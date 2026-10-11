@@ -235,7 +235,7 @@ inline constexpr int max_octaves = 16;
     std::int64_t amplitude = fixed_one;
     std::int64_t total_amplitude = 0;
     // Each octave's frequency doubles as its amplitude halves, so plain sums of the octaves' own
-    // derivatives are the slope of the (unnormalised) sum.
+    // derivatives approximate the slope of the (unnormalised) sum.
     std::array<std::int64_t, 3> slope{};
     for (int octave = 0; octave < octaves; ++octave) {
         const auto octave_seed = hash_combine(seed, static_cast<std::uint64_t>(octave));
@@ -250,8 +250,9 @@ inline constexpr int max_octaves = 16;
         sum += (((amplitude * ridge) >> fixed_fraction_bits) * fixed_one) / damping;
         total_amplitude += amplitude;
 
-        // d(crest^2) = -2 crest sign(n) dn
-        const std::int64_t scale = noise.value < 0 ? 2 * crest : -2 * crest;
+        // The ridge's slope is -2 crest sign(n) dn, which flips at every crest and would make the
+        // damping jump there. Dropping the sign keeps the magnitude and stays continuous.
+        const std::int64_t scale = 2 * crest;
         slope[0] += (scale * noise.dx) >> fixed_fraction_bits;
         slope[1] += (scale * noise.dy) >> fixed_fraction_bits;
         slope[2] += (scale * noise.dz) >> fixed_fraction_bits;

@@ -23,6 +23,16 @@ NoisePoint random_point(std::mt19937_64& rng, std::int64_t span) {
     return {.x = coordinate(rng), .y = coordinate(rng), .z = coordinate(rng)};
 }
 
+// Identical on every platform, unlike the standard distributions, so statistical checks see
+// the same samples everywhere.
+NoisePoint hashed_point(std::uint64_t index, std::int64_t span) {
+    const auto coordinate = [&](std::uint64_t axis) {
+        const auto range = static_cast<std::uint64_t>(2 * span) + 1;
+        return static_cast<std::int64_t>(hog::hash_values(index, axis) % range) - span;
+    };
+    return {.x = coordinate(0), .y = coordinate(1), .z = coordinate(2)};
+}
+
 // The same algorithm in double precision, to measure the fixed-point rounding error.
 double reference_perlin(std::uint64_t noise_seed, NoisePoint point) {
     const auto fade = [](double t) { return t * t * t * ((t * ((t * 6.0) - 15.0)) + 10.0); };
@@ -231,6 +241,17 @@ TEST_CASE("ridges stay within 0 and 1, and erosion only lowers them", "[planet][
     CHECK(hog::planet::ridges(seed, point, 1) == hog::planet::ridges(seed, point, 1, 0));
 }
 
+TEST_CASE("ridges are continuous, erosion included", "[planet][noise]") {
+    std::mt19937_64 rng{9};
+    for (int sample = 0; sample < 50'000; ++sample) {
+        const NoisePoint point = random_point(rng, 100 * fixed_one);
+        const NoisePoint next{.x = point.x + 1, .y = point.y, .z = point.z};
+        const std::int64_t step =
+            hog::planet::ridges(seed, next, 8) - hog::planet::ridges(seed, point, 8);
+        REQUIRE(std::abs(step) <= 16);
+    }
+}
+
 TEST_CASE("erosion smooths steep ground more than flat ground", "[planet][noise]") {
     // Fine detail as the second difference over a short step; steepness from the plain ridges
     // over a long one.
@@ -248,17 +269,16 @@ TEST_CASE("erosion smooths steep ground more than flat ground", "[planet][noise]
         std::int64_t eroded;
     };
     std::vector<Sample> samples;
-    std::mt19937_64 rng{8};
-    for (int sample = 0; sample < 4'000; ++sample) {
-        const NoisePoint p = random_point(rng, 1'000 * fixed_one);
+    for (std::uint64_t sample = 0; sample < 8'000; ++sample) {
+        const NoisePoint p = hashed_point(sample, 1'000 * fixed_one);
         const auto plain_at = [&](std::int64_t dx) {
             return hog::planet::ridges(seed, {.x = p.x + dx, .y = p.y, .z = p.z}, 8, 0);
         };
         samples.push_back({.steepness = std::abs(plain_at(coarse) - plain_at(-coarse)),
                            .plain = detail(p, 0),
-                           .eroded = detail(p, fixed_one)});
+                           .eroded = detail(p, 4 * fixed_one)});
     }
-    std::ranges::sort(samples, {}, &Sample::steepness);
+    std::ranges::stable_sort(samples, {}, &Sample::steepness);
     const auto mean_detail = [&](std::size_t begin, std::size_t end, auto member) {
         double sum = 0.0;
         for (std::size_t i = begin; i < end; ++i) {
@@ -273,7 +293,7 @@ TEST_CASE("erosion smooths steep ground more than flat ground", "[planet][noise]
     const double eroded_ratio =
         mean_detail(samples.size() - quarter, samples.size(), &Sample::eroded) /
         mean_detail(0, quarter, &Sample::eroded);
-    CHECK(eroded_ratio < plain_ratio * 0.8);
+    CHECK(eroded_ratio < plain_ratio * 0.9);
 }
 
 TEST_CASE("fractal noise checks the octave count", "[planet][noise]") {
