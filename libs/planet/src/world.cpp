@@ -48,11 +48,6 @@ void fold(CellState& state, const ChangePayload& payload) {
 
 } // namespace
 
-bool ChangeFilter::matches(const Change& change) const noexcept {
-    return (!author || change.author == *author) && (!layer || change.layer == *layer) &&
-           change.time >= from && change.time < until;
-}
-
 World::World(const PlanetConfig& config) : geology_{config} {}
 
 Result<void> World::apply(const Change& change) {

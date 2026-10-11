@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <variant>
@@ -77,6 +78,17 @@ struct Change {
     [[nodiscard]] ChangeKind kind() const noexcept { return kind_of(payload); }
 
     friend bool operator==(const Change&, const Change&) = default;
+};
+
+// Selects changes, for rolling back or listing. Every set field must match.
+struct ChangeFilter {
+    std::optional<AuthorId> author;
+    std::optional<Layer> layer;
+    // Game time from `from` up to, not including, `until`.
+    GameTime from = GameTime::min();
+    GameTime until = GameTime::max();
+
+    [[nodiscard]] bool matches(const Change& change) const noexcept;
 };
 
 // A payload's bytes for storage: fixed-width little-endian fields, the same on every platform.

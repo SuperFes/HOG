@@ -90,6 +90,11 @@ std::string_view to_string(ChangeKind kind) noexcept {
     return "unknown";
 }
 
+bool ChangeFilter::matches(const Change& change) const noexcept {
+    return (!author || change.author == *author) && (!layer || change.layer == *layer) &&
+           change.time >= from && change.time < until;
+}
+
 std::vector<std::byte> encode_payload(const ChangePayload& payload) {
     Writer writer;
     std::visit(

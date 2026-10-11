@@ -9,7 +9,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <optional>
 #include <span>
 #include <unordered_map>
 #include <vector>
@@ -23,17 +22,6 @@ struct CellState {
     std::int64_t excavated = 0; // fixed-point metres dug out below the generated surface
 
     friend bool operator==(const CellState&, const CellState&) = default;
-};
-
-// Selects changes, for rolling back or listing. Every set field must match.
-struct ChangeFilter {
-    std::optional<AuthorId> author;
-    std::optional<Layer> layer;
-    // Game time from `from` up to, not including, `until`.
-    GameTime from = GameTime::min();
-    GameTime until = GameTime::max();
-
-    [[nodiscard]] bool matches(const Change& change) const noexcept;
 };
 
 // The planet as its seed plus every change made to it. A change to a cell also changes everything
