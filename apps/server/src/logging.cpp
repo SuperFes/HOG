@@ -13,9 +13,12 @@ namespace {
 constexpr std::array<const log::Category*, 3> all{&server_log, &save_log, &metrics_log};
 
 [[nodiscard]] const log::Category* find(std::string_view name) {
-    const auto* found = std::ranges::find(
-        all, name, [](const log::Category* category) { return category->name(); });
-    return found == all.end() ? nullptr : *found;
+    for (const log::Category* category : all) {
+        if (category->name() == name) {
+            return category;
+        }
+    }
+    return nullptr;
 }
 
 } // namespace

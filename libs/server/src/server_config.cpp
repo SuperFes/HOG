@@ -232,11 +232,12 @@ Result<ServerConfig> parse_server_config(std::string_view text, const std::files
     constexpr std::array<std::string_view, 4> names{"server", "save", "log", "metrics"};
     std::array<const toml::table*, names.size()> tables{};
     for (const auto& [key, node] : parsed.table()) {
-        const auto* name = std::ranges::find(names, key.str());
-        if (name == names.end() || !node.is_table()) {
+        const auto index =
+            static_cast<std::size_t>(std::ranges::find(names, key.str()) - names.begin());
+        if (index == names.size() || !node.is_table()) {
             return invalid(std::format("unknown table [{}]", key.str()));
         }
-        tables.at(static_cast<std::size_t>(name - names.begin())) = node.as_table();
+        tables.at(index) = node.as_table();
     }
     if (tables[0] == nullptr) {
         return invalid("missing [server] table");
