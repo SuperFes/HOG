@@ -14,4 +14,5 @@ hog_target_defaults(hog_core)
 hog_add_tests(hog_core
     tests/assert_tests.cpp
     tests/slot_map_tests.cpp
-    tests/build_info_tests.cpp)
+    tests/build_info_tests.cpp
+    tests/result_tests.cpp)
