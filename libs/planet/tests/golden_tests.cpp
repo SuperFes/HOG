@@ -1,6 +1,8 @@
+#include <hog/core/hash.hpp>
 #include <hog/planet/climate.hpp>
 #include <hog/planet/continents.hpp>
 #include <hog/planet/elevation.hpp>
+#include <hog/planet/geology.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tile.hpp>
@@ -68,12 +70,35 @@ std::int64_t biome_layer(CellId cell) {
     return static_cast<std::int64_t>(climate().biome(cell));
 }
 
+const hog::planet::Geology& geology() {
+    static const hog::planet::Geology geology{planet};
+    return geology;
+}
+
+std::int64_t strata_layer(CellId cell) {
+    const hog::planet::Strata strata = geology().strata(cell);
+    return static_cast<std::int64_t>(
+        hog::hash_values(0, static_cast<int>(strata.cover), strata.cover_thickness,
+                         static_cast<int>(strata.sediment), strata.sediment_thickness,
+                         static_cast<int>(strata.bedrock)));
+}
+
+std::int64_t deposits_layer(CellId cell) {
+    std::uint64_t hash = 0;
+    for (const auto& deposit : geology().deposits(cell)) {
+        hash = hog::hash_values(hash, deposit.top, deposit.thickness);
+    }
+    return static_cast<std::int64_t>(hash);
+}
+
 constexpr std::array layers{Layer{.name = "noise", .sample = noise_layer},
                             Layer{.name = "continents", .sample = continents_layer},
                             Layer{.name = "elevation", .sample = elevation_layer},
                             Layer{.name = "temperature", .sample = temperature_layer},
                             Layer{.name = "moisture", .sample = moisture_layer},
-                            Layer{.name = "biome", .sample = biome_layer}};
+                            Layer{.name = "biome", .sample = biome_layer},
+                            Layer{.name = "strata", .sample = strata_layer},
+                            Layer{.name = "deposits", .sample = deposits_layer}};
 
 struct GoldenTile {
     CellId tile;
