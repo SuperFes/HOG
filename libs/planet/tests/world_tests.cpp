@@ -1,3 +1,4 @@
+#include <hog/core/hash.hpp>
 #include <hog/planet/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -207,5 +208,62 @@ TEST_CASE("rolling back removes the matching changes", "[planet][world]") {
         CHECK(w.roll_back(by_layer(Layer::Player)) == 4);
         CHECK(w.state(cell) == seed_state(cell));
         CHECK(w.state(other) == seed_state(other));
+    }
+}
+
+TEST_CASE("rolling back the latest changes equals never making them", "[planet][world]") {
+    static World rolled_back{planet};
+    static World replayed{planet};
+    // A few overlapping cells, so changes to parents and children interleave.
+    const std::vector<CellId> cells{cell,          cell.child(0), cell.child(0).child(3),
+                                    cell.child(2), cell.parent(), CellId::from_face_ij(5, 7, 9, 8)};
+    for (std::uint64_t trial = 0; trial < 50; ++trial) {
+        INFO("trial " << trial);
+        const auto draw = [&](std::uint64_t index, std::uint64_t what, std::uint64_t range) {
+            return hog::hash_values(trial, index, what) % range;
+        };
+        const auto count = static_cast<std::size_t>(draw(0, 0, 200));
+        std::vector<Change> all;
+        for (std::uint64_t index = 0; index < count; ++index) {
+            const CellId target = cells.at(draw(index, 1, cells.size()));
+            const std::int64_t amount =
+                static_cast<std::int64_t>(draw(index, 2, 100) + 1) * fixed_one / 4;
+            ChangePayload payload;
+            switch (draw(index, 3, 3)) {
+            case 0:
+                payload = SetElevation{.elevation = amount - (12 * fixed_one)};
+                break;
+            case 1:
+                payload = Excavate{.depth = amount};
+                break;
+            default:
+                payload =
+                    SetBiome{.biome = static_cast<Biome>(draw(index, 4, hog::planet::biome_count))};
+            }
+            all.push_back(change(target, payload, static_cast<std::int64_t>(draw(index, 5, 60)),
+                                 AuthorId{draw(index, 6, 4)},
+                                 static_cast<Layer>(draw(index, 7, hog::planet::layer_count))));
+        }
+        const auto cut = static_cast<std::int64_t>(draw(0, 8, 61));
+        std::vector<Change> kept;
+        for (const Change& each : all) {
+            if (each.time < at(cut)) {
+                kept.push_back(each);
+            }
+        }
+
+        rolled_back.roll_back({});
+        replayed.roll_back({});
+        REQUIRE(rolled_back.replay(all));
+        REQUIRE(replayed.replay(kept));
+        ChangeFilter latest;
+        latest.from = at(cut);
+        CHECK(rolled_back.roll_back(latest) == all.size() - kept.size());
+        CHECK(rolled_back.changes() == kept);
+        for (const CellId target : cells) {
+            for (const CellId probe : {target, target.child(1), target.parent()}) {
+                CHECK(rolled_back.state(probe) == replayed.state(probe));
+            }
+        }
     }
 }
