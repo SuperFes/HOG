@@ -116,6 +116,23 @@ TEST_CASE("a rate change applies from the next tick", "[server][loop]") {
     CHECK(loop.clock().rate() == 10);
 }
 
+TEST_CASE("a resumed loop carries on from its tick and time", "[server][loop]") {
+    ManualTimer timer;
+    TickLoop loop{timer, LoopConfig{.start = GameTime{1h}, .first_tick = hog::Tick{500}}};
+    std::vector<Ran> ran;
+    loop.run([&](const TickClock& clock) {
+        ran.push_back(ran_at(timer, clock));
+        if (ran.size() == 2) {
+            loop.stop();
+        }
+    });
+    REQUIRE(ran.size() == 2);
+    CHECK(ran[0].tick == 500);
+    CHECK(ran[0].game == GameTime{1h});
+    CHECK(ran[1].tick == 501);
+    CHECK(ran[1].game == GameTime{1h + 50ms});
+}
+
 TEST_CASE("another thread can stop a loop paced to real time", "[server][loop]") {
     hog::server::SteadyTimer timer;
     TickLoop loop{timer, LoopConfig{.rate = hog::server::max_rate}};

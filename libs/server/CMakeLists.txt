@@ -11,6 +11,7 @@ target_link_libraries(hog_server PUBLIC hog::core hog::planet hog::save flecs::f
 hog_target_defaults(hog_server)
 
 hog_add_tests(hog_server
+    tests/catch_up_tests.cpp
     tests/pacer_tests.cpp
     tests/persistence_tests.cpp
     tests/spatial_index_tests.cpp

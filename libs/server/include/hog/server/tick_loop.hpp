@@ -30,6 +30,7 @@ struct SteadyTimer {
 
 struct LoopConfig {
     GameTime start{GameDuration::zero()};
+    Tick first_tick{0};
     std::uint32_t rate = idle_rate;
     std::int64_t time_scale = default_time_scale;
     // Ticks run back to back to catch up before the rest are dropped.
@@ -48,7 +49,7 @@ template <Timer T>
 class TickLoop {
 public:
     TickLoop(T& timer, const LoopConfig& config)
-        : timer_(&timer), clock_(config.start, config.rate, config.time_scale),
+        : timer_(&timer), clock_(config.start, config.rate, config.time_scale, config.first_tick),
           max_burst_(config.max_burst) {}
 
     // Calls step(clock) once per tick until stop(); the clock shows the tick being run, and is

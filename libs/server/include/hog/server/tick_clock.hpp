@@ -18,8 +18,9 @@ inline constexpr std::int64_t default_time_scale = 1;
 // time whatever the tick rate, in integer arithmetic so a replay reaches exactly the same times.
 class TickClock {
 public:
-    // Preconditions: 0 < rate <= max_rate, scale > 0.
-    TickClock(GameTime start, std::uint32_t rate, std::int64_t scale);
+    // Starts at tick `first`, which a resumed world carries on from. Preconditions:
+    // 0 < rate <= max_rate, scale > 0.
+    TickClock(GameTime start, std::uint32_t rate, std::int64_t scale, Tick first = Tick{});
 
     [[nodiscard]] Tick tick() const noexcept { return tick_; }
     [[nodiscard]] GameTime now() const noexcept { return time_at(tick_); }
@@ -34,12 +35,15 @@ public:
 
     // Applies from the current tick on. Precondition: 0 < rate <= max_rate.
     void set_rate(std::uint32_t rate);
+    // Applies from the current tick on. Precondition: scale > 0.
+    void set_scale(std::int64_t scale);
 
 private:
     [[nodiscard]] GameTime time_at(Tick tick) const noexcept;
 
     Tick tick_;
-    // The tick and time the current rate took effect, so a change never moves earlier times.
+    // The tick and time the current rate and scale took effect, so a change never moves earlier
+    // times.
     Tick since_tick_;
     GameTime since_time_;
     std::uint32_t rate_;
