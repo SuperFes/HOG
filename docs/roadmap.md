@@ -31,16 +31,16 @@ Phases 0 and 1 are strictly in order. After that, server and client work split a
 
 Five choices block Phase 0. Each one can be settled in an evening. The rest of the open questions are due only when their phase starts.
 
-| Decision | Options | Needed by | Leaning |
+| Decision | Options | Needed by | Leaning or outcome |
 | --- | --- | --- | --- |
-| Repo host | GitHub, GitLab, Codeberg | Phase 0 | GitHub: free macOS and Windows CI runners for public repos |
-| Code license | MIT, Apache-2.0, MPL-2.0 | Phase 0 | MIT, in the repo before the first outside contribution |
-| Dependency management | vcpkg manifest, CPM.cmake, git submodules | Phase 0 | vcpkg for big libraries, pinned versions |
-| Unit-test framework | doctest, Catch2, GoogleTest | Phase 0 | doctest (fast to compile) or Catch2 |
-| Compilers | Clang, GCC, MSVC, clang-cl, AppleClang | Phase 0 | Clang and GCC on Linux, MSVC on Windows, AppleClang on macOS |
-| Generator maths | Integer hashing, fixed-point, strict IEEE floats | Phase 1 | Integer and fixed-point; floats only after the deterministic step |
-| Change-store backend | SQLite, custom append-only log | Phase 1 | SQLite first, swap later behind an interface |
-| Development planet size | 500k, 2M or 10M population tier | Phase 1 | 500k (115 km radius); the radius stays a parameter |
+| Repo host | GitHub, GitLab, Codeberg | Phase 0 | **Decided:** GitHub |
+| Code license | MIT, Apache-2.0, MPL-2.0 | Phase 0 | **Decided:** MIT |
+| Dependency management | vcpkg manifest, CPM.cmake, git submodules | Phase 0 | **Decided:** CPM.cmake, pinned versions |
+| Unit-test framework | doctest, Catch2, GoogleTest | Phase 0 | **Decided:** Catch2 v3 |
+| Compilers | Clang, GCC, MSVC, clang-cl, AppleClang | Phase 0 | **Decided:** Clang with libc++ first; GCC, MSVC and AppleClang in CI |
+| Generator maths | Integer hashing, fixed-point, strict IEEE floats | Phase 1 | **Decided ([#7](https://github.com/SuperFes/HOG/issues/7)):** integer and fixed-point; floats only after the deterministic step |
+| Change-store backend | SQLite, custom append-only log | Phase 1 | **Decided ([#8](https://github.com/SuperFes/HOG/issues/8)):** SQLite behind an interface, swappable for production |
+| Development planet size | 500k, 2M or 10M population tier | Phase 1 | **Decided ([#9](https://github.com/SuperFes/HOG/issues/9)):** 500k (115 km radius); the radius stays a parameter |
 | Entity system | EnTT, flecs | Phase 2 | Decide with a one-week benchmark spike |
 | Minimum-spec hardware | e.g. GTX 1060, Intel Iris Xe, Apple M1 | Phase 3 | Pick one real machine one of us owns |
 | macOS Vulkan layer | KosmicKrisp, MoltenVK | Phase 3 | Support both and test against each |
