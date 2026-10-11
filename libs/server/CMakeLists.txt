@@ -1,6 +1,7 @@
 add_library(hog_server
     src/pacer.cpp
     src/persistence.cpp
+    src/snapshot_writer.cpp
     src/spatial_index.cpp
     src/spatial_tracking.cpp
     src/tick_clock.cpp)
@@ -14,6 +15,7 @@ hog_add_tests(hog_server
     tests/catch_up_tests.cpp
     tests/pacer_tests.cpp
     tests/persistence_tests.cpp
+    tests/snapshot_writer_tests.cpp
     tests/spatial_index_tests.cpp
     tests/spatial_tracking_tests.cpp
     tests/tick_clock_tests.cpp
