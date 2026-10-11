@@ -106,7 +106,7 @@ This phase produces a pure library that turns a seed into a planet. It has no gr
 
 **Cells and coordinates**
 
-- [ ] Cube-sphere cell address: face, level, x, y; packed into 64 bits
+- [x] Cube-sphere cell address: face, level, x, y; packed into 64 bits
 - [ ] Neighbor lookup across face edges and corners, with exhaustive tests at low levels
 - [ ] Conversions between cell, direction on the unit sphere, and double-precision world position
 - [ ] Local tangent frame per cell, for physics and rendering
