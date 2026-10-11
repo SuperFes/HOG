@@ -28,10 +28,14 @@ namespace {
 const hog::planet::PlanetConfig planet{.seed = 1, .ocean_fraction = 0.7, .radius = 115'000.0};
 
 // One World for the whole file: the seed's generators are costly to set up.
-World& world() {
+World& shared_world() {
     static World world{planet};
-    world.roll_back({});
     return world;
+}
+
+World& fresh_world() {
+    shared_world().roll_back({});
+    return shared_world();
 }
 
 GameTime at(std::int64_t seconds) {
@@ -66,7 +70,7 @@ ChangeFilter during(std::int64_t from, std::int64_t until) {
 }
 
 CellState seed_state(CellId at_cell) {
-    const auto& geology = world().geology();
+    const auto& geology = shared_world().geology();
     return {.elevation = geology.terrain().elevation(at_cell),
             .biome = geology.climate().biome(at_cell),
             .excavated = 0};
@@ -75,14 +79,14 @@ CellState seed_state(CellId at_cell) {
 } // namespace
 
 TEST_CASE("an untouched world is its seed", "[planet][world]") {
-    World& w = world();
+    World& w = fresh_world();
     CHECK(w.size() == 0);
     CHECK(w.state(cell) == seed_state(cell));
     CHECK(w.changes().empty());
 }
 
 TEST_CASE("changes apply over the seed", "[planet][world]") {
-    World& w = world();
+    World& w = fresh_world();
     REQUIRE(w.apply(change(cell, SetElevation{.elevation = 50 * fixed_one})));
     REQUIRE(w.apply(change(cell, Excavate{.depth = 3 * fixed_one}, 1)));
     REQUIRE(w.apply(change(cell, Excavate{.depth = 2 * fixed_one}, 2)));
@@ -95,7 +99,7 @@ TEST_CASE("changes apply over the seed", "[planet][world]") {
 }
 
 TEST_CASE("a change covers everything inside its cell", "[planet][world]") {
-    World& w = world();
+    World& w = fresh_world();
     REQUIRE(w.apply(change(cell, SetBiome{.biome = Biome::Desert})));
     const CellId child = cell.child(2);
     const CellId grandchild = child.child(1);
@@ -111,7 +115,7 @@ TEST_CASE("a change covers everything inside its cell", "[planet][world]") {
 }
 
 TEST_CASE("higher layers win, then later times, then later changes", "[planet][world]") {
-    World& w = world();
+    World& w = fresh_world();
     SECTION("layers") {
         REQUIRE(w.apply(change(cell, SetBiome{.biome = Biome::Savanna}, 5, {}, Layer::Player)));
         REQUIRE(w.apply(change(cell, SetBiome{.biome = Biome::Tundra}, 9, {}, Layer::Authored)));
@@ -136,7 +140,7 @@ TEST_CASE("higher layers win, then later times, then later changes", "[planet][w
 }
 
 TEST_CASE("invalid changes are refused and change nothing", "[planet][world]") {
-    World& w = world();
+    World& w = fresh_world();
     const auto refused = [&](const Change& bad) {
         const auto applied = w.apply(bad);
         return !applied && applied.error().code == ErrorCode::InvalidArgument;
@@ -164,7 +168,7 @@ TEST_CASE("replaying changes equals applying them one by one", "[planet][world]"
         change(cell.child(1), Excavate{.depth = fixed_one}, 2),
         change(cell, SetBiome{.biome = Biome::Beach}, 3, {}, Layer::Simulation),
     };
-    World& w = world();
+    World& w = fresh_world();
     REQUIRE(w.replay(batch));
     const CellState replayed = w.state(cell.child(1));
     CHECK(w.changes() == batch);
@@ -178,7 +182,7 @@ TEST_CASE("replaying changes equals applying them one by one", "[planet][world]"
 TEST_CASE("rolling back removes the matching changes", "[planet][world]") {
     constexpr AuthorId griefer{7};
     constexpr AuthorId builder{8};
-    World& w = world();
+    World& w = fresh_world();
     const CellId other = CellId::from_face_ij(4, 10, 20, 12);
     REQUIRE(w.apply(change(cell, SetElevation{.elevation = fixed_one}, 10, builder)));
     REQUIRE(w.apply(change(cell, Excavate{.depth = 5 * fixed_one}, 20, griefer)));
