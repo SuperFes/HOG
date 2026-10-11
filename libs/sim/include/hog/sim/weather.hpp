@@ -1,0 +1,109 @@
+#pragma once
+
+#include <hog/core/math.hpp>
+#include <hog/core/result.hpp>
+#include <hog/core/time.hpp>
+#include <hog/planet/world.hpp>
+#include <hog/sim/calendar.hpp>
+#include <hog/sim/cell_grid.hpp>
+
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <span>
+#include <vector>
+
+namespace hog::jobs {
+class JobSystem;
+}
+
+namespace hog::sim {
+
+struct WeatherConfig {
+    int level = 5;
+    // Steps fall on whole multiples of this since the epoch, whatever the tick rate.
+    GameDuration step = std::chrono::minutes{10};
+    // The day the weather's heating and the Coriolis force follow, which needn't be the sun's.
+    GameDuration day = std::chrono::hours{24};
+    double axial_tilt = 23.44; // degrees
+};
+
+// What a cell's weather sits on.
+struct Ground {
+    float mean_temperature = 15.0F; // annual mean at the surface, °C
+    float elevation = 0.0F;         // metres, 0 over the ocean
+    float wetness = 1.0F;           // how freely the surface gives up water, 0 to 1
+    bool ocean = true;
+};
+
+// The ground under every grid cell, from the planet's terrain, changes and climate.
+[[nodiscard]] std::vector<Ground> ground_for(const CellGrid& grid, const planet::World& world);
+
+// Two layers of air per cell: the surface and the upper air near 500 hPa. Winds are (east, north)
+// metres per second; water is millimetres of column depth, so it adds up across fields. The
+// planet is small, so distances are scaled up to an Earth-sized sphere: systems cross it at the
+// pace Earth's would, and winds have Earth-like speeds.
+struct WeatherFields {
+    std::vector<float> temperature;       // surface air, °C
+    std::vector<float> upper_temperature; // °C
+    std::vector<float> pressure;          // at sea level, hPa
+    std::vector<float> vapour;            // mm
+    std::vector<float> cloud;             // mm of condensed water
+    std::vector<Vec2> wind;               // at the surface
+    std::vector<Vec2> jet;                // in the upper air
+    // What the last step did, in mm.
+    std::vector<float> evaporation;
+    std::vector<float> rain;
+    std::vector<float> snow;
+    std::vector<float> hail;
+    // Thunderstorm strength over the last step, 0 to 1.
+    std::vector<float> storm;
+
+    explicit WeatherFields(std::size_t size = 0);
+
+    [[nodiscard]] std::size_t size() const noexcept { return temperature.size(); }
+    // Fraction of the sky covered, 0 to 1.
+    [[nodiscard]] float cloud_cover(std::size_t index) const;
+
+    friend bool operator==(const WeatherFields&, const WeatherFields&) = default;
+};
+
+class Weather {
+public:
+    // Starts from the weather the season and time of day would bring, as of the last step at or
+    // before `now`. Precondition: one ground per cell at the configured level, positive step
+    // and day.
+    Weather(const WeatherConfig& config, std::vector<Ground> ground, GameTime now);
+
+    [[nodiscard]] const WeatherConfig& config() const noexcept { return config_; }
+    [[nodiscard]] const CellGrid& grid() const noexcept { return grid_; }
+    [[nodiscard]] const std::vector<Ground>& ground() const noexcept { return ground_; }
+    [[nodiscard]] const WeatherFields& fields() const noexcept { return fields_; }
+    // When the last step was taken.
+    [[nodiscard]] GameTime time() const noexcept { return time_; }
+
+    // Takes every step due by `now`; returns how many. Call from the jobs' owning thread.
+    std::uint64_t advance_to(GameTime now, jobs::JobSystem& jobs);
+
+    // Versioned bytes for a snapshot section.
+    [[nodiscard]] std::vector<std::byte> save() const;
+    // Replaces the state with saved bytes, or fails and changes nothing. Fails with Unsupported
+    // for weather saved at another grid level, which can't be carried over.
+    [[nodiscard]] Result<void> load(std::uint16_t version, std::span<const std::byte> bytes);
+
+    static constexpr std::uint16_t save_version = 1;
+
+private:
+    void step(GameTime at, jobs::JobSystem& jobs);
+    // Pressure follows temperature; winds follow pressure and the upper air's temperature.
+    void balance_winds(jobs::JobSystem* jobs);
+
+    WeatherConfig config_;
+    CellGrid grid_;
+    std::vector<Ground> ground_;
+    Calendar calendar_;
+    WeatherFields fields_;
+    GameTime time_;
+};
+
+} // namespace hog::sim
