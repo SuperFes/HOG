@@ -2,6 +2,7 @@
 
 #include <hog/core/result.hpp>
 
+#include <algorithm>
 #include <concepts>
 #include <cstddef>
 #include <span>
@@ -21,7 +22,10 @@ public:
     }
 
     void write_bytes(std::span<const std::byte> bytes) {
-        out_.insert(out_.end(), bytes.begin(), bytes.end());
+        // Not vector::insert, which GCC 14.2 wrongly reports as overflowing at -O2.
+        const std::size_t start = out_.size();
+        out_.resize(start + bytes.size());
+        std::ranges::copy(bytes, std::span{out_}.subspan(start).begin());
     }
 
     [[nodiscard]] std::size_t size() const noexcept { return out_.size(); }
