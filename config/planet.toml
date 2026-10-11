@@ -1,4 +1,4 @@
-# Development planet: the 500k population tier from docs/plan.md, about 115 km in radius. (maps workflow test)
+# Development planet: the 500k population tier from docs/plan.md, about 115 km in radius. (maps workflow test, again)
 [planet]
 seed = 1
 ocean_fraction = 0.7
