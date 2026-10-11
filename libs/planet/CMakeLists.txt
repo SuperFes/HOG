@@ -1,5 +1,6 @@
 add_library(hog_planet
     src/cell_id.cpp
+    src/continents.cpp
     src/neighbors.cpp
     src/planet_config.cpp
     src/projection.cpp
@@ -13,6 +14,7 @@ hog_target_defaults(hog_planet)
 
 hog_add_tests(hog_planet
     tests/cell_id_tests.cpp
+    tests/continents_tests.cpp
     tests/golden_tests.cpp
     tests/neighbors_tests.cpp
     tests/noise_tests.cpp

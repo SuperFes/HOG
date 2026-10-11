@@ -1,3 +1,4 @@
+#include <hog/planet/continents.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tile.hpp>
@@ -33,7 +34,13 @@ std::int64_t noise_layer(CellId cell) {
     return hog::planet::fbm(seed, hog::planet::noise_point(hog::planet::cell_center(cell), 4.0), 8);
 }
 
-constexpr std::array layers{Layer{.name = "noise", .sample = noise_layer}};
+std::int64_t continents_layer(CellId cell) {
+    static const hog::planet::Continents continents{seed, 0.7};
+    return continents.height(cell);
+}
+
+constexpr std::array layers{Layer{.name = "noise", .sample = noise_layer},
+                            Layer{.name = "continents", .sample = continents_layer}};
 
 struct GoldenTile {
     CellId tile;
