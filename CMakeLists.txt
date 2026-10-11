@@ -4,7 +4,7 @@ project(HOG
     VERSION 0.0.1
     DESCRIPTION "A seamless-planet MMORPG and engine"
     HOMEPAGE_URL "https://github.com/SuperFes/HOG"
-    LANGUAGES CXX)
+    LANGUAGES C CXX)
 
 if(PROJECT_SOURCE_DIR STREQUAL PROJECT_BINARY_DIR)
     message(FATAL_ERROR "In-source builds are not supported; use a preset, e.g. cmake --preset debug")
@@ -54,6 +54,13 @@ target_include_directories(tomlplusplus SYSTEM INTERFACE "${tomlplusplus_SOURCE_
 # Parse errors come back as values, matching hog::Result.
 target_compile_definitions(tomlplusplus INTERFACE TOML_EXCEPTIONS=0)
 
+# Public domain. The amalgamation is one C file; only servers keep a database.
+CPMAddPackage(
+    NAME sqlite3
+    URL https://www.sqlite.org/2026/sqlite-amalgamation-3540000.zip
+    URL_HASH SHA3_256=7b670a62fdfbd672b75fef004cb703c8a3e87d3a5cc7d675b4a08337004a2d93
+    DOWNLOAD_ONLY YES)
+
 if(HOG_BUILD_TESTS)
     enable_testing()
     CPMAddPackage(
@@ -95,6 +102,7 @@ endfunction()
 add_subdirectory(libs/core)
 add_subdirectory(libs/jobs)
 add_subdirectory(libs/planet)
+add_subdirectory(libs/store)
 if(HOG_BUILD_TESTS)
     add_subdirectory(libs/testing)
 endif()

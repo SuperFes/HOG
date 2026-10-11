@@ -5,7 +5,7 @@ option(HOG_USE_LIBCXX "Build against LLVM libc++ (what macOS ships) instead of t
 
 # Global so dependencies share the same standard library ABI.
 if(HOG_USE_LIBCXX)
-    add_compile_options(-stdlib=libc++)
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>)
     add_link_options(-stdlib=libc++)
 endif()
 
