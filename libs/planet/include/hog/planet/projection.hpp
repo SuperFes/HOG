@@ -31,6 +31,10 @@ struct FaceUV {
 // Corners in counter-clockwise order seen from outside, starting at the lowest i and j.
 [[nodiscard]] std::array<DVec3, 4> cell_vertices(CellId cell);
 
+// Area on the unit sphere, in steradians. Uses atan2, so it may differ in the last bits between
+// platforms: fine for statistics, not for generation.
+[[nodiscard]] double cell_area(CellId cell);
+
 // The cell containing a non-zero direction, at the given level.
 [[nodiscard]] CellId cell_at(DVec3 direction, int level = max_level);
 

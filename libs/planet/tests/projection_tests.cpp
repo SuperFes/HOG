@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <bit>
 #include <cstdint>
+#include <numbers>
 #include <random>
 
 using Catch::Matchers::WithinAbs;
@@ -31,16 +32,6 @@ DVec3 random_direction(std::mt19937_64& rng) {
         direction = DVec3{normal(rng), normal(rng), normal(rng)};
     }
     return glm::normalize(direction);
-}
-
-// Spherical area of the quad, from its two triangles (Van Oosterom and Strackee).
-double quad_area(const std::array<DVec3, 4>& v) {
-    const auto triangle = [](DVec3 a, DVec3 b, DVec3 c) {
-        const double numerator = glm::dot(a, glm::cross(b, c));
-        const double denominator = 1.0 + glm::dot(a, b) + glm::dot(b, c) + glm::dot(c, a);
-        return 2.0 * std::atan2(std::abs(numerator), denominator);
-    };
-    return triangle(v[0], v[1], v[2]) + triangle(v[0], v[2], v[3]);
 }
 
 } // namespace
@@ -154,8 +145,7 @@ TEST_CASE("cell areas stay within about two to one", "[planet][projection]") {
     double total = 0.0;
     for (std::uint32_t i = 0; i < size; ++i) {
         for (std::uint32_t j = 0; j < size; ++j) {
-            const double area =
-                quad_area(hog::planet::cell_vertices(CellId::from_face_ij(0, i, j, level)));
+            const double area = hog::planet::cell_area(CellId::from_face_ij(0, i, j, level));
             smallest = std::min(smallest, area);
             largest = std::max(largest, area);
             total += area;
@@ -163,7 +153,7 @@ TEST_CASE("cell areas stay within about two to one", "[planet][projection]") {
     }
     CHECK(largest / smallest < 2.2);
     // One face is a sixth of the sphere's 4 pi steradians.
-    CHECK_THAT(total, WithinAbs(4.0 * 3.141592653589793 / 6.0, 1e-9));
+    CHECK_THAT(total, WithinAbs(4.0 * std::numbers::pi / 6.0, 1e-9));
 }
 
 TEST_CASE("world positions sit on the planet's surface", "[planet][projection]") {

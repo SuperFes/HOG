@@ -93,6 +93,17 @@ std::array<DVec3, 4> cell_vertices(CellId cell) {
             glm::normalize(face_uv_to_xyz(ij.face, u0, v1))};
 }
 
+double cell_area(CellId cell) {
+    // Two spherical triangles (Van Oosterom and Strackee).
+    const auto triangle = [](DVec3 a, DVec3 b, DVec3 c) {
+        const double numerator = glm::dot(a, glm::cross(b, c));
+        const double denominator = 1.0 + glm::dot(a, b) + glm::dot(b, c) + glm::dot(c, a);
+        return 2.0 * std::atan2(std::abs(numerator), denominator);
+    };
+    const auto v = cell_vertices(cell);
+    return triangle(v[0], v[1], v[2]) + triangle(v[0], v[2], v[3]);
+}
+
 CellId cell_at(DVec3 direction, int level) {
     HOG_ASSERT(level >= 0 && level <= max_level, "level out of range");
     const FaceUV uv = xyz_to_face_uv(direction);
