@@ -17,10 +17,12 @@ Checks: >
   -modernize-use-trailing-return-type,
   performance-*,
   portability-*,
+  -portability-avoid-pragma-once,
   readability-*,
   -readability-magic-numbers,
   -readability-identifier-length,
-  -readability-uppercase-literal-suffix
+  -readability-uppercase-literal-suffix,
+  -readability-use-concise-preprocessor-directives
 WarningsAsErrors: ''
 HeaderFilterRegex: '(include|src|tests|tools)/.*'
 FormatStyle: file

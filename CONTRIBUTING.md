@@ -1,5 +1,24 @@
 # Contributing
 
+## Building
+
+Needs CMake 3.28+, Ninja, and GCC 14+, Clang 18+ or MSVC 2022 17.10+. Dependencies are fetched by [CPM.cmake](https://github.com/cpm-cmake/CPM.cmake) into `.cache/cpm` on first configure.
+
+```sh
+cmake --workflow --preset debug        # configure, build and run all tests
+cmake --preset asan && cmake --build --preset asan && ctest --preset asan
+```
+
+| Preset | Purpose |
+| --- | --- |
+| `debug` | Day-to-day development |
+| `release` | Optimized with debug info |
+| `asan` | Address and undefined-behaviour sanitizers |
+| `tsan` | Thread sanitizer |
+| `ci`, `ci-asan`, `ci-tsan` | As above with warnings as errors |
+
+Pick the compiler with `CC`/`CXX` (e.g. `CC=clang CXX=clang++ cmake --preset debug`). Libraries live in `libs/<name>/` with `include/hog/<name>/`, `src/` and `tests/`; each registers its tests with `hog_add_tests()`.
+
 ## Code rules
 
 - **C++23.** Use C++26 library hardening as compilers ship it; until then the hardened standard-library modes are on in every build.

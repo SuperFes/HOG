@@ -1,0 +1,14 @@
+configure_file(version.hpp.in "${CMAKE_CURRENT_BINARY_DIR}/include/hog/core/version.hpp" @ONLY)
+
+add_library(hog_core
+    src/build_info.cpp)
+add_library(hog::core ALIAS hog_core)
+
+target_include_directories(hog_core PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_BINARY_DIR}/include")
+target_compile_definitions(hog_core PRIVATE HOG_BUILD_CONFIG="$<IF:$<CONFIG:>,unspecified,$<CONFIG>>")
+hog_target_defaults(hog_core)
+
+hog_add_tests(hog_core
+    tests/build_info_tests.cpp)

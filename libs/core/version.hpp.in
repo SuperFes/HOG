@@ -1,0 +1,22 @@
+#pragma once
+
+#include <string_view>
+
+namespace hog {
+
+struct Version {
+    int major;
+    int minor;
+    int patch;
+};
+
+// clang-format off
+inline constexpr Version version{
+    .major = @PROJECT_VERSION_MAJOR@,
+    .minor = @PROJECT_VERSION_MINOR@,
+    .patch = @PROJECT_VERSION_PATCH@,
+};
+// clang-format on
+inline constexpr std::string_view version_text = "@PROJECT_VERSION@";
+
+} // namespace hog
