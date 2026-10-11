@@ -17,6 +17,8 @@ cmake --preset asan && cmake --build --preset asan && ctest --preset asan
 | `tsan` | Thread sanitizer |
 | `ci`, `ci-asan`, `ci-tsan` | As above with warnings as errors |
 
+Benchmarks live in each library's `bench/` directory as Catch2 `BENCHMARK`s, built into separate `<lib>_bench` executables that ctest never runs. Run them on a release build: `cmake --build --preset release --target benchmarks`.
+
 Pick the compiler with `CC`/`CXX` (e.g. `CC=clang CXX=clang++ cmake --preset debug`). Libraries live in `libs/<name>/` with `include/hog/<name>/`, `src/` and `tests/`; each registers its tests with `hog_add_tests()`.
 
 ## Code rules

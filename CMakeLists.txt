@@ -58,6 +58,22 @@ function(hog_add_tests lib)
     catch_discover_tests(${lib}_tests DISCOVERY_MODE PRE_TEST)
 endfunction()
 
+# Benchmarks are separate executables so ctest (and sanitizer runs) never pay for them.
+# Run them all with: cmake --build --preset release --target benchmarks
+function(hog_add_benchmarks lib)
+    if(NOT HOG_BUILD_TESTS)
+        return()
+    endif()
+    add_executable(${lib}_bench ${ARGN})
+    target_link_libraries(${lib}_bench PRIVATE ${lib} Catch2::Catch2WithMain)
+    hog_target_defaults(${lib}_bench)
+    if(NOT TARGET benchmarks)
+        add_custom_target(benchmarks)
+    endif()
+    add_custom_target(run_${lib}_bench COMMAND ${lib}_bench USES_TERMINAL)
+    add_dependencies(benchmarks run_${lib}_bench)
+endfunction()
+
 add_subdirectory(libs/core)
 if(HOG_BUILD_TESTS)
     add_subdirectory(libs/testing)

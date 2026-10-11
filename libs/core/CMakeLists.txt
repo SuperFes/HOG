@@ -28,3 +28,6 @@ hog_add_tests(hog_core
     tests/result_tests.cpp
     tests/slot_map_tests.cpp
     tests/time_tests.cpp)
+
+hog_add_benchmarks(hog_core
+    bench/slot_map_bench.cpp)
