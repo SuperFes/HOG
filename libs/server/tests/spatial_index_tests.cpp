@@ -35,12 +35,6 @@ std::set<EntityId> ids(const SpatialIndex& index, hog::planet::CellId cell) {
 
 } // namespace
 
-TEST_CASE("the index level suits the cell size", "[server][spatial]") {
-    CHECK(hog::server::level_for(100.0, radius) == 11);
-    CHECK(hog::server::level_for(1e9, radius) == 0);
-    CHECK(hog::server::level_for(1e-9, radius) == hog::planet::max_level);
-}
-
 TEST_CASE("entities are placed, moved and removed", "[server][spatial]") {
     SpatialIndex index{11};
     const WorldPosition here = above({1.0, 0.2, 0.3});
@@ -127,7 +121,6 @@ TEST_CASE("spatial indexes reject bad input", "[server][spatial]") {
     using hog::testing::AssertionFailed;
     CHECK_THROWS_AS(SpatialIndex(-1), AssertionFailed);
     CHECK_THROWS_AS(SpatialIndex(hog::planet::max_level + 1), AssertionFailed);
-    CHECK_THROWS_AS(hog::server::level_for(0.0, radius), AssertionFailed);
 
     const SpatialIndex index{11};
     CHECK_THROWS_AS(static_cast<void>(index.in_cell(hog::planet::CellId::from_face(0))),

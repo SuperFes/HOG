@@ -13,18 +13,6 @@ namespace hog::server {
 
 using planet::CellId;
 
-int level_for(double cell_size, double planet_radius) {
-    HOG_ASSERT(cell_size > 0.0 && planet_radius > 0.0, "sizes must be positive");
-    // A face spans a quarter of a great circle, halved at each level.
-    double across = std::numbers::pi / 2.0 * planet_radius;
-    int level = 0;
-    while (across > cell_size && level < planet::max_level) {
-        across /= 2.0;
-        ++level;
-    }
-    return level;
-}
-
 SpatialIndex::SpatialIndex(int level) : level_(level) {
     HOG_ASSERT(level >= 0 && level <= planet::max_level, "level out of range");
 }

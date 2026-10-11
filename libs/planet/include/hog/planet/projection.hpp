@@ -42,4 +42,7 @@ struct FaceUV {
 [[nodiscard]] WorldPosition surface_position(CellId cell, double radius);
 [[nodiscard]] CellId cell_at(WorldPosition position, int level = max_level);
 
+// The coarsest level whose cells are at most `cell_size` metres across on average.
+[[nodiscard]] int level_for(double cell_size, double planet_radius);
+
 } // namespace hog::planet

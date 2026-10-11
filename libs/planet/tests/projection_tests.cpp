@@ -187,10 +187,18 @@ TEST_CASE("cell centres are bit-identical on every platform", "[planet][projecti
     CHECK(hash == 0x1C3D'7A16'3A0E'19E2);
 }
 
+TEST_CASE("the level suits the cell size", "[planet][projection]") {
+    constexpr double radius = 115'000.0;
+    CHECK(hog::planet::level_for(100.0, radius) == 11);
+    CHECK(hog::planet::level_for(1e9, radius) == 0);
+    CHECK(hog::planet::level_for(1e-9, radius) == max_level);
+}
+
 TEST_CASE("projection rejects degenerate input", "[planet][projection]") {
     const hog::testing::AssertionGuard guard;
     using hog::testing::AssertionFailed;
     CHECK_THROWS_AS(hog::planet::xyz_to_face_uv(DVec3{0.0}), AssertionFailed);
     CHECK_THROWS_AS(hog::planet::cell_at(DVec3{1.0, 0.0, 0.0}, max_level + 1), AssertionFailed);
     CHECK_THROWS_AS(hog::planet::surface_position(CellId::from_face(0), 0.0), AssertionFailed);
+    CHECK_THROWS_AS(hog::planet::level_for(0.0, 1.0), AssertionFailed);
 }

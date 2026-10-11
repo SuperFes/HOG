@@ -16,9 +16,6 @@ namespace hog::server {
 // flecs entity ids, though the index itself knows nothing of the ECS.
 using EntityId = std::uint64_t;
 
-// The coarsest cube-sphere level whose cells are at most `cell_size` metres across on average.
-[[nodiscard]] int level_for(double cell_size, double planet_radius);
-
 // Entities bucketed by the cube-sphere cell under them, at one level. A cell is a column from the
 // planet's centre outwards, so altitude never moves an entity between cells.
 class SpatialIndex {
