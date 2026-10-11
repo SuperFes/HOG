@@ -55,6 +55,10 @@ TEST_CASE("mapgen reads every option", "[mapgen]") {
     CHECK(region->view ==
           hog::mapgen::View{RegionView{.latitude = -41.5, .longitude = 172.25, .width = 30'000.0}});
 
+    const auto islands = parse({"--islands", "40"});
+    REQUIRE(islands);
+    CHECK(islands->view == hog::mapgen::View{hog::mapgen::IslandsView{.width = 40'000.0}});
+
     const auto help = parse({"--help"});
     REQUIRE(help);
     CHECK(help->help);
@@ -78,6 +82,8 @@ TEST_CASE("mapgen rejects bad arguments", "[mapgen]") {
     CHECK(rejects({"--region", "0,0,0"}));
     CHECK(rejects({"--region", "0,0,nan"}));
     CHECK(rejects({"--region", "0,,10"}));
+    CHECK(rejects({"--islands", "0"}));
+    CHECK(rejects({"--islands", "wide"}));
 }
 
 TEST_CASE("every mapgen layer has a distinct name", "[mapgen]") {

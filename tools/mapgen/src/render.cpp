@@ -1,3 +1,4 @@
+#include <hog/core/assert.hpp>
 #include <hog/mapgen/render.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tangent_frame.hpp>
@@ -102,8 +103,12 @@ constexpr std::array rarity{
     planet::Resource::Clay,
 };
 
-[[nodiscard]] double radians(double degrees) {
-    return degrees * std::numbers::pi / 180.0;
+[[nodiscard]] double radians(double angle) {
+    return angle * std::numbers::pi / 180.0;
+}
+
+[[nodiscard]] double degrees(double angle) {
+    return angle * 180.0 / std::numbers::pi;
 }
 
 [[nodiscard]] DVec3 direction_at(double latitude, double longitude) {
@@ -117,6 +122,17 @@ Rgb Image::at(int x, int y) const {
     const auto offset = 3 * ((static_cast<std::size_t>(y) * static_cast<std::size_t>(width)) +
                              static_cast<std::size_t>(x));
     return {pixels.at(offset), pixels.at(offset + 1), pixels.at(offset + 2)};
+}
+
+View resolve(const View& view, const planet::Geology& geology) {
+    const auto* islands = std::get_if<IslandsView>(&view);
+    if (islands == nullptr) {
+        return view;
+    }
+    const DVec3 center = geology.terrain().archipelago().center();
+    return RegionView{.latitude = degrees(std::asin(center.z)),
+                      .longitude = degrees(std::atan2(center.y, center.x)),
+                      .width = islands->width};
 }
 
 ImageSize image_size(const View& view, int width) noexcept {
@@ -138,6 +154,7 @@ DVec3 pixel_direction(const View& view, ImageSize size, int x, int y, double pla
         return glm::normalize(planet::face_uv_to_xyz(face->face, planet::st_to_uv(across),
                                                      planet::st_to_uv(1.0 - down)));
     }
+    HOG_ASSERT(std::holds_alternative<RegionView>(view), "view not resolved");
     const auto& region = std::get<RegionView>(view);
     const DVec3 center = direction_at(radians(region.latitude), radians(region.longitude));
     const planet::TangentFrame frame = planet::tangent_frame(center);
@@ -181,7 +198,8 @@ Rgb deposit_colour(const std::array<planet::Deposit, planet::resource_count>& de
 
 Image render(const planet::Geology& geology, double planet_radius, const View& view, Layer layer,
              int width, jobs::JobSystem& jobs) {
-    const ImageSize size = image_size(view, width);
+    const View resolved = resolve(view, geology);
+    const ImageSize size = image_size(resolved, width);
     Image image{.width = size.width,
                 .height = size.height,
                 .pixels = std::vector<std::uint8_t>(3 * static_cast<std::size_t>(size.width) *
@@ -208,7 +226,7 @@ Image render(const planet::Geology& geology, double planet_radius, const View& v
                 const auto y = static_cast<int>(row);
                 for (int x = 0; x < size.width; ++x) {
                     const Rgb colour = colour_at(
-                        planet::cell_at(pixel_direction(view, size, x, y, planet_radius)));
+                        planet::cell_at(pixel_direction(resolved, size, x, y, planet_radius)));
                     const auto offset =
                         3 * ((static_cast<std::size_t>(y) * static_cast<std::size_t>(size.width)) +
                              static_cast<std::size_t>(x));
@@ -224,8 +242,13 @@ std::string file_name(const View& view, Layer layer) {
     if (const auto* face = std::get_if<FaceView>(&view)) {
         return std::format("face{}-{}.png", face->face, to_string(layer));
     }
-    return std::format("{}-{}.png", std::holds_alternative<PlanetView>(view) ? "planet" : "region",
-                       to_string(layer));
+    const char* name = "region";
+    if (std::holds_alternative<PlanetView>(view)) {
+        name = "planet";
+    } else if (std::holds_alternative<IslandsView>(view)) {
+        name = "islands";
+    }
+    return std::format("{}-{}.png", name, to_string(layer));
 }
 
 Result<void> write_png(const std::filesystem::path& path, const Image& image) {

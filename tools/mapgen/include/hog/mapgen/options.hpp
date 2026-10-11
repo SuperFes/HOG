@@ -45,7 +45,14 @@ struct RegionView {
     friend bool operator==(const RegionView&, const RegionView&) = default;
 };
 
-using View = std::variant<PlanetView, FaceView, RegionView>;
+// A square region centred on the starting islands, wherever the seed put them.
+struct IslandsView {
+    double width = 0.0; // metres across
+
+    friend bool operator==(const IslandsView&, const IslandsView&) = default;
+};
+
+using View = std::variant<PlanetView, FaceView, RegionView, IslandsView>;
 
 struct Options {
     std::filesystem::path config = "config/planet.toml";

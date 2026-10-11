@@ -93,6 +93,22 @@ TEST_CASE("the region view is the requested width, north up", "[mapgen]") {
     CHECK(longitude(middle) == Catch::Approx(-70.0).margin(1e-9));
 }
 
+TEST_CASE("the islands view centres on the starting islands", "[mapgen]") {
+    const hog::planet::PlanetConfig planet{.seed = 3, .ocean_fraction = 0.7, .radius = radius};
+    const hog::planet::Geology geology{planet};
+    const View view =
+        hog::mapgen::resolve(View{hog::mapgen::IslandsView{.width = 2'000.0}}, geology);
+    REQUIRE(std::holds_alternative<RegionView>(view));
+    CHECK(std::get<RegionView>(view).width == 2'000.0);
+    const ImageSize size = image_size(view, 2);
+    const hog::DVec3 middle =
+        glm::normalize(hog::mapgen::pixel_direction(view, size, 0, 0, radius) +
+                       hog::mapgen::pixel_direction(view, size, 1, 1, radius));
+    CHECK(glm::length(middle - geology.terrain().archipelago().center()) < 1e-9);
+    // Other views pass through.
+    CHECK(hog::mapgen::resolve(View{FaceView{.face = 3}}, geology) == View{FaceView{.face = 3}});
+}
+
 TEST_CASE("height colours run from deep blue to snow", "[mapgen]") {
     const auto colour = [](double metres) {
         return hog::mapgen::height_colour(std::llround(metres * fixed_one));
@@ -194,6 +210,8 @@ TEST_CASE("map files are named for their view and layer", "[mapgen]") {
     CHECK(hog::mapgen::file_name(View{PlanetView{}}, Layer::Height) == "planet-height.png");
     CHECK(hog::mapgen::file_name(View{FaceView{.face = 2}}, Layer::Height) == "face2-height.png");
     CHECK(hog::mapgen::file_name(View{RegionView{}}, Layer::Height) == "region-height.png");
+    CHECK(hog::mapgen::file_name(View{hog::mapgen::IslandsView{}}, Layer::Biome) ==
+          "islands-biome.png");
 }
 
 TEST_CASE("maps are written as PNG", "[mapgen]") {
