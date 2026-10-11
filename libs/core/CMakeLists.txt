@@ -5,6 +5,7 @@ add_library(hog_core
     src/build_info.cpp
     src/bytes.cpp
     src/hash.cpp
+    src/line_sink.cpp
     src/log.cpp)
 add_library(hog::core ALIAS hog_core)
 
@@ -25,6 +26,7 @@ hog_add_tests(hog_core
     tests/build_info_tests.cpp
     tests/bytes_tests.cpp
     tests/hash_tests.cpp
+    tests/line_sink_tests.cpp
     tests/log_tests.cpp
     tests/math_tests.cpp
     tests/result_tests.cpp
