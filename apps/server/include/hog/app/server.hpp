@@ -5,6 +5,7 @@
 #include <hog/core/metrics.hpp>
 #include <hog/core/result.hpp>
 #include <hog/core/time.hpp>
+#include <hog/jobs/job_system.hpp>
 #include <hog/planet/planet_config.hpp>
 #include <hog/planet/world.hpp>
 #include <hog/server/catch_up.hpp>
@@ -12,6 +13,7 @@
 #include <hog/server/server_config.hpp>
 #include <hog/server/snapshot_writer.hpp>
 #include <hog/server/tick_loop.hpp>
+#include <hog/sim/weather.hpp>
 #include <hog/store/sqlite_change_store.hpp>
 #include <hog/store/sqlite_snapshot_store.hpp>
 
@@ -70,13 +72,14 @@ public:
     [[nodiscard]] server::Persistence& persistence() noexcept { return persistence_; }
     [[nodiscard]] const metrics::Registry& metrics() const noexcept { return registry_; }
     [[nodiscard]] const planet::World& planet() const noexcept { return planet_; }
+    [[nodiscard]] const sim::Weather& weather() const noexcept { return *weather_; }
 
     // Logs the metrics, bringing those mirrored from elsewhere up to date first.
     void report(std::uint64_t slipped);
 
 private:
-    // Advances the entities by one tick of game time.
-    void simulate(GameDuration step);
+    // Advances the world by one tick of game time.
+    void simulate(GameTime from, GameDuration step);
     void submit();
 
     server::ServerConfig config_;
@@ -88,6 +91,9 @@ private:
     server::SnapshotWriter writer_;
     flecs::world entities_;
     server::Persistence persistence_;
+    jobs::JobSystem jobs_;
+    // Set once the planet's changes are in, since the weather starts from the ground.
+    std::unique_ptr<sim::Weather> weather_;
     GameTime time_;
     Tick tick_;
 
@@ -101,6 +107,8 @@ private:
     metrics::Counter& snapshots_replaced_;
     metrics::Counter& snapshots_failed_;
     metrics::Counter& snapshots_skipped_;
+    metrics::Counter& weather_steps_;
+    metrics::Histogram& weather_step_seconds_;
     metrics::Reporter reporter_;
     // What the mirrored counters were last brought up to.
     server::SnapshotWriter::Stats mirrored_writes_;
@@ -114,7 +122,7 @@ server::CatchUpStats Server::catch_up(Now now) {
     const MonotonicClock::time_point started = MonotonicClock::now();
     const server::CatchUpStats stats =
         server::catch_up(clock, config_.catch_up_ticks, now,
-                         [this](const server::TickClock& at) { simulate(at.step()); });
+                         [this](const server::TickClock& at) { simulate(at.now(), at.step()); });
     time_ = clock.now();
     tick_ = clock.tick();
     catch_up_ticks_.add(stats.ticks);
@@ -144,7 +152,7 @@ Result<void> Server::run(T& timer, const std::atomic<bool>& stop) {
     MonotonicClock::time_point next_report = timer.now() + interval;
     loop.run([&](const server::TickClock& clock) {
         const MonotonicClock::time_point started = MonotonicClock::now();
-        simulate(clock.step());
+        simulate(clock.now(), clock.step());
         time_ = clock.now() + clock.step();
         tick_ = clock.tick() + TickDelta{1};
         if (saves.due(time_)) {

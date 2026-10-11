@@ -48,6 +48,9 @@ TEST_CASE("a minimal server config takes the defaults", "[server][config]") {
     CHECK(config->log.categories.empty());
     CHECK_FALSE(config->log.file);
     CHECK(config->metrics_interval == 10s);
+    CHECK(config->weather.cell_size == 6'000.0);
+    CHECK(config->weather.step == 10min);
+    CHECK(config->weather.day == 24h);
 }
 
 TEST_CASE("every server setting can be given", "[server][config]") {
@@ -70,6 +73,11 @@ categories = { save = "trace", net = "off" }
 
 [metrics]
 interval_seconds = 0
+
+[weather]
+cell_km = 2.5
+step_minutes = 5
+day_hours = 4
 )",
                                             base());
     REQUIRE(config);
@@ -90,6 +98,9 @@ interval_seconds = 0
     CHECK(has(Override{"net", hog::log::Level::Off}));
     CHECK(config->log.file == std::filesystem::path{"/srv/hog/var/logs/server.jsonl"});
     CHECK(config->metrics_interval == 0s);
+    CHECK(config->weather.cell_size == 2'500.0);
+    CHECK(config->weather.step == 5min);
+    CHECK(config->weather.day == 4h);
 }
 
 TEST_CASE("bad server configs are rejected", "[server][config]") {
@@ -121,6 +132,13 @@ TEST_CASE("bad server configs are rejected", "[server][config]") {
         {with("[log]\ncategories = \"save\"\n"), ErrorCode::InvalidArgument},
         {with("[metrics]\ninterval_seconds = -1\n"), ErrorCode::InvalidArgument},
         {with("[metrics]\ninterval_seconds = 1.5\n"), ErrorCode::InvalidArgument},
+        {with("[weather]\ncell_km = 0\n"), ErrorCode::InvalidArgument},
+        {with("[weather]\ncell_km = nan\n"), ErrorCode::InvalidArgument},
+        {with("[weather]\nstep_minutes = 0\n"), ErrorCode::InvalidArgument},
+        {with("[weather]\nstep_minutes = 1441\n"), ErrorCode::InvalidArgument},
+        {with("[weather]\nday_hours = -4\n"), ErrorCode::InvalidArgument},
+        {with("[weather]\nday_hours = inf\n"), ErrorCode::InvalidArgument},
+        {with("[weather]\nwind = 3\n"), ErrorCode::InvalidArgument},
     }));
     CAPTURE(text);
     const auto config = parse_server_config(text, base());

@@ -131,6 +131,8 @@ TEST_CASE("a reopened world catches up to now", "[app][server]") {
         CHECK(server->time() <= now);
         CHECK(now - server->time() < 50ms);
         CHECK(counter(*server, "hog_catch_up_ticks_total") == stats.ticks);
+        CHECK(now - server->weather().time() < config.weather.step);
+        CHECK(counter(*server, "hog_weather_steps_total") > 0);
 
         // Already at now, there's nothing to do.
         CHECK(server->catch_up([&] { return now; }).ticks == 0);
@@ -147,6 +149,31 @@ TEST_CASE("startup time is caught up without saving", "[app][server]") {
         CHECK(server->tick() == hog::Tick{2});
     }
     CHECK(opened(world.config())->tick() == hog::Tick{0});
+}
+
+TEST_CASE("weather is kept with the world", "[app][server]") {
+    const World world;
+    auto config = world.config();
+    config.catch_up_ticks = 100;
+    REQUIRE(opened(config)->save());
+
+    const GameTime later = start + 6h;
+    hog::sim::WeatherFields before;
+    int level = 0;
+    {
+        const auto server = opened(config, later);
+        server->catch_up([&] { return later; });
+        before = server->weather().fields();
+        level = server->weather().grid().level();
+        CHECK(server->weather().time() > start);
+    }
+    CHECK(opened(config, later)->weather().fields() == before);
+
+    // Saved weather doesn't fit a coarser grid, so it starts over.
+    config.weather.cell_size *= 4.0;
+    const auto coarser = opened(config, later);
+    CHECK(coarser->weather().grid().level() == level - 2);
+    CHECK(coarser->weather().fields().size() == before.size() / 16);
 }
 
 TEST_CASE("snapshots are taken every save interval", "[app][server]") {

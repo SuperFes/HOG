@@ -19,6 +19,9 @@ constexpr std::int64_t max_burst_limit = 1'000;
 constexpr std::int64_t max_keep = 1'000;
 constexpr std::int64_t max_catch_up_ticks = 1'000'000'000;
 constexpr std::int64_t max_metrics_seconds = std::int64_t{24} * 60 * 60;
+constexpr double max_cell_km = 10'000.0;
+constexpr double max_weather_minutes = 24.0 * 60.0;
+constexpr double max_weather_day_hours = 24.0 * 365.0;
 
 [[nodiscard]] std::unexpected<Error> invalid(std::string message) {
     return make_error(ErrorCode::InvalidArgument, std::move(message));
@@ -67,6 +70,27 @@ public:
             return floating->get();
         }
         return invalid(std::format("{}.{} must be a number", name_, key));
+    }
+
+    // A positive game time in units of Period, at most `max` of them.
+    template <typename Period>
+    [[nodiscard]] Result<std::optional<GameDuration>> duration(std::string_view key, double max,
+                                                               std::string_view limit) const {
+        const auto value = number(key);
+        if (!value || !*value) {
+            return value ? Result<std::optional<GameDuration>>{std::nullopt}
+                         : std::unexpected(value.error());
+        }
+        // Checked before converting, which is undefined for NaN; NaN fails every comparison.
+        const bool in_range = **value > 0.0 && **value <= max;
+        const auto converted =
+            in_range
+                ? std::chrono::round<GameDuration>(std::chrono::duration<double, Period>{**value})
+                : GameDuration::zero();
+        if (converted <= GameDuration::zero()) {
+            return invalid(std::format("{}.{} must be above 0 and at most {}", name_, key, limit));
+        }
+        return converted;
     }
 
     [[nodiscard]] Result<std::optional<std::string>> string(std::string_view key) const {
@@ -142,22 +166,12 @@ private:
     if (auto known = save.only({"interval_minutes", "keep", "catch_up_ticks"}); !known) {
         return known;
     }
-    const auto minutes = save.number("interval_minutes");
-    if (!minutes) {
-        return std::unexpected(minutes.error());
+    const auto interval =
+        save.duration<std::ratio<60>>("interval_minutes", max_save_minutes, "a day");
+    if (!interval) {
+        return std::unexpected(interval.error());
     }
-    if (*minutes) {
-        // Checked before converting, which is undefined for NaN; NaN fails every comparison.
-        const bool in_range = **minutes > 0.0 && **minutes <= max_save_minutes;
-        const auto interval = in_range
-                                  ? std::chrono::round<GameDuration>(
-                                        std::chrono::duration<double, std::ratio<60>>{**minutes})
-                                  : GameDuration::zero();
-        if (interval <= GameDuration::zero()) {
-            return invalid("save.interval_minutes must be above 0 and at most a day");
-        }
-        config.save_interval = interval;
-    }
+    config.save_interval = interval->value_or(config.save_interval);
     const auto keep = save.integer("keep", 1, max_keep);
     const auto catch_up = save.integer("catch_up_ticks", 1, max_catch_up_ticks);
     for (const auto* field : {&keep, &catch_up}) {
@@ -220,6 +234,37 @@ private:
     return {};
 }
 
+[[nodiscard]] Result<void> parse_weather(const Table& weather, WeatherSettings& config) {
+    if (auto known = weather.only({"cell_km", "step_minutes", "day_hours"}); !known) {
+        return known;
+    }
+    const auto cell = weather.number("cell_km");
+    if (!cell) {
+        return std::unexpected(cell.error());
+    }
+    if (*cell) {
+        // NaN fails every comparison, so it is out of range too.
+        const bool in_range = **cell > 0.0 && **cell <= max_cell_km;
+        if (!in_range) {
+            return invalid(
+                std::format("weather.cell_km must be above 0 and at most {}", max_cell_km));
+        }
+        config.cell_size = **cell * 1'000.0;
+    }
+    const auto step =
+        weather.duration<std::ratio<60>>("step_minutes", max_weather_minutes, "a day");
+    const auto day =
+        weather.duration<std::ratio<3'600>>("day_hours", max_weather_day_hours, "a year");
+    for (const auto* field : {&step, &day}) {
+        if (!*field) {
+            return std::unexpected(field->error());
+        }
+    }
+    config.step = step->value_or(config.step);
+    config.day = day->value_or(config.day);
+    return {};
+}
+
 } // namespace
 
 Result<ServerConfig> parse_server_config(std::string_view text, const std::filesystem::path& base) {
@@ -229,7 +274,7 @@ Result<ServerConfig> parse_server_config(std::string_view text, const std::files
         return make_error(ErrorCode::Parse, std::format("line {}: {}", error.source().begin.line,
                                                         error.description()));
     }
-    constexpr std::array<std::string_view, 4> names{"server", "save", "log", "metrics"};
+    constexpr std::array<std::string_view, 5> names{"server", "save", "log", "metrics", "weather"};
     std::array<const toml::table*, names.size()> tables{};
     for (const auto& [key, node] : parsed.table()) {
         const auto index =
@@ -255,6 +300,9 @@ Result<ServerConfig> parse_server_config(std::string_view text, const std::files
     }
     if (auto metrics = parse_metrics(Table{tables[3], "metrics"}, config); !metrics) {
         return std::unexpected(metrics.error());
+    }
+    if (auto weather = parse_weather(Table{tables[4], "weather"}, config.weather); !weather) {
+        return std::unexpected(weather.error());
     }
     return config;
 }

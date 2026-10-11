@@ -25,6 +25,13 @@ struct LogConfig {
     std::optional<std::filesystem::path> file;
 };
 
+struct WeatherSettings {
+    double cell_size = 6'000.0; // at most this many metres across a grid cell on the planet
+    GameDuration step = std::chrono::minutes{10};
+    // The day the weather follows, which needn't be the sun's.
+    GameDuration day = std::chrono::hours{24};
+};
+
 struct ServerConfig {
     std::filesystem::path world; // the world database
     std::filesystem::path planet;
@@ -37,6 +44,7 @@ struct ServerConfig {
     LogConfig log;
     // Real time between metrics records; zero turns them off.
     std::chrono::seconds metrics_interval{10};
+    WeatherSettings weather;
 };
 
 // Reads a server config. Relative paths are resolved against `base`, normally the directory of
@@ -60,6 +68,11 @@ struct ServerConfig {
 //
 //     [metrics]                  # optional
 //     interval_seconds = 10      # 0 turns metrics off
+//
+//     [weather]                  # optional
+//     cell_km = 6.0
+//     step_minutes = 10.0        # game time
+//     day_hours = 24.0
 //
 // Unknown tables and keys are errors, so typos don't silently fall back to defaults.
 [[nodiscard]] Result<ServerConfig> parse_server_config(std::string_view text,

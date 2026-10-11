@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdint>
 #include <numbers>
+#include <numeric>
 #include <vector>
 
 using namespace std::chrono;
@@ -175,7 +176,7 @@ TEST_CASE("hot, wet afternoons bring thunderstorms; cold air brings snow", "[sim
     for (int hour = 1; hour <= 48; ++hour) {
         hot.advance_to(march_equinox + hours{hour}, jobs);
         storm = std::max(storm, std::ranges::max(hot.fields().storm));
-        rain += std::ranges::fold_left(hot.fields().rain, 0.0F, std::plus{});
+        rain += std::accumulate(hot.fields().rain.begin(), hot.fields().rain.end(), 0.0F);
     }
     CHECK(storm > 0.3F);
     CHECK(rain > 0.0F);
@@ -225,7 +226,7 @@ TEST_CASE("weather saves and loads", "[sim][weather]") {
     Weather finer{WeatherConfig{.level = level + 1}, std::vector<Ground>(6U << 8U), june_solstice};
     const auto other_level = finer.load(Weather::save_version, bytes);
     REQUIRE_FALSE(other_level);
-    CHECK(other_level.error().code == hog::ErrorCode::Unsupported);
+    CHECK(other_level.error().code == hog::ErrorCode::InvalidArgument);
     const auto newer = loaded.load(Weather::save_version + 1, bytes);
     REQUIRE_FALSE(newer);
     CHECK(newer.error().code == hog::ErrorCode::Unsupported);

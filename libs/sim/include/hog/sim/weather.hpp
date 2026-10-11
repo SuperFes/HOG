@@ -87,8 +87,9 @@ public:
 
     // Versioned bytes for a snapshot section.
     [[nodiscard]] std::vector<std::byte> save() const;
-    // Replaces the state with saved bytes, or fails and changes nothing. Fails with Unsupported
-    // for weather saved at another grid level, which can't be carried over.
+    // Replaces the state with saved bytes, or fails and changes nothing: with Unsupported for a
+    // newer version, and InvalidArgument for weather saved at another grid level, which can't be
+    // carried over.
     [[nodiscard]] Result<void> load(std::uint16_t version, std::span<const std::byte> bytes);
 
     static constexpr std::uint16_t save_version = 1;

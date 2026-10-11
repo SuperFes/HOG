@@ -393,7 +393,7 @@ Result<void> Weather::load(std::uint16_t version, std::span<const std::byte> byt
     }
     if (*level != grid_.level()) {
         return make_error(
-            ErrorCode::Unsupported,
+            ErrorCode::InvalidArgument,
             std::format("weather was saved at level {}, not {}", *level, grid_.level()));
     }
     const auto time = in.read<std::uint64_t>();

@@ -15,3 +15,8 @@ file = "../var/logs/server.jsonl"
 
 [metrics]
 interval_seconds = 10
+
+[weather]
+cell_km = 6
+step_minutes = 10
+day_hours = 24

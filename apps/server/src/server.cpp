@@ -1,6 +1,8 @@
 #include <hog/app/server.hpp>
+#include <hog/planet/projection.hpp>
 #include <hog/save/snapshot_store.hpp>
 
+#include <algorithm>
 #include <array>
 #include <filesystem>
 #include <format>
@@ -14,6 +16,8 @@ namespace {
 // Seconds; a 20 Hz tick has 50 ms to spare.
 constexpr std::array tick_bounds{0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005,
                                  0.01,   0.025,   0.05,   0.1,   0.25,   1.0};
+
+constexpr save::SectionId weather_section = save::section_id("WTHR");
 
 [[nodiscard]] std::string format_time(GameTime time) {
     return std::format("{:%FT%T}Z",
@@ -53,6 +57,10 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config,
           registry_.counter("hog_snapshots_failed_total", "Snapshots that failed to write.")),
       snapshots_skipped_(registry_.counter("hog_snapshots_skipped_total",
                                            "Damaged snapshots passed over when loading.")),
+      weather_steps_(registry_.counter("hog_weather_steps_total", "Weather steps taken.")),
+      weather_step_seconds_(registry_.histogram("hog_weather_step_seconds",
+                                                "Real time each weather step took.",
+                                                {tick_bounds.begin(), tick_bounds.end()})),
       reporter_(registry_) {
     persistence_.persist<server::Position>();
 }
@@ -99,6 +107,19 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
     log::info(server_log, "world {:016x} in {}: {} planet changes", server->world_id_, world_file,
               stored_changes->size());
 
+    const sim::WeatherConfig weather{
+        .level = std::min(planet::level_for(config.weather.cell_size, planet->radius),
+                          sim::CellGrid::max_level),
+        .step = config.weather.step,
+        .day = config.weather.day,
+        .axial_tilt = planet->axial_tilt,
+    };
+    server->weather_ = std::make_unique<sim::Weather>(
+        weather, sim::ground_for(sim::CellGrid{weather.level}, server->planet_),
+        loaded->snapshot ? loaded->snapshot->time : now);
+    log::info(server_log, "weather grid at level {}: {} cells", weather.level,
+              server->weather_->grid().size());
+
     for (const Error& skipped : loaded->skipped) {
         log::warn(save_log, "skipped damaged {}", skipped.message);
     }
@@ -107,6 +128,15 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
         const auto restored = server->persistence_.restore(*snapshot);
         if (!restored) {
             return context("snapshot", restored.error());
+        }
+        if (const save::Section* section = snapshot->find(weather_section)) {
+            auto restored_weather = server->weather_->load(section->version, section->bytes);
+            if (!restored_weather && restored_weather.error().code == ErrorCode::Unsupported) {
+                return context("weather", restored_weather.error());
+            }
+            if (!restored_weather) {
+                log::warn(save_log, "weather starts over: {}", restored_weather.error().message);
+            }
         }
         server->time_ = snapshot->time;
         server->tick_ = snapshot->tick;
@@ -119,13 +149,22 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
     return server;
 }
 
-void Server::simulate(GameDuration step) {
+void Server::simulate(GameTime from, GameDuration step) {
     entities_.progress(std::chrono::duration<float>(step).count());
+    const MonotonicClock::time_point started = MonotonicClock::now();
+    if (const std::uint64_t steps = weather_->advance_to(from + step, jobs_); steps > 0) {
+        weather_steps_.add(steps);
+        weather_step_seconds_.observe(
+            std::chrono::duration<double>(MonotonicClock::now() - started).count() /
+            static_cast<double>(steps));
+    }
 }
 
 void Server::submit() {
     save::Snapshot snapshot{.world = world_id_, .time = time_, .tick = tick_, .sections = {}};
     persistence_.store(snapshot);
+    snapshot.add(save::Section{
+        .id = weather_section, .version = sim::Weather::save_version, .bytes = weather_->save()});
     writer_.submit(std::move(snapshot));
 }
 
