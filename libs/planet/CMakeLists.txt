@@ -1,4 +1,5 @@
 add_library(hog_planet
+    src/archipelago.cpp
     src/cell_id.cpp
     src/climate.cpp
     src/continents.cpp
@@ -15,6 +16,7 @@ target_link_libraries(hog_planet PUBLIC hog::core PRIVATE tomlplusplus)
 hog_target_defaults(hog_planet)
 
 hog_add_tests(hog_planet
+    tests/archipelago_tests.cpp
     tests/cell_id_tests.cpp
     tests/climate_tests.cpp
     tests/continents_tests.cpp

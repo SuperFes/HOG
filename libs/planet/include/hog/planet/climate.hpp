@@ -3,6 +3,7 @@
 #include <hog/planet/cell_id.hpp>
 #include <hog/planet/elevation.hpp>
 #include <hog/planet/noise.hpp>
+#include <hog/planet/planet_config.hpp>
 
 #include <cstdint>
 #include <string_view>
@@ -75,21 +76,22 @@ public:
     static constexpr std::int64_t alpine_height = 1'800;
     static constexpr std::int64_t beach_height = 10;
 
-    Climate(std::uint64_t seed, double ocean_fraction);
+    explicit Climate(const PlanetConfig& config);
 
     [[nodiscard]] const Elevation& terrain() const noexcept { return terrain_; }
 
     // Fixed-point mean annual temperature in °C, at the surface or the sea surface.
     [[nodiscard]] std::int64_t temperature(CellId cell) const;
 
-    // Fixed-point wetness from 0 (arid) to 1 (saturated).
+    // Fixed-point wetness from 0 (arid) to 1 (saturated). Only continents dry out inland; islands
+    // are too small to.
     [[nodiscard]] std::int64_t moisture(CellId cell) const;
 
     [[nodiscard]] Biome biome(CellId cell) const;
 
 private:
     [[nodiscard]] std::int64_t temperature(CellId cell, std::int64_t elevation) const;
-    [[nodiscard]] std::int64_t moisture(CellId cell, std::int64_t height) const;
+    [[nodiscard]] std::int64_t moisture(CellId cell, std::int64_t continent_height) const;
 
     Elevation terrain_;
     std::uint64_t temperature_seed_;

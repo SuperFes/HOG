@@ -34,9 +34,11 @@ constexpr std::int64_t erosion = 2 * fixed_one;
 
 } // namespace
 
-Elevation::Elevation(std::uint64_t seed, double ocean_fraction)
-    : continents_{seed, ocean_fraction}, belt_seed_{hash_combine(seed, belt_salt)},
-      ridge_seed_{hash_combine(seed, ridge_salt)} {}
+Elevation::Elevation(const PlanetConfig& config)
+    : continents_{config.seed, config.ocean_fraction},
+      archipelago_{config.seed, config.radius, continents_},
+      belt_seed_{hash_combine(config.seed, belt_salt)},
+      ridge_seed_{hash_combine(config.seed, ridge_salt)} {}
 
 std::int64_t Elevation::mountain_strength(CellId cell) const {
     return mountain_strength(cell, continents_.height(cell));
@@ -55,12 +57,14 @@ std::int64_t Elevation::mountain_strength(CellId cell, std::int64_t height) cons
 }
 
 std::int64_t Elevation::elevation(CellId cell) const {
-    const std::int64_t height = continents_.height(cell);
+    const std::int64_t continent = continents_.height(cell);
+    const std::int64_t height = archipelago_.raise(cell, continent);
     if (height <= 0) {
         return -ocean_depth * ramp(-height, depth_width);
     }
     const std::int64_t lowland = lowland_height * ramp(height, lowland_width);
-    const std::int64_t strength = mountain_strength(cell, height);
+    // Islands keep to lowland hills; only continents carry mountain belts.
+    const std::int64_t strength = mountain_strength(cell, continent);
     if (strength == 0) {
         return lowland;
     }

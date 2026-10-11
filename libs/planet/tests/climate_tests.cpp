@@ -23,6 +23,10 @@ using hog::planet::fixed_one;
 
 namespace {
 
+hog::planet::PlanetConfig planet(std::uint64_t seed) {
+    return {.seed = seed, .ocean_fraction = 0.7, .radius = 115'000.0};
+}
+
 std::vector<CellId> cells_at(int level) {
     std::vector<CellId> cells;
     for (int face = 0; face < hog::planet::face_count; ++face) {
@@ -106,14 +110,14 @@ TEST_CASE("every biome has a distinct name", "[planet][climate]") {
 }
 
 TEST_CASE("the poles are colder than the equator", "[planet][climate]") {
-    const Climate climate{1, 0.7};
+    const Climate climate{planet(1)};
     std::int64_t warmest_pole = celsius(-100);
     std::int64_t coldest_equator = celsius(100);
     for (const CellId cell : cells_at(6)) {
         const double sine = sine_of_latitude(cell);
         if (sine > 0.95) {
             warmest_pole = std::max(warmest_pole, climate.temperature(cell));
-        } else if (sine < 0.1 && !climate.terrain().continents().is_land(cell)) {
+        } else if (sine < 0.1 && !climate.terrain().is_land(cell)) {
             coldest_equator = std::min(coldest_equator, climate.temperature(cell));
         }
     }
@@ -123,7 +127,7 @@ TEST_CASE("the poles are colder than the equator", "[planet][climate]") {
 
 TEST_CASE("temperature falls with height", "[planet][climate]") {
     const std::uint64_t seed = GENERATE(1U, 2U);
-    const Climate climate{seed, 0.7};
+    const Climate climate{planet(seed)};
     Mean lowland;
     Mean highland;
     for (const CellId cell : cells_at(6)) {
@@ -144,13 +148,13 @@ TEST_CASE("temperature falls with height", "[planet][climate]") {
 
 TEST_CASE("moisture follows the circulation bands", "[planet][climate]") {
     const std::uint64_t seed = GENERATE(1U, 2U);
-    const Climate climate{seed, 0.7};
+    const Climate climate{planet(seed)};
     // Over the ocean, where nothing dries the air out.
     Mean equator;
     Mean subtropics;
     Mean subpolar;
     for (const CellId cell : cells_at(6)) {
-        if (climate.terrain().continents().is_land(cell)) {
+        if (climate.terrain().is_land(cell)) {
             continue;
         }
         const double sine = sine_of_latitude(cell);
@@ -170,11 +174,11 @@ TEST_CASE("moisture follows the circulation bands", "[planet][climate]") {
 
 TEST_CASE("the interior is drier than the coast", "[planet][climate]") {
     const std::uint64_t seed = GENERATE(1U, 2U);
-    const Climate climate{seed, 0.7};
+    const Climate climate{planet(seed)};
     Mean coast;
     Mean interior;
     for (const CellId cell : cells_at(6)) {
-        const std::int64_t height = climate.terrain().continents().height(cell);
+        const std::int64_t height = climate.terrain().height(cell);
         const double area = hog::planet::cell_area(cell);
         const auto moisture = static_cast<double>(climate.moisture(cell)) / fixed_one;
         if (height > 0 && height < fixed_one / 20) {
@@ -190,13 +194,13 @@ TEST_CASE("biomes cover the land in plausible shares", "[planet][climate]") {
     std::set<Biome> seen;
     for (std::uint64_t seed = 1; seed <= 4; ++seed) {
         INFO("seed " << seed);
-        const Climate climate{seed, 0.7};
+        const Climate climate{planet(seed)};
         std::array<double, hog::planet::biome_count> areas{};
         double land = 0.0;
         double desert_in_subtropics = 0.0;
         for (const CellId cell : cells_at(6)) {
             const Biome biome = climate.biome(cell);
-            REQUIRE((biome == Biome::Ocean) == !climate.terrain().continents().is_land(cell));
+            REQUIRE((biome == Biome::Ocean) == !climate.terrain().is_land(cell));
             seen.insert(biome);
             if (biome == Biome::Ocean) {
                 continue;
@@ -227,7 +231,7 @@ TEST_CASE("biomes cover the land in plausible shares", "[planet][climate]") {
 }
 
 TEST_CASE("climate changes smoothly between neighbours", "[planet][climate]") {
-    const Climate climate{2, 0.7};
+    const Climate climate{planet(2)};
     constexpr int level = 16;
     constexpr std::uint64_t side = std::uint64_t{1} << level;
     std::int64_t largest_temperature_step = 0;
@@ -251,9 +255,9 @@ TEST_CASE("climate changes smoothly between neighbours", "[planet][climate]") {
 
 TEST_CASE("climate depends on the seed", "[planet][climate]") {
     const CellId cell = CellId::from_face_ij(2, 100, 200, 10);
-    const Climate first{1, 0.7};
-    CHECK(Climate{1, 0.7}.temperature(cell) == first.temperature(cell));
-    CHECK(Climate{1, 0.7}.moisture(cell) == first.moisture(cell));
-    CHECK(Climate{2, 0.7}.temperature(cell) != first.temperature(cell));
-    CHECK(Climate{2, 0.7}.moisture(cell) != first.moisture(cell));
+    const Climate first{planet(1)};
+    CHECK(Climate{planet(1)}.temperature(cell) == first.temperature(cell));
+    CHECK(Climate{planet(1)}.moisture(cell) == first.moisture(cell));
+    CHECK(Climate{planet(2)}.temperature(cell) != first.temperature(cell));
+    CHECK(Climate{planet(2)}.moisture(cell) != first.moisture(cell));
 }

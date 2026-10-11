@@ -77,9 +77,9 @@ std::string_view to_string(Biome biome) noexcept {
     return "unknown";
 }
 
-Climate::Climate(std::uint64_t seed, double ocean_fraction)
-    : terrain_{seed, ocean_fraction}, temperature_seed_{hash_combine(seed, temperature_salt)},
-      moisture_seed_{hash_combine(seed, moisture_salt)} {}
+Climate::Climate(const PlanetConfig& config)
+    : terrain_{config}, temperature_seed_{hash_combine(config.seed, temperature_salt)},
+      moisture_seed_{hash_combine(config.seed, moisture_salt)} {}
 
 std::int64_t Climate::temperature(CellId cell) const {
     return temperature(cell, terrain_.elevation(cell));
@@ -103,7 +103,7 @@ std::int64_t Climate::moisture(CellId cell) const {
     return moisture(cell, terrain_.continents().height(cell));
 }
 
-std::int64_t Climate::moisture(CellId cell, std::int64_t height) const {
+std::int64_t Climate::moisture(CellId cell, std::int64_t continent_height) const {
     const DVec3 center = cell_center(cell);
     const std::int64_t sine = latitude_sine(center);
     const std::int64_t u = multiply(sine, sine);
@@ -114,19 +114,20 @@ std::int64_t Climate::moisture(CellId cell, std::int64_t height) const {
     const std::int64_t noise =
         multiply(moisture_variation,
                  fbm(moisture_seed_, noise_point(center, moisture_frequency), moisture_octaves));
-    const std::int64_t wetness = (fixed_one / 2) + multiply(band_amplitude, bands) -
-                                 multiply(inland_dryness, ramp(height, inland_dry_width)) + noise;
+    const std::int64_t wetness =
+        (fixed_one / 2) + multiply(band_amplitude, bands) -
+        multiply(inland_dryness, ramp(continent_height, inland_dry_width)) + noise;
     return std::clamp(wetness, std::int64_t{0}, fixed_one);
 }
 
 Biome Climate::biome(CellId cell) const {
-    const std::int64_t height = terrain_.continents().height(cell);
-    if (height <= 0) {
+    const std::int64_t continent = terrain_.continents().height(cell);
+    if (terrain_.archipelago().raise(cell, continent) <= 0) {
         return Biome::Ocean;
     }
     const std::int64_t elevation = terrain_.elevation(cell);
     const std::int64_t temperature = this->temperature(cell, elevation);
-    const Biome climate = classify_biome(temperature, moisture(cell, height));
+    const Biome climate = classify_biome(temperature, moisture(cell, continent));
     if (climate == Biome::Ice) {
         return climate;
     }
