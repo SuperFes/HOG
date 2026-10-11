@@ -120,7 +120,7 @@ TEST_CASE("another thread can stop a loop paced to real time", "[server][loop]")
     hog::server::SteadyTimer timer;
     TickLoop loop{timer, LoopConfig{.rate = hog::server::max_rate}};
     std::atomic<int> ticks{0};
-    std::jthread runner{[&] { loop.run([&](const TickClock&) { ++ticks; }); }};
+    std::thread runner{[&] { loop.run([&](const TickClock&) { ++ticks; }); }};
     while (ticks.load() < 3) {
         std::this_thread::sleep_for(1ms);
     }
