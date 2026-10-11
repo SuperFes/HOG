@@ -36,6 +36,13 @@ CPMAddPackage(
     GIT_TAG 1.0.3
     DOWNLOAD_ONLY YES)
 
+# Task scheduler; Zlib. Built by hog_jobs from source to skip its C interface and examples.
+CPMAddPackage(
+    NAME enkiTS
+    GITHUB_REPOSITORY dougbinks/enkiTS
+    GIT_TAG v1.12
+    DOWNLOAD_ONLY YES)
+
 if(HOG_BUILD_TESTS)
     enable_testing()
     CPMAddPackage(
@@ -75,6 +82,7 @@ function(hog_add_benchmarks lib)
 endfunction()
 
 add_subdirectory(libs/core)
+add_subdirectory(libs/jobs)
 if(HOG_BUILD_TESTS)
     add_subdirectory(libs/testing)
 endif()
