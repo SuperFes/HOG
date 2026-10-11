@@ -143,7 +143,7 @@ This phase builds a server that runs the world with nobody connected: time passe
 
 **Loop and entities**
 
-- [ ] Fixed-tick loop (20 Hz idle, up to 30 Hz in combat areas) with a game-time scale
+- [x] Fixed-tick loop (20 Hz idle, up to 30 Hz in combat areas) with a game-time scale
 - [ ] Spike: EnTT against flecs, benchmarked with 100k entities and our access patterns; record the decision
 - [ ] Spatial index keyed by cube-sphere cell
 - [ ] Save and load: periodic snapshot plus the change log since then
