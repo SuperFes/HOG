@@ -94,9 +94,9 @@ This phase builds the repo and the rules every later line of code follows. It ha
 - [x] Fixed-size math types: vectors, quaternions, double-precision world positions
 - [x] Stable hashing (same output on every platform and compiler)
 - [x] Clock and tick types that cannot be mixed up with each other
-- [ ] Small job system or thread pool (or adopt one, e.g. enkiTS)
+- [x] Job system: enkiTS behind `hog_jobs`
 - [x] Benchmark harness (Catch2 BENCHMARK) next to the unit tests
-- [ ] Every item above has unit tests, and the slot map has a fuzz test
+- [x] Every item above has unit tests, and the slot map has a fuzz test
 
 ## Phase 1 — Planet core
 
