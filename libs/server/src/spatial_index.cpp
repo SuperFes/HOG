@@ -107,7 +107,8 @@ std::vector<CellId> SpatialIndex::cells_near(WorldPosition center, double radius
             continue;
         }
         near.push_back(cell);
-        for (const CellId neighbor : planet::vertex_neighbors(cell).cells()) {
+        const planet::VertexNeighbors neighbors = planet::vertex_neighbors(cell);
+        for (const CellId neighbor : neighbors.cells()) {
             if (seen.insert(neighbor.raw()).second) {
                 frontier.push_back(neighbor);
             }

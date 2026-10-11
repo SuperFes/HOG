@@ -47,7 +47,17 @@ public:
     // Calls visit(entry) for every entity within `radius` metres of `center`.
     template <typename F>
         requires std::invocable<F&, const Entry&>
-    void for_each_near(WorldPosition center, double radius, F visit) const;
+    void for_each_near(WorldPosition center, double radius, F visit) const {
+        const double squared = radius * radius;
+        for (const planet::CellId cell : cells_near(center, radius)) {
+            for (const Entry& entry : in_cell(cell)) {
+                const DVec3 offset = entry.position - center;
+                if (glm::dot(offset, offset) <= squared) {
+                    visit(entry);
+                }
+            }
+        }
+    }
 
 private:
     struct Slot {
@@ -62,19 +72,5 @@ private:
     std::unordered_map<std::uint64_t, std::vector<Entry>> cells_;
     std::unordered_map<EntityId, Slot> slots_;
 };
-
-template <typename F>
-    requires std::invocable<F&, const SpatialIndex::Entry&>
-void SpatialIndex::for_each_near(WorldPosition center, double radius, F visit) const {
-    const double squared = radius * radius;
-    for (const planet::CellId cell : cells_near(center, radius)) {
-        for (const Entry& entry : in_cell(cell)) {
-            const DVec3 offset = entry.position - center;
-            if (glm::dot(offset, offset) <= squared) {
-                visit(entry);
-            }
-        }
-    }
-}
 
 } // namespace hog::server
