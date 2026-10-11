@@ -25,7 +25,7 @@ using hog::planet::World;
 
 namespace {
 
-const hog::planet::PlanetConfig planet{.seed = 1, .ocean_fraction = 0.7, .radius = 115'000.0};
+constexpr hog::planet::PlanetConfig planet{.seed = 1, .ocean_fraction = 0.7, .radius = 115'000.0};
 
 // One World for the whole file: the seed's generators are costly to set up.
 World& shared_world() {

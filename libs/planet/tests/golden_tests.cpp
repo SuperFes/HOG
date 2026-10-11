@@ -28,7 +28,8 @@ using hog::planet::CellId;
 namespace {
 
 constexpr std::uint64_t seed = 1;
-const hog::planet::PlanetConfig planet{.seed = seed, .ocean_fraction = 0.7, .radius = 115'000.0};
+constexpr hog::planet::PlanetConfig planet{
+    .seed = seed, .ocean_fraction = 0.7, .radius = 115'000.0};
 
 struct Layer {
     std::string_view name;
