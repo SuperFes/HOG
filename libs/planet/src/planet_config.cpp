@@ -1,10 +1,12 @@
 #include <hog/core/assert.hpp>
+#include <hog/core/hash.hpp>
 #include <hog/planet/planet_config.hpp>
 
 #include <toml++/toml.hpp>
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <format>
 #include <fstream>
@@ -188,6 +190,11 @@ Result<PlanetConfig> load_planet_config(const std::filesystem::path& path) {
         config.error().message = std::format("{}: {}", path.string(), config.error().message);
     }
     return config;
+}
+
+std::uint64_t world_id(const PlanetConfig& config) noexcept {
+    return hash_values(config.seed, std::bit_cast<std::uint64_t>(config.radius),
+                       std::bit_cast<std::uint64_t>(config.ocean_fraction));
 }
 
 } // namespace hog::planet

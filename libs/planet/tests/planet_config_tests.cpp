@@ -8,6 +8,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <string>
 
 using Catch::Matchers::ContainsSubstring;
@@ -119,4 +120,26 @@ TEST_CASE("population sizing checks its inputs", "[planet][config]") {
     using hog::testing::AssertionFailed;
     CHECK_THROWS_AS(hog::planet::radius_for_population({.population = 0.0}, 0.7), AssertionFailed);
     CHECK_THROWS_AS(hog::planet::radius_for_population({.population = 1.0}, 1.0), AssertionFailed);
+}
+
+TEST_CASE("a world's id follows what shapes its ground", "[planet][config]") {
+    const hog::planet::PlanetConfig base{.seed = 1, .ocean_fraction = 0.7, .radius = 115'000.0};
+    const std::uint64_t id = hog::planet::world_id(base);
+    // Saved worlds are keyed by this, so it must not change between builds.
+    CHECK(id == 0xB87E7E64C83CED74ULL);
+
+    auto other = base;
+    other.seed = 2;
+    CHECK(hog::planet::world_id(other) != id);
+    other = base;
+    other.radius = 115'001.0;
+    CHECK(hog::planet::world_id(other) != id);
+    other = base;
+    other.ocean_fraction = 0.6;
+    CHECK(hog::planet::world_id(other) != id);
+
+    other = base;
+    other.day_length = std::chrono::hours{24};
+    other.axial_tilt = 0.0;
+    CHECK(hog::planet::world_id(other) == id);
 }

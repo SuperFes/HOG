@@ -29,6 +29,10 @@ struct PlanetConfig {
     double axial_tilt = 23.44; // degrees
 };
 
+// Identifies a world by what shapes its ground, so state saved for one is never loaded into
+// another. Day length and tilt only move the sun, so they can change under a running world.
+[[nodiscard]] std::uint64_t world_id(const PlanetConfig& config) noexcept;
+
 // Reads a [planet] table:
 //
 //     [planet]
