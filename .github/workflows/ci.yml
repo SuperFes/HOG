@@ -22,9 +22,9 @@ jobs:
       matrix:
         include:
           - { name: Linux GCC, os: ubuntu-24.04, cc: gcc-14, cxx: g++-14, preset: ci }
-          - { name: Linux Clang, os: ubuntu-24.04, cc: clang-18, cxx: clang++-18, preset: ci }
-          - { name: Linux sanitizers, os: ubuntu-24.04, cc: clang-18, cxx: clang++-18, preset: ci-asan }
-          - { name: Linux thread sanitizer, os: ubuntu-24.04, cc: clang-18, cxx: clang++-18, preset: ci-tsan }
+          - { name: Linux Clang, os: ubuntu-24.04, cc: clang-22, cxx: clang++-22, llvm: 22, preset: ci }
+          - { name: Linux sanitizers, os: ubuntu-24.04, cc: clang-22, cxx: clang++-22, llvm: 22, preset: ci-asan }
+          - { name: Linux thread sanitizer, os: ubuntu-24.04, cc: clang-22, cxx: clang++-22, llvm: 22, preset: ci-tsan }
           - { name: Windows MSVC, os: windows-2025, cc: cl, cxx: cl, preset: ci }
           - { name: macOS AppleClang, os: macos-15, cc: clang, cxx: clang++, preset: ci }
     env:
@@ -35,6 +35,13 @@ jobs:
       - uses: lukka/get-cmake@v4.4.2
       - uses: ilammy/msvc-dev-cmd@v1.13.0
         if: runner.os == 'Windows'
+      # The runner's stock Clang 18 can't use libstdc++ 14's <expected>.
+      - name: Install LLVM ${{ matrix.llvm }}
+        if: matrix.llvm
+        run: |
+          wget -qO llvm.sh https://apt.llvm.org/llvm.sh
+          sudo bash llvm.sh ${{ matrix.llvm }}
+          sudo apt-get install -y libclang-rt-${{ matrix.llvm }}-dev
       # Older sanitizer runtimes crash under the runner kernel's high mmap randomization.
       - name: Lower mmap randomization
         if: startsWith(matrix.preset, 'ci-') && runner.os == 'Linux'
@@ -62,11 +69,16 @@ jobs:
     name: clang-tidy
     runs-on: ubuntu-24.04
     env:
-      CC: clang-18
-      CXX: clang++-18
+      CC: clang-22
+      CXX: clang++-22
     steps:
       - uses: actions/checkout@v7
       - uses: lukka/get-cmake@v4.4.2
+      - name: Install LLVM 22
+        run: |
+          wget -qO llvm.sh https://apt.llvm.org/llvm.sh
+          sudo bash llvm.sh 22
+          sudo apt-get install -y clang-tidy-22
       - uses: actions/cache@v6
         with:
           path: .cache/cpm
@@ -80,4 +92,4 @@ jobs:
       - name: Analyze
         run: |
           git ls-files '*.cpp' \
-            | xargs pipx run clang-tidy==22.1.8 -p build/debug --quiet --warnings-as-errors='*'
+            | xargs clang-tidy-22 -p build/debug --quiet --warnings-as-errors='*'

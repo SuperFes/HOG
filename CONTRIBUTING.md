@@ -2,7 +2,7 @@
 
 ## Building
 
-Needs CMake 3.28+, Ninja, and GCC 14+, Clang 18+ or MSVC 2022 17.10+. Dependencies are fetched by [CPM.cmake](https://github.com/cpm-cmake/CPM.cmake) into `.cache/cpm` on first configure.
+Needs CMake 3.28+, Ninja, and GCC 14+, Clang 19+ or MSVC 2022 17.10+. Dependencies are fetched by [CPM.cmake](https://github.com/cpm-cmake/CPM.cmake) into `.cache/cpm` on first configure.
 
 ```sh
 cmake --workflow --preset debug        # configure, build and run all tests
