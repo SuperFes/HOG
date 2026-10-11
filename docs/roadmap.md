@@ -147,7 +147,7 @@ This phase builds a server that runs the world with nobody connected: time passe
 - [x] Spike: EnTT against flecs, benchmarked with 100k entities and our access patterns; record the decision
 - [x] Spatial index keyed by cube-sphere cell
 - [x] Save and load: periodic snapshot plus the change log since then
-- [ ] Server config, structured logs, and a metrics endpoint (tick time, entity counts)
+- [x] Server config, structured logs, and metrics (tick time, entity counts); logged as JSON lines until a Prometheus endpoint
 
 **Coarse simulation**
 
