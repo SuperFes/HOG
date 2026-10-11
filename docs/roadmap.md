@@ -117,7 +117,7 @@ This phase produces a pure library that turns a seed into a planet. It has no gr
 - [x] Integer hash noise and fixed-point gradient noise
 - [x] Golden-file tests: hashes of generated tiles checked into the repo and compared in CI on every platform
 - [x] Continents and ocean basins at the target ocean fraction
-- [ ] Mountains and erosion pass (cheap approximation first)
+- [x] Mountains and erosion pass (cheap approximation first)
 - [ ] Temperature and moisture bands, then biome assignment
 - [ ] Starting archipelago: 5–8 islands of 10–60 km², placed on the real planet
 - [ ] Geology strata and finite deposits per cell (stub values are fine)
