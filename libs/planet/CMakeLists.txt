@@ -10,7 +10,8 @@ add_library(hog_planet
     src/planet_config.cpp
     src/projection.cpp
     src/tangent_frame.cpp
-    src/tile.cpp)
+    src/tile.cpp
+    src/world.cpp)
 add_library(hog::planet ALIAS hog_planet)
 
 target_include_directories(hog_planet PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -31,7 +32,8 @@ hog_add_tests(hog_planet
     tests/planet_config_tests.cpp
     tests/projection_tests.cpp
     tests/tangent_frame_tests.cpp
-    tests/tile_tests.cpp)
+    tests/tile_tests.cpp
+    tests/world_tests.cpp)
 hog_add_benchmarks(hog_planet
     bench/noise_bench.cpp)
 
