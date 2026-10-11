@@ -25,7 +25,9 @@ function(hog_target_defaults target)
             -Wall -Wextra -Wpedantic
             -Wconversion -Wsign-conversion -Wshadow -Wold-style-cast
             -Wnon-virtual-dtor -Woverloaded-virtual -Wcast-align
-            -Wnull-dereference -Wdouble-promotion -Wimplicit-fallthrough)
+            -Wnull-dereference -Wdouble-promotion -Wimplicit-fallthrough
+            # Clang fuses a*b+c into FMA by default and GCC does not; results must match exactly.
+            -ffp-contract=off)
         if(HOG_WARNINGS_AS_ERRORS)
             target_compile_options(${target} PRIVATE -Werror)
         endif()
