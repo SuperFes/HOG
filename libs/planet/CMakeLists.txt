@@ -13,6 +13,7 @@ hog_target_defaults(hog_planet)
 
 hog_add_tests(hog_planet
     tests/cell_id_tests.cpp
+    tests/golden_tests.cpp
     tests/neighbors_tests.cpp
     tests/noise_tests.cpp
     tests/planet_config_tests.cpp

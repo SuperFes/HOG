@@ -19,6 +19,8 @@ cmake --preset asan && cmake --build --preset asan && ctest --preset asan
 
 Benchmarks live in each library's `bench/` directory as Catch2 `BENCHMARK`s, built into separate `<lib>_bench` executables that ctest never runs. Run them on a release build: `cmake --build --preset release --target benchmarks`.
 
+World generation is pinned by golden hashes in `libs/planet/tests/golden/tiles.txt`, which every CI platform must reproduce. After an intended change to generated output, rewrite the file with `hog_planet_tests "[.update-golden]"` and commit it with the change.
+
 Presets use `clang++`; pick another compiler with `-DCMAKE_CXX_COMPILER=g++` (or `cl` on Windows). `-DHOG_USE_LIBCXX=ON` builds against libc++, as macOS does; CI's Linux Clang jobs use it. Libraries live in `libs/<name>/` with `include/hog/<name>/`, `src/` and `tests/`; each registers its tests with `hog_add_tests()`.
 
 ## Code rules
