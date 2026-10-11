@@ -1,6 +1,13 @@
 option(HOG_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(HOG_BUILD_TESTS "Build unit tests" ON)
 set(HOG_SANITIZE "" CACHE STRING "Semicolon-separated sanitizers, e.g. address;undefined or thread")
+option(HOG_USE_LIBCXX "Build against LLVM libc++ (what macOS ships) instead of the platform default" OFF)
+
+# Global so dependencies share the same standard library ABI.
+if(HOG_USE_LIBCXX)
+    add_compile_options(-stdlib=libc++)
+    add_link_options(-stdlib=libc++)
+endif()
 
 if(NOT CMAKE_CXX_COMPILER_LAUNCHER)
     find_program(HOG_CCACHE ccache)

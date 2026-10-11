@@ -24,15 +24,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: Linux GCC, os: ubuntu-24.04, cc: gcc-14, cxx: g++-14, preset: ci }
-          - { name: Linux Clang, os: ubuntu-24.04, cc: clang-22, cxx: clang++-22, llvm: 22, preset: ci }
-          - { name: Linux sanitizers, os: ubuntu-24.04, cc: clang-22, cxx: clang++-22, llvm: 22, preset: ci-asan }
-          - { name: Linux thread sanitizer, os: ubuntu-24.04, cc: clang-22, cxx: clang++-22, llvm: 22, preset: ci-tsan }
-          - { name: Windows MSVC, os: windows-2025, cc: cl, cxx: cl, preset: ci }
-          - { name: macOS AppleClang, os: macos-15, cc: clang, cxx: clang++, preset: ci }
-    env:
-      CC: ${{ matrix.cc }}
-      CXX: ${{ matrix.cxx }}
+          # Clang with libc++ is the primary toolchain (it matches macOS); GCC stays as a portability check.
+          - { name: Linux Clang libc++, os: ubuntu-24.04, cxx: clang++-22, llvm: 22, libcxx: 'ON', preset: ci }
+          - { name: Linux sanitizers, os: ubuntu-24.04, cxx: clang++-22, llvm: 22, libcxx: 'ON', preset: ci-asan }
+          - { name: Linux thread sanitizer, os: ubuntu-24.04, cxx: clang++-22, llvm: 22, libcxx: 'ON', preset: ci-tsan }
+          - { name: Linux GCC, os: ubuntu-24.04, cxx: g++-14, libcxx: 'OFF', preset: ci }
+          - { name: Windows MSVC, os: windows-2025, cxx: cl, libcxx: 'OFF', preset: ci }
+          - { name: macOS AppleClang, os: macos-15, cxx: clang++, libcxx: 'OFF', preset: ci }
     steps:
       - uses: actions/checkout@v7
       - uses: lukka/get-cmake@v4.4.2
@@ -44,7 +42,7 @@ jobs:
         run: |
           wget -qO llvm.sh https://apt.llvm.org/llvm.sh
           sudo bash llvm.sh ${{ matrix.llvm }}
-          sudo apt-get install -y libclang-rt-${{ matrix.llvm }}-dev
+          sudo apt-get install -y libclang-rt-${{ matrix.llvm }}-dev libc++-${{ matrix.llvm }}-dev libc++abi-${{ matrix.llvm }}-dev
       # Older sanitizer runtimes crash under the runner kernel's high mmap randomization.
       - name: Lower mmap randomization
         if: startsWith(matrix.preset, 'ci-') && runner.os == 'Linux'
@@ -55,7 +53,10 @@ jobs:
           key: cpm-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt', 'cmake/*.cmake') }}
           restore-keys: cpm-${{ runner.os }}-
       - name: Configure
-        run: cmake --preset ${{ matrix.preset }}
+        run: >-
+          cmake --preset ${{ matrix.preset }}
+          -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
+          -DHOG_USE_LIBCXX=${{ matrix.libcxx }}
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }}
       - name: Test
@@ -71,9 +72,6 @@ jobs:
   tidy:
     name: clang-tidy
     runs-on: ubuntu-24.04
-    env:
-      CC: clang-22
-      CXX: clang++-22
     steps:
       - uses: actions/checkout@v7
       - uses: lukka/get-cmake@v4.4.2
@@ -88,7 +86,7 @@ jobs:
           key: cpm-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt', 'cmake/*.cmake') }}
           restore-keys: cpm-${{ runner.os }}-
       - name: Configure
-        run: cmake --preset debug
+        run: cmake --preset debug -DCMAKE_CXX_COMPILER=clang++-22
       # Generated headers must exist before analysis.
       - name: Build
         run: cmake --build --preset debug

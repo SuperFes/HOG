@@ -2,7 +2,7 @@
 
 ## Building
 
-Needs CMake 3.28+, Ninja, and GCC 14+, Clang 19+ or MSVC 2022 17.10+. Dependencies are fetched by [CPM.cmake](https://github.com/cpm-cmake/CPM.cmake) into `.cache/cpm` on first configure.
+Needs CMake 3.28+, Ninja, and Clang 19+ (the default and primary toolchain), GCC 14+ or MSVC 2022 17.10+. Dependencies are fetched by [CPM.cmake](https://github.com/cpm-cmake/CPM.cmake) into `.cache/cpm` on first configure.
 
 ```sh
 cmake --workflow --preset debug        # configure, build and run all tests
@@ -19,7 +19,7 @@ cmake --preset asan && cmake --build --preset asan && ctest --preset asan
 
 Benchmarks live in each library's `bench/` directory as Catch2 `BENCHMARK`s, built into separate `<lib>_bench` executables that ctest never runs. Run them on a release build: `cmake --build --preset release --target benchmarks`.
 
-Pick the compiler with `CC`/`CXX` (e.g. `CC=clang CXX=clang++ cmake --preset debug`). Libraries live in `libs/<name>/` with `include/hog/<name>/`, `src/` and `tests/`; each registers its tests with `hog_add_tests()`.
+Presets use `clang++`; pick another compiler with `-DCMAKE_CXX_COMPILER=g++` (or `cl` on Windows). `-DHOG_USE_LIBCXX=ON` builds against libc++, as macOS does; CI's Linux Clang jobs use it. Libraries live in `libs/<name>/` with `include/hog/<name>/`, `src/` and `tests/`; each registers its tests with `hog_add_tests()`.
 
 ## Code rules
 
