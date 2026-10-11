@@ -3,3 +3,6 @@
 seed = 1
 ocean_fraction = 0.7
 population = 500_000
+# Locked to real time: four hours of day and night, through Earth's year and seasons.
+day_hours = 4
+axial_tilt = 23.44

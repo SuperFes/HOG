@@ -20,8 +20,11 @@ namespace {
 using namespace std::string_view_literals;
 
 constexpr std::array known_keys{
-    "seed"sv,     "ocean_fraction"sv, "population"sv, "settled_density"sv, "wilderness_factor"sv,
-    "radius_km"sv};
+    "seed"sv,      "ocean_fraction"sv, "population"sv, "settled_density"sv, "wilderness_factor"sv,
+    "radius_km"sv, "day_hours"sv,      "axial_tilt"sv};
+
+constexpr double min_day_hours = 0.01;
+constexpr double max_day_hours = 24.0 * 366.0;
 
 [[nodiscard]] std::unexpected<Error> invalid(std::string message) {
     return make_error(ErrorCode::InvalidArgument, std::move(message));
@@ -49,6 +52,34 @@ constexpr std::array known_keys{
 
 [[nodiscard]] bool valid_ocean_fraction(double value) {
     return value >= 0.0 && value < 1.0;
+}
+
+[[nodiscard]] bool in_range(double value, double low, double high) {
+    return value >= low && value <= high;
+}
+
+[[nodiscard]] Result<void> parse_calendar(const toml::table& planet, PlanetConfig& config) {
+    const auto day_hours = optional_number(planet, "day_hours");
+    if (!day_hours) {
+        return std::unexpected(day_hours.error());
+    }
+    if (day_hours->has_value()) {
+        if (!in_range(**day_hours, min_day_hours, max_day_hours)) {
+            return invalid("planet.day_hours must be between 0.01 and a year");
+        }
+        config.day_length = std::chrono::round<GameDuration>(
+            std::chrono::duration<double, std::ratio<3'600>>{**day_hours});
+    }
+
+    const auto tilt = optional_number(planet, "axial_tilt");
+    if (!tilt) {
+        return std::unexpected(tilt.error());
+    }
+    config.axial_tilt = tilt->value_or(config.axial_tilt);
+    if (!in_range(config.axial_tilt, 0.0, 90.0)) {
+        return invalid("planet.axial_tilt must be between 0 and 90 degrees");
+    }
+    return {};
 }
 
 } // namespace
@@ -97,6 +128,10 @@ Result<PlanetConfig> parse_planet_config(std::string_view text) {
     config.ocean_fraction = ocean->value_or(config.ocean_fraction);
     if (!valid_ocean_fraction(config.ocean_fraction)) {
         return invalid("planet.ocean_fraction must be at least 0 and below 1");
+    }
+
+    if (auto calendar = parse_calendar(*planet, config); !calendar) {
+        return std::unexpected(calendar.error());
     }
 
     const auto population = optional_number(*planet, "population");

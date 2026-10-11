@@ -53,6 +53,14 @@ TEST_CASE("time_at and tick_at round-trip over a long run", "[core][time]") {
     }
 }
 
+TEST_CASE("game time counts from the Unix epoch", "[core][time]") {
+    using namespace std::chrono;
+    const sys_days day = 2026y / October / 11;
+    CHECK(hog::to_game_time(hog::WallClock::time_point{day + 90min + 7us}) ==
+          hog::GameTime{(day + 90min + 7us).time_since_epoch()});
+    CHECK(hog::to_game_time(hog::WallClock::time_point{}) == hog::GameTime{});
+}
+
 TEST_CASE("schedules reject bad input", "[core][time]") {
     const hog::testing::AssertionGuard guard;
     CHECK_THROWS_AS(hog::TickSchedule(hog::GameTime{}, 0us), hog::testing::AssertionFailed);

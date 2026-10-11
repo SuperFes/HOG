@@ -11,8 +11,8 @@ inline constexpr std::uint32_t idle_rate = 20;
 inline constexpr std::uint32_t combat_rate = 30;
 inline constexpr std::uint32_t max_rate = 60;
 
-// Twenty times real time makes a game day last 72 minutes.
-inline constexpr std::int64_t default_time_scale = 20;
+// Live worlds run at real time; faster scales are for offline runs.
+inline constexpr std::int64_t default_time_scale = 1;
 
 // The current tick and the game time it starts at. Game time runs `scale` times faster than real
 // time whatever the tick rate, in integer arithmetic so a replay reaches exactly the same times.

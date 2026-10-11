@@ -12,8 +12,8 @@ namespace hog {
 using MonotonicClock = std::chrono::steady_clock;
 using WallClock = std::chrono::system_clock;
 
-// In-world time. It has no now(): game time advances only as the simulation ticks, and is a
-// distinct type so chrono rejects mixing it with real time.
+// In-world time, counted from the Unix epoch. It has no now(): game time advances only as the
+// simulation ticks, and is a distinct type so chrono rejects mixing it with real time.
 struct GameClock {
     // NOLINTBEGIN(readability-identifier-naming): names required by the chrono clock interface
     using rep = std::int64_t;
@@ -26,6 +26,11 @@ struct GameClock {
 
 using GameDuration = GameClock::duration;
 using GameTime = GameClock::time_point;
+
+// Planet time is locked to UTC, so a world started or resumed now begins here.
+[[nodiscard]] inline GameTime to_game_time(WallClock::time_point time) {
+    return GameTime{std::chrono::floor<GameDuration>(time.time_since_epoch())};
+}
 
 // A signed number of simulation steps.
 class TickDelta {

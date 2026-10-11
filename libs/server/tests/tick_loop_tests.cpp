@@ -57,8 +57,8 @@ TEST_CASE("the loop runs one tick per period", "[server][loop]") {
     for (std::uint64_t i = 0; i < ran.size(); ++i) {
         CHECK(ran[i].tick == i);
         CHECK(ran[i].real == i * 50ms);
-        CHECK(ran[i].game == GameTime{i * 1s});
-        CHECK(ran[i].step == 1s);
+        CHECK(ran[i].game == GameTime{i * 50ms});
+        CHECK(ran[i].step == 50ms);
     }
     CHECK(loop.clock().tick() == hog::Tick{10});
     CHECK(loop.stats().ticks == 10);
@@ -86,7 +86,7 @@ TEST_CASE("a slow tick is caught up in a burst and the rest dropped", "[server][
     REQUIRE(ran.size() == expected.size());
     for (std::uint64_t i = 0; i < ran.size(); ++i) {
         CHECK(ran[i].real == expected[i]);
-        CHECK(ran[i].game == GameTime{i * 1s});
+        CHECK(ran[i].game == GameTime{i * 50ms});
     }
     CHECK(loop.stats().slipped == 4);
     CHECK(loop.stats().longest_step == 300ms);
@@ -95,7 +95,7 @@ TEST_CASE("a slow tick is caught up in a burst and the rest dropped", "[server][
 
 TEST_CASE("a rate change applies from the next tick", "[server][loop]") {
     ManualTimer timer;
-    TickLoop loop{timer, LoopConfig{.time_scale = 1}};
+    TickLoop loop{timer, LoopConfig{}};
     std::vector<Ran> ran;
     loop.run([&](const TickClock& clock) {
         ran.push_back(ran_at(timer, clock));

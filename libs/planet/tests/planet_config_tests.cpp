@@ -6,6 +6,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include <chrono>
 #include <cmath>
 #include <string>
 
@@ -45,6 +46,16 @@ TEST_CASE("a radius config skips sizing and defaults the ocean", "[planet][confi
     REQUIRE(config.has_value());
     CHECK(config->radius == 6'371'000.0);
     CHECK(config->ocean_fraction == 0.7);
+    CHECK(config->day_length == std::chrono::hours{4});
+    CHECK(config->axial_tilt == 23.44);
+}
+
+TEST_CASE("a config sets the day and the tilt", "[planet][config]") {
+    const auto config =
+        parse_planet_config("[planet]\nseed = 0\nradius_km = 1\nday_hours = 6.5\naxial_tilt = 0\n");
+    REQUIRE(config.has_value());
+    CHECK(config->day_length == std::chrono::minutes{390});
+    CHECK(config->axial_tilt == 0.0);
 }
 
 TEST_CASE("the shipped development config is the 500k planet", "[planet][config]") {
@@ -79,7 +90,15 @@ TEST_CASE("bad configs are rejected with a reason", "[planet][config]") {
         Case{"[planet]\nseed = 1\nradius_km = 5\nocean_fraction = 'wet'",
              ErrorCode::InvalidArgument, "number"},
         Case{"[planet]\nseed = 1\nradius_km = 5\nradius = 5", ErrorCode::InvalidArgument,
-             "planet.radius"});
+             "planet.radius"},
+        Case{"[planet]\nseed = 1\nradius_km = 5\nday_hours = 0", ErrorCode::InvalidArgument,
+             "day_hours"},
+        Case{"[planet]\nseed = 1\nradius_km = 5\nday_hours = nan", ErrorCode::InvalidArgument,
+             "day_hours"},
+        Case{"[planet]\nseed = 1\nradius_km = 5\naxial_tilt = 91", ErrorCode::InvalidArgument,
+             "axial_tilt"},
+        Case{"[planet]\nseed = 1\nradius_km = 5\naxial_tilt = -1", ErrorCode::InvalidArgument,
+             "axial_tilt"});
 
     const auto config = parse_planet_config(bad.toml);
     INFO(bad.toml);
