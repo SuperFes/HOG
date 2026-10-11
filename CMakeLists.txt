@@ -83,6 +83,7 @@ endfunction()
 
 add_subdirectory(libs/core)
 add_subdirectory(libs/jobs)
+add_subdirectory(libs/planet)
 if(HOG_BUILD_TESTS)
     add_subdirectory(libs/testing)
 endif()
