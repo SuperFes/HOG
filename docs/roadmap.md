@@ -41,7 +41,7 @@ Five choices block Phase 0. Each one can be settled in an evening. The rest of t
 | Generator maths | Integer hashing, fixed-point, strict IEEE floats | Phase 1 | **Decided ([#7](https://github.com/SuperFes/HOG/issues/7)):** integer and fixed-point; floats only after the deterministic step |
 | Change-store backend | SQLite, custom append-only log | Phase 1 | **Decided ([#8](https://github.com/SuperFes/HOG/issues/8)):** SQLite behind an interface, swappable for production |
 | Development planet size | 500k, 2M or 10M population tier | Phase 1 | **Decided ([#9](https://github.com/SuperFes/HOG/issues/9)):** 500k (115 km radius); the radius stays a parameter |
-| Entity system | EnTT, flecs | Phase 2 | Decide with a one-week benchmark spike |
+| Entity system | EnTT, flecs | Phase 2 | **Decided ([#32](https://github.com/SuperFes/HOG/issues/32)):** flecs |
 | Minimum-spec hardware | e.g. GTX 1060, Intel Iris Xe, Apple M1 | Phase 3 | Pick one real machine one of us owns |
 | macOS Vulkan layer | KosmicKrisp, MoltenVK | Phase 3 | Support both and test against each |
 | Network library | GameNetworkingSockets, QUIC with datagrams | Phase 4 | Decide with a spike |
@@ -144,14 +144,14 @@ This phase builds a server that runs the world with nobody connected: time passe
 **Loop and entities**
 
 - [x] Fixed-tick loop (20 Hz idle, up to 30 Hz in combat areas) with a game-time scale
-- [ ] Spike: EnTT against flecs, benchmarked with 100k entities and our access patterns; record the decision
+- [x] Spike: EnTT against flecs, benchmarked with 100k entities and our access patterns; record the decision
 - [ ] Spatial index keyed by cube-sphere cell
 - [ ] Save and load: periodic snapshot plus the change log since then
 - [ ] Server config, structured logs, and a metrics endpoint (tick time, entity counts)
 
 **Coarse simulation**
 
-- [ ] Calendar: day, night, seasons, and the sun's position from planet time
+- [x] Calendar: day, night, seasons, and the sun's position from planet time
 - [ ] Weather grid: temperature, pressure, humidity, wind, cloud, precipitation
 - [ ] Weather moves with the wind, is shaped by terrain, and is checked against simple climate expectations
 - [ ] Wildlife: population per species per cell, with births, deaths, food and migration
