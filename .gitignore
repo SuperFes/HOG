@@ -8,3 +8,6 @@ CMakeUserPresets.json
 .idea/
 *.swp
 .DS_Store
+
+# hog-mapgen output
+/maps/

@@ -61,6 +61,13 @@ CPMAddPackage(
     URL_HASH SHA3_256=7b670a62fdfbd672b75fef004cb703c8a3e87d3a5cc7d675b4a08337004a2d93
     DOWNLOAD_ONLY YES)
 
+# Public domain or MIT. Only stb_image_write, for map images.
+CPMAddPackage(
+    NAME stb
+    GITHUB_REPOSITORY nothings/stb
+    GIT_TAG 2c980bb59875b0d32144a71867fbdebb2f77cd20
+    DOWNLOAD_ONLY YES)
+
 if(HOG_BUILD_TESTS)
     enable_testing()
     CPMAddPackage(
@@ -103,6 +110,7 @@ add_subdirectory(libs/core)
 add_subdirectory(libs/jobs)
 add_subdirectory(libs/planet)
 add_subdirectory(libs/store)
+add_subdirectory(tools/mapgen)
 if(HOG_BUILD_TESTS)
     add_subdirectory(libs/testing)
 endif()
