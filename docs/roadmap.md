@@ -124,10 +124,10 @@ This phase produces a pure library that turns a seed into a planet. It has no gr
 
 **Change store**
 
-- [ ] Change record: cell, timestamp, author, kind, payload
-- [ ] Apply, replay and roll back changes on top of the seed
-- [ ] Storage backend behind an interface; SQLite first
-- [ ] Tests: replaying N random changes, then rolling back the last M, equals replaying N−M
+- [x] Change record: cell, timestamp, author, kind, payload
+- [x] Apply, replay and roll back changes on top of the seed
+- [x] Storage backend behind an interface; SQLite first
+- [x] Tests: replaying N random changes, then rolling back the last M, equals replaying N−M
 
 **First tool: `hog-mapgen`**
 
