@@ -63,8 +63,8 @@ This phase builds the repo and the rules every later line of code follows. It ha
 - [x] Export the plan doc to `docs/plan.md` and this roadmap to `docs/roadmap.md`
 - [x] CONTRIBUTING.md with the code rules from the plan (no raw owning pointers, static dispatch by default, tests for everything)
 - [x] Commit style: short conventional commits; pull requests reviewed by one other person
-- [ ] Issue labels (phase, track, bug, spike, decision) and one milestone per phase
-- [ ] Turn the Phase 0 and Phase 1 lists below into issues
+- [x] Issue labels (phase, track, bug, spike, decision) and one milestone per phase
+- [x] Turn the Phase 0 and Phase 1 lists below into issues
 
 **Build**
 
