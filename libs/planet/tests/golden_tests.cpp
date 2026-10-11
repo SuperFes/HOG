@@ -26,6 +26,7 @@ using hog::planet::CellId;
 namespace {
 
 constexpr std::uint64_t seed = 1;
+const hog::planet::PlanetConfig planet{.seed = seed, .ocean_fraction = 0.7, .radius = 115'000.0};
 
 struct Layer {
     std::string_view name;
@@ -41,13 +42,17 @@ std::int64_t continents_layer(CellId cell) {
     return continents.height(cell);
 }
 
+const hog::planet::Elevation& terrain() {
+    static const hog::planet::Elevation terrain{planet};
+    return terrain;
+}
+
 std::int64_t elevation_layer(CellId cell) {
-    static const hog::planet::Elevation terrain{seed, 0.7};
-    return terrain.elevation(cell);
+    return terrain().elevation(cell);
 }
 
 const hog::planet::Climate& climate() {
-    static const hog::planet::Climate climate{seed, 0.7};
+    static const hog::planet::Climate climate{planet};
     return climate;
 }
 
@@ -75,16 +80,19 @@ struct GoldenTile {
     int depth = 0;
 };
 
-// Every face whole, then small deep tiles at a cube corner, at the north pole and mid-face.
+// Every face whole, then small deep tiles at a cube corner, at the north pole, mid-face and over
+// the starting islands.
 std::vector<GoldenTile> golden_tiles() {
     std::vector<GoldenTile> tiles;
-    tiles.reserve(hog::planet::face_count + 3);
+    tiles.reserve(hog::planet::face_count + 4);
     for (int face = 0; face < hog::planet::face_count; ++face) {
         tiles.push_back({.tile = CellId::from_face(face), .depth = 5});
     }
     tiles.push_back({.tile = CellId::from_face_ij(2, 0, 0, 12), .depth = 4});
     tiles.push_back({.tile = CellId::from_face_ij(2, 8'191, 8'191, 14), .depth = 4});
     tiles.push_back({.tile = CellId::from_face_ij(1, 123'456, 654'321, 20), .depth = 4});
+    tiles.push_back(
+        {.tile = hog::planet::cell_at(terrain().archipelago().center(), 3), .depth = 7});
     return tiles;
 }
 
