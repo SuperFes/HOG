@@ -32,16 +32,20 @@ constexpr std::int64_t open_ocean = -fixed_one / 20;
 
 constexpr std::int64_t min_peak = fixed_one / 10;
 constexpr std::int64_t max_peak = fixed_one / 5;
-// Each island keeps this many times its radius clear, for the coastline noise.
-constexpr double spread = 1.3;
 constexpr int placement_attempts = 10'000;
 
-constexpr double coast_wavelength = 3'000.0; // metres
-constexpr int coast_octaves = 3;
+constexpr double coast_wavelength = 4'000.0; // metres
+constexpr int coast_octaves = 5;
+// Fractal noise rarely strays far from zero, so it is scaled up and clipped to [-1, 1].
+constexpr double coast_gain = 2.5;
 // The coastline noise moves an island's coast by up to this fraction of its radius either way.
-constexpr double coast_wobble = 0.2;
+constexpr double coast_wobble = 0.4;
+// Each island keeps this many times its undisturbed extent clear, for the coastline noise.
+constexpr double spread = 1.0 + coast_wobble;
 // Continent height lost per metre down an island's underwater flank: about 15 degrees.
 constexpr double skirt_slope = 1e-5;
+
+using Island = Archipelago::Island;
 
 // A uniform double in [0, 1) from the hash's high bits.
 [[nodiscard]] double unit(std::uint64_t hash) {
@@ -50,6 +54,37 @@ constexpr double skirt_slope = 1e-5;
 
 [[nodiscard]] DVec3 offset(DVec3 origin, DVec3 tangent, double angle) {
     return glm::normalize(origin + (tangent * angle));
+}
+
+// A unit vector uniform in the plane, as x and y, by rejection so no trigonometry is needed.
+template <typename Draw>
+[[nodiscard]] std::optional<std::array<double, 2>> planar_direction(Draw draw) {
+    const double x = (2.0 * draw(0)) - 1.0;
+    const double y = (2.0 * draw(1)) - 1.0;
+    const double length = std::sqrt((x * x) + (y * y));
+    if (length > 1.0 || length < 0.01) {
+        return std::nullopt;
+    }
+    return std::array{x / length, y / length};
+}
+
+// The length of an offset from an island's centre, squeezed along the island's axis and stretched
+// across it so that the undisturbed coast lies at the island's radius all round.
+[[nodiscard]] double stretched(const Island& island, DVec3 offset) {
+    const double root = std::sqrt(island.elongation);
+    const double along = glm::dot(offset, island.axis) / root;
+    const double across = glm::dot(offset, glm::cross(island.center, island.axis)) * root;
+    return std::sqrt((along * along) + (across * across));
+}
+
+// Metres from an island's centre to its undisturbed coast in the direction of an offset.
+[[nodiscard]] double extent(const Island& island, DVec3 offset) {
+    return island.radius * glm::length(offset) / stretched(island, offset);
+}
+
+// A tangent at `center` pointing the way `direction` does.
+[[nodiscard]] DVec3 tangent_at(DVec3 center, DVec3 direction) {
+    return glm::normalize(direction - (center * glm::dot(direction, center)));
 }
 
 // Sixteen probes on two rings, using exact compass directions so every platform agrees.
@@ -120,51 +155,61 @@ Archipelago::Archipelago(std::uint64_t seed, double planet_radius, const Contine
     const std::size_t count =
         min_islands + (hash_values(placement, 0) % (max_islands - min_islands + 1));
     islands_.reserve(count);
+    const TangentFrame home = tangent_frame(center_);
     for (std::size_t index = 0; index < count; ++index) {
         const double area = min_target_area + ((max_target_area - min_target_area) *
                                                unit(hash_values(placement, 1, index)));
-        const Island shape{.center = center_,
-                           .radius = std::sqrt(area / std::numbers::pi),
-                           .peak = min_peak +
-                                   static_cast<std::int64_t>(hash_values(placement, 2, index) %
-                                                             (max_peak - min_peak + 1))};
+        std::optional<std::array<double, 2>> heading;
+        for (std::uint64_t attempt = 0; !heading; ++attempt) {
+            heading = planar_direction([&](std::uint64_t what) {
+                return unit(hash_values(placement, 5, index, attempt, what));
+            });
+        }
+        const DVec3 axis = (home.east * (*heading)[0]) + (home.north * (*heading)[1]);
+        const Island shape{
+            .center = center_,
+            .radius = std::sqrt(area / std::numbers::pi),
+            .axis = tangent_at(center_, axis),
+            .elongation = 1.0 + ((max_elongation - 1.0) * unit(hash_values(placement, 6, index))),
+            .peak = min_peak + static_cast<std::int64_t>(hash_values(placement, 2, index) %
+                                                         (max_peak - min_peak + 1))};
         if (islands_.empty()) {
             islands_.push_back(shape);
             continue;
         }
+        const auto metres = [&](DVec3 a, DVec3 b) { return glm::length(a - b) * planet_radius; };
+        const double longest = shape.radius * std::sqrt(shape.elongation);
         bool placed = false;
         for (std::uint64_t attempt = 0; attempt < placement_attempts && !placed; ++attempt) {
-            const auto draw = [&](std::uint64_t what) {
-                return unit(hash_values(placement, 3, index, attempt, what));
-            };
             const Island& anchor =
                 islands_[hash_values(placement, 4, index, attempt) % islands_.size()];
-            // A direction uniform in the plane, by rejection, so no trigonometry is needed.
-            const double x = (2.0 * draw(0)) - 1.0;
-            const double y = (2.0 * draw(1)) - 1.0;
-            const double length = std::sqrt((x * x) + (y * y));
-            if (length > 1.0 || length < 0.01) {
+            const auto direction = planar_direction([&](std::uint64_t what) {
+                return unit(hash_values(placement, 3, index, attempt, what));
+            });
+            if (!direction) {
                 continue;
             }
-            const double gap = min_gap + ((max_gap - min_gap) * draw(2));
-            const double distance = (spread * (anchor.radius + shape.radius)) + gap;
             const TangentFrame frame = tangent_frame(anchor.center);
-            const DVec3 center =
-                offset(anchor.center, ((frame.east * x) + (frame.north * y)) / length,
-                       distance / planet_radius);
-            const auto metres = [&](DVec3 a, DVec3 b) {
-                return glm::length(a - b) * planet_radius;
-            };
-            if (metres(center, center_) + (spread * shape.radius) > reach) {
+            const DVec3 outward = (frame.east * (*direction)[0]) + (frame.north * (*direction)[1]);
+            // Sized as if it sat on the anchor, which is close enough to choose the distance.
+            Island island = shape;
+            island.center = anchor.center;
+            island.axis = tangent_at(anchor.center, axis);
+            const double gap = min_gap + ((max_gap - min_gap) *
+                                          unit(hash_values(placement, 3, index, attempt, 2)));
+            const double distance =
+                (spread * (extent(anchor, outward) + extent(island, outward))) + gap;
+            island.center = offset(anchor.center, outward, distance / planet_radius);
+            island.axis = tangent_at(island.center, axis);
+            if (metres(island.center, center_) + (spread * longest) > reach) {
                 continue;
             }
             const bool clear = std::ranges::all_of(islands_, [&](const Island& other) {
-                return metres(center, other.center) >=
-                       (spread * (other.radius + shape.radius)) + min_gap;
+                const DVec3 between = island.center - other.center;
+                return metres(island.center, other.center) >=
+                       (spread * (extent(other, between) + extent(island, between))) + min_gap;
             });
             if (clear) {
-                Island island = shape;
-                island.center = center;
                 islands_.push_back(island);
                 placed = true;
             }
@@ -175,27 +220,37 @@ Archipelago::Archipelago(std::uint64_t seed, double planet_radius, const Contine
 
 std::int64_t Archipelago::raise(CellId cell, std::int64_t height) const {
     const DVec3 position = cell_center(cell);
-    // Distances that the noise can shrink to past the coast plus the buried flank.
-    const double horizon = skirt_reach_ / (1.0 - coast_wobble);
+    // The stretched distance is at least the true one over the root of the elongation, and the
+    // noise moves the coast out by at most the wobble, so past this every flank is buried.
+    const auto horizon = [&](double radius, double elongation) {
+        return std::sqrt(elongation) * ((radius * (1.0 + coast_wobble)) + skirt_reach_);
+    };
     const double largest = std::sqrt(max_target_area / std::numbers::pi);
-    if (glm::length(position - center_) * planet_radius_ > reach + largest + horizon) {
+    if (glm::length(position - center_) * planet_radius_ >
+        reach + horizon(largest, max_elongation)) {
         return height;
     }
     std::optional<double> wobble;
     for (const Island& island : islands_) {
-        const double distance = glm::length(position - island.center) * planet_radius_;
-        if (distance > island.radius + horizon) {
+        const DVec3 between = (position - island.center) * planet_radius_;
+        if (glm::length(between) > horizon(island.radius, island.elongation)) {
             continue;
         }
         if (!wobble) {
-            wobble =
-                1.0 - (coast_wobble *
-                       fixed_to_double(fbm(noise_seed_,
-                                           noise_point(position, planet_radius_ / coast_wavelength),
-                                           coast_octaves)));
+            wobble = coast_wobble *
+                     std::clamp(coast_gain *
+                                    fixed_to_double(fbm(
+                                        noise_seed_,
+                                        noise_point(position, planet_radius_ / coast_wavelength),
+                                        coast_octaves)),
+                                -1.0, 1.0);
         }
-        // A dome down to the coast, then a gentle flank down to the ocean floor.
-        const double from_center = distance * *wobble;
+        // The coast moves out to the radius times 1 + wobble: the dome is scaled to it, while the
+        // flank is shifted so it keeps its slope however far out it reaches.
+        const double distance = stretched(island, between);
+        const double coast = island.radius * (1.0 + *wobble);
+        const double from_center =
+            distance < coast ? distance * island.radius / coast : distance - coast + island.radius;
         std::int64_t island_height = 0;
         if (from_center < island.radius) {
             const std::int64_t ratio =

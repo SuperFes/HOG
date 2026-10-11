@@ -19,6 +19,8 @@ public:
     // Square metres of undisturbed coastline; the coastline noise moves real areas either side.
     static constexpr double min_target_area = 15e6;
     static constexpr double max_target_area = 45e6;
+    // Longest over shortest width of an undisturbed coast, which is an ellipse.
+    static constexpr double max_elongation = 2.5;
     // Metres of water between an island and its closest neighbour when placed.
     static constexpr double min_gap = 1'500.0;
     static constexpr double max_gap = 6'000.0;
@@ -29,7 +31,9 @@ public:
 
     struct Island {
         DVec3 center;      // unit direction
-        double radius;     // metres to the undisturbed coast
+        double radius;     // metres to a circular coast of the same area
+        DVec3 axis;        // unit tangent along the longest width
+        double elongation; // longest over shortest width, at least 1
         std::int64_t peak; // fixed-point continent height at the centre
     };
 

@@ -108,6 +108,31 @@ TEST_CASE("the starting islands are separate and 10 to 60 square kilometres",
     }
 }
 
+TEST_CASE("the starting islands are irregular rather than round", "[planet][archipelago]") {
+    const std::uint64_t seed = GENERATE(1U, 2U, 3U, 4U);
+    const Elevation terrain{planet(seed)};
+    std::vector<double> ratios;
+    for (const auto& island : terrain.archipelago().islands()) {
+        CHECK(island.elongation >= 1.0);
+        CHECK(island.elongation <= Archipelago::max_elongation);
+        CHECK(std::abs(glm::length(island.axis) - 1.0) < 1e-12);
+        CHECK(std::abs(glm::dot(island.axis, island.center)) < 1e-12);
+        // How much farther the farthest stretch of coast is from the centre than the nearest.
+        double nearest = 1e300;
+        double farthest = 0.0;
+        for (const CellId cell : coast(terrain, island_cells(terrain, island.center, level))) {
+            const double distance = glm::length(hog::planet::cell_center(cell) - island.center);
+            nearest = std::min(nearest, distance);
+            farthest = std::max(farthest, distance);
+        }
+        ratios.push_back(farthest / nearest);
+    }
+    std::ranges::sort(ratios);
+    INFO("least " << ratios.front() << ", median " << ratios[ratios.size() / 2]);
+    CHECK(ratios.front() > 1.2);
+    CHECK(ratios[ratios.size() / 2] > 1.5);
+}
+
 TEST_CASE("the starting islands are within sailing distance of each other",
           "[planet][archipelago]") {
     const std::uint64_t seed = GENERATE(1U, 2U, 3U, 4U);
@@ -198,25 +223,35 @@ TEST_CASE("the starting islands keep their size on an Earth-sized planet",
 }
 
 TEST_CASE("the starting islands rise smoothly from the sea floor", "[planet][archipelago]") {
-    // Cells here are about 2.7 m across; flanks of 15 degrees or so climb under 1 m per cell.
+    // Cells here are about 2.7 m across; flanks of 15 degrees or so climb under 1 m per cell,
+    // steepening off rugged coasts but never into cliffs or seams.
     constexpr int fine_level = 16;
-    const Elevation terrain{planet(3)};
-    std::int64_t largest_step = 0;
+    const std::uint64_t seed = GENERATE(1U, 2U, 3U, 4U);
+    const Elevation terrain{planet(seed)};
+    std::vector<std::int64_t> steps;
     for (const auto& island : terrain.archipelago().islands()) {
         const hog::planet::TangentFrame frame = hog::planet::tangent_frame(island.center);
-        // A line of cells from the centre out across the coast and flank.
-        const auto steps = static_cast<int>(5.0 * island.radius / 2.0);
-        for (int step = 0; step < steps; ++step) {
-            const double metres = 2.0 * step;
-            const CellId cell = hog::planet::cell_at(
-                glm::normalize(island.center + (frame.east * (metres / radius))), fine_level);
-            for (const CellId next : hog::planet::edge_neighbors(cell)) {
-                largest_step = std::max(
-                    largest_step, std::abs(terrain.elevation(cell) - terrain.elevation(next)));
+        const double diagonal = std::sqrt(0.5);
+        for (const hog::DVec3 direction : {frame.east, (frame.east + frame.north) * diagonal,
+                                           frame.north, (frame.north - frame.east) * diagonal,
+                                           -frame.east, (-frame.east - frame.north) * diagonal,
+                                           -frame.north, (frame.east - frame.north) * diagonal}) {
+            // A line of cells from the centre out across the coast and flank.
+            const double longest = island.radius * std::sqrt(island.elongation);
+            const auto count = static_cast<int>(2.5 * longest / 2.0);
+            for (int step = 0; step < count; ++step) {
+                const double metres = 2.0 * step;
+                const CellId cell = hog::planet::cell_at(
+                    glm::normalize(island.center + (direction * (metres / radius))), fine_level);
+                for (const CellId next : hog::planet::edge_neighbors(cell)) {
+                    steps.push_back(std::abs(terrain.elevation(cell) - terrain.elevation(next)));
+                }
             }
         }
     }
-    CHECK(largest_step < 2 * fixed_one);
+    std::ranges::sort(steps);
+    CHECK(steps[steps.size() * 95 / 100] < 3 * fixed_one / 2);
+    CHECK(steps.back() < 6 * fixed_one);
 }
 
 TEST_CASE("the starting islands depend on the seed", "[planet][archipelago]") {
