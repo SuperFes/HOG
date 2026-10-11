@@ -1,0 +1,17 @@
+# Development server. Paths are relative to this file.
+[server]
+world = "../var/world.db"
+planet = "planet.toml"
+tick_rate = 20
+
+[save]
+interval_minutes = 5
+keep = 3
+catch_up_ticks = 2000
+
+[log]
+level = "info"
+file = "../var/logs/server.jsonl"
+
+[metrics]
+interval_seconds = 10

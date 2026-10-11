@@ -11,3 +11,6 @@ CMakeUserPresets.json
 
 # hog-mapgen output
 /maps/
+
+# Server worlds and logs
+/var/
