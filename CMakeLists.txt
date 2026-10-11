@@ -22,6 +22,13 @@ include(HogOptions)
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 include(GetCPM)
 
+# Header-only use (XXH_INLINE_ALL); BSD-2-Clause.
+CPMAddPackage(
+    NAME xxHash
+    GITHUB_REPOSITORY Cyan4973/xxHash
+    VERSION 0.8.4
+    DOWNLOAD_ONLY YES)
+
 if(HOG_BUILD_TESTS)
     enable_testing()
     CPMAddPackage(
