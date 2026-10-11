@@ -59,38 +59,38 @@ This phase builds the repo and the rules every later line of code follows. It ha
 
 **Repo and process**
 
-- [ ] Create the repo with a README, LICENSE, .gitignore and .editorconfig
+- [x] Create the repo with a README, LICENSE, .gitignore and .editorconfig
 - [x] Export the plan doc to `docs/plan.md` and this roadmap to `docs/roadmap.md`
-- [ ] CONTRIBUTING.md with the code rules from the plan (no raw owning pointers, static dispatch by default, tests for everything)
-- [ ] Commit style: short conventional commits; pull requests reviewed by one other person
+- [x] CONTRIBUTING.md with the code rules from the plan (no raw owning pointers, static dispatch by default, tests for everything)
+- [x] Commit style: short conventional commits; pull requests reviewed by one other person
 - [ ] Issue labels (phase, track, bug, spike, decision) and one milestone per phase
 - [ ] Turn the Phase 0 and Phase 1 lists below into issues
 
 **Build**
 
-- [ ] CMake 3.28+ with presets: debug, release, asan+ubsan, tsan
-- [ ] Ninja generator everywhere; ccache or sccache
-- [ ] C++23, warnings as errors in CI, `-Wall -Wextra -Wpedantic` and the `/W4` equivalent
-- [ ] Hardened standard library on: `_GLIBCXX_ASSERTIONS` and `_LIBCPP_HARDENING_MODE`, plus the MSVC checked-iterator equivalent
-- [ ] Dependency manager set up with pinned versions
-- [ ] .clang-format and .clang-tidy committed; format check in CI
+- [x] CMake 3.28+ with presets: debug, release, asan+ubsan, tsan
+- [x] Ninja generator everywhere; ccache or sccache
+- [x] C++23, warnings as errors in CI, `-Wall -Wextra -Wpedantic` and the `/W4` equivalent
+- [x] Hardened standard library on: `_GLIBCXX_ASSERTIONS` and `_LIBCPP_HARDENING_MODE`, plus the MSVC checked-iterator equivalent
+- [x] Dependency manager set up with pinned versions
+- [x] .clang-format and .clang-tidy committed; format check in CI
 
 **Continuous integration**
 
-- [ ] Linux: GCC and Clang
-- [ ] Windows: MSVC
-- [ ] macOS: AppleClang on Apple Silicon
-- [ ] Sanitizer job (address, undefined) on Linux
-- [ ] Thread-sanitizer job (nightly is fine)
-- [ ] clang-tidy job on changed files
+- [x] Linux: GCC and Clang
+- [x] Windows: MSVC
+- [x] macOS: AppleClang on Apple Silicon
+- [x] Sanitizer job (address, undefined) on Linux
+- [x] Thread-sanitizer job (nightly is fine)
+- [x] clang-tidy job on changed files
 - [ ] Test results and timings shown in the pull request
 
 **Core library (`hog_core`)**
 
-- [ ] Generational handle and slot map: the replacement for pointers between objects
-- [ ] Error type built on `std::expected`; no exceptions across module boundaries
-- [ ] Assertions that stay on in release builds for invariants
-- [ ] Logging with categories and levels
+- [x] Generational handle and slot map: the replacement for pointers between objects
+- [x] Error type built on `std::expected`; no exceptions across module boundaries
+- [x] Assertions that stay on in release builds for invariants
+- [x] Logging with categories and levels
 - [ ] Fixed-size math types: vectors, quaternions, double-precision world positions
 - [ ] Stable hashing (same output on every platform and compiler)
 - [ ] Clock and tick types that cannot be mixed up with each other
