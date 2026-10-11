@@ -114,7 +114,7 @@ This phase produces a pure library that turns a seed into a planet. It has no gr
 
 **Deterministic generator**
 
-- [ ] Integer hash noise and fixed-point gradient noise
+- [x] Integer hash noise and fixed-point gradient noise
 - [ ] Golden-file tests: hashes of generated tiles checked into the repo and compared in CI on every platform
 - [ ] Continents and ocean basins at the target ocean fraction
 - [ ] Mountains and erosion pass (cheap approximation first)
