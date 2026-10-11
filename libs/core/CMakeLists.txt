@@ -1,6 +1,7 @@
 configure_file(version.hpp.in "${CMAKE_CURRENT_BINARY_DIR}/include/hog/core/version.hpp" @ONLY)
 
 add_library(hog_core
+    src/assert.cpp
     src/build_info.cpp)
 add_library(hog::core ALIAS hog_core)
 
@@ -11,4 +12,5 @@ target_compile_definitions(hog_core PRIVATE HOG_BUILD_CONFIG="$<IF:$<CONFIG:>,un
 hog_target_defaults(hog_core)
 
 hog_add_tests(hog_core
+    tests/assert_tests.cpp
     tests/build_info_tests.cpp)
