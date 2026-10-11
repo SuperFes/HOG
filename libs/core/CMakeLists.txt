@@ -7,7 +7,8 @@ add_library(hog_core
     src/hash.cpp
     src/line_sink.cpp
     src/log.cpp
-    src/metrics.cpp)
+    src/metrics.cpp
+    src/text_file.cpp)
 add_library(hog::core ALIAS hog_core)
 
 target_include_directories(hog_core PUBLIC
@@ -33,6 +34,7 @@ hog_add_tests(hog_core
     tests/metrics_tests.cpp
     tests/result_tests.cpp
     tests/slot_map_tests.cpp
+    tests/text_file_tests.cpp
     tests/time_tests.cpp)
 
 hog_add_benchmarks(hog_core

@@ -1,5 +1,6 @@
 #include <hog/core/assert.hpp>
 #include <hog/core/hash.hpp>
+#include <hog/core/text_file.hpp>
 #include <hog/planet/planet_config.hpp>
 
 #include <toml++/toml.hpp>
@@ -9,10 +10,8 @@
 #include <bit>
 #include <cmath>
 #include <format>
-#include <fstream>
 #include <numbers>
 #include <optional>
-#include <sstream>
 #include <string>
 
 namespace hog::planet {
@@ -172,20 +171,11 @@ Result<PlanetConfig> parse_planet_config(std::string_view text) {
 }
 
 Result<PlanetConfig> load_planet_config(const std::filesystem::path& path) {
-    const std::ifstream file{path, std::ios::binary};
-    if (!file) {
-        std::error_code error;
-        const bool exists = std::filesystem::exists(path, error);
-        return make_error(exists ? ErrorCode::Io : ErrorCode::NotFound,
-                          std::format("cannot open {}", path.string()));
+    const auto text = read_text_file(path);
+    if (!text) {
+        return std::unexpected(text.error());
     }
-    std::ostringstream text;
-    text << file.rdbuf();
-    if (file.bad()) {
-        return make_error(ErrorCode::Io, std::format("cannot read {}", path.string()));
-    }
-
-    auto config = parse_planet_config(text.str());
+    auto config = parse_planet_config(*text);
     if (!config) {
         config.error().message = std::format("{}: {}", path.string(), config.error().message);
     }
