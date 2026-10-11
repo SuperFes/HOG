@@ -1,3 +1,4 @@
+#include <hog/planet/climate.hpp>
 #include <hog/planet/continents.hpp>
 #include <hog/planet/elevation.hpp>
 #include <hog/planet/noise.hpp>
@@ -45,9 +46,29 @@ std::int64_t elevation_layer(CellId cell) {
     return terrain.elevation(cell);
 }
 
+const hog::planet::Climate& climate() {
+    static const hog::planet::Climate climate{seed, 0.7};
+    return climate;
+}
+
+std::int64_t temperature_layer(CellId cell) {
+    return climate().temperature(cell);
+}
+
+std::int64_t moisture_layer(CellId cell) {
+    return climate().moisture(cell);
+}
+
+std::int64_t biome_layer(CellId cell) {
+    return static_cast<std::int64_t>(climate().biome(cell));
+}
+
 constexpr std::array layers{Layer{.name = "noise", .sample = noise_layer},
                             Layer{.name = "continents", .sample = continents_layer},
-                            Layer{.name = "elevation", .sample = elevation_layer}};
+                            Layer{.name = "elevation", .sample = elevation_layer},
+                            Layer{.name = "temperature", .sample = temperature_layer},
+                            Layer{.name = "moisture", .sample = moisture_layer},
+                            Layer{.name = "biome", .sample = biome_layer}};
 
 struct GoldenTile {
     CellId tile;
