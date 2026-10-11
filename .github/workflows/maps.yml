@@ -1,0 +1,94 @@
+name: Maps
+
+# Renders the planet for pull requests that change generation and shows the maps in a comment, so
+# reviewers see what changed. The images live on a branch per pull request, deleted on close.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    paths: ['libs/planet/**', 'tools/mapgen/**', 'config/**']
+
+concurrency:
+  group: maps-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/.cache/cpm
+  GH_TOKEN: ${{ github.token }}
+  IMAGES: maps/pr-${{ github.event.pull_request.number }}
+  PR: ${{ github.event.pull_request.number }}
+
+jobs:
+  render:
+    name: Render maps
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: lukka/get-cmake@v4.4.2
+      - uses: actions/cache@v6
+        with:
+          path: .cache/cpm
+          key: cpm-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt', 'cmake/*.cmake') }}
+          restore-keys: cpm-${{ runner.os }}-
+      # GCC ships with the runner, which saves installing LLVM for a single tool.
+      - name: Build hog-mapgen
+        run: |
+          cmake --preset release -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14 -DHOG_BUILD_TESTS=OFF
+          cmake --build --preset release --target hog_mapgen_cli
+      - name: Render
+        run: |
+          build/release/tools/mapgen/hog-mapgen --size 1024 --out maps
+          build/release/tools/mapgen/hog-mapgen --islands 60 --size 768 --out maps
+      - uses: actions/upload-artifact@v7
+        with:
+          name: maps
+          path: maps/*.png
+      - name: Publish the images
+        working-directory: maps
+        run: |
+          git init -q
+          git checkout -q -b "$IMAGES"
+          git add ./*.png
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -q -m "Maps for #$PR at ${{ github.event.pull_request.head.sha }}"
+          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+              "HEAD:refs/heads/$IMAGES"
+          echo "IMAGES_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - name: Comment
+        run: |
+          marker='<!-- hog-mapgen -->'
+          image() {
+            echo "<img src=\"https://github.com/${GITHUB_REPOSITORY}/blob/${IMAGES_SHA}/$1?raw=true\" width=\"$2\" alt=\"$1\">"
+          }
+          {
+            echo "$marker"
+            echo "### Maps at ${{ github.event.pull_request.head.sha }}"
+            echo
+            for layer in height biome temperature moisture deposits; do
+              echo "**${layer}**"
+              echo
+              image "planet-${layer}.png" 800
+              image "islands-${layer}.png" 400
+              echo
+            done
+            echo "Full size: the [maps artifact](${{ github.server_url }}/${GITHUB_REPOSITORY}/actions/runs/${{ github.run_id }})."
+          } > comment.md
+          existing=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" --paginate \
+            --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -n 1)
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${existing}" -F body=@comment.md > /dev/null
+          else
+            gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file comment.md
+          fi
+
+  clean:
+    name: Delete the maps
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-24.04
+    steps:
+      - run: gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${IMAGES}" || true
