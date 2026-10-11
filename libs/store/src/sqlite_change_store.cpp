@@ -1,6 +1,6 @@
-#include <hog/store/sqlite_change_store.hpp>
+#include "sqlite.hpp"
 
-#include <sqlite3.h>
+#include <hog/store/sqlite_change_store.hpp>
 
 #include <bit>
 #include <cstdint>
@@ -14,99 +14,11 @@ namespace hog::store {
 
 namespace {
 
-constexpr int schema_version = 1;
-
-constexpr std::string_view schema = R"sql(
-CREATE TABLE changes (
-    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-    cell INTEGER NOT NULL,
-    time INTEGER NOT NULL,
-    author INTEGER NOT NULL,
-    layer INTEGER NOT NULL,
-    kind INTEGER NOT NULL,
-    payload BLOB NOT NULL
-);
-CREATE INDEX changes_by_cell ON changes (cell);
-CREATE INDEX changes_by_time ON changes (time);
-CREATE INDEX changes_by_author ON changes (author, time);
-PRAGMA user_version = 1;
-)sql";
-
-[[nodiscard]] std::unexpected<Error> failure(sqlite3* database, std::string_view doing) {
-    return make_error(ErrorCode::Io, std::format("{}: {}", doing, sqlite3_errmsg(database)));
-}
-
-// SQLite integers are signed; ids and authors keep all 64 bits.
-[[nodiscard]] std::int64_t to_signed(std::uint64_t value) noexcept {
-    return std::bit_cast<std::int64_t>(value);
-}
-
-[[nodiscard]] std::uint64_t to_unsigned(std::int64_t value) noexcept {
-    return std::bit_cast<std::uint64_t>(value);
-}
-
-class Statement {
-public:
-    Statement(sqlite3* database, std::string_view sql) {
-        // On failure the statement stays null, which `ok` reports.
-        sqlite3_prepare_v2(database, sql.data(), static_cast<int>(sql.size()), &statement_,
-                           nullptr);
-    }
-    Statement(const Statement&) = delete;
-    Statement(Statement&&) = delete;
-    Statement& operator=(const Statement&) = delete;
-    Statement& operator=(Statement&&) = delete;
-    ~Statement() { sqlite3_finalize(statement_); }
-
-    [[nodiscard]] bool ok() const noexcept { return statement_ != nullptr; }
-    [[nodiscard]] sqlite3_stmt* get() const noexcept { return statement_; }
-
-    // SQLITE_ROW, SQLITE_DONE or an error code.
-    int step() noexcept { return sqlite3_step(statement_); }
-
-    void reset() noexcept {
-        sqlite3_reset(statement_);
-        sqlite3_clear_bindings(statement_);
-    }
-
-private:
-    sqlite3_stmt* statement_ = nullptr;
-};
-
-[[nodiscard]] Result<void> execute(sqlite3* database, const char* sql, std::string_view doing) {
-    if (sqlite3_exec(database, sql, nullptr, nullptr, nullptr) != SQLITE_OK) {
-        return failure(database, doing);
-    }
-    return {};
-}
-
-[[nodiscard]] Result<int> user_version(sqlite3* database) {
-    Statement statement{database, "PRAGMA user_version"};
-    if (!statement.ok() || statement.step() != SQLITE_ROW) {
-        return failure(database, "reading the schema version");
-    }
-    return sqlite3_column_int(statement.get(), 0);
-}
-
-[[nodiscard]] Result<void> prepare_schema(sqlite3* database) {
-    const auto version = user_version(database);
-    if (!version) {
-        return std::unexpected(version.error());
-    }
-    if (*version == schema_version) {
-        return {};
-    }
-    if (*version != 0) {
-        return make_error(ErrorCode::Unsupported, std::format("change store schema {} is not {}",
-                                                              *version, schema_version));
-    }
-    const std::string script = std::format("BEGIN;{}COMMIT;", schema);
-    if (auto created = execute(database, script.c_str(), "creating the change store"); !created) {
-        sqlite3_exec(database, "ROLLBACK", nullptr, nullptr, nullptr);
-        return created;
-    }
-    return {};
-}
+using sqlite::execute;
+using sqlite::failure;
+using sqlite::Statement;
+using sqlite::to_signed;
+using sqlite::to_unsigned;
 
 [[nodiscard]] Result<planet::Change> read_change(sqlite3_stmt* row) {
     const auto layer = sqlite3_column_int64(row, 3);
@@ -133,34 +45,14 @@ private:
 
 } // namespace
 
-void SqliteChangeStore::Close::operator()(sqlite3* database) const noexcept {
-    sqlite3_close_v2(database);
-}
-
-SqliteChangeStore::SqliteChangeStore(std::unique_ptr<sqlite3, Close> database)
-    : database_{std::move(database)} {}
+SqliteChangeStore::SqliteChangeStore(Database database) : database_{std::move(database)} {}
 
 Result<SqliteChangeStore> SqliteChangeStore::open(const std::filesystem::path& path) {
-    sqlite3* raw = nullptr;
-    const std::u8string name = path.u8string();
-    const int opened = sqlite3_open_v2(
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): SQLite takes UTF-8 as char.
-        reinterpret_cast<const char*>(name.c_str()), &raw,
-        SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_EXRESCODE, nullptr);
-    // SQLite allocates a handle even when opening fails, to carry the message.
-    std::unique_ptr<sqlite3, Close> database{raw};
-    if (opened != SQLITE_OK) {
-        return failure(database.get(), std::format("opening {}", path.string()));
+    auto database = open_database(path);
+    if (!database) {
+        return std::unexpected(std::move(database.error()));
     }
-    // Write-ahead logging keeps readers going during writes; in memory it is ignored.
-    if (auto journal = execute(database.get(), "PRAGMA journal_mode = WAL", "enabling the WAL");
-        !journal) {
-        return std::unexpected(std::move(journal.error()));
-    }
-    if (auto prepared = prepare_schema(database.get()); !prepared) {
-        return std::unexpected(std::move(prepared.error()));
-    }
-    return SqliteChangeStore{std::move(database)};
+    return SqliteChangeStore{*std::move(database)};
 }
 
 Result<void> SqliteChangeStore::append(std::span<const planet::Change> changes) {

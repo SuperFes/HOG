@@ -2,14 +2,12 @@
 
 #include <hog/core/result.hpp>
 #include <hog/planet/change_store.hpp>
+#include <hog/store/database.hpp>
 
 #include <cstddef>
 #include <filesystem>
-#include <memory>
 #include <span>
 #include <vector>
-
-struct sqlite3;
 
 namespace hog::store {
 
@@ -25,13 +23,9 @@ public:
     Result<std::size_t> erase(const planet::ChangeFilter& filter) override;
 
 private:
-    struct Close {
-        void operator()(sqlite3* database) const noexcept;
-    };
+    explicit SqliteChangeStore(Database database);
 
-    explicit SqliteChangeStore(std::unique_ptr<sqlite3, Close> database);
-
-    std::unique_ptr<sqlite3, Close> database_;
+    Database database_;
 };
 
 } // namespace hog::store

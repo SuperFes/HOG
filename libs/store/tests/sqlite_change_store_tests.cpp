@@ -1,3 +1,5 @@
+#include "temporary_database.hpp"
+
 #include <hog/core/hash.hpp>
 #include <hog/planet/world.hpp>
 #include <hog/store/sqlite_change_store.hpp>
@@ -26,6 +28,8 @@ using hog::planet::Layer;
 using hog::planet::SetBiome;
 using hog::planet::SetElevation;
 using hog::store::SqliteChangeStore;
+using hog::store::testing::tamper;
+using hog::store::testing::TemporaryFile;
 
 namespace {
 
@@ -33,44 +37,10 @@ GameTime at(std::int64_t seconds) {
     return GameTime{std::chrono::seconds{seconds}};
 }
 
-// A database file removed again when the test ends.
-class TemporaryFile {
-public:
-    TemporaryFile()
-        : path_{std::filesystem::temp_directory_path() /
-                std::format("hog-store-{:016x}.db",
-                            hog::hash_values(static_cast<std::uint64_t>(
-                                std::chrono::steady_clock::now().time_since_epoch().count())))} {}
-    TemporaryFile(const TemporaryFile&) = delete;
-    TemporaryFile(TemporaryFile&&) = delete;
-    TemporaryFile& operator=(const TemporaryFile&) = delete;
-    TemporaryFile& operator=(TemporaryFile&&) = delete;
-    ~TemporaryFile() {
-        std::error_code ignored;
-        for (const char* suffix : {"", "-wal", "-shm"}) {
-            std::filesystem::remove(path_.string() + suffix, ignored);
-        }
-    }
-
-    [[nodiscard]] const std::filesystem::path& path() const noexcept { return path_; }
-
-private:
-    std::filesystem::path path_;
-};
-
 SqliteChangeStore memory_store() {
     auto store = SqliteChangeStore::open(":memory:");
     REQUIRE(store);
     return *std::move(store);
-}
-
-// Runs SQL straight against the database file, behind the store's back.
-void tamper(const std::filesystem::path& path, const char* sql) {
-    sqlite3* database = nullptr;
-    REQUIRE(sqlite3_open(path.string().c_str(), &database) == SQLITE_OK);
-    const int result = sqlite3_exec(database, sql, nullptr, nullptr, nullptr);
-    sqlite3_close(database);
-    REQUIRE(result == SQLITE_OK);
 }
 
 // Changes that reach the edges of every field.
