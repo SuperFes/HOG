@@ -24,4 +24,22 @@ TEST_CASE("noise throughput", "[benchmark]") {
         }
         return sum;
     };
+
+    BENCHMARK("perlin gradient, 10k samples") {
+        std::int64_t sum = 0;
+        for (std::int64_t i = 0; i < samples; ++i) {
+            sum +=
+                hog::planet::perlin_gradient(seed, {.x = i * 4'099, .y = i * 977, .z = -i * 1'531})
+                    .dx;
+        }
+        return sum;
+    };
+
+    BENCHMARK("ridges 8 octaves, 10k samples") {
+        std::int64_t sum = 0;
+        for (std::int64_t i = 0; i < samples; ++i) {
+            sum += hog::planet::ridges(seed, {.x = i * 4'099, .y = i * 977, .z = -i * 1'531}, 8);
+        }
+        return sum;
+    };
 }

@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdint>
 #include <random>
+#include <vector>
 
 using hog::planet::fixed_one;
 using hog::planet::NoisePoint;
@@ -66,6 +67,8 @@ double reference_perlin(std::uint64_t noise_seed, NoisePoint point) {
 // Evaluable at compile time, which also proves it's free of undefined behaviour there.
 static_assert(hog::planet::perlin(seed, {.x = 3 * fixed_one, .y = -7 * fixed_one, .z = 0}) == 0);
 static_assert(hog::planet::fbm(seed, {.x = 12'345, .y = -678, .z = 9}, 8) != 0);
+static_assert(hog::planet::perlin_gradient(seed, {.x = 12'345, .y = -678, .z = 9}).dx != 0);
+static_assert(hog::planet::ridges(seed, {.x = 12'345, .y = -678, .z = 9}, 8) != 0);
 
 TEST_CASE("fixed-point Perlin stays within two steps of the exact value", "[planet][noise]") {
     std::mt19937_64 rng{4};
@@ -173,9 +176,111 @@ TEST_CASE("noise output is bit-identical on every platform", "[planet][noise]") 
     CHECK(hash == 0x56A1'9C08'0A36'E71F);
 }
 
+TEST_CASE("the gradient's value is plain Perlin", "[planet][noise]") {
+    std::mt19937_64 rng{5};
+    for (int sample = 0; sample < 100'000; ++sample) {
+        const NoisePoint point = random_point(rng, 1'000 * fixed_one);
+        REQUIRE(hog::planet::perlin_gradient(seed, point).value ==
+                hog::planet::perlin(seed, point));
+    }
+}
+
+TEST_CASE("the gradient matches finite differences", "[planet][noise]") {
+    // A sixty-fourth of a lattice cell: small enough for the curvature, large enough that
+    // the value's rounding stays below the tolerance.
+    constexpr std::int64_t step = fixed_one / 64;
+    constexpr std::int64_t tolerance = fixed_one / 100;
+    const auto difference = [](NoisePoint low, NoisePoint high) {
+        return ((hog::planet::perlin(seed, high) - hog::planet::perlin(seed, low)) * fixed_one) /
+               (2 * step);
+    };
+    std::mt19937_64 rng{6};
+    for (int sample = 0; sample < 20'000; ++sample) {
+        const NoisePoint p = random_point(rng, 1'000 * fixed_one);
+        const auto gradient = hog::planet::perlin_gradient(seed, p);
+        if (std::abs(gradient.value) > fixed_one * 9 / 10) {
+            continue; // near the clamp
+        }
+        REQUIRE(std::abs(difference({p.x - step, p.y, p.z}, {p.x + step, p.y, p.z}) - gradient.dx) <
+                tolerance);
+        REQUIRE(std::abs(difference({p.x, p.y - step, p.z}, {p.x, p.y + step, p.z}) - gradient.dy) <
+                tolerance);
+        REQUIRE(std::abs(difference({p.x, p.y, p.z - step}, {p.x, p.y, p.z + step}) - gradient.dz) <
+                tolerance);
+    }
+}
+
+TEST_CASE("ridges stay within 0 and 1, and erosion only lowers them", "[planet][noise]") {
+    std::mt19937_64 rng{7};
+    std::int64_t lowest = fixed_one;
+    std::int64_t highest = 0;
+    for (int sample = 0; sample < 20'000; ++sample) {
+        const NoisePoint point = random_point(rng, 1'000 * fixed_one);
+        const std::int64_t eroded = hog::planet::ridges(seed, point, 8);
+        const std::int64_t plain = hog::planet::ridges(seed, point, 8, 0);
+        REQUIRE(eroded >= 0);
+        REQUIRE(plain <= fixed_one);
+        REQUIRE(eroded <= plain);
+        lowest = std::min(lowest, eroded);
+        highest = std::max(highest, plain);
+    }
+    CHECK(lowest < fixed_one / 4);
+    CHECK(highest > fixed_one * 3 / 4);
+    // One octave is undamped: there is no slope before it.
+    const NoisePoint point{.x = 77'777, .y = 123'456, .z = -98'765};
+    CHECK(hog::planet::ridges(seed, point, 1) == hog::planet::ridges(seed, point, 1, 0));
+}
+
+TEST_CASE("erosion smooths steep ground more than flat ground", "[planet][noise]") {
+    // Fine detail as the second difference over a short step; steepness from the plain ridges
+    // over a long one.
+    constexpr std::int64_t fine = fixed_one / 256;
+    constexpr std::int64_t coarse = fixed_one / 16;
+    const auto detail = [](NoisePoint p, std::int64_t erosion) {
+        const auto at = [&](std::int64_t dx) {
+            return hog::planet::ridges(seed, {.x = p.x + dx, .y = p.y, .z = p.z}, 8, erosion);
+        };
+        return std::abs(at(fine) + at(-fine) - (2 * at(0)));
+    };
+    struct Sample {
+        std::int64_t steepness;
+        std::int64_t plain;
+        std::int64_t eroded;
+    };
+    std::vector<Sample> samples;
+    std::mt19937_64 rng{8};
+    for (int sample = 0; sample < 4'000; ++sample) {
+        const NoisePoint p = random_point(rng, 1'000 * fixed_one);
+        const auto plain_at = [&](std::int64_t dx) {
+            return hog::planet::ridges(seed, {.x = p.x + dx, .y = p.y, .z = p.z}, 8, 0);
+        };
+        samples.push_back({.steepness = std::abs(plain_at(coarse) - plain_at(-coarse)),
+                           .plain = detail(p, 0),
+                           .eroded = detail(p, fixed_one)});
+    }
+    std::ranges::sort(samples, {}, &Sample::steepness);
+    const auto mean_detail = [&](std::size_t begin, std::size_t end, auto member) {
+        double sum = 0.0;
+        for (std::size_t i = begin; i < end; ++i) {
+            sum += static_cast<double>(samples[i].*member);
+        }
+        return sum / static_cast<double>(end - begin);
+    };
+    const std::size_t quarter = samples.size() / 4;
+    const double plain_ratio =
+        mean_detail(samples.size() - quarter, samples.size(), &Sample::plain) /
+        mean_detail(0, quarter, &Sample::plain);
+    const double eroded_ratio =
+        mean_detail(samples.size() - quarter, samples.size(), &Sample::eroded) /
+        mean_detail(0, quarter, &Sample::eroded);
+    CHECK(eroded_ratio < plain_ratio * 0.8);
+}
+
 TEST_CASE("fractal noise checks the octave count", "[planet][noise]") {
     const hog::testing::AssertionGuard guard;
     CHECK_THROWS_AS(hog::planet::fbm(seed, {}, 0), hog::testing::AssertionFailed);
     CHECK_THROWS_AS(hog::planet::fbm(seed, {}, hog::planet::max_octaves + 1),
                     hog::testing::AssertionFailed);
+    CHECK_THROWS_AS(hog::planet::ridges(seed, {}, 0), hog::testing::AssertionFailed);
+    CHECK_THROWS_AS(hog::planet::ridges(seed, {}, 4, -1), hog::testing::AssertionFailed);
 }
