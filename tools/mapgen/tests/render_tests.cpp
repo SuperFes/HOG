@@ -11,6 +11,7 @@
 #include <fstream>
 #include <iterator>
 #include <numbers>
+#include <set>
 #include <vector>
 
 using hog::mapgen::FaceView;
@@ -106,6 +107,70 @@ TEST_CASE("height colours run from deep blue to snow", "[mapgen]") {
     CHECK(lowland[1] > lowland[0]);
     CHECK(lowland[1] > lowland[2]);
     CHECK(colour(9'000.0) == hog::mapgen::Rgb{245, 245, 245});
+}
+
+TEST_CASE("every biome has its own colour", "[mapgen]") {
+    std::set<hog::mapgen::Rgb> colours;
+    for (int biome = 0; biome < hog::planet::biome_count; ++biome) {
+        colours.insert(hog::mapgen::biome_colour(static_cast<hog::planet::Biome>(biome)));
+    }
+    CHECK(colours.size() == hog::planet::biome_count);
+}
+
+TEST_CASE("temperature colours run from blue through white to red", "[mapgen]") {
+    const auto colour = [](std::int64_t celsius) {
+        return hog::mapgen::temperature_colour(celsius * fixed_one);
+    };
+    CHECK(colour(-20)[2] > colour(-20)[0]);
+    CHECK(colour(0) == hog::mapgen::Rgb{245, 245, 245});
+    CHECK(colour(30)[0] > colour(30)[2]);
+    CHECK(colour(-60) == colour(-30));
+}
+
+TEST_CASE("moisture colours run from brown to blue", "[mapgen]") {
+    const auto dry = hog::mapgen::moisture_colour(0);
+    const auto wet = hog::mapgen::moisture_colour(fixed_one);
+    CHECK(dry[0] > dry[2]);
+    CHECK(wet[2] > wet[0]);
+    const auto middling = hog::mapgen::moisture_colour(fixed_one * 6 / 10);
+    CHECK(middling[1] > middling[0]);
+    CHECK(middling[1] > middling[2]);
+}
+
+TEST_CASE("deposit maps show the rarest deposit over grey land", "[mapgen]") {
+    using hog::planet::Resource;
+    std::array<hog::planet::Deposit, hog::planet::resource_count> deposits{};
+    const auto grey = hog::mapgen::deposit_colour(deposits, 100 * fixed_one);
+    CHECK(grey[0] == grey[1]);
+    CHECK(grey[1] == grey[2]);
+    CHECK(hog::mapgen::deposit_colour(deposits, 3'000 * fixed_one)[0] > grey[0]);
+    CHECK(hog::mapgen::deposit_colour(deposits, -fixed_one) != grey);
+
+    const auto with = [&](Resource resource) -> hog::planet::Deposit& {
+        return deposits.at(static_cast<std::size_t>(resource));
+    };
+    with(Resource::Iron) = {.top = 0, .thickness = fixed_one};
+    const auto iron = hog::mapgen::deposit_colour(deposits, 100 * fixed_one);
+    CHECK(iron != grey);
+    with(Resource::Gold) = {.top = 0, .thickness = fixed_one};
+    const auto gold = hog::mapgen::deposit_colour(deposits, 100 * fixed_one);
+    CHECK(gold != iron);
+    with(Resource::Iron) = {};
+    CHECK(hog::mapgen::deposit_colour(deposits, 100 * fixed_one) == gold);
+}
+
+TEST_CASE("every layer renders", "[mapgen]") {
+    const hog::planet::PlanetConfig planet{.seed = 1, .ocean_fraction = 0.7, .radius = radius};
+    const hog::planet::Geology geology{planet};
+    hog::jobs::JobSystem jobs{2};
+    std::set<std::vector<std::uint8_t>> images;
+    for (int layer = 0; layer < hog::mapgen::layer_count; ++layer) {
+        const auto image = hog::mapgen::render(geology, radius, View{PlanetView{}},
+                                               static_cast<Layer>(layer), 32, jobs);
+        CHECK(image.pixels.size() == std::size_t{32} * 16 * 3);
+        images.insert(image.pixels);
+    }
+    CHECK(images.size() == hog::mapgen::layer_count);
 }
 
 TEST_CASE("rendering doesn't depend on the thread count", "[mapgen]") {

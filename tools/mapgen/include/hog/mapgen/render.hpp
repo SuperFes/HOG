@@ -42,6 +42,19 @@ struct ImageSize {
 // fixed-point metres.
 [[nodiscard]] Rgb height_colour(std::int64_t elevation) noexcept;
 
+[[nodiscard]] Rgb biome_colour(planet::Biome biome) noexcept;
+
+// Blue below freezing, white at 0 °C, red when hot; temperature is fixed-point °C.
+[[nodiscard]] Rgb temperature_colour(std::int64_t temperature) noexcept;
+
+// Brown when arid through green to blue when saturated; moisture is fixed point from 0 to 1.
+[[nodiscard]] Rgb moisture_colour(std::int64_t moisture) noexcept;
+
+// The rarest deposit under a cell, over grey land shaded by height and dark ocean.
+[[nodiscard]] Rgb
+deposit_colour(const std::array<planet::Deposit, planet::resource_count>& deposits,
+               std::int64_t elevation) noexcept;
+
 [[nodiscard]] Image render(const planet::Geology& geology, double planet_radius, const View& view,
                            Layer layer, int width, jobs::JobSystem& jobs);
 

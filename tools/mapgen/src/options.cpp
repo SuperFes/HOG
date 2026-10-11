@@ -149,8 +149,17 @@ constexpr std::array flags{
 } // namespace
 
 std::string_view to_string(Layer layer) noexcept {
-    if (layer == Layer::Height) {
+    switch (layer) {
+    case Layer::Height:
         return "height";
+    case Layer::Biome:
+        return "biome";
+    case Layer::Temperature:
+        return "temperature";
+    case Layer::Moisture:
+        return "moisture";
+    case Layer::Deposits:
+        return "deposits";
     }
     return "unknown";
 }
@@ -165,7 +174,8 @@ Writes PNG maps of a generated planet, one per layer, named <view>-<layer>.png.
   --planet             the whole planet, longitude across and latitude down (default)
   --face F             one cube face, 0 to 5
   --region LAT,LON,KM  a square KM across, centred on LAT,LON in degrees
-  --layer NAME         height; repeat for several (default: all)
+  --layer NAME         height, biome, temperature, moisture or deposits; repeat for
+                       several (default: all)
   --size PIXELS        image width (default 1024); the planet view is half as tall
   --out DIR            output directory (default maps)
   --help               shows this
