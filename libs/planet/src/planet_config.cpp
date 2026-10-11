@@ -1,0 +1,158 @@
+#include <hog/core/assert.hpp>
+#include <hog/planet/planet_config.hpp>
+
+#include <toml++/toml.hpp>
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <format>
+#include <fstream>
+#include <numbers>
+#include <optional>
+#include <sstream>
+#include <string>
+
+namespace hog::planet {
+
+namespace {
+
+using namespace std::string_view_literals;
+
+constexpr std::array known_keys{
+    "seed"sv,     "ocean_fraction"sv, "population"sv, "settled_density"sv, "wilderness_factor"sv,
+    "radius_km"sv};
+
+[[nodiscard]] std::unexpected<Error> invalid(std::string message) {
+    return make_error(ErrorCode::InvalidArgument, std::move(message));
+}
+
+[[nodiscard]] Result<std::optional<double>> optional_number(const toml::table& table,
+                                                            std::string_view key) {
+    const auto node = table[key];
+    if (!node) {
+        return std::optional<double>{};
+    }
+    if (const auto* integer = node.as_integer()) {
+        return std::optional<double>{static_cast<double>(integer->get())};
+    }
+    if (const auto* floating = node.as_floating_point()) {
+        return std::optional<double>{floating->get()};
+    }
+    return invalid(std::format("planet.{} must be a number", key));
+}
+
+// NaN fails every comparison, so these reject it along with out-of-range values.
+[[nodiscard]] bool positive(double value) {
+    return value > 0.0 && std::isfinite(value);
+}
+
+[[nodiscard]] bool valid_ocean_fraction(double value) {
+    return value >= 0.0 && value < 1.0;
+}
+
+} // namespace
+
+double radius_for_population(const PopulationSizing& sizing, double ocean_fraction) {
+    HOG_ASSERT(positive(sizing.population), "population must be positive");
+    HOG_ASSERT(positive(sizing.settled_density), "settled density must be positive");
+    HOG_ASSERT(positive(sizing.wilderness_factor), "wilderness factor must be positive");
+    HOG_ASSERT(valid_ocean_fraction(ocean_fraction), "ocean fraction must be in [0, 1)");
+
+    const double land_km2 = sizing.population / sizing.settled_density * sizing.wilderness_factor;
+    const double surface_km2 = land_km2 / (1.0 - ocean_fraction);
+    return std::sqrt(surface_km2 / (4.0 * std::numbers::pi)) * 1'000.0;
+}
+
+Result<PlanetConfig> parse_planet_config(std::string_view text) {
+    const toml::parse_result parsed = toml::parse(text);
+    if (!parsed) {
+        const toml::parse_error& error = parsed.error();
+        return make_error(ErrorCode::Parse, std::format("line {}: {}", error.source().begin.line,
+                                                        error.description()));
+    }
+
+    const toml::table* planet = parsed.table()["planet"].as_table();
+    if (planet == nullptr) {
+        return invalid("missing [planet] table");
+    }
+    for (const auto& [key, value] : *planet) {
+        if (std::ranges::find(known_keys, key.str()) == known_keys.end()) {
+            return invalid(std::format("unknown key planet.{}", key.str()));
+        }
+    }
+
+    PlanetConfig config;
+
+    const auto* seed = (*planet)["seed"].as_integer();
+    if (seed == nullptr || seed->get() < 0) {
+        return invalid("planet.seed must be a non-negative integer");
+    }
+    config.seed = static_cast<std::uint64_t>(seed->get());
+
+    const auto ocean = optional_number(*planet, "ocean_fraction");
+    if (!ocean) {
+        return std::unexpected(ocean.error());
+    }
+    config.ocean_fraction = ocean->value_or(config.ocean_fraction);
+    if (!valid_ocean_fraction(config.ocean_fraction)) {
+        return invalid("planet.ocean_fraction must be at least 0 and below 1");
+    }
+
+    const auto population = optional_number(*planet, "population");
+    const auto density = optional_number(*planet, "settled_density");
+    const auto wilderness = optional_number(*planet, "wilderness_factor");
+    const auto radius_km = optional_number(*planet, "radius_km");
+    for (const auto* field : {&population, &density, &wilderness, &radius_km}) {
+        if (!*field) {
+            return std::unexpected(field->error());
+        }
+    }
+
+    if (population->has_value() == radius_km->has_value()) {
+        return invalid("planet needs exactly one of population or radius_km");
+    }
+    if (radius_km->has_value()) {
+        if (density->has_value() || wilderness->has_value()) {
+            return invalid("settled_density and wilderness_factor only apply with population");
+        }
+        if (!positive(**radius_km)) {
+            return invalid("planet.radius_km must be positive");
+        }
+        config.radius = **radius_km * 1'000.0;
+        return config;
+    }
+
+    PopulationSizing sizing{.population = **population};
+    sizing.settled_density = density->value_or(sizing.settled_density);
+    sizing.wilderness_factor = wilderness->value_or(sizing.wilderness_factor);
+    if (!positive(sizing.population) || !positive(sizing.settled_density) ||
+        !positive(sizing.wilderness_factor)) {
+        return invalid("population, settled_density and wilderness_factor must be positive");
+    }
+    config.radius = radius_for_population(sizing, config.ocean_fraction);
+    return config;
+}
+
+Result<PlanetConfig> load_planet_config(const std::filesystem::path& path) {
+    const std::ifstream file{path, std::ios::binary};
+    if (!file) {
+        std::error_code error;
+        const bool exists = std::filesystem::exists(path, error);
+        return make_error(exists ? ErrorCode::Io : ErrorCode::NotFound,
+                          std::format("cannot open {}", path.string()));
+    }
+    std::ostringstream text;
+    text << file.rdbuf();
+    if (file.bad()) {
+        return make_error(ErrorCode::Io, std::format("cannot read {}", path.string()));
+    }
+
+    auto config = parse_planet_config(text.str());
+    if (!config) {
+        config.error().message = std::format("{}: {}", path.string(), config.error().message);
+    }
+    return config;
+}
+
+} // namespace hog::planet
