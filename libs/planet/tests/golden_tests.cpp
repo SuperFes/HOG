@@ -1,4 +1,5 @@
 #include <hog/planet/continents.hpp>
+#include <hog/planet/elevation.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tile.hpp>
@@ -39,8 +40,14 @@ std::int64_t continents_layer(CellId cell) {
     return continents.height(cell);
 }
 
+std::int64_t elevation_layer(CellId cell) {
+    static const hog::planet::Elevation terrain{seed, 0.7};
+    return terrain.elevation(cell);
+}
+
 constexpr std::array layers{Layer{.name = "noise", .sample = noise_layer},
-                            Layer{.name = "continents", .sample = continents_layer}};
+                            Layer{.name = "continents", .sample = continents_layer},
+                            Layer{.name = "elevation", .sample = elevation_layer}};
 
 struct GoldenTile {
     CellId tile;
