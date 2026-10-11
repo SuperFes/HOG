@@ -29,7 +29,8 @@ Checks: >
   -readability-magic-numbers,
   -readability-identifier-length,
   -readability-uppercase-literal-suffix,
-  -readability-use-concise-preprocessor-directives
+  -readability-use-concise-preprocessor-directives,
+  -readability-trailing-comma
 WarningsAsErrors: ''
 HeaderFilterRegex: '.*/libs/[^/]+/(include|src|tests)/.*'
 ExcludeHeaderFilterRegex: '.*/\.cache/.*'
