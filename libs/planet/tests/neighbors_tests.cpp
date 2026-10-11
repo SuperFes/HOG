@@ -87,7 +87,9 @@ TEST_CASE("vertex neighbours are symmetric, and seven at cube corners", "[planet
                 REQUIRE(neighbors.size() == 4);
             } else {
                 REQUIRE((neighbors.size() == 8 || neighbors.size() == 7));
-                seven += neighbors.size() == 7 ? 1 : 0;
+                if (neighbors.size() == 7) {
+                    ++seven;
+                }
             }
         }
         // Eight cube corners, three faces each.

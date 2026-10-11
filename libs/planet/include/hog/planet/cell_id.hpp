@@ -127,7 +127,7 @@ private:
 
     constexpr explicit CellId(std::uint64_t raw) noexcept : raw_(raw) {}
 
-    [[nodiscard]] constexpr std::uint64_t lowest_bit() const noexcept { return raw_ & -raw_; }
+    [[nodiscard]] constexpr std::uint64_t lowest_bit() const noexcept { return raw_ & (~raw_ + 1); }
 
     // Position bits sit directly below the face, followed by the marker bit.
     [[nodiscard]] static constexpr int position_shift(int level) noexcept {
