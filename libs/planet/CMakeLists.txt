@@ -13,9 +13,13 @@ hog_target_defaults(hog_planet)
 hog_add_tests(hog_planet
     tests/cell_id_tests.cpp
     tests/neighbors_tests.cpp
+    tests/noise_tests.cpp
     tests/planet_config_tests.cpp
     tests/projection_tests.cpp
     tests/tangent_frame_tests.cpp)
+hog_add_benchmarks(hog_planet
+    bench/noise_bench.cpp)
+
 if(TARGET hog_planet_tests)
     target_compile_definitions(hog_planet_tests PRIVATE HOG_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 endif()
