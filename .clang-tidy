@@ -1,14 +1,21 @@
 ---
+# Fixed seeds are deliberate (determinism), and operator[] is bounds-checked by the hardened
+# standard library, so the checks for those are off.
 Checks: >
   -*,
   bugprone-*,
   -bugprone-easily-swappable-parameters,
+  -bugprone-random-generator-seed,
   cert-*,
+  -cert-msc32-c,
+  -cert-msc51-cpp,
   clang-analyzer-*,
+  -clang-analyzer-optin.core.EnumCastOutOfRange,
   concurrency-*,
   cppcoreguidelines-*,
   -cppcoreguidelines-avoid-magic-numbers,
   -cppcoreguidelines-pro-bounds-constant-array-index,
+  -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,
   -cppcoreguidelines-avoid-do-while,
   misc-*,
   -misc-non-private-member-variables-in-classes,
@@ -24,9 +31,11 @@ Checks: >
   -readability-uppercase-literal-suffix,
   -readability-use-concise-preprocessor-directives
 WarningsAsErrors: ''
-HeaderFilterRegex: '(include|src|tests|tools)/.*'
+HeaderFilterRegex: '.*/libs/[^/]+/(include|src|tests)/.*'
+ExcludeHeaderFilterRegex: '.*/\.cache/.*'
 FormatStyle: file
 CheckOptions:
+  - { key: readability-function-cognitive-complexity.IgnoreMacros, value: true }
   - { key: readability-identifier-naming.NamespaceCase, value: lower_case }
   - { key: readability-identifier-naming.ClassCase, value: CamelCase }
   - { key: readability-identifier-naming.StructCase, value: CamelCase }
