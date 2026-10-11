@@ -61,6 +61,14 @@ CPMAddPackage(
     URL_HASH SHA3_256=7b670a62fdfbd672b75fef004cb703c8a3e87d3a5cc7d675b4a08337004a2d93
     DOWNLOAD_ONLY YES)
 
+# Entity system; MIT. Static, from its own CMake so Windows gets its socket libraries.
+CPMAddPackage(
+    NAME flecs
+    GITHUB_REPOSITORY SanderMertens/flecs
+    VERSION 4.1.6
+    SYSTEM YES
+    OPTIONS "FLECS_SHARED OFF" "FLECS_STATIC ON" "FLECS_TESTS OFF")
+
 # Public domain or MIT. Only stb_image_write, for map images.
 CPMAddPackage(
     NAME stb
