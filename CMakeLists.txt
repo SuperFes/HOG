@@ -43,6 +43,17 @@ CPMAddPackage(
     GIT_TAG v1.12
     DOWNLOAD_ONLY YES)
 
+# Header-only; MIT. Config files are TOML.
+CPMAddPackage(
+    NAME tomlplusplus
+    GITHUB_REPOSITORY marzer/tomlplusplus
+    VERSION 3.4.0
+    DOWNLOAD_ONLY YES)
+add_library(tomlplusplus INTERFACE)
+target_include_directories(tomlplusplus SYSTEM INTERFACE "${tomlplusplus_SOURCE_DIR}/include")
+# Parse errors come back as values, matching hog::Result.
+target_compile_definitions(tomlplusplus INTERFACE TOML_EXCEPTIONS=0)
+
 if(HOG_BUILD_TESTS)
     enable_testing()
     CPMAddPackage(
