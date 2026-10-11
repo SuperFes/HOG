@@ -131,8 +131,8 @@ This phase produces a pure library that turns a seed into a planet. It has no gr
 
 **First tool: `hog-mapgen`**
 
-- [ ] Command-line tool that exports PNGs for the whole planet, any face, or one region
-- [ ] Layers: height, biome, temperature, moisture, deposits
+- [x] Command-line tool that exports PNGs for the whole planet, any face, or one region
+- [x] Layers: height, biome, temperature, moisture, deposits
 - [ ] Run it in CI and attach the images to pull requests that change the generator
 
 ## Phase 2 — Headless server
