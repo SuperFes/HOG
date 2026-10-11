@@ -1,6 +1,6 @@
 ---
 # Fixed seeds are deliberate (determinism), and operator[] is bounds-checked by the hardened
-# standard library, so the checks for those are off.
+# standard library, so the checks for those are off. GLM vectors are unions by design.
 Checks: >
   -*,
   bugprone-*,
@@ -17,6 +17,7 @@ Checks: >
   -cppcoreguidelines-pro-bounds-constant-array-index,
   -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,
   -cppcoreguidelines-avoid-do-while,
+  -cppcoreguidelines-pro-type-union-access,
   misc-*,
   -misc-non-private-member-variables-in-classes,
   -misc-include-cleaner,

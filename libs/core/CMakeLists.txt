@@ -12,6 +12,11 @@ target_include_directories(hog_core PUBLIC
     "${CMAKE_CURRENT_BINARY_DIR}/include")
 target_compile_definitions(hog_core PRIVATE HOG_BUILD_CONFIG="$<IF:$<CONFIG:>,unspecified,$<CONFIG>>")
 target_include_directories(hog_core SYSTEM PRIVATE "${xxHash_SOURCE_DIR}")
+target_include_directories(hog_core SYSTEM PUBLIC "${glm_SOURCE_DIR}")
+target_compile_definitions(hog_core PUBLIC
+    GLM_FORCE_DEPTH_ZERO_TO_ONE
+    GLM_FORCE_EXPLICIT_CTOR
+    GLM_FORCE_SIZE_T_LENGTH)
 hog_target_defaults(hog_core)
 
 hog_add_tests(hog_core
@@ -19,6 +24,7 @@ hog_add_tests(hog_core
     tests/build_info_tests.cpp
     tests/hash_tests.cpp
     tests/log_tests.cpp
+    tests/math_tests.cpp
     tests/result_tests.cpp
     tests/slot_map_tests.cpp
     tests/time_tests.cpp)

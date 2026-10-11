@@ -29,6 +29,13 @@ CPMAddPackage(
     VERSION 0.8.4
     DOWNLOAD_ONLY YES)
 
+# Header-only; MIT. Configured through hog_core's compile definitions.
+CPMAddPackage(
+    NAME glm
+    GITHUB_REPOSITORY g-truc/glm
+    GIT_TAG 1.0.3
+    DOWNLOAD_ONLY YES)
+
 if(HOG_BUILD_TESTS)
     enable_testing()
     CPMAddPackage(
