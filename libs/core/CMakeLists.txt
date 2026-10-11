@@ -3,6 +3,7 @@ configure_file(version.hpp.in "${CMAKE_CURRENT_BINARY_DIR}/include/hog/core/vers
 add_library(hog_core
     src/assert.cpp
     src/build_info.cpp
+    src/bytes.cpp
     src/hash.cpp
     src/log.cpp)
 add_library(hog::core ALIAS hog_core)
@@ -22,6 +23,7 @@ hog_target_defaults(hog_core)
 hog_add_tests(hog_core
     tests/assert_tests.cpp
     tests/build_info_tests.cpp
+    tests/bytes_tests.cpp
     tests/hash_tests.cpp
     tests/log_tests.cpp
     tests/math_tests.cpp
