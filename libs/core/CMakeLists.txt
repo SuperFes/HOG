@@ -20,4 +20,5 @@ hog_add_tests(hog_core
     tests/hash_tests.cpp
     tests/log_tests.cpp
     tests/result_tests.cpp
-    tests/slot_map_tests.cpp)
+    tests/slot_map_tests.cpp
+    tests/time_tests.cpp)
