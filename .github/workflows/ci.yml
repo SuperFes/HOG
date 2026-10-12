@@ -1,8 +1,10 @@
 name: CI
 
-# Run by hand (gh workflow run ci.yml) while the repo is private: Actions minutes are limited and
-# every change passes the same builds, tests, tidy and format locally first.
+# Runs on release tags (v*) and by hand (gh workflow run ci.yml), not every push: each change passes
+# the same builds, tests, tidy and format locally first, and these platforms are checked per release.
 on:
+  push:
+    tags: ['v*']
   workflow_dispatch:
 
 concurrency:
