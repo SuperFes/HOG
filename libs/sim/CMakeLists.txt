@@ -2,6 +2,7 @@ add_library(hog_sim
     src/calendar.cpp
     src/cell_grid.cpp
     src/ecology.cpp
+    src/forest.cpp
     src/vegetation.cpp
     src/weather.cpp
     src/weather_heat.cpp
@@ -28,6 +29,7 @@ hog_add_tests(hog_sim
     tests/cell_grid_tests.cpp
     tests/ecology_tests.cpp
     tests/food_chain_tests.cpp
+    tests/forest_tests.cpp
     tests/vegetation_tests.cpp
     tests/weather_tests.cpp
     tests/wildlife_tests.cpp)
