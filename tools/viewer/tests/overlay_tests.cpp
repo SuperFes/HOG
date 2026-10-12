@@ -186,3 +186,32 @@ TEST_CASE("colour ramps run as described", "[viewer][overlay]") {
     CHECK(viewer::fire_colour(Rgb{0, 0, 0}, 0.0) == Rgb{0, 0, 0});
     CHECK(viewer::fire_colour(Rgb{0, 0, 0}, 1.0) == Rgb{255, 80, 10});
 }
+
+TEST_CASE("a legend gives the range of what an overlay shows", "[viewer][overlay]") {
+    Planet planet = land();
+    planet.set("weather/temperature", 10.0F);
+    planet.values("weather/temperature")[2] = -5.0F;
+    planet.values("weather/temperature")[4] = 25.0F;
+    const probe::Welcome welcome{
+        .version = probe::protocol_version,
+        .world_id = 1,
+        .level = level,
+        .planet_radius = 1.0,
+        .layers = {probe::LayerInfo{.name = "weather/temperature", .unit = "°C"}}};
+    const Frame frame{welcome, probe::Layers{.time = {}, .layers = planet.layers},
+                      planet.grid.size()};
+    const auto legend = viewer::legend_for(Overlay::Air, frame, "");
+    REQUIRE(legend);
+    const viewer::Legend air = legend.value_or(viewer::Legend{});
+    CHECK(air.layer == "weather/temperature");
+    CHECK(air.unit == "°C");
+    CHECK(air.low == -5.0);
+    CHECK(air.high == 25.0);
+
+    CHECK_FALSE(viewer::legend_for(Overlay::Biome, frame, ""));
+    CHECK_FALSE(viewer::legend_for(Overlay::Pressure, frame, ""));
+    const auto terrain = viewer::legend_for(Overlay::Terrain, frame, "");
+    REQUIRE(terrain);
+    CHECK(terrain.value_or(viewer::Legend{.layer = "", .unit = "?", .low = 0.0, .high = 0.0})
+              .unit.empty());
+}

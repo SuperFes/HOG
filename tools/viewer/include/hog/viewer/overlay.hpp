@@ -8,6 +8,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -36,6 +37,18 @@ inline constexpr std::array overlays{
 
 // The layers an overlay draws, so a tool fetches only those. `species` names the wildlife shown.
 [[nodiscard]] std::vector<std::string> layers_for(Overlay overlay, std::string_view species);
+
+// The range of the layer an overlay mostly shows, as of a frame.
+struct Legend {
+    std::string layer;
+    std::string unit;
+    double low = 0.0;
+    double high = 0.0;
+};
+
+// None for overlays of categories, such as biomes, or when the layer is missing.
+[[nodiscard]] std::optional<Legend> legend_for(Overlay overlay, const Frame& frame,
+                                               std::string_view species);
 
 // What the map shows where its layers are missing.
 inline constexpr mapgen::Rgb missing_colour{90, 90, 90};

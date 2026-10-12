@@ -275,6 +275,50 @@ std::vector<std::string> layers_for(Overlay overlay, std::string_view species) {
     return layers;
 }
 
+std::optional<Legend> legend_for(Overlay overlay, const Frame& frame, std::string_view species) {
+    std::string layer;
+    switch (overlay) {
+    case Overlay::Terrain:
+        layer = "planet/elevation";
+        break;
+    case Overlay::Biome:
+        return std::nullopt;
+    case Overlay::Temperature:
+    case Overlay::Air:
+        layer = "weather/temperature";
+        break;
+    case Overlay::Sky:
+        layer = "weather/rain";
+        break;
+    case Overlay::Pressure:
+        layer = "weather/pressure";
+        break;
+    case Overlay::Dryness:
+        layer = "forest/dryness";
+        break;
+    case Overlay::Plants:
+        layer = "forest/biomass";
+        break;
+    case Overlay::Fire:
+        layer = "forest/fire";
+        break;
+    case Overlay::Wildlife:
+        layer = "wildlife/" + std::string{species};
+        break;
+    }
+    const std::span<const float> values = frame.layer(layer);
+    if (values.empty()) {
+        return std::nullopt;
+    }
+    const auto [low, high] = std::ranges::minmax(values);
+    const auto& offered = frame.welcome().layers;
+    const auto info = std::ranges::find(offered, layer, &probe::LayerInfo::name);
+    return Legend{.layer = layer,
+                  .unit = info != offered.end() ? info->unit : std::string{},
+                  .low = static_cast<double>(low),
+                  .high = static_cast<double>(high)};
+}
+
 Rgb pressure_colour(double pressure) noexcept {
     return mapgen::ramp(pressure_stops, pressure);
 }
