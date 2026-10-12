@@ -11,9 +11,15 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <vector>
+
+namespace hog {
+class ByteWriter;
+}
 
 namespace hog::jobs {
 class JobSystem;
@@ -25,7 +31,8 @@ class Weather;
 
 namespace detail {
 struct LifeContext;
-}
+class Reader;
+} // namespace detail
 
 struct WildlifeConfig {
     int level = 5;
@@ -40,6 +47,11 @@ struct WildlifeConfig {
     double scent_fade = 0.85;
     // Species empty out of and come back to regions the size of grid cells at this level.
     int region_level = 2;
+    // Kills are remembered against their hunters, fading by half every `kill_half_life` years.
+    // Events name up to `named` hunters, each with at least `named_share` of the kills remembered.
+    double kill_half_life = 2.0;
+    std::size_t named = 3;
+    double named_share = 0.1;
     Ecology ecology{};
 };
 
@@ -87,6 +99,40 @@ struct Presence {
     friend bool operator==(const Presence&, const Presence&) = default;
 };
 
+// Whoever kills animals: a player, an NPC, or anything else gameplay tells apart.
+using Hunter = std::uint64_t;
+
+struct Contributor {
+    Hunter hunter = 0;
+    double kills = 0.0; // as remembered, faded with time
+
+    friend bool operator==(const Contributor&, const Contributor&) = default;
+};
+
+// What happened to a species in a region, or everywhere, measured against its long-run baseline.
+struct EcologyEvent {
+    enum class Kind : std::uint8_t {
+        Collapse,        // fell far below its baseline
+        Overpopulation,  // rose far above it
+        LocalExtinction, // none left in a region that held a fair number
+        Return,          // back where it had died out, or anywhere after extinction
+        Extinction,      // none left anywhere
+    };
+    static constexpr std::uint32_t everywhere = std::numeric_limits<std::uint32_t>::max();
+
+    Kind kind = Kind::Collapse;
+    std::uint32_t species = 0;
+    std::uint32_t region = everywhere;
+    GameTime at;
+    double count = 0.0; // animals there now
+    double baseline = 0.0;
+    std::vector<Contributor> hunters; // most kills first
+
+    friend bool operator==(const EcologyEvent&, const EcologyEvent&) = default;
+};
+
+[[nodiscard]] std::string_view to_string(EcologyEvent::Kind kind) noexcept;
+
 // Populations of each species per cell, stepped together: plants grow, animals eat, are born and
 // die, and wander or head for better ground. Long cycles come from predators and prey chasing
 // each other and from good and bad years of weather, plus any a species is authored with.
@@ -94,6 +140,8 @@ struct Presence {
 // founding group once a while has passed and no rival has taken its place. Once a species is gone
 // from everywhere it's extinct: it waits to be reintroduced, or as its ecology says, a few relicts
 // turn up or a successor takes its place.
+// Each species keeps a slow baseline of its numbers per region, and what strays far from it, or
+// dies out or comes back, is reported as an event naming the hunters with the most kills there.
 class Wildlife {
 public:
     // Starts at the ecology's densities with forage grown in, as of the last step at or before
@@ -111,6 +159,15 @@ public:
     [[nodiscard]] const Presence& presence(std::uint32_t species) const {
         return presence_[species];
     }
+    // The species' long-run number of animals in the region.
+    [[nodiscard]] double baseline(std::uint32_t species, std::uint32_t region) const {
+        return watched_[species].regions[region].baseline;
+    }
+    // The kills remembered against each hunter of the species in the region, in no order.
+    [[nodiscard]] std::span<const Contributor> kills(std::uint32_t species,
+                                                     std::uint32_t region) const {
+        return watched_[species].kills[region];
+    }
     // When the last step was taken, and when the next is due.
     [[nodiscard]] GameTime time() const noexcept { return time_; }
     [[nodiscard]] GameTime next_step() const noexcept { return time_ + config_.step; }
@@ -127,18 +184,45 @@ public:
     // Puts animals back, as when they're folded back into the population or reintroduced; a
     // species brought back from extinction is alive again from the next step.
     void add(std::uint32_t species, std::uint32_t cell, float count);
+    // Takes animals as `take` does, remembering them against the hunter; returns how many died.
+    float kill(std::uint32_t species, std::uint32_t cell, float count, Hunter hunter);
+    // Events since the last call, in the order they happened. They aren't saved.
+    [[nodiscard]] std::vector<EcologyEvent> drain_events();
 
     // Versioned bytes for a snapshot section.
     [[nodiscard]] std::vector<std::byte> save() const;
     // Replaces the state with saved bytes, or fails and changes nothing: with Unsupported for a
     // newer version, and InvalidArgument for wildlife saved at another grid level. Species are
-    // matched by name; one the save lacks keeps its state. Presence missing from an older save is
-    // taken from the populations, as of the save.
+    // matched by name; one the save lacks keeps its state. Presence and baselines missing from an
+    // older save are taken from the populations, as of the save, and no kills are remembered.
     [[nodiscard]] Result<void> load(std::uint16_t version, std::span<const std::byte> bytes);
 
-    static constexpr std::uint16_t save_version = 2;
+    static constexpr std::uint16_t save_version = 3;
 
 private:
+    // A species' baseline in a region, and what has last been reported of it there.
+    struct Watch {
+        enum class State : std::uint8_t { Usual, Collapsed, Overrun, Gone };
+        double baseline = 0.0;
+        State state = State::Usual;
+
+        friend bool operator==(const Watch&, const Watch&) = default;
+    };
+    // Whether a species has lived at all, lives, or has died out everywhere, as last reported.
+    enum class Standing : std::uint8_t { Absent, Alive, Extinct };
+    [[nodiscard]] static Standing standing(const Presence& presence);
+    // A species' baselines and the kills remembered, per region. Strays from the baseline go
+    // unreported until it has had a while to settle after `since`.
+    struct Watched {
+        GameTime since;
+        std::vector<Watch> regions;
+        std::vector<std::vector<Contributor>> kills;
+    };
+    void write_watch(ByteWriter& out, std::uint32_t species) const;
+    // Whether what was read can be used: watching saved over another number of regions is read
+    // past.
+    [[nodiscard]] bool read_watch(detail::Reader& in, Watched& watched) const;
+
     void step(GameTime at, const Conditions& conditions, jobs::JobSystem& jobs);
     // Animals wander, and head for better ground they can sense.
     void move(const detail::LifeContext& context, std::uint32_t species, jobs::JobSystem& jobs);
@@ -154,6 +238,14 @@ private:
     void found(const detail::LifeContext& context, std::uint32_t species,
                std::vector<std::vector<double>>& held, GameTime at);
     void outlive(const detail::LifeContext& context, std::uint32_t species, GameTime at);
+    // Reports what strayed from its baseline, then moves the baselines on and fades the kills.
+    void report(GameTime at);
+    void watch(std::uint32_t species, std::uint32_t region, double held, GameTime at);
+    [[nodiscard]] Watched watching(std::span<const double> held, GameTime since) const;
+    void announce(EcologyEvent::Kind kind, std::uint32_t species, std::uint32_t region, GameTime at,
+                  double count, double baseline);
+    // The hunters to name, of those remembered.
+    [[nodiscard]] std::vector<Contributor> named(std::vector<Contributor> kills) const;
     // Whether founders could live in the region: no rival with its main food is settled there.
     [[nodiscard]] bool open_niche(std::uint32_t species, std::uint32_t region,
                                   const std::vector<std::vector<double>>& held) const;
@@ -179,6 +271,9 @@ private:
     std::vector<std::vector<bool>> livable_;
     WildlifeFields fields_;
     std::vector<Presence> presence_;
+    std::vector<Watched> watched_;
+    std::vector<Standing> standing_;
+    std::vector<EcologyEvent> events_;
     GameTime time_;
     // Scratch for moving.
     std::vector<float> appeal_;

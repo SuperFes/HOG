@@ -70,7 +70,61 @@ std::optional<Presence> read_presence(Reader& in, std::uint32_t regions) {
     return presence;
 }
 
+void write_double(ByteWriter& out, double value) {
+    out.write(std::bit_cast<std::uint64_t>(value));
+}
+
 } // namespace
+
+void Wildlife::write_watch(ByteWriter& out, std::uint32_t species) const {
+    const Watched& watched = watched_[species];
+    write_time(out, watched.since);
+    out.write(region_count_);
+    for (std::uint32_t region = 0; region < region_count_; ++region) {
+        const Watch& watch = watched.regions[region];
+        write_double(out, watch.baseline);
+        out.write(static_cast<std::uint8_t>(watch.state));
+        const std::vector<Contributor>& kills = watched.kills[region];
+        out.write(static_cast<std::uint32_t>(kills.size()));
+        for (const Contributor& one : kills) {
+            out.write(one.hunter);
+            write_double(out, one.kills);
+        }
+    }
+}
+
+bool Wildlife::read_watch(detail::Reader& in, Watched& watched) const {
+    watched.since = read_time(in).value_or(time_);
+    const auto count = in.integer<std::uint32_t>();
+    constexpr std::size_t least_per_region = sizeof(double) + 1 + sizeof(std::uint32_t);
+    if (count > in.remaining() / least_per_region) {
+        in.fail(Error{.code = ErrorCode::Parse,
+                      .message = "wildlife lists more regions than it holds"});
+        return false;
+    }
+    for (std::uint32_t region = 0; region < count && in.ok(); ++region) {
+        Watch& watch = watched.regions.emplace_back();
+        watch.baseline = in.twice();
+        const auto state = in.integer<std::uint8_t>();
+        if (state > static_cast<std::uint8_t>(Watch::State::Gone)) {
+            in.fail(Error{.code = ErrorCode::Parse, .message = "wildlife holds an unknown state"});
+            return false;
+        }
+        watch.state = static_cast<Watch::State>(state);
+        const auto hunters = in.integer<std::uint32_t>();
+        if (hunters > in.remaining() / (2 * sizeof(std::uint64_t))) {
+            in.fail(Error{.code = ErrorCode::Parse,
+                          .message = "wildlife lists more hunters than it holds"});
+            return false;
+        }
+        std::vector<Contributor>& kills = watched.kills.emplace_back();
+        for (std::uint32_t one = 0; one < hunters; ++one) {
+            const auto hunter = in.integer<std::uint64_t>();
+            kills.push_back(Contributor{.hunter = hunter, .kills = in.twice()});
+        }
+    }
+    return count == region_count_;
+}
 
 std::vector<std::byte> Wildlife::save() const {
     ByteWriter out;
@@ -87,6 +141,7 @@ std::vector<std::byte> Wildlife::save() const {
         write_floats(out, fields_.populations[species].count);
         write_floats(out, fields_.populations[species].fed);
         write_presence(out, presence_[species]);
+        write_watch(out, static_cast<std::uint32_t>(species));
     }
     return std::move(out).take();
 }
@@ -116,8 +171,11 @@ Result<void> Wildlife::load(std::uint16_t version, std::span<const std::byte> by
     // A species no longer in the ecology is read past; one new to it keeps its start.
     Population ignored{.count = std::vector<float>(grid_.size()),
                        .fed = std::vector<float>(grid_.size())};
-    // Presence a save lacks is worked out from the populations; a species it lacks keeps its own.
+    // Presence and baselines a save lacks are worked out from the populations; a species it lacks
+    // keeps its own.
     std::vector<std::optional<Presence>> presence(presence_.begin(), presence_.end());
+    std::vector<Watched> watched = watched_;
+    std::vector<bool> unwatched(watched_.size(), false);
     for (std::uint32_t read = 0; read < count && in.ok(); ++read) {
         const std::string name = in.text(in.integer<std::uint16_t>());
         const auto species = config_.ecology.find(name);
@@ -126,8 +184,14 @@ Result<void> Wildlife::load(std::uint16_t version, std::span<const std::byte> by
         read_floats(in, into.fed);
         std::optional<Presence> present =
             version >= 2 ? read_presence(in, region_count_) : std::nullopt;
+        Watched seen;
+        const bool usable = version >= 3 && read_watch(in, seen);
         if (species) {
             presence[*species] = std::move(present);
+            unwatched[*species] = !usable;
+            if (usable) {
+                watched[*species] = std::move(seen);
+            }
         }
     }
     if (auto finished = in.finish(); !finished) {
@@ -139,6 +203,9 @@ Result<void> Wildlife::load(std::uint16_t version, std::span<const std::byte> by
         std::optional<Presence>& kept = presence[species];
         presence_[species] =
             kept ? std::move(*kept) : present(species, held_then[species], loaded_time);
+        standing_[species] = standing(presence_[species]);
+        watched_[species] = unwatched[species] ? watching(held_then[species], loaded_time)
+                                               : std::move(watched[species]);
     }
     fields_ = std::move(loaded);
     time_ = loaded_time;

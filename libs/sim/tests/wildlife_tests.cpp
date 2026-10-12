@@ -5,21 +5,27 @@
 #include <hog/sim/wildlife.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <algorithm>
 #include <bit>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
+#include <iterator>
 #include <set>
 #include <span>
 #include <string>
+#include <tuple>
 #include <vector>
 
 using namespace std::chrono;
+using Catch::Matchers::WithinRel;
 using hog::GameTime;
 using hog::jobs::JobSystem;
 using hog::planet::Biome;
 using hog::sim::Conditions;
+using hog::sim::EcologyEvent;
 using hog::sim::Food;
 using hog::sim::Habitat;
 using hog::sim::Recovery;
@@ -121,6 +127,38 @@ void clear(Wildlife& wildlife, std::uint32_t species, std::uint32_t region) {
             wildlife.take(species, cell, 1e9F);
         }
     }
+}
+
+// Kills `share` of the species in each of the region's cells.
+void hunt(Wildlife& wildlife, std::uint32_t region, hog::sim::Hunter hunter, float share) {
+    for (std::uint32_t cell = 0; cell < wildlife.grid().size(); ++cell) {
+        if (wildlife.region(cell) == region) {
+            wildlife.kill(0, cell, share * wildlife.fields().populations[0].count[cell], hunter);
+        }
+    }
+}
+
+std::vector<EcologyEvent> of_kind(const std::vector<EcologyEvent>& events,
+                                  EcologyEvent::Kind kind) {
+    std::vector<EcologyEvent> found;
+    std::ranges::copy_if(events, std::back_inserter(found),
+                         [&](const EcologyEvent& event) { return event.kind == kind; });
+    return found;
+}
+
+std::vector<hog::sim::Hunter> hunters(const EcologyEvent& event) {
+    std::vector<hog::sim::Hunter> named;
+    std::ranges::transform(event.hunters, std::back_inserter(named),
+                           &hog::sim::Contributor::hunter);
+    return named;
+}
+
+double kills_by(const Wildlife& wildlife, std::uint32_t region, hog::sim::Hunter hunter) {
+    double kills = 0.0;
+    for (const auto& one : wildlife.kills(0, region)) {
+        kills += one.hunter == hunter ? one.kills : 0.0;
+    }
+    return kills;
 }
 
 Species returning(double earliest, double latest) {
@@ -564,6 +602,123 @@ TEST_CASE("a successor takes the place of an extinct species", "[sim][wildlife][
     CHECK(wildlife.presence(1).alive);
 }
 
+TEST_CASE("kills are remembered against their hunters, fading", "[sim][wildlife][events]") {
+    JobSystem jobs{1};
+    Wildlife wildlife{config({grazer()}), grassland(), march_equinox};
+    const std::uint32_t region = wildlife.region(5);
+    CHECK(wildlife.kill(0, 5, 3.0F, 7) == 3.0F);
+    wildlife.kill(0, 5, 1.0F, 8);
+    wildlife.kill(0, 5, 2.0F, 7);
+    wildlife.kill(0, 5, 0.015F, 9);
+    // Animals taken some other way are no one's kills.
+    wildlife.take(0, 5, 4.0F);
+    CHECK(wildlife.kills(0, region).size() == 3);
+    CHECK(kills_by(wildlife, region, 7) == 5.0);
+    CHECK(kills_by(wildlife, region, 8) == 1.0);
+    CHECK(wildlife.kill(0, 5, 1e9F, 8) < 1e9F);
+
+    const auto steps = wildlife.advance_to(march_equinox + days{730}, Steady{}.conditions(), jobs);
+    const double faded = std::exp2(-static_cast<double>(steps) / hog::sim::days_per_year / 2.0);
+    CHECK_THAT(kills_by(wildlife, region, 7), WithinRel(5.0 * faded, 1e-9));
+    // The fewest are forgotten.
+    CHECK(wildlife.kills(0, region).size() == 2);
+}
+
+TEST_CASE("a region hunted out reports its collapse, its loss and its return",
+          "[sim][wildlife][events]") {
+    JobSystem jobs{1};
+    Species deer = returning(1.0, 2.0);
+    deer.events.baseline_years = 0.5;
+    Wildlife wildlife{config({deer}), islands(), march_equinox};
+    const Steady weather;
+    wildlife.advance_to(march_equinox + days{200}, weather.conditions(), jobs);
+    std::ignore = wildlife.drain_events();
+
+    hunt(wildlife, island_a, 7, 0.6F);
+    hunt(wildlife, island_a, 8, 0.75F);
+    // Too few kills to be named.
+    hunt(wildlife, island_a, 9, 0.5F);
+    wildlife.advance_to(march_equinox + days{201}, weather.conditions(), jobs);
+    auto events = wildlife.drain_events();
+    REQUIRE(events.size() == 1);
+    CHECK(events[0].kind == EcologyEvent::Kind::Collapse);
+    CHECK(events[0].region == island_a);
+    CHECK(events[0].at == wildlife.time());
+    CHECK(events[0].count < 0.2 * events[0].baseline);
+    CHECK(hunters(events[0]) == std::vector<hog::sim::Hunter>{7, 8});
+
+    hunt(wildlife, island_a, 8, 1.0F);
+    wildlife.advance_to(march_equinox + days{202}, weather.conditions(), jobs);
+    events = wildlife.drain_events();
+    REQUIRE(events.size() == 1);
+    CHECK(events[0].kind == EcologyEvent::Kind::LocalExtinction);
+    CHECK(events[0].count == 0.0);
+    CHECK(hunters(events[0]) == std::vector<hog::sim::Hunter>{7, 8});
+
+    // Founders come back to the island, and that's news of its own.
+    wildlife.advance_to(march_equinox + days{202 + (3 * 365)}, weather.conditions(), jobs);
+    events = of_kind(wildlife.drain_events(), EcologyEvent::Kind::Return);
+    REQUIRE(events.size() == 1);
+    CHECK(events[0].region == island_a);
+    CHECK(events[0].hunters.empty());
+}
+
+TEST_CASE("a species hunted out everywhere names its hunters", "[sim][wildlife][events]") {
+    JobSystem jobs{1};
+    Wildlife wildlife{config({returning(1.0, 2.0)}), islands(), march_equinox};
+    const Steady weather;
+    hunt(wildlife, island_a, 7, 1.0F);
+    hunt(wildlife, island_b, 8, 1.0F);
+    wildlife.advance_to(march_equinox + days{1}, weather.conditions(), jobs);
+    const auto events = wildlife.drain_events();
+    // Losses are news from the start; there's no baseline to settle for them.
+    REQUIRE(events.size() == 3);
+    CHECK(events[0].kind == EcologyEvent::Kind::LocalExtinction);
+    CHECK(events[1].kind == EcologyEvent::Kind::LocalExtinction);
+    CHECK(hunters(events[0]) == std::vector<hog::sim::Hunter>{7});
+    const EcologyEvent& gone = events[2];
+    CHECK(gone.kind == EcologyEvent::Kind::Extinction);
+    CHECK(gone.region == EcologyEvent::everywhere);
+    CHECK(gone.count == 0.0);
+    CHECK(gone.baseline > 1'000.0);
+    CHECK(gone.hunters.size() == 2);
+
+    wildlife.add(0, 0, 50.0F);
+    wildlife.advance_to(march_equinox + days{2}, weather.conditions(), jobs);
+    const auto back = of_kind(wildlife.drain_events(), EcologyEvent::Kind::Return);
+    REQUIRE(back.size() == 2);
+    CHECK(back[1].region == EcologyEvent::everywhere);
+}
+
+TEST_CASE("overpopulation is reported once the baseline has settled", "[sim][wildlife][events]") {
+    JobSystem jobs{1};
+    Species deer = grazer();
+    deer.events.baseline_years = 1.0;
+    Wildlife wildlife{config({deer}), islands(), march_equinox};
+    const Steady weather;
+    const auto flood = [&] {
+        for (std::uint32_t cell = 0; cell < wildlife.grid().size(); ++cell) {
+            if (wildlife.region(cell) == island_a) {
+                wildlife.add(0, cell, 4.0F * wildlife.fields().populations[0].count[cell]);
+            }
+        }
+    };
+    hunt(wildlife, island_a, 5, 0.1F);
+    flood();
+    wildlife.advance_to(march_equinox + days{1}, weather.conditions(), jobs);
+    CHECK(of_kind(wildlife.drain_events(), EcologyEvent::Kind::Overpopulation).empty());
+
+    wildlife.advance_to(march_equinox + days{2 * 365}, weather.conditions(), jobs);
+    std::ignore = wildlife.drain_events();
+    flood();
+    wildlife.advance_to(march_equinox + days{(2 * 365) + 1}, weather.conditions(), jobs);
+    const auto events = wildlife.drain_events();
+    REQUIRE(events.size() == 1);
+    CHECK(events[0].kind == EcologyEvent::Kind::Overpopulation);
+    CHECK(events[0].region == island_a);
+    CHECK(hunters(events[0]) == std::vector<hog::sim::Hunter>{5});
+}
+
 TEST_CASE("wildlife is the same on any number of threads", "[sim][wildlife]") {
     JobSystem one{1};
     JobSystem many{4};
@@ -591,6 +746,7 @@ TEST_CASE("wildlife saves and loads", "[sim][wildlife]") {
     Wildlife saved{config({grazer(), wolf}), grassland(), march_equinox};
     const Steady weather;
     saved.advance_to(march_equinox + days{40}, weather.conditions(), jobs);
+    saved.kill(0, 5, 2.0F, 7);
     const auto bytes = saved.save();
 
     Wildlife loaded{config({grazer(), wolf}), grassland(), march_equinox + days{400}};
@@ -599,6 +755,11 @@ TEST_CASE("wildlife saves and loads", "[sim][wildlife]") {
     CHECK(loaded.fields() == saved.fields());
     CHECK(loaded.presence(0) == saved.presence(0));
     CHECK(loaded.presence(1) == saved.presence(1));
+    for (std::uint32_t region = 0; region < saved.region_count(); ++region) {
+        CHECK(loaded.baseline(0, region) == saved.baseline(0, region));
+        CHECK(std::ranges::equal(loaded.kills(0, region), saved.kills(0, region)));
+    }
+    CHECK(kills_by(loaded, saved.region(5), 7) == 2.0);
     saved.advance_to(march_equinox + days{50}, weather.conditions(), jobs);
     loaded.advance_to(march_equinox + days{50}, weather.conditions(), jobs);
     CHECK(loaded.fields() == saved.fields());
@@ -660,6 +821,9 @@ TEST_CASE("wildlife loads saves from before it kept presence", "[sim][wildlife][
     CHECK(wildlife.presence(0).alive);
     CHECK(wildlife.presence(0).emptied[3] == saved);
     CHECK_FALSE(wildlife.presence(0).emptied[4]);
+    CHECK(wildlife.baseline(0, 3) == 0.0);
+    CHECK(wildlife.baseline(0, 4) > 0.0);
+    CHECK(wildlife.kills(0, 4).empty());
 }
 
 TEST_CASE("wildlife lives on the planet under its weather", "[sim][wildlife]") {

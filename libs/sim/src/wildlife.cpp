@@ -105,6 +105,8 @@ Wildlife::Wildlife(WildlifeConfig config, std::vector<Habitat> habitat, GameTime
     const auto held_now = held(fields_);
     for (std::uint32_t kind = 0; kind < species.size(); ++kind) {
         presence_.push_back(present(kind, held_now[kind], time_));
+        standing_.push_back(standing(presence_.back()));
+        watched_.push_back(watching(held_now[kind], time_));
     }
 
     appeal_.resize(size);
@@ -150,6 +152,7 @@ void Wildlife::step(GameTime at, const Conditions& conditions, jobs::JobSystem& 
         move(context, species, jobs);
     }
     recover(context, at);
+    report(at);
     time_ = at;
 }
 

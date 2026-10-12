@@ -10,6 +10,7 @@ add_library(hog_sim
     src/weather_water.cpp
     src/weather_wind.cpp
     src/wildlife.cpp
+    src/wildlife_events.cpp
     src/wildlife_food.cpp
     src/wildlife_life.cpp
     src/wildlife_motion.cpp

@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <iterator>
 #include <numbers>
 #include <span>
 #include <string_view>
@@ -95,11 +96,13 @@ std::uint32_t id_of(const hog::sim::Ecology& ecology, std::string_view name) {
     return found.value_or(0);
 }
 
-// Yearly totals of each species, and how far north the deer reach in the last summers and winters.
+// Yearly totals of each species, how far north the deer reach in the last summers and winters,
+// and what was reported along the way.
 struct Run {
     std::vector<std::vector<double>> totals;
     double summer_reach = 0.0;
     double winter_reach = 0.0;
+    std::vector<hog::sim::EcologyEvent> events;
 };
 
 // Deer north of 35° as a share of all northern deer.
@@ -118,8 +121,8 @@ double northern_reach(const Wildlife& wildlife, const hog::sim::CellGrid& grid,
 
 Run run(Wildlife& wildlife, const RecordedYear& weather, const hog::sim::CellGrid& grid,
         std::uint32_t deer, JobSystem& jobs) {
-    Run result{.totals =
-                   std::vector<std::vector<double>>(wildlife.config().ecology.species.size())};
+    Run result{.totals = std::vector<std::vector<double>>(wildlife.config().ecology.species.size()),
+               .events = {}};
     for (int year = 0; year < run_years; ++year) {
         for (int day = 0; day < 365; ++day) {
             wildlife.advance_to(march_equinox + days{(year * 365) + day + 1}, weather.on(day),
@@ -135,6 +138,7 @@ Run run(Wildlife& wildlife, const RecordedYear& weather, const hog::sim::CellGri
         for (std::uint32_t species = 0; species < result.totals.size(); ++species) {
             result.totals[species].push_back(wildlife.total(species));
         }
+        std::ranges::move(wildlife.drain_events(), std::back_inserter(result.events));
     }
     return result;
 }
@@ -218,6 +222,16 @@ TEST_CASE("the development species make a food chain", "[sim][wildlife][food-cha
 
     // Winter thins the deer out of the north.
     CHECK(years.winter_reach < years.summer_reach);
+
+    // Natural swings are reported now and then, not every few days, and with no one hunting, no
+    // hunters are named.
+    const auto strays = std::ranges::count_if(years.events, [](const auto& event) {
+        using Kind = hog::sim::EcologyEvent::Kind;
+        return event.kind == Kind::Collapse || event.kind == Kind::Overpopulation;
+    });
+    CHECK(strays < 100);
+    CHECK(
+        std::ranges::all_of(years.events, [](const auto& event) { return event.hunters.empty(); }));
 
     // Each lives where it can: land animals on land, and deer mostly where they thrive.
     const Placement placed = placement(wildlife, habitat, ids.deer);
