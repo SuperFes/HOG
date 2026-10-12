@@ -50,7 +50,7 @@ burn_days = 3
     CHECK(vegetation->dryness.demand == 0.2);
     CHECK(vegetation->dryness.climate == 0.5);
     CHECK(vegetation->fire.damp == 0.3);
-    CHECK(vegetation->fire.parched == 0.8);
+    CHECK(vegetation->fire.parched == 0.9);
     CHECK(vegetation->fire.spread == 4.0);
     CHECK(vegetation->fire.burn_days == 3.0);
 

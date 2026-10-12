@@ -256,7 +256,10 @@ TEST_CASE("fire stops at water and burns itself out", "[sim][forest]") {
     for (std::uint32_t cell = face; cell < island.size(); ++cell) {
         island[cell].biome = Biome::Ocean;
     }
-    Forest forest{config(), island, start};
+    // Fierce enough to spread across the whole face.
+    ForestConfig settings = config();
+    settings.vegetation.fire.spread = 6.0;
+    Forest forest{settings, island, start};
     JobSystem jobs{2};
     const Weather dry = drought(forest.grid().size());
     forest.advance_to(forest.next_step(), dry.conditions(), jobs);

@@ -32,14 +32,14 @@ struct DrynessConfig {
 };
 
 struct FireConfig {
-    double damp = 0.4;    // dryness below which nothing burns
-    double parched = 0.8; // dryness from which plants burn freely
+    double damp = 0.5;    // dryness below which nothing burns
+    double parched = 0.9; // dryness from which plants burn freely
     double fuel = 0.5;    // kg per m² of burnable biomass for half flammability
     // Per day, how readily a full thunderstorm lights a cell that burns freely.
     double lightning = 0.05;
     // Per day, how readily a cell burning throughout lights a neighbour that burns freely, in
     // still air. With the wind it's multiplied by exp(wind × speed in m/s), and against it divided.
-    double spread = 2.0;
+    double spread = 1.5;
     double wind = 0.15;
     double burn_days = 2.0; // for a fire to burn its cell down to the seeds
     double douse = 5.0;     // mm per day of rain that puts most of a fire out within a day
@@ -70,11 +70,11 @@ struct Vegetation {
 //     climate = 0.5
 //
 //     [fire]
-//     damp = 0.4
-//     parched = 0.8
+//     damp = 0.5
+//     parched = 0.9
 //     fuel = 0.5
 //     lightning = 0.05
-//     spread = 2
+//     spread = 1.5
 //     wind = 0.15
 //     burn_days = 2
 //     douse = 5

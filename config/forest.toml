@@ -37,11 +37,12 @@ demand = 0.15
 climate = 0.5
 
 [fire]
-damp = 0.4
-parched = 0.8
+# About 4% of the land burns a year, mostly from a score or so of lightning strikes.
+damp = 0.5
+parched = 0.9
 fuel = 0.5
 lightning = 0.05
-spread = 2
+spread = 1.5
 wind = 0.15
 burn_days = 2
 douse = 5
