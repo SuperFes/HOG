@@ -1,0 +1,168 @@
+#include <hog/core/bytes.hpp>
+#include <hog/probe/messages.hpp>
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <bit>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <limits>
+#include <span>
+#include <vector>
+
+using namespace hog;
+using namespace hog::probe;
+
+namespace {
+
+// The next message, which must not fail.
+std::optional<Message> next_of(FrameReader& reader) {
+    auto next = reader.next();
+    REQUIRE(next);
+    return *next;
+}
+
+Message round_trip(const Message& message) {
+    FrameReader reader;
+    reader.feed(encode(message));
+    const std::optional<Message> next = next_of(reader);
+    REQUIRE(next.has_value());
+    CHECK(reader.pending() == 0);
+    return next.value_or(Message{});
+}
+
+std::vector<std::byte> frame(std::uint8_t kind, std::span<const std::byte> payload) {
+    ByteWriter out;
+    out.write(static_cast<std::uint32_t>(payload.size()));
+    out.write(kind);
+    out.write_bytes(payload);
+    return std::move(out).take();
+}
+
+Layers sample_layers() {
+    return Layers{.time = GameTime{std::chrono::hours{24 * 365}},
+                  .layers = {Layer{.name = "weather/temperature", .values = {-12.5F, 0.0F, 31.25F}},
+                             Layer{.name = "forest/fire", .values = {}}}};
+}
+
+} // namespace
+
+TEST_CASE("every message survives a round trip", "[probe][messages]") {
+    CHECK(round_trip(Hello{}) == Message{Hello{.version = protocol_version}});
+    CHECK(round_trip(Hello{.version = 9}) == Message{Hello{.version = 9}});
+
+    const Welcome welcome{.version = protocol_version,
+                          .world_id = 0xFEDCBA9876543210,
+                          .level = 5,
+                          .planet_radius = 115'000.5,
+                          .layers = {LayerInfo{.name = "weather/temperature", .unit = "°C"},
+                                     LayerInfo{.name = "wildlife/deer", .unit = "per km²"}}};
+    CHECK(round_trip(welcome) == Message{welcome});
+
+    CHECK(round_trip(Refused{.reason = "speaks version 9"}) ==
+          Message{Refused{.reason = "speaks version 9"}});
+
+    const Fetch fetch{.names = {"weather/temperature", "", "forest/biomass"}};
+    CHECK(round_trip(fetch) == Message{fetch});
+    CHECK(round_trip(Fetch{}) == Message{Fetch{}});
+
+    CHECK(round_trip(sample_layers()) == Message{sample_layers()});
+}
+
+TEST_CASE("a frame is its payload length, kind and payload", "[probe][messages]") {
+    const std::vector<std::byte> bytes = encode(Hello{.version = 0x0102});
+    const std::vector<std::byte> expected{std::byte{2}, std::byte{0}, std::byte{0}, std::byte{0},
+                                          std::byte{1}, std::byte{2}, std::byte{1}};
+    CHECK(bytes == expected);
+}
+
+TEST_CASE("messages arrive however the stream splits them", "[probe][messages]") {
+    std::vector<std::byte> stream = encode(sample_layers());
+    const std::vector<std::byte> second = encode(Fetch{.names = {"forest/fire"}});
+    stream.insert(stream.end(), second.begin(), second.end());
+
+    FrameReader reader;
+    std::vector<Message> received;
+    for (const std::byte byte : stream) {
+        reader.feed(std::span{&byte, 1});
+        auto next = reader.next();
+        REQUIRE(next);
+        if (next->has_value()) {
+            received.push_back(**next);
+        }
+    }
+    REQUIRE(received.size() == 2);
+    CHECK(received[0] == Message{sample_layers()});
+    CHECK(received[1] == Message{Fetch{.names = {"forest/fire"}}});
+    CHECK(reader.pending() == 0);
+}
+
+TEST_CASE("several messages in one read come out in order", "[probe][messages]") {
+    FrameReader reader;
+    reader.feed(encode(Hello{}));
+    reader.feed(encode(Refused{.reason = "full"}));
+    CHECK(next_of(reader) == std::optional<Message>{Hello{}});
+    CHECK(next_of(reader) == std::optional<Message>{Refused{.reason = "full"}});
+    CHECK(next_of(reader) == std::optional<Message>{});
+}
+
+TEST_CASE("a partial frame waits for the rest", "[probe][messages]") {
+    const std::vector<std::byte> bytes = encode(Refused{.reason = "nope"});
+    FrameReader reader;
+    reader.feed(std::span{bytes}.first(bytes.size() - 1));
+    CHECK(next_of(reader) == std::optional<Message>{});
+    CHECK(reader.pending() == bytes.size() - 1);
+    reader.feed(std::span{bytes}.last(1));
+    CHECK(next_of(reader) == std::optional<Message>{Refused{.reason = "nope"}});
+}
+
+TEST_CASE("broken streams fail and stay failed", "[probe][messages]") {
+    FrameReader reader;
+    SECTION("an unknown kind") {
+        reader.feed(frame(99, {}));
+    }
+    SECTION("an oversized frame, before it arrives") {
+        ByteWriter out;
+        out.write(std::uint32_t{max_payload + 1});
+        out.write(std::uint8_t{1});
+        reader.feed(out.bytes());
+    }
+    SECTION("a payload with bytes left over") {
+        ByteWriter payload;
+        payload.write(std::uint16_t{1});
+        payload.write(std::uint8_t{0});
+        reader.feed(frame(1, payload.bytes()));
+    }
+    SECTION("a payload cut short") {
+        ByteWriter payload;
+        payload.write(std::uint16_t{10});
+        payload.write_bytes(std::as_bytes(std::span{"abc", 3}));
+        reader.feed(frame(3, payload.bytes()));
+    }
+    SECTION("a count larger than the payload could hold") {
+        ByteWriter payload;
+        payload.write(std::uint64_t{0});
+        payload.write(std::uint32_t{0xFFFF'FFFF});
+        reader.feed(frame(5, payload.bytes()));
+    }
+    const auto first = reader.next();
+    REQUIRE_FALSE(first);
+    CHECK(first.error().code == ErrorCode::Parse);
+    reader.feed(encode(Hello{}));
+    CHECK_FALSE(reader.next());
+}
+
+TEST_CASE("float values keep their exact bits", "[probe][messages]") {
+    const std::vector<float> values{std::bit_cast<float>(0x7FC0'0001U), -0.0F,
+                                    std::numeric_limits<float>::infinity(),
+                                    std::numeric_limits<float>::denorm_min()};
+    const Message received =
+        round_trip(Layers{.time = {}, .layers = {Layer{.name = "x", .values = values}}});
+    const auto& layer = std::get<Layers>(received).layers.at(0);
+    REQUIRE(layer.values.size() == values.size());
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        CHECK(std::bit_cast<std::uint32_t>(layer.values[index]) ==
+              std::bit_cast<std::uint32_t>(values[index]));
+    }
+}

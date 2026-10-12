@@ -1,0 +1,101 @@
+#pragma once
+
+#include <hog/core/result.hpp>
+#include <hog/core/time.hpp>
+
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <span>
+#include <string>
+#include <variant>
+#include <vector>
+
+// What debug tools and a running server say to each other. Every message travels in a frame: a
+// u32 payload length, a u8 kind, then the payload, little-endian throughout.
+namespace hog::probe {
+
+inline constexpr std::uint16_t protocol_version = 1;
+// Large enough for every layer of a level 7 grid; anything bigger is a broken or hostile peer.
+inline constexpr std::uint32_t max_payload = 64U << 20U;
+
+// A per-cell field the server can send, such as "weather/temperature".
+struct LayerInfo {
+    std::string name;
+    std::string unit;
+
+    friend bool operator==(const LayerInfo&, const LayerInfo&) = default;
+};
+
+// One value per cell of the server's grid, in cell index order.
+struct Layer {
+    std::string name;
+    std::vector<float> values;
+
+    friend bool operator==(const Layer&, const Layer&) = default;
+};
+
+// Tool to server, first: the protocol it speaks.
+struct Hello {
+    std::uint16_t version = protocol_version;
+
+    friend bool operator==(const Hello&, const Hello&) = default;
+};
+
+// Server to tool, answering Hello: the world and the layers it can send.
+struct Welcome {
+    std::uint16_t version = protocol_version;
+    std::uint64_t world_id = 0;
+    std::uint8_t level = 0; // of the cell grid every layer is on
+    double planet_radius = 0.0;
+    std::vector<LayerInfo> layers;
+
+    friend bool operator==(const Welcome&, const Welcome&) = default;
+};
+
+// Server to tool, before closing: why it won't talk.
+struct Refused {
+    std::string reason;
+
+    friend bool operator==(const Refused&, const Refused&) = default;
+};
+
+// Tool to server: the layers it wants now, by name.
+struct Fetch {
+    std::vector<std::string> names;
+
+    friend bool operator==(const Fetch&, const Fetch&) = default;
+};
+
+// Server to tool, answering Fetch: the layers as of a game time, leaving out names it doesn't know.
+struct Layers {
+    GameTime time;
+    std::vector<Layer> layers;
+
+    friend bool operator==(const Layers&, const Layers&) = default;
+};
+
+using Message = std::variant<Hello, Welcome, Refused, Fetch, Layers>;
+
+// The whole frame for a message.
+[[nodiscard]] std::vector<std::byte> encode(const Message& message);
+
+// Splits a byte stream back into messages, however it arrives.
+class FrameReader {
+public:
+    void feed(std::span<const std::byte> bytes);
+
+    // The next whole message, or none until more arrives. After a failure the stream can't be
+    // trusted, so every later call fails too.
+    [[nodiscard]] Result<std::optional<Message>> next();
+
+    // Bytes received but not yet read as a message.
+    [[nodiscard]] std::size_t pending() const noexcept { return buffer_.size() - start_; }
+
+private:
+    std::vector<std::byte> buffer_;
+    std::size_t start_ = 0;
+    std::optional<Error> error_;
+};
+
+} // namespace hog::probe

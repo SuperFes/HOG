@@ -1,0 +1,244 @@
+#include <hog/core/assert.hpp>
+#include <hog/core/bytes.hpp>
+#include <hog/probe/messages.hpp>
+
+#include <algorithm>
+#include <bit>
+#include <format>
+#include <limits>
+#include <utility>
+
+namespace hog::probe {
+
+namespace {
+
+// Kept apart from the variant's order, which may change without breaking the wire.
+enum class Kind : std::uint8_t {
+    Hello = 1,
+    Welcome = 2,
+    Refused = 3,
+    Fetch = 4,
+    Layers = 5,
+};
+
+constexpr std::size_t header_size = sizeof(std::uint32_t) + sizeof(std::uint8_t);
+
+constexpr Kind kind_of(const Hello& /*unused*/) noexcept {
+    return Kind::Hello;
+}
+constexpr Kind kind_of(const Welcome& /*unused*/) noexcept {
+    return Kind::Welcome;
+}
+constexpr Kind kind_of(const Refused& /*unused*/) noexcept {
+    return Kind::Refused;
+}
+constexpr Kind kind_of(const Fetch& /*unused*/) noexcept {
+    return Kind::Fetch;
+}
+constexpr Kind kind_of(const Layers& /*unused*/) noexcept {
+    return Kind::Layers;
+}
+
+void write_text(ByteWriter& out, const std::string& text) {
+    HOG_ASSERT(text.size() <= std::numeric_limits<std::uint16_t>::max(), "text too long to send");
+    out.write(static_cast<std::uint16_t>(text.size()));
+    out.write_bytes(std::as_bytes(std::span{text}));
+}
+
+void write_count(ByteWriter& out, std::size_t count) {
+    HOG_ASSERT(count <= std::numeric_limits<std::uint32_t>::max(), "too many to send");
+    out.write(static_cast<std::uint32_t>(count));
+}
+
+void write_body(ByteWriter& out, const Hello& hello) {
+    out.write(hello.version);
+}
+
+void write_body(ByteWriter& out, const Welcome& welcome) {
+    out.write(welcome.version);
+    out.write(welcome.world_id);
+    out.write(welcome.level);
+    out.write(std::bit_cast<std::uint64_t>(welcome.planet_radius));
+    write_count(out, welcome.layers.size());
+    for (const LayerInfo& layer : welcome.layers) {
+        write_text(out, layer.name);
+        write_text(out, layer.unit);
+    }
+}
+
+void write_body(ByteWriter& out, const Refused& refused) {
+    write_text(out, refused.reason);
+}
+
+void write_body(ByteWriter& out, const Fetch& fetch) {
+    write_count(out, fetch.names.size());
+    for (const std::string& name : fetch.names) {
+        write_text(out, name);
+    }
+}
+
+void write_body(ByteWriter& out, const Layers& layers) {
+    out.write(static_cast<std::uint64_t>(layers.time.time_since_epoch().count()));
+    write_count(out, layers.layers.size());
+    for (const Layer& layer : layers.layers) {
+        write_text(out, layer.name);
+        write_count(out, layer.values.size());
+        for (const float value : layer.values) {
+            out.write(std::bit_cast<std::uint32_t>(value));
+        }
+    }
+}
+
+std::string read_text(ValueReader& in) {
+    return in.text(in.integer<std::uint16_t>());
+}
+
+// A count of things at least `smallest` bytes each, failing if there can't be that many left.
+std::uint32_t read_count(ValueReader& in, std::size_t smallest) {
+    const auto count = in.integer<std::uint32_t>();
+    if (in.ok() && count > in.remaining() / smallest) {
+        in.fail(Error{.code = ErrorCode::Parse,
+                      .message =
+                          std::format("{} entries can't fit in {} bytes", count, in.remaining())});
+        return 0;
+    }
+    return count;
+}
+
+Hello read_hello(ValueReader& in) {
+    return Hello{.version = in.integer<std::uint16_t>()};
+}
+
+Welcome read_welcome(ValueReader& in) {
+    Welcome welcome;
+    welcome.version = in.integer<std::uint16_t>();
+    welcome.world_id = in.integer<std::uint64_t>();
+    welcome.level = in.integer<std::uint8_t>();
+    welcome.planet_radius = in.twice();
+    const std::uint32_t count = read_count(in, 2 * sizeof(std::uint16_t));
+    welcome.layers.reserve(count);
+    for (std::uint32_t layer = 0; layer < count && in.ok(); ++layer) {
+        std::string name = read_text(in);
+        welcome.layers.push_back(LayerInfo{.name = std::move(name), .unit = read_text(in)});
+    }
+    return welcome;
+}
+
+Refused read_refused(ValueReader& in) {
+    return Refused{.reason = read_text(in)};
+}
+
+Fetch read_fetch(ValueReader& in) {
+    Fetch fetch;
+    const std::uint32_t count = read_count(in, sizeof(std::uint16_t));
+    fetch.names.reserve(count);
+    for (std::uint32_t name = 0; name < count && in.ok(); ++name) {
+        fetch.names.push_back(read_text(in));
+    }
+    return fetch;
+}
+
+Layers read_layers(ValueReader& in) {
+    Layers layers;
+    layers.time =
+        GameTime{GameDuration{static_cast<GameDuration::rep>(in.integer<std::uint64_t>())}};
+    const std::uint32_t count = read_count(in, sizeof(std::uint16_t) + sizeof(std::uint32_t));
+    layers.layers.reserve(count);
+    for (std::uint32_t index = 0; index < count && in.ok(); ++index) {
+        Layer layer{.name = read_text(in), .values = {}};
+        layer.values.resize(read_count(in, sizeof(std::uint32_t)));
+        for (float& value : layer.values) {
+            value = in.single();
+        }
+        layers.layers.push_back(std::move(layer));
+    }
+    return layers;
+}
+
+Result<Message> decode(Kind kind, std::span<const std::byte> payload) {
+    ValueReader in{payload};
+    Message message;
+    switch (kind) {
+    case Kind::Hello:
+        message = read_hello(in);
+        break;
+    case Kind::Welcome:
+        message = read_welcome(in);
+        break;
+    case Kind::Refused:
+        message = read_refused(in);
+        break;
+    case Kind::Fetch:
+        message = read_fetch(in);
+        break;
+    case Kind::Layers:
+        message = read_layers(in);
+        break;
+    default:
+        return make_error(ErrorCode::Parse,
+                          std::format("unknown message kind {}", std::to_underlying(kind)));
+    }
+    if (auto finished = in.finish(); !finished) {
+        return std::unexpected(std::move(finished.error()));
+    }
+    return message;
+}
+
+} // namespace
+
+std::vector<std::byte> encode(const Message& message) {
+    ByteWriter body;
+    const Kind kind = std::visit(
+        [&body](const auto& value) {
+            write_body(body, value);
+            return kind_of(value);
+        },
+        message);
+    HOG_ASSERT(body.size() <= max_payload, "message too large to send");
+    ByteWriter frame;
+    frame.write(static_cast<std::uint32_t>(body.size()));
+    frame.write(std::to_underlying(kind));
+    frame.write_bytes(body.bytes());
+    return std::move(frame).take();
+}
+
+void FrameReader::feed(std::span<const std::byte> bytes) {
+    if (start_ > 0) {
+        buffer_.erase(buffer_.begin(), buffer_.begin() + static_cast<std::ptrdiff_t>(start_));
+        start_ = 0;
+    }
+    const std::size_t end = buffer_.size();
+    buffer_.resize(end + bytes.size());
+    std::ranges::copy(bytes, std::span{buffer_}.subspan(end).begin());
+}
+
+Result<std::optional<Message>> FrameReader::next() {
+    if (error_) {
+        return std::unexpected(*error_);
+    }
+    const std::span<const std::byte> unread = std::span{buffer_}.subspan(start_);
+    if (unread.size() < header_size) {
+        return std::nullopt;
+    }
+    ByteReader header{unread.first(header_size)};
+    const std::uint32_t length = *header.read<std::uint32_t>();
+    const auto kind = static_cast<Kind>(*header.read<std::uint8_t>());
+    if (length > max_payload) {
+        error_ = Error{.code = ErrorCode::Parse,
+                       .message = std::format("a {} byte message is over the {} byte limit", length,
+                                              max_payload)};
+        return std::unexpected(*error_);
+    }
+    if (unread.size() - header_size < length) {
+        return std::nullopt;
+    }
+    auto message = decode(kind, unread.subspan(header_size, length));
+    if (!message) {
+        error_ = std::move(message.error());
+        return std::unexpected(*error_);
+    }
+    start_ += header_size + length;
+    return std::optional<Message>{std::move(*message)};
+}
+
+} // namespace hog::probe
