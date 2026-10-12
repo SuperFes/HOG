@@ -1,12 +1,8 @@
 name: CI
 
-# Docs-only changes don't need the build matrix; private-repo minutes are limited.
+# Run by hand (gh workflow run ci.yml) while the repo is private: Actions minutes are limited and
+# every change passes the same builds, tests, tidy and format locally first.
 on:
-  push:
-    branches: [main]
-    paths-ignore: ['docs/**', '**.md', 'LICENSE']
-  pull_request:
-    paths-ignore: ['docs/**', '**.md', 'LICENSE']
   workflow_dispatch:
 
 concurrency:
