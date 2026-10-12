@@ -20,3 +20,68 @@ if(TARGET hog_viewer_tests)
     # A real probe service to talk to.
     target_link_libraries(hog_viewer_tests PRIVATE hog::server)
 endif()
+
+if(NOT HOG_BUILD_VIEWER)
+    return()
+endif()
+
+# SDL3 refuses to build on Linux without X11 or Wayland headers; headless builds (containers,
+# bare CI images) still compile the viewer, though it can't open a window there.
+set(hog_sdl_console OFF)
+if(UNIX AND NOT APPLE)
+    find_package(X11 QUIET)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(hog_wayland QUIET wayland-client)
+    endif()
+    if(NOT X11_FOUND AND NOT hog_wayland_FOUND)
+        message(WARNING "No X11 or Wayland headers: the viewer is built without a window system")
+        set(hog_sdl_console ON)
+    endif()
+endif()
+
+# Windows, input and 2D drawing; zlib. Without D-Bus, which only adds desktop niceties, such as
+# input methods, that a debug tool can do without.
+CPMAddPackage(
+    NAME SDL3
+    GITHUB_REPOSITORY libsdl-org/SDL
+    GIT_TAG release-3.4.18
+    SYSTEM YES
+    OPTIONS
+        "SDL_SHARED OFF" "SDL_STATIC ON" "SDL_TEST_LIBRARY OFF" "SDL_TESTS OFF" "SDL_EXAMPLES OFF"
+        "SDL_INSTALL OFF" "SDL_AUDIO OFF" "SDL_CAMERA OFF" "SDL_DBUS OFF" "SDL_IBUS OFF"
+        "SDL_UNIX_CONSOLE_BUILD ${hog_sdl_console}")
+
+# Debug UI; MIT. Built here with the backends for SDL3 and its 2D renderer.
+CPMAddPackage(
+    NAME imgui
+    GITHUB_REPOSITORY ocornut/imgui
+    GIT_TAG v1.92.9
+    DOWNLOAD_ONLY YES)
+add_library(imgui STATIC
+    "${imgui_SOURCE_DIR}/imgui.cpp"
+    "${imgui_SOURCE_DIR}/imgui_demo.cpp"
+    "${imgui_SOURCE_DIR}/imgui_draw.cpp"
+    "${imgui_SOURCE_DIR}/imgui_tables.cpp"
+    "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
+    "${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp"
+    "${imgui_SOURCE_DIR}/backends/imgui_impl_sdlrenderer3.cpp")
+target_include_directories(imgui SYSTEM PUBLIC "${imgui_SOURCE_DIR}" "${imgui_SOURCE_DIR}/backends")
+target_link_libraries(imgui PUBLIC SDL3::SDL3-static)
+
+add_executable(hog_viewer_cli src/main.cpp)
+set_target_properties(hog_viewer_cli PROPERTIES OUTPUT_NAME hog-viewer)
+target_link_libraries(hog_viewer_cli PRIVATE hog::viewer imgui)
+hog_target_defaults(hog_viewer_cli)
+
+if(HOG_BUILD_TESTS)
+    # Runs the app for a moment without a window or a server, saving what it drew. Software
+    # drawing keeps the system's GPU drivers, which sanitizers can't see into, out of it.
+    add_test(NAME hog_viewer_smoke
+        COMMAND hog_viewer_cli --port 1 --quit-after 1
+                --capture "${CMAKE_CURRENT_BINARY_DIR}/smoke.png")
+    set_tests_properties(hog_viewer_smoke PROPERTIES
+        ENVIRONMENT
+        "SDL_VIDEO_DRIVER=offscreen;SDL_RENDER_DRIVER=software;SDL_FRAMEBUFFER_ACCELERATION=0"
+        TIMEOUT 60)
+endif()

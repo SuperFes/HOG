@@ -37,7 +37,7 @@ jobs:
       # GCC ships with the runner, which saves installing LLVM for a single tool.
       - name: Build hog-mapgen
         run: |
-          cmake --preset release -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14 -DHOG_BUILD_TESTS=OFF
+          cmake --preset release -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14 -DHOG_BUILD_TESTS=OFF -DHOG_BUILD_VIEWER=OFF
           cmake --build --preset release --target hog_mapgen_cli
       - name: Render
         run: |

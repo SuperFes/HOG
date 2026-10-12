@@ -34,6 +34,7 @@ inline constexpr std::array overlays{
 };
 
 [[nodiscard]] std::string_view to_string(Overlay overlay) noexcept;
+[[nodiscard]] std::optional<Overlay> overlay_named(std::string_view name) noexcept;
 
 // The layers an overlay draws, so a tool fetches only those. `species` names the wildlife shown.
 [[nodiscard]] std::vector<std::string> layers_for(Overlay overlay, std::string_view species);

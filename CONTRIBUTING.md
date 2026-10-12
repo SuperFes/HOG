@@ -2,7 +2,7 @@
 
 ## Building
 
-Needs CMake 3.28+, Ninja, and Clang 19+ (the default and primary toolchain), GCC 14+ or MSVC 2022 17.10+. Dependencies are fetched by [CPM.cmake](https://github.com/cpm-cmake/CPM.cmake) into `.cache/cpm` on first configure.
+Needs CMake 3.28+, Ninja, and Clang 19+ (the default and primary toolchain), GCC 14+ or MSVC 2022 17.10+. Dependencies are fetched by [CPM.cmake](https://github.com/cpm-cmake/CPM.cmake) into `.cache/cpm` on first configure. On Linux the debug viewer's SDL3 wants X11 or Wayland headers (on Ubuntu: `libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxkbcommon-dev libwayland-dev libegl1-mesa-dev`); without them it builds without a window system, and `-DHOG_BUILD_VIEWER=OFF` skips it.
 
 ```sh
 cmake --workflow --preset debug        # configure, build and run all tests
@@ -21,7 +21,7 @@ Benchmarks live in each library's `bench/` directory as Catch2 `BENCHMARK`s, bui
 
 World generation is pinned by golden hashes in `libs/planet/tests/golden/tiles.txt`, which every CI platform must reproduce. After an intended change to generated output, rewrite the file with `hog_planet_tests "[.update-golden]"` and commit it with the change.
 
-Run a development server with `build/debug/apps/server/hog-server` from the repository root. It reads `config/server.toml`, keeps the world and its logs under `var/`, catches up to now on start, and saves when stopped with Ctrl-C.
+Run a development server with `build/debug/apps/server/hog-server` from the repository root. It reads `config/server.toml`, keeps the world and its logs under `var/`, catches up to now on start, and saves when stopped with Ctrl-C. Watch it with `build/debug/tools/viewer/hog-viewer`, which connects to the `[debug]` port (7777 in the dev config, loopback only) and draws the weather, plants and wildlife on a map of the planet: wheel to zoom, drag to pan, double-click for the whole planet. `--help` lists its options.
 
 Presets use `clang++`; pick another compiler with `-DCMAKE_CXX_COMPILER=g++` (or `cl` on Windows). `-DHOG_USE_LIBCXX=ON` builds against libc++, as macOS does; CI's Linux Clang jobs use it. Libraries live in `libs/<name>/` with `include/hog/<name>/`, `src/` and `tests/`; each registers its tests with `hog_add_tests()`. Executables keep their logic in a tested library beside a thin `main.cpp`: `tools/` for developer tools, `apps/` for what ships.
 

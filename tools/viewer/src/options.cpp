@@ -24,6 +24,49 @@ std::optional<int> integer(std::string_view text) {
     return value;
 }
 
+// Reads an option that takes a value.
+Result<void> read_option(Options& options, std::string_view option, std::string_view value) {
+    if (option == "--host") {
+        options.host = value;
+    } else if (option == "--overlay") {
+        const std::optional<Overlay> overlay = overlay_named(value);
+        if (!overlay) {
+            return make_error(ErrorCode::InvalidArgument, std::format("no overlay {}", value));
+        }
+        options.overlay = *overlay;
+    } else if (option == "--species") {
+        options.species = value;
+    } else if (option == "--capture") {
+        options.capture = std::filesystem::path{value};
+    } else if (option == "--quit-after") {
+        const std::optional<int> seconds = integer(value);
+        if (!seconds || *seconds < 0) {
+            return make_error(ErrorCode::InvalidArgument,
+                              std::format("--quit-after takes whole seconds, not {}", value));
+        }
+        options.quit_after = std::chrono::seconds{*seconds};
+    } else if (option == "--port") {
+        const std::optional<int> port = integer(value);
+        if (!port || *port < 1 ||
+            std::cmp_greater(*port, std::numeric_limits<std::uint16_t>::max())) {
+            return make_error(ErrorCode::InvalidArgument,
+                              std::format("--port must be from 1 to 65535, not {}", value));
+        }
+        options.port = static_cast<std::uint16_t>(*port);
+    } else if (option == "--width") {
+        const std::optional<int> width = integer(value);
+        if (!width || *width < narrowest || *width > widest) {
+            return make_error(
+                ErrorCode::InvalidArgument,
+                std::format("--width must be from {} to {}, not {}", narrowest, widest, value));
+        }
+        options.width = *width;
+    } else {
+        return make_error(ErrorCode::InvalidArgument, std::format("unknown argument {}", option));
+    }
+    return {};
+}
+
 } // namespace
 
 std::string_view usage() noexcept {
@@ -35,6 +78,11 @@ options:
   --host HOST     where the server runs (default 127.0.0.1)
   --port PORT     its [debug] port (default 7777)
   --width PIXELS  of the rendered map (default 1024)
+  --overlay NAME  shown first: terrain, biome, temperature, air, sky, pressure,
+                  dryness, plants, fire or wildlife (default terrain)
+  --species NAME  shown first on the wildlife overlay
+  --quit-after S  quit after this many seconds
+  --capture PATH  save the last frame drawn as a PNG, on quitting
   -h, --help      show this help
 )";
 }
@@ -47,33 +95,12 @@ Result<Options> parse_options(std::span<const std::string_view> arguments) {
             options.help = true;
             continue;
         }
-        if (argument != "--host" && argument != "--port" && argument != "--width") {
-            return make_error(ErrorCode::InvalidArgument,
-                              std::format("unknown argument {}", argument));
-        }
         if (i + 1 == arguments.size()) {
             return make_error(ErrorCode::InvalidArgument,
-                              std::format("{} needs a value", argument));
+                              std::format("unknown argument {}, or it needs a value", argument));
         }
-        const std::string_view value = arguments[++i];
-        if (argument == "--host") {
-            options.host = value;
-        } else if (argument == "--port") {
-            const std::optional<int> port = integer(value);
-            if (!port || *port < 1 ||
-                std::cmp_greater(*port, std::numeric_limits<std::uint16_t>::max())) {
-                return make_error(ErrorCode::InvalidArgument,
-                                  std::format("--port must be from 1 to 65535, not {}", value));
-            }
-            options.port = static_cast<std::uint16_t>(*port);
-        } else {
-            const std::optional<int> width = integer(value);
-            if (!width || *width < narrowest || *width > widest) {
-                return make_error(
-                    ErrorCode::InvalidArgument,
-                    std::format("--width must be from {} to {}, not {}", narrowest, widest, value));
-            }
-            options.width = *width;
+        if (auto read = read_option(options, argument, arguments[++i]); !read) {
+            return std::unexpected(std::move(read.error()));
         }
     }
     return options;

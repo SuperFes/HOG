@@ -68,7 +68,8 @@ public:
 
     [[nodiscard]] bool ocean(DVec3 direction) const {
         const std::span<const float> ocean = layer("planet/ocean");
-        return !ocean.empty() && nearest(ocean, direction) > 0.5;
+        // Smoothed, so coasts run between cells rather than around them.
+        return !ocean.empty() && smooth(ocean, direction) > 0.5;
     }
 
     [[nodiscard]] Rgb ground(DVec3 direction) const {
@@ -88,17 +89,17 @@ private:
     const Frame* frame_;
 };
 
-// The densest any cell holds of a species, in animals per km².
-double densest(const Frame& frame, std::span<const float> count) {
+// Animals per km² in each cell; empty without the counts or the areas.
+std::vector<float> densities(const Frame& frame, std::span<const float> count) {
     const std::span<const float> area = frame.layer("planet/area");
-    double most = 0.0;
-    for (std::size_t cell = 0; cell < count.size() && cell < area.size(); ++cell) {
-        if (area[cell] > 0.0F) {
-            most =
-                std::max(most, static_cast<double>(count[cell]) / static_cast<double>(area[cell]));
-        }
+    if (count.empty() || area.size() != count.size()) {
+        return {};
     }
-    return most;
+    std::vector<float> density(count.size());
+    for (std::size_t cell = 0; cell < count.size(); ++cell) {
+        density[cell] = area[cell] > 0.0F ? count[cell] / area[cell] : 0.0F;
+    }
+    return density;
 }
 
 Rgb plants_at(const Sampler& sampler, DVec3 direction) {
@@ -193,14 +194,10 @@ Rgb colour_at(const Sampler& sampler, Overlay overlay, std::span<const float> sp
                             : fire_colour(plants, sampler.nearest(fire, direction));
     }
     case Overlay::Wildlife: {
-        const std::span<const float> area = sampler.layer("planet/area");
-        if (species.empty() || area.empty()) {
+        if (species.empty()) {
             return missing_colour;
         }
-        const std::uint32_t cell = sampler.cell(direction);
-        const double density =
-            area[cell] > 0.0F ? static_cast<double>(species[cell]) / static_cast<double>(area[cell])
-                              : 0.0;
+        const double density = sampler.smooth(species, direction);
         return mapgen::density_colour(sampler.ground(direction), most > 0.0 ? density / most : 0.0);
     }
     }
@@ -208,6 +205,15 @@ Rgb colour_at(const Sampler& sampler, Overlay overlay, std::span<const float> sp
 }
 
 } // namespace
+
+std::optional<Overlay> overlay_named(std::string_view name) noexcept {
+    for (const Overlay overlay : overlays) {
+        if (to_string(overlay) == name) {
+            return overlay;
+        }
+    }
+    return std::nullopt;
+}
 
 std::string_view to_string(Overlay overlay) noexcept {
     switch (overlay) {
@@ -344,10 +350,12 @@ mapgen::Image render_overlay(const sim::CellGrid& grid, const Frame& frame, Over
                             std::vector<std::uint8_t>(3 * static_cast<std::size_t>(size.width) *
                                                       static_cast<std::size_t>(size.height))};
     const Sampler sampler{grid, frame};
-    const std::span<const float> animals = overlay == Overlay::Wildlife
-                                               ? frame.layer("wildlife/" + std::string{species})
-                                               : std::span<const float>{};
-    const double most = animals.empty() ? 0.0 : densest(frame, animals);
+    // Densities rather than counts, since cells differ in size.
+    const std::vector<float> animals =
+        overlay == Overlay::Wildlife
+            ? densities(frame, frame.layer("wildlife/" + std::string{species}))
+            : std::vector<float>{};
+    const double most = animals.empty() ? 0.0 : static_cast<double>(std::ranges::max(animals));
     jobs.parallel_for(
         static_cast<std::uint32_t>(size.height), 1,
         [&](jobs::Range rows, std::uint32_t /*thread*/) {

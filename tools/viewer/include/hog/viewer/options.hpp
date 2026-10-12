@@ -1,8 +1,12 @@
 #pragma once
 
 #include <hog/core/result.hpp>
+#include <hog/viewer/overlay.hpp>
 
+#include <chrono>
 #include <cstdint>
+#include <filesystem>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -13,6 +17,12 @@ struct Options {
     std::string host = "127.0.0.1";
     std::uint16_t port = 7777;
     int width = 1'024; // of the rendered map, in pixels
+    Overlay overlay = Overlay::Terrain;
+    std::string species; // shown first, when the overlay is wildlife
+    // For smoke tests and pictures: how long to run before quitting, and where to save the last
+    // frame drawn, as a PNG.
+    std::optional<std::chrono::milliseconds> quit_after;
+    std::optional<std::filesystem::path> capture;
     bool help = false;
 };
 

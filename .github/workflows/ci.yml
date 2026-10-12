@@ -41,6 +41,13 @@ jobs:
           wget -qO llvm.sh https://apt.llvm.org/llvm.sh
           sudo bash llvm.sh ${{ matrix.llvm }}
           sudo apt-get install -y libclang-rt-${{ matrix.llvm }}-dev libc++-${{ matrix.llvm }}-dev libc++abi-${{ matrix.llvm }}-dev
+      # Window system headers for SDL3, which the debug viewer is built on.
+      - name: Install X11 and Wayland headers
+        if: runner.os == 'Linux'
+        run: >-
+          sudo apt-get update && sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev
+          libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxkbcommon-dev libwayland-dev
+          libegl1-mesa-dev
       # Older sanitizer runtimes crash under the runner kernel's high mmap randomization.
       - name: Lower mmap randomization
         if: startsWith(matrix.preset, 'ci-') && runner.os == 'Linux'
@@ -78,6 +85,12 @@ jobs:
           wget -qO llvm.sh https://apt.llvm.org/llvm.sh
           sudo bash llvm.sh 22
           sudo apt-get install -y clang-tidy-22
+      # Window system headers for SDL3, which the debug viewer is built on.
+      - name: Install X11 and Wayland headers
+        run: >-
+          sudo apt-get update && sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev
+          libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxkbcommon-dev libwayland-dev
+          libegl1-mesa-dev
       - uses: actions/cache@v6
         with:
           path: .cache/cpm

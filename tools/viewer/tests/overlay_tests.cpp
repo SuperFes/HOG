@@ -155,13 +155,21 @@ TEST_CASE("plants show by how grown they are, and fires on top", "[viewer][overl
 TEST_CASE("wildlife is shown against its densest cell", "[viewer][overlay]") {
     Planet planet = land();
     planet.set("wildlife/deer", 10.0F);
+    const Rgb ground = mapgen::height_colour(fixed(500.0));
+    CHECK(all(planet.render(Overlay::Wildlife, "deer"), mapgen::density_colour(ground, 1.0)));
+
+    // Smoothed between cells, so only those beside the dense one see it.
     planet.values("wildlife/deer")[3] = 40.0F;
+    const auto& beside = planet.grid.neighbors(3);
     const auto cells = planet.cells();
     const auto shown = pixels(planet.render(Overlay::Wildlife, "deer"));
-    const Rgb ground = mapgen::height_colour(fixed(500.0));
     for (std::size_t pixel = 0; pixel < shown.size(); ++pixel) {
-        CHECK(shown[pixel] == mapgen::density_colour(ground, cells[pixel] == 3 ? 1.0 : 0.25));
+        if (cells[pixel] != 3 && std::ranges::find(beside, cells[pixel]) == beside.end()) {
+            CHECK(shown[pixel] == mapgen::density_colour(ground, 0.25));
+        }
     }
+    CHECK(std::ranges::count(shown, mapgen::density_colour(ground, 0.25)) <
+          static_cast<std::ptrdiff_t>(shown.size()));
     CHECK(all(planet.render(Overlay::Wildlife, "elk"), viewer::missing_colour));
 }
 
@@ -214,4 +222,11 @@ TEST_CASE("a legend gives the range of what an overlay shows", "[viewer][overlay
     REQUIRE(terrain);
     CHECK(terrain.value_or(viewer::Legend{.layer = "", .unit = "?", .low = 0.0, .high = 0.0})
               .unit.empty());
+}
+
+TEST_CASE("overlays are found by name", "[viewer][overlay]") {
+    for (const Overlay overlay : viewer::overlays) {
+        CHECK(viewer::overlay_named(viewer::to_string(overlay)) == overlay);
+    }
+    CHECK_FALSE(viewer::overlay_named("rainbows"));
 }
