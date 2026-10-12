@@ -257,6 +257,15 @@ std::string parse_recovery(Table& parent, Recovery& recovery) {
     return successor == nullptr ? std::string{} : std::string{successor->as_string()->get()};
 }
 
+void parse_events(Table& parent, Events& events) {
+    Table table = parent.child("events");
+    table.only({"baseline_years"sv, "collapse"sv, "overpopulation"sv, "least"sv});
+    table.number("baseline_years", positive, 10'000.0, events.baseline_years);
+    table.number("collapse", positive, 0.99, events.collapse);
+    table.number("overpopulation", 1.01, 1e6, events.overpopulation);
+    table.number("least", 0.0, 1e9, events.least);
+}
+
 // Diets and successors name other species, so they're read once every species is known.
 struct Names {
     std::vector<std::pair<std::string, double>> diet;
@@ -268,7 +277,7 @@ Species parse_species(Table table, Names& names) {
                 "diet"sv,     "habitat"sv,        "density"sv,   "crowded"sv,      "births"sv,
                 "breeding"sv, "lifespan_years"sv, "starving"sv,  "hungry_below"sv, "comfort"sv,
                 "exposure"sv, "dormant_below"sv,  "wander_km"sv, "speed_km"sv,     "leftovers"sv,
-                "cycle"sv,    "recovery"sv});
+                "cycle"sv,    "recovery"sv,       "events"sv});
     Species species;
     const toml::node* name = table.find("name");
     if (name == nullptr || !name->is_string() || name->as_string()->get().empty()) {
@@ -294,6 +303,7 @@ Species parse_species(Table table, Names& names) {
     table.number("leftovers", 0.0, 0.99, species.leftovers);
     parse_timing(table, species);
     names.successor = parse_recovery(table, species.recovery);
+    parse_events(table, species.events);
 
     Table foods = table.child("diet");
     if (foods.get() != nullptr) {

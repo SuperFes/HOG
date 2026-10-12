@@ -43,6 +43,7 @@ comfort = [-25, 35]
 dormant_below = -10
 cycle = { years = 13, boom = 4, width_years = 2 }
 recovery = { years = [2, 6], founders = 12, after_extinction = "successor", extinct_years = [5, 9], successor = "wolf" }
+events = { baseline_years = 5, collapse = 0.1, overpopulation = 4, least = 20 }
 
 [[species]]
 name = "wolf"
@@ -79,6 +80,10 @@ recovery = { after_extinction = "relict" }
     CHECK(deer.recovery.extinct_earliest == 5.0);
     CHECK(deer.recovery.extinct_latest == 9.0);
     CHECK(deer.recovery.successor == 1U);
+    CHECK(deer.events.baseline_years == 5.0);
+    CHECK(deer.events.collapse == 0.1);
+    CHECK(deer.events.overpopulation == 4.0);
+    CHECK(deer.events.least == 20.0);
     REQUIRE(deer.diet.size() == 1);
     CHECK(deer.diet[0].kind == Food::Kind::Forage);
 
@@ -86,6 +91,7 @@ recovery = { after_extinction = "relict" }
     CHECK_FALSE(wolf.dormant_below);
     CHECK(wolf.recovery.after_extinction == hog::sim::Recovery::After::Relict);
     CHECK(wolf.recovery.latest == 10.0);
+    CHECK(wolf.events.collapse == 0.2);
     REQUIRE(wolf.diet.size() == 2);
     const auto prey = std::ranges::find(wolf.diet, Food::Kind::Prey, &Food::kind);
     REQUIRE(prey != wolf.diet.end());
@@ -133,6 +139,12 @@ TEST_CASE("an ecology rejects what it can't use", "[sim][ecology]") {
     CHECK_THAT(error_of("[[species]]\nname = \"a\"\nrecovery = { successor = \"b\" }\n"
                         "[[species]]\nname = \"b\""),
                ContainsSubstring("isn't succeeded"));
+    CHECK_THAT(error_of("[[species]]\nname = \"a\"\nevents = { collapse = 1.5 }"),
+               ContainsSubstring("events.collapse"));
+    CHECK_THAT(error_of("[[species]]\nname = \"a\"\nevents = { overpopulation = 0.5 }"),
+               ContainsSubstring("events.overpopulation"));
+    CHECK_THAT(error_of("[[species]]\nname = \"a\"\nevents = { boom = 1 }"),
+               ContainsSubstring("events.boom"));
     CHECK_THAT(error_of("[[species]]\nname = \"a\"\n[[species]]\nname = \"a\""),
                ContainsSubstring("twice"));
     CHECK_THAT(error_of("[[species]]\nname = \"carrion\""), ContainsSubstring("carrion"));

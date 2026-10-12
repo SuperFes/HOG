@@ -73,6 +73,14 @@ struct Recovery {
     std::uint32_t successor = 0; // the species taking its place, for Successor
 };
 
+// How far a region's numbers must stray from their long-run baseline to be worth reporting.
+struct Events {
+    double baseline_years = 10.0; // how long the baseline takes to follow a lasting change
+    double collapse = 0.2;        // share of the baseline below which a region has collapsed
+    double overpopulation = 3.0;  // multiple of the baseline above which a region is overrun
+    double least = 10.0;          // animals a region's baseline needs before it reports anything
+};
+
 struct Species {
     std::string name;
     Moves moves = Moves::Land;
@@ -101,6 +109,7 @@ struct Species {
     double leftovers = 0.3; // share of each kill left for scavengers
     Cycle cycle{};
     Recovery recovery{};
+    Events events{};
 };
 
 struct Ecology {
@@ -145,6 +154,7 @@ struct Ecology {
 //     cycle = { years = 13, boom = 4, width_years = 1, region_level = 2 }
 //     recovery = { years = [3, 10], founders = 10, after_extinction = "successor",
 //                  extinct_years = [20, 50], successor = "elk" }    # or "admin", "relict"
+//     events = { baseline_years = 10, collapse = 0.2, overpopulation = 3, least = 10 }
 //
 // Every key is optional except a species' name. Biomes are named as planet::to_string() names
 // them, with spaces or underscores. Unknown keys, biomes and foods are errors.
