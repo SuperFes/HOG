@@ -130,7 +130,8 @@ public:
                                     std::chrono::seconds{moment.time.second} +
                                     std::chrono::nanoseconds{moment.time.nanosecond};
         const auto local = std::chrono::sys_days{day} + since_midnight;
-        return to_game_time(local - std::chrono::minutes{moment.offset->minutes});
+        return to_game_time(std::chrono::floor<WallClock::duration>(
+            local - std::chrono::minutes{moment.offset->minutes}));
     }
 
     [[nodiscard]] Result<std::optional<std::string>> string(std::string_view key) const {
