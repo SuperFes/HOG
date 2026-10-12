@@ -1,5 +1,3 @@
-#include "save_reader.hpp"
-
 #include <hog/core/bytes.hpp>
 #include <hog/sim/wildlife.hpp>
 
@@ -11,15 +9,13 @@ namespace hog::sim {
 
 namespace {
 
-using detail::Reader;
-
 void write_floats(ByteWriter& out, const std::vector<float>& values) {
     for (const float value : values) {
         out.write(std::bit_cast<std::uint32_t>(value));
     }
 }
 
-void read_floats(Reader& in, std::vector<float>& values) {
+void read_floats(ValueReader& in, std::vector<float>& values) {
     for (float& value : values) {
         value = in.single();
     }
@@ -31,7 +27,7 @@ void write_time(ByteWriter& out, const std::optional<GameTime>& time) {
     out.write(time ? static_cast<std::uint64_t>(time->time_since_epoch().count()) : never);
 }
 
-std::optional<GameTime> read_time(Reader& in) {
+std::optional<GameTime> read_time(ValueReader& in) {
     const auto time = in.integer<std::uint64_t>();
     if (time == never) {
         return std::nullopt;
@@ -50,7 +46,7 @@ void write_presence(ByteWriter& out, const Presence& presence) {
 }
 
 // Presence saved over another number of regions is read past.
-std::optional<Presence> read_presence(Reader& in, std::uint32_t regions) {
+std::optional<Presence> read_presence(ValueReader& in, std::uint32_t regions) {
     Presence presence;
     presence.alive = in.integer<std::uint8_t>() != 0;
     presence.succeeded = in.integer<std::uint8_t>() != 0;
@@ -93,7 +89,7 @@ void Wildlife::write_watch(ByteWriter& out, std::uint32_t species) const {
     }
 }
 
-bool Wildlife::read_watch(detail::Reader& in, Watched& watched) const {
+bool Wildlife::read_watch(ValueReader& in, Watched& watched) const {
     watched.since = read_time(in).value_or(time_);
     const auto count = in.integer<std::uint32_t>();
     constexpr std::size_t least_per_region = sizeof(double) + 1 + sizeof(std::uint32_t);
@@ -151,7 +147,7 @@ Result<void> Wildlife::load(std::uint16_t version, std::span<const std::byte> by
         return make_error(ErrorCode::Unsupported,
                           std::format("wildlife version {} is unknown to this build", version));
     }
-    Reader in{bytes};
+    ValueReader in{bytes};
     const auto level = in.integer<std::uint8_t>();
     if (in.ok() && level != grid_.level()) {
         return make_error(

@@ -1,4 +1,3 @@
-#include "save_reader.hpp"
 #include "weather_stages.hpp"
 
 #include <hog/core/bytes.hpp>
@@ -15,8 +14,6 @@
 namespace hog::sim {
 
 namespace {
-
-using detail::Reader;
 
 // Every saved field in order, with the version that added it. Fields only ever join at the end,
 // and an older save leaves the newer ones at zero.
@@ -40,16 +37,16 @@ void each_field(Fields& fields, Visit visit) {
     visit(fields.recent_precipitation, 3);
 }
 
-void read_value(Reader& in, float& value) {
+void read_value(ValueReader& in, float& value) {
     value = in.single();
 }
 
-void read_value(Reader& in, Vec2& value) {
+void read_value(ValueReader& in, Vec2& value) {
     value.x = in.single();
     value.y = in.single();
 }
 
-Result<std::vector<StormSystem>> read_systems(Reader& in) {
+Result<std::vector<StormSystem>> read_systems(ValueReader& in) {
     const auto count = in.integer<std::uint32_t>();
     // A damaged count can't ask for more systems than the bytes left could hold.
     constexpr std::size_t system_bytes = 44;
@@ -114,7 +111,7 @@ Result<void> Weather::load(std::uint16_t version, std::span<const std::byte> byt
         return make_error(ErrorCode::Unsupported,
                           std::format("weather version {} is unknown to this build", version));
     }
-    Reader in{bytes};
+    ValueReader in{bytes};
     const auto level = in.integer<std::uint8_t>();
     if (in.ok() && level != grid_.level()) {
         return make_error(

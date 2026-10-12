@@ -19,7 +19,8 @@
 
 namespace hog {
 class ByteWriter;
-}
+class ValueReader;
+} // namespace hog
 
 namespace hog::jobs {
 class JobSystem;
@@ -31,7 +32,6 @@ class Weather;
 
 namespace detail {
 struct LifeContext;
-class Reader;
 } // namespace detail
 
 struct WildlifeConfig {
@@ -221,7 +221,7 @@ private:
     void write_watch(ByteWriter& out, std::uint32_t species) const;
     // Whether what was read can be used: watching saved over another number of regions is read
     // past.
-    [[nodiscard]] bool read_watch(detail::Reader& in, Watched& watched) const;
+    [[nodiscard]] bool read_watch(ValueReader& in, Watched& watched) const;
 
     void step(GameTime at, const Conditions& conditions, jobs::JobSystem& jobs);
     // Animals wander, and head for better ground they can sense.

@@ -1,5 +1,3 @@
-#include "save_reader.hpp"
-
 #include <hog/core/bytes.hpp>
 #include <hog/sim/forest.hpp>
 
@@ -17,7 +15,7 @@ void write_floats(ByteWriter& out, const std::vector<float>& values) {
     }
 }
 
-void read_floats(detail::Reader& in, std::vector<float>& values) {
+void read_floats(ValueReader& in, std::vector<float>& values) {
     for (float& value : values) {
         value = in.single();
     }
@@ -40,7 +38,7 @@ Result<void> Forest::load(std::uint16_t version, std::span<const std::byte> byte
         return make_error(ErrorCode::Unsupported,
                           std::format("forest version {} is unknown to this build", version));
     }
-    detail::Reader in{bytes};
+    ValueReader in{bytes};
     const auto level = in.integer<std::uint8_t>();
     if (in.ok() && level != grid_.level()) {
         return make_error(
