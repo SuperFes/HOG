@@ -190,6 +190,7 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
     if (server->forest_) {
         server->report_forest();
     }
+    server->open_probe();
     return server;
 }
 
@@ -388,6 +389,41 @@ void Server::advance_weather(GameTime to) {
         weather_step_seconds_.observe(
             std::chrono::duration<double>(MonotonicClock::now() - started).count() /
             static_cast<double>(steps));
+    }
+}
+
+LayerSources Server::layer_sources() const {
+    return LayerSources{.planet = planet_,
+                        .weather = *weather_,
+                        .wildlife = wildlife_.get(),
+                        .forest = forest_.get()};
+}
+
+void Server::open_probe() {
+    const std::optional<std::uint16_t> port = config_.debug.port;
+    if (!port) {
+        return;
+    }
+    probe::Welcome welcome{.version = probe::protocol_version,
+                           .world_id = world_id_,
+                           .level = static_cast<std::uint8_t>(weather_->config().level),
+                           .planet_radius = weather_->config().planet_radius,
+                           .layers = layer_catalogue(layer_sources())};
+    const std::size_t layers = welcome.layers.size();
+    auto started = server::ProbeService::start(*port, std::move(welcome));
+    if (!started) {
+        log::warn(server_log, "no debug port: {}", started.error());
+        return;
+    }
+    probe_ = std::move(*started);
+    log::info(server_log, "debug tools on 127.0.0.1:{}, {} layers", probe_->port(), layers);
+}
+
+void Server::serve_probe() {
+    if (probe_) {
+        probe_->serve([this](const probe::Fetch& fetch) {
+            return fetch_layers(layer_sources(), fetch, time_);
+        });
     }
 }
 

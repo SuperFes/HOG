@@ -1,4 +1,6 @@
+#include <hog/app/probe_layers.hpp>
 #include <hog/app/server.hpp>
+#include <hog/probe/channel.hpp>
 #include <hog/testing/temporary_directory.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -10,8 +12,11 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
+#include <variant>
 #include <vector>
 
 using namespace std::chrono_literals;
@@ -296,6 +301,99 @@ capacity = { grassland = 0.5, savanna = 3, temperate_forest = 20, boreal_forest 
     const auto broken = Server::open(config, later);
     REQUIRE_FALSE(broken);
     CHECK(broken.error().message.find("forest.toml") != std::string::npos);
+}
+
+TEST_CASE("the world's layers are laid out for debug tools", "[app][server]") {
+    const World world;
+    auto config = world.config();
+    config.forest.vegetation = world.write_vegetation("[growth]\ncapacity = { grassland = 0.5 }\n");
+    const auto server = opened(config);
+    const hog::app::LayerSources sources{.planet = server->planet(),
+                                         .weather = server->weather(),
+                                         .wildlife = server->wildlife(),
+                                         .forest = server->forest()};
+    const auto catalogue = hog::app::layer_catalogue(sources);
+    const auto named = [&](std::string_view name) {
+        return std::ranges::find(catalogue, name, &hog::probe::LayerInfo::name) != catalogue.end();
+    };
+    CHECK(named("planet/biome"));
+    CHECK(named("weather/temperature"));
+    CHECK(named("weather/wind_north"));
+    CHECK(named("forest/biomass"));
+    CHECK_FALSE(named("wildlife/forage"));
+
+    const auto layers = hog::app::fetch_layers(
+        sources, hog::probe::Fetch{.names = {"forest/biomass", "nothing", "weather/temperature"}},
+        start);
+    CHECK(layers.time == start);
+    REQUIRE(layers.layers.size() == 2);
+    // In catalogue order, whatever order they were asked for in.
+    CHECK(layers.layers[0].name == "weather/temperature");
+    CHECK(layers.layers[0].values == server->weather().fields().temperature);
+    CHECK(layers.layers[1].values == server->forest()->fields().biomass);
+
+    const auto wind = hog::app::fetch_layers(
+        sources, hog::probe::Fetch{.names = {"weather/wind_east", "planet/area"}}, start);
+    REQUIRE(wind.layers.size() == 2);
+    CHECK(wind.layers[0].name == "planet/area");
+    CHECK(std::ranges::all_of(wind.layers[0].values, [](float area) { return area > 0.0F; }));
+    const auto& winds = server->weather().fields().wind;
+    std::vector<float> east(winds.size());
+    std::ranges::transform(winds, east.begin(), [](const hog::Vec2& blowing) { return blowing.x; });
+    CHECK(wind.layers[1].values == east);
+}
+
+TEST_CASE("debug tools fetch layers from a running server", "[app][server]") {
+    const World world;
+    auto config = world.config();
+    CHECK(opened(config)->probe() == nullptr);
+
+    config.debug.port = 0;
+    const auto server = opened(config);
+    REQUIRE(server->probe() != nullptr);
+    auto socket = hog::probe::Socket::connect("127.0.0.1", server->probe()->port());
+    REQUIRE(socket);
+    hog::probe::Channel tool{std::move(*socket)};
+    REQUIRE(tool.send(hog::probe::Hello{}));
+    auto welcome = tool.receive(5s);
+    REQUIRE(welcome);
+    REQUIRE(welcome->has_value());
+    const hog::probe::Message greeting = welcome->value_or(hog::probe::Message{});
+    const auto* welcomed = std::get_if<hog::probe::Welcome>(&greeting);
+    REQUIRE(welcomed != nullptr);
+    CHECK(welcomed->world_id == server->world_id());
+    CHECK(welcomed->level == server->weather().grid().level());
+    CHECK_FALSE(welcomed->layers.empty());
+
+    std::atomic<bool> answered = false;
+    std::optional<hog::probe::Message> answer;
+    std::thread asking{[&] {
+        REQUIRE(tool.send(hog::probe::Fetch{.names = {"weather/pressure"}}));
+        auto received = tool.receive(10s);
+        if (received && received->has_value()) {
+            answer = **received;
+        }
+        answered.store(true);
+    }};
+    // Fetches are answered as the world ticks.
+    GameTime now = start;
+    while (!answered.load()) {
+        now += 1s;
+        server->catch_up([now] { return now; });
+        std::this_thread::sleep_for(1ms);
+    }
+    asking.join();
+    REQUIRE(answer);
+    const hog::probe::Message reply = answer.value_or(hog::probe::Message{});
+    const auto* layers = std::get_if<hog::probe::Layers>(&reply);
+    REQUIRE(layers != nullptr);
+    CHECK(layers->time > start);
+    REQUIRE(layers->layers.size() == 1);
+    CHECK(layers->layers[0].values.size() == server->weather().grid().size());
+
+    // A port already taken leaves the server running without one.
+    config.debug.port = server->probe()->port();
+    CHECK(opened(config)->probe() == nullptr);
 }
 
 TEST_CASE("snapshots are taken every save interval", "[app][server]") {

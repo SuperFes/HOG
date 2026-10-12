@@ -1,6 +1,7 @@
 #pragma once
 
 #include <hog/app/logging.hpp>
+#include <hog/app/probe_layers.hpp>
 #include <hog/core/log.hpp>
 #include <hog/core/metrics.hpp>
 #include <hog/core/result.hpp>
@@ -10,6 +11,7 @@
 #include <hog/planet/world.hpp>
 #include <hog/server/catch_up.hpp>
 #include <hog/server/persistence.hpp>
+#include <hog/server/probe_service.hpp>
 #include <hog/server/server_config.hpp>
 #include <hog/server/snapshot_writer.hpp>
 #include <hog/server/tick_loop.hpp>
@@ -81,6 +83,8 @@ public:
     [[nodiscard]] const sim::Wildlife* wildlife() const noexcept { return wildlife_.get(); }
     // Null when no vegetation is configured.
     [[nodiscard]] const sim::Forest* forest() const noexcept { return forest_.get(); }
+    // Null without a debug port, or when it couldn't be opened.
+    [[nodiscard]] const server::ProbeService* probe() const noexcept { return probe_.get(); }
 
     // Logs the metrics, bringing those mirrored from elsewhere up to date first.
     void report(std::uint64_t slipped);
@@ -104,6 +108,11 @@ private:
     // Logs the species that are gone from everywhere, as the server opens.
     void recall_extinctions() const;
     void submit();
+    [[nodiscard]] LayerSources layer_sources() const;
+    // Opens the debug port, if one is configured, logging rather than failing if it can't.
+    void open_probe();
+    // Answers debug tools waiting on the world.
+    void serve_probe();
 
     server::ServerConfig config_;
     std::uint64_t world_id_;
@@ -119,6 +128,8 @@ private:
     std::unique_ptr<sim::Weather> weather_;
     std::unique_ptr<sim::Wildlife> wildlife_;
     std::unique_ptr<sim::Forest> forest_;
+    // After what it reads, so it stops first.
+    std::unique_ptr<server::ProbeService> probe_;
     GameTime time_;
     Tick tick_;
 
@@ -159,8 +170,11 @@ server::CatchUpStats Server::catch_up(Now now) {
     server::TickClock clock{time_, config_.tick_rate, server::default_time_scale, tick_};
     const MonotonicClock::time_point started = MonotonicClock::now();
     const server::CatchUpStats stats =
-        server::catch_up(clock, config_.catch_up_ticks, now,
-                         [this](const server::TickClock& at) { simulate(at.now(), at.step()); });
+        server::catch_up(clock, config_.catch_up_ticks, now, [this](const server::TickClock& at) {
+            simulate(at.now(), at.step());
+            time_ = at.now() + at.step();
+            serve_probe();
+        });
     time_ = clock.now();
     tick_ = clock.tick();
     catch_up_ticks_.add(stats.ticks);
@@ -193,6 +207,7 @@ Result<void> Server::run(T& timer, const std::atomic<bool>& stop) {
         simulate(clock.now(), clock.step());
         time_ = clock.now() + clock.step();
         tick_ = clock.tick() + TickDelta{1};
+        serve_probe();
         if (saves.due(time_)) {
             submit();
         }
