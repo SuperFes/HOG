@@ -1,3 +1,4 @@
+#include "save_reader.hpp"
 #include "weather_stages.hpp"
 
 #include <hog/core/bytes.hpp>
@@ -14,6 +15,8 @@
 namespace hog::sim {
 
 namespace {
+
+using detail::Reader;
 
 // Every saved field in order, with the version that added it. Fields only ever join at the end,
 // and an older save leaves the newer ones at zero.
@@ -36,41 +39,6 @@ void each_field(Fields& fields, Visit visit) {
     visit(fields.recent_temperature, 3);
     visit(fields.recent_precipitation, 3);
 }
-
-// Reads values in order, keeping the first failure and reading nothing after it.
-class Reader {
-public:
-    explicit Reader(std::span<const std::byte> bytes) noexcept : in_{bytes} {}
-
-    template <std::unsigned_integral T>
-    T integer() {
-        if (error_) {
-            return 0;
-        }
-        auto value = in_.read<T>();
-        if (!value) {
-            error_ = std::move(value.error());
-            return 0;
-        }
-        return *value;
-    }
-    float single() { return std::bit_cast<float>(integer<std::uint32_t>()); }
-    double twice() { return std::bit_cast<double>(integer<std::uint64_t>()); }
-
-    [[nodiscard]] bool ok() const noexcept { return !error_; }
-    [[nodiscard]] std::size_t remaining() const noexcept { return in_.remaining(); }
-    // Fails with the first failure, or if bytes are left over.
-    [[nodiscard]] Result<void> finish() const {
-        if (error_) {
-            return std::unexpected(*error_);
-        }
-        return in_.finish();
-    }
-
-private:
-    ByteReader in_;
-    std::optional<Error> error_;
-};
 
 void read_value(Reader& in, float& value) {
     value = in.single();

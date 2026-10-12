@@ -331,6 +331,54 @@ TEST_CASE("wildlife is the same on any number of threads", "[sim][wildlife]") {
     CHECK(a.fields() == b.fields());
 }
 
+TEST_CASE("wildlife saves and loads", "[sim][wildlife]") {
+    JobSystem jobs{1};
+    Species wolf = grazer();
+    wolf.name = "wolf";
+    wolf.diet = {Food{.kind = Food::Kind::Prey, .prey = 0}};
+    wolf.density = 0.1;
+    Wildlife saved{config({grazer(), wolf}), grassland(), march_equinox};
+    const Steady weather;
+    saved.advance_to(march_equinox + days{40}, weather.conditions(), jobs);
+    const auto bytes = saved.save();
+
+    Wildlife loaded{config({grazer(), wolf}), grassland(), march_equinox + days{400}};
+    REQUIRE(loaded.load(Wildlife::save_version, bytes));
+    CHECK(loaded.time() == saved.time());
+    CHECK(loaded.fields() == saved.fields());
+    saved.advance_to(march_equinox + days{50}, weather.conditions(), jobs);
+    loaded.advance_to(march_equinox + days{50}, weather.conditions(), jobs);
+    CHECK(loaded.fields() == saved.fields());
+
+    // Species are found by name: the wolf moved, the deer left, and the crow is new.
+    Species crow = grazer();
+    crow.name = "crow";
+    Wildlife changed{config({wolf, crow}), grassland(), march_equinox};
+    const auto crows = changed.fields().populations[1];
+    REQUIRE(changed.load(Wildlife::save_version, bytes));
+    Wildlife reloaded{config({grazer(), wolf}), grassland(), march_equinox};
+    REQUIRE(reloaded.load(Wildlife::save_version, bytes));
+    CHECK(changed.fields().populations[0] == reloaded.fields().populations[1]);
+    CHECK(changed.fields().populations[1] == crows);
+
+    Wildlife finer{WildlifeConfig{.level = level + 1}, std::vector<Habitat>(6U << 8U),
+                   march_equinox};
+    const auto other_level = finer.load(Wildlife::save_version, bytes);
+    REQUIRE_FALSE(other_level);
+    CHECK(other_level.error().code == hog::ErrorCode::InvalidArgument);
+    const auto newer = reloaded.load(Wildlife::save_version + 1, bytes);
+    REQUIRE_FALSE(newer);
+    CHECK(newer.error().code == hog::ErrorCode::Unsupported);
+
+    const auto before = reloaded.fields();
+    const std::span<const std::byte> all{bytes};
+    CHECK_FALSE(reloaded.load(Wildlife::save_version, all.first(all.size() - 1)));
+    auto longer = bytes;
+    longer.push_back(std::byte{0});
+    CHECK_FALSE(reloaded.load(Wildlife::save_version, longer));
+    CHECK(reloaded.fields() == before);
+}
+
 TEST_CASE("wildlife lives on the planet under its weather", "[sim][wildlife]") {
     const hog::planet::World world{hog::planet::PlanetConfig{.seed = 1, .radius = 115'000.0}};
     const hog::sim::CellGrid grid{level};

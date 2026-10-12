@@ -9,6 +9,7 @@
 
 #include <array>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <vector>
@@ -101,6 +102,15 @@ public:
     float take(std::uint32_t species, std::uint32_t cell, float count);
     // Puts animals back, as when they're folded back into the population.
     void add(std::uint32_t species, std::uint32_t cell, float count);
+
+    // Versioned bytes for a snapshot section.
+    [[nodiscard]] std::vector<std::byte> save() const;
+    // Replaces the state with saved bytes, or fails and changes nothing: with Unsupported for a
+    // newer version, and InvalidArgument for wildlife saved at another grid level. Species are
+    // matched by name; one the save lacks keeps its state.
+    [[nodiscard]] Result<void> load(std::uint16_t version, std::span<const std::byte> bytes);
+
+    static constexpr std::uint16_t save_version = 1;
 
 private:
     void step(GameTime at, const Conditions& conditions, jobs::JobSystem& jobs);

@@ -12,7 +12,8 @@ add_library(hog_sim
     src/wildlife.cpp
     src/wildlife_food.cpp
     src/wildlife_life.cpp
-    src/wildlife_motion.cpp)
+    src/wildlife_motion.cpp
+    src/wildlife_save.cpp)
 add_library(hog::sim ALIAS hog_sim)
 
 target_include_directories(hog_sim PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
