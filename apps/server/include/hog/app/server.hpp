@@ -86,6 +86,8 @@ private:
     // Builds the weather and wildlife as of `at`, on the planet with its changes.
     [[nodiscard]] Result<void> start_simulation(const planet::PlanetConfig& shape, GameTime at);
     void advance_weather(GameTime to);
+    // Logs species dying out everywhere and coming back.
+    void watch_extinctions();
     void submit();
 
     server::ServerConfig config_;
@@ -101,6 +103,8 @@ private:
     // Set once the planet's changes are in, since the weather starts from the ground.
     std::unique_ptr<sim::Weather> weather_;
     std::unique_ptr<sim::Wildlife> wildlife_;
+    // Per species, whether it was extinct when last watched.
+    std::vector<bool> extinct_;
     GameTime time_;
     Tick tick_;
 
@@ -118,6 +122,7 @@ private:
     metrics::Histogram& weather_step_seconds_;
     metrics::Counter& wildlife_steps_;
     metrics::Histogram& wildlife_step_seconds_;
+    metrics::Gauge& extinct_species_;
     metrics::Reporter reporter_;
     // What the mirrored counters were last brought up to.
     server::SnapshotWriter::Stats mirrored_writes_;

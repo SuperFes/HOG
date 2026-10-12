@@ -67,5 +67,5 @@ TEST_CASE("logging fails without changing anything", "[app][logging]") {
     REQUIRE_FALSE(unwritable);
 
     CHECK(hog::app::server_log.threshold() == Level::Info);
-    CHECK(hog::app::categories().size() == 3);
+    CHECK(hog::app::categories().size() == 4);
 }

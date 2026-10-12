@@ -88,6 +88,16 @@ std::uint64_t counter(const Server& server, std::string_view name) {
     return 0;
 }
 
+double gauge(const Server& server, std::string_view name) {
+    for (const auto& entry : server.metrics().entries()) {
+        if (entry.name == name) {
+            return std::get<std::unique_ptr<hog::metrics::Gauge>>(entry.metric)->value();
+        }
+    }
+    FAIL("no gauge " << name);
+    return 0.0;
+}
+
 // Runs the server for `ticks` live ticks.
 void run(Server& server, int ticks) {
     std::atomic<bool> stop{false};
@@ -217,6 +227,30 @@ habitat = { grassland = 1, savanna = 1, temperate_forest = 0.5 }
     const auto broken = Server::open(config, later);
     REQUIRE_FALSE(broken);
     CHECK(broken.error().message.find("ecology.toml") != std::string::npos);
+}
+
+TEST_CASE("species dying out everywhere are counted", "[app][server]") {
+    const World world;
+    auto config = world.config();
+    config.catch_up_ticks = 100;
+    // With nothing to eat, it starves on the first day.
+    config.wildlife.ecology = world.write_ecology(R"(
+[[species]]
+name = "dodo"
+habitat = { grassland = 1, savanna = 1, temperate_forest = 1 }
+starving = 1
+)");
+    REQUIRE(opened(config)->save());
+    const GameTime later = start + 48h;
+    {
+        const auto server = opened(config, later);
+        CHECK(gauge(*server, "hog_wildlife_extinct_species") == 0.0);
+        server->catch_up([&] { return later; });
+        CHECK(server->wildlife()->presence(0).extinct);
+        CHECK(gauge(*server, "hog_wildlife_extinct_species") == 1.0);
+        REQUIRE(server->save());
+    }
+    CHECK(gauge(*opened(config, later), "hog_wildlife_extinct_species") == 1.0);
 }
 
 TEST_CASE("snapshots are taken every save interval", "[app][server]") {

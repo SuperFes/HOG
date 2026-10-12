@@ -10,7 +10,8 @@ namespace hog::app {
 
 namespace {
 
-constexpr std::array<const log::Category*, 3> all{&server_log, &save_log, &metrics_log};
+constexpr std::array<const log::Category*, 4> all{&server_log, &save_log, &metrics_log,
+                                                  &wildlife_log};
 
 [[nodiscard]] const log::Category* find(std::string_view name) {
     for (const log::Category* category : all) {

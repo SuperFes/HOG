@@ -42,6 +42,7 @@ exposure = 0.002
 wander_km = 0.5
 speed_km = 4
 leftovers = 0
+recovery = { years = [2, 6], founders = 20 }
 
 # A predator: hunts deer, takes carrion when it must, and trails the deer by a year or two.
 [[species]]
@@ -63,6 +64,8 @@ exposure = 0.002
 wander_km = 2
 speed_km = 10
 leftovers = 0.4
+# Once hunted out everywhere, a hidden pack turns up decades later.
+recovery = { years = [5, 15], founders = 4, after_extinction = "relict", extinct_years = [15, 40] }
 
 # A scavenger: flies anywhere over land and lives on what dies.
 [[species]]
@@ -84,3 +87,4 @@ exposure = 0.002
 wander_km = 3
 speed_km = 20
 leftovers = 0
+recovery = { years = [1, 4], founders = 10 }

@@ -85,6 +85,8 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config,
       wildlife_step_seconds_(registry_.histogram("hog_wildlife_step_seconds",
                                                  "Real time each wildlife step took.",
                                                  {tick_bounds.begin(), tick_bounds.end()})),
+      extinct_species_(registry_.gauge("hog_wildlife_extinct_species",
+                                       "Species gone from everywhere, waiting to come back.")),
       reporter_(registry_) {
     persistence_.persist<server::Position>();
 }
@@ -166,6 +168,9 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
         server->time_ = now;
         log::info(save_log, "no snapshot; starting a new world at {}", format_time(now));
     }
+    if (server->wildlife_) {
+        server->watch_extinctions();
+    }
     return server;
 }
 
@@ -215,8 +220,29 @@ void Server::simulate(GameTime from, GameDuration step) {
         wildlife_steps_.add(1);
         wildlife_step_seconds_.observe(
             std::chrono::duration<double>(MonotonicClock::now() - started).count());
+        watch_extinctions();
     }
     advance_weather(to);
+}
+
+void Server::watch_extinctions() {
+    const auto& species = wildlife_->config().ecology.species;
+    extinct_.resize(species.size());
+    std::size_t extinct = 0;
+    for (std::uint32_t kind = 0; kind < species.size(); ++kind) {
+        const bool gone = wildlife_->presence(kind).extinct.has_value();
+        if (gone && !extinct_[kind]) {
+            const bool waits =
+                species[kind].recovery.after_extinction == sim::Recovery::After::Admin;
+            log::warn(wildlife_log, "{} has died out everywhere{}", species[kind].name,
+                      waits ? " and waits to be reintroduced" : "");
+        } else if (!gone && extinct_[kind]) {
+            log::info(wildlife_log, "{} is back", species[kind].name);
+        }
+        extinct_[kind] = gone;
+        extinct += gone ? 1 : 0;
+    }
+    extinct_species_.set(static_cast<double>(extinct));
 }
 
 void Server::advance_weather(GameTime to) {
