@@ -4,6 +4,7 @@
 #include <hog/probe/messages.hpp>
 #include <hog/sim/cell_grid.hpp>
 #include <hog/viewer/clock_text.hpp>
+#include <hog/viewer/daylight.hpp>
 #include <hog/viewer/frame.hpp>
 #include <hog/viewer/link.hpp>
 #include <hog/viewer/map_view.hpp>
@@ -37,6 +38,7 @@ using namespace hog;
 
 constexpr float sidebar_width = 280.0F;
 constexpr double zoom_step = 1.2;
+constexpr float sun_radius = 6.0F;
 
 struct WindowDeleter {
     void operator()(SDL_Window* window) const noexcept { SDL_DestroyWindow(window); }
@@ -134,10 +136,12 @@ struct View {
     viewer::Overlay overlay = viewer::Overlay::Terrain;
     std::string species;
     viewer::MapView map;
+    bool daylight = true;
     Texture texture;
     std::optional<sim::CellGrid> grid;
-    std::uint64_t drawn = 0; // the link's frame count when last drawn
-    bool stale = true;       // the choices changed since
+    std::optional<DVec2> sun; // where it's overhead on the map, when daylight is shown
+    std::uint64_t drawn = 0;  // the link's frame count when last drawn
+    bool stale = true;        // the choices changed since
 };
 
 // Draws the newest frame into the map texture, when there's something new to draw.
@@ -151,8 +155,13 @@ void redraw(View& view, const viewer::Link& link, SDL_Renderer* renderer, int wi
     if (!view.grid || view.grid->level() != level) {
         view.grid.emplace(level);
     }
-    const mapgen::Image image =
+    mapgen::Image image =
         viewer::render_overlay(*view.grid, *frame, view.overlay, view.species, width, jobs);
+    view.sun.reset();
+    if (const auto calendar = viewer::calendar_of(frame->welcome()); calendar && view.daylight) {
+        viewer::shade_night(image, *calendar, frame->time(), jobs);
+        view.sun = viewer::subsolar_point(*calendar, frame->time());
+    }
     if (view.texture == nullptr) {
         view.texture.reset(SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB24,
                                              SDL_TEXTUREACCESS_STATIC, image.width, image.height));
@@ -251,6 +260,9 @@ void sidebar(View& view, viewer::Link& link) {
         }
     }
     choose(view, link, overlay, std::move(species));
+    if (ImGui::Checkbox("daylight", &view.daylight)) {
+        view.stale = true;
+    }
 
     ImGui::Separator();
     if (frame != nullptr) {
@@ -297,6 +309,15 @@ void map(View& view) {
     draw->AddImage(texture_ref(view.texture.get()), corner, far,
                    ImVec2{static_cast<float>(shown.low.x), static_cast<float>(shown.low.y)},
                    ImVec2{static_cast<float>(shown.high.x), static_cast<float>(shown.high.y)});
+    if (view.sun) {
+        const DVec2 at = viewer::shown_point(shown, *view.sun);
+        const ImVec2 centre{corner.x + (static_cast<float>(at.x) * size.x),
+                            corner.y + (static_cast<float>(at.y) * size.y)};
+        draw->PushClipRect(corner, far, true);
+        draw->AddCircleFilled(centre, sun_radius, IM_COL32(255, 210, 60, 255));
+        draw->AddCircle(centre, sun_radius, IM_COL32(60, 40, 0, 255), 0, 1.5F);
+        draw->PopClipRect();
+    }
 }
 
 int run(std::span<const std::string_view> arguments) {
