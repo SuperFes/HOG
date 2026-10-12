@@ -21,3 +21,66 @@ desert = 15000
 savanna = 250000
 tropical_rainforest = 150000
 alpine = 50000
+
+# A grazer: lives on open ground and forest edges, breeds in spring, and leaves the cold.
+[[species]]
+name = "deer"
+moves = "land"
+mass = 70
+appetite = 3
+half_fed = 20000
+diet = { forage = 1 }
+habitat = { grassland = 1, savanna = 1, shrubland = 0.9, temperate_forest = 0.7, boreal_forest = 0.4, tundra = 0.2, alpine = 0.2 }
+density = 4
+crowded = 15
+births = 0.9
+breeding = { start_day = 60, days = 40 }
+lifespan_years = 10
+starving = 0.03
+comfort = [-10, 35]
+exposure = 0.002
+wander_km = 0.5
+speed_km = 4
+leftovers = 0
+
+# A predator: hunts deer, takes carrion when it must, and trails the deer by a year or two.
+[[species]]
+name = "wolf"
+moves = "land"
+mass = 40
+appetite = 2.5
+half_fed = 80
+diet = { deer = 1, carrion = 0.3 }
+habitat = { grassland = 1, savanna = 0.8, shrubland = 1, temperate_forest = 1, boreal_forest = 1, tundra = 0.8, alpine = 0.6 }
+density = 0.02
+crowded = 0.5
+births = 1.2
+breeding = { start_day = 45, days = 30 }
+lifespan_years = 7
+starving = 0.02
+comfort = [-40, 35]
+exposure = 0.002
+wander_km = 2
+speed_km = 10
+leftovers = 0.4
+
+# A scavenger: flies anywhere over land and lives on what dies.
+[[species]]
+name = "raven"
+moves = "air"
+mass = 1.2
+appetite = 0.08
+half_fed = 0.2
+diet = { carrion = 1 }
+habitat = { grassland = 0.8, savanna = 0.8, shrubland = 0.8, temperate_forest = 1, boreal_forest = 1, tundra = 1, alpine = 0.8, desert = 0.3, beach = 0.5, tropical_rainforest = 0.5 }
+density = 0.5
+crowded = 5
+births = 1
+breeding = { start_day = 30, days = 40 }
+lifespan_years = 10
+starving = 0.03
+comfort = [-40, 40]
+exposure = 0.002
+wander_km = 3
+speed_km = 20
+leftovers = 0

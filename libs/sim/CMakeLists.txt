@@ -24,6 +24,7 @@ hog_add_tests(hog_sim
     tests/calendar_tests.cpp
     tests/cell_grid_tests.cpp
     tests/ecology_tests.cpp
+    tests/food_chain_tests.cpp
     tests/weather_tests.cpp
     tests/wildlife_tests.cpp)
 
