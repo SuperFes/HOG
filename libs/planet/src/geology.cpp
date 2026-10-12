@@ -22,6 +22,10 @@ constexpr std::int64_t ocean_sand = 3 * fixed_one;
 constexpr std::int64_t ocean_sediment = 200 * fixed_one;
 constexpr std::int64_t sand_cover = 2 * fixed_one;
 constexpr std::int64_t max_sediment = 600 * fixed_one;
+// Continent height where the shelf gives way to ocean floor, a third of the way down the slope to
+// the abyss (about 1,300 m deep), wandering up to `shelf_wander` either way.
+constexpr std::int64_t shelf_edge = -fixed_one / 20;
+constexpr std::int64_t shelf_wander = fixed_one / 50;
 
 // The surface below which a seam sits.
 enum class Host : std::uint8_t {
@@ -89,6 +93,7 @@ constexpr std::array<Seam, resource_count> seams{{
 constexpr std::int64_t seam_ramp = fixed_one / 4;
 // Clay lies on low ground near the coast; salt only where it is dry; gold where mountains rose.
 constexpr std::int64_t clay_below = 60 * fixed_one;
+constexpr std::int64_t clay_above = -200 * fixed_one;
 constexpr std::int64_t salt_moisture = fixed_one * 7 / 20;
 constexpr std::int64_t gold_strength = fixed_one / 4;
 
@@ -109,8 +114,8 @@ constexpr std::int64_t gold_strength = fixed_one / 4;
                             std::int64_t elevation, std::int64_t moisture, std::int64_t mountains) {
     switch (resource) {
     case Resource::Clay:
-        return elevation < clay_below && biome != Biome::Desert && biome != Biome::Ice &&
-               biome != Biome::Alpine;
+        return elevation < clay_below && elevation > clay_above && biome != Biome::Desert &&
+               biome != Biome::Ice && biome != Biome::Alpine;
     case Resource::Coal:
         return strata.sediment == Rock::Shale || strata.sediment == Rock::Sandstone;
     case Resource::Salt:
@@ -189,12 +194,20 @@ NoisePoint Geology::noise_at(CellId cell, double wavelength) const {
     return noise_point(cell_center(cell), planet_radius_ / wavelength);
 }
 
+bool Geology::continental(CellId cell) const {
+    const std::int64_t wander =
+        multiply(shelf_wander, fbm(hash_combine(thickness_seed_, 1),
+                                   noise_at(cell, thickness_wavelength), octaves));
+    return terrain().continents().height(cell) > shelf_edge + wander;
+}
+
 Strata Geology::strata(CellId cell) const {
     return strata(cell, climate_.biome(cell));
 }
 
 Strata Geology::strata(CellId cell, Biome biome) const {
-    if (biome == Biome::Ocean) {
+    const bool sea = biome == Biome::Ocean;
+    if (sea && !continental(cell)) {
         return {.cover = Rock::Sand,
                 .cover_thickness = ocean_sand,
                 .sediment = Rock::Shale,
@@ -212,6 +225,10 @@ Strata Geology::strata(CellId cell, Biome biome) const {
         strata.cover = Rock::Sand;
         strata.cover_thickness = sand_cover;
         break;
+    case Biome::Ocean:
+        strata.cover = Rock::Sand;
+        strata.cover_thickness = ocean_sand;
+        break;
     case Biome::Ice:
     case Biome::Alpine:
         break;
@@ -220,7 +237,7 @@ Strata Geology::strata(CellId cell, Biome biome) const {
         strata.cover_thickness = multiply(fixed_one + unit(swell), fixed_one - mountains);
     }
     // The starting islands are volcanic, with nothing laid down on them yet.
-    if (terrain().continents().height(cell) <= 0) {
+    if (!sea && terrain().continents().height(cell) <= 0) {
         strata.bedrock = Rock::Basalt;
         return strata;
     }
@@ -239,7 +256,7 @@ Strata Geology::strata(CellId cell, Biome biome) const {
 std::array<Deposit, resource_count> Geology::deposits(CellId cell) const {
     std::array<Deposit, resource_count> found{};
     const Biome biome = climate_.biome(cell);
-    if (biome == Biome::Ocean) {
+    if (biome == Biome::Ocean && !continental(cell)) {
         return found;
     }
     const Strata strata = this->strata(cell, biome);

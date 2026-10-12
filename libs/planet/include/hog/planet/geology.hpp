@@ -85,13 +85,18 @@ struct Deposit {
 resource_at(const std::array<Deposit, resource_count>& deposits, std::int64_t depth) noexcept;
 
 // Rock layers and ore deposits from terrain and climate: continents sit on granite under a cover
-// of sedimentary rock that mountains strip away; ocean floors and the starting islands are basalt.
+// of sedimentary rock that mountains strip away, carrying on under the sea as shelves; the deep
+// ocean floor and the starting islands are basalt.
 class Geology {
 public:
     explicit Geology(const PlanetConfig& config);
 
     [[nodiscard]] const Climate& climate() const noexcept { return climate_; }
     [[nodiscard]] const Elevation& terrain() const noexcept { return climate_.terrain(); }
+
+    // Whether continental crust lies under the cell. It reaches out under the sea as a shelf,
+    // ending partway down the slope to the ocean floor.
+    [[nodiscard]] bool continental(CellId cell) const;
 
     [[nodiscard]] Strata strata(CellId cell) const;
 

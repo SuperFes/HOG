@@ -59,6 +59,29 @@ constexpr std::size_t index(Resource resource) {
     return static_cast<std::size_t>(resource);
 }
 
+// Each resource's seam lies in the rock it forms in.
+void check_host(Resource resource, const hog::planet::Deposit& deposit, const Strata& strata) {
+    switch (resource) {
+    case Resource::Clay:
+        REQUIRE(deposit.top == strata.cover_thickness);
+        break;
+    case Resource::Coal:
+    case Resource::Salt:
+        REQUIRE(deposit.top + deposit.thickness <= strata.bedrock_depth());
+        REQUIRE(strata.rock_at(deposit.top) == strata.sediment);
+        break;
+    case Resource::Tin:
+    case Resource::Gold:
+        REQUIRE(strata.rock_at(deposit.top) == Rock::Granite);
+        [[fallthrough]];
+    case Resource::Copper:
+        REQUIRE(deposit.top >= strata.bedrock_depth());
+        break;
+    case Resource::Iron:
+        break;
+    }
+}
+
 } // namespace
 
 TEST_CASE("strata stack from the surface down", "[planet][geology]") {
@@ -112,23 +135,58 @@ TEST_CASE("every rock and resource has a distinct name", "[planet][geology]") {
     CHECK_FALSE(resources.contains("unknown"));
 }
 
-TEST_CASE("continents stand on granite and oceans on basalt", "[planet][geology]") {
+TEST_CASE("continents stand on granite and the deep ocean on basalt", "[planet][geology]") {
     const std::uint64_t seed = GENERATE(1U, 2U);
     const Geology geology{planet(seed)};
     std::set<Rock> sediments;
+    std::set<Rock> shelf_sediments;
     for (const CellId cell : cells_at(6)) {
         const Strata strata = geology.strata(cell);
         REQUIRE(strata.cover_thickness >= 0);
         REQUIRE(strata.sediment_thickness >= 0);
-        if (!geology.terrain().is_land(cell)) {
+        const bool land = geology.terrain().is_land(cell);
+        if (geology.terrain().continents().is_land(cell)) {
+            REQUIRE(geology.continental(cell));
+        }
+        if (!geology.continental(cell)) {
             REQUIRE(strata.bedrock == Rock::Basalt);
-            REQUIRE(strata.cover == Rock::Sand);
-        } else if (geology.terrain().continents().is_land(cell)) {
+            if (!land) {
+                REQUIRE(strata.cover == Rock::Sand);
+            }
+        } else if (land && geology.terrain().continents().is_land(cell)) {
             REQUIRE(strata.bedrock == Rock::Granite);
             sediments.insert(strata.sediment);
+        } else if (!land) {
+            // The shelf: the continent's rock under sea sand.
+            REQUIRE(strata.bedrock == Rock::Granite);
+            REQUIRE(strata.cover == Rock::Sand);
+            shelf_sediments.insert(strata.sediment);
         }
     }
     CHECK(sediments == std::set{Rock::Sandstone, Rock::Shale, Rock::Limestone});
+    CHECK(shelf_sediments == sediments);
+}
+
+TEST_CASE("shelves end partway down to the ocean floor", "[planet][geology]") {
+    const Geology geology{planet(1)};
+    int shelf = 0;
+    int deep = 0;
+    for (const CellId cell : cells_at(7)) {
+        const std::int64_t height = geology.terrain().continents().height(cell);
+        if (geology.terrain().is_land(cell)) {
+            continue;
+        }
+        // Clear of the wandering edge, on either side.
+        if (height > -fixed_one / 40) {
+            REQUIRE(geology.continental(cell));
+            ++shelf;
+        } else if (height < -fixed_one * 3 / 40) {
+            REQUIRE_FALSE(geology.continental(cell));
+            ++deep;
+        }
+    }
+    CHECK(shelf > 0);
+    CHECK(deep > shelf);
 }
 
 TEST_CASE("mountains are stripped down to granite", "[planet][geology]") {
@@ -175,15 +233,26 @@ TEST_CASE("deposits are sparse seams in their host rock", "[planet][geology]") {
     const Geology geology{planet(1)};
     std::array<int, hog::planet::resource_count> found{};
     int land = 0;
+    int shelf = 0;
+    int shelf_deposits = 0;
     for (const CellId cell : scattered(40'000)) {
         const auto deposits = geology.deposits(cell);
-        if (!geology.terrain().is_land(cell)) {
+        if (!geology.continental(cell) && !geology.terrain().is_land(cell)) {
             for (const auto& deposit : deposits) {
                 REQUIRE(deposit.empty());
             }
             continue;
         }
-        ++land;
+        const bool offshore = !geology.terrain().is_land(cell);
+        if (offshore) {
+            ++shelf;
+            shelf_deposits +=
+                std::ranges::any_of(deposits, [](const auto& deposit) { return !deposit.empty(); })
+                    ? 1
+                    : 0;
+        } else {
+            ++land;
+        }
         const Strata strata = geology.strata(cell);
         for (int resource = 0; resource < hog::planet::resource_count; ++resource) {
             const auto& deposit = deposits.at(static_cast<std::size_t>(resource));
@@ -191,32 +260,16 @@ TEST_CASE("deposits are sparse seams in their host rock", "[planet][geology]") {
                 continue;
             }
             INFO(to_string(static_cast<Resource>(resource)));
-            ++found.at(static_cast<std::size_t>(resource));
+            if (!offshore) {
+                ++found.at(static_cast<std::size_t>(resource));
+            }
             REQUIRE(deposit.thickness > 0);
             REQUIRE(deposit.thickness <= 15 * fixed_one);
             REQUIRE(deposit.top >= strata.cover_thickness);
             const double volume = geology.volume(cell, deposit);
             REQUIRE(volume > 0.0);
             REQUIRE(std::isfinite(volume));
-            switch (static_cast<Resource>(resource)) {
-            case Resource::Clay:
-                REQUIRE(deposit.top == strata.cover_thickness);
-                break;
-            case Resource::Coal:
-            case Resource::Salt:
-                REQUIRE(deposit.top + deposit.thickness <= strata.bedrock_depth());
-                REQUIRE(strata.rock_at(deposit.top) == strata.sediment);
-                break;
-            case Resource::Tin:
-            case Resource::Gold:
-                REQUIRE(strata.rock_at(deposit.top) == Rock::Granite);
-                [[fallthrough]];
-            case Resource::Copper:
-                REQUIRE(deposit.top >= strata.bedrock_depth());
-                break;
-            case Resource::Iron:
-                break;
-            }
+            check_host(static_cast<Resource>(resource), deposit, strata);
         }
     }
     for (int resource = 0; resource < hog::planet::resource_count; ++resource) {
@@ -225,6 +278,9 @@ TEST_CASE("deposits are sparse seams in their host rock", "[planet][geology]") {
         CHECK(count > 0);
         CHECK(count < land / 3);
     }
+    // Seams run on under the shelf.
+    CHECK(shelf > 0);
+    CHECK(shelf_deposits > 0);
     // Gold is the rarest.
     for (const int count : found) {
         CHECK(found.at(index(Resource::Gold)) <= count);
