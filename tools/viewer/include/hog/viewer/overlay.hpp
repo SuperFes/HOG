@@ -60,11 +60,12 @@ inline constexpr mapgen::Rgb missing_colour{90, 90, 90};
 // The shown part of the map, latitude down and longitude across, twice as wide as it is tall.
 // Fields are smoothed between cells; biomes and fires are shown cell by cell. Where `ground`, if
 // any, was surveyed, the terrain, coasts and biomes come from it instead, as finely as it was
-// sampled. Precondition: the grid is at the frame's level.
+// sampled. `natural` gives the cells' edges a natural wander. Precondition: the grid is at the
+// frame's level.
 [[nodiscard]] mapgen::Image render_overlay(const sim::CellGrid& grid, const Frame& frame,
                                            const probe::Ground* ground, Overlay overlay,
                                            std::string_view species, const MapRect& shown,
-                                           int width, jobs::JobSystem& jobs);
+                                           int width, bool natural, jobs::JobSystem& jobs);
 
 // Pale lows through white to dark red highs, in hPa.
 [[nodiscard]] mapgen::Rgb pressure_colour(double pressure) noexcept;

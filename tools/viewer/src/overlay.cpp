@@ -3,6 +3,7 @@
 #include <hog/planet/climate.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/sim/natural.hpp>
 #include <hog/sim/weather.hpp>
 #include <hog/viewer/ground.hpp>
 #include <hog/viewer/overlay.hpp>
@@ -47,17 +48,24 @@ std::int64_t fixed(double value) {
 // Where on the map a pixel samples.
 struct Spot {
     DVec3 direction;
+    DVec3 cells;                       // where the simulation's cells are read
     std::optional<std::size_t> sample; // of the surveyed ground, if it reaches here
 };
 
 // Reads a frame's layers, and the ground surveyed where there is some, at points on the planet.
 class Sampler {
 public:
-    Sampler(const sim::CellGrid& grid, const Frame& frame, const probe::Ground* ground)
-        : grid_(&grid), frame_(&frame), ground_(ground) {}
+    Sampler(const sim::CellGrid& grid, const Frame& frame, const probe::Ground* ground,
+            bool natural)
+        : grid_(&grid), frame_(&frame), ground_(ground),
+          reach_(natural ? sim::natural_reach(grid.level()) : 0.0) {}
 
     [[nodiscard]] Spot spot(DVec2 point) const {
-        return Spot{.direction = map_direction(point),
+        const DVec3 direction = map_direction(point);
+        return Spot{.direction = direction,
+                    .cells = reach_ > 0.0
+                                 ? sim::natural_point(direction, reach_, frame_->welcome().world_id)
+                                 : direction,
                     .sample = ground_ != nullptr ? sample_at(*ground_, point) : std::nullopt};
     }
 
@@ -65,11 +73,11 @@ public:
         return frame_->layer(name);
     }
 
-    // Smoothed between cells. Precondition: the layer isn't empty.
+    // Smoothed between cells, without seams when natural. Precondition: the layer isn't empty.
     [[nodiscard]] double smooth(std::span<const float> values, const Spot& spot) const {
-        return grid_->interpolate(spot.direction, [values](std::uint32_t cell) {
-            return static_cast<double>(values[cell]);
-        });
+        const auto at = [values](std::uint32_t cell) { return static_cast<double>(values[cell]); };
+        return reach_ > 0.0 ? sim::blend(*grid_, spot.cells, at)
+                            : grid_->interpolate(spot.cells, at);
     }
 
     // The cell under the point. Precondition: the layer isn't empty.
@@ -78,7 +86,7 @@ public:
     }
 
     [[nodiscard]] std::uint32_t cell(const Spot& spot) const {
-        return grid_->index(planet::cell_at(spot.direction, grid_->level()));
+        return grid_->index(planet::cell_at(spot.cells, grid_->level()));
     }
 
     // Metres above sea level, where surveyed.
@@ -143,6 +151,7 @@ private:
     const sim::CellGrid* grid_;
     const Frame* frame_;
     const probe::Ground* ground_;
+    double reach_; // of natural edges, or zero for the cells as they are
 };
 
 // Animals per km² in each cell; empty without the counts or the areas.
@@ -254,6 +263,10 @@ Rgb colour_at(const Sampler& sampler, Overlay overlay, std::span<const float> sp
     case Overlay::Wildlife: {
         if (species.empty()) {
             return missing_colour;
+        }
+        // Smoothing reaches past the coast; every species lives on land.
+        if (sampler.ocean(spot)) {
+            return sampler.ground(spot);
         }
         const double density = sampler.smooth(species, spot);
         return mapgen::density_colour(sampler.ground(spot), most > 0.0 ? density / most : 0.0);
@@ -405,14 +418,14 @@ Rgb fire_colour(Rgb plants, double fire) noexcept {
 
 mapgen::Image render_overlay(const sim::CellGrid& grid, const Frame& frame,
                              const probe::Ground* ground, Overlay overlay, std::string_view species,
-                             const MapRect& shown, int width, jobs::JobSystem& jobs) {
+                             const MapRect& shown, int width, bool natural, jobs::JobSystem& jobs) {
     const mapgen::ImageSize size = mapgen::image_size(mapgen::PlanetView{}, width);
     mapgen::Image image{.width = size.width,
                         .height = size.height,
                         .pixels =
                             std::vector<std::uint8_t>(3 * static_cast<std::size_t>(size.width) *
                                                       static_cast<std::size_t>(size.height))};
-    const Sampler sampler{grid, frame, ground};
+    const Sampler sampler{grid, frame, ground, natural};
     // Densities rather than counts, since cells differ in size.
     const std::vector<float> animals =
         overlay == Overlay::Wildlife

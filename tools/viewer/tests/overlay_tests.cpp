@@ -2,6 +2,7 @@
 #include <hog/mapgen/wildlife_render.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/sim/natural.hpp>
 #include <hog/viewer/ground.hpp>
 #include <hog/viewer/overlay.hpp>
 
@@ -44,9 +45,11 @@ struct Planet {
 
     [[nodiscard]] mapgen::Image render(Overlay overlay, const std::string& species = "",
                                        const viewer::MapRect& shown = {},
-                                       const probe::Ground* ground = nullptr) const {
+                                       const probe::Ground* ground = nullptr,
+                                       bool natural = false) const {
         jobs::JobSystem jobs{2};
-        return viewer::render_overlay(grid, frame(), ground, overlay, species, shown, width, jobs);
+        return viewer::render_overlay(grid, frame(), ground, overlay, species, shown, width,
+                                      natural, jobs);
     }
 
     // The cell under each pixel, row by row.
@@ -204,6 +207,10 @@ TEST_CASE("wildlife is shown against its densest cell", "[viewer][overlay]") {
     CHECK(std::ranges::count(shown, mapgen::density_colour(ground, 0.25)) <
           static_cast<std::ptrdiff_t>(shown.size()));
     CHECK(all(planet.render(Overlay::Wildlife, "elk"), viewer::missing_colour));
+
+    // Nothing lives at sea, whatever smoothing carries over the coast.
+    planet.set("planet/ocean", 1.0F);
+    CHECK(all(planet.render(Overlay::Wildlife, "deer"), mapgen::height_colour(fixed(-200.0))));
 }
 
 namespace {
@@ -276,6 +283,32 @@ TEST_CASE("minerals show the rock or rarest deposit at the surveyed depth", "[vi
     ground.rock.clear();
     ground.deposit.clear();
     CHECK(all(planet.render(Overlay::Minerals, "", shown, &ground), viewer::missing_colour));
+}
+
+TEST_CASE("natural edges wander, keeping each cell's value", "[viewer][overlay]") {
+    Planet planet = land();
+    planet.set("planet/biome", static_cast<float>(planet::Biome::Desert));
+    planet.values("planet/biome")[7] = static_cast<float>(planet::Biome::Tundra);
+    const auto plain = pixels(planet.render(Overlay::Biome));
+    const auto natural = pixels(planet.render(Overlay::Biome, "", {}, nullptr, true));
+    const Rgb tundra = mapgen::biome_colour(planet::Biome::Tundra);
+    const double reach = sim::natural_reach(level);
+    std::size_t moved = 0;
+    for (int y = 0; y < width / 2; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const DVec3 direction =
+                viewer::map_direction(viewer::pixel_point({}, width, width / 2, x, y));
+            // The welcome's world id seeds the wander.
+            const DVec3 cells = sim::natural_point(direction, reach, 0);
+            const bool in_tundra = planet.grid.index(planet::cell_at(cells, level)) == 7;
+            const std::size_t pixel =
+                (static_cast<std::size_t>(y) * width) + static_cast<std::size_t>(x);
+            CHECK(natural[pixel] ==
+                  (in_tundra ? tundra : mapgen::biome_colour(planet::Biome::Desert)));
+            moved += natural[pixel] != plain[pixel] ? 1U : 0U;
+        }
+    }
+    CHECK(moved > 0);
 }
 
 TEST_CASE("each overlay asks for the layers it draws", "[viewer][overlay]") {

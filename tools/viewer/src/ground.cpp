@@ -24,7 +24,10 @@ std::optional<std::size_t> sample_at(const probe::Ground& ground, DVec2 point) n
     const double latitude = (0.5 - point.y) * 180.0;
     const double across = (longitude - survey.west) / (survey.east - survey.west) * survey.width;
     const double down = (survey.north - latitude) / (survey.north - survey.south) * survey.height;
-    if (!(across >= 0.0 && across < survey.width && down >= 0.0 && down < survey.height)) {
+    // Written to fail for NaN too.
+    const bool inside =
+        across >= 0.0 && across < survey.width && down >= 0.0 && down < survey.height;
+    if (!inside) {
         return std::nullopt;
     }
     return (static_cast<std::size_t>(down) * survey.width) + static_cast<std::size_t>(across);

@@ -142,6 +142,7 @@ struct View {
     std::string species;
     viewer::MapView map;
     bool daylight = true;
+    bool natural = true; // edges of the simulation's cells
     float depth = 10.0F; // metres below the surface the minerals overlay shows
     viewer::SurveyPacer pacer{survey_settle};
     std::uint64_t grounds = 0; // the link's ground count when last looked at
@@ -170,7 +171,7 @@ void redraw(View& view, const viewer::Link& link, SDL_Renderer* renderer, int wi
         view.grid.emplace(level);
     }
     mapgen::Image image = viewer::render_overlay(*view.grid, *frame, ground.get(), view.overlay,
-                                                 view.species, shown, width, jobs);
+                                                 view.species, shown, width, view.natural, jobs);
     view.sun.reset();
     if (const auto calendar = viewer::calendar_of(frame->welcome()); calendar && view.daylight) {
         viewer::shade_night(image, shown, *calendar, frame->time(), jobs);
@@ -210,7 +211,10 @@ void survey(View& view, viewer::Link& link, int width) {
 // What the minerals overlay's colours stand for.
 void minerals_key() {
     const auto swatch = [](mapgen::Rgb colour, std::string_view name) {
-        const ImVec4 shown{colour[0] / 255.0F, colour[1] / 255.0F, colour[2] / 255.0F, 1.0F};
+        const auto channel = [&colour](std::size_t index) {
+            return static_cast<float>(colour.at(index)) / 255.0F;
+        };
+        const ImVec4 shown{channel(0), channel(1), channel(2), 1.0F};
         ImGui::ColorButton(std::string{name}.c_str(), shown, ImGuiColorEditFlags_NoTooltip,
                            ImVec2{12.0F, 12.0F});
         ImGui::SameLine();
@@ -274,22 +278,8 @@ void clock_controls(viewer::Link& link, const viewer::Frame& frame) {
     }
 }
 
-void sidebar(View& view, viewer::Link& link) {
-    const viewer::Link::State state = link.state();
-    const std::shared_ptr<const viewer::Frame> frame = link.frame();
-    ImGui::TextUnformatted(std::format("server: {}", viewer::to_string(state.status)).c_str());
-    if (!state.message.empty()) {
-        ImGui::PushTextWrapPos(0.0F);
-        ImGui::TextUnformatted(state.message.c_str());
-        ImGui::PopTextWrapPos();
-    }
-    if (frame != nullptr) {
-        ImGui::TextUnformatted(std::format("world {:016x}", frame->welcome().world_id).c_str());
-        ImGui::TextUnformatted(format_time(frame->time()).c_str());
-        clock_controls(link, *frame);
-    }
-    ImGui::Separator();
-
+// The overlays to choose from, and the species when it's wildlife.
+void overlay_picker(View& view, viewer::Link& link, const viewer::Frame* frame) {
     viewer::Overlay overlay = view.overlay;
     for (const viewer::Overlay each : viewer::overlays) {
         if (ImGui::RadioButton(std::string{viewer::to_string(each)}.c_str(), overlay == each)) {
@@ -312,15 +302,10 @@ void sidebar(View& view, viewer::Link& link) {
         }
     }
     choose(view, link, overlay, std::move(species));
-    if (view.overlay == viewer::Overlay::Minerals) {
-        ImGui::SliderFloat("depth", &view.depth, 0.0F, deepest, "%.0f m",
-                           ImGuiSliderFlags_Logarithmic);
-    }
-    if (ImGui::Checkbox("daylight", &view.daylight)) {
-        view.stale = true;
-    }
+}
 
-    ImGui::Separator();
+// What the overlay's colours mean.
+void legend(const View& view, const viewer::Link& link, const viewer::Frame* frame) {
     if (view.overlay == viewer::Overlay::Minerals) {
         const auto ground = link.ground();
         ImGui::TextUnformatted(ground != nullptr && !ground->rock.empty()
@@ -328,14 +313,46 @@ void sidebar(View& view, viewer::Link& link) {
                                    : "surveying");
         minerals_key();
     }
-    if (frame != nullptr) {
-        if (const auto legend = viewer::legend_for(view.overlay, *frame, view.species)) {
-            ImGui::TextUnformatted(legend->layer.c_str());
-            ImGui::TextUnformatted(
-                std::format("{:.4g} to {:.4g} {}", legend->low, legend->high, legend->unit)
-                    .c_str());
-        }
+    if (frame == nullptr) {
+        return;
     }
+    if (const auto range = viewer::legend_for(view.overlay, *frame, view.species)) {
+        ImGui::TextUnformatted(range->layer.c_str());
+        ImGui::TextUnformatted(
+            std::format("{:.4g} to {:.4g} {}", range->low, range->high, range->unit).c_str());
+    }
+}
+
+void sidebar(View& view, viewer::Link& link) {
+    const viewer::Link::State state = link.state();
+    const std::shared_ptr<const viewer::Frame> frame = link.frame();
+    ImGui::TextUnformatted(std::format("server: {}", viewer::to_string(state.status)).c_str());
+    if (!state.message.empty()) {
+        ImGui::PushTextWrapPos(0.0F);
+        ImGui::TextUnformatted(state.message.c_str());
+        ImGui::PopTextWrapPos();
+    }
+    if (frame != nullptr) {
+        ImGui::TextUnformatted(std::format("world {:016x}", frame->welcome().world_id).c_str());
+        ImGui::TextUnformatted(format_time(frame->time()).c_str());
+        clock_controls(link, *frame);
+    }
+    ImGui::Separator();
+
+    overlay_picker(view, link, frame.get());
+    if (view.overlay == viewer::Overlay::Minerals) {
+        ImGui::SliderFloat("depth", &view.depth, 0.0F, deepest, "%.0f m",
+                           ImGuiSliderFlags_Logarithmic);
+    }
+    if (ImGui::Checkbox("daylight", &view.daylight)) {
+        view.stale = true;
+    }
+    if (ImGui::Checkbox("natural edges", &view.natural)) {
+        view.stale = true;
+    }
+
+    ImGui::Separator();
+    legend(view, link, frame.get());
     ImGui::TextUnformatted(std::format("zoom {:.1f}x", view.map.zoom()).c_str());
     if (ImGui::Button("whole planet")) {
         view.map.reset();
