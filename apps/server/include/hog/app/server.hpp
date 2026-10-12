@@ -20,6 +20,7 @@
 
 #include <flecs.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -86,8 +87,10 @@ private:
     // Builds the weather and wildlife as of `at`, on the planet with its changes.
     [[nodiscard]] Result<void> start_simulation(const planet::PlanetConfig& shape, GameTime at);
     void advance_weather(GameTime to);
-    // Logs species dying out everywhere and coming back.
-    void watch_extinctions();
+    // Logs and counts what has happened to wildlife since last asked.
+    void report_wildlife();
+    // Logs the species that are gone from everywhere, as the server opens.
+    void recall_extinctions() const;
     void submit();
 
     server::ServerConfig config_;
@@ -103,8 +106,6 @@ private:
     // Set once the planet's changes are in, since the weather starts from the ground.
     std::unique_ptr<sim::Weather> weather_;
     std::unique_ptr<sim::Wildlife> wildlife_;
-    // Per species, whether it was extinct when last watched.
-    std::vector<bool> extinct_;
     GameTime time_;
     Tick tick_;
 
@@ -123,6 +124,8 @@ private:
     metrics::Counter& wildlife_steps_;
     metrics::Histogram& wildlife_step_seconds_;
     metrics::Gauge& extinct_species_;
+    // By ecology event kind.
+    std::array<metrics::Counter*, 5> ecology_events_;
     metrics::Reporter reporter_;
     // What the mirrored counters were last brought up to.
     server::SnapshotWriter::Stats mirrored_writes_;

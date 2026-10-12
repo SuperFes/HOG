@@ -6,6 +6,7 @@
 #include <array>
 #include <filesystem>
 #include <format>
+#include <string>
 #include <system_error>
 #include <utility>
 
@@ -87,6 +88,17 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config,
                                                  {tick_bounds.begin(), tick_bounds.end()})),
       extinct_species_(registry_.gauge("hog_wildlife_extinct_species",
                                        "Species gone from everywhere, waiting to come back.")),
+      ecology_events_{
+          &registry_.counter("hog_wildlife_collapses_total",
+                             "Regions where a species fell far below its baseline."),
+          &registry_.counter("hog_wildlife_overpopulations_total",
+                             "Regions where a species rose far above its baseline."),
+          &registry_.counter("hog_wildlife_local_extinctions_total",
+                             "Regions a species died out of."),
+          &registry_.counter("hog_wildlife_returns_total",
+                             "Species back where they had died out, or anywhere after extinction."),
+          &registry_.counter("hog_wildlife_extinctions_total", "Species that died out everywhere."),
+      },
       reporter_(registry_) {
     persistence_.persist<server::Position>();
 }
@@ -169,7 +181,8 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
         log::info(save_log, "no snapshot; starting a new world at {}", format_time(now));
     }
     if (server->wildlife_) {
-        server->watch_extinctions();
+        server->report_wildlife();
+        server->recall_extinctions();
     }
     return server;
 }
@@ -220,29 +233,75 @@ void Server::simulate(GameTime from, GameDuration step) {
         wildlife_steps_.add(1);
         wildlife_step_seconds_.observe(
             std::chrono::duration<double>(MonotonicClock::now() - started).count());
-        watch_extinctions();
+        report_wildlife();
     }
     advance_weather(to);
 }
 
-void Server::watch_extinctions() {
+namespace {
+
+std::string describe(const sim::EcologyEvent& event, const sim::Species& species) {
+    using Kind = sim::EcologyEvent::Kind;
+    const std::string where = event.region == sim::EcologyEvent::everywhere
+                                  ? "everywhere"
+                                  : std::format("in region {}", event.region);
+    std::string hunted;
+    for (const sim::Contributor& one : event.hunters) {
+        hunted += std::format("{} {} ({:.0f})", hunted.empty() ? ", hunted by" : ",", one.hunter,
+                              one.kills);
+    }
+    switch (event.kind) {
+    case Kind::Collapse:
+        return std::format("{} collapsed {} to {:.0f}, from a usual {:.0f}{}", species.name, where,
+                           event.count, event.baseline, hunted);
+    case Kind::Overpopulation:
+        return std::format("{} overran {} with {:.0f}, from a usual {:.0f}{}", species.name, where,
+                           event.count, event.baseline, hunted);
+    case Kind::LocalExtinction:
+        return std::format("{} died out {}{}", species.name, where, hunted);
+    case Kind::Return:
+        return std::format("{} is back {}", species.name, where);
+    case Kind::Extinction:
+        return std::format("{} died out everywhere{}{}", species.name,
+                           species.recovery.after_extinction == sim::Recovery::After::Admin
+                               ? " and waits to be reintroduced"
+                               : "",
+                           hunted);
+    }
+    return {};
+}
+
+} // namespace
+
+void Server::report_wildlife() {
+    using Kind = sim::EcologyEvent::Kind;
     const auto& species = wildlife_->config().ecology.species;
-    extinct_.resize(species.size());
+    for (const sim::EcologyEvent& event : wildlife_->drain_events()) {
+        ecology_events_.at(static_cast<std::size_t>(event.kind))->add();
+        const std::string message = describe(event, species[event.species]);
+        if (event.kind == Kind::Return || event.kind == Kind::Overpopulation) {
+            log::info(wildlife_log, "{}", message);
+        } else {
+            log::warn(wildlife_log, "{}", message);
+        }
+    }
     std::size_t extinct = 0;
     for (std::uint32_t kind = 0; kind < species.size(); ++kind) {
-        const bool gone = wildlife_->presence(kind).extinct.has_value();
-        if (gone && !extinct_[kind]) {
-            const bool waits =
-                species[kind].recovery.after_extinction == sim::Recovery::After::Admin;
-            log::warn(wildlife_log, "{} has died out everywhere{}", species[kind].name,
-                      waits ? " and waits to be reintroduced" : "");
-        } else if (!gone && extinct_[kind]) {
-            log::info(wildlife_log, "{} is back", species[kind].name);
-        }
-        extinct_[kind] = gone;
-        extinct += gone ? 1 : 0;
+        extinct += wildlife_->presence(kind).extinct ? 1U : 0U;
     }
     extinct_species_.set(static_cast<double>(extinct));
+}
+
+void Server::recall_extinctions() const {
+    const auto& species = wildlife_->config().ecology.species;
+    for (std::uint32_t kind = 0; kind < species.size(); ++kind) {
+        if (wildlife_->presence(kind).extinct) {
+            log::warn(wildlife_log, "{} is extinct{}", species[kind].name,
+                      species[kind].recovery.after_extinction == sim::Recovery::After::Admin
+                          ? " and waits to be reintroduced"
+                          : "");
+        }
+    }
 }
 
 void Server::advance_weather(GameTime to) {

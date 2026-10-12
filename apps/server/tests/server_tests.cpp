@@ -229,7 +229,7 @@ habitat = { grassland = 1, savanna = 1, temperate_forest = 0.5 }
     CHECK(broken.error().message.find("ecology.toml") != std::string::npos);
 }
 
-TEST_CASE("species dying out everywhere are counted", "[app][server]") {
+TEST_CASE("species dying out are counted", "[app][server]") {
     const World world;
     auto config = world.config();
     config.catch_up_ticks = 100;
@@ -248,6 +248,9 @@ starving = 1
         server->catch_up([&] { return later; });
         CHECK(server->wildlife()->presence(0).extinct);
         CHECK(gauge(*server, "hog_wildlife_extinct_species") == 1.0);
+        CHECK(counter(*server, "hog_wildlife_extinctions_total") == 1);
+        CHECK(counter(*server, "hog_wildlife_local_extinctions_total") > 0);
+        CHECK(counter(*server, "hog_wildlife_returns_total") == 0);
         REQUIRE(server->save());
     }
     CHECK(gauge(*opened(config, later), "hog_wildlife_extinct_species") == 1.0);
