@@ -121,6 +121,8 @@ This phase produces a pure library that turns a seed into a planet. It has no gr
 - [x] Temperature and moisture bands, then biome assignment
 - [x] Starting archipelago: 5–8 islands of 10–60 km², placed on the real planet
 - [x] Geology strata and finite deposits per cell (stub values are fine)
+- [ ] Deep layers: crust thickness, mantle rock beneath it, and magma chambers under volcanic ground, so the whole volume can be dug through
+- [ ] Caves and tunnels: karst in wet limestone, lava tubes in basalt, sea caves in cliffs
 
 **Change store**
 
@@ -322,6 +324,7 @@ These tracks can start once Phase 4 works and can run side by side; four people 
 - [ ] Apex succession (the dragon example)
 - [ ] Consequences of wiping out wildlife, driven by ecology events: bounties, wardens, hunting bans, scarce-goods prices
 - [ ] Quarries and mines as voxel volumes; finite deposits
+- [ ] Tunnel collapse under Earth gravity: spans and depth against rock strength; supports, cave-ins and sinkholes
 - [ ] Forest fire spread with weather; regrowth through succession
 
 **Travel**
