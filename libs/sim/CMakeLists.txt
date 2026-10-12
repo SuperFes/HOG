@@ -1,7 +1,11 @@
 add_library(hog_sim
     src/calendar.cpp
     src/cell_grid.cpp
-    src/weather.cpp)
+    src/weather.cpp
+    src/weather_heat.cpp
+    src/weather_save.cpp
+    src/weather_water.cpp
+    src/weather_wind.cpp)
 add_library(hog::sim ALIAS hog_sim)
 
 target_include_directories(hog_sim PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")

@@ -6,6 +6,7 @@
 #include <hog/planet/world.hpp>
 #include <hog/sim/calendar.hpp>
 #include <hog/sim/cell_grid.hpp>
+#include <hog/sim/weather_tuning.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -26,6 +27,7 @@ struct WeatherConfig {
     // The day the weather's heating and the Coriolis force follow, which needn't be the sun's.
     GameDuration day = std::chrono::hours{24};
     double axial_tilt = 23.44; // degrees
+    WeatherTuning tuning{};
 };
 
 // What a cell's weather sits on.
