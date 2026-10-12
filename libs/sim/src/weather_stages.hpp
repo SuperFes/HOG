@@ -54,6 +54,12 @@ struct Targets {
 [[nodiscard]] Targets targets(const HeatTuning& tuning, const Ground& ground, double sin_latitude,
                               double sin_declination);
 
+// Carries each layer's warmth, water and cloud with the wind, reading the step's start from
+// `before`. Moving alone doesn't keep water exactly; conserve_water() puts it right.
+void move(const StepContext& step, const WeatherFields& before, WeatherFields& fields,
+          std::uint32_t index);
+// Scales vapour and cloud so the planet holds as much water as `before` did.
+void conserve_water(const CellGrid& grid, const WeatherFields& before, WeatherFields& fields);
 // The sun and the seasons pull each layer's temperature towards its targets.
 void heat(const StepContext& step, WeatherFields& fields, std::uint32_t index);
 // Evaporation, cloud, rain, snow, hail and thunderstorms.

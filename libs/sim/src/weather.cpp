@@ -68,7 +68,7 @@ std::vector<Ground> ground_for(const CellGrid& grid, const planet::World& world)
 Weather::Weather(const WeatherConfig& config, std::vector<Ground> ground, GameTime now)
     : config_(config), grid_(config.level), ground_(std::move(ground)),
       calendar_(positive(config.day), config.axial_tilt), fields_(grid_.size()),
-      time_(last_step(now, positive(config.step))) {
+      before_(grid_.size()), time_(last_step(now, positive(config.step))) {
     HOG_ASSERT(config.step > GameDuration::zero(), "weather step must be positive");
     HOG_ASSERT(config.day > GameDuration::zero(), "weather day must be positive");
     HOG_ASSERT(ground_.size() == grid_.size(), "need ground for every cell");
@@ -82,6 +82,12 @@ Weather::Weather(const WeatherConfig& config, std::vector<Ground> ground, GameTi
                                                    static_cast<double>(ground_[index].wetness));
     }
     balance_winds(nullptr);
+}
+
+void Weather::set_fields(WeatherFields fields) {
+    HOG_ASSERT(fields.size() == grid_.size() && fields.wind.size() == grid_.size(),
+               "need weather for every cell");
+    fields_ = std::move(fields);
 }
 
 std::uint64_t Weather::advance_to(GameTime now, jobs::JobSystem& jobs) {
@@ -104,6 +110,10 @@ void Weather::step(GameTime at, jobs::JobSystem& jobs) {
         .seconds = Seconds{config_.step}.count(),
         .sin_declination = detail::sin_declination(middle, config_.axial_tilt),
     };
+    before_ = fields_;
+    detail::for_cells(&jobs, grid_.size(),
+                      [&](std::uint32_t index) { detail::move(context, before_, fields_, index); });
+    detail::conserve_water(grid_, before_, fields_);
     detail::for_cells(&jobs, grid_.size(), [&](std::uint32_t index) {
         detail::heat(context, fields_, index);
         detail::water(context, fields_, index);

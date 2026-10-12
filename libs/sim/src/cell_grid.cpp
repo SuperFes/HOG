@@ -15,10 +15,13 @@ CellGrid::CellGrid(int level)
     HOG_ASSERT(level >= 0 && level <= max_level, "grid level out of range");
     const std::uint32_t count = planet::face_count * side_ * side_;
     frames_.reserve(count);
+    areas_.reserve(count);
     neighbors_.reserve(count);
+    offsets_.reserve(count);
     gradient_weights_.reserve(count);
     for (std::uint32_t index = 0; index < count; ++index) {
         frames_.push_back(planet::tangent_frame(cell(index)));
+        areas_.push_back(planet::cell_area(cell(index)));
     }
     for (std::uint32_t index = 0; index < count; ++index) {
         const planet::TangentFrame& here = frames_[index];
@@ -47,6 +50,7 @@ CellGrid::CellGrid(int level)
                          determinant;
         }
         neighbors_.push_back(around);
+        offsets_.push_back(offsets);
         gradient_weights_.push_back(weights);
     }
 }

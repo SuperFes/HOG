@@ -3,9 +3,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <algorithm>
 #include <cstdint>
+#include <numbers>
 
 using hog::DVec2;
 using hog::DVec3;
@@ -22,6 +24,16 @@ TEST_CASE("a grid numbers every cell of its level once", "[sim][grid]") {
         CHECK(cell.level() == level);
         CHECK(grid.index(cell) == index);
     }
+}
+
+TEST_CASE("grid cells cover the sphere", "[sim][grid]") {
+    const CellGrid grid{4};
+    double total = 0.0;
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        CHECK(grid.area(index) > 0.0);
+        total += grid.area(index);
+    }
+    CHECK_THAT(total, Catch::Matchers::WithinRel(4.0 * std::numbers::pi, 1e-9));
 }
 
 TEST_CASE("grid neighbours are mutual", "[sim][grid]") {

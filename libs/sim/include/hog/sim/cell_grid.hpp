@@ -36,6 +36,14 @@ public:
         return frames_[index];
     }
 
+    // Where each neighbour's centre lies from this cell's, as (east, north) radians.
+    [[nodiscard]] const std::array<DVec2, 4>& offsets(std::uint32_t index) const {
+        return offsets_[index];
+    }
+
+    // Steradians, summing to 4π over the grid.
+    [[nodiscard]] double area(std::uint32_t index) const { return areas_[index]; }
+
     // A field's (east, north) gradient per radian is the sum of weights[k] times the field's
     // difference from this cell to neighbour k.
     [[nodiscard]] const std::array<DVec2, 4>& gradient_weights(std::uint32_t index) const {
@@ -46,7 +54,9 @@ private:
     int level_;
     std::uint32_t side_;
     std::vector<planet::TangentFrame> frames_;
+    std::vector<double> areas_;
     std::vector<std::array<std::uint32_t, 4>> neighbors_;
+    std::vector<std::array<DVec2, 4>> offsets_;
     std::vector<std::array<DVec2, 4>> gradient_weights_;
 };
 

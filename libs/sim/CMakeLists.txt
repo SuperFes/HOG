@@ -3,6 +3,7 @@ add_library(hog_sim
     src/cell_grid.cpp
     src/weather.cpp
     src/weather_heat.cpp
+    src/weather_motion.cpp
     src/weather_save.cpp
     src/weather_water.cpp
     src/weather_wind.cpp)

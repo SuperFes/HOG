@@ -20,6 +20,7 @@ using hog::jobs::JobSystem;
 using hog::sim::Ground;
 using hog::sim::Weather;
 using hog::sim::WeatherConfig;
+using hog::sim::WeatherFields;
 
 namespace {
 
@@ -151,21 +152,20 @@ TEST_CASE("water is neither made nor lost", "[sim][weather]") {
         .mean_temperature = 27.0F, .elevation = 0.0F, .wetness = 1.0F, .ocean = false};
     Weather weather{config(), everywhere(tropics), march_equinox};
     const auto& f = weather.fields();
+    const auto& grid = weather.grid();
+    const auto total = [&](auto... parts) {
+        double sum = 0.0;
+        for (std::uint32_t index = 0; index < grid.size(); ++index) {
+            sum += grid.area(index) * (static_cast<double>(parts[index]) + ...);
+        }
+        return sum;
+    };
     for (int step = 1; step <= 300; ++step) {
-        std::vector<double> before(f.size());
-        for (std::size_t index = 0; index < f.size(); ++index) {
-            before[index] =
-                static_cast<double>(f.vapour[index]) + static_cast<double>(f.cloud[index]);
-        }
+        const double held = total(f.vapour, f.cloud);
         weather.advance_to(march_equinox + (step * minutes{10}), jobs);
-        for (std::size_t index = 0; index < f.size(); ++index) {
-            const double in = before[index] + static_cast<double>(f.evaporation[index]);
-            const double out =
-                static_cast<double>(f.vapour[index]) + static_cast<double>(f.cloud[index]) +
-                static_cast<double>(f.rain[index]) + static_cast<double>(f.snow[index]) +
-                static_cast<double>(f.hail[index]);
-            REQUIRE(std::abs(in - out) < 1e-4 * std::max(in, 1.0));
-        }
+        const double in = held + total(f.evaporation);
+        const double out = total(f.vapour, f.cloud) + total(f.rain, f.snow, f.hail);
+        REQUIRE(std::abs(in - out) < 1e-5 * in);
     }
 }
 
@@ -199,6 +199,43 @@ TEST_CASE("hot, wet afternoons bring thunderstorms; cold air brings snow", "[sim
         }
     }
     CHECK(snow > 0.0F);
+}
+
+TEST_CASE("weather drifts east in the westerlies and west in the trades", "[sim][weather]") {
+    JobSystem jobs{1};
+    const WeatherConfig fine{.level = 4};
+    const std::vector<Ground> ground(hog::sim::CellGrid{fine.level}.size(), sea);
+    // How far east a warm patch has moved after two days, as the longitude of the middle of its
+    // difference from undisturbed weather.
+    const auto drift = [&](double latitude, std::vector<float> WeatherFields::* layer) {
+        Weather calm{fine, ground, march_equinox};
+        Weather warm{fine, ground, march_equinox};
+        auto fields = warm.fields();
+        const DVec3 up{std::cos(latitude * degree), 0.0, std::sin(latitude * degree)};
+        (fields.*layer)[warm.grid().index(hog::planet::cell_at(up, fine.level))] += 0.5F;
+        warm.set_fields(fields);
+        calm.advance_to(march_equinox + hours{48}, jobs);
+        warm.advance_to(march_equinox + hours{48}, jobs);
+        double weight = 0.0;
+        double longitude = 0.0;
+        for (std::uint32_t index = 0; index < warm.grid().size(); ++index) {
+            const double difference = std::max(
+                static_cast<double>((warm.fields().*layer)[index] - (calm.fields().*layer)[index]),
+                0.0);
+            const DVec3 at = warm.grid().frame(index).up;
+            if (glm::dot(at, up) < std::cos(40.0 * degree)) {
+                continue;
+            }
+            weight += difference;
+            longitude += difference * std::atan2(at.y, at.x) / degree;
+        }
+        return longitude / weight;
+    };
+    const double westerlies = drift(45.0, &WeatherFields::upper_temperature);
+    const double trades = drift(15.0, &WeatherFields::temperature);
+    // Patterns travel slower than the wind that carries them, as Earth's do.
+    CHECK(westerlies > 3.0);
+    CHECK(trades < -1.0);
 }
 
 TEST_CASE("weather comes out the same on any number of threads", "[sim][weather]") {

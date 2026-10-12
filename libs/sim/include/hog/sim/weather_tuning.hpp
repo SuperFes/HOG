@@ -68,7 +68,14 @@ struct StormTuning {
     double hail_below = -15.0; // °C in the upper air
 };
 
+struct MotionTuning {
+    // Surface weather drifts with a wind between the surface's and the jet's, as Earth's fronts
+    // and clouds follow the winds a few kilometres up.
+    double jet_steering = 0.4;
+};
+
 struct WeatherTuning {
+    MotionTuning motion{};
     HeatTuning heat{};
     WindTuning wind{};
     WaterTuning water{};

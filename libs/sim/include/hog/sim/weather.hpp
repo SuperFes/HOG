@@ -81,6 +81,8 @@ public:
     [[nodiscard]] const CellGrid& grid() const noexcept { return grid_; }
     [[nodiscard]] const std::vector<Ground>& ground() const noexcept { return ground_; }
     [[nodiscard]] const WeatherFields& fields() const noexcept { return fields_; }
+    // Replaces the weather as it stands, for tools and tests. Precondition: one value per cell.
+    void set_fields(WeatherFields fields);
     // When the last step was taken.
     [[nodiscard]] GameTime time() const noexcept { return time_; }
 
@@ -106,6 +108,8 @@ private:
     std::vector<Ground> ground_;
     Calendar calendar_;
     WeatherFields fields_;
+    // The fields as the step began, which moving reads from.
+    WeatherFields before_;
     GameTime time_;
 };
 
