@@ -113,15 +113,15 @@ Targets targets(const Ground& ground, double sin_latitude, double sin_declinatio
     const double drop = upper_drop - (upper_drop_seasons * summer);
     const double cooling = 0.5 + (0.5 * std::tanh((latitude - middle) / band_width));
     return Targets{
-        .surface = double{ground.mean_temperature} +
+        .surface = static_cast<double>(ground.mean_temperature) +
                    ((ground.ocean ? ocean_seasons : land_seasons) * seasons),
         .upper = upper_equator - (drop * cooling),
-        .reference = double{ground.mean_temperature} + (ocean_seasons * seasons),
+        .reference = static_cast<double>(ground.mean_temperature) + (ocean_seasons * seasons),
     };
 }
 
 double sea_level(double temperature, const Ground& ground) {
-    return temperature + (lapse_rate * double{ground.elevation});
+    return temperature + (lapse_rate * static_cast<double>(ground.elevation));
 }
 
 template <typename F>
@@ -200,8 +200,8 @@ Weather::Weather(const WeatherConfig& config, std::vector<Ground> ground, GameTi
         const Targets target = targets(ground_[index], grid_.frame(index).up.z, sin_declination);
         fields_.temperature[index] = static_cast<float>(target.surface);
         fields_.upper_temperature[index] = static_cast<float>(target.upper);
-        fields_.vapour[index] =
-            static_cast<float>(0.7 * saturation(target.surface) * double{ground_[index].wetness});
+        fields_.vapour[index] = static_cast<float>(0.7 * saturation(target.surface) *
+                                                   static_cast<double>(ground_[index].wetness));
     }
     balance_winds(nullptr);
 }
@@ -232,21 +232,21 @@ void Weather::step(GameTime at, jobs::JobSystem& jobs) {
         const DVec3 up = grid_.frame(index).up;
         WeatherFields& f = fields_;
         const Targets target = targets(ground, up.z, sin_declination);
-        const auto cover = double{f.cloud_cover(index)};
+        const auto cover = static_cast<double>(f.cloud_cover(index));
         const double sun = std::sin(calendar_.sun_elevation(middle, up));
         const double heating =
             (ground.ocean ? ocean_days : land_days) * sun * (1.0 - (cloud_shade * cover));
 
-        auto surface = double{f.temperature[index]};
-        auto upper = double{f.upper_temperature[index]};
+        auto surface = static_cast<double>(f.temperature[index]);
+        auto upper = static_cast<double>(f.upper_temperature[index]);
         surface += (target.surface + heating - surface) * (ground.ocean ? ocean_move : land_move);
         upper += (target.upper - upper) * upper_move;
 
-        auto vapour = double{f.vapour[index]};
-        auto cloud = double{f.cloud[index]};
+        auto vapour = static_cast<double>(f.vapour[index]);
+        auto cloud = static_cast<double>(f.cloud[index]);
         const double holds = saturation(surface);
         const double evaporation =
-            std::max(holds - vapour, 0.0) * double{ground.wetness} * evaporating;
+            std::max(holds - vapour, 0.0) * static_cast<double>(ground.wetness) * evaporating;
         vapour += evaporation;
 
         // Thunderstorms rain straight out of the air and stir the column towards neutral.
@@ -299,8 +299,8 @@ void Weather::balance_winds(jobs::JobSystem* jobs) {
         const double sin_latitude = grid_.frame(index).up.z;
         const double latitude = std::asin(sin_latitude);
         const Targets target = targets(ground, sin_latitude, sin_declination);
-        const double warmth = (sea_level(double{fields_.temperature[index]}, ground) -
-                               double{fields_.upper_temperature[index]}) -
+        const double warmth = (sea_level(static_cast<double>(fields_.temperature[index]), ground) -
+                               static_cast<double>(fields_.upper_temperature[index])) -
                               (target.reference - target.upper);
         fields_.pressure[index] =
             static_cast<float>(sea_level_pressure - (band_pressure * std::cos(6.0 * latitude)) -
@@ -314,10 +314,11 @@ void Weather::balance_winds(jobs::JobSystem* jobs) {
         DVec2 pressure_gradient{0.0};
         DVec2 upper_gradient{0.0};
         for (std::size_t k = 0; k < around.size(); ++k) {
-            pressure_gradient +=
-                weights[k] * double{fields_.pressure[around[k]] - fields_.pressure[index]};
-            upper_gradient += weights[k] * double{fields_.upper_temperature[around[k]] -
-                                                  fields_.upper_temperature[index]};
+            pressure_gradient += weights[k] * static_cast<double>(fields_.pressure[around[k]] -
+                                                                  fields_.pressure[index]);
+            upper_gradient +=
+                weights[k] * static_cast<double>(fields_.upper_temperature[around[k]] -
+                                                 fields_.upper_temperature[index]);
         }
         // Per metre over Earth, in Pa and °C.
         pressure_gradient *= 100.0 / earth_radius;

@@ -125,7 +125,8 @@ TEST_CASE("winds blow partly down the pressure gradient", "[sim][weather]") {
         hog::DVec2 gradient{0.0};
         for (std::size_t k = 0; k < 4; ++k) {
             gradient += grid.gradient_weights(index)[k] *
-                        double{fields.pressure[grid.neighbors(index)[k]] - fields.pressure[index]};
+                        static_cast<double>(fields.pressure[grid.neighbors(index)[k]] -
+                                            fields.pressure[index]);
         }
         if (glm::length(gradient) > 1.0) {
             CHECK(glm::dot(hog::DVec2{fields.wind[index]}, gradient) < 0.0);
@@ -153,14 +154,16 @@ TEST_CASE("water is neither made nor lost", "[sim][weather]") {
     for (int step = 1; step <= 300; ++step) {
         std::vector<double> before(f.size());
         for (std::size_t index = 0; index < f.size(); ++index) {
-            before[index] = double{f.vapour[index]} + double{f.cloud[index]};
+            before[index] =
+                static_cast<double>(f.vapour[index]) + static_cast<double>(f.cloud[index]);
         }
         weather.advance_to(march_equinox + (step * minutes{10}), jobs);
         for (std::size_t index = 0; index < f.size(); ++index) {
-            const double in = before[index] + double{f.evaporation[index]};
-            const double out = double{f.vapour[index]} + double{f.cloud[index]} +
-                               double{f.rain[index]} + double{f.snow[index]} +
-                               double{f.hail[index]};
+            const double in = before[index] + static_cast<double>(f.evaporation[index]);
+            const double out =
+                static_cast<double>(f.vapour[index]) + static_cast<double>(f.cloud[index]) +
+                static_cast<double>(f.rain[index]) + static_cast<double>(f.snow[index]) +
+                static_cast<double>(f.hail[index]);
             REQUIRE(std::abs(in - out) < 1e-4 * std::max(in, 1.0));
         }
     }
