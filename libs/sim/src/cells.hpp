@@ -17,6 +17,12 @@ namespace hog::sim::detail {
     return GameTime{steps * step};
 }
 
+// A hash as a number from 0 up to 1.
+[[nodiscard]] inline double fraction(std::uint64_t hash) {
+    constexpr double scale = 1.0 / static_cast<double>(std::uint64_t{1} << 53U);
+    return static_cast<double>(hash >> 11U) * scale;
+}
+
 // Runs body(index) for every cell, across the jobs when given.
 template <typename F>
 void for_cells(jobs::JobSystem* jobs, std::uint32_t count, F body) {
