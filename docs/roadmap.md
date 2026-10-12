@@ -163,7 +163,7 @@ This phase builds a server that runs the world with nobody connected: time passe
 **Debug viewer**
 
 - [x] ImGui app that attaches to a running server and shows map overlays (weather, populations, biomass)
-- [ ] Time controls: pause, step, speed up
+- [x] Time controls: pause, step, speed up
 - [ ] Click a cell to inspect its raw values
 
 ## Phase 3 — Client renderer
