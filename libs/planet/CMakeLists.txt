@@ -6,6 +6,7 @@ add_library(hog_planet
     src/continents.cpp
     src/drainage.cpp
     src/elevation.cpp
+    src/erosion.cpp
     src/geology.cpp
     src/level_grid.cpp
     src/neighbors.cpp
@@ -28,6 +29,7 @@ hog_add_tests(hog_planet
     tests/continents_tests.cpp
     tests/drainage_tests.cpp
     tests/elevation_tests.cpp
+    tests/erosion_tests.cpp
     tests/geology_tests.cpp
     tests/golden_tests.cpp
     tests/level_grid_tests.cpp
