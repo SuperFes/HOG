@@ -1,0 +1,336 @@
+#include <hog/core/text_file.hpp>
+#include <hog/sim/ecology.hpp>
+
+#include <toml++/toml.hpp>
+
+#include <algorithm>
+#include <format>
+#include <initializer_list>
+#include <limits>
+#include <utility>
+
+namespace hog::sim {
+
+namespace {
+
+using namespace std::string_view_literals;
+
+constexpr double positive = std::numeric_limits<double>::min();
+constexpr double most_days = 10.0 * days_per_year;
+constexpr double extreme_temperature = 100.0;
+
+// Reads one table's values, keeping the first failure for every table read alongside it.
+class Table {
+public:
+    Table(const toml::table* table, std::string name, std::optional<Error>* error)
+        : table_(table), name_(std::move(name)), error_(error) {}
+
+    void only(std::initializer_list<std::string_view> known) {
+        if (table_ == nullptr) {
+            return;
+        }
+        for (const auto& [key, value] : *table_) {
+            if (std::ranges::find(known, key.str()) == known.end()) {
+                fail(std::format("unknown key {}.{}", name_, key.str()));
+            }
+        }
+    }
+
+    // Leaves `value` alone when the key is missing.
+    void number(std::string_view key, double low, double high, double& value) {
+        if (const toml::node* node = find(key)) {
+            number(*node, where(key), low, high, value);
+        }
+    }
+
+    void number(const toml::node& node, const std::string& where, double low, double high,
+                double& value) {
+        std::optional<double> read;
+        if (const auto* integer = node.as_integer()) {
+            read = static_cast<double>(integer->get());
+        } else if (const auto* floating = node.as_floating_point()) {
+            read = floating->get();
+        }
+        // Written so NaN fails.
+        const bool in_range = read && *read >= low && *read <= high;
+        if (!in_range) {
+            fail(std::format("{} must be a number from {} to {}", where, low, high));
+            return;
+        }
+        value = *read;
+    }
+
+    void days(std::string_view key, Seconds& value) {
+        double count = value.count() / 86'400.0;
+        number(key, positive, most_days, count);
+        value = Seconds{count * 86'400.0};
+    }
+
+    // Null when missing, or when it isn't a table, which fails.
+    [[nodiscard]] const toml::table* table(std::string_view key) {
+        const toml::node* node = find(key);
+        if (node != nullptr && !node->is_table()) {
+            fail(std::format("{} must be a table", where(key)));
+        }
+        return node == nullptr ? nullptr : node->as_table();
+    }
+
+    [[nodiscard]] Table child(std::string_view key) {
+        return Table{table(key), where(key), error_};
+    }
+
+    [[nodiscard]] const toml::node* find(std::string_view key) const {
+        return table_ == nullptr ? nullptr : table_->get(key);
+    }
+
+    [[nodiscard]] const toml::table* get() const noexcept { return table_; }
+    [[nodiscard]] std::string where(std::string_view key) const {
+        return std::format("{}.{}", name_, key);
+    }
+
+    void fail(std::string message) {
+        if (!*error_) {
+            *error_ = Error{.code = ErrorCode::InvalidArgument, .message = std::move(message)};
+        }
+    }
+
+private:
+    const toml::table* table_;
+    std::string name_;
+    std::optional<Error>* error_;
+};
+
+std::optional<planet::Biome> biome_named(std::string_view name) {
+    std::string spaced{name};
+    std::ranges::replace(spaced, '_', ' ');
+    for (int index = 0; index < planet::biome_count; ++index) {
+        const auto biome = static_cast<planet::Biome>(index);
+        if (planet::to_string(biome) == spaced) {
+            return biome;
+        }
+    }
+    return std::nullopt;
+}
+
+void per_biome(Table& parent, std::string_view key, double high,
+               std::array<double, planet::biome_count>& values) {
+    Table table = parent.child(key);
+    if (table.get() == nullptr) {
+        return;
+    }
+    for (const auto& [name, node] : *table.get()) {
+        const auto biome = biome_named(name.str());
+        if (!biome) {
+            table.fail(std::format("unknown biome {}", table.where(name.str())));
+            continue;
+        }
+        table.number(node, table.where(name.str()), 0.0, high,
+                     values.at(static_cast<std::size_t>(*biome)));
+    }
+}
+
+void parse_forage(Table forage, ForageConfig& config) {
+    forage.only({"growth_days"sv, "wither_days"sv, "cold"sv, "warm"sv, "wet"sv, "rot_days"sv,
+                 "capacity"sv});
+    forage.days("growth_days", config.growth);
+    forage.days("wither_days", config.wither);
+    forage.number("cold", -extreme_temperature, extreme_temperature, config.cold);
+    forage.number("warm", -extreme_temperature, extreme_temperature, config.warm);
+    if (config.warm <= config.cold) {
+        forage.fail(std::format("{} must be above {}", forage.where("warm"), forage.where("cold")));
+    }
+    forage.number("wet", positive, 1'000.0, config.wet);
+    forage.days("rot_days", config.rot);
+    per_biome(forage, "capacity", 1e9, config.capacity);
+}
+
+void parse_moves(Table& table, Species& species) {
+    const toml::node* node = table.find("moves");
+    if (node == nullptr) {
+        return;
+    }
+    constexpr std::array names{std::pair{"land"sv, Moves::Land}, std::pair{"water"sv, Moves::Water},
+                               std::pair{"air"sv, Moves::Air}};
+    const auto* name = node->as_string();
+    const auto* found = name == nullptr
+                            ? names.end()
+                            : std::ranges::find(names, std::string_view{name->get()},
+                                                &std::pair<std::string_view, Moves>::first);
+    if (found == names.end()) {
+        table.fail(std::format("{} must be land, water or air", table.where("moves")));
+        return;
+    }
+    species.moves = found->second;
+}
+
+void parse_comfort(Table& table, Species& species) {
+    const toml::node* node = table.find("comfort");
+    if (node == nullptr) {
+        return;
+    }
+    const auto* range = node->as_array();
+    if (range == nullptr || range->size() != 2) {
+        table.fail(std::format("{} must be [cold, heat]", table.where("comfort")));
+        return;
+    }
+    table.number(*range->get(0), table.where("comfort"), -extreme_temperature, extreme_temperature,
+                 species.cold);
+    table.number(*range->get(1), table.where("comfort"), -extreme_temperature, extreme_temperature,
+                 species.heat);
+    if (species.heat <= species.cold) {
+        table.fail(std::format("{} must rise from cold to heat", table.where("comfort")));
+    }
+}
+
+void parse_timing(Table& table, Species& species) {
+    Table breeding = table.child("breeding");
+    breeding.only({"start_day"sv, "days"sv});
+    breeding.number("start_day", 0.0, days_per_year, species.breeding.start);
+    breeding.number("days", positive, days_per_year, species.breeding.days);
+
+    Table cycle = table.child("cycle");
+    cycle.only({"years"sv, "boom"sv, "width_years"sv, "region_level"sv});
+    cycle.number("years", 0.0, 1'000.0, species.cycle.years);
+    cycle.number("boom", 0.0, 1'000.0, species.cycle.boom);
+    cycle.number("width_years", positive, 1'000.0, species.cycle.width);
+    double level = species.cycle.region_level;
+    cycle.number("region_level", 0.0, 10.0, level);
+    species.cycle.region_level = static_cast<int>(level);
+    if (species.cycle.years > 0.0 && species.cycle.width > species.cycle.years) {
+        cycle.fail(std::format("{} must be at most the cycle's years", cycle.where("width_years")));
+    }
+
+    if (table.find("dormant_below") != nullptr) {
+        double below = 0.0;
+        table.number("dormant_below", -extreme_temperature, extreme_temperature, below);
+        species.dormant_below = below;
+    }
+}
+
+// Diets name other species, so they're read once every species is known.
+using Diet = std::vector<std::pair<std::string, double>>;
+
+Species parse_species(Table table, Diet& diet) {
+    table.only({"name"sv,          "moves"sv,          "mass"sv,     "appetite"sv,  "half_fed"sv,
+                "diet"sv,          "habitat"sv,        "density"sv,  "crowded"sv,   "births"sv,
+                "breeding"sv,      "lifespan_years"sv, "starving"sv, "comfort"sv,   "exposure"sv,
+                "dormant_below"sv, "dispersal"sv,      "drift"sv,    "leftovers"sv, "cycle"sv});
+    Species species;
+    const toml::node* name = table.find("name");
+    if (name == nullptr || !name->is_string() || name->as_string()->get().empty()) {
+        table.fail(std::format("{} must be a non-empty string", table.where("name")));
+    } else {
+        species.name = name->as_string()->get();
+    }
+    parse_moves(table, species);
+    table.number("mass", positive, 1e9, species.mass);
+    table.number("appetite", 0.0, 1e9, species.appetite);
+    table.number("half_fed", positive, 1e12, species.half_fed);
+    per_biome(table, "habitat", 1.0, species.habitat);
+    table.number("density", 0.0, 1e9, species.density);
+    table.number("crowded", positive, 1e9, species.crowded);
+    table.number("births", 0.0, 1'000.0, species.births);
+    table.number("lifespan_years", positive, 10'000.0, species.lifespan);
+    table.number("starving", 0.0, 1.0, species.starving);
+    parse_comfort(table, species);
+    table.number("exposure", 0.0, 1.0, species.exposure);
+    table.number("dispersal", 0.0, 1.0, species.dispersal);
+    table.number("drift", 0.0, 1.0, species.drift);
+    table.number("leftovers", 0.0, 0.99, species.leftovers);
+    parse_timing(table, species);
+
+    Table foods = table.child("diet");
+    if (foods.get() != nullptr) {
+        for (const auto& [food, node] : *foods.get()) {
+            double preference = 1.0;
+            foods.number(node, foods.where(food.str()), positive, 1'000.0, preference);
+            diet.emplace_back(food.str(), preference);
+        }
+    }
+    return species;
+}
+
+void resolve_diet(const Ecology& ecology, const Diet& diet, Species& species, Table& table) {
+    for (const auto& [name, preference] : diet) {
+        Food food{.preference = preference};
+        if (name == "forage") {
+            food.kind = Food::Kind::Forage;
+        } else if (name == "carrion") {
+            food.kind = Food::Kind::Carrion;
+        } else if (const auto prey = ecology.find(name)) {
+            food.kind = Food::Kind::Prey;
+            food.prey = *prey;
+        } else {
+            table.fail(std::format("{} eats {}, which is neither forage, carrion nor a species",
+                                   species.name, name));
+            continue;
+        }
+        species.diet.push_back(food);
+    }
+}
+
+Result<Ecology> parse(const toml::table& root) {
+    std::optional<Error> error;
+    Table top{&root, "ecology", &error};
+    top.only({"forage"sv, "species"sv});
+    Ecology ecology;
+    parse_forage(Table{top.table("forage"), "forage", &error}, ecology.forage);
+
+    std::vector<Diet> diets;
+    if (const toml::node* list = top.find("species")) {
+        const auto* species = list->as_array();
+        if (species == nullptr || !species->is_array_of_tables()) {
+            top.fail("species must be an array of tables, as [[species]]");
+        } else {
+            for (std::size_t index = 0; index < species->size(); ++index) {
+                ecology.species.push_back(
+                    parse_species(Table{species->get(index)->as_table(),
+                                        std::format("species[{}]", index), &error},
+                                  diets.emplace_back()));
+            }
+        }
+    }
+    for (std::size_t index = 0; index < ecology.species.size(); ++index) {
+        const std::string& name = ecology.species[index].name;
+        if (name == "forage" || name == "carrion") {
+            top.fail(std::format("a species can't be named {}", name));
+        } else if (ecology.find(name) != index) {
+            top.fail(std::format("species {} is listed twice", name));
+        }
+        resolve_diet(ecology, diets[index], ecology.species[index], top);
+    }
+    if (error) {
+        return std::unexpected(std::move(*error));
+    }
+    return ecology;
+}
+
+} // namespace
+
+std::optional<std::uint32_t> Ecology::find(std::string_view name) const {
+    const auto found = std::ranges::find(species, name, &Species::name);
+    if (found == species.end()) {
+        return std::nullopt;
+    }
+    return static_cast<std::uint32_t>(found - species.begin());
+}
+
+Result<Ecology> parse_ecology(std::string_view text) {
+    const toml::parse_result parsed = toml::parse(text);
+    if (!parsed) {
+        const toml::parse_error& error = parsed.error();
+        return make_error(ErrorCode::Parse, std::format("line {}: {}", error.source().begin.line,
+                                                        error.description()));
+    }
+    return parse(parsed.table());
+}
+
+Result<Ecology> load_ecology(const std::filesystem::path& path) {
+    auto text = read_text_file(path);
+    if (!text) {
+        return std::unexpected(std::move(text.error()));
+    }
+    return parse_ecology(*text);
+}
+
+} // namespace hog::sim
