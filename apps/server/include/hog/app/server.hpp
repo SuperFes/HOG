@@ -13,6 +13,7 @@
 #include <hog/server/server_config.hpp>
 #include <hog/server/snapshot_writer.hpp>
 #include <hog/server/tick_loop.hpp>
+#include <hog/sim/forest.hpp>
 #include <hog/sim/weather.hpp>
 #include <hog/sim/wildlife.hpp>
 #include <hog/store/sqlite_change_store.hpp>
@@ -25,6 +26,7 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <optional>
 
 namespace hog::app {
 
@@ -77,6 +79,8 @@ public:
     [[nodiscard]] const sim::Weather& weather() const noexcept { return *weather_; }
     // Null when no ecology is configured.
     [[nodiscard]] const sim::Wildlife* wildlife() const noexcept { return wildlife_.get(); }
+    // Null when no vegetation is configured.
+    [[nodiscard]] const sim::Forest* forest() const noexcept { return forest_.get(); }
 
     // Logs the metrics, bringing those mirrored from elsewhere up to date first.
     void report(std::uint64_t slipped);
@@ -84,9 +88,17 @@ public:
 private:
     // Advances the world by one tick of game time.
     void simulate(GameTime from, GameDuration step);
-    // Builds the weather and wildlife as of `at`, on the planet with its changes.
+    // Builds the weather, wildlife and forest as of `at`, on the planet with its changes.
     [[nodiscard]] Result<void> start_simulation(const planet::PlanetConfig& shape, GameTime at);
+    // Reads the weather, wildlife and forest from a snapshot; a part it can't read starts over.
+    [[nodiscard]] Result<void> restore_simulation(const save::Snapshot& snapshot);
     void advance_weather(GameTime to);
+    // When the wildlife or the forest next steps, whichever is sooner; none without either.
+    [[nodiscard]] std::optional<GameTime> next_due() const;
+    void step_wildlife(GameTime at);
+    void step_forest(GameTime at);
+    // Counts the fires and measures the forest.
+    void report_forest();
     // Logs and counts what has happened to wildlife since last asked.
     void report_wildlife();
     // Logs the species that are gone from everywhere, as the server opens.
@@ -106,6 +118,7 @@ private:
     // Set once the planet's changes are in, since the weather starts from the ground.
     std::unique_ptr<sim::Weather> weather_;
     std::unique_ptr<sim::Wildlife> wildlife_;
+    std::unique_ptr<sim::Forest> forest_;
     GameTime time_;
     Tick tick_;
 
@@ -126,6 +139,14 @@ private:
     metrics::Gauge& extinct_species_;
     // By ecology event kind.
     std::array<metrics::Counter*, 5> ecology_events_;
+    metrics::Counter& forest_steps_;
+    metrics::Histogram& forest_step_seconds_;
+    metrics::Counter& fires_started_;
+    metrics::Counter& alight_km2_;
+    metrics::Gauge& burning_cells_;
+    metrics::Gauge& biomass_tonnes_;
+    // km² alight not yet counted, being under one.
+    double alight_left_ = 0.0;
     metrics::Reporter reporter_;
     // What the mirrored counters were last brought up to.
     server::SnapshotWriter::Stats mirrored_writes_;

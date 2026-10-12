@@ -53,6 +53,8 @@ TEST_CASE("a minimal server config takes the defaults", "[server][config]") {
     CHECK(config->weather.day == 24h);
     CHECK_FALSE(config->wildlife.ecology);
     CHECK(config->wildlife.step == 24h);
+    CHECK_FALSE(config->forest.vegetation);
+    CHECK(config->forest.step == 1h);
 }
 
 TEST_CASE("every server setting can be given", "[server][config]") {
@@ -84,6 +86,10 @@ day_hours = 4
 [wildlife]
 ecology = "ecology.toml"
 step_hours = 6
+
+[forest]
+vegetation = "forest.toml"
+step_hours = 0.5
 )",
                                             base());
     REQUIRE(config);
@@ -109,6 +115,8 @@ step_hours = 6
     CHECK(config->weather.day == 4h);
     CHECK(config->wildlife.ecology == base() / "ecology.toml");
     CHECK(config->wildlife.step == 6h);
+    CHECK(config->forest.vegetation == base() / "forest.toml");
+    CHECK(config->forest.step == 30min);
 }
 
 TEST_CASE("bad server configs are rejected", "[server][config]") {
@@ -150,6 +158,9 @@ TEST_CASE("bad server configs are rejected", "[server][config]") {
         {with("[wildlife]\necology = 3\n"), ErrorCode::InvalidArgument},
         {with("[wildlife]\nstep_hours = 0\n"), ErrorCode::InvalidArgument},
         {with("[wildlife]\nspecies = \"a.toml\"\n"), ErrorCode::InvalidArgument},
+        {with("[forest]\nvegetation = 3\n"), ErrorCode::InvalidArgument},
+        {with("[forest]\nstep_hours = 25\n"), ErrorCode::InvalidArgument},
+        {with("[forest]\nfire = \"a.toml\"\n"), ErrorCode::InvalidArgument},
     }));
     CAPTURE(text);
     const auto config = parse_server_config(text, base());
@@ -187,4 +198,5 @@ TEST_CASE("the development server config loads", "[server][config]") {
     CHECK(config->planet.filename() == "planet.toml");
     CHECK(std::filesystem::exists(config->planet));
     CHECK(std::filesystem::exists(config->wildlife.ecology.value_or("")));
+    CHECK(std::filesystem::exists(config->forest.vegetation.value_or("")));
 }

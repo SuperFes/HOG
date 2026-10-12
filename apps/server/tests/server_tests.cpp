@@ -55,9 +55,11 @@ public:
     }
 
     [[nodiscard]] std::filesystem::path write_ecology(std::string_view text) const {
-        const auto path = directory_.path() / "ecology.toml";
-        std::ofstream{path} << text;
-        return path;
+        return write("ecology.toml", text);
+    }
+
+    [[nodiscard]] std::filesystem::path write_vegetation(std::string_view text) const {
+        return write("forest.toml", text);
     }
 
     [[nodiscard]] hog::server::ServerConfig config() const {
@@ -69,6 +71,12 @@ public:
     }
 
 private:
+    [[nodiscard]] std::filesystem::path write(std::string_view name, std::string_view text) const {
+        const auto path = directory_.path() / name;
+        std::ofstream{path} << text;
+        return path;
+    }
+
     hog::testing::TemporaryDirectory directory_;
 };
 
@@ -254,6 +262,40 @@ starving = 1
         REQUIRE(server->save());
     }
     CHECK(gauge(*opened(config, later), "hog_wildlife_extinct_species") == 1.0);
+}
+
+TEST_CASE("the forest grows with the weather and is kept with the world", "[app][server]") {
+    const World world;
+    auto config = world.config();
+    config.catch_up_ticks = 100;
+    CHECK(opened(config)->forest() == nullptr);
+
+    config.forest.vegetation = world.write_vegetation(R"(
+[growth]
+capacity = { grassland = 0.5, savanna = 3, temperate_forest = 20, boreal_forest = 10 }
+)");
+    REQUIRE(opened(config)->save());
+    const GameTime later = start + 72h;
+    hog::sim::ForestFields before;
+    {
+        const auto server = opened(config, later);
+        REQUIRE(server->forest() != nullptr);
+        CHECK(gauge(*server, "hog_forest_biomass_tonnes") > 0.0);
+        server->catch_up([&] { return later; });
+        CHECK(server->forest()->time() == later);
+        CHECK(counter(*server, "hog_forest_steps_total") == 72);
+        CHECK(server->forest()->grid().level() == server->weather().grid().level());
+        CHECK(gauge(*server, "hog_forest_biomass_tonnes") == server->forest()->total() / 1e3);
+        CHECK(gauge(*server, "hog_forest_burning_cells") ==
+              static_cast<double>(server->forest()->burning()));
+        before = server->forest()->fields();
+    }
+    CHECK(opened(config, later)->forest()->fields() == before);
+
+    config.forest.vegetation = world.write_vegetation("[fire]\nsmoke = 1\n");
+    const auto broken = Server::open(config, later);
+    REQUIRE_FALSE(broken);
+    CHECK(broken.error().message.find("forest.toml") != std::string::npos);
 }
 
 TEST_CASE("snapshots are taken every save interval", "[app][server]") {

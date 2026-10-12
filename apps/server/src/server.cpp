@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <filesystem>
 #include <format>
 #include <string>
@@ -20,6 +21,7 @@ constexpr std::array tick_bounds{0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005,
 
 constexpr save::SectionId weather_section = save::section_id("WTHR");
 constexpr save::SectionId wildlife_section = save::section_id("WILD");
+constexpr save::SectionId forest_section = save::section_id("FRST");
 
 [[nodiscard]] std::string format_time(GameTime time) {
     return std::format("{:%FT%T}Z",
@@ -99,6 +101,16 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config,
                              "Species back where they had died out, or anywhere after extinction."),
           &registry_.counter("hog_wildlife_extinctions_total", "Species that died out everywhere."),
       },
+      forest_steps_(registry_.counter("hog_forest_steps_total", "Forest steps taken.")),
+      forest_step_seconds_(registry_.histogram("hog_forest_step_seconds",
+                                               "Real time each forest step took.",
+                                               {tick_bounds.begin(), tick_bounds.end()})),
+      fires_started_(registry_.counter("hog_forest_fires_started_total",
+                                       "Fires started by lightning or by hand.")),
+      alight_km2_(registry_.counter("hog_forest_alight_km2_total",
+                                    "Area of cells that caught fire, however they caught it.")),
+      burning_cells_(registry_.gauge("hog_forest_burning_cells", "Forest cells alight.")),
+      biomass_tonnes_(registry_.gauge("hog_forest_biomass_tonnes", "Living plants on the planet.")),
       reporter_(registry_) {
     persistence_.persist<server::Position>();
 }
@@ -160,17 +172,8 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
         if (!restored) {
             return context("snapshot", restored.error());
         }
-        if (const auto weather =
-                restore_part(*server->weather_, *snapshot, weather_section, "weather");
-            !weather) {
-            return std::unexpected(weather.error());
-        }
-        if (server->wildlife_) {
-            if (const auto wildlife =
-                    restore_part(*server->wildlife_, *snapshot, wildlife_section, "wildlife");
-                !wildlife) {
-                return std::unexpected(wildlife.error());
-            }
+        if (auto simulation = server->restore_simulation(*snapshot); !simulation) {
+            return std::unexpected(simulation.error());
         }
         server->time_ = snapshot->time;
         server->tick_ = snapshot->tick;
@@ -183,6 +186,9 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
     if (server->wildlife_) {
         server->report_wildlife();
         server->recall_extinctions();
+    }
+    if (server->forest_) {
+        server->report_forest();
     }
     return server;
 }
@@ -218,24 +224,95 @@ Result<void> Server::start_simulation(const planet::PlanetConfig& shape, GameTim
             std::move(wildlife), sim::habitat_for(weather_->grid(), planet_), at);
         log::info(server_log, "wildlife: {} species", species);
     }
+    if (const auto& path = config_.forest.vegetation) {
+        auto vegetation = sim::load_vegetation(*path);
+        if (!vegetation) {
+            return context(path->string(), vegetation.error());
+        }
+        const sim::ForestConfig forest{
+            .level = weather.level,
+            .step = config_.forest.step,
+            .planet_radius = shape.radius,
+            .seed = shape.seed,
+            .vegetation = *vegetation,
+        };
+        forest_ =
+            std::make_unique<sim::Forest>(forest, sim::soil_for(weather_->grid(), planet_), at);
+        log::info(server_log, "forest: {:.0f} Mt of plants", forest_->total() / 1e9);
+    }
     return {};
 }
 
 void Server::simulate(GameTime from, GameDuration step) {
     entities_.progress(std::chrono::duration<float>(step).count());
     const GameTime to = from + step;
-    // Wildlife steps see the weather as it was when they fell due.
-    while (wildlife_ && wildlife_->next_step() <= to) {
-        const GameTime at = wildlife_->next_step();
-        advance_weather(at);
-        const MonotonicClock::time_point started = MonotonicClock::now();
-        wildlife_->advance_to(at, sim::conditions_of(*weather_), jobs_);
-        wildlife_steps_.add(1);
-        wildlife_step_seconds_.observe(
-            std::chrono::duration<double>(MonotonicClock::now() - started).count());
-        report_wildlife();
+    // Wildlife and forest steps see the weather as it was when they fell due.
+    for (auto due = next_due(); due && *due <= to; due = next_due()) {
+        advance_weather(*due);
+        if (wildlife_ && wildlife_->next_step() == *due) {
+            step_wildlife(*due);
+        }
+        if (forest_ && forest_->next_step() == *due) {
+            step_forest(*due);
+        }
     }
     advance_weather(to);
+}
+
+Result<void> Server::restore_simulation(const save::Snapshot& snapshot) {
+    if (auto weather = restore_part(*weather_, snapshot, weather_section, "weather"); !weather) {
+        return weather;
+    }
+    if (wildlife_) {
+        if (auto wildlife = restore_part(*wildlife_, snapshot, wildlife_section, "wildlife");
+            !wildlife) {
+            return wildlife;
+        }
+    }
+    if (forest_) {
+        return restore_part(*forest_, snapshot, forest_section, "forest");
+    }
+    return {};
+}
+
+std::optional<GameTime> Server::next_due() const {
+    std::optional<GameTime> due;
+    if (wildlife_) {
+        due = wildlife_->next_step();
+    }
+    if (forest_) {
+        due = due ? std::min(*due, forest_->next_step()) : forest_->next_step();
+    }
+    return due;
+}
+
+void Server::step_wildlife(GameTime at) {
+    const MonotonicClock::time_point started = MonotonicClock::now();
+    wildlife_->advance_to(at, sim::conditions_of(*weather_), jobs_);
+    wildlife_steps_.add(1);
+    wildlife_step_seconds_.observe(
+        std::chrono::duration<double>(MonotonicClock::now() - started).count());
+    report_wildlife();
+}
+
+void Server::step_forest(GameTime at) {
+    const MonotonicClock::time_point started = MonotonicClock::now();
+    forest_->advance_to(at, sim::forest_conditions_of(*weather_), jobs_);
+    forest_steps_.add(1);
+    forest_step_seconds_.observe(
+        std::chrono::duration<double>(MonotonicClock::now() - started).count());
+    report_forest();
+}
+
+void Server::report_forest() {
+    const sim::FireReport fires = forest_->drain_fires();
+    fires_started_.add(fires.started);
+    alight_left_ += fires.alight;
+    const double whole = std::floor(alight_left_);
+    alight_km2_.add(static_cast<std::uint64_t>(whole));
+    alight_left_ -= whole;
+    burning_cells_.set(static_cast<double>(forest_->burning()));
+    biomass_tonnes_.set(forest_->total() / 1e3);
 }
 
 namespace {
@@ -323,6 +400,10 @@ void Server::submit() {
         snapshot.add(save::Section{.id = wildlife_section,
                                    .version = sim::Wildlife::save_version,
                                    .bytes = wildlife_->save()});
+    }
+    if (forest_) {
+        snapshot.add(save::Section{
+            .id = forest_section, .version = sim::Forest::save_version, .bytes = forest_->save()});
     }
     writer_.submit(std::move(snapshot));
 }

@@ -38,6 +38,12 @@ struct WildlifeSettings {
     GameDuration step = std::chrono::hours{24};
 };
 
+struct ForestSettings {
+    // How plants grow and burn; without one, nothing grows on the planet.
+    std::optional<std::filesystem::path> vegetation;
+    GameDuration step = std::chrono::hours{1};
+};
+
 struct ServerConfig {
     std::filesystem::path world; // the world database
     std::filesystem::path planet;
@@ -52,6 +58,7 @@ struct ServerConfig {
     std::chrono::seconds metrics_interval{10};
     WeatherSettings weather;
     WildlifeSettings wildlife;
+    ForestSettings forest;
 };
 
 // Reads a server config. Relative paths are resolved against `base`, normally the directory of
@@ -84,6 +91,10 @@ struct ServerConfig {
 //     [wildlife]                 # optional
 //     ecology = "ecology.toml"
 //     step_hours = 24.0          # game time
+//
+//     [forest]                   # optional
+//     vegetation = "forest.toml"
+//     step_hours = 1.0           # game time
 //
 // Unknown tables and keys are errors, so typos don't silently fall back to defaults.
 [[nodiscard]] Result<ServerConfig> parse_server_config(std::string_view text,

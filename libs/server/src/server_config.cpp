@@ -23,6 +23,7 @@ constexpr double max_cell_km = 10'000.0;
 constexpr double max_weather_minutes = 24.0 * 60.0;
 constexpr double max_weather_day_hours = 24.0 * 365.0;
 constexpr double max_wildlife_step_hours = 24.0 * 365.0;
+constexpr double max_forest_step_hours = 24.0;
 
 [[nodiscard]] std::unexpected<Error> invalid(std::string message) {
     return make_error(ErrorCode::InvalidArgument, std::move(message));
@@ -287,6 +288,27 @@ private:
     return {};
 }
 
+[[nodiscard]] Result<void> parse_forest(const Table& forest, const std::filesystem::path& base,
+                                        ForestSettings& config) {
+    if (auto known = forest.only({"vegetation", "step_hours"}); !known) {
+        return known;
+    }
+    const auto vegetation = forest.string("vegetation");
+    if (!vegetation) {
+        return std::unexpected(vegetation.error());
+    }
+    if (*vegetation) {
+        config.vegetation = (base / **vegetation).lexically_normal();
+    }
+    const auto step =
+        forest.duration<std::ratio<3'600>>("step_hours", max_forest_step_hours, "a day");
+    if (!step) {
+        return std::unexpected(step.error());
+    }
+    config.step = step->value_or(config.step);
+    return {};
+}
+
 } // namespace
 
 Result<ServerConfig> parse_server_config(std::string_view text, const std::filesystem::path& base) {
@@ -296,8 +318,8 @@ Result<ServerConfig> parse_server_config(std::string_view text, const std::files
         return make_error(ErrorCode::Parse, std::format("line {}: {}", error.source().begin.line,
                                                         error.description()));
     }
-    constexpr std::array<std::string_view, 6> names{"server",  "save",    "log",
-                                                    "metrics", "weather", "wildlife"};
+    constexpr std::array<std::string_view, 7> names{"server",  "save",     "log",   "metrics",
+                                                    "weather", "wildlife", "forest"};
     std::array<const toml::table*, names.size()> tables{};
     for (const auto& [key, node] : parsed.table()) {
         const auto index =
@@ -330,6 +352,9 @@ Result<ServerConfig> parse_server_config(std::string_view text, const std::files
     if (auto wildlife = parse_wildlife(Table{tables[5], "wildlife"}, base, config.wildlife);
         !wildlife) {
         return std::unexpected(wildlife.error());
+    }
+    if (auto forest = parse_forest(Table{tables[6], "forest"}, base, config.forest); !forest) {
+        return std::unexpected(forest.error());
     }
     return config;
 }
