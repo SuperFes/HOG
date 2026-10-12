@@ -110,11 +110,16 @@ struct SystemTuning {
     double spacing = 2.0;   // radii a new system keeps from the others
 };
 
-// Where the wind carries warmer or colder air in, the air rises along the boundary: gently ahead
-// of warm air, sharply ahead of cold.
+// Each low carries fronts the way Earth's do: a warm front reaching ahead of it and a cold front
+// trailing behind towards the equator. Air rises along both, gently at the warm front and sharply
+// at the cold. Lengths are in the system's radii, east and poleward of its centre.
 struct FrontTuning {
-    double reference = 0.3;  // °C per hour of warming or cooling that makes a strong front
-    double lift = 0.02;      // m/s of rising along a strong front
+    double warm_east = 1.4;
+    double warm_poleward = -0.4;
+    double cold_east = -0.4;
+    double cold_poleward = -1.4;
+    double width = 0.3;
+    double lift = 0.06;      // m/s of rising along a strong front
     double cold_storm = 8.0; // °C of storm contrast a strong cold front adds
 };
 

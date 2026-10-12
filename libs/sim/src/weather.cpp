@@ -12,7 +12,7 @@ namespace hog::sim {
 
 namespace {
 
-constexpr float cloud_cover_depth = 0.5F; // mm of cloud that covers most of the sky
+constexpr float cloud_cover_depth = 0.2F; // mm of cloud that covers most of the sky
 
 // Sea ice holds its water in.
 float sea_wetness(double temperature) {
@@ -40,8 +40,12 @@ WeatherFields::WeatherFields(std::size_t size)
       wind(size, Vec2{0.0F}), jet(size, Vec2{0.0F}), evaporation(size), rain(size), snow(size),
       hail(size), storm(size), lift(size), front(size) {}
 
+float cloud_cover(float cloud) noexcept {
+    return 1.0F - std::exp(-cloud / cloud_cover_depth);
+}
+
 float WeatherFields::cloud_cover(std::size_t index) const {
-    return 1.0F - std::exp(-cloud[index] / cloud_cover_depth);
+    return sim::cloud_cover(cloud[index]);
 }
 
 std::vector<Ground> ground_for(const CellGrid& grid, const planet::World& world) {

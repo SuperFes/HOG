@@ -76,6 +76,9 @@ struct WeatherFields {
     friend bool operator==(const WeatherFields&, const WeatherFields&) = default;
 };
 
+// Fraction of the sky covered, 0 to 1, by mm of cloud.
+[[nodiscard]] float cloud_cover(float cloud) noexcept;
+
 // A travelling low.
 struct StormSystem {
     std::uint32_t id = 0;

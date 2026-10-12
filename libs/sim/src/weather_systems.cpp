@@ -131,18 +131,39 @@ void update_systems(const StepContext& step, const WeatherFields& fields,
 
 void fronts(const StepContext& step, WeatherFields& fields, std::uint32_t index) {
     const FrontTuning& tuning = step.config->tuning.fronts;
-    const auto& around = step.grid->neighbors(index);
-    const auto& weights = step.grid->gradient_weights(index);
-    const auto warmth = [&](std::uint32_t cell) {
-        return sea_level(static_cast<double>(fields.temperature[cell]), step.ground[cell]);
-    };
-    DVec2 gradient{0.0};
-    for (std::size_t k = 0; k < around.size(); ++k) {
-        gradient += weights[k] * (warmth(around[k]) - warmth(index));
+    const double growing = step.config->tuning.systems.growing;
+    const DVec3 up = step.grid->frame(index).up;
+    const DVec2 warm_end{tuning.warm_east, tuning.warm_poleward};
+    const DVec2 cold_end{tuning.cold_east, tuning.cold_poleward};
+    const double reach =
+        std::max(glm::length(warm_end), glm::length(cold_end)) + (2.0 * tuning.width);
+    double front = 0.0;
+    for (const StormSystem& system : step.systems) {
+        const auto radius = static_cast<double>(system.radius);
+        if (glm::dot(up, system.centre) < std::cos(std::min(reach * radius, 3.0))) {
+            continue;
+        }
+        const planet::TangentFrame frame = planet::tangent_frame(system.centre);
+        // Where the cell lies from the centre in radii, poleward up in either hemisphere.
+        DVec2 at = DVec2{glm::dot(up, frame.east), glm::dot(up, frame.north)} / radius;
+        if (system.centre.z < 0.0) {
+            at.y = -at.y;
+        }
+        const double share =
+            system.strength(growing) / std::max(static_cast<double>(system.depth), 1e-9);
+        const auto along = [&](DVec2 end) {
+            const double t = std::clamp(glm::dot(at, end) / glm::dot(end, end), 0.0, 1.0);
+            const double away = glm::length(at - (end * t)) / tuning.width;
+            return share * std::exp(-away * away);
+        };
+        const double warm = along(warm_end);
+        const double cold = along(cold_end);
+        const double strongest = warm >= cold ? warm : -cold;
+        if (std::abs(strongest) > std::abs(front)) {
+            front = strongest;
+        }
     }
-    // °C per hour the wind brings in.
-    const double warming = -glm::dot(DVec2{fields.wind[index]}, gradient / earth_radius) * 3'600.0;
-    fields.front[index] = static_cast<float>(std::tanh(warming / tuning.reference));
+    fields.front[index] = static_cast<float>(front);
 }
 
 } // namespace detail
