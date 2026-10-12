@@ -482,3 +482,107 @@ TEST_CASE("weather rejects bad input", "[sim][weather]") {
     no_day.day = hog::GameDuration::zero();
     CHECK_THROWS_AS((Weather{no_day, everywhere(sea), march_equinox}), AssertionFailed);
 }
+
+namespace {
+
+// A year's weather added up per cell.
+struct Year {
+    explicit Year(std::size_t size) : warmth(size), rain(size), snow(size), snow_warmth(size) {}
+
+    void add(const Weather& weather, unsigned month) {
+        const auto& f = weather.fields();
+        ++steps;
+        for (std::uint32_t index = 0; index < f.size(); ++index) {
+            const auto temperature = static_cast<double>(f.temperature[index]);
+            warmth[index] += temperature;
+            rain[index] += static_cast<double>(f.rain[index] + f.snow[index] + f.hail[index]);
+            snow[index] += static_cast<double>(f.snow[index]);
+            snow_warmth[index] += static_cast<double>(f.snow[index]) * temperature;
+            // Northern land in its summer against its winter.
+            if (!weather.ground()[index].ocean && weather.grid().frame(index).up.z > 0.3) {
+                const auto storm = static_cast<double>(f.storm[index]);
+                summer_storms += month >= 6 && month <= 8 ? storm : 0.0;
+                winter_storms += month == 12 || month <= 2 ? storm : 0.0;
+            }
+        }
+    }
+
+    std::vector<double> warmth;
+    std::vector<double> rain;
+    std::vector<double> snow;
+    std::vector<double> snow_warmth;
+    double summer_storms = 0.0;
+    double winter_storms = 0.0;
+    int steps = 0;
+};
+
+} // namespace
+
+TEST_CASE("a year of weather matches the planet's climate", "[sim][weather][climate]") {
+    const hog::planet::World world{hog::planet::PlanetConfig{.seed = 1, .radius = 115'000.0}};
+    const WeatherConfig coarse{.level = 4, .step = hours{2}, .planet_radius = 115'000.0, .seed = 1};
+    const hog::sim::CellGrid grid{coarse.level};
+    Weather weather{coarse, hog::sim::ground_for(grid, world), at(2026y / January / 1)};
+    JobSystem jobs{0};
+
+    const std::size_t size = grid.size();
+    Year year{size};
+    for (GameTime time = weather.time(); time < at(2027y / January / 1); time += hours{2}) {
+        weather.advance_to(time + hours{2}, jobs);
+        const year_month_day date{
+            floor<days>(sys_time<hog::GameDuration>{time.time_since_epoch()})};
+        year.add(weather, static_cast<unsigned>(date.month()));
+    }
+    const auto& [warmth, rain, snow, snow_warmth, summer_storms, winter_storms, steps] = year;
+
+    // Yearly means stay near the climate the planet was generated with.
+    double drift = 0.0;
+    for (std::uint32_t index = 0; index < size; ++index) {
+        drift += std::abs((warmth[index] / steps) -
+                          static_cast<double>(weather.ground()[index].mean_temperature));
+    }
+    CHECK(drift / static_cast<double>(size) < 2.0);
+
+    // Wet biomes get more rain than dry ones, and the tropics more than the subtropics.
+    const auto mean_rain = [&](auto keep) {
+        double total = 0.0;
+        int count = 0;
+        for (std::uint32_t index = 0; index < size; ++index) {
+            if (keep(index)) {
+                total += rain[index];
+                ++count;
+            }
+        }
+        REQUIRE(count > 0);
+        return total / count;
+    };
+    const auto biome = [&](std::uint32_t index) { return world.state(grid.cell(index)).biome; };
+    const auto latitude = [&](std::uint32_t index) {
+        return std::abs(std::asin(grid.frame(index).up.z)) / degree;
+    };
+    using hog::planet::Biome;
+    const double wet = mean_rain([&](std::uint32_t index) {
+        const Biome b = biome(index);
+        return b == Biome::TropicalRainforest || b == Biome::TemperateForest;
+    });
+    const double dry = mean_rain([&](std::uint32_t index) {
+        const Biome b = biome(index);
+        return b == Biome::Desert || b == Biome::Shrubland;
+    });
+    CHECK(wet > dry);
+    CHECK(mean_rain([&](std::uint32_t index) { return latitude(index) < 12.0; }) >
+          mean_rain([&](std::uint32_t index) {
+              return latitude(index) > 20.0 && latitude(index) < 35.0;
+          }));
+
+    // Thunderstorms come with summer, snow with cold.
+    CHECK(summer_storms > winter_storms * 2.0);
+    double snowfall = 0.0;
+    double snowy_warmth = 0.0;
+    for (std::uint32_t index = 0; index < size; ++index) {
+        snowfall += snow[index];
+        snowy_warmth += snow_warmth[index];
+    }
+    REQUIRE(snowfall > 0.0);
+    CHECK(snowy_warmth / snowfall < 1.0);
+}

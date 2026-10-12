@@ -10,9 +10,11 @@ namespace hog::sim {
 using Seconds = std::chrono::duration<double>;
 
 struct HeatTuning {
-    // Surface air over land follows the sun within hours; over the ocean it follows the sea.
+    // Surface air over land follows the sun within hours; over the ocean it follows the sea,
+    // which warms and cools a season late.
     Seconds land_response = std::chrono::hours{6};
-    Seconds ocean_response = std::chrono::days{20};
+    Seconds ocean_response = std::chrono::days{2};
+    Seconds ocean_lag = std::chrono::days{35};
     Seconds upper_response = std::chrono::days{4};
     double land_seasons = 55.0; // °C per unit of sin(declination) · sin(latitude)
     double ocean_seasons = 15.0;

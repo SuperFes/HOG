@@ -83,10 +83,10 @@ Weather::Weather(const WeatherConfig& config, std::vector<Ground> ground, GameTi
         }
         slopes_.push_back(slope / config.planet_radius);
     }
-    const double sin_declination = detail::sin_declination(time_, config_.axial_tilt);
+    const detail::Seasons seasons = detail::seasons(config_, time_);
     for (std::uint32_t index = 0; index < grid_.size(); ++index) {
-        const detail::Targets target = detail::targets(config_.tuning.heat, ground_[index],
-                                                       grid_.frame(index).up.z, sin_declination);
+        const detail::Targets target =
+            detail::targets(config_.tuning.heat, ground_[index], grid_.frame(index).up.z, seasons);
         fields_.temperature[index] = static_cast<float>(target.surface);
         fields_.upper_temperature[index] = static_cast<float>(target.upper);
         fields_.vapour[index] = static_cast<float>(0.7 * detail::saturation(target.surface) *
@@ -121,7 +121,7 @@ void Weather::step(GameTime at, jobs::JobSystem& jobs) {
         .calendar = &calendar_,
         .middle = middle,
         .seconds = Seconds{config_.step}.count(),
-        .sin_declination = detail::sin_declination(middle, config_.axial_tilt),
+        .seasons = detail::seasons(config_, middle),
     };
     detail::update_systems(context, fields_, systems_, next_system_,
                            at.time_since_epoch() / config_.step);
@@ -147,7 +147,7 @@ void Weather::balance_winds(jobs::JobSystem* jobs) {
         .calendar = &calendar_,
         .middle = time_,
         .seconds = 0.0,
-        .sin_declination = detail::sin_declination(time_, config_.axial_tilt),
+        .seasons = detail::seasons(config_, time_),
     };
     detail::for_cells(jobs, grid_.size(),
                       [&](std::uint32_t index) { detail::pressure(context, fields_, index); });

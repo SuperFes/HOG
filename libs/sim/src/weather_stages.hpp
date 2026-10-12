@@ -17,6 +17,12 @@ inline constexpr double degree = std::numbers::pi / 180.0;
 inline constexpr double earth_radius = 6'371'000.0;
 inline constexpr double lapse_rate = 0.0065; // °C per metre
 
+// The sun's declination, as sines: now, and as the slower sea feels it.
+struct Seasons {
+    double now = 0.0;
+    double sea = 0.0;
+};
+
 struct StepContext {
     const WeatherConfig* config;
     const CellGrid* grid;
@@ -26,7 +32,7 @@ struct StepContext {
     const Calendar* calendar;
     GameTime middle; // halfway through the step
     double seconds;  // the step's length
-    double sin_declination;
+    Seasons seasons;
 };
 
 // Column water the air holds at saturation, rising about 6% per °C.
@@ -43,7 +49,7 @@ struct StepContext {
     return temperature + (lapse_rate * static_cast<double>(ground.elevation));
 }
 
-[[nodiscard]] double sin_declination(GameTime time, double axial_tilt);
+[[nodiscard]] Seasons seasons(const WeatherConfig& config, GameTime time);
 
 // Where the weather would settle at a latitude and season, before the time of day.
 struct Targets {
@@ -54,7 +60,7 @@ struct Targets {
 };
 
 [[nodiscard]] Targets targets(const HeatTuning& tuning, const Ground& ground, double sin_latitude,
-                              double sin_declination);
+                              Seasons seasons);
 
 // Carries each layer's warmth, water and cloud with the wind, reading the step's start from
 // `before`. Moving alone doesn't keep water exactly; conserve_water() puts it right.

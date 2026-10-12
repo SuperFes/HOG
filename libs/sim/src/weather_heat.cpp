@@ -5,13 +5,20 @@
 
 namespace hog::sim::detail {
 
-double sin_declination(GameTime time, double axial_tilt) {
-    return std::sin(axial_tilt * degree) * std::sin(Calendar::solar_longitude(time));
+Seasons seasons(const WeatherConfig& config, GameTime time) {
+    const double tilt = std::sin(config.axial_tilt * degree);
+    const auto lag = std::chrono::round<GameDuration>(config.tuning.heat.ocean_lag);
+    return Seasons{
+        .now = tilt * std::sin(Calendar::solar_longitude(time)),
+        .sea = tilt * std::sin(Calendar::solar_longitude(time - lag)),
+    };
 }
 
 Targets targets(const HeatTuning& tuning, const Ground& ground, double sin_latitude,
-                double sin_declination) {
-    const double seasons = sin_declination * sin_latitude;
+                Seasons seasons) {
+    const double sin_declination = seasons.now;
+    const double land = sin_declination * sin_latitude;
+    const double sea = seasons.sea * sin_latitude;
     const double latitude = std::abs(std::asin(sin_latitude));
     const double summer = sin_latitude < 0.0 ? -sin_declination : sin_declination;
     const double middle = (tuning.band_latitude + (tuning.band_seasons * summer)) * degree;
@@ -20,9 +27,9 @@ Targets targets(const HeatTuning& tuning, const Ground& ground, double sin_latit
         0.5 + (0.5 * std::tanh((latitude - middle) / (tuning.band_width * degree)));
     const auto mean = static_cast<double>(ground.mean_temperature);
     return Targets{
-        .surface = mean + ((ground.ocean ? tuning.ocean_seasons : tuning.land_seasons) * seasons),
+        .surface = mean + (ground.ocean ? tuning.ocean_seasons * sea : tuning.land_seasons * land),
         .upper = tuning.upper_equator - (drop * cooling),
-        .reference = mean + (tuning.ocean_seasons * seasons),
+        .reference = mean + (tuning.ocean_seasons * sea),
     };
 }
 
@@ -30,7 +37,7 @@ void heat(const StepContext& step, WeatherFields& fields, std::uint32_t index) {
     const HeatTuning& tuning = step.config->tuning.heat;
     const Ground& ground = step.ground[index];
     const DVec3 up = step.grid->frame(index).up;
-    const Targets target = targets(tuning, ground, up.z, step.sin_declination);
+    const Targets target = targets(tuning, ground, up.z, step.seasons);
     const auto cover = static_cast<double>(fields.cloud_cover(index));
     const double sun = std::sin(step.calendar->sun_elevation(step.middle, up));
     const double heating = (ground.ocean ? tuning.ocean_days : tuning.land_days) * sun *
