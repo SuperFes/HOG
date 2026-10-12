@@ -341,6 +341,19 @@ TEST_CASE("the world's layers are laid out for debug tools", "[app][server]") {
     std::vector<float> east(winds.size());
     std::ranges::transform(winds, east.begin(), [](const hog::Vec2& blowing) { return blowing.x; });
     CHECK(wind.layers[1].values == east);
+
+    // Precipitation goes out as hourly rates.
+    const auto rain =
+        hog::app::fetch_layers(sources, hog::probe::Fetch{.names = {"weather/rain"}}, start);
+    REQUIRE(rain.layers.size() == 1);
+    const double steps_per_hour = std::chrono::duration<double>(1h) /
+                                  std::chrono::duration<double>(server->weather().config().step);
+    const auto& fallen = server->weather().fields().rain;
+    REQUIRE(rain.layers[0].values.size() == fallen.size());
+    for (std::size_t cell = 0; cell < fallen.size(); cell += 97) {
+        CHECK(rain.layers[0].values[cell] ==
+              static_cast<float>(static_cast<double>(fallen[cell]) * steps_per_hour));
+    }
 }
 
 TEST_CASE("debug tools fetch layers from a running server", "[app][server]") {

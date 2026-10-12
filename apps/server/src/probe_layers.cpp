@@ -1,6 +1,7 @@
 #include <hog/app/probe_layers.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -61,10 +62,19 @@ void each_layer(const LayerSources& sources, Use use) {
     use("weather/wind_north", "m/s", [&](auto& values) { component(weather.wind, 1, values); });
     use("weather/jet_east", "m/s", [&](auto& values) { component(weather.jet, 0, values); });
     use("weather/jet_north", "m/s", [&](auto& values) { component(weather.jet, 1, values); });
-    use("weather/evaporation", "mm", [&](auto& values) { copy(weather.evaporation, values); });
-    use("weather/rain", "mm", [&](auto& values) { copy(weather.rain, values); });
-    use("weather/snow", "mm", [&](auto& values) { copy(weather.snow, values); });
-    use("weather/hail", "mm", [&](auto& values) { copy(weather.hail, values); });
+    // What the last step did, as hourly rates, since tools don't know the step.
+    const double per_hour =
+        3'600.0 / std::chrono::duration<double>(sources.weather.config().step).count();
+    const auto hourly = [&](const std::vector<float>& from, std::vector<float>& values) {
+        values.resize(from.size());
+        std::ranges::transform(from, values.begin(), [per_hour](float amount) {
+            return static_cast<float>(static_cast<double>(amount) * per_hour);
+        });
+    };
+    use("weather/evaporation", "mm/h", [&](auto& values) { hourly(weather.evaporation, values); });
+    use("weather/rain", "mm/h", [&](auto& values) { hourly(weather.rain, values); });
+    use("weather/snow", "mm/h", [&](auto& values) { hourly(weather.snow, values); });
+    use("weather/hail", "mm/h", [&](auto& values) { hourly(weather.hail, values); });
     use("weather/storm", "", [&](auto& values) { copy(weather.storm, values); });
     use("weather/lift", "m/s", [&](auto& values) { copy(weather.lift, values); });
     use("weather/front", "", [&](auto& values) { copy(weather.front, values); });
