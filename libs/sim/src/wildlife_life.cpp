@@ -68,7 +68,7 @@ void live(const LifeContext& step, WildlifeFields& fields, std::uint32_t cell) {
         double born = 0.0;
         if (!dormant(one, temperature)) {
             const auto fed = static_cast<double>(population.fed[cell]);
-            const double hunger = 1.0 - fed;
+            const double hunger = std::max(1.0 - (fed / one.hungry_below), 0.0);
             dying += (one.starving * hunger * hunger) + (one.exposure * outside(one, temperature));
             if (breeding(step, one, cell)) {
                 born = one.births / one.breeding.days * fed *

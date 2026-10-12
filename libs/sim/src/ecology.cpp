@@ -211,10 +211,11 @@ void parse_timing(Table& table, Species& species) {
 using Diet = std::vector<std::pair<std::string, double>>;
 
 Species parse_species(Table table, Diet& diet) {
-    table.only({"name"sv,          "moves"sv,          "mass"sv,     "appetite"sv,  "half_fed"sv,
-                "diet"sv,          "habitat"sv,        "density"sv,  "crowded"sv,   "births"sv,
-                "breeding"sv,      "lifespan_years"sv, "starving"sv, "comfort"sv,   "exposure"sv,
-                "dormant_below"sv, "wander_km"sv,      "speed_km"sv, "leftovers"sv, "cycle"sv});
+    table.only({"name"sv,     "moves"sv,          "mass"sv,      "appetite"sv,     "half_fed"sv,
+                "diet"sv,     "habitat"sv,        "density"sv,   "crowded"sv,      "births"sv,
+                "breeding"sv, "lifespan_years"sv, "starving"sv,  "hungry_below"sv, "comfort"sv,
+                "exposure"sv, "dormant_below"sv,  "wander_km"sv, "speed_km"sv,     "leftovers"sv,
+                "cycle"sv});
     Species species;
     const toml::node* name = table.find("name");
     if (name == nullptr || !name->is_string() || name->as_string()->get().empty()) {
@@ -232,6 +233,7 @@ Species parse_species(Table table, Diet& diet) {
     table.number("births", 0.0, 1'000.0, species.births);
     table.number("lifespan_years", positive, 10'000.0, species.lifespan);
     table.number("starving", 0.0, 1.0, species.starving);
+    table.number("hungry_below", positive, 1.0, species.hungry_below);
     parse_comfort(table, species);
     table.number("exposure", 0.0, 1.0, species.exposure);
     table.number("wander_km", 0.0, 1e4, species.wander);

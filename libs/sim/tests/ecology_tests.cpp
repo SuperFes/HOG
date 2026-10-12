@@ -38,6 +38,7 @@ diet = { forage = 1.0 }
 habitat = { grassland = 1.0, temperate_forest = 0.5 }
 breeding = { start_day = 40, days = 50 }
 lifespan_years = 12
+hungry_below = 0.6
 comfort = [-25, 35]
 dormant_below = -10
 cycle = { years = 13, boom = 4, width_years = 2 }
@@ -63,6 +64,7 @@ diet = { deer = 1.0, carrion = 0.25 }
     CHECK(deer.breeding.start == 40.0);
     CHECK(deer.breeding.days == 50.0);
     CHECK(deer.lifespan == 12.0);
+    CHECK(deer.hungry_below == 0.6);
     CHECK(deer.cold == -25.0);
     CHECK(deer.heat == 35.0);
     CHECK(deer.dormant_below == -10.0);

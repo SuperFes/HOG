@@ -262,6 +262,50 @@ TEST_CASE("authored cycles boom in different years in different regions", "[sim]
     CHECK(boom_years.size() > 1);
 }
 
+TEST_CASE("only real hunger kills", "[sim][wildlife]") {
+    JobSystem jobs{1};
+    Species deer = grazer();
+    deer.births = 0.0;
+    deer.lifespan = 1e4;
+    deer.wander = 0.0;
+    deer.speed = 0.0;
+    deer.starving = 0.05;
+    deer.hungry_below = 0.5;
+    // Forage that fills them about two thirds of the way, then about a quarter.
+    deer.half_fed = 50'000.0;
+    Wildlife fed{config({deer}), grassland(), march_equinox};
+    deer.half_fed = 300'000.0;
+    Wildlife hungry{config({deer}), grassland(), march_equinox};
+    const double start = fed.total(0);
+    const Steady weather;
+    fed.advance_to(march_equinox + days{30}, weather.conditions(), jobs);
+    hungry.advance_to(march_equinox + days{30}, weather.conditions(), jobs);
+    CHECK(fed.fields().populations[0].fed[0] > 0.5F);
+    CHECK(fed.total(0) > 0.999 * start);
+    CHECK(hungry.fields().populations[0].fed[0] < 0.5F);
+    CHECK(hungry.total(0) < 0.98 * start);
+}
+
+TEST_CASE("animals stray only onto ground they can live on", "[sim][wildlife]") {
+    JobSystem jobs{1};
+    Species crow = grazer();
+    crow.name = "crow";
+    crow.moves = hog::sim::Moves::Air;
+    crow.wander = 50.0;
+    crow.births = 0.0;
+    auto habitat = grassland();
+    const hog::sim::CellGrid grid{level};
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        if (grid.frame(cell).up.z > 0.0) {
+            habitat[cell] = Habitat{.biome = Biome::Ocean, .ocean = true};
+        }
+    }
+    Wildlife wildlife{config({crow}), habitat, march_equinox};
+    const Steady weather;
+    wildlife.advance_to(march_equinox + days{30}, weather.conditions(), jobs);
+    CHECK(northern_share(wildlife, 0) < 1e-6);
+}
+
 TEST_CASE("sleeping animals neither eat, breed nor move", "[sim][wildlife]") {
     JobSystem jobs{1};
     Species bear = grazer();

@@ -67,7 +67,10 @@ struct Species {
     double births = 1.0;   // young per animal per year, well fed
     Breeding breeding{};
     double lifespan = 10.0; // years
-    double starving = 0.05; // share dying per day with nothing to eat, falling fast as it eats
+    double starving = 0.05; // share dying per day with nothing to eat
+    // Fed less than this share of its appetite, it starts to die of hunger; above it, hunger only
+    // slows breeding.
+    double hungry_below = 0.75;
     // °C of recent temperature it lives in comfortably.
     double cold = -30.0;
     double heat = 40.0;
@@ -112,6 +115,7 @@ struct Ecology {
 //     breeding = { start_day = 40, days = 50 }
 //     lifespan_years = 12
 //     starving = 0.03
+//     hungry_below = 0.75
 //     comfort = [-25, 35]
 //     exposure = 0.005
 //     dormant_below = -10
