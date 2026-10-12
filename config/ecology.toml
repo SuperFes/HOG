@@ -69,17 +69,19 @@ leftovers = 0.4
 recovery = { years = [5, 15], founders = 4, after_extinction = "relict", extinct_years = [15, 40] }
 events = { collapse = 0.03, overpopulation = 4 }
 
-# A scavenger: flies anywhere over land and lives on what dies.
+# A scavenger: flies anywhere over land and lives on what dies, filling up on seeds, nuts, fruit
+# and worms while plants grow. Those are a sliver of the forage, enough alone for about three
+# quarters of a good summer's appetite; winter leaves the carrion.
 [[species]]
 name = "raven"
 moves = "air"
 mass = 1.2
 appetite = 0.08
 half_fed = 0.2
-diet = { carrion = 1 }
+diet = { carrion = 1, forage = 0.000004 }
 habitat = { grassland = 0.8, savanna = 0.8, shrubland = 0.8, temperate_forest = 1, boreal_forest = 1, tundra = 1, alpine = 0.8, desert = 0.3, beach = 0.5, tropical_rainforest = 0.5 }
 density = 0.5
-crowded = 5
+crowded = 1
 births = 1
 breeding = { start_day = 30, days = 40 }
 lifespan_years = 10

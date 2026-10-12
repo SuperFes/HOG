@@ -214,7 +214,7 @@ TEST_CASE("the development species make a food chain", "[sim][wildlife][food-cha
     CHECK(most < deer_room(wildlife, habitat, ecology->species[ids.deer]));
     CHECK(most > 2.0 * fewest);
 
-    // Wolves follow the deer, and ravens, which eat only the dead, follow both.
+    // Wolves follow the deer, and ravens, which live largely on the dead, follow both.
     const int wolves_behind = lag(years.totals[ids.deer], years.totals[ids.wolf]);
     CHECK(wolves_behind >= 1);
     CHECK(wolves_behind <= 8);
