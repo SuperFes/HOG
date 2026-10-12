@@ -410,7 +410,9 @@ void Server::open_probe() {
                            .level = static_cast<std::uint8_t>(weather_->config().level),
                            .planet_radius = weather_->config().planet_radius,
                            .layers = layer_catalogue(layer_sources()),
-                           .controllable = config_.debug.time_control};
+                           .controllable = config_.debug.time_control,
+                           .day_length = weather_->config().day,
+                           .axial_tilt = weather_->config().axial_tilt};
     const std::size_t layers = welcome.layers.size();
     auto started = server::ProbeService::start(*port, std::move(welcome));
     if (!started) {

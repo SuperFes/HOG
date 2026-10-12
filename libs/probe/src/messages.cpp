@@ -82,6 +82,8 @@ void write_body(ByteWriter& out, const Welcome& welcome) {
         write_text(out, layer.unit);
     }
     write_flag(out, welcome.controllable);
+    out.write(static_cast<std::uint64_t>(welcome.day_length.count()));
+    out.write(std::bit_cast<std::uint64_t>(welcome.axial_tilt));
 }
 
 void write_body(ByteWriter& out, const Refused& refused) {
@@ -166,6 +168,8 @@ Welcome read_welcome(ValueReader& in) {
         welcome.layers.push_back(LayerInfo{.name = std::move(name), .unit = read_text(in)});
     }
     welcome.controllable = read_flag(in);
+    welcome.day_length = GameDuration{static_cast<GameDuration::rep>(in.integer<std::uint64_t>())};
+    welcome.axial_tilt = in.twice();
     return welcome;
 }
 

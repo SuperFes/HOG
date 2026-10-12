@@ -377,6 +377,8 @@ TEST_CASE("debug tools fetch layers from a running server", "[app][server]") {
     CHECK(welcomed->world_id == server->world_id());
     CHECK(welcomed->level == server->weather().grid().level());
     CHECK_FALSE(welcomed->layers.empty());
+    CHECK(welcomed->day_length == server->weather().config().day);
+    CHECK(welcomed->axial_tilt == server->weather().config().axial_tilt);
 
     std::atomic<bool> answered = false;
     std::optional<hog::probe::Message> answer;

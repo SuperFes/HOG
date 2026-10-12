@@ -58,6 +58,8 @@ struct Welcome {
     double planet_radius = 0.0;
     std::vector<LayerInfo> layers;
     bool controllable = false; // whether tools may change the clock
+    GameDuration day_length{}; // of the planet's own day, for where the sun is
+    double axial_tilt = 0.0;   // degrees
 
     friend bool operator==(const Welcome&, const Welcome&) = default;
 };

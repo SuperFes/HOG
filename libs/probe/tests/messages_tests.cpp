@@ -59,7 +59,9 @@ TEST_CASE("every message survives a round trip", "[probe][messages]") {
                           .planet_radius = 115'000.5,
                           .layers = {LayerInfo{.name = "weather/temperature", .unit = "°C"},
                                      LayerInfo{.name = "wildlife/deer", .unit = "per km²"}},
-                          .controllable = true};
+                          .controllable = true,
+                          .day_length = std::chrono::hours{4},
+                          .axial_tilt = 23.44};
     CHECK(round_trip(welcome) == Message{welcome});
 
     CHECK(round_trip(Refused{.reason = "speaks version 9"}) ==
