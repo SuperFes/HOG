@@ -12,6 +12,8 @@ struct MapRect {
 
 // The map point under a point of the shown area, which also runs 0 to 1 across and down.
 [[nodiscard]] DVec2 map_point(const MapRect& shown, DVec2 at) noexcept;
+// The other way: where a map point is in the shown area, outside 0 to 1 when it's off screen.
+[[nodiscard]] DVec2 shown_point(const MapRect& shown, DVec2 point) noexcept;
 
 // Zooming and panning, never past the edges of the map.
 class MapView {

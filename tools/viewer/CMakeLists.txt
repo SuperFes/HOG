@@ -1,5 +1,6 @@
 add_library(hog_viewer
     src/clock_text.cpp
+    src/daylight.cpp
     src/frame.cpp
     src/link.cpp
     src/map_view.cpp
@@ -13,6 +14,7 @@ hog_target_defaults(hog_viewer)
 
 hog_add_tests(hog_viewer
     tests/clock_text_tests.cpp
+    tests/daylight_tests.cpp
     tests/frame_tests.cpp
     tests/link_tests.cpp
     tests/map_view_tests.cpp

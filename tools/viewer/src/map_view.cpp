@@ -8,6 +8,10 @@ DVec2 map_point(const MapRect& shown, DVec2 at) noexcept {
     return shown.low + ((shown.high - shown.low) * at);
 }
 
+DVec2 shown_point(const MapRect& shown, DVec2 point) noexcept {
+    return (point - shown.low) / (shown.high - shown.low);
+}
+
 MapRect MapView::shown() const noexcept {
     const double half = 0.5 / zoom_;
     return MapRect{.low = centre_ - half, .high = centre_ + half};

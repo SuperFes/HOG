@@ -27,6 +27,7 @@ TEST_CASE("zooming keeps the point under the cursor still", "[viewer][map]") {
     const DVec2 at{0.3, 0.6};
     const DVec2 before = hog::viewer::map_point(view.shown(), at);
     view.zoom_by(4.0, at);
+    check_near(hog::viewer::shown_point(view.shown(), before), at);
     CHECK(view.zoom() == 4.0);
     check_near(hog::viewer::map_point(view.shown(), at), before);
     const DVec2 size = view.shown().high - view.shown().low;
