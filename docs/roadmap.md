@@ -158,7 +158,7 @@ This phase builds a server that runs the world with nobody connected: time passe
 - [x] Two or three test species (grazer, predator, scavenger) to prove the food chain
 - [x] Recovery: emptied areas refill from their neighbours, wiped-out species return as founders after a while, and players can reintroduce animals
 - [x] Ecology events (collapse, local extinction, return, overpopulation) against a long-run baseline, with kills attributed to hunters
-- [ ] Forest biomass per cell, with growth and a stub fire spread
+- [x] Forest biomass per cell, with growth and a stub fire spread
 
 **Debug viewer**
 
