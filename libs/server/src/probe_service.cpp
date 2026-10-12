@@ -127,23 +127,28 @@ void ProbeService::talk(probe::Channel channel) {
         if (!message->has_value()) {
             continue;
         }
-        auto* fetch = std::get_if<probe::Fetch>(&**message);
-        if (fetch == nullptr) {
-            std::ignore = channel.send(probe::Refused{.reason = "expected a fetch"});
+        std::optional<Request> request;
+        if (auto* fetch = std::get_if<probe::Fetch>(&**message)) {
+            request = std::move(*fetch);
+        } else if (const auto* control = std::get_if<probe::Control>(&**message)) {
+            request = *control;
+        } else {
+            std::ignore = channel.send(probe::Refused{.reason = "expected a fetch or a control"});
             return;
         }
-        std::optional<probe::Layers> layers = ask(std::move(*fetch));
-        if (!layers || !channel.send(*layers)) {
+        const std::optional<probe::Message> answer = ask(std::move(*request));
+        if (!answer || !channel.send(*answer)) {
             return;
         }
     }
 }
 
-std::optional<probe::Layers> ProbeService::ask(probe::Fetch fetch) {
-    std::future<probe::Layers> answer;
+std::optional<probe::Message> ProbeService::ask(Request request) {
+    std::future<probe::Message> answer;
     {
         const std::scoped_lock lock{waiting_mutex_};
-        Waiting& waiting = waiting_.emplace_back(Waiting{.fetch = std::move(fetch), .answer = {}});
+        Waiting& waiting =
+            waiting_.emplace_back(Waiting{.request = std::move(request), .answer = {}});
         answer = waiting.answer.get_future();
         asked_.store(true, std::memory_order_release);
     }

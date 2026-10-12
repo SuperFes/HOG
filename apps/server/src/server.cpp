@@ -157,8 +157,9 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
     log::info(server_log, "world {:016x} in {}: {} planet changes", server->world_id_, world_file,
               stored_changes->size());
 
+    const GameTime first = config.debug.start.value_or(now);
     if (auto started =
-            server->start_simulation(*planet, loaded->snapshot ? loaded->snapshot->time : now);
+            server->start_simulation(*planet, loaded->snapshot ? loaded->snapshot->time : first);
         !started) {
         return std::unexpected(started.error());
     }
@@ -180,8 +181,8 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
         log::info(save_log, "restored {} entities at tick {}, {}", *restored,
                   snapshot->tick.value(), format_time(snapshot->time));
     } else {
-        server->time_ = now;
-        log::info(save_log, "no snapshot; starting a new world at {}", format_time(now));
+        server->time_ = first;
+        log::info(save_log, "no snapshot; starting a new world at {}", format_time(first));
     }
     if (server->wildlife_) {
         server->report_wildlife();
@@ -408,7 +409,8 @@ void Server::open_probe() {
                            .world_id = world_id_,
                            .level = static_cast<std::uint8_t>(weather_->config().level),
                            .planet_radius = weather_->config().planet_radius,
-                           .layers = layer_catalogue(layer_sources())};
+                           .layers = layer_catalogue(layer_sources()),
+                           .controllable = config_.debug.time_control};
     const std::size_t layers = welcome.layers.size();
     auto started = server::ProbeService::start(*port, std::move(welcome));
     if (!started) {
@@ -416,15 +418,8 @@ void Server::open_probe() {
         return;
     }
     probe_ = std::move(*started);
-    log::info(server_log, "debug tools on 127.0.0.1:{}, {} layers", probe_->port(), layers);
-}
-
-void Server::serve_probe() {
-    if (probe_) {
-        probe_->serve([this](const probe::Fetch& fetch) {
-            return fetch_layers(layer_sources(), fetch, time_);
-        });
-    }
+    log::info(server_log, "debug tools on 127.0.0.1:{}, {} layers{}", probe_->port(), layers,
+              config_.debug.time_control ? ", time control on" : "");
 }
 
 void Server::submit() {

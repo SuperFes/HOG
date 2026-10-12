@@ -31,3 +31,7 @@ step_hours = 1
 
 [debug]
 port = 7777
+# Lets the viewer pause, step and speed up the clock; the world then stays wherever it's left
+# rather than catching up to real time on start.
+time_control = true
+# start = 2026-01-01T00:00:00Z   # a new world's first moment, instead of now

@@ -62,10 +62,14 @@ public:
         requires std::same_as<std::invoke_result_t<Now&>, GameTime>
     server::CatchUpStats catch_up(Now now);
 
+    // Fastest debug tools may run the clock, in game seconds per real second.
+    static constexpr std::uint32_t fastest = 86'400;
+
     // Ticks at the configured rate, saving periodically, until `stop` is set; then saves and
-    // waits for every snapshot to be written.
-    template <server::Timer T>
-    [[nodiscard]] Result<void> run(T& timer, const std::atomic<bool>& stop);
+    // waits for every snapshot to be written. now() is real time, for debug tools to rejoin.
+    template <server::Timer T, typename Now>
+        requires std::same_as<std::invoke_result_t<Now&>, GameTime>
+    [[nodiscard]] Result<void> run(T& timer, Now now, const std::atomic<bool>& stop);
 
     // Snapshots the world and waits until it is written.
     [[nodiscard]] Result<void> save();
@@ -111,8 +115,13 @@ private:
     [[nodiscard]] LayerSources layer_sources() const;
     // Opens the debug port, if one is configured, logging rather than failing if it can't.
     void open_probe();
-    // Answers debug tools waiting on the world.
-    void serve_probe();
+    // Answers debug tools waiting on the world, telling them how clock() runs and asking
+    // steer(control) to change it.
+    template <typename Clock, typename Steer>
+    void serve_probe(Clock clock, Steer steer);
+    // Changes how `loop` runs as a debug tool asked, if this world allows it.
+    template <typename Loop, typename Now>
+    [[nodiscard]] probe::Controlled steer(Loop& loop, const probe::Control& control, Now& now);
 
     server::ServerConfig config_;
     std::uint64_t world_id_;
@@ -173,7 +182,11 @@ server::CatchUpStats Server::catch_up(Now now) {
         server::catch_up(clock, config_.catch_up_ticks, now, [this](const server::TickClock& at) {
             simulate(at.now(), at.step());
             time_ = at.now() + at.step();
-            serve_probe();
+            serve_probe([] { return probe::Clock{}; },
+                        [](const probe::Control& /*unused*/) {
+                            return probe::Controlled{.clock = {},
+                                                     .error = "the world is still catching up"};
+                        });
         });
     time_ = clock.now();
     tick_ = clock.tick();
@@ -191,8 +204,73 @@ server::CatchUpStats Server::catch_up(Now now) {
     return stats;
 }
 
-template <server::Timer T>
-Result<void> Server::run(T& timer, const std::atomic<bool>& stop) {
+template <typename Clock, typename Steer>
+void Server::serve_probe(Clock clock, Steer steer) {
+    if (probe_) {
+        probe_->serve(
+            [&](const probe::Fetch& fetch) {
+                probe::Layers layers = fetch_layers(layer_sources(), fetch, time_);
+                layers.clock = clock();
+                return layers;
+            },
+            steer);
+    }
+}
+
+namespace detail {
+
+template <typename Loop>
+probe::Clock clock_of(const Loop& loop) {
+    return probe::Clock{.paused = loop.paused(), .scale = static_cast<std::uint32_t>(loop.scale())};
+}
+
+} // namespace detail
+
+template <typename Loop, typename Now>
+probe::Controlled Server::steer(Loop& loop, const probe::Control& control, Now& now) {
+    if (!config_.debug.time_control) {
+        return {.clock = detail::clock_of(loop), .error = "time control is off for this world"};
+    }
+    switch (control.action) {
+    case probe::Action::Pause:
+        loop.pause();
+        break;
+    case probe::Action::Resume:
+        loop.resume();
+        break;
+    case probe::Action::Step:
+        if (!loop.paused() || control.amount == 0) {
+            return {.clock = detail::clock_of(loop),
+                    .error = "step at least one tick, while paused"};
+        }
+        loop.step_ticks(control.amount);
+        break;
+    case probe::Action::Speed:
+        if (control.amount == 0 || control.amount > fastest) {
+            return {.clock = detail::clock_of(loop),
+                    .error = std::format("speed must be from 1 to {}", fastest)};
+        }
+        loop.set_scale(control.amount);
+        break;
+    case probe::Action::RealTime: {
+        const GameTime target = now();
+        if (time_ > target) {
+            return {.clock = detail::clock_of(loop),
+                    .error = std::format("{} ahead of real time",
+                                         std::chrono::floor<std::chrono::seconds>(time_ - target))};
+        }
+        loop.set_scale(server::default_time_scale);
+        loop.resume();
+        loop.catch_up_to(target, config_.catch_up_ticks);
+        break;
+    }
+    }
+    return {.clock = detail::clock_of(loop), .error = {}};
+}
+
+template <server::Timer T, typename Now>
+    requires std::same_as<std::invoke_result_t<Now&>, GameTime>
+Result<void> Server::run(T& timer, Now now, const std::atomic<bool>& stop) {
     server::TickLoop loop{timer, server::LoopConfig{.start = time_,
                                                     .first_tick = tick_,
                                                     .rate = config_.tick_rate,
@@ -202,18 +280,10 @@ Result<void> Server::run(T& timer, const std::atomic<bool>& stop) {
     const auto interval =
         std::chrono::duration_cast<MonotonicClock::duration>(config_.metrics_interval);
     MonotonicClock::time_point next_report = timer.now() + interval;
-    loop.run([&](const server::TickClock& clock) {
-        const MonotonicClock::time_point started = MonotonicClock::now();
-        simulate(clock.now(), clock.step());
-        time_ = clock.now() + clock.step();
-        tick_ = clock.tick() + TickDelta{1};
-        serve_probe();
-        if (saves.due(time_)) {
-            submit();
-        }
-        ticks_.add();
-        tick_seconds_.observe(
-            std::chrono::duration<double>(MonotonicClock::now() - started).count());
+    // Between ticks, and in place of them while paused.
+    const auto between = [&] {
+        serve_probe([&loop] { return detail::clock_of(loop); },
+                    [&](const probe::Control& control) { return steer(loop, control, now); });
         if (interval > MonotonicClock::duration::zero() && timer.now() >= next_report) {
             report(loop.stats().slipped);
             next_report = timer.now() + interval;
@@ -221,7 +291,22 @@ Result<void> Server::run(T& timer, const std::atomic<bool>& stop) {
         if (stop.load(std::memory_order_relaxed)) {
             loop.stop();
         }
-    });
+    };
+    loop.run(
+        [&](const server::TickClock& clock) {
+            const MonotonicClock::time_point started = MonotonicClock::now();
+            simulate(clock.now(), clock.step());
+            time_ = clock.now() + clock.step();
+            tick_ = clock.tick() + TickDelta{1};
+            if (saves.due(time_)) {
+                submit();
+            }
+            ticks_.add();
+            tick_seconds_.observe(
+                std::chrono::duration<double>(MonotonicClock::now() - started).count());
+            between();
+        },
+        [&](const server::TickClock& /*unused*/) { between(); });
     auto saved = save();
     report(loop.stats().slipped);
     return saved;

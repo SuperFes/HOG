@@ -60,14 +60,21 @@ public:
     explicit Ticking(ProbeService& service)
         : thread_([this, &service] {
               while (!stop_.load()) {
-                  service.serve([](const Fetch& fetch) {
-                      Layers layers{
-                          .time = GameTime{std::chrono::seconds{7}}, .clock = {}, .layers = {}};
-                      for (const std::string& name : fetch.names) {
-                          layers.layers.push_back(Layer{.name = name, .values = {1.0F, 2.0F}});
-                      }
-                      return layers;
-                  });
+                  service.serve(
+                      [](const Fetch& fetch) {
+                          Layers layers{
+                              .time = GameTime{std::chrono::seconds{7}}, .clock = {}, .layers = {}};
+                          for (const std::string& name : fetch.names) {
+                              layers.layers.push_back(Layer{.name = name, .values = {1.0F, 2.0F}});
+                          }
+                          return layers;
+                      },
+                      [](const Control& control) {
+                          return Controlled{.clock =
+                                                Clock{.paused = control.action == Action::Pause,
+                                                      .scale = control.amount},
+                                            .error = {}};
+                      });
                   std::this_thread::sleep_for(1ms);
               }
           }) {}
@@ -98,6 +105,23 @@ TEST_CASE("a tool is welcomed and its fetches answered between ticks", "[server]
     CHECK(layers.time == GameTime{std::chrono::seconds{7}});
     REQUIRE(layers.layers.size() == 2);
     CHECK(layers.layers[1] == Layer{.name = "b", .values = {1.0F, 2.0F}});
+}
+
+TEST_CASE("a tool's controls are answered between ticks", "[server][probe]") {
+    const auto service = started();
+    Channel tool = welcomed(*service);
+    const Ticking ticking{*service};
+    REQUIRE(tool.send(Control{.action = Action::Pause, .amount = 5}));
+    CHECK(received(tool) ==
+          Message{Controlled{.clock = Clock{.paused = true, .scale = 5}, .error = {}}});
+}
+
+TEST_CASE("a tool may only fetch and control once welcomed", "[server][probe]") {
+    const auto service = started();
+    Channel tool = welcomed(*service);
+    REQUIRE(tool.send(Hello{}));
+    CHECK(std::holds_alternative<Refused>(received(tool)));
+    CHECK_FALSE(tool.receive(5s));
 }
 
 TEST_CASE("a fetch waits for the next tick", "[server][probe]") {

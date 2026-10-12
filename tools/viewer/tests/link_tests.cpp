@@ -43,17 +43,21 @@ public:
         service_ = std::move(*started);
         thread_ = std::thread{[this] {
             while (!stop_.load()) {
-                service_->serve([this](const probe::Fetch& fetch) {
-                    const auto answered = static_cast<float>(++answered_);
-                    probe::Layers layers{.time = GameTime{std::chrono::seconds{answered_}},
-                                         .clock = {},
-                                         .layers = {}};
-                    for (const std::string& name : fetch.names) {
-                        layers.layers.push_back(probe::Layer{
-                            .name = name, .values = std::vector<float>(cells, answered)});
-                    }
-                    return layers;
-                });
+                service_->serve(
+                    [this](const probe::Fetch& fetch) {
+                        const auto answered = static_cast<float>(++answered_);
+                        probe::Layers layers{.time = GameTime{std::chrono::seconds{answered_}},
+                                             .clock = {},
+                                             .layers = {}};
+                        for (const std::string& name : fetch.names) {
+                            layers.layers.push_back(probe::Layer{
+                                .name = name, .values = std::vector<float>(cells, answered)});
+                        }
+                        return layers;
+                    },
+                    [](const probe::Control& /*unused*/) {
+                        return probe::Controlled{.clock = {}, .error = "not here"};
+                    });
                 std::this_thread::sleep_for(1ms);
             }
         }};

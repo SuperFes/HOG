@@ -56,6 +56,8 @@ TEST_CASE("a minimal server config takes the defaults", "[server][config]") {
     CHECK_FALSE(config->forest.vegetation);
     CHECK(config->forest.step == 1h);
     CHECK_FALSE(config->debug.port);
+    CHECK_FALSE(config->debug.time_control);
+    CHECK_FALSE(config->debug.start);
 }
 
 TEST_CASE("every server setting can be given", "[server][config]") {
@@ -94,6 +96,8 @@ step_hours = 0.5
 
 [debug]
 port = 7777
+time_control = true
+start = 2030-06-01T12:00:00+02:00
 )",
                                             base());
     REQUIRE(config);
@@ -122,6 +126,9 @@ port = 7777
     CHECK(config->forest.vegetation == base() / "forest.toml");
     CHECK(config->forest.step == 30min);
     CHECK(config->debug.port == 7777);
+    CHECK(config->debug.time_control);
+    CHECK(config->debug.start ==
+          hog::to_game_time(std::chrono::sys_days{std::chrono::year{2030} / 6 / 1} + 10h));
 }
 
 TEST_CASE("bad server configs are rejected", "[server][config]") {
@@ -170,6 +177,9 @@ TEST_CASE("bad server configs are rejected", "[server][config]") {
         {with("[debug]\nport = 65536\n"), ErrorCode::InvalidArgument},
         {with("[debug]\nport = \"7777\"\n"), ErrorCode::InvalidArgument},
         {with("[debug]\nhost = \"0.0.0.0\"\n"), ErrorCode::InvalidArgument},
+        {with("[debug]\ntime_control = \"yes\"\n"), ErrorCode::InvalidArgument},
+        {with("[debug]\nstart = 2030-06-01T12:00:00\n"), ErrorCode::InvalidArgument},
+        {with("[debug]\nstart = 2030-06-01\n"), ErrorCode::InvalidArgument},
     }));
     CAPTURE(text);
     const auto config = parse_server_config(text, base());

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <format>
 #include <initializer_list>
 #include <limits>
@@ -94,6 +95,42 @@ public:
             return invalid(std::format("{}.{} must be above 0 and at most {}", name_, key, limit));
         }
         return converted;
+    }
+
+    [[nodiscard]] Result<std::optional<bool>> boolean(std::string_view key) const {
+        const toml::node* node = find(key);
+        if (node == nullptr) {
+            return std::nullopt;
+        }
+        const auto* value = node->as_boolean();
+        if (value == nullptr) {
+            return invalid(std::format("{}.{} must be true or false", name_, key));
+        }
+        return value->get();
+    }
+
+    // A date and time with its UTC offset, such as 2026-01-01T00:00:00Z.
+    [[nodiscard]] Result<std::optional<GameTime>> moment(std::string_view key) const {
+        const toml::node* node = find(key);
+        if (node == nullptr) {
+            return std::nullopt;
+        }
+        const auto* value = node->as_date_time();
+        if (value == nullptr || !value->get().offset) {
+            return invalid(std::format("{}.{} must be a date and time with an offset, such as "
+                                       "2026-01-01T00:00:00Z",
+                                       name_, key));
+        }
+        const toml::date_time& moment = value->get();
+        const std::chrono::year_month_day day{std::chrono::year{moment.date.year},
+                                              std::chrono::month{moment.date.month},
+                                              std::chrono::day{moment.date.day}};
+        const auto since_midnight = std::chrono::hours{moment.time.hour} +
+                                    std::chrono::minutes{moment.time.minute} +
+                                    std::chrono::seconds{moment.time.second} +
+                                    std::chrono::nanoseconds{moment.time.nanosecond};
+        const auto local = std::chrono::sys_days{day} + since_midnight;
+        return to_game_time(local - std::chrono::minutes{moment.offset->minutes});
     }
 
     [[nodiscard]] Result<std::optional<std::string>> string(std::string_view key) const {
@@ -311,7 +348,7 @@ private:
 }
 
 [[nodiscard]] Result<void> parse_debug(const Table& debug, DebugSettings& config) {
-    if (auto known = debug.only({"port"}); !known) {
+    if (auto known = debug.only({"port", "time_control", "start"}); !known) {
         return known;
     }
     const auto port = debug.integer("port", 1, std::numeric_limits<std::uint16_t>::max());
@@ -321,6 +358,16 @@ private:
     if (*port) {
         config.port = static_cast<std::uint16_t>(**port);
     }
+    const auto time_control = debug.boolean("time_control");
+    if (!time_control) {
+        return std::unexpected(time_control.error());
+    }
+    config.time_control = time_control->value_or(config.time_control);
+    const auto start = debug.moment("start");
+    if (!start) {
+        return std::unexpected(start.error());
+    }
+    config.start = *start;
     return {};
 }
 

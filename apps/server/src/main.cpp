@@ -61,12 +61,15 @@ int run(std::span<const std::string_view> arguments) {
                            signal);
         }
     }
-    (*server)->catch_up(real_now);
+    // A world under time control stays wherever its tools left it.
+    if (!config->debug.time_control) {
+        (*server)->catch_up(real_now);
+    }
     hog::log::info(hog::app::server_log, "running at {} Hz from tick {}", config->tick_rate,
                    (*server)->tick().value());
 
     hog::server::SteadyTimer timer;
-    if (const auto ran = (*server)->run(timer, stop_requested); !ran) {
+    if (const auto ran = (*server)->run(timer, real_now, stop_requested); !ran) {
         return EXIT_FAILURE;
     }
     hog::log::info(hog::app::server_log, "stopped at tick {}", (*server)->tick().value());

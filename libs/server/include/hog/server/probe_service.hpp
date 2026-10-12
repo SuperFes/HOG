@@ -15,14 +15,16 @@
 #include <mutex>
 #include <optional>
 #include <thread>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace hog::server {
 
 // Answers debug tools on a loopback port while the server runs. Each tool talks on its own
-// thread, but its fetches wait for the tick thread to answer them between ticks, so nothing else
-// ever reads the world while it changes.
+// thread, but its fetches and controls wait for the tick thread to answer them between ticks, so
+// nothing else ever touches the world while it changes.
 class ProbeService {
     // Lets start() construct through make_unique while nothing else can.
     struct Started {
@@ -48,15 +50,18 @@ public:
     [[nodiscard]] std::uint16_t port() const noexcept { return port_; }
     [[nodiscard]] std::size_t tools() const;
 
-    // Answers the fetches waiting, each with build(fetch).
-    template <typename Build>
-        requires std::same_as<std::invoke_result_t<Build&, const probe::Fetch&>, probe::Layers>
-    void serve(Build build);
+    // Answers what is waiting: each fetch with build(fetch), each control with steer(control).
+    template <typename Build, typename Steer>
+        requires std::same_as<std::invoke_result_t<Build&, const probe::Fetch&>, probe::Layers> &&
+                 std::same_as<std::invoke_result_t<Steer&, const probe::Control&>,
+                              probe::Controlled>
+    void serve(Build build, Steer steer);
 
 private:
+    using Request = std::variant<probe::Fetch, probe::Control>;
     struct Waiting {
-        probe::Fetch fetch;
-        std::promise<probe::Layers> answer;
+        Request request;
+        std::promise<probe::Message> answer;
     };
     struct Tool {
         std::thread thread;
@@ -69,8 +74,8 @@ private:
     // What a tool says first, waiting a while for it; none if it went quiet or away.
     [[nodiscard]] std::optional<probe::Message> first_message(probe::Channel& channel) const;
     void talk(probe::Channel channel);
-    // The answer to a fetch, or none if the service stopped first.
-    [[nodiscard]] std::optional<probe::Layers> ask(probe::Fetch fetch);
+    // The tick thread's answer, or none if the service stopped first.
+    [[nodiscard]] std::optional<probe::Message> ask(Request request);
 
     probe::Listener listener_;
     probe::Welcome welcome_;
@@ -85,9 +90,10 @@ private:
     std::thread listening_;
 };
 
-template <typename Build>
-    requires std::same_as<std::invoke_result_t<Build&, const probe::Fetch&>, probe::Layers>
-void ProbeService::serve(Build build) {
+template <typename Build, typename Steer>
+    requires std::same_as<std::invoke_result_t<Build&, const probe::Fetch&>, probe::Layers> &&
+             std::same_as<std::invoke_result_t<Steer&, const probe::Control&>, probe::Controlled>
+void ProbeService::serve(Build build, Steer steer) {
     if (!asked_.load(std::memory_order_acquire)) {
         return;
     }
@@ -97,8 +103,16 @@ void ProbeService::serve(Build build) {
         waiting.swap(waiting_);
         asked_.store(false, std::memory_order_release);
     }
-    for (Waiting& fetch : waiting) {
-        fetch.answer.set_value(build(std::as_const(fetch.fetch)));
+    for (Waiting& asked : waiting) {
+        asked.answer.set_value(std::visit(
+            [&](const auto& request) -> probe::Message {
+                if constexpr (std::same_as<std::decay_t<decltype(request)>, probe::Fetch>) {
+                    return build(request);
+                } else {
+                    return steer(request);
+                }
+            },
+            std::as_const(asked.request)));
     }
 }
 

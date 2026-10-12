@@ -47,6 +47,10 @@ struct ForestSettings {
 struct DebugSettings {
     // Where debug tools connect, on the loopback address only; without one, they can't.
     std::optional<std::uint16_t> port;
+    // Whether debug tools may pause, step and speed up the clock, taking the world off real time.
+    bool time_control = false;
+    // When a new world's clock starts, instead of now.
+    std::optional<GameTime> start;
 };
 
 struct ServerConfig {
@@ -104,6 +108,8 @@ struct ServerConfig {
 //
 //     [debug]                    # optional
 //     port = 7777                # for debug tools, on 127.0.0.1
+//     time_control = false       # let them pause, step and speed up the clock
+//     start = 2026-01-01T00:00:00Z  # a new world's first moment, instead of now
 //
 // Unknown tables and keys are errors, so typos don't silently fall back to defaults.
 [[nodiscard]] Result<ServerConfig> parse_server_config(std::string_view text,

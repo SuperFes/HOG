@@ -115,7 +115,7 @@ double gauge(const Server& server, std::string_view name) {
 void run(Server& server, int ticks) {
     std::atomic<bool> stop{false};
     StoppingTimer timer{stop, ticks - 1};
-    REQUIRE(server.run(timer, stop));
+    REQUIRE(server.run(timer, [] { return start; }, stop));
 }
 
 } // namespace
@@ -407,6 +407,158 @@ TEST_CASE("debug tools fetch layers from a running server", "[app][server]") {
     // A port already taken leaves the server running without one.
     config.debug.port = server->probe()->port();
     CHECK(opened(config)->probe() == nullptr);
+}
+
+namespace {
+
+// A debug tool's side of a conversation, recording rather than checking, as it runs on its own
+// thread.
+class Ask {
+public:
+    explicit Ask(hog::probe::Channel& channel) : channel_(&channel) {}
+
+    std::optional<hog::probe::Message> answer(const hog::probe::Message& message) {
+        if (!channel_->send(message)) {
+            return std::nullopt;
+        }
+        auto received = channel_->receive(10s);
+        if (!received || !received->has_value()) {
+            return std::nullopt;
+        }
+        return *received;
+    }
+
+    hog::probe::Controlled control(hog::probe::Action action, std::uint32_t amount = 0) {
+        const auto said = answer(hog::probe::Control{.action = action, .amount = amount});
+        const auto* controlled = said ? std::get_if<hog::probe::Controlled>(&*said) : nullptr;
+        return controlled != nullptr ? *controlled
+                                     : hog::probe::Controlled{.clock = {}, .error = "no answer"};
+    }
+
+    // Empty, at the epoch, if there was no answer.
+    hog::probe::Layers fetch() {
+        const auto said = answer(hog::probe::Fetch{});
+        const auto* layers = said ? std::get_if<hog::probe::Layers>(&*said) : nullptr;
+        return layers != nullptr ? *layers : hog::probe::Layers{};
+    }
+
+private:
+    hog::probe::Channel* channel_;
+};
+
+// Runs the server at real pace here, as only the thread that opened it may, while a tool runs
+// script(ask) on another thread; stops once the script is done.
+template <typename Script>
+void steered(Server& server, Script script) {
+    std::atomic<bool> stop = false;
+    std::thread tool{[&] {
+        if (auto socket = hog::probe::Socket::connect("127.0.0.1", server.probe()->port())) {
+            hog::probe::Channel channel{std::move(*socket)};
+            Ask ask{channel};
+            const auto welcome = ask.answer(hog::probe::Hello{});
+            if (welcome && std::holds_alternative<hog::probe::Welcome>(*welcome)) {
+                script(ask);
+            }
+        }
+        stop.store(true);
+    }};
+    hog::server::SteadyTimer timer;
+    const auto ran = server.run(timer, [] { return start + 1h; }, stop);
+    tool.join();
+    CHECK(ran);
+}
+
+} // namespace
+
+TEST_CASE("a new world can start at a chosen moment", "[app][server]") {
+    const World world;
+    auto config = world.config();
+    config.debug.start = start + std::chrono::days{365};
+    CHECK(opened(config)->time() == start + std::chrono::days{365});
+}
+
+TEST_CASE("debug tools can't steer the clock unless allowed", "[app][server]") {
+    const World world;
+    auto config = world.config();
+    config.debug.port = 0;
+    const auto server = opened(config);
+    hog::probe::Controlled refused;
+    hog::probe::Layers layers;
+    steered(*server, [&](Ask& ask) {
+        refused = ask.control(hog::probe::Action::Pause);
+        layers = ask.fetch();
+    });
+    CHECK_FALSE(refused.error.empty());
+    CHECK_FALSE(refused.clock.paused);
+    CHECK(layers.time >= start);
+    CHECK_FALSE(layers.clock.paused);
+}
+
+TEST_CASE("debug tools pause, step, speed up and rejoin real time", "[app][server]") {
+    const World world;
+    auto config = world.config();
+    config.debug.port = 0;
+    config.debug.time_control = true;
+    const auto server = opened(config);
+    using hog::probe::Action;
+    using hog::probe::Clock;
+    using hog::probe::Controlled;
+
+    std::vector<Controlled> refused;
+    Controlled sped;
+    Controlled paused;
+    hog::probe::Layers first;
+    hog::probe::Layers again;
+    hog::probe::Layers stepped;
+    hog::probe::Layers still;
+    Controlled rejoined;
+    GameTime reached;
+    Controlled ahead;
+    steered(*server, [&](Ask& ask) {
+        refused.push_back(ask.control(Action::Step, 1));
+        refused.push_back(ask.control(Action::Speed, 0));
+        refused.push_back(ask.control(Action::Speed, Server::fastest + 1));
+        sped = ask.control(Action::Speed, 600);
+        paused = ask.control(Action::Pause);
+        first = ask.fetch();
+        again = ask.fetch();
+        refused.push_back(ask.control(Action::Step, 0));
+        std::ignore = ask.control(Action::Step, 3);
+        // Tools are still answered while it steps or catches up.
+        const auto deadline = MonotonicClock::now() + 10s;
+        do {
+            stepped = ask.fetch();
+        } while (stepped.time < first.time + 90s && MonotonicClock::now() < deadline);
+        still = ask.fetch();
+        rejoined = ask.control(Action::RealTime);
+        do {
+            reached = ask.fetch().time;
+        } while (reached < start + 1h - 1s && MonotonicClock::now() < deadline);
+        // Past the real time the test gives it, there's nothing to rejoin.
+        std::ignore = ask.control(Action::Speed, Server::fastest);
+        GameTime later = reached;
+        while (later <= start + 1h && MonotonicClock::now() < deadline) {
+            later = ask.fetch().time;
+        }
+        ahead = ask.control(Action::RealTime);
+    });
+
+    for (const Controlled& refusal : refused) {
+        CHECK_FALSE(refusal.error.empty());
+    }
+    CHECK(sped == Controlled{.clock = Clock{.paused = false, .scale = 600}, .error = {}});
+    CHECK(paused == Controlled{.clock = Clock{.paused = true, .scale = 600}, .error = {}});
+    CHECK(first.time >= start);
+    CHECK(first.clock == Clock{.paused = true, .scale = 600});
+    CHECK(again.time == first.time);
+    // Each tick at 20 Hz and 600x is 30 game seconds.
+    CHECK(stepped.time == first.time + 90s);
+    CHECK(still.time == stepped.time);
+    CHECK(rejoined == Controlled{.clock = Clock{.paused = false, .scale = 1}, .error = {}});
+    CHECK(reached > start + 1h - 1s);
+    CHECK(reached < start + 1h + 10s);
+    CHECK_FALSE(ahead.error.empty());
+    CHECK(ahead.clock.scale == Server::fastest);
 }
 
 TEST_CASE("snapshots are taken every save interval", "[app][server]") {
