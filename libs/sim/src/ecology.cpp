@@ -207,15 +207,68 @@ void parse_timing(Table& table, Species& species) {
     }
 }
 
-// Diets name other species, so they're read once every species is known.
-using Diet = std::vector<std::pair<std::string, double>>;
+// Reads [earliest, latest] years.
+void parse_years(Table& table, std::string_view key, double& earliest, double& latest) {
+    const toml::node* node = table.find(key);
+    if (node == nullptr) {
+        return;
+    }
+    const auto* range = node->as_array();
+    if (range == nullptr || range->size() != 2) {
+        table.fail(std::format("{} must be [earliest, latest]", table.where(key)));
+        return;
+    }
+    table.number(*range->get(0), table.where(key), 0.0, 10'000.0, earliest);
+    table.number(*range->get(1), table.where(key), 0.0, 10'000.0, latest);
+    if (latest < earliest) {
+        table.fail(std::format("{} must not end before it starts", table.where(key)));
+    }
+}
 
-Species parse_species(Table table, Diet& diet) {
+// Successors name other species, so the name is resolved once every species is known.
+std::string parse_recovery(Table& parent, Recovery& recovery) {
+    Table table = parent.child("recovery");
+    table.only({"years"sv, "founders"sv, "after_extinction"sv, "extinct_years"sv, "successor"sv});
+    parse_years(table, "years", recovery.earliest, recovery.latest);
+    table.number("founders", 0.0, 1e9, recovery.founders);
+    parse_years(table, "extinct_years", recovery.extinct_earliest, recovery.extinct_latest);
+    if (const toml::node* node = table.find("after_extinction")) {
+        constexpr std::array names{std::pair{"admin"sv, Recovery::After::Admin},
+                                   std::pair{"relict"sv, Recovery::After::Relict},
+                                   std::pair{"successor"sv, Recovery::After::Successor}};
+        const auto* name = node->as_string();
+        const auto* found =
+            name == nullptr
+                ? names.end()
+                : std::ranges::find(names, std::string_view{name->get()},
+                                    &std::pair<std::string_view, Recovery::After>::first);
+        if (found == names.end()) {
+            table.fail(std::format("{} must be admin, relict or successor",
+                                   table.where("after_extinction")));
+        } else {
+            recovery.after_extinction = found->second;
+        }
+    }
+    const toml::node* successor = table.find("successor");
+    if (successor != nullptr && !successor->is_string()) {
+        table.fail(std::format("{} must be a species' name", table.where("successor")));
+        return {};
+    }
+    return successor == nullptr ? std::string{} : std::string{successor->as_string()->get()};
+}
+
+// Diets and successors name other species, so they're read once every species is known.
+struct Names {
+    std::vector<std::pair<std::string, double>> diet;
+    std::string successor;
+};
+
+Species parse_species(Table table, Names& names) {
     table.only({"name"sv,     "moves"sv,          "mass"sv,      "appetite"sv,     "half_fed"sv,
                 "diet"sv,     "habitat"sv,        "density"sv,   "crowded"sv,      "births"sv,
                 "breeding"sv, "lifespan_years"sv, "starving"sv,  "hungry_below"sv, "comfort"sv,
                 "exposure"sv, "dormant_below"sv,  "wander_km"sv, "speed_km"sv,     "leftovers"sv,
-                "cycle"sv});
+                "cycle"sv,    "recovery"sv});
     Species species;
     const toml::node* name = table.find("name");
     if (name == nullptr || !name->is_string() || name->as_string()->get().empty()) {
@@ -240,20 +293,44 @@ Species parse_species(Table table, Diet& diet) {
     table.number("speed_km", 0.0, 1e4, species.speed);
     table.number("leftovers", 0.0, 0.99, species.leftovers);
     parse_timing(table, species);
+    names.successor = parse_recovery(table, species.recovery);
 
     Table foods = table.child("diet");
     if (foods.get() != nullptr) {
         for (const auto& [food, node] : *foods.get()) {
             double preference = 1.0;
             foods.number(node, foods.where(food.str()), positive, 1'000.0, preference);
-            diet.emplace_back(food.str(), preference);
+            names.diet.emplace_back(food.str(), preference);
         }
     }
     return species;
 }
 
-void resolve_diet(const Ecology& ecology, const Diet& diet, Species& species, Table& table) {
-    for (const auto& [name, preference] : diet) {
+void resolve_successor(const Ecology& ecology, const std::string& name, Species& species,
+                       Table& table) {
+    const bool wanted = species.recovery.after_extinction == Recovery::After::Successor;
+    if (name.empty()) {
+        if (wanted) {
+            table.fail(std::format("{} needs a successor to take its place", species.name));
+        }
+        return;
+    }
+    if (!wanted) {
+        table.fail(
+            std::format("{} names a successor but isn't succeeded after_extinction", species.name));
+        return;
+    }
+    const auto successor = ecology.find(name);
+    if (!successor || *successor == ecology.find(species.name)) {
+        table.fail(std::format("{}'s successor {} must be another species", species.name, name));
+        return;
+    }
+    species.recovery.successor = *successor;
+}
+
+void resolve_names(const Ecology& ecology, const Names& names, Species& species, Table& table) {
+    resolve_successor(ecology, names.successor, species, table);
+    for (const auto& [name, preference] : names.diet) {
         Food food{.preference = preference};
         if (name == "forage") {
             food.kind = Food::Kind::Forage;
@@ -278,7 +355,7 @@ Result<Ecology> parse(const toml::table& root) {
     Ecology ecology;
     parse_forage(Table{top.table("forage"), "forage", &error}, ecology.forage);
 
-    std::vector<Diet> diets;
+    std::vector<Names> names;
     if (const toml::node* list = top.find("species")) {
         const auto* species = list->as_array();
         if (species == nullptr || !species->is_array_of_tables()) {
@@ -288,7 +365,7 @@ Result<Ecology> parse(const toml::table& root) {
                 ecology.species.push_back(
                     parse_species(Table{node.as_table(),
                                         std::format("species[{}]", ecology.species.size()), &error},
-                                  diets.emplace_back()));
+                                  names.emplace_back()));
             }
         }
     }
@@ -299,7 +376,7 @@ Result<Ecology> parse(const toml::table& root) {
         } else if (ecology.find(name) != index) {
             top.fail(std::format("species {} is listed twice", name));
         }
-        resolve_diet(ecology, diets[index], ecology.species[index], top);
+        resolve_names(ecology, names[index], ecology.species[index], top);
     }
     if (error) {
         return std::unexpected(std::move(*error));

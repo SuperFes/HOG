@@ -54,6 +54,25 @@ struct Cycle {
     int region_level = 2;
 };
 
+// How a species comes back once it's gone from a region, or from everywhere.
+struct Recovery {
+    // What brings it back once none are left anywhere.
+    enum class After : std::uint8_t {
+        Admin,     // nothing: it waits to be reintroduced
+        Relict,    // a hidden few turn up where the ground is best
+        Successor, // another species takes its place
+    };
+    // Years after a region empties before founders arrive from where it still lives.
+    double earliest = 3.0;
+    double latest = 10.0;
+    double founders = 10.0; // animals in a founding group
+    After after_extinction = After::Admin;
+    // Years after it dies out everywhere before relicts or a successor turn up.
+    double extinct_earliest = 20.0;
+    double extinct_latest = 50.0;
+    std::uint32_t successor = 0; // the species taking its place, for Successor
+};
+
 struct Species {
     std::string name;
     Moves moves = Moves::Land;
@@ -81,6 +100,7 @@ struct Species {
     double speed = 2.0;     // km per day it heads for better ground at
     double leftovers = 0.3; // share of each kill left for scavengers
     Cycle cycle{};
+    Recovery recovery{};
 };
 
 struct Ecology {
@@ -123,6 +143,8 @@ struct Ecology {
 //     speed_km = 2                # per day
 //     leftovers = 0.3
 //     cycle = { years = 13, boom = 4, width_years = 1, region_level = 2 }
+//     recovery = { years = [3, 10], founders = 10, after_extinction = "successor",
+//                  extinct_years = [20, 50], successor = "elk" }    # or "admin", "relict"
 //
 // Every key is optional except a species' name. Biomes are named as planet::to_string() names
 // them, with spaces or underscores. Unknown keys, biomes and foods are errors.

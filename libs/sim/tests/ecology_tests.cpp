@@ -42,11 +42,13 @@ hungry_below = 0.6
 comfort = [-25, 35]
 dormant_below = -10
 cycle = { years = 13, boom = 4, width_years = 2 }
+recovery = { years = [2, 6], founders = 12, after_extinction = "successor", extinct_years = [5, 9], successor = "wolf" }
 
 [[species]]
 name = "wolf"
 moves = "land"
 diet = { deer = 1.0, carrion = 0.25 }
+recovery = { after_extinction = "relict" }
 )");
     REQUIRE(ecology);
     CHECK(ecology->forage.growth == std::chrono::days{20});
@@ -70,11 +72,20 @@ diet = { deer = 1.0, carrion = 0.25 }
     CHECK(deer.dormant_below == -10.0);
     CHECK(deer.cycle.years == 13.0);
     CHECK(deer.cycle.width == 2.0);
+    CHECK(deer.recovery.earliest == 2.0);
+    CHECK(deer.recovery.latest == 6.0);
+    CHECK(deer.recovery.founders == 12.0);
+    CHECK(deer.recovery.after_extinction == hog::sim::Recovery::After::Successor);
+    CHECK(deer.recovery.extinct_earliest == 5.0);
+    CHECK(deer.recovery.extinct_latest == 9.0);
+    CHECK(deer.recovery.successor == 1U);
     REQUIRE(deer.diet.size() == 1);
     CHECK(deer.diet[0].kind == Food::Kind::Forage);
 
     const auto& wolf = ecology->species[1];
     CHECK_FALSE(wolf.dormant_below);
+    CHECK(wolf.recovery.after_extinction == hog::sim::Recovery::After::Relict);
+    CHECK(wolf.recovery.latest == 10.0);
     REQUIRE(wolf.diet.size() == 2);
     const auto prey = std::ranges::find(wolf.diet, Food::Kind::Prey, &Food::kind);
     REQUIRE(prey != wolf.diet.end());
@@ -87,6 +98,7 @@ TEST_CASE("an empty ecology has defaults and no species", "[sim][ecology]") {
     const auto ecology = parse_ecology("");
     REQUIRE(ecology);
     CHECK(ecology->species.empty());
+    CHECK(hog::sim::Species{}.recovery.after_extinction == hog::sim::Recovery::After::Admin);
     CHECK(ecology->forage.rot == std::chrono::days{10});
 }
 
@@ -108,6 +120,19 @@ TEST_CASE("an ecology rejects what it can't use", "[sim][ecology]") {
                ContainsSubstring("grassland"));
     CHECK_THAT(error_of("[[species]]\nname = \"a\"\ncycle = { years = 2, width_years = 3 }"),
                ContainsSubstring("width_years"));
+    CHECK_THAT(error_of("[[species]]\nname = \"a\"\nrecovery = { years = [5, 2] }"),
+               ContainsSubstring("recovery.years"));
+    CHECK_THAT(error_of("[[species]]\nname = \"a\"\nrecovery = { after_extinction = \"pray\" }"),
+               ContainsSubstring("after_extinction"));
+    CHECK_THAT(error_of("[[species]]\nname = \"a\"\nrecovery = { after_extinction = "
+                        "\"successor\" }"),
+               ContainsSubstring("needs a successor"));
+    CHECK_THAT(error_of("[[species]]\nname = \"a\"\nrecovery = { after_extinction = "
+                        "\"successor\", successor = \"a\" }"),
+               ContainsSubstring("another species"));
+    CHECK_THAT(error_of("[[species]]\nname = \"a\"\nrecovery = { successor = \"b\" }\n"
+                        "[[species]]\nname = \"b\""),
+               ContainsSubstring("isn't succeeded"));
     CHECK_THAT(error_of("[[species]]\nname = \"a\"\n[[species]]\nname = \"a\""),
                ContainsSubstring("twice"));
     CHECK_THAT(error_of("[[species]]\nname = \"carrion\""), ContainsSubstring("carrion"));
