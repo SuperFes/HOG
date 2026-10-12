@@ -2,7 +2,7 @@
 
 ## Building
 
-Needs CMake 3.28+, Ninja, and Clang 19+ (the default and primary toolchain), GCC 14+ or MSVC 2022 17.10+. Dependencies are fetched by [CPM.cmake](https://github.com/cpm-cmake/CPM.cmake) into `.cache/cpm` on first configure. On Linux the debug viewer's SDL3 wants X11 or Wayland headers (on Ubuntu: `libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxkbcommon-dev libwayland-dev libegl1-mesa-dev`); without them it builds without a window system, and `-DHOG_BUILD_VIEWER=OFF` skips it.
+Needs CMake 3.28+, Ninja, and Clang 19+ (the default and primary toolchain), GCC 14+ or MSVC 2022 17.10+. Dependencies are fetched by [CPM.cmake](https://github.com/cpm-cmake/CPM.cmake) into `.cache/cpm` on first configure. On Linux the debug viewer's SDL3 wants X11 or Wayland headers (on Ubuntu: `libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev libegl1-mesa-dev`); without them it builds without a window system, and `-DHOG_BUILD_VIEWER=OFF` skips it.
 
 ```sh
 cmake --workflow --preset debug        # configure, build and run all tests

@@ -25,17 +25,30 @@ if(NOT HOG_BUILD_VIEWER)
     return()
 endif()
 
-# SDL3 refuses to build on Linux without X11 or Wayland headers; headless builds (containers,
-# bare CI images) still compile the viewer, though it can't open a window there.
+# SDL3 refuses to build on Linux without X11 or Wayland, and turns on X11 whenever libX11 is
+# there, then wants every extension it supports; so each is used only when complete. Headless
+# builds (containers, bare CI images) still compile the viewer, though it can't open a window.
 set(hog_sdl_console OFF)
+set(hog_x11 OFF)
+set(hog_wayland OFF)
 if(UNIX AND NOT APPLE)
     find_package(X11 QUIET)
+    if(X11_FOUND AND X11_Xcursor_FOUND AND X11_Xext_FOUND AND X11_Xdbe_FOUND AND X11_Xshape_FOUND
+       AND X11_Xi_FOUND AND X11_Xfixes_FOUND AND X11_Xrandr_FOUND AND X11_Xss_FOUND
+       AND X11_XTest_FOUND)
+        set(hog_x11 ON)
+    endif()
     find_package(PkgConfig QUIET)
     if(PkgConfig_FOUND)
-        pkg_check_modules(hog_wayland QUIET wayland-client)
+        pkg_check_modules(hog_wayland_pkgs QUIET wayland-client wayland-cursor wayland-egl egl
+                          xkbcommon)
+        if(hog_wayland_pkgs_FOUND)
+            set(hog_wayland ON)
+        endif()
     endif()
-    if(NOT X11_FOUND AND NOT hog_wayland_FOUND)
-        message(WARNING "No X11 or Wayland headers: the viewer is built without a window system")
+    if(NOT hog_x11 AND NOT hog_wayland)
+        message(WARNING "No complete X11 or Wayland headers: the viewer is built without a window "
+                        "system")
         set(hog_sdl_console ON)
     endif()
 endif()
@@ -50,7 +63,7 @@ CPMAddPackage(
     OPTIONS
         "SDL_SHARED OFF" "SDL_STATIC ON" "SDL_TEST_LIBRARY OFF" "SDL_TESTS OFF" "SDL_EXAMPLES OFF"
         "SDL_INSTALL OFF" "SDL_AUDIO OFF" "SDL_CAMERA OFF" "SDL_DBUS OFF" "SDL_IBUS OFF"
-        "SDL_UNIX_CONSOLE_BUILD ${hog_sdl_console}")
+        "SDL_UNIX_CONSOLE_BUILD ${hog_sdl_console}" "SDL_X11 ${hog_x11}" "SDL_WAYLAND ${hog_wayland}")
 
 # Debug UI; MIT. Built here with the backends for SDL3 and its 2D renderer.
 CPMAddPackage(

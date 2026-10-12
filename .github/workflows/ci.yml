@@ -46,7 +46,7 @@ jobs:
         if: runner.os == 'Linux'
         run: >-
           sudo apt-get update && sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev
-          libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxkbcommon-dev libwayland-dev
+          libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev
           libegl1-mesa-dev
       # Older sanitizer runtimes crash under the runner kernel's high mmap randomization.
       - name: Lower mmap randomization
@@ -89,7 +89,7 @@ jobs:
       - name: Install X11 and Wayland headers
         run: >-
           sudo apt-get update && sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev
-          libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxkbcommon-dev libwayland-dev
+          libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev
           libegl1-mesa-dev
       - uses: actions/cache@v6
         with:
