@@ -153,7 +153,7 @@ This phase builds a server that runs the world with nobody connected: time passe
 
 - [x] Calendar: day, night, seasons, and the sun's position from planet time
 - [x] Weather grid: temperature, pressure, humidity, wind, cloud, precipitation
-- [ ] Weather moves with the wind, is shaped by terrain, and is checked against simple climate expectations
+- [x] Weather moves with the wind, is shaped by terrain, and is checked against simple climate expectations
 - [ ] Wildlife: population per species per cell, with births, deaths, food and migration
 - [ ] Two or three test species (grazer, predator, scavenger) to prove the food chain
 - [ ] Forest biomass per cell, with growth and a stub fire spread
