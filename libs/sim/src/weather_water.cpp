@@ -25,8 +25,10 @@ void water(const StepContext& step, WeatherFields& fields, std::uint32_t index) 
     vapour += evaporation;
 
     // Thunderstorms rain straight out of the air and stir the column towards neutral.
+    const double cold_front = std::max(-static_cast<double>(fields.front[index]), 0.0);
     const double contrast = sea_level(surface, ground) + vapour - upper - storms.neutral_contrast +
-                            (lifting.storm * std::max(rising, 0.0));
+                            (lifting.storm * std::max(rising, 0.0)) +
+                            (step.config->tuning.fronts.cold_storm * cold_front);
     const double storm = std::clamp(contrast / storms.full_contrast, 0.0, 1.0);
     const double convected = storm * vapour * storms.rain_out * storm_move;
     vapour -= convected;

@@ -114,6 +114,7 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
         .day = config.weather.day,
         .axial_tilt = planet->axial_tilt,
         .planet_radius = planet->radius,
+        .seed = planet->seed,
     };
     server->weather_ = std::make_unique<sim::Weather>(
         weather, sim::ground_for(sim::CellGrid{weather.level}, server->planet_),

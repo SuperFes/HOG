@@ -28,6 +28,7 @@ struct WeatherConfig {
     GameDuration day = std::chrono::hours{24};
     double axial_tilt = 23.44;        // degrees
     double planet_radius = 115'000.0; // metres, for how steep the ground is
+    std::uint64_t seed = 0;           // where and when storm systems form
     WeatherTuning tuning{};
 };
 
@@ -63,6 +64,8 @@ struct WeatherFields {
     std::vector<float> storm;
     // How fast the air is rising, in m/s; negative where it sinks.
     std::vector<float> lift;
+    // Fronts, from -1 to 1: positive where warmer air is arriving, negative where colder is.
+    std::vector<float> front;
 
     explicit WeatherFields(std::size_t size = 0);
 
@@ -71,6 +74,22 @@ struct WeatherFields {
     [[nodiscard]] float cloud_cover(std::size_t index) const;
 
     friend bool operator==(const WeatherFields&, const WeatherFields&) = default;
+};
+
+// A travelling low.
+struct StormSystem {
+    std::uint32_t id = 0;
+    DVec3 centre{1.0, 0.0, 0.0}; // unit direction from the planet's centre
+    float depth = 0.0F;          // hPa at its deepest
+    float radius = 0.0F;         // radians
+    float age = 0.0F;            // seconds
+    float life = 0.0F;           // seconds
+
+    // hPa below the surroundings now: deepening for the first `growing` share of its life, then
+    // filling.
+    [[nodiscard]] double strength(double growing) const;
+
+    friend bool operator==(const StormSystem&, const StormSystem&) = default;
 };
 
 class Weather {
@@ -84,6 +103,7 @@ public:
     [[nodiscard]] const CellGrid& grid() const noexcept { return grid_; }
     [[nodiscard]] const std::vector<Ground>& ground() const noexcept { return ground_; }
     [[nodiscard]] const WeatherFields& fields() const noexcept { return fields_; }
+    [[nodiscard]] const std::vector<StormSystem>& systems() const noexcept { return systems_; }
     // Replaces the weather as it stands, for tools and tests. Precondition: one value per cell.
     void set_fields(WeatherFields fields);
     // When the last step was taken.
@@ -115,6 +135,8 @@ private:
     WeatherFields fields_;
     // The fields as the step began, which moving reads from.
     WeatherFields before_;
+    std::vector<StormSystem> systems_;
+    std::uint32_t next_system_ = 1;
     GameTime time_;
 };
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstddef>
 
 namespace hog::sim {
 
@@ -63,7 +64,7 @@ struct StormTuning {
     double mixing = 0.3;   // share of the contrast stirred away per response
     // Most of a storm's heat is released aloft; the sea holds the air above it where it is.
     double land_cooling = 0.2;
-    double hail_storm = 0.5;   // storm strength where hail starts
+    double hail_storm = 0.4;   // storm strength where hail starts
     double max_hail = 0.6;     // share of storm rain that falls as hail
     double hail_below = -15.0; // °C in the upper air
 };
@@ -88,9 +89,38 @@ struct LiftTuning {
     double foehn = 8.0; // °C strongly sinking air warms by
 };
 
+// Travelling lows, born where the jet is strongest and carried along by it. Their winds pull warm
+// air poleward ahead of them and cold air in behind, which makes the fronts.
+struct SystemTuning {
+    double per_day = 2.5; // new systems in each hemisphere
+    double min_latitude = 25.0;
+    double max_latitude = 65.0;
+    double min_depth = 10.0; // hPa below the surroundings at their deepest
+    double max_depth = 30.0;
+    double min_radius = 8.0; // degrees
+    double max_radius = 14.0;
+    Seconds min_life = std::chrono::days{3};
+    Seconds max_life = std::chrono::days{7};
+    double growing = 0.35;  // share of a life spent deepening
+    double steering = 0.6;  // share of the jet's speed they travel at
+    double poleward = 1.0;  // m/s they drift towards the pole
+    std::size_t limit = 40; // systems alive at once
+    double spacing = 2.0;   // radii a new system keeps from the others
+};
+
+// Where the wind carries warmer or colder air in, the air rises along the boundary: gently ahead
+// of warm air, sharply ahead of cold.
+struct FrontTuning {
+    double reference = 0.3;  // °C per hour of warming or cooling that makes a strong front
+    double lift = 0.02;      // m/s of rising along a strong front
+    double cold_storm = 8.0; // °C of storm contrast a strong cold front adds
+};
+
 struct WeatherTuning {
     MotionTuning motion{};
     LiftTuning lift{};
+    SystemTuning systems{};
+    FrontTuning fronts{};
     HeatTuning heat{};
     WindTuning wind{};
     WaterTuning water{};

@@ -22,6 +22,7 @@ struct StepContext {
     const CellGrid* grid;
     std::span<const Ground> ground;
     std::span<const DVec2> slopes;
+    std::span<const StormSystem> systems;
     const Calendar* calendar;
     GameTime middle; // halfway through the step
     double seconds;  // the step's length
@@ -69,6 +70,16 @@ void water(const StepContext& step, WeatherFields& fields, std::uint32_t index);
 void pressure(const StepContext& step, WeatherFields& fields, std::uint32_t index);
 // Surface wind and jet from the pressure and upper air around the cell.
 void winds(const StepContext& step, WeatherFields& fields, std::uint32_t index);
+
+// Moves, ages and retires the storm systems, then starts the step's new ones where the jet is
+// strongest. `step_number` counts steps since the epoch, so the same step always forms the same
+// systems.
+void update_systems(const StepContext& step, const WeatherFields& fields,
+                    std::vector<StormSystem>& systems, std::uint32_t& next_id,
+                    std::int64_t step_number);
+
+// Fronts where the wind brings warmer or colder air.
+void fronts(const StepContext& step, WeatherFields& fields, std::uint32_t index);
 
 // How fast the air rises where the winds around the cell converge or climb the ground.
 void lift(const StepContext& step, WeatherFields& fields, std::uint32_t index);

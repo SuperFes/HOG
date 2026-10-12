@@ -1,5 +1,6 @@
 #include "weather_stages.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <numbers>
 
@@ -27,9 +28,16 @@ void pressure(const StepContext& step, WeatherFields& fields, std::uint32_t inde
     const double warmth = (sea_level(static_cast<double>(fields.temperature[index]), ground) -
                            static_cast<double>(fields.upper_temperature[index])) -
                           (target.reference - target.upper);
+    double lows = 0.0;
+    const DVec3 up = step.grid->frame(index).up;
+    for (const StormSystem& system : step.systems) {
+        const double away = std::acos(std::clamp(glm::dot(up, system.centre), -1.0, 1.0)) /
+                            static_cast<double>(system.radius);
+        lows += system.strength(step.config->tuning.systems.growing) * std::exp(-away * away);
+    }
     fields.pressure[index] = static_cast<float>(
         sea_level_pressure - (tuning.band_pressure * std::cos(6.0 * std::asin(sin_latitude))) -
-        (tuning.thermal_pressure * warmth));
+        (tuning.thermal_pressure * warmth) - lows);
 }
 
 void winds(const StepContext& step, WeatherFields& fields, std::uint32_t index) {
@@ -81,7 +89,10 @@ void lift(const StepContext& step, WeatherFields& fields, std::uint32_t index) {
     }
     divergence /= earth_radius;
     const double climbing = glm::dot(wind, step.slopes[index]) * tuning.slope_share;
-    fields.lift[index] = static_cast<float>((-divergence * tuning.converging_depth) + climbing);
+    const double along_front =
+        step.config->tuning.fronts.lift * std::abs(static_cast<double>(fields.front[index]));
+    fields.lift[index] =
+        static_cast<float>((-divergence * tuning.converging_depth) + climbing + along_front);
 }
 
 } // namespace hog::sim::detail

@@ -47,6 +47,18 @@ constexpr Ground land{
     .mean_temperature = 15.0F, .elevation = 0.0F, .wetness = 0.5F, .ocean = false};
 constexpr Ground sea{};
 
+// An ocean warm at the equator and cold at the poles, as Earth's is.
+std::vector<Ground> zonal_sea(int grid_level) {
+    const hog::sim::CellGrid grid{grid_level};
+    std::vector<Ground> ground(grid.size());
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        const double sin_latitude = grid.frame(index).up.z;
+        ground[index].mean_temperature =
+            static_cast<float>(28.0 - (35.0 * sin_latitude * sin_latitude));
+    }
+    return ground;
+}
+
 std::uint32_t cell_at(const Weather& weather, double latitude, double longitude) {
     const DVec3 up{std::cos(latitude * degree) * std::cos(longitude * degree),
                    std::cos(latitude * degree) * std::sin(longitude * degree),
@@ -308,6 +320,87 @@ TEST_CASE("mountains rain on their windward side and shelter their lee", "[sim][
     CHECK(lee_vapour < flat_vapour * 0.85);
 }
 
+TEST_CASE("storm systems form in the middle latitudes and travel east", "[sim][weather]") {
+    JobSystem jobs{1};
+    const WeatherConfig fine{.level = 4, .seed = 7};
+    Weather weather{fine, zonal_sea(fine.level), march_equinox};
+    weather.advance_to(march_equinox + hours{144}, jobs);
+    const auto before = weather.systems();
+    REQUIRE(before.size() >= 4);
+    for (const hog::sim::StormSystem& system : before) {
+        const double latitude = std::abs(std::asin(system.centre.z)) / degree;
+        CHECK(latitude > 20.0);
+        CHECK(latitude < 75.0);
+    }
+
+    weather.advance_to(march_equinox + hours{156}, jobs);
+    int tracked = 0;
+    int eastward = 0;
+    for (const hog::sim::StormSystem& was : before) {
+        for (const hog::sim::StormSystem& is : weather.systems()) {
+            if (is.id == was.id) {
+                ++tracked;
+                const double east = std::remainder(std::atan2(is.centre.y, is.centre.x) -
+                                                       std::atan2(was.centre.y, was.centre.x),
+                                                   2.0 * std::numbers::pi);
+                eastward += east > 0.0 ? 1 : 0;
+            }
+        }
+    }
+    REQUIRE(tracked > 0);
+    CHECK(eastward * 4 >= tracked * 3);
+
+    Weather loaded{fine, zonal_sea(fine.level), june_solstice};
+    REQUIRE(loaded.load(Weather::save_version, weather.save()));
+    CHECK(loaded.systems() == weather.systems());
+}
+
+TEST_CASE("storm systems are lows the wind circles, with fronts around them", "[sim][weather]") {
+    JobSystem jobs{1};
+    const WeatherConfig fine{.level = 4, .seed = 7};
+    Weather weather{fine, zonal_sea(fine.level), march_equinox};
+    weather.advance_to(march_equinox + hours{144}, jobs);
+    const auto& grid = weather.grid();
+    const auto& fields = weather.fields();
+    const auto strongest =
+        std::ranges::max_element(weather.systems(), {}, [&](const hog::sim::StormSystem& system) {
+            return system.strength(fine.tuning.systems.growing);
+        });
+    REQUIRE(strongest != weather.systems().end());
+    const hog::sim::StormSystem& system = *strongest;
+    REQUIRE(system.strength(fine.tuning.systems.growing) > 5.0);
+
+    double centre_pressure = 2'000.0;
+    double ring_pressure = 0.0;
+    int ring = 0;
+    double circulation = 0.0;
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        const auto& frame = grid.frame(index);
+        const double away = std::acos(std::clamp(glm::dot(frame.up, system.centre), -1.0, 1.0)) /
+                            static_cast<double>(system.radius);
+        if (away < 0.5) {
+            centre_pressure =
+                std::min(centre_pressure, static_cast<double>(fields.pressure[index]));
+        } else if (away > 2.0 && away < 2.5) {
+            ring_pressure += static_cast<double>(fields.pressure[index]);
+            ++ring;
+        }
+        if (away > 0.5 && away < 1.5) {
+            // Anticlockwise around the centre, seen from above it.
+            const DVec3 around = glm::normalize(glm::cross(system.centre, frame.up));
+            const hog::DVec2 local{glm::dot(around, frame.east), glm::dot(around, frame.north)};
+            circulation += glm::dot(hog::DVec2{fields.wind[index]}, local);
+        }
+    }
+    REQUIRE(ring > 0);
+    CHECK(centre_pressure < (ring_pressure / ring) - 3.0);
+    // Anticlockwise in the north, clockwise in the south.
+    CHECK(circulation * system.centre.z > 0.0);
+
+    CHECK(std::ranges::max(fields.front) > 0.5F);
+    CHECK(std::ranges::min(fields.front) < -0.5F);
+}
+
 TEST_CASE("weather comes out the same on any number of threads", "[sim][weather]") {
     JobSystem one{1};
     JobSystem many{4};
@@ -317,6 +410,7 @@ TEST_CASE("weather comes out the same on any number of threads", "[sim][weather]
     a.advance_to(later, one);
     b.advance_to(later, many);
     CHECK(a.fields() == b.fields());
+    CHECK(a.systems() == b.systems());
 }
 
 TEST_CASE("weather saves and loads", "[sim][weather]") {
@@ -341,13 +435,15 @@ TEST_CASE("weather saves and loads", "[sim][weather]") {
     REQUIRE_FALSE(newer);
     CHECK(newer.error().code == hog::ErrorCode::Unsupported);
 
-    // Weather saved before air rose and sank loads without it.
+    // Weather saved before air rose and sank, or storm systems formed, loads without them.
     Weather current{config(), everywhere(land), june_solstice};
     REQUIRE(current.load(Weather::save_version, bytes));
     Weather old{config(), everywhere(land), june_solstice};
-    const std::size_t lift_bytes = old.fields().size() * sizeof(float);
-    REQUIRE(old.load(1, std::span{bytes}.first(bytes.size() - lift_bytes)));
+    // Version 1 held a level, a time and fourteen floats per cell.
+    const std::size_t version_one = 1 + 8 + (old.fields().size() * 14 * sizeof(float));
+    REQUIRE(old.load(1, std::span{bytes}.first(version_one)));
     CHECK(std::ranges::all_of(old.fields().lift, [](float lift) { return lift == 0.0F; }));
+    CHECK(old.systems().empty());
     CHECK(old.fields().temperature == current.fields().temperature);
 
     const std::span<const std::byte> all{bytes};

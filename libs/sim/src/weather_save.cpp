@@ -2,8 +2,10 @@
 #include <hog/sim/weather.hpp>
 
 #include <bit>
+#include <concepts>
 #include <cstdint>
 #include <format>
+#include <optional>
 #include <type_traits>
 #include <utility>
 
@@ -28,6 +30,80 @@ void each_field(Fields& fields, Visit visit) {
     visit(fields.hail, 1);
     visit(fields.storm, 1);
     visit(fields.lift, 2);
+    visit(fields.front, 2);
+}
+
+// Reads values in order, keeping the first failure and reading nothing after it.
+class Reader {
+public:
+    explicit Reader(std::span<const std::byte> bytes) noexcept : in_{bytes} {}
+
+    template <std::unsigned_integral T>
+    T integer() {
+        if (error_) {
+            return 0;
+        }
+        auto value = in_.read<T>();
+        if (!value) {
+            error_ = std::move(value.error());
+            return 0;
+        }
+        return *value;
+    }
+    float single() { return std::bit_cast<float>(integer<std::uint32_t>()); }
+    double twice() { return std::bit_cast<double>(integer<std::uint64_t>()); }
+
+    [[nodiscard]] bool ok() const noexcept { return !error_; }
+    [[nodiscard]] std::size_t remaining() const noexcept { return in_.remaining(); }
+    // Fails with the first failure, or if bytes are left over.
+    [[nodiscard]] Result<void> finish() const {
+        if (error_) {
+            return std::unexpected(*error_);
+        }
+        return in_.finish();
+    }
+
+private:
+    ByteReader in_;
+    std::optional<Error> error_;
+};
+
+void read_value(Reader& in, float& value) {
+    value = in.single();
+}
+
+void read_value(Reader& in, Vec2& value) {
+    value.x = in.single();
+    value.y = in.single();
+}
+
+Result<std::vector<StormSystem>> read_systems(Reader& in) {
+    const auto count = in.integer<std::uint32_t>();
+    // A damaged count can't ask for more systems than the bytes left could hold.
+    constexpr std::size_t system_bytes = 44;
+    if (count > in.remaining() / system_bytes) {
+        return make_error(ErrorCode::Parse, "weather lists more storm systems than it holds");
+    }
+    std::vector<StormSystem> systems(count);
+    for (StormSystem& system : systems) {
+        system.id = in.integer<std::uint32_t>();
+        system.centre.x = in.twice();
+        system.centre.y = in.twice();
+        system.centre.z = in.twice();
+        system.depth = in.single();
+        system.radius = in.single();
+        system.age = in.single();
+        system.life = in.single();
+    }
+    return systems;
+}
+
+void write_double(ByteWriter& out, double value) {
+    out.write(std::bit_cast<std::uint64_t>(value));
+}
+
+void write_float(ByteWriter& out, float value) {
+    out.write(std::bit_cast<std::uint32_t>(value));
 }
 
 } // namespace
@@ -46,6 +122,18 @@ std::vector<std::byte> Weather::save() const {
             }
         }
     });
+    out.write(next_system_);
+    out.write(static_cast<std::uint32_t>(systems_.size()));
+    for (const StormSystem& system : systems_) {
+        out.write(system.id);
+        write_double(out, system.centre.x);
+        write_double(out, system.centre.y);
+        write_double(out, system.centre.z);
+        write_float(out, system.depth);
+        write_float(out, system.radius);
+        write_float(out, system.age);
+        write_float(out, system.life);
+    }
     return std::move(out).take();
 }
 
@@ -54,50 +142,39 @@ Result<void> Weather::load(std::uint16_t version, std::span<const std::byte> byt
         return make_error(ErrorCode::Unsupported,
                           std::format("weather version {} is unknown to this build", version));
     }
-    ByteReader in{bytes};
-    const auto level = in.read<std::uint8_t>();
-    if (!level) {
-        return std::unexpected(level.error());
-    }
-    if (*level != grid_.level()) {
+    Reader in{bytes};
+    const auto level = in.integer<std::uint8_t>();
+    if (in.ok() && level != grid_.level()) {
         return make_error(
             ErrorCode::InvalidArgument,
-            std::format("weather was saved at level {}, not {}", *level, grid_.level()));
+            std::format("weather was saved at level {}, not {}", level, grid_.level()));
     }
-    const auto time = in.read<std::uint64_t>();
-    if (!time) {
-        return std::unexpected(time.error());
-    }
+    const auto time = in.integer<std::uint64_t>();
     WeatherFields loaded{grid_.size()};
-    Result<void> read{};
-    const auto next = [&] {
-        auto bits = read ? in.read<std::uint32_t>() : Result<std::uint32_t>{0U};
-        if (!bits) {
-            read = std::unexpected(std::move(bits.error()));
-        }
-        return std::bit_cast<float>(bits.value_or(0U));
-    };
     each_field(loaded, [&](auto& values, int since) {
-        if (std::cmp_greater(since, version)) {
-            return;
-        }
-        for (auto& value : values) {
-            if constexpr (std::is_same_v<std::remove_cvref_t<decltype(value)>, Vec2>) {
-                value.x = next();
-                value.y = next();
-            } else {
-                value = next();
+        if (std::cmp_less_equal(since, version)) {
+            for (auto& value : values) {
+                read_value(in, value);
             }
         }
     });
-    if (!read) {
-        return read;
+    std::uint32_t next_system = 1;
+    std::vector<StormSystem> systems;
+    if (version >= 2) {
+        next_system = in.integer<std::uint32_t>();
+        auto read = read_systems(in);
+        if (!read) {
+            return std::unexpected(std::move(read.error()));
+        }
+        systems = std::move(*read);
     }
     if (auto finished = in.finish(); !finished) {
         return finished;
     }
     fields_ = std::move(loaded);
-    time_ = GameTime{GameDuration{static_cast<GameDuration::rep>(*time)}};
+    systems_ = std::move(systems);
+    next_system_ = next_system;
+    time_ = GameTime{GameDuration{static_cast<GameDuration::rep>(time)}};
     return {};
 }
 

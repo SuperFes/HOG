@@ -5,6 +5,7 @@ add_library(hog_sim
     src/weather_heat.cpp
     src/weather_motion.cpp
     src/weather_save.cpp
+    src/weather_systems.cpp
     src/weather_water.cpp
     src/weather_wind.cpp)
 add_library(hog::sim ALIAS hog_sim)

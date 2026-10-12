@@ -38,7 +38,7 @@ GameDuration positive(GameDuration duration) {
 WeatherFields::WeatherFields(std::size_t size)
     : temperature(size), upper_temperature(size), pressure(size), vapour(size), cloud(size),
       wind(size, Vec2{0.0F}), jet(size, Vec2{0.0F}), evaporation(size), rain(size), snow(size),
-      hail(size), storm(size), lift(size) {}
+      hail(size), storm(size), lift(size), front(size) {}
 
 float WeatherFields::cloud_cover(std::size_t index) const {
     return 1.0F - std::exp(-cloud[index] / cloud_cover_depth);
@@ -117,11 +117,14 @@ void Weather::step(GameTime at, jobs::JobSystem& jobs) {
         .grid = &grid_,
         .ground = ground_,
         .slopes = slopes_,
+        .systems = {},
         .calendar = &calendar_,
         .middle = middle,
         .seconds = Seconds{config_.step}.count(),
         .sin_declination = detail::sin_declination(middle, config_.axial_tilt),
     };
+    detail::update_systems(context, fields_, systems_, next_system_,
+                           at.time_since_epoch() / config_.step);
     before_ = fields_;
     detail::for_cells(&jobs, grid_.size(),
                       [&](std::uint32_t index) { detail::move(context, before_, fields_, index); });
@@ -140,6 +143,7 @@ void Weather::balance_winds(jobs::JobSystem* jobs) {
         .grid = &grid_,
         .ground = ground_,
         .slopes = slopes_,
+        .systems = systems_,
         .calendar = &calendar_,
         .middle = time_,
         .seconds = 0.0,
@@ -149,6 +153,8 @@ void Weather::balance_winds(jobs::JobSystem* jobs) {
                       [&](std::uint32_t index) { detail::pressure(context, fields_, index); });
     detail::for_cells(jobs, grid_.size(),
                       [&](std::uint32_t index) { detail::winds(context, fields_, index); });
+    detail::for_cells(jobs, grid_.size(),
+                      [&](std::uint32_t index) { detail::fronts(context, fields_, index); });
     detail::for_cells(jobs, grid_.size(),
                       [&](std::uint32_t index) { detail::lift(context, fields_, index); });
 }
