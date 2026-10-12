@@ -445,6 +445,9 @@ TEST_CASE("weather saves and loads", "[sim][weather]") {
     CHECK(std::ranges::all_of(old.fields().lift, [](float lift) { return lift == 0.0F; }));
     CHECK(old.systems().empty());
     CHECK(old.fields().temperature == current.fields().temperature);
+    // Without saved means, they start from the weather as it stands.
+    CHECK(old.fields().recent_temperature == old.fields().temperature);
+    CHECK(old.fields().recent_precipitation[0] > 0.0F);
 
     const std::span<const std::byte> all{bytes};
     CHECK_FALSE(loaded.load(Weather::save_version, all.first(all.size() - 1)));
@@ -452,6 +455,28 @@ TEST_CASE("weather saves and loads", "[sim][weather]") {
     longer.push_back(std::byte{0});
     CHECK_FALSE(loaded.load(Weather::save_version, longer));
     CHECK(loaded.fields() == saved.fields());
+}
+
+TEST_CASE("recent weather follows the weather slowly", "[sim][weather]") {
+    JobSystem jobs{1};
+    Weather weather{config(), everywhere(land), march_equinox};
+    const auto start = weather.fields();
+    weather.advance_to(march_equinox + days{3}, jobs);
+    const auto& fields = weather.fields();
+    double surface_swing = 0.0;
+    double recent_swing = 0.0;
+    for (std::size_t index = 0; index < fields.size(); ++index) {
+        surface_swing = std::max(surface_swing,
+                                 static_cast<double>(std::abs(fields.temperature[index] -
+                                                              fields.recent_temperature[index])));
+        recent_swing =
+            std::max(recent_swing, static_cast<double>(std::abs(fields.recent_temperature[index] -
+                                                                start.recent_temperature[index])));
+        CHECK(fields.recent_precipitation[index] >= 0.0F);
+    }
+    // Days and nights swing the air, but the mean barely moves.
+    CHECK(surface_swing > 3.0);
+    CHECK(recent_swing < surface_swing);
 }
 
 TEST_CASE("weather ground comes from the planet", "[sim][weather]") {

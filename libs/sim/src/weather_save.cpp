@@ -1,3 +1,5 @@
+#include "weather_stages.hpp"
+
 #include <hog/core/bytes.hpp>
 #include <hog/sim/weather.hpp>
 
@@ -31,6 +33,8 @@ void each_field(Fields& fields, Visit visit) {
     visit(fields.storm, 1);
     visit(fields.lift, 2);
     visit(fields.front, 2);
+    visit(fields.recent_temperature, 3);
+    visit(fields.recent_precipitation, 3);
 }
 
 // Reads values in order, keeping the first failure and reading nothing after it.
@@ -170,6 +174,12 @@ Result<void> Weather::load(std::uint16_t version, std::span<const std::byte> byt
     }
     if (auto finished = in.finish(); !finished) {
         return finished;
+    }
+    if (version < 3) {
+        for (std::uint32_t index = 0; index < grid_.size(); ++index) {
+            loaded.recent_temperature[index] = loaded.temperature[index];
+            loaded.recent_precipitation[index] = detail::usual_precipitation(ground_[index]);
+        }
     }
     fields_ = std::move(loaded);
     systems_ = std::move(systems);

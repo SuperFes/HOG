@@ -72,6 +72,15 @@ void water(const StepContext& step, WeatherFields& fields, std::uint32_t index) 
     fields.snow[index] = static_cast<float>(falling * snowy);
     fields.hail[index] = static_cast<float>(hail);
     fields.storm[index] = static_cast<float>(storm);
+
+    const RecentTuning& recent = step.config->tuning.recent;
+    const double per_day = (falling + hail) * 86'400.0 / step.seconds;
+    const auto toward = [&](float& mean, double value, Seconds response) {
+        const auto now = static_cast<double>(mean);
+        mean = static_cast<float>(now + ((value - now) * approach(step.seconds, response)));
+    };
+    toward(fields.recent_temperature[index], surface, recent.temperature);
+    toward(fields.recent_precipitation[index], per_day, recent.precipitation);
 }
 
 } // namespace hog::sim::detail

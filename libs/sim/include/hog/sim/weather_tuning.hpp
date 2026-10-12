@@ -123,6 +123,12 @@ struct FrontTuning {
     double cold_storm = 8.0; // °C of storm contrast a strong cold front adds
 };
 
+// Running means of the weather, for what lives under it and responds over days, not hours.
+struct RecentTuning {
+    Seconds temperature = std::chrono::days{5};
+    Seconds precipitation = std::chrono::days{20};
+};
+
 struct WeatherTuning {
     MotionTuning motion{};
     LiftTuning lift{};
@@ -132,6 +138,7 @@ struct WeatherTuning {
     WindTuning wind{};
     WaterTuning water{};
     StormTuning storms{};
+    RecentTuning recent{};
 };
 
 } // namespace hog::sim

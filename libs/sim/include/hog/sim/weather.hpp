@@ -66,6 +66,9 @@ struct WeatherFields {
     std::vector<float> lift;
     // Fronts, from -1 to 1: positive where warmer air is arriving, negative where colder is.
     std::vector<float> front;
+    // Running means: surface °C, and rain, snow and hail together in mm per day.
+    std::vector<float> recent_temperature;
+    std::vector<float> recent_precipitation;
 
     explicit WeatherFields(std::size_t size = 0);
 
@@ -122,7 +125,7 @@ public:
     // carried over.
     [[nodiscard]] Result<void> load(std::uint16_t version, std::span<const std::byte> bytes);
 
-    static constexpr std::uint16_t save_version = 2;
+    static constexpr std::uint16_t save_version = 3;
 
 private:
     void step(GameTime at, jobs::JobSystem& jobs);

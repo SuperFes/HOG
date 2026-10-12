@@ -77,6 +77,12 @@ void pressure(const StepContext& step, WeatherFields& fields, std::uint32_t inde
 // Surface wind and jet from the pressure and upper air around the cell.
 void winds(const StepContext& step, WeatherFields& fields, std::uint32_t index);
 
+// What the recent means start from without a history: wetter ground has wetter weather.
+[[nodiscard]] inline float usual_precipitation(const Ground& ground) {
+    constexpr float wettest = 4.0F; // mm per day
+    return wettest * ground.wetness;
+}
+
 // Moves, ages and retires the storm systems, then starts the step's new ones where the jet is
 // strongest. `step_number` counts steps since the epoch, so the same step always forms the same
 // systems.

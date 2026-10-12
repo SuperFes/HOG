@@ -38,7 +38,8 @@ GameDuration positive(GameDuration duration) {
 WeatherFields::WeatherFields(std::size_t size)
     : temperature(size), upper_temperature(size), pressure(size), vapour(size), cloud(size),
       wind(size, Vec2{0.0F}), jet(size, Vec2{0.0F}), evaporation(size), rain(size), snow(size),
-      hail(size), storm(size), lift(size), front(size) {}
+      hail(size), storm(size), lift(size), front(size), recent_temperature(size),
+      recent_precipitation(size) {}
 
 float cloud_cover(float cloud) noexcept {
     return 1.0F - std::exp(-cloud / cloud_cover_depth);
@@ -95,6 +96,8 @@ Weather::Weather(const WeatherConfig& config, std::vector<Ground> ground, GameTi
         fields_.upper_temperature[index] = static_cast<float>(target.upper);
         fields_.vapour[index] = static_cast<float>(0.7 * detail::saturation(target.surface) *
                                                    static_cast<double>(ground_[index].wetness));
+        fields_.recent_temperature[index] = static_cast<float>(target.surface);
+        fields_.recent_precipitation[index] = detail::usual_precipitation(ground_[index]);
     }
     balance_winds(nullptr);
 }
