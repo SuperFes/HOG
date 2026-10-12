@@ -61,7 +61,8 @@ public:
         : thread_([this, &service] {
               while (!stop_.load()) {
                   service.serve([](const Fetch& fetch) {
-                      Layers layers{.time = GameTime{std::chrono::seconds{7}}, .layers = {}};
+                      Layers layers{
+                          .time = GameTime{std::chrono::seconds{7}}, .clock = {}, .layers = {}};
                       for (const std::string& name : fetch.names) {
                           layers.layers.push_back(Layer{.name = name, .values = {1.0F, 2.0F}});
                       }

@@ -11,6 +11,7 @@ using hog::viewer::Frame;
 
 TEST_CASE("a frame finds its layers by name", "[viewer][frame]") {
     const probe::Layers layers{.time = GameTime{std::chrono::hours{5}},
+                               .clock = {},
                                .layers = {probe::Layer{.name = "a", .values = {1.0F, 2.0F, 3.0F}},
                                           probe::Layer{.name = "short", .values = {1.0F}}}};
     const Frame frame{probe::Welcome{}, layers, 3};

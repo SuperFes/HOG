@@ -42,6 +42,7 @@ std::vector<std::byte> frame(std::uint8_t kind, std::span<const std::byte> paylo
 
 Layers sample_layers() {
     return Layers{.time = GameTime{std::chrono::hours{24 * 365}},
+                  .clock = Clock{.paused = true, .scale = 600},
                   .layers = {Layer{.name = "weather/temperature", .values = {-12.5F, 0.0F, 31.25F}},
                              Layer{.name = "forest/fire", .values = {}}}};
 }
@@ -57,7 +58,8 @@ TEST_CASE("every message survives a round trip", "[probe][messages]") {
                           .level = 5,
                           .planet_radius = 115'000.5,
                           .layers = {LayerInfo{.name = "weather/temperature", .unit = "°C"},
-                                     LayerInfo{.name = "wildlife/deer", .unit = "per km²"}}};
+                                     LayerInfo{.name = "wildlife/deer", .unit = "per km²"}},
+                          .controllable = true};
     CHECK(round_trip(welcome) == Message{welcome});
 
     CHECK(round_trip(Refused{.reason = "speaks version 9"}) ==
@@ -68,6 +70,15 @@ TEST_CASE("every message survives a round trip", "[probe][messages]") {
     CHECK(round_trip(Fetch{}) == Message{Fetch{}});
 
     CHECK(round_trip(sample_layers()) == Message{sample_layers()});
+
+    for (const Action action :
+         {Action::Pause, Action::Resume, Action::Step, Action::Speed, Action::RealTime}) {
+        const Control control{.action = action, .amount = 0xFFFF'FFFF};
+        CHECK(round_trip(control) == Message{control});
+    }
+    const Controlled controlled{.clock = Clock{.paused = false, .scale = 3'600},
+                                .error = "time control is off"};
+    CHECK(round_trip(controlled) == Message{controlled});
 }
 
 TEST_CASE("a frame is its payload length, kind and payload", "[probe][messages]") {
@@ -143,8 +154,23 @@ TEST_CASE("broken streams fail and stay failed", "[probe][messages]") {
     SECTION("a count larger than the payload could hold") {
         ByteWriter payload;
         payload.write(std::uint64_t{0});
+        payload.write(std::uint8_t{0});
+        payload.write(std::uint32_t{1});
         payload.write(std::uint32_t{0xFFFF'FFFF});
         reader.feed(frame(5, payload.bytes()));
+    }
+    SECTION("an unknown action") {
+        ByteWriter payload;
+        payload.write(std::uint8_t{9});
+        payload.write(std::uint32_t{0});
+        reader.feed(frame(6, payload.bytes()));
+    }
+    SECTION("a flag that is neither true nor false") {
+        ByteWriter payload;
+        payload.write(std::uint8_t{2});
+        payload.write(std::uint32_t{1});
+        payload.write(std::uint16_t{0});
+        reader.feed(frame(7, payload.bytes()));
     }
     const auto first = reader.next();
     REQUIRE_FALSE(first);
@@ -157,8 +183,8 @@ TEST_CASE("float values keep their exact bits", "[probe][messages]") {
     const std::vector<float> values{std::bit_cast<float>(0x7FC0'0001U), -0.0F,
                                     std::numeric_limits<float>::infinity(),
                                     std::numeric_limits<float>::denorm_min()};
-    const Message received =
-        round_trip(Layers{.time = {}, .layers = {Layer{.name = "x", .values = values}}});
+    const Message received = round_trip(
+        Layers{.time = {}, .clock = {}, .layers = {Layer{.name = "x", .values = values}}});
     const auto& layer = std::get<Layers>(received).layers.at(0);
     REQUIRE(layer.values.size() == values.size());
     for (std::size_t index = 0; index < values.size(); ++index) {

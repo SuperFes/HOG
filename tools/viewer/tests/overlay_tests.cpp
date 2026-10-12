@@ -36,7 +36,8 @@ struct Planet {
     }
 
     [[nodiscard]] Frame frame() const {
-        return Frame{probe::Welcome{}, probe::Layers{.time = {}, .layers = layers}, grid.size()};
+        return Frame{probe::Welcome{}, probe::Layers{.time = {}, .clock = {}, .layers = layers},
+                     grid.size()};
     }
 
     [[nodiscard]] mapgen::Image render(Overlay overlay, const std::string& species = "") const {
@@ -206,7 +207,7 @@ TEST_CASE("a legend gives the range of what an overlay shows", "[viewer][overlay
         .level = level,
         .planet_radius = 1.0,
         .layers = {probe::LayerInfo{.name = "weather/temperature", .unit = "°C"}}};
-    const Frame frame{welcome, probe::Layers{.time = {}, .layers = planet.layers},
+    const Frame frame{welcome, probe::Layers{.time = {}, .clock = {}, .layers = planet.layers},
                       planet.grid.size()};
     const auto legend = viewer::legend_for(Overlay::Air, frame, "");
     REQUIRE(legend);

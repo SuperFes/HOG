@@ -58,7 +58,7 @@ TEST_CASE("messages cross a connection both ways", "[probe][channel]") {
 
 TEST_CASE("a message larger than one read arrives whole", "[probe][channel]") {
     Pair pair = connected();
-    Layers layers{.time = GameTime{std::chrono::days{3}}, .layers = {}};
+    Layers layers{.time = GameTime{std::chrono::days{3}}, .clock = {}, .layers = {}};
     for (int index = 0; index < 8; ++index) {
         std::vector<float> values(100'000);
         for (std::size_t cell = 0; cell < values.size(); ++cell) {

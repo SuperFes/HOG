@@ -118,7 +118,7 @@ std::vector<probe::LayerInfo> layer_catalogue(const LayerSources& sources) {
 }
 
 probe::Layers fetch_layers(const LayerSources& sources, const probe::Fetch& fetch, GameTime time) {
-    probe::Layers layers{.time = time, .layers = {}};
+    probe::Layers layers{.time = time, .clock = {}, .layers = {}};
     each_layer(sources, [&](std::string_view name, std::string_view /*unit*/, auto&& fill) {
         if (std::ranges::find(fetch.names, name) != fetch.names.end()) {
             probe::Layer& layer =

@@ -19,6 +19,8 @@ enum class Kind : std::uint8_t {
     Refused = 3,
     Fetch = 4,
     Layers = 5,
+    Control = 6,
+    Controlled = 7,
 };
 
 constexpr std::size_t header_size = sizeof(std::uint32_t) + sizeof(std::uint8_t);
@@ -38,6 +40,12 @@ constexpr Kind kind_of(const Fetch& /*unused*/) noexcept {
 constexpr Kind kind_of(const Layers& /*unused*/) noexcept {
     return Kind::Layers;
 }
+constexpr Kind kind_of(const Control& /*unused*/) noexcept {
+    return Kind::Control;
+}
+constexpr Kind kind_of(const Controlled& /*unused*/) noexcept {
+    return Kind::Controlled;
+}
 
 void write_text(ByteWriter& out, const std::string& text) {
     HOG_ASSERT(text.size() <= std::numeric_limits<std::uint16_t>::max(), "text too long to send");
@@ -48,6 +56,15 @@ void write_text(ByteWriter& out, const std::string& text) {
 void write_count(ByteWriter& out, std::size_t count) {
     HOG_ASSERT(count <= std::numeric_limits<std::uint32_t>::max(), "too many to send");
     out.write(static_cast<std::uint32_t>(count));
+}
+
+void write_flag(ByteWriter& out, bool flag) {
+    out.write(static_cast<std::uint8_t>(flag ? 1 : 0));
+}
+
+void write_clock(ByteWriter& out, const Clock& clock) {
+    write_flag(out, clock.paused);
+    out.write(clock.scale);
 }
 
 void write_body(ByteWriter& out, const Hello& hello) {
@@ -64,6 +81,7 @@ void write_body(ByteWriter& out, const Welcome& welcome) {
         write_text(out, layer.name);
         write_text(out, layer.unit);
     }
+    write_flag(out, welcome.controllable);
 }
 
 void write_body(ByteWriter& out, const Refused& refused) {
@@ -79,6 +97,7 @@ void write_body(ByteWriter& out, const Fetch& fetch) {
 
 void write_body(ByteWriter& out, const Layers& layers) {
     out.write(static_cast<std::uint64_t>(layers.time.time_since_epoch().count()));
+    write_clock(out, layers.clock);
     write_count(out, layers.layers.size());
     for (const Layer& layer : layers.layers) {
         write_text(out, layer.name);
@@ -87,6 +106,16 @@ void write_body(ByteWriter& out, const Layers& layers) {
             out.write(std::bit_cast<std::uint32_t>(value));
         }
     }
+}
+
+void write_body(ByteWriter& out, const Control& control) {
+    out.write(std::to_underlying(control.action));
+    out.write(control.amount);
+}
+
+void write_body(ByteWriter& out, const Controlled& controlled) {
+    write_clock(out, controlled.clock);
+    write_text(out, controlled.error);
 }
 
 std::string read_text(ValueReader& in) {
@@ -105,6 +134,21 @@ std::uint32_t read_count(ValueReader& in, std::size_t smallest) {
     return count;
 }
 
+bool read_flag(ValueReader& in) {
+    const auto flag = in.integer<std::uint8_t>();
+    if (flag > 1) {
+        in.fail(Error{.code = ErrorCode::Parse, .message = std::format("{} isn't a flag", flag)});
+    }
+    return flag == 1;
+}
+
+Clock read_clock(ValueReader& in) {
+    Clock clock;
+    clock.paused = read_flag(in);
+    clock.scale = in.integer<std::uint32_t>();
+    return clock;
+}
+
 Hello read_hello(ValueReader& in) {
     return Hello{.version = in.integer<std::uint16_t>()};
 }
@@ -121,6 +165,7 @@ Welcome read_welcome(ValueReader& in) {
         std::string name = read_text(in);
         welcome.layers.push_back(LayerInfo{.name = std::move(name), .unit = read_text(in)});
     }
+    welcome.controllable = read_flag(in);
     return welcome;
 }
 
@@ -142,6 +187,7 @@ Layers read_layers(ValueReader& in) {
     Layers layers;
     layers.time =
         GameTime{GameDuration{static_cast<GameDuration::rep>(in.integer<std::uint64_t>())}};
+    layers.clock = read_clock(in);
     const std::uint32_t count = read_count(in, sizeof(std::uint16_t) + sizeof(std::uint32_t));
     layers.layers.reserve(count);
     for (std::uint32_t index = 0; index < count && in.ok(); ++index) {
@@ -153,6 +199,21 @@ Layers read_layers(ValueReader& in) {
         layers.layers.push_back(std::move(layer));
     }
     return layers;
+}
+
+Control read_control(ValueReader& in) {
+    const auto action = in.integer<std::uint8_t>();
+    if (action < std::to_underlying(Action::Pause) ||
+        action > std::to_underlying(Action::RealTime)) {
+        in.fail(
+            Error{.code = ErrorCode::Parse, .message = std::format("unknown action {}", action)});
+    }
+    return Control{.action = static_cast<Action>(action), .amount = in.integer<std::uint32_t>()};
+}
+
+Controlled read_controlled(ValueReader& in) {
+    const Clock clock = read_clock(in);
+    return Controlled{.clock = clock, .error = read_text(in)};
 }
 
 Result<Message> decode(Kind kind, std::span<const std::byte> payload) {
@@ -173,6 +234,12 @@ Result<Message> decode(Kind kind, std::span<const std::byte> payload) {
         break;
     case Kind::Layers:
         message = read_layers(in);
+        break;
+    case Kind::Control:
+        message = read_control(in);
+        break;
+    case Kind::Controlled:
+        message = read_controlled(in);
         break;
     default:
         return make_error(ErrorCode::Parse,

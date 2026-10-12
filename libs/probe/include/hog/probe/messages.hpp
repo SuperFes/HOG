@@ -15,7 +15,7 @@
 // u32 payload length, a u8 kind, then the payload, little-endian throughout.
 namespace hog::probe {
 
-inline constexpr std::uint16_t protocol_version = 1;
+inline constexpr std::uint16_t protocol_version = 2;
 // Large enough for every layer of a level 7 grid; anything bigger is a broken or hostile peer.
 inline constexpr std::uint32_t max_payload = 64U << 20U;
 
@@ -35,6 +35,14 @@ struct Layer {
     friend bool operator==(const Layer&, const Layer&) = default;
 };
 
+// How the server's clock is running.
+struct Clock {
+    bool paused = false;
+    std::uint32_t scale = 1; // game seconds per real second
+
+    friend bool operator==(const Clock&, const Clock&) = default;
+};
+
 // Tool to server, first: the protocol it speaks.
 struct Hello {
     std::uint16_t version = protocol_version;
@@ -49,6 +57,7 @@ struct Welcome {
     std::uint8_t level = 0; // of the cell grid every layer is on
     double planet_radius = 0.0;
     std::vector<LayerInfo> layers;
+    bool controllable = false; // whether tools may change the clock
 
     friend bool operator==(const Welcome&, const Welcome&) = default;
 };
@@ -70,12 +79,37 @@ struct Fetch {
 // Server to tool, answering Fetch: the layers as of a game time, leaving out names it doesn't know.
 struct Layers {
     GameTime time;
+    Clock clock;
     std::vector<Layer> layers;
 
     friend bool operator==(const Layers&, const Layers&) = default;
 };
 
-using Message = std::variant<Hello, Welcome, Refused, Fetch, Layers>;
+enum class Action : std::uint8_t {
+    Pause = 1,
+    Resume = 2,
+    Step = 3,     // `amount` ticks, while paused
+    Speed = 4,    // to `amount` game seconds per real second
+    RealTime = 5, // catch up to real time, if behind it
+};
+
+// Tool to server: change how the clock runs, if the server allows it.
+struct Control {
+    Action action = Action::Pause;
+    std::uint32_t amount = 0;
+
+    friend bool operator==(const Control&, const Control&) = default;
+};
+
+// Server to tool, answering Control: the clock afterwards, and why not if it didn't change.
+struct Controlled {
+    Clock clock;
+    std::string error;
+
+    friend bool operator==(const Controlled&, const Controlled&) = default;
+};
+
+using Message = std::variant<Hello, Welcome, Refused, Fetch, Layers, Control, Controlled>;
 
 // The whole frame for a message.
 [[nodiscard]] std::vector<std::byte> encode(const Message& message);

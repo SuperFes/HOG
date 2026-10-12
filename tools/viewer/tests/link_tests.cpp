@@ -46,6 +46,7 @@ public:
                 service_->serve([this](const probe::Fetch& fetch) {
                     const auto answered = static_cast<float>(++answered_);
                     probe::Layers layers{.time = GameTime{std::chrono::seconds{answered_}},
+                                         .clock = {},
                                          .layers = {}};
                     for (const std::string& name : fetch.names) {
                         layers.layers.push_back(probe::Layer{
