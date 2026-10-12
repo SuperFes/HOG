@@ -117,7 +117,7 @@ inline std::optional<planet::Biome> biome_named(std::string_view name) {
 }
 
 inline void per_biome(Table& parent, std::string_view key, double high,
-                      std::array<double, planet::biome_count>& values) {
+                      std::array<double, planet::biome_count>& values, double low = 0.0) {
     Table table = parent.child(key);
     if (table.get() == nullptr) {
         return;
@@ -128,7 +128,7 @@ inline void per_biome(Table& parent, std::string_view key, double high,
             table.fail(std::format("unknown biome {}", table.where(name.str())));
             continue;
         }
-        table.number(node, table.where(name.str()), 0.0, high,
+        table.number(node, table.where(name.str()), low, high,
                      values.at(static_cast<std::size_t>(*biome)));
     }
 }

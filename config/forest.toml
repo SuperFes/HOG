@@ -1,0 +1,48 @@
+# Plants for the development server: how much each biome holds, how fast it grows back, and how
+# it burns.
+[growth]
+seeds = 0.02
+cold = 0
+warm = 15
+wet = 0.5
+
+# kg per m² of living plants, fully grown.
+[growth.capacity]
+beach = 0.1
+tundra = 0.3
+boreal_forest = 10
+temperate_forest = 20
+grassland = 0.5
+shrubland = 2
+desert = 0.1
+savanna = 3
+tropical_rainforest = 30
+alpine = 0.3
+
+# Years to grow back most of the way after burning, in good weather.
+[growth.years]
+beach = 2
+tundra = 10
+boreal_forest = 80
+temperate_forest = 60
+grassland = 1
+shrubland = 8
+desert = 5
+savanna = 5
+tropical_rainforest = 40
+alpine = 10
+
+[dryness]
+demand = 0.15
+climate = 0.5
+
+[fire]
+damp = 0.4
+parched = 0.8
+fuel = 0.5
+lightning = 0.05
+spread = 2
+wind = 0.15
+burn_days = 2
+douse = 5
+out = 0.05
