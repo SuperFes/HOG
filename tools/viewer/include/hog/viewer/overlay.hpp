@@ -5,6 +5,7 @@
 #include <hog/mapgen/render.hpp>
 #include <hog/sim/cell_grid.hpp>
 #include <hog/viewer/frame.hpp>
+#include <hog/viewer/map_view.hpp>
 
 #include <array>
 #include <cstdint>
@@ -54,12 +55,12 @@ struct Legend {
 // What the map shows where its layers are missing.
 inline constexpr mapgen::Rgb missing_colour{90, 90, 90};
 
-// The whole planet, latitude down and longitude across, twice as wide as it is tall. Fields are
-// smoothed between cells; biomes and fires are shown cell by cell. Precondition: the grid is at
-// the frame's level.
+// The shown part of the map, latitude down and longitude across, twice as wide as it is tall.
+// Fields are smoothed between cells; biomes and fires are shown cell by cell. Precondition: the
+// grid is at the frame's level.
 [[nodiscard]] mapgen::Image render_overlay(const sim::CellGrid& grid, const Frame& frame,
-                                           Overlay overlay, std::string_view species, int width,
-                                           jobs::JobSystem& jobs);
+                                           Overlay overlay, std::string_view species,
+                                           const MapRect& shown, int width, jobs::JobSystem& jobs);
 
 // Pale lows through white to dark red highs, in hPa.
 [[nodiscard]] mapgen::Rgb pressure_colour(double pressure) noexcept;

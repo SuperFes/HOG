@@ -8,12 +8,19 @@ namespace hog::viewer {
 struct MapRect {
     DVec2 low{0.0, 0.0};
     DVec2 high{1.0, 1.0};
+
+    friend bool operator==(const MapRect&, const MapRect&) = default;
 };
 
 // The map point under a point of the shown area, which also runs 0 to 1 across and down.
 [[nodiscard]] DVec2 map_point(const MapRect& shown, DVec2 at) noexcept;
 // The other way: where a map point is in the shown area, outside 0 to 1 when it's off screen.
 [[nodiscard]] DVec2 shown_point(const MapRect& shown, DVec2 point) noexcept;
+
+// The map point under the centre of a pixel of an image of the shown area.
+[[nodiscard]] DVec2 pixel_point(const MapRect& shown, int width, int height, int x, int y) noexcept;
+// The unit direction from the planet's centre under a map point: latitude down, longitude across.
+[[nodiscard]] DVec3 map_direction(DVec2 point) noexcept;
 
 // Zooming and panning, never past the edges of the map.
 class MapView {

@@ -4,6 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 using hog::DVec2;
+using hog::DVec3;
 using hog::viewer::MapView;
 
 namespace {
@@ -11,6 +12,12 @@ namespace {
 void check_near(DVec2 actual, DVec2 expected) {
     CHECK(actual.x == Catch::Approx(expected.x).margin(1e-12));
     CHECK(actual.y == Catch::Approx(expected.y).margin(1e-12));
+}
+
+void check_near(DVec3 actual, DVec3 expected) {
+    CHECK(actual.x == Catch::Approx(expected.x).margin(1e-12));
+    CHECK(actual.y == Catch::Approx(expected.y).margin(1e-12));
+    CHECK(actual.z == Catch::Approx(expected.z).margin(1e-12));
 }
 
 } // namespace
@@ -57,4 +64,17 @@ TEST_CASE("panning moves the map with the cursor", "[viewer][map]") {
     check_near(view.shown().low, before - DVec2{0.05, 0.0});
     view.reset();
     CHECK(view.zoom() == 1.0);
+}
+
+TEST_CASE("pixels sample the middle of their share of the shown area", "[viewer][map]") {
+    const hog::viewer::MapRect shown{.low = {0.25, 0.5}, .high = {0.75, 0.75}};
+    check_near(hog::viewer::pixel_point(shown, 4, 2, 0, 0), DVec2{0.3125, 0.5625});
+    check_near(hog::viewer::pixel_point(shown, 4, 2, 3, 1), DVec2{0.6875, 0.6875});
+}
+
+TEST_CASE("map points face out from the planet by latitude and longitude", "[viewer][map]") {
+    check_near(hog::viewer::map_direction(DVec2{0.5, 0.5}), DVec3{1.0, 0.0, 0.0});
+    check_near(hog::viewer::map_direction(DVec2{0.75, 0.5}), DVec3{0.0, 1.0, 0.0});
+    check_near(hog::viewer::map_direction(DVec2{0.3, 0.0}), DVec3{0.0, 0.0, 1.0});
+    check_near(hog::viewer::map_direction(DVec2{0.0, 0.5}), DVec3{-1.0, 0.0, 0.0});
 }

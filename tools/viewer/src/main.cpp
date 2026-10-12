@@ -139,16 +139,19 @@ struct View {
     bool daylight = true;
     Texture texture;
     std::optional<sim::CellGrid> grid;
-    std::optional<DVec2> sun; // where it's overhead on the map, when daylight is shown
-    std::uint64_t drawn = 0;  // the link's frame count when last drawn
-    bool stale = true;        // the choices changed since
+    std::optional<DVec2> sun;    // where it's overhead on the map, when daylight is shown
+    std::uint64_t drawn = 0;     // the link's frame count when last drawn
+    viewer::MapRect drawn_shown; // the part of the map the texture holds
+    bool stale = true;           // the choices changed since
 };
 
 // Draws the newest frame into the map texture, when there's something new to draw.
 void redraw(View& view, const viewer::Link& link, SDL_Renderer* renderer, int width,
             jobs::JobSystem& jobs) {
     const std::shared_ptr<const viewer::Frame> frame = link.frame();
-    if (frame == nullptr || (!view.stale && link.frames() == view.drawn)) {
+    const viewer::MapRect shown = view.map.shown();
+    if (frame == nullptr ||
+        (!view.stale && link.frames() == view.drawn && shown == view.drawn_shown)) {
         return;
     }
     const int level = frame->welcome().level;
@@ -156,10 +159,10 @@ void redraw(View& view, const viewer::Link& link, SDL_Renderer* renderer, int wi
         view.grid.emplace(level);
     }
     mapgen::Image image =
-        viewer::render_overlay(*view.grid, *frame, view.overlay, view.species, width, jobs);
+        viewer::render_overlay(*view.grid, *frame, view.overlay, view.species, shown, width, jobs);
     view.sun.reset();
     if (const auto calendar = viewer::calendar_of(frame->welcome()); calendar && view.daylight) {
-        viewer::shade_night(image, *calendar, frame->time(), jobs);
+        viewer::shade_night(image, shown, *calendar, frame->time(), jobs);
         view.sun = viewer::subsolar_point(*calendar, frame->time());
     }
     if (view.texture == nullptr) {
@@ -170,6 +173,7 @@ void redraw(View& view, const viewer::Link& link, SDL_Renderer* renderer, int wi
         SDL_UpdateTexture(view.texture.get(), nullptr, image.pixels.data(), 3 * image.width);
     }
     view.drawn = link.frames();
+    view.drawn_shown = shown;
     view.stale = false;
 }
 
@@ -305,10 +309,13 @@ void map(View& view) {
         draw->AddRectFilled(corner, far, ImGui::GetColorU32(ImGuiCol_FrameBg));
         return;
     }
+    // The texture can be a frame behind the view; until it's redrawn, show its part of what's held.
     const viewer::MapRect shown = view.map.shown();
+    const DVec2 low = viewer::shown_point(view.drawn_shown, shown.low);
+    const DVec2 high = viewer::shown_point(view.drawn_shown, shown.high);
     draw->AddImage(texture_ref(view.texture.get()), corner, far,
-                   ImVec2{static_cast<float>(shown.low.x), static_cast<float>(shown.low.y)},
-                   ImVec2{static_cast<float>(shown.high.x), static_cast<float>(shown.high.y)});
+                   ImVec2{static_cast<float>(low.x), static_cast<float>(low.y)},
+                   ImVec2{static_cast<float>(high.x), static_cast<float>(high.y)});
     if (view.sun) {
         const DVec2 at = viewer::shown_point(shown, *view.sun);
         const ImVec2 centre{corner.x + (static_cast<float>(at.x) * size.x),

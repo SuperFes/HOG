@@ -6,6 +6,7 @@
 #include <hog/mapgen/render.hpp>
 #include <hog/probe/messages.hpp>
 #include <hog/sim/calendar.hpp>
+#include <hog/viewer/map_view.hpp>
 
 #include <numbers>
 #include <optional>
@@ -27,8 +28,8 @@ inline constexpr double night_light = 0.4;
 // Where the sun is overhead on the planet map, 0 to 1 across and down.
 [[nodiscard]] DVec2 subsolar_point(const sim::Calendar& calendar, GameTime time) noexcept;
 
-// Darkens the night side of a planet map as of `time`.
-void shade_night(mapgen::Image& image, const sim::Calendar& calendar, GameTime time,
-                 jobs::JobSystem& jobs);
+// Darkens the night side of an image of the shown part of the map, as of `time`.
+void shade_night(mapgen::Image& image, const MapRect& shown, const sim::Calendar& calendar,
+                 GameTime time, jobs::JobSystem& jobs);
 
 } // namespace hog::viewer

@@ -1,6 +1,8 @@
 #include <hog/viewer/map_view.hpp>
 
 #include <algorithm>
+#include <cmath>
+#include <numbers>
 
 namespace hog::viewer {
 
@@ -10,6 +12,17 @@ DVec2 map_point(const MapRect& shown, DVec2 at) noexcept {
 
 DVec2 shown_point(const MapRect& shown, DVec2 point) noexcept {
     return (point - shown.low) / (shown.high - shown.low);
+}
+
+DVec2 pixel_point(const MapRect& shown, int width, int height, int x, int y) noexcept {
+    return map_point(shown, DVec2{(x + 0.5) / width, (y + 0.5) / height});
+}
+
+DVec3 map_direction(DVec2 point) noexcept {
+    const double latitude = (0.5 - point.y) * std::numbers::pi;
+    const double longitude = (point.x - 0.5) * 2.0 * std::numbers::pi;
+    return {std::cos(latitude) * std::cos(longitude), std::cos(latitude) * std::sin(longitude),
+            std::sin(latitude)};
 }
 
 MapRect MapView::shown() const noexcept {

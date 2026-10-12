@@ -89,7 +89,8 @@ TEST_CASE("night darkens the far side of the map", "[viewer][daylight]") {
                              .height = width / 2,
                              .pixels = std::vector<std::uint8_t>(3 * width * width / 2, grey)};
     hog::jobs::JobSystem jobs{2};
-    hog::viewer::shade_night(image, Calendar{hours{4}, 23.44}, equinox_noon(), jobs);
+    hog::viewer::shade_night(image, hog::viewer::MapRect{}, Calendar{hours{4}, 23.44},
+                             equinox_noon(), jobs);
 
     const auto night = static_cast<std::uint8_t>(std::lround(grey * hog::viewer::night_light));
     // Noon at the centre, midnight at the edges, and dawn and dusk a quarter of the way in.
@@ -99,4 +100,20 @@ TEST_CASE("night darkens the far side of the map", "[viewer][daylight]") {
     const std::uint8_t dusk = image.at((width / 4) - 1, width / 4)[0];
     CHECK(dusk > night);
     CHECK(dusk < grey);
+}
+
+TEST_CASE("night is shaded over the shown part of the map", "[viewer][daylight]") {
+    constexpr int width = 64;
+    constexpr std::uint8_t grey = 200;
+    hog::mapgen::Image image{.width = width,
+                             .height = width / 2,
+                             .pixels = std::vector<std::uint8_t>(3 * width * width / 2, grey)};
+    hog::jobs::JobSystem jobs{2};
+    // The western half, from midnight at its left edge to noon at its right.
+    const hog::viewer::MapRect west{.low = {0.0, 0.0}, .high = {0.5, 1.0}};
+    hog::viewer::shade_night(image, west, Calendar{hours{4}, 23.44}, equinox_noon(), jobs);
+
+    const auto night = static_cast<std::uint8_t>(std::lround(grey * hog::viewer::night_light));
+    CHECK(image.at(0, width / 4) == hog::mapgen::Rgb{night, night, night});
+    CHECK(image.at(width - 1, width / 4) == hog::mapgen::Rgb{grey, grey, grey});
 }

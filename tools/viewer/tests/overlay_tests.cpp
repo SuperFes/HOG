@@ -40,9 +40,10 @@ struct Planet {
                      grid.size()};
     }
 
-    [[nodiscard]] mapgen::Image render(Overlay overlay, const std::string& species = "") const {
+    [[nodiscard]] mapgen::Image render(Overlay overlay, const std::string& species = "",
+                                       const viewer::MapRect& shown = {}) const {
         jobs::JobSystem jobs{2};
-        return viewer::render_overlay(grid, frame(), overlay, species, width, jobs);
+        return viewer::render_overlay(grid, frame(), overlay, species, shown, width, jobs);
     }
 
     // The cell under each pixel, row by row.
@@ -132,6 +133,34 @@ TEST_CASE("biomes are shown cell by cell", "[viewer][overlay]") {
                                                                      : planet::Biome::Desert));
     }
     CHECK(std::ranges::count(cells, 7U) > 0);
+}
+
+TEST_CASE("a zoomed overlay draws only the shown part, at full size", "[viewer][overlay]") {
+    Planet planet = land();
+    planet.set("planet/biome", static_cast<float>(planet::Biome::Desert));
+    planet.values("planet/biome")[7] = static_cast<float>(planet::Biome::Tundra);
+    const Rgb tundra = mapgen::biome_colour(planet::Biome::Tundra);
+    const auto whole = pixels(planet.render(Overlay::Biome));
+    const auto first = static_cast<int>(std::ranges::find(whole, tundra) - whole.begin());
+    REQUIRE(first < static_cast<int>(whole.size()));
+
+    viewer::MapView view;
+    view.zoom_by(4.0, viewer::pixel_point(viewer::MapRect{}, width, width / 2, first % width,
+                                          first / width));
+    const mapgen::Image image = planet.render(Overlay::Biome, "", view.shown());
+    CHECK(image.width == width);
+    CHECK(image.height == width / 2);
+    for (int y = 0; y < image.height; ++y) {
+        for (int x = 0; x < image.width; ++x) {
+            const DVec3 direction = viewer::map_direction(
+                viewer::pixel_point(view.shown(), image.width, image.height, x, y));
+            const bool in_tundra = planet.grid.index(planet::cell_at(direction, level)) == 7;
+            CHECK(image.at(x, y) ==
+                  (in_tundra ? tundra : mapgen::biome_colour(planet::Biome::Desert)));
+        }
+    }
+    // The cell spans more pixels than it did on the whole map.
+    CHECK(std::ranges::count(pixels(image), tundra) > std::ranges::count(whole, tundra));
 }
 
 TEST_CASE("plants show by how grown they are, and fires on top", "[viewer][overlay]") {

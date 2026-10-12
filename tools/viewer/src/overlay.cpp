@@ -341,9 +341,9 @@ Rgb fire_colour(Rgb plants, double fire) noexcept {
 }
 
 mapgen::Image render_overlay(const sim::CellGrid& grid, const Frame& frame, Overlay overlay,
-                             std::string_view species, int width, jobs::JobSystem& jobs) {
-    const mapgen::View view = mapgen::PlanetView{};
-    const mapgen::ImageSize size = mapgen::image_size(view, width);
+                             std::string_view species, const MapRect& shown, int width,
+                             jobs::JobSystem& jobs) {
+    const mapgen::ImageSize size = mapgen::image_size(mapgen::PlanetView{}, width);
     mapgen::Image image{.width = size.width,
                         .height = size.height,
                         .pixels =
@@ -362,9 +362,9 @@ mapgen::Image render_overlay(const sim::CellGrid& grid, const Frame& frame, Over
             for (std::uint32_t row = rows.begin; row < rows.end; ++row) {
                 const auto y = static_cast<int>(row);
                 for (int x = 0; x < size.width; ++x) {
-                    // The radius only matters for regional views.
-                    const Rgb colour = colour_at(sampler, overlay, animals, most,
-                                                 mapgen::pixel_direction(view, size, x, y, 1.0));
+                    const Rgb colour =
+                        colour_at(sampler, overlay, animals, most,
+                                  map_direction(pixel_point(shown, size.width, size.height, x, y)));
                     const auto offset =
                         3 * ((static_cast<std::size_t>(y) * static_cast<std::size_t>(size.width)) +
                              static_cast<std::size_t>(x));
