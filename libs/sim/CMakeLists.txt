@@ -8,7 +8,11 @@ add_library(hog_sim
     src/weather_save.cpp
     src/weather_systems.cpp
     src/weather_water.cpp
-    src/weather_wind.cpp)
+    src/weather_wind.cpp
+    src/wildlife.cpp
+    src/wildlife_food.cpp
+    src/wildlife_life.cpp
+    src/wildlife_motion.cpp)
 add_library(hog::sim ALIAS hog_sim)
 
 target_include_directories(hog_sim PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -19,4 +23,5 @@ hog_add_tests(hog_sim
     tests/calendar_tests.cpp
     tests/cell_grid_tests.cpp
     tests/ecology_tests.cpp
-    tests/weather_tests.cpp)
+    tests/weather_tests.cpp
+    tests/wildlife_tests.cpp)

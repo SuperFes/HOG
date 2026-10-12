@@ -1,6 +1,7 @@
 #pragma once
 
-#include <hog/jobs/job_system.hpp>
+#include "cells.hpp"
+
 #include <hog/sim/weather.hpp>
 
 #include <cmath>
@@ -95,22 +96,5 @@ void fronts(const StepContext& step, WeatherFields& fields, std::uint32_t index)
 
 // How fast the air rises where the winds around the cell converge or climb the ground.
 void lift(const StepContext& step, WeatherFields& fields, std::uint32_t index);
-
-// Runs body(index) for every cell, across the jobs when given.
-template <typename F>
-void for_cells(jobs::JobSystem* jobs, std::uint32_t count, F body) {
-    constexpr std::uint32_t cells_per_job = 256;
-    if (jobs == nullptr) {
-        for (std::uint32_t index = 0; index < count; ++index) {
-            body(index);
-        }
-        return;
-    }
-    jobs->parallel_for(count, cells_per_job, [&](jobs::Range range, std::uint32_t /*thread*/) {
-        for (std::uint32_t index = range.begin; index < range.end; ++index) {
-            body(index);
-        }
-    });
-}
 
 } // namespace hog::sim::detail

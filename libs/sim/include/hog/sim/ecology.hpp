@@ -67,16 +67,16 @@ struct Species {
     double births = 1.0;   // young per animal per year, well fed
     Breeding breeding{};
     double lifespan = 10.0; // years
-    double starving = 0.05; // share dying per day with nothing to eat
+    double starving = 0.05; // share dying per day with nothing to eat, falling fast as it eats
     // °C of recent temperature it lives in comfortably.
     double cold = -30.0;
     double heat = 40.0;
     double exposure = 0.005; // share dying per day per °C outside that
     // Sleeps, neither eating nor breeding nor moving, while the recent temperature is below this.
-    std::optional<double> dormant_below;
-    double dispersal = 0.01; // share wandering off to neighbouring cells per day
-    double drift = 0.1;      // share per day heading for better ground
-    double leftovers = 0.3;  // share of each kill left for scavengers
+    std::optional<double> dormant_below{};
+    double wander = 0.2;    // km per day it strays at random
+    double speed = 2.0;     // km per day it heads for better ground at
+    double leftovers = 0.3; // share of each kill left for scavengers
     Cycle cycle{};
 };
 
@@ -115,8 +115,8 @@ struct Ecology {
 //     comfort = [-25, 35]
 //     exposure = 0.005
 //     dormant_below = -10
-//     dispersal = 0.01
-//     drift = 0.1
+//     wander_km = 0.2             # per day
+//     speed_km = 2                # per day
 //     leftovers = 0.3
 //     cycle = { years = 13, boom = 4, width_years = 1, region_level = 2 }
 //

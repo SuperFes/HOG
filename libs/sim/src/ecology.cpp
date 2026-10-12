@@ -214,7 +214,7 @@ Species parse_species(Table table, Diet& diet) {
     table.only({"name"sv,          "moves"sv,          "mass"sv,     "appetite"sv,  "half_fed"sv,
                 "diet"sv,          "habitat"sv,        "density"sv,  "crowded"sv,   "births"sv,
                 "breeding"sv,      "lifespan_years"sv, "starving"sv, "comfort"sv,   "exposure"sv,
-                "dormant_below"sv, "dispersal"sv,      "drift"sv,    "leftovers"sv, "cycle"sv});
+                "dormant_below"sv, "wander_km"sv,      "speed_km"sv, "leftovers"sv, "cycle"sv});
     Species species;
     const toml::node* name = table.find("name");
     if (name == nullptr || !name->is_string() || name->as_string()->get().empty()) {
@@ -234,8 +234,8 @@ Species parse_species(Table table, Diet& diet) {
     table.number("starving", 0.0, 1.0, species.starving);
     parse_comfort(table, species);
     table.number("exposure", 0.0, 1.0, species.exposure);
-    table.number("dispersal", 0.0, 1.0, species.dispersal);
-    table.number("drift", 0.0, 1.0, species.drift);
+    table.number("wander_km", 0.0, 1e4, species.wander);
+    table.number("speed_km", 0.0, 1e4, species.speed);
     table.number("leftovers", 0.0, 0.99, species.leftovers);
     parse_timing(table, species);
 

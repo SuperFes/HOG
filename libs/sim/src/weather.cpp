@@ -20,15 +20,6 @@ float sea_wetness(double temperature) {
     return temperature < freezing ? 0.2F : 1.0F;
 }
 
-GameTime last_step(GameTime now, GameDuration step) {
-    const auto since = now.time_since_epoch();
-    auto steps = since / step;
-    if (since % step < GameDuration::zero()) {
-        --steps;
-    }
-    return GameTime{steps * step};
-}
-
 GameDuration positive(GameDuration duration) {
     return duration > GameDuration::zero() ? duration : GameDuration{1};
 }
@@ -73,7 +64,7 @@ std::vector<Ground> ground_for(const CellGrid& grid, const planet::World& world)
 Weather::Weather(const WeatherConfig& config, std::vector<Ground> ground, GameTime now)
     : config_(config), grid_(config.level), ground_(std::move(ground)),
       calendar_(positive(config.day), config.axial_tilt), fields_(grid_.size()),
-      before_(grid_.size()), time_(last_step(now, positive(config.step))) {
+      before_(grid_.size()), time_(detail::last_step(now, positive(config.step))) {
     HOG_ASSERT(config.step > GameDuration::zero(), "weather step must be positive");
     HOG_ASSERT(config.day > GameDuration::zero(), "weather day must be positive");
     HOG_ASSERT(ground_.size() == grid_.size(), "need ground for every cell");
