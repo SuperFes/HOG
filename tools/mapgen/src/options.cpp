@@ -104,6 +104,8 @@ template <typename T>
 
 constexpr int max_weather_days = 366;
 constexpr int max_frame_hours = 24 * 30;
+constexpr int max_wildlife_years = 100;
+constexpr int max_frame_days = 366;
 
 // Options that take a value.
 using Handler = Result<void> (*)(Options&, std::string_view);
@@ -205,6 +207,31 @@ constexpr std::array flags{
              options.weather.start = *date;
              return {};
          }},
+    Flag{.name = "--wildlife",
+         .handler = [](Options& options, std::string_view value) -> Result<void> {
+             const auto years = parse_integer<int>(value);
+             if (!years || *years < 1 || *years > max_wildlife_years) {
+                 return invalid(
+                     std::format("--wildlife {} is not 1 to {} years", value, max_wildlife_years));
+             }
+             options.wildlife.years = *years;
+             return {};
+         }},
+    Flag{.name = "--every-days",
+         .handler = [](Options& options, std::string_view value) -> Result<void> {
+             const auto days = parse_integer<int>(value);
+             if (!days || *days < 1 || *days > max_frame_days) {
+                 return invalid(
+                     std::format("--every-days {} is not 1 to {} days", value, max_frame_days));
+             }
+             options.wildlife.every = *days;
+             return {};
+         }},
+    Flag{.name = "--ecology",
+         .handler = [](Options& options, std::string_view value) -> Result<void> {
+             options.wildlife.ecology = std::filesystem::path{value};
+             return {};
+         }},
     Flag{.name = "--cell-km",
          .handler = [](Options& options, std::string_view value) -> Result<void> {
              const auto km = parse_double(value);
@@ -252,9 +279,14 @@ Writes PNG maps of a generated planet, one per layer, named <view>-<layer>.png.
   --weather DAYS       instead of the layers, follows the weather for DAYS days and
                        writes sky and air maps, named <view>-weather-<time>-<map>.png
   --every HOURS        hours between weather maps (default 6)
-  --date YYYY-MM-DD    when the weather maps start (default 2026-01-01), after ten days
-                       for the weather to settle
-  --cell-km KM         weather grid cells at most KM across (default 6)
+  --date YYYY-MM-DD    when the weather or wildlife maps start (default 2026-01-01),
+                       after ten days for the weather to settle
+  --wildlife YEARS     instead of the layers, follows the wildlife with its weather for
+                       YEARS years and writes a map per species, named
+                       <view>-wildlife-<time>-<species>.png, and totals in wildlife.csv
+  --every-days DAYS    days between wildlife maps and totals (default 30)
+  --ecology PATH       species and forage (default config/ecology.toml)
+  --cell-km KM         weather and wildlife grid cells at most KM across (default 6)
   --help               shows this
 )";
 }
@@ -286,6 +318,9 @@ Result<Options> parse_options(std::span<const std::string_view> arguments) {
         if (auto handled = flag->handler(options, arguments[++index]); !handled) {
             return std::unexpected(std::move(handled.error()));
         }
+    }
+    if (options.weather.days > 0 && options.wildlife.years > 0) {
+        return invalid("--weather and --wildlife can't be used together");
     }
     if (options.layers.empty()) {
         for (int layer = 0; layer < layer_count; ++layer) {

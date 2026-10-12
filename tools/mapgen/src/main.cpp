@@ -2,11 +2,14 @@
 #include <hog/mapgen/options.hpp>
 #include <hog/mapgen/render.hpp>
 #include <hog/mapgen/weather_render.hpp>
+#include <hog/mapgen/wildlife_render.hpp>
 #include <hog/planet/geology.hpp>
 #include <hog/planet/planet_config.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/world.hpp>
+#include <hog/sim/ecology.hpp>
 #include <hog/sim/weather.hpp>
+#include <hog/sim/wildlife.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -14,6 +17,7 @@
 #include <exception>
 #include <filesystem>
 #include <format>
+#include <fstream>
 #include <iostream>
 #include <span>
 #include <string_view>
@@ -34,16 +38,21 @@ int write(const std::filesystem::path& path, const hog::mapgen::Image& image) {
     return EXIT_SUCCESS;
 }
 
-int render_weather(const hog::mapgen::Options& options, const hog::planet::PlanetConfig& config,
-                   hog::jobs::JobSystem& jobs) {
-    const hog::planet::World world{config};
-    const hog::sim::WeatherConfig weather_config{
+hog::sim::WeatherConfig weather_for(const hog::mapgen::Options& options,
+                                    const hog::planet::PlanetConfig& config) {
+    return hog::sim::WeatherConfig{
         .level = std::min(hog::planet::level_for(options.weather.cell_km * 1'000.0, config.radius),
                           hog::sim::CellGrid::max_level),
         .axial_tilt = config.axial_tilt,
         .planet_radius = config.radius,
         .seed = config.seed,
     };
+}
+
+int render_weather(const hog::mapgen::Options& options, const hog::planet::PlanetConfig& config,
+                   hog::jobs::JobSystem& jobs) {
+    const hog::planet::World world{config};
+    const hog::sim::WeatherConfig weather_config = weather_for(options, config);
     const hog::GameTime start{options.weather.start.time_since_epoch()};
     hog::sim::Weather weather{weather_config,
                               hog::sim::ground_for(hog::sim::CellGrid{weather_config.level}, world),
@@ -62,6 +71,57 @@ int render_weather(const hog::mapgen::Options& options, const hog::planet::Plane
             }
         }
     }
+    return EXIT_SUCCESS;
+}
+
+// Steps the weather and wildlife together, as the server does, writing maps and totals as it goes.
+int render_wildlife(const hog::mapgen::Options& options, const hog::planet::PlanetConfig& config,
+                    hog::jobs::JobSystem& jobs) {
+    auto ecology = hog::sim::load_ecology(options.wildlife.ecology);
+    if (!ecology) {
+        std::cerr << std::format("hog-mapgen: {}: {}\n", options.wildlife.ecology.string(),
+                                 ecology.error());
+        return EXIT_FAILURE;
+    }
+    const hog::planet::World world{config};
+    const hog::sim::WeatherConfig weather_config = weather_for(options, config);
+    const hog::sim::CellGrid grid{weather_config.level};
+    const hog::GameTime start{options.weather.start.time_since_epoch()};
+    hog::sim::Weather weather{weather_config, hog::sim::ground_for(grid, world), start - warm_up};
+    weather.advance_to(start, jobs);
+    hog::sim::WildlifeConfig wildlife_config{
+        .level = weather_config.level, .planet_radius = config.radius, .seed = config.seed};
+    wildlife_config.ecology = std::move(*ecology);
+    hog::sim::Wildlife wildlife{wildlife_config, hog::sim::habitat_for(grid, world), start};
+
+    const auto csv_path = options.output / "wildlife.csv";
+    std::ofstream csv{csv_path};
+    csv << hog::mapgen::wildlife_header(wildlife.config().ecology) << '\n';
+    const hog::GameTime end = start + std::chrono::days{365 * options.wildlife.years};
+    for (hog::GameTime time = start; time <= end;
+         time += std::chrono::days{options.wildlife.every}) {
+        while (wildlife.next_step() <= time) {
+            const hog::GameTime at = wildlife.next_step();
+            weather.advance_to(at, jobs);
+            wildlife.advance_to(at, hog::sim::conditions_of(weather), jobs);
+        }
+        csv << hog::mapgen::wildlife_row(wildlife) << '\n';
+        const auto& species = wildlife.config().ecology.species;
+        for (std::uint32_t kind = 0; kind < species.size(); ++kind) {
+            const auto image = hog::mapgen::render_wildlife(
+                world.geology(), wildlife, kind, config.radius, options.view, options.size, jobs);
+            const auto path = options.output / hog::mapgen::wildlife_file_name(
+                                                   options.view, species[kind].name, time);
+            if (write(path, image) != EXIT_SUCCESS) {
+                return EXIT_FAILURE;
+            }
+        }
+    }
+    if (!csv) {
+        std::cerr << std::format("hog-mapgen: writing {} failed\n", csv_path.string());
+        return EXIT_FAILURE;
+    }
+    std::cout << csv_path.string() << '\n';
     return EXIT_SUCCESS;
 }
 
@@ -95,6 +155,9 @@ int run(std::span<const std::string_view> arguments) {
     hog::jobs::JobSystem jobs;
     if (options->weather.days > 0) {
         return render_weather(*options, *config, jobs);
+    }
+    if (options->wildlife.years > 0) {
+        return render_wildlife(*options, *config, jobs);
     }
     const hog::planet::Geology geology{*config};
     for (const hog::mapgen::Layer layer : options->layers) {

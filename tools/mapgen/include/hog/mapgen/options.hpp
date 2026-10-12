@@ -65,6 +65,16 @@ struct WeatherFrames {
     friend bool operator==(const WeatherFrames&, const WeatherFrames&) = default;
 };
 
+// Wildlife maps: one per species every so often, with totals in a CSV. The weather frames' start
+// and grid apply to these too.
+struct WildlifeFrames {
+    int years = 0;  // how long to follow it; none when 0
+    int every = 30; // days between maps
+    std::filesystem::path ecology = "config/ecology.toml";
+
+    friend bool operator==(const WildlifeFrames&, const WildlifeFrames&) = default;
+};
+
 struct Options {
     std::filesystem::path config = "config/planet.toml";
     std::optional<std::uint64_t> seed;
@@ -73,6 +83,7 @@ struct Options {
     int size = 1'024;          // image width in pixels
     std::filesystem::path output = "maps";
     WeatherFrames weather;
+    WildlifeFrames wildlife;
     bool help = false;
 };
 
