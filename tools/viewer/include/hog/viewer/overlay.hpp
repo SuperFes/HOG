@@ -1,0 +1,59 @@
+#pragma once
+
+#include <hog/jobs/job_system.hpp>
+#include <hog/mapgen/colour.hpp>
+#include <hog/mapgen/render.hpp>
+#include <hog/sim/cell_grid.hpp>
+#include <hog/viewer/frame.hpp>
+
+#include <array>
+#include <cstdint>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace hog::viewer {
+
+enum class Overlay : std::uint8_t {
+    Terrain,     // elevation, with the ocean
+    Biome,       //
+    Temperature, // at the surface
+    Air,         // temperature, reddened along warm fronts and blued along cold ones
+    Sky,         // cloud, rain, snow, hail and storms over the ground
+    Pressure,    // at sea level
+    Dryness,     // of the ground
+    Plants,      // biomass as a share of what the ground holds
+    Fire,        // plants, with what's burning
+    Wildlife,    // one species, by density
+};
+
+inline constexpr std::array overlays{
+    Overlay::Terrain,  Overlay::Biome,   Overlay::Temperature, Overlay::Air,  Overlay::Sky,
+    Overlay::Pressure, Overlay::Dryness, Overlay::Plants,      Overlay::Fire, Overlay::Wildlife,
+};
+
+[[nodiscard]] std::string_view to_string(Overlay overlay) noexcept;
+
+// The layers an overlay draws, so a tool fetches only those. `species` names the wildlife shown.
+[[nodiscard]] std::vector<std::string> layers_for(Overlay overlay, std::string_view species);
+
+// What the map shows where its layers are missing.
+inline constexpr mapgen::Rgb missing_colour{90, 90, 90};
+
+// The whole planet, latitude down and longitude across, twice as wide as it is tall. Fields are
+// smoothed between cells; biomes and fires are shown cell by cell. Precondition: the grid is at
+// the frame's level.
+[[nodiscard]] mapgen::Image render_overlay(const sim::CellGrid& grid, const Frame& frame,
+                                           Overlay overlay, std::string_view species, int width,
+                                           jobs::JobSystem& jobs);
+
+// Pale lows through white to dark red highs, in hPa.
+[[nodiscard]] mapgen::Rgb pressure_colour(double pressure) noexcept;
+
+// Bare tan through grass and shrubs to dark mature forest, by biomass as a share of capacity.
+[[nodiscard]] mapgen::Rgb plant_colour(double share) noexcept;
+
+// Plants burning, brighter as the fire is stronger, from 0 to 1.
+[[nodiscard]] mapgen::Rgb fire_colour(mapgen::Rgb plants, double fire) noexcept;
+
+} // namespace hog::viewer
