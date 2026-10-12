@@ -105,6 +105,26 @@ TEST_CASE("every message survives a round trip", "[probe][messages]") {
                          .rock = {},
                          .deposit = {}};
     CHECK(round_trip(surface) == Message{surface});
+
+    const Inspect inspect{.latitude = -33.75, .longitude = 151.125};
+    CHECK(round_trip(inspect) == Message{inspect});
+    const Inspection inspection{
+        .inspect = inspect,
+        .time = GameTime{std::chrono::hours{30}},
+        .cell = 4'097,
+        .values = {12.5F, -0.25F, 1'013.0F},
+        .column = Column{.elevation = 240.5F,
+                         .biome = 7,
+                         .continental = true,
+                         .cover = 1,
+                         .cover_thickness = 2.5F,
+                         .sediment = 3,
+                         .sediment_thickness = 410.0F,
+                         .bedrock = 5,
+                         .seams = {Seam{.resource = 0, .top = 12.0F, .thickness = 1.5F},
+                                   Seam{.resource = 4, .top = 300.0F, .thickness = 0.25F}}}};
+    CHECK(round_trip(inspection) == Message{inspection});
+    CHECK(round_trip(Inspection{}) == Message{Inspection{}});
 }
 
 TEST_CASE("a frame is its payload length, kind and payload", "[probe][messages]") {
@@ -204,6 +224,24 @@ TEST_CASE("broken streams fail and stay failed", "[probe][messages]") {
                                   .biome = {0, 0, 0},
                                   .rock = {},
                                   .deposit = {}}));
+    }
+    SECTION("more seams than could fit") {
+        ByteWriter payload;
+        payload.write(std::uint64_t{0}); // latitude
+        payload.write(std::uint64_t{0}); // longitude
+        payload.write(std::uint64_t{0}); // time
+        payload.write(std::uint32_t{0}); // cell
+        payload.write(std::uint32_t{0}); // no values
+        payload.write(std::uint32_t{0}); // elevation
+        for (int field = 0; field < 3; ++field) {
+            payload.write(std::uint8_t{0}); // biome, continental, cover
+        }
+        payload.write(std::uint32_t{0});
+        payload.write(std::uint8_t{0});
+        payload.write(std::uint32_t{0});
+        payload.write(std::uint8_t{0});
+        payload.write(std::uint32_t{1'000});
+        reader.feed(frame(11, payload.bytes()));
     }
     SECTION("ground with rock it wasn't asked for") {
         reader.feed(encode(Ground{.survey = Survey{.width = 1, .height = 1},

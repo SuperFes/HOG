@@ -23,6 +23,8 @@ enum class Kind : std::uint8_t {
     Controlled = 7,
     Survey = 8,
     Ground = 9,
+    Inspect = 10,
+    Inspection = 11,
 };
 
 constexpr std::size_t header_size = sizeof(std::uint32_t) + sizeof(std::uint8_t);
@@ -53,6 +55,12 @@ constexpr Kind kind_of(const Survey& /*unused*/) noexcept {
 }
 constexpr Kind kind_of(const Ground& /*unused*/) noexcept {
     return Kind::Ground;
+}
+constexpr Kind kind_of(const Inspect& /*unused*/) noexcept {
+    return Kind::Inspect;
+}
+constexpr Kind kind_of(const Inspection& /*unused*/) noexcept {
+    return Kind::Inspection;
 }
 
 void write_text(ByteWriter& out, const std::string& text) {
@@ -152,6 +160,43 @@ void write_body(ByteWriter& out, const Ground& ground) {
     write_bytes(out, ground.biome);
     write_bytes(out, ground.rock);
     write_bytes(out, ground.deposit);
+}
+
+void write_body(ByteWriter& out, const Inspect& inspect) {
+    out.write(std::bit_cast<std::uint64_t>(inspect.latitude));
+    out.write(std::bit_cast<std::uint64_t>(inspect.longitude));
+}
+
+void write_single(ByteWriter& out, float value) {
+    out.write(std::bit_cast<std::uint32_t>(value));
+}
+
+void write_column(ByteWriter& out, const Column& column) {
+    write_single(out, column.elevation);
+    out.write(column.biome);
+    write_flag(out, column.continental);
+    out.write(column.cover);
+    write_single(out, column.cover_thickness);
+    out.write(column.sediment);
+    write_single(out, column.sediment_thickness);
+    out.write(column.bedrock);
+    write_count(out, column.seams.size());
+    for (const Seam& seam : column.seams) {
+        out.write(seam.resource);
+        write_single(out, seam.top);
+        write_single(out, seam.thickness);
+    }
+}
+
+void write_body(ByteWriter& out, const Inspection& inspection) {
+    write_body(out, inspection.inspect);
+    out.write(static_cast<std::uint64_t>(inspection.time.time_since_epoch().count()));
+    out.write(inspection.cell);
+    write_count(out, inspection.values.size());
+    for (const float value : inspection.values) {
+        write_single(out, value);
+    }
+    write_column(out, inspection.column);
 }
 
 std::string read_text(ValueReader& in) {
@@ -297,6 +342,49 @@ Ground read_ground(ValueReader& in) {
     return ground;
 }
 
+Inspect read_inspect(ValueReader& in) {
+    Inspect inspect;
+    inspect.latitude = in.twice();
+    inspect.longitude = in.twice();
+    return inspect;
+}
+
+Column read_column(ValueReader& in) {
+    Column column;
+    column.elevation = in.single();
+    column.biome = in.integer<std::uint8_t>();
+    column.continental = read_flag(in);
+    column.cover = in.integer<std::uint8_t>();
+    column.cover_thickness = in.single();
+    column.sediment = in.integer<std::uint8_t>();
+    column.sediment_thickness = in.single();
+    column.bedrock = in.integer<std::uint8_t>();
+    const std::uint32_t count = read_count(in, sizeof(std::uint8_t) + (2 * sizeof(float)));
+    column.seams.reserve(count);
+    for (std::uint32_t index = 0; index < count && in.ok(); ++index) {
+        Seam seam;
+        seam.resource = in.integer<std::uint8_t>();
+        seam.top = in.single();
+        seam.thickness = in.single();
+        column.seams.push_back(seam);
+    }
+    return column;
+}
+
+Inspection read_inspection(ValueReader& in) {
+    Inspection inspection;
+    inspection.inspect = read_inspect(in);
+    inspection.time =
+        GameTime{GameDuration{static_cast<GameDuration::rep>(in.integer<std::uint64_t>())}};
+    inspection.cell = in.integer<std::uint32_t>();
+    inspection.values.resize(read_count(in, sizeof(std::uint32_t)));
+    for (float& value : inspection.values) {
+        value = in.single();
+    }
+    inspection.column = read_column(in);
+    return inspection;
+}
+
 Result<Message> decode(Kind kind, std::span<const std::byte> payload) {
     ValueReader in{payload};
     Message message;
@@ -327,6 +415,12 @@ Result<Message> decode(Kind kind, std::span<const std::byte> payload) {
         break;
     case Kind::Ground:
         message = read_ground(in);
+        break;
+    case Kind::Inspect:
+        message = read_inspect(in);
+        break;
+    case Kind::Inspection:
+        message = read_inspection(in);
         break;
     default:
         return make_error(ErrorCode::Parse,

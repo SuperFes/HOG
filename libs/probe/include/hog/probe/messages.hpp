@@ -15,7 +15,7 @@
 // u32 payload length, a u8 kind, then the payload, little-endian throughout.
 namespace hog::probe {
 
-inline constexpr std::uint16_t protocol_version = 3;
+inline constexpr std::uint16_t protocol_version = 4;
 // Large enough for every layer of a level 7 grid; anything bigger is a broken or hostile peer.
 inline constexpr std::uint32_t max_payload = 64U << 20U;
 
@@ -140,8 +140,51 @@ struct Ground {
     friend bool operator==(const Ground&, const Ground&) = default;
 };
 
-using Message =
-    std::variant<Hello, Welcome, Refused, Fetch, Layers, Control, Controlled, Survey, Ground>;
+// Tool to server: everything known about one point of the planet.
+struct Inspect {
+    double latitude = 0.0; // degrees
+    double longitude = 0.0;
+
+    friend bool operator==(const Inspect&, const Inspect&) = default;
+};
+
+// A resource's seam under a point.
+struct Seam {
+    std::uint8_t resource = 0; // planet::Resource
+    float top = 0.0F;          // metres below the surface
+    float thickness = 0.0F;    // metres
+
+    friend bool operator==(const Seam&, const Seam&) = default;
+};
+
+// The generated ground under a point, as finely as the generator makes it.
+struct Column {
+    float elevation = 0.0F;       // metres above sea level
+    std::uint8_t biome = 0;       // planet::Biome
+    bool continental = false;     // crust, rather than ocean floor
+    std::uint8_t cover = 0;       // planet::Rock, from the surface
+    float cover_thickness = 0.0F; // metres
+    std::uint8_t sediment = 0;
+    float sediment_thickness = 0.0F;
+    std::uint8_t bedrock = 0; // running on below
+    std::vector<Seam> seams;  // shallowest first
+
+    friend bool operator==(const Column&, const Column&) = default;
+};
+
+// Server to tool, answering Inspect between ticks.
+struct Inspection {
+    Inspect inspect;
+    GameTime time;
+    std::uint32_t cell = 0;    // index on the grid of every layer
+    std::vector<float> values; // the cell's value in each of Welcome's layers, in its order
+    Column column;
+
+    friend bool operator==(const Inspection&, const Inspection&) = default;
+};
+
+using Message = std::variant<Hello, Welcome, Refused, Fetch, Layers, Control, Controlled, Survey,
+                             Ground, Inspect, Inspection>;
 
 // The whole frame for a message.
 [[nodiscard]] std::vector<std::byte> encode(const Message& message);
