@@ -8,6 +8,7 @@
 #include <hog/viewer/daylight.hpp>
 #include <hog/viewer/frame.hpp>
 #include <hog/viewer/ground.hpp>
+#include <hog/viewer/inspector.hpp>
 #include <hog/viewer/link.hpp>
 #include <hog/viewer/map_view.hpp>
 #include <hog/viewer/options.hpp>
@@ -32,6 +33,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -41,6 +43,7 @@ using namespace hog;
 constexpr float sidebar_width = 280.0F;
 constexpr double zoom_step = 1.2;
 constexpr float sun_radius = 6.0F;
+constexpr float marker_reach = 9.0F; // pixels from the inspected point to a crosshair arm's end
 // How long the view must hold still before the ground under it is surveyed.
 constexpr std::chrono::milliseconds survey_settle{150};
 constexpr float deepest = 2'000.0F; // metres, for the minerals overlay
@@ -153,7 +156,13 @@ struct View {
     std::uint64_t drawn_ground = 0; // and its ground count
     viewer::MapRect drawn_shown;    // the part of the map the texture holds
     bool stale = true;              // the choices changed since
+    std::optional<probe::Inspect> inspected;
 };
+
+void inspect(View& view, viewer::Link& link, std::optional<probe::Inspect> point) {
+    view.inspected = point;
+    link.inspect(point);
+}
 
 // Draws the newest frame into the map texture, when there's something new to draw.
 void redraw(View& view, const viewer::Link& link, SDL_Renderer* renderer, int width,
@@ -323,6 +332,63 @@ void legend(const View& view, const viewer::Link& link, const viewer::Frame* fra
     }
 }
 
+void readings_table(const char* id, const std::vector<viewer::Reading>& readings) {
+    if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_RowBg)) {
+        return;
+    }
+    ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthFixed);
+    ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch);
+    for (const viewer::Reading& reading : readings) {
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(reading.name.c_str());
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(reading.value.c_str());
+    }
+    ImGui::EndTable();
+}
+
+void faint(const char* text) {
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    ImGui::TextUnformatted(text);
+    ImGui::PopStyleColor();
+}
+
+// Everything known about the point picked on the map.
+void inspector(View& view, viewer::Link& link) {
+    if (!view.inspected) {
+        faint("click the map to inspect a point");
+        return;
+    }
+    ImGui::TextUnformatted(
+        std::format("{:.4f}°, {:.4f}°", view.inspected->latitude, view.inspected->longitude)
+            .c_str());
+    ImGui::SameLine();
+    if (ImGui::SmallButton("clear")) {
+        inspect(view, link, std::nullopt);
+        return;
+    }
+    const std::shared_ptr<const probe::Inspection> inspection = link.inspection();
+    const std::shared_ptr<const viewer::Frame> frame = link.frame();
+    if (inspection == nullptr || frame == nullptr) {
+        faint("inspecting...");
+        return;
+    }
+    if (view.grid && inspection->cell < view.grid->size()) {
+        ImGui::TextUnformatted(
+            std::format("cell {} ({})", inspection->cell, view.grid->cell(inspection->cell))
+                .c_str());
+    }
+    for (const viewer::ReadingGroup& group : viewer::readings(frame->welcome(), *inspection)) {
+        if (ImGui::CollapsingHeader(group.name.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
+            readings_table(group.name.c_str(), group.readings);
+        }
+    }
+    if (ImGui::CollapsingHeader("ground", ImGuiTreeNodeFlags_DefaultOpen)) {
+        readings_table("ground", viewer::column_readings(inspection->column));
+    }
+}
+
 void sidebar(View& view, viewer::Link& link) {
     const viewer::Link::State state = link.state();
     const std::shared_ptr<const viewer::Frame> frame = link.frame();
@@ -357,10 +423,36 @@ void sidebar(View& view, viewer::Link& link) {
     if (ImGui::Button("whole planet")) {
         view.map.reset();
     }
+
+    ImGui::Separator();
+    inspector(view, link);
 }
 
-// The map, as large as fits at twice as wide as tall; wheel zooms, dragging pans.
-void map(View& view) {
+// A crosshair over the inspected point, if it's on show.
+void mark_inspected(const View& view, ImVec2 corner, ImVec2 size) {
+    if (!view.inspected) {
+        return;
+    }
+    const DVec2 at =
+        viewer::shown_point(view.map.shown(), viewer::inspected_point(*view.inspected));
+    const ImVec2 centre{corner.x + (static_cast<float>(at.x) * size.x),
+                        corner.y + (static_cast<float>(at.y) * size.y)};
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    draw->PushClipRect(corner, ImVec2{corner.x + size.x, corner.y + size.y}, true);
+    // A dark crosshair under a light one, so it shows on any overlay.
+    for (const auto& [colour, thickness] :
+         {std::pair{IM_COL32(0, 0, 0, 200), 3.5F}, std::pair{IM_COL32(255, 255, 255, 255), 1.5F}}) {
+        draw->AddLine(ImVec2{centre.x - marker_reach, centre.y},
+                      ImVec2{centre.x + marker_reach, centre.y}, colour, thickness);
+        draw->AddLine(ImVec2{centre.x, centre.y - marker_reach},
+                      ImVec2{centre.x, centre.y + marker_reach}, colour, thickness);
+    }
+    draw->PopClipRect();
+}
+
+// The map, as large as fits at twice as wide as tall; wheel zooms, dragging pans, clicking
+// inspects and right-clicking or Escape stops.
+void map(View& view, viewer::Link& link) {
     const ImVec2 space = ImGui::GetContentRegionAvail();
     const float width = std::max(std::min(space.x, space.y * 2.0F), 1.0F);
     const ImVec2 size{width, width / 2.0F};
@@ -375,6 +467,18 @@ void map(View& view) {
         if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
             view.map.reset();
         }
+        // Only a press on the map that didn't move far enough to pan.
+        const float threshold = io.MouseDragThreshold;
+        if (ImGui::IsItemDeactivated() &&
+            io.MouseDragMaxDistanceSqr[ImGuiMouseButton_Left] < threshold * threshold) {
+            inspect(view, link, viewer::inspect_at(viewer::map_point(view.map.shown(), at)));
+        }
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+            inspect(view, link, std::nullopt);
+        }
+    }
+    if (view.inspected && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        inspect(view, link, std::nullopt);
     }
     if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
         view.map.pan(DVec2{io.MouseDelta.x / size.x, io.MouseDelta.y / size.y});
@@ -401,6 +505,7 @@ void map(View& view) {
         draw->AddCircle(centre, sun_radius, IM_COL32(60, 40, 0, 255), 0, 1.5F);
         draw->PopClipRect();
     }
+    mark_inspected(view, corner, size);
 }
 
 int run(std::span<const std::string_view> arguments) {
@@ -467,7 +572,7 @@ int run(std::span<const std::string_view> arguments) {
         ImGui::EndChild();
         ImGui::SameLine();
         ImGui::BeginChild("map");
-        map(view);
+        map(view, link);
         ImGui::EndChild();
         ImGui::End();
         ImGui::Render();

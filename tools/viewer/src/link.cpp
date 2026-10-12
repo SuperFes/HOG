@@ -70,6 +70,24 @@ void Link::control(probe::Control control) {
     woken_.notify_all();
 }
 
+void Link::inspect(std::optional<probe::Inspect> point) {
+    {
+        const std::scoped_lock lock{mutex_};
+        if (inspect_ == point) {
+            return;
+        }
+        inspect_ = point;
+        inspection_.reset();
+        changed_ = true;
+    }
+    woken_.notify_all();
+}
+
+std::shared_ptr<const probe::Inspection> Link::inspection() const {
+    const std::scoped_lock lock{mutex_};
+    return inspection_;
+}
+
 void Link::survey(probe::Survey survey) {
     {
         const std::scoped_lock lock{mutex_};
@@ -229,6 +247,41 @@ bool Link::send_survey(probe::Channel& channel) {
     return true;
 }
 
+bool Link::send_inspect(probe::Channel& channel) {
+    std::optional<probe::Inspect> point;
+    {
+        const std::scoped_lock lock{mutex_};
+        point = inspect_;
+    }
+    if (!point) {
+        return true;
+    }
+    if (auto sent = channel.send(*point); !sent) {
+        set_state(Status::Lost, sent.error().message);
+        return false;
+    }
+    std::optional<probe::Message> answer = await(channel);
+    if (!answer) {
+        return false;
+    }
+    if (const auto* refused = std::get_if<probe::Refused>(&*answer)) {
+        set_state(Status::Refused, refused->reason);
+        return false;
+    }
+    auto* inspection = std::get_if<probe::Inspection>(&*answer);
+    if (inspection == nullptr) {
+        set_state(Status::Lost, "the server answered an inspection with something else");
+        return false;
+    }
+    auto shared = std::make_shared<const probe::Inspection>(std::move(*inspection));
+    const std::scoped_lock lock{mutex_};
+    // Unless another point was picked while it was asked.
+    if (inspect_ == point) {
+        inspection_ = std::move(shared);
+    }
+    return true;
+}
+
 void Link::talk() {
     set_state(Status::Connecting);
     auto socket = probe::Socket::connect(host_, port_);
@@ -247,6 +300,7 @@ void Link::talk() {
         controls_.clear();
         control_error_.clear();
         ground_.reset();
+        inspection_.reset();
     }
     grounds_.fetch_add(1);
     set_state(Status::Connected);
@@ -278,6 +332,9 @@ void Link::talk() {
             frame_ = std::move(frame);
         }
         frames_.fetch_add(1);
+        if (!send_inspect(channel)) {
+            return;
+        }
         if (wait(timing_.fetch_every)) {
             return;
         }

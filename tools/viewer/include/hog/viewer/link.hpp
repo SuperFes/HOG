@@ -22,7 +22,8 @@ namespace hog::viewer {
 
 // Keeps a tool talking to a server from its own thread: connecting, saying hello, then fetching
 // the layers it wants every so often, and connecting again whenever the server goes away. Clock
-// controls go ahead of the next fetch, then the newest survey asked for.
+// controls go ahead of the next fetch, then the newest survey asked for; the point inspected, if
+// any, is inspected again after each fetch.
 class Link {
 public:
     enum class Status : std::uint8_t {
@@ -60,6 +61,9 @@ public:
     // Asks for the ground under part of the planet, replacing any survey not yet sent.
     void survey(probe::Survey survey);
 
+    // The point to inspect from now on, at once and after every fetch; none to stop.
+    void inspect(std::optional<probe::Inspect> point);
+
     [[nodiscard]] State state() const;
     // Why the server didn't change its clock the last time it was asked, or empty if it did.
     [[nodiscard]] std::string control_error() const;
@@ -70,6 +74,8 @@ public:
     // The newest ground surveyed from the server talked to now, or null before the first.
     [[nodiscard]] std::shared_ptr<const probe::Ground> ground() const;
     [[nodiscard]] std::uint64_t grounds() const noexcept { return grounds_.load(); }
+    // The newest inspection of the point inspected now, or null before the first.
+    [[nodiscard]] std::shared_ptr<const probe::Inspection> inspection() const;
 
 private:
     struct Greeting {
@@ -89,6 +95,8 @@ private:
     [[nodiscard]] bool send_controls(probe::Channel& channel);
     // Sends the survey waiting, if any; false if the server went away or refused it.
     [[nodiscard]] bool send_survey(probe::Channel& channel);
+    // Inspects the point wanted, if any; false if the server went away or refused it.
+    [[nodiscard]] bool send_inspect(probe::Channel& channel);
     // Waits until a fetch is due, the wanted layers change, or the link stops; true if stopping.
     bool wait(std::chrono::milliseconds most);
     void set_state(Status status, std::string message = {});
@@ -106,6 +114,8 @@ private:
     std::vector<probe::Control> controls_;
     std::optional<probe::Survey> survey_;
     std::shared_ptr<const probe::Ground> ground_;
+    std::optional<probe::Inspect> inspect_;
+    std::shared_ptr<const probe::Inspection> inspection_;
     std::string control_error_;
     bool changed_ = false;
     std::shared_ptr<const Frame> frame_;

@@ -242,3 +242,44 @@ TEST_CASE("a refused survey says why", "[viewer][link]") {
     REQUIRE(eventually([&] { return link.state().status == Link::Status::Refused; }));
     CHECK_FALSE(link.state().message.empty());
 }
+
+TEST_CASE("a link inspects its point after every fetch", "[viewer][link]") {
+    const Server server;
+    Link link{"127.0.0.1", server.port(), quick};
+    REQUIRE(eventually([&] { return link.frames() >= 1; }));
+    CHECK(link.inspection() == nullptr);
+
+    const probe::Inspect point{.latitude = 10.0, .longitude = 20.0};
+    link.inspect(point);
+    REQUIRE(eventually([&] { return link.inspection() != nullptr; }));
+    CHECK(link.inspection()->inspect == point);
+    CHECK(link.inspection()->values.size() == welcome().layers.size());
+    const GameTime first = link.inspection()->time;
+    CHECK(eventually([&] { return link.inspection()->time > first; }));
+
+    // Another point forgets the last one's answer.
+    const probe::Inspect other{.latitude = -5.0, .longitude = 100.0};
+    link.inspect(other);
+    const auto answer = link.inspection();
+    CHECK((answer == nullptr || answer->inspect == other));
+    CHECK(eventually([&] {
+        const auto now = link.inspection();
+        return now != nullptr && now->inspect == other;
+    }));
+
+    link.inspect(std::nullopt);
+    CHECK(link.inspection() == nullptr);
+    const std::uint64_t frames = link.frames();
+    REQUIRE(eventually([&] { return link.frames() >= frames + 2; }));
+    CHECK(link.inspection() == nullptr);
+}
+
+TEST_CASE("a refused inspection says why", "[viewer][link]") {
+    const Server server;
+    Link link{"127.0.0.1", server.port(),
+              Link::Timing{.fetch_every = 1h, .retry_after = 1h, .patience = 5s}};
+    REQUIRE(eventually([&] { return link.frames() >= 1; }));
+    link.inspect(probe::Inspect{.latitude = 100.0, .longitude = 0.0});
+    REQUIRE(eventually([&] { return link.state().status == Link::Status::Refused; }));
+    CHECK(link.state().message.contains("planet"));
+}
