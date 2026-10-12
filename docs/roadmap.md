@@ -324,6 +324,7 @@ These tracks can start once Phase 4 works and can run side by side; four people 
 - [ ] Apex succession (the dragon example)
 - [ ] Consequences of wiping out wildlife, driven by ecology events: bounties, wardens, hunting bans, scarce-goods prices
 - [ ] Quarries and mines as voxel volumes; finite deposits
+- [ ] Building by players and NPCs, from tents and lean-tos to castles, walls and trails: posts sunk in the ground, foundations on soil or bedrock, and wind and snow that topple weak builds
 - [ ] Structural integrity under Earth gravity for tunnels, buildings and bridges: span, load and material decide what holds; supports, cave-ins and sinkholes
 - [ ] Upkeep as a job players and NPCs take; places nobody maintains crumble into ruins over the centuries
 - [ ] Forest fire spread with weather; regrowth through succession
