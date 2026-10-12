@@ -111,6 +111,9 @@ struct Controlled {
     friend bool operator==(const Controlled&, const Controlled&) = default;
 };
 
+// Samples along a survey's side; more is a broken or greedy tool.
+inline constexpr std::uint16_t most_survey_side = 2'048;
+
 // Tool to server: the generated ground under part of the planet, sampled at the centres of a grid
 // of equal latitude and longitude steps, as finely as the samples are apart.
 struct Survey {

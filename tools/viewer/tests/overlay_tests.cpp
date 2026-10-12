@@ -2,6 +2,7 @@
 #include <hog/mapgen/wildlife_render.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/viewer/ground.hpp>
 #include <hog/viewer/overlay.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -10,6 +11,7 @@
 #include <cmath>
 #include <cstddef>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace hog;
@@ -41,9 +43,10 @@ struct Planet {
     }
 
     [[nodiscard]] mapgen::Image render(Overlay overlay, const std::string& species = "",
-                                       const viewer::MapRect& shown = {}) const {
+                                       const viewer::MapRect& shown = {},
+                                       const probe::Ground* ground = nullptr) const {
         jobs::JobSystem jobs{2};
-        return viewer::render_overlay(grid, frame(), overlay, species, shown, width, jobs);
+        return viewer::render_overlay(grid, frame(), ground, overlay, species, shown, width, jobs);
     }
 
     // The cell under each pixel, row by row.
@@ -201,6 +204,78 @@ TEST_CASE("wildlife is shown against its densest cell", "[viewer][overlay]") {
     CHECK(std::ranges::count(shown, mapgen::density_colour(ground, 0.25)) <
           static_cast<std::ptrdiff_t>(shown.size()));
     CHECK(all(planet.render(Overlay::Wildlife, "elk"), viewer::missing_colour));
+}
+
+namespace {
+
+// Ground surveyed under every pixel of a shown area: the west half sea 30 m deep and the east half
+// land 800 m up, tundra over sandstone with gold in the far east.
+probe::Ground surveyed(const viewer::MapRect& shown) {
+    const int height = width / 2;
+    probe::Ground ground{.survey = viewer::survey_of(shown, width, height, true, 40.0F),
+                         .elevation = {},
+                         .biome = {},
+                         .rock = {},
+                         .deposit = {}};
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const bool east = x >= width / 2;
+            ground.elevation.push_back(east ? 800.0F : -30.0F);
+            ground.biome.push_back(
+                std::to_underlying(east ? planet::Biome::Tundra : planet::Biome::Ocean));
+            ground.rock.push_back(std::to_underlying(planet::Rock::Sandstone));
+            ground.deposit.push_back(x >= width - 4 ? std::to_underlying(planet::Resource::Gold) + 1
+                                                    : 0);
+        }
+    }
+    return ground;
+}
+
+} // namespace
+
+TEST_CASE("surveyed ground draws terrain, coasts and biomes finely", "[viewer][overlay]") {
+    Planet planet = land();
+    planet.set("planet/biome", static_cast<float>(planet::Biome::Desert));
+    planet.set("forest/biomass", 1.0F);
+    planet.set("forest/capacity", 4.0F);
+    const viewer::MapRect shown{.low = {0.25, 0.25}, .high = {0.75, 0.5}};
+    const probe::Ground ground = surveyed(shown);
+
+    const mapgen::Image terrain = planet.render(Overlay::Terrain, "", shown, &ground);
+    const mapgen::Image biomes = planet.render(Overlay::Biome, "", shown, &ground);
+    const mapgen::Image plants = planet.render(Overlay::Plants, "", shown, &ground);
+    for (int y = 0; y < terrain.height; ++y) {
+        for (int x = 0; x < terrain.width; ++x) {
+            const bool east = x >= width / 2;
+            CHECK(terrain.at(x, y) == mapgen::height_colour(fixed(east ? 800.0 : -30.0)));
+            CHECK(biomes.at(x, y) ==
+                  mapgen::biome_colour(east ? planet::Biome::Tundra : planet::Biome::Ocean));
+        }
+    }
+    // Overlays of the simulation keep its values, inside the surveyed coasts.
+    CHECK(plants.at(0, 0) == Rgb{40, 90, 150});
+    CHECK(plants.at(width - 1, 0) == viewer::plant_colour(0.25));
+
+    // Off the surveyed part, the cells show as before.
+    const mapgen::Image whole = planet.render(Overlay::Terrain, "", {}, &ground);
+    CHECK(whole.at(0, 0) == mapgen::height_colour(fixed(500.0)));
+}
+
+TEST_CASE("minerals show the rock or rarest deposit at the surveyed depth", "[viewer][overlay]") {
+    const Planet planet = land();
+    CHECK(all(planet.render(Overlay::Minerals), viewer::missing_colour));
+    const viewer::MapRect shown{.low = {0.25, 0.25}, .high = {0.75, 0.5}};
+    probe::Ground ground = surveyed(shown);
+    const mapgen::Image image = planet.render(Overlay::Minerals, "", shown, &ground);
+    const Rgb sandstone = mapgen::rock_colour(planet::Rock::Sandstone);
+    CHECK(image.at(width / 2, 0) == sandstone);
+    CHECK(image.at(width - 1, 0) == mapgen::resource_colour(planet::Resource::Gold));
+    CHECK(image.at(0, 0) == mapgen::mix(sandstone, Rgb{40, 90, 150}, 0.4));
+
+    // Ground surveyed only at the surface has nothing to show below it.
+    ground.rock.clear();
+    ground.deposit.clear();
+    CHECK(all(planet.render(Overlay::Minerals, "", shown, &ground), viewer::missing_colour));
 }
 
 TEST_CASE("each overlay asks for the layers it draws", "[viewer][overlay]") {

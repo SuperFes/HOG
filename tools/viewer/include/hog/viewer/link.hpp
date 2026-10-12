@@ -22,7 +22,7 @@ namespace hog::viewer {
 
 // Keeps a tool talking to a server from its own thread: connecting, saying hello, then fetching
 // the layers it wants every so often, and connecting again whenever the server goes away. Clock
-// controls go ahead of the next fetch.
+// controls go ahead of the next fetch, then the newest survey asked for.
 class Link {
 public:
     enum class Status : std::uint8_t {
@@ -57,6 +57,9 @@ public:
     // server goes away first.
     void control(probe::Control control);
 
+    // Asks for the ground under part of the planet, replacing any survey not yet sent.
+    void survey(probe::Survey survey);
+
     [[nodiscard]] State state() const;
     // Why the server didn't change its clock the last time it was asked, or empty if it did.
     [[nodiscard]] std::string control_error() const;
@@ -64,6 +67,9 @@ public:
     [[nodiscard]] std::shared_ptr<const Frame> frame() const;
     // Frames received so far, to tell when there's a new one.
     [[nodiscard]] std::uint64_t frames() const noexcept { return frames_.load(); }
+    // The newest ground surveyed from the server talked to now, or null before the first.
+    [[nodiscard]] std::shared_ptr<const probe::Ground> ground() const;
+    [[nodiscard]] std::uint64_t grounds() const noexcept { return grounds_.load(); }
 
 private:
     struct Greeting {
@@ -81,6 +87,8 @@ private:
     [[nodiscard]] std::optional<probe::Message> await(probe::Channel& channel);
     // Sends the controls waiting; false if the server went away.
     [[nodiscard]] bool send_controls(probe::Channel& channel);
+    // Sends the survey waiting, if any; false if the server went away or refused it.
+    [[nodiscard]] bool send_survey(probe::Channel& channel);
     // Waits until a fetch is due, the wanted layers change, or the link stops; true if stopping.
     bool wait(std::chrono::milliseconds most);
     void set_state(Status status, std::string message = {});
@@ -90,11 +98,14 @@ private:
     Timing timing_;
     std::atomic<bool> stopping_ = false;
     std::atomic<std::uint64_t> frames_ = 0;
+    std::atomic<std::uint64_t> grounds_ = 0;
     mutable std::mutex mutex_;
     std::condition_variable woken_;
     State state_;
     std::vector<std::string> wanted_;
     std::vector<probe::Control> controls_;
+    std::optional<probe::Survey> survey_;
+    std::shared_ptr<const probe::Ground> ground_;
     std::string control_error_;
     bool changed_ = false;
     std::shared_ptr<const Frame> frame_;

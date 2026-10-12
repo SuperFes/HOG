@@ -5,12 +5,7 @@
 #include <hog/planet/geology.hpp>
 #include <hog/probe/messages.hpp>
 
-#include <cstdint>
-
 namespace hog::server {
-
-// Samples along a survey's side; more is a broken or greedy tool.
-inline constexpr std::uint16_t most_survey_side = 2'048;
 
 // Fails when the edges are out of order or off the planet, there are no samples or too many, or
 // the depth is negative.

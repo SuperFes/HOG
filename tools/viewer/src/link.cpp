@@ -70,6 +70,20 @@ void Link::control(probe::Control control) {
     woken_.notify_all();
 }
 
+void Link::survey(probe::Survey survey) {
+    {
+        const std::scoped_lock lock{mutex_};
+        survey_ = survey;
+        changed_ = true;
+    }
+    woken_.notify_all();
+}
+
+std::shared_ptr<const probe::Ground> Link::ground() const {
+    const std::scoped_lock lock{mutex_};
+    return ground_;
+}
+
 std::string Link::control_error() const {
     const std::scoped_lock lock{mutex_};
     return control_error_;
@@ -180,6 +194,41 @@ bool Link::send_controls(probe::Channel& channel) {
     return true;
 }
 
+bool Link::send_survey(probe::Channel& channel) {
+    std::optional<probe::Survey> survey;
+    {
+        const std::scoped_lock lock{mutex_};
+        survey.swap(survey_);
+    }
+    if (!survey) {
+        return true;
+    }
+    if (auto sent = channel.send(*survey); !sent) {
+        set_state(Status::Lost, sent.error().message);
+        return false;
+    }
+    std::optional<probe::Message> answer = await(channel);
+    if (!answer) {
+        return false;
+    }
+    if (const auto* refused = std::get_if<probe::Refused>(&*answer)) {
+        set_state(Status::Refused, refused->reason);
+        return false;
+    }
+    auto* ground = std::get_if<probe::Ground>(&*answer);
+    if (ground == nullptr) {
+        set_state(Status::Lost, "the server answered a survey with something else");
+        return false;
+    }
+    auto shared = std::make_shared<const probe::Ground>(std::move(*ground));
+    {
+        const std::scoped_lock lock{mutex_};
+        ground_ = std::move(shared);
+    }
+    grounds_.fetch_add(1);
+    return true;
+}
+
 void Link::talk() {
     set_state(Status::Connecting);
     auto socket = probe::Socket::connect(host_, port_);
@@ -197,10 +246,12 @@ void Link::talk() {
         const std::scoped_lock lock{mutex_};
         controls_.clear();
         control_error_.clear();
+        ground_.reset();
     }
+    grounds_.fetch_add(1);
     set_state(Status::Connected);
     while (!stopping_.load()) {
-        if (!send_controls(channel)) {
+        if (!send_controls(channel) || !send_survey(channel)) {
             return;
         }
         probe::Fetch fetch;

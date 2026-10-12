@@ -1,11 +1,13 @@
 #include <hog/core/time.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/mapgen/render.hpp>
+#include <hog/planet/geology.hpp>
 #include <hog/probe/messages.hpp>
 #include <hog/sim/cell_grid.hpp>
 #include <hog/viewer/clock_text.hpp>
 #include <hog/viewer/daylight.hpp>
 #include <hog/viewer/frame.hpp>
+#include <hog/viewer/ground.hpp>
 #include <hog/viewer/link.hpp>
 #include <hog/viewer/map_view.hpp>
 #include <hog/viewer/options.hpp>
@@ -39,6 +41,9 @@ using namespace hog;
 constexpr float sidebar_width = 280.0F;
 constexpr double zoom_step = 1.2;
 constexpr float sun_radius = 6.0F;
+// How long the view must hold still before the ground under it is surveyed.
+constexpr std::chrono::milliseconds survey_settle{150};
+constexpr float deepest = 2'000.0F; // metres, for the minerals overlay
 
 struct WindowDeleter {
     void operator()(SDL_Window* window) const noexcept { SDL_DestroyWindow(window); }
@@ -137,12 +142,16 @@ struct View {
     std::string species;
     viewer::MapView map;
     bool daylight = true;
+    float depth = 10.0F; // metres below the surface the minerals overlay shows
+    viewer::SurveyPacer pacer{survey_settle};
+    std::uint64_t grounds = 0; // the link's ground count when last looked at
     Texture texture;
     std::optional<sim::CellGrid> grid;
-    std::optional<DVec2> sun;    // where it's overhead on the map, when daylight is shown
-    std::uint64_t drawn = 0;     // the link's frame count when last drawn
-    viewer::MapRect drawn_shown; // the part of the map the texture holds
-    bool stale = true;           // the choices changed since
+    std::optional<DVec2> sun;       // where it's overhead on the map, when daylight is shown
+    std::uint64_t drawn = 0;        // the link's frame count when last drawn
+    std::uint64_t drawn_ground = 0; // and its ground count
+    viewer::MapRect drawn_shown;    // the part of the map the texture holds
+    bool stale = true;              // the choices changed since
 };
 
 // Draws the newest frame into the map texture, when there's something new to draw.
@@ -150,16 +159,18 @@ void redraw(View& view, const viewer::Link& link, SDL_Renderer* renderer, int wi
             jobs::JobSystem& jobs) {
     const std::shared_ptr<const viewer::Frame> frame = link.frame();
     const viewer::MapRect shown = view.map.shown();
-    if (frame == nullptr ||
-        (!view.stale && link.frames() == view.drawn && shown == view.drawn_shown)) {
+    if (frame == nullptr || (!view.stale && link.frames() == view.drawn &&
+                             link.grounds() == view.drawn_ground && shown == view.drawn_shown)) {
         return;
     }
+    const std::uint64_t grounds = link.grounds();
+    const std::shared_ptr<const probe::Ground> ground = link.ground();
     const int level = frame->welcome().level;
     if (!view.grid || view.grid->level() != level) {
         view.grid.emplace(level);
     }
-    mapgen::Image image =
-        viewer::render_overlay(*view.grid, *frame, view.overlay, view.species, shown, width, jobs);
+    mapgen::Image image = viewer::render_overlay(*view.grid, *frame, ground.get(), view.overlay,
+                                                 view.species, shown, width, jobs);
     view.sun.reset();
     if (const auto calendar = viewer::calendar_of(frame->welcome()); calendar && view.daylight) {
         viewer::shade_night(image, shown, *calendar, frame->time(), jobs);
@@ -173,8 +184,45 @@ void redraw(View& view, const viewer::Link& link, SDL_Renderer* renderer, int wi
         SDL_UpdateTexture(view.texture.get(), nullptr, image.pixels.data(), 3 * image.width);
     }
     view.drawn = link.frames();
+    view.drawn_ground = grounds;
     view.drawn_shown = shown;
     view.stale = false;
+}
+
+// Asks for the ground under the view once it holds still, at about the map's own resolution.
+void survey(View& view, viewer::Link& link, int width) {
+    // A link that connects again starts without ground.
+    if (const std::uint64_t grounds = link.grounds(); grounds != view.grounds) {
+        view.grounds = grounds;
+        if (link.ground() == nullptr) {
+            view.pacer.forget();
+        }
+    }
+    const int across = std::min(width, static_cast<int>(probe::most_survey_side));
+    const probe::Survey wanted =
+        viewer::survey_of(view.map.shown(), across, across / 2,
+                          view.overlay == viewer::Overlay::Minerals, view.depth);
+    if (const auto ready = view.pacer.poll(wanted, MonotonicClock::now())) {
+        link.survey(*ready);
+    }
+}
+
+// What the minerals overlay's colours stand for.
+void minerals_key() {
+    const auto swatch = [](mapgen::Rgb colour, std::string_view name) {
+        const ImVec4 shown{colour[0] / 255.0F, colour[1] / 255.0F, colour[2] / 255.0F, 1.0F};
+        ImGui::ColorButton(std::string{name}.c_str(), shown, ImGuiColorEditFlags_NoTooltip,
+                           ImVec2{12.0F, 12.0F});
+        ImGui::SameLine();
+        ImGui::TextUnformatted(std::string{name}.c_str());
+    };
+    for (int rock = 0; rock < planet::rock_count; ++rock) {
+        const auto each = static_cast<planet::Rock>(rock);
+        swatch(mapgen::rock_colour(each), planet::to_string(each));
+    }
+    for (const planet::Resource resource : planet::rarest_first) {
+        swatch(mapgen::resource_colour(resource), planet::to_string(resource));
+    }
 }
 
 void choose(View& view, viewer::Link& link, viewer::Overlay overlay, std::string species) {
@@ -264,11 +312,22 @@ void sidebar(View& view, viewer::Link& link) {
         }
     }
     choose(view, link, overlay, std::move(species));
+    if (view.overlay == viewer::Overlay::Minerals) {
+        ImGui::SliderFloat("depth", &view.depth, 0.0F, deepest, "%.0f m",
+                           ImGuiSliderFlags_Logarithmic);
+    }
     if (ImGui::Checkbox("daylight", &view.daylight)) {
         view.stale = true;
     }
 
     ImGui::Separator();
+    if (view.overlay == viewer::Overlay::Minerals) {
+        const auto ground = link.ground();
+        ImGui::TextUnformatted(ground != nullptr && !ground->rock.empty()
+                                   ? std::format("{:.0f} m down", ground->survey.depth).c_str()
+                                   : "surveying");
+        minerals_key();
+    }
     if (frame != nullptr) {
         if (const auto legend = viewer::legend_for(view.overlay, *frame, view.species)) {
             ImGui::TextUnformatted(legend->layer.c_str());
@@ -374,6 +433,7 @@ int run(std::span<const std::string_view> arguments) {
                 running = false;
             }
         }
+        survey(view, link, options->width);
         redraw(view, link, renderer.get(), options->width, jobs);
 
         ImGui_ImplSDLRenderer3_NewFrame();

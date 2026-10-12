@@ -19,6 +19,7 @@ namespace hog::viewer {
 enum class Overlay : std::uint8_t {
     Terrain,     // elevation, with the ocean
     Biome,       //
+    Minerals,    // rock, or the rarest deposit, at a depth; needs the ground surveyed
     Temperature, // at the surface
     Air,         // temperature, reddened along warm fronts and blued along cold ones
     Sky,         // cloud, rain, snow, hail and storms over the ground
@@ -30,8 +31,9 @@ enum class Overlay : std::uint8_t {
 };
 
 inline constexpr std::array overlays{
-    Overlay::Terrain,  Overlay::Biome,   Overlay::Temperature, Overlay::Air,  Overlay::Sky,
-    Overlay::Pressure, Overlay::Dryness, Overlay::Plants,      Overlay::Fire, Overlay::Wildlife,
+    Overlay::Terrain, Overlay::Biome, Overlay::Minerals, Overlay::Temperature,
+    Overlay::Air,     Overlay::Sky,   Overlay::Pressure, Overlay::Dryness,
+    Overlay::Plants,  Overlay::Fire,  Overlay::Wildlife,
 };
 
 [[nodiscard]] std::string_view to_string(Overlay overlay) noexcept;
@@ -56,11 +58,13 @@ struct Legend {
 inline constexpr mapgen::Rgb missing_colour{90, 90, 90};
 
 // The shown part of the map, latitude down and longitude across, twice as wide as it is tall.
-// Fields are smoothed between cells; biomes and fires are shown cell by cell. Precondition: the
-// grid is at the frame's level.
+// Fields are smoothed between cells; biomes and fires are shown cell by cell. Where `ground`, if
+// any, was surveyed, the terrain, coasts and biomes come from it instead, as finely as it was
+// sampled. Precondition: the grid is at the frame's level.
 [[nodiscard]] mapgen::Image render_overlay(const sim::CellGrid& grid, const Frame& frame,
-                                           Overlay overlay, std::string_view species,
-                                           const MapRect& shown, int width, jobs::JobSystem& jobs);
+                                           const probe::Ground* ground, Overlay overlay,
+                                           std::string_view species, const MapRect& shown,
+                                           int width, jobs::JobSystem& jobs);
 
 // Pale lows through white to dark red highs, in hPa.
 [[nodiscard]] mapgen::Rgb pressure_colour(double pressure) noexcept;

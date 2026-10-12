@@ -4,11 +4,13 @@
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/sim/weather.hpp>
+#include <hog/viewer/ground.hpp>
 #include <hog/viewer/overlay.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <optional>
 #include <span>
 
 namespace hog::viewer {
@@ -42,51 +44,105 @@ std::int64_t fixed(double value) {
     return std::llround(value * planet::fixed_one);
 }
 
-// Reads a frame's layers at points on the planet.
+// Where on the map a pixel samples.
+struct Spot {
+    DVec3 direction;
+    std::optional<std::size_t> sample; // of the surveyed ground, if it reaches here
+};
+
+// Reads a frame's layers, and the ground surveyed where there is some, at points on the planet.
 class Sampler {
 public:
-    Sampler(const sim::CellGrid& grid, const Frame& frame) : grid_(&grid), frame_(&frame) {}
+    Sampler(const sim::CellGrid& grid, const Frame& frame, const probe::Ground* ground)
+        : grid_(&grid), frame_(&frame), ground_(ground) {}
+
+    [[nodiscard]] Spot spot(DVec2 point) const {
+        return Spot{.direction = map_direction(point),
+                    .sample = ground_ != nullptr ? sample_at(*ground_, point) : std::nullopt};
+    }
 
     [[nodiscard]] std::span<const float> layer(std::string_view name) const {
         return frame_->layer(name);
     }
 
     // Smoothed between cells. Precondition: the layer isn't empty.
-    [[nodiscard]] double smooth(std::span<const float> values, DVec3 direction) const {
-        return grid_->interpolate(
-            direction, [values](std::uint32_t cell) { return static_cast<double>(values[cell]); });
+    [[nodiscard]] double smooth(std::span<const float> values, const Spot& spot) const {
+        return grid_->interpolate(spot.direction, [values](std::uint32_t cell) {
+            return static_cast<double>(values[cell]);
+        });
     }
 
     // The cell under the point. Precondition: the layer isn't empty.
-    [[nodiscard]] double nearest(std::span<const float> values, DVec3 direction) const {
-        return static_cast<double>(values[cell(direction)]);
+    [[nodiscard]] double nearest(std::span<const float> values, const Spot& spot) const {
+        return static_cast<double>(values[cell(spot)]);
     }
 
-    [[nodiscard]] std::uint32_t cell(DVec3 direction) const {
-        return grid_->index(planet::cell_at(direction, grid_->level()));
+    [[nodiscard]] std::uint32_t cell(const Spot& spot) const {
+        return grid_->index(planet::cell_at(spot.direction, grid_->level()));
     }
 
-    [[nodiscard]] bool ocean(DVec3 direction) const {
+    // Metres above sea level, where surveyed.
+    [[nodiscard]] std::optional<double> elevation(const Spot& spot) const {
+        if (!spot.sample) {
+            return std::nullopt;
+        }
+        return static_cast<double>(ground_->elevation[*spot.sample]);
+    }
+
+    [[nodiscard]] bool ocean(const Spot& spot) const {
+        if (const auto metres = elevation(spot)) {
+            return *metres <= 0.0;
+        }
         const std::span<const float> ocean = layer("planet/ocean");
         // Smoothed, so coasts run between cells rather than around them.
-        return !ocean.empty() && smooth(ocean, direction) > 0.5;
+        return !ocean.empty() && smooth(ocean, spot) > 0.5;
     }
 
-    [[nodiscard]] Rgb ground(DVec3 direction) const {
+    [[nodiscard]] Rgb ground(const Spot& spot) const {
+        if (const auto metres = elevation(spot)) {
+            // Land at sea level would take the shallows' colour.
+            return mapgen::height_colour(fixed(*metres <= 0.0 ? *metres : std::max(*metres, 1.0)));
+        }
         const std::span<const float> elevation = layer("planet/elevation");
         if (elevation.empty()) {
             return missing_colour;
         }
-        if (ocean(direction)) {
+        if (ocean(spot)) {
             return mapgen::height_colour(fixed(ocean_depth));
         }
-        // Land at sea level would take the shallows' colour.
-        return mapgen::height_colour(fixed(std::max(smooth(elevation, direction), 1.0)));
+        return mapgen::height_colour(fixed(std::max(smooth(elevation, spot), 1.0)));
+    }
+
+    [[nodiscard]] std::optional<planet::Biome> biome(const Spot& spot) const {
+        int index = 0;
+        if (spot.sample) {
+            index = ground_->biome[*spot.sample];
+        } else if (const std::span<const float> biome = layer("planet/biome"); !biome.empty()) {
+            index = static_cast<int>(nearest(biome, spot));
+        } else {
+            return std::nullopt;
+        }
+        return static_cast<planet::Biome>(std::clamp(index, 0, planet::biome_count - 1));
+    }
+
+    // Rock, or the rarest deposit, at the surveyed depth; none where that wasn't surveyed.
+    [[nodiscard]] std::optional<Rgb> underground(const Spot& spot) const {
+        if (!spot.sample || ground_->rock.empty()) {
+            return std::nullopt;
+        }
+        const int rock = ground_->rock[*spot.sample];
+        const int deposit = ground_->deposit[*spot.sample];
+        if (rock >= planet::rock_count || deposit > planet::resource_count) {
+            return std::nullopt;
+        }
+        return deposit > 0 ? mapgen::resource_colour(static_cast<planet::Resource>(deposit - 1))
+                           : mapgen::rock_colour(static_cast<planet::Rock>(rock));
     }
 
 private:
     const sim::CellGrid* grid_;
     const Frame* frame_;
+    const probe::Ground* ground_;
 };
 
 // Animals per km² in each cell; empty without the counts or the areas.
@@ -102,29 +158,29 @@ std::vector<float> densities(const Frame& frame, std::span<const float> count) {
     return density;
 }
 
-Rgb plants_at(const Sampler& sampler, DVec3 direction) {
+Rgb plants_at(const Sampler& sampler, const Spot& spot) {
     const std::span<const float> biomass = sampler.layer("forest/biomass");
     const std::span<const float> capacity = sampler.layer("forest/capacity");
     if (biomass.empty() || capacity.empty()) {
         return missing_colour;
     }
-    if (sampler.ocean(direction)) {
+    if (sampler.ocean(spot)) {
         return ocean_blue;
     }
-    const std::uint32_t cell = sampler.cell(direction);
+    const std::uint32_t cell = sampler.cell(spot);
     if (!(capacity[cell] > 0.0F)) {
-        return mapgen::mix(sampler.ground(direction), {0, 0, 0}, 0.5);
+        return mapgen::mix(sampler.ground(spot), {0, 0, 0}, 0.5);
     }
     return plant_colour(static_cast<double>(biomass[cell] / capacity[cell]));
 }
 
-Rgb weather_at(const Sampler& sampler, Overlay overlay, DVec3 direction) {
+Rgb weather_at(const Sampler& sampler, Overlay overlay, const Spot& spot) {
     const auto field = [&](std::string_view name, double& value) {
         const std::span<const float> values = sampler.layer(name);
         if (values.empty()) {
             return false;
         }
-        value = sampler.smooth(values, direction);
+        value = sampler.smooth(values, spot);
         return true;
     };
     double temperature = 0.0;
@@ -151,54 +207,56 @@ Rgb weather_at(const Sampler& sampler, Overlay overlay, DVec3 direction) {
         !field("weather/storm", storm)) {
         return missing_colour;
     }
-    return mapgen::sky_colour(sampler.ground(direction),
+    return mapgen::sky_colour(sampler.ground(spot),
                               static_cast<double>(sim::cloud_cover(static_cast<float>(cloud))),
                               falling, storm);
 }
 
 Rgb colour_at(const Sampler& sampler, Overlay overlay, std::span<const float> species, double most,
-              DVec3 direction) {
+              const Spot& spot) {
     switch (overlay) {
     case Overlay::Terrain:
-        return sampler.ground(direction);
+        return sampler.ground(spot);
     case Overlay::Biome: {
-        const std::span<const float> biome = sampler.layer("planet/biome");
-        if (biome.empty()) {
+        const std::optional<planet::Biome> biome = sampler.biome(spot);
+        return biome ? mapgen::biome_colour(*biome) : missing_colour;
+    }
+    case Overlay::Minerals: {
+        const std::optional<Rgb> below = sampler.underground(spot);
+        if (!below) {
             return missing_colour;
         }
-        const auto index = std::clamp(static_cast<int>(sampler.nearest(biome, direction)), 0,
-                                      planet::biome_count - 1);
-        return mapgen::biome_colour(static_cast<planet::Biome>(index));
+        // Tinted under the sea, so coasts still show.
+        return sampler.ocean(spot) ? mapgen::mix(*below, ocean_blue, 0.4) : *below;
     }
     case Overlay::Temperature:
     case Overlay::Air:
     case Overlay::Sky:
     case Overlay::Pressure:
-        return weather_at(sampler, overlay, direction);
+        return weather_at(sampler, overlay, spot);
     case Overlay::Dryness: {
         const std::span<const float> dryness = sampler.layer("forest/dryness");
         if (dryness.empty()) {
             return missing_colour;
         }
-        if (sampler.ocean(direction)) {
+        if (sampler.ocean(spot)) {
             return ocean_blue;
         }
-        return mapgen::moisture_colour(fixed(1.0 - sampler.smooth(dryness, direction)));
+        return mapgen::moisture_colour(fixed(1.0 - sampler.smooth(dryness, spot)));
     }
     case Overlay::Plants:
-        return plants_at(sampler, direction);
+        return plants_at(sampler, spot);
     case Overlay::Fire: {
         const std::span<const float> fire = sampler.layer("forest/fire");
-        const Rgb plants = plants_at(sampler, direction);
-        return fire.empty() ? missing_colour
-                            : fire_colour(plants, sampler.nearest(fire, direction));
+        const Rgb plants = plants_at(sampler, spot);
+        return fire.empty() ? missing_colour : fire_colour(plants, sampler.nearest(fire, spot));
     }
     case Overlay::Wildlife: {
         if (species.empty()) {
             return missing_colour;
         }
-        const double density = sampler.smooth(species, direction);
-        return mapgen::density_colour(sampler.ground(direction), most > 0.0 ? density / most : 0.0);
+        const double density = sampler.smooth(species, spot);
+        return mapgen::density_colour(sampler.ground(spot), most > 0.0 ? density / most : 0.0);
     }
     }
     return missing_colour;
@@ -221,6 +279,8 @@ std::string_view to_string(Overlay overlay) noexcept {
         return "terrain";
     case Overlay::Biome:
         return "biome";
+    case Overlay::Minerals:
+        return "minerals";
     case Overlay::Temperature:
         return "temperature";
     case Overlay::Air:
@@ -251,6 +311,8 @@ std::vector<std::string> layers_for(Overlay overlay, std::string_view species) {
         break;
     case Overlay::Biome:
         add({"planet/biome"});
+        break;
+    case Overlay::Minerals:
         break;
     case Overlay::Temperature:
         add({"weather/temperature"});
@@ -288,6 +350,7 @@ std::optional<Legend> legend_for(Overlay overlay, const Frame& frame, std::strin
         layer = "planet/elevation";
         break;
     case Overlay::Biome:
+    case Overlay::Minerals:
         return std::nullopt;
     case Overlay::Temperature:
     case Overlay::Air:
@@ -340,16 +403,16 @@ Rgb fire_colour(Rgb plants, double fire) noexcept {
     return mapgen::mix(plants, burning, 0.5 + (0.5 * std::min(fire, 1.0)));
 }
 
-mapgen::Image render_overlay(const sim::CellGrid& grid, const Frame& frame, Overlay overlay,
-                             std::string_view species, const MapRect& shown, int width,
-                             jobs::JobSystem& jobs) {
+mapgen::Image render_overlay(const sim::CellGrid& grid, const Frame& frame,
+                             const probe::Ground* ground, Overlay overlay, std::string_view species,
+                             const MapRect& shown, int width, jobs::JobSystem& jobs) {
     const mapgen::ImageSize size = mapgen::image_size(mapgen::PlanetView{}, width);
     mapgen::Image image{.width = size.width,
                         .height = size.height,
                         .pixels =
                             std::vector<std::uint8_t>(3 * static_cast<std::size_t>(size.width) *
                                                       static_cast<std::size_t>(size.height))};
-    const Sampler sampler{grid, frame};
+    const Sampler sampler{grid, frame, ground};
     // Densities rather than counts, since cells differ in size.
     const std::vector<float> animals =
         overlay == Overlay::Wildlife
@@ -364,7 +427,7 @@ mapgen::Image render_overlay(const sim::CellGrid& grid, const Frame& frame, Over
                 for (int x = 0; x < size.width; ++x) {
                     const Rgb colour =
                         colour_at(sampler, overlay, animals, most,
-                                  map_direction(pixel_point(shown, size.width, size.height, x, y)));
+                                  sampler.spot(pixel_point(shown, size.width, size.height, x, y)));
                     const auto offset =
                         3 * ((static_cast<std::size_t>(y) * static_cast<std::size_t>(size.width)) +
                              static_cast<std::size_t>(x));

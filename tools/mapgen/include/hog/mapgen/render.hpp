@@ -52,6 +52,9 @@ struct ImageSize {
 // Brown when arid through green to blue when saturated; moisture is fixed point from 0 to 1.
 [[nodiscard]] Rgb moisture_colour(std::int64_t moisture) noexcept;
 
+[[nodiscard]] Rgb rock_colour(planet::Rock rock) noexcept;
+[[nodiscard]] Rgb resource_colour(planet::Resource resource) noexcept;
+
 // The rarest deposit under a cell, over grey land shaded by height and dark ocean.
 [[nodiscard]] Rgb
 deposit_colour(const std::array<planet::Deposit, planet::resource_count>& deposits,

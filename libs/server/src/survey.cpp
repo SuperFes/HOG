@@ -55,11 +55,11 @@ Result<void> check_survey(const probe::Survey& survey) {
                                       "order on the planet",
                                       survey.west, survey.east, survey.north, survey.south));
     }
-    if (survey.width == 0 || survey.height == 0 || survey.width > most_survey_side ||
-        survey.height > most_survey_side) {
+    if (survey.width == 0 || survey.height == 0 || survey.width > probe::most_survey_side ||
+        survey.height > probe::most_survey_side) {
         return make_error(ErrorCode::InvalidArgument,
                           std::format("a survey takes 1 to {} samples a side, not {} by {}",
-                                      most_survey_side, survey.width, survey.height));
+                                      probe::most_survey_side, survey.width, survey.height));
     }
     if (!(survey.depth >= 0.0F) || std::isinf(survey.depth)) {
         return make_error(ErrorCode::InvalidArgument,

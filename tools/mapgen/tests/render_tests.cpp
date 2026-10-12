@@ -133,6 +133,17 @@ TEST_CASE("every biome has its own colour", "[mapgen]") {
     CHECK(colours.size() == hog::planet::biome_count);
 }
 
+TEST_CASE("every rock and resource has its own colour", "[mapgen]") {
+    std::set<hog::mapgen::Rgb> colours;
+    for (int rock = 0; rock < hog::planet::rock_count; ++rock) {
+        colours.insert(hog::mapgen::rock_colour(static_cast<hog::planet::Rock>(rock)));
+    }
+    for (int resource = 0; resource < hog::planet::resource_count; ++resource) {
+        colours.insert(hog::mapgen::resource_colour(static_cast<hog::planet::Resource>(resource)));
+    }
+    CHECK(colours.size() == hog::planet::rock_count + hog::planet::resource_count);
+}
+
 TEST_CASE("temperature colours run from blue through white to red", "[mapgen]") {
     const auto colour = [](std::int64_t celsius) {
         return hog::mapgen::temperature_colour(celsius * fixed_one);

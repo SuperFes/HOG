@@ -73,6 +73,17 @@ constexpr std::array<Rgb, planet::resource_count> resource_colours{{
     {255, 205, 0},   // gold
 }};
 
+// Indexed by rock.
+constexpr std::array<Rgb, planet::rock_count> rock_colours{{
+    {110, 80, 50},   // soil
+    {225, 205, 150}, // sand
+    {200, 140, 90},  // sandstone
+    {95, 100, 110},  // shale
+    {215, 210, 185}, // limestone
+    {190, 150, 145}, // granite
+    {55, 55, 60},    // basalt
+}};
+
 [[nodiscard]] double radians(double angle) {
     return angle * std::numbers::pi / 180.0;
 }
@@ -146,11 +157,19 @@ Rgb moisture_colour(std::int64_t moisture) noexcept {
     return ramp(moisture_stops, planet::fixed_to_double(moisture));
 }
 
+Rgb rock_colour(planet::Rock rock) noexcept {
+    return rock_colours.at(static_cast<std::size_t>(rock));
+}
+
+Rgb resource_colour(planet::Resource resource) noexcept {
+    return resource_colours.at(static_cast<std::size_t>(resource));
+}
+
 Rgb deposit_colour(const std::array<planet::Deposit, planet::resource_count>& deposits,
                    std::int64_t elevation) noexcept {
     for (const planet::Resource resource : planet::rarest_first) {
         if (!deposits.at(static_cast<std::size_t>(resource)).empty()) {
-            return resource_colours.at(static_cast<std::size_t>(resource));
+            return resource_colour(resource);
         }
     }
     if (elevation <= 0) {

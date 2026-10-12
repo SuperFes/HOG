@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -33,12 +35,22 @@ probe::Welcome welcome() {
                                      probe::LayerInfo{.name = "b", .unit = ""}}};
 }
 
+// Ground at the depth surveyed, which is as high as it is deep.
+probe::Ground surveyed(const probe::Survey& survey, jobs::JobSystem& /*jobs*/) {
+    const std::size_t samples = std::size_t{survey.width} * survey.height;
+    return probe::Ground{.survey = survey,
+                         .elevation = std::vector<float>(samples, survey.depth),
+                         .biome = std::vector<std::uint8_t>(samples, 0),
+                         .rock = {},
+                         .deposit = {}};
+}
+
 // A probe service answering from its own thread, as a server's tick thread would: every layer
 // asked for, filled with how many fetches it has answered.
 class Server {
 public:
     explicit Server(std::uint16_t port = 0) {
-        auto started = server::ProbeService::start(port, welcome());
+        auto started = server::ProbeService::start(port, welcome(), surveyed);
         REQUIRE(started);
         service_ = std::move(*started);
         thread_ = std::thread{[this] {
@@ -190,4 +202,34 @@ TEST_CASE("a link stops promptly, even while waiting on a server", "[viewer][lin
     const auto stopping = std::chrono::steady_clock::now();
     link.reset();
     CHECK(std::chrono::steady_clock::now() - stopping < 1s);
+}
+
+TEST_CASE("a link surveys the ground without waiting for the next fetch", "[viewer][link]") {
+    const Server server;
+    Link link{"127.0.0.1", server.port(),
+              Link::Timing{.fetch_every = 1h, .retry_after = 10ms, .patience = 5s}};
+    REQUIRE(eventually([&] { return link.frames() >= 1; }));
+    CHECK(link.ground() == nullptr);
+    const std::uint64_t before = link.grounds();
+    probe::Survey survey{.width = 4, .height = 2, .depth = 30.0F};
+    link.survey(survey);
+    REQUIRE(eventually([&] { return link.ground() != nullptr; }));
+    CHECK(link.grounds() > before);
+    CHECK(link.ground()->survey == survey);
+    CHECK(link.ground()->elevation == std::vector<float>(8, 30.0F));
+    CHECK(link.state().status == Link::Status::Connected);
+
+    survey.depth = 60.0F;
+    link.survey(survey);
+    CHECK(eventually([&] { return link.ground()->survey.depth == 60.0F; }));
+}
+
+TEST_CASE("a refused survey says why", "[viewer][link]") {
+    const Server server;
+    Link link{"127.0.0.1", server.port(),
+              Link::Timing{.fetch_every = 1h, .retry_after = 1h, .patience = 5s}};
+    REQUIRE(eventually([&] { return link.frames() >= 1; }));
+    link.survey(probe::Survey{.width = 0, .height = 0});
+    REQUIRE(eventually([&] { return link.state().status == Link::Status::Refused; }));
+    CHECK_FALSE(link.state().message.empty());
 }

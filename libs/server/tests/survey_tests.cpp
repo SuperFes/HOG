@@ -57,7 +57,7 @@ TEST_CASE("surveys must lie on the planet and be a sensible size", "[server][sur
     survey = whole(64);
     survey.height = 0;
     CHECK(refused(survey));
-    CHECK(refused(whole(server::most_survey_side + 2)));
+    CHECK(refused(whole(probe::most_survey_side + 2)));
     survey = whole(64);
     survey.depth = -1.0F;
     CHECK(refused(survey));
