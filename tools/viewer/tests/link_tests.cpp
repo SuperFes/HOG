@@ -47,7 +47,7 @@ public:
                     [this](const probe::Fetch& fetch) {
                         const auto answered = static_cast<float>(++answered_);
                         probe::Layers layers{.time = GameTime{std::chrono::seconds{answered_}},
-                                             .clock = {},
+                                             .clock = clock_,
                                              .layers = {}};
                         for (const std::string& name : fetch.names) {
                             layers.layers.push_back(probe::Layer{
@@ -55,8 +55,16 @@ public:
                         }
                         return layers;
                     },
-                    [](const probe::Control& /*unused*/) {
-                        return probe::Controlled{.clock = {}, .error = "not here"};
+                    [this](const probe::Control& control) {
+                        if (control.action == probe::Action::Speed && control.amount == 0) {
+                            return probe::Controlled{.clock = clock_, .error = "too slow"};
+                        }
+                        if (control.action == probe::Action::Speed) {
+                            clock_.scale = control.amount;
+                        }
+                        clock_.paused = control.action == probe::Action::Pause ||
+                                        (clock_.paused && control.action != probe::Action::Resume);
+                        return probe::Controlled{.clock = clock_, .error = {}};
                     });
                 std::this_thread::sleep_for(1ms);
             }
@@ -77,6 +85,7 @@ private:
     std::unique_ptr<server::ProbeService> service_;
     std::atomic<bool> stop_ = false;
     int answered_ = 0;
+    probe::Clock clock_;
     std::thread thread_;
 };
 
@@ -118,6 +127,25 @@ TEST_CASE("a link fetches the layers it wants, again and again", "[viewer][link]
 
     link.want({"b"});
     CHECK(eventually([&] { return !link.frame()->layer("b").empty(); }));
+}
+
+TEST_CASE("a link sends clock controls ahead of the next fetch", "[viewer][link]") {
+    const Server server;
+    // Slow fetches, so only a control hurries the next one.
+    Link link{"127.0.0.1", server.port(),
+              Link::Timing{.fetch_every = 1h, .retry_after = 10ms, .patience = 5s}};
+    REQUIRE(eventually([&] { return link.frames() >= 1; }));
+    const auto clock = [&] {
+        const auto frame = link.frame();
+        return frame != nullptr ? frame->clock() : probe::Clock{};
+    };
+    link.control(probe::Control{.action = probe::Action::Pause, .amount = 0});
+    CHECK(eventually([&] { return clock().paused; }));
+    link.control(probe::Control{.action = probe::Action::Speed, .amount = 0});
+    CHECK(eventually([&] { return link.control_error() == "too slow"; }));
+    link.control(probe::Control{.action = probe::Action::Speed, .amount = 60});
+    CHECK(eventually([&] { return clock() == probe::Clock{.paused = true, .scale = 60}; }));
+    CHECK(link.control_error().empty());
 }
 
 TEST_CASE("a link waits for a server and finds it again", "[viewer][link]") {

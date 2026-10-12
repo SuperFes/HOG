@@ -11,11 +11,12 @@ using hog::viewer::Frame;
 
 TEST_CASE("a frame finds its layers by name", "[viewer][frame]") {
     const probe::Layers layers{.time = GameTime{std::chrono::hours{5}},
-                               .clock = {},
+                               .clock = probe::Clock{.paused = true, .scale = 60},
                                .layers = {probe::Layer{.name = "a", .values = {1.0F, 2.0F, 3.0F}},
                                           probe::Layer{.name = "short", .values = {1.0F}}}};
     const Frame frame{probe::Welcome{}, layers, 3};
     CHECK(frame.time() == GameTime{std::chrono::hours{5}});
+    CHECK(frame.clock() == probe::Clock{.paused = true, .scale = 60});
     REQUIRE(frame.layer("a").size() == 3);
     CHECK(frame.layer("a")[2] == 3.0F);
     // Layers that don't cover every cell are as good as missing.

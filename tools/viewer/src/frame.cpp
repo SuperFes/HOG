@@ -6,7 +6,8 @@
 namespace hog::viewer {
 
 Frame::Frame(probe::Welcome welcome, probe::Layers layers, std::uint32_t cells)
-    : welcome_(std::move(welcome)), time_(layers.time), layers_(std::move(layers.layers)) {
+    : welcome_(std::move(welcome)), time_(layers.time), clock_(layers.clock),
+      layers_(std::move(layers.layers)) {
     std::erase_if(layers_,
                   [cells](const probe::Layer& layer) { return layer.values.size() != cells; });
 }

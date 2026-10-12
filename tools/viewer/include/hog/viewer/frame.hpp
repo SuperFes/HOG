@@ -20,6 +20,7 @@ public:
 
     [[nodiscard]] const probe::Welcome& welcome() const noexcept { return welcome_; }
     [[nodiscard]] GameTime time() const noexcept { return time_; }
+    [[nodiscard]] const probe::Clock& clock() const noexcept { return clock_; }
     // One value per cell, or empty if the server didn't send it.
     [[nodiscard]] std::span<const float> layer(std::string_view name) const noexcept;
 
@@ -29,6 +30,7 @@ public:
 private:
     probe::Welcome welcome_;
     GameTime time_;
+    probe::Clock clock_;
     std::vector<probe::Layer> layers_;
 };
 

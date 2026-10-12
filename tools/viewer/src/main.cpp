@@ -1,7 +1,9 @@
 #include <hog/core/time.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/mapgen/render.hpp>
+#include <hog/probe/messages.hpp>
 #include <hog/sim/cell_grid.hpp>
+#include <hog/viewer/clock_text.hpp>
 #include <hog/viewer/frame.hpp>
 #include <hog/viewer/link.hpp>
 #include <hog/viewer/map_view.hpp>
@@ -172,6 +174,45 @@ void choose(View& view, viewer::Link& link, viewer::Overlay overlay, std::string
     link.want(viewer::layers_for(view.overlay, view.species));
 }
 
+// Where the world's clock is against real time, and, if the server allows it, ways to change it.
+void clock_controls(viewer::Link& link, const viewer::Frame& frame) {
+    ImGui::TextUnformatted(
+        viewer::drift_text(frame.time(), to_game_time(WallClock::now())).c_str());
+    if (!frame.welcome().controllable) {
+        return;
+    }
+    const probe::Clock& clock = frame.clock();
+    const auto send = [&link](probe::Action action, std::uint32_t amount) {
+        link.control(probe::Control{.action = action, .amount = amount});
+    };
+    if (ImGui::Button(clock.paused ? "resume" : "pause")) {
+        send(clock.paused ? probe::Action::Resume : probe::Action::Pause, 0);
+    }
+    ImGui::BeginDisabled(!clock.paused);
+    for (const std::uint32_t ticks : {1U, 10U, 100U}) {
+        ImGui::SameLine();
+        if (ImGui::Button(std::format("+{}", ticks).c_str())) {
+            send(probe::Action::Step, ticks);
+        }
+    }
+    ImGui::EndDisabled();
+    for (const viewer::Speed& speed : viewer::speeds) {
+        if (ImGui::RadioButton(std::string{speed.label}.c_str(), clock.scale == speed.scale)) {
+            send(probe::Action::Speed, speed.scale);
+        }
+    }
+    if (ImGui::Button("rejoin real time")) {
+        send(probe::Action::RealTime, 0);
+    }
+    if (const std::string error = link.control_error(); !error.empty()) {
+        ImGui::PushTextWrapPos(0.0F);
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4{1.0F, 0.6F, 0.4F, 1.0F});
+        ImGui::TextUnformatted(error.c_str());
+        ImGui::PopStyleColor();
+        ImGui::PopTextWrapPos();
+    }
+}
+
 void sidebar(View& view, viewer::Link& link) {
     const viewer::Link::State state = link.state();
     const std::shared_ptr<const viewer::Frame> frame = link.frame();
@@ -184,6 +225,7 @@ void sidebar(View& view, viewer::Link& link) {
     if (frame != nullptr) {
         ImGui::TextUnformatted(std::format("world {:016x}", frame->welcome().world_id).c_str());
         ImGui::TextUnformatted(format_time(frame->time()).c_str());
+        clock_controls(link, *frame);
     }
     ImGui::Separator();
 

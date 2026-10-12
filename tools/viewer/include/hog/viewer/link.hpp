@@ -21,7 +21,8 @@ class Channel;
 namespace hog::viewer {
 
 // Keeps a tool talking to a server from its own thread: connecting, saying hello, then fetching
-// the layers it wants every so often, and connecting again whenever the server goes away.
+// the layers it wants every so often, and connecting again whenever the server goes away. Clock
+// controls go ahead of the next fetch.
 class Link {
 public:
     enum class Status : std::uint8_t {
@@ -52,8 +53,13 @@ public:
 
     // The layers to fetch from now on, starting at once.
     void want(std::vector<std::string> layers);
+    // Asks the server to change its clock, then fetches at once to show it. Dropped if the
+    // server goes away first.
+    void control(probe::Control control);
 
     [[nodiscard]] State state() const;
+    // Why the server didn't change its clock the last time it was asked, or empty if it did.
+    [[nodiscard]] std::string control_error() const;
     // The newest frame, or null before the first.
     [[nodiscard]] std::shared_ptr<const Frame> frame() const;
     // Frames received so far, to tell when there's a new one.
@@ -73,6 +79,8 @@ private:
     // The next message, waiting as long as a server may take; none if it went away or the link
     // is stopping.
     [[nodiscard]] std::optional<probe::Message> await(probe::Channel& channel);
+    // Sends the controls waiting; false if the server went away.
+    [[nodiscard]] bool send_controls(probe::Channel& channel);
     // Waits until a fetch is due, the wanted layers change, or the link stops; true if stopping.
     bool wait(std::chrono::milliseconds most);
     void set_state(Status status, std::string message = {});
@@ -86,6 +94,8 @@ private:
     std::condition_variable woken_;
     State state_;
     std::vector<std::string> wanted_;
+    std::vector<probe::Control> controls_;
+    std::string control_error_;
     bool changed_ = false;
     std::shared_ptr<const Frame> frame_;
     // Last, so it starts after everything it uses exists.
