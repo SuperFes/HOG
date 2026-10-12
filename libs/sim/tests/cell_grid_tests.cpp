@@ -66,6 +66,30 @@ TEST_CASE("grid gradients recover a smooth field's slope", "[sim][grid]") {
     CHECK(worst < 0.05);
 }
 
+TEST_CASE("grids interpolate between cells", "[sim][grid]") {
+    const CellGrid grid{4};
+    const auto value = [](std::uint32_t index) { return static_cast<double>(index % 7); };
+    for (std::uint32_t index = 0; index < grid.size(); index += 37) {
+        CHECK_THAT(grid.interpolate(grid.frame(index).up, value),
+                   Catch::Matchers::WithinAbs(value(index), 1e-9));
+        // Halfway to a neighbour stays within the values around both cells.
+        for (const std::uint32_t neighbor : grid.neighbors(index)) {
+            double low = value(index);
+            double high = low;
+            for (const std::uint32_t cell : {index, neighbor}) {
+                for (const std::uint32_t around : grid.neighbors(cell)) {
+                    low = std::min({low, value(cell), value(around)});
+                    high = std::max({high, value(cell), value(around)});
+                }
+            }
+            const DVec3 between = glm::normalize(grid.frame(index).up + grid.frame(neighbor).up);
+            const double halfway = grid.interpolate(between, value);
+            CHECK(halfway >= low - 1e-9);
+            CHECK(halfway <= high + 1e-9);
+        }
+    }
+}
+
 TEST_CASE("grids reject bad input", "[sim][grid]") {
     const hog::testing::AssertionGuard guard;
     using hog::testing::AssertionFailed;

@@ -2,9 +2,12 @@
 
 #include <hog/core/math.hpp>
 #include <hog/planet/cell_id.hpp>
+#include <hog/planet/projection.hpp>
 #include <hog/planet/tangent_frame.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <vector>
 
@@ -50,6 +53,13 @@ public:
         return gradient_weights_[index];
     }
 
+    // A field's value at a unit direction, where value(index) gives it at a cell: interpolated
+    // linearly from the cell under the point towards each neighbour, by how far the point lies
+    // in that neighbour's direction. The weights are never negative, so it never makes new
+    // highs or lows.
+    template <typename Value>
+    [[nodiscard]] double interpolate(DVec3 point, Value value) const;
+
 private:
     int level_;
     std::uint32_t side_;
@@ -59,5 +69,28 @@ private:
     std::vector<std::array<DVec2, 4>> offsets_;
     std::vector<std::array<DVec2, 4>> gradient_weights_;
 };
+
+template <typename Value>
+double CellGrid::interpolate(DVec3 point, Value value) const {
+    const std::uint32_t cell = index(planet::cell_at(point, level_));
+    const planet::TangentFrame& here = frames_[cell];
+    const DVec2 heading{glm::dot(point, here.east), glm::dot(point, here.north)};
+    const double length = glm::length(heading);
+    if (length == 0.0) {
+        return value(cell);
+    }
+    const double arc = std::atan2(length, glm::dot(point, here.up));
+    const DVec2 offset = heading * (arc / length);
+    double total = 0.0;
+    double toward = 0.0;
+    for (std::size_t k = 0; k < 4; ++k) {
+        const DVec2 to = offsets_[cell][k];
+        const double share = std::clamp(glm::dot(offset, to) / glm::dot(to, to), 0.0, 1.0);
+        total += share * value(neighbors_[cell][k]);
+        toward += share;
+    }
+    const double stay = std::max(1.0 - toward, 0.0);
+    return (total + (stay * value(cell))) / (toward + stay);
+}
 
 } // namespace hog::sim

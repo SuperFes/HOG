@@ -1,7 +1,5 @@
 #include "weather_stages.hpp"
 
-#include <hog/planet/projection.hpp>
-
 #include <algorithm>
 #include <cmath>
 #include <span>
@@ -23,35 +21,6 @@ DVec3 departure(const planet::TangentFrame& frame, Vec2 wind, double seconds) {
     return (frame.up * std::cos(angle)) - (heading * std::sin(angle));
 }
 
-// A field's value at a point, interpolated linearly from the cell under it towards each
-// neighbour by how far the point lies in that neighbour's direction. The weights are never
-// negative, so moving never makes new highs or lows.
-template <typename Value>
-double sample(const CellGrid& grid, DVec3 point, Value value) {
-    const std::uint32_t cell = grid.index(planet::cell_at(point, grid.level()));
-    const planet::TangentFrame& frame = grid.frame(cell);
-    const DVec2 heading{glm::dot(point, frame.east), glm::dot(point, frame.north)};
-    const double length = glm::length(heading);
-    if (length == 0.0) {
-        return value(cell);
-    }
-    const double arc = std::atan2(length, glm::dot(point, frame.up));
-    const DVec2 offset = heading * (arc / length);
-
-    const auto& around = grid.neighbors(cell);
-    const auto& offsets = grid.offsets(cell);
-    double total = 0.0;
-    double toward = 0.0;
-    for (std::size_t k = 0; k < around.size(); ++k) {
-        const double share =
-            std::clamp(glm::dot(offset, offsets[k]) / glm::dot(offsets[k], offsets[k]), 0.0, 1.0);
-        total += share * value(around[k]);
-        toward += share;
-    }
-    const double stay = std::max(1.0 - toward, 0.0);
-    return (total + (stay * value(cell))) / (toward + stay);
-}
-
 double at(std::span<const float> field, std::uint32_t index) {
     return static_cast<double>(field[index]);
 }
@@ -69,18 +38,18 @@ void move(const StepContext& step, const WeatherFields& before, WeatherFields& f
 
     const DVec3 low = departure(frame, steering, step.seconds);
     // Air keeps its warmth brought to sea level, so crossing mountains doesn't heat or chill it.
-    const double surface = sample(grid, low, [&](std::uint32_t cell) {
+    const double surface = grid.interpolate(low, [&](std::uint32_t cell) {
         return sea_level(at(before.temperature, cell), step.ground[cell]);
     });
     fields.temperature[index] = static_cast<float>(surface - sea_level(0.0, step.ground[index]));
     fields.vapour[index] = static_cast<float>(
-        sample(grid, low, [&](std::uint32_t cell) { return at(before.vapour, cell); }));
+        grid.interpolate(low, [&](std::uint32_t cell) { return at(before.vapour, cell); }));
     fields.cloud[index] = static_cast<float>(
-        sample(grid, low, [&](std::uint32_t cell) { return at(before.cloud, cell); }));
+        grid.interpolate(low, [&](std::uint32_t cell) { return at(before.cloud, cell); }));
 
     const DVec3 high = departure(frame, jet, step.seconds);
-    fields.upper_temperature[index] = static_cast<float>(
-        sample(grid, high, [&](std::uint32_t cell) { return at(before.upper_temperature, cell); }));
+    fields.upper_temperature[index] = static_cast<float>(grid.interpolate(
+        high, [&](std::uint32_t cell) { return at(before.upper_temperature, cell); }));
 }
 
 void conserve_water(const CellGrid& grid, const WeatherFields& before, WeatherFields& fields) {
