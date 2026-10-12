@@ -7,6 +7,7 @@
 #include <array>
 #include <format>
 #include <initializer_list>
+#include <limits>
 #include <string>
 #include <utility>
 
@@ -309,6 +310,20 @@ private:
     return {};
 }
 
+[[nodiscard]] Result<void> parse_debug(const Table& debug, DebugSettings& config) {
+    if (auto known = debug.only({"port"}); !known) {
+        return known;
+    }
+    const auto port = debug.integer("port", 1, std::numeric_limits<std::uint16_t>::max());
+    if (!port) {
+        return std::unexpected(port.error());
+    }
+    if (*port) {
+        config.port = static_cast<std::uint16_t>(**port);
+    }
+    return {};
+}
+
 } // namespace
 
 Result<ServerConfig> parse_server_config(std::string_view text, const std::filesystem::path& base) {
@@ -318,8 +333,8 @@ Result<ServerConfig> parse_server_config(std::string_view text, const std::files
         return make_error(ErrorCode::Parse, std::format("line {}: {}", error.source().begin.line,
                                                         error.description()));
     }
-    constexpr std::array<std::string_view, 7> names{"server",  "save",     "log",   "metrics",
-                                                    "weather", "wildlife", "forest"};
+    constexpr std::array<std::string_view, 8> names{"server",  "save",     "log",    "metrics",
+                                                    "weather", "wildlife", "forest", "debug"};
     std::array<const toml::table*, names.size()> tables{};
     for (const auto& [key, node] : parsed.table()) {
         const auto index =
@@ -355,6 +370,9 @@ Result<ServerConfig> parse_server_config(std::string_view text, const std::files
     }
     if (auto forest = parse_forest(Table{tables[6], "forest"}, base, config.forest); !forest) {
         return std::unexpected(forest.error());
+    }
+    if (auto debug = parse_debug(Table{tables[7], "debug"}, config.debug); !debug) {
+        return std::unexpected(debug.error());
     }
     return config;
 }

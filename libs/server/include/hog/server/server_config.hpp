@@ -44,6 +44,11 @@ struct ForestSettings {
     GameDuration step = std::chrono::hours{1};
 };
 
+struct DebugSettings {
+    // Where debug tools connect, on the loopback address only; without one, they can't.
+    std::optional<std::uint16_t> port;
+};
+
 struct ServerConfig {
     std::filesystem::path world; // the world database
     std::filesystem::path planet;
@@ -59,6 +64,7 @@ struct ServerConfig {
     WeatherSettings weather;
     WildlifeSettings wildlife;
     ForestSettings forest;
+    DebugSettings debug;
 };
 
 // Reads a server config. Relative paths are resolved against `base`, normally the directory of
@@ -95,6 +101,9 @@ struct ServerConfig {
 //     [forest]                   # optional
 //     vegetation = "forest.toml"
 //     step_hours = 1.0           # game time
+//
+//     [debug]                    # optional
+//     port = 7777                # for debug tools, on 127.0.0.1
 //
 // Unknown tables and keys are errors, so typos don't silently fall back to defaults.
 [[nodiscard]] Result<ServerConfig> parse_server_config(std::string_view text,

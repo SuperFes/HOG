@@ -28,3 +28,6 @@ step_hours = 24
 [forest]
 vegetation = "forest.toml"
 step_hours = 1
+
+[debug]
+port = 7777
