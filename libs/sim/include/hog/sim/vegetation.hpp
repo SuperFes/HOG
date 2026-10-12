@@ -41,9 +41,11 @@ struct FireConfig {
     // still air. With the wind it's multiplied by exp(wind × speed in m/s), and against it divided.
     double spread = 2.0;
     double wind = 0.15;
-    double burn_days = 2.0; // for a cell burning throughout to burn most of its fuel
+    double burn_days = 2.0; // for a fire to burn its cell down to the seeds
     double douse = 5.0;     // mm per day of rain that puts most of a fire out within a day
-    double out = 0.05;      // share of its cell below which a fire goes out
+    // A fire goes out burning less than this share of its cell, or with less than this share of
+    // its cell's plants left to burn.
+    double out = 0.05;
 };
 
 // How the planet's plants grow and burn.
