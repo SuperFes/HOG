@@ -4,8 +4,10 @@ add_library(hog_planet
     src/change.cpp
     src/climate.cpp
     src/continents.cpp
+    src/drainage.cpp
     src/elevation.cpp
     src/geology.cpp
+    src/level_grid.cpp
     src/neighbors.cpp
     src/planet_config.cpp
     src/projection.cpp
@@ -24,9 +26,11 @@ hog_add_tests(hog_planet
     tests/change_tests.cpp
     tests/climate_tests.cpp
     tests/continents_tests.cpp
+    tests/drainage_tests.cpp
     tests/elevation_tests.cpp
     tests/geology_tests.cpp
     tests/golden_tests.cpp
+    tests/level_grid_tests.cpp
     tests/neighbors_tests.cpp
     tests/noise_tests.cpp
     tests/planet_config_tests.cpp
