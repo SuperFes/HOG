@@ -1,9 +1,12 @@
 #include <hog/app/probe_layers.hpp>
+#include <hog/planet/projection.hpp>
+#include <hog/server/survey.hpp>
 
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <numbers>
 #include <span>
 #include <string>
 #include <string_view>
@@ -127,6 +130,27 @@ probe::Layers fetch_layers(const LayerSources& sources, const probe::Fetch& fetc
         }
     });
     return layers;
+}
+
+probe::Inspection inspect_layers(const LayerSources& sources, const probe::Inspect& inspect,
+                                 GameTime time) {
+    const double radius = sources.weather.config().planet_radius;
+    const DVec3 direction = planet::direction_at(inspect.latitude * std::numbers::pi / 180.0,
+                                                 inspect.longitude * std::numbers::pi / 180.0);
+    const sim::CellGrid& grid = sources.weather.grid();
+    const std::uint32_t cell = grid.index(planet::cell_at(direction, grid.level()));
+    probe::Inspection inspection{
+        .inspect = inspect,
+        .time = time,
+        .cell = cell,
+        .values = {},
+        .column = server::ground_column(sources.planet.geology(), radius, inspect)};
+    std::vector<float> values;
+    each_layer(sources, [&](std::string_view /*name*/, std::string_view /*unit*/, auto&& fill) {
+        fill(values);
+        inspection.values.push_back(values[cell]);
+    });
+    return inspection;
 }
 
 } // namespace hog::app

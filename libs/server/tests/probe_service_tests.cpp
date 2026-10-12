@@ -76,6 +76,13 @@ public:
                                                 Clock{.paused = control.action == Action::Pause,
                                                       .scale = control.amount},
                                             .error = {}};
+                      },
+                      [](const Inspect& inspect) {
+                          return Inspection{.inspect = inspect,
+                                            .time = GameTime{std::chrono::seconds{7}},
+                                            .cell = 3,
+                                            .values = {1.0F},
+                                            .column = {}};
                       });
                   std::this_thread::sleep_for(1ms);
               }
@@ -116,6 +123,32 @@ TEST_CASE("a tool's controls are answered between ticks", "[server][probe]") {
     REQUIRE(tool.send(Control{.action = Action::Pause, .amount = 5}));
     CHECK(received(tool) ==
           Message{Controlled{.clock = Clock{.paused = true, .scale = 5}, .error = {}}});
+}
+
+TEST_CASE("a tool's inspections are answered between ticks", "[server][probe]") {
+    const auto service = started();
+    Channel tool = welcomed(*service);
+    const Inspect inspect{.latitude = 12.5, .longitude = -170.0};
+    REQUIRE(tool.send(inspect));
+    auto early = tool.receive(200ms);
+    REQUIRE(early);
+    CHECK_FALSE(early->has_value());
+    const Ticking ticking{*service};
+    const Message answer = received(tool);
+    REQUIRE(std::holds_alternative<Inspection>(answer));
+    CHECK(std::get<Inspection>(answer).inspect == inspect);
+    CHECK(std::get<Inspection>(answer).cell == 3);
+}
+
+TEST_CASE("an inspection off the planet is refused", "[server][probe]") {
+    const auto service = started();
+    Channel tool = welcomed(*service);
+    const Ticking ticking{*service};
+    REQUIRE(tool.send(Inspect{.latitude = 91.0, .longitude = 0.0}));
+    const Message answer = received(tool);
+    REQUIRE(std::holds_alternative<Refused>(answer));
+    CHECK(std::get<Refused>(answer).reason.contains("planet"));
+    CHECK_FALSE(tool.receive(5s));
 }
 
 TEST_CASE("a tool may only fetch and control once welcomed", "[server][probe]") {

@@ -26,4 +26,9 @@ struct LayerSources {
 [[nodiscard]] probe::Layers fetch_layers(const LayerSources& sources, const probe::Fetch& fetch,
                                          GameTime time);
 
+// Every layer's value at the cell under a checked point, in catalogue order, with the generated
+// ground beneath it, as of `time`.
+[[nodiscard]] probe::Inspection inspect_layers(const LayerSources& sources,
+                                               const probe::Inspect& inspect, GameTime time);
+
 } // namespace hog::app

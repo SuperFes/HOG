@@ -100,7 +100,7 @@ public:
 
     [[nodiscard]] Strata strata(CellId cell) const;
 
-    // Every resource's seam under the cell, indexed by resource. Only land holds deposits.
+    // Every resource's seam under the cell, indexed by resource. The deep ocean floor holds none.
     [[nodiscard]] std::array<Deposit, resource_count> deposits(CellId cell) const;
 
     // Cubic metres of a seam under the cell.

@@ -129,3 +129,57 @@ TEST_CASE("the whole planet has land and sea", "[server][survey]") {
     CHECK(std::ranges::any_of(ground.elevation, [](float metres) { return metres > 0.0F; }));
     CHECK(std::ranges::any_of(ground.elevation, [](float metres) { return metres < 0.0F; }));
 }
+
+TEST_CASE("inspections must lie on the planet", "[server][survey]") {
+    CHECK(server::check_inspect(probe::Inspect{.latitude = 90.0, .longitude = -180.0}));
+    CHECK(server::check_inspect(probe::Inspect{.latitude = -90.0, .longitude = 180.0}));
+    for (const probe::Inspect off :
+         {probe::Inspect{.latitude = 90.5, .longitude = 0.0},
+          probe::Inspect{.latitude = 0.0, .longitude = -180.5},
+          probe::Inspect{.latitude = std::numeric_limits<double>::quiet_NaN(), .longitude = 0.0}}) {
+        const auto checked = server::check_inspect(off);
+        REQUIRE_FALSE(checked);
+        CHECK(checked.error().code == ErrorCode::InvalidArgument);
+    }
+}
+
+TEST_CASE("inspected ground is the generated ground about a metre across", "[server][survey]") {
+    const double metres =
+        std::numbers::pi / 2.0 * radius / std::ldexp(1.0, server::inspect_level(radius));
+    CHECK(metres <= 1.0);
+    CHECK(metres > 0.4);
+
+    bool seen_seams = false;
+    for (int point = 0; point < 200; ++point) {
+        const probe::Inspect inspect{.latitude = -60.0 + (point * 0.6),
+                                     .longitude = -179.0 + (point * 1.7)};
+        const probe::Column column = server::ground_column(geology(), radius, inspect);
+        const planet::CellId cell =
+            planet::cell_at(planet::direction_at(inspect.latitude * std::numbers::pi / 180.0,
+                                                 inspect.longitude * std::numbers::pi / 180.0),
+                            server::inspect_level(radius));
+        const planet::Strata strata = geology().strata(cell);
+        CHECK(column.elevation ==
+              static_cast<float>(planet::fixed_to_double(geology().terrain().elevation(cell))));
+        CHECK(column.biome == std::to_underlying(geology().climate().biome(cell)));
+        CHECK(column.continental == geology().continental(cell));
+        CHECK(column.cover == std::to_underlying(strata.cover));
+        CHECK(column.sediment == std::to_underlying(strata.sediment));
+        CHECK(column.bedrock == std::to_underlying(strata.bedrock));
+        CHECK(column.cover_thickness ==
+              static_cast<float>(planet::fixed_to_double(strata.cover_thickness)));
+
+        const auto deposits = geology().deposits(cell);
+        CHECK(column.seams.size() ==
+              static_cast<std::size_t>(std::ranges::count_if(
+                  deposits, [](const planet::Deposit& deposit) { return !deposit.empty(); })));
+        CHECK(std::ranges::is_sorted(column.seams, {}, &probe::Seam::top));
+        for (const probe::Seam& seam : column.seams) {
+            const planet::Deposit& deposit = deposits.at(seam.resource);
+            CHECK(seam.top == static_cast<float>(planet::fixed_to_double(deposit.top)));
+            CHECK(seam.thickness == static_cast<float>(planet::fixed_to_double(deposit.thickness)));
+        }
+        seen_seams = seen_seams || column.seams.size() > 1;
+    }
+    CHECK(seen_seams);
+}

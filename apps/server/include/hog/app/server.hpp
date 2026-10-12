@@ -213,7 +213,10 @@ void Server::serve_probe(Clock clock, Steer steer) {
                 layers.clock = clock();
                 return layers;
             },
-            steer);
+            steer,
+            [&](const probe::Inspect& inspect) {
+                return inspect_layers(layer_sources(), inspect, time_);
+            });
     }
 }
 

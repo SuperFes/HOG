@@ -25,9 +25,9 @@
 namespace hog::server {
 
 // Answers debug tools on a loopback port while the server runs. Each tool talks on its own
-// thread, but its fetches and controls wait for the tick thread to answer them between ticks, so
-// nothing else ever touches the world while it changes. Surveys read only what never changes, so
-// the tool's thread answers them itself, with its own jobs, rather than hold up a tick.
+// thread, but its fetches, controls and inspections wait for the tick thread to answer them between
+// ticks, so nothing else ever touches the world while it changes. Surveys read only what never
+// changes, so the tool's thread answers them itself, with its own jobs, rather than hold up a tick.
 class ProbeService {
     // Lets start() construct through make_unique while nothing else can.
     struct Started {
@@ -57,15 +57,17 @@ public:
     [[nodiscard]] std::uint16_t port() const noexcept { return port_; }
     [[nodiscard]] std::size_t tools() const;
 
-    // Answers what is waiting: each fetch with build(fetch), each control with steer(control).
-    template <typename Build, typename Steer>
+    // Answers what is waiting: each fetch with build(fetch), each control with steer(control),
+    // and each checked inspection with look(inspect).
+    template <typename Build, typename Steer, typename Look>
         requires std::same_as<std::invoke_result_t<Build&, const probe::Fetch&>, probe::Layers> &&
                  std::same_as<std::invoke_result_t<Steer&, const probe::Control&>,
-                              probe::Controlled>
-    void serve(Build build, Steer steer);
+                              probe::Controlled> &&
+                 std::same_as<std::invoke_result_t<Look&, const probe::Inspect&>, probe::Inspection>
+    void serve(Build build, Steer steer, Look look);
 
 private:
-    using Request = std::variant<probe::Fetch, probe::Control>;
+    using Request = std::variant<probe::Fetch, probe::Control, probe::Inspect>;
     struct Waiting {
         Request request;
         std::promise<probe::Message> answer;
@@ -101,10 +103,11 @@ private:
     std::thread listening_;
 };
 
-template <typename Build, typename Steer>
+template <typename Build, typename Steer, typename Look>
     requires std::same_as<std::invoke_result_t<Build&, const probe::Fetch&>, probe::Layers> &&
-             std::same_as<std::invoke_result_t<Steer&, const probe::Control&>, probe::Controlled>
-void ProbeService::serve(Build build, Steer steer) {
+             std::same_as<std::invoke_result_t<Steer&, const probe::Control&>, probe::Controlled> &&
+             std::same_as<std::invoke_result_t<Look&, const probe::Inspect&>, probe::Inspection>
+void ProbeService::serve(Build build, Steer steer, Look look) {
     if (!asked_.load(std::memory_order_acquire)) {
         return;
     }
@@ -117,10 +120,13 @@ void ProbeService::serve(Build build, Steer steer) {
     for (Waiting& asked : waiting) {
         asked.answer.set_value(std::visit(
             [&](const auto& request) -> probe::Message {
-                if constexpr (std::same_as<std::decay_t<decltype(request)>, probe::Fetch>) {
+                using Asked = std::decay_t<decltype(request)>;
+                if constexpr (std::same_as<Asked, probe::Fetch>) {
                     return build(request);
-                } else {
+                } else if constexpr (std::same_as<Asked, probe::Control>) {
                     return steer(request);
+                } else {
+                    return look(request);
                 }
             },
             std::as_const(asked.request)));

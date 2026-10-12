@@ -20,4 +20,14 @@ namespace hog::server {
 [[nodiscard]] probe::Ground survey_ground(const planet::Geology& geology, double planet_radius,
                                           const probe::Survey& survey, jobs::JobSystem& jobs);
 
+// Fails unless the point lies on the planet.
+[[nodiscard]] Result<void> check_inspect(const probe::Inspect& inspect);
+
+// The cell level ground is inspected at: about a metre across, finer than the generator's detail.
+[[nodiscard]] int inspect_level(double planet_radius);
+
+// The generated ground under a checked point. Like a survey, any thread may call it.
+[[nodiscard]] probe::Column ground_column(const planet::Geology& geology, double planet_radius,
+                                          const probe::Inspect& inspect);
+
 } // namespace hog::server

@@ -77,6 +77,53 @@ int survey_level(const probe::Survey& survey, double planet_radius) {
                              planet_radius);
 }
 
+Result<void> check_inspect(const probe::Inspect& inspect) {
+    // Written so NaN fails too.
+    const bool on_planet = inspect.latitude >= -90.0 && inspect.latitude <= 90.0 &&
+                           inspect.longitude >= -180.0 && inspect.longitude <= 180.0;
+    if (!on_planet) {
+        return make_error(ErrorCode::InvalidArgument,
+                          std::format("latitude {} longitude {} isn't on the planet",
+                                      inspect.latitude, inspect.longitude));
+    }
+    return {};
+}
+
+int inspect_level(double planet_radius) {
+    return planet::level_for(1.0, planet_radius);
+}
+
+probe::Column ground_column(const planet::Geology& geology, double planet_radius,
+                            const probe::Inspect& inspect) {
+    HOG_ASSERT(check_inspect(inspect).has_value(), "inspection not checked");
+    const planet::CellId cell =
+        planet::cell_at(planet::direction_at(radians(inspect.latitude), radians(inspect.longitude)),
+                        inspect_level(planet_radius));
+    const auto metres = [](std::int64_t fixed) {
+        return static_cast<float>(planet::fixed_to_double(fixed));
+    };
+    const planet::Strata strata = geology.strata(cell);
+    probe::Column column{.elevation = metres(geology.terrain().elevation(cell)),
+                         .biome = std::to_underlying(geology.climate().biome(cell)),
+                         .continental = geology.continental(cell),
+                         .cover = std::to_underlying(strata.cover),
+                         .cover_thickness = metres(strata.cover_thickness),
+                         .sediment = std::to_underlying(strata.sediment),
+                         .sediment_thickness = metres(strata.sediment_thickness),
+                         .bedrock = std::to_underlying(strata.bedrock),
+                         .seams = {}};
+    const auto deposits = geology.deposits(cell);
+    for (std::size_t resource = 0; resource < deposits.size(); ++resource) {
+        if (!deposits[resource].empty()) {
+            column.seams.push_back(probe::Seam{.resource = static_cast<std::uint8_t>(resource),
+                                               .top = metres(deposits[resource].top),
+                                               .thickness = metres(deposits[resource].thickness)});
+        }
+    }
+    std::ranges::stable_sort(column.seams, {}, &probe::Seam::top);
+    return column;
+}
+
 probe::Ground survey_ground(const planet::Geology& geology, double planet_radius,
                             const probe::Survey& survey, jobs::JobSystem& jobs) {
     HOG_ASSERT(check_survey(survey).has_value(), "survey not checked");

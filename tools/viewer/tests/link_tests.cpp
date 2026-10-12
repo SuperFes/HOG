@@ -77,6 +77,15 @@ public:
                         clock_.paused = control.action == probe::Action::Pause ||
                                         (clock_.paused && control.action != probe::Action::Resume);
                         return probe::Controlled{.clock = clock_, .error = {}};
+                    },
+                    [this](const probe::Inspect& inspect) {
+                        return probe::Inspection{
+                            .inspect = inspect,
+                            .time = GameTime{std::chrono::seconds{answered_}},
+                            .cell = 1,
+                            .values = std::vector<float>(welcome().layers.size(),
+                                                         static_cast<float>(answered_)),
+                            .column = {}};
                     });
                 std::this_thread::sleep_for(1ms);
             }

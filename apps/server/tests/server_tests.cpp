@@ -1,6 +1,8 @@
 #include <hog/app/probe_layers.hpp>
 #include <hog/app/server.hpp>
+#include <hog/planet/projection.hpp>
 #include <hog/probe/channel.hpp>
+#include <hog/server/survey.hpp>
 #include <hog/testing/temporary_directory.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -8,10 +10,12 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <numbers>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -354,6 +358,38 @@ TEST_CASE("the world's layers are laid out for debug tools", "[app][server]") {
         CHECK(rain.layers[0].values[cell] ==
               static_cast<float>(static_cast<double>(fallen[cell]) * steps_per_hour));
     }
+}
+
+TEST_CASE("inspecting a point gives every layer at its cell", "[app][server]") {
+    const World world;
+    const auto server = opened(world.config());
+    const hog::app::LayerSources sources{.planet = server->planet(),
+                                         .weather = server->weather(),
+                                         .wildlife = server->wildlife(),
+                                         .forest = server->forest()};
+    const auto catalogue = hog::app::layer_catalogue(sources);
+    hog::probe::Fetch every;
+    for (const hog::probe::LayerInfo& layer : catalogue) {
+        every.names.push_back(layer.name);
+    }
+    const auto layers = hog::app::fetch_layers(sources, every, start);
+    REQUIRE(layers.layers.size() == catalogue.size());
+
+    const hog::probe::Inspect inspect{.latitude = 21.5, .longitude = -40.25};
+    const auto inspection = hog::app::inspect_layers(sources, inspect, start);
+    CHECK(inspection.inspect == inspect);
+    CHECK(inspection.time == start);
+    const hog::sim::CellGrid& grid = server->weather().grid();
+    const hog::DVec3 direction = hog::planet::direction_at(21.5 * std::numbers::pi / 180.0,
+                                                           -40.25 * std::numbers::pi / 180.0);
+    CHECK(inspection.cell == grid.index(hog::planet::cell_at(direction, grid.level())));
+    REQUIRE(inspection.values.size() == catalogue.size());
+    for (std::size_t layer = 0; layer < catalogue.size(); ++layer) {
+        CHECK(inspection.values[layer] == layers.layers[layer].values[inspection.cell]);
+    }
+    CHECK(inspection.column == hog::server::ground_column(server->planet().geology(),
+                                                          server->weather().config().planet_radius,
+                                                          inspect));
 }
 
 TEST_CASE("debug tools fetch layers from a running server", "[app][server]") {

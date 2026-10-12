@@ -149,9 +149,15 @@ void ProbeService::talk(probe::Channel channel) {
             request = std::move(*fetch);
         } else if (const auto* control = std::get_if<probe::Control>(&**message)) {
             request = *control;
+        } else if (const auto* inspect = std::get_if<probe::Inspect>(&**message)) {
+            if (auto checked = check_inspect(*inspect); !checked) {
+                std::ignore = channel.send(probe::Refused{.reason = checked.error().message});
+                return;
+            }
+            request = *inspect;
         } else {
-            std::ignore =
-                channel.send(probe::Refused{.reason = "expected a fetch, control or survey"});
+            std::ignore = channel.send(
+                probe::Refused{.reason = "expected a fetch, control, survey or inspection"});
             return;
         }
         const std::optional<probe::Message> answer = ask(std::move(*request));
