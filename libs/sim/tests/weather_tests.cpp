@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <numbers>
 #include <numeric>
+#include <utility>
 #include <vector>
 
 using namespace std::chrono;
@@ -238,6 +239,75 @@ TEST_CASE("weather drifts east in the westerlies and west in the trades", "[sim]
     CHECK(trades < -1.0);
 }
 
+TEST_CASE("air rises where the trades meet and sinks under the subtropical highs",
+          "[sim][weather]") {
+    const WeatherConfig fine{.level = 4};
+    const Weather weather{fine, std::vector<Ground>(hog::sim::CellGrid{fine.level}.size(), sea),
+                          march_equinox};
+    double equator = 0.0;
+    double subtropics = 0.0;
+    for (std::uint32_t index = 0; index < weather.grid().size(); ++index) {
+        const double latitude = std::abs(std::asin(weather.grid().frame(index).up.z)) / degree;
+        const auto lift = static_cast<double>(weather.fields().lift[index]);
+        if (latitude < 6.0) {
+            equator += lift;
+        } else if (latitude > 22.0 && latitude < 35.0) {
+            subtropics += lift;
+        }
+    }
+    CHECK(equator > 0.0);
+    CHECK(subtropics < 0.0);
+}
+
+TEST_CASE("mountains rain on their windward side and shelter their lee", "[sim][weather]") {
+    JobSystem jobs{1};
+    const WeatherConfig fine{.level = 4};
+    const hog::sim::CellGrid grid{fine.level};
+    const auto longitude = [&](std::uint32_t index) {
+        const DVec3 up = grid.frame(index).up;
+        return std::atan2(up.y, up.x) / degree;
+    };
+    const auto latitude = [&](std::uint32_t index) {
+        return std::asin(grid.frame(index).up.z) / degree;
+    };
+    // A ridge running north and south through the westerlies.
+    const std::vector<Ground> flat(grid.size(), Ground{.mean_temperature = 12.0F});
+    std::vector<Ground> ridged = flat;
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        if (std::abs(longitude(index)) < 3.0 && latitude(index) > 30.0 && latitude(index) < 60.0) {
+            // As cool as the climate makes high ground.
+            ridged[index] = Ground{
+                .mean_temperature = -4.0F, .elevation = 2'500.0F, .wetness = 0.5F, .ocean = false};
+        }
+    }
+    // Rain upwind of the ridge and water vapour downwind, over five days.
+    const auto rain = [&](const std::vector<Ground>& ground) {
+        Weather weather{fine, ground, march_equinox};
+        double windward = 0.0;
+        double lee = 0.0;
+        for (int hour = 1; hour <= 120; ++hour) {
+            weather.advance_to(march_equinox + hours{hour}, jobs);
+            for (std::uint32_t index = 0; index < grid.size(); ++index) {
+                if (latitude(index) < 35.0 || latitude(index) > 55.0) {
+                    continue;
+                }
+                if (longitude(index) > -9.0 && longitude(index) < -3.0) {
+                    windward += static_cast<double>(weather.fields().rain[index] +
+                                                    weather.fields().snow[index]);
+                } else if (longitude(index) > 3.0 && longitude(index) < 9.0) {
+                    lee += static_cast<double>(weather.fields().vapour[index]);
+                }
+            }
+        }
+        return std::pair{windward, lee};
+    };
+    const auto [flat_rain, flat_vapour] = rain(flat);
+    const auto [windward_rain, lee_vapour] = rain(ridged);
+    CHECK(windward_rain > flat_rain * 1.2);
+    // Air coming down the far side is drier.
+    CHECK(lee_vapour < flat_vapour * 0.85);
+}
+
 TEST_CASE("weather comes out the same on any number of threads", "[sim][weather]") {
     JobSystem one{1};
     JobSystem many{4};
@@ -270,6 +340,15 @@ TEST_CASE("weather saves and loads", "[sim][weather]") {
     const auto newer = loaded.load(Weather::save_version + 1, bytes);
     REQUIRE_FALSE(newer);
     CHECK(newer.error().code == hog::ErrorCode::Unsupported);
+
+    // Weather saved before air rose and sank loads without it.
+    Weather current{config(), everywhere(land), june_solstice};
+    REQUIRE(current.load(Weather::save_version, bytes));
+    Weather old{config(), everywhere(land), june_solstice};
+    const std::size_t lift_bytes = old.fields().size() * sizeof(float);
+    REQUIRE(old.load(1, std::span{bytes}.first(bytes.size() - lift_bytes)));
+    CHECK(std::ranges::all_of(old.fields().lift, [](float lift) { return lift == 0.0F; }));
+    CHECK(old.fields().temperature == current.fields().temperature);
 
     const std::span<const std::byte> all{bytes};
     CHECK_FALSE(loaded.load(Weather::save_version, all.first(all.size() - 1)));

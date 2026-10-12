@@ -26,7 +26,8 @@ struct WeatherConfig {
     GameDuration step = std::chrono::minutes{10};
     // The day the weather's heating and the Coriolis force follow, which needn't be the sun's.
     GameDuration day = std::chrono::hours{24};
-    double axial_tilt = 23.44; // degrees
+    double axial_tilt = 23.44;        // degrees
+    double planet_radius = 115'000.0; // metres, for how steep the ground is
     WeatherTuning tuning{};
 };
 
@@ -60,6 +61,8 @@ struct WeatherFields {
     std::vector<float> hail;
     // Thunderstorm strength over the last step, 0 to 1.
     std::vector<float> storm;
+    // How fast the air is rising, in m/s; negative where it sinks.
+    std::vector<float> lift;
 
     explicit WeatherFields(std::size_t size = 0);
 
@@ -96,7 +99,7 @@ public:
     // carried over.
     [[nodiscard]] Result<void> load(std::uint16_t version, std::span<const std::byte> bytes);
 
-    static constexpr std::uint16_t save_version = 1;
+    static constexpr std::uint16_t save_version = 2;
 
 private:
     void step(GameTime at, jobs::JobSystem& jobs);
@@ -106,6 +109,8 @@ private:
     WeatherConfig config_;
     CellGrid grid_;
     std::vector<Ground> ground_;
+    // How the ground rises per metre east and north.
+    std::vector<DVec2> slopes_;
     Calendar calendar_;
     WeatherFields fields_;
     // The fields as the step began, which moving reads from.

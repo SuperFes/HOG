@@ -38,7 +38,7 @@ GameDuration positive(GameDuration duration) {
 WeatherFields::WeatherFields(std::size_t size)
     : temperature(size), upper_temperature(size), pressure(size), vapour(size), cloud(size),
       wind(size, Vec2{0.0F}), jet(size, Vec2{0.0F}), evaporation(size), rain(size), snow(size),
-      hail(size), storm(size) {}
+      hail(size), storm(size), lift(size) {}
 
 float WeatherFields::cloud_cover(std::size_t index) const {
     return 1.0F - std::exp(-cloud[index] / cloud_cover_depth);
@@ -72,6 +72,17 @@ Weather::Weather(const WeatherConfig& config, std::vector<Ground> ground, GameTi
     HOG_ASSERT(config.step > GameDuration::zero(), "weather step must be positive");
     HOG_ASSERT(config.day > GameDuration::zero(), "weather day must be positive");
     HOG_ASSERT(ground_.size() == grid_.size(), "need ground for every cell");
+    HOG_ASSERT(config.planet_radius > 0.0, "planet radius must be positive");
+    slopes_.reserve(grid_.size());
+    for (std::uint32_t index = 0; index < grid_.size(); ++index) {
+        DVec2 slope{0.0};
+        for (std::size_t k = 0; k < 4; ++k) {
+            slope += grid_.gradient_weights(index)[k] *
+                     static_cast<double>(ground_[grid_.neighbors(index)[k]].elevation -
+                                         ground_[index].elevation);
+        }
+        slopes_.push_back(slope / config.planet_radius);
+    }
     const double sin_declination = detail::sin_declination(time_, config_.axial_tilt);
     for (std::uint32_t index = 0; index < grid_.size(); ++index) {
         const detail::Targets target = detail::targets(config_.tuning.heat, ground_[index],
@@ -105,6 +116,7 @@ void Weather::step(GameTime at, jobs::JobSystem& jobs) {
         .config = &config_,
         .grid = &grid_,
         .ground = ground_,
+        .slopes = slopes_,
         .calendar = &calendar_,
         .middle = middle,
         .seconds = Seconds{config_.step}.count(),
@@ -127,6 +139,7 @@ void Weather::balance_winds(jobs::JobSystem* jobs) {
         .config = &config_,
         .grid = &grid_,
         .ground = ground_,
+        .slopes = slopes_,
         .calendar = &calendar_,
         .middle = time_,
         .seconds = 0.0,
@@ -136,6 +149,8 @@ void Weather::balance_winds(jobs::JobSystem* jobs) {
                       [&](std::uint32_t index) { detail::pressure(context, fields_, index); });
     detail::for_cells(jobs, grid_.size(),
                       [&](std::uint32_t index) { detail::winds(context, fields_, index); });
+    detail::for_cells(jobs, grid_.size(),
+                      [&](std::uint32_t index) { detail::lift(context, fields_, index); });
 }
 
 } // namespace hog::sim

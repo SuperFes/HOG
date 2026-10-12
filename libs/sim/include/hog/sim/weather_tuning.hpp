@@ -74,8 +74,23 @@ struct MotionTuning {
     double jet_steering = 0.4;
 };
 
+// Rising air cools, so it clouds over and rains sooner; sinking air dries out. Air rises where
+// surface winds converge and where they blow up a slope.
+struct LiftTuning {
+    double converging_depth = 1'000.0; // metres of air squeezed upwards where winds converge
+    // Share of the ground's real steepness the wind climbs; the planet's slopes are steep for
+    // the distances weather travels.
+    double slope_share = 0.05;
+    double reference = 0.05; // m/s of rising that counts as strong
+    double humidity = 0.25;  // how much sooner strongly rising air condenses
+    double storm = 6.0;      // °C of storm contrast strongly rising air adds
+    // Sinking air warms as it is squeezed, so it holds more water and its cloud melts away.
+    double foehn = 8.0; // °C strongly sinking air warms by
+};
+
 struct WeatherTuning {
     MotionTuning motion{};
+    LiftTuning lift{};
     HeatTuning heat{};
     WindTuning wind{};
     WaterTuning water{};

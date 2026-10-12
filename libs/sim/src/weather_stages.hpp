@@ -21,6 +21,7 @@ struct StepContext {
     const WeatherConfig* config;
     const CellGrid* grid;
     std::span<const Ground> ground;
+    std::span<const DVec2> slopes;
     const Calendar* calendar;
     GameTime middle; // halfway through the step
     double seconds;  // the step's length
@@ -68,6 +69,9 @@ void water(const StepContext& step, WeatherFields& fields, std::uint32_t index);
 void pressure(const StepContext& step, WeatherFields& fields, std::uint32_t index);
 // Surface wind and jet from the pressure and upper air around the cell.
 void winds(const StepContext& step, WeatherFields& fields, std::uint32_t index);
+
+// How fast the air rises where the winds around the cell converge or climb the ground.
+void lift(const StepContext& step, WeatherFields& fields, std::uint32_t index);
 
 // Runs body(index) for every cell, across the jobs when given.
 template <typename F>

@@ -1,6 +1,7 @@
 #include "weather_stages.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace hog::sim::detail {
 
@@ -9,6 +10,9 @@ void water(const StepContext& step, WeatherFields& fields, std::uint32_t index) 
     const StormTuning& storms = step.config->tuning.storms;
     const Ground& ground = step.ground[index];
     const double storm_move = approach(step.seconds, storms.response);
+    const LiftTuning& lifting = step.config->tuning.lift;
+    // From -1 for strongly sinking air to 1 for strongly rising.
+    const double rising = std::tanh(static_cast<double>(fields.lift[index]) / lifting.reference);
 
     auto surface = static_cast<double>(fields.temperature[index]);
     auto upper = static_cast<double>(fields.upper_temperature[index]);
@@ -21,7 +25,8 @@ void water(const StepContext& step, WeatherFields& fields, std::uint32_t index) 
     vapour += evaporation;
 
     // Thunderstorms rain straight out of the air and stir the column towards neutral.
-    const double contrast = sea_level(surface, ground) + vapour - upper - storms.neutral_contrast;
+    const double contrast = sea_level(surface, ground) + vapour - upper - storms.neutral_contrast +
+                            (lifting.storm * std::max(rising, 0.0));
     const double storm = std::clamp(contrast / storms.full_contrast, 0.0, 1.0);
     const double convected = storm * vapour * storms.rain_out * storm_move;
     vapour -= convected;
@@ -30,18 +35,22 @@ void water(const StepContext& step, WeatherFields& fields, std::uint32_t index) 
     surface -= ground.ocean ? 0.0 : mixed * storms.land_cooling;
     upper += mixed;
 
-    const double limit = tuning.condensing_humidity * holds;
+    const double sinking = std::max(-rising, 0.0);
+    const double limit = std::min(tuning.condensing_humidity - (lifting.humidity * rising), 1.0) *
+                         saturation(surface + (lifting.foehn * sinking));
     if (vapour > limit) {
         cloud += vapour - limit;
         vapour = limit;
     } else {
-        const double cleared =
-            std::min(cloud, limit - vapour) * approach(step.seconds, tuning.cloud_clearing);
+        const double cleared = std::min(cloud, limit - vapour) *
+                               approach(step.seconds * (1.0 + sinking), tuning.cloud_clearing);
         cloud -= cleared;
         vapour += cleared;
     }
+    // Rising air rains its cloud out sooner.
     const double stratiform =
-        std::max(cloud - tuning.raining_cloud, 0.0) * approach(step.seconds, tuning.rain_out);
+        std::max(cloud - tuning.raining_cloud, 0.0) *
+        approach(step.seconds * (1.0 + std::max(rising, 0.0)), tuning.rain_out);
     cloud -= stratiform;
 
     const double storm_fall = convected * (1.0 - storms.anvil);

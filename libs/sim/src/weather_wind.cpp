@@ -69,4 +69,19 @@ void winds(const StepContext& step, WeatherFields& fields, std::uint32_t index) 
     fields.jet[index] = Vec2{capped(wind + shear, tuning.max_jet)};
 }
 
+void lift(const StepContext& step, WeatherFields& fields, std::uint32_t index) {
+    const LiftTuning& tuning = step.config->tuning.lift;
+    const auto& around = step.grid->neighbors(index);
+    const auto& weights = step.grid->gradient_weights(index);
+    const DVec2 wind{fields.wind[index]};
+    double divergence = 0.0;
+    for (std::size_t k = 0; k < around.size(); ++k) {
+        const DVec2 change = DVec2{fields.wind[around[k]]} - wind;
+        divergence += (weights[k].x * change.x) + (weights[k].y * change.y);
+    }
+    divergence /= earth_radius;
+    const double climbing = glm::dot(wind, step.slopes[index]) * tuning.slope_share;
+    fields.lift[index] = static_cast<float>((-divergence * tuning.converging_depth) + climbing);
+}
+
 } // namespace hog::sim::detail

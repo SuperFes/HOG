@@ -2,45 +2,57 @@
 #include <hog/sim/weather.hpp>
 
 #include <bit>
+#include <cstdint>
 #include <format>
+#include <type_traits>
 #include <utility>
 
 namespace hog::sim {
+
+namespace {
+
+// Every saved field in order, with the version that added it. Fields only ever join at the end,
+// and an older save leaves the newer ones at zero.
+template <typename Fields, typename Visit>
+void each_field(Fields& fields, Visit visit) {
+    visit(fields.temperature, 1);
+    visit(fields.upper_temperature, 1);
+    visit(fields.pressure, 1);
+    visit(fields.vapour, 1);
+    visit(fields.cloud, 1);
+    visit(fields.wind, 1);
+    visit(fields.jet, 1);
+    visit(fields.evaporation, 1);
+    visit(fields.rain, 1);
+    visit(fields.snow, 1);
+    visit(fields.hail, 1);
+    visit(fields.storm, 1);
+    visit(fields.lift, 2);
+}
+
+} // namespace
 
 std::vector<std::byte> Weather::save() const {
     ByteWriter out;
     out.write(static_cast<std::uint8_t>(grid_.level()));
     out.write(static_cast<std::uint64_t>(time_.time_since_epoch().count()));
-    const auto floats = [&](const std::vector<float>& values) {
-        for (const float value : values) {
-            out.write(std::bit_cast<std::uint32_t>(value));
+    each_field(fields_, [&](const auto& values, int /*since*/) {
+        for (const auto value : values) {
+            if constexpr (std::is_same_v<std::remove_cvref_t<decltype(value)>, Vec2>) {
+                out.write(std::bit_cast<std::uint32_t>(value.x));
+                out.write(std::bit_cast<std::uint32_t>(value.y));
+            } else {
+                out.write(std::bit_cast<std::uint32_t>(value));
+            }
         }
-    };
-    const auto vectors = [&](const std::vector<Vec2>& values) {
-        for (const Vec2 value : values) {
-            out.write(std::bit_cast<std::uint32_t>(value.x));
-            out.write(std::bit_cast<std::uint32_t>(value.y));
-        }
-    };
-    floats(fields_.temperature);
-    floats(fields_.upper_temperature);
-    floats(fields_.pressure);
-    floats(fields_.vapour);
-    floats(fields_.cloud);
-    vectors(fields_.wind);
-    vectors(fields_.jet);
-    floats(fields_.evaporation);
-    floats(fields_.rain);
-    floats(fields_.snow);
-    floats(fields_.hail);
-    floats(fields_.storm);
+    });
     return std::move(out).take();
 }
 
 Result<void> Weather::load(std::uint16_t version, std::span<const std::byte> bytes) {
-    if (version != save_version) {
+    if (version == 0 || version > save_version) {
         return make_error(ErrorCode::Unsupported,
-                          std::format("weather version {} is newer than this build", version));
+                          std::format("weather version {} is unknown to this build", version));
     }
     ByteReader in{bytes};
     const auto level = in.read<std::uint8_t>();
@@ -65,29 +77,19 @@ Result<void> Weather::load(std::uint16_t version, std::span<const std::byte> byt
         }
         return std::bit_cast<float>(bits.value_or(0U));
     };
-    const auto floats = [&](std::vector<float>& values) {
-        for (float& value : values) {
-            value = next();
+    each_field(loaded, [&](auto& values, int since) {
+        if (std::cmp_greater(since, version)) {
+            return;
         }
-    };
-    const auto vectors = [&](std::vector<Vec2>& values) {
-        for (Vec2& value : values) {
-            value.x = next();
-            value.y = next();
+        for (auto& value : values) {
+            if constexpr (std::is_same_v<std::remove_cvref_t<decltype(value)>, Vec2>) {
+                value.x = next();
+                value.y = next();
+            } else {
+                value = next();
+            }
         }
-    };
-    floats(loaded.temperature);
-    floats(loaded.upper_temperature);
-    floats(loaded.pressure);
-    floats(loaded.vapour);
-    floats(loaded.cloud);
-    vectors(loaded.wind);
-    vectors(loaded.jet);
-    floats(loaded.evaporation);
-    floats(loaded.rain);
-    floats(loaded.snow);
-    floats(loaded.hail);
-    floats(loaded.storm);
+    });
     if (!read) {
         return read;
     }
