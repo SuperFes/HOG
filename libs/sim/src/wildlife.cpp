@@ -177,7 +177,7 @@ void Wildlife::move(const detail::LifeContext& context, std::uint32_t species,
     }
 
     detail::for_cells(&jobs, grid_.size(), [&](std::uint32_t cell) {
-        leaving_[cell] = detail::leaving(context, scent_, species, cell);
+        leaving_[cell] = detail::leaving(context, appeal_, scent_, species, cell);
     });
 
     // Each cell gathers its arrivals, so no two cells write to the same place.

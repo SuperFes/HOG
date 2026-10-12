@@ -2,8 +2,9 @@
 
 namespace hog::sim::detail {
 
-std::array<float, 4> leaving(const LifeContext& step, std::span<const float> scent,
-                             std::uint32_t species, std::uint32_t cell) {
+std::array<float, 4> leaving(const LifeContext& step, std::span<const float> appeal,
+                             std::span<const float> scent, std::uint32_t species,
+                             std::uint32_t cell) {
     const Species& one = step.config->ecology.species[species];
     std::array<float, 4> leaving{};
     if (dormant(one, static_cast<double>(step.conditions.temperature[cell]))) {
@@ -36,12 +37,19 @@ std::array<float, 4> leaving(const LifeContext& step, std::span<const float> sce
     const double width = std::sqrt(step.areas[cell]);
     const double wander = ways > 0 ? std::min(one.wander * step.days / width, 0.5) / ways : 0.0;
     const double urgency = std::min(most / (1.0 - step.config->scent_fade), 1.0);
-    const double head =
-        sum > 0.0 ? std::min(one.speed * step.days / width, 1.0) * urgency / sum : 0.0;
+    const double reach = std::min(one.speed * step.days / width, 1.0);
+    const double head = sum > 0.0 ? reach * urgency / sum : 0.0;
     std::array<double, 4> share{};
     double total = 0.0;
     for (std::size_t k = 0; k < 4; ++k) {
-        share[k] = (livable[k] ? wander : 0.0) + (head * better[k]);
+        double heading = head * better[k];
+        // Better ground right next door gets worse as animals arrive, so only enough go to close
+        // part of the gap; any more and they'd all turn round and come back the next step.
+        if (scent[next[k]] <= appeal[next[k]]) {
+            constexpr double closing = 0.5;
+            heading = std::min(heading, better[k] * closing);
+        }
+        share[k] = (livable[k] ? wander : 0.0) + heading;
         total += share[k];
     }
     constexpr double most_leaving = 0.95;

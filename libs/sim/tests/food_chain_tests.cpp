@@ -25,6 +25,7 @@ namespace {
 
 constexpr int level = 3;
 constexpr int run_years = 20;
+constexpr int reach_years = 5;
 constexpr GameTime march_equinox{(sys_days{2026y / March / 20} + hours{15}).time_since_epoch()};
 
 // A year of the planet's weather as wildlife sees it, one day at a time, to replay year after
@@ -94,7 +95,7 @@ std::uint32_t id_of(const hog::sim::Ecology& ecology, std::string_view name) {
     return found.value_or(0);
 }
 
-// Yearly totals of each species, and how far north the deer reach in the last summer and winter.
+// Yearly totals of each species, and how far north the deer reach in the last summers and winters.
 struct Run {
     std::vector<std::vector<double>> totals;
     double summer_reach = 0.0;
@@ -123,12 +124,12 @@ Run run(Wildlife& wildlife, const RecordedYear& weather, const hog::sim::CellGri
         for (int day = 0; day < 365; ++day) {
             wildlife.advance_to(march_equinox + days{(year * 365) + day + 1}, weather.on(day),
                                 jobs);
-            // Midsummer and midwinter in the north, the last year.
-            if (year == run_years - 1 && day == 95) {
-                result.summer_reach = northern_reach(wildlife, grid, deer);
+            // Midsummer and midwinter in the north, over the last years.
+            if (year >= run_years - reach_years && day == 95) {
+                result.summer_reach += northern_reach(wildlife, grid, deer) / reach_years;
             }
-            if (year == run_years - 1 && day == 280) {
-                result.winter_reach = northern_reach(wildlife, grid, deer);
+            if (year >= run_years - reach_years && day == 280) {
+                result.winter_reach += northern_reach(wildlife, grid, deer) / reach_years;
             }
         }
         for (std::uint32_t species = 0; species < result.totals.size(); ++species) {

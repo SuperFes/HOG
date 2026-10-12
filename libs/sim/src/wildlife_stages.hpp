@@ -75,7 +75,8 @@ void live(const LifeContext& step, WildlifeFields& fields, std::uint32_t cell);
 
 // The share of a cell's animals leaving for each of its neighbours: some wander off at random,
 // and some head for where the scent of better ground is stronger.
-[[nodiscard]] std::array<float, 4> leaving(const LifeContext& step, std::span<const float> scent,
-                                           std::uint32_t species, std::uint32_t cell);
+[[nodiscard]] std::array<float, 4> leaving(const LifeContext& step, std::span<const float> appeal,
+                                           std::span<const float> scent, std::uint32_t species,
+                                           std::uint32_t cell);
 
 } // namespace hog::sim::detail

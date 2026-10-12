@@ -237,6 +237,33 @@ TEST_CASE("animals head for better ground and back again", "[sim][wildlife]") {
     CHECK(std::abs(wildlife.total(0) - start) < 1e-3 * start);
 }
 
+TEST_CASE("fast animals settle onto better ground without overshooting", "[sim][wildlife]") {
+    JobSystem jobs{1};
+    Species raven = grazer();
+    raven.births = 0.0;
+    raven.lifespan = 1e4;
+    raven.starving = 0.0;
+    raven.speed = 40.0;
+    Wildlife wildlife{config({raven}), grassland(), march_equinox};
+    constexpr std::uint32_t crowded = 5;
+    wildlife.add(0, crowded, 10'000.0F);
+    const Steady weather;
+    // Ground overshot one step is better left the next, so the count would swing up and down for
+    // good; settling, it only does at first.
+    wildlife.advance_to(march_equinox + days{14}, weather.conditions(), jobs);
+    int swings = 0;
+    float before = wildlife.fields().populations[0].count[crowded];
+    float change = 0.0F;
+    for (int day = 15; day <= 30; ++day) {
+        wildlife.advance_to(march_equinox + days{day}, weather.conditions(), jobs);
+        const float now = wildlife.fields().populations[0].count[crowded];
+        swings += (now - before) * change < 0.0F ? 1 : 0;
+        change = now - before;
+        before = now;
+    }
+    CHECK(swings == 0);
+}
+
 TEST_CASE("young are born in their season in either hemisphere", "[sim][wildlife]") {
     JobSystem jobs{1};
     Species deer = grazer();
