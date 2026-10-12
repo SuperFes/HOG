@@ -9,6 +9,7 @@
 #include <hog/sim/vegetation.hpp>
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string_view>
@@ -117,6 +118,14 @@ public:
     bool ignite(std::uint32_t cell);
     // Fires since the last call. They aren't saved.
     [[nodiscard]] FireReport drain_fires();
+
+    // Versioned bytes for a snapshot section.
+    [[nodiscard]] std::vector<std::byte> save() const;
+    // Replaces the state with saved bytes, or fails and changes nothing: with Unsupported for a
+    // newer version, and InvalidArgument for a forest saved at another grid level.
+    [[nodiscard]] Result<void> load(std::uint16_t version, std::span<const std::byte> bytes);
+
+    static constexpr std::uint16_t save_version = 1;
 
 private:
     // How a cell catches fire on a step.

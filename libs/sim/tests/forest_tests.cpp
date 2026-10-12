@@ -6,7 +6,9 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -332,4 +334,41 @@ TEST_CASE("fires spread the same on any number of threads", "[sim][forest]") {
     const hog::sim::ForestFields one = run(1);
     CHECK(std::ranges::count_if(one.biomass, [](float biomass) { return biomass < 10.0F; }) > 0);
     CHECK(run(4) == one);
+}
+
+TEST_CASE("a forest saves and loads, fires and all", "[sim][forest]") {
+    Forest saved{config(), woods(), start};
+    JobSystem jobs{1};
+    const Weather dry = drought(saved.grid().size());
+    saved.advance_to(saved.next_step(), dry.conditions(), jobs);
+    REQUIRE(saved.ignite(middle()));
+    saved.advance_to(saved.time() + days{1}, dry.conditions(), jobs);
+    REQUIRE(saved.burning() > 0);
+    const auto bytes = saved.save();
+
+    Forest loaded{config(), woods(), start + days{400}};
+    REQUIRE(loaded.load(Forest::save_version, bytes));
+    CHECK(loaded.time() == saved.time());
+    CHECK(loaded.fields() == saved.fields());
+    saved.advance_to(saved.time() + days{5}, dry.conditions(), jobs);
+    loaded.advance_to(loaded.time() + days{5}, dry.conditions(), jobs);
+    CHECK(loaded.fields() == saved.fields());
+
+    ForestConfig finer_config = config();
+    finer_config.level = level + 1;
+    Forest finer{finer_config, std::vector<Soil>(hog::sim::CellGrid{level + 1}.size()), start};
+    const auto other_level = finer.load(Forest::save_version, bytes);
+    REQUIRE_FALSE(other_level);
+    CHECK(other_level.error().code == hog::ErrorCode::InvalidArgument);
+    const auto newer = loaded.load(Forest::save_version + 1, bytes);
+    REQUIRE_FALSE(newer);
+    CHECK(newer.error().code == hog::ErrorCode::Unsupported);
+
+    const auto before = loaded.fields();
+    const std::span<const std::byte> all{bytes};
+    CHECK_FALSE(loaded.load(Forest::save_version, all.first(all.size() - 1)));
+    auto longer = bytes;
+    longer.push_back(std::byte{0});
+    CHECK_FALSE(loaded.load(Forest::save_version, longer));
+    CHECK(loaded.fields() == before);
 }
