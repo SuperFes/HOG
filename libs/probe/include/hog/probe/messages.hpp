@@ -15,7 +15,7 @@
 // u32 payload length, a u8 kind, then the payload, little-endian throughout.
 namespace hog::probe {
 
-inline constexpr std::uint16_t protocol_version = 2;
+inline constexpr std::uint16_t protocol_version = 3;
 // Large enough for every layer of a level 7 grid; anything bigger is a broken or hostile peer.
 inline constexpr std::uint32_t max_payload = 64U << 20U;
 
@@ -111,7 +111,34 @@ struct Controlled {
     friend bool operator==(const Controlled&, const Controlled&) = default;
 };
 
-using Message = std::variant<Hello, Welcome, Refused, Fetch, Layers, Control, Controlled>;
+// Tool to server: the generated ground under part of the planet, sampled at the centres of a grid
+// of equal latitude and longitude steps, as finely as the samples are apart.
+struct Survey {
+    double west = -180.0; // degrees of longitude
+    double east = 180.0;
+    double north = 90.0; // degrees of latitude
+    double south = -90.0;
+    std::uint16_t width = 0; // samples across
+    std::uint16_t height = 0;
+    bool underground = false; // whether to send what is at `depth`, which costs more
+    float depth = 0.0F;       // metres below the surface
+
+    friend bool operator==(const Survey&, const Survey&) = default;
+};
+
+// Server to tool, answering Survey: one value per sample, row by row from the north-west.
+struct Ground {
+    Survey survey;
+    std::vector<float> elevation;      // metres above sea level
+    std::vector<std::uint8_t> biome;   // planet::Biome
+    std::vector<std::uint8_t> rock;    // planet::Rock at the depth; empty unless underground
+    std::vector<std::uint8_t> deposit; // the rarest planet::Resource there plus one, or 0; likewise
+
+    friend bool operator==(const Ground&, const Ground&) = default;
+};
+
+using Message =
+    std::variant<Hello, Welcome, Refused, Fetch, Layers, Control, Controlled, Survey, Ground>;
 
 // The whole frame for a message.
 [[nodiscard]] std::vector<std::byte> encode(const Message& message);

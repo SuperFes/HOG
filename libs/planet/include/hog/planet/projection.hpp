@@ -42,6 +42,9 @@ struct FaceUV {
 [[nodiscard]] WorldPosition surface_position(CellId cell, double radius);
 [[nodiscard]] CellId cell_at(WorldPosition position, int level = max_level);
 
+// The unit direction at a latitude and longitude in radians: north is +Z and longitude 0 is +X.
+[[nodiscard]] DVec3 direction_at(double latitude, double longitude) noexcept;
+
 // The coarsest level whose cells are at most `cell_size` metres across on average.
 [[nodiscard]] int level_for(double cell_size, double planet_radius);
 

@@ -148,6 +148,17 @@ std::string_view to_string(Rock rock) noexcept {
     return "unknown";
 }
 
+std::optional<Resource> resource_at(const std::array<Deposit, resource_count>& deposits,
+                                    std::int64_t depth) noexcept {
+    for (const Resource resource : rarest_first) {
+        const Deposit& deposit = deposits.at(static_cast<std::size_t>(resource));
+        if (!deposit.empty() && depth >= deposit.top && depth < deposit.top + deposit.thickness) {
+            return resource;
+        }
+    }
+    return std::nullopt;
+}
+
 std::string_view to_string(Resource resource) noexcept {
     switch (resource) {
     case Resource::Clay:

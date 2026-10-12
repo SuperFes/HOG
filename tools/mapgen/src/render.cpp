@@ -73,24 +73,12 @@ constexpr std::array<Rgb, planet::resource_count> resource_colours{{
     {255, 205, 0},   // gold
 }};
 
-// Rarest first.
-constexpr std::array rarity{
-    planet::Resource::Gold, planet::Resource::Tin,  planet::Resource::Copper,
-    planet::Resource::Salt, planet::Resource::Coal, planet::Resource::Iron,
-    planet::Resource::Clay,
-};
-
 [[nodiscard]] double radians(double angle) {
     return angle * std::numbers::pi / 180.0;
 }
 
 [[nodiscard]] double degrees(double angle) {
     return angle * 180.0 / std::numbers::pi;
-}
-
-[[nodiscard]] DVec3 direction_at(double latitude, double longitude) {
-    return {std::cos(latitude) * std::cos(longitude), std::cos(latitude) * std::sin(longitude),
-            std::sin(latitude)};
 }
 
 } // namespace
@@ -124,8 +112,8 @@ DVec3 pixel_direction(const View& view, ImageSize size, int x, int y, double pla
     const double across = (x + 0.5) / size.width;
     const double down = (y + 0.5) / size.height;
     if (std::holds_alternative<PlanetView>(view)) {
-        return direction_at((0.5 - down) * std::numbers::pi,
-                            (across - 0.5) * 2.0 * std::numbers::pi);
+        return planet::direction_at((0.5 - down) * std::numbers::pi,
+                                    (across - 0.5) * 2.0 * std::numbers::pi);
     }
     if (const auto* face = std::get_if<FaceView>(&view)) {
         return glm::normalize(planet::face_uv_to_xyz(face->face, planet::st_to_uv(across),
@@ -133,7 +121,7 @@ DVec3 pixel_direction(const View& view, ImageSize size, int x, int y, double pla
     }
     HOG_ASSERT(std::holds_alternative<RegionView>(view), "view not resolved");
     const auto& region = std::get<RegionView>(view);
-    const DVec3 center = direction_at(radians(region.latitude), radians(region.longitude));
+    const DVec3 center = planet::direction_at(radians(region.latitude), radians(region.longitude));
     const planet::TangentFrame frame = planet::tangent_frame(center);
     const double east = (across - 0.5) * region.width;
     const double north = (0.5 - down) * region.width * size.height / size.width;
@@ -160,7 +148,7 @@ Rgb moisture_colour(std::int64_t moisture) noexcept {
 
 Rgb deposit_colour(const std::array<planet::Deposit, planet::resource_count>& deposits,
                    std::int64_t elevation) noexcept {
-    for (const planet::Resource resource : rarity) {
+    for (const planet::Resource resource : planet::rarest_first) {
         if (!deposits.at(static_cast<std::size_t>(resource)).empty()) {
             return resource_colours.at(static_cast<std::size_t>(resource));
         }

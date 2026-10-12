@@ -81,6 +81,30 @@ TEST_CASE("every message survives a round trip", "[probe][messages]") {
     const Controlled controlled{.clock = Clock{.paused = false, .scale = 3'600},
                                 .error = "time control is off"};
     CHECK(round_trip(controlled) == Message{controlled});
+
+    const Survey survey{.west = -12.5,
+                        .east = 30.0,
+                        .north = 45.25,
+                        .south = -2.0,
+                        .width = 2,
+                        .height = 1,
+                        .underground = true,
+                        .depth = 120.5F};
+    CHECK(round_trip(survey) == Message{survey});
+    const Ground ground{.survey = survey,
+                        .elevation = {-3'500.0F, 812.25F},
+                        .biome = {0, 7},
+                        .rock = {6, 4},
+                        .deposit = {0, 3}};
+    CHECK(round_trip(ground) == Message{ground});
+    Survey above = survey;
+    above.underground = false;
+    const Ground surface{.survey = above,
+                         .elevation = ground.elevation,
+                         .biome = ground.biome,
+                         .rock = {},
+                         .deposit = {}};
+    CHECK(round_trip(surface) == Message{surface});
 }
 
 TEST_CASE("a frame is its payload length, kind and payload", "[probe][messages]") {
@@ -173,6 +197,20 @@ TEST_CASE("broken streams fail and stay failed", "[probe][messages]") {
         payload.write(std::uint32_t{1});
         payload.write(std::uint16_t{0});
         reader.feed(frame(7, payload.bytes()));
+    }
+    SECTION("ground without a value for every sample") {
+        reader.feed(encode(Ground{.survey = Survey{.width = 2, .height = 2},
+                                  .elevation = {1.0F, 2.0F, 3.0F},
+                                  .biome = {0, 0, 0},
+                                  .rock = {},
+                                  .deposit = {}}));
+    }
+    SECTION("ground with rock it wasn't asked for") {
+        reader.feed(encode(Ground{.survey = Survey{.width = 1, .height = 1},
+                                  .elevation = {1.0F},
+                                  .biome = {0},
+                                  .rock = {1},
+                                  .deposit = {0}}));
     }
     const auto first = reader.next();
     REQUIRE_FALSE(first);

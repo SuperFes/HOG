@@ -77,6 +77,19 @@ TEST_CASE("face coordinates round-trip through cube points", "[planet][projectio
     }
 }
 
+TEST_CASE("latitude and longitude point out from the centre", "[planet][projection]") {
+    constexpr double quarter = std::numbers::pi / 2.0;
+    const auto check = [](DVec3 actual, DVec3 expected) {
+        CHECK_THAT(actual.x, WithinAbs(expected.x, 1e-12));
+        CHECK_THAT(actual.y, WithinAbs(expected.y, 1e-12));
+        CHECK_THAT(actual.z, WithinAbs(expected.z, 1e-12));
+    };
+    check(hog::planet::direction_at(0.0, 0.0), DVec3{1.0, 0.0, 0.0});
+    check(hog::planet::direction_at(0.0, quarter), DVec3{0.0, 1.0, 0.0});
+    check(hog::planet::direction_at(quarter, 1.0), DVec3{0.0, 0.0, 1.0});
+    check(hog::planet::direction_at(-quarter, 0.0), DVec3{0.0, 0.0, -1.0});
+}
+
 TEST_CASE("every cell contains its own centre", "[planet][projection]") {
     for (int level = 0; level <= 5; ++level) {
         const std::uint32_t size = 1U << level;

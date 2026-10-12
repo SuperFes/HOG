@@ -406,6 +406,24 @@ TEST_CASE("debug tools fetch layers from a running server", "[app][server]") {
     REQUIRE(layers->layers.size() == 1);
     CHECK(layers->layers[0].values.size() == server->weather().grid().size());
 
+    // Surveys don't wait for a tick.
+    const hog::probe::Survey survey{.west = -20.0,
+                                    .east = 20.0,
+                                    .north = 10.0,
+                                    .south = -10.0,
+                                    .width = 8,
+                                    .height = 4,
+                                    .underground = true,
+                                    .depth = 50.0F};
+    REQUIRE(tool.send(survey));
+    auto surveyed = tool.receive(10s);
+    REQUIRE(surveyed);
+    REQUIRE(surveyed->has_value());
+    const hog::probe::Message ground = surveyed->value_or(hog::probe::Message{});
+    REQUIRE(std::holds_alternative<hog::probe::Ground>(ground));
+    CHECK(std::get<hog::probe::Ground>(ground).survey == survey);
+    CHECK(std::get<hog::probe::Ground>(ground).rock.size() == 32);
+
     // A port already taken leaves the server running without one.
     config.debug.port = server->probe()->port();
     CHECK(opened(config)->probe() == nullptr);

@@ -7,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -79,6 +80,21 @@ TEST_CASE("strata stack from the surface down", "[planet][geology]") {
                           .sediment_thickness = 0,
                           .bedrock = Rock::Basalt};
     static_assert(bare.rock_at(0) == Rock::Basalt);
+}
+
+TEST_CASE("the rarest seam at a depth is the one found there", "[planet][geology]") {
+    std::array<hog::planet::Deposit, hog::planet::resource_count> deposits{};
+    deposits.at(index(Resource::Clay)) = {.top = 0, .thickness = 10 * fixed_one};
+    deposits.at(index(Resource::Gold)) = {.top = 5 * fixed_one, .thickness = fixed_one};
+    CHECK(hog::planet::resource_at(deposits, 0) == Resource::Clay);
+    CHECK(hog::planet::resource_at(deposits, 5 * fixed_one) == Resource::Gold);
+    CHECK(hog::planet::resource_at(deposits, 6 * fixed_one) == Resource::Clay);
+    CHECK_FALSE(hog::planet::resource_at(deposits, 10 * fixed_one));
+    CHECK_FALSE(hog::planet::resource_at({}, 0));
+    CHECK(std::ranges::is_permutation(hog::planet::rarest_first,
+                                      std::array{Resource::Clay, Resource::Coal, Resource::Salt,
+                                                 Resource::Iron, Resource::Copper, Resource::Tin,
+                                                 Resource::Gold}));
 }
 
 TEST_CASE("every rock and resource has a distinct name", "[planet][geology]") {

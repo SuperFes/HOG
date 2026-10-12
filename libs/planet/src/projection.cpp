@@ -73,6 +73,11 @@ FaceUV xyz_to_face_uv(DVec3 direction) {
             .v = signed_component(direction, frame.v) / depth};
 }
 
+DVec3 direction_at(double latitude, double longitude) noexcept {
+    return {std::cos(latitude) * std::cos(longitude), std::cos(latitude) * std::sin(longitude),
+            std::sin(latitude)};
+}
+
 DVec3 cell_center(CellId cell) {
     const FaceIJ ij = cell.to_face_ij();
     // The centre sits half a cell in, which is the corner of the first child.

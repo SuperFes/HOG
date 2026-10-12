@@ -5,6 +5,8 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -188,4 +190,54 @@ TEST_CASE("stopping hangs up on tools, even mid-fetch", "[server][probe]") {
     CHECK_FALSE(idle.receive(5s));
     CHECK_FALSE(fetching.receive(5s));
     CHECK_FALSE(silent.receive(5s));
+}
+
+TEST_CASE("surveys are answered without waiting for a tick", "[server][probe]") {
+    std::atomic<std::uint32_t> threads = 0;
+    auto service = ProbeService::start(
+        0, sample_welcome(), [&threads](const Survey& survey, jobs::JobSystem& jobs) {
+            threads.store(jobs.thread_count());
+            const std::size_t samples = std::size_t{survey.width} * survey.height;
+            return Ground{.survey = survey,
+                          .elevation = std::vector<float>(samples, 12.5F),
+                          .biome = std::vector<std::uint8_t>(samples, 3),
+                          .rock = {},
+                          .deposit = {}};
+        });
+    REQUIRE(service);
+    Channel tool = welcomed(**service);
+    const Survey survey{.west = -10.0,
+                        .east = 10.0,
+                        .north = 5.0,
+                        .south = -5.0,
+                        .width = 4,
+                        .height = 2,
+                        .underground = false,
+                        .depth = 0.0F};
+    for (int twice = 0; twice < 2; ++twice) {
+        REQUIRE(tool.send(survey));
+        const Message answer = received(tool);
+        REQUIRE(std::holds_alternative<Ground>(answer));
+        CHECK(std::get<Ground>(answer).survey == survey);
+        CHECK(std::get<Ground>(answer).elevation == std::vector<float>(8, 12.5F));
+    }
+    CHECK(threads.load() >= 1);
+}
+
+TEST_CASE("bad surveys, and surveys of a server without them, are refused", "[server][probe]") {
+    const auto ground = [](const Survey& survey, jobs::JobSystem& /*jobs*/) {
+        return Ground{.survey = survey, .elevation = {}, .biome = {}, .rock = {}, .deposit = {}};
+    };
+    auto service = ProbeService::start(0, sample_welcome(), ground);
+    REQUIRE(service);
+    Channel tool = welcomed(**service);
+    REQUIRE(tool.send(Survey{.west = 10.0, .east = -10.0, .width = 1, .height = 1}));
+    const Message answer = received(tool);
+    REQUIRE(std::holds_alternative<Refused>(answer));
+    CHECK(std::get<Refused>(answer).reason.contains("edges"));
+
+    const auto plain = started();
+    Channel other = welcomed(*plain);
+    REQUIRE(other.send(Survey{.width = 1, .height = 1}));
+    CHECK(std::holds_alternative<Refused>(received(other)));
 }

@@ -21,6 +21,8 @@ enum class Kind : std::uint8_t {
     Layers = 5,
     Control = 6,
     Controlled = 7,
+    Survey = 8,
+    Ground = 9,
 };
 
 constexpr std::size_t header_size = sizeof(std::uint32_t) + sizeof(std::uint8_t);
@@ -45,6 +47,12 @@ constexpr Kind kind_of(const Control& /*unused*/) noexcept {
 }
 constexpr Kind kind_of(const Controlled& /*unused*/) noexcept {
     return Kind::Controlled;
+}
+constexpr Kind kind_of(const Survey& /*unused*/) noexcept {
+    return Kind::Survey;
+}
+constexpr Kind kind_of(const Ground& /*unused*/) noexcept {
+    return Kind::Ground;
 }
 
 void write_text(ByteWriter& out, const std::string& text) {
@@ -118,6 +126,32 @@ void write_body(ByteWriter& out, const Control& control) {
 void write_body(ByteWriter& out, const Controlled& controlled) {
     write_clock(out, controlled.clock);
     write_text(out, controlled.error);
+}
+
+void write_body(ByteWriter& out, const Survey& survey) {
+    for (const double edge : {survey.west, survey.east, survey.north, survey.south}) {
+        out.write(std::bit_cast<std::uint64_t>(edge));
+    }
+    out.write(survey.width);
+    out.write(survey.height);
+    write_flag(out, survey.underground);
+    out.write(std::bit_cast<std::uint32_t>(survey.depth));
+}
+
+void write_bytes(ByteWriter& out, const std::vector<std::uint8_t>& values) {
+    write_count(out, values.size());
+    out.write_bytes(std::as_bytes(std::span{values}));
+}
+
+void write_body(ByteWriter& out, const Ground& ground) {
+    write_body(out, ground.survey);
+    write_count(out, ground.elevation.size());
+    for (const float value : ground.elevation) {
+        out.write(std::bit_cast<std::uint32_t>(value));
+    }
+    write_bytes(out, ground.biome);
+    write_bytes(out, ground.rock);
+    write_bytes(out, ground.deposit);
 }
 
 std::string read_text(ValueReader& in) {
@@ -220,6 +254,49 @@ Controlled read_controlled(ValueReader& in) {
     return Controlled{.clock = clock, .error = read_text(in)};
 }
 
+Survey read_survey(ValueReader& in) {
+    Survey survey;
+    survey.west = in.twice();
+    survey.east = in.twice();
+    survey.north = in.twice();
+    survey.south = in.twice();
+    survey.width = in.integer<std::uint16_t>();
+    survey.height = in.integer<std::uint16_t>();
+    survey.underground = read_flag(in);
+    survey.depth = in.single();
+    return survey;
+}
+
+std::vector<std::uint8_t> read_bytes(ValueReader& in) {
+    std::vector<std::uint8_t> values(read_count(in, sizeof(std::uint8_t)));
+    for (std::uint8_t& value : values) {
+        value = in.integer<std::uint8_t>();
+    }
+    return values;
+}
+
+Ground read_ground(ValueReader& in) {
+    Ground ground{
+        .survey = read_survey(in), .elevation = {}, .biome = {}, .rock = {}, .deposit = {}};
+    ground.elevation.resize(read_count(in, sizeof(std::uint32_t)));
+    for (float& value : ground.elevation) {
+        value = in.single();
+    }
+    ground.biome = read_bytes(in);
+    ground.rock = read_bytes(in);
+    ground.deposit = read_bytes(in);
+    const std::size_t samples =
+        static_cast<std::size_t>(ground.survey.width) * ground.survey.height;
+    const std::size_t below = ground.survey.underground ? samples : 0;
+    if (in.ok() && (ground.elevation.size() != samples || ground.biome.size() != samples ||
+                    ground.rock.size() != below || ground.deposit.size() != below)) {
+        in.fail(Error{.code = ErrorCode::Parse,
+                      .message = std::format("ground values don't match its {} by {} samples",
+                                             ground.survey.width, ground.survey.height)});
+    }
+    return ground;
+}
+
 Result<Message> decode(Kind kind, std::span<const std::byte> payload) {
     ValueReader in{payload};
     Message message;
@@ -244,6 +321,12 @@ Result<Message> decode(Kind kind, std::span<const std::byte> payload) {
         break;
     case Kind::Controlled:
         message = read_controlled(in);
+        break;
+    case Kind::Survey:
+        message = read_survey(in);
+        break;
+    case Kind::Ground:
+        message = read_ground(in);
         break;
     default:
         return make_error(ErrorCode::Parse,

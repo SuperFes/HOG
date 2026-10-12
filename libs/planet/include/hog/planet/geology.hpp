@@ -7,6 +7,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string_view>
 
 namespace hog::planet {
@@ -65,6 +66,11 @@ inline constexpr int resource_count = static_cast<int>(Resource::Gold) + 1;
 
 [[nodiscard]] std::string_view to_string(Resource resource) noexcept;
 
+inline constexpr std::array rarest_first{
+    Resource::Gold, Resource::Tin,  Resource::Copper, Resource::Salt,
+    Resource::Coal, Resource::Iron, Resource::Clay,
+};
+
 // A flat seam under a cell, in fixed-point metres below the surface; no seam has zero thickness.
 // What a cell holds is the seam's thickness times the cell's area, so it is finite at every level.
 struct Deposit {
@@ -73,6 +79,10 @@ struct Deposit {
 
     [[nodiscard]] constexpr bool empty() const noexcept { return thickness == 0; }
 };
+
+// The rarest resource whose seam takes in a fixed-point depth in metres below the surface.
+[[nodiscard]] std::optional<Resource>
+resource_at(const std::array<Deposit, resource_count>& deposits, std::int64_t depth) noexcept;
 
 // Rock layers and ore deposits from terrain and climate: continents sit on granite under a cover
 // of sedimentary rock that mountains strip away; ocean floors and the starting islands are basalt.

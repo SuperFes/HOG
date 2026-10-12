@@ -1,8 +1,11 @@
 #include <hog/core/time.hpp>
 #include <hog/server/probe_service.hpp>
+#include <hog/server/survey.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <format>
+#include <thread>
 #include <variant>
 
 namespace hog::server {
@@ -16,20 +19,27 @@ constexpr std::chrono::milliseconds glance = 100ms;
 // For a tool to say hello once connected.
 constexpr std::chrono::milliseconds greeting = 5s;
 
+// Half the machine, leaving the rest to the world's own jobs.
+std::uint32_t survey_threads() noexcept {
+    return std::max(1U, std::thread::hardware_concurrency() / 2);
+}
+
 } // namespace
 
-Result<std::unique_ptr<ProbeService>> ProbeService::start(std::uint16_t port,
-                                                          probe::Welcome welcome) {
+Result<std::unique_ptr<ProbeService>>
+ProbeService::start(std::uint16_t port, probe::Welcome welcome, Surveyor surveyor) {
     auto listener = probe::Listener::open(port);
     if (!listener) {
         return std::unexpected(std::move(listener.error()));
     }
-    return std::make_unique<ProbeService>(Started{}, std::move(*listener), std::move(welcome));
+    return std::make_unique<ProbeService>(Started{}, std::move(*listener), std::move(welcome),
+                                          std::move(surveyor));
 }
 
-ProbeService::ProbeService(Started /*unused*/, probe::Listener listener, probe::Welcome welcome)
-    : listener_(std::move(listener)), welcome_(std::move(welcome)), port_(listener_.port()),
-      listening_([this] { listen(); }) {}
+ProbeService::ProbeService(Started /*unused*/, probe::Listener listener, probe::Welcome welcome,
+                           Surveyor surveyor)
+    : listener_(std::move(listener)), welcome_(std::move(welcome)), surveyor_(std::move(surveyor)),
+      port_(listener_.port()), listening_([this] { listen(); }) {}
 
 ProbeService::~ProbeService() {
     stopping_.store(true);
@@ -119,6 +129,7 @@ void ProbeService::talk(probe::Channel channel) {
     if (!channel.send(welcome_)) {
         return;
     }
+    std::optional<jobs::JobSystem> jobs;
     while (!stopping_.load()) {
         auto message = channel.receive(glance);
         if (!message) {
@@ -127,13 +138,20 @@ void ProbeService::talk(probe::Channel channel) {
         if (!message->has_value()) {
             continue;
         }
+        if (const auto* asked = std::get_if<probe::Survey>(&**message)) {
+            if (!survey(channel, *asked, jobs)) {
+                return;
+            }
+            continue;
+        }
         std::optional<Request> request;
         if (auto* fetch = std::get_if<probe::Fetch>(&**message)) {
             request = std::move(*fetch);
         } else if (const auto* control = std::get_if<probe::Control>(&**message)) {
             request = *control;
         } else {
-            std::ignore = channel.send(probe::Refused{.reason = "expected a fetch or a control"});
+            std::ignore =
+                channel.send(probe::Refused{.reason = "expected a fetch, control or survey"});
             return;
         }
         const std::optional<probe::Message> answer = ask(std::move(*request));
@@ -141,6 +159,22 @@ void ProbeService::talk(probe::Channel channel) {
             return;
         }
     }
+}
+
+bool ProbeService::survey(probe::Channel& channel, const probe::Survey& survey,
+                          std::optional<jobs::JobSystem>& jobs) const {
+    if (!surveyor_) {
+        std::ignore = channel.send(probe::Refused{.reason = "this server takes no surveys"});
+        return false;
+    }
+    if (auto checked = check_survey(survey); !checked) {
+        std::ignore = channel.send(probe::Refused{.reason = checked.error().message});
+        return false;
+    }
+    if (!jobs) {
+        jobs.emplace(survey_threads());
+    }
+    return channel.send(surveyor_(survey, *jobs)).has_value();
 }
 
 std::optional<probe::Message> ProbeService::ask(Request request) {
