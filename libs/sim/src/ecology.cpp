@@ -6,9 +6,13 @@
 #include <toml++/toml.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cstddef>
 #include <format>
 #include <initializer_list>
 #include <limits>
+#include <optional>
+#include <string_view>
 #include <utility>
 
 namespace hog::sim {
@@ -20,6 +24,22 @@ using detail::extreme_temperature;
 using detail::per_biome;
 using detail::positive;
 using detail::Table;
+
+// The value a string node names, if it names one.
+template <typename T, std::size_t N>
+std::optional<T> named(const toml::node& node,
+                       const std::array<std::pair<std::string_view, T>, N>& names) {
+    const auto* text = node.as_string();
+    if (text == nullptr) {
+        return std::nullopt;
+    }
+    for (const auto& [name, value] : names) {
+        if (name == text->get()) {
+            return value;
+        }
+    }
+    return std::nullopt;
+}
 
 void parse_forage(Table forage, ForageConfig& config) {
     forage.only({"growth_days"sv, "wither_days"sv, "cold"sv, "warm"sv, "wet"sv, "rot_days"sv,
@@ -43,16 +63,12 @@ void parse_moves(Table& table, Species& species) {
     }
     constexpr std::array names{std::pair{"land"sv, Moves::Land}, std::pair{"water"sv, Moves::Water},
                                std::pair{"air"sv, Moves::Air}};
-    const auto* name = node->as_string();
-    const auto* found = name == nullptr
-                            ? names.end()
-                            : std::ranges::find(names, std::string_view{name->get()},
-                                                &std::pair<std::string_view, Moves>::first);
-    if (found == names.end()) {
+    const std::optional<Moves> moves = named(*node, names);
+    if (!moves) {
         table.fail(std::format("{} must be land, water or air", table.where("moves")));
         return;
     }
-    species.moves = found->second;
+    species.moves = *moves;
 }
 
 void parse_comfort(Table& table, Species& species) {
@@ -128,17 +144,11 @@ std::string parse_recovery(Table& parent, Recovery& recovery) {
         constexpr std::array names{std::pair{"admin"sv, Recovery::After::Admin},
                                    std::pair{"relict"sv, Recovery::After::Relict},
                                    std::pair{"successor"sv, Recovery::After::Successor}};
-        const auto* name = node->as_string();
-        const auto* found =
-            name == nullptr
-                ? names.end()
-                : std::ranges::find(names, std::string_view{name->get()},
-                                    &std::pair<std::string_view, Recovery::After>::first);
-        if (found == names.end()) {
+        if (const std::optional<Recovery::After> after = named(*node, names)) {
+            recovery.after_extinction = *after;
+        } else {
             table.fail(std::format("{} must be admin, relict or successor",
                                    table.where("after_extinction")));
-        } else {
-            recovery.after_extinction = found->second;
         }
     }
     const toml::node* successor = table.find("successor");

@@ -89,12 +89,13 @@ hog_target_defaults(hog_viewer_cli)
 
 if(HOG_BUILD_TESTS)
     # Runs the app for a moment without a window or a server, saving what it drew. Software
-    # drawing keeps the system's GPU drivers, which sanitizers can't see into, out of it.
+    # drawing keeps the system's GPU drivers, which sanitizers can't see into, out of it, and an
+    # external context stops macOS making every window an OpenGL one.
     add_test(NAME hog_viewer_smoke
         COMMAND hog_viewer_cli --port 1 --quit-after 1
                 --capture "${CMAKE_CURRENT_BINARY_DIR}/smoke.png")
     set_tests_properties(hog_viewer_smoke PROPERTIES
         ENVIRONMENT
-        "SDL_VIDEO_DRIVER=offscreen;SDL_RENDER_DRIVER=software;SDL_FRAMEBUFFER_ACCELERATION=0"
+        "SDL_VIDEO_DRIVER=offscreen;SDL_RENDER_DRIVER=software;SDL_FRAMEBUFFER_ACCELERATION=0;SDL_VIDEO_EXTERNAL_CONTEXT=1"
         TIMEOUT 60)
 endif()
