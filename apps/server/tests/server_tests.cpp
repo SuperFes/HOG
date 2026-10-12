@@ -726,7 +726,10 @@ TEST_CASE("a simulated year runs in under ten minutes", "[.gate]") {
     for (const auto& one : species) {
         table += std::format(" {:>10}", one.name);
     }
-    table += "  biomass t\n";
+    for (const auto& one : species) {
+        table += std::format(" {:>5}", one.name.substr(0, 5));
+    }
+    table += "  carrion t  biomass t\n";
 
     std::uint64_t ticks = 0;
     std::chrono::duration<double> took{};
@@ -763,11 +766,28 @@ TEST_CASE("a simulated year runs in under ten minutes", "[.gate]") {
                              warmth[0] / area[0], warmth[1] / area[1], rain,
                              server->weather().systems().size(),
                              100.0 * fronted / (area[0] + area[1]), cloud / middle);
+        const auto& wildlife = server->wildlife()->fields();
         for (std::size_t kind = 0; kind < species.size(); ++kind) {
-            const auto& count = server->wildlife()->fields().populations[kind].count;
+            const auto& count = wildlife.populations[kind].count;
             table += std::format(" {:>10.0f}", std::accumulate(count.begin(), count.end(), 0.0));
         }
-        table += std::format(" {:>10.0f}\n", gauge(*server, "hog_forest_biomass_tonnes"));
+        // How well fed each species is on average, animal by animal.
+        for (std::size_t kind = 0; kind < species.size(); ++kind) {
+            const auto& population = wildlife.populations[kind];
+            double fed = 0.0;
+            double animals = 0.0;
+            for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+                fed += static_cast<double>(population.fed[cell] * population.count[cell]);
+                animals += static_cast<double>(population.count[cell]);
+            }
+            table += std::format(" {:>5.2f}", fed / animals);
+        }
+        double carrion = 0.0;
+        for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+            carrion += static_cast<double>(wildlife.carrion[cell]) * server->wildlife()->area(cell);
+        }
+        table += std::format(" {:>10.1f} {:>10.0f}\n", carrion / 1e3,
+                             gauge(*server, "hog_forest_biomass_tonnes"));
     }
     WARN(std::format("a year in {:.1f} s over {} ticks: {} weather, {} wildlife and {} forest "
                      "steps; {} collapses, {} local extinctions, {} returns\n{}",
