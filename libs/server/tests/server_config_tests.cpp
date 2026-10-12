@@ -51,6 +51,8 @@ TEST_CASE("a minimal server config takes the defaults", "[server][config]") {
     CHECK(config->weather.cell_size == 6'000.0);
     CHECK(config->weather.step == 10min);
     CHECK(config->weather.day == 24h);
+    CHECK_FALSE(config->wildlife.ecology);
+    CHECK(config->wildlife.step == 24h);
 }
 
 TEST_CASE("every server setting can be given", "[server][config]") {
@@ -78,6 +80,10 @@ interval_seconds = 0
 cell_km = 2.5
 step_minutes = 5
 day_hours = 4
+
+[wildlife]
+ecology = "ecology.toml"
+step_hours = 6
 )",
                                             base());
     REQUIRE(config);
@@ -101,6 +107,8 @@ day_hours = 4
     CHECK(config->weather.cell_size == 2'500.0);
     CHECK(config->weather.step == 5min);
     CHECK(config->weather.day == 4h);
+    CHECK(config->wildlife.ecology == base() / "ecology.toml");
+    CHECK(config->wildlife.step == 6h);
 }
 
 TEST_CASE("bad server configs are rejected", "[server][config]") {
@@ -139,6 +147,9 @@ TEST_CASE("bad server configs are rejected", "[server][config]") {
         {with("[weather]\nday_hours = -4\n"), ErrorCode::InvalidArgument},
         {with("[weather]\nday_hours = inf\n"), ErrorCode::InvalidArgument},
         {with("[weather]\nwind = 3\n"), ErrorCode::InvalidArgument},
+        {with("[wildlife]\necology = 3\n"), ErrorCode::InvalidArgument},
+        {with("[wildlife]\nstep_hours = 0\n"), ErrorCode::InvalidArgument},
+        {with("[wildlife]\nspecies = \"a.toml\"\n"), ErrorCode::InvalidArgument},
     }));
     CAPTURE(text);
     const auto config = parse_server_config(text, base());
@@ -175,4 +186,5 @@ TEST_CASE("the development server config loads", "[server][config]") {
     REQUIRE(config);
     CHECK(config->planet.filename() == "planet.toml");
     CHECK(std::filesystem::exists(config->planet));
+    CHECK(std::filesystem::exists(config->wildlife.ecology.value_or("")));
 }

@@ -282,10 +282,10 @@ Result<Ecology> parse(const toml::table& root) {
         if (species == nullptr || !species->is_array_of_tables()) {
             top.fail("species must be an array of tables, as [[species]]");
         } else {
-            for (std::size_t index = 0; index < species->size(); ++index) {
+            for (const toml::node& node : *species) {
                 ecology.species.push_back(
-                    parse_species(Table{species->get(index)->as_table(),
-                                        std::format("species[{}]", index), &error},
+                    parse_species(Table{node.as_table(),
+                                        std::format("species[{}]", ecology.species.size()), &error},
                                   diets.emplace_back()));
             }
         }

@@ -14,6 +14,7 @@
 #include <hog/server/snapshot_writer.hpp>
 #include <hog/server/tick_loop.hpp>
 #include <hog/sim/weather.hpp>
+#include <hog/sim/wildlife.hpp>
 #include <hog/store/sqlite_change_store.hpp>
 #include <hog/store/sqlite_snapshot_store.hpp>
 
@@ -73,6 +74,8 @@ public:
     [[nodiscard]] const metrics::Registry& metrics() const noexcept { return registry_; }
     [[nodiscard]] const planet::World& planet() const noexcept { return planet_; }
     [[nodiscard]] const sim::Weather& weather() const noexcept { return *weather_; }
+    // Null when no ecology is configured.
+    [[nodiscard]] const sim::Wildlife* wildlife() const noexcept { return wildlife_.get(); }
 
     // Logs the metrics, bringing those mirrored from elsewhere up to date first.
     void report(std::uint64_t slipped);
@@ -80,6 +83,9 @@ public:
 private:
     // Advances the world by one tick of game time.
     void simulate(GameTime from, GameDuration step);
+    // Builds the weather and wildlife as of `at`, on the planet with its changes.
+    [[nodiscard]] Result<void> start_simulation(const planet::PlanetConfig& shape, GameTime at);
+    void advance_weather(GameTime to);
     void submit();
 
     server::ServerConfig config_;
@@ -94,6 +100,7 @@ private:
     jobs::JobSystem jobs_;
     // Set once the planet's changes are in, since the weather starts from the ground.
     std::unique_ptr<sim::Weather> weather_;
+    std::unique_ptr<sim::Wildlife> wildlife_;
     GameTime time_;
     Tick tick_;
 
@@ -109,6 +116,8 @@ private:
     metrics::Counter& snapshots_skipped_;
     metrics::Counter& weather_steps_;
     metrics::Histogram& weather_step_seconds_;
+    metrics::Counter& wildlife_steps_;
+    metrics::Histogram& wildlife_step_seconds_;
     metrics::Reporter reporter_;
     // What the mirrored counters were last brought up to.
     server::SnapshotWriter::Stats mirrored_writes_;

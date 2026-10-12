@@ -26,3 +26,7 @@ hog_add_tests(hog_sim
     tests/ecology_tests.cpp
     tests/weather_tests.cpp
     tests/wildlife_tests.cpp)
+
+if(TARGET hog_sim_tests)
+    target_compile_definitions(hog_sim_tests PRIVATE HOG_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+endif()

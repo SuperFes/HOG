@@ -115,5 +115,8 @@ TEST_CASE("an ecology rejects what it can't use", "[sim][ecology]") {
 }
 
 TEST_CASE("an ecology loads from a file", "[sim][ecology]") {
+    const auto development = hog::sim::load_ecology(HOG_SOURCE_DIR "/config/ecology.toml");
+    REQUIRE(development);
+    CHECK(development->forage.capacity[at(Biome::Grassland)] > 0.0);
     CHECK(hog::sim::load_ecology("no/such/ecology.toml").error().code == hog::ErrorCode::NotFound);
 }

@@ -20,3 +20,7 @@ interval_seconds = 10
 cell_km = 6
 step_minutes = 10
 day_hours = 24
+
+[wildlife]
+ecology = "ecology.toml"
+step_hours = 24

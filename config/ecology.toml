@@ -1,0 +1,23 @@
+# Wildlife for the development server: what each biome grows, and the species that live on it.
+[forage]
+growth_days = 30
+wither_days = 90
+cold = 0
+warm = 15
+wet = 1.0
+rot_days = 10
+
+# kg per km² of what grazers can eat, when warm and wet enough.
+[forage.capacity]
+ocean = 50000
+beach = 10000
+ice = 0
+tundra = 60000
+boreal_forest = 80000
+temperate_forest = 150000
+grassland = 300000
+shrubland = 120000
+desert = 15000
+savanna = 250000
+tropical_rainforest = 150000
+alpine = 50000

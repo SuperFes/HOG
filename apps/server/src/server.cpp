@@ -18,6 +18,7 @@ constexpr std::array tick_bounds{0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005,
                                  0.01,   0.025,   0.05,   0.1,   0.25,   1.0};
 
 constexpr save::SectionId weather_section = save::section_id("WTHR");
+constexpr save::SectionId wildlife_section = save::section_id("WILD");
 
 [[nodiscard]] std::string format_time(GameTime time) {
     return std::format("{:%FT%T}Z",
@@ -27,6 +28,25 @@ constexpr save::SectionId weather_section = save::section_id("WTHR");
 
 [[nodiscard]] std::unexpected<Error> context(std::string_view what, const Error& error) {
     return make_error(error.code, std::format("{}: {}", what, error.message));
+}
+
+// A part of the simulation whose section can't be read starts over, unless a newer build wrote
+// it.
+template <typename Part>
+[[nodiscard]] Result<void> restore_part(Part& part, const save::Snapshot& snapshot,
+                                        save::SectionId id, std::string_view what) {
+    const save::Section* section = snapshot.find(id);
+    if (section == nullptr) {
+        return {};
+    }
+    auto restored = part.load(section->version, section->bytes);
+    if (!restored && restored.error().code == ErrorCode::Unsupported) {
+        return context(what, restored.error());
+    }
+    if (!restored) {
+        log::warn(save_log, "{} starts over: {}", what, restored.error().message);
+    }
+    return {};
 }
 
 void mirror(metrics::Counter& counter, std::uint64_t total, std::uint64_t& mirrored) {
@@ -61,6 +81,10 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config,
       weather_step_seconds_(registry_.histogram("hog_weather_step_seconds",
                                                 "Real time each weather step took.",
                                                 {tick_bounds.begin(), tick_bounds.end()})),
+      wildlife_steps_(registry_.counter("hog_wildlife_steps_total", "Wildlife steps taken.")),
+      wildlife_step_seconds_(registry_.histogram("hog_wildlife_step_seconds",
+                                                 "Real time each wildlife step took.",
+                                                 {tick_bounds.begin(), tick_bounds.end()})),
       reporter_(registry_) {
     persistence_.persist<server::Position>();
 }
@@ -107,20 +131,11 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
     log::info(server_log, "world {:016x} in {}: {} planet changes", server->world_id_, world_file,
               stored_changes->size());
 
-    const sim::WeatherConfig weather{
-        .level = std::min(planet::level_for(config.weather.cell_size, planet->radius),
-                          sim::CellGrid::max_level),
-        .step = config.weather.step,
-        .day = config.weather.day,
-        .axial_tilt = planet->axial_tilt,
-        .planet_radius = planet->radius,
-        .seed = planet->seed,
-    };
-    server->weather_ = std::make_unique<sim::Weather>(
-        weather, sim::ground_for(sim::CellGrid{weather.level}, server->planet_),
-        loaded->snapshot ? loaded->snapshot->time : now);
-    log::info(server_log, "weather grid at level {}: {} cells", weather.level,
-              server->weather_->grid().size());
+    if (auto started =
+            server->start_simulation(*planet, loaded->snapshot ? loaded->snapshot->time : now);
+        !started) {
+        return std::unexpected(started.error());
+    }
 
     for (const Error& skipped : loaded->skipped) {
         log::warn(save_log, "skipped damaged {}", skipped.message);
@@ -131,13 +146,16 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
         if (!restored) {
             return context("snapshot", restored.error());
         }
-        if (const save::Section* section = snapshot->find(weather_section)) {
-            auto restored_weather = server->weather_->load(section->version, section->bytes);
-            if (!restored_weather && restored_weather.error().code == ErrorCode::Unsupported) {
-                return context("weather", restored_weather.error());
-            }
-            if (!restored_weather) {
-                log::warn(save_log, "weather starts over: {}", restored_weather.error().message);
+        if (const auto weather =
+                restore_part(*server->weather_, *snapshot, weather_section, "weather");
+            !weather) {
+            return std::unexpected(weather.error());
+        }
+        if (server->wildlife_) {
+            if (const auto wildlife =
+                    restore_part(*server->wildlife_, *snapshot, wildlife_section, "wildlife");
+                !wildlife) {
+                return std::unexpected(wildlife.error());
             }
         }
         server->time_ = snapshot->time;
@@ -151,10 +169,59 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
     return server;
 }
 
+Result<void> Server::start_simulation(const planet::PlanetConfig& shape, GameTime at) {
+    const sim::WeatherConfig weather{
+        .level = std::min(planet::level_for(config_.weather.cell_size, shape.radius),
+                          sim::CellGrid::max_level),
+        .step = config_.weather.step,
+        .day = config_.weather.day,
+        .axial_tilt = shape.axial_tilt,
+        .planet_radius = shape.radius,
+        .seed = shape.seed,
+    };
+    weather_ = std::make_unique<sim::Weather>(
+        weather, sim::ground_for(sim::CellGrid{weather.level}, planet_), at);
+    log::info(server_log, "weather grid at level {}: {} cells", weather.level,
+              weather_->grid().size());
+    if (const auto& path = config_.wildlife.ecology) {
+        auto ecology = sim::load_ecology(*path);
+        if (!ecology) {
+            return context(path->string(), ecology.error());
+        }
+        sim::WildlifeConfig wildlife{
+            .level = weather.level,
+            .step = config_.wildlife.step,
+            .planet_radius = shape.radius,
+            .seed = shape.seed,
+            .ecology = std::move(*ecology),
+        };
+        const std::size_t species = wildlife.ecology.species.size();
+        wildlife_ = std::make_unique<sim::Wildlife>(
+            std::move(wildlife), sim::habitat_for(weather_->grid(), planet_), at);
+        log::info(server_log, "wildlife: {} species", species);
+    }
+    return {};
+}
+
 void Server::simulate(GameTime from, GameDuration step) {
     entities_.progress(std::chrono::duration<float>(step).count());
+    const GameTime to = from + step;
+    // Wildlife steps see the weather as it was when they fell due.
+    while (wildlife_ && wildlife_->next_step() <= to) {
+        const GameTime at = wildlife_->next_step();
+        advance_weather(at);
+        const MonotonicClock::time_point started = MonotonicClock::now();
+        wildlife_->advance_to(at, sim::conditions_of(*weather_), jobs_);
+        wildlife_steps_.add(1);
+        wildlife_step_seconds_.observe(
+            std::chrono::duration<double>(MonotonicClock::now() - started).count());
+    }
+    advance_weather(to);
+}
+
+void Server::advance_weather(GameTime to) {
     const MonotonicClock::time_point started = MonotonicClock::now();
-    if (const std::uint64_t steps = weather_->advance_to(from + step, jobs_); steps > 0) {
+    if (const std::uint64_t steps = weather_->advance_to(to, jobs_); steps > 0) {
         weather_steps_.add(steps);
         weather_step_seconds_.observe(
             std::chrono::duration<double>(MonotonicClock::now() - started).count() /
@@ -167,6 +234,11 @@ void Server::submit() {
     persistence_.store(snapshot);
     snapshot.add(save::Section{
         .id = weather_section, .version = sim::Weather::save_version, .bytes = weather_->save()});
+    if (wildlife_) {
+        snapshot.add(save::Section{.id = wildlife_section,
+                                   .version = sim::Wildlife::save_version,
+                                   .bytes = wildlife_->save()});
+    }
     writer_.submit(std::move(snapshot));
 }
 

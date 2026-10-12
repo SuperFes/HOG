@@ -32,6 +32,12 @@ struct WeatherSettings {
     GameDuration day = std::chrono::hours{24};
 };
 
+struct WildlifeSettings {
+    // Species and forage; without one, no wildlife lives on the planet.
+    std::optional<std::filesystem::path> ecology;
+    GameDuration step = std::chrono::hours{24};
+};
+
 struct ServerConfig {
     std::filesystem::path world; // the world database
     std::filesystem::path planet;
@@ -45,6 +51,7 @@ struct ServerConfig {
     // Real time between metrics records; zero turns them off.
     std::chrono::seconds metrics_interval{10};
     WeatherSettings weather;
+    WildlifeSettings wildlife;
 };
 
 // Reads a server config. Relative paths are resolved against `base`, normally the directory of
@@ -73,6 +80,10 @@ struct ServerConfig {
 //     cell_km = 6.0
 //     step_minutes = 10.0        # game time
 //     day_hours = 24.0
+//
+//     [wildlife]                 # optional
+//     ecology = "ecology.toml"
+//     step_hours = 24.0          # game time
 //
 // Unknown tables and keys are errors, so typos don't silently fall back to defaults.
 [[nodiscard]] Result<ServerConfig> parse_server_config(std::string_view text,

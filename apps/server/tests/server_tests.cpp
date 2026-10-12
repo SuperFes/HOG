@@ -7,6 +7,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <memory>
 #include <string>
@@ -51,6 +52,12 @@ public:
     void write_planet(std::uint64_t seed) const {
         std::ofstream{directory_.path() / "planet.toml"} << "[planet]\nseed = " << seed
                                                          << "\nradius_km = 115\n";
+    }
+
+    [[nodiscard]] std::filesystem::path write_ecology(std::string_view text) const {
+        const auto path = directory_.path() / "ecology.toml";
+        std::ofstream{path} << text;
+        return path;
     }
 
     [[nodiscard]] hog::server::ServerConfig config() const {
@@ -174,6 +181,42 @@ TEST_CASE("weather is kept with the world", "[app][server]") {
     const auto coarser = opened(config, later);
     CHECK(coarser->weather().grid().level() == level - 2);
     CHECK(coarser->weather().fields().size() == before.size() / 16);
+}
+
+TEST_CASE("wildlife lives with the weather and is kept with the world", "[app][server]") {
+    const World world;
+    auto config = world.config();
+    config.catch_up_ticks = 100;
+    CHECK(opened(config)->wildlife() == nullptr);
+
+    config.wildlife.ecology = world.write_ecology(R"(
+[forage]
+capacity = { grassland = 100000, savanna = 100000, "temperate forest" = 50000 }
+
+[[species]]
+name = "deer"
+diet = { forage = 1 }
+habitat = { grassland = 1, savanna = 1, temperate_forest = 0.5 }
+)");
+    REQUIRE(opened(config)->save());
+    const GameTime later = start + 72h;
+    hog::sim::WildlifeFields before;
+    {
+        const auto server = opened(config, later);
+        REQUIRE(server->wildlife() != nullptr);
+        CHECK(server->wildlife()->total(0) > 0.0);
+        server->catch_up([&] { return later; });
+        CHECK(server->wildlife()->time() == later);
+        CHECK(counter(*server, "hog_wildlife_steps_total") == 3);
+        CHECK(server->wildlife()->grid().level() == server->weather().grid().level());
+        before = server->wildlife()->fields();
+    }
+    CHECK(opened(config, later)->wildlife()->fields() == before);
+
+    config.wildlife.ecology = world.write_ecology("[[species]]\nname = 3\n");
+    const auto broken = Server::open(config, later);
+    REQUIRE_FALSE(broken);
+    CHECK(broken.error().message.find("ecology.toml") != std::string::npos);
 }
 
 TEST_CASE("snapshots are taken every save interval", "[app][server]") {

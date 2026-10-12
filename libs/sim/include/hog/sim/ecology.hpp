@@ -73,7 +73,7 @@ struct Species {
     double heat = 40.0;
     double exposure = 0.005; // share dying per day per °C outside that
     // Sleeps, neither eating nor breeding nor moving, while the recent temperature is below this.
-    std::optional<double> dormant_below{};
+    std::optional<double> dormant_below = std::nullopt;
     double wander = 0.2;    // km per day it strays at random
     double speed = 2.0;     // km per day it heads for better ground at
     double leftovers = 0.3; // share of each kill left for scavengers
