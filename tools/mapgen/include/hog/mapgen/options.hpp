@@ -2,6 +2,7 @@
 
 #include <hog/core/result.hpp>
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -54,6 +55,16 @@ struct IslandsView {
 
 using View = std::variant<PlanetView, FaceView, RegionView, IslandsView>;
 
+// Weather maps: frames from a start date, after the weather has had time to settle.
+struct WeatherFrames {
+    int days = 0;  // how long to follow it; none when 0
+    int every = 6; // hours between frames
+    std::chrono::sys_days start{std::chrono::year{2026} / 1 / 1};
+    double cell_km = 6.0;
+
+    friend bool operator==(const WeatherFrames&, const WeatherFrames&) = default;
+};
+
 struct Options {
     std::filesystem::path config = "config/planet.toml";
     std::optional<std::uint64_t> seed;
@@ -61,6 +72,7 @@ struct Options {
     std::vector<Layer> layers; // every layer when empty
     int size = 1'024;          // image width in pixels
     std::filesystem::path output = "maps";
+    WeatherFrames weather;
     bool help = false;
 };
 

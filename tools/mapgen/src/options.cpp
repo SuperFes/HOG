@@ -3,6 +3,7 @@
 
 #include <array>
 #include <charconv>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <format>
@@ -82,6 +83,28 @@ template <typename T>
     return region;
 }
 
+// YYYY-MM-DD
+[[nodiscard]] std::optional<std::chrono::sys_days> parse_date(std::string_view text) {
+    if (text.size() != 10 || text[4] != '-' || text[7] != '-') {
+        return std::nullopt;
+    }
+    const auto year = parse_integer<int>(text.substr(0, 4));
+    const auto month = parse_integer<unsigned>(text.substr(5, 2));
+    const auto day = parse_integer<unsigned>(text.substr(8, 2));
+    if (!year || !month || !day) {
+        return std::nullopt;
+    }
+    const std::chrono::year_month_day date{std::chrono::year{*year}, std::chrono::month{*month},
+                                           std::chrono::day{*day}};
+    if (!date.ok()) {
+        return std::nullopt;
+    }
+    return std::chrono::sys_days{date};
+}
+
+constexpr int max_weather_days = 366;
+constexpr int max_frame_hours = 24 * 30;
+
 // Options that take a value.
 using Handler = Result<void> (*)(Options&, std::string_view);
 
@@ -153,6 +176,44 @@ constexpr std::array flags{
              options.size = *size;
              return {};
          }},
+    Flag{.name = "--weather",
+         .handler = [](Options& options, std::string_view value) -> Result<void> {
+             const auto days = parse_integer<int>(value);
+             if (!days || *days < 1 || *days > max_weather_days) {
+                 return invalid(
+                     std::format("--weather {} is not 1 to {} days", value, max_weather_days));
+             }
+             options.weather.days = *days;
+             return {};
+         }},
+    Flag{.name = "--every",
+         .handler = [](Options& options, std::string_view value) -> Result<void> {
+             const auto hours = parse_integer<int>(value);
+             if (!hours || *hours < 1 || *hours > max_frame_hours) {
+                 return invalid(
+                     std::format("--every {} is not 1 to {} hours", value, max_frame_hours));
+             }
+             options.weather.every = *hours;
+             return {};
+         }},
+    Flag{.name = "--date",
+         .handler = [](Options& options, std::string_view value) -> Result<void> {
+             const auto date = parse_date(value);
+             if (!date) {
+                 return invalid(std::format("--date {} is not a date like 2026-01-31", value));
+             }
+             options.weather.start = *date;
+             return {};
+         }},
+    Flag{.name = "--cell-km",
+         .handler = [](Options& options, std::string_view value) -> Result<void> {
+             const auto km = parse_double(value);
+             if (!km || *km <= 0.0) {
+                 return invalid(std::format("--cell-km {} is not a positive size", value));
+             }
+             options.weather.cell_km = *km;
+             return {};
+         }},
 };
 
 } // namespace
@@ -188,6 +249,12 @@ Writes PNG maps of a generated planet, one per layer, named <view>-<layer>.png.
                        several (default: all)
   --size PIXELS        image width (default 1024); the planet view is half as tall
   --out DIR            output directory (default maps)
+  --weather DAYS       instead of the layers, follows the weather for DAYS days and
+                       writes sky and air maps, named <view>-weather-<time>-<map>.png
+  --every HOURS        hours between weather maps (default 6)
+  --date YYYY-MM-DD    when the weather maps start (default 2026-01-01), after ten days
+                       for the weather to settle
+  --cell-km KM         weather grid cells at most KM across (default 6)
   --help               shows this
 )";
 }

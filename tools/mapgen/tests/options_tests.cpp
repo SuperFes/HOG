@@ -2,6 +2,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <initializer_list>
 #include <set>
 #include <string_view>
@@ -37,6 +38,8 @@ TEST_CASE("mapgen defaults to every layer of the whole planet", "[mapgen]") {
     CHECK(options->output == "maps");
     CHECK_FALSE(options->seed);
     CHECK_FALSE(options->help);
+    CHECK(options->weather == hog::mapgen::WeatherFrames{});
+    CHECK(options->weather.days == 0);
 }
 
 TEST_CASE("mapgen reads every option", "[mapgen]") {
@@ -58,6 +61,14 @@ TEST_CASE("mapgen reads every option", "[mapgen]") {
     const auto islands = parse({"--islands", "40"});
     REQUIRE(islands);
     CHECK(islands->view == hog::mapgen::View{hog::mapgen::IslandsView{.width = 40'000.0}});
+
+    const auto weather =
+        parse({"--weather", "3", "--every", "2", "--date", "2026-07-04", "--cell-km", "12.5"});
+    REQUIRE(weather);
+    using namespace std::chrono;
+    CHECK(weather->weather ==
+          hog::mapgen::WeatherFrames{
+              .days = 3, .every = 2, .start = sys_days{2026y / July / 4}, .cell_km = 12.5});
 
     const auto help = parse({"--help"});
     REQUIRE(help);
@@ -84,6 +95,14 @@ TEST_CASE("mapgen rejects bad arguments", "[mapgen]") {
     CHECK(rejects({"--region", "0,,10"}));
     CHECK(rejects({"--islands", "0"}));
     CHECK(rejects({"--islands", "wide"}));
+    CHECK(rejects({"--weather", "0"}));
+    CHECK(rejects({"--weather", "400"}));
+    CHECK(rejects({"--every", "0"}));
+    CHECK(rejects({"--date", "2026-02-30"}));
+    CHECK(rejects({"--date", "2026-2-3"}));
+    CHECK(rejects({"--date", "2026/02/03"}));
+    CHECK(rejects({"--cell-km", "0"}));
+    CHECK(rejects({"--cell-km", "inf"}));
 }
 
 TEST_CASE("every mapgen layer has a distinct name", "[mapgen]") {
