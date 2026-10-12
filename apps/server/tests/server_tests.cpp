@@ -8,14 +8,18 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <memory>
 #include <numbers>
+#include <numeric>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -683,4 +687,125 @@ TEST_CASE("a server reports what it can't open", "[app][server]") {
     const auto not_a_database = Server::open(config, start);
     REQUIRE_FALSE(not_a_database);
     CHECK(not_a_database.error().message.starts_with(config.world.string() + ": "));
+}
+
+namespace {
+
+// The development world from config/, saved in a fresh directory, with no debug port.
+hog::server::ServerConfig development(const hog::testing::TemporaryDirectory& directory) {
+    auto config = hog::server::load_server_config(std::filesystem::path{HOG_SOURCE_DIR} / "config" /
+                                                  "server.toml");
+    REQUIRE(config);
+    config->world = directory.path() / "world.db";
+    config->debug = {};
+    config->metrics_interval = 0s;
+    return *config;
+}
+
+// Everything the simulation keeps, as it would be saved.
+std::vector<std::vector<std::byte>> simulated(const Server& server) {
+    REQUIRE(server.wildlife() != nullptr);
+    REQUIRE(server.forest() != nullptr);
+    return {server.weather().save(), server.wildlife()->save(), server.forest()->save()};
+}
+
+} // namespace
+
+// Phase 2's gate, run by hand on a release build: hog_app_tests "[.gate]". It also prints the
+// world month by month, to judge whether seasons and populations look plausible.
+TEST_CASE("a simulated year runs in under ten minutes", "[.gate]") {
+    const hog::testing::TemporaryDirectory directory;
+    const auto config = development(directory);
+    REQUIRE(opened(config)->save());
+
+    const GameTime year_on = start + std::chrono::years{1};
+    const auto server = opened(config, year_on);
+    const auto& grid = server->weather().grid();
+    const auto& species = server->wildlife()->config().ecology.species;
+    std::string table = "month  north°C  south°C   rain mm/h  lows  fronts%  mid cloud";
+    for (const auto& one : species) {
+        table += std::format(" {:>10}", one.name);
+    }
+    table += "  biomass t\n";
+
+    std::uint64_t ticks = 0;
+    std::chrono::duration<double> took{};
+    for (int month = 1; month <= 12; ++month) {
+        const GameTime until = start + (std::chrono::seconds{std::chrono::years{1}} * month / 12);
+        const MonotonicClock::time_point began = MonotonicClock::now();
+        ticks += server->catch_up([&] { return until; }).ticks;
+        took += MonotonicClock::now() - began;
+
+        // Area-weighted means of the surface temperature on each side of the equator.
+        std::array<double, 2> warmth{};
+        std::array<double, 2> area{};
+        double rain = 0.0;
+        double fronted = 0.0;
+        double cloud = 0.0;
+        double middle = 0.0;
+        const auto& weather = server->weather().fields();
+        for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+            const double height = hog::planet::cell_center(grid.cell(cell)).z;
+            const std::size_t side = height >= 0.0 ? 0 : 1;
+            warmth[side] += static_cast<double>(weather.temperature[cell]) * grid.area(cell);
+            area[side] += grid.area(cell);
+            rain += static_cast<double>(weather.rain[cell]);
+            if (std::abs(weather.front[cell]) > 0.25F) {
+                fronted += grid.area(cell);
+            }
+            // Between 25° and 65° of latitude, where the lows travel.
+            if (std::abs(height) > std::sin(0.436) && std::abs(height) < std::sin(1.134)) {
+                cloud += static_cast<double>(weather.cloud[cell]) * grid.area(cell);
+                middle += grid.area(cell);
+            }
+        }
+        table += std::format("{:>5} {:>8.1f} {:>8.1f} {:>11.1f} {:>5} {:>8.1f} {:>10.2f}", month,
+                             warmth[0] / area[0], warmth[1] / area[1], rain,
+                             server->weather().systems().size(),
+                             100.0 * fronted / (area[0] + area[1]), cloud / middle);
+        for (std::size_t kind = 0; kind < species.size(); ++kind) {
+            const auto& count = server->wildlife()->fields().populations[kind].count;
+            table += std::format(" {:>10.0f}", std::accumulate(count.begin(), count.end(), 0.0));
+        }
+        table += std::format(" {:>10.0f}\n", gauge(*server, "hog_forest_biomass_tonnes"));
+    }
+    WARN(std::format("a year in {:.1f} s over {} ticks: {} weather, {} wildlife and {} forest "
+                     "steps; {} collapses, {} local extinctions, {} returns\n{}",
+                     took.count(), ticks, counter(*server, "hog_weather_steps_total"),
+                     counter(*server, "hog_wildlife_steps_total"),
+                     counter(*server, "hog_forest_steps_total"),
+                     counter(*server, "hog_wildlife_collapses_total"),
+                     counter(*server, "hog_wildlife_local_extinctions_total"),
+                     counter(*server, "hog_wildlife_returns_total"), table));
+    CHECK(year_on - server->time() < 1s);
+    CHECK(took < 10min);
+}
+
+TEST_CASE("replaying from the same seed gives the same world", "[.gate]") {
+    const GameTime later = start + std::chrono::days{90};
+    // Straight through, and in two runs with a save and reload between.
+    const hog::testing::TemporaryDirectory straight;
+    const hog::testing::TemporaryDirectory stopped;
+    std::vector<std::vector<std::byte>> once;
+    {
+        const auto config = development(straight);
+        REQUIRE(opened(config)->save());
+        const auto server = opened(config, later);
+        server->catch_up([&] { return later; });
+        once = simulated(*server);
+    }
+    const auto config = development(stopped);
+    REQUIRE(opened(config)->save());
+    const GameTime halfway = start + std::chrono::days{37} + 5h + 17min;
+    {
+        const auto server = opened(config, halfway);
+        server->catch_up([&] { return halfway; });
+        REQUIRE(server->save());
+    }
+    const auto server = opened(config, later);
+    server->catch_up([&] { return later; });
+    const auto twice = simulated(*server);
+    CHECK(twice[0] == once[0]);
+    CHECK(twice[1] == once[1]);
+    CHECK(twice[2] == once[2]);
 }
