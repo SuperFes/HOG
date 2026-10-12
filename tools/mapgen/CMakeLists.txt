@@ -7,6 +7,7 @@ target_include_directories(stb_image_write SYSTEM PUBLIC "${stb_SOURCE_DIR}")
 target_compile_definitions(stb_image_write PUBLIC STBI_WRITE_NO_STDIO)
 
 add_library(hog_mapgen
+    src/colour.cpp
     src/options.cpp
     src/render.cpp
     src/weather_render.cpp
@@ -23,6 +24,7 @@ target_link_libraries(hog_mapgen_cli PRIVATE hog::mapgen)
 hog_target_defaults(hog_mapgen_cli)
 
 hog_add_tests(hog_mapgen
+    tests/colour_tests.cpp
     tests/options_tests.cpp
     tests/render_tests.cpp
     tests/weather_render_tests.cpp

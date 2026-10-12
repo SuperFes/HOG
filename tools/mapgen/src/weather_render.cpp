@@ -28,17 +28,6 @@ constexpr double heavy_rain = 4.0;
 constexpr double heavy_snow = 2.0;
 constexpr double heavy_hail = 0.5;
 
-Rgb mix(Rgb from, Rgb to, double share) {
-    const double t = std::clamp(share, 0.0, 1.0);
-    Rgb out{};
-    for (std::size_t channel = 0; channel < out.size(); ++channel) {
-        out.at(channel) = static_cast<std::uint8_t>(std::lround(
-            static_cast<double>(from.at(channel)) +
-            ((static_cast<double>(to.at(channel)) - static_cast<double>(from.at(channel))) * t)));
-    }
-    return out;
-}
-
 double at(std::span<const float> field, std::uint32_t index) {
     return static_cast<double>(field[index]);
 }

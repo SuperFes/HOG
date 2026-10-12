@@ -16,57 +16,34 @@ namespace hog::mapgen {
 
 namespace {
 
-struct Stop {
-    double at; // the value where the colour is exact
-    Rgb colour;
-};
-
 constexpr std::array ocean_stops{
-    Stop{.at = -4'000.0, .colour = {8, 30, 80}},
-    Stop{.at = -1'000.0, .colour = {25, 70, 140}},
-    Stop{.at = -100.0, .colour = {60, 130, 195}},
-    Stop{.at = 0.0, .colour = {130, 190, 225}},
+    ColourStop{.at = -4'000.0, .colour = {8, 30, 80}},
+    ColourStop{.at = -1'000.0, .colour = {25, 70, 140}},
+    ColourStop{.at = -100.0, .colour = {60, 130, 195}},
+    ColourStop{.at = 0.0, .colour = {130, 190, 225}},
 };
 
 constexpr std::array land_stops{
-    Stop{.at = 0.0, .colour = {70, 140, 70}},       Stop{.at = 300.0, .colour = {150, 180, 95}},
-    Stop{.at = 1'000.0, .colour = {195, 165, 110}}, Stop{.at = 2'500.0, .colour = {125, 95, 75}},
-    Stop{.at = 4'000.0, .colour = {245, 245, 245}},
+    ColourStop{.at = 0.0, .colour = {70, 140, 70}},
+    ColourStop{.at = 300.0, .colour = {150, 180, 95}},
+    ColourStop{.at = 1'000.0, .colour = {195, 165, 110}},
+    ColourStop{.at = 2'500.0, .colour = {125, 95, 75}},
+    ColourStop{.at = 4'000.0, .colour = {245, 245, 245}},
 };
 
-template <std::size_t N>
-[[nodiscard]] Rgb interpolate(const std::array<Stop, N>& stops, double value) {
-    if (value <= stops.front().at) {
-        return stops.front().colour;
-    }
-    for (std::size_t index = 1; index < N; ++index) {
-        const Stop& high = stops.at(index);
-        if (value <= high.at) {
-            const Stop& low = stops.at(index - 1);
-            const double t = (value - low.at) / (high.at - low.at);
-            Rgb colour{};
-            for (std::size_t channel = 0; channel < colour.size(); ++channel) {
-                const double mixed = low.colour.at(channel) +
-                                     (t * (high.colour.at(channel) - low.colour.at(channel)));
-                colour.at(channel) = static_cast<std::uint8_t>(std::lround(mixed));
-            }
-            return colour;
-        }
-    }
-    return stops.back().colour;
-}
-
 constexpr std::array temperature_stops{
-    Stop{.at = -30.0, .colour = {60, 20, 120}}, Stop{.at = -10.0, .colour = {60, 110, 220}},
-    Stop{.at = 0.0, .colour = {245, 245, 245}}, Stop{.at = 15.0, .colour = {245, 200, 80}},
-    Stop{.at = 35.0, .colour = {190, 30, 30}},
+    ColourStop{.at = -30.0, .colour = {60, 20, 120}},
+    ColourStop{.at = -10.0, .colour = {60, 110, 220}},
+    ColourStop{.at = 0.0, .colour = {245, 245, 245}},
+    ColourStop{.at = 15.0, .colour = {245, 200, 80}},
+    ColourStop{.at = 35.0, .colour = {190, 30, 30}},
 };
 
 constexpr std::array moisture_stops{
-    Stop{.at = 0.0, .colour = {150, 100, 50}},
-    Stop{.at = 0.3, .colour = {225, 205, 120}},
-    Stop{.at = 0.6, .colour = {80, 170, 80}},
-    Stop{.at = 1.0, .colour = {30, 80, 190}},
+    ColourStop{.at = 0.0, .colour = {150, 100, 50}},
+    ColourStop{.at = 0.3, .colour = {225, 205, 120}},
+    ColourStop{.at = 0.6, .colour = {80, 170, 80}},
+    ColourStop{.at = 1.0, .colour = {30, 80, 190}},
 };
 
 // Indexed by biome.
@@ -165,7 +142,7 @@ DVec3 pixel_direction(const View& view, ImageSize size, int x, int y, double pla
 
 Rgb height_colour(std::int64_t elevation) noexcept {
     const double metres = planet::fixed_to_double(elevation);
-    return metres <= 0.0 ? interpolate(ocean_stops, metres) : interpolate(land_stops, metres);
+    return metres <= 0.0 ? ramp(ocean_stops, metres) : ramp(land_stops, metres);
 }
 
 Rgb biome_colour(planet::Biome biome) noexcept {
@@ -174,11 +151,11 @@ Rgb biome_colour(planet::Biome biome) noexcept {
 }
 
 Rgb temperature_colour(std::int64_t temperature) noexcept {
-    return interpolate(temperature_stops, planet::fixed_to_double(temperature));
+    return ramp(temperature_stops, planet::fixed_to_double(temperature));
 }
 
 Rgb moisture_colour(std::int64_t moisture) noexcept {
-    return interpolate(moisture_stops, planet::fixed_to_double(moisture));
+    return ramp(moisture_stops, planet::fixed_to_double(moisture));
 }
 
 Rgb deposit_colour(const std::array<planet::Deposit, planet::resource_count>& deposits,

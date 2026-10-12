@@ -16,17 +16,6 @@ constexpr Rgb shade{30, 30, 34};
 constexpr Rgb sparse{190, 40, 40};
 constexpr Rgb dense{255, 235, 90};
 
-Rgb mix(Rgb from, Rgb to, double share) {
-    const double t = std::clamp(share, 0.0, 1.0);
-    Rgb out{};
-    for (std::size_t channel = 0; channel < out.size(); ++channel) {
-        out.at(channel) = static_cast<std::uint8_t>(std::lround(
-            static_cast<double>(from.at(channel)) +
-            ((static_cast<double>(to.at(channel)) - static_cast<double>(from.at(channel))) * t)));
-    }
-    return out;
-}
-
 void put(Image& image, int x, int y, Rgb colour) {
     const auto offset = 3 * ((static_cast<std::size_t>(y) * static_cast<std::size_t>(image.width)) +
                              static_cast<std::size_t>(x));

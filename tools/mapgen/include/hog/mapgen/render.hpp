@@ -3,6 +3,7 @@
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
 #include <hog/jobs/job_system.hpp>
+#include <hog/mapgen/colour.hpp>
 #include <hog/mapgen/options.hpp>
 #include <hog/planet/geology.hpp>
 
@@ -13,8 +14,6 @@
 #include <vector>
 
 namespace hog::mapgen {
-
-using Rgb = std::array<std::uint8_t, 3>;
 
 struct Image {
     int width = 0;
