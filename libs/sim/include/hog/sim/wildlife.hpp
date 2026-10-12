@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -37,6 +38,8 @@ struct WildlifeConfig {
     // Animals sense better ground this many cells away, valued less by `scent_fade` per cell.
     int scent_reach = 12;
     double scent_fade = 0.85;
+    // Species empty out of and come back to regions the size of grid cells at this level.
+    int region_level = 2;
     Ecology ecology{};
 };
 
@@ -72,9 +75,25 @@ struct WildlifeFields {
     friend bool operator==(const WildlifeFields&, const WildlifeFields&) = default;
 };
 
+// Where a species has gone from, and whether it has gone from everywhere.
+struct Presence {
+    // Per region, since when it has had none; empty while some live there, and for regions it
+    // can't live in.
+    std::vector<std::optional<GameTime>> emptied;
+    std::optional<GameTime> extinct; // since when none are left anywhere, having once lived
+    bool alive = false;              // some lived at the last step
+    bool succeeded = false;          // its successor has come in its place
+
+    friend bool operator==(const Presence&, const Presence&) = default;
+};
+
 // Populations of each species per cell, stepped together: plants grow, animals eat, are born and
 // die, and wander or head for better ground. Long cycles come from predators and prey chasing
 // each other and from good and bad years of weather, plus any a species is authored with.
+// A region a species empties out of fills back from its neighbours, or failing that, from a
+// founding group once a while has passed and no rival has taken its place. Once a species is gone
+// from everywhere it's extinct: it waits to be reintroduced, or as its ecology says, a few relicts
+// turn up or a successor takes its place.
 class Wildlife {
 public:
     // Starts at the ecology's densities with forage grown in, as of the last step at or before
@@ -87,6 +106,11 @@ public:
     [[nodiscard]] const WildlifeFields& fields() const noexcept { return fields_; }
     // km².
     [[nodiscard]] double area(std::uint32_t cell) const { return areas_[cell]; }
+    [[nodiscard]] std::uint32_t region(std::uint32_t cell) const { return regions_[cell]; }
+    [[nodiscard]] std::uint32_t region_count() const noexcept { return region_count_; }
+    [[nodiscard]] const Presence& presence(std::uint32_t species) const {
+        return presence_[species];
+    }
     // When the last step was taken, and when the next is due.
     [[nodiscard]] GameTime time() const noexcept { return time_; }
     [[nodiscard]] GameTime next_step() const noexcept { return time_ + config_.step; }
@@ -100,22 +124,46 @@ public:
     // Removes up to `count` animals from a cell, as when they're killed or brought to life in
     // detail; returns how many there were to take.
     float take(std::uint32_t species, std::uint32_t cell, float count);
-    // Puts animals back, as when they're folded back into the population.
+    // Puts animals back, as when they're folded back into the population or reintroduced; a
+    // species brought back from extinction is alive again from the next step.
     void add(std::uint32_t species, std::uint32_t cell, float count);
 
     // Versioned bytes for a snapshot section.
     [[nodiscard]] std::vector<std::byte> save() const;
     // Replaces the state with saved bytes, or fails and changes nothing: with Unsupported for a
     // newer version, and InvalidArgument for wildlife saved at another grid level. Species are
-    // matched by name; one the save lacks keeps its state.
+    // matched by name; one the save lacks keeps its state. Presence missing from an older save is
+    // taken from the populations, as of the save.
     [[nodiscard]] Result<void> load(std::uint16_t version, std::span<const std::byte> bytes);
 
-    static constexpr std::uint16_t save_version = 1;
+    static constexpr std::uint16_t save_version = 2;
 
 private:
     void step(GameTime at, const Conditions& conditions, jobs::JobSystem& jobs);
     // Animals wander, and head for better ground they can sense.
     void move(const detail::LifeContext& context, std::uint32_t species, jobs::JobSystem& jobs);
+    // Animals of each species in each region.
+    [[nodiscard]] std::vector<std::vector<double>> held(const WildlifeFields& fields) const;
+    // Presence as it stands, with every emptied region's wait starting at `at`.
+    [[nodiscard]] Presence present(std::uint32_t species, std::span<const double> held,
+                                   GameTime at) const;
+    // Notes where each species has gone from and come back to, and brings founders, relicts and
+    // successors where they're due.
+    void recover(const detail::LifeContext& context, GameTime at);
+    void track(std::uint32_t species, std::span<const double> held, GameTime at);
+    void found(const detail::LifeContext& context, std::uint32_t species,
+               std::vector<std::vector<double>>& held, GameTime at);
+    void outlive(const detail::LifeContext& context, std::uint32_t species, GameTime at);
+    // Whether founders could live in the region: no rival with its main food is settled there.
+    [[nodiscard]] bool open_niche(std::uint32_t species, std::uint32_t region,
+                                  const std::vector<std::vector<double>>& held) const;
+    // The cell the species likes best, of those `where` allows; none if it likes none.
+    template <typename Where>
+    [[nodiscard]] std::optional<std::uint32_t> best_cell(const detail::LifeContext& context,
+                                                         std::uint32_t species, Where where) const;
+    // A wait between `earliest` and `latest` years, the same each time for the same reasons.
+    [[nodiscard]] GameDuration wait(std::uint32_t species, std::uint64_t place, GameTime since,
+                                    double earliest, double latest) const;
 
     WildlifeConfig config_;
     CellGrid grid_;
@@ -125,7 +173,12 @@ private:
     std::vector<std::array<std::uint8_t, 4>> back_;
     // Per species, the year (from 0 to its cycle's length) each cell's authored boom peaks.
     std::vector<std::vector<float>> peaks_;
+    std::vector<std::uint32_t> regions_; // each cell's
+    std::uint32_t region_count_ = 0;
+    // Per species, the regions with ground it can live on.
+    std::vector<std::vector<bool>> livable_;
     WildlifeFields fields_;
+    std::vector<Presence> presence_;
     GameTime time_;
     // Scratch for moving.
     std::vector<float> appeal_;

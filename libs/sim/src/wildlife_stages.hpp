@@ -43,6 +43,12 @@ struct LifeContext {
     return false;
 }
 
+// A hash as a number from 0 up to 1.
+[[nodiscard]] inline double fraction(std::uint64_t hash) {
+    constexpr double scale = 1.0 / static_cast<double>(std::uint64_t{1} << 53U);
+    return static_cast<double>(hash >> 11U) * scale;
+}
+
 // How much of a share per day comes to over `days`.
 [[nodiscard]] inline double over(double per_day, double days) {
     return 1.0 - std::pow(1.0 - std::clamp(per_day, 0.0, 1.0), days);

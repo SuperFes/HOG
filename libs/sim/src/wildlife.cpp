@@ -12,11 +12,6 @@ namespace hog::sim {
 
 namespace {
 
-double fraction(std::uint64_t hash) {
-    constexpr double scale = 1.0 / static_cast<double>(std::uint64_t{1} << 53U);
-    return static_cast<double>(hash >> 11U) * scale;
-}
-
 GameDuration positive(GameDuration duration) {
     return duration > GameDuration::zero() ? duration : GameDuration{1};
 }
@@ -84,11 +79,34 @@ Wildlife::Wildlife(WildlifeConfig config, std::vector<Habitat> habitat, GameTime
             peaks.resize(size);
             for (std::uint32_t cell = 0; cell < size; ++cell) {
                 const std::uint64_t region = grid_.cell(cell).parent(level).raw();
-                peaks[cell] = static_cast<float>(fraction(hash_values(config_.seed, name, region)) *
-                                                 one.cycle.years);
+                peaks[cell] = static_cast<float>(
+                    detail::fraction(hash_values(config_.seed, name, region)) * one.cycle.years);
             }
         }
     }
+    const int region_level = std::clamp(config_.region_level, 0, grid_.level());
+    const std::uint32_t side = 1U << static_cast<unsigned>(region_level);
+    region_count_ = 6 * side * side;
+    regions_.reserve(size);
+    for (std::uint32_t cell = 0; cell < size; ++cell) {
+        const planet::FaceIJ at = grid_.cell(cell).parent(region_level).to_face_ij();
+        regions_.push_back((static_cast<std::uint32_t>(at.face) * side * side) + (at.j * side) +
+                           at.i);
+    }
+    for (const Species& one : species) {
+        std::vector<bool>& livable = livable_.emplace_back(region_count_);
+        for (std::uint32_t cell = 0; cell < size; ++cell) {
+            if (detail::passable(one, habitat_[cell]) &&
+                one.habitat.at(static_cast<std::size_t>(habitat_[cell].biome)) > 0.0) {
+                livable[regions_[cell]] = true;
+            }
+        }
+    }
+    const auto held_now = held(fields_);
+    for (std::uint32_t kind = 0; kind < species.size(); ++kind) {
+        presence_.push_back(present(kind, held_now[kind], time_));
+    }
+
     appeal_.resize(size);
     scent_.resize(size);
     scent_next_.resize(size);
@@ -131,6 +149,7 @@ void Wildlife::step(GameTime at, const Conditions& conditions, jobs::JobSystem& 
     for (std::uint32_t species = 0; species < config_.ecology.species.size(); ++species) {
         move(context, species, jobs);
     }
+    recover(context, at);
     time_ = at;
 }
 

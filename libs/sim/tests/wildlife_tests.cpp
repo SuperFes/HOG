@@ -1,3 +1,4 @@
+#include <hog/core/bytes.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/planet/world.hpp>
 #include <hog/sim/weather.hpp>
@@ -6,9 +7,12 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <bit>
 #include <chrono>
 #include <cstdint>
 #include <set>
+#include <span>
+#include <string>
 #include <vector>
 
 using namespace std::chrono;
@@ -18,6 +22,7 @@ using hog::planet::Biome;
 using hog::sim::Conditions;
 using hog::sim::Food;
 using hog::sim::Habitat;
+using hog::sim::Recovery;
 using hog::sim::Species;
 using hog::sim::Wildlife;
 using hog::sim::WildlifeConfig;
@@ -82,6 +87,47 @@ double northern_share(const Wildlife& wildlife, std::uint32_t species) {
         }
     }
     return north / wildlife.total(species);
+}
+
+constexpr std::uint32_t island_a = 0;
+constexpr std::uint32_t island_b = 10;
+
+// Ocean everywhere but two regions of grassland, too far apart for land animals to cross.
+std::vector<Habitat> islands() {
+    const Wildlife probe{config({}), grassland(), march_equinox};
+    std::vector<Habitat> habitat = grassland();
+    for (std::uint32_t cell = 0; cell < habitat.size(); ++cell) {
+        const std::uint32_t region = probe.region(cell);
+        if (region != island_a && region != island_b) {
+            habitat[cell] = Habitat{.biome = Biome::Ocean, .ocean = true};
+        }
+    }
+    return habitat;
+}
+
+double in_region(const Wildlife& wildlife, std::uint32_t species, std::uint32_t region) {
+    double sum = 0.0;
+    for (std::uint32_t cell = 0; cell < wildlife.grid().size(); ++cell) {
+        if (wildlife.region(cell) == region) {
+            sum += static_cast<double>(wildlife.fields().populations[species].count[cell]);
+        }
+    }
+    return sum;
+}
+
+void clear(Wildlife& wildlife, std::uint32_t species, std::uint32_t region) {
+    for (std::uint32_t cell = 0; cell < wildlife.grid().size(); ++cell) {
+        if (wildlife.region(cell) == region) {
+            wildlife.take(species, cell, 1e9F);
+        }
+    }
+}
+
+Species returning(double earliest, double latest) {
+    Species deer = grazer();
+    deer.recovery.earliest = earliest;
+    deer.recovery.latest = latest;
+    return deer;
 }
 
 } // namespace
@@ -357,6 +403,140 @@ TEST_CASE("animals can be taken from the population and put back", "[sim][wildli
     CHECK(wildlife.fields().populations[0].count[5] == 3.0F);
 }
 
+TEST_CASE("emptied ground fills back from its neighbours", "[sim][wildlife][recovery]") {
+    JobSystem jobs{1};
+    Species deer = grazer();
+    deer.recovery.founders = 0.0;
+    Wildlife wildlife{config({deer}), grassland(), march_equinox};
+    const Steady weather;
+    wildlife.advance_to(march_equinox + days{365}, weather.conditions(), jobs);
+    const double settled = in_region(wildlife, 0, 20);
+    clear(wildlife, 0, 20);
+    wildlife.advance_to(march_equinox + days{2 * 365}, weather.conditions(), jobs);
+    CHECK(in_region(wildlife, 0, 20) > 0.5 * settled);
+}
+
+TEST_CASE("a species wiped from a region returns as founders", "[sim][wildlife][recovery]") {
+    JobSystem jobs{1};
+    Wildlife wildlife{config({returning(1.0, 2.0)}), islands(), march_equinox};
+    const Steady weather;
+    wildlife.advance_to(march_equinox + days{30}, weather.conditions(), jobs);
+    const double other_island = in_region(wildlife, 0, island_b);
+    clear(wildlife, 0, island_a);
+    wildlife.advance_to(march_equinox + days{31}, weather.conditions(), jobs);
+    const auto& presence = wildlife.presence(0);
+    CHECK(presence.alive);
+    CHECK(presence.emptied[island_a] == wildlife.time());
+    CHECK_FALSE(presence.emptied[island_b]);
+    CHECK(in_region(wildlife, 0, island_b) > 0.5 * other_island);
+
+    wildlife.advance_to(march_equinox + days{31 + 360}, weather.conditions(), jobs);
+    CHECK(in_region(wildlife, 0, island_a) == 0.0);
+    wildlife.advance_to(march_equinox + days{31 + (2 * 366)}, weather.conditions(), jobs);
+    CHECK(in_region(wildlife, 0, island_a) > 0.0);
+    CHECK_FALSE(wildlife.presence(0).emptied[island_a]);
+}
+
+TEST_CASE("rivals keep an emptied niche from founders", "[sim][wildlife][recovery]") {
+    JobSystem jobs{1};
+    Species elk = returning(1.0, 2.0);
+    elk.name = "elk";
+    Wildlife wildlife{config({returning(1.0, 2.0), elk}), islands(), march_equinox};
+    const Steady weather;
+    clear(wildlife, 0, island_a);
+    wildlife.advance_to(march_equinox + days{3 * 365}, weather.conditions(), jobs);
+    CHECK(in_region(wildlife, 0, island_a) == 0.0);
+    CHECK(wildlife.presence(0).emptied[island_a]);
+    CHECK(in_region(wildlife, 1, island_a) > 0.0);
+    CHECK(in_region(wildlife, 0, island_b) > 0.0);
+
+    // Once the rivals are gone too, both are free to come back.
+    clear(wildlife, 1, island_a);
+    wildlife.advance_to(march_equinox + days{6 * 365}, weather.conditions(), jobs);
+    CHECK(in_region(wildlife, 0, island_a) + in_region(wildlife, 1, island_a) > 0.0);
+}
+
+TEST_CASE("a species gone from everywhere waits to be reintroduced", "[sim][wildlife][recovery]") {
+    JobSystem jobs{1};
+    Wildlife wildlife{config({returning(1.0, 2.0)}), islands(), march_equinox};
+    const Steady weather;
+    clear(wildlife, 0, island_a);
+    clear(wildlife, 0, island_b);
+    wildlife.advance_to(march_equinox + days{1}, weather.conditions(), jobs);
+    const GameTime gone = wildlife.time();
+    CHECK_FALSE(wildlife.presence(0).alive);
+    CHECK(wildlife.presence(0).extinct == gone);
+
+    wildlife.advance_to(march_equinox + days{15 * 365}, weather.conditions(), jobs);
+    CHECK(wildlife.total(0) == 0.0);
+    CHECK(wildlife.presence(0).extinct == gone);
+
+    // Brought back to one island, it's alive again, and the other's wait starts over.
+    const GameTime back = march_equinox + days{(15 * 365) + 1};
+    for (std::uint32_t cell = 0; cell < wildlife.grid().size(); ++cell) {
+        if (wildlife.region(cell) == island_a) {
+            wildlife.add(0, cell, 20.0F);
+        }
+    }
+    wildlife.advance_to(back, weather.conditions(), jobs);
+    CHECK(wildlife.presence(0).alive);
+    CHECK_FALSE(wildlife.presence(0).extinct);
+    CHECK(wildlife.presence(0).emptied[island_b] == wildlife.time());
+    wildlife.advance_to(back + days{300}, weather.conditions(), jobs);
+    CHECK(in_region(wildlife, 0, island_b) == 0.0);
+    wildlife.advance_to(back + days{2 * 366}, weather.conditions(), jobs);
+    CHECK(in_region(wildlife, 0, island_b) > 0.0);
+}
+
+TEST_CASE("relicts of an extinct species turn up long after", "[sim][wildlife][recovery]") {
+    JobSystem jobs{1};
+    Species deer = grazer();
+    deer.recovery.after_extinction = Recovery::After::Relict;
+    deer.recovery.extinct_earliest = 1.0;
+    deer.recovery.extinct_latest = 2.0;
+    Wildlife wildlife{config({deer}), grassland(), march_equinox};
+    const Steady weather;
+    for (std::uint32_t cell = 0; cell < wildlife.grid().size(); ++cell) {
+        wildlife.take(0, cell, 1e9F);
+    }
+    wildlife.advance_to(march_equinox + days{360}, weather.conditions(), jobs);
+    CHECK(wildlife.total(0) == 0.0);
+    CHECK(wildlife.presence(0).extinct);
+    wildlife.advance_to(march_equinox + days{2 * 366}, weather.conditions(), jobs);
+    CHECK(wildlife.total(0) > 0.0);
+    CHECK_FALSE(wildlife.presence(0).extinct);
+}
+
+TEST_CASE("a successor takes the place of an extinct species", "[sim][wildlife][recovery]") {
+    JobSystem jobs{1};
+    Species deer = grazer();
+    deer.recovery.after_extinction = Recovery::After::Successor;
+    deer.recovery.successor = 1;
+    deer.recovery.extinct_earliest = 1.0;
+    deer.recovery.extinct_latest = 2.0;
+    Species elk = grazer();
+    elk.name = "elk";
+    elk.density = 0.0;
+    Wildlife wildlife{config({deer, elk}), grassland(), march_equinox};
+    // Never having lived isn't dying out.
+    CHECK_FALSE(wildlife.presence(1).alive);
+    CHECK_FALSE(wildlife.presence(1).extinct);
+
+    const Steady weather;
+    for (std::uint32_t cell = 0; cell < wildlife.grid().size(); ++cell) {
+        wildlife.take(0, cell, 1e9F);
+    }
+    wildlife.advance_to(march_equinox + days{360}, weather.conditions(), jobs);
+    CHECK(wildlife.total(1) == 0.0);
+    CHECK_FALSE(wildlife.presence(1).extinct);
+    wildlife.advance_to(march_equinox + days{2 * 366}, weather.conditions(), jobs);
+    CHECK(wildlife.total(0) == 0.0);
+    CHECK(wildlife.presence(0).extinct);
+    CHECK(wildlife.presence(0).succeeded);
+    CHECK(wildlife.total(1) > 0.0);
+    CHECK(wildlife.presence(1).alive);
+}
+
 TEST_CASE("wildlife is the same on any number of threads", "[sim][wildlife]") {
     JobSystem one{1};
     JobSystem many{4};
@@ -390,6 +570,8 @@ TEST_CASE("wildlife saves and loads", "[sim][wildlife]") {
     REQUIRE(loaded.load(Wildlife::save_version, bytes));
     CHECK(loaded.time() == saved.time());
     CHECK(loaded.fields() == saved.fields());
+    CHECK(loaded.presence(0) == saved.presence(0));
+    CHECK(loaded.presence(1) == saved.presence(1));
     saved.advance_to(march_equinox + days{50}, weather.conditions(), jobs);
     loaded.advance_to(march_equinox + days{50}, weather.conditions(), jobs);
     CHECK(loaded.fields() == saved.fields());
@@ -421,6 +603,36 @@ TEST_CASE("wildlife saves and loads", "[sim][wildlife]") {
     longer.push_back(std::byte{0});
     CHECK_FALSE(reloaded.load(Wildlife::save_version, longer));
     CHECK(reloaded.fields() == before);
+}
+
+TEST_CASE("wildlife loads saves from before it kept presence", "[sim][wildlife][recovery]") {
+    Wildlife wildlife{config({grazer()}), grassland(), march_equinox};
+    const std::uint32_t cells = wildlife.grid().size();
+    const GameTime saved = march_equinox + days{10};
+    hog::ByteWriter out;
+    out.write(static_cast<std::uint8_t>(level));
+    out.write(static_cast<std::uint64_t>(saved.time_since_epoch().count()));
+    const auto floats = [&](float value) {
+        for (std::uint32_t cell = 0; cell < cells; ++cell) {
+            out.write(std::bit_cast<std::uint32_t>(value));
+        }
+    };
+    floats(1'000.0F);
+    floats(0.0F);
+    out.write(std::uint32_t{1});
+    const std::string name = "deer";
+    out.write(static_cast<std::uint16_t>(name.size()));
+    out.write_bytes(std::as_bytes(std::span{name}));
+    for (std::uint32_t cell = 0; cell < cells; ++cell) {
+        out.write(std::bit_cast<std::uint32_t>(wildlife.region(cell) == 3 ? 0.0F : 5.0F));
+    }
+    floats(1.0F);
+
+    const auto bytes = std::move(out).take();
+    REQUIRE(wildlife.load(1, bytes));
+    CHECK(wildlife.presence(0).alive);
+    CHECK(wildlife.presence(0).emptied[3] == saved);
+    CHECK_FALSE(wildlife.presence(0).emptied[4]);
 }
 
 TEST_CASE("wildlife lives on the planet under its weather", "[sim][wildlife]") {

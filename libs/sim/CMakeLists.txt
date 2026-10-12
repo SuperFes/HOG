@@ -13,6 +13,7 @@ add_library(hog_sim
     src/wildlife_food.cpp
     src/wildlife_life.cpp
     src/wildlife_motion.cpp
+    src/wildlife_recovery.cpp
     src/wildlife_save.cpp)
 add_library(hog::sim ALIAS hog_sim)
 

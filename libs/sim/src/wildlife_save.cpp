@@ -25,6 +25,51 @@ void read_floats(Reader& in, std::vector<float>& values) {
     }
 }
 
+constexpr std::uint64_t never = std::numeric_limits<std::uint64_t>::max();
+
+void write_time(ByteWriter& out, const std::optional<GameTime>& time) {
+    out.write(time ? static_cast<std::uint64_t>(time->time_since_epoch().count()) : never);
+}
+
+std::optional<GameTime> read_time(Reader& in) {
+    const auto time = in.integer<std::uint64_t>();
+    if (time == never) {
+        return std::nullopt;
+    }
+    return GameTime{GameDuration{static_cast<GameDuration::rep>(time)}};
+}
+
+void write_presence(ByteWriter& out, const Presence& presence) {
+    out.write(static_cast<std::uint8_t>(presence.alive));
+    out.write(static_cast<std::uint8_t>(presence.succeeded));
+    write_time(out, presence.extinct);
+    out.write(static_cast<std::uint32_t>(presence.emptied.size()));
+    for (const auto& emptied : presence.emptied) {
+        write_time(out, emptied);
+    }
+}
+
+// Presence saved over another number of regions is read past.
+std::optional<Presence> read_presence(Reader& in, std::uint32_t regions) {
+    Presence presence;
+    presence.alive = in.integer<std::uint8_t>() != 0;
+    presence.succeeded = in.integer<std::uint8_t>() != 0;
+    presence.extinct = read_time(in);
+    const auto count = in.integer<std::uint32_t>();
+    if (count > in.remaining() / sizeof(std::uint64_t)) {
+        in.fail(Error{.code = ErrorCode::Parse,
+                      .message = "wildlife lists more regions than it holds"});
+        return std::nullopt;
+    }
+    for (std::uint32_t region = 0; region < count; ++region) {
+        presence.emptied.push_back(read_time(in));
+    }
+    if (count != regions) {
+        return std::nullopt;
+    }
+    return presence;
+}
+
 } // namespace
 
 std::vector<std::byte> Wildlife::save() const {
@@ -41,6 +86,7 @@ std::vector<std::byte> Wildlife::save() const {
         out.write_bytes(std::as_bytes(std::span{name}));
         write_floats(out, fields_.populations[species].count);
         write_floats(out, fields_.populations[species].fed);
+        write_presence(out, presence_[species]);
     }
     return std::move(out).take();
 }
@@ -70,18 +116,32 @@ Result<void> Wildlife::load(std::uint16_t version, std::span<const std::byte> by
     // A species no longer in the ecology is read past; one new to it keeps its start.
     Population ignored{.count = std::vector<float>(grid_.size()),
                        .fed = std::vector<float>(grid_.size())};
+    // Presence a save lacks is worked out from the populations; a species it lacks keeps its own.
+    std::vector<std::optional<Presence>> presence(presence_.begin(), presence_.end());
     for (std::uint32_t read = 0; read < count && in.ok(); ++read) {
         const std::string name = in.text(in.integer<std::uint16_t>());
         const auto species = config_.ecology.find(name);
         Population& into = species ? loaded.populations[*species] : ignored;
         read_floats(in, into.count);
         read_floats(in, into.fed);
+        std::optional<Presence> present =
+            version >= 2 ? read_presence(in, region_count_) : std::nullopt;
+        if (species) {
+            presence[*species] = std::move(present);
+        }
     }
     if (auto finished = in.finish(); !finished) {
         return finished;
     }
+    const GameTime loaded_time{GameDuration{static_cast<GameDuration::rep>(time)}};
+    const auto held_then = held(loaded);
+    for (std::uint32_t species = 0; species < presence_.size(); ++species) {
+        std::optional<Presence>& kept = presence[species];
+        presence_[species] =
+            kept ? std::move(*kept) : present(species, held_then[species], loaded_time);
+    }
     fields_ = std::move(loaded);
-    time_ = GameTime{GameDuration{static_cast<GameDuration::rep>(time)}};
+    time_ = loaded_time;
     return {};
 }
 
