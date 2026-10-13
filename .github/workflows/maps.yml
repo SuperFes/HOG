@@ -5,7 +5,7 @@ name: Maps
 on:
   pull_request:
     types: [opened, synchronize, reopened, closed]
-    paths: ['libs/planet/**', 'tools/mapgen/**', 'config/**']
+    paths: ['libs/planet/**', 'libs/sim/**', 'tools/mapgen/**', 'config/**']
 
 concurrency:
   group: maps-${{ github.event.pull_request.number }}
@@ -43,6 +43,7 @@ jobs:
         run: |
           build/release/tools/mapgen/hog-mapgen --size 1024 --out maps
           build/release/tools/mapgen/hog-mapgen --islands 60 --size 768 --out maps
+          build/release/tools/mapgen/hog-mapgen --seasons --size 256 --out maps
       - uses: actions/upload-artifact@v7
         with:
           name: maps
@@ -74,6 +75,14 @@ jobs:
               echo
               image "planet-${layer}.png" 800
               image "islands-${layer}.png" 400
+              echo
+            done
+            echo "**Seasons**, the first of each month from January, left to right"
+            echo
+            for map in temperature rain land forest; do
+              echo "${map}"
+              echo
+              image "planet-seasons-${map}.png" 800
               echo
             done
             echo "Full size: the [maps artifact](${{ github.server_url }}/${GITHUB_REPOSITORY}/actions/runs/${{ github.run_id }})."
