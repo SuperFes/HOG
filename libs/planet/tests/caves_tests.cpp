@@ -2,6 +2,7 @@
 #include <hog/planet/caves.hpp>
 #include <hog/planet/neighbors.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/planet/tangent_frame.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -15,6 +16,7 @@
 #include <optional>
 #include <set>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 using hog::DVec3;
@@ -66,6 +68,28 @@ Spot spot_at(const Caves& caves, DVec3 point) {
     const double height = glm::length(point) - radius;
     const std::int64_t surface = caves.geology().terrain().elevation(cell);
     return {.cell = cell, .depth = surface - std::llround(height * static_cast<double>(fixed_one))};
+}
+
+// Sea-cave tiles over and around each starting island.
+std::vector<CellId> island_coasts(const Caves& caves) {
+    std::vector<CellId> cells;
+    for (const auto& island : caves.geology().terrain().archipelago().islands()) {
+        const hog::planet::TangentFrame frame = hog::planet::tangent_frame(island.center);
+        const auto steps = static_cast<int>(island.radius * 2.0 / 150.0);
+        for (int east = -steps; east <= steps; ++east) {
+            for (int north = -steps; north <= steps; ++north) {
+                const DVec3 offset = ((frame.east * static_cast<double>(east)) +
+                                      (frame.north * static_cast<double>(north))) *
+                                     (150.0 / radius);
+                cells.push_back(hog::planet::cell_at(glm::normalize(island.center + offset),
+                                                     caves.sea_level()));
+            }
+        }
+    }
+    std::ranges::sort(cells);
+    const auto [first, last] = std::ranges::unique(cells);
+    cells.erase(first, last);
+    return cells;
 }
 
 } // namespace
@@ -254,6 +278,52 @@ TEST_CASE("lava tubes are found in the basalt they run through", "[planet][caves
         }
     }
     CHECK(found > 10);
+}
+
+TEST_CASE("sea caves run inland from cliffs at the water's edge", "[planet][caves]") {
+    const std::uint64_t seed = GENERATE(1U, 2U);
+    const Caves caves{geology(seed)};
+    Caves::Lookup lookup{caves};
+    const hog::planet::Elevation& terrain = caves.geology().terrain();
+    std::set<std::pair<double, double>> seen;
+    int found = 0;
+    int entered = 0;
+    for (const CellId tile : island_coasts(caves)) {
+        for (const Passage& passage : lookup.passages_near(tile)) {
+            if (passage.cave != Cave::SeaCave ||
+                !seen.insert({passage.from.x, passage.from.y}).second) {
+                continue;
+            }
+            ++found;
+            // From a mouth in the sea, about level with it, to a crack inland.
+            CHECK(terrain.elevation(hog::planet::cell_at(glm::normalize(passage.from), 18)) <= 0);
+            CHECK(terrain.elevation(hog::planet::cell_at(glm::normalize(passage.to), 18)) > 0);
+            for (const DVec3 end : {passage.from, passage.to}) {
+                CHECK_THAT(glm::length(end) - radius, Catch::Matchers::WithinAbs(1.0, 1e-6));
+            }
+            CHECK(passage.from_radius >= 3.0);
+            CHECK(passage.to_radius < hog::planet::crawl_clearance);
+            const double length = glm::length(passage.to - passage.from);
+            CHECK(length >= 20.0);
+            CHECK(length <= 140.0);
+            // Somewhere along it, inside the cliff, there is room.
+            for (double along = 0.0; along <= 1.0; along += 0.05) {
+                const Spot at =
+                    spot_at(caves, passage.from + ((passage.to - passage.from) * along));
+                if (at.depth <= 2 * fixed_one) {
+                    continue;
+                }
+                const auto hit = lookup.cave_at(at.cell, at.depth);
+                if (hit && hit->cave == Cave::SeaCave) {
+                    ++entered;
+                    break;
+                }
+            }
+        }
+    }
+    INFO(found << " sea caves, " << entered << " entered");
+    CHECK(found > 0);
+    CHECK(entered * 2 >= found);
 }
 
 TEST_CASE("only limestone holds karst", "[planet][caves]") {

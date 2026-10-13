@@ -77,8 +77,10 @@ public:
 
     [[nodiscard]] std::span<const LavaTube> lava_tubes() const noexcept { return lava_tubes_; }
 
-    // The level of the cells karst passages run between.
+    // The level of the cells karst passages run between, and of those each holding at most one
+    // sea cave.
     [[nodiscard]] int karst_level() const noexcept { return karst_level_; }
+    [[nodiscard]] int sea_level() const noexcept { return sea_level_; }
 
     // Remembers the passages it has worked out, for many nearby queries on one thread.
     class Lookup {
@@ -98,10 +100,12 @@ public:
 
         [[nodiscard]] const Junction& junction(CellId tile);
         [[nodiscard]] const std::vector<Passage>& karst(CellId tile);
+        [[nodiscard]] const std::vector<Passage>& sea(CellId tile);
 
         const Caves* caves_;
         std::unordered_map<std::uint64_t, Junction> junctions_;
         std::unordered_map<std::uint64_t, std::vector<Passage>> karst_;
+        std::unordered_map<std::uint64_t, std::vector<Passage>> sea_;
     };
 
 private:
@@ -111,7 +115,9 @@ private:
     double planet_radius_;
     int karst_level_;
     int point_level_;
+    int sea_level_;
     std::uint64_t karst_seed_;
+    std::uint64_t sea_seed_;
     std::vector<LavaTube> lava_tubes_;
 };
 

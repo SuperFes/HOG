@@ -5,6 +5,7 @@
 #include <hog/planet/tangent_frame.hpp>
 
 #include <algorithm>
+#include <array>
 #include <utility>
 
 namespace hog::planet {
@@ -13,6 +14,7 @@ namespace {
 
 constexpr std::uint64_t karst_salt = 0x6B61'7273'7400'0000ULL; // "karst"
 constexpr std::uint64_t lava_salt = 0x6C61'7661'0000'0000ULL;  // "lava"
+constexpr std::uint64_t sea_salt = 0x7365'6163'6176'6500ULL;   // "seacave"
 
 // Metres between karst junctions, and across the cells whose ground a passage's ends are set in.
 constexpr double karst_spacing = 400.0;
@@ -60,6 +62,27 @@ constexpr double widest_pinch = 0.5;
 constexpr double tube_end = 0.3;
 // Lava tubes lie no deeper than this, which spares deeper queries the search.
 constexpr std::int64_t below_tubes = 40 * fixed_one;
+
+// The sea hollows out caves where it beats on steep coasts: ground at least `cliff_height` up
+// within `cliff_reach` of open water. A cave runs inland from its mouth at about sea level, wide at
+// the mouth and narrowing to a crack.
+constexpr double sea_spacing = 200.0;
+constexpr std::int64_t cliff_height = 8 * fixed_one;
+constexpr double cliff_reach = 80.0;
+constexpr std::uint64_t sea_cave_percent = 40;
+constexpr double shortest_sea_cave = 20.0;
+constexpr double longest_sea_cave = 60.0;
+constexpr double narrowest_mouth = 3.0;
+constexpr double widest_mouth = 8.0;
+constexpr double narrowest_crack = 0.2;
+constexpr double widest_crack = 0.35;
+constexpr double mouth_height = 1.0; // metres above the sea
+// Eight ways around, as east and north.
+constexpr std::array compass_east{1.0, 1.0, 0.0, -1.0, -1.0, -1.0, 0.0, 1.0};
+constexpr std::array compass_north{0.0, 1.0, 1.0, 1.0, 0.0, -1.0, -1.0, -1.0};
+// Metres above and below the sea that sea caves stay within, which spares other queries.
+constexpr double above_sea_caves = mouth_height + widest_mouth;
+constexpr double below_sea_caves = widest_mouth;
 
 // A hash mapped to [0, 1).
 [[nodiscard]] double fraction(std::uint64_t hash) {
@@ -109,7 +132,9 @@ Caves::Caves(const Geology& geology)
     : geology_{&geology}, planet_radius_{geology.planet_radius()},
       karst_level_{level_for(karst_spacing, geology.planet_radius())},
       point_level_{level_for(point_spacing, geology.planet_radius())},
-      karst_seed_{hash_combine(geology.seed(), karst_salt)} {
+      sea_level_{level_for(sea_spacing, geology.planet_radius())},
+      karst_seed_{hash_combine(geology.seed(), karst_salt)},
+      sea_seed_{hash_combine(geology.seed(), sea_salt)} {
     const std::uint64_t seed = hash_combine(geology.seed(), lava_salt);
     const auto chambers = geology.chambers();
     for (std::size_t chamber = 0; chamber < chambers.size(); ++chamber) {
@@ -308,12 +333,69 @@ const std::vector<Passage>& Caves::Lookup::karst(CellId tile) {
     return karst_.emplace(tile.raw(), std::move(passages)).first->second;
 }
 
+const std::vector<Passage>& Caves::Lookup::sea(CellId tile) {
+    if (const auto found = sea_.find(tile.raw()); found != sea_.end()) {
+        return found->second;
+    }
+    const Caves& caves = *caves_;
+    const Elevation& terrain = caves.geology_->terrain();
+    const std::uint64_t seed = hash_values(caves.sea_seed_, tile.raw());
+    std::vector<Passage> passages;
+    if (hash_values(seed, 0) % 100 < sea_cave_percent) {
+        const TangentFrame frame = tangent_frame(tile);
+        const double reach = 0.8 * sea_spacing / caves.planet_radius_;
+        const DVec3 top = glm::normalize(
+            frame.up + (frame.east * ((fraction(hash_values(seed, 1)) - 0.5) * reach)) +
+            (frame.north * ((fraction(hash_values(seed, 2)) - 0.5) * reach)));
+        const auto ground = [&](DVec3 direction) {
+            return terrain.elevation(cell_at(direction, caves.point_level_));
+        };
+        if (ground(top) >= cliff_height) {
+            // The first way, around from a seeded start, that finds the sea.
+            const TangentFrame here = tangent_frame(top);
+            const std::uint64_t start = hash_values(seed, 3) % 8;
+            for (std::uint64_t turn = 0; turn < 8; ++turn) {
+                const std::uint64_t way = (start + turn) % 8;
+                const DVec3 out = glm::normalize((here.east * compass_east.at(way)) +
+                                                 (here.north * compass_north.at(way)));
+                const DVec3 sea =
+                    glm::normalize(top + (out * (cliff_reach / caves.planet_radius_)));
+                if (ground(sea) > 0) {
+                    continue;
+                }
+                const double length = shortest_sea_cave + ((longest_sea_cave - shortest_sea_cave) *
+                                                           fraction(hash_values(seed, 4)));
+                const DVec3 inland = glm::normalize(top - (out * (length / caves.planet_radius_)));
+                const double height = caves.planet_radius_ + mouth_height;
+                passages.push_back(
+                    {.from = sea * height,
+                     .to = inland * height,
+                     .from_radius = narrowest_mouth + ((widest_mouth - narrowest_mouth) *
+                                                       fraction(hash_values(seed, 5))),
+                     .to_radius = narrowest_crack + ((widest_crack - narrowest_crack) *
+                                                     fraction(hash_values(seed, 6))),
+                     .cave = Cave::SeaCave});
+                break;
+            }
+        }
+    }
+    return sea_.emplace(tile.raw(), std::move(passages)).first->second;
+}
+
 std::vector<Passage> Caves::Lookup::passages_near(CellId cell) {
     const CellId tile = cell_at(cell_center(cell), caves_->karst_level_);
     std::vector<Passage> near = karst(tile);
     const VertexNeighbors around_tile = vertex_neighbors(tile);
     for (const CellId around : around_tile.cells()) {
         const std::vector<Passage>& theirs = karst(around);
+        near.insert(near.end(), theirs.begin(), theirs.end());
+    }
+    const CellId coast = cell_at(cell_center(cell), caves_->sea_level_);
+    const std::vector<Passage>& here = sea(coast);
+    near.insert(near.end(), here.begin(), here.end());
+    const VertexNeighbors around_coast = vertex_neighbors(coast);
+    for (const CellId around : around_coast.cells()) {
+        const std::vector<Passage>& theirs = sea(around);
         near.insert(near.end(), theirs.begin(), theirs.end());
     }
     const DVec3 point = caves_->point_at(cell, 0);
@@ -331,10 +413,16 @@ std::optional<CaveHit> Caves::Lookup::cave_at(CellId cell, std::int64_t depth) {
     // Only limestone dissolves, and sinkholes open through what lies over it.
     const bool karst = strata.sediment == Rock::Limestone && depth < strata.bedrock_depth();
     const bool lava = rock == Rock::Basalt && depth < below_tubes;
-    if (!karst && !lava) {
+    // Sea caves are cut in solid rock, about level with the sea.
+    const std::int64_t elevation = caves_->geology_->terrain().elevation(cell);
+    const double height = fixed_to_double(elevation - depth);
+    const bool solid = rock != Rock::Soil && rock != Rock::Sand && depth >= 0;
+    const bool sea_cave =
+        solid && elevation > 0 && height < above_sea_caves && height > -below_sea_caves;
+    if (!karst && !lava && !sea_cave) {
         return std::nullopt;
     }
-    const DVec3 point = caves_->point_at(cell, depth);
+    const DVec3 point = point_over(cell_center(cell), caves_->planet_radius_, elevation, depth);
     std::optional<CaveHit> best;
     const auto consider = [&](const Passage& passage) {
         const std::optional<double> clearance = clearance_at(passage, point);
@@ -354,6 +442,14 @@ std::optional<CaveHit> Caves::Lookup::cave_at(CellId cell, std::int64_t depth) {
         dissolved(tile);
         const VertexNeighbors around = vertex_neighbors(tile);
         std::ranges::for_each(around.cells(), dissolved);
+    }
+    if (sea_cave) {
+        const CellId tile = cell_at(cell_center(cell), caves_->sea_level_);
+        std::ranges::for_each(sea(tile), consider);
+        const VertexNeighbors around = vertex_neighbors(tile);
+        for (const CellId each : around.cells()) {
+            std::ranges::for_each(sea(each), consider);
+        }
     }
     if (lava) {
         for (const LavaTube& tube : caves_->lava_tubes_) {
