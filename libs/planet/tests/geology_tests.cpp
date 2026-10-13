@@ -13,6 +13,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <set>
 #include <string_view>
 #include <vector>
@@ -373,6 +374,74 @@ TEST_CASE("magma lies only under the middle of the islands", "[planet][geology]"
             }
         }
         CHECK(molten > 0);
+    }
+}
+
+TEST_CASE("rock warms with depth through the crust and the mantle", "[planet][geology]") {
+    const Geology geology{planet(1)};
+    const auto clear_of_chambers = [&](CellId cell) {
+        return std::ranges::none_of(geology.chambers(), [&](const auto& chamber) {
+            return glm::length(hog::planet::cell_center(cell) - chamber.center) * radius < 20'000.0;
+        });
+    };
+    int checked = 0;
+    for (const CellId cell : cells_at(5)) {
+        if (!clear_of_chambers(cell)) {
+            continue;
+        }
+        ++checked;
+        const std::int64_t elevation = geology.terrain().elevation(cell);
+        const std::int64_t surface = geology.rock_temperature(cell, 0);
+        if (elevation >= 0) {
+            REQUIRE(surface == geology.climate().temperature(cell));
+        } else if (elevation < -1'000 * fixed_one) {
+            REQUIRE(surface == 4 * fixed_one);
+        }
+        const std::int64_t mantle = geology.crust_thickness(cell);
+        REQUIRE(geology.rock_temperature(cell, mantle) == 800 * fixed_one);
+        REQUIRE(geology.rock_temperature(cell, mantle + (10'000 * fixed_one)) == 900 * fixed_one);
+        std::int64_t last = surface;
+        for (std::int64_t depth = 0; depth <= 110'000 * fixed_one; depth += 500 * fixed_one) {
+            const std::int64_t heat = geology.rock_temperature(cell, depth);
+            REQUIRE(heat >= last);
+            last = heat;
+        }
+        // Nothing deeper than the planet's middle.
+        REQUIRE(geology.rock_temperature(cell, std::numeric_limits<std::int64_t>::max()) ==
+                geology.rock_temperature(cell, static_cast<std::int64_t>(radius) * fixed_one));
+    }
+    CHECK(checked > 5'000);
+}
+
+TEST_CASE("the rock around a magma chamber is hot", "[planet][geology]") {
+    const Geology geology{planet(1)};
+    for (const auto& chamber : geology.chambers()) {
+        const CellId cell = hog::planet::cell_at(chamber.center, 12);
+        const Strata strata = geology.strata(cell);
+        const std::int64_t roof = strata.chamber_top;
+        CHECK(geology.rock_temperature(cell, roof + (strata.chamber_thickness / 2)) ==
+              1'100 * fixed_one);
+        CHECK(geology.rock_temperature(cell, roof) >= 1'099 * fixed_one);
+        CHECK(geology.rock_temperature(cell, roof - (500 * fixed_one)) > 400 * fixed_one);
+        // Cooling all the way up to warm ground.
+        std::int64_t last = geology.rock_temperature(cell, roof);
+        for (std::int64_t depth = roof; depth >= 0; depth -= 100 * fixed_one) {
+            const std::int64_t heat = geology.rock_temperature(cell, depth);
+            REQUIRE(heat <= last);
+            last = heat;
+        }
+        CHECK(geology.rock_temperature(cell, 0) > geology.climate().temperature(cell));
+        // Rock beside it at the same depth, past the rim, is warmed too but less.
+        const hog::planet::TangentFrame frame = hog::planet::tangent_frame(chamber.center);
+        const CellId beside = hog::planet::cell_at(
+            glm::normalize(chamber.center + (frame.east * ((chamber.radius + 500.0) / radius))),
+            12);
+        const std::int64_t level = roof + (strata.chamber_thickness / 2) -
+                                   geology.terrain().elevation(cell) +
+                                   geology.terrain().elevation(beside);
+        CHECK(geology.strata(beside).chamber_thickness == 0);
+        CHECK(geology.rock_temperature(beside, level) > 300 * fixed_one);
+        CHECK(geology.rock_temperature(beside, level) < 1'000 * fixed_one);
     }
 }
 

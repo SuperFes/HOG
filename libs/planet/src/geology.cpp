@@ -52,6 +52,18 @@ constexpr std::int64_t shallowest_chamber = 3'000;
 constexpr std::int64_t deepest_chamber = 6'000;
 constexpr std::int64_t chamber_half_height = 500 * fixed_one;
 
+// °C: deep sea water, the base of the crust, and magma, with the mantle warming per kilometre.
+// The sea floor cools from the surface water's warmth over the first `cold_water_depth`.
+constexpr std::int64_t sea_floor_temperature = 4 * fixed_one;
+constexpr std::int64_t mantle_temperature = 800 * fixed_one;
+constexpr std::int64_t mantle_warming = 10;
+constexpr std::int64_t magma_temperature = 1'100 * fixed_one;
+constexpr std::int64_t cold_water_depth = 1'000 * fixed_one;
+// Metres from a chamber over which the rock's warming towards magma falls to about a quarter,
+// and beyond which it is gone.
+constexpr double magma_reach = 1'000.0;
+constexpr double magma_limit = 10'000.0;
+
 // The surface below which a seam sits.
 enum class Host : std::uint8_t {
     Cover,    // straight under the cover
@@ -139,6 +151,16 @@ constexpr std::int64_t gold_strength = fixed_one / 4;
 [[nodiscard]] std::int64_t smooth_ramp(std::int64_t value, std::int64_t width) {
     const std::int64_t t = ramp(value, width);
     return multiply(multiply(t, t), (3 * fixed_one) - (2 * t));
+}
+
+// How far rock this many metres from a chamber's wall is warmed towards magma, from 0 to 1.
+[[nodiscard]] double magma_warmth(double distance) {
+    const auto falloff = [](double away) {
+        const double fall = magma_reach / (magma_reach + away);
+        return fall * fall;
+    };
+    const double edge = falloff(magma_limit);
+    return std::max((falloff(distance) - edge) / (1.0 - edge), 0.0);
 }
 
 // Noise in [-1, 1] mapped to [0, 1].
@@ -339,6 +361,42 @@ Strata Geology::strata(CellId cell, Biome biome) const {
     strata.sediment_thickness =
         multiply(multiply(max_sediment, exposure), ramp(swell + (fixed_one / 2), fixed_one));
     return strata;
+}
+
+std::int64_t Geology::rock_temperature(CellId cell, std::int64_t depth) const {
+    const std::int64_t elevation = terrain().elevation(cell);
+    std::int64_t surface = climate_.temperature(cell);
+    if (elevation < 0) {
+        surface += multiply(sea_floor_temperature - surface, ramp(-elevation, cold_water_depth));
+    }
+    const auto deepest = static_cast<std::int64_t>(planet_radius_) * fixed_one;
+    depth = std::clamp(depth, std::int64_t{0}, deepest);
+    const std::int64_t mantle = crust_thickness(cell);
+    std::int64_t heat = depth < mantle
+                            ? surface + ((mantle_temperature - surface) * depth / mantle)
+                            : mantle_temperature + ((depth - mantle) * mantle_warming / 1'000);
+
+    const DVec3 here = cell_center(cell);
+    const double below_sea = fixed_to_double(depth - elevation);
+    double warmth = 0.0;
+    for (const Chamber& chamber : chambers_) {
+        const double across = glm::length(here - chamber.center) * planet_radius_;
+        const double down = below_sea - fixed_to_double(chamber.depth);
+        const double half = fixed_to_double(chamber.half_height);
+        // How far out the point is in the chamber's own shape, and so its distance from the
+        // chamber's wall along the line from its middle.
+        const double reach = std::sqrt(((across * across) / (chamber.radius * chamber.radius)) +
+                                       ((down * down) / (half * half)));
+        const double distance =
+            reach <= 1.0 ? 0.0
+                         : std::sqrt((across * across) + (down * down)) * (1.0 - (1.0 / reach));
+        warmth = std::max(warmth, magma_warmth(distance));
+    }
+    if (heat < magma_temperature) {
+        heat += static_cast<std::int64_t>(
+            std::llround(static_cast<double>(magma_temperature - heat) * warmth));
+    }
+    return heat;
 }
 
 std::array<Deposit, resource_count> Geology::deposits(CellId cell) const {

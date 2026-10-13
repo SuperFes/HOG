@@ -97,6 +97,16 @@ std::int64_t deposits_layer(CellId cell) {
     return static_cast<std::int64_t>(hash);
 }
 
+// Through a chamber's depths and into the mantle.
+std::int64_t heat_layer(CellId cell) {
+    std::uint64_t hash = 0;
+    for (const std::int64_t depth : {1'000, 5'000, 40'000}) {
+        hash = hog::hash_values(hash,
+                                geology().rock_temperature(cell, depth * hog::planet::fixed_one));
+    }
+    return static_cast<std::int64_t>(hash);
+}
+
 constexpr std::array layers{Layer{.name = "noise", .sample = noise_layer},
                             Layer{.name = "continents", .sample = continents_layer},
                             Layer{.name = "elevation", .sample = elevation_layer},
@@ -105,7 +115,8 @@ constexpr std::array layers{Layer{.name = "noise", .sample = noise_layer},
                             Layer{.name = "water_table", .sample = water_table_layer},
                             Layer{.name = "biome", .sample = biome_layer},
                             Layer{.name = "strata", .sample = strata_layer},
-                            Layer{.name = "deposits", .sample = deposits_layer}};
+                            Layer{.name = "deposits", .sample = deposits_layer},
+                            Layer{.name = "heat", .sample = heat_layer}};
 
 struct GoldenTile {
     CellId tile;

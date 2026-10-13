@@ -128,6 +128,11 @@ public:
     // still under mountains, thin under the ocean floor, and thickened under the islands.
     [[nodiscard]] std::int64_t crust_thickness(CellId cell) const;
 
+    // Fixed-point °C of the rock at a fixed-point depth in metres below the surface: warming
+    // from the surface, or the cold water on the deep sea floor, down through the crust, then
+    // more slowly through the mantle, and hotter near a magma chamber.
+    [[nodiscard]] std::int64_t rock_temperature(CellId cell, std::int64_t depth) const;
+
     // The magma chambers, one under each starting island.
     [[nodiscard]] std::span<const Chamber> chambers() const noexcept { return chambers_; }
 
