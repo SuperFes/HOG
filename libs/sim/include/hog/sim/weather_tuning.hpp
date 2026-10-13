@@ -129,6 +129,21 @@ struct RecentTuning {
     Seconds precipitation = std::chrono::days{20};
 };
 
+// Surface currents from the wind-driven gyre model: the twist of the wind over the sea, the
+// planet's spin growing towards the poles and friction balance, which turns each basin's water in
+// gyres and crowds their return flow against the western coasts. Distances are Earth's, as the
+// air's.
+struct OceanTuning {
+    Seconds step = std::chrono::hours{6};
+    Seconds stress_memory = std::chrono::days{10}; // storms pass without stirring the gyres
+    double drag = 1.3e-3;                          // of the wind on the sea
+    double layer = 50.0;                           // metres of water the wind drives
+    double friction = 5e-6;     // 1/s; the western currents are about friction / spin gradient wide
+    double max_current = 2.0;   // m/s
+    int settling = 20;          // solver sweeps a step
+    int first_settling = 5'000; // solver sweeps at most, from rest
+};
+
 struct WeatherTuning {
     MotionTuning motion{};
     LiftTuning lift{};
@@ -139,6 +154,7 @@ struct WeatherTuning {
     WaterTuning water{};
     StormTuning storms{};
     RecentTuning recent{};
+    OceanTuning ocean{};
 };
 
 } // namespace hog::sim

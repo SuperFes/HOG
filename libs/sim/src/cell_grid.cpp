@@ -72,11 +72,9 @@ std::array<double, 4> CellGrid::laplacian(std::uint32_t index,
         const DVec3 there = frames_[around[k]].up;
         // The shared edge runs between the two corners nearest the neighbour.
         std::array<DVec3, 4> nearest = corners;
-        std::ranges::sort(nearest, [&](DVec3 a, DVec3 b) {
-            return glm::dot(a, there) > glm::dot(b, there);
-        });
-        weights[k] =
-            arc(nearest[0], nearest[1]) / (arc(frames_[index].up, there) * areas_[index]);
+        std::ranges::sort(
+            nearest, [&](DVec3 a, DVec3 b) { return glm::dot(a, there) > glm::dot(b, there); });
+        weights[k] = arc(nearest[0], nearest[1]) / (arc(frames_[index].up, there) * areas_[index]);
     }
     return weights;
 }
