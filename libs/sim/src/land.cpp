@@ -127,6 +127,8 @@ void Land::step(std::uint32_t index, const LandWeather& weather) {
     const double warmth = static_cast<double>(weather.temperature[index]) - tuning_.melting;
     const double melt = std::min(snow, tuning_.melt_per_degree * std::max(warmth, 0.0) * days);
     snow -= melt;
+    const double flowing = std::max(snow - tuning_.glacier, 0.0);
+    snow -= flowing;
 
     // What the sun draws out comes from the snow where it lies, and the soil elsewhere.
     const double cover = snow / (snow + tuning_.covering_snow);
@@ -135,7 +137,7 @@ void Land::step(std::uint32_t index, const LandWeather& weather) {
     snow -= sublimed;
 
     double soil = static_cast<double>(fields_.soil[index]) * capacity;
-    const double arriving = static_cast<double>(weather.rain[index]) + melt;
+    const double arriving = static_cast<double>(weather.rain[index]) + melt + flowing;
     double runoff = arriving * std::pow(soil / capacity, tuning_.shedding);
     soil += arriving - runoff;
     runoff += std::max(soil - capacity, 0.0);

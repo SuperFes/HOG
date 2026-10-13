@@ -162,7 +162,10 @@ struct LandTuning {
     double melting = 0.0;         // °C, above which snow melts
     double melt_per_degree = 3.0; // mm of snow a day per °C above melting
     double covering_snow = 20.0;  // mm of snow that hides most of the ground
-    double snow_wetness = 0.1;    // how freely snow gives up water, against wet soil's 1
+    // mm of snow that packs into ice where it never melts; more flows away downhill as glaciers do
+    // and melts lower down.
+    double glacier = 3'000.0;
+    double snow_wetness = 0.1; // how freely snow gives up water, against wet soil's 1
     // Wetter soil sheds more of what falls: the share running off is its fullness to this power.
     double shedding = 2.0;
     Seconds percolation = std::chrono::days{30}; // full soil drains into the ground this slowly

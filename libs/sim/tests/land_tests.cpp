@@ -85,6 +85,13 @@ TEST_CASE("snow lies below freezing and melts into the soil above it", "[sim][la
     CHECK(run.snow() == 0.0);
 }
 
+TEST_CASE("snow that never melts packs down and flows away as ice", "[sim][land]") {
+    Run run;
+    run.hold({.snow = 10.0F, .temperature = -20.0F}, 20.0 * day);
+    CHECK(run.snow() == Catch::Approx(LandTuning{}.glacier));
+    CHECK(run.ran_off > 1'000.0);
+}
+
 TEST_CASE("rain soaks in until the soil is full and runs off after", "[sim][land]") {
     Run run;
     run.hold({.rain = 1.0F}, 12.0 * hour);
