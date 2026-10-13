@@ -15,7 +15,7 @@
 // u32 payload length, a u8 kind, then the payload, little-endian throughout.
 namespace hog::probe {
 
-inline constexpr std::uint16_t protocol_version = 6;
+inline constexpr std::uint16_t protocol_version = 7;
 // Large enough for every layer of a level 7 grid; anything bigger is a broken or hostile peer.
 inline constexpr std::uint32_t max_payload = 64U << 20U;
 
@@ -139,6 +139,7 @@ struct Ground {
     std::vector<std::uint8_t> river;
     std::vector<std::uint8_t> rock;    // planet::Rock at the depth; empty unless underground
     std::vector<std::uint8_t> deposit; // the rarest planet::Resource there plus one, or 0; likewise
+    std::vector<float> heat;           // °C of the rock at the depth; likewise
 
     friend bool operator==(const Ground&, const Ground&) = default;
 };
@@ -171,8 +172,11 @@ struct Column {
     float cover_thickness = 0.0F; // metres
     std::uint8_t sediment = 0;
     float sediment_thickness = 0.0F;
-    std::uint8_t bedrock = 0; // running on below
-    std::vector<Seam> seams;  // shallowest first
+    std::uint8_t bedrock = 0;       // running on below, to the mantle
+    float mantle_depth = 0.0F;      // metres below the surface
+    float chamber_top = 0.0F;       // metres below the surface to a magma chamber's roof
+    float chamber_thickness = 0.0F; // metres; 0 where there's none
+    std::vector<Seam> seams;        // shallowest first
 
     friend bool operator==(const Column&, const Column&) = default;
 };

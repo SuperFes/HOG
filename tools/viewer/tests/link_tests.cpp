@@ -44,7 +44,8 @@ probe::Ground surveyed(const probe::Survey& survey, jobs::JobSystem& /*jobs*/) {
                          .water_table = std::vector<float>(samples, 0.0F),
                          .river = std::vector<std::uint8_t>(samples, 0),
                          .rock = {},
-                         .deposit = {}};
+                         .deposit = {},
+                         .heat = {}};
 }
 
 // A probe service answering from its own thread, as a server's tick thread would: every layer

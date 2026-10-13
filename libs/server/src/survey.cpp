@@ -47,6 +47,8 @@ void survey_row(const planet::Geology& geology, double planet_radius, const prob
         const auto resource = planet::resource_at(geology.deposits(cell), depth);
         ground.deposit[sample] =
             resource ? static_cast<std::uint8_t>(std::to_underlying(*resource) + 1) : 0;
+        ground.heat[sample] =
+            static_cast<float>(planet::fixed_to_double(geology.rock_temperature(cell, depth)));
     }
 }
 
@@ -141,6 +143,9 @@ probe::Column ground_column(const planet::Geology& geology, double planet_radius
                          .sediment = std::to_underlying(strata.sediment),
                          .sediment_thickness = metres(strata.sediment_thickness),
                          .bedrock = std::to_underlying(strata.bedrock),
+                         .mantle_depth = metres(strata.mantle_depth),
+                         .chamber_top = metres(strata.chamber_top),
+                         .chamber_thickness = metres(strata.chamber_thickness),
                          .seams = {}};
     const auto deposits = geology.deposits(cell);
     for (std::size_t resource = 0; resource < deposits.size(); ++resource) {
@@ -165,7 +170,8 @@ probe::Ground survey_ground(const planet::Geology& geology, double planet_radius
                          .water_table = std::vector<float>(samples),
                          .river = std::vector<std::uint8_t>(samples),
                          .rock = std::vector<std::uint8_t>(below),
-                         .deposit = std::vector<std::uint8_t>(below)};
+                         .deposit = std::vector<std::uint8_t>(below),
+                         .heat = std::vector<float>(below)};
     const int level = survey_level(survey, planet_radius);
     jobs.parallel_for(survey.height, 1, [&](jobs::Range rows, std::uint32_t /*thread*/) {
         for (std::uint32_t row = rows.begin; row < rows.end; ++row) {

@@ -1,4 +1,5 @@
 #include <hog/planet/climate.hpp>
+#include <hog/planet/geology.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/server/survey.hpp>
@@ -101,6 +102,7 @@ TEST_CASE("a survey reports the ground under each sample", "[server][survey]") {
     REQUIRE(ground.river.size() == samples);
     REQUIRE(ground.rock.size() == (survey.underground ? samples : 0));
     REQUIRE(ground.deposit.size() == ground.rock.size());
+    REQUIRE(ground.heat.size() == ground.rock.size());
 
     const int level = server::survey_level(survey, radius);
     const auto depth = std::llround(25.0 * planet::fixed_one);
@@ -127,8 +129,23 @@ TEST_CASE("a survey reports the ground under each sample", "[server][survey]") {
                       std::to_underlying(geology().strata(cell).rock_at(depth)));
                 const auto resource = planet::resource_at(geology().deposits(cell), depth);
                 CHECK(ground.deposit[sample] == (resource ? std::to_underlying(*resource) + 1 : 0));
+                CHECK(ground.heat[sample] == static_cast<float>(planet::fixed_to_double(
+                                                 geology().rock_temperature(cell, depth))));
             }
         }
+    }
+}
+
+TEST_CASE("inspecting a starting island finds the magma under it", "[server][survey]") {
+    for (const planet::Chamber& chamber : geology().chambers()) {
+        const probe::Inspect inspect{
+            .latitude = std::asin(chamber.center.z) * 180.0 / std::numbers::pi,
+            .longitude = std::atan2(chamber.center.y, chamber.center.x) * 180.0 / std::numbers::pi};
+        const probe::Column column = server::ground_column(geology(), radius, inspect);
+        CHECK(column.chamber_thickness > 900.0F);
+        CHECK(column.chamber_top > 2'000.0F);
+        CHECK(column.chamber_top + column.chamber_thickness < column.mantle_depth);
+        CHECK(column.bedrock == std::to_underlying(planet::Rock::Basalt));
     }
 }
 
@@ -226,6 +243,12 @@ TEST_CASE("inspected ground is the generated ground about a metre across", "[ser
         CHECK(column.bedrock == std::to_underlying(strata.bedrock));
         CHECK(column.cover_thickness ==
               static_cast<float>(planet::fixed_to_double(strata.cover_thickness)));
+        CHECK(column.mantle_depth ==
+              static_cast<float>(planet::fixed_to_double(strata.mantle_depth)));
+        CHECK(column.chamber_top ==
+              static_cast<float>(planet::fixed_to_double(strata.chamber_top)));
+        CHECK(column.chamber_thickness ==
+              static_cast<float>(planet::fixed_to_double(strata.chamber_thickness)));
 
         const auto deposits = geology().deposits(cell);
         CHECK(column.seams.size() ==

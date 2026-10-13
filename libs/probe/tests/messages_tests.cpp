@@ -97,7 +97,8 @@ TEST_CASE("every message survives a round trip", "[probe][messages]") {
                         .water_table = {0.0F, 12.5F},
                         .river = {0, 40},
                         .rock = {6, 4},
-                        .deposit = {0, 3}};
+                        .deposit = {0, 3},
+                        .heat = {12.0F, 150.5F}};
     CHECK(round_trip(ground) == Message{ground});
     Survey above = survey;
     above.underground = false;
@@ -107,7 +108,8 @@ TEST_CASE("every message survives a round trip", "[probe][messages]") {
                          .water_table = ground.water_table,
                          .river = ground.river,
                          .rock = {},
-                         .deposit = {}};
+                         .deposit = {},
+                         .heat = {}};
     CHECK(round_trip(surface) == Message{surface});
 
     const Inspect inspect{.latitude = -33.75, .longitude = 151.125};
@@ -127,6 +129,9 @@ TEST_CASE("every message survives a round trip", "[probe][messages]") {
                          .sediment = 3,
                          .sediment_thickness = 410.0F,
                          .bedrock = 5,
+                         .mantle_depth = 35'000.0F,
+                         .chamber_top = 4'200.0F,
+                         .chamber_thickness = 950.5F,
                          .seams = {Seam{.resource = 0, .top = 12.0F, .thickness = 1.5F},
                                    Seam{.resource = 4, .top = 300.0F, .thickness = 0.25F}}}};
     CHECK(round_trip(inspection) == Message{inspection});
@@ -231,7 +236,8 @@ TEST_CASE("broken streams fail and stay failed", "[probe][messages]") {
                                   .water_table = {0.0F, 0.0F, 0.0F},
                                   .river = {0, 0, 0},
                                   .rock = {},
-                                  .deposit = {}}));
+                                  .deposit = {},
+                                  .heat = {}}));
     }
     SECTION("more seams than could fit") {
         ByteWriter payload;
@@ -248,6 +254,9 @@ TEST_CASE("broken streams fail and stay failed", "[probe][messages]") {
         payload.write(std::uint8_t{0});
         payload.write(std::uint32_t{0});
         payload.write(std::uint8_t{0});
+        for (int field = 0; field < 3; ++field) {
+            payload.write(std::uint32_t{0}); // mantle depth, chamber top and thickness
+        }
         payload.write(std::uint32_t{1'000});
         reader.feed(frame(11, payload.bytes()));
     }
@@ -258,7 +267,8 @@ TEST_CASE("broken streams fail and stay failed", "[probe][messages]") {
                                   .water_table = {0.0F},
                                   .river = {},
                                   .rock = {},
-                                  .deposit = {}}));
+                                  .deposit = {},
+                                  .heat = {}}));
     }
     SECTION("ground with rock it wasn't asked for") {
         reader.feed(encode(Ground{.survey = Survey{.width = 1, .height = 1},
@@ -267,7 +277,18 @@ TEST_CASE("broken streams fail and stay failed", "[probe][messages]") {
                                   .water_table = {0.0F},
                                   .river = {0},
                                   .rock = {1},
-                                  .deposit = {0}}));
+                                  .deposit = {0},
+                                  .heat = {0.0F}}));
+    }
+    SECTION("ground without heat for every sample") {
+        reader.feed(encode(Ground{.survey = Survey{.width = 1, .height = 1, .underground = true},
+                                  .elevation = {1.0F},
+                                  .biome = {0},
+                                  .water_table = {0.0F},
+                                  .river = {0},
+                                  .rock = {1},
+                                  .deposit = {0},
+                                  .heat = {}}));
     }
     const auto first = reader.next();
     REQUIRE_FALSE(first);

@@ -225,7 +225,8 @@ probe::Ground surveyed(const viewer::MapRect& shown) {
                          .water_table = {},
                          .river = {},
                          .rock = {},
-                         .deposit = {}};
+                         .deposit = {},
+                         .heat = {}};
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
             const bool east = x >= width / 2;

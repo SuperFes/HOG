@@ -163,6 +163,7 @@ void write_body(ByteWriter& out, const Ground& ground) {
     write_bytes(out, ground.river);
     write_bytes(out, ground.rock);
     write_bytes(out, ground.deposit);
+    write_singles(out, ground.heat);
 }
 
 void write_body(ByteWriter& out, const Inspect& inspect) {
@@ -185,6 +186,9 @@ void write_column(ByteWriter& out, const Column& column) {
     out.write(column.sediment);
     write_single(out, column.sediment_thickness);
     out.write(column.bedrock);
+    write_single(out, column.mantle_depth);
+    write_single(out, column.chamber_top);
+    write_single(out, column.chamber_thickness);
     write_count(out, column.seams.size());
     for (const Seam& seam : column.seams) {
         out.write(seam.resource);
@@ -336,13 +340,15 @@ Ground read_ground(ValueReader& in) {
                   .water_table = read_singles(in),
                   .river = read_bytes(in),
                   .rock = read_bytes(in),
-                  .deposit = read_bytes(in)};
+                  .deposit = read_bytes(in),
+                  .heat = read_singles(in)};
     const std::size_t samples =
         static_cast<std::size_t>(ground.survey.width) * ground.survey.height;
     const std::size_t below = ground.survey.underground ? samples : 0;
     if (in.ok() && (ground.elevation.size() != samples || ground.biome.size() != samples ||
                     ground.water_table.size() != samples || ground.river.size() != samples ||
-                    ground.rock.size() != below || ground.deposit.size() != below)) {
+                    ground.rock.size() != below || ground.deposit.size() != below ||
+                    ground.heat.size() != below)) {
         in.fail(Error{.code = ErrorCode::Parse,
                       .message = std::format("ground values don't match its {} by {} samples",
                                              ground.survey.width, ground.survey.height)});
@@ -369,6 +375,9 @@ Column read_column(ValueReader& in) {
     column.sediment = in.integer<std::uint8_t>();
     column.sediment_thickness = in.single();
     column.bedrock = in.integer<std::uint8_t>();
+    column.mantle_depth = in.single();
+    column.chamber_top = in.single();
+    column.chamber_thickness = in.single();
     const std::uint32_t count = read_count(in, sizeof(std::uint8_t) + (2 * sizeof(float)));
     column.seams.reserve(count);
     for (std::uint32_t index = 0; index < count && in.ok(); ++index) {
