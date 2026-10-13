@@ -1,9 +1,11 @@
 #include <hog/core/hash.hpp>
 #include <hog/planet/geology.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/planet/tangent_frame.hpp>
 #include <hog/planet/tile.hpp>
 
 #include <algorithm>
+#include <cmath>
 
 namespace hog::planet {
 
@@ -13,6 +15,7 @@ constexpr std::uint64_t facies_salt = 0x6661'6369'6573'0000ULL;    // "facies"
 constexpr std::uint64_t thickness_salt = 0x7468'6963'6B00'0000ULL; // "thick"
 constexpr std::uint64_t deposit_salt = 0x6465'706F'7369'7400ULL;   // "deposit"
 constexpr std::uint64_t crust_salt = 0x6372'7573'7400'0000ULL;     // "crust"
+constexpr std::uint64_t chamber_salt = 0x6368'616D'6265'7200ULL;   // "chamber"
 
 constexpr int octaves = 3;
 // Metres across a sedimentary province and the swells in layer thickness.
@@ -40,6 +43,14 @@ constexpr std::int64_t crust_slope_width = fixed_one / 5;
 constexpr std::int64_t island_rise = fixed_one * 3 / 20;
 constexpr std::int64_t crust_swell = fixed_one / 10;
 constexpr double crust_wavelength = 30'000.0;
+
+// Each island's chamber lies within a fifth of its radius of its middle, reaches two fifths of
+// the way to its coast, and sits 3 to 6 km down.
+constexpr double chamber_wander = 0.2;
+constexpr double chamber_reach = 0.4;
+constexpr std::int64_t shallowest_chamber = 3'000;
+constexpr std::int64_t deepest_chamber = 6'000;
+constexpr std::int64_t chamber_half_height = 500 * fixed_one;
 
 // The surface below which a seam sits.
 enum class Host : std::uint8_t {
@@ -119,6 +130,11 @@ constexpr std::int64_t gold_strength = fixed_one / 4;
     return (a * b) >> fixed_fraction_bits;
 }
 
+// A hash mapped to [0, 1).
+[[nodiscard]] double fraction(std::uint64_t hash) {
+    return static_cast<double>(hash >> 11U) * 0x1p-53;
+}
+
 // 0 to 1 over `width`, easing in and out.
 [[nodiscard]] std::int64_t smooth_ramp(std::int64_t value, std::int64_t width) {
     const std::int64_t t = ramp(value, width);
@@ -171,6 +187,8 @@ std::string_view to_string(Rock rock) noexcept {
         return "basalt";
     case Rock::Peridotite:
         return "peridotite";
+    case Rock::Magma:
+        return "magma";
     }
     return "unknown";
 }
@@ -211,7 +229,27 @@ Geology::Geology(const PlanetConfig& config)
       facies_seed_{hash_combine(config.seed, facies_salt)},
       thickness_seed_{hash_combine(config.seed, thickness_salt)},
       deposit_seed_{hash_combine(config.seed, deposit_salt)},
-      crust_seed_{hash_combine(config.seed, crust_salt)} {}
+      crust_seed_{hash_combine(config.seed, crust_salt)} {
+    const std::uint64_t placement = hash_combine(config.seed, chamber_salt);
+    const auto islands = terrain().archipelago().islands();
+    chambers_.reserve(islands.size());
+    for (std::size_t index = 0; index < islands.size(); ++index) {
+        const auto& island = islands[index];
+        const TangentFrame frame = tangent_frame(island.center);
+        const auto wander = [&](int axis) {
+            return ((2.0 * fraction(hash_values(placement, axis, index))) - 1.0) * chamber_wander *
+                   island.radius / planet_radius_;
+        };
+        const auto depth = static_cast<std::int64_t>(
+            hash_values(placement, 2, index) %
+            static_cast<std::uint64_t>(deepest_chamber - shallowest_chamber + 1));
+        chambers_.push_back({.center = glm::normalize(island.center + (frame.east * wander(0)) +
+                                                      (frame.north * wander(1))),
+                             .depth = (shallowest_chamber + depth) * fixed_one,
+                             .radius = chamber_reach * island.radius,
+                             .half_height = chamber_half_height});
+    }
+}
 
 NoisePoint Geology::noise_at(CellId cell, double wavelength) const {
     return noise_point(cell_center(cell), planet_radius_ / wavelength);
@@ -225,7 +263,20 @@ bool Geology::continental(CellId cell) const {
 }
 
 Strata Geology::strata(CellId cell) const {
-    return strata(cell, climate_.biome(cell));
+    Strata strata = this->strata(cell, climate_.biome(cell));
+    const DVec3 here = cell_center(cell);
+    for (const Chamber& chamber : chambers_) {
+        const double across = glm::length(here - chamber.center) * planet_radius_ / chamber.radius;
+        if (across >= 1.0) {
+            continue;
+        }
+        const auto half = static_cast<std::int64_t>(std::sqrt(1.0 - (across * across)) *
+                                                    static_cast<double>(chamber.half_height));
+        strata.chamber_top = terrain().elevation(cell) + chamber.depth - half;
+        strata.chamber_thickness = 2 * half;
+        break;
+    }
+    return strata;
 }
 
 std::int64_t Geology::crust_thickness(CellId cell) const {

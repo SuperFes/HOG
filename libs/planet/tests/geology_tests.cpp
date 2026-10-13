@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <set>
@@ -107,6 +108,15 @@ TEST_CASE("strata stack from the surface down", "[planet][geology]") {
     static_assert(crust.rock_at((30'000 * fixed_one) - 1) == Rock::Granite);
     static_assert(crust.rock_at(30'000 * fixed_one) == Rock::Peridotite);
     static_assert(crust.rock_at(100'000 * fixed_one) == Rock::Peridotite);
+
+    constexpr Strata molten{.bedrock = Rock::Basalt,
+                            .mantle_depth = 12'000 * fixed_one,
+                            .chamber_top = 4'000 * fixed_one,
+                            .chamber_thickness = 1'000 * fixed_one};
+    static_assert(molten.rock_at((4'000 * fixed_one) - 1) == Rock::Basalt);
+    static_assert(molten.rock_at(4'000 * fixed_one) == Rock::Magma);
+    static_assert(molten.rock_at((5'000 * fixed_one) - 1) == Rock::Magma);
+    static_assert(molten.rock_at(5'000 * fixed_one) == Rock::Basalt);
 
     constexpr Strata bare{.cover = Rock::Soil,
                           .cover_thickness = 0,
@@ -309,6 +319,63 @@ TEST_CASE("the starting islands are bare basalt under their soil", "[planet][geo
     }
 }
 
+TEST_CASE("a magma chamber lies in the crust under each starting island", "[planet][geology]") {
+    const std::uint64_t seed = GENERATE(1U, 2U, 3U, 4U);
+    const Geology geology{planet(seed)};
+    const auto islands = geology.terrain().archipelago().islands();
+    REQUIRE(geology.chambers().size() == islands.size());
+    for (std::size_t index = 0; index < islands.size(); ++index) {
+        const auto& chamber = geology.chambers()[index];
+        const auto& island = islands[index];
+        CHECK(glm::length(chamber.center - island.center) * radius <= 0.3 * island.radius);
+        const CellId cell = hog::planet::cell_at(chamber.center, 12);
+        const Strata strata = geology.strata(cell);
+        const std::int64_t below_sea = strata.chamber_top - geology.terrain().elevation(cell);
+        CHECK(below_sea >= 2'500 * fixed_one);
+        CHECK(below_sea + strata.chamber_thickness <= 6'500 * fixed_one);
+        CHECK(strata.chamber_thickness > 990 * fixed_one);
+        CHECK(strata.chamber_top + strata.chamber_thickness < strata.mantle_depth);
+        CHECK(strata.rock_at(strata.chamber_top - 1) == Rock::Basalt);
+        CHECK(strata.rock_at(strata.chamber_top) == Rock::Magma);
+        CHECK(strata.rock_at(strata.chamber_top + strata.chamber_thickness) == Rock::Basalt);
+    }
+}
+
+TEST_CASE("magma lies only under the middle of the islands", "[planet][geology]") {
+    const Geology geology{planet(1)};
+    const auto islands = geology.terrain().archipelago().islands();
+    const auto under = [&](CellId cell) { return geology.strata(cell).chamber_thickness > 0; };
+    const auto central = [&](hog::DVec3 at) {
+        return std::ranges::any_of(islands, [&](const auto& island) {
+            return glm::length(at - island.center) * radius < 0.65 * island.radius;
+        });
+    };
+    for (const CellId cell : scattered(40'000)) {
+        if (under(cell)) {
+            REQUIRE(central(hog::planet::cell_center(cell)));
+        }
+    }
+    // A grid of cells about 150 m apart over each island and its shore.
+    for (const auto& island : islands) {
+        const hog::planet::TangentFrame frame = hog::planet::tangent_frame(island.center);
+        const auto steps = static_cast<int>(island.radius * 1.5 / 150.0);
+        int molten = 0;
+        for (int east = -steps; east <= steps; ++east) {
+            for (int north = -steps; north <= steps; ++north) {
+                const hog::DVec3 offset = ((frame.east * static_cast<double>(east)) +
+                                           (frame.north * static_cast<double>(north))) *
+                                          (150.0 / radius);
+                const hog::DVec3 at = glm::normalize(island.center + offset);
+                if (under(hog::planet::cell_at(at, 12))) {
+                    ++molten;
+                    REQUIRE(central(at));
+                }
+            }
+        }
+        CHECK(molten > 0);
+    }
+}
+
 TEST_CASE("deposits are sparse seams in their host rock", "[planet][geology]") {
     const Geology geology{planet(1)};
     std::array<int, hog::planet::resource_count> found{};
@@ -400,10 +467,15 @@ TEST_CASE("geology depends on the seed", "[planet][geology]") {
         for (const CellId cell : scattered(2'000)) {
             const Strata strata = geology.strata(cell);
             hash = hog::hash_values(hash, strata.cover_thickness, strata.sediment_thickness,
-                                    static_cast<int>(strata.sediment));
+                                    static_cast<int>(strata.sediment), strata.mantle_depth);
             for (const auto& deposit : geology.deposits(cell)) {
                 hash = hog::hash_values(hash, deposit.top, deposit.thickness);
             }
+        }
+        for (const auto& chamber : geology.chambers()) {
+            hash =
+                hog::hash_values(hash, chamber.depth, std::bit_cast<std::uint64_t>(chamber.radius),
+                                 std::bit_cast<std::uint64_t>(chamber.center.x));
         }
         return hash;
     };

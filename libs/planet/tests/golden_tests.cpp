@@ -85,7 +85,8 @@ std::int64_t strata_layer(CellId cell) {
     return static_cast<std::int64_t>(
         hog::hash_values(0, static_cast<int>(strata.cover), strata.cover_thickness,
                          static_cast<int>(strata.sediment), strata.sediment_thickness,
-                         static_cast<int>(strata.bedrock), strata.mantle_depth));
+                         static_cast<int>(strata.bedrock), strata.mantle_depth, strata.chamber_top,
+                         strata.chamber_thickness));
 }
 
 std::int64_t deposits_layer(CellId cell) {

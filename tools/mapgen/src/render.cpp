@@ -100,6 +100,7 @@ constexpr std::array<Rgb, planet::rock_count> rock_colours{{
     {190, 150, 145}, // granite
     {55, 55, 60},    // basalt
     {95, 120, 70},   // peridotite
+    {240, 90, 20},   // magma
 }};
 
 [[nodiscard]] double radians(double angle) {
