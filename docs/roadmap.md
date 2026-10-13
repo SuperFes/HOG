@@ -169,7 +169,7 @@ This phase builds a server that runs the world with nobody connected: time passe
 - [x] ImGui app that attaches to a running server and shows map overlays (weather, populations, biomass)
 - [x] Time controls: pause, step, speed up
 - [x] Click a cell to inspect its raw values
-- [ ] Rivers, water table and wetlands over the map
+- [x] Rivers, lakes and the water table over the map, with a biome key
 
 ## Phase 3 — Client renderer
 
