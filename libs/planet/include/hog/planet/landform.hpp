@@ -31,8 +31,12 @@ public:
 
     // Fixed-point metres the ground moved, per grid cell.
     [[nodiscard]] std::span<const std::int64_t> change() const noexcept { return change_; }
-    // The same at any cell's centre, bilinear between the four grid cells around it.
+    // The same at any cell's centre.
     [[nodiscard]] std::int64_t change(CellId cell) const;
+
+    // A field with one fixed-point value per grid cell at any cell's centre, bilinear between the
+    // four grid cells around it.
+    [[nodiscard]] std::int64_t sample(std::span<const std::int64_t> field, CellId cell) const;
 
 private:
     // Grid cells around each one, by quadrant: the neighbour along u, along v and between the

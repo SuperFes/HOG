@@ -152,6 +152,19 @@ std::optional<Channel> Elevation::river(CellId cell) const {
     return evolved.rivers.channel(cell, worn(cell, generated, evolved.landform, evolved.meander));
 }
 
+std::int64_t Elevation::above_water(CellId cell) const {
+    const std::int64_t generated = this->generated(cell);
+    if (generated <= 0) {
+        return 0;
+    }
+    const Evolved& evolved = this->evolved();
+    const std::int64_t ground =
+        evolved.rivers.cut(cell, worn(cell, generated, evolved.landform, evolved.meander));
+    const std::int64_t water = evolved.landform.sample(evolved.rivers.levels(),
+                                                       cell_at(evolved.meander(cell_center(cell))));
+    return std::max<std::int64_t>(ground - water, 0);
+}
+
 std::int64_t Elevation::worn(CellId cell, std::int64_t generated, const Landform& landform,
                              const Meander& meander) {
     if (generated <= 0) {

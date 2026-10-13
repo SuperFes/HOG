@@ -75,6 +75,11 @@ Landform::Landform(LevelGrid grid, std::vector<std::int64_t> heights, const Eros
 }
 
 std::int64_t Landform::change(CellId cell) const {
+    return sample(change_, cell);
+}
+
+std::int64_t Landform::sample(std::span<const std::int64_t> field, CellId cell) const {
+    HOG_ASSERT(field.size() == grid_.size(), "one value per grid cell");
     const int level = grid_.level();
     const FaceIJ at = cell.to_face_ij();
     // Centres in units of 2^-31 of a face, so a cell's centre is a whole number at any level.
@@ -94,13 +99,13 @@ std::int64_t Landform::change(CellId cell) const {
     const std::uint32_t here =
         grid_.index(CellId::from_face_ij(at.face, coarse_i, coarse_j, level));
     const Quadrant& around = quadrants_[here][(du < 0 ? 0U : 1U) + (dv < 0 ? 0U : 2U)];
-    const std::int64_t along_u = change_[around[0]];
-    const std::int64_t along_v = change_[around[1]];
+    const std::int64_t along_u = field[around[0]];
+    const std::int64_t along_v = field[around[1]];
     // Where three cells meet at a cube corner, the missing fourth takes their mean, so the corner
     // gets the same value from each.
     const std::int64_t diagonal =
-        around[2] == here ? (change_[here] + along_u + along_v) / 3 : change_[around[2]];
-    return lerp(lerp(change_[here], along_u, wu), lerp(along_v, diagonal, wu), wv);
+        around[2] == here ? (field[here] + along_u + along_v) / 3 : field[around[2]];
+    return lerp(lerp(field[here], along_u, wu), lerp(along_v, diagonal, wu), wv);
 }
 
 Meander::Meander(std::uint64_t seed, const LevelGrid& grid)

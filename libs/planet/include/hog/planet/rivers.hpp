@@ -20,20 +20,20 @@ struct Channel {
     friend bool operator==(const Channel&, const Channel&) = default;
 };
 
-// A river from one landform cell's centre to the next downstream: its bed falls from one end to
+// A river from one landform cell's centre to the next downstream: its water falls from one end to
 // the other, in fixed-point metres.
 struct Reach {
     DVec3 from;
     DVec3 to;
-    std::int64_t from_bed = 0;
-    std::int64_t to_bed = 0;
+    std::int64_t from_surface = 0;
+    std::int64_t to_surface = 0;
     double width = 0.0; // metres
     std::int64_t depth = 0;
 };
 
 // Rivers from every landform cell that drains enough ground, each running to the cell it drains
 // into and meandering about the line between their centres. Channels widen and deepen with the
-// water they carry. A river's bed only falls downstream, so it cuts through rises in the ground
+// water they carry. A river's water only falls downstream, so it cuts through rises in the ground
 // rather than pooling behind them, between banks sloping up to meet the ground.
 class Rivers {
 public:
@@ -47,6 +47,10 @@ public:
            double radius, double scale = 1.0);
 
     [[nodiscard]] std::span<const Reach> reaches() const noexcept { return reaches_; }
+
+    // Per landform cell, the fixed-point level of the water it drains into first: its own river,
+    // the one downstream, or the sea.
+    [[nodiscard]] std::span<const std::int64_t> levels() const noexcept { return levels_; }
 
     // The ground at a cell's centre once rivers have cut their channels and banks into it, where
     // `ground` is its height before.
@@ -70,6 +74,7 @@ private:
     Meander meander_;
     double radius_;
     std::vector<Reach> reaches_;
+    std::vector<std::int64_t> levels_;
     // Reaches coming within a cell of each landform cell.
     std::vector<std::uint32_t> first_;
     std::vector<std::uint32_t> nearby_;

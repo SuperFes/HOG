@@ -18,6 +18,7 @@ desert = 0.1
 savanna = 3
 tropical_rainforest = 30
 alpine = 0.3
+wetland = 5
 
 # Years to grow back most of the way after burning, in good weather.
 [growth.years]
@@ -31,6 +32,7 @@ desert = 5
 savanna = 5
 tropical_rainforest = 40
 alpine = 10
+wetland = 20
 
 [dryness]
 demand = 0.15

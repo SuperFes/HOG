@@ -24,9 +24,10 @@ enum class Biome : std::uint8_t {
     Savanna,
     TropicalRainforest,
     Alpine,
+    Wetland,
 };
 
-inline constexpr int biome_count = static_cast<int>(Biome::Alpine) + 1;
+inline constexpr int biome_count = static_cast<int>(Biome::Wetland) + 1;
 
 [[nodiscard]] std::string_view to_string(Biome biome) noexcept;
 
@@ -70,12 +71,14 @@ inline constexpr int biome_count = static_cast<int>(Biome::Alpine) + 1;
 }
 
 // Climate from latitude and terrain: temperature falls towards the poles and with height;
-// moisture follows Earth-like circulation bands and dries out deep inland.
+// moisture follows Earth-like circulation bands and dries out deep inland. High ground cold enough
+// holds glaciers, and wet ground where the water table reaches the surface turns to wetland.
 class Climate {
 public:
     // Metres.
     static constexpr std::int64_t alpine_height = 1'800;
     static constexpr std::int64_t beach_height = 10;
+    static constexpr std::int64_t wetland_depth = 1;
 
     explicit Climate(const PlanetConfig& config);
 
@@ -88,10 +91,15 @@ public:
     // are too small to.
     [[nodiscard]] std::int64_t moisture(CellId cell) const;
 
+    // Fixed-point metres from the ground down to the water table: zero at sea, shallow near water
+    // and in wet climates, deep under high, dry ground.
+    [[nodiscard]] std::int64_t water_table(CellId cell) const;
+
     [[nodiscard]] Biome biome(CellId cell) const;
 
 private:
     [[nodiscard]] std::int64_t temperature(CellId cell, std::int64_t elevation) const;
+    [[nodiscard]] std::int64_t water_table(CellId cell, std::int64_t moisture) const;
 
     Elevation terrain_;
     std::uint64_t temperature_seed_;

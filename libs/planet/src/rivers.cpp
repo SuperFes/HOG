@@ -48,15 +48,22 @@ Rivers::Rivers(const Landform& landform, std::span<const std::int64_t> ground, M
     const auto flows = [&](std::uint32_t cell) {
         return !outlet(cell) && static_cast<double>(drained[cell]) >= source_area;
     };
-    // Beds fall from each source to the sea: each cell's is no higher than any upstream of it.
-    std::vector<std::int64_t> bed(count);
-    for (std::uint32_t cell = 0; cell < count; ++cell) {
-        bed[cell] = ground[cell] - fixed(scale * depth(static_cast<double>(drained[cell])));
-    }
+    // A river's water stands at the ground of its cell's centre, but never above the water
+    // upstream, so it only falls towards the sea and cuts through rises on the way.
+    levels_.assign(ground.begin(), ground.end());
     for (auto cell = drainage.order.rbegin(); cell != drainage.order.rend(); ++cell) {
         const std::uint32_t receiver = drainage.receiver[*cell];
-        if (flows(*cell) && !outlet(receiver)) {
-            bed[receiver] = std::min(bed[receiver], bed[*cell]);
+        if (flows(*cell) && flows(receiver)) {
+            levels_[receiver] = std::min(levels_[receiver], levels_[*cell]);
+        }
+    }
+    // Ground away from rivers drains into the water downstream: a river or the sea, or the
+    // lowest ground of a world without one.
+    for (const std::uint32_t cell : drainage.order) {
+        if (outlet(cell)) {
+            levels_[cell] = std::max<std::int64_t>(ground[cell], 0);
+        } else if (!flows(cell)) {
+            levels_[cell] = levels_[drainage.receiver[cell]];
         }
     }
 
@@ -67,16 +74,13 @@ Rivers::Rivers(const Landform& landform, std::span<const std::int64_t> ground, M
         }
         const std::uint32_t receiver = drainage.receiver[cell];
         const auto area = static_cast<double>(drained[cell]);
-        const std::int64_t deep = fixed(scale * depth(area));
-        // At the sea the water surface meets sea level.
-        const std::int64_t to_bed = outlet(receiver) ? -deep : bed[receiver];
         const auto reach = static_cast<std::uint32_t>(reaches_.size());
         reaches_.push_back({.from = cell_center(grid.cell(cell)),
                             .to = cell_center(grid.cell(receiver)),
-                            .from_bed = bed[cell],
-                            .to_bed = to_bed,
+                            .from_surface = levels_[cell],
+                            .to_surface = levels_[receiver],
                             .width = scale * width(area),
-                            .depth = deep});
+                            .depth = fixed(scale * depth(area))});
         for (const std::uint32_t end : {cell, receiver}) {
             near.emplace_back(end, reach);
             for (const std::uint32_t next : grid.neighbors(end)) {
@@ -117,9 +121,10 @@ void Rivers::each_reach(CellId cell, Visit visit) const {
         } else {
             away = std::abs(glm::dot(point, glm::normalize(glm::cross(reach.from, reach.to))));
         }
-        const std::int64_t line =
-            reach.from_bed + std::llround(static_cast<double>(reach.to_bed - reach.from_bed) * t);
-        visit(reach, line + reach.depth, away * radius_);
+        const std::int64_t level =
+            reach.from_surface +
+            std::llround(static_cast<double>(reach.to_surface - reach.from_surface) * t);
+        visit(reach, level, away * radius_);
     }
 }
 

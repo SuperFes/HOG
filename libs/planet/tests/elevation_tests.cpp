@@ -123,3 +123,20 @@ TEST_CASE("elevation depends on the seed", "[planet][elevation]") {
     CHECK(Elevation{planet(1)}.elevation(cell) == first.elevation(cell));
     CHECK(Elevation{planet(2)}.elevation(cell) != first.elevation(cell));
 }
+
+TEST_CASE("ground stands above the water it drains to", "[planet][elevation]") {
+    const Elevation terrain{planet(1)};
+    int land = 0;
+    for (const CellId cell : cells_at(7)) {
+        const std::int64_t above = terrain.above_water(cell);
+        REQUIRE(above >= 0);
+        if (terrain.elevation(cell) <= 0) {
+            REQUIRE(above == 0);
+        } else {
+            // Rivers and the sea lie at or above sea level.
+            REQUIRE(above <= terrain.elevation(cell));
+            ++land;
+        }
+    }
+    CHECK(land > 0);
+}

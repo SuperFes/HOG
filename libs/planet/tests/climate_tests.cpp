@@ -261,3 +261,66 @@ TEST_CASE("climate depends on the seed", "[planet][climate]") {
     CHECK(Climate{planet(2)}.temperature(cell) != first.temperature(cell));
     CHECK(Climate{planet(2)}.moisture(cell) != first.moisture(cell));
 }
+
+TEST_CASE("the water table lies under the ground, shallow where it's wet", "[planet][climate]") {
+    const Climate climate{planet(1)};
+    double wet_total = 0.0;
+    double dry_total = 0.0;
+    int wet_count = 0;
+    int dry_count = 0;
+    for (const CellId cell : cells_at(7)) {
+        const std::int64_t table = climate.water_table(cell);
+        REQUIRE(table >= 0);
+        if (climate.biome(cell) == Biome::Ocean) {
+            REQUIRE(table == 0);
+            continue;
+        }
+        // Per metre above the water the cell drains to, so height doesn't decide it.
+        const std::int64_t above = climate.terrain().above_water(cell);
+        if (above < 20 * fixed_one) {
+            continue;
+        }
+        const double share = static_cast<double>(table) / static_cast<double>(above);
+        if (climate.moisture(cell) > fixed_one * 7 / 10) {
+            wet_total += share;
+            ++wet_count;
+        } else if (climate.moisture(cell) < fixed_one * 3 / 10) {
+            dry_total += share;
+            ++dry_count;
+        }
+    }
+    REQUIRE(wet_count > 0);
+    REQUIRE(dry_count > 0);
+    CHECK(wet_total / wet_count < 0.5 * (dry_total / dry_count));
+}
+
+TEST_CASE("wetlands lie where the water table meets wet ground", "[planet][climate]") {
+    const Climate climate{planet(1)};
+    int wetlands = 0;
+    for (const CellId cell : cells_at(8)) {
+        if (climate.biome(cell) != Biome::Wetland) {
+            continue;
+        }
+        ++wetlands;
+        REQUIRE(climate.water_table(cell) < Climate::wetland_depth * fixed_one);
+        REQUIRE(classify_biome(climate.temperature(cell), climate.moisture(cell)) != Biome::Desert);
+    }
+    CHECK(wetlands > 100);
+}
+
+TEST_CASE("glaciers cap high ground that stays cold", "[planet][climate]") {
+    const Climate climate{planet(1)};
+    int glaciers = 0;
+    for (const CellId cell : cells_at(8)) {
+        const std::int64_t elevation = climate.terrain().elevation(cell);
+        if (elevation <= Climate::alpine_height * fixed_one) {
+            continue;
+        }
+        const Biome biome = climate.biome(cell);
+        REQUIRE((biome == Biome::Ice || biome == Biome::Alpine));
+        const bool cold = climate.temperature(cell) < celsius(-4);
+        REQUIRE((biome == Biome::Ice) == cold);
+        glaciers += cold ? 1 : 0;
+    }
+    CHECK(glaciers > 0);
+}

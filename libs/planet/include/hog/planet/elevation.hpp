@@ -43,6 +43,10 @@ public:
     // The river running through a cell, if one does.
     [[nodiscard]] std::optional<Channel> river(CellId cell) const;
 
+    // Fixed-point metres of the ground above the water it drains into first, a river or the
+    // sea; zero at sea.
+    [[nodiscard]] std::int64_t above_water(CellId cell) const;
+
     // How strongly mountains rise here, in fixed point from 0 to 1.
     [[nodiscard]] std::int64_t mountain_strength(CellId cell) const;
 

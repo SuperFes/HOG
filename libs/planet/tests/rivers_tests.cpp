@@ -95,14 +95,14 @@ TEST_CASE("rivers run downhill to the sea, growing on the way", "[planet][rivers
     REQUIRE(reaches.size() > 20);
     int at_sea = 0;
     for (const Reach& reach : reaches) {
-        REQUIRE(reach.to_bed <= reach.from_bed);
+        REQUIRE(reach.to_surface <= reach.from_surface);
         const auto next = std::ranges::find_if(
             reaches, [&](const Reach& other) { return other.from == reach.to; });
         if (next == reaches.end()) {
             ++at_sea;
             CHECK(reach.to.z <= 0.05);
         } else {
-            REQUIRE(next->from_bed <= reach.to_bed);
+            REQUIRE(next->from_surface == reach.to_surface);
             REQUIRE(next->width >= reach.width);
         }
     }
@@ -116,8 +116,7 @@ TEST_CASE("a river cuts its channel below the ground, under water", "[planet][ri
             if (const auto channel =
                     rivers().channel(cell, plain(hog::planet::cell_center(cell)))) {
                 found = channel;
-                // The ground is far above the river's planned bed, so the water fills the
-                // channel to it.
+                // The ground is far above the river's planned water, so the channel holds it.
                 REQUIRE(channel->bed < channel->surface);
                 REQUIRE(channel->surface <= plain(hog::planet::cell_center(cell)));
             }
@@ -128,7 +127,7 @@ TEST_CASE("a river cuts its channel below the ground, under water", "[planet][ri
 
 TEST_CASE("a river follows dips in the ground rather than standing above it", "[planet][rivers]") {
     for (const Reach& reach : rivers().reaches()) {
-        const std::int64_t low = std::min(reach.from_bed, reach.to_bed) - (50 * fixed_one);
+        const std::int64_t low = std::min(reach.from_surface, reach.to_surface) - (50 * fixed_one);
         for (const CellId cell : across(reach)) {
             if (const auto channel = rivers().channel(cell, low)) {
                 REQUIRE(channel->surface <= low);
@@ -176,5 +175,19 @@ TEST_CASE("without rain there are no rivers", "[planet][rivers]") {
     for (std::uint32_t cell = 0; cell < dry.grid().size(); cell += 7) {
         REQUIRE_FALSE(none.channel(dry.grid().cell(cell).child(0), fixed_one));
         REQUIRE(none.cut(dry.grid().cell(cell).child(0), fixed_one) == fixed_one);
+    }
+}
+
+TEST_CASE("each cell drains into water no higher than itself downstream", "[planet][rivers]") {
+    const auto levels = rivers().levels();
+    const auto& drainage = landform().drainage();
+    REQUIRE(levels.size() == landform().grid().size());
+    for (std::uint32_t cell = 0; cell < levels.size(); ++cell) {
+        const std::uint32_t receiver = drainage.receiver[cell];
+        if (receiver == cell) {
+            REQUIRE(levels[cell] == 0);
+        } else {
+            REQUIRE(levels[receiver] <= levels[cell]);
+        }
     }
 }

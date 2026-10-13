@@ -67,6 +67,10 @@ std::int64_t moisture_layer(CellId cell) {
     return climate().moisture(cell);
 }
 
+std::int64_t water_table_layer(CellId cell) {
+    return climate().water_table(cell);
+}
+
 std::int64_t biome_layer(CellId cell) {
     return static_cast<std::int64_t>(climate().biome(cell));
 }
@@ -97,6 +101,7 @@ constexpr std::array layers{Layer{.name = "noise", .sample = noise_layer},
                             Layer{.name = "elevation", .sample = elevation_layer},
                             Layer{.name = "temperature", .sample = temperature_layer},
                             Layer{.name = "moisture", .sample = moisture_layer},
+                            Layer{.name = "water_table", .sample = water_table_layer},
                             Layer{.name = "biome", .sample = biome_layer},
                             Layer{.name = "strata", .sample = strata_layer},
                             Layer{.name = "deposits", .sample = deposits_layer}};

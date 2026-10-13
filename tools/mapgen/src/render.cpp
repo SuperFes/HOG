@@ -60,6 +60,7 @@ constexpr std::array<Rgb, planet::biome_count> biome_colours{{
     {200, 185, 80},  // savanna
     {10, 95, 35},    // tropical rainforest
     {145, 135, 135}, // alpine
+    {80, 120, 100},  // wetland
 }};
 
 // Indexed by resource.

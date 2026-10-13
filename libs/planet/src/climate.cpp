@@ -22,6 +22,12 @@ constexpr double temperature_frequency = 2.0;
 constexpr int temperature_octaves = 4;
 
 constexpr std::int64_t beach_temperature = 0;
+// High ground colder than this through the year keeps its snow as glaciers.
+constexpr std::int64_t glacier_temperature = -4 * fixed_one;
+// The water table sits at this share of the height above water in a saturated climate, rising to
+// the full height and beyond in a dry one.
+constexpr std::int64_t wet_table_share = fixed_one / 5;
+constexpr std::int64_t dry_table_share = fixed_one * 6 / 5;
 
 [[nodiscard]] std::int64_t multiply(std::int64_t a, std::int64_t b) {
     return (a * b) >> fixed_fraction_bits;
@@ -60,6 +66,8 @@ std::string_view to_string(Biome biome) noexcept {
         return "tropical rainforest";
     case Biome::Alpine:
         return "alpine";
+    case Biome::Wetland:
+        return "wetland";
     }
     return "unknown";
 }
@@ -90,6 +98,16 @@ std::int64_t Climate::moisture(CellId cell) const {
     return moisture_.at(cell, terrain_.continents().height(cell));
 }
 
+std::int64_t Climate::water_table(CellId cell) const {
+    return water_table(cell, moisture(cell));
+}
+
+std::int64_t Climate::water_table(CellId cell, std::int64_t moisture) const {
+    const std::int64_t share =
+        dry_table_share - multiply(dry_table_share - wet_table_share, moisture);
+    return multiply(terrain_.above_water(cell), share);
+}
+
 Biome Climate::biome(CellId cell) const {
     const std::int64_t continent = terrain_.continents().height(cell);
     if (terrain_.archipelago().raise(cell, continent) <= 0) {
@@ -97,15 +115,19 @@ Biome Climate::biome(CellId cell) const {
     }
     const std::int64_t elevation = terrain_.elevation(cell);
     const std::int64_t temperature = this->temperature(cell, elevation);
-    const Biome climate = classify_biome(temperature, moisture_.at(cell, continent));
+    const std::int64_t moisture = moisture_.at(cell, continent);
+    const Biome climate = classify_biome(temperature, moisture);
     if (climate == Biome::Ice) {
         return climate;
     }
     if (elevation > alpine_height * fixed_one) {
-        return Biome::Alpine;
+        return temperature < glacier_temperature ? Biome::Ice : Biome::Alpine;
     }
     if (elevation < beach_height * fixed_one && temperature > beach_temperature) {
         return Biome::Beach;
+    }
+    if (climate != Biome::Desert && water_table(cell, moisture) < wetland_depth * fixed_one) {
+        return Biome::Wetland;
     }
     return climate;
 }

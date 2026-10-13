@@ -21,6 +21,7 @@ desert = 15000
 savanna = 250000
 tropical_rainforest = 150000
 alpine = 50000
+wetland = 200000
 
 # A grazer: lives on open ground and forest edges, breeds in spring, and leaves the cold.
 [[species]]
@@ -30,7 +31,7 @@ mass = 70
 appetite = 3
 half_fed = 20000
 diet = { forage = 1 }
-habitat = { grassland = 1, savanna = 1, shrubland = 0.9, temperate_forest = 0.7, boreal_forest = 0.4, tundra = 0.2, alpine = 0.2 }
+habitat = { grassland = 1, savanna = 1, shrubland = 0.9, temperate_forest = 0.7, boreal_forest = 0.4, tundra = 0.2, alpine = 0.2, wetland = 0.5 }
 density = 4
 crowded = 15
 births = 0.9
@@ -53,7 +54,7 @@ mass = 40
 appetite = 2.5
 half_fed = 80
 diet = { deer = 1, carrion = 0.3 }
-habitat = { grassland = 1, savanna = 0.8, shrubland = 1, temperate_forest = 1, boreal_forest = 1, tundra = 0.8, alpine = 0.6 }
+habitat = { grassland = 1, savanna = 0.8, shrubland = 1, temperate_forest = 1, boreal_forest = 1, tundra = 0.8, alpine = 0.6, wetland = 0.6 }
 density = 0.02
 crowded = 0.5
 births = 1.2
@@ -79,7 +80,7 @@ mass = 1.2
 appetite = 0.08
 half_fed = 0.2
 diet = { carrion = 1, forage = 0.000004 }
-habitat = { grassland = 0.8, savanna = 0.8, shrubland = 0.8, temperate_forest = 1, boreal_forest = 1, tundra = 1, alpine = 0.8, desert = 0.3, beach = 0.5, tropical_rainforest = 0.5 }
+habitat = { grassland = 0.8, savanna = 0.8, shrubland = 0.8, temperate_forest = 1, boreal_forest = 1, tundra = 1, alpine = 0.8, desert = 0.3, beach = 0.5, tropical_rainforest = 0.5, wetland = 0.8 }
 density = 0.5
 crowded = 1
 births = 1
