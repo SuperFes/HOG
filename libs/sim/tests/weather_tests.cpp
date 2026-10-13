@@ -17,6 +17,7 @@
 using namespace std::chrono;
 using hog::DVec3;
 using hog::GameTime;
+using hog::Vec2;
 using hog::jobs::JobSystem;
 using hog::sim::Ground;
 using hog::sim::Weather;
@@ -55,6 +56,20 @@ std::vector<Ground> zonal_sea(int grid_level) {
         const double sin_latitude = grid.frame(index).up.z;
         ground[index].mean_temperature =
             static_cast<float>(28.0 - (35.0 * sin_latitude * sin_latitude));
+    }
+    return ground;
+}
+
+// A sea 120° wide between the poles, warm at the equator, with land all round it.
+std::vector<Ground> basin() {
+    std::vector<Ground> ground = zonal_sea(level);
+    const hog::sim::CellGrid grid{level};
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        const DVec3 up = grid.frame(index).up;
+        if (std::abs(std::atan2(up.y, up.x)) > 60.0 * degree) {
+            ground[index].ocean = false;
+            ground[index].wetness = 0.5F;
+        }
     }
     return ground;
 }
@@ -413,19 +428,40 @@ TEST_CASE("weather comes out the same on any number of threads", "[sim][weather]
     CHECK(a.systems() == b.systems());
 }
 
+TEST_CASE("the sea warms western coasts and the air over them", "[sim][weather]") {
+    const Weather weather{config(), basin(), march_equinox};
+    const auto ground = basin();
+    const auto coast = [&](double latitude, double towards) {
+        double longitude = 70.0 * towards;
+        while (!ground[cell_at(weather, latitude, longitude)].ocean) {
+            longitude -= towards;
+        }
+        return cell_at(weather, latitude, longitude);
+    };
+    for (const double latitude : {-30.0, 30.0}) {
+        const std::uint32_t west = coast(latitude, -1.0);
+        const std::uint32_t east = coast(latitude, 1.0);
+        CHECK(weather.ocean().temperature[west] > weather.ocean().temperature[east] + 1.0F);
+        CHECK(weather.fields().temperature[west] > weather.fields().temperature[east] + 1.0F);
+    }
+}
+
 TEST_CASE("weather saves and loads", "[sim][weather]") {
     JobSystem jobs{1};
-    Weather saved{config(), everywhere(land), march_equinox};
+    Weather saved{config(), basin(), march_equinox};
     saved.advance_to(march_equinox + hours{5}, jobs);
     const auto bytes = saved.save();
+    const WeatherFields saved_fields = saved.fields();
 
-    Weather loaded{config(), everywhere(land), june_solstice};
+    Weather loaded{config(), basin(), june_solstice};
     REQUIRE(loaded.load(Weather::save_version, bytes));
     CHECK(loaded.time() == saved.time());
     CHECK(loaded.fields() == saved.fields());
+    CHECK(loaded.ocean() == saved.ocean());
     saved.advance_to(march_equinox + hours{9}, jobs);
     loaded.advance_to(march_equinox + hours{9}, jobs);
     CHECK(loaded.fields() == saved.fields());
+    CHECK(loaded.ocean() == saved.ocean());
 
     Weather finer{WeatherConfig{.level = level + 1}, std::vector<Ground>(6U << 8U), june_solstice};
     const auto other_level = finer.load(Weather::save_version, bytes);
@@ -448,6 +484,13 @@ TEST_CASE("weather saves and loads", "[sim][weather]") {
     // Without saved means, they start from the weather as it stands.
     CHECK(old.fields().recent_temperature == old.fields().temperature);
     CHECK(old.fields().recent_precipitation[0] > 0.0F);
+    // Without a saved sea, it settles one under the saved winds.
+    Weather dry{config(), basin(), june_solstice};
+    const std::size_t sea_bytes =
+        dry.ocean().size() * (sizeof(float) + (2 * sizeof(Vec2)) + sizeof(double));
+    REQUIRE(dry.load(3, std::span{bytes}.first(bytes.size() - sea_bytes)));
+    CHECK(dry.fields() == saved_fields);
+    CHECK(std::ranges::any_of(dry.ocean().current, [](Vec2 flow) { return flow != Vec2{0.0F}; }));
 
     const std::span<const std::byte> all{bytes};
     CHECK_FALSE(loaded.load(Weather::save_version, all.first(all.size() - 1)));

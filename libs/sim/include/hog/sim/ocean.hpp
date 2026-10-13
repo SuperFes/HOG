@@ -36,16 +36,18 @@ struct OceanFields {
 // takes the grid it was made with.
 class Ocean {
 public:
-    // Settles the currents under `wind` from rest, with the sea as warm as the season would make
-    // it with the sun at `sin_declination`. `rotation` is the planet's spin in radians per second.
-    // Precondition: one ground and one wind per cell.
+    // A calm sea as warm as the season would make it with the sun at `sin_declination`.
+    // `rotation` is the planet's spin in radians per second. Precondition: one ground per cell.
     Ocean(const CellGrid& grid, std::span<const Ground> ground, const OceanTuning& tuning,
-          double rotation, std::span<const Vec2> wind, double sin_declination);
+          double rotation, double sin_declination);
 
     [[nodiscard]] const OceanFields& fields() const noexcept { return fields_; }
     // Replaces the sea as it stands, for loading and tests. Precondition: one value per cell.
     void set_fields(const CellGrid& grid, OceanFields fields);
 
+    // Settles the currents at once under `wind`, as if it had long blown. Precondition: one wind
+    // per cell.
+    void settle_under(const CellGrid& grid, std::span<const Vec2> wind, jobs::JobSystem* jobs);
     // Moves the sea on by `seconds` under `wind`, with the sun at `sin_declination`.
     void step(const CellGrid& grid, std::span<const Vec2> wind, double sin_declination,
               double seconds, jobs::JobSystem* jobs);

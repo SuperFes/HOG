@@ -28,6 +28,7 @@ struct StepContext {
     const WeatherConfig* config;
     const CellGrid* grid;
     std::span<const Ground> ground;
+    std::span<const float> sea; // °C at the surface
     std::span<const DVec2> slopes;
     std::span<const StormSystem> systems;
     const Calendar* calendar;
@@ -46,13 +47,17 @@ struct StepContext {
     return 1.0 - std::exp(-step / response.count());
 }
 
+// How freely the sea gives up water, as the ice over it allows.
+inline constexpr float ice_wetness = 0.2F;
+
 [[nodiscard]] inline double sea_level(double temperature, const Ground& ground) {
     return temperature + (lapse_rate * static_cast<double>(ground.elevation));
 }
 
 [[nodiscard]] Seasons seasons(const WeatherConfig& config, GameTime time);
 
-// Where the weather would settle at a latitude and season, before the time of day.
+// Where the weather would settle at a latitude and season, before the time of day, over a sea at
+// `sea` °C.
 struct Targets {
     double surface = 0.0;
     double upper = 0.0;
@@ -60,8 +65,8 @@ struct Targets {
     double reference = 0.0;
 };
 
-[[nodiscard]] Targets targets(const HeatTuning& tuning, const Ground& ground, double sin_latitude,
-                              Seasons seasons);
+[[nodiscard]] Targets targets(const WeatherTuning& tuning, const Ground& ground,
+                              double sin_latitude, Seasons seasons, double sea);
 
 // Where what is over `frame` now was `seconds` ago, moving at `velocity` (east, north) m/s along a
 // great circle.

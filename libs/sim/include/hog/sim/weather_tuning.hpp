@@ -10,10 +10,10 @@ namespace hog::sim {
 using Seconds = std::chrono::duration<double>;
 
 struct HeatTuning {
-    // Surface air over land follows the sun within hours; over the ocean it follows the sea,
-    // which warms and cools a season late.
+    // Surface air over land follows the sun within hours; over the ocean it follows the sea.
     Seconds land_response = std::chrono::hours{6};
     Seconds ocean_response = std::chrono::days{2};
+    // The open sea's seasons as the air's pressure is measured against: a month late and milder.
     Seconds ocean_lag = std::chrono::days{35};
     Seconds upper_response = std::chrono::days{4};
     double land_seasons = 55.0; // °C per unit of sin(declination) · sin(latitude)
@@ -142,6 +142,8 @@ struct OceanTuning {
     double max_current = 2.0;   // m/s
     int settling = 20;          // solver sweeps a step
     int first_settling = 5'000; // solver sweeps at most, from rest
+    // A new sea runs this long before it is first used, in day-long steps, to settle its warmth.
+    Seconds spin_up = std::chrono::days{180};
 
     // The sea's warmth follows the season this slowly, so it lags the sun by over a month.
     Seconds response = std::chrono::days{40};

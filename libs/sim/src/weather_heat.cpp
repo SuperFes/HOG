@@ -14,22 +14,28 @@ Seasons seasons(const WeatherConfig& config, GameTime time) {
     };
 }
 
-Targets targets(const HeatTuning& tuning, const Ground& ground, double sin_latitude,
-                Seasons seasons) {
+Targets targets(const WeatherTuning& tuning, const Ground& ground, double sin_latitude,
+                Seasons seasons, double sea_temperature) {
+    const HeatTuning& heat = tuning.heat;
     const double sin_declination = seasons.now;
     const double land = sin_declination * sin_latitude;
     const double sea = seasons.sea * sin_latitude;
     const double latitude = std::abs(std::asin(sin_latitude));
     const double summer = sin_latitude < 0.0 ? -sin_declination : sin_declination;
-    const double middle = (tuning.band_latitude + (tuning.band_seasons * summer)) * degree;
-    const double drop = tuning.upper_drop - (tuning.upper_drop_seasons * summer);
+    const double middle = (heat.band_latitude + (heat.band_seasons * summer)) * degree;
+    const double drop = heat.upper_drop - (heat.upper_drop_seasons * summer);
     const double cooling =
-        0.5 + (0.5 * std::tanh((latitude - middle) / (tuning.band_width * degree)));
+        0.5 + (0.5 * std::tanh((latitude - middle) / (heat.band_width * degree)));
     const auto mean = static_cast<double>(ground.mean_temperature);
+    const double reference = mean + (heat.ocean_seasons * sea);
+    // Ice keeps the air off the water under it, so the air over it follows the seasons.
+    const double over_sea = sea_temperature > tuning.ocean.freezing
+                                ? sea_temperature
+                                : std::min(sea_temperature, reference);
     return Targets{
-        .surface = mean + (ground.ocean ? tuning.ocean_seasons * sea : tuning.land_seasons * land),
-        .upper = tuning.upper_equator - (drop * cooling),
-        .reference = mean + (tuning.ocean_seasons * sea),
+        .surface = ground.ocean ? over_sea : mean + (heat.land_seasons * land),
+        .upper = heat.upper_equator - (drop * cooling),
+        .reference = reference,
     };
 }
 
@@ -37,7 +43,8 @@ void heat(const StepContext& step, WeatherFields& fields, std::uint32_t index) {
     const HeatTuning& tuning = step.config->tuning.heat;
     const Ground& ground = step.ground[index];
     const DVec3 up = step.grid->frame(index).up;
-    const Targets target = targets(tuning, ground, up.z, step.seasons);
+    const Targets target = targets(step.config->tuning, ground, up.z, step.seasons,
+                                   static_cast<double>(step.sea[index]));
     const auto cover = static_cast<double>(fields.cloud_cover(index));
     const double sun = std::sin(step.calendar->sun_elevation(step.middle, up));
     const double heating = (ground.ocean ? tuning.ocean_days : tuning.land_days) * sun *

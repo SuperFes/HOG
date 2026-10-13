@@ -23,7 +23,8 @@ void pressure(const StepContext& step, WeatherFields& fields, std::uint32_t inde
     const WindTuning& tuning = step.config->tuning.wind;
     const Ground& ground = step.ground[index];
     const double sin_latitude = step.grid->frame(index).up.z;
-    const Targets target = targets(step.config->tuning.heat, ground, sin_latitude, step.seasons);
+    const Targets target = targets(step.config->tuning, ground, sin_latitude, step.seasons,
+                                   static_cast<double>(step.sea[index]));
     const double warmth = (sea_level(static_cast<double>(fields.temperature[index]), ground) -
                            static_cast<double>(fields.upper_temperature[index])) -
                           (target.reference - target.upper);

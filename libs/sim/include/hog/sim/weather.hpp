@@ -6,6 +6,7 @@
 #include <hog/planet/world.hpp>
 #include <hog/sim/calendar.hpp>
 #include <hog/sim/cell_grid.hpp>
+#include <hog/sim/ocean.hpp>
 #include <hog/sim/weather_tuning.hpp>
 
 #include <chrono>
@@ -110,6 +111,7 @@ public:
     [[nodiscard]] const std::vector<Ground>& ground() const noexcept { return ground_; }
     [[nodiscard]] const WeatherFields& fields() const noexcept { return fields_; }
     [[nodiscard]] const std::vector<StormSystem>& systems() const noexcept { return systems_; }
+    [[nodiscard]] const OceanFields& ocean() const noexcept { return ocean_.fields(); }
     // Replaces the weather as it stands, for tools and tests. Precondition: one value per cell.
     void set_fields(WeatherFields fields);
     // When the last step was taken.
@@ -125,9 +127,14 @@ public:
     // carried over.
     [[nodiscard]] Result<void> load(std::uint16_t version, std::span<const std::byte> bytes);
 
-    static constexpr std::uint16_t save_version = 3;
+    static constexpr std::uint16_t save_version = 4;
 
 private:
+    // The air as the season and the sea would leave it, with its winds balanced.
+    void start_air();
+    // Settles the sea's currents under the winds as they stand, then warms it through the months
+    // before the last step, so it starts with its seasons late and its currents' warmth carried.
+    void spin_up_ocean();
     void step(GameTime at, jobs::JobSystem& jobs);
     // Pressure follows temperature; winds follow pressure and the upper air's temperature.
     void balance_winds(jobs::JobSystem* jobs);
@@ -144,6 +151,7 @@ private:
     std::vector<StormSystem> systems_;
     std::uint32_t next_system_ = 1;
     GameTime time_;
+    Ocean ocean_;
 };
 
 } // namespace hog::sim

@@ -42,11 +42,10 @@ OceanFields::OceanFields(std::size_t size)
     : temperature(size), current(size, Vec2{0.0F}), stress(size, Vec2{0.0F}), stream(size) {}
 
 Ocean::Ocean(const CellGrid& grid, std::span<const Ground> ground, const OceanTuning& tuning,
-             double rotation, std::span<const Vec2> wind, double sin_declination)
+             double rotation, double sin_declination)
     : tuning_(tuning), rotation_(rotation), fields_(grid.size()), forcing_(grid.size()),
       next_(grid.size()), upwelling_(grid.size()), carried_(grid.size()) {
     HOG_ASSERT(ground.size() == grid.size(), "need ground for every cell");
-    HOG_ASSERT(wind.size() == grid.size(), "need wind for every cell");
     wet_.reserve(grid.size());
     mean_.reserve(grid.size());
     spin_weights_.reserve(grid.size());
@@ -65,11 +64,17 @@ Ocean::Ocean(const CellGrid& grid, std::span<const Ground> ground, const OceanTu
             weights[k] = spin_gradient * std::max(offset.x / length, 0.0) / (length * earth_radius);
         }
         spin_weights_.push_back(weights);
-        fields_.stress[index] = wind_stress(tuning_, wind[index]);
         fields_.temperature[index] = static_cast<float>(target(grid, index, sin_declination));
     }
-    settle(grid, tuning_.first_settling, nullptr);
-    find_currents(grid, nullptr);
+}
+
+void Ocean::settle_under(const CellGrid& grid, std::span<const Vec2> wind, jobs::JobSystem* jobs) {
+    HOG_ASSERT(wind.size() == grid.size(), "need wind for every cell");
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        fields_.stress[index] = wind_stress(tuning_, wind[index]);
+    }
+    settle(grid, tuning_.first_settling, jobs);
+    find_currents(grid, jobs);
 }
 
 double Ocean::target(const CellGrid& grid, std::uint32_t index, double sin_declination) const {

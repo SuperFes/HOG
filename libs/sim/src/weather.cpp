@@ -5,7 +5,9 @@
 #include <hog/sim/weather.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <numbers>
 #include <utility>
 
 namespace hog::sim {
@@ -16,12 +18,19 @@ constexpr float cloud_cover_depth = 0.2F; // mm of cloud that covers most of the
 
 // Sea ice holds its water in.
 float sea_wetness(double temperature) {
-    constexpr double freezing = -2.0;
-    return temperature < freezing ? 0.2F : 1.0F;
+    return temperature <= OceanTuning{}.freezing ? detail::ice_wetness : 1.0F;
 }
 
 GameDuration positive(GameDuration duration) {
     return duration > GameDuration::zero() ? duration : GameDuration{1};
+}
+
+double rotation(const WeatherConfig& config) {
+    return 2.0 * std::numbers::pi / Seconds{positive(config.day)}.count();
+}
+
+GameDuration ocean_step(const WeatherConfig& config) {
+    return positive(std::chrono::round<GameDuration>(config.tuning.ocean.step));
 }
 
 } // namespace
@@ -64,7 +73,9 @@ std::vector<Ground> ground_for(const CellGrid& grid, const planet::World& world)
 Weather::Weather(const WeatherConfig& config, std::vector<Ground> ground, GameTime now)
     : config_(config), grid_(config.level), ground_(std::move(ground)),
       calendar_(positive(config.day), config.axial_tilt), fields_(grid_.size()),
-      before_(grid_.size()), time_(detail::last_step(now, positive(config.step))) {
+      before_(grid_.size()), time_(detail::last_step(now, positive(config.step))),
+      ocean_(grid_, ground_, config.tuning.ocean, rotation(config),
+             detail::seasons(config, time_).now) {
     HOG_ASSERT(config.step > GameDuration::zero(), "weather step must be positive");
     HOG_ASSERT(config.day > GameDuration::zero(), "weather day must be positive");
     HOG_ASSERT(ground_.size() == grid_.size(), "need ground for every cell");
@@ -79,10 +90,17 @@ Weather::Weather(const WeatherConfig& config, std::vector<Ground> ground, GameTi
         }
         slopes_.push_back(slope / config.planet_radius);
     }
+    start_air();
+    spin_up_ocean();
+    start_air();
+}
+
+void Weather::start_air() {
     const detail::Seasons seasons = detail::seasons(config_, time_);
     for (std::uint32_t index = 0; index < grid_.size(); ++index) {
         const detail::Targets target =
-            detail::targets(config_.tuning.heat, ground_[index], grid_.frame(index).up.z, seasons);
+            detail::targets(config_.tuning, ground_[index], grid_.frame(index).up.z, seasons,
+                            static_cast<double>(ocean_.fields().temperature[index]));
         fields_.temperature[index] = static_cast<float>(target.surface);
         fields_.upper_temperature[index] = static_cast<float>(target.upper);
         fields_.vapour[index] = static_cast<float>(0.7 * detail::saturation(target.surface) *
@@ -91,6 +109,16 @@ Weather::Weather(const WeatherConfig& config, std::vector<Ground> ground, GameTi
         fields_.recent_precipitation[index] = detail::usual_precipitation(ground_[index]);
     }
     balance_winds(nullptr);
+}
+
+void Weather::spin_up_ocean() {
+    ocean_.settle_under(grid_, fields_.wind, nullptr);
+    constexpr GameDuration day = std::chrono::days{1};
+    const auto days = std::chrono::round<GameDuration>(config_.tuning.ocean.spin_up) / day;
+    for (auto left = days; left > 0; --left) {
+        ocean_.warm(grid_, detail::seasons(config_, time_ - (left * day)).now, Seconds{day}.count(),
+                    nullptr);
+    }
 }
 
 void Weather::set_fields(WeatherFields fields) {
@@ -109,11 +137,19 @@ std::uint64_t Weather::advance_to(GameTime now, jobs::JobSystem& jobs) {
 }
 
 void Weather::step(GameTime at, jobs::JobSystem& jobs) {
+    const GameDuration sea_step = ocean_step(config_);
+    const GameDuration sea_since =
+        detail::last_step(at, sea_step) - detail::last_step(time_, sea_step);
+    if (sea_since > GameDuration::zero()) {
+        ocean_.step(grid_, fields_.wind, detail::seasons(config_, at).now,
+                    Seconds{sea_since}.count(), &jobs);
+    }
     const GameTime middle = at - (config_.step / 2);
     const detail::StepContext context{
         .config = &config_,
         .grid = &grid_,
         .ground = ground_,
+        .sea = ocean_.fields().temperature,
         .slopes = slopes_,
         .systems = {},
         .calendar = &calendar_,
@@ -140,6 +176,7 @@ void Weather::balance_winds(jobs::JobSystem* jobs) {
         .config = &config_,
         .grid = &grid_,
         .ground = ground_,
+        .sea = ocean_.fields().temperature,
         .slopes = slopes_,
         .systems = systems_,
         .calendar = &calendar_,

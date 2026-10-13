@@ -67,6 +67,18 @@ Result<std::vector<StormSystem>> read_systems(ValueReader& in) {
     return systems;
 }
 
+template <typename Fields, typename Visit>
+void each_sea_field(Fields& fields, Visit visit) {
+    visit(fields.temperature);
+    visit(fields.current);
+    visit(fields.stress);
+    visit(fields.stream);
+}
+
+void read_value(ValueReader& in, double& value) {
+    value = in.twice();
+}
+
 void write_double(ByteWriter& out, double value) {
     out.write(std::bit_cast<std::uint64_t>(value));
 }
@@ -103,6 +115,19 @@ std::vector<std::byte> Weather::save() const {
         write_float(out, system.age);
         write_float(out, system.life);
     }
+    each_sea_field(ocean_.fields(), [&](const auto& values) {
+        for (const auto value : values) {
+            using Value = std::remove_cvref_t<decltype(value)>;
+            if constexpr (std::is_same_v<Value, Vec2>) {
+                write_float(out, value.x);
+                write_float(out, value.y);
+            } else if constexpr (std::is_same_v<Value, double>) {
+                write_double(out, value);
+            } else {
+                write_float(out, value);
+            }
+        }
+    });
     return std::move(out).take();
 }
 
@@ -137,6 +162,14 @@ Result<void> Weather::load(std::uint16_t version, std::span<const std::byte> byt
         }
         systems = std::move(*read);
     }
+    OceanFields sea{grid_.size()};
+    if (version >= 4) {
+        each_sea_field(sea, [&](auto& values) {
+            for (auto& value : values) {
+                read_value(in, value);
+            }
+        });
+    }
     if (auto finished = in.finish(); !finished) {
         return finished;
     }
@@ -150,6 +183,11 @@ Result<void> Weather::load(std::uint16_t version, std::span<const std::byte> byt
     systems_ = std::move(systems);
     next_system_ = next_system;
     time_ = GameTime{GameDuration{static_cast<GameDuration::rep>(time)}};
+    if (version >= 4) {
+        ocean_.set_fields(grid_, std::move(sea));
+    } else {
+        spin_up_ocean();
+    }
     return {};
 }
 

@@ -18,10 +18,15 @@ void water(const StepContext& step, WeatherFields& fields, std::uint32_t index) 
     auto upper = static_cast<double>(fields.upper_temperature[index]);
     auto vapour = static_cast<double>(fields.vapour[index]);
     auto cloud = static_cast<double>(fields.cloud[index]);
-    const double holds = saturation(surface);
+    // The sea gives up water as its own warmth allows, so warm currents wet the air over them.
+    const auto sea = static_cast<double>(step.sea[index]);
+    const double holds = saturation(ground.ocean ? sea : surface);
+    const float wetness = !ground.ocean                               ? ground.wetness
+                          : sea <= step.config->tuning.ocean.freezing ? ice_wetness
+                                                                      : 1.0F;
     const double evaporating = std::min(tuning.evaporation_per_day * step.seconds / 86'400.0, 1.0);
     const double evaporation =
-        std::max(holds - vapour, 0.0) * static_cast<double>(ground.wetness) * evaporating;
+        std::max(holds - vapour, 0.0) * static_cast<double>(wetness) * evaporating;
     vapour += evaporation;
 
     // Thunderstorms rain straight out of the air and stir the column towards neutral.

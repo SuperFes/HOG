@@ -62,8 +62,14 @@ std::vector<Vec2> belts() {
     return wind;
 }
 
+Ocean settled(const std::vector<Ground>& ground, const std::vector<Vec2>& wind) {
+    Ocean ocean{grid(), ground, OceanTuning{}, rotation, 0.0};
+    ocean.settle_under(grid(), wind, nullptr);
+    return ocean;
+}
+
 const Ocean& gyres() {
-    static const Ocean ocean{grid(), basin(), OceanTuning{}, rotation, belts(), 0.0};
+    static const Ocean ocean = settled(basin(), belts());
     return ocean;
 }
 
@@ -129,7 +135,7 @@ TEST_CASE("currents run along coasts, not into land", "[sim][ocean]") {
 
 TEST_CASE("a sea without coasts runs round the planet with the winds", "[sim][ocean]") {
     const std::vector<Ground> sea(grid().size());
-    const Ocean ocean{grid(), sea, OceanTuning{}, rotation, belts(), 0.0};
+    const Ocean ocean = settled(sea, belts());
     for (std::uint32_t index = 0; index < grid().size(); ++index) {
         const Vec2 flow = ocean.fields().current[index];
         REQUIRE(std::isfinite(flow.x));
@@ -196,7 +202,7 @@ void warm_for(Ocean& ocean, int days) {
 } // namespace
 
 TEST_CASE("currents carry warm water along western coasts and cold along eastern", "[sim][ocean]") {
-    Ocean ocean{grid(), zonal(basin()), OceanTuning{}, rotation, belts(), 0.0};
+    Ocean ocean = settled(zonal(basin()), belts());
     warm_for(ocean, 180);
     const auto& temperature = ocean.fields().temperature;
     for (const double lat : {-30.0, 30.0}) {
@@ -210,7 +216,7 @@ TEST_CASE("colder water wells up where the wind drives the sea off a coast", "[s
     for (std::uint32_t index = 0; index < grid().size(); ++index) {
         wind[index] = Vec2{0.0F, latitude(index) > 0.0 ? -7.0F : 7.0F};
     }
-    Ocean ocean{grid(), basin(), OceanTuning{}, rotation, wind, 0.0};
+    Ocean ocean = settled(basin(), wind);
     warm_for(ocean, 180);
     const auto& temperature = ocean.fields().temperature;
     CHECK(temperature[coast(30.0, east)] < temperature[coast(30.0, west)] - 0.5F);
@@ -223,9 +229,8 @@ TEST_CASE("colder water wells up where the wind drives the sea off a coast", "[s
 
 TEST_CASE("the sea's seasons come late and mild", "[sim][ocean]") {
     const std::vector<Ground> sea(grid().size());
-    const std::vector<Vec2> calm(grid().size(), Vec2{0.0F});
     const double tilt = std::sin(23.44 * degree);
-    Ocean ocean{grid(), sea, OceanTuning{}, rotation, calm, 0.0};
+    Ocean ocean{grid(), sea, OceanTuning{}, rotation, 0.0};
     const std::uint32_t north = cell_at(45.0, 0.0);
     // From the March equinox, through a year to settle and a year to watch.
     int warmest = 0;
@@ -255,7 +260,7 @@ TEST_CASE("the sea ices over rather than cooling further", "[sim][ocean]") {
     for (Ground& ground : sea) {
         ground.mean_temperature = -20.0F;
     }
-    Ocean ocean{grid(), sea, OceanTuning{}, rotation, belts(), 0.0};
+    Ocean ocean = settled(sea, belts());
     warm_for(ocean, 10);
     for (const float warmth : ocean.fields().temperature) {
         REQUIRE(static_cast<double>(warmth) == OceanTuning{}.freezing);
@@ -265,10 +270,10 @@ TEST_CASE("the sea ices over rather than cooling further", "[sim][ocean]") {
 TEST_CASE("oceans reject bad input", "[sim][ocean]") {
     const hog::testing::AssertionGuard guard;
     using hog::testing::AssertionFailed;
-    CHECK_THROWS_AS((Ocean{grid(), std::vector<Ground>(3), OceanTuning{}, rotation, belts(), 0.0}),
-                    AssertionFailed);
-    CHECK_THROWS_AS((Ocean{grid(), basin(), OceanTuning{}, rotation, std::vector<Vec2>(3), 0.0}),
+    CHECK_THROWS_AS((Ocean{grid(), std::vector<Ground>(3), OceanTuning{}, rotation, 0.0}),
                     AssertionFailed);
     Ocean ocean = gyres();
+    CHECK_THROWS_AS(ocean.settle_under(grid(), std::vector<Vec2>(3), nullptr), AssertionFailed);
+    CHECK_THROWS_AS(ocean.step(grid(), std::vector<Vec2>(3), 0.0, 1.0, nullptr), AssertionFailed);
     CHECK_THROWS_AS(ocean.set_fields(grid(), hog::sim::OceanFields{3}), AssertionFailed);
 }
