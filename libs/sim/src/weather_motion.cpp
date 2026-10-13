@@ -8,24 +8,23 @@ namespace hog::sim::detail {
 
 namespace {
 
-// Where the air now over `up` was a step ago: back along the great circle the wind follows.
-DVec3 departure(const planet::TangentFrame& frame, Vec2 wind, double seconds) {
-    const double speed = glm::length(DVec2{wind});
-    if (speed == 0.0) {
-        return frame.up;
-    }
-    const double angle = speed * seconds / earth_radius;
-    const DVec3 heading =
-        ((frame.east * static_cast<double>(wind.x)) + (frame.north * static_cast<double>(wind.y))) /
-        speed;
-    return (frame.up * std::cos(angle)) - (heading * std::sin(angle));
-}
-
 double at(std::span<const float> field, std::uint32_t index) {
     return static_cast<double>(field[index]);
 }
 
 } // namespace
+
+DVec3 departure(const planet::TangentFrame& frame, Vec2 velocity, double seconds) {
+    const double speed = glm::length(DVec2{velocity});
+    if (speed == 0.0) {
+        return frame.up;
+    }
+    const double angle = speed * seconds / earth_radius;
+    const DVec3 heading = ((frame.east * static_cast<double>(velocity.x)) +
+                           (frame.north * static_cast<double>(velocity.y))) /
+                          speed;
+    return (frame.up * std::cos(angle)) - (heading * std::sin(angle));
+}
 
 void move(const StepContext& step, const WeatherFields& before, WeatherFields& fields,
           std::uint32_t index) {

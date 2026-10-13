@@ -63,6 +63,10 @@ struct Targets {
 [[nodiscard]] Targets targets(const HeatTuning& tuning, const Ground& ground, double sin_latitude,
                               Seasons seasons);
 
+// Where what is over `frame` now was `seconds` ago, moving at `velocity` (east, north) m/s along a
+// great circle.
+[[nodiscard]] DVec3 departure(const planet::TangentFrame& frame, Vec2 velocity, double seconds);
+
 // Carries each layer's warmth, water and cloud with the wind, reading the step's start from
 // `before`. Moving alone doesn't keep water exactly; conserve_water() puts it right.
 void move(const StepContext& step, const WeatherFields& before, WeatherFields& fields,

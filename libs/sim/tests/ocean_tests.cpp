@@ -63,7 +63,7 @@ std::vector<Vec2> belts() {
 }
 
 const Ocean& gyres() {
-    static const Ocean ocean{grid(), basin(), OceanTuning{}, rotation, belts()};
+    static const Ocean ocean{grid(), basin(), OceanTuning{}, rotation, belts(), 0.0};
     return ocean;
 }
 
@@ -72,14 +72,17 @@ Vec2 current(double lat, double lon) {
 }
 
 // The ocean cell at a latitude nearest the basin's western or eastern coast.
-Vec2 coastal(double lat, double towards) {
+std::uint32_t coast(double lat, double towards) {
     const auto ground = basin();
-    for (double lon = 70.0 * towards; std::abs(lon) > 0.0; lon -= towards) {
-        if (ground[cell_at(lat, lon)].ocean) {
-            return current(lat, lon);
-        }
+    double lon = 70.0 * towards;
+    while (!ground[cell_at(lat, lon)].ocean) {
+        lon -= towards;
     }
-    return Vec2{0.0F};
+    return cell_at(lat, lon);
+}
+
+Vec2 coastal(double lat, double towards) {
+    return gyres().fields().current[coast(lat, towards)];
 }
 
 constexpr double west = -1.0;
@@ -126,7 +129,7 @@ TEST_CASE("currents run along coasts, not into land", "[sim][ocean]") {
 
 TEST_CASE("a sea without coasts runs round the planet with the winds", "[sim][ocean]") {
     const std::vector<Ground> sea(grid().size());
-    const Ocean ocean{grid(), sea, OceanTuning{}, rotation, belts()};
+    const Ocean ocean{grid(), sea, OceanTuning{}, rotation, belts(), 0.0};
     for (std::uint32_t index = 0; index < grid().size(); ++index) {
         const Vec2 flow = ocean.fields().current[index];
         REQUIRE(std::isfinite(flow.x));
@@ -146,10 +149,10 @@ TEST_CASE("currents follow the winds slowly", "[sim][ocean]") {
     const std::vector<Vec2> calm(grid().size(), Vec2{0.0F});
     const auto western = [&] { return glm::length(ocean.fields().current[cell_at(25.0, -40.0)]); };
     const float before = western();
-    ocean.step(grid(), calm, 6.0 * 3'600.0, &jobs);
+    ocean.step(grid(), calm, 0.0, 6.0 * 3'600.0, &jobs);
     CHECK(western() > 0.9F * before);
     for (int step = 0; step < 4 * 60; ++step) {
-        ocean.step(grid(), calm, 6.0 * 3'600.0, &jobs);
+        ocean.step(grid(), calm, 0.0, 6.0 * 3'600.0, &jobs);
     }
     CHECK(western() < 0.1F * before);
 }
@@ -163,19 +166,108 @@ TEST_CASE("the sea comes out the same on any number of threads", "[sim][ocean]")
             blowing.y += 3.0F;
         }
         for (int step = 0; step < 8; ++step) {
-            ocean.step(grid(), wind, 6.0 * 3'600.0, &jobs);
+            ocean.step(grid(), wind, 0.3, 6.0 * 3'600.0, &jobs);
         }
         return ocean.fields();
     };
     CHECK(run(0) == run(3));
 }
 
+namespace {
+
+constexpr double day = 86'400.0;
+
+// Warm at the equator and cold at the poles, as Earth's sea.
+std::vector<Ground> zonal(std::vector<Ground> ground) {
+    for (std::uint32_t index = 0; index < grid().size(); ++index) {
+        const double sin_latitude = grid().frame(index).up.z;
+        ground[index].mean_temperature =
+            static_cast<float>(28.0 - (35.0 * sin_latitude * sin_latitude));
+    }
+    return ground;
+}
+
+void warm_for(Ocean& ocean, int days) {
+    for (int step = 0; step < days; ++step) {
+        ocean.warm(grid(), 0.0, day, nullptr);
+    }
+}
+
+} // namespace
+
+TEST_CASE("currents carry warm water along western coasts and cold along eastern", "[sim][ocean]") {
+    Ocean ocean{grid(), zonal(basin()), OceanTuning{}, rotation, belts(), 0.0};
+    warm_for(ocean, 180);
+    const auto& temperature = ocean.fields().temperature;
+    for (const double lat : {-30.0, 30.0}) {
+        CHECK(temperature[coast(lat, west)] > temperature[coast(lat, east)] + 1.0F);
+    }
+}
+
+TEST_CASE("colder water wells up where the wind drives the sea off a coast", "[sim][ocean]") {
+    // A wind towards the equator pushes the surface west, off the eastern coast, either side.
+    std::vector<Vec2> wind(grid().size());
+    for (std::uint32_t index = 0; index < grid().size(); ++index) {
+        wind[index] = Vec2{0.0F, latitude(index) > 0.0 ? -7.0F : 7.0F};
+    }
+    Ocean ocean{grid(), basin(), OceanTuning{}, rotation, wind, 0.0};
+    warm_for(ocean, 180);
+    const auto& temperature = ocean.fields().temperature;
+    CHECK(temperature[coast(30.0, east)] < temperature[coast(30.0, west)] - 0.5F);
+    CHECK(temperature[coast(-30.0, east)] < temperature[coast(-30.0, west)] - 0.5F);
+    CHECK(temperature[cell_at(30.0, 0.0)] > temperature[coast(30.0, east)]);
+    for (const float warmth : temperature) {
+        REQUIRE(warmth <= 15.0F);
+    }
+}
+
+TEST_CASE("the sea's seasons come late and mild", "[sim][ocean]") {
+    const std::vector<Ground> sea(grid().size());
+    const std::vector<Vec2> calm(grid().size(), Vec2{0.0F});
+    const double tilt = std::sin(23.44 * degree);
+    Ocean ocean{grid(), sea, OceanTuning{}, rotation, calm, 0.0};
+    const std::uint32_t north = cell_at(45.0, 0.0);
+    // From the March equinox, through a year to settle and a year to watch.
+    int warmest = 0;
+    float high = -100.0F;
+    float low = 100.0F;
+    for (int date = 0; date < 2 * 365; ++date) {
+        ocean.warm(grid(), tilt * std::sin(2.0 * std::numbers::pi * date / 365.25), day, nullptr);
+        const float warmth = ocean.fields().temperature[north];
+        if (date >= 365 && warmth > high) {
+            high = warmth;
+            warmest = date - 365;
+        }
+        if (date >= 365) {
+            low = std::min(low, warmth);
+        }
+    }
+    // The June solstice comes 91 days in.
+    CHECK(warmest > 91 + 25);
+    CHECK(warmest < 91 + 50);
+    const double swing = OceanTuning{}.seasons * tilt * std::sin(45.0 * degree);
+    CHECK(static_cast<double>(high - low) / 2.0 < swing);
+    CHECK(static_cast<double>(high - low) / 2.0 > 0.6 * swing);
+}
+
+TEST_CASE("the sea ices over rather than cooling further", "[sim][ocean]") {
+    std::vector<Ground> sea(grid().size());
+    for (Ground& ground : sea) {
+        ground.mean_temperature = -20.0F;
+    }
+    Ocean ocean{grid(), sea, OceanTuning{}, rotation, belts(), 0.0};
+    warm_for(ocean, 10);
+    for (const float warmth : ocean.fields().temperature) {
+        REQUIRE(static_cast<double>(warmth) == OceanTuning{}.freezing);
+    }
+}
+
 TEST_CASE("oceans reject bad input", "[sim][ocean]") {
     const hog::testing::AssertionGuard guard;
     using hog::testing::AssertionFailed;
-    CHECK_THROWS_AS((Ocean{grid(), std::vector<Ground>(3), OceanTuning{}, rotation, belts()}),
+    CHECK_THROWS_AS((Ocean{grid(), std::vector<Ground>(3), OceanTuning{}, rotation, belts(), 0.0}),
                     AssertionFailed);
-    CHECK_THROWS_AS((Ocean{grid(), basin(), OceanTuning{}, rotation, std::vector<Vec2>(3)}),
+    CHECK_THROWS_AS((Ocean{grid(), basin(), OceanTuning{}, rotation, std::vector<Vec2>(3), 0.0}),
                     AssertionFailed);
     Ocean ocean = gyres();
     CHECK_THROWS_AS(ocean.set_fields(grid(), hog::sim::OceanFields{3}), AssertionFailed);

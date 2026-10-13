@@ -39,17 +39,20 @@ Vec2 wind_stress(const OceanTuning& tuning, Vec2 wind) {
 } // namespace
 
 OceanFields::OceanFields(std::size_t size)
-    : current(size, Vec2{0.0F}), stress(size, Vec2{0.0F}), stream(size) {}
+    : temperature(size), current(size, Vec2{0.0F}), stress(size, Vec2{0.0F}), stream(size) {}
 
 Ocean::Ocean(const CellGrid& grid, std::span<const Ground> ground, const OceanTuning& tuning,
-             double rotation, std::span<const Vec2> wind)
-    : tuning_(tuning), fields_(grid.size()), forcing_(grid.size()), next_(grid.size()) {
+             double rotation, std::span<const Vec2> wind, double sin_declination)
+    : tuning_(tuning), rotation_(rotation), fields_(grid.size()), forcing_(grid.size()),
+      next_(grid.size()), upwelling_(grid.size()), carried_(grid.size()) {
     HOG_ASSERT(ground.size() == grid.size(), "need ground for every cell");
     HOG_ASSERT(wind.size() == grid.size(), "need wind for every cell");
     wet_.reserve(grid.size());
+    mean_.reserve(grid.size());
     spin_weights_.reserve(grid.size());
     for (std::uint32_t index = 0; index < grid.size(); ++index) {
         wet_.push_back(ground[index].ocean);
+        mean_.push_back(ground[index].mean_temperature);
         coast_ = coast_ || !ground[index].ocean;
         const double sin_latitude = grid.frame(index).up.z;
         const double spin_gradient = 2.0 * rotation *
@@ -63,20 +66,32 @@ Ocean::Ocean(const CellGrid& grid, std::span<const Ground> ground, const OceanTu
         }
         spin_weights_.push_back(weights);
         fields_.stress[index] = wind_stress(tuning_, wind[index]);
+        fields_.temperature[index] = static_cast<float>(target(grid, index, sin_declination));
     }
     settle(grid, tuning_.first_settling, nullptr);
     find_currents(grid, nullptr);
 }
 
+double Ocean::target(const CellGrid& grid, std::uint32_t index, double sin_declination) const {
+    return static_cast<double>(mean_[index]) +
+           (tuning_.seasons * sin_declination * grid.frame(index).up.z);
+}
+
 void Ocean::set_fields(const CellGrid& grid, OceanFields fields) {
     HOG_ASSERT(fields.size() == grid.size() && fields.current.size() == grid.size() &&
-                   fields.stress.size() == grid.size(),
+                   fields.stress.size() == grid.size() && fields.stream.size() == grid.size(),
                "need the sea for every cell");
     fields_ = std::move(fields);
 }
 
-void Ocean::step(const CellGrid& grid, std::span<const Vec2> wind, double seconds,
-                 jobs::JobSystem* jobs) {
+void Ocean::step(const CellGrid& grid, std::span<const Vec2> wind, double sin_declination,
+                 double seconds, jobs::JobSystem* jobs) {
+    drive(grid, wind, seconds, jobs);
+    warm(grid, sin_declination, seconds, jobs);
+}
+
+void Ocean::drive(const CellGrid& grid, std::span<const Vec2> wind, double seconds,
+                  jobs::JobSystem* jobs) {
     HOG_ASSERT(wind.size() == grid.size(), "need wind for every cell");
     const auto remembering = static_cast<float>(detail::approach(seconds, tuning_.stress_memory));
     for (std::uint32_t index = 0; index < grid.size(); ++index) {
@@ -163,6 +178,59 @@ void Ocean::find_currents(const CellGrid& grid, jobs::JobSystem* jobs) {
         }
         gradient /= earth_radius;
         fields_.current[index] = capped(DVec2{-gradient.y, gradient.x}, tuning_.max_current);
+    });
+}
+
+void Ocean::find_upwelling(const CellGrid& grid, jobs::JobSystem* jobs) {
+    const double floor = 2.0 * rotation_ * std::sin(tuning_.min_spin_latitude * detail::degree);
+    // The water the wind drags along turns right of it in the north and left in the south.
+    const auto pushed = [&](std::uint32_t index) {
+        const double coriolis = 2.0 * rotation_ * grid.frame(index).up.z;
+        const double held = std::abs(coriolis) < floor ? std::copysign(floor, coriolis) : coriolis;
+        const Vec2 stress = fields_.stress[index];
+        return DVec2{stress.y, -stress.x} / (water_density * held);
+    };
+    detail::for_cells(jobs, grid.size(), [&](std::uint32_t index) {
+        if (!wet_[index]) {
+            upwelling_[index] = 0.0;
+            return;
+        }
+        const planet::TangentFrame& here = grid.frame(index);
+        const DVec2 push = pushed(index);
+        // What leaves across each edge, none of it into land.
+        double outflow = 0.0;
+        for (std::size_t k = 0; k < 4; ++k) {
+            const std::uint32_t there = grid.neighbors(index)[k];
+            if (wet_[there]) {
+                const DVec2 theirs = local(here, world(grid.frame(there), Vec2{pushed(there)}));
+                outflow += grid.laplacian_weights(index)[k] *
+                           glm::dot(grid.offsets(index)[k], (push + theirs) * 0.5);
+            }
+        }
+        upwelling_[index] = std::max(outflow / earth_radius, 0.0);
+    });
+}
+
+void Ocean::warm(const CellGrid& grid, double sin_declination, double seconds,
+                 jobs::JobSystem* jobs) {
+    find_upwelling(grid, jobs);
+    carried_ = fields_.temperature;
+    const double settling = detail::approach(seconds, tuning_.response);
+    detail::for_cells(jobs, grid.size(), [&](std::uint32_t index) {
+        const double season = target(grid, index, sin_declination);
+        if (!wet_[index]) {
+            fields_.temperature[index] = static_cast<float>(season);
+            return;
+        }
+        const DVec3 from = detail::departure(grid.frame(index), fields_.current[index], seconds);
+        double warmth = grid.interpolate(from, [&](std::uint32_t cell) {
+            return static_cast<double>(wet_[cell] ? carried_[cell] : carried_[index]);
+        });
+        warmth += (season - warmth) * settling;
+        const double deep = season - tuning_.upwelled;
+        const double lifted = 1.0 - std::exp(-upwelling_[index] * seconds / tuning_.layer);
+        warmth += std::min(deep - warmth, 0.0) * lifted;
+        fields_.temperature[index] = static_cast<float>(std::max(warmth, tuning_.freezing));
     });
 }
 

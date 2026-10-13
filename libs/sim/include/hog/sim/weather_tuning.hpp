@@ -142,6 +142,15 @@ struct OceanTuning {
     double max_current = 2.0;   // m/s
     int settling = 20;          // solver sweeps a step
     int first_settling = 5'000; // solver sweeps at most, from rest
+
+    // The sea's warmth follows the season this slowly, so it lags the sun by over a month.
+    Seconds response = std::chrono::days{40};
+    double seasons = 18.0;  // °C per unit of sin(declination) · sin(latitude)
+    double upwelled = 8.0;  // °C cooler than the season, the water that wells up from below
+    double freezing = -2.0; // °C, below which the sea ices over instead
+    // The wind's sideways push on the water is held finite near the equator, where it would be
+    // infinite. Degrees.
+    double min_spin_latitude = 10.0;
 };
 
 struct WeatherTuning {
