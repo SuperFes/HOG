@@ -216,7 +216,7 @@ TEST_CASE("wildlife is shown against its densest cell", "[viewer][overlay]") {
 namespace {
 
 // Ground surveyed under every pixel of a shown area: the west half sea 30 m deep and the east half
-// land 800 m up, tundra over sandstone with gold in the far east.
+// land 800 m up, tundra over sandstone with gold in the far east, hot under the land.
 probe::Ground surveyed(const viewer::MapRect& shown) {
     const int height = width / 2;
     probe::Ground ground{.survey = viewer::survey_of(shown, width, height, true, 40.0F),
@@ -238,6 +238,7 @@ probe::Ground surveyed(const viewer::MapRect& shown) {
             ground.rock.push_back(std::to_underlying(planet::Rock::Sandstone));
             ground.deposit.push_back(x >= width - 4 ? std::to_underlying(planet::Resource::Gold) + 1
                                                     : 0);
+            ground.heat.push_back(east ? 650.0F : 20.0F);
         }
     }
     return ground;
@@ -345,6 +346,27 @@ TEST_CASE("minerals show the rock or rarest deposit at the surveyed depth", "[vi
     ground.rock.clear();
     ground.deposit.clear();
     CHECK(all(planet.render(Overlay::Minerals, "", shown, &ground), viewer::missing_colour));
+}
+
+TEST_CASE("heat shows the rock's temperature at the surveyed depth", "[viewer][overlay]") {
+    const Planet planet = land();
+    CHECK(all(planet.render(Overlay::Heat), viewer::missing_colour));
+    const viewer::MapRect shown{.low = {0.25, 0.25}, .high = {0.75, 0.5}};
+    probe::Ground ground = surveyed(shown);
+    const mapgen::Image image = planet.render(Overlay::Heat, "", shown, &ground);
+    CHECK(image.at(width - 1, 0) == mapgen::heat_colour(650 * planet::fixed_one));
+    CHECK(image.at(0, 0) ==
+          mapgen::mix(mapgen::heat_colour(20 * planet::fixed_one), Rgb{40, 90, 150}, 0.4));
+
+    ground.heat.clear();
+    CHECK(all(planet.render(Overlay::Heat, "", shown, &ground), viewer::missing_colour));
+}
+
+TEST_CASE("only the minerals and heat overlays look underground", "[viewer][overlay]") {
+    for (const Overlay overlay : viewer::overlays) {
+        CHECK(viewer::underground(overlay) ==
+              (overlay == Overlay::Minerals || overlay == Overlay::Heat));
+    }
 }
 
 TEST_CASE("natural edges wander, keeping each cell's value", "[viewer][overlay]") {

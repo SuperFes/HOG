@@ -154,6 +154,19 @@ TEST_CASE("temperature colours run from blue through white to red", "[mapgen]") 
     CHECK(colour(-60) == colour(-30));
 }
 
+TEST_CASE("heat colours glow brighter towards magma", "[mapgen]") {
+    const auto colour = [](std::int64_t celsius) {
+        return hog::mapgen::heat_colour(celsius * fixed_one);
+    };
+    const auto brightness = [](hog::mapgen::Rgb rgb) { return rgb[0] + rgb[1] + rgb[2]; };
+    CHECK(colour(20)[2] > colour(20)[1]);
+    CHECK(colour(400)[0] > colour(400)[2]);
+    CHECK(brightness(colour(100)) < brightness(colour(500)));
+    CHECK(brightness(colour(500)) < brightness(colour(1'100)));
+    CHECK(colour(1'500) == colour(1'100));
+    CHECK(colour(-10) == colour(0));
+}
+
 TEST_CASE("moisture colours run from brown to blue", "[mapgen]") {
     const auto dry = hog::mapgen::moisture_colour(0);
     const auto wet = hog::mapgen::moisture_colour(fixed_one);

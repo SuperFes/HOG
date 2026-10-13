@@ -10,8 +10,10 @@ namespace hog::viewer {
 
 namespace {
 
+// Four significant figures, but never as an exponent once past the thousands.
 std::string metres(float value) {
-    return std::format("{:.4g} m", value);
+    return std::abs(value) >= 1'000.0F ? std::format("{:.0f} m", value)
+                                       : std::format("{:.4g} m", value);
 }
 
 template <typename Enum>
@@ -97,9 +99,17 @@ std::vector<Reading> column_readings(const probe::Column& column) {
     };
     layer("cover", column.cover, column.cover_thickness);
     layer("sediment", column.sediment, column.sediment_thickness);
-    lines.push_back(
-        {.name = "bedrock",
-         .value = std::format("{}, from {}", rock_name(column.bedrock), metres(depth))});
+    layer("bedrock", column.bedrock, column.mantle_depth - depth);
+    if (column.chamber_thickness > 0.0F) {
+        lines.push_back(
+            {.name = "magma",
+             .value = std::format("{} to {}", metres(column.chamber_top),
+                                  metres(column.chamber_top + column.chamber_thickness))});
+    }
+    lines.push_back({.name = "mantle",
+                     .value = std::format("{}, from {}",
+                                          rock_name(std::to_underlying(planet::Rock::Peridotite)),
+                                          metres(depth))});
     for (const probe::Seam& seam : column.seams) {
         lines.push_back({.name = named<planet::Resource>(seam.resource, planet::resource_count),
                          .value = std::format("{} to {}", metres(seam.top),

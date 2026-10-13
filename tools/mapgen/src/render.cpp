@@ -39,6 +39,15 @@ constexpr std::array temperature_stops{
     ColourStop{.at = 35.0, .colour = {190, 30, 30}},
 };
 
+// Rock temperature in °C, glowing as it nears magma.
+constexpr std::array heat_stops{
+    ColourStop{.at = 0.0, .colour = {30, 30, 60}},
+    ColourStop{.at = 100.0, .colour = {110, 30, 90}},
+    ColourStop{.at = 300.0, .colour = {200, 40, 30}},
+    ColourStop{.at = 700.0, .colour = {250, 150, 20}},
+    ColourStop{.at = 1'100.0, .colour = {255, 245, 180}},
+};
+
 constexpr std::array moisture_stops{
     ColourStop{.at = 0.0, .colour = {150, 100, 50}},
     ColourStop{.at = 0.3, .colour = {225, 205, 120}},
@@ -170,6 +179,10 @@ Rgb biome_colour(planet::Biome biome) noexcept {
 
 Rgb temperature_colour(std::int64_t temperature) noexcept {
     return ramp(temperature_stops, planet::fixed_to_double(temperature));
+}
+
+Rgb heat_colour(std::int64_t temperature) noexcept {
+    return ramp(heat_stops, planet::fixed_to_double(temperature));
 }
 
 Rgb moisture_colour(std::int64_t moisture) noexcept {

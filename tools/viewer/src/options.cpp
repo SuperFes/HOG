@@ -78,8 +78,9 @@ options:
   --host HOST     where the server runs (default 127.0.0.1)
   --port PORT     its [debug] port (default 7777)
   --width PIXELS  of the rendered map (default 1024)
-  --overlay NAME  shown first: terrain, biome, water, minerals, temperature, air,
-                  sky, pressure, sea, dryness, plants, fire or wildlife (default terrain)
+  --overlay NAME  shown first: terrain, biome, water, minerals, heat, temperature,
+                  air, sky, pressure, sea, dryness, plants, fire or wildlife
+                  (default terrain)
   --species NAME  shown first on the wildlife overlay
   --quit-after S  quit after this many seconds
   --capture PATH  save the last frame drawn as a PNG, on quitting

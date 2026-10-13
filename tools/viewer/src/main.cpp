@@ -47,7 +47,7 @@ constexpr float sun_radius = 6.0F;
 constexpr float marker_reach = 9.0F; // pixels from the inspected point to a crosshair arm's end
 // How long the view must hold still before the ground under it is surveyed.
 constexpr std::chrono::milliseconds survey_settle{150};
-constexpr float deepest = 2'000.0F; // metres, for the minerals overlay
+constexpr float deepest = 100'000.0F; // metres, for the underground overlays
 
 struct WindowDeleter {
     void operator()(SDL_Window* window) const noexcept { SDL_DestroyWindow(window); }
@@ -147,7 +147,7 @@ struct View {
     viewer::MapView map;
     bool daylight = true;
     bool natural = true; // edges of the simulation's cells
-    float depth = 10.0F; // metres below the surface the minerals overlay shows
+    float depth = 10.0F; // metres below the surface the underground overlays show
     viewer::SurveyPacer pacer{survey_settle};
     std::uint64_t grounds = 0; // the link's ground count when last looked at
     Texture texture;
@@ -210,15 +210,14 @@ void survey(View& view, viewer::Link& link, int width) {
         }
     }
     const int across = std::min(width, static_cast<int>(probe::most_survey_side));
-    const probe::Survey wanted =
-        viewer::survey_of(view.map.shown(), across, across / 2,
-                          view.overlay == viewer::Overlay::Minerals, view.depth);
+    const probe::Survey wanted = viewer::survey_of(view.map.shown(), across, across / 2,
+                                                   viewer::underground(view.overlay), view.depth);
     if (const auto ready = view.pacer.poll(wanted, MonotonicClock::now())) {
         link.survey(*ready);
     }
 }
 
-// What the minerals overlay's colours stand for.
+// What an overlay's colour stands for.
 void swatch(mapgen::Rgb colour, std::string_view name) {
     const auto channel = [&colour](std::size_t index) {
         return static_cast<float>(colour.at(index)) / 255.0F;
@@ -245,6 +244,12 @@ void minerals_key() {
     }
     for (const planet::Resource resource : planet::rarest_first) {
         swatch(mapgen::resource_colour(resource), planet::to_string(resource));
+    }
+}
+
+void heat_key() {
+    for (const int celsius : {0, 100, 300, 700, 1'100}) {
+        swatch(mapgen::heat_colour(celsius * planet::fixed_one), std::format("{} °C", celsius));
     }
 }
 
@@ -325,12 +330,16 @@ void overlay_picker(View& view, viewer::Link& link, const viewer::Frame* frame) 
 
 // What the overlay's colours mean.
 void legend(const View& view, const viewer::Link& link, const viewer::Frame* frame) {
-    if (view.overlay == viewer::Overlay::Minerals) {
+    if (viewer::underground(view.overlay)) {
         const auto ground = link.ground();
         ImGui::TextUnformatted(ground != nullptr && !ground->rock.empty()
                                    ? std::format("{:.0f} m down", ground->survey.depth).c_str()
                                    : "surveying");
-        minerals_key();
+        if (view.overlay == viewer::Overlay::Minerals) {
+            minerals_key();
+        } else {
+            heat_key();
+        }
     }
     if (view.overlay == viewer::Overlay::Biome) {
         biomes_key();
@@ -419,7 +428,7 @@ void sidebar(View& view, viewer::Link& link) {
     ImGui::Separator();
 
     overlay_picker(view, link, frame.get());
-    if (view.overlay == viewer::Overlay::Minerals) {
+    if (viewer::underground(view.overlay)) {
         ImGui::SliderFloat("depth", &view.depth, 0.0F, deepest, "%.0f m",
                            ImGuiSliderFlags_Logarithmic);
     }

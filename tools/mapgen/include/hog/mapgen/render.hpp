@@ -49,6 +49,9 @@ struct ImageSize {
 // Blue below freezing, white at 0 °C, red when hot; temperature is fixed-point °C.
 [[nodiscard]] Rgb temperature_colour(std::int64_t temperature) noexcept;
 
+// Rock temperature from dark and cold through red to the near-white of magma, from fixed-point °C.
+[[nodiscard]] Rgb heat_colour(std::int64_t temperature) noexcept;
+
 // Brown when arid through green to blue when saturated; moisture is fixed point from 0 to 1.
 [[nodiscard]] Rgb moisture_colour(std::int64_t moisture) noexcept;
 

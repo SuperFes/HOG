@@ -82,6 +82,9 @@ TEST_CASE("the ground reads from the surface down", "[viewer][inspector]") {
                                     .sediment = 3,
                                     .sediment_thickness = 410.0F,
                                     .bedrock = 5,
+                                    .mantle_depth = 35'250.0F,
+                                    .chamber_top = 0.0F,
+                                    .chamber_thickness = 0.0F,
                                     .seams = {{.resource = 1, .top = 12.0F, .thickness = 1.5F},
                                               {.resource = 6, .top = 300.0F, .thickness = 0.25F}}};
     const std::vector<Reading> expected{
@@ -92,13 +95,14 @@ TEST_CASE("the ground reads from the surface down", "[viewer][inspector]") {
         {.name = "crust", .value = "continental"},
         {.name = "cover", .value = "soil, 0 m to 1.5 m"},
         {.name = "sediment", .value = "shale, 1.5 m to 411.5 m"},
-        {.name = "bedrock", .value = "granite, from 411.5 m"},
+        {.name = "bedrock", .value = "granite, 411.5 m to 35250 m"},
+        {.name = "mantle", .value = "peridotite, from 35250 m"},
         {.name = "coal", .value = "12 m to 13.5 m"},
         {.name = "gold", .value = "300 m to 300.2 m"},
     };
     CHECK(hog::viewer::column_readings(column) == expected);
 
-    // Layers with no thickness are left out.
+    // Layers with no thickness are left out, and magma shows where it lies.
     const hog::probe::Column bare{.elevation = -3'000.0F,
                                   .biome = 0,
                                   .water_table = 0.0F,
@@ -109,12 +113,17 @@ TEST_CASE("the ground reads from the surface down", "[viewer][inspector]") {
                                   .sediment = 0,
                                   .sediment_thickness = 0.0F,
                                   .bedrock = 6,
+                                  .mantle_depth = 7'000.0F,
+                                  .chamber_top = 4'000.0F,
+                                  .chamber_thickness = 950.0F,
                                   .seams = {}};
     const std::vector<Reading> floor{
         {.name = "elevation", .value = "-3000 m"},
         {.name = "biome", .value = "ocean"},
         {.name = "crust", .value = "oceanic"},
-        {.name = "bedrock", .value = "basalt, from 0 m"},
+        {.name = "bedrock", .value = "basalt, 0 m to 7000 m"},
+        {.name = "magma", .value = "4000 m to 4950 m"},
+        {.name = "mantle", .value = "peridotite, from 7000 m"},
     };
     CHECK(hog::viewer::column_readings(bare) == floor);
 }

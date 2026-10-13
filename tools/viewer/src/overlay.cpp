@@ -174,6 +174,14 @@ public:
                            : mapgen::rock_colour(static_cast<planet::Rock>(rock));
     }
 
+    // °C of the rock at the surveyed depth; none where that wasn't surveyed.
+    [[nodiscard]] std::optional<double> heat(const Spot& spot) const {
+        if (!spot.sample || ground_->heat.empty()) {
+            return std::nullopt;
+        }
+        return static_cast<double>(ground_->heat[*spot.sample]);
+    }
+
 private:
     const sim::CellGrid* grid_;
     const Frame* frame_;
@@ -348,6 +356,14 @@ Rgb colour_at(const Sampler& sampler, Overlay overlay, std::span<const float> sp
         // Tinted under the sea, so coasts still show.
         return sampler.ocean(spot) ? mapgen::mix(*below, ocean_blue, 0.4) : *below;
     }
+    case Overlay::Heat: {
+        const std::optional<double> heat = sampler.heat(spot);
+        if (!heat) {
+            return missing_colour;
+        }
+        const Rgb glow = mapgen::heat_colour(fixed(*heat));
+        return sampler.ocean(spot) ? mapgen::mix(glow, ocean_blue, 0.4) : glow;
+    }
     case Overlay::Temperature:
     case Overlay::Air:
     case Overlay::Sky:
@@ -408,6 +424,8 @@ std::string_view to_string(Overlay overlay) noexcept {
         return "water";
     case Overlay::Minerals:
         return "minerals";
+    case Overlay::Heat:
+        return "heat";
     case Overlay::Temperature:
         return "temperature";
     case Overlay::Air:
@@ -444,6 +462,7 @@ std::vector<std::string> layers_for(Overlay overlay, std::string_view species) {
         add({"planet/biome", "planet/water_table"});
         break;
     case Overlay::Minerals:
+    case Overlay::Heat:
         break;
     case Overlay::Temperature:
         add({"weather/temperature"});
@@ -485,6 +504,7 @@ std::optional<Legend> legend_for(Overlay overlay, const Frame& frame, std::strin
         break;
     case Overlay::Biome:
     case Overlay::Minerals:
+    case Overlay::Heat:
         return std::nullopt;
     case Overlay::Water:
         layer = "planet/water_table";

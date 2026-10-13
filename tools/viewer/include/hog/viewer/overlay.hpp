@@ -21,6 +21,7 @@ enum class Overlay : std::uint8_t {
     Biome,       // with lakes and rivers
     Water,       // the water table's depth, with lakes and rivers
     Minerals,    // rock, or the rarest deposit, at a depth; needs the ground surveyed
+    Heat,        // the rock's temperature at a depth; likewise
     Temperature, // at the surface
     Air,         // temperature, reddened along warm fronts and blued along cold ones
     Sky,         // cloud, rain, snow, hail and storms over the ground
@@ -33,10 +34,15 @@ enum class Overlay : std::uint8_t {
 };
 
 inline constexpr std::array overlays{
-    Overlay::Terrain, Overlay::Biome, Overlay::Water,    Overlay::Minerals, Overlay::Temperature,
-    Overlay::Air,     Overlay::Sky,   Overlay::Pressure, Overlay::Sea,      Overlay::Dryness,
-    Overlay::Plants,  Overlay::Fire,  Overlay::Wildlife,
+    Overlay::Terrain,     Overlay::Biome,  Overlay::Water, Overlay::Minerals, Overlay::Heat,
+    Overlay::Temperature, Overlay::Air,    Overlay::Sky,   Overlay::Pressure, Overlay::Sea,
+    Overlay::Dryness,     Overlay::Plants, Overlay::Fire,  Overlay::Wildlife,
 };
+
+// Whether an overlay shows what lies underground, which needs the ground surveyed at a depth.
+[[nodiscard]] constexpr bool underground(Overlay overlay) noexcept {
+    return overlay == Overlay::Minerals || overlay == Overlay::Heat;
+}
 
 [[nodiscard]] std::string_view to_string(Overlay overlay) noexcept;
 [[nodiscard]] std::optional<Overlay> overlay_named(std::string_view name) noexcept;
