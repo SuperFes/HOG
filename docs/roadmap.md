@@ -121,7 +121,7 @@ This phase produces a pure library that turns a seed into a planet. It has no gr
 - [x] Temperature and moisture bands, then biome assignment
 - [x] Starting archipelago: 5–8 islands of 10–60 km², placed on the real planet
 - [x] Geology strata and finite deposits per cell (stub values are fine)
-- [ ] Deep layers: crust thickness, mantle rock beneath it, and magma chambers under volcanic ground, so the whole volume can be dug through
+- [x] Deep layers: crust thickness, mantle rock beneath it, and magma chambers under volcanic ground, so the whole volume can be dug through
 - [ ] Caves and tunnels: karst in wet limestone, lava tubes in basalt, sea caves in cliffs
 
 **Change store**
