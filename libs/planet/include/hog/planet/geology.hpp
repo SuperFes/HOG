@@ -7,6 +7,7 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string_view>
 
@@ -20,20 +21,23 @@ enum class Rock : std::uint8_t {
     Limestone,
     Granite,
     Basalt,
+    Peridotite,
 };
 
-inline constexpr int rock_count = static_cast<int>(Rock::Basalt) + 1;
+inline constexpr int rock_count = static_cast<int>(Rock::Peridotite) + 1;
 
 [[nodiscard]] std::string_view to_string(Rock rock) noexcept;
 
-// A cell's ground from the surface down: loose cover, then sedimentary rock, then bedrock that
-// runs on without end. Thicknesses are fixed-point metres and may be zero.
+// A cell's ground from the surface down: loose cover, then sedimentary rock, then bedrock down to
+// the base of the crust, then mantle rock that runs on without end. Thicknesses and depths are
+// fixed-point metres; thicknesses may be zero.
 struct Strata {
     Rock cover = Rock::Soil;
     std::int64_t cover_thickness = 0;
     Rock sediment = Rock::Shale;
     std::int64_t sediment_thickness = 0;
     Rock bedrock = Rock::Granite;
+    std::int64_t mantle_depth = std::numeric_limits<std::int64_t>::max();
 
     // The rock at a fixed-point depth in metres below the surface.
     [[nodiscard]] constexpr Rock rock_at(std::int64_t depth) const noexcept {
@@ -42,6 +46,9 @@ struct Strata {
         }
         if (depth < cover_thickness + sediment_thickness) {
             return sediment;
+        }
+        if (depth >= mantle_depth) {
+            return Rock::Peridotite;
         }
         return bedrock;
     }
@@ -100,6 +107,10 @@ public:
 
     [[nodiscard]] Strata strata(CellId cell) const;
 
+    // Fixed-point metres from the surface to the mantle: thick under continents and thicker
+    // still under mountains, thin under the ocean floor, and thickened under the islands.
+    [[nodiscard]] std::int64_t crust_thickness(CellId cell) const;
+
     // Every resource's seam under the cell, indexed by resource. The deep ocean floor holds none.
     [[nodiscard]] std::array<Deposit, resource_count> deposits(CellId cell) const;
 
@@ -115,6 +126,7 @@ private:
     std::uint64_t facies_seed_;
     std::uint64_t thickness_seed_;
     std::uint64_t deposit_seed_;
+    std::uint64_t crust_seed_;
 };
 
 } // namespace hog::planet

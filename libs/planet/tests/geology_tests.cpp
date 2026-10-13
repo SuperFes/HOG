@@ -1,5 +1,6 @@
 #include <hog/core/hash.hpp>
 #include <hog/planet/geology.hpp>
+#include <hog/planet/neighbors.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tangent_frame.hpp>
 #include <hog/planet/tile.hpp>
@@ -97,6 +98,16 @@ TEST_CASE("strata stack from the surface down", "[planet][geology]") {
     static_assert(strata.rock_at(10'000 * fixed_one) == Rock::Granite);
     static_assert(strata.bedrock_depth() == 102 * fixed_one);
 
+    constexpr Strata crust{.cover = Rock::Soil,
+                           .cover_thickness = 2 * fixed_one,
+                           .sediment = Rock::Limestone,
+                           .sediment_thickness = 100 * fixed_one,
+                           .bedrock = Rock::Granite,
+                           .mantle_depth = 30'000 * fixed_one};
+    static_assert(crust.rock_at((30'000 * fixed_one) - 1) == Rock::Granite);
+    static_assert(crust.rock_at(30'000 * fixed_one) == Rock::Peridotite);
+    static_assert(crust.rock_at(100'000 * fixed_one) == Rock::Peridotite);
+
     constexpr Strata bare{.cover = Rock::Soil,
                           .cover_thickness = 0,
                           .sediment = Rock::Shale,
@@ -187,6 +198,75 @@ TEST_CASE("shelves end partway down to the ocean floor", "[planet][geology]") {
     }
     CHECK(shelf > 0);
     CHECK(deep > shelf);
+}
+
+TEST_CASE("the crust is thick under continents and mountains and thin under the sea",
+          "[planet][geology]") {
+    const std::uint64_t seed = GENERATE(1U, 2U);
+    const Geology geology{planet(seed)};
+    const auto km = [](std::int64_t depth) { return static_cast<double>(depth) / fixed_one / 1e3; };
+    double thinnest_land = 1e9;
+    double thickest_abyss = 0.0;
+    double mountain = 0.0;
+    double mountain_count = 0.0;
+    double lowland = 0.0;
+    double lowland_count = 0.0;
+    for (const CellId cell : cells_at(6)) {
+        const Strata strata = geology.strata(cell);
+        REQUIRE(strata.mantle_depth == geology.crust_thickness(cell));
+        REQUIRE(strata.mantle_depth > strata.bedrock_depth());
+        REQUIRE(strata.rock_at(strata.mantle_depth) == Rock::Peridotite);
+        REQUIRE(strata.rock_at(strata.mantle_depth - 1) == strata.bedrock);
+        const double crust = km(strata.mantle_depth);
+        REQUIRE(crust >= 6.3);
+        REQUIRE(crust <= 66.0);
+        const std::int64_t continent = geology.terrain().continents().height(cell);
+        if (continent > fixed_one / 20) {
+            thinnest_land = std::min(thinnest_land, crust);
+            const std::int64_t strength = geology.terrain().mountain_strength(cell);
+            if (strength == 0) {
+                lowland += crust;
+                lowland_count += 1.0;
+            } else if (strength > fixed_one / 2) {
+                mountain += crust;
+                mountain_count += 1.0;
+            }
+        } else if (continent < -fixed_one * 3 / 20 && geology.terrain().height(cell) == continent) {
+            thickest_abyss = std::max(thickest_abyss, crust);
+        }
+    }
+    CHECK(thinnest_land >= 31.5);
+    CHECK(thickest_abyss <= 7.7);
+    REQUIRE(mountain_count > 0.0);
+    CHECK(mountain / mountain_count > lowland / lowland_count + 10.0);
+}
+
+TEST_CASE("the crust thickens smoothly across the shelves", "[planet][geology]") {
+    const Geology geology{planet(1)};
+    constexpr int level = 9;
+    std::int64_t steepest = 0;
+    for (const CellId cell : cells_at(level)) {
+        if (geology.terrain().is_land(cell) || geology.terrain().mountain_strength(cell) > 0) {
+            continue;
+        }
+        const std::int64_t here = geology.crust_thickness(cell);
+        for (const CellId neighbor : hog::planet::edge_neighbors(cell)) {
+            steepest = std::max(steepest, std::abs(geology.crust_thickness(neighbor) - here));
+        }
+    }
+    // It thickens as steeply as the sea floor rises, with no jump at the shelf's edge, where
+    // the crust under the ocean floor and the continents differ by 28 km.
+    INFO("steepest step " << static_cast<double>(steepest) / fixed_one << " m");
+    CHECK(steepest < 5'000 * fixed_one);
+}
+
+TEST_CASE("the starting islands have thickened ocean crust under them", "[planet][geology]") {
+    const Geology geology{planet(1)};
+    for (const auto& island : geology.terrain().archipelago().islands()) {
+        const CellId cell = hog::planet::cell_at(island.center);
+        CHECK(geology.crust_thickness(cell) > 10'000 * fixed_one);
+        CHECK(geology.crust_thickness(cell) < 14'000 * fixed_one);
+    }
 }
 
 TEST_CASE("mountains are stripped down to granite", "[planet][geology]") {

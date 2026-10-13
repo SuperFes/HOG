@@ -12,6 +12,7 @@ namespace {
 constexpr std::uint64_t facies_salt = 0x6661'6369'6573'0000ULL;    // "facies"
 constexpr std::uint64_t thickness_salt = 0x7468'6963'6B00'0000ULL; // "thick"
 constexpr std::uint64_t deposit_salt = 0x6465'706F'7369'7400ULL;   // "deposit"
+constexpr std::uint64_t crust_salt = 0x6372'7573'7400'0000ULL;     // "crust"
 
 constexpr int octaves = 3;
 // Metres across a sedimentary province and the swells in layer thickness.
@@ -26,6 +27,19 @@ constexpr std::int64_t max_sediment = 600 * fixed_one;
 // the abyss (about 1,300 m deep), wandering up to `shelf_wander` either way.
 constexpr std::int64_t shelf_edge = -fixed_one / 20;
 constexpr std::int64_t shelf_wander = fixed_one / 50;
+
+// Earth's crust: thin under the ocean floor, thickening up the continental slope to its full
+// depth a little inland, with roots under mountains and islands, swelling by a tenth either way.
+constexpr std::int64_t ocean_crust = 7'000 * fixed_one;
+constexpr std::int64_t continent_crust = 35'000 * fixed_one;
+constexpr std::int64_t mountain_root = 25'000 * fixed_one;
+constexpr std::int64_t island_root = 5'000 * fixed_one;
+constexpr std::int64_t crust_slope_foot = -fixed_one * 3 / 20;
+constexpr std::int64_t crust_slope_width = fixed_one / 5;
+// Continent height an island is raised through from the ocean floor to the shore.
+constexpr std::int64_t island_rise = fixed_one * 3 / 20;
+constexpr std::int64_t crust_swell = fixed_one / 10;
+constexpr double crust_wavelength = 30'000.0;
 
 // The surface below which a seam sits.
 enum class Host : std::uint8_t {
@@ -105,6 +119,12 @@ constexpr std::int64_t gold_strength = fixed_one / 4;
     return (a * b) >> fixed_fraction_bits;
 }
 
+// 0 to 1 over `width`, easing in and out.
+[[nodiscard]] std::int64_t smooth_ramp(std::int64_t value, std::int64_t width) {
+    const std::int64_t t = ramp(value, width);
+    return multiply(multiply(t, t), (3 * fixed_one) - (2 * t));
+}
+
 // Noise in [-1, 1] mapped to [0, 1].
 [[nodiscard]] std::int64_t unit(std::int64_t noise) {
     return (noise + fixed_one) / 2;
@@ -149,6 +169,8 @@ std::string_view to_string(Rock rock) noexcept {
         return "granite";
     case Rock::Basalt:
         return "basalt";
+    case Rock::Peridotite:
+        return "peridotite";
     }
     return "unknown";
 }
@@ -188,7 +210,8 @@ Geology::Geology(const PlanetConfig& config)
     : climate_{config}, planet_radius_{config.radius},
       facies_seed_{hash_combine(config.seed, facies_salt)},
       thickness_seed_{hash_combine(config.seed, thickness_salt)},
-      deposit_seed_{hash_combine(config.seed, deposit_salt)} {}
+      deposit_seed_{hash_combine(config.seed, deposit_salt)},
+      crust_seed_{hash_combine(config.seed, crust_salt)} {}
 
 NoisePoint Geology::noise_at(CellId cell, double wavelength) const {
     return noise_point(cell_center(cell), planet_radius_ / wavelength);
@@ -205,6 +228,19 @@ Strata Geology::strata(CellId cell) const {
     return strata(cell, climate_.biome(cell));
 }
 
+std::int64_t Geology::crust_thickness(CellId cell) const {
+    const std::int64_t continent = terrain().continents().height(cell);
+    const std::int64_t island = terrain().height(cell) - continent;
+    const std::int64_t thickness =
+        ocean_crust +
+        multiply(continent_crust - ocean_crust,
+                 smooth_ramp(continent - crust_slope_foot, crust_slope_width)) +
+        multiply(mountain_root, terrain().mountain_strength(cell)) +
+        multiply(island_root, smooth_ramp(island, island_rise));
+    const std::int64_t swell = fbm(crust_seed_, noise_at(cell, crust_wavelength), octaves);
+    return thickness + multiply(thickness, multiply(crust_swell, swell));
+}
+
 Strata Geology::strata(CellId cell, Biome biome) const {
     const bool sea = biome == Biome::Ocean;
     if (sea && !continental(cell)) {
@@ -212,13 +248,14 @@ Strata Geology::strata(CellId cell, Biome biome) const {
                 .cover_thickness = ocean_sand,
                 .sediment = Rock::Shale,
                 .sediment_thickness = ocean_sediment,
-                .bedrock = Rock::Basalt};
+                .bedrock = Rock::Basalt,
+                .mantle_depth = crust_thickness(cell)};
     }
     const std::int64_t swell = fbm(thickness_seed_, noise_at(cell, thickness_wavelength), octaves);
     // Mountains wear their cover and sedimentary rock away down to the granite.
     const std::int64_t mountains = terrain().mountain_strength(cell);
     const std::int64_t exposure = multiply(fixed_one - mountains, fixed_one - mountains);
-    Strata strata{};
+    Strata strata{.mantle_depth = crust_thickness(cell)};
     switch (biome) {
     case Biome::Beach:
     case Biome::Desert:
