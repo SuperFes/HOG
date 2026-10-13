@@ -168,6 +168,22 @@ TEST_CASE("scaled rivers run the same courses, wider and deeper", "[planet][rive
     }
 }
 
+TEST_CASE("rivers can be found from a distance for drawing", "[planet][rivers]") {
+    const Reach& reach = rivers().reaches().front();
+    const hog::DVec3 middle = glm::normalize((reach.from + reach.to) * 0.5);
+    const hog::DVec3 side = glm::normalize(glm::cross(middle, reach.to - reach.from));
+    // Half a cell off the line, beyond any meander.
+    const double off = glm::length(reach.to - reach.from) * 0.9;
+    const CellId far = hog::planet::cell_at(glm::normalize(middle + (side * off)), 22);
+    CHECK(rivers().near(far, 1.0) == nullptr);
+    CHECK(rivers().near(far, off * radius * 2.0) != nullptr);
+    for (const CellId cell : across(reach)) {
+        if (rivers().channel(cell, plain(hog::planet::cell_center(cell)))) {
+            CHECK(rivers().near(cell, 0.0) != nullptr);
+        }
+    }
+}
+
 TEST_CASE("without rain there are no rivers", "[planet][rivers]") {
     const Landform dry = worn(0);
     const Rivers none{dry, ground(dry), {1, dry.grid()}, radius};

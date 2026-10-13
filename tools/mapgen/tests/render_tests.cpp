@@ -164,6 +164,44 @@ TEST_CASE("moisture colours run from brown to blue", "[mapgen]") {
     CHECK(middling[1] > middling[2]);
 }
 
+TEST_CASE("water maps show rivers over the water table, and the sea", "[mapgen]") {
+    const auto colour = [](std::int64_t table) {
+        return hog::mapgen::water_colour(100 * fixed_one, table * fixed_one, nullptr);
+    };
+    const hog::mapgen::Rgb surface = colour(0);
+    CHECK(surface[2] > surface[0]);
+    CHECK(colour(100)[0] > colour(100)[2]);
+    CHECK(colour(500) == colour(200));
+    CHECK(hog::mapgen::water_colour(-fixed_one, 0, nullptr) ==
+          hog::mapgen::height_colour(-fixed_one));
+    hog::planet::Reach narrow;
+    narrow.width = 2.0;
+    hog::planet::Reach wide;
+    wide.width = 40.0;
+    const auto creek = hog::mapgen::water_colour(100 * fixed_one, 0, &narrow);
+    const auto river = hog::mapgen::water_colour(100 * fixed_one, 0, &wide);
+    CHECK(creek[2] > creek[0]);
+    CHECK(river[2] > river[0]);
+    CHECK(river[1] < creek[1]);
+    CHECK(creek != surface);
+}
+
+TEST_CASE("water maps draw rivers wherever they run", "[mapgen]") {
+    const hog::planet::PlanetConfig planet{.seed = 1, .ocean_fraction = 0.7, .radius = radius};
+    const hog::planet::Geology geology{planet};
+    hog::jobs::JobSystem jobs{2};
+    const auto image =
+        hog::mapgen::render(geology, radius, View{PlanetView{}}, Layer::Water, 512, jobs);
+    int river = 0;
+    for (int y = 0; y < image.height; ++y) {
+        for (int x = 0; x < image.width; ++x) {
+            const auto pixel = image.at(x, y);
+            river += pixel[2] > 180 && pixel[0] < 100 ? 1 : 0;
+        }
+    }
+    CHECK(river > 100);
+}
+
 TEST_CASE("deposit maps show the rarest deposit over grey land", "[mapgen]") {
     using hog::planet::Resource;
     std::array<hog::planet::Deposit, hog::planet::resource_count> deposits{};

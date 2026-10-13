@@ -53,6 +53,12 @@ void each_layer(const LayerSources& sources, Use use) {
             return static_cast<float>(sources.planet.state(grid.cell(cell)).biome);
         });
     });
+    use("planet/water_table", "m", [&](std::vector<float>& values) {
+        const planet::Climate& climate = sources.planet.geology().climate();
+        per_cell(values, [&](std::uint32_t cell) {
+            return planet::fixed_to_double(climate.water_table(grid.cell(cell)));
+        });
+    });
 
     const sim::WeatherFields& weather = sources.weather.fields();
     use("weather/temperature", "°C", [&](auto& values) { copy(weather.temperature, values); });

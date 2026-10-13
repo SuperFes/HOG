@@ -103,8 +103,11 @@ probe::Column ground_column(const planet::Geology& geology, double planet_radius
         return static_cast<float>(planet::fixed_to_double(fixed));
     };
     const planet::Strata strata = geology.strata(cell);
+    const auto river = geology.terrain().river(cell);
     probe::Column column{.elevation = metres(geology.terrain().elevation(cell)),
                          .biome = std::to_underlying(geology.climate().biome(cell)),
+                         .water_table = metres(geology.climate().water_table(cell)),
+                         .river = river ? metres(river->surface - river->bed) : 0.0F,
                          .continental = geology.continental(cell),
                          .cover = std::to_underlying(strata.cover),
                          .cover_thickness = metres(strata.cover_thickness),

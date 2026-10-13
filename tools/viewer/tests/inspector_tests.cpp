@@ -74,6 +74,8 @@ TEST_CASE("readings are grouped as the server offers its layers", "[viewer][insp
 TEST_CASE("the ground reads from the surface down", "[viewer][inspector]") {
     const hog::probe::Column column{.elevation = 240.5F,
                                     .biome = 5,
+                                    .water_table = 12.25F,
+                                    .river = 0.75F,
                                     .continental = true,
                                     .cover = 0,
                                     .cover_thickness = 1.5F,
@@ -85,6 +87,8 @@ TEST_CASE("the ground reads from the surface down", "[viewer][inspector]") {
     const std::vector<Reading> expected{
         {.name = "elevation", .value = "240.5 m"},
         {.name = "biome", .value = "temperate forest"},
+        {.name = "water table", .value = "12.25 m down"},
+        {.name = "river", .value = "0.75 m deep"},
         {.name = "crust", .value = "continental"},
         {.name = "cover", .value = "soil, 0 m to 1.5 m"},
         {.name = "sediment", .value = "shale, 1.5 m to 411.5 m"},
@@ -97,6 +101,8 @@ TEST_CASE("the ground reads from the surface down", "[viewer][inspector]") {
     // Layers with no thickness are left out.
     const hog::probe::Column bare{.elevation = -3'000.0F,
                                   .biome = 0,
+                                  .water_table = 0.0F,
+                                  .river = 0.0F,
                                   .continental = false,
                                   .cover = 0,
                                   .cover_thickness = 0.0F,

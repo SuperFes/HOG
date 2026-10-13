@@ -59,6 +59,10 @@ public:
     // The channel through a cell's centre, or nothing out of the water.
     [[nodiscard]] std::optional<Channel> channel(CellId cell, std::int64_t ground) const;
 
+    // The widest reach whose water comes within `margin` metres of a cell's centre, or none: for
+    // drawing rivers narrower than what they're drawn on.
+    [[nodiscard]] const Reach* near(CellId cell, double margin) const;
+
     // Metres across and deep for a river draining `area` square metres of rain-weighted ground,
     // as on Earth.
     [[nodiscard]] static double width(double area);

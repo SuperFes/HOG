@@ -162,6 +162,12 @@ TEST_CASE("inspected ground is the generated ground about a metre across", "[ser
         CHECK(column.elevation ==
               static_cast<float>(planet::fixed_to_double(geology().terrain().elevation(cell))));
         CHECK(column.biome == std::to_underlying(geology().climate().biome(cell)));
+        CHECK(column.water_table ==
+              static_cast<float>(planet::fixed_to_double(geology().climate().water_table(cell))));
+        const auto river = geology().terrain().river(cell);
+        CHECK(column.river ==
+              (river ? static_cast<float>(planet::fixed_to_double(river->surface - river->bed))
+                     : 0.0F));
         CHECK(column.continental == geology().continental(cell));
         CHECK(column.cover == std::to_underlying(strata.cover));
         CHECK(column.sediment == std::to_underlying(strata.sediment));

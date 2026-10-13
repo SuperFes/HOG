@@ -46,6 +46,21 @@ constexpr std::array moisture_stops{
     ColourStop{.at = 1.0, .colour = {30, 80, 190}},
 };
 
+// Metres down to the water table.
+constexpr std::array water_table_stops{
+    ColourStop{.at = 0.0, .colour = {50, 150, 150}},
+    ColourStop{.at = 2.0, .colour = {100, 170, 90}},
+    ColourStop{.at = 10.0, .colour = {190, 185, 110}},
+    ColourStop{.at = 50.0, .colour = {160, 115, 70}},
+    ColourStop{.at = 200.0, .colour = {100, 70, 50}},
+};
+
+// River width in metres.
+constexpr std::array river_stops{
+    ColourStop{.at = 0.0, .colour = {90, 160, 230}},
+    ColourStop{.at = 50.0, .colour = {20, 70, 200}},
+};
+
 // Indexed by biome.
 constexpr std::array<Rgb, planet::biome_count> biome_colours{{
     {20, 50, 110},   // ocean
@@ -158,6 +173,17 @@ Rgb moisture_colour(std::int64_t moisture) noexcept {
     return ramp(moisture_stops, planet::fixed_to_double(moisture));
 }
 
+Rgb water_colour(std::int64_t elevation, std::int64_t water_table,
+                 const planet::Reach* river) noexcept {
+    if (elevation <= 0) {
+        return height_colour(elevation);
+    }
+    if (river != nullptr) {
+        return ramp(river_stops, river->width);
+    }
+    return ramp(water_table_stops, planet::fixed_to_double(water_table));
+}
+
 Rgb rock_colour(planet::Rock rock) noexcept {
     return rock_colours.at(static_cast<std::size_t>(rock));
 }
@@ -189,7 +215,13 @@ Image render(const planet::Geology& geology, double planet_radius, const View& v
                 .height = size.height,
                 .pixels = std::vector<std::uint8_t>(3 * static_cast<std::size_t>(size.width) *
                                                     static_cast<std::size_t>(size.height))};
-    const auto colour_at = [&](planet::CellId cell) -> Rgb {
+    // Half a pixel, in metres, at a pixel's centre.
+    const auto margin = [&](DVec3 at, int x, int y) {
+        const int other = y + 1 < size.height ? y + 1 : y - 1;
+        return 0.5 * glm::length(at - pixel_direction(resolved, size, x, other, planet_radius)) *
+               planet_radius;
+    };
+    const auto colour_at = [&](planet::CellId cell, DVec3 at, int x, int y) -> Rgb {
         switch (layer) {
         case Layer::Height:
             return height_colour(geology.terrain().elevation(cell));
@@ -201,6 +233,10 @@ Image render(const planet::Geology& geology, double planet_radius, const View& v
             return moisture_colour(geology.climate().moisture(cell));
         case Layer::Deposits:
             return deposit_colour(geology.deposits(cell), geology.terrain().elevation(cell));
+        case Layer::Water:
+            return water_colour(geology.terrain().elevation(cell),
+                                geology.climate().water_table(cell),
+                                geology.terrain().rivers().near(cell, margin(at, x, y)));
         }
         return {};
     };
@@ -210,8 +246,8 @@ Image render(const planet::Geology& geology, double planet_radius, const View& v
             for (std::uint32_t row = rows.begin; row < rows.end; ++row) {
                 const auto y = static_cast<int>(row);
                 for (int x = 0; x < size.width; ++x) {
-                    const Rgb colour = colour_at(
-                        planet::cell_at(pixel_direction(resolved, size, x, y, planet_radius)));
+                    const DVec3 at = pixel_direction(resolved, size, x, y, planet_radius);
+                    const Rgb colour = colour_at(planet::cell_at(at), at, x, y);
                     const auto offset =
                         3 * ((static_cast<std::size_t>(y) * static_cast<std::size_t>(size.width)) +
                              static_cast<std::size_t>(x));

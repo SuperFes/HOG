@@ -325,6 +325,7 @@ TEST_CASE("the world's layers are laid out for debug tools", "[app][server]") {
         return std::ranges::find(catalogue, name, &hog::probe::LayerInfo::name) != catalogue.end();
     };
     CHECK(named("planet/biome"));
+    CHECK(named("planet/water_table"));
     CHECK(named("weather/temperature"));
     CHECK(named("weather/wind_north"));
     CHECK(named("forest/biomass"));

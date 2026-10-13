@@ -174,6 +174,8 @@ void write_single(ByteWriter& out, float value) {
 void write_column(ByteWriter& out, const Column& column) {
     write_single(out, column.elevation);
     out.write(column.biome);
+    write_single(out, column.water_table);
+    write_single(out, column.river);
     write_flag(out, column.continental);
     out.write(column.cover);
     write_single(out, column.cover_thickness);
@@ -353,6 +355,8 @@ Column read_column(ValueReader& in) {
     Column column;
     column.elevation = in.single();
     column.biome = in.integer<std::uint8_t>();
+    column.water_table = in.single();
+    column.river = in.single();
     column.continental = read_flag(in);
     column.cover = in.integer<std::uint8_t>();
     column.cover_thickness = in.single();

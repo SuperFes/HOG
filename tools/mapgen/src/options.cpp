@@ -257,6 +257,8 @@ std::string_view to_string(Layer layer) noexcept {
         return "moisture";
     case Layer::Deposits:
         return "deposits";
+    case Layer::Water:
+        return "water";
     }
     return "unknown";
 }
@@ -272,8 +274,8 @@ Writes PNG maps of a generated planet, one per layer, named <view>-<layer>.png.
   --face F             one cube face, 0 to 5
   --region LAT,LON,KM  a square KM across, centred on LAT,LON in degrees
   --islands KM         a square KM across, centred on the starting islands
-  --layer NAME         height, biome, temperature, moisture or deposits; repeat for
-                       several (default: all)
+  --layer NAME         height, biome, temperature, moisture, deposits or water;
+                       repeat for several (default: all)
   --size PIXELS        image width (default 1024); the planet view is half as tall
   --out DIR            output directory (default maps)
   --weather DAYS       instead of the layers, follows the weather for DAYS days and

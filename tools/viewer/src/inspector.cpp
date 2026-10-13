@@ -76,8 +76,16 @@ std::vector<Reading> column_readings(const probe::Column& column) {
     std::vector<Reading> lines{
         {.name = "elevation", .value = metres(column.elevation)},
         {.name = "biome", .value = named<planet::Biome>(column.biome, planet::biome_count)},
-        {.name = "crust", .value = column.continental ? "continental" : "oceanic"},
     };
+    // Under the sea the water table is the sea.
+    if (column.elevation > 0.0F) {
+        lines.push_back(
+            {.name = "water table", .value = std::format("{} down", metres(column.water_table))});
+    }
+    if (column.river > 0.0F) {
+        lines.push_back({.name = "river", .value = std::format("{} deep", metres(column.river))});
+    }
+    lines.push_back({.name = "crust", .value = column.continental ? "continental" : "oceanic"});
     float depth = 0.0F;
     const auto layer = [&](std::string_view name, std::uint8_t rock, float thickness) {
         if (thickness > 0.0F) {

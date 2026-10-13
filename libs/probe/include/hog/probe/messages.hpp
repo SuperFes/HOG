@@ -15,7 +15,7 @@
 // u32 payload length, a u8 kind, then the payload, little-endian throughout.
 namespace hog::probe {
 
-inline constexpr std::uint16_t protocol_version = 4;
+inline constexpr std::uint16_t protocol_version = 5;
 // Large enough for every layer of a level 7 grid; anything bigger is a broken or hostile peer.
 inline constexpr std::uint32_t max_payload = 64U << 20U;
 
@@ -161,6 +161,8 @@ struct Seam {
 struct Column {
     float elevation = 0.0F;       // metres above sea level
     std::uint8_t biome = 0;       // planet::Biome
+    float water_table = 0.0F;     // metres down to it
+    float river = 0.0F;           // metres of river water over the ground, if any
     bool continental = false;     // crust, rather than ocean floor
     std::uint8_t cover = 0;       // planet::Rock, from the surface
     float cover_thickness = 0.0F; // metres

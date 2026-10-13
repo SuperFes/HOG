@@ -160,4 +160,15 @@ std::optional<Channel> Rivers::channel(CellId cell, std::int64_t ground) const {
     return Channel{.bed = cut(cell, ground), .surface = *surface};
 }
 
+const Reach* Rivers::near(CellId cell, double margin) const {
+    const Reach* widest = nullptr;
+    each_reach(cell, [&](const Reach& reach, std::int64_t /*level*/, double away) {
+        if (away < (reach.width / 2.0) + margin &&
+            (widest == nullptr || reach.width > widest->width)) {
+            widest = &reach;
+        }
+    });
+    return widest;
+}
+
 } // namespace hog::planet

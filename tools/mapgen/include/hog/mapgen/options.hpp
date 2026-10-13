@@ -19,9 +19,10 @@ enum class Layer : std::uint8_t {
     Temperature,
     Moisture,
     Deposits,
+    Water,
 };
 
-inline constexpr int layer_count = static_cast<int>(Layer::Deposits) + 1;
+inline constexpr int layer_count = static_cast<int>(Layer::Water) + 1;
 
 [[nodiscard]] std::string_view to_string(Layer layer) noexcept;
 
