@@ -346,6 +346,41 @@ TEST_CASE("the water overlay shows how far down the water table is", "[viewer][o
     CHECK(legend.value_or(viewer::Legend{}).high == 3.0);
 }
 
+TEST_CASE("the water table rises and falls with the land's water", "[viewer][overlay]") {
+    Planet planet = land();
+    planet.set("planet/biome", static_cast<float>(planet::Biome::Grassland));
+    planet.set("planet/water_table", 3.0F);
+    planet.set("land/water_table_rise", 1.0F);
+    CHECK(all(planet.render(Overlay::Water), mapgen::water_table_colour(fixed(2.0))));
+    // Risen to the surface, and no further.
+    planet.set("land/water_table_rise", 5.0F);
+    CHECK(all(planet.render(Overlay::Water), mapgen::water_table_colour(0)));
+    planet.set("land/water_table_rise", -2.0F);
+    CHECK(all(planet.render(Overlay::Water), mapgen::water_table_colour(fixed(5.0))));
+}
+
+TEST_CASE("the soil overlay shows how wet the ground is, white under snow", "[viewer][overlay]") {
+    Planet planet = land();
+    planet.set("land/soil", 0.6F);
+    CHECK(all(planet.render(Overlay::Soil), viewer::missing_colour));
+    planet.set("land/snow", 0.0F);
+    const Rgb damp = mapgen::moisture_colour(fixed(0.6));
+    CHECK(all(planet.render(Overlay::Soil), damp));
+    planet.set("land/snow", 20.0F);
+    CHECK(all(planet.render(Overlay::Soil), viewer::snow_colour(damp, 20.0)));
+
+    CHECK(viewer::snow_colour(damp, 0.0) == damp);
+    const Rgb deep = viewer::snow_colour(damp, 1e6);
+    CHECK(deep[0] > 240);
+    CHECK(deep[2] > 245);
+    const Rgb light = viewer::snow_colour(damp, 5.0);
+    CHECK(light[0] > damp[0]);
+    CHECK(light[0] < deep[0]);
+
+    const auto legend = viewer::legend_for(Overlay::Soil, planet.frame(), "");
+    CHECK(legend.value_or(viewer::Legend{}).layer == "land/soil");
+}
+
 TEST_CASE("minerals show the rock or rarest deposit at the surveyed depth", "[viewer][overlay]") {
     const Planet planet = land();
     CHECK(all(planet.render(Overlay::Minerals), viewer::missing_colour));
@@ -491,6 +526,8 @@ TEST_CASE("each overlay asks for the layers it draws", "[viewer][overlay]") {
     CHECK(has(viewer::layers_for(Overlay::Sky, ""), "weather/storm"));
     CHECK(has(viewer::layers_for(Overlay::Fire, ""), "forest/fire"));
     CHECK(has(viewer::layers_for(Overlay::Water, ""), "planet/water_table"));
+    CHECK(has(viewer::layers_for(Overlay::Water, ""), "land/water_table_rise"));
+    CHECK(has(viewer::layers_for(Overlay::Soil, ""), "land/snow"));
     CHECK(has(viewer::layers_for(Overlay::Terrain, ""), "planet/biome"));
     CHECK(has(viewer::layers_for(Overlay::Sea, ""), "ocean/temperature"));
     CHECK(has(viewer::layers_for(Overlay::Sea, ""), "ocean/current_north"));

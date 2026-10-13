@@ -97,6 +97,17 @@ void each_layer(const LayerSources& sources, Use use) {
     use("ocean/current_east", "m/s", [&](auto& values) { component(ocean.current, 0, values); });
     use("ocean/current_north", "m/s", [&](auto& values) { component(ocean.current, 1, values); });
 
+    const sim::Land& land = sources.weather.land();
+    use("land/snow", "mm", [&](auto& values) { copy(land.fields().snow, values); });
+    use("land/soil", "", [&](auto& values) { copy(land.fields().soil, values); });
+    use("land/water_table_rise", "m", [&](std::vector<float>& values) {
+        per_cell(values, [&](std::uint32_t cell) { return land.water_table_rise(cell); });
+    });
+    use("land/flow", "m³/s", [&](auto& values) { copy(land.fields().flow, values); });
+    use("land/flow_ratio", "", [&](std::vector<float>& values) {
+        per_cell(values, [&](std::uint32_t cell) { return land.flow_ratio(cell); });
+    });
+
     if (const sim::Wildlife* wildlife = sources.wildlife) {
         const sim::WildlifeFields& fields = wildlife->fields();
         use("wildlife/forage", "kg/km²", [&](auto& values) { copy(fields.forage, values); });

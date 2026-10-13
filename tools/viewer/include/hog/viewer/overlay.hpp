@@ -27,7 +27,7 @@ enum class Overlay : std::uint8_t {
     Sky,         // cloud, rain, snow, hail and storms over the ground
     Pressure,    // at sea level
     Sea,         // its surface temperature, with arrows along the currents
-    Dryness,     // of the ground
+    Soil,        // how wet it is, white under snow
     Plants,      // biomass as a share of what the ground holds
     Fire,        // plants, with what's burning
     Wildlife,    // one species, by density
@@ -36,7 +36,7 @@ enum class Overlay : std::uint8_t {
 inline constexpr std::array overlays{
     Overlay::Terrain,     Overlay::Biome,  Overlay::Water, Overlay::Minerals, Overlay::Heat,
     Overlay::Temperature, Overlay::Air,    Overlay::Sky,   Overlay::Pressure, Overlay::Sea,
-    Overlay::Dryness,     Overlay::Plants, Overlay::Fire,  Overlay::Wildlife,
+    Overlay::Soil,        Overlay::Plants, Overlay::Fire,  Overlay::Wildlife,
 };
 
 // Whether an overlay shows what lies underground, which needs the ground surveyed at a depth.
@@ -87,5 +87,8 @@ inline constexpr mapgen::Rgb arrow_colour{15, 25, 45};
 
 // Plants burning, brighter as the fire is stronger, from 0 to 1.
 [[nodiscard]] mapgen::Rgb fire_colour(mapgen::Rgb plants, double fire) noexcept;
+
+// The ground under mm of snow, whiter as more of it is hidden.
+[[nodiscard]] mapgen::Rgb snow_colour(mapgen::Rgb ground, double snow) noexcept;
 
 } // namespace hog::viewer

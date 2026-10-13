@@ -332,6 +332,8 @@ TEST_CASE("the world's layers are laid out for debug tools", "[app][server]") {
     CHECK(named("weather/wind_north"));
     CHECK(named("ocean/temperature"));
     CHECK(named("ocean/current_north"));
+    CHECK(named("land/snow"));
+    CHECK(named("land/flow_ratio"));
     CHECK(named("forest/biomass"));
     CHECK_FALSE(named("wildlife/forage"));
 

@@ -38,6 +38,7 @@ constexpr std::array plant_stops{
 
 constexpr Rgb ocean_blue{40, 90, 150};
 constexpr Rgb burning{255, 80, 10};
+constexpr Rgb snow_white{245, 248, 252};
 // Shallow sea, which the elevation layer doesn't distinguish from deep.
 constexpr double ocean_depth = -200.0;
 
@@ -162,16 +163,19 @@ public:
         return under;
     }
 
-    // Metres down to the water table, where surveyed or else smoothed between cells, if known.
+    // Metres down to the water table, where surveyed or else smoothed between cells, if known,
+    // risen or fallen with the seasons where the land's water is known.
     [[nodiscard]] std::optional<double> water_table(const Spot& spot) const {
+        const std::span<const float> rise = layer("land/water_table_rise");
+        const double risen = rise.empty() ? 0.0 : smooth(rise, spot);
         if (spot.sample) {
-            return static_cast<double>(ground_->water_table[*spot.sample]);
+            return std::max(static_cast<double>(ground_->water_table[*spot.sample]) - risen, 0.0);
         }
         const std::span<const float> depth = layer("planet/water_table");
         if (depth.empty()) {
             return std::nullopt;
         }
-        return smooth(depth, spot);
+        return std::max(smooth(depth, spot) - risen, 0.0);
     }
 
     // An open cave, else the rarest deposit, else the rock, at the surveyed depth; none where that
@@ -398,15 +402,19 @@ Rgb colour_at(const Sampler& sampler, Overlay overlay, std::span<const float> sp
         return weather_at(sampler, overlay, spot);
     case Overlay::Sea:
         return sea_at(sampler, spot);
-    case Overlay::Dryness: {
-        const std::span<const float> dryness = sampler.layer("forest/dryness");
-        if (dryness.empty()) {
+    case Overlay::Soil: {
+        const std::span<const float> soil = sampler.layer("land/soil");
+        const std::span<const float> snow = sampler.layer("land/snow");
+        if (soil.empty() || snow.empty()) {
             return missing_colour;
         }
         if (sampler.ocean(spot)) {
             return ocean_blue;
         }
-        return mapgen::moisture_colour(fixed(1.0 - sampler.smooth(dryness, spot)));
+        return sampler.with_water(
+            snow_colour(mapgen::moisture_colour(fixed(sampler.smooth(soil, spot))),
+                        sampler.smooth(snow, spot)),
+            spot);
     }
     case Overlay::Plants:
         return plants_at(sampler, spot);
@@ -463,8 +471,8 @@ std::string_view to_string(Overlay overlay) noexcept {
         return "pressure";
     case Overlay::Sea:
         return "sea";
-    case Overlay::Dryness:
-        return "dryness";
+    case Overlay::Soil:
+        return "soil";
     case Overlay::Plants:
         return "plants";
     case Overlay::Fire:
@@ -486,7 +494,7 @@ std::vector<std::string> layers_for(Overlay overlay, std::string_view species) {
         add({"planet/biome"});
         break;
     case Overlay::Water:
-        add({"planet/biome", "planet/water_table"});
+        add({"planet/biome", "planet/water_table", "land/water_table_rise"});
         break;
     case Overlay::Minerals:
     case Overlay::Heat:
@@ -506,8 +514,8 @@ std::vector<std::string> layers_for(Overlay overlay, std::string_view species) {
     case Overlay::Sea:
         add({"planet/biome", "ocean/temperature", "ocean/current_east", "ocean/current_north"});
         break;
-    case Overlay::Dryness:
-        add({"forest/dryness"});
+    case Overlay::Soil:
+        add({"planet/biome", "land/soil", "land/snow"});
         break;
     case Overlay::Plants:
         add({"forest/biomass", "forest/capacity"});
@@ -549,8 +557,8 @@ std::optional<Legend> legend_for(Overlay overlay, const Frame& frame, std::strin
     case Overlay::Sea:
         layer = "ocean/temperature";
         break;
-    case Overlay::Dryness:
-        layer = "forest/dryness";
+    case Overlay::Soil:
+        layer = "land/soil";
         break;
     case Overlay::Plants:
         layer = "forest/biomass";
@@ -600,6 +608,13 @@ Rgb pressure_colour(double pressure) noexcept {
 
 Rgb plant_colour(double share) noexcept {
     return mapgen::ramp(plant_stops, share);
+}
+
+Rgb snow_colour(Rgb ground, double snow) noexcept {
+    if (!(snow > 0.0)) {
+        return ground;
+    }
+    return mapgen::mix(ground, snow_white, snow / (snow + sim::LandTuning{}.covering_snow));
 }
 
 Rgb fire_colour(Rgb plants, double fire) noexcept {
