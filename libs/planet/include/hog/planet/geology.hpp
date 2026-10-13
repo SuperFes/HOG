@@ -116,6 +116,8 @@ public:
     explicit Geology(const PlanetConfig& config);
 
     [[nodiscard]] const Climate& climate() const noexcept { return climate_; }
+    [[nodiscard]] std::uint64_t seed() const noexcept { return seed_; }
+    [[nodiscard]] double planet_radius() const noexcept { return planet_radius_; }
     [[nodiscard]] const Elevation& terrain() const noexcept { return climate_.terrain(); }
 
     // Whether continental crust lies under the cell. It reaches out under the sea as a shelf,
@@ -147,6 +149,7 @@ private:
     [[nodiscard]] NoisePoint noise_at(CellId cell, double wavelength) const;
 
     Climate climate_;
+    std::uint64_t seed_;
     double planet_radius_;
     std::uint64_t facies_seed_;
     std::uint64_t thickness_seed_;

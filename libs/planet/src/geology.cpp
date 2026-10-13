@@ -247,7 +247,7 @@ std::string_view to_string(Resource resource) noexcept {
 }
 
 Geology::Geology(const PlanetConfig& config)
-    : climate_{config}, planet_radius_{config.radius},
+    : climate_{config}, seed_{config.seed}, planet_radius_{config.radius},
       facies_seed_{hash_combine(config.seed, facies_salt)},
       thickness_seed_{hash_combine(config.seed, thickness_salt)},
       deposit_seed_{hash_combine(config.seed, deposit_salt)},
