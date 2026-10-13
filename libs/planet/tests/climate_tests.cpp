@@ -329,12 +329,11 @@ TEST_CASE("ground under a lake is lake", "[planet][climate]") {
     const Climate climate{planet(1)};
     int lakes = 0;
     for (const CellId cell : cells_at(9)) {
-        const bool lake = climate.terrain().lake(cell).has_value();
-        REQUIRE((climate.biome(cell) == Biome::Lake) == lake);
-        if (lake) {
+        const auto water = climate.terrain().lake(cell);
+        REQUIRE((climate.biome(cell) == Biome::Lake) == water.has_value());
+        if (water) {
             ++lakes;
-            const auto water = *climate.terrain().lake(cell);
-            REQUIRE(water.bed < water.surface);
+            REQUIRE(water->bed < water->surface);
             REQUIRE(climate.water_table(cell) == 0);
         }
     }

@@ -223,19 +223,20 @@ TEST_CASE("a basin with water enough holds a level lake, drained by a river from
     const CellId middle = hog::planet::cell_at(bowl_center, 22);
     const auto lake = wet.lake(middle, std::numeric_limits<std::int64_t>::min() / 2);
     REQUIRE(lake);
+    const std::int64_t surface = lake.value_or(0);
     for (const double out : {0.05, 0.1}) {
         const CellId cell =
             hog::planet::cell_at(glm::normalize(bowl_center + hog::DVec3{0.0, out, 0.0}), 22);
         CHECK(wet.lake(cell, std::numeric_limits<std::int64_t>::min() / 2) == lake);
     }
     // Ground above the lake is dry.
-    CHECK_FALSE(wet.lake(middle, *lake + fixed_one));
+    CHECK_FALSE(wet.lake(middle, surface + fixed_one));
 
     int inside = 0;
     int out_of = 0;
     for (const Reach& reach : wet.reaches()) {
         inside += in_bowl(reach.from, 0.1) && in_bowl(reach.to, 0.1) ? 1 : 0;
-        out_of += in_bowl(reach.from, 0.3) && reach.from_surface <= *lake ? 1 : 0;
+        out_of += in_bowl(reach.from, 0.3) && reach.from_surface <= surface ? 1 : 0;
     }
     CHECK(inside == 0);
     CHECK(out_of > 0);
