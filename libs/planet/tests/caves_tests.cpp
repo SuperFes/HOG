@@ -11,6 +11,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <set>
 #include <string_view>
@@ -111,7 +112,9 @@ TEST_CASE("karst runs through wet limestone near the water table", "[planet][cav
                 CHECK(passage.to_radius >= 5.0);
                 continue;
             }
-            REQUIRE(passage.cave == Cave::Karst);
+            if (passage.cave != Cave::Karst) {
+                continue;
+            }
             ++passages;
             walkable += passage.from_radius >= hog::planet::walk_clearance ? 1 : 0;
             squeezes += passage.from_radius < hog::planet::crawl_clearance ? 1 : 0;
@@ -179,6 +182,74 @@ TEST_CASE("caves are found where their passages run", "[planet][caves]") {
             CHECK(hit->clearance >= hog::planet::walk_clearance);
             // Deep in the bedrock below, there is nothing.
             CHECK_FALSE(caves.cave_at(at.cell, at.depth + (1'000 * fixed_one)));
+            ++found;
+        }
+    }
+    CHECK(found > 10);
+}
+
+TEST_CASE("lava tubes run downhill from each vent, a few metres down", "[planet][caves]") {
+    const std::uint64_t seed = GENERATE(1U, 2U);
+    const Caves caves{geology(seed)};
+    const auto chambers = caves.geology().chambers();
+    std::vector<int> per_chamber(chambers.size(), 0);
+    int to_the_sea = 0;
+    int pinched = 0;
+    int stretches = 0;
+    for (const auto& tube : caves.lava_tubes()) {
+        REQUIRE(tube.chamber < chambers.size());
+        ++per_chamber[tube.chamber];
+        REQUIRE_FALSE(tube.passages.empty());
+        // From the vent.
+        const DVec3 start = glm::normalize(tube.passages.front().from);
+        CHECK(glm::length(start - chambers[tube.chamber].center) < 1e-9);
+        std::int64_t last = std::numeric_limits<std::int64_t>::max();
+        for (const Passage& passage : tube.passages) {
+            CHECK(passage.cave == Cave::LavaTube);
+            const Spot at = spot_at(caves, passage.from);
+            CHECK(at.depth >= (3 * fixed_one) - (fixed_one / 2));
+            CHECK(at.depth <= (15 * fixed_one) + (fixed_one / 2));
+            const std::int64_t ground = caves.geology().terrain().elevation(at.cell);
+            CHECK(ground - (fixed_one / 2) <= last);
+            last = ground;
+            CHECK(glm::length(passage.from - tube.middle) <= tube.reach);
+            CHECK(glm::length(passage.to - tube.middle) <= tube.reach);
+            pinched += passage.from_radius < hog::planet::crawl_clearance ? 1 : 0;
+            ++stretches;
+        }
+        // Closing off at the far end.
+        CHECK(tube.passages.back().to_radius < hog::planet::crawl_clearance);
+        const Spot end = spot_at(caves, tube.passages.back().to);
+        to_the_sea += caves.geology().terrain().elevation(end.cell) <= 0 ? 1 : 0;
+    }
+    for (const int count : per_chamber) {
+        CHECK(count >= 1);
+        CHECK(count <= 4);
+    }
+    INFO(to_the_sea << " of " << caves.lava_tubes().size() << " reach the sea");
+    CHECK(to_the_sea * 2 >= static_cast<int>(caves.lava_tubes().size()));
+    CHECK(pinched > 0);
+    CHECK(pinched * 3 < stretches);
+}
+
+TEST_CASE("lava tubes are found in the basalt they run through", "[planet][caves]") {
+    const Caves caves{geology(1)};
+    Caves::Lookup lookup{caves};
+    int found = 0;
+    for (const auto& tube : caves.lava_tubes()) {
+        for (const Passage& passage : tube.passages) {
+            if (passage.from_radius < 2.0) {
+                continue;
+            }
+            const Spot at = spot_at(caves, passage.from);
+            if (caves.geology().strata(at.cell).rock_at(at.depth) != Rock::Basalt) {
+                continue;
+            }
+            const auto hit = lookup.cave_at(at.cell, at.depth);
+            REQUIRE(hit);
+            CHECK(hit->cave == Cave::LavaTube);
+            CHECK(hit->clearance >= hog::planet::walk_clearance);
+            CHECK_FALSE(lookup.cave_at(at.cell, at.depth + (50 * fixed_one)));
             ++found;
         }
     }

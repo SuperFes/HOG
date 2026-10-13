@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -46,6 +47,14 @@ struct CaveHit {
     friend bool operator==(const CaveHit&, const CaveHit&) = default;
 };
 
+// A lava tube from a magma chamber's vent down towards the sea, and a ball around all of it.
+struct LavaTube {
+    std::size_t chamber = 0; // in Geology::chambers()
+    std::vector<Passage> passages;
+    DVec3 middle{};
+    double reach = 0.0; // metres from the middle that the tube stays within
+};
+
 // The passage's radius at a point, if the point lies inside it.
 [[nodiscard]] std::optional<double> clearance_at(const Passage& passage, DVec3 point) noexcept;
 
@@ -65,6 +74,8 @@ public:
 
     // The point at a fixed-point depth in metres below a cell's surface.
     [[nodiscard]] DVec3 point_at(CellId cell, std::int64_t depth) const;
+
+    [[nodiscard]] std::span<const LavaTube> lava_tubes() const noexcept { return lava_tubes_; }
 
     // The level of the cells karst passages run between.
     [[nodiscard]] int karst_level() const noexcept { return karst_level_; }
@@ -94,11 +105,14 @@ public:
     };
 
 private:
+    [[nodiscard]] LavaTube lava_tube(DVec3 vent, std::uint64_t seed) const;
+
     const Geology* geology_;
     double planet_radius_;
     int karst_level_;
     int point_level_;
     std::uint64_t karst_seed_;
+    std::vector<LavaTube> lava_tubes_;
 };
 
 } // namespace hog::planet

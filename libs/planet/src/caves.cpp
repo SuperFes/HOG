@@ -12,6 +12,7 @@ namespace hog::planet {
 namespace {
 
 constexpr std::uint64_t karst_salt = 0x6B61'7273'7400'0000ULL; // "karst"
+constexpr std::uint64_t lava_salt = 0x6C61'7661'0000'0000ULL;  // "lava"
 
 // Metres between karst junctions, and across the cells whose ground a passage's ends are set in.
 constexpr double karst_spacing = 400.0;
@@ -37,6 +38,28 @@ constexpr std::uint64_t sinkhole_percent = 15;
 constexpr double narrowest_sinkhole = 5.0;
 constexpr double widest_sinkhole = 15.0;
 constexpr std::int64_t sinkhole_lip = 2 * fixed_one;
+
+// Each vent feeds a few tubes, each running downhill in steps until it reaches the sea or the
+// ground stops falling, a few metres under the surface. Most are roomy, now and then pinched
+// almost shut, and they close off at their far ends.
+constexpr std::uint64_t fewest_tubes = 2;
+constexpr std::uint64_t most_tubes = 4;
+constexpr double lava_step = 100.0;
+constexpr int longest_tube = 60;
+// How far to either side a tube looks for the way down, against one step ahead, and up to how
+// many metres of rise it shrugs off in choosing, so tubes from one vent part ways.
+constexpr double lava_turn = 0.8;
+constexpr std::int64_t lava_wobble = 3 * fixed_one;
+constexpr std::int64_t shallowest_tube = 3;
+constexpr std::int64_t deepest_tube = 15;
+constexpr double narrowest_tube = 1.0;
+constexpr double widest_tube = 6.0;
+constexpr std::uint64_t pinch_percent = 15;
+constexpr double narrowest_pinch = 0.2;
+constexpr double widest_pinch = 0.5;
+constexpr double tube_end = 0.3;
+// Lava tubes lie no deeper than this, which spares deeper queries the search.
+constexpr std::int64_t below_tubes = 40 * fixed_one;
 
 // A hash mapped to [0, 1).
 [[nodiscard]] double fraction(std::uint64_t hash) {
@@ -86,7 +109,98 @@ Caves::Caves(const Geology& geology)
     : geology_{&geology}, planet_radius_{geology.planet_radius()},
       karst_level_{level_for(karst_spacing, geology.planet_radius())},
       point_level_{level_for(point_spacing, geology.planet_radius())},
-      karst_seed_{hash_combine(geology.seed(), karst_salt)} {}
+      karst_seed_{hash_combine(geology.seed(), karst_salt)} {
+    const std::uint64_t seed = hash_combine(geology.seed(), lava_salt);
+    const auto chambers = geology.chambers();
+    for (std::size_t chamber = 0; chamber < chambers.size(); ++chamber) {
+        const std::uint64_t count =
+            fewest_tubes + (hash_values(seed, chamber) % (most_tubes - fewest_tubes + 1));
+        for (std::uint64_t tube = 0; tube < count; ++tube) {
+            LavaTube made = lava_tube(chambers[chamber].center, hash_values(seed, chamber, tube));
+            if (!made.passages.empty()) {
+                made.chamber = chamber;
+                lava_tubes_.push_back(std::move(made));
+            }
+        }
+    }
+}
+
+LavaTube Caves::lava_tube(DVec3 vent, std::uint64_t seed) const {
+    const auto ground = [&](DVec3 direction) {
+        return geology_->terrain().elevation(cell_at(direction, point_level_));
+    };
+    struct Node {
+        DVec3 direction;
+        std::int64_t elevation;
+    };
+    std::vector<Node> nodes{{.direction = vent, .elevation = ground(vent)}};
+    const TangentFrame frame = tangent_frame(vent);
+    DVec3 heading = glm::normalize((frame.east * ((2.0 * fraction(hash_values(seed, 0))) - 1.0)) +
+                                   (frame.north * ((2.0 * fraction(hash_values(seed, 1))) - 1.0)));
+    for (int step = 0; step < longest_tube && nodes.back().elevation > 0; ++step) {
+        const Node& here = nodes.back();
+        const DVec3 side = glm::normalize(glm::cross(here.direction, heading));
+        std::optional<Node> lowest;
+        DVec3 lowest_heading{};
+        for (const double turn : {0.0, -lava_turn, lava_turn}) {
+            const DVec3 way = glm::normalize(heading + (side * turn));
+            const DVec3 next =
+                glm::normalize(here.direction + (way * (lava_step / planet_radius_)));
+            const std::int64_t elevation = ground(next);
+            if (!lowest || elevation < lowest->elevation) {
+                lowest = Node{.direction = next, .elevation = elevation};
+                lowest_heading = way;
+            }
+        }
+        if (lowest->elevation >= here.elevation) {
+            break;
+        }
+        heading = glm::normalize(lowest_heading -
+                                 (lowest->direction * glm::dot(lowest_heading, lowest->direction)));
+        nodes.push_back(*lowest);
+    }
+
+    LavaTube tube;
+    if (nodes.size() < 2) {
+        return tube;
+    }
+    std::vector<DVec3> points;
+    std::vector<double> radii;
+    for (std::size_t index = 0; index < nodes.size(); ++index) {
+        const std::uint64_t node = hash_values(seed, 2, index);
+        const auto depth =
+            (shallowest_tube * fixed_one) +
+            static_cast<std::int64_t>(
+                hash_values(node, 0) %
+                static_cast<std::uint64_t>(((deepest_tube - shallowest_tube) * fixed_one) + 1));
+        points.push_back(
+            point_over(nodes[index].direction, planet_radius_, nodes[index].elevation, depth));
+        if (index + 1 == nodes.size()) {
+            radii.push_back(tube_end);
+        } else if (hash_values(node, 1) % 100 < pinch_percent) {
+            radii.push_back(narrowest_pinch +
+                            ((widest_pinch - narrowest_pinch) * fraction(hash_values(node, 2))));
+        } else {
+            radii.push_back(narrowest_tube +
+                            ((widest_tube - narrowest_tube) * fraction(hash_values(node, 2))));
+        }
+    }
+    DVec3 middle{0.0};
+    for (const DVec3 point : points) {
+        middle += point / static_cast<double>(points.size());
+    }
+    for (std::size_t index = 0; index + 1 < points.size(); ++index) {
+        tube.passages.push_back({.from = points[index],
+                                 .to = points[index + 1],
+                                 .from_radius = radii[index],
+                                 .to_radius = radii[index + 1],
+                                 .cave = Cave::LavaTube});
+        tube.reach = std::max(tube.reach, glm::length(points[index] - middle) + widest_tube);
+    }
+    tube.reach = std::max(tube.reach, glm::length(points.back() - middle) + widest_tube);
+    tube.middle = middle;
+    return tube;
+}
 
 DVec3 Caves::point_at(CellId cell, std::int64_t depth) const {
     return point_over(cell_center(cell), planet_radius_, geology_->terrain().elevation(cell),
@@ -202,25 +316,50 @@ std::vector<Passage> Caves::Lookup::passages_near(CellId cell) {
         const std::vector<Passage>& theirs = karst(around);
         near.insert(near.end(), theirs.begin(), theirs.end());
     }
+    const DVec3 point = caves_->point_at(cell, 0);
+    for (const LavaTube& tube : caves_->lava_tubes_) {
+        if (glm::length(point - tube.middle) <= tube.reach + karst_spacing) {
+            near.insert(near.end(), tube.passages.begin(), tube.passages.end());
+        }
+    }
     return near;
 }
 
 std::optional<CaveHit> Caves::Lookup::cave_at(CellId cell, std::int64_t depth) {
     const Strata strata = caves_->geology_->strata(cell);
+    const Rock rock = strata.rock_at(depth);
     // Only limestone dissolves, and sinkholes open through what lies over it.
-    if (strata.sediment != Rock::Limestone || depth >= strata.bedrock_depth()) {
+    const bool karst = strata.sediment == Rock::Limestone && depth < strata.bedrock_depth();
+    const bool lava = rock == Rock::Basalt && depth < below_tubes;
+    if (!karst && !lava) {
         return std::nullopt;
     }
-    const bool in_limestone = strata.rock_at(depth) == Rock::Limestone;
     const DVec3 point = caves_->point_at(cell, depth);
     std::optional<CaveHit> best;
-    for (const Passage& passage : passages_near(cell)) {
-        if (passage.cave == Cave::Karst && !in_limestone) {
-            continue;
-        }
+    const auto consider = [&](const Passage& passage) {
         const std::optional<double> clearance = clearance_at(passage, point);
         if (clearance && (!best || *clearance > best->clearance)) {
             best = CaveHit{.cave = passage.cave, .clearance = *clearance};
+        }
+    };
+    if (karst) {
+        const auto dissolved = [&](CellId tile) {
+            for (const Passage& passage : this->karst(tile)) {
+                if (passage.cave == Cave::Sinkhole || rock == Rock::Limestone) {
+                    consider(passage);
+                }
+            }
+        };
+        const CellId tile = cell_at(cell_center(cell), caves_->karst_level_);
+        dissolved(tile);
+        const VertexNeighbors around = vertex_neighbors(tile);
+        std::ranges::for_each(around.cells(), dissolved);
+    }
+    if (lava) {
+        for (const LavaTube& tube : caves_->lava_tubes_) {
+            if (glm::length(point - tube.middle) <= tube.reach) {
+                std::ranges::for_each(tube.passages, consider);
+            }
         }
     }
     return best;
