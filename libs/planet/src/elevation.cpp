@@ -62,16 +62,26 @@ Elevation::Elevation(const PlanetConfig& config)
       ridge_seed_{hash_combine(config.seed, ridge_salt)},
       evolving_{std::make_shared<Evolving>(config)} {}
 
-const Landform& Elevation::landform() const {
-    std::call_once(evolving_->once, [this] { evolving_->landform = evolve(evolving_->config); });
-    return *evolving_->landform;
+Elevation::Evolved::Evolved(Landform worn, const Elevation& terrain, const PlanetConfig& config)
+    : landform{std::move(worn)}, meander{config.seed, landform.grid()}, rivers{[&] {
+          std::vector<std::int64_t> ground(landform.grid().size());
+          for (std::uint32_t index = 0; index < landform.grid().size(); ++index) {
+              const CellId cell = landform.grid().cell(index);
+              ground[index] = terrain.worn(cell, terrain.generated(cell), landform, meander);
+          }
+          return Rivers{landform, ground, meander, config.radius};
+      }()} {}
+
+const Elevation::Evolved& Elevation::evolved() const {
+    std::call_once(evolving_->once, [this] { evolving_->evolved = evolve(evolving_->config); });
+    return *evolving_->evolved;
 }
 
-std::shared_ptr<const Landform> Elevation::evolve(const PlanetConfig& config) const {
+std::shared_ptr<const Elevation::Evolved> Elevation::evolve(const PlanetConfig& config) const {
     // Evolving takes a while, so it's shared while any Elevation of the same planet lives.
     using Key = std::tuple<std::uint64_t, std::uint64_t, std::uint64_t>;
     static std::mutex mutex;
-    static std::map<Key, std::weak_ptr<const Landform>> evolved;
+    static std::map<Key, std::weak_ptr<const Evolved>> evolved;
     const Key key{config.seed, std::bit_cast<std::uint64_t>(config.radius),
                   std::bit_cast<std::uint64_t>(config.ocean_fraction)};
     const std::scoped_lock lock{mutex};
@@ -97,11 +107,13 @@ std::shared_ptr<const Landform> Elevation::evolve(const PlanetConfig& config) co
         hardness[index] = fixed(erodibility * (1.0 - (granite_hardness * strength)));
         runoff[index] = moisture.at(cell, continents_.height(cell));
     }
-    auto landform = std::make_shared<const Landform>(
-        std::move(grid), std::move(heights),
-        Erosion{.uplift = uplift, .erodibility = hardness, .runoff = runoff}, landform_steps);
-    evolved[key] = landform;
-    return landform;
+    auto shared = std::make_shared<const Evolved>(
+        Landform{std::move(grid), std::move(heights),
+                 Erosion{.uplift = uplift, .erodibility = hardness, .runoff = runoff},
+                 landform_steps},
+        *this, config);
+    evolved[key] = shared;
+    return shared;
 }
 
 std::int64_t Elevation::mountain_strength(CellId cell) const {
@@ -125,10 +137,31 @@ std::int64_t Elevation::elevation(CellId cell) const {
     if (generated <= 0) {
         return generated;
     }
+    const Evolved& evolved = this->evolved();
+    const std::int64_t ground = worn(cell, generated, evolved.landform, evolved.meander);
+    return evolved.rivers.cut(cell, ground);
+}
+
+std::optional<Channel> Elevation::river(CellId cell) const {
+    const std::int64_t generated = this->generated(cell);
+    if (generated <= 0) {
+        return std::nullopt;
+    }
+    const Evolved& evolved = this->evolved();
+    return evolved.rivers.channel(cell, worn(cell, generated, evolved.landform, evolved.meander));
+}
+
+std::int64_t Elevation::worn(CellId cell, std::int64_t generated, const Landform& landform,
+                             const Meander& meander) const {
+    if (generated <= 0) {
+        return generated;
+    }
     // The change fades out towards the shore, and low ground is never worn below a quarter of
     // its height, so coasts stay where generated and meet the sea without a step.
+    // Sampled where the meanders shift the cell to, so valleys bend with the rivers in them.
     const std::int64_t change =
-        (landform().change(cell) * ramp(generated, coast_blend)) >> fixed_fraction_bits;
+        (landform.change(cell_at(meander(cell_center(cell)))) * ramp(generated, coast_blend)) >>
+        fixed_fraction_bits;
     return std::max(generated + change, (generated + 3) / 4);
 }
 

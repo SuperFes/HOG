@@ -1,5 +1,6 @@
 #pragma once
 
+#include <hog/core/math.hpp>
 #include <hog/planet/cell_id.hpp>
 #include <hog/planet/drainage.hpp>
 #include <hog/planet/erosion.hpp>
@@ -24,6 +25,9 @@ public:
     [[nodiscard]] std::span<const std::int64_t> heights() const noexcept { return heights_; }
     // How the water runs over the evolved heights.
     [[nodiscard]] const Drainage& drainage() const noexcept { return drainage_; }
+    // Square metres of ground draining through each grid cell, its own included, each weighted
+    // by its runoff.
+    [[nodiscard]] std::span<const std::int64_t> drained() const noexcept { return drained_; }
 
     // Fixed-point metres the ground moved, per grid cell.
     [[nodiscard]] std::span<const std::int64_t> change() const noexcept { return change_; }
@@ -40,7 +44,23 @@ private:
     std::vector<std::int64_t> heights_;
     std::vector<std::int64_t> change_;
     Drainage drainage_;
+    std::vector<std::int64_t> drained_;
     std::vector<std::array<Quadrant, 4>> quadrants_;
+};
+
+// Smooth noise shifting points on the unit sphere by about a fifth of a grid cell, over bends a
+// few cells long: sampling a grid at shifted points bends the straight lines between its cell
+// centres into meanders.
+class Meander {
+public:
+    Meander(std::uint64_t seed, const LevelGrid& grid);
+
+    [[nodiscard]] DVec3 operator()(DVec3 point) const;
+
+private:
+    std::uint64_t seed_;
+    double reach_;     // unit-sphere distance
+    double frequency_; // per unit-sphere distance
 };
 
 } // namespace hog::planet

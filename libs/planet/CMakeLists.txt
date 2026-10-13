@@ -14,6 +14,7 @@ add_library(hog_planet
     src/neighbors.cpp
     src/planet_config.cpp
     src/projection.cpp
+    src/rivers.cpp
     src/tangent_frame.cpp
     src/tile.cpp
     src/world.cpp)
@@ -40,6 +41,7 @@ hog_add_tests(hog_planet
     tests/noise_tests.cpp
     tests/planet_config_tests.cpp
     tests/projection_tests.cpp
+    tests/rivers_tests.cpp
     tests/tangent_frame_tests.cpp
     tests/tile_tests.cpp
     tests/world_tests.cpp)
@@ -53,6 +55,6 @@ endif()
 # Landform evolution runs whenever a planet is built; unoptimized it makes every test that builds
 # one take seconds.
 if(NOT MSVC)
-    set_source_files_properties(src/drainage.cpp src/erosion.cpp src/landform.cpp
+    set_source_files_properties(src/drainage.cpp src/erosion.cpp src/landform.cpp src/rivers.cpp
         PROPERTIES COMPILE_OPTIONS "$<$<CONFIG:Debug>:-O2>")
 endif()

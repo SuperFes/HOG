@@ -123,3 +123,4 @@ TEST_CASE("elevation depends on the seed", "[planet][elevation]") {
     CHECK(Elevation{planet(1)}.elevation(cell) == first.elevation(cell));
     CHECK(Elevation{planet(2)}.elevation(cell) != first.elevation(cell));
 }
+
