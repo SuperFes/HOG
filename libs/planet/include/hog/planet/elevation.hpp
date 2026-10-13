@@ -69,8 +69,8 @@ private:
     // The elevation as generated, before rivers wore it.
     [[nodiscard]] std::int64_t generated(CellId cell) const;
     // The elevation as rivers wore it, before they cut their channels, given the generated one.
-    [[nodiscard]] std::int64_t worn(CellId cell, std::int64_t generated, const Landform& landform,
-                                    const Meander& meander) const;
+    [[nodiscard]] static std::int64_t worn(CellId cell, std::int64_t generated,
+                                           const Landform& landform, const Meander& meander);
     [[nodiscard]] const Evolved& evolved() const;
     [[nodiscard]] std::shared_ptr<const Evolved> evolve(const PlanetConfig& config) const;
 

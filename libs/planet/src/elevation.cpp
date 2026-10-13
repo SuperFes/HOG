@@ -67,7 +67,7 @@ Elevation::Evolved::Evolved(Landform worn, const Elevation& terrain, const Plane
           std::vector<std::int64_t> ground(landform.grid().size());
           for (std::uint32_t index = 0; index < landform.grid().size(); ++index) {
               const CellId cell = landform.grid().cell(index);
-              ground[index] = terrain.worn(cell, terrain.generated(cell), landform, meander);
+              ground[index] = Elevation::worn(cell, terrain.generated(cell), landform, meander);
           }
           return Rivers{landform, ground, meander, config.radius};
       }()} {}
@@ -152,7 +152,7 @@ std::optional<Channel> Elevation::river(CellId cell) const {
 }
 
 std::int64_t Elevation::worn(CellId cell, std::int64_t generated, const Landform& landform,
-                             const Meander& meander) const {
+                             const Meander& meander) {
     if (generated <= 0) {
         return generated;
     }

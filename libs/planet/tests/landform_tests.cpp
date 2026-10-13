@@ -95,4 +95,3 @@ TEST_CASE("a landform's change runs on smoothly between cells, across faces too"
     }
     CHECK(largest < range() / 16);
 }
-

@@ -66,7 +66,7 @@ Rivers::Rivers(const Landform& landform, std::span<const std::int64_t> ground, M
             continue;
         }
         const std::uint32_t receiver = drainage.receiver[cell];
-        const double area = static_cast<double>(drained[cell]);
+        const auto area = static_cast<double>(drained[cell]);
         const std::int64_t deep = fixed(depth(area));
         // At the sea the water surface meets sea level.
         const std::int64_t to_bed = outlet(receiver) ? -deep : bed[receiver];
@@ -146,7 +146,7 @@ std::optional<Channel> Rivers::channel(CellId cell, std::int64_t ground) const {
     std::optional<std::int64_t> surface;
     each_reach(cell, [&](const Reach& reach, std::int64_t level, double away) {
         if (away < reach.width / 2.0) {
-            surface = std::min(surface.value_or(level), std::min(level, ground));
+            surface = std::min({surface.value_or(level), level, ground});
         }
     });
     if (!surface) {

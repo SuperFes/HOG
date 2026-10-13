@@ -30,7 +30,8 @@ LevelGrid::LevelGrid(int level, double radius)
     distances_.reserve(std::size_t{count} * 8);
     for (std::uint32_t index = 0; index < count; ++index) {
         first_.push_back(static_cast<std::uint32_t>(around_.size()));
-        for (const CellId next : vertex_neighbors(cell(index)).cells()) {
+        const VertexNeighbors near = vertex_neighbors(cell(index));
+        for (const CellId next : near.cells()) {
             const std::uint32_t there = this->index(next);
             around_.push_back(there);
             // Chords, not arcs: no trigonometry, and the difference at these sizes is tiny.
