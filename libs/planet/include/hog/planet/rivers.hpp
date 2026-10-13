@@ -23,8 +23,8 @@ struct Channel {
 // A river from one landform cell's centre to the next downstream: its water falls from one end to
 // the other, in fixed-point metres.
 struct Reach {
-    DVec3 from;
-    DVec3 to;
+    DVec3 from{};
+    DVec3 to{};
     std::int64_t from_surface = 0;
     std::int64_t to_surface = 0;
     double width = 0.0; // metres
