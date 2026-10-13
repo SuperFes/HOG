@@ -187,6 +187,7 @@ TEST_CASE("lakes and rivers show over the ground", "[mapgen]") {
     CHECK(creek[2] > creek[0]);
     CHECK(river[2] > river[0]);
     CHECK(river[1] < creek[1]);
+    CHECK(river == hog::mapgen::river_colour(40.0));
 }
 
 TEST_CASE("water maps draw rivers wherever they run", "[mapgen]") {

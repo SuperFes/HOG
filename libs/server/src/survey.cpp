@@ -1,6 +1,8 @@
 #include <hog/core/assert.hpp>
+#include <hog/planet/elevation.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/planet/rivers.hpp>
 #include <hog/server/survey.hpp>
 
 #include <algorithm>
@@ -19,10 +21,11 @@ constexpr double radians(double degrees) noexcept {
 }
 
 // Fills one row of samples, from the west.
-void survey_row(const planet::Geology& geology, const probe::Survey& survey, int level,
-                std::uint32_t row, probe::Ground& ground) {
+void survey_row(const planet::Geology& geology, double planet_radius, const probe::Survey& survey,
+                int level, std::uint32_t row, probe::Ground& ground) {
     const double latitude =
         radians(survey.north - ((row + 0.5) / survey.height * (survey.north - survey.south)));
+    const double margin = river_margin(survey, planet_radius, latitude);
     const std::int64_t depth = std::llround(static_cast<double>(survey.depth) * planet::fixed_one);
     const std::size_t first = static_cast<std::size_t>(row) * survey.width;
     for (std::uint32_t column = 0; column < survey.width; ++column) {
@@ -34,6 +37,9 @@ void survey_row(const planet::Geology& geology, const probe::Survey& survey, int
         ground.elevation[sample] =
             static_cast<float>(planet::fixed_to_double(geology.terrain().elevation(cell)));
         ground.biome[sample] = std::to_underlying(geology.climate().biome(cell));
+        ground.water_table[sample] =
+            static_cast<float>(planet::fixed_to_double(geology.climate().water_table(cell)));
+        ground.river[sample] = river_width(geology, cell, margin);
         if (!survey.underground) {
             continue;
         }
@@ -45,6 +51,24 @@ void survey_row(const planet::Geology& geology, const probe::Survey& survey, int
 }
 
 } // namespace
+
+std::uint8_t river_width(const planet::Geology& geology, planet::CellId cell, double margin) {
+    const planet::Elevation& terrain = geology.terrain();
+    if (terrain.elevation(cell) <= 0 || terrain.lake(cell)) {
+        return 0;
+    }
+    const planet::Reach* river = terrain.rivers().near(cell, margin);
+    if (river == nullptr) {
+        return 0;
+    }
+    return static_cast<std::uint8_t>(std::clamp(std::ceil(river->width), 1.0, 255.0));
+}
+
+double river_margin(const probe::Survey& survey, double planet_radius, double latitude) {
+    const double down = radians(survey.north - survey.south) / survey.height;
+    const double across = radians(survey.east - survey.west) / survey.width * std::cos(latitude);
+    return 0.5 * std::max(down, across) * planet_radius;
+}
 
 Result<void> check_survey(const probe::Survey& survey) {
     const bool across = survey.west >= -180.0 && survey.west < survey.east && survey.east <= 180.0;
@@ -138,12 +162,14 @@ probe::Ground survey_ground(const planet::Geology& geology, double planet_radius
     probe::Ground ground{.survey = survey,
                          .elevation = std::vector<float>(samples),
                          .biome = std::vector<std::uint8_t>(samples),
+                         .water_table = std::vector<float>(samples),
+                         .river = std::vector<std::uint8_t>(samples),
                          .rock = std::vector<std::uint8_t>(below),
                          .deposit = std::vector<std::uint8_t>(below)};
     const int level = survey_level(survey, planet_radius);
     jobs.parallel_for(survey.height, 1, [&](jobs::Range rows, std::uint32_t /*thread*/) {
         for (std::uint32_t row = rows.begin; row < rows.end; ++row) {
-            survey_row(geology, survey, level, row, ground);
+            survey_row(geology, planet_radius, survey, level, row, ground);
         }
     });
     return ground;

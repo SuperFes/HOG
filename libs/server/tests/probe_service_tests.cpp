@@ -234,6 +234,8 @@ TEST_CASE("surveys are answered without waiting for a tick", "[server][probe]") 
             return Ground{.survey = survey,
                           .elevation = std::vector<float>(samples, 12.5F),
                           .biome = std::vector<std::uint8_t>(samples, 3),
+                          .water_table = std::vector<float>(samples, 2.0F),
+                          .river = std::vector<std::uint8_t>(samples, 0),
                           .rock = {},
                           .deposit = {}};
         });
@@ -259,7 +261,13 @@ TEST_CASE("surveys are answered without waiting for a tick", "[server][probe]") 
 
 TEST_CASE("bad surveys, and surveys of a server without them, are refused", "[server][probe]") {
     const auto ground = [](const Survey& survey, jobs::JobSystem& /*jobs*/) {
-        return Ground{.survey = survey, .elevation = {}, .biome = {}, .rock = {}, .deposit = {}};
+        return Ground{.survey = survey,
+                      .elevation = {},
+                      .biome = {},
+                      .water_table = {},
+                      .river = {},
+                      .rock = {},
+                      .deposit = {}};
     };
     auto service = ProbeService::start(0, sample_welcome(), ground);
     REQUIRE(service);

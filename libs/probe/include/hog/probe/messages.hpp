@@ -15,7 +15,7 @@
 // u32 payload length, a u8 kind, then the payload, little-endian throughout.
 namespace hog::probe {
 
-inline constexpr std::uint16_t protocol_version = 5;
+inline constexpr std::uint16_t protocol_version = 6;
 // Large enough for every layer of a level 7 grid; anything bigger is a broken or hostile peer.
 inline constexpr std::uint32_t max_payload = 64U << 20U;
 
@@ -132,8 +132,11 @@ struct Survey {
 // Server to tool, answering Survey: one value per sample, row by row from the north-west.
 struct Ground {
     Survey survey;
-    std::vector<float> elevation;      // metres above sea level
-    std::vector<std::uint8_t> biome;   // planet::Biome
+    std::vector<float> elevation;    // metres above sea level
+    std::vector<std::uint8_t> biome; // planet::Biome
+    std::vector<float> water_table;  // metres down to it, 0 under water
+    // The width in metres of a river nearer than half a sample, rounded up to at most 255, or 0.
+    std::vector<std::uint8_t> river;
     std::vector<std::uint8_t> rock;    // planet::Rock at the depth; empty unless underground
     std::vector<std::uint8_t> deposit; // the rarest planet::Resource there plus one, or 0; likewise
 

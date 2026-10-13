@@ -35,6 +35,8 @@ TEST_CASE("each pixel's centre falls in its own sample", "[viewer][ground]") {
     const hog::probe::Ground ground{.survey = hog::viewer::survey_of(shown, 8, 4, false, 0.0F),
                                     .elevation = {},
                                     .biome = {},
+                                    .water_table = {},
+                                    .river = {},
                                     .rock = {},
                                     .deposit = {}};
     for (int y = 0; y < 4; ++y) {

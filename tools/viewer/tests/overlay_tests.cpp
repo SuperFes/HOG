@@ -222,6 +222,8 @@ probe::Ground surveyed(const viewer::MapRect& shown) {
     probe::Ground ground{.survey = viewer::survey_of(shown, width, height, true, 40.0F),
                          .elevation = {},
                          .biome = {},
+                         .water_table = {},
+                         .river = {},
                          .rock = {},
                          .deposit = {}};
     for (int y = 0; y < height; ++y) {
@@ -230,6 +232,8 @@ probe::Ground surveyed(const viewer::MapRect& shown) {
             ground.elevation.push_back(east ? 800.0F : -30.0F);
             ground.biome.push_back(
                 std::to_underlying(east ? planet::Biome::Tundra : planet::Biome::Ocean));
+            ground.water_table.push_back(east ? 6.0F : 0.0F);
+            ground.river.push_back(0);
             ground.rock.push_back(std::to_underlying(planet::Rock::Sandstone));
             ground.deposit.push_back(x >= width - 4 ? std::to_underlying(planet::Resource::Gold) + 1
                                                     : 0);
@@ -266,6 +270,63 @@ TEST_CASE("surveyed ground draws terrain, coasts and biomes finely", "[viewer][o
     // Off the surveyed part, the cells show as before.
     const mapgen::Image whole = planet.render(Overlay::Terrain, "", {}, &ground);
     CHECK(whole.at(0, 0) == mapgen::height_colour(fixed(500.0)));
+}
+
+TEST_CASE("lakes and rivers show over terrain and biomes", "[viewer][overlay]") {
+    Planet planet = land();
+    planet.set("planet/biome", static_cast<float>(planet::Biome::Desert));
+    const viewer::MapRect shown{.low = {0.25, 0.25}, .high = {0.75, 0.5}};
+    probe::Ground ground = surveyed(shown);
+    const auto sample = [](int x, int y) {
+        return (static_cast<std::size_t>(y) * width) + static_cast<std::size_t>(x);
+    };
+    ground.river[sample(3 * width / 4, 2)] = 30;
+    ground.river[sample(1, 2)] = 30;
+    ground.biome[sample(width - 2, 4)] = std::to_underlying(planet::Biome::Lake);
+
+    for (const Overlay overlay : {Overlay::Terrain, Overlay::Biome}) {
+        const mapgen::Image image = planet.render(overlay, "", shown, &ground);
+        CHECK(image.at(3 * width / 4, 2) == mapgen::river_colour(30.0));
+        CHECK(image.at(width - 2, 4) == mapgen::biome_colour(planet::Biome::Lake));
+        // Rivers run into the sea, which stays the sea's colour.
+        CHECK(image.at(1, 2) == planet.render(overlay, "", shown, &ground).at(0, 2));
+    }
+    CHECK(planet.render(Overlay::Terrain, "", shown, &ground).at(width - 1, 2) ==
+          mapgen::height_colour(fixed(800.0)));
+
+    // Off the surveyed part, lakes come from the cells' biomes.
+    planet.values("planet/biome")[5] = static_cast<float>(planet::Biome::Lake);
+    const auto cells = planet.cells();
+    const auto terrain = pixels(planet.render(Overlay::Terrain));
+    std::size_t lakes = 0;
+    for (std::size_t pixel = 0; pixel < cells.size(); ++pixel) {
+        const bool lake = cells[pixel] == 5;
+        lakes += lake ? 1U : 0U;
+        CHECK(terrain[pixel] == (lake ? mapgen::biome_colour(planet::Biome::Lake)
+                                      : mapgen::height_colour(fixed(500.0))));
+    }
+    CHECK(lakes > 0);
+}
+
+TEST_CASE("the water overlay shows how far down the water table is", "[viewer][overlay]") {
+    Planet planet = land();
+    planet.set("planet/biome", static_cast<float>(planet::Biome::Grassland));
+    planet.set("planet/water_table", 3.0F);
+    CHECK(all(planet.render(Overlay::Water), mapgen::water_table_colour(fixed(3.0))));
+
+    const viewer::MapRect shown{.low = {0.25, 0.25}, .high = {0.75, 0.5}};
+    probe::Ground ground = surveyed(shown);
+    ground.river[(2 * width) + (3 * width / 4)] = 30;
+    const mapgen::Image image = planet.render(Overlay::Water, "", shown, &ground);
+    CHECK(image.at(0, 0) == mapgen::height_colour(fixed(-30.0)));
+    CHECK(image.at(width - 1, 0) == mapgen::water_table_colour(fixed(6.0)));
+    CHECK(image.at(3 * width / 4, 2) == mapgen::river_colour(30.0));
+
+    const Frame frame = planet.frame();
+    const auto legend = viewer::legend_for(Overlay::Water, frame, "");
+    REQUIRE(legend);
+    CHECK(legend.value_or(viewer::Legend{}).layer == "planet/water_table");
+    CHECK(legend.value_or(viewer::Legend{}).high == 3.0);
 }
 
 TEST_CASE("minerals show the rock or rarest deposit at the surveyed depth", "[viewer][overlay]") {
@@ -317,6 +378,8 @@ TEST_CASE("each overlay asks for the layers it draws", "[viewer][overlay]") {
     };
     CHECK(has(viewer::layers_for(Overlay::Sky, ""), "weather/storm"));
     CHECK(has(viewer::layers_for(Overlay::Fire, ""), "forest/fire"));
+    CHECK(has(viewer::layers_for(Overlay::Water, ""), "planet/water_table"));
+    CHECK(has(viewer::layers_for(Overlay::Terrain, ""), "planet/biome"));
     CHECK(has(viewer::layers_for(Overlay::Wildlife, "red fox"), "wildlife/red fox"));
     CHECK(has(viewer::layers_for(Overlay::Wildlife, "red fox"), "planet/area"));
     CHECK_FALSE(has(viewer::layers_for(Overlay::Terrain, ""), "weather/temperature"));

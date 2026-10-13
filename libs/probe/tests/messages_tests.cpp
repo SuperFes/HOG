@@ -94,6 +94,8 @@ TEST_CASE("every message survives a round trip", "[probe][messages]") {
     const Ground ground{.survey = survey,
                         .elevation = {-3'500.0F, 812.25F},
                         .biome = {0, 7},
+                        .water_table = {0.0F, 12.5F},
+                        .river = {0, 40},
                         .rock = {6, 4},
                         .deposit = {0, 3}};
     CHECK(round_trip(ground) == Message{ground});
@@ -102,6 +104,8 @@ TEST_CASE("every message survives a round trip", "[probe][messages]") {
     const Ground surface{.survey = above,
                          .elevation = ground.elevation,
                          .biome = ground.biome,
+                         .water_table = ground.water_table,
+                         .river = ground.river,
                          .rock = {},
                          .deposit = {}};
     CHECK(round_trip(surface) == Message{surface});
@@ -224,6 +228,8 @@ TEST_CASE("broken streams fail and stay failed", "[probe][messages]") {
         reader.feed(encode(Ground{.survey = Survey{.width = 2, .height = 2},
                                   .elevation = {1.0F, 2.0F, 3.0F},
                                   .biome = {0, 0, 0},
+                                  .water_table = {0.0F, 0.0F, 0.0F},
+                                  .river = {0, 0, 0},
                                   .rock = {},
                                   .deposit = {}}));
     }
@@ -245,10 +251,21 @@ TEST_CASE("broken streams fail and stay failed", "[probe][messages]") {
         payload.write(std::uint32_t{1'000});
         reader.feed(frame(11, payload.bytes()));
     }
+    SECTION("ground without a river for every sample") {
+        reader.feed(encode(Ground{.survey = Survey{.width = 1, .height = 1},
+                                  .elevation = {1.0F},
+                                  .biome = {0},
+                                  .water_table = {0.0F},
+                                  .river = {},
+                                  .rock = {},
+                                  .deposit = {}}));
+    }
     SECTION("ground with rock it wasn't asked for") {
         reader.feed(encode(Ground{.survey = Survey{.width = 1, .height = 1},
                                   .elevation = {1.0F},
                                   .biome = {0},
+                                  .water_table = {0.0F},
+                                  .river = {0},
                                   .rock = {1},
                                   .deposit = {0}}));
     }

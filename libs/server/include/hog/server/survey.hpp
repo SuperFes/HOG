@@ -5,6 +5,8 @@
 #include <hog/planet/geology.hpp>
 #include <hog/probe/messages.hpp>
 
+#include <cstdint>
+
 namespace hog::server {
 
 // Fails when the edges are out of order or off the planet, there are no samples or too many, or
@@ -14,6 +16,16 @@ namespace hog::server {
 // The cell level a survey samples at: cells about as small as the samples are apart where they're
 // furthest apart, nearest the equator.
 [[nodiscard]] int survey_level(const probe::Survey& survey, double planet_radius);
+
+// The width of a river within `margin` metres of a cell on dry land, in whole metres rounded up,
+// from 1 to 255, or 0 where there is none.
+[[nodiscard]] std::uint8_t river_width(const planet::Geology& geology, planet::CellId cell,
+                                       double margin);
+
+// How far from a sample a survey looks for rivers: half the samples' spacing on a row, so every
+// river crosses at least one.
+[[nodiscard]] double river_margin(const probe::Survey& survey, double planet_radius,
+                                  double latitude);
 
 // The generated ground under a checked survey. It reads only the geology, which never changes, so
 // any thread may call it with its own jobs; changes made to the world since aren't shown.

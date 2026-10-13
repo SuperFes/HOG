@@ -133,6 +133,33 @@ public:
         return static_cast<planet::Biome>(std::clamp(index, 0, planet::biome_count - 1));
     }
 
+    // A lake or river over land, or else `under`. Rivers show only where surveyed; lakes show from
+    // the cells' biomes elsewhere.
+    [[nodiscard]] Rgb with_water(Rgb under, const Spot& spot) const {
+        if (ocean(spot)) {
+            return under;
+        }
+        if (biome(spot) == planet::Biome::Lake) {
+            return mapgen::biome_colour(planet::Biome::Lake);
+        }
+        if (spot.sample && ground_->river[*spot.sample] > 0) {
+            return mapgen::river_colour(static_cast<double>(ground_->river[*spot.sample]));
+        }
+        return under;
+    }
+
+    // Metres down to the water table, where surveyed or else smoothed between cells, if known.
+    [[nodiscard]] std::optional<double> water_table(const Spot& spot) const {
+        if (spot.sample) {
+            return static_cast<double>(ground_->water_table[*spot.sample]);
+        }
+        const std::span<const float> depth = layer("planet/water_table");
+        if (depth.empty()) {
+            return std::nullopt;
+        }
+        return smooth(depth, spot);
+    }
+
     // Rock, or the rarest deposit, at the surveyed depth; none where that wasn't surveyed.
     [[nodiscard]] std::optional<Rgb> underground(const Spot& spot) const {
         if (!spot.sample || ground_->rock.empty()) {
@@ -225,10 +252,21 @@ Rgb colour_at(const Sampler& sampler, Overlay overlay, std::span<const float> sp
               const Spot& spot) {
     switch (overlay) {
     case Overlay::Terrain:
-        return sampler.ground(spot);
+        return sampler.with_water(sampler.ground(spot), spot);
     case Overlay::Biome: {
         const std::optional<planet::Biome> biome = sampler.biome(spot);
-        return biome ? mapgen::biome_colour(*biome) : missing_colour;
+        return biome ? sampler.with_water(mapgen::biome_colour(*biome), spot) : missing_colour;
+    }
+    case Overlay::Water: {
+        if (sampler.layer("planet/water_table").empty()) {
+            return missing_colour;
+        }
+        if (sampler.ocean(spot)) {
+            return sampler.ground(spot);
+        }
+        const std::optional<double> depth = sampler.water_table(spot);
+        return depth ? sampler.with_water(mapgen::water_table_colour(fixed(*depth)), spot)
+                     : missing_colour;
     }
     case Overlay::Minerals: {
         const std::optional<Rgb> below = sampler.underground(spot);
@@ -292,6 +330,8 @@ std::string_view to_string(Overlay overlay) noexcept {
         return "terrain";
     case Overlay::Biome:
         return "biome";
+    case Overlay::Water:
+        return "water";
     case Overlay::Minerals:
         return "minerals";
     case Overlay::Temperature:
@@ -320,10 +360,12 @@ std::vector<std::string> layers_for(Overlay overlay, std::string_view species) {
         layers.insert(layers.end(), names.begin(), names.end());
     };
     switch (overlay) {
-    case Overlay::Terrain:
-        break;
+    case Overlay::Terrain: // for its lakes
     case Overlay::Biome:
         add({"planet/biome"});
+        break;
+    case Overlay::Water:
+        add({"planet/biome", "planet/water_table"});
         break;
     case Overlay::Minerals:
         break;
@@ -365,6 +407,9 @@ std::optional<Legend> legend_for(Overlay overlay, const Frame& frame, std::strin
     case Overlay::Biome:
     case Overlay::Minerals:
         return std::nullopt;
+    case Overlay::Water:
+        layer = "planet/water_table";
+        break;
     case Overlay::Temperature:
     case Overlay::Air:
         layer = "weather/temperature";

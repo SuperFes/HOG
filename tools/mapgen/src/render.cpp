@@ -178,12 +178,16 @@ Rgb water_table_colour(std::int64_t water_table) noexcept {
     return ramp(water_table_stops, planet::fixed_to_double(water_table));
 }
 
+Rgb river_colour(double width) noexcept {
+    return ramp(river_stops, width);
+}
+
 Rgb with_water(Rgb ground, bool lake, const planet::Reach* river) noexcept {
     if (lake) {
         return biome_colour(planet::Biome::Lake);
     }
     if (river != nullptr) {
-        return ramp(river_stops, river->width);
+        return river_colour(river->width);
     }
     return ground;
 }

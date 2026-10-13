@@ -1,6 +1,7 @@
 #include <hog/core/time.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/mapgen/render.hpp>
+#include <hog/planet/climate.hpp>
 #include <hog/planet/geology.hpp>
 #include <hog/probe/messages.hpp>
 #include <hog/sim/cell_grid.hpp>
@@ -218,17 +219,26 @@ void survey(View& view, viewer::Link& link, int width) {
 }
 
 // What the minerals overlay's colours stand for.
-void minerals_key() {
-    const auto swatch = [](mapgen::Rgb colour, std::string_view name) {
-        const auto channel = [&colour](std::size_t index) {
-            return static_cast<float>(colour.at(index)) / 255.0F;
-        };
-        const ImVec4 shown{channel(0), channel(1), channel(2), 1.0F};
-        ImGui::ColorButton(std::string{name}.c_str(), shown, ImGuiColorEditFlags_NoTooltip,
-                           ImVec2{12.0F, 12.0F});
-        ImGui::SameLine();
-        ImGui::TextUnformatted(std::string{name}.c_str());
+void swatch(mapgen::Rgb colour, std::string_view name) {
+    const auto channel = [&colour](std::size_t index) {
+        return static_cast<float>(colour.at(index)) / 255.0F;
     };
+    const ImVec4 shown{channel(0), channel(1), channel(2), 1.0F};
+    ImGui::ColorButton(std::string{name}.c_str(), shown, ImGuiColorEditFlags_NoTooltip,
+                       ImVec2{12.0F, 12.0F});
+    ImGui::SameLine();
+    ImGui::TextUnformatted(std::string{name}.c_str());
+}
+
+void biomes_key() {
+    for (int biome = 0; biome < planet::biome_count; ++biome) {
+        const auto each = static_cast<planet::Biome>(biome);
+        swatch(mapgen::biome_colour(each), planet::to_string(each));
+    }
+    swatch(mapgen::river_colour(0.0), "river");
+}
+
+void minerals_key() {
     for (int rock = 0; rock < planet::rock_count; ++rock) {
         const auto each = static_cast<planet::Rock>(rock);
         swatch(mapgen::rock_colour(each), planet::to_string(each));
@@ -321,6 +331,9 @@ void legend(const View& view, const viewer::Link& link, const viewer::Frame* fra
                                    ? std::format("{:.0f} m down", ground->survey.depth).c_str()
                                    : "surveying");
         minerals_key();
+    }
+    if (view.overlay == viewer::Overlay::Biome) {
+        biomes_key();
     }
     if (frame == nullptr) {
         return;

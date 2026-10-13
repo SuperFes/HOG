@@ -1,7 +1,9 @@
+#include <hog/planet/climate.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/server/survey.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
@@ -95,6 +97,8 @@ TEST_CASE("a survey reports the ground under each sample", "[server][survey]") {
     const std::size_t samples = std::size_t{16} * 12;
     REQUIRE(ground.elevation.size() == samples);
     REQUIRE(ground.biome.size() == samples);
+    REQUIRE(ground.water_table.size() == samples);
+    REQUIRE(ground.river.size() == samples);
     REQUIRE(ground.rock.size() == (survey.underground ? samples : 0));
     REQUIRE(ground.deposit.size() == ground.rock.size());
 
@@ -113,6 +117,11 @@ TEST_CASE("a survey reports the ground under each sample", "[server][survey]") {
             CHECK(ground.elevation[sample] ==
                   static_cast<float>(planet::fixed_to_double(geology().terrain().elevation(cell))));
             CHECK(ground.biome[sample] == std::to_underlying(geology().climate().biome(cell)));
+            CHECK(ground.water_table[sample] == static_cast<float>(planet::fixed_to_double(
+                                                    geology().climate().water_table(cell))));
+            CHECK(ground.river[sample] ==
+                  server::river_width(geology(), cell,
+                                      server::river_margin(survey, radius, latitude)));
             if (survey.underground) {
                 CHECK(ground.rock[sample] ==
                       std::to_underlying(geology().strata(cell).rock_at(depth)));
@@ -128,6 +137,46 @@ TEST_CASE("the whole planet has land and sea", "[server][survey]") {
     const probe::Ground ground = server::survey_ground(geology(), radius, whole(128), jobs);
     CHECK(std::ranges::any_of(ground.elevation, [](float metres) { return metres > 0.0F; }));
     CHECK(std::ranges::any_of(ground.elevation, [](float metres) { return metres < 0.0F; }));
+}
+
+TEST_CASE("surveys look for rivers half a sample's spacing away", "[server][survey]") {
+    const Survey survey{.west = -40.0,
+                        .east = 40.0,
+                        .north = 40.0,
+                        .south = -40.0,
+                        .width = 16,
+                        .height = 8,
+                        .underground = false,
+                        .depth = 0.0F};
+    const double down = 10.0 * std::numbers::pi / 180.0 * radius;
+    // Rows are squeezed towards the poles, so their samples are nearer across than down.
+    CHECK(server::river_margin(survey, radius, 0.0) == Catch::Approx(down / 2.0));
+    CHECK(server::river_margin(survey, radius, 1.0) == Catch::Approx(down / 2.0));
+    const Survey wide{.west = -180.0,
+                      .east = 180.0,
+                      .north = 10.0,
+                      .south = -10.0,
+                      .width = 4,
+                      .height = 4,
+                      .underground = false,
+                      .depth = 0.0F};
+    CHECK(server::river_margin(wide, radius, 0.0) ==
+          Catch::Approx(45.0 * std::numbers::pi / 180.0 * radius));
+}
+
+TEST_CASE("surveyed rivers run only on dry land, wide enough to see", "[server][survey]") {
+    jobs::JobSystem jobs{2};
+    const probe::Ground ground = server::survey_ground(geology(), radius, whole(256), jobs);
+    std::size_t rivers = 0;
+    for (std::size_t sample = 0; sample < ground.river.size(); ++sample) {
+        if (ground.river[sample] == 0) {
+            continue;
+        }
+        ++rivers;
+        REQUIRE(ground.elevation[sample] > 0.0F);
+        REQUIRE(ground.biome[sample] != std::to_underlying(planet::Biome::Lake));
+    }
+    CHECK(rivers > 0);
 }
 
 TEST_CASE("inspections must lie on the planet", "[server][survey]") {

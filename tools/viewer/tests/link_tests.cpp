@@ -41,6 +41,8 @@ probe::Ground surveyed(const probe::Survey& survey, jobs::JobSystem& /*jobs*/) {
     return probe::Ground{.survey = survey,
                          .elevation = std::vector<float>(samples, survey.depth),
                          .biome = std::vector<std::uint8_t>(samples, 0),
+                         .water_table = std::vector<float>(samples, 0.0F),
+                         .river = std::vector<std::uint8_t>(samples, 0),
                          .rock = {},
                          .deposit = {}};
 }

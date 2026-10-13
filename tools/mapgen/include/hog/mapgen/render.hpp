@@ -64,6 +64,9 @@ deposit_colour(const std::array<planet::Deposit, planet::resource_count>& deposi
 // green and tan to brown far down.
 [[nodiscard]] Rgb water_table_colour(std::int64_t water_table) noexcept;
 
+// A river's blue, deepening as it widens, by its width in metres.
+[[nodiscard]] Rgb river_colour(double width) noexcept;
+
 // What lies on land: a lake, a river in blue deepening as it widens, or else the ground's colour.
 [[nodiscard]] Rgb with_water(Rgb ground, bool lake, const planet::Reach* river) noexcept;
 

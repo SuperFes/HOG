@@ -113,16 +113,20 @@ void write_body(ByteWriter& out, const Fetch& fetch) {
     }
 }
 
+void write_singles(ByteWriter& out, const std::vector<float>& values) {
+    write_count(out, values.size());
+    for (const float value : values) {
+        out.write(std::bit_cast<std::uint32_t>(value));
+    }
+}
+
 void write_body(ByteWriter& out, const Layers& layers) {
     out.write(static_cast<std::uint64_t>(layers.time.time_since_epoch().count()));
     write_clock(out, layers.clock);
     write_count(out, layers.layers.size());
     for (const Layer& layer : layers.layers) {
         write_text(out, layer.name);
-        write_count(out, layer.values.size());
-        for (const float value : layer.values) {
-            out.write(std::bit_cast<std::uint32_t>(value));
-        }
+        write_singles(out, layer.values);
     }
 }
 
@@ -153,11 +157,10 @@ void write_bytes(ByteWriter& out, const std::vector<std::uint8_t>& values) {
 
 void write_body(ByteWriter& out, const Ground& ground) {
     write_body(out, ground.survey);
-    write_count(out, ground.elevation.size());
-    for (const float value : ground.elevation) {
-        out.write(std::bit_cast<std::uint32_t>(value));
-    }
+    write_singles(out, ground.elevation);
     write_bytes(out, ground.biome);
+    write_singles(out, ground.water_table);
+    write_bytes(out, ground.river);
     write_bytes(out, ground.rock);
     write_bytes(out, ground.deposit);
 }
@@ -268,6 +271,14 @@ Fetch read_fetch(ValueReader& in) {
     return fetch;
 }
 
+std::vector<float> read_singles(ValueReader& in) {
+    std::vector<float> values(read_count(in, sizeof(std::uint32_t)));
+    for (float& value : values) {
+        value = in.single();
+    }
+    return values;
+}
+
 Layers read_layers(ValueReader& in) {
     Layers layers;
     layers.time =
@@ -276,12 +287,8 @@ Layers read_layers(ValueReader& in) {
     const std::uint32_t count = read_count(in, sizeof(std::uint16_t) + sizeof(std::uint32_t));
     layers.layers.reserve(count);
     for (std::uint32_t index = 0; index < count && in.ok(); ++index) {
-        Layer layer{.name = read_text(in), .values = {}};
-        layer.values.resize(read_count(in, sizeof(std::uint32_t)));
-        for (float& value : layer.values) {
-            value = in.single();
-        }
-        layers.layers.push_back(std::move(layer));
+        // Braced initialisers run in order.
+        layers.layers.push_back(Layer{.name = read_text(in), .values = read_singles(in)});
     }
     return layers;
 }
@@ -323,19 +330,18 @@ std::vector<std::uint8_t> read_bytes(ValueReader& in) {
 }
 
 Ground read_ground(ValueReader& in) {
-    Ground ground{
-        .survey = read_survey(in), .elevation = {}, .biome = {}, .rock = {}, .deposit = {}};
-    ground.elevation.resize(read_count(in, sizeof(std::uint32_t)));
-    for (float& value : ground.elevation) {
-        value = in.single();
-    }
-    ground.biome = read_bytes(in);
-    ground.rock = read_bytes(in);
-    ground.deposit = read_bytes(in);
+    Ground ground{.survey = read_survey(in),
+                  .elevation = read_singles(in),
+                  .biome = read_bytes(in),
+                  .water_table = read_singles(in),
+                  .river = read_bytes(in),
+                  .rock = read_bytes(in),
+                  .deposit = read_bytes(in)};
     const std::size_t samples =
         static_cast<std::size_t>(ground.survey.width) * ground.survey.height;
     const std::size_t below = ground.survey.underground ? samples : 0;
     if (in.ok() && (ground.elevation.size() != samples || ground.biome.size() != samples ||
+                    ground.water_table.size() != samples || ground.river.size() != samples ||
                     ground.rock.size() != below || ground.deposit.size() != below)) {
         in.fail(Error{.code = ErrorCode::Parse,
                       .message = std::format("ground values don't match its {} by {} samples",
