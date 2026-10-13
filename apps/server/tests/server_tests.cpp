@@ -587,8 +587,9 @@ TEST_CASE("debug tools pause, step, speed up and rejoin real time", "[app][serve
         again = ask.fetch();
         refused.push_back(ask.control(Action::Step, 0));
         std::ignore = ask.control(Action::Step, 3);
-        // Tools are still answered while it steps or catches up.
-        const auto deadline = MonotonicClock::now() + 10s;
+        // Tools are still answered while it steps or catches up. Catching up an hour is 72,000
+        // ticks, slow in sanitizer builds under load; the waits end as soon as they're met.
+        const auto deadline = MonotonicClock::now() + 60s;
         do {
             stepped = ask.fetch();
         } while (stepped.time < first.time + 90s && MonotonicClock::now() < deadline);
