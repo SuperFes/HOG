@@ -165,19 +165,26 @@ LavaTube Caves::lava_tube(DVec3 vent, std::uint64_t seed) const {
     for (int step = 0; step < longest_tube && nodes.back().elevation > 0; ++step) {
         const Node& here = nodes.back();
         const DVec3 side = glm::normalize(glm::cross(here.direction, heading));
+        // The lowest way down, give or take the wobble.
         std::optional<Node> lowest;
+        std::int64_t lowest_choice = 0;
         DVec3 lowest_heading{};
+        std::uint64_t way_index = 0;
         for (const double turn : {0.0, -lava_turn, lava_turn}) {
             const DVec3 way = glm::normalize(heading + (side * turn));
             const DVec3 next =
                 glm::normalize(here.direction + (way * (lava_step / planet_radius_)));
             const std::int64_t elevation = ground(next);
-            if (!lowest || elevation < lowest->elevation) {
+            const std::int64_t choice =
+                elevation + static_cast<std::int64_t>(hash_values(seed, 3, step, way_index++) %
+                                                      static_cast<std::uint64_t>(lava_wobble + 1));
+            if (elevation < here.elevation && (!lowest || choice < lowest_choice)) {
                 lowest = Node{.direction = next, .elevation = elevation};
+                lowest_choice = choice;
                 lowest_heading = way;
             }
         }
-        if (lowest->elevation >= here.elevation) {
+        if (!lowest) {
             break;
         }
         heading = glm::normalize(lowest_heading -
