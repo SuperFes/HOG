@@ -39,7 +39,8 @@ struct LandFields {
 // What the weather did to the ground over a step, per cell.
 struct LandWeather {
     std::span<const float> rain;        // mm
-    std::span<const float> snow;        // mm of water, hail included
+    std::span<const float> snow;        // mm of water
+    std::span<const float> hail;        // mm of water
     std::span<const float> evaporation; // mm drawn from the surface
     std::span<const float> temperature; // °C of the surface air
     double seconds = 0.0;               // the step's length

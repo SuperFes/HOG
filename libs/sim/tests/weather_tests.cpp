@@ -458,10 +458,12 @@ TEST_CASE("weather saves and loads", "[sim][weather]") {
     CHECK(loaded.time() == saved.time());
     CHECK(loaded.fields() == saved.fields());
     CHECK(loaded.ocean() == saved.ocean());
+    CHECK(loaded.land().fields() == saved.land().fields());
     saved.advance_to(march_equinox + hours{9}, jobs);
     loaded.advance_to(march_equinox + hours{9}, jobs);
     CHECK(loaded.fields() == saved.fields());
     CHECK(loaded.ocean() == saved.ocean());
+    CHECK(loaded.land().fields() == saved.land().fields());
 
     Weather finer{WeatherConfig{.level = level + 1}, std::vector<Ground>(6U << 8U), june_solstice};
     const auto other_level = finer.load(Weather::save_version, bytes);
@@ -484,11 +486,18 @@ TEST_CASE("weather saves and loads", "[sim][weather]") {
     // Without saved means, they start from the weather as it stands.
     CHECK(old.fields().recent_temperature == old.fields().temperature);
     CHECK(old.fields().recent_precipitation[0] > 0.0F);
+    // Without saved land, it spins up under the saved time's seasons.
+    Weather bare{config(), basin(), june_solstice};
+    const std::size_t land_bytes =
+        bare.ocean().size() * ((4 * sizeof(float)) + (4 * sizeof(double)));
+    REQUIRE(bare.load(4, std::span{bytes}.first(bytes.size() - land_bytes)));
+    CHECK(bare.ocean() == current.ocean());
+    CHECK(std::ranges::any_of(bare.land().fields().soil, [](float soil) { return soil > 0.1F; }));
     // Without a saved sea, it settles one under the saved winds.
     Weather dry{config(), basin(), june_solstice};
     const std::size_t sea_bytes =
         dry.ocean().size() * (sizeof(float) + (2 * sizeof(Vec2)) + sizeof(double));
-    REQUIRE(dry.load(3, std::span{bytes}.first(bytes.size() - sea_bytes)));
+    REQUIRE(dry.load(3, std::span{bytes}.first(bytes.size() - sea_bytes - land_bytes)));
     CHECK(dry.fields() == saved_fields);
     CHECK(std::ranges::any_of(dry.ocean().current, [](Vec2 flow) { return flow != Vec2{0.0F}; }));
 
@@ -498,6 +507,38 @@ TEST_CASE("weather saves and loads", "[sim][weather]") {
     longer.push_back(std::byte{0});
     CHECK_FALSE(loaded.load(Weather::save_version, longer));
     CHECK(loaded.fields() == saved.fields());
+}
+
+TEST_CASE("land starts with the season's snow and rivers, and the weather moves them on",
+          "[sim][weather]") {
+    JobSystem jobs{1};
+    Weather weather{config(), basin(), june_solstice};
+    const hog::sim::Land& ground = weather.land();
+    double winter = 0.0;
+    double summer = 0.0;
+    double flowing = 0.0;
+    for (std::uint32_t index = 0; index < weather.grid().size(); ++index) {
+        const double sin_latitude = weather.grid().frame(index).up.z;
+        if (basin()[index].ocean) {
+            continue;
+        }
+        const auto snow = static_cast<double>(ground.fields().snow[index]);
+        if (sin_latitude < -std::sin(50.0 * degree)) {
+            winter = std::max(winter, snow);
+        } else if (sin_latitude > std::sin(35.0 * degree) &&
+                   sin_latitude < std::sin(55.0 * degree)) {
+            summer = std::max(summer, snow);
+        }
+        flowing = std::max(flowing, ground.fields().usual_flow[index]);
+    }
+    CHECK(winter > 50.0);
+    CHECK(summer == 0.0);
+    CHECK(flowing > 0.0);
+
+    const hog::sim::LandFields before = ground.fields();
+    weather.advance_to(june_solstice + hours{6}, jobs);
+    CHECK(ground.fields().soil != before.soil);
+    CHECK(ground.fields().channel != before.channel);
 }
 
 TEST_CASE("recent weather follows the weather slowly", "[sim][weather]") {

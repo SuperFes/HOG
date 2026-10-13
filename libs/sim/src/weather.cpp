@@ -7,8 +7,10 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <numbers>
 #include <utility>
+#include <vector>
 
 namespace hog::sim {
 
@@ -75,7 +77,8 @@ Weather::Weather(const WeatherConfig& config, std::vector<Ground> ground, GameTi
       calendar_(positive(config.day), config.axial_tilt), fields_(grid_.size()),
       before_(grid_.size()), time_(detail::last_step(now, positive(config.step))),
       ocean_(grid_, ground_, config.tuning.ocean, rotation(config),
-             detail::seasons(config, time_).now) {
+             detail::seasons(config, time_).now),
+      land_(grid_, ground_, config.tuning.land, config.planet_radius) {
     HOG_ASSERT(config.step > GameDuration::zero(), "weather step must be positive");
     HOG_ASSERT(config.day > GameDuration::zero(), "weather day must be positive");
     HOG_ASSERT(ground_.size() == grid_.size(), "need ground for every cell");
@@ -93,6 +96,7 @@ Weather::Weather(const WeatherConfig& config, std::vector<Ground> ground, GameTi
     start_air();
     spin_up_ocean();
     start_air();
+    spin_up_land();
 }
 
 void Weather::start_air() {
@@ -119,6 +123,60 @@ void Weather::spin_up_ocean() {
         ocean_.warm(grid_, detail::seasons(config_, time_ - (left * day)).now, Seconds{day}.count(),
                     nullptr);
     }
+}
+
+void Weather::spin_up_land() {
+    const LandTuning& tuning = config_.tuning.land;
+    constexpr GameDuration day = std::chrono::days{1};
+    const auto days = std::chrono::round<GameDuration>(tuning.spin_up) / day;
+    const auto counted = std::min<std::int64_t>(days, 365);
+    const std::size_t size = grid_.size();
+    std::vector<float> rain(size);
+    std::vector<float> snow(size);
+    std::vector<float> evaporation(size);
+    std::vector<float> temperature(size);
+    const std::vector<float> hail(size);
+    std::vector<double> groundwater(size);
+    std::vector<double> flow(size);
+    land_.set_fields(grid_, LandFields{size});
+    for (auto left = days; left > 0; --left) {
+        const detail::Seasons seasons = detail::seasons(config_, time_ - (left * day));
+        for (std::uint32_t index = 0; index < size; ++index) {
+            const Ground& ground = ground_[index];
+            const double surface =
+                detail::targets(config_.tuning, ground, grid_.frame(index).up.z, seasons,
+                                static_cast<double>(ocean_.fields().temperature[index]))
+                    .surface;
+            const auto falling = static_cast<double>(detail::usual_precipitation(ground));
+            const double snowy =
+                std::clamp((config_.tuning.water.snow_below - surface) / 3.0, 0.0, 1.0);
+            temperature[index] = static_cast<float>(surface);
+            rain[index] = static_cast<float>(falling * (1.0 - snowy));
+            snow[index] = static_cast<float>(falling * snowy);
+            evaporation[index] =
+                static_cast<float>(tuning.drying * std::max(surface, 0.0) * land_.wetness(index));
+        }
+        land_.step(grid_,
+                   LandWeather{.rain = rain,
+                               .snow = snow,
+                               .hail = hail,
+                               .evaporation = evaporation,
+                               .temperature = temperature,
+                               .seconds = Seconds{day}.count()},
+                   nullptr);
+        if (left <= counted) {
+            for (std::uint32_t index = 0; index < size; ++index) {
+                groundwater[index] +=
+                    land_.fields().groundwater[index] / static_cast<double>(counted);
+                flow[index] +=
+                    static_cast<double>(land_.fields().flow[index]) / static_cast<double>(counted);
+            }
+        }
+    }
+    LandFields settled = land_.fields();
+    settled.usual_groundwater = std::move(groundwater);
+    settled.usual_flow = std::move(flow);
+    land_.set_fields(grid_, std::move(settled));
 }
 
 void Weather::set_fields(WeatherFields fields) {
@@ -167,6 +225,14 @@ void Weather::step(GameTime at, jobs::JobSystem& jobs) {
         detail::heat(context, fields_, index);
         detail::water(context, fields_, index);
     });
+    land_.step(grid_,
+               LandWeather{.rain = fields_.rain,
+                           .snow = fields_.snow,
+                           .hail = fields_.hail,
+                           .evaporation = fields_.evaporation,
+                           .temperature = fields_.temperature,
+                           .seconds = context.seconds},
+               &jobs);
     time_ = at;
     balance_winds(&jobs);
 }

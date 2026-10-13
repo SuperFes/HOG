@@ -85,6 +85,7 @@ double Land::water(std::uint32_t index) const {
 
 void Land::step(const CellGrid& grid, const LandWeather& weather, jobs::JobSystem* jobs) {
     HOG_ASSERT(weather.rain.size() == grid.size() && weather.snow.size() == grid.size() &&
+                   weather.hail.size() == grid.size() &&
                    weather.evaporation.size() == grid.size() &&
                    weather.temperature.size() == grid.size(),
                "need weather for every cell");

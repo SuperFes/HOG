@@ -170,6 +170,10 @@ struct LandTuning {
     double specific_yield = 0.1; // share of the rock water fills, so 100 mm of it is a metre
     Seconds river = std::chrono::hours{2};  // water takes this long to leave a cell's river
     Seconds usual = std::chrono::days{365}; // the running means water is measured against
+    // New land runs this long under the seasons' usual weather before it is first used, in
+    // day-long steps, and takes its usual levels from the last year of it.
+    Seconds spin_up = std::chrono::days{730};
+    double drying = 0.1; // mm a day per °C the sun draws from wet ground while spinning up
 };
 
 struct WeatherTuning {

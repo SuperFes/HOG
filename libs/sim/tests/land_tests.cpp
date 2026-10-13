@@ -49,8 +49,10 @@ struct Run {
         const std::vector<float> snow(grid().size(), spell.snow);
         const std::vector<float> evaporation(grid().size(), spell.evaporation);
         const std::vector<float> temperature(grid().size(), spell.temperature);
+        const std::vector<float> hail(grid().size());
         const LandWeather weather{.rain = rain,
                                   .snow = snow,
+                                  .hail = hail,
                                   .evaporation = evaporation,
                                   .temperature = temperature,
                                   .seconds = hour};
@@ -196,6 +198,7 @@ struct Hillside {
         const std::vector<float> mild(fine().size(), 10.0F);
         const LandWeather weather{.rain = falling,
                                   .snow = none,
+                                  .hail = none,
                                   .evaporation = none,
                                   .temperature = mild,
                                   .seconds = hour};

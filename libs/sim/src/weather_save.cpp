@@ -75,6 +75,18 @@ void each_sea_field(Fields& fields, Visit visit) {
     visit(fields.stream);
 }
 
+template <typename Fields, typename Visit>
+void each_land_field(Fields& fields, Visit visit) {
+    visit(fields.snow);
+    visit(fields.soil);
+    visit(fields.groundwater);
+    visit(fields.runoff);
+    visit(fields.usual_groundwater);
+    visit(fields.channel);
+    visit(fields.flow);
+    visit(fields.usual_flow);
+}
+
 void read_value(ValueReader& in, double& value) {
     value = in.twice();
 }
@@ -115,7 +127,7 @@ std::vector<std::byte> Weather::save() const {
         write_float(out, system.age);
         write_float(out, system.life);
     }
-    each_sea_field(ocean_.fields(), [&](const auto& values) {
+    const auto write_values = [&](const auto& values) {
         for (const auto value : values) {
             using Value = std::remove_cvref_t<decltype(value)>;
             if constexpr (std::is_same_v<Value, Vec2>) {
@@ -127,7 +139,9 @@ std::vector<std::byte> Weather::save() const {
                 write_float(out, value);
             }
         }
-    });
+    };
+    each_sea_field(ocean_.fields(), write_values);
+    each_land_field(land_.fields(), write_values);
     return std::move(out).take();
 }
 
@@ -162,13 +176,18 @@ Result<void> Weather::load(std::uint16_t version, std::span<const std::byte> byt
         }
         systems = std::move(*read);
     }
+    const auto read_values = [&](auto& values) {
+        for (auto& value : values) {
+            read_value(in, value);
+        }
+    };
     OceanFields sea{grid_.size()};
     if (version >= 4) {
-        each_sea_field(sea, [&](auto& values) {
-            for (auto& value : values) {
-                read_value(in, value);
-            }
-        });
+        each_sea_field(sea, read_values);
+    }
+    LandFields land{grid_.size()};
+    if (version >= 5) {
+        each_land_field(land, read_values);
     }
     if (auto finished = in.finish(); !finished) {
         return finished;
@@ -187,6 +206,11 @@ Result<void> Weather::load(std::uint16_t version, std::span<const std::byte> byt
         ocean_.set_fields(grid_, std::move(sea));
     } else {
         spin_up_ocean();
+    }
+    if (version >= 5) {
+        land_.set_fields(grid_, std::move(land));
+    } else {
+        spin_up_land();
     }
     return {};
 }
