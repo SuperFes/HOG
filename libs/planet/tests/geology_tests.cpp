@@ -249,7 +249,7 @@ TEST_CASE("the crust is thick under continents and mountains and thin under the 
     CHECK(thinnest_land >= 31.5);
     CHECK(thickest_abyss <= 7.7);
     REQUIRE(mountain_count > 0.0);
-    CHECK(mountain / mountain_count > lowland / lowland_count + 10.0);
+    CHECK(mountain / mountain_count > (lowland / lowland_count) + 10.0);
 }
 
 TEST_CASE("the crust thickens smoothly across the shelves", "[planet][geology]") {

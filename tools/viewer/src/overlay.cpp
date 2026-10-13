@@ -328,6 +328,24 @@ Rgb sea_at(const Sampler& sampler, const Spot& spot) {
     return mapgen::temperature_colour(fixed(sampler.smooth(warmth, spot)));
 }
 
+// Rock, the rarest deposit or the rock's heat at the surveyed depth, tinted under the sea so
+// coasts still show.
+Rgb underground_at(const Sampler& sampler, Overlay overlay, const Spot& spot) {
+    std::optional<Rgb> below;
+    if (overlay == Overlay::Heat) {
+        const std::optional<double> heat = sampler.heat(spot);
+        if (heat) {
+            below = mapgen::heat_colour(fixed(*heat));
+        }
+    } else {
+        below = sampler.underground(spot);
+    }
+    if (!below) {
+        return missing_colour;
+    }
+    return sampler.ocean(spot) ? mapgen::mix(*below, ocean_blue, 0.4) : *below;
+}
+
 Rgb colour_at(const Sampler& sampler, Overlay overlay, std::span<const float> species, double most,
               const Spot& spot) {
     switch (overlay) {
@@ -348,22 +366,9 @@ Rgb colour_at(const Sampler& sampler, Overlay overlay, std::span<const float> sp
         return depth ? sampler.with_water(mapgen::water_table_colour(fixed(*depth)), spot)
                      : missing_colour;
     }
-    case Overlay::Minerals: {
-        const std::optional<Rgb> below = sampler.underground(spot);
-        if (!below) {
-            return missing_colour;
-        }
-        // Tinted under the sea, so coasts still show.
-        return sampler.ocean(spot) ? mapgen::mix(*below, ocean_blue, 0.4) : *below;
-    }
-    case Overlay::Heat: {
-        const std::optional<double> heat = sampler.heat(spot);
-        if (!heat) {
-            return missing_colour;
-        }
-        const Rgb glow = mapgen::heat_colour(fixed(*heat));
-        return sampler.ocean(spot) ? mapgen::mix(glow, ocean_blue, 0.4) : glow;
-    }
+    case Overlay::Minerals:
+    case Overlay::Heat:
+        return underground_at(sampler, overlay, spot);
     case Overlay::Temperature:
     case Overlay::Air:
     case Overlay::Sky:
