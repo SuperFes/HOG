@@ -116,7 +116,7 @@ TEST_CASE("every message survives a round trip", "[probe][messages]") {
         .column = Column{.elevation = 240.5F,
                          .biome = 7,
                          .water_table = 3.25F,
-                         .river = 0.5F,
+                         .water = 0.5F,
                          .continental = true,
                          .cover = 1,
                          .cover_thickness = 2.5F,

@@ -17,8 +17,9 @@ namespace hog::planet {
 
 namespace {
 
-constexpr std::uint64_t belt_salt = 0x6265'6C74'7300'0000ULL;  // "belts"
-constexpr std::uint64_t ridge_salt = 0x7269'6467'6573'0000ULL; // "ridges"
+constexpr std::uint64_t belt_salt = 0x6265'6C74'7300'0000ULL;   // "belts"
+constexpr std::uint64_t ridge_salt = 0x7269'6467'6573'0000ULL;  // "ridges"
+constexpr std::uint64_t relief_salt = 0x7265'6C69'6566'0000ULL; // "relief"
 
 // Continent heights (fixed point) over which each effect ramps from nothing to full.
 constexpr std::int64_t depth_width = fixed_one * 3 / 20;
@@ -29,6 +30,12 @@ constexpr double belt_frequency = 2.0;
 constexpr int belt_octaves = 3;
 constexpr std::int64_t belt_threshold = fixed_one / 8;
 constexpr std::int64_t belt_width = fixed_one / 5;
+
+// Continental lowlands roll by some tens of metres over a dozen kilometres or so, so no plain is
+// dead flat and water always finds a way down.
+constexpr std::int64_t relief_height = 80;
+constexpr double relief_frequency = 8.0;
+constexpr int relief_octaves = 4;
 
 constexpr double ridge_frequency = 6.0;
 constexpr int ridge_octaves = 6;
@@ -60,6 +67,7 @@ Elevation::Elevation(const PlanetConfig& config)
       archipelago_{config.seed, config.radius, continents_},
       belt_seed_{hash_combine(config.seed, belt_salt)},
       ridge_seed_{hash_combine(config.seed, ridge_salt)},
+      relief_seed_{hash_combine(config.seed, relief_salt)},
       evolving_{std::make_shared<Evolving>(config)} {}
 
 Elevation::Evolved::Evolved(Landform worn, const Elevation& terrain, const PlanetConfig& config)
@@ -152,6 +160,21 @@ std::optional<Channel> Elevation::river(CellId cell) const {
     return evolved.rivers.channel(cell, worn(cell, generated, evolved.landform, evolved.meander));
 }
 
+std::optional<Channel> Elevation::lake(CellId cell) const {
+    const std::int64_t generated = this->generated(cell);
+    if (generated <= 0) {
+        return std::nullopt;
+    }
+    const Evolved& evolved = this->evolved();
+    const std::int64_t ground =
+        evolved.rivers.cut(cell, worn(cell, generated, evolved.landform, evolved.meander));
+    const auto level = evolved.rivers.lake(cell, ground);
+    if (!level) {
+        return std::nullopt;
+    }
+    return Channel{.bed = ground, .surface = *level};
+}
+
 std::int64_t Elevation::above_water(CellId cell) const {
     const std::int64_t generated = this->generated(cell);
     if (generated <= 0) {
@@ -160,6 +183,9 @@ std::int64_t Elevation::above_water(CellId cell) const {
     const Evolved& evolved = this->evolved();
     const std::int64_t ground =
         evolved.rivers.cut(cell, worn(cell, generated, evolved.landform, evolved.meander));
+    if (evolved.rivers.lake(cell, ground)) {
+        return 0;
+    }
     const std::int64_t water = evolved.landform.sample(evolved.rivers.levels(),
                                                        cell_at(evolved.meander(cell_center(cell))));
     return std::max<std::int64_t>(ground - water, 0);
@@ -185,8 +211,15 @@ std::int64_t Elevation::generated(CellId cell) const {
     if (height <= 0) {
         return -ocean_depth * ramp(-height, depth_width);
     }
-    const std::int64_t lowland = lowland_height * ramp(height, lowland_width);
-    // Islands keep to lowland hills; only continents carry mountain belts.
+    // Islands keep to lowland hills; only continents roll and carry mountain belts.
+    const std::int64_t relief =
+        (relief_height *
+         ((ramp(continent, inland_width) *
+           fbm(relief_seed_, noise_point(cell_center(cell), relief_frequency), relief_octaves)) >>
+          fixed_fraction_bits));
+    const std::int64_t lowland =
+        (((lowland_height * fixed_one) + relief) * ramp(height, lowland_width)) >>
+        fixed_fraction_bits;
     const std::int64_t strength = mountain_strength(cell, continent);
     if (strength == 0) {
         return lowland;

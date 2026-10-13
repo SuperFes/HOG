@@ -164,26 +164,29 @@ TEST_CASE("moisture colours run from brown to blue", "[mapgen]") {
     CHECK(middling[1] > middling[2]);
 }
 
-TEST_CASE("water maps show rivers over the water table, and the sea", "[mapgen]") {
-    const auto colour = [](std::int64_t table) {
-        return hog::mapgen::water_colour(100 * fixed_one, table * fixed_one, nullptr);
+TEST_CASE("water table colours run from teal at the surface to brown far down", "[mapgen]") {
+    const auto colour = [](std::int64_t metres) {
+        return hog::mapgen::water_table_colour(metres * fixed_one);
     };
-    const hog::mapgen::Rgb surface = colour(0);
-    CHECK(surface[2] > surface[0]);
+    CHECK(colour(0)[2] > colour(0)[0]);
     CHECK(colour(100)[0] > colour(100)[2]);
     CHECK(colour(500) == colour(200));
-    CHECK(hog::mapgen::water_colour(-fixed_one, 0, nullptr) ==
-          hog::mapgen::height_colour(-fixed_one));
+}
+
+TEST_CASE("lakes and rivers show over the ground", "[mapgen]") {
+    const hog::mapgen::Rgb ground{10, 200, 10};
+    CHECK(hog::mapgen::with_water(ground, false, nullptr) == ground);
+    CHECK(hog::mapgen::with_water(ground, true, nullptr) ==
+          hog::mapgen::biome_colour(hog::planet::Biome::Lake));
     hog::planet::Reach narrow;
     narrow.width = 2.0;
     hog::planet::Reach wide;
     wide.width = 40.0;
-    const auto creek = hog::mapgen::water_colour(100 * fixed_one, 0, &narrow);
-    const auto river = hog::mapgen::water_colour(100 * fixed_one, 0, &wide);
+    const auto creek = hog::mapgen::with_water(ground, false, &narrow);
+    const auto river = hog::mapgen::with_water(ground, false, &wide);
     CHECK(creek[2] > creek[0]);
     CHECK(river[2] > river[0]);
     CHECK(river[1] < creek[1]);
-    CHECK(creek != surface);
 }
 
 TEST_CASE("water maps draw rivers wherever they run", "[mapgen]") {

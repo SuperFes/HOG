@@ -25,9 +25,10 @@ enum class Biome : std::uint8_t {
     TropicalRainforest,
     Alpine,
     Wetland,
+    Lake,
 };
 
-inline constexpr int biome_count = static_cast<int>(Biome::Wetland) + 1;
+inline constexpr int biome_count = static_cast<int>(Biome::Lake) + 1;
 
 [[nodiscard]] std::string_view to_string(Biome biome) noexcept;
 
@@ -72,7 +73,8 @@ inline constexpr int biome_count = static_cast<int>(Biome::Wetland) + 1;
 
 // Climate from latitude and terrain: temperature falls towards the poles and with height;
 // moisture follows Earth-like circulation bands and dries out deep inland. High ground cold enough
-// holds glaciers, and wet ground where the water table reaches the surface turns to wetland.
+// holds glaciers, wet ground where the water table reaches the surface turns to wetland, and
+// ground under a lake is lake.
 class Climate {
 public:
     // Metres.

@@ -68,6 +68,8 @@ std::string_view to_string(Biome biome) noexcept {
         return "alpine";
     case Biome::Wetland:
         return "wetland";
+    case Biome::Lake:
+        return "lake";
     }
     return "unknown";
 }
@@ -112,6 +114,9 @@ Biome Climate::biome(CellId cell) const {
     const std::int64_t continent = terrain_.continents().height(cell);
     if (terrain_.archipelago().raise(cell, continent) <= 0) {
         return Biome::Ocean;
+    }
+    if (terrain_.lake(cell)) {
+        return Biome::Lake;
     }
     const std::int64_t elevation = terrain_.elevation(cell);
     const std::int64_t temperature = this->temperature(cell, elevation);

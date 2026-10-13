@@ -162,7 +162,7 @@ struct Column {
     float elevation = 0.0F;       // metres above sea level
     std::uint8_t biome = 0;       // planet::Biome
     float water_table = 0.0F;     // metres down to it
-    float river = 0.0F;           // metres of river water over the ground, if any
+    float water = 0.0F;           // metres of river or lake water over the ground, if any
     bool continental = false;     // crust, rather than ocean floor
     std::uint8_t cover = 0;       // planet::Rock, from the surface
     float cover_thickness = 0.0F; // metres

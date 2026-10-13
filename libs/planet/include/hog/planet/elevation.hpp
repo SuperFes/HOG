@@ -43,6 +43,9 @@ public:
     // The river running through a cell, if one does.
     [[nodiscard]] std::optional<Channel> river(CellId cell) const;
 
+    // The lake over a cell, if one is: the ground under it and the level of its water.
+    [[nodiscard]] std::optional<Channel> lake(CellId cell) const;
+
     // Fixed-point metres of the ground above the water it drains into first, a river or the
     // sea; zero at sea.
     [[nodiscard]] std::int64_t above_water(CellId cell) const;
@@ -82,6 +85,7 @@ private:
     Archipelago archipelago_;
     std::uint64_t belt_seed_;
     std::uint64_t ridge_seed_;
+    std::uint64_t relief_seed_;
     struct Evolving {
         PlanetConfig config;
         std::once_flag once;

@@ -82,8 +82,8 @@ std::vector<Reading> column_readings(const probe::Column& column) {
         lines.push_back(
             {.name = "water table", .value = std::format("{} down", metres(column.water_table))});
     }
-    if (column.river > 0.0F) {
-        lines.push_back({.name = "river", .value = std::format("{} deep", metres(column.river))});
+    if (column.water > 0.0F) {
+        lines.push_back({.name = "water", .value = std::format("{} deep", metres(column.water))});
     }
     lines.push_back({.name = "crust", .value = column.continental ? "continental" : "oceanic"});
     float depth = 0.0F;

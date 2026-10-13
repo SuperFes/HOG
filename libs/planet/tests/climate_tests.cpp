@@ -324,3 +324,19 @@ TEST_CASE("glaciers cap high ground that stays cold", "[planet][climate]") {
     }
     CHECK(glaciers > 0);
 }
+
+TEST_CASE("ground under a lake is lake", "[planet][climate]") {
+    const Climate climate{planet(1)};
+    int lakes = 0;
+    for (const CellId cell : cells_at(9)) {
+        const bool lake = climate.terrain().lake(cell).has_value();
+        REQUIRE((climate.biome(cell) == Biome::Lake) == lake);
+        if (lake) {
+            ++lakes;
+            const auto water = *climate.terrain().lake(cell);
+            REQUIRE(water.bed < water.surface);
+            REQUIRE(climate.water_table(cell) == 0);
+        }
+    }
+    CHECK(lakes > 0);
+}

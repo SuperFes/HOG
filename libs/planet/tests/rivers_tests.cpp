@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <vector>
 
@@ -90,7 +91,7 @@ TEST_CASE("rivers widen and deepen with the water they carry", "[planet][rivers]
     CHECK(Rivers::width(Rivers::source_area) < 5.0);
 }
 
-TEST_CASE("rivers run downhill to the sea, growing on the way", "[planet][rivers]") {
+TEST_CASE("rivers run downhill to the sea or a lake, growing on the way", "[planet][rivers]") {
     const auto reaches = rivers().reaches();
     REQUIRE(reaches.size() > 20);
     int at_sea = 0;
@@ -99,8 +100,11 @@ TEST_CASE("rivers run downhill to the sea, growing on the way", "[planet][rivers
         const auto next = std::ranges::find_if(
             reaches, [&](const Reach& other) { return other.from == reach.to; });
         if (next == reaches.end()) {
-            ++at_sea;
-            CHECK(reach.to.z <= 0.05);
+            const bool sea = reach.to.z <= 0.05;
+            at_sea += sea ? 1 : 0;
+            const auto lake =
+                rivers().lake(hog::planet::cell_at(reach.to, 22), reach.to_surface - fixed_one);
+            CHECK((sea || lake == reach.to_surface));
         } else {
             REQUIRE(next->from_surface == reach.to_surface);
             REQUIRE(next->width >= reach.width);
@@ -181,6 +185,69 @@ TEST_CASE("rivers can be found from a distance for drawing", "[planet][rivers]")
         if (rivers().channel(cell, plain(hog::planet::cell_center(cell)))) {
             CHECK(rivers().near(cell, 0.0) != nullptr);
         }
+    }
+}
+
+namespace {
+
+// Land rising north of a sea with a bowl sunk in it, left as it is.
+constexpr hog::DVec3 bowl_center{0.6, 0.0, 0.8};
+
+Landform bowl(std::int64_t runoff) {
+    LevelGrid grid{level, radius};
+    std::vector<std::int64_t> heights;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const hog::DVec3 at = hog::planet::cell_center(grid.cell(cell));
+        const double dip = 600.0 * std::max(0.0, 1.0 - (glm::length(at - bowl_center) / 0.25));
+        const double metres = at.z > 0.0 ? 20.0 + (900.0 * at.z) - dip : -1000.0;
+        heights.push_back(std::llround(metres * static_cast<double>(fixed_one)));
+    }
+    const std::vector<std::int64_t> none(grid.size(), 0);
+    const std::vector<std::int64_t> rain(grid.size(), runoff);
+    return Landform{std::move(grid),
+                    std::move(heights),
+                    {.uplift = none, .erodibility = none, .runoff = rain},
+                    0};
+}
+
+bool in_bowl(hog::DVec3 at, double within) {
+    return glm::length(at - bowl_center) < within;
+}
+
+} // namespace
+
+TEST_CASE("a basin with water enough holds a level lake, drained by a river from its outlet",
+          "[planet][rivers]") {
+    const Landform basin = bowl(fixed_one / 2);
+    const Rivers wet{basin, ground(basin), {1, basin.grid()}, radius};
+    const CellId middle = hog::planet::cell_at(bowl_center, 22);
+    const auto lake = wet.lake(middle, std::numeric_limits<std::int64_t>::min() / 2);
+    REQUIRE(lake);
+    for (const double out : {0.05, 0.1}) {
+        const CellId cell =
+            hog::planet::cell_at(glm::normalize(bowl_center + hog::DVec3{0.0, out, 0.0}), 22);
+        CHECK(wet.lake(cell, std::numeric_limits<std::int64_t>::min() / 2) == lake);
+    }
+    // Ground above the lake is dry.
+    CHECK_FALSE(wet.lake(middle, *lake + fixed_one));
+
+    int inside = 0;
+    int out_of = 0;
+    for (const Reach& reach : wet.reaches()) {
+        inside += in_bowl(reach.from, 0.1) && in_bowl(reach.to, 0.1) ? 1 : 0;
+        out_of += in_bowl(reach.from, 0.3) && reach.from_surface <= *lake ? 1 : 0;
+    }
+    CHECK(inside == 0);
+    CHECK(out_of > 0);
+}
+
+TEST_CASE("a basin too dry to fill holds no lake and no rivers", "[planet][rivers]") {
+    const Landform basin = bowl(fixed_one / 1'000);
+    const Rivers dry{basin, ground(basin), {1, basin.grid()}, radius};
+    CHECK_FALSE(dry.lake(hog::planet::cell_at(bowl_center, 22),
+                         std::numeric_limits<std::int64_t>::min() / 2));
+    for (const Reach& reach : dry.reaches()) {
+        REQUIRE_FALSE(in_bowl(reach.from, 0.2));
     }
 }
 

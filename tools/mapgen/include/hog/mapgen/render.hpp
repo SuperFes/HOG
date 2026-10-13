@@ -60,11 +60,12 @@ struct ImageSize {
 deposit_colour(const std::array<planet::Deposit, planet::resource_count>& deposits,
                std::int64_t elevation) noexcept;
 
-// Rivers in blue, deeper for wider ones; elsewhere on land, the water table from teal where it
-// meets the surface through green and tan to brown far down. The sea keeps its height colours.
-// Elevation and the water table's depth are in fixed-point metres.
-[[nodiscard]] Rgb water_colour(std::int64_t elevation, std::int64_t water_table,
-                               const planet::Reach* river) noexcept;
+// The water table's depth in fixed-point metres, from teal where it meets the surface through
+// green and tan to brown far down.
+[[nodiscard]] Rgb water_table_colour(std::int64_t water_table) noexcept;
+
+// What lies on land: a lake, a river in blue deepening as it widens, or else the ground's colour.
+[[nodiscard]] Rgb with_water(Rgb ground, bool lake, const planet::Reach* river) noexcept;
 
 [[nodiscard]] Image render(const planet::Geology& geology, double planet_radius, const View& view,
                            Layer layer, int width, jobs::JobSystem& jobs);

@@ -76,6 +76,7 @@ constexpr std::array<Rgb, planet::biome_count> biome_colours{{
     {10, 95, 35},    // tropical rainforest
     {145, 135, 135}, // alpine
     {80, 120, 100},  // wetland
+    {60, 110, 190},  // lake
 }};
 
 // Indexed by resource.
@@ -173,15 +174,18 @@ Rgb moisture_colour(std::int64_t moisture) noexcept {
     return ramp(moisture_stops, planet::fixed_to_double(moisture));
 }
 
-Rgb water_colour(std::int64_t elevation, std::int64_t water_table,
-                 const planet::Reach* river) noexcept {
-    if (elevation <= 0) {
-        return height_colour(elevation);
+Rgb water_table_colour(std::int64_t water_table) noexcept {
+    return ramp(water_table_stops, planet::fixed_to_double(water_table));
+}
+
+Rgb with_water(Rgb ground, bool lake, const planet::Reach* river) noexcept {
+    if (lake) {
+        return biome_colour(planet::Biome::Lake);
     }
     if (river != nullptr) {
         return ramp(river_stops, river->width);
     }
-    return ramp(water_table_stops, planet::fixed_to_double(water_table));
+    return ground;
 }
 
 Rgb rock_colour(planet::Rock rock) noexcept {
@@ -221,22 +225,34 @@ Image render(const planet::Geology& geology, double planet_radius, const View& v
         return 0.5 * glm::length(at - pixel_direction(resolved, size, x, other, planet_radius)) *
                planet_radius;
     };
+    const planet::Elevation& terrain = geology.terrain();
+    // Rivers are drawn at least a pixel wide, so they show at any scale.
+    const auto over_land = [&](Rgb ground, planet::CellId cell, DVec3 at, int x, int y) {
+        if (terrain.elevation(cell) <= 0) {
+            return ground;
+        }
+        return with_water(ground, terrain.lake(cell).has_value(),
+                          terrain.rivers().near(cell, margin(at, x, y)));
+    };
     const auto colour_at = [&](planet::CellId cell, DVec3 at, int x, int y) -> Rgb {
         switch (layer) {
         case Layer::Height:
-            return height_colour(geology.terrain().elevation(cell));
+            return over_land(height_colour(terrain.elevation(cell)), cell, at, x, y);
         case Layer::Biome:
-            return biome_colour(geology.climate().biome(cell));
+            return over_land(biome_colour(geology.climate().biome(cell)), cell, at, x, y);
         case Layer::Temperature:
             return temperature_colour(geology.climate().temperature(cell));
         case Layer::Moisture:
             return moisture_colour(geology.climate().moisture(cell));
         case Layer::Deposits:
-            return deposit_colour(geology.deposits(cell), geology.terrain().elevation(cell));
-        case Layer::Water:
-            return water_colour(geology.terrain().elevation(cell),
-                                geology.climate().water_table(cell),
-                                geology.terrain().rivers().near(cell, margin(at, x, y)));
+            return deposit_colour(geology.deposits(cell), terrain.elevation(cell));
+        case Layer::Water: {
+            const std::int64_t elevation = terrain.elevation(cell);
+            const Rgb ground = elevation <= 0
+                                   ? height_colour(elevation)
+                                   : water_table_colour(geology.climate().water_table(cell));
+            return over_land(ground, cell, at, x, y);
+        }
         }
         return {};
     };
