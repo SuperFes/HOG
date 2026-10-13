@@ -34,10 +34,6 @@ tropical_rainforest = 40
 alpine = 10
 wetland = 20
 
-[dryness]
-demand = 0.15
-climate = 0.5
-
 [fire]
 # About 4% of the land burns a year, mostly from a score or so of lightning strikes.
 damp = 0.5

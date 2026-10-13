@@ -25,12 +25,6 @@ struct GrowthConfig {
     double wet = 0.5;    // wetness (1 less dryness) from which growth is full
 };
 
-// How dry the ground is, from the planet's moisture map and the recent weather.
-struct DrynessConfig {
-    double demand = 0.15; // mm per day the air draws from the ground per °C above freezing
-    double climate = 0.5; // the moisture map's share, against the recent weather's
-};
-
 struct FireConfig {
     double damp = 0.5;    // dryness below which nothing burns
     double parched = 0.9; // dryness from which plants burn freely
@@ -51,7 +45,6 @@ struct FireConfig {
 // How the planet's plants grow and burn.
 struct Vegetation {
     GrowthConfig growth{};
-    DrynessConfig dryness{};
     FireConfig fire{};
 };
 
@@ -64,10 +57,6 @@ struct Vegetation {
 //     cold = 0
 //     warm = 15
 //     wet = 0.5
-//
-//     [dryness]
-//     demand = 0.15
-//     climate = 0.5
 //
 //     [fire]
 //     damp = 0.5

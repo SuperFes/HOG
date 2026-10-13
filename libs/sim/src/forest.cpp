@@ -37,15 +37,10 @@ double speed(const GrowthConfig& growth, double temperature, double dryness) {
 } // namespace
 
 std::vector<Soil> soil_for(const CellGrid& grid, const planet::World& world) {
-    const planet::Climate& climate = world.geology().climate();
     std::vector<Soil> soil(grid.size());
     for (std::uint32_t index = 0; index < grid.size(); ++index) {
         const planet::CellId cell = grid.cell(index);
-        soil[index] = Soil{
-            .biome = world.state(cell).biome,
-            .moisture = static_cast<float>(
-                std::clamp(planet::fixed_to_double(climate.moisture(cell)), 0.0, 1.0)),
-        };
+        soil[index] = Soil{.biome = world.state(cell).biome};
     }
     return soil;
 }
@@ -53,7 +48,8 @@ std::vector<Soil> soil_for(const CellGrid& grid, const planet::World& world) {
 ForestConditions forest_conditions_of(const Weather& weather) {
     const WeatherFields& fields = weather.fields();
     return ForestConditions{.temperature = fields.recent_temperature,
-                            .precipitation = fields.recent_precipitation,
+                            .soil = weather.land().fields().soil,
+                            .snow = weather.land().fields().snow,
                             .rain = fields.rain,
                             .rain_days = Seconds{weather.config().step}.count() / 86'400.0,
                             .storm = fields.storm,
@@ -93,14 +89,10 @@ std::string_view to_string(Stage stage) noexcept {
     return "unknown";
 }
 
-double dryness(const DrynessConfig& config, double moisture, double temperature,
-               double precipitation) noexcept {
-    const double supply = std::max(precipitation, 0.0);
-    const double demand = config.demand * std::max(temperature, 0.0);
-    const double kept = supply + demand > 0.0 ? supply / (supply + demand) : 1.0;
-    const double wetness =
-        (config.climate * std::clamp(moisture, 0.0, 1.0)) + ((1.0 - config.climate) * kept);
-    return std::clamp(1.0 - wetness, 0.0, 1.0);
+double dryness(double soil, double snow) noexcept {
+    // mm of snow that keeps the ground from burning.
+    constexpr double lying = 1.0;
+    return snow >= lying ? 0.0 : std::clamp(1.0 - soil, 0.0, 1.0);
 }
 
 Forest::Forest(const ForestConfig& config, std::vector<Soil> soil, GameTime now)
@@ -173,9 +165,9 @@ FireReport Forest::drain_fires() {
 std::uint64_t Forest::advance_to(GameTime now, const ForestConditions& conditions,
                                  jobs::JobSystem& jobs) {
     const std::size_t size = grid_.size();
-    HOG_ASSERT(conditions.temperature.size() == size && conditions.precipitation.size() == size &&
-                   conditions.rain.size() == size && conditions.storm.size() == size &&
-                   conditions.wind.size() == size,
+    HOG_ASSERT(conditions.temperature.size() == size && conditions.soil.size() == size &&
+                   conditions.snow.size() == size && conditions.rain.size() == size &&
+                   conditions.storm.size() == size && conditions.wind.size() == size,
                "need conditions for every cell");
     std::uint64_t steps = 0;
     while (next_step() <= now) {
@@ -189,10 +181,9 @@ void Forest::step(GameTime at, const ForestConditions& conditions, jobs::JobSyst
     const double days = Seconds{config_.step}.count() / 86'400.0;
     const auto step_number = static_cast<std::uint64_t>(at.time_since_epoch() / config_.step);
     detail::for_cells(&jobs, grid_.size(), [&](std::uint32_t cell) {
-        fields_.dryness[cell] = static_cast<float>(
-            dryness(config_.vegetation.dryness, static_cast<double>(soil_[cell].moisture),
-                    static_cast<double>(conditions.temperature[cell]),
-                    static_cast<double>(conditions.precipitation[cell])));
+        fields_.dryness[cell] =
+            static_cast<float>(dryness(static_cast<double>(conditions.soil[cell]),
+                                       static_cast<double>(conditions.snow[cell])));
     });
     detail::for_cells(&jobs, grid_.size(), [&](std::uint32_t cell) {
         catching_[cell] = catching(cell, conditions, days, step_number);

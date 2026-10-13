@@ -22,16 +22,13 @@ std::string error_of(std::string_view text) {
 
 } // namespace
 
-TEST_CASE("vegetation reads growth, dryness and fire", "[sim][vegetation]") {
+TEST_CASE("vegetation reads growth and fire", "[sim][vegetation]") {
     const auto vegetation = parse_vegetation(R"(
 [growth]
 capacity = { temperate_forest = 20, "boreal forest" = 10 }
 years = { temperate_forest = 60 }
 seeds = 0.05
 warm = 12
-
-[dryness]
-demand = 0.2
 
 [fire]
 damp = 0.3
@@ -47,8 +44,6 @@ burn_days = 3
     CHECK(vegetation->growth.seeds == 0.05);
     CHECK(vegetation->growth.cold == 0.0);
     CHECK(vegetation->growth.warm == 12.0);
-    CHECK(vegetation->dryness.demand == 0.2);
-    CHECK(vegetation->dryness.climate == 0.5);
     CHECK(vegetation->fire.damp == 0.3);
     CHECK(vegetation->fire.parched == 0.9);
     CHECK(vegetation->fire.spread == 4.0);
@@ -67,7 +62,7 @@ TEST_CASE("vegetation reports what it can't read", "[sim][vegetation]") {
                ContainsSubstring("growth.years.grassland"));
     CHECK_THAT(error_of("[growth]\ncold = 20"), ContainsSubstring("growth.warm"));
     CHECK_THAT(error_of("[growth]\nseeds = 0"), ContainsSubstring("growth.seeds"));
-    CHECK_THAT(error_of("[dryness]\nclimate = 2"), ContainsSubstring("dryness.climate"));
+    CHECK_THAT(error_of("[dryness]"), ContainsSubstring("dryness"));
     CHECK_THAT(error_of("[fire]\ndamp = 0.9"), ContainsSubstring("fire.parched"));
     CHECK_THAT(error_of("[fire]\nburn_days = 0"), ContainsSubstring("fire.burn_days"));
     CHECK_THAT(error_of("[fire]\nsmoke = 1"), ContainsSubstring("fire.smoke"));

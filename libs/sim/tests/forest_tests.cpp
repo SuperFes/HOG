@@ -18,7 +18,6 @@ using Catch::Matchers::WithinRel;
 using hog::GameTime;
 using hog::jobs::JobSystem;
 using hog::planet::Biome;
-using hog::sim::DrynessConfig;
 using hog::sim::Forest;
 using hog::sim::ForestConditions;
 using hog::sim::ForestConfig;
@@ -47,7 +46,7 @@ ForestConfig config() {
 // Forest everywhere but a band of ocean and one of grassland.
 std::vector<Soil> soil() {
     const hog::sim::CellGrid grid{level};
-    std::vector<Soil> soil(grid.size(), Soil{.biome = Biome::TemperateForest, .moisture = 0.6F});
+    std::vector<Soil> soil(grid.size(), Soil{.biome = Biome::TemperateForest});
     for (std::uint32_t cell = 0; cell < grid.size(); cell += 5) {
         soil[cell].biome = Biome::Ocean;
     }
@@ -60,18 +59,20 @@ std::vector<Soil> soil() {
 // The same weather in every cell.
 struct Weather {
     std::vector<float> temperature;
-    std::vector<float> precipitation;
+    std::vector<float> soil;
+    std::vector<float> snow;
     std::vector<float> rain;
     std::vector<float> storm;
     std::vector<hog::Vec2> wind;
 
-    Weather(std::size_t size, float degrees, float recent_rain)
-        : temperature(size, degrees), precipitation(size, recent_rain), rain(size), storm(size),
+    Weather(std::size_t size, float degrees, float fullness)
+        : temperature(size, degrees), soil(size, fullness), snow(size), rain(size), storm(size),
           wind(size, hog::Vec2{0.0F}) {}
 
     [[nodiscard]] ForestConditions conditions() const {
         return ForestConditions{.temperature = temperature,
-                                .precipitation = precipitation,
+                                .soil = soil,
+                                .snow = snow,
                                 .rain = rain,
                                 .rain_days = 1.0,
                                 .storm = storm,
@@ -81,18 +82,18 @@ struct Weather {
 
 // Hot, with no rain for weeks: dry enough for the forest to burn.
 Weather drought(std::size_t size) {
-    return Weather{size, 30.0F, 0.1F};
+    return Weather{size, 30.0F, 0.05F};
 }
 
 // Warm and wet enough to grow at full speed.
 Weather good_year(std::size_t size) {
-    return Weather{size, 20.0F, 3.0F};
+    return Weather{size, 20.0F, 0.8F};
 }
 
 // Forest everywhere.
 std::vector<Soil> woods() {
     return std::vector<Soil>(hog::sim::CellGrid{level}.size(),
-                             Soil{.biome = Biome::TemperateForest, .moisture = 0.6F});
+                             Soil{.biome = Biome::TemperateForest});
 }
 
 // A cell in the middle of the first face.
@@ -129,7 +130,7 @@ TEST_CASE("a forest starts fully grown on what its biomes hold", "[sim][forest]"
 TEST_CASE("a grown forest stays at what its biome holds", "[sim][forest]") {
     Forest forest{config(), soil(), start};
     JobSystem jobs{2};
-    const Weather summer{forest.grid().size(), 20.0F, 3.0F};
+    const Weather summer{forest.grid().size(), 20.0F, 0.8F};
     CHECK(forest.advance_to(start + days{365}, summer.conditions(), jobs) == 365);
     CHECK(forest.time() == start + days{365});
     for (std::uint32_t cell = 0; cell < forest.grid().size(); ++cell) {
@@ -138,22 +139,21 @@ TEST_CASE("a grown forest stays at what its biome holds", "[sim][forest]") {
     CHECK(forest.advance_to(start + days{365} + hours{23}, summer.conditions(), jobs) == 0);
 }
 
-TEST_CASE("the ground dries with heat and wets with rain and a wet climate", "[sim][forest]") {
-    const DrynessConfig settings;
+TEST_CASE("the ground is as dry as its soil is empty, and snow keeps it damp", "[sim][forest]") {
     using hog::sim::dryness;
-    // Frozen ground loses nothing to the air, so only the climate dries it.
-    CHECK_THAT(dryness(settings, 0.6, -5.0, 0.0), WithinAbs(0.2, 1e-9));
-    CHECK(dryness(settings, 0.6, 25.0, 0.0) > dryness(settings, 0.6, 25.0, 2.0));
-    CHECK(dryness(settings, 0.6, 30.0, 2.0) > dryness(settings, 0.6, 10.0, 2.0));
-    CHECK(dryness(settings, 0.1, 20.0, 2.0) > dryness(settings, 0.8, 20.0, 2.0));
-    CHECK_THAT(dryness(settings, 0.0, 40.0, 0.0), WithinAbs(1.0, 1e-9));
-    CHECK_THAT(dryness(settings, 1.0, 0.0, 10.0), WithinAbs(0.0, 1e-9));
+    CHECK_THAT(dryness(0.0, 0.0), WithinAbs(1.0, 1e-9));
+    CHECK_THAT(dryness(0.3, 0.0), WithinAbs(0.7, 1e-9));
+    CHECK_THAT(dryness(1.0, 0.0), WithinAbs(0.0, 1e-9));
+    CHECK(dryness(0.0, 5.0) == 0.0);
 
     Forest forest{config(), soil(), start};
     JobSystem jobs{1};
-    const Weather drought{forest.grid().size(), 30.0F, 0.1F};
+    Weather drought{forest.grid().size(), 30.0F, 0.2F};
     forest.advance_to(forest.next_step(), drought.conditions(), jobs);
-    CHECK_THAT(forest.fields().dryness[2], WithinAbs(dryness(settings, 0.6, 30.0, 0.1), 1e-6));
+    CHECK_THAT(forest.fields().dryness[2], WithinAbs(0.8, 1e-6));
+    std::ranges::fill(drought.snow, 20.0F);
+    forest.advance_to(forest.next_step(), drought.conditions(), jobs);
+    CHECK(forest.fields().dryness[2] == 0.0F);
 }
 
 TEST_CASE("stages follow the share of the biome's plants grown back", "[sim][forest]") {
@@ -214,7 +214,7 @@ TEST_CASE("a fire burns its cell down and the plants grow back through their sta
 TEST_CASE("wet ground and water don't burn", "[sim][forest]") {
     Forest forest{config(), soil(), start};
     JobSystem jobs{1};
-    const Weather wet{forest.grid().size(), 15.0F, 6.0F};
+    const Weather wet{forest.grid().size(), 15.0F, 1.0F};
     forest.advance_to(forest.next_step(), wet.conditions(), jobs);
     CHECK(forest.flammability(2) == 0.0);
     CHECK_FALSE(forest.ignite(2));
@@ -303,21 +303,21 @@ TEST_CASE("lightning lights dry plants under thunderstorms", "[sim][forest]") {
     settings.vegetation.fire.lightning = 0.02;
     settings.vegetation.fire.spread = 0.0;
     JobSystem jobs{2};
-    const auto fires = [&](float storm, float recent_rain, std::uint64_t seed) {
+    const auto fires = [&](float storm, float soil, std::uint64_t seed) {
         settings.seed = seed;
         Forest forest{settings, woods(), start};
-        Weather weather{forest.grid().size(), 30.0F, recent_rain};
+        Weather weather{forest.grid().size(), 30.0F, soil};
         std::ranges::fill(weather.storm, storm);
         forest.advance_to(start + days{10}, weather.conditions(), jobs);
         return std::pair{forest.drain_fires().started, forest.fields()};
     };
-    const auto [stormy, burnt] = fires(1.0F, 0.1F, 1);
+    const auto [stormy, burnt] = fires(1.0F, 0.05F, 1);
     CHECK(stormy > 5);
     CHECK(stormy < 100);
-    CHECK(fires(0.0F, 0.1F, 1).first == 0);
-    CHECK(fires(1.0F, 8.0F, 1).first == 0);
+    CHECK(fires(0.0F, 0.05F, 1).first == 0);
+    CHECK(fires(1.0F, 1.0F, 1).first == 0);
     // The same strikes every time, and others for another seed.
-    CHECK(fires(1.0F, 0.1F, 1).second == burnt);
+    CHECK(fires(1.0F, 0.05F, 1).second == burnt);
     CHECK(fires(1.0F, 0.1F, 2).second != burnt);
 }
 

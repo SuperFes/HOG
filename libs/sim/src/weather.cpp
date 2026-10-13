@@ -214,6 +214,7 @@ void Weather::step(GameTime at, jobs::JobSystem& jobs) {
         .middle = middle,
         .seconds = Seconds{config_.step}.count(),
         .seasons = detail::seasons(config_, middle),
+        .land = &land_,
     };
     detail::update_systems(context, fields_, systems_, next_system_,
                            at.time_since_epoch() / config_.step);

@@ -35,6 +35,8 @@ struct StepContext {
     GameTime middle; // halfway through the step
     double seconds;  // the step's length
     Seasons seasons;
+    // How freely the land gives up water; without it, as wet as its ground.
+    const Land* land = nullptr;
 };
 
 // Column water the air holds at saturation, rising about 6% per °C.

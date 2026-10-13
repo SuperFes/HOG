@@ -31,12 +31,6 @@ void parse_growth(Table growth, GrowthConfig& config) {
     growth.number("wet", positive, 1.0, config.wet);
 }
 
-void parse_dryness(Table dryness, DrynessConfig& config) {
-    dryness.only({"demand"sv, "climate"sv});
-    dryness.number("demand", 0.0, 100.0, config.demand);
-    dryness.number("climate", 0.0, 1.0, config.climate);
-}
-
 void parse_fire(Table fire, FireConfig& config) {
     fire.only({"damp"sv, "parched"sv, "fuel"sv, "lightning"sv, "spread"sv, "wind"sv, "burn_days"sv,
                "douse"sv, "out"sv});
@@ -57,10 +51,9 @@ void parse_fire(Table fire, FireConfig& config) {
 Result<Vegetation> parse(const toml::table& root) {
     std::optional<Error> error;
     Table top{&root, "vegetation", &error};
-    top.only({"growth"sv, "dryness"sv, "fire"sv});
+    top.only({"growth"sv, "fire"sv});
     Vegetation vegetation;
     parse_growth(Table{top.table("growth"), "growth", &error}, vegetation.growth);
-    parse_dryness(Table{top.table("dryness"), "dryness", &error}, vegetation.dryness);
     parse_fire(Table{top.table("fire"), "fire", &error}, vegetation.fire);
     if (error) {
         return std::unexpected(std::move(*error));

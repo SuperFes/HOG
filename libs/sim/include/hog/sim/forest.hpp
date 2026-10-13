@@ -35,16 +35,16 @@ struct ForestConfig {
 // What a cell's plants grow on.
 struct Soil {
     planet::Biome biome = planet::Biome::Grassland;
-    float moisture = 0.5F; // from the planet's moisture map, 0 (arid) to 1 (saturated)
 };
 
 [[nodiscard]] std::vector<Soil> soil_for(const CellGrid& grid, const planet::World& world);
 
 // The weather in each cell, as plants and fires feel it.
 struct ForestConditions {
-    std::span<const float> temperature;   // recent °C
-    std::span<const float> precipitation; // recent mm per day
-    std::span<const float> rain;          // mm fallen over the last `rain_days`
+    std::span<const float> temperature; // recent °C
+    std::span<const float> soil;        // how full the soil is, 0 to 1
+    std::span<const float> snow;        // mm of water lying as snow
+    std::span<const float> rain;        // mm fallen over the last `rain_days`
     double rain_days = 1.0;
     std::span<const float> storm; // thunderstorm strength now, 0 to 1
     std::span<const Vec2> wind;   // (east, north) m/s at the surface
@@ -75,10 +75,9 @@ enum class Stage : std::uint8_t { Bare, Grass, Shrub, Young, Mature };
 [[nodiscard]] Stage stage_of(double biomass, double capacity) noexcept;
 [[nodiscard]] std::string_view to_string(Stage stage) noexcept;
 
-// How dry the ground is, from 0 (wet) to 1 (parched): the moisture map blended with how well the
-// recent rain keeps up with what the warmth draws out. Stands in for soil moisture.
-[[nodiscard]] double dryness(const DrynessConfig& config, double moisture, double temperature,
-                             double precipitation) noexcept;
+// How dry the ground is, from 0 (wet) to 1 (parched): as dry as its soil is empty, and not at
+// all under snow.
+[[nodiscard]] double dryness(double soil, double snow) noexcept;
 
 // Living plants per cell, as one amount of biomass growing back towards what its biome holds, as
 // fast as the warmth and the wetness of the ground allow. Lightning sets dry fuel alight, and

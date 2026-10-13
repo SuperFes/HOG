@@ -21,7 +21,8 @@ void water(const StepContext& step, WeatherFields& fields, std::uint32_t index) 
     // The sea gives up water as its own warmth allows, so warm currents wet the air over them.
     const auto sea = static_cast<double>(step.sea[index]);
     const double holds = saturation(ground.ocean ? sea : surface);
-    float wetness = ground.wetness;
+    auto wetness =
+        step.land != nullptr ? static_cast<float>(step.land->wetness(index)) : ground.wetness;
     if (ground.ocean) {
         wetness = sea <= step.config->tuning.ocean.freezing ? ice_wetness : 1.0F;
     }
