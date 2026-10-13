@@ -50,13 +50,23 @@ struct SetBiome {
     friend bool operator==(const SetBiome&, const SetBiome&) = default;
 };
 
+// Empties the ground from a fixed-point depth in metres below the generated surface down to a
+// deeper one, as a tunnel or a dug chamber does, leaving what lies above.
+struct Hollow {
+    std::int64_t top = 0;
+    std::int64_t bottom = 0;
+
+    friend bool operator==(const Hollow&, const Hollow&) = default;
+};
+
 // Alternatives are only ever appended: a kind is the payload's index, and is stored.
-using ChangePayload = std::variant<SetElevation, Excavate, SetBiome>;
+using ChangePayload = std::variant<SetElevation, Excavate, SetBiome, Hollow>;
 
 enum class ChangeKind : std::uint8_t {
     SetElevation,
     Excavate,
     SetBiome,
+    Hollow,
 };
 
 inline constexpr int change_kind_count = static_cast<int>(std::variant_size_v<ChangePayload>);

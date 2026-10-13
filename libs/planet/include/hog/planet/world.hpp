@@ -2,6 +2,7 @@
 
 #include <hog/core/result.hpp>
 #include <hog/core/time.hpp>
+#include <hog/planet/caves.hpp>
 #include <hog/planet/cell_id.hpp>
 #include <hog/planet/change.hpp>
 #include <hog/planet/geology.hpp>
@@ -9,6 +10,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <unordered_map>
 #include <vector>
@@ -19,9 +21,17 @@ namespace hog::planet {
 struct CellState {
     std::int64_t elevation = 0; // fixed-point metres above sea level
     Biome biome = Biome::Ocean;
-    std::int64_t excavated = 0; // fixed-point metres dug out below the generated surface
+    std::int64_t excavated = 0;  // fixed-point metres dug out below the generated surface
+    std::vector<Hollow> hollows; // dug out below the ground left, shallowest first, never touching
 
     friend bool operator==(const CellState&, const CellState&) = default;
+};
+
+// Open space under a cell: a natural cave, or else dug out by someone.
+struct Opening {
+    std::optional<CaveHit> cave;
+
+    friend bool operator==(const Opening&, const Opening&) = default;
 };
 
 // The planet as its seed plus every change made to it. A change to a cell also changes everything
@@ -30,7 +40,15 @@ class World {
 public:
     explicit World(const PlanetConfig& config);
 
+    // The caves point into the world's own geology.
+    World(const World&) = delete;
+    World(World&&) = delete;
+    World& operator=(const World&) = delete;
+    World& operator=(World&&) = delete;
+    ~World() = default;
+
     [[nodiscard]] const Geology& geology() const noexcept { return geology_; }
+    [[nodiscard]] const Caves& caves() const noexcept { return caves_; }
 
     // Fails, changing nothing, on an invalid cell, layer or payload.
     Result<void> apply(const Change& change);
@@ -42,6 +60,10 @@ public:
     std::size_t roll_back(const ChangeFilter& filter);
 
     [[nodiscard]] CellState state(CellId cell) const;
+
+    // What is open at a fixed-point depth in metres below a cell's generated surface: dug out,
+    // whether from the surface or as a hollow, or else a cave.
+    [[nodiscard]] std::optional<Opening> opening_at(CellId cell, std::int64_t depth) const;
 
     // The matching changes, in the order they were made.
     [[nodiscard]] std::vector<Change> changes(const ChangeFilter& filter = {}) const;
@@ -55,6 +77,7 @@ private:
     };
 
     Geology geology_;
+    Caves caves_;
     std::unordered_map<std::uint64_t, std::vector<Entry>> cells_;
     std::uint64_t next_sequence_ = 0;
     std::size_t count_ = 0;

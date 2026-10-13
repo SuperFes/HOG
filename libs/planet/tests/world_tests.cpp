@@ -1,10 +1,14 @@
 #include <hog/core/hash.hpp>
+#include <hog/planet/projection.hpp>
 #include <hog/planet/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
+#include <cmath>
 #include <cstdint>
+#include <initializer_list>
+#include <utility>
 #include <vector>
 
 using hog::ErrorCode;
@@ -18,6 +22,7 @@ using hog::planet::ChangeFilter;
 using hog::planet::ChangePayload;
 using hog::planet::Excavate;
 using hog::planet::fixed_one;
+using hog::planet::Hollow;
 using hog::planet::Layer;
 using hog::planet::SetBiome;
 using hog::planet::SetElevation;
@@ -73,7 +78,8 @@ CellState seed_state(CellId at_cell) {
     const auto& geology = shared_world().geology();
     return {.elevation = geology.terrain().elevation(at_cell),
             .biome = geology.climate().biome(at_cell),
-            .excavated = 0};
+            .excavated = 0,
+            .hollows = {}};
 }
 
 } // namespace
@@ -149,6 +155,8 @@ TEST_CASE("invalid changes are refused and change nothing", "[planet][world]") {
     CHECK(refused(change(cell, Excavate{.depth = 0})));
     CHECK(refused(change(cell, Excavate{.depth = -fixed_one})));
     CHECK(refused(change(cell, SetBiome{.biome = static_cast<Biome>(hog::planet::biome_count)})));
+    CHECK(refused(change(cell, Hollow{.top = -fixed_one, .bottom = fixed_one})));
+    CHECK(refused(change(cell, Hollow{.top = fixed_one, .bottom = fixed_one})));
     CHECK(
         refused(change(cell, SetElevation{}, 0, {}, static_cast<Layer>(hog::planet::layer_count))));
     CHECK(w.size() == 0);
@@ -160,6 +168,67 @@ TEST_CASE("invalid changes are refused and change nothing", "[planet][world]") {
     REQUIRE_FALSE(replayed);
     CHECK(replayed.error().message.starts_with("change 1:"));
     CHECK(w.size() == 0);
+}
+
+TEST_CASE("hollows dug in a cell join where they meet", "[planet][world]") {
+    World& w = fresh_world();
+    const auto dig = [&](std::int64_t top, std::int64_t bottom, std::int64_t seconds) {
+        REQUIRE(w.apply(
+            change(cell, Hollow{.top = top * fixed_one, .bottom = bottom * fixed_one}, seconds)));
+    };
+    const auto metres = [](std::initializer_list<std::pair<std::int64_t, std::int64_t>> spans) {
+        std::vector<Hollow> hollows;
+        for (const auto& [top, bottom] : spans) {
+            hollows.push_back({.top = top * fixed_one, .bottom = bottom * fixed_one});
+        }
+        return hollows;
+    };
+    dig(10, 12, 1);
+    dig(2, 4, 2);
+    CHECK(w.state(cell).hollows == metres({{2, 4}, {10, 12}}));
+    dig(4, 6, 3); // touching
+    CHECK(w.state(cell).hollows == metres({{2, 6}, {10, 12}}));
+    dig(5, 11, 4); // bridging
+    CHECK(w.state(cell).hollows == metres({{2, 12}}));
+    dig(20, 21, 5);
+    // Cells inside take their parent's hollows.
+    CHECK(w.state(cell.child(3)).hollows == metres({{2, 12}, {20, 21}}));
+    w.roll_back(during(4, 6));
+    CHECK(w.state(cell).hollows == metres({{2, 6}, {10, 12}}));
+}
+
+TEST_CASE("openings are dug out or natural caves", "[planet][world]") {
+    World& w = fresh_world();
+    CHECK_FALSE(w.opening_at(cell, 5 * fixed_one));
+    REQUIRE(w.apply(change(cell, Excavate{.depth = 2 * fixed_one})));
+    REQUIRE(w.apply(change(cell, Hollow{.top = 4 * fixed_one, .bottom = 6 * fixed_one})));
+    CHECK(w.opening_at(cell, fixed_one) == hog::planet::Opening{});
+    CHECK_FALSE(w.opening_at(cell, 3 * fixed_one));
+    CHECK(w.opening_at(cell, 5 * fixed_one) == hog::planet::Opening{});
+    CHECK_FALSE(w.opening_at(cell, 6 * fixed_one));
+
+    // A roomy stretch of lava tube, found through the world.
+    bool found = false;
+    for (const auto& tube : w.caves().lava_tubes()) {
+        for (const auto& passage : tube.passages) {
+            if (found || passage.from_radius < 2.0) {
+                continue;
+            }
+            const CellId over = hog::planet::cell_at(glm::normalize(passage.from), 20);
+            const std::int64_t depth =
+                w.geology().terrain().elevation(over) -
+                std::llround((glm::length(passage.from) - planet.radius) * fixed_one);
+            if (w.geology().strata(over).rock_at(depth) != hog::planet::Rock::Basalt) {
+                continue;
+            }
+            const auto opening = w.opening_at(over, depth);
+            REQUIRE(opening);
+            REQUIRE(opening->cave);
+            CHECK(opening->cave->cave == hog::planet::Cave::LavaTube);
+            found = true;
+        }
+    }
+    CHECK(found);
 }
 
 TEST_CASE("replaying changes equals applying them one by one", "[planet][world]") {

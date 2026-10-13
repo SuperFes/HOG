@@ -12,7 +12,8 @@ namespace {
 static_assert(kind_of(SetElevation{}) == ChangeKind::SetElevation);
 static_assert(kind_of(Excavate{}) == ChangeKind::Excavate);
 static_assert(kind_of(SetBiome{}) == ChangeKind::SetBiome);
-static_assert(change_kind_count == static_cast<int>(ChangeKind::SetBiome) + 1);
+static_assert(kind_of(Hollow{}) == ChangeKind::Hollow);
+static_assert(change_kind_count == static_cast<int>(ChangeKind::Hollow) + 1);
 
 template <typename Payload>
 [[nodiscard]] Result<ChangePayload> finish(const ByteReader& reader, Payload payload) {
@@ -45,6 +46,8 @@ std::string_view to_string(ChangeKind kind) noexcept {
         return "excavate";
     case ChangeKind::SetBiome:
         return "set biome";
+    case ChangeKind::Hollow:
+        return "hollow";
     }
     return "unknown";
 }
@@ -63,9 +66,12 @@ std::vector<std::byte> encode_payload(const ChangePayload& payload) {
                 writer.write(static_cast<std::uint64_t>(change.elevation));
             } else if constexpr (std::is_same_v<Payload, Excavate>) {
                 writer.write(static_cast<std::uint64_t>(change.depth));
-            } else {
-                static_assert(std::is_same_v<Payload, SetBiome>);
+            } else if constexpr (std::is_same_v<Payload, SetBiome>) {
                 writer.write(std::to_underlying(change.biome));
+            } else {
+                static_assert(std::is_same_v<Payload, Hollow>);
+                writer.write(static_cast<std::uint64_t>(change.top));
+                writer.write(static_cast<std::uint64_t>(change.bottom));
             }
         },
         payload);
@@ -98,6 +104,18 @@ Result<ChangePayload> decode_payload(std::uint8_t kind, std::span<const std::byt
             return make_error(ErrorCode::Parse, std::format("unknown biome {}", *biome));
         }
         return finish(reader, SetBiome{static_cast<Biome>(*biome)});
+    }
+    case ChangeKind::Hollow: {
+        const auto top = reader.read<std::uint64_t>();
+        if (!top) {
+            return std::unexpected(top.error());
+        }
+        const auto bottom = reader.read<std::uint64_t>();
+        if (!bottom) {
+            return std::unexpected(bottom.error());
+        }
+        return finish(reader, Hollow{.top = static_cast<std::int64_t>(*top),
+                                     .bottom = static_cast<std::int64_t>(*bottom)});
     }
     }
     return make_error(ErrorCode::Parse, std::format("unknown change kind {}", kind));

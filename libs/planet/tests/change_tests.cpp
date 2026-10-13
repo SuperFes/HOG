@@ -18,6 +18,7 @@ using hog::planet::ChangePayload;
 using hog::planet::decode_payload;
 using hog::planet::encode_payload;
 using hog::planet::Excavate;
+using hog::planet::Hollow;
 using hog::planet::SetBiome;
 using hog::planet::SetElevation;
 
@@ -66,7 +67,8 @@ TEST_CASE("payloads survive encoding", "[planet][change]") {
         ChangePayload{SetElevation{.elevation = highest}},
         ChangePayload{Excavate{.depth = 3 * hog::planet::fixed_one / 2}},
         ChangePayload{SetBiome{.biome = Biome::Ocean}},
-        ChangePayload{SetBiome{.biome = Biome::Alpine}});
+        ChangePayload{SetBiome{.biome = Biome::Alpine}},
+        ChangePayload{Hollow{.top = 2 * hog::planet::fixed_one, .bottom = highest}});
     const auto encoded = encode_payload(payload);
     const auto decoded = decode_payload(static_cast<std::uint8_t>(payload.index()), encoded);
     REQUIRE(decoded);
@@ -82,6 +84,8 @@ TEST_CASE("payload bytes are fixed little-endian", "[planet][change]") {
     CHECK(encode_payload(Excavate{.depth = 0x1'0000}) ==
           bytes({0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00}));
     CHECK(encode_payload(SetBiome{.biome = Biome::Desert}) == bytes({8}));
+    CHECK(encode_payload(Hollow{.top = 0x0201, .bottom = 0x0403}) ==
+          bytes({0x01, 0x02, 0, 0, 0, 0, 0, 0, 0x03, 0x04, 0, 0, 0, 0, 0, 0}));
 }
 
 TEST_CASE("malformed payloads are rejected", "[planet][change]") {
@@ -95,6 +99,9 @@ TEST_CASE("malformed payloads are rejected", "[planet][change]") {
     CHECK(rejects(elevation, bytes({1, 2, 3, 4, 5, 6, 7})));
     CHECK(rejects(elevation, bytes({1, 2, 3, 4, 5, 6, 7, 8, 9})));
     CHECK(rejects(biome, bytes({static_cast<unsigned>(hog::planet::biome_count)})));
+    const auto hollow = static_cast<std::uint8_t>(ChangeKind::Hollow);
+    CHECK(rejects(hollow, bytes({1, 2, 3, 4, 5, 6, 7, 8})));
+    CHECK(rejects(hollow, bytes({1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15})));
     CHECK(rejects(hog::planet::change_kind_count, bytes({})));
     CHECK(rejects(255, bytes({0})));
 }

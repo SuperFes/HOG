@@ -62,6 +62,11 @@ std::vector<Change> sample_changes() {
          .author = AuthorId{42},
          .layer = Layer::Player,
          .payload = Excavate{.depth = most}},
+        {.cell = CellId::from_face_ij(4, 5, 6, 14),
+         .time = at(124),
+         .author = AuthorId{42},
+         .layer = Layer::Player,
+         .payload = hog::planet::Hollow{.top = fixed_one, .bottom = most}},
     };
 }
 
@@ -81,8 +86,8 @@ TEST_CASE("changes come back as they were stored, in order", "[store]") {
     REQUIRE(store.append({}));
     const auto loaded = store.load();
     REQUIRE(loaded);
-    REQUIRE(loaded->size() == 4);
-    CHECK(std::vector(loaded->begin(), loaded->begin() + 3) == changes);
+    REQUIRE(loaded->size() == changes.size() + 1);
+    CHECK(std::vector(loaded->begin(), loaded->end() - 1) == changes);
     CHECK(loaded->back() == changes.front());
 }
 
