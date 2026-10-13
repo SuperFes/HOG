@@ -8,6 +8,7 @@ add_library(hog_planet
     src/elevation.cpp
     src/erosion.cpp
     src/geology.cpp
+    src/landform.cpp
     src/level_grid.cpp
     src/moisture.cpp
     src/neighbors.cpp
@@ -33,6 +34,7 @@ hog_add_tests(hog_planet
     tests/erosion_tests.cpp
     tests/geology_tests.cpp
     tests/golden_tests.cpp
+    tests/landform_tests.cpp
     tests/level_grid_tests.cpp
     tests/neighbors_tests.cpp
     tests/noise_tests.cpp
@@ -46,4 +48,11 @@ hog_add_benchmarks(hog_planet
 
 if(TARGET hog_planet_tests)
     target_compile_definitions(hog_planet_tests PRIVATE HOG_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+endif()
+
+# Landform evolution runs whenever a planet is built; unoptimized it makes every test that builds
+# one take seconds.
+if(NOT MSVC)
+    set_source_files_properties(src/drainage.cpp src/erosion.cpp src/landform.cpp
+        PROPERTIES COMPILE_OPTIONS "$<$<CONFIG:Debug>:-O2>")
 endif()

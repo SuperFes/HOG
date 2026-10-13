@@ -34,19 +34,31 @@ std::vector<bool> flood(const LevelGrid& grid, std::span<const std::int64_t> hei
     for (std::uint32_t cell = 0; cell < count; ++cell) {
         if (heights[cell] <= sea_level) {
             outlet[cell] = true;
-            open(cell, sea_level);
+            reached[cell] = true;
+            result.surface[cell] = sea_level;
+            result.order.push_back(cell);
         }
     }
-    if (frontier.empty() && count > 0) {
+    // Only the coast leads inland; the open sea stays out of the queue.
+    for (const std::uint32_t cell : result.order) {
+        if (std::ranges::any_of(grid.neighbors(cell),
+                                [&](std::uint32_t next) { return !reached[next]; })) {
+            frontier.emplace(sea_level, reach++, cell);
+        }
+    }
+    if (result.order.empty() && count > 0) {
         const auto lowest = static_cast<std::uint32_t>(
             std::ranges::distance(heights.begin(), std::ranges::min_element(heights)));
         outlet[lowest] = true;
+        result.order.push_back(lowest);
         open(lowest, heights[lowest]);
     }
     while (!frontier.empty()) {
         const auto [surface, _, cell] = frontier.top();
         frontier.pop();
-        result.order.push_back(cell);
+        if (!outlet[cell]) {
+            result.order.push_back(cell);
+        }
         for (const std::uint32_t next : grid.neighbors(cell)) {
             if (!reached[next]) {
                 open(next, std::max(heights[next], surface + 1));
