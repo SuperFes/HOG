@@ -11,7 +11,6 @@ namespace hog::planet {
 namespace {
 
 constexpr std::uint64_t temperature_salt = 0x7465'6D70'6572'6174ULL; // "temperat"
-constexpr std::uint64_t moisture_salt = 0x6D6F'6973'7475'7265ULL;    // "moisture"
 
 constexpr std::int64_t equator_temperature = 28 * fixed_one;
 constexpr std::int64_t pole_temperature = -25 * fixed_one;
@@ -22,19 +21,7 @@ constexpr std::int64_t temperature_variation = 4 * fixed_one;
 constexpr double temperature_frequency = 2.0;
 constexpr int temperature_octaves = 4;
 
-constexpr std::int64_t band_amplitude = fixed_one / 4;
-constexpr std::int64_t inland_dryness = fixed_one / 4;
-// Continent height over which the interior dries out.
-constexpr std::int64_t inland_dry_width = fixed_one * 3 / 10;
-constexpr std::int64_t moisture_variation = fixed_one / 4;
-constexpr double moisture_frequency = 3.0;
-constexpr int moisture_octaves = 4;
-
 constexpr std::int64_t beach_temperature = 0;
-
-[[nodiscard]] std::int64_t ramp(std::int64_t value, std::int64_t width) {
-    return std::clamp((value * fixed_one) / width, std::int64_t{0}, fixed_one);
-}
 
 [[nodiscard]] std::int64_t multiply(std::int64_t a, std::int64_t b) {
     return (a * b) >> fixed_fraction_bits;
@@ -79,7 +66,7 @@ std::string_view to_string(Biome biome) noexcept {
 
 Climate::Climate(const PlanetConfig& config)
     : terrain_{config}, temperature_seed_{hash_combine(config.seed, temperature_salt)},
-      moisture_seed_{hash_combine(config.seed, moisture_salt)} {}
+      moisture_{config.seed} {}
 
 std::int64_t Climate::temperature(CellId cell) const {
     return temperature(cell, terrain_.elevation(cell));
@@ -100,24 +87,7 @@ std::int64_t Climate::temperature(CellId cell, std::int64_t elevation) const {
 }
 
 std::int64_t Climate::moisture(CellId cell) const {
-    return moisture(cell, terrain_.continents().height(cell));
-}
-
-std::int64_t Climate::moisture(CellId cell, std::int64_t continent_height) const {
-    const DVec3 center = cell_center(cell);
-    const std::int64_t sine = latitude_sine(center);
-    const std::int64_t u = multiply(sine, sine);
-    const std::int64_t u2 = multiply(u, u);
-    const std::int64_t u3 = multiply(u2, u);
-    // cos(6 * latitude): wet at the equator and 60 degrees, dry at 30 degrees and the poles.
-    const std::int64_t bands = fixed_one - (18 * u) + (48 * u2) - (32 * u3);
-    const std::int64_t noise =
-        multiply(moisture_variation,
-                 fbm(moisture_seed_, noise_point(center, moisture_frequency), moisture_octaves));
-    const std::int64_t wetness =
-        (fixed_one / 2) + multiply(band_amplitude, bands) -
-        multiply(inland_dryness, ramp(continent_height, inland_dry_width)) + noise;
-    return std::clamp(wetness, std::int64_t{0}, fixed_one);
+    return moisture_.at(cell, terrain_.continents().height(cell));
 }
 
 Biome Climate::biome(CellId cell) const {
@@ -127,7 +97,7 @@ Biome Climate::biome(CellId cell) const {
     }
     const std::int64_t elevation = terrain_.elevation(cell);
     const std::int64_t temperature = this->temperature(cell, elevation);
-    const Biome climate = classify_biome(temperature, moisture(cell, continent));
+    const Biome climate = classify_biome(temperature, moisture_.at(cell, continent));
     if (climate == Biome::Ice) {
         return climate;
     }

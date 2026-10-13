@@ -2,6 +2,7 @@
 
 #include <hog/planet/cell_id.hpp>
 #include <hog/planet/elevation.hpp>
+#include <hog/planet/moisture.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/planet_config.hpp>
 
@@ -91,11 +92,10 @@ public:
 
 private:
     [[nodiscard]] std::int64_t temperature(CellId cell, std::int64_t elevation) const;
-    [[nodiscard]] std::int64_t moisture(CellId cell, std::int64_t continent_height) const;
 
     Elevation terrain_;
     std::uint64_t temperature_seed_;
-    std::uint64_t moisture_seed_;
+    Moisture moisture_;
 };
 
 } // namespace hog::planet

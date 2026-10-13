@@ -9,6 +9,7 @@ add_library(hog_planet
     src/erosion.cpp
     src/geology.cpp
     src/level_grid.cpp
+    src/moisture.cpp
     src/neighbors.cpp
     src/planet_config.cpp
     src/projection.cpp
