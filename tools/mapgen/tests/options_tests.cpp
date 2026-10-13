@@ -41,6 +41,7 @@ TEST_CASE("mapgen defaults to every layer of the whole planet", "[mapgen]") {
     CHECK(options->weather == hog::mapgen::WeatherFrames{});
     CHECK(options->weather.days == 0);
     CHECK(options->wildlife == hog::mapgen::WildlifeFrames{});
+    CHECK(options->seasons == hog::mapgen::SeasonFrames{});
 }
 
 TEST_CASE("mapgen reads every option", "[mapgen]") {
@@ -77,6 +78,10 @@ TEST_CASE("mapgen reads every option", "[mapgen]") {
     CHECK(wildlife->wildlife ==
           hog::mapgen::WildlifeFrames{.years = 5, .every = 10, .ecology = "other.toml"});
 
+    const auto seasons = parse({"--seasons", "--vegetation", "plants.toml"});
+    REQUIRE(seasons);
+    CHECK(seasons->seasons == hog::mapgen::SeasonFrames{.on = true, .vegetation = "plants.toml"});
+
     const auto help = parse({"--help"});
     REQUIRE(help);
     CHECK(help->help);
@@ -109,6 +114,8 @@ TEST_CASE("mapgen rejects bad arguments", "[mapgen]") {
     CHECK(rejects({"--wildlife", "101"}));
     CHECK(rejects({"--every-days", "0"}));
     CHECK(rejects({"--weather", "1", "--wildlife", "1"}));
+    CHECK(rejects({"--seasons", "--weather", "1"}));
+    CHECK(rejects({"--wildlife", "1", "--seasons"}));
     CHECK(rejects({"--date", "2026-02-30"}));
     CHECK(rejects({"--date", "2026-2-3"}));
     CHECK(rejects({"--date", "2026/02/03"}));

@@ -232,6 +232,11 @@ constexpr std::array flags{
              options.wildlife.ecology = std::filesystem::path{value};
              return {};
          }},
+    Flag{.name = "--vegetation",
+         .handler = [](Options& options, std::string_view value) -> Result<void> {
+             options.seasons.vegetation = std::filesystem::path{value};
+             return {};
+         }},
     Flag{.name = "--cell-km",
          .handler = [](Options& options, std::string_view value) -> Result<void> {
              const auto km = parse_double(value);
@@ -281,13 +286,19 @@ Writes PNG maps of a generated planet, one per layer, named <view>-<layer>.png.
   --weather DAYS       instead of the layers, follows the weather for DAYS days and
                        writes sky and air maps, named <view>-weather-<time>-<map>.png
   --every HOURS        hours between weather maps (default 6)
-  --date YYYY-MM-DD    when the weather or wildlife maps start (default 2026-01-01),
-                       after ten days for the weather to settle
+  --date YYYY-MM-DD    when the weather, wildlife or seasons maps start (default
+                       2026-01-01), after ten days for the weather to settle
   --wildlife YEARS     instead of the layers, follows the wildlife with its weather for
                        YEARS years and writes a map per species, named
                        <view>-wildlife-<time>-<species>.png, and totals in wildlife.csv
   --every-days DAYS    days between wildlife maps and totals (default 30)
   --ecology PATH       species and forage (default config/ecology.toml)
+  --seasons            instead of the layers, follows the weather, land and plants for a
+                       year and writes temperature, rain, land and forest maps on the
+                       same day of each month, named <view>-seasons-<month>-<map>.png,
+                       and a sheet of all twelve per map, <view>-seasons-<map>.png,
+                       after sixty days for the weather to settle
+  --vegetation PATH    plants for the seasons (default config/forest.toml)
   --cell-km KM         weather and wildlife grid cells at most KM across (default 6)
   --help               shows this
 )";
@@ -299,6 +310,10 @@ Result<Options> parse_options(std::span<const std::string_view> arguments) {
         const std::string_view name = arguments[index];
         if (name == "--help" || name == "-h") {
             options.help = true;
+            continue;
+        }
+        if (name == "--seasons") {
+            options.seasons.on = true;
             continue;
         }
         if (name == "--planet") {
@@ -321,8 +336,10 @@ Result<Options> parse_options(std::span<const std::string_view> arguments) {
             return std::unexpected(std::move(handled.error()));
         }
     }
-    if (options.weather.days > 0 && options.wildlife.years > 0) {
-        return invalid("--weather and --wildlife can't be used together");
+    if (static_cast<int>(options.weather.days > 0) + static_cast<int>(options.wildlife.years > 0) +
+            static_cast<int>(options.seasons.on) >
+        1) {
+        return invalid("only one of --weather, --wildlife and --seasons can be used");
     }
     if (options.layers.empty()) {
         for (int layer = 0; layer < layer_count; ++layer) {

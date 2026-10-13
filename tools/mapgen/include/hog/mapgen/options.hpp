@@ -76,6 +76,15 @@ struct WildlifeFrames {
     friend bool operator==(const WildlifeFrames&, const WildlifeFrames&) = default;
 };
 
+// Seasonal maps: a frame on the same day of each month for a year, with the weather, land and
+// plants stepped together. The weather frames' start and grid apply to these too.
+struct SeasonFrames {
+    bool on = false;
+    std::filesystem::path vegetation = "config/forest.toml";
+
+    friend bool operator==(const SeasonFrames&, const SeasonFrames&) = default;
+};
+
 struct Options {
     std::filesystem::path config = "config/planet.toml";
     std::optional<std::uint64_t> seed;
@@ -85,6 +94,7 @@ struct Options {
     std::filesystem::path output = "maps";
     WeatherFrames weather;
     WildlifeFrames wildlife;
+    SeasonFrames seasons;
     bool help = false;
 };
 
