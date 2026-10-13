@@ -168,6 +168,7 @@ struct LandTuning {
     Seconds percolation = std::chrono::days{30}; // full soil drains into the ground this slowly
     Seconds seepage = std::chrono::days{180};    // ground water seeps out to the rivers
     double specific_yield = 0.1; // share of the rock water fills, so 100 mm of it is a metre
+    Seconds river = std::chrono::hours{2};  // water takes this long to leave a cell's river
     Seconds usual = std::chrono::days{365}; // the running means water is measured against
 };
 

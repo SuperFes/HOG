@@ -1,32 +1,57 @@
 #include "weather_stages.hpp"
 
 #include <hog/core/assert.hpp>
+#include <hog/planet/drainage.hpp>
+#include <hog/planet/level_grid.hpp>
+#include <hog/planet/noise.hpp>
 #include <hog/sim/land.hpp>
 #include <hog/sim/weather.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <iterator>
 #include <utility>
 
 namespace hog::sim {
 
 LandFields::LandFields(std::size_t size)
-    : snow(size), soil(size), groundwater(size), runoff(size), usual_groundwater(size) {}
+    : snow(size), soil(size), groundwater(size), runoff(size), usual_groundwater(size),
+      channel(size), flow(size), usual_flow(size) {}
 
-Land::Land(const CellGrid& grid, std::span<const Ground> ground, const LandTuning& tuning)
+Land::Land(const CellGrid& grid, std::span<const Ground> ground, const LandTuning& tuning,
+           double planet_radius)
     : tuning_(tuning), fields_(grid.size()) {
     HOG_ASSERT(ground.size() == grid.size(), "need ground for every cell");
+    HOG_ASSERT(planet_radius > 0.0, "planet radius must be positive");
     land_.reserve(grid.size());
-    for (const Ground& cell : ground) {
+    areas_.reserve(grid.size());
+    // Numbered as the cell grid is. Land sits a hair above the sea even where it's level with it.
+    const planet::LevelGrid level{grid.level(), planet_radius};
+    std::vector<std::int64_t> heights;
+    heights.reserve(grid.size());
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        const Ground& cell = ground[index];
         land_.push_back(!cell.ocean);
+        areas_.push_back(grid.area(index) * planet_radius * planet_radius);
+        heights.push_back(cell.ocean
+                              ? -planet::fixed_one
+                              : std::llround(std::max(static_cast<double>(cell.elevation), 0.0) *
+                                             static_cast<double>(planet::fixed_one)) +
+                                    1);
     }
+    planet::Drainage drainage = planet::drain(level, heights);
+    receiver_ = std::move(drainage.receiver);
+    downstream_.assign(drainage.order.rbegin(), drainage.order.rend());
 }
 
 void Land::set_fields(const CellGrid& grid, LandFields fields) {
     HOG_ASSERT(fields.size() == grid.size() && fields.soil.size() == grid.size() &&
                    fields.groundwater.size() == grid.size() &&
                    fields.runoff.size() == grid.size() &&
-                   fields.usual_groundwater.size() == grid.size(),
+                   fields.usual_groundwater.size() == grid.size() &&
+                   fields.channel.size() == grid.size() && fields.flow.size() == grid.size() &&
+                   fields.usual_flow.size() == grid.size(),
                "need water for every cell");
     fields_ = std::move(fields);
 }
@@ -47,6 +72,11 @@ double Land::water_table_rise(std::uint32_t index) const {
     return above / 1'000.0 / tuning_.specific_yield;
 }
 
+double Land::flow_ratio(std::uint32_t index) const {
+    const double usual = fields_.usual_flow[index];
+    return usual > 0.0 ? static_cast<double>(fields_.flow[index]) / usual : 1.0;
+}
+
 double Land::water(std::uint32_t index) const {
     return static_cast<double>(fields_.snow[index]) +
            (static_cast<double>(fields_.soil[index]) * tuning_.soil_capacity) +
@@ -63,6 +93,30 @@ void Land::step(const CellGrid& grid, const LandWeather& weather, jobs::JobSyste
             step(index, weather);
         }
     });
+    route(weather.seconds);
+}
+
+void Land::route(double seconds) {
+    const double leaving = detail::approach(seconds, tuning_.river);
+    const double averaging = detail::approach(seconds, tuning_.usual);
+    for (const std::uint32_t index : downstream_) {
+        if (!land_[index]) {
+            continue;
+        }
+        double& channel = fields_.channel[index];
+        channel += static_cast<double>(fields_.runoff[index]) / 1'000.0 * areas_[index];
+        const double out = channel * leaving;
+        channel -= out;
+        const double flow = out / seconds;
+        fields_.flow[index] = static_cast<float>(flow);
+        fields_.usual_flow[index] += (flow - fields_.usual_flow[index]) * averaging;
+        const std::uint32_t into = receiver_[index];
+        if (into != index && land_[into]) {
+            fields_.channel[into] += out;
+        } else {
+            discharged_ += out;
+        }
+    }
 }
 
 void Land::step(std::uint32_t index, const LandWeather& weather) {

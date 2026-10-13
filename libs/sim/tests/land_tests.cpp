@@ -18,6 +18,7 @@ namespace {
 
 constexpr double hour = 3'600.0;
 constexpr double day = 86'400.0;
+constexpr double radius = 115'000.0;
 
 const CellGrid& grid() {
     static const CellGrid grid{1};
@@ -40,7 +41,7 @@ struct Spell {
 };
 
 struct Run {
-    Land land{grid(), island(), LandTuning{}};
+    Land land{grid(), island(), LandTuning{}, radius};
     double ran_off = 0.0; // mm from cell 1
 
     void hold(const Spell& spell, double seconds) {
@@ -163,4 +164,141 @@ TEST_CASE("the sea holds no land water", "[sim][land]") {
     CHECK(run.land.water(0) == 0.0);
     CHECK(run.land.fields().runoff[0] == 0.0F);
     CHECK(run.land.water(1) > 0.0);
+}
+
+namespace {
+
+const CellGrid& fine() {
+    static const CellGrid grid{3};
+    return grid;
+}
+
+// Sea south of the equator, and land rising northwards from it.
+std::vector<Ground> hillside() {
+    std::vector<Ground> ground(fine().size());
+    for (std::uint32_t index = 0; index < fine().size(); ++index) {
+        const double north = fine().frame(index).up.z;
+        ground[index] = Ground{.elevation = static_cast<float>(std::max(north, 0.0) * 2'000.0),
+                               .ocean = north < 0.0};
+    }
+    return ground;
+}
+
+struct Hillside {
+    Land land{fine(), hillside(), LandTuning{}, radius};
+
+    void hold(float rain, double seconds, std::uint32_t only = UINT32_MAX) {
+        std::vector<float> falling(fine().size(), only == UINT32_MAX ? rain : 0.0F);
+        if (only != UINT32_MAX) {
+            falling[only] = rain;
+        }
+        const std::vector<float> none(fine().size());
+        const std::vector<float> mild(fine().size(), 10.0F);
+        const LandWeather weather{.rain = falling,
+                                  .snow = none,
+                                  .evaporation = none,
+                                  .temperature = mild,
+                                  .seconds = hour};
+        const auto steps = static_cast<int>(std::lround(seconds / hour));
+        for (int left = steps; left > 0; --left) {
+            land.step(fine(), weather, nullptr);
+        }
+    }
+
+    // m³ held on and under the land.
+    [[nodiscard]] double stored() const {
+        double total = 0.0;
+        for (std::uint32_t index = 0; index < fine().size(); ++index) {
+            total += (land.water(index) / 1'000.0 * fine().area(index) * radius * radius) +
+                     land.fields().channel[index];
+        }
+        return total;
+    }
+};
+
+// The land cell farthest north, where the rivers start.
+std::uint32_t summit() {
+    std::uint32_t best = 0;
+    for (std::uint32_t index = 1; index < fine().size(); ++index) {
+        if (fine().frame(index).up.z > fine().frame(best).up.z) {
+            best = index;
+        }
+    }
+    return best;
+}
+
+} // namespace
+
+TEST_CASE("rivers run downhill to the sea", "[sim][land]") {
+    const Hillside hill;
+    const std::vector<Ground> ground = hillside();
+    for (std::uint32_t index = 0; index < fine().size(); ++index) {
+        if (ground[index].ocean) {
+            continue;
+        }
+        // Follow it down: every step lower, and the sea in the end.
+        std::uint32_t at = index;
+        for (int steps = 0; !ground[at].ocean; ++steps) {
+            const std::uint32_t next = hill.land.receiver(at);
+            REQUIRE(next != at);
+            REQUIRE(steps < 100);
+            REQUIRE(ground[next].elevation <= ground[at].elevation);
+            at = next;
+        }
+    }
+}
+
+TEST_CASE("rivers gather what falls upstream and carry it all to the sea", "[sim][land]") {
+    Hillside hill;
+    hill.hold(20.0F, 2.0 * day);
+    const double fallen = 20.0 * 48.0 * [] {
+        double area = 0.0;
+        for (std::uint32_t index = 0; index < fine().size(); ++index) {
+            area += hillside()[index].ocean ? 0.0 : fine().area(index) * radius * radius;
+        }
+        return area;
+    }() / 1'000.0;
+    CHECK(hill.stored() + hill.land.discharged() == Catch::Approx(fallen).epsilon(1e-4));
+
+    Hillside one;
+    const std::uint32_t top = summit();
+    one.hold(50.0F, day, top);
+    one.hold(0.0F, 2.0 * day);
+    // Every cell below the summit carries its water, none beside it.
+    std::uint32_t at = one.land.receiver(top);
+    CHECK(one.land.fields().channel[top] > 0.0);
+    double carried = 0.0;
+    for (std::uint32_t index = 0; index < fine().size(); ++index) {
+        carried += index == top ? 0.0 : one.land.fields().channel[index];
+    }
+    double along = 0.0;
+    for (; !hillside()[at].ocean; at = one.land.receiver(at)) {
+        along += one.land.fields().channel[at];
+    }
+    CHECK(along == Catch::Approx(carried));
+}
+
+TEST_CASE("rivers flood after heavy rain and run low through a drought", "[sim][land]") {
+    Hillside hill;
+    // Long enough for the ground water to fill.
+    hill.hold(0.15F, 4.0 * 365.0 * day);
+    const std::uint32_t top = summit();
+    std::uint32_t mouth = top;
+    while (!hillside()[hill.land.receiver(mouth)].ocean) {
+        mouth = hill.land.receiver(mouth);
+    }
+    CHECK(hill.land.flow_ratio(mouth) == Catch::Approx(1.0).epsilon(0.2));
+
+    Hillside flooded = hill;
+    flooded.hold(15.0F, 12.0 * hour);
+    CHECK(flooded.land.flow_ratio(mouth) > 3.0);
+    // The flood passes within days.
+    flooded.hold(0.15F, 5.0 * day);
+    CHECK(flooded.land.flow_ratio(mouth) < 2.0);
+
+    hill.hold(0.0F, 60.0 * day);
+    const double low = hill.land.flow_ratio(mouth);
+    CHECK(low < 0.8);
+    // Still fed by the ground water.
+    CHECK(low > 0.1);
 }
