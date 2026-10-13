@@ -181,6 +181,66 @@ private:
     double reach_; // of natural edges, or zero for the cells as they are
 };
 
+double distance_to_segment(DVec2 point, DVec2 from, DVec2 to) {
+    const DVec2 along = to - from;
+    const double t = std::clamp(glm::dot(point - from, along) / glm::dot(along, along), 0.0, 1.0);
+    return glm::length(point - (from + (along * t)));
+}
+
+// How much of the pixel at `offset` from its square's centre an arrow covers, from 0 to 1. The
+// arrow points `heading` (right and down on the image) and grows with `speed` in m/s.
+double arrow_cover(DVec2 offset, DVec2 heading, double speed, int spacing) {
+    constexpr double still = 0.005; // m/s, slower than which no arrow shows
+    constexpr double fastest = 0.5; // m/s, from which arrows are longest
+    constexpr double half_width = 0.6;
+    if (speed < still) {
+        return 0.0;
+    }
+    const double length =
+        static_cast<double>(spacing) * (0.3 + (0.55 * std::min(speed / fastest, 1.0)));
+    const DVec2 tip = heading * (length / 2.0);
+    const DVec2 tail = -tip;
+    const double barb = std::max(length * 0.35, 3.0);
+    const double turn = 0.5; // radians either side of straight back
+    const auto back = [&](double angle) {
+        const DVec2 behind = -heading;
+        return tip + (DVec2{(behind.x * std::cos(angle)) - (behind.y * std::sin(angle)),
+                            (behind.x * std::sin(angle)) + (behind.y * std::cos(angle))} *
+                      barb);
+    };
+    const double away = std::min({distance_to_segment(offset, tail, tip),
+                                  distance_to_segment(offset, tip, back(turn)),
+                                  distance_to_segment(offset, tip, back(-turn))});
+    return std::clamp(1.0 - (away - half_width), 0.0, 1.0);
+}
+
+// The sea's current drawn over a pixel: one arrow per square, following the current at the
+// square's centre, on the sea only.
+Rgb with_arrow(const Sampler& sampler, const MapRect& shown, mapgen::ImageSize size, int x, int y,
+               Rgb under) {
+    const std::span<const float> east = sampler.layer("ocean/current_east");
+    const std::span<const float> north = sampler.layer("ocean/current_north");
+    if (east.empty() || north.empty()) {
+        return under;
+    }
+    const int spacing = arrow_spacing(size.width);
+    const int centre_x = ((x / spacing) * spacing) + (spacing / 2);
+    const int centre_y = ((y / spacing) * spacing) + (spacing / 2);
+    const Spot centre =
+        sampler.spot(pixel_point(shown, size.width, size.height, centre_x, centre_y));
+    if (!sampler.ocean(centre)) {
+        return under;
+    }
+    const DVec2 current{sampler.smooth(east, centre), sampler.smooth(north, centre)};
+    const double speed = glm::length(current);
+    if (speed == 0.0) {
+        return under;
+    }
+    const DVec2 offset{static_cast<double>(x - centre_x), static_cast<double>(y - centre_y)};
+    const double cover = arrow_cover(offset, DVec2{current.x, -current.y} / speed, speed, spacing);
+    return cover > 0.0 ? mapgen::mix(under, arrow_colour, cover) : under;
+}
+
 // Animals per km² in each cell; empty without the counts or the areas.
 std::vector<float> densities(const Frame& frame, std::span<const float> count) {
     const std::span<const float> area = frame.layer("planet/area");
@@ -281,6 +341,16 @@ Rgb colour_at(const Sampler& sampler, Overlay overlay, std::span<const float> sp
     case Overlay::Sky:
     case Overlay::Pressure:
         return weather_at(sampler, overlay, spot);
+    case Overlay::Sea: {
+        const std::span<const float> warmth = sampler.layer("ocean/temperature");
+        if (warmth.empty()) {
+            return missing_colour;
+        }
+        if (!sampler.ocean(spot)) {
+            return sampler.with_water(sampler.ground(spot), spot);
+        }
+        return mapgen::temperature_colour(fixed(sampler.smooth(warmth, spot)));
+    }
     case Overlay::Dryness: {
         const std::span<const float> dryness = sampler.layer("forest/dryness");
         if (dryness.empty()) {
@@ -342,6 +412,8 @@ std::string_view to_string(Overlay overlay) noexcept {
         return "sky";
     case Overlay::Pressure:
         return "pressure";
+    case Overlay::Sea:
+        return "sea";
     case Overlay::Dryness:
         return "dryness";
     case Overlay::Plants:
@@ -380,6 +452,9 @@ std::vector<std::string> layers_for(Overlay overlay, std::string_view species) {
         break;
     case Overlay::Pressure:
         add({"weather/pressure"});
+        break;
+    case Overlay::Sea:
+        add({"planet/biome", "ocean/temperature", "ocean/current_east", "ocean/current_north"});
         break;
     case Overlay::Dryness:
         add({"forest/dryness"});
@@ -420,6 +495,9 @@ std::optional<Legend> legend_for(Overlay overlay, const Frame& frame, std::strin
     case Overlay::Pressure:
         layer = "weather/pressure";
         break;
+    case Overlay::Sea:
+        layer = "ocean/temperature";
+        break;
     case Overlay::Dryness:
         layer = "forest/dryness";
         break;
@@ -433,9 +511,22 @@ std::optional<Legend> legend_for(Overlay overlay, const Frame& frame, std::strin
         layer = "wildlife/" + std::string{species};
         break;
     }
-    const std::span<const float> values = frame.layer(layer);
+    std::span<const float> values = frame.layer(layer);
     if (values.empty()) {
         return std::nullopt;
+    }
+    // The sea's range, not the land's, where the sea is known.
+    std::vector<float> sea;
+    const std::span<const float> ocean = frame.layer("planet/ocean");
+    if (overlay == Overlay::Sea && ocean.size() == values.size()) {
+        for (std::size_t cell = 0; cell < values.size(); ++cell) {
+            if (ocean[cell] > 0.5F) {
+                sea.push_back(values[cell]);
+            }
+        }
+        if (!sea.empty()) {
+            values = sea;
+        }
     }
     const auto [low, high] = std::ranges::minmax(values);
     const auto& offered = frame.welcome().layers;
@@ -444,6 +535,12 @@ std::optional<Legend> legend_for(Overlay overlay, const Frame& frame, std::strin
                   .unit = info != offered.end() ? info->unit : std::string{},
                   .low = static_cast<double>(low),
                   .high = static_cast<double>(high)};
+}
+
+int arrow_spacing(int width) noexcept {
+    constexpr int across = 48; // arrows across the image
+    constexpr int closest = 8;
+    return std::max(width / across, closest);
 }
 
 Rgb pressure_colour(double pressure) noexcept {
@@ -483,9 +580,12 @@ mapgen::Image render_overlay(const sim::CellGrid& grid, const Frame& frame,
             for (std::uint32_t row = rows.begin; row < rows.end; ++row) {
                 const auto y = static_cast<int>(row);
                 for (int x = 0; x < size.width; ++x) {
-                    const Rgb colour =
+                    Rgb colour =
                         colour_at(sampler, overlay, animals, most,
                                   sampler.spot(pixel_point(shown, size.width, size.height, x, y)));
+                    if (overlay == Overlay::Sea) {
+                        colour = with_arrow(sampler, shown, size, x, y, colour);
+                    }
                     const auto offset =
                         3 * ((static_cast<std::size_t>(y) * static_cast<std::size_t>(size.width)) +
                              static_cast<std::size_t>(x));

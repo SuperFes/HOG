@@ -372,6 +372,76 @@ TEST_CASE("natural edges wander, keeping each cell's value", "[viewer][overlay]"
     CHECK(moved > 0);
 }
 
+namespace {
+
+// Sea 20 °C everywhere, running at `east` and `north` m/s.
+Planet sea(float east, float north) {
+    Planet planet;
+    planet.set("planet/ocean", 1.0F);
+    planet.set("planet/elevation", 0.0F);
+    planet.set("ocean/temperature", 20.0F);
+    planet.set("ocean/current_east", east);
+    planet.set("ocean/current_north", north);
+    return planet;
+}
+
+// How far the arrow in the image's first square reaches across and down, in pixels.
+std::pair<int, int> arrow_extent(const mapgen::Image& image, Rgb sea) {
+    const int spacing = viewer::arrow_spacing(width);
+    int left = spacing;
+    int right = -1;
+    int top = spacing;
+    int bottom = -1;
+    for (int y = 0; y < spacing; ++y) {
+        for (int x = 0; x < spacing; ++x) {
+            if (image.at(x, y) != sea) {
+                left = std::min(left, x);
+                right = std::max(right, x);
+                top = std::min(top, y);
+                bottom = std::max(bottom, y);
+            }
+        }
+    }
+    return {right - left + 1, bottom - top + 1};
+}
+
+} // namespace
+
+TEST_CASE("the sea overlay shows its warmth, with arrows along its currents", "[viewer][overlay]") {
+    const Rgb warm = mapgen::temperature_colour(fixed(20.0));
+    CHECK(all(sea(0.0F, 0.0F).render(Overlay::Sea), warm));
+
+    const mapgen::Image east = sea(0.4F, 0.0F).render(Overlay::Sea);
+    const auto [east_wide, east_tall] = arrow_extent(east, warm);
+    CHECK(east_wide > east_tall);
+    // Every pixel is the sea's or leans towards the arrows'.
+    for (const Rgb pixel : pixels(east)) {
+        REQUIRE((pixel == warm || pixel[2] < warm[2] || pixel[0] < warm[0]));
+    }
+    const auto [north_wide, north_tall] = arrow_extent(sea(0.0F, 0.4F).render(Overlay::Sea), warm);
+    CHECK(north_tall > north_wide);
+    // Faster currents draw longer arrows.
+    CHECK(arrow_extent(sea(0.05F, 0.0F).render(Overlay::Sea), warm).first < east_wide);
+
+    // Land shows as itself, without arrows.
+    Planet planet = land();
+    planet.set("ocean/temperature", 20.0F);
+    planet.set("ocean/current_east", 0.4F);
+    planet.set("ocean/current_north", 0.0F);
+    CHECK(all(planet.render(Overlay::Sea), mapgen::height_colour(fixed(500.0))));
+}
+
+TEST_CASE("the sea's legend ranges over the sea alone", "[viewer][overlay]") {
+    Planet planet = sea(0.0F, 0.0F);
+    planet.values("planet/ocean")[0] = 0.0F;
+    planet.values("ocean/temperature")[0] = -30.0F;
+    planet.values("ocean/temperature")[1] = 4.0F;
+    const auto legend = viewer::legend_for(Overlay::Sea, planet.frame(), "");
+    REQUIRE(legend);
+    CHECK(legend.value_or(viewer::Legend{}).low == 4.0);
+    CHECK(legend.value_or(viewer::Legend{}).high == 20.0);
+}
+
 TEST_CASE("each overlay asks for the layers it draws", "[viewer][overlay]") {
     const auto has = [](const std::vector<std::string>& layers, const std::string& name) {
         return std::ranges::find(layers, name) != layers.end();
@@ -380,6 +450,8 @@ TEST_CASE("each overlay asks for the layers it draws", "[viewer][overlay]") {
     CHECK(has(viewer::layers_for(Overlay::Fire, ""), "forest/fire"));
     CHECK(has(viewer::layers_for(Overlay::Water, ""), "planet/water_table"));
     CHECK(has(viewer::layers_for(Overlay::Terrain, ""), "planet/biome"));
+    CHECK(has(viewer::layers_for(Overlay::Sea, ""), "ocean/temperature"));
+    CHECK(has(viewer::layers_for(Overlay::Sea, ""), "ocean/current_north"));
     CHECK(has(viewer::layers_for(Overlay::Wildlife, "red fox"), "wildlife/red fox"));
     CHECK(has(viewer::layers_for(Overlay::Wildlife, "red fox"), "planet/area"));
     CHECK_FALSE(has(viewer::layers_for(Overlay::Terrain, ""), "weather/temperature"));

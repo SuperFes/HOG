@@ -92,6 +92,11 @@ void each_layer(const LayerSources& sources, Use use) {
     use("weather/recent_precipitation", "mm/day",
         [&](auto& values) { copy(weather.recent_precipitation, values); });
 
+    const sim::OceanFields& ocean = sources.weather.ocean();
+    use("ocean/temperature", "°C", [&](auto& values) { copy(ocean.temperature, values); });
+    use("ocean/current_east", "m/s", [&](auto& values) { component(ocean.current, 0, values); });
+    use("ocean/current_north", "m/s", [&](auto& values) { component(ocean.current, 1, values); });
+
     if (const sim::Wildlife* wildlife = sources.wildlife) {
         const sim::WildlifeFields& fields = wildlife->fields();
         use("wildlife/forage", "kg/km²", [&](auto& values) { copy(fields.forage, values); });

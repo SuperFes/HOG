@@ -79,7 +79,7 @@ options:
   --port PORT     its [debug] port (default 7777)
   --width PIXELS  of the rendered map (default 1024)
   --overlay NAME  shown first: terrain, biome, water, minerals, temperature, air,
-                  sky, pressure, dryness, plants, fire or wildlife (default terrain)
+                  sky, pressure, sea, dryness, plants, fire or wildlife (default terrain)
   --species NAME  shown first on the wildlife overlay
   --quit-after S  quit after this many seconds
   --capture PATH  save the last frame drawn as a PNG, on quitting

@@ -25,6 +25,7 @@ enum class Overlay : std::uint8_t {
     Air,         // temperature, reddened along warm fronts and blued along cold ones
     Sky,         // cloud, rain, snow, hail and storms over the ground
     Pressure,    // at sea level
+    Sea,         // its surface temperature, with arrows along the currents
     Dryness,     // of the ground
     Plants,      // biomass as a share of what the ground holds
     Fire,        // plants, with what's burning
@@ -32,9 +33,9 @@ enum class Overlay : std::uint8_t {
 };
 
 inline constexpr std::array overlays{
-    Overlay::Terrain,     Overlay::Biome,  Overlay::Water, Overlay::Minerals,
-    Overlay::Temperature, Overlay::Air,    Overlay::Sky,   Overlay::Pressure,
-    Overlay::Dryness,     Overlay::Plants, Overlay::Fire,  Overlay::Wildlife,
+    Overlay::Terrain, Overlay::Biome, Overlay::Water,    Overlay::Minerals, Overlay::Temperature,
+    Overlay::Air,     Overlay::Sky,   Overlay::Pressure, Overlay::Sea,      Overlay::Dryness,
+    Overlay::Plants,  Overlay::Fire,  Overlay::Wildlife,
 };
 
 [[nodiscard]] std::string_view to_string(Overlay overlay) noexcept;
@@ -57,6 +58,10 @@ struct Legend {
 
 // What the map shows where its layers are missing.
 inline constexpr mapgen::Rgb missing_colour{90, 90, 90};
+inline constexpr mapgen::Rgb arrow_colour{15, 25, 45};
+
+// Arrows are this many pixels apart, one centred in each square of the image.
+[[nodiscard]] int arrow_spacing(int width) noexcept;
 
 // The shown part of the map, latitude down and longitude across, twice as wide as it is tall.
 // Fields are smoothed between cells; biomes and fires are shown cell by cell. Where `ground`, if
