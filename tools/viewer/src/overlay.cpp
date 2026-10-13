@@ -309,6 +309,17 @@ Rgb weather_at(const Sampler& sampler, Overlay overlay, const Spot& spot) {
                               falling, storm);
 }
 
+Rgb sea_at(const Sampler& sampler, const Spot& spot) {
+    const std::span<const float> warmth = sampler.layer("ocean/temperature");
+    if (warmth.empty()) {
+        return missing_colour;
+    }
+    if (!sampler.ocean(spot)) {
+        return sampler.with_water(sampler.ground(spot), spot);
+    }
+    return mapgen::temperature_colour(fixed(sampler.smooth(warmth, spot)));
+}
+
 Rgb colour_at(const Sampler& sampler, Overlay overlay, std::span<const float> species, double most,
               const Spot& spot) {
     switch (overlay) {
@@ -342,16 +353,8 @@ Rgb colour_at(const Sampler& sampler, Overlay overlay, std::span<const float> sp
     case Overlay::Sky:
     case Overlay::Pressure:
         return weather_at(sampler, overlay, spot);
-    case Overlay::Sea: {
-        const std::span<const float> warmth = sampler.layer("ocean/temperature");
-        if (warmth.empty()) {
-            return missing_colour;
-        }
-        if (!sampler.ocean(spot)) {
-            return sampler.with_water(sampler.ground(spot), spot);
-        }
-        return mapgen::temperature_colour(fixed(sampler.smooth(warmth, spot)));
-    }
+    case Overlay::Sea:
+        return sea_at(sampler, spot);
     case Overlay::Dryness: {
         const std::span<const float> dryness = sampler.layer("forest/dryness");
         if (dryness.empty()) {

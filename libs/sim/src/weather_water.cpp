@@ -21,9 +21,10 @@ void water(const StepContext& step, WeatherFields& fields, std::uint32_t index) 
     // The sea gives up water as its own warmth allows, so warm currents wet the air over them.
     const auto sea = static_cast<double>(step.sea[index]);
     const double holds = saturation(ground.ocean ? sea : surface);
-    const float wetness = !ground.ocean                               ? ground.wetness
-                          : sea <= step.config->tuning.ocean.freezing ? ice_wetness
-                                                                      : 1.0F;
+    float wetness = ground.wetness;
+    if (ground.ocean) {
+        wetness = sea <= step.config->tuning.ocean.freezing ? ice_wetness : 1.0F;
+    }
     const double evaporating = std::min(tuning.evaporation_per_day * step.seconds / 86'400.0, 1.0);
     const double evaporation =
         std::max(holds - vapour, 0.0) * static_cast<double>(wetness) * evaporating;

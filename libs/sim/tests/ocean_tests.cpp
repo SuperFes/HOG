@@ -145,7 +145,7 @@ TEST_CASE("a sea without coasts runs round the planet with the winds", "[sim][oc
         if (std::abs(latitude(index)) > 40.0 && std::abs(latitude(index)) < 50.0) {
             CHECK(flow.x > 0.0F);
         }
-        CHECK(std::abs(flow.y) < 0.2F * std::abs(flow.x) + 0.01F);
+        CHECK(std::abs(flow.y) < (0.2F * std::abs(flow.x)) + 0.01F);
     }
 }
 
