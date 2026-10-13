@@ -161,6 +161,7 @@ This phase builds a server that runs the world with nobody connected: time passe
 - [x] Recovery: emptied areas refill from their neighbours, wiped-out species return as founders after a while, and players can reintroduce animals
 - [x] Ecology events (collapse, local extinction, return, overpopulation) against a long-run baseline, with kills attributed to hunters
 - [x] Forest biomass per cell, with growth and a stub fire spread
+- [x] Hydrology: rivers carve the land over geological time, with meandering channels, a water table, wetlands and mountain glaciers
 - [ ] Ocean currents: wind-driven gyres steered by the coasts, carrying sea temperature that feeds back into the weather
 
 **Debug viewer**
