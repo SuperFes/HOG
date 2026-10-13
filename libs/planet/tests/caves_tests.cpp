@@ -60,7 +60,7 @@ std::vector<CellId> tiles(const Caves& caves, std::uint64_t count) {
 // The finest cell over a point, and the fixed-point depth of the point below its surface.
 struct Spot {
     CellId cell;
-    std::int64_t depth;
+    std::int64_t depth = 0;
 };
 
 Spot spot_at(const Caves& caves, DVec3 point) {
@@ -201,9 +201,9 @@ TEST_CASE("caves are found where their passages run", "[planet][caves]") {
             const auto hit = caves.cave_at(at.cell, at.depth);
             REQUIRE(hit);
             // A sinkhole may rise from the junction too.
-            CHECK(hit->cave != Cave::LavaTube);
-            CHECK(hit->cave != Cave::SeaCave);
-            CHECK(hit->clearance >= hog::planet::walk_clearance);
+            CHECK(hit.value().cave != Cave::LavaTube);
+            CHECK(hit.value().cave != Cave::SeaCave);
+            CHECK(hit.value().clearance >= hog::planet::walk_clearance);
             // Deep in the bedrock below, there is nothing.
             CHECK_FALSE(caves.cave_at(at.cell, at.depth + (1'000 * fixed_one)));
             ++found;
@@ -271,8 +271,8 @@ TEST_CASE("lava tubes are found in the basalt they run through", "[planet][caves
             }
             const auto hit = lookup.cave_at(at.cell, at.depth);
             REQUIRE(hit);
-            CHECK(hit->cave == Cave::LavaTube);
-            CHECK(hit->clearance >= hog::planet::walk_clearance);
+            CHECK(hit.value().cave == Cave::LavaTube);
+            CHECK(hit.value().clearance >= hog::planet::walk_clearance);
             CHECK_FALSE(lookup.cave_at(at.cell, at.depth + (50 * fixed_one)));
             ++found;
         }

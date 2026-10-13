@@ -95,6 +95,14 @@ constexpr double below_sea_caves = widest_mouth;
     return narrowest + ((widest - narrowest) * share * share * share * share);
 }
 
+// Keeps whichever of `best` and the passage at the point has more room.
+void keep_roomiest(std::optional<CaveHit>& best, const Passage& passage, DVec3 point) {
+    const std::optional<double> clearance = clearance_at(passage, point);
+    if (clearance && (!best || *clearance > best->clearance)) {
+        best = CaveHit{.cave = passage.cave, .clearance = *clearance};
+    }
+}
+
 [[nodiscard]] DVec3 point_over(DVec3 direction, double planet_radius, std::int64_t elevation,
                                std::int64_t depth) {
     return direction * (planet_radius + fixed_to_double(elevation - depth));
@@ -297,7 +305,8 @@ const std::vector<Passage>& Caves::Lookup::karst(CellId tile) {
         for (const CellId neighbor : edge_neighbors(tile)) {
             const Junction there = junction(neighbor);
             // Both tiles make the same passage between them, from the lower-numbered one.
-            const auto [low, high] = std::minmax(tile.raw(), neighbor.raw());
+            const std::uint64_t low = std::min(tile.raw(), neighbor.raw());
+            const std::uint64_t high = std::max(tile.raw(), neighbor.raw());
             const std::uint64_t seed = hash_values(caves.karst_seed_, low, high);
             if (!there.open || hash_values(seed, 0) % 100 >= link_percent) {
                 continue;
@@ -414,54 +423,61 @@ std::vector<Passage> Caves::Lookup::passages_near(CellId cell) {
     return near;
 }
 
+void Caves::Lookup::karst_hit(CellId cell, DVec3 point, bool in_limestone,
+                              std::optional<CaveHit>& best) {
+    const auto dissolved = [&](CellId tile) {
+        for (const Passage& passage : karst(tile)) {
+            // Passages only run through the limestone; sinkholes open through what lies over it.
+            if (passage.cave == Cave::Sinkhole || in_limestone) {
+                keep_roomiest(best, passage, point);
+            }
+        }
+    };
+    const CellId tile = cell_at(cell_center(cell), caves_->karst_level_);
+    dissolved(tile);
+    const VertexNeighbors around = vertex_neighbors(tile);
+    std::ranges::for_each(around.cells(), dissolved);
+}
+
+void Caves::Lookup::sea_hit(CellId cell, DVec3 point, std::optional<CaveHit>& best) {
+    const auto cut = [&](CellId tile) {
+        for (const Passage& passage : sea(tile)) {
+            keep_roomiest(best, passage, point);
+        }
+    };
+    const CellId tile = cell_at(cell_center(cell), caves_->sea_level_);
+    cut(tile);
+    const VertexNeighbors around = vertex_neighbors(tile);
+    std::ranges::for_each(around.cells(), cut);
+}
+
 std::optional<CaveHit> Caves::Lookup::cave_at(CellId cell, std::int64_t depth) {
     const Strata strata = caves_->geology_->strata(cell);
     const Rock rock = strata.rock_at(depth);
-    // Only limestone dissolves, and sinkholes open through what lies over it.
+    const std::int64_t elevation = caves_->geology_->terrain().elevation(cell);
     const bool karst = strata.sediment == Rock::Limestone && depth < strata.bedrock_depth();
     const bool lava = rock == Rock::Basalt && depth < below_tubes;
     // Sea caves are cut in solid rock, about level with the sea.
-    const std::int64_t elevation = caves_->geology_->terrain().elevation(cell);
     const double height = fixed_to_double(elevation - depth);
-    const bool solid = rock != Rock::Soil && rock != Rock::Sand && depth >= 0;
-    const bool sea_cave =
-        solid && elevation > 0 && height < above_sea_caves && height > -below_sea_caves;
+    const bool sea_cave = rock != Rock::Soil && rock != Rock::Sand && depth >= 0 && elevation > 0 &&
+                          height < above_sea_caves && height > -below_sea_caves;
     if (!karst && !lava && !sea_cave) {
         return std::nullopt;
     }
     const DVec3 point = point_over(cell_center(cell), caves_->planet_radius_, elevation, depth);
     std::optional<CaveHit> best;
-    const auto consider = [&](const Passage& passage) {
-        const std::optional<double> clearance = clearance_at(passage, point);
-        if (clearance && (!best || *clearance > best->clearance)) {
-            best = CaveHit{.cave = passage.cave, .clearance = *clearance};
-        }
-    };
     if (karst) {
-        const auto dissolved = [&](CellId tile) {
-            for (const Passage& passage : this->karst(tile)) {
-                if (passage.cave == Cave::Sinkhole || rock == Rock::Limestone) {
-                    consider(passage);
-                }
-            }
-        };
-        const CellId tile = cell_at(cell_center(cell), caves_->karst_level_);
-        dissolved(tile);
-        const VertexNeighbors around = vertex_neighbors(tile);
-        std::ranges::for_each(around.cells(), dissolved);
+        karst_hit(cell, point, rock == Rock::Limestone, best);
     }
     if (sea_cave) {
-        const CellId tile = cell_at(cell_center(cell), caves_->sea_level_);
-        std::ranges::for_each(sea(tile), consider);
-        const VertexNeighbors around = vertex_neighbors(tile);
-        for (const CellId each : around.cells()) {
-            std::ranges::for_each(sea(each), consider);
-        }
+        sea_hit(cell, point, best);
     }
     if (lava) {
         for (const LavaTube& tube : caves_->lava_tubes_) {
             if (glm::length(point - tube.middle) <= tube.reach) {
-                std::ranges::for_each(tube.passages, consider);
+                for (const Passage& passage : tube.passages) {
+                    keep_roomiest(best, passage, point);
+                }
             }
         }
     }

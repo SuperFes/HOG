@@ -52,6 +52,20 @@ struct Spot {
     std::optional<std::size_t> sample; // of the surveyed ground, if it reaches here
 };
 
+// How much of the rock shows through a cave with this many decimetres of room: none where it can
+// be walked, more where it must be crawled, and most through a squeeze.
+double showing_through(std::uint8_t decimetres) {
+    switch (planet::room_for(decimetres / 10.0)) {
+    case planet::Room::Walk:
+        return 0.0;
+    case planet::Room::Crawl:
+        return 0.3;
+    case planet::Room::Squeeze:
+        return 0.6;
+    }
+    return 0.0;
+}
+
 // Reads a frame's layers, and the ground surveyed where there is some, at points on the planet.
 class Sampler {
 public:
@@ -175,12 +189,8 @@ public:
         }
         const Rgb solid = mapgen::rock_colour(static_cast<planet::Rock>(rock));
         if (cave > 0) {
-            const double room = ground_->room[*spot.sample] / 10.0;
-            const double through = room < planet::crawl_clearance  ? 0.6
-                                   : room < planet::walk_clearance ? 0.3
-                                                                   : 0.0;
             return mapgen::mix(mapgen::cave_colour(static_cast<planet::Cave>(cave - 1)), solid,
-                               through);
+                               showing_through(ground_->room[*spot.sample]));
         }
         return deposit > 0 ? mapgen::resource_colour(static_cast<planet::Resource>(deposit - 1))
                            : solid;

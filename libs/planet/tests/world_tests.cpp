@@ -223,8 +223,8 @@ TEST_CASE("openings are dug out or natural caves", "[planet][world]") {
             }
             const auto opening = w.opening_at(over, depth);
             REQUIRE(opening);
-            REQUIRE(opening->cave);
-            CHECK(opening->cave->cave == hog::planet::Cave::LavaTube);
+            REQUIRE(opening.value().cave);
+            CHECK(opening.value().cave.value().cave == hog::planet::Cave::LavaTube);
             found = true;
         }
     }

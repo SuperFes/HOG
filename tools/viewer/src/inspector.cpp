@@ -122,10 +122,17 @@ std::vector<Reading> column_readings(const probe::Column& column) {
             lines.push_back({.name = "dug", .value = span});
             continue;
         }
-        const auto room = static_cast<double>(cavity.room);
-        const std::string_view tight = room < planet::crawl_clearance  ? ", a squeeze"
-                                       : room < planet::walk_clearance ? ", a crawl"
-                                                                       : "";
+        std::string_view tight;
+        switch (planet::room_for(static_cast<double>(cavity.room))) {
+        case planet::Room::Walk:
+            break;
+        case planet::Room::Crawl:
+            tight = ", a crawl";
+            break;
+        case planet::Room::Squeeze:
+            tight = ", a squeeze";
+            break;
+        }
         lines.push_back(
             {.name = named<planet::Cave>(static_cast<std::uint8_t>(cavity.cave - 1),
                                          planet::cave_count),

@@ -29,6 +29,19 @@ inline constexpr int cave_count = static_cast<int>(Cave::SeaCave) + 1;
 inline constexpr double walk_clearance = 1.0;
 inline constexpr double crawl_clearance = 0.4;
 
+enum class Room : std::uint8_t {
+    Walk,
+    Crawl,
+    Squeeze,
+};
+
+[[nodiscard]] constexpr Room room_for(double clearance) noexcept {
+    if (clearance >= walk_clearance) {
+        return Room::Walk;
+    }
+    return clearance >= crawl_clearance ? Room::Crawl : Room::Squeeze;
+}
+
 // A stretch of passage: a tube between two points, narrowing or widening from one end to the
 // other. Points are metres from the planet's middle.
 struct Passage {
@@ -103,6 +116,8 @@ public:
         [[nodiscard]] const Junction& junction(CellId tile);
         [[nodiscard]] const std::vector<Passage>& karst(CellId tile);
         [[nodiscard]] const std::vector<Passage>& sea(CellId tile);
+        void karst_hit(CellId cell, DVec3 point, bool in_limestone, std::optional<CaveHit>& best);
+        void sea_hit(CellId cell, DVec3 point, std::optional<CaveHit>& best);
 
         const Caves* caves_;
         std::unordered_map<std::uint64_t, Junction> junctions_;

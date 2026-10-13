@@ -215,6 +215,27 @@ TEST_CASE("wildlife is shown against its densest cell", "[viewer][overlay]") {
 
 namespace {
 
+// The cave and its decimetres of room along the top rows; none below.
+constexpr std::array<std::pair<std::uint8_t, std::uint8_t>, 3> row_caves{{
+    {std::to_underlying(planet::Cave::LavaTube) + 1, 30},
+    {std::to_underlying(planet::Cave::Karst) + 1, 2},
+    {0, 0},
+}};
+
+void add_sample(probe::Ground& ground, int x, int y) {
+    const bool east = x >= width / 2;
+    ground.elevation.push_back(east ? 800.0F : -30.0F);
+    ground.biome.push_back(std::to_underlying(east ? planet::Biome::Tundra : planet::Biome::Ocean));
+    ground.water_table.push_back(east ? 6.0F : 0.0F);
+    ground.river.push_back(0);
+    ground.rock.push_back(std::to_underlying(planet::Rock::Sandstone));
+    ground.deposit.push_back(x >= width - 4 ? std::to_underlying(planet::Resource::Gold) + 1 : 0);
+    ground.heat.push_back(east ? 650.0F : 20.0F);
+    const auto& [cave, room] = row_caves.at(static_cast<std::size_t>(std::min(y, 2)));
+    ground.cave.push_back(cave);
+    ground.room.push_back(room);
+}
+
 // Ground surveyed under every pixel of a shown area: the west half sea 30 m deep and the east half
 // land 800 m up, tundra over sandstone with gold in the far east, hot under the land, with a
 // roomy lava tube along the top row and a karst squeeze along the next.
@@ -232,20 +253,7 @@ probe::Ground surveyed(const viewer::MapRect& shown) {
                          .room = {}};
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
-            const bool east = x >= width / 2;
-            ground.elevation.push_back(east ? 800.0F : -30.0F);
-            ground.biome.push_back(
-                std::to_underlying(east ? planet::Biome::Tundra : planet::Biome::Ocean));
-            ground.water_table.push_back(east ? 6.0F : 0.0F);
-            ground.river.push_back(0);
-            ground.rock.push_back(std::to_underlying(planet::Rock::Sandstone));
-            ground.deposit.push_back(x >= width - 4 ? std::to_underlying(planet::Resource::Gold) + 1
-                                                    : 0);
-            ground.heat.push_back(east ? 650.0F : 20.0F);
-            ground.cave.push_back(y == 0
-                                      ? std::to_underlying(planet::Cave::LavaTube) + 1
-                                      : (y == 1 ? std::to_underlying(planet::Cave::Karst) + 1 : 0));
-            ground.room.push_back(y == 0 ? 30 : (y == 1 ? 2 : 0));
+            add_sample(ground, x, y);
         }
     }
     return ground;
