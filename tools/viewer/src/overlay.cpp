@@ -196,8 +196,9 @@ double arrow_cover(DVec2 offset, DVec2 heading, double speed, int spacing) {
     if (speed < still) {
         return 0.0;
     }
+    // Most currents are slow, so lengths grow fastest among them.
     const double length =
-        static_cast<double>(spacing) * (0.3 + (0.55 * std::min(speed / fastest, 1.0)));
+        static_cast<double>(spacing) * (0.25 + (0.65 * std::sqrt(std::min(speed / fastest, 1.0))));
     const DVec2 tip = heading * (length / 2.0);
     const DVec2 tail = -tip;
     const double barb = std::max(length * 0.35, 3.0);

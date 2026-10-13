@@ -145,9 +145,9 @@ struct OceanTuning {
     // A new sea runs this long before it is first used, in day-long steps, to settle its warmth.
     Seconds spin_up = std::chrono::days{180};
 
-    // The sea's warmth follows the season this slowly, so it lags the sun by over a month.
-    Seconds response = std::chrono::days{40};
-    double seasons = 18.0;  // °C per unit of sin(declination) · sin(latitude)
+    // The sea's warmth follows the season this slowly, so it lags the sun by six weeks or so.
+    Seconds response = std::chrono::days{60};
+    double seasons = 20.0;  // °C per unit of sin(declination) · sin(latitude)
     double upwelled = 8.0;  // °C cooler than the season, the water that wells up from below
     double freezing = -2.0; // °C, below which the sea ices over instead
     // The wind's sideways push on the water is held finite near the equator, where it would be
