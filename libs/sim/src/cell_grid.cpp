@@ -10,6 +10,14 @@ namespace hog::sim {
 
 using planet::CellId;
 
+namespace {
+
+double arc(DVec3 from, DVec3 to) {
+    return std::acos(std::clamp(glm::dot(from, to), -1.0, 1.0));
+}
+
+} // namespace
+
 CellGrid::CellGrid(int level)
     : level_(level), side_(std::uint32_t{1} << std::clamp(level, 0, max_level)) {
     HOG_ASSERT(level >= 0 && level <= max_level, "grid level out of range");
@@ -19,6 +27,7 @@ CellGrid::CellGrid(int level)
     neighbors_.reserve(count);
     offsets_.reserve(count);
     gradient_weights_.reserve(count);
+    laplacian_weights_.reserve(count);
     for (std::uint32_t index = 0; index < count; ++index) {
         frames_.push_back(planet::tangent_frame(cell(index)));
         areas_.push_back(planet::cell_area(cell(index)));
@@ -36,8 +45,7 @@ CellGrid::CellGrid(int level)
             around[k] = this->index(cells[k]);
             const DVec3 there = frames_[around[k]].up;
             const DVec2 heading{glm::dot(there, here.east), glm::dot(there, here.north)};
-            const double arc = std::acos(std::clamp(glm::dot(there, here.up), -1.0, 1.0));
-            offsets[k] = glm::normalize(heading) * arc;
+            offsets[k] = glm::normalize(heading) * arc(here.up, there);
             xx += offsets[k].x * offsets[k].x;
             xy += offsets[k].x * offsets[k].y;
             yy += offsets[k].y * offsets[k].y;
@@ -52,7 +60,25 @@ CellGrid::CellGrid(int level)
         neighbors_.push_back(around);
         offsets_.push_back(offsets);
         gradient_weights_.push_back(weights);
+        laplacian_weights_.push_back(laplacian(index, around));
     }
+}
+
+std::array<double, 4> CellGrid::laplacian(std::uint32_t index,
+                                          const std::array<std::uint32_t, 4>& around) const {
+    const auto corners = planet::cell_vertices(cell(index));
+    std::array<double, 4> weights{};
+    for (std::size_t k = 0; k < around.size(); ++k) {
+        const DVec3 there = frames_[around[k]].up;
+        // The shared edge runs between the two corners nearest the neighbour.
+        std::array<DVec3, 4> nearest = corners;
+        std::ranges::sort(nearest, [&](DVec3 a, DVec3 b) {
+            return glm::dot(a, there) > glm::dot(b, there);
+        });
+        weights[k] =
+            arc(nearest[0], nearest[1]) / (arc(frames_[index].up, there) * areas_[index]);
+    }
+    return weights;
 }
 
 CellId CellGrid::cell(std::uint32_t index) const {

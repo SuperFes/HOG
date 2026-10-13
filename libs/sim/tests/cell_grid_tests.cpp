@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <numbers>
+#include <vector>
 
 using hog::DVec2;
 using hog::DVec3;
@@ -86,6 +87,50 @@ TEST_CASE("grids interpolate between cells", "[sim][grid]") {
             const double halfway = grid.interpolate(between, value);
             CHECK(halfway >= low - 1e-9);
             CHECK(halfway <= high + 1e-9);
+        }
+    }
+}
+
+TEST_CASE("solving with grid Laplacians recovers a smooth field", "[sim][grid]") {
+    // Height along an axis is a first spherical harmonic, whose Laplacian is -2 times itself, so
+    // it solves laplacian(u) - u = -3 height. Cells are skewed, so single cells are off by more
+    // than the solution is.
+    const CellGrid grid{4};
+    const DVec3 axis = glm::normalize(DVec3{0.3, -0.5, 0.8});
+    const auto height = [&](std::uint32_t index) { return glm::dot(grid.frame(index).up, axis); };
+    std::vector<double> solution(grid.size(), 0.0);
+    std::vector<double> next(grid.size());
+    for (int iteration = 0; iteration < 5'000; ++iteration) {
+        for (std::uint32_t index = 0; index < grid.size(); ++index) {
+            double around = 0.0;
+            double total = 1.0;
+            for (std::size_t k = 0; k < 4; ++k) {
+                const double weight = grid.laplacian_weights(index)[k];
+                around += weight * solution[grid.neighbors(index)[k]];
+                total += weight;
+            }
+            next[index] = ((3.0 * height(index)) + around) / total;
+        }
+        solution.swap(next);
+    }
+    double worst = 0.0;
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        worst = std::max(worst, std::abs(solution[index] - height(index)));
+    }
+    CHECK(worst < 0.05);
+}
+
+TEST_CASE("what a grid Laplacian moves out of a cell moves into its neighbour", "[sim][grid]") {
+    const CellGrid grid{3};
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        for (std::size_t k = 0; k < 4; ++k) {
+            const std::uint32_t neighbor = grid.neighbors(index)[k];
+            const auto back = std::ranges::find(grid.neighbors(neighbor), index) -
+                              grid.neighbors(neighbor).begin();
+            const double out = grid.area(index) * grid.laplacian_weights(index)[k];
+            const double in = grid.area(neighbor) *
+                              grid.laplacian_weights(neighbor)[static_cast<std::size_t>(back)];
+            CHECK_THAT(out, Catch::Matchers::WithinRel(in, 1e-9));
         }
     }
 }

@@ -53,6 +53,13 @@ public:
         return gradient_weights_[index];
     }
 
+    // A field's Laplacian per square radian is the sum of weights[k] times the field's difference
+    // from this cell to neighbour k: the flux across each shared edge, over the cell's area, so
+    // what flows out of one cell flows into its neighbour.
+    [[nodiscard]] const std::array<double, 4>& laplacian_weights(std::uint32_t index) const {
+        return laplacian_weights_[index];
+    }
+
     // A field's value at a unit direction, where value(index) gives it at a cell: interpolated
     // linearly from the cell under the point towards each neighbour, by how far the point lies
     // in that neighbour's direction. The weights are never negative, so it never makes new
@@ -61,6 +68,9 @@ public:
     [[nodiscard]] double interpolate(DVec3 point, Value value) const;
 
 private:
+    [[nodiscard]] std::array<double, 4> laplacian(std::uint32_t index,
+                                                  const std::array<std::uint32_t, 4>& around) const;
+
     int level_;
     std::uint32_t side_;
     std::vector<planet::TangentFrame> frames_;
@@ -68,6 +78,7 @@ private:
     std::vector<std::array<std::uint32_t, 4>> neighbors_;
     std::vector<std::array<DVec2, 4>> offsets_;
     std::vector<std::array<DVec2, 4>> gradient_weights_;
+    std::vector<std::array<double, 4>> laplacian_weights_;
 };
 
 template <typename Value>
