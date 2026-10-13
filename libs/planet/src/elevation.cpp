@@ -69,7 +69,7 @@ Elevation::Evolved::Evolved(Landform worn, const Elevation& terrain, const Plane
               const CellId cell = landform.grid().cell(index);
               ground[index] = Elevation::worn(cell, terrain.generated(cell), landform, meander);
           }
-          return Rivers{landform, ground, meander, config.radius};
+          return Rivers{landform, ground, meander, config.radius, config.river_scale};
       }()} {}
 
 const Elevation::Evolved& Elevation::evolved() const {
@@ -79,11 +79,12 @@ const Elevation::Evolved& Elevation::evolved() const {
 
 std::shared_ptr<const Elevation::Evolved> Elevation::evolve(const PlanetConfig& config) const {
     // Evolving takes a while, so it's shared while any Elevation of the same planet lives.
-    using Key = std::tuple<std::uint64_t, std::uint64_t, std::uint64_t>;
+    using Key = std::tuple<std::uint64_t, std::uint64_t, std::uint64_t, std::uint64_t>;
     static std::mutex mutex;
     static std::map<Key, std::weak_ptr<const Evolved>> evolved;
     const Key key{config.seed, std::bit_cast<std::uint64_t>(config.radius),
-                  std::bit_cast<std::uint64_t>(config.ocean_fraction)};
+                  std::bit_cast<std::uint64_t>(config.ocean_fraction),
+                  std::bit_cast<std::uint64_t>(config.river_scale)};
     const std::scoped_lock lock{mutex};
     if (auto shared = evolved[key].lock()) {
         return shared;

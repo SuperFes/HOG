@@ -36,7 +36,7 @@ double Rivers::depth(double area) {
 }
 
 Rivers::Rivers(const Landform& landform, std::span<const std::int64_t> ground, Meander meander,
-               double radius)
+               double radius, double scale)
     : grid_{&landform.grid()}, meander_{meander}, radius_{radius} {
     const LevelGrid& grid = landform.grid();
     const Drainage& drainage = landform.drainage();
@@ -51,7 +51,7 @@ Rivers::Rivers(const Landform& landform, std::span<const std::int64_t> ground, M
     // Beds fall from each source to the sea: each cell's is no higher than any upstream of it.
     std::vector<std::int64_t> bed(count);
     for (std::uint32_t cell = 0; cell < count; ++cell) {
-        bed[cell] = ground[cell] - fixed(depth(static_cast<double>(drained[cell])));
+        bed[cell] = ground[cell] - fixed(scale * depth(static_cast<double>(drained[cell])));
     }
     for (auto cell = drainage.order.rbegin(); cell != drainage.order.rend(); ++cell) {
         const std::uint32_t receiver = drainage.receiver[*cell];
@@ -67,7 +67,7 @@ Rivers::Rivers(const Landform& landform, std::span<const std::int64_t> ground, M
         }
         const std::uint32_t receiver = drainage.receiver[cell];
         const auto area = static_cast<double>(drained[cell]);
-        const std::int64_t deep = fixed(depth(area));
+        const std::int64_t deep = fixed(scale * depth(area));
         // At the sea the water surface meets sea level.
         const std::int64_t to_bed = outlet(receiver) ? -deep : bed[receiver];
         const auto reach = static_cast<std::uint32_t>(reaches_.size());
@@ -75,7 +75,7 @@ Rivers::Rivers(const Landform& landform, std::span<const std::int64_t> ground, M
                             .to = cell_center(grid.cell(receiver)),
                             .from_bed = bed[cell],
                             .to_bed = to_bed,
-                            .width = width(area),
+                            .width = scale * width(area),
                             .depth = deep});
         for (const std::uint32_t end : {cell, receiver}) {
             near.emplace_back(end, reach);

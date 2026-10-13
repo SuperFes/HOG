@@ -156,6 +156,19 @@ TEST_CASE("banks slope up from the water rather than standing as walls", "[plane
     }
 }
 
+TEST_CASE("scaled rivers run the same courses, wider and deeper", "[planet][rivers]") {
+    const Rivers scaled{landform(), ground(landform()), {1, landform().grid()}, radius, 3.0};
+    const auto plain = rivers().reaches();
+    const auto wide = scaled.reaches();
+    REQUIRE(wide.size() == plain.size());
+    for (std::size_t k = 0; k < plain.size(); ++k) {
+        REQUIRE(wide[k].from == plain[k].from);
+        REQUIRE(wide[k].to == plain[k].to);
+        REQUIRE(wide[k].width == 3.0 * plain[k].width);
+        REQUIRE(wide[k].depth > plain[k].depth);
+    }
+}
+
 TEST_CASE("without rain there are no rivers", "[planet][rivers]") {
     const Landform dry = worn(0);
     const Rivers none{dry, ground(dry), {1, dry.grid()}, radius};

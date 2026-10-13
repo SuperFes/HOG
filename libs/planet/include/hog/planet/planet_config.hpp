@@ -24,13 +24,16 @@ struct PlanetConfig {
     std::uint64_t seed = 0;
     double ocean_fraction = 0.7;
     double radius = 0.0; // metres
+    // Multiplies the width and depth rivers would have on Earth for the water they carry.
+    double river_scale = 1.0;
     // One turn of day and night, in real time; the year is Earth's.
     GameDuration day_length = std::chrono::hours{4};
     double axial_tilt = 23.44; // degrees
 };
 
 // Identifies a world by what shapes its ground, so state saved for one is never loaded into
-// another. Day length and tilt only move the sun, so they can change under a running world.
+// another. Day length and tilt only move the sun, so they can change under a running world. A
+// river scale of 1 leaves the id as it was before rivers could be scaled.
 [[nodiscard]] std::uint64_t world_id(const PlanetConfig& config) noexcept;
 
 // Reads a [planet] table:
@@ -41,6 +44,7 @@ struct PlanetConfig {
 //     population = 500_000      # or radius_km = 115.0, not both
 //     settled_density = 30.0    # optional, with population
 //     wilderness_factor = 3.0   # optional, with population
+//     river_scale = 1.0         # optional, above 0 and at most 20
 //     day_hours = 4.0           # optional
 //     axial_tilt = 23.44        # optional, degrees
 //

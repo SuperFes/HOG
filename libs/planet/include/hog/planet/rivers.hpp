@@ -41,9 +41,10 @@ public:
     static constexpr double source_area = 20e6;
 
     // `ground` is the fixed-point height of the ground at each landform cell's centre, before
-    // rivers cut it. Rivers bend with `meander`. The landform must outlive the rivers.
+    // rivers cut it. Rivers bend with `meander`, and `scale` multiplies their width and depth.
+    // The landform must outlive the rivers.
     Rivers(const Landform& landform, std::span<const std::int64_t> ground, Meander meander,
-           double radius);
+           double radius, double scale = 1.0);
 
     [[nodiscard]] std::span<const Reach> reaches() const noexcept { return reaches_; }
 
@@ -54,7 +55,8 @@ public:
     // The channel through a cell's centre, or nothing out of the water.
     [[nodiscard]] std::optional<Channel> channel(CellId cell, std::int64_t ground) const;
 
-    // Metres across and deep for a river draining `area` square metres of rain-weighted ground.
+    // Metres across and deep for a river draining `area` square metres of rain-weighted ground,
+    // as on Earth.
     [[nodiscard]] static double width(double area);
     [[nodiscard]] static double depth(double area);
 
