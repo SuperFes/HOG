@@ -200,10 +200,11 @@ TEST_CASE("caves are found where their passages run", "[planet][caves]") {
             }
             const auto hit = caves.cave_at(at.cell, at.depth);
             REQUIRE(hit);
+            const hog::planet::CaveHit got = hit.value_or(hog::planet::CaveHit{});
             // A sinkhole may rise from the junction too.
-            CHECK(hit.value().cave != Cave::LavaTube);
-            CHECK(hit.value().cave != Cave::SeaCave);
-            CHECK(hit.value().clearance >= hog::planet::walk_clearance);
+            CHECK(got.cave != Cave::LavaTube);
+            CHECK(got.cave != Cave::SeaCave);
+            CHECK(got.clearance >= hog::planet::walk_clearance);
             // Deep in the bedrock below, there is nothing.
             CHECK_FALSE(caves.cave_at(at.cell, at.depth + (1'000 * fixed_one)));
             ++found;
@@ -271,8 +272,9 @@ TEST_CASE("lava tubes are found in the basalt they run through", "[planet][caves
             }
             const auto hit = lookup.cave_at(at.cell, at.depth);
             REQUIRE(hit);
-            CHECK(hit.value().cave == Cave::LavaTube);
-            CHECK(hit.value().clearance >= hog::planet::walk_clearance);
+            const hog::planet::CaveHit got = hit.value_or(hog::planet::CaveHit{});
+            CHECK(got.cave == Cave::LavaTube);
+            CHECK(got.clearance >= hog::planet::walk_clearance);
             CHECK_FALSE(lookup.cave_at(at.cell, at.depth + (50 * fixed_one)));
             ++found;
         }
@@ -307,7 +309,8 @@ TEST_CASE("sea caves run inland from cliffs at the water's edge", "[planet][cave
             CHECK(length >= 20.0);
             CHECK(length <= 140.0);
             // Somewhere along it, inside the cliff, there is room.
-            for (double along = 0.0; along <= 1.0; along += 0.05) {
+            for (int step = 0; step <= 20; ++step) {
+                const double along = step / 20.0;
                 const Spot at =
                     spot_at(caves, passage.from + ((passage.to - passage.from) * along));
                 if (at.depth <= 2 * fixed_one) {
