@@ -4,6 +4,7 @@ add_library(hog_sim
     src/ecology.cpp
     src/forest.cpp
     src/forest_save.cpp
+    src/land.cpp
     src/natural.cpp
     src/ocean.cpp
     src/vegetation.cpp
@@ -33,6 +34,7 @@ hog_add_tests(hog_sim
     tests/ecology_tests.cpp
     tests/food_chain_tests.cpp
     tests/forest_tests.cpp
+    tests/land_tests.cpp
     tests/natural_tests.cpp
     tests/ocean_tests.cpp
     tests/vegetation_tests.cpp

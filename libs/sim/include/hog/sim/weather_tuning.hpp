@@ -155,6 +155,22 @@ struct OceanTuning {
     double min_spin_latitude = 10.0;
 };
 
+// Water on and under the land: snow lying until it melts, soil holding rain until plants and the
+// sun draw it out, and ground water below seeping slowly out to the rivers.
+struct LandTuning {
+    double soil_capacity = 150.0; // mm the soil holds where plants can reach it
+    double melting = 0.0;         // °C, above which snow melts
+    double melt_per_degree = 3.0; // mm of snow a day per °C above melting
+    double covering_snow = 20.0;  // mm of snow that hides most of the ground
+    double snow_wetness = 0.1;    // how freely snow gives up water, against wet soil's 1
+    // Wetter soil sheds more of what falls: the share running off is its fullness to this power.
+    double shedding = 2.0;
+    Seconds percolation = std::chrono::days{30}; // full soil drains into the ground this slowly
+    Seconds seepage = std::chrono::days{180};    // ground water seeps out to the rivers
+    double specific_yield = 0.1; // share of the rock water fills, so 100 mm of it is a metre
+    Seconds usual = std::chrono::days{365}; // the running means water is measured against
+};
+
 struct WeatherTuning {
     MotionTuning motion{};
     LiftTuning lift{};
@@ -166,6 +182,7 @@ struct WeatherTuning {
     StormTuning storms{};
     RecentTuning recent{};
     OceanTuning ocean{};
+    LandTuning land{};
 };
 
 } // namespace hog::sim
