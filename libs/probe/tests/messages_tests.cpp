@@ -98,7 +98,9 @@ TEST_CASE("every message survives a round trip", "[probe][messages]") {
                         .river = {0, 40},
                         .rock = {6, 4},
                         .deposit = {0, 3},
-                        .heat = {12.0F, 150.5F}};
+                        .heat = {12.0F, 150.5F},
+                        .cave = {0, 3},
+                        .room = {0, 15}};
     CHECK(round_trip(ground) == Message{ground});
     Survey above = survey;
     above.underground = false;
@@ -109,7 +111,9 @@ TEST_CASE("every message survives a round trip", "[probe][messages]") {
                          .river = ground.river,
                          .rock = {},
                          .deposit = {},
-                         .heat = {}};
+                         .heat = {},
+                         .cave = {},
+                         .room = {}};
     CHECK(round_trip(surface) == Message{surface});
 
     const Inspect inspect{.latitude = -33.75, .longitude = 151.125};
@@ -119,21 +123,24 @@ TEST_CASE("every message survives a round trip", "[probe][messages]") {
         .time = GameTime{std::chrono::hours{30}},
         .cell = 4'097,
         .values = {12.5F, -0.25F, 1'013.0F},
-        .column = Column{.elevation = 240.5F,
-                         .biome = 7,
-                         .water_table = 3.25F,
-                         .water = 0.5F,
-                         .continental = true,
-                         .cover = 1,
-                         .cover_thickness = 2.5F,
-                         .sediment = 3,
-                         .sediment_thickness = 410.0F,
-                         .bedrock = 5,
-                         .mantle_depth = 35'000.0F,
-                         .chamber_top = 4'200.0F,
-                         .chamber_thickness = 950.5F,
-                         .seams = {Seam{.resource = 0, .top = 12.0F, .thickness = 1.5F},
-                                   Seam{.resource = 4, .top = 300.0F, .thickness = 0.25F}}}};
+        .column =
+            Column{.elevation = 240.5F,
+                   .biome = 7,
+                   .water_table = 3.25F,
+                   .water = 0.5F,
+                   .continental = true,
+                   .cover = 1,
+                   .cover_thickness = 2.5F,
+                   .sediment = 3,
+                   .sediment_thickness = 410.0F,
+                   .bedrock = 5,
+                   .mantle_depth = 35'000.0F,
+                   .chamber_top = 4'200.0F,
+                   .chamber_thickness = 950.5F,
+                   .seams = {Seam{.resource = 0, .top = 12.0F, .thickness = 1.5F},
+                             Seam{.resource = 4, .top = 300.0F, .thickness = 0.25F}},
+                   .cavities = {Cavity{.cave = 3, .top = 1.0F, .bottom = 9.5F, .room = 4.25F},
+                                Cavity{.cave = 0, .top = 20.0F, .bottom = 22.0F, .room = 0.0F}}}};
     CHECK(round_trip(inspection) == Message{inspection});
     CHECK(round_trip(Inspection{}) == Message{Inspection{}});
 }
@@ -237,7 +244,9 @@ TEST_CASE("broken streams fail and stay failed", "[probe][messages]") {
                                   .river = {0, 0, 0},
                                   .rock = {},
                                   .deposit = {},
-                                  .heat = {}}));
+                                  .heat = {},
+                                  .cave = {},
+                                  .room = {}}));
     }
     SECTION("more seams than could fit") {
         ByteWriter payload;
@@ -260,6 +269,28 @@ TEST_CASE("broken streams fail and stay failed", "[probe][messages]") {
         payload.write(std::uint32_t{1'000});
         reader.feed(frame(11, payload.bytes()));
     }
+    SECTION("more cavities than could fit") {
+        ByteWriter payload;
+        payload.write(std::uint64_t{0}); // latitude
+        payload.write(std::uint64_t{0}); // longitude
+        payload.write(std::uint64_t{0}); // time
+        payload.write(std::uint32_t{0}); // cell
+        payload.write(std::uint32_t{0}); // no values
+        payload.write(std::uint32_t{0}); // elevation
+        for (int field = 0; field < 3; ++field) {
+            payload.write(std::uint8_t{0}); // biome, continental, cover
+        }
+        payload.write(std::uint32_t{0});
+        payload.write(std::uint8_t{0});
+        payload.write(std::uint32_t{0});
+        payload.write(std::uint8_t{0});
+        for (int field = 0; field < 3; ++field) {
+            payload.write(std::uint32_t{0}); // mantle depth, chamber top and thickness
+        }
+        payload.write(std::uint32_t{0}); // no seams
+        payload.write(std::uint32_t{1'000});
+        reader.feed(frame(11, payload.bytes()));
+    }
     SECTION("ground without a river for every sample") {
         reader.feed(encode(Ground{.survey = Survey{.width = 1, .height = 1},
                                   .elevation = {1.0F},
@@ -268,7 +299,9 @@ TEST_CASE("broken streams fail and stay failed", "[probe][messages]") {
                                   .river = {},
                                   .rock = {},
                                   .deposit = {},
-                                  .heat = {}}));
+                                  .heat = {},
+                                  .cave = {},
+                                  .room = {}}));
     }
     SECTION("ground with rock it wasn't asked for") {
         reader.feed(encode(Ground{.survey = Survey{.width = 1, .height = 1},
@@ -278,7 +311,21 @@ TEST_CASE("broken streams fail and stay failed", "[probe][messages]") {
                                   .river = {0},
                                   .rock = {1},
                                   .deposit = {0},
-                                  .heat = {0.0F}}));
+                                  .heat = {0.0F},
+                                  .cave = {0},
+                                  .room = {0}}));
+    }
+    SECTION("ground without a cave for every sample") {
+        reader.feed(encode(Ground{.survey = Survey{.width = 1, .height = 1, .underground = true},
+                                  .elevation = {1.0F},
+                                  .biome = {0},
+                                  .water_table = {0.0F},
+                                  .river = {0},
+                                  .rock = {1},
+                                  .deposit = {0},
+                                  .heat = {0.0F},
+                                  .cave = {},
+                                  .room = {0}}));
     }
     SECTION("ground without heat for every sample") {
         reader.feed(encode(Ground{.survey = Survey{.width = 1, .height = 1, .underground = true},
@@ -288,7 +335,9 @@ TEST_CASE("broken streams fail and stay failed", "[probe][messages]") {
                                   .river = {0},
                                   .rock = {1},
                                   .deposit = {0},
-                                  .heat = {}}));
+                                  .heat = {},
+                                  .cave = {},
+                                  .room = {}}));
     }
     const auto first = reader.next();
     REQUIRE_FALSE(first);

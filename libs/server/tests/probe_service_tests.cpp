@@ -238,7 +238,9 @@ TEST_CASE("surveys are answered without waiting for a tick", "[server][probe]") 
                           .river = std::vector<std::uint8_t>(samples, 0),
                           .rock = {},
                           .deposit = {},
-                          .heat = {}};
+                          .heat = {},
+                          .cave = {},
+                          .room = {}};
         });
     REQUIRE(service);
     Channel tool = welcomed(**service);
@@ -269,7 +271,9 @@ TEST_CASE("bad surveys, and surveys of a server without them, are refused", "[se
                       .river = {},
                       .rock = {},
                       .deposit = {},
-                      .heat = {}};
+                      .heat = {},
+                      .cave = {},
+                      .room = {}};
     };
     auto service = ProbeService::start(0, sample_welcome(), ground);
     REQUIRE(service);

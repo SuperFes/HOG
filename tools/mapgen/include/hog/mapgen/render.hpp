@@ -5,6 +5,7 @@
 #include <hog/jobs/job_system.hpp>
 #include <hog/mapgen/colour.hpp>
 #include <hog/mapgen/options.hpp>
+#include <hog/planet/caves.hpp>
 #include <hog/planet/geology.hpp>
 
 #include <array>
@@ -57,6 +58,7 @@ struct ImageSize {
 
 [[nodiscard]] Rgb rock_colour(planet::Rock rock) noexcept;
 [[nodiscard]] Rgb resource_colour(planet::Resource resource) noexcept;
+[[nodiscard]] Rgb cave_colour(planet::Cave cave) noexcept;
 
 // The rarest deposit under a cell, over grey land shaded by height and dark ocean.
 [[nodiscard]] Rgb

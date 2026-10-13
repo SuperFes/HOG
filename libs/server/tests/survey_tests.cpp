@@ -28,6 +28,11 @@ const planet::Geology& geology() {
     return made;
 }
 
+const planet::Caves& caves() {
+    static const planet::Caves made{geology()};
+    return made;
+}
+
 Survey whole(std::uint16_t width) {
     return Survey{.west = -180.0,
                   .east = 180.0,
@@ -93,7 +98,7 @@ TEST_CASE("a survey reports the ground under each sample", "[server][survey]") {
                         .underground = GENERATE(false, true),
                         .depth = 25.0F};
     jobs::JobSystem jobs{2};
-    const probe::Ground ground = server::survey_ground(geology(), radius, survey, jobs);
+    const probe::Ground ground = server::survey_ground(caves(), radius, survey, jobs);
     CHECK(ground.survey == survey);
     const std::size_t samples = std::size_t{16} * 12;
     REQUIRE(ground.elevation.size() == samples);
@@ -103,6 +108,8 @@ TEST_CASE("a survey reports the ground under each sample", "[server][survey]") {
     REQUIRE(ground.rock.size() == (survey.underground ? samples : 0));
     REQUIRE(ground.deposit.size() == ground.rock.size());
     REQUIRE(ground.heat.size() == ground.rock.size());
+    REQUIRE(ground.cave.size() == ground.rock.size());
+    REQUIRE(ground.room.size() == ground.rock.size());
 
     const int level = server::survey_level(survey, radius);
     const auto depth = std::llround(25.0 * planet::fixed_one);
@@ -131,6 +138,9 @@ TEST_CASE("a survey reports the ground under each sample", "[server][survey]") {
                 CHECK(ground.deposit[sample] == (resource ? std::to_underlying(*resource) + 1 : 0));
                 CHECK(ground.heat[sample] == static_cast<float>(planet::fixed_to_double(
                                                  geology().rock_temperature(cell, depth))));
+                const auto cave = caves().cave_at(cell, depth);
+                CHECK(ground.cave[sample] == (cave ? std::to_underlying(cave->cave) + 1 : 0));
+                CHECK((ground.room[sample] > 0) == (cave && cave->clearance >= 0.1));
             }
         }
     }
@@ -141,7 +151,7 @@ TEST_CASE("inspecting a starting island finds the magma under it", "[server][sur
         const probe::Inspect inspect{
             .latitude = std::asin(chamber.center.z) * 180.0 / std::numbers::pi,
             .longitude = std::atan2(chamber.center.y, chamber.center.x) * 180.0 / std::numbers::pi};
-        const probe::Column column = server::ground_column(geology(), radius, inspect);
+        const probe::Column column = server::ground_column(caves(), radius, inspect);
         CHECK(column.chamber_thickness > 900.0F);
         CHECK(column.chamber_top > 2'000.0F);
         CHECK(column.chamber_top + column.chamber_thickness < column.mantle_depth);
@@ -149,9 +159,33 @@ TEST_CASE("inspecting a starting island finds the magma under it", "[server][sur
     }
 }
 
+TEST_CASE("inspecting over a lava tube finds its cavity", "[server][survey]") {
+    int found = 0;
+    for (const planet::LavaTube& tube : caves().lava_tubes()) {
+        const planet::Passage& passage = tube.passages.at(tube.passages.size() / 2);
+        if (passage.from_radius < 2.0) {
+            continue;
+        }
+        const DVec3 over = glm::normalize(passage.from);
+        const probe::Inspect inspect{.latitude = std::asin(over.z) * 180.0 / std::numbers::pi,
+                                     .longitude =
+                                         std::atan2(over.y, over.x) * 180.0 / std::numbers::pi};
+        const probe::Column column = server::ground_column(caves(), radius, inspect);
+        CHECK(std::ranges::is_sorted(column.cavities, {}, &probe::Cavity::top));
+        const bool tube_there =
+            std::ranges::any_of(column.cavities, [](const probe::Cavity& cavity) {
+                return cavity.cave == std::to_underlying(planet::Cave::LavaTube) + 1 &&
+                       cavity.top >= 0.0F && cavity.bottom > cavity.top && cavity.room > 1.0F &&
+                       cavity.bottom - cavity.top < 15.0F;
+            });
+        found += tube_there ? 1 : 0;
+    }
+    CHECK(found > 3);
+}
+
 TEST_CASE("the whole planet has land and sea", "[server][survey]") {
     jobs::JobSystem jobs{2};
-    const probe::Ground ground = server::survey_ground(geology(), radius, whole(128), jobs);
+    const probe::Ground ground = server::survey_ground(caves(), radius, whole(128), jobs);
     CHECK(std::ranges::any_of(ground.elevation, [](float metres) { return metres > 0.0F; }));
     CHECK(std::ranges::any_of(ground.elevation, [](float metres) { return metres < 0.0F; }));
 }
@@ -183,7 +217,7 @@ TEST_CASE("surveys look for rivers half a sample's spacing away", "[server][surv
 
 TEST_CASE("surveyed rivers run only on dry land, wide enough to see", "[server][survey]") {
     jobs::JobSystem jobs{2};
-    const probe::Ground ground = server::survey_ground(geology(), radius, whole(256), jobs);
+    const probe::Ground ground = server::survey_ground(caves(), radius, whole(256), jobs);
     std::size_t rivers = 0;
     for (std::size_t sample = 0; sample < ground.river.size(); ++sample) {
         if (ground.river[sample] == 0) {
@@ -219,7 +253,7 @@ TEST_CASE("inspected ground is the generated ground about a metre across", "[ser
     for (int point = 0; point < 200; ++point) {
         const probe::Inspect inspect{.latitude = -60.0 + (point * 0.6),
                                      .longitude = -179.0 + (point * 1.7)};
-        const probe::Column column = server::ground_column(geology(), radius, inspect);
+        const probe::Column column = server::ground_column(caves(), radius, inspect);
         const planet::CellId cell =
             planet::cell_at(planet::direction_at(inspect.latitude * std::numbers::pi / 180.0,
                                                  inspect.longitude * std::numbers::pi / 180.0),

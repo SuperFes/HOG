@@ -88,6 +88,14 @@ constexpr std::array<Rgb, planet::biome_count> biome_colours{{
     {60, 110, 190},  // lake
 }};
 
+// Indexed by cave: dark, each tinted after the rock it's found in.
+constexpr std::array<Rgb, planet::cave_count> cave_colours{{
+    {25, 25, 40}, // karst
+    {15, 45, 35}, // sinkhole
+    {50, 15, 10}, // lava tube
+    {10, 30, 60}, // sea cave
+}};
+
 // Indexed by resource.
 constexpr std::array<Rgb, planet::resource_count> resource_colours{{
     {205, 110, 70},  // clay
@@ -209,6 +217,10 @@ Rgb with_water(Rgb ground, bool lake, const planet::Reach* river) noexcept {
 
 Rgb rock_colour(planet::Rock rock) noexcept {
     return rock_colours.at(static_cast<std::size_t>(rock));
+}
+
+Rgb cave_colour(planet::Cave cave) noexcept {
+    return cave_colours.at(static_cast<std::size_t>(cave));
 }
 
 Rgb resource_colour(planet::Resource resource) noexcept {

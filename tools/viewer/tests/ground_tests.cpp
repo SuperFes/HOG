@@ -39,7 +39,9 @@ TEST_CASE("each pixel's centre falls in its own sample", "[viewer][ground]") {
                                     .river = {},
                                     .rock = {},
                                     .deposit = {},
-                                    .heat = {}};
+                                    .heat = {},
+                                    .cave = {},
+                                    .room = {}};
     for (int y = 0; y < 4; ++y) {
         for (int x = 0; x < 8; ++x) {
             CHECK(hog::viewer::sample_at(ground, hog::viewer::pixel_point(shown, 8, 4, x, y)) ==

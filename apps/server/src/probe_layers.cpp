@@ -155,7 +155,18 @@ probe::Inspection inspect_layers(const LayerSources& sources, const probe::Inspe
         .time = time,
         .cell = cell,
         .values = {},
-        .column = server::ground_column(sources.planet.geology(), radius, inspect)};
+        .column = server::ground_column(sources.planet.caves(), radius, inspect)};
+    // What has been dug there since, which the generated column can't know.
+    const auto metres = [](std::int64_t fixed) {
+        return static_cast<float>(planet::fixed_to_double(fixed));
+    };
+    std::vector<probe::Cavity>& cavities = inspection.column.cavities;
+    for (const planet::Hollow& hollow :
+         sources.planet.state(planet::cell_at(direction, server::inspect_level(radius))).hollows) {
+        cavities.push_back(
+            {.cave = 0, .top = metres(hollow.top), .bottom = metres(hollow.bottom), .room = 0.0F});
+    }
+    std::ranges::stable_sort(cavities, {}, &probe::Cavity::top);
     std::vector<float> values;
     each_layer(sources, [&](std::string_view /*name*/, std::string_view /*unit*/, auto&& fill) {
         fill(values);

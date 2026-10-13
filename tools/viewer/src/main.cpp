@@ -245,6 +245,11 @@ void minerals_key() {
     for (const planet::Resource resource : planet::rarest_first) {
         swatch(mapgen::resource_colour(resource), planet::to_string(resource));
     }
+    for (int cave = 0; cave < planet::cave_count; ++cave) {
+        const auto each = static_cast<planet::Cave>(cave);
+        swatch(mapgen::cave_colour(each), planet::to_string(each));
+    }
+    ImGui::TextUnformatted("paler caves: too tight to walk");
 }
 
 void heat_key() {

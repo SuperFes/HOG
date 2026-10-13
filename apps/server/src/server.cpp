@@ -415,9 +415,9 @@ void Server::open_probe() {
                            .day_length = weather_->config().day,
                            .axial_tilt = weather_->config().axial_tilt};
     const std::size_t layers = welcome.layers.size();
-    const auto survey = [&geology = planet_.geology(), radius = welcome.planet_radius](
+    const auto survey = [&caves = planet_.caves(), radius = welcome.planet_radius](
                             const probe::Survey& asked, jobs::JobSystem& jobs) {
-        return server::survey_ground(geology, radius, asked, jobs);
+        return server::survey_ground(caves, radius, asked, jobs);
     };
     auto started = server::ProbeService::start(*port, std::move(welcome), survey);
     if (!started) {

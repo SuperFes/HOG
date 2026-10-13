@@ -1,4 +1,5 @@
 #include <hog/core/hash.hpp>
+#include <hog/planet/caves.hpp>
 #include <hog/planet/climate.hpp>
 #include <hog/planet/continents.hpp>
 #include <hog/planet/elevation.hpp>
@@ -11,6 +12,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstdint>
 #include <filesystem>
 #include <format>
@@ -107,6 +109,18 @@ std::int64_t heat_layer(CellId cell) {
     return static_cast<std::int64_t>(hash);
 }
 
+// The cave open at a few depths, and its room, to the bit.
+std::int64_t caves_layer(CellId cell) {
+    static const hog::planet::Caves caves{geology()};
+    std::uint64_t hash = 0;
+    for (const std::int64_t depth : {2, 10, 30}) {
+        const auto hit = caves.cave_at(cell, depth * hog::planet::fixed_one);
+        hash = hog::hash_values(hash, hit ? static_cast<int>(hit->cave) + 1 : 0,
+                                hit ? std::bit_cast<std::uint64_t>(hit->clearance) : 0);
+    }
+    return static_cast<std::int64_t>(hash);
+}
+
 constexpr std::array layers{Layer{.name = "noise", .sample = noise_layer},
                             Layer{.name = "continents", .sample = continents_layer},
                             Layer{.name = "elevation", .sample = elevation_layer},
@@ -116,7 +130,8 @@ constexpr std::array layers{Layer{.name = "noise", .sample = noise_layer},
                             Layer{.name = "biome", .sample = biome_layer},
                             Layer{.name = "strata", .sample = strata_layer},
                             Layer{.name = "deposits", .sample = deposits_layer},
-                            Layer{.name = "heat", .sample = heat_layer}};
+                            Layer{.name = "heat", .sample = heat_layer},
+                            Layer{.name = "caves", .sample = caves_layer}};
 
 struct GoldenTile {
     CellId tile;

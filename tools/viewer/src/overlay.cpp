@@ -160,18 +160,30 @@ public:
         return smooth(depth, spot);
     }
 
-    // Rock, or the rarest deposit, at the surveyed depth; none where that wasn't surveyed.
+    // An open cave, else the rarest deposit, else the rock, at the surveyed depth; none where that
+    // wasn't surveyed. Caves too tight to walk show the rock through them, more so to crawl.
     [[nodiscard]] std::optional<Rgb> underground(const Spot& spot) const {
-        if (!spot.sample || ground_->rock.empty()) {
+        if (!spot.sample || ground_->rock.empty() || ground_->cave.empty()) {
             return std::nullopt;
         }
         const int rock = ground_->rock[*spot.sample];
         const int deposit = ground_->deposit[*spot.sample];
-        if (rock >= planet::rock_count || deposit > planet::resource_count) {
+        const int cave = ground_->cave[*spot.sample];
+        if (rock >= planet::rock_count || deposit > planet::resource_count ||
+            cave > planet::cave_count) {
             return std::nullopt;
         }
+        const Rgb solid = mapgen::rock_colour(static_cast<planet::Rock>(rock));
+        if (cave > 0) {
+            const double room = ground_->room[*spot.sample] / 10.0;
+            const double through = room < planet::crawl_clearance  ? 0.6
+                                   : room < planet::walk_clearance ? 0.3
+                                                                   : 0.0;
+            return mapgen::mix(mapgen::cave_colour(static_cast<planet::Cave>(cave - 1)), solid,
+                               through);
+        }
         return deposit > 0 ? mapgen::resource_colour(static_cast<planet::Resource>(deposit - 1))
-                           : mapgen::rock_colour(static_cast<planet::Rock>(rock));
+                           : solid;
     }
 
     // °C of the rock at the surveyed depth; none where that wasn't surveyed.

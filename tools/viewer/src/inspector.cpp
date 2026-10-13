@@ -1,3 +1,4 @@
+#include <hog/planet/caves.hpp>
 #include <hog/planet/climate.hpp>
 #include <hog/planet/geology.hpp>
 #include <hog/viewer/inspector.hpp>
@@ -114,6 +115,21 @@ std::vector<Reading> column_readings(const probe::Column& column) {
         lines.push_back({.name = named<planet::Resource>(seam.resource, planet::resource_count),
                          .value = std::format("{} to {}", metres(seam.top),
                                               metres(seam.top + seam.thickness))});
+    }
+    for (const probe::Cavity& cavity : column.cavities) {
+        const std::string span = std::format("{} to {}", metres(cavity.top), metres(cavity.bottom));
+        if (cavity.cave == 0) {
+            lines.push_back({.name = "dug", .value = span});
+            continue;
+        }
+        const auto room = static_cast<double>(cavity.room);
+        const std::string_view tight = room < planet::crawl_clearance  ? ", a squeeze"
+                                       : room < planet::walk_clearance ? ", a crawl"
+                                                                       : "";
+        lines.push_back(
+            {.name = named<planet::Cave>(static_cast<std::uint8_t>(cavity.cave - 1),
+                                         planet::cave_count),
+             .value = std::format("{}, {} across{}", span, metres(2.0F * cavity.room), tight)});
     }
     return lines;
 }

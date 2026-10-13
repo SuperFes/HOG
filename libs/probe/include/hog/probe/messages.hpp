@@ -15,7 +15,7 @@
 // u32 payload length, a u8 kind, then the payload, little-endian throughout.
 namespace hog::probe {
 
-inline constexpr std::uint16_t protocol_version = 7;
+inline constexpr std::uint16_t protocol_version = 8;
 // Large enough for every layer of a level 7 grid; anything bigger is a broken or hostile peer.
 inline constexpr std::uint32_t max_payload = 64U << 20U;
 
@@ -140,6 +140,8 @@ struct Ground {
     std::vector<std::uint8_t> rock;    // planet::Rock at the depth; empty unless underground
     std::vector<std::uint8_t> deposit; // the rarest planet::Resource there plus one, or 0; likewise
     std::vector<float> heat;           // °C of the rock at the depth; likewise
+    std::vector<std::uint8_t> cave;    // the planet::Cave open there plus one, or 0; likewise
+    std::vector<std::uint8_t> room;    // decimetres of a cave's radius there, at most 255; likewise
 
     friend bool operator==(const Ground&, const Ground&) = default;
 };
@@ -161,6 +163,16 @@ struct Seam {
     friend bool operator==(const Seam&, const Seam&) = default;
 };
 
+// Open space under a point, from its roof down to its floor.
+struct Cavity {
+    std::uint8_t cave = 0; // planet::Cave plus one, or 0 where dug
+    float top = 0.0F;      // metres below the surface
+    float bottom = 0.0F;
+    float room = 0.0F; // metres of a cave's radius at its roomiest; 0 where dug
+
+    friend bool operator==(const Cavity&, const Cavity&) = default;
+};
+
 // The generated ground under a point, as finely as the generator makes it.
 struct Column {
     float elevation = 0.0F;       // metres above sea level
@@ -177,6 +189,7 @@ struct Column {
     float chamber_top = 0.0F;       // metres below the surface to a magma chamber's roof
     float chamber_thickness = 0.0F; // metres; 0 where there's none
     std::vector<Seam> seams;        // shallowest first
+    std::vector<Cavity> cavities;   // likewise
 
     friend bool operator==(const Column&, const Column&) = default;
 };

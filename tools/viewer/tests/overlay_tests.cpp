@@ -216,7 +216,8 @@ TEST_CASE("wildlife is shown against its densest cell", "[viewer][overlay]") {
 namespace {
 
 // Ground surveyed under every pixel of a shown area: the west half sea 30 m deep and the east half
-// land 800 m up, tundra over sandstone with gold in the far east, hot under the land.
+// land 800 m up, tundra over sandstone with gold in the far east, hot under the land, with a
+// roomy lava tube along the top row and a karst squeeze along the next.
 probe::Ground surveyed(const viewer::MapRect& shown) {
     const int height = width / 2;
     probe::Ground ground{.survey = viewer::survey_of(shown, width, height, true, 40.0F),
@@ -226,7 +227,9 @@ probe::Ground surveyed(const viewer::MapRect& shown) {
                          .river = {},
                          .rock = {},
                          .deposit = {},
-                         .heat = {}};
+                         .heat = {},
+                         .cave = {},
+                         .room = {}};
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
             const bool east = x >= width / 2;
@@ -239,6 +242,10 @@ probe::Ground surveyed(const viewer::MapRect& shown) {
             ground.deposit.push_back(x >= width - 4 ? std::to_underlying(planet::Resource::Gold) + 1
                                                     : 0);
             ground.heat.push_back(east ? 650.0F : 20.0F);
+            ground.cave.push_back(y == 0
+                                      ? std::to_underlying(planet::Cave::LavaTube) + 1
+                                      : (y == 1 ? std::to_underlying(planet::Cave::Karst) + 1 : 0));
+            ground.room.push_back(y == 0 ? 30 : (y == 1 ? 2 : 0));
         }
     }
     return ground;
@@ -338,9 +345,13 @@ TEST_CASE("minerals show the rock or rarest deposit at the surveyed depth", "[vi
     probe::Ground ground = surveyed(shown);
     const mapgen::Image image = planet.render(Overlay::Minerals, "", shown, &ground);
     const Rgb sandstone = mapgen::rock_colour(planet::Rock::Sandstone);
-    CHECK(image.at(width / 2, 0) == sandstone);
-    CHECK(image.at(width - 1, 0) == mapgen::resource_colour(planet::Resource::Gold));
-    CHECK(image.at(0, 0) == mapgen::mix(sandstone, Rgb{40, 90, 150}, 0.4));
+    CHECK(image.at(width / 2, 2) == sandstone);
+    CHECK(image.at(width - 1, 2) == mapgen::resource_colour(planet::Resource::Gold));
+    CHECK(image.at(0, 2) == mapgen::mix(sandstone, Rgb{40, 90, 150}, 0.4));
+    // Caves show over the rock and deposits; a squeeze lets the rock show through.
+    CHECK(image.at(width - 1, 0) == mapgen::cave_colour(planet::Cave::LavaTube));
+    CHECK(image.at(width / 2, 1) ==
+          mapgen::mix(mapgen::cave_colour(planet::Cave::Karst), sandstone, 0.6));
 
     // Ground surveyed only at the surface has nothing to show below it.
     ground.rock.clear();

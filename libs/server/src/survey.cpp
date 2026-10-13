@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstddef>
 #include <format>
+#include <limits>
 #include <numbers>
 #include <utility>
 
@@ -16,13 +17,23 @@ namespace hog::server {
 
 namespace {
 
+// Metres between the depths a column is searched for caves at, and at most how many.
+constexpr double cavity_step = 0.25;
+constexpr double most_cavity_steps = 4'000.0;
+
 constexpr double radians(double degrees) noexcept {
     return degrees * std::numbers::pi / 180.0;
 }
 
+// Decimetres of room, rounded down, as a byte.
+std::uint8_t decimetres(double metres) {
+    return static_cast<std::uint8_t>(std::clamp(std::floor(metres * 10.0), 0.0, 255.0));
+}
+
 // Fills one row of samples, from the west.
-void survey_row(const planet::Geology& geology, double planet_radius, const probe::Survey& survey,
+void survey_row(planet::Caves::Lookup& caves, double planet_radius, const probe::Survey& survey,
                 int level, std::uint32_t row, probe::Ground& ground) {
+    const planet::Geology& geology = caves.caves().geology();
     const double latitude =
         radians(survey.north - ((row + 0.5) / survey.height * (survey.north - survey.south)));
     const double margin = river_margin(survey, planet_radius, latitude);
@@ -49,6 +60,10 @@ void survey_row(const planet::Geology& geology, double planet_radius, const prob
             resource ? static_cast<std::uint8_t>(std::to_underlying(*resource) + 1) : 0;
         ground.heat[sample] =
             static_cast<float>(planet::fixed_to_double(geology.rock_temperature(cell, depth)));
+        if (const auto cave = caves.cave_at(cell, depth)) {
+            ground.cave[sample] = static_cast<std::uint8_t>(std::to_underlying(cave->cave) + 1);
+            ground.room[sample] = decimetres(cave->clearance);
+        }
     }
 }
 
@@ -119,8 +134,52 @@ int inspect_level(double planet_radius) {
     return planet::level_for(1.0, planet_radius);
 }
 
-probe::Column ground_column(const planet::Geology& geology, double planet_radius,
+std::vector<probe::Cavity> cavities(const planet::Caves& caves, planet::CellId cell) {
+    planet::Caves::Lookup lookup{caves};
+    const std::vector<planet::Passage> near = lookup.passages_near(cell);
+    if (near.empty()) {
+        return {};
+    }
+    // Only the depths the passages nearby could reach.
+    const double surface = glm::length(caves.point_at(cell, 0));
+    double shallowest = std::numeric_limits<double>::max();
+    double deepest = 0.0;
+    for (const planet::Passage& passage : near) {
+        for (const auto& [end, radius] : {std::pair{passage.from, passage.from_radius},
+                                          std::pair{passage.to, passage.to_radius}}) {
+            const double depth = surface - glm::length(end);
+            shallowest = std::min(shallowest, depth - radius);
+            deepest = std::max(deepest, depth + radius);
+        }
+    }
+    std::vector<probe::Cavity> found;
+    const double first = std::max(shallowest, 0.0);
+    const auto steps =
+        static_cast<int>(std::min((deepest - first) / cavity_step, most_cavity_steps));
+    bool open = false;
+    for (int step = 0; step <= steps; ++step) {
+        const double depth = first + (step * cavity_step);
+        const auto hit =
+            lookup.cave_at(cell, std::llround(depth * static_cast<double>(planet::fixed_one)));
+        const auto kind =
+            hit ? static_cast<std::uint8_t>(std::to_underlying(hit->cave) + 1) : std::uint8_t{0};
+        if (hit && open && found.back().cave == kind) {
+            found.back().bottom = static_cast<float>(depth + cavity_step);
+            found.back().room = std::max(found.back().room, static_cast<float>(hit->clearance));
+        } else if (hit) {
+            found.push_back({.cave = kind,
+                             .top = static_cast<float>(depth),
+                             .bottom = static_cast<float>(depth + cavity_step),
+                             .room = static_cast<float>(hit->clearance)});
+        }
+        open = hit.has_value();
+    }
+    return found;
+}
+
+probe::Column ground_column(const planet::Caves& caves, double planet_radius,
                             const probe::Inspect& inspect) {
+    const planet::Geology& geology = caves.geology();
     HOG_ASSERT(check_inspect(inspect).has_value(), "inspection not checked");
     const planet::CellId cell =
         planet::cell_at(planet::direction_at(radians(inspect.latitude), radians(inspect.longitude)),
@@ -146,7 +205,8 @@ probe::Column ground_column(const planet::Geology& geology, double planet_radius
                          .mantle_depth = metres(strata.mantle_depth),
                          .chamber_top = metres(strata.chamber_top),
                          .chamber_thickness = metres(strata.chamber_thickness),
-                         .seams = {}};
+                         .seams = {},
+                         .cavities = {}};
     const auto deposits = geology.deposits(cell);
     for (std::size_t resource = 0; resource < deposits.size(); ++resource) {
         if (!deposits[resource].empty()) {
@@ -156,10 +216,11 @@ probe::Column ground_column(const planet::Geology& geology, double planet_radius
         }
     }
     std::ranges::stable_sort(column.seams, {}, &probe::Seam::top);
+    column.cavities = cavities(caves, cell);
     return column;
 }
 
-probe::Ground survey_ground(const planet::Geology& geology, double planet_radius,
+probe::Ground survey_ground(const planet::Caves& caves, double planet_radius,
                             const probe::Survey& survey, jobs::JobSystem& jobs) {
     HOG_ASSERT(check_survey(survey).has_value(), "survey not checked");
     const std::size_t samples = static_cast<std::size_t>(survey.width) * survey.height;
@@ -171,11 +232,14 @@ probe::Ground survey_ground(const planet::Geology& geology, double planet_radius
                          .river = std::vector<std::uint8_t>(samples),
                          .rock = std::vector<std::uint8_t>(below),
                          .deposit = std::vector<std::uint8_t>(below),
-                         .heat = std::vector<float>(below)};
+                         .heat = std::vector<float>(below),
+                         .cave = std::vector<std::uint8_t>(below),
+                         .room = std::vector<std::uint8_t>(below)};
     const int level = survey_level(survey, planet_radius);
     jobs.parallel_for(survey.height, 1, [&](jobs::Range rows, std::uint32_t /*thread*/) {
+        planet::Caves::Lookup lookup{caves};
         for (std::uint32_t row = rows.begin; row < rows.end; ++row) {
-            survey_row(geology, planet_radius, survey, level, row, ground);
+            survey_row(lookup, planet_radius, survey, level, row, ground);
         }
     });
     return ground;

@@ -72,21 +72,25 @@ TEST_CASE("readings are grouped as the server offers its layers", "[viewer][insp
 }
 
 TEST_CASE("the ground reads from the surface down", "[viewer][inspector]") {
-    const hog::probe::Column column{.elevation = 240.5F,
-                                    .biome = 5,
-                                    .water_table = 12.25F,
-                                    .water = 0.75F,
-                                    .continental = true,
-                                    .cover = 0,
-                                    .cover_thickness = 1.5F,
-                                    .sediment = 3,
-                                    .sediment_thickness = 410.0F,
-                                    .bedrock = 5,
-                                    .mantle_depth = 35'250.0F,
-                                    .chamber_top = 0.0F,
-                                    .chamber_thickness = 0.0F,
-                                    .seams = {{.resource = 1, .top = 12.0F, .thickness = 1.5F},
-                                              {.resource = 6, .top = 300.0F, .thickness = 0.25F}}};
+    const hog::probe::Column column{
+        .elevation = 240.5F,
+        .biome = 5,
+        .water_table = 12.25F,
+        .water = 0.75F,
+        .continental = true,
+        .cover = 0,
+        .cover_thickness = 1.5F,
+        .sediment = 3,
+        .sediment_thickness = 410.0F,
+        .bedrock = 5,
+        .mantle_depth = 35'250.0F,
+        .chamber_top = 0.0F,
+        .chamber_thickness = 0.0F,
+        .seams = {{.resource = 1, .top = 12.0F, .thickness = 1.5F},
+                  {.resource = 6, .top = 300.0F, .thickness = 0.25F}},
+        .cavities = {{.cave = 1, .top = 20.0F, .bottom = 21.5F, .room = 0.5F},
+                     {.cave = 0, .top = 30.0F, .bottom = 32.0F, .room = 0.0F},
+                     {.cave = 3, .top = 40.0F, .bottom = 44.0F, .room = 0.25F}}};
     const std::vector<Reading> expected{
         {.name = "elevation", .value = "240.5 m"},
         {.name = "biome", .value = "temperate forest"},
@@ -99,6 +103,9 @@ TEST_CASE("the ground reads from the surface down", "[viewer][inspector]") {
         {.name = "mantle", .value = "peridotite, from 35250 m"},
         {.name = "coal", .value = "12 m to 13.5 m"},
         {.name = "gold", .value = "300 m to 300.2 m"},
+        {.name = "karst", .value = "20 m to 21.5 m, 1 m across, a crawl"},
+        {.name = "dug", .value = "30 m to 32 m"},
+        {.name = "lava tube", .value = "40 m to 44 m, 0.5 m across, a squeeze"},
     };
     CHECK(hog::viewer::column_readings(column) == expected);
 
@@ -116,7 +123,8 @@ TEST_CASE("the ground reads from the surface down", "[viewer][inspector]") {
                                   .mantle_depth = 7'000.0F,
                                   .chamber_top = 4'000.0F,
                                   .chamber_thickness = 950.0F,
-                                  .seams = {}};
+                                  .seams = {},
+                                  .cavities = {}};
     const std::vector<Reading> floor{
         {.name = "elevation", .value = "-3000 m"},
         {.name = "biome", .value = "ocean"},

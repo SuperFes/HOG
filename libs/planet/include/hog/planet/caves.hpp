@@ -87,6 +87,8 @@ public:
     public:
         explicit Lookup(const Caves& caves) : caves_{&caves} {}
 
+        [[nodiscard]] const Caves& caves() const noexcept { return *caves_; }
+
         [[nodiscard]] std::optional<CaveHit> cave_at(CellId cell, std::int64_t depth);
         [[nodiscard]] std::vector<Passage> passages_near(CellId cell);
 

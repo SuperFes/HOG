@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <numbers>
 #include <numeric>
@@ -24,6 +25,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -367,6 +369,39 @@ TEST_CASE("the world's layers are laid out for debug tools", "[app][server]") {
     }
 }
 
+TEST_CASE("inspecting a point shows what has been dug under it", "[app][server]") {
+    const World world;
+    const auto server = opened(world.config());
+    hog::planet::World dug{{.seed = 1, .ocean_fraction = 0.7, .radius = 115'000.0}};
+    const hog::probe::Inspect inspect{.latitude = 21.5, .longitude = -40.25};
+    const hog::planet::CellId cell =
+        hog::planet::cell_at(hog::planet::direction_at(21.5 * std::numbers::pi / 180.0,
+                                                       -40.25 * std::numbers::pi / 180.0),
+                             hog::server::inspect_level(115'000.0));
+    // Dug a little wider than the point, and deeper first.
+    for (const auto& [top, bottom] : {std::pair{30, 34}, std::pair{3, 5}}) {
+        REQUIRE(
+            dug.apply({.cell = cell.parent(cell.level() - 2),
+                       .time = {},
+                       .author = {},
+                       .layer = hog::planet::Layer::Player,
+                       .payload = hog::planet::Hollow{.top = top * hog::planet::fixed_one,
+                                                      .bottom = bottom * hog::planet::fixed_one}}));
+    }
+    const hog::app::LayerSources sources{.planet = dug,
+                                         .weather = server->weather(),
+                                         .wildlife = server->wildlife(),
+                                         .forest = server->forest()};
+    const auto inspection = hog::app::inspect_layers(sources, inspect, {});
+    std::vector<hog::probe::Cavity> dug_out;
+    std::ranges::copy_if(inspection.column.cavities, std::back_inserter(dug_out),
+                         [](const auto& cavity) { return cavity.cave == 0; });
+    CHECK(dug_out == std::vector<hog::probe::Cavity>{
+                         {.cave = 0, .top = 3.0F, .bottom = 5.0F, .room = 0.0F},
+                         {.cave = 0, .top = 30.0F, .bottom = 34.0F, .room = 0.0F}});
+    CHECK(std::ranges::is_sorted(inspection.column.cavities, {}, &hog::probe::Cavity::top));
+}
+
 TEST_CASE("inspecting a point gives every layer at its cell", "[app][server]") {
     const World world;
     const auto server = opened(world.config());
@@ -394,7 +429,7 @@ TEST_CASE("inspecting a point gives every layer at its cell", "[app][server]") {
     for (std::size_t layer = 0; layer < catalogue.size(); ++layer) {
         CHECK(inspection.values[layer] == layers.layers[layer].values[inspection.cell]);
     }
-    CHECK(inspection.column == hog::server::ground_column(server->planet().geology(),
+    CHECK(inspection.column == hog::server::ground_column(server->planet().caves(),
                                                           server->weather().config().planet_radius,
                                                           inspect));
 }
