@@ -4,6 +4,7 @@
 #include <hog/core/time.hpp>
 
 #include <cstdint>
+#include <numbers>
 
 namespace hog::sim {
 
@@ -41,5 +42,12 @@ private:
     GameDuration day_length_;
     double sin_tilt_;
 };
+
+// How far below the horizon the sun still lights the sky.
+inline constexpr double twilight = 6.0 * std::numbers::pi / 180.0;
+
+// How lit the ground is with the sun at `elevation` radians: 1 by day, 0 by night, easing between
+// through twilight.
+[[nodiscard]] double sunlight(double elevation) noexcept;
 
 } // namespace hog::sim

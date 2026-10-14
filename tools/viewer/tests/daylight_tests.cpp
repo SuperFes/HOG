@@ -7,7 +7,6 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
-#include <numbers>
 #include <optional>
 #include <vector>
 
@@ -16,11 +15,8 @@ using Catch::Matchers::WithinAbs;
 using hog::DVec2;
 using hog::GameTime;
 using hog::sim::Calendar;
-using hog::viewer::sunlight;
 
 namespace {
-
-constexpr double degree = std::numbers::pi / 180.0;
 
 GameTime at(sys_days day, minutes time) {
     return hog::to_game_time(hog::WallClock::time_point{day + time});
@@ -39,18 +35,6 @@ hog::probe::Welcome welcome(hog::GameDuration day, double tilt) {
 }
 
 } // namespace
-
-TEST_CASE("daylight fades through twilight", "[viewer][daylight]") {
-    CHECK(sunlight(90.0 * degree) == 1.0);
-    CHECK(sunlight(0.0) == 1.0);
-    CHECK_THAT(sunlight(-3.0 * degree), WithinAbs(0.5, 1e-12));
-    CHECK(sunlight(-6.0 * degree) == 0.0);
-    CHECK(sunlight(-90.0 * degree) == 0.0);
-    for (int quarter = -28; quarter < 4; ++quarter) {
-        const double elevation = quarter * 0.25 * degree;
-        CHECK(sunlight(elevation) <= sunlight(elevation + (0.25 * degree)));
-    }
-}
 
 TEST_CASE("the calendar comes from the server's welcome", "[viewer][daylight]") {
     const auto calendar = hog::viewer::calendar_of(welcome(hours{4}, 23.44));

@@ -8,19 +8,12 @@
 #include <hog/sim/calendar.hpp>
 #include <hog/viewer/map_view.hpp>
 
-#include <numbers>
 #include <optional>
 
 namespace hog::viewer {
 
-// How far below the horizon the sun still lights the sky.
-inline constexpr double twilight = 6.0 * std::numbers::pi / 180.0;
 // How bright the night side stays, so the map under it can still be read.
 inline constexpr double night_light = 0.4;
-
-// How lit the ground is with the sun at `elevation` radians: 1 by day, 0 by night, easing between
-// through twilight.
-[[nodiscard]] double sunlight(double elevation) noexcept;
 
 // The planet's calendar, or none if the server didn't send a usable day length and tilt.
 [[nodiscard]] std::optional<sim::Calendar> calendar_of(const probe::Welcome& welcome);

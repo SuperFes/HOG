@@ -122,3 +122,15 @@ TEST_CASE("calendars reject bad input", "[sim][calendar]") {
     CHECK_THROWS_AS(Calendar(hours{4}, -1.0), AssertionFailed);
     CHECK_THROWS_AS(Calendar(hours{4}, 91.0), AssertionFailed);
 }
+
+TEST_CASE("daylight fades through twilight", "[sim][calendar]") {
+    CHECK(hog::sim::sunlight(90.0 * degree) == 1.0);
+    CHECK(hog::sim::sunlight(0.0) == 1.0);
+    CHECK_THAT(hog::sim::sunlight(-3.0 * degree), WithinAbs(0.5, 1e-12));
+    CHECK(hog::sim::sunlight(-6.0 * degree) == 0.0);
+    CHECK(hog::sim::sunlight(-90.0 * degree) == 0.0);
+    for (int quarter = -28; quarter < 4; ++quarter) {
+        const double elevation = quarter * 0.25 * degree;
+        CHECK(hog::sim::sunlight(elevation) <= hog::sim::sunlight(elevation + (0.25 * degree)));
+    }
+}

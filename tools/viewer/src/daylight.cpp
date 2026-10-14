@@ -13,7 +13,7 @@ namespace {
 void shade_row(mapgen::Image& image, const MapRect& shown, DVec3 sun, int y) {
     for (int x = 0; x < image.width; ++x) {
         const DVec3 up = map_direction(pixel_point(shown, image.width, image.height, x, y));
-        const double light = sunlight(std::asin(std::clamp(glm::dot(sun, up), -1.0, 1.0)));
+        const double light = sim::sunlight(std::asin(std::clamp(glm::dot(sun, up), -1.0, 1.0)));
         if (light >= 1.0) {
             continue;
         }
@@ -29,11 +29,6 @@ void shade_row(mapgen::Image& image, const MapRect& shown, DVec3 sun, int y) {
 }
 
 } // namespace
-
-double sunlight(double elevation) noexcept {
-    const double share = std::clamp((elevation + twilight) / twilight, 0.0, 1.0);
-    return share * share * (3.0 - (2.0 * share));
-}
 
 std::optional<sim::Calendar> calendar_of(const probe::Welcome& welcome) {
     const double tilt = welcome.axial_tilt;

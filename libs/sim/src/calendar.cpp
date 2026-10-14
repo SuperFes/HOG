@@ -81,4 +81,9 @@ double Calendar::sun_elevation(GameTime time, DVec3 up) const noexcept {
     return std::asin(std::clamp(glm::dot(sun_direction(time), glm::normalize(up)), -1.0, 1.0));
 }
 
+double sunlight(double elevation) noexcept {
+    const double share = std::clamp((elevation + twilight) / twilight, 0.0, 1.0);
+    return share * share * (3.0 - (2.0 * share));
+}
+
 } // namespace hog::sim
