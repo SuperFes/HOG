@@ -1,3 +1,4 @@
+#include <hog/core/time.hpp>
 #include <hog/mapgen/photo.hpp>
 #include <hog/mapgen/weather_render.hpp>
 #include <hog/mapgen/wildlife_render.hpp>
@@ -5,12 +6,14 @@
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/sim/natural.hpp>
+#include <hog/sim/weather.hpp>
 #include <hog/viewer/ground.hpp>
 #include <hog/viewer/overlay.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -94,6 +97,19 @@ bool all(const mapgen::Image& image, Rgb colour) {
 
 std::int64_t fixed(double value) {
     return std::llround(value * planet::fixed_one);
+}
+
+// Millimetres of cloud covering about half the sky.
+float half_cover() {
+    float half = 0.0F;
+    for (int hundredths = 0; sim::cloud_cover(half) < 0.5F; ++hundredths) {
+        half = static_cast<float>(hundredths) / 100.0F;
+    }
+    return half;
+}
+
+bool has(const std::vector<std::string>& layers, const std::string& name) {
+    return std::ranges::find(layers, name) != layers.end();
 }
 
 } // namespace
@@ -246,6 +262,82 @@ TEST_CASE("heights stand on each face's corners, the sea level", "[viewer][overl
     }
     // Each face's edges, without its corners, plus each of the cube's corners thrice over.
     CHECK(shared == (12 * (steps - 1)) + (8 * 3));
+}
+
+TEST_CASE("clouds cover as much of the faces as the sky's cloud says", "[viewer][overlay]") {
+    Planet planet = land();
+    constexpr int size = 16;
+    jobs::JobSystem jobs{2};
+    const auto clouds = [&] {
+        return viewer::render_clouds(planet.grid, planet.frame(), size, false, jobs);
+    };
+    CHECK(clouds().empty());
+
+    planet.set("weather/cloud", 0.0F);
+    planet.set("weather/storm", 0.0F);
+    const std::vector<std::uint8_t> clear = clouds();
+    REQUIRE(clear.size() == std::size_t{4} * planet::face_count * size * size);
+    const auto mean_alpha = [](const std::vector<std::uint8_t>& texels) {
+        double sum = 0.0;
+        for (std::size_t at = 3; at < texels.size(); at += 4) {
+            sum += texels[at];
+        }
+        return 4.0 * sum / static_cast<double>(texels.size());
+    };
+    CHECK(mean_alpha(clear) == 0.0);
+
+    // Enough cloud to cover the sky, and about half as much.
+    planet.set("weather/cloud", 1'000.0F);
+    const std::vector<std::uint8_t> overcast = clouds();
+    CHECK(mean_alpha(overcast) == 255.0);
+    planet.set("weather/cloud", half_cover());
+    const double broken = mean_alpha(clouds());
+    CHECK(broken > 40.0);
+    CHECK(broken < 215.0);
+}
+
+TEST_CASE("clouds change with the world's time, smoothly, and hold still while it does",
+          "[viewer][overlay]") {
+    Planet planet = land();
+    planet.set("weather/cloud", half_cover());
+    planet.set("weather/storm", 0.0F);
+    constexpr int size = 16;
+    jobs::JobSystem jobs{2};
+    const GameTime start = to_game_time(WallClock::time_point{
+        std::chrono::sys_days{std::chrono::year{2026} / std::chrono::March / 20}});
+    probe::Welcome welcome;
+    welcome.world_id = 7;
+    const auto at = [&](GameDuration later) {
+        const Frame frame{
+            welcome, probe::Layers{.time = start + later, .clock = {}, .layers = planet.layers},
+            planet.grid.size()};
+        return viewer::render_clouds(planet.grid, frame, size, false, jobs);
+    };
+    // The most any texel's cover differs between two drawings.
+    const auto apart = [](const std::vector<std::uint8_t>& a, const std::vector<std::uint8_t>& b) {
+        int most = 0;
+        for (std::size_t texel = 3; texel < a.size(); texel += 4) {
+            most = std::max(most, std::abs(int{a[texel]} - int{b[texel]}));
+        }
+        return most;
+    };
+    const auto first = at({});
+    CHECK(apart(first, at({})) == 0);
+    CHECK(apart(first, at(std::chrono::seconds{1})) <= 2);
+    CHECK(apart(first, at(std::chrono::minutes{30})) > 50);
+    CHECK(apart(at(std::chrono::minutes{59}), at(std::chrono::minutes{61})) < 50);
+}
+
+TEST_CASE("clouds' layers are fetched only while they're shown", "[viewer][overlay]") {
+    // The sky's overlay draws from them already, and asks for each once.
+    auto plain = viewer::layers_for(Overlay::Sky, "");
+    auto clouded = viewer::layers_for(Overlay::Sky, "", true);
+    std::ranges::sort(plain);
+    std::ranges::sort(clouded);
+    CHECK(plain == clouded);
+    CHECK(has(viewer::layers_for(Overlay::Terrain, "", true), "weather/cloud"));
+    CHECK(has(viewer::layers_for(Overlay::Terrain, "", true), "weather/storm"));
+    CHECK_FALSE(has(viewer::layers_for(Overlay::Terrain, ""), "weather/cloud"));
 }
 
 TEST_CASE("a zoomed overlay draws only the shown part, at full size", "[viewer][overlay]") {
@@ -627,9 +719,6 @@ TEST_CASE("the sea's legend ranges over the sea alone", "[viewer][overlay]") {
 }
 
 TEST_CASE("each overlay asks for the layers it draws", "[viewer][overlay]") {
-    const auto has = [](const std::vector<std::string>& layers, const std::string& name) {
-        return std::ranges::find(layers, name) != layers.end();
-    };
     CHECK(has(viewer::layers_for(Overlay::Sky, ""), "weather/storm"));
     CHECK(has(viewer::layers_for(Overlay::Fire, ""), "forest/fire"));
     CHECK(has(viewer::layers_for(Overlay::Water, ""), "planet/water_table"));

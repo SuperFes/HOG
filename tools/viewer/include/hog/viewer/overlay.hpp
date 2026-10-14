@@ -48,8 +48,10 @@ inline constexpr std::array overlays{
 [[nodiscard]] std::string_view to_string(Overlay overlay) noexcept;
 [[nodiscard]] std::optional<Overlay> overlay_named(std::string_view name) noexcept;
 
-// The layers an overlay draws, so a tool fetches only those. `species` names the wildlife shown.
-[[nodiscard]] std::vector<std::string> layers_for(Overlay overlay, std::string_view species);
+// The layers an overlay draws, so a tool fetches only those, and those clouds are drawn from when
+// they're shown too. `species` names the wildlife shown.
+[[nodiscard]] std::vector<std::string> layers_for(Overlay overlay, std::string_view species,
+                                                  bool clouds = false);
 
 // The range of the layer an overlay mostly shows, as of a frame.
 struct Legend {
@@ -94,6 +96,14 @@ inline constexpr mapgen::Rgb arrow_colour{15, 25, 45};
 [[nodiscard]] std::vector<float> render_heights(const sim::CellGrid& grid, const Frame& frame,
                                                 const probe::Ground* ground, int steps,
                                                 bool natural, jobs::JobSystem& jobs);
+
+// Clouds over the planet's cube faces, laid out as render_faces lays its pixels, a texel each of
+// red, green, blue and alpha: the cloud tops' colour in daylight, and how much of the ground they
+// hide. Broken up finer than the cells by noise fixed for the world, so clouds keep their shapes
+// as their cover changes. Empty without the sky's layers.
+[[nodiscard]] std::vector<std::uint8_t> render_clouds(const sim::CellGrid& grid, const Frame& frame,
+                                                      int size, bool natural,
+                                                      jobs::JobSystem& jobs);
 
 // Pale lows through white to dark red highs, in hPa.
 [[nodiscard]] mapgen::Rgb pressure_colour(double pressure) noexcept;

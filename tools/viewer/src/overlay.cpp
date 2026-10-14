@@ -1,3 +1,5 @@
+#include <hog/core/hash.hpp>
+#include <hog/core/time.hpp>
 #include <hog/mapgen/photo.hpp>
 #include <hog/mapgen/weather_render.hpp>
 #include <hog/mapgen/wildlife_render.hpp>
@@ -12,9 +14,11 @@
 #include <hog/viewer/overlay.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <numbers>
 #include <optional>
 #include <span>
 #include <string>
@@ -541,6 +545,43 @@ void put(mapgen::Image& image, int x, int y, Rgb colour) {
     std::ranges::copy(colour, image.pixels.begin() + static_cast<std::ptrdiff_t>(offset));
 }
 
+// Where clouds gather and part: a field of noise for each hour of the world's time, fading into
+// the next through the hour, so clouds never repeat and hold still while the clock does.
+class CloudNoise {
+public:
+    CloudNoise(std::uint64_t world, GameTime time, double across)
+        : across_{across}, next_{eased(into_hour(time))},
+          // Two fields blended spread less than either, so the blend is widened back.
+          spread_{std::sqrt(((1.0 - next_) * (1.0 - next_)) + (next_ * next_))},
+          this_seed_{hash_values(world, hour(time))},
+          next_seed_{hash_values(world, hour(time) + 1)} {}
+
+    [[nodiscard]] double operator()(DVec3 metres) const noexcept {
+        const double now = mapgen::cloud_noise(this_seed_, metres, across_);
+        const double later = next_ > 0.0 ? mapgen::cloud_noise(next_seed_, metres, across_) : 0.0;
+        return (((1.0 - next_) * now) + (next_ * later)) / spread_;
+    }
+
+private:
+    static std::uint64_t hour(GameTime time) noexcept {
+        return static_cast<std::uint64_t>(
+            std::chrono::floor<std::chrono::hours>(time.time_since_epoch()).count());
+    }
+    static double into_hour(GameTime time) noexcept {
+        const GameDuration since = time.time_since_epoch();
+        return std::chrono::duration<double, std::chrono::hours::period>(
+                   since - std::chrono::floor<std::chrono::hours>(since))
+            .count();
+    }
+    static double eased(double share) noexcept { return share * share * (3.0 - (2.0 * share)); }
+
+    double across_;
+    double next_; // how far into the next hour's field, 0 to 1
+    double spread_;
+    std::uint64_t this_seed_;
+    std::uint64_t next_seed_;
+};
+
 } // namespace
 
 std::optional<Overlay> overlay_named(std::string_view name) noexcept {
@@ -588,11 +629,18 @@ std::string_view to_string(Overlay overlay) noexcept {
     return "unknown";
 }
 
-std::vector<std::string> layers_for(Overlay overlay, std::string_view species) {
+std::vector<std::string> layers_for(Overlay overlay, std::string_view species, bool clouds) {
     std::vector<std::string> layers{"planet/ocean", "planet/elevation"};
     const auto add = [&layers](std::initializer_list<std::string_view> names) {
-        layers.insert(layers.end(), names.begin(), names.end());
+        for (const std::string_view name : names) {
+            if (std::ranges::find(layers, name) == layers.end()) {
+                layers.emplace_back(name);
+            }
+        }
     };
+    if (clouds) {
+        add({"weather/cloud", "weather/storm"});
+    }
     switch (overlay) {
     case Overlay::Terrain: // for its lakes
     case Overlay::Biome:
@@ -801,6 +849,47 @@ std::vector<float> render_heights(const sim::CellGrid& grid, const Frame& frame,
             }
         });
     return heights;
+}
+
+std::vector<std::uint8_t> render_clouds(const sim::CellGrid& grid, const Frame& frame, int size,
+                                        bool natural, jobs::JobSystem& jobs) {
+    const std::span<const float> cloud = frame.layer("weather/cloud");
+    const std::span<const float> storm = frame.layer("weather/storm");
+    if (cloud.empty() || storm.empty()) {
+        return {};
+    }
+    const Sampler sampler{grid, frame, nullptr, natural};
+    const double radius = frame.welcome().planet_radius > 0.0 ? frame.welcome().planet_radius : 1.0;
+    // Two of the grid's cells a noise lattice cell, as the photos have it.
+    const double across =
+        2.0 * radius * std::sqrt(4.0 * std::numbers::pi / static_cast<double>(grid.size()));
+    const CloudNoise noise{frame.welcome().world_id, frame.time(), across};
+    const auto width = static_cast<std::size_t>(size);
+    std::vector<std::uint8_t> texels(std::size_t{4} * planet::face_count * width * width);
+    jobs.parallel_for(
+        static_cast<std::uint32_t>(planet::face_count * size), 1,
+        [&](jobs::Range rows, std::uint32_t /*thread*/) {
+            for (std::uint32_t row = rows.begin; row < rows.end; ++row) {
+                const auto y = static_cast<int>(row);
+                const double v = planet::st_to_uv(((y % size) + 0.5) / size);
+                for (int x = 0; x < size; ++x) {
+                    const DVec3 direction = glm::normalize(
+                        planet::face_uv_to_xyz(y / size, planet::st_to_uv((x + 0.5) / size), v));
+                    const Spot spot = sampler.spot(direction);
+                    const auto cover = static_cast<double>(
+                        sim::cloud_cover(static_cast<float>(sampler.smooth(cloud, spot))));
+                    const mapgen::Cloud over = mapgen::cloud_over(cover, noise(direction * radius));
+                    const Rgb colour =
+                        mapgen::to_srgb(mapgen::cloud_colour(over, sampler.smooth(storm, spot)));
+                    const std::size_t at =
+                        4 * ((std::size_t{row} * width) + static_cast<std::size_t>(x));
+                    std::ranges::copy(colour, texels.begin() + static_cast<std::ptrdiff_t>(at));
+                    texels[at + 3] = static_cast<std::uint8_t>(
+                        std::lround(255.0 * std::clamp(over.opacity(), 0.0, 1.0)));
+                }
+            }
+        });
+    return texels;
 }
 
 } // namespace hog::viewer

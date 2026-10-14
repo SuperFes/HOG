@@ -68,6 +68,7 @@ constexpr int face_size = 512;      // pixels across each of the globe's faces
 constexpr int globe_cells = 128;    // of its mesh, across each face
 constexpr int relief_steps = 256;   // between the globe's heights across each face
 constexpr float most_relief = 5.0F; // times the land's true height
+constexpr int cloud_size = 256;     // texels across each face of the globe's clouds
 constexpr VkFormat globe_depth = VK_FORMAT_D32_SFLOAT;
 constexpr VkClearColorValue window_colour{
     .float32 = {20.0F / 255.0F, 20.0F / 255.0F, 24.0F / 255.0F, 1.0F}};
@@ -271,10 +272,13 @@ public:
     // Precondition: showing.
     [[nodiscard]] ImTextureRef ref() const noexcept { return target_->ui.ref(); }
 
-    // What's been drawn for the globe and not yet sent to the GPU, taken as it's sent.
+    // What's been drawn for the globe and not yet sent to the GPU, taken as it's sent. None may be
+    // null.
     struct Baked {
-        std::optional<mapgen::Image>& faces;        // stacked from face 0 down
-        std::optional<std::vector<float>>& heights; // as render_heights draws them
+        std::optional<mapgen::Image>* faces;        // stacked from face 0 down
+        std::optional<std::vector<float>>* heights; // as render_heights draws them
+        // As render_clouds draws them; empty for none.
+        std::optional<std::vector<std::uint8_t>>* clouds;
     };
 
     // Before the frame is laid out: sends what's newly baked to the GPU, and sizes the image to
@@ -312,8 +316,9 @@ public:
         return {};
     }
 
-    // Records drawing the globe into its image, ready for ImGui to show.
-    void draw(VkCommandBuffer commands, const render::GlobeView& view) {
+    // Records drawing the globe into its image, ready for ImGui to show, with clouds if asked for
+    // and there are any.
+    void draw(VkCommandBuffer commands, const render::GlobeView& view, bool clouds) {
         if (!faces_ || !relief_ || !showing()) {
             return;
         }
@@ -322,7 +327,11 @@ public:
         target_->tracked_depth.use_as(commands, render::image_use::depth_target);
         render::begin_rendering(commands, target_->image.view(), extent, space_colour,
                                 {.view = target_->depth.view()});
-        globe_.draw(commands, extent, {.faces = &faces_->image(), .relief = &relief_->image()},
+        const bool cloudy = clouds && clouded_ && clouds_ && clouds_->ready();
+        globe_.draw(commands, extent,
+                    {.faces = &faces_->image(),
+                     .relief = &relief_->image(),
+                     .clouds = cloudy ? &clouds_->image() : nullptr},
                     view);
         vkCmdEndRendering(commands);
         target_->tracked.use_as(commands, render::image_use::sampled);
@@ -343,25 +352,40 @@ private:
     };
 
     Result<void> send(const render::Device& device, const render::Frame& frame, Baked baked) {
-        if (baked.faces) {
-            const VkExtent2D extent{.width = static_cast<std::uint32_t>(baked.faces->width),
-                                    .height = static_cast<std::uint32_t>(baked.faces->width)};
+        std::optional<mapgen::Image>& faces = *baked.faces;
+        std::optional<std::vector<float>>& heights = *baked.heights;
+        std::optional<std::vector<std::uint8_t>>& clouds = *baked.clouds;
+        if (faces) {
+            const VkExtent2D extent{.width = static_cast<std::uint32_t>(faces->width),
+                                    .height = static_cast<std::uint32_t>(faces->width)};
             if (auto sent = stream(device, frame, faces_, VK_FORMAT_R8G8B8A8_UNORM, extent,
-                                   viewer::rgba_texels(*baked.faces));
+                                   viewer::rgba_texels(*faces));
                 !sent) {
                 return sent;
             }
-            baked.faces.reset();
+            faces.reset();
         }
-        if (baked.heights) {
+        if (heights) {
             constexpr auto across = static_cast<std::uint32_t>(relief_steps) + 1;
-            if (auto sent = stream(device, frame, relief_, VK_FORMAT_R32_SFLOAT,
-                                   {.width = across, .height = across},
-                                   std::as_bytes(std::span{*baked.heights}));
+            if (auto sent =
+                    stream(device, frame, relief_, VK_FORMAT_R32_SFLOAT,
+                           {.width = across, .height = across}, std::as_bytes(std::span{*heights}));
                 !sent) {
                 return sent;
             }
-            baked.heights.reset();
+            heights.reset();
+        }
+        if (clouds) {
+            clouded_ = !clouds->empty();
+            if (clouded_) {
+                if (auto sent = stream(device, frame, clouds_, VK_FORMAT_R8G8B8A8_UNORM,
+                                       {.width = cloud_size, .height = cloud_size},
+                                       std::as_bytes(std::span{*clouds}));
+                    !sent) {
+                    return sent;
+                }
+            }
+            clouds.reset();
         }
         return {};
     }
@@ -369,6 +393,8 @@ private:
     render::Globe globe_;
     std::optional<render::StreamedImage> faces_;
     std::optional<render::StreamedImage> relief_;
+    std::optional<render::StreamedImage> clouds_;
+    bool clouded_ = false; // whether the newest clouds sent had any sky to draw from
     std::unique_ptr<Target> target_;
 };
 
@@ -435,10 +461,15 @@ struct View {
     std::uint64_t baked = 0;            // the link's frame count when the faces were last drawn
     std::uint64_t baked_ground = 0;     // and its ground count
     bool faces_stale = true;
+    bool heights_baked = false; // with the land's elevation, since the edges changed
+    bool clouds = true;         // over the globe
+    bool clouds_stale = true;
     float relief = 1.0F;                       // times the land's true height, on the globe
     std::optional<std::vector<float>> heights; // drawn for the globe, but not yet sent to the GPU
-    bool heights_baked = false;                // with the land's elevation, since the edges changed
     std::uint64_t heights_ground = 0;          // the link's ground count when last drawn
+    std::optional<std::vector<std::uint8_t>> cloud_texels; // drawn, but not yet sent to the GPU
+    std::uint64_t clouded = 0;      // the link's frame count when the clouds were last drawn
+    std::vector<std::string> asked; // the layers the link was last asked for
 };
 
 // The globe's faces before there's anything to draw on them.
@@ -515,6 +546,22 @@ void rebake(View& view, const viewer::Link& link, jobs::JobSystem& jobs) {
                                               relief_steps, view.natural, jobs);
         view.heights_baked = !frame->layer("planet/elevation").empty();
         view.heights_ground = grounds;
+    }
+    if (view.clouds && (view.clouds_stale || link.frames() != view.clouded)) {
+        view.cloud_texels =
+            viewer::render_clouds(grid_for(view, *frame), *frame, cloud_size, view.natural, jobs);
+        view.clouded = link.frames();
+        view.clouds_stale = false;
+    }
+}
+
+// Asks the link for the layers what's on show is drawn from, when they change.
+void ask(View& view, viewer::Link& link) {
+    std::vector<std::string> wanted =
+        viewer::layers_for(view.overlay, view.species, view.globe && view.clouds);
+    if (wanted != view.asked) {
+        link.want(wanted);
+        view.asked = std::move(wanted);
     }
 }
 
@@ -614,7 +661,7 @@ void choose(View& view, viewer::Link& link, viewer::Overlay overlay, std::string
     view.species = std::move(species);
     view.stale = true;
     view.faces_stale = true;
-    link.want(viewer::layers_for(view.overlay, view.species));
+    ask(view, link);
 }
 
 // Where the world's clock is against real time, and, if the server allows it, ways to change it.
@@ -793,6 +840,7 @@ void sidebar(View& view, viewer::Link& link) {
         view.stale = true;
         view.faces_stale = true;
         view.heights_baked = false;
+        view.clouds_stale = true;
     }
 
     ImGui::Separator();
@@ -810,6 +858,9 @@ void sidebar(View& view, viewer::Link& link) {
                                .c_str());
     if (view.globe) {
         ImGui::SliderFloat("relief", &view.relief, 0.0F, most_relief, "%.1fx");
+        if (ImGui::Checkbox("clouds", &view.clouds)) {
+            view.clouds_stale = true;
+        }
     }
     if (ImGui::Button("whole planet")) {
         view.map.reset();
@@ -971,8 +1022,10 @@ Result<bool> draw(View& view, viewer::Link& link, const render::Device& device,
     if (auto uploaded = upload(view, device, frame); !uploaded) {
         return std::unexpected(std::move(uploaded).error());
     }
-    if (auto prepared = panel.prepare(device, frame, {.faces = view.faces, .heights = view.heights},
-                                      view.globe ? view.globe_wanted : VkExtent2D{});
+    if (auto prepared = panel.prepare(
+            device, frame,
+            {.faces = &view.faces, .heights = &view.heights, .clouds = &view.cloud_texels},
+            view.globe ? view.globe_wanted : VkExtent2D{});
         !prepared) {
         return std::unexpected(std::move(prepared).error());
     }
@@ -986,7 +1039,8 @@ Result<bool> draw(View& view, viewer::Link& link, const render::Device& device,
         panel.draw(frame.commands,
                    viewer::globe_view(
                        view.orbit, link.frame().get(),
-                       {.daylight = view.daylight, .relief = static_cast<double>(view.relief)}));
+                       {.daylight = view.daylight, .relief = static_cast<double>(view.relief)}),
+                   view.clouds);
     }
 
     frame.target.use_as(frame.commands, render::image_use::colour_target);
@@ -1024,7 +1078,6 @@ int show(const viewer::Options& options, const render::Device& device, render::P
     view.faces = missing_faces();
     // Level ground until the land's known.
     view.heights.emplace(std::size_t{planet::face_count} * (relief_steps + 1) * (relief_steps + 1));
-    link.want(viewer::layers_for(view.overlay, view.species));
     auto made = render::Globe::create(device, VK_FORMAT_R8G8B8A8_UNORM, globe_depth, globe_cells);
     if (!made) {
         std::cerr << std::format("hog-viewer: can't draw the globe: {}\n", made.error());
@@ -1042,6 +1095,7 @@ int show(const viewer::Options& options, const render::Device& device, render::P
                 running = false;
             }
         }
+        ask(view, link);
         survey(view, link, options.width);
         redraw(view, link, options.width, jobs);
         rebake(view, link, jobs);

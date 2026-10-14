@@ -23,12 +23,14 @@ render::GlobeView globe_view(const GlobeCamera& camera, const Frame* frame, Glob
                            .radius = 1.0,
                            .sun = DVec3{1.0, 0.0, 0.0},
                            .night_light = 1.0,
-                           .twilight = sim::twilight};
+                           .twilight = sim::twilight,
+                           .air = air_depth};
     if (frame == nullptr) {
         return view;
     }
     if (const double radius = frame->welcome().planet_radius; radius > 0.0) {
         view.relief = look.relief / radius;
+        view.cloud_lift = std::max(look.relief, 1.0) * cloud_height / radius;
     }
     if (!look.daylight) {
         return view;

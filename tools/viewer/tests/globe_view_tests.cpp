@@ -78,3 +78,18 @@ TEST_CASE("the land stands as high as the planet's size makes it, or higher", "[
     CHECK_THAT(hog::viewer::globe_view(camera, &frame, {.daylight = false, .relief = 3.0}).relief,
                WithinAbs(3e-5, 1e-15));
 }
+
+TEST_CASE("clouds float as high as the land is drawn, never lower than they are",
+          "[viewer][globe]") {
+    const GlobeCamera camera;
+    hog::probe::Welcome welcome;
+    welcome.planet_radius = 100'000.0;
+    const hog::viewer::Frame frame{welcome,
+                                   hog::probe::Layers{.time = {}, .clock = {}, .layers = {}}, 0};
+    const double true_height = hog::viewer::cloud_height / 100'000.0;
+    CHECK_THAT(hog::viewer::globe_view(camera, &frame, {.relief = 0.0}).cloud_lift,
+               WithinAbs(true_height, 1e-15));
+    CHECK_THAT(hog::viewer::globe_view(camera, &frame, {.relief = 4.0}).cloud_lift,
+               WithinAbs(4.0 * true_height, 1e-15));
+    CHECK(hog::viewer::globe_view(camera, &frame, {}).air == hog::viewer::air_depth);
+}

@@ -27,6 +27,11 @@ private:
     render::Orbit orbit_{.latitude = 0.0, .longitude = 0.0, .altitude = start_altitude};
 };
 
+// Metres up the clouds lie, as the photos have them, raised with the land when it's exaggerated.
+inline constexpr double cloud_height = 3'000.0;
+// Radii of air drawn above the ground.
+inline constexpr double air_depth = 0.025;
+
 // How the globe is shown.
 struct GlobeLook {
     bool daylight = true;
