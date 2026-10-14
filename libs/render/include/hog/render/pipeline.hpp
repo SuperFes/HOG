@@ -11,6 +11,13 @@ namespace hog::render {
 
 class Device;
 
+// How a pipeline's colour combines with what's already drawn.
+enum class Blend : std::uint8_t {
+    None,
+    Alpha, // over what's there, by the colour's alpha
+    Add,
+};
+
 // A graphics pipeline drawing into colour and depth images by dynamic rendering, with the
 // viewport and scissor set while recording.
 struct PipelineDesc {
@@ -26,6 +33,9 @@ struct PipelineDesc {
     VkFormat colour_format = VK_FORMAT_R8G8B8A8_UNORM;
     // VK_FORMAT_UNDEFINED for none. Depth is reversed, so nearer is greater.
     VkFormat depth_format = VK_FORMAT_UNDEFINED;
+    // Whether drawing also writes depth, when there is a depth image; tested either way.
+    bool depth_write = true;
+    Blend blend = Blend::None;
     VkCullModeFlags cull = VK_CULL_MODE_NONE;
     // Visible to both stages.
     std::uint32_t push_constant_bytes = 0;
@@ -59,7 +69,7 @@ private:
 [[nodiscard]] Result<Pipeline> make_pipeline(const Device& device, const PipelineDesc& desc);
 
 // Records handing the bound pipeline's shaders an image to sample at `binding` of set 0. The image
-// must be ready for fragment shaders by the time they run.
+// must be ready to sample by the time they run.
 void push_sampled_image(VkCommandBuffer commands, const Pipeline& pipeline, std::uint32_t binding,
                         VkImageView view, VkSampler sampler) noexcept;
 

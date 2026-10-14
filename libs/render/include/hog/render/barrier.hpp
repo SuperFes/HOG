@@ -28,7 +28,9 @@ inline constexpr ImageUse depth_target{.stage = VK_PIPELINE_STAGE_2_EARLY_FRAGME
                                        .access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
                                                  VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
                                        .layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL};
-inline constexpr ImageUse sampled{.stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+// By either shader stage.
+inline constexpr ImageUse sampled{.stage = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
+                                           VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                                   .access = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
                                   .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 inline constexpr ImageUse copy_source{.stage = VK_PIPELINE_STAGE_2_COPY_BIT,

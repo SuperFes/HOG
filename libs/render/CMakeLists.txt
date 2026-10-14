@@ -71,12 +71,14 @@ hog_add_tests(hog_render
     tests/device_tests.cpp
     tests/globe_tests.cpp
     tests/orbit_tests.cpp
+    tests/pipeline_tests.cpp
     tests/presenter_tests.cpp
     tests/streamed_image_tests.cpp
     tests/swapchain_tests.cpp)
 if(TARGET hog_render_tests)
     target_link_libraries(hog_render_tests PRIVATE hog::planet)
-    hog_add_shaders(hog_render_tests tests/shaders/layer.slang tests/shaders/triangle.slang)
+    hog_add_shaders(hog_render_tests tests/shaders/fill.slang tests/shaders/layer.slang
+                    tests/shaders/triangle.slang)
     # GPU drivers are opaque to sanitizers, so those runs leave the GPU out.
     if(HOG_SANITIZE)
         target_compile_definitions(hog_render_tests PRIVATE HOG_GPU_TESTS=0)

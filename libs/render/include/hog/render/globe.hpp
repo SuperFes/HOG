@@ -34,7 +34,7 @@ public:
 
     // Records drawing into the colour image being rendered to, of `extent`, leaving the rest of
     // it as it was. `faces` holds a layer per cube face, laid out as the mesh's face points, and
-    // must be ready for fragment shaders.
+    // must be ready to sample.
     void draw(VkCommandBuffer commands, VkExtent2D extent, const Image& faces,
               const GlobeView& view) const noexcept;
 

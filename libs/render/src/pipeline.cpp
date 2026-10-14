@@ -43,6 +43,23 @@ void Pipeline::release() noexcept {
     }
 }
 
+namespace {
+
+// How much of what's already drawn a blend keeps.
+VkBlendFactor kept_colour(Blend blend) noexcept {
+    switch (blend) {
+    case Blend::None:
+        return VK_BLEND_FACTOR_ZERO;
+    case Blend::Alpha:
+        return VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    case Blend::Add:
+        return VK_BLEND_FACTOR_ONE;
+    }
+    return VK_BLEND_FACTOR_ZERO;
+}
+
+} // namespace
+
 Result<Pipeline> make_pipeline(const Device& device, const PipelineDesc& desc) {
     Pipeline pipeline;
     pipeline.device_ = device.handle();
@@ -158,7 +175,7 @@ Result<Pipeline> make_pipeline(const Device& device, const PipelineDesc& desc) {
         .pNext = nullptr,
         .flags = 0,
         .depthTestEnable = depth ? VK_TRUE : VK_FALSE,
-        .depthWriteEnable = depth ? VK_TRUE : VK_FALSE,
+        .depthWriteEnable = depth && desc.depth_write ? VK_TRUE : VK_FALSE,
         .depthCompareOp = VK_COMPARE_OP_GREATER,
         .depthBoundsTestEnable = VK_FALSE,
         .stencilTestEnable = VK_FALSE,
@@ -166,13 +183,16 @@ Result<Pipeline> make_pipeline(const Device& device, const PipelineDesc& desc) {
         .back = {},
         .minDepthBounds = 0.0F,
         .maxDepthBounds = 1.0F};
+    const bool blending = desc.blend != Blend::None;
     const VkPipelineColorBlendAttachmentState blend_attachment{
-        .blendEnable = VK_FALSE,
-        .srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
-        .dstColorBlendFactor = VK_BLEND_FACTOR_ZERO,
+        .blendEnable = blending ? VK_TRUE : VK_FALSE,
+        .srcColorBlendFactor =
+            desc.blend == Blend::Alpha ? VK_BLEND_FACTOR_SRC_ALPHA : VK_BLEND_FACTOR_ONE,
+        .dstColorBlendFactor = kept_colour(desc.blend),
         .colorBlendOp = VK_BLEND_OP_ADD,
-        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
-        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+        // What's drawn over keeps its own alpha.
+        .srcAlphaBlendFactor = blending ? VK_BLEND_FACTOR_ZERO : VK_BLEND_FACTOR_ONE,
+        .dstAlphaBlendFactor = blending ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_ZERO,
         .alphaBlendOp = VK_BLEND_OP_ADD,
         .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                           VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT};
