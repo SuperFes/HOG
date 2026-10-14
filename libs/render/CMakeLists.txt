@@ -39,7 +39,9 @@ add_library(hog_render
     src/memory.cpp
     src/orbit.cpp
     src/pipeline.cpp
+    src/presenter.cpp
     src/readback.cpp
+    src/swapchain.cpp
     src/vma.cpp
     src/vulkan.cpp)
 add_library(hog::render ALIAS hog_render)
@@ -58,10 +60,13 @@ target_link_libraries(hog_render
 hog_target_defaults(hog_render)
 
 hog_add_tests(hog_render
+    tests/barrier_tests.cpp
     tests/camera_tests.cpp
     tests/cube_sphere_tests.cpp
     tests/device_tests.cpp
-    tests/orbit_tests.cpp)
+    tests/orbit_tests.cpp
+    tests/presenter_tests.cpp
+    tests/swapchain_tests.cpp)
 if(TARGET hog_render_tests)
     target_link_libraries(hog_render_tests PRIVATE hog::planet)
     hog_add_shaders(hog_render_tests tests/shaders/triangle.slang)

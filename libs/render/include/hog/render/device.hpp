@@ -20,7 +20,7 @@ struct DeviceOptions {
     bool validation = false;
     // A software device such as lavapipe over a GPU, so images come out the same on any machine.
     bool prefer_software = false;
-    // Instance extensions the window system needs to make its surface.
+    // Instance extensions the window system needs to make its surface, VK_KHR_surface among them.
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     std::vector<std::string> instance_extensions = {};
     // Makes the window's surface once the instance exists. Without one, the device can only

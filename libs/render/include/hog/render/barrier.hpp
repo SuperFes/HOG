@@ -2,6 +2,8 @@
 
 #include <hog/render/vulkan.hpp>
 
+#include <optional>
+
 namespace hog::render {
 
 // How an image was last used, or is about to be: what a barrier waits on and makes ready.
@@ -48,5 +50,29 @@ inline constexpr ImageUse present{.stage = VK_PIPELINE_STAGE_2_NONE,
 // Records the barrier between two uses of an image.
 void transition(VkCommandBuffer commands, VkImage image, VkImageAspectFlags aspect, ImageUse from,
                 ImageUse to) noexcept;
+
+// Whether moving between two uses needs a barrier: a layout change, or a write on either side.
+[[nodiscard]] bool needs_barrier(ImageUse from, ImageUse to) noexcept;
+
+// An image and how it was last used, so each new use waits on exactly the one before.
+class TrackedImage {
+public:
+    TrackedImage() = default;
+    TrackedImage(VkImage image, VkImageAspectFlags aspect, ImageUse use = image_use::discard)
+        : image_{image}, aspect_{aspect}, use_{use} {}
+
+    [[nodiscard]] VkImage handle() const noexcept { return image_; }
+    [[nodiscard]] ImageUse use() const noexcept { return use_; }
+
+    // The barrier into `next`, where one is needed; either way the image is in `next` after.
+    [[nodiscard]] std::optional<VkImageMemoryBarrier2> barrier_to(ImageUse next) noexcept;
+    // Records the barrier into `next`, where one is needed.
+    void use_as(VkCommandBuffer commands, ImageUse next) noexcept;
+
+private:
+    VkImage image_ = VK_NULL_HANDLE;
+    VkImageAspectFlags aspect_ = VK_IMAGE_ASPECT_COLOR_BIT;
+    ImageUse use_ = image_use::discard;
+};
 
 } // namespace hog::render

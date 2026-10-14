@@ -43,6 +43,23 @@ bool validation_installed() {
     });
 }
 
+// Whether the queue family vk-bootstrap hands out for graphics can show images on the surface.
+bool presents(const vkb::PhysicalDevice& candidate, VkSurfaceKHR surface) {
+    const auto families = candidate.get_queue_families();
+    const auto graphics = std::ranges::find_if(families, [](const VkQueueFamilyProperties& family) {
+        return (family.queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0;
+    });
+    if (graphics == families.end()) {
+        return false;
+    }
+    VkBool32 supported = VK_FALSE;
+    return vkGetPhysicalDeviceSurfaceSupportKHR(
+               candidate.physical_device,
+               static_cast<std::uint32_t>(std::distance(families.begin(), graphics)), surface,
+               &supported) == VK_SUCCESS &&
+           supported == VK_TRUE;
+}
+
 } // namespace
 
 VkBool32 Device::report(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
@@ -72,9 +89,9 @@ Result<std::unique_ptr<Device>> Device::create(const DeviceOptions& options) {
         log::warn(vulkan_log, "validation was asked for, but its layer isn't installed");
     }
     vkb::InstanceBuilder instance_builder{vkGetInstanceProcAddr};
-    instance_builder.set_app_name(options.app_name)
-        .require_api_version(1, 3, 0)
-        .set_headless(!options.make_surface);
+    // Headless to vk-bootstrap, which would otherwise guess at window system extensions: the host
+    // names its own.
+    instance_builder.set_app_name(options.app_name).require_api_version(1, 3, 0).set_headless(true);
     if (device->validating_) {
         instance_builder.enable_validation_layers()
             .set_debug_callback(&Device::report)
@@ -111,15 +128,26 @@ Result<std::unique_ptr<Device>> Device::create(const DeviceOptions& options) {
     selector.set_minimum_version(1, 3)
         .set_required_features_11(features_11)
         .set_required_features_13(features_13)
-        .require_present(device->surface_ != VK_NULL_HANDLE)
+        // Present support is checked here rather than by vk-bootstrap, whose surface functions
+        // come from the first instance in the process, which may have had no surfaces.
+        .require_present(false)
         .prefer_gpu_device_type(options.prefer_software ? vkb::PreferredDeviceType::cpu
                                                         : vkb::PreferredDeviceType::discrete);
     if (device->surface_ != VK_NULL_HANDLE) {
-        selector.set_surface(device->surface_);
+        selector.add_required_extension(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
     }
-    const auto physical = selector.select();
-    if (!physical) {
-        return bootstrap_error(physical, "choosing a Vulkan 1.3 device");
+    const auto candidates = selector.select_devices();
+    if (!candidates) {
+        return bootstrap_error(candidates, "choosing a Vulkan 1.3 device");
+    }
+    // Preferred devices come first.
+    const auto physical =
+        std::ranges::find_if(*candidates, [&](const vkb::PhysicalDevice& candidate) {
+            return device->surface_ == VK_NULL_HANDLE || presents(candidate, device->surface_);
+        });
+    if (physical == candidates->end()) {
+        return make_error(ErrorCode::Unsupported,
+                          "no Vulkan 1.3 device can show images on the window");
     }
     device->physical_ = physical->physical_device;
     device->name_ = physical->name;

@@ -1,3 +1,5 @@
+#include "test_device.hpp"
+
 #include <hog/render/barrier.hpp>
 #include <hog/render/device.hpp>
 #include <hog/render/memory.hpp>
@@ -11,26 +13,10 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <memory>
 
-using hog::render::Device;
+using hog::render::testing::test_device;
 
 namespace {
-
-// A validated device preferring a software one, or a skipped test where there's none.
-std::unique_ptr<Device> test_device() {
-    if (HOG_GPU_TESTS == 0) {
-        SKIP("GPU tests are off in this build");
-    }
-    auto device = Device::create({.validation = true, .prefer_software = true});
-    if (!device) {
-        SKIP("no Vulkan device: " << device.error().message);
-    }
-    if (!(*device)->validating()) {
-        WARN("the Vulkan validation layer isn't installed, so it isn't checked");
-    }
-    return std::move(device).value();
-}
 
 using Pixel = std::array<std::uint8_t, 4>;
 
