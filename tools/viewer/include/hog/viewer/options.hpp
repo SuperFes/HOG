@@ -23,6 +23,10 @@ struct Options {
     // frame drawn, as a PNG.
     std::optional<std::chrono::milliseconds> quit_after;
     std::optional<std::filesystem::path> capture;
+    // A software Vulkan device over a GPU, and the validation layer with its errors failing the
+    // run, also for tests.
+    bool software = false;
+    bool validate = false;
     bool help = false;
 };
 

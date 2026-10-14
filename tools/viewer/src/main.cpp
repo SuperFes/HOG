@@ -4,6 +4,12 @@
 #include <hog/planet/climate.hpp>
 #include <hog/planet/geology.hpp>
 #include <hog/probe/messages.hpp>
+#include <hog/render/device.hpp>
+#include <hog/render/memory.hpp>
+#include <hog/render/presenter.hpp>
+#include <hog/render/readback.hpp>
+#include <hog/render/rendering.hpp>
+#include <hog/render/streamed_image.hpp>
 #include <hog/sim/cell_grid.hpp>
 #include <hog/viewer/clock_text.hpp>
 #include <hog/viewer/daylight.hpp>
@@ -14,11 +20,13 @@
 #include <hog/viewer/map_view.hpp>
 #include <hog/viewer/options.hpp>
 #include <hog/viewer/overlay.hpp>
+#include <hog/viewer/texels.hpp>
 
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
-#include <imgui_impl_sdlrenderer3.h>
+#include <imgui_impl_vulkan.h>
 
 #include <algorithm>
 #include <chrono>
@@ -48,69 +56,156 @@ constexpr float marker_reach = 9.0F; // pixels from the inspected point to a cro
 // How long the view must hold still before the ground under it is surveyed.
 constexpr std::chrono::milliseconds survey_settle{150};
 constexpr float deepest = 100'000.0F; // metres, for the underground overlays
+// How long to wait between looks at a minimised window.
+constexpr Uint32 idle_ms = 50;
+// What test runners take as skipped: there's no Vulkan to draw with.
+constexpr int no_vulkan = 77;
 
 struct WindowDeleter {
     void operator()(SDL_Window* window) const noexcept { SDL_DestroyWindow(window); }
 };
-struct RendererDeleter {
-    void operator()(SDL_Renderer* renderer) const noexcept { SDL_DestroyRenderer(renderer); }
-};
-struct SurfaceDeleter {
-    void operator()(SDL_Surface* surface) const noexcept { SDL_DestroySurface(surface); }
-};
-using Surface = std::unique_ptr<SDL_Surface, SurfaceDeleter>;
-struct TextureDeleter {
-    void operator()(SDL_Texture* texture) const noexcept { SDL_DestroyTexture(texture); }
-};
-using Texture = std::unique_ptr<SDL_Texture, TextureDeleter>;
-
-// SDL from starting to quitting.
+// SDL from starting to quitting, with Vulkan loaded for its windows.
 class Sdl {
 public:
-    Sdl() : started_(SDL_Init(SDL_INIT_VIDEO)) {}
+    Sdl()
+        : started_(SDL_Init(SDL_INIT_VIDEO)), vulkan_(started_ && SDL_Vulkan_LoadLibrary(nullptr)) {
+    }
     Sdl(const Sdl&) = delete;
     Sdl(Sdl&&) = delete;
     Sdl& operator=(const Sdl&) = delete;
     Sdl& operator=(Sdl&&) = delete;
     ~Sdl() {
+        if (vulkan_) {
+            SDL_Vulkan_UnloadLibrary();
+        }
         if (started_) {
             SDL_Quit();
         }
     }
 
     [[nodiscard]] bool started() const noexcept { return started_; }
+    [[nodiscard]] bool vulkan() const noexcept { return vulkan_; }
 
 private:
     bool started_;
+    bool vulkan_;
 };
 
-// ImGui, drawing through an SDL renderer.
+// A device for the window: the instance extensions SDL needs, and its surface once there's an
+// instance to make it with.
+Result<render::DeviceOptions> device_options(SDL_Window* window, const viewer::Options& options) {
+    Uint32 count = 0;
+    const char* const* names = SDL_Vulkan_GetInstanceExtensions(&count);
+    if (names == nullptr) {
+        return make_error(
+            ErrorCode::Unsupported,
+            std::format("can't use Vulkan on this window system: {}", SDL_GetError()));
+    }
+    render::DeviceOptions device{.app_name = "HOG viewer",
+                                 .validation = options.validate,
+                                 .prefer_software = options.software};
+    for (const char* name : std::span{names, count}) {
+        device.instance_extensions.emplace_back(name);
+    }
+    device.make_surface = [window](VkInstance instance) -> Result<VkSurfaceKHR> {
+        VkSurfaceKHR surface = VK_NULL_HANDLE;
+        if (!SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface)) {
+            return make_error(ErrorCode::Unsupported,
+                              std::format("can't show Vulkan on the window: {}", SDL_GetError()));
+        }
+        return surface;
+    };
+    return device;
+}
+
+// The window's drawable size, which is none while it's minimised.
+VkExtent2D drawable(SDL_Window* window) {
+    int width = 0;
+    int height = 0;
+    if ((SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED) != 0 ||
+        !SDL_GetWindowSizeInPixels(window, &width, &height)) {
+        return {};
+    }
+    return {.width = static_cast<std::uint32_t>(std::max(width, 0)),
+            .height = static_cast<std::uint32_t>(std::max(height, 0))};
+}
+
+// ImGui, drawing with Vulkan into images of `format`.
 class Ui {
 public:
-    Ui(SDL_Window* window, SDL_Renderer* renderer) {
+    Ui(SDL_Window* window, const render::Device& device, VkFormat format) {
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
         ImGui::GetIO().IniFilename = nullptr;
         ImGui::StyleColorsDark();
-        ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
-        ImGui_ImplSDLRenderer3_Init(renderer);
+        ImGui_ImplSDL3_InitForVulkan(window);
+        ImGui_ImplVulkan_InitInfo info{};
+        info.ApiVersion = VK_API_VERSION_1_3;
+        info.Instance = device.instance();
+        info.PhysicalDevice = device.physical();
+        info.Device = device.handle();
+        info.QueueFamily = device.queue_family();
+        info.Queue = device.queue();
+        // The font atlas and the map.
+        info.DescriptorPoolSize = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE + 1;
+        // Its vertex buffers are reused once a frame in flight finishes, not a swapchain image.
+        info.MinImageCount = render::frames_in_flight;
+        info.ImageCount = render::frames_in_flight;
+        info.UseDynamicRendering = true;
+        info.PipelineInfoMain.PipelineRenderingCreateInfo = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+            .pNext = nullptr,
+            .viewMask = 0,
+            .colorAttachmentCount = 1,
+            .pColorAttachmentFormats = &format,
+            .depthAttachmentFormat = VK_FORMAT_UNDEFINED,
+            .stencilAttachmentFormat = VK_FORMAT_UNDEFINED};
+        vulkan_ = ImGui_ImplVulkan_Init(&info);
     }
     Ui(const Ui&) = delete;
     Ui(Ui&&) = delete;
     Ui& operator=(const Ui&) = delete;
     Ui& operator=(Ui&&) = delete;
     ~Ui() {
-        ImGui_ImplSDLRenderer3_Shutdown();
+        if (vulkan_) {
+            ImGui_ImplVulkan_Shutdown();
+        }
         ImGui_ImplSDL3_Shutdown();
         ImGui::DestroyContext();
     }
+
+    [[nodiscard]] bool started() const noexcept { return vulkan_; }
+
+private:
+    bool vulkan_ = false;
 };
 
-ImTextureRef texture_ref(const SDL_Texture* texture) {
-    // The SDL renderer backend takes its textures as ImGui's opaque ids.
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-    return ImTextureRef{static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(texture))};
-}
+// The map's image on the GPU, as ImGui samples it. The GPU must have finished with it before it
+// goes.
+class MapTexture {
+public:
+    explicit MapTexture(render::StreamedImage image)
+        : image_{std::move(image)},
+          set_{ImGui_ImplVulkan_AddTexture(image_.image().view(),
+                                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)} {}
+    MapTexture(const MapTexture&) = delete;
+    MapTexture(MapTexture&&) = delete;
+    MapTexture& operator=(const MapTexture&) = delete;
+    MapTexture& operator=(MapTexture&&) = delete;
+    ~MapTexture() { ImGui_ImplVulkan_RemoveTexture(set_); }
+
+    [[nodiscard]] render::StreamedImage& image() noexcept { return image_; }
+    [[nodiscard]] VkExtent2D extent() const noexcept { return image_.image().desc().extent; }
+    [[nodiscard]] ImTextureRef ref() const noexcept {
+        // The Vulkan backend takes descriptor sets as ImGui's opaque ids.
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+        return ImTextureRef{static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(set_))};
+    }
+
+private:
+    render::StreamedImage image_;
+    VkDescriptorSet set_;
+};
 
 std::string format_time(GameTime time) {
     return std::format("{:%F %R} UTC",
@@ -118,26 +213,35 @@ std::string format_time(GameTime time) {
                            std::chrono::floor<std::chrono::seconds>(time.time_since_epoch())});
 }
 
-// Saves what's been drawn so far this frame.
-Result<void> capture(SDL_Renderer* renderer, const std::filesystem::path& path) {
-    const Surface read{SDL_RenderReadPixels(renderer, nullptr)};
-    const Surface rgb{read != nullptr ? SDL_ConvertSurface(read.get(), SDL_PIXELFORMAT_RGB24)
-                                      : nullptr};
-    if (rgb == nullptr) {
-        return make_error(ErrorCode::Io, std::format("can't read the window: {}", SDL_GetError()));
+// Records copying what's been drawn so far this frame, to save once the GPU has finished.
+Result<render::Buffer> start_capture(const render::Device& device,
+                                     const render::Presenter& presenter, render::Frame& frame) {
+    if ((presenter.swapchain().usage() & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) == 0) {
+        return make_error(ErrorCode::Unsupported, "the window's images can't be read");
     }
-    const std::size_t row = 3 * static_cast<std::size_t>(rgb->w);
-    const auto rows = static_cast<std::size_t>(rgb->h);
-    const auto pitch = static_cast<std::size_t>(rgb->pitch);
-    const std::span<const std::uint8_t> pixels{static_cast<const std::uint8_t*>(rgb->pixels),
-                                               pitch * rows};
-    mapgen::Image image{.width = rgb->w, .height = rgb->h, .pixels = {}};
-    image.pixels.reserve(row * rows);
-    for (std::size_t y = 0; y < rows; ++y) {
-        const auto line = pixels.subspan(y * pitch, row);
-        image.pixels.insert(image.pixels.end(), line.begin(), line.end());
+    auto buffer = render::make_readback(device, frame.extent);
+    if (buffer) {
+        render::record_readback(frame.commands, frame.target, frame.extent, *buffer);
     }
-    return mapgen::write_png(path, image);
+    return buffer;
+}
+
+Result<void> save_capture(const render::Device& device, const render::Buffer& buffer,
+                          const render::Frame& frame, const std::filesystem::path& path) {
+    if (const VkResult waited = vkDeviceWaitIdle(device.handle()); waited != VK_SUCCESS) {
+        return render::vulkan_error(waited, "waiting for the frame to capture");
+    }
+    const auto pixels = render::read_back(buffer);
+    if (!pixels) {
+        return std::unexpected(pixels.error());
+    }
+    auto rgb = render::to_rgb(*pixels, frame.format);
+    if (!rgb) {
+        return std::unexpected(rgb.error());
+    }
+    return mapgen::write_png(path, mapgen::Image{.width = static_cast<int>(frame.extent.width),
+                                                 .height = static_cast<int>(frame.extent.height),
+                                                 .pixels = std::move(rgb).value()});
 }
 
 // What the person at the viewer has chosen, and what's drawn from it.
@@ -150,7 +254,8 @@ struct View {
     float depth = 10.0F; // metres below the surface the underground overlays show
     viewer::SurveyPacer pacer{survey_settle};
     std::uint64_t grounds = 0; // the link's ground count when last looked at
-    Texture texture;
+    std::unique_ptr<MapTexture> texture;
+    std::optional<mapgen::Image> pending; // drawn, but not yet sent to the GPU
     std::optional<sim::CellGrid> grid;
     std::optional<DVec2> sun;       // where it's overhead on the map, when daylight is shown
     std::uint64_t drawn = 0;        // the link's frame count when last drawn
@@ -165,9 +270,8 @@ void inspect(View& view, viewer::Link& link, std::optional<probe::Inspect> point
     link.inspect(point);
 }
 
-// Draws the newest frame into the map texture, when there's something new to draw.
-void redraw(View& view, const viewer::Link& link, SDL_Renderer* renderer, int width,
-            jobs::JobSystem& jobs) {
+// Draws the newest frame into the map image, when there's something new to draw.
+void redraw(View& view, const viewer::Link& link, int width, jobs::JobSystem& jobs) {
     const std::shared_ptr<const viewer::Frame> frame = link.frame();
     const viewer::MapRect shown = view.map.shown();
     if (frame == nullptr || (!view.stale && link.frames() == view.drawn &&
@@ -187,17 +291,41 @@ void redraw(View& view, const viewer::Link& link, SDL_Renderer* renderer, int wi
         viewer::shade_night(image, shown, *calendar, frame->time(), jobs);
         view.sun = viewer::subsolar_point(*calendar, frame->time());
     }
-    if (view.texture == nullptr) {
-        view.texture.reset(SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB24,
-                                             SDL_TEXTUREACCESS_STATIC, image.width, image.height));
-    }
-    if (view.texture != nullptr) {
-        SDL_UpdateTexture(view.texture.get(), nullptr, image.pixels.data(), 3 * image.width);
-    }
+    view.pending = std::move(image);
     view.drawn = link.frames();
     view.drawn_ground = grounds;
     view.drawn_shown = shown;
     view.stale = false;
+}
+
+// Sends the newest map image to the GPU, before anything this frame samples it.
+Result<void> upload(View& view, const render::Device& device, const render::Frame& frame) {
+    if (!view.pending) {
+        return {};
+    }
+    const VkExtent2D extent{.width = static_cast<std::uint32_t>(view.pending->width),
+                            .height = static_cast<std::uint32_t>(view.pending->height)};
+    if (view.texture == nullptr || view.texture->extent().width != extent.width ||
+        view.texture->extent().height != extent.height) {
+        // Frames still in flight may be drawing the old one.
+        if (const VkResult waited = vkDeviceWaitIdle(device.handle()); waited != VK_SUCCESS) {
+            return render::vulkan_error(waited, "waiting to replace the map");
+        }
+        view.texture.reset();
+        auto image = render::make_streamed_image(device, VK_FORMAT_R8G8B8A8_UNORM, extent,
+                                                 render::frames_in_flight);
+        if (!image) {
+            return std::unexpected(std::move(image).error());
+        }
+        view.texture = std::make_unique<MapTexture>(std::move(image).value());
+    }
+    if (auto updated = view.texture->image().update(frame.commands, frame.slot,
+                                                    viewer::rgba_texels(*view.pending));
+        !updated) {
+        return updated;
+    }
+    view.pending.reset();
+    return {};
 }
 
 // Asks for the ground under the view once it holds still, at about the map's own resolution.
@@ -512,7 +640,7 @@ void map(View& view, viewer::Link& link) {
     }
     ImDrawList* draw = ImGui::GetWindowDrawList();
     const ImVec2 far{corner.x + size.x, corner.y + size.y};
-    if (view.texture == nullptr) {
+    if (view.texture == nullptr || !view.texture->image().ready()) {
         draw->AddRectFilled(corner, far, ImGui::GetColorU32(ImGuiCol_FrameBg));
         return;
     }
@@ -520,7 +648,7 @@ void map(View& view, viewer::Link& link) {
     const viewer::MapRect shown = view.map.shown();
     const DVec2 low = viewer::shown_point(view.drawn_shown, shown.low);
     const DVec2 high = viewer::shown_point(view.drawn_shown, shown.high);
-    draw->AddImage(texture_ref(view.texture.get()), corner, far,
+    draw->AddImage(view.texture->ref(), corner, far,
                    ImVec2{static_cast<float>(low.x), static_cast<float>(low.y)},
                    ImVec2{static_cast<float>(high.x), static_cast<float>(high.y)});
     if (view.sun) {
@@ -533,6 +661,118 @@ void map(View& view, viewer::Link& link) {
         draw->PopClipRect();
     }
     mark_inspected(view, corner, size);
+}
+
+// The whole viewer, laid out over the window.
+void layout(View& view, viewer::Link& link) {
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->WorkPos);
+    ImGui::SetNextWindowSize(viewport->WorkSize);
+    ImGui::Begin("viewer", nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                     ImGuiWindowFlags_NoBringToFrontOnFocus);
+    ImGui::BeginChild("sidebar", ImVec2{sidebar_width, 0.0F});
+    sidebar(view, link);
+    ImGui::EndChild();
+    ImGui::SameLine();
+    ImGui::BeginChild("map");
+    map(view, link);
+    ImGui::EndChild();
+    ImGui::End();
+}
+
+// Draws and shows a frame, saving it to `capture` if given. False when there was nothing to draw
+// into, such as while the window is minimised.
+Result<bool> draw(View& view, viewer::Link& link, const render::Device& device,
+                  render::Presenter& presenter, SDL_Window* window,
+                  const std::optional<std::filesystem::path>& capture) {
+    auto begun = presenter.begin(drawable(window));
+    if (!begun) {
+        return std::unexpected(std::move(begun).error());
+    }
+    if (!begun->has_value()) {
+        return false;
+    }
+    render::Frame& frame = begun->value();
+    if (auto uploaded = upload(view, device, frame); !uploaded) {
+        return std::unexpected(std::move(uploaded).error());
+    }
+
+    ImGui_ImplVulkan_NewFrame();
+    ImGui_ImplSDL3_NewFrame();
+    ImGui::NewFrame();
+    layout(view, link);
+    ImGui::Render();
+
+    frame.target.use_as(frame.commands, render::image_use::colour_target);
+    render::begin_rendering(
+        frame.commands, frame.view, frame.extent,
+        VkClearColorValue{.float32 = {20.0F / 255.0F, 20.0F / 255.0F, 24.0F / 255.0F, 1.0F}});
+    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), frame.commands);
+    vkCmdEndRendering(frame.commands);
+
+    std::optional<Result<render::Buffer>> captured;
+    if (capture) {
+        captured = start_capture(device, presenter, frame);
+    }
+    if (auto ended = presenter.end(frame); !ended) {
+        return std::unexpected(std::move(ended).error());
+    }
+    if (capture && captured) {
+        const Result<void> saved = captured->has_value()
+                                       ? save_capture(device, captured->value(), frame, *capture)
+                                       : std::unexpected(captured->error());
+        if (!saved) {
+            std::cerr << std::format("hog-viewer: can't capture the window: {}\n", saved.error());
+        }
+    }
+    return true;
+}
+
+// Shows the server's world until the window closes or it's time to quit.
+int show(const viewer::Options& options, const render::Device& device, render::Presenter& presenter,
+         SDL_Window* window) {
+    jobs::JobSystem jobs;
+    viewer::Link link{options.host, options.port, viewer::Link::Timing{}};
+    View view;
+    view.overlay = options.overlay;
+    view.species = options.species;
+    link.want(viewer::layers_for(view.overlay, view.species));
+
+    int status = EXIT_SUCCESS;
+    const MonotonicClock::time_point started = MonotonicClock::now();
+    for (bool running = true; running;) {
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {
+            ImGui_ImplSDL3_ProcessEvent(&event);
+            if (event.type == SDL_EVENT_QUIT) {
+                running = false;
+            }
+        }
+        survey(view, link, options.width);
+        redraw(view, link, options.width, jobs);
+        if (options.quit_after && MonotonicClock::now() - started >= *options.quit_after) {
+            running = false;
+        }
+        const auto drawn =
+            draw(view, link, device, presenter, window, running ? std::nullopt : options.capture);
+        if (!drawn) {
+            std::cerr << std::format("hog-viewer: {}\n", drawn.error());
+            status = EXIT_FAILURE;
+            break;
+        }
+        if (!*drawn) {
+            SDL_Delay(idle_ms);
+        }
+    }
+    // The map texture goes first, and the GPU may still be drawing with it.
+    vkDeviceWaitIdle(device.handle());
+    if (options.validate && device.validation_errors() != 0) {
+        std::cerr << std::format("hog-viewer: {} Vulkan validation errors\n",
+                                 device.validation_errors());
+        status = EXIT_FAILURE;
+    }
+    return status;
 }
 
 int run(std::span<const std::string_view> arguments) {
@@ -551,76 +791,41 @@ int run(std::span<const std::string_view> arguments) {
         std::cerr << std::format("hog-viewer: can't start SDL: {}\n", SDL_GetError());
         return EXIT_FAILURE;
     }
-    const std::unique_ptr<SDL_Window, WindowDeleter> window{SDL_CreateWindow(
-        "HOG viewer", 1'400, 800, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY)};
+    if (!sdl.vulkan()) {
+        std::cerr << std::format("hog-viewer: can't load Vulkan: {}\n", SDL_GetError());
+        return no_vulkan;
+    }
+    const std::unique_ptr<SDL_Window, WindowDeleter> window{
+        SDL_CreateWindow("HOG viewer", 1'400, 800,
+                         SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY)};
     if (window == nullptr) {
         std::cerr << std::format("hog-viewer: can't open a window: {}\n", SDL_GetError());
         return EXIT_FAILURE;
     }
-    const std::unique_ptr<SDL_Renderer, RendererDeleter> renderer{
-        SDL_CreateRenderer(window.get(), nullptr)};
-    if (renderer == nullptr) {
-        std::cerr << std::format("hog-viewer: can't draw: {}\n", SDL_GetError());
+    const auto wanted = device_options(window.get(), *options);
+    if (!wanted) {
+        std::cerr << std::format("hog-viewer: {}\n", wanted.error());
+        return no_vulkan;
+    }
+    const auto device = render::Device::create(*wanted);
+    if (!device) {
+        std::cerr << std::format("hog-viewer: can't draw: {}\n", device.error());
+        return device.error().code == ErrorCode::Unsupported ? no_vulkan : EXIT_FAILURE;
+    }
+    // ImGui's colours are already sRGB, so the window's images take them as they are.
+    const auto presenter =
+        render::Presenter::create(**device, drawable(window.get()), {.srgb = false});
+    if (!presenter) {
+        std::cerr << std::format("hog-viewer: can't show frames: {}\n", presenter.error());
         return EXIT_FAILURE;
     }
-    SDL_SetRenderVSync(renderer.get(), 1);
-    const Ui ui{window.get(), renderer.get()};
-
-    jobs::JobSystem jobs;
-    viewer::Link link{options->host, options->port, viewer::Link::Timing{}};
-    View view;
-    view.overlay = options->overlay;
-    view.species = options->species;
-    link.want(viewer::layers_for(view.overlay, view.species));
-
-    const MonotonicClock::time_point started = MonotonicClock::now();
-    for (bool running = true; running;) {
-        SDL_Event event;
-        while (SDL_PollEvent(&event)) {
-            ImGui_ImplSDL3_ProcessEvent(&event);
-            if (event.type == SDL_EVENT_QUIT) {
-                running = false;
-            }
-        }
-        survey(view, link, options->width);
-        redraw(view, link, renderer.get(), options->width, jobs);
-
-        ImGui_ImplSDLRenderer3_NewFrame();
-        ImGui_ImplSDL3_NewFrame();
-        ImGui::NewFrame();
-        const ImGuiViewport* viewport = ImGui::GetMainViewport();
-        ImGui::SetNextWindowPos(viewport->WorkPos);
-        ImGui::SetNextWindowSize(viewport->WorkSize);
-        ImGui::Begin("viewer", nullptr,
-                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-                         ImGuiWindowFlags_NoBringToFrontOnFocus);
-        ImGui::BeginChild("sidebar", ImVec2{sidebar_width, 0.0F});
-        sidebar(view, link);
-        ImGui::EndChild();
-        ImGui::SameLine();
-        ImGui::BeginChild("map");
-        map(view, link);
-        ImGui::EndChild();
-        ImGui::End();
-        ImGui::Render();
-
-        const ImGuiIO& io = ImGui::GetIO();
-        SDL_SetRenderScale(renderer.get(), io.DisplayFramebufferScale.x,
-                           io.DisplayFramebufferScale.y);
-        SDL_SetRenderDrawColor(renderer.get(), 20, 20, 24, 255);
-        SDL_RenderClear(renderer.get());
-        ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer.get());
-        if (options->quit_after && MonotonicClock::now() - started >= *options->quit_after) {
-            running = false;
-        }
-        if (!running && options->capture) {
-            if (auto saved = capture(renderer.get(), *options->capture); !saved) {
-                std::cerr << std::format("hog-viewer: {}\n", saved.error());
-            }
-        }
-        SDL_RenderPresent(renderer.get());
+    const Ui ui{window.get(), **device, (*presenter)->swapchain().format()};
+    if (!ui.started()) {
+        std::cerr << "hog-viewer: can't start ImGui's Vulkan backend\n";
+        return EXIT_FAILURE;
     }
-    return EXIT_SUCCESS;
+
+    return show(*options, **device, **presenter, window.get());
 }
 
 } // namespace

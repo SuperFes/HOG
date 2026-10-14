@@ -7,7 +7,8 @@ add_library(hog_viewer
     src/link.cpp
     src/map_view.cpp
     src/options.cpp
-    src/overlay.cpp)
+    src/overlay.cpp
+    src/texels.cpp)
 add_library(hog::viewer ALIAS hog_viewer)
 
 target_include_directories(hog_viewer PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -23,7 +24,8 @@ hog_add_tests(hog_viewer
     tests/link_tests.cpp
     tests/map_view_tests.cpp
     tests/options_tests.cpp
-    tests/overlay_tests.cpp)
+    tests/overlay_tests.cpp
+    tests/texels_tests.cpp)
 if(TARGET hog_viewer_tests)
     # A real probe service to talk to.
     target_link_libraries(hog_viewer_tests PRIVATE hog::server)
@@ -73,7 +75,7 @@ CPMAddPackage(
         "SDL_INSTALL OFF" "SDL_AUDIO OFF" "SDL_CAMERA OFF" "SDL_DBUS OFF" "SDL_IBUS OFF"
         "SDL_UNIX_CONSOLE_BUILD ${hog_sdl_console}" "SDL_X11 ${hog_x11}" "SDL_WAYLAND ${hog_wayland}")
 
-# Debug UI; MIT. Built here with the backends for SDL3 and its 2D renderer.
+# Debug UI; MIT. Built here with the backends for SDL3 and Vulkan, which it takes from volk.
 CPMAddPackage(
     NAME imgui
     GITHUB_REPOSITORY ocornut/imgui
@@ -86,24 +88,25 @@ add_library(imgui STATIC
     "${imgui_SOURCE_DIR}/imgui_tables.cpp"
     "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
     "${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp"
-    "${imgui_SOURCE_DIR}/backends/imgui_impl_sdlrenderer3.cpp")
+    "${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp")
 target_include_directories(imgui SYSTEM PUBLIC "${imgui_SOURCE_DIR}" "${imgui_SOURCE_DIR}/backends")
-target_link_libraries(imgui PUBLIC SDL3::SDL3-static)
+target_compile_definitions(imgui PUBLIC IMGUI_IMPL_VULKAN_USE_VOLK VK_NO_PROTOTYPES)
+target_link_libraries(imgui PUBLIC SDL3::SDL3-static volk::volk)
 
 add_executable(hog_viewer_cli src/main.cpp)
 set_target_properties(hog_viewer_cli PROPERTIES OUTPUT_NAME hog-viewer)
-target_link_libraries(hog_viewer_cli PRIVATE hog::viewer imgui)
+target_link_libraries(hog_viewer_cli PRIVATE hog::viewer hog::render imgui)
 hog_target_defaults(hog_viewer_cli)
 
-if(HOG_BUILD_TESTS)
-    # Runs the app for a moment without a window or a server, saving what it drew. The dummy video
-    # driver and software drawing keep the system's GPU drivers, which sanitizers can't see into,
-    # out of it, and have no OpenGL for macOS to make every window use.
+# GPU drivers are opaque to sanitizers, so those runs leave the smoke test out.
+if(HOG_BUILD_TESTS AND NOT HOG_SANITIZE)
+    # Runs the app for a moment without a window or a server, on a software device with
+    # validation, saving what it drew. Skipped where there's no Vulkan.
     add_test(NAME hog_viewer_smoke
-        COMMAND hog_viewer_cli --port 1 --quit-after 1
+        COMMAND hog_viewer_cli --port 1 --quit-after 1 --software --validate
                 --capture "${CMAKE_CURRENT_BINARY_DIR}/smoke.png")
     set_tests_properties(hog_viewer_smoke PROPERTIES
-        ENVIRONMENT
-        "SDL_VIDEO_DRIVER=dummy;SDL_RENDER_DRIVER=software;SDL_FRAMEBUFFER_ACCELERATION=0"
+        ENVIRONMENT "SDL_VIDEO_DRIVER=offscreen"
+        SKIP_RETURN_CODE 77
         TIMEOUT 60)
 endif()

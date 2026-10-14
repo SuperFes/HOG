@@ -84,6 +84,8 @@ options:
   --species NAME  shown first on the wildlife overlay
   --quit-after S  quit after this many seconds
   --capture PATH  save the last frame drawn as a PNG, on quitting
+  --software      draw with a software Vulkan device, such as lavapipe
+  --validate      check Vulkan use with its validation layer, failing on errors
   -h, --help      show this help
 )";
 }
@@ -94,6 +96,14 @@ Result<Options> parse_options(std::span<const std::string_view> arguments) {
         const std::string_view argument = arguments[i];
         if (argument == "-h" || argument == "--help") {
             options.help = true;
+            continue;
+        }
+        if (argument == "--software") {
+            options.software = true;
+            continue;
+        }
+        if (argument == "--validate") {
+            options.validate = true;
             continue;
         }
         if (i + 1 == arguments.size()) {
