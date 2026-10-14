@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <limits>
 
 namespace hog::terrain {
 
@@ -95,6 +96,8 @@ Patch bake_patch(const planet::World& world, planet::CellId cell) {
 
     std::vector<DVec3> points(std::size_t{bordered} * bordered);
     std::vector<planet::Biome> biomes(std::size_t{patch_side} * patch_side);
+    HeightRange heights{.lowest = std::numeric_limits<double>::infinity(),
+                        .highest = -std::numeric_limits<double>::infinity()};
     for (int j = -1; j <= patch_side; ++j) {
         for (int i = -1; i <= patch_side; ++i) {
             if (!inside(i) && !inside(j)) {
@@ -107,12 +110,16 @@ Patch bake_patch(const planet::World& world, planet::CellId cell) {
             points[bordered_index(i, j)] = direction(corner) * (radius + height);
             if (inside(i) && inside(j)) {
                 biomes[index(i, j)] = state.biome;
+                heights.lowest = std::min(heights.lowest, height);
+                heights.highest = std::max(heights.highest, height);
             }
         }
     }
 
-    Patch patch{
-        .cell = cell, .origin = WorldPosition{planet::cell_center(cell) * radius}, .vertices = {}};
+    Patch patch{.cell = cell,
+                .origin = WorldPosition{planet::cell_center(cell) * radius},
+                .heights = heights,
+                .vertices = {}};
     patch.vertices.reserve(biomes.size());
     for (int j = 0; j < patch_side; ++j) {
         for (int i = 0; i < patch_side; ++i) {

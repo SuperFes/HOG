@@ -6,6 +6,8 @@
 #include <hog/terrain/stitching.hpp>
 
 #include <cstdint>
+#include <functional>
+#include <optional>
 #include <vector>
 
 namespace hog::terrain {
@@ -31,6 +33,10 @@ struct SelectionSettings {
     double highest = 9'000.0;
 };
 
+// What some cells' patches are known to keep between, such as from baking them, tighter than the
+// settings' range. A patch's ground lies within its children's.
+using KnownHeights = std::function<std::optional<HeightRange>(planet::CellId)>;
+
 struct SelectedPatch {
     planet::CellId cell;
     std::uint8_t coarser_edges = 0; // edge bits, where the neighbour is a level coarser
@@ -41,6 +47,7 @@ struct SelectedPatch {
 // within the error on screen, then balanced so neighbours differ by at most a level. Patches
 // outside the view or below the horizon are left out. Nearest first.
 [[nodiscard]] std::vector<SelectedPatch> select_patches(const Viewpoint& view, double planet_radius,
-                                                        const SelectionSettings& settings = {});
+                                                        const SelectionSettings& settings = {},
+                                                        const KnownHeights& known = {});
 
 } // namespace hog::terrain

@@ -1,3 +1,5 @@
+#include "shared_world.hpp"
+
 #include <hog/planet/neighbors.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
@@ -27,22 +29,11 @@ using hog::terrain::direction;
 using hog::terrain::Patch;
 using hog::terrain::patch_side;
 using hog::terrain::sample_cell;
+using hog::terrain::testing::land_patch;
+using hog::terrain::testing::planet;
+using hog::terrain::testing::shared_world;
 
 namespace {
-
-constexpr hog::planet::PlanetConfig planet{.seed = 1, .ocean_fraction = 0.7, .radius = 115'000.0};
-
-// One World for the whole file: the seed's generators are costly to set up.
-World& shared_world() {
-    static World world{planet};
-    return world;
-}
-
-// A level-6 patch over land, a few kilometres across, so its heights vary.
-CellId land_patch() {
-    const auto& terrain = shared_world().geology().terrain();
-    return hog::planet::cell_at(terrain.archipelago().center(), 6);
-}
 
 DVec3 world_at(const Patch& patch, std::size_t vertex) {
     return (patch.origin + DVec3(patch.vertices.at(vertex).position)).metres();
@@ -176,6 +167,7 @@ TEST_CASE("a patch lies on the ground over its cell", "[terrain][patch]") {
     }
     CHECK(highest > 0.0);
     CHECK(highest - lowest > 1.0);
+    CHECK(patch.heights == hog::terrain::HeightRange{.lowest = lowest, .highest = highest});
 }
 
 TEST_CASE("neighbouring patches meet along their edges", "[terrain][patch]") {
@@ -210,6 +202,8 @@ TEST_CASE("a patch's children meet it at its own vertices", "[terrain][patch]") 
     const World& world = shared_world();
     const CellId cell = land_patch();
     const Patch parent = bake_patch(world, cell);
+    double lowest = 1e9;
+    double highest = -1e9;
     for (int index = 0; index < 4; ++index) {
         const Patch child = bake_patch(world, cell.child(index));
         int shared = 0;
@@ -221,7 +215,12 @@ TEST_CASE("a patch's children meet it at its own vertices", "[terrain][patch]") 
             }
         }
         CHECK(shared == ((patch_side + 1) / 2) * ((patch_side + 1) / 2));
+        lowest = std::min(lowest, child.heights.lowest);
+        highest = std::max(highest, child.heights.highest);
     }
+    // Every vertex of the parent is one of its children's.
+    CHECK(lowest <= parent.heights.lowest);
+    CHECK(highest >= parent.heights.highest);
 }
 
 TEST_CASE("a patch faces outwards and tilts with its slopes", "[terrain][patch]") {

@@ -180,3 +180,43 @@ TEST_CASE("a ground range out of order is refused", "[terrain][selection]") {
         select_patches(looking(somewhere * radius * 2.0, -somewhere), radius, upside_down),
         hog::testing::AssertionFailed);
 }
+
+TEST_CASE("ground known to lie low draws fewer patches from above", "[terrain][selection]") {
+    const DVec3 eye = somewhere * (radius + 20'000.0);
+    const auto view = looking(eye, (somewhere * radius) + (level_with(eye) * 30'000.0) - eye);
+    const hog::terrain::KnownHeights lowland = [](CellId) {
+        return hog::terrain::HeightRange{.lowest = 0.0, .highest = 50.0};
+    };
+    const auto assumed = select_patches(view, radius);
+    const auto known = select_patches(view, radius, {}, lowland);
+    REQUIRE(!known.empty());
+    CHECK(known.size() < assumed.size());
+    CHECK(finest(known) <= finest(assumed));
+}
+
+TEST_CASE("ground known to stand higher than assumed is drawn finer", "[terrain][selection]") {
+    const DVec3 eye = somewhere * (radius + 12'000.0);
+    const auto view = looking(eye, -somewhere);
+    const hog::terrain::KnownHeights plateau = [](CellId) {
+        return hog::terrain::HeightRange{.lowest = 11'000.0, .highest = 11'500.0};
+    };
+    CHECK(finest(select_patches(view, radius, {}, plateau)) > finest(select_patches(view, radius)));
+}
+
+TEST_CASE("ground known to lie low hides sooner past the horizon", "[terrain][selection]") {
+    const DVec3 eye = somewhere * (radius + 100.0);
+    const auto view = looking(eye, level_with(eye));
+    const auto farthest = [&](const std::vector<SelectedPatch>& drawn) {
+        double angle = 0.0;
+        for (const SelectedPatch& patch : drawn) {
+            angle = std::max(angle,
+                             std::acos(glm::dot(hog::planet::cell_center(patch.cell), somewhere)));
+        }
+        return angle;
+    };
+    const hog::terrain::KnownHeights flat = [](CellId) {
+        return hog::terrain::HeightRange{.lowest = 0.0, .highest = 1.0};
+    };
+    CHECK(farthest(select_patches(view, radius, {}, flat)) <
+          farthest(select_patches(view, radius)));
+}

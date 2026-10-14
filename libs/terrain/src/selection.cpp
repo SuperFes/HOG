@@ -1,3 +1,5 @@
+#include "leaves.hpp"
+
 #include <hog/core/assert.hpp>
 #include <hog/planet/neighbors.hpp>
 #include <hog/planet/projection.hpp>
@@ -7,7 +9,6 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
-#include <iterator>
 #include <optional>
 #include <set>
 #include <vector>
@@ -27,12 +28,16 @@ struct Bounds {
     DVec3 direction; // unit, the cell's centre
     double angle;    // radians from direction to the cell's farthest corner
     double spacing;  // metres between the patch's vertices, at most
+    double lowest;   // metres from the planet's centre the patch keeps between
+    double highest;
 };
 
 class Selector {
 public:
-    Selector(const Viewpoint& view, double planet_radius, const SelectionSettings& settings)
-        : settings_(settings), eye_(view.eye.metres()), eye_height_(glm::length(eye_)),
+    Selector(const Viewpoint& view, double planet_radius, const SelectionSettings& settings,
+             const KnownHeights& known)
+        : settings_(settings), known_(&known), planet_radius_(planet_radius),
+          eye_(view.eye.metres()), eye_height_(glm::length(eye_)),
           lowest_(planet_radius + settings.lowest), highest_(planet_radius + settings.highest),
           pixels_per_radian_(view.viewport_height / (2.0 * std::tan(view.vertical_fov / 2.0))) {
         HOG_ASSERT(lowest_ > 0.0 && highest_ > lowest_, "ground range out of order");
@@ -50,7 +55,7 @@ public:
                    (view.forward * std::sin(half_width)) + (right * std::cos(half_width))};
         // Ground beyond the horizon of the lowest ground can't be seen, from above it.
         if (eye_height_ > lowest_) {
-            horizon_ = std::acos(lowest_ / eye_height_) + std::acos(lowest_ / highest_);
+            eye_horizon_ = std::acos(lowest_ / eye_height_);
         }
     }
 
@@ -69,19 +74,31 @@ public:
             edge = std::max(
                 edge, glm::distance(corners.at(corner), corners.at((corner + 1) % corners.size())));
         }
+        double highest = highest_;
+        double lowest = lowest_;
+        if (const auto heights = *known_ ? (*known_)(cell) : std::nullopt) {
+            highest = planet_radius_ + heights->highest;
+            lowest = planet_radius_ + heights->lowest;
+        }
+        const double spacing = edge * highest / patch_cells;
+        // Triangles sag below their vertices towards the centre, most midway along a diagonal.
+        lowest -= spacing * spacing / (4.0 * planet_radius_);
+
         // Every point lies within `angle` of the middle, between the lowest and highest ground,
         // so its distance from a point on the middle's ray peaks at one of those two radii.
         const double cos_angle = std::cos(angle);
-        const double along = ((lowest_ * cos_angle) + highest_) / 2.0;
+        const double along = ((lowest * cos_angle) + highest) / 2.0;
         const auto reach = [&](double radius) {
             return std::sqrt(std::max(0.0, (radius * radius) + (along * along) -
                                                (2.0 * radius * along * cos_angle)));
         };
         return {.centre = middle * along,
-                .radius = std::max(reach(lowest_), reach(highest_)),
+                .radius = std::max(reach(lowest), reach(highest)),
                 .direction = middle,
                 .angle = angle,
-                .spacing = edge * highest_ / patch_cells};
+                .spacing = spacing,
+                .lowest = lowest,
+                .highest = highest};
     }
 
     [[nodiscard]] bool visible(const Bounds& bounds) const {
@@ -91,14 +108,19 @@ public:
                 return false;
             }
         }
-        return !horizon_ || gap(bounds) <= *horizon_;
+        if (!eye_horizon_) {
+            return true;
+        }
+        // Seen past the horizon of the lowest ground, as far as the patch's highest stands up.
+        const double beyond = std::acos(std::min(1.0, lowest_ / bounds.highest));
+        return gap(bounds) <= *eye_horizon_ + beyond;
     }
 
     // The nearest the cell's ground can come to the eye: no closer in angle than its cone allows,
     // at whichever height between the lowest and highest ground is nearest.
     [[nodiscard]] double distance(const Bounds& bounds) const {
         const double cos_gap = std::cos(gap(bounds));
-        const double nearest = std::clamp(eye_height_ * cos_gap, lowest_, highest_);
+        const double nearest = std::clamp(eye_height_ * cos_gap, bounds.lowest, bounds.highest);
         return std::sqrt(std::max(0.0, (nearest * nearest) + (eye_height_ * eye_height_) -
                                            (2.0 * nearest * eye_height_ * cos_gap)));
     }
@@ -136,6 +158,8 @@ public:
 
 private:
     SelectionSettings settings_;
+    const KnownHeights* known_;
+    double planet_radius_;
     DVec3 eye_;
     double eye_height_;
     DVec3 eye_direction_{};
@@ -143,22 +167,8 @@ private:
     double highest_;
     double pixels_per_radian_;
     std::array<DVec3, 5> planes_{};
-    std::optional<double> horizon_;
+    std::optional<double> eye_horizon_;
 };
-
-// The leaf covering all of `cell`, if one does rather than several finer ones.
-[[nodiscard]] std::optional<planet::CellId> leaf_over(const std::set<planet::CellId>& leaves,
-                                                      planet::CellId cell) {
-    // Leaves don't overlap, so the one covering `cell` sorts next to it.
-    const auto after = leaves.lower_bound(cell);
-    if (after != leaves.end() && after->contains(cell)) {
-        return *after;
-    }
-    if (after != leaves.begin() && std::prev(after)->contains(cell)) {
-        return *std::prev(after);
-    }
-    return std::nullopt;
-}
 
 // Splits leaves until every pair sharing an edge differs by at most a level.
 void balance(std::set<planet::CellId>& leaves) {
@@ -170,7 +180,7 @@ void balance(std::set<planet::CellId>& leaves) {
             continue;
         }
         for (const planet::CellId next : planet::edge_neighbors(cell)) {
-            const auto over = leaf_over(leaves, next);
+            const auto over = detail::leaf_over(leaves, next);
             if (!over || over->level() >= cell.level() - 1) {
                 continue;
             }
@@ -189,8 +199,9 @@ void balance(std::set<planet::CellId>& leaves) {
 } // namespace
 
 std::vector<SelectedPatch> select_patches(const Viewpoint& view, double planet_radius,
-                                          const SelectionSettings& settings) {
-    const Selector selector{view, planet_radius, settings};
+                                          const SelectionSettings& settings,
+                                          const KnownHeights& known) {
+    const Selector selector{view, planet_radius, settings, known};
     std::set<planet::CellId> leaves = selector.refine();
     balance(leaves);
 
@@ -200,16 +211,9 @@ std::vector<SelectedPatch> select_patches(const Viewpoint& view, double planet_r
         if (!selector.visible(around)) {
             continue;
         }
-        std::uint8_t coarser = 0;
-        const auto neighbours = planet::edge_neighbors(cell);
-        for (std::size_t edge = 0; edge < neighbours.size(); ++edge) {
-            const auto over = leaf_over(leaves, neighbours.at(edge));
-            if (over && over->level() < cell.level()) {
-                coarser |= static_cast<std::uint8_t>(1U << edge);
-            }
-        }
-        drawn.push_back(
-            {.cell = cell, .coarser_edges = coarser, .distance = selector.distance(around)});
+        drawn.push_back({.cell = cell,
+                         .coarser_edges = detail::coarser_edges(leaves, cell),
+                         .distance = selector.distance(around)});
     }
     std::ranges::stable_sort(drawn, {}, &SelectedPatch::distance);
     return drawn;

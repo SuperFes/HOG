@@ -45,9 +45,18 @@ struct PatchVertex {
     planet::Biome biome = planet::Biome::Ocean;
 };
 
+// Metres from sea level.
+struct HeightRange {
+    double lowest = 0.0;
+    double highest = 0.0;
+
+    friend constexpr bool operator==(const HeightRange&, const HeightRange&) = default;
+};
+
 struct Patch {
     planet::CellId cell;
     WorldPosition origin; // over the patch's centre at sea level
+    HeightRange heights;  // of its vertices
     // patch_side² vertices row by row, i fastest, from the corner at the lowest i and j.
     std::vector<PatchVertex> vertices;
 };
