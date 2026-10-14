@@ -3,6 +3,7 @@
 #include <hog/core/math.hpp>
 #include <hog/planet/cell_id.hpp>
 #include <hog/terrain/patch.hpp>
+#include <hog/terrain/stitching.hpp>
 
 #include <cstdint>
 #include <vector>
@@ -30,15 +31,9 @@ struct SelectionSettings {
     double highest = 9'000.0;
 };
 
-// Bits of SelectedPatch::coarser_edges, in edge_neighbors' order.
-inline constexpr std::uint8_t edge_minus_u = 1U << 0U;
-inline constexpr std::uint8_t edge_plus_u = 1U << 1U;
-inline constexpr std::uint8_t edge_minus_v = 1U << 2U;
-inline constexpr std::uint8_t edge_plus_v = 1U << 3U;
-
 struct SelectedPatch {
     planet::CellId cell;
-    std::uint8_t coarser_edges = 0; // edges whose neighbour is a level coarser
+    std::uint8_t coarser_edges = 0; // edge bits, where the neighbour is a level coarser
     double distance = 0.0;          // least metres from the eye to the patch's ground
 };
 
