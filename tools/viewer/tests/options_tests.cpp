@@ -25,6 +25,7 @@ TEST_CASE("viewer options default to the local dev server", "[viewer][options]")
     CHECK(options->width == 1'024);
     CHECK_FALSE(options->quit_after);
     CHECK_FALSE(options->capture);
+    CHECK_FALSE(options->globe);
     CHECK_FALSE(options->software);
     CHECK_FALSE(options->validate);
     CHECK_FALSE(options->help);
@@ -33,7 +34,7 @@ TEST_CASE("viewer options default to the local dev server", "[viewer][options]")
 TEST_CASE("viewer options are read", "[viewer][options]") {
     const auto options =
         parsed({"--host", "localhost", "--port", "9000", "--width", "2048", "--quit-after", "3",
-                "--capture", "out.png", "--overlay", "wildlife", "--species", "red fox",
+                "--capture", "out.png", "--overlay", "wildlife", "--species", "red fox", "--globe",
                 "--software", "--validate", "-h"});
     REQUIRE(options);
     CHECK(options->host == "localhost");
@@ -43,6 +44,7 @@ TEST_CASE("viewer options are read", "[viewer][options]") {
     CHECK(options->capture == std::filesystem::path{"out.png"});
     CHECK(options->overlay == hog::viewer::Overlay::Wildlife);
     CHECK(options->species == "red fox");
+    CHECK(options->globe);
     CHECK(options->software);
     CHECK(options->validate);
     CHECK(options->help);

@@ -82,6 +82,7 @@ options:
                   air, sky, pressure, sea, soil, plants, fire or wildlife
                   (default terrain)
   --species NAME  shown first on the wildlife overlay
+  --globe         show the globe first rather than the map; Tab swaps them
   --quit-after S  quit after this many seconds
   --capture PATH  save the last frame drawn as a PNG, on quitting
   --software      draw with a software Vulkan device, such as lavapipe
@@ -96,6 +97,10 @@ Result<Options> parse_options(std::span<const std::string_view> arguments) {
         const std::string_view argument = arguments[i];
         if (argument == "-h" || argument == "--help") {
             options.help = true;
+            continue;
+        }
+        if (argument == "--globe") {
+            options.globe = true;
             continue;
         }
         if (argument == "--software") {

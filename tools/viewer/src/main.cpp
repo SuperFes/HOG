@@ -1,10 +1,13 @@
 #include <hog/core/time.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/mapgen/render.hpp>
+#include <hog/planet/cell_id.hpp>
 #include <hog/planet/climate.hpp>
 #include <hog/planet/geology.hpp>
 #include <hog/probe/messages.hpp>
+#include <hog/render/barrier.hpp>
 #include <hog/render/device.hpp>
+#include <hog/render/globe.hpp>
 #include <hog/render/memory.hpp>
 #include <hog/render/presenter.hpp>
 #include <hog/render/readback.hpp>
@@ -14,6 +17,7 @@
 #include <hog/viewer/clock_text.hpp>
 #include <hog/viewer/daylight.hpp>
 #include <hog/viewer/frame.hpp>
+#include <hog/viewer/globe_view.hpp>
 #include <hog/viewer/ground.hpp>
 #include <hog/viewer/inspector.hpp>
 #include <hog/viewer/link.hpp>
@@ -60,6 +64,12 @@ constexpr float deepest = 100'000.0F; // metres, for the underground overlays
 constexpr Uint32 idle_ms = 50;
 // What test runners take as skipped: there's no Vulkan to draw with.
 constexpr int no_vulkan = 77;
+constexpr int face_size = 512;  // pixels across each of the globe's faces
+constexpr int globe_cells = 64; // of its mesh, across each face
+constexpr VkClearColorValue window_colour{
+    .float32 = {20.0F / 255.0F, 20.0F / 255.0F, 24.0F / 255.0F, 1.0F}};
+constexpr VkClearColorValue space_colour{
+    .float32 = {6.0F / 255.0F, 6.0F / 255.0F, 10.0F / 255.0F, 1.0F}};
 
 struct WindowDeleter {
     void operator()(SDL_Window* window) const noexcept { SDL_DestroyWindow(window); }
@@ -180,22 +190,18 @@ private:
     bool vulkan_ = false;
 };
 
-// The map's image on the GPU, as ImGui samples it. The GPU must have finished with it before it
-// goes.
-class MapTexture {
+// An image as ImGui samples it, in the layout fragment shaders read. The GPU must have finished
+// with it before it goes.
+class UiTexture {
 public:
-    explicit MapTexture(render::StreamedImage image)
-        : image_{std::move(image)},
-          set_{ImGui_ImplVulkan_AddTexture(image_.image().view(),
-                                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)} {}
-    MapTexture(const MapTexture&) = delete;
-    MapTexture(MapTexture&&) = delete;
-    MapTexture& operator=(const MapTexture&) = delete;
-    MapTexture& operator=(MapTexture&&) = delete;
-    ~MapTexture() { ImGui_ImplVulkan_RemoveTexture(set_); }
+    explicit UiTexture(VkImageView view)
+        : set_{ImGui_ImplVulkan_AddTexture(view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)} {}
+    UiTexture(const UiTexture&) = delete;
+    UiTexture(UiTexture&&) = delete;
+    UiTexture& operator=(const UiTexture&) = delete;
+    UiTexture& operator=(UiTexture&&) = delete;
+    ~UiTexture() { ImGui_ImplVulkan_RemoveTexture(set_); }
 
-    [[nodiscard]] render::StreamedImage& image() noexcept { return image_; }
-    [[nodiscard]] VkExtent2D extent() const noexcept { return image_.image().desc().extent; }
     [[nodiscard]] ImTextureRef ref() const noexcept {
         // The Vulkan backend takes descriptor sets as ImGui's opaque ids.
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
@@ -203,8 +209,119 @@ public:
     }
 
 private:
-    render::StreamedImage image_;
     VkDescriptorSet set_;
+};
+
+// The map's image on the GPU.
+class MapTexture {
+public:
+    explicit MapTexture(render::StreamedImage image)
+        : image_{std::move(image)}, ui_{image_.image().view()} {}
+
+    [[nodiscard]] render::StreamedImage& image() noexcept { return image_; }
+    [[nodiscard]] VkExtent2D extent() const noexcept { return image_.image().desc().extent; }
+    [[nodiscard]] ImTextureRef ref() const noexcept { return ui_.ref(); }
+
+private:
+    render::StreamedImage image_;
+    UiTexture ui_;
+};
+
+Result<void> wait_idle(const render::Device& device, std::string_view why) {
+    if (const VkResult waited = vkDeviceWaitIdle(device.handle()); waited != VK_SUCCESS) {
+        return render::vulkan_error(waited, why);
+    }
+    return {};
+}
+
+// The globe, drawn into an image of its own that ImGui shows in the map's place.
+class GlobePanel {
+public:
+    explicit GlobePanel(render::Globe globe) : globe_{std::move(globe)} {}
+
+    // Whether there's an image to show, once drawn this frame.
+    [[nodiscard]] bool showing() const noexcept {
+        return target_ != nullptr && faces_ && faces_->ready();
+    }
+    // Precondition: showing.
+    [[nodiscard]] ImTextureRef ref() const noexcept { return target_->ui.ref(); }
+
+    // Before the frame is laid out: sends new faces, stacked from face 0 down, to the GPU, and
+    // sizes the image to `wanted`, if it's any size.
+    Result<void> prepare(const render::Device& device, const render::Frame& frame,
+                         std::optional<mapgen::Image>& faces, VkExtent2D wanted) {
+        if (faces) {
+            if (auto sent = send(device, frame, *faces); !sent) {
+                return sent;
+            }
+            faces.reset();
+        }
+        if (wanted.width == 0 || wanted.height == 0 ||
+            (target_ != nullptr && target_->image.desc().extent.width == wanted.width &&
+             target_->image.desc().extent.height == wanted.height)) {
+            return {};
+        }
+        if (auto waited = wait_idle(device, "waiting to resize the globe"); !waited) {
+            return waited;
+        }
+        target_.reset();
+        auto image = render::make_image(
+            device, {.format = VK_FORMAT_R8G8B8A8_UNORM,
+                     .extent = wanted,
+                     .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
+        if (!image) {
+            return std::unexpected(std::move(image).error());
+        }
+        target_ = std::make_unique<Target>(std::move(image).value());
+        return {};
+    }
+
+    // Records drawing the globe into its image, ready for ImGui to show.
+    void draw(VkCommandBuffer commands, const render::GlobeView& view) {
+        if (!faces_ || !showing()) {
+            return;
+        }
+        const VkExtent2D extent = target_->image.desc().extent;
+        target_->tracked.use_as(commands, render::image_use::colour_target);
+        render::begin_rendering(commands, target_->image.view(), extent, space_colour);
+        globe_.draw(commands, extent, faces_->image(), view);
+        vkCmdEndRendering(commands);
+        target_->tracked.use_as(commands, render::image_use::sampled);
+    }
+
+private:
+    struct Target {
+        explicit Target(render::Image made)
+            : image{std::move(made)}, tracked{image.handle(), VK_IMAGE_ASPECT_COLOR_BIT},
+              ui{image.view()} {}
+
+        render::Image image;
+        render::TrackedImage tracked;
+        UiTexture ui;
+    };
+
+    Result<void> send(const render::Device& device, const render::Frame& frame,
+                      const mapgen::Image& faces) {
+        const VkExtent2D extent{.width = static_cast<std::uint32_t>(faces.width),
+                                .height = static_cast<std::uint32_t>(faces.width)};
+        if (!faces_ || faces_->image().desc().extent.width != extent.width) {
+            if (auto waited = wait_idle(device, "waiting to replace the globe's faces"); !waited) {
+                return waited;
+            }
+            faces_.reset();
+            auto made = render::make_streamed_image(device, VK_FORMAT_R8G8B8A8_UNORM, extent,
+                                                    render::frames_in_flight, planet::face_count);
+            if (!made) {
+                return std::unexpected(std::move(made).error());
+            }
+            faces_ = std::move(made).value();
+        }
+        return faces_->update(frame.commands, frame.slot, viewer::rgba_texels(faces));
+    }
+
+    render::Globe globe_;
+    std::optional<render::StreamedImage> faces_;
+    std::unique_ptr<Target> target_;
 };
 
 std::string format_time(GameTime time) {
@@ -263,29 +380,53 @@ struct View {
     viewer::MapRect drawn_shown;    // the part of the map the texture holds
     bool stale = true;              // the choices changed since
     std::optional<probe::Inspect> inspected;
+    bool globe = false; // on show instead of the map
+    viewer::GlobeCamera orbit;
+    VkExtent2D globe_wanted{};          // pixels the globe took when last laid out
+    std::optional<mapgen::Image> faces; // drawn for the globe, but not yet sent to the GPU
+    std::uint64_t baked = 0;            // the link's frame count when the faces were last drawn
+    std::uint64_t baked_ground = 0;     // and its ground count
+    bool faces_stale = true;
 };
+
+// The globe's faces before there's anything to draw on them.
+mapgen::Image missing_faces() {
+    mapgen::Image image{.width = 1, .height = planet::face_count, .pixels = {}};
+    for (int face = 0; face < planet::face_count; ++face) {
+        image.pixels.insert(image.pixels.end(), viewer::missing_colour.begin(),
+                            viewer::missing_colour.end());
+    }
+    return image;
+}
+
+const sim::CellGrid& grid_for(View& view, const viewer::Frame& frame) {
+    const int level = frame.welcome().level;
+    if (!view.grid || view.grid->level() != level) {
+        view.grid.emplace(level);
+    }
+    return *view.grid;
+}
 
 void inspect(View& view, viewer::Link& link, std::optional<probe::Inspect> point) {
     view.inspected = point;
     link.inspect(point);
 }
 
-// Draws the newest frame into the map image, when there's something new to draw.
+// Draws the newest frame into the map image, when the map's on show and there's something new to
+// draw.
 void redraw(View& view, const viewer::Link& link, int width, jobs::JobSystem& jobs) {
     const std::shared_ptr<const viewer::Frame> frame = link.frame();
     const viewer::MapRect shown = view.map.shown();
-    if (frame == nullptr || (!view.stale && link.frames() == view.drawn &&
-                             link.grounds() == view.drawn_ground && shown == view.drawn_shown)) {
+    if (view.globe || frame == nullptr ||
+        (!view.stale && link.frames() == view.drawn && link.grounds() == view.drawn_ground &&
+         shown == view.drawn_shown)) {
         return;
     }
     const std::uint64_t grounds = link.grounds();
     const std::shared_ptr<const probe::Ground> ground = link.ground();
-    const int level = frame->welcome().level;
-    if (!view.grid || view.grid->level() != level) {
-        view.grid.emplace(level);
-    }
-    mapgen::Image image = viewer::render_overlay(*view.grid, *frame, ground.get(), view.overlay,
-                                                 view.species, shown, width, view.natural, jobs);
+    mapgen::Image image =
+        viewer::render_overlay(grid_for(view, *frame), *frame, ground.get(), view.overlay,
+                               view.species, shown, width, view.natural, jobs);
     view.sun.reset();
     if (const auto calendar = viewer::calendar_of(frame->welcome()); calendar && view.daylight) {
         viewer::shade_night(image, shown, *calendar, frame->time(), jobs);
@@ -298,6 +439,23 @@ void redraw(View& view, const viewer::Link& link, int width, jobs::JobSystem& jo
     view.stale = false;
 }
 
+// Draws the newest frame onto the globe's faces, when the globe's on show and there's something new
+// to draw.
+void rebake(View& view, const viewer::Link& link, jobs::JobSystem& jobs) {
+    const std::shared_ptr<const viewer::Frame> frame = link.frame();
+    if (!view.globe || frame == nullptr ||
+        (!view.faces_stale && link.frames() == view.baked && link.grounds() == view.baked_ground)) {
+        return;
+    }
+    const std::uint64_t grounds = link.grounds();
+    const std::shared_ptr<const probe::Ground> ground = link.ground();
+    view.faces = viewer::render_faces(grid_for(view, *frame), *frame, ground.get(), view.overlay,
+                                      view.species, face_size, view.natural, jobs);
+    view.baked = link.frames();
+    view.baked_ground = grounds;
+    view.faces_stale = false;
+}
+
 // Sends the newest map image to the GPU, before anything this frame samples it.
 Result<void> upload(View& view, const render::Device& device, const render::Frame& frame) {
     if (!view.pending) {
@@ -308,8 +466,8 @@ Result<void> upload(View& view, const render::Device& device, const render::Fram
     if (view.texture == nullptr || view.texture->extent().width != extent.width ||
         view.texture->extent().height != extent.height) {
         // Frames still in flight may be drawing the old one.
-        if (const VkResult waited = vkDeviceWaitIdle(device.handle()); waited != VK_SUCCESS) {
-            return render::vulkan_error(waited, "waiting to replace the map");
+        if (auto waited = wait_idle(device, "waiting to replace the map"); !waited) {
+            return waited;
         }
         view.texture.reset();
         auto image = render::make_streamed_image(device, VK_FORMAT_R8G8B8A8_UNORM, extent,
@@ -393,6 +551,7 @@ void choose(View& view, viewer::Link& link, viewer::Overlay overlay, std::string
     view.overlay = overlay;
     view.species = std::move(species);
     view.stale = true;
+    view.faces_stale = true;
     link.want(viewer::layers_for(view.overlay, view.species));
 }
 
@@ -570,13 +729,25 @@ void sidebar(View& view, viewer::Link& link) {
     }
     if (ImGui::Checkbox("natural edges", &view.natural)) {
         view.stale = true;
+        view.faces_stale = true;
     }
 
     ImGui::Separator();
     legend(view, link, frame.get());
-    ImGui::TextUnformatted(std::format("zoom {:.1f}x", view.map.zoom()).c_str());
+    if (ImGui::RadioButton("map", !view.globe)) {
+        view.globe = false;
+    }
+    ImGui::SameLine();
+    if (ImGui::RadioButton("globe (Tab)", view.globe)) {
+        view.globe = true;
+    }
+    ImGui::TextUnformatted((view.globe
+                                ? std::format("altitude {:.2f} radii", view.orbit.orbit().altitude)
+                                : std::format("zoom {:.1f}x", view.map.zoom()))
+                               .c_str());
     if (ImGui::Button("whole planet")) {
         view.map.reset();
+        view.orbit.reset();
     }
 
     ImGui::Separator();
@@ -663,8 +834,41 @@ void map(View& view, viewer::Link& link) {
     mark_inspected(view, corner, size);
 }
 
+// The globe, filling its panel; dragging turns it, the wheel zooms and double-clicking resets.
+void globe(View& view, const GlobePanel& panel) {
+    const ImVec2 space = ImGui::GetContentRegionAvail();
+    const ImVec2 size{std::max(space.x, 1.0F), std::max(space.y, 1.0F)};
+    const ImVec2 corner = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton("globe", size);
+    const ImGuiIO& io = ImGui::GetIO();
+    view.globe_wanted = {
+        .width = static_cast<std::uint32_t>(std::lround(size.x * io.DisplayFramebufferScale.x)),
+        .height = static_cast<std::uint32_t>(std::lround(size.y * io.DisplayFramebufferScale.y))};
+    if (ImGui::IsItemHovered()) {
+        if (io.MouseWheel != 0.0F) {
+            view.orbit.zoom(static_cast<double>(io.MouseWheel));
+        }
+        if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+            view.orbit.reset();
+        }
+    }
+    if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+        view.orbit.drag(DVec2{io.MouseDelta.x, io.MouseDelta.y}, static_cast<double>(size.y));
+    }
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    const ImVec2 far{corner.x + size.x, corner.y + size.y};
+    if (!panel.showing()) {
+        draw->AddRectFilled(corner, far, ImGui::GetColorU32(ImGuiCol_FrameBg));
+        return;
+    }
+    draw->AddImage(panel.ref(), corner, far);
+}
+
 // The whole viewer, laid out over the window.
-void layout(View& view, viewer::Link& link) {
+void layout(View& view, viewer::Link& link, const GlobePanel& panel) {
+    if (ImGui::IsKeyPressed(ImGuiKey_Tab, false) && !ImGui::GetIO().WantTextInput) {
+        view.globe = !view.globe;
+    }
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
     ImGui::SetNextWindowSize(viewport->WorkSize);
@@ -676,7 +880,11 @@ void layout(View& view, viewer::Link& link) {
     ImGui::EndChild();
     ImGui::SameLine();
     ImGui::BeginChild("map");
-    map(view, link);
+    if (view.globe) {
+        globe(view, panel);
+    } else {
+        map(view, link);
+    }
     ImGui::EndChild();
     ImGui::End();
 }
@@ -684,7 +892,7 @@ void layout(View& view, viewer::Link& link) {
 // Draws and shows a frame, saving it to `capture` if given. False when there was nothing to draw
 // into, such as while the window is minimised.
 Result<bool> draw(View& view, viewer::Link& link, const render::Device& device,
-                  render::Presenter& presenter, SDL_Window* window,
+                  render::Presenter& presenter, GlobePanel& panel, SDL_Window* window,
                   const std::optional<std::filesystem::path>& capture) {
     auto begun = presenter.begin(drawable(window));
     if (!begun) {
@@ -697,17 +905,24 @@ Result<bool> draw(View& view, viewer::Link& link, const render::Device& device,
     if (auto uploaded = upload(view, device, frame); !uploaded) {
         return std::unexpected(std::move(uploaded).error());
     }
+    if (auto prepared =
+            panel.prepare(device, frame, view.faces, view.globe ? view.globe_wanted : VkExtent2D{});
+        !prepared) {
+        return std::unexpected(std::move(prepared).error());
+    }
 
     ImGui_ImplVulkan_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
-    layout(view, link);
+    layout(view, link, panel);
     ImGui::Render();
+    if (view.globe) {
+        panel.draw(frame.commands,
+                   viewer::globe_view(view.orbit, link.frame().get(), view.daylight));
+    }
 
     frame.target.use_as(frame.commands, render::image_use::colour_target);
-    render::begin_rendering(
-        frame.commands, frame.view, frame.extent,
-        VkClearColorValue{.float32 = {20.0F / 255.0F, 20.0F / 255.0F, 24.0F / 255.0F, 1.0F}});
+    render::begin_rendering(frame.commands, frame.view, frame.extent, window_colour);
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), frame.commands);
     vkCmdEndRendering(frame.commands);
 
@@ -737,7 +952,15 @@ int show(const viewer::Options& options, const render::Device& device, render::P
     View view;
     view.overlay = options.overlay;
     view.species = options.species;
+    view.globe = options.globe;
+    view.faces = missing_faces();
     link.want(viewer::layers_for(view.overlay, view.species));
+    auto made = render::Globe::create(device, VK_FORMAT_R8G8B8A8_UNORM, globe_cells);
+    if (!made) {
+        std::cerr << std::format("hog-viewer: can't draw the globe: {}\n", made.error());
+        return EXIT_FAILURE;
+    }
+    GlobePanel panel{std::move(made).value()};
 
     int status = EXIT_SUCCESS;
     const MonotonicClock::time_point started = MonotonicClock::now();
@@ -751,11 +974,12 @@ int show(const viewer::Options& options, const render::Device& device, render::P
         }
         survey(view, link, options.width);
         redraw(view, link, options.width, jobs);
+        rebake(view, link, jobs);
         if (options.quit_after && MonotonicClock::now() - started >= *options.quit_after) {
             running = false;
         }
-        const auto drawn =
-            draw(view, link, device, presenter, window, running ? std::nullopt : options.capture);
+        const auto drawn = draw(view, link, device, presenter, panel, window,
+                                running ? std::nullopt : options.capture);
         if (!drawn) {
             std::cerr << std::format("hog-viewer: {}\n", drawn.error());
             status = EXIT_FAILURE;
@@ -765,7 +989,7 @@ int show(const viewer::Options& options, const render::Device& device, render::P
             SDL_Delay(idle_ms);
         }
     }
-    // The map texture goes first, and the GPU may still be drawing with it.
+    // The globe and the map's texture go first, and the GPU may still be drawing with them.
     vkDeviceWaitIdle(device.handle());
     if (options.validate && device.validation_errors() != 0) {
         std::cerr << std::format("hog-viewer: {} Vulkan validation errors\n",

@@ -2,6 +2,7 @@ add_library(hog_viewer
     src/clock_text.cpp
     src/daylight.cpp
     src/frame.cpp
+    src/globe_view.cpp
     src/ground.cpp
     src/inspector.cpp
     src/link.cpp
@@ -12,13 +13,14 @@ add_library(hog_viewer
 add_library(hog::viewer ALIAS hog_viewer)
 
 target_include_directories(hog_viewer PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(hog_viewer PUBLIC hog::mapgen hog::probe hog::sim hog::jobs)
+target_link_libraries(hog_viewer PUBLIC hog::mapgen hog::probe hog::render hog::sim hog::jobs)
 hog_target_defaults(hog_viewer)
 
 hog_add_tests(hog_viewer
     tests/clock_text_tests.cpp
     tests/daylight_tests.cpp
     tests/frame_tests.cpp
+    tests/globe_view_tests.cpp
     tests/ground_tests.cpp
     tests/inspector_tests.cpp
     tests/link_tests.cpp
@@ -105,7 +107,10 @@ if(HOG_BUILD_TESTS AND NOT HOG_SANITIZE)
     add_test(NAME hog_viewer_smoke
         COMMAND hog_viewer_cli --port 1 --quit-after 1 --software --validate
                 --capture "${CMAKE_CURRENT_BINARY_DIR}/smoke.png")
-    set_tests_properties(hog_viewer_smoke PROPERTIES
+    add_test(NAME hog_viewer_smoke_globe
+        COMMAND hog_viewer_cli --port 1 --quit-after 1 --software --validate --globe
+                --capture "${CMAKE_CURRENT_BINARY_DIR}/smoke_globe.png")
+    set_tests_properties(hog_viewer_smoke hog_viewer_smoke_globe PROPERTIES
         ENVIRONMENT "SDL_VIDEO_DRIVER=offscreen"
         SKIP_RETURN_CODE 77
         TIMEOUT 60)
