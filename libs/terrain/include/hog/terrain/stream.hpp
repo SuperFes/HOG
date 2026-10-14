@@ -1,0 +1,90 @@
+#pragma once
+
+#include <hog/core/math.hpp>
+#include <hog/planet/cell_id.hpp>
+#include <hog/terrain/patch.hpp>
+#include <hog/terrain/selection.hpp>
+
+#include <cstddef>
+#include <cstdint>
+#include <map>
+#include <optional>
+#include <set>
+#include <span>
+#include <vector>
+
+namespace hog::terrain {
+
+struct StreamSettings {
+    std::uint32_t capacity = 4'096; // patches held at once
+    std::uint32_t uploads = 16;     // patches arriving in a frame at most
+    std::uint32_t bakes = 16;       // in flight at most
+};
+
+// A held patch, drawn in place of the selection over its ground.
+struct StreamedPatch {
+    planet::CellId cell;
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    WorldPosition origin = {};
+    std::uint8_t coarser_edges = 0; // edge bits, where the patch beside it is coarser
+};
+
+struct StreamFrame {
+    std::vector<planet::CellId> evicted; // no longer held
+    std::vector<Patch> arrived;          // held from now on, to upload
+    std::vector<StreamedPatch> drawn;    // nearest first
+    std::vector<planet::CellId> bakes;   // to start, most wanted first
+};
+
+// Which patches are held, standing in for the selection until what it asks for is baked: a held
+// parent covers its children until all of them are held, and held children cover their parent.
+// Ground covered by nothing held is baked first, then the rest nearest first. The patches drawn
+// least recently make room for those arriving.
+class PatchStream {
+public:
+    explicit PatchStream(const StreamSettings& settings = {}) : settings_(settings) {}
+
+    // A patch an update asked to bake, baked.
+    void baked(Patch patch);
+    // Once a frame, with the patches selected for it.
+    [[nodiscard]] StreamFrame update(std::span<const SelectedPatch> selected);
+
+    [[nodiscard]] bool held(planet::CellId cell) const { return held_.contains(cell); }
+    [[nodiscard]] std::size_t held_count() const noexcept { return held_.size(); }
+    [[nodiscard]] std::size_t baking_count() const noexcept { return baking_.size(); }
+
+    // Of a patch baked so far, or bounding one whose children have all been.
+    [[nodiscard]] std::optional<HeightRange> heights(planet::CellId cell) const;
+    // heights(), for selection, for as long as the stream lives.
+    [[nodiscard]] KnownHeights known_heights() const {
+        return [this](planet::CellId cell) { return heights(cell); };
+    }
+
+private:
+    struct Held {
+        WorldPosition origin;
+        std::uint64_t drawn = 0; // frame
+    };
+    struct Known {
+        HeightRange heights;
+        bool baked = false; // rather than bounding its children
+    };
+
+    // Held cells covering the selection, without overlapping, with the least distance of what
+    // each covers.
+    [[nodiscard]] std::map<planet::CellId, double>
+    cover(std::span<const SelectedPatch> selected) const;
+    [[nodiscard]] bool covered(planet::CellId cell) const;
+    [[nodiscard]] std::optional<planet::CellId> held_above(planet::CellId cell) const;
+    void arrive(std::span<const SelectedPatch> selected, StreamFrame& frame);
+    void spread_heights(planet::CellId cell);
+
+    StreamSettings settings_;
+    std::map<planet::CellId, Held> held_;
+    std::set<planet::CellId> baking_;
+    std::vector<Patch> waiting_; // baked, not yet arrived
+    std::map<planet::CellId, Known> heights_;
+    std::uint64_t frame_ = 0;
+};
+
+} // namespace hog::terrain
