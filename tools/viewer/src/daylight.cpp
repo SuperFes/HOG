@@ -4,7 +4,6 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <numbers>
 
 namespace hog::viewer {
 
@@ -40,10 +39,7 @@ std::optional<sim::Calendar> calendar_of(const probe::Welcome& welcome) {
 }
 
 DVec2 subsolar_point(const sim::Calendar& calendar, GameTime time) noexcept {
-    const DVec3 sun = calendar.sun_direction(time);
-    const double latitude = std::asin(std::clamp(sun.z, -1.0, 1.0));
-    const double longitude = std::atan2(sun.y, sun.x);
-    return {(longitude / (2.0 * std::numbers::pi)) + 0.5, 0.5 - (latitude / std::numbers::pi)};
+    return direction_point(calendar.sun_direction(time));
 }
 
 void shade_night(mapgen::Image& image, const MapRect& shown, const sim::Calendar& calendar,

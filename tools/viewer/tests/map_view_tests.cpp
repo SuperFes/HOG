@@ -78,3 +78,11 @@ TEST_CASE("map points face out from the planet by latitude and longitude", "[vie
     check_near(hog::viewer::map_direction(DVec2{0.3, 0.0}), DVec3{0.0, 0.0, 1.0});
     check_near(hog::viewer::map_direction(DVec2{0.0, 0.5}), DVec3{-1.0, 0.0, 0.0});
 }
+
+TEST_CASE("directions find their way back to the map point under them", "[viewer][map]") {
+    for (const DVec2 point :
+         {DVec2{0.5, 0.5}, DVec2{0.1, 0.2}, DVec2{0.9, 0.7}, DVec2{0.3, 0.95}}) {
+        check_near(hog::viewer::direction_point(hog::viewer::map_direction(point)), point);
+    }
+    check_near(hog::viewer::direction_point(DVec3{0.0, 0.0, 3.0}), DVec2{0.5, 0.0});
+}

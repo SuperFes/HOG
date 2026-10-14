@@ -1,5 +1,6 @@
 #include <hog/mapgen/weather_render.hpp>
 #include <hog/mapgen/wildlife_render.hpp>
+#include <hog/planet/cell_id.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/sim/natural.hpp>
@@ -11,6 +12,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <utility>
 #include <vector>
@@ -139,6 +141,32 @@ TEST_CASE("biomes are shown cell by cell", "[viewer][overlay]") {
                                                                      : planet::Biome::Desert));
     }
     CHECK(std::ranges::count(cells, 7U) > 0);
+}
+
+TEST_CASE("the planet's faces are drawn a pixel per cell, stacked", "[viewer][overlay]") {
+    Planet planet = land();
+    planet.set("planet/biome", static_cast<float>(planet::Biome::Desert));
+    planet.values("planet/biome")[7] = static_cast<float>(planet::Biome::Tundra);
+    constexpr int across = 1 << level;
+    jobs::JobSystem jobs{2};
+    const mapgen::Image faces = viewer::render_faces(planet.grid, planet.frame(), nullptr,
+                                                     Overlay::Biome, "", across, false, jobs);
+    CHECK(faces.width == across);
+    CHECK(faces.height == planet::face_count * across);
+    int tundra = 0;
+    for (int face = 0; face < planet::face_count; ++face) {
+        for (int j = 0; j < across; ++j) {
+            for (int i = 0; i < across; ++i) {
+                const std::uint32_t cell = planet.grid.index(planet::CellId::from_face_ij(
+                    face, static_cast<std::uint32_t>(i), static_cast<std::uint32_t>(j), level));
+                tundra += cell == 7 ? 1 : 0;
+                CHECK(faces.at(i, (face * across) + j) ==
+                      mapgen::biome_colour(cell == 7 ? planet::Biome::Tundra
+                                                     : planet::Biome::Desert));
+            }
+        }
+    }
+    CHECK(tundra == 1);
 }
 
 TEST_CASE("a zoomed overlay draws only the shown part, at full size", "[viewer][overlay]") {

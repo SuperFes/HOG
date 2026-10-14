@@ -1,5 +1,6 @@
 #include <hog/mapgen/weather_render.hpp>
 #include <hog/mapgen/wildlife_render.hpp>
+#include <hog/planet/cell_id.hpp>
 #include <hog/planet/climate.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
@@ -11,8 +12,11 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
+#include <vector>
 
 namespace hog::viewer {
 
@@ -75,8 +79,12 @@ public:
         : grid_(&grid), frame_(&frame), ground_(ground),
           reach_(natural ? sim::natural_reach(grid.level()) : 0.0) {}
 
-    [[nodiscard]] Spot spot(DVec2 point) const {
-        const DVec3 direction = map_direction(point);
+    [[nodiscard]] Spot spot(DVec2 point) const { return spot(map_direction(point), point); }
+    [[nodiscard]] Spot spot(DVec3 direction) const {
+        return spot(direction, direction_point(direction));
+    }
+
+    [[nodiscard]] Spot spot(DVec3 direction, DVec2 point) const {
         return Spot{.direction = direction,
                     .cells = reach_ > 0.0
                                  ? sim::natural_point(direction, reach_, frame_->welcome().world_id)
@@ -438,6 +446,40 @@ Rgb colour_at(const Sampler& sampler, Overlay overlay, std::span<const float> sp
     return missing_colour;
 }
 
+// What an overlay colours each point of the planet by.
+struct Painting {
+    Painting(const sim::CellGrid& grid, const Frame& frame, const probe::Ground* ground,
+             Overlay shown, std::string_view species, bool natural)
+        : sampler{grid, frame, ground, natural}, overlay{shown},
+          // Densities rather than counts, since cells differ in size.
+          animals{overlay == Overlay::Wildlife
+                      ? densities(frame, frame.layer("wildlife/" + std::string{species}))
+                      : std::vector<float>{}},
+          most{animals.empty() ? 0.0 : static_cast<double>(std::ranges::max(animals))} {}
+
+    [[nodiscard]] Rgb colour(const Spot& spot) const {
+        return colour_at(sampler, overlay, animals, most, spot);
+    }
+
+    Sampler sampler;
+    Overlay overlay;
+    std::vector<float> animals;
+    double most;
+};
+
+mapgen::Image blank(mapgen::ImageSize size) {
+    return {.width = size.width,
+            .height = size.height,
+            .pixels = std::vector<std::uint8_t>(3 * static_cast<std::size_t>(size.width) *
+                                                static_cast<std::size_t>(size.height))};
+}
+
+void put(mapgen::Image& image, int x, int y, Rgb colour) {
+    const auto offset = 3 * ((static_cast<std::size_t>(y) * static_cast<std::size_t>(image.width)) +
+                             static_cast<std::size_t>(x));
+    std::ranges::copy(colour, image.pixels.begin() + static_cast<std::ptrdiff_t>(offset));
+}
+
 } // namespace
 
 std::optional<Overlay> overlay_named(std::string_view name) noexcept {
@@ -628,35 +670,42 @@ mapgen::Image render_overlay(const sim::CellGrid& grid, const Frame& frame,
                              const probe::Ground* ground, Overlay overlay, std::string_view species,
                              const MapRect& shown, int width, bool natural, jobs::JobSystem& jobs) {
     const mapgen::ImageSize size = mapgen::image_size(mapgen::PlanetView{}, width);
-    mapgen::Image image{.width = size.width,
-                        .height = size.height,
-                        .pixels =
-                            std::vector<std::uint8_t>(3 * static_cast<std::size_t>(size.width) *
-                                                      static_cast<std::size_t>(size.height))};
-    const Sampler sampler{grid, frame, ground, natural};
-    // Densities rather than counts, since cells differ in size.
-    const std::vector<float> animals =
-        overlay == Overlay::Wildlife
-            ? densities(frame, frame.layer("wildlife/" + std::string{species}))
-            : std::vector<float>{};
-    const double most = animals.empty() ? 0.0 : static_cast<double>(std::ranges::max(animals));
+    mapgen::Image image = blank(size);
+    const Painting painting{grid, frame, ground, overlay, species, natural};
+    jobs.parallel_for(static_cast<std::uint32_t>(size.height), 1,
+                      [&](jobs::Range rows, std::uint32_t /*thread*/) {
+                          for (std::uint32_t row = rows.begin; row < rows.end; ++row) {
+                              const auto y = static_cast<int>(row);
+                              for (int x = 0; x < size.width; ++x) {
+                                  Rgb colour = painting.colour(painting.sampler.spot(
+                                      pixel_point(shown, size.width, size.height, x, y)));
+                                  if (overlay == Overlay::Sea) {
+                                      colour =
+                                          with_arrow(painting.sampler, shown, size, x, y, colour);
+                                  }
+                                  put(image, x, y, colour);
+                              }
+                          }
+                      });
+    return image;
+}
+
+mapgen::Image render_faces(const sim::CellGrid& grid, const Frame& frame,
+                           const probe::Ground* ground, Overlay overlay, std::string_view species,
+                           int size, bool natural, jobs::JobSystem& jobs) {
+    mapgen::Image image = blank({.width = size, .height = planet::face_count * size});
+    const Painting painting{grid, frame, ground, overlay, species, natural};
     jobs.parallel_for(
-        static_cast<std::uint32_t>(size.height), 1,
+        static_cast<std::uint32_t>(image.height), 1,
         [&](jobs::Range rows, std::uint32_t /*thread*/) {
             for (std::uint32_t row = rows.begin; row < rows.end; ++row) {
                 const auto y = static_cast<int>(row);
-                for (int x = 0; x < size.width; ++x) {
-                    Rgb colour =
-                        colour_at(sampler, overlay, animals, most,
-                                  sampler.spot(pixel_point(shown, size.width, size.height, x, y)));
-                    if (overlay == Overlay::Sea) {
-                        colour = with_arrow(sampler, shown, size, x, y, colour);
-                    }
-                    const auto offset =
-                        3 * ((static_cast<std::size_t>(y) * static_cast<std::size_t>(size.width)) +
-                             static_cast<std::size_t>(x));
-                    std::ranges::copy(colour,
-                                      image.pixels.begin() + static_cast<std::ptrdiff_t>(offset));
+                const int face = y / size;
+                const double v = planet::st_to_uv(((y % size) + 0.5) / size);
+                for (int x = 0; x < size; ++x) {
+                    const double u = planet::st_to_uv((x + 0.5) / size);
+                    put(image, x, y,
+                        painting.colour(painting.sampler.spot(planet::face_uv_to_xyz(face, u, v))));
                 }
             }
         });

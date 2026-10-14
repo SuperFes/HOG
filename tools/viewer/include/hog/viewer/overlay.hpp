@@ -79,6 +79,14 @@ inline constexpr mapgen::Rgb arrow_colour{15, 25, 45};
                                            std::string_view species, const MapRect& shown,
                                            int width, bool natural, jobs::JobSystem& jobs);
 
+// The planet on the six faces of its cube, `size` pixels across each, stacked from face 0 down.
+// Pixels are evenly spaced along each face's s and t, so at the level with `size` cells across a
+// face each pixel is one cell. Drawn as render_overlay draws, without the sea's arrows.
+[[nodiscard]] mapgen::Image render_faces(const sim::CellGrid& grid, const Frame& frame,
+                                         const probe::Ground* ground, Overlay overlay,
+                                         std::string_view species, int size, bool natural,
+                                         jobs::JobSystem& jobs);
+
 // Pale lows through white to dark red highs, in hPa.
 [[nodiscard]] mapgen::Rgb pressure_colour(double pressure) noexcept;
 

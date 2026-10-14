@@ -2,6 +2,7 @@
 #include <hog/viewer/map_view.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <numbers>
 
 namespace hog::viewer {
@@ -21,6 +22,12 @@ DVec2 pixel_point(const MapRect& shown, int width, int height, int x, int y) noe
 DVec3 map_direction(DVec2 point) noexcept {
     return planet::direction_at((0.5 - point.y) * std::numbers::pi,
                                 (point.x - 0.5) * 2.0 * std::numbers::pi);
+}
+
+DVec2 direction_point(DVec3 direction) noexcept {
+    const double latitude = std::asin(std::clamp(glm::normalize(direction).z, -1.0, 1.0));
+    const double longitude = std::atan2(direction.y, direction.x);
+    return {(longitude / (2.0 * std::numbers::pi)) + 0.5, 0.5 - (latitude / std::numbers::pi)};
 }
 
 MapRect MapView::shown() const noexcept {

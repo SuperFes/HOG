@@ -21,6 +21,8 @@ struct MapRect {
 [[nodiscard]] DVec2 pixel_point(const MapRect& shown, int width, int height, int x, int y) noexcept;
 // The unit direction from the planet's centre under a map point: latitude down, longitude across.
 [[nodiscard]] DVec3 map_direction(DVec2 point) noexcept;
+// The map point under a direction from the planet's centre, which needn't be unit length.
+[[nodiscard]] DVec2 direction_point(DVec3 direction) noexcept;
 
 // Zooming and panning, never past the edges of the map.
 class MapView {
