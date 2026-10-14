@@ -29,7 +29,8 @@ struct DeviceOptions {
     std::function<Result<VkSurfaceKHR>(VkInstance)> make_surface = {};
 };
 
-// A Vulkan 1.3 instance, device and graphics queue, with an allocator for GPU memory. Vulkan's
+// A Vulkan 1.3 instance, device with push descriptors and graphics queue, with an allocator for
+// GPU memory. Vulkan's
 // functions are loaded process-wide, so there is one device at a time.
 class Device {
 public:

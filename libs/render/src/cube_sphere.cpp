@@ -11,15 +11,19 @@ Mesh cube_sphere(int cells) {
     const auto across = static_cast<std::uint32_t>(cells) + 1;
     Mesh mesh;
     mesh.positions.reserve(std::size_t{6} * across * across);
+    mesh.face_points.reserve(mesh.positions.capacity());
     mesh.indices.reserve(std::size_t{6} * 6 * static_cast<std::size_t>(cells) *
                          static_cast<std::size_t>(cells));
     for (int face = 0; face < 6; ++face) {
         const auto first = static_cast<std::uint32_t>(mesh.positions.size());
         for (std::uint32_t j = 0; j < across; ++j) {
-            const double v = planet::st_to_uv(static_cast<double>(j) / cells);
+            const double t = static_cast<double>(j) / cells;
+            const double v = planet::st_to_uv(t);
             for (std::uint32_t i = 0; i < across; ++i) {
-                const double u = planet::st_to_uv(static_cast<double>(i) / cells);
+                const double s = static_cast<double>(i) / cells;
+                const double u = planet::st_to_uv(s);
                 mesh.positions.emplace_back(glm::normalize(planet::face_uv_to_xyz(face, u, v)));
+                mesh.face_points.emplace_back(s, t, face);
             }
         }
         // Corners run counter-clockwise from outside in i then j, as the planet's cells do.

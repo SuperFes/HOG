@@ -9,6 +9,9 @@ namespace hog::render {
 
 struct Mesh {
     std::vector<Vec3> positions;
+    // Where each vertex lies on its face: s and t from 0 to 1 along the face's u and v, then the
+    // face. Cells are evenly spaced in s and t, so a texture per face has a texel per cell.
+    std::vector<Vec3> face_points;
     std::vector<std::uint32_t> indices; // triangles, counter-clockwise seen from outside
 };
 

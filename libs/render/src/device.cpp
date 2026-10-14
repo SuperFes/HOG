@@ -131,6 +131,7 @@ Result<std::unique_ptr<Device>> Device::create(const DeviceOptions& options) {
         // Present support is checked here rather than by vk-bootstrap, whose surface functions
         // come from the first instance in the process, which may have had no surfaces.
         .require_present(false)
+        .add_required_extension(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME)
         .prefer_gpu_device_type(options.prefer_software ? vkb::PreferredDeviceType::cpu
                                                         : vkb::PreferredDeviceType::discrete);
     if (device->surface_ != VK_NULL_HANDLE) {

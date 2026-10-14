@@ -44,7 +44,7 @@ Result<> StreamedImage::update(VkCommandBuffer commands, std::uint32_t slot,
         .imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
                              .mipLevel = 0,
                              .baseArrayLayer = 0,
-                             .layerCount = 1},
+                             .layerCount = image_.desc().layers},
         .imageOffset = {},
         .imageExtent = {.width = extent.width, .height = extent.height, .depth = 1}};
     vkCmdCopyBufferToImage(commands, staging.handle(), image_.handle(),
@@ -54,27 +54,29 @@ Result<> StreamedImage::update(VkCommandBuffer commands, std::uint32_t slot,
 }
 
 Result<StreamedImage> make_streamed_image(const Device& device, VkFormat format, VkExtent2D extent,
-                                          std::uint32_t slots) {
+                                          std::uint32_t slots, std::uint32_t layers) {
     const std::optional<std::uint32_t> bytes = texel_bytes(format);
     if (!bytes) {
         return make_error(ErrorCode::Unsupported, "images can't be streamed in that format");
     }
-    if (extent.width == 0 || extent.height == 0 || slots == 0) {
-        return make_error(ErrorCode::InvalidArgument, "a streamed image needs area and a slot");
+    if (extent.width == 0 || extent.height == 0 || slots == 0 || layers == 0) {
+        return make_error(ErrorCode::InvalidArgument,
+                          "a streamed image needs area, a layer and a slot");
     }
     // Readable too, so tests can check what arrived.
     auto image =
         make_image(device, {.format = format,
                             .extent = extent,
                             .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                                     VK_IMAGE_USAGE_TRANSFER_SRC_BIT});
+                                     VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                            .layers = layers});
     if (!image) {
         return std::unexpected(std::move(image).error());
     }
     StreamedImage streamed;
     streamed.image_ = std::move(image).value();
     streamed.tracked_ = TrackedImage{streamed.image_.handle(), VK_IMAGE_ASPECT_COLOR_BIT};
-    const VkDeviceSize size = VkDeviceSize{*bytes} * extent.width * extent.height;
+    const VkDeviceSize size = VkDeviceSize{*bytes} * extent.width * extent.height * layers;
     for (std::uint32_t slot = 0; slot < slots; ++slot) {
         auto staging = make_buffer(device, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, Memory::Upload);
         if (!staging) {

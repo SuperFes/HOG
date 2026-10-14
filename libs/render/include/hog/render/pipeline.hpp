@@ -29,6 +29,9 @@ struct PipelineDesc {
     VkCullModeFlags cull = VK_CULL_MODE_NONE;
     // Visible to both stages.
     std::uint32_t push_constant_bytes = 0;
+    // What the shaders read from set 0, pushed while recording rather than allocated in sets.
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    std::span<const VkDescriptorSetLayoutBinding> descriptors = {};
 };
 
 class Pipeline {
@@ -48,10 +51,16 @@ private:
     void release() noexcept;
 
     VkDevice device_ = VK_NULL_HANDLE;
+    VkDescriptorSetLayout set_layout_ = VK_NULL_HANDLE;
     VkPipelineLayout layout_ = VK_NULL_HANDLE;
     VkPipeline pipeline_ = VK_NULL_HANDLE;
 };
 
 [[nodiscard]] Result<Pipeline> make_pipeline(const Device& device, const PipelineDesc& desc);
+
+// Records handing the bound pipeline's shaders an image to sample at `binding` of set 0. The image
+// must be ready for fragment shaders by the time they run.
+void push_sampled_image(VkCommandBuffer commands, const Pipeline& pipeline, std::uint32_t binding,
+                        VkImageView view, VkSampler sampler) noexcept;
 
 } // namespace hog::render

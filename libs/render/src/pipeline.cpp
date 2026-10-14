@@ -9,6 +9,7 @@ namespace hog::render {
 
 Pipeline::Pipeline(Pipeline&& other) noexcept
     : device_(std::exchange(other.device_, VK_NULL_HANDLE)),
+      set_layout_(std::exchange(other.set_layout_, VK_NULL_HANDLE)),
       layout_(std::exchange(other.layout_, VK_NULL_HANDLE)),
       pipeline_(std::exchange(other.pipeline_, VK_NULL_HANDLE)) {}
 
@@ -16,6 +17,7 @@ Pipeline& Pipeline::operator=(Pipeline&& other) noexcept {
     if (this != &other) {
         release();
         device_ = std::exchange(other.device_, VK_NULL_HANDLE);
+        set_layout_ = std::exchange(other.set_layout_, VK_NULL_HANDLE);
         layout_ = std::exchange(other.layout_, VK_NULL_HANDLE);
         pipeline_ = std::exchange(other.pipeline_, VK_NULL_HANDLE);
     }
@@ -35,11 +37,29 @@ void Pipeline::release() noexcept {
         vkDestroyPipelineLayout(device_, layout_, nullptr);
         layout_ = VK_NULL_HANDLE;
     }
+    if (set_layout_ != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(device_, set_layout_, nullptr);
+        set_layout_ = VK_NULL_HANDLE;
+    }
 }
 
 Result<Pipeline> make_pipeline(const Device& device, const PipelineDesc& desc) {
     Pipeline pipeline;
     pipeline.device_ = device.handle();
+
+    if (!desc.descriptors.empty()) {
+        const VkDescriptorSetLayoutCreateInfo set_info{
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR,
+            .bindingCount = static_cast<std::uint32_t>(desc.descriptors.size()),
+            .pBindings = desc.descriptors.data()};
+        if (const VkResult made = vkCreateDescriptorSetLayout(device.handle(), &set_info, nullptr,
+                                                              &pipeline.set_layout_);
+            made != VK_SUCCESS) {
+            return vulkan_error(made, "creating a descriptor set layout");
+        }
+    }
 
     const VkPushConstantRange push_range{.stageFlags = VK_SHADER_STAGE_VERTEX_BIT |
                                                        VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -49,8 +69,8 @@ Result<Pipeline> make_pipeline(const Device& device, const PipelineDesc& desc) {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .pNext = nullptr,
         .flags = 0,
-        .setLayoutCount = 0,
-        .pSetLayouts = nullptr,
+        .setLayoutCount = pipeline.set_layout_ != VK_NULL_HANDLE ? 1U : 0U,
+        .pSetLayouts = &pipeline.set_layout_,
         .pushConstantRangeCount = desc.push_constant_bytes > 0 ? 1U : 0U,
         .pPushConstantRanges = &push_range};
     if (const VkResult made =
@@ -207,6 +227,25 @@ Result<Pipeline> make_pipeline(const Device& device, const PipelineDesc& desc) {
         return vulkan_error(made, "creating a graphics pipeline");
     }
     return pipeline;
+}
+
+void push_sampled_image(VkCommandBuffer commands, const Pipeline& pipeline, std::uint32_t binding,
+                        VkImageView view, VkSampler sampler) noexcept {
+    const VkDescriptorImageInfo image{.sampler = sampler,
+                                      .imageView = view,
+                                      .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    const VkWriteDescriptorSet write{.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                     .pNext = nullptr,
+                                     .dstSet = VK_NULL_HANDLE,
+                                     .dstBinding = binding,
+                                     .dstArrayElement = 0,
+                                     .descriptorCount = 1,
+                                     .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                     .pImageInfo = &image,
+                                     .pBufferInfo = nullptr,
+                                     .pTexelBufferView = nullptr};
+    vkCmdPushDescriptorSetKHR(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.layout(), 0, 1,
+                              &write);
 }
 
 } // namespace hog::render

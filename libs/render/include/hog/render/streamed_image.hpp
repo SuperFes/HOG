@@ -26,14 +26,15 @@ public:
     // Whether it's been written yet; until then it mustn't be sampled.
     [[nodiscard]] bool ready() const noexcept { return tracked_.use() == image_use::sampled; }
 
-    // Records copying in `texels`, rows packed tightly from the top, and readies the image for
-    // fragment shaders. The slot's last frame must have finished.
+    // Records copying in `texels`, rows packed tightly from the top and layers one after another,
+    // and readies the image for fragment shaders. The slot's last frame must have finished.
     Result<> update(VkCommandBuffer commands, std::uint32_t slot,
                     std::span<const std::byte> texels);
 
 private:
     friend Result<StreamedImage> make_streamed_image(const Device& device, VkFormat format,
-                                                     VkExtent2D extent, std::uint32_t slots);
+                                                     VkExtent2D extent, std::uint32_t slots,
+                                                     std::uint32_t layers);
 
     Image image_;
     TrackedImage tracked_;
@@ -41,6 +42,7 @@ private:
 };
 
 [[nodiscard]] Result<StreamedImage> make_streamed_image(const Device& device, VkFormat format,
-                                                        VkExtent2D extent, std::uint32_t slots);
+                                                        VkExtent2D extent, std::uint32_t slots,
+                                                        std::uint32_t layers = 1);
 
 } // namespace hog::render

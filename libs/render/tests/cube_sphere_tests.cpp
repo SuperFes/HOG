@@ -51,6 +51,31 @@ TEST_CASE("cube sphere vertices sit on the planet's cell corners", "[render][cub
     }
 }
 
+TEST_CASE("each cube sphere cell spans one texel of its face", "[render][cube_sphere]") {
+    constexpr int level = 2;
+    constexpr std::uint32_t cells = 1U << level;
+    constexpr std::uint32_t across = cells + 1;
+    const auto mesh = hog::render::cube_sphere(static_cast<int>(cells));
+    REQUIRE(mesh.face_points.size() == mesh.positions.size());
+    for (int face = 0; face < 6; ++face) {
+        for (std::uint32_t j = 0; j < cells; ++j) {
+            for (std::uint32_t i = 0; i < cells; ++i) {
+                const std::size_t first = (static_cast<std::size_t>(face) * across * across) +
+                                          (std::size_t{j} * across) + i;
+                const Vec3 low = mesh.face_points[first];
+                const Vec3 high = mesh.face_points[first + across + 1];
+                CHECK(low == Vec3{static_cast<float>(i) / cells, static_cast<float>(j) / cells,
+                                  static_cast<float>(face)});
+                const DVec3 middle{(low + high) / 2.0F};
+                const DVec3 direction = hog::planet::face_uv_to_xyz(
+                    face, hog::planet::st_to_uv(middle.x), hog::planet::st_to_uv(middle.y));
+                CHECK(hog::planet::cell_at(direction, level) ==
+                      hog::planet::CellId::from_face_ij(face, i, j, level));
+            }
+        }
+    }
+}
+
 TEST_CASE("cube sphere triangles face outwards and close the sphere", "[render][cube_sphere]") {
     constexpr int cells = 32;
     const auto mesh = hog::render::cube_sphere(cells);

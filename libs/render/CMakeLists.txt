@@ -42,6 +42,7 @@ add_library(hog_render
     src/presenter.cpp
     src/readback.cpp
     src/rendering.cpp
+    src/sampler.cpp
     src/streamed_image.cpp
     src/swapchain.cpp
     src/vma.cpp
@@ -72,7 +73,7 @@ hog_add_tests(hog_render
     tests/swapchain_tests.cpp)
 if(TARGET hog_render_tests)
     target_link_libraries(hog_render_tests PRIVATE hog::planet)
-    hog_add_shaders(hog_render_tests tests/shaders/triangle.slang)
+    hog_add_shaders(hog_render_tests tests/shaders/layer.slang tests/shaders/triangle.slang)
     # GPU drivers are opaque to sanitizers, so those runs leave the GPU out.
     if(HOG_SANITIZE)
         target_compile_definitions(hog_render_tests PRIVATE HOG_GPU_TESTS=0)

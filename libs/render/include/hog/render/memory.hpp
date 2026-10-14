@@ -53,9 +53,11 @@ struct ImageDesc {
     VkExtent2D extent{.width = 1, .height = 1};
     VkImageUsageFlags usage = 0;
     VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+    std::uint32_t layers = 1;
 };
 
-// A 2D image on the GPU with a view of the whole of it.
+// A 2D image on the GPU with a view of the whole of it, viewed as an array when it has more than
+// one layer.
 class Image {
 public:
     Image() = default;

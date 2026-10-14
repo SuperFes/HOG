@@ -134,7 +134,7 @@ Result<Image> make_image(const Device& device, const ImageDesc& desc) {
         .format = desc.format,
         .extent = {.width = desc.extent.width, .height = desc.extent.height, .depth = 1},
         .mipLevels = 1,
-        .arrayLayers = 1,
+        .arrayLayers = desc.layers,
         .samples = VK_SAMPLE_COUNT_1_BIT,
         .tiling = VK_IMAGE_TILING_OPTIMAL,
         .usage = desc.usage,
@@ -157,14 +157,15 @@ Result<Image> make_image(const Device& device, const ImageDesc& desc) {
                                           .pNext = nullptr,
                                           .flags = 0,
                                           .image = image.image_,
-                                          .viewType = VK_IMAGE_VIEW_TYPE_2D,
+                                          .viewType = desc.layers > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY
+                                                                      : VK_IMAGE_VIEW_TYPE_2D,
                                           .format = desc.format,
                                           .components = {},
                                           .subresourceRange = {.aspectMask = desc.aspect,
                                                                .baseMipLevel = 0,
                                                                .levelCount = 1,
                                                                .baseArrayLayer = 0,
-                                                               .layerCount = 1}};
+                                                               .layerCount = desc.layers}};
     if (const VkResult made = vkCreateImageView(device.handle(), &view_info, nullptr, &image.view_);
         made != VK_SUCCESS) {
         return vulkan_error(made, "creating an image view");
