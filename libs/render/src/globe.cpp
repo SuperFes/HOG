@@ -36,20 +36,6 @@ struct Push {
     alignas(16) glm::vec4 eye{};
 };
 
-// A host-written buffer the GPU reads from, holding `bytes`.
-Result<Buffer> upload(const Device& device, std::span<const std::byte> bytes,
-                      VkBufferUsageFlags usage) {
-    auto buffer = make_buffer(device, bytes.size(), usage, Memory::Upload);
-    if (!buffer) {
-        return buffer;
-    }
-    std::ranges::copy(bytes, buffer->mapped().begin());
-    if (auto flushed = buffer->flush(); !flushed) {
-        return std::unexpected(std::move(flushed).error());
-    }
-    return buffer;
-}
-
 Push push_for(const GlobeView& view, VkExtent2D extent, const Image& relief) {
     const double aspect = static_cast<double>(extent.width) / static_cast<double>(extent.height);
     const glm::dmat4 planet_from_unit =
@@ -138,14 +124,14 @@ Result<Globe> Globe::create(const Device& device, VkFormat colour_format, VkForm
     }
 
     Globe globe;
-    auto vertex_buffer =
-        upload(device, std::as_bytes(std::span{vertices}), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+    auto vertex_buffer = make_filled_buffer(device, std::as_bytes(std::span{vertices}),
+                                            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
     if (!vertex_buffer) {
         return std::unexpected(std::move(vertex_buffer).error());
     }
     globe.vertices_ = std::move(vertex_buffer).value();
-    auto index_buffer =
-        upload(device, std::as_bytes(std::span{mesh.indices}), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+    auto index_buffer = make_filled_buffer(device, std::as_bytes(std::span{mesh.indices}),
+                                           VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
     if (!index_buffer) {
         return std::unexpected(std::move(index_buffer).error());
     }

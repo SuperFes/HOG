@@ -268,4 +268,21 @@ void push_sampled_image(VkCommandBuffer commands, const Pipeline& pipeline, std:
                               &write);
 }
 
+void push_uniform_buffer(VkCommandBuffer commands, const Pipeline& pipeline, std::uint32_t binding,
+                         VkBuffer buffer) noexcept {
+    const VkDescriptorBufferInfo whole{.buffer = buffer, .offset = 0, .range = VK_WHOLE_SIZE};
+    const VkWriteDescriptorSet write{.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                     .pNext = nullptr,
+                                     .dstSet = VK_NULL_HANDLE,
+                                     .dstBinding = binding,
+                                     .dstArrayElement = 0,
+                                     .descriptorCount = 1,
+                                     .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                                     .pImageInfo = nullptr,
+                                     .pBufferInfo = &whole,
+                                     .pTexelBufferView = nullptr};
+    vkCmdPushDescriptorSetKHR(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.layout(), 0, 1,
+                              &write);
+}
+
 } // namespace hog::render

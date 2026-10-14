@@ -72,5 +72,8 @@ private:
 // must be ready to sample by the time they run.
 void push_sampled_image(VkCommandBuffer commands, const Pipeline& pipeline, std::uint32_t binding,
                         VkImageView view, VkSampler sampler) noexcept;
+// As above, for a uniform buffer.
+void push_uniform_buffer(VkCommandBuffer commands, const Pipeline& pipeline, std::uint32_t binding,
+                         VkBuffer buffer) noexcept;
 
 } // namespace hog::render

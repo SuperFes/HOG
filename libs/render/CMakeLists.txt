@@ -46,6 +46,7 @@ add_library(hog_render
     src/sampler.cpp
     src/streamed_image.cpp
     src/swapchain.cpp
+    src/terrain.cpp
     src/vma.cpp
     src/vulkan.cpp)
 add_library(hog::render ALIAS hog_render)
@@ -59,10 +60,10 @@ target_compile_definitions(hog_render PUBLIC
     VMA_DYNAMIC_VULKAN_FUNCTIONS=0)
 set_source_files_properties(src/vma.cpp PROPERTIES COMPILE_DEFINITIONS VMA_IMPLEMENTATION)
 target_link_libraries(hog_render
-    PUBLIC hog::core volk::volk
+    PUBLIC hog::core hog::terrain volk::volk
     PRIVATE hog::planet vk-bootstrap::vk-bootstrap)
 hog_target_defaults(hog_render)
-hog_add_shaders(hog_render shaders/globe.slang)
+hog_add_shaders(hog_render shaders/globe.slang shaders/terrain.slang)
 
 hog_add_tests(hog_render
     tests/barrier_tests.cpp
@@ -74,7 +75,8 @@ hog_add_tests(hog_render
     tests/pipeline_tests.cpp
     tests/presenter_tests.cpp
     tests/streamed_image_tests.cpp
-    tests/swapchain_tests.cpp)
+    tests/swapchain_tests.cpp
+    tests/terrain_tests.cpp)
 if(TARGET hog_render_tests)
     target_link_libraries(hog_render_tests PRIVATE hog::planet)
     hog_add_shaders(hog_render_tests tests/shaders/fill.slang tests/shaders/layer.slang

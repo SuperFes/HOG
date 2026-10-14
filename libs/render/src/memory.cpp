@@ -1,6 +1,7 @@
 #include <hog/render/device.hpp>
 #include <hog/render/memory.hpp>
 
+#include <algorithm>
 #include <utility>
 
 namespace hog::render {
@@ -86,6 +87,19 @@ Result<Buffer> make_buffer(const Device& device, VkDeviceSize size, VkBufferUsag
     if (allocated.pMappedData != nullptr) {
         buffer.mapped_ = {static_cast<std::byte*>(allocated.pMappedData),
                           static_cast<std::size_t>(size)};
+    }
+    return buffer;
+}
+
+Result<Buffer> make_filled_buffer(const Device& device, std::span<const std::byte> bytes,
+                                  VkBufferUsageFlags usage) {
+    auto buffer = make_buffer(device, bytes.size(), usage, Memory::Upload);
+    if (!buffer) {
+        return buffer;
+    }
+    std::ranges::copy(bytes, buffer->mapped().begin());
+    if (auto flushed = buffer->flush(); !flushed) {
+        return std::unexpected(std::move(flushed).error());
     }
     return buffer;
 }

@@ -47,6 +47,10 @@ private:
 
 [[nodiscard]] Result<Buffer> make_buffer(const Device& device, VkDeviceSize size,
                                          VkBufferUsageFlags usage, Memory memory);
+// Upload memory holding `bytes`, made visible to the GPU.
+[[nodiscard]] Result<Buffer> make_filled_buffer(const Device& device,
+                                                std::span<const std::byte> bytes,
+                                                VkBufferUsageFlags usage);
 
 struct ImageDesc {
     VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
