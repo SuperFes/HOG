@@ -1,3 +1,4 @@
+#include <hog/mapgen/photo.hpp>
 #include <hog/mapgen/weather_render.hpp>
 #include <hog/mapgen/wildlife_render.hpp>
 #include <hog/planet/cell_id.hpp>
@@ -110,6 +111,34 @@ TEST_CASE("overlays without their layers show as missing", "[viewer][overlay]") 
         INFO(viewer::to_string(overlay));
         CHECK(all(planet.render(overlay, "deer"), viewer::missing_colour));
     }
+}
+
+TEST_CASE("the photo shows the ground in true colour", "[viewer][overlay]") {
+    Planet planet = land();
+    planet.set("planet/biome", static_cast<float>(planet::Biome::Grassland));
+    CHECK(all(planet.render(Overlay::Photo),
+              mapgen::to_srgb(
+                  mapgen::true_colour({.biome = planet::Biome::Grassland, .height = 500.0}))));
+
+    planet.set("forest/capacity", 100.0F);
+    planet.set("forest/biomass", 25.0F);
+    planet.set("land/snow", 40.0F);
+    CHECK(all(
+        planet.render(Overlay::Photo),
+        mapgen::to_srgb(mapgen::true_colour(
+            {.biome = planet::Biome::Grassland, .height = 500.0, .plants = 0.25, .snow = 40.0}))));
+
+    // A sea 3 km deep, iced over where it's cold enough.
+    planet.set("planet/ocean", 1.0F);
+    planet.set("planet/elevation", -3'000.0F);
+    planet.set("ocean/temperature", 10.0F);
+    CHECK(all(planet.render(Overlay::Photo),
+              mapgen::to_srgb(mapgen::true_colour(
+                  {.biome = planet::Biome::Ocean, .depth = 3'000.0, .ice = 0.0}))));
+    planet.set("ocean/temperature", -10.0F);
+    CHECK(all(planet.render(Overlay::Photo),
+              mapgen::to_srgb(mapgen::true_colour(
+                  {.biome = planet::Biome::Ocean, .depth = 3'000.0, .ice = 1.0}))));
 }
 
 TEST_CASE("weather overlays colour by their fields", "[viewer][overlay]") {

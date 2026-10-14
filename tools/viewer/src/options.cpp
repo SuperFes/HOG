@@ -78,8 +78,8 @@ options:
   --host HOST     where the server runs (default 127.0.0.1)
   --port PORT     its [debug] port (default 7777)
   --width PIXELS  of the rendered map (default 1024)
-  --overlay NAME  shown first: terrain, biome, water, minerals, heat, temperature,
-                  air, sky, pressure, sea, soil, plants, fire or wildlife
+  --overlay NAME  shown first: terrain, photo, biome, water, minerals, heat,
+                  temperature, air, sky, pressure, sea, soil, plants, fire or wildlife
                   (default terrain)
   --species NAME  shown first on the wildlife overlay
   --globe         show the globe first rather than the map; Tab swaps them

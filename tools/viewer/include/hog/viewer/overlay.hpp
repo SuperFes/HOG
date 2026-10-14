@@ -18,6 +18,7 @@ namespace hog::viewer {
 
 enum class Overlay : std::uint8_t {
     Terrain,     // elevation, with the ocean, lakes and rivers
+    Photo,       // the ground in true colour, as it would look from above at noon
     Biome,       // with lakes and rivers
     Water,       // the water table's depth, with lakes and rivers
     Minerals,    // rock, or the rarest deposit, at a depth; needs the ground surveyed
@@ -34,9 +35,9 @@ enum class Overlay : std::uint8_t {
 };
 
 inline constexpr std::array overlays{
-    Overlay::Terrain,     Overlay::Biome,  Overlay::Water, Overlay::Minerals, Overlay::Heat,
-    Overlay::Temperature, Overlay::Air,    Overlay::Sky,   Overlay::Pressure, Overlay::Sea,
-    Overlay::Soil,        Overlay::Plants, Overlay::Fire,  Overlay::Wildlife,
+    Overlay::Terrain, Overlay::Photo,       Overlay::Biome,  Overlay::Water, Overlay::Minerals,
+    Overlay::Heat,    Overlay::Temperature, Overlay::Air,    Overlay::Sky,   Overlay::Pressure,
+    Overlay::Sea,     Overlay::Soil,        Overlay::Plants, Overlay::Fire,  Overlay::Wildlife,
 };
 
 // Whether an overlay shows what lies underground, which needs the ground surveyed at a depth.

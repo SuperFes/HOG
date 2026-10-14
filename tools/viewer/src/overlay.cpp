@@ -1,3 +1,4 @@
+#include <hog/mapgen/photo.hpp>
 #include <hog/mapgen/weather_render.hpp>
 #include <hog/mapgen/wildlife_render.hpp>
 #include <hog/planet/cell_id.hpp>
@@ -6,6 +7,7 @@
 #include <hog/planet/projection.hpp>
 #include <hog/sim/natural.hpp>
 #include <hog/sim/weather.hpp>
+#include <hog/sim/weather_tuning.hpp>
 #include <hog/viewer/ground.hpp>
 #include <hog/viewer/overlay.hpp>
 
@@ -363,6 +365,51 @@ Rgb weather_at(const Sampler& sampler, Overlay overlay, const Spot& spot) {
                               falling, storm);
 }
 
+// The sea's surface: deeper is darker, iced over where it's colder than the sea freezes at.
+mapgen::Surface sea_surface(const Sampler& sampler, const Spot& spot) {
+    mapgen::Surface surface{.biome = planet::Biome::Ocean};
+    if (const auto metres = sampler.elevation(spot)) {
+        surface.depth = std::max(-*metres, 0.0);
+    } else if (const std::span<const float> elevation = sampler.layer("planet/elevation");
+               !elevation.empty()) {
+        surface.depth = std::max(-sampler.smooth(elevation, spot), 0.0);
+    }
+    if (const std::span<const float> warmth = sampler.layer("ocean/temperature"); !warmth.empty()) {
+        // Over a degree, so the ice's edge isn't a line.
+        surface.ice =
+            std::clamp(sim::OceanTuning{}.freezing + 0.5 - sampler.smooth(warmth, spot), 0.0, 1.0);
+    }
+    return surface;
+}
+
+// The ground as a camera would see it, missing where the land's heights or kinds aren't known.
+Rgb photo_at(const Sampler& sampler, const Spot& spot) {
+    if (sampler.layer("planet/elevation").empty() && !spot.sample) {
+        return missing_colour;
+    }
+    if (sampler.ocean(spot)) {
+        return mapgen::to_srgb(mapgen::true_colour(sea_surface(sampler, spot)));
+    }
+    const std::optional<planet::Biome> biome = sampler.biome(spot);
+    if (!biome) {
+        return missing_colour;
+    }
+    const auto field = [&](std::string_view name, double otherwise) {
+        const std::span<const float> values = sampler.layer(name);
+        return values.empty() ? otherwise : sampler.smooth(values, spot);
+    };
+    const double capacity = field("forest/capacity", 0.0);
+    const mapgen::Surface surface{
+        // Cells along the coast may be sea, while the point is land.
+        .biome = biome == planet::Biome::Ocean ? planet::Biome::Beach : *biome,
+        .height = sampler.height(spot).value_or(0.0),
+        .plants = capacity > 0.0 ? field("forest/biomass", capacity) / capacity : 1.0,
+        .fire = field("forest/fire", 0.0),
+        .soil = field("land/soil", 0.0),
+        .snow = field("land/snow", 0.0)};
+    return mapgen::to_srgb(mapgen::true_colour(surface));
+}
+
 Rgb sea_at(const Sampler& sampler, const Spot& spot) {
     const std::span<const float> warmth = sampler.layer("ocean/temperature");
     if (warmth.empty()) {
@@ -397,6 +444,8 @@ Rgb colour_at(const Sampler& sampler, Overlay overlay, std::span<const float> sp
     switch (overlay) {
     case Overlay::Terrain:
         return sampler.with_water(sampler.ground(spot), spot);
+    case Overlay::Photo:
+        return photo_at(sampler, spot);
     case Overlay::Biome: {
         const std::optional<planet::Biome> biome = sampler.biome(spot);
         return biome ? sampler.with_water(mapgen::biome_colour(*biome), spot) : missing_colour;
@@ -507,6 +556,8 @@ std::string_view to_string(Overlay overlay) noexcept {
     switch (overlay) {
     case Overlay::Terrain:
         return "terrain";
+    case Overlay::Photo:
+        return "photo";
     case Overlay::Biome:
         return "biome";
     case Overlay::Water:
@@ -546,6 +597,10 @@ std::vector<std::string> layers_for(Overlay overlay, std::string_view species) {
     case Overlay::Terrain: // for its lakes
     case Overlay::Biome:
         add({"planet/biome"});
+        break;
+    case Overlay::Photo:
+        add({"planet/biome", "forest/biomass", "forest/capacity", "forest/fire", "land/soil",
+             "land/snow", "ocean/temperature"});
         break;
     case Overlay::Water:
         add({"planet/biome", "planet/water_table", "land/water_table_rise"});
@@ -591,6 +646,7 @@ std::optional<Legend> legend_for(Overlay overlay, const Frame& frame, std::strin
     case Overlay::Terrain:
         layer = "planet/elevation";
         break;
+    case Overlay::Photo:
     case Overlay::Biome:
     case Overlay::Minerals:
     case Overlay::Heat:
