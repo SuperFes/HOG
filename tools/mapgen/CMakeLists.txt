@@ -9,6 +9,7 @@ target_compile_definitions(stb_image_write PUBLIC STBI_WRITE_NO_STDIO)
 add_library(hog_mapgen
     src/colour.cpp
     src/options.cpp
+    src/photo.cpp
     src/render.cpp
     src/season_render.cpp
     src/weather_render.cpp
@@ -27,6 +28,7 @@ hog_target_defaults(hog_mapgen_cli)
 hog_add_tests(hog_mapgen
     tests/colour_tests.cpp
     tests/options_tests.cpp
+    tests/photo_tests.cpp
     tests/render_tests.cpp
     tests/season_render_tests.cpp
     tests/weather_render_tests.cpp

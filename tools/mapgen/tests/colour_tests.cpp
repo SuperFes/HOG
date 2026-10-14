@@ -1,8 +1,10 @@
 #include <hog/mapgen/colour.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <cstdint>
 #include <limits>
 
 using hog::mapgen::ColourStop;
@@ -39,4 +41,19 @@ TEST_CASE("mixing moves one colour towards another", "[mapgen][colour]") {
     CHECK(hog::mapgen::mix(black, white, 0.5) == Rgb{128, 128, 128});
     CHECK(hog::mapgen::mix(black, white, -1.0) == black);
     CHECK(hog::mapgen::mix(black, white, 2.0) == white);
+}
+
+TEST_CASE("colours go to linear light and back", "[mapgen][colour]") {
+    using hog::mapgen::to_linear;
+    using hog::mapgen::to_srgb;
+    CHECK(to_linear({0, 0, 0}) == hog::mapgen::LinearRgb{0.0, 0.0, 0.0});
+    CHECK(to_linear({255, 255, 255}).g == Catch::Approx(1.0));
+    // Mid grey reflects about a fifth of the light.
+    CHECK(to_linear({128, 128, 128}).r == Catch::Approx(0.216).epsilon(0.01));
+    for (int value = 0; value < 256; value += 15) {
+        const auto channel = static_cast<std::uint8_t>(value);
+        const Rgb colour{channel, static_cast<std::uint8_t>(255 - value), 40};
+        CHECK(to_srgb(to_linear(colour)) == colour);
+    }
+    CHECK(to_srgb({2.0, -1.0, 0.5}) == Rgb{255, 0, 188});
 }
