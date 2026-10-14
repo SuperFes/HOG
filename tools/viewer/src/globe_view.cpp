@@ -18,13 +18,19 @@ void GlobeCamera::zoom(double steps) noexcept {
     orbit_ = render::zoomed(orbit_, steps, altitudes);
 }
 
-render::GlobeView globe_view(const GlobeCamera& camera, const Frame* frame, bool daylight) {
+render::GlobeView globe_view(const GlobeCamera& camera, const Frame* frame, GlobeLook look) {
     render::GlobeView view{.camera = camera.camera(),
                            .radius = 1.0,
                            .sun = DVec3{1.0, 0.0, 0.0},
                            .night_light = 1.0,
                            .twilight = sim::twilight};
-    if (frame == nullptr || !daylight) {
+    if (frame == nullptr) {
+        return view;
+    }
+    if (const double radius = frame->welcome().planet_radius; radius > 0.0) {
+        view.relief = look.relief / radius;
+    }
+    if (!look.daylight) {
         return view;
     }
     if (const auto calendar = calendar_of(frame->welcome())) {

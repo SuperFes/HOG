@@ -64,8 +64,10 @@ constexpr float deepest = 100'000.0F; // metres, for the underground overlays
 constexpr Uint32 idle_ms = 50;
 // What test runners take as skipped: there's no Vulkan to draw with.
 constexpr int no_vulkan = 77;
-constexpr int face_size = 512;  // pixels across each of the globe's faces
-constexpr int globe_cells = 64; // of its mesh, across each face
+constexpr int face_size = 512;      // pixels across each of the globe's faces
+constexpr int globe_cells = 128;    // of its mesh, across each face
+constexpr int relief_steps = 256;   // between the globe's heights across each face
+constexpr float most_relief = 5.0F; // times the land's true height
 constexpr VkFormat globe_depth = VK_FORMAT_D32_SFLOAT;
 constexpr VkClearColorValue window_colour{
     .float32 = {20.0F / 255.0F, 20.0F / 255.0F, 24.0F / 255.0F, 1.0F}};
@@ -269,28 +271,18 @@ public:
     // Precondition: showing.
     [[nodiscard]] ImTextureRef ref() const noexcept { return target_->ui.ref(); }
 
-    // Before the frame is laid out: sends new faces, stacked from face 0 down, to the GPU, and
-    // sizes the image to `wanted`, if it's any size.
-    Result<void> prepare(const render::Device& device, const render::Frame& frame,
-                         std::optional<mapgen::Image>& faces, VkExtent2D wanted) {
-        if (faces) {
-            const VkExtent2D extent{.width = static_cast<std::uint32_t>(faces->width),
-                                    .height = static_cast<std::uint32_t>(faces->width)};
-            if (auto sent = stream(device, frame, faces_, VK_FORMAT_R8G8B8A8_UNORM, extent,
-                                   viewer::rgba_texels(*faces));
-                !sent) {
-                return sent;
-            }
-            faces.reset();
-        }
-        if (!relief_) {
-            // Level ground, a texel on each corner of each face.
-            const std::array<float, std::size_t{4} * planet::face_count> level{};
-            if (auto sent = stream(device, frame, relief_, VK_FORMAT_R32_SFLOAT,
-                                   {.width = 2, .height = 2}, std::as_bytes(std::span{level}));
-                !sent) {
-                return sent;
-            }
+    // What's been drawn for the globe and not yet sent to the GPU, taken as it's sent.
+    struct Baked {
+        std::optional<mapgen::Image>& faces;        // stacked from face 0 down
+        std::optional<std::vector<float>>& heights; // as render_heights draws them
+    };
+
+    // Before the frame is laid out: sends what's newly baked to the GPU, and sizes the image to
+    // `wanted`, if it's any size.
+    Result<void> prepare(const render::Device& device, const render::Frame& frame, Baked baked,
+                         VkExtent2D wanted) {
+        if (auto sent = send(device, frame, baked); !sent) {
+            return sent;
         }
         if (wanted.width == 0 || wanted.height == 0 ||
             (target_ != nullptr && target_->image.desc().extent.width == wanted.width &&
@@ -349,6 +341,30 @@ private:
         render::Image depth;
         render::TrackedImage tracked_depth;
     };
+
+    Result<void> send(const render::Device& device, const render::Frame& frame, Baked baked) {
+        if (baked.faces) {
+            const VkExtent2D extent{.width = static_cast<std::uint32_t>(baked.faces->width),
+                                    .height = static_cast<std::uint32_t>(baked.faces->width)};
+            if (auto sent = stream(device, frame, faces_, VK_FORMAT_R8G8B8A8_UNORM, extent,
+                                   viewer::rgba_texels(*baked.faces));
+                !sent) {
+                return sent;
+            }
+            baked.faces.reset();
+        }
+        if (baked.heights) {
+            constexpr auto across = static_cast<std::uint32_t>(relief_steps) + 1;
+            if (auto sent = stream(device, frame, relief_, VK_FORMAT_R32_SFLOAT,
+                                   {.width = across, .height = across},
+                                   std::as_bytes(std::span{*baked.heights}));
+                !sent) {
+                return sent;
+            }
+            baked.heights.reset();
+        }
+        return {};
+    }
 
     render::Globe globe_;
     std::optional<render::StreamedImage> faces_;
@@ -419,6 +435,10 @@ struct View {
     std::uint64_t baked = 0;            // the link's frame count when the faces were last drawn
     std::uint64_t baked_ground = 0;     // and its ground count
     bool faces_stale = true;
+    float relief = 1.0F;                       // times the land's true height, on the globe
+    std::optional<std::vector<float>> heights; // drawn for the globe, but not yet sent to the GPU
+    bool heights_baked = false;                // with the land's elevation, since the edges changed
+    std::uint64_t heights_ground = 0;          // the link's ground count when last drawn
 };
 
 // The globe's faces before there's anything to draw on them.
@@ -475,17 +495,27 @@ void redraw(View& view, const viewer::Link& link, int width, jobs::JobSystem& jo
 // to draw.
 void rebake(View& view, const viewer::Link& link, jobs::JobSystem& jobs) {
     const std::shared_ptr<const viewer::Frame> frame = link.frame();
-    if (!view.globe || frame == nullptr ||
-        (!view.faces_stale && link.frames() == view.baked && link.grounds() == view.baked_ground)) {
+    if (!view.globe || frame == nullptr) {
         return;
     }
     const std::uint64_t grounds = link.grounds();
-    const std::shared_ptr<const probe::Ground> ground = link.ground();
-    view.faces = viewer::render_faces(grid_for(view, *frame), *frame, ground.get(), view.overlay,
-                                      view.species, face_size, view.natural, jobs);
-    view.baked = link.frames();
-    view.baked_ground = grounds;
-    view.faces_stale = false;
+    if (view.faces_stale || link.frames() != view.baked || grounds != view.baked_ground) {
+        const std::shared_ptr<const probe::Ground> ground = link.ground();
+        view.faces =
+            viewer::render_faces(grid_for(view, *frame), *frame, ground.get(), view.overlay,
+                                 view.species, face_size, view.natural, jobs);
+        view.baked = link.frames();
+        view.baked_ground = grounds;
+        view.faces_stale = false;
+    }
+    // The land rises and falls only where it's surveyed, so its heights wait for that.
+    if (!view.heights_baked || grounds != view.heights_ground) {
+        const std::shared_ptr<const probe::Ground> ground = link.ground();
+        view.heights = viewer::render_heights(grid_for(view, *frame), *frame, ground.get(),
+                                              relief_steps, view.natural, jobs);
+        view.heights_baked = !frame->layer("planet/elevation").empty();
+        view.heights_ground = grounds;
+    }
 }
 
 // Sends the newest map image to the GPU, before anything this frame samples it.
@@ -762,6 +792,7 @@ void sidebar(View& view, viewer::Link& link) {
     if (ImGui::Checkbox("natural edges", &view.natural)) {
         view.stale = true;
         view.faces_stale = true;
+        view.heights_baked = false;
     }
 
     ImGui::Separator();
@@ -777,6 +808,9 @@ void sidebar(View& view, viewer::Link& link) {
                                 ? std::format("altitude {:.2f} radii", view.orbit.orbit().altitude)
                                 : std::format("zoom {:.1f}x", view.map.zoom()))
                                .c_str());
+    if (view.globe) {
+        ImGui::SliderFloat("relief", &view.relief, 0.0F, most_relief, "%.1fx");
+    }
     if (ImGui::Button("whole planet")) {
         view.map.reset();
         view.orbit.reset();
@@ -937,8 +971,8 @@ Result<bool> draw(View& view, viewer::Link& link, const render::Device& device,
     if (auto uploaded = upload(view, device, frame); !uploaded) {
         return std::unexpected(std::move(uploaded).error());
     }
-    if (auto prepared =
-            panel.prepare(device, frame, view.faces, view.globe ? view.globe_wanted : VkExtent2D{});
+    if (auto prepared = panel.prepare(device, frame, {.faces = view.faces, .heights = view.heights},
+                                      view.globe ? view.globe_wanted : VkExtent2D{});
         !prepared) {
         return std::unexpected(std::move(prepared).error());
     }
@@ -950,7 +984,9 @@ Result<bool> draw(View& view, viewer::Link& link, const render::Device& device,
     ImGui::Render();
     if (view.globe) {
         panel.draw(frame.commands,
-                   viewer::globe_view(view.orbit, link.frame().get(), view.daylight));
+                   viewer::globe_view(
+                       view.orbit, link.frame().get(),
+                       {.daylight = view.daylight, .relief = static_cast<double>(view.relief)}));
     }
 
     frame.target.use_as(frame.commands, render::image_use::colour_target);
@@ -986,6 +1022,8 @@ int show(const viewer::Options& options, const render::Device& device, render::P
     view.species = options.species;
     view.globe = options.globe;
     view.faces = missing_faces();
+    // Level ground until the land's known.
+    view.heights.emplace(std::size_t{planet::face_count} * (relief_steps + 1) * (relief_steps + 1));
     link.want(viewer::layers_for(view.overlay, view.species));
     auto made = render::Globe::create(device, VK_FORMAT_R8G8B8A8_UNORM, globe_depth, globe_cells);
     if (!made) {

@@ -27,9 +27,16 @@ private:
     render::Orbit orbit_{.latitude = 0.0, .longitude = 0.0, .altitude = start_altitude};
 };
 
+// How the globe is shown.
+struct GlobeLook {
+    bool daylight = true;
+    // Times over the land's true height it stands, once the planet's size is known.
+    double relief = 1.0;
+};
+
 // The globe as seen from `camera`, lit by the sun as of `frame` when daylight is shown and the
 // server sent a calendar, and evenly otherwise.
 [[nodiscard]] render::GlobeView globe_view(const GlobeCamera& camera, const Frame* frame,
-                                           bool daylight);
+                                           GlobeLook look);
 
 } // namespace hog::viewer

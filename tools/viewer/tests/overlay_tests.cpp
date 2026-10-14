@@ -169,6 +169,56 @@ TEST_CASE("the planet's faces are drawn a pixel per cell, stacked", "[viewer][ov
     CHECK(tundra == 1);
 }
 
+TEST_CASE("heights stand on each face's corners, the sea level", "[viewer][overlay]") {
+    Planet planet = land();
+    planet.values("planet/ocean")[7] = 1.0F;
+    planet.values("planet/elevation")[7] = -3'000.0F;
+    for (std::size_t cell = 0; cell < planet.grid.size(); ++cell) {
+        if (cell != 7) {
+            planet.values("planet/elevation")[cell] += 10.0F * static_cast<float>(cell);
+        }
+    }
+    constexpr int cells = 1 << level;
+    constexpr int steps = 2 * cells;
+    constexpr std::size_t across = steps + 1;
+    jobs::JobSystem jobs{2};
+    const std::vector<float> heights =
+        viewer::render_heights(planet.grid, planet.frame(), nullptr, steps, false, jobs);
+    REQUIRE(heights.size() == planet::face_count * across * across);
+
+    std::vector<std::pair<DVec3, float>> seen;
+    for (int face = 0; face < planet::face_count; ++face) {
+        for (std::size_t j = 0; j < across; ++j) {
+            for (std::size_t i = 0; i < across; ++i) {
+                const float height =
+                    heights[(((static_cast<std::size_t>(face) * across) + j) * across) + i];
+                const DVec3 direction = glm::normalize(
+                    planet::face_uv_to_xyz(face, planet::st_to_uv(static_cast<double>(i) / steps),
+                                           planet::st_to_uv(static_cast<double>(j) / steps)));
+                // Odd points sit in the middle of a cell, where it's alone.
+                if (i % 2 == 1 && j % 2 == 1) {
+                    const std::uint32_t cell = planet.grid.index(planet::cell_at(direction, level));
+                    CHECK(height == (cell == 7 ? 0.0F : planet.values("planet/elevation")[cell]));
+                }
+                CHECK(height >= 0.0F);
+                seen.emplace_back(direction, height);
+            }
+        }
+    }
+    // Faces meet on their edges, and agree there.
+    int shared = 0;
+    for (std::size_t a = 0; a < seen.size(); ++a) {
+        for (std::size_t b = a + 1; b < seen.size(); ++b) {
+            if (glm::distance(seen[a].first, seen[b].first) < 1e-9) {
+                ++shared;
+                CHECK(std::abs(seen[a].second - seen[b].second) < 1e-3F);
+            }
+        }
+    }
+    // Each face's edges, without its corners, plus each of the cube's corners thrice over.
+    CHECK(shared == (12 * (steps - 1)) + (8 * 3));
+}
+
 TEST_CASE("a zoomed overlay draws only the shown part, at full size", "[viewer][overlay]") {
     Planet planet = land();
     planet.set("planet/biome", static_cast<float>(planet::Biome::Desert));

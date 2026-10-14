@@ -144,6 +144,18 @@ public:
         return mapgen::height_colour(fixed(std::max(smooth(elevation, spot), 1.0)));
     }
 
+    // Metres the land stands above the sea, and none for the sea, if known.
+    [[nodiscard]] std::optional<double> height(const Spot& spot) const {
+        if (const auto metres = elevation(spot)) {
+            return std::max(*metres, 0.0);
+        }
+        const std::span<const float> elevation = layer("planet/elevation");
+        if (elevation.empty()) {
+            return std::nullopt;
+        }
+        return ocean(spot) ? 0.0 : std::max(smooth(elevation, spot), 0.0);
+    }
+
     [[nodiscard]] std::optional<planet::Biome> biome(const Spot& spot) const {
         int index = 0;
         if (spot.sample) {
@@ -710,6 +722,29 @@ mapgen::Image render_faces(const sim::CellGrid& grid, const Frame& frame,
             }
         });
     return image;
+}
+
+std::vector<float> render_heights(const sim::CellGrid& grid, const Frame& frame,
+                                  const probe::Ground* ground, int steps, bool natural,
+                                  jobs::JobSystem& jobs) {
+    const auto across = static_cast<std::size_t>(steps) + 1;
+    std::vector<float> heights(planet::face_count * across * across);
+    const Sampler sampler{grid, frame, ground, natural};
+    jobs.parallel_for(
+        static_cast<std::uint32_t>(planet::face_count * across), 1,
+        [&](jobs::Range rows, std::uint32_t /*thread*/) {
+            for (std::uint32_t row = rows.begin; row < rows.end; ++row) {
+                const auto face = static_cast<int>(row / across);
+                const double v = planet::st_to_uv(static_cast<double>(row % across) / steps);
+                for (std::size_t column = 0; column < across; ++column) {
+                    const double u = planet::st_to_uv(static_cast<double>(column) / steps);
+                    const Spot spot = sampler.spot(planet::face_uv_to_xyz(face, u, v));
+                    heights[(row * across) + column] =
+                        static_cast<float>(sampler.height(spot).value_or(0.0));
+                }
+            }
+        });
+    return heights;
 }
 
 } // namespace hog::viewer

@@ -42,7 +42,7 @@ TEST_CASE("dragging turns the globe and zooming stays in range", "[viewer][globe
 
 TEST_CASE("the globe is lit by the frame's sun when daylight is shown", "[viewer][globe]") {
     const GlobeCamera camera;
-    CHECK(hog::viewer::globe_view(camera, nullptr, true).night_light == 1.0);
+    CHECK(hog::viewer::globe_view(camera, nullptr, {}).night_light == 1.0);
 
     hog::probe::Welcome welcome;
     welcome.day_length = hours{4};
@@ -51,15 +51,30 @@ TEST_CASE("the globe is lit by the frame's sun when daylight is shown", "[viewer
         hog::to_game_time(hog::WallClock::time_point{sys_days{2026y / March / 20} + 14h});
     const hog::viewer::Frame frame{welcome,
                                    hog::probe::Layers{.time = noon, .clock = {}, .layers = {}}, 0};
-    const hog::render::GlobeView lit = hog::viewer::globe_view(camera, &frame, true);
+    const hog::render::GlobeView lit = hog::viewer::globe_view(camera, &frame, {});
     CHECK(lit.night_light == hog::viewer::night_light);
     CHECK(lit.twilight == hog::sim::twilight);
     const hog::DVec3 sun = hog::sim::Calendar{hours{4}, 23.44}.sun_direction(noon);
     CHECK_THAT(glm::distance(lit.sun, sun), WithinAbs(0.0, 1e-12));
-    CHECK(hog::viewer::globe_view(camera, &frame, false).night_light == 1.0);
+    CHECK(hog::viewer::globe_view(camera, &frame, {.daylight = false}).night_light == 1.0);
 
     // Without a usable calendar, evenly.
     const hog::viewer::Frame timeless{
         hog::probe::Welcome{}, hog::probe::Layers{.time = noon, .clock = {}, .layers = {}}, 0};
-    CHECK(hog::viewer::globe_view(camera, &timeless, true).night_light == 1.0);
+    CHECK(hog::viewer::globe_view(camera, &timeless, {}).night_light == 1.0);
+}
+
+TEST_CASE("the land stands as high as the planet's size makes it, or higher", "[viewer][globe]") {
+    const GlobeCamera camera;
+    CHECK(hog::viewer::globe_view(camera, nullptr, {}).relief == 0.0);
+
+    hog::probe::Welcome welcome;
+    const hog::probe::Layers layers{.time = {}, .clock = {}, .layers = {}};
+    const hog::viewer::Frame sizeless{welcome, layers, 0};
+    CHECK(hog::viewer::globe_view(camera, &sizeless, {}).relief == 0.0);
+    welcome.planet_radius = 100'000.0;
+    const hog::viewer::Frame frame{welcome, layers, 0};
+    CHECK_THAT(hog::viewer::globe_view(camera, &frame, {}).relief, WithinAbs(1e-5, 1e-15));
+    CHECK_THAT(hog::viewer::globe_view(camera, &frame, {.daylight = false, .relief = 3.0}).relief,
+               WithinAbs(3e-5, 1e-15));
 }

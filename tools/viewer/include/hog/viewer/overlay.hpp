@@ -87,6 +87,13 @@ inline constexpr mapgen::Rgb arrow_colour{15, 25, 45};
                                          std::string_view species, int size, bool natural,
                                          jobs::JobSystem& jobs);
 
+// Metres the land stands above the sea, and none for the sea or where unknown, at (steps + 1)²
+// points per face with s and t of 0, 1 / steps, ... 1, stacked from face 0. Taken by direction, so
+// neighbouring faces agree where they meet.
+[[nodiscard]] std::vector<float> render_heights(const sim::CellGrid& grid, const Frame& frame,
+                                                const probe::Ground* ground, int steps,
+                                                bool natural, jobs::JobSystem& jobs);
+
 // Pale lows through white to dark red highs, in hPa.
 [[nodiscard]] mapgen::Rgb pressure_colour(double pressure) noexcept;
 
