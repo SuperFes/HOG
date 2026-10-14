@@ -1,6 +1,7 @@
 #pragma once
 
 #include <hog/core/result.hpp>
+#include <hog/mapgen/photo.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -81,6 +82,7 @@ struct WildlifeFrames {
 struct SeasonFrames {
     bool on = false;
     std::filesystem::path vegetation = "config/forest.toml";
+    Lighting lighting{}; // for the photo
 
     friend bool operator==(const SeasonFrames&, const SeasonFrames&) = default;
 };

@@ -178,7 +178,8 @@ int render_seasons(const hog::mapgen::Options& options, const hog::planet::Plane
         for (int map = 0; map < hog::mapgen::season_map_count; ++map) {
             const auto kind = static_cast<hog::mapgen::SeasonMap>(map);
             auto image = hog::mapgen::render_season(world.geology(), weather, forest, config.radius,
-                                                    options.view, kind, options.size, jobs);
+                                                    options.view, kind, options.size, jobs,
+                                                    options.seasons.lighting);
             const auto path = options.output / hog::mapgen::season_file_name(
                                                    options.view, kind, date.year() / date.month());
             if (write(path, image) != EXIT_SUCCESS) {

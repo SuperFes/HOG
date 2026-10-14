@@ -1,7 +1,14 @@
 #include <hog/mapgen/photo.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+#include <cmath>
+
+using hog::DVec2;
+using hog::DVec3;
+using hog::mapgen::Lighting;
 using hog::mapgen::LinearRgb;
 using hog::mapgen::true_colour;
 using hog::planet::Biome;
@@ -83,4 +90,61 @@ TEST_CASE("lakes are dark water that freezes white", "[mapgen][photo]") {
     CHECK(brightness(lake) < brightness(true_colour({.biome = Biome::Grassland})));
     CHECK(lake == true_colour({.biome = Biome::Lake, .plants = 0.0, .soil = 1.0}));
     CHECK(brightness(true_colour({.biome = Biome::Lake, .snow = 500.0})) > 0.7);
+}
+
+TEST_CASE("the sun stands where the lighting puts it", "[mapgen][photo]") {
+    const hog::planet::TangentFrame frame{};
+    const DVec3 sun = hog::mapgen::sun_towards(Lighting{}, frame);
+    CHECK(glm::length(sun) == Catch::Approx(1.0));
+    CHECK(sun.z == Catch::Approx(std::sin(glm::radians(35.0))));
+    // From the north-west.
+    CHECK(sun.x < 0.0);
+    CHECK(sun.y == Catch::Approx(-sun.x));
+    const DVec3 overhead = hog::mapgen::sun_towards(Lighting{.sun_elevation = 90.0}, frame);
+    CHECK(overhead.z == Catch::Approx(1.0));
+}
+
+TEST_CASE("a surface faces away from the ground falling under it", "[mapgen][photo]") {
+    using hog::mapgen::surface_normal;
+    const DVec3 up{0.0, 0.0, 1.0};
+    const DVec3 flat =
+        surface_normal({-1.0, 0.0, 0.0}, {1.0, 0.0, 0.0}, {0.0, -1.0, 0.0}, {0.0, 1.0, 0.0}, up);
+    CHECK(flat.z == Catch::Approx(1.0));
+    // Falling away eastwards, so it faces east.
+    const DVec3 slope =
+        surface_normal({-1.0, 0.0, 1.0}, {1.0, 0.0, -1.0}, {0.0, -1.0, 0.0}, {0.0, 1.0, 0.0}, up);
+    CHECK(slope.x == Catch::Approx(std::sqrt(0.5)));
+    CHECK(slope.z == Catch::Approx(std::sqrt(0.5)));
+    // The image's rows may run either way.
+    CHECK(surface_normal({-1.0, 0.0, 0.0}, {1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {0.0, -1.0, 0.0}, up)
+              .z == Catch::Approx(1.0));
+    CHECK(surface_normal({}, {}, {}, {}, up) == up);
+}
+
+TEST_CASE("slopes facing the sun are lit brighter and shadows by the sky alone",
+          "[mapgen][photo]") {
+    using hog::mapgen::light;
+    const Lighting lighting{};
+    const DVec3 up{0.0, 0.0, 1.0};
+    const DVec3 sun = hog::mapgen::sun_towards(lighting, {});
+    const double flat = light(up, up, sun, lighting.sky, false);
+    CHECK(flat / hog::mapgen::exposure(lighting) == Catch::Approx(1.0));
+    CHECK(light(glm::normalize(up + sun), up, sun, lighting.sky, false) > flat);
+    const DVec3 away = glm::normalize(up - (2.0 * sun));
+    CHECK(light(away, up, sun, lighting.sky, false) < 0.5 * flat);
+    CHECK(light(up, up, sun, lighting.sky, true) == Catch::Approx(lighting.sky));
+}
+
+TEST_CASE("higher ground towards the sun casts a shadow", "[mapgen][photo]") {
+    using hog::mapgen::in_shadow;
+    constexpr std::array heights{0.0, 0.0, 0.0, 100.0, 0.0};
+    const hog::mapgen::HeightField field{.width = 5, .height = 1, .heights = heights};
+    CHECK(in_shadow(field, 0, 0, DVec2{1.0, 0.0}, 10.0, 8));
+    // A sun high enough clears it.
+    CHECK_FALSE(in_shadow(field, 0, 0, DVec2{1.0, 0.0}, 50.0, 8));
+    // Too far to reach.
+    CHECK_FALSE(in_shadow(field, 0, 0, DVec2{1.0, 0.0}, 10.0, 2));
+    // Looking away from it, off the edge.
+    CHECK_FALSE(in_shadow(field, 2, 0, DVec2{-1.0, 0.0}, 0.0, 8));
+    CHECK_FALSE(in_shadow(field, 3, 0, DVec2{1.0, 0.0}, 0.0, 8));
 }

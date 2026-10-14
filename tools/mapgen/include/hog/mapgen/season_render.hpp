@@ -46,10 +46,11 @@ inline constexpr int season_map_count = static_cast<int>(SeasonMap::Photo) + 1;
 [[nodiscard]] Surface sample_surface(const planet::Geology& geology, const sim::Weather& weather,
                                      const sim::Forest& forest, DVec3 point, double across);
 
-// Precondition: the forest is on the weather's grid.
+// The photo is lit by `lighting`. Precondition: the forest is on the weather's grid.
 [[nodiscard]] Image render_season(const planet::Geology& geology, const sim::Weather& weather,
                                   const sim::Forest& forest, double planet_radius, const View& view,
-                                  SeasonMap map, int width, jobs::JobSystem& jobs);
+                                  SeasonMap map, int width, jobs::JobSystem& jobs,
+                                  const Lighting& lighting = {});
 
 // Frames side by side, `columns` across, filling rows from the top left. Precondition: at least
 // one frame, all the same size, and a positive column count.

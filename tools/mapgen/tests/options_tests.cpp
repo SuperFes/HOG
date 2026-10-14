@@ -78,9 +78,11 @@ TEST_CASE("mapgen reads every option", "[mapgen]") {
     CHECK(wildlife->wildlife ==
           hog::mapgen::WildlifeFrames{.years = 5, .every = 10, .ecology = "other.toml"});
 
-    const auto seasons = parse({"--seasons", "--vegetation", "plants.toml"});
+    const auto seasons = parse({"--seasons", "--vegetation", "plants.toml", "--relief", "2.5"});
     REQUIRE(seasons);
-    CHECK(seasons->seasons == hog::mapgen::SeasonFrames{.on = true, .vegetation = "plants.toml"});
+    CHECK(seasons->seasons == hog::mapgen::SeasonFrames{.on = true,
+                                                        .vegetation = "plants.toml",
+                                                        .lighting = {.relief = 2.5}});
 
     const auto help = parse({"--help"});
     REQUIRE(help);
@@ -96,6 +98,8 @@ TEST_CASE("mapgen rejects bad arguments", "[mapgen]") {
     CHECK(rejects({"--seed", "-3"}));
     CHECK(rejects({"--seed", "12x"}));
     CHECK(rejects({"--size", "1"}));
+    CHECK(rejects({"--relief", "-1"}));
+    CHECK(rejects({"--relief", "steep"}));
     CHECK(rejects({"--size", "100000"}));
     CHECK(rejects({"--layer", "volcanoes"}));
     CHECK(rejects({"--region", "10,20"}));

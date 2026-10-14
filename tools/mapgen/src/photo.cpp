@@ -105,4 +105,51 @@ LinearRgb true_colour(const Surface& surface) noexcept {
     return snowed(flowing(burning, surface), snow, look.canopy * plants);
 }
 
+DVec3 sun_towards(const Lighting& lighting, const planet::TangentFrame& frame) noexcept {
+    const double elevation = glm::radians(lighting.sun_elevation);
+    const double azimuth = glm::radians(lighting.sun_azimuth);
+    return frame.to_world({std::cos(elevation) * std::sin(azimuth),
+                           std::cos(elevation) * std::cos(azimuth), std::sin(elevation)});
+}
+
+DVec3 surface_normal(DVec3 left, DVec3 right, DVec3 below, DVec3 above, DVec3 up) noexcept {
+    const DVec3 normal = glm::cross(right - left, above - below);
+    const double length = glm::length(normal);
+    if (length <= 0.0) {
+        return up;
+    }
+    return glm::dot(normal, up) < 0.0 ? -normal / length : normal / length;
+}
+
+double light(DVec3 normal, DVec3 up, DVec3 sun, double sky, bool shadowed) noexcept {
+    const double direct = shadowed ? 0.0 : std::max(glm::dot(normal, sun), 0.0);
+    return direct + (sky * 0.5 * (1.0 + glm::dot(normal, up)));
+}
+
+double exposure(const Lighting& lighting) noexcept {
+    return std::max(std::sin(glm::radians(lighting.sun_elevation)), 0.0) + lighting.sky;
+}
+
+bool in_shadow(const HeightField& field, int x, int y, DVec2 step, double rise,
+               int steps) noexcept {
+    const auto at = [&](int column, int row) {
+        return field
+            .heights[(static_cast<std::size_t>(row) * static_cast<std::size_t>(field.width)) +
+                     static_cast<std::size_t>(column)];
+    };
+    const double ground = at(x, y);
+    for (int taken = 1; taken <= steps; ++taken) {
+        const DVec2 along = DVec2{x + 0.5, y + 0.5} + (step * static_cast<double>(taken));
+        const auto column = static_cast<int>(std::floor(along.x));
+        const auto row = static_cast<int>(std::floor(along.y));
+        if (column < 0 || row < 0 || column >= field.width || row >= field.height) {
+            return false;
+        }
+        if (at(column, row) > ground + (rise * static_cast<double>(taken))) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace hog::mapgen

@@ -78,6 +78,99 @@ std::string view_prefix(const View& view) {
     return layer_name.substr(0, layer_name.rfind('-'));
 }
 
+// Whether higher ground hides the sun, followed across the image along the sun's bearing, given
+// the metres a pixel spans across and down.
+bool casts_shadow(const HeightField& field, int x, int y, DVec3 sun, DVec3 up, DVec3 across,
+                  DVec3 down, int reach) {
+    const double rising = glm::dot(sun, up);
+    const DVec3 bearing = sun - (up * rising);
+    // The pixels across and down that head along the bearing.
+    const double aa = glm::dot(across, across);
+    const double ad = glm::dot(across, down);
+    const double dd = glm::dot(down, down);
+    const double determinant = (aa * dd) - (ad * ad);
+    if (rising <= 0.0 || glm::length(bearing) <= 0.0 || determinant <= 0.0) {
+        return false;
+    }
+    const double ba = glm::dot(bearing, across);
+    const double bd = glm::dot(bearing, down);
+    const DVec2 heading{((dd * ba) - (ad * bd)) / determinant,
+                        ((aa * bd) - (ad * ba)) / determinant};
+    // A pixel's step along the bearing, and the metres it covers.
+    const double pixels = glm::length(heading);
+    const double metres = glm::length(bearing) / pixels;
+    return in_shadow(field, x, y, heading / pixels, metres * rising / glm::length(bearing), reach);
+}
+
+// Pixels are coloured, then lit by the slope of the ground around them and any higher ground
+// between them and the sun.
+Image render_photo(const planet::Geology& geology, const sim::Weather& weather,
+                   const sim::Forest& forest, double planet_radius, const View& resolved,
+                   ImageSize size, const Lighting& lighting, jobs::JobSystem& jobs) {
+    const auto width = static_cast<std::size_t>(size.width);
+    const auto count = width * static_cast<std::size_t>(size.height);
+    std::vector<DVec3> points(count);
+    std::vector<double> heights(count);
+    std::vector<LinearRgb> colours(count);
+    const auto pixel = [&](int x, int y) {
+        return (static_cast<std::size_t>(y) * width) + static_cast<std::size_t>(x);
+    };
+    const auto rows = static_cast<std::uint32_t>(size.height);
+    jobs.parallel_for(rows, 1, [&](jobs::Range range, std::uint32_t /*thread*/) {
+        for (std::uint32_t row = range.begin; row < range.end; ++row) {
+            const auto y = static_cast<int>(row);
+            const int other = y + 1 < size.height ? y + 1 : y - 1;
+            for (int x = 0; x < size.width; ++x) {
+                const DVec3 point = pixel_direction(resolved, size, x, y, planet_radius);
+                const double across =
+                    glm::length(point - pixel_direction(resolved, size, x, other, planet_radius)) *
+                    planet_radius;
+                const Surface surface = sample_surface(geology, weather, forest, point, across);
+                points[pixel(x, y)] = point;
+                heights[pixel(x, y)] = lighting.relief * surface.height;
+                colours[pixel(x, y)] = true_colour(surface);
+            }
+        }
+    });
+    Image image{
+        .width = size.width, .height = size.height, .pixels = std::vector<std::uint8_t>(3 * count)};
+    const HeightField field{.width = size.width, .height = size.height, .heights = heights};
+    const double exposed = exposure(lighting);
+    jobs.parallel_for(rows, 1, [&](jobs::Range range, std::uint32_t /*thread*/) {
+        for (std::uint32_t row = range.begin; row < range.end; ++row) {
+            const auto y = static_cast<int>(row);
+            const int below = std::max(y - 1, 0);
+            const int above = std::min(y + 1, size.height - 1);
+            for (int x = 0; x < size.width; ++x) {
+                const int left = std::max(x - 1, 0);
+                const int right = std::min(x + 1, size.width - 1);
+                const auto ground = [&](int column, int line) {
+                    const std::size_t at = pixel(column, line);
+                    return points[at] * (planet_radius + heights[at]);
+                };
+                const auto flat = [&](int column, int line) {
+                    return points[pixel(column, line)] * planet_radius;
+                };
+                const planet::TangentFrame frame = planet::tangent_frame(points[pixel(x, y)]);
+                const DVec3 normal = surface_normal(ground(left, y), ground(right, y),
+                                                    ground(x, below), ground(x, above), frame.up);
+                const DVec3 sun = sun_towards(lighting, frame);
+                const bool shadowed = casts_shadow(
+                    field, x, y, sun, frame.up,
+                    (flat(right, y) - flat(left, y)) / static_cast<double>(right - left),
+                    (flat(x, above) - flat(x, below)) / static_cast<double>(above - below),
+                    lighting.shadow_reach);
+                const LinearRgb lit =
+                    colours[pixel(x, y)] *
+                    (light(normal, frame.up, sun, lighting.sky, shadowed) / exposed);
+                std::ranges::copy(to_srgb(lit), image.pixels.begin() +
+                                                    static_cast<std::ptrdiff_t>(3 * pixel(x, y)));
+            }
+        }
+    });
+    return image;
+}
+
 } // namespace
 
 std::string_view to_string(SeasonMap map) noexcept {
@@ -124,7 +217,8 @@ Surface sample_surface(const planet::Geology& geology, const sim::Weather& weath
     const std::vector<sim::Ground>& ground = weather.ground();
     const planet::Elevation& terrain = geology.terrain();
     const planet::CellId cell = planet::cell_at(point);
-    if (const std::int64_t elevation = terrain.elevation(cell); elevation <= 0) {
+    const std::int64_t elevation = terrain.elevation(cell);
+    if (elevation <= 0) {
         const std::vector<float>& sea = weather.ocean().temperature;
         const double freezing = sim::OceanTuning{}.freezing;
         return Surface{.biome = planet::Biome::Ocean,
@@ -135,10 +229,12 @@ Surface sample_surface(const planet::Geology& geology, const sim::Weather& weath
     }
     const sim::LandFields& land = weather.land().fields();
     const sim::ForestFields& plants = forest.fields();
+    const double height = planet::fixed_to_double(elevation);
     const auto field = [&](const std::vector<float>& values) {
         return on_land(grid, ground, point, [&](std::uint32_t index) { return at(values, index); });
     };
-    Surface surface{.plants = on_land(grid, ground, point,
+    Surface surface{.height = height,
+                    .plants = on_land(grid, ground, point,
                                       [&](std::uint32_t index) {
                                           const double capacity = forest.capacity(index);
                                           return capacity > 0.0
@@ -167,10 +263,14 @@ Surface sample_surface(const planet::Geology& geology, const sim::Weather& weath
 
 Image render_season(const planet::Geology& geology, const sim::Weather& weather,
                     const sim::Forest& forest, double planet_radius, const View& view,
-                    SeasonMap map, int width, jobs::JobSystem& jobs) {
+                    SeasonMap map, int width, jobs::JobSystem& jobs, const Lighting& lighting) {
     HOG_ASSERT(forest.grid().level() == weather.grid().level(), "forest off the weather's grid");
     const View resolved = resolve(view, geology);
     const ImageSize size = image_size(resolved, width);
+    if (map == SeasonMap::Photo) {
+        return render_photo(geology, weather, forest, planet_radius, resolved, size, lighting,
+                            jobs);
+    }
     Image image{.width = size.width,
                 .height = size.height,
                 .pixels = std::vector<std::uint8_t>(3 * static_cast<std::size_t>(size.width) *
@@ -221,9 +321,8 @@ Image render_season(const planet::Geology& geology, const sim::Weather& weather,
                                                    static_cast<double>(planet::fixed_one)));
         case SeasonMap::Rain:
             return rain_colour(field(fields.recent_precipitation));
-        case SeasonMap::Photo:
-            return to_srgb(true_colour(
-                sample_surface(geology, weather, forest, point, 2.0 * margin(point, x, y))));
+        case SeasonMap::Photo: // lit by render_photo
+            break;
         case SeasonMap::Land:
         case SeasonMap::Forest: {
             const planet::CellId cell = planet::cell_at(point);

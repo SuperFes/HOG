@@ -237,6 +237,16 @@ constexpr std::array flags{
              options.seasons.vegetation = std::filesystem::path{value};
              return {};
          }},
+    Flag{.name = "--relief",
+         .handler = [](Options& options, std::string_view value) -> Result<void> {
+             const auto relief = parse_double(value);
+             if (!relief || *relief < 0.0) {
+                 return invalid(
+                     std::format("--relief {} is not a height scale of 0 or more", value));
+             }
+             options.seasons.lighting.relief = *relief;
+             return {};
+         }},
     Flag{.name = "--cell-km",
          .handler = [](Options& options, std::string_view value) -> Result<void> {
              const auto km = parse_double(value);
@@ -294,11 +304,12 @@ Writes PNG maps of a generated planet, one per layer, named <view>-<layer>.png.
   --every-days DAYS    days between wildlife maps and totals (default 30)
   --ecology PATH       species and forage (default config/ecology.toml)
   --seasons            instead of the layers, follows the weather, land and plants for a
-                       year and writes temperature, rain, land and forest maps on the
-                       same day of each month, named <view>-seasons-<month>-<map>.png,
+                       year and writes temperature, rain, land, forest and photo maps on
+                       the same day of each month, named <view>-seasons-<month>-<map>.png,
                        and a sheet of all twelve per map, <view>-seasons-<map>.png,
                        after sixty days for the weather to settle
   --vegetation PATH    plants for the seasons (default config/forest.toml)
+  --relief SCALE       how many times over the photo draws the heights (default 4)
   --cell-km KM         weather and wildlife grid cells at most KM across (default 6)
   --help               shows this
 )";
