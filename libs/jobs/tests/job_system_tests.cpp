@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <mutex>
 #include <numeric>
@@ -141,4 +142,48 @@ TEST_CASE("parallel_for checks its preconditions", "[jobs]") {
     }};
     outsider.join();
     CHECK(rejected);
+}
+
+TEST_CASE("an Async hands back what it worked out", "[jobs]") {
+    hog::jobs::JobSystem jobs{pool_threads};
+    hog::jobs::Async<std::uint64_t> sum{jobs, [] {
+                                            std::uint64_t total = 0;
+                                            for (std::uint64_t i = 1; i <= 1'000; ++i) {
+                                                total += i;
+                                            }
+                                            return total;
+                                        }};
+    while (!sum.done()) {
+        std::this_thread::yield();
+    }
+    CHECK(sum.take() == 500'500);
+
+    const hog::testing::AssertionGuard guard;
+    CHECK_THROWS_AS((void)sum.take(), hog::testing::AssertionFailed);
+}
+
+TEST_CASE("an Async rethrows what it threw once taken", "[jobs]") {
+    hog::jobs::JobSystem jobs{pool_threads};
+    hog::jobs::Async<int> failing{jobs, [] -> int { throw std::runtime_error{"job failed"}; }};
+    CHECK_THROWS_AS(failing.take(), std::runtime_error);
+}
+
+TEST_CASE("an Async runs without workers once waited on", "[jobs]") {
+    hog::jobs::JobSystem jobs{1};
+    hog::jobs::Async<int> answer{jobs, [] { return 42; }};
+    CHECK(answer.take() == 42);
+}
+
+TEST_CASE("destroying an Async waits for it", "[jobs]") {
+    hog::jobs::JobSystem jobs{pool_threads};
+    std::atomic<bool> finished{false};
+    {
+        const hog::jobs::Async<bool> slow{jobs, [&] {
+                                              std::this_thread::sleep_for(
+                                                  std::chrono::milliseconds{20});
+                                              finished = true;
+                                              return true;
+                                          }};
+    }
+    CHECK(finished.load());
 }
