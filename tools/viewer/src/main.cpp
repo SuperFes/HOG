@@ -66,6 +66,7 @@ constexpr Uint32 idle_ms = 50;
 constexpr int no_vulkan = 77;
 constexpr int face_size = 512;  // pixels across each of the globe's faces
 constexpr int globe_cells = 64; // of its mesh, across each face
+constexpr VkFormat globe_depth = VK_FORMAT_D32_SFLOAT;
 constexpr VkClearColorValue window_colour{
     .float32 = {20.0F / 255.0F, 20.0F / 255.0F, 24.0F / 255.0F, 1.0F}};
 constexpr VkClearColorValue space_colour{
@@ -234,6 +235,28 @@ Result<void> wait_idle(const render::Device& device, std::string_view why) {
     return {};
 }
 
+// Records replacing an image's texels, a layer per cube face, making it anew when its size or
+// format changes.
+Result<void> stream(const render::Device& device, const render::Frame& frame,
+                    std::optional<render::StreamedImage>& image, VkFormat format, VkExtent2D extent,
+                    std::span<const std::byte> texels) {
+    if (!image || image->image().desc().format != format ||
+        image->image().desc().extent.width != extent.width ||
+        image->image().desc().extent.height != extent.height) {
+        if (auto waited = wait_idle(device, "waiting to replace the globe's images"); !waited) {
+            return waited;
+        }
+        image.reset();
+        auto made = render::make_streamed_image(device, format, extent, render::frames_in_flight,
+                                                planet::face_count);
+        if (!made) {
+            return std::unexpected(std::move(made).error());
+        }
+        image = std::move(made).value();
+    }
+    return image->update(frame.commands, frame.slot, texels);
+}
+
 // The globe, drawn into an image of its own that ImGui shows in the map's place.
 class GlobePanel {
 public:
@@ -241,7 +264,7 @@ public:
 
     // Whether there's an image to show, once drawn this frame.
     [[nodiscard]] bool showing() const noexcept {
-        return target_ != nullptr && faces_ && faces_->ready();
+        return target_ != nullptr && faces_ && faces_->ready() && relief_ && relief_->ready();
     }
     // Precondition: showing.
     [[nodiscard]] ImTextureRef ref() const noexcept { return target_->ui.ref(); }
@@ -251,10 +274,23 @@ public:
     Result<void> prepare(const render::Device& device, const render::Frame& frame,
                          std::optional<mapgen::Image>& faces, VkExtent2D wanted) {
         if (faces) {
-            if (auto sent = send(device, frame, *faces); !sent) {
+            const VkExtent2D extent{.width = static_cast<std::uint32_t>(faces->width),
+                                    .height = static_cast<std::uint32_t>(faces->width)};
+            if (auto sent = stream(device, frame, faces_, VK_FORMAT_R8G8B8A8_UNORM, extent,
+                                   viewer::rgba_texels(*faces));
+                !sent) {
                 return sent;
             }
             faces.reset();
+        }
+        if (!relief_) {
+            // Level ground, a texel on each corner of each face.
+            const std::array<float, std::size_t{4} * planet::face_count> level{};
+            if (auto sent = stream(device, frame, relief_, VK_FORMAT_R32_SFLOAT,
+                                   {.width = 2, .height = 2}, std::as_bytes(std::span{level}));
+                !sent) {
+                return sent;
+            }
         }
         if (wanted.width == 0 || wanted.height == 0 ||
             (target_ != nullptr && target_->image.desc().extent.width == wanted.width &&
@@ -272,55 +308,51 @@ public:
         if (!image) {
             return std::unexpected(std::move(image).error());
         }
-        target_ = std::make_unique<Target>(std::move(image).value());
+        auto depth =
+            render::make_image(device, {.format = globe_depth,
+                                        .extent = wanted,
+                                        .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+                                        .aspect = VK_IMAGE_ASPECT_DEPTH_BIT});
+        if (!depth) {
+            return std::unexpected(std::move(depth).error());
+        }
+        target_ = std::make_unique<Target>(std::move(image).value(), std::move(depth).value());
         return {};
     }
 
     // Records drawing the globe into its image, ready for ImGui to show.
     void draw(VkCommandBuffer commands, const render::GlobeView& view) {
-        if (!faces_ || !showing()) {
+        if (!faces_ || !relief_ || !showing()) {
             return;
         }
         const VkExtent2D extent = target_->image.desc().extent;
         target_->tracked.use_as(commands, render::image_use::colour_target);
-        render::begin_rendering(commands, target_->image.view(), extent, space_colour);
-        globe_.draw(commands, extent, faces_->image(), view);
+        target_->tracked_depth.use_as(commands, render::image_use::depth_target);
+        render::begin_rendering(commands, target_->image.view(), extent, space_colour,
+                                {.view = target_->depth.view()});
+        globe_.draw(commands, extent, {.faces = &faces_->image(), .relief = &relief_->image()},
+                    view);
         vkCmdEndRendering(commands);
         target_->tracked.use_as(commands, render::image_use::sampled);
     }
 
 private:
     struct Target {
-        explicit Target(render::Image made)
-            : image{std::move(made)}, tracked{image.handle(), VK_IMAGE_ASPECT_COLOR_BIT},
-              ui{image.view()} {}
+        Target(render::Image colour, render::Image depth_image)
+            : image{std::move(colour)}, tracked{image.handle(), VK_IMAGE_ASPECT_COLOR_BIT},
+              ui{image.view()}, depth{std::move(depth_image)},
+              tracked_depth{depth.handle(), VK_IMAGE_ASPECT_DEPTH_BIT} {}
 
         render::Image image;
         render::TrackedImage tracked;
         UiTexture ui;
+        render::Image depth;
+        render::TrackedImage tracked_depth;
     };
-
-    Result<void> send(const render::Device& device, const render::Frame& frame,
-                      const mapgen::Image& faces) {
-        const VkExtent2D extent{.width = static_cast<std::uint32_t>(faces.width),
-                                .height = static_cast<std::uint32_t>(faces.width)};
-        if (!faces_ || faces_->image().desc().extent.width != extent.width) {
-            if (auto waited = wait_idle(device, "waiting to replace the globe's faces"); !waited) {
-                return waited;
-            }
-            faces_.reset();
-            auto made = render::make_streamed_image(device, VK_FORMAT_R8G8B8A8_UNORM, extent,
-                                                    render::frames_in_flight, planet::face_count);
-            if (!made) {
-                return std::unexpected(std::move(made).error());
-            }
-            faces_ = std::move(made).value();
-        }
-        return faces_->update(frame.commands, frame.slot, viewer::rgba_texels(faces));
-    }
 
     render::Globe globe_;
     std::optional<render::StreamedImage> faces_;
+    std::optional<render::StreamedImage> relief_;
     std::unique_ptr<Target> target_;
 };
 
@@ -955,7 +987,7 @@ int show(const viewer::Options& options, const render::Device& device, render::P
     view.globe = options.globe;
     view.faces = missing_faces();
     link.want(viewer::layers_for(view.overlay, view.species));
-    auto made = render::Globe::create(device, VK_FORMAT_R8G8B8A8_UNORM, globe_cells);
+    auto made = render::Globe::create(device, VK_FORMAT_R8G8B8A8_UNORM, globe_depth, globe_cells);
     if (!made) {
         std::cerr << std::format("hog-viewer: can't draw the globe: {}\n", made.error());
         return EXIT_FAILURE;

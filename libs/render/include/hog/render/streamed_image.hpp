@@ -27,7 +27,7 @@ public:
     [[nodiscard]] bool ready() const noexcept { return tracked_.use() == image_use::sampled; }
 
     // Records copying in `texels`, rows packed tightly from the top and layers one after another,
-    // and readies the image for fragment shaders. The slot's last frame must have finished.
+    // and readies the image for shaders to sample. The slot's last frame must have finished.
     Result<> update(VkCommandBuffer commands, std::uint32_t slot,
                     std::span<const std::byte> texels);
 

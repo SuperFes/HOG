@@ -76,6 +76,29 @@ TEST_CASE("each cube sphere cell spans one texel of its face", "[render][cube_sp
     }
 }
 
+TEST_CASE("cube sphere vertices know which way the surface runs", "[render][cube_sphere]") {
+    constexpr int cells = 8;
+    const auto mesh = hog::render::cube_sphere(cells);
+    REQUIRE(mesh.along_s.size() == mesh.positions.size());
+    REQUIRE(mesh.along_t.size() == mesh.positions.size());
+    constexpr std::size_t across = cells + 1;
+    for (std::size_t at = 0; at < mesh.positions.size(); ++at) {
+        const DVec3 position{mesh.positions[at]};
+        const DVec3 along_s{mesh.along_s[at]};
+        const DVec3 along_t{mesh.along_t[at]};
+        CHECK_THAT(glm::dot(position, along_s), WithinAbs(0.0, 1e-4));
+        CHECK_THAT(glm::dot(position, along_t), WithinAbs(0.0, 1e-4));
+        CHECK(glm::dot(glm::cross(along_s, along_t), position) > 0.0);
+        // A step of one cell along s, by the mean of the ends' tangents, lands on the next vertex.
+        if ((at % across) + 1 < across) {
+            const DVec3 mean = (along_s + DVec3{mesh.along_s[at + 1]}) / 2.0;
+            CHECK_THAT(
+                glm::distance(position + (mean / double{cells}), DVec3{mesh.positions[at + 1]}),
+                WithinAbs(0.0, 0.05 / cells));
+        }
+    }
+}
+
 TEST_CASE("cube sphere triangles face outwards and close the sphere", "[render][cube_sphere]") {
     constexpr int cells = 32;
     const auto mesh = hog::render::cube_sphere(cells);

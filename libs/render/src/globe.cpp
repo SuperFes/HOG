@@ -20,12 +20,16 @@ namespace {
 struct Vertex {
     Vec3 position;
     Vec3 face_point;
+    Vec3 along_s;
+    Vec3 along_t;
 };
 
 struct Push {
     Mat4 clip_from_planet;
     glm::vec4 sun;
     float twilight = 0.0F;
+    float relief = 0.0F;
+    float relief_steps = 0.0F;
 };
 
 // A host-written buffer the GPU reads from, holding `bytes`.
@@ -42,23 +46,42 @@ Result<Buffer> upload(const Device& device, std::span<const std::byte> bytes,
     return buffer;
 }
 
-Push push_for(const GlobeView& view, VkExtent2D extent) {
+Push push_for(const GlobeView& view, VkExtent2D extent, const Image& relief) {
     const double aspect = static_cast<double>(extent.width) / static_cast<double>(extent.height);
     const glm::dmat4 planet_from_unit =
         glm::scale(glm::translate(glm::dmat4{1.0}, -view.camera.eye.metres()), DVec3{view.radius});
     return {.clip_from_planet =
                 Mat4{glm::dmat4{view_projection(view.camera, aspect)} * planet_from_unit},
             .sun = glm::vec4{Vec3{view.sun}, static_cast<float>(view.night_light)},
-            .twilight = static_cast<float>(std::max(view.twilight, 1e-6))};
+            .twilight = static_cast<float>(std::max(view.twilight, 1e-6)),
+            .relief = static_cast<float>(view.relief),
+            .relief_steps = static_cast<float>(relief.desc().extent.width - 1)};
+}
+
+VkVertexInputAttributeDescription attribute(std::uint32_t location, std::uint32_t offset) {
+    return {
+        .location = location, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offset};
+}
+
+VkDescriptorSetLayoutBinding sampled_image(std::uint32_t binding, VkShaderStageFlags stages) {
+    return {.binding = binding,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = 1,
+            .stageFlags = stages,
+            .pImmutableSamplers = nullptr};
 }
 
 } // namespace
 
-Result<Globe> Globe::create(const Device& device, VkFormat colour_format, int cells) {
+Result<Globe> Globe::create(const Device& device, VkFormat colour_format, VkFormat depth_format,
+                            int cells) {
     const Mesh mesh = cube_sphere(cells);
     std::vector<Vertex> vertices(mesh.positions.size());
     for (std::size_t at = 0; at < vertices.size(); ++at) {
-        vertices[at] = {.position = mesh.positions[at], .face_point = mesh.face_points[at]};
+        vertices[at] = {.position = mesh.positions[at],
+                        .face_point = mesh.face_points[at],
+                        .along_s = mesh.along_s[at],
+                        .along_t = mesh.along_t[at]};
     }
 
     Globe globe;
@@ -85,24 +108,16 @@ Result<Globe> Globe::create(const Device& device, VkFormat colour_format, int ce
     const std::array bindings{VkVertexInputBindingDescription{
         .binding = 0, .stride = sizeof(Vertex), .inputRate = VK_VERTEX_INPUT_RATE_VERTEX}};
     const std::array attributes{
-        VkVertexInputAttributeDescription{.location = 0,
-                                          .binding = 0,
-                                          .format = VK_FORMAT_R32G32B32_SFLOAT,
-                                          .offset = offsetof(Vertex, position)},
-        VkVertexInputAttributeDescription{.location = 1,
-                                          .binding = 0,
-                                          .format = VK_FORMAT_R32G32B32_SFLOAT,
-                                          .offset = offsetof(Vertex, face_point)}};
+        attribute(0, offsetof(Vertex, position)), attribute(1, offsetof(Vertex, face_point)),
+        attribute(2, offsetof(Vertex, along_s)), attribute(3, offsetof(Vertex, along_t))};
     const std::array descriptors{
-        VkDescriptorSetLayoutBinding{.binding = 0,
-                                     .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                                     .descriptorCount = 1,
-                                     .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-                                     .pImmutableSamplers = nullptr}};
+        sampled_image(0, VK_SHADER_STAGE_FRAGMENT_BIT),
+        sampled_image(1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)};
     auto pipeline = make_pipeline(device, {.spirv = shaders::globe,
                                            .bindings = bindings,
                                            .attributes = attributes,
                                            .colour_format = colour_format,
+                                           .depth_format = depth_format,
                                            .cull = VK_CULL_MODE_BACK_BIT,
                                            .push_constant_bytes = sizeof(Push),
                                            .descriptors = descriptors});
@@ -113,14 +128,16 @@ Result<Globe> Globe::create(const Device& device, VkFormat colour_format, int ce
     return globe;
 }
 
-void Globe::draw(VkCommandBuffer commands, VkExtent2D extent, const Image& faces,
+void Globe::draw(VkCommandBuffer commands, VkExtent2D extent, const GlobeImages& images,
                  const GlobeView& view) const noexcept {
-    if (extent.width == 0 || extent.height == 0) {
+    if (extent.width == 0 || extent.height == 0 || images.faces == nullptr ||
+        images.relief == nullptr) {
         return;
     }
-    const Push push = push_for(view, extent);
+    const Push push = push_for(view, extent, *images.relief);
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.handle());
-    push_sampled_image(commands, pipeline_, 0, faces.view(), sampler_.handle());
+    push_sampled_image(commands, pipeline_, 0, images.faces->view(), sampler_.handle());
+    push_sampled_image(commands, pipeline_, 1, images.relief->view(), sampler_.handle());
     vkCmdPushConstants(commands, pipeline_.layout(),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push),
                        &push);

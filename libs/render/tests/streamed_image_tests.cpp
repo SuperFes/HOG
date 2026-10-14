@@ -70,8 +70,9 @@ std::vector<std::uint8_t> draw_layer(hog::render::Device& device, const hog::ren
 
 } // namespace
 
-TEST_CASE("only 4-byte colour formats are streamed", "[render]") {
+TEST_CASE("only 4-byte colours and heights are streamed", "[render]") {
     CHECK(hog::render::texel_bytes(VK_FORMAT_R8G8B8A8_UNORM) == 4U);
+    CHECK(hog::render::texel_bytes(VK_FORMAT_R32_SFLOAT) == 4U);
     CHECK(hog::render::texel_bytes(VK_FORMAT_B8G8R8A8_SRGB) == 4U);
     CHECK_FALSE(hog::render::texel_bytes(VK_FORMAT_R8G8B8_UNORM).has_value());
     CHECK_FALSE(hog::render::texel_bytes(VK_FORMAT_D32_SFLOAT).has_value());
