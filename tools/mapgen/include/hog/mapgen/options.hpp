@@ -82,7 +82,8 @@ struct WildlifeFrames {
 struct SeasonFrames {
     bool on = false;
     std::filesystem::path vegetation = "config/forest.toml";
-    Lighting lighting{}; // for the photo
+    std::chrono::minutes time{0}; // of day, UTC
+    Lighting lighting{};          // for the photo
 
     friend bool operator==(const SeasonFrames&, const SeasonFrames&) = default;
 };

@@ -127,12 +127,16 @@ TEST_CASE("slopes facing the sun are lit brighter and shadows by the sky alone",
     const Lighting lighting{};
     const DVec3 up{0.0, 0.0, 1.0};
     const DVec3 sun = hog::mapgen::sun_towards(lighting, {});
-    const double flat = light(up, up, sun, lighting.sky, false);
+    const double flat = light(up, up, sun, lighting.sky, 1.0);
     CHECK(flat / hog::mapgen::exposure(lighting) == Catch::Approx(1.0));
-    CHECK(light(glm::normalize(up + sun), up, sun, lighting.sky, false) > flat);
+    CHECK(light(glm::normalize(up + sun), up, sun, lighting.sky, 1.0) > flat);
     const DVec3 away = glm::normalize(up - (2.0 * sun));
-    CHECK(light(away, up, sun, lighting.sky, false) < 0.5 * flat);
-    CHECK(light(up, up, sun, lighting.sky, true) == Catch::Approx(lighting.sky));
+    CHECK(light(away, up, sun, lighting.sky, 1.0) < 0.5 * flat);
+    const double shaded = light(up, up, sun, lighting.sky, 0.0);
+    CHECK(shaded == Catch::Approx(lighting.sky).margin(0.02));
+    const double hazy = light(up, up, sun, lighting.sky, 0.5);
+    CHECK(hazy > shaded);
+    CHECK(hazy < flat);
 }
 
 TEST_CASE("higher ground towards the sun casts a shadow", "[mapgen][photo]") {
@@ -193,4 +197,55 @@ TEST_CASE("storm tops are whiter than other cloud", "[mapgen][photo]") {
     CHECK(brightness(hog::mapgen::cloud_colour(cloud, 1.0)) >
           brightness(hog::mapgen::cloud_colour(cloud, 0.0)));
     CHECK(brightness(hog::mapgen::cloud_colour(cloud, 0.0)) > 0.5);
+}
+
+TEST_CASE("night falls where the sun has set", "[mapgen][photo]") {
+    using hog::mapgen::light;
+    const Lighting lighting{.real_sun = true};
+    const DVec3 up{0.0, 0.0, 1.0};
+    // Exposed for the sun overhead.
+    CHECK(light(up, up, up, lighting.sky, 1.0) / hog::mapgen::exposure(lighting) ==
+          Catch::Approx(1.0));
+    const DVec3 set = glm::normalize(DVec3{1.0, 0.0, -0.6});
+    const double night = light(up, up, set, lighting.sky, 1.0);
+    CHECK(night > 0.0);
+    CHECK(night < 0.02);
+    // A slope facing a sun that has set still lies in the planet's shadow.
+    CHECK(light(glm::normalize(DVec3{1.0, 0.0, 0.2}), up, set, lighting.sky, 1.0) == night);
+}
+
+TEST_CASE("the sun glints off water below it", "[mapgen][photo]") {
+    using hog::mapgen::sea_glint;
+    const DVec3 up{0.0, 0.0, 1.0};
+    CHECK(sea_glint(up, up) == Catch::Approx(1.0));
+    const DVec3 high = hog::mapgen::sun_towards(Lighting{.sun_elevation = 75.0}, {});
+    const DVec3 low = hog::mapgen::sun_towards(Lighting{}, {});
+    CHECK(sea_glint(up, high) < 1.0);
+    CHECK(sea_glint(up, high) > sea_glint(up, low));
+    CHECK(sea_glint(up, low) < 0.1);
+    CHECK(sea_glint(up, -up) == 0.0);
+}
+
+TEST_CASE("open water is sea free of ice and lakes free of snow", "[mapgen][photo]") {
+    using hog::mapgen::open_water;
+    CHECK(open_water({.biome = Biome::Ocean}) == 1.0);
+    CHECK(open_water({.biome = Biome::Ocean, .ice = 0.25}) == 0.75);
+    CHECK(open_water({.biome = Biome::Lake}) == 1.0);
+    CHECK(open_water({.biome = Biome::Lake, .snow = 100.0}) < 0.25);
+    CHECK(open_water({.biome = Biome::Grassland, .river = 1.0}) == 0.0);
+}
+
+TEST_CASE("clouds shade the ground away from the sun", "[mapgen][photo]") {
+    using hog::mapgen::towards_clouds;
+    constexpr double radius = 100'000.0;
+    const DVec3 up{0.0, 0.0, 1.0};
+    CHECK(glm::length(towards_clouds(up, up, 3'000.0, radius) - up) < 1e-12);
+    // With the sun 45° up in the east, the cloud shading a point lies its height to the east.
+    const DVec3 east_sun = glm::normalize(DVec3{1.0, 0.0, 1.0});
+    const DVec3 above = towards_clouds(up, east_sun, 3'000.0, radius);
+    CHECK(above.x * radius == Catch::Approx(3'000.0).epsilon(0.05));
+    CHECK(above.y == 0.0);
+    // Held near with the sun on the horizon.
+    const DVec3 low = towards_clouds(up, DVec3{1.0, 0.0, 0.0}, 3'000.0, radius);
+    CHECK(low.x * radius == Catch::Approx(30'000.0).epsilon(0.05));
 }

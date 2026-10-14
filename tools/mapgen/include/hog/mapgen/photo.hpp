@@ -33,8 +33,12 @@ struct Lighting {
     double relief = 4.0;         // how many times over the heights are drawn
     double sun_elevation = 35.0; // degrees above the horizon
     double sun_azimuth = 315.0;  // degrees clockwise from north that the light comes from
-    double sky = 0.25;           // light from the open sky, against the sun's 1 overhead
-    int shadow_reach = 32;       // pixels a shadow is looked for towards the sun
+    // The sun where the calendar has it at the photo's time instead, with night where it has set.
+    bool real_sun = false;
+    double sky = 0.25;             // light from the open sky, against the sun's 1 overhead
+    double cloud_height = 3'000.0; // metres up that clouds cast their shadows from
+    double glint = 0.5;            // the sun's glare off open water at its brightest
+    int shadow_reach = 32;         // pixels a shadow is looked for towards the sun
 
     friend bool operator==(const Lighting&, const Lighting&) = default;
 };
@@ -47,11 +51,24 @@ struct Lighting {
 [[nodiscard]] DVec3 surface_normal(DVec3 left, DVec3 right, DVec3 below, DVec3 above,
                                    DVec3 up) noexcept;
 
-// Light falling on a surface: the sun's unless shadowed, and the share of the sky it faces.
-[[nodiscard]] double light(DVec3 normal, DVec3 up, DVec3 sun, double sky, bool shadowed) noexcept;
+// Light falling on a surface: the share `sunlit` of the sun's that isn't shaded, and the share of
+// the sky it faces, both fading through twilight, with a glimmer left at night.
+[[nodiscard]] double light(DVec3 normal, DVec3 up, DVec3 sun, double sky, double sunlit) noexcept;
 
-// Light on flat open ground under the lighting's sun, which a photo is exposed for.
+// Light on flat open ground, which a photo is exposed for: under the lighting's sun, or under the
+// sun overhead for the real one.
 [[nodiscard]] double exposure(const Lighting& lighting) noexcept;
+
+// Where the sun's ray up from a unit direction on the ground meets clouds `height` metres up, as
+// a unit direction; held within ten times the height when the sun is low.
+[[nodiscard]] DVec3 towards_clouds(DVec3 point, DVec3 sun, double height,
+                                   double planet_radius) noexcept;
+
+// Glare off open water seen from straight above, from 1 with the sun overhead to 0 away from it.
+[[nodiscard]] double sea_glint(DVec3 up, DVec3 sun) noexcept;
+
+// The share of a surface that's open water, to glint.
+[[nodiscard]] double open_water(const Surface& surface) noexcept;
 
 // Noise for where cloud gathers and where it parts, about [-1, 1] and near normal, across `across`
 // metres of sky a lattice cell.

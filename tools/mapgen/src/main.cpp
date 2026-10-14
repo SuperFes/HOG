@@ -167,7 +167,7 @@ int render_seasons(const hog::mapgen::Options& options, const hog::planet::Plane
     std::array<std::vector<hog::mapgen::Image>, hog::mapgen::season_map_count> frames;
     for (int month = 0; month < months; ++month) {
         const std::chrono::sys_days day = months_after(options.weather.start, month);
-        const hog::GameTime time{day.time_since_epoch()};
+        const hog::GameTime time{(day + options.seasons.time).time_since_epoch()};
         while (forest.next_step() <= time) {
             const hog::GameTime at = forest.next_step();
             weather.advance_to(at, jobs);

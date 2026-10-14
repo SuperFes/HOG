@@ -102,6 +102,19 @@ template <typename T>
     return std::chrono::sys_days{date};
 }
 
+// HH:MM
+[[nodiscard]] std::optional<std::chrono::minutes> parse_time(std::string_view text) {
+    if (text.size() != 5 || text[2] != ':') {
+        return std::nullopt;
+    }
+    const auto hours = parse_integer<int>(text.substr(0, 2));
+    const auto minutes = parse_integer<int>(text.substr(3, 2));
+    if (!hours || !minutes || *hours < 0 || *hours > 23 || *minutes < 0 || *minutes > 59) {
+        return std::nullopt;
+    }
+    return std::chrono::hours{*hours} + std::chrono::minutes{*minutes};
+}
+
 constexpr int max_weather_days = 366;
 constexpr int max_frame_hours = 24 * 30;
 constexpr int max_wildlife_years = 100;
@@ -247,6 +260,16 @@ constexpr std::array flags{
              options.seasons.lighting.relief = *relief;
              return {};
          }},
+    Flag{.name = "--time",
+         .handler = [](Options& options, std::string_view value) -> Result<void> {
+             const auto time = parse_time(value);
+             if (!time) {
+                 return invalid(std::format("--time {} is not a time like 14:30", value));
+             }
+             options.seasons.time = *time;
+             options.seasons.lighting.real_sun = true;
+             return {};
+         }},
     Flag{.name = "--cell-km",
          .handler = [](Options& options, std::string_view value) -> Result<void> {
              const auto km = parse_double(value);
@@ -310,6 +333,8 @@ Writes PNG maps of a generated planet, one per layer, named <view>-<layer>.png.
                        after sixty days for the weather to settle
   --vegetation PATH    plants for the seasons (default config/forest.toml)
   --relief SCALE       how many times over the photo draws the heights (default 4)
+  --time HH:MM         takes the seasons at this time of day, UTC, and lights the photo
+                       by the sun as it stands then, rather than from the north-west
   --cell-km KM         weather and wildlife grid cells at most KM across (default 6)
   --help               shows this
 )";

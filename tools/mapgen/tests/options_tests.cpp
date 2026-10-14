@@ -84,6 +84,11 @@ TEST_CASE("mapgen reads every option", "[mapgen]") {
                                                         .vegetation = "plants.toml",
                                                         .lighting = {.relief = 2.5}});
 
+    const auto timed = parse({"--seasons", "--time", "14:30"});
+    REQUIRE(timed);
+    CHECK(timed->seasons.time == std::chrono::minutes{(14 * 60) + 30});
+    CHECK(timed->seasons.lighting.real_sun);
+
     const auto help = parse({"--help"});
     REQUIRE(help);
     CHECK(help->help);
@@ -100,6 +105,9 @@ TEST_CASE("mapgen rejects bad arguments", "[mapgen]") {
     CHECK(rejects({"--size", "1"}));
     CHECK(rejects({"--relief", "-1"}));
     CHECK(rejects({"--relief", "steep"}));
+    CHECK(rejects({"--time", "24:00"}));
+    CHECK(rejects({"--time", "9:30"}));
+    CHECK(rejects({"--time", "12:60"}));
     CHECK(rejects({"--size", "100000"}));
     CHECK(rejects({"--layer", "volcanoes"}));
     CHECK(rejects({"--region", "10,20"}));

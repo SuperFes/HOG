@@ -1,6 +1,7 @@
 #include <hog/mapgen/photo.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/tile.hpp>
+#include <hog/sim/calendar.hpp>
 #include <hog/sim/weather_tuning.hpp>
 
 #include <algorithm>
@@ -66,6 +67,11 @@ constexpr double cloud_spread = 0.16;
 constexpr double cloud_edge = 0.08;
 // The opacity of cloud at its thinnest, against 1 deep in.
 constexpr double thinnest_cloud = 0.35;
+
+// Light left at night, against the sun's 1 overhead, so the land still shows faintly.
+constexpr double night_glimmer = 0.01;
+// The spread of the waves' slopes, which sets how wide the sun's glint spreads.
+constexpr double wave_slope = 0.1;
 
 // Wet soil reflects this much less than dry.
 constexpr double wet_darkening = 0.4;
@@ -135,13 +141,43 @@ DVec3 surface_normal(DVec3 left, DVec3 right, DVec3 below, DVec3 above, DVec3 up
     return glm::dot(normal, up) < 0.0 ? -normal / length : normal / length;
 }
 
-double light(DVec3 normal, DVec3 up, DVec3 sun, double sky, bool shadowed) noexcept {
-    const double direct = shadowed ? 0.0 : std::max(glm::dot(normal, sun), 0.0);
-    return direct + (sky * 0.5 * (1.0 + glm::dot(normal, up)));
+double light(DVec3 normal, DVec3 up, DVec3 sun, double sky, double sunlit) noexcept {
+    const double day = sim::sunlight(std::asin(std::clamp(glm::dot(sun, up), -1.0, 1.0)));
+    const double direct = std::max(glm::dot(normal, sun), 0.0) * std::clamp(sunlit, 0.0, 1.0);
+    return night_glimmer + (day * (direct + (sky * 0.5 * (1.0 + glm::dot(normal, up)))));
 }
 
 double exposure(const Lighting& lighting) noexcept {
-    return std::max(std::sin(glm::radians(lighting.sun_elevation)), 0.0) + lighting.sky;
+    const double elevation = lighting.real_sun ? 90.0 : lighting.sun_elevation;
+    return std::max(std::sin(glm::radians(elevation)), 0.0) + lighting.sky + night_glimmer;
+}
+
+DVec3 towards_clouds(DVec3 point, DVec3 sun, double height, double planet_radius) noexcept {
+    const double reach = height / std::max(glm::dot(sun, point), 0.1);
+    return glm::normalize((point * planet_radius) + (sun * reach));
+}
+
+double sea_glint(DVec3 up, DVec3 sun) noexcept {
+    if (glm::dot(sun, up) <= 0.0) {
+        return 0.0;
+    }
+    // The waves tilted to throw the sun straight up, by the square of their slope.
+    const double tilt = glm::dot(glm::normalize(sun + up), up);
+    const double slope = (1.0 - (tilt * tilt)) / (tilt * tilt);
+    return std::exp(-slope / (2.0 * wave_slope * wave_slope));
+}
+
+double open_water(const Surface& surface) noexcept {
+    switch (surface.biome) {
+    case planet::Biome::Ocean:
+        return 1.0 - std::clamp(surface.ice, 0.0, 1.0);
+    case planet::Biome::Lake: {
+        const double snow = std::max(surface.snow, 0.0);
+        return 1.0 - (snow / (snow + sim::LandTuning{}.covering_snow));
+    }
+    default:
+        return 0.0;
+    }
 }
 
 double cloud_noise(std::uint64_t seed, DVec3 metres, double across) noexcept {

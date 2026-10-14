@@ -2,6 +2,7 @@
 #include <hog/core/hash.hpp>
 #include <hog/mapgen/season_render.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/sim/calendar.hpp>
 
 #include <algorithm>
 #include <array>
@@ -147,6 +148,7 @@ Image render_photo(const planet::Geology& geology, const sim::Weather& weather,
     std::vector<LinearRgb> colours(count);
     std::vector<Cloud> clouds(count);
     std::vector<double> storms(count);
+    std::vector<double> waters(count);
     const Sky sky{weather, planet_radius};
     const auto pixel = [&](int x, int y) {
         return (static_cast<std::size_t>(y) * width) + static_cast<std::size_t>(x);
@@ -167,6 +169,7 @@ Image render_photo(const planet::Geology& geology, const sim::Weather& weather,
                 colours[pixel(x, y)] = true_colour(surface);
                 clouds[pixel(x, y)] = sky.cloud(point);
                 storms[pixel(x, y)] = sky.storm(point);
+                waters[pixel(x, y)] = open_water(surface);
             }
         }
     });
@@ -174,6 +177,17 @@ Image render_photo(const planet::Geology& geology, const sim::Weather& weather,
         .width = size.width, .height = size.height, .pixels = std::vector<std::uint8_t>(3 * count)};
     const HeightField field{.width = size.width, .height = size.height, .heights = heights};
     const double exposed = exposure(lighting);
+    const DVec3 real_sun =
+        sim::Calendar{weather.config().day, weather.config().axial_tilt}.sun_direction(
+            weather.time());
+    // The share of the sun the clouds let through to the ground.
+    const auto through_clouds = [&](DVec3 point, DVec3 sun) {
+        if (glm::dot(sun, point) <= 0.0) {
+            return 1.0;
+        }
+        return 1.0 - sky.cloud(towards_clouds(point, sun, lighting.cloud_height, planet_radius))
+                         .opacity();
+    };
     jobs.parallel_for(rows, 1, [&](jobs::Range range, std::uint32_t /*thread*/) {
         for (std::uint32_t row = range.begin; row < range.end; ++row) {
             const auto y = static_cast<int>(row);
@@ -189,25 +203,30 @@ Image render_photo(const planet::Geology& geology, const sim::Weather& weather,
                 const auto flat = [&](int column, int line) {
                     return points[pixel(column, line)] * planet_radius;
                 };
-                const planet::TangentFrame frame = planet::tangent_frame(points[pixel(x, y)]);
+                const std::size_t here = pixel(x, y);
+                const planet::TangentFrame frame = planet::tangent_frame(points[here]);
                 const DVec3 normal = surface_normal(ground(left, y), ground(right, y),
                                                     ground(x, below), ground(x, above), frame.up);
-                const DVec3 sun = sun_towards(lighting, frame);
+                const DVec3 sun = lighting.real_sun ? real_sun : sun_towards(lighting, frame);
                 const bool shadowed = casts_shadow(
                     field, x, y, sun, frame.up,
                     (flat(right, y) - flat(left, y)) / static_cast<double>(right - left),
                     (flat(x, above) - flat(x, below)) / static_cast<double>(above - below),
                     lighting.shadow_reach);
+                const double sunlit = shadowed ? 0.0 : through_clouds(points[here], sun);
+                const double glare =
+                    lighting.glint * waters[here] * sunlit * sea_glint(frame.up, sun);
                 const LinearRgb ground_lit =
-                    colours[pixel(x, y)] *
-                    (light(normal, frame.up, sun, lighting.sky, shadowed) / exposed);
-                const Cloud& cloud = clouds[pixel(x, y)];
+                    (colours[here] * light(normal, frame.up, sun, lighting.sky, sunlit) +
+                     LinearRgb{glare}) /
+                    exposed;
+                const Cloud& cloud = clouds[here];
                 const LinearRgb cloud_lit =
-                    cloud_colour(cloud, storms[pixel(x, y)]) *
-                    (light(frame.up, frame.up, sun, lighting.sky, false) / exposed);
+                    cloud_colour(cloud, storms[here]) *
+                    (light(frame.up, frame.up, sun, lighting.sky, 1.0) / exposed);
                 const LinearRgb lit = glm::mix(ground_lit, cloud_lit, cloud.opacity());
-                std::ranges::copy(to_srgb(lit), image.pixels.begin() +
-                                                    static_cast<std::ptrdiff_t>(3 * pixel(x, y)));
+                std::ranges::copy(to_srgb(lit),
+                                  image.pixels.begin() + static_cast<std::ptrdiff_t>(3 * here));
             }
         }
     });
