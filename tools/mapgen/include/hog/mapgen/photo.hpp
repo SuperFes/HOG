@@ -4,6 +4,7 @@
 #include <hog/planet/climate.hpp>
 #include <hog/planet/tangent_frame.hpp>
 
+#include <cstdint>
 #include <span>
 
 namespace hog::mapgen {
@@ -51,6 +52,28 @@ struct Lighting {
 
 // Light on flat open ground under the lighting's sun, which a photo is exposed for.
 [[nodiscard]] double exposure(const Lighting& lighting) noexcept;
+
+// Noise for where cloud gathers and where it parts, about [-1, 1] and near normal, across `across`
+// metres of sky a lattice cell.
+[[nodiscard]] double cloud_noise(std::uint64_t seed, DVec3 metres, double across) noexcept;
+
+// Cloud over a point.
+struct Cloud {
+    double shape = 0.0; // 1 under cloud, fading to 0 across its edge
+    double depth = 0.0; // how far into it, from 0 at its edge to 1 deep in
+
+    // Thin at its edges, so the ground shows through.
+    [[nodiscard]] double opacity() const noexcept;
+
+    friend bool operator==(const Cloud&, const Cloud&) = default;
+};
+
+// The cloud where its noise is `noise`, with `cover` of the sky about there clouded: the noise
+// picks out that share of the ground to lie under it.
+[[nodiscard]] Cloud cloud_over(double cover, double noise) noexcept;
+
+// Cloud tops in daylight: greyer where thin, whiter deep in and where storms tower (0 to 1).
+[[nodiscard]] LinearRgb cloud_colour(const Cloud& cloud, double storm) noexcept;
 
 // Heights in metres, row by row.
 struct HeightField {

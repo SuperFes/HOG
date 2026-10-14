@@ -1,4 +1,6 @@
 #include <hog/mapgen/photo.hpp>
+#include <hog/planet/noise.hpp>
+#include <hog/planet/tile.hpp>
 #include <hog/sim/weather_tuning.hpp>
 
 #include <algorithm>
@@ -52,6 +54,18 @@ constexpr Rgb snow_white{240, 244, 250};
 constexpr Rgb glacier_ice{195, 212, 230};
 constexpr Rgb char_black{35, 30, 28};
 constexpr Rgb ember_orange{230, 90, 20};
+
+constexpr Rgb cloud_grey{200, 205, 212};
+constexpr Rgb cloud_white{242, 244, 247};
+constexpr Rgb storm_white{252, 252, 253};
+
+// Cloud noise is near normal with this spread.
+constexpr int cloud_octaves = 5;
+constexpr double cloud_spread = 0.16;
+// Noise over which cloud fades in at its edge.
+constexpr double cloud_edge = 0.08;
+// The opacity of cloud at its thinnest, against 1 deep in.
+constexpr double thinnest_cloud = 0.35;
 
 // Wet soil reflects this much less than dry.
 constexpr double wet_darkening = 0.4;
@@ -128,6 +142,35 @@ double light(DVec3 normal, DVec3 up, DVec3 sun, double sky, bool shadowed) noexc
 
 double exposure(const Lighting& lighting) noexcept {
     return std::max(std::sin(glm::radians(lighting.sun_elevation)), 0.0) + lighting.sky;
+}
+
+double cloud_noise(std::uint64_t seed, DVec3 metres, double across) noexcept {
+    return planet::fixed_to_double(
+        planet::fbm(seed, planet::noise_point(metres, 1.0 / across), cloud_octaves));
+}
+
+double Cloud::opacity() const noexcept {
+    return shape * (thinnest_cloud + ((1.0 - thinnest_cloud) * depth));
+}
+
+Cloud cloud_over(double cover, double noise) noexcept {
+    if (cover <= 0.0) {
+        return {};
+    }
+    if (cover >= 1.0) {
+        return {.shape = 1.0, .depth = 1.0};
+    }
+    // The noise level that `cover` of a normal spread lies above, by the logistic approximation
+    // of its inverse.
+    const double threshold = cloud_spread * std::log((1.0 - cover) / cover) / 1.702;
+    const double t = std::clamp((noise - threshold + cloud_edge) / (2.0 * cloud_edge), 0.0, 1.0);
+    return {.shape = t * t * (3.0 - (2.0 * t)),
+            .depth = std::clamp((noise - threshold) / (2.0 * cloud_spread), 0.0, 1.0)};
+}
+
+LinearRgb cloud_colour(const Cloud& cloud, double storm) noexcept {
+    return blend(blend(to_linear(cloud_grey), to_linear(cloud_white), cloud.depth),
+                 to_linear(storm_white), storm);
 }
 
 bool in_shadow(const HeightField& field, int x, int y, DVec2 step, double rise,

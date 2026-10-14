@@ -1,4 +1,5 @@
 #include <hog/core/assert.hpp>
+#include <hog/core/hash.hpp>
 #include <hog/mapgen/season_render.hpp>
 #include <hog/planet/projection.hpp>
 
@@ -7,6 +8,7 @@
 #include <cmath>
 #include <cstddef>
 #include <format>
+#include <numbers>
 #include <vector>
 
 namespace hog::mapgen {
@@ -102,8 +104,39 @@ bool casts_shadow(const HeightField& field, int x, int y, DVec3 sun, DVec3 up, D
     return in_shadow(field, x, y, heading / pixels, metres * rising / glm::length(bearing), reach);
 }
 
+// Clouds over the weather's grid, broken up finer than its cells.
+class Sky {
+public:
+    Sky(const sim::Weather& weather, double planet_radius)
+        : weather_{&weather}, planet_radius_{planet_radius},
+          seed_{hash_values(weather.config().seed,
+                            static_cast<std::uint64_t>(weather.time().time_since_epoch().count()))},
+          // Two of the grid's cells a noise lattice cell.
+          across_{2.0 * planet_radius *
+                  std::sqrt(4.0 * std::numbers::pi / static_cast<double>(weather.grid().size()))} {}
+
+    [[nodiscard]] Cloud cloud(DVec3 point) const {
+        const sim::WeatherFields& fields = weather_->fields();
+        const double cover = weather_->grid().interpolate(point, [&](std::uint32_t index) {
+            return static_cast<double>(fields.cloud_cover(index));
+        });
+        return cloud_over(cover, cloud_noise(seed_, point * planet_radius_, across_));
+    }
+
+    [[nodiscard]] double storm(DVec3 point) const {
+        return weather_->grid().interpolate(
+            point, [&](std::uint32_t index) { return at(weather_->fields().storm, index); });
+    }
+
+private:
+    const sim::Weather* weather_;
+    double planet_radius_;
+    std::uint64_t seed_;
+    double across_;
+};
+
 // Pixels are coloured, then lit by the slope of the ground around them and any higher ground
-// between them and the sun.
+// between them and the sun, under the clouds.
 Image render_photo(const planet::Geology& geology, const sim::Weather& weather,
                    const sim::Forest& forest, double planet_radius, const View& resolved,
                    ImageSize size, const Lighting& lighting, jobs::JobSystem& jobs) {
@@ -112,6 +145,9 @@ Image render_photo(const planet::Geology& geology, const sim::Weather& weather,
     std::vector<DVec3> points(count);
     std::vector<double> heights(count);
     std::vector<LinearRgb> colours(count);
+    std::vector<Cloud> clouds(count);
+    std::vector<double> storms(count);
+    const Sky sky{weather, planet_radius};
     const auto pixel = [&](int x, int y) {
         return (static_cast<std::size_t>(y) * width) + static_cast<std::size_t>(x);
     };
@@ -129,6 +165,8 @@ Image render_photo(const planet::Geology& geology, const sim::Weather& weather,
                 points[pixel(x, y)] = point;
                 heights[pixel(x, y)] = lighting.relief * surface.height;
                 colours[pixel(x, y)] = true_colour(surface);
+                clouds[pixel(x, y)] = sky.cloud(point);
+                storms[pixel(x, y)] = sky.storm(point);
             }
         }
     });
@@ -160,9 +198,14 @@ Image render_photo(const planet::Geology& geology, const sim::Weather& weather,
                     (flat(right, y) - flat(left, y)) / static_cast<double>(right - left),
                     (flat(x, above) - flat(x, below)) / static_cast<double>(above - below),
                     lighting.shadow_reach);
-                const LinearRgb lit =
+                const LinearRgb ground_lit =
                     colours[pixel(x, y)] *
                     (light(normal, frame.up, sun, lighting.sky, shadowed) / exposed);
+                const Cloud& cloud = clouds[pixel(x, y)];
+                const LinearRgb cloud_lit =
+                    cloud_colour(cloud, storms[pixel(x, y)]) *
+                    (light(frame.up, frame.up, sun, lighting.sky, false) / exposed);
+                const LinearRgb lit = glm::mix(ground_lit, cloud_lit, cloud.opacity());
                 std::ranges::copy(to_srgb(lit), image.pixels.begin() +
                                                     static_cast<std::ptrdiff_t>(3 * pixel(x, y)));
             }

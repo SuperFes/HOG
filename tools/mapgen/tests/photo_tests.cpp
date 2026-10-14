@@ -148,3 +148,49 @@ TEST_CASE("higher ground towards the sun casts a shadow", "[mapgen][photo]") {
     CHECK_FALSE(in_shadow(field, 2, 0, DVec2{-1.0, 0.0}, 0.0, 8));
     CHECK_FALSE(in_shadow(field, 3, 0, DVec2{1.0, 0.0}, 0.0, 8));
 }
+
+TEST_CASE("cloud gathers over the share of the ground its cover gives", "[mapgen][photo]") {
+    using hog::mapgen::Cloud;
+    using hog::mapgen::cloud_noise;
+    using hog::mapgen::cloud_over;
+    CHECK(cloud_over(0.0, 1.0) == Cloud{});
+    CHECK(cloud_over(1.0, -1.0) == Cloud{.shape = 1.0, .depth = 1.0});
+    CHECK(cloud_over(1.0, -1.0).opacity() == 1.0);
+    CHECK(cloud_over(0.5, 0.3).shape > cloud_over(0.5, -0.3).shape);
+    CHECK(cloud_over(0.8, 0.0).shape > cloud_over(0.2, 0.0).shape);
+    for (const double cover : {0.2, 0.5, 0.8}) {
+        double total = 0.0;
+        constexpr int samples = 4'000;
+        for (int sample = 0; sample < samples; ++sample) {
+            const DVec3 metres{sample * 7'919.0, sample * 3'217.0, sample * -5'003.0};
+            total += cloud_over(cover, cloud_noise(9, metres, 12'000.0)).shape;
+        }
+        CHECK(total / samples == Catch::Approx(cover).margin(0.07));
+    }
+}
+
+TEST_CASE("cloud is thin at its edges and thick deep in", "[mapgen][photo]") {
+    using hog::mapgen::cloud_over;
+    const auto edge = cloud_over(0.5, 0.0);
+    const auto deep = cloud_over(0.5, 0.4);
+    CHECK(edge.depth < deep.depth);
+    CHECK(edge.opacity() < 0.5 * deep.opacity());
+    CHECK(deep.opacity() > 0.9);
+    CHECK(brightness(hog::mapgen::cloud_colour(deep, 0.0)) >
+          brightness(hog::mapgen::cloud_colour(edge, 0.0)));
+}
+
+TEST_CASE("cloud noise follows its seed", "[mapgen][photo]") {
+    using hog::mapgen::cloud_noise;
+    const DVec3 metres{12'345.0, -6'789.0, 1'011.0};
+    CHECK(cloud_noise(1, metres, 10'000.0) == cloud_noise(1, metres, 10'000.0));
+    CHECK(cloud_noise(1, metres, 10'000.0) != cloud_noise(2, metres, 10'000.0));
+    CHECK(std::abs(cloud_noise(1, metres, 10'000.0)) <= 1.0);
+}
+
+TEST_CASE("storm tops are whiter than other cloud", "[mapgen][photo]") {
+    const hog::mapgen::Cloud cloud{.shape = 1.0, .depth = 0.5};
+    CHECK(brightness(hog::mapgen::cloud_colour(cloud, 1.0)) >
+          brightness(hog::mapgen::cloud_colour(cloud, 0.0)));
+    CHECK(brightness(hog::mapgen::cloud_colour(cloud, 0.0)) > 0.5);
+}
