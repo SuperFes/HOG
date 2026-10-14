@@ -83,8 +83,8 @@ Swapchain::Swapchain(Swapchain&& other) noexcept
       surface_(std::exchange(other.surface_, VK_NULL_HANDLE)), options_(other.options_),
       swapchain_(std::exchange(other.swapchain_, VK_NULL_HANDLE)),
       format_(std::exchange(other.format_, VK_FORMAT_UNDEFINED)),
-      extent_(std::exchange(other.extent_, {})), images_(std::exchange(other.images_, {})),
-      views_(std::exchange(other.views_, {})) {}
+      extent_(std::exchange(other.extent_, {})), usage_(std::exchange(other.usage_, 0)),
+      images_(std::exchange(other.images_, {})), views_(std::exchange(other.views_, {})) {}
 
 Swapchain& Swapchain::operator=(Swapchain&& other) noexcept {
     if (this != &other) {
@@ -96,6 +96,7 @@ Swapchain& Swapchain::operator=(Swapchain&& other) noexcept {
         swapchain_ = std::exchange(other.swapchain_, VK_NULL_HANDLE);
         format_ = std::exchange(other.format_, VK_FORMAT_UNDEFINED);
         extent_ = std::exchange(other.extent_, {});
+        usage_ = std::exchange(other.usage_, 0);
         images_ = std::exchange(other.images_, {});
         views_ = std::exchange(other.views_, {});
     }
@@ -164,26 +165,28 @@ Result<> Swapchain::rebuild(VkExtent2D window) {
             break;
         }
     }
-    const VkSwapchainCreateInfoKHR info{
-        .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-        .pNext = nullptr,
-        .flags = 0,
-        .surface = surface_,
-        .minImageCount = choose_image_count(capabilities),
-        .imageFormat = format.format,
-        .imageColorSpace = format.colorSpace,
-        .imageExtent = extent,
-        .imageArrayLayers = 1,
-        .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                      (capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT),
-        .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        .queueFamilyIndexCount = 0,
-        .pQueueFamilyIndices = nullptr,
-        .preTransform = capabilities.currentTransform,
-        .compositeAlpha = alpha,
-        .presentMode = choose_present_mode(modes, options_.vsync),
-        .clipped = VK_TRUE,
-        .oldSwapchain = swapchain_};
+    const VkImageUsageFlags usage =
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+        (capabilities.supportedUsageFlags &
+         (VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT));
+    const VkSwapchainCreateInfoKHR info{.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+                                        .pNext = nullptr,
+                                        .flags = 0,
+                                        .surface = surface_,
+                                        .minImageCount = choose_image_count(capabilities),
+                                        .imageFormat = format.format,
+                                        .imageColorSpace = format.colorSpace,
+                                        .imageExtent = extent,
+                                        .imageArrayLayers = 1,
+                                        .imageUsage = usage,
+                                        .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
+                                        .queueFamilyIndexCount = 0,
+                                        .pQueueFamilyIndices = nullptr,
+                                        .preTransform = capabilities.currentTransform,
+                                        .compositeAlpha = alpha,
+                                        .presentMode = choose_present_mode(modes, options_.vsync),
+                                        .clipped = VK_TRUE,
+                                        .oldSwapchain = swapchain_};
     VkSwapchainKHR made = VK_NULL_HANDLE;
     const VkResult created = vkCreateSwapchainKHR(device_, &info, nullptr, &made);
     release();
@@ -193,6 +196,7 @@ Result<> Swapchain::rebuild(VkExtent2D window) {
     swapchain_ = made;
     format_ = format.format;
     extent_ = extent;
+    usage_ = usage;
 
     vkGetSwapchainImagesKHR(device_, swapchain_, &count, nullptr);
     images_.resize(count);

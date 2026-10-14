@@ -1,11 +1,16 @@
 #include "test_device.hpp"
 
+#include <hog/render/memory.hpp>
 #include <hog/render/presenter.hpp>
+#include <hog/render/readback.hpp>
+#include <hog/render/rendering.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstdint>
 #include <optional>
 #include <utility>
+#include <vector>
 
 using hog::render::Frame;
 using hog::render::needs_rebuild;
@@ -35,28 +40,8 @@ std::unique_ptr<hog::render::Device> headless_device() {
 
 void clear(Frame& frame) {
     frame.target.use_as(frame.commands, hog::render::image_use::colour_target);
-    const VkRenderingAttachmentInfo colour{
-        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-        .pNext = nullptr,
-        .imageView = frame.view,
-        .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .resolveMode = VK_RESOLVE_MODE_NONE,
-        .resolveImageView = VK_NULL_HANDLE,
-        .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-        .clearValue = {.color = {.float32 = {0.1F, 0.2F, 0.3F, 1.0F}}}};
-    const VkRenderingInfo rendering{.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-                                    .pNext = nullptr,
-                                    .flags = 0,
-                                    .renderArea = {.offset = {}, .extent = frame.extent},
-                                    .layerCount = 1,
-                                    .viewMask = 0,
-                                    .colorAttachmentCount = 1,
-                                    .pColorAttachments = &colour,
-                                    .pDepthAttachment = nullptr,
-                                    .pStencilAttachment = nullptr};
-    vkCmdBeginRendering(frame.commands, &rendering);
+    hog::render::begin_rendering(frame.commands, frame.view, frame.extent,
+                                 VkClearColorValue{.float32 = {0.2F, 0.4F, 1.0F, 1.0F}});
     vkCmdEndRendering(frame.commands);
 }
 
@@ -71,6 +56,27 @@ VkExtent2D show(Presenter& presenter, VkExtent2D window) {
     clear(frame.value());
     REQUIRE(presenter.end(frame.value()));
     return frame.value().extent;
+}
+
+// Clears a frame and copies it out before it's shown, returning it as RGB; empty when there was
+// nothing to draw into.
+std::vector<std::uint8_t> clear_and_read(const hog::render::Device& device, Presenter& presenter,
+                                         VkExtent2D window) {
+    auto begun = presenter.begin(window);
+    REQUIRE(begun);
+    std::optional<Frame> frame = std::move(begun).value();
+    if (!frame.has_value()) {
+        return {};
+    }
+    auto buffer = hog::render::make_readback(device, frame->extent);
+    REQUIRE(buffer);
+    clear(*frame);
+    hog::render::record_readback(frame->commands, frame->target, frame->extent, *buffer);
+    REQUIRE(presenter.end(*frame));
+    REQUIRE(vkDeviceWaitIdle(device.handle()) == VK_SUCCESS);
+    const auto pixels = hog::render::read_back(*buffer);
+    REQUIRE(pixels);
+    return hog::render::to_rgb(*pixels, frame->format).value_or(std::vector<std::uint8_t>{});
 }
 
 } // namespace
@@ -105,5 +111,20 @@ TEST_CASE("frames are shown, follow the window's size and pause while it's minim
     CHECK(show(**presenter, {.width = 100, .height = 0}).width == 0);
 
     CHECK(show(**presenter, {.width = 64, .height = 48}).width == 64);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("a frame can be read back before it's shown", "[render][gpu]") {
+    const auto device = headless_device();
+    auto presenter = Presenter::create(*device, {.width = 8, .height = 4}, {.srgb = false});
+    REQUIRE(presenter);
+    if (((*presenter)->swapchain().usage() & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) == 0) {
+        SKIP("the surface's images can't be copied from");
+    }
+    const std::vector<std::uint8_t> rgb =
+        clear_and_read(*device, **presenter, {.width = 8, .height = 4});
+    REQUIRE(rgb.size() == std::size_t{3} * 8 * 4);
+    CHECK(std::vector<std::uint8_t>(rgb.begin(), rgb.begin() + 3) ==
+          std::vector<std::uint8_t>{51, 102, 255});
     CHECK(device->validation_errors() == 0);
 }

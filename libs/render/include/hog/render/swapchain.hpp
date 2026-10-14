@@ -52,6 +52,8 @@ public:
     [[nodiscard]] VkSwapchainKHR handle() const noexcept { return swapchain_; }
     [[nodiscard]] VkFormat format() const noexcept { return format_; }
     [[nodiscard]] VkExtent2D extent() const noexcept { return extent_; }
+    // Always a colour target; a copy source and target where the surface allows.
+    [[nodiscard]] VkImageUsageFlags usage() const noexcept { return usage_; }
     [[nodiscard]] std::span<const VkImage> images() const noexcept { return images_; }
     [[nodiscard]] std::span<const VkImageView> views() const noexcept { return views_; }
 
@@ -68,6 +70,7 @@ private:
     VkSwapchainKHR swapchain_ = VK_NULL_HANDLE;
     VkFormat format_ = VK_FORMAT_UNDEFINED;
     VkExtent2D extent_{};
+    VkImageUsageFlags usage_ = 0;
     std::vector<VkImage> images_;
     std::vector<VkImageView> views_;
 };

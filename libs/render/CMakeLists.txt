@@ -41,6 +41,8 @@ add_library(hog_render
     src/pipeline.cpp
     src/presenter.cpp
     src/readback.cpp
+    src/rendering.cpp
+    src/streamed_image.cpp
     src/swapchain.cpp
     src/vma.cpp
     src/vulkan.cpp)
@@ -66,6 +68,7 @@ hog_add_tests(hog_render
     tests/device_tests.cpp
     tests/orbit_tests.cpp
     tests/presenter_tests.cpp
+    tests/streamed_image_tests.cpp
     tests/swapchain_tests.cpp)
 if(TARGET hog_render_tests)
     target_link_libraries(hog_render_tests PRIVATE hog::planet)

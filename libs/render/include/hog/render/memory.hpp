@@ -27,8 +27,10 @@ public:
 
     [[nodiscard]] VkBuffer handle() const noexcept { return buffer_; }
     [[nodiscard]] VkDeviceSize size() const noexcept { return size_; }
-    // Empty for GPU memory. Readback memory is made visible to the CPU with invalidate().
+    // Empty for GPU memory. What the CPU writes to upload memory is made visible to the GPU with
+    // flush(), and what the GPU writes to readback memory to the CPU with invalidate().
     [[nodiscard]] std::span<std::byte> mapped() const noexcept { return mapped_; }
+    Result<> flush() const;
     Result<> invalidate() const;
 
 private:

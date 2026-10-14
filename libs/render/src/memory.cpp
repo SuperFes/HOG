@@ -34,6 +34,14 @@ void Buffer::release() noexcept {
     }
 }
 
+Result<> Buffer::flush() const {
+    if (const VkResult done = vmaFlushAllocation(allocator_, allocation_, 0, VK_WHOLE_SIZE);
+        done != VK_SUCCESS) {
+        return vulkan_error(done, "making a buffer visible to the GPU");
+    }
+    return {};
+}
+
 Result<> Buffer::invalidate() const {
     if (const VkResult done = vmaInvalidateAllocation(allocator_, allocation_, 0, VK_WHOLE_SIZE);
         done != VK_SUCCESS) {

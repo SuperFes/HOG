@@ -5,6 +5,7 @@
 #include <hog/render/memory.hpp>
 #include <hog/render/pipeline.hpp>
 #include <hog/render/readback.hpp>
+#include <hog/render/rendering.hpp>
 #include <hog/shaders/triangle.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -43,37 +44,8 @@ TEST_CASE("a headless device draws a triangle and reads it back", "[render][gpu]
         namespace use = hog::render::image_use;
         hog::render::transition(commands, target->handle(), VK_IMAGE_ASPECT_COLOR_BIT, use::discard,
                                 use::colour_target);
-        const VkRenderingAttachmentInfo colour{
-            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-            .pNext = nullptr,
-            .imageView = target->view(),
-            .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            .resolveMode = VK_RESOLVE_MODE_NONE,
-            .resolveImageView = VK_NULL_HANDLE,
-            .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-            .clearValue = {.color = {.float32 = {0.0F, 0.0F, 1.0F, 1.0F}}}};
-        const VkRenderingInfo rendering{.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-                                        .pNext = nullptr,
-                                        .flags = 0,
-                                        .renderArea = {.offset = {}, .extent = extent},
-                                        .layerCount = 1,
-                                        .viewMask = 0,
-                                        .colorAttachmentCount = 1,
-                                        .pColorAttachments = &colour,
-                                        .pDepthAttachment = nullptr,
-                                        .pStencilAttachment = nullptr};
-        vkCmdBeginRendering(commands, &rendering);
-        const VkViewport viewport{.x = 0.0F,
-                                  .y = 0.0F,
-                                  .width = static_cast<float>(extent.width),
-                                  .height = static_cast<float>(extent.height),
-                                  .minDepth = 0.0F,
-                                  .maxDepth = 1.0F};
-        const VkRect2D scissor{.offset = {}, .extent = extent};
-        vkCmdSetViewport(commands, 0, 1, &viewport);
-        vkCmdSetScissor(commands, 0, 1, &scissor);
+        hog::render::begin_rendering(commands, target->view(), extent,
+                                     VkClearColorValue{.float32 = {0.0F, 0.0F, 1.0F, 1.0F}});
         vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->handle());
         vkCmdDraw(commands, 3, 1, 0, 0);
         vkCmdEndRendering(commands);
@@ -104,6 +76,7 @@ TEST_CASE("buffers carry bytes to the GPU and back", "[render][gpu]") {
         upload->mapped()[at] = static_cast<std::byte>(at * 7);
     }
 
+    REQUIRE(upload->flush());
     hog::render::Buffer moved = std::move(*upload);
     CHECK(upload->handle() == VK_NULL_HANDLE);
     REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
