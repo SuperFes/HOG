@@ -1,5 +1,6 @@
 #include <hog/mapgen/season_render.hpp>
 #include <hog/planet/noise.hpp>
+#include <hog/planet/projection.hpp>
 #include <hog/planet/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -99,6 +100,44 @@ TEST_CASE("seasons render over a view", "[mapgen][seasons]") {
         }
         CHECK(colours.size() > 10);
     }
+}
+
+TEST_CASE("the surface is sampled as sea or land", "[mapgen][seasons]") {
+    const hog::planet::World world{hog::planet::PlanetConfig{.seed = 1, .radius = 115'000.0}};
+    const hog::sim::WeatherConfig config{.level = 3};
+    const hog::sim::CellGrid grid{config.level};
+    const hog::GameTime summer{sys_days{2026y / July / 15}.time_since_epoch()};
+    const hog::sim::Weather weather{config, hog::sim::ground_for(grid, world), summer};
+    hog::sim::ForestConfig plants{.level = config.level};
+    plants.vegetation.growth.capacity.fill(10.0);
+    const hog::sim::Forest forest{plants, hog::sim::soil_for(grid, world), summer};
+    const hog::mapgen::ImageSize size{.width = 64, .height = 32};
+    int sea = 0;
+    int land = 0;
+    for (int y = 0; y < size.height; ++y) {
+        for (int x = 0; x < size.width; ++x) {
+            const hog::DVec3 point =
+                hog::mapgen::pixel_direction(hog::mapgen::PlanetView{}, size, x, y, 115'000.0);
+            const hog::mapgen::Surface surface =
+                hog::mapgen::sample_surface(world.geology(), weather, forest, point, 10'000.0);
+            const bool ocean =
+                world.geology().terrain().elevation(hog::planet::cell_at(point)) <= 0;
+            CHECK((surface.biome == hog::planet::Biome::Ocean) == ocean);
+            if (ocean) {
+                ++sea;
+                CHECK(surface.depth >= 0.0);
+                CHECK(surface.ice >= 0.0);
+                CHECK(surface.ice <= 1.0);
+            } else {
+                ++land;
+                CHECK(surface.plants >= 0.0);
+                CHECK(surface.soil >= 0.0);
+                CHECK(surface.river <= 1.0);
+            }
+        }
+    }
+    CHECK(sea > 0);
+    CHECK(land > 0);
 }
 
 TEST_CASE("a contact sheet lays frames out in rows", "[mapgen][seasons]") {

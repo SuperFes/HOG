@@ -79,7 +79,7 @@ jobs:
             done
             echo "**Seasons**, the first of each month from January, left to right"
             echo
-            for map in temperature rain land forest; do
+            for map in temperature rain land forest photo; do
               echo "${map}"
               echo
               image "planet-seasons-${map}.png" 800

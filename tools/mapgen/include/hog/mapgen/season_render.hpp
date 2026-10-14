@@ -2,6 +2,7 @@
 
 #include <hog/jobs/job_system.hpp>
 #include <hog/mapgen/options.hpp>
+#include <hog/mapgen/photo.hpp>
 #include <hog/mapgen/render.hpp>
 #include <hog/planet/geology.hpp>
 #include <hog/sim/forest.hpp>
@@ -20,9 +21,10 @@ enum class SeasonMap : std::uint8_t {
     Rain,        // recent rain and snow
     Land,        // soil water and snow, with rivers by how full they run
     Forest,      // plants by how grown they are, and fires
+    Photo,       // the ground in true colour
 };
 
-inline constexpr int season_map_count = static_cast<int>(SeasonMap::Forest) + 1;
+inline constexpr int season_map_count = static_cast<int>(SeasonMap::Photo) + 1;
 
 [[nodiscard]] std::string_view to_string(SeasonMap map) noexcept;
 
@@ -38,6 +40,11 @@ inline constexpr int season_map_count = static_cast<int>(SeasonMap::Forest) + 1;
 // Plants by their share of what their biome holds, from bare earth to fully grown, glowing by
 // the share of the cell alight.
 [[nodiscard]] Rgb forest_colour(Rgb grown, double share, double fire) noexcept;
+
+// What lies under a unit direction, seen across `across` metres. Precondition: the forest is on
+// the weather's grid.
+[[nodiscard]] Surface sample_surface(const planet::Geology& geology, const sim::Weather& weather,
+                                     const sim::Forest& forest, DVec3 point, double across);
 
 // Precondition: the forest is on the weather's grid.
 [[nodiscard]] Image render_season(const planet::Geology& geology, const sim::Weather& weather,

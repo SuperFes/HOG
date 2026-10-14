@@ -34,29 +34,42 @@ double at(std::span<const float> field, std::uint32_t index) {
     return static_cast<double>(field[index]);
 }
 
-// The land cell for a point: the cell under it, or a land neighbour where that's sea, so a land
-// pixel on a coast reads the land beside it. The sea when there's no land about.
-std::uint32_t land_cell(const sim::CellGrid& grid, const std::vector<sim::Ground>& ground,
-                        DVec3 point) {
+// The cell for a point on land or at sea: the cell under it, or a neighbour on that side where it's
+// the other, so a pixel on a coast reads its own side. The cell under it when there's none about.
+std::uint32_t side_cell(const sim::CellGrid& grid, const std::vector<sim::Ground>& ground,
+                        DVec3 point, bool sea) {
     const std::uint32_t under = grid.index(planet::cell_at(point, grid.level()));
-    if (!ground[under].ocean) {
+    if (ground[under].ocean == sea) {
         return under;
     }
     for (const std::uint32_t next : grid.neighbors(under)) {
-        if (!ground[next].ocean) {
+        if (ground[next].ocean == sea) {
             return next;
         }
     }
     return under;
 }
 
-// A land field interpolated between land cells only, so the coasts aren't drawn like the sea.
+// A field interpolated between cells on one side of the coast only, so the land isn't drawn like
+// the sea, nor the sea like the land.
+template <typename Value>
+double on_side(const sim::CellGrid& grid, const std::vector<sim::Ground>& ground, DVec3 point,
+               bool sea, Value value) {
+    const std::uint32_t centre = side_cell(grid, ground, point, sea);
+    return grid.interpolate(point, [&](std::uint32_t index) {
+        return value(ground[index].ocean == sea ? index : centre);
+    });
+}
+
 template <typename Value>
 double on_land(const sim::CellGrid& grid, const std::vector<sim::Ground>& ground, DVec3 point,
                Value value) {
-    const std::uint32_t centre = land_cell(grid, ground, point);
-    return grid.interpolate(
-        point, [&](std::uint32_t index) { return value(ground[index].ocean ? centre : index); });
+    return on_side(grid, ground, point, false, value);
+}
+
+std::uint32_t land_cell(const sim::CellGrid& grid, const std::vector<sim::Ground>& ground,
+                        DVec3 point) {
+    return side_cell(grid, ground, point, false);
 }
 
 // Same prefix as the layer maps, so a view's files sort together.
@@ -77,6 +90,8 @@ std::string_view to_string(SeasonMap map) noexcept {
         return "land";
     case SeasonMap::Forest:
         return "forest";
+    case SeasonMap::Photo:
+        return "photo";
     }
     return "unknown";
 }
@@ -100,6 +115,54 @@ Rgb flowing_colour(Rgb ground, Rgb river, double ratio) noexcept {
 
 Rgb forest_colour(Rgb grown, double share, double fire) noexcept {
     return mix(mix(bare_earth, grown, share), fire_orange, std::sqrt(std::max(fire, 0.0)));
+}
+
+Surface sample_surface(const planet::Geology& geology, const sim::Weather& weather,
+                       const sim::Forest& forest, DVec3 point, double across) {
+    HOG_ASSERT(forest.grid().level() == weather.grid().level(), "forest off the weather's grid");
+    const sim::CellGrid& grid = weather.grid();
+    const std::vector<sim::Ground>& ground = weather.ground();
+    const planet::Elevation& terrain = geology.terrain();
+    const planet::CellId cell = planet::cell_at(point);
+    if (const std::int64_t elevation = terrain.elevation(cell); elevation <= 0) {
+        const std::vector<float>& sea = weather.ocean().temperature;
+        const double freezing = sim::OceanTuning{}.freezing;
+        return Surface{.biome = planet::Biome::Ocean,
+                       .depth = -planet::fixed_to_double(elevation),
+                       .ice = on_side(grid, ground, point, true, [&](std::uint32_t index) {
+                           return at(sea, index) <= freezing ? 1.0 : 0.0;
+                       })};
+    }
+    const sim::LandFields& land = weather.land().fields();
+    const sim::ForestFields& plants = forest.fields();
+    const auto field = [&](const std::vector<float>& values) {
+        return on_land(grid, ground, point, [&](std::uint32_t index) { return at(values, index); });
+    };
+    Surface surface{.plants = on_land(grid, ground, point,
+                                      [&](std::uint32_t index) {
+                                          const double capacity = forest.capacity(index);
+                                          return capacity > 0.0
+                                                     ? at(plants.biomass, index) / capacity
+                                                     : 1.0;
+                                      }),
+                    .fire = field(plants.fire),
+                    .soil = field(land.soil),
+                    .snow = field(land.snow)};
+    if (terrain.lake(cell)) {
+        surface.biome = planet::Biome::Lake;
+        return surface;
+    }
+    const planet::Biome biome = geology.climate().biome(cell);
+    surface.biome = biome == planet::Biome::Ocean ? planet::Biome::Beach : biome;
+    surface.flow = weather.land().flow_ratio(land_cell(grid, ground, point));
+    // Floods spread wider than the river's own bed.
+    const double spread = std::clamp(surface.flow, 1.0, widest);
+    if (const planet::Reach* river = terrain.rivers().near(cell, 0.5 * across * spread)) {
+        // Drawn at least this thick, so a creek still shows as a line.
+        constexpr double thinnest = 0.4;
+        surface.river = std::clamp(river->width * spread / across, thinnest, 1.0);
+    }
+    return surface;
 }
 
 Image render_season(const planet::Geology& geology, const sim::Weather& weather,
@@ -158,6 +221,9 @@ Image render_season(const planet::Geology& geology, const sim::Weather& weather,
                                                    static_cast<double>(planet::fixed_one)));
         case SeasonMap::Rain:
             return rain_colour(field(fields.recent_precipitation));
+        case SeasonMap::Photo:
+            return to_srgb(true_colour(
+                sample_surface(geology, weather, forest, point, 2.0 * margin(point, x, y))));
         case SeasonMap::Land:
         case SeasonMap::Forest: {
             const planet::CellId cell = planet::cell_at(point);
