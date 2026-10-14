@@ -36,6 +36,7 @@ add_library(hog_render
     src/camera.cpp
     src/cube_sphere.cpp
     src/device.cpp
+    src/globe.cpp
     src/memory.cpp
     src/orbit.cpp
     src/pipeline.cpp
@@ -61,12 +62,14 @@ target_link_libraries(hog_render
     PUBLIC hog::core volk::volk
     PRIVATE hog::planet vk-bootstrap::vk-bootstrap)
 hog_target_defaults(hog_render)
+hog_add_shaders(hog_render shaders/globe.slang)
 
 hog_add_tests(hog_render
     tests/barrier_tests.cpp
     tests/camera_tests.cpp
     tests/cube_sphere_tests.cpp
     tests/device_tests.cpp
+    tests/globe_tests.cpp
     tests/orbit_tests.cpp
     tests/presenter_tests.cpp
     tests/streamed_image_tests.cpp
