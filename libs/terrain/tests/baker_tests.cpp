@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <map>
 #include <thread>
 #include <vector>
 
@@ -73,9 +74,11 @@ TEST_CASE("finishing hands over every bake in flight", "[terrain][baker]") {
     CHECK(baker.in_flight() == 0);
 }
 
-TEST_CASE("a view streamed from the world settles on what it selects", "[terrain][baker]") {
+TEST_CASE("a view streamed from the world settles on what it selects, changes and all",
+          "[terrain][baker]") {
+    hog::planet::World& world = shared_world();
     hog::jobs::JobSystem jobs{4};
-    PatchBaker baker{shared_world(), jobs};
+    PatchBaker baker{world, jobs};
     hog::terrain::PatchStream stream{{.capacity = 2'048, .uploads = 64, .bakes = 32}};
     const hog::DVec3 up = hog::planet::cell_center(land_patch());
     const double radius = hog::terrain::testing::planet.radius;
@@ -90,24 +93,61 @@ TEST_CASE("a view streamed from the world settles on what it selects", "[terrain
 
     std::vector<hog::terrain::SelectedPatch> selected;
     hog::terrain::StreamFrame frame;
-    bool settled = false;
-    for (int round = 0; round < 10'000 && !settled; ++round) {
-        for (Patch& patch : baker.collect()) {
-            stream.baked(std::move(patch));
+    std::map<CellId, Patch> uploaded;
+    const auto settle = [&] {
+        for (int round = 0; round < 10'000; ++round) {
+            for (Patch& patch : baker.collect()) {
+                stream.baked(std::move(patch));
+            }
+            selected = select_patches(view, radius, {}, stream.known_heights());
+            frame = stream.update(selected);
+            for (const CellId cell : frame.evicted) {
+                uploaded.erase(cell);
+            }
+            for (Patch& patch : frame.arrived) {
+                uploaded.insert_or_assign(patch.cell, std::move(patch));
+            }
+            for (const CellId cell : frame.bakes) {
+                baker.start(cell);
+            }
+            if (frame.arrived.empty() && frame.bakes.empty() && baker.in_flight() == 0) {
+                return true;
+            }
+            std::this_thread::yield();
         }
-        selected = select_patches(view, radius, {}, stream.known_heights());
-        frame = stream.update(selected);
-        for (const CellId cell : frame.bakes) {
-            baker.start(cell);
-        }
-        settled = frame.arrived.empty() && frame.bakes.empty() && baker.in_flight() == 0;
-        std::this_thread::yield();
-    }
-    REQUIRE(settled);
+        return false;
+    };
+
+    REQUIRE(settle());
     REQUIRE(frame.drawn.size() == selected.size());
     CHECK(stream.held_count() <= 2'048);
+    CHECK(uploaded.size() == stream.held_count());
     for (std::size_t at = 0; at < selected.size(); ++at) {
         CHECK(frame.drawn.at(at).cell == selected.at(at).cell);
         CHECK(frame.drawn.at(at).coarser_edges == selected.at(at).coarser_edges);
     }
+
+    // Dug out ahead, with nothing baking.
+    const CellId dug = hog::planet::cell_at(glm::normalize(up + (ahead * 0.01)), 10);
+    REQUIRE(world.apply({.cell = dug,
+                         .time = {},
+                         .author = {},
+                         .layer = hog::planet::Layer::Player,
+                         .payload = hog::planet::Excavate{.depth = 40 * hog::planet::fixed_one}}));
+    stream.changed(dug);
+    const bool resettled = settle();
+    std::vector<CellId> differing;
+    std::size_t reached = 0;
+    for (const auto& patch : frame.drawn) {
+        if (hog::terrain::reaches(patch.cell, dug)) {
+            ++reached;
+        }
+        if (!same(uploaded.at(patch.cell), hog::terrain::bake_patch(world, patch.cell))) {
+            differing.push_back(patch.cell);
+        }
+    }
+    world.roll_back({});
+    REQUIRE(resettled);
+    CHECK(reached > 0);
+    CHECK(differing.empty());
 }

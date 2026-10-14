@@ -31,7 +31,7 @@ struct StreamedPatch {
 
 struct StreamFrame {
     std::vector<planet::CellId> evicted; // no longer held
-    std::vector<Patch> arrived;          // held from now on, to upload
+    std::vector<Patch> arrived;          // held from now on, to upload, replacing any held before
     std::vector<StreamedPatch> drawn;    // nearest first
     std::vector<planet::CellId> bakes;   // to start, most wanted first
 };
@@ -39,13 +39,16 @@ struct StreamFrame {
 // Which patches are held, standing in for the selection until what it asks for is baked: a held
 // parent covers its children until all of them are held, and held children cover their parent.
 // Ground covered by nothing held is baked first, then the rest nearest first. The patches drawn
-// least recently make room for those arriving.
+// least recently make room for those arriving. Changed ground stays drawn until it's baked again.
 class PatchStream {
 public:
     explicit PatchStream(const StreamSettings& settings = {}) : settings_(settings) {}
 
     // A patch an update asked to bake, baked.
     void baked(Patch patch);
+    // A cell of the world changed, or had a change rolled back. No bake may be running while the
+    // world changes; those in flight across it are dropped when they arrive.
+    void changed(planet::CellId cell);
     // Once a frame, with the patches selected for it.
     [[nodiscard]] StreamFrame update(std::span<const SelectedPatch> selected);
 
@@ -64,6 +67,7 @@ private:
     struct Held {
         WorldPosition origin;
         std::uint64_t drawn = 0; // frame
+        bool stale = false;      // its ground changed since
     };
     struct Known {
         HeightRange heights;
@@ -75,6 +79,8 @@ private:
     [[nodiscard]] std::map<planet::CellId, double>
     cover(std::span<const SelectedPatch> selected) const;
     [[nodiscard]] bool covered(planet::CellId cell) const;
+    // Held, and baked since its ground last changed.
+    [[nodiscard]] bool fresh(planet::CellId cell) const;
     [[nodiscard]] std::optional<planet::CellId> held_above(planet::CellId cell) const;
     void arrive(std::span<const SelectedPatch> selected, StreamFrame& frame);
     void spread_heights(planet::CellId cell);
@@ -82,7 +88,8 @@ private:
     StreamSettings settings_;
     std::map<planet::CellId, Held> held_;
     std::set<planet::CellId> baking_;
-    std::vector<Patch> waiting_; // baked, not yet arrived
+    std::set<planet::CellId> outdated_; // baking from ground since changed
+    std::vector<Patch> waiting_;        // baked, not yet arrived
     std::map<planet::CellId, Known> heights_;
     std::uint64_t frame_ = 0;
 };

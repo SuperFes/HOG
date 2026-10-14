@@ -12,6 +12,7 @@
 #include <set>
 #include <span>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -45,15 +46,73 @@ std::uint8_t stitching(const std::set<planet::CellId>& drawn,
     return coarser;
 }
 
+// The cells among those tracked that a change reaches: the one it lies in at each coarser level
+// and those beside that, then those within it, and those beside it touching it.
+template <typename Cells>
+std::vector<planet::CellId> reached(const Cells& cells, planet::CellId change) {
+    const auto cell_of = [](const auto& entry) -> planet::CellId {
+        if constexpr (std::is_same_v<std::decay_t<decltype(entry)>, planet::CellId>) {
+            return entry;
+        } else {
+            return entry.first;
+        }
+    };
+    std::vector<planet::CellId> found;
+    const auto add_tracked = [&](planet::CellId cell) {
+        if (cells.contains(cell)) {
+            found.push_back(cell);
+        }
+    };
+    for (int level = 0; level < change.level(); ++level) {
+        const planet::CellId above = change.parent(level);
+        add_tracked(above);
+        const auto beside = planet::vertex_neighbors(above);
+        for (const planet::CellId next : beside.cells()) {
+            add_tracked(next);
+        }
+    }
+    const auto within = [&](planet::CellId area, auto keep) {
+        for (auto at = cells.lower_bound(area.range_min());
+             at != cells.end() && cell_of(*at) <= area.range_max(); ++at) {
+            if (keep(cell_of(*at))) {
+                found.push_back(cell_of(*at));
+            }
+        }
+    };
+    within(change, [](planet::CellId /*cell*/) { return true; });
+    const auto beside = planet::vertex_neighbors(change);
+    for (const planet::CellId next : beside.cells()) {
+        within(next, [&](planet::CellId cell) { return reaches(cell, change); });
+    }
+    return found;
+}
+
 } // namespace
 
 void PatchStream::baked(Patch patch) {
     baking_.erase(patch.cell);
+    if (outdated_.erase(patch.cell) != 0) {
+        return;
+    }
     heights_.insert_or_assign(patch.cell, Known{.heights = patch.heights, .baked = true});
     spread_heights(patch.cell);
-    if (!held_.contains(patch.cell)) {
+    if (!fresh(patch.cell)) {
         waiting_.push_back(std::move(patch));
     }
+}
+
+void PatchStream::changed(planet::CellId cell) {
+    for (const planet::CellId held : reached(held_, cell)) {
+        held_.at(held).stale = true;
+    }
+    for (const planet::CellId baking : reached(baking_, cell)) {
+        outdated_.insert(baking);
+    }
+    // Bounds built on what's reached are reached too, lying over it.
+    for (const planet::CellId known : reached(heights_, cell)) {
+        heights_.erase(known);
+    }
+    std::erase_if(waiting_, [&](const Patch& patch) { return reaches(patch.cell, cell); });
 }
 
 std::optional<HeightRange> PatchStream::heights(planet::CellId cell) const {
@@ -81,6 +140,11 @@ void PatchStream::spread_heights(planet::CellId cell) {
         heights_.insert_or_assign(parent, Known{.heights = bounds, .baked = false});
         cell = parent;
     }
+}
+
+bool PatchStream::fresh(planet::CellId cell) const {
+    const auto held = held_.find(cell);
+    return held != held_.end() && !held->second.stale;
 }
 
 std::optional<planet::CellId> PatchStream::held_above(planet::CellId cell) const {
@@ -144,7 +208,7 @@ void PatchStream::arrive(std::span<const SelectedPatch> selected, StreamFrame& f
         wanted.emplace(patch.cell, patch.distance);
     }
     std::erase_if(waiting_, [&](const Patch& patch) {
-        return !wanted.contains(patch.cell) || held_.contains(patch.cell);
+        return !wanted.contains(patch.cell) || fresh(patch.cell);
     });
     std::ranges::stable_sort(waiting_, {}, [&](const Patch& patch) {
         return std::pair{covered(patch.cell), wanted.at(patch.cell)};
@@ -163,16 +227,20 @@ void PatchStream::arrive(std::span<const SelectedPatch> selected, StreamFrame& f
 
     std::size_t taken = 0;
     for (; taken < waiting_.size() && frame.arrived.size() < settings_.uploads; ++taken) {
-        if (held_.size() >= settings_.capacity) {
-            if (spare.empty()) {
-                break;
-            }
-            held_.erase(spare.back());
-            frame.evicted.push_back(spare.back());
-            spare.pop_back();
-        }
         Patch& patch = waiting_[taken];
-        held_.emplace(patch.cell, Held{.origin = patch.origin, .drawn = frame_});
+        if (const auto held = held_.find(patch.cell); held != held_.end()) {
+            held->second.stale = false;
+        } else {
+            if (held_.size() >= settings_.capacity) {
+                if (spare.empty()) {
+                    break;
+                }
+                held_.erase(spare.back());
+                frame.evicted.push_back(spare.back());
+                spare.pop_back();
+            }
+            held_.emplace(patch.cell, Held{.origin = patch.origin, .drawn = frame_});
+        }
         frame.arrived.push_back(std::move(patch));
     }
     waiting_.erase(waiting_.begin(), waiting_.begin() + static_cast<std::ptrdiff_t>(taken));
@@ -214,8 +282,7 @@ StreamFrame PatchStream::update(std::span<const SelectedPatch> selected) {
     }
     std::vector<std::tuple<bool, double, planet::CellId>> missing;
     for (const SelectedPatch& patch : selected) {
-        if (!held_.contains(patch.cell) && !baking_.contains(patch.cell) &&
-            !waiting.contains(patch.cell)) {
+        if (!fresh(patch.cell) && !baking_.contains(patch.cell) && !waiting.contains(patch.cell)) {
             missing.emplace_back(covered(patch.cell), patch.distance, patch.cell);
         }
     }

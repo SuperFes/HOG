@@ -1,5 +1,6 @@
 #include <hog/planet/neighbors.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/terrain/patch.hpp>
 #include <hog/terrain/stream.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -246,4 +247,102 @@ TEST_CASE("edges towards nothing drawn keep the selection's stitching", "[terrai
     const auto frame = settle(stream, selected);
     REQUIRE(frame.drawn.size() == 1);
     CHECK(frame.drawn.front().coarser_edges == hog::terrain::edge_plus_v);
+}
+
+TEST_CASE("changed ground stays drawn until it's baked again", "[terrain][stream]") {
+    PatchStream stream;
+    const auto selected = selecting({parent});
+    settle(stream, selected);
+    stream.changed(parent.child(0).child(3));
+    auto frame = stream.update(selected);
+    CHECK(frame.bakes == std::vector{parent});
+    CHECK(drawn(frame) == std::set{parent});
+    stream.baked(fake_bake(parent));
+    frame = stream.update(selected);
+    CHECK(arrived(frame) == std::vector{parent});
+    CHECK(frame.evicted.empty());
+    CHECK(drawn(frame) == std::set{parent});
+    CHECK(stream.held_count() == 1);
+    CHECK(stream.update(selected).bakes.empty());
+}
+
+TEST_CASE("bakes from before a change are baked again", "[terrain][stream]") {
+    PatchStream stream;
+    const auto selected = selecting({parent.child(0), parent.child(1)});
+    REQUIRE(stream.update(selected).bakes.size() == 2);
+    // One waiting when the ground changed, one in flight.
+    stream.baked(fake_bake(parent.child(0)));
+    stream.changed(parent);
+    stream.baked(fake_bake(parent.child(1)));
+    auto frame = stream.update(selected);
+    CHECK(frame.arrived.empty());
+    CHECK(frame.bakes == std::vector{parent.child(0), parent.child(1)});
+    CHECK(!stream.heights(parent.child(1)));
+    for (const CellId cell : frame.bakes) {
+        stream.baked(fake_bake(cell));
+    }
+    frame = stream.update(selected);
+    CHECK(drawn(frame) == std::set{parent.child(0), parent.child(1)});
+}
+
+TEST_CASE("a change leaves the ground it doesn't reach be", "[terrain][stream]") {
+    PatchStream stream;
+    const CellId elsewhere = CellId::from_face_ij(4, 1, 1, 6);
+    const auto selected = selecting({parent, elsewhere});
+    settle(stream, selected);
+    stream.changed(elsewhere.child(2));
+    const auto frame = stream.update(selected);
+    CHECK(frame.bakes == std::vector{elsewhere});
+    CHECK(stream.heights(parent));
+    CHECK(!stream.heights(elsewhere));
+}
+
+TEST_CASE("a change forgets the heights it reaches, and the bounds built on them",
+          "[terrain][stream]") {
+    PatchStream stream;
+    for (int child = 0; child < 4; ++child) {
+        stream.baked(fake_bake(parent.child(child)));
+    }
+    REQUIRE(stream.heights(parent));
+    stream.changed(parent.child(0).child(0));
+    CHECK(!stream.heights(parent));
+    for (int child = 0; child < 4; ++child) {
+        CHECK(!stream.heights(parent.child(child)));
+    }
+}
+
+TEST_CASE("a change finds every patch it reaches", "[terrain][stream]") {
+    // In from a cube's corner, and out across its faces.
+    const CellId corner = CellId::from_face_ij(0, 0, 0, 8);
+    for (const CellId change : {corner, corner.child(3).child(1), parent.child(2)}) {
+        CAPTURE(change.raw());
+        std::set<CellId> cells;
+        for (const CellId seed :
+             {change.child(0).child(0), hog::planet::edge_neighbors(change)[0].child(1),
+              hog::planet::edge_neighbors(hog::planet::edge_neighbors(change)[3])[3]}) {
+            for (int level = 0; level <= seed.level(); ++level) {
+                const CellId above = seed.parent(level);
+                cells.insert(above);
+                const auto beside = hog::planet::vertex_neighbors(above);
+                for (const CellId next : beside.cells()) {
+                    cells.insert(next);
+                }
+            }
+        }
+        PatchStream stream;
+        for (const CellId cell : cells) {
+            stream.baked(fake_bake(cell));
+        }
+        stream.changed(change);
+        std::size_t reached = 0;
+        for (const CellId cell : cells) {
+            CAPTURE(cell.raw());
+            CHECK(stream.heights(cell).has_value() != hog::terrain::reaches(cell, change));
+            if (hog::terrain::reaches(cell, change)) {
+                ++reached;
+            }
+        }
+        CHECK(reached > 0);
+        CHECK(reached < cells.size());
+    }
 }
