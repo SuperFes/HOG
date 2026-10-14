@@ -41,7 +41,7 @@ TEST_CASE("cube sphere vertices sit on the planet's cell corners", "[render][cub
                     hog::planet::CellId::from_face_ij(face, i, j, level));
                 const std::size_t first = (static_cast<std::size_t>(face) * across * across) +
                                           (std::size_t{j} * across) + i;
-                for (const auto [corner, offset] :
+                for (const auto& [corner, offset] :
                      {std::tuple{0U, 0U}, {1U, 1U}, {2U, across + 1}, {3U, across}}) {
                     const DVec3 position{mesh.positions[first + offset]};
                     CHECK(glm::length(position - corners.at(corner)) < 1e-6);

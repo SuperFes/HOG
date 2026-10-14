@@ -48,6 +48,10 @@ jobs:
           sudo apt-get update && sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev
           libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev
           libegl1-mesa-dev
+      # Lavapipe and the validation layer, so GPU tests run the same on runners without a GPU.
+      - name: Install a software Vulkan driver
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y libvulkan1 mesa-vulkan-drivers vulkan-validationlayers
       # Older sanitizer runtimes crash under the runner kernel's high mmap randomization.
       - name: Lower mmap randomization
         if: startsWith(matrix.preset, 'ci-') && runner.os == 'Linux'

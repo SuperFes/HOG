@@ -7,7 +7,8 @@ namespace hog::render {
 // Where a view is from and which way it looks. The eye stays in doubles; the GPU only ever sees
 // offsets from it.
 struct Camera {
-    WorldPosition eye;
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    WorldPosition eye = {};
     DVec3 forward{0.0, 0.0, -1.0}; // unit length
     DVec3 up{0.0, 1.0, 0.0};       // unit length, at right angles to forward
     double vertical_fov = 1.0;     // radians
