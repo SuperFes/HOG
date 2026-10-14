@@ -25,6 +25,10 @@ struct GlobeView {
     double twilight = 0.1;
     // Radii the ground rises per unit of the relief's heights; zero for a smooth sphere.
     double relief = 0.0;
+    // Radii above the sphere the clouds lie, when there are any.
+    double cloud_lift = 0.0;
+    // Radii of air above the sphere, glowing where the sun lights it; none at zero.
+    double air = 0.0;
 };
 
 // What a globe is drawn from: images with a layer per cube face, ready to sample.
@@ -35,6 +39,9 @@ struct GlobeImages {
     // neighbouring faces share their edges. They should agree there, as heights taken by direction
     // do.
     const Image* relief = nullptr;
+    // Colours, with how much of the sky they cover as alpha, laid out as `faces`; none for clear
+    // skies.
+    const Image* clouds = nullptr;
 };
 
 // A planet drawn as a sphere with a texture per cube face, lit by a far sun.
@@ -46,7 +53,7 @@ public:
                                               VkFormat depth_format, int cells);
 
     // Records drawing into the colour and depth images being rendered to, of `extent`, leaving the
-    // rest of them as they were. Both images must be set.
+    // rest of them as they were. The faces and relief must be set.
     void draw(VkCommandBuffer commands, VkExtent2D extent, const GlobeImages& images,
               const GlobeView& view) const noexcept;
 
@@ -54,6 +61,8 @@ private:
     Globe() = default;
 
     Pipeline pipeline_;
+    Pipeline cloud_pipeline_;
+    Pipeline air_pipeline_;
     Sampler sampler_;
     Buffer vertices_;
     Buffer indices_;

@@ -11,6 +11,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -33,6 +34,22 @@ constexpr std::array<Pixel, 6> face_colours{{{200, 0, 0, 255},
                                              {200, 200, 0, 255},
                                              {0, 200, 200, 255},
                                              {200, 0, 200, 255}}};
+
+// Every face in one colour.
+hog::render::StreamedImage uniform_faces(hog::render::Device& device, Pixel colour) {
+    constexpr VkExtent2D face{.width = 2, .height = 2};
+    auto faces = hog::render::make_streamed_image(device, VK_FORMAT_R8G8B8A8_UNORM, face, 1, 6);
+    REQUIRE(faces);
+    std::vector<std::byte> texels;
+    for (std::uint32_t texel = 0; texel < 6 * face.width * face.height; ++texel) {
+        for (const std::uint8_t channel : colour) {
+            texels.push_back(static_cast<std::byte>(channel));
+        }
+    }
+    REQUIRE(device.submit_now(
+        [&](VkCommandBuffer commands) { REQUIRE(faces->update(commands, 0, texels)); }));
+    return std::move(faces).value();
+}
 
 hog::render::StreamedImage coloured_faces(hog::render::Device& device) {
     constexpr VkExtent2D face{.width = 2, .height = 2};
@@ -203,5 +220,59 @@ TEST_CASE("slopes facing the sun are lit more than those facing away", "[render]
     const int level_ground = lit(0.0, -0.5);
     CHECK(lit(0.2, -0.5) > level_ground + 5);
     CHECK(lit(0.2, 0.5) < level_ground - 5);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("clouds lie over the ground as much as they cover the sky", "[render][gpu]") {
+    const auto device = test_device();
+    const auto globe = make_globe(*device);
+    const auto faces = coloured_faces(*device);
+    const auto flat = level(*device);
+    const auto overcast = uniform_faces(*device, {255, 255, 255, 255});
+    const auto broken = uniform_faces(*device, {255, 255, 255, 128});
+    auto view = view_from(0.0, 0.0, {1.0, 0.0, 0.0});
+    view.cloud_lift = 0.05;
+
+    const auto under = [&](const hog::render::Image* clouds) {
+        return pixel_at(draw(*device, globe,
+                             {.faces = &faces.image(), .relief = &flat.image(), .clouds = clouds},
+                             view),
+                        16, 16);
+    };
+    CHECK(under(nullptr) == face_colours[0]);
+    CHECK(under(&overcast.image()) == Pixel{255, 255, 255, 255});
+    const Pixel half = under(&broken.image());
+    CHECK(half[0] > 220);
+    CHECK(half[0] < 235);
+    CHECK(half[1] > 120);
+    CHECK(half[1] < 135);
+    CHECK(half[3] == 255);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("the air glows around the planet where the sun lights it", "[render][gpu]") {
+    const auto device = test_device();
+    const auto globe = make_globe(*device);
+    const auto faces = coloured_faces(*device);
+    const auto flat = level(*device);
+    const hog::render::GlobeImages images{.faces = &faces.image(), .relief = &flat.image()};
+
+    // Sunlit from one side, so the edge glows there and not on the other. The planet's edge lies
+    // about 10 pixels out from the middle and the air's 14.
+    const auto edges = [&](hog::DVec3 sun) {
+        auto view = view_from(0.0, 0.0, sun);
+        view.air = 0.3;
+        const auto pixels = draw(*device, globe, images, view);
+        CHECK(pixel_at(pixels, 1, 1) == Pixel{0, 0, 0, 255});
+        return std::pair{pixel_at(pixels, 4, 16), pixel_at(pixels, 28, 16)};
+    };
+    const auto [left, right] = edges({0.0, 1.0, 0.0});
+    const auto [left_flipped, right_flipped] = edges({0.0, -1.0, 0.0});
+    const Pixel lit = std::max(left, right, [](Pixel a, Pixel b) { return a[2] < b[2]; });
+    const Pixel dark = std::min(left, right, [](Pixel a, Pixel b) { return a[2] < b[2]; });
+    CHECK(lit[2] > 30);
+    CHECK(lit[2] > lit[0]);
+    CHECK(dark[2] < 10);
+    CHECK((left[2] > right[2]) != (left_flipped[2] > right_flipped[2]));
     CHECK(device->validation_errors() == 0);
 }

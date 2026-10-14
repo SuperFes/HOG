@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <span>
 #include <utility>
@@ -30,6 +31,9 @@ struct Push {
     float twilight = 0.0F;
     float relief = 0.0F;
     float relief_steps = 0.0F;
+    float cloud_lift = 0.0F;
+    float air_lift = 0.0F;
+    alignas(16) glm::vec4 eye{};
 };
 
 // A host-written buffer the GPU reads from, holding `bytes`.
@@ -55,20 +59,69 @@ Push push_for(const GlobeView& view, VkExtent2D extent, const Image& relief) {
             .sun = glm::vec4{Vec3{view.sun}, static_cast<float>(view.night_light)},
             .twilight = static_cast<float>(std::max(view.twilight, 1e-6)),
             .relief = static_cast<float>(view.relief),
-            .relief_steps = static_cast<float>(relief.desc().extent.width - 1)};
+            .relief_steps = static_cast<float>(relief.desc().extent.width - 1),
+            .cloud_lift = static_cast<float>(view.cloud_lift),
+            .air_lift = static_cast<float>(view.air),
+            .eye = glm::vec4{Vec3{view.camera.eye.metres() / view.radius}, 1.0F}};
 }
 
-VkVertexInputAttributeDescription attribute(std::uint32_t location, std::uint32_t offset) {
+constexpr VkVertexInputAttributeDescription attribute(std::uint32_t location,
+                                                      std::uint32_t offset) {
     return {
         .location = location, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offset};
 }
 
-VkDescriptorSetLayoutBinding sampled_image(std::uint32_t binding, VkShaderStageFlags stages) {
+constexpr VkDescriptorSetLayoutBinding sampled_image(std::uint32_t binding,
+                                                     VkShaderStageFlags stages) {
     return {.binding = binding,
             .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             .descriptorCount = 1,
             .stageFlags = stages,
             .pImmutableSamplers = nullptr};
+}
+
+constexpr std::array vertex_bindings{VkVertexInputBindingDescription{
+    .binding = 0, .stride = sizeof(Vertex), .inputRate = VK_VERTEX_INPUT_RATE_VERTEX}};
+constexpr std::array vertex_attributes{
+    attribute(0, offsetof(Vertex, position)), attribute(1, offsetof(Vertex, face_point)),
+    attribute(2, offsetof(Vertex, along_s)), attribute(3, offsetof(Vertex, along_t))};
+constexpr std::array ground_images{
+    sampled_image(0, VK_SHADER_STAGE_FRAGMENT_BIT),
+    sampled_image(1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)};
+constexpr std::array cloud_images{sampled_image(0, VK_SHADER_STAGE_FRAGMENT_BIT)};
+
+enum class Layer : std::uint8_t { Ground, Clouds, Air };
+
+// The ground's pipeline, or a shell's laid over it without hiding what's drawn after.
+PipelineDesc globe_pipeline(VkFormat colour_format, VkFormat depth_format, Layer layer) {
+    PipelineDesc desc{.spirv = shaders::globe,
+                      .bindings = vertex_bindings,
+                      .attributes = vertex_attributes,
+                      .colour_format = colour_format,
+                      .depth_format = depth_format,
+                      .cull = VK_CULL_MODE_BACK_BIT,
+                      .push_constant_bytes = sizeof(Push),
+                      .descriptors = ground_images};
+    if (layer == Layer::Ground) {
+        return desc;
+    }
+    // The shells need only where they are.
+    desc.attributes = std::span{vertex_attributes}.first(2);
+    desc.depth_write = false;
+    if (layer == Layer::Clouds) {
+        desc.vertex_entry = "cloud_vertex";
+        desc.fragment_entry = "cloud_fragment";
+        desc.blend = Blend::Alpha;
+        desc.descriptors = cloud_images;
+    } else {
+        desc.vertex_entry = "air_vertex";
+        desc.fragment_entry = "air_fragment";
+        desc.blend = Blend::Add;
+        // Drawn from its far side, which shows from within it too.
+        desc.cull = VK_CULL_MODE_FRONT_BIT;
+        desc.descriptors = {};
+    }
+    return desc;
 }
 
 } // namespace
@@ -105,26 +158,21 @@ Result<Globe> Globe::create(const Device& device, VkFormat colour_format, VkForm
     }
     globe.sampler_ = std::move(sampler).value();
 
-    const std::array bindings{VkVertexInputBindingDescription{
-        .binding = 0, .stride = sizeof(Vertex), .inputRate = VK_VERTEX_INPUT_RATE_VERTEX}};
-    const std::array attributes{
-        attribute(0, offsetof(Vertex, position)), attribute(1, offsetof(Vertex, face_point)),
-        attribute(2, offsetof(Vertex, along_s)), attribute(3, offsetof(Vertex, along_t))};
-    const std::array descriptors{
-        sampled_image(0, VK_SHADER_STAGE_FRAGMENT_BIT),
-        sampled_image(1, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)};
-    auto pipeline = make_pipeline(device, {.spirv = shaders::globe,
-                                           .bindings = bindings,
-                                           .attributes = attributes,
-                                           .colour_format = colour_format,
-                                           .depth_format = depth_format,
-                                           .cull = VK_CULL_MODE_BACK_BIT,
-                                           .push_constant_bytes = sizeof(Push),
-                                           .descriptors = descriptors});
-    if (!pipeline) {
-        return std::unexpected(std::move(pipeline).error());
+    auto ground = make_pipeline(device, globe_pipeline(colour_format, depth_format, Layer::Ground));
+    if (!ground) {
+        return std::unexpected(std::move(ground).error());
     }
-    globe.pipeline_ = std::move(pipeline).value();
+    globe.pipeline_ = std::move(ground).value();
+    auto clouds = make_pipeline(device, globe_pipeline(colour_format, depth_format, Layer::Clouds));
+    if (!clouds) {
+        return std::unexpected(std::move(clouds).error());
+    }
+    globe.cloud_pipeline_ = std::move(clouds).value();
+    auto air = make_pipeline(device, globe_pipeline(colour_format, depth_format, Layer::Air));
+    if (!air) {
+        return std::unexpected(std::move(air).error());
+    }
+    globe.air_pipeline_ = std::move(air).value();
     return globe;
 }
 
@@ -135,17 +183,28 @@ void Globe::draw(VkCommandBuffer commands, VkExtent2D extent, const GlobeImages&
         return;
     }
     const Push push = push_for(view, extent, *images.relief);
-    vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.handle());
-    push_sampled_image(commands, pipeline_, 0, images.faces->view(), sampler_.handle());
-    push_sampled_image(commands, pipeline_, 1, images.relief->view(), sampler_.handle());
-    vkCmdPushConstants(commands, pipeline_.layout(),
-                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push),
-                       &push);
     const std::array vertices{vertices_.handle()};
     const VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(commands, 0, 1, vertices.data(), &offset);
     vkCmdBindIndexBuffer(commands, indices_.handle(), 0, VK_INDEX_TYPE_UINT32);
-    vkCmdDrawIndexed(commands, index_count_, 1, 0, 0, 0);
+    const auto draw_with = [&](const Pipeline& pipeline) {
+        vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
+        vkCmdPushConstants(commands, pipeline.layout(),
+                           VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                           sizeof(push), &push);
+        vkCmdDrawIndexed(commands, index_count_, 1, 0, 0, 0);
+    };
+
+    push_sampled_image(commands, pipeline_, 0, images.faces->view(), sampler_.handle());
+    push_sampled_image(commands, pipeline_, 1, images.relief->view(), sampler_.handle());
+    draw_with(pipeline_);
+    if (images.clouds != nullptr) {
+        push_sampled_image(commands, cloud_pipeline_, 0, images.clouds->view(), sampler_.handle());
+        draw_with(cloud_pipeline_);
+    }
+    if (view.air > 0.0) {
+        draw_with(air_pipeline_);
+    }
 }
 
 } // namespace hog::render

@@ -8,9 +8,15 @@ struct Push {
     float relief;
     // Steps between the relief's texels across a face, one fewer than it has.
     float relief_steps;
+    // Radii above the sphere the clouds and the top of the air lie.
+    float cloud_lift;
+    float air_lift;
+    // xyz where the camera is, in radii from the planet's centre.
+    float4 eye;
 };
 
 [[vk::push_constant]] ConstantBuffer<Push> push;
+// The ground's colours and heights; the clouds' pipeline takes its own colours at 0 instead.
 [[vk::binding(0, 0)]] Sampler2DArray faces;
 [[vk::binding(1, 0)]] Sampler2DArray relief;
 
@@ -85,4 +91,84 @@ float4 fragment_main(Ground ground) : SV_Target {
     const float night = push.sun.w;
     const float day = sunlight(asin(clamp(sun_up, -1.0, 1.0))) * slope;
     return float4(saturate(colour * (night + ((1.0 - night) * day))), 1.0);
+}
+
+struct Shell {
+    float4 position : SV_Position;
+    float3 at; // in radii from the planet's centre
+    float3 face_point;
+};
+
+Shell lift_shell(Vertex vertex, float lift) {
+    Shell shell;
+    shell.at = vertex.position * (1.0 + lift);
+    shell.position = mul(push.clip_from_planet, float4(shell.at, 1.0));
+    shell.face_point = vertex.face_point;
+    return shell;
+}
+
+[shader("vertex")]
+Shell cloud_vertex(Vertex vertex) {
+    return lift_shell(vertex, push.cloud_lift);
+}
+
+// Colour, and how much of the sky the cloud covers as alpha, lit as the ground below is.
+[shader("fragment")]
+float4 cloud_fragment(Shell shell) : SV_Target {
+    const float4 cloud = faces.Sample(shell.face_point);
+    const float sun_up = dot(normalize(shell.at), push.sun.xyz);
+    const float night = push.sun.w;
+    const float light = night + ((1.0 - night) * sunlight(asin(clamp(sun_up, -1.0, 1.0))));
+    return float4(cloud.rgb * light, cloud.a);
+}
+
+[shader("vertex")]
+Shell air_vertex(Vertex vertex) {
+    return lift_shell(vertex, push.air_lift);
+}
+
+// Where a ray from `origin` along unit `direction` enters and leaves a sphere about the centre,
+// if it meets it.
+bool crossing(float3 origin, float3 direction, float radius, out float enter, out float leave) {
+    const float along = dot(origin, direction);
+    const float miss = dot(origin, origin) - (along * along);
+    const float half_chord_squared = (radius * radius) - miss;
+    if (half_chord_squared < 0.0) {
+        enter = 0.0;
+        leave = 0.0;
+        return false;
+    }
+    const float half_chord = sqrt(half_chord_squared);
+    enter = -along - half_chord;
+    leave = -along + half_chord;
+    return true;
+}
+
+// The air between the camera and the far side of its shell, brighter the more of it a ray
+// crosses and fading through a twilight wider than the ground's, since high air keeps the sun
+// longer. Drawn on the shell's far side, so it shows from outside and in.
+[shader("fragment")]
+float4 air_fragment(Shell shell) : SV_Target {
+    const float3 eye = push.eye.xyz;
+    const float3 direction = normalize(shell.at - eye);
+    const float top = 1.0 + push.air_lift;
+    float enter;
+    float leave;
+    if (!crossing(eye, direction, top, enter, leave)) {
+        return float4(0.0, 0.0, 0.0, 0.0);
+    }
+    enter = max(enter, 0.0);
+    float ground_enter;
+    float ground_leave;
+    if (crossing(eye, direction, 1.0, ground_enter, ground_leave) && ground_enter > 0.0) {
+        leave = min(leave, ground_enter);
+    }
+    const float longest = 2.0 * sqrt((top * top) - 1.0);
+    const float depth = saturate((leave - enter) / longest);
+    const float3 middle = eye + (direction * ((enter + leave) / 2.0));
+    const float sun_up = dot(normalize(middle), push.sun.xyz);
+    const float wide = 3.0 * push.twilight;
+    const float share = saturate((asin(clamp(sun_up, -1.0, 1.0)) + wide) / wide);
+    const float3 blue = float3(0.35, 0.6, 1.0);
+    return float4(blue * depth * share * share * (3.0 - (2.0 * share)), 0.0);
 }
