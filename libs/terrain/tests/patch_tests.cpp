@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <set>
 #include <tuple>
 #include <vector>
 
@@ -28,6 +29,7 @@ using hog::terrain::Corner;
 using hog::terrain::direction;
 using hog::terrain::Patch;
 using hog::terrain::patch_side;
+using hog::terrain::reaches;
 using hog::terrain::sample_cell;
 using hog::terrain::testing::land_patch;
 using hog::terrain::testing::planet;
@@ -255,6 +257,51 @@ TEST_CASE("a patch shows changes to the ground", "[terrain][patch]") {
     // The far edges take their ground from the cells beyond.
     const DVec3 point = world_at(patch, vertex_index(10, 20));
     CHECK(std::abs(glm::length(point) - planet.radius - 1'200.0) < near_enough);
+}
+
+TEST_CASE("a patch is altered only by changes that reach it", "[terrain][patch]") {
+    World& world = shared_world();
+    const CellId patch = land_patch();
+    const Patch before = bake_patch(world, patch);
+    const auto altered_by = [&](CellId cell) {
+        REQUIRE(
+            world.apply({.cell = cell,
+                         .time = {},
+                         .author = {},
+                         .layer = hog::planet::Layer::Player,
+                         .payload = hog::planet::SetElevation{.elevation = 3'000 * fixed_one}}));
+        const Patch after = bake_patch(world, patch);
+        world.roll_back({});
+        return !std::ranges::equal(
+            before.vertices, after.vertices, [](const auto& a, const auto& b) {
+                return a.position == b.position && a.normal == b.normal && a.biome == b.biome;
+            });
+    };
+
+    const auto beside = hog::planet::edge_neighbors(patch);
+    for (const CellId cell : {patch, patch.child(1).child(2), patch.parent(3), beside[0], beside[1],
+                              beside[2], beside[3].child(0)}) {
+        CAPTURE(cell.raw());
+        CHECK(reaches(patch, cell));
+        CHECK(altered_by(cell));
+    }
+    CHECK(!reaches(patch, hog::planet::edge_neighbors(patch.parent(4))[0]));
+    // Every cell just beyond those beside it.
+    std::set<CellId> beyond;
+    const auto beside_patch = hog::planet::vertex_neighbors(patch);
+    for (const CellId next : beside_patch.cells()) {
+        const auto beside_next = hog::planet::vertex_neighbors(next);
+        for (const CellId cell : beside_next.cells()) {
+            if (!reaches(patch, cell)) {
+                beyond.insert(cell);
+            }
+        }
+    }
+    CHECK(beyond.size() == 16);
+    for (const CellId cell : beyond) {
+        CAPTURE(cell.raw());
+        CHECK(!altered_by(cell));
+    }
 }
 
 TEST_CASE("a patch too fine for its vertices is refused", "[terrain][patch]") {

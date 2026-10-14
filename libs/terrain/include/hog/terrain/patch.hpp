@@ -64,4 +64,9 @@ struct Patch {
 // The ground of a cell at most max_patch_level deep, changes and digging included.
 [[nodiscard]] Patch bake_patch(const planet::World& world, planet::CellId cell);
 
+// Whether a change to a cell can alter a patch's bake: whether it overlaps the patch or a cell
+// beside it, which the border and far edges sample. A change anywhere in a cell beside it counts,
+// being cheaper to bake again than to rule out.
+[[nodiscard]] bool reaches(planet::CellId patch, planet::CellId change);
+
 } // namespace hog::terrain

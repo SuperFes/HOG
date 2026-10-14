@@ -1,5 +1,6 @@
 #include <hog/core/assert.hpp>
 #include <hog/planet/cube_face.hpp>
+#include <hog/planet/neighbors.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/terrain/patch.hpp>
@@ -134,6 +135,14 @@ Patch bake_patch(const planet::World& world, planet::CellId cell) {
         }
     }
     return patch;
+}
+
+bool reaches(planet::CellId patch, planet::CellId change) {
+    const auto overlaps = [&](planet::CellId cell) {
+        return cell.contains(change) || change.contains(cell);
+    };
+    return overlaps(patch) ||
+           std::ranges::any_of(planet::vertex_neighbors(patch).cells(), overlaps);
 }
 
 } // namespace hog::terrain
