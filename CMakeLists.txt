@@ -114,6 +114,7 @@ function(hog_add_benchmarks lib)
     add_dependencies(benchmarks run_${lib}_bench)
 endfunction()
 
+add_subdirectory(libs/atmosphere)
 add_subdirectory(libs/core)
 add_subdirectory(libs/jobs)
 add_subdirectory(libs/planet)
