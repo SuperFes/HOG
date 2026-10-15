@@ -14,6 +14,7 @@
 #include <hog/render/billboard.hpp>
 #include <hog/render/device.hpp>
 #include <hog/render/memory.hpp>
+#include <hog/render/ocean.hpp>
 #include <hog/render/presenter.hpp>
 #include <hog/render/readback.hpp>
 #include <hog/render/rendering.hpp>
@@ -154,6 +155,7 @@ struct Ground {
     terrain::PatchBaker baker;
     terrain::PatchStream stream;
     render::Terrain terrain;
+    render::Ocean ocean;
     render::TerrainPool pool;
     client::GroundSlots slots;
     std::array<std::optional<render::Image>, render::frames_in_flight> depths;
@@ -259,6 +261,11 @@ Result<bool> draw(Ground& ground, const client::Flight& flight, double planet_ra
     view.bend = bend;
     ground.terrain.draw(frame.commands, frame.extent, ground.pool,
                         ground.slots.draws(streamed.drawn), view);
+    ground.ocean.draw(frame.commands, frame.extent,
+                      {.camera = camera,
+                       .sun = view.sun,
+                       .sky = Vec3{sky.float32[0], sky.float32[1], sky.float32[2]},
+                       .bend = bend});
     if (ground.companion) {
         ground.companion->draw(frame.commands, frame.extent, camera, companion, bend);
     }
@@ -389,6 +396,11 @@ int show(const client::Options& options, const planet::World& world, render::Dev
         std::cerr << std::format("hog-client: can't draw the ground: {}\n", terrain.error());
         return EXIT_FAILURE;
     }
+    auto ocean = render::Ocean::create(device, presenter.swapchain().format(), depth_format);
+    if (!ocean) {
+        std::cerr << std::format("hog-client: can't draw the sea: {}\n", ocean.error());
+        return EXIT_FAILURE;
+    }
     auto pool = render::TerrainPool::create(device, {.patches = settings.capacity,
                                                      .frames = render::frames_in_flight,
                                                      .uploads = settings.uploads});
@@ -404,12 +416,14 @@ int show(const client::Options& options, const planet::World& world, render::Dev
     Ground ground{.baker = terrain::PatchBaker{world, jobs},
                   .stream = terrain::PatchStream{settings},
                   .terrain = std::move(terrain).value(),
+                  .ocean = std::move(ocean).value(),
                   .pool = std::move(pool).value(),
                   .slots = {},
                   .depths = {},
                   .lighting = {.camera = {},
                                .sun = glm::normalize(frame.to_world({0.5, 0.3, 0.8})),
-                               .night_light = night_light},
+                               .night_light = night_light,
+                               .sea = true},
                   .companion = companion(options, device, presenter.swapchain().format())};
     const Result<void> flown = fly(ground, world, flight, options, device, presenter, window);
     // The bakes go before the world, and the GPU may still be drawing with the ground.
