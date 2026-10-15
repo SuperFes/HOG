@@ -200,7 +200,7 @@ This phase builds a client that flies over the generated planet with a real sky.
 - [x] Biome-driven materials (flat colors first, textures later)
 - [x] Basic ocean surface
 - [x] Sea drawn over ground at and just below sea level, so shorelines don't flicker
-- [ ] Hillaire atmosphere and sun lighting driven by planet time
+- [x] Hillaire atmosphere and sun lighting driven by planet time
 
 **Tests**
 
