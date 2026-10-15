@@ -33,6 +33,7 @@ include(HogShaders)
 
 add_library(hog_render
     src/barrier.cpp
+    src/billboard.cpp
     src/camera.cpp
     src/cube_sphere.cpp
     src/device.cpp
@@ -63,10 +64,11 @@ target_link_libraries(hog_render
     PUBLIC hog::core hog::terrain volk::volk
     PRIVATE hog::planet vk-bootstrap::vk-bootstrap)
 hog_target_defaults(hog_render)
-hog_add_shaders(hog_render shaders/globe.slang shaders/terrain.slang)
+hog_add_shaders(hog_render shaders/billboard.slang shaders/globe.slang shaders/terrain.slang)
 
 hog_add_tests(hog_render
     tests/barrier_tests.cpp
+    tests/billboard_tests.cpp
     tests/camera_tests.cpp
     tests/cube_sphere_tests.cpp
     tests/device_tests.cpp
