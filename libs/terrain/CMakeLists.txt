@@ -1,5 +1,6 @@
 add_library(hog_terrain
     src/baker.cpp
+    src/bend.cpp
     src/patch.cpp
     src/selection.cpp
     src/stitching.cpp
@@ -12,6 +13,7 @@ hog_target_defaults(hog_terrain)
 
 hog_add_tests(hog_terrain
     tests/baker_tests.cpp
+    tests/bend_tests.cpp
     tests/patch_tests.cpp
     tests/selection_tests.cpp
     tests/stitching_tests.cpp
