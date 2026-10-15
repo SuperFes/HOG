@@ -68,6 +68,10 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
     if (!glare) {
         return failed("draw the sun's glare", glare.error());
     }
+    auto timer = render::GpuTimer::create(device, frames);
+    if (!timer) {
+        return failed("time the GPU", timer.error());
+    }
     return Scene{device,
                  world,
                  jobs,
@@ -78,6 +82,7 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
                  std::move(atmosphere).value(),
                  std::move(sky).value(),
                  std::move(glare).value(),
+                 std::move(timer).value(),
                  std::move(companion),
                  frames};
 }
@@ -85,11 +90,12 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
 Scene::Scene(const render::Device& device, const planet::World& world, jobs::JobSystem& jobs,
              const sim::Calendar& calendar, render::Terrain terrain, render::Ocean ocean,
              render::TerrainPool pool, render::Atmosphere atmosphere, render::Sky sky,
-             render::Glare glare, std::optional<render::Billboard> companion, std::uint32_t frames)
+             render::Glare glare, render::GpuTimer timer,
+             std::optional<render::Billboard> companion, std::uint32_t frames)
     : device_{&device}, baker_{world, jobs}, terrain_{std::move(terrain)}, ocean_{std::move(ocean)},
       pool_{std::move(pool)}, depths_(frames), companion_{std::move(companion)},
       atmosphere_{std::move(atmosphere)}, sky_{std::move(sky)}, glare_{std::move(glare)},
-      calendar_{calendar} {}
+      timer_{std::move(timer)}, calendar_{calendar} {}
 
 Scene::~Scene() {
     (void)baker_.finish();
@@ -135,6 +141,8 @@ render::SkyView Scene::sky_view(const Shot& shot) {
 }
 
 Result<> Scene::record(render::Frame& frame, const Shot& shot) {
+    const std::span<const render::GpuSpan> timed = timer_.read(frame.commands, frame.slot);
+    timings_.assign(timed.begin(), timed.end());
     for (terrain::Patch& patch : baker_.collect()) {
         stream_.baked(std::move(patch));
     }
@@ -151,19 +159,23 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     if (auto taken = slots_.take(pool_, frame.slot, streamed); !taken) {
         return taken;
     }
+    timer_.begin(frame.commands, frame.slot, "uploads");
     if (auto recorded = pool_.record_uploads(frame.commands, frame.slot); !recorded) {
         return recorded;
     }
+    timer_.end(frame.commands, frame.slot);
     const auto depth = depth_for(frame);
     if (!depth) {
         return std::unexpected(depth.error());
     }
     const render::SkyView sky = sky_view(shot);
+    timer_.begin(frame.commands, frame.slot, "sky tables");
     if (auto recorded =
             sky_.record_frame(frame.commands, frame.extent, frame.slot, atmosphere_, sky);
         !recorded) {
         return recorded;
     }
+    timer_.end(frame.commands, frame.slot);
     const render::AirBindings through = sky_.bindings(frame.slot, atmosphere_);
 
     frame.target.use_as(frame.commands, render::image_use::colour_target);
@@ -171,19 +183,28 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                        render::image_use::discard, render::image_use::depth_target);
     render::begin_rendering(frame.commands, frame.view, frame.extent, cleared,
                             {.view = (*depth)->view()});
+    timer_.begin(frame.commands, frame.slot, "sky");
     sky_.draw(frame.commands, frame.extent, frame.slot, atmosphere_, sky);
+    timer_.end(frame.commands, frame.slot);
+    timer_.begin(frame.commands, frame.slot, "ground");
     terrain_.draw(frame.commands, frame.extent, pool_, slots_.draws(streamed.drawn),
                   {.camera = shot.camera, .sun = sky.sun, .bend = shot.bend, .air = through});
+    timer_.end(frame.commands, frame.slot);
+    timer_.begin(frame.commands, frame.slot, "sea");
     ocean_.draw(frame.commands, frame.extent,
                 {.camera = shot.camera, .sun = sky.sun, .bend = shot.bend, .air = through});
+    timer_.end(frame.commands, frame.slot);
     if (companion_ && shot.companion) {
+        timer_.begin(frame.commands, frame.slot, "companion");
         companion_->draw(frame.commands, frame.extent, shot.camera, *shot.companion, shot.bend);
+        timer_.end(frame.commands, frame.slot);
     }
     vkCmdEndRendering(frame.commands);
 
     // The glare reads what's drawn in front of the sun from depth, so it's drawn without it.
     render::transition(frame.commands, (*depth)->handle(), VK_IMAGE_ASPECT_DEPTH_BIT,
                        render::image_use::depth_target, render::image_use::sampled);
+    timer_.begin(frame.commands, frame.slot, "glare");
     render::begin_rendering(frame.commands, frame.view, frame.extent, std::nullopt);
     const double height = shot.bend.eye_height * render::air_scale(model_.air(), shot.bend);
     glare_.draw(frame.commands, frame.extent, (*depth)->view(),
@@ -192,6 +213,7 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                  .irradiance = model_.transmittance(height, glm::dot(sky.sun, shot.bend.up)),
                  .exposure = sky.exposure});
     vkCmdEndRendering(frame.commands);
+    timer_.end(frame.commands, frame.slot);
     return {};
 }
 

@@ -5,6 +5,7 @@
 #include <hog/client/scene.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/planet/world.hpp>
+#include <hog/render/gpu_timer.hpp>
 #include <hog/sim/calendar.hpp>
 #include <hog/terrain/bend.hpp>
 
@@ -14,6 +15,8 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
+#include <vector>
 
 using namespace std::chrono_literals;
 using hog::client::Picture;
@@ -85,6 +88,26 @@ TEST_CASE("a scene drawn as a still settles, with the sky above and the islands 
     CHECK(sky.b > sky.r);
     CHECK(sky.b > 100);
     CHECK(below.r + below.g + below.b > 100);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("a scene times its passes on the GPU", "[client][scene][gpu]") {
+    const auto device = test_device();
+    hog::jobs::JobSystem jobs{2};
+    auto scene = Scene::create(*device, world(), jobs, calendar(), hog::client::still_format, 1);
+    REQUIRE(scene);
+    if (device->timestamp_bits() == 0) {
+        SKIP("the Vulkan device's queue can't time");
+    }
+    // Over more than one frame, so one has been read back.
+    REQUIRE(hog::client::draw_still(*device, *scene, over_the_islands(), extent));
+    std::vector<std::string_view> names;
+    for (const hog::render::GpuSpan& span : scene->timings()) {
+        names.push_back(span.name);
+        CHECK(span.milliseconds >= 0.0);
+    }
+    CHECK(names ==
+          std::vector<std::string_view>{"uploads", "sky tables", "sky", "ground", "sea", "glare"});
     CHECK(device->validation_errors() == 0);
 }
 

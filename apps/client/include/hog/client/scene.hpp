@@ -12,6 +12,7 @@
 #include <hog/render/billboard.hpp>
 #include <hog/render/camera.hpp>
 #include <hog/render/glare.hpp>
+#include <hog/render/gpu_timer.hpp>
 #include <hog/render/memory.hpp>
 #include <hog/render/ocean.hpp>
 #include <hog/render/presenter.hpp>
@@ -25,6 +26,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace hog::client {
@@ -75,6 +77,9 @@ public:
 
     // The last frame recorded wanted nothing more baked, and all it wanted had arrived.
     [[nodiscard]] bool settled() const noexcept { return settled_; }
+    // How long the GPU took over the passes of the last frame recorded in the slot before, as
+    // read when the last frame was recorded; empty where the GPU can't time.
+    [[nodiscard]] std::span<const render::GpuSpan> timings() const noexcept { return timings_; }
 
     [[nodiscard]] const atmosphere::Model& air() const noexcept { return model_; }
     [[nodiscard]] const sim::Calendar& calendar() const noexcept { return calendar_; }
@@ -83,7 +88,8 @@ private:
     Scene(const render::Device& device, const planet::World& world, jobs::JobSystem& jobs,
           const sim::Calendar& calendar, render::Terrain terrain, render::Ocean ocean,
           render::TerrainPool pool, render::Atmosphere atmosphere, render::Sky sky,
-          render::Glare glare, std::optional<render::Billboard> companion, std::uint32_t frames);
+          render::Glare glare, render::GpuTimer timer, std::optional<render::Billboard> companion,
+          std::uint32_t frames);
 
     Result<const render::Image*> depth_for(const render::Frame& frame);
     render::SkyView sky_view(const Shot& shot);
@@ -101,6 +107,8 @@ private:
     render::Atmosphere atmosphere_;
     render::Sky sky_;
     render::Glare glare_;
+    render::GpuTimer timer_;
+    std::vector<render::GpuSpan> timings_;
     sim::Calendar calendar_;
     std::optional<double> exposure_;
     bool settled_ = false;
