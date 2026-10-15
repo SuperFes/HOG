@@ -1,11 +1,14 @@
 #include "test_device.hpp"
 
+#include <hog/atmosphere/model.hpp>
 #include <hog/core/math.hpp>
+#include <hog/render/atmosphere.hpp>
 #include <hog/render/barrier.hpp>
 #include <hog/render/memory.hpp>
 #include <hog/render/ocean.hpp>
 #include <hog/render/readback.hpp>
 #include <hog/render/rendering.hpp>
+#include <hog/render/sky.hpp>
 #include <hog/render/terrain.hpp>
 #include <hog/terrain/bend.hpp>
 #include <hog/terrain/material.hpp>
@@ -17,6 +20,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <numbers>
 #include <optional>
 #include <span>
 #include <utility>
@@ -180,6 +184,61 @@ Pixel pixel_at(const std::vector<std::uint8_t>& pixels, std::uint32_t x, std::ui
     return {pixels.at(first), pixels.at(first + 1), pixels.at(first + 2), pixels.at(first + 3)};
 }
 
+constexpr double earth = 6'371'000.0;
+
+// From walking height over open sea on an Earth-sized planet, looking level towards +X, the sky
+// and the sea lit through the air.
+std::vector<std::uint8_t> through_air(hog::render::Device& device, double sun_elevation) {
+    auto atmosphere = hog::render::Atmosphere::create(device);
+    REQUIRE(atmosphere);
+    auto sky = hog::render::Sky::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
+    REQUIRE(sky);
+    auto ocean =
+        hog::render::Ocean::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT, true);
+    REQUIRE(ocean);
+    const WorldPosition eye{up * (earth + 2.0)};
+    const double elevation = sun_elevation * std::numbers::pi / 180.0;
+    const DVec3 sun = (east * std::cos(elevation)) + (up * std::sin(elevation));
+    const hog::terrain::Bend bend = hog::terrain::bend_from(eye, earth, 0.0);
+    const hog::render::Camera camera{.eye = eye, .forward = east, .up = up};
+    const hog::render::SkyView seen{.camera = camera, .sun = sun, .bend = bend, .exposure = 10.0};
+    const OceanView view{
+        .camera = camera, .sun = sun, .bend = bend, .air = sky->bindings(0, *atmosphere)};
+
+    auto target = hog::render::make_image(
+        device, {.format = VK_FORMAT_R8G8B8A8_UNORM,
+                 .extent = extent,
+                 .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT});
+    REQUIRE(target);
+    auto depth =
+        hog::render::make_image(device, {.format = VK_FORMAT_D32_SFLOAT,
+                                         .extent = extent,
+                                         .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+                                         .aspect = VK_IMAGE_ASPECT_DEPTH_BIT});
+    REQUIRE(depth);
+    REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
+        namespace use = hog::render::image_use;
+        CHECK(sky->record_frame(commands, extent, 0, *atmosphere, seen));
+        hog::render::transition(commands, target->handle(), VK_IMAGE_ASPECT_COLOR_BIT, use::discard,
+                                use::colour_target);
+        hog::render::transition(commands, depth->handle(), VK_IMAGE_ASPECT_DEPTH_BIT, use::discard,
+                                use::depth_target);
+        hog::render::begin_rendering(commands, target->view(), extent,
+                                     VkClearColorValue{.float32 = {0.0F, 0.0F, 0.0F, 1.0F}},
+                                     {.view = depth->view()});
+        sky->draw(commands, extent, 0, *atmosphere, seen);
+        ocean->draw(commands, extent, view);
+        vkCmdEndRendering(commands);
+    }));
+    auto pixels = hog::render::read_pixels(device, *target, hog::render::image_use::colour_target);
+    REQUIRE(pixels);
+    return std::move(pixels).value();
+}
+
+int brightness(Pixel pixel) {
+    return pixel[0] + pixel[1] + pixel[2];
+}
+
 } // namespace
 
 TEST_CASE("over open sea, the sea is drawn out to the horizon", "[render][gpu]") {
@@ -304,5 +363,49 @@ TEST_CASE("ground at sea level lies under the sea, wherever the eye stands", "[r
             CHECK((under ? covered : unchanged) == seen);
         }
     }
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("through the air, the sea meets the sky at the horizon without a seam",
+          "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    // The sun behind, so neither its disc nor its glint is in view.
+    const auto pixels = through_air(*device, -150.0);
+    const auto daytime = through_air(*device, 160.0);
+    const std::uint32_t middle = extent.width / 2;
+    const std::uint32_t horizon = extent.height / 2;
+    const Pixel above = pixel_at(daytime, middle, horizon - 1);
+    const Pixel below = pixel_at(daytime, middle, horizon + 1);
+    INFO("above " << int{above[0]} << ", " << int{above[1]} << ", " << int{above[2]} << "; below "
+                  << int{below[0]} << ", " << int{below[1]} << ", " << int{below[2]});
+    // Just below, it reflects most of the sky just above.
+    for (std::size_t channel = 0; channel < 3; ++channel) {
+        CHECK(below.at(channel) <= above.at(channel));
+        CHECK(below.at(channel) >= 0.8 * above.at(channel));
+    }
+    // The steeper the view down, the less the sea reflects.
+    CHECK(brightness(pixel_at(daytime, middle, extent.height - 1)) < brightness(below));
+    CHECK(below[2] > below[0]);
+    // At night, it's dark.
+    CHECK(brightness(pixel_at(pixels, middle, horizon + 1)) < 15);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("through the air, the sun's glint on the sea reddens as it sets",
+          "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    const auto setting = through_air(*device, 2.0);
+    const std::uint32_t middle = extent.width / 2;
+    Pixel brightest{};
+    for (std::uint32_t y = (extent.height / 2) + 1; y < extent.height; ++y) {
+        if (brightness(pixel_at(setting, middle, y)) > brightness(brightest)) {
+            brightest = pixel_at(setting, middle, y);
+        }
+    }
+    const Pixel aside = pixel_at(setting, 2, (extent.height / 2) + 4);
+    INFO("glint " << int{brightest[0]} << ", " << int{brightest[1]} << ", " << int{brightest[2]}
+                  << "; aside " << int{aside[0]} << ", " << int{aside[1]} << ", " << int{aside[2]});
+    CHECK(brightness(brightest) > 2 * brightness(aside));
+    CHECK(brightest[0] > 2 * brightest[2]);
     CHECK(device->validation_errors() == 0);
 }
