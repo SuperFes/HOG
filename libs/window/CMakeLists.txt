@@ -38,11 +38,29 @@ CPMAddPackage(
         "SDL_INSTALL OFF" "SDL_AUDIO OFF" "SDL_CAMERA OFF" "SDL_DBUS OFF" "SDL_IBUS OFF"
         "SDL_UNIX_CONSOLE_BUILD ${hog_sdl_console}" "SDL_X11 ${hog_x11}" "SDL_WAYLAND ${hog_wayland}")
 
-add_library(hog_window src/window.cpp)
+# Debug UI; MIT. Built with the backends for SDL3 and Vulkan, which it takes from volk.
+CPMAddPackage(
+    NAME imgui
+    GITHUB_REPOSITORY ocornut/imgui
+    GIT_TAG v1.92.9
+    DOWNLOAD_ONLY YES)
+add_library(imgui STATIC
+    "${imgui_SOURCE_DIR}/imgui.cpp"
+    "${imgui_SOURCE_DIR}/imgui_demo.cpp"
+    "${imgui_SOURCE_DIR}/imgui_draw.cpp"
+    "${imgui_SOURCE_DIR}/imgui_tables.cpp"
+    "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
+    "${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp"
+    "${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp")
+target_include_directories(imgui SYSTEM PUBLIC "${imgui_SOURCE_DIR}" "${imgui_SOURCE_DIR}/backends")
+target_compile_definitions(imgui PUBLIC IMGUI_IMPL_VULKAN_USE_VOLK VK_NO_PROTOTYPES)
+target_link_libraries(imgui PUBLIC SDL3::SDL3-static volk::volk)
+
+add_library(hog_window src/ui.cpp src/window.cpp)
 add_library(hog::window ALIAS hog_window)
 
 target_include_directories(hog_window PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(hog_window PUBLIC hog::core hog::render SDL3::SDL3-static)
+target_link_libraries(hog_window PUBLIC hog::core hog::render imgui SDL3::SDL3-static)
 hog_target_defaults(hog_window)
 
 hog_add_tests(hog_window

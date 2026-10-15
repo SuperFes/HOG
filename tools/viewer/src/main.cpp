@@ -25,6 +25,7 @@
 #include <hog/viewer/options.hpp>
 #include <hog/viewer/overlay.hpp>
 #include <hog/viewer/texels.hpp>
+#include <hog/window/ui.hpp>
 #include <hog/window/window.hpp>
 
 #include <SDL3/SDL.h>
@@ -73,78 +74,6 @@ constexpr VkClearColorValue window_colour{
 constexpr VkClearColorValue space_colour{
     .float32 = {6.0F / 255.0F, 6.0F / 255.0F, 10.0F / 255.0F, 1.0F}};
 
-// ImGui, drawing with Vulkan into images of `format`.
-class Ui {
-public:
-    Ui(SDL_Window* window, const render::Device& device, VkFormat format) {
-        IMGUI_CHECKVERSION();
-        ImGui::CreateContext();
-        ImGui::GetIO().IniFilename = nullptr;
-        ImGui::StyleColorsDark();
-        ImGui_ImplSDL3_InitForVulkan(window);
-        ImGui_ImplVulkan_InitInfo info{};
-        info.ApiVersion = VK_API_VERSION_1_3;
-        info.Instance = device.instance();
-        info.PhysicalDevice = device.physical();
-        info.Device = device.handle();
-        info.QueueFamily = device.queue_family();
-        info.Queue = device.queue();
-        // The font atlas and the map.
-        info.DescriptorPoolSize = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE + 1;
-        // Its vertex buffers are reused once a frame in flight finishes, not a swapchain image.
-        info.MinImageCount = render::frames_in_flight;
-        info.ImageCount = render::frames_in_flight;
-        info.UseDynamicRendering = true;
-        info.PipelineInfoMain.PipelineRenderingCreateInfo = {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
-            .pNext = nullptr,
-            .viewMask = 0,
-            .colorAttachmentCount = 1,
-            .pColorAttachmentFormats = &format,
-            .depthAttachmentFormat = VK_FORMAT_UNDEFINED,
-            .stencilAttachmentFormat = VK_FORMAT_UNDEFINED};
-        vulkan_ = ImGui_ImplVulkan_Init(&info);
-    }
-    Ui(const Ui&) = delete;
-    Ui(Ui&&) = delete;
-    Ui& operator=(const Ui&) = delete;
-    Ui& operator=(Ui&&) = delete;
-    ~Ui() {
-        if (vulkan_) {
-            ImGui_ImplVulkan_Shutdown();
-        }
-        ImGui_ImplSDL3_Shutdown();
-        ImGui::DestroyContext();
-    }
-
-    [[nodiscard]] bool started() const noexcept { return vulkan_; }
-
-private:
-    bool vulkan_ = false;
-};
-
-// An image as ImGui samples it, in the layout fragment shaders read. The GPU must have finished
-// with it before it goes.
-class UiTexture {
-public:
-    explicit UiTexture(VkImageView view)
-        : set_{ImGui_ImplVulkan_AddTexture(view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)} {}
-    UiTexture(const UiTexture&) = delete;
-    UiTexture(UiTexture&&) = delete;
-    UiTexture& operator=(const UiTexture&) = delete;
-    UiTexture& operator=(UiTexture&&) = delete;
-    ~UiTexture() { ImGui_ImplVulkan_RemoveTexture(set_); }
-
-    [[nodiscard]] ImTextureRef ref() const noexcept {
-        // The Vulkan backend takes descriptor sets as ImGui's opaque ids.
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-        return ImTextureRef{static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(set_))};
-    }
-
-private:
-    VkDescriptorSet set_;
-};
-
 // The map's image on the GPU.
 class MapTexture {
 public:
@@ -157,7 +86,7 @@ public:
 
 private:
     render::StreamedImage image_;
-    UiTexture ui_;
+    window::UiTexture ui_;
 };
 
 Result<void> wait_idle(const render::Device& device, std::string_view why) {
@@ -275,7 +204,7 @@ private:
 
         render::Image image;
         render::TrackedImage tracked;
-        UiTexture ui;
+        window::UiTexture ui;
         render::Image depth;
         render::TrackedImage tracked_depth;
     };
@@ -1099,7 +1028,8 @@ int run(std::span<const std::string_view> arguments) {
         std::cerr << std::format("hog-viewer: can't show frames: {}\n", presenter.error());
         return EXIT_FAILURE;
     }
-    const Ui ui{window.get(), **device, (*presenter)->swapchain().format()};
+    // The map's texture besides.
+    const window::Ui ui{window.get(), **device, (*presenter)->swapchain().format(), 1};
     if (!ui.started()) {
         std::cerr << "hog-viewer: can't start ImGui's Vulkan backend\n";
         return EXIT_FAILURE;

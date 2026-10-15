@@ -37,24 +37,6 @@ if(NOT HOG_BUILD_VIEWER)
     return()
 endif()
 
-# Debug UI; MIT. Built here with the backends for SDL3 and Vulkan, which it takes from volk.
-CPMAddPackage(
-    NAME imgui
-    GITHUB_REPOSITORY ocornut/imgui
-    GIT_TAG v1.92.9
-    DOWNLOAD_ONLY YES)
-add_library(imgui STATIC
-    "${imgui_SOURCE_DIR}/imgui.cpp"
-    "${imgui_SOURCE_DIR}/imgui_demo.cpp"
-    "${imgui_SOURCE_DIR}/imgui_draw.cpp"
-    "${imgui_SOURCE_DIR}/imgui_tables.cpp"
-    "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
-    "${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp"
-    "${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp")
-target_include_directories(imgui SYSTEM PUBLIC "${imgui_SOURCE_DIR}" "${imgui_SOURCE_DIR}/backends")
-target_compile_definitions(imgui PUBLIC IMGUI_IMPL_VULKAN_USE_VOLK VK_NO_PROTOTYPES)
-target_link_libraries(imgui PUBLIC SDL3::SDL3-static volk::volk)
-
 add_executable(hog_viewer_cli src/main.cpp)
 set_target_properties(hog_viewer_cli PROPERTIES OUTPUT_NAME hog-viewer)
 target_link_libraries(hog_viewer_cli PRIVATE hog::viewer hog::render hog::window imgui)
