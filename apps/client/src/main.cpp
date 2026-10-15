@@ -1,38 +1,26 @@
-#include <hog/atmosphere/model.hpp>
 #include <hog/client/daylight.hpp>
 #include <hog/client/flight.hpp>
-#include <hog/client/ground.hpp>
 #include <hog/client/options.hpp>
 #include <hog/client/picture.hpp>
+#include <hog/client/scene.hpp>
 #include <hog/core/time.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/mapgen/render.hpp>
-#include <hog/planet/noise.hpp>
 #include <hog/planet/planet_config.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/world.hpp>
-#include <hog/render/atmosphere.hpp>
-#include <hog/render/barrier.hpp>
 #include <hog/render/billboard.hpp>
 #include <hog/render/device.hpp>
 #include <hog/render/memory.hpp>
-#include <hog/render/ocean.hpp>
 #include <hog/render/presenter.hpp>
 #include <hog/render/readback.hpp>
-#include <hog/render/rendering.hpp>
-#include <hog/render/sky.hpp>
-#include <hog/render/terrain.hpp>
 #include <hog/sim/calendar.hpp>
-#include <hog/terrain/baker.hpp>
 #include <hog/terrain/bend.hpp>
-#include <hog/terrain/selection.hpp>
-#include <hog/terrain/stream.hpp>
 #include <hog/window/window.hpp>
 
 #include <SDL3/SDL.h>
 
 #include <algorithm>
-#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -66,9 +54,6 @@ constexpr double fastest_speed = 10.0;
 constexpr double longest_frame = 0.1;
 // How long to wait between looks at a minimised window.
 constexpr Uint32 idle_ms = 50;
-constexpr VkFormat depth_format = VK_FORMAT_D32_SFLOAT;
-// Behind the sky, which covers it.
-constexpr VkClearColorValue cleared{.float32 = {0.0F, 0.0F, 0.0F, 1.0F}};
 // Someone 3 m tall flying along 8 m ahead, 2 m below the eye, so they land in front of it.
 constexpr double companion_height = 3.0;
 constexpr double companion_ahead = 8.0;
@@ -153,69 +138,6 @@ client::Flight start(const client::Options& options, const planet::World& world)
     return flight;
 }
 
-// Metres above sea level of the ground under the eye.
-double ground_under(const planet::World& world, WorldPosition eye) {
-    return static_cast<double>(world.state(planet::cell_at(eye)).elevation) /
-           static_cast<double>(planet::fixed_one);
-}
-
-// The ground as it's baked, streamed and drawn.
-struct Ground {
-    terrain::PatchBaker baker;
-    terrain::PatchStream stream;
-    render::Terrain terrain;
-    render::Ocean ocean;
-    render::TerrainPool pool;
-    client::GroundSlots slots;
-    std::array<std::optional<render::Image>, render::frames_in_flight> depths;
-    std::optional<render::Billboard> companion;
-};
-
-// The air and the planet's time it's lit at.
-struct Air {
-    atmosphere::Model model;
-    render::Atmosphere atmosphere;
-    render::Sky sky;
-    sim::Calendar calendar;
-    client::PlanetClock clock;
-    std::optional<double> exposure;
-};
-
-// The sky as the air lights it from the eye, its exposure adapting over `seconds`.
-render::SkyView sky_view(Air& air, const render::Camera& camera, const terrain::Bend& bend,
-                         double seconds) {
-    const DVec3 sun = air.calendar.sun_direction(air.clock.time());
-    const client::EyeLight light =
-        client::light_at_eye(air.model, bend.eye_height * render::air_scale(air.model.air(), bend),
-                             glm::dot(sun, bend.up));
-    const double wanted = client::exposure_for(light);
-    air.exposure = air.exposure ? client::adapted(*air.exposure, wanted, seconds) : wanted;
-    return {.camera = camera,
-            .sun = sun,
-            .bend = bend,
-            .exposure = *air.exposure,
-            .sky_light = light.sky};
-}
-
-Result<const render::Image*> depth_for(Ground& ground, const render::Device& device,
-                                       const render::Frame& frame) {
-    std::optional<render::Image>& depth = ground.depths.at(frame.slot);
-    if (!depth || depth->desc().extent.width != frame.extent.width ||
-        depth->desc().extent.height != frame.extent.height) {
-        // This slot's last frame has finished, so nothing still draws with it.
-        auto made =
-            render::make_image(device, {.format = depth_format,
-                                        .extent = frame.extent,
-                                        .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-                                        .aspect = VK_IMAGE_ASPECT_DEPTH_BIT});
-        if (!made) {
-            return std::unexpected(std::move(made).error());
-        }
-        depth = std::move(made).value();
-    }
-    return &*depth;
-}
-
 // Records copying what's been drawn so far this frame, to save once the GPU has finished.
 Result<render::Buffer> start_capture(const render::Device& device,
                                      const render::Presenter& presenter, render::Frame& frame) {
@@ -247,11 +169,10 @@ Result<void> save_capture(const render::Device& device, const render::Buffer& bu
                                                  .pixels = std::move(rgb).value()});
 }
 
-// Draws a frame of the ground from the flight, saving it to `capture` if given; false when
-// there's nothing to draw into.
-Result<bool> draw(Ground& ground, Air& air, const client::Flight& flight, double planet_radius,
-                  const render::Standing& companion, const terrain::Bend& bend, double seconds,
-                  const render::Device& device, render::Presenter& presenter, SDL_Window* window,
+// Draws a frame of the shot, saving it to `capture` if given; false when there's nothing to draw
+// into.
+Result<bool> draw(client::Scene& scene, const client::Shot& shot, const render::Device& device,
+                  render::Presenter& presenter, SDL_Window* window,
                   const std::optional<std::filesystem::path>& capture) {
     auto begun = presenter.begin(window::drawable(window));
     if (!begun) {
@@ -261,53 +182,9 @@ Result<bool> draw(Ground& ground, Air& air, const client::Flight& flight, double
         return false;
     }
     render::Frame& frame = begun->value();
-    const render::Camera camera = client::flight_camera(flight, vertical_fov);
-
-    for (terrain::Patch& patch : ground.baker.collect()) {
-        ground.stream.baked(std::move(patch));
-    }
-    terrain::Viewpoint seen = client::viewpoint(camera, frame.extent);
-    seen.bend = bend;
-    const std::vector<terrain::SelectedPatch> selected =
-        terrain::select_patches(seen, planet_radius, {}, ground.stream.known_heights());
-    const terrain::StreamFrame streamed = ground.stream.update(selected);
-    for (const planet::CellId cell : streamed.bakes) {
-        ground.baker.start(cell);
-    }
-    if (auto taken = ground.slots.take(ground.pool, frame.slot, streamed); !taken) {
-        return std::unexpected(std::move(taken).error());
-    }
-    if (auto recorded = ground.pool.record_uploads(frame.commands, frame.slot); !recorded) {
+    if (auto recorded = scene.record(frame, shot); !recorded) {
         return std::unexpected(std::move(recorded).error());
     }
-    const auto depth = depth_for(ground, device, frame);
-    if (!depth) {
-        return std::unexpected(depth.error());
-    }
-    const render::SkyView sky = sky_view(air, camera, bend, seconds);
-    if (auto recorded =
-            air.sky.record_frame(frame.commands, frame.extent, frame.slot, air.atmosphere, sky);
-        !recorded) {
-        return std::unexpected(std::move(recorded).error());
-    }
-    const render::AirBindings through = air.sky.bindings(frame.slot, air.atmosphere);
-
-    frame.target.use_as(frame.commands, render::image_use::colour_target);
-    render::transition(frame.commands, (*depth)->handle(), VK_IMAGE_ASPECT_DEPTH_BIT,
-                       render::image_use::discard, render::image_use::depth_target);
-    render::begin_rendering(frame.commands, frame.view, frame.extent, cleared,
-                            {.view = (*depth)->view()});
-    air.sky.draw(frame.commands, frame.extent, frame.slot, air.atmosphere, sky);
-    ground.terrain.draw(frame.commands, frame.extent, ground.pool,
-                        ground.slots.draws(streamed.drawn),
-                        {.camera = camera, .sun = sky.sun, .bend = bend, .air = through});
-    ground.ocean.draw(frame.commands, frame.extent,
-                      {.camera = camera, .sun = sky.sun, .bend = bend, .air = through});
-    if (ground.companion) {
-        ground.companion->draw(frame.commands, frame.extent, camera, companion, bend);
-    }
-    vkCmdEndRendering(frame.commands);
-
     std::optional<Result<render::Buffer>> captured;
     if (capture) {
         captured = start_capture(device, presenter, frame);
@@ -352,9 +229,9 @@ private:
 };
 
 // Flies or walks over the world until the window closes or it's time to quit.
-Result<void> fly(Ground& ground, Air& air, const planet::World& world, client::Flight flight,
-                 const client::Options& options, const render::Device& device,
-                 render::Presenter& presenter, SDL_Window* window) {
+Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet::World& world,
+                 client::Flight flight, const client::Options& options,
+                 const render::Device& device, render::Presenter& presenter, SDL_Window* window) {
     const double radius = world.geology().planet_radius();
     Controls controls;
     TitleCounter title;
@@ -373,29 +250,31 @@ Result<void> fly(Ground& ground, Air& air, const planet::World& world, client::F
         last = now;
         const bool faster = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
         const client::FlyInput input{.move = movement(), .look = controls.look, .seconds = seconds};
-        flight = controls.walking
-                     ? client::walk(flight, input, faster, radius,
-                                    [&](WorldPosition at) { return ground_under(world, at); })
-                     : client::fly(flight, input, radius, ground_under(world, flight.eye),
-                                   {.speed = controls.speed * (faster ? fast : 1.0)});
-        const double ground_height = ground_under(world, flight.eye);
+        flight =
+            controls.walking
+                ? client::walk(flight, input, faster, radius,
+                               [&](WorldPosition at) { return client::ground_under(world, at); })
+                : client::fly(flight, input, radius, client::ground_under(world, flight.eye),
+                              {.speed = controls.speed * (faster ? fast : 1.0)});
+        const double ground_height = client::ground_under(world, flight.eye);
         for (; controls.faster_time > 0; --controls.faster_time) {
-            air.clock.faster();
+            clock.faster();
         }
         for (; controls.faster_time < 0; ++controls.faster_time) {
-            air.clock.slower();
+            clock.slower();
         }
-        air.clock.advance(seconds);
+        clock.advance(seconds);
         title.count(
             window, glm::length(flight.eye.metres()) - radius - ground_height,
-            air.calendar.local_time_of_day(air.clock.time(), glm::normalize(flight.eye.metres())),
-            air.clock.rate());
+            scene.calendar().local_time_of_day(clock.time(), glm::normalize(flight.eye.metres())),
+            clock.rate());
 
         if (options.quit_after && now - started >= *options.quit_after) {
             controls.quit = true;
         }
         const DVec3 companion_up = client::companion_direction(flight, companion_ahead);
-        const double ground_ahead = ground_under(world, WorldPosition{companion_up * radius});
+        const double ground_ahead =
+            client::ground_under(world, WorldPosition{companion_up * radius});
         const render::Standing companion{
             .feet = controls.walking
                         ? WorldPosition{companion_up * (radius + ground_ahead)}
@@ -404,8 +283,13 @@ Result<void> fly(Ground& ground, Air& air, const planet::World& world, client::F
             .up = companion_up,
             .height = companion_height};
         const terrain::Bend bend = terrain::bend_from(flight.eye, radius, ground_height);
-        const auto drawn = draw(ground, air, flight, radius, companion, bend, seconds, device,
-                                presenter, window, controls.quit ? options.capture : std::nullopt);
+        const client::Shot shot{.camera = client::flight_camera(flight, vertical_fov),
+                                .bend = bend,
+                                .time = clock.time(),
+                                .seconds = seconds,
+                                .companion = companion};
+        const auto drawn = draw(scene, shot, device, presenter, window,
+                                controls.quit ? options.capture : std::nullopt);
         if (!drawn) {
             return std::unexpected(drawn.error());
         }
@@ -428,7 +312,7 @@ std::optional<render::Billboard> companion(const client::Options& options, rende
         return std::nullopt;
     }
     client::lift_ink(*picture);
-    auto billboard = render::Billboard::create(device, colour_format, depth_format,
+    auto billboard = render::Billboard::create(device, colour_format, client::depth_format,
                                                {.width = picture->width, .height = picture->height},
                                                picture->texels);
     if (!billboard) {
@@ -441,60 +325,23 @@ std::optional<render::Billboard> companion(const client::Options& options, rende
 int show(const client::Options& options, const planet::PlanetConfig& planet,
          const planet::World& world, render::Device& device, render::Presenter& presenter,
          SDL_Window* window) {
-    const terrain::StreamSettings settings;
-    const std::vector<terrain::MaterialImage> materials = client::biome_materials();
-    auto terrain = render::Terrain::create(device, presenter.swapchain().format(), depth_format,
-                                           {.materials = materials, .sea = true, .air = true});
-    if (!terrain) {
-        std::cerr << std::format("hog-client: can't draw the ground: {}\n", terrain.error());
-        return EXIT_FAILURE;
-    }
-    auto ocean = render::Ocean::create(device, presenter.swapchain().format(), depth_format, true);
-    if (!ocean) {
-        std::cerr << std::format("hog-client: can't draw the sea: {}\n", ocean.error());
-        return EXIT_FAILURE;
-    }
-    auto pool = render::TerrainPool::create(device, {.patches = settings.capacity,
-                                                     .frames = render::frames_in_flight,
-                                                     .uploads = settings.uploads});
-    if (!pool) {
-        std::cerr << std::format("hog-client: can't hold the ground: {}\n", pool.error());
-        return EXIT_FAILURE;
-    }
-    auto atmosphere = render::Atmosphere::create(device);
-    if (!atmosphere) {
-        std::cerr << std::format("hog-client: can't draw the air: {}\n", atmosphere.error());
-        return EXIT_FAILURE;
-    }
-    auto sky = render::Sky::create(device, presenter.swapchain().format(), depth_format,
-                                   render::frames_in_flight);
-    if (!sky) {
-        std::cerr << std::format("hog-client: can't draw the sky: {}\n", sky.error());
-        return EXIT_FAILURE;
-    }
     const client::Flight flight = start(options, world);
     const sim::Calendar calendar{planet.day_length, planet.axial_tilt};
-    Air air{.model = atmosphere::Model{},
-            .atmosphere = std::move(atmosphere).value(),
-            .sky = std::move(sky).value(),
-            .calendar = calendar,
-            .clock = client::PlanetClock{client::start_time(
-                calendar, to_game_time(WallClock::now()), glm::normalize(flight.eye.metres()),
-                options.time_of_day)},
-            .exposure = std::nullopt};
-
+    client::PlanetClock clock{client::start_time(calendar, to_game_time(WallClock::now()),
+                                                 glm::normalize(flight.eye.metres()),
+                                                 options.time_of_day)};
+    // Before the scene, whose bakes run on it.
     jobs::JobSystem jobs{options.threads};
-    Ground ground{.baker = terrain::PatchBaker{world, jobs},
-                  .stream = terrain::PatchStream{settings},
-                  .terrain = std::move(terrain).value(),
-                  .ocean = std::move(ocean).value(),
-                  .pool = std::move(pool).value(),
-                  .slots = {},
-                  .depths = {},
-                  .companion = companion(options, device, presenter.swapchain().format())};
-    const Result<void> flown = fly(ground, air, world, flight, options, device, presenter, window);
-    // The bakes go before the world, and the GPU may still be drawing with the ground.
-    (void)ground.baker.finish();
+    auto scene = client::Scene::create(device, world, jobs, calendar,
+                                       presenter.swapchain().format(), render::frames_in_flight,
+                                       companion(options, device, presenter.swapchain().format()));
+    if (!scene) {
+        std::cerr << std::format("hog-client: {}\n", scene.error());
+        return EXIT_FAILURE;
+    }
+    const Result<void> flown =
+        fly(*scene, clock, world, flight, options, device, presenter, window);
+    // The GPU may still be drawing with the scene.
     vkDeviceWaitIdle(device.handle());
     if (!flown) {
         std::cerr << std::format("hog-client: {}\n", flown.error());

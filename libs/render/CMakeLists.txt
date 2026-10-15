@@ -70,6 +70,17 @@ hog_target_defaults(hog_render)
 hog_add_shaders(hog_render shaders/aerial.slang shaders/air_tables.slang shaders/billboard.slang shaders/globe.slang shaders/ocean.slang shaders/sky.slang shaders/sky_view.slang
                 shaders/terrain.slang)
 
+# A test device, for tests here and elsewhere that draw.
+add_library(hog_render_testing INTERFACE)
+add_library(hog::render_testing ALIAS hog_render_testing)
+target_include_directories(hog_render_testing INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+# GPU drivers are opaque to sanitizers, so those runs leave the GPU out.
+if(HOG_SANITIZE)
+    target_compile_definitions(hog_render_testing INTERFACE HOG_GPU_TESTS=0)
+else()
+    target_compile_definitions(hog_render_testing INTERFACE HOG_GPU_TESTS=1)
+endif()
+
 hog_add_tests(hog_render
     tests/atmosphere_tests.cpp
     tests/barrier_tests.cpp
@@ -90,10 +101,5 @@ if(TARGET hog_render_tests)
     target_link_libraries(hog_render_tests PRIVATE hog::planet)
     hog_add_shaders(hog_render_tests tests/shaders/aerial_probe.slang tests/shaders/air_probe.slang tests/shaders/dispatch.slang tests/shaders/fill.slang tests/shaders/layer.slang
                     tests/shaders/triangle.slang)
-    # GPU drivers are opaque to sanitizers, so those runs leave the GPU out.
-    if(HOG_SANITIZE)
-        target_compile_definitions(hog_render_tests PRIVATE HOG_GPU_TESTS=0)
-    else()
-        target_compile_definitions(hog_render_tests PRIVATE HOG_GPU_TESTS=1)
-    endif()
+    target_link_libraries(hog_render_tests PRIVATE hog::render_testing)
 endif()
