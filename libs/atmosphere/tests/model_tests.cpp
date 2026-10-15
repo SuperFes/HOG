@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <numbers>
 
@@ -148,4 +149,20 @@ TEST_CASE("the same air scaled to a smaller planet looks the same", "[atmosphere
             }
         }
     }
+}
+
+TEST_CASE("the sky lights level ground a little at noon, and most of all at sunset",
+          "[atmosphere]") {
+    const auto sky_share = [](double elevation) {
+        const DVec3 sun = towards(elevation);
+        const DVec3 sky = earth().sky_irradiance(2.0, sun);
+        const DVec3 direct = earth().transmittance(2.0, sun.z) * std::max(sun.z, 0.0);
+        return brightness(sky) / (brightness(sky) + brightness(direct));
+    };
+    const DVec3 noon = earth().sky_irradiance(2.0, towards(90.0));
+    CHECK(noon.b > noon.r);
+    CHECK(sky_share(90.0) > 0.05);
+    CHECK(sky_share(90.0) < 0.25);
+    CHECK(sky_share(3.0) > 0.5);
+    CHECK(brightness(earth().sky_irradiance(2.0, towards(-12.0))) < 1e-3 * brightness(noon));
 }

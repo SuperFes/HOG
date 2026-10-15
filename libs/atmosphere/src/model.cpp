@@ -14,6 +14,9 @@ constexpr double pi = std::numbers::pi;
 constexpr int transmittance_steps = 100;
 constexpr int scattering_directions = 64;
 constexpr int scattering_steps = 20;
+// The sky changes slowly enough across it that these see it well.
+constexpr int irradiance_directions = 64;
+constexpr int irradiance_steps = 16;
 
 // Squared distance from the planet's centre along a ray from `radius` at `mu`, less radius^2.
 double discriminant(double radius, double mu, double sphere) noexcept {
@@ -298,6 +301,22 @@ Scattered Model::march(double height, DVec3 view, DVec3 sun, double distance,
         scattered.transmittance *= through;
     }
     return scattered;
+}
+
+DVec3 Model::sky_irradiance(double height, DVec3 sun) const noexcept {
+    // Evenly over the upper half of the sky, each direction weighted by how squarely it falls.
+    const double golden = pi * (3.0 - std::sqrt(5.0));
+    DVec3 irradiance{0.0};
+    for (int at = 0; at < irradiance_directions; ++at) {
+        const double z = 1.0 - ((at + 0.5) / irradiance_directions);
+        const double across = std::sqrt(1.0 - (z * z));
+        const DVec3 view{across * std::cos(golden * at), across * std::sin(golden * at), z};
+        irradiance +=
+            march(height, view, sun, std::numeric_limits<double>::infinity(), irradiance_steps)
+                .light *
+            z;
+    }
+    return irradiance * (2.0 * pi / irradiance_directions);
 }
 
 } // namespace hog::atmosphere

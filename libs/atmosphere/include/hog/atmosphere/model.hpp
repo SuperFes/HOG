@@ -85,6 +85,10 @@ public:
                                   double distance = std::numeric_limits<double>::infinity(),
                                   int steps = 64) const noexcept;
 
+    // Irradiance from the sky, but not the sun's disc, on level ground at `height`, with `sun`
+    // as for march().
+    [[nodiscard]] DVec3 sky_irradiance(double height, DVec3 sun) const noexcept;
+
     // Row by row from the ground up, each across directions from the sun straight below.
     [[nodiscard]] std::span<const DVec3> transmittance_table() const noexcept {
         return transmittance_;
