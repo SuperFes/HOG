@@ -6,6 +6,7 @@ target_include_directories(stb_image SYSTEM PUBLIC "${stb_SOURCE_DIR}")
 target_compile_definitions(stb_image PUBLIC STBI_ONLY_PNG)
 
 add_library(hog_client
+    src/daylight.cpp
     src/flight.cpp
     src/ground.cpp
     src/options.cpp
@@ -14,11 +15,12 @@ add_library(hog::client ALIAS hog_client)
 
 target_include_directories(hog_client PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(hog_client
-    PUBLIC hog::core hog::render hog::terrain
+    PUBLIC hog::atmosphere hog::core hog::render hog::sim hog::terrain
     PRIVATE hog::mapgen hog::planet stb_image)
 hog_target_defaults(hog_client)
 
 hog_add_tests(hog_client
+    tests/daylight_tests.cpp
     tests/flight_tests.cpp
     tests/ground_tests.cpp
     tests/options_tests.cpp

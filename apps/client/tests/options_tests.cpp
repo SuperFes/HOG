@@ -17,6 +17,7 @@ TEST_CASE("client options default to the development planet", "[client][options]
     REQUIRE(options);
     CHECK(options->planet == "config/planet.toml");
     CHECK_FALSE(options->start);
+    CHECK_FALSE(options->time_of_day);
     CHECK(options->threads == 0);
     CHECK(options->companion == "res/Matt.png");
     CHECK_FALSE(options->quit_after);
@@ -27,13 +28,14 @@ TEST_CASE("client options default to the development planet", "[client][options]
 }
 
 TEST_CASE("client options are parsed", "[client][options]") {
-    const auto options =
-        parse_options(Arguments{"--planet", "other.toml", "--at", "-12.5,170,300", "--threads", "2",
-                                "--companion", "friend.png", "--quit-after", "3", "--capture",
-                                "out.png", "--software", "--validate", "-h"});
+    const auto options = parse_options(Arguments{"--planet", "other.toml", "--at", "-12.5,170,300",
+                                                 "--time", "18:30", "--threads", "2", "--companion",
+                                                 "friend.png", "--quit-after", "3", "--capture",
+                                                 "out.png", "--software", "--validate", "-h"});
     REQUIRE(options);
     CHECK(options->planet == "other.toml");
     CHECK(options->start == Place{.latitude = -12.5, .longitude = 170.0, .altitude = 300.0});
+    CHECK(options->time_of_day == 18.5 / 24.0);
     CHECK(options->threads == 2);
     CHECK(options->companion == "friend.png");
     CHECK(options->quit_after == std::chrono::seconds{3});
@@ -57,6 +59,10 @@ TEST_CASE("bad client options are rejected", "[client][options]") {
     CHECK_FALSE(parse_options(Arguments{"--threads", "-1"}));
     CHECK_FALSE(parse_options(Arguments{"--threads", "many"}));
     CHECK_FALSE(parse_options(Arguments{"--quit-after", "1.5"}));
+    CHECK_FALSE(parse_options(Arguments{"--time", "18"}));
+    CHECK_FALSE(parse_options(Arguments{"--time", "24:00"}));
+    CHECK_FALSE(parse_options(Arguments{"--time", "12:60"}));
+    CHECK_FALSE(parse_options(Arguments{"--time", "noon"}));
     CHECK_FALSE(hog::client::usage().empty());
 }
 

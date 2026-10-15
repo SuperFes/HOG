@@ -24,6 +24,8 @@ struct Options {
     std::filesystem::path planet = "config/planet.toml";
     // Over the starting islands without one.
     std::optional<Place> start;
+    // The local time of day to start at, from 0 at midnight to 1; the planet's own without one.
+    std::optional<double> time_of_day;
     std::uint32_t threads = 0; // baking the ground, 0 for one per hardware thread
     // A drawing on white paper, of someone to fly along with; none without one.
     std::optional<std::filesystem::path> companion = std::filesystem::path{"res/Matt.png"};

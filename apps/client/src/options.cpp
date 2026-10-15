@@ -55,6 +55,20 @@ std::optional<Place> place(std::string_view text) {
     return Place{.latitude = *latitude, .longitude = *longitude, .altitude = *altitude};
 }
 
+// A fraction of the day from HH:MM.
+std::optional<double> time_of_day(std::string_view text) {
+    const std::size_t colon = text.find(':');
+    if (colon == std::string_view::npos) {
+        return std::nullopt;
+    }
+    const std::optional<int> hours = integer(text.substr(0, colon));
+    const std::optional<int> minutes = integer(text.substr(colon + 1));
+    if (!hours || !minutes || *hours < 0 || *hours > 23 || *minutes < 0 || *minutes > 59) {
+        return std::nullopt;
+    }
+    return ((*hours * 60.0) + *minutes) / (24.0 * 60.0);
+}
+
 // Reads an option that takes a value.
 Result<void> read_option(Options& options, std::string_view option, std::string_view value) {
     if (option == "--planet") {
@@ -66,6 +80,12 @@ Result<void> read_option(Options& options, std::string_view option, std::string_
                 ErrorCode::InvalidArgument,
                 std::format("--at takes latitude,longitude,altitude in degrees and metres, not {}",
                             value));
+        }
+    } else if (option == "--time") {
+        options.time_of_day = time_of_day(value);
+        if (!options.time_of_day) {
+            return make_error(ErrorCode::InvalidArgument,
+                              std::format("--time takes a time of day as HH:MM, not {}", value));
         }
     } else if (option == "--companion") {
         options.companion = std::filesystem::path{value};
@@ -103,6 +123,7 @@ options:
   --planet PATH          the planet's config (default config/planet.toml)
   --at LAT,LON,ALT       start at degrees of latitude and longitude, metres above
                          sea level (default over the starting islands)
+  --time HH:MM           start at this local time of day (default the planet's own)
   --threads N            baking the ground (default one per hardware thread)
   --companion PATH       a drawing on white paper of someone 3 m tall to fly along
                          with (default res/Matt.png)
@@ -126,6 +147,9 @@ walking:
   Shift                  run
   right mouse button     hold to look around
   F                      fly
+
+time:
+  ] [                    run the planet's time faster, slower
 )";
 }
 
