@@ -1,9 +1,11 @@
 #include <hog/client/picture.hpp>
+#include <hog/mapgen/render.hpp>
 
 #include <stb_image.h>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <format>
 #include <memory>
 #include <span>
@@ -37,6 +39,19 @@ Result<Picture> load_picture(const std::filesystem::path& path) {
     return Picture{.width = static_cast<std::uint32_t>(width),
                    .height = static_cast<std::uint32_t>(height),
                    .texels = {bytes.begin(), bytes.end()}};
+}
+
+Result<void> save_picture(const std::filesystem::path& path, const Picture& picture) {
+    mapgen::Image image{.width = static_cast<int>(picture.width),
+                        .height = static_cast<int>(picture.height),
+                        .pixels = {}};
+    image.pixels.reserve(picture.texels.size() / channels * 3);
+    for (std::size_t at = 0; at + channels <= picture.texels.size(); at += channels) {
+        for (std::size_t channel = 0; channel < 3; ++channel) {
+            image.pixels.push_back(std::to_integer<std::uint8_t>(picture.texels[at + channel]));
+        }
+    }
+    return mapgen::write_png(path, image);
 }
 
 void lift_ink(Picture& picture) {

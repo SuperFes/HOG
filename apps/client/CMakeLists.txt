@@ -9,6 +9,7 @@ add_library(hog_client
     src/daylight.cpp
     src/flight.cpp
     src/ground.cpp
+    src/likeness.cpp
     src/options.cpp
     src/picture.cpp)
 add_library(hog::client ALIAS hog_client)
@@ -23,6 +24,7 @@ hog_add_tests(hog_client
     tests/daylight_tests.cpp
     tests/flight_tests.cpp
     tests/ground_tests.cpp
+    tests/likeness_tests.cpp
     tests/options_tests.cpp
     tests/picture_tests.cpp)
 if(TARGET hog_client_tests)

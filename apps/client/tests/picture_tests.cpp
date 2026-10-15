@@ -1,4 +1,5 @@
 #include <hog/client/picture.hpp>
+#include <hog/testing/temporary_directory.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -11,6 +12,7 @@
 using hog::client::lift_ink;
 using hog::client::load_picture;
 using hog::client::Picture;
+using hog::client::save_picture;
 using Texel = std::vector<int>;
 
 namespace {
@@ -60,4 +62,17 @@ TEST_CASE("pictures load as sRGB texels with alpha", "[client][picture]") {
     CHECK(picture->height > 0);
     CHECK(picture->texels.size() == std::size_t{picture->width} * picture->height * 4);
     CHECK(!load_picture(std::filesystem::path{HOG_SOURCE_DIR} / "res" / "missing.png"));
+}
+
+TEST_CASE("pictures save as PNGs and load back, made opaque", "[client][picture]") {
+    const hog::testing::TemporaryDirectory directory;
+    const Picture picture = of({{10, 20, 30, 255}, {200, 100, 0, 40}});
+    REQUIRE(save_picture(directory.path() / "saved.png", picture));
+    const auto loaded = load_picture(directory.path() / "saved.png");
+    REQUIRE(loaded);
+    CHECK(loaded->width == 2);
+    CHECK(loaded->height == 1);
+    CHECK(texel(*loaded, 0) == Texel{10, 20, 30, 255});
+    CHECK(texel(*loaded, 1) == Texel{200, 100, 0, 255});
+    CHECK(!save_picture(directory.path() / "missing" / "saved.png", picture));
 }

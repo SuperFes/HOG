@@ -17,6 +17,8 @@ struct Picture {
 };
 
 [[nodiscard]] Result<Picture> load_picture(const std::filesystem::path& path);
+// As a PNG, without its alpha.
+[[nodiscard]] Result<void> save_picture(const std::filesystem::path& path, const Picture& picture);
 
 // A drawing in ink on white paper, with the paper made see-through: each texel takes the least
 // opacity that keeps its ink a colour, so white goes clear and blends of ink and white go back to
