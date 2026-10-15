@@ -1,8 +1,9 @@
+#include "test_planet.hpp"
+
 #include <hog/client/daylight.hpp>
 #include <hog/client/flight.hpp>
 #include <hog/client/scene.hpp>
 #include <hog/jobs/job_system.hpp>
-#include <hog/planet/planet_config.hpp>
 #include <hog/planet/world.hpp>
 #include <hog/sim/calendar.hpp>
 #include <hog/terrain/bend.hpp>
@@ -13,34 +14,18 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <filesystem>
 
 using namespace std::chrono_literals;
 using hog::client::Picture;
 using hog::client::Scene;
 using hog::client::Shot;
+using hog::client::testing::calendar;
+using hog::client::testing::world;
 using hog::render::testing::test_device;
 
 namespace {
 
 constexpr VkExtent2D extent{.width = 160, .height = 90};
-
-const hog::planet::PlanetConfig& planet() {
-    static const hog::planet::PlanetConfig config =
-        hog::planet::load_planet_config(std::filesystem::path{HOG_SOURCE_DIR} / "config" /
-                                        "planet.toml")
-            .value();
-    return config;
-}
-
-const hog::planet::World& world() {
-    static const hog::planet::World made{planet()};
-    return made;
-}
-
-hog::sim::Calendar calendar() {
-    return {planet().day_length, planet().axial_tilt};
-}
 
 // Over the starting islands at noon, looking a little down.
 Shot over_the_islands() {

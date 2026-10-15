@@ -43,7 +43,6 @@ namespace {
 
 using namespace hog;
 
-constexpr double vertical_fov = 1.0;       // radians
 constexpr double start_altitude = 1'500.0; // metres over the starting islands
 constexpr double start_pitch = -0.2;       // radians
 constexpr double fast = 5.0;               // times as fast with Shift held
@@ -283,7 +282,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
             .up = companion_up,
             .height = companion_height};
         const terrain::Bend bend = terrain::bend_from(flight.eye, radius, ground_height);
-        const client::Shot shot{.camera = client::flight_camera(flight, vertical_fov),
+        const client::Shot shot{.camera = client::flight_camera(flight, client::vertical_fov),
                                 .bend = bend,
                                 .time = clock.time(),
                                 .seconds = seconds,

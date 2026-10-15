@@ -28,6 +28,7 @@
 
 namespace hog::client {
 
+inline constexpr double vertical_fov = 1.0; // radians
 inline constexpr VkFormat depth_format = VK_FORMAT_D32_SFLOAT;
 // Stills are sRGB, as the window shows them.
 inline constexpr VkFormat still_format = VK_FORMAT_R8G8B8A8_SRGB;

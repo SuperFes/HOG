@@ -12,7 +12,8 @@ add_library(hog_client
     src/likeness.cpp
     src/options.cpp
     src/picture.cpp
-    src/scene.cpp)
+    src/scene.cpp
+    src/views.cpp)
 add_library(hog::client ALIAS hog_client)
 
 target_include_directories(hog_client PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -28,10 +29,12 @@ hog_add_tests(hog_client
     tests/likeness_tests.cpp
     tests/options_tests.cpp
     tests/picture_tests.cpp
-    tests/scene_tests.cpp)
+    tests/scene_tests.cpp
+    tests/views_tests.cpp)
 if(TARGET hog_client_tests)
     target_link_libraries(hog_client_tests PRIVATE hog::planet hog::render_testing)
-    target_compile_definitions(hog_client_tests PRIVATE HOG_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_compile_definitions(hog_client_tests PRIVATE HOG_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+                                                        HOG_BINARY_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 endif()
 
 if(NOT HOG_BUILD_CLIENT)
