@@ -198,7 +198,7 @@ This phase builds a client that flies over the generated planet with a real sky.
 - [x] Continuous LOD over the cube-sphere with no cracks at chunk borders
 - [x] Faked Earth-sized curvature, blending to true curvature with altitude
 - [ ] Biome-driven materials (flat colors first, textures later)
-- [ ] Basic ocean surface
+- [x] Basic ocean surface
 - [ ] Hillaire atmosphere and sun lighting driven by planet time
 
 **Tests**
