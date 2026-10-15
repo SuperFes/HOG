@@ -25,9 +25,9 @@
 #include <hog/viewer/options.hpp>
 #include <hog/viewer/overlay.hpp>
 #include <hog/viewer/texels.hpp>
+#include <hog/window/window.hpp>
 
 #include <SDL3/SDL.h>
-#include <SDL3/SDL_vulkan.h>
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_vulkan.h>
@@ -62,8 +62,6 @@ constexpr std::chrono::milliseconds survey_settle{150};
 constexpr float deepest = 100'000.0F; // metres, for the underground overlays
 // How long to wait between looks at a minimised window.
 constexpr Uint32 idle_ms = 50;
-// What test runners take as skipped: there's no Vulkan to draw with.
-constexpr int no_vulkan = 77;
 constexpr int face_size = 512;      // pixels across each of the globe's faces
 constexpr int globe_cells = 128;    // of its mesh, across each face
 constexpr int relief_steps = 256;   // between the globe's heights across each face
@@ -74,75 +72,6 @@ constexpr VkClearColorValue window_colour{
     .float32 = {20.0F / 255.0F, 20.0F / 255.0F, 24.0F / 255.0F, 1.0F}};
 constexpr VkClearColorValue space_colour{
     .float32 = {6.0F / 255.0F, 6.0F / 255.0F, 10.0F / 255.0F, 1.0F}};
-
-struct WindowDeleter {
-    void operator()(SDL_Window* window) const noexcept { SDL_DestroyWindow(window); }
-};
-// SDL from starting to quitting, with Vulkan loaded for its windows.
-class Sdl {
-public:
-    Sdl()
-        : started_(SDL_Init(SDL_INIT_VIDEO)), vulkan_(started_ && SDL_Vulkan_LoadLibrary(nullptr)) {
-    }
-    Sdl(const Sdl&) = delete;
-    Sdl(Sdl&&) = delete;
-    Sdl& operator=(const Sdl&) = delete;
-    Sdl& operator=(Sdl&&) = delete;
-    ~Sdl() {
-        if (vulkan_) {
-            SDL_Vulkan_UnloadLibrary();
-        }
-        if (started_) {
-            SDL_Quit();
-        }
-    }
-
-    [[nodiscard]] bool started() const noexcept { return started_; }
-    [[nodiscard]] bool vulkan() const noexcept { return vulkan_; }
-
-private:
-    bool started_;
-    bool vulkan_;
-};
-
-// A device for the window: the instance extensions SDL needs, and its surface once there's an
-// instance to make it with.
-Result<render::DeviceOptions> device_options(SDL_Window* window, const viewer::Options& options) {
-    Uint32 count = 0;
-    const char* const* names = SDL_Vulkan_GetInstanceExtensions(&count);
-    if (names == nullptr) {
-        return make_error(
-            ErrorCode::Unsupported,
-            std::format("can't use Vulkan on this window system: {}", SDL_GetError()));
-    }
-    render::DeviceOptions device{.app_name = "HOG viewer",
-                                 .validation = options.validate,
-                                 .prefer_software = options.software};
-    for (const char* name : std::span{names, count}) {
-        device.instance_extensions.emplace_back(name);
-    }
-    device.make_surface = [window](VkInstance instance) -> Result<VkSurfaceKHR> {
-        VkSurfaceKHR surface = VK_NULL_HANDLE;
-        if (!SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface)) {
-            return make_error(ErrorCode::Unsupported,
-                              std::format("can't show Vulkan on the window: {}", SDL_GetError()));
-        }
-        return surface;
-    };
-    return device;
-}
-
-// The window's drawable size, which is none while it's minimised.
-VkExtent2D drawable(SDL_Window* window) {
-    int width = 0;
-    int height = 0;
-    if ((SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED) != 0 ||
-        !SDL_GetWindowSizeInPixels(window, &width, &height)) {
-        return {};
-    }
-    return {.width = static_cast<std::uint32_t>(std::max(width, 0)),
-            .height = static_cast<std::uint32_t>(std::max(height, 0))};
-}
 
 // ImGui, drawing with Vulkan into images of `format`.
 class Ui {
@@ -1011,7 +940,7 @@ void layout(View& view, viewer::Link& link, const GlobePanel& panel) {
 Result<bool> draw(View& view, viewer::Link& link, const render::Device& device,
                   render::Presenter& presenter, GlobePanel& panel, SDL_Window* window,
                   const std::optional<std::filesystem::path>& capture) {
-    auto begun = presenter.begin(drawable(window));
+    auto begun = presenter.begin(window::drawable(window));
     if (!begun) {
         return std::unexpected(std::move(begun).error());
     }
@@ -1134,35 +1063,38 @@ int run(std::span<const std::string_view> arguments) {
         return EXIT_SUCCESS;
     }
     // Declared in the order they're made, so each goes before what it was made with.
-    const Sdl sdl;
+    const window::Sdl sdl;
     if (!sdl.started()) {
         std::cerr << std::format("hog-viewer: can't start SDL: {}\n", SDL_GetError());
         return EXIT_FAILURE;
     }
     if (!sdl.vulkan()) {
         std::cerr << std::format("hog-viewer: can't load Vulkan: {}\n", SDL_GetError());
-        return no_vulkan;
+        return window::no_vulkan;
     }
-    const std::unique_ptr<SDL_Window, WindowDeleter> window{
+    const window::Window window{
         SDL_CreateWindow("HOG viewer", 1'400, 800,
                          SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY)};
     if (window == nullptr) {
         std::cerr << std::format("hog-viewer: can't open a window: {}\n", SDL_GetError());
         return EXIT_FAILURE;
     }
-    const auto wanted = device_options(window.get(), *options);
+    const auto wanted =
+        window::device_options(window.get(), {.app_name = "HOG viewer",
+                                              .validation = options->validate,
+                                              .prefer_software = options->software});
     if (!wanted) {
         std::cerr << std::format("hog-viewer: {}\n", wanted.error());
-        return no_vulkan;
+        return window::no_vulkan;
     }
     const auto device = render::Device::create(*wanted);
     if (!device) {
         std::cerr << std::format("hog-viewer: can't draw: {}\n", device.error());
-        return device.error().code == ErrorCode::Unsupported ? no_vulkan : EXIT_FAILURE;
+        return device.error().code == ErrorCode::Unsupported ? window::no_vulkan : EXIT_FAILURE;
     }
     // ImGui's colours are already sRGB, so the window's images take them as they are.
     const auto presenter =
-        render::Presenter::create(**device, drawable(window.get()), {.srgb = false});
+        render::Presenter::create(**device, window::drawable(window.get()), {.srgb = false});
     if (!presenter) {
         std::cerr << std::format("hog-viewer: can't show frames: {}\n", presenter.error());
         return EXIT_FAILURE;
