@@ -9,6 +9,7 @@
 #include <hog/render/readback.hpp>
 #include <hog/render/rendering.hpp>
 #include <hog/render/sky.hpp>
+#include <hog/shaders/aerial_probe.hpp>
 #include <hog/shaders/fill.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -57,15 +58,18 @@ SkyView view_from(double height, DVec3 sun, DVec3 forward = {1.0, 0.0, 0.0}) {
             .exposure = 1.0};
 }
 
-// The view through a pixel's centre, as the sky's shader finds it.
-DVec3 through(const SkyView& view, std::uint32_t x, std::uint32_t y) {
+// The view through a point of the picture, from 0 to 1 across it, as the shaders find it.
+DVec3 through(const SkyView& view, hog::DVec2 uv) {
     const double aspect = static_cast<double>(extent.width) / extent.height;
     const glm::dmat4 eye_from_clip =
         glm::inverse(glm::dmat4{hog::render::view_projection(view.camera, aspect)});
     const glm::dvec4 far =
-        eye_from_clip * glm::dvec4{((x + 0.5) / extent.width * 2.0) - 1.0,
-                                   ((y + 0.5) / extent.height * 2.0) - 1.0, 1.0, 1.0};
+        eye_from_clip * glm::dvec4{(uv.x * 2.0) - 1.0, (uv.y * 2.0) - 1.0, 1.0, 1.0};
     return glm::normalize(DVec3{far} / far.w);
+}
+
+DVec3 through(const SkyView& view, std::uint32_t x, std::uint32_t y) {
+    return through(view, hog::DVec2{(x + 0.5) / extent.width, (y + 0.5) / extent.height});
 }
 
 using Picture = std::vector<std::array<float, 4>>;
@@ -88,7 +92,7 @@ Picture draw(hog::render::Device& device, const Atmosphere& atmosphere, const Sk
     REQUIRE(depth);
     const auto drawn = device.submit_now([&](VkCommandBuffer commands) {
         namespace use = hog::render::image_use;
-        sky->record_table(commands, 0, atmosphere, view);
+        CHECK(sky->record_frame(commands, extent, 0, atmosphere, view));
         hog::render::transition(commands, colour->handle(), VK_IMAGE_ASPECT_COLOR_BIT, use::discard,
                                 use::colour_target);
         hog::render::transition(commands, depth->handle(), VK_IMAGE_ASPECT_DEPTH_BIT, use::discard,
@@ -239,5 +243,103 @@ TEST_CASE("the sky stays behind what's drawn after it", "[render][gpu][atmospher
         });
     CHECK(at(picture, 0, 0) == far.colour);
     CHECK(at(picture, extent.width - 1, extent.height - 1) == far.colour);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("the aerial perspective held matches the CPU model's", "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    auto atmosphere = Atmosphere::create(*device);
+    REQUIRE(atmosphere);
+    const hog::atmosphere::Model model;
+    auto sky = Sky::create(*device, colour_format, depth_format);
+    REQUIRE(sky);
+    const double height = 1'500.0;
+    SkyView view = view_from(height, towards(10.0, 30.0));
+    // Looking a little down, so some views meet the ground within reach.
+    view.camera.forward = towards(-5.0);
+    view.camera.up = towards(85.0);
+    const double scale = hog::render::air_scale(atmosphere->air(), view.bend);
+
+    // At texel centres across, and at the ends of slices out from the eye and between them.
+    std::vector<std::array<float, 4>> asked;
+    for (const double across : {3.5, 16.5, 28.5}) {
+        for (const double down : {2.5, 15.5, 30.5}) {
+            for (const double share : {4.0, 10.0, 15.5, 20.0, 32.0}) {
+                const double distance = hog::render::aerial_reach * (share / 32.0) * (share / 32.0);
+                asked.push_back({static_cast<float>(across / 32.0), static_cast<float>(down / 32.0),
+                                 static_cast<float>(distance),
+                                 static_cast<float>(hog::render::aerial_reach)});
+            }
+        }
+    }
+    constexpr auto binding = [](std::uint32_t at, VkDescriptorType type) {
+        return VkDescriptorSetLayoutBinding{.binding = at,
+                                            .descriptorType = type,
+                                            .descriptorCount = 1,
+                                            .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+                                            .pImmutableSamplers = nullptr};
+    };
+    const std::array bindings{binding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+                              binding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
+                              binding(2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)};
+    auto probe = hog::render::make_compute_pipeline(
+        *device, {.spirv = hog::shaders::aerial_probe, .descriptors = bindings});
+    REQUIRE(probe);
+    auto questions = hog::render::make_filled_buffer(*device, std::as_bytes(std::span{asked}),
+                                                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    REQUIRE(questions);
+    auto answers =
+        hog::render::make_buffer(*device, std::span{asked}.size_bytes(),
+                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, hog::render::Memory::Readback);
+    REQUIRE(answers);
+    const hog::render::AirBindings air = sky->bindings(0, *atmosphere);
+    const auto run = device->submit_now([&](VkCommandBuffer commands) {
+        CHECK(sky->record_frame(commands, extent, 0, *atmosphere, view));
+        vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, probe->handle());
+        hog::render::push_sampled_image(commands, *probe, 0, air.aerial, air.sampler);
+        hog::render::push_storage_buffer(commands, *probe, 1, questions->handle());
+        hog::render::push_storage_buffer(commands, *probe, 2, answers->handle());
+        vkCmdDispatch(commands, 1, 1, 1);
+        const VkMemoryBarrier2 to_host{.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+                                       .pNext = nullptr,
+                                       .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                                       .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                                       .dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT,
+                                       .dstAccessMask = VK_ACCESS_2_HOST_READ_BIT};
+        const VkDependencyInfo dependency{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                                          .pNext = nullptr,
+                                          .dependencyFlags = 0,
+                                          .memoryBarrierCount = 1,
+                                          .pMemoryBarriers = &to_host,
+                                          .bufferMemoryBarrierCount = 0,
+                                          .pBufferMemoryBarriers = nullptr,
+                                          .imageMemoryBarrierCount = 0,
+                                          .pImageMemoryBarriers = nullptr};
+        vkCmdPipelineBarrier2(commands, &dependency);
+    });
+    REQUIRE(run);
+    REQUIRE(answers->invalidate());
+    std::vector<std::array<float, 4>> found(asked.size());
+    std::memcpy(found.data(), answers->mapped().data(), std::span{found}.size_bytes());
+
+    for (std::size_t at = 0; at < asked.size(); ++at) {
+        const std::array<float, 4>& question = asked[at];
+        const DVec3 direction = through(
+            view, hog::DVec2{static_cast<double>(question[0]), static_cast<double>(question[1])});
+        const hog::atmosphere::Scattered expected =
+            model.march(height * scale, direction, view.sun, static_cast<double>(question[2]));
+        const double passed =
+            (expected.transmittance.r + expected.transmittance.g + expected.transmittance.b) / 3.0;
+        INFO("at " << question[0] << ", " << question[1] << ", " << question[2]
+                   << " m: " << found[at][0] << ", " << found[at][1] << ", " << found[at][2] << ", "
+                   << found[at][3] << " against " << expected.light.r << ", " << expected.light.g
+                   << ", " << expected.light.b << ", " << passed);
+        for (std::size_t channel = 0; channel < 3; ++channel) {
+            const double light = expected.light[static_cast<glm::length_t>(channel)];
+            CHECK(std::abs(static_cast<double>(found[at].at(channel)) - light) <=
+                  1e-3 + (0.1 * light));
+        }
+        CHECK(std::abs(static_cast<double>(found[at][3]) - passed) <= 0.02);
+    }
     CHECK(device->validation_errors() == 0);
 }

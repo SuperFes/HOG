@@ -254,3 +254,45 @@ public float3 sky_view_direction(Air air, float height, float2 uv) {
     return float3(sin(zenith_angle) * cos_azimuth, sin(zenith_angle) * sin_azimuth,
                   cos(zenith_angle));
 }
+
+// A frame in which `up` is +Z, as march() takes directions in.
+public float3x3 frame_of(float3 up) {
+    const float3 east = normalize(abs(up.z) < 0.9 ? cross(float3(0.0, 0.0, 1.0), up)
+                                                  : cross(float3(1.0, 0.0, 0.0), up));
+    return float3x3(east, cross(up, east), up);
+}
+
+// How the air lights a frame, as render::Sky writes it.
+public struct Lighting {
+    public float4x4 eye_from_clip;
+    // xyz up through the eye, w its height above the ground in the air's metres.
+    public float4 up_height;
+    // xyz towards the sun, w how much brighter the picture is than the light reaching it.
+    public float4 sun_exposure;
+    // rgb the sky's irradiance on level ground at the eye, w the air's metres to a metre drawn.
+    public float4 sky_scale;
+    // x the air's metres the aerial-perspective volume reaches out to.
+    public float4 reach;
+};
+
+public static const uint aerial_size = 32;
+public static const uint aerial_slices = 32;
+
+// The air's metres slice `slice` of the aerial-perspective volume reaches out to, finer near the
+// eye.
+public float aerial_slice_end(uint slice, float reach) {
+    const float share = (slice + 1.0) / aerial_slices;
+    return reach * share * share;
+}
+
+// What the air between the eye and what's drawn at `uv` on the picture, `distance` of the air's
+// metres away, adds to the light from it, and as w the share of that light it lets through.
+public float4 aerial_perspective(Sampler2DArray volume, float2 uv, float distance, float reach) {
+    const float slice = (sqrt(max(distance, 0.0) / reach) * aerial_slices) - 1.0;
+    const float below = floor(slice);
+    const float4 far = volume.SampleLevel(float3(uv, clamp(below + 1.0, 0.0, aerial_slices - 1.0)), 0.0);
+    const float4 near =
+        below < 0.0 ? float4(0.0, 0.0, 0.0, 1.0)
+                    : volume.SampleLevel(float3(uv, min(below, aerial_slices - 1.0)), 0.0);
+    return lerp(near, far, slice >= aerial_slices - 1.0 ? 1.0 : slice - below);
+}
