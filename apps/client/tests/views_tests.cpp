@@ -13,6 +13,9 @@
 
 #include <cmath>
 #include <cstddef>
+#include <cstdlib>
+#include <filesystem>
+#include <format>
 #include <numbers>
 #include <set>
 #include <string_view>
@@ -29,6 +32,7 @@ namespace {
 
 constexpr double degree = std::numbers::pi / 180.0;
 constexpr VkExtent2D extent{.width = 96, .height = 54};
+constexpr VkExtent2D reference_extent{.width = 320, .height = 180};
 
 const FixedView& view_named(std::string_view name) {
     for (const FixedView& view : hog::client::fixed_views()) {
@@ -114,4 +118,43 @@ TEST_CASE("the islands are darker at night than at noon", "[client][views][gpu]"
     CHECK(night < 0.5 * noon);
     CHECK(night > 0.0);
     CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("fixed views look as their reference pictures do", "[client][views][gpu][reference]") {
+    const auto device = test_device();
+    if (!device->software()) {
+        SKIP("the reference pictures are drawn on a software device");
+    }
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
+    const bool updating = std::getenv("HOG_UPDATE_REFERENCES") != nullptr;
+    const std::filesystem::path references =
+        std::filesystem::path{HOG_SOURCE_DIR} / "apps" / "client" / "tests" / "reference";
+    const std::filesystem::path failures = std::filesystem::path{HOG_BINARY_DIR} / "reference";
+    for (const FixedView& view : hog::client::fixed_views()) {
+        DYNAMIC_SECTION(view.name) {
+            const Picture drawn = still_of(*device, view, reference_extent);
+            const std::filesystem::path reference = references / std::format("{}.png", view.name);
+            if (updating) {
+                REQUIRE(hog::client::save_picture(reference, drawn));
+                continue;
+            }
+            const auto expected = hog::client::load_picture(reference);
+            INFO("draw it with HOG_UPDATE_REFERENCES=1 set");
+            REQUIRE(expected);
+            const auto difference = hog::client::difference(*expected, drawn);
+            REQUIRE(difference);
+            INFO("mean " << difference->mean << " counts, " << 100.0 * difference->share
+                         << "% of pixels far off");
+            if (!hog::client::alike(*difference)) {
+                std::filesystem::create_directories(failures);
+                const auto saved = failures / std::format("{}.png", view.name);
+                const auto differences = failures / std::format("{}-difference.png", view.name);
+                CHECK(hog::client::save_picture(saved, drawn));
+                CHECK(hog::client::save_picture(differences, difference->picture));
+                INFO("drawn as " << saved.string() << ", differing as " << differences.string());
+                CHECK(hog::client::alike(*difference));
+            }
+            CHECK(device->validation_errors() == 0);
+        }
+    }
 }
