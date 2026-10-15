@@ -9,6 +9,7 @@
 #include <hog/render/sampler.hpp>
 #include <hog/shaders/dispatch.hpp>
 #include <hog/shaders/fill.hpp>
+#include <hog/shaders/triangle.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -261,4 +262,56 @@ TEST_CASE("compute shaders write images and buffers, and sample what they wrote"
         }
     }
     CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("pipelines made again from new SPIR-V draw with it", "[render][gpu][reload]") {
+    const auto device = test_device();
+    const Pipeline first = fill_pipeline(*device, Blend::None);
+    Pipeline moved = fill_pipeline(*device, Blend::None);
+    const Pipeline second = std::move(moved);
+    const Draw filled{.pipeline = &second, .fill = {.colour = green}};
+    CHECK(draw_all(*device, black, std::array{filled}) == Pixel{0, 255, 0, 255});
+    auto* const was = second.handle();
+    const auto remade = device->pipelines().remake(hog::shaders::fill, hog::shaders::triangle);
+    REQUIRE(remade);
+    CHECK(*remade == 2);
+    CHECK(second.handle() != was);
+    // The triangle's own red, not the green pushed.
+    CHECK(draw_all(*device, black, std::array{filled}) == Pixel{255, 0, 0, 255});
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("only the pipelines made from a shader are made again", "[render][gpu][reload]") {
+    const auto device = test_device();
+    const Pipeline filled = fill_pipeline(*device, Blend::None);
+    auto* const was = filled.handle();
+    const auto remade = device->pipelines().remake(hog::shaders::triangle, hog::shaders::fill);
+    REQUIRE(remade);
+    CHECK(*remade == 0);
+    CHECK(filled.handle() == was);
+}
+
+TEST_CASE("pipelines aren't made again from what isn't SPIR-V", "[render][gpu][reload]") {
+    const auto device = test_device();
+    const Pipeline filled = fill_pipeline(*device, Blend::None);
+    auto* const was = filled.handle();
+    constexpr std::array<std::uint32_t, 8> words{1, 2, 3, 4, 5, 6, 7, 8};
+    CHECK_FALSE(device->pipelines().remake(hog::shaders::fill, words));
+    CHECK_FALSE(device->pipelines().remake(hog::shaders::fill, {}));
+    CHECK(filled.handle() == was);
+}
+
+TEST_CASE("a device's registry holds the pipelines living on it", "[render][gpu][reload]") {
+    const auto device = test_device();
+    const std::size_t before = device->pipelines().size();
+    {
+        const Pipeline filled = fill_pipeline(*device, Blend::None);
+        Pipeline moved = fill_pipeline(*device, Blend::None);
+        CHECK(device->pipelines().size() == before + 2);
+        Pipeline taken = std::move(moved);
+        CHECK(device->pipelines().size() == before + 2);
+        taken = Pipeline{};
+        CHECK(device->pipelines().size() == before + 1);
+    }
+    CHECK(device->pipelines().size() == before);
 }

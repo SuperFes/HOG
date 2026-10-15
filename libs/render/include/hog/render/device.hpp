@@ -14,6 +14,8 @@
 
 namespace hog::render {
 
+class PipelineRegistry;
+
 struct DeviceOptions {
     std::string app_name = "HOG";
     // The Khronos validation layer, where it's installed; what it reports is logged and counted.
@@ -66,6 +68,9 @@ public:
     }
 
     // Records commands with `record`, submits them and waits for the GPU to finish them.
+    // Those made on it, living still.
+    [[nodiscard]] PipelineRegistry& pipelines() const noexcept { return *pipelines_; }
+
     Result<> submit_now(const std::function<void(VkCommandBuffer)>& record);
 
 private:
@@ -94,6 +99,7 @@ private:
     std::uint32_t timestamp_bits_ = 0;
     bool validating_ = false;
     std::atomic<std::uint64_t> validation_errors_{0};
+    std::unique_ptr<PipelineRegistry> pipelines_;
 };
 
 } // namespace hog::render

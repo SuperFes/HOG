@@ -4,51 +4,72 @@
 #include <array>
 #include <cstdint>
 #include <expected>
+#include <memory>
+#include <mutex>
 #include <span>
 #include <utility>
+#include <variant>
+#include <vector>
 
 namespace hog::render {
 
-Pipeline::Pipeline(Pipeline&& other) noexcept
-    : device_(std::exchange(other.device_, VK_NULL_HANDLE)),
-      set_layout_(std::exchange(other.set_layout_, VK_NULL_HANDLE)),
-      layout_(std::exchange(other.layout_, VK_NULL_HANDLE)),
-      pipeline_(std::exchange(other.pipeline_, VK_NULL_HANDLE)), bind_point_(other.bind_point_) {}
+// A pipeline's handles, and what it was made with, so it can be made again from new SPIR-V.
+struct PipelineState {
+    PipelineState() = default;
+    PipelineState(const PipelineState&) = delete;
+    PipelineState& operator=(const PipelineState&) = delete;
+    PipelineState(PipelineState&&) = delete;
+    PipelineState& operator=(PipelineState&&) = delete;
+    ~PipelineState();
 
-Pipeline& Pipeline::operator=(Pipeline&& other) noexcept {
-    if (this != &other) {
-        release();
-        device_ = std::exchange(other.device_, VK_NULL_HANDLE);
-        set_layout_ = std::exchange(other.set_layout_, VK_NULL_HANDLE);
-        layout_ = std::exchange(other.layout_, VK_NULL_HANDLE);
-        pipeline_ = std::exchange(other.pipeline_, VK_NULL_HANDLE);
-        bind_point_ = other.bind_point_;
+    PipelineRegistry* registry = nullptr;
+    VkDevice device = VK_NULL_HANDLE;
+    VkDescriptorSetLayout set_layout = VK_NULL_HANDLE;
+    VkPipelineLayout layout = VK_NULL_HANDLE;
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    VkPipelineBindPoint bind_point = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    const std::uint32_t* made_from = nullptr; // the SPIR-V it was first made from
+    // Without its SPIR-V, and its spans into the copies below.
+    std::variant<PipelineDesc, ComputePipelineDesc> desc;
+    std::vector<VkVertexInputBindingDescription> bindings;
+    std::vector<VkVertexInputAttributeDescription> attributes;
+    std::vector<VkDescriptorSetLayoutBinding> descriptors;
+};
+
+PipelineState::~PipelineState() {
+    if (registry != nullptr) {
+        registry->remove(this);
     }
-    return *this;
+    if (pipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(device, pipeline, nullptr);
+    }
+    if (layout != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(device, layout, nullptr);
+    }
+    if (set_layout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(device, set_layout, nullptr);
+    }
 }
 
-Pipeline::~Pipeline() {
-    release();
+Pipeline::Pipeline() noexcept = default;
+Pipeline::Pipeline(Pipeline&& other) noexcept = default;
+Pipeline& Pipeline::operator=(Pipeline&& other) noexcept = default;
+Pipeline::~Pipeline() = default;
+
+VkPipeline Pipeline::handle() const noexcept {
+    return state_ ? state_->pipeline : VK_NULL_HANDLE;
 }
 
-void Pipeline::release() noexcept {
-    if (pipeline_ != VK_NULL_HANDLE) {
-        vkDestroyPipeline(device_, pipeline_, nullptr);
-        pipeline_ = VK_NULL_HANDLE;
-    }
-    if (layout_ != VK_NULL_HANDLE) {
-        vkDestroyPipelineLayout(device_, layout_, nullptr);
-        layout_ = VK_NULL_HANDLE;
-    }
-    if (set_layout_ != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(device_, set_layout_, nullptr);
-        set_layout_ = VK_NULL_HANDLE;
-    }
+VkPipelineLayout Pipeline::layout() const noexcept {
+    return state_ ? state_->layout : VK_NULL_HANDLE;
+}
+
+VkPipelineBindPoint Pipeline::bind_point() const noexcept {
+    return state_ ? state_->bind_point : VK_PIPELINE_BIND_POINT_GRAPHICS;
 }
 
 namespace {
 
-// How much of what's already drawn a blend keeps.
 VkBlendFactor kept_colour(Blend blend) noexcept {
     switch (blend) {
     case Blend::None:
@@ -118,19 +139,9 @@ void push_descriptor(VkCommandBuffer commands, const Pipeline& pipeline,
     vkCmdPushDescriptorSetKHR(commands, pipeline.bind_point(), pipeline.layout(), 0, 1, &write);
 }
 
-} // namespace
-
-Result<Pipeline> make_pipeline(const Device& device, const PipelineDesc& desc) {
-    Pipeline pipeline;
-    pipeline.device_ = device.handle();
-    pipeline.bind_point_ = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    if (auto made = make_layouts(device.handle(), desc.descriptors, desc.push_constant_bytes,
-                                 VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                                 pipeline.set_layout_, pipeline.layout_);
-        !made) {
-        return std::unexpected(std::move(made).error());
-    }
-    const auto made_module = make_module(device.handle(), desc.spirv);
+Result<VkPipeline> build_graphics(VkDevice device, const PipelineDesc& desc,
+                                  std::span<const std::uint32_t> spirv, VkPipelineLayout layout) {
+    const auto made_module = make_module(device, spirv);
     if (!made_module) {
         return std::unexpected(made_module.error());
     }
@@ -264,31 +275,24 @@ Result<Pipeline> make_pipeline(const Device& device, const PipelineDesc& desc) {
         .pDepthStencilState = &depth_stencil,
         .pColorBlendState = &blend,
         .pDynamicState = &dynamic,
-        .layout = pipeline.layout_,
+        .layout = layout,
         .renderPass = VK_NULL_HANDLE,
         .subpass = 0,
         .basePipelineHandle = VK_NULL_HANDLE,
         .basePipelineIndex = -1};
-    const VkResult made = vkCreateGraphicsPipelines(device.handle(), VK_NULL_HANDLE, 1,
-                                                    &pipeline_info, nullptr, &pipeline.pipeline_);
-    vkDestroyShaderModule(device.handle(), module, nullptr);
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    const VkResult made =
+        vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &pipeline);
+    vkDestroyShaderModule(device, module, nullptr);
     if (made != VK_SUCCESS) {
         return vulkan_error(made, "creating a graphics pipeline");
     }
     return pipeline;
 }
 
-Result<Pipeline> make_compute_pipeline(const Device& device, const ComputePipelineDesc& desc) {
-    Pipeline pipeline;
-    pipeline.device_ = device.handle();
-    pipeline.bind_point_ = VK_PIPELINE_BIND_POINT_COMPUTE;
-    if (auto made =
-            make_layouts(device.handle(), desc.descriptors, desc.push_constant_bytes,
-                         VK_SHADER_STAGE_COMPUTE_BIT, pipeline.set_layout_, pipeline.layout_);
-        !made) {
-        return std::unexpected(std::move(made).error());
-    }
-    const auto module = make_module(device.handle(), desc.spirv);
+Result<VkPipeline> build_compute(VkDevice device, const ComputePipelineDesc& desc,
+                                 std::span<const std::uint32_t> spirv, VkPipelineLayout layout) {
+    const auto module = make_module(device, spirv);
     if (!module) {
         return std::unexpected(module.error());
     }
@@ -303,15 +307,153 @@ Result<Pipeline> make_compute_pipeline(const Device& device, const ComputePipeli
                   .module = *module,
                   .pName = desc.entry.c_str(),
                   .pSpecializationInfo = nullptr},
-        .layout = pipeline.layout_,
+        .layout = layout,
         .basePipelineHandle = VK_NULL_HANDLE,
         .basePipelineIndex = -1};
-    const VkResult made = vkCreateComputePipelines(device.handle(), VK_NULL_HANDLE, 1,
-                                                   &pipeline_info, nullptr, &pipeline.pipeline_);
-    vkDestroyShaderModule(device.handle(), *module, nullptr);
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    const VkResult made =
+        vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &pipeline);
+    vkDestroyShaderModule(device, *module, nullptr);
     if (made != VK_SUCCESS) {
         return vulkan_error(made, "creating a compute pipeline");
     }
+    return pipeline;
+}
+
+Result<VkPipeline> build(const PipelineState& state, std::span<const std::uint32_t> spirv) {
+    if (const auto* graphics = std::get_if<PipelineDesc>(&state.desc)) {
+        return build_graphics(state.device, *graphics, spirv, state.layout);
+    }
+    return build_compute(state.device, std::get<ComputePipelineDesc>(state.desc), spirv,
+                         state.layout);
+}
+
+// Copies what a description points to into the state, which never moves, so it outlasts the
+// caller's.
+void keep(PipelineState& state, const PipelineDesc& desc) {
+    state.bindings.assign(desc.bindings.begin(), desc.bindings.end());
+    state.attributes.assign(desc.attributes.begin(), desc.attributes.end());
+    state.descriptors.assign(desc.descriptors.begin(), desc.descriptors.end());
+    PipelineDesc kept = desc;
+    kept.spirv = {};
+    kept.bindings = state.bindings;
+    kept.attributes = state.attributes;
+    kept.descriptors = state.descriptors;
+    state.desc = std::move(kept);
+}
+
+void keep(PipelineState& state, const ComputePipelineDesc& desc) {
+    state.descriptors.assign(desc.descriptors.begin(), desc.descriptors.end());
+    ComputePipelineDesc kept = desc;
+    kept.spirv = {};
+    kept.descriptors = state.descriptors;
+    state.desc = std::move(kept);
+}
+
+template <typename Desc>
+Result<std::unique_ptr<PipelineState>>
+make(VkDevice device, const Desc& desc, VkPipelineBindPoint bind_point, VkShaderStageFlags stages) {
+    auto state = std::make_unique<PipelineState>();
+    state->device = device;
+    state->bind_point = bind_point;
+    state->made_from = desc.spirv.data();
+    keep(*state, desc);
+    if (auto made = make_layouts(device, desc.descriptors, desc.push_constant_bytes, stages,
+                                 state->set_layout, state->layout);
+        !made) {
+        return std::unexpected(std::move(made).error());
+    }
+    auto pipeline = build(*state, desc.spirv);
+    if (!pipeline) {
+        return std::unexpected(std::move(pipeline).error());
+    }
+    state->pipeline = *pipeline;
+    return state;
+}
+
+} // namespace
+
+PipelineRegistry::PipelineRegistry(VkDevice device) noexcept : device_(device) {}
+
+PipelineRegistry::~PipelineRegistry() {
+    // Pipelines outliving their device are a bug, but needn't crash.
+    for (PipelineState* state : states_) {
+        state->registry = nullptr;
+    }
+}
+
+void PipelineRegistry::add(PipelineState& state) {
+    const std::scoped_lock lock{mutex_};
+    states_.push_back(&state);
+    state.registry = this;
+}
+
+void PipelineRegistry::remove(PipelineState* state) noexcept {
+    const std::scoped_lock lock{mutex_};
+    std::erase(states_, state);
+}
+
+std::size_t PipelineRegistry::size() const {
+    const std::scoped_lock lock{mutex_};
+    return states_.size();
+}
+
+Result<std::size_t> PipelineRegistry::remake(std::span<const std::uint32_t> made_from,
+                                             std::span<const std::uint32_t> spirv) {
+    // Drivers needn't survive what isn't SPIR-V at all.
+    constexpr std::uint32_t magic = 0x07230203;
+    constexpr std::size_t header_words = 5;
+    if (spirv.size() < header_words || spirv.front() != magic) {
+        return make_error(ErrorCode::InvalidArgument,
+                          "making pipelines again from what isn't SPIR-V");
+    }
+    const std::scoped_lock lock{mutex_};
+    std::vector<std::pair<PipelineState*, VkPipeline>> remade;
+    for (PipelineState* state : states_) {
+        if (state->made_from != made_from.data()) {
+            continue;
+        }
+        auto pipeline = build(*state, spirv);
+        if (!pipeline) {
+            for (const auto& [kept, made] : remade) {
+                vkDestroyPipeline(device_, made, nullptr);
+            }
+            return std::unexpected(std::move(pipeline).error());
+        }
+        remade.emplace_back(state, *pipeline);
+    }
+    if (remade.empty()) {
+        return 0;
+    }
+    // The old ones may be in commands still running.
+    vkDeviceWaitIdle(device_);
+    for (const auto& [state, made] : remade) {
+        vkDestroyPipeline(device_, std::exchange(state->pipeline, made), nullptr);
+    }
+    return remade.size();
+}
+
+Result<Pipeline> make_pipeline(const Device& device, const PipelineDesc& desc) {
+    auto state = make(device.handle(), desc, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+    if (!state) {
+        return std::unexpected(std::move(state).error());
+    }
+    device.pipelines().add(**state);
+    Pipeline pipeline;
+    pipeline.state_ = std::move(state).value();
+    return pipeline;
+}
+
+Result<Pipeline> make_compute_pipeline(const Device& device, const ComputePipelineDesc& desc) {
+    auto state =
+        make(device.handle(), desc, VK_PIPELINE_BIND_POINT_COMPUTE, VK_SHADER_STAGE_COMPUTE_BIT);
+    if (!state) {
+        return std::unexpected(std::move(state).error());
+    }
+    device.pipelines().add(**state);
+    Pipeline pipeline;
+    pipeline.state_ = std::move(state).value();
     return pipeline;
 }
 

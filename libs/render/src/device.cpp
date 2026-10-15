@@ -1,5 +1,6 @@
 #include <hog/core/log.hpp>
 #include <hog/render/device.hpp>
+#include <hog/render/pipeline.hpp>
 
 #include <VkBootstrap.h>
 
@@ -8,6 +9,7 @@
 #include <format>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -165,6 +167,7 @@ Result<std::unique_ptr<Device>> Device::create(const DeviceOptions& options) {
     }
     device->device_ = built->device;
     volkLoadDevice(device->device_);
+    device->pipelines_ = std::make_unique<PipelineRegistry>(device->device_);
     const auto family = built->get_queue_index(vkb::QueueType::graphics);
     const auto queue = built->get_queue(vkb::QueueType::graphics);
     if (!family || !queue) {

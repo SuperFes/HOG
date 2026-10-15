@@ -3,9 +3,13 @@
 #include <hog/core/result.hpp>
 #include <hog/render/vulkan.hpp>
 
+#include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <mutex>
 #include <span>
 #include <string>
+#include <vector>
 
 namespace hog::render {
 
@@ -58,30 +62,60 @@ struct ComputePipelineDesc {
     std::span<const VkDescriptorSetLayoutBinding> descriptors = {};
 };
 
+struct PipelineState;
+
 class Pipeline {
 public:
-    Pipeline() = default;
+    Pipeline() noexcept;
     Pipeline(const Pipeline&) = delete;
     Pipeline& operator=(const Pipeline&) = delete;
     Pipeline(Pipeline&& other) noexcept;
     Pipeline& operator=(Pipeline&& other) noexcept;
     ~Pipeline();
 
-    [[nodiscard]] VkPipeline handle() const noexcept { return pipeline_; }
-    [[nodiscard]] VkPipelineLayout layout() const noexcept { return layout_; }
-    [[nodiscard]] VkPipelineBindPoint bind_point() const noexcept { return bind_point_; }
+    [[nodiscard]] VkPipeline handle() const noexcept;
+    [[nodiscard]] VkPipelineLayout layout() const noexcept;
+    [[nodiscard]] VkPipelineBindPoint bind_point() const noexcept;
 
 private:
     friend Result<Pipeline> make_pipeline(const Device& device, const PipelineDesc& desc);
     friend Result<Pipeline> make_compute_pipeline(const Device& device,
                                                   const ComputePipelineDesc& desc);
-    void release() noexcept;
 
-    VkDevice device_ = VK_NULL_HANDLE;
-    VkDescriptorSetLayout set_layout_ = VK_NULL_HANDLE;
-    VkPipelineLayout layout_ = VK_NULL_HANDLE;
-    VkPipeline pipeline_ = VK_NULL_HANDLE;
-    VkPipelineBindPoint bind_point_ = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    // Kept apart, so a pipeline moves without its registry hearing of it.
+    std::unique_ptr<PipelineState> state_;
+};
+
+// The pipelines living on a device, so those made from a shader can be made again from new SPIR-V
+// of it while running.
+class PipelineRegistry {
+public:
+    explicit PipelineRegistry(VkDevice device) noexcept;
+    PipelineRegistry(const PipelineRegistry&) = delete;
+    PipelineRegistry& operator=(const PipelineRegistry&) = delete;
+    PipelineRegistry(PipelineRegistry&&) = delete;
+    PipelineRegistry& operator=(PipelineRegistry&&) = delete;
+    ~PipelineRegistry();
+
+    [[nodiscard]] std::size_t size() const;
+
+    // Makes each pipeline first made from `made_from` again from `spirv`, which must keep the
+    // shader's entry points, descriptors and push constants, waiting for the device to be idle
+    // first. Where any fails, none change. Gives how many were made again.
+    [[nodiscard]] Result<std::size_t> remake(std::span<const std::uint32_t> made_from,
+                                             std::span<const std::uint32_t> spirv);
+
+private:
+    friend struct PipelineState;
+    friend Result<Pipeline> make_pipeline(const Device& device, const PipelineDesc& desc);
+    friend Result<Pipeline> make_compute_pipeline(const Device& device,
+                                                  const ComputePipelineDesc& desc);
+    void add(PipelineState& state);
+    void remove(PipelineState* state) noexcept;
+
+    VkDevice device_;
+    mutable std::mutex mutex_;
+    std::vector<PipelineState*> states_;
 };
 
 [[nodiscard]] Result<Pipeline> make_pipeline(const Device& device, const PipelineDesc& desc);
