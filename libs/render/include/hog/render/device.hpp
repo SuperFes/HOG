@@ -55,6 +55,10 @@ public:
     [[nodiscard]] bool software() const noexcept { return software_; }
     // How many samples along a glancing view a sampler may take.
     [[nodiscard]] float max_anisotropy() const noexcept { return max_anisotropy_; }
+    // Nanoseconds a tick of the queue's timestamps lasts, and how many of their bits count; none
+    // where it can't time.
+    [[nodiscard]] double timestamp_period() const noexcept { return timestamp_period_; }
+    [[nodiscard]] std::uint32_t timestamp_bits() const noexcept { return timestamp_bits_; }
     [[nodiscard]] bool validating() const noexcept { return validating_; }
     // Errors the validation layer has reported.
     [[nodiscard]] std::uint64_t validation_errors() const noexcept {
@@ -86,6 +90,8 @@ private:
     std::string name_;
     bool software_ = false;
     float max_anisotropy_ = 1.0F;
+    double timestamp_period_ = 1.0;
+    std::uint32_t timestamp_bits_ = 0;
     bool validating_ = false;
     std::atomic<std::uint64_t> validation_errors_{0};
 };

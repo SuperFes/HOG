@@ -157,6 +157,7 @@ Result<std::unique_ptr<Device>> Device::create(const DeviceOptions& options) {
     device->name_ = physical->name;
     device->software_ = physical->properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU;
     device->max_anisotropy_ = physical->properties.limits.maxSamplerAnisotropy;
+    device->timestamp_period_ = static_cast<double>(physical->properties.limits.timestampPeriod);
 
     const auto built = vkb::DeviceBuilder{*physical}.build();
     if (!built) {
@@ -174,6 +175,7 @@ Result<std::unique_ptr<Device>> Device::create(const DeviceOptions& options) {
                           "the Vulkan device's graphics queue can't compute");
     }
     device->queue_family_ = *family;
+    device->timestamp_bits_ = physical->get_queue_families().at(*family).timestampValidBits;
     device->queue_ = *queue;
 
     VmaVulkanFunctions functions{};
