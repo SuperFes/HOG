@@ -35,6 +35,7 @@ struct Ground {
     float4 position : SV_Position;
     float3 normal;
     float3 from_eye;
+    float3 drawn; // from the eye, bent
     float height; // above sea level, or 0 if not seen through water
     // Each biome's share, four to a vector: all of one at a corner, blended across a triangle.
     float4 biomes[(biome_count + 3) / 4];
@@ -43,6 +44,13 @@ struct Ground {
 // Of clear seawater, by the metre of it light passes through, and the light it scatters back.
 static const float3 water_absorbing = float3(0.35, 0.07, 0.03);
 static const float3 water_colour = float3(0.0, 0.15, 0.25);
+
+// Ground no higher above sea level than this, by the metre it lies from the eye, is too near level
+// with the sea for depth to tell which is in front, so it's drawn under it.
+static const float level_with_sea = 1e-5;
+// How far behind the sea's true surface such ground is put, relative to its depth, to stay behind
+// the flat triangles the sea is drawn with.
+static const float behind_sea = 1e-3;
 
 // Shares below these aren't worth sampling for.
 static const float least_biome = 1.0 / 256.0;
@@ -55,6 +63,7 @@ Ground vertex_main(Vertex vertex) {
     const float3 from_eye = push.origin.xyz + vertex.position;
     const float3 drawn = bent(from_eye, push.bend_up, push.bend_radii.xy);
     ground.position = mul(push.clip_from_eye, float4(drawn, 1.0));
+    ground.drawn = drawn;
     ground.normal = vertex.normal;
     ground.from_eye = from_eye;
     ground.height =
@@ -114,8 +123,30 @@ float3 albedo(Ground ground, float3 normal) {
     return colour;
 }
 
-[shader("fragment")]
-float4 fragment_main(Ground ground) : SV_Target {
+// The depth at which the eye, above sea level, sees the sea's surface past `drawn`, if it does: on
+// the faked sphere drawing bends sea level onto.
+float sea_depth(float3 drawn, out bool seen) {
+    const float3 up = push.bend_up.xyz;
+    const float eye_height = push.bend_up.w;
+    const float faked = push.bend_radii.y;
+    const float3 looking = normalize(drawn);
+    // Along `looking` from the eye, the sphere is met where t^2 - 2kt + c = 0.
+    const float k = (faked + eye_height) * dot(looking, -up);
+    const float c = eye_height * ((2.0 * faked) + eye_height);
+    const float discriminant = (k * k) - c;
+    seen = eye_height > 0.0 && k > 0.0 && discriminant >= 0.0;
+    // The nearer root, without cancelling.
+    const float t = c / (k + sqrt(max(discriminant, 0.0)));
+    const float4 clip = mul(push.clip_from_eye, float4(looking * t, 1.0));
+    return clip.z / clip.w;
+}
+
+struct Shaded {
+    float4 colour : SV_Target;
+    float depth : SV_DepthLessEqual;
+};
+
+float3 shaded(Ground ground) {
     const float3 sun = push.sun.xyz;
     const float night = push.sun.w;
     const float3 normal = normalize(ground.normal);
@@ -123,7 +154,7 @@ float4 fragment_main(Ground ground) : SV_Target {
         albedo(ground, normal) * (night + ((1.0 - night) * saturate(dot(normal, sun))));
     const float under_sea = -ground.height;
     if (under_sea <= 0.0) {
-        return float4(saturate(lit_ground), 1.0);
+        return lit_ground;
     }
 
     // Light down through the water and back up to the eye, the steeper the shorter.
@@ -132,5 +163,21 @@ float4 fragment_main(Ground ground) : SV_Target {
     const float looking_down = max(dot(-normalize(ground.from_eye), up), 0.1);
     const float3 passed = exp(-water_absorbing * under_sea * (1.0 + (1.0 / looking_down)));
     const float3 lit_water = water_colour * (night + ((1.0 - night) * saturate(dot(up, sun))));
-    return float4(saturate((lit_ground * passed) + (lit_water * (1.0 - passed))), 1.0);
+    return (lit_ground * passed) + (lit_water * (1.0 - passed));
+}
+
+[shader("fragment")]
+Shaded fragment_main(Ground ground) {
+    Shaded result;
+    result.colour = float4(saturate(shaded(ground)), 1.0);
+    result.depth = ground.position.z;
+    if (settings.tiling.z > 0.0 &&
+        ground.height <= level_with_sea * length(ground.from_eye)) {
+        bool seen;
+        const float sea = sea_depth(ground.drawn, seen);
+        if (seen) {
+            result.depth = min(result.depth, sea * (1.0 - behind_sea));
+        }
+    }
+    return result;
 }

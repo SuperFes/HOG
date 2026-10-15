@@ -14,6 +14,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -50,18 +51,13 @@ OceanView seen_from(double height, DVec3 forward, DVec3 camera_up, DVec3 sun) {
             .bend = hog::terrain::bend_from(eye, radius, 0.0)};
 }
 
-// Level ground two metres across, facing up.
-std::vector<PatchVertex> flat_patch() {
-    constexpr float spacing = 2.0F / patch_cells;
-    constexpr int middle = patch_cells / 2;
+// A patch's vertices, the grid's from `grid_vertex(i, j)` followed by its edges'.
+template <typename GridVertex>
+std::vector<PatchVertex> patch_of(GridVertex grid_vertex) {
     std::vector<PatchVertex> vertices;
     for (int j = 0; j < patch_side; ++j) {
         for (int i = 0; i < patch_side; ++i) {
-            vertices.push_back(
-                {.position = hog::Vec3{static_cast<float>(i - middle) * spacing,
-                                       static_cast<float>(j - middle) * spacing, 0.0F},
-                 .normal = {0.0F, 0.0F, 1.0F},
-                 .biome = Biome::Grassland});
+            vertices.push_back(grid_vertex(i, j));
         }
     }
     for (int edge = 0; edge < 4; ++edge) {
@@ -74,10 +70,47 @@ std::vector<PatchVertex> flat_patch() {
     return vertices;
 }
 
-// Draws over a black background the ground, if any is `ground` metres above sea level under the
-// eye, tinted below sea level if asked, and then, if asked, the sea's surface; reads it back.
-std::vector<std::uint8_t> draw(hog::render::Device& device, const OceanView& view,
-                               std::optional<double> ground, bool sea = true, bool tinted = false) {
+// Level ground two metres across, facing up.
+std::vector<PatchVertex> flat_patch() {
+    constexpr float spacing = 2.0F / patch_cells;
+    constexpr int middle = patch_cells / 2;
+    return patch_of([](int i, int j) {
+        return PatchVertex{.position = hog::Vec3{static_cast<float>(i - middle) * spacing,
+                                                 static_cast<float>(j - middle) * spacing, 0.0F},
+                           .normal = {0.0F, 0.0F, 1.0F},
+                           .biome = Biome::Grassland};
+    });
+}
+
+struct Patch {
+    WorldPosition origin;
+    std::vector<PatchVertex> vertices;
+};
+
+// Ground `height` metres above sea level all over, `across` metres square, its middle `along`
+// metres east over the ground from the top of the planet.
+Patch level_patch(double along, double across, double height) {
+    const double turned = along / radius;
+    const DVec3 middle = (up * std::cos(turned)) + (east * std::sin(turned));
+    const DVec3 eastward = (east * std::cos(turned)) - (up * std::sin(turned));
+    const DVec3 origin = middle * (radius + height);
+    const double spacing = across / patch_cells;
+    constexpr int half = patch_cells / 2;
+    return {.origin = WorldPosition{origin},
+            .vertices = patch_of([&](int i, int j) {
+                const DVec3 out = glm::normalize(
+                    (middle * radius) + (eastward * (static_cast<double>(i - half) * spacing)) +
+                    (north * (static_cast<double>(j - half) * spacing)));
+                return PatchVertex{.position = hog::Vec3{(out * (radius + height)) - origin},
+                                   .normal = hog::Vec3{out},
+                                   .biome = Biome::Grassland};
+            })};
+}
+
+// Draws over a black background the ground, if any, tinted below sea level if asked, and then, if
+// asked, the sea's surface; reads it back.
+std::vector<std::uint8_t> draw_patch(hog::render::Device& device, const OceanView& view,
+                                     const std::optional<Patch>& ground, bool sea, bool tinted) {
     auto ocean = hog::render::Ocean::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
     REQUIRE(ocean);
     std::vector<hog::terrain::MaterialImage> materials;
@@ -95,8 +128,8 @@ std::vector<std::uint8_t> draw(hog::render::Device& device, const OceanView& vie
     std::vector<hog::render::TerrainDraw> draws;
     if (ground) {
         const std::uint32_t slot = pool->acquire().value_or(1);
-        REQUIRE(pool->stage(0, slot, flat_patch()));
-        draws.push_back({.slot = slot, .origin = WorldPosition{up * (radius + *ground)}});
+        REQUIRE(pool->stage(0, slot, ground->vertices));
+        draws.push_back({.slot = slot, .origin = ground->origin});
     }
 
     auto target = hog::render::make_image(
@@ -130,6 +163,16 @@ std::vector<std::uint8_t> draw(hog::render::Device& device, const OceanView& vie
     auto pixels = hog::render::read_pixels(device, *target, hog::render::image_use::colour_target);
     REQUIRE(pixels);
     return std::move(pixels).value();
+}
+
+// As draw_patch, with level ground, if any, `ground` metres above sea level under the eye.
+std::vector<std::uint8_t> draw(hog::render::Device& device, const OceanView& view,
+                               std::optional<double> ground, bool sea = true, bool tinted = false) {
+    std::optional<Patch> patch;
+    if (ground) {
+        patch = Patch{.origin = WorldPosition{up * (radius + *ground)}, .vertices = flat_patch()};
+    }
+    return draw_patch(device, view, patch, sea, tinted);
 }
 
 Pixel pixel_at(const std::vector<std::uint8_t>& pixels, std::uint32_t x, std::uint32_t y) {
@@ -212,5 +255,54 @@ TEST_CASE("ground below sea level is lost in the water's colour the deeper it li
     CHECK(shallow[1] > deep[1] + 50);
     // Most of the way to the water's own colour, lit as the ground is.
     CHECK(deep[1] < 40);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("ground at sea level lies under the sea, wherever the eye stands", "[render][gpu]") {
+    const auto device = test_device();
+    // Walking height, looking east and down at ground from 20 to 40 metres off, the sun behind.
+    const auto view_from = [](double east_of_top) {
+        const double turned = east_of_top / radius;
+        const DVec3 here = (up * std::cos(turned)) + (east * std::sin(turned));
+        const DVec3 eastward = (east * std::cos(turned)) - (up * std::sin(turned));
+        OceanView view = seen_from(3.0, east, up, glm::normalize(up - east));
+        const WorldPosition eye{here * (radius + 3.0)};
+        const DVec3 forward = glm::normalize((eastward * 30.0) - (here * 3.0));
+        view.camera = {.eye = eye,
+                       .forward = forward,
+                       .up = glm::normalize(here - (forward * glm::dot(here, forward))),
+                       .vertical_fov = 0.2};
+        view.sun = glm::normalize(here - eastward);
+        view.bend = hog::terrain::bend_from(eye, radius, 0.0);
+        return view;
+    };
+
+    // Ground a centimetre up stays dry, and what is level with the sea, or as near as drawing can
+    // tell, lies under it.
+    for (const double height : {1e-2, 1e-4, 0.0, -1e-3}) {
+        const bool under = height < 1e-3;
+        for (const double stand : {0.0, 0.13, 0.41, 0.77}) {
+            const OceanView view = view_from(stand);
+            const Patch ground = level_patch(stand + 30.0, 20.0, height);
+            const auto dry = draw_patch(*device, view, ground, false, true);
+            const auto wet = draw_patch(*device, view, ground, true, true);
+            int seen = 0;
+            int covered = 0;
+            int unchanged = 0;
+            for (std::uint32_t y = 0; y < extent.height; ++y) {
+                for (std::uint32_t x = 0; x < extent.width; ++x) {
+                    if (pixel_at(dry, x, y) == background) {
+                        continue;
+                    }
+                    ++seen;
+                    covered += pixel_at(wet, x, y)[2] > pixel_at(dry, x, y)[2] + 40 ? 1 : 0;
+                    unchanged += pixel_at(wet, x, y) == pixel_at(dry, x, y) ? 1 : 0;
+                }
+            }
+            INFO("ground " << height << " m, standing " << stand << " m east");
+            CHECK(seen > 500);
+            CHECK((under ? covered : unchanged) == seen);
+        }
+    }
     CHECK(device->validation_errors() == 0);
 }
