@@ -51,18 +51,27 @@ constexpr std::array vertex_attributes{
                                       .binding = 0,
                                       .format = VK_FORMAT_R8_UINT,
                                       .offset = offsetof(PatchVertex, biome)}};
+constexpr VkDescriptorSetLayoutBinding binding(std::uint32_t at, VkDescriptorType type,
+                                               VkShaderStageFlags stages) noexcept {
+    return {.binding = at,
+            .descriptorType = type,
+            .descriptorCount = 1,
+            .stageFlags = stages,
+            .pImmutableSamplers = nullptr};
+}
+
 constexpr std::array descriptors{
-    VkDescriptorSetLayoutBinding{.binding = 0,
-                                 .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                                 .descriptorCount = 1,
-                                 .stageFlags =
-                                     VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                                 .pImmutableSamplers = nullptr},
-    VkDescriptorSetLayoutBinding{.binding = 1,
-                                 .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                                 .descriptorCount = 1,
-                                 .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-                                 .pImmutableSamplers = nullptr}};
+    binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT),
+    binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)};
+// Lit through the air, it reads the air too.
+constexpr std::array air_descriptors{
+    descriptors[0],
+    descriptors[1],
+    binding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT),
+    binding(3, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT),
+    binding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
+    binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)};
 
 // The near tile's size, the far one's, and 1 if ground below sea level is seen through water.
 struct Settings {
@@ -281,14 +290,19 @@ Result<Terrain> Terrain::create(Device& device, VkFormat colour_format, VkFormat
     }
     drawn.settings_ = std::move(settings_buffer).value();
 
-    auto pipeline = make_pipeline(device, {.spirv = shaders::terrain,
-                                           .bindings = vertex_bindings,
-                                           .attributes = vertex_attributes,
-                                           .colour_format = colour_format,
-                                           .depth_format = depth_format,
-                                           .cull = VK_CULL_MODE_BACK_BIT,
-                                           .push_constant_bytes = sizeof(Push),
-                                           .descriptors = descriptors});
+    drawn.air_ = look.air;
+    auto pipeline = make_pipeline(
+        device,
+        {.spirv = shaders::terrain,
+         .fragment_entry = look.air ? "fragment_air" : "fragment_main",
+         .bindings = vertex_bindings,
+         .attributes = vertex_attributes,
+         .colour_format = colour_format,
+         .depth_format = depth_format,
+         .cull = VK_CULL_MODE_BACK_BIT,
+         .push_constant_bytes = sizeof(Push),
+         .descriptors = look.air ? std::span<const VkDescriptorSetLayoutBinding>{air_descriptors}
+                                 : std::span<const VkDescriptorSetLayoutBinding>{descriptors}});
     if (!pipeline) {
         return std::unexpected(std::move(pipeline).error());
     }
@@ -315,6 +329,13 @@ void Terrain::draw(VkCommandBuffer commands, VkExtent2D extent, const TerrainPoo
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.handle());
     push_uniform_buffer(commands, pipeline_, 0, settings_.handle());
     push_sampled_image(commands, pipeline_, 1, materials_.view(), sampler_.handle());
+    if (air_) {
+        HOG_ASSERT(view.air.lighting != VK_NULL_HANDLE, "drawing ground lit by the air without it");
+        push_uniform_buffer(commands, pipeline_, 2, view.air.air);
+        push_uniform_buffer(commands, pipeline_, 3, view.air.lighting);
+        push_sampled_image(commands, pipeline_, 4, view.air.transmittance, view.air.sampler);
+        push_sampled_image(commands, pipeline_, 5, view.air.aerial, view.air.sampler);
+    }
     const std::array vertices{pool.vertices()};
     const VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(commands, 0, 1, vertices.data(), &offset);

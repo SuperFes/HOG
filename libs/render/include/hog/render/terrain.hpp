@@ -7,6 +7,7 @@
 #include <hog/render/memory.hpp>
 #include <hog/render/pipeline.hpp>
 #include <hog/render/sampler.hpp>
+#include <hog/render/sky.hpp>
 #include <hog/render/vulkan.hpp>
 #include <hog/terrain/bend.hpp>
 #include <hog/terrain/material.hpp>
@@ -78,11 +79,14 @@ private:
 struct TerrainView {
     Camera camera;
     DVec3 sun{1.0, 0.0, 0.0}; // unit, towards the sun
-    // How bright ground facing away from the sun stays, from 0 to 1.
+    // How bright ground facing away from the sun stays, from 0 to 1, unless lit through the air.
     double night_light = 0.0;
     // How the ground is bent as it's drawn; lit as it truly lies.
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     terrain::Bend bend = {};
+    // The frame's air, for ground lit through it.
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    AirBindings air = {};
 };
 
 // A patch held in a pool's slot.
@@ -105,6 +109,9 @@ struct TerrainLook {
     double tile = 4.0;
     // Whether ground below sea level is tinted by the water over it.
     bool sea = false;
+    // Whether it's lit by the sun and sky through the air, seen through the air and tone mapped,
+    // rather than lit by the sun alone.
+    bool air = false;
 };
 
 // Ground drawn from patches in a pool, each placed from the eye so floats keep their precision
@@ -133,6 +140,7 @@ private:
     Image materials_;
     Sampler sampler_;
     double period_ = 0.0; // metres over which the tiling repeats
+    bool air_ = false;
     std::array<Range, terrain::stitchings> stitchings_{};
 };
 

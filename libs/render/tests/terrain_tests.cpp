@@ -1,9 +1,12 @@
 #include "test_device.hpp"
 
+#include <hog/atmosphere/model.hpp>
+#include <hog/render/atmosphere.hpp>
 #include <hog/render/barrier.hpp>
 #include <hog/render/memory.hpp>
 #include <hog/render/readback.hpp>
 #include <hog/render/rendering.hpp>
+#include <hog/render/sky.hpp>
 #include <hog/render/terrain.hpp>
 #include <hog/terrain/bend.hpp>
 #include <hog/terrain/material.hpp>
@@ -18,6 +21,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <functional>
+#include <numbers>
 #include <span>
 #include <utility>
 #include <vector>
@@ -112,10 +117,12 @@ hog::render::TerrainView looking_down(DVec3 below, double height, DVec3 sun = {0
             .night_light = 0.5};
 }
 
-// Uploads what's staged, then draws over a black background and reads it back.
+// Uploads what's staged, records `before` if given, then draws over a black background and reads
+// it back.
 std::vector<std::uint8_t> draw(hog::render::Device& device, const hog::render::Terrain& terrain,
                                hog::render::TerrainPool& pool, std::span<const TerrainDraw> draws,
-                               const hog::render::TerrainView& view) {
+                               const hog::render::TerrainView& view,
+                               const std::function<void(VkCommandBuffer)>& before = {}) {
     auto target = hog::render::make_image(
         device, {.format = VK_FORMAT_R8G8B8A8_UNORM,
                  .extent = extent,
@@ -130,6 +137,9 @@ std::vector<std::uint8_t> draw(hog::render::Device& device, const hog::render::T
     REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
         namespace use = hog::render::image_use;
         REQUIRE(pool.record_uploads(commands, 0));
+        if (before) {
+            before(commands);
+        }
         hog::render::transition(commands, target->handle(), VK_IMAGE_ASPECT_COLOR_BIT, use::discard,
                                 use::colour_target);
         hog::render::transition(commands, depth->handle(), VK_IMAGE_ASPECT_DEPTH_BIT, use::discard,
@@ -217,6 +227,91 @@ double row_of(const hog::render::Camera& camera, DVec3 from_eye) {
     const glm::vec4 clip =
         hog::render::view_projection(camera, 1.0) * glm::vec4{hog::Vec3{from_eye}, 1.0F};
     return (static_cast<double>(clip.y / clip.w) + 1.0) / 2.0 * extent.height;
+}
+
+constexpr double earth = 6'371'000.0;
+
+// Grey all over.
+std::vector<hog::terrain::MaterialImage> grey_materials() {
+    return {static_cast<std::size_t>(hog::planet::biome_count),
+            hog::terrain::material_image({.colour = DVec3{0.5}}, 64)};
+}
+
+DVec3 towards(double elevation) {
+    const double radians = elevation * std::numbers::pi / 180.0;
+    return {std::cos(radians), 0.0, std::sin(radians)};
+}
+
+// Grey ground on top of an Earth-sized planet seen straight down from `height`, lit through the
+// air as if it faced `facing`, and the middle pixel's colour as the CPU model has it.
+struct ThroughAir {
+    Pixel drawn;
+    DVec3 expected;
+};
+
+ThroughAir through_air(hog::render::Device& device, double height, DVec3 sun,
+                       DVec3 facing = {0.0, 0.0, 1.0}) {
+    constexpr double exposure = 10.0;
+    auto terrain =
+        hog::render::Terrain::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT,
+                                     {.materials = grey_materials(), .air = true});
+    REQUIRE(terrain);
+    auto atmosphere = hog::render::Atmosphere::create(device);
+    REQUIRE(atmosphere);
+    auto sky = hog::render::Sky::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
+    REQUIRE(sky);
+    auto pool = make_pool(device, {});
+    const std::uint32_t slot = pool.acquire().value_or(1);
+    std::vector<PatchVertex> patch = flat_patch(static_cast<float>(height) / patch_cells * 4.0F);
+    for (PatchVertex& vertex : patch) {
+        vertex.normal = hog::Vec3{facing};
+    }
+    REQUIRE(pool.stage(0, slot, patch));
+
+    const DVec3 top{0.0, 0.0, earth};
+    const hog::terrain::Bend bend{
+        .up = {0.0, 0.0, 1.0}, .eye_height = height, .radius = earth, .faked = earth};
+    const hog::atmosphere::Model model;
+    const double scale = hog::render::air_scale(model.air(), bend);
+    const DVec3 sky_light = model.sky_irradiance(height * scale, sun);
+    hog::render::TerrainView view = looking_down(top, height, sun);
+    view.bend = bend;
+    view.air = sky->bindings(0, *atmosphere);
+    const hog::render::SkyView seen{.camera = view.camera,
+                                    .sun = sun,
+                                    .bend = bend,
+                                    .exposure = exposure,
+                                    .sky_light = sky_light};
+    const std::array draws{TerrainDraw{.slot = slot, .origin = WorldPosition{top}}};
+    const auto pixels = draw(device, *terrain, pool, draws, view, [&](VkCommandBuffer commands) {
+        CHECK(sky->record_frame(commands, extent, 0, *atmosphere, seen));
+    });
+
+    const DVec3 on_ground =
+        (model.transmittance(0.0, sun.z) * std::max(glm::dot(facing, sun), 0.0)) +
+        (sky_light * (0.5 + (0.5 * facing.z)));
+    const DVec3 radiance = 0.5 * on_ground / std::numbers::pi;
+    const hog::atmosphere::Scattered between =
+        model.march(height * scale, {0.0, 0.0, -1.0}, sun, height * scale);
+    const double passed =
+        (between.transmittance.r + between.transmittance.g + between.transmittance.b) / 3.0;
+    const DVec3 seen_radiance = (radiance * passed) + between.light;
+    const DVec3 expected = 255.0 * (DVec3{1.0} - glm::exp(-seen_radiance * exposure));
+    return {.drawn = pixel_at(pixels, extent.width / 2, extent.height / 2), .expected = expected};
+}
+
+bool matches(const ThroughAir& seen, double counts) {
+    for (glm::length_t channel = 0; channel < 3; ++channel) {
+        if (std::abs(seen.drawn.at(static_cast<std::size_t>(channel)) - seen.expected[channel]) >
+            counts) {
+            return false;
+        }
+    }
+    return true;
+}
+
+double blueness(Pixel pixel) {
+    return static_cast<double>(pixel[2]) / std::max(1.0, static_cast<double>(pixel[0]));
 }
 
 } // namespace
@@ -466,5 +561,36 @@ TEST_CASE("biomes blend from one to the next across the ground between them", "[
     CHECK(pixel_at(pixels, 0, 32)[0] == 0);
     CHECK(pixel_at(pixels, extent.width - 1, 32)[0] > 120);
     CHECK(between >= 3);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("lit through the air, ground takes the sun and the sky and is seen through the haze",
+          "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    const ThroughAir near = through_air(*device, 200.0, towards(40.0));
+    const ThroughAir far = through_air(*device, 20'000.0, towards(40.0));
+    INFO("near " << int{near.drawn[0]} << ", " << int{near.drawn[1]} << ", " << int{near.drawn[2]}
+                 << " against " << near.expected.r << ", " << near.expected.g << ", "
+                 << near.expected.b);
+    INFO("far " << int{far.drawn[0]} << ", " << int{far.drawn[1]} << ", " << int{far.drawn[2]}
+                << " against " << far.expected.r << ", " << far.expected.g << ", "
+                << far.expected.b);
+    CHECK(matches(near, 4.0));
+    CHECK(matches(far, 6.0));
+    // Seen through more air, it's bluer.
+    CHECK(blueness(far.drawn) > blueness(near.drawn));
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("ground facing the setting sun is lit red", "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    const ThroughAir noon = through_air(*device, 200.0, towards(60.0), towards(60.0));
+    const ThroughAir setting = through_air(*device, 200.0, towards(3.0), towards(3.0));
+    INFO("noon " << int{noon.drawn[0]} << ", " << int{noon.drawn[1]} << ", " << int{noon.drawn[2]});
+    INFO("setting " << int{setting.drawn[0]} << ", " << int{setting.drawn[1]} << ", "
+                    << int{setting.drawn[2]});
+    CHECK(matches(setting, 4.0));
+    CHECK(blueness(noon.drawn) > 0.8);
+    CHECK(blueness(setting.drawn) < 0.7);
     CHECK(device->validation_errors() == 0);
 }

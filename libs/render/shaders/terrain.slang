@@ -1,4 +1,6 @@
+import atmosphere;
 import bend;
+import tone;
 
 struct Push {
     float4x4 clip_from_eye;
@@ -24,6 +26,11 @@ struct Settings {
 [[vk::binding(0, 0)]] ConstantBuffer<Settings> settings;
 // A layer per biome.
 [[vk::binding(1, 0)]] Sampler2DArray materials;
+// When lit through the air.
+[[vk::binding(2, 0)]] ConstantBuffer<Air> air;
+[[vk::binding(3, 0)]] ConstantBuffer<Lighting> lighting;
+[[vk::binding(4, 0)]] Sampler2D transmittance_table;
+[[vk::binding(5, 0)]] Sampler2DArray aerial_volume;
 
 struct Vertex {
     [[vk::location(0)]] float3 position; // metres from the patch's origin
@@ -36,7 +43,7 @@ struct Ground {
     float3 normal;
     float3 from_eye;
     float3 drawn; // from the eye, bent
-    float height; // above sea level, or 0 if not seen through water
+    float height; // above sea level
     // Each biome's share, four to a vector: all of one at a corner, blended across a triangle.
     float4 biomes[(biome_count + 3) / 4];
 };
@@ -66,8 +73,7 @@ Ground vertex_main(Vertex vertex) {
     ground.drawn = drawn;
     ground.normal = vertex.normal;
     ground.from_eye = from_eye;
-    ground.height =
-        settings.tiling.z > 0.0 ? height_above_sea(from_eye, push.bend_up, push.bend_radii.x) : 0.0;
+    ground.height = height_above_sea(from_eye, push.bend_up, push.bend_radii.x);
     const uint biome = min(vertex.biome, biome_count - 1);
     for (uint group = 0; group < (biome_count + 3) / 4; ++group) {
         ground.biomes[group] = float4(0.0);
@@ -146,38 +152,75 @@ struct Shaded {
     float depth : SV_DepthLessEqual;
 };
 
-float3 shaded(Ground ground) {
-    const float3 sun = push.sun.xyz;
-    const float night = push.sun.w;
-    const float3 normal = normalize(ground.normal);
-    const float3 lit_ground =
-        albedo(ground, normal) * (night + ((1.0 - night) * saturate(dot(normal, sun))));
-    const float under_sea = -ground.height;
+// Up from the planet's centre through the ground.
+float3 up_at(Ground ground) {
+    return normalize(ground.from_eye + (push.bend_up.xyz * (push.bend_radii.x + push.bend_up.w)));
+}
+
+// The ground's colour lit by `on_ground` facing its normal and `on_water` facing up, each times
+// pi, with water over it where it lies below the sea.
+float3 shaded(Ground ground, float3 normal, float3 on_ground, float3 on_water) {
+    const float3 lit_ground = albedo(ground, normal) * on_ground;
+    const float under_sea = settings.tiling.z > 0.0 ? -ground.height : 0.0;
     if (under_sea <= 0.0) {
         return lit_ground;
     }
 
     // Light down through the water and back up to the eye, the steeper the shorter.
-    const float3 up = normalize(ground.from_eye +
-                                (push.bend_up.xyz * (push.bend_radii.x + push.bend_up.w)));
-    const float looking_down = max(dot(-normalize(ground.from_eye), up), 0.1);
+    const float looking_down = max(dot(-normalize(ground.from_eye), up_at(ground)), 0.1);
     const float3 passed = exp(-water_absorbing * under_sea * (1.0 + (1.0 / looking_down)));
-    const float3 lit_water = water_colour * (night + ((1.0 - night) * saturate(dot(up, sun))));
-    return (lit_ground * passed) + (lit_water * (1.0 - passed));
+    return (lit_ground * passed) + (water_colour * on_water * (1.0 - passed));
+}
+
+// Ground at or within depth precision of sea level is put just behind the sea, which then wins.
+float depth_of(Ground ground) {
+    float depth = ground.position.z;
+    if (settings.tiling.z > 0.0 && ground.height <= level_with_sea * length(ground.from_eye)) {
+        bool seen;
+        const float sea = sea_depth(ground.drawn, seen);
+        if (seen) {
+            depth = min(depth, sea * (1.0 - behind_sea));
+        }
+    }
+    return depth;
 }
 
 [shader("fragment")]
 Shaded fragment_main(Ground ground) {
+    const float3 sun = push.sun.xyz;
+    const float night = push.sun.w;
+    const float3 normal = normalize(ground.normal);
+    const float3 on_ground = night + ((1.0 - night) * saturate(dot(normal, sun)));
+    const float3 on_water = night + ((1.0 - night) * saturate(dot(up_at(ground), sun)));
     Shaded result;
-    result.colour = float4(saturate(shaded(ground)), 1.0);
-    result.depth = ground.position.z;
-    if (settings.tiling.z > 0.0 &&
-        ground.height <= level_with_sea * length(ground.from_eye)) {
-        bool seen;
-        const float sea = sea_depth(ground.drawn, seen);
-        if (seen) {
-            result.depth = min(result.depth, sea * (1.0 - behind_sea));
-        }
-    }
+    result.colour = float4(saturate(shaded(ground, normal, on_ground, on_water)), 1.0);
+    result.depth = depth_of(ground);
+    return result;
+}
+
+// Lit by sunlight through the air at the ground's own height and the sky's light at the eye, seen
+// through the air between, and tone mapped.
+[shader("fragment")]
+Shaded fragment_air(Ground ground) {
+    const float3 sun = push.sun.xyz;
+    const float scale = lighting.sky_scale.w;
+    const float3 normal = normalize(ground.normal);
+    const float3 up = up_at(ground);
+    const float3 sunlight =
+        transmittance(air, transmittance_table, max(ground.height, 0.0) * scale, dot(up, sun));
+    const float3 sky = lighting.sky_scale.rgb;
+    const float3 on_ground =
+        (sunlight * saturate(dot(normal, sun))) + (sky * (0.5 + (0.5 * dot(normal, up))));
+    const float3 on_water = (sunlight * saturate(dot(up, sun))) + sky;
+    const float3 radiance = shaded(ground, normal, on_ground, on_water) / pi;
+
+    const float4 clip = mul(push.clip_from_eye, float4(ground.drawn, 1.0));
+    const float2 uv = ((clip.xy / clip.w) * 0.5) + 0.5;
+    const float4 between =
+        aerial_perspective(aerial_volume, uv, length(ground.drawn) * scale, lighting.reach.x);
+    Shaded result;
+    result.colour =
+        float4(tone_mapped((radiance * between.a) + between.rgb, lighting.sun_exposure.w), 1.0);
+    result.depth = depth_of(ground);
     return result;
 }
