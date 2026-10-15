@@ -49,6 +49,7 @@ add_library(hog_render
     src/readback.cpp
     src/rendering.cpp
     src/sampler.cpp
+    src/shader_watch.cpp
     src/sky.cpp
     src/streamed_image.cpp
     src/swapchain.cpp
@@ -69,7 +70,7 @@ target_link_libraries(hog_render
     PUBLIC hog::atmosphere hog::core hog::terrain volk::volk
     PRIVATE hog::planet vk-bootstrap::vk-bootstrap)
 hog_target_defaults(hog_render)
-hog_add_shaders(hog_render shaders/aerial.slang shaders/air_tables.slang shaders/billboard.slang shaders/glare.slang shaders/globe.slang shaders/ocean.slang shaders/sky.slang shaders/sky_view.slang
+hog_add_shaders(hog_render CATALOGUE shaders/aerial.slang shaders/air_tables.slang shaders/billboard.slang shaders/glare.slang shaders/globe.slang shaders/ocean.slang shaders/sky.slang shaders/sky_view.slang
                 shaders/terrain.slang)
 
 # A test device, for tests here and elsewhere that draw.
@@ -97,6 +98,7 @@ hog_add_tests(hog_render
     tests/orbit_tests.cpp
     tests/pipeline_tests.cpp
     tests/presenter_tests.cpp
+    tests/shader_watch_tests.cpp
     tests/sky_tests.cpp
     tests/streamed_image_tests.cpp
     tests/swapchain_tests.cpp
