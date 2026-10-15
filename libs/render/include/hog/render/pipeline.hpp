@@ -14,7 +14,8 @@ class Device;
 // How a pipeline's colour combines with what's already drawn.
 enum class Blend : std::uint8_t {
     None,
-    Alpha, // over what's there, by the colour's alpha
+    Alpha,         // over what's there, by the colour's alpha
+    Premultiplied, // added to what's there, which is kept by one less the colour's alpha
     Add,
 };
 

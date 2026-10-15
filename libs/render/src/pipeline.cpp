@@ -51,6 +51,7 @@ VkBlendFactor kept_colour(Blend blend) noexcept {
     case Blend::None:
         return VK_BLEND_FACTOR_ZERO;
     case Blend::Alpha:
+    case Blend::Premultiplied:
         return VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
     case Blend::Add:
         return VK_BLEND_FACTOR_ONE;

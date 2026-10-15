@@ -39,6 +39,7 @@ add_library(hog_render
     src/device.cpp
     src/globe.cpp
     src/memory.cpp
+    src/ocean.cpp
     src/orbit.cpp
     src/pipeline.cpp
     src/presenter.cpp
@@ -64,7 +65,8 @@ target_link_libraries(hog_render
     PUBLIC hog::core hog::terrain volk::volk
     PRIVATE hog::planet vk-bootstrap::vk-bootstrap)
 hog_target_defaults(hog_render)
-hog_add_shaders(hog_render shaders/billboard.slang shaders/globe.slang shaders/terrain.slang)
+hog_add_shaders(hog_render shaders/billboard.slang shaders/globe.slang shaders/ocean.slang
+                shaders/terrain.slang)
 
 hog_add_tests(hog_render
     tests/barrier_tests.cpp
@@ -73,6 +75,7 @@ hog_add_tests(hog_render
     tests/cube_sphere_tests.cpp
     tests/device_tests.cpp
     tests/globe_tests.cpp
+    tests/ocean_tests.cpp
     tests/orbit_tests.cpp
     tests/pipeline_tests.cpp
     tests/presenter_tests.cpp
