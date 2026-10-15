@@ -25,10 +25,32 @@ struct Glow {
     float2 clip;
 };
 
-// As glare.hpp's eye_spread.
+// As glare.hpp's eye_spread, eye_spread_streaked and streaks.
 float eye_spread(float degrees) {
     const float near = degrees + 0.02;
     return ((0.478 * 20.91) / (near * near * near)) + ((0.138 * 72.37) / (near * near));
+}
+
+float eye_spread_streaked(float degrees) {
+    const float near = degrees + 0.02;
+    return (0.478 * 20.91) / (near * near * near) * exp(-degrees / 10.0);
+}
+
+static const uint streak_count = 96;
+static const float streak_width = 0.12;
+static const float streaked = 0.8;
+
+float stride(uint streak, uint step) {
+    return (float((streak * step) % streak_count) + 0.5) / float(streak_count);
+}
+
+float streaks(float turn) {
+    const float at = frac(turn) * float(streak_count);
+    const uint streak = uint(at) % streak_count;
+    const float brightness = 5.0 * pow(stride(streak, 59), 4.0);
+    const float across = (frac(at) - (0.5 + (0.6 * (stride(streak, 37) - 0.5)))) / streak_width;
+    return (1.0 - streaked) +
+           (streaked * brightness * exp(-across * across) / (streak_width * sqrt(3.14159265)));
 }
 
 bool seen_at(float2 pixel, uint2 size) {
@@ -70,7 +92,14 @@ float4 fragment_main(Glow glow) : SV_Target {
     const float3 view = normalize(far.xyz / far.w);
     // Exact close to the light, where acos of the dot isn't.
     const float angle = 2.0 * asin(min(length(view - push.towards_exposure.xyz) * 0.5, 1.0));
-    const float3 glare =
-        push.irradiance.rgb * (seen() * eye_spread(angle * degrees_per_radian));
+    const float degrees = angle * degrees_per_radian;
+    float spread = eye_spread(degrees);
+    if (push.disc.w != 0.0) {
+        // Streaks are in the eye, so they're laid round the light as it is in the picture.
+        const float2 away = glow.position.xy - push.disc.xy;
+        const float turn = atan2(away.y, away.x) / 6.2831853;
+        spread += eye_spread_streaked(degrees) * (streaks(turn) - 1.0);
+    }
+    const float3 glare = push.irradiance.rgb * (seen() * spread);
     return float4(tone_mapped(glare, push.towards_exposure.w), 0.0);
 }

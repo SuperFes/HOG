@@ -11,6 +11,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <glm/gtc/packing.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -22,8 +23,10 @@
 using Catch::Matchers::WithinRel;
 using hog::DVec3;
 using hog::render::eye_spread;
+using hog::render::eye_spread_streaked;
 using hog::render::Glare;
 using hog::render::GlareView;
+using hog::render::streaks;
 using hog::render::testing::test_device;
 
 namespace {
@@ -53,6 +56,23 @@ DVec3 through(const GlareView& view, std::uint32_t x, std::uint32_t y) {
         eye_from_clip * glm::dvec4{((x + 0.5) * 2.0 / extent.width) - 1.0,
                                    ((y + 0.5) * 2.0 / extent.height) - 1.0, 1.0, 1.0};
     return glm::normalize(DVec3{far} / far.w);
+}
+
+double angle_at(const GlareView& view, std::uint32_t x, std::uint32_t y) {
+    return std::acos(std::min(glm::dot(through(view, x, y), view.towards), 1.0)) / degree;
+}
+
+// The radiance the glare should be drawn with at a pixel, for view_of's irradiance.
+double expected(const GlareView& view, std::uint32_t x, std::uint32_t y) {
+    const double aspect = static_cast<double>(extent.width) / extent.height;
+    const glm::dvec4 clip = glm::dmat4{hog::render::view_projection(view.camera, aspect)} *
+                            glm::dvec4{view.towards, 0.0};
+    const hog::DVec2 light =
+        ((hog::DVec2{clip} / clip.w) * 0.5 + 0.5) * hog::DVec2{extent.width, extent.height};
+    const hog::DVec2 away = hog::DVec2{x + 0.5, y + 0.5} - light;
+    const double turn = std::atan2(away.y, away.x) / (2.0 * std::numbers::pi);
+    const double angle = angle_at(view, x, y);
+    return 0.01 * (eye_spread(angle) + (eye_spread_streaked(angle) * (streaks(turn) - 1.0)));
 }
 
 // The radiance each pixel's red was tone mapped from.
@@ -156,23 +176,56 @@ TEST_CASE("the eye spreads light as disability glare does, about a sixth of it p
     CHECK(spread_between(0.0, 180.0) < 1.0);
 }
 
-TEST_CASE("the glare round a light is as the eye spreads it", "[render][gpu][glare]") {
+TEST_CASE("streaks in the glare are fine and bright, and average out", "[render][glare]") {
+    constexpr int steps = 100'000;
+    double sum = 0.0;
+    double most = 0.0;
+    double least = 1.0;
+    for (int step = 0; step < steps; ++step) {
+        const double streaked = streaks((step + 0.5) / steps);
+        sum += streaked;
+        most = std::max(most, streaked);
+        least = std::min(least, streaked);
+    }
+    CHECK_THAT(sum / steps, WithinRel(1.0, 0.01));
+    CHECK(most > 10.0);
+    CHECK(least < 0.3);
+    // Any turn, however many times round.
+    CHECK_THAT(streaks(2.3), WithinRel(streaks(0.3), 1e-9));
+    CHECK_THAT(streaks(-0.7), WithinRel(streaks(0.3), 1e-9));
+}
+
+TEST_CASE("the glare round a light is as the eye spreads it, streaked", "[render][gpu][glare]") {
     const auto device = test_device();
     const GlareView view = view_of(10.0);
     const Picture picture = draw(*device, view);
     int checked = 0;
     for (std::uint32_t y = 0; y < extent.height; y += 3) {
         for (std::uint32_t x = 0; x < extent.width; x += 3) {
-            const double angle = std::acos(glm::dot(through(view, x, y), view.towards)) / degree;
+            const double angle = angle_at(view, x, y);
             if (angle < 1.0) {
                 continue;
             }
             INFO(x << ", " << y << ": " << angle << " degrees");
-            CHECK_THAT(at(picture, x, y), WithinRel(0.01 * eye_spread(angle), 0.02));
+            CHECK_THAT(at(picture, x, y), WithinRel(expected(view, x, y), 0.02));
             ++checked;
         }
     }
     CHECK(checked > 100);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("the streaks are fixed to the picture, not the sky", "[render][gpu][glare]") {
+    const auto device = test_device();
+    const GlareView upright = view_of(0.0);
+    GlareView rolled = upright;
+    rolled.camera.up = glm::normalize(DVec3{0.0, -1.0, 1.0});
+    const Picture first = draw(*device, upright);
+    const Picture second = draw(*device, rolled);
+    for (std::size_t pixel = 0; pixel < first.size(); pixel += 7) {
+        INFO("pixel " << pixel);
+        CHECK_THAT(second[pixel], WithinRel(first[pixel], 1e-3));
+    }
     CHECK(device->validation_errors() == 0);
 }
 
@@ -202,8 +255,7 @@ TEST_CASE("a light just out of view glares in from the edge", "[render][gpu][gla
         draw(*device, view, VkRect2D{.offset = {.x = 0, .y = 0}, .extent = extent});
     const std::uint32_t edge = extent.width - 1;
     const std::uint32_t middle = extent.height / 2;
-    const double angle = std::acos(glm::dot(through(view, edge, middle), view.towards)) / degree;
-    CHECK_THAT(at(picture, edge, middle), WithinRel(0.01 * eye_spread(angle), 0.02));
+    CHECK_THAT(at(picture, edge, middle), WithinRel(expected(view, edge, middle), 0.02));
     CHECK(at(picture, edge, middle) > at(picture, 0, middle));
     CHECK(device->validation_errors() == 0);
 }

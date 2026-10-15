@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cmath>
+#include <numbers>
 #include <utility>
 
 namespace hog::render {
@@ -30,6 +31,29 @@ constexpr std::array bindings{
 double eye_spread(double degrees) noexcept {
     const double near = degrees + 0.02;
     return ((0.478 * 20.91) / (near * near * near)) + ((0.138 * 72.37) / (near * near));
+}
+
+double eye_spread_streaked(double degrees) noexcept {
+    constexpr double reach = 10.0; // degrees
+    const double near = degrees + 0.02;
+    return (0.478 * 20.91) / (near * near * near) * std::exp(-degrees / reach);
+}
+
+double streaks(double turn) noexcept {
+    // A streak each of an even share of the turn, set off within it and bright to a degree by
+    // strides through them, which spread both evenly so they average out.
+    constexpr int count = 96;
+    constexpr double width = 0.12; // of a share, a streak's
+    constexpr double streaked = 0.8;
+    const double at = (turn - std::floor(turn)) * count;
+    const int streak = static_cast<int>(at) % count;
+    const auto stride = [&](int step) {
+        return (static_cast<double>((streak * step) % count) + 0.5) / count;
+    };
+    const double brightness = 5.0 * std::pow(stride(59), 4.0);
+    const double across = (at - std::floor(at) - (0.5 + (0.6 * (stride(37) - 0.5)))) / width;
+    return (1.0 - streaked) + (streaked * brightness * std::exp(-across * across) /
+                               (width * std::sqrt(std::numbers::pi)));
 }
 
 Result<Glare> Glare::create(const Device& device, VkFormat colour_format) {

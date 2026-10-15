@@ -27,9 +27,16 @@ struct GlareView {
 // Of light from a point reaching the eye, the share per steradian scattered within the eye to
 // `degrees` from it (Spencer et al. 1995, less the central peak, which falls within the disc).
 [[nodiscard]] double eye_spread(double degrees) noexcept;
+// Of that, the share in streaks: close in, and fading out within ten degrees or so.
+[[nodiscard]] double eye_spread_streaked(double degrees) noexcept;
 
-// Light scattered within the eye round a bright light, as a glow fading over tens of degrees,
-// laid over what's drawn. It's hidden as much as the light's disc is by anything drawn in front.
+// How much brighter than its average the streaked glare is, at a `turn` (0 to 1, from the right
+// round through down) about the light in the picture: fine streaks, averaging 1 round the turn.
+[[nodiscard]] double streaks(double turn) noexcept;
+
+// Light scattered within the eye round a bright light, as a glow fading over tens of degrees and
+// streaked close in, laid over what's drawn. It's hidden as much as the light's disc is by anything
+// drawn in front.
 class Glare {
 public:
     [[nodiscard]] static Result<Glare> create(const Device& device, VkFormat colour_format);
