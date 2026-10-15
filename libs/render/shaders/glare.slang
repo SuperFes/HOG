@@ -23,6 +23,7 @@ static const float ring_share = 0.7; // of the disc's radius
 struct Glow {
     float4 position : SV_Position;
     float2 clip;
+    nointerpolation float seen;
 };
 
 // As glare.hpp's eye_spread, eye_spread_streaked and streaks.
@@ -76,13 +77,15 @@ float seen() {
     return seen / float(ring_points + 1);
 }
 
-// A triangle covering the whole picture.
+// A triangle covering the whole picture, with how much of the light is seen worked out once for
+// it rather than for every pixel.
 [shader("vertex")]
 Glow vertex_main(uint id: SV_VertexID) {
     const float2 clip = (float2((id << 1) & 2, id & 2) * 2.0) - 1.0;
     Glow glow;
     glow.position = float4(clip, 0.0, 1.0);
     glow.clip = clip;
+    glow.seen = seen();
     return glow;
 }
 
@@ -100,6 +103,6 @@ float4 fragment_main(Glow glow) : SV_Target {
         const float turn = atan2(away.y, away.x) / 6.2831853;
         spread += eye_spread_streaked(degrees) * (streaks(turn) - 1.0);
     }
-    const float3 glare = push.irradiance.rgb * (seen() * spread);
+    const float3 glare = push.irradiance.rgb * (glow.seen * spread);
     return float4(tone_mapped(glare, push.towards_exposure.w), 0.0);
 }
