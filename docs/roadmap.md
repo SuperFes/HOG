@@ -201,7 +201,7 @@ This phase builds a client that flies over the generated planet with a real sky.
 - [x] Basic ocean surface
 - [x] Sea drawn over ground at and just below sea level, so shorelines don't flicker
 - [x] Hillaire atmosphere and sun lighting driven by planet time
-- [ ] The sun as people see it: a glow and glare round its disc, rather than the bare disc a camera records
+- [x] The sun as people see it: a glow and glare round its disc, rather than the bare disc a camera records
 
 **Tests**
 
