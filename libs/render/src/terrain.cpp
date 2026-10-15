@@ -26,8 +26,13 @@ constexpr VkDeviceSize patch_bytes = VkDeviceSize{patch_vertex_count} * sizeof(P
 struct Push {
     Mat4 clip_from_eye;
     glm::vec4 sun;
+    glm::vec4 bend_up;
+    glm::vec4 bend_radii;
     glm::vec4 origin;
 };
+
+// Within what every device can push.
+static_assert(sizeof(Push) <= 128);
 
 constexpr std::array vertex_bindings{VkVertexInputBindingDescription{
     .binding = 0, .stride = sizeof(PatchVertex), .inputRate = VK_VERTEX_INPUT_RATE_VERTEX}};
@@ -235,6 +240,9 @@ void Terrain::draw(VkCommandBuffer commands, VkExtent2D extent, const TerrainPoo
     const double aspect = static_cast<double>(extent.width) / static_cast<double>(extent.height);
     Push push{.clip_from_eye = Mat4{view_projection(view.camera, aspect)},
               .sun = glm::vec4{Vec3{view.sun}, static_cast<float>(view.night_light)},
+              .bend_up = glm::vec4{Vec3{view.bend.up}, static_cast<float>(view.bend.eye_height)},
+              .bend_radii = glm::vec4{static_cast<float>(view.bend.radius),
+                                      static_cast<float>(view.bend.faked), 0.0F, 0.0F},
               .origin = {}};
     constexpr VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 

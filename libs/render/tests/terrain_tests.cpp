@@ -5,12 +5,15 @@
 #include <hog/render/readback.hpp>
 #include <hog/render/rendering.hpp>
 #include <hog/render/terrain.hpp>
+#include <hog/terrain/bend.hpp>
 #include <hog/terrain/stitching.hpp>
 #include <hog/testing/assertion_guard.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -163,6 +166,29 @@ std::vector<std::uint8_t> one_patch(hog::render::Device& device, DVec3 origin,
     return draw(device, terrain, pool, draws, looking_down(origin, 4.0, sun));
 }
 
+// The middle row of what's drawn over the background.
+double middle_row(const std::vector<std::uint8_t>& pixels) {
+    std::uint32_t top = extent.height;
+    std::uint32_t bottom = 0;
+    for (std::uint32_t y = 0; y < extent.height; ++y) {
+        for (std::uint32_t x = 0; x < extent.width; ++x) {
+            if (pixel_at(pixels, x, y) != background) {
+                top = std::min(top, y);
+                bottom = std::max(bottom, y);
+            }
+        }
+    }
+    REQUIRE(top <= bottom);
+    return (static_cast<double>(top + bottom) / 2.0) + 0.5;
+}
+
+// The row an offset from the eye is drawn at.
+double row_of(const hog::render::Camera& camera, DVec3 from_eye) {
+    const glm::vec4 clip =
+        hog::render::view_projection(camera, 1.0) * glm::vec4{hog::Vec3{from_eye}, 1.0F};
+    return (static_cast<double>(clip.y / clip.w) + 1.0) / 2.0 * extent.height;
+}
+
 } // namespace
 
 TEST_CASE("a terrain pool hands out each slot once, and takes them back", "[render][gpu]") {
@@ -294,5 +320,67 @@ TEST_CASE("skirts hide the gaps beside a neighbour left unstitched", "[render][g
     };
     CHECK(background_pixels(seam(0.0F)) > 0);
     CHECK(background_pixels(seam(4.0F * fine)) == 0);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("bent, ground past the true horizon is drawn where the bend puts it", "[render][gpu]") {
+    const auto device = test_device();
+    const auto terrain = make_terrain(*device);
+    constexpr double radius = 115'000.0;
+    constexpr double eye_height = 3.0;
+    constexpr double along = 6'000.0;
+    // A wall 60 m square, standing on the ground `along` metres east and facing back west.
+    std::vector<PatchVertex> wall = flat_patch(60.0F / patch_cells);
+    for (PatchVertex& vertex : wall) {
+        vertex.position = {0.0F, -vertex.position.x, vertex.position.y};
+        vertex.normal = {-1.0F, 0.0F, 0.0F};
+    }
+    auto pool = make_pool(*device, {});
+    REQUIRE(pool.acquire());
+    REQUIRE(pool.stage(0, 0, wall));
+    const DVec3 foot = radius * DVec3{std::sin(along / radius), 0.0, std::cos(along / radius)};
+    const std::array draws{TerrainDraw{.slot = 0, .origin = WorldPosition{foot}}};
+
+    // Looking east along the ground, 0.1 radians high.
+    const WorldPosition eye{DVec3{0.0, 0.0, radius + eye_height}};
+    hog::render::TerrainView view{.camera = {.eye = eye,
+                                             .forward = {1.0, 0.0, 0.0},
+                                             .up = {0.0, 0.0, 1.0},
+                                             .vertical_fov = 0.1,
+                                             .near_plane = 0.1},
+                                  .sun = {-1.0, 0.0, 0.0},
+                                  .night_light = 0.5};
+    const DVec3 from_eye = foot - eye.metres();
+    const double true_horizon =
+        row_of(view.camera, {1.0, 0.0, -std::tan(std::acos(radius / (radius + eye_height)))});
+
+    const double unbent = middle_row(draw(*device, terrain, pool, draws, view));
+    CHECK(std::abs(unbent - row_of(view.camera, from_eye)) < 1.0);
+    CHECK(unbent > true_horizon + 5.0);
+
+    view.bend = hog::terrain::bend_from(eye, radius, 0.0);
+    const double bent = middle_row(draw(*device, terrain, pool, draws, view));
+    CHECK(std::abs(bent - row_of(view.camera, hog::terrain::bent(view.bend, from_eye))) < 1.0);
+    CHECK(bent < true_horizon - 2.0);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("high up, the ground is drawn unbent", "[render][gpu]") {
+    const auto device = test_device();
+    const auto terrain = make_terrain(*device);
+    constexpr double radius = 115'000.0;
+    auto pool = make_pool(*device, {});
+    REQUIRE(pool.acquire());
+    REQUIRE(pool.stage(0, 0, flat_patch(2'000.0F / patch_cells)));
+    // Off to one side of straight down, where bending would move it.
+    const DVec3 below{0.0, 0.0, radius};
+    const std::array draws{
+        TerrainDraw{.slot = 0, .origin = WorldPosition{below + DVec3{4'000.0, 0.0, -70.0}}}};
+    hog::render::TerrainView view = looking_down(below, 20'000.0);
+    const auto unbent = draw(*device, terrain, pool, draws, view);
+    view.bend = hog::terrain::bend_from(view.camera.eye, radius, 0.0);
+    CHECK(view.bend.faked == radius);
+    CHECK(draw(*device, terrain, pool, draws, view) == unbent);
+    CHECK(background_pixels(unbent) > 0);
     CHECK(device->validation_errors() == 0);
 }

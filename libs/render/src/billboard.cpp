@@ -66,22 +66,25 @@ Result<Billboard> Billboard::create(Device& device, VkFormat colour_format, VkFo
 }
 
 void Billboard::draw(VkCommandBuffer commands, VkExtent2D extent, const Camera& camera,
-                     const Standing& standing) const noexcept {
+                     const Standing& standing, const terrain::Bend& bend) const noexcept {
     if (extent.width == 0 || extent.height == 0) {
         return;
     }
-    const DVec3 feet = standing.feet - camera.eye;
+    const DVec3 unbent_feet = standing.feet - camera.eye;
+    const DVec3 feet = terrain::bent(bend, unbent_feet);
+    const DVec3 tall = terrain::bent(bend, unbent_feet + (standing.up * standing.height)) - feet;
+    const DVec3 up = glm::normalize(tall);
     // Facing the eye across the ground, or the way the eye looks when straight above.
-    DVec3 towards = -feet - (standing.up * glm::dot(-feet, standing.up));
+    DVec3 towards = -feet - (up * glm::dot(-feet, up));
     if (glm::length(towards) < 1e-6) {
         towards = -camera.forward;
     }
-    const DVec3 right = glm::normalize(glm::cross(standing.up, towards));
+    const DVec3 right = glm::normalize(glm::cross(up, towards));
     const double aspect = static_cast<double>(extent.width) / static_cast<double>(extent.height);
     const Push push{.clip_from_eye = Mat4{view_projection(camera, aspect)},
                     .feet = glm::vec4{Vec3{feet}, 0.0F},
                     .right = glm::vec4{Vec3{right * (standing.height * aspect_ / 2.0)}, 0.0F},
-                    .up = glm::vec4{Vec3{standing.up * standing.height}, 0.0F}};
+                    .up = glm::vec4{Vec3{tall}, 0.0F}};
 
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.handle());
     push_sampled_image(commands, pipeline_, 0, picture_.image().view(), sampler_.handle());

@@ -7,6 +7,7 @@
 #include <hog/render/memory.hpp>
 #include <hog/render/pipeline.hpp>
 #include <hog/render/vulkan.hpp>
+#include <hog/terrain/bend.hpp>
 #include <hog/terrain/patch.hpp>
 #include <hog/terrain/stitching.hpp>
 
@@ -77,6 +78,9 @@ struct TerrainView {
     DVec3 sun{1.0, 0.0, 0.0}; // unit, towards the sun
     // How bright ground facing away from the sun stays, from 0 to 1.
     double night_light = 0.0;
+    // How the ground is bent as it's drawn; lit as it truly lies.
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    terrain::Bend bend = {};
 };
 
 // A patch held in a pool's slot.

@@ -19,6 +19,7 @@
 #include <hog/render/rendering.hpp>
 #include <hog/render/terrain.hpp>
 #include <hog/terrain/baker.hpp>
+#include <hog/terrain/bend.hpp>
 #include <hog/terrain/selection.hpp>
 #include <hog/terrain/stream.hpp>
 #include <hog/window/window.hpp>
@@ -207,8 +208,8 @@ Result<void> save_capture(const render::Device& device, const render::Buffer& bu
 // Draws a frame of the ground from the flight, saving it to `capture` if given; false when
 // there's nothing to draw into.
 Result<bool> draw(Ground& ground, const client::Flight& flight, double planet_radius,
-                  const render::Standing& companion, const render::Device& device,
-                  render::Presenter& presenter, SDL_Window* window,
+                  const render::Standing& companion, const terrain::Bend& bend,
+                  const render::Device& device, render::Presenter& presenter, SDL_Window* window,
                   const std::optional<std::filesystem::path>& capture) {
     auto begun = presenter.begin(window::drawable(window));
     if (!begun) {
@@ -247,10 +248,11 @@ Result<bool> draw(Ground& ground, const client::Flight& flight, double planet_ra
                             {.view = (*depth)->view()});
     render::TerrainView view = ground.lighting;
     view.camera = camera;
+    view.bend = bend;
     ground.terrain.draw(frame.commands, frame.extent, ground.pool,
                         ground.slots.draws(streamed.drawn), view);
     if (ground.companion) {
-        ground.companion->draw(frame.commands, frame.extent, camera, companion);
+        ground.companion->draw(frame.commands, frame.extent, camera, companion, bend);
     }
     vkCmdEndRendering(frame.commands);
 
@@ -330,7 +332,9 @@ Result<void> fly(Ground& ground, const planet::World& world, client::Flight flig
                                        ground_under(world, WorldPosition{companion_up * radius})),
             .up = companion_up,
             .height = companion_height};
-        const auto drawn = draw(ground, flight, radius, companion, device, presenter, window,
+        const terrain::Bend bend =
+            terrain::bend_from(flight.eye, radius, ground_under(world, flight.eye));
+        const auto drawn = draw(ground, flight, radius, companion, bend, device, presenter, window,
                                 controls.quit ? options.capture : std::nullopt);
         if (!drawn) {
             return std::unexpected(drawn.error());

@@ -7,6 +7,7 @@
 #include <hog/render/sampler.hpp>
 #include <hog/render/streamed_image.hpp>
 #include <hog/render/vulkan.hpp>
+#include <hog/terrain/bend.hpp>
 
 #include <cstddef>
 #include <span>
@@ -33,9 +34,9 @@ public:
                                                   std::span<const std::byte> texels);
 
     // Records drawing into the colour and depth images being rendered to, of `extent`, as wide
-    // as the picture is for its height.
+    // as the picture is for its height, bent as the ground under it is.
     void draw(VkCommandBuffer commands, VkExtent2D extent, const Camera& camera,
-              const Standing& standing) const noexcept;
+              const Standing& standing, const terrain::Bend& bend = {}) const noexcept;
 
 private:
     Billboard() = default;
