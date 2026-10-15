@@ -135,6 +135,9 @@ options:
   --validate             check Vulkan use with its validation layer, failing on errors;
                          on by default in debug builds
   --no-validate          don't
+  --reload-shaders       compile shaders again and draw with them as they're edited;
+                         on by default in debug builds
+  --no-reload-shaders    don't
   -h, --help             show this help
 
 flying:
@@ -184,6 +187,14 @@ Result<Options> parse_options(std::span<const std::string_view> arguments) {
         }
         if (argument == "--no-validate") {
             options.validate = false;
+            continue;
+        }
+        if (argument == "--reload-shaders") {
+            options.reload_shaders = true;
+            continue;
+        }
+        if (argument == "--no-reload-shaders") {
+            options.reload_shaders = false;
             continue;
         }
         if (i + 1 == arguments.size()) {

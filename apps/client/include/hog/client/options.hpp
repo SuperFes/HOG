@@ -39,6 +39,8 @@ struct Options {
     // run, also for tests. Debug builds validate unless told not to.
     bool software = false;
     bool validate = debug_build;
+    // Shaders compiled again and drawn with as they're edited, by debug builds unless told not to.
+    bool reload_shaders = debug_build;
     bool help = false;
 };
 

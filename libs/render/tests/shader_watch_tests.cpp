@@ -1,3 +1,7 @@
+#include "test_device.hpp"
+
+#include <hog/render/device.hpp>
+#include <hog/render/pipeline.hpp>
 #include <hog/render/shader_watch.hpp>
 #include <hog/shaders/fill.hpp>
 #include <hog/testing/temporary_directory.hpp>
@@ -197,4 +201,27 @@ TEST_CASE("a shader changed since it was built is compiled again at once",
     const auto changed = settle(watch);
     CHECK(changed.failed.empty());
     CHECK(changed.reloaded.size() == 1);
+}
+
+TEST_CASE("the pipelines of a shader compiled again are made again",
+          "[render][gpu][shader_watch]") {
+    const auto device = hog::render::testing::test_device();
+    constexpr std::uint32_t fill_push_bytes = 20;
+    const auto pipeline = hog::render::make_pipeline(
+        *device, {.spirv = hog::shaders::fill, .push_constant_bytes = fill_push_bytes});
+    REQUIRE(pipeline);
+    auto* const was = pipeline->handle();
+    const Shine shader;
+    ShaderWatch watch{shader.catalogue()};
+    write(shader.source, std::string{shine} + "\n// A comment\n");
+    std::size_t remade = 0;
+    const auto give_up = std::chrono::steady_clock::now() + std::chrono::seconds{60};
+    do {
+        remade += hog::render::reload_changed(watch, device->pipelines());
+        std::this_thread::sleep_for(std::chrono::milliseconds{20});
+    } while (watch.compiling() && std::chrono::steady_clock::now() < give_up);
+    remade += hog::render::reload_changed(watch, device->pipelines());
+    CHECK(remade >= 1);
+    CHECK(pipeline->handle() != was);
+    CHECK(device->validation_errors() == 0);
 }

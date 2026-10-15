@@ -16,6 +16,7 @@
 #include <hog/render/presenter.hpp>
 #include <hog/render/readback.hpp>
 #include <hog/render/rendering.hpp>
+#include <hog/render/shader_watch.hpp>
 #include <hog/sim/calendar.hpp>
 #include <hog/terrain/bend.hpp>
 #include <hog/window/ui.hpp>
@@ -59,6 +60,8 @@ constexpr double fastest_speed = 10.0;
 constexpr double longest_frame = 0.1;
 // How long to wait between looks at a minimised window.
 constexpr Uint32 idle_ms = 50;
+// How often to look for edited shaders.
+constexpr std::chrono::milliseconds shader_looks{250};
 // Someone 3 m tall flying along 8 m ahead, 2 m below the eye, so they land in front of it.
 constexpr double companion_height = 3.0;
 constexpr double companion_ahead = 8.0;
@@ -292,6 +295,28 @@ private:
     int frames_ = 0;
 };
 
+// Looks for edited shaders now and then, drawing with them once they compile.
+class ShaderReloader {
+public:
+    explicit ShaderReloader(bool reloading) {
+        if (reloading) {
+            watch_.emplace(render::shader_catalogue());
+        }
+    }
+
+    void look(const render::Device& device, MonotonicClock::time_point now) {
+        if (!watch_ || now - looked_ < shader_looks) {
+            return;
+        }
+        looked_ = now;
+        render::reload_changed(*watch_, device.pipelines());
+    }
+
+private:
+    std::optional<render::ShaderWatch> watch_;
+    MonotonicClock::time_point looked_ = MonotonicClock::now();
+};
+
 // Flies or walks over the world until the window closes or it's time to quit.
 Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet::World& world,
                  client::Flight flight, const client::Options& options,
@@ -303,6 +328,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
     client::FrameTimes times;
     const MonotonicClock::time_point started = MonotonicClock::now();
     MonotonicClock::time_point last = started;
+    ShaderReloader shaders{options.reload_shaders};
     while (!controls.quit) {
         controls.look = {};
         controls.faster_time = 0;
@@ -315,6 +341,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
         const double seconds = std::min(passed, longest_frame);
         last = now;
         times.add(passed, scene.timings());
+        shaders.look(device, now);
         const bool faster = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
         const client::FlyInput input{.move = movement(), .look = controls.look, .seconds = seconds};
         flight =

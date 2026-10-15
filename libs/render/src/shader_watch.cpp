@@ -1,4 +1,6 @@
+#include <hog/core/log.hpp>
 #include <hog/core/text_file.hpp>
+#include <hog/render/pipeline.hpp>
 #include <hog/render/shader_watch.hpp>
 #include <hog/shaders/catalogue.hpp>
 
@@ -14,6 +16,8 @@
 namespace hog::render {
 
 namespace {
+
+const log::Category shaders_log{"shaders"};
 
 std::string read_text(const std::filesystem::path& path) {
     return read_text_file(path).value_or(std::string{});
@@ -209,6 +213,25 @@ ShaderWatch::Compiled ShaderWatch::compile(const ShaderCompiler& compiler,
     std::memcpy(result.spirv.data(), bytes.data(), bytes.size());
     result.files = read_depfile(read_text(depfile));
     return result;
+}
+
+std::size_t reload_changed(ShaderWatch& watch, PipelineRegistry& pipelines) {
+    const ShaderWatch::Changes changes = watch.poll();
+    for (const ShaderFailure& failed : changes.failed) {
+        log::error(shaders_log, "{} doesn't compile:\n{}", failed.name, failed.message);
+    }
+    std::size_t remade = 0;
+    for (const ReloadedShader& reloaded : changes.reloaded) {
+        const auto made = pipelines.remake(reloaded.embedded, reloaded.spirv);
+        if (!made) {
+            log::error(shaders_log, "can't reload {}: {}", reloaded.name, made.error());
+            continue;
+        }
+        log::info(shaders_log, "reloaded {} into {} pipeline{}", reloaded.name, *made,
+                  *made == 1 ? "" : "s");
+        remade += *made;
+    }
+    return remade;
 }
 
 } // namespace hog::render

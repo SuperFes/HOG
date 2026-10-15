@@ -103,4 +103,10 @@ private:
     std::future<std::vector<Compiled>> compiling_;
 };
 
+class PipelineRegistry;
+
+// Makes the pipelines of the shaders the watch has compiled again anew, logging which, and which
+// shaders failed to compile. Gives how many pipelines were made again.
+std::size_t reload_changed(ShaderWatch& watch, PipelineRegistry& pipelines);
+
 } // namespace hog::render
