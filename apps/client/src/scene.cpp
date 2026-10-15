@@ -64,6 +64,10 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
     if (!sky) {
         return failed("draw the sky", sky.error());
     }
+    auto glare = render::Glare::create(device, colour_format);
+    if (!glare) {
+        return failed("draw the sun's glare", glare.error());
+    }
     return Scene{device,
                  world,
                  jobs,
@@ -73,6 +77,7 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
                  std::move(pool).value(),
                  std::move(atmosphere).value(),
                  std::move(sky).value(),
+                 std::move(glare).value(),
                  std::move(companion),
                  frames};
 }
@@ -80,10 +85,11 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
 Scene::Scene(const render::Device& device, const planet::World& world, jobs::JobSystem& jobs,
              const sim::Calendar& calendar, render::Terrain terrain, render::Ocean ocean,
              render::TerrainPool pool, render::Atmosphere atmosphere, render::Sky sky,
-             std::optional<render::Billboard> companion, std::uint32_t frames)
+             render::Glare glare, std::optional<render::Billboard> companion, std::uint32_t frames)
     : device_{&device}, baker_{world, jobs}, terrain_{std::move(terrain)}, ocean_{std::move(ocean)},
       pool_{std::move(pool)}, depths_(frames), companion_{std::move(companion)},
-      atmosphere_{std::move(atmosphere)}, sky_{std::move(sky)}, calendar_{calendar} {}
+      atmosphere_{std::move(atmosphere)}, sky_{std::move(sky)}, glare_{std::move(glare)},
+      calendar_{calendar} {}
 
 Scene::~Scene() {
     (void)baker_.finish();
@@ -103,7 +109,8 @@ Result<const render::Image*> Scene::depth_for(const render::Frame& frame) {
         auto made =
             render::make_image(*device_, {.format = depth_format,
                                           .extent = frame.extent,
-                                          .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+                                          .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+                                                   VK_IMAGE_USAGE_SAMPLED_BIT,
                                           .aspect = VK_IMAGE_ASPECT_DEPTH_BIT});
         if (!made) {
             return std::unexpected(std::move(made).error());
@@ -172,6 +179,18 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     if (companion_ && shot.companion) {
         companion_->draw(frame.commands, frame.extent, shot.camera, *shot.companion, shot.bend);
     }
+    vkCmdEndRendering(frame.commands);
+
+    // The glare reads what's drawn in front of the sun from depth, so it's drawn without it.
+    render::transition(frame.commands, (*depth)->handle(), VK_IMAGE_ASPECT_DEPTH_BIT,
+                       render::image_use::depth_target, render::image_use::sampled);
+    render::begin_rendering(frame.commands, frame.view, frame.extent, std::nullopt);
+    const double height = shot.bend.eye_height * render::air_scale(model_.air(), shot.bend);
+    glare_.draw(frame.commands, frame.extent, (*depth)->view(),
+                {.camera = shot.camera,
+                 .towards = sky.sun,
+                 .irradiance = model_.transmittance(height, glm::dot(sky.sun, shot.bend.up)),
+                 .exposure = sky.exposure});
     vkCmdEndRendering(frame.commands);
     return {};
 }

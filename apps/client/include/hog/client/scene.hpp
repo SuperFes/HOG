@@ -11,6 +11,7 @@
 #include <hog/render/atmosphere.hpp>
 #include <hog/render/billboard.hpp>
 #include <hog/render/camera.hpp>
+#include <hog/render/glare.hpp>
 #include <hog/render/memory.hpp>
 #include <hog/render/ocean.hpp>
 #include <hog/render/presenter.hpp>
@@ -48,7 +49,7 @@ struct Shot {
 };
 
 // The planet as the client draws it: the ground baked and streamed in round the eye, the sea, the
-// air lit by the sun at the planet's time, and whoever flies along.
+// air lit by the sun at the planet's time, whoever flies along, and the sun's glare over it all.
 class Scene {
 public:
     // Drawn into colour images of `colour_format`, `frames` in flight, with the sun and seasons
@@ -82,7 +83,7 @@ private:
     Scene(const render::Device& device, const planet::World& world, jobs::JobSystem& jobs,
           const sim::Calendar& calendar, render::Terrain terrain, render::Ocean ocean,
           render::TerrainPool pool, render::Atmosphere atmosphere, render::Sky sky,
-          std::optional<render::Billboard> companion, std::uint32_t frames);
+          render::Glare glare, std::optional<render::Billboard> companion, std::uint32_t frames);
 
     Result<const render::Image*> depth_for(const render::Frame& frame);
     render::SkyView sky_view(const Shot& shot);
@@ -99,6 +100,7 @@ private:
     atmosphere::Model model_;
     render::Atmosphere atmosphere_;
     render::Sky sky_;
+    render::Glare glare_;
     sim::Calendar calendar_;
     std::optional<double> exposure_;
     bool settled_ = false;
