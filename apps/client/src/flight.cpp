@@ -28,6 +28,25 @@ DVec3 forward_of(const Flight& flight) {
            (glm::normalize(flight.eye.metres()) * std::sin(flight.pitch));
 }
 
+// Turned and pitched as the mouse moved.
+Flight looked(const Flight& flight, DVec2 look, const LookSettings& settings) {
+    const DVec3 up = glm::normalize(flight.eye.metres());
+    // Turning right is turning clockwise about up, seen from above.
+    const double yaw = -look.x * settings.per_pixel;
+    return {.eye = flight.eye,
+            .heading =
+                (flight.heading * std::cos(yaw)) + (glm::cross(up, flight.heading) * std::sin(yaw)),
+            .pitch = std::clamp(flight.pitch - (look.y * settings.per_pixel), -settings.steepest,
+                                settings.steepest)};
+}
+
+// Carried along the ground to where the eye now is, so it turns only when asked.
+Flight carried(Flight flight) {
+    flight.heading =
+        along_ground(glm::normalize(flight.eye.metres()), flight.heading).value_or(flight.heading);
+    return flight;
+}
+
 } // namespace
 
 Flight start_flight(DVec3 direction, double planet_radius, double altitude, DVec3 towards) {
@@ -41,13 +60,7 @@ Flight start_flight(DVec3 direction, double planet_radius, double altitude, DVec
 Flight fly(const Flight& flight, const FlyInput& input, double planet_radius, double ground,
            const FlySettings& settings) {
     const DVec3 up = glm::normalize(flight.eye.metres());
-    // Turning right is turning clockwise about up, seen from above.
-    const double yaw = -input.look.x * settings.look_per_pixel;
-    Flight next{.eye = flight.eye,
-                .heading = (flight.heading * std::cos(yaw)) +
-                           (glm::cross(up, flight.heading) * std::sin(yaw)),
-                .pitch = std::clamp(flight.pitch - (input.look.y * settings.look_per_pixel),
-                                    -settings.steepest, settings.steepest)};
+    Flight next = looked(flight, input.look, settings.look);
 
     const double floor = planet_radius + ground + settings.lowest;
     const double height = std::max(glm::length(flight.eye.metres()) - floor, 0.0);
@@ -56,13 +69,37 @@ Flight fly(const Flight& flight, const FlyInput& input, double planet_radius, do
                  (forward_of(next) * input.move.z)) *
                 (speed * input.seconds);
 
-    const DVec3 moved_up = glm::normalize(next.eye.metres());
     if (glm::length(next.eye.metres()) < floor) {
-        next.eye = WorldPosition{moved_up * floor};
+        next.eye = WorldPosition{glm::normalize(next.eye.metres()) * floor};
     }
-    // Carried along the ground to where the eye now is, so it turns only when asked.
-    next.heading = along_ground(moved_up, next.heading).value_or(next.heading);
-    return next;
+    return carried(next);
+}
+
+Flight step(const Flight& flight, const FlyInput& input, bool running,
+            const WalkSettings& settings) {
+    const Flight next = looked(flight, input.look, settings.look);
+    const DVec3 way = (right_of(next) * input.move.x) + (next.heading * input.move.z);
+    const double ways = glm::length(way);
+    if (ways == 0.0) {
+        return next;
+    }
+    const double from_centre = glm::length(next.eye.metres());
+    const DVec3 up = next.eye.metres() / from_centre;
+    // Diagonally no faster than straight.
+    const double turned = std::min(ways, 1.0) * (running ? settings.running : settings.walking) *
+                          input.seconds / from_centre;
+    Flight walked = next;
+    walked.eye =
+        WorldPosition{((up * std::cos(turned)) + (way * (std::sin(turned) / ways))) * from_centre};
+    return carried(walked);
+}
+
+Flight stand(const Flight& flight, double planet_radius, double ground,
+             const WalkSettings& settings) {
+    Flight stood = flight;
+    stood.eye = WorldPosition{glm::normalize(flight.eye.metres()) *
+                              (planet_radius + ground + settings.eye_height)};
+    return stood;
 }
 
 render::Camera flight_camera(const Flight& flight, double vertical_fov) {

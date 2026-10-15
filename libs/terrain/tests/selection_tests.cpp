@@ -317,6 +317,7 @@ TEST_CASE("blended out, the bend changes nothing picked", "[terrain][selection]"
     REQUIRE(high.bend.faked == radius);
     const auto cells = [](const std::vector<SelectedPatch>& drawn) {
         std::vector<CellId> picked;
+        picked.reserve(drawn.size());
         for (const SelectedPatch& patch : drawn) {
             picked.push_back(patch.cell);
         }

@@ -70,10 +70,11 @@ constexpr double companion_below = 2.0;
 // Light from the sky on ground the sun doesn't reach.
 constexpr double night_light = 0.15;
 
-// What the person flying asks for between frames.
+// What the person flying or walking asks for between frames.
 struct Controls {
     DVec2 look{};
     double speed = client::FlySettings{}.speed;
+    bool walking = false;
     bool quit = false;
 };
 
@@ -85,6 +86,8 @@ void handle(const SDL_Event& event, SDL_Window* window, Controls& controls) {
     case SDL_EVENT_KEY_DOWN:
         if (event.key.key == SDLK_ESCAPE) {
             controls.quit = true;
+        } else if (event.key.key == SDLK_F && !event.key.repeat) {
+            controls.walking = !controls.walking;
         }
         break;
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
@@ -100,6 +103,9 @@ void handle(const SDL_Event& event, SDL_Window* window, Controls& controls) {
         }
         break;
     case SDL_EVENT_MOUSE_WHEEL:
+        if (controls.walking) {
+            break;
+        }
         controls.speed =
             std::clamp(controls.speed * std::pow(speed_step, static_cast<double>(event.wheel.y)),
                        slowest_speed, fastest_speed);
@@ -298,7 +304,7 @@ private:
     int frames_ = 0;
 };
 
-// Flies over the world until the window closes or it's time to quit.
+// Flies or walks over the world until the window closes or it's time to quit.
 Result<void> fly(Ground& ground, const planet::World& world, client::Flight flight,
                  const client::Options& options, const render::Device& device,
                  render::Presenter& presenter, SDL_Window* window) {
@@ -318,24 +324,28 @@ Result<void> fly(Ground& ground, const planet::World& world, client::Flight flig
             std::min(std::chrono::duration<double>(now - last).count(), longest_frame);
         last = now;
         const bool faster = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
+        const client::FlyInput input{.move = movement(), .look = controls.look, .seconds = seconds};
+        flight = controls.walking
+                     ? client::walk(flight, input, faster, radius,
+                                    [&](WorldPosition at) { return ground_under(world, at); })
+                     : client::fly(flight, input, radius, ground_under(world, flight.eye),
+                                   {.speed = controls.speed * (faster ? fast : 1.0)});
         const double ground_height = ground_under(world, flight.eye);
-        flight =
-            client::fly(flight, {.move = movement(), .look = controls.look, .seconds = seconds},
-                        radius, ground_height, {.speed = controls.speed * (faster ? fast : 1.0)});
         title.count(window, glm::length(flight.eye.metres()) - radius - ground_height);
 
         if (options.quit_after && now - started >= *options.quit_after) {
             controls.quit = true;
         }
         const DVec3 companion_up = client::companion_direction(flight, companion_ahead);
+        const double ground_ahead = ground_under(world, WorldPosition{companion_up * radius});
         const render::Standing companion{
-            .feet =
-                client::companion_feet(flight, companion_ahead, companion_below, radius,
-                                       ground_under(world, WorldPosition{companion_up * radius})),
+            .feet = controls.walking
+                        ? WorldPosition{companion_up * (radius + ground_ahead)}
+                        : client::companion_feet(flight, companion_ahead, companion_below, radius,
+                                                 ground_ahead),
             .up = companion_up,
             .height = companion_height};
-        const terrain::Bend bend =
-            terrain::bend_from(flight.eye, radius, ground_under(world, flight.eye));
+        const terrain::Bend bend = terrain::bend_from(flight.eye, radius, ground_height);
         const auto drawn = draw(ground, flight, radius, companion, bend, device, presenter, window,
                                 controls.quit ? options.capture : std::nullopt);
         if (!drawn) {

@@ -97,7 +97,7 @@ Result<void> read_option(Options& options, std::string_view option, std::string_
 std::string_view usage() noexcept {
     return R"(usage: hog-client [options]
 
-Flies over the planet.
+Flies or walks over the planet.
 
 options:
   --planet PATH          the planet's config (default config/planet.toml)
@@ -119,6 +119,13 @@ flying:
   Shift                  faster
   right mouse button     hold to look around
   mouse wheel            speed up or slow down
+  F                      walk
+
+walking:
+  W A S D                forwards, left, back, right
+  Shift                  run
+  right mouse button     hold to look around
+  F                      fly
 )";
 }
 
