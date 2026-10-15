@@ -43,4 +43,9 @@ struct Options {
 // Parses the arguments after the program name.
 [[nodiscard]] Result<Options> parse_options(std::span<const std::string_view> arguments);
 
+// `path` if it's absolute or found from the working directory, else found from `from` or the
+// nearest directory above it, such as the program's; as given if neither finds it.
+[[nodiscard]] std::filesystem::path locate(const std::filesystem::path& path,
+                                           const std::filesystem::path& from);
+
 } // namespace hog::client

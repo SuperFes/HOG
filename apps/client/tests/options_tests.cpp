@@ -3,9 +3,11 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
+#include <filesystem>
 #include <string_view>
 #include <vector>
 
+using hog::client::locate;
 using hog::client::parse_options;
 using hog::client::Place;
 using Arguments = std::vector<std::string_view>;
@@ -56,4 +58,14 @@ TEST_CASE("bad client options are rejected", "[client][options]") {
     CHECK_FALSE(parse_options(Arguments{"--threads", "many"}));
     CHECK_FALSE(parse_options(Arguments{"--quit-after", "1.5"}));
     CHECK_FALSE(hog::client::usage().empty());
+}
+
+TEST_CASE("paths not found here are found from above the program", "[client][options]") {
+    const std::filesystem::path source{HOG_SOURCE_DIR};
+    const std::filesystem::path found = locate("config/planet.toml", source / "apps/client/tests");
+    CHECK(std::filesystem::equivalent(found, source / "config/planet.toml"));
+
+    const std::filesystem::path absolute = source / "nowhere.toml";
+    CHECK(locate(absolute, source) == absolute);
+    CHECK(locate("nowhere/at/all.toml", source / "apps") == "nowhere/at/all.toml");
 }

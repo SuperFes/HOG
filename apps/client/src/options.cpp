@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <system_error>
 #include <utility>
 
 namespace hog::client {
@@ -150,6 +151,22 @@ Result<Options> parse_options(std::span<const std::string_view> arguments) {
         }
     }
     return options;
+}
+
+std::filesystem::path locate(const std::filesystem::path& path, const std::filesystem::path& from) {
+    std::error_code error;
+    if (path.is_absolute() || std::filesystem::exists(path, error)) {
+        return path;
+    }
+    for (std::filesystem::path at = from; !at.empty(); at = at.parent_path()) {
+        if (std::filesystem::exists(at / path, error)) {
+            return at / path;
+        }
+        if (at == at.parent_path()) {
+            break;
+        }
+    }
+    return path;
 }
 
 } // namespace hog::client

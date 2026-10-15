@@ -412,7 +412,7 @@ int show(const client::Options& options, const planet::World& world, render::Dev
 }
 
 int run(std::span<const std::string_view> arguments) {
-    const auto options = client::parse_options(arguments);
+    auto options = client::parse_options(arguments);
     if (!options) {
         std::cerr << std::format("hog-client: {}\n\n{}", options.error().message, client::usage());
         return EXIT_FAILURE;
@@ -420,6 +420,13 @@ int run(std::span<const std::string_view> arguments) {
     if (options->help) {
         std::cout << client::usage();
         return EXIT_SUCCESS;
+    }
+    // Found from the program too, so it runs from any directory.
+    if (const char* base = SDL_GetBasePath(); base != nullptr) {
+        options->planet = client::locate(options->planet, base);
+        if (options->companion) {
+            options->companion = client::locate(*options->companion, base);
+        }
     }
     const auto planet = planet::load_planet_config(options->planet);
     if (!planet) {
