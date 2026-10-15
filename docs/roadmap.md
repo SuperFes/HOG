@@ -205,7 +205,7 @@ This phase builds a client that flies over the generated planet with a real sky.
 
 **Tests**
 
-- [ ] Headless render of fixed camera views, compared with reference images within a tolerance
+- [x] Headless render of fixed camera views, compared with reference images within a tolerance
 - [x] Unit tests for the LOD selection and chunk-border stitching
 
 ## Phase 4 — First milestone: four friends on the islands
