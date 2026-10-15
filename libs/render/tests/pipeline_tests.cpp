@@ -6,13 +6,17 @@
 #include <hog/render/pipeline.hpp>
 #include <hog/render/readback.hpp>
 #include <hog/render/rendering.hpp>
+#include <hog/render/sampler.hpp>
+#include <hog/shaders/dispatch.hpp>
 #include <hog/shaders/fill.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <span>
 #include <utility>
 #include <vector>
@@ -144,5 +148,110 @@ TEST_CASE("drawing without writing depth leaves it for what's drawn after", "[re
     const std::array draws{Draw{.pipeline = &unwritten, .fill = {.colour = red, .depth = 0.9F}},
                            Draw{.pipeline = &opaque, .fill = {.colour = green, .depth = 0.1F}}};
     CHECK(draw_all(*device, black, draws) == Pixel{0, 255, 0, 255});
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("compute shaders write images and buffers, and sample what they wrote", "[render][gpu]") {
+    const auto device = test_device();
+    constexpr std::array<std::uint32_t, 2> size{12, 5};
+    constexpr std::size_t count = std::size_t{size[0]} * size[1];
+    constexpr std::array<VkDescriptorSetLayoutBinding, 2> writing{
+        VkDescriptorSetLayoutBinding{.binding = 0,
+                                     .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                     .descriptorCount = 1,
+                                     .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+                                     .pImmutableSamplers = nullptr},
+        VkDescriptorSetLayoutBinding{.binding = 1,
+                                     .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                     .descriptorCount = 1,
+                                     .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+                                     .pImmutableSamplers = nullptr}};
+    std::array<VkDescriptorSetLayoutBinding, 2> sampling = writing;
+    sampling[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    auto write = hog::render::make_compute_pipeline(*device, {.spirv = hog::shaders::dispatch,
+                                                              .push_constant_bytes = sizeof(size),
+                                                              .descriptors = writing});
+    REQUIRE(write);
+    auto sample = hog::render::make_compute_pipeline(*device, {.spirv = hog::shaders::dispatch,
+                                                               .entry = "sample_main",
+                                                               .push_constant_bytes = sizeof(size),
+                                                               .descriptors = sampling});
+    REQUIRE(sample);
+    CHECK(write->bind_point() == VK_PIPELINE_BIND_POINT_COMPUTE);
+
+    auto image = hog::render::make_image(
+        *device, {.format = VK_FORMAT_R16G16B16A16_SFLOAT,
+                  .extent = {.width = size[0], .height = size[1]},
+                  .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
+    REQUIRE(image);
+    const auto sampler = hog::render::make_sampler(*device, VK_FILTER_NEAREST);
+    REQUIRE(sampler);
+    auto indices =
+        hog::render::make_buffer(*device, count * sizeof(std::uint32_t),
+                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, hog::render::Memory::Readback);
+    REQUIRE(indices);
+    auto samples =
+        hog::render::make_buffer(*device, count * sizeof(std::array<float, 4>),
+                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, hog::render::Memory::Readback);
+    REQUIRE(samples);
+
+    const auto run = device->submit_now([&](VkCommandBuffer commands) {
+        namespace use = hog::render::image_use;
+        const auto groups = [](std::uint32_t across) { return (across + 7) / 8; };
+        hog::render::transition(commands, image->handle(), VK_IMAGE_ASPECT_COLOR_BIT, use::discard,
+                                use::storage);
+        vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, write->handle());
+        vkCmdPushConstants(commands, write->layout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(size),
+                           size.data());
+        hog::render::push_storage_image(commands, *write, 0, image->view());
+        hog::render::push_storage_buffer(commands, *write, 1, indices->handle());
+        vkCmdDispatch(commands, groups(size[0]), groups(size[1]), 1);
+
+        hog::render::transition(commands, image->handle(), VK_IMAGE_ASPECT_COLOR_BIT, use::storage,
+                                use::sampled);
+        vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, sample->handle());
+        vkCmdPushConstants(commands, sample->layout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(size),
+                           size.data());
+        hog::render::push_sampled_image(commands, *sample, 0, image->view(), sampler->handle());
+        hog::render::push_storage_buffer(commands, *sample, 1, samples->handle());
+        vkCmdDispatch(commands, groups(size[0]), groups(size[1]), 1);
+
+        const VkMemoryBarrier2 to_host{.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+                                       .pNext = nullptr,
+                                       .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                                       .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                                       .dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT,
+                                       .dstAccessMask = VK_ACCESS_2_HOST_READ_BIT};
+        const VkDependencyInfo dependency{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                                          .pNext = nullptr,
+                                          .dependencyFlags = 0,
+                                          .memoryBarrierCount = 1,
+                                          .pMemoryBarriers = &to_host,
+                                          .bufferMemoryBarrierCount = 0,
+                                          .pBufferMemoryBarriers = nullptr,
+                                          .imageMemoryBarrierCount = 0,
+                                          .pImageMemoryBarriers = nullptr};
+        vkCmdPipelineBarrier2(commands, &dependency);
+    });
+    REQUIRE(run);
+    REQUIRE(indices->invalidate());
+    REQUIRE(samples->invalidate());
+
+    std::vector<std::uint32_t> written(count);
+    std::memcpy(written.data(), indices->mapped().data(), count * sizeof(std::uint32_t));
+    std::vector<std::array<float, 4>> sampled(count);
+    std::memcpy(sampled.data(), samples->mapped().data(), count * sizeof(std::array<float, 4>));
+    for (std::uint32_t y = 0; y < size[1]; ++y) {
+        for (std::uint32_t x = 0; x < size[0]; ++x) {
+            const std::size_t at = (std::size_t{y} * size[0]) + x;
+            INFO("texel " << x << ", " << y);
+            CHECK(written[at] == at);
+            // Half floats hold these to within a part in a thousand.
+            CHECK(std::abs(sampled[at][0] - (static_cast<float>(x) / size[0])) < 1e-3F);
+            CHECK(std::abs(sampled[at][1] - (static_cast<float>(y) / size[1])) < 1e-3F);
+            CHECK(sampled[at][2] == 0.5F);
+            CHECK(sampled[at][3] == 1.0F);
+        }
+    }
     CHECK(device->validation_errors() == 0);
 }

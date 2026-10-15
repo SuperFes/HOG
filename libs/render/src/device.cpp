@@ -169,6 +169,10 @@ Result<std::unique_ptr<Device>> Device::create(const DeviceOptions& options) {
     if (!family || !queue) {
         return make_error(ErrorCode::Unsupported, "the Vulkan device has no graphics queue");
     }
+    if ((physical->get_queue_families().at(*family).queueFlags & VK_QUEUE_COMPUTE_BIT) == 0) {
+        return make_error(ErrorCode::Unsupported,
+                          "the Vulkan device's graphics queue can't compute");
+    }
     device->queue_family_ = *family;
     device->queue_ = *queue;
 

@@ -84,7 +84,7 @@ hog_add_tests(hog_render
     tests/terrain_tests.cpp)
 if(TARGET hog_render_tests)
     target_link_libraries(hog_render_tests PRIVATE hog::planet)
-    hog_add_shaders(hog_render_tests tests/shaders/fill.slang tests/shaders/layer.slang
+    hog_add_shaders(hog_render_tests tests/shaders/dispatch.slang tests/shaders/fill.slang tests/shaders/layer.slang
                     tests/shaders/triangle.slang)
     # GPU drivers are opaque to sanitizers, so those runs leave the GPU out.
     if(HOG_SANITIZE)

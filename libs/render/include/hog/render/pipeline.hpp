@@ -45,6 +45,16 @@ struct PipelineDesc {
     std::span<const VkDescriptorSetLayoutBinding> descriptors = {};
 };
 
+// A compute pipeline, its push constants and descriptors visible to the compute stage.
+struct ComputePipelineDesc {
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    std::span<const std::uint32_t> spirv = {};
+    std::string entry = "compute_main";
+    std::uint32_t push_constant_bytes = 0;
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    std::span<const VkDescriptorSetLayoutBinding> descriptors = {};
+};
+
 class Pipeline {
 public:
     Pipeline() = default;
@@ -56,18 +66,24 @@ public:
 
     [[nodiscard]] VkPipeline handle() const noexcept { return pipeline_; }
     [[nodiscard]] VkPipelineLayout layout() const noexcept { return layout_; }
+    [[nodiscard]] VkPipelineBindPoint bind_point() const noexcept { return bind_point_; }
 
 private:
     friend Result<Pipeline> make_pipeline(const Device& device, const PipelineDesc& desc);
+    friend Result<Pipeline> make_compute_pipeline(const Device& device,
+                                                  const ComputePipelineDesc& desc);
     void release() noexcept;
 
     VkDevice device_ = VK_NULL_HANDLE;
     VkDescriptorSetLayout set_layout_ = VK_NULL_HANDLE;
     VkPipelineLayout layout_ = VK_NULL_HANDLE;
     VkPipeline pipeline_ = VK_NULL_HANDLE;
+    VkPipelineBindPoint bind_point_ = VK_PIPELINE_BIND_POINT_GRAPHICS;
 };
 
 [[nodiscard]] Result<Pipeline> make_pipeline(const Device& device, const PipelineDesc& desc);
+[[nodiscard]] Result<Pipeline> make_compute_pipeline(const Device& device,
+                                                     const ComputePipelineDesc& desc);
 
 // Records handing the bound pipeline's shaders an image to sample at `binding` of set 0. The image
 // must be ready to sample by the time they run.
@@ -75,6 +91,12 @@ void push_sampled_image(VkCommandBuffer commands, const Pipeline& pipeline, std:
                         VkImageView view, VkSampler sampler) noexcept;
 // As above, for a uniform buffer.
 void push_uniform_buffer(VkCommandBuffer commands, const Pipeline& pipeline, std::uint32_t binding,
+                         VkBuffer buffer) noexcept;
+// As above, for an image to read and write in place, which must be in the storage layout.
+void push_storage_image(VkCommandBuffer commands, const Pipeline& pipeline, std::uint32_t binding,
+                        VkImageView view) noexcept;
+// As above, for a buffer to read and write.
+void push_storage_buffer(VkCommandBuffer commands, const Pipeline& pipeline, std::uint32_t binding,
                          VkBuffer buffer) noexcept;
 
 } // namespace hog::render
