@@ -1,5 +1,6 @@
 #include <hog/planet/neighbors.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/terrain/bend.hpp>
 #include <hog/terrain/selection.hpp>
 #include <hog/testing/assertion_guard.hpp>
 
@@ -10,6 +11,7 @@
 #include <cstddef>
 #include <iterator>
 #include <map>
+#include <numbers>
 #include <optional>
 #include <random>
 #include <vector>
@@ -63,6 +65,29 @@ int finest(const std::vector<SelectedPatch>& drawn) {
 }
 
 const DVec3 somewhere = hog::planet::direction_at(0.3, 0.5);
+
+// Flat ground at sea level, for horizons worked out by hand.
+const hog::terrain::SelectionSettings flat_ground{.lowest = 0.0, .highest = 1.0};
+
+// Looking along `forward` from `height` metres over `somewhere`, bent as walking there.
+Viewpoint walking(double height, DVec3 forward) {
+    const DVec3 eye = somewhere * (radius + height);
+    Viewpoint view = looking(eye, forward);
+    view.bend = hog::terrain::bend_from(view.eye, radius, 0.0);
+    return view;
+}
+
+// The ground `metres` along it from under the eye, towards `towards`, level with the eye.
+DVec3 along_ground(double metres, DVec3 towards) {
+    const double turned = metres / radius;
+    return (somewhere * std::cos(turned)) + (towards * std::sin(turned));
+}
+
+// Metres along the ground to the horizon of ground `ground` metres high, from `eye` metres
+// high, over a sea-level sphere of radius `sphere`.
+double horizon(double sphere, double eye, double ground) {
+    return sphere * (std::acos(sphere / (sphere + eye)) + std::acos(sphere / (sphere + ground)));
+}
 
 } // namespace
 
@@ -219,4 +244,84 @@ TEST_CASE("ground known to lie low hides sooner past the horizon", "[terrain][se
     };
     CHECK(farthest(select_patches(view, radius, {}, flat)) <
           farthest(select_patches(view, radius)));
+}
+
+TEST_CASE("bent, ground out to the faked horizon is picked and beyond it isn't",
+          "[terrain][selection]") {
+    const DVec3 ahead = level_with(somewhere);
+    const Viewpoint bent = walking(3.0, ahead);
+    const Viewpoint unbent = looking(bent.eye.metres(), ahead);
+    const double faked = horizon(bent.bend.faked, 3.0, 1.0);
+    REQUIRE(faked > 5.0 * horizon(radius, 3.0, 1.0));
+
+    const auto drawn = select_patches(bent, radius, flat_ground);
+    const auto at = [](double metres, DVec3 towards) {
+        return hog::planet::cell_at(along_ground(metres, towards));
+    };
+    CHECK(drawn_over(drawn, at(0.9 * faked, ahead)));
+    CHECK(!drawn_over(select_patches(unbent, radius, flat_ground), at(0.9 * faked, ahead)));
+    CHECK(!drawn_over(drawn, at(2.0 * faked, ahead)));
+    CHECK(!drawn_over(drawn, at(2'000.0, -ahead)));
+}
+
+TEST_CASE("bent, all the ground drawn in view is picked", "[terrain][selection]") {
+    const DVec3 ahead = level_with(somewhere);
+    const DVec3 aside = glm::cross(somewhere, ahead);
+    std::mt19937_64 random{11};
+    std::uniform_real_distribution<double> unit{0.0, 1.0};
+    for (const double pitch : {0.0, 0.2, 0.45}) {
+        const Viewpoint view =
+            walking(3.0, (ahead * std::cos(pitch)) - (somewhere * std::sin(pitch)));
+        const auto drawn = select_patches(view, radius, flat_ground);
+        std::vector<SelectedPatch> by_cell = drawn;
+        std::ranges::sort(by_cell, {}, &SelectedPatch::cell);
+
+        const DVec3 right = glm::normalize(glm::cross(view.forward, view.up));
+        const DVec3 up = glm::cross(right, view.forward);
+        const double tall = std::tan(view.vertical_fov / 2.0);
+        int seen = 0;
+        for (int sample = 0; sample < 4'000; ++sample) {
+            // Short of the sea-level horizon, so in sight, and often near the view's edges.
+            const double metres = horizon(view.bend.faked, 3.0, 0.0) * std::sqrt(unit(random));
+            const double bearing = 2.0 * std::numbers::pi * unit(random);
+            const DVec3 towards = (ahead * std::cos(bearing)) + (aside * std::sin(bearing));
+            const DVec3 ground = along_ground(metres, towards) * (radius + unit(random));
+            const DVec3 drawn_at = hog::terrain::bent(view.bend, ground - view.eye.metres());
+            const double depth = glm::dot(drawn_at, view.forward);
+            if (depth <= 0.0 || std::abs(glm::dot(drawn_at, up)) > depth * tall ||
+                std::abs(glm::dot(drawn_at, right)) > depth * tall * view.aspect) {
+                continue;
+            }
+            ++seen;
+            CHECK(sorted_over(by_cell, hog::planet::cell_at(ground)));
+        }
+        CHECK(seen > 200);
+    }
+}
+
+TEST_CASE("bent, the ground under a walker is still drawn finest", "[terrain][selection]") {
+    const DVec3 ahead = level_with(somewhere);
+    const Viewpoint bent = walking(2.0, ahead);
+    const auto under = [&](const Viewpoint& view) {
+        return drawn_over(select_patches(view, radius), hog::planet::cell_at(somewhere))
+            .value_or(SelectedPatch{});
+    };
+    const SelectedPatch found = under(bent);
+    CHECK(found.distance == 0.0);
+    CHECK(found.cell == under(looking(bent.eye.metres(), ahead)).cell);
+}
+
+TEST_CASE("blended out, the bend changes nothing picked", "[terrain][selection]") {
+    const DVec3 ahead = level_with(somewhere);
+    const Viewpoint high = walking(20'000.0, ahead - somewhere);
+    REQUIRE(high.bend.faked == radius);
+    const auto cells = [](const std::vector<SelectedPatch>& drawn) {
+        std::vector<CellId> picked;
+        for (const SelectedPatch& patch : drawn) {
+            picked.push_back(patch.cell);
+        }
+        return picked;
+    };
+    CHECK(cells(select_patches(high, radius)) ==
+          cells(select_patches(looking(high.eye.metres(), ahead - somewhere), radius)));
 }

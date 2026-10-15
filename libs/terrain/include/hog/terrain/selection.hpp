@@ -2,6 +2,7 @@
 
 #include <hog/core/math.hpp>
 #include <hog/planet/cell_id.hpp>
+#include <hog/terrain/bend.hpp>
 #include <hog/terrain/patch.hpp>
 #include <hog/terrain/stitching.hpp>
 
@@ -20,6 +21,9 @@ struct Viewpoint {
     double vertical_fov = 1.0;        // radians
     double aspect = 16.0 / 9.0;       // width over height
     double viewport_height = 1'080.0; // pixels
+    // How the ground is bent as it's drawn, which is what's culled and refined.
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    Bend bend = {};
 };
 
 struct SelectionSettings {

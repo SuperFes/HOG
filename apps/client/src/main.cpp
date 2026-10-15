@@ -224,8 +224,10 @@ Result<bool> draw(Ground& ground, const client::Flight& flight, double planet_ra
     for (terrain::Patch& patch : ground.baker.collect()) {
         ground.stream.baked(std::move(patch));
     }
-    const std::vector<terrain::SelectedPatch> selected = terrain::select_patches(
-        client::viewpoint(camera, frame.extent), planet_radius, {}, ground.stream.known_heights());
+    terrain::Viewpoint seen = client::viewpoint(camera, frame.extent);
+    seen.bend = bend;
+    const std::vector<terrain::SelectedPatch> selected =
+        terrain::select_patches(seen, planet_radius, {}, ground.stream.known_heights());
     const terrain::StreamFrame streamed = ground.stream.update(selected);
     for (const planet::CellId cell : streamed.bakes) {
         ground.baker.start(cell);
