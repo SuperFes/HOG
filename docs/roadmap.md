@@ -201,6 +201,7 @@ This phase builds a client that flies over the generated planet with a real sky.
 - [x] Basic ocean surface
 - [x] Sea drawn over ground at and just below sea level, so shorelines don't flicker
 - [x] Hillaire atmosphere and sun lighting driven by planet time
+- [ ] The sun as people see it: a glow and glare round its disc, rather than the bare disc a camera records
 
 **Tests**
 
@@ -233,6 +234,7 @@ This phase joins the server and client. It ends at the first milestone: four of 
 - [ ] Client prediction with server validation and correction
 - [ ] Smooth interpolation of other players
 - [ ] Placeholder avatars (capsules or a basic mannequin) with name tags
+- [ ] Third-person camera that turns about the character rather than about the eye
 
 **World**
 
