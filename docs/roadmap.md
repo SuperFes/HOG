@@ -182,8 +182,8 @@ This phase builds a client that flies over the generated planet with a real sky.
 - [x] SDL3 window and input; the renderer takes a `VkSurface` and never owns the window, so the Qt editor can host it later
 - [x] Vulkan 1.3 through volk, with VMA for memory
 - [ ] Spike: KosmicKrisp against MoltenVK on macOS
-- [ ] Validation layers on in debug builds, with errors failing CI smoke tests
-- [ ] GPU timing queries and a frame-time overlay
+- [x] Validation layers on in debug builds, with errors failing CI smoke tests
+- [x] GPU timing queries and a frame-time overlay
 
 **Shaders and frame**
 
