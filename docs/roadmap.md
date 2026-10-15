@@ -199,6 +199,7 @@ This phase builds a client that flies over the generated planet with a real sky.
 - [x] Faked Earth-sized curvature, blending to true curvature with altitude
 - [ ] Biome-driven materials (flat colors first, textures later)
 - [x] Basic ocean surface
+- [ ] Sea drawn over ground at and just below sea level, so shorelines don't flicker
 - [ ] Hillaire atmosphere and sun lighting driven by planet time
 
 **Tests**
@@ -279,6 +280,7 @@ These tracks can start once Phase 4 works and can run side by side; four people 
 - [ ] Bake on appearance change, cached by appearance hash
 - [ ] Animation: locomotion set, blending, foot IK on slopes
 - [ ] Cage-wrap clothing layers 0–7; hiding covered surfaces
+- [ ] Overlapping layers resolve to the outermost (outer clothing over inner, as water over ground at the shore), never flickering between them
 - [ ] Fit ranges from body measurements; armor that is too big or small cannot be worn
 - [ ] Plate armor attached to bones and driven by IK and constraints
 - [ ] Character LOD tiers, with only the nearest N at full quality
