@@ -31,7 +31,8 @@ set(hog_embed_spirv "${CMAKE_CURRENT_LIST_DIR}/EmbedSpirv.cmake")
 
 # hog_add_shaders(<target> <name>.slang...): each shader becomes
 # <build>/shaders/include/hog/shaders/<name>.hpp, holding `hog::shaders::<name>` as SPIR-V words.
-# Every entry point keeps its own name.
+# Every entry point keeps its own name. Modules are imported from beside the shader or from the
+# target's shaders directory.
 function(hog_add_shaders target)
     set(include_dir "${CMAKE_CURRENT_BINARY_DIR}/shaders/include")
     set(headers)
@@ -43,7 +44,8 @@ function(hog_add_shaders target)
         add_custom_command(
             OUTPUT "${header}" "${spirv}"
             COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/shaders"
-            COMMAND "${HOG_SLANGC}" "${source_path}" -target spirv -fvk-use-entrypoint-name
+            COMMAND "${HOG_SLANGC}" "${source_path}" -I "${CMAKE_CURRENT_SOURCE_DIR}/shaders"
+                    -target spirv -fvk-use-entrypoint-name
                     -matrix-layout-column-major -o "${spirv}" -depfile "${spirv}.d"
             COMMAND "${CMAKE_COMMAND}" -DSPIRV=${spirv} -DHEADER=${header} -DNAME=${name}
                     -P "${hog_embed_spirv}"

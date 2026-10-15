@@ -32,6 +32,7 @@ CPMAddPackage(
 include(HogShaders)
 
 add_library(hog_render
+    src/atmosphere.cpp
     src/barrier.cpp
     src/billboard.cpp
     src/camera.cpp
@@ -62,13 +63,14 @@ target_compile_definitions(hog_render PUBLIC
     VMA_DYNAMIC_VULKAN_FUNCTIONS=0)
 set_source_files_properties(src/vma.cpp PROPERTIES COMPILE_DEFINITIONS VMA_IMPLEMENTATION)
 target_link_libraries(hog_render
-    PUBLIC hog::core hog::terrain volk::volk
+    PUBLIC hog::atmosphere hog::core hog::terrain volk::volk
     PRIVATE hog::planet vk-bootstrap::vk-bootstrap)
 hog_target_defaults(hog_render)
-hog_add_shaders(hog_render shaders/billboard.slang shaders/globe.slang shaders/ocean.slang
+hog_add_shaders(hog_render shaders/air_tables.slang shaders/billboard.slang shaders/globe.slang shaders/ocean.slang
                 shaders/terrain.slang)
 
 hog_add_tests(hog_render
+    tests/atmosphere_tests.cpp
     tests/barrier_tests.cpp
     tests/billboard_tests.cpp
     tests/camera_tests.cpp
@@ -84,7 +86,7 @@ hog_add_tests(hog_render
     tests/terrain_tests.cpp)
 if(TARGET hog_render_tests)
     target_link_libraries(hog_render_tests PRIVATE hog::planet)
-    hog_add_shaders(hog_render_tests tests/shaders/dispatch.slang tests/shaders/fill.slang tests/shaders/layer.slang
+    hog_add_shaders(hog_render_tests tests/shaders/air_probe.slang tests/shaders/dispatch.slang tests/shaders/fill.slang tests/shaders/layer.slang
                     tests/shaders/triangle.slang)
     # GPU drivers are opaque to sanitizers, so those runs leave the GPU out.
     if(HOG_SANITIZE)
