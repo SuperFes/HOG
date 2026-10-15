@@ -121,11 +121,14 @@ Result<std::unique_ptr<Device>> Device::create(const DeviceOptions& options) {
     // Slang reads vertex and instance ids through draw parameters.
     VkPhysicalDeviceVulkan11Features features_11{};
     features_11.shaderDrawParameters = VK_TRUE;
+    VkPhysicalDeviceFeatures features{};
+    features.samplerAnisotropy = VK_TRUE;
     VkPhysicalDeviceVulkan13Features features_13{};
     features_13.dynamicRendering = VK_TRUE;
     features_13.synchronization2 = VK_TRUE;
     vkb::PhysicalDeviceSelector selector{*instance};
     selector.set_minimum_version(1, 3)
+        .set_required_features(features)
         .set_required_features_11(features_11)
         .set_required_features_13(features_13)
         // Present support is checked here rather than by vk-bootstrap, whose surface functions
@@ -153,6 +156,7 @@ Result<std::unique_ptr<Device>> Device::create(const DeviceOptions& options) {
     device->physical_ = physical->physical_device;
     device->name_ = physical->name;
     device->software_ = physical->properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU;
+    device->max_anisotropy_ = physical->properties.limits.maxSamplerAnisotropy;
 
     const auto built = vkb::DeviceBuilder{*physical}.build();
     if (!built) {

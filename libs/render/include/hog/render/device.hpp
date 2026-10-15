@@ -29,9 +29,9 @@ struct DeviceOptions {
     std::function<Result<VkSurfaceKHR>(VkInstance)> make_surface = {};
 };
 
-// A Vulkan 1.3 instance, device with push descriptors and graphics queue, with an allocator for
-// GPU memory. Vulkan's
-// functions are loaded process-wide, so there is one device at a time.
+// A Vulkan 1.3 instance, device with push descriptors, anisotropic filtering and a graphics queue,
+// with an allocator for GPU memory. Vulkan's functions are loaded process-wide, so there is one
+// device at a time.
 class Device {
 public:
     [[nodiscard]] static Result<std::unique_ptr<Device>> create(const DeviceOptions& options);
@@ -53,6 +53,8 @@ public:
 
     [[nodiscard]] const std::string& name() const noexcept { return name_; }
     [[nodiscard]] bool software() const noexcept { return software_; }
+    // How many samples along a glancing view a sampler may take.
+    [[nodiscard]] float max_anisotropy() const noexcept { return max_anisotropy_; }
     [[nodiscard]] bool validating() const noexcept { return validating_; }
     // Errors the validation layer has reported.
     [[nodiscard]] std::uint64_t validation_errors() const noexcept {
@@ -83,6 +85,7 @@ private:
     VkFence done_ = VK_NULL_HANDLE;
     std::string name_;
     bool software_ = false;
+    float max_anisotropy_ = 1.0F;
     bool validating_ = false;
     std::atomic<std::uint64_t> validation_errors_{0};
 };

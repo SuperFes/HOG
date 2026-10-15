@@ -147,7 +147,7 @@ Result<Image> make_image(const Device& device, const ImageDesc& desc) {
         .imageType = VK_IMAGE_TYPE_2D,
         .format = desc.format,
         .extent = {.width = desc.extent.width, .height = desc.extent.height, .depth = 1},
-        .mipLevels = 1,
+        .mipLevels = desc.levels,
         .arrayLayers = desc.layers,
         .samples = VK_SAMPLE_COUNT_1_BIT,
         .tiling = VK_IMAGE_TILING_OPTIMAL,
@@ -177,7 +177,7 @@ Result<Image> make_image(const Device& device, const ImageDesc& desc) {
                                           .components = {},
                                           .subresourceRange = {.aspectMask = desc.aspect,
                                                                .baseMipLevel = 0,
-                                                               .levelCount = 1,
+                                                               .levelCount = desc.levels,
                                                                .baseArrayLayer = 0,
                                                                .layerCount = desc.layers}};
     if (const VkResult made = vkCreateImageView(device.handle(), &view_info, nullptr, &image.view_);

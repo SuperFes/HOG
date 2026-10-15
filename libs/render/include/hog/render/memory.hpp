@@ -58,6 +58,7 @@ struct ImageDesc {
     VkImageUsageFlags usage = 0;
     VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
     std::uint32_t layers = 1;
+    std::uint32_t levels = 1; // of mips, each half the size of the one before
 };
 
 // A 2D image on the GPU with a view of the whole of it, viewed as an array when it has more than

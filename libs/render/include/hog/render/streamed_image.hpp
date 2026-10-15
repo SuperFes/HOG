@@ -45,4 +45,9 @@ private:
                                                         VkExtent2D extent, std::uint32_t slots,
                                                         std::uint32_t layers = 1);
 
+// A sampled image filled once from `texels`: each mip in turn from the largest, its layers one
+// after another, rows packed tightly from the top. It's ready to sample once this returns.
+[[nodiscard]] Result<Image> make_filled_image(Device& device, const ImageDesc& desc,
+                                              std::span<const std::byte> texels);
+
 } // namespace hog::render

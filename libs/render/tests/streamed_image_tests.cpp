@@ -11,9 +11,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 using hog::render::make_streamed_image;
@@ -153,5 +155,63 @@ TEST_CASE("each layer of a streamed image is sampled on its own", "[render][gpu]
                   colours.at(layer));
         }
     }
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("a filled image holds each mip of each layer as given", "[render][gpu]") {
+    const auto device = test_device();
+    const hog::render::ImageDesc desc{.format = VK_FORMAT_R8G8B8A8_UNORM,
+                                      .extent = {.width = 4, .height = 2},
+                                      .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                                      .layers = 2,
+                                      .levels = 3};
+    // 4 by 2, 2 by 1 and 1 by 1, two layers each.
+    constexpr std::size_t size = std::size_t{4} * 2 * ((4 * 2) + (2 * 1) + (1 * 1));
+    const std::vector<std::byte> texels = filled(size, 1);
+    CHECK(hog::render::make_filled_image(*device, desc, std::span{texels}.first(size - 4))
+              .error()
+              .code == hog::ErrorCode::InvalidArgument);
+    hog::render::ImageDesc too_many = desc;
+    too_many.levels = 4;
+    CHECK(hog::render::make_filled_image(*device, too_many, texels).error().code ==
+          hog::ErrorCode::InvalidArgument);
+
+    auto image = hog::render::make_filled_image(*device, desc, texels);
+    REQUIRE(image);
+    auto readback = hog::render::make_buffer(*device, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                             hog::render::Memory::Readback);
+    REQUIRE(readback);
+    REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
+        hog::render::transition(commands, image->handle(), VK_IMAGE_ASPECT_COLOR_BIT,
+                                hog::render::image_use::sampled,
+                                hog::render::image_use::copy_source);
+        std::vector<VkBufferImageCopy> regions;
+        VkDeviceSize at = 0;
+        for (std::uint32_t level = 0; level < desc.levels; ++level) {
+            const VkExtent3D extent{.width = std::max(4U >> level, 1U),
+                                    .height = std::max(2U >> level, 1U),
+                                    .depth = 1};
+            regions.push_back({.bufferOffset = at,
+                               .bufferRowLength = 0,
+                               .bufferImageHeight = 0,
+                               .imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                                                    .mipLevel = level,
+                                                    .baseArrayLayer = 0,
+                                                    .layerCount = desc.layers},
+                               .imageOffset = {},
+                               .imageExtent = extent});
+            at += VkDeviceSize{4} * extent.width * extent.height * desc.layers;
+        }
+        vkCmdCopyImageToBuffer(commands, image->handle(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                               readback->handle(), static_cast<std::uint32_t>(regions.size()),
+                               regions.data());
+    }));
+    const auto read = hog::render::read_back(*readback);
+    REQUIRE(read);
+    REQUIRE(read->size() == size);
+    for (std::size_t at = 0; at < size; ++at) {
+        CHECK(static_cast<std::byte>(read->at(at)) == texels[at]);
+    }
+    CHECK(hog::render::make_tiling_sampler(*device));
     CHECK(device->validation_errors() == 0);
 }

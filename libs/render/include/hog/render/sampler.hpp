@@ -22,7 +22,9 @@ public:
 
 private:
     friend Result<Sampler> make_sampler(const Device& device, VkFilter filter);
+    friend Result<Sampler> make_tiling_sampler(const Device& device);
 
+    static Result<Sampler> create(const Device& device, const VkSamplerCreateInfo& info);
     void release() noexcept;
 
     VkDevice device_ = VK_NULL_HANDLE;
@@ -30,5 +32,9 @@ private:
 };
 
 [[nodiscard]] Result<Sampler> make_sampler(const Device& device, VkFilter filter);
+
+// For textures tiled over a surface: filtered linearly between texels and mips, as anisotropically
+// as the device allows, and repeating past the edges.
+[[nodiscard]] Result<Sampler> make_tiling_sampler(const Device& device);
 
 } // namespace hog::render

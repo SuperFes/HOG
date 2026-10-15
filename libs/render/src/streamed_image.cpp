@@ -2,8 +2,10 @@
 #include <hog/render/streamed_image.hpp>
 
 #include <algorithm>
+#include <bit>
 #include <format>
 #include <utility>
+#include <vector>
 
 namespace hog::render {
 
@@ -86,6 +88,64 @@ Result<StreamedImage> make_streamed_image(const Device& device, VkFormat format,
         streamed.staging_.push_back(std::move(staging).value());
     }
     return streamed;
+}
+
+Result<Image> make_filled_image(Device& device, const ImageDesc& desc,
+                                std::span<const std::byte> texels) {
+    const std::optional<std::uint32_t> bytes = texel_bytes(desc.format);
+    if (!bytes) {
+        return make_error(ErrorCode::Unsupported, "images can't be filled in that format");
+    }
+    const std::uint32_t largest = std::max(desc.extent.width, desc.extent.height);
+    if (largest == 0 || desc.extent.width == 0 || desc.extent.height == 0 || desc.layers == 0 ||
+        desc.levels == 0 || std::cmp_greater(desc.levels, std::bit_width(largest))) {
+        return make_error(ErrorCode::InvalidArgument,
+                          "a filled image needs area, a layer and no more mips than halve it");
+    }
+    std::vector<VkBufferImageCopy> regions;
+    VkDeviceSize at = 0;
+    for (std::uint32_t level = 0; level < desc.levels; ++level) {
+        const VkExtent3D extent{.width = std::max(desc.extent.width >> level, 1U),
+                                .height = std::max(desc.extent.height >> level, 1U),
+                                .depth = 1};
+        regions.push_back({.bufferOffset = at,
+                           .bufferRowLength = 0,
+                           .bufferImageHeight = 0,
+                           .imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                                                .mipLevel = level,
+                                                .baseArrayLayer = 0,
+                                                .layerCount = desc.layers},
+                           .imageOffset = {},
+                           .imageExtent = extent});
+        at += VkDeviceSize{*bytes} * extent.width * extent.height * desc.layers;
+    }
+    if (texels.size() != at) {
+        return make_error(ErrorCode::InvalidArgument, "the texels don't fill the image exactly");
+    }
+
+    ImageDesc sampled = desc;
+    sampled.usage |= VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    auto image = make_image(device, sampled);
+    if (!image) {
+        return std::unexpected(std::move(image).error());
+    }
+    auto staging = make_filled_buffer(device, texels, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+    if (!staging) {
+        return std::unexpected(std::move(staging).error());
+    }
+    if (auto copied = device.submit_now([&](VkCommandBuffer commands) {
+            transition(commands, image->handle(), VK_IMAGE_ASPECT_COLOR_BIT, image_use::discard,
+                       image_use::copy_target);
+            vkCmdCopyBufferToImage(commands, staging->handle(), image->handle(),
+                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                   static_cast<std::uint32_t>(regions.size()), regions.data());
+            transition(commands, image->handle(), VK_IMAGE_ASPECT_COLOR_BIT, image_use::copy_target,
+                       image_use::sampled);
+        });
+        !copied) {
+        return std::unexpected(std::move(copied).error());
+    }
+    return image;
 }
 
 } // namespace hog::render
