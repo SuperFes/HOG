@@ -2,8 +2,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <ranges>
 #include <set>
 #include <span>
 #include <vector>
@@ -128,4 +131,27 @@ TEST_CASE("each biome is coloured as it looks from above", "[client][ground]") {
     CHECK(glm::all(glm::lessThan(of(hog::planet::Biome::Ocean), of(hog::planet::Biome::Beach))));
     CHECK(of(hog::planet::Biome::Grassland).g > of(hog::planet::Biome::Grassland).b);
     CHECK(of(hog::planet::Biome::Ice) != of(hog::planet::Biome::Desert));
+}
+
+TEST_CASE("each biome's ground varies up close and averages to its colour", "[client][ground]") {
+    const hog::client::BiomePalette palette = hog::client::biome_palette();
+    const auto looks = hog::client::biome_looks();
+    for (std::size_t biome = 0; biome < looks.size(); ++biome) {
+        INFO(hog::planet::to_string(static_cast<hog::planet::Biome>(biome)));
+        const hog::terrain::Look& look = looks.at(biome);
+        CHECK(hog::Vec3{look.colour} == palette.at(biome));
+        CHECK(look.accent != look.colour);
+        CHECK(look.grain > 0.0);
+        const hog::terrain::MaterialImage material = hog::terrain::material_image(look, 64);
+        const std::vector<std::uint8_t>& largest = material.levels.front();
+        CHECK(std::ranges::any_of(std::views::iota(std::size_t{0}, largest.size() / 4),
+                                  [&](std::size_t texel) {
+                                      return largest.at(4 * texel) != largest.at(0) ||
+                                             largest.at((4 * texel) + 1) != largest.at(1);
+                                  }));
+    }
+    // Every look is its own.
+    for (std::size_t biome = 1; biome < looks.size(); ++biome) {
+        CHECK(looks.at(biome).seed != looks.at(biome - 1).seed);
+    }
 }

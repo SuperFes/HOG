@@ -18,12 +18,68 @@ BiomePalette biome_palette() {
     return palette;
 }
 
+std::array<terrain::Look, planet::biome_count> biome_looks() {
+    // The accent as a tint of the biome's colour, how much ground it covers, then the grain and
+    // the mottling.
+    struct Variation {
+        planet::Biome biome;
+        DVec3 accent;
+        double share;
+        double grain;
+        double mottle;
+    };
+    constexpr auto vary = [](planet::Biome biome, DVec3 accent, double share, double grain,
+                             double mottle) {
+        return Variation{
+            .biome = biome, .accent = accent, .share = share, .grain = grain, .mottle = mottle};
+    };
+    using planet::Biome;
+    constexpr std::array variations{
+        // Ripples of darker, wetter sand.
+        vary(Biome::Ocean, {0.7, 0.7, 0.7}, 0.2, 0.25, 0.15),
+        vary(Biome::Beach, {1.2, 1.2, 1.15}, 0.3, 0.3, 0.1),
+        vary(Biome::Ice, {0.85, 0.95, 1.05}, 0.3, 0.06, 0.08),
+        // Lichen and bare stone.
+        vary(Biome::Tundra, {1.2, 1.0, 0.8}, 0.4, 0.35, 0.25),
+        // Needles and moss.
+        vary(Biome::BorealForest, {0.6, 0.7, 0.6}, 0.35, 0.4, 0.3),
+        // Leaf litter.
+        vary(Biome::TemperateForest, {1.5, 1.0, 0.6}, 0.3, 0.4, 0.3),
+        // Dry tufts.
+        vary(Biome::Grassland, {1.4, 1.1, 0.7}, 0.25, 0.35, 0.2),
+        // Bare dirt between the bushes.
+        vary(Biome::Shrubland, {1.4, 1.1, 0.9}, 0.4, 0.35, 0.3),
+        vary(Biome::Desert, {1.1, 1.0, 0.9}, 0.3, 0.2, 0.15),
+        vary(Biome::Savanna, {1.3, 1.15, 0.8}, 0.35, 0.35, 0.25),
+        vary(Biome::TropicalRainforest, {0.7, 0.9, 0.7}, 0.35, 0.4, 0.3),
+        // Paler stone among the darker.
+        vary(Biome::Alpine, {1.2, 1.2, 1.25}, 0.35, 0.45, 0.35),
+        // Standing water.
+        vary(Biome::Wetland, {0.6, 0.7, 0.8}, 0.35, 0.3, 0.25),
+        vary(Biome::Lake, {0.7, 0.7, 0.7}, 0.3, 0.25, 0.2)};
+    static_assert(variations.size() == planet::biome_count);
+
+    const BiomePalette palette = biome_palette();
+    std::array<terrain::Look, planet::biome_count> looks{};
+    for (const Variation& variation : variations) {
+        const auto biome = static_cast<std::size_t>(variation.biome);
+        const DVec3 colour{palette.at(biome)};
+        looks.at(biome) = {.colour = colour,
+                           .accent = glm::min(colour * variation.accent, DVec3{1.0}),
+                           .accent_share = variation.share,
+                           .grain = variation.grain,
+                           .mottle = variation.mottle,
+                           .seed = biome + 1};
+    }
+    return looks;
+}
+
 std::vector<terrain::MaterialImage> biome_materials() {
-    // Fine enough at arm's length over the four metres a material spans.
+    // A texel about 1.5 cm across over the four metres a material spans.
     constexpr int size = 256;
     std::vector<terrain::MaterialImage> materials;
-    for (const Vec3 colour : biome_palette()) {
-        materials.push_back(terrain::material_image({.colour = DVec3{colour}}, size));
+    for (const terrain::Look& look : biome_looks()) {
+        materials.push_back(terrain::material_image(look, size));
     }
     return materials;
 }

@@ -22,7 +22,10 @@ using BiomePalette = std::array<Vec3, planet::biome_count>;
 // Each biome as it looks from above in daylight, the seabed as it would without the sea over it.
 [[nodiscard]] BiomePalette biome_palette();
 
-// Each biome's material, in Biome's order, averaging to its colour in the palette.
+// How each biome's ground looks up close, averaging to its colour in the palette.
+[[nodiscard]] std::array<terrain::Look, planet::biome_count> biome_looks();
+
+// Each biome's material from its look, in Biome's order.
 [[nodiscard]] std::vector<terrain::MaterialImage> biome_materials();
 
 // Slots on the GPU that patches are held in, as render::TerrainPool hands them out.
