@@ -110,12 +110,13 @@ TEST_CASE("depth keeps what's nearest, whichever is drawn first", "[render][gpu]
     CHECK(device->validation_errors() == 0);
 }
 
-TEST_CASE("colour is laid over what's drawn by its alpha, premultiplied or not, or added to it",
+TEST_CASE("colour is laid over what's drawn by its alpha, premultiplied or not, added or screened",
           "[render][gpu]") {
     const auto device = test_device();
     const Pipeline alpha = fill_pipeline(*device, Blend::Alpha);
     const Pipeline premultiplied = fill_pipeline(*device, Blend::Premultiplied);
     const Pipeline add = fill_pipeline(*device, Blend::Add);
+    const Pipeline screen = fill_pipeline(*device, Blend::Screen);
     const std::array<float, 4> blue{0.0F, 0.0F, 0.4F, 1.0F};
 
     const Pixel over = draw_all(
@@ -138,6 +139,12 @@ TEST_CASE("colour is laid over what's drawn by its alpha, premultiplied or not, 
         draw_all(*device, blue,
                  std::array{Draw{.pipeline = &add, .fill = {.colour = {0.4F, 0.0F, 0.2F, 0.0F}}}});
     CHECK(added == Pixel{102, 0, 153, 255});
+
+    // Blue is 0.25 + (0.4 * (1 - 0.25)).
+    const Pixel screened = draw_all(
+        *device, blue,
+        std::array{Draw{.pipeline = &screen, .fill = {.colour = {0.6F, 0.0F, 0.25F, 0.0F}}}});
+    CHECK(screened == Pixel{153, 0, 140, 255});
     CHECK(device->validation_errors() == 0);
 }
 

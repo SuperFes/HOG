@@ -17,6 +17,9 @@ enum class Blend : std::uint8_t {
     Alpha,         // over what's there, by the colour's alpha
     Premultiplied, // added to what's there, which is kept by one less the colour's alpha
     Add,
+    // What's there is kept by one less the colour, channel by channel: added light, tone mapped as
+    // 1 - exp(-radiance) is, laid over light tone mapped the same way.
+    Screen,
 };
 
 // A graphics pipeline drawing into colour and depth images by dynamic rendering, with the

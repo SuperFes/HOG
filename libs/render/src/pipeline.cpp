@@ -58,6 +58,8 @@ VkBlendFactor kept_colour(Blend blend) noexcept {
         return VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
     case Blend::Add:
         return VK_BLEND_FACTOR_ONE;
+    case Blend::Screen:
+        return VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR;
     }
     return VK_BLEND_FACTOR_ZERO;
 }
