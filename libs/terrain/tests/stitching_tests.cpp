@@ -264,7 +264,59 @@ TEST_CASE("selected patches meet without cracks", "[terrain][stitching]") {
     }
 }
 
+TEST_CASE("every stitching's skirts hang from its outline", "[terrain][stitching]") {
+    // The edge and place along it of the vertex a skirt vertex hangs under.
+    const auto above = [](std::uint16_t vertex) {
+        const int skirt = vertex - hog::terrain::patch_grid_vertices;
+        const int edge = skirt / patch_side;
+        const auto point = hog::terrain::on_edge(edge, skirt % patch_side);
+        return std::pair{edge, static_cast<std::uint16_t>((point.j * patch_side) + point.i)};
+    };
+    for (int edges = 0; edges < hog::terrain::stitchings; ++edges) {
+        const auto indices = hog::terrain::skirt_indices(static_cast<std::uint8_t>(edges));
+        REQUIRE(indices.size() % 3 == 0);
+        std::multiset<std::pair<std::uint16_t, std::uint16_t>> hung;
+        std::multiset<std::pair<std::uint16_t, std::uint16_t>> under;
+        for (std::size_t first = 0; first < indices.size(); first += 3) {
+            std::vector<std::uint16_t> tops;
+            std::vector<std::uint16_t> bottoms;
+            for (std::size_t k = 0; k < 3; ++k) {
+                const std::uint16_t vertex = indices[first + k];
+                REQUIRE(vertex < hog::terrain::patch_vertices);
+                (vertex < hog::terrain::patch_grid_vertices ? tops : bottoms).push_back(vertex);
+            }
+            REQUIRE((tops.size() == 1 || tops.size() == 2));
+            auto& ends = tops.size() == 2 ? hung : under;
+            const auto& pair = tops.size() == 2 ? tops : bottoms;
+            const std::uint16_t lone = tops.size() == 2 ? bottoms[0] : tops[0];
+            const auto [a, b] = std::minmax(pair[0], pair[1]);
+            if (tops.size() == 2) {
+                ends.insert({a, b});
+                // The bottom corner hangs under one of the top two, on their edge.
+                const auto [edge, over] = above(lone);
+                CHECK((over == a || over == b));
+                CHECK(edge_along(a, b) == edge);
+            } else {
+                const auto [edge_a, over_a] = above(a);
+                const auto [edge_b, over_b] = above(b);
+                CHECK(edge_a == edge_b);
+                ends.insert(std::minmax(over_a, over_b));
+                CHECK((lone == over_a || lone == over_b));
+            }
+        }
+        // A quad hangs from each outline segment, and from nothing else.
+        std::multiset<std::pair<std::uint16_t, std::uint16_t>> segments;
+        for (const BorderSegment& segment : outline(static_cast<std::uint8_t>(edges))) {
+            segments.insert({segment.a, segment.b});
+        }
+        CHECK(hung == segments);
+        CHECK(under == segments);
+    }
+}
+
 TEST_CASE("a stitching beyond four edges is refused", "[terrain][stitching]") {
     const hog::testing::AssertionGuard guard;
     CHECK_THROWS_AS(patch_indices(hog::terrain::stitchings), hog::testing::AssertionFailed);
+    CHECK_THROWS_AS(hog::terrain::skirt_indices(hog::terrain::stitchings),
+                    hog::testing::AssertionFailed);
 }

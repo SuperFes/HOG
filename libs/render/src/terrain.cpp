@@ -187,10 +187,13 @@ Result<Terrain> Terrain::create(const Device& device, VkFormat colour_format, Vk
     Terrain drawn;
     std::vector<std::uint16_t> indices;
     for (std::size_t edges = 0; edges < drawn.stitchings_.size(); ++edges) {
-        const auto set = terrain::patch_indices(static_cast<std::uint8_t>(edges));
-        drawn.stitchings_.at(edges) = {.first = static_cast<std::uint32_t>(indices.size()),
-                                       .count = static_cast<std::uint32_t>(set.size())};
-        indices.insert(indices.end(), set.begin(), set.end());
+        const auto surface = terrain::patch_indices(static_cast<std::uint8_t>(edges));
+        const auto skirts = terrain::skirt_indices(static_cast<std::uint8_t>(edges));
+        drawn.stitchings_.at(edges) = {
+            .first = static_cast<std::uint32_t>(indices.size()),
+            .count = static_cast<std::uint32_t>(surface.size() + skirts.size())};
+        indices.insert(indices.end(), surface.begin(), surface.end());
+        indices.insert(indices.end(), skirts.begin(), skirts.end());
     }
     auto index_buffer = make_filled_buffer(device, std::as_bytes(std::span{indices}),
                                            VK_BUFFER_USAGE_INDEX_BUFFER_BIT);

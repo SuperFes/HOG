@@ -4,6 +4,7 @@
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/terrain/patch.hpp>
+#include <hog/terrain/stitching.hpp>
 #include <hog/testing/assertion_guard.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -13,6 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <numbers>
 #include <optional>
 #include <set>
 #include <tuple>
@@ -27,7 +29,10 @@ using hog::terrain::bake_patch;
 using hog::terrain::canonical;
 using hog::terrain::Corner;
 using hog::terrain::direction;
+using hog::terrain::GridPoint;
 using hog::terrain::Patch;
+using hog::terrain::patch_cells;
+using hog::terrain::patch_depth;
 using hog::terrain::patch_side;
 using hog::terrain::reaches;
 using hog::terrain::sample_cell;
@@ -41,6 +46,8 @@ DVec3 world_at(const Patch& patch, std::size_t vertex) {
     return (patch.origin + DVec3(patch.vertices.at(vertex).position)).metres();
 }
 
+constexpr auto grid_vertices = std::size_t{hog::terrain::patch_grid_vertices};
+
 std::size_t vertex_index(int i, int j) {
     return (static_cast<std::size_t>(j) * patch_side) + static_cast<std::size_t>(i);
 }
@@ -53,7 +60,7 @@ bool on_border(std::size_t vertex) {
 
 // The vertex of `patch` within `tolerance` metres of `point`, if one is.
 std::optional<std::size_t> vertex_near(const Patch& patch, DVec3 point, double tolerance) {
-    for (std::size_t vertex = 0; vertex < patch.vertices.size(); ++vertex) {
+    for (std::size_t vertex = 0; vertex < grid_vertices; ++vertex) {
         if (glm::distance(world_at(patch, vertex), point) <= tolerance) {
             return vertex;
         }
@@ -145,7 +152,7 @@ TEST_CASE("a patch lies on the ground over its cell", "[terrain][patch]") {
     const World& world = shared_world();
     const CellId cell = land_patch();
     const Patch patch = bake_patch(world, cell);
-    REQUIRE(patch.vertices.size() == std::size_t{patch_side} * patch_side);
+    REQUIRE(patch.vertices.size() == std::size_t{hog::terrain::patch_vertices});
     CHECK(std::abs(glm::length(patch.origin.metres()) - planet.radius) < 1e-6);
 
     const hog::planet::FaceIJ at = cell.to_face_ij();
@@ -182,7 +189,7 @@ TEST_CASE("neighbouring patches meet along their edges", "[terrain][patch]") {
         for (const CellId next : hog::planet::edge_neighbors(cell)) {
             const Patch neighbour = bake_patch(world, next);
             int shared = 0;
-            for (std::size_t vertex = 0; vertex < patch.vertices.size(); ++vertex) {
+            for (std::size_t vertex = 0; vertex < grid_vertices; ++vertex) {
                 if (!on_border(vertex)) {
                     continue;
                 }
@@ -235,6 +242,43 @@ TEST_CASE("a patch faces outwards and tilts with its slopes", "[terrain][patch]"
         least = std::min(least, upright);
     }
     CHECK(least < 0.9999F);
+}
+
+TEST_CASE("a patch's skirts hang under its edges, lit alike", "[terrain][patch]") {
+    const Patch patch = bake_patch(shared_world(), land_patch());
+    const double spacing = planet.radius * std::numbers::pi / 2.0 /
+                           static_cast<double>(1 << (land_patch().level() + patch_depth));
+    for (int edge = 0; edge < 4; ++edge) {
+        for (int along = 0; along < patch_side; ++along) {
+            const GridPoint above = hog::terrain::on_edge(edge, along);
+            const auto skirt = static_cast<std::size_t>(hog::terrain::skirt_vertex(edge, along));
+            const std::size_t top = vertex_index(above.i, above.j);
+            const DVec3 bottom = world_at(patch, skirt);
+            CHECK(glm::length(glm::normalize(bottom) - glm::normalize(world_at(patch, top))) <
+                  1e-6);
+            CHECK(glm::length(bottom) - planet.radius <
+                  patch.heights.lowest - (patch_cells / 4.0 * spacing) + near_enough);
+            CHECK(patch.vertices.at(skirt).normal == patch.vertices.at(top).normal);
+            CHECK(patch.vertices.at(skirt).biome == patch.vertices.at(top).biome);
+        }
+    }
+}
+
+TEST_CASE("a patch's skirts face out of it", "[terrain][patch]") {
+    const Patch patch = bake_patch(shared_world(), land_patch());
+    const DVec3 up = glm::normalize(patch.origin.metres());
+    for (const std::uint8_t edges : {std::uint8_t{0}, std::uint8_t{15}}) {
+        const auto indices = hog::terrain::skirt_indices(edges);
+        REQUIRE(!indices.empty());
+        for (std::size_t first = 0; first < indices.size(); first += 3) {
+            const DVec3 a = world_at(patch, indices[first]);
+            const DVec3 b = world_at(patch, indices[first + 1]);
+            const DVec3 c = world_at(patch, indices[first + 2]);
+            DVec3 out = ((a + b + c) / 3.0) - patch.origin.metres();
+            out -= up * glm::dot(out, up);
+            CHECK(glm::dot(glm::cross(b - a, c - a), out) > 0.0);
+        }
+    }
 }
 
 TEST_CASE("a patch shows changes to the ground", "[terrain][patch]") {

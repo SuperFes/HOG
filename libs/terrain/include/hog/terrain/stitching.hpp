@@ -17,4 +17,8 @@ inline constexpr int stitchings = 16;
 // straight between the vertices a neighbour a level coarser has there.
 [[nodiscard]] std::span<const std::uint16_t> patch_indices(std::uint8_t coarser_edges);
 
+// Triangles over a patch's skirts, facing out of it, hung from patch_indices' outline for the
+// same edges.
+[[nodiscard]] std::span<const std::uint16_t> skirt_indices(std::uint8_t coarser_edges);
+
 } // namespace hog::terrain

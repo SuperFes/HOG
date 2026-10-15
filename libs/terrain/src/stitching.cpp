@@ -13,25 +13,6 @@ namespace {
 
 constexpr int last = patch_cells;
 
-struct GridPoint {
-    int i;
-    int j;
-};
-
-// `along` an edge and `in` rows from it.
-[[nodiscard]] GridPoint on_edge(int edge, int along, int in) {
-    switch (edge) {
-    case 0:
-        return {.i = in, .j = along};
-    case 1:
-        return {.i = last - in, .j = along};
-    case 2:
-        return {.i = along, .j = in};
-    default:
-        return {.i = along, .j = last - in};
-    }
-}
-
 [[nodiscard]] std::vector<std::uint16_t> stitched(std::uint8_t coarser_edges) {
     std::vector<std::uint16_t> indices;
     const auto triangle = [&](GridPoint a, GridPoint b, GridPoint c) {
@@ -76,18 +57,51 @@ struct GridPoint {
     return indices;
 }
 
+[[nodiscard]] std::vector<std::uint16_t> skirted(std::uint8_t coarser_edges) {
+    std::vector<std::uint16_t> indices;
+    for (int edge = 0; edge < 4; ++edge) {
+        // Along the edge, then down, faces out of the -u and +v edges and into the others.
+        const bool forwards = edge == 0 || edge == 3;
+        const auto triangle = [&](int a, int b, int c) {
+            for (const int vertex : {a, forwards ? b : c, forwards ? c : b}) {
+                indices.push_back(static_cast<std::uint16_t>(vertex));
+            }
+        };
+        const auto top = [&](int along) {
+            const GridPoint point = on_edge(edge, along);
+            return (point.j * patch_side) + point.i;
+        };
+        const auto bottom = [&](int along) { return skirt_vertex(edge, along); };
+        const int step = ((coarser_edges >> edge) & 1U) != 0 ? 2 : 1;
+        for (int along = 0; along < last; along += step) {
+            triangle(top(along), top(along + step), bottom(along));
+            triangle(top(along + step), bottom(along + step), bottom(along));
+        }
+    }
+    return indices;
+}
+
+template <auto Build>
+[[nodiscard]] std::span<const std::uint16_t> built(std::uint8_t coarser_edges) {
+    HOG_ASSERT(coarser_edges < stitchings, "stitching beyond a patch's four edges");
+    static const auto sets = [] {
+        std::array<std::vector<std::uint16_t>, stitchings> each;
+        for (std::size_t edges = 0; edges < each.size(); ++edges) {
+            each.at(edges) = Build(static_cast<std::uint8_t>(edges));
+        }
+        return each;
+    }();
+    return sets.at(coarser_edges);
+}
+
 } // namespace
 
 std::span<const std::uint16_t> patch_indices(std::uint8_t coarser_edges) {
-    HOG_ASSERT(coarser_edges < stitchings, "stitching beyond a patch's four edges");
-    static const auto sets = [] {
-        std::array<std::vector<std::uint16_t>, stitchings> built;
-        for (std::size_t edges = 0; edges < built.size(); ++edges) {
-            built.at(edges) = stitched(static_cast<std::uint8_t>(edges));
-        }
-        return built;
-    }();
-    return sets.at(coarser_edges);
+    return built<stitched>(coarser_edges);
+}
+
+std::span<const std::uint16_t> skirt_indices(std::uint8_t coarser_edges) {
+    return built<skirted>(coarser_edges);
 }
 
 } // namespace hog::terrain

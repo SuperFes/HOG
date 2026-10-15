@@ -20,7 +20,7 @@ namespace hog::render {
 
 class Device;
 
-inline constexpr std::uint32_t patch_vertex_count = terrain::patch_side * terrain::patch_side;
+inline constexpr std::uint32_t patch_vertex_count = terrain::patch_vertices;
 
 struct TerrainPoolDesc {
     std::uint32_t patches = 1; // held on the GPU at once

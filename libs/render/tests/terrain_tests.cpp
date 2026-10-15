@@ -41,18 +41,29 @@ hog::render::BiomePalette palette() {
     return colours;
 }
 
-// Level ground facing +z, `spacing` metres between vertices about the patch's origin. Odd vertices
-// along its -u edge can be pushed off it towards +u.
-std::vector<PatchVertex> flat_patch(float spacing, float odd_pushed = 0.0F) {
+// Level ground facing +z, `spacing` metres between vertices about the patch's origin, its skirts
+// `skirt` metres deep. Odd vertices along its -u edge can be pushed off it.
+std::vector<PatchVertex> flat_patch(float spacing, hog::Vec3 odd_pushed = {}, float skirt = 0.0F) {
     constexpr int middle = patch_cells / 2;
     std::vector<PatchVertex> vertices;
     for (int j = 0; j < patch_side; ++j) {
         for (int i = 0; i < patch_side; ++i) {
-            const float pushed = i == 0 && j % 2 != 0 ? odd_pushed : 0.0F;
-            vertices.push_back({.position = {(static_cast<float>(i - middle) * spacing) + pushed,
-                                             static_cast<float>(j - middle) * spacing, 0.0F},
-                                .normal = {0.0F, 0.0F, 1.0F},
-                                .biome = Biome::Grassland});
+            const hog::Vec3 pushed = i == 0 && j % 2 != 0 ? odd_pushed : hog::Vec3{};
+            vertices.push_back(
+                {.position = hog::Vec3{static_cast<float>(i - middle) * spacing,
+                                       static_cast<float>(j - middle) * spacing, 0.0F} +
+                             pushed,
+                 .normal = {0.0F, 0.0F, 1.0F},
+                 .biome = Biome::Grassland});
+        }
+    }
+    for (int edge = 0; edge < 4; ++edge) {
+        for (int along = 0; along < patch_side; ++along) {
+            const hog::terrain::GridPoint above = hog::terrain::on_edge(edge, along);
+            PatchVertex under = vertices.at((static_cast<std::size_t>(above.j) * patch_side) +
+                                            static_cast<std::size_t>(above.i));
+            under.position.z -= skirt;
+            vertices.push_back(under);
         }
     }
     return vertices;
@@ -232,8 +243,8 @@ TEST_CASE("patches meet across a level boundary without cracks", "[render][gpu]"
     constexpr float fine = 1.0F;
     constexpr double half = patch_cells / 2.0;
     REQUIRE(pool.stage(0, 0, flat_patch(2.0F * fine)));
-    REQUIRE(pool.stage(0, 1, flat_patch(fine, fine / 2.0F)));
-    REQUIRE(pool.stage(0, 2, flat_patch(fine, fine / 2.0F)));
+    REQUIRE(pool.stage(0, 1, flat_patch(fine, {fine / 2.0F, 0.0F, 0.0F})));
+    REQUIRE(pool.stage(0, 2, flat_patch(fine, {fine / 2.0F, 0.0F, 0.0F})));
     const auto seam = [&](std::uint8_t fine_edges) {
         const std::array draws{
             TerrainDraw{.slot = 0, .origin = WorldPosition{DVec3{-2.0 * half, 0.0, 0.0}}},
@@ -248,5 +259,40 @@ TEST_CASE("patches meet across a level boundary without cracks", "[render][gpu]"
     };
     CHECK(background_pixels(seam(hog::terrain::edge_minus_u)) == 0);
     CHECK(background_pixels(seam(0)) > 0);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("skirts hide the gaps beside a neighbour left unstitched", "[render][gpu]") {
+    const auto device = test_device();
+    const auto terrain = make_terrain(*device);
+    constexpr float fine = 1.0F;
+    constexpr double half = patch_cells / 2.0;
+    // As beside a stand-in levels coarser: the finer side's odd vertices along the seam stand
+    // over the coarse side's straight edge, and nothing stitches them to it.
+    const auto seam = [&](float skirt) {
+        auto pool = make_pool(*device, {.patches = 3, .uploads = 3});
+        for (int slot = 0; slot < 3; ++slot) {
+            REQUIRE(pool.acquire());
+        }
+        REQUIRE(pool.stage(0, 0, flat_patch(2.0F * fine, {}, skirt)));
+        REQUIRE(pool.stage(0, 1, flat_patch(fine, {0.0F, 0.0F, fine / 2.0F}, skirt)));
+        REQUIRE(pool.stage(0, 2, flat_patch(fine, {0.0F, 0.0F, fine / 2.0F}, skirt)));
+        const std::array draws{
+            TerrainDraw{.slot = 0, .origin = WorldPosition{DVec3{-2.0 * half, 0.0, 0.0}}},
+            TerrainDraw{.slot = 1, .origin = WorldPosition{DVec3{half, -half, 0.0}}},
+            TerrainDraw{.slot = 2, .origin = WorldPosition{DVec3{half, half, 0.0}}}};
+        // From over the coarse side, looking across the seam and down onto the finer side.
+        const hog::render::TerrainView view{
+            .camera = {.eye = WorldPosition{DVec3{-4.0, 0.0, 6.0}},
+                       .forward = glm::normalize(DVec3{1.0, 0.0, -2.0}),
+                       .up = glm::normalize(DVec3{2.0, 0.0, 1.0}),
+                       .vertical_fov = 1.0,
+                       .near_plane = 0.1},
+            .sun = {0.0, 0.0, 1.0},
+            .night_light = 0.5};
+        return draw(*device, terrain, pool, draws, view);
+    };
+    CHECK(background_pixels(seam(0.0F)) > 0);
+    CHECK(background_pixels(seam(4.0F * fine)) == 0);
     CHECK(device->validation_errors() == 0);
 }

@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
+#include <numbers>
 
 namespace hog::terrain {
 
@@ -20,6 +21,10 @@ namespace {
     HOG_ASSERT(level >= 0 && level <= planet::max_level, "corner level out of range");
     return std::int64_t{1} << level;
 }
+
+// Skirts hang this many vertex spacings below the patch's lowest ground: enough to meet a
+// neighbour a few levels coarser, whose edge runs straight over what this one's follows.
+constexpr double skirt_spacings = patch_cells / 4.0;
 
 [[nodiscard]] bool on_face(std::int64_t at, std::int64_t side) noexcept {
     return at >= 0 && at <= side;
@@ -121,7 +126,7 @@ Patch bake_patch(const planet::World& world, planet::CellId cell) {
                 .origin = WorldPosition{planet::cell_center(cell) * radius},
                 .heights = heights,
                 .vertices = {}};
-    patch.vertices.reserve(biomes.size());
+    patch.vertices.reserve(patch_vertices);
     for (int j = 0; j < patch_side; ++j) {
         for (int i = 0; i < patch_side; ++i) {
             const DVec3 along_i =
@@ -132,6 +137,19 @@ Patch bake_patch(const planet::World& world, planet::CellId cell) {
                 {.position = relative_to(WorldPosition{points[bordered_index(i, j)]}, patch.origin),
                  .normal = Vec3(glm::normalize(glm::cross(along_i, along_j))),
                  .biome = biomes[index(i, j)]});
+        }
+    }
+
+    const double spacing = radius * std::numbers::pi / 2.0 / static_cast<double>(side_of(level));
+    const double depth = (heights.highest - heights.lowest) + (skirt_spacings * spacing);
+    for (int edge = 0; edge < 4; ++edge) {
+        for (int along = 0; along < patch_side; ++along) {
+            const GridPoint above = on_edge(edge, along);
+            const DVec3 point = points[bordered_index(above.i, above.j)];
+            PatchVertex skirt = patch.vertices[index(above.i, above.j)];
+            skirt.position = relative_to(
+                WorldPosition{point * (1.0 - (depth / glm::length(point)))}, patch.origin);
+            patch.vertices.push_back(skirt);
         }
     }
     return patch;
