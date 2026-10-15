@@ -1,5 +1,6 @@
 #include <hog/core/assert.hpp>
 #include <hog/render/device.hpp>
+#include <hog/render/streamed_image.hpp>
 #include <hog/render/terrain.hpp>
 #include <hog/shaders/terrain.hpp>
 
@@ -8,6 +9,7 @@
 #include <cstddef>
 #include <format>
 #include <ranges>
+#include <span>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -49,12 +51,50 @@ constexpr std::array vertex_attributes{
                                       .binding = 0,
                                       .format = VK_FORMAT_R8_UINT,
                                       .offset = offsetof(PatchVertex, biome)}};
-constexpr std::array palette_binding{
+constexpr std::array descriptors{
     VkDescriptorSetLayoutBinding{.binding = 0,
                                  .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
                                  .descriptorCount = 1,
-                                 .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+                                 .stageFlags =
+                                     VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                                 .pImmutableSamplers = nullptr},
+    VkDescriptorSetLayoutBinding{.binding = 1,
+                                 .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                 .descriptorCount = 1,
+                                 .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
                                  .pImmutableSamplers = nullptr}};
+
+// The near tile's size, the far one's, and 1 if ground below sea level is seen through water.
+struct Settings {
+    glm::vec4 tiling;
+};
+
+// The far tile, as many times the near one's size.
+constexpr double far_tiles = 8.0;
+
+// Each mip of every material in turn, the biomes' layers one after another.
+Result<std::vector<std::byte>> material_texels(std::span<const terrain::MaterialImage> materials) {
+    if (materials.size() != planet::biome_count) {
+        return make_error(
+            ErrorCode::InvalidArgument,
+            std::format("{} materials for {} biomes", materials.size(), planet::biome_count));
+    }
+    const terrain::MaterialImage& first = materials.front();
+    for (const terrain::MaterialImage& material : materials) {
+        if (material.size != first.size || material.levels.size() != first.levels.size() ||
+            first.levels.empty()) {
+            return make_error(ErrorCode::InvalidArgument, "materials of different sizes");
+        }
+    }
+    std::vector<std::byte> texels;
+    for (std::size_t level = 0; level < first.levels.size(); ++level) {
+        for (const terrain::MaterialImage& material : materials) {
+            const auto bytes = std::as_bytes(std::span{material.levels[level]});
+            texels.insert(texels.end(), bytes.begin(), bytes.end());
+        }
+    }
+    return texels;
+}
 
 void memory_barrier(VkCommandBuffer commands, VkPipelineStageFlags2 from_stage,
                     VkAccessFlags2 from_access, VkPipelineStageFlags2 to_stage,
@@ -187,8 +227,8 @@ Result<> TerrainPool::record_uploads(VkCommandBuffer commands, std::uint32_t fra
     return {};
 }
 
-Result<Terrain> Terrain::create(const Device& device, VkFormat colour_format, VkFormat depth_format,
-                                const BiomePalette& palette) {
+Result<Terrain> Terrain::create(Device& device, VkFormat colour_format, VkFormat depth_format,
+                                const TerrainLook& look) {
     Terrain drawn;
     std::vector<std::uint16_t> indices;
     for (std::size_t edges = 0; edges < drawn.stitchings_.size(); ++edges) {
@@ -207,15 +247,39 @@ Result<Terrain> Terrain::create(const Device& device, VkFormat colour_format, Vk
     }
     drawn.indices_ = std::move(index_buffer).value();
 
-    std::array<glm::vec4, planet::biome_count> colours{};
-    std::ranges::transform(palette, colours.begin(),
-                           [](Vec3 colour) { return glm::vec4{colour, 1.0F}; });
-    auto palette_buffer = make_filled_buffer(device, std::as_bytes(std::span{colours}),
-                                             VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
-    if (!palette_buffer) {
-        return std::unexpected(std::move(palette_buffer).error());
+    auto texels = material_texels(look.materials);
+    if (!texels) {
+        return std::unexpected(std::move(texels).error());
     }
-    drawn.palette_ = std::move(palette_buffer).value();
+    const terrain::MaterialImage& first = look.materials.front();
+    auto materials =
+        make_filled_image(device,
+                          {.format = VK_FORMAT_R8G8B8A8_SRGB,
+                           .extent = {.width = static_cast<std::uint32_t>(first.size),
+                                      .height = static_cast<std::uint32_t>(first.size)},
+                           .layers = planet::biome_count,
+                           .levels = static_cast<std::uint32_t>(first.levels.size())},
+                          *texels);
+    if (!materials) {
+        return std::unexpected(std::move(materials).error());
+    }
+    drawn.materials_ = std::move(materials).value();
+    auto sampler = make_tiling_sampler(device);
+    if (!sampler) {
+        return std::unexpected(std::move(sampler).error());
+    }
+    drawn.sampler_ = std::move(sampler).value();
+
+    drawn.period_ = look.tile * far_tiles;
+    const Settings settings{.tiling = {static_cast<float>(look.tile),
+                                       static_cast<float>(drawn.period_), look.sea ? 1.0F : 0.0F,
+                                       0.0F}};
+    auto settings_buffer = make_filled_buffer(device, std::as_bytes(std::span{&settings, 1}),
+                                              VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+    if (!settings_buffer) {
+        return std::unexpected(std::move(settings_buffer).error());
+    }
+    drawn.settings_ = std::move(settings_buffer).value();
 
     auto pipeline = make_pipeline(device, {.spirv = shaders::terrain,
                                            .bindings = vertex_bindings,
@@ -224,7 +288,7 @@ Result<Terrain> Terrain::create(const Device& device, VkFormat colour_format, Vk
                                            .depth_format = depth_format,
                                            .cull = VK_CULL_MODE_BACK_BIT,
                                            .push_constant_bytes = sizeof(Push),
-                                           .descriptors = palette_binding});
+                                           .descriptors = descriptors});
     if (!pipeline) {
         return std::unexpected(std::move(pipeline).error());
     }
@@ -238,17 +302,19 @@ void Terrain::draw(VkCommandBuffer commands, VkExtent2D extent, const TerrainPoo
         return;
     }
     const double aspect = static_cast<double>(extent.width) / static_cast<double>(extent.height);
+    // Where the eye lies in the tiling, which keeps materials' coordinates small near it.
+    const Vec3 tiled{glm::mod(view.camera.eye.metres(), DVec3{period_})};
     Push push{.clip_from_eye = Mat4{view_projection(view.camera, aspect)},
               .sun = glm::vec4{Vec3{view.sun}, static_cast<float>(view.night_light)},
               .bend_up = glm::vec4{Vec3{view.bend.up}, static_cast<float>(view.bend.eye_height)},
-              .bend_radii =
-                  glm::vec4{static_cast<float>(view.bend.radius),
-                            static_cast<float>(view.bend.faked), view.sea ? 1.0F : 0.0F, 0.0F},
+              .bend_radii = glm::vec4{static_cast<float>(view.bend.radius),
+                                      static_cast<float>(view.bend.faked), Vec2{tiled}},
               .origin = {}};
     constexpr VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.handle());
-    push_uniform_buffer(commands, pipeline_, 0, palette_.handle());
+    push_uniform_buffer(commands, pipeline_, 0, settings_.handle());
+    push_sampled_image(commands, pipeline_, 1, materials_.view(), sampler_.handle());
     const std::array vertices{pool.vertices()};
     const VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(commands, 0, 1, vertices.data(), &offset);
@@ -257,7 +323,7 @@ void Terrain::draw(VkCommandBuffer commands, VkExtent2D extent, const TerrainPoo
     for (const TerrainDraw& draw : draws) {
         HOG_ASSERT(draw.slot < pool.capacity(), "drawing a slot beyond the pool");
         HOG_ASSERT(draw.coarser_edges < terrain::stitchings, "stitching beyond four edges");
-        push.origin = glm::vec4{relative_to(draw.origin, view.camera.eye), 0.0F};
+        push.origin = glm::vec4{relative_to(draw.origin, view.camera.eye), tiled.z};
         vkCmdPushConstants(commands, pipeline_.layout(), stages, offsetof(Push, origin),
                            sizeof(push.origin), &push.origin);
         const Range& range = stitchings_.at(draw.coarser_edges);

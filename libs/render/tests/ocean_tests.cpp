@@ -8,6 +8,7 @@
 #include <hog/render/rendering.hpp>
 #include <hog/render/terrain.hpp>
 #include <hog/terrain/bend.hpp>
+#include <hog/terrain/material.hpp>
 #include <hog/terrain/stitching.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -79,10 +80,15 @@ std::vector<std::uint8_t> draw(hog::render::Device& device, const OceanView& vie
                                std::optional<double> ground, bool sea = true, bool tinted = false) {
     auto ocean = hog::render::Ocean::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
     REQUIRE(ocean);
-    hog::render::BiomePalette palette{};
-    palette.at(static_cast<std::size_t>(Biome::Grassland)) = {0.0F, 0.75F, 0.25F};
-    auto terrain = hog::render::Terrain::create(device, VK_FORMAT_R8G8B8A8_UNORM,
-                                                VK_FORMAT_D32_SFLOAT, palette);
+    std::vector<hog::terrain::MaterialImage> materials;
+    for (int biome = 0; biome < hog::planet::biome_count; ++biome) {
+        const DVec3 colour =
+            static_cast<Biome>(biome) == Biome::Grassland ? DVec3{0.0, 0.75, 0.25} : DVec3{0.0};
+        materials.push_back(hog::terrain::material_image({.colour = colour}, 64));
+    }
+    auto terrain =
+        hog::render::Terrain::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT,
+                                     {.materials = materials, .sea = tinted});
     REQUIRE(terrain);
     auto pool = hog::render::TerrainPool::create(device, {});
     REQUIRE(pool);
@@ -115,7 +121,7 @@ std::vector<std::uint8_t> draw(hog::render::Device& device, const OceanView& vie
                                      VkClearColorValue{.float32 = {0.0F, 0.0F, 0.0F, 1.0F}},
                                      {.view = depth->view()});
         terrain->draw(commands, extent, *pool, draws,
-                      {.camera = view.camera, .sun = view.sun, .sea = tinted, .bend = view.bend});
+                      {.camera = view.camera, .sun = view.sun, .bend = view.bend});
         if (sea) {
             ocean->draw(commands, extent, view);
         }

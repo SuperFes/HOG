@@ -6,8 +6,10 @@
 #include <hog/render/camera.hpp>
 #include <hog/render/memory.hpp>
 #include <hog/render/pipeline.hpp>
+#include <hog/render/sampler.hpp>
 #include <hog/render/vulkan.hpp>
 #include <hog/terrain/bend.hpp>
+#include <hog/terrain/material.hpp>
 #include <hog/terrain/patch.hpp>
 #include <hog/terrain/stitching.hpp>
 
@@ -78,8 +80,6 @@ struct TerrainView {
     DVec3 sun{1.0, 0.0, 0.0}; // unit, towards the sun
     // How bright ground facing away from the sun stays, from 0 to 1.
     double night_light = 0.0;
-    // Whether ground below sea level is tinted by the water over it.
-    bool sea = false;
     // How the ground is bent as it's drawn; lit as it truly lies.
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     terrain::Bend bend = {};
@@ -94,15 +94,25 @@ struct TerrainDraw {
     std::uint8_t coarser_edges = 0;
 };
 
-// Flat colours by biome, until there are materials.
-using BiomePalette = std::array<Vec3, planet::biome_count>;
+// What the ground is drawn with.
+struct TerrainLook {
+    // A material per biome, in Biome's order and all of one size; the sea's and lakes' are their
+    // beds'.
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    std::span<const terrain::MaterialImage> materials = {};
+    // Metres a material spans up close. It's mixed with itself eight times as large, which hides
+    // the repeat.
+    double tile = 4.0;
+    // Whether ground below sea level is tinted by the water over it.
+    bool sea = false;
+};
 
 // Ground drawn from patches in a pool, each placed from the eye so floats keep their precision
 // near it.
 class Terrain {
 public:
-    [[nodiscard]] static Result<Terrain> create(const Device& device, VkFormat colour_format,
-                                                VkFormat depth_format, const BiomePalette& palette);
+    [[nodiscard]] static Result<Terrain> create(Device& device, VkFormat colour_format,
+                                                VkFormat depth_format, const TerrainLook& look);
 
     // Records drawing into the colour and depth images being rendered to, of `extent`. Their
     // slots must hold patches already uploaded.
@@ -119,7 +129,10 @@ private:
 
     Pipeline pipeline_;
     Buffer indices_;
-    Buffer palette_;
+    Buffer settings_;
+    Image materials_;
+    Sampler sampler_;
+    double period_ = 0.0; // metres over which the tiling repeats
     std::array<Range, terrain::stitchings> stitchings_{};
 };
 

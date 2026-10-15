@@ -3,8 +3,10 @@
 #include <hog/core/result.hpp>
 #include <hog/planet/cell_id.hpp>
 #include <hog/render/terrain.hpp>
+#include <hog/terrain/material.hpp>
 #include <hog/terrain/stream.hpp>
 
+#include <array>
 #include <concepts>
 #include <cstdint>
 #include <format>
@@ -15,8 +17,13 @@
 
 namespace hog::client {
 
+using BiomePalette = std::array<Vec3, planet::biome_count>;
+
 // Each biome as it looks from above in daylight, the seabed as it would without the sea over it.
-[[nodiscard]] render::BiomePalette biome_palette();
+[[nodiscard]] BiomePalette biome_palette();
+
+// Each biome's material, in Biome's order, averaging to its colour in the palette.
+[[nodiscard]] std::vector<terrain::MaterialImage> biome_materials();
 
 // Slots on the GPU that patches are held in, as render::TerrainPool hands them out.
 template <typename Pool>

@@ -115,7 +115,7 @@ TEST_CASE("patches are drawn from their slots", "[client][ground]") {
 }
 
 TEST_CASE("each biome is coloured as it looks from above", "[client][ground]") {
-    const hog::render::BiomePalette palette = hog::client::biome_palette();
+    const hog::client::BiomePalette palette = hog::client::biome_palette();
     for (const hog::Vec3 colour : palette) {
         CHECK(glm::all(glm::greaterThanEqual(colour, hog::Vec3{0.0F})));
         CHECK(glm::all(glm::lessThanEqual(colour, hog::Vec3{1.0F})));

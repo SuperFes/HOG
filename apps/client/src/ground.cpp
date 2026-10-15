@@ -6,8 +6,8 @@
 
 namespace hog::client {
 
-render::BiomePalette biome_palette() {
-    render::BiomePalette palette{};
+BiomePalette biome_palette() {
+    BiomePalette palette{};
     for (std::size_t biome = 0; biome < palette.size(); ++biome) {
         palette.at(biome) = Vec3(mapgen::true_colour({.biome = static_cast<planet::Biome>(biome)}));
     }
@@ -16,6 +16,16 @@ render::BiomePalette biome_palette() {
     palette.at(static_cast<std::size_t>(planet::Biome::Ocean)) =
         palette.at(static_cast<std::size_t>(planet::Biome::Beach)) * wet;
     return palette;
+}
+
+std::vector<terrain::MaterialImage> biome_materials() {
+    // Fine enough at arm's length over the four metres a material spans.
+    constexpr int size = 256;
+    std::vector<terrain::MaterialImage> materials;
+    for (const Vec3 colour : biome_palette()) {
+        materials.push_back(terrain::material_image({.colour = DVec3{colour}}, size));
+    }
+    return materials;
 }
 
 std::vector<render::TerrainDraw>

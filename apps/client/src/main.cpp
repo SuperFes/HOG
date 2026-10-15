@@ -390,8 +390,9 @@ std::optional<render::Billboard> companion(const client::Options& options, rende
 int show(const client::Options& options, const planet::World& world, render::Device& device,
          render::Presenter& presenter, SDL_Window* window) {
     const terrain::StreamSettings settings;
+    const std::vector<terrain::MaterialImage> materials = client::biome_materials();
     auto terrain = render::Terrain::create(device, presenter.swapchain().format(), depth_format,
-                                           client::biome_palette());
+                                           {.materials = materials, .sea = true});
     if (!terrain) {
         std::cerr << std::format("hog-client: can't draw the ground: {}\n", terrain.error());
         return EXIT_FAILURE;
@@ -422,8 +423,7 @@ int show(const client::Options& options, const planet::World& world, render::Dev
                   .depths = {},
                   .lighting = {.camera = {},
                                .sun = glm::normalize(frame.to_world({0.5, 0.3, 0.8})),
-                               .night_light = night_light,
-                               .sea = true},
+                               .night_light = night_light},
                   .companion = companion(options, device, presenter.swapchain().format())};
     const Result<void> flown = fly(ground, world, flight, options, device, presenter, window);
     // The bakes go before the world, and the GPU may still be drawing with the ground.

@@ -6,6 +6,7 @@
 #include <hog/render/rendering.hpp>
 #include <hog/render/terrain.hpp>
 #include <hog/terrain/bend.hpp>
+#include <hog/terrain/material.hpp>
 #include <hog/terrain/stitching.hpp>
 #include <hog/testing/assertion_guard.hpp>
 
@@ -37,11 +38,15 @@ using Pixel = std::array<std::uint8_t, 4>;
 constexpr VkExtent2D extent{.width = 64, .height = 64};
 constexpr Pixel background{0, 0, 0, 255};
 
-hog::render::BiomePalette palette() {
-    hog::render::BiomePalette colours{};
-    colours.fill({0.5F, 0.5F, 0.5F});
-    colours.at(static_cast<std::size_t>(Biome::Grassland)) = {0.0F, 0.75F, 0.25F};
-    return colours;
+// Grey all over, but for grassland in green.
+std::vector<hog::terrain::MaterialImage> plain_materials() {
+    std::vector<hog::terrain::MaterialImage> materials;
+    for (int biome = 0; biome < hog::planet::biome_count; ++biome) {
+        const DVec3 colour =
+            static_cast<Biome>(biome) == Biome::Grassland ? DVec3{0.0, 0.75, 0.25} : DVec3{0.5};
+        materials.push_back(hog::terrain::material_image({.colour = colour}, 64));
+    }
+    return materials;
 }
 
 // Level ground facing +z, `spacing` metres between vertices about the patch's origin, its skirts
@@ -79,9 +84,19 @@ hog::render::TerrainPool make_pool(const hog::render::Device& device,
     return std::move(pool).value();
 }
 
-hog::render::Terrain make_terrain(const hog::render::Device& device) {
+// As plain_materials, but grassland's is grainy and mottled.
+std::vector<hog::terrain::MaterialImage> grainy_materials() {
+    std::vector<hog::terrain::MaterialImage> materials = plain_materials();
+    materials.at(static_cast<std::size_t>(Biome::Grassland)) = hog::terrain::material_image(
+        {.colour = {0.0, 0.75, 0.25}, .grain = 0.5, .mottle = 0.3, .seed = 1}, 64);
+    return materials;
+}
+
+hog::render::Terrain
+make_terrain(hog::render::Device& device,
+             const std::vector<hog::terrain::MaterialImage>& materials = plain_materials()) {
     auto terrain = hog::render::Terrain::create(device, VK_FORMAT_R8G8B8A8_UNORM,
-                                                VK_FORMAT_D32_SFLOAT, palette());
+                                                VK_FORMAT_D32_SFLOAT, {.materials = materials});
     REQUIRE(terrain);
     return std::move(terrain).value();
 }
@@ -144,6 +159,20 @@ bool near(Pixel a, Pixel b) {
     return true;
 }
 
+// The most any channel strays between the middle quarter's pixels.
+int spread(const std::vector<std::uint8_t>& pixels) {
+    int least = 255;
+    int most = 0;
+    for (std::uint32_t y = 3 * extent.height / 8; y < 5 * extent.height / 8; ++y) {
+        for (std::uint32_t x = 3 * extent.width / 8; x < 5 * extent.width / 8; ++x) {
+            const int green = pixel_at(pixels, x, y)[1];
+            least = std::min(least, green);
+            most = std::max(most, green);
+        }
+    }
+    return most - least;
+}
+
 int background_pixels(const std::vector<std::uint8_t>& pixels) {
     int count = 0;
     for (std::uint32_t y = 0; y < extent.height; ++y) {
@@ -155,9 +184,10 @@ int background_pixels(const std::vector<std::uint8_t>& pixels) {
 }
 
 // One patch two metres across, seen from four metres over its origin.
-std::vector<std::uint8_t> one_patch(hog::render::Device& device, DVec3 origin,
-                                    DVec3 sun = {0.0, 0.0, 1.0}) {
-    const auto terrain = make_terrain(device);
+std::vector<std::uint8_t>
+one_patch(hog::render::Device& device, DVec3 origin, DVec3 sun = {0.0, 0.0, 1.0},
+          const std::vector<hog::terrain::MaterialImage>& materials = plain_materials()) {
+    const auto terrain = make_terrain(device, materials);
     auto pool = make_pool(device, {});
     const std::uint32_t slot = pool.acquire().value_or(1);
     REQUIRE(slot == 0);
@@ -382,5 +412,59 @@ TEST_CASE("high up, the ground is drawn unbent", "[render][gpu]") {
     CHECK(view.bend.faked == radius);
     CHECK(draw(*device, terrain, pool, draws, view) == unbent);
     CHECK(background_pixels(unbent) > 0);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("up close the ground shows its material, and from afar what it averages to",
+          "[render][gpu]") {
+    const auto device = test_device();
+    const auto close = one_patch(*device, {}, {0.0, 0.0, 1.0}, grainy_materials());
+    CHECK(spread(close) > 20);
+    CHECK(spread(one_patch(*device, {})) == 0);
+    // Wherever on the planet it's seen from.
+    CHECK(one_patch(*device, {6.4e6, -3.2e6, 1.6e6}, {0.0, 0.0, 1.0}, grainy_materials()) == close);
+
+    // Two kilometres across, from high enough that a pixel spans tens of tiles.
+    const auto far = [&](const std::vector<hog::terrain::MaterialImage>& materials) {
+        const auto terrain = make_terrain(*device, materials);
+        auto pool = make_pool(*device, {});
+        REQUIRE(pool.acquire());
+        REQUIRE(pool.stage(0, 0, flat_patch(2'000.0F / patch_cells)));
+        const std::array draws{TerrainDraw{.slot = 0, .origin = WorldPosition{}}};
+        return pixel_at(draw(*device, terrain, pool, draws, looking_down({}, 3'000.0)), 32, 32);
+    };
+    const Pixel plain = far(plain_materials());
+    const Pixel grainy = far(grainy_materials());
+    for (std::size_t channel = 0; channel < 3; ++channel) {
+        CHECK(std::abs(int{grainy.at(channel)} - int{plain.at(channel)}) <= 3);
+    }
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("biomes blend from one to the next across the ground between them", "[render][gpu]") {
+    const auto device = test_device();
+    const auto terrain = make_terrain(*device);
+    // Grassland to -x of the middle, grey to +x.
+    std::vector<PatchVertex> half_grass = flat_patch(2.0F / patch_cells);
+    for (PatchVertex& vertex : half_grass) {
+        vertex.biome = vertex.position.x < 0.0F ? Biome::Grassland : Biome::Desert;
+    }
+    auto pool = make_pool(*device, {});
+    REQUIRE(pool.acquire());
+    REQUIRE(pool.stage(0, 0, half_grass));
+    const std::array draws{TerrainDraw{.slot = 0, .origin = WorldPosition{}}};
+    // Close enough that a cell spans several pixels.
+    const auto pixels = draw(*device, terrain, pool, draws, looking_down({}, 0.5));
+    int previous = 0;
+    int between = 0;
+    for (std::uint32_t x = 0; x < extent.width; ++x) {
+        const int red = pixel_at(pixels, x, extent.height / 2)[0];
+        CHECK(red >= previous);
+        previous = red;
+        between += red > 5 && red < 120 ? 1 : 0;
+    }
+    CHECK(pixel_at(pixels, 0, 32)[0] == 0);
+    CHECK(pixel_at(pixels, extent.width - 1, 32)[0] > 120);
+    CHECK(between >= 3);
     CHECK(device->validation_errors() == 0);
 }
