@@ -19,6 +19,13 @@ struct StreamSettings {
     std::uint32_t capacity = 4'096; // patches held at once
     std::uint32_t uploads = 16;     // patches arriving in a frame at most
     std::uint32_t bakes = 16;       // in flight at most
+    // Levels below the nearest ground of known heights that a bake is asked for at most, so
+    // coarser ground is baked first, bounding the finer ground's heights and drawn in its place
+    // meanwhile. 0 bakes the selection straight away.
+    int coarse_steps = 3;
+    // How far ground of unknown heights may lie beyond its nearest known ancestor's, in that
+    // ancestor's vertex spacings.
+    double margin = 2.0;
 };
 
 // A held patch, drawn in place of the selection over its ground.
@@ -37,9 +44,10 @@ struct StreamFrame {
 };
 
 // Which patches are held, standing in for the selection until what it asks for is baked: a held
-// parent covers its children until all of them are held, and held children cover their parent.
-// Ground covered by nothing held is baked first, then the rest nearest first. The patches drawn
-// least recently make room for those arriving. Changed ground stays drawn until it's baked again.
+// ancestor covers its descendants until all of them are held, and held children cover their
+// parent. Ground covered by nothing held is baked first, then the rest nearest first, each from
+// coarse to fine. The patches drawn least recently make room for those arriving. Changed ground
+// stays drawn until it's baked again.
 class PatchStream {
 public:
     explicit PatchStream(const StreamSettings& settings = {}) : settings_(settings) {}
@@ -58,9 +66,11 @@ public:
 
     // Of a patch baked so far, or bounding one whose children have all been.
     [[nodiscard]] std::optional<HeightRange> heights(planet::CellId cell) const;
-    // heights(), for selection, for as long as the stream lives.
+    // heights(), or else its nearest ancestor's with the margin, as far as anything's known.
+    [[nodiscard]] std::optional<HeightRange> bounds(planet::CellId cell) const;
+    // bounds(), for selection, for as long as the stream lives.
     [[nodiscard]] KnownHeights known_heights() const {
-        return [this](planet::CellId cell) { return heights(cell); };
+        return [this](planet::CellId cell) { return bounds(cell); };
     }
 
 private:
@@ -71,7 +81,8 @@ private:
     };
     struct Known {
         HeightRange heights;
-        bool baked = false; // rather than bounding its children
+        double spacing = 0.0; // metres between the vertices the heights were taken from
+        bool baked = false;   // rather than bounding its children
     };
 
     // Held cells covering the selection, without overlapping, with the least distance of what
@@ -82,6 +93,12 @@ private:
     // Held, and baked since its ground last changed.
     [[nodiscard]] bool fresh(planet::CellId cell) const;
     [[nodiscard]] std::optional<planet::CellId> held_above(planet::CellId cell) const;
+    // The coarsest ancestor still to bake before a selected cell, or the cell itself.
+    [[nodiscard]] planet::CellId to_bake(planet::CellId cell) const;
+    // The waiting patches still wanted: selected, or standing in for selected ground within them,
+    // as near as that ground is.
+    [[nodiscard]] std::map<planet::CellId, double>
+    wanted_waiting(std::span<const SelectedPatch> selected) const;
     void arrive(std::span<const SelectedPatch> selected, StreamFrame& frame);
     void spread_heights(planet::CellId cell);
 

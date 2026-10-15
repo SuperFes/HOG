@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <limits>
 #include <map>
+#include <numbers>
 #include <optional>
 #include <set>
 #include <span>
@@ -87,6 +88,12 @@ std::vector<planet::CellId> reached(const Cells& cells, planet::CellId change) {
     return found;
 }
 
+// Roughly, metres between a patch's vertices: a face spans a quarter turn.
+double spacing_of(const Patch& patch) {
+    return glm::length(patch.origin.metres()) * (std::numbers::pi / 2.0) /
+           static_cast<double>(std::int64_t{1} << (patch.cell.level() + patch_depth));
+}
+
 } // namespace
 
 void PatchStream::baked(Patch patch) {
@@ -94,7 +101,8 @@ void PatchStream::baked(Patch patch) {
     if (outdated_.erase(patch.cell) != 0) {
         return;
     }
-    heights_.insert_or_assign(patch.cell, Known{.heights = patch.heights, .baked = true});
+    heights_.insert_or_assign(
+        patch.cell, Known{.heights = patch.heights, .spacing = spacing_of(patch), .baked = true});
     spread_heights(patch.cell);
     if (!fresh(patch.cell)) {
         waiting_.push_back(std::move(patch));
@@ -120,6 +128,40 @@ std::optional<HeightRange> PatchStream::heights(planet::CellId cell) const {
     return found == heights_.end() ? std::nullopt : std::optional{found->second.heights};
 }
 
+std::optional<HeightRange> PatchStream::bounds(planet::CellId cell) const {
+    for (int level = cell.level(); level >= 0; --level) {
+        const auto found = heights_.find(cell.parent(level));
+        if (found == heights_.end()) {
+            continue;
+        }
+        if (level == cell.level()) {
+            return found->second.heights;
+        }
+        // Finer ground can rise and fall between the ancestor's vertices.
+        const double margin = settings_.margin * found->second.spacing;
+        return HeightRange{.lowest = found->second.heights.lowest - margin,
+                           .highest = found->second.heights.highest + margin};
+    }
+    return std::nullopt;
+}
+
+planet::CellId PatchStream::to_bake(planet::CellId cell) const {
+    if (settings_.coarse_steps <= 0) {
+        return cell;
+    }
+    int known = -1;
+    for (int level = cell.level(); level >= 0; --level) {
+        if (heights_.contains(cell.parent(level))) {
+            known = level;
+            break;
+        }
+    }
+    if (cell.level() - known <= settings_.coarse_steps) {
+        return cell;
+    }
+    return cell.parent(known + settings_.coarse_steps);
+}
+
 void PatchStream::spread_heights(planet::CellId cell) {
     // A parent's vertices are all its children's too.
     while (!cell.is_face()) {
@@ -127,17 +169,21 @@ void PatchStream::spread_heights(planet::CellId cell) {
         if (const auto own = heights_.find(parent); own != heights_.end() && own->second.baked) {
             return;
         }
-        HeightRange bounds{.lowest = std::numeric_limits<double>::infinity(),
-                           .highest = -std::numeric_limits<double>::infinity()};
+        Known bounds{.heights = {.lowest = std::numeric_limits<double>::infinity(),
+                                 .highest = -std::numeric_limits<double>::infinity()},
+                     .spacing = 0.0,
+                     .baked = false};
         for (int index = 0; index < 4; ++index) {
             const auto child = heights_.find(parent.child(index));
             if (child == heights_.end()) {
                 return;
             }
-            bounds.lowest = std::min(bounds.lowest, child->second.heights.lowest);
-            bounds.highest = std::max(bounds.highest, child->second.heights.highest);
+            bounds.heights.lowest = std::min(bounds.heights.lowest, child->second.heights.lowest);
+            bounds.heights.highest =
+                std::max(bounds.heights.highest, child->second.heights.highest);
+            bounds.spacing = std::max(bounds.spacing, child->second.spacing);
         }
-        heights_.insert_or_assign(parent, Known{.heights = bounds, .baked = false});
+        heights_.insert_or_assign(parent, bounds);
         cell = parent;
     }
 }
@@ -202,14 +248,35 @@ std::map<planet::CellId, double> PatchStream::cover(std::span<const SelectedPatc
     return drawn;
 }
 
-void PatchStream::arrive(std::span<const SelectedPatch> selected, StreamFrame& frame) {
-    std::map<planet::CellId, double> wanted;
+std::map<planet::CellId, double>
+PatchStream::wanted_waiting(std::span<const SelectedPatch> selected) const {
+    std::map<planet::CellId, double> selected_at;
     for (const SelectedPatch& patch : selected) {
-        wanted.emplace(patch.cell, patch.distance);
+        selected_at.emplace(patch.cell, patch.distance);
     }
-    std::erase_if(waiting_, [&](const Patch& patch) {
-        return !wanted.contains(patch.cell) || fresh(patch.cell);
-    });
+    std::map<planet::CellId, double> wanted;
+    for (const Patch& patch : waiting_) {
+        if (fresh(patch.cell)) {
+            continue;
+        }
+        if (const auto chosen = selected_at.find(patch.cell); chosen != selected_at.end()) {
+            wanted.emplace(patch.cell, chosen->second);
+            continue;
+        }
+        for (auto within = selected_at.lower_bound(patch.cell.range_min());
+             within != selected_at.end() && within->first <= patch.cell.range_max(); ++within) {
+            const auto [at, added] = wanted.try_emplace(patch.cell, within->second);
+            if (!added) {
+                at->second = std::min(at->second, within->second);
+            }
+        }
+    }
+    return wanted;
+}
+
+void PatchStream::arrive(std::span<const SelectedPatch> selected, StreamFrame& frame) {
+    const std::map<planet::CellId, double> wanted = wanted_waiting(selected);
+    std::erase_if(waiting_, [&](const Patch& patch) { return !wanted.contains(patch.cell); });
     std::ranges::stable_sort(waiting_, {}, [&](const Patch& patch) {
         return std::pair{covered(patch.cell), wanted.at(patch.cell)};
     });
@@ -281,9 +348,12 @@ StreamFrame PatchStream::update(std::span<const SelectedPatch> selected) {
         waiting.insert(patch.cell);
     }
     std::vector<std::tuple<bool, double, planet::CellId>> missing;
+    std::set<planet::CellId> asked;
     for (const SelectedPatch& patch : selected) {
-        if (!fresh(patch.cell) && !baking_.contains(patch.cell) && !waiting.contains(patch.cell)) {
-            missing.emplace_back(covered(patch.cell), patch.distance, patch.cell);
+        const planet::CellId cell = to_bake(patch.cell);
+        if (!fresh(cell) && !baking_.contains(cell) && !waiting.contains(cell) &&
+            asked.insert(cell).second) {
+            missing.emplace_back(covered(cell), patch.distance, cell);
         }
     }
     std::ranges::sort(missing);

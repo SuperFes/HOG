@@ -3,13 +3,16 @@
 #include <hog/terrain/patch.hpp>
 #include <hog/terrain/stream.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstddef>
 #include <initializer_list>
+#include <numbers>
 #include <set>
 #include <vector>
 
+using Catch::Approx;
 using hog::planet::CellId;
 using hog::terrain::HeightRange;
 using hog::terrain::Patch;
@@ -22,6 +25,9 @@ namespace {
 constexpr double radius = 115'000.0;
 
 constexpr CellId parent = CellId::from_face_ij(2, 5, 9, 6);
+
+// Baking the selection straight away, without coarser ground first.
+constexpr hog::terrain::StreamSettings fine_first{.coarse_steps = 0};
 
 Patch fake_bake(CellId cell, HeightRange heights = {}) {
     return {.cell = cell,
@@ -79,7 +85,7 @@ StreamFrame settle(PatchStream& stream, const std::vector<SelectedPatch>& select
 } // namespace
 
 TEST_CASE("a stream bakes what's selected, nearest first, so many at a time", "[terrain][stream]") {
-    PatchStream stream{{.bakes = 3}};
+    PatchStream stream{{.bakes = 3, .coarse_steps = 0}};
     const auto selected = selecting_children(parent);
     auto frame = stream.update(selected);
     CHECK(frame.bakes == std::vector{parent.child(0), parent.child(1), parent.child(2)});
@@ -97,7 +103,7 @@ TEST_CASE("a stream bakes what's selected, nearest first, so many at a time", "[
 
 TEST_CASE("bakes arrive within the upload budget, nearest first, and are drawn",
           "[terrain][stream]") {
-    PatchStream stream{{.uploads = 2}};
+    PatchStream stream{{.uploads = 2, .coarse_steps = 0}};
     const auto selected = selecting_children(parent);
     for (const CellId cell : stream.update(selected).bakes) {
         stream.baked(fake_bake(cell));
@@ -114,7 +120,7 @@ TEST_CASE("bakes arrive within the upload budget, nearest first, and are drawn",
 }
 
 TEST_CASE("a parent stands in for its children until all of them are held", "[terrain][stream]") {
-    PatchStream stream;
+    PatchStream stream{fine_first};
     settle(stream, selecting({parent}));
     const auto selected = selecting_children(parent);
     auto frame = stream.update(selected);
@@ -133,7 +139,7 @@ TEST_CASE("a parent stands in for its children until all of them are held", "[te
 }
 
 TEST_CASE("held children stand in for their parent until it's held", "[terrain][stream]") {
-    PatchStream stream;
+    PatchStream stream{fine_first};
     settle(stream, selecting_children(parent));
     auto frame = stream.update(selecting({parent}));
     CHECK(drawn(frame) == children(parent));
@@ -144,7 +150,7 @@ TEST_CASE("held children stand in for their parent until it's held", "[terrain][
 }
 
 TEST_CASE("ground nothing stands in for is baked first", "[terrain][stream]") {
-    PatchStream stream{{.bakes = 1}};
+    PatchStream stream{{.bakes = 1, .coarse_steps = 0}};
     const CellId elsewhere = CellId::from_face_ij(4, 1, 1, 6);
     settle(stream, selecting({parent}));
     // The nearer is covered by its parent meanwhile.
@@ -161,7 +167,7 @@ TEST_CASE("a parent standing in is stitched to what's drawn beside it", "[terrai
         }
     }
     REQUIRE(beside.is_valid());
-    PatchStream stream;
+    PatchStream stream{fine_first};
     settle(stream, selecting({parent, beside}));
 
     auto selected = selecting_children(parent);
@@ -182,7 +188,7 @@ TEST_CASE("a parent standing in is stitched to what's drawn beside it", "[terrai
 }
 
 TEST_CASE("room is made from the patches drawn least recently", "[terrain][stream]") {
-    PatchStream stream{{.capacity = 2}};
+    PatchStream stream{{.capacity = 2, .coarse_steps = 0}};
     const CellId first = parent.child(0);
     const CellId second = parent.child(1);
     const CellId third = parent.child(2);
@@ -196,7 +202,7 @@ TEST_CASE("room is made from the patches drawn least recently", "[terrain][strea
 }
 
 TEST_CASE("what's drawn isn't evicted, so arrivals wait for room", "[terrain][stream]") {
-    PatchStream stream{{.capacity = 1}};
+    PatchStream stream{{.capacity = 1, .coarse_steps = 0}};
     settle(stream, selecting({parent.child(0)}));
     const auto selected = selecting({parent.child(0), parent.child(1)});
     auto frame = stream.update(selected);
@@ -213,7 +219,7 @@ TEST_CASE("what's drawn isn't evicted, so arrivals wait for room", "[terrain][st
 }
 
 TEST_CASE("bakes no longer selected when they arrive are dropped", "[terrain][stream]") {
-    PatchStream stream;
+    PatchStream stream{fine_first};
     (void)stream.update(selecting({parent.child(0)}));
     stream.baked(fake_bake(parent.child(0)));
     const auto frame = stream.update(selecting({parent.child(1)}));
@@ -224,7 +230,7 @@ TEST_CASE("bakes no longer selected when they arrive are dropped", "[terrain][st
 
 TEST_CASE("heights are known from bakes, and a parent's from all its children's",
           "[terrain][stream]") {
-    PatchStream stream;
+    PatchStream stream{fine_first};
     CHECK(!stream.heights(parent));
     for (int child = 0; child < 4; ++child) {
         CHECK(!stream.heights(parent));
@@ -241,7 +247,7 @@ TEST_CASE("heights are known from bakes, and a parent's from all its children's"
 }
 
 TEST_CASE("edges towards nothing drawn keep the selection's stitching", "[terrain][stream]") {
-    PatchStream stream;
+    PatchStream stream{fine_first};
     const std::vector<SelectedPatch> selected{
         {.cell = parent, .coarser_edges = hog::terrain::edge_plus_v, .distance = 0.0}};
     const auto frame = settle(stream, selected);
@@ -250,7 +256,7 @@ TEST_CASE("edges towards nothing drawn keep the selection's stitching", "[terrai
 }
 
 TEST_CASE("changed ground stays drawn until it's baked again", "[terrain][stream]") {
-    PatchStream stream;
+    PatchStream stream{fine_first};
     const auto selected = selecting({parent});
     settle(stream, selected);
     stream.changed(parent.child(0).child(3));
@@ -267,7 +273,7 @@ TEST_CASE("changed ground stays drawn until it's baked again", "[terrain][stream
 }
 
 TEST_CASE("bakes from before a change are baked again", "[terrain][stream]") {
-    PatchStream stream;
+    PatchStream stream{fine_first};
     const auto selected = selecting({parent.child(0), parent.child(1)});
     REQUIRE(stream.update(selected).bakes.size() == 2);
     // One waiting when the ground changed, one in flight.
@@ -286,7 +292,7 @@ TEST_CASE("bakes from before a change are baked again", "[terrain][stream]") {
 }
 
 TEST_CASE("a change leaves the ground it doesn't reach be", "[terrain][stream]") {
-    PatchStream stream;
+    PatchStream stream{fine_first};
     const CellId elsewhere = CellId::from_face_ij(4, 1, 1, 6);
     const auto selected = selecting({parent, elsewhere});
     settle(stream, selected);
@@ -299,7 +305,7 @@ TEST_CASE("a change leaves the ground it doesn't reach be", "[terrain][stream]")
 
 TEST_CASE("a change forgets the heights it reaches, and the bounds built on them",
           "[terrain][stream]") {
-    PatchStream stream;
+    PatchStream stream{fine_first};
     for (int child = 0; child < 4; ++child) {
         stream.baked(fake_bake(parent.child(child)));
     }
@@ -329,7 +335,7 @@ TEST_CASE("a change finds every patch it reaches", "[terrain][stream]") {
                 }
             }
         }
-        PatchStream stream;
+        PatchStream stream{fine_first};
         for (const CellId cell : cells) {
             stream.baked(fake_bake(cell));
         }
@@ -345,4 +351,45 @@ TEST_CASE("a change finds every patch it reaches", "[terrain][stream]") {
         CHECK(reached > 0);
         CHECK(reached < cells.size());
     }
+}
+
+TEST_CASE("ground of unknown heights is bounded by its nearest known ancestor's, with a margin",
+          "[terrain][stream]") {
+    PatchStream stream{{.margin = 2.0}};
+    stream.baked(fake_bake(parent, {.lowest = 10.0, .highest = 20.0}));
+    // Patches at the parent's level span 2048 vertex spacings of a face's quarter turn.
+    const double spacing = radius * std::numbers::pi / 2.0 / 2'048.0;
+    const CellId inside = parent.child(1).child(2);
+    REQUIRE(stream.bounds(inside));
+    const HeightRange bounds = stream.bounds(inside).value_or(HeightRange{});
+    CHECK(bounds.lowest == Approx(10.0 - (2.0 * spacing)));
+    CHECK(bounds.highest == Approx(20.0 + (2.0 * spacing)));
+    CHECK(stream.known_heights()(inside) == bounds);
+    CHECK(!stream.heights(inside));
+    CHECK(stream.bounds(parent) == HeightRange{.lowest = 10.0, .highest = 20.0});
+    CHECK(!stream.bounds(parent.parent()));
+    CHECK(!stream.bounds(CellId::from_face_ij(4, 1, 1, 6).child(0)));
+}
+
+TEST_CASE("missing ground is baked from coarse to fine, a few levels at a time, each standing in",
+          "[terrain][stream]") {
+    PatchStream stream{{.coarse_steps = 3}};
+    const CellId deep = parent.child(0).child(1).child(2).child(3).child(0);
+    REQUIRE(deep.level() == 11);
+    const auto selected = selecting({deep});
+    auto frame = stream.update(selected);
+    for (const int level : {2, 5, 8, 11}) {
+        CHECK(frame.bakes == std::vector{deep.parent(level)});
+        stream.baked(fake_bake(deep.parent(level)));
+        frame = stream.update(selected);
+        CHECK(arrived(frame) == std::vector{deep.parent(level)});
+        CHECK(drawn(frame) == std::set{deep.parent(level)});
+    }
+    CHECK(frame.bakes.empty());
+}
+
+TEST_CASE("selected ground shares the coarser bakes over it", "[terrain][stream]") {
+    PatchStream stream{{.coarse_steps = 3}};
+    const auto frame = stream.update(selecting_children(parent.child(2).child(1)));
+    CHECK(frame.bakes == std::vector{parent.parent(2)});
 }
