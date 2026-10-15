@@ -78,6 +78,8 @@ struct TerrainView {
     DVec3 sun{1.0, 0.0, 0.0}; // unit, towards the sun
     // How bright ground facing away from the sun stays, from 0 to 1.
     double night_light = 0.0;
+    // Whether ground below sea level is tinted by the water over it.
+    bool sea = false;
     // How the ground is bent as it's drawn; lit as it truly lies.
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     terrain::Bend bend = {};

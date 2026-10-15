@@ -74,9 +74,9 @@ std::vector<PatchVertex> flat_patch() {
 }
 
 // Draws over a black background the ground, if any is `ground` metres above sea level under the
-// eye, and then, if asked, the sea; reads it back.
+// eye, tinted below sea level if asked, and then, if asked, the sea's surface; reads it back.
 std::vector<std::uint8_t> draw(hog::render::Device& device, const OceanView& view,
-                               std::optional<double> ground, bool sea = true) {
+                               std::optional<double> ground, bool sea = true, bool tinted = false) {
     auto ocean = hog::render::Ocean::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
     REQUIRE(ocean);
     hog::render::BiomePalette palette{};
@@ -115,7 +115,7 @@ std::vector<std::uint8_t> draw(hog::render::Device& device, const OceanView& vie
                                      VkClearColorValue{.float32 = {0.0F, 0.0F, 0.0F, 1.0F}},
                                      {.view = depth->view()});
         terrain->draw(commands, extent, *pool, draws,
-                      {.camera = view.camera, .sun = view.sun, .bend = view.bend});
+                      {.camera = view.camera, .sun = view.sun, .sea = tinted, .bend = view.bend});
         if (sea) {
             ocean->draw(commands, extent, view);
         }
@@ -187,5 +187,24 @@ TEST_CASE("the sea reflects more of the sky the more glancing the view", "[rende
     const Pixel near_horizon = pixel_at(level, middle, (extent.height / 2) + 1);
     const Pixel underfoot = pixel_at(level, middle, extent.height - 1);
     CHECK(near_horizon[2] > underfoot[2] + 50);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("ground below sea level is lost in the water's colour the deeper it lies",
+          "[render][gpu]") {
+    const auto device = test_device();
+    const OceanView view = seen_from(4.0, -up, north, glm::normalize(east + up));
+    const std::uint32_t middle = extent.width / 2;
+    const auto seen = [&](double ground, bool tinted) {
+        return pixel_at(draw(*device, view, ground, false, tinted), middle, middle);
+    };
+
+    CHECK(seen(1.0, true) == seen(1.0, false));
+    const Pixel shallow = seen(-1.0, true);
+    const Pixel deep = seen(-20.0, true);
+    CHECK(shallow[1] < seen(-1.0, false)[1]);
+    CHECK(shallow[1] > deep[1] + 50);
+    // Most of the way to the water's own colour, lit as the ground is.
+    CHECK(deep[1] < 40);
     CHECK(device->validation_errors() == 0);
 }

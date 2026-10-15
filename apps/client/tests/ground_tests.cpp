@@ -123,7 +123,9 @@ TEST_CASE("each biome is coloured as it looks from above", "[client][ground]") {
     const auto of = [&](hog::planet::Biome biome) {
         return palette.at(static_cast<std::size_t>(biome));
     };
-    CHECK(of(hog::planet::Biome::Ocean).b > of(hog::planet::Biome::Ocean).r);
+    // Sand under the sea, darker for being wet.
+    CHECK(of(hog::planet::Biome::Ocean).r > of(hog::planet::Biome::Ocean).b);
+    CHECK(glm::all(glm::lessThan(of(hog::planet::Biome::Ocean), of(hog::planet::Biome::Beach))));
     CHECK(of(hog::planet::Biome::Grassland).g > of(hog::planet::Biome::Grassland).b);
     CHECK(of(hog::planet::Biome::Ice) != of(hog::planet::Biome::Desert));
 }

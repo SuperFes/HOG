@@ -11,6 +11,10 @@ render::BiomePalette biome_palette() {
     for (std::size_t biome = 0; biome < palette.size(); ++biome) {
         palette.at(biome) = Vec3(mapgen::true_colour({.biome = static_cast<planet::Biome>(biome)}));
     }
+    // Wet sand; the water's colour is drawn over it by depth.
+    constexpr float wet = 0.7F;
+    palette.at(static_cast<std::size_t>(planet::Biome::Ocean)) =
+        palette.at(static_cast<std::size_t>(planet::Biome::Beach)) * wet;
     return palette;
 }
 

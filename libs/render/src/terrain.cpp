@@ -241,8 +241,9 @@ void Terrain::draw(VkCommandBuffer commands, VkExtent2D extent, const TerrainPoo
     Push push{.clip_from_eye = Mat4{view_projection(view.camera, aspect)},
               .sun = glm::vec4{Vec3{view.sun}, static_cast<float>(view.night_light)},
               .bend_up = glm::vec4{Vec3{view.bend.up}, static_cast<float>(view.bend.eye_height)},
-              .bend_radii = glm::vec4{static_cast<float>(view.bend.radius),
-                                      static_cast<float>(view.bend.faked), 0.0F, 0.0F},
+              .bend_radii =
+                  glm::vec4{static_cast<float>(view.bend.radius),
+                            static_cast<float>(view.bend.faked), view.sea ? 1.0F : 0.0F, 0.0F},
               .origin = {}};
     constexpr VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 

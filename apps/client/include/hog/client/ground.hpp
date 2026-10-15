@@ -15,7 +15,7 @@
 
 namespace hog::client {
 
-// Each biome as it looks from above in daylight.
+// Each biome as it looks from above in daylight, the seabed as it would without the sea over it.
 [[nodiscard]] render::BiomePalette biome_palette();
 
 // Slots on the GPU that patches are held in, as render::TerrainPool hands them out.
