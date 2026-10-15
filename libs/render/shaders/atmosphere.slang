@@ -150,3 +150,107 @@ public float3 within_step(float3 scattering, float3 extinction, float3 passed, f
     return select(extinction > 0.0, scattering * (1.0 - passed) / max(extinction, 1e-30),
                   scattering * length);
 }
+
+// Light scattered towards the eye along a ray, and the share of what lies beyond that still
+// reaches it.
+public struct Scattered {
+    public float3 light;
+    public float3 transmittance;
+};
+
+// As hog::atmosphere::Model::march: along `view` from the eye at `height`, with `sun` towards the
+// sun, both unit in a frame in which up from the eye is +Z, to where the ray leaves the air or
+// meets the ground, or to `distance` if that's nearer.
+public Scattered march(Air air, Sampler2D transmittance_table, Sampler2D scattering_table,
+                       float height, float3 view, float3 sun, float distance, uint steps) {
+    Scattered scattered;
+    scattered.light = float3(0.0);
+    scattered.transmittance = float3(1.0);
+    float3 eye = float3(0.0, 0.0, air.radii.x + max(height, 0.0));
+    float eye_height = max(height, 0.0);
+    float mu = view.z;
+    // From above the air, start where the ray enters it.
+    const float top = air.radii.y;
+    if (eye.z > top) {
+        const float entering = (eye.z * eye.z * mu * mu) - ((eye.z - top) * (eye.z + top));
+        if (mu >= 0.0 || entering < 0.0) {
+            return scattered;
+        }
+        const float along = (-eye.z * mu) - sqrt(entering);
+        eye += view * along;
+        distance -= along;
+        const float radius = length(eye);
+        eye_height = radius - air.radii.x;
+        mu = dot(eye / radius, view);
+    }
+    const float length = min(to_end(air, eye_height, mu), max(distance, 0.0));
+    const float cos_angle = dot(view, sun);
+    const float rayleigh = rayleigh_phase(cos_angle);
+    const float mie = mie_phase(cos_angle, air.mie_ozone.y);
+    const float3 up = normalize(eye);
+
+    // Denser near the eye, where the air is too.
+    float before = 0.0;
+    for (uint at = 0; at < steps; ++at) {
+        const float share = (at + 1.0) / steps;
+        const float after = length * share * share;
+        const float step = after - before;
+        const float along = before + (step * 0.5);
+        before = after;
+        const float point_height = height_along(air, eye_height, mu, along);
+        const float3 point_up = normalize((up * (air.radii.x + eye_height)) + (view * along));
+        const float sun_mu = dot(point_up, sun);
+        const Medium medium = medium_at(air, point_height);
+        const float3 lit =
+            (((medium.rayleigh * rayleigh) + (medium.mie * mie)) *
+             transmittance(air, transmittance_table, point_height, sun_mu)) +
+            (medium.scattering() * multiple_scattering(air, scattering_table, point_height, sun_mu));
+        const float3 through = exp(-medium.extinction * step);
+        scattered.light +=
+            scattered.transmittance * within_step(lit, medium.extinction, through, step);
+        scattered.transmittance *= through;
+    }
+    return scattered;
+}
+
+public static const uint sky_view_width = 192;
+public static const uint sky_view_height = 108;
+
+// Hillaire's sky-view mapping, from the eye at `height`: across, the view's azimuth from the sun's,
+// finest towards it; down, from the zenith to the horizon and on to the nadir, finest at the
+// horizon.
+public float2 sky_view_uv(Air air, float height, float mu, float cos_azimuth) {
+    const float radius = air.radii.x + height;
+    const float beta = acos(clamp(sqrt(above_ground(air, height)) / radius, 0.0, 1.0));
+    const float horizon_angle = pi - beta;
+    const float zenith_angle = acos(clamp(mu, -1.0, 1.0));
+    float v;
+    if (zenith_angle < horizon_angle) {
+        v = 0.5 * (1.0 - sqrt(1.0 - (zenith_angle / horizon_angle)));
+    } else {
+        v = 0.5 + (0.5 * sqrt(saturate((zenith_angle - horizon_angle) / beta)));
+    }
+    const float u = sqrt(saturate(0.5 - (0.5 * cos_azimuth)));
+    return float2(texel_from_unit(u, sky_view_width), texel_from_unit(v, sky_view_height));
+}
+
+// The view a texel of the sky-view table is for, with the sun along +X.
+public float3 sky_view_direction(Air air, float height, float2 uv) {
+    const float radius = air.radii.x + height;
+    const float beta = acos(clamp(sqrt(above_ground(air, height)) / radius, 0.0, 1.0));
+    const float horizon_angle = pi - beta;
+    const float u = unit_from_texel(uv.x, sky_view_width);
+    const float v = unit_from_texel(uv.y, sky_view_height);
+    float zenith_angle;
+    if (v < 0.5) {
+        const float coord = 1.0 - (2.0 * v);
+        zenith_angle = horizon_angle * (1.0 - (coord * coord));
+    } else {
+        const float coord = (2.0 * v) - 1.0;
+        zenith_angle = horizon_angle + (beta * coord * coord);
+    }
+    const float cos_azimuth = 1.0 - (2.0 * u * u);
+    const float sin_azimuth = sqrt(saturate(1.0 - (cos_azimuth * cos_azimuth)));
+    return float3(sin(zenith_angle) * cos_azimuth, sin(zenith_angle) * sin_azimuth,
+                  cos(zenith_angle));
+}

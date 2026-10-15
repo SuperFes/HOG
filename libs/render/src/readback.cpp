@@ -4,11 +4,27 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 
 namespace hog::render {
 
-Result<Buffer> make_readback(const Device& device, VkExtent2D extent) {
-    const VkDeviceSize size = VkDeviceSize{4} * extent.width * extent.height;
+namespace {
+
+std::uint32_t pixel_bytes_of(VkFormat format) noexcept {
+    switch (format) {
+    case VK_FORMAT_R16G16B16A16_SFLOAT:
+        return 8;
+    case VK_FORMAT_R32G32B32A32_SFLOAT:
+        return 16;
+    default:
+        return 4;
+    }
+}
+
+} // namespace
+
+Result<Buffer> make_readback(const Device& device, VkExtent2D extent, std::uint32_t pixel_bytes) {
+    const VkDeviceSize size = VkDeviceSize{pixel_bytes} * extent.width * extent.height;
     return make_buffer(device, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT, Memory::Readback);
 }
 
@@ -41,7 +57,7 @@ Result<std::vector<std::uint8_t>> read_back(const Buffer& buffer) {
 
 Result<std::vector<std::uint8_t>> read_pixels(Device& device, const Image& image, ImageUse use) {
     const VkExtent2D extent = image.desc().extent;
-    auto buffer = make_readback(device, extent);
+    auto buffer = make_readback(device, extent, pixel_bytes_of(image.desc().format));
     if (!buffer) {
         return std::unexpected(std::move(buffer).error());
     }

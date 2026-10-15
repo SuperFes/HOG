@@ -47,6 +47,7 @@ add_library(hog_render
     src/readback.cpp
     src/rendering.cpp
     src/sampler.cpp
+    src/sky.cpp
     src/streamed_image.cpp
     src/swapchain.cpp
     src/terrain.cpp
@@ -66,7 +67,7 @@ target_link_libraries(hog_render
     PUBLIC hog::atmosphere hog::core hog::terrain volk::volk
     PRIVATE hog::planet vk-bootstrap::vk-bootstrap)
 hog_target_defaults(hog_render)
-hog_add_shaders(hog_render shaders/air_tables.slang shaders/billboard.slang shaders/globe.slang shaders/ocean.slang
+hog_add_shaders(hog_render shaders/air_tables.slang shaders/billboard.slang shaders/globe.slang shaders/ocean.slang shaders/sky.slang shaders/sky_view.slang
                 shaders/terrain.slang)
 
 hog_add_tests(hog_render
@@ -81,6 +82,7 @@ hog_add_tests(hog_render
     tests/orbit_tests.cpp
     tests/pipeline_tests.cpp
     tests/presenter_tests.cpp
+    tests/sky_tests.cpp
     tests/streamed_image_tests.cpp
     tests/swapchain_tests.cpp
     tests/terrain_tests.cpp)
