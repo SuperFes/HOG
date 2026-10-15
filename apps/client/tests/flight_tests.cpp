@@ -130,3 +130,16 @@ TEST_CASE("a viewpoint sees what the camera does, through the viewport", "[clien
     CHECK(view.aspect == 2.0);
     CHECK(view.viewport_height == 800.0);
 }
+
+TEST_CASE("a companion flies along ahead of the eye, landing where the eye is low",
+          "[client][flight]") {
+    const Flight flight = start_flight({1.0, 0.0, 0.0}, radius, 500.0, {0.0, 1.0, 0.0});
+    const hog::WorldPosition high = hog::client::companion_feet(flight, 8.0, 2.0, radius, 100.0);
+    CHECK(glm::length(high.metres()) == Approx(radius + 498.0));
+    CHECK(glm::normalize(high.metres()).y == Approx(8.0 / (radius + 500.0)));
+    CHECK(glm::dot(hog::client::companion_direction(flight, 8.0), glm::normalize(high.metres())) ==
+          Approx(1.0));
+
+    const hog::WorldPosition landed = hog::client::companion_feet(flight, 8.0, 2.0, radius, 499.0);
+    CHECK(glm::length(landed.metres()) == Approx(radius + 499.0));
+}

@@ -1,21 +1,31 @@
+# The implementation, compiled once in C without HOG's warnings; pictures are PNGs.
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/stb_image.c"
+    "#define STB_IMAGE_IMPLEMENTATION\n#include <stb_image.h>\n")
+add_library(stb_image STATIC "${CMAKE_CURRENT_BINARY_DIR}/stb_image.c")
+target_include_directories(stb_image SYSTEM PUBLIC "${stb_SOURCE_DIR}")
+target_compile_definitions(stb_image PUBLIC STBI_ONLY_PNG)
+
 add_library(hog_client
     src/flight.cpp
     src/ground.cpp
-    src/options.cpp)
+    src/options.cpp
+    src/picture.cpp)
 add_library(hog::client ALIAS hog_client)
 
 target_include_directories(hog_client PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(hog_client
     PUBLIC hog::core hog::render hog::terrain
-    PRIVATE hog::mapgen hog::planet)
+    PRIVATE hog::mapgen hog::planet stb_image)
 hog_target_defaults(hog_client)
 
 hog_add_tests(hog_client
     tests/flight_tests.cpp
     tests/ground_tests.cpp
-    tests/options_tests.cpp)
+    tests/options_tests.cpp
+    tests/picture_tests.cpp)
 if(TARGET hog_client_tests)
     target_link_libraries(hog_client_tests PRIVATE hog::planet)
+    target_compile_definitions(hog_client_tests PRIVATE HOG_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 endif()
 
 if(NOT HOG_BUILD_CLIENT)
@@ -33,6 +43,7 @@ if(HOG_BUILD_TESTS AND NOT HOG_SANITIZE)
     # drew. Skipped where there's no Vulkan.
     add_test(NAME hog_client_smoke
         COMMAND hog_client_cli --planet "${PROJECT_SOURCE_DIR}/config/planet.toml"
+                --companion "${PROJECT_SOURCE_DIR}/res/Matt.png"
                 --quit-after 1 --threads 2 --software --validate
                 --capture "${CMAKE_CURRENT_BINARY_DIR}/smoke.png")
     set_tests_properties(hog_client_smoke PROPERTIES

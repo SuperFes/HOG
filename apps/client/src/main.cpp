@@ -1,6 +1,7 @@
 #include <hog/client/flight.hpp>
 #include <hog/client/ground.hpp>
 #include <hog/client/options.hpp>
+#include <hog/client/picture.hpp>
 #include <hog/core/time.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/mapgen/render.hpp>
@@ -10,6 +11,7 @@
 #include <hog/planet/tangent_frame.hpp>
 #include <hog/planet/world.hpp>
 #include <hog/render/barrier.hpp>
+#include <hog/render/billboard.hpp>
 #include <hog/render/device.hpp>
 #include <hog/render/memory.hpp>
 #include <hog/render/presenter.hpp>
@@ -60,6 +62,10 @@ constexpr double longest_frame = 0.1;
 constexpr Uint32 idle_ms = 50;
 constexpr VkFormat depth_format = VK_FORMAT_D32_SFLOAT;
 constexpr VkClearColorValue sky{.float32 = {0.35F, 0.55F, 0.85F, 1.0F}};
+// Someone 3 m tall flying along 8 m ahead, 2 m below the eye, so they land in front of it.
+constexpr double companion_height = 3.0;
+constexpr double companion_ahead = 8.0;
+constexpr double companion_below = 2.0;
 // Light from the sky on ground the sun doesn't reach.
 constexpr double night_light = 0.15;
 
@@ -145,6 +151,7 @@ struct Ground {
     client::GroundSlots slots;
     std::array<std::optional<render::Image>, render::frames_in_flight> depths;
     render::TerrainView lighting;
+    std::optional<render::Billboard> companion;
 };
 
 Result<const render::Image*> depth_for(Ground& ground, const render::Device& device,
@@ -200,7 +207,8 @@ Result<void> save_capture(const render::Device& device, const render::Buffer& bu
 // Draws a frame of the ground from the flight, saving it to `capture` if given; false when
 // there's nothing to draw into.
 Result<bool> draw(Ground& ground, const client::Flight& flight, double planet_radius,
-                  const render::Device& device, render::Presenter& presenter, SDL_Window* window,
+                  const render::Standing& companion, const render::Device& device,
+                  render::Presenter& presenter, SDL_Window* window,
                   const std::optional<std::filesystem::path>& capture) {
     auto begun = presenter.begin(window::drawable(window));
     if (!begun) {
@@ -241,6 +249,9 @@ Result<bool> draw(Ground& ground, const client::Flight& flight, double planet_ra
     view.camera = camera;
     ground.terrain.draw(frame.commands, frame.extent, ground.pool,
                         ground.slots.draws(streamed.drawn), view);
+    if (ground.companion) {
+        ground.companion->draw(frame.commands, frame.extent, camera, companion);
+    }
     vkCmdEndRendering(frame.commands);
 
     std::optional<Result<render::Buffer>> captured;
@@ -312,7 +323,14 @@ Result<void> fly(Ground& ground, const planet::World& world, client::Flight flig
         if (options.quit_after && now - started >= *options.quit_after) {
             controls.quit = true;
         }
-        const auto drawn = draw(ground, flight, radius, device, presenter, window,
+        const DVec3 companion_up = client::companion_direction(flight, companion_ahead);
+        const render::Standing companion{
+            .feet =
+                client::companion_feet(flight, companion_ahead, companion_below, radius,
+                                       ground_under(world, WorldPosition{companion_up * radius})),
+            .up = companion_up,
+            .height = companion_height};
+        const auto drawn = draw(ground, flight, radius, companion, device, presenter, window,
                                 controls.quit ? options.capture : std::nullopt);
         if (!drawn) {
             return std::unexpected(drawn.error());
@@ -324,7 +342,29 @@ Result<void> fly(Ground& ground, const planet::World& world, client::Flight flig
     return {};
 }
 
-int show(const client::Options& options, const planet::World& world, const render::Device& device,
+// The companion as a billboard, if there's one to fly with and they can be drawn.
+std::optional<render::Billboard> companion(const client::Options& options, render::Device& device,
+                                           VkFormat colour_format) {
+    if (!options.companion) {
+        return std::nullopt;
+    }
+    auto picture = client::load_picture(*options.companion);
+    if (!picture) {
+        std::cerr << std::format("hog-client: flying alone: {}\n", picture.error());
+        return std::nullopt;
+    }
+    client::lift_ink(*picture);
+    auto billboard = render::Billboard::create(device, colour_format, depth_format,
+                                               {.width = picture->width, .height = picture->height},
+                                               picture->texels);
+    if (!billboard) {
+        std::cerr << std::format("hog-client: flying alone: {}\n", billboard.error());
+        return std::nullopt;
+    }
+    return std::move(billboard).value();
+}
+
+int show(const client::Options& options, const planet::World& world, render::Device& device,
          render::Presenter& presenter, SDL_Window* window) {
     const terrain::StreamSettings settings;
     auto terrain = render::Terrain::create(device, presenter.swapchain().format(), depth_format,
@@ -353,7 +393,8 @@ int show(const client::Options& options, const planet::World& world, const rende
                   .depths = {},
                   .lighting = {.camera = {},
                                .sun = glm::normalize(frame.to_world({0.5, 0.3, 0.8})),
-                               .night_light = night_light}};
+                               .night_light = night_light},
+                  .companion = companion(options, device, presenter.swapchain().format())};
     const Result<void> flown = fly(ground, world, flight, options, device, presenter, window);
     // The bakes go before the world, and the GPU may still be drawing with the ground.
     (void)ground.baker.finish();

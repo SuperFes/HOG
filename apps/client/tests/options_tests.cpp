@@ -16,6 +16,7 @@ TEST_CASE("client options default to the development planet", "[client][options]
     CHECK(options->planet == "config/planet.toml");
     CHECK_FALSE(options->start);
     CHECK(options->threads == 0);
+    CHECK(options->companion == "res/Matt.png");
     CHECK_FALSE(options->quit_after);
     CHECK_FALSE(options->capture);
     CHECK_FALSE(options->software);
@@ -24,18 +25,24 @@ TEST_CASE("client options default to the development planet", "[client][options]
 }
 
 TEST_CASE("client options are parsed", "[client][options]") {
-    const auto options = parse_options(Arguments{"--planet", "other.toml", "--at", "-12.5,170,300",
-                                                 "--threads", "2", "--quit-after", "3", "--capture",
-                                                 "out.png", "--software", "--validate", "-h"});
+    const auto options =
+        parse_options(Arguments{"--planet", "other.toml", "--at", "-12.5,170,300", "--threads", "2",
+                                "--companion", "friend.png", "--quit-after", "3", "--capture",
+                                "out.png", "--software", "--validate", "-h"});
     REQUIRE(options);
     CHECK(options->planet == "other.toml");
     CHECK(options->start == Place{.latitude = -12.5, .longitude = 170.0, .altitude = 300.0});
     CHECK(options->threads == 2);
+    CHECK(options->companion == "friend.png");
     CHECK(options->quit_after == std::chrono::seconds{3});
     CHECK(options->capture == "out.png");
     CHECK(options->software);
     CHECK(options->validate);
     CHECK(options->help);
+}
+
+TEST_CASE("a client can fly alone", "[client][options]") {
+    CHECK(!parse_options(Arguments{"--alone"})->companion);
 }
 
 TEST_CASE("bad client options are rejected", "[client][options]") {

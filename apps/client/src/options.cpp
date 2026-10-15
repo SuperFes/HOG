@@ -66,6 +66,8 @@ Result<void> read_option(Options& options, std::string_view option, std::string_
                 std::format("--at takes latitude,longitude,altitude in degrees and metres, not {}",
                             value));
         }
+    } else if (option == "--companion") {
+        options.companion = std::filesystem::path{value};
     } else if (option == "--capture") {
         options.capture = std::filesystem::path{value};
     } else if (option == "--threads") {
@@ -101,6 +103,9 @@ options:
   --at LAT,LON,ALT       start at degrees of latitude and longitude, metres above
                          sea level (default over the starting islands)
   --threads N            baking the ground (default one per hardware thread)
+  --companion PATH       a drawing on white paper of someone 3 m tall to fly along
+                         with (default res/Matt.png)
+  --alone                fly without them
   --quit-after S         quit after this many seconds
   --capture PATH         save the last frame drawn as a PNG, on quitting
   --software             draw with a software Vulkan device, such as lavapipe
@@ -122,6 +127,10 @@ Result<Options> parse_options(std::span<const std::string_view> arguments) {
         const std::string_view argument = arguments[i];
         if (argument == "-h" || argument == "--help") {
             options.help = true;
+            continue;
+        }
+        if (argument == "--alone") {
+            options.companion.reset();
             continue;
         }
         if (argument == "--software") {

@@ -25,6 +25,8 @@ struct Options {
     // Over the starting islands without one.
     std::optional<Place> start;
     std::uint32_t threads = 0; // baking the ground, 0 for one per hardware thread
+    // A drawing on white paper, of someone to fly along with; none without one.
+    std::optional<std::filesystem::path> companion = std::filesystem::path{"res/Matt.png"};
     // For smoke tests and pictures: how long to run before quitting, and where to save the last
     // frame drawn, as a PNG.
     std::optional<std::chrono::milliseconds> quit_after;

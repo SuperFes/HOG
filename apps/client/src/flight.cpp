@@ -73,6 +73,17 @@ render::Camera flight_camera(const Flight& flight, double vertical_fov) {
             .vertical_fov = vertical_fov};
 }
 
+DVec3 companion_direction(const Flight& flight, double ahead) {
+    return glm::normalize(flight.eye.metres() + (flight.heading * ahead));
+}
+
+WorldPosition companion_feet(const Flight& flight, double ahead, double below, double planet_radius,
+                             double ground) {
+    const double height =
+        std::max(glm::length(flight.eye.metres()) - planet_radius - below, ground);
+    return WorldPosition{companion_direction(flight, ahead) * (planet_radius + height)};
+}
+
 terrain::Viewpoint viewpoint(const render::Camera& camera, VkExtent2D extent) {
     const auto height = static_cast<double>(std::max(extent.height, 1U));
     return {.eye = camera.eye,
