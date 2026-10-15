@@ -1,4 +1,5 @@
 #include <hog/client/options.hpp>
+#include <hog/core/build_info.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -23,7 +24,7 @@ TEST_CASE("client options default to the development planet", "[client][options]
     CHECK_FALSE(options->quit_after);
     CHECK_FALSE(options->capture);
     CHECK_FALSE(options->software);
-    CHECK_FALSE(options->validate);
+    CHECK(options->validate == hog::debug_build);
     CHECK_FALSE(options->help);
 }
 
@@ -74,4 +75,10 @@ TEST_CASE("paths not found here are found from above the program", "[client][opt
     const std::filesystem::path absolute = source / "nowhere.toml";
     CHECK(locate(absolute, source) == absolute);
     CHECK(locate("nowhere/at/all.toml", source / "apps") == "nowhere/at/all.toml");
+}
+
+TEST_CASE("a client can be told not to validate", "[client][options]") {
+    const auto options = parse_options(Arguments{"--validate", "--no-validate"});
+    REQUIRE(options);
+    CHECK_FALSE(options->validate);
 }

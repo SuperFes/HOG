@@ -1,5 +1,6 @@
 #pragma once
 
+#include <hog/core/build_info.hpp>
 #include <hog/core/result.hpp>
 
 #include <chrono>
@@ -34,9 +35,9 @@ struct Options {
     std::optional<std::chrono::milliseconds> quit_after;
     std::optional<std::filesystem::path> capture;
     // A software Vulkan device over a GPU, and the validation layer with its errors failing the
-    // run, also for tests.
+    // run, also for tests. Debug builds validate unless told not to.
     bool software = false;
-    bool validate = false;
+    bool validate = debug_build;
     bool help = false;
 };
 

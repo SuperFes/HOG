@@ -13,4 +13,10 @@ struct BuildInfo {
 
 [[nodiscard]] BuildInfo build_info() noexcept;
 
+#ifdef NDEBUG
+inline constexpr bool debug_build = false;
+#else
+inline constexpr bool debug_build = true;
+#endif
+
 } // namespace hog

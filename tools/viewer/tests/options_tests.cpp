@@ -1,3 +1,4 @@
+#include <hog/core/build_info.hpp>
 #include <hog/viewer/options.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -27,7 +28,7 @@ TEST_CASE("viewer options default to the local dev server", "[viewer][options]")
     CHECK_FALSE(options->capture);
     CHECK_FALSE(options->globe);
     CHECK_FALSE(options->software);
-    CHECK_FALSE(options->validate);
+    CHECK(options->validate == hog::debug_build);
     CHECK_FALSE(options->help);
 }
 
@@ -60,4 +61,10 @@ TEST_CASE("bad viewer options are rejected", "[viewer][options]") {
     CHECK_FALSE(parsed({"--quit-after", "-1"}));
     CHECK_FALSE(parsed({"--capture"}));
     CHECK_FALSE(parsed({"--overlay", "rainbows"}));
+}
+
+TEST_CASE("a viewer can be told not to validate", "[viewer][options]") {
+    const auto options = parsed({"--validate", "--no-validate"});
+    REQUIRE(options);
+    CHECK_FALSE(options->validate);
 }

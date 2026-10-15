@@ -86,7 +86,9 @@ options:
   --quit-after S  quit after this many seconds
   --capture PATH  save the last frame drawn as a PNG, on quitting
   --software      draw with a software Vulkan device, such as lavapipe
-  --validate      check Vulkan use with its validation layer, failing on errors
+  --validate      check Vulkan use with its validation layer, failing on errors;
+                  on by default in debug builds
+  --no-validate   don't
   -h, --help      show this help
 )";
 }
@@ -109,6 +111,10 @@ Result<Options> parse_options(std::span<const std::string_view> arguments) {
         }
         if (argument == "--validate") {
             options.validate = true;
+            continue;
+        }
+        if (argument == "--no-validate") {
+            options.validate = false;
             continue;
         }
         if (i + 1 == arguments.size()) {
