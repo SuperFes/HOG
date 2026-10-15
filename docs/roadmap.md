@@ -179,8 +179,8 @@ This phase builds a client that flies over the generated planet with a real sky.
 
 **Platform and device**
 
-- [ ] SDL3 window and input; the renderer takes a `VkSurface` and never owns the window, so the Qt editor can host it later
-- [ ] Vulkan 1.3 through volk, with VMA for memory
+- [x] SDL3 window and input; the renderer takes a `VkSurface` and never owns the window, so the Qt editor can host it later
+- [x] Vulkan 1.3 through volk, with VMA for memory
 - [ ] Spike: KosmicKrisp against MoltenVK on macOS
 - [ ] Validation layers on in debug builds, with errors failing CI smoke tests
 - [ ] GPU timing queries and a frame-time overlay
@@ -189,13 +189,13 @@ This phase builds a client that flies over the generated planet with a real sky.
 
 - [ ] Slang compiled to SPIR-V at build time, with hot reload in debug builds
 - [ ] Simple render graph: passes, transient images, barriers handled automatically
-- [ ] Camera-relative rendering (doubles on the CPU, floats on the GPU)
-- [ ] Reverse-Z depth
+- [x] Camera-relative rendering (doubles on the CPU, floats on the GPU)
+- [x] Reverse-Z depth
 
 **Planet**
 
-- [ ] Terrain chunks generated from the planet library on worker threads
-- [ ] Continuous LOD over the cube-sphere with no cracks at chunk borders
+- [x] Terrain chunks generated from the planet library on worker threads
+- [x] Continuous LOD over the cube-sphere with no cracks at chunk borders
 - [ ] Faked Earth-sized curvature, blending to true curvature with altitude
 - [ ] Biome-driven materials (flat colors first, textures later)
 - [ ] Basic ocean surface
@@ -204,7 +204,7 @@ This phase builds a client that flies over the generated planet with a real sky.
 **Tests**
 
 - [ ] Headless render of fixed camera views, compared with reference images within a tolerance
-- [ ] Unit tests for the LOD selection and chunk-border stitching
+- [x] Unit tests for the LOD selection and chunk-border stitching
 
 ## Phase 4 — First milestone: four friends on the islands
 
