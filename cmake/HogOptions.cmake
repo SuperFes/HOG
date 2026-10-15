@@ -1,6 +1,7 @@
 option(HOG_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(HOG_BUILD_TESTS "Build unit tests" ON)
 option(HOG_BUILD_VIEWER "Build the debug viewer app, with SDL3 and Dear ImGui" ON)
+option(HOG_BUILD_CLIENT "Build the game client app, with SDL3" ON)
 set(HOG_SANITIZE "" CACHE STRING "Semicolon-separated sanitizers, e.g. address;undefined or thread")
 option(HOG_USE_LIBCXX "Build against LLVM libc++ (what macOS ships) instead of the platform default" OFF)
 
