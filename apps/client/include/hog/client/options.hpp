@@ -34,6 +34,7 @@ struct Options {
     // frame drawn, as a PNG.
     std::optional<std::chrono::milliseconds> quit_after;
     std::optional<std::filesystem::path> capture;
+    bool timings = false; // shown over the picture
     // A software Vulkan device over a GPU, and the validation layer with its errors failing the
     // run, also for tests. Debug builds validate unless told not to.
     bool software = false;

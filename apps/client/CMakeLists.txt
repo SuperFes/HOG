@@ -8,6 +8,7 @@ target_compile_definitions(stb_image PUBLIC STBI_ONLY_PNG)
 add_library(hog_client
     src/daylight.cpp
     src/flight.cpp
+    src/frame_times.cpp
     src/ground.cpp
     src/likeness.cpp
     src/options.cpp
@@ -25,6 +26,7 @@ hog_target_defaults(hog_client)
 hog_add_tests(hog_client
     tests/daylight_tests.cpp
     tests/flight_tests.cpp
+    tests/frame_times_tests.cpp
     tests/ground_tests.cpp
     tests/likeness_tests.cpp
     tests/options_tests.cpp
@@ -48,12 +50,12 @@ hog_target_defaults(hog_client_cli)
 
 # GPU drivers are opaque to sanitizers, so those runs leave the smoke test out.
 if(HOG_BUILD_TESTS AND NOT HOG_SANITIZE)
-    # Flies for a moment without a window, on a software device with validation, saving what it
-    # drew. Skipped where there's no Vulkan.
+    # Flies for a moment without a window, on a software device with validation and the timings
+    # shown, saving what it drew. Skipped where there's no Vulkan.
     add_test(NAME hog_client_smoke
         COMMAND hog_client_cli --planet "${PROJECT_SOURCE_DIR}/config/planet.toml"
                 --companion "${PROJECT_SOURCE_DIR}/res/Matt.png"
-                --quit-after 1 --threads 2 --software --validate
+                --quit-after 1 --threads 2 --timings --software --validate
                 --capture "${CMAKE_CURRENT_BINARY_DIR}/smoke.png")
     set_tests_properties(hog_client_smoke PROPERTIES
         ENVIRONMENT "SDL_VIDEO_DRIVER=offscreen"

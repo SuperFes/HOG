@@ -130,6 +130,7 @@ options:
   --alone                fly without them
   --quit-after S         quit after this many seconds
   --capture PATH         save the last frame drawn as a PNG, on quitting
+  --timings              show how long frames take from the start
   --software             draw with a software Vulkan device, such as lavapipe
   --validate             check Vulkan use with its validation layer, failing on errors;
                          on by default in debug builds
@@ -152,6 +153,8 @@ walking:
 
 time:
   ] [                    run the planet's time faster, slower
+
+  F3                     show or hide how long frames take
 )";
 }
 
@@ -165,6 +168,10 @@ Result<Options> parse_options(std::span<const std::string_view> arguments) {
         }
         if (argument == "--alone") {
             options.companion.reset();
+            continue;
+        }
+        if (argument == "--timings") {
+            options.timings = true;
             continue;
         }
         if (argument == "--software") {

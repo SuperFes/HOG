@@ -23,16 +23,17 @@ TEST_CASE("client options default to the development planet", "[client][options]
     CHECK(options->companion == "res/Matt.png");
     CHECK_FALSE(options->quit_after);
     CHECK_FALSE(options->capture);
+    CHECK_FALSE(options->timings);
     CHECK_FALSE(options->software);
     CHECK(options->validate == hog::debug_build);
     CHECK_FALSE(options->help);
 }
 
 TEST_CASE("client options are parsed", "[client][options]") {
-    const auto options = parse_options(Arguments{"--planet", "other.toml", "--at", "-12.5,170,300",
-                                                 "--time", "18:30", "--threads", "2", "--companion",
-                                                 "friend.png", "--quit-after", "3", "--capture",
-                                                 "out.png", "--software", "--validate", "-h"});
+    const auto options = parse_options(
+        Arguments{"--planet", "other.toml", "--at", "-12.5,170,300", "--time", "18:30", "--threads",
+                  "2", "--companion", "friend.png", "--quit-after", "3", "--capture", "out.png",
+                  "--timings", "--software", "--validate", "-h"});
     REQUIRE(options);
     CHECK(options->planet == "other.toml");
     CHECK(options->start == Place{.latitude = -12.5, .longitude = 170.0, .altitude = 300.0});
@@ -41,6 +42,7 @@ TEST_CASE("client options are parsed", "[client][options]") {
     CHECK(options->companion == "friend.png");
     CHECK(options->quit_after == std::chrono::seconds{3});
     CHECK(options->capture == "out.png");
+    CHECK(options->timings);
     CHECK(options->software);
     CHECK(options->validate);
     CHECK(options->help);

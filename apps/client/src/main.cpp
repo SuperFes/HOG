@@ -1,5 +1,6 @@
 #include <hog/client/daylight.hpp>
 #include <hog/client/flight.hpp>
+#include <hog/client/frame_times.hpp>
 #include <hog/client/options.hpp>
 #include <hog/client/picture.hpp>
 #include <hog/client/scene.hpp>
@@ -14,11 +15,16 @@
 #include <hog/render/memory.hpp>
 #include <hog/render/presenter.hpp>
 #include <hog/render/readback.hpp>
+#include <hog/render/rendering.hpp>
 #include <hog/sim/calendar.hpp>
 #include <hog/terrain/bend.hpp>
+#include <hog/window/ui.hpp>
 #include <hog/window/window.hpp>
 
 #include <SDL3/SDL.h>
+#include <imgui.h>
+#include <imgui_impl_sdl3.h>
+#include <imgui_impl_vulkan.h>
 
 #include <algorithm>
 #include <chrono>
@@ -63,6 +69,7 @@ struct Controls {
     DVec2 look{};
     double speed = client::FlySettings{}.speed;
     bool walking = false;
+    bool timings = false; // shown over the picture
     bool quit = false;
     // Doublings of the planet's time asked for, halvings if negative.
     int faster_time = 0;
@@ -78,6 +85,8 @@ void handle(const SDL_Event& event, SDL_Window* window, Controls& controls) {
             controls.quit = true;
         } else if (event.key.key == SDLK_F && !event.key.repeat) {
             controls.walking = !controls.walking;
+        } else if (event.key.key == SDLK_F3 && !event.key.repeat) {
+            controls.timings = !controls.timings;
         } else if (event.key.key == SDLK_RIGHTBRACKET) {
             ++controls.faster_time;
         } else if (event.key.key == SDLK_LEFTBRACKET) {
@@ -168,10 +177,54 @@ Result<void> save_capture(const render::Device& device, const render::Buffer& bu
                                                  .pixels = std::move(rgb).value()});
 }
 
-// Draws a frame of the shot, saving it to `capture` if given; false when there's nothing to draw
-// into.
+// How long frames take, in a corner over the picture.
+void show_timings(const client::FrameTimes& times) {
+    constexpr float margin = 10.0F;
+    constexpr ImVec2 graph{240.0F, 48.0F};
+    // Milliseconds, as at 30 fps, or higher to hold the worst frame.
+    constexpr double least_top = 1'000.0 / 30.0;
+    ImGui::SetNextWindowPos({margin, margin});
+    ImGui::SetNextWindowBgAlpha(0.6F);
+    if (ImGui::Begin("timings", nullptr,
+                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                         ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoSavedSettings |
+                         ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav)) {
+        const client::Timing cpu = times.cpu();
+        ImGui::TextUnformatted(std::format("{:.0f} fps, {:.1f} ms a frame, worst {:.1f}",
+                                           cpu.mean > 0.0 ? 1'000.0 / cpu.mean : 0.0, cpu.mean,
+                                           cpu.worst)
+                                   .c_str());
+        const std::vector<float> history = times.history();
+        ImGui::PlotLines("##frames", history.data(), static_cast<int>(history.size()), 0, nullptr,
+                         0.0F, static_cast<float>(std::max(cpu.worst, least_top)), graph);
+        const std::vector<client::Timing> gpu = times.gpu();
+        if (gpu.empty()) {
+            ImGui::TextUnformatted("the GPU can't time its passes");
+        } else if (ImGui::BeginTable("gpu", 3)) {
+            ImGui::TableSetupColumn("pass");
+            ImGui::TableSetupColumn("ms");
+            ImGui::TableSetupColumn("worst");
+            ImGui::TableHeadersRow();
+            for (const client::Timing& pass : gpu) {
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::TextUnformatted(std::string{pass.name}.c_str());
+                ImGui::TableNextColumn();
+                ImGui::TextUnformatted(std::format("{:.2f}", pass.mean).c_str());
+                ImGui::TableNextColumn();
+                ImGui::TextUnformatted(std::format("{:.2f}", pass.worst).c_str());
+            }
+            ImGui::EndTable();
+        }
+    }
+    ImGui::End();
+}
+
+// Draws a frame of the shot, with the timings over it if given, saving it to `capture` if given;
+// false when there's nothing to draw into.
 Result<bool> draw(client::Scene& scene, const client::Shot& shot, const render::Device& device,
                   render::Presenter& presenter, SDL_Window* window,
+                  const client::FrameTimes* timings,
                   const std::optional<std::filesystem::path>& capture) {
     auto begun = presenter.begin(window::drawable(window));
     if (!begun) {
@@ -183,6 +236,18 @@ Result<bool> draw(client::Scene& scene, const client::Shot& shot, const render::
     render::Frame& frame = begun->value();
     if (auto recorded = scene.record(frame, shot); !recorded) {
         return std::unexpected(std::move(recorded).error());
+    }
+    ImGui_ImplVulkan_NewFrame();
+    ImGui_ImplSDL3_NewFrame();
+    ImGui::NewFrame();
+    if (timings != nullptr) {
+        show_timings(*timings);
+    }
+    ImGui::Render();
+    if (timings != nullptr) {
+        render::begin_rendering(frame.commands, frame.view, frame.extent, std::nullopt);
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), frame.commands);
+        vkCmdEndRendering(frame.commands);
     }
     std::optional<Result<render::Buffer>> captured;
     if (capture) {
@@ -233,7 +298,9 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
                  const render::Device& device, render::Presenter& presenter, SDL_Window* window) {
     const double radius = world.geology().planet_radius();
     Controls controls;
+    controls.timings = options.timings;
     TitleCounter title;
+    client::FrameTimes times;
     const MonotonicClock::time_point started = MonotonicClock::now();
     MonotonicClock::time_point last = started;
     while (!controls.quit) {
@@ -244,9 +311,10 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
             handle(event, window, controls);
         }
         const MonotonicClock::time_point now = MonotonicClock::now();
-        const double seconds =
-            std::min(std::chrono::duration<double>(now - last).count(), longest_frame);
+        const double passed = std::chrono::duration<double>(now - last).count();
+        const double seconds = std::min(passed, longest_frame);
         last = now;
+        times.add(passed, scene.timings());
         const bool faster = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
         const client::FlyInput input{.move = movement(), .look = controls.look, .seconds = seconds};
         flight =
@@ -287,8 +355,9 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
                                 .time = clock.time(),
                                 .seconds = seconds,
                                 .companion = companion};
-        const auto drawn = draw(scene, shot, device, presenter, window,
-                                controls.quit ? options.capture : std::nullopt);
+        const auto drawn =
+            draw(scene, shot, device, presenter, window, controls.timings ? &times : nullptr,
+                 controls.quit ? options.capture : std::nullopt);
         if (!drawn) {
             return std::unexpected(drawn.error());
         }
@@ -329,6 +398,14 @@ int show(const client::Options& options, const planet::PlanetConfig& planet,
     client::PlanetClock clock{client::start_time(calendar, to_game_time(WallClock::now()),
                                                  glm::normalize(flight.eye.metres()),
                                                  options.time_of_day)};
+    const window::Ui ui{window, device, presenter.swapchain().format()};
+    if (!ui.started()) {
+        std::cerr << "hog-client: can't draw the timings over the picture\n";
+        return EXIT_FAILURE;
+    }
+    // Only shown, so it leaves the mouse and keys to flying.
+    ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NoMouse | ImGuiConfigFlags_NoMouseCursorChange |
+                                  ImGuiConfigFlags_NoKeyboard;
     // Before the scene, whose bakes run on it.
     jobs::JobSystem jobs{options.threads};
     auto scene = client::Scene::create(device, world, jobs, calendar,
