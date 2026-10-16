@@ -109,6 +109,12 @@ CPMAddPackage(
     OPTIONS "BUILD_STATIC_LIB ON" "BUILD_SHARED_LIB OFF" "ENABLE_ICE OFF"
             "USE_CRYPTO ${hog_gns_crypto}")
 
+# Ed25519 for connect tokens; BSD-2-Clause or CC0. Two C files, built by hog_login.
+CPMAddPackage(
+    NAME Monocypher
+    URL https://github.com/LoupVaillant/Monocypher/archive/refs/tags/4.0.3.tar.gz
+    DOWNLOAD_ONLY YES)
+
 if(HOG_BUILD_TESTS)
     enable_testing()
     CPMAddPackage(
@@ -150,6 +156,7 @@ endfunction()
 add_subdirectory(libs/atmosphere)
 add_subdirectory(libs/core)
 add_subdirectory(libs/jobs)
+add_subdirectory(libs/login)
 add_subdirectory(libs/net)
 add_subdirectory(libs/planet)
 add_subdirectory(libs/probe)
