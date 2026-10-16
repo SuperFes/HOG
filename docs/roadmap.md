@@ -347,6 +347,7 @@ These tracks can start once Phase 4 works and can run side by side; four people 
 - [ ] Mid-distance hierarchical LOD and far-field impostors
 - [ ] Horizon panorama relit every frame and refreshed as the player moves
 - [ ] Volumetric clouds; weather-driven visibility
+- [ ] Ground materials with roughness and wetness, wet where weather reaches and dry where it's sheltered (mud, rain on rocks)
 - [ ] Art direction pass once the references are chosen
 
 ## Phase 7 — Tools, scripting and moderation
