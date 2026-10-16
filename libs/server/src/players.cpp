@@ -8,8 +8,27 @@
 
 namespace hog::server {
 
-Players::Players(flecs::world& world, double radius, const replication::ViewSettings& view) noexcept
-    : world_(&world), nearest_(radius / 2.0), farthest_(radius * 2.0), view_(view) {}
+std::string_view describe(Ruling ruling) noexcept {
+    switch (ruling) {
+    case Ruling::Taken:
+        return "taken";
+    case Ruling::Stale:
+        return "stale";
+    case Ruling::NotJoined:
+        return "before joining";
+    case Ruling::OutOfBounds:
+        return "out of bounds";
+    case Ruling::TooFast:
+        return "too fast";
+    case Ruling::UnderGround:
+        return "under the ground";
+    }
+    return "?";
+}
+
+Players::Players(flecs::world& world, double radius, const replication::ViewSettings& view,
+                 const MoveRules& rules) noexcept
+    : world_(&world), nearest_(radius / 2.0), farthest_(radius * 2.0), view_(view), rules_(rules) {}
 
 flecs::entity Players::join(net::ConnectionId connection, std::string name) {
     HOG_ASSERT(!joined_.contains(connection), "a connection joins once");
@@ -19,17 +38,47 @@ flecs::entity Players::join(net::ConnectionId connection, std::string name) {
     return entity;
 }
 
-bool Players::move(net::ConnectionId connection, WorldPosition at) {
+MoveResult Players::move(net::ConnectionId connection, const protocol::Moved& moved,
+                         MonotonicClock::time_point now, const physics::Space& space) {
     const auto found = joined_.find(connection);
     if (found == joined_.end()) {
-        return false;
+        return {.ruling = Ruling::NotJoined, .correction = std::nullopt};
     }
-    const double from_centre = glm::length(at.metres());
-    if (from_centre < nearest_ || from_centre > farthest_) {
-        return false;
+    Joined& joined = found->second;
+    if (moved.corrections != joined.corrections || moved.sequence <= joined.sequence) {
+        return {.ruling = Ruling::Stale, .correction = std::nullopt};
     }
-    found->second.entity.set<Position>({at});
-    return true;
+    joined.sequence = moved.sequence;
+
+    const WorldPosition to = protocol::to_world(moved.at);
+    const double from_centre = glm::length(to.metres());
+    const bool inside = from_centre >= nearest_ && from_centre <= farthest_;
+    if (!joined.check) {
+        if (!inside) {
+            return {.ruling = Ruling::OutOfBounds, .correction = std::nullopt};
+        }
+        joined.check.emplace(to, now, rules_);
+        joined.entity.set<Position>({to});
+        return {.ruling = Ruling::Taken, .correction = std::nullopt};
+    }
+    Ruling ruling = Ruling::OutOfBounds;
+    if (inside) {
+        switch (joined.check->judge(to, now, space)) {
+        case Verdict::Taken:
+            joined.entity.set<Position>({to});
+            return {.ruling = Ruling::Taken, .correction = std::nullopt};
+        case Verdict::TooFast:
+            ruling = Ruling::TooFast;
+            break;
+        case Verdict::UnderGround:
+            ruling = Ruling::UnderGround;
+            break;
+        }
+    }
+    ++joined.corrections;
+    return {.ruling = ruling,
+            .correction = protocol::Corrected{.count = joined.corrections,
+                                              .at = protocol::to_millimetres(joined.check->at())}};
 }
 
 void Players::leave(net::ConnectionId connection) {
@@ -45,6 +94,16 @@ void Players::acknowledged(net::ConnectionId connection, std::uint32_t tick) noe
     if (const auto found = joined_.find(connection); found != joined_.end()) {
         found->second.view.acknowledged(tick);
     }
+}
+
+std::vector<WorldPosition> Players::placed() const {
+    std::vector<WorldPosition> places;
+    for (const auto& [connection, joined] : joined_) {
+        if (joined.check) {
+            places.push_back(joined.check->at());
+        }
+    }
+    return places;
 }
 
 std::optional<flecs::entity> Players::find(net::ConnectionId connection) const {

@@ -15,12 +15,13 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace hog::client {
 
 // A player's connection to the game server: says hello, then keeps what's near them from its
-// snapshots and tells it where they are.
+// snapshots and tells it where their feet are, taking it back when the server won't have it.
 class Session {
 public:
     enum class State : std::uint8_t { Connecting, Welcomed, Refused, Closed };
@@ -31,9 +32,14 @@ public:
     // Starts connecting to `address`, to say hello with the login service's token, or none.
     [[nodiscard]] static Result<Session> connect(std::string address, std::vector<std::byte> token);
 
-    // Takes in what the server sent, answering it, and once welcomed tells it the player is at
-    // `eye`.
-    void look(WorldPosition eye, MonotonicClock::time_point now);
+    // Takes in what the server sent, answering it, and once welcomed tells it the player's feet
+    // are at `feet`; nothing while they have none, flying about to look at the world.
+    void look(std::optional<WorldPosition> feet, MonotonicClock::time_point now);
+
+    // Where the server put the player back to since last asked, once for each time.
+    [[nodiscard]] std::optional<WorldPosition> take_correction() noexcept {
+        return std::exchange(correction_, std::nullopt);
+    }
 
     [[nodiscard]] State state() const noexcept { return state_; }
     [[nodiscard]] const std::string& address() const noexcept { return address_; }
@@ -62,6 +68,9 @@ private:
     replication::Replica replica_;
     std::vector<net::Event> events_;
     std::optional<MonotonicClock::time_point> next_move_;
+    std::uint32_t moves_ = 0;
+    std::uint32_t corrections_ = 0;
+    std::optional<WorldPosition> correction_;
     std::optional<MonotonicClock::time_point> last_snapshot_;
     MonotonicClock::time_point counting_since_;
     std::uint32_t counted_ = 0;

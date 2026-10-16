@@ -381,14 +381,19 @@ public:
         return connection;
     }
 
-    // Tells the server the player is at `eye`, once in.
-    void look(WorldPosition eye, MonotonicClock::time_point now) {
+    // Tells the server where the player's feet are, once in; nothing while they're flying.
+    void look(std::optional<WorldPosition> feet, MonotonicClock::time_point now) {
         if (login_) {
             look_at_login(*login_);
         }
         if (session_) {
-            session_->look(eye, now);
+            session_->look(feet, now);
         }
+    }
+
+    // Where the server put the player back to since last asked.
+    [[nodiscard]] std::optional<WorldPosition> take_correction() noexcept {
+        return session_ ? session_->take_correction() : std::nullopt;
     }
 
     // None until connecting to the server.
@@ -478,6 +483,17 @@ private:
     MonotonicClock::time_point looked_ = MonotonicClock::now();
 };
 
+// Sends the server where the walker's feet are, and puts them back where it says.
+void report(Connection& connection, client::Flight& flight, bool walking,
+            MonotonicClock::time_point now) {
+    const DVec3 up = glm::normalize(flight.eye.metres());
+    const double eye_height = client::WalkSettings{}.eye_height;
+    connection.look(walking ? std::optional{flight.eye - (up * eye_height)} : std::nullopt, now);
+    if (const auto back = connection.take_correction(); back && walking) {
+        flight.eye = *back + (up * eye_height);
+    }
+}
+
 // Flies or walks over the world until the window closes or it's time to quit.
 Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet::World& world,
                  client::Flight flight, Connection& connection, const client::Options& options,
@@ -503,7 +519,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
         last = now;
         times.add(passed, scene.timings());
         shaders.look(device, now);
-        connection.look(flight.eye, now);
+        report(connection, flight, controls.walking, now);
         const bool faster = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
         const client::FlyInput input{.move = movement(), .look = controls.look, .seconds = seconds};
         flight =

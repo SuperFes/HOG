@@ -24,6 +24,7 @@ enum class Kind : std::uint16_t {
     Moved = 4,
     Ack = 5,
     Snapshot = 6,
+    Corrected = 7,
 }; // NOLINT(performance-enum-size)
 
 // Which of an entity's changes follow its id in a snapshot.
@@ -352,12 +353,18 @@ std::vector<std::byte> encode(const Message& message) {
                 out.write(body.version);
             } else if constexpr (std::is_same_v<Body, Moved>) {
                 out.write(static_cast<std::uint16_t>(Kind::Moved));
+                out.write(body.sequence);
+                out.write(body.corrections);
                 write_position(out, body.at);
             } else if constexpr (std::is_same_v<Body, Ack>) {
                 out.write(static_cast<std::uint16_t>(Kind::Ack));
                 out.write(body.tick);
             } else if constexpr (std::is_same_v<Body, Snapshot>) {
                 write_snapshot(out, body);
+            } else if constexpr (std::is_same_v<Body, Corrected>) {
+                out.write(static_cast<std::uint16_t>(Kind::Corrected));
+                out.write(body.count);
+                write_position(out, body.at);
             } else {
                 static_assert(std::is_same_v<Body, Refused>);
                 out.write(static_cast<std::uint16_t>(Kind::Refused));
@@ -391,11 +398,21 @@ Result<Message> decode(std::span<const std::byte> bytes) {
     case Kind::Refused:
         return read_refused(in);
     case Kind::Moved: {
+        const auto sequence = read<std::uint32_t>(in, "a move");
+        const auto corrections = read<std::uint32_t>(in, "a move");
         const auto at = read_position(in, "a move");
-        if (!at) {
-            return std::unexpected(at.error());
+        if (!sequence || !corrections || !at) {
+            return make_error(ErrorCode::Parse, "a move cut short");
         }
-        return finished(in, Moved{.at = *at});
+        return finished(in, Moved{.sequence = *sequence, .corrections = *corrections, .at = *at});
+    }
+    case Kind::Corrected: {
+        const auto count = read<std::uint32_t>(in, "a correction");
+        const auto at = read_position(in, "a correction");
+        if (!count || !at) {
+            return make_error(ErrorCode::Parse, "a correction cut short");
+        }
+        return finished(in, Corrected{.count = *count, .at = *at});
     }
     case Kind::Ack: {
         const auto tick = read<std::uint32_t>(in, "an ack");

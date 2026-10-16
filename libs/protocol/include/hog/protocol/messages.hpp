@@ -16,7 +16,7 @@
 namespace hog::protocol {
 
 // Raised whenever any message changes; the two sides must speak the same one.
-inline constexpr std::uint32_t version = 2;
+inline constexpr std::uint32_t version = 3;
 // The longest connect token a client may present; more is a broken or hostile client.
 inline constexpr std::size_t most_token = 1'024;
 // The longest line of text a refusal carries.
@@ -66,11 +66,24 @@ struct Refused {
     friend bool operator==(const Refused&, const Refused&) = default;
 };
 
-// Client to server, until movement is the server's: where the player is.
+// Client to server: where the client has moved the player's feet to. Moves count up from 1, so
+// one overtaken on the way is left out; `corrections` is how many Corrected the client has taken,
+// so moves it made before the newest reached it are left out too.
 struct Moved {
+    std::uint32_t sequence = 0;
+    std::uint32_t corrections = 0;
     Millimetres at{0};
 
     friend bool operator==(const Moved&, const Moved&) = default;
+};
+
+// Server to client: a move it wouldn't take. The player's feet go back to `at`, and this is the
+// connection's correction number `count`, from 1.
+struct Corrected {
+    std::uint32_t count = 0;
+    Millimetres at{0};
+
+    friend bool operator==(const Corrected&, const Corrected&) = default;
 };
 
 // Client to server: the newest snapshot it has applied, for the next to be coded against.
@@ -110,7 +123,7 @@ struct Snapshot {
     friend bool operator==(const Snapshot&, const Snapshot&) = default;
 };
 
-using Message = std::variant<Hello, Welcome, Refused, Moved, Ack, Snapshot>;
+using Message = std::variant<Hello, Welcome, Refused, Moved, Ack, Snapshot, Corrected>;
 
 [[nodiscard]] std::vector<std::byte> encode(const Message& message);
 // Fails on an unknown kind, a message cut short or with bytes left over, one too long, or a

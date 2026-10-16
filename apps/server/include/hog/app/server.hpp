@@ -8,6 +8,8 @@
 #include <hog/core/time.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/net/server.hpp>
+#include <hog/physics/ground.hpp>
+#include <hog/physics/space.hpp>
 #include <hog/planet/planet_config.hpp>
 #include <hog/planet/world.hpp>
 #include <hog/protocol/handshake.hpp>
@@ -171,6 +173,9 @@ private:
     // Connections still to say hello, and the players let in.
     std::map<net::ConnectionId, protocol::Handshake> handshakes_;
     server::Players joined_;
+    // The ground near players, to check their moves against.
+    physics::Space space_;
+    physics::Ground ground_;
     // The login service's, when only players it logged in may join.
     std::optional<login::PublicKey> login_key_;
     GameTime time_;
@@ -202,6 +207,7 @@ private:
     metrics::Gauge& connections_;
     metrics::Counter& shared_snapshots_;
     metrics::Counter& shared_bytes_;
+    metrics::Counter& corrected_moves_;
     // km² alight not yet counted, being under one.
     double alight_left_ = 0.0;
     metrics::Reporter reporter_;

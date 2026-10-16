@@ -1,4 +1,5 @@
 #include <hog/app/server.hpp>
+#include <hog/client/scene.hpp>
 #include <hog/client/session.hpp>
 #include <hog/net/server.hpp>
 #include <hog/net/simulation.hpp>
@@ -6,6 +7,7 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <glm/geometric.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -116,15 +118,16 @@ struct Stand {
     }
 };
 
-// Has the session look, from `eye`, until `done`, failing if that takes too long.
+// Has the session look, with the player's feet at `feet`, until `done`, failing if that takes too
+// long.
 void look_until(Session& session, Stand& stand, const std::function<bool()>& done,
-                WorldPosition eye = along(0.0)) {
+                std::optional<WorldPosition> feet = along(0.0)) {
     const auto give_up = MonotonicClock::now() + 10s;
     while (!done()) {
         if (MonotonicClock::now() >= give_up) {
             FAIL("gave up waiting");
         }
-        session.look(eye, MonotonicClock::now());
+        session.look(feet, MonotonicClock::now());
         stand.poll();
         std::this_thread::sleep_for(1ms);
     }
@@ -158,6 +161,22 @@ TEST_CASE("a session says hello and is welcomed", "[client][session]") {
     CHECK_FALSE(session->last_snapshot());
 }
 
+namespace {
+
+// The moves the stand heard, but those made while being welcomed.
+std::vector<protocol::Moved> moves(const Stand& stand) {
+    std::vector<protocol::Moved> moved;
+    for (const protocol::Message& message : stand.heard) {
+        if (const auto* move = std::get_if<protocol::Moved>(&message);
+            move != nullptr && move->at != protocol::to_millimetres(along(0.0))) {
+            moved.push_back(*move);
+        }
+    }
+    return moved;
+}
+
+} // namespace
+
 TEST_CASE("a welcomed session says where the player is, as often as it may", "[client][session]") {
     Stand stand;
     Session session = connected(stand.server);
@@ -167,20 +186,38 @@ TEST_CASE("a welcomed session says where the player is, as often as it may", "[c
     const MonotonicClock::time_point later = MonotonicClock::now() + 1h;
     session.look(along(5.0), later);
     session.look(along(6.0), later + Session::move_interval / 2);
-    session.look(along(7.0), later + Session::move_interval);
-    const auto last_at = [&] {
-        std::vector<protocol::Millimetres> at;
-        for (const protocol::Message& message : stand.heard) {
-            if (const auto* moved = std::get_if<protocol::Moved>(&message);
-                moved != nullptr && moved->at != protocol::to_millimetres(along(0.0))) {
-                at.push_back(moved->at);
-            }
-        }
-        return at;
-    };
-    look_until(session, stand, [&] { return last_at().size() == 2; });
-    CHECK(last_at() ==
-          std::vector{protocol::to_millimetres(along(5.0)), protocol::to_millimetres(along(7.0))});
+    // Nothing while flying.
+    session.look(std::nullopt, later + Session::move_interval);
+    session.look(along(7.0), later + (Session::move_interval * 2));
+    look_until(session, stand, [&] { return moves(stand).size() == 2; }, std::nullopt);
+    const auto moved = moves(stand);
+    CHECK(moved[0].at == protocol::to_millimetres(along(5.0)));
+    CHECK(moved[1].at == protocol::to_millimetres(along(7.0)));
+    CHECK(moved[1].sequence > moved[0].sequence);
+    CHECK(moved[1].corrections == 0);
+}
+
+TEST_CASE("a session takes the server's corrections once each", "[client][session]") {
+    Stand stand;
+    Session session = connected(stand.server);
+    welcome(session, stand);
+    CHECK_FALSE(session.take_correction());
+
+    stand.send(protocol::Corrected{.count = 1, .at = protocol::to_millimetres(along(3.0))});
+    std::optional<WorldPosition> back;
+    look_until(session, stand, [&] {
+        back = session.take_correction();
+        return back.has_value();
+    });
+    CHECK(back == protocol::to_world(protocol::to_millimetres(along(3.0))));
+    CHECK_FALSE(session.take_correction());
+
+    // A repeat of one already taken is passed over; moves made since say it was taken.
+    stand.send(protocol::Corrected{.count = 1, .at = protocol::to_millimetres(along(9.0))});
+    session.look(along(4.0), MonotonicClock::now() + 1h);
+    look_until(session, stand, [&] { return !moves(stand).empty(); }, std::nullopt);
+    CHECK(moves(stand).back().corrections == 1);
+    CHECK_FALSE(session.take_correction());
 }
 
 TEST_CASE("a session keeps what snapshots show and acknowledges them", "[client][session]") {
@@ -319,6 +356,13 @@ bool sees(const Session& session, WorldPosition at) {
     return held.size() == 1 && held[0].at == protocol::to_millimetres(at);
 }
 
+// Just over the ground, or the sea, `metres` along the surface from the first player's place.
+WorldPosition standing(const hog::planet::World& world, double metres) {
+    const DVec3 up = glm::normalize(along(metres).metres());
+    const double ground = hog::client::ground_under(world, WorldPosition{up * radius});
+    return WorldPosition{up * (radius + std::max(ground, 0.0) + 0.1)};
+}
+
 } // namespace
 
 TEST_CASE("two players see each other through a bad network", "[client][session]") {
@@ -332,29 +376,38 @@ TEST_CASE("two players see each other through a bad network", "[client][session]
     REQUIRE(anna);
     REQUIRE(matt);
 
-    WorldPosition matt_at = along(100.0);
+    const WorldPosition anna_at = standing(server->planet(), 0.0);
+    WorldPosition matt_at = standing(server->planet(), 100.0);
     int stage = 0;
     std::atomic<bool> stop = false;
     const auto give_up = MonotonicClock::now() + 30s;
     Visited timer{[&] {
         const MonotonicClock::time_point now = MonotonicClock::now();
-        anna->look(along(0.0), now);
+        anna->look(anna_at, now);
         matt->look(matt_at, now);
-        if (stage == 0 && sees(*anna, matt_at) && sees(*matt, along(0.0))) {
+        if (stage == 0 && sees(*anna, matt_at) && sees(*matt, anna_at)) {
             stage = 1;
-            matt_at = along(150.0);
+            matt_at = standing(server->planet(), 103.0);
         } else if (stage == 1 && sees(*anna, matt_at)) {
+            // Too far to have got to by now: the server sends him back.
             stage = 2;
-            stop = true;
+            matt_at = standing(server->planet(), 400.0);
+        } else if (stage == 2) {
+            if (const auto back = matt->take_correction()) {
+                CHECK(protocol::to_millimetres(*back) ==
+                      protocol::to_millimetres(standing(server->planet(), 103.0)));
+                stage = 3;
+                stop = true;
+            }
         }
         if (now >= give_up) {
             stop = true;
         }
     }};
     REQUIRE(server->run(timer, [] { return start; }, stop));
-    CHECK(stage == 2);
+    CHECK(stage == 3);
     CHECK(anna->state() == Session::State::Welcomed);
-    CHECK(anna->replica().now().size() == 1);
+    CHECK(sees(*anna, standing(server->planet(), 103.0)));
     CHECK(anna->last_snapshot());
     CHECK(matt->stats());
 }

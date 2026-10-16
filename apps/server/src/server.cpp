@@ -73,7 +73,7 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config,
       nearby_(
           std::min(planet::level_for(config.net.view.radius, planet.radius), planet::max_level)),
       persistence_(entities_), joined_(entities_, planet.radius, config.net.view),
-      ticks_(registry_.counter("hog_ticks_total", "Live ticks run.")),
+      ground_(space_, planet_), ticks_(registry_.counter("hog_ticks_total", "Live ticks run.")),
       tick_seconds_(registry_.histogram("hog_tick_seconds", "Real time each live tick took.",
                                         {tick_bounds.begin(), tick_bounds.end()})),
       slipped_(registry_.counter("hog_ticks_slipped_total",
@@ -124,6 +124,8 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config,
                                           "Snapshots sent to players of those near them.")),
       shared_bytes_(
           registry_.counter("hog_player_snapshot_bytes_total", "Bytes of players' snapshots.")),
+      corrected_moves_(registry_.counter("hog_player_moves_corrected_total",
+                                         "Players' moves refused, and sent back.")),
       reporter_(registry_) {
     persistence_.persist<server::Position>();
     server::track_positions(entities_, nearby_);
@@ -522,9 +524,18 @@ void Server::heard(net::ConnectionId connection, std::span<const std::byte> byte
         log::debug(server_log, "connection {} sent something unreadable: {}",
                    std::to_underlying(connection), message.error());
     } else if (const auto* moved = std::get_if<protocol::Moved>(&*message)) {
-        if (!joined_.move(connection, protocol::to_world(moved->at))) {
-            log::debug(server_log, "connection {} moved out of bounds",
-                       std::to_underlying(connection));
+        const server::MoveResult result =
+            joined_.move(connection, *moved, MonotonicClock::now(), space_);
+        if (result.correction && players_) {
+            log::debug(server_log, "connection {} moved {}; sent back",
+                       std::to_underlying(connection), server::describe(result.ruling));
+            corrected_moves_.add();
+            if (auto sent = players_->send(connection, net::Delivery::Reliable,
+                                           protocol::encode(*result.correction));
+                !sent) {
+                log::debug(server_log, "couldn't correct connection {}: {}",
+                           std::to_underlying(connection), sent.error());
+            }
         }
     } else if (const auto* ack = std::get_if<protocol::Ack>(&*message)) {
         joined_.acknowledged(connection, ack->tick);
@@ -537,6 +548,9 @@ void Server::heard(net::ConnectionId connection, std::span<const std::byte> byte
 void Server::share() {
     if (!players_) {
         return;
+    }
+    if (auto kept = ground_.keep(joined_.placed()); !kept) {
+        log::warn(server_log, "couldn't keep the ground near players: {}", kept.error());
     }
     joined_.share(
         nearby_, [this](net::ConnectionId connection, const protocol::Snapshot& snapshot) {
