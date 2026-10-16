@@ -144,6 +144,24 @@ Result<Sky> Sky::create(const Device& device, VkFormat colour_format, VkFormat d
 
 Result<> Sky::record_frame(VkCommandBuffer commands, VkExtent2D extent, std::uint32_t frame,
                            const Atmosphere& atmosphere, const SkyView& view) const {
+    const Image& table = tables_.at(frame);
+    const Image& volume = aerial_volumes_.at(frame);
+    transition(commands, table.handle(), VK_IMAGE_ASPECT_COLOR_BIT, image_use::discard,
+               image_use::storage);
+    transition(commands, volume.handle(), VK_IMAGE_ASPECT_COLOR_BIT, image_use::discard,
+               image_use::storage);
+    if (auto recorded = record_tables(commands, extent, frame, atmosphere, view); !recorded) {
+        return recorded;
+    }
+    transition(commands, table.handle(), VK_IMAGE_ASPECT_COLOR_BIT, image_use::storage,
+               image_use::sampled);
+    transition(commands, volume.handle(), VK_IMAGE_ASPECT_COLOR_BIT, image_use::storage,
+               image_use::sampled);
+    return {};
+}
+
+Result<> Sky::record_tables(VkCommandBuffer commands, VkExtent2D extent, std::uint32_t frame,
+                            const Atmosphere& atmosphere, const SkyView& view) const {
     const double scale = air_scale(atmosphere.air(), view.bend);
     const double aspect =
         extent.height > 0 ? static_cast<double>(extent.width) / static_cast<double>(extent.height)
@@ -160,30 +178,20 @@ Result<> Sky::record_frame(VkCommandBuffer commands, VkExtent2D extent, std::uin
         return flushed;
     }
 
-    const Image& table = tables_.at(frame);
-    transition(commands, table.handle(), VK_IMAGE_ASPECT_COLOR_BIT, image_use::discard,
-               image_use::storage);
     const TablePush push{
         .height_sun = {lighting.up_height.w, static_cast<float>(glm::dot(view.sun, view.bend.up))}};
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, table_.handle());
     push_tables(commands, table_, atmosphere);
-    push_storage_image(commands, table_, 3, table.view());
+    push_storage_image(commands, table_, 3, tables_.at(frame).view());
     vkCmdPushConstants(commands, table_.layout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push),
                        &push);
     vkCmdDispatch(commands, (table_width + 7) / 8, (table_height + 7) / 8, 1);
-    transition(commands, table.handle(), VK_IMAGE_ASPECT_COLOR_BIT, image_use::storage,
-               image_use::sampled);
 
-    const Image& volume = aerial_volumes_.at(frame);
-    transition(commands, volume.handle(), VK_IMAGE_ASPECT_COLOR_BIT, image_use::discard,
-               image_use::storage);
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, aerial_.handle());
     push_tables(commands, aerial_, atmosphere);
     push_uniform_buffer(commands, aerial_, 3, buffer.handle());
-    push_storage_image(commands, aerial_, 4, volume.view());
+    push_storage_image(commands, aerial_, 4, aerial_volumes_.at(frame).view());
     vkCmdDispatch(commands, aerial_size / 8, aerial_size / 8, aerial_slices);
-    transition(commands, volume.handle(), VK_IMAGE_ASPECT_COLOR_BIT, image_use::storage,
-               image_use::sampled);
     return {};
 }
 

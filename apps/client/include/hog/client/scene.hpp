@@ -16,6 +16,7 @@
 #include <hog/render/memory.hpp>
 #include <hog/render/ocean.hpp>
 #include <hog/render/presenter.hpp>
+#include <hog/render/render_graph.hpp>
 #include <hog/render/sky.hpp>
 #include <hog/render/terrain.hpp>
 #include <hog/render/vulkan.hpp>
@@ -91,17 +92,15 @@ private:
           render::Glare glare, render::GpuTimer timer, std::optional<render::Billboard> companion,
           std::uint32_t frames);
 
-    Result<const render::Image*> depth_for(const render::Frame& frame);
     render::SkyView sky_view(const Shot& shot);
 
-    const render::Device* device_;
     terrain::PatchBaker baker_;
     terrain::PatchStream stream_;
     render::Terrain terrain_;
     render::Ocean ocean_;
     render::TerrainPool pool_;
     GroundSlots slots_;
-    std::vector<std::optional<render::Image>> depths_;
+    render::TransientImages transients_;
     std::optional<render::Billboard> companion_;
     atmosphere::Model model_;
     render::Atmosphere atmosphere_;

@@ -59,6 +59,14 @@ public:
     // frame's last submit must have finished.
     Result<> record_frame(VkCommandBuffer commands, VkExtent2D extent, std::uint32_t frame,
                           const Atmosphere& atmosphere, const SkyView& view) const;
+    // As record_frame(), with `frame`'s table and aerial volume already storage images, and left
+    // as they're written.
+    Result<> record_tables(VkCommandBuffer commands, VkExtent2D extent, std::uint32_t frame,
+                           const Atmosphere& atmosphere, const SkyView& view) const;
+    [[nodiscard]] const Image& table(std::uint32_t frame) const { return tables_.at(frame); }
+    [[nodiscard]] const Image& aerial_volume(std::uint32_t frame) const {
+        return aerial_volumes_.at(frame);
+    }
 
     [[nodiscard]] AirBindings bindings(std::uint32_t frame,
                                        const Atmosphere& atmosphere) const noexcept;

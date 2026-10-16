@@ -6,7 +6,7 @@
 #include <hog/render/barrier.hpp>
 #include <hog/render/device.hpp>
 #include <hog/render/readback.hpp>
-#include <hog/render/rendering.hpp>
+#include <hog/render/render_graph.hpp>
 #include <hog/terrain/patch.hpp>
 #include <hog/terrain/selection.hpp>
 
@@ -92,8 +92,8 @@ Scene::Scene(const render::Device& device, const planet::World& world, jobs::Job
              render::TerrainPool pool, render::Atmosphere atmosphere, render::Sky sky,
              render::Glare glare, render::GpuTimer timer,
              std::optional<render::Billboard> companion, std::uint32_t frames)
-    : device_{&device}, baker_{world, jobs}, terrain_{std::move(terrain)}, ocean_{std::move(ocean)},
-      pool_{std::move(pool)}, depths_(frames), companion_{std::move(companion)},
+    : baker_{world, jobs}, terrain_{std::move(terrain)}, ocean_{std::move(ocean)},
+      pool_{std::move(pool)}, transients_{device, frames}, companion_{std::move(companion)},
       atmosphere_{std::move(atmosphere)}, sky_{std::move(sky)}, glare_{std::move(glare)},
       timer_{std::move(timer)}, calendar_{calendar} {}
 
@@ -105,25 +105,6 @@ void Scene::finish_bakes() {
     for (terrain::Patch& patch : baker_.finish()) {
         stream_.baked(std::move(patch));
     }
-}
-
-Result<const render::Image*> Scene::depth_for(const render::Frame& frame) {
-    std::optional<render::Image>& depth = depths_.at(frame.slot);
-    if (!depth || depth->desc().extent.width != frame.extent.width ||
-        depth->desc().extent.height != frame.extent.height) {
-        // This slot's last frame has finished, so nothing still draws with it.
-        auto made =
-            render::make_image(*device_, {.format = depth_format,
-                                          .extent = frame.extent,
-                                          .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
-                                                   VK_IMAGE_USAGE_SAMPLED_BIT,
-                                          .aspect = VK_IMAGE_ASPECT_DEPTH_BIT});
-        if (!made) {
-            return std::unexpected(std::move(made).error());
-        }
-        depth = std::move(made).value();
-    }
-    return &*depth;
 }
 
 render::SkyView Scene::sky_view(const Shot& shot) {
@@ -159,62 +140,82 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     if (auto taken = slots_.take(pool_, frame.slot, streamed); !taken) {
         return taken;
     }
-    timer_.begin(frame.commands, frame.slot, "uploads");
-    if (auto recorded = pool_.record_uploads(frame.commands, frame.slot); !recorded) {
-        return recorded;
-    }
-    timer_.end(frame.commands, frame.slot);
-    const auto depth = depth_for(frame);
-    if (!depth) {
-        return std::unexpected(depth.error());
-    }
     const render::SkyView sky = sky_view(shot);
-    timer_.begin(frame.commands, frame.slot, "sky tables");
-    if (auto recorded =
-            sky_.record_frame(frame.commands, frame.extent, frame.slot, atmosphere_, sky);
-        !recorded) {
-        return recorded;
-    }
-    timer_.end(frame.commands, frame.slot);
     const render::AirBindings through = sky_.bindings(frame.slot, atmosphere_);
 
-    frame.target.use_as(frame.commands, render::image_use::colour_target);
-    render::transition(frame.commands, (*depth)->handle(), VK_IMAGE_ASPECT_DEPTH_BIT,
-                       render::image_use::discard, render::image_use::depth_target);
-    render::begin_rendering(frame.commands, frame.view, frame.extent, cleared,
-                            {.view = (*depth)->view()});
-    timer_.begin(frame.commands, frame.slot, "sky");
-    sky_.draw(frame.commands, frame.extent, frame.slot, atmosphere_, sky);
-    timer_.end(frame.commands, frame.slot);
-    timer_.begin(frame.commands, frame.slot, "ground");
-    terrain_.draw(frame.commands, frame.extent, pool_, slots_.draws(streamed.drawn),
-                  {.camera = shot.camera, .sun = sky.sun, .bend = shot.bend, .air = through});
-    timer_.end(frame.commands, frame.slot);
-    timer_.begin(frame.commands, frame.slot, "sea");
-    ocean_.draw(frame.commands, frame.extent,
-                {.camera = shot.camera, .sun = sky.sun, .bend = shot.bend, .air = through});
-    timer_.end(frame.commands, frame.slot);
-    if (companion_ && shot.companion) {
-        timer_.begin(frame.commands, frame.slot, "companion");
-        companion_->draw(frame.commands, frame.extent, shot.camera, *shot.companion, shot.bend);
-        timer_.end(frame.commands, frame.slot);
-    }
-    vkCmdEndRendering(frame.commands);
+    render::RenderGraph graph;
+    const render::GraphImage target = graph.import(frame.target, frame.view, frame.extent);
+    const render::GraphImage depth = graph.transient(
+        {.format = depth_format,
+         .extent = frame.extent,
+         .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+         .aspect = VK_IMAGE_ASPECT_DEPTH_BIT,
+         .layers = 1,
+         .levels = 1});
+    // Made afresh each frame, so what the slot's last frame left in them isn't needed.
+    const render::Image& sky_table = sky_.table(frame.slot);
+    const render::Image& aerial_volume = sky_.aerial_volume(frame.slot);
+    render::TrackedImage tracked_table{sky_table.handle(), VK_IMAGE_ASPECT_COLOR_BIT};
+    render::TrackedImage tracked_aerial{aerial_volume.handle(), VK_IMAGE_ASPECT_COLOR_BIT};
+    const render::GraphImage table =
+        graph.import(tracked_table, sky_table.view(), sky_table.desc().extent);
+    const render::GraphImage aerial =
+        graph.import(tracked_aerial, aerial_volume.view(), aerial_volume.desc().extent);
+    const std::vector<render::GraphUse> through_air{
+        {.image = table, .use = render::image_use::sampled},
+        {.image = aerial, .use = render::image_use::sampled}};
+    const render::GraphTargets drawn{.colour = {.image = target, .clear = std::nullopt},
+                                     .depth = {{.image = depth, .clear = std::nullopt}}};
 
+    graph.add({.name = "uploads", .uses = {}, .targets = std::nullopt},
+              [&](VkCommandBuffer commands) { return pool_.record_uploads(commands, frame.slot); });
+    graph.add({.name = "sky tables",
+               .uses = {{.image = table, .use = render::image_use::storage},
+                        {.image = aerial, .use = render::image_use::storage}},
+               .targets = std::nullopt},
+              [&](VkCommandBuffer commands) {
+                  return sky_.record_tables(commands, frame.extent, frame.slot, atmosphere_, sky);
+              });
+    graph.add({.name = "sky",
+               .uses = {{.image = table, .use = render::image_use::sampled}},
+               .targets = {{.colour = {.image = target, .clear = cleared},
+                            .depth = {{.image = depth, .clear = 0.0F}}}}},
+              [&](VkCommandBuffer commands) {
+                  sky_.draw(commands, frame.extent, frame.slot, atmosphere_, sky);
+              });
+    graph.add({.name = "ground", .uses = through_air, .targets = drawn},
+              [&](VkCommandBuffer commands) {
+                  terrain_.draw(
+                      commands, frame.extent, pool_, slots_.draws(streamed.drawn),
+                      {.camera = shot.camera, .sun = sky.sun, .bend = shot.bend, .air = through});
+              });
+    graph.add(
+        {.name = "sea", .uses = through_air, .targets = drawn}, [&](VkCommandBuffer commands) {
+            ocean_.draw(commands, frame.extent,
+                        {.camera = shot.camera, .sun = sky.sun, .bend = shot.bend, .air = through});
+        });
+    if (companion_ && shot.companion) {
+        graph.add(
+            {.name = "companion", .uses = {}, .targets = drawn}, [&](VkCommandBuffer commands) {
+                companion_->draw(commands, frame.extent, shot.camera, *shot.companion, shot.bend);
+            });
+    }
     // The glare reads what's drawn in front of the sun from depth, so it's drawn without it.
-    render::transition(frame.commands, (*depth)->handle(), VK_IMAGE_ASPECT_DEPTH_BIT,
-                       render::image_use::depth_target, render::image_use::sampled);
-    timer_.begin(frame.commands, frame.slot, "glare");
-    render::begin_rendering(frame.commands, frame.view, frame.extent, std::nullopt);
     const double height = shot.bend.eye_height * render::air_scale(model_.air(), shot.bend);
-    glare_.draw(frame.commands, frame.extent, (*depth)->view(),
+    graph.add(
+        {.name = "glare",
+         .uses = {{.image = depth, .use = render::image_use::sampled}},
+         .targets = {{.colour = {.image = target, .clear = std::nullopt}, .depth = std::nullopt}}},
+        [&](VkCommandBuffer commands) {
+            glare_.draw(
+                commands, frame.extent, graph.view(depth),
                 {.camera = shot.camera,
                  .towards = sky.sun,
                  .irradiance = model_.transmittance(height, glm::dot(sky.sun, shot.bend.up)),
                  .exposure = sky.exposure});
-    vkCmdEndRendering(frame.commands);
-    timer_.end(frame.commands, frame.slot);
-    return {};
+        });
+    return graph.execute(frame.commands,
+                         {.slot = frame.slot, .timer = &timer_, .transients = &transients_});
 }
 
 Result<Picture> draw_still(render::Device& device, Scene& scene, const Shot& shot,
