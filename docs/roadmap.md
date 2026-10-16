@@ -44,7 +44,7 @@ Five choices block Phase 0. Each one can be settled in an evening. The rest of t
 | Entity system | EnTT, flecs | Phase 2 | **Decided ([#32](https://github.com/SuperFes/HOG/issues/32)):** flecs |
 | Minimum-spec hardware | e.g. GTX 1060, Intel Iris Xe, Apple M1 | Phase 3 | Pick one real machine one of us owns |
 | macOS Vulkan layer | KosmicKrisp, MoltenVK | Phase 3 | Support both and test against each |
-| Network library | GameNetworkingSockets, QUIC with datagrams | Phase 4 | Decide with a spike |
+| Network library | GameNetworkingSockets, QUIC with datagrams | Phase 4 | **Decided ([#83](https://github.com/SuperFes/HOG/issues/83)):** GameNetworkingSockets |
 | Art direction | Three or four reference games | Phase 3 end | Open |
 | Death penalty, PvP default | See the plan's open questions | Phase 6 | Open |
 | Generative AI in content | None, internal concept reference only | Before any content production | None in shipped assets |
@@ -216,7 +216,7 @@ This phase joins the server and client. It ends at the first milestone: four of 
 
 **Connection**
 
-- [ ] Spike: GameNetworkingSockets against QUIC with datagrams; record the decision
+- [x] Spike: GameNetworkingSockets against QUIC with datagrams (and yojimbo); record the decision
 - [ ] Login service stub that issues signed connect tokens
 - [ ] One encrypted UDP connection with reliable, unreliable and ordered channels
 - [ ] Protocol versioning, so an old client gets a clear error message
