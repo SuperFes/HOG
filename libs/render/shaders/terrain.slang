@@ -21,6 +21,8 @@ static const uint biome_count = 14;
 struct Settings {
     // Metres a material spans near and far, and 1 if ground below sea level is seen through water.
     float4 tiling;
+    // What each biome's material averages to.
+    float4 means[biome_count];
 };
 
 [[vk::binding(0, 0)]] ConstantBuffer<Settings> settings;
@@ -105,6 +107,8 @@ float3 albedo(Ground ground, float3 normal) {
     }
 
     float3 colour = float3(0.0);
+    // Unrolled, so the interpolated shares are indexed statically.
+    [unroll]
     for (uint biome = 0; biome < biome_count; ++biome) {
         const float share = ground.biomes[biome / 4][biome % 4];
         if (share < least_biome) {
@@ -123,8 +127,7 @@ float3 albedo(Ground ground, float3 normal) {
                                                         along_x[index + 1], along_y[index + 1]).rgb;
         }
         // Each scale strays from the mean in its own way, so together they still average to it.
-        const float3 mean = materials.SampleLevel(float3(0.5, 0.5, biome), 64.0).rgb;
-        colour += share * near * far / max(mean, 1.0 / 1024.0);
+        colour += share * near * far / max(settings.means[biome].rgb, 1.0 / 1024.0);
     }
     return colour;
 }

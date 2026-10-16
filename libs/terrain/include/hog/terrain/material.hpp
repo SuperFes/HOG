@@ -29,4 +29,7 @@ struct MaterialImage {
 // light, so the last is the look's colour.
 [[nodiscard]] MaterialImage material_image(const Look& look, int size);
 
+// What `image` averages to in linear light, as its last level holds it.
+[[nodiscard]] DVec3 material_mean(const MaterialImage& image);
+
 } // namespace hog::terrain

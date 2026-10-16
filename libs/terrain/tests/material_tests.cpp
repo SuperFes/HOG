@@ -13,6 +13,7 @@
 using hog::DVec3;
 using hog::terrain::Look;
 using hog::terrain::material_image;
+using hog::terrain::material_mean;
 using hog::terrain::MaterialImage;
 
 namespace {
@@ -117,6 +118,17 @@ TEST_CASE("a material averages to its look's colour, level by level", "[terrain]
                 }
             }
         }
+    }
+}
+
+TEST_CASE("a material's mean is its look's colour, in linear light", "[terrain][material]") {
+    const MaterialImage image = material_image(grassy(), size);
+    const DVec3 mean = material_mean(image);
+    const Texel last = texel_at(image.levels.back(), 1, 0, 0);
+    for (std::size_t channel = 0; channel < 3; ++channel) {
+        const auto at = static_cast<glm::length_t>(channel);
+        CHECK(mean[at] == decode(last.at(channel)));
+        CHECK(std::abs(int{encode(mean[at])} - int{encode(grassy().colour[at])}) <= 1);
     }
 }
 

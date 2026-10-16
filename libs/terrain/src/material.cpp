@@ -66,6 +66,11 @@ std::uint8_t encode(double linear) {
     return static_cast<std::uint8_t>(std::lround(encoded * 255.0));
 }
 
+double decode(std::uint8_t byte) {
+    const double encoded = byte / 255.0;
+    return encoded <= 0.04045 ? encoded / 12.92 : std::pow((encoded + 0.055) / 1.055, 2.4);
+}
+
 std::vector<std::uint8_t> encoded(const Level& level) {
     std::vector<std::uint8_t> texels;
     texels.reserve(level.size() * 4);
@@ -159,6 +164,13 @@ MaterialImage material_image(const Look& look, int size) {
         level = halved(level, across);
     }
     return image;
+}
+
+DVec3 material_mean(const MaterialImage& image) {
+    HOG_ASSERT(!image.levels.empty() && image.levels.back().size() >= 3,
+               "a material's mean is in its last level");
+    const std::vector<std::uint8_t>& last = image.levels.back();
+    return {decode(last[0]), decode(last[1]), decode(last[2])};
 }
 
 } // namespace hog::terrain

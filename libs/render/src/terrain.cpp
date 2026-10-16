@@ -73,9 +73,11 @@ constexpr std::array air_descriptors{
     binding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
     binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)};
 
-// The near tile's size, the far one's, and 1 if ground below sea level is seen through water.
+// The near tile's size, the far one's, and 1 if ground below sea level is seen through water; then
+// what each biome's material averages to, in linear light.
 struct Settings {
     glm::vec4 tiling;
+    std::array<glm::vec4, planet::biome_count> means;
 };
 
 // The far tile, as many times the near one's size.
@@ -280,9 +282,13 @@ Result<Terrain> Terrain::create(Device& device, VkFormat colour_format, VkFormat
     drawn.sampler_ = std::move(sampler).value();
 
     drawn.period_ = look.tile * far_tiles;
-    const Settings settings{.tiling = {static_cast<float>(look.tile),
-                                       static_cast<float>(drawn.period_), look.sea ? 1.0F : 0.0F,
-                                       0.0F}};
+    Settings settings{.tiling = {static_cast<float>(look.tile), static_cast<float>(drawn.period_),
+                                 look.sea ? 1.0F : 0.0F, 0.0F},
+                      .means = {}};
+    for (std::size_t biome = 0; biome < settings.means.size(); ++biome) {
+        settings.means.at(biome) =
+            glm::vec4{Vec3{terrain::material_mean(look.materials[biome])}, 1.0F};
+    }
     auto settings_buffer = make_filled_buffer(device, std::as_bytes(std::span{&settings, 1}),
                                               VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
     if (!settings_buffer) {
