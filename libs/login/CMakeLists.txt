@@ -14,6 +14,8 @@ target_include_directories(hog_login PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include
 target_link_libraries(hog_login PUBLIC hog::core PRIVATE monocypher)
 if(WIN32)
     target_link_libraries(hog_login PRIVATE bcrypt)
+    # windows.h, for the system's randomness, otherwise defines min and max over std's.
+    target_compile_definitions(hog_login PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
 hog_target_defaults(hog_login)
 
