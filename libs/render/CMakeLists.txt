@@ -47,6 +47,7 @@ add_library(hog_render
     src/pipeline.cpp
     src/presenter.cpp
     src/readback.cpp
+    src/render_graph.cpp
     src/rendering.cpp
     src/sampler.cpp
     src/shader_watch.cpp
@@ -98,6 +99,7 @@ hog_add_tests(hog_render
     tests/orbit_tests.cpp
     tests/pipeline_tests.cpp
     tests/presenter_tests.cpp
+    tests/render_graph_tests.cpp
     tests/shader_watch_tests.cpp
     tests/sky_tests.cpp
     tests/streamed_image_tests.cpp

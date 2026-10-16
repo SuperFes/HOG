@@ -1,5 +1,6 @@
 #include <hog/render/barrier.hpp>
 
+#include <cstdint>
 #include <utility>
 
 namespace hog::render {
@@ -32,7 +33,13 @@ constexpr VkAccessFlags2 writes = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
                                   VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT |
                                   VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_HOST_WRITE_BIT;
 
-void record(VkCommandBuffer commands, const VkImageMemoryBarrier2& barrier) noexcept {
+} // namespace
+
+void record_barriers(VkCommandBuffer commands,
+                     std::span<const VkImageMemoryBarrier2> barriers) noexcept {
+    if (barriers.empty()) {
+        return;
+    }
     const VkDependencyInfo dependency{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
                                       .pNext = nullptr,
                                       .dependencyFlags = 0,
@@ -40,16 +47,16 @@ void record(VkCommandBuffer commands, const VkImageMemoryBarrier2& barrier) noex
                                       .pMemoryBarriers = nullptr,
                                       .bufferMemoryBarrierCount = 0,
                                       .pBufferMemoryBarriers = nullptr,
-                                      .imageMemoryBarrierCount = 1,
-                                      .pImageMemoryBarriers = &barrier};
+                                      .imageMemoryBarrierCount =
+                                          static_cast<std::uint32_t>(barriers.size()),
+                                      .pImageMemoryBarriers = barriers.data()};
     vkCmdPipelineBarrier2(commands, &dependency);
 }
 
-} // namespace
-
 void transition(VkCommandBuffer commands, VkImage image, VkImageAspectFlags aspect, ImageUse from,
                 ImageUse to) noexcept {
-    record(commands, image_barrier(image, aspect, from, to));
+    const VkImageMemoryBarrier2 barrier = image_barrier(image, aspect, from, to);
+    record_barriers(commands, std::span{&barrier, 1});
 }
 
 bool needs_barrier(ImageUse from, ImageUse to) noexcept {
@@ -66,7 +73,7 @@ std::optional<VkImageMemoryBarrier2> TrackedImage::barrier_to(ImageUse next) noe
 
 void TrackedImage::use_as(VkCommandBuffer commands, ImageUse next) noexcept {
     if (const auto barrier = barrier_to(next)) {
-        record(commands, *barrier);
+        record_barriers(commands, std::span{&*barrier, 1});
     }
 }
 

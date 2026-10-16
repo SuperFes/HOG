@@ -42,3 +42,16 @@ TEST_CASE("a tracked image waits on its last use", "[render]") {
     CHECK_FALSE(tracked.barrier_to(use::sampled));
     CHECK(tracked.use() == use::sampled);
 }
+
+TEST_CASE("a tracked image can be told what it was left in", "[render]") {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast,performance-no-int-to-ptr)
+    auto* image = reinterpret_cast<VkImage>(std::uintptr_t{0x1000});
+    TrackedImage tracked{image, VK_IMAGE_ASPECT_DEPTH_BIT};
+    CHECK(tracked.aspect() == VK_IMAGE_ASPECT_DEPTH_BIT);
+    tracked.used_as(use::sampled);
+    CHECK(tracked.use() == use::sampled);
+    const auto barrier = tracked.barrier_to(use::depth_target);
+    REQUIRE(barrier.has_value());
+    CHECK(barrier.value_or(VkImageMemoryBarrier2{}).oldLayout ==
+          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+}

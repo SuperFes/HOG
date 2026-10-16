@@ -3,6 +3,7 @@
 #include <hog/render/vulkan.hpp>
 
 #include <optional>
+#include <span>
 
 namespace hog::render {
 
@@ -59,6 +60,10 @@ inline constexpr ImageUse present{.stage = VK_PIPELINE_STAGE_2_NONE,
 void transition(VkCommandBuffer commands, VkImage image, VkImageAspectFlags aspect, ImageUse from,
                 ImageUse to) noexcept;
 
+// Records the barriers together.
+void record_barriers(VkCommandBuffer commands,
+                     std::span<const VkImageMemoryBarrier2> barriers) noexcept;
+
 // Whether moving between two uses needs a barrier: a layout change, or a write on either side.
 [[nodiscard]] bool needs_barrier(ImageUse from, ImageUse to) noexcept;
 
@@ -70,7 +75,10 @@ public:
         : image_{image}, aspect_{aspect}, use_{use} {}
 
     [[nodiscard]] VkImage handle() const noexcept { return image_; }
+    [[nodiscard]] VkImageAspectFlags aspect() const noexcept { return aspect_; }
     [[nodiscard]] ImageUse use() const noexcept { return use_; }
+    // Left in `use` by barriers recorded elsewhere.
+    void used_as(ImageUse use) noexcept { use_ = use; }
 
     // The barrier into `next`, where one is needed; either way the image is in `next` after.
     [[nodiscard]] std::optional<VkImageMemoryBarrier2> barrier_to(ImageUse next) noexcept;
