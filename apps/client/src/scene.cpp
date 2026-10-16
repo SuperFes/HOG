@@ -64,6 +64,10 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
     if (!sky) {
         return failed("draw the sky", sky.error());
     }
+    auto others = render::Capsules::create(device, colour_format, depth_format, true);
+    if (!others) {
+        return failed("draw other players", others.error());
+    }
     auto glare = render::Glare::create(device, colour_format);
     if (!glare) {
         return failed("draw the sun's glare", glare.error());
@@ -81,6 +85,7 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
                  std::move(pool).value(),
                  std::move(atmosphere).value(),
                  std::move(sky).value(),
+                 std::move(others).value(),
                  std::move(glare).value(),
                  std::move(timer).value(),
                  std::move(companion),
@@ -90,12 +95,12 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
 Scene::Scene(const render::Device& device, const planet::World& world, jobs::JobSystem& jobs,
              const sim::Calendar& calendar, render::Terrain terrain, render::Ocean ocean,
              render::TerrainPool pool, render::Atmosphere atmosphere, render::Sky sky,
-             render::Glare glare, render::GpuTimer timer,
+             render::Capsules others, render::Glare glare, render::GpuTimer timer,
              std::optional<render::Billboard> companion, std::uint32_t frames)
     : baker_{world, jobs}, terrain_{std::move(terrain)}, ocean_{std::move(ocean)},
-      pool_{std::move(pool)}, transients_{device, frames}, companion_{std::move(companion)},
-      atmosphere_{std::move(atmosphere)}, sky_{std::move(sky)}, glare_{std::move(glare)},
-      timer_{std::move(timer)}, calendar_{calendar} {}
+      pool_{std::move(pool)}, transients_{device, frames}, others_{std::move(others)},
+      companion_{std::move(companion)}, atmosphere_{std::move(atmosphere)}, sky_{std::move(sky)},
+      glare_{std::move(glare)}, timer_{std::move(timer)}, calendar_{calendar} {}
 
 Scene::~Scene() {
     (void)baker_.finish();
@@ -195,6 +200,16 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
             ocean_.draw(commands, frame.extent,
                         {.camera = shot.camera, .sun = sky.sun, .bend = shot.bend, .air = through});
         });
+    if (!shot.others.empty()) {
+        graph.add(
+            {.name = "others", .uses = through_air, .targets = drawn},
+            [&](VkCommandBuffer commands) {
+                others_.draw(
+                    commands, frame.extent,
+                    {.camera = shot.camera, .sun = sky.sun, .bend = shot.bend, .air = through},
+                    shot.others);
+            });
+    }
     if (companion_ && shot.companion) {
         graph.add(
             {.name = "companion", .uses = {}, .targets = drawn}, [&](VkCommandBuffer commands) {
@@ -228,7 +243,8 @@ Result<Picture> draw_still(render::Device& device, Scene& scene, const Shot& sho
     if (!target) {
         return std::unexpected(std::move(target).error());
     }
-    for (int drawn = 0; drawn < most_frames && !scene.settled(); ++drawn) {
+    // At least once, though the scene settled drawing another shot.
+    for (int drawn = 0; drawn < most_frames && (drawn == 0 || !scene.settled()); ++drawn) {
         Result<> recorded;
         if (auto submitted = device.submit_now([&](VkCommandBuffer commands) {
                 render::Frame frame{.commands = commands,

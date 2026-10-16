@@ -11,6 +11,7 @@
 #include <hog/render/atmosphere.hpp>
 #include <hog/render/billboard.hpp>
 #include <hog/render/camera.hpp>
+#include <hog/render/capsules.hpp>
 #include <hog/render/glare.hpp>
 #include <hog/render/gpu_timer.hpp>
 #include <hog/render/memory.hpp>
@@ -49,10 +50,14 @@ struct Shot {
     double seconds = 0.0; // since the frame before, for the eye to adapt to the light over
     // Whoever flies along, where there's someone to draw.
     std::optional<render::Standing> companion;
+    // Other players.
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    std::vector<render::Capsule> others = {};
 };
 
 // The planet as the client draws it: the ground baked and streamed in round the eye, the sea, the
-// air lit by the sun at the planet's time, whoever flies along, and the sun's glare over it all.
+// air lit by the sun at the planet's time, other players, whoever flies along, and the sun's glare
+// over it all.
 class Scene {
 public:
     // Drawn into colour images of `colour_format`, `frames` in flight, with the sun and seasons
@@ -89,8 +94,8 @@ private:
     Scene(const render::Device& device, const planet::World& world, jobs::JobSystem& jobs,
           const sim::Calendar& calendar, render::Terrain terrain, render::Ocean ocean,
           render::TerrainPool pool, render::Atmosphere atmosphere, render::Sky sky,
-          render::Glare glare, render::GpuTimer timer, std::optional<render::Billboard> companion,
-          std::uint32_t frames);
+          render::Capsules others, render::Glare glare, render::GpuTimer timer,
+          std::optional<render::Billboard> companion, std::uint32_t frames);
 
     render::SkyView sky_view(const Shot& shot);
 
@@ -101,6 +106,7 @@ private:
     render::TerrainPool pool_;
     GroundSlots slots_;
     render::TransientImages transients_;
+    render::Capsules others_;
     std::optional<render::Billboard> companion_;
     atmosphere::Model model_;
     render::Atmosphere atmosphere_;

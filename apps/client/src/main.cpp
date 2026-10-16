@@ -2,6 +2,7 @@
 #include <hog/client/flight.hpp>
 #include <hog/client/frame_times.hpp>
 #include <hog/client/options.hpp>
+#include <hog/client/others.hpp>
 #include <hog/client/picture.hpp>
 #include <hog/client/scene.hpp>
 #include <hog/client/session.hpp>
@@ -264,19 +265,38 @@ void show_network(const client::SessionSummary& summary) {
     ImGui::End();
 }
 
+// Others' names over them, darkened behind so they read against the sky.
+void show_tags(std::span<const client::Tag> tags) {
+    constexpr ImU32 shadow = IM_COL32(0, 0, 0, 160);
+    constexpr ImU32 white = IM_COL32(255, 255, 255, 255);
+    ImDrawList& drawn = *ImGui::GetBackgroundDrawList();
+    for (const client::Tag& tag : tags) {
+        const char* begin = tag.name.data();
+        const char* end = std::to_address(tag.name.end());
+        const ImVec2 text = ImGui::CalcTextSize(begin, end);
+        const ImVec2 corner{static_cast<float>(tag.at.x) - (text.x / 2.0F),
+                            static_cast<float>(tag.at.y) - text.y};
+        drawn.AddText({corner.x + 1.0F, corner.y + 1.0F}, shadow, begin, end);
+        drawn.AddText(corner, white, begin, end);
+    }
+}
+
 // What's drawn over the picture.
 struct Overlay {
     const client::FrameTimes* times = nullptr;
+    bool timings = false;
     // None when not connecting to a server.
     const client::Session* session = nullptr;
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    std::span<const replication::Shown> others = {};
     WorldPosition eye;
     MonotonicClock::time_point now;
 };
 
-// Draws a frame of the shot, with the overlay over it if given, saving it to `capture` if given;
-// false when there's nothing to draw into.
+// Draws a frame of the shot with the overlay over it, saving it to `capture` if given; false when
+// there's nothing to draw into.
 Result<bool> draw(client::Scene& scene, const client::Shot& shot, const render::Device& device,
-                  render::Presenter& presenter, SDL_Window* window, const Overlay* overlay,
+                  render::Presenter& presenter, SDL_Window* window, const Overlay& overlay,
                   const std::optional<std::filesystem::path>& capture) {
     auto begun = presenter.begin(window::drawable(window));
     if (!begun) {
@@ -292,14 +312,16 @@ Result<bool> draw(client::Scene& scene, const client::Shot& shot, const render::
     ImGui_ImplVulkan_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
-    if (overlay != nullptr) {
-        show_timings(*overlay->times);
-        if (overlay->session != nullptr) {
-            show_network(client::summarise(*overlay->session, overlay->eye, overlay->now));
+    const ImVec2 size = ImGui::GetIO().DisplaySize;
+    show_tags(client::tags(overlay.others, shot.camera, shot.bend, {size.x, size.y}));
+    if (overlay.timings) {
+        show_timings(*overlay.times);
+        if (overlay.session != nullptr) {
+            show_network(client::summarise(*overlay.session, overlay.eye, overlay.now));
         }
     }
     ImGui::Render();
-    if (overlay != nullptr) {
+    if (ImGui::GetDrawData()->TotalVtxCount > 0) {
         render::begin_rendering(frame.commands, frame.view, frame.extent, std::nullopt);
         ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), frame.commands);
         vkCmdEndRendering(frame.commands);
@@ -555,16 +577,23 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
             .up = companion_up,
             .height = companion_height};
         const terrain::Bend bend = terrain::bend_from(flight.eye, radius, ground_height);
+        const client::Session* session = connection.session();
+        const std::vector<replication::Shown> others =
+            session != nullptr ? session->others(now) : std::vector<replication::Shown>{};
         const client::Shot shot{.camera = client::flight_camera(flight, client::vertical_fov),
                                 .bend = bend,
                                 .time = clock.time(),
                                 .seconds = seconds,
-                                .companion = companion};
-        const Overlay overlay{
-            .times = &times, .session = connection.session(), .eye = flight.eye, .now = now};
-        const auto drawn =
-            draw(scene, shot, device, presenter, window, controls.timings ? &overlay : nullptr,
-                 controls.quit ? options.capture : std::nullopt);
+                                .companion = companion,
+                                .others = client::avatars(others)};
+        const Overlay overlay{.times = &times,
+                              .timings = controls.timings,
+                              .session = session,
+                              .others = others,
+                              .eye = flight.eye,
+                              .now = now};
+        const auto drawn = draw(scene, shot, device, presenter, window, overlay,
+                                controls.quit ? options.capture : std::nullopt);
         if (!drawn) {
             return std::unexpected(drawn.error());
         }
