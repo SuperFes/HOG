@@ -217,7 +217,7 @@ This phase joins the server and client. It ends at the first milestone: four of 
 **Connection**
 
 - [x] Spike: GameNetworkingSockets against QUIC with datagrams (and yojimbo); record the decision
-- [ ] Login service stub that issues signed connect tokens
+- [x] Login service stub that issues signed connect tokens
 - [x] One encrypted UDP connection with reliable, unreliable and ordered channels
 - [x] Protocol versioning, so an old client gets a clear error message
 
