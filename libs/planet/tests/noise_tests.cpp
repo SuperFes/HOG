@@ -11,8 +11,13 @@
 #include <random>
 #include <vector>
 
+using hog::planet::fine_fraction_bits;
 using hog::planet::fixed_one;
 using hog::planet::NoisePoint;
+
+using FinePoint = hog::planet::BasicNoisePoint<fine_fraction_bits>;
+constexpr std::int64_t fine_one = hog::planet::fixed_unit<fine_fraction_bits>;
+constexpr int fine_shift = fine_fraction_bits - hog::planet::fixed_fraction_bits;
 
 namespace {
 
@@ -33,13 +38,18 @@ NoisePoint hashed_point(std::uint64_t index, std::int64_t span) {
     return {.x = coordinate(0), .y = coordinate(1), .z = coordinate(2)};
 }
 
+FinePoint finer(NoisePoint point) {
+    return {.x = point.x << fine_shift, .y = point.y << fine_shift, .z = point.z << fine_shift};
+}
+
 // The same algorithm in double precision, to measure the fixed-point rounding error.
-double reference_perlin(std::uint64_t noise_seed, NoisePoint point) {
+template <int Bits>
+double reference_perlin(std::uint64_t noise_seed, hog::planet::BasicNoisePoint<Bits> point) {
     const auto fade = [](double t) { return t * t * t * ((t * ((t * 6.0) - 15.0)) + 10.0); };
     const auto lerp = [](double a, double b, double t) { return a + ((b - a) * t); };
-    const auto cell = [](std::int64_t v) { return v >> hog::planet::fixed_fraction_bits; };
+    const auto cell = [](std::int64_t v) { return v >> Bits; };
     const auto fraction = [](std::int64_t v) {
-        return hog::planet::fixed_to_double(v & (fixed_one - 1));
+        return hog::planet::fixed_to_double<Bits>(v & (hog::planet::fixed_unit<Bits> - 1));
     };
     const double fx = fraction(point.x);
     const double fy = fraction(point.y);
@@ -79,6 +89,13 @@ static_assert(hog::planet::perlin(seed, {.x = 3 * fixed_one, .y = -7 * fixed_one
 static_assert(hog::planet::fbm(seed, {.x = 12'345, .y = -678, .z = 9}, 8) != 0);
 static_assert(hog::planet::perlin_gradient(seed, {.x = 12'345, .y = -678, .z = 9}).dx != 0);
 static_assert(hog::planet::ridges(seed, {.x = 12'345, .y = -678, .z = 9}, 8) != 0);
+// At 24 bits too, from the fade's ends to coordinates as far out as noise points may reach.
+static_assert(hog::planet::detail::fade<fine_fraction_bits>(fine_one - 1) <=
+              std::int64_t{1} << hog::planet::detail::weight_bits);
+static_assert(hog::planet::fbm(seed, FinePoint{.x = (fine_one << 22) - 1, .y = -fine_one, .z = 9},
+                               hog::planet::max_octaves) != 0);
+static_assert(hog::planet::ridges(seed, FinePoint{.x = (fine_one << 22) - 1, .y = 5, .z = -9},
+                                  hog::planet::max_octaves, 4 * fine_one) != 0);
 
 TEST_CASE("fixed-point Perlin stays within two steps of the exact value", "[planet][noise]") {
     std::mt19937_64 rng{4};
@@ -303,4 +320,51 @@ TEST_CASE("fractal noise checks the octave count", "[planet][noise]") {
                     hog::testing::AssertionFailed);
     CHECK_THROWS_AS(hog::planet::ridges(seed, {}, 0), hog::testing::AssertionFailed);
     CHECK_THROWS_AS(hog::planet::ridges(seed, {}, 4, -1), hog::testing::AssertionFailed);
+}
+
+TEST_CASE("fine Perlin stays within two of its steps of the exact value", "[planet][noise]") {
+    std::mt19937_64 rng{10};
+    for (int sample = 0; sample < 100'000; ++sample) {
+        const FinePoint point = finer(random_point(rng, 100 * fixed_one));
+        const FinePoint between{.x = point.x + (sample % 251), .y = point.y + 77, .z = point.z};
+        const double exact = reference_perlin(seed, between) * static_cast<double>(fine_one);
+        REQUIRE(std::abs(exact - static_cast<double>(hog::planet::perlin(seed, between))) <= 2.0);
+    }
+}
+
+TEST_CASE("fine noise is coarse noise with more precision", "[planet][noise]") {
+    const auto coarser = [](std::int64_t fine) { return fine >> fine_shift; };
+    std::mt19937_64 rng{11};
+    for (int sample = 0; sample < 20'000; ++sample) {
+        const NoisePoint point = random_point(rng, 1'000 * fixed_one);
+        REQUIRE(std::abs(coarser(hog::planet::perlin(seed, finer(point))) -
+                         hog::planet::perlin(seed, point)) <= 2);
+        REQUIRE(std::abs(coarser(hog::planet::fbm(seed, finer(point), 8)) -
+                         hog::planet::fbm(seed, point, 8)) <= 4);
+        REQUIRE(std::abs(coarser(hog::planet::ridges(seed, finer(point), 8, 2 * fine_one)) -
+                         hog::planet::ridges(seed, point, 8, 2 * fixed_one)) <= 16);
+    }
+}
+
+TEST_CASE("fine noise moves between the points coarse noise steps by", "[planet][noise]") {
+    std::mt19937_64 rng{12};
+    for (int sample = 0; sample < 2'000; ++sample) {
+        const FinePoint start = finer(random_point(rng, 100 * fixed_one));
+        // Within a step of coarse noise, fine ridges change by a few of their own steps at a time
+        // and take many values, rather than holding one and jumping.
+        std::int64_t previous = hog::planet::ridges(seed, start, 6, 2 * fine_one);
+        std::vector<std::int64_t> values{previous};
+        for (std::int64_t step = 1; step <= std::int64_t{1} << fine_shift; ++step) {
+            const std::int64_t value = hog::planet::ridges(
+                seed, FinePoint{.x = start.x + step, .y = start.y, .z = start.z}, 6, 2 * fine_one);
+            REQUIRE(std::abs(value - previous) <= 16);
+            previous = value;
+            values.push_back(value);
+        }
+        std::ranges::sort(values);
+        const auto distinct =
+            std::ranges::distance(values.begin(), std::ranges::unique(values).begin());
+        const std::int64_t spread = values.back() - values.front();
+        CHECK(distinct >= std::min<std::int64_t>(spread / 4, 64));
+    }
 }

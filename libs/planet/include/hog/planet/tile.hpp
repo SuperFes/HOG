@@ -49,7 +49,13 @@ template <std::integral T>
 }
 
 // The fixed-point noise point for a position, at `frequency` lattice cells per unit length.
-// Rounds once per coordinate, so it is as deterministic as the position itself.
-[[nodiscard]] NoisePoint noise_point(DVec3 position, double frequency);
+// Rounds once per coordinate, so it is as deterministic as the position itself. Defined for 16
+// and 24 fractional bits.
+template <int Bits = fixed_fraction_bits>
+[[nodiscard]] BasicNoisePoint<Bits> noise_point(DVec3 position, double frequency);
+
+extern template NoisePoint noise_point<fixed_fraction_bits>(DVec3 position, double frequency);
+extern template BasicNoisePoint<fine_fraction_bits>
+noise_point<fine_fraction_bits>(DVec3 position, double frequency);
 
 } // namespace hog::planet
