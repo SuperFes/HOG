@@ -7,6 +7,7 @@
 #include <hog/core/log.hpp>
 #include <hog/core/time.hpp>
 #include <hog/jobs/job_system.hpp>
+#include <hog/login/service.hpp>
 #include <hog/mapgen/render.hpp>
 #include <hog/net/client.hpp>
 #include <hog/planet/planet_config.hpp>
@@ -301,33 +302,102 @@ private:
 
 const log::Category connection_log{"connection"};
 
-// The connection to a server, if there's one to connect to, telling what becomes of it.
+// The connection to a server, if there's one to connect to, telling what becomes of it: after
+// logging in for a connect token, when asked to.
 class Connection {
 public:
-    [[nodiscard]] static Result<Connection> open(const std::optional<std::string>& address) {
+    [[nodiscard]] static Result<Connection> open(const client::Options& options) {
         Connection connection;
-        if (address) {
-            auto client = net::Client::connect(*address);
-            if (!client) {
-                return std::unexpected(client.error());
+        if (!options.connect) {
+            return connection;
+        }
+        connection.address_ = *options.connect;
+        if (options.login) {
+            auto login = net::Client::connect(*options.login);
+            if (!login) {
+                return std::unexpected(login.error());
             }
-            connection.client_ = std::move(*client);
-            connection.address_ = *address;
-            log::info(connection_log, "connecting to {}", *address);
+            connection.login_ = std::move(*login);
+            connection.login_address_ = *options.login;
+            connection.name_ = options.name.value_or("");
+            log::info(connection_log, "logging in at {} as {}", *options.login, connection.name_);
+            return connection;
+        }
+        if (auto started = connection.connect(); !started) {
+            return std::unexpected(started.error());
         }
         return connection;
     }
 
     void look() {
-        if (!client_) {
-            return;
+        if (login_) {
+            look_at_login(*login_);
         }
-        client_->poll(events_);
+        if (client_) {
+            look_at_server(*client_);
+        }
+    }
+
+private:
+    [[nodiscard]] Result<void> connect() {
+        auto client = net::Client::connect(address_);
+        if (!client) {
+            return std::unexpected(client.error());
+        }
+        client_ = std::move(*client);
+        log::info(connection_log, "connecting to {}", address_);
+        return {};
+    }
+
+    void look_at_login(net::Client& login) {
+        login.poll(events_);
+        for (const net::Event& event : events_) {
+            if (std::holds_alternative<net::Connected>(event)) {
+                if (auto sent = login.send(
+                        net::Delivery::Reliable,
+                        login::encode(login::Ask{.version = login::login_version, .name = name_}));
+                    !sent) {
+                    log::warn(connection_log, "couldn't log in: {}", sent.error());
+                }
+            } else if (const auto* message = std::get_if<net::Message>(&event)) {
+                logged_in(message->bytes());
+                login.disconnect("answered");
+                login_.reset();
+                return;
+            } else if (const auto* lost = std::get_if<net::Disconnected>(&event)) {
+                log::warn(connection_log, "the login service at {} closed: {}", login_address_,
+                          lost->reason);
+                login_.reset();
+                return;
+            }
+        }
+    }
+
+    // What the login service answered: on with its token, or no further.
+    void logged_in(std::span<const std::byte> bytes) {
+        const auto message = login::decode(bytes);
+        if (!message) {
+            log::warn(connection_log, "the login service sent something unreadable: {}",
+                      message.error());
+        } else if (const auto* granted = std::get_if<login::Granted>(&*message)) {
+            token_ = granted->token;
+            log::info(connection_log, "logged in as {}", name_);
+            if (auto started = connect(); !started) {
+                log::warn(connection_log, "couldn't connect to {}: {}", address_, started.error());
+            }
+        } else if (const auto* denied = std::get_if<login::Denied>(&*message)) {
+            log::warn(connection_log, "the login was denied: {}", denied->reason);
+        }
+    }
+
+    void look_at_server(net::Client& client) {
+        client.poll(events_);
         for (const net::Event& event : events_) {
             if (std::holds_alternative<net::Connected>(event)) {
                 log::info(connection_log, "connected to {}", address_);
-                if (auto sent =
-                        client_->send(net::Delivery::Reliable, protocol::encode(protocol::Hello{}));
+                if (auto sent = client.send(net::Delivery::Reliable,
+                                            protocol::encode(protocol::Hello{
+                                                .version = protocol::version, .token = token_}));
                     !sent) {
                     log::warn(connection_log, "couldn't say hello: {}", sent.error());
                 }
@@ -339,7 +409,6 @@ public:
         }
     }
 
-private:
     void heard(std::span<const std::byte> bytes) const {
         const auto message = protocol::decode(bytes);
         if (!message) {
@@ -352,8 +421,12 @@ private:
         }
     }
 
+    std::optional<net::Client> login_;
     std::optional<net::Client> client_;
+    std::string login_address_;
     std::string address_;
+    std::string name_;
+    std::vector<std::byte> token_;
     std::vector<net::Event> events_;
 };
 
@@ -483,7 +556,7 @@ std::optional<render::Billboard> companion(const client::Options& options, rende
 int show(const client::Options& options, const planet::PlanetConfig& planet,
          const planet::World& world, render::Device& device, render::Presenter& presenter,
          SDL_Window* window) {
-    auto connection = Connection::open(options.connect);
+    auto connection = Connection::open(options);
     if (!connection) {
         std::cerr << std::format("hog-client: {}\n", connection.error());
         return EXIT_FAILURE;

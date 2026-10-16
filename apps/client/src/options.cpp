@@ -89,6 +89,10 @@ Result<void> read_option(Options& options, std::string_view option, std::string_
         }
     } else if (option == "--connect") {
         options.connect = std::string{value};
+    } else if (option == "--login") {
+        options.login = std::string{value};
+    } else if (option == "--name") {
+        options.name = std::string{value};
     } else if (option == "--companion") {
         options.companion = std::filesystem::path{value};
     } else if (option == "--capture") {
@@ -114,6 +118,18 @@ Result<void> read_option(Options& options, std::string_view option, std::string_
     return {};
 }
 
+// Options that only make sense with others.
+Result<void> check_together(const Options& options) {
+    if (options.login && (!options.name || !options.connect)) {
+        return make_error(ErrorCode::InvalidArgument,
+                          "--login needs --name to log in as and --connect to go on to");
+    }
+    if (options.name && !options.login) {
+        return make_error(ErrorCode::InvalidArgument, "--name is for --login");
+    }
+    return {};
+}
+
 } // namespace
 
 std::string_view usage() noexcept {
@@ -129,6 +145,8 @@ options:
   --threads N            baking the ground (default one per hardware thread)
   --connect ADDRESS      connect to a server at an IP address and port, such as
                          127.0.0.1:7675
+  --login ADDRESS        log in there first, such as 127.0.0.1:4647, with --name
+  --name NAME            who to log in as
   --companion PATH       a drawing on white paper of someone 3 m tall to fly along
                          with (default res/Matt.png)
   --alone                fly without them
@@ -208,6 +226,9 @@ Result<Options> parse_options(std::span<const std::string_view> arguments) {
         if (auto read = read_option(options, argument, arguments[++i]); !read) {
             return std::unexpected(std::move(read.error()));
         }
+    }
+    if (auto together = check_together(options); !together) {
+        return std::unexpected(std::move(together.error()));
     }
     return options;
 }

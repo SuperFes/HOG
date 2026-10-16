@@ -31,6 +31,10 @@ struct Options {
     std::uint32_t threads = 0; // baking the ground, 0 for one per hardware thread
     // A server's IP address and port to connect to; alone without one.
     std::optional<std::string> connect;
+    // A login service's IP address and port, and the name to log in with, for a connect token
+    // to connect with; without, connecting with none.
+    std::optional<std::string> login;
+    std::optional<std::string> name;
     // A drawing on white paper, of someone to fly along with; none without one.
     std::optional<std::filesystem::path> companion = std::filesystem::path{"res/Matt.png"};
     // For smoke tests and pictures: how long to run before quitting, and where to save the last

@@ -21,6 +21,8 @@ TEST_CASE("client options default to the development planet", "[client][options]
     CHECK_FALSE(options->time_of_day);
     CHECK(options->threads == 0);
     CHECK_FALSE(options->connect);
+    CHECK_FALSE(options->login);
+    CHECK_FALSE(options->name);
     CHECK(options->companion == "res/Matt.png");
     CHECK_FALSE(options->quit_after);
     CHECK_FALSE(options->capture);
@@ -42,6 +44,10 @@ TEST_CASE("client options are parsed", "[client][options]") {
                                                  "2",
                                                  "--connect",
                                                  "127.0.0.1:7675",
+                                                 "--login",
+                                                 "127.0.0.1:4647",
+                                                 "--name",
+                                                 "Matt",
                                                  "--companion",
                                                  "friend.png",
                                                  "--quit-after",
@@ -59,6 +65,8 @@ TEST_CASE("client options are parsed", "[client][options]") {
     CHECK(options->time_of_day == 18.5 / 24.0);
     CHECK(options->threads == 2);
     CHECK(options->connect == "127.0.0.1:7675");
+    CHECK(options->login == "127.0.0.1:4647");
+    CHECK(options->name == "Matt");
     CHECK(options->companion == "friend.png");
     CHECK(options->quit_after == std::chrono::seconds{3});
     CHECK(options->capture == "out.png");
@@ -110,4 +118,11 @@ TEST_CASE("a client can be told not to reload shaders", "[client][options]") {
     const auto options = parse_options(Arguments{"--reload-shaders", "--no-reload-shaders"});
     REQUIRE(options);
     CHECK_FALSE(options->reload_shaders);
+}
+
+TEST_CASE("logging in needs a name and a server to go on to", "[client][options]") {
+    CHECK_FALSE(parse_options(Arguments{"--login", "127.0.0.1:4647", "--name", "Matt"}));
+    CHECK_FALSE(
+        parse_options(Arguments{"--login", "127.0.0.1:4647", "--connect", "127.0.0.1:7675"}));
+    CHECK_FALSE(parse_options(Arguments{"--name", "Matt", "--connect", "127.0.0.1:7675"}));
 }
