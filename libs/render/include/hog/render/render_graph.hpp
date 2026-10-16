@@ -67,8 +67,9 @@ struct GraphTransition {
 
 struct PlannedPass {
     std::vector<GraphTransition> transitions; // before it
-    // Draws into the same targets as the pass before, clearing neither and needing no barrier,
-    // so it carries on in the same rendering.
+    // Draws into the same targets as the pass before, clearing neither, so it carries on in the
+    // same rendering. Barriers it needs on images not used since the rendering began are moved
+    // before the pass that began it; it can't carry on needing any others.
     bool continues_rendering = false;
 };
 

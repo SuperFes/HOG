@@ -117,29 +117,38 @@ TEST_CASE("passes drawing into the same targets carry on in the same rendering",
           "[render][render_graph]") {
     GraphPass sampling = drawing("sampling", false);
     sampling.uses = {{.image = table, .use = fragment_read}};
+    GraphPass rewriting = drawing("rewriting", false);
+    rewriting.uses = {{.image = table, .use = use::storage}};
     GraphPass glare = drawing("glare", false, false);
     glare.uses = {{.image = depth, .use = use::sampled}};
-    const std::array passes{drawing("sky", true),   drawing("ground", false), sampling,
-                            drawing("sea", false),  drawing("cleared", true), glare,
-                            drawing("after", false)};
+    const std::array passes{
+        drawing("sky", true),  drawing("ground", false), sampling, rewriting,
+        drawing("sea", false), drawing("cleared", true), glare,    drawing("after", false)};
     const auto plan = plan_graph(starting, passes);
     REQUIRE(plan);
     const auto& planned = plan->passes;
     CHECK_FALSE(planned[0].continues_rendering);
     CHECK(planned[1].continues_rendering);
     CHECK(planned[1].transitions.empty());
-    // The table it samples needs a barrier, so it starts its own rendering.
-    CHECK_FALSE(planned[2].continues_rendering);
-    CHECK(planned[2].transitions.size() == 3);
-    CHECK(planned[3].continues_rendering);
-    CHECK_FALSE(planned[4].continues_rendering);
-    // Sampling what was a target means drawing without it.
+    // The barrier on the table it samples comes before the rendering began.
+    CHECK(planned[2].continues_rendering);
+    CHECK(planned[2].transitions.empty());
+    REQUIRE(planned[0].transitions.size() == 3);
+    CHECK(planned[0].transitions[2].image == table);
+    CHECK(planned[0].transitions[2].from == use::storage);
+    CHECK(planned[0].transitions[2].to == fragment_read);
+    // But the rendering has sampled it since, so writing it needs a rendering of its own.
+    CHECK_FALSE(planned[3].continues_rendering);
+    CHECK(planned[3].transitions.size() == 3);
+    CHECK(planned[4].continues_rendering);
     CHECK_FALSE(planned[5].continues_rendering);
-    REQUIRE_FALSE(planned[5].transitions.empty());
-    CHECK(planned[5].transitions[0].image == depth);
-    CHECK(planned[5].transitions[0].to == use::sampled);
-    // After a pass with other targets.
+    // Sampling what was a target means drawing without it.
     CHECK_FALSE(planned[6].continues_rendering);
+    REQUIRE_FALSE(planned[6].transitions.empty());
+    CHECK(planned[6].transitions[0].image == depth);
+    CHECK(planned[6].transitions[0].to == use::sampled);
+    // After a pass with other targets.
+    CHECK_FALSE(planned[7].continues_rendering);
     CHECK(plan->last_uses[1] == use::depth_target);
 }
 

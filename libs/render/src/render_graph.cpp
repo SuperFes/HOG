@@ -70,32 +70,41 @@ Result<GraphPlan> plan_graph(std::span<const ImageUse> first_uses,
     GraphPlan plan{.passes = {}, .last_uses = {first_uses.begin(), first_uses.end()}};
     std::vector<ImageUse>& uses = plan.last_uses;
     const GraphPass* before = nullptr;
+    std::size_t opened = 0;                         // the pass the rendering began in
+    std::vector<bool> rendered(uses.size(), false); // images used since
     for (const GraphPass& pass : passes) {
         const std::vector<GraphUse> wanted = wanted_uses(pass);
         if (auto checked = check_uses(pass, wanted, uses.size()); !checked) {
             return std::unexpected(std::move(checked).error());
         }
         // Drawing into the same targets again needs no barrier between, rendering's own order
-        // keeping the draws apart.
+        // keeping the draws apart; barriers on what the rendering hasn't touched come before it.
         const bool continues =
             before != nullptr && before->targets && pass.targets &&
             same_targets(*before->targets, *pass.targets) && !clears(*pass.targets) &&
             std::ranges::none_of(wanted, [&](const GraphUse& use) {
-                return !is_target(pass, use.image) && needs_barrier(uses[use.image.index], use.use);
+                return !is_target(pass, use.image) && rendered[use.image.index] &&
+                       needs_barrier(uses[use.image.index], use.use);
             });
-        PlannedPass planned{.transitions = {}, .continues_rendering = continues};
+        if (!continues) {
+            opened = plan.passes.size();
+            std::ranges::fill(rendered, false);
+        }
+        plan.passes.push_back({.transitions = {}, .continues_rendering = continues});
         for (const GraphUse& use : wanted) {
             if (continues && is_target(pass, use.image)) {
                 continue;
             }
             ImageUse& was = uses[use.image.index];
+            const bool barrier = needs_barrier(was, use.use);
             const ImageUse next = next_use(was, use.use);
-            if (next != was || needs_barrier(was, use.use)) {
-                planned.transitions.push_back({.image = use.image, .from = was, .to = next});
+            if (next != was || barrier) {
+                PlannedPass& into = continues && barrier ? plan.passes[opened] : plan.passes.back();
+                into.transitions.push_back({.image = use.image, .from = was, .to = next});
                 was = next;
             }
+            rendered[use.image.index] = true;
         }
-        plan.passes.push_back(std::move(planned));
         before = &pass;
     }
     return plan;
