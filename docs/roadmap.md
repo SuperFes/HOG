@@ -230,11 +230,11 @@ This phase joins the server and client. It ends at the first milestone: four of 
 
 **Movement**
 
-- [ ] Jolt physics in double precision; character controller on the sphere
-- [ ] Client prediction with server validation and correction
-- [ ] Smooth interpolation of other players
-- [ ] Placeholder avatars (capsules or a basic mannequin) with name tags
-- [ ] Third-person camera that turns about the character rather than about the eye
+- [x] Jolt physics in double precision; character controller on the sphere
+- [x] Client prediction with server validation and correction
+- [x] Smooth interpolation of other players
+- [x] Placeholder avatars (capsules or a basic mannequin) with name tags
+- [x] Third-person camera that turns about the character rather than about the eye
 
 **World**
 
