@@ -348,6 +348,20 @@ private:
     return {};
 }
 
+[[nodiscard]] Result<void> parse_net(const Table& net, NetSettings& config) {
+    if (auto known = net.only({"port"}); !known) {
+        return known;
+    }
+    const auto port = net.integer("port", 1, std::numeric_limits<std::uint16_t>::max());
+    if (!port) {
+        return std::unexpected(port.error());
+    }
+    if (*port) {
+        config.port = static_cast<std::uint16_t>(**port);
+    }
+    return {};
+}
+
 [[nodiscard]] Result<void> parse_debug(const Table& debug, DebugSettings& config) {
     if (auto known = debug.only({"port", "time_control", "start"}); !known) {
         return known;
@@ -381,8 +395,8 @@ Result<ServerConfig> parse_server_config(std::string_view text, const std::files
         return make_error(ErrorCode::Parse, std::format("line {}: {}", error.source().begin.line,
                                                         error.description()));
     }
-    constexpr std::array<std::string_view, 8> names{"server",  "save",     "log",    "metrics",
-                                                    "weather", "wildlife", "forest", "debug"};
+    constexpr std::array<std::string_view, 9> names{
+        "server", "save", "log", "metrics", "weather", "wildlife", "forest", "debug", "net"};
     std::array<const toml::table*, names.size()> tables{};
     for (const auto& [key, node] : parsed.table()) {
         const auto index =
@@ -421,6 +435,9 @@ Result<ServerConfig> parse_server_config(std::string_view text, const std::files
     }
     if (auto debug = parse_debug(Table{tables[7], "debug"}, config.debug); !debug) {
         return std::unexpected(debug.error());
+    }
+    if (auto net = parse_net(Table{tables[8], "net"}, config.net); !net) {
+        return std::unexpected(net.error());
     }
     return config;
 }

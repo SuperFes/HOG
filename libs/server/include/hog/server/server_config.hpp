@@ -44,6 +44,11 @@ struct ForestSettings {
     GameDuration step = std::chrono::hours{1};
 };
 
+struct NetSettings {
+    // Where players connect, on every address; without one, they can't.
+    std::optional<std::uint16_t> port;
+};
+
 struct DebugSettings {
     // Where debug tools connect, on the loopback address only; without one, they can't.
     std::optional<std::uint16_t> port;
@@ -68,6 +73,7 @@ struct ServerConfig {
     WeatherSettings weather;
     WildlifeSettings wildlife;
     ForestSettings forest;
+    NetSettings net;
     DebugSettings debug;
 };
 
@@ -105,6 +111,9 @@ struct ServerConfig {
 //     [forest]                   # optional
 //     vegetation = "forest.toml"
 //     step_hours = 1.0           # game time
+//
+//     [net]                      # optional
+//     port = 27015               # for players, on every address
 //
 //     [debug]                    # optional
 //     port = 7777                # for debug tools, on 127.0.0.1

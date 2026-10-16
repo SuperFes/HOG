@@ -55,6 +55,7 @@ TEST_CASE("a minimal server config takes the defaults", "[server][config]") {
     CHECK(config->wildlife.step == 24h);
     CHECK_FALSE(config->forest.vegetation);
     CHECK(config->forest.step == 1h);
+    CHECK_FALSE(config->net.port);
     CHECK_FALSE(config->debug.port);
     CHECK_FALSE(config->debug.time_control);
     CHECK_FALSE(config->debug.start);
@@ -94,6 +95,9 @@ step_hours = 6
 vegetation = "forest.toml"
 step_hours = 0.5
 
+[net]
+port = 27100
+
 [debug]
 port = 7777
 time_control = true
@@ -125,6 +129,7 @@ start = 2030-06-01T12:00:00+02:00
     CHECK(config->wildlife.step == 6h);
     CHECK(config->forest.vegetation == base() / "forest.toml");
     CHECK(config->forest.step == 30min);
+    CHECK(config->net.port == 27100);
     CHECK(config->debug.port == 7777);
     CHECK(config->debug.time_control);
     CHECK(config->debug.start ==
@@ -173,6 +178,9 @@ TEST_CASE("bad server configs are rejected", "[server][config]") {
         {with("[forest]\nvegetation = 3\n"), ErrorCode::InvalidArgument},
         {with("[forest]\nstep_hours = 25\n"), ErrorCode::InvalidArgument},
         {with("[forest]\nfire = \"a.toml\"\n"), ErrorCode::InvalidArgument},
+        {with("[net]\nport = 0\n"), ErrorCode::InvalidArgument},
+        {with("[net]\nport = 65536\n"), ErrorCode::InvalidArgument},
+        {with("[net]\naddress = \"0.0.0.0\"\n"), ErrorCode::InvalidArgument},
         {with("[debug]\nport = 0\n"), ErrorCode::InvalidArgument},
         {with("[debug]\nport = 65536\n"), ErrorCode::InvalidArgument},
         {with("[debug]\nport = \"7777\"\n"), ErrorCode::InvalidArgument},
@@ -218,5 +226,6 @@ TEST_CASE("the development server config loads", "[server][config]") {
     CHECK(std::filesystem::exists(config->planet));
     CHECK(std::filesystem::exists(config->wildlife.ecology.value_or("")));
     CHECK(std::filesystem::exists(config->forest.vegetation.value_or("")));
+    CHECK(config->net.port);
     CHECK(config->debug.port);
 }

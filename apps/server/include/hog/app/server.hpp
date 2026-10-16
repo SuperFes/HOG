@@ -7,6 +7,7 @@
 #include <hog/core/result.hpp>
 #include <hog/core/time.hpp>
 #include <hog/jobs/job_system.hpp>
+#include <hog/net/server.hpp>
 #include <hog/planet/planet_config.hpp>
 #include <hog/planet/world.hpp>
 #include <hog/server/catch_up.hpp>
@@ -29,6 +30,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <vector>
 
 namespace hog::app {
 
@@ -89,6 +91,10 @@ public:
     [[nodiscard]] const sim::Forest* forest() const noexcept { return forest_.get(); }
     // Null without a debug port, or when it couldn't be opened.
     [[nodiscard]] const server::ProbeService* probe() const noexcept { return probe_.get(); }
+    // Null without a players' port, or when it couldn't be opened.
+    [[nodiscard]] const net::Server* players() const noexcept {
+        return players_ ? &*players_ : nullptr;
+    }
 
     // Logs the metrics, bringing those mirrored from elsewhere up to date first.
     void report(std::uint64_t slipped);
@@ -115,6 +121,10 @@ private:
     [[nodiscard]] LayerSources layer_sources() const;
     // Opens the debug port, if one is configured, logging rather than failing if it can't.
     void open_probe();
+    // Opens the players' port, if one is configured, logging rather than failing if it can't.
+    void open_players();
+    // Takes in what players' connections sent and what became of them.
+    void serve_players();
     // Answers debug tools waiting on the world, telling them how clock() runs and asking
     // steer(control) to change it.
     template <typename Clock, typename Steer>
@@ -139,6 +149,8 @@ private:
     std::unique_ptr<sim::Forest> forest_;
     // After what it reads, so it stops first.
     std::unique_ptr<server::ProbeService> probe_;
+    std::optional<net::Server> players_;
+    std::vector<net::Event> player_events_;
     GameTime time_;
     Tick tick_;
 
@@ -165,6 +177,7 @@ private:
     metrics::Counter& alight_km2_;
     metrics::Gauge& burning_cells_;
     metrics::Gauge& biomass_tonnes_;
+    metrics::Gauge& connections_;
     // km² alight not yet counted, being under one.
     double alight_left_ = 0.0;
     metrics::Reporter reporter_;
@@ -287,6 +300,7 @@ Result<void> Server::run(T& timer, Now now, const std::atomic<bool>& stop) {
     const auto between = [&] {
         serve_probe([&loop] { return detail::clock_of(loop); },
                     [&](const probe::Control& control) { return steer(loop, control, now); });
+        serve_players();
         if (interval > MonotonicClock::duration::zero() && timer.now() >= next_report) {
             report(loop.stats().slipped);
             next_report = timer.now() + interval;

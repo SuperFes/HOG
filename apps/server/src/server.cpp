@@ -112,6 +112,7 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config,
                                     "Area of cells that caught fire, however they caught it.")),
       burning_cells_(registry_.gauge("hog_forest_burning_cells", "Forest cells alight.")),
       biomass_tonnes_(registry_.gauge("hog_forest_biomass_tonnes", "Living plants on the planet.")),
+      connections_(registry_.gauge("hog_connections", "Players' connections open.")),
       reporter_(registry_) {
     persistence_.persist<server::Position>();
 }
@@ -193,6 +194,7 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
         server->report_forest();
     }
     server->open_probe();
+    server->open_players();
     return server;
 }
 
@@ -399,6 +401,38 @@ LayerSources Server::layer_sources() const {
                         .weather = *weather_,
                         .wildlife = wildlife_.get(),
                         .forest = forest_.get()};
+}
+
+void Server::open_players() {
+    const std::optional<std::uint16_t> port = config_.net.port;
+    if (!port) {
+        return;
+    }
+    auto listening = net::Server::listen(*port);
+    if (!listening) {
+        log::warn(server_log, "no players' port: {}", listening.error());
+        return;
+    }
+    players_ = std::move(*listening);
+    log::info(server_log, "players connect on port {}", *port);
+}
+
+void Server::serve_players() {
+    if (!players_) {
+        return;
+    }
+    players_->poll(player_events_);
+    for (const net::Event& event : player_events_) {
+        if (const auto* connected = std::get_if<net::Connected>(&event)) {
+            log::info(server_log, "connection {} opened",
+                      std::to_underlying(connected->connection));
+            connections_.set(connections_.value() + 1.0);
+        } else if (const auto* lost = std::get_if<net::Disconnected>(&event)) {
+            log::info(server_log, "connection {} closed: {}", std::to_underlying(lost->connection),
+                      lost->reason);
+            connections_.set(connections_.value() - 1.0);
+        }
+    }
 }
 
 void Server::open_probe() {
