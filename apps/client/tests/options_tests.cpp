@@ -41,7 +41,7 @@ TEST_CASE("client options are parsed", "[client][options]") {
                                                  "--threads",
                                                  "2",
                                                  "--connect",
-                                                 "127.0.0.1:27015",
+                                                 "127.0.0.1:7675",
                                                  "--companion",
                                                  "friend.png",
                                                  "--quit-after",
@@ -58,7 +58,7 @@ TEST_CASE("client options are parsed", "[client][options]") {
     CHECK(options->start == Place{.latitude = -12.5, .longitude = 170.0, .altitude = 300.0});
     CHECK(options->time_of_day == 18.5 / 24.0);
     CHECK(options->threads == 2);
-    CHECK(options->connect == "127.0.0.1:27015");
+    CHECK(options->connect == "127.0.0.1:7675");
     CHECK(options->companion == "friend.png");
     CHECK(options->quit_after == std::chrono::seconds{3});
     CHECK(options->capture == "out.png");

@@ -30,7 +30,7 @@ vegetation = "forest.toml"
 step_hours = 1
 
 [net]
-port = 27015
+port = 7675 # PORK on a phone keypad
 
 [debug]
 port = 7777

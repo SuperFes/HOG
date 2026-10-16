@@ -113,7 +113,7 @@ struct ServerConfig {
 //     step_hours = 1.0           # game time
 //
 //     [net]                      # optional
-//     port = 27015               # for players, on every address
+//     port = 7675                # for players, on every address
 //
 //     [debug]                    # optional
 //     port = 7777                # for debug tools, on 127.0.0.1

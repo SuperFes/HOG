@@ -13,8 +13,8 @@ namespace hog::net {
 // One encrypted connection to a server.
 class Client {
 public:
-    // Starts connecting to `address`, an IP address and port such as "127.0.0.1:27015" or
-    // "[::1]:27015". Connected follows once the server accepts, or Disconnected if it doesn't.
+    // Starts connecting to `address`, an IP address and port such as "127.0.0.1:7675" or
+    // "[::1]:7675". Connected follows once the server accepts, or Disconnected if it doesn't.
     [[nodiscard]] static Result<Client> connect(std::string_view address);
 
     Client(Client&&) noexcept;

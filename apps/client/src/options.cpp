@@ -128,7 +128,7 @@ options:
   --time HH:MM           start at this local time of day (default the planet's own)
   --threads N            baking the ground (default one per hardware thread)
   --connect ADDRESS      connect to a server at an IP address and port, such as
-                         127.0.0.1:27015
+                         127.0.0.1:7675
   --companion PATH       a drawing on white paper of someone 3 m tall to fly along
                          with (default res/Matt.png)
   --alone                fly without them
