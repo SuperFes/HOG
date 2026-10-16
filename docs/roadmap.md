@@ -223,10 +223,10 @@ This phase joins the server and client. It ends at the first milestone: four of 
 
 **Replication**
 
-- [ ] Interest management by cell: each client receives only what is near it
-- [ ] Entity snapshots with delta compression against the last acknowledged state
-- [ ] Bandwidth and packet-loss counters in the debug overlay
-- [ ] Network simulator (latency, jitter, loss) in tests and in debug builds
+- [x] Interest management by cell: each client receives only what is near it
+- [x] Entity snapshots with delta compression against the last acknowledged state
+- [x] Bandwidth and packet-loss counters in the debug overlay
+- [x] Network simulator (latency, jitter, loss) in tests and in debug builds
 
 **Movement**
 
