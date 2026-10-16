@@ -5,9 +5,6 @@
 #include <hog/render/vulkan.hpp>
 #include <hog/terrain/selection.hpp>
 
-#include <concepts>
-#include <functional>
-
 namespace hog::client {
 
 // A free-flying eye over a planet centred on the origin, kept level with the ground: its up is
@@ -40,13 +37,6 @@ struct FlySettings {
     double lowest = 2.0;  // metres above the ground the eye keeps
 };
 
-struct WalkSettings {
-    LookSettings look{};
-    double walking = 1.5;    // metres a second
-    double running = 6.0;    // metres a second
-    double eye_height = 3.0; // metres above the ground
-};
-
 // Over a unit `direction`, `altitude` metres above sea level, facing along the ground towards
 // `towards` where it can; otherwise north, or at a pole along +x.
 [[nodiscard]] Flight start_flight(DVec3 direction, double planet_radius, double altitude,
@@ -57,25 +47,17 @@ struct WalkSettings {
 [[nodiscard]] Flight fly(const Flight& flight, const FlyInput& input, double planet_radius,
                          double ground, const FlySettings& settings = {});
 
-// A frame of walking along the ground the way the eye faces, staying as high as it is.
-[[nodiscard]] Flight step(const Flight& flight, const FlyInput& input, bool running,
-                          const WalkSettings& settings = {});
+// Turned and pitched as the mouse moved.
+[[nodiscard]] Flight looked(const Flight& flight, DVec2 look, const LookSettings& settings = {});
 
-// The eye stood on `ground`, metres above sea level.
-[[nodiscard]] Flight stand(const Flight& flight, double planet_radius, double ground,
-                           const WalkSettings& settings = {});
-
-// A frame of walking, standing on the ground wherever it gets to; `ground_at` gives the ground's
-// height in metres above sea level under a position.
-template <std::invocable<WorldPosition> GroundAt>
-[[nodiscard]] Flight walk(const Flight& flight, const FlyInput& input, bool running,
-                          double planet_radius, const GroundAt& ground_at,
-                          const WalkSettings& settings = {}) {
-    const Flight stepped = step(flight, input, running, settings);
-    return stand(stepped, planet_radius, std::invoke(ground_at, stepped.eye), settings);
-}
+// The eye moved to `eye`, still facing the same way along the ground.
+[[nodiscard]] Flight carried_to(const Flight& flight, WorldPosition eye);
 
 [[nodiscard]] render::Camera flight_camera(const Flight& flight, double vertical_fov);
+
+// Looking the way the flight does at its eye, from `distance` metres behind it.
+[[nodiscard]] render::Camera third_person(const Flight& flight, double distance,
+                                          double vertical_fov);
 
 // Where someone flying along with the eye is: `ahead` metres from it along the ground.
 [[nodiscard]] DVec3 companion_direction(const Flight& flight, double ahead);

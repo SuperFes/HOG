@@ -4,6 +4,7 @@
 #include <hog/client/options.hpp>
 #include <hog/client/others.hpp>
 #include <hog/client/picture.hpp>
+#include <hog/client/player.hpp>
 #include <hog/client/scene.hpp>
 #include <hog/client/session.hpp>
 #include <hog/core/log.hpp>
@@ -73,11 +74,16 @@ constexpr std::chrono::milliseconds shader_looks{250};
 constexpr double companion_height = 3.0;
 constexpr double companion_ahead = 8.0;
 constexpr double companion_below = 2.0;
+// Metres the camera stays behind the player, and how near and far the wheel takes it.
+constexpr double behind = 4.0;
+constexpr double nearest_behind = 1.5;
+constexpr double furthest_behind = 20.0;
 
 // What the person flying or walking asks for between frames.
 struct Controls {
     DVec2 look{};
     double speed = client::FlySettings{}.speed;
+    double behind = ::behind; // metres, while walking
     bool walking = false;
     bool timings = false; // shown over the picture
     bool quit = false;
@@ -117,6 +123,9 @@ void handle(const SDL_Event& event, SDL_Window* window, Controls& controls) {
         break;
     case SDL_EVENT_MOUSE_WHEEL:
         if (controls.walking) {
+            controls.behind = std::clamp(
+                controls.behind / std::pow(speed_step, static_cast<double>(event.wheel.y)),
+                nearest_behind, furthest_behind);
             break;
         }
         controls.speed =
@@ -370,6 +379,7 @@ private:
 };
 
 const log::Category connection_log{"connection"};
+const log::Category player_log{"player"};
 
 // The connection to a server, if there's one to connect to, telling what becomes of it: after
 // logging in for a connect token, when asked to.
@@ -505,15 +515,55 @@ private:
     MonotonicClock::time_point looked_ = MonotonicClock::now();
 };
 
-// Sends the server where the walker's feet are, and puts them back where it says.
-void report(Connection& connection, client::Flight& flight, bool walking,
+// Sends the server where the player's feet are, and puts them back where it says.
+void report(Connection& connection, std::optional<client::Player>& player,
             MonotonicClock::time_point now) {
-    const DVec3 up = glm::normalize(flight.eye.metres());
-    const double eye_height = client::WalkSettings{}.eye_height;
-    connection.look(walking ? std::optional{flight.eye - (up * eye_height)} : std::nullopt, now);
-    if (const auto back = connection.take_correction(); back && walking) {
-        flight.eye = *back + (up * eye_height);
+    connection.look(player ? std::optional{player->feet()} : std::nullopt, now);
+    if (const auto back = connection.take_correction(); back && player) {
+        player->place(*back);
     }
+}
+
+// Starts or stops playing the character as asked: stood on the ground under the eye, or flying
+// on from where the camera was.
+void take_part(Controls& controls, std::optional<client::Player>& player, client::Flight& flight,
+               const render::Camera& camera, const planet::World& world) {
+    if (controls.walking == player.has_value()) {
+        return;
+    }
+    if (player) {
+        player.reset();
+        flight.eye = camera.eye;
+        return;
+    }
+    auto made = client::Player::create(world, glm::normalize(flight.eye.metres()));
+    if (!made) {
+        log::warn(player_log, "can't walk here: {}", made.error());
+        controls.walking = false;
+        return;
+    }
+    player = std::move(made).value();
+}
+
+// Plays the character or flies a frame on, as the controls ask; what the camera then sees.
+render::Camera move(const Controls& controls, std::optional<client::Player>& player,
+                    client::Flight& flight, const planet::World& world, double seconds) {
+    const bool faster = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
+    if (!player) {
+        flight =
+            client::fly(flight, {.move = movement(), .look = controls.look, .seconds = seconds},
+                        world.geology().planet_radius(), client::ground_under(world, flight.eye),
+                        {.speed = controls.speed * (faster ? fast : 1.0)});
+        return client::flight_camera(flight, client::vertical_fov);
+    }
+    flight = client::looked(flight, controls.look);
+    if (auto played = player->play(client::stride(flight, movement(), faster), seconds); !played) {
+        log::warn(player_log, "can't keep the ground: {}", played.error());
+    }
+    flight = client::carried_to(flight, player->shoulder());
+    const DVec3 back = -client::flight_camera(flight, client::vertical_fov).forward;
+    return client::third_person(flight, player->room(flight.eye, back, controls.behind),
+                                client::vertical_fov);
 }
 
 // Flies or walks over the world until the window closes or it's time to quit.
@@ -528,6 +578,8 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
     const MonotonicClock::time_point started = MonotonicClock::now();
     MonotonicClock::time_point last = started;
     ShaderReloader shaders{options.reload_shaders};
+    std::optional<client::Player> player;
+    render::Camera camera = client::flight_camera(flight, client::vertical_fov);
     while (!controls.quit) {
         controls.look = {};
         controls.faster_time = 0;
@@ -541,16 +593,10 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
         last = now;
         times.add(passed, scene.timings());
         shaders.look(device, now);
-        report(connection, flight, controls.walking, now);
-        const bool faster = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
-        const client::FlyInput input{.move = movement(), .look = controls.look, .seconds = seconds};
-        flight =
-            controls.walking
-                ? client::walk(flight, input, faster, radius,
-                               [&](WorldPosition at) { return client::ground_under(world, at); })
-                : client::fly(flight, input, radius, client::ground_under(world, flight.eye),
-                              {.speed = controls.speed * (faster ? fast : 1.0)});
-        const double ground_height = client::ground_under(world, flight.eye);
+        take_part(controls, player, flight, camera, world);
+        report(connection, player, now);
+        camera = move(controls, player, flight, world, seconds);
+        const double ground_height = client::ground_under(world, camera.eye);
         for (; controls.faster_time > 0; --controls.faster_time) {
             clock.faster();
         }
@@ -559,7 +605,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
         }
         clock.advance(seconds);
         title.count(
-            window, glm::length(flight.eye.metres()) - radius - ground_height,
+            window, glm::length(camera.eye.metres()) - radius - ground_height,
             scene.calendar().local_time_of_day(clock.time(), glm::normalize(flight.eye.metres())),
             clock.rate());
 
@@ -570,27 +616,31 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
         const double ground_ahead =
             client::ground_under(world, WorldPosition{companion_up * radius});
         const render::Standing companion{
-            .feet = controls.walking
-                        ? WorldPosition{companion_up * (radius + ground_ahead)}
-                        : client::companion_feet(flight, companion_ahead, companion_below, radius,
-                                                 ground_ahead),
+            .feet = player ? WorldPosition{companion_up * (radius + ground_ahead)}
+                           : client::companion_feet(flight, companion_ahead, companion_below,
+                                                    radius, ground_ahead),
             .up = companion_up,
             .height = companion_height};
-        const terrain::Bend bend = terrain::bend_from(flight.eye, radius, ground_height);
+        const terrain::Bend bend = terrain::bend_from(camera.eye, radius, ground_height);
         const client::Session* session = connection.session();
         const std::vector<replication::Shown> others =
             session != nullptr ? session->others(now) : std::vector<replication::Shown>{};
-        const client::Shot shot{.camera = client::flight_camera(flight, client::vertical_fov),
+        std::vector<render::Capsule> avatars = client::avatars(others);
+        if (player) {
+            // The server doesn't say who the player is, so they take the colour of no one.
+            avatars.push_back(client::avatar(player->feet(), client::colour_of(protocol::NetId{})));
+        }
+        const client::Shot shot{.camera = camera,
                                 .bend = bend,
                                 .time = clock.time(),
                                 .seconds = seconds,
                                 .companion = companion,
-                                .others = client::avatars(others)};
+                                .others = std::move(avatars)};
         const Overlay overlay{.times = &times,
                               .timings = controls.timings,
                               .session = session,
                               .others = others,
-                              .eye = flight.eye,
+                              .eye = camera.eye,
                               .now = now};
         const auto drawn = draw(scene, shot, device, presenter, window, overlay,
                                 controls.quit ? options.capture : std::nullopt);

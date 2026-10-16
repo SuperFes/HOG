@@ -19,6 +19,9 @@ inline constexpr double tag_reach = 100.0; // metres
 // Each player's own colour, told apart from those joining near them.
 [[nodiscard]] Vec3 colour_of(protocol::NetId id) noexcept;
 
+// Someone as a capsule the size of their character, standing at `feet`.
+[[nodiscard]] render::Capsule avatar(WorldPosition feet, Vec3 colour);
+
 // Others as capsules the size of their characters, standing where they're shown.
 [[nodiscard]] std::vector<render::Capsule> avatars(std::span<const replication::Shown> shown);
 

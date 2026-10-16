@@ -144,71 +144,49 @@ TEST_CASE("a companion flies along ahead of the eye, landing where the eye is lo
     CHECK(glm::length(landed.metres()) == Approx(radius + 499.0));
 }
 
-TEST_CASE("walking goes along the ground the way it faces, at a walk or a run",
+TEST_CASE("carried along with someone, the eye keeps facing the same way along the ground, round "
+          "the planet and over the poles",
           "[client][flight]") {
-    const hog::client::WalkSettings settings{.walking = 1.5, .running = 6.0, .eye_height = 3.0};
-    const auto flat = [](hog::WorldPosition) { return 0.0; };
-    Flight start = start_flight({1.0, 0.0, 0.0}, radius, 3.0, {0.0, 1.0, 0.0});
-    // Looking down or up neither slows nor lifts it.
-    start.pitch = -1.2;
-    const auto walked = [&](DVec3 move, bool running) {
-        return hog::client::walk(start, {.move = move, .seconds = 1.0}, running, radius, flat,
-                                 settings);
-    };
-    const auto apart = [&](const Flight& to) {
-        return glm::length(to.eye.metres() - start.eye.metres());
-    };
-
-    const Flight walking = walked({0.0, 0.0, 1.0}, false);
-    CHECK(apart(walking) == Approx(1.5));
-    CHECK(walking.eye.metres().y == Approx(1.5));
-    CHECK(height_of(walking) == Approx(3.0));
-    CHECK(walking.pitch == -1.2);
-    check_level(walking);
-
-    CHECK(apart(walked({0.0, 0.0, 1.0}, true)) == Approx(6.0));
-    // Facing +y with +x up, right is -z.
-    CHECK(walked({1.0, 0.0, 0.0}, false).eye.metres().z == Approx(-1.5));
-    CHECK(apart(walked({1.0, 0.0, 1.0}, false)) == Approx(1.5));
-    CHECK(walked({0.0, 0.0, -1.0}, false).eye.metres().y == Approx(-1.5));
-    // Up and down do nothing.
-    CHECK(apart(walked({0.0, 1.0, 0.0}, false)) == Approx(0.0).margin(margin));
-}
-
-TEST_CASE("walking keeps the eye over the ground it reaches", "[client][flight]") {
-    const hog::client::WalkSettings settings{.walking = 1.5, .eye_height = 3.0};
-    // Rising a metre for each metre north, with a cliff 10 m up at 20 m.
-    const auto hill = [](hog::WorldPosition at) {
-        const double north = glm::normalize(at.metres()).z * radius;
-        return north + (north > 20.0 ? 10.0 : 0.0);
-    };
-    Flight flight = start_flight({1.0, 0.0, 0.0}, radius, 500.0, {0.0, 0.0, 1.0});
-    // Starting from up in the air, it lands.
-    flight = hog::client::walk(flight, {}, false, radius, hill, settings);
-    CHECK(height_of(flight) == Approx(3.0));
-    for (int second = 0; second < 20; ++second) {
-        flight = hog::client::walk(flight, {.move = {0.0, 0.0, 1.0}, .seconds = 1.0}, false, radius,
-                                   hill, settings);
-        CHECK(height_of(flight) == Approx(hill(flight.eye) + 3.0));
-        check_level(flight);
-    }
-    CHECK(flight.eye.metres().z > 20.0);
-    CHECK(height_of(flight) > 33.0);
-}
-
-TEST_CASE("walking round the planet keeps the horizon level, over the poles too",
-          "[client][flight]") {
-    const auto flat = [](hog::WorldPosition) { return 0.0; };
-    Flight flight = start_flight({1.0, 0.0, 0.0}, radius, 3.0, {0.0, 0.0, 1.0});
-    const hog::client::WalkSettings settings{.walking = 1'000.0};
-    const double circumference = 2.0 * std::numbers::pi * (radius + 3.0);
+    Flight flight = start_flight({1.0, 0.0, 0.0}, radius, 1.6, {0.0, 0.0, 1.0});
+    flight.pitch = -0.3;
     const int steps = 1'000;
-    for (int step = 0; step < steps; ++step) {
-        flight = hog::client::walk(
-            flight, {.move = {0.0, 0.0, 1.0}, .seconds = circumference / 1'000.0 / steps}, false,
-            radius, flat, settings);
+    for (int step = 1; step <= steps; ++step) {
+        const double turned = 2.0 * std::numbers::pi * step / steps;
+        flight = hog::client::carried_to(
+            flight,
+            hog::WorldPosition{DVec3{std::cos(turned), 0.0, std::sin(turned)} * (radius + 1.6)});
         check_level(flight);
     }
-    CHECK(flight.eye.metres().x == Approx(radius + 3.0));
+    CHECK(flight.eye.metres().x == Approx(radius + 1.6));
     CHECK(flight.heading.z == Approx(1.0));
+    CHECK(flight.pitch == -0.3);
+}
+
+TEST_CASE("looking turns and pitches the eye where it is", "[client][flight]") {
+    const Flight flight = start_flight({1.0, 0.0, 0.0}, radius, 2.0, {0.0, 1.0, 0.0});
+    const hog::client::LookSettings settings{.per_pixel = 0.01, .steepest = 1.0};
+    // Turning right from facing +y with +x up faces towards -z.
+    const Flight turned = hog::client::looked(flight, {50.0, 0.0}, settings);
+    CHECK(turned.heading.z == Approx(-std::sin(0.5)));
+    CHECK(turned.eye == flight.eye);
+    check_level(turned);
+    CHECK(hog::client::looked(flight, {0.0, -50.0}, settings).pitch == Approx(0.5));
+    CHECK(hog::client::looked(flight, {0.0, 500.0}, settings).pitch == Approx(-1.0));
+}
+
+TEST_CASE("from the third person, the eye looks at its mark from behind", "[client][flight]") {
+    Flight flight = start_flight({1.0, 0.0, 0.0}, radius, 1.6, {0.0, 1.0, 0.0});
+    const hog::render::Camera level = hog::client::third_person(flight, 4.0, 1.0);
+    CHECK(level.eye.metres().x == Approx(radius + 1.6));
+    CHECK(level.eye.metres().y == Approx(-4.0));
+    CHECK(level.forward.y == Approx(1.0));
+    CHECK(level.up.x == Approx(1.0));
+    CHECK(level.vertical_fov == 1.0);
+
+    // Looking down on it from above.
+    flight.pitch = -std::numbers::pi / 6.0;
+    const hog::render::Camera above = hog::client::third_person(flight, 4.0, 1.0);
+    CHECK(above.eye.metres().x == Approx(radius + 1.6 + 2.0));
+    CHECK(glm::length(above.eye - flight.eye) == Approx(4.0));
+    CHECK(glm::dot(glm::normalize(flight.eye - above.eye), above.forward) == Approx(1.0));
 }

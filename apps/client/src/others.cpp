@@ -31,16 +31,20 @@ Vec3 colour_of(protocol::NetId id) noexcept {
     return {channel(5.0), channel(3.0), channel(1.0)};
 }
 
-std::vector<render::Capsule> avatars(std::span<const replication::Shown> shown) {
+render::Capsule avatar(WorldPosition feet, Vec3 colour) {
     const physics::CharacterSettings character;
+    return {.feet = feet,
+            .up = glm::normalize(feet.metres()),
+            .height = character.height,
+            .radius = character.radius,
+            .colour = colour};
+}
+
+std::vector<render::Capsule> avatars(std::span<const replication::Shown> shown) {
     std::vector<render::Capsule> capsules;
     capsules.reserve(shown.size());
     for (const replication::Shown& other : shown) {
-        capsules.push_back({.feet = other.at,
-                            .up = glm::normalize(other.at.metres()),
-                            .height = character.height,
-                            .radius = character.radius,
-                            .colour = colour_of(other.id)});
+        capsules.push_back(avatar(other.at, colour_of(other.id)));
     }
     return capsules;
 }

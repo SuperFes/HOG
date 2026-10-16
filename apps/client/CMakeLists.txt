@@ -14,6 +14,7 @@ add_library(hog_client
     src/options.cpp
     src/others.cpp
     src/picture.cpp
+    src/player.cpp
     src/scene.cpp
     src/session.cpp
     src/views.cpp)
@@ -21,9 +22,9 @@ add_library(hog::client ALIAS hog_client)
 
 target_include_directories(hog_client PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(hog_client
-    PUBLIC hog::atmosphere hog::core hog::jobs hog::net hog::planet hog::protocol hog::render
-        hog::replication hog::sim hog::terrain
-    PRIVATE hog::mapgen hog::physics stb_image)
+    PUBLIC hog::atmosphere hog::core hog::jobs hog::net hog::physics hog::planet hog::protocol
+        hog::render hog::replication hog::sim hog::terrain
+    PRIVATE hog::mapgen stb_image)
 hog_target_defaults(hog_client)
 
 hog_add_tests(hog_client
@@ -35,6 +36,7 @@ hog_add_tests(hog_client
     tests/options_tests.cpp
     tests/others_tests.cpp
     tests/picture_tests.cpp
+    tests/player_tests.cpp
     tests/scene_tests.cpp
     tests/session_tests.cpp
     tests/views_tests.cpp)
