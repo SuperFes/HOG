@@ -188,7 +188,7 @@ This phase builds a client that flies over the generated planet with a real sky.
 **Shaders and frame**
 
 - [x] Slang compiled to SPIR-V at build time, with hot reload in debug builds
-- [ ] Simple render graph: passes, transient images, barriers handled automatically
+- [x] Simple render graph: passes, transient images, barriers handled automatically
 - [x] Camera-relative rendering (doubles on the CPU, floats on the GPU)
 - [x] Reverse-Z depth
 
