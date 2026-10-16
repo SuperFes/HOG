@@ -34,7 +34,11 @@ flecs::entity Players::join(net::ConnectionId connection, std::string name) {
     HOG_ASSERT(!joined_.contains(connection), "a connection joins once");
     const flecs::entity entity = world_->entity().set<Replicated>(
         {.id = protocol::NetId{next_id_++}, .name = std::move(name)});
-    joined_.emplace(connection, Joined{.entity = entity, .view = replication::View{view_}});
+    joined_.emplace(connection, Joined{.entity = entity,
+                                       .view = replication::View{view_},
+                                       .check = {},
+                                       .sequence = 0,
+                                       .corrections = 0});
     return entity;
 }
 
