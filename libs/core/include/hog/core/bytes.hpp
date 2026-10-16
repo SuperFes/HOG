@@ -6,6 +6,7 @@
 #include <bit>
 #include <concepts>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <string>
@@ -23,6 +24,12 @@ public:
             out_.push_back(static_cast<std::byte>(value >> (8 * byte)));
         }
     }
+
+    // Seven bits a byte, lowest first, the top bit set while more follow, so small values take
+    // fewer bytes.
+    void write_varint(std::uint64_t value);
+    // Zigzagged into a varint, so values near zero either side stay short.
+    void write_signed(std::int64_t value);
 
     void write_bytes(std::span<const std::byte> bytes) {
         // Not vector::insert, which GCC 14.2 wrongly reports as overflowing at -O2.
@@ -58,6 +65,10 @@ public:
     }
 
     [[nodiscard]] Result<std::span<const std::byte>> read_bytes(std::size_t count);
+
+    // What write_varint and write_signed wrote; fails on one cut short or too large for 64 bits.
+    [[nodiscard]] Result<std::uint64_t> read_varint();
+    [[nodiscard]] Result<std::int64_t> read_signed();
 
     [[nodiscard]] std::size_t remaining() const noexcept { return bytes_.size(); }
 

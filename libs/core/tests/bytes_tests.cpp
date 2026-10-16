@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
+#include <limits>
 #include <vector>
 
 namespace {
@@ -102,4 +103,61 @@ TEST_CASE("a value reader fails with bytes left over", "[core][bytes]") {
     CHECK(reader.integer<std::uint8_t>() == 1);
     CHECK(reader.ok());
     CHECK_FALSE(reader.finish());
+}
+
+TEST_CASE("varints take a byte for every seven bits", "[core][bytes]") {
+    hog::ByteWriter writer;
+    writer.write_varint(0);
+    writer.write_varint(127);
+    writer.write_varint(128);
+    writer.write_varint(300);
+    CHECK(std::move(writer).take() == bytes_of({0x00, 0x7F, 0x80, 0x01, 0xAC, 0x02}));
+
+    hog::ByteWriter widest;
+    widest.write_varint(std::numeric_limits<std::uint64_t>::max());
+    CHECK(widest.size() == 10);
+}
+
+TEST_CASE("signed varints keep small values short either side of zero", "[core][bytes]") {
+    hog::ByteWriter writer;
+    for (const std::int64_t value : {0, -1, 1, -2, 63, -64}) {
+        writer.write_signed(value);
+    }
+    CHECK(std::move(writer).take() == bytes_of({0x00, 0x01, 0x02, 0x03, 0x7E, 0x7F}));
+}
+
+TEST_CASE("varints read back as written", "[core][bytes]") {
+    constexpr auto most = std::numeric_limits<std::uint64_t>::max();
+    constexpr auto lowest = std::numeric_limits<std::int64_t>::min();
+    constexpr auto highest = std::numeric_limits<std::int64_t>::max();
+    hog::ByteWriter writer;
+    for (const std::uint64_t value : {std::uint64_t{0}, std::uint64_t{1} << 35U, most}) {
+        writer.write_varint(value);
+    }
+    for (const std::int64_t value : {lowest, std::int64_t{-300}, std::int64_t{0}, highest}) {
+        writer.write_signed(value);
+    }
+    const auto bytes = std::move(writer).take();
+    hog::ByteReader reader{bytes};
+    CHECK(reader.read_varint() == 0);
+    CHECK(reader.read_varint() == std::uint64_t{1} << 35U);
+    CHECK(reader.read_varint() == most);
+    CHECK(reader.read_signed() == lowest);
+    CHECK(reader.read_signed() == -300);
+    CHECK(reader.read_signed() == 0);
+    CHECK(reader.read_signed() == highest);
+    CHECK(reader.finish());
+}
+
+TEST_CASE("varints cut short or too large fail without consuming", "[core][bytes]") {
+    for (const auto& bytes :
+         {bytes_of({}), bytes_of({0x80}), bytes_of({0xFF, 0xFF}),
+          bytes_of({0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x02}),
+          bytes_of({0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00})}) {
+        hog::ByteReader reader{bytes};
+        const auto value = reader.read_varint();
+        REQUIRE_FALSE(value);
+        CHECK(value.error().code == hog::ErrorCode::Parse);
+        CHECK(reader.remaining() == bytes.size());
+    }
 }
