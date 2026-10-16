@@ -299,6 +299,53 @@ TEST_CASE("bent, all the ground drawn in view is picked", "[terrain][selection]"
     }
 }
 
+TEST_CASE("only ground in view is picked unless all round is asked for", "[terrain][selection]") {
+    const Viewpoint view = walking(3.0, level_with(somewhere));
+    const auto in_view = select_patches(view, radius, flat_ground);
+    CHECK(std::ranges::all_of(in_view, &SelectedPatch::in_view));
+    hog::terrain::SelectionSettings around = flat_ground;
+    around.only_in_view = false;
+    const auto all_round = select_patches(view, radius, around);
+    CHECK(all_round.size() > in_view.size());
+
+    // Behind the eye is picked, and isn't in view.
+    const auto behind =
+        drawn_over(all_round, hog::planet::cell_at(along_ground(500.0, -level_with(somewhere))));
+    REQUIRE(behind.has_value());
+    CHECK_FALSE(behind.value_or(SelectedPatch{}).in_view);
+    // What's in view is picked either way, and said to be.
+    std::vector<SelectedPatch> by_cell = all_round;
+    std::ranges::sort(by_cell, {}, &SelectedPatch::cell);
+    for (const SelectedPatch& patch : in_view) {
+        const auto over = sorted_over(by_cell, patch.cell.range_min());
+        REQUIRE(over.has_value());
+        CHECK(over.value_or(SelectedPatch{}).in_view);
+    }
+}
+
+TEST_CASE("picked all round, the patches are the same whichever way the eye faces",
+          "[terrain][selection]") {
+    hog::terrain::SelectionSettings around = flat_ground;
+    around.only_in_view = false;
+    const DVec3 ahead = level_with(somewhere);
+    const DVec3 aside = glm::cross(somewhere, ahead);
+    std::vector<CellId> first;
+    for (const double bearing : {0.0, 1.0, 2.5, 4.0}) {
+        const DVec3 towards = (ahead * std::cos(bearing)) + (aside * std::sin(bearing));
+        const auto picked = select_patches(walking(3.0, towards), radius, around);
+        std::vector<CellId> cells;
+        cells.reserve(picked.size());
+        for (const SelectedPatch& patch : picked) {
+            cells.push_back(patch.cell);
+        }
+        std::ranges::sort(cells);
+        if (first.empty()) {
+            first = cells;
+        }
+        CHECK(cells == first);
+    }
+}
+
 TEST_CASE("bent, the ground under a walker is still drawn finest", "[terrain][selection]") {
     const DVec3 ahead = level_with(somewhere);
     const Viewpoint bent = walking(2.0, ahead);

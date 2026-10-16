@@ -153,12 +153,22 @@ public:
                 .highest = high};
     }
 
+    // Picked: above the horizon, and in view unless all round the eye is wanted.
     [[nodiscard]] bool visible(const Bounds& bounds) const {
-        for (const DVec3& plane : planes_) {
-            if (glm::dot(bounds.from_eye, plane) < -bounds.radius) {
-                return false;
-            }
-        }
+        return above_horizon(bounds) && (!settings_.only_in_view || in_frustum(bounds));
+    }
+
+    [[nodiscard]] bool in_view(const Bounds& bounds) const {
+        return above_horizon(bounds) && in_frustum(bounds);
+    }
+
+    [[nodiscard]] bool in_frustum(const Bounds& bounds) const {
+        return std::ranges::none_of(planes_, [&](const DVec3& plane) {
+            return glm::dot(bounds.from_eye, plane) < -bounds.radius;
+        });
+    }
+
+    [[nodiscard]] bool above_horizon(const Bounds& bounds) const {
         if (!eye_horizon_) {
             return true;
         }
@@ -265,7 +275,8 @@ std::vector<SelectedPatch> select_patches(const Viewpoint& view, double planet_r
         }
         drawn.push_back({.cell = cell,
                          .coarser_edges = detail::coarser_edges(leaves, cell),
-                         .distance = selector.distance(around)});
+                         .distance = selector.distance(around),
+                         .in_view = selector.in_view(around)});
     }
     std::ranges::stable_sort(drawn, {}, &SelectedPatch::distance);
     return drawn;

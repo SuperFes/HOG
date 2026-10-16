@@ -35,6 +35,9 @@ struct SelectionSettings {
     // generous over the generated ground, so only changes beyond it can be culled too early.
     double lowest = -6'000.0;
     double highest = 9'000.0;
+    // Only ground in view is picked; otherwise ground all round the eye is, out to its horizon,
+    // each patch saying whether it's in view.
+    bool only_in_view = true;
 };
 
 // What some cells' patches are known to keep between, such as from baking them, tighter than the
@@ -45,11 +48,13 @@ struct SelectedPatch {
     planet::CellId cell;
     std::uint8_t coarser_edges = 0; // edge bits, where the neighbour is a level coarser
     double distance = 0.0;          // least metres from the eye to the patch's ground
+    bool in_view = true;
 };
 
 // The patches to draw: a quadtree over the six faces, split until each patch's vertex spacing is
 // within the error on screen, then balanced so neighbours differ by at most a level. Patches
-// outside the view or below the horizon are left out. Nearest first.
+// below the horizon are left out, and unless the settings say otherwise, those outside the view.
+// Nearest first.
 [[nodiscard]] std::vector<SelectedPatch> select_patches(const Viewpoint& view, double planet_radius,
                                                         const SelectionSettings& settings = {},
                                                         const KnownHeights& known = {});
