@@ -218,7 +218,9 @@ Archipelago::Archipelago(std::uint64_t seed, double planet_radius, const Contine
     }
 }
 
+template <int Bits>
 std::int64_t Archipelago::raise(CellId cell, std::int64_t height) const {
+    constexpr std::int64_t one = fixed_unit<Bits>;
     const DVec3 position = cell_center(cell);
     // The stretched distance is at least the true one over the root of the elongation, and the
     // noise moves the coast out by at most the wobble, so past this every flank is buried.
@@ -254,16 +256,22 @@ std::int64_t Archipelago::raise(CellId cell, std::int64_t height) const {
         std::int64_t island_height = 0;
         if (from_center < island.radius) {
             const std::int64_t ratio =
-                std::llround(from_center / island.radius * static_cast<double>(fixed_one));
-            const std::int64_t falloff = (ratio * ratio) >> fixed_fraction_bits;
-            island_height = island.peak - ((island.peak * falloff) >> fixed_fraction_bits);
+                std::llround(from_center / island.radius * static_cast<double>(one));
+            const std::int64_t falloff = (ratio * ratio) >> Bits;
+            const std::int64_t peak = island.peak << (Bits - fixed_fraction_bits);
+            island_height = peak - ((peak * falloff) >> Bits);
         } else {
             island_height = -std::llround((from_center - island.radius) * skirt_slope *
-                                          static_cast<double>(fixed_one));
+                                          static_cast<double>(one));
         }
         height = std::max(height, island_height);
     }
     return height;
 }
+
+template std::int64_t Archipelago::raise<fixed_fraction_bits>(CellId cell,
+                                                              std::int64_t height) const;
+template std::int64_t Archipelago::raise<fine_fraction_bits>(CellId cell,
+                                                             std::int64_t height) const;
 
 } // namespace hog::planet

@@ -2,6 +2,7 @@
 #include <hog/planet/elevation.hpp>
 #include <hog/planet/neighbors.hpp>
 #include <hog/planet/noise.hpp>
+#include <hog/planet/projection.hpp>
 #include <hog/planet/tile.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -9,6 +10,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 using hog::planet::CellId;
@@ -33,6 +35,45 @@ std::vector<CellId> cells_at(int level) {
 
 std::int64_t metres(std::int64_t value) {
     return value * fixed_one;
+}
+
+constexpr double radius = 115'000.0;
+
+// Where coasts cross from land to sea: the first `count` level-8 land cells beside the sea, each
+// with the sea cell beside it.
+std::vector<std::pair<hog::DVec3, hog::DVec3>> coasts(const Elevation& terrain, int count) {
+    std::vector<std::pair<hog::DVec3, hog::DVec3>> found;
+    for (const CellId cell :
+         hog::planet::sample_tile(CellId::from_face(4), 8, [](CellId cell) { return cell; })) {
+        if (!terrain.is_land(cell)) {
+            continue;
+        }
+        for (const CellId next : hog::planet::edge_neighbors(cell)) {
+            if (!terrain.is_land(next)) {
+                found.emplace_back(hog::planet::cell_center(cell), hog::planet::cell_center(next));
+                break;
+            }
+        }
+        if (std::cmp_equal(found.size(), count)) {
+            break;
+        }
+    }
+    return found;
+}
+
+// The shore between `land` and `sea`, found to within the finest cells.
+hog::DVec3 shore(const Elevation& terrain, hog::DVec3 land, hog::DVec3 sea) {
+    for (int halving = 0; halving < 40; ++halving) {
+        const hog::DVec3 middle = glm::normalize(land + sea);
+        (terrain.is_land(hog::planet::cell_at(middle)) ? land : sea) = middle;
+    }
+    return land;
+}
+
+// `metres` along the ground from `from`, towards `towards`.
+hog::DVec3 along(hog::DVec3 from, hog::DVec3 towards, double metres) {
+    const hog::DVec3 across = glm::normalize(towards - (from * glm::dot(towards, from)));
+    return glm::normalize(from + (across * (metres / radius)));
 }
 
 } // namespace
@@ -115,6 +156,34 @@ TEST_CASE("elevation changes smoothly between neighbours", "[planet][elevation]"
     }
     // Cells here are about 3 m across.
     CHECK(largest_step < metres(10));
+}
+
+TEST_CASE("land is where the ground stands above the sea, to the finest cell",
+          "[planet][elevation]") {
+    const Elevation terrain{planet(4)};
+    for (const auto& [land, sea] : coasts(terrain, 8)) {
+        const hog::DVec3 at = shore(terrain, land, sea);
+        for (int centimetre = -300; centimetre <= 300; ++centimetre) {
+            const CellId cell = hog::planet::cell_at(along(at, sea, centimetre / 100.0));
+            REQUIRE(terrain.is_land(cell) == (terrain.elevation(cell) > 0));
+        }
+    }
+}
+
+TEST_CASE("the sea floor deepens off a coast without steps", "[planet][elevation]") {
+    // Off a coast the floor falls by about a third of a metre per metre; generated with too few
+    // bits, it held for over a metre and then dropped by 0.4 m.
+    const Elevation terrain{planet(4)};
+    for (const auto& [land, sea] : coasts(terrain, 8)) {
+        const hog::DVec3 at = shore(terrain, land, sea);
+        std::int64_t previous = terrain.elevation(hog::planet::cell_at(at));
+        for (int step = 1; step <= 400; ++step) {
+            const std::int64_t floor =
+                terrain.elevation(hog::planet::cell_at(along(at, sea, step / 20.0)));
+            REQUIRE(std::abs(floor - previous) < fixed_one / 10);
+            previous = floor;
+        }
+    }
 }
 
 TEST_CASE("elevation depends on the seed", "[planet][elevation]") {

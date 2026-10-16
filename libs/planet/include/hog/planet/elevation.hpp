@@ -31,10 +31,12 @@ public:
     [[nodiscard]] const Archipelago& archipelago() const noexcept { return archipelago_; }
 
     // Fixed-point continent height with the islands raised on it; land is positive.
+    template <int Bits = fixed_fraction_bits>
     [[nodiscard]] std::int64_t height(CellId cell) const {
-        return archipelago_.raise(cell, continents_.height(cell));
+        return archipelago_.raise<Bits>(cell, continents_.height<Bits>(cell));
     }
-    [[nodiscard]] bool is_land(CellId cell) const { return height(cell) > 0; }
+    // Told by the fine height, so land is exactly where the elevation is above the sea.
+    [[nodiscard]] bool is_land(CellId cell) const { return height<fine_fraction_bits>(cell) > 0; }
 
     // Fixed-point metres above sea level of the ground, a river's bed included: positive on
     // land, negative under the ocean.
@@ -72,8 +74,13 @@ private:
         Rivers rivers;
     };
 
+    // Both in fixed point with `Bits` fractional bits.
+    template <int Bits>
     [[nodiscard]] std::int64_t mountain_strength(CellId cell, std::int64_t height) const;
     // The elevation as generated, before rivers wore it.
+    [[nodiscard]] std::int64_t generated(CellId cell) const;
+    // The same with `Bits` fractional bits.
+    template <int Bits>
     [[nodiscard]] std::int64_t generated(CellId cell) const;
     // The elevation as rivers wore it, before they cut their channels, given the generated one.
     [[nodiscard]] static std::int64_t worn(CellId cell, std::int64_t generated,

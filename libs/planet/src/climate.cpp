@@ -111,8 +111,7 @@ std::int64_t Climate::water_table(CellId cell, std::int64_t moisture) const {
 }
 
 Biome Climate::biome(CellId cell) const {
-    const std::int64_t continent = terrain_.continents().height(cell);
-    if (terrain_.archipelago().raise(cell, continent) <= 0) {
+    if (!terrain_.is_land(cell)) {
         return Biome::Ocean;
     }
     if (terrain_.lake(cell)) {
@@ -120,7 +119,7 @@ Biome Climate::biome(CellId cell) const {
     }
     const std::int64_t elevation = terrain_.elevation(cell);
     const std::int64_t temperature = this->temperature(cell, elevation);
-    const std::int64_t moisture = moisture_.at(cell, continent);
+    const std::int64_t moisture = moisture_.at(cell, terrain_.continents().height(cell));
     const Biome climate = classify_biome(temperature, moisture);
     if (climate == Biome::Ice) {
         return climate;

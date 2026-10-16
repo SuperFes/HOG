@@ -45,8 +45,12 @@ Continents::Continents(std::uint64_t seed, double ocean_fraction)
     sea_level_ = *highest_ocean;
 }
 
+template <int Bits>
 std::int64_t Continents::field(CellId cell) const {
-    return fbm(seed_, noise_point(cell_center(cell), frequency), octaves);
+    return fbm(seed_, noise_point<Bits>(cell_center(cell), frequency), octaves);
 }
+
+template std::int64_t Continents::field<fixed_fraction_bits>(CellId cell) const;
+template std::int64_t Continents::field<fine_fraction_bits>(CellId cell) const;
 
 } // namespace hog::planet

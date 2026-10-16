@@ -347,7 +347,7 @@ Strata Geology::strata(CellId cell, Biome biome) const {
         strata.cover_thickness = multiply(fixed_one + unit(swell), fixed_one - mountains);
     }
     // The starting islands are volcanic, with nothing laid down on them yet.
-    if (!sea && terrain().continents().height(cell) <= 0) {
+    if (!sea && !terrain().continents().is_land(cell)) {
         strata.bedrock = Rock::Basalt;
         return strata;
     }

@@ -42,7 +42,9 @@ public:
     [[nodiscard]] DVec3 center() const noexcept { return center_; }
     [[nodiscard]] std::span<const Island> islands() const noexcept { return islands_; }
 
-    // The higher of `height` and the islands' fixed-point continent height at the cell.
+    // The higher of `height` and the islands' continent height at the cell, both in fixed point
+    // with `Bits` fractional bits.
+    template <int Bits = fixed_fraction_bits>
     [[nodiscard]] std::int64_t raise(CellId cell, std::int64_t height) const;
 
 private:
@@ -52,5 +54,10 @@ private:
     DVec3 center_{};
     std::vector<Island> islands_;
 };
+
+extern template std::int64_t Archipelago::raise<fixed_fraction_bits>(CellId cell,
+                                                                     std::int64_t height) const;
+extern template std::int64_t Archipelago::raise<fine_fraction_bits>(CellId cell,
+                                                                    std::int64_t height) const;
 
 } // namespace hog::planet
