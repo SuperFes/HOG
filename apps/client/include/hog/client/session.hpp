@@ -8,6 +8,7 @@
 #include <hog/net/stats.hpp>
 #include <hog/protocol/messages.hpp>
 #include <hog/replication/replica.hpp>
+#include <hog/replication/timeline.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -46,6 +47,10 @@ public:
     // Why the server refused or closed the connection.
     [[nodiscard]] const std::string& reason() const noexcept { return reason_; }
     [[nodiscard]] const replication::Replica& replica() const noexcept { return replica_; }
+    // Others as they're shown at `now`: a little in the past, between the snapshots around then.
+    [[nodiscard]] std::vector<replication::Shown> others(MonotonicClock::time_point now) const {
+        return timeline_.at(now);
+    }
     [[nodiscard]] std::optional<net::Stats> stats() const { return client_.stats(); }
     // When the newest snapshot came; none before the first.
     [[nodiscard]] std::optional<MonotonicClock::time_point> last_snapshot() const noexcept {
@@ -66,6 +71,7 @@ private:
     State state_ = State::Connecting;
     std::string reason_;
     replication::Replica replica_;
+    replication::Timeline timeline_;
     std::vector<net::Event> events_;
     std::optional<MonotonicClock::time_point> next_move_;
     std::uint32_t moves_ = 0;

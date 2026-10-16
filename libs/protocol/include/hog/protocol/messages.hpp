@@ -3,6 +3,7 @@
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -23,6 +24,8 @@ inline constexpr std::size_t most_token = 1'024;
 inline constexpr std::size_t most_detail = 512;
 // The longest name an entity is sent with.
 inline constexpr std::size_t most_name = 32;
+// Real time between the snapshots a client is sent, whatever the server's tick rate.
+inline constexpr std::chrono::milliseconds snapshot_interval{50};
 
 // Positions as they're sent: whole millimetres from the planet's centre.
 using Millimetres = I64Vec3;

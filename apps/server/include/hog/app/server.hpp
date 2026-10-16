@@ -13,6 +13,7 @@
 #include <hog/planet/planet_config.hpp>
 #include <hog/planet/world.hpp>
 #include <hog/protocol/handshake.hpp>
+#include <hog/protocol/messages.hpp>
 #include <hog/server/catch_up.hpp>
 #include <hog/server/persistence.hpp>
 #include <hog/server/players.hpp>
@@ -74,8 +75,6 @@ public:
 
     // Fastest debug tools may run the clock, in game seconds per real second.
     static constexpr std::uint32_t fastest = 86'400;
-    // Real time between the snapshots players are sent, whatever the tick rate.
-    static constexpr std::chrono::milliseconds share_interval{50};
 
     // Ticks at the configured rate, saving periodically, until `stop` is set; then saves and
     // waits for every snapshot to be written. now() is real time, for debug tools to rejoin.
@@ -334,10 +333,10 @@ Result<void> Server::run(T& timer, Now now, const std::atomic<bool>& stop) {
         serve_players();
         if (const MonotonicClock::time_point at = timer.now(); at >= next_share) {
             share();
-            next_share += share_interval;
+            next_share += protocol::snapshot_interval;
             // After a stall, carry on from now rather than send the missed ones at once.
             if (next_share <= at) {
-                next_share = at + share_interval;
+                next_share = at + protocol::snapshot_interval;
             }
         }
         if (interval > MonotonicClock::duration::zero() && timer.now() >= next_report) {

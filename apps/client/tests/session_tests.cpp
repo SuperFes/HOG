@@ -237,6 +237,9 @@ TEST_CASE("a session keeps what snapshots show and acknowledges them", "[client]
     REQUIRE(session.replica().now().size() == 1);
     CHECK(session.replica().now()[0].name == "Anna");
     CHECK(session.last_snapshot());
+    const auto shown = session.others(MonotonicClock::now());
+    REQUIRE(shown.size() == 1);
+    CHECK(shown[0].at == protocol::to_world(anna.at));
 
     // One that doesn't fit is passed over, unacknowledged.
     stand.send(protocol::Snapshot{.tick = 2,
@@ -249,6 +252,7 @@ TEST_CASE("a session keeps what snapshots show and acknowledges them", "[client]
     look_until(session, stand, [&] { return stand.count<protocol::Ack>() == 2; });
     CHECK(session.replica().now().empty());
     CHECK(session.replica().tick() == 3);
+    CHECK(session.others(MonotonicClock::now() + 1s).empty());
 }
 
 TEST_CASE("a session says why it was refused or closed", "[client][session]") {

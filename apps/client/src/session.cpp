@@ -103,6 +103,7 @@ void Session::heard(std::span<const std::byte> bytes, MonotonicClock::time_point
                       applied.error());
         } else if (*applied) {
             send(protocol::Ack{.tick = snapshot->tick}, net::Delivery::Unreliable);
+            timeline_.add(snapshot->tick, now, replica_.now());
             last_snapshot_ = now;
             ++counted_;
         }
@@ -144,9 +145,9 @@ SessionSummary summarise(const Session& session, WorldPosition eye,
     } else {
         summary.snapshots = "no snapshots yet";
     }
-    for (const replication::EntityState& entity : session.replica().now()) {
+    for (const replication::Shown& other : session.others(now)) {
         summary.nearby.push_back(
-            {.name = entity.name, .distance = glm::length(protocol::to_world(entity.at) - eye)});
+            {.name = std::string{other.name}, .distance = glm::length(other.at - eye)});
     }
     std::ranges::stable_sort(summary.nearby, {}, &SessionSummary::Seen::distance);
     return summary;
