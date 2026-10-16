@@ -1,36 +1,24 @@
+#include "space_impl.hpp"
+
 #include <hog/core/assert.hpp>
 #include <hog/physics/space.hpp>
-
-#include <Jolt/Jolt.h>
 
 #include <Jolt/Core/Factory.h>
 #include <Jolt/Core/Memory.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyLock.h>
-#include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayerInterfaceTable.h>
-#include <Jolt/Physics/Collision/BroadPhase/ObjectVsBroadPhaseLayerFilterTable.h>
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
-#include <Jolt/Physics/Collision/ObjectLayerPairFilterTable.h>
 #include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>
-#include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/RegisterTypes.h>
+#include <glm/geometric.hpp>
 
 #include <format>
 #include <utility>
 
 namespace hog::physics {
 
-namespace {
-
-namespace layers {
-constexpr JPH::ObjectLayer still = 0;
-constexpr JPH::ObjectLayer moving = 1;
-constexpr JPH::uint count = 2;
-} // namespace layers
-
-// Jolt's allocator, factory and shape types are process-wide and set up once.
 void register_jolt() {
     static const bool registered = [] {
         JPH::RegisterDefaultAllocator();
@@ -42,50 +30,15 @@ void register_jolt() {
     (void)registered;
 }
 
-JPH::RVec3 to_jolt(WorldPosition position) noexcept {
-    const DVec3 metres = position.metres();
-    return {metres.x, metres.y, metres.z};
+Space::Impl::Impl(const SpaceSettings& settings) {
+    pairs.EnableCollision(layers::moving, layers::still);
+    pairs.EnableCollision(layers::moving, layers::moving);
+    broad.MapObjectToBroadPhaseLayer(layers::still, JPH::BroadPhaseLayer{layers::still});
+    broad.MapObjectToBroadPhaseLayer(layers::moving, JPH::BroadPhaseLayer{layers::moving});
+    object_vs_broad.emplace(broad, layers::count, pairs, layers::count);
+    system.Init(settings.bodies, 0, settings.body_pairs, settings.contacts, broad, *object_vs_broad,
+                pairs);
 }
-
-JPH::Vec3 to_jolt(DVec3 offset) noexcept {
-    const Vec3 single{offset};
-    return {single.x, single.y, single.z};
-}
-
-WorldPosition from_jolt(JPH::RVec3 position) noexcept {
-    return {position.GetX(), position.GetY(), position.GetZ()};
-}
-
-DVec3 from_jolt(JPH::Vec3 offset) noexcept {
-    return DVec3{Vec3{offset.GetX(), offset.GetY(), offset.GetZ()}};
-}
-
-} // namespace
-
-struct Space::Impl {
-    // Comes first: Jolt's tables below allocate with its allocator.
-    struct Registration {
-        Registration() { register_jolt(); }
-    };
-
-    explicit Impl(const SpaceSettings& settings) {
-        pairs.EnableCollision(layers::moving, layers::still);
-        pairs.EnableCollision(layers::moving, layers::moving);
-        broad.MapObjectToBroadPhaseLayer(layers::still, JPH::BroadPhaseLayer{layers::still});
-        broad.MapObjectToBroadPhaseLayer(layers::moving, JPH::BroadPhaseLayer{layers::moving});
-        object_vs_broad.emplace(broad, layers::count, pairs, layers::count);
-        system.Init(settings.bodies, 0, settings.body_pairs, settings.contacts, broad,
-                    *object_vs_broad, pairs);
-    }
-
-    Registration registration;
-    JPH::ObjectLayerPairFilterTable pairs{layers::count};
-    JPH::BroadPhaseLayerInterfaceTable broad{layers::count, layers::count};
-    // Built from the two above once they're filled in.
-    std::optional<JPH::ObjectVsBroadPhaseLayerFilterTable> object_vs_broad;
-    JPH::PhysicsSystem system;
-    std::size_t size = 0;
-};
 
 Space::Space(const SpaceSettings& settings) : impl_(std::make_unique<Impl>(settings)) {}
 
@@ -144,11 +97,14 @@ std::size_t Space::size() const noexcept {
     return impl_->size;
 }
 
-std::optional<Hit> Space::cast_ray(WorldPosition from, DVec3 along) const {
+std::optional<Hit> Space::cast_ray(WorldPosition from, DVec3 along, Faces faces) const {
     const JPH::RRayCast ray{to_jolt(from), to_jolt(along)};
-    // Unlike the simpler overload, these settings pass through back faces.
+    // Unlike the simpler overload, these settings can pass through back faces.
+    JPH::RayCastSettings settings;
+    settings.SetBackFaceMode(faces == Faces::Both ? JPH::EBackFaceMode::CollideWithBackFaces
+                                                  : JPH::EBackFaceMode::IgnoreBackFaces);
     JPH::ClosestHitCollisionCollector<JPH::CastRayCollector> closest;
-    impl_->system.GetNarrowPhaseQuery().CastRay(ray, JPH::RayCastSettings{}, closest);
+    impl_->system.GetNarrowPhaseQuery().CastRay(ray, settings, closest);
     if (!closest.HadHit()) {
         return std::nullopt;
     }
@@ -156,10 +112,12 @@ std::optional<Hit> Space::cast_ray(WorldPosition from, DVec3 along) const {
     const JPH::RVec3 point = ray.GetPointOnRay(result.mFraction);
     const JPH::BodyLockRead lock{impl_->system.GetBodyLockInterface(), result.mBodyID};
     HOG_ASSERT(lock.Succeeded(), "a body hit is in the space");
-    return Hit{
-        .body = BodyId{result.mBodyID.GetIndexAndSequenceNumber()},
-        .at = from_jolt(point),
-        .normal = from_jolt(lock.GetBody().GetWorldSpaceSurfaceNormal(result.mSubShapeID2, point))};
+    const DVec3 normal =
+        from_jolt(lock.GetBody().GetWorldSpaceSurfaceNormal(result.mSubShapeID2, point));
+    return Hit{.body = BodyId{result.mBodyID.GetIndexAndSequenceNumber()},
+               .at = from_jolt(point),
+               .normal = normal,
+               .back = glm::dot(normal, along) > 0.0};
 }
 
 } // namespace hog::physics

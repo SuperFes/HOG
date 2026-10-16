@@ -54,6 +54,24 @@ TEST_CASE("a ray misses what's beyond its reach, behind it, or gone", "[physics]
     CHECK_FALSE(space.cast_ray(WorldPosition{0.0, 0.0, earth + 1.0}, {0.0, 0.0, -2.0}));
 }
 
+TEST_CASE("a ray meets the backs of triangles only when asked to", "[physics]") {
+    Space space;
+    REQUIRE(space.add(floor_at(earth)));
+    const WorldPosition under{0.0, 0.0, earth - 1.0};
+    CHECK_FALSE(space.cast_ray(under, {0.0, 0.0, 2.0}));
+    const auto cast = space.cast_ray(under, {0.0, 0.0, 2.0}, Faces::Both);
+    REQUIRE(cast);
+    const Hit hit = cast.value_or(Hit{});
+    CHECK(hit.back);
+    CHECK(glm::length(hit.normal - DVec3{0.0, 0.0, 1.0}) < 1e-6);
+    CHECK(hit.at.metres().z == Catch::Approx(earth).margin(1e-4));
+
+    const auto front =
+        space.cast_ray(WorldPosition{0.0, 0.0, earth + 1.0}, {0.0, 0.0, -2.0}, Faces::Both);
+    REQUIRE(front);
+    CHECK_FALSE(front.value_or(Hit{}).back);
+}
+
 TEST_CASE("meshes without triangles, or with corners that aren't there, are refused", "[physics]") {
     Space space;
     Mesh empty = floor_at(earth);

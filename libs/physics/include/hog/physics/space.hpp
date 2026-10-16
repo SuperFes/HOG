@@ -23,11 +23,15 @@ struct Mesh {
 
 enum class BodyId : std::uint32_t {};
 
+// Which sides of triangles a ray can meet.
+enum class Faces : std::uint8_t { Front, Both };
+
 struct Hit {
     BodyId body{};
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     WorldPosition at = {};
-    DVec3 normal{0.0}; // unit, out of the side hit
+    DVec3 normal{0.0}; // unit, out of the front of what was hit
+    bool back = false; // met from behind
 };
 
 struct SpaceSettings {
@@ -50,10 +54,13 @@ public:
     void remove(BodyId body);
     [[nodiscard]] std::size_t size() const noexcept;
 
-    // The first thing a ray from `from` meets within `along`'s length, coming at its front.
-    [[nodiscard]] std::optional<Hit> cast_ray(WorldPosition from, DVec3 along) const;
+    // The first thing a ray from `from` meets within `along`'s length.
+    [[nodiscard]] std::optional<Hit> cast_ray(WorldPosition from, DVec3 along,
+                                              Faces faces = Faces::Front) const;
 
 private:
+    friend class Character;
+
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
