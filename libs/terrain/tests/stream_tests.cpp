@@ -1,15 +1,21 @@
 #include <hog/planet/neighbors.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/terrain/bend.hpp>
 #include <hog/terrain/patch.hpp>
+#include <hog/terrain/selection.hpp>
 #include <hog/terrain/stream.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
+#include <cmath>
 #include <cstddef>
+#include <deque>
 #include <initializer_list>
 #include <numbers>
 #include <set>
+#include <utility>
 #include <vector>
 
 using Catch::Approx;
@@ -147,6 +153,99 @@ TEST_CASE("held children stand in for their parent until it's held", "[terrain][
     stream.baked(fake_bake(parent));
     frame = stream.update(selecting({parent}));
     CHECK(drawn(frame) == std::set{parent});
+}
+
+TEST_CASE("ground drawn finely isn't turned coarse again for ground still to bake",
+          "[terrain][stream]") {
+    PatchStream stream{fine_first};
+    const CellId near = parent.child(0);
+    const CellId beside = parent.child(1);
+    settle(stream, selecting({parent}));
+    settle(stream, selecting_children(near));
+
+    // The parent is all that's held over the ground beside, but it would hide what's drawn.
+    std::vector<SelectedPatch> wider = selecting_children(near);
+    wider.push_back({.cell = beside, .distance = 10.0});
+    auto frame = stream.update(wider);
+    CHECK(drawn(frame) == children(near));
+    CHECK(frame.bakes == std::vector{beside});
+    stream.baked(fake_bake(beside));
+    frame = stream.update(wider);
+    std::set<CellId> expected = children(near);
+    expected.insert(beside);
+    CHECK(drawn(frame) == expected);
+}
+
+TEST_CASE("ground selected out of view is baked and held, but not drawn", "[terrain][stream]") {
+    PatchStream stream{fine_first};
+    std::vector<SelectedPatch> selected = selecting_children(parent);
+    selected.at(2).in_view = false;
+    selected.at(3).in_view = false;
+    const StreamFrame frame = settle(stream, selected);
+    CHECK(drawn(frame) == std::set{parent.child(0), parent.child(1)});
+    CHECK(stream.held(parent.child(2)));
+    CHECK(stream.held(parent.child(3)));
+
+    // Turning to it, it's drawn at once.
+    for (SelectedPatch& patch : selected) {
+        patch.in_view = !patch.in_view;
+    }
+    const StreamFrame turned = stream.update(selected);
+    CHECK(drawn(turned) == std::set{parent.child(2), parent.child(3)});
+    CHECK(turned.bakes.empty());
+}
+
+TEST_CASE("turning on the spot never turns what's drawn coarser", "[terrain][stream]") {
+    // Selected in view only, ground turned to has nothing baked finer than the first, coarsest
+    // patches; selected all round, it's baked before it's turned to.
+    const bool only_in_view = GENERATE(true, false);
+    CAPTURE(only_in_view);
+    const hog::DVec3 up = hog::planet::direction_at(0.3, 0.5);
+    const hog::DVec3 east = glm::normalize(glm::cross(hog::DVec3{0.0, 0.0, 1.0}, up));
+    const hog::DVec3 north = glm::cross(up, east);
+    const hog::WorldPosition eye{up * (radius + 1'500.0)};
+    constexpr double pitch = 0.2;
+    const double turn = only_in_view ? 0.01 : 0.05; // radians a frame
+    const int bake_frames = only_in_view ? 3 : 5;
+    // Hills, so what's known of the heights changes what's selected as bakes arrive.
+    const auto hilly_bake = [](CellId cell) {
+        const double middle = 300.0 * std::sin(static_cast<double>(cell.raw() % 997));
+        return fake_bake(cell, {.lowest = middle - 300.0, .highest = middle + 300.0});
+    };
+    PatchStream stream;
+    std::deque<std::pair<int, CellId>> baking;
+    std::set<CellId> before;
+    int coarsened = 0;
+    for (int frame = 0; frame < 400; ++frame) {
+        const double bearing = turn * frame;
+        const hog::DVec3 level = (east * std::cos(bearing)) + (north * std::sin(bearing));
+        const hog::DVec3 forward = (level * std::cos(pitch)) - (up * std::sin(pitch));
+        hog::terrain::Viewpoint view{
+            .eye = eye,
+            .forward = forward,
+            .up = glm::cross(glm::normalize(glm::cross(forward, up)), forward)};
+        view.bend = hog::terrain::bend_from(eye, radius, 0.0);
+        while (!baking.empty() && baking.front().first <= frame) {
+            stream.baked(hilly_bake(baking.front().second));
+            baking.pop_front();
+        }
+        const auto selected = hog::terrain::select_patches(
+            view, radius, {.only_in_view = only_in_view}, stream.known_heights());
+        const StreamFrame streamed = stream.update(selected);
+        for (const CellId cell : streamed.bakes) {
+            baking.emplace_back(frame + bake_frames, cell);
+        }
+        const std::set<CellId> now = drawn(streamed);
+        for (const CellId cell : now) {
+            const auto within = before.lower_bound(cell.range_min());
+            if (within != before.end() && *within <= cell.range_max() && *within != cell) {
+                ++coarsened;
+            }
+        }
+        before = now;
+    }
+    CHECK(coarsened == 0);
+    CHECK(before.size() > 20);
 }
 
 TEST_CASE("ground nothing stands in for is baked first", "[terrain][stream]") {

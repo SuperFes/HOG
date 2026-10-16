@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <numbers>
@@ -210,6 +211,29 @@ bool PatchStream::covered(planet::CellId cell) const {
     return within != held_.end() && within->first <= cell.range_max();
 }
 
+void PatchStream::stand_in(const std::map<planet::CellId, double>& standing,
+                           std::map<planet::CellId, double>& drawn) const {
+    // An ancestor stands in for missing ground only if it already did, or if nothing finer is
+    // drawn beneath it: ground drawn finely never turns coarse again for a patch or two that
+    // aren't baked yet, which are left out until they are. Finest first, so a coarser one
+    // doesn't hide them.
+    std::vector<std::pair<planet::CellId, double>> by_level(standing.begin(), standing.end());
+    std::ranges::stable_sort(by_level, std::ranges::greater{},
+                             [](const auto& entry) { return entry.first.level(); });
+    for (const auto& [cell, distance] : by_level) {
+        const bool stood_in = held_.at(cell).drawn + 1 == frame_;
+        const auto within = drawn.lower_bound(cell.range_min());
+        const bool finer =
+            within != drawn.end() && within->first <= cell.range_max() && within->first != cell;
+        if (stood_in || !finer) {
+            const auto [at, added] = drawn.try_emplace(cell, distance);
+            if (!added) {
+                at->second = std::min(at->second, distance);
+            }
+        }
+    }
+}
+
 std::map<planet::CellId, double> PatchStream::cover(std::span<const SelectedPatch> selected) const {
     std::map<planet::CellId, double> drawn;
     const auto add = [&](planet::CellId cell, double distance) {
@@ -218,11 +242,15 @@ std::map<planet::CellId, double> PatchStream::cover(std::span<const SelectedPatc
             at->second = std::min(at->second, distance);
         }
     };
+    std::map<planet::CellId, double> standing;
     for (const SelectedPatch& patch : selected) {
         if (held_.contains(patch.cell)) {
             add(patch.cell, patch.distance);
         } else if (const auto above = held_above(patch.cell)) {
-            add(*above, patch.distance);
+            const auto [at, fresh] = standing.try_emplace(*above, patch.distance);
+            if (!fresh) {
+                at->second = std::min(at->second, patch.distance);
+            }
         } else {
             for (auto within = held_.lower_bound(patch.cell.range_min());
                  within != held_.end() && within->first <= patch.cell.range_max(); ++within) {
@@ -230,6 +258,7 @@ std::map<planet::CellId, double> PatchStream::cover(std::span<const SelectedPatc
             }
         }
     }
+    stand_in(standing, drawn);
     // A parent standing in for some of the selection hides whatever else is held within it.
     std::vector<planet::CellId> hidden;
     for (const auto& [cell, distance] : drawn) {
@@ -318,13 +347,15 @@ StreamFrame PatchStream::update(std::span<const SelectedPatch> selected) {
     StreamFrame frame;
     arrive(selected, frame);
 
-    const auto drawn = cover(selected);
+    std::vector<SelectedPatch> in_view;
+    std::ranges::copy_if(selected, std::back_inserter(in_view), &SelectedPatch::in_view);
+    const auto drawn = cover(in_view);
     std::set<planet::CellId> leaves;
     for (const auto& [cell, distance] : drawn) {
         leaves.insert(cell);
     }
     std::map<planet::CellId, std::uint8_t> selected_edges;
-    for (const SelectedPatch& patch : selected) {
+    for (const SelectedPatch& patch : in_view) {
         selected_edges.emplace(patch.cell, patch.coarser_edges);
     }
     std::vector<std::pair<double, StreamedPatch>> nearest;

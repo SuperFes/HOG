@@ -45,9 +45,11 @@ struct StreamFrame {
 
 // Which patches are held, standing in for the selection until what it asks for is baked: a held
 // ancestor covers its descendants until all of them are held, and held children cover their
-// parent. Ground covered by nothing held is baked first, then the rest nearest first, each from
-// coarse to fine. The patches drawn least recently make room for those arriving. Changed ground
-// stays drawn until it's baked again.
+// parent. An ancestor only starts standing in where nothing finer is drawn beneath it, so ground
+// never turns coarse again; what it would have covered is left out until baked. Ground covered by
+// nothing held is baked first, then the rest nearest first, each from coarse to fine. The patches
+// drawn least recently make room for those arriving. Changed ground stays drawn until it's baked
+// again.
 class PatchStream {
 public:
     explicit PatchStream(const StreamSettings& settings = {}) : settings_(settings) {}
@@ -57,7 +59,8 @@ public:
     // A cell of the world changed, or had a change rolled back. No bake may be running while the
     // world changes; those in flight across it are dropped when they arrive.
     void changed(planet::CellId cell);
-    // Once a frame, with the patches selected for it.
+    // Once a frame, with the patches selected for it. Those in view are drawn; all are baked and
+    // kept, so selecting all round the eye has ground ready before it turns into view.
     [[nodiscard]] StreamFrame update(std::span<const SelectedPatch> selected);
 
     [[nodiscard]] bool held(planet::CellId cell) const { return held_.contains(cell); }
@@ -89,6 +92,10 @@ private:
     // each covers.
     [[nodiscard]] std::map<planet::CellId, double>
     cover(std::span<const SelectedPatch> selected) const;
+    // Adds to `drawn` the ancestors that may stand in for missing ground, with the least
+    // distance of what each stands in for.
+    void stand_in(const std::map<planet::CellId, double>& standing,
+                  std::map<planet::CellId, double>& drawn) const;
     [[nodiscard]] bool covered(planet::CellId cell) const;
     // Held, and baked since its ground last changed.
     [[nodiscard]] bool fresh(planet::CellId cell) const;
