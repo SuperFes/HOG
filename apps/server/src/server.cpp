@@ -426,12 +426,56 @@ void Server::serve_players() {
         if (const auto* connected = std::get_if<net::Connected>(&event)) {
             log::info(server_log, "connection {} opened",
                       std::to_underlying(connected->connection));
-            connections_.set(connections_.value() + 1.0);
+            handshakes_.emplace(connected->connection, protocol::Handshake{MonotonicClock::now()});
+        } else if (const auto* message = std::get_if<net::Message>(&event)) {
+            const auto shaking = handshakes_.find(message->from());
+            if (shaking != handshakes_.end()) {
+                answer(message->from(), shaking->second.received(message->bytes()));
+            }
         } else if (const auto* lost = std::get_if<net::Disconnected>(&event)) {
             log::info(server_log, "connection {} closed: {}", std::to_underlying(lost->connection),
                       lost->reason);
-            connections_.set(connections_.value() - 1.0);
+            handshakes_.erase(lost->connection);
+            joined_.erase(lost->connection);
         }
+    }
+    const MonotonicClock::time_point now = MonotonicClock::now();
+    std::vector<std::pair<net::ConnectionId, protocol::Answer>> late;
+    for (const auto& [connection, handshake] : handshakes_) {
+        if (auto waited = handshake.waited(now)) {
+            late.emplace_back(connection, std::move(*waited));
+        }
+    }
+    for (const auto& [connection, waited] : late) {
+        answer(connection, waited);
+    }
+    connections_.set(static_cast<double>(handshakes_.size() + joined_.size()));
+}
+
+void Server::answer(net::ConnectionId connection, const protocol::Answer& answer) {
+    if (!players_) {
+        return;
+    }
+    if (answer.reply) {
+        if (auto sent = players_->send(connection, net::Delivery::Reliable,
+                                       protocol::encode(*answer.reply));
+            !sent) {
+            log::warn(server_log, "couldn't answer connection {}: {}",
+                      std::to_underlying(connection), sent.error());
+        }
+    }
+    if (answer.close) {
+        log::info(server_log, "connection {} refused: {}", std::to_underlying(connection),
+                  answer.reason);
+        players_->disconnect(connection, answer.reason);
+        handshakes_.erase(connection);
+        return;
+    }
+    if (const auto shaking = handshakes_.find(connection);
+        shaking != handshakes_.end() && shaking->second.welcomed()) {
+        log::info(server_log, "connection {} welcomed", std::to_underlying(connection));
+        handshakes_.erase(shaking);
+        joined_.insert(connection);
     }
 }
 

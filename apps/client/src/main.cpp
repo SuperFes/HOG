@@ -12,6 +12,7 @@
 #include <hog/planet/planet_config.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/world.hpp>
+#include <hog/protocol/messages.hpp>
 #include <hog/render/billboard.hpp>
 #include <hog/render/device.hpp>
 #include <hog/render/memory.hpp>
@@ -325,6 +326,13 @@ public:
         for (const net::Event& event : events_) {
             if (std::holds_alternative<net::Connected>(event)) {
                 log::info(connection_log, "connected to {}", address_);
+                if (auto sent =
+                        client_->send(net::Delivery::Reliable, protocol::encode(protocol::Hello{}));
+                    !sent) {
+                    log::warn(connection_log, "couldn't say hello: {}", sent.error());
+                }
+            } else if (const auto* message = std::get_if<net::Message>(&event)) {
+                heard(message->bytes());
             } else if (const auto* lost = std::get_if<net::Disconnected>(&event)) {
                 log::warn(connection_log, "disconnected from {}: {}", address_, lost->reason);
             }
@@ -332,6 +340,18 @@ public:
     }
 
 private:
+    void heard(std::span<const std::byte> bytes) const {
+        const auto message = protocol::decode(bytes);
+        if (!message) {
+            log::warn(connection_log, "{} sent something unreadable: {}", address_,
+                      message.error());
+        } else if (std::holds_alternative<protocol::Welcome>(*message)) {
+            log::info(connection_log, "welcomed by {}", address_);
+        } else if (const auto* refused = std::get_if<protocol::Refused>(&*message)) {
+            log::warn(connection_log, "{}", protocol::explain(*refused));
+        }
+    }
+
     std::optional<net::Client> client_;
     std::string address_;
     std::vector<net::Event> events_;

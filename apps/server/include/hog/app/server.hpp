@@ -10,6 +10,7 @@
 #include <hog/net/server.hpp>
 #include <hog/planet/planet_config.hpp>
 #include <hog/planet/world.hpp>
+#include <hog/protocol/handshake.hpp>
 #include <hog/server/catch_up.hpp>
 #include <hog/server/persistence.hpp>
 #include <hog/server/probe_service.hpp>
@@ -28,8 +29,10 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <vector>
 
 namespace hog::app {
@@ -123,8 +126,11 @@ private:
     void open_probe();
     // Opens the players' port, if one is configured, logging rather than failing if it can't.
     void open_players();
-    // Takes in what players' connections sent and what became of them.
+    // Takes in what players' connections sent and what became of them, shaking hands with those
+    // just connected.
     void serve_players();
+    // Does what a handshake answered: replies, and closes the connection or lets it in.
+    void answer(net::ConnectionId connection, const protocol::Answer& answer);
     // Answers debug tools waiting on the world, telling them how clock() runs and asking
     // steer(control) to change it.
     template <typename Clock, typename Steer>
@@ -151,6 +157,9 @@ private:
     std::unique_ptr<server::ProbeService> probe_;
     std::optional<net::Server> players_;
     std::vector<net::Event> player_events_;
+    // Connections still to say hello, and those let in.
+    std::map<net::ConnectionId, protocol::Handshake> handshakes_;
+    std::set<net::ConnectionId> joined_;
     GameTime time_;
     Tick tick_;
 
