@@ -14,12 +14,14 @@ add_library(hog_client
     src/options.cpp
     src/picture.cpp
     src/scene.cpp
+    src/session.cpp
     src/views.cpp)
 add_library(hog::client ALIAS hog_client)
 
 target_include_directories(hog_client PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(hog_client
-    PUBLIC hog::atmosphere hog::core hog::jobs hog::net hog::planet hog::render hog::sim hog::terrain
+    PUBLIC hog::atmosphere hog::core hog::jobs hog::net hog::planet hog::protocol hog::render
+        hog::replication hog::sim hog::terrain
     PRIVATE hog::mapgen stb_image)
 hog_target_defaults(hog_client)
 
@@ -32,9 +34,11 @@ hog_add_tests(hog_client
     tests/options_tests.cpp
     tests/picture_tests.cpp
     tests/scene_tests.cpp
+    tests/session_tests.cpp
     tests/views_tests.cpp)
 if(TARGET hog_client_tests)
-    target_link_libraries(hog_client_tests PRIVATE hog::planet hog::render_testing)
+    # The server, for players to meet through.
+    target_link_libraries(hog_client_tests PRIVATE hog::app hog::planet hog::render_testing)
     target_compile_definitions(hog_client_tests PRIVATE HOG_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
                                                         HOG_BINARY_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 endif()

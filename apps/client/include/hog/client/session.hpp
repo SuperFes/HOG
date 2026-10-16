@@ -1,0 +1,88 @@
+#pragma once
+
+#include <hog/core/math.hpp>
+#include <hog/core/result.hpp>
+#include <hog/core/time.hpp>
+#include <hog/net/client.hpp>
+#include <hog/net/events.hpp>
+#include <hog/net/stats.hpp>
+#include <hog/protocol/messages.hpp>
+#include <hog/replication/replica.hpp>
+
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <span>
+#include <string>
+#include <vector>
+
+namespace hog::client {
+
+// A player's connection to the game server: says hello, then keeps what's near them from its
+// snapshots and tells it where they are.
+class Session {
+public:
+    enum class State : std::uint8_t { Connecting, Welcomed, Refused, Closed };
+
+    // Real time between the moves sent, at most.
+    static constexpr std::chrono::milliseconds move_interval{50};
+
+    // Starts connecting to `address`, to say hello with the login service's token, or none.
+    [[nodiscard]] static Result<Session> connect(std::string address, std::vector<std::byte> token);
+
+    // Takes in what the server sent, answering it, and once welcomed tells it the player is at
+    // `eye`.
+    void look(WorldPosition eye, MonotonicClock::time_point now);
+
+    [[nodiscard]] State state() const noexcept { return state_; }
+    [[nodiscard]] const std::string& address() const noexcept { return address_; }
+    // Why the server refused or closed the connection.
+    [[nodiscard]] const std::string& reason() const noexcept { return reason_; }
+    [[nodiscard]] const replication::Replica& replica() const noexcept { return replica_; }
+    [[nodiscard]] std::optional<net::Stats> stats() const { return client_.stats(); }
+    // When the newest snapshot came; none before the first.
+    [[nodiscard]] std::optional<MonotonicClock::time_point> last_snapshot() const noexcept {
+        return last_snapshot_;
+    }
+    // Snapshots taken in over the last whole second.
+    [[nodiscard]] std::uint32_t snapshot_rate() const noexcept { return rate_; }
+
+private:
+    Session(net::Client client, std::string address, std::vector<std::byte> token) noexcept;
+
+    void heard(std::span<const std::byte> bytes, MonotonicClock::time_point now);
+    void send(const protocol::Message& message, net::Delivery delivery);
+
+    net::Client client_;
+    std::string address_;
+    std::vector<std::byte> token_;
+    State state_ = State::Connecting;
+    std::string reason_;
+    replication::Replica replica_;
+    std::vector<net::Event> events_;
+    std::optional<MonotonicClock::time_point> next_move_;
+    std::optional<MonotonicClock::time_point> last_snapshot_;
+    MonotonicClock::time_point counting_since_;
+    std::uint32_t counted_ = 0;
+    std::uint32_t rate_ = 0;
+};
+
+// What the network window shows of a session.
+struct SessionSummary {
+    struct Seen {
+        std::string name;
+        double distance = 0.0; // metres from the eye
+    };
+
+    std::string connection;   // address and state, with why it was refused or closed
+    std::string quality;      // ping and loss, once known
+    std::string traffic;      // once known
+    std::string snapshots;    // how often they come, and the newest's age
+    std::vector<Seen> nearby; // nearest first
+};
+
+[[nodiscard]] SessionSummary summarise(const Session& session, WorldPosition eye,
+                                       MonotonicClock::time_point now);
+
+} // namespace hog::client

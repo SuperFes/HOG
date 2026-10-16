@@ -4,6 +4,7 @@
 #include <hog/client/options.hpp>
 #include <hog/client/picture.hpp>
 #include <hog/client/scene.hpp>
+#include <hog/client/session.hpp>
 #include <hog/core/log.hpp>
 #include <hog/core/time.hpp>
 #include <hog/jobs/job_system.hpp>
@@ -14,7 +15,6 @@
 #include <hog/planet/planet_config.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/world.hpp>
-#include <hog/protocol/messages.hpp>
 #include <hog/render/billboard.hpp>
 #include <hog/render/device.hpp>
 #include <hog/render/memory.hpp>
@@ -229,11 +229,54 @@ void show_timings(const client::FrameTimes& times) {
     ImGui::End();
 }
 
-// Draws a frame of the shot, with the timings over it if given, saving it to `capture` if given;
+// How the connection to the server is doing, and who's near.
+void show_network(const client::SessionSummary& summary) {
+    constexpr float margin = 10.0F;
+    ImGui::SetNextWindowPos({ImGui::GetIO().DisplaySize.x - margin, margin}, ImGuiCond_Always,
+                            {1.0F, 0.0F});
+    ImGui::SetNextWindowBgAlpha(0.6F);
+    if (ImGui::Begin("network", nullptr,
+                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                         ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoSavedSettings |
+                         ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav)) {
+        for (const std::string* line :
+             {&summary.connection, &summary.quality, &summary.traffic, &summary.snapshots}) {
+            if (!line->empty()) {
+                ImGui::TextUnformatted(line->c_str());
+            }
+        }
+        if (summary.nearby.empty()) {
+            ImGui::TextUnformatted("no one near");
+        } else if (ImGui::BeginTable("nearby", 2)) {
+            ImGui::TableSetupColumn("near");
+            ImGui::TableSetupColumn("m");
+            ImGui::TableHeadersRow();
+            for (const client::SessionSummary::Seen& seen : summary.nearby) {
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::TextUnformatted(seen.name.c_str());
+                ImGui::TableNextColumn();
+                ImGui::TextUnformatted(std::format("{:.0f}", seen.distance).c_str());
+            }
+            ImGui::EndTable();
+        }
+    }
+    ImGui::End();
+}
+
+// What's drawn over the picture.
+struct Overlay {
+    const client::FrameTimes* times = nullptr;
+    // None when not connecting to a server.
+    const client::Session* session = nullptr;
+    WorldPosition eye;
+    MonotonicClock::time_point now;
+};
+
+// Draws a frame of the shot, with the overlay over it if given, saving it to `capture` if given;
 // false when there's nothing to draw into.
 Result<bool> draw(client::Scene& scene, const client::Shot& shot, const render::Device& device,
-                  render::Presenter& presenter, SDL_Window* window,
-                  const client::FrameTimes* timings,
+                  render::Presenter& presenter, SDL_Window* window, const Overlay* overlay,
                   const std::optional<std::filesystem::path>& capture) {
     auto begun = presenter.begin(window::drawable(window));
     if (!begun) {
@@ -249,11 +292,14 @@ Result<bool> draw(client::Scene& scene, const client::Shot& shot, const render::
     ImGui_ImplVulkan_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
-    if (timings != nullptr) {
-        show_timings(*timings);
+    if (overlay != nullptr) {
+        show_timings(*overlay->times);
+        if (overlay->session != nullptr) {
+            show_network(client::summarise(*overlay->session, overlay->eye, overlay->now));
+        }
     }
     ImGui::Render();
-    if (timings != nullptr) {
+    if (overlay != nullptr) {
         render::begin_rendering(frame.commands, frame.view, frame.extent, std::nullopt);
         ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), frame.commands);
         vkCmdEndRendering(frame.commands);
@@ -335,23 +381,28 @@ public:
         return connection;
     }
 
-    void look() {
+    // Tells the server the player is at `eye`, once in.
+    void look(WorldPosition eye, MonotonicClock::time_point now) {
         if (login_) {
             look_at_login(*login_);
         }
-        if (client_) {
-            look_at_server(*client_);
+        if (session_) {
+            session_->look(eye, now);
         }
+    }
+
+    // None until connecting to the server.
+    [[nodiscard]] const client::Session* session() const noexcept {
+        return session_ ? &*session_ : nullptr;
     }
 
 private:
     [[nodiscard]] Result<void> connect() {
-        auto client = net::Client::connect(address_);
-        if (!client) {
-            return std::unexpected(client.error());
+        auto session = client::Session::connect(address_, token_);
+        if (!session) {
+            return std::unexpected(session.error());
         }
-        client_ = std::move(*client);
-        log::info(connection_log, "connecting to {}", address_);
+        session_ = std::move(*session);
         return {};
     }
 
@@ -396,39 +447,8 @@ private:
         }
     }
 
-    void look_at_server(net::Client& client) {
-        client.poll(events_);
-        for (const net::Event& event : events_) {
-            if (std::holds_alternative<net::Connected>(event)) {
-                log::info(connection_log, "connected to {}", address_);
-                if (auto sent = client.send(net::Delivery::Reliable,
-                                            protocol::encode(protocol::Hello{
-                                                .version = protocol::version, .token = token_}));
-                    !sent) {
-                    log::warn(connection_log, "couldn't say hello: {}", sent.error());
-                }
-            } else if (const auto* message = std::get_if<net::Message>(&event)) {
-                heard(message->bytes());
-            } else if (const auto* lost = std::get_if<net::Disconnected>(&event)) {
-                log::warn(connection_log, "disconnected from {}: {}", address_, lost->reason);
-            }
-        }
-    }
-
-    void heard(std::span<const std::byte> bytes) const {
-        const auto message = protocol::decode(bytes);
-        if (!message) {
-            log::warn(connection_log, "{} sent something unreadable: {}", address_,
-                      message.error());
-        } else if (std::holds_alternative<protocol::Welcome>(*message)) {
-            log::info(connection_log, "welcomed by {}", address_);
-        } else if (const auto* refused = std::get_if<protocol::Refused>(&*message)) {
-            log::warn(connection_log, "{}", protocol::explain(*refused));
-        }
-    }
-
     std::optional<net::Client> login_;
-    std::optional<net::Client> client_;
+    std::optional<client::Session> session_;
     std::string login_address_;
     std::string address_;
     std::string name_;
@@ -483,7 +503,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
         last = now;
         times.add(passed, scene.timings());
         shaders.look(device, now);
-        connection.look();
+        connection.look(flight.eye, now);
         const bool faster = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
         const client::FlyInput input{.move = movement(), .look = controls.look, .seconds = seconds};
         flight =
@@ -524,8 +544,10 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
                                 .time = clock.time(),
                                 .seconds = seconds,
                                 .companion = companion};
+        const Overlay overlay{
+            .times = &times, .session = connection.session(), .eye = flight.eye, .now = now};
         const auto drawn =
-            draw(scene, shot, device, presenter, window, controls.timings ? &times : nullptr,
+            draw(scene, shot, device, presenter, window, controls.timings ? &overlay : nullptr,
                  controls.quit ? options.capture : std::nullopt);
         if (!drawn) {
             return std::unexpected(drawn.error());
