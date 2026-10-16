@@ -107,7 +107,7 @@ hog_add_tests(hog_render
     tests/terrain_tests.cpp)
 if(TARGET hog_render_tests)
     target_link_libraries(hog_render_tests PRIVATE hog::planet)
-    hog_add_shaders(hog_render_tests tests/shaders/aerial_probe.slang tests/shaders/air_probe.slang tests/shaders/dispatch.slang tests/shaders/fill.slang tests/shaders/layer.slang
+    hog_add_shaders(hog_render_tests tests/shaders/aerial_probe.slang tests/shaders/air_probe.slang tests/shaders/dispatch.slang tests/shaders/fill.slang tests/shaders/layer.slang tests/shaders/projection_probe.slang
                     tests/shaders/triangle.slang)
     target_link_libraries(hog_render_tests PRIVATE hog::render_testing)
 endif()

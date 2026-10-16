@@ -4,10 +4,12 @@
 #include <hog/render/atmosphere.hpp>
 #include <hog/render/barrier.hpp>
 #include <hog/render/memory.hpp>
+#include <hog/render/pipeline.hpp>
 #include <hog/render/readback.hpp>
 #include <hog/render/rendering.hpp>
 #include <hog/render/sky.hpp>
 #include <hog/render/terrain.hpp>
+#include <hog/shaders/projection_probe.hpp>
 #include <hog/terrain/bend.hpp>
 #include <hog/terrain/material.hpp>
 #include <hog/terrain/stitching.hpp>
@@ -21,6 +23,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <numbers>
 #include <span>
@@ -592,5 +595,154 @@ TEST_CASE("ground facing the setting sun is lit red", "[render][gpu][atmosphere]
     CHECK(matches(setting, 4.0));
     CHECK(blueness(noon.drawn) > 0.8);
     CHECK(blueness(setting.drawn) < 0.7);
+    CHECK(device->validation_errors() == 0);
+}
+
+namespace {
+
+// The plane shares ground facing `normal` takes where the planet's up is `up`, a case each.
+std::vector<DVec3> plane_shares(hog::render::Device& device,
+                                std::span<const std::pair<DVec3, DVec3>> cases) {
+    std::vector<std::array<float, 4>> asked;
+    for (const auto& [up, normal] : cases) {
+        const glm::vec3 u{glm::normalize(up)};
+        const glm::vec3 n{glm::normalize(normal)};
+        asked.push_back({u.x, u.y, u.z, 0.0F});
+        asked.push_back({n.x, n.y, n.z, 0.0F});
+    }
+    constexpr auto binding = [](std::uint32_t at) {
+        return VkDescriptorSetLayoutBinding{.binding = at,
+                                            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                            .descriptorCount = 1,
+                                            .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+                                            .pImmutableSamplers = nullptr};
+    };
+    const std::array bindings{binding(0), binding(1)};
+    auto probe = hog::render::make_compute_pipeline(
+        device, {.spirv = hog::shaders::projection_probe, .descriptors = bindings});
+    REQUIRE(probe);
+    auto questions = hog::render::make_filled_buffer(device, std::as_bytes(std::span{asked}),
+                                                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    REQUIRE(questions);
+    std::vector<std::array<float, 4>> found(cases.size());
+    auto answers =
+        hog::render::make_buffer(device, std::span{found}.size_bytes(),
+                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, hog::render::Memory::Readback);
+    REQUIRE(answers);
+    const auto run = device.submit_now([&](VkCommandBuffer commands) {
+        vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, probe->handle());
+        hog::render::push_storage_buffer(commands, *probe, 0, questions->handle());
+        hog::render::push_storage_buffer(commands, *probe, 1, answers->handle());
+        vkCmdDispatch(commands, static_cast<std::uint32_t>((cases.size() + 63) / 64), 1, 1);
+        const VkMemoryBarrier2 to_host{.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+                                       .pNext = nullptr,
+                                       .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                                       .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                                       .dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT,
+                                       .dstAccessMask = VK_ACCESS_2_HOST_READ_BIT};
+        const VkDependencyInfo dependency{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                                          .pNext = nullptr,
+                                          .dependencyFlags = 0,
+                                          .memoryBarrierCount = 1,
+                                          .pMemoryBarriers = &to_host,
+                                          .bufferMemoryBarrierCount = 0,
+                                          .pBufferMemoryBarriers = nullptr,
+                                          .imageMemoryBarrierCount = 0,
+                                          .pImageMemoryBarriers = nullptr};
+        vkCmdPipelineBarrier2(commands, &dependency);
+    });
+    REQUIRE(run);
+    REQUIRE(answers->invalidate());
+    std::memcpy(found.data(), answers->mapped().data(), std::span{found}.size_bytes());
+    std::vector<DVec3> shares;
+    shares.reserve(found.size());
+    for (const auto& share : found) {
+        shares.emplace_back(share[0], share[1], share[2]);
+    }
+    return shares;
+}
+
+// Tilted from `up` by `degrees` towards `towards`.
+DVec3 tilted(DVec3 up, DVec3 towards, double degrees) {
+    const DVec3 across = glm::normalize(towards - (up * glm::dot(towards, up)));
+    const double angle = degrees * std::numbers::pi / 180.0;
+    return (up * std::cos(angle)) + (across * std::sin(angle));
+}
+
+int planes_taken(DVec3 shares) {
+    return (shares.x > 0.0 ? 1 : 0) + (shares.y > 0.0 ? 1 : 0) + (shares.z > 0.0 ? 1 : 0);
+}
+
+} // namespace
+
+TEST_CASE("flat ground away from where the planes meet takes a single projection, by the up",
+          "[render][gpu]") {
+    const auto device = test_device();
+    // Up nearest x, then y, then z, each well away from the others; flat or gently sloping
+    // ground, sloping away from the axis too.
+    const std::array ups{DVec3{0.8, 0.5, 0.33}, DVec3{-0.4, -0.85, 0.35}, DVec3{0.3, 0.55, 0.78}};
+    std::vector<std::pair<DVec3, DVec3>> cases;
+    for (const DVec3& up : ups) {
+        const DVec3 unit = glm::normalize(up);
+        for (const double slope : {0.0, 10.0, 18.0}) {
+            cases.emplace_back(unit, tilted(unit, DVec3{1.0, 1.0, 1.0} - glm::abs(unit), slope));
+        }
+    }
+    const std::vector<DVec3> shares = plane_shares(*device, cases);
+    for (std::size_t at = 0; at < cases.size(); ++at) {
+        const DVec3 up = glm::abs(cases[at].first);
+        glm::length_t axis = 2;
+        if (up.x > up.y && up.x > up.z) {
+            axis = 0;
+        } else if (up.y > up.z) {
+            axis = 1;
+        }
+        INFO("case " << at << ": " << shares[at].x << ", " << shares[at].y << ", " << shares[at].z);
+        CHECK(shares[at][axis] == 1.0);
+        CHECK(planes_taken(shares[at]) == 1);
+    }
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("where the planes meet, flat ground's shares blend continuously", "[render][gpu]") {
+    const auto device = test_device();
+    // Up swept from nearest x to nearest y, across where they meet.
+    std::vector<std::pair<DVec3, DVec3>> cases;
+    constexpr int steps = 400;
+    for (int step = 0; step <= steps; ++step) {
+        const double angle = (0.15 + (0.5 * step / steps)) * std::numbers::pi / 2.0;
+        const DVec3 up = glm::normalize(DVec3{std::cos(angle), std::sin(angle), 0.3});
+        cases.emplace_back(up, up);
+    }
+    const std::vector<DVec3> shares = plane_shares(*device, cases);
+    CHECK(shares.front() == DVec3{1.0, 0.0, 0.0});
+    CHECK(shares.back() == DVec3{0.0, 1.0, 0.0});
+    int blended = 0;
+    for (std::size_t at = 0; at < shares.size(); ++at) {
+        INFO("step " << at << ": " << shares[at].x << ", " << shares[at].y << ", " << shares[at].z);
+        CHECK(std::abs(shares[at].x + shares[at].y + shares[at].z - 1.0) < 1e-5);
+        CHECK(shares[at].z == 0.0);
+        blended += planes_taken(shares[at]) == 2 ? 1 : 0;
+        if (at > 0) {
+            CHECK(glm::length(shares[at] - shares[at - 1]) < 0.15);
+        }
+    }
+    // A narrow band, but a band.
+    CHECK(blended > 2);
+    CHECK(blended < steps / 10);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("steep ground follows its normal", "[render][gpu]") {
+    const auto device = test_device();
+    const DVec3 up{0.0, 0.0, 1.0};
+    const std::array<std::pair<DVec3, DVec3>, 3> cases{
+        {{up, DVec3{1.0, 0.0, 0.0}},
+         {up, tilted(up, DVec3{0.0, 1.0, 0.0}, 60.0)},
+         {glm::normalize(DVec3{0.8, 0.5, 0.33}), DVec3{0.0, 0.0, -1.0} + DVec3{0.1, 0.0, 0.0}}}};
+    const std::vector<DVec3> shares = plane_shares(*device, cases);
+    CHECK(shares[0] == DVec3{1.0, 0.0, 0.0});
+    CHECK(shares[1] == DVec3{0.0, 1.0, 0.0});
+    CHECK(shares[2] == DVec3{0.0, 0.0, 1.0});
     CHECK(device->validation_errors() == 0);
 }

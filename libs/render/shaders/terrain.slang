@@ -1,5 +1,6 @@
 import atmosphere;
 import bend;
+import projection;
 import tone;
 
 struct Push {
@@ -61,9 +62,8 @@ static const float level_with_sea = 1e-5;
 // the flat triangles the sea is drawn with.
 static const float behind_sea = 1e-3;
 
-// Shares below these aren't worth sampling for.
+// Shares below this aren't worth sampling for.
 static const float least_biome = 1.0 / 256.0;
-static const float least_plane = 0.02;
 
 [shader("vertex")]
 Ground vertex_main(Vertex vertex) {
@@ -84,13 +84,16 @@ Ground vertex_main(Vertex vertex) {
     return ground;
 }
 
-// The ground's colour from its biomes' materials, each projected along the planet's axes, blended
-// by how squarely the ground faces each, and mixed at two scales.
+// Up from the planet's centre through the ground.
+float3 up_at(Ground ground) {
+    return normalize(ground.from_eye + (push.bend_up.xyz * (push.bend_radii.x + push.bend_up.w)));
+}
+
+// The ground's colour from its biomes' materials, each projected along the planet's axes as
+// plane_shares has it, and mixed at two scales.
 float3 albedo(Ground ground, float3 normal) {
     const float3 tiled = ground.from_eye + float3(push.bend_radii.zw, push.origin.w);
-    float3 planes = pow(abs(normal), 4.0);
-    planes = select(planes < least_plane * max(planes.x, max(planes.y, planes.z)), 0.0, planes);
-    planes /= planes.x + planes.y + planes.z;
+    const float3 planes = plane_shares(up_at(ground), normal);
     const float2 across[3] = { tiled.yz, tiled.zx, tiled.xy };
 
     // Gradients taken while every fragment is still running, as sampling skips biomes and planes.
@@ -154,11 +157,6 @@ struct Shaded {
     float4 colour : SV_Target;
     float depth : SV_DepthLessEqual;
 };
-
-// Up from the planet's centre through the ground.
-float3 up_at(Ground ground) {
-    return normalize(ground.from_eye + (push.bend_up.xyz * (push.bend_radii.x + push.bend_up.w)));
-}
 
 // The ground's colour lit by `on_ground` facing its normal and `on_water` facing up, each times
 // pi, with water over it where it lies below the sea.
