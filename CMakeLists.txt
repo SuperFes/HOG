@@ -69,6 +69,23 @@ CPMAddPackage(
     SYSTEM YES
     OPTIONS "FLECS_SHARED OFF" "FLECS_STATIC ON" "FLECS_TESTS OFF")
 
+# Physics; MIT. Double precision, so bodies sit at planet coordinates. Built for any x86-64 since
+# SSE4.2 rather than for the machine building it, and with our flags rather than its own.
+CPMAddPackage(
+    NAME JoltPhysics
+    GITHUB_REPOSITORY jrouwe/JoltPhysics
+    VERSION 5.6.0
+    SOURCE_SUBDIR Build
+    SYSTEM YES
+    OPTIONS "DOUBLE_PRECISION ON" "OVERRIDE_CXX_FLAGS OFF" "INTERPROCEDURAL_OPTIMIZATION OFF"
+            "ENABLE_OBJECT_STREAM OFF" "ENABLE_INSTALL OFF" "TARGET_UNIT_TESTS OFF"
+            "TARGET_HELLO_WORLD OFF" "TARGET_PERFORMANCE_TEST OFF" "TARGET_SAMPLES OFF"
+            "TARGET_VIEWER OFF" "USE_AVX OFF" "USE_AVX2 OFF" "USE_AVX512 OFF" "USE_F16C OFF"
+            "USE_FMADD OFF" "USE_LZCNT OFF" "USE_TZCNT OFF" "ENABLE_ALL_WARNINGS OFF"
+            "USE_STATIC_MSVC_RUNTIME_LIBRARY OFF" "DEBUG_RENDERER_IN_DEBUG_AND_RELEASE OFF"
+            "PROFILER_IN_DEBUG_AND_RELEASE OFF" "JPH_USE_DX12 OFF" "JPH_USE_VK OFF" "JPH_USE_MTL OFF"
+            "JPH_USE_CPU_COMPUTE OFF")
+
 # Public domain or MIT. Only stb_image_write, for map images.
 CPMAddPackage(
     NAME stb
@@ -158,6 +175,7 @@ add_subdirectory(libs/core)
 add_subdirectory(libs/jobs)
 add_subdirectory(libs/login)
 add_subdirectory(libs/net)
+add_subdirectory(libs/physics)
 add_subdirectory(libs/planet)
 add_subdirectory(libs/probe)
 add_subdirectory(libs/protocol)

@@ -23,7 +23,10 @@ IncludeCategories:
     Priority: 1
   - Regex: '^<hog/'
     Priority: 2
-  - Regex: '^<[a-z_]+>$'
-    Priority: 4
-  - Regex: '.*'
+  # Jolt's other headers need it first.
+  - Regex: '^<Jolt/Jolt\.h>$'
     Priority: 3
+  - Regex: '^<[a-z_]+>$'
+    Priority: 5
+  - Regex: '.*'
+    Priority: 4
