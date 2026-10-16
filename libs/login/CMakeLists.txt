@@ -6,6 +6,7 @@ target_include_directories(monocypher SYSTEM PUBLIC
 
 add_library(hog_login
     src/keys.cpp
+    src/service.cpp
     src/token.cpp)
 add_library(hog::login ALIAS hog_login)
 
@@ -17,4 +18,5 @@ endif()
 hog_target_defaults(hog_login)
 
 hog_add_tests(hog_login
+    tests/service_tests.cpp
     tests/token_tests.cpp)
