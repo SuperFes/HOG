@@ -13,6 +13,7 @@
 #include <hog/protocol/handshake.hpp>
 #include <hog/server/catch_up.hpp>
 #include <hog/server/persistence.hpp>
+#include <hog/server/players.hpp>
 #include <hog/server/probe_service.hpp>
 #include <hog/server/server_config.hpp>
 #include <hog/server/snapshot_writer.hpp>
@@ -28,11 +29,12 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <memory>
 #include <optional>
-#include <set>
+#include <span>
 #include <vector>
 
 namespace hog::app {
@@ -131,6 +133,8 @@ private:
     void serve_players();
     // Does what a handshake answered: replies, and closes the connection or lets it in.
     void answer(net::ConnectionId connection, const protocol::Answer& answer);
+    // Does what a player who's in asks.
+    void heard(net::ConnectionId connection, std::span<const std::byte> bytes);
     // Answers debug tools waiting on the world, telling them how clock() runs and asking
     // steer(control) to change it.
     template <typename Clock, typename Steer>
@@ -157,9 +161,9 @@ private:
     std::unique_ptr<server::ProbeService> probe_;
     std::optional<net::Server> players_;
     std::vector<net::Event> player_events_;
-    // Connections still to say hello, and those let in.
+    // Connections still to say hello, and the players let in.
     std::map<net::ConnectionId, protocol::Handshake> handshakes_;
-    std::set<net::ConnectionId> joined_;
+    server::Players joined_;
     // The login service's, when only players it logged in may join.
     std::optional<login::PublicKey> login_key_;
     GameTime time_;

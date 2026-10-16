@@ -67,6 +67,7 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config,
     : config_(config), world_id_(planet::world_id(planet)), planet_(planet),
       changes_(std::move(changes)), snapshots_(std::move(snapshots)),
       writer_(snapshots_, config.keep_snapshots), persistence_(entities_),
+      joined_(entities_, planet.radius),
       ticks_(registry_.counter("hog_ticks_total", "Live ticks run.")),
       tick_seconds_(registry_.histogram("hog_tick_seconds", "Real time each live tick took.",
                                         {tick_bounds.begin(), tick_bounds.end()})),
@@ -452,12 +453,14 @@ void Server::serve_players() {
                        shaking->second.received(
                            message->bytes(),
                            std::chrono::floor<std::chrono::seconds>(WallClock::now())));
+            } else {
+                heard(message->from(), message->bytes());
             }
         } else if (const auto* lost = std::get_if<net::Disconnected>(&event)) {
             log::info(server_log, "connection {} closed: {}", std::to_underlying(lost->connection),
                       lost->reason);
             handshakes_.erase(lost->connection);
-            joined_.erase(lost->connection);
+            joined_.leave(lost->connection);
         }
     }
     const MonotonicClock::time_point now = MonotonicClock::now();
@@ -497,8 +500,25 @@ void Server::answer(net::ConnectionId connection, const protocol::Answer& answer
         const auto& player = shaking->second.player();
         log::info(server_log, "connection {} welcomed{}", std::to_underlying(connection),
                   player ? std::format(": {}", player->name) : std::string{});
+        joined_.join(connection, player ? player->name
+                                        : std::format("player {}", std::to_underlying(connection)));
         handshakes_.erase(shaking);
-        joined_.insert(connection);
+    }
+}
+
+void Server::heard(net::ConnectionId connection, std::span<const std::byte> bytes) {
+    const auto message = protocol::decode(bytes);
+    if (!message) {
+        log::debug(server_log, "connection {} sent something unreadable: {}",
+                   std::to_underlying(connection), message.error());
+    } else if (const auto* moved = std::get_if<protocol::Moved>(&*message)) {
+        if (!joined_.move(connection, protocol::to_world(moved->at))) {
+            log::debug(server_log, "connection {} moved out of bounds",
+                       std::to_underlying(connection));
+        }
+    } else if (!std::holds_alternative<protocol::Ack>(*message)) {
+        log::debug(server_log, "connection {} sent a message out of place",
+                   std::to_underlying(connection));
     }
 }
 
