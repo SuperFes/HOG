@@ -26,6 +26,9 @@ constexpr double max_weather_minutes = 24.0 * 60.0;
 constexpr double max_weather_day_hours = 24.0 * 365.0;
 constexpr double max_wildlife_step_hours = 24.0 * 365.0;
 constexpr double max_forest_step_hours = 24.0;
+constexpr double max_view_m = 10'000.0;
+constexpr std::int64_t least_snapshot_bytes = 64;
+constexpr std::int64_t most_snapshot_bytes = 65'536;
 
 [[nodiscard]] std::unexpected<Error> invalid(std::string message) {
     return make_error(ErrorCode::InvalidArgument, std::move(message));
@@ -350,7 +353,8 @@ private:
 
 [[nodiscard]] Result<void> parse_net(const Table& net, const std::filesystem::path& base,
                                      NetSettings& config) {
-    if (auto known = net.only({"port", "login_key", "simulate"}); !known) {
+    if (auto known = net.only({"port", "login_key", "simulate", "view_m", "snapshot_bytes"});
+        !known) {
         return known;
     }
     const auto key = net.string("login_key");
@@ -378,6 +382,25 @@ private:
     }
     if (*port) {
         config.port = static_cast<std::uint16_t>(**port);
+    }
+    const auto view = net.number("view_m");
+    if (!view) {
+        return std::unexpected(view.error());
+    }
+    if (*view) {
+        // NaN fails every comparison, so it is out of range too.
+        const bool in_range = **view > 0.0 && **view <= max_view_m;
+        if (!in_range) {
+            return invalid(std::format("net.view_m must be above 0 and at most {}", max_view_m));
+        }
+        config.view.radius = **view;
+    }
+    const auto bytes = net.integer("snapshot_bytes", least_snapshot_bytes, most_snapshot_bytes);
+    if (!bytes) {
+        return std::unexpected(bytes.error());
+    }
+    if (*bytes) {
+        config.view.budget = static_cast<std::size_t>(**bytes);
     }
     return {};
 }

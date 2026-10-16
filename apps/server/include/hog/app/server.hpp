@@ -17,6 +17,7 @@
 #include <hog/server/probe_service.hpp>
 #include <hog/server/server_config.hpp>
 #include <hog/server/snapshot_writer.hpp>
+#include <hog/server/spatial_index.hpp>
 #include <hog/server/tick_loop.hpp>
 #include <hog/sim/forest.hpp>
 #include <hog/sim/weather.hpp>
@@ -71,6 +72,8 @@ public:
 
     // Fastest debug tools may run the clock, in game seconds per real second.
     static constexpr std::uint32_t fastest = 86'400;
+    // Real time between the snapshots players are sent, whatever the tick rate.
+    static constexpr std::chrono::milliseconds share_interval{50};
 
     // Ticks at the configured rate, saving periodically, until `stop` is set; then saves and
     // waits for every snapshot to be written. now() is real time, for debug tools to rejoin.
@@ -135,6 +138,8 @@ private:
     void answer(net::ConnectionId connection, const protocol::Answer& answer);
     // Does what a player who's in asks.
     void heard(net::ConnectionId connection, std::span<const std::byte> bytes);
+    // Sends each player a snapshot of those near them.
+    void share();
     // Answers debug tools waiting on the world, telling them how clock() runs and asking
     // steer(control) to change it.
     template <typename Clock, typename Steer>
@@ -150,6 +155,8 @@ private:
     store::SqliteSnapshotStore snapshots_;
     // After the store it writes to.
     server::SnapshotWriter writer_;
+    // Before the world, which it must outlive.
+    server::SpatialIndex nearby_;
     flecs::world entities_;
     server::Persistence persistence_;
     jobs::JobSystem jobs_;
@@ -193,6 +200,8 @@ private:
     metrics::Gauge& burning_cells_;
     metrics::Gauge& biomass_tonnes_;
     metrics::Gauge& connections_;
+    metrics::Counter& shared_snapshots_;
+    metrics::Counter& shared_bytes_;
     // km² alight not yet counted, being under one.
     double alight_left_ = 0.0;
     metrics::Reporter reporter_;
@@ -311,11 +320,20 @@ Result<void> Server::run(T& timer, Now now, const std::atomic<bool>& stop) {
     const auto interval =
         std::chrono::duration_cast<MonotonicClock::duration>(config_.metrics_interval);
     MonotonicClock::time_point next_report = timer.now() + interval;
+    MonotonicClock::time_point next_share = timer.now();
     // Between ticks, and in place of them while paused.
     const auto between = [&] {
         serve_probe([&loop] { return detail::clock_of(loop); },
                     [&](const probe::Control& control) { return steer(loop, control, now); });
         serve_players();
+        if (const MonotonicClock::time_point at = timer.now(); at >= next_share) {
+            share();
+            next_share += share_interval;
+            // After a stall, carry on from now rather than send the missed ones at once.
+            if (next_share <= at) {
+                next_share = at + share_interval;
+            }
+        }
         if (interval > MonotonicClock::duration::zero() && timer.now() >= next_report) {
             report(loop.stats().slipped);
             next_report = timer.now() + interval;

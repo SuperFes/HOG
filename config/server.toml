@@ -35,6 +35,8 @@ port = 7675 # PORK on a phone keypad
 login_key = "../var/login.pub"
 # A bad network to try the game on, in ms and percent, added both ways.
 # simulate = "lag=75,jitter=10,loss=2,reorder=1"
+view_m = 500
+snapshot_bytes = 1200
 
 [debug]
 port = 7777

@@ -1,7 +1,9 @@
 #include <hog/app/server.hpp>
 #include <hog/net/simulation.hpp>
+#include <hog/planet/cell_id.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/save/snapshot_store.hpp>
+#include <hog/server/spatial_tracking.hpp>
 #include <hog/server/survey.hpp>
 
 #include <algorithm>
@@ -12,6 +14,7 @@
 #include <string>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 namespace hog::app {
 
@@ -66,8 +69,10 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config,
                store::SqliteChangeStore changes)
     : config_(config), world_id_(planet::world_id(planet)), planet_(planet),
       changes_(std::move(changes)), snapshots_(std::move(snapshots)),
-      writer_(snapshots_, config.keep_snapshots), persistence_(entities_),
-      joined_(entities_, planet.radius),
+      writer_(snapshots_, config.keep_snapshots),
+      nearby_(
+          std::min(planet::level_for(config.net.view.radius, planet.radius), planet::max_level)),
+      persistence_(entities_), joined_(entities_, planet.radius, config.net.view),
       ticks_(registry_.counter("hog_ticks_total", "Live ticks run.")),
       tick_seconds_(registry_.histogram("hog_tick_seconds", "Real time each live tick took.",
                                         {tick_bounds.begin(), tick_bounds.end()})),
@@ -115,8 +120,13 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config,
       burning_cells_(registry_.gauge("hog_forest_burning_cells", "Forest cells alight.")),
       biomass_tonnes_(registry_.gauge("hog_forest_biomass_tonnes", "Living plants on the planet.")),
       connections_(registry_.gauge("hog_connections", "Players' connections open.")),
+      shared_snapshots_(registry_.counter("hog_player_snapshots_total",
+                                          "Snapshots sent to players of those near them.")),
+      shared_bytes_(
+          registry_.counter("hog_player_snapshot_bytes_total", "Bytes of players' snapshots.")),
       reporter_(registry_) {
     persistence_.persist<server::Position>();
+    server::track_positions(entities_, nearby_);
 }
 
 Server::~Server() = default;
@@ -516,10 +526,29 @@ void Server::heard(net::ConnectionId connection, std::span<const std::byte> byte
             log::debug(server_log, "connection {} moved out of bounds",
                        std::to_underlying(connection));
         }
-    } else if (!std::holds_alternative<protocol::Ack>(*message)) {
+    } else if (const auto* ack = std::get_if<protocol::Ack>(&*message)) {
+        joined_.acknowledged(connection, ack->tick);
+    } else {
         log::debug(server_log, "connection {} sent a message out of place",
                    std::to_underlying(connection));
     }
+}
+
+void Server::share() {
+    if (!players_) {
+        return;
+    }
+    joined_.share(
+        nearby_, [this](net::ConnectionId connection, const protocol::Snapshot& snapshot) {
+            const std::vector<std::byte> bytes = protocol::encode(snapshot);
+            if (auto sent = players_->send(connection, net::Delivery::Unreliable, bytes); !sent) {
+                log::debug(server_log, "couldn't send connection {} a snapshot: {}",
+                           std::to_underlying(connection), sent.error());
+                return;
+            }
+            shared_snapshots_.add();
+            shared_bytes_.add(bytes.size());
+        });
 }
 
 void Server::open_probe() {

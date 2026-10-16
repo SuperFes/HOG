@@ -4,6 +4,7 @@
 #include <hog/core/result.hpp>
 #include <hog/core/time.hpp>
 #include <hog/net/simulation.hpp>
+#include <hog/replication/view.hpp>
 #include <hog/server/tick_clock.hpp>
 
 #include <chrono>
@@ -53,6 +54,8 @@ struct NetSettings {
     std::optional<std::filesystem::path> login_key;
     // A bad network to try the game on, for every connection the process has.
     net::Simulation simulate;
+    // How far players see others, and how large their snapshots may be.
+    replication::ViewSettings view;
 };
 
 struct DebugSettings {
@@ -122,6 +125,8 @@ struct ServerConfig {
 //     port = 7675                # for players, on every address
 //     login_key = "../var/login.pub"  # only players logged in by its service get in
 //     simulate = "lag=75,jitter=10,loss=2,reorder=1"  # a bad network: ms and percent
+//     view_m = 500               # how far players see others
+//     snapshot_bytes = 1200      # what players are sent each snapshot, at most
 //
 //     [debug]                    # optional
 //     port = 7777                # for debug tools, on 127.0.0.1

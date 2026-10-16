@@ -58,6 +58,8 @@ TEST_CASE("a minimal server config takes the defaults", "[server][config]") {
     CHECK_FALSE(config->net.port);
     CHECK_FALSE(config->net.login_key);
     CHECK(config->net.simulate.off());
+    CHECK(config->net.view.radius == 500.0);
+    CHECK(config->net.view.budget == 1'200);
     CHECK_FALSE(config->debug.port);
     CHECK_FALSE(config->debug.time_control);
     CHECK_FALSE(config->debug.start);
@@ -101,6 +103,8 @@ step_hours = 0.5
 port = 27100
 login_key = "../var/login.pub"
 simulate = "lag=75,loss=2"
+view_m = 250.5
+snapshot_bytes = 900
 
 [debug]
 port = 7777
@@ -136,6 +140,8 @@ start = 2030-06-01T12:00:00+02:00
     CHECK(config->net.port == 27100);
     CHECK(config->net.login_key == (base() / "../var/login.pub").lexically_normal());
     CHECK(config->net.simulate == hog::net::Simulation{.lag = 75ms, .loss = 2});
+    CHECK(config->net.view.radius == 250.5);
+    CHECK(config->net.view.budget == 900);
     CHECK(config->debug.port == 7777);
     CHECK(config->debug.time_control);
     CHECK(config->debug.start ==
@@ -190,6 +196,13 @@ TEST_CASE("bad server configs are rejected", "[server][config]") {
         {with("[net]\nlogin_key = 3\n"), ErrorCode::InvalidArgument},
         {with("[net]\nsimulate = \"lag=-5\"\n"), ErrorCode::InvalidArgument},
         {with("[net]\nsimulate = 5\n"), ErrorCode::InvalidArgument},
+        {with("[net]\nview_m = 0\n"), ErrorCode::InvalidArgument},
+        {with("[net]\nview_m = 10001\n"), ErrorCode::InvalidArgument},
+        {with("[net]\nview_m = nan\n"), ErrorCode::InvalidArgument},
+        {with("[net]\nview_m = \"far\"\n"), ErrorCode::InvalidArgument},
+        {with("[net]\nsnapshot_bytes = 63\n"), ErrorCode::InvalidArgument},
+        {with("[net]\nsnapshot_bytes = 65537\n"), ErrorCode::InvalidArgument},
+        {with("[net]\nsnapshot_bytes = 1200.5\n"), ErrorCode::InvalidArgument},
         {with("[debug]\nport = 0\n"), ErrorCode::InvalidArgument},
         {with("[debug]\nport = 65536\n"), ErrorCode::InvalidArgument},
         {with("[debug]\nport = \"7777\"\n"), ErrorCode::InvalidArgument},
