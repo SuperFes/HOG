@@ -23,10 +23,48 @@ std::vector<std::byte> bytes(std::initializer_list<int> values) {
     return out;
 }
 
+// Somewhere on an Earth-sized planet's surface.
+constexpr Millimetres far_out{3'000'000'000, -4'500'000'123, 2'000'000'000};
+
+Snapshot whole() {
+    return {.tick = 7,
+            .baseline = {},
+            .entered = {{.id = NetId{1}, .at = far_out, .name = "Matt"},
+                        {.id = NetId{900}, .at = -far_out, .name = ""}},
+            .changed = {},
+            .left = {}};
+}
+
+Snapshot delta() {
+    return {.tick = 120,
+            .baseline = 117,
+            .entered = {{.id = NetId{4}, .at = far_out, .name = std::string(most_name, 'n')}},
+            .changed = {{.id = NetId{1}, .moved_by = Millimetres{300, -120, 0}},
+                        {.id = NetId{2}, .moved_by = {}},
+                        {.id = NetId{70'000}, .moved_by = Millimetres{0, 0, -5}}},
+            .left = {NetId{3}, NetId{0xFFFF'FFFF}}};
+}
+
 std::vector<Message> examples() {
-    return {Hello{}, Hello{.version = version, .token = bytes({1, 2, 3, 250})}, Welcome{},
+    return {Hello{},
+            Hello{.version = version, .token = bytes({1, 2, 3, 250})},
+            Welcome{},
             Refused{.reason = Refusal::Version, .version = 7, .detail = "too new"},
-            Refused{.reason = Refusal::Silent, .version = version, .detail = ""}};
+            Refused{.reason = Refusal::Silent, .version = version, .detail = ""},
+            Moved{.at = far_out},
+            Ack{.tick = 0xFFFF'FFF0},
+            whole(),
+            delta(),
+            Snapshot{.tick = 1, .baseline = 0, .entered = {}, .changed = {}, .left = {}}};
+}
+
+// A snapshot at tick 10 with no baseline and nothing entering, then `rest`.
+std::vector<std::byte> snapshot_with(std::initializer_list<int> rest) {
+    auto out = bytes({6, 0, 10, 0, 0, 0, 0, 0});
+    for (const int value : rest) {
+        out.push_back(static_cast<std::byte>(value));
+    }
+    return out;
 }
 
 } // namespace
@@ -102,4 +140,43 @@ TEST_CASE("a refusal says which side to update", "[protocol]") {
           "the server didn't accept the login: expired");
     CHECK(explain({.reason = Refusal::Silent, .version = 3, .detail = "no hello"}, 3) ==
           "the server closed the connection: no hello");
+}
+
+TEST_CASE("positions are sent to the millimetre", "[protocol]") {
+    const hog::WorldPosition at{hog::DVec3{6'371'000.0004, -0.0006, 1.2345}};
+    CHECK(to_millimetres(at) == Millimetres{6'371'000'000, -1, 1'235});
+    CHECK(to_millimetres(to_world(far_out)) == far_out);
+}
+
+TEST_CASE("a small move takes few bytes", "[protocol]") {
+    const Snapshot moved{.tick = 1'000,
+                         .baseline = 997,
+                         .entered = {},
+                         .changed = {{.id = NetId{12}, .moved_by = Millimetres{900, -900, 600}}},
+                         .left = {}};
+    // Kind, tick, baseline, three counts, then the id, what changed and three axes of two bytes.
+    CHECK(encode(moved).size() == 2 + 4 + 1 + 3 + 1 + 1 + 6);
+}
+
+TEST_CASE("a snapshot's ids must go up", "[protocol]") {
+    // Two changed entities, the second 0 past the first.
+    const auto twice = decode(snapshot_with({2, 3, 0, 0, 0, 0}));
+    REQUIRE_FALSE(twice);
+    CHECK(twice.error().code == ErrorCode::Parse);
+    // One leaving, past the largest id.
+    CHECK(decode(snapshot_with({0, 1, 0xFF, 0xFF, 0xFF, 0xFF, 0x10})).error().code ==
+          ErrorCode::Parse);
+}
+
+TEST_CASE("snapshots that can't be right are refused", "[protocol]") {
+    // A baseline 11 ticks before tick 10.
+    CHECK(decode(bytes({6, 0, 10, 0, 0, 0, 11, 0, 0, 0})).error().code == ErrorCode::Parse);
+    // A change of a kind this version doesn't know.
+    CHECK(decode(snapshot_with({1, 1, 2, 0})).error().code == ErrorCode::Parse);
+    // More entities changed than there are bytes for.
+    CHECK(decode(snapshot_with({100, 1, 0})).error().code == ErrorCode::Parse);
+    // A name too long.
+    auto named = bytes({6, 0, 10, 0, 0, 0, 0, 1, 1, 0, 0, 0, static_cast<int>(most_name + 1)});
+    named.resize(named.size() + most_name + 1 + 2, std::byte{'n'});
+    CHECK(decode(named).error().code == ErrorCode::OutOfRange);
 }

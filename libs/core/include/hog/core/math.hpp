@@ -2,6 +2,7 @@
 
 // GLM is configured for the whole project through hog_core's compile definitions (Vulkan depth
 // range, explicit constructors, size_t lengths); include GLM through this header.
+#include <glm/ext/vector_int3_sized.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
@@ -14,6 +15,7 @@ using DVec2 = glm::dvec2;
 using DVec3 = glm::dvec3;
 using IVec2 = glm::ivec2;
 using IVec3 = glm::ivec3;
+using I64Vec3 = glm::i64vec3;
 using Quat = glm::quat;
 using DQuat = glm::dquat;
 using Mat3 = glm::mat3;

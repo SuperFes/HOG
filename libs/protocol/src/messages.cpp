@@ -3,10 +3,13 @@
 #include <hog/protocol/messages.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <format>
+#include <limits>
 #include <string_view>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace hog::protocol {
 
@@ -17,8 +20,15 @@ namespace {
 enum class Kind : std::uint16_t {
     Hello = 1,
     Welcome = 2,
-    Refused = 3
+    Refused = 3,
+    Moved = 4,
+    Ack = 5,
+    Snapshot = 6,
 }; // NOLINT(performance-enum-size)
+
+// Which of an entity's changes follow its id in a snapshot.
+constexpr std::uint8_t changed_position = 1U;
+constexpr std::uint8_t known_changes = changed_position;
 
 template <typename T>
 [[nodiscard]] Result<T> read(ByteReader& in, std::string_view what) {
@@ -47,6 +57,80 @@ template <typename T>
     }
     return bytes;
 }
+
+[[nodiscard]] Result<std::uint64_t> read_varint(ByteReader& in, std::string_view what) {
+    auto value = in.read_varint();
+    if (!value) {
+        return make_error(ErrorCode::Parse, std::format("{}: {}", what, value.error().message));
+    }
+    return value;
+}
+
+[[nodiscard]] Result<Millimetres> read_position(ByteReader& in, std::string_view what) {
+    Millimetres at{0};
+    for (std::size_t axis = 0; axis < 3; ++axis) {
+        auto value = in.read_signed();
+        if (!value) {
+            return make_error(ErrorCode::Parse,
+                              std::format("{}'s position: {}", what, value.error().message));
+        }
+        at[axis] = *value;
+    }
+    return at;
+}
+
+void write_position(ByteWriter& out, Millimetres at) {
+    for (std::size_t axis = 0; axis < 3; ++axis) {
+        out.write_signed(at[axis]);
+    }
+}
+
+// A list's length, which can't be more than the bytes left, as each entry takes one at least.
+[[nodiscard]] Result<std::size_t> read_count(ByteReader& in, std::string_view what) {
+    const auto count = read_varint(in, what);
+    if (!count) {
+        return std::unexpected(count.error());
+    }
+    if (*count > in.remaining()) {
+        return make_error(ErrorCode::Parse, std::format("{} of {} cut short", what, *count));
+    }
+    return static_cast<std::size_t>(*count);
+}
+
+// Ids in a list go up, each written as the gap from the one before, the first from 0.
+class IdReader {
+public:
+    explicit IdReader(std::string_view what) noexcept : what_(what) {}
+
+    [[nodiscard]] Result<NetId> next(ByteReader& in) {
+        const auto gap = read_varint(in, what_);
+        if (!gap) {
+            return std::unexpected(gap.error());
+        }
+        if (*gap == 0 || *gap > std::numeric_limits<std::uint32_t>::max() - last_) {
+            return make_error(ErrorCode::Parse, std::format("{} out of order", what_));
+        }
+        last_ += static_cast<std::uint32_t>(*gap);
+        return NetId{last_};
+    }
+
+private:
+    std::string_view what_;
+    std::uint32_t last_ = 0;
+};
+
+class IdWriter {
+public:
+    void next(ByteWriter& out, NetId id) {
+        const auto value = std::to_underlying(id);
+        HOG_ASSERT(value > last_, "a snapshot's ids must go up");
+        out.write_varint(value - last_);
+        last_ = value;
+    }
+
+private:
+    std::uint32_t last_ = 0;
+};
 
 void write_sized(ByteWriter& out, std::span<const std::byte> bytes) {
     out.write(static_cast<std::uint16_t>(bytes.size()));
@@ -102,7 +186,156 @@ void write_sized(ByteWriter& out, std::span<const std::byte> bytes) {
     return finished(in, std::move(refused));
 }
 
+// A list in a snapshot: its length, then each entry's id and what read_one reads after it.
+template <typename Read>
+[[nodiscard]] auto read_list(ByteReader& in, std::string_view what, Read read_one)
+    -> Result<std::vector<typename std::invoke_result_t<Read&, ByteReader&, NetId>::value_type>> {
+    using Entry = std::invoke_result_t<Read&, ByteReader&, NetId>::value_type;
+    const auto count = read_count(in, what);
+    if (!count) {
+        return std::unexpected(count.error());
+    }
+    std::vector<Entry> entries;
+    IdReader ids{what};
+    for (std::size_t index = 0; index < *count; ++index) {
+        const auto id = ids.next(in);
+        if (!id) {
+            return std::unexpected(id.error());
+        }
+        auto entry = read_one(in, *id);
+        if (!entry) {
+            return std::unexpected(entry.error());
+        }
+        entries.push_back(std::move(*entry));
+    }
+    return entries;
+}
+
+[[nodiscard]] Result<Entered> read_entered(ByteReader& in, NetId id) {
+    const auto at = read_position(in, "an entity entering");
+    if (!at) {
+        return std::unexpected(at.error());
+    }
+    const auto length = read<std::uint8_t>(in, "an entity's name");
+    if (!length) {
+        return std::unexpected(length.error());
+    }
+    if (*length > most_name) {
+        return make_error(
+            ErrorCode::OutOfRange,
+            std::format("a name of {} bytes is over the {} allowed", *length, most_name));
+    }
+    const auto name = in.read_bytes(*length);
+    if (!name) {
+        return make_error(ErrorCode::Parse, "an entity's name cut short");
+    }
+    Entered entity{.id = id, .at = *at, .name = {}};
+    for (const std::byte byte : *name) {
+        entity.name.push_back(static_cast<char>(byte));
+    }
+    return entity;
+}
+
+[[nodiscard]] Result<Changed> read_changed(ByteReader& in, NetId id) {
+    const auto what = read<std::uint8_t>(in, "an entity's changes");
+    if (!what) {
+        return std::unexpected(what.error());
+    }
+    if ((*what & ~known_changes) != 0) {
+        return make_error(ErrorCode::Parse, std::format("unknown changes {:#x}", *what));
+    }
+    Changed entity{.id = id, .moved_by = {}};
+    if ((*what & changed_position) != 0) {
+        const auto moved_by = read_position(in, "an entity changed");
+        if (!moved_by) {
+            return std::unexpected(moved_by.error());
+        }
+        entity.moved_by = *moved_by;
+    }
+    return entity;
+}
+
+[[nodiscard]] Result<Message> read_snapshot(ByteReader& in) {
+    Snapshot snapshot;
+    const auto tick = read<std::uint32_t>(in, "snapshot");
+    if (!tick) {
+        return std::unexpected(tick.error());
+    }
+    const auto age = read_varint(in, "snapshot's baseline");
+    if (!age) {
+        return std::unexpected(age.error());
+    }
+    snapshot.tick = *tick;
+    if (*age > *tick) {
+        return make_error(ErrorCode::Parse, "snapshot's baseline before the first tick");
+    }
+    if (*age != 0) {
+        snapshot.baseline = static_cast<std::uint32_t>(*tick - *age);
+    }
+    auto entered = read_list(in, "entities entering", read_entered);
+    if (!entered) {
+        return std::unexpected(entered.error());
+    }
+    auto changed = read_list(in, "entities changed", read_changed);
+    if (!changed) {
+        return std::unexpected(changed.error());
+    }
+    auto left = read_list(in, "entities leaving",
+                          [](ByteReader& /*in*/, NetId id) { return Result<NetId>{id}; });
+    if (!left) {
+        return std::unexpected(left.error());
+    }
+    snapshot.entered = std::move(*entered);
+    snapshot.changed = std::move(*changed);
+    snapshot.left = std::move(*left);
+    return finished(in, std::move(snapshot));
+}
+
+void write_snapshot(ByteWriter& out, const Snapshot& snapshot) {
+    out.write(static_cast<std::uint16_t>(Kind::Snapshot));
+    out.write(snapshot.tick);
+    HOG_ASSERT(!snapshot.baseline || *snapshot.baseline < snapshot.tick,
+               "a snapshot's baseline must come before it");
+    out.write_varint(snapshot.baseline ? snapshot.tick - *snapshot.baseline : 0);
+
+    out.write_varint(snapshot.entered.size());
+    IdWriter entering;
+    for (const Entered& entity : snapshot.entered) {
+        HOG_ASSERT(entity.name.size() <= most_name, "an entity's name too long to send");
+        entering.next(out, entity.id);
+        write_position(out, entity.at);
+        out.write(static_cast<std::uint8_t>(entity.name.size()));
+        out.write_bytes(std::as_bytes(std::span{entity.name}));
+    }
+
+    out.write_varint(snapshot.changed.size());
+    IdWriter changing;
+    for (const Changed& entity : snapshot.changed) {
+        changing.next(out, entity.id);
+        out.write(entity.moved_by ? changed_position : std::uint8_t{0});
+        if (entity.moved_by) {
+            write_position(out, *entity.moved_by);
+        }
+    }
+
+    out.write_varint(snapshot.left.size());
+    IdWriter leaving;
+    for (const NetId id : snapshot.left) {
+        leaving.next(out, id);
+    }
+}
+
 } // namespace
+
+Millimetres to_millimetres(WorldPosition position) noexcept {
+    const DVec3 metres = position.metres();
+    return {std::llround(metres.x * 1'000.0), std::llround(metres.y * 1'000.0),
+            std::llround(metres.z * 1'000.0)};
+}
+
+WorldPosition to_world(Millimetres millimetres) noexcept {
+    return WorldPosition{DVec3{millimetres} / 1'000.0};
+}
 
 std::vector<std::byte> encode(const Message& message) {
     ByteWriter out;
@@ -117,7 +350,16 @@ std::vector<std::byte> encode(const Message& message) {
             } else if constexpr (std::is_same_v<Body, Welcome>) {
                 out.write(static_cast<std::uint16_t>(Kind::Welcome));
                 out.write(body.version);
+            } else if constexpr (std::is_same_v<Body, Moved>) {
+                out.write(static_cast<std::uint16_t>(Kind::Moved));
+                write_position(out, body.at);
+            } else if constexpr (std::is_same_v<Body, Ack>) {
+                out.write(static_cast<std::uint16_t>(Kind::Ack));
+                out.write(body.tick);
+            } else if constexpr (std::is_same_v<Body, Snapshot>) {
+                write_snapshot(out, body);
             } else {
+                static_assert(std::is_same_v<Body, Refused>);
                 out.write(static_cast<std::uint16_t>(Kind::Refused));
                 out.write(body.version);
                 out.write(static_cast<std::uint8_t>(body.reason));
@@ -148,6 +390,22 @@ Result<Message> decode(std::span<const std::byte> bytes) {
     }
     case Kind::Refused:
         return read_refused(in);
+    case Kind::Moved: {
+        const auto at = read_position(in, "a move");
+        if (!at) {
+            return std::unexpected(at.error());
+        }
+        return finished(in, Moved{.at = *at});
+    }
+    case Kind::Ack: {
+        const auto tick = read<std::uint32_t>(in, "an ack");
+        if (!tick) {
+            return std::unexpected(tick.error());
+        }
+        return finished(in, Ack{.tick = *tick});
+    }
+    case Kind::Snapshot:
+        return read_snapshot(in);
     }
     return make_error(ErrorCode::Unsupported, std::format("unknown message kind {}", *kind));
 }
