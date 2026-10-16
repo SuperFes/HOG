@@ -47,6 +47,9 @@ struct ForestSettings {
 struct NetSettings {
     // Where players connect, on every address; without one, they can't.
     std::optional<std::uint16_t> port;
+    // The login service's public key, as hog-login writes it; with one, only players with its
+    // connect tokens get in, and without, anyone does.
+    std::optional<std::filesystem::path> login_key;
 };
 
 struct DebugSettings {
@@ -114,6 +117,7 @@ struct ServerConfig {
 //
 //     [net]                      # optional
 //     port = 7675                # for players, on every address
+//     login_key = "../var/login.pub"  # only players logged in by its service get in
 //
 //     [debug]                    # optional
 //     port = 7777                # for debug tools, on 127.0.0.1

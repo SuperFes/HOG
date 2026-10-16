@@ -31,6 +31,8 @@ step_hours = 1
 
 [net]
 port = 7675 # PORK on a phone keypad
+# Made by hog-login on its first run, from the repository's root.
+login_key = "../var/login.pub"
 
 [debug]
 port = 7777

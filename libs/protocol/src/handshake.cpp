@@ -18,7 +18,7 @@ Answer refuse(Refusal reason, std::string detail) {
 
 } // namespace
 
-Answer Handshake::received(std::span<const std::byte> bytes) {
+Answer Handshake::received(std::span<const std::byte> bytes, login::UnixTime now) {
     HOG_ASSERT(!welcomed_, "shaking hands with a client already welcomed");
     const auto message = decode(bytes);
     if (!message) {
@@ -33,6 +33,13 @@ Answer Handshake::received(std::span<const std::byte> bytes) {
         return refuse(Refusal::Version, std::format("the client speaks protocol {} and this "
                                                     "server {}",
                                                     hello->version, version));
+    }
+    if (key_) {
+        auto token = login::check(hello->token, *key_, now);
+        if (!token) {
+            return refuse(Refusal::Token, token.error().message);
+        }
+        player_ = std::move(*token);
     }
     welcomed_ = true;
     return {.reply = Welcome{}, .close = false, .reason = {}};

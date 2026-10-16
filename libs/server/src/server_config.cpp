@@ -348,9 +348,17 @@ private:
     return {};
 }
 
-[[nodiscard]] Result<void> parse_net(const Table& net, NetSettings& config) {
-    if (auto known = net.only({"port"}); !known) {
+[[nodiscard]] Result<void> parse_net(const Table& net, const std::filesystem::path& base,
+                                     NetSettings& config) {
+    if (auto known = net.only({"port", "login_key"}); !known) {
         return known;
+    }
+    const auto key = net.string("login_key");
+    if (!key) {
+        return std::unexpected(key.error());
+    }
+    if (*key) {
+        config.login_key = (base / **key).lexically_normal();
     }
     const auto port = net.integer("port", 1, std::numeric_limits<std::uint16_t>::max());
     if (!port) {
@@ -436,7 +444,7 @@ Result<ServerConfig> parse_server_config(std::string_view text, const std::files
     if (auto debug = parse_debug(Table{tables[7], "debug"}, config.debug); !debug) {
         return std::unexpected(debug.error());
     }
-    if (auto net = parse_net(Table{tables[8], "net"}, config.net); !net) {
+    if (auto net = parse_net(Table{tables[8], "net"}, base, config.net); !net) {
         return std::unexpected(net.error());
     }
     return config;

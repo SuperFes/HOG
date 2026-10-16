@@ -408,13 +408,25 @@ void Server::open_players() {
     if (!port) {
         return;
     }
+    if (const auto& key_file = config_.net.login_key) {
+        auto key = login::load_public_key(*key_file);
+        if (!key) {
+            log::error(server_log,
+                       "no players' port without the login service's key: {}; "
+                       "hog-login makes it on its first run",
+                       key.error());
+            return;
+        }
+        login_key_ = *key;
+    }
     auto listening = net::Server::listen(*port);
     if (!listening) {
         log::warn(server_log, "no players' port: {}", listening.error());
         return;
     }
     players_ = std::move(*listening);
-    log::info(server_log, "players connect on port {}", *port);
+    log::info(server_log, "players connect on port {}{}", *port,
+              login_key_ ? ", logged in" : ", anyone at all");
 }
 
 void Server::serve_players() {
@@ -426,11 +438,15 @@ void Server::serve_players() {
         if (const auto* connected = std::get_if<net::Connected>(&event)) {
             log::info(server_log, "connection {} opened",
                       std::to_underlying(connected->connection));
-            handshakes_.emplace(connected->connection, protocol::Handshake{MonotonicClock::now()});
+            handshakes_.emplace(connected->connection,
+                                protocol::Handshake{MonotonicClock::now(), login_key_});
         } else if (const auto* message = std::get_if<net::Message>(&event)) {
             const auto shaking = handshakes_.find(message->from());
             if (shaking != handshakes_.end()) {
-                answer(message->from(), shaking->second.received(message->bytes()));
+                answer(message->from(),
+                       shaking->second.received(
+                           message->bytes(),
+                           std::chrono::floor<std::chrono::seconds>(WallClock::now())));
             }
         } else if (const auto* lost = std::get_if<net::Disconnected>(&event)) {
             log::info(server_log, "connection {} closed: {}", std::to_underlying(lost->connection),
@@ -473,7 +489,9 @@ void Server::answer(net::ConnectionId connection, const protocol::Answer& answer
     }
     if (const auto shaking = handshakes_.find(connection);
         shaking != handshakes_.end() && shaking->second.welcomed()) {
-        log::info(server_log, "connection {} welcomed", std::to_underlying(connection));
+        const auto& player = shaking->second.player();
+        log::info(server_log, "connection {} welcomed{}", std::to_underlying(connection),
+                  player ? std::format(": {}", player->name) : std::string{});
         handshakes_.erase(shaking);
         joined_.insert(connection);
     }

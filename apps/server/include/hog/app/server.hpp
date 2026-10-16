@@ -160,6 +160,8 @@ private:
     // Connections still to say hello, and those let in.
     std::map<net::ConnectionId, protocol::Handshake> handshakes_;
     std::set<net::ConnectionId> joined_;
+    // The login service's, when only players it logged in may join.
+    std::optional<login::PublicKey> login_key_;
     GameTime time_;
     Tick tick_;
 
