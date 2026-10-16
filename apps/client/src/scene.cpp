@@ -129,8 +129,9 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     }
     terrain::Viewpoint seen = viewpoint(shot.camera, frame.extent);
     seen.bend = shot.bend;
-    const std::vector<terrain::SelectedPatch> selected =
-        terrain::select_patches(seen, shot.bend.radius, {}, stream_.known_heights());
+    // All round the eye, so the ground is baked before it's turned to.
+    const std::vector<terrain::SelectedPatch> selected = terrain::select_patches(
+        seen, shot.bend.radius, {.only_in_view = false}, stream_.known_heights());
     const terrain::StreamFrame streamed = stream_.update(selected);
     for (const planet::CellId cell : streamed.bakes) {
         baker_.start(cell);
