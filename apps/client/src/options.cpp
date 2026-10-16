@@ -87,6 +87,8 @@ Result<void> read_option(Options& options, std::string_view option, std::string_
             return make_error(ErrorCode::InvalidArgument,
                               std::format("--time takes a time of day as HH:MM, not {}", value));
         }
+    } else if (option == "--connect") {
+        options.connect = std::string{value};
     } else if (option == "--companion") {
         options.companion = std::filesystem::path{value};
     } else if (option == "--capture") {
@@ -125,6 +127,8 @@ options:
                          sea level (default over the starting islands)
   --time HH:MM           start at this local time of day (default the planet's own)
   --threads N            baking the ground (default one per hardware thread)
+  --connect ADDRESS      connect to a server at an IP address and port, such as
+                         127.0.0.1:27015
   --companion PATH       a drawing on white paper of someone 3 m tall to fly along
                          with (default res/Matt.png)
   --alone                fly without them

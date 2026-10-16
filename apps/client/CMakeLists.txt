@@ -45,7 +45,8 @@ endif()
 
 add_executable(hog_client_cli src/main.cpp)
 set_target_properties(hog_client_cli PROPERTIES OUTPUT_NAME hog-client)
-target_link_libraries(hog_client_cli PRIVATE hog::client hog::jobs hog::mapgen hog::planet hog::window)
+target_link_libraries(hog_client_cli PRIVATE hog::client hog::jobs hog::mapgen hog::net hog::planet
+    hog::window)
 hog_target_defaults(hog_client_cli)
 
 # GPU drivers are opaque to sanitizers, so those runs leave the smoke test out.

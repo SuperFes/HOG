@@ -20,6 +20,7 @@ TEST_CASE("client options default to the development planet", "[client][options]
     CHECK_FALSE(options->start);
     CHECK_FALSE(options->time_of_day);
     CHECK(options->threads == 0);
+    CHECK_FALSE(options->connect);
     CHECK(options->companion == "res/Matt.png");
     CHECK_FALSE(options->quit_after);
     CHECK_FALSE(options->capture);
@@ -31,15 +32,33 @@ TEST_CASE("client options default to the development planet", "[client][options]
 }
 
 TEST_CASE("client options are parsed", "[client][options]") {
-    const auto options = parse_options(
-        Arguments{"--planet", "other.toml", "--at", "-12.5,170,300", "--time", "18:30", "--threads",
-                  "2", "--companion", "friend.png", "--quit-after", "3", "--capture", "out.png",
-                  "--timings", "--software", "--validate", "--reload-shaders", "-h"});
+    const auto options = parse_options(Arguments{"--planet",
+                                                 "other.toml",
+                                                 "--at",
+                                                 "-12.5,170,300",
+                                                 "--time",
+                                                 "18:30",
+                                                 "--threads",
+                                                 "2",
+                                                 "--connect",
+                                                 "127.0.0.1:27015",
+                                                 "--companion",
+                                                 "friend.png",
+                                                 "--quit-after",
+                                                 "3",
+                                                 "--capture",
+                                                 "out.png",
+                                                 "--timings",
+                                                 "--software",
+                                                 "--validate",
+                                                 "--reload-shaders",
+                                                 "-h"});
     REQUIRE(options);
     CHECK(options->planet == "other.toml");
     CHECK(options->start == Place{.latitude = -12.5, .longitude = 170.0, .altitude = 300.0});
     CHECK(options->time_of_day == 18.5 / 24.0);
     CHECK(options->threads == 2);
+    CHECK(options->connect == "127.0.0.1:27015");
     CHECK(options->companion == "friend.png");
     CHECK(options->quit_after == std::chrono::seconds{3});
     CHECK(options->capture == "out.png");

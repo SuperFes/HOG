@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 
 namespace hog::client {
@@ -28,6 +29,8 @@ struct Options {
     // The local time of day to start at, from 0 at midnight to 1; the planet's own without one.
     std::optional<double> time_of_day;
     std::uint32_t threads = 0; // baking the ground, 0 for one per hardware thread
+    // A server's IP address and port to connect to; alone without one.
+    std::optional<std::string> connect;
     // A drawing on white paper, of someone to fly along with; none without one.
     std::optional<std::filesystem::path> companion = std::filesystem::path{"res/Matt.png"};
     // For smoke tests and pictures: how long to run before quitting, and where to save the last

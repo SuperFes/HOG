@@ -4,9 +4,11 @@
 #include <hog/client/options.hpp>
 #include <hog/client/picture.hpp>
 #include <hog/client/scene.hpp>
+#include <hog/core/log.hpp>
 #include <hog/core/time.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/mapgen/render.hpp>
+#include <hog/net/client.hpp>
 #include <hog/planet/planet_config.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/world.hpp>
@@ -44,6 +46,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace {
@@ -295,6 +298,45 @@ private:
     int frames_ = 0;
 };
 
+const log::Category connection_log{"connection"};
+
+// The connection to a server, if there's one to connect to, telling what becomes of it.
+class Connection {
+public:
+    [[nodiscard]] static Result<Connection> open(const std::optional<std::string>& address) {
+        Connection connection;
+        if (address) {
+            auto client = net::Client::connect(*address);
+            if (!client) {
+                return std::unexpected(client.error());
+            }
+            connection.client_ = std::move(*client);
+            connection.address_ = *address;
+            log::info(connection_log, "connecting to {}", *address);
+        }
+        return connection;
+    }
+
+    void look() {
+        if (!client_) {
+            return;
+        }
+        client_->poll(events_);
+        for (const net::Event& event : events_) {
+            if (std::holds_alternative<net::Connected>(event)) {
+                log::info(connection_log, "connected to {}", address_);
+            } else if (const auto* lost = std::get_if<net::Disconnected>(&event)) {
+                log::warn(connection_log, "disconnected from {}: {}", address_, lost->reason);
+            }
+        }
+    }
+
+private:
+    std::optional<net::Client> client_;
+    std::string address_;
+    std::vector<net::Event> events_;
+};
+
 // Looks for edited shaders now and then, drawing with them once they compile.
 class ShaderReloader {
 public:
@@ -319,7 +361,7 @@ private:
 
 // Flies or walks over the world until the window closes or it's time to quit.
 Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet::World& world,
-                 client::Flight flight, const client::Options& options,
+                 client::Flight flight, Connection& connection, const client::Options& options,
                  const render::Device& device, render::Presenter& presenter, SDL_Window* window) {
     const double radius = world.geology().planet_radius();
     Controls controls;
@@ -342,6 +384,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
         last = now;
         times.add(passed, scene.timings());
         shaders.look(device, now);
+        connection.look();
         const bool faster = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
         const client::FlyInput input{.move = movement(), .look = controls.look, .seconds = seconds};
         flight =
@@ -420,6 +463,11 @@ std::optional<render::Billboard> companion(const client::Options& options, rende
 int show(const client::Options& options, const planet::PlanetConfig& planet,
          const planet::World& world, render::Device& device, render::Presenter& presenter,
          SDL_Window* window) {
+    auto connection = Connection::open(options.connect);
+    if (!connection) {
+        std::cerr << std::format("hog-client: {}\n", connection.error());
+        return EXIT_FAILURE;
+    }
     const client::Flight flight = start(options, world);
     const sim::Calendar calendar{planet.day_length, planet.axial_tilt};
     client::PlanetClock clock{client::start_time(calendar, to_game_time(WallClock::now()),
@@ -443,7 +491,7 @@ int show(const client::Options& options, const planet::PlanetConfig& planet,
         return EXIT_FAILURE;
     }
     const Result<void> flown =
-        fly(*scene, clock, world, flight, options, device, presenter, window);
+        fly(*scene, clock, world, flight, *connection, options, device, presenter, window);
     // The GPU may still be drawing with the scene.
     vkDeviceWaitIdle(device.handle());
     if (!flown) {
