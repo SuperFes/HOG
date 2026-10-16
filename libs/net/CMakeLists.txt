@@ -2,7 +2,8 @@ add_library(hog_net
     src/client.cpp
     src/events.cpp
     src/library.cpp
-    src/server.cpp)
+    src/server.cpp
+    src/simulation.cpp)
 add_library(hog::net ALIAS hog_net)
 
 target_include_directories(hog_net PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -10,4 +11,5 @@ target_link_libraries(hog_net PUBLIC hog::core PRIVATE GameNetworkingSockets::st
 hog_target_defaults(hog_net)
 
 hog_add_tests(hog_net
-    tests/connection_tests.cpp)
+    tests/connection_tests.cpp
+    tests/simulation_tests.cpp)

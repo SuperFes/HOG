@@ -3,6 +3,7 @@
 #include <hog/core/log.hpp>
 
 #include <array>
+#include <chrono>
 #include <cstring>
 #include <format>
 #include <unordered_map>
@@ -136,6 +137,20 @@ Result<void> send(HSteamNetConnection connection, Delivery delivery,
                           std::format("couldn't send a message: result {}", -result));
     }
     return {};
+}
+
+std::optional<Stats> stats(HSteamNetConnection connection) {
+    SteamNetConnectionRealTimeStatus_t status{};
+    if (sockets().GetConnectionRealTimeStatus(connection, &status, 0, nullptr) != k_EResultOK) {
+        return std::nullopt;
+    }
+    return Stats{.ping = std::chrono::milliseconds{status.m_nPing},
+                 .delivered_here = status.m_flConnectionQualityLocal,
+                 .delivered_there = status.m_flConnectionQualityRemote,
+                 .bytes_in_per_second = status.m_flInBytesPerSec,
+                 .bytes_out_per_second = status.m_flOutBytesPerSec,
+                 .queued_bytes = static_cast<std::size_t>(status.m_cbPendingReliable) +
+                                 static_cast<std::size_t>(status.m_cbPendingUnreliable)};
 }
 
 } // namespace hog::net::detail

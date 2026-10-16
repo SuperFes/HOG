@@ -350,7 +350,7 @@ private:
 
 [[nodiscard]] Result<void> parse_net(const Table& net, const std::filesystem::path& base,
                                      NetSettings& config) {
-    if (auto known = net.only({"port", "login_key"}); !known) {
+    if (auto known = net.only({"port", "login_key", "simulate"}); !known) {
         return known;
     }
     const auto key = net.string("login_key");
@@ -359,6 +359,18 @@ private:
     }
     if (*key) {
         config.login_key = (base / **key).lexically_normal();
+    }
+    const auto simulate = net.string("simulate");
+    if (!simulate) {
+        return std::unexpected(simulate.error());
+    }
+    if (*simulate) {
+        auto simulation = net::parse_simulation(**simulate);
+        if (!simulation) {
+            return make_error(ErrorCode::InvalidArgument,
+                              std::format("net.simulate: {}", simulation.error().message));
+        }
+        config.simulate = *simulation;
     }
     const auto port = net.integer("port", 1, std::numeric_limits<std::uint16_t>::max());
     if (!port) {

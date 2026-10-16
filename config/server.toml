@@ -33,6 +33,8 @@ step_hours = 1
 port = 7675 # PORK on a phone keypad
 # Made by hog-login on its first run, from the repository's root.
 login_key = "../var/login.pub"
+# A bad network to try the game on, in ms and percent, added both ways.
+# simulate = "lag=75,jitter=10,loss=2,reorder=1"
 
 [debug]
 port = 7777

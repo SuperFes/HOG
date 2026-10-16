@@ -2,9 +2,11 @@
 
 #include <hog/core/result.hpp>
 #include <hog/net/events.hpp>
+#include <hog/net/stats.hpp>
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -29,6 +31,9 @@ public:
 
     // Replaces `events` with what happened since the last poll.
     void poll(std::vector<Event>& events);
+
+    // How a connection is doing; none if it's gone.
+    [[nodiscard]] std::optional<Stats> stats(ConnectionId connection) const;
 
     // Queues a message; fails if the connection is gone or the message too large.
     [[nodiscard]] Result<void> send(ConnectionId connection, Delivery delivery,

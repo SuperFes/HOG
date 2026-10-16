@@ -19,7 +19,7 @@ add_library(hog::client ALIAS hog_client)
 
 target_include_directories(hog_client PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(hog_client
-    PUBLIC hog::atmosphere hog::core hog::jobs hog::planet hog::render hog::sim hog::terrain
+    PUBLIC hog::atmosphere hog::core hog::jobs hog::net hog::planet hog::render hog::sim hog::terrain
     PRIVATE hog::mapgen stb_image)
 hog_target_defaults(hog_client)
 

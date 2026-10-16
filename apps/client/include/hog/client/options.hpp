@@ -2,6 +2,7 @@
 
 #include <hog/core/build_info.hpp>
 #include <hog/core/result.hpp>
+#include <hog/net/simulation.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -35,6 +36,8 @@ struct Options {
     // to connect with; without, connecting with none.
     std::optional<std::string> login;
     std::optional<std::string> name;
+    // A bad network to try the connection on.
+    net::Simulation simulate;
     // A drawing on white paper, of someone to fly along with; none without one.
     std::optional<std::filesystem::path> companion = std::filesystem::path{"res/Matt.png"};
     // For smoke tests and pictures: how long to run before quitting, and where to save the last

@@ -1,5 +1,6 @@
 #include <hog/net/client.hpp>
 #include <hog/net/server.hpp>
+#include <hog/net/simulation.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -66,8 +67,9 @@ struct Pair {
     std::vector<Event> events;
 
     // Polls both ends until `done`, failing if that takes too long.
-    void poll_until(const std::function<bool()>& done) {
-        const auto give_up = std::chrono::steady_clock::now() + 10s;
+    void poll_until(const std::function<bool()>& done,
+                    std::chrono::steady_clock::duration within = 10s) {
+        const auto give_up = std::chrono::steady_clock::now() + within;
         while (!done()) {
             if (std::chrono::steady_clock::now() >= give_up) {
                 FAIL("gave up waiting");
@@ -95,6 +97,17 @@ Server listening() {
     FAIL("no free port");
     std::unreachable();
 }
+
+// Simulates a bad network for as long as it lives.
+class Simulated {
+public:
+    explicit Simulated(const Simulation& simulation) { simulate(simulation); }
+    Simulated(const Simulated&) = delete;
+    Simulated& operator=(const Simulated&) = delete;
+    Simulated(Simulated&&) = delete;
+    Simulated& operator=(Simulated&&) = delete;
+    ~Simulated() { simulate({}); }
+};
 
 Pair connected_pair() {
     Server server = listening();
@@ -217,4 +230,66 @@ TEST_CASE("a client needs an IP address and port") {
         REQUIRE_FALSE(client);
         CHECK(client.error().code == ErrorCode::InvalidArgument);
     }
+}
+
+TEST_CASE("a connection's stats show its traffic, and only while it's there") {
+    Pair pair = connected_pair();
+    const std::vector<std::byte> chunk(std::size_t{16} * 1024);
+    for (int index = 0; index < 8; ++index) {
+        REQUIRE(pair.server.send(pair.connection(), Delivery::Reliable, chunk));
+    }
+    // The rates are averages the library updates every 5 seconds.
+    pair.poll_until(
+        [&] {
+            const auto at_server = pair.server.stats(pair.connection());
+            const auto at_client = pair.client.stats();
+            return at_server && at_client && at_server->bytes_out_per_second > 0.0F &&
+                   at_client->bytes_in_per_second > 0.0F;
+        },
+        20s);
+    CHECK(pair.at_client.messages.size() == 8);
+    // None fails as too slow.
+    CHECK(pair.client.stats().value_or(Stats{.ping = 1h}).ping < 50ms);
+
+    CHECK_FALSE(pair.server.stats(ConnectionId{0}));
+    pair.client.disconnect("done");
+    CHECK_FALSE(pair.client.stats());
+}
+
+TEST_CASE("simulated lag delays what passes, both ways") {
+    constexpr auto lag = 25ms;
+    const Simulated simulated{{.lag = lag}};
+    Pair pair = connected_pair();
+    const auto sent = std::chrono::steady_clock::now();
+    REQUIRE(pair.client.send(Delivery::Reliable, bytes_of("ping")));
+    pair.poll_until([&] { return !pair.at_server.messages.empty(); });
+    REQUIRE(pair.server.send(pair.connection(), Delivery::Reliable, bytes_of("pong")));
+    pair.poll_until([&] { return !pair.at_client.messages.empty(); });
+    // Sent and received in this one process, each way: four times the lag.
+    CHECK(std::chrono::steady_clock::now() - sent >= 4 * lag);
+}
+
+TEST_CASE("simulated loss drops unreliable messages") {
+    Pair pair = connected_pair();
+    constexpr int count = 200;
+    {
+        const Simulated simulated{{.loss = 50}};
+        for (int index = 0; index < count; ++index) {
+            REQUIRE(pair.server.send(pair.connection(), Delivery::Unreliable, bytes_of("maybe")));
+            // Apart, so each goes in a packet of its own.
+            std::this_thread::sleep_for(1ms);
+        }
+        // Long enough for every packet to have arrived or been dropped.
+        const auto settled = std::chrono::steady_clock::now() + 100ms;
+        pair.poll_until([&] { return std::chrono::steady_clock::now() >= settled; });
+    }
+    REQUIRE(pair.server.send(pair.connection(), Delivery::Reliable, bytes_of("surely")));
+    pair.poll_until([&] {
+        return !pair.at_client.messages.empty() &&
+               text_of(pair.at_client.messages.back()) == "surely";
+    });
+    // Dropped half the time going out and half coming in, so about a quarter arrive.
+    const auto arrived = static_cast<int>(pair.at_client.messages.size()) - 1;
+    CHECK(arrived > count / 10);
+    CHECK(arrived < count / 2);
 }

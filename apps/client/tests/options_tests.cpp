@@ -48,6 +48,8 @@ TEST_CASE("client options are parsed", "[client][options]") {
                                                  "127.0.0.1:4647",
                                                  "--name",
                                                  "Matt",
+                                                 "--simulate",
+                                                 "lag=75,loss=2",
                                                  "--companion",
                                                  "friend.png",
                                                  "--quit-after",
@@ -67,6 +69,8 @@ TEST_CASE("client options are parsed", "[client][options]") {
     CHECK(options->connect == "127.0.0.1:7675");
     CHECK(options->login == "127.0.0.1:4647");
     CHECK(options->name == "Matt");
+    CHECK(options->simulate ==
+          hog::net::Simulation{.lag = std::chrono::milliseconds{75}, .loss = 2});
     CHECK(options->companion == "friend.png");
     CHECK(options->quit_after == std::chrono::seconds{3});
     CHECK(options->capture == "out.png");
@@ -95,6 +99,8 @@ TEST_CASE("bad client options are rejected", "[client][options]") {
     CHECK_FALSE(parse_options(Arguments{"--time", "24:00"}));
     CHECK_FALSE(parse_options(Arguments{"--time", "12:60"}));
     CHECK_FALSE(parse_options(Arguments{"--time", "noon"}));
+    CHECK_FALSE(parse_options(Arguments{"--connect", "127.0.0.1:7675", "--simulate", "lag=x"}));
+    CHECK_FALSE(parse_options(Arguments{"--simulate", "lag=75"}));
     CHECK_FALSE(hog::client::usage().empty());
 }
 

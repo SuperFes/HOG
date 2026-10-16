@@ -10,6 +10,7 @@
 #include <hog/login/service.hpp>
 #include <hog/mapgen/render.hpp>
 #include <hog/net/client.hpp>
+#include <hog/net/simulation.hpp>
 #include <hog/planet/planet_config.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/world.hpp>
@@ -312,6 +313,11 @@ public:
             return connection;
         }
         connection.address_ = *options.connect;
+        if (!options.simulate.off()) {
+            net::simulate(options.simulate);
+            log::warn(connection_log, "simulating a bad network: {}",
+                      net::describe(options.simulate));
+        }
         if (options.login) {
             auto login = net::Client::connect(*options.login);
             if (!login) {

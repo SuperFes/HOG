@@ -2,6 +2,7 @@
 
 #include <hog/core/result.hpp>
 #include <hog/net/events.hpp>
+#include <hog/net/stats.hpp>
 
 #include <steam/isteamnetworkingutils.h>
 #include <steam/steamnetworkingsockets.h>
@@ -10,6 +11,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -63,6 +65,9 @@ void configure_lanes(HSteamNetConnection connection);
 
 [[nodiscard]] Result<void> send(HSteamNetConnection connection, Delivery delivery,
                                 std::span<const std::byte> bytes);
+
+// None if the library doesn't know the connection.
+[[nodiscard]] std::optional<Stats> stats(HSteamNetConnection connection);
 
 // Moves what arrived on a poll group or connection into `events`.
 template <class Receive>

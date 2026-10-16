@@ -2,8 +2,10 @@
 
 #include <hog/core/result.hpp>
 #include <hog/net/events.hpp>
+#include <hog/net/stats.hpp>
 
 #include <memory>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -28,6 +30,9 @@ public:
 
     // Replaces `events` with what happened since the last poll.
     void poll(std::vector<Event>& events);
+
+    // How the connection is doing; none unless connected.
+    [[nodiscard]] std::optional<Stats> stats() const;
 
     // Queues a message; fails unless connected, or if the message is too large.
     [[nodiscard]] Result<void> send(Delivery delivery, std::span<const std::byte> bytes);

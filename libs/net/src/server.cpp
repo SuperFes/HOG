@@ -112,6 +112,14 @@ Result<void> Server::send(ConnectionId connection, Delivery delivery,
     return detail::send(handle, delivery, bytes);
 }
 
+std::optional<Stats> Server::stats(ConnectionId connection) const {
+    const auto handle = static_cast<HSteamNetConnection>(connection);
+    if (!state_->connections.contains(handle)) {
+        return std::nullopt;
+    }
+    return detail::stats(handle);
+}
+
 void Server::disconnect(ConnectionId connection, std::string_view reason) {
     const auto handle = static_cast<HSteamNetConnection>(connection);
     if (state_->connections.erase(handle) != 0) {

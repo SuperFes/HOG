@@ -93,6 +93,13 @@ Result<void> read_option(Options& options, std::string_view option, std::string_
         options.login = std::string{value};
     } else if (option == "--name") {
         options.name = std::string{value};
+    } else if (option == "--simulate") {
+        auto simulation = net::parse_simulation(value);
+        if (!simulation) {
+            return make_error(ErrorCode::InvalidArgument,
+                              std::format("--simulate: {}", simulation.error().message));
+        }
+        options.simulate = *simulation;
     } else if (option == "--companion") {
         options.companion = std::filesystem::path{value};
     } else if (option == "--capture") {
@@ -127,6 +134,9 @@ Result<void> check_together(const Options& options) {
     if (options.name && !options.login) {
         return make_error(ErrorCode::InvalidArgument, "--name is for --login");
     }
+    if (!options.simulate.off() && !options.connect) {
+        return make_error(ErrorCode::InvalidArgument, "--simulate is for --connect");
+    }
     return {};
 }
 
@@ -147,6 +157,9 @@ options:
                          127.0.0.1:7675
   --login ADDRESS        log in there first, such as 127.0.0.1:4647, with --name
   --name NAME            who to log in as
+  --simulate SETTINGS    a bad network to connect over, such as
+                         lag=75,jitter=10,loss=2,reorder=1 in ms and percent, each
+                         added both ways
   --companion PATH       a drawing on white paper of someone 3 m tall to fly along
                          with (default res/Matt.png)
   --alone                fly without them

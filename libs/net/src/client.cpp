@@ -95,6 +95,13 @@ Result<void> Client::send(Delivery delivery, std::span<const std::byte> bytes) {
     return detail::send(state_->connection, delivery, bytes);
 }
 
+std::optional<Stats> Client::stats() const {
+    if (!state_->connected) {
+        return std::nullopt;
+    }
+    return detail::stats(state_->connection);
+}
+
 void Client::disconnect(std::string_view reason) {
     State& state = *state_;
     if (state.connection == k_HSteamNetConnection_Invalid) {

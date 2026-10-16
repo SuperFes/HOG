@@ -1,4 +1,5 @@
 #include <hog/app/server.hpp>
+#include <hog/net/simulation.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/save/snapshot_store.hpp>
 #include <hog/server/survey.hpp>
@@ -407,6 +408,10 @@ void Server::open_players() {
     const std::optional<std::uint16_t> port = config_.net.port;
     if (!port) {
         return;
+    }
+    if (!config_.net.simulate.off()) {
+        net::simulate(config_.net.simulate);
+        log::warn(server_log, "simulating a bad network: {}", net::describe(config_.net.simulate));
     }
     if (const auto& key_file = config_.net.login_key) {
         auto key = login::load_public_key(*key_file);

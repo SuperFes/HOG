@@ -57,6 +57,7 @@ TEST_CASE("a minimal server config takes the defaults", "[server][config]") {
     CHECK(config->forest.step == 1h);
     CHECK_FALSE(config->net.port);
     CHECK_FALSE(config->net.login_key);
+    CHECK(config->net.simulate.off());
     CHECK_FALSE(config->debug.port);
     CHECK_FALSE(config->debug.time_control);
     CHECK_FALSE(config->debug.start);
@@ -99,6 +100,7 @@ step_hours = 0.5
 [net]
 port = 27100
 login_key = "../var/login.pub"
+simulate = "lag=75,loss=2"
 
 [debug]
 port = 7777
@@ -133,6 +135,7 @@ start = 2030-06-01T12:00:00+02:00
     CHECK(config->forest.step == 30min);
     CHECK(config->net.port == 27100);
     CHECK(config->net.login_key == (base() / "../var/login.pub").lexically_normal());
+    CHECK(config->net.simulate == hog::net::Simulation{.lag = 75ms, .loss = 2});
     CHECK(config->debug.port == 7777);
     CHECK(config->debug.time_control);
     CHECK(config->debug.start ==
@@ -185,6 +188,8 @@ TEST_CASE("bad server configs are rejected", "[server][config]") {
         {with("[net]\nport = 65536\n"), ErrorCode::InvalidArgument},
         {with("[net]\naddress = \"0.0.0.0\"\n"), ErrorCode::InvalidArgument},
         {with("[net]\nlogin_key = 3\n"), ErrorCode::InvalidArgument},
+        {with("[net]\nsimulate = \"lag=-5\"\n"), ErrorCode::InvalidArgument},
+        {with("[net]\nsimulate = 5\n"), ErrorCode::InvalidArgument},
         {with("[debug]\nport = 0\n"), ErrorCode::InvalidArgument},
         {with("[debug]\nport = 65536\n"), ErrorCode::InvalidArgument},
         {with("[debug]\nport = \"7777\"\n"), ErrorCode::InvalidArgument},
