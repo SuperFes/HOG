@@ -1,4 +1,5 @@
 add_library(hog_replication
+    src/replica.cpp
     src/states.cpp
     src/view.cpp)
 add_library(hog::replication ALIAS hog_replication)
@@ -8,5 +9,6 @@ target_link_libraries(hog_replication PUBLIC hog::core hog::protocol)
 hog_target_defaults(hog_replication)
 
 hog_add_tests(hog_replication
+    tests/replica_tests.cpp
     tests/states_tests.cpp
     tests/view_tests.cpp)
