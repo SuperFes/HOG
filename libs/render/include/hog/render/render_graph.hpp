@@ -2,6 +2,7 @@
 
 #include <hog/core/result.hpp>
 #include <hog/render/barrier.hpp>
+#include <hog/render/memory.hpp>
 #include <hog/render/vulkan.hpp>
 
 #include <concepts>
@@ -81,9 +82,35 @@ struct GraphPlan {
 [[nodiscard]] Result<GraphPlan> plan_graph(std::span<const ImageUse> first_uses,
                                            std::span<const GraphPass> passes);
 
-struct GraphTiming {
-    GpuTimer* timer = nullptr; // or not timed
-    std::uint32_t slot = 0;
+class Device;
+
+// Images made for frames' graphs, kept one set per frame in flight and made again only when what's
+// wanted of them changes.
+class TransientImages {
+public:
+    TransientImages(const Device& device, std::uint32_t frames);
+
+    // Images as described for a frame in `slot`, whose last frame must have finished. Those of its
+    // last frame are kept where they're wanted the same, and let go where they're not. What's
+    // returned lasts until the slot is taken again.
+    [[nodiscard]] Result<std::vector<const Image*>> take(std::uint32_t slot,
+                                                         std::span<const ImageDesc> wanted);
+
+    // Held for frames in the slot.
+    [[nodiscard]] std::size_t held(std::uint32_t slot) const noexcept {
+        return slots_[slot].size();
+    }
+
+private:
+    const Device* device_;
+    std::vector<std::vector<Image>> slots_;
+};
+
+// The frame a graph is recorded for.
+struct GraphFrame {
+    std::uint32_t slot = 0;                // of those in flight
+    GpuTimer* timer = nullptr;             // or not timed
+    TransientImages* transients = nullptr; // needed where the graph makes images
 };
 
 // A frame's passes, each recorded after the barriers into the uses it declares, and timed.
@@ -94,6 +121,8 @@ public:
     // An image from outside the graph, starting in the use it's tracked in and left in its last.
     // It must outlive the graph's execution.
     GraphImage import(TrackedImage& image, VkImageView view, VkExtent2D extent);
+    // An image made for the frame, its contents not kept from one to the next.
+    GraphImage transient(const ImageDesc& desc);
 
     // Adds a pass to run after those before it, recorded by `record`, which may return nothing or
     // Result<>. Views of the graph's images are valid while it records.
@@ -114,16 +143,23 @@ public:
     [[nodiscard]] VkImageView view(GraphImage image) const noexcept;
     [[nodiscard]] VkExtent2D extent(GraphImage image) const noexcept;
 
-    // Records every pass, refusing a graph whose plan is refused or whose targets differ in size;
-    // stops at the first pass that fails, ending any rendering begun.
-    [[nodiscard]] Result<> execute(VkCommandBuffer commands, GraphTiming timing = {});
+    // Makes the graph's images and records every pass, refusing a graph whose plan is refused or
+    // whose targets differ in size; stops at the first pass that fails, ending any rendering begun.
+    [[nodiscard]] Result<> execute(VkCommandBuffer commands, GraphFrame frame = {});
 
 private:
     struct Image {
-        TrackedImage* tracked = nullptr;
+        TrackedImage* imported = nullptr;
+        TrackedImage made; // otherwise
         VkImageView view = VK_NULL_HANDLE;
         VkExtent2D extent{};
+        std::optional<ImageDesc> desc; // where made
     };
+
+    [[nodiscard]] TrackedImage& tracked(std::size_t image) noexcept {
+        return images_[image].imported != nullptr ? *images_[image].imported : images_[image].made;
+    }
+    [[nodiscard]] Result<> make_transients(const GraphFrame& frame);
 
     void add_pass(GraphPass pass, Record record);
     [[nodiscard]] Result<> check_targets() const;

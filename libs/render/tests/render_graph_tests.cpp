@@ -27,6 +27,7 @@ using hog::render::ImageUse;
 using hog::render::plan_graph;
 using hog::render::RenderGraph;
 using hog::render::TrackedImage;
+using hog::render::TransientImages;
 using hog::render::testing::test_device;
 namespace use = hog::render::image_use;
 
@@ -187,9 +188,34 @@ TEST_CASE("a graph refuses targets of different sizes before recording anything"
     CHECK(first.use() == use::discard);
 }
 
+TEST_CASE("a graph making images refuses to without somewhere to keep them",
+          "[render][render_graph]") {
+    RenderGraph graph;
+    const GraphImage made = graph.transient({.format = VK_FORMAT_R8G8B8A8_UNORM,
+                                             .extent = {.width = 4, .height = 4},
+                                             .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT});
+    bool recorded = false;
+    graph.add({.name = "made",
+               .uses = {},
+               .targets = {{.colour = {.image = made, .clear = black}, .depth = std::nullopt}}},
+              [&](VkCommandBuffer) { recorded = true; });
+    const auto executed = graph.execute(VK_NULL_HANDLE);
+    REQUIRE_FALSE(executed);
+    CHECK(executed.error().code == hog::ErrorCode::InvalidArgument);
+    CHECK_FALSE(recorded);
+}
+
 namespace {
 
 constexpr VkExtent2D extent{.width = 4, .height = 4};
+
+constexpr hog::render::ImageDesc depth_desc{.format = VK_FORMAT_D32_SFLOAT,
+                                            .extent = extent,
+                                            .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+                                                     VK_IMAGE_USAGE_SAMPLED_BIT,
+                                            .aspect = VK_IMAGE_ASPECT_DEPTH_BIT,
+                                            .layers = 1,
+                                            .levels = 1};
 
 struct Fill {
     std::array<float, 4> colour{};
@@ -205,12 +231,7 @@ struct Targets {
                                                       VK_IMAGE_USAGE_TRANSFER_SRC_BIT});
         REQUIRE(made_colour);
         colour = std::move(made_colour).value();
-        auto made_depth =
-            hog::render::make_image(device, {.format = VK_FORMAT_D32_SFLOAT,
-                                             .extent = extent,
-                                             .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
-                                                      VK_IMAGE_USAGE_SAMPLED_BIT,
-                                             .aspect = VK_IMAGE_ASPECT_DEPTH_BIT});
+        auto made_depth = hog::render::make_image(device, depth_desc);
         REQUIRE(made_depth);
         depth = std::move(made_depth).value();
         auto made = hog::render::make_pipeline(device, {.spirv = hog::shaders::fill,
@@ -230,10 +251,12 @@ struct Targets {
         vkCmdDraw(commands, 3, 1, 0, 0);
     }
 
-    // The frame: a far red cleared into, a near green drawn after, then a pass sampling depth.
-    void add_to(RenderGraph& graph) {
+    // The frame: a far red cleared into, a near green drawn after, then a pass sampling depth,
+    // which is made by the graph where it's transient.
+    void add_to(RenderGraph& graph, bool transient = false) {
         const GraphImage drawn = graph.import(tracked_colour, colour.view(), extent);
-        const GraphImage tested = graph.import(tracked_depth, depth.view(), extent);
+        const GraphImage tested = transient ? graph.transient(depth_desc)
+                                            : graph.import(tracked_depth, depth.view(), extent);
         graph.add({.name = "far",
                    .uses = {},
                    .targets = {{.colour = {.image = drawn, .clear = black},
@@ -332,10 +355,81 @@ TEST_CASE("a graph times each of its passes", "[render][gpu][render_graph]") {
             for (const hog::render::GpuSpan& span : timer->read(commands, 0)) {
                 names.push_back(span.name);
             }
-            executed = graph.execute(commands, {.timer = &*timer, .slot = 0});
+            executed =
+                graph.execute(commands, {.slot = 0, .timer = &*timer, .transients = nullptr});
         }));
         REQUIRE(executed);
     }
     CHECK(names == std::vector<std::string_view>{"far", "near", "sampled"});
     CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("a graph draws with the images it makes", "[render][gpu][render_graph]") {
+    const auto device = test_device();
+    Targets targets{*device};
+    TransientImages transients{*device, 1};
+    for (int frame = 0; frame < 2; ++frame) {
+        targets.tracked_colour.used_as(use::discard);
+        RenderGraph graph;
+        targets.add_to(graph, true);
+        Result<> executed;
+        REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
+            executed =
+                graph.execute(commands, {.slot = 0, .timer = nullptr, .transients = &transients});
+        }));
+        REQUIRE(executed);
+        CHECK(middle(*device, targets) == Pixel{0, 255, 0, 255});
+        CHECK(transients.held(0) == 1);
+    }
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("transient images are kept across frames, one set per frame in flight",
+          "[render][gpu][render_graph]") {
+    const auto device = test_device();
+    TransientImages transients{*device, 2};
+    constexpr hog::render::ImageDesc colour_desc{.format = VK_FORMAT_R8G8B8A8_UNORM,
+                                                 .extent = extent,
+                                                 .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+                                                 .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
+                                                 .layers = 1,
+                                                 .levels = 1};
+    const std::array both{depth_desc, colour_desc};
+    const auto first = transients.take(0, both);
+    REQUIRE(first);
+    REQUIRE(first->size() == 2);
+    CHECK(first->at(0)->desc() == depth_desc);
+    CHECK(first->at(1)->desc() == colour_desc);
+    auto* const depth_image = first->at(0)->handle();
+    auto* const colour_image = first->at(1)->handle();
+
+    const auto other = transients.take(1, both);
+    REQUIRE(other);
+    CHECK(other->at(0)->handle() != depth_image);
+
+    // Asked for in another order, the same images.
+    const std::array swapped{colour_desc, depth_desc};
+    const auto again = transients.take(0, swapped);
+    REQUIRE(again);
+    CHECK(again->at(0)->handle() == colour_image);
+    CHECK(again->at(1)->handle() == depth_image);
+
+    // Two the same are two images.
+    const std::array twins{colour_desc, colour_desc};
+    const auto two = transients.take(0, twins);
+    REQUIRE(two);
+    CHECK(two->at(0)->handle() == colour_image);
+    CHECK(two->at(1)->handle() != colour_image);
+    CHECK(transients.held(0) == 2);
+
+    // What's no longer wanted is let go.
+    hog::render::ImageDesc larger = colour_desc;
+    larger.extent = {.width = 8, .height = 8};
+    const auto changed = transients.take(0, std::array{larger});
+    REQUIRE(changed);
+    CHECK(changed->at(0)->desc() == larger);
+    CHECK(transients.held(0) == 1);
+    CHECK(transients.take(0, {}));
+    CHECK(transients.held(0) == 0);
+    CHECK(transients.held(1) == 2);
 }

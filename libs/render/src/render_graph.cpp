@@ -1,9 +1,11 @@
+#include <hog/render/device.hpp>
 #include <hog/render/gpu_timer.hpp>
 #include <hog/render/render_graph.hpp>
 #include <hog/render/rendering.hpp>
 
 #include <algorithm>
 #include <format>
+#include <iterator>
 
 namespace hog::render {
 
@@ -99,9 +101,81 @@ Result<GraphPlan> plan_graph(std::span<const ImageUse> first_uses,
     return plan;
 }
 
+TransientImages::TransientImages(const Device& device, std::uint32_t frames)
+    : device_{&device}, slots_(frames) {}
+
+Result<std::vector<const Image*>> TransientImages::take(std::uint32_t slot,
+                                                        std::span<const ImageDesc> wanted) {
+    std::vector<Image>& had = slots_.at(slot);
+    std::vector<Image> kept;
+    kept.reserve(wanted.size());
+    for (const ImageDesc& desc : wanted) {
+        // Those taken already are left without a handle.
+        const auto same = std::ranges::find_if(had, [&](const Image& image) {
+            return image.handle() != VK_NULL_HANDLE && image.desc() == desc;
+        });
+        if (same != had.end()) {
+            kept.push_back(std::move(*same));
+            continue;
+        }
+        auto made = make_image(*device_, desc);
+        if (!made) {
+            std::ranges::move(kept, std::back_inserter(had));
+            return std::unexpected(std::move(made).error());
+        }
+        kept.push_back(std::move(made).value());
+    }
+    had = std::move(kept);
+    std::vector<const Image*> images;
+    images.reserve(had.size());
+    for (const Image& image : had) {
+        images.push_back(&image);
+    }
+    return images;
+}
+
 GraphImage RenderGraph::import(TrackedImage& image, VkImageView view, VkExtent2D extent) {
-    images_.push_back({.tracked = &image, .view = view, .extent = extent});
+    images_.push_back(
+        {.imported = &image, .made = {}, .view = view, .extent = extent, .desc = std::nullopt});
     return {.index = static_cast<std::uint32_t>(images_.size() - 1)};
+}
+
+GraphImage RenderGraph::transient(const ImageDesc& desc) {
+    images_.push_back({.imported = nullptr,
+                       .made = {},
+                       .view = VK_NULL_HANDLE,
+                       .extent = desc.extent,
+                       .desc = desc});
+    return {.index = static_cast<std::uint32_t>(images_.size() - 1)};
+}
+
+Result<> RenderGraph::make_transients(const GraphFrame& frame) {
+    std::vector<ImageDesc> wanted;
+    for (const Image& image : images_) {
+        if (image.desc) {
+            wanted.push_back(*image.desc);
+        }
+    }
+    if (wanted.empty()) {
+        return {};
+    }
+    if (frame.transients == nullptr) {
+        return make_error(ErrorCode::InvalidArgument,
+                          "a graph making images needs somewhere to keep them");
+    }
+    auto taken = frame.transients->take(frame.slot, wanted);
+    if (!taken) {
+        return std::unexpected(std::move(taken).error());
+    }
+    auto made = taken->begin();
+    for (Image& image : images_) {
+        if (image.desc) {
+            image.made = {(*made)->handle(), image.desc->aspect};
+            image.view = (*made)->view();
+            ++made;
+        }
+    }
+    return {};
 }
 
 void RenderGraph::add_pass(GraphPass pass, Record record) {
@@ -134,11 +208,11 @@ Result<> RenderGraph::check_targets() const {
     return {};
 }
 
-Result<> RenderGraph::execute(VkCommandBuffer commands, GraphTiming timing) {
+Result<> RenderGraph::execute(VkCommandBuffer commands, GraphFrame frame) {
     std::vector<ImageUse> uses;
     uses.reserve(images_.size());
-    for (const Image& image : images_) {
-        uses.push_back(image.tracked->use());
+    for (std::size_t image = 0; image < images_.size(); ++image) {
+        uses.push_back(tracked(image).use());
     }
     const auto plan = plan_graph(uses, passes_);
     if (!plan) {
@@ -146,6 +220,9 @@ Result<> RenderGraph::execute(VkCommandBuffer commands, GraphTiming timing) {
     }
     if (auto checked = check_targets(); !checked) {
         return checked;
+    }
+    if (auto made = make_transients(frame); !made) {
+        return made;
     }
     bool rendering = false;
     Result<> recorded;
@@ -159,31 +236,31 @@ Result<> RenderGraph::execute(VkCommandBuffer commands, GraphTiming timing) {
         }
         barriers.clear();
         for (const GraphTransition& transition : planned.transitions) {
-            const TrackedImage& tracked = *images_[transition.image.index].tracked;
+            const TrackedImage& image = tracked(transition.image.index);
             if (transition.barrier()) {
-                barriers.push_back(image_barrier(tracked.handle(), tracked.aspect(),
-                                                 transition.from, transition.to));
+                barriers.push_back(
+                    image_barrier(image.handle(), image.aspect(), transition.from, transition.to));
             }
             uses[transition.image.index] = transition.to;
         }
         record_barriers(commands, barriers);
-        if (timing.timer != nullptr) {
-            timing.timer->begin(commands, timing.slot, pass.name);
+        if (frame.timer != nullptr) {
+            frame.timer->begin(commands, frame.slot, pass.name);
         }
         if (pass.targets && !rendering) {
             begin_targets(commands, *pass.targets);
             rendering = true;
         }
         recorded = records_[at](commands);
-        if (timing.timer != nullptr) {
-            timing.timer->end(commands, timing.slot);
+        if (frame.timer != nullptr) {
+            frame.timer->end(commands, frame.slot);
         }
     }
     if (rendering) {
         vkCmdEndRendering(commands);
     }
     for (std::size_t image = 0; image < images_.size(); ++image) {
-        images_[image].tracked->used_as(uses[image]);
+        tracked(image).used_as(uses[image]);
     }
     return recorded;
 }

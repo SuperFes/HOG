@@ -139,6 +139,13 @@ void Image::release() noexcept {
     }
 }
 
+bool operator==(const ImageDesc& left, const ImageDesc& right) noexcept {
+    return left.format == right.format && left.extent.width == right.extent.width &&
+           left.extent.height == right.extent.height && left.usage == right.usage &&
+           left.aspect == right.aspect && left.layers == right.layers &&
+           left.levels == right.levels;
+}
+
 Result<Image> make_image(const Device& device, const ImageDesc& desc) {
     const VkImageCreateInfo image_info{
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
