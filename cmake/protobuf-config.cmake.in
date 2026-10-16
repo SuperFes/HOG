@@ -1,0 +1,15 @@
+# The protobuf built in this tree, found as if installed: its targets already exist, and
+# protobuf_generate_cpp works as CMake's FindProtobuf has it.
+set(Protobuf_FOUND TRUE)
+set(Protobuf_VERSION "@protobuf_VERSION@")
+include("@protobuf_SOURCE_DIR@/cmake/protobuf-generate.cmake")
+
+function(protobuf_generate_cpp sources headers)
+    protobuf_generate(LANGUAGE cpp OUT_VAR generated APPEND_PATH PROTOS ${ARGN})
+    set(cc ${generated})
+    set(h ${generated})
+    list(FILTER cc INCLUDE REGEX "\\.pb\\.cc$")
+    list(FILTER h INCLUDE REGEX "\\.pb\\.h$")
+    set(${sources} ${cc} PARENT_SCOPE)
+    set(${headers} ${h} PARENT_SCOPE)
+endfunction()

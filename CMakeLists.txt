@@ -76,6 +76,39 @@ CPMAddPackage(
     GIT_TAG 2c980bb59875b0d32144a71867fbdebb2f77cd20
     DOWNLOAD_ONLY YES)
 
+# Nothing here is installed, and dependencies' install rules expect what they use to be
+# installed too.
+set(CMAKE_SKIP_INSTALL_RULES ON)
+
+# The connection: GameNetworkingSockets (BSD-3), which needs protobuf (BSD-3) and Abseil
+# (Apache-2.0). All three are built here, so every toolchain and standard library links them.
+CPMAddPackage(
+    NAME absl
+    URL https://github.com/abseil/abseil-cpp/archive/refs/tags/20250512.1.tar.gz
+    SYSTEM YES
+    OPTIONS "ABSL_PROPAGATE_CXX_STD ON" "ABSL_BUILD_TESTING OFF" "ABSL_ENABLE_INSTALL OFF")
+CPMAddPackage(
+    NAME protobuf
+    URL https://github.com/protocolbuffers/protobuf/archive/refs/tags/v36.2.tar.gz
+    SYSTEM YES
+    OPTIONS "protobuf_INSTALL OFF" "protobuf_BUILD_TESTS OFF" "protobuf_BUILD_LIBUPB OFF"
+            "protobuf_BUILD_SHARED_LIBS OFF" "protobuf_MSVC_STATIC_RUNTIME OFF"
+            "protobuf_WITH_ZLIB OFF")
+# GameNetworkingSockets looks for protobuf as an installed package; this one answers for ours.
+configure_file(cmake/protobuf-config.cmake.in
+    "${CMAKE_FIND_PACKAGE_REDIRECTS_DIR}/protobuf-config.cmake" @ONLY)
+if(WIN32)
+    set(hog_gns_crypto BCrypt)
+else()
+    set(hog_gns_crypto OpenSSL)
+endif()
+CPMAddPackage(
+    NAME GameNetworkingSockets
+    URL https://github.com/ValveSoftware/GameNetworkingSockets/archive/refs/tags/v1.6.1.tar.gz
+    SYSTEM YES
+    OPTIONS "BUILD_STATIC_LIB ON" "BUILD_SHARED_LIB OFF" "ENABLE_ICE OFF"
+            "USE_CRYPTO ${hog_gns_crypto}")
+
 if(HOG_BUILD_TESTS)
     enable_testing()
     CPMAddPackage(
