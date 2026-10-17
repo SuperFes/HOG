@@ -5,6 +5,7 @@ import tone;
 [[vk::binding(1, 0)]] Sampler2D transmittance_table;
 [[vk::binding(2, 0)]] Sampler2D scattering_table;
 [[vk::binding(3, 0)]] Sampler2D sky_view_table;
+[[vk::binding(4, 0)]] Sampler2DArray aerial_volume;
 
 struct Push {
     float4x4 eye_from_clip;
@@ -68,5 +69,8 @@ float4 fragment_main(Sky sky) : SV_Target {
     if (dot(view, sun) > cos(sun_angular_radius)) {
         light += sun_radiance * transmittance(air, transmittance_table, height, mu);
     }
+    const float4 haze =
+        aerial_volume.SampleLevel(float3((sky.clip * 0.5) + 0.5, float(aerial_haze)), 0.0);
+    light = (light * haze.a) + haze.rgb;
     return float4(tone_mapped(light, push.sun_exposure.w), 1.0);
 }

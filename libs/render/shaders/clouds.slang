@@ -1,5 +1,6 @@
 import atmosphere;
 import tone;
+import weather;
 
 [[vk::binding(0, 0)]] ConstantBuffer<Air> air;
 [[vk::binding(1, 0)]] ConstantBuffer<Lighting> lighting;
@@ -10,6 +11,9 @@ import tone;
 // hour, and the share falling as snow.
 [[vk::binding(5, 0)]] SamplerCube weather_before;
 [[vk::binding(6, 0)]] SamplerCube weather_after;
+// As client::SkyTexel.
+[[vk::binding(7, 0)]] SamplerCube sky_before;
+[[vk::binding(8, 0)]] SamplerCube sky_after;
 
 struct Push {
     float4x4 eye_from_clip;
@@ -21,8 +25,9 @@ struct Push {
     // xyz the metres the clouds have drifted, in the planet's frame and within the noise's period;
     // w the radians across a pixel.
     float4 moved_pixel;
-    // x 1 when anything falls anywhere in the weather, else 0.
-    float4 veil;
+    // x 1 when anything falls anywhere in the weather, else 0; y the top of the highest fog anywhere,
+    // metres above sea level, or 0 for none.
+    float4 veil_fog;
 };
 
 [[vk::push_constant]] ConstantBuffer<Push> push;
@@ -50,6 +55,9 @@ static const float snow_albedo = 0.9;
 static const uint veil_steps = 12;
 // Metres along the view what falls is seen through, at most.
 static const float veil_reach = 40000.0;
+static const uint fog_steps = 24;
+// Metres of fog marched through at most, past which it hides everything.
+static const float fog_reach = 3000.0;
 
 struct Layer {
     float4 position : SV_Position;
@@ -146,16 +154,6 @@ Layer vertex_main(uint id: SV_VertexID) {
     layer.position = float4(clip, 0.0, 1.0);
     layer.clip = clip;
     return layer;
-}
-
-// The direction from the planet's true centre to what's drawn `from_eye`: as far along the ground
-// as drawn, turned about the true centre.
-float3 on_planet(float3 from_eye, float3 up, float centre_to_eye, float faked, float radius) {
-    const float3 drawn_up = (up * centre_to_eye) + from_eye;
-    const float3 across = from_eye - (up * dot(from_eye, up));
-    const float out = length(across);
-    const float turned = atan2(out, dot(drawn_up, up)) * (faked / radius);
-    return (up * cos(turned)) + (out > 0.0 ? across * (sin(turned) / out) : float3(0.0));
 }
 
 float4 weather_at(float3 direction) {
@@ -284,6 +282,57 @@ float4 veil_between(float3 view, float start, float end, float2 uv, float jitter
     return float4((radiance * between.a) + (between.rgb * opacity), opacity);
 }
 
+// The fog from `start` to `end` along the view, premultiplied, before tone mapping. Steps are
+// finest at the start, where the fog's nearest, and offset by `jitter`.
+float4 fog_between(float3 view, float start, float end, float2 uv, float jitter) {
+    const float3 up = push.up_height.xyz;
+    const float eye_height = push.up_height.w;
+    const float radius = push.radii.x;
+    const float faked = push.radii.y;
+    const float3 sun = lighting.sun_exposure.xyz;
+    const float scale = lighting.sky_scale.w;
+    const float cos_sun = dot(view, sun);
+    // Under cloud, lit by what comes through it, as the air is.
+    const float shaded = lighting.reach.y + lighting.reach.z;
+
+    const float length = end - start;
+    float3 radiance = float3(0.0);
+    float seen_through = 1.0;
+    float distance = 0.0;
+    for (uint at = 0; at < fog_steps; ++at) {
+        const float from = float(at) / float(fog_steps);
+        const float to = float(at + 1) / float(fog_steps);
+        const float t = (float(at) + jitter) / float(fog_steps);
+        const float along = start + (length * t * t);
+        const float step = length * ((to * to) - (from * from));
+        const float3 from_eye = view * along;
+        const float height = drawn_height(from_eye, up, eye_height, faked);
+        const float3 direction = on_planet(from_eye, up, faked + eye_height, faked, radius);
+        const SkyCell cell = sky_cell(lerp(sky_before.SampleLevel(direction, 0.0),
+                                           sky_after.SampleLevel(direction, 0.0), push.radii.w));
+        const float extinction = fog_extinction(cell, height);
+        if (extinction <= 0.0) {
+            continue;
+        }
+        const float sun_mu = dot(sun, normalize((up * (faked + eye_height)) + from_eye));
+        const float3 sunlight = transmittance(air, transmittance_table, height * scale, sun_mu);
+        const float3 lit = mist_light(sunlight, sun_mu, cos_sun, mist_above(cell, height),
+                                      lighting.sky_scale.rgb) *
+                           shaded;
+        const float hidden = seen_through * (1.0 - exp(-extinction * step));
+        radiance += lit * hidden;
+        distance += along * hidden;
+        seen_through -= hidden;
+    }
+    const float opacity = 1.0 - seen_through;
+    if (opacity <= 0.0) {
+        return float4(0.0);
+    }
+    const float4 between =
+        aerial_perspective(aerial_volume, uv, (distance / opacity) * scale, lighting.reach.x);
+    return float4((radiance * between.a) + (between.rgb * opacity), opacity);
+}
+
 // From a pixel, a fraction that varies finely and evenly between neighbours.
 float interleaved(float2 pixel) {
     return frac(52.9829189 * frac(dot(pixel, float2(0.06711056, 0.00583715))));
@@ -317,7 +366,7 @@ float4 fragment_main(Layer layer) : SV_Target {
                              ? cloud_at(view, along, uv, push.moved_pixel.w)
                              : float4(0.0);
     float4 veil = float4(0.0);
-    if (push.veil.x > 0.0) {
+    if (push.veil_fog.x > 0.0) {
         const float jitter = interleaved(layer.position.xy);
         if (eye_height < base) {
             const float end = min(min(reach, along > 0.0 ? along : 1e30), veil_reach);
@@ -327,8 +376,23 @@ float4 fragment_main(Layer layer) : SV_Target {
         }
     }
     // Premultiplied, the nearer over the further, over what's drawn beyond.
-    const float4 seen =
+    const float4 overhead =
         eye_height < base ? veil + (cloud * (1.0 - veil.a)) : cloud + (veil * (1.0 - cloud.a));
+    float4 seen = overhead;
+    const float fog_top = push.veil_fog.y;
+    if (fog_top > 0.0) {
+        const float jitter = interleaved(layer.position.xy + 17.0);
+        // Where the view leaves the highest fog's top from under it, or meets it from over it.
+        const float shell = to_layer(mu, centre_to_eye, eye_height, fog_top, faked);
+        if (eye_height < fog_top) {
+            const float end = min(min(reach, shell > 0.0 ? shell : 1e30), fog_reach);
+            const float4 fog = fog_between(view, 0.0, end, uv, jitter);
+            seen = fog + (overhead * (1.0 - fog.a));
+        } else if (shell > 0.0 && shell < reach) {
+            const float4 fog = fog_between(view, shell, min(reach, shell + fog_reach), uv, jitter);
+            seen = overhead + (fog * (1.0 - overhead.a));
+        }
+    }
     if (seen.a <= 0.0) {
         discard;
     }

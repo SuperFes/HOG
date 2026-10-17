@@ -24,6 +24,7 @@
 #include <hog/render/sky.hpp>
 #include <hog/render/terrain.hpp>
 #include <hog/render/vulkan.hpp>
+#include <hog/render/weather_maps.hpp>
 #include <hog/sim/calendar.hpp>
 #include <hog/terrain/baker.hpp>
 #include <hog/terrain/bend.hpp>
@@ -115,9 +116,9 @@ private:
     Scene(const render::Device& device, const planet::World& world, jobs::JobSystem& jobs,
           const sim::Calendar& calendar, render::Terrain terrain, render::Ocean ocean,
           render::TerrainPool pool, render::Atmosphere atmosphere, render::Sky sky,
-          render::Capsules others, render::Clouds clouds, render::Precipitation precipitation,
-          render::Glare glare, render::GpuTimer timer, std::optional<render::Billboard> companion,
-          std::uint32_t frames);
+          render::Capsules others, render::WeatherMaps weather, render::Clouds clouds,
+          render::Precipitation precipitation, render::Glare glare, render::GpuTimer timer,
+          std::optional<render::Billboard> companion, std::uint32_t frames);
 
     render::SkyView sky_view(const Shot& shot, render::CloudShade shade);
 
@@ -133,6 +134,7 @@ private:
     atmosphere::Model model_;
     render::Atmosphere atmosphere_;
     render::Sky sky_;
+    render::WeatherMaps weather_;
     render::Clouds clouds_;
     render::Precipitation precipitation_;
     render::Glare glare_;
@@ -140,7 +142,7 @@ private:
     std::vector<render::GpuSpan> timings_;
     sim::Calendar calendar_;
     std::optional<double> exposure_;
-    // How many times weather had come when the clouds last took it.
+    // How many times weather had come when its maps were last taken.
     std::optional<std::uint64_t> weather_taken_;
     DVec3 drifted_{0.0};       // metres the clouds have drifted
     double falling_for_ = 0.0; // seconds what falls has been falling

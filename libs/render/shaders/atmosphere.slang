@@ -158,17 +158,40 @@ public struct Scattered {
     public float3 transmittance;
 };
 
+// What else lies along a view through the air.
+public interface IAlong {
+    // At `along` of the air's metres from the eye, where the sun's light reaches through the air as
+    // `sunlight` from `sun_mu` above the horizon: xyz the light scattered towards the eye per metre
+    // of the air's, w the share of light lost per metre.
+    public float4 at(float along, float3 sunlight, float sun_mu);
+};
+
+public struct OnlyAir : IAlong {
+    public float4 at(float along, float3 sunlight, float sun_mu) {
+        return float4(0.0);
+    }
+};
+
 // As hog::atmosphere::Model::march: along `view` from the eye at `height`, with `sun` towards the
 // sun, both unit in a frame in which up from the eye is +Z, to where the ray leaves the air or
 // meets the ground, or to `distance` if that's nearer.
 public Scattered march(Air air, Sampler2D transmittance_table, Sampler2D scattering_table,
                        float height, float3 view, float3 sun, float distance, uint steps) {
+    return march(air, transmittance_table, scattering_table, height, view, sun, distance, steps,
+                 OnlyAir());
+}
+
+// As march(), through `also` as well as the air.
+public Scattered march<A : IAlong>(Air air, Sampler2D transmittance_table,
+                                   Sampler2D scattering_table, float height, float3 view,
+                                   float3 sun, float distance, uint steps, A also) {
     Scattered scattered;
     scattered.light = float3(0.0);
     scattered.transmittance = float3(1.0);
     float3 eye = float3(0.0, 0.0, air.radii.x + max(height, 0.0));
     float eye_height = max(height, 0.0);
     float mu = view.z;
+    float entered = 0.0;
     // From above the air, start where the ray enters it.
     const float top = air.radii.y;
     if (eye.z > top) {
@@ -179,6 +202,7 @@ public Scattered march(Air air, Sampler2D transmittance_table, Sampler2D scatter
         const float along = (-eye.z * mu) - sqrt(entering);
         eye += view * along;
         distance -= along;
+        entered = along;
         const float radius = length(eye);
         eye_height = radius - air.radii.x;
         mu = dot(eye / radius, view);
@@ -201,13 +225,15 @@ public Scattered march(Air air, Sampler2D transmittance_table, Sampler2D scatter
         const float3 point_up = normalize((up * (air.radii.x + eye_height)) + (view * along));
         const float sun_mu = dot(point_up, sun);
         const Medium medium = medium_at(air, point_height);
+        const float3 sunlight = transmittance(air, transmittance_table, point_height, sun_mu);
+        const float4 other = also.at(entered + along, sunlight, sun_mu);
         const float3 lit =
-            (((medium.rayleigh * rayleigh) + (medium.mie * mie)) *
-             transmittance(air, transmittance_table, point_height, sun_mu)) +
-            (medium.scattering() * multiple_scattering(air, scattering_table, point_height, sun_mu));
-        const float3 through = exp(-medium.extinction * step);
-        scattered.light +=
-            scattered.transmittance * within_step(lit, medium.extinction, through, step);
+            (((medium.rayleigh * rayleigh) + (medium.mie * mie)) * sunlight) +
+            (medium.scattering() * multiple_scattering(air, scattering_table, point_height, sun_mu)) +
+            other.xyz;
+        const float3 extinction = medium.extinction + other.w;
+        const float3 through = exp(-extinction * step);
+        scattered.light += scattered.transmittance * within_step(lit, extinction, through, step);
         scattered.transmittance *= through;
     }
     return scattered;
@@ -274,6 +300,9 @@ public struct Lighting {
     // x the air's metres the aerial-perspective volume reaches out to; y and z of the light falling
     // on any cloud over the eye, the shares let straight through and scattered through.
     public float4 reach;
+    // As drawn: x the planet's radius, y the faked radius drawing bends it onto, z how far the
+    // weather has faded from its maps before to those after, w the eye's height above sea level.
+    public float4 weather;
 };
 
 // Of `sunlight`, the sun's light as it falls clear, what comes straight through any cloud over the
@@ -291,6 +320,9 @@ public float3 sky_under_cloud(Lighting lighting, float3 level_sunlight) {
 
 public static const uint aerial_size = 32;
 public static const uint aerial_slices = 32;
+// After the slices, a layer holding only what the haze adds and lets through along each view to the
+// sky, as the sky's table leaves it out.
+public static const uint aerial_haze = aerial_slices;
 
 // The air's metres slice `slice` of the aerial-perspective volume reaches out to, finer near the
 // eye.

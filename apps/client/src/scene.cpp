@@ -93,7 +93,11 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
     if (!others) {
         return failed("draw other players", others.error());
     }
-    auto clouds = render::Clouds::create(device, colour_format, weather_map_size, frames);
+    auto weather = render::WeatherMaps::create(device, weather_map_size, frames);
+    if (!weather) {
+        return failed("hold the weather", weather.error());
+    }
+    auto clouds = render::Clouds::create(device, colour_format);
     if (!clouds) {
         return failed("draw the clouds", clouds.error());
     }
@@ -119,6 +123,7 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
                  std::move(atmosphere).value(),
                  std::move(sky).value(),
                  std::move(others).value(),
+                 std::move(weather).value(),
                  std::move(clouds).value(),
                  std::move(precipitation).value(),
                  std::move(glare).value(),
@@ -130,14 +135,15 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
 Scene::Scene(const render::Device& device, const planet::World& world, jobs::JobSystem& jobs,
              const sim::Calendar& calendar, render::Terrain terrain, render::Ocean ocean,
              render::TerrainPool pool, render::Atmosphere atmosphere, render::Sky sky,
-             render::Capsules others, render::Clouds clouds, render::Precipitation precipitation,
-             render::Glare glare, render::GpuTimer timer,
+             render::Capsules others, render::WeatherMaps weather, render::Clouds clouds,
+             render::Precipitation precipitation, render::Glare glare, render::GpuTimer timer,
              std::optional<render::Billboard> companion, std::uint32_t frames)
     : baker_{world, jobs}, terrain_{std::move(terrain)}, ocean_{std::move(ocean)},
       pool_{std::move(pool)}, transients_{device, frames}, others_{std::move(others)},
       companion_{std::move(companion)}, atmosphere_{std::move(atmosphere)}, sky_{std::move(sky)},
-      clouds_{std::move(clouds)}, precipitation_{std::move(precipitation)},
-      glare_{std::move(glare)}, timer_{std::move(timer)}, calendar_{calendar} {}
+      weather_{std::move(weather)}, clouds_{std::move(clouds)},
+      precipitation_{std::move(precipitation)}, glare_{std::move(glare)}, timer_{std::move(timer)},
+      calendar_{calendar} {}
 
 Scene::~Scene() {
     (void)baker_.finish();
@@ -185,7 +191,10 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
         return taken;
     }
     const protocol::CellWeather here = weather_at_eye(shot);
-    const render::CloudShade shade = shade_at_eye(shot.bend, here);
+    const DVec3 sun = calendar_.sun_direction(shot.time);
+    const render::CloudShade shade =
+        render::under_mist(shade_at_eye(shot.bend, here), double{here.humidity},
+                           double{here.fog_top}, shot.bend.eye_height, glm::dot(sun, shot.bend.up));
     const DVec3 drift = drift_at(shot.bend.up, here);
     const double falling = falling_at_eye(shot.bend, here);
     drifted_ = render::within_period(drifted_ + (drift * shot.seconds));
@@ -193,6 +202,10 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     const bool new_weather = shot.forecast != nullptr && shot.forecast->known() &&
                              weather_taken_ != shot.forecast->received();
     const bool cloudy = shot.forecast != nullptr && shot.forecast->known();
+    const double faded = cloudy ? shot.forecast->faded(shot.now) : 1.0;
+    // Taken as the passes are recorded, after the uploads: until the maps are first taken, a clear
+    // sky.
+    const auto weather = [&] { return weather_.bindings(faded); };
     const render::SkyView sky = sky_view(shot, shade);
     const render::AirBindings through = sky_.bindings(frame.slot, atmosphere_);
 
@@ -224,9 +237,11 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
               [&](VkCommandBuffer commands) -> Result<> {
                   if (new_weather) {
                       if (auto updated =
-                              clouds_.update(commands, frame.slot,
-                                             std::as_bytes(std::span{shot.forecast->before()}),
-                                             std::as_bytes(std::span{shot.forecast->after()}));
+                              weather_.update(commands, frame.slot,
+                                              std::as_bytes(std::span{shot.forecast->before()}),
+                                              std::as_bytes(std::span{shot.forecast->after()}),
+                                              std::as_bytes(std::span{shot.forecast->sky_before()}),
+                                              std::as_bytes(std::span{shot.forecast->sky_after()}));
                           !updated) {
                           return updated;
                       }
@@ -238,10 +253,13 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                         {.image = aerial, .use = render::image_use::storage}},
                .targets = std::nullopt},
               [&](VkCommandBuffer commands) {
-                  return sky_.record_tables(commands, frame.extent, frame.slot, atmosphere_, sky);
+                  render::SkyView weathered = sky;
+                  weathered.weather = weather();
+                  return sky_.record_tables(commands, frame.extent, frame.slot, atmosphere_,
+                                            weathered);
               });
     graph.add({.name = "sky",
-               .uses = {{.image = table, .use = render::image_use::sampled}},
+               .uses = through_air,
                .targets = {{.colour = {.image = target, .clear = cleared},
                             .depth = {{.image = depth, .clear = 0.0F}}}}},
               [&](VkCommandBuffer commands) {
@@ -300,7 +318,7 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                                     .bend = shot.bend,
                                     .air = through,
                                     .base = cloud_base,
-                                    .faded = shot.forecast->faded(shot.now),
+                                    .weather = weather(),
                                     .moved = drifted_});
                   });
     }

@@ -9,6 +9,7 @@
 #include <hog/render/readback.hpp>
 #include <hog/render/rendering.hpp>
 #include <hog/render/sky.hpp>
+#include <hog/render/weather_maps.hpp>
 #include <hog/shaders/aerial_probe.hpp>
 #include <hog/shaders/fill.hpp>
 
@@ -22,6 +23,8 @@
 #include <cstring>
 #include <functional>
 #include <numbers>
+#include <span>
+#include <utility>
 #include <vector>
 
 using hog::DVec3;
@@ -125,6 +128,65 @@ DVec3 radiance(const std::array<float, 4>& pixel) {
 
 const std::array<float, 4>& at(const Picture& picture, std::uint32_t x, std::uint32_t y) {
     return picture.at((std::size_t{y} * extent.width) + x);
+}
+
+// What the aerial-perspective volume made for `view` holds at each of `asked`: xy where on the
+// picture, z the air's metres away, w the volume's reach.
+std::vector<std::array<float, 4>> probe(hog::render::Device& device, const Atmosphere& atmosphere,
+                                        const SkyView& view,
+                                        const std::vector<std::array<float, 4>>& asked) {
+    auto sky = Sky::create(device, colour_format, depth_format);
+    REQUIRE(sky);
+    constexpr auto binding = [](std::uint32_t at, VkDescriptorType type) {
+        return VkDescriptorSetLayoutBinding{.binding = at,
+                                            .descriptorType = type,
+                                            .descriptorCount = 1,
+                                            .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+                                            .pImmutableSamplers = nullptr};
+    };
+    const std::array bindings{binding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+                              binding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
+                              binding(2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)};
+    auto probe = hog::render::make_compute_pipeline(
+        device, {.spirv = hog::shaders::aerial_probe, .descriptors = bindings});
+    REQUIRE(probe);
+    auto questions = hog::render::make_filled_buffer(device, std::as_bytes(std::span{asked}),
+                                                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    REQUIRE(questions);
+    auto answers =
+        hog::render::make_buffer(device, std::span{asked}.size_bytes(),
+                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, hog::render::Memory::Readback);
+    REQUIRE(answers);
+    const hog::render::AirBindings air = sky->bindings(0, atmosphere);
+    const auto run = device.submit_now([&](VkCommandBuffer commands) {
+        CHECK(sky->record_frame(commands, extent, 0, atmosphere, view));
+        vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, probe->handle());
+        hog::render::push_sampled_image(commands, *probe, 0, air.aerial, air.sampler);
+        hog::render::push_storage_buffer(commands, *probe, 1, questions->handle());
+        hog::render::push_storage_buffer(commands, *probe, 2, answers->handle());
+        vkCmdDispatch(commands, 1, 1, 1);
+        const VkMemoryBarrier2 to_host{.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+                                       .pNext = nullptr,
+                                       .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                                       .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                                       .dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT,
+                                       .dstAccessMask = VK_ACCESS_2_HOST_READ_BIT};
+        const VkDependencyInfo dependency{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                                          .pNext = nullptr,
+                                          .dependencyFlags = 0,
+                                          .memoryBarrierCount = 1,
+                                          .pMemoryBarriers = &to_host,
+                                          .bufferMemoryBarrierCount = 0,
+                                          .pBufferMemoryBarriers = nullptr,
+                                          .imageMemoryBarrierCount = 0,
+                                          .pImageMemoryBarriers = nullptr};
+        vkCmdPipelineBarrier2(commands, &dependency);
+    });
+    REQUIRE(run);
+    REQUIRE(answers->invalidate());
+    std::vector<std::array<float, 4>> found(asked.size());
+    std::memcpy(found.data(), answers->mapped().data(), std::span{found}.size_bytes());
+    return found;
 }
 
 } // namespace
@@ -251,8 +313,6 @@ TEST_CASE("the aerial perspective held matches the CPU model's", "[render][gpu][
     auto atmosphere = Atmosphere::create(*device);
     REQUIRE(atmosphere);
     const hog::atmosphere::Model model;
-    auto sky = Sky::create(*device, colour_format, depth_format);
-    REQUIRE(sky);
     const double height = 1'500.0;
     SkyView view = view_from(height, towards(10.0, 30.0));
     // Looking a little down, so some views meet the ground within reach.
@@ -272,55 +332,7 @@ TEST_CASE("the aerial perspective held matches the CPU model's", "[render][gpu][
             }
         }
     }
-    constexpr auto binding = [](std::uint32_t at, VkDescriptorType type) {
-        return VkDescriptorSetLayoutBinding{.binding = at,
-                                            .descriptorType = type,
-                                            .descriptorCount = 1,
-                                            .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
-                                            .pImmutableSamplers = nullptr};
-    };
-    const std::array bindings{binding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-                              binding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
-                              binding(2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)};
-    auto probe = hog::render::make_compute_pipeline(
-        *device, {.spirv = hog::shaders::aerial_probe, .descriptors = bindings});
-    REQUIRE(probe);
-    auto questions = hog::render::make_filled_buffer(*device, std::as_bytes(std::span{asked}),
-                                                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
-    REQUIRE(questions);
-    auto answers =
-        hog::render::make_buffer(*device, std::span{asked}.size_bytes(),
-                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, hog::render::Memory::Readback);
-    REQUIRE(answers);
-    const hog::render::AirBindings air = sky->bindings(0, *atmosphere);
-    const auto run = device->submit_now([&](VkCommandBuffer commands) {
-        CHECK(sky->record_frame(commands, extent, 0, *atmosphere, view));
-        vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, probe->handle());
-        hog::render::push_sampled_image(commands, *probe, 0, air.aerial, air.sampler);
-        hog::render::push_storage_buffer(commands, *probe, 1, questions->handle());
-        hog::render::push_storage_buffer(commands, *probe, 2, answers->handle());
-        vkCmdDispatch(commands, 1, 1, 1);
-        const VkMemoryBarrier2 to_host{.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
-                                       .pNext = nullptr,
-                                       .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                                       .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-                                       .dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT,
-                                       .dstAccessMask = VK_ACCESS_2_HOST_READ_BIT};
-        const VkDependencyInfo dependency{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                                          .pNext = nullptr,
-                                          .dependencyFlags = 0,
-                                          .memoryBarrierCount = 1,
-                                          .pMemoryBarriers = &to_host,
-                                          .bufferMemoryBarrierCount = 0,
-                                          .pBufferMemoryBarriers = nullptr,
-                                          .imageMemoryBarrierCount = 0,
-                                          .pImageMemoryBarriers = nullptr};
-        vkCmdPipelineBarrier2(commands, &dependency);
-    });
-    REQUIRE(run);
-    REQUIRE(answers->invalidate());
-    std::vector<std::array<float, 4>> found(asked.size());
-    std::memcpy(found.data(), answers->mapped().data(), std::span{found}.size_bytes());
+    const std::vector<std::array<float, 4>> found = probe(*device, *atmosphere, view, asked);
 
     for (std::size_t at = 0; at < asked.size(); ++at) {
         const std::array<float, 4>& question = asked[at];
@@ -341,5 +353,127 @@ TEST_CASE("the aerial perspective held matches the CPU model's", "[render][gpu][
         }
         CHECK(std::abs(static_cast<double>(found[at][3]) - passed) <= 0.02);
     }
+    CHECK(device->validation_errors() == 0);
+}
+
+namespace {
+
+constexpr std::uint32_t map_size = 4;
+
+// Weather maps with no cloud, and the sky everywhere as `sky`, as client::SkyTexel holds it.
+hog::render::WeatherMaps sky_everywhere(hog::render::Device& device,
+                                        std::array<std::uint8_t, 4> sky) {
+    auto maps = hog::render::WeatherMaps::create(device, map_size);
+    REQUIRE(maps);
+    const std::vector<std::byte> clear(maps->map_bytes(), std::byte{0});
+    std::vector<std::byte> texels(maps->map_bytes());
+    for (std::size_t at = 0; at < texels.size(); ++at) {
+        texels[at] = std::byte{sky.at(at % 4)};
+    }
+    REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
+        CHECK(maps->update(commands, 0, clear, clear, texels, texels));
+    }));
+    return std::move(maps).value();
+}
+
+constexpr std::array<std::uint8_t, 4> dry{0, 0, 0, 0};
+constexpr std::array<std::uint8_t, 4> humid{255, 0, 0, 0};
+// Saturated under fog to 288 m.
+constexpr std::array<std::uint8_t, 4> foggy{255, 9, 0, 0};
+
+// Of the light from what's drawn `distance` away straight ahead, the share the eye sees.
+double seen_through(hog::render::Device& device, const Atmosphere& atmosphere, SkyView view,
+                    const hog::render::WeatherMaps& maps, double distance) {
+    view.weather = maps.bindings(1.0);
+    const std::vector<std::array<float, 4>> found =
+        probe(device, atmosphere, view,
+              {{0.5F, 0.5F, static_cast<float>(distance),
+                static_cast<float>(hog::render::aerial_reach)}});
+    return static_cast<double>(found.at(0)[3]);
+}
+
+} // namespace
+
+TEST_CASE("mist thickens as the air nears forming cloud and thins with height; fog lies below its "
+          "top",
+          "[render][atmosphere]") {
+    using hog::render::mist_extinction;
+    CHECK(mist_extinction(0.0, 0.0, 0.0) == 0.0);
+    CHECK(mist_extinction(0.5, 0.0, 0.0) < mist_extinction(0.9, 0.0, 0.0));
+    CHECK(mist_extinction(0.9, 0.0, 0.0) < mist_extinction(1.0, 0.0, 0.0));
+    // At its wettest, a few kilometres can be seen through.
+    const double seen = 3.912 / mist_extinction(1.0, 0.0, 0.0);
+    CHECK(seen > 3'000.0);
+    CHECK(seen < 5'000.0);
+    CHECK(mist_extinction(0.9, 0.0, 2'000.0) < 0.5 * mist_extinction(0.9, 0.0, 0.0));
+
+    CHECK(mist_extinction(0.0, 300.0, 100.0) == 0.015);
+    CHECK(mist_extinction(0.0, 300.0, 280.0) > 0.0);
+    CHECK(mist_extinction(0.0, 300.0, 280.0) < 0.015);
+    CHECK(mist_extinction(0.0, 300.0, 400.0) == 0.0);
+    CHECK(mist_extinction(0.0, 300.0, -50.0) == mist_extinction(0.0, 300.0, 0.0));
+    CHECK(mist_extinction(0.0, 0.0, -50.0) == 0.0);
+    // Over fog, the air's drier.
+    CHECK(mist_extinction(1.0, 300.0, 900.0) < 0.05 * mist_extinction(1.0, 0.0, 900.0));
+
+    using hog::render::mist_above;
+    CHECK(mist_above(0.0, 0.0, 0.0) == 0.0);
+    CHECK(mist_above(0.9, 0.0, 1'000.0) < mist_above(0.9, 0.0, 0.0));
+    // Deep in fog, under all of it.
+    CHECK(mist_above(0.0, 300.0, 0.0) > 4.0);
+    CHECK(mist_above(0.0, 300.0, 400.0) == 0.0);
+}
+
+TEST_CASE("humid air hides what's far, but not over fog, where it's drier",
+          "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    auto atmosphere = Atmosphere::create(*device);
+    REQUIRE(atmosphere);
+    const hog::render::WeatherMaps dry_maps = sky_everywhere(*device, dry);
+    const hog::render::WeatherMaps humid_maps = sky_everywhere(*device, humid);
+    const hog::render::WeatherMaps foggy_maps = sky_everywhere(*device, foggy);
+    // Looking a little up, so no view meets the sea.
+    const auto raised = [](double height) {
+        SkyView view = view_from(height, towards(30.0));
+        view.camera.forward = towards(3.0);
+        view.camera.up = towards(93.0);
+        return view;
+    };
+    const SkyView low = raised(2.0);
+
+    const double far_dry = seen_through(*device, *atmosphere, low, dry_maps, 20'000.0);
+    const double far_humid = seen_through(*device, *atmosphere, low, humid_maps, 20'000.0);
+    CHECK(far_dry > 0.5);
+    CHECK(far_humid < 0.05);
+
+    // Over the fog the air's drier.
+    const SkyView over = raised(1'000.0);
+    CHECK(seen_through(*device, *atmosphere, over, foggy_maps, 5'000.0) >
+          0.9 * seen_through(*device, *atmosphere, over, dry_maps, 5'000.0));
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("the sky fades to white in wet haze, lit by the day", "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    auto atmosphere = Atmosphere::create(*device);
+    REQUIRE(atmosphere);
+    const hog::render::WeatherMaps dry_maps = sky_everywhere(*device, dry);
+    const hog::render::WeatherMaps humid_maps = sky_everywhere(*device, humid);
+    SkyView view = view_from(2.0, towards(30.0, 90.0));
+    view.sky_light = hog::atmosphere::Model{}.sky_irradiance(2.0, view.sun);
+    // A little above the horizon.
+    const std::uint32_t x = extent.width / 2;
+    const std::uint32_t y = extent.height / 3;
+    REQUIRE(glm::dot(through(view, x, y), DVec3{0.0, 0.0, 1.0}) > 0.1);
+
+    view.weather = dry_maps.bindings(1.0);
+    const DVec3 clear = radiance(at(draw(*device, *atmosphere, view), x, y));
+    view.weather = humid_maps.bindings(1.0);
+    const DVec3 hazed = radiance(at(draw(*device, *atmosphere, view), x, y));
+    INFO("clear " << clear.r << ", " << clear.g << ", " << clear.b << "; hazed " << hazed.r << ", "
+                  << hazed.g << ", " << hazed.b);
+    CHECK(clear.b > 1.5 * clear.r);
+    CHECK(hazed.b < 1.2 * hazed.r);
+    CHECK(hazed.g > clear.g);
     CHECK(device->validation_errors() == 0);
 }

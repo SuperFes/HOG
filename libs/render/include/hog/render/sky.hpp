@@ -7,9 +7,11 @@
 #include <hog/render/memory.hpp>
 #include <hog/render/pipeline.hpp>
 #include <hog/render/vulkan.hpp>
+#include <hog/render/weather_maps.hpp>
 #include <hog/terrain/bend.hpp>
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace hog::render {
@@ -35,6 +37,9 @@ struct SkyView {
     // What any cloud over the eye lets through to what's drawn under it, and the air between.
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     CloudShade shade = {};
+    // The mist's from these; a clear, dry sky with none.
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    WeatherBindings weather = {};
 };
 
 // What's drawn through the air reads it from these, all ready for any shader once a frame's
@@ -44,8 +49,9 @@ struct AirBindings {
     VkBuffer lighting = VK_NULL_HANDLE; // the frame's Lighting, as atmosphere.slang has it
     VkImageView transmittance = VK_NULL_HANDLE;
     VkImageView sky_view = VK_NULL_HANDLE;
-    VkImageView aerial = VK_NULL_HANDLE; // an array, a layer per slice of distance
-    VkSampler sampler = VK_NULL_HANDLE;  // linear, clamped
+    // An array, a layer per slice of distance, and one more of the mist alone to the sky.
+    VkImageView aerial = VK_NULL_HANDLE;
+    VkSampler sampler = VK_NULL_HANDLE; // linear, clamped
 };
 
 // How far out of the air's metres aerial perspective is held: past the horizon from high over the
@@ -57,11 +63,11 @@ inline constexpr double aerial_reach = 160'000.0;
 [[nodiscard]] double air_scale(const atmosphere::Air& air, const terrain::Bend& bend) noexcept;
 
 // The sky from Hillaire's sky-view table and the sun's disc, and the aerial perspective for what's
-// drawn through the air, both made afresh for each frame.
+// drawn through the air and any mist, both made afresh for each frame.
 class Sky {
 public:
     // `frames` in flight, each with its own tables.
-    [[nodiscard]] static Result<Sky> create(const Device& device, VkFormat colour_format,
+    [[nodiscard]] static Result<Sky> create(Device& device, VkFormat colour_format,
                                             VkFormat depth_format, std::uint32_t frames = 1);
 
     // Records making `frame`'s tables for the view, of `extent`, before rendering begins. The
@@ -94,6 +100,9 @@ private:
     std::vector<Image> tables_;
     std::vector<Image> aerial_volumes_;
     std::vector<Buffer> lighting_;
+    // A clear, dry sky's, for views with no weather.
+    std::optional<WeatherMaps> clear_;
+    WeatherBindings clear_bindings_;
 };
 
 } // namespace hog::render

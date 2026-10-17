@@ -21,9 +21,10 @@ constexpr VkFormat table_format = VK_FORMAT_R16G16B16A16_SFLOAT;
 constexpr std::uint32_t table_width = 192;
 constexpr std::uint32_t table_height = 108;
 
-// As atmosphere.slang's aerial-perspective volume.
+// As atmosphere.slang's aerial-perspective volume, and its layer of the mist alone.
 constexpr std::uint32_t aerial_size = 32;
 constexpr std::uint32_t aerial_slices = 32;
+constexpr std::uint32_t aerial_layers = aerial_slices + 1;
 
 struct Lighting {
     Mat4 eye_from_clip;
@@ -31,6 +32,7 @@ struct Lighting {
     glm::vec4 sun_exposure;
     glm::vec4 sky_scale;
     glm::vec4 reach;
+    glm::vec4 weather;
 };
 
 struct TablePush {
@@ -65,13 +67,16 @@ constexpr std::array aerial_bindings{
     binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT),
     binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT),
     binding(3, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT),
-    binding(4, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT)};
+    binding(4, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT),
+    binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT),
+    binding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT)};
 
 constexpr std::array sky_bindings{
     binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT),
     binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
     binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
-    binding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)};
+    binding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
+    binding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)};
 
 void push_tables(VkCommandBuffer commands, const Pipeline& pipeline,
                  const Atmosphere& atmosphere) noexcept {
@@ -87,9 +92,15 @@ double air_scale(const atmosphere::Air& air, const terrain::Bend& bend) noexcept
     return air.bottom / bend.faked;
 }
 
-Result<Sky> Sky::create(const Device& device, VkFormat colour_format, VkFormat depth_format,
+Result<Sky> Sky::create(Device& device, VkFormat colour_format, VkFormat depth_format,
                         std::uint32_t frames) {
     Sky sky;
+    auto clear = WeatherMaps::create(device, 1);
+    if (!clear) {
+        return std::unexpected(std::move(clear).error());
+    }
+    sky.clear_bindings_ = clear->bindings(1.0);
+    sky.clear_.emplace(std::move(clear).value());
     auto table = make_compute_pipeline(device, {.spirv = shaders::sky_view,
                                                 .entry = "sky_view_main",
                                                 .push_constant_bytes = sizeof(TablePush),
@@ -127,7 +138,7 @@ Result<Sky> Sky::create(const Device& device, VkFormat colour_format, VkFormat d
             make_image(device, {.format = table_format,
                                 .extent = {.width = aerial_size, .height = aerial_size},
                                 .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-                                .layers = aerial_slices});
+                                .layers = aerial_layers});
         if (!volume) {
             return std::unexpected(std::move(volume).error());
         }
@@ -172,7 +183,10 @@ Result<> Sky::record_tables(VkCommandBuffer commands, VkExtent2D extent, std::ui
         .sun_exposure = {Vec3{view.sun}, static_cast<float>(view.exposure)},
         .sky_scale = {Vec3{view.sky_light}, static_cast<float>(scale)},
         .reach = {static_cast<float>(aerial_reach), static_cast<float>(view.shade.direct),
-                  static_cast<float>(view.shade.diffuse), 0.0F}};
+                  static_cast<float>(view.shade.diffuse), 0.0F},
+        .weather = {static_cast<float>(view.bend.radius), static_cast<float>(view.bend.faked),
+                    static_cast<float>(view.weather.faded),
+                    static_cast<float>(view.bend.eye_height)}};
     const Buffer& buffer = lighting_.at(frame);
     std::memcpy(buffer.mapped().data(), &lighting, sizeof(lighting));
     if (auto flushed = buffer.flush(); !flushed) {
@@ -192,7 +206,11 @@ Result<> Sky::record_tables(VkCommandBuffer commands, VkExtent2D extent, std::ui
     push_tables(commands, aerial_, atmosphere);
     push_uniform_buffer(commands, aerial_, 3, buffer.handle());
     push_storage_image(commands, aerial_, 4, aerial_volumes_.at(frame).view());
-    vkCmdDispatch(commands, aerial_size / 8, aerial_size / 8, aerial_slices);
+    const WeatherBindings weather =
+        view.weather.sky_before != VK_NULL_HANDLE ? view.weather : clear_bindings_;
+    push_sampled_image(commands, aerial_, 5, weather.sky_before, weather.sampler);
+    push_sampled_image(commands, aerial_, 6, weather.sky_after, weather.sampler);
+    vkCmdDispatch(commands, aerial_size / 8, aerial_size / 8, aerial_layers);
     return {};
 }
 
@@ -220,6 +238,7 @@ void Sky::draw(VkCommandBuffer commands, VkExtent2D extent, std::uint32_t frame,
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, sky_.handle());
     push_tables(commands, sky_, atmosphere);
     push_sampled_image(commands, sky_, 3, tables_.at(frame).view(), atmosphere.sampler());
+    push_sampled_image(commands, sky_, 4, aerial_volumes_.at(frame).view(), atmosphere.sampler());
     vkCmdPushConstants(commands, sky_.layout(),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push),
                        &push);

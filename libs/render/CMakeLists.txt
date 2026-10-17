@@ -59,7 +59,8 @@ add_library(hog_render
     src/swapchain.cpp
     src/terrain.cpp
     src/vma.cpp
-    src/vulkan.cpp)
+    src/vulkan.cpp
+    src/weather_maps.cpp)
 add_library(hog::render ALIAS hog_render)
 
 target_include_directories(hog_render PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")

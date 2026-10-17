@@ -16,12 +16,11 @@ struct Push {
     glm::vec4 up_height;
     glm::vec4 radii;
     glm::vec4 moved_pixel;
-    glm::vec4 veil;
+    glm::vec4 veil_fog;
 };
 
 static_assert(sizeof(Push) <= 128);
 
-constexpr VkFormat map_format = VK_FORMAT_R8G8B8A8_UNORM;
 // As clouds.slang's.
 constexpr double depth_per_mm = 150.0;
 constexpr double scattered_forward = 0.8;
@@ -29,8 +28,10 @@ constexpr double least_cover = 0.05;
 constexpr double rain_extinction_per_metre = 2.5e-4;
 constexpr double rain_extinction_power = 0.63;
 constexpr double snow_extinction = 12.0;
-// A texel's channel holding the root of a 256th of mm falling an hour.
-constexpr std::size_t falling_channel = 2;
+// As weather.slang's.
+constexpr double least_sun = 0.05;
+// Of the sun's light the mist takes, the share it scatters on down.
+constexpr double mist_scattered_down = 0.7;
 
 constexpr VkDescriptorSetLayoutBinding binding(std::uint32_t at, VkDescriptorType type) noexcept {
     return {.binding = at,
@@ -46,7 +47,9 @@ constexpr std::array descriptors{binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
                                  binding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
                                  binding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
                                  binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-                                 binding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)};
+                                 binding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+                                 binding(7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+                                 binding(8, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)};
 
 } // namespace
 
@@ -70,6 +73,14 @@ CloudShade cloud_shade(double cover, double water) noexcept {
             .diffuse = covered * (let_through - unscattered)};
 }
 
+CloudShade under_mist(CloudShade shade, double humidity, double fog_top, double height,
+                      double sun_mu) noexcept {
+    const double through =
+        std::exp(-mist_above(humidity, fog_top, height) / std::max(sun_mu, least_sun));
+    return {.direct = shade.direct * through,
+            .diffuse = shade.diffuse + (shade.direct * (1.0 - through) * mist_scattered_down)};
+}
+
 double rain_extinction(double falling, double snow) noexcept {
     if (falling <= 0.0) {
         return 0.0;
@@ -78,8 +89,7 @@ double rain_extinction(double falling, double snow) noexcept {
            (1.0 + ((snow_extinction - 1.0) * std::clamp(snow, 0.0, 1.0)));
 }
 
-Result<Clouds> Clouds::create(const Device& device, VkFormat colour_format, std::uint32_t map_size,
-                              std::uint32_t frames) {
+Result<Clouds> Clouds::create(const Device& device, VkFormat colour_format) {
     Clouds clouds;
     auto pipeline = make_pipeline(device, {.spirv = shaders::clouds,
                                            .colour_format = colour_format,
@@ -96,70 +106,36 @@ Result<Clouds> Clouds::create(const Device& device, VkFormat colour_format, std:
         return std::unexpected(std::move(nearest).error());
     }
     clouds.nearest_ = std::move(nearest).value();
-    auto linear = make_sampler(device, VK_FILTER_LINEAR);
-    if (!linear) {
-        return std::unexpected(std::move(linear).error());
-    }
-    clouds.linear_ = std::move(linear).value();
-    const VkExtent2D extent{.width = map_size, .height = map_size};
-    for (StreamedImage* map : {&clouds.before_, &clouds.after_}) {
-        auto made = make_streamed_image(device, map_format, extent, frames, 6, true);
-        if (!made) {
-            return std::unexpected(std::move(made).error());
-        }
-        *map = std::move(made).value();
-    }
-    clouds.map_size_ = map_size;
     return clouds;
-}
-
-std::size_t Clouds::map_bytes() const noexcept {
-    return std::size_t{6} * 4 * map_size_ * map_size_;
-}
-
-Result<> Clouds::update(VkCommandBuffer commands, std::uint32_t frame,
-                        std::span<const std::byte> before, std::span<const std::byte> after) {
-    if (auto updated = before_.update(commands, frame, before); !updated) {
-        return updated;
-    }
-    if (auto updated = after_.update(commands, frame, after); !updated) {
-        return updated;
-    }
-    const auto falls = [](std::span<const std::byte> map) {
-        for (std::size_t at = falling_channel; at < map.size(); at += 4) {
-            if (map[at] != std::byte{0}) {
-                return true;
-            }
-        }
-        return false;
-    };
-    falling_ = falls(before) || falls(after);
-    return {};
 }
 
 void Clouds::draw(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth,
                   const CloudsView& view) const noexcept {
-    if (extent.width == 0 || extent.height == 0 || !ready()) {
+    if (extent.width == 0 || extent.height == 0) {
         return;
     }
     HOG_ASSERT(view.air.lighting != VK_NULL_HANDLE, "drawing clouds without the air");
+    HOG_ASSERT(view.weather.weather_before != VK_NULL_HANDLE, "drawing clouds without weather");
     const double aspect = static_cast<double>(extent.width) / static_cast<double>(extent.height);
     const double pixel = 2.0 * std::tan(0.5 * view.camera.vertical_fov) / extent.height;
     const Push push{
         .eye_from_clip = Mat4{glm::inverse(glm::dmat4{view_projection(view.camera, aspect)})},
         .up_height = {Vec3{view.bend.up}, static_cast<float>(view.bend.eye_height)},
         .radii = {static_cast<float>(view.bend.radius), static_cast<float>(view.bend.faked),
-                  static_cast<float>(view.base), static_cast<float>(view.faded)},
+                  static_cast<float>(view.base), static_cast<float>(view.weather.faded)},
         .moved_pixel = {Vec3{within_period(view.moved)}, static_cast<float>(pixel)},
-        .veil = {falling_ ? 1.0F : 0.0F, 0.0F, 0.0F, 0.0F}};
+        .veil_fog = {view.weather.falling ? 1.0F : 0.0F, static_cast<float>(view.weather.fog_top),
+                     0.0F, 0.0F}};
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.handle());
     push_uniform_buffer(commands, pipeline_, 0, view.air.air);
     push_uniform_buffer(commands, pipeline_, 1, view.air.lighting);
     push_sampled_image(commands, pipeline_, 2, view.air.transmittance, view.air.sampler);
     push_sampled_image(commands, pipeline_, 3, view.air.aerial, view.air.sampler);
     push_sampled_image(commands, pipeline_, 4, depth, nearest_.handle());
-    push_sampled_image(commands, pipeline_, 5, before_.image().view(), linear_.handle());
-    push_sampled_image(commands, pipeline_, 6, after_.image().view(), linear_.handle());
+    push_sampled_image(commands, pipeline_, 5, view.weather.weather_before, view.weather.sampler);
+    push_sampled_image(commands, pipeline_, 6, view.weather.weather_after, view.weather.sampler);
+    push_sampled_image(commands, pipeline_, 7, view.weather.sky_before, view.weather.sampler);
+    push_sampled_image(commands, pipeline_, 8, view.weather.sky_after, view.weather.sampler);
     vkCmdPushConstants(commands, pipeline_.layout(),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push),
                        &push);

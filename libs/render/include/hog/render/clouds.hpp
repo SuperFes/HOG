@@ -6,13 +6,9 @@
 #include <hog/render/pipeline.hpp>
 #include <hog/render/sampler.hpp>
 #include <hog/render/sky.hpp>
-#include <hog/render/streamed_image.hpp>
 #include <hog/render/vulkan.hpp>
+#include <hog/render/weather_maps.hpp>
 #include <hog/terrain/bend.hpp>
-
-#include <cstddef>
-#include <cstdint>
-#include <span>
 
 namespace hog::render {
 
@@ -31,7 +27,8 @@ struct CloudsView {
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     AirBindings air = {};
     double base = 2000.0; // metres above sea level the layer lies at
-    double faded = 1.0;   // from the weather map before, at 0, to the one after, at 1
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    WeatherBindings weather = {};
     // Metres the clouds have drifted with the wind, in the planet's frame.
     DVec3 moved{0.0};
 };
@@ -43,6 +40,12 @@ struct CloudsView {
 // layer is lit when drawn.
 [[nodiscard]] CloudShade cloud_shade(double cover, double water) noexcept;
 
+// `shade` with what's over `height` metres above sea level of mist in air of `humidity` under fog
+// to `fog_top`, with the sun `sun_mu` above the horizon: the mist takes from the sun's light, and
+// scatters most of it on down.
+[[nodiscard]] CloudShade under_mist(CloudShade shade, double humidity, double fog_top,
+                                    double height, double sun_mu) noexcept;
+
 // Per metre, how much of the light along a view is lost to what's falling at `falling` mm an
 // hour, `snow` of it as snow.
 [[nodiscard]] double rain_extinction(double falling, double snow) noexcept;
@@ -53,20 +56,10 @@ struct CloudsView {
 // drawn nearer.
 class Clouds {
 public:
-    // Weather maps are cubes of `map_size` texels a side, each texel as client::WeatherTexel.
-    [[nodiscard]] static Result<Clouds> create(const Device& device, VkFormat colour_format,
-                                               std::uint32_t map_size, std::uint32_t frames = 1);
-
-    [[nodiscard]] std::size_t map_bytes() const noexcept;
-    // Records copying in the maps faded from and to, faces in Vulkan's order, for `frame`, whose
-    // last submit must have finished.
-    Result<> update(VkCommandBuffer commands, std::uint32_t frame,
-                    std::span<const std::byte> before, std::span<const std::byte> after);
-    // Whether there are maps to draw from yet.
-    [[nodiscard]] bool ready() const noexcept { return before_.ready() && after_.ready(); }
+    [[nodiscard]] static Result<Clouds> create(const Device& device, VkFormat colour_format);
 
     // Records drawing the clouds over the colour image being rendered to, of `extent`, with no
-    // depth image. `depth` is the picture's, ready to sample. Nothing's drawn until ready().
+    // depth image. `depth` is the picture's, ready to sample.
     void draw(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth,
               const CloudsView& view) const noexcept;
 
@@ -75,11 +68,6 @@ private:
 
     Pipeline pipeline_;
     Sampler nearest_;
-    Sampler linear_;
-    StreamedImage before_;
-    StreamedImage after_;
-    std::uint32_t map_size_ = 0;
-    bool falling_ = false;
 };
 
 } // namespace hog::render

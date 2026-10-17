@@ -181,6 +181,32 @@ TEST_CASE("a scene under rain and overcast is grey and dim", "[client][scene][gp
     CHECK(device->validation_errors() == 0);
 }
 
+TEST_CASE("a scene in fog is grey, hiding the islands", "[client][scene][gpu]") {
+    const auto device = test_device();
+    hog::jobs::JobSystem jobs{2};
+    auto scene = Scene::create(*device, world(), jobs, calendar(), hog::client::still_format, 1);
+    REQUIRE(scene);
+    const auto clear =
+        hog::client::draw_still(*device, *scene, over_the_islands(300.0, 0.0), extent);
+    REQUIRE(clear);
+    const hog::client::Forecast forecast = everywhere({.humidity = 1.0F, .fog_top = 1'000.0F});
+    Shot shot = over_the_islands(300.0, 0.0);
+    shot.forecast = &forecast;
+    const auto fogged = hog::client::draw_still(*device, *scene, shot, extent);
+    REQUIRE(fogged);
+    const auto spread = [](const Rgb& rgb) {
+        return std::max({rgb.r, rgb.g, rgb.b}) - std::min({rgb.r, rgb.g, rgb.b});
+    };
+    const Rgb ground = row(*clear, extent.height - 1);
+    const Rgb grey = row(*fogged, extent.height - 1);
+    INFO("ground " << ground.r << ", " << ground.g << ", " << ground.b);
+    INFO("grey " << grey.r << ", " << grey.g << ", " << grey.b);
+    CHECK(spread(grey) < 15);
+    CHECK(spread(grey) < spread(ground) / 2);
+    CHECK(brightness(grey) > 300);
+    CHECK(device->validation_errors() == 0);
+}
+
 TEST_CASE("a scene drawn as a still settles, with the sky above and the islands below",
           "[client][scene][gpu]") {
     const auto device = test_device();
