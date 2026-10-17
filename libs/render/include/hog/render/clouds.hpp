@@ -30,7 +30,6 @@ struct CloudsView {
     // The frame's air, which lights them and lies between them and the eye.
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     AirBindings air = {};
-    double base = 2000.0; // metres above sea level of the cloud's base over the eye
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     WeatherBindings weather = {};
     // Metres the clouds have drifted with the wind, in the planet's frame.
@@ -53,11 +52,16 @@ struct CloudsView {
 // Per metre, how much of the light along a view is lost to what's falling at `falling` mm an
 // hour, `snow` of it as snow.
 [[nodiscard]] double rain_extinction(double falling, double snow) noexcept;
+// Of what the weather has falling over a place, `cover` of whose sky is covered, the share falling
+// where the cloud above is there by `presence`, from 0 to 1: all of it beneath the cloud, none in
+// the gaps, and as much as the weather has over the place; evenly where there's too little cover
+// to follow.
+[[nodiscard]] double rain_beneath(double cover, double presence) noexcept;
 
 // Clouds filling the sky where the weather has them, between the heights it has them at, their
-// shapes from noise drifting with the wind; marched at half the picture's size, then drawn over
-// it with what falls from them in veils to the ground and any fog lying low. All are lit through
-// the air and seen through it, and hidden by anything drawn nearer.
+// shapes from noise drifting with the wind, and what falls from them to the ground; marched at half
+// the picture's size, then drawn over it with any fog lying low. All are lit through the air and
+// seen through it, and hidden by anything drawn nearer.
 class Clouds {
 public:
     // The noise is baked on `jobs`.

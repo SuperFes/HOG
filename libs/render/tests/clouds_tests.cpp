@@ -13,6 +13,7 @@
 #include <hog/render/weather_maps.hpp>
 #include <hog/terrain/bend.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <glm/glm.hpp>
 
@@ -79,10 +80,9 @@ const Texel clear{0, 0, 0, 0};
 const Texel overcast{255, 64, 0, 0};
 // Half covered.
 const Texel broken{128, 24, 0, 0};
-// Overcast, raining about 2.7 mm and 26 mm an hour, and the first as snow.
+// Overcast, raining about 2.7 mm and 26 mm an hour.
 const Texel raining{255, 64, 26, 0};
 const Texel pouring{255, 64, 80, 0};
-const Texel snowing{255, 64, 26, 255};
 // As client::SkyTexel: dry, with cloud from 1984 m to 3008 m.
 const Texel layer{0, 0, 31, 47};
 
@@ -162,7 +162,6 @@ std::vector<Pixels> draw_frames(hog::render::Device& device, const std::vector<S
         const CloudsView view{.camera = camera,
                               .bend = bend,
                               .air = sky->bindings(0, *atmosphere),
-                              .base = 1'984.0,
                               .weather = weather,
                               .moved = scene.moved};
         REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
@@ -306,6 +305,18 @@ TEST_CASE("rain hides more the heavier it falls, and snow more than rain", "[ren
     CHECK(rain_extinction(1.0, 0.5) < rain_extinction(1.0, 1.0));
 }
 
+TEST_CASE("rain falls beneath the cloud, not the gaps, as much as the weather has", "[render]") {
+    using hog::render::rain_beneath;
+    // A third covered: all of it falls under that third.
+    CHECK(rain_beneath(1.0 / 3.0, 1.0) == Catch::Approx(3.0));
+    CHECK(rain_beneath(1.0 / 3.0, 0.0) == 0.0);
+    CHECK(rain_beneath(1.0, 1.0) == Catch::Approx(1.0));
+    CHECK(rain_beneath(0.5, 0.5) == Catch::Approx(1.0));
+    // With no cloud to follow, it falls evenly.
+    CHECK(rain_beneath(0.0, 0.0) == Catch::Approx(1.0));
+    CHECK(rain_beneath(0.01, 0.0) > 0.5);
+}
+
 TEST_CASE("with no cloud in the weather, none is drawn", "[render][gpu][atmosphere]") {
     const auto device = test_device();
     const Pixels pixels = draw(*device, {.before = everywhere(clear)});
@@ -425,8 +436,9 @@ TEST_CASE("rain far off hangs beneath the cloud, thicker the heavier it falls",
 
 TEST_CASE("snow hangs paler than rain", "[render][gpu][atmosphere]") {
     const auto device = test_device();
-    const long rain = total(draw(*device, {.before = everywhere(raining)}), extent.height);
-    const long snow = total(draw(*device, {.before = everywhere(snowing)}), extent.height);
+    // Under no cloud, in the sun.
+    const long rain = total(draw(*device, {.before = everywhere({0, 0, 26, 0})}), extent.height);
+    const long snow = total(draw(*device, {.before = everywhere({0, 0, 26, 255})}), extent.height);
     INFO("rain " << rain << ", snow " << snow);
     CHECK(snow > rain);
 }
@@ -441,6 +453,33 @@ TEST_CASE("rain beneath is seen from above through gaps in the cloud",
     Scene dry = above;
     dry.before = everywhere(clear);
     CHECK(lit_pixels(draw(*device, dry), extent.height) == 0);
+}
+
+TEST_CASE("looking up through rain, it falls beneath the cloud, not the gaps between",
+          "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    const Scene dry{.forward = glm::normalize(up + (east * 0.05)),
+                    .before = everywhere({192, 40, 0, 0})};
+    Scene wet = dry;
+    wet.before = everywhere({192, 40, 80, 0});
+    const Pixels without = draw(*device, dry);
+    const Pixels with = draw(*device, wet);
+    std::uint32_t gaps = 0;
+    std::uint32_t dry_gaps = 0;
+    std::uint32_t changed = 0;
+    for (std::uint32_t y = 0; y < extent.height; ++y) {
+        for (std::uint32_t x = 0; x < extent.width; ++x) {
+            const bool gap = brightness(without, x, y) == 0;
+            gaps += gap ? 1U : 0U;
+            dry_gaps += gap && brightness(with, x, y) == 0 ? 1U : 0U;
+            changed += brightness(without, x, y) != brightness(with, x, y) ? 1U : 0U;
+        }
+    }
+    INFO("gaps " << gaps << ", still dry " << dry_gaps << ", changed " << changed);
+    CHECK(gaps > extent.width * extent.height / 10);
+    CHECK(dry_gaps > gaps / 2);
+    // Beneath all but the cloud's thin edges.
+    CHECK(changed > ((extent.width * extent.height) - gaps) / 3);
 }
 
 TEST_CASE("rain is hidden by what's drawn in front of it", "[render][gpu][atmosphere]") {

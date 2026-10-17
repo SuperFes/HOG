@@ -330,7 +330,6 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
             return render::CloudsView{.camera = shot.camera,
                                       .bend = shot.bend,
                                       .air = through,
-                                      .base = double{here.base},
                                       .weather = weather(),
                                       .moved = drifted_};
         };

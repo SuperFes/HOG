@@ -27,8 +27,9 @@ struct Push {
     float4 radii;
     // xyz the metres the clouds have drifted, in the planet's frame and within their period.
     float4 moved;
-    // Metres above sea level anywhere: x the lowest of the cloud's base, y the highest of its top;
-    // z how many frames have been marched since the eye last jumped.
+    // Metres above sea level anywhere: x the lowest of the cloud's base, y the highest of its top,
+    // and w the highest of its base, or -1 when nothing falls anywhere; z how many frames have been
+    // marched since the eye last jumped.
     float4 bounds;
 };
 
@@ -73,6 +74,29 @@ static const float cloud_albedo = 0.99;
 static const float wander_tile = 32000.0;
 static const float wander = 8000.0;
 static const float lift = 0.25;
+// As clouds.hpp's. Per metre of rain falling at 1 mm an hour; snow, slower and in larger flakes,
+// hides more.
+static const float rain_extinction = 2.5e-4;
+static const float rain_extinction_power = 0.63;
+static const float snow_extinction = 12.0;
+// Of light falling on what falls, the share scattered on, as if evenly.
+static const float rain_albedo = 0.6;
+static const float snow_albedo = 0.9;
+static const uint rain_steps = 16;
+// Metres along the view what falls is seen through, at most.
+static const float rain_reach = 40000.0;
+// Rain falls from the cloud as it is this far up it, as a share of its depth, and from within its
+// edges: where its density, as a share of its cover, is past the least, fully past the most. It
+// thickens over this many metres below the base, so the shafts have no flat tops.
+static const float rain_from = 0.1;
+static const float rain_least = 0.15;
+static const float rain_most = 0.6;
+static const float rain_top = 300.0;
+// Metres a pixel's taken to span, at least, where the cloud's found for rain: its shafts are broad.
+static const float rain_footprint = 1000.0;
+// It falls in streaks, this many metres across and stretched this many times as long.
+static const float streak_tile = 1000.0;
+static const float streak_stretch = 10.0;
 
 // The weather at a place, as both maps fade between.
 struct Cell {
@@ -80,6 +104,9 @@ struct Cell {
     float mm;
     float base;
     float top;
+    // mm an hour, and the share of it as snow.
+    float falling;
+    float snow;
 };
 
 Cell cell_at(float3 direction) {
@@ -92,6 +119,8 @@ Cell cell_at(float3 direction) {
     cell.mm = weather.g * weather.g * 16.0;
     cell.base = sky.base;
     cell.top = sky.top;
+    cell.falling = weather.b * weather.b * 256.0;
+    cell.snow = weather.a;
     return cell;
 }
 
@@ -184,54 +213,133 @@ float2 shell_along(float mu, float centre_to_eye, float eye_height, float faked)
     return float2(start, end);
 }
 
-[shader("compute")]
-[numthreads(8, 8, 1)]
-void march_main(uint3 id: SV_DispatchThreadID) {
-    uint width;
-    uint height;
-    marched.GetDimensions(width, height);
-    if (id.x >= width || id.y >= height) {
-        return;
-    }
-    const float2 uv = (float2(id.xy) + 0.5) / float2(width, height);
-    const float2 clip = (uv * 2.0) - 1.0;
-    const float4 far = mul(push.eye_from_clip, float4(clip, 1.0, 1.0));
-    const float3 view = normalize(far.xyz / far.w);
+// As clouds.hpp's rain_extinction.
+float extinction_of(float falling, float snow) {
+    return falling > 0.0 ? rain_extinction * pow(falling, rain_extinction_power) *
+                               (1.0 + ((snow_extinction - 1.0) * snow))
+                         : 0.0;
+}
+
+// Of the light falling on the cloud's top, the share let through to beneath it where it's there by
+// `presence`: scattered through it, under it; as much as comes through the gaps round it, as
+// clouds.hpp's cloud_shade has it on the whole, at its edges.
+float shade_beneath(Cell cell, float presence) {
+    const float column = depth_per_mm * cell.mm / max(cell.cover, least_cover);
+    const float under = 1.0 / (1.0 + (0.75 * (1.0 - forward) * column));
+    return lerp(lerp(1.0, under, cell.cover), under, presence);
+}
+
+// How heavily it falls in its streaks at `height` over `direction`, about 1 on the whole.
+float streaks_at(float3 direction, float height, float footprint) {
+    const float3 at = (direction * (push.radii.x + (height / streak_stretch))) + push.moved.xyz;
+    const float detail = detail_noise
+                             .SampleLevel(at / streak_tile,
+                                          max(log2(footprint * detail_texels / streak_tile), 0.0))
+                             .a;
+    return 0.25 + (1.5 * detail);
+}
+
+// As clouds.hpp's rain_beneath.
+float rain_beneath(float cover, float presence) {
+    return lerp(1.0, presence / max(cover, least_cover), saturate(cover / least_cover));
+}
+
+// How much the cloud in `cell` is there over `direction`, from 0 in its gaps to 1 under its
+// billows, as rain falls from it.
+float raining_from(float3 direction, Cell cell, float footprint) {
+    const float height = lerp(cell.base, cell.top, rain_from);
+    float unused = 0.0;
+    const float cloud = cloud_at(direction * (push.radii.x + height), height, cell,
+                                 max(footprint, rain_footprint), false, unused);
+    return saturate(
+        remap(cloud / max(cell.cover, 1.0 / 255.0), rain_least, rain_most, 0.0, 1.0));
+}
+
+// The view's way through the sky, and the picture's texel it's for.
+struct Ray {
+    float3 view;
+    float2 uv;
+    // How far it reaches: to what's drawn, else to the ground.
+    float reach;
+    // Offsets each step, afresh each frame, so frames blended together fill in between the steps.
+    float jitter;
+};
+
+// What falls beneath the cloud along `ray`, from `start` to `end`, premultiplied, before tone
+// mapping; `distance` is left as the metres to it, weighed by what it hides. It falls in streaks
+// beneath the billows over it, not the gaps between, and each step's lit as under the cloud over
+// it. Steps are finest at the start.
+float4 rain_between(Ray ray, float start, float end, out float distance) {
     const float3 up = push.up_height.xyz;
     const float eye_height = push.up_height.w;
     const float radius = push.radii.x;
     const float faked = push.radii.y;
     const float centre_to_eye = faked + eye_height;
-    const float mu = dot(view, up);
+    const float3 sun = lighting.sun_exposure.xyz;
+    const float scale = lighting.sky_scale.w;
+    const float pixel = push.radii.w * 2.0;
 
-    // How far the view reaches: to the furthest drawn under this texel, else to the ground.
-    float reach = to_layer(mu, centre_to_eye, eye_height, 0.0, faked);
-    if (reach <= 0.0) {
-        reach = 1e30;
+    const float span = end - start;
+    float3 radiance = float3(0.0);
+    float seen_through = 1.0;
+    float weighed = 0.0;
+    float from = start;
+    for (uint at = 0; at < rain_steps; ++at) {
+        const float share = float(at + 1) / float(rain_steps);
+        const float to = start + (span * share * share);
+        const float along = lerp(from, to, ray.jitter);
+        const float step = to - from;
+        from = to;
+        const float3 from_eye = ray.view * along;
+        const float height = drawn_height(from_eye, up, eye_height, faked);
+        if (height < 0.0) {
+            continue;
+        }
+        const float3 direction = on_planet(from_eye, up, centre_to_eye, faked, radius);
+        const Cell cell = wandering_cell_at(direction, radius);
+        if (height >= cell.base || cell.falling <= 0.0) {
+            continue;
+        }
+        const float footprint = along * pixel;
+        const float presence = raining_from(direction, cell, footprint);
+        const float extinction = extinction_of(cell.falling, cell.snow) *
+                                 rain_beneath(cell.cover, presence) *
+                                 streaks_at(direction, height, footprint) *
+                                 saturate((cell.base - height) / rain_top);
+        if (extinction <= 0.0) {
+            continue;
+        }
+        const float sun_mu = dot(sun, normalize((up * centre_to_eye) + from_eye));
+        const float3 level_sunlight =
+            transmittance(air, transmittance_table, height * scale, sun_mu) * max(sun_mu, 0.0);
+        // The sun's and the sky's light alike, as much as the cloud over it lets through.
+        const float3 lit =
+            (level_sunlight + lighting.sky_scale.rgb) * shade_beneath(cell, presence);
+        const float albedo = lerp(rain_albedo, snow_albedo, cell.snow);
+        const float hidden = seen_through * (1.0 - exp(-extinction * step));
+        radiance += lit * (albedo / pi) * hidden;
+        weighed += along * hidden;
+        seen_through -= hidden;
     }
-    uint full_width;
-    uint full_height;
-    depth_image.GetDimensions(full_width, full_height);
-    float furthest = 1.0;
-    for (uint corner = 0; corner < 4; ++corner) {
-        const uint2 pixel = min((id.xy * 2) + uint2(corner & 1, corner >> 1),
-                                uint2(full_width - 1, full_height - 1));
-        furthest = min(furthest, depth_image.Load(int3(int2(pixel), 0)));
+    const float opacity = 1.0 - seen_through;
+    distance = opacity > 0.0 ? weighed / opacity : 0.0;
+    if (opacity <= 0.0) {
+        return float4(0.0);
     }
-    if (furthest > sky_depth) {
-        const float4 drawn = mul(push.eye_from_clip, float4(clip, furthest, 1.0));
-        reach = min(reach, length(drawn.xyz / drawn.w));
-    }
+    const float4 between =
+        aerial_perspective(aerial_volume, ray.uv, distance * scale, lighting.reach.x);
+    return float4((radiance * between.a) + (between.rgb * opacity), opacity);
+}
 
-    const float2 shell = shell_along(mu, centre_to_eye, eye_height, faked);
-    const float start = shell.x;
-    const float end = min(min(shell.y, reach), march_reach);
-    if (end <= start) {
-        marched[id.xy] = float4(0.0);
-        distances[id.xy] = 0.0;
-        return;
-    }
-
+// The cloud along `ray`, from `start` to `end`, premultiplied, before tone mapping; `distance` is
+// left as the metres to it, weighed by what it hides.
+float4 cloud_between(Ray ray, float start, float end, out float distance) {
+    const float3 view = ray.view;
+    const float3 up = push.up_height.xyz;
+    const float eye_height = push.up_height.w;
+    const float radius = push.radii.x;
+    const float faked = push.radii.y;
+    const float centre_to_eye = faked + eye_height;
     const float3 sun = lighting.sun_exposure.xyz;
     const float scale = lighting.sky_scale.w;
     const float cos_sun = dot(view, sun);
@@ -242,9 +350,7 @@ void march_main(uint3 id: SV_DispatchThreadID) {
     // No step's longer than a share of the view's way through the shell, so even a thin layer seen
     // from afar is stepped through, not hit or missed whole.
     const float longest = clamp((end - start) / float(least_steps), shortest_step, longest_step);
-    // Offset afresh each frame, so frames blended together fill in between the steps.
-    const float jitter = frac(interleaved(float2(id.xy)) + (push.bounds.z * golden));
-    float along = start + (jitter * clamp(start * step_growth, shortest_step, longest));
+    float along = start + (ray.jitter * clamp(start * step_growth, shortest_step, longest));
     // Whether the last step was a long one through clear air, and how far to go only in steps once
     // one strode into cloud.
     bool striding = false;
@@ -314,13 +420,86 @@ void march_main(uint3 id: SV_DispatchThreadID) {
         along += striding ? step * clear_stride : step;
     }
     const float opacity = 1.0 - seen_through;
+    distance = opacity > 0.0 ? weighed / opacity : 0.0;
     if (opacity <= 0.0) {
-        marched[id.xy] = float4(0.0);
-        distances[id.xy] = 0.0;
+        return float4(0.0);
+    }
+    const float4 between =
+        aerial_perspective(aerial_volume, ray.uv, distance * scale, lighting.reach.x);
+    return float4((radiance * between.a) + (between.rgb * opacity), opacity);
+}
+
+[shader("compute")]
+[numthreads(8, 8, 1)]
+void march_main(uint3 id: SV_DispatchThreadID) {
+    uint width;
+    uint height;
+    marched.GetDimensions(width, height);
+    if (id.x >= width || id.y >= height) {
         return;
     }
-    const float distance = weighed / opacity;
-    const float4 between = aerial_perspective(aerial_volume, uv, distance * scale, lighting.reach.x);
-    marched[id.xy] = float4((radiance * between.a) + (between.rgb * opacity), opacity);
-    distances[id.xy] = distance;
+    Ray ray;
+    ray.uv = (float2(id.xy) + 0.5) / float2(width, height);
+    const float2 clip = (ray.uv * 2.0) - 1.0;
+    const float4 far = mul(push.eye_from_clip, float4(clip, 1.0, 1.0));
+    ray.view = normalize(far.xyz / far.w);
+    ray.jitter = frac(interleaved(float2(id.xy)) + (push.bounds.z * golden));
+    const float3 up = push.up_height.xyz;
+    const float eye_height = push.up_height.w;
+    const float faked = push.radii.y;
+    const float centre_to_eye = faked + eye_height;
+    const float mu = dot(ray.view, up);
+
+    // How far the view reaches: to the furthest drawn under this texel, else to the ground.
+    ray.reach = to_layer(mu, centre_to_eye, eye_height, 0.0, faked);
+    if (ray.reach <= 0.0) {
+        ray.reach = 1e30;
+    }
+    uint full_width;
+    uint full_height;
+    depth_image.GetDimensions(full_width, full_height);
+    float furthest = 1.0;
+    for (uint corner = 0; corner < 4; ++corner) {
+        const uint2 pixel = min((id.xy * 2) + uint2(corner & 1, corner >> 1),
+                                uint2(full_width - 1, full_height - 1));
+        furthest = min(furthest, depth_image.Load(int3(int2(pixel), 0)));
+    }
+    if (furthest > sky_depth) {
+        const float4 drawn = mul(push.eye_from_clip, float4(clip, furthest, 1.0));
+        ray.reach = min(ray.reach, length(drawn.xyz / drawn.w));
+    }
+
+    float4 cloud = float4(0.0);
+    float cloud_distance = 0.0;
+    const float2 shell = shell_along(mu, centre_to_eye, eye_height, faked);
+    const float end = min(min(shell.y, ray.reach), march_reach);
+    if (end > shell.x) {
+        cloud = cloud_between(ray, shell.x, end, cloud_distance);
+    }
+    float4 rain = float4(0.0);
+    float rain_distance = 0.0;
+    const float highest_base = push.bounds.w;
+    if (highest_base >= 0.0) {
+        // From the eye, or from where the view meets the highest of the cloud's base.
+        const float start =
+            eye_height < highest_base
+                ? 0.0
+                : to_layer(mu, centre_to_eye, eye_height, highest_base, faked);
+        if (start >= 0.0 && start < ray.reach) {
+            rain = rain_between(ray, start, min(ray.reach, start + rain_reach), rain_distance);
+        }
+    }
+
+    // Premultiplied, the nearer over the further.
+    const bool rain_nearer = cloud.a <= 0.0 || (rain.a > 0.0 && rain_distance < cloud_distance);
+    const float4 nearer = rain_nearer ? rain : cloud;
+    const float4 further = rain_nearer ? cloud : rain;
+    const float nearer_distance = rain_nearer ? rain_distance : cloud_distance;
+    const float further_distance = rain_nearer ? cloud_distance : rain_distance;
+    const float4 seen = nearer + (further * (1.0 - nearer.a));
+    marched[id.xy] = seen;
+    distances[id.xy] = seen.a > 0.0 ? ((nearer.a * nearer_distance) +
+                                       (further.a * (1.0 - nearer.a) * further_distance)) /
+                                          seen.a
+                                    : 0.0;
 }
