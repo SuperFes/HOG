@@ -43,9 +43,14 @@ struct CloudsView {
 // layer is lit when drawn.
 [[nodiscard]] CloudShade cloud_shade(double cover, double water) noexcept;
 
+// Per metre, how much of the light along a view is lost to what's falling at `falling` mm an
+// hour, `snow` of it as snow.
+[[nodiscard]] double rain_extinction(double falling, double snow) noexcept;
+
 // A layer of cloud round the planet, at a height above sea level, its cover and thickness from
-// weather maps faded between, and its billows drifting with the wind. It's lit through the air and
-// seen through it, and hidden by anything drawn nearer.
+// weather maps faded between, and its billows drifting with the wind, and what falls from it in
+// veils to the ground. They're lit through the air and seen through it, and hidden by anything
+// drawn nearer.
 class Clouds {
 public:
     // Weather maps are cubes of `map_size` texels a side, each texel as client::WeatherTexel.
@@ -74,6 +79,7 @@ private:
     StreamedImage before_;
     StreamedImage after_;
     std::uint32_t map_size_ = 0;
+    bool falling_ = false;
 };
 
 } // namespace hog::render

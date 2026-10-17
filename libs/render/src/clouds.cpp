@@ -16,6 +16,7 @@ struct Push {
     glm::vec4 up_height;
     glm::vec4 radii;
     glm::vec4 moved_pixel;
+    glm::vec4 veil;
 };
 
 static_assert(sizeof(Push) <= 128);
@@ -25,6 +26,11 @@ constexpr VkFormat map_format = VK_FORMAT_R8G8B8A8_UNORM;
 constexpr double depth_per_mm = 150.0;
 constexpr double scattered_forward = 0.8;
 constexpr double least_cover = 0.05;
+constexpr double rain_extinction_per_metre = 2.5e-4;
+constexpr double rain_extinction_power = 0.63;
+constexpr double snow_extinction = 12.0;
+// A texel's channel holding the root of a 256th of mm falling an hour.
+constexpr std::size_t falling_channel = 2;
 
 constexpr VkDescriptorSetLayoutBinding binding(std::uint32_t at, VkDescriptorType type) noexcept {
     return {.binding = at,
@@ -62,6 +68,14 @@ CloudShade cloud_shade(double cover, double water) noexcept {
     const double let_through = 1.0 / (1.0 + (0.75 * (1.0 - scattered_forward) * thickness));
     return {.direct = (1.0 - covered) + (covered * unscattered),
             .diffuse = covered * (let_through - unscattered)};
+}
+
+double rain_extinction(double falling, double snow) noexcept {
+    if (falling <= 0.0) {
+        return 0.0;
+    }
+    return rain_extinction_per_metre * std::pow(falling, rain_extinction_power) *
+           (1.0 + ((snow_extinction - 1.0) * std::clamp(snow, 0.0, 1.0)));
 }
 
 Result<Clouds> Clouds::create(const Device& device, VkFormat colour_format, std::uint32_t map_size,
@@ -108,7 +122,19 @@ Result<> Clouds::update(VkCommandBuffer commands, std::uint32_t frame,
     if (auto updated = before_.update(commands, frame, before); !updated) {
         return updated;
     }
-    return after_.update(commands, frame, after);
+    if (auto updated = after_.update(commands, frame, after); !updated) {
+        return updated;
+    }
+    const auto falls = [](std::span<const std::byte> map) {
+        for (std::size_t at = falling_channel; at < map.size(); at += 4) {
+            if (map[at] != std::byte{0}) {
+                return true;
+            }
+        }
+        return false;
+    };
+    falling_ = falls(before) || falls(after);
+    return {};
 }
 
 void Clouds::draw(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth,
@@ -124,7 +150,8 @@ void Clouds::draw(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth
         .up_height = {Vec3{view.bend.up}, static_cast<float>(view.bend.eye_height)},
         .radii = {static_cast<float>(view.bend.radius), static_cast<float>(view.bend.faked),
                   static_cast<float>(view.base), static_cast<float>(view.faded)},
-        .moved_pixel = {Vec3{within_period(view.moved)}, static_cast<float>(pixel)}};
+        .moved_pixel = {Vec3{within_period(view.moved)}, static_cast<float>(pixel)},
+        .veil = {falling_ ? 1.0F : 0.0F, 0.0F, 0.0F, 0.0F}};
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.handle());
     push_uniform_buffer(commands, pipeline_, 0, view.air.air);
     push_uniform_buffer(commands, pipeline_, 1, view.air.lighting);

@@ -76,6 +76,10 @@ const Texel clear{0, 0, 0, 0};
 const Texel overcast{255, 64, 0, 0};
 // Half covered.
 const Texel broken{128, 24, 0, 0};
+// Overcast, raining about 2.7 mm and 26 mm an hour, and the first as snow.
+const Texel raining{255, 64, 26, 0};
+const Texel pouring{255, 64, 80, 0};
+const Texel snowing{255, 64, 26, 255};
 
 struct Scene {
     double eye_height = 2.0;
@@ -191,6 +195,17 @@ std::uint32_t lit_pixels(const Pixels& pixels, std::uint32_t rows = extent.heigh
     return lit;
 }
 
+// Of the rows below the horizon, when looking level.
+std::uint32_t lit_below(const Pixels& pixels) {
+    std::uint32_t lit = 0;
+    for (std::uint32_t y = (extent.height / 2) + 1; y < extent.height; ++y) {
+        for (std::uint32_t x = 0; x < extent.width; ++x) {
+            lit += brightness(pixels, x, y) > 0 ? 1U : 0U;
+        }
+    }
+    return lit;
+}
+
 } // namespace
 
 TEST_CASE("the clouds' drift is kept within their period", "[render]") {
@@ -216,6 +231,18 @@ TEST_CASE("cloud shades the ground the more of it there is", "[render]") {
     const hog::render::CloudShade wisp = cloud_shade(1.0, 0.001);
     CHECK(wisp.direct > 0.8);
     CHECK(wisp.direct + wisp.diffuse <= 1.0);
+}
+
+TEST_CASE("rain hides more the heavier it falls, and snow more than rain", "[render]") {
+    using hog::render::rain_extinction;
+    CHECK(rain_extinction(0.0, 0.0) == 0.0);
+    CHECK(rain_extinction(-1.0, 1.0) == 0.0);
+    // Moderate rain is seen through for some kilometres, snow for one or so.
+    CHECK(rain_extinction(2.5, 0.0) * 5000.0 > 1.0);
+    CHECK(rain_extinction(2.5, 0.0) * 5000.0 < 5.0);
+    CHECK(rain_extinction(25.0, 0.0) > 2.0 * rain_extinction(2.5, 0.0));
+    CHECK(rain_extinction(1.0, 1.0) * 1000.0 > 2.0);
+    CHECK(rain_extinction(1.0, 0.5) < rain_extinction(1.0, 1.0));
 }
 
 TEST_CASE("with no cloud in the weather, none is drawn", "[render][gpu][atmosphere]") {
@@ -298,4 +325,52 @@ TEST_CASE("thick cloud is dark beneath and bright on top", "[render][gpu][atmosp
     INFO("beneath " << under << ", on top " << over);
     CHECK(under > 0);
     CHECK(over > 3 * under);
+}
+
+TEST_CASE("cloud beyond the ground isn't drawn", "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    CHECK(lit_below(draw(*device, {})) == 0);
+}
+
+TEST_CASE("rain far off hangs beneath the cloud, thicker the heavier it falls",
+          "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    // Under no cloud, seen to the horizon, kilometres off.
+    const Pixels alone = draw(*device, {.before = everywhere({0, 0, 26, 0})});
+    CHECK(lit_pixels(alone) == extent.width * (extent.height / 2));
+    // Under cloud, between it and the eye, and duller than its underside.
+    const Pixels dry = draw(*device, {});
+    const long light = total(draw(*device, {.before = everywhere(raining)}));
+    const long heavy = total(draw(*device, {.before = everywhere(pouring)}));
+    INFO("dry " << total(dry) << ", light " << light << ", heavy " << heavy);
+    CHECK(light < total(dry));
+    CHECK(heavy < light);
+}
+
+TEST_CASE("snow hangs paler than rain", "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    const long rain = total(draw(*device, {.before = everywhere(raining)}), extent.height);
+    const long snow = total(draw(*device, {.before = everywhere(snowing)}), extent.height);
+    INFO("rain " << rain << ", snow " << snow);
+    CHECK(snow > rain);
+}
+
+TEST_CASE("rain beneath is seen from above through gaps in the cloud",
+          "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    const Scene above{.eye_height = 3000.0,
+                      .forward = glm::normalize(east - up),
+                      .before = everywhere({0, 0, 26, 0})};
+    CHECK(lit_pixels(draw(*device, above), extent.height) == extent.width * extent.height);
+    Scene dry = above;
+    dry.before = everywhere(clear);
+    CHECK(lit_pixels(draw(*device, dry), extent.height) == 0);
+}
+
+TEST_CASE("rain is hidden by what's drawn in front of it", "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    const VkRect2D covered{.offset = {.x = 10, .y = 2}, .extent = {.width = 8, .height = 6}};
+    const Pixels pixels = draw(*device, {.before = everywhere({0, 0, 26, 0}), .covered = covered});
+    CHECK(brightness(pixels, 12, 4) == 0);
+    CHECK(brightness(pixels, 4, 4) > 0);
 }

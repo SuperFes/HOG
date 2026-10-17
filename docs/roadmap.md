@@ -347,7 +347,7 @@ These tracks can start once Phase 4 works and can run side by side; four people 
 - [ ] Mid-distance hierarchical LOD and far-field impostors
 - [ ] Horizon panorama relit every frame and refreshed as the player moves
 - [ ] Volumetric clouds that fill the sky's volume and can be flown through (raymarched, likely at reduced resolution); weather-driven visibility
-- [ ] Rain and snow seen from afar, falling in veils from the cloud base to the ground
+- [x] Rain and snow seen from afar, falling in veils from the cloud base to the ground
 - [ ] Ground materials with roughness and wetness, wet where weather reaches and dry where it's sheltered (mud, rain on rocks)
 - [ ] Art direction pass once the references are chosen
 
