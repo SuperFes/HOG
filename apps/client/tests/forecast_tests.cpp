@@ -89,6 +89,14 @@ TEST_CASE("a cube map's texels look the way Vulkan samples them", "[client][fore
     }
 }
 
+TEST_CASE("the weather reads as a line", "[client][forecast]") {
+    CHECK(hog::client::describe({}) == "0% cloud, drifting 0 m/s");
+    CHECK(hog::client::describe({.cloud = 16.0F, .falling = 2.5F, .drift = {3.0F, -4.0F}}) ==
+          "100% cloud, rain 2.5 mm/h, drifting 5 m/s");
+    CHECK(hog::client::describe({.cloud = 16.0F, .falling = 1.0F, .snow = 0.75F}) ==
+          "100% cloud, snow 1.0 mm/h, drifting 0 m/s");
+}
+
 TEST_CASE("with no weather the sky is clear", "[client][forecast]") {
     const Forecast forecast;
     CHECK_FALSE(forecast.known());

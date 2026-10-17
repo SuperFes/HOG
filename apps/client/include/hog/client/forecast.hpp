@@ -8,6 +8,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace hog::client {
@@ -24,6 +25,9 @@ using WeatherTexel = std::array<std::uint8_t, 4>;
 // cube map `size` texels a side, as Vulkan samples it; faces go +x, -x, +y, -y, +z, -z.
 [[nodiscard]] DVec3 cube_direction(std::uint32_t face, std::uint32_t x, std::uint32_t y,
                                    std::uint32_t size) noexcept;
+
+// The weather as a line for people to read.
+[[nodiscard]] std::string describe(const protocol::CellWeather& weather);
 
 // The weather the server last sent, faded to from what was shown when it came.
 class Forecast {

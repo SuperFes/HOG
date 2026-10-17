@@ -2,15 +2,19 @@
 
 #include <hog/client/daylight.hpp>
 #include <hog/client/flight.hpp>
+#include <hog/client/forecast.hpp>
 #include <hog/client/scene.hpp>
 #include <hog/jobs/job_system.hpp>
+#include <hog/planet/tangent_frame.hpp>
 #include <hog/planet/world.hpp>
+#include <hog/protocol/messages.hpp>
 #include <hog/render/camera.hpp>
 #include <hog/render/gpu_timer.hpp>
 #include <hog/sim/calendar.hpp>
 #include <hog/terrain/bend.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <test_device.hpp>
 
 #include <algorithm>
@@ -21,6 +25,7 @@
 #include <vector>
 
 using namespace std::chrono_literals;
+using Catch::Matchers::WithinAbs;
 using hog::client::Picture;
 using hog::client::Scene;
 using hog::client::Shot;
@@ -99,7 +104,82 @@ hog::WorldPosition ahead(const Shot& shot, double along) {
          std::max(hog::client::ground_under(world(), hog::WorldPosition{there * radius}), 0.0))};
 }
 
+// The same weather everywhere, shown at once.
+hog::client::Forecast everywhere(hog::protocol::CellWeather cell) {
+    hog::client::Forecast forecast;
+    forecast.receive(
+        {.level = 2,
+         .fade = 0ms,
+         .cells = std::vector<hog::protocol::CellWeather>(hog::protocol::weather_cells(2), cell)},
+        hog::MonotonicClock::time_point{});
+    return forecast;
+}
+
+int brightness(const Rgb& rgb) {
+    return rgb.r + rgb.g + rgb.b;
+}
+
 } // namespace
+
+TEST_CASE("the weather at the eye is clear until some is known", "[client][scene]") {
+    Shot shot = over_the_islands();
+    CHECK(hog::client::weather_at_eye(shot) == hog::protocol::CellWeather{});
+    const hog::client::Forecast forecast = everywhere({.cloud = 2.0F, .falling = 4.0F});
+    shot.forecast = &forecast;
+    const hog::protocol::CellWeather here = hog::client::weather_at_eye(shot);
+    CHECK_THAT(here.cloud, WithinAbs(2.0, 1e-3));
+    CHECK_THAT(here.falling, WithinAbs(4.0, 1e-3));
+}
+
+TEST_CASE("the weather drifts along the ground, east and north as it says", "[client][scene]") {
+    const hog::DVec3 up = glm::normalize(hog::DVec3{1.0, 2.0, 3.0});
+    const hog::planet::TangentFrame frame = hog::planet::tangent_frame(up);
+    const hog::DVec3 drift = hog::client::drift_at(up, {.drift = {3.0F, -4.0F}});
+    CHECK_THAT(glm::dot(drift, frame.east), WithinAbs(3.0, 1e-9));
+    CHECK_THAT(glm::dot(drift, frame.north), WithinAbs(-4.0, 1e-9));
+    CHECK_THAT(glm::dot(drift, up), WithinAbs(0.0, 1e-9));
+}
+
+TEST_CASE("rain falls round the eye only under the cloud", "[client][scene]") {
+    const hog::protocol::CellWeather raining{.cloud = 2.0F, .falling = 5.0F};
+    hog::terrain::Bend bend{.eye_height = hog::client::cloud_base - 100.0};
+    CHECK(hog::client::falling_at_eye(bend, raining) == 5.0);
+    bend.eye_height = hog::client::cloud_base + 100.0;
+    CHECK(hog::client::falling_at_eye(bend, raining) == 0.0);
+}
+
+TEST_CASE("cloud shades the eye only from above", "[client][scene]") {
+    const hog::protocol::CellWeather overcast{.cloud = 2.0F};
+    hog::terrain::Bend bend{.eye_height = hog::client::cloud_base - 100.0};
+    CHECK(hog::client::shade_at_eye(bend, overcast).direct < 0.01);
+    CHECK(hog::client::shade_at_eye(bend, {}).direct == 1.0);
+    bend.eye_height = hog::client::cloud_base + 100.0;
+    CHECK(hog::client::shade_at_eye(bend, overcast).direct == 1.0);
+}
+
+TEST_CASE("a scene under rain and overcast is grey and dim", "[client][scene][gpu]") {
+    const auto device = test_device();
+    hog::jobs::JobSystem jobs{2};
+    auto scene = Scene::create(*device, world(), jobs, calendar(), hog::client::still_format, 1);
+    REQUIRE(scene);
+    const auto clear = hog::client::draw_still(*device, *scene, over_the_islands(), extent);
+    REQUIRE(clear);
+    const hog::client::Forecast forecast = everywhere({.cloud = 1.0F, .falling = 8.0F});
+    Shot shot = over_the_islands();
+    shot.forecast = &forecast;
+    const auto overcast = hog::client::draw_still(*device, *scene, shot, extent);
+    REQUIRE(overcast);
+    const Rgb clear_sky = row(*clear, 0);
+    const Rgb grey_sky = row(*overcast, 0);
+    const Rgb clear_ground = row(*clear, extent.height - 1);
+    const Rgb dim_ground = row(*overcast, extent.height - 1);
+    INFO("clear sky " << clear_sky.r << ", " << clear_sky.g << ", " << clear_sky.b);
+    INFO("grey sky " << grey_sky.r << ", " << grey_sky.g << ", " << grey_sky.b);
+    INFO("ground " << brightness(clear_ground) << " to " << brightness(dim_ground));
+    CHECK(grey_sky.b - grey_sky.r < (clear_sky.b - clear_sky.r) / 2);
+    CHECK(brightness(dim_ground) < brightness(clear_ground));
+    CHECK(device->validation_errors() == 0);
+}
 
 TEST_CASE("a scene drawn as a still settles, with the sky above and the islands below",
           "[client][scene][gpu]") {

@@ -3,10 +3,12 @@
 #include <hog/client/scene.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/planet/tangent_frame.hpp>
 #include <hog/render/barrier.hpp>
 #include <hog/render/device.hpp>
 #include <hog/render/readback.hpp>
 #include <hog/render/render_graph.hpp>
+#include <hog/sim/weather.hpp>
 #include <hog/terrain/patch.hpp>
 #include <hog/terrain/selection.hpp>
 
@@ -34,6 +36,29 @@ std::unexpected<Error> failed(std::string_view doing, const Error& error) {
 double ground_under(const planet::World& world, WorldPosition at) {
     return static_cast<double>(world.state(planet::cell_at(at)).elevation) /
            static_cast<double>(planet::fixed_one);
+}
+
+protocol::CellWeather weather_at_eye(const Shot& shot) {
+    if (shot.forecast == nullptr || !shot.forecast->known()) {
+        return {};
+    }
+    return shot.forecast->at(shot.bend.up, shot.now);
+}
+
+DVec3 drift_at(DVec3 up, const protocol::CellWeather& weather) {
+    return planet::tangent_frame(up).to_world(
+        {double{weather.drift.x}, double{weather.drift.y}, 0.0});
+}
+
+double falling_at_eye(const terrain::Bend& bend, const protocol::CellWeather& weather) noexcept {
+    return bend.eye_height < cloud_base ? double{weather.falling} : 0.0;
+}
+
+render::CloudShade shade_at_eye(const terrain::Bend& bend, const protocol::CellWeather& weather) {
+    if (bend.eye_height >= cloud_base) {
+        return {};
+    }
+    return render::cloud_shade(double{sim::cloud_cover(weather.cloud)}, double{weather.cloud});
 }
 
 Result<Scene> Scene::create(render::Device& device, const planet::World& world,
@@ -68,6 +93,14 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
     if (!others) {
         return failed("draw other players", others.error());
     }
+    auto clouds = render::Clouds::create(device, colour_format, weather_map_size, frames);
+    if (!clouds) {
+        return failed("draw the clouds", clouds.error());
+    }
+    auto precipitation = render::Precipitation::create(device, colour_format, depth_format);
+    if (!precipitation) {
+        return failed("draw the rain", precipitation.error());
+    }
     auto glare = render::Glare::create(device, colour_format);
     if (!glare) {
         return failed("draw the sun's glare", glare.error());
@@ -86,6 +119,8 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
                  std::move(atmosphere).value(),
                  std::move(sky).value(),
                  std::move(others).value(),
+                 std::move(clouds).value(),
+                 std::move(precipitation).value(),
                  std::move(glare).value(),
                  std::move(timer).value(),
                  std::move(companion),
@@ -95,11 +130,13 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
 Scene::Scene(const render::Device& device, const planet::World& world, jobs::JobSystem& jobs,
              const sim::Calendar& calendar, render::Terrain terrain, render::Ocean ocean,
              render::TerrainPool pool, render::Atmosphere atmosphere, render::Sky sky,
-             render::Capsules others, render::Glare glare, render::GpuTimer timer,
+             render::Capsules others, render::Clouds clouds, render::Precipitation precipitation,
+             render::Glare glare, render::GpuTimer timer,
              std::optional<render::Billboard> companion, std::uint32_t frames)
     : baker_{world, jobs}, terrain_{std::move(terrain)}, ocean_{std::move(ocean)},
       pool_{std::move(pool)}, transients_{device, frames}, others_{std::move(others)},
       companion_{std::move(companion)}, atmosphere_{std::move(atmosphere)}, sky_{std::move(sky)},
+      clouds_{std::move(clouds)}, precipitation_{std::move(precipitation)},
       glare_{std::move(glare)}, timer_{std::move(timer)}, calendar_{calendar} {}
 
 Scene::~Scene() {
@@ -112,18 +149,19 @@ void Scene::finish_bakes() {
     }
 }
 
-render::SkyView Scene::sky_view(const Shot& shot) {
+render::SkyView Scene::sky_view(const Shot& shot, render::CloudShade shade) {
     const DVec3 sun = calendar_.sun_direction(shot.time);
     const EyeLight light =
         light_at_eye(model_, shot.bend.eye_height * render::air_scale(model_.air(), shot.bend),
                      glm::dot(sun, shot.bend.up));
-    const double wanted = exposure_for(light);
+    const double wanted = exposure_for(under_cloud(light, shade));
     exposure_ = exposure_ ? adapted(*exposure_, wanted, shot.seconds) : wanted;
     return {.camera = shot.camera,
             .sun = sun,
             .bend = shot.bend,
             .exposure = *exposure_,
-            .sky_light = light.sky};
+            .sky_light = light.sky,
+            .shade = shade};
 }
 
 Result<> Scene::record(render::Frame& frame, const Shot& shot) {
@@ -146,7 +184,16 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     if (auto taken = slots_.take(pool_, frame.slot, streamed); !taken) {
         return taken;
     }
-    const render::SkyView sky = sky_view(shot);
+    const protocol::CellWeather here = weather_at_eye(shot);
+    const render::CloudShade shade = shade_at_eye(shot.bend, here);
+    const DVec3 drift = drift_at(shot.bend.up, here);
+    const double falling = falling_at_eye(shot.bend, here);
+    drifted_ = render::within_period(drifted_ + (drift * shot.seconds));
+    falling_for_ += shot.seconds;
+    const bool new_weather = shot.forecast != nullptr && shot.forecast->known() &&
+                             weather_taken_ != shot.forecast->received();
+    const bool cloudy = shot.forecast != nullptr && shot.forecast->known();
+    const render::SkyView sky = sky_view(shot, shade);
     const render::AirBindings through = sky_.bindings(frame.slot, atmosphere_);
 
     render::RenderGraph graph;
@@ -174,7 +221,18 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                                      .depth = {{.image = depth, .clear = std::nullopt}}};
 
     graph.add({.name = "uploads", .uses = {}, .targets = std::nullopt},
-              [&](VkCommandBuffer commands) { return pool_.record_uploads(commands, frame.slot); });
+              [&](VkCommandBuffer commands) -> Result<> {
+                  if (new_weather) {
+                      if (auto updated =
+                              clouds_.update(commands, frame.slot,
+                                             std::as_bytes(std::span{shot.forecast->before()}),
+                                             std::as_bytes(std::span{shot.forecast->after()}));
+                          !updated) {
+                          return updated;
+                      }
+                  }
+                  return pool_.record_uploads(commands, frame.slot);
+              });
     graph.add({.name = "sky tables",
                .uses = {{.image = table, .use = render::image_use::storage},
                         {.image = aerial, .use = render::image_use::storage}},
@@ -216,7 +274,36 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                 companion_->draw(commands, frame.extent, shot.camera, *shot.companion, shot.bend);
             });
     }
-    // The glare reads what's drawn in front of the sun from depth, so it's drawn without it.
+    if (render::precipitation_count(falling, double{here.snow}) > 0) {
+        graph.add({.name = "rain", .uses = {}, .targets = drawn}, [&](VkCommandBuffer commands) {
+            precipitation_.draw(commands, frame.extent,
+                                {.camera = shot.camera,
+                                 .air = through,
+                                 .up = shot.bend.up,
+                                 .wind = drift * surface_wind,
+                                 .falling = falling,
+                                 .snow = double{here.snow},
+                                 .seconds = falling_for_});
+        });
+    }
+    // The clouds and glare read what's drawn in front of them from depth, so they're drawn
+    // without it.
+    if (cloudy) {
+        graph.add({.name = "clouds",
+                   .uses = {{.image = aerial, .use = render::image_use::sampled},
+                            {.image = depth, .use = render::image_use::sampled}},
+                   .targets = {{.colour = {.image = target, .clear = std::nullopt},
+                                .depth = std::nullopt}}},
+                  [&](VkCommandBuffer commands) {
+                      clouds_.draw(commands, frame.extent, graph.view(depth),
+                                   {.camera = shot.camera,
+                                    .bend = shot.bend,
+                                    .air = through,
+                                    .base = cloud_base,
+                                    .faded = shot.forecast->faded(shot.now),
+                                    .moved = drifted_});
+                  });
+    }
     const double height = shot.bend.eye_height * render::air_scale(model_.air(), shot.bend);
     graph.add(
         {.name = "glare",
@@ -227,9 +314,13 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                 commands, frame.extent, graph.view(depth),
                 {.camera = shot.camera,
                  .towards = sky.sun,
-                 .irradiance = model_.transmittance(height, glm::dot(sky.sun, shot.bend.up)),
+                 .irradiance =
+                     model_.transmittance(height, glm::dot(sky.sun, shot.bend.up)) * shade.direct,
                  .exposure = sky.exposure});
         });
+    if (new_weather) {
+        weather_taken_ = shot.forecast->received();
+    }
     return graph.execute(frame.commands,
                          {.slot = frame.slot, .timer = &timer_, .transients = &transients_});
 }

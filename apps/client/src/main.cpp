@@ -1,5 +1,6 @@
 #include <hog/client/daylight.hpp>
 #include <hog/client/flight.hpp>
+#include <hog/client/forecast.hpp>
 #include <hog/client/frame_times.hpp>
 #include <hog/client/options.hpp>
 #include <hog/client/others.hpp>
@@ -239,8 +240,8 @@ void show_timings(const client::FrameTimes& times) {
     ImGui::End();
 }
 
-// How the connection to the server is doing, and who's near.
-void show_network(const client::SessionSummary& summary) {
+// How the connection to the server is doing, the weather it says is over the eye, and who's near.
+void show_network(const client::SessionSummary& summary, const std::string& weather) {
     constexpr float margin = 10.0F;
     ImGui::SetNextWindowPos({ImGui::GetIO().DisplaySize.x - margin, margin}, ImGuiCond_Always,
                             {1.0F, 0.0F});
@@ -249,8 +250,8 @@ void show_network(const client::SessionSummary& summary) {
                      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                          ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoSavedSettings |
                          ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav)) {
-        for (const std::string* line :
-             {&summary.connection, &summary.quality, &summary.traffic, &summary.snapshots}) {
+        for (const std::string* line : {&summary.connection, &summary.quality, &summary.traffic,
+                                        &summary.snapshots, &weather}) {
             if (!line->empty()) {
                 ImGui::TextUnformatted(line->c_str());
             }
@@ -300,6 +301,7 @@ struct Overlay {
     std::span<const replication::Shown> others = {};
     WorldPosition eye;
     MonotonicClock::time_point now;
+    std::string weather; // over the eye, once known
 };
 
 // Draws a frame of the shot with the overlay over it, saving it to `capture` if given; false when
@@ -326,7 +328,8 @@ Result<bool> draw(client::Scene& scene, const client::Shot& shot, const render::
     if (overlay.timings) {
         show_timings(*overlay.times);
         if (overlay.session != nullptr) {
-            show_network(client::summarise(*overlay.session, overlay.eye, overlay.now));
+            show_network(client::summarise(*overlay.session, overlay.eye, overlay.now),
+                         overlay.weather);
         }
     }
     ImGui::Render();
@@ -428,6 +431,11 @@ public:
         return session_ ? session_->take_correction() : std::nullopt;
     }
 
+    // The newest weather the server sent since last asked.
+    [[nodiscard]] std::optional<protocol::Weather> take_weather() noexcept {
+        return session_ ? session_->take_weather() : std::nullopt;
+    }
+
     // None until connecting to the server.
     [[nodiscard]] const client::Session* session() const noexcept {
         return session_ ? &*session_ : nullptr;
@@ -515,12 +523,16 @@ private:
     MonotonicClock::time_point looked_ = MonotonicClock::now();
 };
 
-// Sends the server where the player's feet are, and puts them back where it says.
+// Sends the server where the player's feet are, puts them back where it says, and takes the
+// weather it sends.
 void report(Connection& connection, std::optional<client::Player>& player,
-            MonotonicClock::time_point now) {
+            client::Forecast& forecast, MonotonicClock::time_point now) {
     connection.look(player ? std::optional{player->feet()} : std::nullopt, now);
     if (const auto back = connection.take_correction(); back && player) {
         player->place(*back);
+    }
+    if (const auto weather = connection.take_weather()) {
+        forecast.receive(*weather, now);
     }
 }
 
@@ -579,6 +591,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
     MonotonicClock::time_point last = started;
     ShaderReloader shaders{options.reload_shaders};
     std::optional<client::Player> player;
+    client::Forecast forecast;
     render::Camera camera = client::flight_camera(flight, client::vertical_fov);
     while (!controls.quit) {
         controls.look = {};
@@ -594,7 +607,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
         times.add(passed, scene.timings());
         shaders.look(device, now);
         take_part(controls, player, flight, camera, world);
-        report(connection, player, now);
+        report(connection, player, forecast, now);
         camera = move(controls, player, flight, world, seconds);
         const double ground_height = client::ground_under(world, camera.eye);
         for (; controls.faster_time > 0; --controls.faster_time) {
@@ -635,13 +648,18 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
                                 .time = clock.time(),
                                 .seconds = seconds,
                                 .companion = companion,
-                                .others = std::move(avatars)};
+                                .others = std::move(avatars),
+                                .forecast = &forecast,
+                                .now = now};
         const Overlay overlay{.times = &times,
                               .timings = controls.timings,
                               .session = session,
                               .others = others,
                               .eye = camera.eye,
-                              .now = now};
+                              .now = now,
+                              .weather = controls.timings && forecast.known()
+                                             ? client::describe(client::weather_at_eye(shot))
+                                             : std::string{}};
         const auto drawn = draw(scene, shot, device, presenter, window, overlay,
                                 controls.quit ? options.capture : std::nullopt);
         if (!drawn) {

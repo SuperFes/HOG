@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <format>
 
 namespace hog::client {
 
@@ -63,6 +64,16 @@ std::vector<WeatherTexel> map_of(const sim::CellGrid& grid, const Cells& cells) 
 }
 
 } // namespace
+
+std::string describe(const protocol::CellWeather& weather) {
+    std::string line =
+        std::format("{:.0f}% cloud", 100.0 * double{sim::cloud_cover(weather.cloud)});
+    if (weather.falling > 0.0F) {
+        const char* falls = weather.snow >= 0.5F ? "snow" : "rain";
+        line += std::format(", {} {:.1f} mm/h", falls, double{weather.falling});
+    }
+    return line + std::format(", drifting {:.0f} m/s", double{glm::length(weather.drift)});
+}
 
 DVec3 cube_direction(std::uint32_t face, std::uint32_t x, std::uint32_t y,
                      std::uint32_t size) noexcept {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <hog/atmosphere/model.hpp>
+#include <hog/client/forecast.hpp>
 #include <hog/client/ground.hpp>
 #include <hog/client/picture.hpp>
 #include <hog/core/math.hpp>
@@ -12,10 +13,12 @@
 #include <hog/render/billboard.hpp>
 #include <hog/render/camera.hpp>
 #include <hog/render/capsules.hpp>
+#include <hog/render/clouds.hpp>
 #include <hog/render/glare.hpp>
 #include <hog/render/gpu_timer.hpp>
 #include <hog/render/memory.hpp>
 #include <hog/render/ocean.hpp>
+#include <hog/render/precipitation.hpp>
 #include <hog/render/presenter.hpp>
 #include <hog/render/render_graph.hpp>
 #include <hog/render/sky.hpp>
@@ -37,6 +40,10 @@ inline constexpr double vertical_fov = 1.0; // radians
 inline constexpr VkFormat depth_format = VK_FORMAT_D32_SFLOAT;
 // Stills are sRGB, as the window shows them.
 inline constexpr VkFormat still_format = VK_FORMAT_R8G8B8A8_SRGB;
+// Metres above sea level the clouds lie at.
+inline constexpr double cloud_base = 2'000.0;
+// Of the weather's drift, how fast the wind blows what falls near the ground.
+inline constexpr double surface_wind = 0.5;
 
 // Metres above sea level of the ground under a position.
 [[nodiscard]] double ground_under(const planet::World& world, WorldPosition at);
@@ -53,11 +60,25 @@ struct Shot {
     // Other players.
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     std::vector<render::Capsule> others = {};
+    // The weather shown, if any is known, and the real time it's shown at, for its fades.
+    const Forecast* forecast = nullptr;
+    MonotonicClock::time_point now{};
 };
 
+// The weather at the eye as the shot shows it: a clear sky while none is known.
+[[nodiscard]] protocol::CellWeather weather_at_eye(const Shot& shot);
+// The weather's drift at the eye in the planet's frame, m/s.
+[[nodiscard]] DVec3 drift_at(DVec3 up, const protocol::CellWeather& weather);
+// mm an hour falling round the eye: none above the cloud it falls from.
+[[nodiscard]] double falling_at_eye(const terrain::Bend& bend,
+                                    const protocol::CellWeather& weather) noexcept;
+// What cloud over the eye lets through of the light falling on it; all of it above the cloud.
+[[nodiscard]] render::CloudShade shade_at_eye(const terrain::Bend& bend,
+                                              const protocol::CellWeather& weather);
+
 // The planet as the client draws it: the ground baked and streamed in round the eye, the sea, the
-// air lit by the sun at the planet's time, other players, whoever flies along, and the sun's glare
-// over it all.
+// air lit by the sun at the planet's time, other players, whoever flies along, the weather's
+// clouds and what falls from them, and the sun's glare over it all.
 class Scene {
 public:
     // Drawn into colour images of `colour_format`, `frames` in flight, with the sun and seasons
@@ -94,10 +115,11 @@ private:
     Scene(const render::Device& device, const planet::World& world, jobs::JobSystem& jobs,
           const sim::Calendar& calendar, render::Terrain terrain, render::Ocean ocean,
           render::TerrainPool pool, render::Atmosphere atmosphere, render::Sky sky,
-          render::Capsules others, render::Glare glare, render::GpuTimer timer,
-          std::optional<render::Billboard> companion, std::uint32_t frames);
+          render::Capsules others, render::Clouds clouds, render::Precipitation precipitation,
+          render::Glare glare, render::GpuTimer timer, std::optional<render::Billboard> companion,
+          std::uint32_t frames);
 
-    render::SkyView sky_view(const Shot& shot);
+    render::SkyView sky_view(const Shot& shot, render::CloudShade shade);
 
     terrain::PatchBaker baker_;
     terrain::PatchStream stream_;
@@ -111,11 +133,17 @@ private:
     atmosphere::Model model_;
     render::Atmosphere atmosphere_;
     render::Sky sky_;
+    render::Clouds clouds_;
+    render::Precipitation precipitation_;
     render::Glare glare_;
     render::GpuTimer timer_;
     std::vector<render::GpuSpan> timings_;
     sim::Calendar calendar_;
     std::optional<double> exposure_;
+    // How many times weather had come when the clouds last took it.
+    std::optional<std::uint64_t> weather_taken_;
+    DVec3 drifted_{0.0};       // metres the clouds have drifted
+    double falling_for_ = 0.0; // seconds what falls has been falling
     bool settled_ = false;
 };
 
