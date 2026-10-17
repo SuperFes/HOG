@@ -1,7 +1,11 @@
 #include <hog/core/assert.hpp>
+#include <hog/render/barrier.hpp>
 #include <hog/render/clouds.hpp>
 #include <hog/shaders/cloud_march.hpp>
+#include <hog/shaders/cloud_resolve.hpp>
 #include <hog/shaders/clouds.hpp>
+
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
 #include <array>
@@ -20,6 +24,11 @@ struct MarchPush {
     glm::vec4 bounds;
 };
 
+struct ResolvePush {
+    Mat4 eye_from_clip;
+    Mat4 previous_clip_from_eye;
+};
+
 struct Push {
     Mat4 eye_from_clip;
     glm::vec4 up_height;
@@ -28,6 +37,7 @@ struct Push {
 };
 
 static_assert(sizeof(MarchPush) <= 128);
+static_assert(sizeof(ResolvePush) <= 128);
 static_assert(sizeof(Push) <= 128);
 
 // As clouds.slang's.
@@ -81,9 +91,17 @@ constexpr std::array march_descriptors{binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUF
                                        binding(11, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, compute),
                                        binding(12, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, compute)};
 
+constexpr std::array resolve_descriptors{binding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, compute),
+                                         binding(1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, compute),
+                                         binding(2, sampled, compute),
+                                         binding(3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, compute)};
+
+double aspect_of(VkExtent2D extent) noexcept {
+    return static_cast<double>(extent.width) / static_cast<double>(extent.height);
+}
+
 Mat4 eye_from_clip(const Camera& camera, VkExtent2D extent) noexcept {
-    const double aspect = static_cast<double>(extent.width) / static_cast<double>(extent.height);
-    return Mat4{glm::inverse(glm::dmat4{view_projection(camera, aspect)})};
+    return Mat4{glm::inverse(glm::dmat4{view_projection(camera, aspect_of(extent))})};
 }
 
 } // namespace
@@ -126,6 +144,15 @@ double rain_extinction(double falling, double snow) noexcept {
 
 Result<Clouds> Clouds::create(Device& device, VkFormat colour_format, jobs::JobSystem& jobs) {
     Clouds clouds;
+    clouds.device_ = &device;
+    auto resolve = make_compute_pipeline(device, {.spirv = shaders::cloud_resolve,
+                                                  .entry = "resolve_main",
+                                                  .push_constant_bytes = sizeof(ResolvePush),
+                                                  .descriptors = resolve_descriptors});
+    if (!resolve) {
+        return std::unexpected(std::move(resolve).error());
+    }
+    clouds.resolve_ = std::move(resolve).value();
     auto march = make_compute_pipeline(device, {.spirv = shaders::cloud_march,
                                                 .entry = "march_main",
                                                 .push_constant_bytes = sizeof(MarchPush),
@@ -171,23 +198,45 @@ VkExtent2D Clouds::march_extent(VkExtent2D extent) noexcept {
     return {.width = (extent.width + 1) / 2, .height = (extent.height + 1) / 2};
 }
 
-void Clouds::march(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth,
-                   VkImageView marched, VkImageView distances,
-                   const CloudsView& view) const noexcept {
+Result<> Clouds::march(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth,
+                       VkImageView marched, VkImageView distances, const CloudsView& view) {
     if (extent.width == 0 || extent.height == 0) {
-        return;
+        return {};
     }
     HOG_ASSERT(view.air.lighting != VK_NULL_HANDLE, "marching clouds without the air");
     HOG_ASSERT(view.weather.weather_before != VK_NULL_HANDLE, "marching clouds without weather");
+    const VkExtent2D size = march_extent(extent);
+    if (size.width != blend_extent_.width || size.height != blend_extent_.height) {
+        for (Image& blend : blends_) {
+            auto made = make_image(
+                *device_, {.format = marched_format,
+                           .extent = size,
+                           .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
+            if (!made) {
+                return std::unexpected(std::move(made).error());
+            }
+            blend = std::move(made).value();
+            transition(commands, blend.handle(), VK_IMAGE_ASPECT_COLOR_BIT, image_use::discard,
+                       image_use::sampled);
+        }
+        blend_extent_ = size;
+        frames_ = 0;
+    }
+    if (frames_ > 0 && glm::length(view.camera.eye - previous_eye_) > furthest_blended) {
+        frames_ = 0;
+    }
+
     const double pixel = 2.0 * std::tan(0.5 * view.camera.vertical_fov) / extent.height;
+    const Mat4 from_clip = eye_from_clip(view.camera, extent);
     const MarchPush push{
-        .eye_from_clip = eye_from_clip(view.camera, extent),
+        .eye_from_clip = from_clip,
         .up_height = {Vec3{view.bend.up}, static_cast<float>(view.bend.eye_height)},
         .radii = {static_cast<float>(view.bend.radius), static_cast<float>(view.bend.faked),
                   static_cast<float>(view.weather.faded), static_cast<float>(pixel)},
         .moved = {Vec3{within_period(view.moved)}, 0.0F},
         .bounds = {static_cast<float>(view.weather.lowest_base),
-                   static_cast<float>(view.weather.highest_top), 0.0F, 0.0F}};
+                   static_cast<float>(view.weather.highest_top), static_cast<float>(frames_),
+                   0.0F}};
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, march_.handle());
     push_uniform_buffer(commands, march_, 0, view.air.air);
     push_uniform_buffer(commands, march_, 1, view.air.lighting);
@@ -204,18 +253,65 @@ void Clouds::march(VkCommandBuffer commands, VkExtent2D extent, VkImageView dept
     push_storage_image(commands, march_, 12, distances);
     vkCmdPushConstants(commands, march_.layout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push),
                        &push);
-    const VkExtent2D size = march_extent(extent);
     vkCmdDispatch(commands, (size.width + 7) / 8, (size.height + 7) / 8, 1);
+
+    // What was just marched, read back by the blend; the marched images are the graph's, so a
+    // barrier on all of memory rather than on them.
+    const VkMemoryBarrier2 marched_to_read{.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+                                           .pNext = nullptr,
+                                           .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                                           .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                                           .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                                           .dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT};
+    const VkDependencyInfo dependency{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                                      .pNext = nullptr,
+                                      .dependencyFlags = 0,
+                                      .memoryBarrierCount = 1,
+                                      .pMemoryBarriers = &marched_to_read,
+                                      .bufferMemoryBarrierCount = 0,
+                                      .pBufferMemoryBarriers = nullptr,
+                                      .imageMemoryBarrierCount = 0,
+                                      .pImageMemoryBarriers = nullptr};
+    vkCmdPipelineBarrier2(commands, &dependency);
+
+    const std::uint32_t next = 1 - blended_;
+    const Image& before = blends_.at(blended_);
+    const Image& after = blends_.at(next);
+    transition(commands, after.handle(), VK_IMAGE_ASPECT_COLOR_BIT, image_use::sampled,
+               image_use::storage);
+    // From this frame's eye to the last's clip space: moved by how far the eye moved.
+    const DVec3 moved = view.camera.eye - previous_eye_;
+    const ResolvePush resolve{.eye_from_clip = from_clip,
+                              .previous_clip_from_eye =
+                                  frames_ > 0 ? previous_clip_from_eye_ *
+                                                    Mat4{glm::translate(glm::dmat4{1.0}, moved)}
+                                              : Mat4{0.0F}};
+    vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, resolve_.handle());
+    push_storage_image(commands, resolve_, 0, marched);
+    push_storage_image(commands, resolve_, 1, distances);
+    push_sampled_image(commands, resolve_, 2, before.view(), linear_.handle());
+    push_storage_image(commands, resolve_, 3, after.view());
+    vkCmdPushConstants(commands, resolve_.layout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(resolve),
+                       &resolve);
+    vkCmdDispatch(commands, (size.width + 7) / 8, (size.height + 7) / 8, 1);
+    transition(commands, after.handle(), VK_IMAGE_ASPECT_COLOR_BIT, image_use::storage,
+               image_use::sampled);
+
+    blended_ = next;
+    previous_clip_from_eye_ = view_projection(view.camera, aspect_of(extent));
+    previous_eye_ = view.camera.eye;
+    ++frames_;
+    return {};
 }
 
 void Clouds::draw(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth,
-                  VkImageView marched, VkImageView distances,
-                  const CloudsView& view) const noexcept {
+                  VkImageView distances, const CloudsView& view) const noexcept {
     if (extent.width == 0 || extent.height == 0) {
         return;
     }
     HOG_ASSERT(view.air.lighting != VK_NULL_HANDLE, "drawing clouds without the air");
     HOG_ASSERT(view.weather.weather_before != VK_NULL_HANDLE, "drawing clouds without weather");
+    HOG_ASSERT(blend_extent_.width > 0, "drawing clouds before marching them");
     const Push push{
         .eye_from_clip = eye_from_clip(view.camera, extent),
         .up_height = {Vec3{view.bend.up}, static_cast<float>(view.bend.eye_height)},
@@ -233,7 +329,7 @@ void Clouds::draw(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth
     push_sampled_image(commands, pipeline_, 6, view.weather.weather_after, view.weather.sampler);
     push_sampled_image(commands, pipeline_, 7, view.weather.sky_before, view.weather.sampler);
     push_sampled_image(commands, pipeline_, 8, view.weather.sky_after, view.weather.sampler);
-    push_sampled_image(commands, pipeline_, 9, marched, linear_.handle());
+    push_sampled_image(commands, pipeline_, 9, blends_.at(blended_).view(), linear_.handle());
     push_sampled_image(commands, pipeline_, 10, distances, nearest_.handle());
     vkCmdPushConstants(commands, pipeline_.layout(),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push),

@@ -101,8 +101,8 @@ struct Scene {
     std::optional<VkRect2D> covered = {};
 };
 
-// The clouds alone, over black.
-Pixels draw(hog::render::Device& device, const Scene& scene) {
+// The clouds alone, over black, for each of `scenes` in turn as frames of one picture.
+std::vector<Pixels> draw_frames(hog::render::Device& device, const std::vector<Scene>& scenes) {
     auto atmosphere = hog::render::Atmosphere::create(device);
     REQUIRE(atmosphere);
     auto sky = hog::render::Sky::create(device, colour_format, depth_format);
@@ -112,36 +112,6 @@ Pixels draw(hog::render::Device& device, const Scene& scene) {
     REQUIRE(clouds);
     auto maps = hog::render::WeatherMaps::create(device, map_size);
     REQUIRE(maps);
-    CHECK(maps->map_bytes() == scene.before.size());
-    REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
-        CHECK(maps->update(commands, 0, scene.before, scene.after.value_or(scene.before), scene.sky,
-                           scene.sky));
-    }));
-    const hog::render::WeatherBindings weather = maps->bindings(scene.faded);
-
-    const WorldPosition eye{up * (radius + scene.eye_height)};
-    const hog::terrain::Bend bend = hog::terrain::bend_from(eye, radius, 0.0);
-    const double elevation = scene.sun_elevation * std::numbers::pi / 180.0;
-    const DVec3 sun = (east * std::cos(elevation)) + (up * std::sin(elevation));
-    const DVec3 camera_up = glm::normalize(up - (scene.forward * glm::dot(up, scene.forward)));
-    const hog::render::Camera camera{
-        .eye = eye, .forward = scene.forward, .up = camera_up, .vertical_fov = 1.2};
-    const hog::atmosphere::Model model;
-    const double scale = hog::render::air_scale(model.air(), bend);
-    const hog::render::SkyView seen{.camera = camera,
-                                    .sun = sun,
-                                    .bend = bend,
-                                    .exposure = 10.0,
-                                    .sky_light =
-                                        model.sky_irradiance(scene.eye_height * scale, sun),
-                                    .weather = weather};
-    const CloudsView view{.camera = camera,
-                          .bend = bend,
-                          .air = sky->bindings(0, *atmosphere),
-                          .base = 1'984.0,
-                          .weather = weather,
-                          .moved = scene.moved};
-
     auto colour = hog::render::make_image(
         device, {.format = colour_format,
                  .extent = extent,
@@ -163,44 +133,84 @@ Pixels draw(hog::render::Device& device, const Scene& scene) {
     };
     const hog::render::Image marched = march_image(Clouds::marched_format);
     const hog::render::Image distances = march_image(Clouds::distances_format);
-    REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
-        namespace use = hog::render::image_use;
-        CHECK(sky->record_frame(commands, extent, 0, *atmosphere, seen));
-        hog::render::transition(commands, colour->handle(), VK_IMAGE_ASPECT_COLOR_BIT, use::discard,
-                                use::colour_target);
-        hog::render::transition(commands, depth->handle(), VK_IMAGE_ASPECT_DEPTH_BIT, use::discard,
-                                use::depth_target);
-        hog::render::begin_rendering(commands, colour->view(), extent,
-                                     VkClearColorValue{.float32 = {0.0F, 0.0F, 0.0F, 1.0F}},
-                                     {.view = depth->view()});
-        if (scene.covered) {
-            const VkClearAttachment nearest{
-                .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
-                .colorAttachment = 0,
-                .clearValue = {.depthStencil = {.depth = 1.0F, .stencil = 0}}};
-            const VkClearRect rect{.rect = *scene.covered, .baseArrayLayer = 0, .layerCount = 1};
-            vkCmdClearAttachments(commands, 1, &nearest, 1, &rect);
-        }
-        vkCmdEndRendering(commands);
-        hog::render::transition(commands, depth->handle(), VK_IMAGE_ASPECT_DEPTH_BIT,
-                                use::depth_target, use::sampled);
-        for (const hog::render::Image* image : {&marched, &distances}) {
-            hog::render::transition(commands, image->handle(), VK_IMAGE_ASPECT_COLOR_BIT,
-                                    use::discard, use::storage);
-        }
-        clouds->march(commands, extent, depth->view(), marched.view(), distances.view(), view);
-        for (const hog::render::Image* image : {&marched, &distances}) {
-            hog::render::transition(commands, image->handle(), VK_IMAGE_ASPECT_COLOR_BIT,
+
+    std::vector<Pixels> frames;
+    for (const Scene& scene : scenes) {
+        CHECK(maps->map_bytes() == scene.before.size());
+        REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
+            CHECK(maps->update(commands, 0, scene.before, scene.after.value_or(scene.before),
+                               scene.sky, scene.sky));
+        }));
+        const hog::render::WeatherBindings weather = maps->bindings(scene.faded);
+
+        const WorldPosition eye{up * (radius + scene.eye_height)};
+        const hog::terrain::Bend bend = hog::terrain::bend_from(eye, radius, 0.0);
+        const double elevation = scene.sun_elevation * std::numbers::pi / 180.0;
+        const DVec3 sun = (east * std::cos(elevation)) + (up * std::sin(elevation));
+        const DVec3 camera_up = glm::normalize(up - (scene.forward * glm::dot(up, scene.forward)));
+        const hog::render::Camera camera{
+            .eye = eye, .forward = scene.forward, .up = camera_up, .vertical_fov = 1.2};
+        const hog::atmosphere::Model model;
+        const double scale = hog::render::air_scale(model.air(), bend);
+        const hog::render::SkyView seen{.camera = camera,
+                                        .sun = sun,
+                                        .bend = bend,
+                                        .exposure = 10.0,
+                                        .sky_light =
+                                            model.sky_irradiance(scene.eye_height * scale, sun),
+                                        .weather = weather};
+        const CloudsView view{.camera = camera,
+                              .bend = bend,
+                              .air = sky->bindings(0, *atmosphere),
+                              .base = 1'984.0,
+                              .weather = weather,
+                              .moved = scene.moved};
+        REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
+            namespace use = hog::render::image_use;
+            CHECK(sky->record_frame(commands, extent, 0, *atmosphere, seen));
+            hog::render::transition(commands, colour->handle(), VK_IMAGE_ASPECT_COLOR_BIT,
+                                    use::discard, use::colour_target);
+            hog::render::transition(commands, depth->handle(), VK_IMAGE_ASPECT_DEPTH_BIT,
+                                    use::discard, use::depth_target);
+            hog::render::begin_rendering(commands, colour->view(), extent,
+                                         VkClearColorValue{.float32 = {0.0F, 0.0F, 0.0F, 1.0F}},
+                                         {.view = depth->view()});
+            if (scene.covered) {
+                const VkClearAttachment nearest{
+                    .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+                    .colorAttachment = 0,
+                    .clearValue = {.depthStencil = {.depth = 1.0F, .stencil = 0}}};
+                const VkClearRect rect{
+                    .rect = *scene.covered, .baseArrayLayer = 0, .layerCount = 1};
+                vkCmdClearAttachments(commands, 1, &nearest, 1, &rect);
+            }
+            vkCmdEndRendering(commands);
+            hog::render::transition(commands, depth->handle(), VK_IMAGE_ASPECT_DEPTH_BIT,
+                                    use::depth_target, use::sampled);
+            for (const hog::render::Image* image : {&marched, &distances}) {
+                hog::render::transition(commands, image->handle(), VK_IMAGE_ASPECT_COLOR_BIT,
+                                        use::discard, use::storage);
+            }
+            CHECK(clouds->march(commands, extent, depth->view(), marched.view(), distances.view(),
+                                view));
+            hog::render::transition(commands, distances.handle(), VK_IMAGE_ASPECT_COLOR_BIT,
                                     use::storage, use::sampled);
-        }
-        hog::render::begin_rendering(commands, colour->view(), extent, std::nullopt);
-        clouds->draw(commands, extent, depth->view(), marched.view(), distances.view(), view);
-        vkCmdEndRendering(commands);
-    }));
-    CHECK(device.validation_errors() == 0);
-    auto pixels = hog::render::read_pixels(device, *colour, hog::render::image_use::colour_target);
-    REQUIRE(pixels);
-    return std::move(pixels).value();
+            hog::render::begin_rendering(commands, colour->view(), extent, std::nullopt);
+            clouds->draw(commands, extent, depth->view(), distances.view(), view);
+            vkCmdEndRendering(commands);
+        }));
+        CHECK(device.validation_errors() == 0);
+        auto pixels =
+            hog::render::read_pixels(device, *colour, hog::render::image_use::colour_target);
+        REQUIRE(pixels);
+        frames.push_back(std::move(pixels).value());
+    }
+    return frames;
+}
+
+// The clouds alone, over black.
+Pixels draw(hog::render::Device& device, const Scene& scene) {
+    return draw_frames(device, {scene}).front();
 }
 
 int brightness(const Pixels& pixels, std::uint32_t x, std::uint32_t y) {
@@ -513,4 +523,58 @@ TEST_CASE("a storm towers over the thin cloud round it", "[render][gpu][atmosphe
                                              .sky = towering});
     CHECK(lit_pixels(north_view) > 0);
     CHECK(lit_pixels(south_view) == 0);
+}
+
+namespace {
+
+long difference(const Pixels& left, const Pixels& right) {
+    long sum = 0;
+    for (std::size_t at = 0; at < left.size(); ++at) {
+        sum += std::abs(int{left[at]} - int{right[at]});
+    }
+    return sum;
+}
+
+// Broken cloud overhead, looking well up through it.
+Scene broken_overhead() {
+    return {.forward = glm::normalize(east + (2.0 * up)), .before = everywhere(broken)};
+}
+
+} // namespace
+
+TEST_CASE("frames blend with those before, steadying while the eye's still",
+          "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    const std::vector<Pixels> frames =
+        draw_frames(*device, std::vector<Scene>(10, broken_overhead()));
+    const long first = difference(frames[0], frames[1]);
+    const long last = difference(frames[8], frames[9]);
+    INFO("first " << first << ", last " << last);
+    // Each frame's march is offset afresh, so they differ, less as more are blended.
+    CHECK(first > 0);
+    CHECK(last < first);
+}
+
+TEST_CASE("when the eye jumps, what was marched before is dropped", "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    const Scene still = broken_overhead();
+    Scene jumped = still;
+    jumped.eye_height = 1'500.0;
+    const std::vector<Pixels> frames = draw_frames(*device, {still, still, still, jumped});
+    CHECK(frames.back() == draw(*device, jumped));
+}
+
+TEST_CASE("turning, what was marched before follows the view", "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    const Scene still = broken_overhead();
+    Scene turned = still;
+    turned.forward = glm::normalize(east + (0.1 * north) + (2.0 * up));
+    std::vector<Scene> turning(6, still);
+    turning.push_back(turned);
+    const Pixels after_turning = draw_frames(*device, turning).back();
+    const Pixels settled = draw_frames(*device, std::vector<Scene>(7, turned)).back();
+    const Pixels unturned = draw_frames(*device, std::vector<Scene>(7, still)).back();
+    INFO("after turning " << difference(after_turning, settled) << ", unturned "
+                          << difference(unturned, settled));
+    CHECK(difference(after_turning, settled) < difference(unturned, settled) / 2);
 }

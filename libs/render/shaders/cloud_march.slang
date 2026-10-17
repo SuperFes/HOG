@@ -27,7 +27,8 @@ struct Push {
     float4 radii;
     // xyz the metres the clouds have drifted, in the planet's frame and within their period.
     float4 moved;
-    // Metres above sea level anywhere: x the lowest of the cloud's base, y the highest of its top.
+    // Metres above sea level anywhere: x the lowest of the cloud's base, y the highest of its top;
+    // z how many frames have been marched since the eye last jumped.
     float4 bounds;
 };
 
@@ -52,6 +53,8 @@ static const uint most_steps = 128;
 static const float step_growth = 0.03;
 static const float clear_stride = 4.0;
 static const uint least_steps = 24;
+// Of the golden ratio, the part past 1: frame after frame, it spreads offsets evenly.
+static const float golden = 0.618034;
 static const float shortest_step = 40.0;
 static const float longest_step = 2000.0;
 // Metres along the view clouds are marched over at most.
@@ -218,8 +221,9 @@ void march_main(uint3 id: SV_DispatchThreadID) {
     // No step's longer than a share of the view's way through the shell, so even a thin layer seen
     // from afar is stepped through, not hit or missed whole.
     const float longest = clamp((end - start) / float(least_steps), shortest_step, longest_step);
-    float along = start + (interleaved(float2(id.xy)) *
-                           clamp(start * step_growth, shortest_step, longest));
+    // Offset afresh each frame, so frames blended together fill in between the steps.
+    const float jitter = frac(interleaved(float2(id.xy)) + (push.bounds.z * golden));
+    float along = start + (jitter * clamp(start * step_growth, shortest_step, longest));
     // Whether the last step was a long one through clear air, and how far to go only in steps once
     // one strode into cloud.
     bool striding = false;

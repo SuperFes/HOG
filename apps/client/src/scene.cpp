@@ -342,19 +342,19 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                    .targets = std::nullopt},
                   // By value what's made in this block, as the passes run after it.
                   [&, marched, distances, clouds_view](VkCommandBuffer commands) {
-                      clouds_.march(commands, frame.extent, graph.view(depth), graph.view(marched),
-                                    graph.view(distances), clouds_view());
+                      return clouds_.march(commands, frame.extent, graph.view(depth),
+                                           graph.view(marched), graph.view(distances),
+                                           clouds_view());
                   });
         graph.add({.name = "clouds",
                    .uses = {{.image = aerial, .use = render::image_use::sampled},
                             {.image = depth, .use = render::image_use::sampled},
-                            {.image = marched, .use = render::image_use::sampled},
                             {.image = distances, .use = render::image_use::sampled}},
                    .targets = {{.colour = {.image = target, .clear = std::nullopt},
                                 .depth = std::nullopt}}},
-                  [&, marched, distances, clouds_view](VkCommandBuffer commands) {
-                      clouds_.draw(commands, frame.extent, graph.view(depth), graph.view(marched),
-                                   graph.view(distances), clouds_view());
+                  [&, distances, clouds_view](VkCommandBuffer commands) {
+                      clouds_.draw(commands, frame.extent, graph.view(depth), graph.view(distances),
+                                   clouds_view());
                   });
     }
     const double height = shot.bend.eye_height * render::air_scale(model_.air(), shot.bend);

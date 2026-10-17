@@ -76,7 +76,7 @@ target_link_libraries(hog_render
     PUBLIC hog::atmosphere hog::core hog::terrain volk::volk
     PRIVATE hog::planet vk-bootstrap::vk-bootstrap)
 hog_target_defaults(hog_render)
-hog_add_shaders(hog_render CATALOGUE shaders/aerial.slang shaders/air_tables.slang shaders/billboard.slang shaders/capsules.slang shaders/cloud_march.slang shaders/clouds.slang shaders/glare.slang shaders/globe.slang shaders/ocean.slang shaders/precipitation.slang shaders/sky.slang shaders/sky_view.slang
+hog_add_shaders(hog_render CATALOGUE shaders/aerial.slang shaders/air_tables.slang shaders/billboard.slang shaders/capsules.slang shaders/cloud_march.slang shaders/cloud_resolve.slang shaders/clouds.slang shaders/glare.slang shaders/globe.slang shaders/ocean.slang shaders/precipitation.slang shaders/sky.slang shaders/sky_view.slang
                 shaders/terrain.slang)
 
 # A test device, for tests here and elsewhere that draw.

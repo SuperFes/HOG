@@ -12,6 +12,9 @@
 #include <hog/render/weather_maps.hpp>
 #include <hog/terrain/bend.hpp>
 
+#include <array>
+#include <cstdint>
+
 namespace hog::render {
 
 class Device;
@@ -66,25 +69,38 @@ public:
     // Of the images the clouds are marched into.
     static constexpr VkFormat marched_format = VK_FORMAT_R16G16B16A16_SFLOAT;
     static constexpr VkFormat distances_format = VK_FORMAT_R32_SFLOAT;
+    // Metres the eye may move between frames and still have what was marched before blended in.
+    static constexpr double furthest_blended = 500.0;
 
     // Records marching the clouds for a picture of `extent` into `marched` and `distances`, storage
-    // images of march_extent(). `depth` is the picture's, ready to sample.
-    void march(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth, VkImageView marched,
-               VkImageView distances, const CloudsView& view) const noexcept;
+    // images of march_extent(), then blending them with what was marched for the frames before, as
+    // draw() draws them. `depth` is the picture's, ready to sample. Frames are blended while the
+    // picture keeps its size and the eye doesn't jump.
+    Result<> march(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth,
+                   VkImageView marched, VkImageView distances, const CloudsView& view);
     // Records drawing them over the colour image being rendered to, of `extent`, with no depth
-    // image, from `marched` and `distances`, ready to sample.
-    void draw(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth, VkImageView marched,
-              VkImageView distances, const CloudsView& view) const noexcept;
+    // image, from the last march() and its `distances`, ready to sample.
+    void draw(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth, VkImageView distances,
+              const CloudsView& view) const noexcept;
 
 private:
     Clouds() = default;
 
+    const Device* device_ = nullptr;
     Pipeline march_;
+    Pipeline resolve_;
     Pipeline pipeline_;
     Sampler nearest_;
     Sampler linear_;
     Sampler tiling_;
     CloudNoise noise_;
+    // Frames blended in turn: the last's, read, and the next's, written.
+    std::array<Image, 2> blends_;
+    std::uint32_t blended_ = 0; // which of blends_ was last written
+    VkExtent2D blend_extent_{};
+    std::uint32_t frames_ = 0; // since the eye last jumped
+    Mat4 previous_clip_from_eye_{0.0F};
+    WorldPosition previous_eye_;
 };
 
 } // namespace hog::render
