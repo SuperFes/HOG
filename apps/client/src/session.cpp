@@ -86,7 +86,7 @@ void Session::look(std::optional<WorldPosition> feet, MonotonicClock::time_point
 }
 
 void Session::heard(std::span<const std::byte> bytes, MonotonicClock::time_point now) {
-    const auto message = protocol::decode(bytes);
+    auto message = protocol::decode(bytes);
     if (!message) {
         log::warn(session_log, "{} sent something unreadable: {}", address_, message.error());
     } else if (std::holds_alternative<protocol::Welcome>(*message)) {
@@ -113,6 +113,8 @@ void Session::heard(std::span<const std::byte> bytes, MonotonicClock::time_point
             correction_ = protocol::to_world(corrected->at);
             log::debug(session_log, "{} put the player back", address_);
         }
+    } else if (auto* weather = std::get_if<protocol::Weather>(&*message)) {
+        weather_ = std::move(*weather);
     } else {
         log::debug(session_log, "{} sent a message out of place", address_);
     }

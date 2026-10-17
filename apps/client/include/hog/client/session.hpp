@@ -42,6 +42,11 @@ public:
         return std::exchange(correction_, std::nullopt);
     }
 
+    // The newest weather the server sent since last asked, once.
+    [[nodiscard]] std::optional<protocol::Weather> take_weather() noexcept {
+        return std::exchange(weather_, std::nullopt);
+    }
+
     [[nodiscard]] State state() const noexcept { return state_; }
     [[nodiscard]] const std::string& address() const noexcept { return address_; }
     // Why the server refused or closed the connection.
@@ -77,6 +82,7 @@ private:
     std::uint32_t moves_ = 0;
     std::uint32_t corrections_ = 0;
     std::optional<WorldPosition> correction_;
+    std::optional<protocol::Weather> weather_;
     std::optional<MonotonicClock::time_point> last_snapshot_;
     MonotonicClock::time_point counting_since_;
     std::uint32_t counted_ = 0;

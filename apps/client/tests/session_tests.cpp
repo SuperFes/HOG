@@ -220,6 +220,31 @@ TEST_CASE("a session takes the server's corrections once each", "[client][sessio
     CHECK_FALSE(session.take_correction());
 }
 
+TEST_CASE("a session takes the newest weather once", "[client][session]") {
+    Stand stand;
+    Session session = connected(stand.server);
+    welcome(session, stand);
+    CHECK_FALSE(session.take_weather());
+
+    const auto weather = [](float cloud) {
+        return protocol::Weather{.level = 0,
+                                 .fade = 1s,
+                                 .cells = std::vector<protocol::CellWeather>(6, {.cloud = cloud})};
+    };
+    stand.send(weather(1.0F));
+    stand.send(weather(4.0F));
+    std::optional<protocol::Weather> taken;
+    look_until(session, stand, [&] {
+        if (auto newest = session.take_weather()) {
+            taken = std::move(newest);
+        }
+        return taken && taken->cells[0].cloud == 4.0F;
+    });
+    REQUIRE(taken.has_value());
+    CHECK(taken.value_or(protocol::Weather{}).fade == 1s);
+    CHECK_FALSE(session.take_weather());
+}
+
 TEST_CASE("a session keeps what snapshots show and acknowledges them", "[client][session]") {
     Stand stand;
     Session session = connected(stand.server);
@@ -414,4 +439,7 @@ TEST_CASE("two players see each other through a bad network", "[client][session]
     CHECK(sees(*anna, standing(server->planet(), 103.0)));
     CHECK(anna->last_snapshot());
     CHECK(matt->stats());
+    // Both were told the weather as they joined.
+    CHECK(anna->take_weather());
+    CHECK(matt->take_weather());
 }

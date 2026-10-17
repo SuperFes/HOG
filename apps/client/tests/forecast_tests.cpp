@@ -1,0 +1,179 @@
+#include <hog/client/forecast.hpp>
+#include <hog/planet/projection.hpp>
+#include <hog/sim/cell_grid.hpp>
+#include <hog/sim/weather.hpp>
+
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <glm/glm.hpp>
+
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <vector>
+
+using namespace std::chrono_literals;
+using Catch::Matchers::WithinAbs;
+using hog::DVec3;
+using hog::MonotonicClock;
+using hog::client::cube_direction;
+using hog::client::Forecast;
+using hog::client::weather_map_size;
+using hog::protocol::CellWeather;
+using hog::protocol::Weather;
+
+namespace {
+
+constexpr MonotonicClock::time_point start{};
+
+Weather everywhere(CellWeather cell, std::chrono::milliseconds fade = 10s, std::uint8_t level = 2) {
+    return {.level = level,
+            .fade = fade,
+            .cells = std::vector<CellWeather>(hog::protocol::weather_cells(level), cell)};
+}
+
+double cloud_at(const Forecast& forecast, MonotonicClock::time_point now) {
+    return double{forecast.at(glm::normalize(DVec3{1.0, 2.0, 3.0}), now).cloud};
+}
+
+// Where Vulkan samples a direction: its face, and s and t across it from 0 to 1.
+struct Sampled {
+    std::uint32_t face;
+    double s;
+    double t;
+};
+
+Sampled sampled(DVec3 d) {
+    const DVec3 a = glm::abs(d);
+    if (a.x >= a.y && a.x >= a.z) {
+        return d.x > 0.0 ? Sampled{.face = 0,
+                                   .s = ((-d.z / a.x) + 1.0) / 2.0,
+                                   .t = ((-d.y / a.x) + 1.0) / 2.0}
+                         : Sampled{.face = 1,
+                                   .s = ((d.z / a.x) + 1.0) / 2.0,
+                                   .t = ((-d.y / a.x) + 1.0) / 2.0};
+    }
+    if (a.y >= a.z) {
+        return d.y > 0.0 ? Sampled{.face = 2,
+                                   .s = ((d.x / a.y) + 1.0) / 2.0,
+                                   .t = ((d.z / a.y) + 1.0) / 2.0}
+                         : Sampled{.face = 3,
+                                   .s = ((d.x / a.y) + 1.0) / 2.0,
+                                   .t = ((-d.z / a.y) + 1.0) / 2.0};
+    }
+    return d.z > 0.0
+               ? Sampled{.face = 4, .s = ((d.x / a.z) + 1.0) / 2.0, .t = ((-d.y / a.z) + 1.0) / 2.0}
+               : Sampled{
+                     .face = 5, .s = ((-d.x / a.z) + 1.0) / 2.0, .t = ((-d.y / a.z) + 1.0) / 2.0};
+}
+
+} // namespace
+
+TEST_CASE("a cube map's texels look the way Vulkan samples them", "[client][forecast]") {
+    constexpr std::uint32_t size = 8;
+    for (std::uint32_t face = 0; face < 6; ++face) {
+        for (std::uint32_t y = 0; y < size; ++y) {
+            for (std::uint32_t x = 0; x < size; ++x) {
+                CAPTURE(face, x, y);
+                const DVec3 direction = cube_direction(face, x, y, size);
+                CHECK_THAT(glm::length(direction), WithinAbs(1.0, 1e-12));
+                const Sampled at = sampled(direction);
+                CHECK(at.face == face);
+                CHECK_THAT(at.s * size, WithinAbs(x + 0.5, 1e-9));
+                CHECK_THAT(at.t * size, WithinAbs(y + 0.5, 1e-9));
+            }
+        }
+    }
+}
+
+TEST_CASE("with no weather the sky is clear", "[client][forecast]") {
+    const Forecast forecast;
+    CHECK_FALSE(forecast.known());
+    CHECK(forecast.at(DVec3{0.0, 0.0, 1.0}, start) == CellWeather{});
+    CHECK(forecast.before().empty());
+    CHECK(forecast.received() == 0);
+}
+
+TEST_CASE("the first weather is shown at once", "[client][forecast]") {
+    Forecast forecast;
+    const CellWeather rainy{.cloud = 2.0F, .falling = 4.0F, .snow = 0.25F, .drift = {3.0F, -1.0F}};
+    forecast.receive(everywhere(rainy), start);
+    CHECK(forecast.known());
+    CHECK(forecast.received() == 1);
+    CHECK(forecast.faded(start) == 1.0);
+    const CellWeather here = forecast.at(glm::normalize(DVec3{-1.0, 0.5, 0.2}), start);
+    CHECK_THAT(double{here.cloud}, WithinAbs(2.0, 1e-5));
+    CHECK_THAT(double{here.falling}, WithinAbs(4.0, 1e-5));
+    CHECK_THAT(double{here.snow}, WithinAbs(0.25, 1e-6));
+    CHECK_THAT(double{here.drift.x}, WithinAbs(3.0, 1e-5));
+    CHECK_THAT(double{here.drift.y}, WithinAbs(-1.0, 1e-5));
+    REQUIRE(forecast.before().size() == std::size_t{6} * weather_map_size * weather_map_size);
+    CHECK(forecast.after() == forecast.before());
+    const auto cover = static_cast<int>(std::lround(double{hog::sim::cloud_cover(2.0F)} * 255.0));
+    // The roots of 2/16 and of 4/256, and a quarter.
+    const hog::client::WeatherTexel expected{static_cast<std::uint8_t>(cover), 90, 32, 64};
+    CHECK(std::ranges::all_of(forecast.before(),
+                              [&](const auto& texel) { return texel == expected; }));
+}
+
+TEST_CASE("new weather fades in over its fade", "[client][forecast]") {
+    Forecast forecast;
+    forecast.receive(everywhere({}), start);
+    forecast.receive(everywhere({.cloud = 4.0F}), start + 1s);
+    CHECK(forecast.received() == 2);
+    CHECK(cloud_at(forecast, start + 1s) == 0.0);
+    CHECK_THAT(cloud_at(forecast, start + 6s), WithinAbs(2.0, 1e-5));
+    CHECK_THAT(cloud_at(forecast, start + 11s), WithinAbs(4.0, 1e-5));
+    CHECK_THAT(cloud_at(forecast, start + 1h), WithinAbs(4.0, 1e-5));
+    CHECK(forecast.before().front()[0] == 0);
+    CHECK(forecast.after().front()[0] > 200);
+}
+
+TEST_CASE("weather coming mid-fade fades on from what's shown", "[client][forecast]") {
+    Forecast forecast;
+    forecast.receive(everywhere({}), start);
+    forecast.receive(everywhere({.cloud = 4.0F}), start);
+    forecast.receive(everywhere({.cloud = 0.0F}), start + 5s);
+    CHECK_THAT(cloud_at(forecast, start + 5s), WithinAbs(2.0, 1e-5));
+    CHECK_THAT(cloud_at(forecast, start + 10s), WithinAbs(1.0, 1e-5));
+    CHECK_THAT(cloud_at(forecast, start + 15s), WithinAbs(0.0, 1e-5));
+}
+
+TEST_CASE("weather with no fade, or at another level, is shown at once", "[client][forecast]") {
+    Forecast forecast;
+    forecast.receive(everywhere({}), start);
+    forecast.receive(everywhere({.cloud = 4.0F}, 0ms), start);
+    CHECK_THAT(cloud_at(forecast, start), WithinAbs(4.0, 1e-5));
+    CHECK(forecast.after() == forecast.before());
+    forecast.receive(everywhere({.cloud = 1.0F}, 10s, 3), start);
+    CHECK_THAT(cloud_at(forecast, start), WithinAbs(1.0, 1e-5));
+}
+
+TEST_CASE("the weather's map holds what's at each texel's direction", "[client][forecast]") {
+    // Cloud from none to plenty about the planet, and rain where there's most.
+    const hog::sim::CellGrid grid{2};
+    Weather weather = everywhere({}, 0ms);
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        const DVec3 up = grid.frame(index).up;
+        weather.cells[index].cloud = static_cast<float>(1.5 + up.x + (0.5 * up.z));
+        weather.cells[index].falling = up.y > 0.5 ? 20.0F : 0.0F;
+    }
+    Forecast forecast;
+    forecast.receive(weather, start);
+    for (std::uint32_t face = 0; face < 6; ++face) {
+        for (std::uint32_t y = 0; y < weather_map_size; y += 7) {
+            for (std::uint32_t x = 0; x < weather_map_size; x += 7) {
+                CAPTURE(face, x, y);
+                const auto& texel =
+                    forecast.before()[(((face * weather_map_size) + y) * weather_map_size) + x];
+                const CellWeather here =
+                    forecast.at(cube_direction(face, x, y, weather_map_size), start);
+                CHECK(std::abs(texel[0] - (hog::sim::cloud_cover(here.cloud) * 255.0F)) <= 0.51F);
+                CHECK(std::abs(texel[2] - (std::sqrt(here.falling / 256.0F) * 255.0F)) <= 0.51F);
+            }
+        }
+    }
+}

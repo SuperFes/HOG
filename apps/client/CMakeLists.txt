@@ -8,6 +8,7 @@ target_compile_definitions(stb_image PUBLIC STBI_ONLY_PNG)
 add_library(hog_client
     src/daylight.cpp
     src/flight.cpp
+    src/forecast.cpp
     src/frame_times.cpp
     src/ground.cpp
     src/likeness.cpp
@@ -30,6 +31,7 @@ hog_target_defaults(hog_client)
 hog_add_tests(hog_client
     tests/daylight_tests.cpp
     tests/flight_tests.cpp
+    tests/forecast_tests.cpp
     tests/frame_times_tests.cpp
     tests/ground_tests.cpp
     tests/likeness_tests.cpp
