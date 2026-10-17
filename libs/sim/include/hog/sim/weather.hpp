@@ -84,6 +84,21 @@ struct WeatherFields {
 // Fraction of the sky covered, 0 to 1, by mm of cloud.
 [[nodiscard]] float cloud_cover(float cloud) noexcept;
 
+// The air over a cell as it's seen. Heights are metres above sea level.
+struct Sky {
+    // Of the water the air near the ground holds when it starts forming cloud, the share it holds.
+    float humidity = 0.0F;
+    float fog = 0.0F; // 0 to 1
+    // Fog fills the low ground first: its top rises from sea level as it thickens.
+    float fog_top = 0.0F;
+    // Where cloud is, or would form.
+    float base = 0.0F;
+    float top = 0.0F;
+};
+
+[[nodiscard]] Sky sky_over(const WeatherFields& fields, const Ground& ground,
+                           const WeatherTuning& tuning, std::size_t index);
+
 // A travelling low.
 struct StormSystem {
     std::uint32_t id = 0;

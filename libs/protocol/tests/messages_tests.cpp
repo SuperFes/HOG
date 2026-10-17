@@ -57,7 +57,11 @@ Weather weather(std::uint8_t level) {
         out.cells.push_back({.cloud = step * step / 16.0F,
                              .falling = step * step,
                              .snow = step == 0.0F ? 1.0F : 0.0F,
-                             .drift = {-step, static_cast<float>(index) - 12.0F}});
+                             .drift = {-step, static_cast<float>(index) - 12.0F},
+                             .humidity = step / 255.0F,
+                             .fog_top = step * 32.0F,
+                             .base = step * 640.0F,
+                             .top = (step + 1.0F) * 1'280.0F});
     }
     return out;
 }
@@ -213,25 +217,47 @@ TEST_CASE("weather is sent near enough to draw", "[protocol]") {
     }
     CHECK_THAT(as_sent({.snow = 0.31F}).snow, Catch::Matchers::WithinAbs(0.31, 0.5 / 255.0));
     CHECK(as_sent({.drift = {12.4F, -3.6F}}).drift == hog::Vec2{12.0F, -4.0F});
+    CHECK_THAT(as_sent({.humidity = 0.83F}).humidity,
+               Catch::Matchers::WithinAbs(0.83, 0.5 / 255.0));
+    CHECK_THAT(as_sent({.fog_top = 250.0F}).fog_top, Catch::Matchers::WithinAbs(250.0, 16.0));
+    const CellWeather heights = as_sent({.base = 1'210.0F, .top = 9'000.0F});
+    CHECK_THAT(heights.base, Catch::Matchers::WithinAbs(1'210.0, 32.0));
+    CHECK_THAT(heights.top, Catch::Matchers::WithinAbs(9'000.0, 32.0));
 }
 
 TEST_CASE("weather past what a byte holds is clamped", "[protocol]") {
     const float nan = std::numeric_limits<float>::quiet_NaN();
-    const CellWeather over =
-        as_sent({.cloud = 100.0F, .falling = 1'000.0F, .snow = 2.0F, .drift = {500.0F, -500.0F}});
+    const CellWeather over = as_sent({.cloud = 100.0F,
+                                      .falling = 1'000.0F,
+                                      .snow = 2.0F,
+                                      .drift = {500.0F, -500.0F},
+                                      .humidity = 3.0F,
+                                      .fog_top = 20'000.0F,
+                                      .base = 20'000.0F,
+                                      .top = 20'000.0F});
     CHECK(over.cloud < 16.0F);
     CHECK(over.cloud > 15.8F);
     CHECK(over.falling < 255.0F);
     CHECK(over.falling > 253.0F);
     CHECK(over.snow == 1.0F);
     CHECK(over.drift == hog::Vec2{127.0F, -127.0F});
-    CHECK(as_sent({.cloud = -1.0F, .falling = nan, .snow = -0.5F, .drift = {nan, nan}}) ==
-          CellWeather{});
+    CHECK(over.humidity == 1.0F);
+    CHECK(over.fog_top == 8'160.0F);
+    CHECK(over.base == 16'320.0F);
+    CHECK(over.top == 16'320.0F);
+    CHECK(as_sent({.cloud = -1.0F,
+                   .falling = nan,
+                   .snow = -0.5F,
+                   .drift = {nan, nan},
+                   .humidity = nan,
+                   .fog_top = -5.0F,
+                   .base = nan,
+                   .top = -1.0F}) == CellWeather{});
 }
 
-TEST_CASE("the planet's weather takes five bytes a cell", "[protocol]") {
+TEST_CASE("the planet's weather takes nine bytes a cell", "[protocol]") {
     CHECK(weather_cells(most_weather_level) == 6'144);
-    CHECK(encode(weather(most_weather_level)).size() == 2 + 1 + 4 + (5 * 6'144));
+    CHECK(encode(weather(most_weather_level)).size() == 2 + 1 + 4 + (9 * 6'144));
 }
 
 TEST_CASE("weather too fine is refused", "[protocol]") {

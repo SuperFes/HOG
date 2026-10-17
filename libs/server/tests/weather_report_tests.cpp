@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 using namespace std::chrono_literals;
 using Catch::Matchers::WithinAbs;
@@ -13,6 +14,7 @@ using Catch::Matchers::WithinRel;
 using hog::Vec2;
 using hog::server::weather_report;
 using hog::sim::CellGrid;
+using hog::sim::Ground;
 using hog::sim::WeatherConfig;
 using hog::sim::WeatherFields;
 
@@ -23,6 +25,15 @@ WeatherConfig config() {
     WeatherConfig out;
     out.step = 10min;
     out.tuning.motion.jet_steering = 0.4;
+    return out;
+}
+
+// Land rising a hundred metres a cell.
+std::vector<Ground> ground(const CellGrid& grid) {
+    std::vector<Ground> out(grid.size());
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        out[index] = {.elevation = 100.0F * static_cast<float>(index), .ocean = false};
+    }
     return out;
 }
 
@@ -39,8 +50,13 @@ TEST_CASE("weather as coarse as may be sent goes cell for cell", "[server][weath
         fields.hail[index] = 0.2F;
         fields.wind[index] = {value, -5.0F};
         fields.jet[index] = {value + 10.0F, 5.0F};
+        fields.temperature[index] = value - 20.0F;
+        fields.vapour[index] = 5.0F;
+        fields.lift[index] = (value - 40.0F) / 1'000.0F;
+        fields.storm[index] = value / 200.0F;
     }
-    const auto weather = weather_report(grid, fields, config(), 600'000ms);
+    const std::vector<Ground> under = ground(grid);
+    const auto weather = weather_report(grid, fields, ground(grid), config(), 600'000ms);
     CHECK(weather.level == 2);
     CHECK(weather.fade == 600'000ms);
     REQUIRE(weather.cells.size() == grid.size());
@@ -55,12 +71,18 @@ TEST_CASE("weather as coarse as may be sent goes cell for cell", "[server][weath
         CHECK_THAT(double{cell.snow}, WithinRel(0.6 / falling, 1e-5));
         CHECK_THAT(double{cell.drift.x}, WithinAbs(value + 4.0, 1e-4));
         CHECK_THAT(double{cell.drift.y}, WithinAbs(-1.0, 1e-5));
+        const hog::sim::Sky sky = hog::sim::sky_over(fields, under[index], config().tuning, index);
+        CHECK(cell.humidity == sky.humidity);
+        CHECK(cell.fog_top == sky.fog_top);
+        CHECK(cell.base == sky.base);
+        CHECK(cell.top == sky.top);
     }
 }
 
 TEST_CASE("nothing falling is no snow", "[server][weather]") {
     const CellGrid grid{0};
-    const auto weather = weather_report(grid, WeatherFields{grid.size()}, config(), 0ms);
+    const auto weather =
+        weather_report(grid, WeatherFields{grid.size()}, ground(grid), config(), 0ms);
     for (const auto& cell : weather.cells) {
         CHECK(cell.falling == 0.0F);
         CHECK(cell.snow == 0.0F);
@@ -83,7 +105,7 @@ TEST_CASE("finer weather is averaged over the cells sent", "[server][weather]") 
         fields.jet[index] = fields.wind[index];
         cloud += grid.area(index) * double{fields.cloud[index]};
     }
-    const auto weather = weather_report(grid, fields, config(), 0ms);
+    const auto weather = weather_report(grid, fields, ground(grid), config(), 0ms);
     CHECK(weather.level == hog::protocol::most_weather_level);
     REQUIRE(weather.cells.size() == sent.size());
     double sent_cloud = 0.0;

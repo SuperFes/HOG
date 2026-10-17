@@ -695,3 +695,78 @@ TEST_CASE("a year of weather matches the planet's climate", "[sim][weather][clim
     REQUIRE(snowfall > 0.0);
     CHECK(snowy_warmth / snowfall < 1.0);
 }
+
+namespace {
+
+// One cell of air at 25 °C, which forms cloud from 45 mm.
+WeatherFields air(float vapour) {
+    WeatherFields fields{1};
+    fields.temperature[0] = 25.0F;
+    fields.vapour[0] = vapour;
+    return fields;
+}
+
+hog::sim::Sky sky_of(const WeatherFields& fields, float elevation = 0.0F) {
+    return hog::sim::sky_over(fields, Ground{.elevation = elevation, .ocean = elevation <= 0.0F},
+                              hog::sim::WeatherTuning{}, 0);
+}
+
+} // namespace
+
+TEST_CASE("humidity is the share of the water the air holds when it starts forming cloud",
+          "[sim][weather]") {
+    CHECK(std::abs(sky_of(air(22.5F)).humidity - 0.5F) < 1e-6F);
+    CHECK(sky_of(air(80.0F)).humidity == 1.0F);
+    CHECK(sky_of(air(0.0F)).humidity == 0.0F);
+}
+
+TEST_CASE("cloud sits higher in drier air, and above the ground beneath", "[sim][weather]") {
+    const hog::sim::Sky damp = sky_of(air(45.0F));
+    CHECK(std::abs(damp.base - 500.0F) < 1.0F);
+    CHECK(std::abs(sky_of(air(30.0F)).base - 1'333.3F) < 1.0F);
+    CHECK(sky_of(air(0.0F)).base == 3'000.0F);
+    CHECK(std::abs(sky_of(air(45.0F), 1'000.0F).base - 1'500.0F) < 1.0F);
+    CHECK(damp.top > damp.base);
+}
+
+TEST_CASE("more cloud and rising air build deeper cloud, and storms tower", "[sim][weather]") {
+    const auto depth = [](const WeatherFields& fields) {
+        const hog::sim::Sky sky = sky_of(fields);
+        return sky.top - sky.base;
+    };
+    WeatherFields fields = air(45.0F);
+    const float thin = depth(fields);
+    CHECK(std::abs(thin - 300.0F) < 1.0F);
+    fields.cloud[0] = 2.0F;
+    const float thick = depth(fields);
+    CHECK(thick > thin + 2'000.0F);
+    fields.lift[0] = 0.2F;
+    CHECK(depth(fields) > thick + 2'000.0F);
+    fields.storm[0] = 1.0F;
+    CHECK(sky_of(fields).top >= 11'000.0F);
+}
+
+TEST_CASE("fog lies in calm, damp air and fills the low ground first", "[sim][weather]") {
+    WeatherFields calm = air(45.0F);
+    const hog::sim::Sky at_sea = sky_of(calm);
+    CHECK(at_sea.fog == 1.0F);
+    CHECK(std::abs(at_sea.fog_top - 300.0F) < 1.0F);
+    CHECK(std::abs(sky_of(calm, 500.0F).fog_top - 800.0F) < 1.0F);
+
+    WeatherFields windy = calm;
+    windy.wind[0] = {8.0F, 0.0F};
+    CHECK(sky_of(windy).fog == 0.0F);
+    CHECK(sky_of(windy).fog_top == 0.0F);
+    CHECK(sky_of(air(30.0F)).fog == 0.0F);
+    WeatherFields rising = calm;
+    rising.lift[0] = 1.0F;
+    CHECK(sky_of(rising).fog < 0.01F);
+
+    // Thin fog over high ground lies only in the valleys, below the ground's mean.
+    WeatherFields breezy = calm;
+    breezy.wind[0] = {4.0F, 0.0F};
+    const hog::sim::Sky partly = sky_of(breezy, 1'000.0F);
+    CHECK(partly.fog > 0.0F);
+    CHECK(partly.fog < 1.0F);
+    CHECK(partly.fog_top < 1'000.0F);
+}

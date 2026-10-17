@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <utility>
 
 namespace hog::client {
 
@@ -25,7 +26,11 @@ protocol::CellWeather mixed(const protocol::CellWeather& from, const protocol::C
     return {.cloud = mix(from.cloud, to.cloud, by),
             .falling = mix(from.falling, to.falling, by),
             .snow = mix(from.snow, to.snow, by),
-            .drift = from.drift + ((to.drift - from.drift) * by)};
+            .drift = from.drift + ((to.drift - from.drift) * by),
+            .humidity = mix(from.humidity, to.humidity, by),
+            .fog_top = mix(from.fog_top, to.fog_top, by),
+            .base = mix(from.base, to.base, by),
+            .top = mix(from.top, to.top, by)};
 }
 
 protocol::CellWeather interpolated(const sim::CellGrid& grid, const Cells& cells, DVec3 direction) {
@@ -37,40 +42,62 @@ protocol::CellWeather interpolated(const sim::CellGrid& grid, const Cells& cells
             .falling = field([](const auto& cell) { return double{cell.falling}; }),
             .snow = field([](const auto& cell) { return double{cell.snow}; }),
             .drift = {field([](const auto& cell) { return double{cell.drift.x}; }),
-                      field([](const auto& cell) { return double{cell.drift.y}; })}};
+                      field([](const auto& cell) { return double{cell.drift.y}; })},
+            .humidity = field([](const auto& cell) { return double{cell.humidity}; }),
+            .fog_top = field([](const auto& cell) { return double{cell.fog_top}; }),
+            .base = field([](const auto& cell) { return double{cell.base}; }),
+            .top = field([](const auto& cell) { return double{cell.top}; })};
 }
 
 std::uint8_t to_byte(double share) noexcept {
     return static_cast<std::uint8_t>(std::lround(std::clamp(share, 0.0, 1.0) * 255.0));
 }
 
-std::vector<WeatherTexel> map_of(const sim::CellGrid& grid, const Cells& cells) {
+struct Maps {
+    std::vector<WeatherTexel> weather;
+    std::vector<SkyTexel> sky;
+};
+
+Maps maps_of(const sim::CellGrid& grid, const Cells& cells) {
     constexpr std::uint32_t size = weather_map_size;
-    std::vector<WeatherTexel> texels;
-    texels.reserve(std::size_t{6} * size * size);
+    Maps maps;
+    maps.weather.reserve(std::size_t{6} * size * size);
+    maps.sky.reserve(std::size_t{6} * size * size);
     for (std::uint32_t face = 0; face < 6; ++face) {
         for (std::uint32_t y = 0; y < size; ++y) {
             for (std::uint32_t x = 0; x < size; ++x) {
                 const protocol::CellWeather cell =
                     interpolated(grid, cells, cube_direction(face, x, y, size));
-                texels.push_back({to_byte(double{sim::cloud_cover(cell.cloud)}),
-                                  to_byte(std::sqrt(std::max(double{cell.cloud}, 0.0) / 16.0)),
-                                  to_byte(std::sqrt(std::max(double{cell.falling}, 0.0) / 256.0)),
-                                  to_byte(double{cell.snow})});
+                maps.weather.push_back(
+                    {to_byte(double{sim::cloud_cover(cell.cloud)}),
+                     to_byte(std::sqrt(std::max(double{cell.cloud}, 0.0) / 16.0)),
+                     to_byte(std::sqrt(std::max(double{cell.falling}, 0.0) / 256.0)),
+                     to_byte(double{cell.snow})});
+                maps.sky.push_back({to_byte(double{cell.humidity}),
+                                    to_byte(double{cell.fog_top} / (255.0 * fog_texel_step)),
+                                    to_byte(double{cell.base} / (255.0 * height_texel_step)),
+                                    to_byte(double{cell.top} / (255.0 * height_texel_step))});
             }
         }
     }
-    return texels;
+    return maps;
 }
 
 } // namespace
 
 std::string describe(const protocol::CellWeather& weather) {
-    std::string line =
-        std::format("{:.0f}% cloud", 100.0 * double{sim::cloud_cover(weather.cloud)});
+    const double cover = 100.0 * double{sim::cloud_cover(weather.cloud)};
+    std::string line = std::format("{:.0f}% cloud", cover);
+    if (cover >= 0.5) {
+        line += std::format(" at {:.0f}-{:.0f} m", double{weather.base}, double{weather.top});
+    }
     if (weather.falling > 0.0F) {
         const char* falls = weather.snow >= 0.5F ? "snow" : "rain";
         line += std::format(", {} {:.1f} mm/h", falls, double{weather.falling});
+    }
+    line += std::format(", {:.0f}% humid", 100.0 * double{weather.humidity});
+    if (weather.fog_top > 0.0F) {
+        line += std::format(", fog to {:.0f} m", double{weather.fog_top});
     }
     return line + std::format(", drifting {:.0f} m/s", double{glm::length(weather.drift)});
 }
@@ -115,8 +142,12 @@ void Forecast::receive(const protocol::Weather& weather, MonotonicClock::time_po
         }
     }
     since_ = now;
-    before_ = map_of(*grid_, from_);
-    after_ = fade_ > MonotonicClock::duration::zero() ? map_of(*grid_, to_) : before_;
+    Maps before = maps_of(*grid_, from_);
+    Maps after = fade_ > MonotonicClock::duration::zero() ? maps_of(*grid_, to_) : before;
+    before_ = std::move(before.weather);
+    sky_before_ = std::move(before.sky);
+    after_ = std::move(after.weather);
+    sky_after_ = std::move(after.sky);
 }
 
 double Forecast::faded(MonotonicClock::time_point now) const noexcept {

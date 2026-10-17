@@ -38,7 +38,10 @@ constexpr float cloud_steps = 64.0F;   // a byte's steps to the root of a millim
 constexpr float falling_steps = 16.0F; // to the root of a millimetre an hour
 constexpr float snow_steps = 255.0F;
 constexpr float fastest_drift = 127.0F;
-constexpr std::size_t weather_cell_bytes = 5;
+constexpr float humidity_steps = 255.0F;
+constexpr float fog_step = 32.0F; // metres
+constexpr float height_step = 64.0F;
+constexpr std::size_t weather_cell_bytes = 9;
 
 [[nodiscard]] std::uint8_t to_byte(float value) noexcept {
     // Also NaN to 0.
@@ -73,15 +76,26 @@ constexpr std::size_t weather_cell_bytes = 5;
 using CodedCell = std::array<std::uint8_t, weather_cell_bytes>;
 
 [[nodiscard]] CodedCell coded(const CellWeather& cell) noexcept {
-    return {rooted(cell.cloud, cloud_steps), rooted(cell.falling, falling_steps),
-            to_byte(cell.snow * snow_steps), speed(cell.drift.x), speed(cell.drift.y)};
+    return {rooted(cell.cloud, cloud_steps),
+            rooted(cell.falling, falling_steps),
+            to_byte(cell.snow * snow_steps),
+            speed(cell.drift.x),
+            speed(cell.drift.y),
+            to_byte(cell.humidity * humidity_steps),
+            to_byte(cell.fog_top / fog_step),
+            to_byte(cell.base / height_step),
+            to_byte(cell.top / height_step)};
 }
 
 [[nodiscard]] CellWeather decoded(const CodedCell& bytes) noexcept {
     return {.cloud = squared(bytes[0], cloud_steps),
             .falling = squared(bytes[1], falling_steps),
             .snow = static_cast<float>(bytes[2]) / snow_steps,
-            .drift = {speed_of(bytes[3]), speed_of(bytes[4])}};
+            .drift = {speed_of(bytes[3]), speed_of(bytes[4])},
+            .humidity = static_cast<float>(bytes[5]) / humidity_steps,
+            .fog_top = static_cast<float>(bytes[6]) * fog_step,
+            .base = static_cast<float>(bytes[7]) * height_step,
+            .top = static_cast<float>(bytes[8]) * height_step};
 }
 
 template <typename T>

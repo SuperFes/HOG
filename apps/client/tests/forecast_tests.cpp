@@ -90,11 +90,17 @@ TEST_CASE("a cube map's texels look the way Vulkan samples them", "[client][fore
 }
 
 TEST_CASE("the weather reads as a line", "[client][forecast]") {
-    CHECK(hog::client::describe({}) == "0% cloud, drifting 0 m/s");
-    CHECK(hog::client::describe({.cloud = 16.0F, .falling = 2.5F, .drift = {3.0F, -4.0F}}) ==
-          "100% cloud, rain 2.5 mm/h, drifting 5 m/s");
+    CHECK(hog::client::describe({}) == "0% cloud, 0% humid, drifting 0 m/s");
+    CHECK(hog::client::describe({.cloud = 16.0F,
+                                 .falling = 2.5F,
+                                 .drift = {3.0F, -4.0F},
+                                 .humidity = 0.92F,
+                                 .fog_top = 300.0F,
+                                 .base = 800.0F,
+                                 .top = 2'100.0F}) ==
+          "100% cloud at 800-2100 m, rain 2.5 mm/h, 92% humid, fog to 300 m, drifting 5 m/s");
     CHECK(hog::client::describe({.cloud = 16.0F, .falling = 1.0F, .snow = 0.75F}) ==
-          "100% cloud, snow 1.0 mm/h, drifting 0 m/s");
+          "100% cloud at 0-0 m, snow 1.0 mm/h, 0% humid, drifting 0 m/s");
 }
 
 TEST_CASE("with no weather the sky is clear", "[client][forecast]") {
@@ -107,7 +113,14 @@ TEST_CASE("with no weather the sky is clear", "[client][forecast]") {
 
 TEST_CASE("the first weather is shown at once", "[client][forecast]") {
     Forecast forecast;
-    const CellWeather rainy{.cloud = 2.0F, .falling = 4.0F, .snow = 0.25F, .drift = {3.0F, -1.0F}};
+    const CellWeather rainy{.cloud = 2.0F,
+                            .falling = 4.0F,
+                            .snow = 0.25F,
+                            .drift = {3.0F, -1.0F},
+                            .humidity = 0.6F,
+                            .fog_top = 320.0F,
+                            .base = 1'280.0F,
+                            .top = 3'200.0F};
     forecast.receive(everywhere(rainy), start);
     CHECK(forecast.known());
     CHECK(forecast.received() == 1);
@@ -125,6 +138,16 @@ TEST_CASE("the first weather is shown at once", "[client][forecast]") {
     const hog::client::WeatherTexel expected{static_cast<std::uint8_t>(cover), 90, 32, 64};
     CHECK(std::ranges::all_of(forecast.before(),
                               [&](const auto& texel) { return texel == expected; }));
+    CHECK_THAT(double{here.humidity}, WithinAbs(0.6, 1e-6));
+    CHECK_THAT(double{here.fog_top}, WithinAbs(320.0, 1e-3));
+    CHECK_THAT(double{here.base}, WithinAbs(1'280.0, 1e-3));
+    CHECK_THAT(double{here.top}, WithinAbs(3'200.0, 1e-3));
+    REQUIRE(forecast.sky_before().size() == forecast.before().size());
+    CHECK(forecast.sky_after() == forecast.sky_before());
+    // In steps of 32 and 64 metres.
+    const hog::client::SkyTexel sky{153, 10, 20, 50};
+    CHECK(std::ranges::all_of(forecast.sky_before(),
+                              [&](const auto& texel) { return texel == sky; }));
 }
 
 TEST_CASE("new weather fades in over its fade", "[client][forecast]") {
@@ -168,6 +191,8 @@ TEST_CASE("the weather's map holds what's at each texel's direction", "[client][
         const DVec3 up = grid.frame(index).up;
         weather.cells[index].cloud = static_cast<float>(1.5 + up.x + (0.5 * up.z));
         weather.cells[index].falling = up.y > 0.5 ? 20.0F : 0.0F;
+        weather.cells[index].base = static_cast<float>(2'000.0 + (1'000.0 * up.z));
+        weather.cells[index].fog_top = up.x > 0.0 ? static_cast<float>(400.0 * up.x) : 0.0F;
     }
     Forecast forecast;
     forecast.receive(weather, start);
@@ -181,6 +206,10 @@ TEST_CASE("the weather's map holds what's at each texel's direction", "[client][
                     forecast.at(cube_direction(face, x, y, weather_map_size), start);
                 CHECK(std::abs(texel[0] - (hog::sim::cloud_cover(here.cloud) * 255.0F)) <= 0.51F);
                 CHECK(std::abs(texel[2] - (std::sqrt(here.falling / 256.0F) * 255.0F)) <= 0.51F);
+                const auto& sky =
+                    forecast.sky_before()[(((face * weather_map_size) + y) * weather_map_size) + x];
+                CHECK(std::abs(sky[1] - (here.fog_top / 32.0F)) <= 0.51F);
+                CHECK(std::abs(sky[2] - (here.base / 64.0F)) <= 0.51F);
             }
         }
     }

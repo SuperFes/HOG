@@ -51,6 +51,41 @@ float WeatherFields::cloud_cover(std::size_t index) const {
     return sim::cloud_cover(cloud[index]);
 }
 
+Sky sky_over(const WeatherFields& fields, const Ground& ground, const WeatherTuning& tuning,
+             std::size_t index) {
+    const SkyTuning& sky = tuning.sky;
+    const auto surface = static_cast<double>(fields.temperature[index]);
+    const double holds = tuning.water.condensing_humidity * detail::saturation(surface);
+    const double humidity = std::clamp(static_cast<double>(fields.vapour[index]) / holds, 0.0, 1.0);
+    const double rising =
+        std::max(std::tanh(static_cast<double>(fields.lift[index]) / tuning.lift.reference), 0.0);
+    const auto storm = static_cast<double>(fields.storm[index]);
+    const auto elevation = static_cast<double>(ground.elevation);
+
+    const auto smooth = [](double from, double to, double at) {
+        const double t = std::clamp((at - from) / (to - from), 0.0, 1.0);
+        return t * t * (3.0 - (2.0 * t));
+    };
+    const Vec2 wind = fields.wind[index];
+    const double speed = std::hypot(static_cast<double>(wind.x), static_cast<double>(wind.y));
+    const double fog = smooth(sky.fog_humidity, 1.0, humidity) *
+                       (1.0 - smooth(sky.fog_calm, sky.fog_windy, speed)) * (1.0 - rising) *
+                       (1.0 - storm);
+
+    const double base =
+        elevation +
+        std::min(sky.saturated_base + (sky.base_per_dryness * (1.0 - humidity)), sky.highest_base);
+    const double depth = sky.thinnest +
+                         (sky.depth_per_mm * static_cast<double>(fields.cloud[index])) +
+                         (sky.rising_depth * rising);
+    const double top = std::max(base + depth, sky.storm_top * storm);
+    return {.humidity = static_cast<float>(humidity),
+            .fog = static_cast<float>(fog),
+            .fog_top = static_cast<float>(fog * (std::max(elevation, 0.0) + sky.fog_depth)),
+            .base = static_cast<float>(base),
+            .top = static_cast<float>(top)};
+}
+
 std::vector<Ground> ground_for(const CellGrid& grid, const planet::World& world) {
     const planet::Climate& climate = world.geology().climate();
     std::vector<Ground> ground(grid.size());

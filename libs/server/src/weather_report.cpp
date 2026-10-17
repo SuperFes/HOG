@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace hog::server {
@@ -17,11 +18,16 @@ struct Sums {
     double falling = 0.0;
     double snowing = 0.0;
     DVec2 drift{0.0};
+    double humidity = 0.0;
+    double fog_top = 0.0;
+    double base = 0.0;
+    double top = 0.0;
 };
 
 } // namespace
 
 protocol::Weather weather_report(const sim::CellGrid& grid, const sim::WeatherFields& fields,
+                                 std::span<const sim::Ground> ground,
                                  const sim::WeatherConfig& config, std::chrono::milliseconds fade) {
     const auto level = static_cast<std::uint8_t>(
         std::min(grid.level(), static_cast<int>(protocol::most_weather_level)));
@@ -44,6 +50,11 @@ protocol::Weather weather_report(const sim::CellGrid& grid, const sim::WeatherFi
             area * double{fields.rain[index] + fields.snow[index] + fields.hail[index]} / hours;
         sum.snowing += area * double{fields.snow[index]} / hours;
         sum.drift += area * (wind + ((jet - wind) * steering));
+        const sim::Sky sky = sim::sky_over(fields, ground[index], config.tuning, index);
+        sum.humidity += area * double{sky.humidity};
+        sum.fog_top += area * double{sky.fog_top};
+        sum.base += area * double{sky.base};
+        sum.top += area * double{sky.top};
     }
 
     protocol::Weather weather{.level = level, .fade = fade, .cells = {}};
@@ -53,7 +64,11 @@ protocol::Weather weather_report(const sim::CellGrid& grid, const sim::WeatherFi
             {.cloud = static_cast<float>(sum.cloud / sum.area),
              .falling = static_cast<float>(sum.falling / sum.area),
              .snow = sum.falling > 0.0 ? static_cast<float>(sum.snowing / sum.falling) : 0.0F,
-             .drift = Vec2{sum.drift / sum.area}});
+             .drift = Vec2{sum.drift / sum.area},
+             .humidity = static_cast<float>(sum.humidity / sum.area),
+             .fog_top = static_cast<float>(sum.fog_top / sum.area),
+             .base = static_cast<float>(sum.base / sum.area),
+             .top = static_cast<float>(sum.top / sum.area)});
     }
     return weather;
 }
