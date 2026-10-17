@@ -39,6 +39,10 @@ struct CloudsView {
 // `moved` within the clouds' period, so their shapes are the same and its precision kept.
 [[nodiscard]] DVec3 within_period(DVec3 moved) noexcept;
 
+// Under a layer of `cover`, the share of the sky it covers, holding `water` mm of cloud, as the
+// layer is lit when drawn.
+[[nodiscard]] CloudShade cloud_shade(double cover, double water) noexcept;
+
 // A layer of cloud round the planet, at a height above sea level, its cover and thickness from
 // weather maps faded between, and its billows drifting with the wind. It's lit through the air and
 // seen through it, and hidden by anything drawn nearer.

@@ -75,10 +75,10 @@ float4 fragment_air(Surface surface) : SV_Target {
     const float3 up = normalize(push.tall_night.xyz);
     const float3 sun = push.sun.xyz;
     const float scale = lighting.sky_scale.w;
-    const float3 sunlight =
-        transmittance(air, transmittance_table, lighting.up_height.w, dot(up, sun));
-    const float3 lit = (sunlight * saturate(dot(normal, sun))) +
-                       (lighting.sky_scale.rgb * (0.5 + (0.5 * dot(normal, up))));
+    const float3 clear = transmittance(air, transmittance_table, lighting.up_height.w, dot(up, sun));
+    const float3 lit = (through_cloud(lighting, clear) * saturate(dot(normal, sun))) +
+                       (sky_under_cloud(lighting, clear * saturate(dot(up, sun))) *
+                        (0.5 + (0.5 * dot(normal, up))));
     const float3 radiance = push.colour.rgb * lit / pi;
 
     const float4 clip = mul(push.clip_from_eye, float4(surface.from_eye, 1.0));

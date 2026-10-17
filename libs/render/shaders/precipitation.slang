@@ -111,9 +111,10 @@ float4 fragment_main(Particle particle) : SV_Target {
     const float3 sun = lighting.sun_exposure.xyz;
     const float3 up = lighting.up_height.xyz;
     const float sun_mu = dot(sun, up);
-    const float3 sunlight =
+    const float3 clear =
         transmittance(air, transmittance_table, lighting.up_height.w, sun_mu) * max(sun_mu, 0.0);
-    const float3 sky = lighting.sky_scale.rgb;
+    const float3 sunlight = through_cloud(lighting, clear);
+    const float3 sky = sky_under_cloud(lighting, clear);
     float3 radiance;
     float shape;
     if (particle.flake != 0u) {

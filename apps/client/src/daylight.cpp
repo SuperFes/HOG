@@ -57,6 +57,11 @@ EyeLight light_at_eye(const atmosphere::Model& model, double height, double sun_
             .sky = model.sky_irradiance(height, sun) + night_glow};
 }
 
+EyeLight under_cloud(const EyeLight& light, render::CloudShade shade) noexcept {
+    return {.sun = light.sun * shade.direct,
+            .sky = (light.sky * (shade.direct + shade.diffuse)) + (light.sun * shade.diffuse)};
+}
+
 double exposure_for(const EyeLight& light) noexcept {
     const double seen = std::max(luminance(light.sun + light.sky), darkest);
     return noon_exposure * std::pow(1.0 / seen, adaptation);

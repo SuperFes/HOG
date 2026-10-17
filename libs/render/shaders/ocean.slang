@@ -104,8 +104,16 @@ float4 fragment_air(Surface surface) : SV_Target {
     const float3 flat_sun = sun - (up * sun_mu);
     const float across = length(flat_view) * length(flat_sun);
     const float cos_azimuth = across > 1e-6 ? dot(flat_view, flat_sun) / across : 1.0;
-    const float3 sky = sky_view_table.SampleLevel(sky_view_uv(air, height, mu, cos_azimuth), 0.0).rgb;
-    const float3 sunlight = transmittance(air, transmittance_table, 0.0, dot(normal, sun));
+    const float3 clear_sky =
+        sky_view_table.SampleLevel(sky_view_uv(air, height, mu, cos_azimuth), 0.0).rgb;
+    // Where cloud hides the sky, the cloud's underside, as bright as the light it lets through.
+    const float3 under =
+        sky_under_cloud(lighting, transmittance(air, transmittance_table, 0.0, sun_mu) *
+                                      max(sun_mu, 0.0)) /
+        pi;
+    const float3 sky = lerp(under, clear_sky, lighting.reach.y);
+    const float3 sunlight =
+        through_cloud(lighting, transmittance(air, transmittance_table, 0.0, dot(normal, sun)));
     const float3 glint = sunlight * glint_lobe * reflected * glint_at(looking, normal, sun);
 
     const float4 clip = mul(push.clip_from_eye, float4(surface.from_eye, 1.0));

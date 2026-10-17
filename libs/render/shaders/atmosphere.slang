@@ -271,9 +271,23 @@ public struct Lighting {
     public float4 sun_exposure;
     // rgb the sky's irradiance on level ground at the eye, w the air's metres to a metre drawn.
     public float4 sky_scale;
-    // x the air's metres the aerial-perspective volume reaches out to.
+    // x the air's metres the aerial-perspective volume reaches out to; y and z of the light falling
+    // on any cloud over the eye, the shares let straight through and scattered through.
     public float4 reach;
 };
+
+// Of `sunlight`, the sun's light as it falls clear, what comes straight through any cloud over the
+// eye.
+public float3 through_cloud(Lighting lighting, float3 sunlight) {
+    return sunlight * lighting.reach.y;
+}
+
+// The sky's light on level ground, under any cloud over the eye lit by it and by `level_sunlight`,
+// the sun's light on level ground as it falls clear.
+public float3 sky_under_cloud(Lighting lighting, float3 level_sunlight) {
+    return (lighting.sky_scale.rgb * (lighting.reach.y + lighting.reach.z)) +
+           (level_sunlight * lighting.reach.z);
+}
 
 public static const uint aerial_size = 32;
 public static const uint aerial_slices = 32;

@@ -2,6 +2,7 @@
 #include <hog/render/clouds.hpp>
 #include <hog/shaders/clouds.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <utility>
@@ -20,6 +21,10 @@ struct Push {
 static_assert(sizeof(Push) <= 128);
 
 constexpr VkFormat map_format = VK_FORMAT_R8G8B8A8_UNORM;
+// As clouds.slang's.
+constexpr double depth_per_mm = 150.0;
+constexpr double scattered_forward = 0.8;
+constexpr double least_cover = 0.05;
 
 constexpr VkDescriptorSetLayoutBinding binding(std::uint32_t at, VkDescriptorType type) noexcept {
     return {.binding = at,
@@ -45,6 +50,18 @@ DVec3 within_period(DVec3 moved) noexcept {
         return kept < 0.0 ? kept + cloud_period : kept;
     };
     return {within(moved.x), within(moved.y), within(moved.z)};
+}
+
+CloudShade cloud_shade(double cover, double water) noexcept {
+    const double covered = std::clamp(cover, 0.0, 1.0);
+    if (covered <= 0.0) {
+        return {};
+    }
+    const double thickness = depth_per_mm * std::max(water, 0.0) / std::max(covered, least_cover);
+    const double unscattered = std::exp(-thickness);
+    const double let_through = 1.0 / (1.0 + (0.75 * (1.0 - scattered_forward) * thickness));
+    return {.direct = (1.0 - covered) + (covered * unscattered),
+            .diffuse = covered * (let_through - unscattered)};
 }
 
 Result<Clouds> Clouds::create(const Device& device, VkFormat colour_format, std::uint32_t map_size,

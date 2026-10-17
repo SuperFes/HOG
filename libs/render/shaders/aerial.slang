@@ -25,5 +25,7 @@ void aerial_main(uint3 id: SV_DispatchThreadID) {
         march(air, transmittance_table, scattering_table, lighting.up_height.w, view, sun,
               aerial_slice_end(id.z, lighting.reach.x), aerial_steps);
     const float3 passed = scattered.transmittance;
-    volume[id] = float4(scattered.light, (passed.r + passed.g + passed.b) / 3.0);
+    // Under cloud, the air's lit by what comes through it.
+    volume[id] = float4(scattered.light * (lighting.reach.y + lighting.reach.z),
+                        (passed.r + passed.g + passed.b) / 3.0);
 }

@@ -76,6 +76,24 @@ TEST_CASE("the eye is lit by the sun by day and by a faint glow by night", "[cli
     CHECK(night.sky.b < 0.01 * (noon.sun.b + noon.sky.b));
 }
 
+TEST_CASE("under cloud the sun is hidden and the sky lit by what it scatters through",
+          "[client][daylight]") {
+    const EyeLight noon = hog::client::light_at_eye(earth(), 2.0, 1.0);
+    const EyeLight clear = hog::client::under_cloud(noon, hog::render::cloud_shade(0.0, 0.0));
+    CHECK(clear.sun == noon.sun);
+    CHECK(clear.sky == noon.sky);
+    const EyeLight overcast = hog::client::under_cloud(noon, hog::render::cloud_shade(1.0, 0.1));
+    CHECK(overcast.sun.g < 0.01 * noon.sun.g);
+    CHECK(overcast.sky.g > noon.sky.g);
+    CHECK(overcast.sun.g + overcast.sky.g < 0.5 * (noon.sun.g + noon.sky.g));
+    // Darker, but adapted to it, not by as much.
+    const double seen_clear = hog::client::exposure_for(noon) * (noon.sun.g + noon.sky.g);
+    const double seen_overcast =
+        hog::client::exposure_for(overcast) * (overcast.sun.g + overcast.sky.g);
+    CHECK(seen_overcast < seen_clear);
+    CHECK(seen_overcast > 0.25 * seen_clear);
+}
+
 TEST_CASE("exposure adapts to the light, but brighter light still looks brighter",
           "[client][daylight]") {
     const auto seen = [](double sun_mu) {

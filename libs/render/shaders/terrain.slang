@@ -207,9 +207,10 @@ Shaded fragment_air(Ground ground) {
     const float scale = lighting.sky_scale.w;
     const float3 normal = normalize(ground.normal);
     const float3 up = up_at(ground);
-    const float3 sunlight =
+    const float3 clear =
         transmittance(air, transmittance_table, max(ground.height, 0.0) * scale, dot(up, sun));
-    const float3 sky = lighting.sky_scale.rgb;
+    const float3 sunlight = through_cloud(lighting, clear);
+    const float3 sky = sky_under_cloud(lighting, clear * saturate(dot(up, sun)));
     const float3 on_ground =
         (sunlight * saturate(dot(normal, sun))) + (sky * (0.5 + (0.5 * dot(normal, up))));
     const float3 on_water = (sunlight * saturate(dot(up, sun))) + sky;

@@ -198,6 +198,26 @@ TEST_CASE("the clouds' drift is kept within their period", "[render]") {
     CHECK(within == DVec3{cloud_period - 1.0, 5.0, 0.0});
 }
 
+TEST_CASE("cloud shades the ground the more of it there is", "[render]") {
+    using hog::render::cloud_shade;
+    const hog::render::CloudShade open_sky = cloud_shade(0.0, 0.0);
+    CHECK(open_sky.direct == 1.0);
+    CHECK(open_sky.diffuse == 0.0);
+    // Half covered by thick cloud, half the sun gets through, and a little more scattered.
+    const hog::render::CloudShade gappy = cloud_shade(0.5, 1.0);
+    CHECK(std::abs(gappy.direct - 0.5) < 1e-6);
+    CHECK(gappy.diffuse > 0.0);
+    const hog::render::CloudShade covered = cloud_shade(1.0, 1.0);
+    CHECK(covered.direct < 1e-6);
+    CHECK(covered.diffuse > 0.02);
+    const hog::render::CloudShade heavy = cloud_shade(1.0, 8.0);
+    CHECK(heavy.diffuse < covered.diffuse);
+    // A wisp lets most through, scattering some on the way.
+    const hog::render::CloudShade wisp = cloud_shade(1.0, 0.001);
+    CHECK(wisp.direct > 0.8);
+    CHECK(wisp.direct + wisp.diffuse <= 1.0);
+}
+
 TEST_CASE("with no cloud in the weather, none is drawn", "[render][gpu][atmosphere]") {
     const auto device = test_device();
     const Pixels pixels = draw(*device, {.before = everywhere(clear)});

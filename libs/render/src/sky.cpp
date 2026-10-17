@@ -171,7 +171,8 @@ Result<> Sky::record_tables(VkCommandBuffer commands, VkExtent2D extent, std::ui
         .up_height = {Vec3{view.bend.up}, static_cast<float>(view.bend.eye_height * scale)},
         .sun_exposure = {Vec3{view.sun}, static_cast<float>(view.exposure)},
         .sky_scale = {Vec3{view.sky_light}, static_cast<float>(scale)},
-        .reach = {static_cast<float>(aerial_reach), 0.0F, 0.0F, 0.0F}};
+        .reach = {static_cast<float>(aerial_reach), static_cast<float>(view.shade.direct),
+                  static_cast<float>(view.shade.diffuse), 0.0F}};
     const Buffer& buffer = lighting_.at(frame);
     std::memcpy(buffer.mapped().data(), &lighting, sizeof(lighting));
     if (auto flushed = buffer.flush(); !flushed) {

@@ -3,6 +3,7 @@
 #include <hog/atmosphere/model.hpp>
 #include <hog/core/math.hpp>
 #include <hog/core/time.hpp>
+#include <hog/render/clouds.hpp>
 #include <hog/sim/calendar.hpp>
 
 #include <optional>
@@ -45,6 +46,10 @@ struct EyeLight {
 // At `height` of the air's metres, with the sun at `sun_mu`, the cosine of its angle from straight
 // up.
 [[nodiscard]] EyeLight light_at_eye(const atmosphere::Model& model, double height, double sun_mu);
+
+// The light under cloud letting `shade` of it through: the sun's direct share, and the sun's and
+// sky's scattered through lighting the ground as the sky does.
+[[nodiscard]] EyeLight under_cloud(const EyeLight& light, render::CloudShade shade) noexcept;
 
 // How much brighter the picture is than the light at the eye: adapting partly to it, so night is
 // darker than day but can still be seen in.

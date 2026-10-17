@@ -33,7 +33,7 @@ static const uint octaves = 5;
 static const float sky_depth = 2e-7;
 // Of a covered patch's cover, how much is its soft edge.
 static const float edge = 0.2;
-// Optical depth per mm of liquid water, for droplets of 10 μm.
+// As clouds.cpp's. Optical depth per mm of liquid water, for droplets of 10 μm.
 static const float depth_per_mm = 150.0;
 static const float scattered_forward = 0.8;
 

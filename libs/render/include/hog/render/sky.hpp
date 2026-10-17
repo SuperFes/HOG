@@ -17,6 +17,12 @@ namespace hog::render {
 class Atmosphere;
 class Device;
 
+// Of light falling on a layer of cloud, the shares that reach the ground below it.
+struct CloudShade {
+    double direct = 1.0;  // straight through the gaps and thin cloud, as from the sun
+    double diffuse = 0.0; // scattered through, lighting the ground as the sky does
+};
+
 // Where the sky is seen from and lit by.
 struct SkyView {
     Camera camera;
@@ -26,6 +32,9 @@ struct SkyView {
     double exposure = 1.0; // how much brighter the picture is than the light reaching the eye
     // The sky's irradiance on level ground at the eye, as atmosphere::Model::sky_irradiance finds.
     DVec3 sky_light{0.0};
+    // What any cloud over the eye lets through to what's drawn under it, and the air between.
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    CloudShade shade = {};
 };
 
 // What's drawn through the air reads it from these, all ready for any shader once a frame's
