@@ -1,7 +1,9 @@
 #include <hog/app/probe_layers.hpp>
 #include <hog/app/server.hpp>
+#include <hog/net/client.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/probe/channel.hpp>
+#include <hog/protocol/messages.hpp>
 #include <hog/server/survey.hpp>
 #include <hog/testing/temporary_directory.hpp>
 
@@ -17,11 +19,13 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <memory>
 #include <numbers>
 #include <numeric>
 #include <optional>
+#include <random>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -869,4 +873,76 @@ TEST_CASE("replaying from the same seed gives the same world", "[.gate]") {
     CHECK(twice[0] == once[0]);
     CHECK(twice[1] == once[1]);
     CHECK(twice[2] == once[2]);
+}
+
+namespace {
+
+// Real time, visited between the server's sleeps.
+class Visited {
+public:
+    explicit Visited(std::function<void()> visit) : visit_(std::move(visit)) {}
+
+    [[nodiscard]] static MonotonicClock::time_point now() { return MonotonicClock::now(); }
+    void sleep_until(MonotonicClock::time_point when) {
+        do {
+            visit_();
+            std::this_thread::sleep_for(1ms);
+        } while (now() < when);
+    }
+
+private:
+    std::function<void()> visit_;
+};
+
+// Open on a free players' port.
+std::unique_ptr<Server> playing(const World& world) {
+    std::random_device random;
+    const auto first = static_cast<std::uint16_t>(40'000 + (random() % 20'000));
+    auto config = world.config();
+    for (std::uint16_t port = first; port < first + 100; ++port) {
+        config.net.port = port;
+        auto server = opened(config);
+        if (server->players() != nullptr) {
+            return server;
+        }
+    }
+    FAIL("no free port");
+    std::unreachable();
+}
+
+} // namespace
+
+TEST_CASE("a player is sent the weather as they join", "[app][server]") {
+    const World world;
+    const auto server = playing(world);
+    auto client = hog::net::Client::connect(std::format("127.0.0.1:{}", server->players()->port()));
+    REQUIRE(client);
+    std::vector<hog::protocol::Message> heard;
+    std::vector<hog::net::Event> events;
+    std::atomic<bool> stop = false;
+    const auto give_up = MonotonicClock::now() + 10s;
+    Visited timer{[&] {
+        client->poll(events);
+        for (const hog::net::Event& event : events) {
+            if (std::holds_alternative<hog::net::Connected>(event)) {
+                REQUIRE(client->send(hog::net::Delivery::Reliable,
+                                     hog::protocol::encode(hog::protocol::Hello{})));
+            } else if (const auto* message = std::get_if<hog::net::Message>(&event)) {
+                auto decoded = hog::protocol::decode(message->bytes());
+                REQUIRE(decoded);
+                heard.push_back(std::move(*decoded));
+            }
+        }
+        if (heard.size() >= 2 || MonotonicClock::now() >= give_up) {
+            stop = true;
+        }
+    }};
+    REQUIRE(server->run(timer, [] { return start; }, stop));
+    REQUIRE(heard.size() == 2);
+    CHECK(std::holds_alternative<hog::protocol::Welcome>(heard[0]));
+    const auto* weather = std::get_if<hog::protocol::Weather>(&heard[1]);
+    REQUIRE(weather != nullptr);
+    CHECK(weather->level == server->weather().grid().level());
+    CHECK(weather->fade == 10min);
+    CHECK(weather->cells.size() == server->weather().grid().size());
 }

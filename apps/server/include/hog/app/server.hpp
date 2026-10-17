@@ -141,6 +141,9 @@ private:
     void heard(net::ConnectionId connection, std::span<const std::byte> bytes);
     // Sends each player a snapshot of those near them.
     void share();
+    // Sends every player the weather once it has stepped, to fade to over a step at `scale`.
+    void tell_weather(std::int64_t scale);
+    void send_weather(net::ConnectionId connection);
     // Answers debug tools waiting on the world, telling them how clock() runs and asking
     // steer(control) to change it.
     template <typename Clock, typename Steer>
@@ -171,6 +174,9 @@ private:
     std::vector<net::Event> player_events_;
     // Connections still to say hello, and the players let in.
     std::map<net::ConnectionId, protocol::Handshake> handshakes_;
+    // The weather players were last sent, coded, and the step it's from.
+    std::vector<std::byte> weather_told_;
+    std::optional<GameTime> weather_told_at_;
     server::Players joined_;
     // The ground near players, to check their moves against.
     physics::Space space_;
@@ -331,6 +337,7 @@ Result<void> Server::run(T& timer, Now now, const std::atomic<bool>& stop) {
         serve_probe([&loop] { return detail::clock_of(loop); },
                     [&](const probe::Control& control) { return steer(loop, control, now); });
         serve_players();
+        tell_weather(loop.scale());
         if (const MonotonicClock::time_point at = timer.now(); at >= next_share) {
             share();
             next_share += protocol::snapshot_interval;

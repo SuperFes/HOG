@@ -5,6 +5,7 @@
 #include <hog/save/snapshot_store.hpp>
 #include <hog/server/spatial_tracking.hpp>
 #include <hog/server/survey.hpp>
+#include <hog/server/weather_report.hpp>
 
 #include <algorithm>
 #include <array>
@@ -515,6 +516,7 @@ void Server::answer(net::ConnectionId connection, const protocol::Answer& answer
         joined_.join(connection, player ? player->name
                                         : std::format("player {}", std::to_underlying(connection)));
         handshakes_.erase(shaking);
+        send_weather(connection);
     }
 }
 
@@ -563,6 +565,30 @@ void Server::share() {
             shared_snapshots_.add();
             shared_bytes_.add(bytes.size());
         });
+}
+
+void Server::tell_weather(std::int64_t scale) {
+    if (!players_ || weather_told_at_ == weather_->time()) {
+        return;
+    }
+    weather_told_at_ = weather_->time();
+    weather_told_ = protocol::encode(server::weather_report(
+        weather_->grid(), weather_->fields(), weather_->config(),
+        std::chrono::duration_cast<std::chrono::milliseconds>(weather_->config().step) / scale));
+    for (const net::ConnectionId connection : joined_.connections()) {
+        send_weather(connection);
+    }
+}
+
+void Server::send_weather(net::ConnectionId connection) {
+    // Players joining before the weather is first told are sent it with everyone else.
+    if (!players_ || weather_told_.empty()) {
+        return;
+    }
+    if (auto sent = players_->send(connection, net::Delivery::Reliable, weather_told_); !sent) {
+        log::debug(server_log, "couldn't send connection {} the weather: {}",
+                   std::to_underlying(connection), sent.error());
+    }
 }
 
 void Server::open_probe() {

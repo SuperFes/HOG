@@ -119,6 +119,7 @@ TEST_CASE("a player's first move places them anywhere within bounds", "[server][
     CHECK(mover.move(ConnectionId{7}, at(-radius * 3.0)).ruling == Ruling::OutOfBounds);
     CHECK_FALSE(matt.has<Position>());
     CHECK(players.placed().empty());
+    CHECK(players.connections() == std::vector{ConnectionId{7}});
 
     CHECK(taken(mover.move(ConnectionId{7}, at(radius + 2.0))));
     CHECK(matt.get<Position>().at == at(radius + 2.0));

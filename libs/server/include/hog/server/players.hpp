@@ -81,6 +81,8 @@ public:
 
     // Where each player with a place is.
     [[nodiscard]] std::vector<WorldPosition> placed() const;
+    // Every player's connection, placed or not.
+    [[nodiscard]] std::vector<net::ConnectionId> connections() const;
 
 private:
     struct Joined {

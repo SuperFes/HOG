@@ -110,6 +110,15 @@ std::vector<WorldPosition> Players::placed() const {
     return places;
 }
 
+std::vector<net::ConnectionId> Players::connections() const {
+    std::vector<net::ConnectionId> found;
+    found.reserve(joined_.size());
+    for (const auto& [connection, joined] : joined_) {
+        found.push_back(connection);
+    }
+    return found;
+}
+
 std::optional<flecs::entity> Players::find(net::ConnectionId connection) const {
     const auto found = joined_.find(connection);
     if (found == joined_.end()) {
