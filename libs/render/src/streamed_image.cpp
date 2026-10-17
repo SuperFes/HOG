@@ -57,7 +57,7 @@ Result<> StreamedImage::update(VkCommandBuffer commands, std::uint32_t slot,
 }
 
 Result<StreamedImage> make_streamed_image(const Device& device, VkFormat format, VkExtent2D extent,
-                                          std::uint32_t slots, std::uint32_t layers) {
+                                          std::uint32_t slots, std::uint32_t layers, bool cube) {
     const std::optional<std::uint32_t> bytes = texel_bytes(format);
     if (!bytes) {
         return make_error(ErrorCode::Unsupported, "images can't be streamed in that format");
@@ -72,7 +72,8 @@ Result<StreamedImage> make_streamed_image(const Device& device, VkFormat format,
                             .extent = extent,
                             .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                                      VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-                            .layers = layers});
+                            .layers = layers,
+                            .cube = cube});
     if (!image) {
         return std::unexpected(std::move(image).error());
     }

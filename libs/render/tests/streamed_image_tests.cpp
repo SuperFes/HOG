@@ -158,6 +158,25 @@ TEST_CASE("each layer of a streamed image is sampled on its own", "[render][gpu]
     CHECK(device->validation_errors() == 0);
 }
 
+TEST_CASE("a streamed image is a cube of six square layers", "[render][gpu]") {
+    const auto device = test_device();
+    constexpr VkExtent2D square{.width = 2, .height = 2};
+    CHECK(make_streamed_image(*device, VK_FORMAT_R8G8B8A8_UNORM, square, 1, 3, true).error().code ==
+          hog::ErrorCode::InvalidArgument);
+    CHECK(make_streamed_image(*device, VK_FORMAT_R8G8B8A8_UNORM, {.width = 2, .height = 1}, 1, 6,
+                              true)
+              .error()
+              .code == hog::ErrorCode::InvalidArgument);
+    auto cube = make_streamed_image(*device, VK_FORMAT_R8G8B8A8_UNORM, square, 1, 6, true);
+    REQUIRE(cube);
+    CHECK(cube->image().desc().cube);
+    const std::vector<std::byte> texels = filled(std::size_t{4} * 2 * 2 * 6, 7);
+    REQUIRE(device->submit_now(
+        [&](VkCommandBuffer commands) { CHECK(cube->update(commands, 0, texels)); }));
+    CHECK(cube->ready());
+    CHECK(device->validation_errors() == 0);
+}
+
 TEST_CASE("a filled image holds each mip of each layer as given", "[render][gpu]") {
     const auto device = test_device();
     const hog::render::ImageDesc desc{.format = VK_FORMAT_R8G8B8A8_UNORM,

@@ -6,6 +6,17 @@
 
 namespace hog::render {
 
+namespace {
+
+VkImageViewType view_type(const ImageDesc& desc) noexcept {
+    if (desc.cube) {
+        return VK_IMAGE_VIEW_TYPE_CUBE;
+    }
+    return desc.layers > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
+}
+
+} // namespace
+
 Buffer::Buffer(Buffer&& other) noexcept
     : allocator_(std::exchange(other.allocator_, VK_NULL_HANDLE)),
       buffer_(std::exchange(other.buffer_, VK_NULL_HANDLE)),
@@ -143,14 +154,17 @@ bool operator==(const ImageDesc& left, const ImageDesc& right) noexcept {
     return left.format == right.format && left.extent.width == right.extent.width &&
            left.extent.height == right.extent.height && left.usage == right.usage &&
            left.aspect == right.aspect && left.layers == right.layers &&
-           left.levels == right.levels;
+           left.levels == right.levels && left.cube == right.cube;
 }
 
 Result<Image> make_image(const Device& device, const ImageDesc& desc) {
+    if (desc.cube && (desc.layers != 6 || desc.extent.width != desc.extent.height)) {
+        return make_error(ErrorCode::InvalidArgument, "a cube needs six square layers");
+    }
     const VkImageCreateInfo image_info{
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .pNext = nullptr,
-        .flags = 0,
+        .flags = desc.cube ? VkImageCreateFlags{VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT} : 0,
         .imageType = VK_IMAGE_TYPE_2D,
         .format = desc.format,
         .extent = {.width = desc.extent.width, .height = desc.extent.height, .depth = 1},
@@ -178,8 +192,7 @@ Result<Image> make_image(const Device& device, const ImageDesc& desc) {
                                           .pNext = nullptr,
                                           .flags = 0,
                                           .image = image.image_,
-                                          .viewType = desc.layers > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY
-                                                                      : VK_IMAGE_VIEW_TYPE_2D,
+                                          .viewType = view_type(desc),
                                           .format = desc.format,
                                           .components = {},
                                           .subresourceRange = {.aspectMask = desc.aspect,

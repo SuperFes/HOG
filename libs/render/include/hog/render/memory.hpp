@@ -59,12 +59,13 @@ struct ImageDesc {
     VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
     std::uint32_t layers = 1;
     std::uint32_t levels = 1; // of mips, each half the size of the one before
+    bool cube = false;        // viewed as a cube, its six square layers the faces
 
     friend bool operator==(const ImageDesc& left, const ImageDesc& right) noexcept;
 };
 
 // A 2D image on the GPU with a view of the whole of it, viewed as an array when it has more than
-// one layer.
+// one layer, unless it's a cube.
 class Image {
 public:
     Image() = default;

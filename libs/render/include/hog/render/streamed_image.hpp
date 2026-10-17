@@ -34,16 +34,18 @@ public:
 private:
     friend Result<StreamedImage> make_streamed_image(const Device& device, VkFormat format,
                                                      VkExtent2D extent, std::uint32_t slots,
-                                                     std::uint32_t layers);
+                                                     std::uint32_t layers, bool cube);
 
     Image image_;
     TrackedImage tracked_;
     std::vector<Buffer> staging_;
 };
 
+// A cube takes six square layers, the faces in Vulkan's order.
 [[nodiscard]] Result<StreamedImage> make_streamed_image(const Device& device, VkFormat format,
                                                         VkExtent2D extent, std::uint32_t slots,
-                                                        std::uint32_t layers = 1);
+                                                        std::uint32_t layers = 1,
+                                                        bool cube = false);
 
 // A sampled image filled once from `texels`: each mip in turn from the largest, its layers one
 // after another, rows packed tightly from the top. It's ready to sample once this returns.
