@@ -391,6 +391,18 @@ TEST_CASE("thick cloud is dark beneath and bright on top", "[render][gpu][atmosp
     CHECK(2 * over > 3 * under);
 }
 
+TEST_CASE("the more cloud there is, the darker it is beneath", "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    // Overcast by a quarter of a mm, and by 4 mm.
+    const Pixels thin = draw(
+        *device, {.forward = glm::normalize(east + up), .before = everywhere({255, 32, 0, 0})});
+    const Pixels thick = draw(
+        *device, {.forward = glm::normalize(east + up), .before = everywhere({255, 128, 0, 0})});
+    INFO("thin " << total(thin, extent.height) << ", thick " << total(thick, extent.height));
+    CHECK(total(thick, extent.height) > 0);
+    CHECK(2 * total(thick, extent.height) < total(thin, extent.height));
+}
+
 TEST_CASE("cloud beyond the ground isn't drawn", "[render][gpu][atmosphere]") {
     const auto device = test_device();
     CHECK(lit_below(draw(*device, {})) == 0);
@@ -480,6 +492,23 @@ TEST_CASE("from over fog, its top lies below and the air over it is clear",
     // Looking down below the horizon, at the fog; and up, at nothing.
     CHECK(brightness(pixels, extent.width / 2, extent.height - 1) > 300);
     CHECK(brightness(pixels, extent.width / 2, 0) == 0);
+    Scene dry = over;
+    dry.sky = everywhere(clear);
+    CHECK(lit_pixels(draw(*device, dry), extent.height) == 0);
+}
+
+TEST_CASE("fog lying low far off is seen, however far past the highest fog's top",
+          "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    // Fog to 992 m far behind the eye; ahead, to 32 m.
+    const auto sky = map_of([](DVec3 direction) {
+        return glm::dot(direction, east) < -0.5 ? Texel{255, 31, 0, 0} : Texel{255, 1, 0, 0};
+    });
+    const Scene over{.eye_height = 1'500.0,
+                     .forward = glm::normalize(east - (up * 0.15)),
+                     .before = everywhere(clear),
+                     .sky = sky};
+    CHECK(brightness(draw(*device, over), extent.width / 2, extent.height / 2) > 0);
     Scene dry = over;
     dry.sky = everywhere(clear);
     CHECK(lit_pixels(draw(*device, dry), extent.height) == 0);

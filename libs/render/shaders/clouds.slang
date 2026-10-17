@@ -50,7 +50,7 @@ static const uint veil_steps = 12;
 // Metres along the view what falls is seen through, at most.
 static const float veil_reach = 40000.0;
 static const uint fog_steps = 24;
-// Metres of fog marched through at most, past which it hides everything.
+// Metres of fog marched through at most from within it, past which it hides everything.
 static const float fog_reach = 3000.0;
 
 struct Layer {
@@ -150,8 +150,9 @@ float4 veil_between(float3 view, float start, float end, float2 uv, float jitter
     return float4((radiance * between.a) + (between.rgb * opacity), opacity);
 }
 
-// The fog from `start` to `end` along the view, premultiplied, before tone mapping. Steps are
-// finest at the start, where the fog's nearest, and offset by `jitter`.
+// The fog from `start` to `end` along the view, premultiplied, before tone mapping. Each step takes
+// all the fog in it, however thin, from the weather at a point in it offset by `jitter`; steps are
+// finest at the start, where the fog's nearest.
 float4 fog_between(float3 view, float start, float end, float2 uv, float jitter) {
     const float3 up = push.up_height.xyz;
     const float eye_height = push.up_height.w;
@@ -167,26 +168,31 @@ float4 fog_between(float3 view, float start, float end, float2 uv, float jitter)
     float3 radiance = float3(0.0);
     float seen_through = 1.0;
     float distance = 0.0;
+    float from = start;
+    float from_height = drawn_height(view * from, up, eye_height, faked);
     for (uint at = 0; at < fog_steps; ++at) {
-        const float from = float(at) / float(fog_steps);
-        const float to = float(at + 1) / float(fog_steps);
-        const float t = (float(at) + jitter) / float(fog_steps);
-        const float along = start + (length * t * t);
-        const float step = length * ((to * to) - (from * from));
+        const float share = float(at + 1) / float(fog_steps);
+        const float to = start + (length * share * share);
+        const float to_height = drawn_height(view * to, up, eye_height, faked);
+        const float along = lerp(from, to, jitter);
         const float3 from_eye = view * along;
-        const float height = drawn_height(from_eye, up, eye_height, faked);
         const float3 direction = on_planet(from_eye, up, faked + eye_height, faked, radius);
         const SkyCell cell = sky_at(direction);
-        const float extinction = fog_extinction(cell, height);
-        if (extinction <= 0.0) {
+        const float depth = fog_depth(cell, from_height, to_height, to - from);
+        const float lowest = min(from_height, to_height);
+        from = to;
+        from_height = to_height;
+        if (depth <= 0.0) {
             continue;
         }
+        // Lit as it is where the fog is.
+        const float height = clamp(cell.fog_top - (fog_edge * 0.5), lowest, max(lowest, cell.fog_top));
         const float sun_mu = dot(sun, normalize((up * (faked + eye_height)) + from_eye));
         const float3 sunlight = transmittance(air, transmittance_table, height * scale, sun_mu);
         const float3 lit = mist_light(sunlight, sun_mu, cos_sun, mist_above(cell, height),
                                       lighting.sky_scale.rgb) *
                            shaded;
-        const float hidden = seen_through * (1.0 - exp(-extinction * step));
+        const float hidden = seen_through * (1.0 - exp(-depth));
         radiance += lit * hidden;
         distance += along * hidden;
         seen_through -= hidden;
@@ -199,7 +205,6 @@ float4 fog_between(float3 view, float start, float end, float2 uv, float jitter)
         aerial_perspective(aerial_volume, uv, (distance / opacity) * scale, lighting.reach.x);
     return float4((radiance * between.a) + (between.rgb * opacity), opacity);
 }
-
 
 [shader("fragment")]
 float4 fragment_main(Layer layer) : SV_Target {
@@ -272,7 +277,7 @@ float4 fragment_main(Layer layer) : SV_Target {
             const float4 fog = fog_between(view, 0.0, end, uv, jitter);
             seen = fog + (overhead * (1.0 - fog.a));
         } else if (shell > 0.0 && shell < reach) {
-            const float4 fog = fog_between(view, shell, min(reach, shell + fog_reach), uv, jitter);
+            const float4 fog = fog_between(view, shell, min(reach, shell + veil_reach), uv, jitter);
             seen = overhead + (fog * (1.0 - overhead.a));
         }
     }

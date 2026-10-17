@@ -38,6 +38,9 @@ struct WeatherBindings {
 [[nodiscard]] double mist_extinction(double humidity, double fog_top, double height) noexcept;
 // Of light falling straight down from above the mist, how much the mist over `height` takes.
 [[nodiscard]] double mist_above(double humidity, double fog_top, double height) noexcept;
+// Of the light along a straight stretch `length` long, from `from` to `to` metres above sea level,
+// how much fog whose top is at `fog_top` takes.
+[[nodiscard]] double fog_depth(double fog_top, double from, double to, double length) noexcept;
 
 // The weather's and the sky's cube maps, each before and after, as the server last sent them. Until
 // they're first written they read as a clear, dry sky.

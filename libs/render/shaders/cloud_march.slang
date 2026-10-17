@@ -67,6 +67,12 @@ static const float forward = 0.8;
 static const float backward = -0.3;
 static const float backward_share = 0.25;
 static const float cloud_albedo = 0.99;
+// The weather's looked up a little off from where it's wanted, by a broad noise, so the edges of
+// what the cells hold wander, not run straight across them; the noise lifts and lowers the base too.
+// A whole number of tiles fits in clouds.hpp's cloud_period.
+static const float wander_tile = 32000.0;
+static const float wander = 8000.0;
+static const float lift = 0.25;
 
 // The weather at a place, as both maps fade between.
 struct Cell {
@@ -89,14 +95,24 @@ Cell cell_at(float3 direction) {
     return cell;
 }
 
+// The weather at `direction` on a planet of `radius`, its edges wandering and its base uneven.
+Cell wandering_cell_at(float3 direction, float radius) {
+    const float3 ground = direction * radius;
+    const float4 broad = shape_noise.SampleLevel((ground + push.moved.xyz) / wander_tile, 1.0);
+    Cell cell = cell_at(normalize(ground + ((broad.gba - 0.5) * wander)));
+    cell.base += (broad.r - 0.5) * lift * (cell.top - cell.base);
+    return cell;
+}
+
 float remap(float value, float from_low, float from_high, float to_low, float to_high) {
     return to_low + ((value - from_low) * (to_high - to_low) / (from_high - from_low));
 }
 
 // How much cloud there is, from none to 1, at `height` above sea level in `cell`, `at` metres in
 // the planet's frame; with its edges worn finely when `worn`. `footprint` is the metres a pixel
-// spans there.
-float cloud_at(float3 at, float height, Cell cell, float footprint, bool worn) {
+// spans there. `billows` is left as how much the cloud billows there, from 0 to 1 evenly.
+float cloud_at(float3 at, float height, Cell cell, float footprint, bool worn, out float billows) {
+    billows = 0.0;
     if (cell.cover < 1.0 / 255.0 || height <= cell.base || height >= cell.top) {
         return 0.0;
     }
@@ -109,6 +125,7 @@ float cloud_at(float3 at, float height, Cell cell, float footprint, bool worn) {
     const float3 drifted = at + push.moved.xyz;
     const float4 shape = shape_noise.SampleLevel(
         drifted / shape_tile, max(log2(footprint * shape_texels / shape_tile), 0.0));
+    billows = shape.r;
     // The billows are spread evenly, so about as much of the sky's covered as the cover says, and a
     // full cover leaves no gaps. Broken cloud covers less higher up, so it billows into domes.
     const float doming = (1.0 - cell.cover) * smoothstep(0.3, 1.0, up) * 0.9;
@@ -132,10 +149,14 @@ float cloud_at(float3 at, float height, Cell cell, float footprint, bool worn) {
     return cloud;
 }
 
+float thickness_of(Cell cell) {
+    return max(cell.top - cell.base, 1.0);
+}
+
 // Per metre, how much light the cloud in `cell` takes where it's as thick as it gets.
 float densest_in(Cell cell) {
     const float column = depth_per_mm * cell.mm / max(cell.cover, least_cover);
-    return min(2.0 * column / max(cell.top - cell.base, 1.0), densest);
+    return min(2.0 * column / thickness_of(cell), densest);
 }
 
 float phase(float cos_angle) {
@@ -233,10 +254,11 @@ void march_main(uint3 id: SV_DispatchThreadID) {
         const float3 from_eye = view * along;
         const float point_height = drawn_height(from_eye, up, eye_height, faked);
         const float3 direction = on_planet(from_eye, up, centre_to_eye, faked, radius);
-        const Cell cell = cell_at(direction);
+        const Cell cell = wandering_cell_at(direction, radius);
         const float3 point = direction * (radius + point_height);
         const float footprint = along * pixel;
-        const float cloud = cloud_at(point, point_height, cell, footprint, true);
+        float billows = 0.0;
+        const float cloud = cloud_at(point, point_height, cell, footprint, true, billows);
         if (cloud > 0.0 && striding) {
             // Strode into cloud: back to a step past where it was clear, and on in steps.
             stepping_to = along;
@@ -251,13 +273,14 @@ void march_main(uint3 id: SV_DispatchThreadID) {
             // What the cloud towards the sun takes, as if the weather there were the same.
             float towards_sun = 0.0;
             float before = 0.0;
+            float unused = 0.0;
             for (uint light = 0; light < light_steps; ++light) {
                 const float share = float(light + 1) / float(light_steps);
                 const float after = light_reach * share * share;
                 const float middle = (before + after) * 0.5;
                 const float3 lit_at = point + (sun * middle);
                 const float lit_height = point_height + (middle * sun_mu);
-                towards_sun += cloud_at(lit_at, lit_height, cell, footprint, false) *
+                towards_sun += cloud_at(lit_at, lit_height, cell, footprint, false, unused) *
                                densest_in(cell) * (after - before);
                 before = after;
             }
@@ -273,8 +296,11 @@ void march_main(uint3 id: SV_DispatchThreadID) {
             }
             // The sun's and the sky's light, scattered on through the cloud over the point, as a
             // layer of strongly forward scattering droplets lets it through: as bright as what
-            // falls on the top at the top, dimmer deeper down.
-            const float over = 0.5 * densest_in(cell) * max(cell.top - point_height, 0.0);
+            // falls on the top at the top, dimmer deeper down and under where it billows. About as
+            // deep as the whole column at the base, as clouds.cpp shades the ground beneath.
+            const float column = depth_per_mm * cell.mm / max(cell.cover, least_cover);
+            const float over = column * saturate((cell.top - point_height) / thickness_of(cell)) *
+                               (0.5 + billows);
             const float let_through = 1.0 / (1.0 + (0.75 * (1.0 - forward) * over));
             const float3 falling = (sunlight * max(sun_mu, 0.0)) + lighting.sky_scale.rgb;
             const float3 lit =

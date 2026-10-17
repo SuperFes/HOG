@@ -15,6 +15,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <array>
 #include <cmath>
@@ -422,6 +423,22 @@ TEST_CASE("mist thickens as the air nears forming cloud and thins with height; f
     // Deep in fog, under all of it.
     CHECK(mist_above(0.0, 300.0, 0.0) > 4.0);
     CHECK(mist_above(0.0, 300.0, 400.0) == 0.0);
+
+    using Catch::Matchers::WithinAbs;
+    using hog::render::fog_depth;
+    // Level, as the fog is where it is.
+    CHECK_THAT(fog_depth(300.0, 100.0, 100.0, 1'000.0), WithinAbs(15.0, 1e-9));
+    CHECK(fog_depth(300.0, 400.0, 400.0, 1'000.0) == 0.0);
+    // Down from over the fog to the ground: what's in the stretch inside it, the edge's half.
+    CHECK_THAT(fog_depth(300.0, 600.0, 0.0, 600.0), WithinAbs(0.015 * 270.0, 1e-9));
+    CHECK_THAT(fog_depth(300.0, 0.0, 600.0, 600.0), WithinAbs(0.015 * 270.0, 1e-9));
+    // A thin fog's caught however long the stretch through it.
+    const double steep = fog_depth(30.0, 1'000.0, 0.0, 1'000.0);
+    const double grazing = fog_depth(30.0, 1'000.0, 0.0, 50'000.0);
+    CHECK(steep > 0.0);
+    CHECK_THAT(grazing / steep, WithinAbs(50.0, 1e-6));
+    // Below sea level, as at it.
+    CHECK(fog_depth(300.0, -50.0, -50.0, 10.0) == fog_depth(300.0, 0.0, 0.0, 10.0));
 }
 
 TEST_CASE("humid air hides what's far, but not over fog, where it's drier",
