@@ -21,6 +21,30 @@ static const float fresh = 0.15;
 // How many standard deviations of what's marched round it the history may stray.
 static const float spreads = 1.25;
 
+// `image` at `uv` through a Catmull-Rom spline, from five of its bilinear samples rather than
+// sixteen texels, so the history's not blurred further each time it's moved by part of a texel.
+float4 sharply(Sampler2D image, float2 uv, float2 size) {
+    const float2 position = uv * size;
+    const float2 centre = floor(position - 0.5) + 0.5;
+    const float2 f = position - centre;
+    const float2 w0 = f * (-0.5 + (f * (1.0 - (0.5 * f))));
+    const float2 w1 = 1.0 + (f * f * (-2.5 + (1.5 * f)));
+    const float2 w2 = f * (0.5 + (f * (2.0 - (1.5 * f))));
+    const float2 w3 = f * f * (-0.5 + (0.5 * f));
+    const float2 w12 = w1 + w2;
+    const float2 at0 = (centre - 1.0) / size;
+    const float2 at12 = (centre + (w2 / w12)) / size;
+    const float2 at3 = (centre + 2.0) / size;
+    const float4 sum = (image.SampleLevel(float2(at12.x, at0.y), 0.0) * (w12.x * w0.y)) +
+                       (image.SampleLevel(float2(at0.x, at12.y), 0.0) * (w0.x * w12.y)) +
+                       (image.SampleLevel(at12, 0.0) * (w12.x * w12.y)) +
+                       (image.SampleLevel(float2(at3.x, at12.y), 0.0) * (w3.x * w12.y)) +
+                       (image.SampleLevel(float2(at12.x, at3.y), 0.0) * (w12.x * w3.y));
+    const float weight = (w12.x * w0.y) + (w0.x * w12.y) + (w12.x * w12.y) + (w3.x * w12.y) +
+                         (w12.x * w3.y);
+    return sum / weight;
+}
+
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void resolve_main(uint3 id: SV_DispatchThreadID) {
@@ -65,6 +89,6 @@ void resolve_main(uint3 id: SV_DispatchThreadID) {
     const float4 spread = sqrt(max((squares / 9.0) - (mean * mean), 0.0)) * spreads;
     const float4 least = mean - spread;
     const float4 most = mean + spread;
-    const float4 before = clamp(history.SampleLevel(then, 0.0), least, most);
+    const float4 before = clamp(sharply(history, then, float2(width, height)), least, most);
     blended[id.xy] = lerp(before, now, fresh);
 }

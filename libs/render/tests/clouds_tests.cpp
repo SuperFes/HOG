@@ -105,10 +105,10 @@ struct Scene {
 // Of the cloud's shadow, as Clouds::shadow_image() holds it, row by row from the north.
 using Shadow = std::vector<glm::vec4>;
 
-// The clouds alone, over black, for each of `scenes` in turn as frames of one picture; and the last
-// frame's shadow, into `shadow` if given.
+// The clouds alone, over black, for each of `scenes` in turn as frames of one picture of `size`;
+// and the last frame's shadow, into `shadow` if given.
 std::vector<Pixels> draw_frames(hog::render::Device& device, const std::vector<Scene>& scenes,
-                                Shadow* shadow = nullptr) {
+                                Shadow* shadow = nullptr, VkExtent2D size = extent) {
     auto atmosphere = hog::render::Atmosphere::create(device);
     REQUIRE(atmosphere);
     auto sky = hog::render::Sky::create(device, colour_format, depth_format);
@@ -120,19 +120,19 @@ std::vector<Pixels> draw_frames(hog::render::Device& device, const std::vector<S
     REQUIRE(maps);
     auto colour = hog::render::make_image(
         device, {.format = colour_format,
-                 .extent = extent,
+                 .extent = size,
                  .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT});
     REQUIRE(colour);
     auto depth = hog::render::make_image(
         device, {.format = depth_format,
-                 .extent = extent,
+                 .extent = size,
                  .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                  .aspect = VK_IMAGE_ASPECT_DEPTH_BIT});
     REQUIRE(depth);
     const auto march_image = [&](VkFormat format) {
         auto image = hog::render::make_image(
             device, {.format = format,
-                     .extent = Clouds::march_extent(extent),
+                     .extent = Clouds::march_extent(size),
                      .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
         REQUIRE(image);
         return std::move(image).value();
@@ -179,12 +179,12 @@ std::vector<Pixels> draw_frames(hog::render::Device& device, const std::vector<S
             clouds->shadow(commands, view);
             hog::render::transition(commands, shadow_map.handle(), VK_IMAGE_ASPECT_COLOR_BIT,
                                     use::storage, use::sampled);
-            CHECK(sky->record_frame(commands, extent, 0, *atmosphere, seen));
+            CHECK(sky->record_frame(commands, size, 0, *atmosphere, seen));
             hog::render::transition(commands, colour->handle(), VK_IMAGE_ASPECT_COLOR_BIT,
                                     use::discard, use::colour_target);
             hog::render::transition(commands, depth->handle(), VK_IMAGE_ASPECT_DEPTH_BIT,
                                     use::discard, use::depth_target);
-            hog::render::begin_rendering(commands, colour->view(), extent,
+            hog::render::begin_rendering(commands, colour->view(), size,
                                          VkClearColorValue{.float32 = {0.0F, 0.0F, 0.0F, 1.0F}},
                                          {.view = depth->view()});
             if (scene.covered) {
@@ -203,12 +203,12 @@ std::vector<Pixels> draw_frames(hog::render::Device& device, const std::vector<S
                 hog::render::transition(commands, image->handle(), VK_IMAGE_ASPECT_COLOR_BIT,
                                         use::discard, use::storage);
             }
-            CHECK(clouds->march(commands, extent, depth->view(), marched.view(), distances.view(),
+            CHECK(clouds->march(commands, size, depth->view(), marched.view(), distances.view(),
                                 view));
             hog::render::transition(commands, distances.handle(), VK_IMAGE_ASPECT_COLOR_BIT,
                                     use::storage, use::sampled);
-            hog::render::begin_rendering(commands, colour->view(), extent, std::nullopt);
-            clouds->draw(commands, extent, depth->view(), distances.view(), view);
+            hog::render::begin_rendering(commands, colour->view(), size, std::nullopt);
+            clouds->draw(commands, size, depth->view(), distances.view(), view);
             vkCmdEndRendering(commands);
         }));
         CHECK(device.validation_errors() == 0);
@@ -673,6 +673,69 @@ TEST_CASE("turning, what was marched before follows the view", "[render][gpu][at
     INFO("after turning " << difference(after_turning, settled) << ", unturned "
                           << difference(unturned, settled));
     CHECK(difference(after_turning, settled) < difference(unturned, settled) / 2);
+}
+
+TEST_CASE("turning, the clouds keep as sharp as when still", "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    constexpr VkExtent2D size{.width = 384, .height = 216};
+    // By about a third of a pixel a frame.
+    std::vector<Scene> turning;
+    for (int at = 0; at < 12; ++at) {
+        Scene scene = broken_overhead();
+        scene.forward = glm::normalize(east + (0.004 * at * north) + (2.0 * up));
+        turning.push_back(scene);
+    }
+    const Pixels turned = draw_frames(*device, turning, nullptr, size).back();
+    const Pixels still =
+        draw_frames(*device, std::vector<Scene>(12, turning.back()), nullptr, size).back();
+    // Detail, as how much each pixel differs from the next.
+    const auto detail = [&](const Pixels& pixels) {
+        long sum = 0;
+        for (std::size_t at = 0; at + 4 < pixels.size(); at += 4) {
+            for (std::size_t channel = 0; channel < 3; ++channel) {
+                sum += std::abs(int{pixels[at + channel]} - int{pixels[at + 4 + channel]});
+            }
+        }
+        return static_cast<double>(sum);
+    };
+    // Each frame's history moved by part of a texel; blurred each time, about 0.93.
+    const double kept = detail(turned) / detail(still);
+    INFO("kept " << kept);
+    CHECK(kept > 0.96);
+}
+
+TEST_CASE("cloud seen from afar is found where it starts, not where the step it's found in ends",
+          "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    constexpr VkExtent2D size{.width = 768, .height = 432};
+    // Away from a low sun, so the cloud darkens quickly the deeper into it it's lit.
+    const Scene above{.eye_height = 6'000.0,
+                      .forward = glm::normalize(-east - (0.15 * up)),
+                      .sun_elevation = 20.0,
+                      .before = everywhere(broken)};
+    // Each pixel's march is offset differently from its neighbours'; were the cloud found only
+    // where its steps land, its top would shift by as much as a step from pixel to pixel, and be
+    // lit as from that deep within it.
+    const Pixels drawn = draw_frames(*device, {above}, nullptr, size).front();
+    // Within the cloud, not across its edges.
+    long within = 0;
+    long rough = 0;
+    for (std::uint32_t y = 0; y < size.height; ++y) {
+        for (std::uint32_t x = 0; x + 1 < size.width; ++x) {
+            const std::size_t at = 4 * ((std::size_t{y} * size.width) + x);
+            const int here = drawn[at] + drawn[at + 1] + drawn[at + 2];
+            const int next = drawn[at + 4] + drawn[at + 5] + drawn[at + 6];
+            if (here > 120 && next > 120) {
+                ++within;
+                rough += std::abs(here - next);
+            }
+        }
+    }
+    REQUIRE(within > 0);
+    const double roughness = static_cast<double>(rough) / static_cast<double>(within);
+    INFO("roughness " << roughness);
+    // Found only where its steps land, about 13.7.
+    CHECK(roughness < 12.0);
 }
 
 TEST_CASE("the cloud's shadow reaches further the higher the eye, in steps that double",

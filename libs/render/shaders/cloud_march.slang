@@ -61,6 +61,11 @@ static const float overfill = 1.1;
 static const uint most_steps = 128;
 static const float step_growth = 0.03;
 static const float clear_stride = 4.0;
+// Through cloud, no step's deeper than this, as the light it takes, nor shorter than a pixel's
+// footprint or a share of the step it'd otherwise be; so where cloud starts, which the step it's
+// found in would round to, is found as finely as it's seen.
+static const float step_depth = 1.0;
+static const float most_refined = 4.0;
 static const uint least_steps = 24;
 // Of the golden ratio, the part past 1: frame after frame, it spreads offsets evenly.
 static const float golden = 0.618034;
@@ -367,12 +372,16 @@ float4 cloud_between(Ray ray, float start, float end, out float distance) {
     // from afar is stepped through, not hit or missed whole.
     const float longest = clamp((end - start) / float(least_steps), shortest_step, longest_step);
     float along = start + (ray.jitter * clamp(start * step_growth, shortest_step, longest));
-    // Whether the last step was a long one through clear air, and how far to go only in steps once
-    // one strode into cloud.
+    // Where it was last clear, and whether at the last step; whether the last step was a long one
+    // through clear air; and once stepped into cloud, how far to go back over in steps as fine as
+    // `refined`.
+    float clear_at = start;
+    bool was_clear = true;
     bool striding = false;
     float stepping_to = 0.0;
+    float refined = 0.0;
     for (uint at = 0; at < most_steps && along < end && seen_through > 0.01; ++at) {
-        const float step = clamp(along * step_growth, shortest_step, longest);
+        const float coarse = clamp(along * step_growth, shortest_step, longest);
         const float3 from_eye = view * along;
         const float point_height = drawn_height(from_eye, up, eye_height, faked);
         const float3 direction = on_planet(from_eye, up, centre_to_eye, faked, radius);
@@ -381,15 +390,20 @@ float4 cloud_between(Ray ray, float start, float end, out float distance) {
         const float footprint = along * pixel;
         float billows = 0.0;
         const float cloud = cloud_at(point, point_height, cell, footprint, true, billows);
-        if (cloud > 0.0 && striding) {
-            // Strode into cloud: back to a step past where it was clear, and on in steps.
+        const float extinction = cloud * densest_in(cell);
+        const float fine = clamp(step_depth / max(extinction, 1e-6),
+                                 max(footprint, coarse / most_refined), coarse);
+        if (cloud > 0.0 && was_clear && along - clear_at > fine * 1.01) {
+            // Stepped into cloud: back to where it was clear, and on in steps; strode into it, in
+            // the steps it'd have taken, else finer.
             stepping_to = along;
-            along -= step * (clear_stride - 1.0);
+            refined = striding ? coarse : fine;
+            along = clear_at + (refined * ray.jitter);
             striding = false;
             continue;
         }
+        const float step = cloud > 0.0 ? fine : (along < stepping_to ? refined : coarse);
         if (cloud > 0.0) {
-            const float extinction = cloud * densest_in(cell);
             const float3 point_up = normalize((up * centre_to_eye) + from_eye);
             const float sun_mu = dot(point_up, sun);
             // What the cloud towards the sun takes, as if the weather there were the same.
@@ -431,6 +445,10 @@ float4 cloud_between(Ray ray, float start, float end, out float distance) {
             radiance += lit * hidden;
             weighed += along * hidden;
             seen_through -= hidden;
+        }
+        was_clear = cloud <= 0.0;
+        if (was_clear) {
+            clear_at = along;
         }
         striding = cloud <= 0.0 && along >= stepping_to;
         along += striding ? step * clear_stride : step;
