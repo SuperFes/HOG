@@ -97,9 +97,10 @@ Result<Image> make_filled_image(Device& device, const ImageDesc& desc,
     if (!bytes) {
         return make_error(ErrorCode::Unsupported, "images can't be filled in that format");
     }
-    const std::uint32_t largest = std::max(desc.extent.width, desc.extent.height);
-    if (largest == 0 || desc.extent.width == 0 || desc.extent.height == 0 || desc.layers == 0 ||
-        desc.levels == 0 || std::cmp_greater(desc.levels, std::bit_width(largest))) {
+    const std::uint32_t largest = std::max({desc.extent.width, desc.extent.height, desc.depth});
+    if (largest == 0 || desc.extent.width == 0 || desc.extent.height == 0 || desc.depth == 0 ||
+        desc.layers == 0 || desc.levels == 0 ||
+        std::cmp_greater(desc.levels, std::bit_width(largest))) {
         return make_error(ErrorCode::InvalidArgument,
                           "a filled image needs area, a layer and no more mips than halve it");
     }
@@ -108,7 +109,7 @@ Result<Image> make_filled_image(Device& device, const ImageDesc& desc,
     for (std::uint32_t level = 0; level < desc.levels; ++level) {
         const VkExtent3D extent{.width = std::max(desc.extent.width >> level, 1U),
                                 .height = std::max(desc.extent.height >> level, 1U),
-                                .depth = 1};
+                                .depth = std::max(desc.depth >> level, 1U)};
         regions.push_back({.bufferOffset = at,
                            .bufferRowLength = 0,
                            .bufferImageHeight = 0,
@@ -118,7 +119,7 @@ Result<Image> make_filled_image(Device& device, const ImageDesc& desc,
                                                 .layerCount = desc.layers},
                            .imageOffset = {},
                            .imageExtent = extent});
-        at += VkDeviceSize{*bytes} * extent.width * extent.height * desc.layers;
+        at += VkDeviceSize{*bytes} * extent.width * extent.height * extent.depth * desc.layers;
     }
     if (texels.size() != at) {
         return make_error(ErrorCode::InvalidArgument, "the texels don't fill the image exactly");

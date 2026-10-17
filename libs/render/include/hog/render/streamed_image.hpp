@@ -47,8 +47,9 @@ private:
                                                         std::uint32_t layers = 1,
                                                         bool cube = false);
 
-// A sampled image filled once from `texels`: each mip in turn from the largest, its layers one
-// after another, rows packed tightly from the top. It's ready to sample once this returns.
+// A sampled image filled once from `texels`: each mip in turn from the largest, its layers or
+// slices one after another, rows packed tightly from the top. It's ready to sample once this
+// returns.
 [[nodiscard]] Result<Image> make_filled_image(Device& device, const ImageDesc& desc,
                                               std::span<const std::byte> texels);
 

@@ -245,16 +245,16 @@ TEST_CASE("cloud shades the ground the more of it there is", "[render]") {
 
 TEST_CASE("mist takes the sun's light and scatters most of it on down", "[render]") {
     using hog::render::under_mist;
-    const hog::render::CloudShade clear{.direct = 1.0, .diffuse = 0.0};
-    const hog::render::CloudShade dry = under_mist(clear, 0.0, 0.0, 10.0, 0.5);
+    const hog::render::CloudShade sunny{.direct = 1.0, .diffuse = 0.0};
+    const hog::render::CloudShade dry = under_mist(sunny, 0.0, 0.0, 10.0, 0.5);
     CHECK(dry.direct == 1.0);
     CHECK(dry.diffuse == 0.0);
-    const hog::render::CloudShade hazy = under_mist(clear, 0.9, 0.0, 10.0, 0.5);
+    const hog::render::CloudShade hazy = under_mist(sunny, 0.9, 0.0, 10.0, 0.5);
     CHECK(hazy.direct < 1.0);
     CHECK(hazy.diffuse > 0.0);
-    const hog::render::CloudShade lower = under_mist(clear, 0.9, 0.0, 10.0, 0.2);
+    const hog::render::CloudShade lower = under_mist(sunny, 0.9, 0.0, 10.0, 0.2);
     CHECK(lower.direct < hazy.direct);
-    const hog::render::CloudShade fogged = under_mist(clear, 0.5, 300.0, 10.0, 0.5);
+    const hog::render::CloudShade fogged = under_mist(sunny, 0.5, 300.0, 10.0, 0.5);
     CHECK(fogged.direct < 0.01);
     CHECK(fogged.diffuse > 0.6);
     CHECK(fogged.direct + fogged.diffuse < 1.0);

@@ -37,6 +37,7 @@ add_library(hog_render
     src/billboard.cpp
     src/camera.cpp
     src/capsules.cpp
+    src/cloud_noise.cpp
     src/clouds.cpp
     src/cube_sphere.cpp
     src/device.cpp
@@ -95,6 +96,7 @@ hog_add_tests(hog_render
     tests/billboard_tests.cpp
     tests/camera_tests.cpp
     tests/capsules_tests.cpp
+    tests/cloud_noise_tests.cpp
     tests/clouds_tests.cpp
     tests/cube_sphere_tests.cpp
     tests/device_tests.cpp
@@ -114,7 +116,7 @@ hog_add_tests(hog_render
     tests/terrain_tests.cpp)
 if(TARGET hog_render_tests)
     target_link_libraries(hog_render_tests PRIVATE hog::planet)
-    hog_add_shaders(hog_render_tests tests/shaders/aerial_probe.slang tests/shaders/air_probe.slang tests/shaders/dispatch.slang tests/shaders/fill.slang tests/shaders/layer.slang tests/shaders/projection_probe.slang
+    hog_add_shaders(hog_render_tests tests/shaders/aerial_probe.slang tests/shaders/air_probe.slang tests/shaders/dispatch.slang tests/shaders/fill.slang tests/shaders/layer.slang tests/shaders/projection_probe.slang tests/shaders/volume_probe.slang
                     tests/shaders/triangle.slang)
     target_link_libraries(hog_render_tests PRIVATE hog::render_testing)
 endif()
