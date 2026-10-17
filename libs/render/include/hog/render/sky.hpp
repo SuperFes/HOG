@@ -34,12 +34,18 @@ struct SkyView {
     double exposure = 1.0; // how much brighter the picture is than the light reaching the eye
     // The sky's irradiance on level ground at the eye, as atmosphere::Model::sky_irradiance finds.
     DVec3 sky_light{0.0};
-    // What any cloud over the eye lets through to what's drawn under it, and the air between.
+    // What any cloud over the eye lets through to what's drawn under it, and the air between, and
+    // any mist over it as well.
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     CloudShade shade = {};
     // The mist's from these; a clear, dry sky with none.
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     WeatherBindings weather = {};
+    // The cloud's shadow round the eye, as Clouds::shadow() makes it, ready to sample, which
+    // shades what's drawn in its reach in place of `shade`; none for no shadow.
+    VkImageView cloud_shadow = VK_NULL_HANDLE;
+    // Of light falling straight down, the share the mist over the eye lets through.
+    double mist = 1.0;
 };
 
 // What's drawn through the air reads it from these, all ready for any shader once a frame's
@@ -51,6 +57,8 @@ struct AirBindings {
     VkImageView sky_view = VK_NULL_HANDLE;
     // An array, a layer per slice of distance, and one more of the mist alone to the sky.
     VkImageView aerial = VK_NULL_HANDLE;
+    // As SkyView's, or an image shading nothing when there's none.
+    VkImageView cloud_shadow = VK_NULL_HANDLE;
     VkSampler sampler = VK_NULL_HANDLE; // linear, clamped
 };
 
@@ -83,8 +91,9 @@ public:
         return aerial_volumes_.at(frame);
     }
 
-    [[nodiscard]] AirBindings bindings(std::uint32_t frame,
-                                       const Atmosphere& atmosphere) const noexcept;
+    // With `cloud_shadow` as SkyView's.
+    [[nodiscard]] AirBindings bindings(std::uint32_t frame, const Atmosphere& atmosphere,
+                                       VkImageView cloud_shadow = VK_NULL_HANDLE) const noexcept;
 
     // Records drawing the sky over the whole of the colour image being rendered to, of `extent`,
     // behind anything drawn after it.
@@ -103,6 +112,8 @@ private:
     // A clear, dry sky's, for views with no weather.
     std::optional<WeatherMaps> clear_;
     WeatherBindings clear_bindings_;
+    // For views with no cloud's shadow.
+    Image unshadowed_;
 };
 
 } // namespace hog::render

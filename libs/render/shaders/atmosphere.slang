@@ -164,11 +164,16 @@ public interface IAlong {
     // `sunlight` from `sun_mu` above the horizon: xyz the light scattered towards the eye per metre
     // of the air's, w the share of light lost per metre.
     public float4 at(float along, float3 sunlight, float sun_mu);
+    // What any cloud lets through to `along` of the air's metres from the eye.
+    public Shade shade(float along);
 };
 
 public struct OnlyAir : IAlong {
     public float4 at(float along, float3 sunlight, float sun_mu) {
         return float4(0.0);
+    }
+    public Shade shade(float along) {
+        return unshaded();
     }
 };
 
@@ -227,9 +232,13 @@ public Scattered march<A : IAlong>(Air air, Sampler2D transmittance_table,
         const Medium medium = medium_at(air, point_height);
         const float3 sunlight = transmittance(air, transmittance_table, point_height, sun_mu);
         const float4 other = also.at(entered + along, sunlight, sun_mu);
+        const Shade shade = also.shade(entered + along);
+        // What the cloud scatters through lights the air from all round, as the sky does.
         const float3 lit =
-            (((medium.rayleigh * rayleigh) + (medium.mie * mie)) * sunlight) +
-            (medium.scattering() * multiple_scattering(air, scattering_table, point_height, sun_mu)) +
+            (((medium.rayleigh * rayleigh) + (medium.mie * mie)) * sunlight * shade.sun) +
+            (medium.scattering() *
+             ((multiple_scattering(air, scattering_table, point_height, sun_mu) * shade.sky) +
+              (sunlight * max(sun_mu, 0.0) * shade.scattered / pi))) +
             other.xyz;
         const float3 extinction = medium.extinction + other.w;
         const float3 through = exp(-extinction * step);
@@ -298,24 +307,58 @@ public struct Lighting {
     // rgb the sky's irradiance on level ground at the eye, w the air's metres to a metre drawn.
     public float4 sky_scale;
     // x the air's metres the aerial-perspective volume reaches out to; y and z of the light falling
-    // on any cloud over the eye, the shares let straight through and scattered through.
+    // on any cloud over the eye, the shares let straight through and scattered through, and any
+    // mist over it as well.
     public float4 reach;
     // As drawn: x the planet's radius, y the faked radius drawing bends it onto, z how far the
     // weather has faded from its maps before to those after, w the eye's height above sea level.
     public float4 weather;
+    // Of the cloud's shadow, as shadow.slang reads it: x the metres its map reaches from the eye
+    // east, west, north and south, 0 for none; y the metres above sea level the map's laid at; z
+    // of the light falling straight down, the share the mist over the eye lets through.
+    public float4 shadow;
 };
 
-// Of `sunlight`, the sun's light as it falls clear, what comes straight through any cloud over the
-// eye.
-public float3 through_cloud(Lighting lighting, float3 sunlight) {
-    return sunlight * lighting.reach.y;
+// Of the light falling on any cloud over a place, what reaches it, as render::CloudShade has it.
+public struct Shade {
+    // Of the sun's light, the share let straight through.
+    public float sun;
+    // Of the sky's light, the share let through, straight or scattered.
+    public float sky;
+    // Of the sun's light, the share scattered through, lighting as the sky does.
+    public float scattered;
+    // Of the sky, the share seen clear of the cloud.
+    public float open;
+};
+
+public Shade unshaded() {
+    Shade shade;
+    shade.sun = 1.0;
+    shade.sky = 1.0;
+    shade.scattered = 0.0;
+    shade.open = 1.0;
+    return shade;
 }
 
-// The sky's light on level ground, under any cloud over the eye lit by it and by `level_sunlight`,
-// the sun's light on level ground as it falls clear.
-public float3 sky_under_cloud(Lighting lighting, float3 level_sunlight) {
-    return (lighting.sky_scale.rgb * (lighting.reach.y + lighting.reach.z)) +
-           (level_sunlight * lighting.reach.z);
+// As any cloud and mist over the eye shade it.
+public Shade shade_at_eye(Lighting lighting) {
+    Shade shade;
+    shade.sun = lighting.reach.y;
+    shade.sky = lighting.reach.y + lighting.reach.z;
+    shade.scattered = lighting.reach.z;
+    shade.open = lighting.reach.y;
+    return shade;
+}
+
+// Of `sunlight`, the sun's light as it falls clear, what comes straight through the cloud.
+public float3 through_cloud(Shade shade, float3 sunlight) {
+    return sunlight * shade.sun;
+}
+
+// The sky's light on level ground under the cloud, lit by it and by `level_sunlight`, the sun's
+// light on level ground as it falls clear.
+public float3 sky_under_cloud(Lighting lighting, Shade shade, float3 level_sunlight) {
+    return (lighting.sky_scale.rgb * shade.sky) + (level_sunlight * shade.scattered);
 }
 
 public static const uint aerial_size = 32;

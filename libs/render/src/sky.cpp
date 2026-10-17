@@ -1,7 +1,9 @@
 #include <hog/render/atmosphere.hpp>
 #include <hog/render/barrier.hpp>
+#include <hog/render/clouds.hpp>
 #include <hog/render/device.hpp>
 #include <hog/render/sky.hpp>
+#include <hog/render/streamed_image.hpp>
 #include <hog/shaders/aerial.hpp>
 #include <hog/shaders/sky.hpp>
 #include <hog/shaders/sky_view.hpp>
@@ -33,6 +35,7 @@ struct Lighting {
     glm::vec4 sky_scale;
     glm::vec4 reach;
     glm::vec4 weather;
+    glm::vec4 shadow;
 };
 
 struct TablePush {
@@ -69,7 +72,8 @@ constexpr std::array aerial_bindings{
     binding(3, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT),
     binding(4, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT),
     binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT),
-    binding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT)};
+    binding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT),
+    binding(7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT)};
 
 constexpr std::array sky_bindings{
     binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT),
@@ -101,6 +105,15 @@ Result<Sky> Sky::create(Device& device, VkFormat colour_format, VkFormat depth_f
     }
     sky.clear_bindings_ = clear->bindings(1.0);
     sky.clear_.emplace(std::move(clear).value());
+    // Shading nothing: all the sun's light and the sky's straight through.
+    constexpr std::array<std::byte, 4> unshadowed{std::byte{255}, std::byte{255}, std::byte{0},
+                                                  std::byte{255}};
+    auto filled =
+        make_filled_image(device, {.format = VK_FORMAT_R8G8B8A8_UNORM}, std::span{unshadowed});
+    if (!filled) {
+        return std::unexpected(std::move(filled).error());
+    }
+    sky.unshadowed_ = std::move(filled).value();
     auto table = make_compute_pipeline(device, {.spirv = shaders::sky_view,
                                                 .entry = "sky_view_main",
                                                 .push_constant_bytes = sizeof(TablePush),
@@ -186,7 +199,12 @@ Result<> Sky::record_tables(VkCommandBuffer commands, VkExtent2D extent, std::ui
                   static_cast<float>(view.shade.diffuse), 0.0F},
         .weather = {static_cast<float>(view.bend.radius), static_cast<float>(view.bend.faked),
                     static_cast<float>(view.weather.faded),
-                    static_cast<float>(view.bend.eye_height)}};
+                    static_cast<float>(view.bend.eye_height)},
+        .shadow = {view.cloud_shadow != VK_NULL_HANDLE
+                       ? static_cast<float>(cloud_shadow_reach(view.bend.eye_height))
+                       : 0.0F,
+                   static_cast<float>(view.weather.lowest_base), static_cast<float>(view.mist),
+                   0.0F}};
     const Buffer& buffer = lighting_.at(frame);
     std::memcpy(buffer.mapped().data(), &lighting, sizeof(lighting));
     if (auto flushed = buffer.flush(); !flushed) {
@@ -210,16 +228,21 @@ Result<> Sky::record_tables(VkCommandBuffer commands, VkExtent2D extent, std::ui
         view.weather.sky_before != VK_NULL_HANDLE ? view.weather : clear_bindings_;
     push_sampled_image(commands, aerial_, 5, weather.sky_before, weather.sampler);
     push_sampled_image(commands, aerial_, 6, weather.sky_after, weather.sampler);
+    push_sampled_image(commands, aerial_, 7,
+                       view.cloud_shadow != VK_NULL_HANDLE ? view.cloud_shadow : unshadowed_.view(),
+                       atmosphere.sampler());
     vkCmdDispatch(commands, aerial_size / 8, aerial_size / 8, aerial_layers);
     return {};
 }
 
-AirBindings Sky::bindings(std::uint32_t frame, const Atmosphere& atmosphere) const noexcept {
+AirBindings Sky::bindings(std::uint32_t frame, const Atmosphere& atmosphere,
+                          VkImageView cloud_shadow) const noexcept {
     return {.air = atmosphere.constants(),
             .lighting = lighting_[frame].handle(),
             .transmittance = atmosphere.transmittance().view(),
             .sky_view = tables_[frame].view(),
             .aerial = aerial_volumes_[frame].view(),
+            .cloud_shadow = cloud_shadow != VK_NULL_HANDLE ? cloud_shadow : unshadowed_.view(),
             .sampler = atmosphere.sampler()};
 }
 

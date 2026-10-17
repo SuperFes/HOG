@@ -50,6 +50,9 @@ constexpr double snow_extinction = 12.0;
 constexpr double least_sun = 0.05;
 // Of the sun's light the mist takes, the share it scatters on down.
 constexpr double mist_scattered_down = 0.7;
+// Metres the cloud's shadow reaches from the eye at least and at most.
+constexpr double least_shadow_reach = 32'000.0;
+constexpr double most_shadow_reach = 256'000.0;
 
 constexpr VkDescriptorSetLayoutBinding binding(std::uint32_t at, VkDescriptorType type,
                                                VkShaderStageFlags stage) noexcept {
@@ -72,7 +75,8 @@ constexpr std::array descriptors{binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, f
                                  binding(5, sampled, fragment),
                                  binding(6, sampled, fragment),
                                  binding(7, sampled, fragment),
-                                 binding(8, sampled, fragment)};
+                                 binding(8, sampled, fragment),
+                                 binding(9, sampled, fragment)};
 
 constexpr std::array march_descriptors{binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, compute),
                                        binding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, compute),
@@ -86,7 +90,17 @@ constexpr std::array march_descriptors{binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUF
                                        binding(9, sampled, compute),
                                        binding(10, sampled, compute),
                                        binding(11, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, compute),
-                                       binding(12, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, compute)};
+                                       binding(12, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, compute),
+                                       binding(13, sampled, compute)};
+
+constexpr std::array shadow_descriptors{binding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, compute),
+                                        binding(5, sampled, compute),
+                                        binding(6, sampled, compute),
+                                        binding(7, sampled, compute),
+                                        binding(8, sampled, compute),
+                                        binding(9, sampled, compute),
+                                        binding(10, sampled, compute),
+                                        binding(14, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, compute)};
 
 constexpr std::array resolve_descriptors{binding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, compute),
                                          binding(1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, compute),
@@ -123,10 +137,13 @@ CloudShade cloud_shade(double cover, double water) noexcept {
             .diffuse = covered * (let_through - unscattered)};
 }
 
+double mist_through(double humidity, double fog_top, double height, double sun_mu) noexcept {
+    return std::exp(-mist_above(humidity, fog_top, height) / std::max(sun_mu, least_sun));
+}
+
 CloudShade under_mist(CloudShade shade, double humidity, double fog_top, double height,
                       double sun_mu) noexcept {
-    const double through =
-        std::exp(-mist_above(humidity, fog_top, height) / std::max(sun_mu, least_sun));
+    const double through = mist_through(humidity, fog_top, height, sun_mu);
     return {.direct = shade.direct * through,
             .diffuse = shade.diffuse + (shade.direct * (1.0 - through) * mist_scattered_down)};
 }
@@ -143,6 +160,14 @@ double rain_beneath(double cover, double presence) noexcept {
     const double covered = std::clamp(cover, 0.0, 1.0);
     return std::lerp(1.0, std::clamp(presence, 0.0, 1.0) / std::max(covered, least_cover),
                      std::min(covered / least_cover, 1.0));
+}
+
+double cloud_shadow_reach(double eye_height) noexcept {
+    double reach = least_shadow_reach;
+    while (reach < 2.0 * eye_height && reach < most_shadow_reach) {
+        reach *= 2.0;
+    }
+    return reach;
 }
 
 Result<Clouds> Clouds::create(Device& device, VkFormat colour_format, jobs::JobSystem& jobs) {
@@ -164,6 +189,24 @@ Result<Clouds> Clouds::create(Device& device, VkFormat colour_format, jobs::JobS
         return std::unexpected(std::move(march).error());
     }
     clouds.march_ = std::move(march).value();
+    auto shadow = make_compute_pipeline(device, {.spirv = shaders::cloud_march,
+                                                 .entry = "shadow_main",
+                                                 .push_constant_bytes = sizeof(MarchPush),
+                                                 .descriptors = shadow_descriptors});
+    if (!shadow) {
+        return std::unexpected(std::move(shadow).error());
+    }
+    clouds.shadow_ = std::move(shadow).value();
+    auto shadow_map =
+        make_image(device, {.format = shadow_format,
+                            .extent = {.width = shadow_size, .height = shadow_size},
+                            // Read back to be looked at.
+                            .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                                     VK_IMAGE_USAGE_TRANSFER_SRC_BIT});
+    if (!shadow_map) {
+        return std::unexpected(std::move(shadow_map).error());
+    }
+    clouds.shadow_map_ = std::move(shadow_map).value();
     auto pipeline = make_pipeline(device, {.spirv = shaders::clouds,
                                            .colour_format = colour_format,
                                            .blend = Blend::Premultiplied,
@@ -195,6 +238,32 @@ Result<Clouds> Clouds::create(Device& device, VkFormat colour_format, jobs::JobS
     }
     clouds.noise_ = std::move(noise).value();
     return clouds;
+}
+
+void Clouds::shadow(VkCommandBuffer commands, const CloudsView& view) const noexcept {
+    HOG_ASSERT(view.air.lighting != VK_NULL_HANDLE, "mapping the cloud's shadow without the air");
+    HOG_ASSERT(view.weather.weather_before != VK_NULL_HANDLE,
+               "mapping the cloud's shadow without weather");
+    const MarchPush push{
+        .eye_from_clip = Mat4{1.0F},
+        .up_height = {Vec3{view.bend.up}, static_cast<float>(view.bend.eye_height)},
+        .radii = {static_cast<float>(view.bend.radius), static_cast<float>(view.bend.faked),
+                  static_cast<float>(view.weather.faded), 0.0F},
+        .moved = {Vec3{within_period(view.moved)}, 0.0F},
+        .bounds = {static_cast<float>(view.weather.lowest_base),
+                   static_cast<float>(view.weather.highest_top), 0.0F, -1.0F}};
+    vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, shadow_.handle());
+    push_uniform_buffer(commands, shadow_, 1, view.air.lighting);
+    push_sampled_image(commands, shadow_, 5, view.weather.weather_before, view.weather.sampler);
+    push_sampled_image(commands, shadow_, 6, view.weather.weather_after, view.weather.sampler);
+    push_sampled_image(commands, shadow_, 7, view.weather.sky_before, view.weather.sampler);
+    push_sampled_image(commands, shadow_, 8, view.weather.sky_after, view.weather.sampler);
+    push_sampled_image(commands, shadow_, 9, noise_.shape.view(), tiling_.handle());
+    push_sampled_image(commands, shadow_, 10, noise_.detail.view(), tiling_.handle());
+    push_storage_image(commands, shadow_, 14, shadow_map_.view());
+    vkCmdPushConstants(commands, shadow_.layout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push),
+                       &push);
+    vkCmdDispatch(commands, (shadow_size + 7) / 8, (shadow_size + 7) / 8, 1);
 }
 
 VkExtent2D Clouds::march_extent(VkExtent2D extent) noexcept {
@@ -254,6 +323,7 @@ Result<> Clouds::march(VkCommandBuffer commands, VkExtent2D extent, VkImageView 
     push_sampled_image(commands, march_, 10, noise_.detail.view(), tiling_.handle());
     push_storage_image(commands, march_, 11, marched);
     push_storage_image(commands, march_, 12, distances);
+    push_sampled_image(commands, march_, 13, view.air.cloud_shadow, view.air.sampler);
     vkCmdPushConstants(commands, march_.layout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push),
                        &push);
     vkCmdDispatch(commands, (size.width + 7) / 8, (size.height + 7) / 8, 1);
@@ -331,6 +401,7 @@ void Clouds::draw(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth
     push_sampled_image(commands, pipeline_, 6, view.weather.sky_after, view.weather.sampler);
     push_sampled_image(commands, pipeline_, 7, blends_.at(blended_).view(), linear_.handle());
     push_sampled_image(commands, pipeline_, 8, distances, nearest_.handle());
+    push_sampled_image(commands, pipeline_, 9, view.air.cloud_shadow, view.air.sampler);
     vkCmdPushConstants(commands, pipeline_.layout(),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push),
                        &push);

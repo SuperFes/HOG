@@ -1,9 +1,12 @@
 import atmosphere;
+import shadow;
 import tone;
 
 [[vk::binding(0, 0)]] ConstantBuffer<Air> air;
 [[vk::binding(1, 0)]] ConstantBuffer<Lighting> lighting;
 [[vk::binding(2, 0)]] Sampler2D transmittance_table;
+// As cloud_march.slang's.
+[[vk::binding(3, 0)]] Sampler2D cloud_shadow;
 
 struct Push {
     float4x4 clip_from_eye;
@@ -113,8 +116,10 @@ float4 fragment_main(Particle particle) : SV_Target {
     const float sun_mu = dot(sun, up);
     const float3 clear =
         transmittance(air, transmittance_table, lighting.up_height.w, sun_mu) * max(sun_mu, 0.0);
-    const float3 sunlight = through_cloud(lighting, clear);
-    const float3 sky = sky_under_cloud(lighting, clear);
+    // Near enough the eye to be shaded as it is.
+    const Shade shade = shade_at(lighting, cloud_shadow, float3(0.0));
+    const float3 sunlight = through_cloud(shade, clear);
+    const float3 sky = sky_under_cloud(lighting, shade, clear);
     float3 radiance;
     float shape;
     if (particle.flake != 0u) {

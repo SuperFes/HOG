@@ -71,7 +71,8 @@ constexpr std::array air_descriptors{
     binding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT),
     binding(3, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT),
     binding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
-    binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)};
+    binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
+    binding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)};
 
 // The near tile's size, the far one's, and 1 if ground below sea level is seen through water; then
 // what each biome's material averages to, in linear light.
@@ -341,6 +342,7 @@ void Terrain::draw(VkCommandBuffer commands, VkExtent2D extent, const TerrainPoo
         push_uniform_buffer(commands, pipeline_, 3, view.air.lighting);
         push_sampled_image(commands, pipeline_, 4, view.air.transmittance, view.air.sampler);
         push_sampled_image(commands, pipeline_, 5, view.air.aerial, view.air.sampler);
+        push_sampled_image(commands, pipeline_, 6, view.air.cloud_shadow, view.air.sampler);
     }
     const std::array vertices{pool.vertices()};
     const VkDeviceSize offset = 0;

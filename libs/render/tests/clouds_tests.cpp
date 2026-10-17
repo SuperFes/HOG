@@ -16,6 +16,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <glm/glm.hpp>
+#include <glm/gtc/packing.hpp>
 
 #include <algorithm>
 #include <array>
@@ -101,8 +102,13 @@ struct Scene {
     std::optional<VkRect2D> covered = {};
 };
 
-// The clouds alone, over black, for each of `scenes` in turn as frames of one picture.
-std::vector<Pixels> draw_frames(hog::render::Device& device, const std::vector<Scene>& scenes) {
+// Of the cloud's shadow, as Clouds::shadow_image() holds it, row by row from the north.
+using Shadow = std::vector<glm::vec4>;
+
+// The clouds alone, over black, for each of `scenes` in turn as frames of one picture; and the last
+// frame's shadow, into `shadow` if given.
+std::vector<Pixels> draw_frames(hog::render::Device& device, const std::vector<Scene>& scenes,
+                                Shadow* shadow = nullptr) {
     auto atmosphere = hog::render::Atmosphere::create(device);
     REQUIRE(atmosphere);
     auto sky = hog::render::Sky::create(device, colour_format, depth_format);
@@ -158,14 +164,21 @@ std::vector<Pixels> draw_frames(hog::render::Device& device, const std::vector<S
                                         .exposure = 10.0,
                                         .sky_light =
                                             model.sky_irradiance(scene.eye_height * scale, sun),
-                                        .weather = weather};
+                                        .weather = weather,
+                                        .cloud_shadow = clouds->shadow_image().view()};
         const CloudsView view{.camera = camera,
                               .bend = bend,
-                              .air = sky->bindings(0, *atmosphere),
+                              .air = sky->bindings(0, *atmosphere, seen.cloud_shadow),
                               .weather = weather,
                               .moved = scene.moved};
         REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
             namespace use = hog::render::image_use;
+            const hog::render::Image& shadow_map = clouds->shadow_image();
+            hog::render::transition(commands, shadow_map.handle(), VK_IMAGE_ASPECT_COLOR_BIT,
+                                    use::discard, use::storage);
+            clouds->shadow(commands, view);
+            hog::render::transition(commands, shadow_map.handle(), VK_IMAGE_ASPECT_COLOR_BIT,
+                                    use::storage, use::sampled);
             CHECK(sky->record_frame(commands, extent, 0, *atmosphere, seen));
             hog::render::transition(commands, colour->handle(), VK_IMAGE_ASPECT_COLOR_BIT,
                                     use::discard, use::colour_target);
@@ -203,6 +216,21 @@ std::vector<Pixels> draw_frames(hog::render::Device& device, const std::vector<S
             hog::render::read_pixels(device, *colour, hog::render::image_use::colour_target);
         REQUIRE(pixels);
         frames.push_back(std::move(pixels).value());
+    }
+    if (shadow != nullptr) {
+        auto held = hog::render::read_pixels(device, clouds->shadow_image(),
+                                             hog::render::image_use::sampled);
+        REQUIRE(held);
+        shadow->clear();
+        for (std::size_t at = 0; at + 8 <= held->size(); at += 8) {
+            glm::vec4 texel{0.0F};
+            for (glm::length_t channel = 0; channel < 4; ++channel) {
+                const std::size_t first = at + (2 * static_cast<std::size_t>(channel));
+                texel[channel] = glm::unpackHalf1x16(
+                    static_cast<std::uint16_t>(held->at(first) | (held->at(first + 1) << 8U)));
+            }
+            shadow->push_back(texel);
+        }
     }
     return frames;
 }
@@ -645,4 +673,86 @@ TEST_CASE("turning, what was marched before follows the view", "[render][gpu][at
     INFO("after turning " << difference(after_turning, settled) << ", unturned "
                           << difference(unturned, settled));
     CHECK(difference(after_turning, settled) < difference(unturned, settled) / 2);
+}
+
+TEST_CASE("the cloud's shadow reaches further the higher the eye, in steps that double",
+          "[render]") {
+    using hog::render::cloud_shadow_reach;
+    CHECK(cloud_shadow_reach(2.0) == 32'000.0);
+    CHECK(cloud_shadow_reach(16'000.0) == 32'000.0);
+    CHECK(cloud_shadow_reach(23'000.0) == 64'000.0);
+    CHECK(cloud_shadow_reach(40'000.0) == 128'000.0);
+    CHECK(cloud_shadow_reach(1e7) == 256'000.0);
+}
+
+TEST_CASE("mist lets the light falling on it through, less the more there is", "[render]") {
+    using hog::render::mist_through;
+    CHECK(mist_through(0.0, 0.0, 10.0, 0.5) == 1.0);
+    CHECK(mist_through(0.9, 0.0, 10.0, 0.5) < 1.0);
+    CHECK(mist_through(0.5, 300.0, 10.0, 0.5) < 0.01);
+}
+
+namespace {
+
+// Of `shadow`, the mean of the texels whose middles lie between `from` and `to` metres north of
+// the eye, with the eye low enough that the map reaches 32 km. The map's laid out as
+// atmosphere.slang's frame_of(up) has it.
+glm::vec4 mean_between(const Shadow& shadow, double from, double to) {
+    const DVec3 across = glm::normalize(glm::cross(east, up));
+    const DVec3 along = glm::cross(up, across);
+    const std::uint32_t size = Clouds::shadow_size;
+    const double texel = 64'000.0 / size;
+    glm::vec4 sum{0.0F};
+    std::uint32_t count = 0;
+    for (std::uint32_t y = 0; y < size; ++y) {
+        for (std::uint32_t x = 0; x < size; ++x) {
+            const DVec3 offset = (across * (((x + 0.5) * texel) - 32'000.0)) +
+                                 (along * (((y + 0.5) * texel) - 32'000.0));
+            const double northward = glm::dot(offset, north);
+            if (northward >= from && northward < to) {
+                sum += shadow.at((std::size_t{y} * size) + x);
+                ++count;
+            }
+        }
+    }
+    REQUIRE(count > 0);
+    return sum / static_cast<float>(count);
+}
+
+// Over the north of the planet only, from about 11 km north of the eye.
+const auto northern = [](DVec3 direction) { return direction.y > 0.1 ? overcast : clear; };
+
+} // namespace
+
+TEST_CASE("the cloud's shadow lies beneath it, and over the ground it leaves clear",
+          "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    Shadow shadow;
+    static_cast<void>(draw_frames(*device, {{.before = map_of(northern)}}, &shadow));
+    REQUIRE(shadow.size() == std::size_t{Clouds::shadow_size} * Clouds::shadow_size);
+    // Well under the cloud and well clear of it, past where its edge wanders.
+    const glm::vec4 under = mean_between(shadow, 20'000.0, 30'000.0);
+    const glm::vec4 clear_of = mean_between(shadow, -30'000.0, -10'000.0);
+    INFO("under " << under.r << " " << under.g << " " << under.b << " " << under.a);
+    INFO("clear " << clear_of.r << " " << clear_of.g << " " << clear_of.b << " " << clear_of.a);
+    CHECK(under.r < 0.1F);
+    CHECK(under.g < 0.1F);
+    CHECK(under.b > 0.02F);
+    CHECK(under.a > 2'500.0F);
+    CHECK(clear_of.r > 0.95F);
+    CHECK(clear_of.g > 0.95F);
+    CHECK(clear_of.b < 0.01F);
+}
+
+TEST_CASE("fog lies darker in the cloud's shadow", "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    // The layer's cloud over fog to 288 m.
+    const Texel foggy_layer{255, 9, 31, 47};
+    const Scene shaded{.before = everywhere(overcast), .sky = everywhere(foggy_layer)};
+    Scene lit = shaded;
+    lit.before = everywhere(clear);
+    const long under = total(draw(*device, shaded));
+    const long clear_of = total(draw(*device, lit));
+    INFO("under " << under << ", clear of it " << clear_of);
+    CHECK(under < clear_of * 3 / 4);
 }

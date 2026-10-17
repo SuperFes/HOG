@@ -1,4 +1,5 @@
 import atmosphere;
+import shadow;
 import tone;
 
 struct Push {
@@ -19,6 +20,8 @@ struct Push {
 [[vk::binding(1, 0)]] ConstantBuffer<Lighting> lighting;
 [[vk::binding(2, 0)]] Sampler2D transmittance_table;
 [[vk::binding(3, 0)]] Sampler2DArray aerial_volume;
+// As cloud_march.slang's.
+[[vk::binding(4, 0)]] Sampler2D cloud_shadow;
 
 // Around, and up each half from its pole to its equator; as hog::render::Capsules counts.
 static const uint segments = 16;
@@ -76,8 +79,9 @@ float4 fragment_air(Surface surface) : SV_Target {
     const float3 sun = push.sun.xyz;
     const float scale = lighting.sky_scale.w;
     const float3 clear = transmittance(air, transmittance_table, lighting.up_height.w, dot(up, sun));
-    const float3 lit = (through_cloud(lighting, clear) * saturate(dot(normal, sun))) +
-                       (sky_under_cloud(lighting, clear * saturate(dot(up, sun))) *
+    const Shade shade = shade_at(lighting, cloud_shadow, surface.from_eye);
+    const float3 lit = (through_cloud(shade, clear) * saturate(dot(normal, sun))) +
+                       (sky_under_cloud(lighting, shade, clear * saturate(dot(up, sun))) *
                         (0.5 + (0.5 * dot(normal, up))));
     const float3 radiance = push.colour.rgb * lit / pi;
 

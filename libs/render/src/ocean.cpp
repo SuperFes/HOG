@@ -59,7 +59,8 @@ constexpr std::array air_descriptors{binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFE
                                      binding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
                                      binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
                                      binding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-                                     binding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)};
+                                     binding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+                                     binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)};
 
 } // namespace
 
@@ -124,6 +125,7 @@ void Ocean::draw(VkCommandBuffer commands, VkExtent2D extent, const OceanView& v
         push_sampled_image(commands, pipeline_, 2, view.air.transmittance, view.air.sampler);
         push_sampled_image(commands, pipeline_, 3, view.air.sky_view, view.air.sampler);
         push_sampled_image(commands, pipeline_, 4, view.air.aerial, view.air.sampler);
+        push_sampled_image(commands, pipeline_, 5, view.air.cloud_shadow, view.air.sampler);
     }
     const std::array vertices{vertices_.handle()};
     const VkDeviceSize offset = 0;

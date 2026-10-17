@@ -199,9 +199,10 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     }
     const protocol::CellWeather here = weather_at_eye(shot);
     const DVec3 sun = calendar_.sun_direction(shot.time);
+    const double sun_mu = glm::dot(sun, shot.bend.up);
     const render::CloudShade shade =
         render::under_mist(shade_at_eye(shot.bend, here), double{here.humidity},
-                           double{here.fog_top}, shot.bend.eye_height, glm::dot(sun, shot.bend.up));
+                           double{here.fog_top}, shot.bend.eye_height, sun_mu);
     const DVec3 drift = drift_at(shot.bend.up, here);
     const double falling = falling_at_eye(shot.bend, here);
     drifted_ = render::within_period(drifted_ + (drift * shot.seconds));
@@ -213,8 +214,20 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     // Taken as the passes are recorded, after the uploads: until the maps are first taken, a clear
     // sky.
     const auto weather = [&] { return weather_.bindings(faded); };
-    const render::SkyView sky = sky_view(shot, shade);
-    const render::AirBindings through = sky_.bindings(frame.slot, atmosphere_);
+    render::SkyView sky = sky_view(shot, shade);
+    sky.mist = render::mist_through(double{here.humidity}, double{here.fog_top},
+                                    shot.bend.eye_height, sun_mu);
+    if (cloudy) {
+        sky.cloud_shadow = clouds_.shadow_image().view();
+    }
+    const render::AirBindings through = sky_.bindings(frame.slot, atmosphere_, sky.cloud_shadow);
+    const auto clouds_view = [&] {
+        return render::CloudsView{.camera = shot.camera,
+                                  .bend = shot.bend,
+                                  .air = through,
+                                  .weather = weather(),
+                                  .moved = drifted_};
+    };
 
     render::RenderGraph graph;
     const render::GraphImage target = graph.import(frame.target, frame.view, frame.extent);
@@ -234,9 +247,16 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
         graph.import(tracked_table, sky_table.view(), sky_table.desc().extent);
     const render::GraphImage aerial =
         graph.import(tracked_aerial, aerial_volume.view(), aerial_volume.desc().extent);
-    const std::vector<render::GraphUse> through_air{
-        {.image = table, .use = render::image_use::sampled},
-        {.image = aerial, .use = render::image_use::sampled}};
+    std::vector<render::GraphUse> through_air{{.image = table, .use = render::image_use::sampled},
+                                              {.image = aerial, .use = render::image_use::sampled}};
+    // Made afresh each frame too, when there's cloud to cast it.
+    const render::Image& shadow_map = clouds_.shadow_image();
+    render::TrackedImage tracked_shadow{shadow_map.handle(), VK_IMAGE_ASPECT_COLOR_BIT};
+    std::optional<render::GraphImage> shadow;
+    if (cloudy) {
+        shadow = graph.import(tracked_shadow, shadow_map.view(), shadow_map.desc().extent);
+        through_air.push_back({.image = *shadow, .use = render::image_use::sampled});
+    }
     const render::GraphTargets drawn{.colour = {.image = target, .clear = std::nullopt},
                                      .depth = {{.image = depth, .clear = std::nullopt}}};
 
@@ -255,10 +275,18 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                   }
                   return pool_.record_uploads(commands, frame.slot);
               });
-    graph.add({.name = "sky tables",
-               .uses = {{.image = table, .use = render::image_use::storage},
-                        {.image = aerial, .use = render::image_use::storage}},
-               .targets = std::nullopt},
+    if (shadow) {
+        graph.add({.name = "cloud shadow",
+                   .uses = {{.image = *shadow, .use = render::image_use::storage}},
+                   .targets = std::nullopt},
+                  [&](VkCommandBuffer commands) { clouds_.shadow(commands, clouds_view()); });
+    }
+    std::vector<render::GraphUse> tables{{.image = table, .use = render::image_use::storage},
+                                         {.image = aerial, .use = render::image_use::storage}};
+    if (shadow) {
+        tables.push_back({.image = *shadow, .use = render::image_use::sampled});
+    }
+    graph.add({.name = "sky tables", .uses = tables, .targets = std::nullopt},
               [&](VkCommandBuffer commands) {
                   render::SkyView weathered = sky;
                   weathered.weather = weather();
@@ -300,16 +328,17 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
             });
     }
     if (render::precipitation_count(falling, double{here.snow}) > 0) {
-        graph.add({.name = "rain", .uses = {}, .targets = drawn}, [&](VkCommandBuffer commands) {
-            precipitation_.draw(commands, frame.extent,
-                                {.camera = shot.camera,
-                                 .air = through,
-                                 .up = shot.bend.up,
-                                 .wind = drift * surface_wind,
-                                 .falling = falling,
-                                 .snow = double{here.snow},
-                                 .seconds = falling_for_});
-        });
+        graph.add({.name = "rain", .uses = through_air, .targets = drawn},
+                  [&](VkCommandBuffer commands) {
+                      precipitation_.draw(commands, frame.extent,
+                                          {.camera = shot.camera,
+                                           .air = through,
+                                           .up = shot.bend.up,
+                                           .wind = drift * surface_wind,
+                                           .falling = falling,
+                                           .snow = double{here.snow},
+                                           .seconds = falling_for_});
+                  });
     }
     // The clouds and glare read what's drawn in front of them from depth, so they're drawn
     // without it.
@@ -326,32 +355,27 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
         };
         const render::GraphImage marched = marched_image(render::Clouds::marched_format);
         const render::GraphImage distances = marched_image(render::Clouds::distances_format);
-        const auto clouds_view = [&] {
-            return render::CloudsView{.camera = shot.camera,
-                                      .bend = shot.bend,
-                                      .air = through,
-                                      .weather = weather(),
-                                      .moved = drifted_};
-        };
         graph.add({.name = "cloud march",
                    .uses = {{.image = aerial, .use = render::image_use::sampled},
+                            {.image = *shadow, .use = render::image_use::sampled},
                             {.image = depth, .use = render::image_use::sampled},
                             {.image = marched, .use = render::image_use::storage},
                             {.image = distances, .use = render::image_use::storage}},
                    .targets = std::nullopt},
                   // By value what's made in this block, as the passes run after it.
-                  [&, marched, distances, clouds_view](VkCommandBuffer commands) {
+                  [&, marched, distances](VkCommandBuffer commands) {
                       return clouds_.march(commands, frame.extent, graph.view(depth),
                                            graph.view(marched), graph.view(distances),
                                            clouds_view());
                   });
         graph.add({.name = "clouds",
                    .uses = {{.image = aerial, .use = render::image_use::sampled},
+                            {.image = *shadow, .use = render::image_use::sampled},
                             {.image = depth, .use = render::image_use::sampled},
                             {.image = distances, .use = render::image_use::sampled}},
                    .targets = {{.colour = {.image = target, .clear = std::nullopt},
                                 .depth = std::nullopt}}},
-                  [&, distances, clouds_view](VkCommandBuffer commands) {
+                  [&, distances](VkCommandBuffer commands) {
                       clouds_.draw(commands, frame.extent, graph.view(depth), graph.view(distances),
                                    clouds_view());
                   });

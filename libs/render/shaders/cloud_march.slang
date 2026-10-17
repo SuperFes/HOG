@@ -1,4 +1,5 @@
 import atmosphere;
+import shadow;
 import weather;
 
 [[vk::binding(0, 0)]] ConstantBuffer<Air> air;
@@ -17,6 +18,13 @@ import weather;
 // Premultiplied, before tone mapping; and the metres to the cloud, weighed by what it hides.
 [[vk::binding(11, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> marched;
 [[vk::binding(12, 0)]] [[vk::image_format("r32f")]] RWTexture2D<float> distances;
+// The cloud's shadow, as shadow_main() leaves it in `shadow_map`: of the light along the sun's to
+// the ground through each texel at the height the map's laid at, r the share let straight through
+// the cloud; g and b, of the light falling on the cloud over the ground there, as clouds.hpp's
+// cloud_shade has it, the shares let straight through and scattered through; and a the metres
+// above sea level of the top of the cloud the sun's light goes through, or over the ground.
+[[vk::binding(13, 0)]] Sampler2D cloud_shadow;
+[[vk::binding(14, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> shadow_map;
 
 struct Push {
     float4x4 eye_from_clip;
@@ -97,6 +105,11 @@ static const float rain_footprint = 1000.0;
 // It falls in streaks, this many metres across and stretched this many times as long.
 static const float streak_tile = 1000.0;
 static const float streak_stretch = 10.0;
+// Of the cloud's shadow, metres along the sun's light per step at least, and steps at most and
+// least.
+static const float shadow_step = 300.0;
+static const uint most_shadow_steps = 64;
+static const uint least_shadow_steps = 8;
 
 // The weather at a place, as both maps fade between.
 struct Cell {
@@ -220,13 +233,16 @@ float extinction_of(float falling, float snow) {
                          : 0.0;
 }
 
-// Of the light falling on the cloud's top, the share let through to beneath it where it's there by
-// `presence`: scattered through it, under it; as much as comes through the gaps round it, as
-// clouds.hpp's cloud_shade has it on the whole, at its edges.
-float shade_beneath(Cell cell, float presence) {
+// As clouds.hpp's cloud_shade: x the share let straight through, y scattered through.
+float2 cloud_shade(Cell cell) {
+    if (cell.cover <= 0.0) {
+        return float2(1.0, 0.0);
+    }
     const float column = depth_per_mm * cell.mm / max(cell.cover, least_cover);
-    const float under = 1.0 / (1.0 + (0.75 * (1.0 - forward) * column));
-    return lerp(lerp(1.0, under, cell.cover), under, presence);
+    const float unscattered = exp(-column);
+    const float let_through = 1.0 / (1.0 + (0.75 * (1.0 - forward) * column));
+    return float2((1.0 - cell.cover) + (cell.cover * unscattered),
+                  cell.cover * (let_through - unscattered));
 }
 
 // How heavily it falls in its streaks at `height` over `direction`, about 1 on the whole.
@@ -267,8 +283,8 @@ struct Ray {
 
 // What falls beneath the cloud along `ray`, from `start` to `end`, premultiplied, before tone
 // mapping; `distance` is left as the metres to it, weighed by what it hides. It falls in streaks
-// beneath the billows over it, not the gaps between, and each step's lit as under the cloud over
-// it. Steps are finest at the start.
+// beneath the billows over it, not the gaps between, and each step's lit as the cloud's shadow
+// has it. Steps are finest at the start.
 float4 rain_between(Ray ray, float start, float end, out float distance) {
     const float3 up = push.up_height.xyz;
     const float eye_height = push.up_height.w;
@@ -312,9 +328,9 @@ float4 rain_between(Ray ray, float start, float end, out float distance) {
         const float sun_mu = dot(sun, normalize((up * centre_to_eye) + from_eye));
         const float3 level_sunlight =
             transmittance(air, transmittance_table, height * scale, sun_mu) * max(sun_mu, 0.0);
-        // The sun's and the sky's light alike, as much as the cloud over it lets through.
-        const float3 lit =
-            (level_sunlight + lighting.sky_scale.rgb) * shade_beneath(cell, presence);
+        const Shade shade = shade_at(lighting, cloud_shadow, from_eye);
+        const float3 lit = through_cloud(shade, level_sunlight) +
+                           sky_under_cloud(lighting, shade, level_sunlight);
         const float albedo = lerp(rain_albedo, snow_albedo, cell.snow);
         const float hidden = seen_through * (1.0 - exp(-extinction * step));
         radiance += lit * (albedo / pi) * hidden;
@@ -502,4 +518,57 @@ void march_main(uint3 id: SV_DispatchThreadID) {
                                        (further.a * (1.0 - nearer.a) * further_distance)) /
                                           seen.a
                                     : 0.0;
+}
+
+// The cloud's shadow round the eye, as cloud_shadow holds it, over as much of the ground as the
+// frame's Lighting has it reach.
+[shader("compute")]
+[numthreads(8, 8, 1)]
+void shadow_main(uint3 id: SV_DispatchThreadID) {
+    uint width;
+    uint height;
+    shadow_map.GetDimensions(width, height);
+    if (id.x >= width || id.y >= height) {
+        return;
+    }
+    const float radius = push.radii.x;
+    const float reach = lighting.shadow.x;
+    const float laid_at = lighting.shadow.y;
+    const float3 sun = lighting.sun_exposure.xyz;
+    const float texel = 2.0 * reach / float(width);
+    const float2 offset = ((float2(id.xy) + 0.5) * texel) - reach;
+    const float3 ground = shadow_direction(offset, push.up_height.xyz, radius);
+    const Cell over = wandering_cell_at(ground, radius);
+    const float2 shade = cloud_shade(over);
+
+    // Up the sun's light from the map, through the shell any cloud lies in.
+    float depth = 0.0;
+    float top = over.top;
+    const float sun_mu = dot(ground, sun);
+    const float2 out = sphere_hits(sun_mu, radius + laid_at, laid_at, push.bounds.y, radius);
+    if (sun_mu > 0.0 && out.y > 0.0 && push.bounds.y > push.bounds.x) {
+        const uint steps =
+            clamp(uint(ceil(out.y / shadow_step)), least_shadow_steps, most_shadow_steps);
+        const float step = out.y / float(steps);
+        // Offset alike each frame, so the shadow holds still.
+        const float jitter = interleaved(float2(id.xy));
+        const float3 start = ground * (radius + laid_at);
+        top = 0.0;
+        for (uint at = 0; at < steps; ++at) {
+            const float3 point = start + (sun * ((float(at) + jitter) * step));
+            const float distance = length(point);
+            const float point_height = distance - radius;
+            const Cell cell = wandering_cell_at(point / distance, radius);
+            float billows = 0.0;
+            const float cloud = cloud_at(point, point_height, cell, texel, true, billows);
+            if (cloud > 0.0) {
+                depth += cloud * densest_in(cell) * step;
+                top = max(top, cell.top);
+            }
+        }
+        if (depth <= 0.0) {
+            top = over.top;
+        }
+    }
+    shadow_map[id.xy] = float4(exp(-depth), shade.x, shade.y, top);
 }

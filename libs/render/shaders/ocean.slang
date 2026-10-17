@@ -1,4 +1,5 @@
 import atmosphere;
+import shadow;
 import tone;
 
 struct Push {
@@ -21,6 +22,8 @@ struct Push {
 [[vk::binding(2, 0)]] Sampler2D transmittance_table;
 [[vk::binding(3, 0)]] Sampler2D sky_view_table;
 [[vk::binding(4, 0)]] Sampler2DArray aerial_volume;
+// As cloud_march.slang's.
+[[vk::binding(5, 0)]] Sampler2D cloud_shadow;
 
 struct Vertex {
     [[vk::location(0)]] float out; // from 0 under the eye to 1 at the rim
@@ -107,13 +110,14 @@ float4 fragment_air(Surface surface) : SV_Target {
     const float3 clear_sky =
         sky_view_table.SampleLevel(sky_view_uv(air, height, mu, cos_azimuth), 0.0).rgb;
     // Where cloud hides the sky, the cloud's underside, as bright as the light it lets through.
+    const Shade shade = shade_at(lighting, cloud_shadow, surface.from_eye);
     const float3 under =
-        sky_under_cloud(lighting, transmittance(air, transmittance_table, 0.0, sun_mu) *
-                                      max(sun_mu, 0.0)) /
+        sky_under_cloud(lighting, shade,
+                        transmittance(air, transmittance_table, 0.0, sun_mu) * max(sun_mu, 0.0)) /
         pi;
-    const float3 sky = lerp(under, clear_sky, lighting.reach.y);
+    const float3 sky = lerp(under, clear_sky, shade.open);
     const float3 sunlight =
-        through_cloud(lighting, transmittance(air, transmittance_table, 0.0, dot(normal, sun)));
+        through_cloud(shade, transmittance(air, transmittance_table, 0.0, dot(normal, sun)));
     const float3 glint = sunlight * glint_lobe * reflected * glint_at(looking, normal, sun);
 
     const float4 clip = mul(push.clip_from_eye, float4(surface.from_eye, 1.0));

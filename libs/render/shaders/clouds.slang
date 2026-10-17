@@ -1,4 +1,5 @@
 import atmosphere;
+import shadow;
 import tone;
 import weather;
 
@@ -13,6 +14,8 @@ import weather;
 // As cloud_march.slang leaves them.
 [[vk::binding(7, 0)]] Sampler2D marched;
 [[vk::binding(8, 0)]] Sampler2D<float> distances;
+// As cloud_march.slang's.
+[[vk::binding(9, 0)]] Sampler2D cloud_shadow;
 
 struct Push {
     float4x4 eye_from_clip;
@@ -65,8 +68,6 @@ float4 fog_between(float3 view, float start, float end, float2 uv, float jitter)
     const float3 sun = lighting.sun_exposure.xyz;
     const float scale = lighting.sky_scale.w;
     const float cos_sun = dot(view, sun);
-    // Under cloud, lit by what comes through it, as the air is.
-    const float shaded = lighting.reach.y + lighting.reach.z;
 
     const float length = end - start;
     float3 radiance = float3(0.0);
@@ -93,9 +94,12 @@ float4 fog_between(float3 view, float start, float end, float2 uv, float jitter)
         const float height = clamp(cell.fog_top - (fog_edge * 0.5), lowest, max(lowest, cell.fog_top));
         const float sun_mu = dot(sun, normalize((up * (faked + eye_height)) + from_eye));
         const float3 sunlight = transmittance(air, transmittance_table, height * scale, sun_mu);
-        const float3 lit = mist_light(sunlight, sun_mu, cos_sun, mist_above(cell, height),
-                                      lighting.sky_scale.rgb) *
-                           shaded;
+        // Under cloud, lit by what comes through it, as the air is.
+        const Shade shade = shade_at(lighting, cloud_shadow, from_eye);
+        const float3 level_sunlight = sunlight * max(sun_mu, 0.0);
+        const float3 lit = mist_light(through_cloud(shade, sunlight), sun_mu, cos_sun,
+                                      mist_above(cell, height),
+                                      sky_under_cloud(lighting, shade, level_sunlight));
         const float hidden = seen_through * (1.0 - exp(-depth));
         radiance += lit * hidden;
         distance += along * hidden;

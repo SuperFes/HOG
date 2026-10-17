@@ -38,7 +38,8 @@ constexpr VkDescriptorSetLayoutBinding binding(std::uint32_t at, VkDescriptorTyp
 constexpr std::array air_descriptors{binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
                                      binding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
                                      binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-                                     binding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)};
+                                     binding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+                                     binding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)};
 
 } // namespace
 
@@ -76,6 +77,7 @@ void Capsules::draw(VkCommandBuffer commands, VkExtent2D extent, const CapsuleVi
         push_uniform_buffer(commands, pipeline_, 1, view.air.lighting);
         push_sampled_image(commands, pipeline_, 2, view.air.transmittance, view.air.sampler);
         push_sampled_image(commands, pipeline_, 3, view.air.aerial, view.air.sampler);
+        push_sampled_image(commands, pipeline_, 4, view.air.cloud_shadow, view.air.sampler);
     }
     for (const Capsule& capsule : capsules) {
         // Bent at its feet and its top, and upright between, too short to bend itself.

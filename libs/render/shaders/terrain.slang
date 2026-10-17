@@ -1,6 +1,7 @@
 import atmosphere;
 import bend;
 import projection;
+import shadow;
 import tone;
 
 struct Push {
@@ -34,6 +35,8 @@ struct Settings {
 [[vk::binding(3, 0)]] ConstantBuffer<Lighting> lighting;
 [[vk::binding(4, 0)]] Sampler2D transmittance_table;
 [[vk::binding(5, 0)]] Sampler2DArray aerial_volume;
+// As cloud_march.slang's.
+[[vk::binding(6, 0)]] Sampler2D cloud_shadow;
 
 struct Vertex {
     [[vk::location(0)]] float3 position; // metres from the patch's origin
@@ -209,8 +212,9 @@ Shaded fragment_air(Ground ground) {
     const float3 up = up_at(ground);
     const float3 clear =
         transmittance(air, transmittance_table, max(ground.height, 0.0) * scale, dot(up, sun));
-    const float3 sunlight = through_cloud(lighting, clear);
-    const float3 sky = sky_under_cloud(lighting, clear * saturate(dot(up, sun)));
+    const Shade shade = shade_at(lighting, cloud_shadow, ground.drawn);
+    const float3 sunlight = through_cloud(shade, clear);
+    const float3 sky = sky_under_cloud(lighting, shade, clear * saturate(dot(up, sun)));
     const float3 on_ground =
         (sunlight * saturate(dot(normal, sun))) + (sky * (0.5 + (0.5 * dot(normal, up))));
     const float3 on_water = (sunlight * saturate(dot(up, sun))) + sky;

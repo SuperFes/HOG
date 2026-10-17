@@ -1,4 +1,5 @@
 import atmosphere;
+import shadow;
 import weather;
 
 [[vk::binding(0, 0)]] ConstantBuffer<Air> air;
@@ -9,6 +10,8 @@ import weather;
 // As client::SkyTexel.
 [[vk::binding(5, 0)]] SamplerCube sky_before;
 [[vk::binding(6, 0)]] SamplerCube sky_after;
+// As cloud_march.slang's.
+[[vk::binding(7, 0)]] Sampler2D cloud_shadow;
 
 static const uint aerial_steps = 12;
 static const uint haze_steps = 16;
@@ -38,10 +41,17 @@ struct Haze : IAlong {
         if (extinction <= 0.0) {
             return float4(0.0);
         }
-        // As if under a clear sky; it's dimmed under cloud with the air.
-        const float3 lit = mist_light(sunlight, sun_mu, cos_sun, mist_above(cell, height),
-                                      lighting.sky_scale.rgb);
+        // Under cloud, lit by what comes through it, as the air is.
+        const Shade shade = shade_at(lighting, cloud_shadow, from_eye);
+        const float3 level_sunlight = sunlight * max(sun_mu, 0.0);
+        const float3 lit = mist_light(through_cloud(shade, sunlight), sun_mu, cos_sun,
+                                      mist_above(cell, height),
+                                      sky_under_cloud(lighting, shade, level_sunlight));
         return float4(lit * (extinction / scale), extinction / scale);
+    }
+
+    Shade shade(float along) {
+        return shade_at(lighting, cloud_shadow, view * (along / lighting.sky_scale.w));
     }
 };
 
@@ -75,7 +85,7 @@ float4 haze_only(Haze haze) {
         light += passed * within_step(here.xyz, float3(here.w), float3(through), step * scale);
         passed *= through;
     }
-    return float4(light * (lighting.reach.y + lighting.reach.z), passed);
+    return float4(light, passed);
 }
 
 // Each texel holds the light the air and the haze add along its pixel's view out to its slice's
@@ -102,7 +112,5 @@ void aerial_main(uint3 id: SV_DispatchThreadID) {
         march(air, transmittance_table, scattering_table, lighting.up_height.w, mul(local, view),
               sun, aerial_slice_end(id.z, lighting.reach.x), aerial_steps, haze);
     const float3 passed = scattered.transmittance;
-    // Under cloud, the air's lit by what comes through it.
-    volume[id] = float4(scattered.light * (lighting.reach.y + lighting.reach.z),
-                        (passed.r + passed.g + passed.b) / 3.0);
+    volume[id] = float4(scattered.light, (passed.r + passed.g + passed.b) / 3.0);
 }

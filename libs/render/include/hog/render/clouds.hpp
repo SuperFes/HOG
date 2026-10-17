@@ -43,6 +43,10 @@ struct CloudsView {
 // layer is lit when drawn.
 [[nodiscard]] CloudShade cloud_shade(double cover, double water) noexcept;
 
+// Of light falling straight down onto mist in air of `humidity` under fog to `fog_top`, from the
+// sun `sun_mu` above the horizon, the share let through to `height` metres above sea level.
+[[nodiscard]] double mist_through(double humidity, double fog_top, double height,
+                                  double sun_mu) noexcept;
 // `shade` with what's over `height` metres above sea level of mist in air of `humidity` under fog
 // to `fog_top`, with the sun `sun_mu` above the horizon: the mist takes from the sun's light, and
 // scatters most of it on down.
@@ -58,10 +62,16 @@ struct CloudsView {
 // to follow.
 [[nodiscard]] double rain_beneath(double cover, double presence) noexcept;
 
+// Metres the map of the cloud's shadow reaches from an eye `eye_height` metres above sea level,
+// east, west, north and south: further the higher it is, to cover the ground it sees, in steps that
+// double, so the map's texels keep their size between them.
+[[nodiscard]] double cloud_shadow_reach(double eye_height) noexcept;
+
 // Clouds filling the sky where the weather has them, between the heights it has them at, their
 // shapes from noise drifting with the wind, and what falls from them to the ground; marched at half
 // the picture's size, then drawn over it with any fog lying low. All are lit through the air and
-// seen through it, and hidden by anything drawn nearer.
+// seen through it, and hidden by anything drawn nearer. Their shadow's mapped round the eye, for
+// all that's lit under them.
 class Clouds {
 public:
     // The noise is baked on `jobs`.
@@ -75,6 +85,14 @@ public:
     static constexpr VkFormat distances_format = VK_FORMAT_R32_SFLOAT;
     // Metres the eye may move between frames and still have what was marched before blended in.
     static constexpr double furthest_blended = 500.0;
+    // Of the map of the cloud's shadow, as cloud_march.slang's shadow_main() leaves it.
+    static constexpr std::uint32_t shadow_size = 512;
+    static constexpr VkFormat shadow_format = VK_FORMAT_R16G16B16A16_SFLOAT;
+
+    // Records mapping the cloud's shadow round the eye into shadow_image(), a storage image, as
+    // far as the Lighting of `view.air` reaches, which must be written before this is submitted.
+    void shadow(VkCommandBuffer commands, const CloudsView& view) const noexcept;
+    [[nodiscard]] const Image& shadow_image() const noexcept { return shadow_map_; }
 
     // Records marching the clouds for a picture of `extent` into `marched` and `distances`, storage
     // images of march_extent(), then blending them with what was marched for the frames before, as
@@ -92,12 +110,14 @@ private:
 
     const Device* device_ = nullptr;
     Pipeline march_;
+    Pipeline shadow_;
     Pipeline resolve_;
     Pipeline pipeline_;
     Sampler nearest_;
     Sampler linear_;
     Sampler tiling_;
     CloudNoise noise_;
+    Image shadow_map_;
     // Frames blended in turn: the last's, read, and the next's, written.
     std::array<Image, 2> blends_;
     std::uint32_t blended_ = 0; // which of blends_ was last written

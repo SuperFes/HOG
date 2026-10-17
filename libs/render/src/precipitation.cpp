@@ -38,7 +38,8 @@ constexpr VkDescriptorSetLayoutBinding binding(std::uint32_t at, VkDescriptorTyp
 
 constexpr std::array descriptors{binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
                                  binding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
-                                 binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)};
+                                 binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+                                 binding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)};
 
 } // namespace
 
@@ -100,6 +101,7 @@ void Precipitation::draw(VkCommandBuffer commands, VkExtent2D extent,
     push_uniform_buffer(commands, pipeline_, 0, view.air.air);
     push_uniform_buffer(commands, pipeline_, 1, view.air.lighting);
     push_sampled_image(commands, pipeline_, 2, view.air.transmittance, view.air.sampler);
+    push_sampled_image(commands, pipeline_, 3, view.air.cloud_shadow, view.air.sampler);
     vkCmdPushConstants(commands, pipeline_.layout(),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push),
                        &push);
