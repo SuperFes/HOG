@@ -17,13 +17,15 @@
 namespace hog::protocol {
 
 // Raised whenever any message changes; the two sides must speak the same one.
-inline constexpr std::uint32_t version = 3;
+inline constexpr std::uint32_t version = 4;
 // The longest connect token a client may present; more is a broken or hostile client.
 inline constexpr std::size_t most_token = 1'024;
 // The longest line of text a refusal carries.
 inline constexpr std::size_t most_detail = 512;
 // The longest name an entity is sent with.
 inline constexpr std::size_t most_name = 32;
+// The finest cube-sphere level the weather is sent at, which keeps it to tens of kilobytes.
+inline constexpr std::uint8_t most_weather_level = 5;
 // Real time between the snapshots a client is sent, whatever the server's tick rate.
 inline constexpr std::chrono::milliseconds snapshot_interval{50};
 
@@ -126,11 +128,42 @@ struct Snapshot {
     friend bool operator==(const Snapshot&, const Snapshot&) = default;
 };
 
-using Message = std::variant<Hello, Welcome, Refused, Moved, Ack, Snapshot, Corrected>;
+// The weather over a cell, as much of it as is drawn. It's sent a byte each, so only near what's
+// given: cloud and falling as their square roots to the nearest 64th and 16th, so the lightest keep
+// their detail; snow to a 255th; and drift to the metre a second; each clamped to its byte.
+struct CellWeather {
+    float cloud = 0.0F;   // mm of condensed water, under 16
+    float falling = 0.0F; // rain and snow, mm an hour, under 255
+    float snow = 0.0F;    // share of what falls that's snow, 0 to 1
+    Vec2 drift{0.0F};     // (east, north) m/s the weather moves with, within ±127
+
+    friend bool operator==(const CellWeather&, const CellWeather&) = default;
+};
+
+// Server to client: the weather over the whole planet, a cell for each cube-sphere cell at
+// `level`, in sim::CellGrid's order. What the client shows fades to it from what it showed over
+// `fade` of real time.
+struct Weather {
+    std::uint8_t level = 0; // at most most_weather_level
+    std::chrono::milliseconds fade{0};
+    std::vector<CellWeather> cells; // 6 × 4^level of them
+
+    friend bool operator==(const Weather&, const Weather&) = default;
+};
+
+// How many cells the weather at `level` has.
+[[nodiscard]] constexpr std::size_t weather_cells(std::uint8_t level) noexcept {
+    return std::size_t{6} << (2U * level);
+}
+
+// As a cell's weather reads back once sent.
+[[nodiscard]] CellWeather as_sent(const CellWeather& cell) noexcept;
+
+using Message = std::variant<Hello, Welcome, Refused, Moved, Ack, Snapshot, Corrected, Weather>;
 
 [[nodiscard]] std::vector<std::byte> encode(const Message& message);
-// Fails on an unknown kind, a message cut short or with bytes left over, one too long, or a
-// snapshot out of order.
+// Fails on an unknown kind, a message cut short or with bytes left over, one too long, a snapshot
+// out of order, or weather too fine or with too few or many cells.
 [[nodiscard]] Result<Message> decode(std::span<const std::byte> bytes);
 
 // A refusal as a person reads it, on a client speaking `own` version.

@@ -3,6 +3,7 @@
 #include <hog/protocol/messages.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <format>
 #include <limits>
@@ -25,11 +26,63 @@ enum class Kind : std::uint16_t {
     Ack = 5,
     Snapshot = 6,
     Corrected = 7,
+    Weather = 8,
 }; // NOLINT(performance-enum-size)
 
 // Which of an entity's changes follow its id in a snapshot.
 constexpr std::uint8_t changed_position = 1U;
 constexpr std::uint8_t known_changes = changed_position;
+
+// Cloud and falling are sent as square roots, so thin cloud and drizzle keep their detail.
+constexpr float cloud_steps = 64.0F;   // a byte's steps to the root of a millimetre
+constexpr float falling_steps = 16.0F; // to the root of a millimetre an hour
+constexpr float snow_steps = 255.0F;
+constexpr float fastest_drift = 127.0F;
+constexpr std::size_t weather_cell_bytes = 5;
+
+[[nodiscard]] std::uint8_t to_byte(float value) noexcept {
+    // Also NaN to 0.
+    if (!(value > 0.0F)) {
+        return 0;
+    }
+    return static_cast<std::uint8_t>(std::lround(std::min(value, 255.0F)));
+}
+
+[[nodiscard]] std::uint8_t rooted(float value, float steps) noexcept {
+    return to_byte(std::sqrt(std::max(value, 0.0F)) * steps);
+}
+
+[[nodiscard]] float squared(std::uint8_t byte, float steps) noexcept {
+    const float root = static_cast<float>(byte) / steps;
+    return root * root;
+}
+
+[[nodiscard]] std::uint8_t speed(float value) noexcept {
+    if (std::isnan(value)) {
+        return 0;
+    }
+    const auto whole =
+        static_cast<std::int8_t>(std::lround(std::clamp(value, -fastest_drift, fastest_drift)));
+    return static_cast<std::uint8_t>(whole);
+}
+
+[[nodiscard]] float speed_of(std::uint8_t byte) noexcept {
+    return static_cast<float>(static_cast<std::int8_t>(byte));
+}
+
+using CodedCell = std::array<std::uint8_t, weather_cell_bytes>;
+
+[[nodiscard]] CodedCell coded(const CellWeather& cell) noexcept {
+    return {rooted(cell.cloud, cloud_steps), rooted(cell.falling, falling_steps),
+            to_byte(cell.snow * snow_steps), speed(cell.drift.x), speed(cell.drift.y)};
+}
+
+[[nodiscard]] CellWeather decoded(const CodedCell& bytes) noexcept {
+    return {.cloud = squared(bytes[0], cloud_steps),
+            .falling = squared(bytes[1], falling_steps),
+            .snow = static_cast<float>(bytes[2]) / snow_steps,
+            .drift = {speed_of(bytes[3]), speed_of(bytes[4])}};
+}
 
 template <typename T>
 [[nodiscard]] Result<T> read(ByteReader& in, std::string_view what) {
@@ -326,7 +379,53 @@ void write_snapshot(ByteWriter& out, const Snapshot& snapshot) {
     }
 }
 
+[[nodiscard]] Result<Message> read_weather(ByteReader& in) {
+    const auto level = read<std::uint8_t>(in, "weather");
+    const auto fade = read<std::uint32_t>(in, "weather");
+    if (!level || !fade) {
+        return make_error(ErrorCode::Parse, "weather cut short");
+    }
+    if (*level > most_weather_level) {
+        return make_error(ErrorCode::OutOfRange,
+                          std::format("weather at level {} is finer than the {} allowed", *level,
+                                      most_weather_level));
+    }
+    Weather weather{.level = *level, .fade = std::chrono::milliseconds{*fade}, .cells = {}};
+    const std::size_t count = weather_cells(*level);
+    const auto bytes = in.read_bytes(count * weather_cell_bytes);
+    if (!bytes) {
+        return make_error(ErrorCode::Parse, "weather's cells cut short");
+    }
+    weather.cells.reserve(count);
+    for (std::size_t first = 0; first < bytes->size(); first += weather_cell_bytes) {
+        CodedCell cell{};
+        std::ranges::transform(bytes->subspan(first, weather_cell_bytes), cell.begin(),
+                               [](std::byte byte) { return std::to_integer<std::uint8_t>(byte); });
+        weather.cells.push_back(decoded(cell));
+    }
+    return finished(in, std::move(weather));
+}
+
+void write_weather(ByteWriter& out, const Weather& weather) {
+    HOG_ASSERT(weather.level <= most_weather_level, "weather too fine to send");
+    HOG_ASSERT(weather.cells.size() == weather_cells(weather.level),
+               "weather needs a cell for each at its level");
+    out.write(static_cast<std::uint16_t>(Kind::Weather));
+    out.write(weather.level);
+    out.write(static_cast<std::uint32_t>(std::clamp<std::chrono::milliseconds::rep>(
+        weather.fade.count(), 0, std::numeric_limits<std::uint32_t>::max())));
+    for (const CellWeather& cell : weather.cells) {
+        for (const std::uint8_t byte : coded(cell)) {
+            out.write(byte);
+        }
+    }
+}
+
 } // namespace
+
+CellWeather as_sent(const CellWeather& cell) noexcept {
+    return decoded(coded(cell));
+}
 
 Millimetres to_millimetres(WorldPosition position) noexcept {
     const DVec3 metres = position.metres();
@@ -361,6 +460,8 @@ std::vector<std::byte> encode(const Message& message) {
                 out.write(body.tick);
             } else if constexpr (std::is_same_v<Body, Snapshot>) {
                 write_snapshot(out, body);
+            } else if constexpr (std::is_same_v<Body, Weather>) {
+                write_weather(out, body);
             } else if constexpr (std::is_same_v<Body, Corrected>) {
                 out.write(static_cast<std::uint16_t>(Kind::Corrected));
                 out.write(body.count);
@@ -423,6 +524,8 @@ Result<Message> decode(std::span<const std::byte> bytes) {
     }
     case Kind::Snapshot:
         return read_snapshot(in);
+    case Kind::Weather:
+        return read_weather(in);
     }
     return make_error(ErrorCode::Unsupported, std::format("unknown message kind {}", *kind));
 }

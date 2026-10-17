@@ -1,10 +1,14 @@
 #include <hog/protocol/messages.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
+#include <limits>
 #include <span>
 #include <string>
 #include <variant>
@@ -45,6 +49,19 @@ Snapshot delta() {
             .left = {NetId{3}, NetId{0xFFFF'FFFF}}};
 }
 
+// Each cell different, with values a byte holds exactly.
+Weather weather(std::uint8_t level) {
+    Weather out{.level = level, .fade = std::chrono::minutes{10}, .cells = {}};
+    for (std::size_t index = 0; index < weather_cells(level); ++index) {
+        const auto step = static_cast<float>(index % 4);
+        out.cells.push_back({.cloud = step * step / 16.0F,
+                             .falling = step * step,
+                             .snow = step == 0.0F ? 1.0F : 0.0F,
+                             .drift = {-step, static_cast<float>(index) - 12.0F}});
+    }
+    return out;
+}
+
 std::vector<Message> examples() {
     return {Hello{},
             Hello{.version = version, .token = bytes({1, 2, 3, 250})},
@@ -56,7 +73,9 @@ std::vector<Message> examples() {
             Ack{.tick = 0xFFFF'FFF0},
             whole(),
             delta(),
-            Snapshot{.tick = 1, .baseline = 0, .entered = {}, .changed = {}, .left = {}}};
+            Snapshot{.tick = 1, .baseline = 0, .entered = {}, .changed = {}, .left = {}},
+            weather(0),
+            weather(1)};
 }
 
 // A snapshot at tick 10 with no baseline and nothing entering, then `rest`.
@@ -180,4 +199,47 @@ TEST_CASE("snapshots that can't be right are refused", "[protocol]") {
     auto named = bytes({6, 0, 10, 0, 0, 0, 0, 1, 1, 0, 0, 0, static_cast<int>(most_name + 1)});
     named.resize(named.size() + most_name + 1 + 2, std::byte{'n'});
     CHECK(decode(named).error().code == ErrorCode::OutOfRange);
+}
+
+TEST_CASE("weather is sent near enough to draw", "[protocol]") {
+    const auto root_within = [](float sent, float given, float steps) {
+        return std::abs(std::sqrt(sent) - std::sqrt(given)) <= 0.5F / steps;
+    };
+    for (const float amount : {0.003F, 0.05F, 0.7F, 9.0F, 120.0F}) {
+        CAPTURE(amount);
+        const CellWeather sent = as_sent({.cloud = amount / 10.0F, .falling = amount});
+        CHECK(root_within(sent.cloud, amount / 10.0F, 64.0F));
+        CHECK(root_within(sent.falling, amount, 16.0F));
+    }
+    CHECK_THAT(as_sent({.snow = 0.31F}).snow, Catch::Matchers::WithinAbs(0.31, 0.5 / 255.0));
+    CHECK(as_sent({.drift = {12.4F, -3.6F}}).drift == hog::Vec2{12.0F, -4.0F});
+}
+
+TEST_CASE("weather past what a byte holds is clamped", "[protocol]") {
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const CellWeather over =
+        as_sent({.cloud = 100.0F, .falling = 1'000.0F, .snow = 2.0F, .drift = {500.0F, -500.0F}});
+    CHECK(over.cloud < 16.0F);
+    CHECK(over.cloud > 15.8F);
+    CHECK(over.falling < 255.0F);
+    CHECK(over.falling > 253.0F);
+    CHECK(over.snow == 1.0F);
+    CHECK(over.drift == hog::Vec2{127.0F, -127.0F});
+    CHECK(as_sent({.cloud = -1.0F, .falling = nan, .snow = -0.5F, .drift = {nan, nan}}) ==
+          CellWeather{});
+}
+
+TEST_CASE("the planet's weather takes five bytes a cell", "[protocol]") {
+    CHECK(weather_cells(most_weather_level) == 6'144);
+    CHECK(encode(weather(most_weather_level)).size() == 2 + 1 + 4 + (5 * 6'144));
+}
+
+TEST_CASE("weather too fine is refused", "[protocol]") {
+    auto finer = encode(weather(1));
+    finer[2] = std::byte{most_weather_level + 1};
+    CHECK(decode(finer).error().code == hog::ErrorCode::OutOfRange);
+    // Level 1's cells, said to be level 0's.
+    auto coarser = encode(weather(1));
+    coarser[2] = std::byte{0};
+    CHECK(decode(coarser).error().code == hog::ErrorCode::Parse);
 }
