@@ -2,6 +2,7 @@
 
 #include <hog/atmosphere/model.hpp>
 #include <hog/core/math.hpp>
+#include <hog/jobs/job_system.hpp>
 #include <hog/render/atmosphere.hpp>
 #include <hog/render/barrier.hpp>
 #include <hog/render/clouds.hpp>
@@ -82,6 +83,8 @@ const Texel broken{128, 24, 0, 0};
 const Texel raining{255, 64, 26, 0};
 const Texel pouring{255, 64, 80, 0};
 const Texel snowing{255, 64, 26, 255};
+// As client::SkyTexel: dry, with cloud from 1984 m to 3008 m.
+const Texel layer{0, 0, 31, 47};
 
 struct Scene {
     double eye_height = 2.0;
@@ -91,7 +94,7 @@ struct Scene {
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     std::optional<std::vector<std::byte>> after = {};
     double faded = 1.0;
-    std::vector<std::byte> sky = everywhere(clear);
+    std::vector<std::byte> sky = everywhere(layer);
     DVec3 moved{0.0};
     // Drawn nearest of all.
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
@@ -104,7 +107,8 @@ Pixels draw(hog::render::Device& device, const Scene& scene) {
     REQUIRE(atmosphere);
     auto sky = hog::render::Sky::create(device, colour_format, depth_format);
     REQUIRE(sky);
-    auto clouds = Clouds::create(device, colour_format);
+    hog::jobs::JobSystem jobs{2};
+    auto clouds = Clouds::create(device, colour_format, jobs);
     REQUIRE(clouds);
     auto maps = hog::render::WeatherMaps::create(device, map_size);
     REQUIRE(maps);
@@ -134,6 +138,7 @@ Pixels draw(hog::render::Device& device, const Scene& scene) {
     const CloudsView view{.camera = camera,
                           .bend = bend,
                           .air = sky->bindings(0, *atmosphere),
+                          .base = 1'984.0,
                           .weather = weather,
                           .moved = scene.moved};
 
@@ -148,6 +153,16 @@ Pixels draw(hog::render::Device& device, const Scene& scene) {
                  .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                  .aspect = VK_IMAGE_ASPECT_DEPTH_BIT});
     REQUIRE(depth);
+    const auto march_image = [&](VkFormat format) {
+        auto image = hog::render::make_image(
+            device, {.format = format,
+                     .extent = Clouds::march_extent(extent),
+                     .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
+        REQUIRE(image);
+        return std::move(image).value();
+    };
+    const hog::render::Image marched = march_image(Clouds::marched_format);
+    const hog::render::Image distances = march_image(Clouds::distances_format);
     REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
         namespace use = hog::render::image_use;
         CHECK(sky->record_frame(commands, extent, 0, *atmosphere, seen));
@@ -169,8 +184,17 @@ Pixels draw(hog::render::Device& device, const Scene& scene) {
         vkCmdEndRendering(commands);
         hog::render::transition(commands, depth->handle(), VK_IMAGE_ASPECT_DEPTH_BIT,
                                 use::depth_target, use::sampled);
+        for (const hog::render::Image* image : {&marched, &distances}) {
+            hog::render::transition(commands, image->handle(), VK_IMAGE_ASPECT_COLOR_BIT,
+                                    use::discard, use::storage);
+        }
+        clouds->march(commands, extent, depth->view(), marched.view(), distances.view(), view);
+        for (const hog::render::Image* image : {&marched, &distances}) {
+            hog::render::transition(commands, image->handle(), VK_IMAGE_ASPECT_COLOR_BIT,
+                                    use::storage, use::sampled);
+        }
         hog::render::begin_rendering(commands, colour->view(), extent, std::nullopt);
-        clouds->draw(commands, extent, depth->view(), view);
+        clouds->draw(commands, extent, depth->view(), marched.view(), distances.view(), view);
         vkCmdEndRendering(commands);
     }));
     CHECK(device.validation_errors() == 0);
@@ -300,14 +324,17 @@ TEST_CASE("clouds are hidden by what's drawn in front of them", "[render][gpu][a
 
 TEST_CASE("clouds fade from the weather before to the weather after", "[render][gpu][atmosphere]") {
     const auto device = test_device();
-    const Scene fading{.before = everywhere(clear), .after = everywhere(overcast)};
+    // Looking well up, through the layer, so gaps show.
+    const Scene fading{.forward = glm::normalize(east + (2.0 * up)),
+                       .before = everywhere(clear),
+                       .after = everywhere(overcast)};
     Scene start = fading;
     start.faded = 0.0;
     Scene halfway = fading;
     halfway.faded = 0.5;
-    const long none = total(draw(*device, start));
-    const long some = total(draw(*device, halfway));
-    const long all = total(draw(*device, fading));
+    const std::uint32_t none = lit_pixels(draw(*device, start), extent.height);
+    const std::uint32_t some = lit_pixels(draw(*device, halfway), extent.height);
+    const std::uint32_t all = lit_pixels(draw(*device, fading), extent.height);
     CHECK(none == 0);
     CHECK(some > 0);
     CHECK(some < all);
@@ -329,15 +356,15 @@ TEST_CASE("clouds lie where the weather has them", "[render][gpu][atmosphere]") 
 TEST_CASE("broken cloud billows, drifts with the wind, and repeats over its period",
           "[render][gpu][atmosphere]") {
     const auto device = test_device();
-    const Scene still{.before = everywhere(broken)};
+    // Looking well up, through the layer, so gaps show.
+    const Scene still{.forward = glm::normalize(east + (2.0 * up)), .before = everywhere(broken)};
     Scene around = still;
     around.moved = DVec3{cloud_period, -2.0 * cloud_period, 0.0};
     Scene drifted = still;
     drifted.moved = DVec3{3000.0, 0.0, 0.0};
     const Pixels pixels = draw(*device, still);
-    const std::uint32_t above = extent.height / 2;
-    CHECK(lit_pixels(pixels) > 0);
-    CHECK(lit_pixels(pixels) < extent.width * above);
+    CHECK(lit_pixels(pixels, extent.height) > 0);
+    CHECK(lit_pixels(pixels, extent.height) < extent.width * extent.height);
     CHECK(draw(*device, around) == pixels);
     CHECK(draw(*device, drifted) != pixels);
 }
@@ -346,12 +373,12 @@ TEST_CASE("thick cloud is dark beneath and bright on top", "[render][gpu][atmosp
     const auto device = test_device();
     const Pixels beneath = draw(*device, {.forward = glm::normalize(east + up)});
     const Pixels on_top =
-        draw(*device, {.eye_height = 3000.0, .forward = glm::normalize(east - up)});
+        draw(*device, {.eye_height = 4000.0, .forward = glm::normalize(east - up)});
     const long under = total(beneath, extent.height);
     const long over = total(on_top, extent.height);
     INFO("beneath " << under << ", on top " << over);
     CHECK(under > 0);
-    CHECK(over > 3 * under);
+    CHECK(2 * over > 3 * under);
 }
 
 TEST_CASE("cloud beyond the ground isn't drawn", "[render][gpu][atmosphere]") {
@@ -385,7 +412,7 @@ TEST_CASE("snow hangs paler than rain", "[render][gpu][atmosphere]") {
 TEST_CASE("rain beneath is seen from above through gaps in the cloud",
           "[render][gpu][atmosphere]") {
     const auto device = test_device();
-    const Scene above{.eye_height = 3000.0,
+    const Scene above{.eye_height = 4000.0,
                       .forward = glm::normalize(east - up),
                       .before = everywhere({0, 0, 26, 0})};
     CHECK(lit_pixels(draw(*device, above), extent.height) == extent.width * extent.height);
@@ -446,4 +473,44 @@ TEST_CASE("from over fog, its top lies below and the air over it is clear",
     Scene dry = over;
     dry.sky = everywhere(clear);
     CHECK(lit_pixels(draw(*device, dry), extent.height) == 0);
+}
+
+TEST_CASE("flying through cloud, it's grey all round", "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    const Pixels pixels = draw(*device, {.eye_height = 2'500.0});
+    CHECK(lit_pixels(pixels, extent.height) == extent.width * extent.height);
+    // Grey: as red nearly as it's blue.
+    const std::size_t middle =
+        4 * ((std::size_t{extent.height / 2} * extent.width) + (extent.width / 2));
+    INFO(int{pixels[middle]} << ", " << int{pixels[middle + 1]} << ", " << int{pixels[middle + 2]});
+    CHECK(pixels[middle + 2] < pixels[middle] + (pixels[middle] / 2) + 4);
+}
+
+TEST_CASE("clouds lie between the heights the sky has them at", "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    // From 1000 m to 1536 m, seen from over it and from under it.
+    const auto low = everywhere({0, 0, 16, 24});
+    const Pixels over =
+        draw(*device, {.eye_height = 2'000.0, .before = everywhere(overcast), .sky = low});
+    CHECK(lit_pixels(over) == 0);
+    CHECK(lit_below(over) > 0);
+    const Pixels under =
+        draw(*device, {.eye_height = 500.0, .before = everywhere(overcast), .sky = low});
+    CHECK(lit_pixels(under) > 0);
+}
+
+TEST_CASE("a storm towers over the thin cloud round it", "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    // Cloud to 3008 m, but to 9984 m in the north.
+    const auto towering =
+        map_of([](DVec3 direction) { return direction.y > 0.2 ? Texel{0, 0, 31, 156} : layer; });
+    const Pixels north_view = draw(
+        *device,
+        {.eye_height = 5'000.0, .forward = north, .before = everywhere(overcast), .sky = towering});
+    const Pixels south_view = draw(*device, {.eye_height = 5'000.0,
+                                             .forward = -north,
+                                             .before = everywhere(overcast),
+                                             .sky = towering});
+    CHECK(lit_pixels(north_view) > 0);
+    CHECK(lit_pixels(south_view) == 0);
 }

@@ -112,6 +112,18 @@ TEST_CASE("the clouds' noise repeats across its edges and comes out the same eac
     CHECK(detail_noise(size, 1) == detail_noise(size, 1));
 }
 
+TEST_CASE("the billows are spread evenly, so cover covers its share", "[render]") {
+    const std::vector<std::byte> volume = shape_noise(size, 1);
+    std::array<std::size_t, 4> quarters{};
+    for (std::size_t at = 0; at < volume.size(); at += 4) {
+        ++quarters.at(std::to_integer<std::size_t>(volume[at]) / 64);
+    }
+    for (const std::size_t quarter : quarters) {
+        CHECK(std::abs(static_cast<double>(quarter) - (size * size * size / 4.0)) <
+              0.05 * size * size * size);
+    }
+}
+
 TEST_CASE("each mip of the clouds' noise is the mean of the one before", "[render]") {
     const std::vector<std::byte> volume = detail_noise(size, 3);
     const std::size_t first = std::size_t{size} * size * size * 4;

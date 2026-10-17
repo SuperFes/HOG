@@ -13,9 +13,13 @@ namespace {
 constexpr VkFormat map_format = VK_FORMAT_R8G8B8A8_UNORM;
 // A weather texel's channel holding the root of a 256th of mm falling an hour.
 constexpr std::size_t falling_channel = 2;
-// A sky texel's channel holding the fog's top, in steps of `fog_step` metres.
+// A sky texel's channels holding the fog's top, in steps of `fog_step` metres, and the cloud's
+// base and top, in steps of `height_step`.
 constexpr std::size_t fog_channel = 1;
+constexpr std::size_t base_channel = 2;
+constexpr std::size_t top_channel = 3;
 constexpr double fog_step = 32.0;
+constexpr double height_step = 64.0;
 // As weather.slang's.
 constexpr double haze_per_metre = 3e-5;
 constexpr double haze_height = 1000.0;
@@ -103,14 +107,23 @@ Result<> WeatherMaps::update(VkCommandBuffer commands, std::uint32_t frame,
         return false;
     };
     falling_ = falls(weather_before) || falls(weather_after);
-    const auto highest_fog = [](std::span<const std::byte> map) {
-        std::uint8_t highest = 0;
-        for (std::size_t at = fog_channel; at < map.size(); at += 4) {
-            highest = std::max(highest, std::to_integer<std::uint8_t>(map[at]));
+    // Of a channel of both sky maps, the least and most.
+    const auto bounds = [&](std::size_t channel) {
+        std::uint8_t least = 255;
+        std::uint8_t most = 0;
+        for (const std::span<const std::byte> map : {sky_before, sky_after}) {
+            for (std::size_t at = channel; at < map.size(); at += 4) {
+                least = std::min(least, std::to_integer<std::uint8_t>(map[at]));
+                most = std::max(most, std::to_integer<std::uint8_t>(map[at]));
+            }
         }
-        return static_cast<double>(highest) * fog_step;
+        return std::pair{static_cast<double>(least), static_cast<double>(most)};
     };
-    fog_top_ = std::max(highest_fog(sky_before), highest_fog(sky_after));
+    fog_top_ = bounds(fog_channel).second * fog_step;
+    const auto [lowest, highest] = bounds(base_channel);
+    lowest_base_ = lowest * height_step;
+    highest_base_ = highest * height_step;
+    highest_top_ = bounds(top_channel).second * height_step;
     return {};
 }
 
@@ -128,7 +141,10 @@ WeatherBindings WeatherMaps::bindings(double faded) const noexcept {
                 .sampler = linear_.handle(),
                 .faded = faded,
                 .falling = false,
-                .fog_top = 0.0};
+                .fog_top = 0.0,
+                .lowest_base = 0.0,
+                .highest_base = 0.0,
+                .highest_top = 0.0};
     }
     return {.weather_before = weather_before_.image().view(),
             .weather_after = weather_after_.image().view(),
@@ -137,7 +153,10 @@ WeatherBindings WeatherMaps::bindings(double faded) const noexcept {
             .sampler = linear_.handle(),
             .faded = faded,
             .falling = falling_,
-            .fog_top = fog_top_};
+            .fog_top = fog_top_,
+            .lowest_base = lowest_base_,
+            .highest_base = highest_base_,
+            .highest_top = highest_top_};
 }
 
 } // namespace hog::render

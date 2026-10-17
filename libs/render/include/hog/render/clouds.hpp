@@ -2,7 +2,9 @@
 
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
+#include <hog/jobs/job_system.hpp>
 #include <hog/render/camera.hpp>
+#include <hog/render/cloud_noise.hpp>
 #include <hog/render/pipeline.hpp>
 #include <hog/render/sampler.hpp>
 #include <hog/render/sky.hpp>
@@ -14,9 +16,8 @@ namespace hog::render {
 
 class Device;
 
-// Metres across the clouds' largest billows; their shapes repeat every `cloud_period` metres.
-inline constexpr double cloud_feature = 4000.0;
-inline constexpr double cloud_period = 256.0 * cloud_feature;
+// Metres over which the clouds' shapes repeat: a whole number of their noise's volumes.
+inline constexpr double cloud_period = 1'024'000.0;
 
 // Where the clouds are seen from and lit by.
 struct CloudsView {
@@ -26,7 +27,7 @@ struct CloudsView {
     // The frame's air, which lights them and lies between them and the eye.
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     AirBindings air = {};
-    double base = 2000.0; // metres above sea level the layer lies at
+    double base = 2000.0; // metres above sea level of the cloud's base over the eye
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     WeatherBindings weather = {};
     // Metres the clouds have drifted with the wind, in the planet's frame.
@@ -50,24 +51,40 @@ struct CloudsView {
 // hour, `snow` of it as snow.
 [[nodiscard]] double rain_extinction(double falling, double snow) noexcept;
 
-// A layer of cloud round the planet, at a height above sea level, its cover and thickness from
-// weather maps faded between, and its billows drifting with the wind, and what falls from it in
-// veils to the ground. They're lit through the air and seen through it, and hidden by anything
-// drawn nearer.
+// Clouds filling the sky where the weather has them, between the heights it has them at, their
+// shapes from noise drifting with the wind; marched at half the picture's size, then drawn over
+// it with what falls from them in veils to the ground and any fog lying low. All are lit through
+// the air and seen through it, and hidden by anything drawn nearer.
 class Clouds {
 public:
-    [[nodiscard]] static Result<Clouds> create(const Device& device, VkFormat colour_format);
+    // The noise is baked on `jobs`.
+    [[nodiscard]] static Result<Clouds> create(Device& device, VkFormat colour_format,
+                                               jobs::JobSystem& jobs);
 
-    // Records drawing the clouds over the colour image being rendered to, of `extent`, with no
-    // depth image. `depth` is the picture's, ready to sample.
-    void draw(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth,
-              const CloudsView& view) const noexcept;
+    // The size the clouds are marched at, for a picture of `extent`.
+    [[nodiscard]] static VkExtent2D march_extent(VkExtent2D extent) noexcept;
+    // Of the images the clouds are marched into.
+    static constexpr VkFormat marched_format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    static constexpr VkFormat distances_format = VK_FORMAT_R32_SFLOAT;
+
+    // Records marching the clouds for a picture of `extent` into `marched` and `distances`, storage
+    // images of march_extent(). `depth` is the picture's, ready to sample.
+    void march(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth, VkImageView marched,
+               VkImageView distances, const CloudsView& view) const noexcept;
+    // Records drawing them over the colour image being rendered to, of `extent`, with no depth
+    // image, from `marched` and `distances`, ready to sample.
+    void draw(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth, VkImageView marched,
+              VkImageView distances, const CloudsView& view) const noexcept;
 
 private:
     Clouds() = default;
 
+    Pipeline march_;
     Pipeline pipeline_;
     Sampler nearest_;
+    Sampler linear_;
+    Sampler tiling_;
+    CloudNoise noise_;
 };
 
 } // namespace hog::render

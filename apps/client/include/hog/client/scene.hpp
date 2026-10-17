@@ -41,8 +41,6 @@ inline constexpr double vertical_fov = 1.0; // radians
 inline constexpr VkFormat depth_format = VK_FORMAT_D32_SFLOAT;
 // Stills are sRGB, as the window shows them.
 inline constexpr VkFormat still_format = VK_FORMAT_R8G8B8A8_SRGB;
-// Metres above sea level the clouds lie at.
-inline constexpr double cloud_base = 2'000.0;
 // Of the weather's drift, how fast the wind blows what falls near the ground.
 inline constexpr double surface_wind = 0.5;
 
@@ -73,7 +71,8 @@ struct Shot {
 // mm an hour falling round the eye: none above the cloud it falls from.
 [[nodiscard]] double falling_at_eye(const terrain::Bend& bend,
                                     const protocol::CellWeather& weather) noexcept;
-// What cloud over the eye lets through of the light falling on it; all of it above the cloud.
+// What cloud over the eye lets through of the light falling on it: all of it above the cloud, and
+// within it, what the cloud over the eye lets through.
 [[nodiscard]] render::CloudShade shade_at_eye(const terrain::Bend& bend,
                                               const protocol::CellWeather& weather);
 

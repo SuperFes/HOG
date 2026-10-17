@@ -97,3 +97,33 @@ public float henyey_greenstein(float cos_angle, float g) {
     const float g2 = g * g;
     return (1.0 - g2) / (4.0 * 3.14159265358979 * pow(1.0 + g2 - (2.0 * g * cos_angle), 1.5));
 }
+
+// The distance along `view` to the drawn sphere of radius `faked` + `base` about the drawn
+// planet's centre, `centre_to_eye` below the eye: the nearest ahead, or negative for none.
+public float to_layer(float mu, float centre_to_eye, float eye_height, float base, float faked) {
+    const float2 hits = sphere_hits(mu, centre_to_eye, eye_height, base, faked);
+    return hits.x > 0.0 ? hits.x : hits.y;
+}
+
+// Where `view` meets the drawn sphere of radius `faked` + `height` about the drawn planet's centre,
+// `centre_to_eye` below the eye: x the nearer and y the further, each negative if behind; both
+// negative for none.
+public float2 sphere_hits(float mu, float centre_to_eye, float eye_height, float height,
+                          float faked) {
+    const float product = (eye_height - height) * (eye_height + height + (2.0 * faked));
+    const float b = -mu * centre_to_eye;
+    const float discriminant = (b * b) - product;
+    if (discriminant < 0.0) {
+        return float2(-1.0);
+    }
+    const float q = b + (b >= 0.0 ? sqrt(discriminant) : -sqrt(discriminant));
+    if (q == 0.0) {
+        return float2(-1.0);
+    }
+    return float2(min(q, product / q), max(q, product / q));
+}
+
+// From a pixel, a fraction that varies finely and evenly between neighbours.
+public float interleaved(float2 pixel) {
+    return frac(52.9829189 * frac(dot(pixel, float2(0.06711056, 0.00583715))));
+}

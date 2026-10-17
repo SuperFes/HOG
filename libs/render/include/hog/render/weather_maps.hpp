@@ -24,7 +24,12 @@ struct WeatherBindings {
     VkSampler sampler = VK_NULL_HANDLE; // linear
     double faded = 1.0;                 // from the maps before, at 0, to those after, at 1
     bool falling = false;               // whether anything falls anywhere
-    double fog_top = 0.0; // metres above sea level of the highest fog's top anywhere; 0 for none
+    // Metres above sea level anywhere: the highest fog's top, 0 for none, and the lowest and
+    // highest of the cloud's base and the highest of its top.
+    double fog_top = 0.0;
+    double lowest_base = 0.0;
+    double highest_base = 0.0;
+    double highest_top = 0.0;
 };
 
 // Per metre, how much of the light along a view the mist takes at `height` metres above sea level,
@@ -66,6 +71,9 @@ private:
     std::uint32_t map_size_ = 0;
     bool falling_ = false;
     double fog_top_ = 0.0;
+    double lowest_base_ = 0.0;
+    double highest_base_ = 0.0;
+    double highest_top_ = 0.0;
 };
 
 } // namespace hog::render

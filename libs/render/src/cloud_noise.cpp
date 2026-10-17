@@ -150,11 +150,32 @@ std::vector<std::byte> halved(std::span<const std::byte> above, std::uint32_t si
     return mip;
 }
 
+// Spreads a channel of texels evenly over its range, keeping their order.
+void even_out(std::span<std::byte> texels, std::size_t channel) {
+    std::array<std::size_t, 256> counts{};
+    for (std::size_t at = channel; at < texels.size(); at += 4) {
+        ++counts.at(std::to_integer<std::size_t>(texels[at]));
+    }
+    std::array<std::byte, 256> spread{};
+    std::size_t below = 0;
+    const auto total = static_cast<double>(texels.size()) / 4.0;
+    for (std::size_t value = 0; value < counts.size(); ++value) {
+        const double middle =
+            static_cast<double>(below) + (0.5 * static_cast<double>(counts.at(value)));
+        spread.at(value) = to_texel(middle / total);
+        below += counts.at(value);
+    }
+    for (std::size_t at = channel; at < texels.size(); at += 4) {
+        texels[at] = spread.at(std::to_integer<std::size_t>(texels[at]));
+    }
+}
+
 // The volume of `size` texels a side and its mips, each texel's four channels from `texel` at
-// its middle, on `jobs` if given.
+// its middle, on `jobs` if given, with the first channel spread evenly over its range when
+// `even`.
 std::vector<std::byte> baked(std::uint32_t size, std::uint32_t levels,
                              const std::function<std::array<double, 4>(DVec3)>& texel,
-                             jobs::JobSystem* jobs) {
+                             jobs::JobSystem* jobs, bool even = false) {
     const std::size_t slice = std::size_t{size} * size * 4;
     std::vector<std::byte> out(slice * size);
     const auto bake = [&](jobs::Range slices, std::uint32_t) {
@@ -174,6 +195,9 @@ std::vector<std::byte> baked(std::uint32_t size, std::uint32_t levels,
         jobs->parallel_for(size, 1, bake);
     } else {
         bake({.begin = 0, .end = size}, 0);
+    }
+    if (even) {
+        even_out(out, 0);
     }
     std::size_t from = 0;
     for (std::uint32_t level = 1, above = size; level < levels && above > 1; ++level) {
@@ -230,7 +254,7 @@ std::vector<std::byte> shape_noise(std::uint32_t size, std::uint32_t levels,
             const double shape = (billows(at) - (cells - 1.0)) / (2.0 - cells);
             return std::array{shape, coarse.at(at), middle.at(at), fine.at(at)};
         },
-        jobs);
+        jobs, true);
 }
 
 std::vector<std::byte> detail_noise(std::uint32_t size, std::uint32_t levels,
@@ -259,11 +283,16 @@ Result<CloudNoise> make_cloud_noise(Device& device, jobs::JobSystem& jobs) {
                                   .depth = size},
                                  texels);
     };
-    auto shape = volume(shape_noise_size, shape_noise(shape_noise_size, noise_levels, &jobs));
+    // Baked once, for however many devices.
+    static const std::vector<std::byte> shape_texels =
+        shape_noise(shape_noise_size, noise_levels, &jobs);
+    static const std::vector<std::byte> detail_texels =
+        detail_noise(detail_noise_size, noise_levels, &jobs);
+    auto shape = volume(shape_noise_size, shape_texels);
     if (!shape) {
         return std::unexpected(std::move(shape).error());
     }
-    auto detail = volume(detail_noise_size, detail_noise(detail_noise_size, noise_levels, &jobs));
+    auto detail = volume(detail_noise_size, detail_texels);
     if (!detail) {
         return std::unexpected(std::move(detail).error());
     }

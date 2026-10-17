@@ -141,19 +141,24 @@ TEST_CASE("the weather drifts along the ground, east and north as it says", "[cl
 }
 
 TEST_CASE("rain falls round the eye only under the cloud", "[client][scene]") {
-    const hog::protocol::CellWeather raining{.cloud = 2.0F, .falling = 5.0F};
-    hog::terrain::Bend bend{.eye_height = hog::client::cloud_base - 100.0};
+    const hog::protocol::CellWeather raining{
+        .cloud = 2.0F, .falling = 5.0F, .base = 1'500.0F, .top = 3'000.0F};
+    hog::terrain::Bend bend{.eye_height = 1'400.0};
     CHECK(hog::client::falling_at_eye(bend, raining) == 5.0);
-    bend.eye_height = hog::client::cloud_base + 100.0;
+    bend.eye_height = 1'600.0;
     CHECK(hog::client::falling_at_eye(bend, raining) == 0.0);
 }
 
-TEST_CASE("cloud shades the eye only from above", "[client][scene]") {
-    const hog::protocol::CellWeather overcast{.cloud = 2.0F};
-    hog::terrain::Bend bend{.eye_height = hog::client::cloud_base - 100.0};
+TEST_CASE("cloud shades the eye from above, less from within it", "[client][scene]") {
+    const hog::protocol::CellWeather overcast{.cloud = 2.0F, .base = 1'500.0F, .top = 3'000.0F};
+    hog::terrain::Bend bend{.eye_height = 1'400.0};
     CHECK(hog::client::shade_at_eye(bend, overcast).direct < 0.01);
     CHECK(hog::client::shade_at_eye(bend, {}).direct == 1.0);
-    bend.eye_height = hog::client::cloud_base + 100.0;
+    bend.eye_height = 2'990.0;
+    const double near_top = hog::client::shade_at_eye(bend, overcast).direct;
+    CHECK(near_top > 0.01);
+    CHECK(near_top < 1.0);
+    bend.eye_height = 3'100.0;
     CHECK(hog::client::shade_at_eye(bend, overcast).direct == 1.0);
 }
 
@@ -164,7 +169,8 @@ TEST_CASE("a scene under rain and overcast is grey and dim", "[client][scene][gp
     REQUIRE(scene);
     const auto clear = hog::client::draw_still(*device, *scene, over_the_islands(), extent);
     REQUIRE(clear);
-    const hog::client::Forecast forecast = everywhere({.cloud = 1.0F, .falling = 8.0F});
+    const hog::client::Forecast forecast =
+        everywhere({.cloud = 1.0F, .falling = 8.0F, .base = 2'000.0F, .top = 3'000.0F});
     Shot shot = over_the_islands();
     shot.forecast = &forecast;
     const auto overcast = hog::client::draw_still(*device, *scene, shot, extent);

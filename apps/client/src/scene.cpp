@@ -14,6 +14,7 @@
 
 #include <glm/glm.hpp>
 
+#include <algorithm>
 #include <format>
 #include <span>
 #include <string_view>
@@ -51,14 +52,20 @@ DVec3 drift_at(DVec3 up, const protocol::CellWeather& weather) {
 }
 
 double falling_at_eye(const terrain::Bend& bend, const protocol::CellWeather& weather) noexcept {
-    return bend.eye_height < cloud_base ? double{weather.falling} : 0.0;
+    return bend.eye_height < double{weather.base} ? double{weather.falling} : 0.0;
 }
 
 render::CloudShade shade_at_eye(const terrain::Bend& bend, const protocol::CellWeather& weather) {
-    if (bend.eye_height >= cloud_base) {
+    const auto base = double{weather.base};
+    const auto top = double{weather.top};
+    if (bend.eye_height >= top) {
         return {};
     }
-    return render::cloud_shade(double{sim::cloud_cover(weather.cloud)}, double{weather.cloud});
+    // Within the cloud, only what's over the eye shades it.
+    const double over =
+        top > base ? std::clamp((top - bend.eye_height) / (top - base), 0.0, 1.0) : 1.0;
+    return render::cloud_shade(double{sim::cloud_cover(weather.cloud)},
+                               double{weather.cloud} * over);
 }
 
 Result<Scene> Scene::create(render::Device& device, const planet::World& world,
@@ -97,7 +104,7 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
     if (!weather) {
         return failed("hold the weather", weather.error());
     }
-    auto clouds = render::Clouds::create(device, colour_format);
+    auto clouds = render::Clouds::create(device, colour_format, jobs);
     if (!clouds) {
         return failed("draw the clouds", clouds.error());
     }
@@ -307,19 +314,47 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     // The clouds and glare read what's drawn in front of them from depth, so they're drawn
     // without it.
     if (cloudy) {
+        const VkExtent2D half = render::Clouds::march_extent(frame.extent);
+        const auto marched_image = [&](VkFormat format) {
+            return graph.transient(
+                {.format = format,
+                 .extent = half,
+                 .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                 .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
+                 .layers = 1,
+                 .levels = 1});
+        };
+        const render::GraphImage marched = marched_image(render::Clouds::marched_format);
+        const render::GraphImage distances = marched_image(render::Clouds::distances_format);
+        const auto clouds_view = [&] {
+            return render::CloudsView{.camera = shot.camera,
+                                      .bend = shot.bend,
+                                      .air = through,
+                                      .base = double{here.base},
+                                      .weather = weather(),
+                                      .moved = drifted_};
+        };
+        graph.add({.name = "cloud march",
+                   .uses = {{.image = aerial, .use = render::image_use::sampled},
+                            {.image = depth, .use = render::image_use::sampled},
+                            {.image = marched, .use = render::image_use::storage},
+                            {.image = distances, .use = render::image_use::storage}},
+                   .targets = std::nullopt},
+                  // By value what's made in this block, as the passes run after it.
+                  [&, marched, distances, clouds_view](VkCommandBuffer commands) {
+                      clouds_.march(commands, frame.extent, graph.view(depth), graph.view(marched),
+                                    graph.view(distances), clouds_view());
+                  });
         graph.add({.name = "clouds",
                    .uses = {{.image = aerial, .use = render::image_use::sampled},
-                            {.image = depth, .use = render::image_use::sampled}},
+                            {.image = depth, .use = render::image_use::sampled},
+                            {.image = marched, .use = render::image_use::sampled},
+                            {.image = distances, .use = render::image_use::sampled}},
                    .targets = {{.colour = {.image = target, .clear = std::nullopt},
                                 .depth = std::nullopt}}},
-                  [&](VkCommandBuffer commands) {
-                      clouds_.draw(commands, frame.extent, graph.view(depth),
-                                   {.camera = shot.camera,
-                                    .bend = shot.bend,
-                                    .air = through,
-                                    .base = cloud_base,
-                                    .weather = weather(),
-                                    .moved = drifted_});
+                  [&, marched, distances, clouds_view](VkCommandBuffer commands) {
+                      clouds_.draw(commands, frame.extent, graph.view(depth), graph.view(marched),
+                                   graph.view(distances), clouds_view());
                   });
     }
     const double height = shot.bend.eye_height * render::air_scale(model_.air(), shot.bend);

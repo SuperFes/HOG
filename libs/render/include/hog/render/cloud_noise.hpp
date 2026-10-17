@@ -30,8 +30,9 @@ inline constexpr std::uint32_t noise_levels = 4;
 // x fastest, then y, then z, and each of `levels` mips after the one before, each texel of one
 // the mean of the eight under it in the one before. Baked on `jobs` if given.
 //
-// The billows' shape: r gradient noise worn by cells, the billows themselves; g, b and a cells at
-// ever finer sizes, to wear them away.
+// The billows' shape: r gradient noise worn by cells, the billows themselves, spread evenly from
+// 0 to 255, so as much of it is above any value as a cover of 1 less that value; g, b and a cells
+// at ever finer sizes, to wear them away.
 [[nodiscard]] std::vector<std::byte> shape_noise(std::uint32_t size, std::uint32_t levels,
                                                  jobs::JobSystem* jobs = nullptr);
 // The edges' detail: r, g and b cells at ever finer sizes, and a their sum.
@@ -44,6 +45,7 @@ struct CloudNoise {
     Image detail;
 };
 
+// The noise is baked on `jobs` the first time, and kept.
 [[nodiscard]] Result<CloudNoise> make_cloud_noise(Device& device, jobs::JobSystem& jobs);
 
 } // namespace hog::render
