@@ -51,6 +51,7 @@ static const float overfill = 1.1;
 static const uint most_steps = 128;
 static const float step_growth = 0.03;
 static const float clear_stride = 4.0;
+static const uint least_steps = 24;
 static const float shortest_step = 40.0;
 static const float longest_step = 2000.0;
 // Metres along the view clouds are marched over at most.
@@ -214,10 +215,17 @@ void march_main(uint3 id: SV_DispatchThreadID) {
     float3 radiance = float3(0.0);
     float seen_through = 1.0;
     float weighed = 0.0;
-    float along = start + (interleaved(float2(id.xy)) * clamp(start * step_growth, shortest_step,
-                                                                longest_step));
+    // No step's longer than a share of the view's way through the shell, so even a thin layer seen
+    // from afar is stepped through, not hit or missed whole.
+    const float longest = clamp((end - start) / float(least_steps), shortest_step, longest_step);
+    float along = start + (interleaved(float2(id.xy)) *
+                           clamp(start * step_growth, shortest_step, longest));
+    // Whether the last step was a long one through clear air, and how far to go only in steps once
+    // one strode into cloud.
+    bool striding = false;
+    float stepping_to = 0.0;
     for (uint at = 0; at < most_steps && along < end && seen_through > 0.01; ++at) {
-        const float step = clamp(along * step_growth, shortest_step, longest_step);
+        const float step = clamp(along * step_growth, shortest_step, longest);
         const float3 from_eye = view * along;
         const float point_height = drawn_height(from_eye, up, eye_height, faked);
         const float3 direction = on_planet(from_eye, up, centre_to_eye, faked, radius);
@@ -225,6 +233,13 @@ void march_main(uint3 id: SV_DispatchThreadID) {
         const float3 point = direction * (radius + point_height);
         const float footprint = along * pixel;
         const float cloud = cloud_at(point, point_height, cell, footprint, true);
+        if (cloud > 0.0 && striding) {
+            // Strode into cloud: back to a step past where it was clear, and on in steps.
+            stepping_to = along;
+            along -= step * (clear_stride - 1.0);
+            striding = false;
+            continue;
+        }
         if (cloud > 0.0) {
             const float extinction = cloud * densest_in(cell);
             const float3 point_up = normalize((up * centre_to_eye) + from_eye);
@@ -265,7 +280,8 @@ void march_main(uint3 id: SV_DispatchThreadID) {
             weighed += along * hidden;
             seen_through -= hidden;
         }
-        along += cloud > 0.0 ? step : step * clear_stride;
+        striding = cloud <= 0.0 && along >= stepping_to;
+        along += striding ? step * clear_stride : step;
     }
     const float opacity = 1.0 - seen_through;
     if (opacity <= 0.0) {
