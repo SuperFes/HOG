@@ -270,6 +270,20 @@ This phase covers the planet in procedurally generated plant life, grown from pe
 - [ ] Succession on burned or emptied cells from the forest sim's history: pioneer grass, then shrubs, then young forest among the burned trunks
 - [ ] A burned-in-the-past, regrowing forest somewhere on the starting islands to prove it
 
+**Life cycle and spread**
+
+Borrowed from real species to make forests feel grown rather than scattered. A menu, not a contract: each mechanic is cheap once placement reads the sim, and we take the ones that earn their keep.
+
+- [ ] Climate niche per species: a temperature and moisture envelope decides each range — palm analogues frost-limited to warm coasts, pines climbing to a cold treeline, nothing growing where it shouldn't
+- [ ] Dispersal, pretended like the insect damage: winged seeds drift downwind of parents, bird-cached seeds jump gaps and march uphill (how oak and stone-pine analogues spread), water-borne seeds follow shores and rivers
+- [ ] Allelopathy: a walnut-analogue poisons the soil around it and stands in a clearing of its own making; grass-suppressing crowns keep bare ground beneath them
+- [ ] Serotiny: fire-sealed cones that open only in a burn, so burned ground reseeds first in the fire-pine analogue
+- [ ] Mast years: a region's trees synchronize bumper seed crops, leaving dateable waves of same-aged saplings
+- [ ] Shade tolerance orders succession: sun-loving pioneers first, shade-tolerant climax species growing up beneath them
+- [ ] Nurse logs: seedlings rooted in rows on fallen trunks in wet forests
+- [ ] Krummholz: trees at the treeline grow stunted and bent to the prevailing wind
+- [ ] One endemic giant: a redwood-analogue growing only in a single fog-wet pocket of the planet
+
 **Rendering**
 
 - [ ] Instanced rendering with LOD tiers: full geometry near, billboard impostors mid-range, density and colour folded into the terrain far away
