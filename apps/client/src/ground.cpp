@@ -184,4 +184,49 @@ std::vector<render::GrassDraw> grass_draws(const GroundSlots& slots,
     return draws;
 }
 
+std::vector<render::BushDraw> bush_draws(const GroundSlots& slots,
+                                         std::span<const terrain::StreamedPatch> drawn,
+                                         WorldPosition eye, double planet_radius,
+                                         const GrassBudget& budget) {
+    std::vector<render::BushDraw> draws;
+    const DVec3 up = glm::normalize(eye.metres());
+    for (const terrain::StreamedPatch& patch : drawn) {
+        const int level = patch.cell.level();
+        // The lattice keys a patch's grid cells together or apart by whole powers of two; a
+        // patch too coarse for even paired lattice cells, or finer than the lattice itself,
+        // can't carry it.
+        const int shift = level + terrain::patch_depth - render::bush_lattice_level;
+        if (shift < -1 || level > render::bush_lattice_level) {
+            continue;
+        }
+        const double spacing =
+            (std::numbers::pi / 2.0) * planet_radius /
+            static_cast<double>(std::uint64_t{1} << static_cast<unsigned>(level)) /
+            terrain::patch_cells;
+        if (spacing > budget.tall_coarsest) {
+            continue;
+        }
+        const double span = spacing * terrain::patch_cells;
+        const DVec3 away = patch.origin - eye;
+        const double distance = std::max(0.0, glm::length(away - (up * glm::dot(away, up))) - span);
+        if (distance >= budget.tall_far) {
+            continue;
+        }
+        const std::optional<std::uint32_t> held = slots.slot(patch.cell);
+        if (!held) {
+            continue;
+        }
+        const planet::FaceIJ at = patch.cell.to_face_ij();
+        const auto spread = static_cast<unsigned>(render::bush_lattice_level - level);
+        draws.push_back({.slot = *held,
+                         .origin = patch.origin,
+                         .face = static_cast<std::uint32_t>(at.face),
+                         .lattice_i = static_cast<std::uint32_t>(at.i) << spread,
+                         .lattice_j = static_cast<std::uint32_t>(at.j) << spread,
+                         .shift = shift,
+                         .fade_far = budget.tall_far});
+    }
+    return draws;
+}
+
 } // namespace hog::client

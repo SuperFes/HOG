@@ -11,6 +11,7 @@
 #include <hog/planet/world.hpp>
 #include <hog/render/atmosphere.hpp>
 #include <hog/render/billboard.hpp>
+#include <hog/render/bushes.hpp>
 #include <hog/render/camera.hpp>
 #include <hog/render/capsules.hpp>
 #include <hog/render/clouds.hpp>
@@ -125,18 +126,26 @@ public:
 private:
     Scene(const render::Device& device, const planet::World& world, jobs::JobSystem& jobs,
           const sim::Calendar& calendar, render::Terrain terrain, render::Ocean ocean,
-          render::Grass grass, render::TerrainPool pool, render::Atmosphere atmosphere,
-          render::Sky sky, render::Capsules others, render::WeatherMaps weather,
-          render::Clouds clouds, render::Precipitation precipitation, render::Glare glare,
-          render::GpuTimer timer, std::optional<render::Billboard> companion, std::uint32_t frames);
+          render::Grass grass, render::Bushes bushes, render::TerrainPool pool,
+          render::Atmosphere atmosphere, render::Sky sky, render::Capsules others,
+          render::WeatherMaps weather, render::Clouds clouds, render::Precipitation precipitation,
+          render::Glare glare, render::GpuTimer timer, std::optional<render::Billboard> companion,
+          std::uint32_t frames);
 
     render::SkyView sky_view(const Shot& shot, render::CloudShade shade);
+    // Adds the grass and bush passes over the drawn patches, blown by `wind`.
+    void grow_vegetation(render::RenderGraph& graph, const render::Frame& frame, const Shot& shot,
+                         std::span<const terrain::StreamedPatch> patches,
+                         std::span<const render::GraphUse> through_air,
+                         const render::GraphTargets& drawn, const render::AirBindings& air,
+                         DVec3 wind);
 
     terrain::PatchBaker baker_;
     terrain::PatchStream stream_;
     render::Terrain terrain_;
     render::Ocean ocean_;
     render::Grass grass_;
+    render::Bushes bushes_;
     render::TerrainPool pool_;
     GroundSlots slots_;
     render::TransientImages transients_;

@@ -2,6 +2,7 @@
 
 #include <hog/core/result.hpp>
 #include <hog/planet/cell_id.hpp>
+#include <hog/render/bushes.hpp>
 #include <hog/render/grass.hpp>
 #include <hog/render/terrain.hpp>
 #include <hog/terrain/material.hpp>
@@ -74,6 +75,12 @@ private:
 [[nodiscard]] std::vector<render::GrassDraw>
 grass_draws(const GroundSlots& slots, std::span<const terrain::StreamedPatch> drawn,
             WorldPosition eye, double planet_radius, const GrassBudget& budget = {});
+
+// The bushes grown on the drawn patches within the grass budget's far reach, keyed to their
+// fixed lattice. Patches without slots, or finer than the lattice can key, are passed over.
+[[nodiscard]] std::vector<render::BushDraw>
+bush_draws(const GroundSlots& slots, std::span<const terrain::StreamedPatch> drawn,
+           WorldPosition eye, double planet_radius, const GrassBudget& budget = {});
 
 template <SlotPool Pool>
 Result<> GroundSlots::take(Pool& pool, std::uint32_t frame, const terrain::StreamFrame& streamed) {
