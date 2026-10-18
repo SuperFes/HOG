@@ -707,6 +707,39 @@ TEST_CASE("turning, the clouds keep as sharp as when still", "[render][gpu][atmo
     CHECK(kept > 0.96);
 }
 
+TEST_CASE("with nothing marched before to blend, the clouds are smoothed, not left grainy",
+          "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    constexpr VkExtent2D size{.width = 384, .height = 216};
+    const Scene seen = broken_overhead();
+    const Pixels first = draw_frames(*device, {seen}, nullptr, size).front();
+    const Pixels settled = draw_frames(*device, std::vector<Scene>(12, seen), nullptr, size).back();
+    // Grain, as how much each pixel differs from those above and below it.
+    const auto grain = [&](const Pixels& pixels) {
+        const std::size_t row = std::size_t{4} * size.width;
+        long sum = 0;
+        for (std::size_t at = row; at + row < pixels.size(); at += 4) {
+            for (std::size_t channel = 0; channel < 3; ++channel) {
+                sum += std::abs((2 * int{pixels[at + channel]}) - int{pixels[at - row + channel]} -
+                                int{pixels[at + row + channel]});
+            }
+        }
+        return static_cast<double>(sum);
+    };
+    const double ratio = grain(first) / grain(settled);
+    INFO("first frame's grain to the settled's " << ratio);
+    CHECK(ratio < 1.0);
+}
+
+TEST_CASE("the eye may move further between frames and keep what was marched, the higher it is "
+          "over the cloud",
+          "[render]") {
+    using hog::render::furthest_blended;
+    CHECK(furthest_blended(2.0, 3'000.0) == 500.0);
+    CHECK(furthest_blended(4'000.0, 3'000.0) == 500.0);
+    CHECK(furthest_blended(20'000.0, 3'000.0) == 1'700.0);
+}
+
 TEST_CASE("cloud seen from afar is found where it starts, not where the step it's found in ends",
           "[render][gpu][atmosphere]") {
     const auto device = test_device();

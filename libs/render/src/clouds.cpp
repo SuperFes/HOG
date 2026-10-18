@@ -52,6 +52,10 @@ constexpr double snow_extinction = 12.0;
 constexpr double least_sun = 0.05;
 // Of the sun's light the mist takes, the share it scatters on down.
 constexpr double mist_scattered_down = 0.7;
+// Metres the eye may move between frames and keep what was marched before, at least, and as a share
+// of its height over the cloud.
+constexpr double least_blended = 500.0;
+constexpr double blended_share = 0.1;
 // Metres the cloud's shadow reaches from the eye at least and at most.
 constexpr double least_shadow_reach = 32'000.0;
 constexpr double most_shadow_reach = 256'000.0;
@@ -223,6 +227,10 @@ double rain_beneath(double cover, double presence) noexcept {
                      std::min(covered / least_cover, 1.0));
 }
 
+double furthest_blended(double eye_height, double highest_top) noexcept {
+    return std::max(least_blended, blended_share * (eye_height - highest_top));
+}
+
 double cloud_shadow_reach(double eye_height) noexcept {
     double reach = least_shadow_reach;
     while (reach < 2.0 * eye_height && reach < most_shadow_reach) {
@@ -370,7 +378,8 @@ Result<> Clouds::march(VkCommandBuffer commands, VkExtent2D extent, VkImageView 
         blend_extent_ = size;
         frames_ = 0;
     }
-    if (frames_ > 0 && glm::length(view.camera.eye - previous_eye_) > furthest_blended) {
+    if (frames_ > 0 && glm::length(view.camera.eye - previous_eye_) >
+                           furthest_blended(view.bend.eye_height, view.weather.highest_top)) {
         frames_ = 0;
     }
 

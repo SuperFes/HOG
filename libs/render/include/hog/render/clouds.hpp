@@ -71,6 +71,11 @@ struct CloudsView {
 // double, so the map's texels keep their size between them.
 [[nodiscard]] double cloud_shadow_reach(double eye_height) noexcept;
 
+// Metres the eye may move between frames and still have what was marched before blended in, from
+// `eye_height` metres above sea level with the cloud's top at most `highest_top`: further the
+// higher it is over the cloud, as what's marched moves less across the picture.
+[[nodiscard]] double furthest_blended(double eye_height, double highest_top) noexcept;
+
 // Clouds filling the sky where the weather has them, between the heights it has them at, their
 // shapes from noise drifting with the wind, and what falls from them to the ground; marched at a
 // share of the picture's size, as their quality has it, then drawn over it with any fog lying low.
@@ -95,8 +100,6 @@ public:
     // Of the images the clouds are marched into.
     static constexpr VkFormat marched_format = VK_FORMAT_R16G16B16A16_SFLOAT;
     static constexpr VkFormat distances_format = VK_FORMAT_R32_SFLOAT;
-    // Metres the eye may move between frames and still have what was marched before blended in.
-    static constexpr double furthest_blended = 500.0;
     // Of the map of the cloud's shadow, as cloud_march.slang's shadow_main() leaves it.
     static constexpr VkFormat shadow_format = VK_FORMAT_R16G16B16A16_SFLOAT;
 

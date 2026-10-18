@@ -18,6 +18,8 @@ struct Push {
 
 // Of each frame, the share it adds to the blend.
 static const float fresh = 0.15;
+// The share by which what's marched round it may be nearer or further and still be blurred into it.
+static const float alike = 0.25;
 // How many standard deviations of what's marched round it the history may stray.
 static const float spreads = 1.25;
 
@@ -56,35 +58,45 @@ void resolve_main(uint3 id: SV_DispatchThreadID) {
     }
     const float4 now = marched[id.xy];
 
-    // Where it was in the last frame: as far along its view as the cloud is, or as far as the sky.
-    const float2 uv = (float2(id.xy) + 0.5) / float2(width, height);
-    const float4 far = mul(push.eye_from_clip, float4((uv * 2.0) - 1.0, 1.0, 1.0));
-    const float3 view = normalize(far.xyz / far.w);
+    // Of what's marched round it now: the spread, and that blurred, where there's nothing before to
+    // blend it with and its noise would show; but only from what's about as far, or nothing, as
+    // what's further may be hidden here.
     const float distance = distances[id.xy];
-    const float4 seen = distance > 0.0 ? float4(view * distance, 1.0) : float4(view, 0.0);
-    const float4 clip = mul(push.previous_clip_from_eye, seen);
-    if (clip.w <= 0.0) {
-        blended[id.xy] = now;
-        return;
-    }
-    const float2 then = ((clip.xy / clip.w) * 0.5) + 0.5;
-    if (any(then < 0.0) || any(then > 1.0)) {
-        blended[id.xy] = now;
-        return;
-    }
-
-    // Kept within the spread of what's marched round it now, so what's moved or gone doesn't
-    // linger: closer than its least and most, which the march's noise spreads wide.
     float4 sum = float4(0.0);
     float4 squares = float4(0.0);
+    float4 smoothed = float4(0.0);
+    float weights = 0.0;
     for (int dy = -1; dy <= 1; ++dy) {
         for (int dx = -1; dx <= 1; ++dx) {
             const int2 next = clamp(int2(id.xy) + int2(dx, dy), int2(0), int2(width - 1, height - 1));
             const float4 there = marched[next];
             sum += there;
             squares += there * there;
+            const float there_distance = distances[next];
+            if (there_distance <= 0.0 ||
+                abs(there_distance - distance) <= alike * max(there_distance, distance)) {
+                const float weight = (dx == 0 ? 2.0 : 1.0) * (dy == 0 ? 2.0 : 1.0);
+                smoothed += there * weight;
+                weights += weight;
+            }
         }
     }
+    smoothed /= weights;
+
+    // Where it was in the last frame: as far along its view as the cloud is, or as far as the sky.
+    const float2 uv = (float2(id.xy) + 0.5) / float2(width, height);
+    const float4 far = mul(push.eye_from_clip, float4((uv * 2.0) - 1.0, 1.0, 1.0));
+    const float3 view = normalize(far.xyz / far.w);
+    const float4 seen = distance > 0.0 ? float4(view * distance, 1.0) : float4(view, 0.0);
+    const float4 clip = mul(push.previous_clip_from_eye, seen);
+    const float2 then = ((clip.xy / max(clip.w, 1e-30)) * 0.5) + 0.5;
+    if (clip.w <= 0.0 || any(then < 0.0) || any(then > 1.0)) {
+        blended[id.xy] = now.a > 0.0 ? smoothed : now;
+        return;
+    }
+
+    // Kept within the spread of what's marched round it now, so what's moved or gone doesn't
+    // linger: closer than its least and most, which the march's noise spreads wide.
     const float4 mean = sum / 9.0;
     const float4 spread = sqrt(max((squares / 9.0) - (mean * mean), 0.0)) * spreads;
     const float4 least = mean - spread;
