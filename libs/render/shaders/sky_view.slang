@@ -21,7 +21,7 @@ void sky_view_main(uint3 id: SV_DispatchThreadID) {
     if (id.x >= sky_view_width || id.y >= sky_view_height) {
         return;
     }
-    const float height = min(push.height_sun.x, air.radii.y - air.radii.x);
+    const float height = push.height_sun.x;
     const float sun_mu = push.height_sun.y;
     const float2 uv = (float2(id.xy) + 0.5) / float2(sky_view_width, sky_view_height);
     const float3 view = sky_view_direction(air, height, uv);

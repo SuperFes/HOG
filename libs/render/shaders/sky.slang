@@ -22,7 +22,6 @@ static const float sun_angular_radius = 0.004675;
 static const float sun_radiance = 1.0 / (pi * sun_angular_radius * sun_angular_radius);
 // Just in front of the cleared depth, so the sky is drawn there and anything drawn after hides it.
 static const float sky_depth = 1e-7;
-static const uint march_steps = 48;
 
 struct Sky {
     float4 position : SV_Position;
@@ -49,23 +48,15 @@ float4 fragment_main(Sky sky) : SV_Target {
     const float mu = dot(view, up);
     const float sun_mu = dot(sun, up);
 
-    float3 light;
-    if (height > air.radii.y - air.radii.x) {
-        // Above the air the table can't be made, so the sky is marched for each pixel.
-        const float3 east = normalize(abs(up.z) < 0.9 ? cross(float3(0.0, 0.0, 1.0), up)
-                                                      : cross(float3(1.0, 0.0, 0.0), up));
-        const float3 north = cross(up, east);
-        const float3x3 local = float3x3(east, north, up);
-        light = march(air, transmittance_table, scattering_table, height, mul(local, view),
-                      mul(local, sun), 1e30, march_steps)
-                    .light;
-    } else {
-        const float3 flat_view = view - (up * mu);
-        const float3 flat_sun = sun - (up * sun_mu);
-        const float across = length(flat_view) * length(flat_sun);
-        const float cos_azimuth = across > 1e-6 ? dot(flat_view, flat_sun) / across : 1.0;
-        light = sky_view_table.SampleLevel(sky_view_uv(air, height, mu, cos_azimuth), 0.0).rgb;
-    }
+    const float3 flat_view = view - (up * mu);
+    const float3 flat_sun = sun - (up * sun_mu);
+    const float across = length(flat_view) * length(flat_sun);
+    const float cos_azimuth = across > 1e-6 ? dot(flat_view, flat_sun) / across : 1.0;
+    // From above the air, the views that pass it by see none.
+    float3 light = mu > cos(least_zenith(air, air.radii.x + height))
+                       ? float3(0.0)
+                       : sky_view_table.SampleLevel(sky_view_uv(air, height, mu, cos_azimuth), 0.0)
+                             .rgb;
     if (dot(view, sun) > cos(sun_angular_radius)) {
         light += sun_radiance * transmittance(air, transmittance_table, height, mu);
     }

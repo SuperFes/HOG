@@ -258,8 +258,8 @@ TEST_CASE("from above the air, the sky is black but for the air's glow over the 
     auto atmosphere = Atmosphere::create(*device);
     REQUIRE(atmosphere);
     const hog::atmosphere::Model model;
-    // Looking down to the limb.
-    const double height = 400'000.0;
+    // Looking down to the limb, from just over the air and far over it.
+    const double height = GENERATE(120'000.0, 400'000.0);
     const SkyView view = view_from(height, towards(30.0), towards(-19.0));
     const Picture picture = draw(*device, *atmosphere, view);
     const double scale = hog::render::air_scale(atmosphere->air(), view.bend);

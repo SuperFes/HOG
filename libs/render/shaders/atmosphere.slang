@@ -251,17 +251,24 @@ public Scattered march<A : IAlong>(Air air, Sampler2D transmittance_table,
 public static const uint sky_view_width = 192;
 public static const uint sky_view_height = 108;
 
+// Of views from `radius`, the least angle from straight up that meets the air: from above it, the
+// views nearer straight up pass it by.
+public float least_zenith(Air air, float radius) {
+    return radius > air.radii.y ? pi - asin(air.radii.y / radius) : 0.0;
+}
+
 // Hillaire's sky-view mapping, from the eye at `height`: across, the view's azimuth from the sun's,
-// finest towards it; down, from the zenith to the horizon and on to the nadir, finest at the
-// horizon.
+// finest towards it; down, from the zenith, or the least angle from it that meets the air, to the
+// horizon and on to the nadir, finest at the horizon.
 public float2 sky_view_uv(Air air, float height, float mu, float cos_azimuth) {
     const float radius = air.radii.x + height;
     const float beta = acos(clamp(sqrt(above_ground(air, height)) / radius, 0.0, 1.0));
     const float horizon_angle = pi - beta;
+    const float least = least_zenith(air, radius);
     const float zenith_angle = acos(clamp(mu, -1.0, 1.0));
     float v;
     if (zenith_angle < horizon_angle) {
-        v = 0.5 * (1.0 - sqrt(1.0 - (zenith_angle / horizon_angle)));
+        v = 0.5 * (1.0 - sqrt(saturate((horizon_angle - zenith_angle) / (horizon_angle - least))));
     } else {
         v = 0.5 + (0.5 * sqrt(saturate((zenith_angle - horizon_angle) / beta)));
     }
@@ -274,12 +281,13 @@ public float3 sky_view_direction(Air air, float height, float2 uv) {
     const float radius = air.radii.x + height;
     const float beta = acos(clamp(sqrt(above_ground(air, height)) / radius, 0.0, 1.0));
     const float horizon_angle = pi - beta;
+    const float least = least_zenith(air, radius);
     const float u = unit_from_texel(uv.x, sky_view_width);
     const float v = unit_from_texel(uv.y, sky_view_height);
     float zenith_angle;
     if (v < 0.5) {
         const float coord = 1.0 - (2.0 * v);
-        zenith_angle = horizon_angle * (1.0 - (coord * coord));
+        zenith_angle = horizon_angle - ((horizon_angle - least) * coord * coord);
     } else {
         const float coord = (2.0 * v) - 1.0;
         zenith_angle = horizon_angle + (beta * coord * coord);
