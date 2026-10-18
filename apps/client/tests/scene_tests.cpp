@@ -9,6 +9,7 @@
 #include <hog/planet/world.hpp>
 #include <hog/protocol/messages.hpp>
 #include <hog/render/camera.hpp>
+#include <hog/render/cloud_quality.hpp>
 #include <hog/render/gpu_timer.hpp>
 #include <hog/sim/calendar.hpp>
 #include <hog/terrain/bend.hpp>
@@ -21,6 +22,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <string_view>
 #include <vector>
 
@@ -184,6 +186,30 @@ TEST_CASE("a scene under rain and overcast is grey and dim", "[client][scene][gp
     INFO("ground " << brightness(clear_ground) << " to " << brightness(dim_ground));
     CHECK(grey_sky.b - grey_sky.r < (clear_sky.b - clear_sky.r) / 2);
     CHECK(brightness(dim_ground) < brightness(clear_ground));
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("a scene draws its clouds at each quality alike", "[client][scene][gpu]") {
+    const auto device = test_device();
+    hog::jobs::JobSystem jobs{2};
+    auto scene = Scene::create(*device, world(), jobs, calendar(), hog::client::still_format, 1);
+    REQUIRE(scene);
+    CHECK(scene->cloud_quality() == hog::render::CloudQuality::High);
+    const hog::client::Forecast forecast =
+        everywhere({.cloud = 1.0F, .falling = 8.0F, .base = 2'000.0F, .top = 3'000.0F});
+    Shot shot = over_the_islands();
+    shot.forecast = &forecast;
+    const auto high = hog::client::draw_still(*device, *scene, shot, extent);
+    REQUIRE(high);
+    REQUIRE(scene->set_cloud_quality(hog::render::CloudQuality::Low));
+    CHECK(scene->cloud_quality() == hog::render::CloudQuality::Low);
+    const auto low = hog::client::draw_still(*device, *scene, shot, extent);
+    REQUIRE(low);
+    const Rgb high_sky = row(*high, 0);
+    const Rgb low_sky = row(*low, 0);
+    INFO("high " << high_sky.r << ", " << high_sky.g << ", " << high_sky.b);
+    INFO("low " << low_sky.r << ", " << low_sky.g << ", " << low_sky.b);
+    CHECK(std::abs(brightness(low_sky) - brightness(high_sky)) < brightness(high_sky) / 10);
     CHECK(device->validation_errors() == 0);
 }
 

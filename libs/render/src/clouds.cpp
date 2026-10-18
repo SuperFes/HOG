@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <optional>
+#include <string_view>
 #include <utility>
 
 namespace hog::render {
@@ -115,7 +117,66 @@ Mat4 eye_from_clip(const Camera& camera, VkExtent2D extent) noexcept {
     return Mat4{glm::inverse(glm::dmat4{view_projection(camera, aspect_of(extent))})};
 }
 
+Result<Image> make_shadow_map(const Device& device, CloudQuality quality) {
+    const std::uint32_t size = shadow_size(quality);
+    return make_image(device, {.format = Clouds::shadow_format,
+                               .extent = {.width = size, .height = size},
+                               // Read back to be looked at.
+                               .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                                        VK_IMAGE_USAGE_TRANSFER_SRC_BIT});
+}
+
 } // namespace
+
+std::string_view name_of(CloudQuality quality) noexcept {
+    switch (quality) {
+    case CloudQuality::Low:
+        return "low";
+    case CloudQuality::Medium:
+        return "medium";
+    case CloudQuality::High:
+        break;
+    }
+    return "high";
+}
+
+std::optional<CloudQuality> cloud_quality_named(std::string_view name) noexcept {
+    for (const CloudQuality quality :
+         {CloudQuality::Low, CloudQuality::Medium, CloudQuality::High}) {
+        if (name == name_of(quality)) {
+            return quality;
+        }
+    }
+    return std::nullopt;
+}
+
+CloudQuality next(CloudQuality quality) noexcept {
+    switch (quality) {
+    case CloudQuality::Low:
+        return CloudQuality::Medium;
+    case CloudQuality::Medium:
+        return CloudQuality::High;
+    case CloudQuality::High:
+        break;
+    }
+    return CloudQuality::Low;
+}
+
+std::uint32_t march_scale(CloudQuality quality) noexcept {
+    switch (quality) {
+    case CloudQuality::Low:
+        return 4;
+    case CloudQuality::Medium:
+        return 3;
+    case CloudQuality::High:
+        break;
+    }
+    return 2;
+}
+
+std::uint32_t shadow_size(CloudQuality quality) noexcept {
+    return quality == CloudQuality::High ? 512 : 256;
+}
 
 DVec3 within_period(DVec3 moved) noexcept {
     const auto within = [](double metres) {
@@ -170,9 +231,11 @@ double cloud_shadow_reach(double eye_height) noexcept {
     return reach;
 }
 
-Result<Clouds> Clouds::create(Device& device, VkFormat colour_format, jobs::JobSystem& jobs) {
+Result<Clouds> Clouds::create(Device& device, VkFormat colour_format, jobs::JobSystem& jobs,
+                              CloudQuality quality) {
     Clouds clouds;
     clouds.device_ = &device;
+    clouds.quality_ = quality;
     auto resolve = make_compute_pipeline(device, {.spirv = shaders::cloud_resolve,
                                                   .entry = "resolve_main",
                                                   .push_constant_bytes = sizeof(ResolvePush),
@@ -197,12 +260,7 @@ Result<Clouds> Clouds::create(Device& device, VkFormat colour_format, jobs::JobS
         return std::unexpected(std::move(shadow).error());
     }
     clouds.shadow_ = std::move(shadow).value();
-    auto shadow_map =
-        make_image(device, {.format = shadow_format,
-                            .extent = {.width = shadow_size, .height = shadow_size},
-                            // Read back to be looked at.
-                            .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
-                                     VK_IMAGE_USAGE_TRANSFER_SRC_BIT});
+    auto shadow_map = make_shadow_map(device, quality);
     if (!shadow_map) {
         return std::unexpected(std::move(shadow_map).error());
     }
@@ -263,11 +321,29 @@ void Clouds::shadow(VkCommandBuffer commands, const CloudsView& view) const noex
     push_storage_image(commands, shadow_, 14, shadow_map_.view());
     vkCmdPushConstants(commands, shadow_.layout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push),
                        &push);
-    vkCmdDispatch(commands, (shadow_size + 7) / 8, (shadow_size + 7) / 8, 1);
+    const std::uint32_t size = shadow_map_.desc().extent.width;
+    vkCmdDispatch(commands, (size + 7) / 8, (size + 7) / 8, 1);
 }
 
-VkExtent2D Clouds::march_extent(VkExtent2D extent) noexcept {
-    return {.width = (extent.width + 1) / 2, .height = (extent.height + 1) / 2};
+VkExtent2D Clouds::march_extent(VkExtent2D extent, CloudQuality quality) noexcept {
+    const std::uint32_t scale = march_scale(quality);
+    return {.width = (extent.width + scale - 1) / scale,
+            .height = (extent.height + scale - 1) / scale};
+}
+
+Result<> Clouds::set_quality(CloudQuality quality) {
+    if (quality == quality_) {
+        return {};
+    }
+    if (shadow_size(quality) != shadow_size(quality_)) {
+        auto shadow_map = make_shadow_map(*device_, quality);
+        if (!shadow_map) {
+            return std::unexpected(std::move(shadow_map).error());
+        }
+        shadow_map_ = std::move(shadow_map).value();
+    }
+    quality_ = quality;
+    return {};
 }
 
 Result<> Clouds::march(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth,
@@ -298,14 +374,16 @@ Result<> Clouds::march(VkCommandBuffer commands, VkExtent2D extent, VkImageView 
         frames_ = 0;
     }
 
-    const double pixel = 2.0 * std::tan(0.5 * view.camera.vertical_fov) / extent.height;
+    const std::uint32_t scale = march_scale(quality_);
+    // Radians across a marched texel.
+    const double texel = scale * 2.0 * std::tan(0.5 * view.camera.vertical_fov) / extent.height;
     const Mat4 from_clip = eye_from_clip(view.camera, extent);
     const MarchPush push{
         .eye_from_clip = from_clip,
         .up_height = {Vec3{view.bend.up}, static_cast<float>(view.bend.eye_height)},
         .radii = {static_cast<float>(view.bend.radius), static_cast<float>(view.bend.faked),
-                  static_cast<float>(view.weather.faded), static_cast<float>(pixel)},
-        .moved = {Vec3{within_period(view.moved)}, 0.0F},
+                  static_cast<float>(view.weather.faded), static_cast<float>(texel)},
+        .moved = {Vec3{within_period(view.moved)}, static_cast<float>(scale)},
         .bounds = {static_cast<float>(view.weather.lowest_base),
                    static_cast<float>(view.weather.highest_top), static_cast<float>(frames_),
                    view.weather.falling ? static_cast<float>(view.weather.highest_base) : -1.0F}};

@@ -31,9 +31,10 @@ struct Push {
     // xyz up through the eye, w its height above sea level.
     float4 up_height;
     // x the planet's radius, y the faked radius drawing bends it onto, z how far the weather has
-    // faded from the maps before to those after, w the radians across a pixel of the picture.
+    // faded from the maps before to those after, w the radians across a marched texel.
     float4 radii;
-    // xyz the metres the clouds have drifted, in the planet's frame and within their period.
+    // xyz the metres the clouds have drifted, in the planet's frame and within their period; w how
+    // many of the picture's pixels a marched texel spans, across and down.
     float4 moved;
     // Metres above sea level anywhere: x the lowest of the cloud's base, y the highest of its top,
     // and w the highest of its base, or -1 when nothing falls anywhere; z how many frames have been
@@ -298,7 +299,7 @@ float4 rain_between(Ray ray, float start, float end, out float distance) {
     const float centre_to_eye = faked + eye_height;
     const float3 sun = lighting.sun_exposure.xyz;
     const float scale = lighting.sky_scale.w;
-    const float pixel = push.radii.w * 2.0;
+    const float pixel = push.radii.w;
 
     const float span = end - start;
     float3 radiance = float3(0.0);
@@ -364,7 +365,7 @@ float4 cloud_between(Ray ray, float start, float end, out float distance) {
     const float3 sun = lighting.sun_exposure.xyz;
     const float scale = lighting.sky_scale.w;
     const float cos_sun = dot(view, sun);
-    const float pixel = push.radii.w * 2.0;
+    const float pixel = push.radii.w;
     float3 radiance = float3(0.0);
     float seen_through = 1.0;
     float weighed = 0.0;
@@ -492,9 +493,10 @@ void march_main(uint3 id: SV_DispatchThreadID) {
     uint full_width;
     uint full_height;
     depth_image.GetDimensions(full_width, full_height);
+    const uint spans = uint(push.moved.w);
     float furthest = 1.0;
-    for (uint corner = 0; corner < 4; ++corner) {
-        const uint2 pixel = min((id.xy * 2) + uint2(corner & 1, corner >> 1),
+    for (uint under = 0; under < spans * spans; ++under) {
+        const uint2 pixel = min((id.xy * spans) + uint2(under % spans, under / spans),
                                 uint2(full_width - 1, full_height - 1));
         furthest = min(furthest, depth_image.Load(int3(int2(pixel), 0)));
     }

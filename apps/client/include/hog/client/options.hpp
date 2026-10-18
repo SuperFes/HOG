@@ -3,6 +3,7 @@
 #include <hog/core/build_info.hpp>
 #include <hog/core/result.hpp>
 #include <hog/net/simulation.hpp>
+#include <hog/render/cloud_quality.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -45,6 +46,7 @@ struct Options {
     std::optional<std::chrono::milliseconds> quit_after;
     std::optional<std::filesystem::path> capture;
     bool timings = false; // shown over the picture
+    render::CloudQuality clouds = render::CloudQuality::High;
     // A software Vulkan device over a GPU, and the validation layer with its errors failing the
     // run, also for tests. Debug builds validate unless told not to.
     bool software = false;

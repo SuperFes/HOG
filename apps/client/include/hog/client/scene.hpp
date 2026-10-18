@@ -108,6 +108,12 @@ public:
     // read when the last frame was recorded; empty where the GPU can't time.
     [[nodiscard]] std::span<const render::GpuSpan> timings() const noexcept { return timings_; }
 
+    [[nodiscard]] render::CloudQuality cloud_quality() const noexcept { return clouds_.quality(); }
+    // The GPU must have finished with the frames recorded before.
+    Result<> set_cloud_quality(render::CloudQuality quality) {
+        return clouds_.set_quality(quality);
+    }
+
     [[nodiscard]] const atmosphere::Model& air() const noexcept { return model_; }
     [[nodiscard]] const sim::Calendar& calendar() const noexcept { return calendar_; }
 

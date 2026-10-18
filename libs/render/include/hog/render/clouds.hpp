@@ -5,6 +5,7 @@
 #include <hog/jobs/job_system.hpp>
 #include <hog/render/camera.hpp>
 #include <hog/render/cloud_noise.hpp>
+#include <hog/render/cloud_quality.hpp>
 #include <hog/render/pipeline.hpp>
 #include <hog/render/sampler.hpp>
 #include <hog/render/sky.hpp>
@@ -21,6 +22,9 @@ class Device;
 
 // Metres over which the clouds' shapes repeat: a whole number of their noise's volumes.
 inline constexpr double cloud_period = 1'024'000.0;
+
+[[nodiscard]] std::uint32_t march_scale(CloudQuality quality) noexcept;
+[[nodiscard]] std::uint32_t shadow_size(CloudQuality quality) noexcept;
 
 // Where the clouds are seen from and lit by.
 struct CloudsView {
@@ -68,25 +72,32 @@ struct CloudsView {
 [[nodiscard]] double cloud_shadow_reach(double eye_height) noexcept;
 
 // Clouds filling the sky where the weather has them, between the heights it has them at, their
-// shapes from noise drifting with the wind, and what falls from them to the ground; marched at half
-// the picture's size, then drawn over it with any fog lying low. All are lit through the air and
-// seen through it, and hidden by anything drawn nearer. Their shadow's mapped round the eye, for
-// all that's lit under them.
+// shapes from noise drifting with the wind, and what falls from them to the ground; marched at a
+// share of the picture's size, as their quality has it, then drawn over it with any fog lying low.
+// All are lit through the air and seen through it, and hidden by anything drawn nearer. Their
+// shadow's mapped round the eye, for all that's lit under them.
 class Clouds {
 public:
     // The noise is baked on `jobs`.
     [[nodiscard]] static Result<Clouds> create(Device& device, VkFormat colour_format,
-                                               jobs::JobSystem& jobs);
+                                               jobs::JobSystem& jobs,
+                                               CloudQuality quality = CloudQuality::High);
 
     // The size the clouds are marched at, for a picture of `extent`.
-    [[nodiscard]] static VkExtent2D march_extent(VkExtent2D extent) noexcept;
+    [[nodiscard]] static VkExtent2D march_extent(VkExtent2D extent, CloudQuality quality) noexcept;
+    [[nodiscard]] VkExtent2D march_extent(VkExtent2D extent) const noexcept {
+        return march_extent(extent, quality_);
+    }
+    [[nodiscard]] CloudQuality quality() const noexcept { return quality_; }
+    // Remakes what's drawn with that differs between qualities, so nothing the GPU's still using
+    // may hold it.
+    Result<> set_quality(CloudQuality quality);
     // Of the images the clouds are marched into.
     static constexpr VkFormat marched_format = VK_FORMAT_R16G16B16A16_SFLOAT;
     static constexpr VkFormat distances_format = VK_FORMAT_R32_SFLOAT;
     // Metres the eye may move between frames and still have what was marched before blended in.
     static constexpr double furthest_blended = 500.0;
     // Of the map of the cloud's shadow, as cloud_march.slang's shadow_main() leaves it.
-    static constexpr std::uint32_t shadow_size = 512;
     static constexpr VkFormat shadow_format = VK_FORMAT_R16G16B16A16_SFLOAT;
 
     // Records mapping the cloud's shadow round the eye into shadow_image(), a storage image, as
@@ -109,6 +120,7 @@ private:
     Clouds() = default;
 
     const Device* device_ = nullptr;
+    CloudQuality quality_ = CloudQuality::High;
     Pipeline march_;
     Pipeline shadow_;
     Pipeline resolve_;

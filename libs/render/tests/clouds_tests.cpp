@@ -23,6 +23,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <numbers>
 #include <optional>
@@ -31,6 +32,7 @@
 using hog::DVec3;
 using hog::WorldPosition;
 using hog::render::cloud_period;
+using hog::render::CloudQuality;
 using hog::render::Clouds;
 using hog::render::CloudsView;
 using hog::render::testing::test_device;
@@ -108,13 +110,14 @@ using Shadow = std::vector<glm::vec4>;
 // The clouds alone, over black, for each of `scenes` in turn as frames of one picture of `size`;
 // and the last frame's shadow, into `shadow` if given.
 std::vector<Pixels> draw_frames(hog::render::Device& device, const std::vector<Scene>& scenes,
-                                Shadow* shadow = nullptr, VkExtent2D size = extent) {
+                                Shadow* shadow = nullptr, VkExtent2D size = extent,
+                                CloudQuality quality = CloudQuality::High) {
     auto atmosphere = hog::render::Atmosphere::create(device);
     REQUIRE(atmosphere);
     auto sky = hog::render::Sky::create(device, colour_format, depth_format);
     REQUIRE(sky);
     hog::jobs::JobSystem jobs{2};
-    auto clouds = Clouds::create(device, colour_format, jobs);
+    auto clouds = Clouds::create(device, colour_format, jobs, quality);
     REQUIRE(clouds);
     auto maps = hog::render::WeatherMaps::create(device, map_size);
     REQUIRE(maps);
@@ -132,7 +135,7 @@ std::vector<Pixels> draw_frames(hog::render::Device& device, const std::vector<S
     const auto march_image = [&](VkFormat format) {
         auto image = hog::render::make_image(
             device, {.format = format,
-                     .extent = Clouds::march_extent(size),
+                     .extent = Clouds::march_extent(size, quality),
                      .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT});
         REQUIRE(image);
         return std::move(image).value();
@@ -763,7 +766,7 @@ namespace {
 glm::vec4 mean_between(const Shadow& shadow, double from, double to) {
     const DVec3 across = glm::normalize(glm::cross(east, up));
     const DVec3 along = glm::cross(up, across);
-    const std::uint32_t size = Clouds::shadow_size;
+    const auto size = static_cast<std::uint32_t>(std::lround(std::sqrt(shadow.size())));
     const double texel = 64'000.0 / size;
     glm::vec4 sum{0.0F};
     std::uint32_t count = 0;
@@ -790,21 +793,93 @@ const auto northern = [](DVec3 direction) { return direction.y > 0.1 ? overcast 
 TEST_CASE("the cloud's shadow lies beneath it, and over the ground it leaves clear",
           "[render][gpu][atmosphere]") {
     const auto device = test_device();
-    Shadow shadow;
-    static_cast<void>(draw_frames(*device, {{.before = map_of(northern)}}, &shadow));
-    REQUIRE(shadow.size() == std::size_t{Clouds::shadow_size} * Clouds::shadow_size);
-    // Well under the cloud and well clear of it, past where its edge wanders.
-    const glm::vec4 under = mean_between(shadow, 20'000.0, 30'000.0);
-    const glm::vec4 clear_of = mean_between(shadow, -30'000.0, -10'000.0);
-    INFO("under " << under.r << " " << under.g << " " << under.b << " " << under.a);
-    INFO("clear " << clear_of.r << " " << clear_of.g << " " << clear_of.b << " " << clear_of.a);
-    CHECK(under.r < 0.1F);
-    CHECK(under.g < 0.1F);
-    CHECK(under.b > 0.02F);
-    CHECK(under.a > 2'500.0F);
-    CHECK(clear_of.r > 0.95F);
-    CHECK(clear_of.g > 0.95F);
-    CHECK(clear_of.b < 0.01F);
+    for (const CloudQuality quality : {CloudQuality::High, CloudQuality::Low}) {
+        Shadow shadow;
+        static_cast<void>(
+            draw_frames(*device, {{.before = map_of(northern)}}, &shadow, extent, quality));
+        const std::size_t size = hog::render::shadow_size(quality);
+        REQUIRE(shadow.size() == size * size);
+        // Well under the cloud and well clear of it, past where its edge wanders.
+        const glm::vec4 under = mean_between(shadow, 20'000.0, 30'000.0);
+        const glm::vec4 clear_of = mean_between(shadow, -30'000.0, -10'000.0);
+        INFO("mapped " << size);
+        INFO("under " << under.r << " " << under.g << " " << under.b << " " << under.a);
+        INFO("clear " << clear_of.r << " " << clear_of.g << " " << clear_of.b << " " << clear_of.a);
+        CHECK(under.r < 0.1F);
+        CHECK(under.g < 0.1F);
+        CHECK(under.b > 0.02F);
+        CHECK(under.a > 2'500.0F);
+        CHECK(clear_of.r > 0.95F);
+        CHECK(clear_of.g > 0.95F);
+        CHECK(clear_of.b < 0.01F);
+    }
+}
+
+TEST_CASE("the lower the clouds' quality, the coarser they're marched and their shadow mapped",
+          "[render]") {
+    constexpr VkExtent2D picture{.width = 1'601, .height = 900};
+    const auto marched = [&](CloudQuality quality) {
+        const VkExtent2D size = Clouds::march_extent(picture, quality);
+        return std::array{size.width, size.height};
+    };
+    CHECK(marched(CloudQuality::High) == std::array<std::uint32_t, 2>{801, 450});
+    CHECK(marched(CloudQuality::Medium) == std::array<std::uint32_t, 2>{534, 300});
+    CHECK(marched(CloudQuality::Low) == std::array<std::uint32_t, 2>{401, 225});
+    CHECK(hog::render::shadow_size(CloudQuality::High) == 512);
+    CHECK(hog::render::shadow_size(CloudQuality::Medium) == 256);
+    CHECK(hog::render::shadow_size(CloudQuality::Low) == 256);
+}
+
+TEST_CASE("the clouds' qualities are named, and go round from coarsest to finest", "[render]") {
+    using hog::render::cloud_quality_named;
+    using hog::render::name_of;
+    using hog::render::next;
+    for (const CloudQuality quality :
+         {CloudQuality::Low, CloudQuality::Medium, CloudQuality::High}) {
+        CHECK(cloud_quality_named(name_of(quality)) == quality);
+    }
+    CHECK_FALSE(cloud_quality_named("ultra"));
+    CHECK(next(CloudQuality::Low) == CloudQuality::Medium);
+    CHECK(next(CloudQuality::Medium) == CloudQuality::High);
+    CHECK(next(CloudQuality::High) == CloudQuality::Low);
+}
+
+TEST_CASE("clouds change quality, remaking their shadow's map to suit",
+          "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    hog::jobs::JobSystem jobs{2};
+    auto clouds = Clouds::create(*device, colour_format, jobs);
+    REQUIRE(clouds);
+    CHECK(clouds->quality() == CloudQuality::High);
+    CHECK(clouds->shadow_image().desc().extent.width == 512);
+    REQUIRE(clouds->set_quality(CloudQuality::Low));
+    CHECK(clouds->quality() == CloudQuality::Low);
+    CHECK(clouds->shadow_image().desc().extent.width == 256);
+    CHECK(clouds->march_extent(extent).width ==
+          Clouds::march_extent(extent, CloudQuality::Low).width);
+    REQUIRE(clouds->set_quality(CloudQuality::High));
+    CHECK(clouds->shadow_image().desc().extent.width == 512);
+}
+
+TEST_CASE("at lower quality, the clouds are drawn alike, only coarser",
+          "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    const std::vector<Scene> settling(8, broken_overhead());
+    constexpr VkExtent2D size{.width = 384, .height = 216};
+    const auto sum = [](const Pixels& pixels) {
+        long all = 0;
+        for (const std::uint8_t channel : pixels) {
+            all += channel;
+        }
+        return all;
+    };
+    const long high = sum(draw_frames(*device, settling, nullptr, size).back());
+    for (const CloudQuality quality : {CloudQuality::Medium, CloudQuality::Low}) {
+        const long lower = sum(draw_frames(*device, settling, nullptr, size, quality).back());
+        INFO("high " << high << ", lower " << lower);
+        CHECK(high > 0);
+        CHECK(std::abs(lower - high) < high / 10);
+    }
 }
 
 TEST_CASE("fog lies darker in the cloud's shadow", "[render][gpu][atmosphere]") {

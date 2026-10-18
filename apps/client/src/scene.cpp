@@ -343,11 +343,11 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     // The clouds and glare read what's drawn in front of them from depth, so they're drawn
     // without it.
     if (cloudy) {
-        const VkExtent2D half = render::Clouds::march_extent(frame.extent);
+        const VkExtent2D marched_extent = clouds_.march_extent(frame.extent);
         const auto marched_image = [&](VkFormat format) {
             return graph.transient(
                 {.format = format,
-                 .extent = half,
+                 .extent = marched_extent,
                  .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                  .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
                  .layers = 1,

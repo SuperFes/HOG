@@ -19,6 +19,7 @@
 #include <hog/planet/projection.hpp>
 #include <hog/planet/world.hpp>
 #include <hog/render/billboard.hpp>
+#include <hog/render/cloud_quality.hpp>
 #include <hog/render/device.hpp>
 #include <hog/render/memory.hpp>
 #include <hog/render/presenter.hpp>
@@ -86,7 +87,8 @@ struct Controls {
     double speed = client::FlySettings{}.speed;
     double behind = ::behind; // metres, while walking
     bool walking = false;
-    bool timings = false; // shown over the picture
+    bool timings = false;     // shown over the picture
+    bool next_clouds = false; // asked to draw the clouds at the next quality
     bool quit = false;
     // Doublings of the planet's time asked for, halvings if negative.
     int faster_time = 0;
@@ -104,6 +106,8 @@ void handle(const SDL_Event& event, SDL_Window* window, Controls& controls) {
             controls.walking = !controls.walking;
         } else if (event.key.key == SDLK_F3 && !event.key.repeat) {
             controls.timings = !controls.timings;
+        } else if (event.key.key == SDLK_F4 && !event.key.repeat) {
+            controls.next_clouds = true;
         } else if (event.key.key == SDLK_RIGHTBRACKET) {
             ++controls.faster_time;
         } else if (event.key.key == SDLK_LEFTBRACKET) {
@@ -198,7 +202,7 @@ Result<void> save_capture(const render::Device& device, const render::Buffer& bu
 }
 
 // How long frames take, in a corner over the picture.
-void show_timings(const client::FrameTimes& times) {
+void show_timings(const client::FrameTimes& times, render::CloudQuality clouds) {
     constexpr float margin = 10.0F;
     constexpr ImVec2 graph{240.0F, 48.0F};
     // Milliseconds, as at 30 fps, or higher to hold the worst frame.
@@ -236,6 +240,7 @@ void show_timings(const client::FrameTimes& times) {
             }
             ImGui::EndTable();
         }
+        ImGui::TextUnformatted(std::format("clouds {} (F4)", render::name_of(clouds)).c_str());
     }
     ImGui::End();
 }
@@ -295,6 +300,7 @@ void show_tags(std::span<const client::Tag> tags) {
 struct Overlay {
     const client::FrameTimes* times = nullptr;
     bool timings = false;
+    render::CloudQuality clouds = render::CloudQuality::High;
     // None when not connecting to a server.
     const client::Session* session = nullptr;
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
@@ -326,7 +332,7 @@ Result<bool> draw(client::Scene& scene, const client::Shot& shot, const render::
     const ImVec2 size = ImGui::GetIO().DisplaySize;
     show_tags(client::tags(overlay.others, shot.camera, shot.bend, {size.x, size.y}));
     if (overlay.timings) {
-        show_timings(*overlay.times);
+        show_timings(*overlay.times, overlay.clouds);
         if (overlay.session != nullptr) {
             show_network(client::summarise(*overlay.session, overlay.eye, overlay.now),
                          overlay.weather);
@@ -383,6 +389,7 @@ private:
 
 const log::Category connection_log{"connection"};
 const log::Category player_log{"player"};
+const log::Category clouds_log{"clouds"};
 
 // The connection to a server, if there's one to connect to, telling what becomes of it: after
 // logging in for a connect token, when asked to.
@@ -578,6 +585,20 @@ render::Camera move(const Controls& controls, std::optional<client::Player>& pla
                                 client::vertical_fov);
 }
 
+// The clouds at the next quality, if asked for; as they were if it can't be made.
+void change_clouds(Controls& controls, client::Scene& scene, const render::Device& device) {
+    if (!std::exchange(controls.next_clouds, false)) {
+        return;
+    }
+    // What changing quality remakes mustn't be in a frame the GPU's still drawing.
+    vkDeviceWaitIdle(device.handle());
+    const render::CloudQuality quality = render::next(scene.cloud_quality());
+    if (auto set = scene.set_cloud_quality(quality); !set) {
+        log::warn(clouds_log, "can't draw the clouds at {} quality: {}", render::name_of(quality),
+                  set.error());
+    }
+}
+
 // Flies or walks over the world until the window closes or it's time to quit.
 Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet::World& world,
                  client::Flight flight, Connection& connection, const client::Options& options,
@@ -600,6 +621,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
         while (SDL_PollEvent(&event)) {
             handle(event, window, controls);
         }
+        change_clouds(controls, scene, device);
         const MonotonicClock::time_point now = MonotonicClock::now();
         const double passed = std::chrono::duration<double>(now - last).count();
         const double seconds = std::min(passed, longest_frame);
@@ -653,6 +675,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
                                 .now = now};
         const Overlay overlay{.times = &times,
                               .timings = controls.timings,
+                              .clouds = scene.cloud_quality(),
                               .session = session,
                               .others = others,
                               .eye = camera.eye,
@@ -722,6 +745,10 @@ int show(const client::Options& options, const planet::PlanetConfig& planet,
                                        companion(options, device, presenter.swapchain().format()));
     if (!scene) {
         std::cerr << std::format("hog-client: {}\n", scene.error());
+        return EXIT_FAILURE;
+    }
+    if (auto set = scene->set_cloud_quality(options.clouds); !set) {
+        std::cerr << std::format("hog-client: {}\n", set.error());
         return EXIT_FAILURE;
     }
     const Result<void> flown =

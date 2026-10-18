@@ -136,8 +136,8 @@ float4 fragment_main(Layer layer) : SV_Target {
         reach = min(reach, length(drawn.xyz / drawn.w));
     }
 
-    // The clouds marched at half the picture's size, blended from the four nearest, but those of
-    // them beyond what's drawn here.
+    // The clouds marched at a share of the picture's size, blended from the four nearest, but those
+    // of them beyond what's drawn here.
     uint width;
     uint height;
     marched.GetDimensions(width, height);

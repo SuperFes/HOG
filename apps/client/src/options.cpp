@@ -69,6 +69,16 @@ std::optional<double> time_of_day(std::string_view text) {
     return ((*hours * 60.0) + *minutes) / (24.0 * 60.0);
 }
 
+Result<void> read_clouds(Options& options, std::string_view value) {
+    const std::optional<render::CloudQuality> quality = render::cloud_quality_named(value);
+    if (!quality) {
+        return make_error(ErrorCode::InvalidArgument,
+                          std::format("--clouds takes low, medium or high, not {}", value));
+    }
+    options.clouds = *quality;
+    return {};
+}
+
 // Reads an option that takes a value.
 Result<void> read_option(Options& options, std::string_view option, std::string_view value) {
     if (option == "--planet") {
@@ -112,6 +122,8 @@ Result<void> read_option(Options& options, std::string_view option, std::string_
                 std::format("--threads must be from 0 to {}, not {}", most_threads, value));
         }
         options.threads = static_cast<std::uint32_t>(*threads);
+    } else if (option == "--clouds") {
+        return read_clouds(options, value);
     } else if (option == "--quit-after") {
         const std::optional<int> seconds = integer(value);
         if (!seconds || *seconds < 0) {
@@ -166,6 +178,8 @@ options:
   --quit-after S         quit after this many seconds
   --capture PATH         save the last frame drawn as a PNG, on quitting
   --timings              show how long frames take from the start
+  --clouds QUALITY       draw the clouds at low, medium or high quality, for what
+                         the GPU can afford (default high)
   --software             draw with a software Vulkan device, such as lavapipe
   --validate             check Vulkan use with its validation layer, failing on errors;
                          on by default in debug builds
@@ -193,6 +207,7 @@ time:
   ] [                    run the planet's time faster, slower
 
   F3                     show or hide how long frames take
+  F4                     draw the clouds at the next quality
 )";
 }
 
