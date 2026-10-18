@@ -258,7 +258,7 @@ This phase covers the planet in procedurally generated plant life, grown from pe
 
 - [ ] Plant grammar: a species is a rule set (trunk habit, branch angles and counts per level, crown shape, leaf, needle or frond) that grows an individual deterministically from a seed
 - [ ] First tree set, each with its own rules: a pine analogue (whorled branches, conical crown), an oak analogue (spreading, gnarled), a maple analogue, a palm analogue (bare trunk, frond crown)
-- [ ] Ground cover: tall and short grasses, reeds by water, bushes and shrubs as cheap grammar cases
+- [x] Ground cover: tall and short grasses with far swaths, cattail reeds at waterlines, bushes in four silhouettes (floofy blobs, spiky rosettes, twiggy skeletons, low mats) mixed by biome
 - [ ] Age from the same seed: seedlings, saplings, mature and ancient trees from one rule set
 - [ ] Condition states: dead standing wood, half-fallen and felled trunks, fire-scorched survivors, insect- and animal-worn damage simulated without the animals
 - [ ] Golden tests: the same seed grows the same plant, bit for bit, on every platform
@@ -266,7 +266,8 @@ This phase covers the planet in procedurally generated plant life, grown from pe
 **Placement**
 
 - [ ] Placement from the sim: biome, forest biomass, moisture and the water table decide what grows where and how densely
-- [ ] Deterministic per-cell scatter, so every client grows the same world with nothing sent over the network
+- [x] Deterministic per-cell scatter, so every client grows the same world with nothing sent over the network (grass by patch seed, bushes keyed to a fixed lattice that holds across terrain levels)
+- [ ] Placement reads the change store over the seed, so planted and cleared ground diverges — the hook farming (Phase 7) builds on
 - [ ] Succession on burned or emptied cells from the forest sim's history: pioneer grass, then shrubs, then young forest among the burned trunks
 - [ ] A burned-in-the-past, regrowing forest somewhere on the starting islands to prove it
 
@@ -292,7 +293,7 @@ Borrowed from real species to make forests feel grown rather than scattered. A m
 
 **Wind and weather**
 
-- [ ] Plants react to the weather grid's wind in the shader: still air sits still, light wind sways gently, storms hold plants bent in the wind's direction
+- [x] Plants react to the weather grid's wind in the shader: still air sits still, light wind sways gently, storms hold plants bent in the wind's direction (grass bends, reeds stand stiff, bushes rustle; trees to follow)
 - [x] Gusts travel as visible waves across grass fields
 - [ ] High wind breaks branches and fells weak trees as sim events, so everyone sees the same deadfall
 
@@ -378,6 +379,7 @@ These tracks can start once Phase 4 works and can run side by side; four people 
 - [ ] Overpopulation that leads to cull quests; empty niches that refill or stay empty
 - [ ] Apex succession (the dragon example)
 - [ ] Consequences of wiping out wildlife, driven by ecology events: bounties, wardens, hunting bans, scarce-goods prices
+- [ ] Planting and farming by players: sow, tend and harvest through the change store, growth riding the same climate and season rules as wild plants
 - [ ] Quarries and mines as voxel volumes; finite deposits
 - [ ] Building by players and NPCs, from tents and lean-tos to castles, walls and trails: posts sunk in the ground, foundations on soil or bedrock, and wind and snow that topple weak builds
 - [ ] Structural integrity under Earth gravity for tunnels, buildings and bridges: span, load and material decide what holds; supports, cave-ins and sinkholes
