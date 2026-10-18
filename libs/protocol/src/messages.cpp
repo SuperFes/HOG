@@ -27,6 +27,7 @@ enum class Kind : std::uint16_t {
     Snapshot = 6,
     Corrected = 7,
     Weather = 8,
+    Said = 9,
 }; // NOLINT(performance-enum-size)
 
 // Which of an entity's changes follow its id in a snapshot.
@@ -203,6 +204,14 @@ private:
 void write_sized(ByteWriter& out, std::span<const std::byte> bytes) {
     out.write(static_cast<std::uint16_t>(bytes.size()));
     out.write_bytes(bytes);
+}
+
+// Chat is shown to other players, so it carries no control characters to trouble a terminal.
+[[nodiscard]] bool printable(std::span<const std::byte> text) noexcept {
+    return std::ranges::none_of(text, [](std::byte byte) {
+        const auto value = std::to_integer<std::uint8_t>(byte);
+        return value < 0x20U || value == 0x7FU;
+    });
 }
 
 [[nodiscard]] Result<Message> finished(const ByteReader& in, Message message) {
@@ -393,6 +402,30 @@ void write_snapshot(ByteWriter& out, const Snapshot& snapshot) {
     }
 }
 
+[[nodiscard]] Result<Message> read_said(ByteReader& in) {
+    const auto from = read_sized(in, most_name, "chat's speaker");
+    if (!from) {
+        return std::unexpected(from.error());
+    }
+    const auto text = read_sized(in, most_said, "a line of chat");
+    if (!text) {
+        return std::unexpected(text.error());
+    }
+    if (!printable(*from) || !printable(*text)) {
+        return make_error(ErrorCode::Parse, "chat with control characters");
+    }
+    Said said;
+    said.from.reserve(from->size());
+    for (const std::byte byte : *from) {
+        said.from.push_back(static_cast<char>(byte));
+    }
+    said.text.reserve(text->size());
+    for (const std::byte byte : *text) {
+        said.text.push_back(static_cast<char>(byte));
+    }
+    return finished(in, std::move(said));
+}
+
 [[nodiscard]] Result<Message> read_weather(ByteReader& in) {
     const auto level = read<std::uint8_t>(in, "weather");
     const auto fade = read<std::uint32_t>(in, "weather");
@@ -480,6 +513,14 @@ std::vector<std::byte> encode(const Message& message) {
                 out.write(static_cast<std::uint16_t>(Kind::Corrected));
                 out.write(body.count);
                 write_position(out, body.at);
+            } else if constexpr (std::is_same_v<Body, Said>) {
+                out.write(static_cast<std::uint16_t>(Kind::Said));
+                const std::string_view from{body.from};
+                write_sized(out, std::as_bytes(
+                                     std::span{from.substr(0, std::min(from.size(), most_name))}));
+                const std::string_view text{body.text};
+                write_sized(out, std::as_bytes(
+                                     std::span{text.substr(0, std::min(text.size(), most_said))}));
             } else {
                 static_assert(std::is_same_v<Body, Refused>);
                 out.write(static_cast<std::uint16_t>(Kind::Refused));
@@ -540,6 +581,8 @@ Result<Message> decode(std::span<const std::byte> bytes) {
         return read_snapshot(in);
     case Kind::Weather:
         return read_weather(in);
+    case Kind::Said:
+        return read_said(in);
     }
     return make_error(ErrorCode::Unsupported, std::format("unknown message kind {}", *kind));
 }

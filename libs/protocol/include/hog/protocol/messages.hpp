@@ -17,13 +17,15 @@
 namespace hog::protocol {
 
 // Raised whenever any message changes; the two sides must speak the same one.
-inline constexpr std::uint32_t version = 5;
+inline constexpr std::uint32_t version = 6;
 // The longest connect token a client may present; more is a broken or hostile client.
 inline constexpr std::size_t most_token = 1'024;
 // The longest line of text a refusal carries.
 inline constexpr std::size_t most_detail = 512;
 // The longest name an entity is sent with.
 inline constexpr std::size_t most_name = 32;
+// The longest line of chat a player says.
+inline constexpr std::size_t most_said = 256;
 // The finest cube-sphere level the weather is sent at, which keeps it to tens of kilobytes.
 inline constexpr std::uint8_t most_weather_level = 5;
 // Real time between the snapshots a client is sent, whatever the server's tick rate.
@@ -157,6 +159,16 @@ struct Weather {
     friend bool operator==(const Weather&, const Weather&) = default;
 };
 
+// A line of chat. A client says it with `from` empty; the server sends it on to every player,
+// the speaker included so all read the same order, with the speaker's name it holds itself
+// rather than any the client claims. Neither part carries control characters.
+struct Said {
+    std::string from; // at most most_name bytes
+    std::string text; // at most most_said bytes
+
+    friend bool operator==(const Said&, const Said&) = default;
+};
+
 // How many cells the weather at `level` has.
 [[nodiscard]] constexpr std::size_t weather_cells(std::uint8_t level) noexcept {
     return std::size_t{6} << (2U * level);
@@ -165,11 +177,12 @@ struct Weather {
 // As a cell's weather reads back once sent.
 [[nodiscard]] CellWeather as_sent(const CellWeather& cell) noexcept;
 
-using Message = std::variant<Hello, Welcome, Refused, Moved, Ack, Snapshot, Corrected, Weather>;
+using Message =
+    std::variant<Hello, Welcome, Refused, Moved, Ack, Snapshot, Corrected, Weather, Said>;
 
 [[nodiscard]] std::vector<std::byte> encode(const Message& message);
 // Fails on an unknown kind, a message cut short or with bytes left over, one too long, a snapshot
-// out of order, or weather too fine or with too few or many cells.
+// out of order, weather too fine or with too few or many cells, or chat with control characters.
 [[nodiscard]] Result<Message> decode(std::span<const std::byte> bytes);
 
 // A refusal as a person reads it, on a client speaking `own` version.

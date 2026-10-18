@@ -1,5 +1,7 @@
 #include <hog/client/options.hpp>
 
+#include <algorithm>
+#include <array>
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
@@ -137,6 +139,28 @@ Result<void> read_option(Options& options, std::string_view option, std::string_
     return {};
 }
 
+// Options that stand alone, and what each sets.
+struct Flag {
+    std::string_view name;
+    void (*set)(Options&);
+};
+
+constexpr std::array flags{
+    Flag{.name = "-h", .set = [](Options& options) { options.help = true; }},
+    Flag{.name = "--help", .set = [](Options& options) { options.help = true; }},
+    Flag{.name = "--alone", .set = [](Options& options) { options.companion.reset(); }},
+    Flag{.name = "--timings", .set = [](Options& options) { options.timings = true; }},
+    Flag{.name = "--chat-filter", .set = [](Options& options) { options.chat_filter = true; }},
+    Flag{.name = "--no-chat-filter", .set = [](Options& options) { options.chat_filter = false; }},
+    Flag{.name = "--software", .set = [](Options& options) { options.software = true; }},
+    Flag{.name = "--validate", .set = [](Options& options) { options.validate = true; }},
+    Flag{.name = "--no-validate", .set = [](Options& options) { options.validate = false; }},
+    Flag{.name = "--reload-shaders",
+         .set = [](Options& options) { options.reload_shaders = true; }},
+    Flag{.name = "--no-reload-shaders",
+         .set = [](Options& options) { options.reload_shaders = false; }},
+};
+
 // Options that only make sense with others.
 Result<void> check_together(const Options& options) {
     if (options.login && (!options.name || !options.connect)) {
@@ -178,6 +202,8 @@ options:
   --quit-after S         quit after this many seconds
   --capture PATH         save the last frame drawn as a PNG, on quitting
   --timings              show how long frames take from the start
+  --chat-filter          show chat with profanity hidden; on by default
+  --no-chat-filter       show chat as it was said
   --clouds QUALITY       draw the clouds at low, medium or high quality, for what
                          the GPU can afford (default high)
   --software             draw with a software Vulkan device, such as lavapipe
@@ -203,6 +229,9 @@ walking:
   right mouse button     hold to look around
   F                      fly
 
+chat, when connected:
+  Enter                  say something: Enter again sends it, Esc puts it away
+
 time:
   ] [                    run the planet's time faster, slower
 
@@ -215,36 +244,9 @@ Result<Options> parse_options(std::span<const std::string_view> arguments) {
     Options options;
     for (std::size_t i = 0; i < arguments.size(); ++i) {
         const std::string_view argument = arguments[i];
-        if (argument == "-h" || argument == "--help") {
-            options.help = true;
-            continue;
-        }
-        if (argument == "--alone") {
-            options.companion.reset();
-            continue;
-        }
-        if (argument == "--timings") {
-            options.timings = true;
-            continue;
-        }
-        if (argument == "--software") {
-            options.software = true;
-            continue;
-        }
-        if (argument == "--validate") {
-            options.validate = true;
-            continue;
-        }
-        if (argument == "--no-validate") {
-            options.validate = false;
-            continue;
-        }
-        if (argument == "--reload-shaders") {
-            options.reload_shaders = true;
-            continue;
-        }
-        if (argument == "--no-reload-shaders") {
-            options.reload_shaders = false;
+        if (const auto* const flag = std::ranges::find(flags, argument, &Flag::name);
+            flag != flags.end()) {
+            flag->set(options);
             continue;
         }
         if (i + 1 == arguments.size()) {

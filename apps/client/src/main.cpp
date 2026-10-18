@@ -1,3 +1,4 @@
+#include <hog/client/chat.hpp>
 #include <hog/client/daylight.hpp>
 #include <hog/client/flight.hpp>
 #include <hog/client/forecast.hpp>
@@ -37,6 +38,7 @@
 #include <imgui_impl_vulkan.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -89,10 +91,37 @@ struct Controls {
     bool walking = false;
     bool timings = false;     // shown over the picture
     bool next_clouds = false; // asked to draw the clouds at the next quality
+    bool may_chat = false;    // connected to a server to chat on
+    bool chatting = false;    // typing into the chat box, which takes the keys
     bool quit = false;
     // Doublings of the planet's time asked for, halvings if negative.
     int faster_time = 0;
 };
+
+// A key pressed. While typing chat only Esc does anything here; the rest go to the chat box.
+void press(const SDL_KeyboardEvent& key, Controls& controls) {
+    if (controls.chatting) {
+        if (key.key == SDLK_ESCAPE) {
+            controls.chatting = false;
+        }
+        return;
+    }
+    if (key.key == SDLK_ESCAPE) {
+        controls.quit = true;
+    } else if (key.key == SDLK_RETURN && !key.repeat && controls.may_chat) {
+        controls.chatting = true;
+    } else if (key.key == SDLK_F && !key.repeat) {
+        controls.walking = !controls.walking;
+    } else if (key.key == SDLK_F3 && !key.repeat) {
+        controls.timings = !controls.timings;
+    } else if (key.key == SDLK_F4 && !key.repeat) {
+        controls.next_clouds = true;
+    } else if (key.key == SDLK_RIGHTBRACKET) {
+        ++controls.faster_time;
+    } else if (key.key == SDLK_LEFTBRACKET) {
+        --controls.faster_time;
+    }
+}
 
 void handle(const SDL_Event& event, SDL_Window* window, Controls& controls) {
     switch (event.type) {
@@ -100,19 +129,7 @@ void handle(const SDL_Event& event, SDL_Window* window, Controls& controls) {
         controls.quit = true;
         break;
     case SDL_EVENT_KEY_DOWN:
-        if (event.key.key == SDLK_ESCAPE) {
-            controls.quit = true;
-        } else if (event.key.key == SDLK_F && !event.key.repeat) {
-            controls.walking = !controls.walking;
-        } else if (event.key.key == SDLK_F3 && !event.key.repeat) {
-            controls.timings = !controls.timings;
-        } else if (event.key.key == SDLK_F4 && !event.key.repeat) {
-            controls.next_clouds = true;
-        } else if (event.key.key == SDLK_RIGHTBRACKET) {
-            ++controls.faster_time;
-        } else if (event.key.key == SDLK_LEFTBRACKET) {
-            --controls.faster_time;
-        }
+        press(event.key, controls);
         break;
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
     case SDL_EVENT_MOUSE_BUTTON_UP:
@@ -142,8 +159,11 @@ void handle(const SDL_Event& event, SDL_Window* window, Controls& controls) {
     }
 }
 
-// The keys held down, as movement.
-DVec3 movement() {
+// The keys held down, as movement; none while they're typing chat.
+DVec3 movement(const Controls& controls) {
+    if (controls.chatting) {
+        return {};
+    }
     int count = 0;
     const std::span held{SDL_GetKeyboardState(&count), static_cast<std::size_t>(count)};
     const auto axis = [&](SDL_Scancode more, SDL_Scancode less) {
@@ -280,6 +300,57 @@ void show_network(const client::SessionSummary& summary, const std::string& weat
     ImGui::End();
 }
 
+// The chat box: the lines heard, and the one being typed while it's open.
+struct ChatBox {
+    client::ChatLog log;
+    std::array<char, protocol::most_said + 1> typed{};
+    std::optional<std::string> said; // finished with Enter this frame
+};
+
+// The chat over the picture, bottom left: what was said lately and, while `chatting`, the line
+// being typed, sent with Enter. `opened` skips the very Enter that opened the box.
+void show_chat(ChatBox& chat, bool& chatting, bool opened, MonotonicClock::time_point now) {
+    constexpr float margin = 10.0F;
+    constexpr float width = 360.0F;
+    const std::span<const client::ChatLog::Line> all = chat.log.lines();
+    const std::span<const client::ChatLog::Line> lines =
+        chatting ? all.last(std::min(all.size(), client::ChatLog::most_fresh))
+                 : chat.log.fresh(now);
+    if (lines.empty() && !chatting) {
+        return;
+    }
+    ImGui::SetNextWindowPos({margin, ImGui::GetIO().DisplaySize.y - margin}, ImGuiCond_Always,
+                            {0.0F, 1.0F});
+    ImGui::SetNextWindowBgAlpha(0.6F);
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                             ImGuiWindowFlags_NoSavedSettings |
+                             ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoMove;
+    if (!chatting) {
+        flags |= ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav;
+    }
+    if (ImGui::Begin("chat", nullptr, flags)) {
+        for (const client::ChatLog::Line& line : lines) {
+            ImGui::PushTextWrapPos(width);
+            ImGui::TextUnformatted(std::format("{}: {}", line.from, line.text).c_str());
+            ImGui::PopTextWrapPos();
+        }
+        if (chatting) {
+            ImGui::SetNextItemWidth(width);
+            if (!ImGui::IsAnyItemActive()) {
+                ImGui::SetKeyboardFocusHere();
+            }
+            if (ImGui::InputText("##say", chat.typed.data(), chat.typed.size(),
+                                 ImGuiInputTextFlags_EnterReturnsTrue) &&
+                !opened) {
+                chat.said = std::string{chat.typed.data()};
+                chat.typed[0] = '\0';
+                chatting = false;
+            }
+        }
+    }
+    ImGui::End();
+}
+
 // Others' names over them, darkened behind so they read against the sky.
 void show_tags(std::span<const client::Tag> tags) {
     constexpr ImU32 shadow = IM_COL32(0, 0, 0, 160);
@@ -308,6 +379,10 @@ struct Overlay {
     WorldPosition eye;
     MonotonicClock::time_point now;
     std::string weather; // over the eye, once known
+    // None when not connecting to a server.
+    ChatBox* chat = nullptr;
+    bool* chatting = nullptr;
+    bool chat_opened = false; // this frame
 };
 
 // Draws a frame of the shot with the overlay over it, saving it to `capture` if given; false when
@@ -331,6 +406,9 @@ Result<bool> draw(client::Scene& scene, const client::Shot& shot, const render::
     ImGui::NewFrame();
     const ImVec2 size = ImGui::GetIO().DisplaySize;
     show_tags(client::tags(overlay.others, shot.camera, shot.bend, {size.x, size.y}));
+    if (overlay.chat != nullptr) {
+        show_chat(*overlay.chat, *overlay.chatting, overlay.chat_opened, overlay.now);
+    }
     if (overlay.timings) {
         show_timings(*overlay.times, overlay.clouds);
         if (overlay.session != nullptr) {
@@ -443,6 +521,18 @@ public:
         return session_ ? session_->take_weather() : std::nullopt;
     }
 
+    // Says `text` to everyone on the server, once in.
+    void say(std::string_view text) {
+        if (session_) {
+            session_->say(text);
+        }
+    }
+
+    // The chat heard since last asked.
+    [[nodiscard]] std::vector<client::ChatLine> take_chat() {
+        return session_ ? session_->take_chat() : std::vector<client::ChatLine>{};
+    }
+
     // None until connecting to the server.
     [[nodiscard]] const client::Session* session() const noexcept {
         return session_ ? &*session_ : nullptr;
@@ -531,9 +621,10 @@ private:
 };
 
 // Sends the server where the player's feet are, puts them back where it says, and takes the
-// weather it sends.
+// weather and chat it sends, chat censored unless the player turned that off.
 void report(Connection& connection, std::optional<client::Player>& player,
-            client::Forecast& forecast, MonotonicClock::time_point now) {
+            client::Forecast& forecast, ChatBox& chat, bool filter,
+            MonotonicClock::time_point now) {
     connection.look(player ? std::optional{player->feet()} : std::nullopt, now);
     if (const auto back = connection.take_correction(); back && player) {
         player->place(*back);
@@ -541,6 +632,27 @@ void report(Connection& connection, std::optional<client::Player>& player,
     if (const auto weather = connection.take_weather()) {
         forecast.receive(*weather, now);
     }
+    for (client::ChatLine& line : connection.take_chat()) {
+        chat.log.add(filter ? client::censored(line.from) : std::move(line.from),
+                     filter ? client::censored(line.text) : std::move(line.text), now);
+    }
+}
+
+// While typing chat the keys go to its box, not the game; back when it closes. Whether the box
+// opened just now, so the Enter that opened it isn't taken as sending.
+[[nodiscard]] bool route_keys(SDL_Window* window, bool chatting, bool& routed_to_chat) {
+    if (chatting == routed_to_chat) {
+        return false;
+    }
+    routed_to_chat = chatting;
+    if (chatting) {
+        ImGui::GetIO().ConfigFlags &= ~ImGuiConfigFlags_NoKeyboard;
+        SDL_StartTextInput(window);
+    } else {
+        ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NoKeyboard;
+        SDL_StopTextInput(window);
+    }
+    return chatting;
 }
 
 // Starts or stops playing the character as asked: stood on the ground under the eye, or flying
@@ -569,20 +681,26 @@ render::Camera move(const Controls& controls, std::optional<client::Player>& pla
                     client::Flight& flight, const planet::World& world, double seconds) {
     const bool faster = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
     if (!player) {
-        flight =
-            client::fly(flight, {.move = movement(), .look = controls.look, .seconds = seconds},
-                        world.geology().planet_radius(), client::ground_under(world, flight.eye),
-                        {.speed = controls.speed * (faster ? fast : 1.0)});
+        flight = client::fly(
+            flight, {.move = movement(controls), .look = controls.look, .seconds = seconds},
+            world.geology().planet_radius(), client::ground_under(world, flight.eye),
+            {.speed = controls.speed * (faster ? fast : 1.0)});
         return client::flight_camera(flight, client::vertical_fov);
     }
     flight = client::looked(flight, controls.look);
-    if (auto played = player->play(client::stride(flight, movement(), faster), seconds); !played) {
+    if (auto played = player->play(client::stride(flight, movement(controls), faster), seconds);
+        !played) {
         log::warn(player_log, "can't keep the ground: {}", played.error());
     }
     flight = client::carried_to(flight, player->shoulder());
     const DVec3 back = -client::flight_camera(flight, client::vertical_fov).forward;
     return client::third_person(flight, player->room(flight.eye, back, controls.behind),
                                 client::vertical_fov);
+}
+
+// Sends what the chat box finished, if anything; an empty line says nothing.
+void say_chat(ChatBox& chat, Connection& connection) {
+    connection.say(std::exchange(chat.said, std::nullopt).value_or(std::string{}));
 }
 
 // The clouds at the next quality, if asked for; as they were if it can't be made.
@@ -613,14 +731,19 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
     ShaderReloader shaders{options.reload_shaders};
     std::optional<client::Player> player;
     client::Forecast forecast;
+    ChatBox chat;
+    bool routed_to_chat = false;
     render::Camera camera = client::flight_camera(flight, client::vertical_fov);
     while (!controls.quit) {
         controls.look = {};
         controls.faster_time = 0;
+        controls.may_chat = connection.session() != nullptr;
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
+            ImGui_ImplSDL3_ProcessEvent(&event);
             handle(event, window, controls);
         }
+        const bool chat_opened = route_keys(window, controls.chatting, routed_to_chat);
         change_clouds(controls, scene, device);
         const MonotonicClock::time_point now = MonotonicClock::now();
         const double passed = std::chrono::duration<double>(now - last).count();
@@ -629,7 +752,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
         times.add(passed, scene.timings());
         shaders.look(device, now);
         take_part(controls, player, flight, camera, world);
-        report(connection, player, forecast, now);
+        report(connection, player, forecast, chat, options.chat_filter, now);
         camera = move(controls, player, flight, world, seconds);
         const double ground_height = client::ground_under(world, camera.eye);
         for (; controls.faster_time > 0; --controls.faster_time) {
@@ -682,12 +805,16 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
                               .now = now,
                               .weather = controls.timings && forecast.known()
                                              ? client::describe(client::weather_at_eye(shot))
-                                             : std::string{}};
+                                             : std::string{},
+                              .chat = &chat,
+                              .chatting = &controls.chatting,
+                              .chat_opened = chat_opened};
         const auto drawn = draw(scene, shot, device, presenter, window, overlay,
                                 controls.quit ? options.capture : std::nullopt);
         if (!drawn) {
             return std::unexpected(drawn.error());
         }
+        say_chat(chat, connection);
         if (!*drawn) {
             SDL_Delay(idle_ms);
         }
@@ -735,7 +862,8 @@ int show(const client::Options& options, const planet::PlanetConfig& planet,
         std::cerr << "hog-client: can't draw the timings over the picture\n";
         return EXIT_FAILURE;
     }
-    // Only shown, so it leaves the mouse and keys to flying.
+    // Only shown, so it leaves the mouse and keys to flying; the keys come back to it while the
+    // chat box is open.
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NoMouse | ImGuiConfigFlags_NoMouseCursorChange |
                                   ImGuiConfigFlags_NoKeyboard;
     // Before the scene, whose bakes run on it.

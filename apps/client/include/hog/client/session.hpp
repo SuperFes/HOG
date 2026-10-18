@@ -21,6 +21,14 @@
 
 namespace hog::client {
 
+// A line of chat as the server relays it: who said it, and what.
+struct ChatLine {
+    std::string from;
+    std::string text;
+
+    friend bool operator==(const ChatLine&, const ChatLine&) = default;
+};
+
 // A player's connection to the game server: says hello, then keeps what's near them from its
 // snapshots and tells it where their feet are, taking it back when the server won't have it.
 class Session {
@@ -46,6 +54,13 @@ public:
     [[nodiscard]] std::optional<protocol::Weather> take_weather() noexcept {
         return std::exchange(weather_, std::nullopt);
     }
+
+    // Says `text` to everyone, tidied to what chat may carry; nothing of it before being
+    // welcomed, or once tidied to nothing.
+    void say(std::string_view text);
+
+    // The chat heard since last asked, oldest first.
+    [[nodiscard]] std::vector<ChatLine> take_chat() noexcept { return std::exchange(chat_, {}); }
 
     [[nodiscard]] State state() const noexcept { return state_; }
     [[nodiscard]] const std::string& address() const noexcept { return address_; }
@@ -83,6 +98,7 @@ private:
     std::uint32_t corrections_ = 0;
     std::optional<WorldPosition> correction_;
     std::optional<protocol::Weather> weather_;
+    std::vector<ChatLine> chat_;
     std::optional<MonotonicClock::time_point> last_snapshot_;
     MonotonicClock::time_point counting_since_;
     std::uint32_t counted_ = 0;

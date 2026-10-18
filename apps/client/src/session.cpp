@@ -115,9 +115,39 @@ void Session::heard(std::span<const std::byte> bytes, MonotonicClock::time_point
         }
     } else if (auto* weather = std::get_if<protocol::Weather>(&*message)) {
         weather_ = std::move(*weather);
+    } else if (auto* said = std::get_if<protocol::Said>(&*message)) {
+        chat_.push_back({.from = std::move(said->from), .text = std::move(said->text)});
     } else {
         log::debug(session_log, "{} sent a message out of place", address_);
     }
+}
+
+void Session::say(std::string_view text) {
+    if (state_ != State::Welcomed) {
+        return;
+    }
+    std::string tidied;
+    for (const char character : text) {
+        const auto value = static_cast<unsigned char>(character);
+        if (value >= 0x20U && value != 0x7FU) {
+            tidied.push_back(character);
+        }
+    }
+    while (!tidied.empty() && tidied.back() == ' ') {
+        tidied.pop_back();
+    }
+    tidied.erase(0, tidied.find_first_not_of(' '));
+    if (tidied.size() > protocol::most_said) {
+        tidied.resize(protocol::most_said);
+        // A line cut short mustn't end mid-way through a UTF-8 character.
+        while (!tidied.empty() && (static_cast<unsigned char>(tidied.back()) & 0xC0U) == 0x80U) {
+            tidied.pop_back();
+        }
+    }
+    if (tidied.empty()) {
+        return;
+    }
+    send(protocol::Said{.from = {}, .text = std::move(tidied)}, net::Delivery::Reliable);
 }
 
 void Session::send(const protocol::Message& message, net::Delivery delivery) {

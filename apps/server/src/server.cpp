@@ -127,6 +127,7 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config,
           registry_.counter("hog_player_snapshot_bytes_total", "Bytes of players' snapshots.")),
       corrected_moves_(registry_.counter("hog_player_moves_corrected_total",
                                          "Players' moves refused, and sent back.")),
+      chat_lines_(registry_.counter("hog_chat_lines_total", "Lines of chat sent to players.")),
       reporter_(registry_) {
     persistence_.persist<server::Position>();
     server::track_positions(entities_, nearby_);
@@ -541,9 +542,32 @@ void Server::heard(net::ConnectionId connection, std::span<const std::byte> byte
         }
     } else if (const auto* ack = std::get_if<protocol::Ack>(&*message)) {
         joined_.acknowledged(connection, ack->tick);
+    } else if (const auto* said = std::get_if<protocol::Said>(&*message)) {
+        say(connection, *said);
     } else {
         log::debug(server_log, "connection {} sent a message out of place",
                    std::to_underlying(connection));
+    }
+}
+
+void Server::say(net::ConnectionId connection, const protocol::Said& said) {
+    if (!players_ || said.text.empty()) {
+        return;
+    }
+    const flecs::entity speaker = joined_.find(connection).value_or(flecs::entity{});
+    if (!speaker.is_valid()) {
+        return;
+    }
+    const auto* replicated = speaker.try_get<server::Replicated>();
+    const std::vector<std::byte> line = protocol::encode(protocol::Said{
+        .from = replicated != nullptr ? replicated->name : std::string{}, .text = said.text});
+    for (const net::ConnectionId hearer : joined_.connections()) {
+        if (auto sent = players_->send(hearer, net::Delivery::Reliable, line); !sent) {
+            log::debug(server_log, "couldn't send connection {} the chat: {}",
+                       std::to_underlying(hearer), sent.error());
+            continue;
+        }
+        chat_lines_.add();
     }
 }
 

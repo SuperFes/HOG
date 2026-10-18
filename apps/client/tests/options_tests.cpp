@@ -28,6 +28,7 @@ TEST_CASE("client options default to the development planet", "[client][options]
     CHECK_FALSE(options->quit_after);
     CHECK_FALSE(options->capture);
     CHECK_FALSE(options->timings);
+    CHECK(options->chat_filter);
     CHECK(options->clouds == hog::render::CloudQuality::High);
     CHECK_FALSE(options->software);
     CHECK(options->validate == hog::debug_build);
@@ -104,6 +105,12 @@ TEST_CASE("a client can be told not to validate", "[client][options]") {
     const auto options = parse_options(Arguments{"--validate", "--no-validate"});
     REQUIRE(options);
     CHECK_FALSE(options->validate);
+}
+
+TEST_CASE("a client can be told to show chat as it was said", "[client][options]") {
+    const auto options = parse_options(Arguments{"--chat-filter", "--no-chat-filter"});
+    REQUIRE(options);
+    CHECK_FALSE(options->chat_filter);
 }
 
 TEST_CASE("a client can be told not to reload shaders", "[client][options]") {

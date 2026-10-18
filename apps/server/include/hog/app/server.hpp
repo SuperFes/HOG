@@ -139,6 +139,8 @@ private:
     void answer(net::ConnectionId connection, const protocol::Answer& answer);
     // Does what a player who's in asks.
     void heard(net::ConnectionId connection, std::span<const std::byte> bytes);
+    // Sends a player's chat to everyone, under the name the server holds for them.
+    void say(net::ConnectionId connection, const protocol::Said& said);
     // Sends each player a snapshot of those near them.
     void share();
     // Sends every player the weather once it has stepped, to fade to over a step at `scale`.
@@ -213,6 +215,7 @@ private:
     metrics::Counter& shared_snapshots_;
     metrics::Counter& shared_bytes_;
     metrics::Counter& corrected_moves_;
+    metrics::Counter& chat_lines_;
     // km² alight not yet counted, being under one.
     double alight_left_ = 0.0;
     metrics::Reporter reporter_;

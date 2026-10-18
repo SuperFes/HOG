@@ -245,6 +245,43 @@ TEST_CASE("a session takes the newest weather once", "[client][session]") {
     CHECK_FALSE(session.take_weather());
 }
 
+TEST_CASE("a session says chat once welcomed, tidied to what it may carry", "[client][session]") {
+    Stand stand;
+    Session session = connected(stand.server);
+    session.say("too soon"); // dropped: not welcomed yet
+    welcome(session, stand);
+    session.say("  hi\tthere  ");
+    session.say("   "); // nothing once tidied, so never sent
+    look_until(session, stand, [&] { return stand.count<protocol::Said>() >= 1; });
+    REQUIRE(stand.count<protocol::Said>() == 1);
+    const auto said = std::ranges::find_if(stand.heard, [](const protocol::Message& message) {
+        return std::holds_alternative<protocol::Said>(message);
+    });
+    CHECK(std::get<protocol::Said>(*said).from.empty());
+    CHECK(std::get<protocol::Said>(*said).text == "hithere");
+}
+
+TEST_CASE("a session takes the chat heard once, oldest first", "[client][session]") {
+    Stand stand;
+    Session session = connected(stand.server);
+    welcome(session, stand);
+    CHECK(session.take_chat().empty());
+
+    stand.send(protocol::Said{.from = "Ada", .text = "hello"});
+    stand.send(protocol::Said{.from = "Brin", .text = "o/"});
+    std::vector<hog::client::ChatLine> heard;
+    look_until(session, stand, [&] {
+        for (auto& line : session.take_chat()) {
+            heard.push_back(std::move(line));
+        }
+        return heard.size() >= 2;
+    });
+    REQUIRE(heard.size() == 2);
+    CHECK(heard[0] == hog::client::ChatLine{.from = "Ada", .text = "hello"});
+    CHECK(heard[1] == hog::client::ChatLine{.from = "Brin", .text = "o/"});
+    CHECK(session.take_chat().empty());
+}
+
 TEST_CASE("a session keeps what snapshots show and acknowledges them", "[client][session]") {
     Stand stand;
     Session session = connected(stand.server);

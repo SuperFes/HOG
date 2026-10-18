@@ -946,3 +946,65 @@ TEST_CASE("a player is sent the weather as they join", "[app][server]") {
     CHECK(weather->fade == 10min);
     CHECK(weather->cells.size() == server->weather().grid().size());
 }
+
+TEST_CASE("players hear each other's chat, named by the server", "[app][server]") {
+    const World world;
+    const auto server = playing(world);
+    const std::string address = std::format("127.0.0.1:{}", server->players()->port());
+    struct Talker {
+        hog::net::Client client;
+        bool welcomed = false;
+        std::optional<hog::protocol::Said> chat;
+        std::vector<hog::net::Event> events;
+    };
+    auto first = hog::net::Client::connect(address);
+    auto second = hog::net::Client::connect(address);
+    REQUIRE(first);
+    REQUIRE(second);
+    std::array<Talker, 2> talkers{
+        Talker{.client = std::move(*first), .welcomed = false, .chat = {}, .events = {}},
+        Talker{.client = std::move(*second), .welcomed = false, .chat = {}, .events = {}}};
+    bool said = false;
+    std::atomic<bool> stop = false;
+    const auto give_up = MonotonicClock::now() + 10s;
+    Visited timer{[&] {
+        for (Talker& talker : talkers) {
+            talker.client.poll(talker.events);
+            for (const hog::net::Event& event : talker.events) {
+                if (std::holds_alternative<hog::net::Connected>(event)) {
+                    REQUIRE(talker.client.send(hog::net::Delivery::Reliable,
+                                               hog::protocol::encode(hog::protocol::Hello{})));
+                } else if (const auto* message = std::get_if<hog::net::Message>(&event)) {
+                    auto decoded = hog::protocol::decode(message->bytes());
+                    REQUIRE(decoded);
+                    if (std::holds_alternative<hog::protocol::Welcome>(*decoded)) {
+                        talker.welcomed = true;
+                    } else if (auto* line = std::get_if<hog::protocol::Said>(&*decoded)) {
+                        talker.chat = std::move(*line);
+                    }
+                }
+            }
+        }
+        if (!said && talkers[0].welcomed && talkers[1].welcomed) {
+            said = true;
+            REQUIRE(talkers[0].client.send(
+                hog::net::Delivery::Reliable,
+                hog::protocol::encode(hog::protocol::Said{.from = "liar", .text = "hello all"})));
+        }
+        if ((talkers[0].chat && talkers[1].chat) || MonotonicClock::now() >= give_up) {
+            stop = true;
+        }
+    }};
+    REQUIRE(server->run(timer, [] { return start; }, stop));
+    REQUIRE(talkers[0].chat);
+    REQUIRE(talkers[1].chat);
+    const hog::protocol::Said to_speaker = talkers[0].chat.value_or(hog::protocol::Said{});
+    const hog::protocol::Said to_hearer = talkers[1].chat.value_or(hog::protocol::Said{});
+    CHECK(to_speaker.text == "hello all");
+    CHECK(to_hearer.text == "hello all");
+    // The server names the speaker itself, never taking the name the client claims.
+    CHECK(to_speaker.from != "liar");
+    CHECK_FALSE(to_speaker.from.empty());
+    CHECK(to_hearer.from == to_speaker.from);
+    CHECK(counter(*server, "hog_chat_lines_total") == 2);
+}

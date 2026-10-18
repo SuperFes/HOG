@@ -79,7 +79,9 @@ std::vector<Message> examples() {
             delta(),
             Snapshot{.tick = 1, .baseline = 0, .entered = {}, .changed = {}, .left = {}},
             weather(0),
-            weather(1)};
+            weather(1),
+            Said{.from = "", .text = "hello?"},
+            Said{.from = std::string(most_name, 'n'), .text = std::string(most_said, 's')}};
 }
 
 // A snapshot at tick 10 with no baseline and nothing entering, then `rest`.
@@ -135,7 +137,7 @@ TEST_CASE("messages cut short or with bytes left over are refused", "[protocol]"
 }
 
 TEST_CASE("unknown kinds and refusals, and tokens too long, are refused", "[protocol]") {
-    CHECK(decode(bytes({9, 0})).error().code == ErrorCode::Unsupported);
+    CHECK(decode(bytes({10, 0})).error().code == ErrorCode::Unsupported);
     CHECK(decode(bytes({3, 0, 1, 0, 0, 0, 200, 0, 0})).error().code == ErrorCode::Parse);
     // A hello of this version with no token, but saying it has one too long.
     std::vector<std::byte> long_token = encode(Hello{});
@@ -268,4 +270,29 @@ TEST_CASE("weather too fine is refused", "[protocol]") {
     auto coarser = encode(weather(1));
     coarser[2] = std::byte{0};
     CHECK(decode(coarser).error().code == hog::ErrorCode::Parse);
+}
+
+TEST_CASE("chat too long is cut on sending, refused coming in", "[protocol]") {
+    const auto read = decode(encode(
+        Said{.from = std::string(most_name * 2, 'n'), .text = std::string(most_said * 2, 's')}));
+    REQUIRE(read);
+    CHECK(std::get<Said>(*read).from == std::string(most_name, 'n'));
+    CHECK(std::get<Said>(*read).text == std::string(most_said, 's'));
+
+    // A line said to be a byte longer than allowed.
+    auto bigger = encode(Said{.from = "", .text = std::string(most_said, 's')});
+    const auto length = static_cast<std::uint16_t>(most_said + 1);
+    bigger[4] = static_cast<std::byte>(length & 0xFFU);
+    bigger[5] = static_cast<std::byte>(length >> 8U);
+    bigger.push_back(std::byte{'s'});
+    CHECK(decode(bigger).error().code == ErrorCode::OutOfRange);
+}
+
+TEST_CASE("chat with control characters is refused", "[protocol]") {
+    for (const char character : {'\n', '\t', '\r', '\x1b', '\x7f'}) {
+        CAPTURE(static_cast<int>(character));
+        const std::string text = std::string{"so"} + character + "on";
+        CHECK(decode(encode(Said{.from = "Ada", .text = text})).error().code == ErrorCode::Parse);
+        CHECK(decode(encode(Said{.from = text, .text = "fine"})).error().code == ErrorCode::Parse);
+    }
 }

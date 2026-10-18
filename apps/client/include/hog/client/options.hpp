@@ -46,6 +46,8 @@ struct Options {
     std::optional<std::chrono::milliseconds> quit_after;
     std::optional<std::filesystem::path> capture;
     bool timings = false; // shown over the picture
+    // Chat shown with profanity hidden; each player chooses for their own screen.
+    bool chat_filter = true;
     render::CloudQuality clouds = render::CloudQuality::High;
     // A software Vulkan device over a GPU, and the validation layer with its errors failing the
     // run, also for tests. Debug builds validate unless told not to.
