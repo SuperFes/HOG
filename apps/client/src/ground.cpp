@@ -139,7 +139,7 @@ std::vector<render::GrassDraw> grass_draws(const GroundSlots& slots,
             (std::numbers::pi / 2.0) * planet_radius /
             static_cast<double>(std::uint64_t{1} << static_cast<unsigned>(patch.cell.level())) /
             terrain::patch_cells;
-        if (spacing > budget.finest) {
+        if (spacing > budget.tall_coarsest) {
             continue;
         }
         // Distance level with the ground, generously: an origin lies at sea level under its
@@ -148,22 +148,38 @@ std::vector<render::GrassDraw> grass_draws(const GroundSlots& slots,
         const double span = spacing * terrain::patch_cells;
         const DVec3 away = patch.origin - eye;
         const double distance = std::max(0.0, glm::length(away - (up * glm::dot(away, up))) - span);
-        if (distance >= render::grass_far) {
-            continue;
-        }
-        const double fade = std::min(
-            (render::grass_far - distance) / (render::grass_far - render::grass_near), 1.0);
-        const auto blades =
-            static_cast<std::uint32_t>(std::lround(budget.density * spacing * spacing * fade));
         const std::optional<std::uint32_t> held = slots.slot(patch.cell);
-        if (blades == 0 || !held) {
+        if (!held) {
             continue;
         }
-        draws.push_back({.slot = *held,
-                         .origin = patch.origin,
-                         .spacing = spacing,
-                         .blades_per_cell = std::min(blades, render::most_blades_per_cell),
-                         .seed = grass_seed(patch.cell)});
+        const auto grow = [&](double density, double fade_far, bool tall_only, std::uint32_t seed) {
+            const auto blades =
+                static_cast<std::uint32_t>(std::lround(density * spacing * spacing));
+            if (blades == 0) {
+                return;
+            }
+            draws.push_back({.slot = *held,
+                             .origin = patch.origin,
+                             .spacing = spacing,
+                             .blades_per_cell = std::min(blades, render::most_blades_per_cell),
+                             .seed = seed,
+                             .fade_far = fade_far,
+                             .tall_only = tall_only});
+        };
+        // The lawn: every biome's blades, on fine ground near the eye.
+        if (spacing <= budget.finest && distance < render::grass_far) {
+            const double fade = std::min(
+                (render::grass_far - distance) / (render::grass_far - render::grass_near), 1.0);
+            grow(budget.density * fade, render::grass_far, false, grass_seed(patch.cell));
+        }
+        // The far swaths: tall biomes only, their stand thinning with the square of distance,
+        // seeded apart from the lawn so the two don't grow twin blades where they overlap.
+        if (distance < budget.tall_far) {
+            const double middle = distance + (span * 0.5);
+            const double held_to = budget.tall_hold / std::max(middle, budget.tall_hold);
+            grow(budget.tall_density * held_to * held_to, budget.tall_far, true,
+                 grass_seed(patch.cell) ^ 0x7a11'f1e1U);
+        }
     }
     return draws;
 }

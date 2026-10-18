@@ -60,8 +60,17 @@ std::vector<hog::terrain::PatchVertex> field(hog::planet::Biome biome) {
     return vertices;
 }
 
+struct Field {
+    hog::planet::Biome biome = hog::planet::Biome::Grassland;
+    DVec3 wind{0.0};
+    double seconds = 0.0;
+    double away = 0.0; // metres east of the eye to the patch's centre
+    double fade_far = hog::render::grass_far;
+    bool tall_only = false;
+};
+
 // The field's grass alone over black, seen from standing height looking slightly down, east.
-Pixels draw(hog::render::Device& device, hog::planet::Biome biome, DVec3 wind, double seconds) {
+Pixels draw(hog::render::Device& device, const Field& grown) {
     auto atmosphere = hog::render::Atmosphere::create(device);
     REQUIRE(atmosphere);
     auto sky = hog::render::Sky::create(device, colour_format, depth_format);
@@ -74,9 +83,9 @@ Pixels draw(hog::render::Device& device, hog::planet::Biome biome, DVec3 wind, d
     REQUIRE(pool);
     const std::uint32_t slot = pool->acquire().value_or(99);
     REQUIRE(slot == 0);
-    REQUIRE(pool->stage(0, slot, field(biome)));
+    REQUIRE(pool->stage(0, slot, field(grown.biome)));
 
-    const WorldPosition origin{up * (radius + ground_height)};
+    const WorldPosition origin{(up * (radius + ground_height)) + (east * grown.away)};
     const WorldPosition eye{up * (radius + ground_height + 1.5)};
     const hog::terrain::Bend bend = hog::terrain::bend_from(eye, radius, ground_height);
     const double elevation = 40.0 * std::numbers::pi / 180.0;
@@ -90,13 +99,18 @@ Pixels draw(hog::render::Device& device, hog::planet::Biome biome, DVec3 wind, d
                                     .bend = bend,
                                     .exposure = 10.0,
                                     .sky_light = model.sky_irradiance(2.0 * scale, sun)};
-    const GrassDraw lawn{
-        .slot = slot, .origin = origin, .spacing = spacing, .blades_per_cell = 8, .seed = 7};
+    const GrassDraw lawn{.slot = slot,
+                         .origin = origin,
+                         .spacing = spacing,
+                         .blades_per_cell = 8,
+                         .seed = 7,
+                         .fade_far = grown.fade_far,
+                         .tall_only = grown.tall_only};
     const GrassView view{.camera = camera,
                          .bend = bend,
                          .air = sky->bindings(0, *atmosphere),
-                         .wind = wind,
-                         .seconds = seconds};
+                         .wind = grown.wind,
+                         .seconds = grown.seconds};
 
     auto colour = hog::render::make_image(
         device, {.format = colour_format,
@@ -146,7 +160,7 @@ TEST_CASE("grass grows over grassland and not over the sea", "[render]") {
     if (!device) {
         SKIP("no Vulkan device");
     }
-    const Pixels grassland = draw(*device, hog::planet::Biome::Grassland, {}, 0.0);
+    const Pixels grassland = draw(*device, {.biome = hog::planet::Biome::Grassland});
     const std::size_t lit = lit_pixels(grassland);
     CHECK(lit > 100);
     // Green blades: grass, not glare.
@@ -161,11 +175,28 @@ TEST_CASE("grass grows over grassland and not over the sea", "[render]") {
     INFO("red " << red << ", green " << green << ", blue " << blue);
     CHECK(green > 1.2 * red);
     CHECK(red > blue);
-    CHECK(lit_pixels(draw(*device, hog::planet::Biome::Ocean, {}, 0.0)) == 0);
+    CHECK(lit_pixels(draw(*device, {.biome = hog::planet::Biome::Ocean})) == 0);
     // Desert bunchgrass stands in lone tufts: far fewer blades than a grassland, but some.
-    const std::size_t tufts = lit_pixels(draw(*device, hog::planet::Biome::Desert, {}, 0.0));
+    const std::size_t tufts = lit_pixels(draw(*device, {.biome = hog::planet::Biome::Desert}));
     CHECK(tufts > 0);
     CHECK(tufts < lit / 4);
+}
+
+TEST_CASE("tall swaths stand where the lawn has faded away", "[render]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    // 70 m out the lawn's fade has taken it; a far-swath draw holds its full height.
+    const Field faded{.biome = hog::planet::Biome::Grassland, .away = 70.0};
+    CHECK(lit_pixels(draw(*device, faded)) == 0);
+    const Field swath{
+        .biome = hog::planet::Biome::Grassland, .away = 70.0, .fade_far = 260.0, .tall_only = true};
+    CHECK(lit_pixels(draw(*device, swath)) > 0);
+    // Short grass stays a near effect: no tundra in the far swaths.
+    const Field tundra{
+        .biome = hog::planet::Biome::Tundra, .away = 70.0, .fade_far = 260.0, .tall_only = true};
+    CHECK(lit_pixels(draw(*device, tundra)) == 0);
 }
 
 TEST_CASE("the wind moves the grass, and still air leaves it still", "[render]") {
@@ -174,10 +205,10 @@ TEST_CASE("the wind moves the grass, and still air leaves it still", "[render]")
         SKIP("no Vulkan device");
     }
     const DVec3 wind = east * 6.0;
-    const Pixels now = draw(*device, hog::planet::Biome::Grassland, wind, 1.0);
-    const Pixels later = draw(*device, hog::planet::Biome::Grassland, wind, 1.4);
+    const Pixels now = draw(*device, {.wind = wind, .seconds = 1.0});
+    const Pixels later = draw(*device, {.wind = wind, .seconds = 1.4});
     CHECK(now != later);
-    const Pixels still_now = draw(*device, hog::planet::Biome::Grassland, {}, 1.0);
-    const Pixels still_later = draw(*device, hog::planet::Biome::Grassland, {}, 1.4);
+    const Pixels still_now = draw(*device, {.seconds = 1.0});
+    const Pixels still_later = draw(*device, {.seconds = 1.4});
     CHECK(still_now == still_later);
 }

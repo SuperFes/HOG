@@ -15,8 +15,9 @@ struct Push {
     float4 bend_radii;
     // xyz the wind near the ground, m/s; w (as bits) the patch's seed.
     float4 wind;
-    // xyz the patch's origin from the eye, in metres; w (as bits) the bytes before the patch's
-    // vertices in what's bound, times 64, plus the blades grown in each grid cell.
+    // xyz the patch's origin from the eye, in metres; w (as bits) the blades grown in each grid
+    // cell, the bytes before the patch's vertices in what's bound times 64, the metres blades
+    // have shrunk away by times 16384, and bit 26 set to grow only the tall biomes' blades.
     float4 origin;
 };
 
@@ -45,11 +46,10 @@ static const uint patch_cells = 32;
 static const uint patch_side = 33;
 static const uint vertex_stride = 28; // bytes, as terrain::PatchVertex lies
 
-// Metres from the eye blades keep their height to, and where they've shrunk away.
-static const float fade_near = 25.0;
-static const float fade_far = 55.0;
 // Blades keep off ground this close to sea level, so the surf stays clear.
 static const float shore = 0.15;
+// Blades this tall stand in the far swaths; shorter grass stays a near effect.
+static const float tall_floor = 0.45;
 
 struct Corner {
     float3 position;
@@ -124,8 +124,12 @@ float3 blown(float3 root, float height, uint hash) {
 [shader("vertex")]
 Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const uint packed = asuint(push.origin.w);
-    const uint bias = packed >> 6;
     const uint blades = packed & 63u;
+    const uint bias = (packed >> 6) & 0xffu;
+    const float fade_far = float((packed >> 14) & 0xfffu);
+    const bool tall_only = (packed & (1u << 26)) != 0u;
+    // Blades keep their height to here, shrinking away by fade_far.
+    const float fade_near = 0.45 * fade_far;
     const uint seed = asuint(push.wind.w);
 
     const uint cell = instance / blades;
@@ -138,7 +142,7 @@ Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const float v = unit(hash + 1u);
     const uint at = (i * patch_side) + j;
     const Corner near = corner_at(bias, at + (u < 0.5 ? 0 : patch_side) + (v < 0.5 ? 0 : 1));
-    if (settings.blade[near.biome].w <= 0.0 ||
+    if (settings.blade[near.biome].w <= (tall_only ? tall_floor : 0.0) ||
         unit(hash + 2u) >= settings.spread[near.biome].x) {
         return nothing();
     }
@@ -201,6 +205,12 @@ Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     // is really thinner than drawn.
     const float its_own = (0.8 + (0.4 * unit(hash + 8u))) * (0.55 + (0.45 * t));
     blade.colour = settings.blade[near.biome].rgb * lerp(1.25, its_own, itself);
+    // Blades bent along the wind catch the light on their flanks, so gusts cross far fields as
+    // bands of light even where single blades have melted away.
+    const float speed = length(push.wind.xyz);
+    const float waving =
+        speed > 1e-3 ? dot(tip_away, push.wind.xyz) / (speed * height) : 0.0;
+    blade.colour *= 1.0 + (waving * lerp(0.15, 0.35, 1.0 - itself));
     return blade;
 }
 

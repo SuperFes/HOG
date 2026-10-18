@@ -17,10 +17,12 @@ namespace hog::render {
 
 class Device;
 
-// Metres from the eye blades keep their height to, and where they've shrunk away; as the shader
-// fades them.
+// Metres from the eye the near lawn keeps its height to, and where it's shrunk away; each draw
+// fades by its own fade_far, keeping height to 0.45 of it.
 inline constexpr double grass_near = 25.0;
 inline constexpr double grass_far = 55.0;
+// The furthest a draw's fade can reach, as far as its packing carries.
+inline constexpr double furthest_grass = 4095.0;
 // Blades grown in one grid cell of a patch at most.
 inline constexpr std::uint32_t most_blades_per_cell = 63;
 
@@ -31,7 +33,9 @@ struct GrassDraw {
     WorldPosition origin = {};
     double spacing = 1.0; // metres between the patch's grid vertices
     std::uint32_t blades_per_cell = 1;
-    std::uint32_t seed = 0; // of the patch's cell, the same on every machine
+    std::uint32_t seed = 0;      // of the patch's cell, the same on every machine
+    double fade_far = grass_far; // metres from the eye its blades have shrunk away by
+    bool tall_only = false;      // grow only the tall biomes' blades, for the far swaths
 };
 
 // Where the grass is seen from, how it's lit, and the wind that moves it.

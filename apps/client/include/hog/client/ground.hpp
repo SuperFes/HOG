@@ -42,6 +42,11 @@ concept SlotPool =
 struct GrassBudget {
     double finest = 0.75;  // metres between a patch's vertices at most, so only fine ground grows
     double density = 40.0; // blades a square metre up close
+    // The tall swaths seen far off: coarser ground grows only the tall biomes' blades.
+    double tall_coarsest = 6.0; // metres between vertices at most for the far swaths
+    double tall_density = 4.0;  // blades a square metre, held out to tall_hold
+    double tall_hold = 60.0;    // metres the density holds to, falling with distance squared
+    double tall_far = 260.0;    // metres the tall swaths reach
 };
 
 // Which slot holds each patch a stream holds.
@@ -63,8 +68,9 @@ private:
     std::map<planet::CellId, std::uint32_t> slots_;
 };
 
-// The grass grown on the drawn patches: those fine enough and within the grass's reach of the
-// eye, fewer blades a cell the further they lie. Patches without slots are passed over.
+// The grass grown on the drawn patches: the near lawn on ground fine enough and close enough,
+// and the far swaths of tall grass on coarser ground, fewer blades a cell the further they lie.
+// Patches without slots are passed over.
 [[nodiscard]] std::vector<render::GrassDraw>
 grass_draws(const GroundSlots& slots, std::span<const terrain::StreamedPatch> drawn,
             WorldPosition eye, double planet_radius, const GrassBudget& budget = {});
