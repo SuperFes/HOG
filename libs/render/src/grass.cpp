@@ -62,6 +62,7 @@ struct BiomeGrass {
     float share = 0.0F;  // of blades grown within a clump, 0 to 1
     float width = 0.02F; // metres
     float clumps = 1.0F; // of clumps grown: 1 everywhere, low for lone tufts on bare ground
+    float reeds = 0.0F;  // share of stems standing in the band at the waterline
 };
 
 // Blades a touch darker than the ground's mean, as standing grass shades itself.
@@ -93,11 +94,13 @@ constexpr BiomeGrass grass_of(planet::Biome biome) noexcept {
     case Alpine:
         return {.height = 0.12F, .share = 0.35F, .width = 0.012F, .clumps = 0.5F};
     case Wetland:
-        return {.height = 0.9F, .share = 0.9F, .width = 0.02F};
+        return {.height = 0.9F, .share = 0.9F, .width = 0.02F, .reeds = 0.12F};
+    // Lakes grow nothing on their beds, but reeds fringe their shores.
+    case Lake:
+        return {.reeds = 0.15F};
     case Ocean:
     case Beach:
     case Ice:
-    case Lake:
         return {};
     }
     return {};
@@ -110,7 +113,7 @@ Settings grass_settings(std::span<const Vec3> palette) noexcept {
         settings.blade.at(static_cast<std::size_t>(biome)) =
             glm::vec4{palette[static_cast<std::size_t>(biome)] * blade_shade, grass.height};
         settings.spread.at(static_cast<std::size_t>(biome)) =
-            glm::vec4{grass.share, grass.width, grass.clumps, 0.0F};
+            glm::vec4{grass.share, grass.width, grass.clumps, grass.reeds};
     }
     return settings;
 }

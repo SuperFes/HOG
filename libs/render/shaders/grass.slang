@@ -28,7 +28,8 @@ static const uint biome_count = 14;
 struct Settings {
     // Each biome's blades: rgb their colour, w their height in metres, none for no grass.
     float4 blade[biome_count];
-    // x the share of blades grown, y their width in metres, z the share of clumps grown.
+    // x the share of blades grown, y their width in metres, z the share of clumps grown,
+    // w the share of reed stems standing in the band at the waterline.
     float4 spread[biome_count];
 };
 
@@ -50,6 +51,16 @@ static const uint vertex_stride = 28; // bytes, as terrain::PatchVertex lies
 static const float shore = 0.15;
 // Blades this tall stand in the far swaths; shorter grass stays a near effect.
 static const float tall_floor = 0.45;
+
+// Reeds stand where the ground sits this close over the water, stiff stems with a cattail head:
+// the quad is cut as wide as the head, and the stem trimmed from it in the fragment shader.
+static const float reed_low = 0.03;
+static const float reed_high = 0.7;
+static const float reed_height = 1.7; // metres, before each stem's own variance
+static const float reed_width = 0.05; // the head's; the stem is trimmed thinner
+static const float head_cut = 0.78;   // of the stem's height, where the head begins
+static const float3 reed_stem = float3(0.06, 0.11, 0.035);
+static const float3 reed_head = float3(0.14, 0.07, 0.03);
 
 struct Corner {
     float3 position;
@@ -85,10 +96,15 @@ static const uint corners[6] = { 0, 1, 2, 2, 1, 3 };
 struct Blade {
     float4 position : SV_Position;
     float3 colour;
+    float3 head; // the colour above the cut, for reeds
     float3 normal;
     float3 from_eye;
-    float3 drawn; // from the eye, bent
-    float height; // above sea level
+    float3 drawn;    // from the eye, bent
+    float height;    // above sea level
+    float t_up;      // 0 at the root, 1 at the tip
+    float cut;       // of t_up, where the head's colour takes over; past 1 for plain blades
+    float side;      // across the quad, -0.5 to 0.5
+    float stem_half; // half-width kept below the cut; the rest is trimmed away
 };
 
 // Nothing: a point's triangles cover no pixels.
@@ -96,10 +112,15 @@ Blade nothing() {
     Blade gone;
     gone.position = float4(0.0, 0.0, 0.0, 1.0);
     gone.colour = float3(0.0);
+    gone.head = float3(0.0);
     gone.normal = float3(0.0, 0.0, 1.0);
     gone.from_eye = float3(0.0);
     gone.drawn = float3(0.0);
     gone.height = 0.0;
+    gone.t_up = 0.0;
+    gone.cut = 2.0;
+    gone.side = 0.0;
+    gone.stem_half = 1.0;
     return gone;
 }
 
@@ -142,14 +163,17 @@ Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const float v = unit(hash + 1u);
     const uint at = (i * patch_side) + j;
     const Corner near = corner_at(bias, at + (u < 0.5 ? 0 : patch_side) + (v < 0.5 ? 0 : 1));
-    if (settings.blade[near.biome].w <= (tall_only ? tall_floor : 0.0) ||
-        unit(hash + 2u) >= settings.spread[near.biome].x) {
+    const float4 kind = settings.blade[near.biome];
+    const float4 spread = settings.spread[near.biome];
+    const bool lawn_here =
+        kind.w > (tall_only ? tall_floor : 0.0) && unit(hash + 2u) < spread.x;
+    if (!lawn_here && spread.w <= 0.0) {
         return nothing();
     }
     // Sparse biomes grow in clumps rather than an evenly thinned lawn: desert bunchgrass stands
     // in tufts of its own, bare ground between.
     const uint clump = ((i >> 2) << 3) | (j >> 2);
-    if (unit(hashed(seed ^ (0x517Cu + clump))) >= settings.spread[near.biome].z) {
+    if (unit(hashed(seed ^ (0x517Cu + clump))) >= spread.z) {
         return nothing();
     }
     const Corner c00 = corner_at(bias, at);
@@ -164,7 +188,10 @@ Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const float3 root = push.origin.xyz + ground;
     const float above = height_above_sea(root, push.bend_up, push.bend_radii.x);
     const float fade = saturate((fade_far - length(root)) / (fade_far - fade_near));
-    if (above < shore || fade <= 0.0) {
+    // At the waterline a reed may stand; elsewhere the lawn grows, keeping off the surf.
+    const bool reed = spread.w > 0.0 && above >= reed_low && above <= reed_high &&
+                      unit(hash + 9u) < spread.w;
+    if (fade <= 0.0 || (!reed && (!lawn_here || above < shore))) {
         return nothing();
     }
 
@@ -175,24 +202,28 @@ Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const float facing = 6.2831853 * unit(hash + 3u);
     const float3 width_dir = (beside * cos(facing)) + (ahead * sin(facing));
     const float leaning = 6.2831853 * unit(hash + 4u);
-    const float3 up =
-        normalize(normal + (0.2 * ((beside * cos(leaning)) + (ahead * sin(leaning)))));
+    // Reeds stand straighter than grass leans.
+    const float3 up = normalize(
+        normal + ((reed ? 0.05 : 0.2) * ((beside * cos(leaning)) + (ahead * sin(leaning)))));
 
-    const float height =
-        settings.blade[near.biome].w * (0.6 + (0.8 * unit(hash + 5u))) * fade;
+    const float height = (reed ? reed_height * (0.75 + (0.45 * unit(hash + 5u)))
+                               : kind.w * (0.6 + (0.8 * unit(hash + 5u)))) *
+                         fade;
     // At least a pixel wide, so far blades don't shatter into bright specks; drawn wider than
     // they are, they wear the ground's colour instead, melting into it.
-    const float true_width = settings.spread[near.biome].y * (0.7 + (0.6 * unit(hash + 6u)));
+    const float true_width = (reed ? reed_width : spread.y) * (0.7 + (0.6 * unit(hash + 6u)));
     const float pixel = push.bend_radii.w * length(root);
     const float width = max(true_width, 0.8 * pixel);
     const float itself = true_width / width;
-    const float3 tip_away = blown(root, height, hash + 7u);
+    // Stems are stiff where blades are carried.
+    const float3 tip_away = blown(root, height, hash + 7u) * (reed ? 0.4 : 1.0);
 
     // Two triangles tapering to a narrow tip, the tip carried by the wind.
     const uint corner = corners[vertex];
     const float side = (corner & 1u) == 0 ? -0.5 : 0.5;
     const float t = corner < 2 ? 0.0 : 1.0;
-    const float3 placed = root + (width_dir * (side * width * (1.0 - (0.8 * t)))) +
+    const float taper = reed ? 0.25 : 0.8;
+    const float3 placed = root + (width_dir * (side * width * (1.0 - (taper * t)))) +
                           (up * (height * t)) + (tip_away * (t * t));
 
     Blade blade;
@@ -204,7 +235,13 @@ Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     // Darker towards the root, as fields shade themselves; the ground's own tone where the blade
     // is really thinner than drawn.
     const float its_own = (0.8 + (0.4 * unit(hash + 8u))) * (0.55 + (0.45 * t));
-    blade.colour = settings.blade[near.biome].rgb * lerp(1.25, its_own, itself);
+    const float3 own = reed ? reed_stem : kind.rgb;
+    blade.colour = lerp(kind.rgb * 1.25, own * its_own, itself);
+    blade.head = lerp(kind.rgb * 1.25, reed_head, itself);
+    blade.t_up = t;
+    blade.cut = reed ? head_cut : 2.0;
+    blade.side = side;
+    blade.stem_half = reed ? lerp(0.5, 0.18, itself) : 1.0;
     // Blades bent along the wind catch the light on their flanks, so gusts cross far fields as
     // bands of light even where single blades have melted away.
     const float speed = length(push.wind.xyz);
@@ -218,6 +255,13 @@ Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
 // air between, and tone mapped, as terrain.slang lights the ground.
 [shader("fragment")]
 float4 fragment_main(Blade blade) : SV_Target {
+    // A reed's stem is trimmed from the quad below the cut; above it the head's colour takes
+    // over whole, a crisp band.
+    const bool headed = blade.t_up > blade.cut;
+    if (!headed && abs(blade.side) > blade.stem_half) {
+        discard;
+    }
+    const float3 albedo = headed ? blade.head : blade.colour;
     const float3 sun = lighting.sun_exposure.xyz;
     const float scale = lighting.sky_scale.w;
     const float3 normal = normalize(blade.normal);
@@ -230,7 +274,7 @@ float4 fragment_main(Blade blade) : SV_Target {
     const float3 sky = sky_under_cloud(lighting, shade, clear * saturate(dot(up, sun)));
     const float3 lit =
         (sunlight * saturate(dot(normal, sun))) + (sky * (0.5 + (0.5 * dot(normal, up))));
-    const float3 radiance = blade.colour * lit / pi;
+    const float3 radiance = albedo * lit / pi;
 
     const float4 clip = mul(push.clip_from_eye, float4(blade.drawn, 1.0));
     const float2 uv = ((clip.xy / clip.w) * 0.5) + 0.5;

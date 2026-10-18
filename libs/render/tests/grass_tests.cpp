@@ -67,6 +67,7 @@ struct Field {
     double away = 0.0; // metres east of the eye to the patch's centre
     double fade_far = hog::render::grass_far;
     bool tall_only = false;
+    double ground = ground_height; // metres above sea level
 };
 
 // The field's grass alone over black, seen from standing height looking slightly down, east.
@@ -85,9 +86,9 @@ Pixels draw(hog::render::Device& device, const Field& grown) {
     REQUIRE(slot == 0);
     REQUIRE(pool->stage(0, slot, field(grown.biome)));
 
-    const WorldPosition origin{(up * (radius + ground_height)) + (east * grown.away)};
-    const WorldPosition eye{up * (radius + ground_height + 1.5)};
-    const hog::terrain::Bend bend = hog::terrain::bend_from(eye, radius, ground_height);
+    const WorldPosition origin{(up * (radius + grown.ground)) + (east * grown.away)};
+    const WorldPosition eye{up * (radius + grown.ground + 1.5)};
+    const hog::terrain::Bend bend = hog::terrain::bend_from(eye, radius, grown.ground);
     const double elevation = 40.0 * std::numbers::pi / 180.0;
     const DVec3 sun = (east * std::cos(elevation)) + (up * std::sin(elevation));
     const hog::render::Camera camera{
@@ -180,6 +181,25 @@ TEST_CASE("grass grows over grassland and not over the sea", "[render]") {
     const std::size_t tufts = lit_pixels(draw(*device, {.biome = hog::planet::Biome::Desert}));
     CHECK(tufts > 0);
     CHECK(tufts < lit / 4);
+}
+
+TEST_CASE("reeds fringe the waterline and leave higher ground alone", "[render]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    // A lake's shore, inside the reed band: stems with brown cattail heads.
+    const Pixels fringe = draw(*device, {.biome = hog::planet::Biome::Lake, .ground = 0.4});
+    CHECK(lit_pixels(fringe) > 50);
+    std::size_t brown = 0;
+    for (std::size_t pixel = 0; pixel < fringe.size() / 4; ++pixel) {
+        const std::uint8_t red = fringe.at(4 * pixel);
+        const std::uint8_t green = fringe.at((4 * pixel) + 1);
+        brown += (red > 0 && red > green) ? 1U : 0U;
+    }
+    CHECK(brown > 10);
+    // Above the band, a lake's ground grows nothing at all.
+    CHECK(lit_pixels(draw(*device, {.biome = hog::planet::Biome::Lake, .ground = 2.0})) == 0);
 }
 
 TEST_CASE("tall swaths stand where the lawn has faded away", "[render]") {
