@@ -6,7 +6,9 @@ add_library(hog_app
 add_library(hog::app ALIAS hog_app)
 
 target_include_directories(hog_app PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(hog_app PUBLIC hog::net hog::probe hog::protocol hog::server hog::sim hog::store)
+target_link_libraries(hog_app
+    PUBLIC hog::net hog::probe hog::protocol hog::server hog::sim hog::store
+    PRIVATE hog::chat)
 hog_target_defaults(hog_app)
 
 add_executable(hog_server_cli src/main.cpp)
@@ -20,4 +22,5 @@ hog_add_tests(hog_app
     tests/server_tests.cpp)
 if(TARGET hog_app_tests)
     target_compile_definitions(hog_app_tests PRIVATE HOG_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(hog_app_tests PRIVATE hog::chat)
 endif()

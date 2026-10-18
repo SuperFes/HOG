@@ -1,3 +1,4 @@
+#include <hog/chat/filter.hpp>
 #include <hog/client/chat.hpp>
 #include <hog/client/daylight.hpp>
 #include <hog/client/flight.hpp>
@@ -632,9 +633,9 @@ void report(Connection& connection, std::optional<client::Player>& player,
     if (const auto weather = connection.take_weather()) {
         forecast.receive(*weather, now);
     }
-    for (client::ChatLine& line : connection.take_chat()) {
-        chat.log.add(filter ? client::censored(line.from) : std::move(line.from),
-                     filter ? client::censored(line.text) : std::move(line.text), now);
+    for (const client::ChatLine& line : connection.take_chat()) {
+        chat.log.add(hog::chat::shown_name(line.from, filter),
+                     hog::chat::shown_chat(line.text, filter), now);
     }
 }
 

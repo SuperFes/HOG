@@ -202,8 +202,9 @@ options:
   --quit-after S         quit after this many seconds
   --capture PATH         save the last frame drawn as a PNG, on quitting
   --timings              show how long frames take from the start
-  --chat-filter          show chat with profanity hidden; on by default
-  --no-chat-filter       show chat as it was said
+  --chat-filter          cussing in chat as comic-book grawlix; on by default
+  --no-chat-filter       cussing as it was said; hate speech reads as small
+                         talk about the weather either way
   --clouds QUALITY       draw the clouds at low, medium or high quality, for what
                          the GPU can afford (default high)
   --software             draw with a software Vulkan device, such as lavapipe

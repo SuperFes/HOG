@@ -6,14 +6,9 @@
 #include <cstddef>
 #include <span>
 #include <string>
-#include <string_view>
 #include <vector>
 
 namespace hog::client {
-
-// `text` with profanity hidden behind asterisks: some words wherever they appear, others only
-// standing alone, so innocent words holding them, like "class", are left be.
-[[nodiscard]] std::string censored(std::string_view text);
 
 // The chat the player has heard, newest last.
 class ChatLog {

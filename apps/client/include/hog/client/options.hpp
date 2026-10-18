@@ -46,7 +46,8 @@ struct Options {
     std::optional<std::chrono::milliseconds> quit_after;
     std::optional<std::filesystem::path> capture;
     bool timings = false; // shown over the picture
-    // Chat shown with profanity hidden; each player chooses for their own screen.
+    // Cussing in chat shown as grawlix; each player chooses for their own screen. Hate speech
+    // reads as small talk whatever this says.
     bool chat_filter = true;
     render::CloudQuality clouds = render::CloudQuality::High;
     // A software Vulkan device over a GPU, and the validation layer with its errors failing the

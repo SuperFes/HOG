@@ -1,5 +1,6 @@
 #include <hog/app/probe_layers.hpp>
 #include <hog/app/server.hpp>
+#include <hog/chat/filter.hpp>
 #include <hog/net/client.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/probe/channel.hpp>
@@ -1007,4 +1008,50 @@ TEST_CASE("players hear each other's chat, named by the server", "[app][server]"
     CHECK_FALSE(to_speaker.from.empty());
     CHECK(to_hearer.from == to_speaker.from);
     CHECK(counter(*server, "hog_chat_lines_total") == 2);
+}
+
+TEST_CASE("hate speech is reported and relayed as small talk", "[app][server]") {
+    const World world;
+    const auto server = playing(world);
+    auto connected =
+        hog::net::Client::connect(std::format("127.0.0.1:{}", server->players()->port()));
+    REQUIRE(connected);
+    hog::net::Client& client = *connected;
+    bool welcomed = false;
+    std::optional<hog::protocol::Said> echoed;
+    std::vector<hog::net::Event> events;
+    std::atomic<bool> stop = false;
+    const auto give_up = MonotonicClock::now() + 10s;
+    Visited timer{[&] {
+        client.poll(events);
+        for (const hog::net::Event& event : events) {
+            if (std::holds_alternative<hog::net::Connected>(event)) {
+                REQUIRE(client.send(hog::net::Delivery::Reliable,
+                                    hog::protocol::encode(hog::protocol::Hello{})));
+            } else if (const auto* message = std::get_if<hog::net::Message>(&event)) {
+                auto decoded = hog::protocol::decode(message->bytes());
+                REQUIRE(decoded);
+                if (std::holds_alternative<hog::protocol::Welcome>(*decoded)) {
+                    welcomed = true;
+                    REQUIRE(client.send(hog::net::Delivery::Reliable,
+                                        hog::protocol::encode(hog::protocol::Said{
+                                            .from = "", .text = "you n1ggers get out"})));
+                } else if (auto* line = std::get_if<hog::protocol::Said>(&*decoded)) {
+                    echoed = std::move(*line);
+                }
+            }
+        }
+        if (echoed || MonotonicClock::now() >= give_up) {
+            stop = true;
+        }
+    }};
+    REQUIRE(server->run(timer, [] { return start; }, stop));
+    REQUIRE(welcomed);
+    REQUIRE(echoed);
+    const hog::protocol::Said heard = echoed.value_or(hog::protocol::Said{});
+    // Even the speaker reads small talk; nobody is sent the slur.
+    CHECK(heard.text != "you n1ggers get out");
+    CHECK_FALSE(hog::chat::hateful(heard.text));
+    CHECK(counter(*server, "hog_chat_hateful_lines_total") == 1);
+    CHECK(counter(*server, "hog_chat_lines_total") == 1);
 }

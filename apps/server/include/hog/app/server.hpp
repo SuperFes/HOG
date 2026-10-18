@@ -216,6 +216,7 @@ private:
     metrics::Counter& shared_bytes_;
     metrics::Counter& corrected_moves_;
     metrics::Counter& chat_lines_;
+    metrics::Counter& hateful_lines_;
     // km² alight not yet counted, being under one.
     double alight_left_ = 0.0;
     metrics::Reporter reporter_;

@@ -14,6 +14,8 @@ inline const log::Category server_log{"server"};
 inline const log::Category save_log{"save"};
 inline const log::Category metrics_log{"metrics"};
 inline const log::Category wildlife_log{"wildlife"};
+// What players said that moderators should see, hate speech above all.
+inline const log::Category moderation_log{"moderation"};
 
 // The categories a server config can set levels for.
 [[nodiscard]] std::span<const log::Category* const> categories() noexcept;

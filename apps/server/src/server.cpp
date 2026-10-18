@@ -1,4 +1,5 @@
 #include <hog/app/server.hpp>
+#include <hog/chat/filter.hpp>
 #include <hog/net/simulation.hpp>
 #include <hog/planet/cell_id.hpp>
 #include <hog/planet/projection.hpp>
@@ -128,6 +129,8 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config,
       corrected_moves_(registry_.counter("hog_player_moves_corrected_total",
                                          "Players' moves refused, and sent back.")),
       chat_lines_(registry_.counter("hog_chat_lines_total", "Lines of chat sent to players.")),
+      hateful_lines_(registry_.counter("hog_chat_hateful_lines_total",
+                                       "Lines of hate speech reported, sent on as small talk.")),
       reporter_(registry_) {
     persistence_.persist<server::Position>();
     server::track_positions(entities_, nearby_);
@@ -559,8 +562,18 @@ void Server::say(net::ConnectionId connection, const protocol::Said& said) {
         return;
     }
     const auto* replicated = speaker.try_get<server::Replicated>();
-    const std::vector<std::byte> line = protocol::encode(protocol::Said{
-        .from = replicated != nullptr ? replicated->name : std::string{}, .text = said.text});
+    const std::string from = replicated != nullptr ? replicated->name : std::string{};
+    std::string text = said.text;
+    // Hate speech gets no platform: it's reported here for moderators, and everyone else, the
+    // speaker included, reads small talk instead.
+    if (chat::hateful(text)) {
+        log::warn(moderation_log, "connection {} ({}) said hate speech: {}",
+                  std::to_underlying(connection), from, text);
+        hateful_lines_.add();
+        text = chat::small_talk_for(text);
+    }
+    const std::vector<std::byte> line =
+        protocol::encode(protocol::Said{.from = from, .text = std::move(text)});
     for (const net::ConnectionId hearer : joined_.connections()) {
         if (auto sent = players_->send(hearer, net::Delivery::Reliable, line); !sent) {
             log::debug(server_log, "couldn't send connection {} the chat: {}",
