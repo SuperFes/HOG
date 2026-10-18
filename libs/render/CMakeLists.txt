@@ -61,6 +61,7 @@ add_library(hog_render
     src/streamed_image.cpp
     src/swapchain.cpp
     src/terrain.cpp
+    src/trees.cpp
     src/vma.cpp
     src/vulkan.cpp
     src/weather_maps.cpp)
@@ -79,7 +80,7 @@ target_link_libraries(hog_render
     PRIVATE hog::planet vk-bootstrap::vk-bootstrap)
 hog_target_defaults(hog_render)
 hog_add_shaders(hog_render CATALOGUE shaders/aerial.slang shaders/air_tables.slang shaders/billboard.slang shaders/bushes.slang shaders/capsules.slang shaders/cloud_march.slang shaders/cloud_resolve.slang shaders/clouds.slang shaders/glare.slang shaders/globe.slang shaders/grass.slang shaders/ocean.slang shaders/precipitation.slang shaders/sky.slang shaders/sky_view.slang
-                shaders/terrain.slang)
+                shaders/terrain.slang shaders/trees.slang)
 
 # A test device, for tests here and elsewhere that draw.
 add_library(hog_render_testing INTERFACE)
@@ -117,7 +118,8 @@ hog_add_tests(hog_render
     tests/sky_tests.cpp
     tests/streamed_image_tests.cpp
     tests/swapchain_tests.cpp
-    tests/terrain_tests.cpp)
+    tests/terrain_tests.cpp
+    tests/tree_tests.cpp)
 if(TARGET hog_render_tests)
     target_link_libraries(hog_render_tests PRIVATE hog::planet)
     hog_add_shaders(hog_render_tests tests/shaders/aerial_probe.slang tests/shaders/air_probe.slang tests/shaders/dispatch.slang tests/shaders/fill.slang tests/shaders/layer.slang tests/shaders/projection_probe.slang tests/shaders/volume_probe.slang

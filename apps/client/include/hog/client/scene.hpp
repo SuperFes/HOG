@@ -25,6 +25,7 @@
 #include <hog/render/render_graph.hpp>
 #include <hog/render/sky.hpp>
 #include <hog/render/terrain.hpp>
+#include <hog/render/trees.hpp>
 #include <hog/render/vulkan.hpp>
 #include <hog/render/weather_maps.hpp>
 #include <hog/sim/calendar.hpp>
@@ -126,14 +127,14 @@ public:
 private:
     Scene(const render::Device& device, const planet::World& world, jobs::JobSystem& jobs,
           const sim::Calendar& calendar, render::Terrain terrain, render::Ocean ocean,
-          render::Grass grass, render::Bushes bushes, render::TerrainPool pool,
+          render::Grass grass, render::Bushes bushes, render::Trees trees, render::TerrainPool pool,
           render::Atmosphere atmosphere, render::Sky sky, render::Capsules others,
           render::WeatherMaps weather, render::Clouds clouds, render::Precipitation precipitation,
           render::Glare glare, render::GpuTimer timer, std::optional<render::Billboard> companion,
           std::uint32_t frames);
 
     render::SkyView sky_view(const Shot& shot, render::CloudShade shade);
-    // Adds the grass and bush passes over the drawn patches, blown by `wind`.
+    // Adds the grass, bush and tree passes over the drawn patches, blown by `wind`.
     void grow_vegetation(render::RenderGraph& graph, const render::Frame& frame, const Shot& shot,
                          std::span<const terrain::StreamedPatch> patches,
                          std::span<const render::GraphUse> through_air,
@@ -146,6 +147,7 @@ private:
     render::Ocean ocean_;
     render::Grass grass_;
     render::Bushes bushes_;
+    render::Trees trees_;
     render::TerrainPool pool_;
     GroundSlots slots_;
     render::TransientImages transients_;

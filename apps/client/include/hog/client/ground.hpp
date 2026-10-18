@@ -5,6 +5,7 @@
 #include <hog/render/bushes.hpp>
 #include <hog/render/grass.hpp>
 #include <hog/render/terrain.hpp>
+#include <hog/render/trees.hpp>
 #include <hog/terrain/material.hpp>
 #include <hog/terrain/stream.hpp>
 
@@ -48,6 +49,9 @@ struct GrassBudget {
     double tall_density = 4.0;  // blades a square metre, held out to tall_hold
     double tall_hold = 60.0;    // metres the density holds to, falling with distance squared
     double tall_far = 260.0;    // metres the tall swaths reach
+    // The trees, standing far beyond the rest and on far coarser ground.
+    double tree_coarsest = 24.0; // metres between vertices at most for the trees
+    double tree_far = 900.0;     // metres the trees reach
 };
 
 // Which slot holds each patch a stream holds.
@@ -80,6 +84,13 @@ grass_draws(const GroundSlots& slots, std::span<const terrain::StreamedPatch> dr
 // fixed lattice. Patches without slots, or finer than the lattice can key, are passed over.
 [[nodiscard]] std::vector<render::BushDraw>
 bush_draws(const GroundSlots& slots, std::span<const terrain::StreamedPatch> drawn,
+           WorldPosition eye, double planet_radius, const GrassBudget& budget = {});
+
+// The trees grown on the drawn patches within the budget's tree reach, keyed to their own,
+// coarser fixed lattice. Patches without slots, or finer than the lattice can key, are passed
+// over.
+[[nodiscard]] std::vector<render::TreeDraw>
+tree_draws(const GroundSlots& slots, std::span<const terrain::StreamedPatch> drawn,
            WorldPosition eye, double planet_radius, const GrassBudget& budget = {});
 
 template <SlotPool Pool>

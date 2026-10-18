@@ -257,7 +257,7 @@ This phase covers the planet in procedurally generated plant life, grown from pe
 **Species rules**
 
 - [ ] Plant grammar: a species is a rule set (trunk habit, branch angles and counts per level, crown shape, leaf, needle or frond) that grows an individual deterministically from a seed
-- [ ] First tree set, each with its own rules: a pine analogue (whorled branches, conical crown), an oak analogue (spreading, gnarled), a maple analogue, a palm analogue (bare trunk, frond crown)
+- [ ] First tree set, each with its own rules: a pine analogue (done: tiered conical crowns over bare trunks, keyed to their own coarser fixed lattice, reaching 900 m), an oak analogue (spreading, gnarled), a maple analogue, a palm analogue (bare trunk, frond crown)
 - [x] Ground cover: tall and short grasses with far swaths, cattail reeds at waterlines, bushes in four silhouettes (floofy blobs, spiky rosettes, twiggy skeletons, low mats) mixed by biome
 - [ ] Age from the same seed: seedlings, saplings, mature and ancient trees from one rule set
 - [ ] Condition states: dead standing wood, half-fallen and felled trunks, fire-scorched survivors, insect- and animal-worn damage simulated without the animals
@@ -293,7 +293,7 @@ Borrowed from real species to make forests feel grown rather than scattered. A m
 
 **Wind and weather**
 
-- [x] Plants react to the weather grid's wind in the shader: still air sits still, light wind sways gently, storms hold plants bent in the wind's direction (grass bends, reeds stand stiff, bushes rustle; trees to follow)
+- [x] Plants react to the weather grid's wind in the shader: still air sits still, light wind sways gently, storms hold plants bent in the wind's direction (grass bends, reeds stand stiff, bushes rustle, pine tops rock and hold over in storms)
 - [x] Gusts travel as visible waves across grass fields
 - [ ] High wind breaks branches and fells weak trees as sim events, so everyone sees the same deadfall
 
