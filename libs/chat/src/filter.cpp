@@ -61,6 +61,12 @@ constexpr std::array cussing{
 // Endings an alone word may wear and still be itself, longest first so none is half-taken.
 constexpr std::array endings{"ing", "ers", "er", "es", "ed", "s", ""};
 
+// Words cussing welds itself to; a compound of them still counts as standing alone, so
+// "dickbutt" hides no better than "dick", while "Scunthorpe" and "class" still pass.
+constexpr std::array compounds{"head",  "butt", "face",  "hole",  "hat",  "wad",
+                               "bag",   "wipe", "stain", "weed",  "lips", "dumb",
+                               "smart", "jack", "fat",   "horse", "bull", "lard"};
+
 // What a hateful line reads as instead.
 constexpr std::array small_talk{
     "lovely weather we're having, isn't it?",   "my, the clouds look fantastic today.",
@@ -324,9 +330,29 @@ struct Span {
     std::size_t end = 0; // in the shadow, one past
 };
 
-// An alone word may wear an ending, but must then stand clear of letters; where it closes, or
-// nothing.
+// A compound part of the shadow ending at `at`, if one does; how long it is, else nothing.
+[[nodiscard]] std::optional<std::size_t> part_before(std::string_view read, std::size_t at) {
+    for (const std::string_view part : compounds) {
+        if (part.size() <= at && read.compare(at - part.size(), part.size(), part) == 0) {
+            return part.size();
+        }
+    }
+    return std::nullopt;
+}
+
+// An alone word may wear compound parts and then an ending, but must then stand clear of
+// letters; where it closes, or nothing.
 [[nodiscard]] std::optional<std::size_t> closed_alone(std::string_view read, std::size_t end) {
+    for (bool grew = true; grew;) {
+        grew = false;
+        for (const std::string_view part : compounds) {
+            if (read.compare(end, part.size(), part) == 0) {
+                end += part.size();
+                grew = true;
+                break;
+            }
+        }
+    }
     for (const std::string_view ending : endings) {
         if (read.compare(end, ending.size(), ending) == 0 &&
             !letter_at(read, end + ending.size())) {
@@ -334,6 +360,25 @@ struct Span {
         }
     }
     return std::nullopt;
+}
+
+// A guarded match at [start, end) of the shadow counts when it stands clear of letters, in a
+// compound ("dumbass", "dickbutt") or out of one; the whole of what it stood in, or nothing.
+[[nodiscard]] std::optional<Span> stood_alone(std::string_view read, std::size_t start,
+                                              std::size_t end) {
+    std::size_t begin = start;
+    while (begin > 0 && letter(read[begin - 1])) {
+        const auto part = part_before(read, begin);
+        if (!part) {
+            return std::nullopt;
+        }
+        begin -= *part;
+    }
+    const auto close = closed_alone(read, end);
+    if (!close) {
+        return std::nullopt;
+    }
+    return Span{.start = begin, .end = *close};
 }
 
 // Where words from `list` show through the shadow.
@@ -352,11 +397,8 @@ struct Span {
             // A match that leant on separators must stand alone, so "his hit song" is no match
             // for anything, while "f u c k" on its own still is.
             if (looked.alone || split) {
-                if (start > 0 && letter(read[start - 1])) {
-                    continue;
-                }
-                if (const auto close = closed_alone(read, *end)) {
-                    found.push_back({.start = start, .end = *close});
+                if (const auto span = stood_alone(read, start, *end)) {
+                    found.push_back(*span);
                 }
                 continue;
             }

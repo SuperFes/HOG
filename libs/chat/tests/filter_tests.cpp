@@ -49,6 +49,16 @@ TEST_CASE("stretched and dressed-up cussing is still seen", "[chat]") {
     CHECK(bleeped("5h17 happens") == "@#$% happens");
 }
 
+TEST_CASE("cussing welded into a compound is seen whole", "[chat]") {
+    CHECK(bleeped("Hello dickbutt!") == "Hello @#$%&!@#!");
+    CHECK(bleeped("what a dumbass") == "what a @#$%&!@");
+    CHECK(bleeped("asshats, dickheads") == "@#$%&!@, @#$%&!@#$");
+    CHECK(bleeped("you jackass") == "you @#$%&!@");
+    // Words that only hold the letters, with no compound part around them, still pass.
+    CHECK(bleeped("Scunthorpe class assessment") == "Scunthorpe class assessment");
+    CHECK(bleeped("the cockpit hatch") == "the cockpit hatch");
+}
+
 TEST_CASE("cussing split apart is seen when it stands alone", "[chat]") {
     CHECK(bleeped("f u c k") == "@#$%&!@");
     CHECK(bleeped("f.u.c.k") == "@#$%&!@");
