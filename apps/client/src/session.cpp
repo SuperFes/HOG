@@ -117,6 +117,11 @@ void Session::heard(std::span<const std::byte> bytes, MonotonicClock::time_point
         weather_ = std::move(*weather);
     } else if (auto* said = std::get_if<protocol::Said>(&*message)) {
         chat_.push_back({.from = std::move(said->from), .text = std::move(said->text)});
+    } else if (const auto* clock = std::get_if<protocol::Clock>(&*message)) {
+        if (clock->scale != world_rate_) {
+            log::info(session_log, "{} runs the world at {}x", address_, clock->scale);
+            world_rate_ = clock->scale;
+        }
     } else {
         log::debug(session_log, "{} sent a message out of place", address_);
     }
@@ -150,6 +155,13 @@ void Session::say(std::string_view text) {
     send(protocol::Said{.from = {}, .text = std::move(tidied)}, net::Delivery::Reliable);
 }
 
+void Session::hurry(std::uint32_t scale) {
+    if (state_ != State::Welcomed || scale == 0) {
+        return;
+    }
+    send(protocol::Hurry{.scale = scale}, net::Delivery::Reliable);
+}
+
 void Session::send(const protocol::Message& message, net::Delivery delivery) {
     if (auto sent = client_.send(delivery, protocol::encode(message)); !sent) {
         log::warn(session_log, "couldn't send to {}: {}", address_, sent.error());
@@ -169,6 +181,9 @@ SessionSummary summarise(const Session& session, WorldPosition eye,
         summary.traffic =
             std::format("{:.1f} kB/s in, {:.1f} out", stats->bytes_in_per_second / 1'000.0F,
                         stats->bytes_out_per_second / 1'000.0F);
+    }
+    if (session.world_rate() != 1) {
+        summary.clock = std::format("world time {}x", session.world_rate());
     }
     if (const auto last = session.last_snapshot()) {
         summary.snapshots =

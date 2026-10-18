@@ -896,10 +896,11 @@ private:
 };
 
 // Open on a free players' port.
-std::unique_ptr<Server> playing(const World& world) {
+std::unique_ptr<Server> playing(const World& world, bool time_control = false) {
     std::random_device random;
     const auto first = static_cast<std::uint16_t>(40'000 + (random() % 20'000));
     auto config = world.config();
+    config.debug.time_control = time_control;
     for (std::uint16_t port = first; port < first + 100; ++port) {
         config.net.port = port;
         auto server = opened(config);
@@ -1054,4 +1055,89 @@ TEST_CASE("hate speech is reported and relayed as small talk", "[app][server]") 
     CHECK_FALSE(hog::chat::hateful(heard.text));
     CHECK(counter(*server, "hog_chat_hateful_lines_total") == 1);
     CHECK(counter(*server, "hog_chat_lines_total") == 1);
+}
+
+TEST_CASE("a player's wish runs the world's clock faster, where allowed", "[app][server]") {
+    const World world;
+    const auto server = playing(world, true);
+    auto connected =
+        hog::net::Client::connect(std::format("127.0.0.1:{}", server->players()->port()));
+    REQUIRE(connected);
+    hog::net::Client& client = *connected;
+    std::optional<hog::protocol::Clock> clock;
+    std::vector<hog::net::Event> events;
+    std::atomic<bool> stop = false;
+    const auto give_up = MonotonicClock::now() + 10s;
+    Visited timer{[&] {
+        client.poll(events);
+        for (const hog::net::Event& event : events) {
+            if (std::holds_alternative<hog::net::Connected>(event)) {
+                REQUIRE(client.send(hog::net::Delivery::Reliable,
+                                    hog::protocol::encode(hog::protocol::Hello{})));
+            } else if (const auto* message = std::get_if<hog::net::Message>(&event)) {
+                auto decoded = hog::protocol::decode(message->bytes());
+                REQUIRE(decoded);
+                if (std::holds_alternative<hog::protocol::Welcome>(*decoded)) {
+                    REQUIRE(client.send(hog::net::Delivery::Reliable,
+                                        hog::protocol::encode(hog::protocol::Hurry{.scale = 512})));
+                } else if (const auto* told = std::get_if<hog::protocol::Clock>(&*decoded)) {
+                    clock = *told;
+                }
+            }
+        }
+        // Once told, hold on until the sped-up world shows in its time.
+        if ((clock && server->time() - start >= 1min) || MonotonicClock::now() >= give_up) {
+            stop = true;
+        }
+    }};
+    REQUIRE(server->run(timer, [] { return start; }, stop));
+    REQUIRE(clock);
+    CHECK(clock.value_or(hog::protocol::Clock{}).scale == 512);
+    CHECK(server->time() - start >= 1min);
+}
+
+TEST_CASE("a world without time control stays at real time", "[app][server]") {
+    const World world;
+    const auto server = playing(world);
+    auto connected =
+        hog::net::Client::connect(std::format("127.0.0.1:{}", server->players()->port()));
+    REQUIRE(connected);
+    hog::net::Client& client = *connected;
+    bool clock_told = false;
+    std::optional<MonotonicClock::time_point> echoed;
+    std::vector<hog::net::Event> events;
+    std::atomic<bool> stop = false;
+    const auto give_up = MonotonicClock::now() + 10s;
+    Visited timer{[&] {
+        client.poll(events);
+        for (const hog::net::Event& event : events) {
+            if (std::holds_alternative<hog::net::Connected>(event)) {
+                REQUIRE(client.send(hog::net::Delivery::Reliable,
+                                    hog::protocol::encode(hog::protocol::Hello{})));
+            } else if (const auto* message = std::get_if<hog::net::Message>(&event)) {
+                auto decoded = hog::protocol::decode(message->bytes());
+                REQUIRE(decoded);
+                if (std::holds_alternative<hog::protocol::Welcome>(*decoded)) {
+                    REQUIRE(client.send(hog::net::Delivery::Reliable,
+                                        hog::protocol::encode(hog::protocol::Hurry{.scale = 512})));
+                    // Chat rides behind the wish, so its echo brackets the server handling it.
+                    REQUIRE(client.send(hog::net::Delivery::Reliable,
+                                        hog::protocol::encode(hog::protocol::Said{
+                                            .from = "", .text = "still with us?"})));
+                } else if (std::holds_alternative<hog::protocol::Said>(*decoded)) {
+                    echoed = echoed.value_or(MonotonicClock::now());
+                } else if (std::holds_alternative<hog::protocol::Clock>(*decoded)) {
+                    clock_told = true;
+                }
+            }
+        }
+        const auto now = MonotonicClock::now();
+        if ((echoed && now - *echoed >= 300ms) || now >= give_up) {
+            stop = true;
+        }
+    }};
+    REQUIRE(server->run(timer, [] { return start; }, stop));
+    REQUIRE(echoed);
+    CHECK_FALSE(clock_told);
+    CHECK(server->time() - start < 1min);
 }

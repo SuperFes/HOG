@@ -234,7 +234,9 @@ chat, when connected:
   Enter                  say something: Enter again sends it, Esc puts it away
 
 time:
-  ] [                    run the planet's time faster, slower
+  ] [                    run this client's daylight faster, slower
+  } {                    run the server's whole world faster, slower, where its
+                         config allows time control
 
   F3                     show or hide how long frames take
   F4                     draw the clouds at the next quality

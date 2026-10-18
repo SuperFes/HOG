@@ -39,6 +39,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace hog::app {
@@ -146,6 +147,12 @@ private:
     // Sends every player the weather once it has stepped, to fade to over a step at `scale`.
     void tell_weather(std::int64_t scale);
     void send_weather(net::ConnectionId connection);
+    // Sends every player how fast the world's clock runs.
+    void tell_clock();
+    void send_clock(net::ConnectionId connection);
+    // Runs the clock as the newest player's wish asked, if any, telling everyone how it runs now.
+    template <typename Loop, typename Now>
+    void hurry_clock(Loop& loop, Now& now);
     // Answers debug tools waiting on the world, telling them how clock() runs and asking
     // steer(control) to change it.
     template <typename Clock, typename Steer>
@@ -179,6 +186,10 @@ private:
     // The weather players were last sent, coded, and the step it's from.
     std::vector<std::byte> weather_told_;
     std::optional<GameTime> weather_told_at_;
+    // The newest wish to run the clock at another speed, and whose it was.
+    std::optional<std::pair<net::ConnectionId, std::uint32_t>> hurry_;
+    // The loop's scale as of its last turn, for players joining between them.
+    std::uint32_t clock_scale_ = 1;
     server::Players joined_;
     // The ground near players, to check their moves against.
     physics::Space space_;
@@ -323,6 +334,26 @@ probe::Controlled Server::steer(Loop& loop, const probe::Control& control, Now& 
     return {.clock = detail::clock_of(loop), .error = {}};
 }
 
+template <typename Loop, typename Now>
+void Server::hurry_clock(Loop& loop, Now& now) {
+    clock_scale_ = static_cast<std::uint32_t>(loop.scale());
+    const auto hurry = std::exchange(hurry_, std::nullopt);
+    if (!hurry) {
+        return;
+    }
+    const probe::Controlled done =
+        steer(loop, probe::Control{.action = probe::Action::Speed, .amount = hurry->second}, now);
+    if (!done.error.empty()) {
+        log::info(server_log, "connection {} asked to run time at {}x: {}",
+                  std::to_underlying(hurry->first), hurry->second, done.error);
+        return;
+    }
+    log::info(server_log, "connection {} set time to {}x", std::to_underlying(hurry->first),
+              done.clock.scale);
+    clock_scale_ = done.clock.scale;
+    tell_clock();
+}
+
 template <server::Timer T, typename Now>
     requires std::same_as<std::invoke_result_t<Now&>, GameTime>
 Result<void> Server::run(T& timer, Now now, const std::atomic<bool>& stop) {
@@ -341,6 +372,7 @@ Result<void> Server::run(T& timer, Now now, const std::atomic<bool>& stop) {
         serve_probe([&loop] { return detail::clock_of(loop); },
                     [&](const probe::Control& control) { return steer(loop, control, now); });
         serve_players();
+        hurry_clock(loop, now);
         tell_weather(loop.scale());
         if (const MonotonicClock::time_point at = timer.now(); at >= next_share) {
             share();

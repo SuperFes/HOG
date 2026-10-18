@@ -521,6 +521,10 @@ void Server::answer(net::ConnectionId connection, const protocol::Answer& answer
                                         : std::format("player {}", std::to_underlying(connection)));
         handshakes_.erase(shaking);
         send_weather(connection);
+        // A world at real time goes without saying.
+        if (clock_scale_ != 1) {
+            send_clock(connection);
+        }
     }
 }
 
@@ -547,6 +551,10 @@ void Server::heard(net::ConnectionId connection, std::span<const std::byte> byte
         joined_.acknowledged(connection, ack->tick);
     } else if (const auto* said = std::get_if<protocol::Said>(&*message)) {
         say(connection, *said);
+    } else if (const auto* hurry = std::get_if<protocol::Hurry>(&*message)) {
+        if (joined_.find(connection)) {
+            hurry_ = {connection, hurry->scale};
+        }
     } else {
         log::debug(server_log, "connection {} sent a message out of place",
                    std::to_underlying(connection));
@@ -624,6 +632,24 @@ void Server::send_weather(net::ConnectionId connection) {
     }
     if (auto sent = players_->send(connection, net::Delivery::Reliable, weather_told_); !sent) {
         log::debug(server_log, "couldn't send connection {} the weather: {}",
+                   std::to_underlying(connection), sent.error());
+    }
+}
+
+void Server::tell_clock() {
+    for (const net::ConnectionId connection : joined_.connections()) {
+        send_clock(connection);
+    }
+}
+
+void Server::send_clock(net::ConnectionId connection) {
+    if (!players_) {
+        return;
+    }
+    if (auto sent = players_->send(connection, net::Delivery::Reliable,
+                                   protocol::encode(protocol::Clock{.scale = clock_scale_}));
+        !sent) {
+        log::debug(server_log, "couldn't send connection {} the clock: {}",
                    std::to_underlying(connection), sent.error());
     }
 }

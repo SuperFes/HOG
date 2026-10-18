@@ -97,6 +97,8 @@ struct Controls {
     bool quit = false;
     // Doublings of the planet's time asked for, halvings if negative.
     int faster_time = 0;
+    // The same for the server's whole world, where it allows time control.
+    int faster_world = 0;
 };
 
 // A key pressed. While typing chat only Esc does anything here; the rest go to the chat box.
@@ -118,9 +120,9 @@ void press(const SDL_KeyboardEvent& key, Controls& controls) {
     } else if (key.key == SDLK_F4 && !key.repeat) {
         controls.next_clouds = true;
     } else if (key.key == SDLK_RIGHTBRACKET) {
-        ++controls.faster_time;
+        ++((key.mod & SDL_KMOD_SHIFT) != 0 ? controls.faster_world : controls.faster_time);
     } else if (key.key == SDLK_LEFTBRACKET) {
-        --controls.faster_time;
+        --((key.mod & SDL_KMOD_SHIFT) != 0 ? controls.faster_world : controls.faster_time);
     }
 }
 
@@ -277,7 +279,7 @@ void show_network(const client::SessionSummary& summary, const std::string& weat
                          ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoSavedSettings |
                          ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav)) {
         for (const std::string* line : {&summary.connection, &summary.quality, &summary.traffic,
-                                        &summary.snapshots, &weather}) {
+                                        &summary.snapshots, &summary.clock, &weather}) {
             if (!line->empty()) {
                 ImGui::TextUnformatted(line->c_str());
             }
@@ -445,16 +447,18 @@ Result<bool> draw(client::Scene& scene, const client::Shot& shot, const render::
 // a second.
 class TitleCounter {
 public:
-    void count(SDL_Window* window, double height, double time_of_day, double rate) {
+    void count(SDL_Window* window, double height, double time_of_day, double rate,
+               std::uint32_t world_rate) {
         ++frames_;
         const MonotonicClock::time_point now = MonotonicClock::now();
         const std::chrono::duration<double> passed = now - since_;
         if (passed.count() >= 1.0) {
             const auto minutes = static_cast<int>(time_of_day * 24.0 * 60.0);
             const std::string title =
-                std::format("HOG - {:.0f} fps, {:.0f} m up, {:02}:{:02}{}",
+                std::format("HOG - {:.0f} fps, {:.0f} m up, {:02}:{:02}{}{}",
                             static_cast<double>(frames_) / passed.count(), height, minutes / 60,
-                            minutes % 60, rate > 1.0 ? std::format(", time {:.0f}x", rate) : "");
+                            minutes % 60, rate > 1.0 ? std::format(", time {:.0f}x", rate) : "",
+                            world_rate != 1 ? std::format(", world {}x", world_rate) : "");
             SDL_SetWindowTitle(window, title.c_str());
             frames_ = 0;
             since_ = now;
@@ -526,6 +530,13 @@ public:
     void say(std::string_view text) {
         if (session_) {
             session_->say(text);
+        }
+    }
+
+    // Asks the server to run the world at `scale` game seconds a real one, once in.
+    void hurry(std::uint32_t scale) {
+        if (session_) {
+            session_->hurry(scale);
         }
     }
 
@@ -704,6 +715,25 @@ void say_chat(ChatBox& chat, Connection& connection) {
     connection.say(std::exchange(chat.said, std::nullopt).value_or(std::string{}));
 }
 
+// The world's rate as the server last said it, 1 without a session.
+std::uint32_t world_rate(const Connection& connection) {
+    const client::Session* session = connection.session();
+    return session != nullptr ? session->world_rate() : 1;
+}
+
+// Asks the server to double or halve the world's time as `{` and `}` asked, from the rate it
+// last said it runs at; the server obliges only where its config allows time control.
+void hurry_world(Controls& controls, Connection& connection) {
+    const int doublings = std::exchange(controls.faster_world, 0);
+    const client::Session* session = connection.session();
+    if (doublings == 0 || session == nullptr) {
+        return;
+    }
+    const double rate =
+        static_cast<double>(session->world_rate()) * std::pow(2.0, static_cast<double>(doublings));
+    connection.hurry(static_cast<std::uint32_t>(std::clamp(rate, 1.0, client::fastest_time)));
+}
+
 // The clouds at the next quality, if asked for; as they were if it can't be made.
 void change_clouds(Controls& controls, client::Scene& scene, const render::Device& device) {
     if (!std::exchange(controls.next_clouds, false)) {
@@ -762,11 +792,12 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
         for (; controls.faster_time < 0; ++controls.faster_time) {
             clock.slower();
         }
+        hurry_world(controls, connection);
         clock.advance(seconds);
         title.count(
             window, glm::length(camera.eye.metres()) - radius - ground_height,
             scene.calendar().local_time_of_day(clock.time(), glm::normalize(flight.eye.metres())),
-            clock.rate());
+            clock.rate(), world_rate(connection));
 
         if (options.quit_after && now - started >= *options.quit_after) {
             controls.quit = true;

@@ -59,6 +59,13 @@ public:
     // welcomed, or once tidied to nothing.
     void say(std::string_view text);
 
+    // Asks the server to run the world at `scale` game seconds a real one; nothing before being
+    // welcomed, or of a scale of nothing.
+    void hurry(std::uint32_t scale);
+
+    // Game seconds a real one the server says its world runs at, 1 until it says otherwise.
+    [[nodiscard]] std::uint32_t world_rate() const noexcept { return world_rate_; }
+
     // The chat heard since last asked, oldest first.
     [[nodiscard]] std::vector<ChatLine> take_chat() noexcept { return std::exchange(chat_, {}); }
 
@@ -99,6 +106,7 @@ private:
     std::optional<WorldPosition> correction_;
     std::optional<protocol::Weather> weather_;
     std::vector<ChatLine> chat_;
+    std::uint32_t world_rate_ = 1;
     std::optional<MonotonicClock::time_point> last_snapshot_;
     MonotonicClock::time_point counting_since_;
     std::uint32_t counted_ = 0;
@@ -116,6 +124,7 @@ struct SessionSummary {
     std::string quality;      // ping and loss, once known
     std::string traffic;      // once known
     std::string snapshots;    // how often they come, and the newest's age
+    std::string clock;        // the world's speed, when not at real time
     std::vector<Seen> nearby; // nearest first
 };
 

@@ -17,7 +17,7 @@
 namespace hog::protocol {
 
 // Raised whenever any message changes; the two sides must speak the same one.
-inline constexpr std::uint32_t version = 6;
+inline constexpr std::uint32_t version = 7;
 // The longest connect token a client may present; more is a broken or hostile client.
 inline constexpr std::size_t most_token = 1'024;
 // The longest line of text a refusal carries.
@@ -169,6 +169,22 @@ struct Said {
     friend bool operator==(const Said&, const Said&) = default;
 };
 
+// Client to server: run the world's clock at `scale` game seconds a real one, to watch the world
+// go by. The server obliges only on a world whose config allows time control.
+struct Hurry {
+    std::uint32_t scale = 1;
+
+    friend bool operator==(const Hurry&, const Hurry&) = default;
+};
+
+// Server to client: how fast the world's clock runs, sent to everyone whose world sped up or
+// slowed down, and on joining one that isn't at real time.
+struct Clock {
+    std::uint32_t scale = 1;
+
+    friend bool operator==(const Clock&, const Clock&) = default;
+};
+
 // How many cells the weather at `level` has.
 [[nodiscard]] constexpr std::size_t weather_cells(std::uint8_t level) noexcept {
     return std::size_t{6} << (2U * level);
@@ -177,8 +193,8 @@ struct Said {
 // As a cell's weather reads back once sent.
 [[nodiscard]] CellWeather as_sent(const CellWeather& cell) noexcept;
 
-using Message =
-    std::variant<Hello, Welcome, Refused, Moved, Ack, Snapshot, Corrected, Weather, Said>;
+using Message = std::variant<Hello, Welcome, Refused, Moved, Ack, Snapshot, Corrected, Weather,
+                             Said, Hurry, Clock>;
 
 [[nodiscard]] std::vector<std::byte> encode(const Message& message);
 // Fails on an unknown kind, a message cut short or with bytes left over, one too long, a snapshot

@@ -261,6 +261,31 @@ TEST_CASE("a session says chat once welcomed, tidied to what it may carry", "[cl
     CHECK(std::get<protocol::Said>(*said).text == "hithere");
 }
 
+TEST_CASE("a session asks the server to hurry once welcomed", "[client][session]") {
+    Stand stand;
+    Session session = connected(stand.server);
+    session.hurry(64); // dropped: not welcomed yet
+    welcome(session, stand);
+    session.hurry(0); // a scale of nothing is never asked for
+    session.hurry(1'024);
+    look_until(session, stand, [&] { return stand.count<protocol::Hurry>() >= 1; });
+    REQUIRE(stand.count<protocol::Hurry>() == 1);
+    const auto hurry = std::ranges::find_if(stand.heard, [](const protocol::Message& message) {
+        return std::holds_alternative<protocol::Hurry>(message);
+    });
+    CHECK(std::get<protocol::Hurry>(*hurry).scale == 1'024);
+}
+
+TEST_CASE("a session hears how fast the world runs", "[client][session]") {
+    Stand stand;
+    Session session = connected(stand.server);
+    welcome(session, stand);
+    CHECK(session.world_rate() == 1);
+    stand.send(protocol::Clock{.scale = 512});
+    look_until(session, stand, [&] { return session.world_rate() == 512; });
+    CHECK(session.world_rate() == 512);
+}
+
 TEST_CASE("a session takes the chat heard once, oldest first", "[client][session]") {
     Stand stand;
     Session session = connected(stand.server);

@@ -28,6 +28,8 @@ enum class Kind : std::uint16_t {
     Corrected = 7,
     Weather = 8,
     Said = 9,
+    Hurry = 10,
+    Clock = 11,
 }; // NOLINT(performance-enum-size)
 
 // Which of an entity's changes follow its id in a snapshot.
@@ -212,6 +214,18 @@ void write_sized(ByteWriter& out, std::span<const std::byte> bytes) {
         const auto value = std::to_integer<std::uint8_t>(byte);
         return value < 0x20U || value == 0x7FU;
     });
+}
+
+// A time scale in game seconds a real one, which is never nothing.
+[[nodiscard]] Result<std::uint32_t> read_scale(ByteReader& in, std::string_view what) {
+    const auto scale = read<std::uint32_t>(in, what);
+    if (!scale) {
+        return std::unexpected(scale.error());
+    }
+    if (*scale == 0) {
+        return make_error(ErrorCode::OutOfRange, std::format("{} to no time at all", what));
+    }
+    return scale;
 }
 
 [[nodiscard]] Result<Message> finished(const ByteReader& in, Message message) {
@@ -513,6 +527,12 @@ std::vector<std::byte> encode(const Message& message) {
                 out.write(static_cast<std::uint16_t>(Kind::Corrected));
                 out.write(body.count);
                 write_position(out, body.at);
+            } else if constexpr (std::is_same_v<Body, Hurry>) {
+                out.write(static_cast<std::uint16_t>(Kind::Hurry));
+                out.write(body.scale);
+            } else if constexpr (std::is_same_v<Body, Clock>) {
+                out.write(static_cast<std::uint16_t>(Kind::Clock));
+                out.write(body.scale);
             } else if constexpr (std::is_same_v<Body, Said>) {
                 out.write(static_cast<std::uint16_t>(Kind::Said));
                 const std::string_view from{body.from};
@@ -583,6 +603,20 @@ Result<Message> decode(std::span<const std::byte> bytes) {
         return read_weather(in);
     case Kind::Said:
         return read_said(in);
+    case Kind::Hurry: {
+        const auto scale = read_scale(in, "a hurry");
+        if (!scale) {
+            return std::unexpected(scale.error());
+        }
+        return finished(in, Hurry{.scale = *scale});
+    }
+    case Kind::Clock: {
+        const auto scale = read_scale(in, "a clock");
+        if (!scale) {
+            return std::unexpected(scale.error());
+        }
+        return finished(in, Clock{.scale = *scale});
+    }
     }
     return make_error(ErrorCode::Unsupported, std::format("unknown message kind {}", *kind));
 }
