@@ -92,6 +92,7 @@ const Texel layer{0, 0, 31, 47};
 struct Scene {
     double eye_height = 2.0;
     DVec3 forward = east;
+    double fov = 1.2;            // vertical, radians
     double sun_elevation = 60.0; // degrees, towards the east
     std::vector<std::byte> before = everywhere(overcast);
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
@@ -158,7 +159,7 @@ std::vector<Pixels> draw_frames(hog::render::Device& device, const std::vector<S
         const DVec3 sun = (east * std::cos(elevation)) + (up * std::sin(elevation));
         const DVec3 camera_up = glm::normalize(up - (scene.forward * glm::dot(up, scene.forward)));
         const hog::render::Camera camera{
-            .eye = eye, .forward = scene.forward, .up = camera_up, .vertical_fov = 1.2};
+            .eye = eye, .forward = scene.forward, .up = camera_up, .vertical_fov = scene.fov};
         const hog::atmosphere::Model model;
         const double scale = hog::render::air_scale(model.air(), bend);
         const hog::render::SkyView seen{.camera = camera,
@@ -772,6 +773,37 @@ TEST_CASE("cloud seen from afar is found where it starts, not where the step it'
     INFO("roughness " << roughness);
     // Found only where its steps land, about 13.7.
     CHECK(roughness < 12.0);
+}
+
+TEST_CASE("cloud far off keeps its shape, not sliced into layers", "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    constexpr VkExtent2D size{.width = 768, .height = 432};
+    // Towers from 1216 m to 3520 m, seen from under their bases, away from the sun; the far ones
+    // lie near the horizon, where long steps through clear air would slice them into layers.
+    const Scene towers{.eye_height = 400.0,
+                       .forward = glm::normalize(-east + (0.1 * up)),
+                       .fov = 0.35,
+                       .before = everywhere(broken),
+                       .sky = everywhere({0, 0, 19, 55})};
+    const Pixels drawn = draw_frames(*device, std::vector<Scene>(8, towers), nullptr, size).back();
+    // Holes: the black behind showing through a gap slit between cloud close above and below it.
+    const auto brightness = [&](std::uint32_t x, std::uint32_t y) {
+        const std::size_t at = 4 * ((std::size_t{y} * size.width) + x);
+        return drawn[at] + drawn[at + 1] + drawn[at + 2];
+    };
+    constexpr std::uint32_t gap = 8;
+    std::uint32_t holes = 0;
+    for (std::uint32_t y = gap; y + gap < size.height; ++y) {
+        for (std::uint32_t x = 0; x < size.width; ++x) {
+            holes += brightness(x, y) < 120 && brightness(x, y - gap) > 330 &&
+                             brightness(x, y + gap) > 330
+                         ? 1U
+                         : 0U;
+        }
+    }
+    INFO("holes " << holes);
+    // Sliced by long steps through clear air, about 290.
+    CHECK(holes < 30);
 }
 
 TEST_CASE("the cloud's shadow reaches further the higher the eye, in steps that double",
