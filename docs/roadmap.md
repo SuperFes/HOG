@@ -239,8 +239,8 @@ This phase joins the server and client. It ends at the first milestone: four of 
 **World**
 
 - [x] Server sends weather state; client renders basic clouds and rain
-- [ ] Text chat with the profanity filter on the client side (toggle per player)
-- [ ] Headless bot clients that wander the islands, for testing
+- [x] Text chat with the profanity filter on the client side (toggle per player)
+- [x] Headless bot clients that wander the islands, for testing
 
 **Hosting**
 
