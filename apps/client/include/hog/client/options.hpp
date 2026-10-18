@@ -49,6 +49,8 @@ struct Options {
     // Cussing in chat shown as grawlix; each player chooses for their own screen. Hate speech
     // reads as small talk whatever this says.
     bool chat_filter = true;
+    // Grass grown on the ground near the eye.
+    bool grass = true;
     render::CloudQuality clouds = render::CloudQuality::High;
     // A software Vulkan device over a GPU, and the validation layer with its errors failing the
     // run, also for tests. Debug builds validate unless told not to.

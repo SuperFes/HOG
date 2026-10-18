@@ -83,6 +83,11 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
     if (!ocean) {
         return failed("draw the sea", ocean.error());
     }
+    const BiomePalette palette = biome_palette();
+    auto grass = render::Grass::create(device, colour_format, depth_format, palette);
+    if (!grass) {
+        return failed("grow the grass", grass.error());
+    }
     auto pool = render::TerrainPool::create(
         device, {.patches = settings.capacity, .frames = frames, .uploads = settings.uploads});
     if (!pool) {
@@ -126,6 +131,7 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
                  calendar,
                  std::move(terrain).value(),
                  std::move(ocean).value(),
+                 std::move(grass).value(),
                  std::move(pool).value(),
                  std::move(atmosphere).value(),
                  std::move(sky).value(),
@@ -141,16 +147,17 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
 
 Scene::Scene(const render::Device& device, const planet::World& world, jobs::JobSystem& jobs,
              const sim::Calendar& calendar, render::Terrain terrain, render::Ocean ocean,
-             render::TerrainPool pool, render::Atmosphere atmosphere, render::Sky sky,
-             render::Capsules others, render::WeatherMaps weather, render::Clouds clouds,
-             render::Precipitation precipitation, render::Glare glare, render::GpuTimer timer,
-             std::optional<render::Billboard> companion, std::uint32_t frames)
+             render::Grass grass, render::TerrainPool pool, render::Atmosphere atmosphere,
+             render::Sky sky, render::Capsules others, render::WeatherMaps weather,
+             render::Clouds clouds, render::Precipitation precipitation, render::Glare glare,
+             render::GpuTimer timer, std::optional<render::Billboard> companion,
+             std::uint32_t frames)
     : baker_{world, jobs}, terrain_{std::move(terrain)}, ocean_{std::move(ocean)},
-      pool_{std::move(pool)}, transients_{device, frames}, others_{std::move(others)},
-      companion_{std::move(companion)}, atmosphere_{std::move(atmosphere)}, sky_{std::move(sky)},
-      weather_{std::move(weather)}, clouds_{std::move(clouds)},
-      precipitation_{std::move(precipitation)}, glare_{std::move(glare)}, timer_{std::move(timer)},
-      calendar_{calendar} {}
+      grass_{std::move(grass)}, pool_{std::move(pool)}, transients_{device, frames},
+      others_{std::move(others)}, companion_{std::move(companion)},
+      atmosphere_{std::move(atmosphere)}, sky_{std::move(sky)}, weather_{std::move(weather)},
+      clouds_{std::move(clouds)}, precipitation_{std::move(precipitation)},
+      glare_{std::move(glare)}, timer_{std::move(timer)}, calendar_{calendar} {}
 
 Scene::~Scene() {
     (void)baker_.finish();
@@ -311,6 +318,21 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
             ocean_.draw(commands, frame.extent,
                         {.camera = shot.camera, .sun = sky.sun, .bend = shot.bend, .air = through});
         });
+    swaying_for_ += shot.seconds;
+    const std::vector<render::GrassDraw> lawn =
+        grass_on_ ? grass_draws(slots_, streamed.drawn, shot.camera.eye, shot.bend.radius)
+                  : std::vector<render::GrassDraw>{};
+    if (!lawn.empty()) {
+        graph.add({.name = "grass", .uses = through_air, .targets = drawn},
+                  [&, lawn](VkCommandBuffer commands) {
+                      grass_.draw(commands, frame.extent, pool_, lawn,
+                                  {.camera = shot.camera,
+                                   .bend = shot.bend,
+                                   .air = through,
+                                   .wind = drift * surface_wind,
+                                   .seconds = swaying_for_});
+                  });
+    }
     if (!shot.others.empty()) {
         graph.add(
             {.name = "others", .uses = through_air, .targets = drawn},

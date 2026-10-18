@@ -911,6 +911,7 @@ int show(const client::Options& options, const planet::PlanetConfig& planet,
         std::cerr << std::format("hog-client: {}\n", set.error());
         return EXIT_FAILURE;
     }
+    scene->set_grass(options.grass);
     const Result<void> flown =
         fly(*scene, clock, world, flight, *connection, options, device, presenter, window);
     // The GPU may still be drawing with the scene.

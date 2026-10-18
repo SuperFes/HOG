@@ -287,13 +287,13 @@ Borrowed from real species to make forests feel grown rather than scattered. A m
 **Rendering**
 
 - [ ] Instanced rendering with LOD tiers: full geometry near, billboard impostors mid-range, density and colour folded into the terrain far away
-- [ ] Grass as instanced blades and patches near the eye, fading into the ground material
+- [x] Grass as instanced blades and patches near the eye, fading into the ground material
 - [ ] Per-tier budgets checked on the minimum-spec iGPU, with counts in the frame overlay
 
 **Wind and weather**
 
 - [ ] Plants react to the weather grid's wind in the shader: still air sits still, light wind sways gently, storms hold plants bent in the wind's direction
-- [ ] Gusts travel as visible waves across grass fields
+- [x] Gusts travel as visible waves across grass fields
 - [ ] High wind breaks branches and fells weak trees as sim events, so everyone sees the same deadfall
 
 ## Phase 6 — Areas and scale

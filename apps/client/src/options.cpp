@@ -152,6 +152,8 @@ constexpr std::array flags{
     Flag{.name = "--timings", .set = [](Options& options) { options.timings = true; }},
     Flag{.name = "--chat-filter", .set = [](Options& options) { options.chat_filter = true; }},
     Flag{.name = "--no-chat-filter", .set = [](Options& options) { options.chat_filter = false; }},
+    Flag{.name = "--grass", .set = [](Options& options) { options.grass = true; }},
+    Flag{.name = "--no-grass", .set = [](Options& options) { options.grass = false; }},
     Flag{.name = "--software", .set = [](Options& options) { options.software = true; }},
     Flag{.name = "--validate", .set = [](Options& options) { options.validate = true; }},
     Flag{.name = "--no-validate", .set = [](Options& options) { options.validate = false; }},
@@ -207,6 +209,7 @@ options:
                          talk about the weather either way
   --clouds QUALITY       draw the clouds at low, medium or high quality, for what
                          the GPU can afford (default high)
+  --no-grass             don't grow grass near the eye, for what the GPU can afford
   --software             draw with a software Vulkan device, such as lavapipe
   --validate             check Vulkan use with its validation layer, failing on errors;
                          on by default in debug builds

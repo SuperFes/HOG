@@ -70,8 +70,8 @@ struct Corner {
 [[nodiscard]] planet::CellId sample_cell(Corner corner);
 
 struct PatchVertex {
-    Vec3 position; // metres from the patch's origin
-    Vec3 normal;
+    Vec3 position{0.0F}; // metres from the patch's origin
+    Vec3 normal{0.0F};
     planet::Biome biome = planet::Biome::Ocean;
 };
 

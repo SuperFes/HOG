@@ -2,7 +2,14 @@
 #include <hog/core/assert.hpp>
 #include <hog/mapgen/photo.hpp>
 
+#include <glm/geometric.hpp>
+
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <numbers>
+#include <optional>
 
 namespace hog::client {
 
@@ -103,6 +110,62 @@ std::optional<std::uint32_t> GroundSlots::slot(planet::CellId cell) const {
         return std::nullopt;
     }
     return held->second;
+}
+
+namespace {
+
+// The same on every machine, so everyone grows the same field.
+std::uint32_t grass_seed(planet::CellId cell) noexcept {
+    std::uint64_t mixed = cell.raw();
+    mixed ^= mixed >> 30U;
+    mixed *= 0xbf58'476d'1ce4'e5b9;
+    mixed ^= mixed >> 27U;
+    mixed *= 0x94d0'49bb'1331'11eb;
+    mixed ^= mixed >> 31U;
+    return static_cast<std::uint32_t>(mixed);
+}
+
+} // namespace
+
+std::vector<render::GrassDraw> grass_draws(const GroundSlots& slots,
+                                           std::span<const terrain::StreamedPatch> drawn,
+                                           WorldPosition eye, double planet_radius,
+                                           const GrassBudget& budget) {
+    std::vector<render::GrassDraw> draws;
+    const DVec3 up = glm::normalize(eye.metres());
+    for (const terrain::StreamedPatch& patch : drawn) {
+        // A face spans a quarter of the circumference, so a cell at this level this much of it.
+        const double spacing =
+            (std::numbers::pi / 2.0) * planet_radius /
+            static_cast<double>(std::uint64_t{1} << static_cast<unsigned>(patch.cell.level())) /
+            terrain::patch_cells;
+        if (spacing > budget.finest) {
+            continue;
+        }
+        // Distance level with the ground, generously: an origin lies at sea level under its
+        // patch, maybe a span aside of its nearest ground, while each blade fades by how far it
+        // truly is.
+        const double span = spacing * terrain::patch_cells;
+        const DVec3 away = patch.origin - eye;
+        const double distance = std::max(0.0, glm::length(away - (up * glm::dot(away, up))) - span);
+        if (distance >= render::grass_far) {
+            continue;
+        }
+        const double fade = std::min(
+            (render::grass_far - distance) / (render::grass_far - render::grass_near), 1.0);
+        const auto blades =
+            static_cast<std::uint32_t>(std::lround(budget.density * spacing * spacing * fade));
+        const std::optional<std::uint32_t> held = slots.slot(patch.cell);
+        if (blades == 0 || !held) {
+            continue;
+        }
+        draws.push_back({.slot = *held,
+                         .origin = patch.origin,
+                         .spacing = spacing,
+                         .blades_per_cell = std::min(blades, render::most_blades_per_cell),
+                         .seed = grass_seed(patch.cell)});
+    }
+    return draws;
 }
 
 } // namespace hog::client

@@ -510,7 +510,12 @@ void push_storage_image(VkCommandBuffer commands, const Pipeline& pipeline, std:
 
 void push_storage_buffer(VkCommandBuffer commands, const Pipeline& pipeline, std::uint32_t binding,
                          VkBuffer buffer) noexcept {
-    const VkDescriptorBufferInfo whole{.buffer = buffer, .offset = 0, .range = VK_WHOLE_SIZE};
+    push_storage_buffer(commands, pipeline, binding, buffer, 0, VK_WHOLE_SIZE);
+}
+
+void push_storage_buffer(VkCommandBuffer commands, const Pipeline& pipeline, std::uint32_t binding,
+                         VkBuffer buffer, VkDeviceSize offset, VkDeviceSize range) noexcept {
+    const VkDescriptorBufferInfo part{.buffer = buffer, .offset = offset, .range = range};
     const VkWriteDescriptorSet write{.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
                                      .pNext = nullptr,
                                      .dstSet = VK_NULL_HANDLE,
@@ -519,7 +524,7 @@ void push_storage_buffer(VkCommandBuffer commands, const Pipeline& pipeline, std
                                      .descriptorCount = 1,
                                      .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                                      .pImageInfo = nullptr,
-                                     .pBufferInfo = &whole,
+                                     .pBufferInfo = &part,
                                      .pTexelBufferView = nullptr};
     push_descriptor(commands, pipeline, write);
 }

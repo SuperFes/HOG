@@ -133,6 +133,9 @@ void push_uniform_buffer(VkCommandBuffer commands, const Pipeline& pipeline, std
 void push_storage_image(VkCommandBuffer commands, const Pipeline& pipeline, std::uint32_t binding,
                         VkImageView view) noexcept;
 // As above, for a buffer to read and write.
+// `offset` must meet the device's storage-buffer alignment; 256 meets any device's.
+void push_storage_buffer(VkCommandBuffer commands, const Pipeline& pipeline, std::uint32_t binding,
+                         VkBuffer buffer, VkDeviceSize offset, VkDeviceSize range) noexcept;
 void push_storage_buffer(VkCommandBuffer commands, const Pipeline& pipeline, std::uint32_t binding,
                          VkBuffer buffer) noexcept;
 

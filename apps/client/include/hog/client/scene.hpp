@@ -16,6 +16,7 @@
 #include <hog/render/clouds.hpp>
 #include <hog/render/glare.hpp>
 #include <hog/render/gpu_timer.hpp>
+#include <hog/render/grass.hpp>
 #include <hog/render/memory.hpp>
 #include <hog/render/ocean.hpp>
 #include <hog/render/precipitation.hpp>
@@ -108,6 +109,10 @@ public:
     // read when the last frame was recorded; empty where the GPU can't time.
     [[nodiscard]] std::span<const render::GpuSpan> timings() const noexcept { return timings_; }
 
+    // Whether grass is grown on the ground near the eye; it is unless turned off.
+    void set_grass(bool grass) noexcept { grass_on_ = grass; }
+    [[nodiscard]] bool grass() const noexcept { return grass_on_; }
+
     [[nodiscard]] render::CloudQuality cloud_quality() const noexcept { return clouds_.quality(); }
     // The GPU must have finished with the frames recorded before.
     Result<> set_cloud_quality(render::CloudQuality quality) {
@@ -120,10 +125,10 @@ public:
 private:
     Scene(const render::Device& device, const planet::World& world, jobs::JobSystem& jobs,
           const sim::Calendar& calendar, render::Terrain terrain, render::Ocean ocean,
-          render::TerrainPool pool, render::Atmosphere atmosphere, render::Sky sky,
-          render::Capsules others, render::WeatherMaps weather, render::Clouds clouds,
-          render::Precipitation precipitation, render::Glare glare, render::GpuTimer timer,
-          std::optional<render::Billboard> companion, std::uint32_t frames);
+          render::Grass grass, render::TerrainPool pool, render::Atmosphere atmosphere,
+          render::Sky sky, render::Capsules others, render::WeatherMaps weather,
+          render::Clouds clouds, render::Precipitation precipitation, render::Glare glare,
+          render::GpuTimer timer, std::optional<render::Billboard> companion, std::uint32_t frames);
 
     render::SkyView sky_view(const Shot& shot, render::CloudShade shade);
 
@@ -131,6 +136,7 @@ private:
     terrain::PatchStream stream_;
     render::Terrain terrain_;
     render::Ocean ocean_;
+    render::Grass grass_;
     render::TerrainPool pool_;
     GroundSlots slots_;
     render::TransientImages transients_;
@@ -151,6 +157,8 @@ private:
     std::optional<std::uint64_t> weather_taken_;
     DVec3 drifted_{0.0};       // metres the clouds have drifted
     double falling_for_ = 0.0; // seconds what falls has been falling
+    double swaying_for_ = 0.0; // seconds the grass has swayed
+    bool grass_on_ = true;
     bool settled_ = false;
 };
 

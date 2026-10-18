@@ -2,6 +2,7 @@
 
 #include <hog/core/result.hpp>
 #include <hog/planet/cell_id.hpp>
+#include <hog/render/grass.hpp>
 #include <hog/render/terrain.hpp>
 #include <hog/terrain/material.hpp>
 #include <hog/terrain/stream.hpp>
@@ -37,6 +38,12 @@ concept SlotPool =
         { pool.stage(slot, slot, vertices) } -> std::same_as<Result<>>;
     };
 
+// How much grass is grown, on ground how fine.
+struct GrassBudget {
+    double finest = 0.75;  // metres between a patch's vertices at most, so only fine ground grows
+    double density = 40.0; // blades a square metre up close
+};
+
 // Which slot holds each patch a stream holds.
 class GroundSlots {
 public:
@@ -55,6 +62,12 @@ public:
 private:
     std::map<planet::CellId, std::uint32_t> slots_;
 };
+
+// The grass grown on the drawn patches: those fine enough and within the grass's reach of the
+// eye, fewer blades a cell the further they lie. Patches without slots are passed over.
+[[nodiscard]] std::vector<render::GrassDraw>
+grass_draws(const GroundSlots& slots, std::span<const terrain::StreamedPatch> drawn,
+            WorldPosition eye, double planet_radius, const GrassBudget& budget = {});
 
 template <SlotPool Pool>
 Result<> GroundSlots::take(Pool& pool, std::uint32_t frame, const terrain::StreamFrame& streamed) {

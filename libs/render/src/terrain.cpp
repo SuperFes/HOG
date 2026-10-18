@@ -137,9 +137,12 @@ Result<TerrainPool> TerrainPool::create(const Device& device, const TerrainPoolD
                           "a terrain pool needs a patch, a frame and an upload");
     }
     TerrainPool pool;
-    auto vertices = make_buffer(
-        device, patch_bytes * desc.patches,
-        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, Memory::Gpu);
+    // Storage too: grass reads the patches' ground straight from the pool.
+    auto vertices =
+        make_buffer(device, patch_bytes * desc.patches,
+                    VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                    Memory::Gpu);
     if (!vertices) {
         return std::unexpected(std::move(vertices).error());
     }
@@ -227,14 +230,18 @@ Result<> TerrainPool::record_uploads(VkCommandBuffer commands, std::uint32_t fra
                            .dstOffset = upload.slot * patch_bytes,
                            .size = patch_bytes});
     }
-    // Earlier frames may still be drawing from a slot about to be replaced.
-    memory_barrier(commands, VK_PIPELINE_STAGE_2_VERTEX_ATTRIBUTE_INPUT_BIT, VK_ACCESS_2_NONE,
-                   VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
+    // Earlier frames may still be drawing from a slot about to be replaced, the ground as
+    // vertices and the grass through storage reads.
+    memory_barrier(commands,
+                   VK_PIPELINE_STAGE_2_VERTEX_ATTRIBUTE_INPUT_BIT |
+                       VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
+                   VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
     vkCmdCopyBuffer(commands, staging_[frame].handle(), vertices_.handle(),
                     static_cast<std::uint32_t>(regions.size()), regions.data());
     memory_barrier(commands, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                   VK_PIPELINE_STAGE_2_VERTEX_ATTRIBUTE_INPUT_BIT,
-                   VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT);
+                   VK_PIPELINE_STAGE_2_VERTEX_ATTRIBUTE_INPUT_BIT |
+                       VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
+                   VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
     staged.clear();
     return {};
 }

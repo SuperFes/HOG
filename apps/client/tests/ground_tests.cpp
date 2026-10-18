@@ -117,6 +117,42 @@ TEST_CASE("patches are drawn from their slots", "[client][ground]") {
     CHECK(draws[1].slot == 0);
 }
 
+TEST_CASE("grass grows on fine ground near the eye, thinning with distance", "[client][ground]") {
+    constexpr double radius = 115'000.0;
+    // Vertex spacing ~0.69 m at level 13 on this planet; a level up is too coarse for grass.
+    const CellId fine = CellId::from_face_ij(0, 0, 0, 13);
+    const CellId fine_far = CellId::from_face_ij(0, 1, 0, 13);
+    const CellId coarse = CellId::from_face_ij(0, 0, 0, 12);
+    FakePool pool;
+    GroundSlots slots;
+    REQUIRE(slots.take(pool, 1, arriving({fine, fine_far, coarse})));
+    const hog::WorldPosition eye{radius, 0.0, 0.0};
+    const auto patch = [&](CellId cell, double away) {
+        return hog::terrain::StreamedPatch{
+            .cell = cell, .origin = hog::WorldPosition{radius, away, 0.0}, .coarser_edges = 0};
+    };
+    const std::vector<hog::terrain::StreamedPatch> drawn{patch(fine, 0.0), patch(fine_far, 60.0),
+                                                         patch(coarse, 0.0)};
+
+    const std::vector<hog::render::GrassDraw> lawn =
+        hog::client::grass_draws(slots, drawn, eye, radius);
+    // Only the fine patches grow grass, and the far one fewer blades than the near.
+    REQUIRE(lawn.size() == 2);
+    CHECK(lawn[0].slot == 0);
+    CHECK(lawn[1].slot == 1);
+    CHECK(lawn[0].blades_per_cell >= 1);
+    CHECK(lawn[1].blades_per_cell >= 1);
+    CHECK(lawn[1].blades_per_cell < lawn[0].blades_per_cell);
+    CHECK(lawn[0].spacing < 0.75);
+    // The same cell seeds the same grass on every machine.
+    CHECK(lawn[0].seed == hog::client::grass_draws(slots, drawn, eye, radius)[0].seed);
+    CHECK(lawn[0].seed != lawn[1].seed);
+
+    // Out of reach altogether, nothing grows.
+    const std::vector<hog::terrain::StreamedPatch> far_off{patch(fine, 300.0)};
+    CHECK(hog::client::grass_draws(slots, far_off, eye, radius).empty());
+}
+
 TEST_CASE("each biome is coloured as it looks from above", "[client][ground]") {
     const hog::client::BiomePalette palette = hog::client::biome_palette();
     for (const hog::Vec3 colour : palette) {
