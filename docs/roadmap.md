@@ -13,19 +13,20 @@ flowchart TB
     p2["Phase 2 · Headless server<br/><i>Gate: 1 sim year in 10 minutes</i>"]
     p3["Phase 3 · Client renderer<br/><i>Gate: 60 fps over the islands</i>"]
     p4["Phase 4 · First milestone: four friends<br/><i>Gate: an hour of play, no desyncs</i>"]
-    p5["Phase 5 · Areas and scale<br/><i>Gate: 1,000 bots cross borders</i>"]
-    p6["Phase 6 · Gameplay tracks<br/><i>Gate: one full play loop</i>"]
-    p7["Phase 7 · Tools and moderation<br/><i>Gate: GM edits, rollback works</i>"]
-    p8["Phase 8 · Playtests to public servers<br/><i>Gate: a public server for a month</i>"]
+    p5["Phase 5 · Vegetation<br/><i>Gate: forests in the wind at 30 fps</i>"]
+    p6["Phase 6 · Areas and scale<br/><i>Gate: 1,000 bots cross borders</i>"]
+    p7["Phase 7 · Gameplay tracks<br/><i>Gate: one full play loop</i>"]
+    p8["Phase 8 · Tools and moderation<br/><i>Gate: GM edits, rollback works</i>"]
+    p9["Phase 9 · Playtests to public servers<br/><i>Gate: a public server for a month</i>"]
     p0 --> p1 --> p2 & p3
     p2 & p3 --> p4
-    p4 --> p5 & p6 & p7
-    p3 -.->|editor starts early| p7
-    p5 & p6 & p7 --> p8
+    p4 --> p5 & p6 & p7 & p8
+    p3 -.->|editor starts early| p8
+    p5 & p6 & p7 & p8 --> p9
     style p4 stroke-width:3px
 ```
 
-Phases 0 and 1 are strictly in order. After that, server and client work split across the team until Phase 4. From there, gameplay, scale and tools run side by side.
+Phases 0 and 1 are strictly in order. After that, server and client work split across the team until Phase 4. From there, vegetation, gameplay, scale and tools run side by side.
 
 ## Decide first
 
@@ -46,10 +47,10 @@ Five choices block Phase 0. Each one can be settled in an evening. The rest of t
 | macOS Vulkan layer | KosmicKrisp, MoltenVK | Phase 3 | Support both and test against each |
 | Network library | GameNetworkingSockets, QUIC with datagrams | Phase 4 | **Decided ([#83](https://github.com/SuperFes/HOG/issues/83)):** GameNetworkingSockets |
 | Art direction | Three or four reference games | Phase 3 end | Open |
-| Death penalty, PvP default | See the plan's open questions | Phase 6 | Open |
+| Death penalty, PvP default | See the plan's open questions | Phase 7 | Open |
 | Generative AI in content | None, internal concept reference only | Before any content production | None in shipped assets |
-| Content and art license | CC BY 4.0, CC BY-SA 4.0, proprietary | Phase 6 | Open |
-| Age checks and minors | Legal review | Phase 8 | Official servers 18+ to start |
+| Content and art license | CC BY 4.0, CC BY-SA 4.0, proprietary | Phase 7 | Open |
+| Age checks and minors | Legal review | Phase 9 | Official servers 18+ to start |
 
 ## Phase 0 — Foundations
 
@@ -247,7 +248,41 @@ This phase joins the server and client. It ends at the first milestone: four of 
 - [ ] One small cloud server or home server reachable by the team
 - [ ] Crash dumps from client and server uploaded automatically to us
 
-## Phase 5 — Areas and scale
+## Phase 5 — Vegetation
+
+This phase covers the planet in procedurally generated plant life, grown from per-species rules and placed deterministically from the seed, shaped by the ecology the server already simulates: biome, forest biomass, moisture, fire history. It's client-heavy, runs in parallel with the phases after it, and is the first time the planet looks alive up close.
+
+**Gate:** flying and walking over the islands shows grass fields, shrubland and mixed forests of visibly different species, holding frame rate on the minimum-spec iGPU. The same seed grows the same forest on every machine. Wind from the live weather visibly crosses a grass field in waves.
+
+**Species rules**
+
+- [ ] Plant grammar: a species is a rule set (trunk habit, branch angles and counts per level, crown shape, leaf, needle or frond) that grows an individual deterministically from a seed
+- [ ] First tree set, each with its own rules: a pine analogue (whorled branches, conical crown), an oak analogue (spreading, gnarled), a maple analogue, a palm analogue (bare trunk, frond crown)
+- [ ] Ground cover: tall and short grasses, reeds by water, bushes and shrubs as cheap grammar cases
+- [ ] Age from the same seed: seedlings, saplings, mature and ancient trees from one rule set
+- [ ] Condition states: dead standing wood, half-fallen and felled trunks, fire-scorched survivors, insect- and animal-worn damage simulated without the animals
+- [ ] Golden tests: the same seed grows the same plant, bit for bit, on every platform
+
+**Placement**
+
+- [ ] Placement from the sim: biome, forest biomass, moisture and the water table decide what grows where and how densely
+- [ ] Deterministic per-cell scatter, so every client grows the same world with nothing sent over the network
+- [ ] Succession on burned or emptied cells from the forest sim's history: pioneer grass, then shrubs, then young forest among the burned trunks
+- [ ] A burned-in-the-past, regrowing forest somewhere on the starting islands to prove it
+
+**Rendering**
+
+- [ ] Instanced rendering with LOD tiers: full geometry near, billboard impostors mid-range, density and colour folded into the terrain far away
+- [ ] Grass as instanced blades and patches near the eye, fading into the ground material
+- [ ] Per-tier budgets checked on the minimum-spec iGPU, with counts in the frame overlay
+
+**Wind and weather**
+
+- [ ] Plants react to the weather grid's wind in the shader: still air sits still, light wind sways gently, storms hold plants bent in the wind's direction
+- [ ] Gusts travel as visible waves across grass fields
+- [ ] High wind breaks branches and fells weak trees as sim events, so everyone sees the same deadfall
+
+## Phase 6 — Areas and scale
 
 This phase proves the world can be split across servers without players noticing. It starts with logical areas inside one process and moves to separate processes only once that works.
 
@@ -264,7 +299,7 @@ This phase proves the world can be split across servers without players noticing
 - [ ] Dashboards for tick time, bandwidth per player and handovers per minute
 - [ ] Bandwidth check against the plan's estimate of about 24 KB/s per player
 
-## Phase 6 — Gameplay tracks
+## Phase 7 — Gameplay tracks
 
 These tracks can start once Phase 4 works and can run side by side; four people means about four tracks at once. Each track is a tested library with its own debug views. Its gate is one small loop that is fun to play on the islands.
 
@@ -352,7 +387,7 @@ These tracks can start once Phase 4 works and can run side by side; four people 
 - [ ] Ground materials with roughness and wetness, wet where weather reaches and dry where it's sheltered (mud, rain on rocks)
 - [ ] Art direction pass once the references are chosen
 
-## Phase 7 — Tools, scripting and moderation
+## Phase 8 — Tools, scripting and moderation
 
 Tools grow alongside the phases above, but this phase brings them together into what GMs and community server hosts need. The Qt editor can start any time after Phase 3, because the renderer already accepts any surface.
 
@@ -387,7 +422,7 @@ Tools grow alongside the phases above, but this phase brings them together into 
 - [ ] Server packages (container image and plain binaries) with a setup guide
 - [ ] Server browser listing for community servers
 
-## Phase 8 — Playtests to public servers
+## Phase 9 — Playtests to public servers
 
 This phase widens the audience in steps, and each step needs the one before it to hold.
 
