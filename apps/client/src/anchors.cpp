@@ -149,10 +149,11 @@ TileTrees tile_anchors(const planet::World& world, planet::CellId tile, WorldPos
             }
         }
         // Each genus a run of its own, for the grown forest to draw by its own vertex count.
-        std::stable_partition(
+        std::stable_sort(
             std::next(trees.anchors.begin(), static_cast<std::ptrdiff_t>(trees.starts.at(block))),
-            trees.anchors.end(), [](const render::TreeAnchor& anchor) {
-                return render::genus_of(anchor.colour) == flora::Genus::Pine;
+            trees.anchors.end(),
+            [](const render::TreeAnchor& left, const render::TreeAnchor& right) {
+                return render::genus_of(left.colour) < render::genus_of(right.colour);
             });
     }
     trees.starts.back() = static_cast<std::uint32_t>(trees.anchors.size());
@@ -275,11 +276,8 @@ TreeAnchors::Tile TreeAnchors::held_tile(std::uint32_t slot, WorldPosition origi
             sum += anchor.position;
         }
         block.centre = sum / static_cast<float>(block.count);
-        block.pines = static_cast<std::uint32_t>(
-            std::ranges::count_if(stood, [](const render::TreeAnchor& anchor) {
-                return render::genus_of(anchor.colour) == flora::Genus::Pine;
-            }));
         for (const render::TreeAnchor& anchor : stood) {
+            ++block.genera.at(static_cast<std::size_t>(render::genus_of(anchor.colour)));
             block.reach = std::max(block.reach, glm::length(anchor.position - block.centre));
         }
     }
@@ -335,18 +333,16 @@ std::vector<render::StandDraw> TreeAnchors::forest_draws(const Sight& sight,
             } else if (distance < budget.forest_mid) {
                 detail = 1;
             }
-            const std::array<std::pair<flora::Genus, std::uint32_t>, 2> runs{
-                {{flora::Genus::Pine, block.pines},
-                 {flora::Genus::Oak, block.count - block.pines}}};
             std::uint32_t first = block.first;
-            for (const auto& [genus, count] : runs) {
+            for (std::size_t genus = 0; genus < block.genera.size(); ++genus) {
+                const std::uint32_t count = block.genera.at(genus);
                 if (count > 0) {
                     stands.push_back({.slot = tile.slot,
                                       .first = first,
                                       .count = count,
                                       .origin = tile.origin,
                                       .detail = detail,
-                                      .genus = genus,
+                                      .genus = static_cast<flora::Genus>(genus),
                                       .distance = distance});
                 }
                 first += count;

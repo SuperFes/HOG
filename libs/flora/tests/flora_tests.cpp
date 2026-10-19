@@ -18,6 +18,7 @@ using hog::flora::aged;
 using hog::flora::Bough;
 using hog::flora::Detail;
 using hog::flora::grow;
+using hog::flora::maple;
 using hog::flora::mesh;
 using hog::flora::oak;
 using hog::flora::pine;
@@ -239,6 +240,22 @@ TEST_CASE("an oak spreads a broad crown of leaves on gnarled limbs", "[flora]") 
     CHECK(fingered(mesh(tree, Detail{.wood_levels = oak().woody})) == 0xd26c'1353'cae4'6736ULL);
     CHECK(fingered(mesh(grow(aged(oak(), 0.15F), 7U))) == 0x42b3'4987'2012'bb37ULL);
     CHECK(fingered(mesh(grow(aged(oak(), 0.95F), 7U))) == 0x4028'5d46'9695'8f1bULL);
+}
+
+TEST_CASE("a maple holds a dense oval crown on a straight trunk", "[flora]") {
+    const Shape pine_prime = shape_at(prime_age);
+    const Shape oak_prime = shape_at(prime_age, oak());
+    const Shape prime = shape_at(prime_age, maple());
+    CHECK(prime.spread > 1.1F * pine_prime.spread);
+    CHECK(prime.spread < 0.75F * oak_prime.spread);
+    CHECK(prime.fronds > 1.1F * oak_prime.fronds);
+    CHECK(shape_at(0.15F, maple()).spread < prime.spread);
+    CHECK(prime.spread < shape_at(0.95F, maple()).spread);
+    CHECK(maple().levels[0].gnarl < 0.5F * oak().levels[0].gnarl);
+    const Skeleton tree = grow(maple(), 7U);
+    CHECK(fingered(mesh(grow(hog::flora::species_of(hog::flora::Genus::Maple), 7U))) ==
+          fingered(mesh(tree)));
+    CHECK(fingered(mesh(tree, Detail{.wood_levels = maple().woody})) == 0x390d'd169'7c7e'd1e8ULL);
 }
 
 TEST_CASE("leaves hold full along a frond, needles thin evenly", "[flora]") {
@@ -470,6 +487,40 @@ TEST_CASE("oaks keep their leaves near the equator, and grow them back further f
         leaves_at(leafing, 0.0F, {.hours = 13.5F, .longest = longest, .lengthening = true});
     CHECK(summer.turned == 0.0F);
     CHECK(summer.held == 1.0F);
+}
+
+TEST_CASE("maples turn before the oaks, brighter, and are bare sooner", "[flora][season]") {
+    using hog::flora::Daylight;
+    using hog::flora::leaves_at;
+    constexpr float longest = 15.4F;
+    const auto shortening = [](float hours) {
+        return Daylight{.hours = hours, .longest = longest, .lengthening = false};
+    };
+    const auto oaks = [&](float hours) {
+        return leaves_at(oak().leafing, 0.0F, shortening(hours));
+    };
+    const auto maples = [&](float hours) {
+        return leaves_at(maple().leafing, 0.0F, shortening(hours));
+    };
+    CHECK(maples(15.0F).turned == 0.0F);
+    CHECK(maples(11.3F).turned > 0.3F); // early October
+    CHECK(oaks(11.3F).turned < 0.25F * maples(11.3F).turned);
+    CHECK(maples(10.9F).turned > 0.9F);
+    CHECK(maples(10.9F).held < 1.0F);
+    CHECK(maples(10.2F).held == 0.0F); // the first days of November
+    CHECK(oaks(10.2F).held > 0.5F);
+    // Out before the oaks.
+    const Daylight may{.hours = 14.6F, .longest = longest, .lengthening = true};
+    CHECK(leaves_at(maple().leafing, 0.0F, may).held > leaves_at(oak().leafing, 0.0F, may).held);
+    // Their reds and oranges, brighter than an oak's browns.
+    const auto bright = [](Vec3 colour) { return colour.r + colour.g + colour.b; };
+    CHECK(bright(maple().leafing.first) > 1.5F * bright(oak().leafing.first));
+    CHECK(maple().leafing.last.r > 4.0F * maple().leafing.last.g);
+    // Near the equator, the earliest only colour; none lose their leaves.
+    const auto tropical =
+        leaves_at(maple().leafing, 1.0F, {.hours = 11.7F, .longest = 12.3F, .lengthening = false});
+    CHECK(tropical.held == 1.0F);
+    CHECK(tropical.turned < 0.7F);
 }
 
 TEST_CASE("each tree keeps its own dates, the old turning first", "[flora][season]") {

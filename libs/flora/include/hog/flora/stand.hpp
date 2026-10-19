@@ -54,10 +54,15 @@ struct BiomeTrees {
 }
 
 // Foliage far darker than the ground's mean, so a forest reads as its own mass: needles cool and
-// deep, leaves warmer and brighter.
+// deep, leaves warmer and brighter, a maple's the brightest.
 [[nodiscard]] constexpr Vec3 foliage_colour(Genus genus, Vec3 ground) noexcept {
-    if (genus == Genus::Oak) {
+    switch (genus) {
+    case Genus::Oak:
         return (ground * 0.38F) + (Vec3{0.022F, 0.062F, 0.012F});
+    case Genus::Maple:
+        return (ground * 0.38F) + (Vec3{0.03F, 0.072F, 0.01F});
+    case Genus::Pine:
+        break;
     }
     return (ground * 0.3F) + (Vec3{0.012F, 0.05F, 0.028F});
 }

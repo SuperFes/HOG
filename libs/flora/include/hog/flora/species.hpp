@@ -60,13 +60,16 @@ struct Species {
 };
 
 // The kinds of tree grown, each its own species.
-enum class Genus : std::uint8_t { Pine, Oak };
-inline constexpr int genus_count = 2;
+enum class Genus : std::uint8_t { Pine, Oak, Maple };
+inline constexpr int genus_count = 3;
 
 // The pine analogue: whorled boughs off a single trunk, a conical crown.
 [[nodiscard]] Species pine();
 // The oak analogue: a short trunk forking into gnarled limbs, a broad rounded crown of leaves.
 [[nodiscard]] Species oak();
+// The maple analogue: a straight trunk carried up into steeply climbing limbs, a dense oval crown
+// that turns early and bright.
+[[nodiscard]] Species maple();
 [[nodiscard]] Species species_of(Genus genus);
 
 // The age a species' rules describe it at, in its prime; 0 is a sapling, 1 old.

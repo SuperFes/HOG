@@ -24,7 +24,7 @@ struct Push {
 
 [[vk::push_constant]] ConstantBuffer<Push> push;
 
-static const uint genus_count = 2;
+static const uint genus_count = 3;
 static const uint detail_count = 3;
 static const uint stage_count = 4;
 static const uint variant_count = 8;
@@ -66,9 +66,10 @@ static const uint anchor_stride = 40; // bytes, as render::TreeAnchor lies
 static const uint wood_stride = 24;   // bytes, as flora::WoodVertex lies
 static const uint leaf_stride = 36;   // bytes, as flora::LeafVertex lies
 
-// Pine bark dark and red-brown, oak's paler and grey.
-static const float3 barks[genus_count] = { float3(0.055, 0.045, 0.038), float3(0.07, 0.064, 0.056) };
-static const uint oak = 1;
+// Pine bark dark and red-brown, oak's paler and grey, maple's paler still.
+static const float3 barks[genus_count] = { float3(0.055, 0.045, 0.038), float3(0.07, 0.064, 0.056),
+                                           float3(0.08, 0.075, 0.068) };
+static const uint pine = 0;
 
 uint hashed(uint at) {
     at ^= at >> 16;
@@ -377,7 +378,7 @@ float leafed(uint seed, float2 card, float pixels) {
 float4 leaf_fragment(Spray spray, bool front: SV_IsFrontFace) : SV_Target {
     // Needles brightest along the outer edge, shadowed at the stem; leaves lit across their face.
     // Either is dark beneath the bough.
-    const bool leaves = spray.genus == oak;
+    const bool leaves = spray.genus != pine;
     const float edge = leaves ? 0.3 : 0.5;
     const float shaped =
         (1.0 - (edge * 0.5) + (edge * saturate(abs(spray.card.x) * 2.0))) * (front ? 1.0 : 0.72);

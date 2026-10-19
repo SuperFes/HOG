@@ -334,3 +334,31 @@ TEST_CASE("an oak's stamp turns in autumn and stands as bare twigs in winter", "
     CHECK(leafy_pixels(draw(*device, {.anchors = pines, .daylight = winter})) ==
           leafy_pixels(draw(*device, {.anchors = pines, .daylight = summer})));
 }
+
+TEST_CASE("a maple's stamp stands narrower than an oak and turns and falls before it", "[render]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    using hog::flora::Genus;
+    const Pixels oak =
+        draw(*device, {.anchors = rank_of(1, 0.0, 11.0F, hog::flora::prime_age, Genus::Oak)});
+    const Pixels maple =
+        draw(*device, {.anchors = rank_of(1, 0.0, 11.0F, hog::flora::prime_age, Genus::Maple)});
+    CHECK(leafy_pixels(maple) > 60);
+    CHECK(columns_lit(maple) < columns_lit(oak));
+    // Early October at 45 degrees north, the maples all colour and the oaks only beginning;
+    // by November the maples are bare and the oaks still full.
+    const auto maples = rank_of(3, 0.0, 11.0F, hog::flora::prime_age, Genus::Maple);
+    const auto oaks = rank_of(3, 0.0, 11.0F, hog::flora::prime_age, Genus::Oak);
+    constexpr hog::flora::Daylight october{.hours = 11.2F, .longest = 15.4F};
+    constexpr hog::flora::Daylight november{.hours = 10.4F, .longest = 15.4F};
+    const Pixels turned = draw(*device, {.anchors = maples, .daylight = october});
+    CHECK(autumnal_pixels(turned) > 100);
+    const std::size_t green_oaks =
+        leafy_pixels(draw(*device, {.anchors = oaks, .daylight = october}));
+    CHECK(green_oaks > 50);
+    CHECK(10 * leafy_pixels(turned) < green_oaks);
+    CHECK(3 * autumnal_pixels(draw(*device, {.anchors = maples, .daylight = november})) <
+          autumnal_pixels(draw(*device, {.anchors = oaks, .daylight = november})));
+}

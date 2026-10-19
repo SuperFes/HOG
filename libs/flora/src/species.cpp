@@ -137,8 +137,83 @@ Species oak() {
     return oak;
 }
 
+Species maple() {
+    Species maple;
+    maple.grown = 3;
+    maple.levels[0] = {.length = 10.0F,
+                       .sway = 0.15F,
+                       .radius = 0.36F,
+                       .taper = 0.8F,
+                       .sections = 8,
+                       .sides = 7,
+                       .children = 9,
+                       .whorl = 1,
+                       .start = 0.3F,
+                       .angle = 0.85F,
+                       .fall = 0.45F,
+                       .gnarl = 0.04F,
+                       .rise = 0.0F};
+    maple.levels[1] = {.length = 6.0F,
+                       .sway = 0.25F,
+                       .radius = 0.55F,
+                       .taper = 0.8F,
+                       .sections = 5,
+                       .sides = 5,
+                       .children = 15,
+                       .whorl = 1,
+                       .start = 0.1F,
+                       .angle = 0.7F,
+                       .fall = 0.3F,
+                       .gnarl = 0.1F,
+                       .rise = 0.015F};
+    maple.levels[2] = {.length = 1.6F,
+                       .sway = 0.3F,
+                       .radius = 0.5F,
+                       .taper = 0.9F,
+                       .sections = 3,
+                       .sides = 3,
+                       .children = 0,
+                       .whorl = 1,
+                       .start = 0.3F,
+                       .angle = 0.8F,
+                       .fall = 0.0F,
+                       .gnarl = 0.15F,
+                       .rise = 0.0F};
+    maple.frond_width = 0.7F;
+    maple.frond_sway = 0.25F;
+    maple.frond_tilt = 0.6F;
+    maple.frond_fullness = 1.0F;
+    maple.woody = 2;
+    // A sapling is a slim upright whip; an old maple a stout trunk under a crown grown broader.
+    maple.ageing = {.girth = {.young = 0.25F, .old = 1.35F},
+                    .crowded = {.young = 0.5F, .old = 1.0F},
+                    .raised = {.young = 0.5F, .old = 1.2F},
+                    .fall = {.young = 1.0F, .old = 0.8F},
+                    .lean = {.young = 0.7F, .old = 1.1F},
+                    .gnarl = {.young = 0.5F, .old = 1.5F},
+                    .reach = {.young = 0.45F, .old = 1.15F},
+                    .rise = {.young = 1.5F, .old = 0.8F}};
+    // At 45 degrees north: orange by early October, scarlet and thinning by its third week,
+    // bare by November; out a little before the oaks in spring.
+    maple.leafing = {.turn = 11.7F,
+                     .fall = 1.4F,
+                     .flush = 0.8F,
+                     .spread = 0.5F,
+                     .first = {0.32F, 0.14F, 0.012F},
+                     .last = {0.26F, 0.025F, 0.015F}};
+    return maple;
+}
+
 Species species_of(Genus genus) {
-    return genus == Genus::Oak ? oak() : pine();
+    switch (genus) {
+    case Genus::Oak:
+        return oak();
+    case Genus::Maple:
+        return maple();
+    case Genus::Pine:
+        break;
+    }
+    return pine();
 }
 
 Species aged(const Species& species, float age) noexcept {

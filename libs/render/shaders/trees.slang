@@ -6,7 +6,7 @@ import tone;
 
 // Tree stamps, each drawn from a tree anchor bound to its spot in the world: three crossed quads, a
 // mask cut in the fragment shader shaping the tree's crown over a bare trunk — a pine's tiered cone
-// of boughs, an oak's lumpy round head of leaves.
+// of boughs, an oak's lumpy round head of leaves, a maple's taller smoother oval.
 // The anchors are shared with the grown forest, which covers the near ground; the stamps hold off
 // inside its reach and carry on beyond, shrinking away at the edge of their own.
 
@@ -25,7 +25,7 @@ struct Push {
 
 [[vk::push_constant]] ConstantBuffer<Push> push;
 
-static const uint genus_count = 2;
+static const uint genus_count = 3;
 
 struct Settings {
     // x metres the stamps hold off while the grown forest covers; y metres from the eye they
@@ -49,8 +49,10 @@ struct Settings {
 
 static const uint anchor_stride = 40; // bytes, as render::TreeAnchor lies
 
-// Bare wood, for the trunk, as the grown forest's bark: pine, then oak.
-static const float3 woods[genus_count] = { float3(0.055, 0.045, 0.038), float3(0.07, 0.064, 0.056) };
+// Bare wood, for the trunk, as the grown forest's bark: pine, oak, then maple.
+static const float3 woods[genus_count] = { float3(0.055, 0.045, 0.038), float3(0.07, 0.064, 0.056),
+                                           float3(0.08, 0.075, 0.068) };
+static const uint pine = 0;
 static const uint oak = 1;
 
 uint hashed(uint at) {
@@ -146,11 +148,12 @@ Tree vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     }
     const float above = height_above_sea(root, push.bend_up, push.bend_radii.x);
     const float height = grown * fade;
-    // Pine saplings and old pines spread wider for their height than one in its prime; an oak
-    // spreads wider every year.
-    const float width = genus == oak
-                            ? height * (0.7 + (0.12 * unit(hash + 5u))) * across(age, 0.85, 1.2)
-                            : height * (0.42 + (0.12 * unit(hash + 5u))) * across(age, 1.15, 1.2);
+    // Pine saplings and old pines spread wider for their height than one in its prime; the
+    // broadleaves spread wider every year, a maple narrower than an oak.
+    const float spread = genus == pine  ? (0.42 + (0.12 * unit(hash + 5u))) * across(age, 1.15, 1.2)
+                         : genus == oak ? (0.7 + (0.12 * unit(hash + 5u))) * across(age, 0.85, 1.2)
+                                        : (0.52 + (0.1 * unit(hash + 5u))) * across(age, 0.9, 1.2);
+    const float width = height * spread;
 
     // Three quads crossed about the tree's own up: near vertical, with a shade of the ground's
     // lean, along the very same axis the grown forest's trees stand. The mask does the shaping.
@@ -256,16 +259,35 @@ Cut pine_cut(uint seed, float age, float2 uv, float pixels) {
     return cut;
 }
 
-// What of the oak the point falls on: a round head of leaves, lumpy at its edge, on a bare trunk;
-// the lumps and mottle go once the whole quad is only a few pixels across. As the grown forest's,
-// a sapling's head low on its stem, an old tree's raised.
-Cut oak_cut(uint seed, float age, float2 uv, float pixels) {
+// A broadleaf's head: where it begins up the trunk, how that moves with age, and how lumpy its
+// edge.
+struct Head {
+    float foot;
+    float young;
+    float old;
+    float lumps;
+};
+
+// An oak's head starts high and lumpy; a maple's lower, longer and smoother.
+Head head_of(uint genus) {
+    if (genus == oak) {
+        const Head oak_head = { 0.28, 0.6, 1.3, 1.0 };
+        return oak_head;
+    }
+    const Head maple_head = { 0.18, 0.7, 1.2, 0.45 };
+    return maple_head;
+}
+
+// What of the broadleaf the point falls on: a round head of leaves, lumpy at its edge, on a bare
+// trunk; the lumps and mottle go once the whole quad is only a few pixels across. As the grown
+// forest's, a sapling's head low on its stem, an old tree's raised.
+Cut broadleaf_cut(uint seed, float age, float2 uv, float pixels, Head head) {
     Cut cut;
     cut.part = air_part;
     cut.shade = 1.0;
     cut.patch = float2(0.0);
     cut.twig = false;
-    const float foot = (0.28 + (0.08 * unit(seed + 11u))) * across(age, 0.6, 1.3);
+    const float foot = (head.foot + (0.08 * unit(seed + 11u))) * across(age, head.young, head.old);
     const float middle = (foot + 1.0) * 0.5;
     const float2 off = float2(uv.x / 0.48, (uv.y - middle) / ((1.0 - foot) * 0.5));
     float reach = length(off);
@@ -273,7 +295,8 @@ Cut oak_cut(uint seed, float age, float2 uv, float pixels) {
     if (near) {
         const float angle = atan2(off.y, off.x);
         const float phase = 6.2831853 * unit(seed + 12u);
-        reach -= (0.1 * sin((angle * 5.0) + phase)) + (0.06 * sin((angle * 9.0) - (2.0 * phase)));
+        reach -= head.lumps *
+                 ((0.1 * sin((angle * 5.0) + phase)) + (0.06 * sin((angle * 9.0) - (2.0 * phase))));
     }
     if (reach < 1.0) {
         cut.part = needles;
@@ -318,8 +341,9 @@ float smooth_dice(uint seed, float2 at) {
 // Lit as the ground beneath it, as grass.slang lights its blades.
 [shader("fragment")]
 float4 fragment_main(Tree tree) : SV_Target {
-    const Cut cut = tree.genus == oak ? oak_cut(tree.seed, tree.age, tree.uv, tree.pixels)
-                                      : pine_cut(tree.seed, tree.age, tree.uv, tree.pixels);
+    const Cut cut = tree.genus == pine ? pine_cut(tree.seed, tree.age, tree.uv, tree.pixels)
+                                       : broadleaf_cut(tree.seed, tree.age, tree.uv, tree.pixels,
+                                                       head_of(tree.genus));
     if (cut.part == air_part) {
         discard;
     }

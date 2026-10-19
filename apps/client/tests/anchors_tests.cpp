@@ -103,13 +103,10 @@ TEST_CASE("a tile's trees are kept in blocks, each a patch of ground of its own"
     for (std::size_t block = 0; block < hog::client::tile_blocks; ++block) {
         REQUIRE(trees.starts.at(block) <= trees.starts.at(block + 1));
         CHECK(trees.starts.at(block + 1) - trees.starts.at(block) <= 16);
-        // Pines first, then oaks: each genus a run the grown forest draws by its own count.
-        bool oaks = false;
-        for (std::uint32_t at = trees.starts.at(block); at < trees.starts.at(block + 1); ++at) {
-            const bool oak =
-                hog::render::genus_of(trees.anchors.at(at).colour) == hog::flora::Genus::Oak;
-            CHECK((oak || !oaks));
-            oaks = oaks || oak;
+        // In genus order: each genus a run the grown forest draws by its own count.
+        for (std::uint32_t at = trees.starts.at(block) + 1; at < trees.starts.at(block + 1); ++at) {
+            CHECK(hog::render::genus_of(trees.anchors.at(at - 1).colour) <=
+                  hog::render::genus_of(trees.anchors.at(at).colour));
         }
         for (std::uint32_t a = trees.starts.at(block); a < trees.starts.at(block + 1); ++a) {
             for (std::uint32_t b = a; b < trees.starts.at(block + 1); ++b) {
