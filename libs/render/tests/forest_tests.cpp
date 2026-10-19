@@ -2,6 +2,7 @@
 
 #include <hog/atmosphere/model.hpp>
 #include <hog/core/math.hpp>
+#include <hog/flora/species.hpp>
 #include <hog/render/anchors.hpp>
 #include <hog/render/atmosphere.hpp>
 #include <hog/render/forest.hpp>
@@ -55,7 +56,8 @@ std::uint32_t hashed(std::uint32_t at) {
 }
 
 // A rank of pines anchored east to west, `away` metres north of the tile's origin.
-std::vector<TreeAnchor> rank_of(int count, double away, float height = 11.0F) {
+std::vector<TreeAnchor> rank_of(int count, double away, float height = 11.0F,
+                                float age = hog::flora::prime_age) {
     std::vector<TreeAnchor> anchors;
     for (int tree = 0; tree < count; ++tree) {
         const double spread = (static_cast<double>(tree) - ((count - 1) * 0.5)) * 8.0;
@@ -64,7 +66,7 @@ std::vector<TreeAnchor> rank_of(int count, double away, float height = 11.0F) {
                            .normal = Vec3{0.0F, 0.0F, 1.0F},
                            .hash = hashed(static_cast<std::uint32_t>(tree) * 2654435761U),
                            .colour = hog::render::packed_needles(needles, 1.0F),
-                           .age = 1.0F});
+                           .age = age});
     }
     return anchors;
 }
@@ -175,9 +177,10 @@ std::size_t barky_pixels(const Pixels& pixels) {
     return barky;
 }
 
-std::size_t leafy_pixels(const Pixels& pixels) {
+// Counted from row `from` down, the picture's top row first.
+std::size_t leafy_pixels(const Pixels& pixels, std::uint32_t from = 0) {
     std::size_t leafy = 0;
-    for (std::size_t pixel = 0; pixel < pixels.size() / 4; ++pixel) {
+    for (std::size_t pixel = std::size_t{from} * extent.width; pixel < pixels.size() / 4; ++pixel) {
         const int red = pixels.at(4 * pixel);
         const int green = pixels.at((4 * pixel) + 1);
         leafy += (green > 20 && green > red) ? 1U : 0U;
@@ -233,4 +236,21 @@ TEST_CASE("the forest ends at its reach, the stamps carrying on from the same an
     const std::size_t together = lit_pixels(draw(*device, both));
     CHECK(grown_alone > 5);
     CHECK(together > grown_alone + 5);
+}
+
+TEST_CASE("each tree grows as its age: saplings green to the ground, old trees bare below",
+          "[render]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    // The same height at either age, so only the shape differs.
+    const Pixels saplings = draw(*device, {.anchors = rank_of(5, 0.0, 11.0F, 0.1F)});
+    const Pixels old = draw(*device, {.anchors = rank_of(5, 0.0, 11.0F, 0.97F)});
+    CHECK(leafy_pixels(saplings) > 100);
+    CHECK(leafy_pixels(old) > 100);
+    // The lowest few metres of the trees, above the ground the eye looks down to.
+    constexpr std::uint32_t low = 34;
+    CHECK(leafy_pixels(saplings, low) > 30);
+    CHECK(leafy_pixels(saplings, low) > 2 * leafy_pixels(old, low));
 }

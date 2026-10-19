@@ -24,10 +24,12 @@ struct Push {
 [[vk::push_constant]] ConstantBuffer<Push> push;
 
 static const uint detail_count = 3;
+static const uint stage_count = 4;
 static const uint variant_count = 8;
 
-// Where each variant's wood and leaves lie in the carpentry, per detail: x the vertex bytes'
-// start, y the index bytes' start, z the index count; wood's w the baked height's bits.
+// Where each variant's wood and leaves lie in the carpentry, per detail and stage of growth: x the
+// vertex bytes' start, y the index bytes' start, z the index count; wood's w the baked height's
+// bits.
 struct Build {
     uint4 wood;
     uint4 leaf;
@@ -37,7 +39,9 @@ struct Settings {
     // Metres from the eye: x the fullest detail's reach, y the middle one's, z the forest's own,
     // where the stamps take over.
     float4 bands;
-    Build builds[detail_count * variant_count];
+    // The ages between one baked stage and the next, sapling to old; w unused.
+    float4 stages;
+    Build builds[detail_count * stage_count * variant_count];
 };
 
 [[vk::binding(0, 0)]] ConstantBuffer<Settings> settings;
@@ -97,8 +101,8 @@ uint anchored(uint instance) {
     return ((asuint(push.origin.w) >> 2) + instance) * anchor_stride;
 }
 
-// The anchored tree, stood on its own spot: the anchor decided where, how tall and whether long
-// ago; here it only steps aside for the stamps beyond the forest's reach.
+// The anchored tree, stood on its own spot: the anchor decided where, how tall, how old and
+// whether long ago; here it only steps aside for the stamps beyond the forest's reach.
 Planted plant(uint instance) {
     Planted planted;
     planted.grows = false;
@@ -107,6 +111,7 @@ Planted plant(uint instance) {
     const float grown = asfloat(anchors.Load(at + 12));
     const float3 normal = asfloat(anchors.Load3(at + 16));
     const uint hash = anchors.Load(at + 28);
+    const float age = asfloat(anchors.Load(at + 36));
 
     const float away = length(root);
     if (away >= settings.bands.z) {
@@ -131,7 +136,9 @@ Planted plant(uint instance) {
     planted.upright = upright;
 
     const uint variant = hashed(hash + 9u) % variant_count;
-    planted.build = (lod * variant_count) + variant;
+    const uint stage = uint(age >= settings.stages.x) + uint(age >= settings.stages.y) +
+                       uint(age >= settings.stages.z);
+    planted.build = (((lod * stage_count) + stage) * variant_count) + variant;
     const Build build = settings.builds[planted.build];
     planted.scale = grown / max(asfloat(build.wood.w), 0.1);
 

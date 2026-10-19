@@ -186,8 +186,8 @@ TEST_CASE("a pine ages from an upswept sapling to a stout, high-crowned old tree
     CHECK(fingered(mesh(grow(aged(pine(), 2.0F), 7U))) ==
           fingered(mesh(grow(aged(pine(), 1.0F), 7U))));
     // The same golden discipline as grow(), for a sapling and an old tree.
-    CHECK(fingered(mesh(grow(aged(pine(), 0.15F), 7U))) == 0x3aef'e956'7e52'6439ULL);
-    CHECK(fingered(mesh(grow(aged(pine(), 0.95F), 7U))) == 0x03f2'7510'52c1'800cULL);
+    CHECK(fingered(mesh(grow(aged(pine(), 0.15F), 7U))) == 0x06ec'd623'ae4a'efe0ULL);
+    CHECK(fingered(mesh(grow(aged(pine(), 0.95F), 7U))) == 0x2878'44a3'f070'6f84ULL);
 }
 
 TEST_CASE("the stand field gathers woods and leaves clearings", "[flora]") {

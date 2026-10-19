@@ -69,13 +69,13 @@ Species aged(const Species& species, float age) noexcept {
     trunk.radius *= across(at, 0.25F, 1.35F);
     const int whorl = std::max(trunk.whorl, 1);
     const float whorls =
-        static_cast<float>(trunk.children) * across(at, 0.375F, 1.0F) / static_cast<float>(whorl);
+        static_cast<float>(trunk.children) * across(at, 0.75F, 1.0F) / static_cast<float>(whorl);
     trunk.children = whorl * std::max(static_cast<int>(whorls + 0.5F), 3);
     trunk.start *= across(at, 0.25F, 2.4F);
-    trunk.fall *= across(at, 1.0F, 0.7F);
+    trunk.fall *= across(at, 1.0F, 0.55F);
     trunk.angle *= across(at, 0.85F, 1.05F);
     trunk.gnarl *= across(at, 0.6F, 2.0F);
-    boughs.length *= across(at, 0.4F, 1.15F);
+    boughs.length *= across(at, 0.5F, 1.5F);
     boughs.rise *= across(at, 0.0F, 1.6F);
     return grown;
 }
