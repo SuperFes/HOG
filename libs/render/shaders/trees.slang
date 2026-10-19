@@ -3,8 +3,9 @@ import bend;
 import shadow;
 import tone;
 
-// Pine stamps, each drawn from a tree anchor bound to its spot in the world: three crossed quads,
-// a mask cut in the fragment shader shaping a tiered conical crown of boughs over a bare trunk.
+// Tree stamps, each drawn from a tree anchor bound to its spot in the world: three crossed quads, a
+// mask cut in the fragment shader shaping the tree's crown over a bare trunk — a pine's tiered cone
+// of boughs, an oak's lumpy round head of leaves.
 // The anchors are shared with the grown forest, which covers the near ground; the stamps hold off
 // inside its reach and carry on beyond, shrinking away at the edge of their own.
 
@@ -41,8 +42,10 @@ struct Settings {
 
 static const uint anchor_stride = 40; // bytes, as render::TreeAnchor lies
 
-// Bare wood, for the trunk, as the grown forest's bark.
-static const float3 wood = float3(0.055, 0.045, 0.038);
+// Bare wood, for the trunk, as the grown forest's bark: pine, then oak.
+static const uint genus_count = 2;
+static const float3 woods[genus_count] = { float3(0.055, 0.045, 0.038), float3(0.07, 0.064, 0.056) };
+static const uint oak = 1;
 
 uint hashed(uint at) {
     at ^= at >> 16;
@@ -64,7 +67,14 @@ float3 foliage_of(uint packed) {
     return rooted * rooted;
 }
 
-// As flora::aged() scales its species: `young` for a sapling, `old` at the end, 1 in its prime.
+// As render::genus_of: the last byte, anything unknown a pine.
+uint genus_of(uint packed) {
+    const uint genus = packed >> 24;
+    return genus < genus_count ? genus : 0u;
+}
+
+// As flora::aged() scales a species: `young` for a sapling, `old` at the end, 1 in its prime. The
+// stamps' factors follow each species' own ageing.
 static const float prime_age = 0.7;
 float across(float age, float young, float old) {
     return age >= prime_age ? lerp(1.0, old, (age - prime_age) / (1.0 - prime_age))
@@ -85,6 +95,7 @@ struct Tree {
     float pixels; // the quad's width in pixels, for shedding detail far off
     nointerpolation uint seed; // the tree's own, keyed to its lattice cell
     nointerpolation float age; // 0 a sapling, 1 old
+    nointerpolation uint genus;
 };
 
 // Nothing: a point's triangles cover no pixels.
@@ -100,6 +111,7 @@ Tree nothing() {
     gone.age = 0.0;
     gone.pixels = 0.0;
     gone.seed = 0;
+    gone.genus = 0;
     return gone;
 }
 
@@ -110,7 +122,9 @@ Tree vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const float grown = asfloat(anchors.Load(at + 12));
     const float3 normal = asfloat(anchors.Load3(at + 16));
     const uint hash = anchors.Load(at + 28);
-    const float3 crown = foliage_of(anchors.Load(at + 32));
+    const uint packed = anchors.Load(at + 32);
+    const float3 crown = foliage_of(packed);
+    const uint genus = genus_of(packed);
     const float age = saturate(asfloat(anchors.Load(at + 36)));
 
     const float away = length(root);
@@ -122,8 +136,11 @@ Tree vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     }
     const float above = height_above_sea(root, push.bend_up, push.bend_radii.x);
     const float height = grown * fade;
-    // Saplings and old trees spread wider for their height than one in its prime.
-    const float width = height * (0.42 + (0.12 * unit(hash + 5u))) * across(age, 1.15, 1.2);
+    // Pine saplings and old pines spread wider for their height than one in its prime; an oak
+    // spreads wider every year.
+    const float width = genus == oak
+                            ? height * (0.7 + (0.12 * unit(hash + 5u))) * across(age, 0.85, 1.2)
+                            : height * (0.42 + (0.12 * unit(hash + 5u))) * across(age, 1.15, 1.2);
 
     // Three quads crossed about the tree's own up: near vertical, with a shade of the ground's
     // lean, along the very same axis the grown forest's trees stand. The mask does the shaping.
@@ -164,6 +181,7 @@ Tree vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     tree.uv = float2(side_x, t);
     tree.seed = hash;
     tree.age = age;
+    tree.genus = genus;
     return tree;
 }
 
@@ -222,14 +240,48 @@ Cut pine_cut(uint seed, float age, float2 uv, float pixels) {
     return cut;
 }
 
+// What of the oak the point falls on: a round head of leaves, lumpy at its edge, on a bare trunk;
+// the lumps and mottle go once the whole quad is only a few pixels across. As the grown forest's,
+// a sapling's head low on its stem, an old tree's raised.
+Cut oak_cut(uint seed, float age, float2 uv, float pixels) {
+    Cut cut;
+    cut.part = air_part;
+    cut.shade = 1.0;
+    const float foot = (0.28 + (0.08 * unit(seed + 11u))) * across(age, 0.6, 1.3);
+    const float middle = (foot + 1.0) * 0.5;
+    const float2 off = float2(uv.x / 0.48, (uv.y - middle) / ((1.0 - foot) * 0.5));
+    float reach = length(off);
+    const bool near = pixels >= 7.0;
+    if (near) {
+        const float angle = atan2(off.y, off.x);
+        const float phase = 6.2831853 * unit(seed + 12u);
+        reach -= (0.1 * sin((angle * 5.0) + phase)) + (0.06 * sin((angle * 9.0) - (2.0 * phase)));
+    }
+    if (reach < 1.0) {
+        cut.part = needles;
+        // Lit over its top, dark beneath, each cluster of leaves its own shade.
+        const uint across_at = uint((uv.x + 0.5) * 9.0);
+        const uint up_at = uint(uv.y * 14.0);
+        const float mottle = near ? 0.85 + (0.3 * unit(seed + across_at + (up_at * 17u))) : 1.0;
+        cut.shade = lerp(0.6, 1.1, saturate((off.y * 0.5) + 0.5)) * mottle;
+        return cut;
+    }
+    const float trunk = (0.035 * (1.0 - (0.5 * uv.y))) + 0.004;
+    if (abs(uv.x) < trunk && uv.y < middle) {
+        cut.part = bark;
+    }
+    return cut;
+}
+
 // Lit as the ground beneath it, as grass.slang lights its blades.
 [shader("fragment")]
 float4 fragment_main(Tree tree) : SV_Target {
-    const Cut cut = pine_cut(tree.seed, tree.age, tree.uv, tree.pixels);
+    const Cut cut = tree.genus == oak ? oak_cut(tree.seed, tree.age, tree.uv, tree.pixels)
+                                      : pine_cut(tree.seed, tree.age, tree.uv, tree.pixels);
     if (cut.part == air_part) {
         discard;
     }
-    const float3 albedo = cut.part == bark ? wood : tree.colour * cut.shade;
+    const float3 albedo = cut.part == bark ? woods[tree.genus] : tree.colour * cut.shade;
     const float3 sun = lighting.sun_exposure.xyz;
     const float scale = lighting.sky_scale.w;
     const float3 normal = normalize(tree.normal);

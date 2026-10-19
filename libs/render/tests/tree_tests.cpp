@@ -158,6 +158,21 @@ std::size_t lit_pixels(const Pixels& pixels) {
     return lit;
 }
 
+// Columns of the picture any tree covers.
+std::size_t columns_lit(const Pixels& pixels) {
+    std::size_t lit = 0;
+    for (std::uint32_t column = 0; column < extent.width; ++column) {
+        for (std::uint32_t row = 0; row < extent.height; ++row) {
+            const std::size_t at = 4 * ((std::size_t{row} * extent.width) + column);
+            if (pixels.at(at) + pixels.at(at + 1) + pixels.at(at + 2) > 0) {
+                ++lit;
+                break;
+            }
+        }
+    }
+    return lit;
+}
+
 std::size_t barky_pixels(const Pixels& pixels) {
     std::size_t barky = 0;
     for (std::size_t pixel = 0; pixel < pixels.size() / 4; ++pixel) {
@@ -260,4 +275,20 @@ TEST_CASE("each stamp stands as its age: saplings green to the ground, old trees
     constexpr std::uint32_t low = 34;
     CHECK(leafy_pixels(saplings, low) > 30);
     CHECK(leafy_pixels(saplings, low) > 2 * leafy_pixels(old, low));
+}
+
+TEST_CASE("an oak's stamp is a broad round head where a pine's of its height stands narrow",
+          "[render]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    using hog::flora::Genus;
+    const Pixels pine = draw(*device, {.anchors = rank_of(1, 0.0, 11.0F, hog::flora::prime_age)});
+    const Pixels oak =
+        draw(*device, {.anchors = rank_of(1, 0.0, 11.0F, hog::flora::prime_age, Genus::Oak)});
+    CHECK(leafy_pixels(oak) > 60);
+    CHECK(barky_pixels(oak) > 0);
+    CHECK(columns_lit(oak) > columns_lit(pine) + (columns_lit(pine) / 2));
+    CHECK(leafy_pixels(oak) > leafy_pixels(pine));
 }
