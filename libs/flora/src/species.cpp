@@ -10,12 +10,12 @@ float mixed(float a, float b, float t) noexcept {
     return a + (t * (b - a));
 }
 
-// A factor on the species' prime: `young` for a sapling, `old` at the end, exactly 1 in its prime.
-float across(float age, float young, float old) noexcept {
+// The span's factor at `age`: exactly 1 in its prime.
+float across(float age, Span span) noexcept {
     if (age >= prime_age) {
-        return mixed(1.0F, old, (age - prime_age) / (1.0F - prime_age));
+        return mixed(1.0F, span.old, (age - prime_age) / (1.0F - prime_age));
     }
-    return mixed(young, 1.0F, age / prime_age);
+    return mixed(span.young, 1.0F, age / prime_age);
 }
 
 // Height for age: quick to rise while young, then barely taller, as stand.cpp grows them.
@@ -57,6 +57,16 @@ Species pine() {
     pine.frond_width = 0.28F;
     pine.frond_sway = 0.25F;
     pine.frond_tilt = 0.55F;
+    // A sapling is a short, thin, upswept cone of a few whorls down to the ground; an old pine
+    // has a stout trunk, its lower boughs shed, its crown raised and rounded, its boughs drooping.
+    pine.ageing = {.girth = {.young = 0.25F, .old = 1.35F},
+                   .crowded = {.young = 0.75F, .old = 1.0F},
+                   .raised = {.young = 0.25F, .old = 2.4F},
+                   .fall = {.young = 1.0F, .old = 0.55F},
+                   .lean = {.young = 0.85F, .old = 1.05F},
+                   .gnarl = {.young = 0.6F, .old = 2.0F},
+                   .reach = {.young = 0.5F, .old = 1.5F},
+                   .rise = {.young = 0.0F, .old = 1.6F}};
     return pine;
 }
 
@@ -65,18 +75,19 @@ Species aged(const Species& species, float age) noexcept {
     Species grown = species;
     Level& trunk = grown.levels[0];
     Level& boughs = grown.levels[1];
+    const Ageing& ageing = species.ageing;
     trunk.length *= rising(at) / rising(prime_age);
-    trunk.radius *= across(at, 0.25F, 1.35F);
+    trunk.radius *= across(at, ageing.girth);
     const int whorl = std::max(trunk.whorl, 1);
     const float whorls =
-        static_cast<float>(trunk.children) * across(at, 0.75F, 1.0F) / static_cast<float>(whorl);
+        static_cast<float>(trunk.children) * across(at, ageing.crowded) / static_cast<float>(whorl);
     trunk.children = whorl * std::max(static_cast<int>(whorls + 0.5F), 3);
-    trunk.start *= across(at, 0.25F, 2.4F);
-    trunk.fall *= across(at, 1.0F, 0.55F);
-    trunk.angle *= across(at, 0.85F, 1.05F);
-    trunk.gnarl *= across(at, 0.6F, 2.0F);
-    boughs.length *= across(at, 0.5F, 1.5F);
-    boughs.rise *= across(at, 0.0F, 1.6F);
+    trunk.start *= across(at, ageing.raised);
+    trunk.fall *= across(at, ageing.fall);
+    trunk.angle *= across(at, ageing.lean);
+    trunk.gnarl *= across(at, ageing.gnarl);
+    boughs.length *= across(at, ageing.reach);
+    boughs.rise *= across(at, ageing.rise);
     return grown;
 }
 

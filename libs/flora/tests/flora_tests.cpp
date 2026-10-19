@@ -190,6 +190,23 @@ TEST_CASE("a pine ages from an upswept sapling to a stout, high-crowned old tree
     CHECK(fingered(mesh(grow(aged(pine(), 0.95F), 7U))) == 0x2878'44a3'f070'6f84ULL);
 }
 
+TEST_CASE("a species ages by its own spans, only its height rising regardless", "[flora]") {
+    hog::flora::Species unchanging = pine();
+    unchanging.ageing = {};
+    const hog::flora::Species sapling = aged(unchanging, 0.15F);
+    CHECK(sapling.levels[0].length < 0.5F * unchanging.levels[0].length);
+    CHECK(sapling.levels[0].radius == unchanging.levels[0].radius);
+    CHECK(sapling.levels[0].children == unchanging.levels[0].children);
+    CHECK(sapling.levels[0].start == unchanging.levels[0].start);
+    CHECK(sapling.levels[1].length == unchanging.levels[1].length);
+    CHECK(sapling.levels[1].rise == unchanging.levels[1].rise);
+
+    hog::flora::Species reaching = unchanging;
+    reaching.ageing.reach = {.young = 0.5F, .old = 2.0F};
+    CHECK(aged(reaching, 0.0F).levels[1].length == 0.5F * reaching.levels[1].length);
+    CHECK(aged(reaching, 1.0F).levels[1].length == 2.0F * reaching.levels[1].length);
+}
+
 TEST_CASE("the stand field gathers woods and leaves clearings", "[flora]") {
     // Spots proven against an independent replica of the field: deep woods at one lattice base,
     // a clearing at another.

@@ -22,6 +22,25 @@ struct Level {
     float rise = 0.0F;    // pull toward upright each section; negative droops
 };
 
+// A factor on a species in its prime: what it scales by for a sapling and for an old tree, 1 in
+// between at prime_age.
+struct Span {
+    float young = 1.0F;
+    float old = 1.0F;
+};
+
+// How a species changes with age, as factors on its prime's trunk and the level off it.
+struct Ageing {
+    Span girth;   // the trunk's radius
+    Span crowded; // branches off the trunk, never under three whorls
+    Span raised;  // where they begin up it
+    Span fall;    // how much shorter toward its tip
+    Span lean;    // how far they lean off it
+    Span gnarl;   // how much the trunk wanders
+    Span reach;   // the branches' length
+    Span rise;    // their pull toward upright, or droop
+};
+
 // A species is a small rule set the grammar grows an individual from, deterministically from a
 // seed: the same on every machine, as many times as it's grown.
 struct Species {
@@ -30,6 +49,7 @@ struct Species {
     float frond_width = 0.25F; // a frond's base half-width, as a fraction of its twig's length
     float frond_sway = 0.25F;  // ± fraction of frond_width each frond differs by
     float frond_tilt = 0.5F;   // radians each of a frond's two blades rolls off flat
+    Ageing ageing;
 };
 
 // The pine analogue: whorled boughs off a single trunk, a conical crown.
@@ -38,10 +58,9 @@ struct Species {
 // The age a species' rules describe it at, in its prime; 0 is a sapling, 1 old.
 inline constexpr float prime_age = 0.7F;
 
-// The species as it grows at `age`, 0 to 1: a sapling is a short, thin, upswept cone of a few
-// whorls down to the ground; an old tree has a stout trunk, its lower boughs shed, its crown raised
-// and rounded, its boughs drooping. Exactly the species at prime_age; pure arithmetic, so as
-// bit-stable as grow().
+// The species as it grows at `age`, 0 to 1, by its own ageing; its height rises quickly while
+// young, then barely more. Exactly the species at prime_age; pure arithmetic, so as bit-stable as
+// grow().
 [[nodiscard]] Species aged(const Species& species, float age) noexcept;
 
 } // namespace hog::flora
