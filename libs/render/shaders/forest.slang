@@ -318,14 +318,17 @@ Spray leaf_vertex(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const uint seed = carpentry.Load(at + 32);
     const float toward_top = saturate(local.z / max(asfloat(build.wood.w), 0.1));
 
-    // Each frond keeps its tree's dates give or take a week or so, the crown's top first, so a
-    // turning crown is many colours at once; fronds drop as their leaves fall.
-    const float own = own_season(unit(planted.hash + 12u), planted.age) +
-                      (0.6 * ((2.0 * unit(seed + 3u)) - 1.0)) + (0.3 * toward_top);
-    const Leaves leaves = leaves_at(settings.leafing[planted.genus], own, lighting.year);
-    if (unit(seed + 5u) >= leaves.held) {
+    // Each frond keeps its tree's dates give or take a week or so, so a turning crown is many
+    // colours at once, its top first; fronds drop as their leaves fall. Whether a frond is down is
+    // decided for the frond, never the vertex: a frond kept at some corners and dropped at others
+    // would stretch to wherever the dropped ones are parked.
+    const float frond_own = own_season(unit(planted.hash + 12u), planted.age) +
+                            (0.6 * ((2.0 * unit(seed + 3u)) - 1.0));
+    const float4 leafing = settings.leafing[planted.genus];
+    if (unit(seed + 5u) >= leaves_at(leafing, frond_own, lighting.year).held) {
         return no_spray();
     }
+    const Leaves leaves = leaves_at(leafing, frond_own + (0.3 * toward_top), lighting.year);
     const float3 hue = autumn_colour(foliage, leaves.turned, settings.first[planted.genus].rgb,
                                      settings.last[planted.genus].rgb);
 

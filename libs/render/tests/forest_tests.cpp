@@ -187,6 +187,17 @@ std::size_t columns_lit(const Pixels& pixels) {
     return lit;
 }
 
+// Pixels `part` lights that `whole` leaves dark.
+std::size_t stray_pixels(const Pixels& part, const Pixels& whole) {
+    std::size_t stray = 0;
+    for (std::size_t at = 0; at + 3 < part.size(); at += 4) {
+        const bool lit = part.at(at) + part.at(at + 1) + part.at(at + 2) > 0;
+        const bool covered = whole.at(at) + whole.at(at + 1) + whole.at(at + 2) > 0;
+        stray += (lit && !covered) ? 1U : 0U;
+    }
+    return stray;
+}
+
 std::size_t barky_pixels(const Pixels& pixels) {
     std::size_t barky = 0;
     for (std::size_t pixel = 0; pixel < pixels.size() / 4; ++pixel) {
@@ -329,6 +340,25 @@ TEST_CASE("an oak's leaves turn in autumn and are gone by winter, a pine's needl
     const auto pines = rank_of(3, 0.0);
     CHECK(leafy_pixels(draw(*device, {.anchors = pines, .daylight = winter})) ==
           leafy_pixels(draw(*device, {.anchors = pines, .daylight = summer})));
+}
+
+TEST_CASE("a crown losing its leaves drops whole fronds, none stretched across the sky",
+          "[render]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    using hog::flora::Genus;
+    // Off to the side, clear of the picture's middle, where a torn frond's dropped corners would
+    // pull it.
+    const std::vector<TreeAnchor> oak{
+        rank_of(3, 0.0, 11.0F, hog::flora::prime_age, Genus::Oak).back()};
+    const Pixels full =
+        draw(*device, {.anchors = oak, .daylight = {.hours = 15.0F, .longest = 15.4F}});
+    const Pixels falling =
+        draw(*device, {.anchors = oak, .daylight = {.hours = 10.2F, .longest = 15.4F}});
+    CHECK(autumnal_pixels(falling) > 20);
+    CHECK(stray_pixels(falling, full) == 0);
 }
 
 TEST_CASE("a maple stands narrower than an oak and turns and falls before it", "[render]") {
