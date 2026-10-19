@@ -1,6 +1,7 @@
 add_library(hog_flora
     src/mesh.cpp
     src/skeleton.cpp
+    src/season.cpp
     src/species.cpp
     src/stand.cpp)
 add_library(hog::flora ALIAS hog_flora)

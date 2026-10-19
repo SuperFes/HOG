@@ -1,5 +1,7 @@
 #pragma once
 
+#include <hog/flora/season.hpp>
+
 #include <array>
 #include <cstdint>
 
@@ -54,6 +56,7 @@ struct Species {
     float frond_fullness = 0.0F;
     int woody = 1; // levels meshed as wood; the fronds cover the twigs past them
     Ageing ageing;
+    Leafing leafing; // evergreen unless set
 };
 
 // The kinds of tree grown, each its own species.

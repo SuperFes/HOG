@@ -408,3 +408,86 @@ TEST_CASE("no tree grows where its biome grows none", "[flora]") {
     CHECK(spot.y >= 0.0F);
     CHECK(spot.y < 1.0F);
 }
+
+TEST_CASE("an oak's leaves turn and fall as the days shorten, and come back in spring",
+          "[flora][season]") {
+    using hog::flora::Daylight;
+    using hog::flora::leaves_at;
+    const hog::flora::Leafing& leafing = oak().leafing;
+    // Earth's days at 45 degrees north.
+    constexpr float longest = 15.4F;
+    const auto shortening = [](float hours) {
+        return Daylight{.hours = hours, .longest = longest, .lengthening = false};
+    };
+    const auto lengthening = [](float hours) {
+        return Daylight{.hours = hours, .longest = longest, .lengthening = true};
+    };
+
+    const auto july = leaves_at(leafing, 0.0F, shortening(15.0F));
+    CHECK(july.turned == 0.0F);
+    CHECK(july.held == 1.0F);
+    const auto october = leaves_at(leafing, 0.0F, shortening(10.9F)); // the 20th or so
+    CHECK(october.turned > 0.2F);
+    CHECK(october.turned < 1.0F);
+    CHECK(october.held == 1.0F);
+    CHECK(leaves_at(leafing, 0.0F, shortening(9.4F)).held == 0.0F);   // late November
+    CHECK(leaves_at(leafing, 0.0F, lengthening(9.0F)).held == 0.0F);  // January
+    CHECK(leaves_at(leafing, 0.0F, lengthening(12.6F)).held == 0.0F); // April
+    const auto june = leaves_at(leafing, 0.0F, lengthening(15.3F));
+    CHECK(june.turned == 0.0F);
+    CHECK(june.held == 1.0F);
+
+    // Some trees turn early, the same every year.
+    const auto early = leaves_at(leafing, 1.0F, shortening(10.9F));
+    const auto late = leaves_at(leafing, -1.0F, shortening(10.9F));
+    CHECK(early.turned > october.turned);
+    CHECK(late.turned < october.turned);
+
+    // Pines keep their needles.
+    for (const float hours : {9.0F, 11.0F, 15.0F}) {
+        CHECK(leaves_at(pine().leafing, 1.0F, shortening(hours)).held == 1.0F);
+        CHECK(leaves_at(pine().leafing, 1.0F, shortening(hours)).turned == 0.0F);
+    }
+}
+
+TEST_CASE("oaks keep their leaves near the equator, and grow them back further from it",
+          "[flora][season]") {
+    using hog::flora::Daylight;
+    using hog::flora::leaves_at;
+    const hog::flora::Leafing& leafing = oak().leafing;
+    // The tropics barely change: the earliest trees are only tinged.
+    for (const bool lengthening : {false, true}) {
+        const auto tropical = leaves_at(
+            leafing, 1.0F, {.hours = 11.7F, .longest = 12.3F, .lengthening = lengthening});
+        CHECK(tropical.held == 1.0F);
+        CHECK(tropical.turned < 0.3F);
+    }
+    // At 25 degrees, a winter's turning but no more, and a green summer.
+    constexpr float longest = 13.6F;
+    CHECK(leaves_at(leafing, 0.0F, {.hours = 10.4F, .longest = longest}).turned > 0.5F);
+    CHECK(leaves_at(leafing, 0.0F, {.hours = 10.4F, .longest = longest}).held > 0.5F);
+    const auto summer =
+        leaves_at(leafing, 0.0F, {.hours = 13.5F, .longest = longest, .lengthening = true});
+    CHECK(summer.turned == 0.0F);
+    CHECK(summer.held == 1.0F);
+}
+
+TEST_CASE("each tree keeps its own dates, the old turning first", "[flora][season]") {
+    using hog::flora::own_season;
+    CHECK(own_season(1234U, 0.5F) == own_season(1234U, 0.5F));
+    float least = 1.0F;
+    float most = -1.0F;
+    float young = 0.0F;
+    float old = 0.0F;
+    constexpr std::uint32_t trees = 2'000;
+    for (std::uint32_t hash = 0; hash < trees; ++hash) {
+        const float own = own_season(hash * 7919U, 0.5F);
+        least = std::min(least, own);
+        most = std::max(most, own);
+        young += own_season(hash * 7919U, 0.1F);
+        old += own_season(hash * 7919U, 0.95F);
+    }
+    CHECK(least < -0.6F);
+    CHECK(most > 0.6F);
+    CHECK(old > young + (0.3F * trees));
+}

@@ -127,6 +127,8 @@ Species oak() {
                   .gnarl = {.young = 0.5F, .old = 1.8F},
                   .reach = {.young = 0.4F, .old = 1.2F},
                   .rise = {.young = 2.0F, .old = 1.0F}};
+    // At 45 degrees north: turning by mid-October, bare by mid-November, out again in May.
+    oak.leafing = {.turn = 11.4F, .fall = 1.8F, .flush = 0.85F, .spread = 0.6F};
     return oak;
 }
 
