@@ -64,6 +64,13 @@ float3 needles_of(uint packed) {
     return rooted * rooted;
 }
 
+// As flora::aged() scales its species: `young` for a sapling, `old` at the end, 1 in its prime.
+static const float prime_age = 0.7;
+float across(float age, float young, float old) {
+    return age >= prime_age ? lerp(1.0, old, (age - prime_age) / (1.0 - prime_age))
+                            : lerp(young, 1.0, age / prime_age);
+}
+
 // The two triangles of a quad: bottom left and right, then top left and right.
 static const uint corners[6] = { 0, 1, 2, 2, 1, 3 };
 
@@ -77,6 +84,7 @@ struct Tree {
     float2 uv;    // -0.5 to 0.5 across the quad, 0 to 1 up it
     float pixels; // the quad's width in pixels, for shedding detail far off
     nointerpolation uint seed; // the tree's own, keyed to its lattice cell
+    nointerpolation float age; // 0 a sapling, 1 old
 };
 
 // Nothing: a point's triangles cover no pixels.
@@ -89,6 +97,7 @@ Tree nothing() {
     gone.drawn = float3(0.0);
     gone.height = 0.0;
     gone.uv = float2(0.0);
+    gone.age = 0.0;
     gone.pixels = 0.0;
     gone.seed = 0;
     return gone;
@@ -102,6 +111,7 @@ Tree vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const float3 normal = asfloat(anchors.Load3(at + 16));
     const uint hash = anchors.Load(at + 28);
     const float3 crown = needles_of(anchors.Load(at + 32));
+    const float age = saturate(asfloat(anchors.Load(at + 36)));
 
     const float away = length(root);
     // Held off while the grown forest covers; full sized until near the edge of their reach,
@@ -112,7 +122,8 @@ Tree vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     }
     const float above = height_above_sea(root, push.bend_up, push.bend_radii.x);
     const float height = grown * fade;
-    const float width = height * (0.42 + (0.12 * unit(hash + 5u)));
+    // Saplings and old trees spread wider for their height than one in its prime.
+    const float width = height * (0.42 + (0.12 * unit(hash + 5u))) * across(age, 1.15, 1.2);
 
     // Three quads crossed about the tree's own up: near vertical, with a shade of the ground's
     // lean, along the very same axis the grown forest's trees stand. The mask does the shaping.
@@ -152,6 +163,7 @@ Tree vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     tree.colour = crown * (0.75 + (0.45 * unit(hash + 7u))) * (0.75 + (0.25 * t));
     tree.uv = float2(side_x, t);
     tree.seed = hash;
+    tree.age = age;
     return tree;
 }
 
@@ -165,22 +177,25 @@ struct Cut {
 };
 
 // What of the pine the point falls on; the crown sheds its tiers once the whole quad is only a
-// few pixels across.
-Cut pine_cut(uint seed, float2 uv, float pixels) {
+// few pixels across. As the grown forest's: a sapling green to the ground, an old tree's crown
+// raised high on its trunk and rounded.
+Cut pine_cut(uint seed, float age, float2 uv, float pixels) {
     Cut cut;
     cut.part = air_part;
     cut.shade = 1.0;
+    const float raised = across(age, 0.25, 2.4);
     if (pixels < 7.0) {
         // Far off, a plain wedge on a one-pixel stem.
-        const float t = saturate((uv.y - 0.06) / 0.94);
-        if (uv.y >= 0.06 && abs(uv.x) < (0.38 * (1.0 - t)) + 0.012) {
+        const float base = 0.06 * raised;
+        const float t = saturate((uv.y - base) / (1.0 - base));
+        if (uv.y >= base && abs(uv.x) < (0.38 * (1.0 - t)) + 0.012) {
             cut.part = needles;
         } else if (abs(uv.x) < 0.03 && uv.y < 0.5) {
             cut.part = bark;
         }
         return cut;
     }
-    const float foot = 0.12 + (0.08 * unit(seed + 11u)); // where the crown begins
+    const float foot = (0.12 + (0.08 * unit(seed + 11u))) * raised; // where the crown begins
     const float phase = unit(seed + 12u);
     const float tiers = 5.0 + (2.0 * unit(seed + 13u));
     if (uv.y >= foot) {
@@ -189,7 +204,7 @@ Cut pine_cut(uint seed, float2 uv, float pixels) {
         // crown narrowing to the leader; a ragged hem of needles on every edge.
         const float along = frac((t * tiers) + phase);
         const float step = lerp(1.0, 0.5, along);
-        const float spread = pow(1.0 - t, 0.85);
+        const float spread = pow(1.0 - t, lerp(0.85, 0.5, saturate((age - prime_age) / 0.3)));
         const float ragged = 0.02 * sin((uv.y * 47.0) + (6.2831853 * phase)) * spread;
         const float half_width = (0.42 * spread * step) + 0.012 + ragged;
         if (abs(uv.x) < half_width) {
@@ -210,7 +225,7 @@ Cut pine_cut(uint seed, float2 uv, float pixels) {
 // Lit as the ground beneath it, as grass.slang lights its blades.
 [shader("fragment")]
 float4 fragment_main(Tree tree) : SV_Target {
-    const Cut cut = pine_cut(tree.seed, tree.uv, tree.pixels);
+    const Cut cut = pine_cut(tree.seed, tree.age, tree.uv, tree.pixels);
     if (cut.part == air_part) {
         discard;
     }
