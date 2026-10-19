@@ -1,5 +1,7 @@
 #pragma once
 
+#include <hog/core/math.hpp>
+
 #include <cstdint>
 
 namespace hog::flora {
@@ -20,6 +22,9 @@ struct Leafing {
     float fall = 1.0F;   // hours
     float flush = 0.8F;  // 0 the shortest day, 1 the longest
     float spread = 0.0F; // hours either way one tree's dates fall from its kind's
+    // The colours its leaves turn through, first and last, in linear light.
+    Vec3 first{0.0F};
+    Vec3 last{0.0F};
 };
 
 // A crown's leaves at a moment of the year.

@@ -1,5 +1,6 @@
 import atmosphere;
 import bend;
+import season;
 import shadow;
 import tone;
 
@@ -24,10 +25,16 @@ struct Push {
 
 [[vk::push_constant]] ConstantBuffer<Push> push;
 
+static const uint genus_count = 2;
+
 struct Settings {
     // x metres the stamps hold off while the grown forest covers; y metres from the eye they
     // have shrunk away by.
     float4 reach;
+    // Each genus' year, as render::GenusSeasons has it.
+    float4 leafing[genus_count];
+    float4 first[genus_count];
+    float4 last[genus_count];
 };
 
 [[vk::binding(0, 0)]] ConstantBuffer<Settings> settings;
@@ -43,7 +50,6 @@ struct Settings {
 static const uint anchor_stride = 40; // bytes, as render::TreeAnchor lies
 
 // Bare wood, for the trunk, as the grown forest's bark: pine, then oak.
-static const uint genus_count = 2;
 static const float3 woods[genus_count] = { float3(0.055, 0.045, 0.038), float3(0.07, 0.064, 0.056) };
 static const uint oak = 1;
 
@@ -86,7 +92,8 @@ static const uint corners[6] = { 0, 1, 2, 2, 1, 3 };
 
 struct Tree {
     float4 position : SV_Position;
-    float3 colour;
+    float3 colour; // the crown's green
+    float tone;    // the tree's own shade of it, darker low in the crown
     float3 normal;
     float3 from_eye;
     float3 drawn; // from the eye, bent
@@ -95,6 +102,7 @@ struct Tree {
     float pixels; // the quad's width in pixels, for shedding detail far off
     nointerpolation uint seed; // the tree's own, keyed to its lattice cell
     nointerpolation float age; // 0 a sapling, 1 old
+    nointerpolation float own; // how early it keeps its kind's dates, as season.slang's
     nointerpolation uint genus;
 };
 
@@ -103,6 +111,7 @@ Tree nothing() {
     Tree gone;
     gone.position = float4(0.0, 0.0, 0.0, 1.0);
     gone.colour = float3(0.0);
+    gone.tone = 0.0;
     gone.normal = float3(0.0, 0.0, 1.0);
     gone.from_eye = float3(0.0);
     gone.drawn = float3(0.0);
@@ -110,6 +119,7 @@ Tree nothing() {
     gone.uv = float2(0.0);
     gone.age = 0.0;
     gone.pixels = 0.0;
+    gone.own = 0.0;
     gone.seed = 0;
     gone.genus = 0;
     return gone;
@@ -177,7 +187,9 @@ Tree vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
         normalize(upright + (width_dir * (side_x * 0.9)) + (upright * ((t - 0.35) * 0.5)));
     tree.height = above;
     tree.pixels = width / max(push.bend_radii.w * away, 1e-6);
-    tree.colour = crown * (0.75 + (0.45 * unit(hash + 7u))) * (0.75 + (0.25 * t));
+    tree.colour = crown;
+    tree.tone = (0.75 + (0.45 * unit(hash + 7u))) * (0.75 + (0.25 * t));
+    tree.own = own_season(unit(hash + 12u), age);
     tree.uv = float2(side_x, t);
     tree.seed = hash;
     tree.age = age;
@@ -192,6 +204,8 @@ static const uint bark = 2;
 struct Cut {
     uint part;
     float shade;
+    float2 patch; // where in the crown's patches of leaves, each turning on its own dates
+    bool twig;    // where the crown, bare, shows its branches
 };
 
 // What of the pine the point falls on; the crown sheds its tiers once the whole quad is only a
@@ -201,6 +215,8 @@ Cut pine_cut(uint seed, float age, float2 uv, float pixels) {
     Cut cut;
     cut.part = air_part;
     cut.shade = 1.0;
+    cut.patch = float2(0.0);
+    cut.twig = false;
     const float raised = across(age, 0.25, 2.4);
     if (pixels < 7.0) {
         // Far off, a plain wedge on a one-pixel stem.
@@ -247,6 +263,8 @@ Cut oak_cut(uint seed, float age, float2 uv, float pixels) {
     Cut cut;
     cut.part = air_part;
     cut.shade = 1.0;
+    cut.patch = float2(0.0);
+    cut.twig = false;
     const float foot = (0.28 + (0.08 * unit(seed + 11u))) * across(age, 0.6, 1.3);
     const float middle = (foot + 1.0) * 0.5;
     const float2 off = float2(uv.x / 0.48, (uv.y - middle) / ((1.0 - foot) * 0.5));
@@ -263,6 +281,18 @@ Cut oak_cut(uint seed, float age, float2 uv, float pixels) {
         const uint across_at = uint((uv.x + 0.5) * 9.0);
         const uint up_at = uint(uv.y * 14.0);
         const float mottle = near ? 0.85 + (0.3 * unit(seed + across_at + (up_at * 17u))) : 1.0;
+        cut.patch = near ? float2((uv.x + 0.5) * 5.0, uv.y * 7.0) : float2(0.0);
+        // Limbs fanning up and out from low in the head, forking as they reach its edge; far
+        // off, a thin haze of them.
+        if (near) {
+            const float2 from = float2(uv.x / 0.48, uv.y - (foot + (0.15 * (1.0 - foot))));
+            const float fan = (atan2(from.x, max(from.y, 0.0) + 0.05) * 1.6) +
+                              (0.06 * sin((length(from) * 9.0) + (6.2831853 * unit(seed + 12u))));
+            const float forked = reach > 0.6 ? 2.0 : 1.0;
+            cut.twig = abs(frac((fan * forked) + unit(seed + 13u)) - 0.5) < (0.09 - (0.04 * reach));
+        } else {
+            cut.twig = unit(seed + 21u) < 0.35;
+        }
         cut.shade = lerp(0.6, 1.1, saturate((off.y * 0.5) + 0.5)) * mottle;
         return cut;
     }
@@ -273,6 +303,18 @@ Cut oak_cut(uint seed, float age, float2 uv, float pixels) {
     return cut;
 }
 
+// Dice rolled at each whole point of `at` and blended smoothly between, 0 to 1.
+float smooth_dice(uint seed, float2 at) {
+    const float2 whole = floor(at);
+    const float2 part = smoothstep(0.0, 1.0, at - whole);
+    const uint i = uint(int(whole.x) + 64);
+    const uint j = uint(int(whole.y) + 64);
+    const float low = lerp(unit(seed + i + (j * 131u)), unit(seed + i + 1u + (j * 131u)), part.x);
+    const float high =
+        lerp(unit(seed + i + ((j + 1u) * 131u)), unit(seed + i + 1u + ((j + 1u) * 131u)), part.x);
+    return lerp(low, high, part.y);
+}
+
 // Lit as the ground beneath it, as grass.slang lights its blades.
 [shader("fragment")]
 float4 fragment_main(Tree tree) : SV_Target {
@@ -281,7 +323,24 @@ float4 fragment_main(Tree tree) : SV_Target {
     if (cut.part == air_part) {
         discard;
     }
-    const float3 albedo = cut.part == bark ? woods[tree.genus] : tree.colour * cut.shade;
+    float3 albedo = woods[tree.genus];
+    if (cut.part == needles) {
+        // Each patch keeps the tree's dates give or take a week or so, the crown's top first;
+        // where its leaves are down, the bare branches show through.
+        const float own = tree.own + (0.6 * ((2.0 * smooth_dice(tree.seed + 1u, cut.patch)) - 1.0)) +
+                          (0.3 * tree.uv.y);
+        const Leaves leaves = leaves_at(settings.leafing[tree.genus], own, lighting.year);
+        if (smooth_dice(tree.seed + 2u, cut.patch * 2.0) >= leaves.held) {
+            if (!cut.twig) {
+                discard;
+            }
+            albedo = woods[tree.genus] * 0.8;
+        } else {
+            albedo = autumn_colour(tree.colour, leaves.turned, settings.first[tree.genus].rgb,
+                                   settings.last[tree.genus].rgb) *
+                     tree.tone * cut.shade;
+        }
+    }
     const float3 sun = lighting.sun_exposure.xyz;
     const float scale = lighting.sky_scale.w;
     const float3 normal = normalize(tree.normal);

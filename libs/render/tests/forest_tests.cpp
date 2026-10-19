@@ -80,6 +80,7 @@ struct Stand {
     bool with_stamps = false; // the stamp tier too, held off to the forest's reach
     double eye_up = 6.0;
     double eye_back = -40.0;
+    hog::flora::Daylight daylight{};
 };
 
 // The stand's grown trees over black, from south of the origin facing north.
@@ -112,11 +113,15 @@ Pixels draw(hog::render::Device& device, const Stand& stand) {
                                     .sun = sun,
                                     .bend = bend,
                                     .exposure = 10.0,
-                                    .sky_light = model.sky_irradiance(2.0 * scale, sun)};
+                                    .sky_light = model.sky_irradiance(2.0 * scale, sun),
+                                    .daylight = stand.daylight};
     const StandDraw grown{.slot = slot,
                           .count = static_cast<std::uint32_t>(stand.anchors.size()),
                           .origin = origin,
-                          .detail = stand.detail};
+                          .detail = stand.detail,
+                          .genus = stand.anchors.empty()
+                                       ? hog::flora::Genus::Pine
+                                       : hog::render::genus_of(stand.anchors.front().colour)};
     const GrassView view{.camera = camera,
                          .bend = bend,
                          .air = sky->bindings(0, *atmosphere),
@@ -204,6 +209,18 @@ std::size_t leafy_pixels(const Pixels& pixels, std::uint32_t from = 0) {
     return leafy;
 }
 
+// Leaves gone yellow, orange or red: warm and well saturated, as no bark is.
+std::size_t autumnal_pixels(const Pixels& pixels) {
+    std::size_t autumnal = 0;
+    for (std::size_t pixel = 0; pixel < pixels.size() / 4; ++pixel) {
+        const int red = pixels.at(4 * pixel);
+        const int green = pixels.at((4 * pixel) + 1);
+        const int blue = pixels.at((4 * pixel) + 2);
+        autumnal += (red > 20 && red > green && red > 2 * blue) ? 1U : 0U;
+    }
+    return autumnal;
+}
+
 } // namespace
 
 TEST_CASE("grown pines carry trunks and needles on their anchors", "[render]") {
@@ -284,4 +301,32 @@ TEST_CASE("an oak grows a broad crown of leaves where a pine of its height stand
     CHECK(leafy_pixels(oak) > 60);
     CHECK(barky_pixels(oak) > 2);
     CHECK(columns_lit(oak) > columns_lit(pine) + (columns_lit(pine) / 2));
+}
+
+TEST_CASE("an oak's leaves turn in autumn and are gone by winter, a pine's needles kept",
+          "[render]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    using hog::flora::Genus;
+    // Earth's days at 45 degrees north: a July day, one in late October, and January's.
+    constexpr hog::flora::Daylight summer{.hours = 15.0F, .longest = 15.4F};
+    constexpr hog::flora::Daylight autumn{.hours = 10.7F, .longest = 15.4F};
+    constexpr hog::flora::Daylight winter{.hours = 9.0F, .longest = 15.4F, .lengthening = true};
+    const auto oaks = rank_of(3, 0.0, 11.0F, hog::flora::prime_age, Genus::Oak);
+    const Pixels green = draw(*device, {.anchors = oaks, .daylight = summer});
+    const Pixels turning = draw(*device, {.anchors = oaks, .daylight = autumn});
+    const Pixels bare = draw(*device, {.anchors = oaks, .daylight = winter});
+    CHECK(leafy_pixels(green) > 150);
+    CHECK(autumnal_pixels(green) < leafy_pixels(green) / 20);
+    CHECK(autumnal_pixels(turning) > 100);
+    CHECK(autumnal_pixels(turning) > leafy_pixels(turning));
+    CHECK(leafy_pixels(bare) < leafy_pixels(green) / 20);
+    CHECK(autumnal_pixels(bare) < autumnal_pixels(turning) / 10);
+    CHECK(barky_pixels(bare) > 10);
+
+    const auto pines = rank_of(3, 0.0);
+    CHECK(leafy_pixels(draw(*device, {.anchors = pines, .daylight = winter})) ==
+          leafy_pixels(draw(*device, {.anchors = pines, .daylight = summer})));
 }

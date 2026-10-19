@@ -213,7 +213,8 @@ render::SkyView Scene::sky_view(const Shot& shot, render::CloudShade shade) {
             .bend = shot.bend,
             .exposure = *exposure_,
             .sky_light = light.sky,
-            .shade = shade};
+            .shade = shade,
+            .daylight = daylight_at(calendar_, shot.time, shot.bend.up)};
 }
 
 void Scene::grow_vegetation(render::RenderGraph& graph, const render::Frame& frame,

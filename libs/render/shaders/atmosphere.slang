@@ -325,6 +325,9 @@ public struct Lighting {
     // east, west, north and south, 0 for none; y the metres above sea level the map's laid at; z
     // of the light falling straight down, the share the mist over the eye lets through.
     public float4 shadow;
+    // The year at the eye, as season.slang keeps it: x hours of daylight, y the longest day's, z 1
+    // while the days lengthen.
+    public float4 year;
 };
 
 // Of the light falling on any cloud over a place, what reaches it, as render::CloudShade has it.

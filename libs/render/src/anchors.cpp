@@ -75,6 +75,17 @@ flora::Genus genus_of(std::uint32_t packed) noexcept {
                                                                   : flora::Genus::Pine;
 }
 
+GenusSeasons genus_seasons() {
+    GenusSeasons seasons;
+    for (std::size_t genus = 0; genus < seasons.leafing.size(); ++genus) {
+        const flora::Leafing leafing = flora::species_of(static_cast<flora::Genus>(genus)).leafing;
+        seasons.leafing.at(genus) = {leafing.turn, leafing.fall, leafing.flush, leafing.spread};
+        seasons.first.at(genus) = {leafing.first, 0.0F};
+        seasons.last.at(genus) = {leafing.last, 0.0F};
+    }
+    return seasons;
+}
+
 Result<AnchorPool> AnchorPool::create(const Device& device, const AnchorPoolDesc& desc) {
     if (desc.tiles == 0 || desc.frames == 0 || desc.uploads == 0) {
         return make_error(ErrorCode::InvalidArgument,

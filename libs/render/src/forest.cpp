@@ -56,6 +56,7 @@ struct Build {
 struct Settings {
     glm::vec4 bands;
     glm::vec4 stages; // the ages between one baked stage and the next
+    GenusSeasons seasons;
     std::array<Build, build_count> builds;
 };
 
@@ -172,6 +173,7 @@ Result<Forest> Forest::create(Device& device, VkFormat colour_format, VkFormat d
         settings.stages[static_cast<glm::length_t>(stage)] =
             0.5F * (stage_ages.at(stage) + stage_ages.at(stage + 1));
     }
+    settings.seasons = genus_seasons();
     settings.builds = carpentry.builds;
     auto settings_buffer = make_filled_buffer(device, std::as_bytes(std::span{&settings, 1}),
                                               VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);

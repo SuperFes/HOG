@@ -6,6 +6,7 @@
 #include <hog/render/memory.hpp>
 #include <hog/render/vulkan.hpp>
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -32,6 +33,15 @@ struct TreeAnchor {
 [[nodiscard]] std::uint32_t packed_foliage(Vec3 colour, flora::Genus genus) noexcept;
 [[nodiscard]] Vec3 foliage_of(std::uint32_t packed) noexcept;
 [[nodiscard]] flora::Genus genus_of(std::uint32_t packed) noexcept;
+
+// Each genus' year as the tree shaders read it, from its species' flora::Leafing: x turn, y fall,
+// z flush, w spread; then the colours its leaves turn through, first and last.
+struct GenusSeasons {
+    std::array<glm::vec4, flora::genus_count> leafing{};
+    std::array<glm::vec4, flora::genus_count> first{};
+    std::array<glm::vec4, flora::genus_count> last{};
+};
+[[nodiscard]] GenusSeasons genus_seasons();
 
 // The fixed lattice trees are anchored to, coarser than the bushes': one tree at most in each
 // level-14 cell, bound to its spot in the world for ever.

@@ -1,5 +1,6 @@
 import atmosphere;
 import bend;
+import season;
 import shadow;
 import tone;
 
@@ -42,6 +43,10 @@ struct Settings {
     float4 bands;
     // The ages between one baked stage and the next, sapling to old; w unused.
     float4 stages;
+    // Each genus' year, as render::GenusSeasons has it.
+    float4 leafing[genus_count];
+    float4 first[genus_count];
+    float4 last[genus_count];
     Build builds[genus_count * detail_count * stage_count * variant_count];
 };
 
@@ -102,6 +107,7 @@ struct Planted {
     float3 along;     // the wind's direction
     float height_above; // of its ground, over the sea
     uint hash;
+    float age;
     uint genus;
     uint build;       // into the carpentry's builds
 };
@@ -169,6 +175,7 @@ Planted plant(uint instance) {
     planted.root = root;
     planted.height_above = height_above_sea(root, push.bend_up, push.bend_radii.x);
     planted.hash = hash;
+    planted.age = age;
     return planted;
 }
 
@@ -308,6 +315,18 @@ Spray leaf_vertex(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const float3 local_normal = asfloat(carpentry.Load3(at + 12));
     const float2 card = asfloat(carpentry.Load2(at + 24));
     const uint seed = carpentry.Load(at + 32);
+    const float toward_top = saturate(local.z / max(asfloat(build.wood.w), 0.1));
+
+    // Each frond keeps its tree's dates give or take a week or so, the crown's top first, so a
+    // turning crown is many colours at once; fronds drop as their leaves fall.
+    const float own = own_season(unit(planted.hash + 12u), planted.age) +
+                      (0.6 * ((2.0 * unit(seed + 3u)) - 1.0)) + (0.3 * toward_top);
+    const Leaves leaves = leaves_at(settings.leafing[planted.genus], own, lighting.year);
+    if (unit(seed + 5u) >= leaves.held) {
+        return no_spray();
+    }
+    const float3 hue = autumn_colour(foliage, leaves.turned, settings.first[planted.genus].rgb,
+                                     settings.last[planted.genus].rgb);
 
     Spray spray;
     spray.from_eye = carried(planted, local, asfloat(build.wood.w));
@@ -318,8 +337,7 @@ Spray leaf_vertex(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     spray.normal = turned(planted, normalize((local_normal * 0.8) +
                                              (normalize(bulge) * 0.5)));
     // Toned as the stamps tone the same tree: the tree's own cast, darker low in the crown.
-    const float toward_top = saturate(local.z / max(asfloat(build.wood.w), 0.1));
-    spray.colour = foliage * (0.75 + (0.45 * unit(planted.hash + 7u))) *
+    spray.colour = hue * (0.75 + (0.45 * unit(planted.hash + 7u))) *
                    (0.85 + (0.3 * unit(seed + 1u))) * (0.75 + (0.25 * toward_top));
     spray.height = planted.height_above;
     spray.card = card;

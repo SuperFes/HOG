@@ -122,3 +122,22 @@ TEST_CASE("exposure moves towards the light's over time", "[client][daylight]") 
     CHECK_THAT(hog::client::adapted(10.0, 100.0, 60.0), WithinAbs(100.0, 1e-6));
     CHECK(hog::client::adapted(100.0, 10.0, 0.25) < 100.0);
 }
+
+TEST_CASE("the leaves keep the year where the eye is", "[client][daylight]") {
+    const hog::sim::Calendar calendar{std::chrono::hours{4}, 23.44};
+    const auto on = [](std::chrono::year_month_day day) {
+        return hog::to_game_time(hog::WallClock::time_point{std::chrono::sys_days{day}});
+    };
+    const DVec3 north{std::cos(0.785), 0.0, std::sin(0.785)};
+    const DVec3 south{north.x, 0.0, -north.z};
+    using std::chrono::year;
+    const auto october = hog::client::daylight_at(calendar, on(year{2026} / 10 / 20), north);
+    CHECK_THAT(october.hours, WithinAbs(10.6, 0.3));
+    CHECK_THAT(october.longest, WithinAbs(15.4, 0.1));
+    CHECK_FALSE(october.lengthening);
+    const auto april = hog::client::daylight_at(calendar, on(year{2026} / 4 / 20), north);
+    CHECK(april.hours > 13.0F);
+    CHECK(april.lengthening);
+    // The south's spring as the north's autumn.
+    CHECK(hog::client::daylight_at(calendar, on(year{2026} / 10 / 20), south).lengthening);
+}

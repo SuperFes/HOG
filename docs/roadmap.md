@@ -468,7 +468,7 @@ Builds on Phase 5's condition states. The server owns every tree's record, as it
 - [ ] Regrowth: suckers and coppice shoots from stumps of the species that do it, and seedlings filling gaps, as the succession rules decide.
 - [ ] Fire's marks: scorched bark on survivors, burned snags, ash ground that greens over again.
 - [ ] Lightning strikes, disease and pest outbreaks as rare sim events that kill trees in patches.
-- [ ] Seasons for deciduous species: leaf-out, autumn colour, bare winter crowns, snow resting on boughs. Each tree turns on its own date, set by its seed and age and the same every year, so one tree is already red while its neighbours are still green. Autumn crowns mix colours. Leaves fall as wind-blown GPU particles near the eye, and the ground under the trees is tinted with them.
+- [ ] Seasons for deciduous species: leaf-out, autumn colour, bare winter crowns, snow resting on boughs (timing, colour, leaf fall and bare crowns done: each broadleaf keys off the day's length at the eye, so autumn comes sooner further from the equator and never in the tropics). Each tree turns on its own date, set by its seed and age and the same every year, so one tree is already red while its neighbours are still green. Autumn crowns mix colours. Leaves fall as wind-blown GPU particles near the eye, and the ground under the trees is tinted with them.
 - [ ] Harvest yields from the same records: wood by species and age, bark, resin, fruit and seed. Crafting (Phase 7) reads them.
 - [ ] Tree changes replicated to clients by cell, as weather is. The anchor tiles rebuild from them (`TreeAnchors::changed`, not yet wired to world changes).
 

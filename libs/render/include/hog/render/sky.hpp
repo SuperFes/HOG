@@ -3,6 +3,7 @@
 #include <hog/atmosphere/model.hpp>
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
+#include <hog/flora/season.hpp>
 #include <hog/render/camera.hpp>
 #include <hog/render/memory.hpp>
 #include <hog/render/pipeline.hpp>
@@ -46,6 +47,9 @@ struct SkyView {
     VkImageView cloud_shadow = VK_NULL_HANDLE;
     // Of light falling straight down, the share the mist over the eye lets through.
     double mist = 1.0;
+    // The year at the eye, which the leaves drawn keep.
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    flora::Daylight daylight = {};
 };
 
 // What's drawn through the air reads it from these, all ready for any shader once a frame's

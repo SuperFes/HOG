@@ -50,6 +50,12 @@ GameTime start_time(const sim::Calendar& calendar, GameTime now, DVec3 up,
     return now + std::chrono::round<GameDuration>(wait);
 }
 
+flora::Daylight daylight_at(const sim::Calendar& calendar, GameTime time, DVec3 up) {
+    return {.hours = static_cast<float>(calendar.daylight_hours(time, up)),
+            .longest = static_cast<float>(calendar.longest_daylight_hours(up)),
+            .lengthening = sim::Calendar::days_lengthening(time, up)};
+}
+
 EyeLight light_at_eye(const atmosphere::Model& model, double height, double sun_mu) {
     const double mu = std::clamp(sun_mu, -1.0, 1.0);
     const DVec3 sun{std::sqrt(1.0 - (mu * mu)), 0.0, mu};

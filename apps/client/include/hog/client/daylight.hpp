@@ -3,6 +3,7 @@
 #include <hog/atmosphere/model.hpp>
 #include <hog/core/math.hpp>
 #include <hog/core/time.hpp>
+#include <hog/flora/season.hpp>
 #include <hog/render/clouds.hpp>
 #include <hog/sim/calendar.hpp>
 
@@ -35,6 +36,9 @@ private:
 // `now`, or the soonest time after it that it's `time_of_day` where `up` is.
 [[nodiscard]] GameTime start_time(const sim::Calendar& calendar, GameTime now, DVec3 up,
                                   std::optional<double> time_of_day);
+
+// The year at `up` as the leaves drawn keep it.
+[[nodiscard]] flora::Daylight daylight_at(const sim::Calendar& calendar, GameTime time, DVec3 up);
 
 // Irradiance on level ground at the eye.
 struct EyeLight {

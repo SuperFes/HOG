@@ -37,7 +37,8 @@ constexpr VkDescriptorSetLayoutBinding binding(std::uint32_t at, VkDescriptorTyp
 }
 
 constexpr std::array descriptors{
-    binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT),
+    binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT),
     binding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT),
     binding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT),
     binding(3, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
@@ -46,10 +47,11 @@ constexpr std::array descriptors{
     binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
     binding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)};
 
-// Metres the stamps hold off while the grown forest covers, and metres from the eye they have
-// shrunk away by.
 struct Settings {
+    // Metres the stamps hold off while the grown forest covers, and metres from the eye they have
+    // shrunk away by.
     glm::vec4 reach;
+    GenusSeasons seasons;
 };
 
 } // namespace
@@ -58,7 +60,8 @@ Result<Trees> Trees::create(Device& device, VkFormat colour_format, VkFormat dep
                             double hold_off, double fade_far) {
     Trees trees;
     const Settings settings{
-        .reach = {static_cast<float>(hold_off), static_cast<float>(fade_far), 0.0F, 0.0F}};
+        .reach = {static_cast<float>(hold_off), static_cast<float>(fade_far), 0.0F, 0.0F},
+        .seasons = genus_seasons()};
     auto settings_buffer = make_filled_buffer(device, std::as_bytes(std::span{&settings, 1}),
                                               VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
     if (!settings_buffer) {
