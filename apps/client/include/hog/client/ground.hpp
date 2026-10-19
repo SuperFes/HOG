@@ -86,14 +86,16 @@ grass_draws(const GroundSlots& slots, std::span<const terrain::StreamedPatch> dr
             WorldPosition eye, double planet_radius, const GrassBudget& budget = {});
 
 // The bushes grown on the drawn patches within the grass budget's far reach, keyed to their
-// fixed lattice. Patches without slots, or finer than the lattice can key, are passed over.
+// fixed lattice; ground finer than the lattice keys through its still-held ancestor at the
+// lattice's level. Patches without slots are passed over.
 [[nodiscard]] std::vector<render::BushDraw>
 bush_draws(const GroundSlots& slots, std::span<const terrain::StreamedPatch> drawn,
            WorldPosition eye, double planet_radius, const GrassBudget& budget = {});
 
 // The trees grown on the drawn patches within the budget's tree reach, keyed to their own,
-// coarser fixed lattice. Patches without slots, or finer than the lattice can key, are passed
-// over. Where the grown forest covers a patch, its stamps hold off to the forest's reach.
+// coarser fixed lattice; ground finer than the lattice keys through its still-held ancestor at
+// the lattice's level. Patches without slots are passed over. Where the grown forest covers a
+// patch, its stamps hold off to the forest's reach.
 [[nodiscard]] std::vector<render::TreeDraw>
 tree_draws(const GroundSlots& slots, std::span<const terrain::StreamedPatch> drawn,
            WorldPosition eye, double planet_radius, const GrassBudget& budget = {});

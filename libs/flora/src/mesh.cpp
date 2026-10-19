@@ -85,7 +85,9 @@ void mesh_card(const Card& card, float scale, TreeMesh& grown) {
 TreeMesh mesh(const Skeleton& skeleton, const Detail& detail) {
     TreeMesh grown;
     for (const Bough& bough : skeleton.boughs) {
-        mesh_bough(bough, detail, grown);
+        if (bough.level < detail.wood_levels) {
+            mesh_bough(bough, detail, grown);
+        }
     }
     const auto card_step = static_cast<std::size_t>(std::max(detail.card_stride, 1));
     for (std::size_t at = 0; at < skeleton.cards.size(); at += card_step) {

@@ -55,8 +55,8 @@ static const uint vertex_stride = 28; // bytes, as terrain::PatchVertex lies
 // Trees keep off ground this close to sea level, and off slopes steeper than this much up.
 static const float shore = 1.0;
 static const float steepest = 0.7;
-// Bare wood, for the trunk.
-static const float3 wood = float3(0.085, 0.05, 0.028);
+// Bare wood, for the trunk, as the grown forest's bark.
+static const float3 wood = float3(0.055, 0.045, 0.038);
 
 struct Corner {
     float3 position;
@@ -168,12 +168,14 @@ Tree vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
         crown.w * (0.55 + (0.9 * unit(hash + 4u))) * lerp(0.8, 1.05, wooded) * fade;
     const float width = height * (0.42 + (0.12 * unit(hash + 5u)));
 
-    // Three quads crossed about the tree's own up, the mask doing the shaping.
+    // Three quads crossed about the tree's own up: near vertical, with a shade of the ground's
+    // lean, along the very same axis the grown forest's trees stand. The mask does the shaping.
+    const float3 upright = normalize(normal + (push.bend_up.xyz * 4.0));
     const uint quad = vertex / 6;
     const uint corner = corners[vertex % 6];
-    const float3 beside = normalize(abs(normal.z) < 0.9 ? cross(normal, float3(0.0, 0.0, 1.0))
-                                                        : cross(normal, float3(1.0, 0.0, 0.0)));
-    const float3 ahead = cross(normal, beside);
+    const float3 beside = normalize(abs(upright.z) < 0.9 ? cross(upright, float3(0.0, 0.0, 1.0))
+                                                         : cross(upright, float3(1.0, 0.0, 0.0)));
+    const float3 ahead = cross(upright, beside);
     const float facing = (float(quad) * 1.0471976) + (6.2831853 * unit(hash + 3u));
     const float3 width_dir = (beside * cos(facing)) + (ahead * sin(facing));
 
@@ -190,14 +192,15 @@ Tree vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
         sway = along * (height * ((held * 0.16) + (rock * saturate(speed / 8.0))));
     }
     const float3 placed =
-        root + (width_dir * (side_x * width)) + (normal * (height * t)) + (sway * (t * t * t));
+        root + (width_dir * (side_x * width)) + (upright * (height * t)) + (sway * (t * t * t));
 
     Tree tree;
     tree.from_eye = placed;
     tree.drawn = bent(placed, push.bend_up, push.bend_radii.xy);
     tree.position = mul(push.clip_from_eye, float4(tree.drawn, 1.0));
     // Rounded off per corner, so the flat quads shade like a volume.
-    tree.normal = normalize(normal + (width_dir * (side_x * 0.9)) + (normal * ((t - 0.35) * 0.5)));
+    tree.normal =
+        normalize(upright + (width_dir * (side_x * 0.9)) + (upright * ((t - 0.35) * 0.5)));
     tree.height = above;
     tree.pixels = width / max(push.bend_radii.w * away, 1e-6);
     tree.colour = crown.rgb * (0.75 + (0.45 * unit(hash + 7u))) * (0.75 + (0.25 * t));

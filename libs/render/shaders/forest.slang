@@ -71,7 +71,7 @@ static const uint leaf_stride = 36;   // bytes, as flora::LeafVertex lies
 static const float shore = 1.0;
 static const float steepest = 0.7;
 // Bark, as the far stamps' trunks wear.
-static const float3 bark = float3(0.085, 0.05, 0.028);
+static const float3 bark = float3(0.055, 0.045, 0.038);
 
 struct Corner {
     float3 position;
@@ -153,16 +153,18 @@ Planted plant(uint instance) {
     const float3 root = push.origin.xyz + ground;
     const float above = height_above_sea(root, push.bend_up, push.bend_radii.x);
     const float away = length(root);
-    const float fade = saturate((fade_far - away) / (0.2 * fade_far));
-    if (above < shore || fade <= 0.0 || dot(normal, push.bend_up.xyz) < steepest) {
+    // Full sized to the edge of the grown tier's reach, where the stamps take over at the very
+    // same height — no shrinking, or trees would sink away just before their stamps stood up.
+    if (above < shore || away >= fade_far || dot(normal, push.bend_up.xyz) < steepest) {
         return planted;
     }
 
     const float height =
-        crown.w * (0.55 + (0.9 * unit(hash + 4u))) * lerp(0.8, 1.05, wooded) * fade;
+        crown.w * (0.55 + (0.9 * unit(hash + 4u))) * lerp(0.8, 1.05, wooded);
 
-    // A real tree grows for the light, not square to its slope.
-    const float3 upright = normalize(normal + (push.bend_up.xyz * 2.0));
+    // A real tree grows for the light, not square to its slope — near vertical, with a shade of
+    // the ground's lean. The stamps stand along the very same axis.
+    const float3 upright = normalize(normal + (push.bend_up.xyz * 4.0));
     const float3 beside0 = normalize(abs(upright.z) < 0.9 ? cross(upright, float3(0.0, 0.0, 1.0))
                                                           : cross(upright, float3(1.0, 0.0, 0.0)));
     const float3 ahead0 = cross(upright, beside0);
@@ -344,8 +346,10 @@ Spray leaf_vertex(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const float3 bulge = float3(local.x, local.y, 0.35);
     spray.normal = turned(planted, normalize((local_normal * 0.6) +
                                              (normalize(bulge) * 0.8)));
+    // Toned as the stamps tone the same tree: the tree's own cast, darker low in the crown.
+    const float toward_top = saturate(local.z / max(asfloat(build.wood.w), 0.1));
     spray.colour = planted.needles * (0.75 + (0.45 * unit(planted.hash + 7u))) *
-                   (0.85 + (0.3 * unit(seed + 1u)));
+                   (0.85 + (0.3 * unit(seed + 1u))) * (0.75 + (0.25 * toward_top));
     spray.height = planted.height_above;
     spray.card = card;
     spray.pixels =
@@ -359,8 +363,8 @@ Spray leaf_vertex(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
 bool within_spray(uint seed, float2 card, float pixels) {
     const float2 off = float2(card.x / 0.5, (card.y - 0.5) / 0.55);
     const float roundness = dot(off, off);
-    if (pixels < 24.0) {
-        return roundness < 0.85;
+    if (pixels < 16.0) {
+        return roundness < 0.72;
     }
     // The stem the needles comb away from.
     if (abs(card.x) < (0.03 * (1.0 - card.y)) + 0.012) {
@@ -381,5 +385,5 @@ float4 leaf_fragment(Spray spray) : SV_Target {
     // Needles darken toward the stem, as the bushes' tiers do.
     const float3 albedo = spray.colour * (0.75 + (0.5 * saturate(abs(spray.card.x) * 2.0)));
     return float4(
-        forest_lit(albedo, spray.normal, spray.from_eye, spray.drawn, spray.height, 0.45), 1.0);
+        forest_lit(albedo, spray.normal, spray.from_eye, spray.drawn, spray.height, 0.3), 1.0);
 }

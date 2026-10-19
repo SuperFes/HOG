@@ -1,6 +1,7 @@
 #include <hog/client/ground.hpp>
 #include <hog/core/assert.hpp>
 #include <hog/mapgen/photo.hpp>
+#include <hog/planet/projection.hpp>
 
 #include <glm/geometric.hpp>
 
@@ -10,6 +11,7 @@
 #include <cstdint>
 #include <numbers>
 #include <optional>
+#include <set>
 
 namespace hog::client {
 
@@ -188,6 +190,9 @@ namespace {
 
 // A patch keyed onto a fixed lattice, for bushes and trees alike.
 struct LatticeStand {
+    planet::CellId cell; // the keyed patch: the drawn one, or its ancestor at the lattice's level
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    WorldPosition origin = {};
     std::uint32_t slot = 0;
     std::uint32_t face = 0;
     std::uint32_t lattice_i = 0;
@@ -199,15 +204,23 @@ struct LatticeStand {
 
 // Keys the patch onto the fixed lattice of `lattice_level`, if its ground is fine enough to
 // carry it and close enough to reach. The lattice keys a patch's grid cells together or apart by
-// whole powers of two; a patch too coarse for even paired lattice cells, or finer than the
-// lattice itself, can't carry it.
+// whole powers of two; a patch too coarse for even paired lattice cells can't carry it, and one
+// finer than the lattice is keyed through its ancestor at the lattice's own level, whose patch
+// stays held under the fine ground drawn over it — siblings key to the same stand, so callers
+// must pass duplicates over.
 std::optional<LatticeStand> lattice_stand(const GroundSlots& slots,
                                           const terrain::StreamedPatch& patch, WorldPosition eye,
                                           DVec3 up, double planet_radius, int lattice_level,
                                           double coarsest, double reach) {
-    const int level = patch.cell.level();
+    planet::CellId cell = patch.cell;
+    WorldPosition origin = patch.origin;
+    if (cell.level() > lattice_level) {
+        cell = cell.parent(lattice_level);
+        origin = WorldPosition{planet::cell_center(cell) * planet_radius};
+    }
+    const int level = cell.level();
     const int shift = level + terrain::patch_depth - lattice_level;
-    if (shift < -1 || level > lattice_level) {
+    if (shift < -1) {
         return std::nullopt;
     }
     const double spacing = (std::numbers::pi / 2.0) * planet_radius /
@@ -217,18 +230,20 @@ std::optional<LatticeStand> lattice_stand(const GroundSlots& slots,
         return std::nullopt;
     }
     const double span = spacing * terrain::patch_cells;
-    const DVec3 away = patch.origin - eye;
+    const DVec3 away = origin - eye;
     const double distance = std::max(0.0, glm::length(away - (up * glm::dot(away, up))) - span);
     if (distance >= reach) {
         return std::nullopt;
     }
-    const std::optional<std::uint32_t> held = slots.slot(patch.cell);
+    const std::optional<std::uint32_t> held = slots.slot(cell);
     if (!held) {
         return std::nullopt;
     }
-    const planet::FaceIJ at = patch.cell.to_face_ij();
+    const planet::FaceIJ at = cell.to_face_ij();
     const auto spread = static_cast<unsigned>(lattice_level - level);
-    return LatticeStand{.slot = *held,
+    return LatticeStand{.cell = cell,
+                        .origin = origin,
+                        .slot = *held,
                         .face = static_cast<std::uint32_t>(at.face),
                         .lattice_i = static_cast<std::uint32_t>(at.i) << spread,
                         .lattice_j = static_cast<std::uint32_t>(at.j) << spread,
@@ -245,15 +260,16 @@ std::vector<render::BushDraw> bush_draws(const GroundSlots& slots,
                                          const GrassBudget& budget) {
     std::vector<render::BushDraw> draws;
     const DVec3 up = glm::normalize(eye.metres());
+    std::set<planet::CellId> keyed;
     for (const terrain::StreamedPatch& patch : drawn) {
         const std::optional<LatticeStand> stand =
             lattice_stand(slots, patch, eye, up, planet_radius, render::bush_lattice_level,
                           budget.tall_coarsest, budget.tall_far);
-        if (!stand) {
+        if (!stand || !keyed.insert(stand->cell).second) {
             continue;
         }
         draws.push_back({.slot = stand->slot,
-                         .origin = patch.origin,
+                         .origin = stand->origin,
                          .face = stand->face,
                          .lattice_i = stand->lattice_i,
                          .lattice_j = stand->lattice_j,
@@ -269,17 +285,18 @@ std::vector<render::TreeDraw> tree_draws(const GroundSlots& slots,
                                          const GrassBudget& budget) {
     std::vector<render::TreeDraw> draws;
     const DVec3 up = glm::normalize(eye.metres());
+    std::set<planet::CellId> keyed;
     for (const terrain::StreamedPatch& patch : drawn) {
         const std::optional<LatticeStand> stand =
             lattice_stand(slots, patch, eye, up, planet_radius, render::tree_lattice_level,
                           budget.tree_coarsest, budget.tree_far);
-        if (!stand) {
+        if (!stand || !keyed.insert(stand->cell).second) {
             continue;
         }
         // Where the grown forest covers this patch, its stamps keep to the distance beyond.
         const double hold_off = stand->spacing <= budget.forest_coarsest ? render::forest_far : 0.0;
         draws.push_back({.slot = stand->slot,
-                         .origin = patch.origin,
+                         .origin = stand->origin,
                          .face = stand->face,
                          .lattice_i = stand->lattice_i,
                          .lattice_j = stand->lattice_j,
@@ -296,11 +313,12 @@ std::vector<render::ForestDraw> forest_draws(const GroundSlots& slots,
                                              const GrassBudget& budget) {
     std::vector<render::ForestDraw> draws;
     const DVec3 up = glm::normalize(eye.metres());
+    std::set<planet::CellId> keyed;
     for (const terrain::StreamedPatch& patch : drawn) {
         const std::optional<LatticeStand> stand =
             lattice_stand(slots, patch, eye, up, planet_radius, render::tree_lattice_level,
                           budget.forest_coarsest, render::forest_far);
-        if (!stand) {
+        if (!stand || !keyed.insert(stand->cell).second) {
             continue;
         }
         int detail = 2;
@@ -310,7 +328,7 @@ std::vector<render::ForestDraw> forest_draws(const GroundSlots& slots,
             detail = 1;
         }
         draws.push_back({.slot = stand->slot,
-                         .origin = patch.origin,
+                         .origin = stand->origin,
                          .face = stand->face,
                          .lattice_i = stand->lattice_i,
                          .lattice_j = stand->lattice_j,

@@ -78,9 +78,13 @@ constexpr VkDeviceSize patch_bytes =
 
 // How much each baked detail keeps, finest first.
 constexpr std::array<flora::Detail, forest_details> details{
-    flora::Detail{.ring_stride = 1, .sides = 1.0F, .card_stride = 1, .card_scale = 1.0F},
-    flora::Detail{.ring_stride = 2, .sides = 0.75F, .card_stride = 2, .card_scale = 1.35F},
-    flora::Detail{.ring_stride = 3, .sides = 0.5F, .card_stride = 3, .card_scale = 1.7F}};
+    flora::Detail{
+        .ring_stride = 1, .sides = 1.0F, .card_stride = 1, .card_scale = 1.0F, .wood_levels = 2},
+    flora::Detail{
+        .ring_stride = 2, .sides = 0.75F, .card_stride = 2, .card_scale = 1.5F, .wood_levels = 2},
+    // Far off, only the trunk is wood; the boughs are sub-pixel, their cards cover alone.
+    flora::Detail{
+        .ring_stride = 3, .sides = 0.5F, .card_stride = 3, .card_scale = 2.0F, .wood_levels = 1}};
 
 void append(std::vector<std::byte>& blob, const void* bytes, std::size_t count) {
     const std::span<const std::byte> source{static_cast<const std::byte*>(bytes), count};

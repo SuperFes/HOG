@@ -26,6 +26,8 @@ struct Detail {
     float sides = 1.0F;      // of each ring's vertices kept, never below 3
     int card_stride = 1;     // every nth card kept
     float card_scale = 1.0F; // cards grown to cover for those dropped
+    // Branching levels meshed as wood; twigs past it are left to their cards to cover.
+    int wood_levels = 8;
 };
 
 // The branches as open tapered tubes, the foliage as quads cut by the shader's own mask.
