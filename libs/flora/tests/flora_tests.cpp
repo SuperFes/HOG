@@ -14,11 +14,13 @@
 #include <vector>
 
 using hog::Vec3;
+using hog::flora::aged;
 using hog::flora::Bough;
 using hog::flora::Detail;
 using hog::flora::grow;
 using hog::flora::mesh;
 using hog::flora::pine;
+using hog::flora::prime_age;
 using hog::flora::Skeleton;
 using hog::flora::TreeMesh;
 
@@ -44,6 +46,37 @@ std::uint64_t fingered(const TreeMesh& grown) {
 
 float length_of(const Bough& bough) {
     return glm::length(bough.rings.back().centre - bough.rings.front().centre);
+}
+
+// A grown tree's shape, averaged over a few seeds at one age.
+struct Shape {
+    float height = 0.0F;
+    float fronds = 0.0F;
+    float crown_base = 0.0F; // the lowest frond, of the height
+    float girth = 0.0F;      // the trunk's base radius, of the height
+};
+
+Shape shape_at(float age) {
+    constexpr std::uint32_t seeds = 8;
+    Shape shape;
+    for (std::uint32_t seed = 101; seed < 101 + seeds; ++seed) {
+        const Skeleton tree = grow(aged(pine(), age), seed);
+        float height = 0.0F;
+        for (const Bough& bough : tree.boughs) {
+            for (const hog::flora::Ring& ring : bough.rings) {
+                height = std::max(height, ring.centre.z);
+            }
+        }
+        float lowest = height;
+        for (const hog::flora::Frond& frond : tree.fronds) {
+            lowest = std::min(lowest, frond.spine.front().centre.z);
+        }
+        shape.height += height / seeds;
+        shape.fronds += static_cast<float>(tree.fronds.size()) / seeds;
+        shape.crown_base += lowest / height / seeds;
+        shape.girth += tree.boughs.front().rings.front().radius / height / seeds;
+    }
+    return shape;
 }
 
 } // namespace
@@ -122,6 +155,39 @@ TEST_CASE("the mesh thins with detail, keeping the same silhouette", "[flora]") 
         return peak;
     };
     CHECK(std::abs(top(thinned) - top(full)) < 0.1F);
+}
+
+TEST_CASE("a pine in its prime is the pine its species describes", "[flora]") {
+    for (std::uint32_t seed = 101; seed < 109; ++seed) {
+        CHECK(fingered(mesh(grow(aged(pine(), prime_age), seed))) ==
+              fingered(mesh(grow(pine(), seed))));
+    }
+}
+
+TEST_CASE("a pine ages from an upswept sapling to a stout, high-crowned old tree", "[flora]") {
+    const Shape sapling = shape_at(0.15F);
+    const Shape young = shape_at(0.4F);
+    const Shape prime = shape_at(prime_age);
+    const Shape old = shape_at(0.95F);
+    CHECK(sapling.height < young.height);
+    CHECK(young.height < prime.height);
+    CHECK(prime.height < old.height);
+    CHECK(sapling.height < 0.5F * prime.height);
+    CHECK(sapling.fronds < young.fronds);
+    CHECK(young.fronds <= prime.fronds);
+    // Saplings are green to the ground; old trees have shed their lower boughs.
+    CHECK(sapling.crown_base < prime.crown_base);
+    CHECK(prime.crown_base < old.crown_base);
+    CHECK(old.crown_base > 0.3F);
+    CHECK(old.girth > prime.girth);
+    // Out of range ages hold at either end.
+    CHECK(fingered(mesh(grow(aged(pine(), -1.0F), 7U))) ==
+          fingered(mesh(grow(aged(pine(), 0.0F), 7U))));
+    CHECK(fingered(mesh(grow(aged(pine(), 2.0F), 7U))) ==
+          fingered(mesh(grow(aged(pine(), 1.0F), 7U))));
+    // The same golden discipline as grow(), for a sapling and an old tree.
+    CHECK(fingered(mesh(grow(aged(pine(), 0.15F), 7U))) == 0x3aef'e956'7e52'6439ULL);
+    CHECK(fingered(mesh(grow(aged(pine(), 0.95F), 7U))) == 0x03f2'7510'52c1'800cULL);
 }
 
 TEST_CASE("the stand field gathers woods and leaves clearings", "[flora]") {

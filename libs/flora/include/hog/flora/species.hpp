@@ -35,4 +35,13 @@ struct Species {
 // The pine analogue: whorled boughs off a single trunk, a conical crown.
 [[nodiscard]] Species pine();
 
+// The age a species' rules describe it at, in its prime; 0 is a sapling, 1 old.
+inline constexpr float prime_age = 0.7F;
+
+// The species as it grows at `age`, 0 to 1: a sapling is a short, thin, upswept cone of a few
+// whorls down to the ground; an old tree has a stout trunk, its lower boughs shed, its crown raised
+// and rounded, its boughs drooping. Exactly the species at prime_age; pure arithmetic, so as
+// bit-stable as grow().
+[[nodiscard]] Species aged(const Species& species, float age) noexcept;
+
 } // namespace hog::flora
