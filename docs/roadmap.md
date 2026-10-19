@@ -287,7 +287,7 @@ Borrowed from real species to make forests feel grown rather than scattered. A m
 
 **Rendering**
 
-- [ ] Instanced rendering with LOD tiers: full geometry near, billboard impostors mid-range, density and colour folded into the terrain far away
+- [ ] Instanced rendering with LOD tiers: full geometry near (done: three baked details to 240 m), billboard impostors mid-range (done: crossed-quad stamps to 900 m), density and colour folded into the terrain far away
 - [x] Grass as instanced blades and patches near the eye, fading into the ground material
 - [ ] Per-tier budgets checked on the minimum-spec iGPU, with counts in the frame overlay
 
