@@ -3,7 +3,9 @@
 #include <hog/render/device.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <format>
 #include <ranges>
 #include <type_traits>
@@ -15,11 +17,20 @@ namespace {
 
 // Uploaded as built, and read by the shaders at this layout.
 static_assert(std::is_trivially_copyable_v<TreeAnchor> && std::is_standard_layout_v<TreeAnchor>);
-static_assert(sizeof(TreeAnchor) == 48);
+static_assert(sizeof(TreeAnchor) == 40);
 static_assert(offsetof(TreeAnchor, height) == 12);
 static_assert(offsetof(TreeAnchor, normal) == 16);
 static_assert(offsetof(TreeAnchor, hash) == 28);
 static_assert(offsetof(TreeAnchor, colour) == 32);
+static_assert(offsetof(TreeAnchor, age) == 36);
+
+std::uint32_t byte_of(float value) noexcept {
+    return static_cast<std::uint32_t>(std::lround(std::clamp(value, 0.0F, 1.0F) * 255.0F));
+}
+
+float from_byte(std::uint32_t packed, std::uint32_t shift) noexcept {
+    return static_cast<float>((packed >> shift) & 0xffU) / 255.0F;
+}
 
 constexpr VkDeviceSize tile_bytes = VkDeviceSize{tile_trees} * sizeof(TreeAnchor);
 
@@ -45,6 +56,21 @@ void memory_barrier(VkCommandBuffer commands, VkPipelineStageFlags2 from_stage,
 }
 
 } // namespace
+
+std::uint32_t packed_needles(Vec3 colour, float wooded) noexcept {
+    return byte_of(std::sqrt(std::max(colour.r, 0.0F))) |
+           (byte_of(std::sqrt(std::max(colour.g, 0.0F))) << 8U) |
+           (byte_of(std::sqrt(std::max(colour.b, 0.0F))) << 16U) | (byte_of(wooded) << 24U);
+}
+
+Vec3 needles_of(std::uint32_t packed) noexcept {
+    const Vec3 rooted{from_byte(packed, 0U), from_byte(packed, 8U), from_byte(packed, 16U)};
+    return rooted * rooted;
+}
+
+float wooded_of(std::uint32_t packed) noexcept {
+    return from_byte(packed, 24U);
+}
 
 Result<AnchorPool> AnchorPool::create(const Device& device, const AnchorPoolDesc& desc) {
     if (desc.tiles == 0 || desc.frames == 0 || desc.uploads == 0) {

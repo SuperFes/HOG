@@ -63,8 +63,8 @@ std::vector<TreeAnchor> rank_of(int count, double away, float height = 11.0F) {
                            .height = height,
                            .normal = Vec3{0.0F, 0.0F, 1.0F},
                            .hash = hashed(static_cast<std::uint32_t>(tree) * 2654435761U),
-                           .colour = needles,
-                           .wooded = 1.0F});
+                           .colour = hog::render::packed_needles(needles, 1.0F),
+                           .age = 1.0F});
     }
     return anchors;
 }

@@ -39,7 +39,7 @@ struct Settings {
 // As cloud_march.slang's.
 [[vk::binding(6, 0)]] Sampler2D cloud_shadow;
 
-static const uint anchor_stride = 48; // bytes, as render::TreeAnchor lies
+static const uint anchor_stride = 40; // bytes, as render::TreeAnchor lies
 
 // Bare wood, for the trunk, as the grown forest's bark.
 static const float3 wood = float3(0.055, 0.045, 0.038);
@@ -55,6 +55,13 @@ uint hashed(uint at) {
 
 float unit(uint at) {
     return float(hashed(at) & 0xffffu) / 65536.0;
+}
+
+// As render::needles_of unpacks them: square-rooted bytes, squared back.
+float3 needles_of(uint packed) {
+    const float3 rooted = float3(float(packed & 0xffu), float((packed >> 8) & 0xffu),
+                                 float((packed >> 16) & 0xffu)) / 255.0;
+    return rooted * rooted;
 }
 
 // The two triangles of a quad: bottom left and right, then top left and right.
@@ -94,7 +101,7 @@ Tree vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const float grown = asfloat(anchors.Load(at + 12));
     const float3 normal = asfloat(anchors.Load3(at + 16));
     const uint hash = anchors.Load(at + 28);
-    const float3 crown = asfloat(anchors.Load3(at + 32));
+    const float3 crown = needles_of(anchors.Load(at + 32));
 
     const float away = length(root);
     // Held off while the grown forest covers; full sized until near the edge of their reach,

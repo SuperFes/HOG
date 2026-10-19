@@ -65,11 +65,13 @@ struct BiomePines {
 // stands with clearings between, edged by a finer grain.
 [[nodiscard]] float stand_field(Vec2 cell, std::uint32_t face) noexcept;
 
-// A tree stood in its lattice cell: where within the cell, and how tall for the stand around it.
+// A tree stood in its lattice cell: where within the cell, how old, and how tall for its age and
+// the stand around it.
 struct Stood {
     Vec2 spot;           // 0 to 1 across the cell, where the trunk roots
     float height = 0.0F; // metres
     float wooded = 0.0F; // how deep in a stand it grows, 0 to 1
+    float age = 0.0F;    // 0 a sapling, 1 full grown
     std::uint32_t hash = 0;
 };
 

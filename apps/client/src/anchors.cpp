@@ -119,8 +119,9 @@ std::optional<render::TreeAnchor> anchor_at(const planet::World& world, std::uin
         .height = stood->height,
         .normal = Vec3{normal},
         .hash = stood->hash,
-        .colour = flora::needle_colour(needles[static_cast<std::size_t>(ground.biome)]),
-        .wooded = stood->wooded};
+        .colour = render::packed_needles(
+            flora::needle_colour(needles[static_cast<std::size_t>(ground.biome)]), stood->wooded),
+        .age = stood->age};
 }
 
 } // namespace

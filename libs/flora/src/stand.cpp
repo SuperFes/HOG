@@ -94,10 +94,15 @@ std::optional<Stood> tree_grown(std::uint32_t lattice_i, std::uint32_t lattice_j
     if (unit(hash + 2U) >= occupancy) {
         return std::nullopt;
     }
-    // Tallest deep in a stand, shorter toward its edges and alone in the open.
+    // Most trees in a stand are grown; its edges and the open are where the young stand, the
+    // woods spreading outward.
+    const float drawn = 1.0F - unit(hash + 4U);
+    const float age = (1.0F - (drawn * drawn)) * mixed(0.55F, 1.0F, wooded);
+    // Quick to rise while young, then barely taller; tallest deep in a stand.
+    const float reached = mixed(0.2F, 1.2F, age * (2.0F - age));
     const float height =
-        pines.height * (0.55F + (0.9F * unit(hash + 4U))) * mixed(0.8F, 1.05F, wooded);
-    return Stood{.spot = spot, .height = height, .wooded = wooded, .hash = hash};
+        pines.height * reached * (0.85F + (0.3F * unit(hash + 5U))) * mixed(0.8F, 1.05F, wooded);
+    return Stood{.spot = spot, .height = height, .wooded = wooded, .age = age, .hash = hash};
 }
 
 } // namespace hog::flora

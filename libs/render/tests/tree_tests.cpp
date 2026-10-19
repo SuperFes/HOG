@@ -62,8 +62,8 @@ std::vector<TreeAnchor> rank_of(int count, double away, float height = 11.0F) {
                            .height = height,
                            .normal = Vec3{0.0F, 0.0F, 1.0F},
                            .hash = hashed(static_cast<std::uint32_t>(tree) * 2654435761U),
-                           .colour = needles,
-                           .wooded = 1.0F});
+                           .colour = hog::render::packed_needles(needles, 1.0F),
+                           .age = 1.0F});
     }
     return anchors;
 }
@@ -167,6 +167,21 @@ std::size_t barky_pixels(const Pixels& pixels) {
 }
 
 } // namespace
+
+TEST_CASE("needles pack into a word, dark shades kept", "[render]") {
+    const Vec3 dark{0.02F, 0.06F, 0.03F};
+    const std::uint32_t packed = hog::render::packed_needles(dark, 0.4F);
+    const Vec3 back = hog::render::needles_of(packed);
+    for (glm::length_t channel = 0; channel < 3; ++channel) {
+        CHECK(std::abs(back[channel] - dark[channel]) < dark[channel] * 0.05F);
+    }
+    CHECK(std::abs(hog::render::wooded_of(packed) - 0.4F) < 0.003F);
+    // Out of range clamps rather than spilling into the next channel.
+    const std::uint32_t bright = hog::render::packed_needles(Vec3{2.0F, -1.0F, 0.5F}, 3.0F);
+    CHECK(hog::render::needles_of(bright).r == 1.0F);
+    CHECK(hog::render::needles_of(bright).g == 0.0F);
+    CHECK(hog::render::wooded_of(bright) == 1.0F);
+}
 
 TEST_CASE("a stamp stands on its anchor, trunk under a tiered crown", "[render]") {
     auto device = test_device();

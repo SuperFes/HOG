@@ -52,7 +52,7 @@ struct Settings {
 // Every variant's baked meshes at every detail, as render::Forest bakes them.
 [[vk::binding(7, 0)]] ByteAddressBuffer carpentry;
 
-static const uint anchor_stride = 48; // bytes, as render::TreeAnchor lies
+static const uint anchor_stride = 40; // bytes, as render::TreeAnchor lies
 static const uint wood_stride = 24;   // bytes, as flora::WoodVertex lies
 static const uint leaf_stride = 36;   // bytes, as flora::LeafVertex lies
 
@@ -69,6 +69,13 @@ uint hashed(uint at) {
 
 float unit(uint at) {
     return float(hashed(at) & 0xffffu) / 65536.0;
+}
+
+// As render::needles_of unpacks them: square-rooted bytes, squared back.
+float3 needles_of(uint packed) {
+    const float3 rooted = float3(float(packed & 0xffu), float((packed >> 8) & 0xffu),
+                                 float((packed >> 16) & 0xffu)) / 255.0;
+    return rooted * rooted;
 }
 
 struct Planted {
@@ -272,7 +279,7 @@ Spray leaf_vertex(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     if (vertex >= build.leaf.z) {
         return no_spray();
     }
-    const float3 needles = asfloat(anchors.Load3(anchored(instance) + 32));
+    const float3 needles = needles_of(anchors.Load(anchored(instance) + 32));
     const uint index = carpentry.Load(build.leaf.y + (vertex * 4));
     const uint at = build.leaf.x + (index * leaf_stride);
     const float3 local = asfloat(carpentry.Load3(at));

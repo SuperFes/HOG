@@ -22,9 +22,15 @@ struct TreeAnchor {
     float height = 0.0F;           // the tree's, metres
     Vec3 normal{0.0F, 0.0F, 1.0F}; // the ground's, unit
     std::uint32_t hash = 0;        // the tree's own dice
-    Vec3 colour{0.0F};             // its needles'
-    float wooded = 0.0F;           // how deep in a stand it grows, 0 to 1
+    std::uint32_t colour = 0;      // its needles' and how wooded, as packed_needles() packs them
+    float age = 0.0F;              // 0 a sapling, 1 full grown
 };
+
+// Needles' colour in a byte a channel, kept square-rooted so dark needles keep their shades, with
+// how deep in a stand the tree grows, 0 to 1, in the last byte.
+[[nodiscard]] std::uint32_t packed_needles(Vec3 colour, float wooded) noexcept;
+[[nodiscard]] Vec3 needles_of(std::uint32_t packed) noexcept;
+[[nodiscard]] float wooded_of(std::uint32_t packed) noexcept;
 
 // The fixed lattice trees are anchored to, coarser than the bushes': one tree at most in each
 // level-14 cell, bound to its spot in the world for ever.

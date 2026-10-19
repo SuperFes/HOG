@@ -155,12 +155,55 @@ TEST_CASE("trees stand by the same dice on every machine", "[flora]") {
             fold(std::bit_cast<std::uint32_t>(tree->height));
             fold(std::bit_cast<std::uint32_t>(tree->spot.x));
             fold(std::bit_cast<std::uint32_t>(tree->spot.y));
+            fold(std::bit_cast<std::uint32_t>(tree->age));
         }
     }
     // Boreal woods are thick: most of this wooded block stands a tree.
     CHECK(grown > 1500);
     CHECK(grown < 4096);
-    CHECK(hash == 0xcfa9'fcc8'89ff'0b1dULL);
+    CHECK(hash == 0xe56f'5251'4772'7255ULL);
+}
+
+TEST_CASE("stands are mostly grown, the young at their edges, height following age", "[flora]") {
+    float deep_age = 0.0F;
+    float edge_age = 0.0F;
+    float young_height = 0.0F;
+    float old_height = 0.0F;
+    std::size_t deep = 0;
+    std::size_t edge = 0;
+    std::size_t young = 0;
+    std::size_t old = 0;
+    for (std::uint32_t i = 2048; i < 2112; ++i) {
+        for (std::uint32_t j = 56576; j < 56640; ++j) {
+            const auto tree = hog::flora::tree_grown(i, j, 0, hog::planet::Biome::BorealForest);
+            if (!tree) {
+                continue;
+            }
+            CHECK(tree->age >= 0.0F);
+            CHECK(tree->age <= 1.0F);
+            if (tree->wooded > 0.95F) {
+                deep_age += tree->age;
+                ++deep;
+            } else if (tree->wooded < 0.5F) {
+                edge_age += tree->age;
+                ++edge;
+            }
+            if (tree->age < 0.25F) {
+                young_height += tree->height;
+                ++young;
+            } else if (tree->age > 0.75F) {
+                old_height += tree->height;
+                ++old;
+            }
+        }
+    }
+    REQUIRE(deep > 100);
+    REQUIRE(edge > 10);
+    REQUIRE(young > 10);
+    REQUIRE(old > 100);
+    CHECK(deep_age / static_cast<float>(deep) > 0.6F);
+    CHECK(edge_age / static_cast<float>(edge) < deep_age / static_cast<float>(deep));
+    CHECK(young_height / static_cast<float>(young) < 0.5F * old_height / static_cast<float>(old));
 }
 
 TEST_CASE("no tree grows where its biome grows none", "[flora]") {
