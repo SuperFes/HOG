@@ -16,8 +16,8 @@ struct Push {
     float4 bend_radii;
     // xyz the wind near the ground, m/s; w unused.
     float4 wind;
-    // xyz the tile's origin from the eye, in metres; w (as bits) the finest detail the tile's
-    // nearest tree needs, bounding each draw's vertex count.
+    // xyz the tile's origin from the eye, in metres; w as bits: the low two the finest detail the
+    // draw's nearest tree needs, bounding its vertex count, the rest the tile's first anchor drawn.
     float4 origin;
 };
 
@@ -85,12 +85,17 @@ struct Planted {
     uint build;       // into the carpentry's builds
 };
 
+// Where the draw's instance lies among the tile's anchors.
+uint anchored(uint instance) {
+    return ((asuint(push.origin.w) >> 2) + instance) * anchor_stride;
+}
+
 // The anchored tree, stood on its own spot: the anchor decided where, how tall and whether long
 // ago; here it only steps aside for the stamps beyond the forest's reach.
 Planted plant(uint instance) {
     Planted planted;
     planted.grows = false;
-    const uint at = instance * anchor_stride;
+    const uint at = anchored(instance);
     const float3 root = push.origin.xyz + asfloat(anchors.Load3(at));
     const float grown = asfloat(anchors.Load(at + 12));
     const float3 normal = asfloat(anchors.Load3(at + 16));
@@ -267,7 +272,7 @@ Spray leaf_vertex(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     if (vertex >= build.leaf.z) {
         return no_spray();
     }
-    const float3 needles = asfloat(anchors.Load3((instance * anchor_stride) + 32));
+    const float3 needles = asfloat(anchors.Load3(anchored(instance) + 32));
     const uint index = carpentry.Load(build.leaf.y + (vertex * 4));
     const uint at = build.leaf.x + (index * leaf_stride);
     const float3 local = asfloat(carpentry.Load3(at));

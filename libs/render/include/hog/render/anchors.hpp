@@ -85,11 +85,12 @@ private:
 // own reach, each tree deciding by its own distance, so the handoff can never tear.
 struct StandDraw {
     std::uint32_t slot = 0;  // in the anchor pool
-    std::uint32_t count = 0; // anchors the tile holds
+    std::uint32_t first = 0; // the first of the tile's anchors drawn
+    std::uint32_t count = 0; // anchors drawn from there
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     WorldPosition origin = {}; // the tile's, the anchors' positions relative to it
-    int detail = 0;            // the finest build the tile's nearest tree needs
-    double distance = 0.0;     // metres to the tile's nearest ground, generously
+    int detail = 0;            // the finest build the nearest tree drawn needs
+    double distance = 0.0;     // metres to the nearest tree drawn, generously
 };
 
 } // namespace hog::render

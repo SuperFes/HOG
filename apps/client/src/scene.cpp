@@ -249,9 +249,12 @@ void Scene::grow_vegetation(render::RenderGraph& graph, const render::Frame& fra
                               .seconds = swaying_for_});
             });
     }
-    // Both tree tiers draw from the same anchored stands: the stamps over them all, holding off
-    // where the grown forest covers, and the grown trees over the near tiles alone.
-    const std::vector<render::StandDraw> stands = anchors_.draws(shot.camera.eye);
+    // Both tree tiers draw from the same anchored stands: the stamps over whole tiles, holding off
+    // where the grown forest covers, and the grown trees over the near blocks alone.
+    const Sight sight =
+        sight_of(shot.camera, static_cast<double>(frame.extent.width) /
+                                  static_cast<double>(std::max(frame.extent.height, 1U)));
+    const std::vector<render::StandDraw> stands = anchors_.draws(sight);
     if (!stands.empty()) {
         graph.add(
             {.name = "trees", .uses = {through_air.begin(), through_air.end()}, .targets = drawn},
@@ -264,10 +267,9 @@ void Scene::grow_vegetation(render::RenderGraph& graph, const render::Frame& fra
                              .seconds = swaying_for_});
             });
     }
-    std::vector<render::StandDraw> woods;
-    std::ranges::copy_if(stands, std::back_inserter(woods), [](const render::StandDraw& stand) {
-        return stand.distance < render::forest_far;
-    });
+    const std::vector<render::StandDraw> woods = anchors_.forest_draws(sight);
+    tree_counts_ = {
+        .tiles = anchors_.size(), .stamped = anchors_in(stands), .grown = anchors_in(woods)};
     if (!woods.empty()) {
         graph.add(
             {.name = "forest", .uses = {through_air.begin(), through_air.end()}, .targets = drawn},

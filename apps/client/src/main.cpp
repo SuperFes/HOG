@@ -225,7 +225,8 @@ Result<void> save_capture(const render::Device& device, const render::Buffer& bu
 }
 
 // How long frames take, in a corner over the picture.
-void show_timings(const client::FrameTimes& times, render::CloudQuality clouds) {
+void show_timings(const client::FrameTimes& times, render::CloudQuality clouds,
+                  const client::TreeCounts& trees) {
     constexpr float margin = 10.0F;
     constexpr ImVec2 graph{240.0F, 48.0F};
     // Milliseconds, as at 30 fps, or higher to hold the worst frame.
@@ -263,6 +264,9 @@ void show_timings(const client::FrameTimes& times, render::CloudQuality clouds) 
             }
             ImGui::EndTable();
         }
+        ImGui::TextUnformatted(std::format("trees {} stamped, {} grown, {} tiles", trees.stamped,
+                                           trees.grown, trees.tiles)
+                                   .c_str());
         ImGui::TextUnformatted(std::format("clouds {} (F4)", render::name_of(clouds)).c_str());
     }
     ImGui::End();
@@ -375,6 +379,7 @@ struct Overlay {
     const client::FrameTimes* times = nullptr;
     bool timings = false;
     render::CloudQuality clouds = render::CloudQuality::High;
+    client::TreeCounts trees;
     // None when not connecting to a server.
     const client::Session* session = nullptr;
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
@@ -413,7 +418,7 @@ Result<bool> draw(client::Scene& scene, const client::Shot& shot, const render::
         show_chat(*overlay.chat, *overlay.chatting, overlay.chat_opened, overlay.now);
     }
     if (overlay.timings) {
-        show_timings(*overlay.times, overlay.clouds);
+        show_timings(*overlay.times, overlay.clouds, overlay.trees);
         if (overlay.session != nullptr) {
             show_network(client::summarise(*overlay.session, overlay.eye, overlay.now),
                          overlay.weather);
@@ -831,6 +836,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
         const Overlay overlay{.times = &times,
                               .timings = controls.timings,
                               .clouds = scene.cloud_quality(),
+                              .trees = scene.tree_counts(),
                               .session = session,
                               .others = others,
                               .eye = camera.eye,

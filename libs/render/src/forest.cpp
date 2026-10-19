@@ -224,8 +224,11 @@ void Forest::draw(VkCommandBuffer commands, VkExtent2D extent, const AnchorPool&
             }
             push_storage_buffer(commands, pipeline, 1, pool.anchors(),
                                 VkDeviceSize{draw.slot} * tile_bytes, tile_bytes);
-            push.origin = glm::vec4{relative_to(draw.origin, view.camera.eye),
-                                    std::bit_cast<float>(static_cast<std::uint32_t>(draw.detail))};
+            HOG_ASSERT(draw.first + draw.count <= tile_trees, "drawing past the tile's anchors");
+            const std::uint32_t chosen =
+                (draw.first << 2U) | static_cast<std::uint32_t>(draw.detail);
+            push.origin =
+                glm::vec4{relative_to(draw.origin, view.camera.eye), std::bit_cast<float>(chosen)};
             vkCmdPushConstants(commands, pipeline.layout(), stages, offsetof(Push, wind),
                                sizeof(Push) - offsetof(Push, wind), &push.wind);
             vkCmdDraw(commands, most[static_cast<std::size_t>(draw.detail)], draw.count, 0, 0);

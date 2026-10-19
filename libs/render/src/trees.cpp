@@ -4,6 +4,7 @@
 #include <hog/shaders/trees.hpp>
 
 #include <array>
+#include <bit>
 #include <cstddef>
 #include <span>
 #include <utility>
@@ -111,7 +112,9 @@ void Trees::draw(VkCommandBuffer commands, VkExtent2D extent, const AnchorPool& 
         }
         push_storage_buffer(commands, pipeline_, 1, pool.anchors(),
                             VkDeviceSize{draw.slot} * tile_bytes, tile_bytes);
-        push.origin = glm::vec4{relative_to(draw.origin, view.camera.eye), 0.0F};
+        HOG_ASSERT(draw.first + draw.count <= tile_trees, "drawing past the tile's anchors");
+        push.origin =
+            glm::vec4{relative_to(draw.origin, view.camera.eye), std::bit_cast<float>(draw.first)};
         vkCmdPushConstants(commands, pipeline_.layout(), stages, offsetof(Push, wind),
                            sizeof(Push) - offsetof(Push, wind), &push.wind);
         vkCmdDraw(commands, tree_vertices, draw.count, 0, 0);

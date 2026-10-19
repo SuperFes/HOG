@@ -289,7 +289,7 @@ Borrowed from real species to make forests feel grown rather than scattered. A m
 
 - [ ] Instanced rendering with LOD tiers: full geometry near (done: three baked details to 240 m), billboard impostors mid-range (done: crossed-quad stamps to 900 m), density and colour folded into the terrain far away
 - [x] Grass as instanced blades and patches near the eye, fading into the ground material
-- [ ] Per-tier budgets checked on the minimum-spec iGPU, with counts in the frame overlay
+- [x] Per-tier budgets checked on the minimum-spec iGPU, with counts in the frame overlay (Radeon 860M at 1600×900, deep woods: grown forest ~0.7 ms, stamps ~0.2 ms, after per-block 3D-distance and view-cone culling)
 
 **Wind and weather**
 
@@ -451,3 +451,35 @@ This phase widens the audience in steps, and each step needs the one before it t
 - [ ] Official server, 18+ to start
 - [ ] Launcher and auto-updater for all three operating systems
 - [ ] Android: start only after the desktop client is stable
+
+## Later
+
+Work we've agreed we want but have parked, so it isn't lost between phases. Each item names where it plugs in. When an item's phase comes up, it moves into that phase's task list.
+
+**Plant life and death**
+
+Builds on Phase 5's condition states. The server owns every tree's record, as it owns the clouds. The anchors are the per-cell registry that record attaches to.
+
+- [ ] A server-owned record per tree: species, age, condition, and when it changed. Unchanged trees stay implied by the seed, so only the trees that changed are stored or sent.
+- [ ] Ageing on the server's clock: seedlings grow up, mature trees grow old, old trees die. Growth rate follows the cell's moisture, light and crowding.
+- [ ] Dying and dead plants: thinning and browning crowns, then a bare standing snag, then a fall. Bushes and grass brown off and die back the same way.
+- [ ] Felled trees: cut by players or blown down by storms. The trunk falls as a physics body along the cut or the wind, lands where everyone sees it land, and leaves a stump.
+- [ ] Deadwood that decays over seasons: fallen logs go mossy and soften, then sink into the forest floor. Nurse logs come from here.
+- [ ] Regrowth: suckers and coppice shoots from stumps of the species that do it, and seedlings filling gaps, as the succession rules decide.
+- [ ] Fire's marks: scorched bark on survivors, burned snags, ash ground that greens over again.
+- [ ] Lightning strikes, disease and pest outbreaks as rare sim events that kill trees in patches.
+- [ ] Seasons for deciduous species: leaf-out, autumn colour, bare winter crowns, snow resting on boughs.
+- [ ] Harvest yields from the same records: wood by species and age, bark, resin, fruit and seed. Crafting (Phase 7) reads them.
+- [ ] Tree changes replicated to clients by cell, as weather is. The anchor tiles rebuild from them (`TreeAnchors::changed`, not yet wired to world changes).
+
+**Vegetation engineering**
+
+- [ ] Bushes onto CPU anchors like the trees, so they too stay put at every terrain level and the server can own them
+- [ ] Anchor tiles built off the main thread, if building them ever shows in frame times
+- [ ] Forest beyond the stamps' 900 m folded into the ground as density and colour, so woods don't end at a line seen from the air
+- [ ] Needle and bark textures, CC0 or procedural, to replace the shader's streaks if they earn it
+- [ ] Richer growth per species at `flora::grow`, such as space colonisation for broadleaf crowns that grow toward light and around their neighbours
+
+**Parked by choice**
+
+- [ ] Phase 4's remote server and automatic crash-dump upload. Until then, friends connect to a dev machine directly.

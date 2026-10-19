@@ -17,7 +17,7 @@ struct Push {
     float4 bend_radii;
     // xyz the wind near the ground, m/s; w unused.
     float4 wind;
-    // xyz the tile's origin from the eye, in metres; w unused.
+    // xyz the tile's origin from the eye, in metres; w (as bits) the tile's first anchor drawn.
     float4 origin;
 };
 
@@ -89,7 +89,7 @@ Tree nothing() {
 
 [shader("vertex")]
 Tree vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
-    const uint at = instance * anchor_stride;
+    const uint at = (asuint(push.origin.w) + instance) * anchor_stride;
     const float3 root = push.origin.xyz + asfloat(anchors.Load3(at));
     const float grown = asfloat(anchors.Load(at + 12));
     const float3 normal = asfloat(anchors.Load3(at + 16));

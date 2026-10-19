@@ -112,6 +112,8 @@ public:
     // How long the GPU took over the passes of the last frame recorded in the slot before, as
     // read when the last frame was recorded; empty where the GPU can't time.
     [[nodiscard]] std::span<const render::GpuSpan> timings() const noexcept { return timings_; }
+    // How many trees the last frame recorded drew, for the overlay.
+    [[nodiscard]] const TreeCounts& tree_counts() const noexcept { return tree_counts_; }
 
     // Whether grass is grown on the ground near the eye; it is unless turned off.
     void set_grass(bool grass) noexcept { grass_on_ = grass; }
@@ -144,6 +146,7 @@ private:
                          DVec3 wind);
 
     const planet::World* world_ = nullptr;
+    TreeCounts tree_counts_;
     terrain::PatchBaker baker_;
     terrain::PatchStream stream_;
     render::Terrain terrain_;
