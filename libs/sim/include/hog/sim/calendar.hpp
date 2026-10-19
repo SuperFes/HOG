@@ -38,6 +38,14 @@ public:
     // Radians above the horizon at `up`, below zero at night.
     [[nodiscard]] double sun_elevation(GameTime time, DVec3 up) const noexcept;
 
+    // Hours of a 24-hour day the sun is up at `up` on the day of `time`: 0 through the polar
+    // night, 24 under the midnight sun. Plants time their year by it, whatever the day's length.
+    [[nodiscard]] double daylight_hours(GameTime time, DVec3 up) const noexcept;
+    // Hours the sun is up at `up` on the year's longest day.
+    [[nodiscard]] double longest_daylight_hours(DVec3 up) const noexcept;
+    // Whether the days are lengthening at `up`, from the winter solstice to the summer one.
+    [[nodiscard]] static bool days_lengthening(GameTime time, DVec3 up) noexcept;
+
 private:
     GameDuration day_length_;
     double sin_tilt_;

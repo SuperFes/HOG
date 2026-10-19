@@ -115,6 +115,50 @@ TEST_CASE("summer days are long and winter days short", "[sim][calendar]") {
     CHECK_THAT(share_lit(upright, june, north), WithinAbs(0.5, 0.01));
 }
 
+TEST_CASE("daylight's hours follow the sun at any latitude and season", "[sim][calendar]") {
+    const Calendar calendar{hours{4}, 23.44};
+    const GameTime june = at(2026y / June / 21, 0min);
+    const GameTime december = at(2026y / December / 21, 0min);
+    const DVec3 north = up_at(42.0, 0.0);
+    const DVec3 south = up_at(-42.0, 0.0);
+    CHECK_THAT(calendar.daylight_hours(june, north),
+               WithinAbs(24.0 * share_lit(calendar, june, north), 0.4));
+    CHECK_THAT(calendar.daylight_hours(december, north),
+               WithinAbs(24.0 * share_lit(calendar, december, north), 0.4));
+    CHECK_THAT(calendar.daylight_hours(june, south),
+               WithinAbs(calendar.daylight_hours(december, north), 0.05));
+    CHECK_THAT(calendar.daylight_hours(at(2026y / September / 23, 0min), north),
+               WithinAbs(12.0, 0.1));
+    CHECK_THAT(calendar.daylight_hours(june, up_at(0.0, 0.0)), WithinAbs(12.0, 1e-9));
+    CHECK(calendar.daylight_hours(june, up_at(80.0, 0.0)) == 24.0);
+    CHECK(calendar.daylight_hours(december, up_at(80.0, 0.0)) == 0.0);
+    CHECK_THAT(calendar.longest_daylight_hours(north),
+               WithinAbs(calendar.daylight_hours(at(2026y / June / 21, 8h), north), 0.01));
+    CHECK_THAT(calendar.longest_daylight_hours(south),
+               WithinAbs(calendar.longest_daylight_hours(north), 1e-9));
+    CHECK(calendar.longest_daylight_hours(up_at(0.0, 0.0)) == 12.0);
+    // Further north, the autumn's days shorten sooner.
+    const GameTime october = at(2026y / October / 15, 0min);
+    CHECK(calendar.daylight_hours(october, up_at(60.0, 0.0)) <
+          calendar.daylight_hours(october, north));
+}
+
+TEST_CASE("days lengthen from the winter solstice, opposite across the equator",
+          "[sim][calendar]") {
+    const DVec3 north = up_at(42.0, 0.0);
+    const DVec3 south = up_at(-42.0, 0.0);
+    for (const GameTime spring : {at(2026y / January / 10, 0min), at(2026y / April / 1, 0min),
+                                  at(2026y / June / 10, 0min)}) {
+        CHECK(Calendar::days_lengthening(spring, north));
+        CHECK_FALSE(Calendar::days_lengthening(spring, south));
+    }
+    for (const GameTime autumn : {at(2026y / July / 1, 0min), at(2026y / October / 1, 0min),
+                                  at(2026y / December / 10, 0min)}) {
+        CHECK_FALSE(Calendar::days_lengthening(autumn, north));
+        CHECK(Calendar::days_lengthening(autumn, south));
+    }
+}
+
 TEST_CASE("calendars reject bad input", "[sim][calendar]") {
     const hog::testing::AssertionGuard guard;
     using hog::testing::AssertionFailed;

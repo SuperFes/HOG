@@ -22,6 +22,21 @@ constexpr GameTime j2000{std::chrono::seconds{946'728'000}};
     return wrapped < 0.0 ? wrapped + two_pi : wrapped;
 }
 
+// Hours of 24 the sun is up at a latitude when it stands over another.
+double hours_lit(double sin_latitude, double sin_declination) noexcept {
+    // The sun's hour angle at setting has cos = -tan(latitude) tan(declination).
+    const double across = -sin_latitude * sin_declination;
+    const double scale = std::sqrt((1.0 - (sin_latitude * sin_latitude)) *
+                                   (1.0 - (sin_declination * sin_declination)));
+    if (across >= scale) {
+        return 0.0;
+    }
+    if (across <= -scale) {
+        return 24.0;
+    }
+    return 24.0 * std::acos(across / scale) / std::numbers::pi;
+}
+
 } // namespace
 
 Calendar::Calendar(GameDuration day_length, double axial_tilt)
@@ -79,6 +94,19 @@ DVec3 Calendar::sun_direction(GameTime time) const noexcept {
 
 double Calendar::sun_elevation(GameTime time, DVec3 up) const noexcept {
     return std::asin(std::clamp(glm::dot(sun_direction(time), glm::normalize(up)), -1.0, 1.0));
+}
+
+double Calendar::daylight_hours(GameTime time, DVec3 up) const noexcept {
+    return hours_lit(glm::normalize(up).z, sin_tilt_ * std::sin(solar_longitude(time)));
+}
+
+double Calendar::longest_daylight_hours(DVec3 up) const noexcept {
+    return hours_lit(std::abs(glm::normalize(up).z), sin_tilt_);
+}
+
+bool Calendar::days_lengthening(GameTime time, DVec3 up) noexcept {
+    const bool rising = std::cos(solar_longitude(time)) > 0.0;
+    return rising == (up.z >= 0.0);
 }
 
 double sunlight(double elevation) noexcept {
