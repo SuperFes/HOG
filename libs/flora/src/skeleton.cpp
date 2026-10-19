@@ -49,8 +49,11 @@ void lay_frond(const Species& species, const Bough& bough, const Shoot& shoot, D
     const float sway = dice.around(species.frond_sway);
     const std::uint32_t seed = dice.roll();
     const float width = species.frond_width * shoot.length * (1.0F + sway);
-    tree.fronds.push_back(
-        {.spine = bough.rings, .width = width, .tilt = species.frond_tilt, .seed = seed});
+    tree.fronds.push_back({.spine = bough.rings,
+                           .width = width,
+                           .tilt = species.frond_tilt,
+                           .fullness = species.frond_fullness,
+                           .seed = seed});
 }
 
 } // namespace

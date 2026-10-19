@@ -26,8 +26,9 @@ struct Bough {
 // `seed` streaks its own needles.
 struct Frond {
     std::vector<Ring> spine;
-    float width = 0.3F; // half-width at the base, metres
-    float tilt = 0.5F;  // radians each blade rolls off flat, opposite ways
+    float width = 0.3F;    // half-width at the base, metres
+    float tilt = 0.5F;     // radians each blade rolls off flat, opposite ways
+    float fullness = 0.0F; // as Species::frond_fullness
     std::uint32_t seed = 0;
 };
 

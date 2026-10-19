@@ -19,9 +19,11 @@ using hog::flora::Bough;
 using hog::flora::Detail;
 using hog::flora::grow;
 using hog::flora::mesh;
+using hog::flora::oak;
 using hog::flora::pine;
 using hog::flora::prime_age;
 using hog::flora::Skeleton;
+using hog::flora::Species;
 using hog::flora::TreeMesh;
 
 namespace {
@@ -54,13 +56,14 @@ struct Shape {
     float fronds = 0.0F;
     float crown_base = 0.0F; // the lowest frond, of the height
     float girth = 0.0F;      // the trunk's base radius, of the height
+    float spread = 0.0F;     // the crown across, of the height
 };
 
-Shape shape_at(float age) {
+Shape shape_at(float age, const Species& species = pine()) {
     constexpr std::uint32_t seeds = 8;
     Shape shape;
     for (std::uint32_t seed = 101; seed < 101 + seeds; ++seed) {
-        const Skeleton tree = grow(aged(pine(), age), seed);
+        const Skeleton tree = grow(aged(species, age), seed);
         float height = 0.0F;
         for (const Bough& bough : tree.boughs) {
             for (const hog::flora::Ring& ring : bough.rings) {
@@ -68,13 +71,18 @@ Shape shape_at(float age) {
             }
         }
         float lowest = height;
+        float widest = 0.0F;
         for (const hog::flora::Frond& frond : tree.fronds) {
             lowest = std::min(lowest, frond.spine.front().centre.z);
+            for (const hog::flora::Ring& ring : frond.spine) {
+                widest = std::max(widest, glm::length(hog::Vec2{ring.centre}));
+            }
         }
         shape.height += height / seeds;
         shape.fronds += static_cast<float>(tree.fronds.size()) / seeds;
         shape.crown_base += lowest / height / seeds;
         shape.girth += tree.boughs.front().rings.front().radius / height / seeds;
+        shape.spread += 2.0F * widest / height / seeds;
     }
     return shape;
 }
@@ -205,6 +213,50 @@ TEST_CASE("a species ages by its own spans, only its height rising regardless", 
     reaching.ageing.reach = {.young = 0.5F, .old = 2.0F};
     CHECK(aged(reaching, 0.0F).levels[1].length == 0.5F * reaching.levels[1].length);
     CHECK(aged(reaching, 1.0F).levels[1].length == 2.0F * reaching.levels[1].length);
+}
+
+TEST_CASE("an oak spreads a broad crown of leaves on gnarled limbs", "[flora]") {
+    const Shape pine_prime = shape_at(prime_age);
+    const Shape prime = shape_at(prime_age, oak());
+    const Shape sapling = shape_at(0.15F, oak());
+    const Shape old = shape_at(0.95F, oak());
+    CHECK(prime.spread > 1.6F * pine_prime.spread);
+    CHECK(sapling.spread < prime.spread);
+    CHECK(prime.spread < old.spread);
+    CHECK(sapling.height < prime.height);
+    CHECK(old.girth > prime.girth);
+    // Its limbs are wood, not left to the leaves to cover.
+    const Skeleton tree = grow(oak(), 7U);
+    const TreeMesh trunk_only = mesh(tree, Detail{.wood_levels = 1});
+    const TreeMesh limbed = mesh(tree, Detail{.wood_levels = oak().woody});
+    CHECK(limbed.wood.size() > 2 * trunk_only.wood.size());
+    CHECK(fingered(mesh(grow(hog::flora::species_of(hog::flora::Genus::Oak), 7U))) ==
+          fingered(mesh(tree)));
+    for (std::uint32_t seed = 101; seed < 105; ++seed) {
+        CHECK(fingered(mesh(grow(aged(oak(), prime_age), seed))) ==
+              fingered(mesh(grow(oak(), seed))));
+    }
+    CHECK(fingered(mesh(tree, Detail{.wood_levels = oak().woody})) == 0x204f'ff67'f29e'e35cULL);
+    CHECK(fingered(mesh(grow(aged(oak(), 0.15F), 7U))) == 0x0c5c'0094'2b6c'00afULL);
+    CHECK(fingered(mesh(grow(aged(oak(), 0.95F), 7U))) == 0x7406'ecd4'14f8'63c4ULL);
+}
+
+TEST_CASE("leaves hold full along a frond, needles thin evenly", "[flora]") {
+    Skeleton twig;
+    twig.fronds.push_back({.spine = {}, .width = 1.0F, .tilt = 0.0F, .fullness = 0.0F, .seed = 1});
+    for (int ring = 0; ring <= 2; ++ring) {
+        twig.fronds.back().spine.push_back({.centre = Vec3{0.0F, static_cast<float>(ring), 0.0F},
+                                            .frame = hog::Quat{0.7071068F, -0.7071068F, 0.0F, 0.0F},
+                                            .radius = 0.01F});
+    }
+    Skeleton leafy = twig;
+    leafy.fronds.back().fullness = 1.0F;
+    // Half the width across the middle of the frond, as the blade's two middle vertices span.
+    const auto middle = [](const TreeMesh& grown) {
+        return glm::length(grown.leaves.at(4).position - grown.leaves.at(5).position) * 0.5F;
+    };
+    CHECK(std::abs(middle(mesh(twig)) - 0.5F) < 1e-4F);
+    CHECK(std::abs(middle(mesh(leafy)) - 0.75F) < 1e-4F);
 }
 
 TEST_CASE("the stand field gathers woods and leaves clearings", "[flora]") {

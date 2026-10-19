@@ -56,9 +56,9 @@ void mesh_bough(const Bough& bough, const Detail& detail, TreeMesh& grown) {
     }
 }
 
-// A twig's needles as two solid tapered blades crossed about its spine, each rolled off flat its
-// own way: dense from above, still a blade from the side, widest at the base and gone by the tip,
-// as pine growth thins outward.
+// A twig's foliage as two solid blades crossed about its spine, each rolled off flat its own way:
+// dense from above, still a blade from the side. Needles thin evenly from the base, as pine growth
+// thins outward; leaves hold full and round off at the tip.
 void mesh_frond(const Frond& frond, const Detail& detail, TreeMesh& grown) {
     if (frond.spine.size() < 2) {
         return;
@@ -80,7 +80,8 @@ void mesh_frond(const Frond& frond, const Detail& detail, TreeMesh& grown) {
         }
         flat = glm::normalize(flat);
         const Vec3 lift = glm::cross(heading, flat);
-        const float width = frond.width * detail.frond_scale * (1.0F - along);
+        const float width =
+            frond.width * detail.frond_scale * (1.0F - along) * (1.0F + (frond.fullness * along));
         const std::array<Vec3, 2> blades{(flat * swing) + (lift * raise),
                                          (flat * swing) - (lift * raise)};
         for (const Vec3& blade : blades) {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 
 namespace hog::flora {
 
@@ -49,11 +50,21 @@ struct Species {
     float frond_width = 0.25F; // a frond's base half-width, as a fraction of its twig's length
     float frond_sway = 0.25F;  // ± fraction of frond_width each frond differs by
     float frond_tilt = 0.5F;   // radians each of a frond's two blades rolls off flat
+    // 0 thins a frond evenly to its tip, as needles; 1 holds it full and rounds it off, as leaves.
+    float frond_fullness = 0.0F;
+    int woody = 1; // levels meshed as wood; the fronds cover the twigs past them
     Ageing ageing;
 };
 
+// The kinds of tree grown, each its own species.
+enum class Genus : std::uint8_t { Pine, Oak };
+inline constexpr int genus_count = 2;
+
 // The pine analogue: whorled boughs off a single trunk, a conical crown.
 [[nodiscard]] Species pine();
+// The oak analogue: a short trunk forking into gnarled limbs, a broad rounded crown of leaves.
+[[nodiscard]] Species oak();
+[[nodiscard]] Species species_of(Genus genus);
 
 // The age a species' rules describe it at, in its prime; 0 is a sapling, 1 old.
 inline constexpr float prime_age = 0.7F;

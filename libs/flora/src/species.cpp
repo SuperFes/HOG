@@ -70,6 +70,70 @@ Species pine() {
     return pine;
 }
 
+Species oak() {
+    Species oak;
+    oak.grown = 3;
+    oak.levels[0] = {.length = 8.0F,
+                     .sway = 0.2F,
+                     .radius = 0.42F,
+                     .taper = 0.75F,
+                     .sections = 8,
+                     .sides = 7,
+                     .children = 6,
+                     .whorl = 1,
+                     .start = 0.35F,
+                     .angle = 0.85F,
+                     .fall = 0.25F,
+                     .gnarl = 0.09F,
+                     .rise = 0.0F};
+    oak.levels[1] = {.length = 6.5F,
+                     .sway = 0.3F,
+                     .radius = 0.6F,
+                     .taper = 0.8F,
+                     .sections = 5,
+                     .sides = 5,
+                     .children = 8,
+                     .whorl = 1,
+                     .start = 0.2F,
+                     .angle = 0.75F,
+                     .fall = 0.4F,
+                     .gnarl = 0.18F,
+                     .rise = 0.01F};
+    oak.levels[2] = {.length = 2.2F,
+                     .sway = 0.3F,
+                     .radius = 0.5F,
+                     .taper = 0.9F,
+                     .sections = 3,
+                     .sides = 3,
+                     .children = 0,
+                     .whorl = 1,
+                     .start = 0.3F,
+                     .angle = 0.8F,
+                     .fall = 0.0F,
+                     .gnarl = 0.2F,
+                     .rise = 0.0F};
+    oak.frond_width = 0.5F;
+    oak.frond_sway = 0.3F;
+    oak.frond_tilt = 0.7F;
+    oak.frond_fullness = 1.0F;
+    oak.woody = 2;
+    // A sapling is a thin whip of a few upswept limbs; an old oak a massive trunk under limbs
+    // spread wide and level, gnarled with age.
+    oak.ageing = {.girth = {.young = 0.2F, .old = 1.5F},
+                  .crowded = {.young = 0.5F, .old = 1.0F},
+                  .raised = {.young = 0.6F, .old = 1.2F},
+                  .fall = {.young = 1.0F, .old = 1.0F},
+                  .lean = {.young = 0.6F, .old = 1.25F},
+                  .gnarl = {.young = 0.5F, .old = 1.8F},
+                  .reach = {.young = 0.4F, .old = 1.3F},
+                  .rise = {.young = 2.0F, .old = 0.3F}};
+    return oak;
+}
+
+Species species_of(Genus genus) {
+    return genus == Genus::Oak ? oak() : pine();
+}
+
 Species aged(const Species& species, float age) noexcept {
     const float at = std::clamp(age, 0.0F, 1.0F);
     Species grown = species;
