@@ -1,0 +1,151 @@
+#include "dice.hpp"
+#include "trig.hpp"
+
+#include <hog/flora/skeleton.hpp>
+
+#include <algorithm>
+#include <cstddef>
+#include <vector>
+
+namespace hog::flora {
+
+namespace {
+
+constexpr float tau = 6.2831853F;
+constexpr Vec3 up{0.0F, 0.0F, 1.0F};
+
+Quat about_x(float radians) noexcept {
+    return {turning_cos(radians * 0.5F), turning_sin(radians * 0.5F), 0.0F, 0.0F};
+}
+
+Quat about_z(float radians) noexcept {
+    return {turning_cos(radians * 0.5F), 0.0F, 0.0F, turning_sin(radians * 0.5F)};
+}
+
+struct Shoot {
+    Vec3 origin{0.0F};
+    Quat frame{1.0F, 0.0F, 0.0F, 0.0F};
+    float length = 1.0F;
+    float radius = 0.1F;
+    int level = 0;
+};
+
+// The ring partway along a grown bough, its frame leaned between the rings it lies between.
+Ring between(const Bough& bough, float along) {
+    const float at = along * static_cast<float>(bough.rings.size() - 1);
+    const auto first = std::min(static_cast<std::size_t>(at), bough.rings.size() - 2);
+    const float rest = at - static_cast<float>(first);
+    const Ring& near = bough.rings[first];
+    const Ring& far = bough.rings[first + 1];
+    return {.centre = near.centre + ((far.centre - near.centre) * rest),
+            .frame = glm::normalize(near.frame + ((far.frame - near.frame) * rest)),
+            .radius = near.radius + ((far.radius - near.radius) * rest)};
+}
+
+} // namespace
+
+Skeleton grow(const Species& species, std::uint32_t seed) {
+    Dice dice{seed};
+    Skeleton tree;
+    const Level& trunk = species.levels[0];
+    std::vector<Shoot> shoots{{.origin = Vec3{0.0F},
+                               .frame = Quat{1.0F, 0.0F, 0.0F, 0.0F},
+                               .length = trunk.length * (1.0F + dice.around(trunk.sway)),
+                               .radius = trunk.radius,
+                               .level = 0}};
+
+    // Breadth first, one stream of dice: every machine deals the same tree.
+    for (std::size_t at = 0; at < shoots.size(); ++at) {
+        const Shoot shoot = shoots[at];
+        const Level& level = species.levels[static_cast<std::size_t>(shoot.level)];
+        const bool deepest = shoot.level + 1 >= species.grown;
+        const float step = shoot.length / static_cast<float>(level.sections);
+
+        Bough bough{.level = shoot.level, .sides = level.sides, .rings = {}};
+        bough.rings.reserve(static_cast<std::size_t>(level.sections) + 1);
+        Vec3 head = shoot.origin;
+        Quat frame = shoot.frame;
+        bough.rings.push_back({.centre = head, .frame = frame, .radius = shoot.radius});
+        for (int section = 1; section <= level.sections; ++section) {
+            // Wander a little, and lean toward (or away from) upright, thinner wood more
+            // easily. The dice are dealt in named order: an expression with two rolls would
+            // leave the deal to the compiler, and every machine must grow the same tree.
+            const float pitch = dice.around(level.gnarl);
+            const float yaw = dice.around(level.gnarl);
+            frame = frame * about_x(pitch) * about_z(yaw);
+            const Vec3 heading = frame * up;
+            const Vec3 axis = glm::cross(heading, up);
+            const float swing = glm::length(axis);
+            if (level.rise != 0.0F && swing > 1e-4F) {
+                const float lean =
+                    std::clamp(level.rise / std::max(shoot.radius, 0.05F), -0.5F, 0.5F);
+                const Vec3 turn = (axis / swing) * turning_sin(lean * 0.5F);
+                frame =
+                    glm::normalize(Quat{turning_cos(lean * 0.5F), turn.x, turn.y, turn.z} * frame);
+            }
+            head += (frame * up) * step;
+            const float grown = static_cast<float>(section) / static_cast<float>(level.sections);
+            float radius = shoot.radius * (1.0F - (level.taper * grown));
+            if (deepest && section == level.sections) {
+                radius = std::min(radius, 0.004F);
+            }
+            bough.rings.push_back({.centre = head, .frame = frame, .radius = radius});
+        }
+
+        if (!deepest) {
+            // The next level sprouts in whorls, each ringing the parent a golden turn on.
+            const Level& next = species.levels[static_cast<std::size_t>(shoot.level) + 1];
+            const int whorl = std::max(level.whorl, 1);
+            const int whorls = std::max((level.children + whorl - 1) / whorl, 1);
+            for (int child = 0; child < level.children; ++child) {
+                const int round = child / whorl;
+                const int spoke = child % whorl;
+                const float along = std::clamp(
+                    level.start + ((1.0F - level.start) *
+                                   ((static_cast<float>(round) + 0.5F + dice.around(0.2F)) /
+                                    static_cast<float>(whorls))),
+                    level.start, 0.97F);
+                const Ring ring = between(bough, along);
+                const float radial =
+                    (tau * (static_cast<float>(spoke) / static_cast<float>(whorl))) +
+                    (static_cast<float>(round) * 2.39996F) + dice.around(0.3F);
+                const float lean = level.angle * (1.0F + dice.around(0.15F));
+                shoots.push_back(
+                    {.origin = ring.centre,
+                     .frame = glm::normalize(ring.frame * about_z(radial) * about_x(lean)),
+                     .length = next.length * (1.0F + dice.around(next.sway)) *
+                               (1.0F - (level.fall * along)),
+                     .radius = std::min(ring.radius * next.radius, ring.radius * 0.9F),
+                     .level = shoot.level + 1});
+            }
+        } else {
+            // Foliage: cards along the twig's outer reach, and one over its tip.
+            for (int card = 0; card <= species.cards; ++card) {
+                const float along =
+                    card == species.cards
+                        ? 1.0F
+                        : std::clamp(species.card_start +
+                                         ((1.0F - species.card_start) *
+                                          ((static_cast<float>(card) + 0.5F + dice.around(0.3F)) /
+                                           static_cast<float>(std::max(species.cards, 1)))),
+                                     0.0F, 1.0F);
+                const Ring ring = between(bough, along);
+                const float pitch =
+                    card == species.cards ? 0.0F : species.card_pitch * (1.0F + dice.around(0.5F));
+                // Sized to its own twig, so short crown twigs carry short sprays.
+                const float size = species.card_size * (shoot.length / level.length) *
+                                   (1.0F + dice.around(species.card_sway));
+                tree.cards.push_back({.centre = ring.centre,
+                                      .frame = glm::normalize(
+                                          ring.frame * about_z(tau * dice.unit()) * about_x(pitch)),
+                                      .size = size,
+                                      .width = size * species.card_aspect,
+                                      .seed = dice.roll()});
+            }
+        }
+        tree.boughs.push_back(std::move(bough));
+    }
+    return tree;
+}
+
+} // namespace hog::flora

@@ -256,12 +256,12 @@ This phase covers the planet in procedurally generated plant life, grown from pe
 
 **Species rules**
 
-- [ ] Plant grammar: a species is a rule set (trunk habit, branch angles and counts per level, crown shape, leaf, needle or frond) that grows an individual deterministically from a seed
+- [x] Plant grammar: a species is a rule set (trunk habit, branch angles and counts per level, crown shape, leaf, needle or frond) that grows an individual deterministically from a seed (libs/flora: whorled levels, gnarl and rise, foliage cards, meshed as low-poly tubes at baked detail levels)
 - [ ] First tree set, each with its own rules: a pine analogue (done: tiered conical crowns over bare trunks, keyed to their own coarser fixed lattice, reaching 900 m), an oak analogue (spreading, gnarled), a maple analogue, a palm analogue (bare trunk, frond crown)
 - [x] Ground cover: tall and short grasses with far swaths, cattail reeds at waterlines, bushes in four silhouettes (floofy blobs, spiky rosettes, twiggy skeletons, low mats) mixed by biome
 - [ ] Age from the same seed: seedlings, saplings, mature and ancient trees from one rule set
 - [ ] Condition states: dead standing wood, half-fallen and felled trunks, fire-scorched survivors, insect- and animal-worn damage simulated without the animals
-- [ ] Golden tests: the same seed grows the same plant, bit for bit, on every platform
+- [ ] Golden tests: the same seed grows the same plant, bit for bit, on every platform (hash baked, clang and gcc agree under -ffp-contract=off and libm-free trig; macOS unproven)
 
 **Placement**
 
