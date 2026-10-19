@@ -3,6 +3,7 @@
 #include <hog/flora/mesh.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <numbers>
@@ -55,29 +56,54 @@ void mesh_bough(const Bough& bough, const Detail& detail, TreeMesh& grown) {
     }
 }
 
-void mesh_card(const Card& card, float scale, TreeMesh& grown) {
-    const Vec3 across = card.frame * Vec3{card.width * scale, 0.0F, 0.0F};
-    const Vec3 along = card.frame * Vec3{0.0F, 0.0F, card.size * scale};
-    const Vec3 normal = card.frame * Vec3{0.0F, 1.0F, 0.0F};
+// A twig's needles as two solid tapered blades crossed about its spine, each rolled off flat its
+// own way: dense from above, still a blade from the side, widest at the base and gone by the tip,
+// as pine growth thins outward.
+void mesh_frond(const Frond& frond, const Detail& detail, TreeMesh& grown) {
+    if (frond.spine.size() < 2) {
+        return;
+    }
+    constexpr Vec3 world_up{0.0F, 0.0F, 1.0F};
+    const std::vector<std::size_t> kept = kept_rings(frond.spine.size(), detail.ring_stride);
     const auto first = static_cast<std::uint32_t>(grown.leaves.size());
-    grown.leaves.push_back({.position = card.centre - (across * 0.5F),
-                            .normal = normal,
-                            .card = {-0.5F, 0.0F},
-                            .seed = card.seed});
-    grown.leaves.push_back({.position = card.centre + (across * 0.5F),
-                            .normal = normal,
-                            .card = {0.5F, 0.0F},
-                            .seed = card.seed});
-    grown.leaves.push_back({.position = card.centre - (across * 0.5F) + along,
-                            .normal = normal,
-                            .card = {-0.5F, 1.0F},
-                            .seed = card.seed});
-    grown.leaves.push_back({.position = card.centre + (across * 0.5F) + along,
-                            .normal = normal,
-                            .card = {0.5F, 1.0F},
-                            .seed = card.seed});
-    grown.leaf_indices.insert(grown.leaf_indices.end(),
-                              {first, first + 1, first + 2, first + 2, first + 1, first + 3});
+    const auto last = static_cast<float>(frond.spine.size() - 1);
+    const float swing = turning_cos(frond.tilt);
+    const float raise = turning_sin(frond.tilt);
+    for (const std::size_t at : kept) {
+        const Ring& ring = frond.spine[at];
+        const float along = static_cast<float>(at) / last;
+        const Vec3 heading = ring.frame * world_up;
+        Vec3 flat = glm::cross(world_up, heading);
+        if (glm::dot(flat, flat) < 1e-6F) {
+            // The leader's tip frond points straight up; any side is its flat one.
+            flat = glm::cross(Vec3{1.0F, 0.0F, 0.0F}, heading);
+        }
+        flat = glm::normalize(flat);
+        const Vec3 lift = glm::cross(heading, flat);
+        const float width = frond.width * detail.frond_scale * (1.0F - along);
+        const std::array<Vec3, 2> blades{(flat * swing) + (lift * raise),
+                                         (flat * swing) - (lift * raise)};
+        for (const Vec3& blade : blades) {
+            const Vec3 normal = glm::normalize(glm::cross(heading, blade));
+            grown.leaves.push_back({.position = ring.centre - (blade * width),
+                                    .normal = normal,
+                                    .card = {-0.5F, along},
+                                    .seed = frond.seed});
+            grown.leaves.push_back({.position = ring.centre + (blade * width),
+                                    .normal = normal,
+                                    .card = {0.5F, along},
+                                    .seed = frond.seed});
+        }
+    }
+    for (std::uint32_t band = 0; band + 1 < kept.size(); ++band) {
+        const std::uint32_t low = first + (band * 4);
+        const std::uint32_t high = low + 4;
+        for (std::uint32_t blade = 0; blade < 4; blade += 2) {
+            grown.leaf_indices.insert(grown.leaf_indices.end(),
+                                      {low + blade, high + blade, low + blade + 1, low + blade + 1,
+                                       high + blade, high + blade + 1});
+        }
+    }
 }
 
 } // namespace
@@ -89,9 +115,9 @@ TreeMesh mesh(const Skeleton& skeleton, const Detail& detail) {
             mesh_bough(bough, detail, grown);
         }
     }
-    const auto card_step = static_cast<std::size_t>(std::max(detail.card_stride, 1));
-    for (std::size_t at = 0; at < skeleton.cards.size(); at += card_step) {
-        mesh_card(skeleton.cards[at], detail.card_scale, grown);
+    const auto frond_step = static_cast<std::size_t>(std::max(detail.frond_stride, 1));
+    for (std::size_t at = 0; at < skeleton.fronds.size(); at += frond_step) {
+        mesh_frond(skeleton.fronds[at], detail, grown);
     }
     return grown;
 }

@@ -21,20 +21,20 @@ struct Bough {
     std::vector<Ring> rings;
 };
 
-// A foliage card on a twig: rooted at `centre`, spanning its frame's local x across and z along,
-// facing local y; `seed` cuts its own silhouette.
-struct Card {
-    Vec3 centre{0.0F};
-    Quat frame{1.0F, 0.0F, 0.0F, 0.0F};
-    float size = 1.0F;  // along the twig
-    float width = 1.0F; // across it
+// The needle mass of one twig: two solid blades crossed about its spine, each rolled off flat its
+// own way, widest at the base and thinning to nothing by the tip, as pine growth thins outward;
+// `seed` streaks its own needles.
+struct Frond {
+    std::vector<Ring> spine;
+    float width = 0.3F; // half-width at the base, metres
+    float tilt = 0.5F;  // radians each blade rolls off flat, opposite ways
     std::uint32_t seed = 0;
 };
 
 // One grown individual, rooted at the origin, z up, in metres.
 struct Skeleton {
     std::vector<Bough> boughs;
-    std::vector<Card> cards;
+    std::vector<Frond> fronds;
 };
 
 // Grows the species from the seed. All randomness is spent growing, so meshing the same skeleton

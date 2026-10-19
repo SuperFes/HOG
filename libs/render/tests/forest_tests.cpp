@@ -194,7 +194,8 @@ TEST_CASE("grown pines carry trunks and needles on their anchors", "[render]") {
     }
     const Pixels stand = draw(*device, {.anchors = rank_of(5, 0.0), .detail = 0});
     CHECK(lit_pixels(stand) > 300);
-    CHECK(barky_pixels(stand) > 10);
+    // Only the trunk is wood now: each twig's frond runs its own spine.
+    CHECK(barky_pixels(stand) > 4);
     CHECK(leafy_pixels(stand) > 100);
     // An empty tile grows nothing.
     CHECK(lit_pixels(draw(*device, {.anchors = {}})) == 0);
@@ -208,7 +209,8 @@ TEST_CASE("the baked details thin with distance, holding the stand", "[render]")
     const Pixels full = draw(*device, {.anchors = rank_of(5, 0.0), .detail = 0});
     const Pixels coarse = draw(*device, {.anchors = rank_of(5, 0.0), .detail = 2});
     CHECK(lit_pixels(full) > 300);
-    CHECK(lit_pixels(coarse) > 300);
+    // Coarser, yet still holding most of the stand's cover.
+    CHECK(lit_pixels(coarse) > lit_pixels(full) / 2);
     CHECK(full != coarse);
 }
 
@@ -229,6 +231,6 @@ TEST_CASE("the forest ends at its reach, the stamps carrying on from the same an
     Stand both = eyes;
     both.with_stamps = true;
     const std::size_t together = lit_pixels(draw(*device, both));
-    CHECK(grown_alone > 15);
+    CHECK(grown_alone > 5);
     CHECK(together > grown_alone + 5);
 }

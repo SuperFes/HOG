@@ -238,8 +238,8 @@ struct Spray {
     float3 from_eye;
     float3 drawn;
     float height;
-    float2 card;  // -0.5 to 0.5 across, 0 to 1 along
-    float pixels; // the card's length in pixels, for shedding detail far off
+    float2 card;  // -0.5 to 0.5 across the frond, 0 at its spine; 0 to 1 along it
+    float pixels; // the frond's length in pixels, for shedding detail far off
     nointerpolation uint seed;
 };
 
@@ -279,10 +279,10 @@ Spray leaf_vertex(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     spray.from_eye = carried(planted, local, asfloat(build.wood.w));
     spray.drawn = bent(spray.from_eye, push.bend_up, push.bend_radii.xy);
     spray.position = mul(push.clip_from_eye, float4(spray.drawn, 1.0));
-    // Rounded out from the trunk, so the flat cards shade like a crown's volume.
+    // Rounded out from the trunk, so the fronds shade like a crown's volume as well as their own.
     const float3 bulge = float3(local.x, local.y, 0.35);
-    spray.normal = turned(planted, normalize((local_normal * 0.6) +
-                                             (normalize(bulge) * 0.8)));
+    spray.normal = turned(planted, normalize((local_normal * 0.8) +
+                                             (normalize(bulge) * 0.5)));
     // Toned as the stamps tone the same tree: the tree's own cast, darker low in the crown.
     const float toward_top = saturate(local.z / max(asfloat(build.wood.w), 0.1));
     spray.colour = needles * (0.75 + (0.45 * unit(planted.hash + 7u))) *
@@ -290,37 +290,28 @@ Spray leaf_vertex(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     spray.height = planted.height_above;
     spray.card = card;
     spray.pixels =
-        (1.5 * planted.scale) / max(push.bend_radii.w * max(length(planted.root), 1.0), 1e-6);
+        (2.4 * planted.scale) / max(push.bend_radii.w * max(length(planted.root), 1.0), 1e-6);
     spray.seed = seed;
     return spray;
 }
 
-// Whether the point falls on the needle spray the card carries: a ragged wedge of needles about
-// a stem, shed to a plain leaf far off.
-bool within_spray(uint seed, float2 card, float pixels) {
-    const float2 off = float2(card.x / 0.5, (card.y - 0.5) / 0.55);
-    const float roundness = dot(off, off);
-    if (pixels < 16.0) {
-        return roundness < 0.72;
+// The needles' own texture: streaks combing from the spine outward and toward the tip, each a
+// shade its own, melting to one tone once the frond is only a few pixels long.
+float needled(uint seed, float2 card, float pixels) {
+    if (pixels < 12.0) {
+        return 1.0;
     }
-    // The stem the needles comb away from.
-    if (abs(card.x) < (0.03 * (1.0 - card.y)) + 0.012) {
-        return card.y < 0.98;
-    }
-    const float angle = atan2(card.x, card.y - 0.5);
-    const float teeth = frac(((angle / 3.1415927) + 1.0) * 9.0 + unit(seed));
-    const float tooth = 1.0 - (2.0 * abs(teeth - 0.5));
-    const float reach = 0.62 + (0.38 * tooth * sqrt(tooth));
-    return roundness < reach * reach;
+    const float comb = (abs(card.x) * 18.0) + ((1.0 - card.y) * 11.0);
+    const float streak = unit(seed + uint(comb));
+    const float melt = saturate((pixels - 12.0) / 24.0);
+    return 1.0 + (melt * 0.5 * (streak - 0.5));
 }
 
 [shader("fragment")]
-float4 leaf_fragment(Spray spray) : SV_Target {
-    if (!within_spray(spray.seed, spray.card, spray.pixels)) {
-        discard;
-    }
-    // Needles darken toward the stem, as the bushes' tiers do.
-    const float3 albedo = spray.colour * (0.75 + (0.5 * saturate(abs(spray.card.x) * 2.0)));
+float4 leaf_fragment(Spray spray, bool front: SV_IsFrontFace) : SV_Target {
+    // Brightest along the outer needles, shadowed at the stem, dark beneath the bough.
+    const float shaped = (0.75 + (0.5 * saturate(abs(spray.card.x) * 2.0))) * (front ? 1.0 : 0.72);
+    const float3 albedo = spray.colour * shaped * needled(spray.seed, spray.card, spray.pixels);
     return float4(
         forest_lit(albedo, spray.normal, spray.from_eye, spray.drawn, spray.height, 0.3), 1.0);
 }

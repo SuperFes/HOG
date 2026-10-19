@@ -70,17 +70,16 @@ constexpr std::array descriptors{
     binding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
     binding(7, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT)};
 
-// How much each baked detail keeps, finest first.
+// How much each baked detail keeps, finest first. Only the trunk is ever wood: each twig's solid
+// frond runs its own spine, so a tube under it would never be seen. Dropped fronds are covered by
+// widening the kept ones a little, not doubling them: each tree sheds detail by its own distance.
 constexpr std::array<flora::Detail, forest_details> details{
     flora::Detail{
-        .ring_stride = 1, .sides = 1.0F, .card_stride = 1, .card_scale = 1.0F, .wood_levels = 2},
-    // Dropped cards are covered by growing the kept ones a little, not doubling them: each tree
-    // sheds detail by its own distance, and a swollen far card would balloon as it stepped near.
+        .ring_stride = 1, .sides = 1.0F, .frond_stride = 1, .frond_scale = 1.0F, .wood_levels = 1},
     flora::Detail{
-        .ring_stride = 2, .sides = 0.75F, .card_stride = 2, .card_scale = 1.4F, .wood_levels = 2},
-    // Far off, only the trunk is wood; the boughs are sub-pixel, their cards cover alone.
+        .ring_stride = 2, .sides = 0.75F, .frond_stride = 2, .frond_scale = 1.4F, .wood_levels = 1},
     flora::Detail{
-        .ring_stride = 3, .sides = 0.5F, .card_stride = 3, .card_scale = 1.8F, .wood_levels = 1}};
+        .ring_stride = 3, .sides = 0.5F, .frond_stride = 3, .frond_scale = 1.9F, .wood_levels = 1}};
 
 void append(std::vector<std::byte>& blob, const void* bytes, std::size_t count) {
     const std::span<const std::byte> source{static_cast<const std::byte*>(bytes), count};

@@ -56,7 +56,7 @@ TEST_CASE("the same seed grows the same pine, bit for bit", "[flora]") {
     CHECK(fingered(grown) != fingered(mesh(grow(pine(), 8U))));
     // The golden number: if this breaks, the same world now grows different trees on different
     // machines or releases, which the deterministic scatter must never do.
-    CHECK(fingered(grown) == 0xef2c'5a3d'e417'3df2ULL);
+    CHECK(fingered(grown) == 0xb7fe'e3d8'80e4'99e2ULL);
 }
 
 TEST_CASE("a pine fits its frame", "[flora]") {
@@ -64,9 +64,16 @@ TEST_CASE("a pine fits its frame", "[flora]") {
     REQUIRE(!tree.boughs.empty());
     const Bough& trunk = tree.boughs.front();
     CHECK(trunk.level == 0);
-    // One trunk, its boughs, and foliage only on the boughs.
+    // One trunk, its boughs, and a frond for every bough.
     CHECK(tree.boughs.size() == 1 + 64);
-    CHECK(!tree.cards.empty());
+    CHECK(tree.fronds.size() == 64);
+    for (const hog::flora::Frond& frond : tree.fronds) {
+        REQUIRE(frond.spine.size() >= 2);
+        CHECK(frond.width > 0.1F);
+        CHECK(frond.width < 1.0F);
+        CHECK(frond.tilt > 0.0F);
+        CHECK(frond.tilt < 1.5F);
+    }
     for (const Bough& bough : tree.boughs) {
         REQUIRE(bough.rings.size() >= 2);
         // Tapering, and rooted within the crown's spread.
@@ -99,8 +106,8 @@ TEST_CASE("the mesh thins with detail, keeping the same silhouette", "[flora]") 
     const TreeMesh full = mesh(tree);
     const TreeMesh thinned = mesh(tree, Detail{.ring_stride = 3,
                                                .sides = 0.6F,
-                                               .card_stride = 2,
-                                               .card_scale = 1.4F,
+                                               .frond_stride = 2,
+                                               .frond_scale = 1.4F,
                                                .wood_levels = 1});
     CHECK(!thinned.wood.empty());
     CHECK(!thinned.leaves.empty());

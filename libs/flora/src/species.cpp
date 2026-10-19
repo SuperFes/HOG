@@ -22,7 +22,7 @@ Species pine() {
                       .sway = 0.25F,
                       .radius = 0.38F,
                       .taper = 0.9F,
-                      .sections = 2,
+                      .sections = 3,
                       .sides = 3,
                       .children = 0,
                       .whorl = 1,
@@ -31,12 +31,9 @@ Species pine() {
                       .fall = 0.0F,
                       .gnarl = 0.05F,
                       .rise = -0.012F};
-    pine.cards = 3;
-    pine.card_size = 1.5F;
-    pine.card_sway = 0.3F;
-    pine.card_start = 0.3F;
-    pine.card_aspect = 0.65F;
-    pine.card_pitch = 0.25F;
+    pine.frond_width = 0.28F;
+    pine.frond_sway = 0.25F;
+    pine.frond_tilt = 0.55F;
     return pine;
 }
 

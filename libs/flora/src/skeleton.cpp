@@ -42,41 +42,15 @@ Ring between(const Bough& bough, float along) {
             .radius = near.radius + ((far.radius - near.radius) * rest)};
 }
 
-// Foliage: cards along the twig's outer reach, and one over its tip. Each spray lies flat, as
-// needles comb out to the light: along its twig, its face turned upward.
-void lay_cards(const Species& species, const Bough& bough, const Shoot& shoot, Dice& dice,
+// Foliage: the twig's needles as one solid frond along its spine, sized to its own twig, so
+// short crown twigs carry short blades. The dice are dealt in named order, as everywhere.
+void lay_frond(const Species& species, const Bough& bough, const Shoot& shoot, Dice& dice,
                Skeleton& tree) {
-    const Level& level = species.levels[static_cast<std::size_t>(shoot.level)];
-    for (int card = 0; card <= species.cards; ++card) {
-        const float along =
-            card == species.cards
-                ? 1.0F
-                : std::clamp(species.card_start +
-                                 ((1.0F - species.card_start) *
-                                  ((static_cast<float>(card) + 0.5F + dice.around(0.3F)) /
-                                   static_cast<float>(std::max(species.cards, 1)))),
-                             0.0F, 1.0F);
-        const Ring ring = between(bough, along);
-        const float pitch =
-            card == species.cards ? 0.0F : species.card_pitch * (1.0F + dice.around(0.5F));
-        // Sized to its own twig, so short crown twigs carry short sprays.
-        const float size = species.card_size * (shoot.length / level.length) *
-                           (1.0F + dice.around(species.card_sway));
-        const Vec3 heading = ring.frame * up;
-        Vec3 flat = glm::cross(up, heading);
-        if (glm::length(flat) < 1e-3F) {
-            // The leader's tip spray points straight up; any side is its flat one.
-            flat = glm::cross(Vec3{1.0F, 0.0F, 0.0F}, heading);
-        }
-        flat = glm::normalize(flat);
-        const Quat laid = glm::quat_cast(Mat3{flat, glm::cross(heading, flat), heading});
-        const float wobble = dice.around(0.3F);
-        tree.cards.push_back({.centre = ring.centre,
-                              .frame = glm::normalize(laid * about_z(wobble) * about_x(pitch)),
-                              .size = size,
-                              .width = size * species.card_aspect,
-                              .seed = dice.roll()});
-    }
+    const float sway = dice.around(species.frond_sway);
+    const std::uint32_t seed = dice.roll();
+    const float width = species.frond_width * shoot.length * (1.0F + sway);
+    tree.fronds.push_back(
+        {.spine = bough.rings, .width = width, .tilt = species.frond_tilt, .seed = seed});
 }
 
 } // namespace
@@ -156,7 +130,7 @@ Skeleton grow(const Species& species, std::uint32_t seed) {
                      .level = shoot.level + 1});
             }
         } else {
-            lay_cards(species, bough, shoot, dice, tree);
+            lay_frond(species, bough, shoot, dice, tree);
         }
         tree.boughs.push_back(std::move(bough));
     }

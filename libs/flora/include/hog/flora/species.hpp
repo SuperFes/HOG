@@ -26,13 +26,10 @@ struct Level {
 // seed: the same on every machine, as many times as it's grown.
 struct Species {
     std::array<Level, 3> levels;
-    int grown = 2;            // levels grown, 1 to 3
-    int cards = 3;            // foliage cards along each deepest branch, plus one at its tip
-    float card_size = 1.5F;   // metres across a card
-    float card_sway = 0.3F;   // ± fraction of card_size
-    float card_start = 0.3F;  // of a branch before its cards begin
-    float card_aspect = 1.0F; // a card's width as a fraction of its length
-    float card_pitch = 0.5F;  // radians a card tips off its twig, give or take half
+    int grown = 2;             // levels grown, 1 to 3
+    float frond_width = 0.25F; // a frond's base half-width, as a fraction of its twig's length
+    float frond_sway = 0.25F;  // ± fraction of frond_width each frond differs by
+    float frond_tilt = 0.5F;   // radians each of a frond's two blades rolls off flat
 };
 
 // The pine analogue: whorled boughs off a single trunk, a conical crown.
