@@ -1,3 +1,5 @@
+#include "flora.hpp"
+
 #include <hog/core/assert.hpp>
 #include <hog/planet/climate.hpp>
 #include <hog/render/device.hpp>
@@ -51,47 +53,14 @@ constexpr std::array descriptors{
     binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
     binding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)};
 
-// Each biome's pines: needle colour and height, then how many lattice cells grow one.
+// Each biome's pines: needle colour and height, then their stands against the field.
 struct Settings {
     std::array<glm::vec4, planet::biome_count> crown;
     std::array<glm::vec4, planet::biome_count> grow;
 };
 
-struct BiomePines {
-    float height = 0.0F; // metres; none grows no trees
-    float share = 0.0F;  // of lattice cells grown, 0 to 1
-};
-
 constexpr VkDeviceSize patch_bytes =
     VkDeviceSize{patch_vertex_count} * sizeof(terrain::PatchVertex);
-
-constexpr BiomePines pines_of(planet::Biome biome) noexcept {
-    using enum planet::Biome;
-    switch (biome) {
-    case BorealForest:
-        return {.height = 13.0F, .share = 0.5F};
-    case TemperateForest:
-        return {.height = 15.0F, .share = 0.28F};
-    case Grassland:
-        return {.height = 12.0F, .share = 0.012F};
-    case Shrubland:
-        return {.height = 7.0F, .share = 0.03F};
-    case Alpine:
-        return {.height = 4.5F, .share = 0.1F};
-    case Wetland:
-        return {.height = 10.0F, .share = 0.06F};
-    case Tundra:
-    case Desert:
-    case Savanna:
-    case TropicalRainforest: // its broadleaves and palms are species to come
-    case Ocean:
-    case Beach:
-    case Ice:
-    case Lake:
-        return {};
-    }
-    return {};
-}
 
 // Needles far darker than the ground's mean, cool and green, so a forest reads as its own mass.
 constexpr Vec3 needle_colour(Vec3 ground) noexcept {
@@ -105,7 +74,7 @@ Settings tree_settings(std::span<const Vec3> palette) noexcept {
         settings.crown.at(static_cast<std::size_t>(biome)) =
             glm::vec4{needle_colour(palette[static_cast<std::size_t>(biome)]), pines.height};
         settings.grow.at(static_cast<std::size_t>(biome)) =
-            glm::vec4{pines.share, 0.0F, 0.0F, 0.0F};
+            glm::vec4{pines.inside, pines.edge, pines.lone, 0.0F};
     }
     return settings;
 }

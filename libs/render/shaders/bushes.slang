@@ -1,5 +1,6 @@
 import atmosphere;
 import bend;
+import flora;
 import shadow;
 import tone;
 
@@ -34,6 +35,9 @@ struct Settings {
     // x the share of lattice cells grown, then the kinds' shares: y floofy blobs, z spiky
     // rosettes, w twiggy skeletons; low mats take the rest.
     float4 shapes[biome_count];
+    // The biome's tree stands: x the stand field's woodland threshold, y whether any woods grow;
+    // zw reserved. Bushes crowd the woods' edges and thin under the canopy.
+    float4 woods[biome_count];
 };
 
 [[vk::binding(0, 0)]] ConstantBuffer<Settings> settings;
@@ -73,19 +77,6 @@ Corner corner_at(uint bias, uint index) {
     corner.normal = asfloat(vertices.Load3(at + 12));
     corner.biome = min(vertices.Load(at + 24) & 0xffu, biome_count - 1);
     return corner;
-}
-
-uint hashed(uint at) {
-    at ^= at >> 16;
-    at *= 0x7feb352du;
-    at ^= at >> 15;
-    at *= 0x846ca68bu;
-    at ^= at >> 16;
-    return at;
-}
-
-float unit(uint at) {
-    return float(hashed(at) & 0xffffu) / 65536.0;
 }
 
 // The two triangles of a quad: bottom left and right, then top left and right.
@@ -151,7 +142,19 @@ Bush vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const Corner near = corner_at(bias, at + (u < 0.5 ? 0 : patch_side) + (v < 0.5 ? 0 : 1));
     const float4 leaf = settings.leaf[near.biome];
     const float4 shapes = settings.shapes[near.biome];
-    if (leaf.w <= 0.0 || unit(hash + 2u) >= shapes.x) {
+    // Where trees stand, bushes keep to their place: crowding the woods' sunny edges, thinning
+    // under the canopy, and spread as ever where no woods grow at all.
+    const float4 woods = settings.woods[near.biome];
+    float share = shapes.x;
+    if (woods.y > 0.5) {
+        // This lattice lies two levels finer than the trees'.
+        const float2 spot = float2(float(lattice_i + li), float(lattice_j + lj)) * 0.25;
+        const float field = stand_field(spot, face);
+        const float canopy = smoothstep(woods.x, woods.x + 0.1, field);
+        const float hem = saturate(1.0 - (abs(field - woods.x - 0.05) / 0.1));
+        share *= lerp(1.0, 0.4, canopy) + (0.8 * hem);
+    }
+    if (leaf.w <= 0.0 || unit(hash + 2u) >= share) {
         return nothing();
     }
     const Corner c00 = corner_at(bias, at);

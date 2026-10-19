@@ -1,3 +1,5 @@
+#include "flora.hpp"
+
 #include <hog/core/assert.hpp>
 #include <hog/planet/climate.hpp>
 #include <hog/render/bushes.hpp>
@@ -51,11 +53,12 @@ constexpr std::array descriptors{
     binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
     binding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)};
 
-// Each biome's bushes: leaf colour and height, then how many lattice cells grow one and the mix
-// of kinds.
+// Each biome's bushes: leaf colour and height, how many lattice cells grow one and the mix of
+// kinds, then the tree stands they keep to the edges of.
 struct Settings {
     std::array<glm::vec4, planet::biome_count> leaf;
     std::array<glm::vec4, planet::biome_count> shapes;
+    std::array<glm::vec4, planet::biome_count> woods;
 };
 
 struct BiomeBushes {
@@ -114,6 +117,9 @@ Settings bush_settings(std::span<const Vec3> palette) noexcept {
             glm::vec4{leaf_colour(palette[static_cast<std::size_t>(biome)]), bushes.height};
         settings.shapes.at(static_cast<std::size_t>(biome)) =
             glm::vec4{bushes.share, bushes.floofy, bushes.spiky, bushes.twiggy};
+        const BiomePines pines = pines_of(static_cast<planet::Biome>(biome));
+        settings.woods.at(static_cast<std::size_t>(biome)) =
+            glm::vec4{pines.edge, pines.inside > 0.0F ? 1.0F : 0.0F, 0.0F, 0.0F};
     }
     return settings;
 }

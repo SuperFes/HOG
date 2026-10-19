@@ -18,6 +18,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <numbers>
 #include <utility>
 #include <vector>
@@ -69,7 +70,7 @@ struct Patch {
     int shift = 0;
     DVec3 wind{0.0};
     double seconds = 0.0;
-    bool from_side = false; // low from the south, close enough to see the trunks
+    bool from_side = false; // low from south of the patch, facing the stand's front rank
 };
 
 // The patch's trees alone over black: from overhead so every one is in view, or from the side.
@@ -91,7 +92,7 @@ Pixels draw(hog::render::Device& device, const Patch& grown) {
     const WorldPosition origin{(up * (radius + ground_height)) + (east * grown.offset.x) +
                                (north * grown.offset.y)};
     const WorldPosition eye{grown.from_side
-                                ? (up * (radius + ground_height + 9.0)) + (north * -30.0)
+                                ? (up * (radius + ground_height + 6.0)) + (north * -80.0)
                                 : up * (radius + ground_height + 80.0)};
     const hog::terrain::Bend bend = hog::terrain::bend_from(eye, radius, ground_height);
     const double elevation = 40.0 * std::numbers::pi / 180.0;
@@ -161,6 +162,23 @@ std::size_t lit_pixels(const Pixels& pixels) {
     return lit;
 }
 
+// Placement is keyed to the lattice bit for bit; the shaded picture may still wobble by a
+// single count where perspective interpolation rounds at a crown's edge.
+bool nearly_same(const Pixels& a, const Pixels& b) {
+    if (a.size() != b.size()) {
+        return false;
+    }
+    std::size_t off = 0;
+    for (std::size_t at = 0; at < a.size(); ++at) {
+        const int apart = std::abs(int{a[at]} - int{b[at]});
+        if (apart > 1) {
+            return false;
+        }
+        off += apart == 0 ? 0U : 1U;
+    }
+    return off <= 16;
+}
+
 std::size_t barky_pixels(const Pixels& pixels) {
     std::size_t barky = 0;
     for (std::size_t pixel = 0; pixel < pixels.size() / 4; ++pixel) {
@@ -201,7 +219,21 @@ TEST_CASE("a pine stands its ground at every terrain level", "[render]") {
     const Pixels coarsely = draw(*device, coarse);
     const Pixels finely = draw(*device, fine);
     CHECK(lit_pixels(finely) > 20);
-    CHECK(coarsely == finely);
+    CHECK(nearly_same(coarsely, finely));
+}
+
+TEST_CASE("pines gather into stands, with clearings between", "[render]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    // Two spots of the same forest biome, one deep in the stand field's woods and one in a
+    // clearing: the woods grow thick, the clearing only the odd lone pine.
+    const std::size_t wooded = lit_pixels(draw(*device, {.lattice_i = 2163, .lattice_j = 56619}));
+    const std::size_t clearing =
+        lit_pixels(draw(*device, {.lattice_i = 49849, .lattice_j = 57876}));
+    CHECK(wooded > 400);
+    CHECK(clearing < wooded / 4);
 }
 
 TEST_CASE("pines carry bare trunks under their crowns", "[render]") {
@@ -209,7 +241,7 @@ TEST_CASE("pines carry bare trunks under their crowns", "[render]") {
     if (!device) {
         SKIP("no Vulkan device");
     }
-    const Pixels stand = draw(*device, {.from_side = true});
+    const Pixels stand = draw(*device, {.lattice_i = 2163, .lattice_j = 56619, .from_side = true});
     CHECK(lit_pixels(stand) > 200);
     CHECK(barky_pixels(stand) > 5);
 }
@@ -220,10 +252,15 @@ TEST_CASE("the wind rocks the pines' tops, and still air leaves them still", "[r
         SKIP("no Vulkan device");
     }
     const DVec3 wind = east * 9.0;
-    const Pixels now = draw(*device, {.wind = wind, .seconds = 1.0, .from_side = true});
-    const Pixels later = draw(*device, {.wind = wind, .seconds = 1.7, .from_side = true});
-    CHECK(now != later);
-    const Pixels still_now = draw(*device, {.seconds = 1.0, .from_side = true});
-    const Pixels still_later = draw(*device, {.seconds = 1.7, .from_side = true});
-    CHECK(still_now == still_later);
+    const Patch windy{.lattice_i = 2163, .lattice_j = 56619, .wind = wind, .from_side = true};
+    Patch now_patch = windy;
+    now_patch.seconds = 1.0;
+    Patch later_patch = windy;
+    later_patch.seconds = 1.7;
+    CHECK(draw(*device, now_patch) != draw(*device, later_patch));
+    Patch still_patch{.lattice_i = 2163, .lattice_j = 56619, .from_side = true};
+    still_patch.seconds = 1.0;
+    const Pixels still_now = draw(*device, still_patch);
+    still_patch.seconds = 1.7;
+    CHECK(still_now == draw(*device, still_patch));
 }

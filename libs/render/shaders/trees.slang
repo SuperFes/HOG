@@ -1,5 +1,6 @@
 import atmosphere;
 import bend;
+import flora;
 import shadow;
 import tone;
 
@@ -31,7 +32,8 @@ static const uint biome_count = 14;
 struct Settings {
     // Each biome's pines: rgb their needles' colour, w their height in metres, none grows none.
     float4 crown[biome_count];
-    // x the share of lattice cells grown; the rest reserved for the species to come.
+    // Against the stand field: x the share of lattice cells grown within a stand, y the field's
+    // woodland threshold, z the share grown lone in the open; w reserved for species to come.
     float4 grow[biome_count];
 };
 
@@ -68,19 +70,6 @@ Corner corner_at(uint bias, uint index) {
     corner.normal = asfloat(vertices.Load3(at + 12));
     corner.biome = min(vertices.Load(at + 24) & 0xffu, biome_count - 1);
     return corner;
-}
-
-uint hashed(uint at) {
-    at ^= at >> 16;
-    at *= 0x7feb352du;
-    at ^= at >> 15;
-    at *= 0x846ca68bu;
-    at ^= at >> 16;
-    return at;
-}
-
-float unit(uint at) {
-    return float(hashed(at) & 0xffffu) / 65536.0;
 }
 
 // The two triangles of a quad: bottom left and right, then top left and right.
@@ -144,7 +133,13 @@ Tree vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const Corner near = corner_at(bias, at + (u < 0.5 ? 0 : patch_side) + (v < 0.5 ? 0 : 1));
     const float4 crown = settings.crown[near.biome];
     const float4 grow = settings.grow[near.biome];
-    if (crown.w <= 0.0 || unit(hash + 2u) >= grow.x) {
+    // Trees gather into the field's stands: full woods past the biome's threshold, the odd lone
+    // tree in the open between.
+    const float2 spot = float2(float(lattice_i + li) + unit(hash),
+                               float(lattice_j + lj) + unit(hash + 1u));
+    const float wooded = smoothstep(grow.y, grow.y + 0.1, stand_field(spot, face));
+    const float occupancy = lerp(grow.z, grow.x, wooded);
+    if (crown.w <= 0.0 || unit(hash + 2u) >= occupancy) {
         return nothing();
     }
     const Corner c00 = corner_at(bias, at);
@@ -165,7 +160,9 @@ Tree vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
         return nothing();
     }
 
-    const float height = crown.w * (0.55 + (0.9 * unit(hash + 4u))) * fade;
+    // Tallest deep in a stand, shorter toward its edges and alone in the open.
+    const float height =
+        crown.w * (0.55 + (0.9 * unit(hash + 4u))) * lerp(0.8, 1.05, wooded) * fade;
     const float width = height * (0.42 + (0.12 * unit(hash + 5u)));
 
     // Three quads crossed about the tree's own up, the mask doing the shaping.
