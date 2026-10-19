@@ -257,7 +257,7 @@ This phase covers the planet in procedurally generated plant life, grown from pe
 **Species rules**
 
 - [x] Plant grammar: a species is a rule set (trunk habit, branch angles and counts per level, crown shape, leaf, needle or frond) that grows an individual deterministically from a seed (libs/flora: whorled levels, gnarl and rise, foliage cards, meshed as low-poly tubes at baked detail levels)
-- [ ] First tree set, each with its own rules: a pine analogue (done: grown whole near the eye, stamped far off, one lattice keying both), an oak analogue (spreading, gnarled), a maple analogue, a palm analogue (bare trunk, frond crown)
+- [ ] First tree set, each with its own rules: a pine analogue (done: grown whole near the eye, stamped far off, one anchor set keying both; foliage to become solid tapered fronds, thick at the trunk and thinning out, in place of masked cards), an oak analogue (spreading, gnarled), a maple analogue, a palm analogue (bare trunk, frond crown); growth stages per species are species parameters scaled by age, for the server-run forest (environment-aware growth like space colonisation can slot in at flora::grow per species later)
 - [x] Ground cover: tall and short grasses with far swaths, cattail reeds at waterlines, bushes in four silhouettes (floofy blobs, spiky rosettes, twiggy skeletons, low mats) mixed by biome
 - [ ] Age from the same seed: seedlings, saplings, mature and ancient trees from one rule set
 - [ ] Condition states: dead standing wood, half-fallen and felled trunks, fire-scorched survivors, insect- and animal-worn damage simulated without the animals
@@ -266,8 +266,8 @@ This phase covers the planet in procedurally generated plant life, grown from pe
 **Placement**
 
 - [ ] Placement from the sim: biome, forest biomass, moisture and the water table decide what grows where and how densely
-- [x] Deterministic per-cell scatter, so every client grows the same world with nothing sent over the network (grass by patch seed, bushes keyed to a fixed lattice that holds across terrain levels)
-- [ ] Placement reads the change store over the seed, so planted and cleared ground diverges — the hook farming (Phase 7) builds on
+- [x] Deterministic per-cell scatter, so every client grows the same world with nothing sent over the network (grass by patch seed, bushes keyed to a fixed lattice that holds across terrain levels; trees as anchors sampled from the world itself on the CPU — one placement in libs/flora, bound to the ground at every terrain level, ready for the server to own as it owns the clouds)
+- [ ] Placement reads the change store over the seed, so planted and cleared ground diverges — the hook farming (Phase 7) builds on (the tree anchors already rebuild their tiles on a changed cell)
 - [ ] Succession on burned or emptied cells from the forest sim's history: pioneer grass, then shrubs, then young forest among the burned trunks
 - [ ] A burned-in-the-past, regrowing forest somewhere on the starting islands to prove it
 

@@ -304,8 +304,8 @@ TEST_CASE("a scene times its passes on the GPU", "[client][scene][gpu]") {
         names.push_back(span.name);
         CHECK(span.milliseconds >= 0.0);
     }
-    CHECK(names ==
-          std::vector<std::string_view>{"uploads", "sky tables", "sky", "ground", "sea", "glare"});
+    CHECK(names == std::vector<std::string_view>{"uploads", "sky tables", "sky", "ground", "sea",
+                                                 "trees", "forest", "glare"});
     CHECK(device->validation_errors() == 0);
 }
 

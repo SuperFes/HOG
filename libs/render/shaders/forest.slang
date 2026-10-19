@@ -1,13 +1,11 @@
 import atmosphere;
 import bend;
-import flora;
 import shadow;
 import tone;
 
-// The near forest: real pines grown by libs/flora, baked as a few variants at a few details and
-// planted here by the very same lattice, stand field and dice as the far tree stamps — so one
-// tree keeps its spot, size and existence whichever tier draws it. Wood is drawn solid; foliage
-// cards are cut to needle sprays by their own seed.
+// The grown forest: whole pines from libs/flora, a few variants baked at a few details, each
+// planted on a tree anchor bound to its spot in the world. The far stamps draw from the very same
+// anchors, so the handoff at the forest's reach swaps representation, never trees.
 
 struct Push {
     float4x4 clip_from_eye;
@@ -16,151 +14,96 @@ struct Push {
     // x the planet's radius and y the faked one drawing bends it onto; z seconds of sway so far,
     // w the radians across a pixel.
     float4 bend_radii;
-    // xyz the wind near the ground, m/s; w (as bits) the patch's first lattice cell, i then j,
-    // sixteen bits each.
+    // xyz the wind near the ground, m/s; w unused.
     float4 wind;
-    // xyz the patch's origin from the eye, in metres; w (as bits) the bytes before the patch's
-    // vertices in what's bound, the face in three bits, the lattice shift plus one in three, the
-    // metres trees have shrunk away by in twelve, and the level of detail in two.
+    // xyz the tile's origin from the eye, in metres; w (as bits) the finest detail the tile's
+    // nearest tree needs, bounding each draw's vertex count.
     float4 origin;
 };
 
 [[vk::push_constant]] ConstantBuffer<Push> push;
 
-static const uint biome_count = 14;
-static const uint variant_count = 8;
 static const uint detail_count = 3;
+static const uint variant_count = 8;
 
-// One baked (detail, variant): where its wood and leaf geometry lie in the carpentry buffer.
+// Where each variant's wood and leaves lie in the carpentry, per detail: x the vertex bytes'
+// start, y the index bytes' start, z the index count; wood's w the baked height's bits.
 struct Build {
-    // x the first vertex byte, y the first index byte, z the index count, w the tree's height in
-    // metres (as float bits).
     uint4 wood;
-    // x the first vertex byte, y the first index byte, z the index count; w spare.
     uint4 leaf;
 };
 
 struct Settings {
-    // Each biome's pines: rgb their needles' colour, w their height in metres, none grows none.
-    float4 crown[biome_count];
-    // Against the stand field: x the share of lattice cells grown within a stand, y the field's
-    // woodland threshold, z the share grown lone in the open; w reserved.
-    float4 grow[biome_count];
+    // Metres from the eye: x the fullest detail's reach, y the middle one's, z the forest's own,
+    // where the stamps take over.
+    float4 bands;
     Build builds[detail_count * variant_count];
 };
 
 [[vk::binding(0, 0)]] ConstantBuffer<Settings> settings;
-// The pool's patch vertices, as render::TerrainPool lays them out.
-[[vk::binding(1, 0)]] ByteAddressBuffer vertices;
+// The tile's tree anchors, as render::TreeAnchor lies.
+[[vk::binding(1, 0)]] ByteAddressBuffer anchors;
 [[vk::binding(2, 0)]] ConstantBuffer<Air> air;
 [[vk::binding(3, 0)]] ConstantBuffer<Lighting> lighting;
 [[vk::binding(4, 0)]] Sampler2D transmittance_table;
 [[vk::binding(5, 0)]] Sampler2DArray aerial_volume;
 // As cloud_march.slang's.
 [[vk::binding(6, 0)]] Sampler2D cloud_shadow;
-// Every variant's baked wood and leaf geometry, vertices then indices, as Build says.
+// Every variant's baked meshes at every detail, as render::Forest bakes them.
 [[vk::binding(7, 0)]] ByteAddressBuffer carpentry;
 
-static const uint patch_cells = 32;
-static const uint patch_side = 33;
-static const uint vertex_stride = 28; // bytes, as terrain::PatchVertex lies
+static const uint anchor_stride = 48; // bytes, as render::TreeAnchor lies
 static const uint wood_stride = 24;   // bytes, as flora::WoodVertex lies
 static const uint leaf_stride = 36;   // bytes, as flora::LeafVertex lies
 
-// Trees keep off ground this close to sea level, and off slopes steeper than this much up.
-static const float shore = 1.0;
-static const float steepest = 0.7;
-// Bark, as the far stamps' trunks wear.
 static const float3 bark = float3(0.055, 0.045, 0.038);
 
-struct Corner {
-    float3 position;
-    float3 normal;
-    uint biome;
-};
-
-Corner corner_at(uint bias, uint index) {
-    const uint at = bias + (index * vertex_stride);
-    Corner corner;
-    corner.position = asfloat(vertices.Load3(at));
-    corner.normal = asfloat(vertices.Load3(at + 12));
-    corner.biome = min(vertices.Load(at + 24) & 0xffu, biome_count - 1);
-    return corner;
+uint hashed(uint at) {
+    at ^= at >> 16;
+    at *= 0x7feb352du;
+    at ^= at >> 15;
+    at *= 0x846ca68bu;
+    at ^= at >> 16;
+    return at;
 }
 
-// One planted tree: where it stands and how it's framed, or nothing to grow.
+float unit(uint at) {
+    return float(hashed(at) & 0xffffu) / 65536.0;
+}
+
 struct Planted {
     bool grows;
     float3 root;      // from the eye
+    float3 upright;   // the tree's own up
     float3 beside;    // the tree's local x, yawed its own way
     float3 ahead;     // its local y
-    float3 upright;   // its local z: mostly up, leaning a little with the ground
-    float scale;      // metres here per baked metre
-    float sway;       // metres the crown's tip is held over by the wind
+    float scale;      // over the baked tree
+    float sway;       // metres the crown's top is held over
     float3 along;     // the wind's direction
     float height_above; // of its ground, over the sea
     uint hash;
-    uint variant;
-    float3 needles;   // the biome's needle colour
+    uint build;       // into the carpentry's builds
 };
 
-// The same planting as trees.slang stamps: same cell, same dice, same field, same size.
+// The anchored tree, stood on its own spot: the anchor decided where, how tall and whether long
+// ago; here it only steps aside for the stamps beyond the forest's reach.
 Planted plant(uint instance) {
     Planted planted;
     planted.grows = false;
-    const uint packed = asuint(push.origin.w);
-    const uint bias = packed & 0xffu;
-    const uint face = (packed >> 8) & 7u;
-    const int shift = int((packed >> 11) & 7u) - 1;
-    const float fade_far = float((packed >> 14) & 0xfffu);
-    const uint base = asuint(push.wind.w);
-    const uint lattice_i = base >> 16;
-    const uint lattice_j = base & 0xffffu;
+    const uint at = instance * anchor_stride;
+    const float3 root = push.origin.xyz + asfloat(anchors.Load3(at));
+    const float grown = asfloat(anchors.Load(at + 12));
+    const float3 normal = asfloat(anchors.Load3(at + 16));
+    const uint hash = anchors.Load(at + 28);
 
-    const uint side = shift >= 0 ? (patch_cells >> shift) : (patch_cells << uint(-shift));
-    const uint li = instance / side;
-    const uint lj = instance % side;
-    const uint hash = hashed(hashed((lattice_i + li) ^ (face * 0x9e3779b9u)) + (lattice_j + lj));
-
-    const float across = shift >= 0 ? float(1u << uint(shift)) : 0.5;
-    const float gi = (float(li) + unit(hash)) * across;
-    const float gj = (float(lj) + unit(hash + 1u)) * across;
-    const uint i = min(uint(gi), patch_cells - 1);
-    const uint j = min(uint(gj), patch_cells - 1);
-    const float u = gi - float(i);
-    const float v = gj - float(j);
-
-    const uint at = (i * patch_side) + j;
-    const Corner near = corner_at(bias, at + (u < 0.5 ? 0 : patch_side) + (v < 0.5 ? 0 : 1));
-    const float4 crown = settings.crown[near.biome];
-    const float4 grow = settings.grow[near.biome];
-    const float2 spot = float2(float(lattice_i + li) + unit(hash),
-                               float(lattice_j + lj) + unit(hash + 1u));
-    const float wooded = smoothstep(grow.y, grow.y + 0.1, stand_field(spot, face));
-    const float occupancy = lerp(grow.z, grow.x, wooded);
-    if (crown.w <= 0.0 || unit(hash + 2u) >= occupancy) {
-        return planted;
-    }
-    const Corner c00 = corner_at(bias, at);
-    const Corner c10 = corner_at(bias, at + patch_side);
-    const Corner c01 = corner_at(bias, at + 1);
-    const Corner c11 = corner_at(bias, at + patch_side + 1);
-    const float3 ground =
-        lerp(lerp(c00.position, c10.position, u), lerp(c01.position, c11.position, u), v);
-    const float3 normal =
-        normalize(lerp(lerp(c00.normal, c10.normal, u), lerp(c01.normal, c11.normal, u), v));
-
-    const float3 root = push.origin.xyz + ground;
-    const float above = height_above_sea(root, push.bend_up, push.bend_radii.x);
     const float away = length(root);
-    // Full sized to the edge of the grown tier's reach, where the stamps take over at the very
-    // same height — no shrinking, or trees would sink away just before their stamps stood up.
-    if (above < shore || away >= fade_far || dot(normal, push.bend_up.xyz) < steepest) {
+    if (away >= settings.bands.z) {
         return planted;
     }
-
-    const float height =
-        crown.w * (0.55 + (0.9 * unit(hash + 4u))) * lerp(0.8, 1.05, wooded);
+    // Each tree sheds detail by its own distance, never finer than the draw's vertex budget.
+    const uint finest = asuint(push.origin.w) & 3u;
+    uint lod = away < settings.bands.x ? 0u : (away < settings.bands.y ? 1u : 2u);
+    lod = max(lod, finest);
 
     // A real tree grows for the light, not square to its slope — near vertical, with a shade of
     // the ground's lean. The stamps stand along the very same axis.
@@ -175,10 +118,10 @@ Planted plant(uint instance) {
     planted.ahead = (ahead0 * swing) - (beside0 * turn);
     planted.upright = upright;
 
-    planted.variant = hashed(hash + 9u) % variant_count;
-    const uint lod = (packed >> 26) & 3u;
-    const Build build = settings.builds[(lod * variant_count) + planted.variant];
-    planted.scale = height / max(asfloat(build.wood.w), 0.1);
+    const uint variant = hashed(hash + 9u) % variant_count;
+    planted.build = (lod * variant_count) + variant;
+    const Build build = settings.builds[planted.build];
+    planted.scale = grown / max(asfloat(build.wood.w), 0.1);
 
     const float speed = length(push.wind.xyz);
     planted.sway = 0.0;
@@ -188,20 +131,13 @@ Planted plant(uint instance) {
         const float held = (speed * speed) / ((speed * speed) + 320.0);
         const float rock = 0.025 * sin((push.bend_radii.z * (0.9 + (0.15 * speed))) +
                                        (6.2831853 * unit(hash + 6u)));
-        planted.sway = height * ((held * 0.16) + (rock * saturate(speed / 8.0)));
+        planted.sway = grown * ((held * 0.16) + (rock * saturate(speed / 8.0)));
     }
     planted.grows = true;
     planted.root = root;
-    planted.height_above = above;
+    planted.height_above = height_above_sea(root, push.bend_up, push.bend_radii.x);
     planted.hash = hash;
-    planted.needles = crown.rgb;
     return planted;
-}
-
-// The planted tree's build for this draw's detail.
-Build build_of(const Planted planted) {
-    const uint lod = (asuint(push.origin.w) >> 26) & 3u;
-    return settings.builds[(lod * variant_count) + planted.variant];
 }
 
 // A baked local point carried to where its tree stands, the crown held over by the wind.
@@ -244,7 +180,7 @@ Timber wood_vertex(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     if (!planted.grows) {
         return no_timber();
     }
-    const Build build = build_of(planted);
+    const Build build = settings.builds[planted.build];
     if (vertex >= build.wood.z) {
         return no_timber();
     }
@@ -327,10 +263,11 @@ Spray leaf_vertex(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     if (!planted.grows) {
         return no_spray();
     }
-    const Build build = build_of(planted);
+    const Build build = settings.builds[planted.build];
     if (vertex >= build.leaf.z) {
         return no_spray();
     }
+    const float3 needles = asfloat(anchors.Load3((instance * anchor_stride) + 32));
     const uint index = carpentry.Load(build.leaf.y + (vertex * 4));
     const uint at = build.leaf.x + (index * leaf_stride);
     const float3 local = asfloat(carpentry.Load3(at));
@@ -348,7 +285,7 @@ Spray leaf_vertex(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
                                              (normalize(bulge) * 0.8)));
     // Toned as the stamps tone the same tree: the tree's own cast, darker low in the crown.
     const float toward_top = saturate(local.z / max(asfloat(build.wood.w), 0.1));
-    spray.colour = planted.needles * (0.75 + (0.45 * unit(planted.hash + 7u))) *
+    spray.colour = needles * (0.75 + (0.45 * unit(planted.hash + 7u))) *
                    (0.85 + (0.3 * unit(seed + 1u))) * (0.75 + (0.25 * toward_top));
     spray.height = planted.height_above;
     spray.card = card;

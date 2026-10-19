@@ -1,6 +1,7 @@
 #pragma once
 
 #include <hog/atmosphere/model.hpp>
+#include <hog/client/anchors.hpp>
 #include <hog/client/forecast.hpp>
 #include <hog/client/ground.hpp>
 #include <hog/client/picture.hpp>
@@ -129,10 +130,10 @@ private:
     Scene(const render::Device& device, const planet::World& world, jobs::JobSystem& jobs,
           const sim::Calendar& calendar, render::Terrain terrain, render::Ocean ocean,
           render::Grass grass, render::Bushes bushes, render::Trees trees, render::Forest forest,
-          render::TerrainPool pool, render::Atmosphere atmosphere, render::Sky sky,
-          render::Capsules others, render::WeatherMaps weather, render::Clouds clouds,
-          render::Precipitation precipitation, render::Glare glare, render::GpuTimer timer,
-          std::optional<render::Billboard> companion, std::uint32_t frames);
+          render::TerrainPool pool, render::AnchorPool anchors, render::Atmosphere atmosphere,
+          render::Sky sky, render::Capsules others, render::WeatherMaps weather,
+          render::Clouds clouds, render::Precipitation precipitation, render::Glare glare,
+          render::GpuTimer timer, std::optional<render::Billboard> companion, std::uint32_t frames);
 
     render::SkyView sky_view(const Shot& shot, render::CloudShade shade);
     // Adds the grass, bush and tree passes over the drawn patches, blown by `wind`.
@@ -142,6 +143,7 @@ private:
                          const render::GraphTargets& drawn, const render::AirBindings& air,
                          DVec3 wind);
 
+    const planet::World* world_ = nullptr;
     terrain::PatchBaker baker_;
     terrain::PatchStream stream_;
     render::Terrain terrain_;
@@ -151,6 +153,8 @@ private:
     render::Trees trees_;
     render::Forest forest_;
     render::TerrainPool pool_;
+    render::AnchorPool anchor_pool_;
+    TreeAnchors anchors_;
     GroundSlots slots_;
     render::TransientImages transients_;
     render::Capsules others_;

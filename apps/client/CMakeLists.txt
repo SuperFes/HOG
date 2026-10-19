@@ -6,6 +6,7 @@ target_include_directories(stb_image SYSTEM PUBLIC "${stb_SOURCE_DIR}")
 target_compile_definitions(stb_image PUBLIC STBI_ONLY_PNG)
 
 add_library(hog_client
+    src/anchors.cpp
     src/chat.cpp
     src/daylight.cpp
     src/flight.cpp
@@ -26,7 +27,7 @@ target_include_directories(hog_client PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/includ
 target_link_libraries(hog_client
     PUBLIC hog::atmosphere hog::core hog::jobs hog::net hog::physics hog::planet hog::protocol
         hog::render hog::replication hog::sim hog::terrain
-    PRIVATE hog::mapgen stb_image)
+    PRIVATE hog::flora hog::mapgen stb_image)
 hog_target_defaults(hog_client)
 
 hog_add_tests(hog_client
@@ -34,6 +35,7 @@ hog_add_tests(hog_client
     tests/daylight_tests.cpp
     tests/flight_tests.cpp
     tests/forecast_tests.cpp
+    tests/anchors_tests.cpp
     tests/frame_times_tests.cpp
     tests/ground_tests.cpp
     tests/likeness_tests.cpp

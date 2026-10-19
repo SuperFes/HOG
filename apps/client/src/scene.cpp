@@ -92,11 +92,13 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
     if (!bushes) {
         return failed("grow the bushes", bushes.error());
     }
-    auto trees = render::Trees::create(device, colour_format, depth_format, palette);
+    const GrassBudget budget;
+    auto trees = render::Trees::create(device, colour_format, depth_format, render::forest_far);
     if (!trees) {
         return failed("grow the trees", trees.error());
     }
-    auto forest = render::Forest::create(device, colour_format, depth_format, palette);
+    auto forest = render::Forest::create(device, colour_format, depth_format, budget.forest_full,
+                                         budget.forest_mid);
     if (!forest) {
         return failed("grow the forest", forest.error());
     }
@@ -104,6 +106,17 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
         device, {.patches = settings.capacity, .frames = frames, .uploads = settings.uploads});
     if (!pool) {
         return failed("hold the ground", pool.error());
+    }
+    // Enough tiles for the trees' whole reach round the eye, within reason on a small planet.
+    const double tile_span = (std::numbers::pi / 2.0) * world.geology().planet_radius() /
+                             static_cast<double>(std::uint32_t{1} << anchor_tile_level);
+    const double rings = (budget.tree_far / tile_span) + 3.0;
+    const auto tiles =
+        static_cast<std::uint32_t>(std::clamp(std::numbers::pi * rings * rings, 64.0, 1024.0));
+    auto anchors =
+        render::AnchorPool::create(device, {.tiles = tiles, .frames = frames, .uploads = 4});
+    if (!anchors) {
+        return failed("hold the trees", anchors.error());
     }
     auto atmosphere = render::Atmosphere::create(device);
     if (!atmosphere) {
@@ -148,6 +161,7 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
                  std::move(trees).value(),
                  std::move(forest).value(),
                  std::move(pool).value(),
+                 std::move(anchors).value(),
                  std::move(atmosphere).value(),
                  std::move(sky).value(),
                  std::move(others).value(),
@@ -163,17 +177,19 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
 Scene::Scene(const render::Device& device, const planet::World& world, jobs::JobSystem& jobs,
              const sim::Calendar& calendar, render::Terrain terrain, render::Ocean ocean,
              render::Grass grass, render::Bushes bushes, render::Trees trees, render::Forest forest,
-             render::TerrainPool pool, render::Atmosphere atmosphere, render::Sky sky,
-             render::Capsules others, render::WeatherMaps weather, render::Clouds clouds,
-             render::Precipitation precipitation, render::Glare glare, render::GpuTimer timer,
-             std::optional<render::Billboard> companion, std::uint32_t frames)
-    : baker_{world, jobs}, terrain_{std::move(terrain)}, ocean_{std::move(ocean)},
+             render::TerrainPool pool, render::AnchorPool anchors, render::Atmosphere atmosphere,
+             render::Sky sky, render::Capsules others, render::WeatherMaps weather,
+             render::Clouds clouds, render::Precipitation precipitation, render::Glare glare,
+             render::GpuTimer timer, std::optional<render::Billboard> companion,
+             std::uint32_t frames)
+    : world_{&world}, baker_{world, jobs}, terrain_{std::move(terrain)}, ocean_{std::move(ocean)},
       grass_{std::move(grass)}, bushes_{std::move(bushes)}, trees_{std::move(trees)},
-      forest_{std::move(forest)}, pool_{std::move(pool)}, transients_{device, frames},
-      others_{std::move(others)}, companion_{std::move(companion)},
-      atmosphere_{std::move(atmosphere)}, sky_{std::move(sky)}, weather_{std::move(weather)},
-      clouds_{std::move(clouds)}, precipitation_{std::move(precipitation)},
-      glare_{std::move(glare)}, timer_{std::move(timer)}, calendar_{calendar} {}
+      forest_{std::move(forest)}, pool_{std::move(pool)}, anchor_pool_{std::move(anchors)},
+      anchors_{biome_palette()}, transients_{device, frames}, others_{std::move(others)},
+      companion_{std::move(companion)}, atmosphere_{std::move(atmosphere)}, sky_{std::move(sky)},
+      weather_{std::move(weather)}, clouds_{std::move(clouds)},
+      precipitation_{std::move(precipitation)}, glare_{std::move(glare)}, timer_{std::move(timer)},
+      calendar_{calendar} {}
 
 Scene::~Scene() {
     (void)baker_.finish();
@@ -233,13 +249,14 @@ void Scene::grow_vegetation(render::RenderGraph& graph, const render::Frame& fra
                               .seconds = swaying_for_});
             });
     }
-    const std::vector<render::TreeDraw> stands =
-        tree_draws(slots_, patches, shot.camera.eye, shot.bend.radius);
+    // Both tree tiers draw from the same anchored stands: the stamps over them all, holding off
+    // where the grown forest covers, and the grown trees over the near tiles alone.
+    const std::vector<render::StandDraw> stands = anchors_.draws(shot.camera.eye);
     if (!stands.empty()) {
         graph.add(
             {.name = "trees", .uses = {through_air.begin(), through_air.end()}, .targets = drawn},
             [&, stands, wind](VkCommandBuffer commands) {
-                trees_.draw(commands, frame.extent, pool_, stands,
+                trees_.draw(commands, frame.extent, anchor_pool_, stands,
                             {.camera = shot.camera,
                              .bend = shot.bend,
                              .air = air,
@@ -247,13 +264,15 @@ void Scene::grow_vegetation(render::RenderGraph& graph, const render::Frame& fra
                              .seconds = swaying_for_});
             });
     }
-    const std::vector<render::ForestDraw> woods =
-        forest_draws(slots_, patches, shot.camera.eye, shot.bend.radius);
+    std::vector<render::StandDraw> woods;
+    std::ranges::copy_if(stands, std::back_inserter(woods), [](const render::StandDraw& stand) {
+        return stand.distance < render::forest_far;
+    });
     if (!woods.empty()) {
         graph.add(
             {.name = "forest", .uses = {through_air.begin(), through_air.end()}, .targets = drawn},
             [&, woods, wind](VkCommandBuffer commands) {
-                forest_.draw(commands, frame.extent, pool_, woods,
+                forest_.draw(commands, frame.extent, anchor_pool_, woods,
                              {.camera = shot.camera,
                               .bend = shot.bend,
                               .air = air,
@@ -278,11 +297,16 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     for (const planet::CellId cell : streamed.bakes) {
         baker_.start(cell);
     }
-    settled_ = streamed.bakes.empty() && streamed.arrived.empty() && streamed.evicted.empty() &&
-               baker_.in_flight() == 0;
-    if (auto taken = slots_.take(pool_, frame.slot, streamed); !taken) {
+    // The ground into its slots, and the anchored trees round the eye, a few tiles a frame.
+    if (auto taken = slots_.take(pool_, frame.slot, streamed).and_then([&] {
+            return anchors_.update(anchor_pool_, frame.slot, *world_, shot.camera.eye,
+                                   GrassBudget{}.tree_far);
+        });
+        !taken) {
         return taken;
     }
+    settled_ = streamed.bakes.empty() && streamed.arrived.empty() && streamed.evicted.empty() &&
+               baker_.in_flight() == 0 && anchors_.settled();
     const protocol::CellWeather here = weather_at_eye(shot);
     const DVec3 sun = calendar_.sun_direction(shot.time);
     const double sun_mu = glm::dot(sun, shot.bend.up);
@@ -359,7 +383,9 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                           return updated;
                       }
                   }
-                  return pool_.record_uploads(commands, frame.slot);
+                  return pool_.record_uploads(commands, frame.slot).and_then([&] {
+                      return anchor_pool_.record_uploads(commands, frame.slot);
+                  });
               });
     if (shadow) {
         graph.add({.name = "cloud shadow",

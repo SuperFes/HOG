@@ -3,10 +3,8 @@
 #include <hog/core/result.hpp>
 #include <hog/planet/cell_id.hpp>
 #include <hog/render/bushes.hpp>
-#include <hog/render/forest.hpp>
 #include <hog/render/grass.hpp>
 #include <hog/render/terrain.hpp>
-#include <hog/render/trees.hpp>
 #include <hog/terrain/material.hpp>
 #include <hog/terrain/stream.hpp>
 
@@ -91,20 +89,6 @@ grass_draws(const GroundSlots& slots, std::span<const terrain::StreamedPatch> dr
 [[nodiscard]] std::vector<render::BushDraw>
 bush_draws(const GroundSlots& slots, std::span<const terrain::StreamedPatch> drawn,
            WorldPosition eye, double planet_radius, const GrassBudget& budget = {});
-
-// The trees grown on the drawn patches within the budget's tree reach, keyed to their own,
-// coarser fixed lattice; ground finer than the lattice keys through its still-held ancestor at
-// the lattice's level. Patches without slots are passed over. Where the grown forest covers a
-// patch, its stamps hold off to the forest's reach.
-[[nodiscard]] std::vector<render::TreeDraw>
-tree_draws(const GroundSlots& slots, std::span<const terrain::StreamedPatch> drawn,
-           WorldPosition eye, double planet_radius, const GrassBudget& budget = {});
-
-// The grown forest on the drawn patches near the eye: the same trees the stamps key, whole, at a
-// detail coarsening with distance.
-[[nodiscard]] std::vector<render::ForestDraw>
-forest_draws(const GroundSlots& slots, std::span<const terrain::StreamedPatch> drawn,
-             WorldPosition eye, double planet_radius, const GrassBudget& budget = {});
 
 template <SlotPool Pool>
 Result<> GroundSlots::take(Pool& pool, std::uint32_t frame, const terrain::StreamFrame& streamed) {

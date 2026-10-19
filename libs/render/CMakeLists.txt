@@ -32,6 +32,7 @@ CPMAddPackage(
 include(HogShaders)
 
 add_library(hog_render
+    src/anchors.cpp
     src/atmosphere.cpp
     src/barrier.cpp
     src/billboard.cpp

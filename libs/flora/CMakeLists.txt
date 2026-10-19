@@ -1,11 +1,14 @@
 add_library(hog_flora
     src/mesh.cpp
     src/skeleton.cpp
-    src/species.cpp)
+    src/species.cpp
+    src/stand.cpp)
 add_library(hog::flora ALIAS hog_flora)
 
 target_include_directories(hog_flora PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(hog_flora PUBLIC hog::core)
+# hog_planet by its plain name: libs/planet is added after libs/flora, and only a plain target
+# may be named before it is defined.
+target_link_libraries(hog_flora PUBLIC hog::core hog_planet)
 hog_target_defaults(hog_flora)
 # The same seed must grow the same plant, bit for bit, on every platform: no fused contractions,
 # and src/trig.hpp keeps libm out of the growing.

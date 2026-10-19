@@ -1,13 +1,12 @@
 import atmosphere;
 import bend;
-import flora;
 import shadow;
 import tone;
 
-// Pines grown on the ground's own patches, each keyed to a fixed lattice of level-14 cells so
-// the same tree stands in the same spot at every terrain level and on every machine. One pine is
-// three crossed quads; a mask cut in the fragment shader shapes it: a tiered conical crown of
-// boughs, each darkest under its own bottom, over a bare trunk showing through the gaps.
+// Pine stamps, each drawn from a tree anchor bound to its spot in the world: three crossed quads,
+// a mask cut in the fragment shader shaping a tiered conical crown of boughs over a bare trunk.
+// The anchors are shared with the grown forest, which covers the near ground; the stamps hold off
+// inside its reach and carry on beyond, shrinking away at the edge of their own.
 
 struct Push {
     float4x4 clip_from_eye;
@@ -16,31 +15,23 @@ struct Push {
     // x the planet's radius and y the faked one drawing bends it onto; z seconds of sway so far,
     // w the radians across a pixel.
     float4 bend_radii;
-    // xyz the wind near the ground, m/s; w (as bits) the patch's first lattice cell, i then j,
-    // sixteen bits each.
+    // xyz the wind near the ground, m/s; w unused.
     float4 wind;
-    // xyz the patch's origin from the eye, in metres; w (as bits) the bytes before the patch's
-    // vertices in what's bound, the face in three bits, the lattice shift plus one in three, the
-    // metres trees have shrunk away by in twelve, and sixteenths of the metres the stamps hold
-    // off while the grown forest covers, in six.
+    // xyz the tile's origin from the eye, in metres; w unused.
     float4 origin;
 };
 
 [[vk::push_constant]] ConstantBuffer<Push> push;
 
-static const uint biome_count = 14;
-
 struct Settings {
-    // Each biome's pines: rgb their needles' colour, w their height in metres, none grows none.
-    float4 crown[biome_count];
-    // Against the stand field: x the share of lattice cells grown within a stand, y the field's
-    // woodland threshold, z the share grown lone in the open; w reserved for species to come.
-    float4 grow[biome_count];
+    // x metres the stamps hold off while the grown forest covers; y metres from the eye they
+    // have shrunk away by.
+    float4 reach;
 };
 
 [[vk::binding(0, 0)]] ConstantBuffer<Settings> settings;
-// The pool's patch vertices, as render::TerrainPool lays them out.
-[[vk::binding(1, 0)]] ByteAddressBuffer vertices;
+// The tile's tree anchors, as render::TreeAnchor lies.
+[[vk::binding(1, 0)]] ByteAddressBuffer anchors;
 [[vk::binding(2, 0)]] ConstantBuffer<Air> air;
 [[vk::binding(3, 0)]] ConstantBuffer<Lighting> lighting;
 [[vk::binding(4, 0)]] Sampler2D transmittance_table;
@@ -48,29 +39,22 @@ struct Settings {
 // As cloud_march.slang's.
 [[vk::binding(6, 0)]] Sampler2D cloud_shadow;
 
-static const uint patch_cells = 32;
-static const uint patch_side = 33;
-static const uint vertex_stride = 28; // bytes, as terrain::PatchVertex lies
+static const uint anchor_stride = 48; // bytes, as render::TreeAnchor lies
 
-// Trees keep off ground this close to sea level, and off slopes steeper than this much up.
-static const float shore = 1.0;
-static const float steepest = 0.7;
 // Bare wood, for the trunk, as the grown forest's bark.
 static const float3 wood = float3(0.055, 0.045, 0.038);
 
-struct Corner {
-    float3 position;
-    float3 normal;
-    uint biome;
-};
+uint hashed(uint at) {
+    at ^= at >> 16;
+    at *= 0x7feb352du;
+    at ^= at >> 15;
+    at *= 0x846ca68bu;
+    at ^= at >> 16;
+    return at;
+}
 
-Corner corner_at(uint bias, uint index) {
-    const uint at = bias + (index * vertex_stride);
-    Corner corner;
-    corner.position = asfloat(vertices.Load3(at));
-    corner.normal = asfloat(vertices.Load3(at + 12));
-    corner.biome = min(vertices.Load(at + 24) & 0xffu, biome_count - 1);
-    return corner;
+float unit(uint at) {
+    return float(hashed(at) & 0xffffu) / 65536.0;
 }
 
 // The two triangles of a quad: bottom left and right, then top left and right.
@@ -105,67 +89,22 @@ Tree nothing() {
 
 [shader("vertex")]
 Tree vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
-    const uint packed = asuint(push.origin.w);
-    const uint bias = packed & 0xffu;
-    const uint face = (packed >> 8) & 7u;
-    const int shift = int((packed >> 11) & 7u) - 1;
-    const float fade_far = float((packed >> 14) & 0xfffu);
-    const float hold_off = float((packed >> 26) & 0x3fu) * 16.0;
-    const uint base = asuint(push.wind.w);
-    const uint lattice_i = base >> 16;
-    const uint lattice_j = base & 0xffffu;
+    const uint at = instance * anchor_stride;
+    const float3 root = push.origin.xyz + asfloat(anchors.Load3(at));
+    const float grown = asfloat(anchors.Load(at + 12));
+    const float3 normal = asfloat(anchors.Load3(at + 16));
+    const uint hash = anchors.Load(at + 28);
+    const float3 crown = asfloat(anchors.Load3(at + 32));
 
-    // The tree's lattice cell, local then global, keyed the same from every patch over it.
-    const uint side = shift >= 0 ? (patch_cells >> shift) : (patch_cells << uint(-shift));
-    const uint li = instance / side;
-    const uint lj = instance % side;
-    const uint hash =
-        hashed(hashed((lattice_i + li) ^ (face * 0x9e3779b9u)) + (lattice_j + lj));
-
-    // Rooted at its own spot within the lattice cell, in this patch's grid.
-    const float across = shift >= 0 ? float(1u << uint(shift)) : 0.5;
-    const float gi = (float(li) + unit(hash)) * across;
-    const float gj = (float(lj) + unit(hash + 1u)) * across;
-    const uint i = min(uint(gi), patch_cells - 1);
-    const uint j = min(uint(gj), patch_cells - 1);
-    const float u = gi - float(i);
-    const float v = gj - float(j);
-
-    const uint at = (i * patch_side) + j;
-    const Corner near = corner_at(bias, at + (u < 0.5 ? 0 : patch_side) + (v < 0.5 ? 0 : 1));
-    const float4 crown = settings.crown[near.biome];
-    const float4 grow = settings.grow[near.biome];
-    // Trees gather into the field's stands: full woods past the biome's threshold, the odd lone
-    // tree in the open between.
-    const float2 spot = float2(float(lattice_i + li) + unit(hash),
-                               float(lattice_j + lj) + unit(hash + 1u));
-    const float wooded = smoothstep(grow.y, grow.y + 0.1, stand_field(spot, face));
-    const float occupancy = lerp(grow.z, grow.x, wooded);
-    if (crown.w <= 0.0 || unit(hash + 2u) >= occupancy) {
-        return nothing();
-    }
-    const Corner c00 = corner_at(bias, at);
-    const Corner c10 = corner_at(bias, at + patch_side);
-    const Corner c01 = corner_at(bias, at + 1);
-    const Corner c11 = corner_at(bias, at + patch_side + 1);
-    const float3 ground = lerp(lerp(c00.position, c10.position, u),
-                               lerp(c01.position, c11.position, u), v);
-    const float3 normal =
-        normalize(lerp(lerp(c00.normal, c10.normal, u), lerp(c01.normal, c11.normal, u), v));
-
-    const float3 root = push.origin.xyz + ground;
-    const float above = height_above_sea(root, push.bend_up, push.bend_radii.x);
     const float away = length(root);
-    // Full sized until near the edge of their reach, then shrinking away.
-    const float fade = saturate((fade_far - away) / (0.2 * fade_far));
-    if (above < shore || fade <= 0.0 || away < hold_off ||
-        dot(normal, push.bend_up.xyz) < steepest) {
+    // Held off while the grown forest covers; full sized until near the edge of their reach,
+    // then shrinking away.
+    const float fade = saturate((settings.reach.y - away) / (0.2 * settings.reach.y));
+    if (away < settings.reach.x || fade <= 0.0) {
         return nothing();
     }
-
-    // Tallest deep in a stand, shorter toward its edges and alone in the open.
-    const float height =
-        crown.w * (0.55 + (0.9 * unit(hash + 4u))) * lerp(0.8, 1.05, wooded) * fade;
+    const float above = height_above_sea(root, push.bend_up, push.bend_radii.x);
+    const float height = grown * fade;
     const float width = height * (0.42 + (0.12 * unit(hash + 5u)));
 
     // Three quads crossed about the tree's own up: near vertical, with a shade of the ground's
@@ -203,7 +142,7 @@ Tree vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
         normalize(upright + (width_dir * (side_x * 0.9)) + (upright * ((t - 0.35) * 0.5)));
     tree.height = above;
     tree.pixels = width / max(push.bend_radii.w * away, 1e-6);
-    tree.colour = crown.rgb * (0.75 + (0.45 * unit(hash + 7u))) * (0.75 + (0.25 * t));
+    tree.colour = crown * (0.75 + (0.45 * unit(hash + 7u))) * (0.75 + (0.25 * t));
     tree.uv = float2(side_x, t);
     tree.seed = hash;
     return tree;

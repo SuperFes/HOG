@@ -1,10 +1,7 @@
-#include "flora.hpp"
-
 #include <hog/core/assert.hpp>
 #include <hog/flora/mesh.hpp>
 #include <hog/flora/skeleton.hpp>
 #include <hog/flora/species.hpp>
-#include <hog/planet/climate.hpp>
 #include <hog/render/device.hpp>
 #include <hog/render/forest.hpp>
 #include <hog/shaders/forest.hpp>
@@ -12,9 +9,8 @@
 #include <algorithm>
 #include <array>
 #include <bit>
-#include <cmath>
 #include <cstddef>
-#include <format>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -22,14 +18,17 @@ namespace hog::render {
 
 namespace {
 
-// The shaders read the pool's patch vertices and the baked trees by these layouts.
-static_assert(sizeof(terrain::PatchVertex) == 28);
+// The shaders read the baked trees by these layouts.
 static_assert(sizeof(flora::WoodVertex) == 24);
 static_assert(sizeof(flora::LeafVertex) == 36);
 static_assert(offsetof(flora::LeafVertex, card) == 24);
 static_assert(offsetof(flora::LeafVertex, seed) == 32);
 
 constexpr std::uint32_t variant_count = 8;
+
+constexpr VkDeviceSize tile_bytes = VkDeviceSize{tile_trees} * sizeof(TreeAnchor);
+// A whole tile is aligned for any device's storage binding.
+static_assert(tile_bytes % 256 == 0);
 
 struct Push {
     Mat4 clip_from_eye;
@@ -47,8 +46,7 @@ struct Build {
 };
 
 struct Settings {
-    std::array<glm::vec4, planet::biome_count> crown;
-    std::array<glm::vec4, planet::biome_count> grow;
+    glm::vec4 bands;
     std::array<Build, std::size_t{forest_details} * variant_count> builds;
 };
 
@@ -62,8 +60,7 @@ constexpr VkDescriptorSetLayoutBinding binding(std::uint32_t at, VkDescriptorTyp
 }
 
 constexpr std::array descriptors{
-    binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT),
+    binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT),
     binding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT),
     binding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT),
     binding(3, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
@@ -73,18 +70,17 @@ constexpr std::array descriptors{
     binding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
     binding(7, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT)};
 
-constexpr VkDeviceSize patch_bytes =
-    VkDeviceSize{patch_vertex_count} * sizeof(terrain::PatchVertex);
-
 // How much each baked detail keeps, finest first.
 constexpr std::array<flora::Detail, forest_details> details{
     flora::Detail{
         .ring_stride = 1, .sides = 1.0F, .card_stride = 1, .card_scale = 1.0F, .wood_levels = 2},
+    // Dropped cards are covered by growing the kept ones a little, not doubling them: each tree
+    // sheds detail by its own distance, and a swollen far card would balloon as it stepped near.
     flora::Detail{
-        .ring_stride = 2, .sides = 0.75F, .card_stride = 2, .card_scale = 1.5F, .wood_levels = 2},
+        .ring_stride = 2, .sides = 0.75F, .card_stride = 2, .card_scale = 1.4F, .wood_levels = 2},
     // Far off, only the trunk is wood; the boughs are sub-pixel, their cards cover alone.
     flora::Detail{
-        .ring_stride = 3, .sides = 0.5F, .card_stride = 3, .card_scale = 2.0F, .wood_levels = 1}};
+        .ring_stride = 3, .sides = 0.5F, .card_stride = 3, .card_scale = 1.8F, .wood_levels = 1}};
 
 void append(std::vector<std::byte>& blob, const void* bytes, std::size_t count) {
     const std::span<const std::byte> source{static_cast<const std::byte*>(bytes), count};
@@ -139,33 +135,18 @@ Carpentry bake() {
     return carpentry;
 }
 
-Settings forest_settings(std::span<const Vec3> palette, const Carpentry& carpentry) noexcept {
-    Settings settings{};
-    for (int biome = 0; biome < planet::biome_count; ++biome) {
-        const BiomePines pines = pines_of(static_cast<planet::Biome>(biome));
-        settings.crown.at(static_cast<std::size_t>(biome)) =
-            glm::vec4{needle_colour(palette[static_cast<std::size_t>(biome)]), pines.height};
-        settings.grow.at(static_cast<std::size_t>(biome)) =
-            glm::vec4{pines.inside, pines.edge, pines.lone, 0.0F};
-    }
-    settings.builds = carpentry.builds;
-    return settings;
-}
-
 } // namespace
 
 Result<Forest> Forest::create(Device& device, VkFormat colour_format, VkFormat depth_format,
-                              std::span<const Vec3> palette) {
-    if (palette.size() != planet::biome_count) {
-        return make_error(
-            ErrorCode::InvalidArgument,
-            std::format("{} colours for {} biomes", palette.size(), planet::biome_count));
-    }
+                              double full, double mid) {
     Forest forest;
     const Carpentry carpentry = bake();
     forest.most_wood_ = carpentry.most_wood;
     forest.most_leaves_ = carpentry.most_leaves;
-    const Settings settings = forest_settings(palette, carpentry);
+    Settings settings{};
+    settings.bands = {static_cast<float>(full), static_cast<float>(mid),
+                      static_cast<float>(forest_far), 0.0F};
+    settings.builds = carpentry.builds;
     auto settings_buffer = make_filled_buffer(device, std::as_bytes(std::span{&settings, 1}),
                                               VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
     if (!settings_buffer) {
@@ -206,8 +187,8 @@ Result<Forest> Forest::create(Device& device, VkFormat colour_format, VkFormat d
     return forest;
 }
 
-void Forest::draw(VkCommandBuffer commands, VkExtent2D extent, const TerrainPool& pool,
-                  std::span<const ForestDraw> draws, const GrassView& view) const {
+void Forest::draw(VkCommandBuffer commands, VkExtent2D extent, const AnchorPool& pool,
+                  std::span<const StandDraw> draws, const GrassView& view) const {
     if (extent.width == 0 || extent.height == 0 || draws.empty()) {
         return;
     }
@@ -235,34 +216,20 @@ void Forest::draw(VkCommandBuffer commands, VkExtent2D extent, const TerrainPool
         push_sampled_image(commands, pipeline, 6, view.air.cloud_shadow, view.air.sampler);
         push_storage_buffer(commands, pipeline, 7, carpentry_.handle());
         vkCmdPushConstants(commands, pipeline.layout(), stages, 0, offsetof(Push, wind), &push);
-        for (const ForestDraw& draw : draws) {
+        for (const StandDraw& draw : draws) {
             HOG_ASSERT(draw.slot < pool.capacity(), "growing a forest on a slot beyond the pool");
-            HOG_ASSERT(draw.shift >= -1 && draw.shift <= 5, "a lattice shift beyond its packing");
-            HOG_ASSERT(draw.lattice_i < (1U << 16U) && draw.lattice_j < (1U << 16U),
-                       "a lattice base beyond its packing");
             HOG_ASSERT(draw.detail >= 0 && draw.detail < forest_details,
                        "a detail beyond those baked");
-            constexpr VkDeviceSize alignment = 256;
-            const VkDeviceSize begin = VkDeviceSize{draw.slot} * patch_bytes;
-            const VkDeviceSize aligned = begin & ~(alignment - 1);
-            const auto bias = static_cast<std::uint32_t>(begin - aligned);
-            push_storage_buffer(commands, pipeline, 1, pool.vertices(), aligned,
-                                bias + patch_bytes);
-            const auto fade = static_cast<std::uint32_t>(
-                std::lround(std::clamp(draw.fade_far, 1.0, furthest_grass)));
-            push.wind.w = std::bit_cast<float>((draw.lattice_i << 16U) | draw.lattice_j);
-            push.origin =
-                glm::vec4{relative_to(draw.origin, view.camera.eye),
-                          std::bit_cast<float>((static_cast<std::uint32_t>(draw.detail) << 26U) |
-                                               (fade << 14U) |
-                                               (static_cast<std::uint32_t>(draw.shift + 1) << 11U) |
-                                               (draw.face << 8U) | bias)};
+            if (draw.count == 0) {
+                continue;
+            }
+            push_storage_buffer(commands, pipeline, 1, pool.anchors(),
+                                VkDeviceSize{draw.slot} * tile_bytes, tile_bytes);
+            push.origin = glm::vec4{relative_to(draw.origin, view.camera.eye),
+                                    std::bit_cast<float>(static_cast<std::uint32_t>(draw.detail))};
             vkCmdPushConstants(commands, pipeline.layout(), stages, offsetof(Push, wind),
                                sizeof(Push) - offsetof(Push, wind), &push.wind);
-            const std::uint32_t side = draw.shift >= 0
-                                           ? (32U >> static_cast<std::uint32_t>(draw.shift))
-                                           : (32U << static_cast<std::uint32_t>(-draw.shift));
-            vkCmdDraw(commands, most[static_cast<std::size_t>(draw.detail)], side * side, 0, 0);
+            vkCmdDraw(commands, most[static_cast<std::size_t>(draw.detail)], draw.count, 0, 0);
         }
     };
     plant_all(wood_, most_wood_);

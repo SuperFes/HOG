@@ -1,6 +1,6 @@
-#include "flora.hpp"
 
 #include <hog/core/assert.hpp>
+#include <hog/flora/stand.hpp>
 #include <hog/planet/climate.hpp>
 #include <hog/render/bushes.hpp>
 #include <hog/render/device.hpp>
@@ -117,7 +117,7 @@ Settings bush_settings(std::span<const Vec3> palette) noexcept {
             glm::vec4{leaf_colour(palette[static_cast<std::size_t>(biome)]), bushes.height};
         settings.shapes.at(static_cast<std::size_t>(biome)) =
             glm::vec4{bushes.share, bushes.floofy, bushes.spiky, bushes.twiggy};
-        const BiomePines pines = pines_of(static_cast<planet::Biome>(biome));
+        const flora::BiomePines pines = flora::pines_of(static_cast<planet::Biome>(biome));
         settings.woods.at(static_cast<std::size_t>(biome)) =
             glm::vec4{pines.edge, pines.inside > 0.0F ? 1.0F : 0.0F, 0.0F, 0.0F};
     }
