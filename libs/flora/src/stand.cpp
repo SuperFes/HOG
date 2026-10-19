@@ -50,6 +50,9 @@ float smoothstepped(float from, float to, float value) noexcept {
     return smooth(saturated((value - from) / (to - from)));
 }
 
+// Oaks stand a little lower than the pines around them, their crowns spread rather than raised.
+constexpr float oak_height = 0.85F;
+
 } // namespace
 
 std::uint32_t hashed(std::uint32_t at) noexcept {
@@ -82,15 +85,15 @@ Vec2 tree_spot(std::uint32_t lattice_i, std::uint32_t lattice_j, std::uint32_t f
 
 std::optional<Stood> tree_grown(std::uint32_t lattice_i, std::uint32_t lattice_j,
                                 std::uint32_t face, planet::Biome biome) noexcept {
-    const BiomePines pines = pines_of(biome);
-    if (pines.height <= 0.0F) {
+    const BiomeTrees trees = trees_of(biome);
+    if (trees.height <= 0.0F) {
         return std::nullopt;
     }
     const std::uint32_t hash = cell_hash(lattice_i, lattice_j, face);
     const Vec2 spot{unit(hash), unit(hash + 1U)};
     const Vec2 cell{static_cast<float>(lattice_i) + spot.x, static_cast<float>(lattice_j) + spot.y};
-    const float wooded = smoothstepped(pines.edge, pines.edge + 0.1F, stand_field(cell, face));
-    const float occupancy = mixed(pines.lone, pines.inside, wooded);
+    const float wooded = smoothstepped(trees.edge, trees.edge + 0.1F, stand_field(cell, face));
+    const float occupancy = mixed(trees.lone, trees.inside, wooded);
     if (unit(hash + 2U) >= occupancy) {
         return std::nullopt;
     }
@@ -100,9 +103,21 @@ std::optional<Stood> tree_grown(std::uint32_t lattice_i, std::uint32_t lattice_j
     const float age = (1.0F - (drawn * drawn)) * mixed(0.55F, 1.0F, wooded);
     // Quick to rise while young, then barely taller; tallest deep in a stand.
     const float reached = mixed(0.2F, 1.2F, age * (2.0F - age));
-    const float height =
-        pines.height * reached * (0.85F + (0.3F * unit(hash + 5U))) * mixed(0.8F, 1.05F, wooded);
-    return Stood{.spot = spot, .height = height, .wooded = wooded, .age = age, .hash = hash};
+    float height =
+        trees.height * reached * (0.85F + (0.3F * unit(hash + 5U))) * mixed(0.8F, 1.05F, wooded);
+    // Oaks gather in groves of their own, a broad field stretched to span its range, roughened by
+    // the cell's own dice.
+    Genus genus = Genus::Pine;
+    if (trees.broadleaf > 0.0F) {
+        const float field =
+            saturated(0.5F + (2.2F * (stand_octave(cell, face, 5U, 0x0a4c1U) - 0.5F)));
+        if (mixed(field, unit(hash + 8U), 0.3F) < trees.broadleaf) {
+            genus = Genus::Oak;
+            height *= oak_height;
+        }
+    }
+    return Stood{
+        .spot = spot, .height = height, .wooded = wooded, .age = age, .hash = hash, .genus = genus};
 }
 
 } // namespace hog::flora

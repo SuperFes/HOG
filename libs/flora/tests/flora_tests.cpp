@@ -341,6 +341,61 @@ TEST_CASE("stands are mostly grown, the young at their edges, height following a
     CHECK(young_height / static_cast<float>(young) < 0.5F * old_height / static_cast<float>(old));
 }
 
+TEST_CASE("oaks gather in groves among temperate pines, the boreal woods all pine", "[flora]") {
+    using hog::flora::Genus;
+    using hog::planet::Biome;
+    constexpr std::uint32_t across = 256;
+    constexpr std::uint32_t rows = 64;
+    std::vector<Genus> grown(std::size_t{across} * rows, Genus::Pine);
+    std::vector<bool> stood(grown.size(), false);
+    std::size_t oaks = 0;
+    std::size_t trees = 0;
+    float oak_height = 0.0F;
+    float pine_height = 0.0F;
+    std::uint64_t hash = 0xcbf2'9ce4'8422'2325ULL;
+    for (std::uint32_t row = 0; row < rows; ++row) {
+        for (std::uint32_t at = 0; at < across; ++at) {
+            const auto tree =
+                hog::flora::tree_grown(2048 + at, 56576 + row, 0, Biome::TemperateForest);
+            CHECK(hog::flora::tree_grown(2048 + at, 56576 + row, 0, Biome::BorealForest)
+                      .value_or(hog::flora::Stood{})
+                      .genus == Genus::Pine);
+            if (!tree) {
+                continue;
+            }
+            ++trees;
+            const std::size_t cell = (std::size_t{row} * across) + at;
+            stood.at(cell) = true;
+            grown.at(cell) = tree->genus;
+            if (tree->genus == Genus::Oak) {
+                ++oaks;
+                oak_height += tree->height;
+            } else {
+                pine_height += tree->height;
+            }
+            hash ^= static_cast<std::uint64_t>(tree->genus);
+            hash *= 0x100'0000'01b3ULL;
+        }
+    }
+    REQUIRE(trees > 1000);
+    const float share = static_cast<float>(oaks) / static_cast<float>(trees);
+    CHECK(share > 0.3F);
+    CHECK(share < 0.8F);
+    CHECK(oak_height / static_cast<float>(oaks) < pine_height / static_cast<float>(trees - oaks));
+    // Grouped: a tree's neighbour is its own kind far more often than a random mix would make it.
+    std::size_t pairs = 0;
+    std::size_t alike = 0;
+    for (std::size_t cell = 0; cell + 1 < grown.size(); ++cell) {
+        if ((cell + 1) % across != 0 && stood.at(cell) && stood.at(cell + 1)) {
+            ++pairs;
+            alike += grown.at(cell) == grown.at(cell + 1) ? 1U : 0U;
+        }
+    }
+    const float chance = (share * share) + ((1.0F - share) * (1.0F - share));
+    CHECK(static_cast<float>(alike) / static_cast<float>(pairs) > chance + 0.15F);
+    CHECK(hash == 0x3fd0'a658'ea8f'37b7ULL);
+}
+
 TEST_CASE("no tree grows where its biome grows none", "[flora]") {
     for (std::uint32_t i = 2048; i < 2112; ++i) {
         CHECK(!hog::flora::tree_grown(i, 56576, 0, hog::planet::Biome::Ocean));

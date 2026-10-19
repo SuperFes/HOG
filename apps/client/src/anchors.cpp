@@ -120,7 +120,9 @@ std::optional<render::TreeAnchor> anchor_at(const planet::World& world, std::uin
         .normal = Vec3{normal},
         .hash = stood->hash,
         .colour = render::packed_needles(
-            flora::needle_colour(needles[static_cast<std::size_t>(ground.biome)]), stood->wooded),
+            flora::foliage_colour(flora::Genus::Pine,
+                                  needles[static_cast<std::size_t>(ground.biome)]),
+            stood->wooded),
         .age = stood->age};
 }
 
