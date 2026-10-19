@@ -358,7 +358,8 @@ TEST_CASE("stands are mostly grown, the young at their edges, height following a
     CHECK(young_height / static_cast<float>(young) < 0.5F * old_height / static_cast<float>(old));
 }
 
-TEST_CASE("oaks gather in groves among temperate pines, the boreal woods all pine", "[flora]") {
+TEST_CASE("broadleaves gather in groves among temperate pines, the boreal woods all pine",
+          "[flora]") {
     using hog::flora::Genus;
     using hog::planet::Biome;
     constexpr std::uint32_t across = 256;
@@ -366,6 +367,7 @@ TEST_CASE("oaks gather in groves among temperate pines, the boreal woods all pin
     std::vector<Genus> grown(std::size_t{across} * rows, Genus::Pine);
     std::vector<bool> stood(grown.size(), false);
     std::size_t oaks = 0;
+    std::size_t maples = 0;
     std::size_t trees = 0;
     float oak_height = 0.0F;
     float pine_height = 0.0F;
@@ -387,6 +389,8 @@ TEST_CASE("oaks gather in groves among temperate pines, the boreal woods all pin
             if (tree->genus == Genus::Oak) {
                 ++oaks;
                 oak_height += tree->height;
+            } else if (tree->genus == Genus::Maple) {
+                ++maples;
             } else {
                 pine_height += tree->height;
             }
@@ -395,10 +399,15 @@ TEST_CASE("oaks gather in groves among temperate pines, the boreal woods all pin
         }
     }
     REQUIRE(trees > 1000);
-    const float share = static_cast<float>(oaks) / static_cast<float>(trees);
+    const std::size_t broadleaves = oaks + maples;
+    const float share = static_cast<float>(broadleaves) / static_cast<float>(trees);
     CHECK(share > 0.3F);
     CHECK(share < 0.8F);
-    CHECK(oak_height / static_cast<float>(oaks) < pine_height / static_cast<float>(trees - oaks));
+    const float maple_share = static_cast<float>(maples) / static_cast<float>(broadleaves);
+    CHECK(maple_share > 0.15F);
+    CHECK(maple_share < 0.65F);
+    CHECK(oak_height / static_cast<float>(oaks) <
+          pine_height / static_cast<float>(trees - broadleaves));
     // Grouped: a tree's neighbour is its own kind far more often than a random mix would make it.
     std::size_t pairs = 0;
     std::size_t alike = 0;
@@ -408,9 +417,34 @@ TEST_CASE("oaks gather in groves among temperate pines, the boreal woods all pin
             alike += grown.at(cell) == grown.at(cell + 1) ? 1U : 0U;
         }
     }
-    const float chance = (share * share) + ((1.0F - share) * (1.0F - share));
+    const float oak_share = static_cast<float>(oaks) / static_cast<float>(trees);
+    const float of_maples = static_cast<float>(maples) / static_cast<float>(trees);
+    const float of_pines = 1.0F - share;
+    const float chance = (oak_share * oak_share) + (of_maples * of_maples) + (of_pines * of_pines);
     CHECK(static_cast<float>(alike) / static_cast<float>(pairs) > chance + 0.15F);
-    CHECK(hash == 0x3fd0'a658'ea8f'37b7ULL);
+    CHECK(hash == 0xee88'7392'8ab1'264eULL);
+}
+
+TEST_CASE("maples crowd the wet woods more than the dry", "[flora]") {
+    using hog::flora::Genus;
+    using hog::planet::Biome;
+    const auto maple_share = [](Biome biome) {
+        std::size_t broadleaves = 0;
+        std::size_t maples = 0;
+        for (std::uint32_t i = 2048; i < 2304; ++i) {
+            for (std::uint32_t j = 56576; j < 56640; ++j) {
+                const auto tree = hog::flora::tree_grown(i, j, 0, biome);
+                if (tree && tree->genus != Genus::Pine) {
+                    ++broadleaves;
+                    maples += tree->genus == Genus::Maple ? 1U : 0U;
+                }
+            }
+        }
+        REQUIRE(broadleaves > 100);
+        return static_cast<float>(maples) / static_cast<float>(broadleaves);
+    };
+    CHECK(maple_share(Biome::Wetland) > 0.4F);
+    CHECK(maple_share(Biome::Wetland) > 2.0F * maple_share(Biome::Shrubland));
 }
 
 TEST_CASE("no tree grows where its biome grows none", "[flora]") {

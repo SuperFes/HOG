@@ -15,14 +15,16 @@ namespace hog::flora {
 
 // Each biome's trees against the stand field: how deep the field must read before woods begin
 // (`edge`, 1 grows none), how full the woods are inside, the odd lone tree in the open, and how
-// many are oaks, gathered in groves among the pines. Bushes read the same table, crowding the
+// many are broadleaves, gathered in groves among the pines, and of those how many are maples, in
+// stands of their own among the oaks. Bushes read the same table, crowding the
 // woods' edges and thinning under the canopy.
 struct BiomeTrees {
     float height = 0.0F;    // metres; none grows no trees
     float inside = 0.0F;    // of lattice cells grown within a stand, 0 to 1
     float edge = 1.0F;      // the stand field's woodland threshold
     float lone = 0.0F;      // of lattice cells grown in the open
-    float broadleaf = 0.0F; // of the trees grown oaks, about
+    float broadleaf = 0.0F; // of the trees grown broadleaves, about
+    float maple = 0.0F;     // of the broadleaves maples, about
 };
 
 [[nodiscard]] constexpr BiomeTrees trees_of(planet::Biome biome) noexcept {
@@ -31,15 +33,35 @@ struct BiomeTrees {
     case BorealForest:
         return {.height = 13.0F, .inside = 0.8F, .edge = 0.42F, .lone = 0.015F};
     case TemperateForest:
-        return {.height = 15.0F, .inside = 0.75F, .edge = 0.5F, .lone = 0.012F, .broadleaf = 0.55F};
+        return {.height = 15.0F,
+                .inside = 0.75F,
+                .edge = 0.5F,
+                .lone = 0.012F,
+                .broadleaf = 0.55F,
+                .maple = 0.4F};
     case Grassland:
-        return {.height = 12.0F, .inside = 0.6F, .edge = 0.66F, .lone = 0.0015F, .broadleaf = 0.7F};
+        return {.height = 12.0F,
+                .inside = 0.6F,
+                .edge = 0.66F,
+                .lone = 0.0015F,
+                .broadleaf = 0.7F,
+                .maple = 0.2F};
     case Shrubland:
-        return {.height = 7.0F, .inside = 0.5F, .edge = 0.62F, .lone = 0.004F, .broadleaf = 0.35F};
+        return {.height = 7.0F,
+                .inside = 0.5F,
+                .edge = 0.62F,
+                .lone = 0.004F,
+                .broadleaf = 0.35F,
+                .maple = 0.15F};
     case Alpine:
         return {.height = 4.5F, .inside = 0.5F, .edge = 0.6F, .lone = 0.008F};
     case Wetland:
-        return {.height = 10.0F, .inside = 0.55F, .edge = 0.58F, .lone = 0.008F, .broadleaf = 0.3F};
+        return {.height = 10.0F,
+                .inside = 0.55F,
+                .edge = 0.58F,
+                .lone = 0.008F,
+                .broadleaf = 0.3F,
+                .maple = 0.6F};
     case Tundra:
     case Desert:
     case Savanna:

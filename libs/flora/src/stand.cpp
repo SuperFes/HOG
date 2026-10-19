@@ -50,8 +50,18 @@ float smoothstepped(float from, float to, float value) noexcept {
     return smooth(saturated((value - from) / (to - from)));
 }
 
-// Oaks stand a little lower than the pines around them, their crowns spread rather than raised.
+// The broadleaves stand a little lower than the pines around them, their crowns spread rather than
+// raised.
 constexpr float oak_height = 0.85F;
+constexpr float maple_height = 0.9F;
+
+// A broad field stretched to span its range, roughened by the cell's own dice, against a share.
+bool drawn_in(Vec2 cell, std::uint32_t face, std::uint32_t period_log, std::uint32_t salt,
+              float dice, float share) noexcept {
+    const float field =
+        saturated(0.5F + (2.2F * (stand_octave(cell, face, period_log, salt) - 0.5F)));
+    return mixed(field, dice, 0.3F) < share;
+}
 
 } // namespace
 
@@ -105,13 +115,14 @@ std::optional<Stood> tree_grown(std::uint32_t lattice_i, std::uint32_t lattice_j
     const float reached = mixed(0.2F, 1.2F, age * (2.0F - age));
     float height =
         trees.height * reached * (0.85F + (0.3F * unit(hash + 5U))) * mixed(0.8F, 1.05F, wooded);
-    // Oaks gather in groves of their own, a broad field stretched to span its range, roughened by
-    // the cell's own dice.
+    // Broadleaves gather in groves of their own, maples in smaller stands within them.
     Genus genus = Genus::Pine;
-    if (trees.broadleaf > 0.0F) {
-        const float field =
-            saturated(0.5F + (2.2F * (stand_octave(cell, face, 5U, 0x0a4c1U) - 0.5F)));
-        if (mixed(field, unit(hash + 8U), 0.3F) < trees.broadleaf) {
+    if (trees.broadleaf > 0.0F &&
+        drawn_in(cell, face, 5U, 0x0a4c1U, unit(hash + 8U), trees.broadleaf)) {
+        if (drawn_in(cell, face, 4U, 0x3a91eU, unit(hash + 14U), trees.maple)) {
+            genus = Genus::Maple;
+            height *= maple_height;
+        } else {
             genus = Genus::Oak;
             height *= oak_height;
         }
