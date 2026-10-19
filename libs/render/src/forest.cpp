@@ -1,0 +1,268 @@
+#include "flora.hpp"
+
+#include <hog/core/assert.hpp>
+#include <hog/flora/mesh.hpp>
+#include <hog/flora/skeleton.hpp>
+#include <hog/flora/species.hpp>
+#include <hog/planet/climate.hpp>
+#include <hog/render/device.hpp>
+#include <hog/render/forest.hpp>
+#include <hog/shaders/forest.hpp>
+
+#include <algorithm>
+#include <array>
+#include <bit>
+#include <cmath>
+#include <cstddef>
+#include <format>
+#include <utility>
+#include <vector>
+
+namespace hog::render {
+
+namespace {
+
+// The shaders read the pool's patch vertices and the baked trees by these layouts.
+static_assert(sizeof(terrain::PatchVertex) == 28);
+static_assert(sizeof(flora::WoodVertex) == 24);
+static_assert(sizeof(flora::LeafVertex) == 36);
+static_assert(offsetof(flora::LeafVertex, card) == 24);
+static_assert(offsetof(flora::LeafVertex, seed) == 32);
+
+constexpr std::uint32_t variant_count = 8;
+
+struct Push {
+    Mat4 clip_from_eye;
+    glm::vec4 bend_up;
+    glm::vec4 bend_radii;
+    glm::vec4 wind;
+    glm::vec4 origin;
+};
+
+static_assert(sizeof(Push) <= 128);
+
+struct Build {
+    glm::uvec4 wood;
+    glm::uvec4 leaf;
+};
+
+struct Settings {
+    std::array<glm::vec4, planet::biome_count> crown;
+    std::array<glm::vec4, planet::biome_count> grow;
+    std::array<Build, std::size_t{forest_details} * variant_count> builds;
+};
+
+constexpr VkDescriptorSetLayoutBinding binding(std::uint32_t at, VkDescriptorType type,
+                                               VkShaderStageFlags stages) noexcept {
+    return {.binding = at,
+            .descriptorType = type,
+            .descriptorCount = 1,
+            .stageFlags = stages,
+            .pImmutableSamplers = nullptr};
+}
+
+constexpr std::array descriptors{
+    binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT),
+    binding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT),
+    binding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT),
+    binding(3, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT),
+    binding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
+    binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
+    binding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
+    binding(7, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT)};
+
+constexpr VkDeviceSize patch_bytes =
+    VkDeviceSize{patch_vertex_count} * sizeof(terrain::PatchVertex);
+
+// How much each baked detail keeps, finest first.
+constexpr std::array<flora::Detail, forest_details> details{
+    flora::Detail{.ring_stride = 1, .sides = 1.0F, .card_stride = 1, .card_scale = 1.0F},
+    flora::Detail{.ring_stride = 2, .sides = 0.75F, .card_stride = 2, .card_scale = 1.35F},
+    flora::Detail{.ring_stride = 3, .sides = 0.5F, .card_stride = 3, .card_scale = 1.7F}};
+
+void append(std::vector<std::byte>& blob, const void* bytes, std::size_t count) {
+    const std::span<const std::byte> source{static_cast<const std::byte*>(bytes), count};
+    blob.insert(blob.end(), source.begin(), source.end());
+}
+
+// Bakes every variant at every detail into one buffer's bytes, filling the builds table.
+struct Carpentry {
+    std::vector<std::byte> blob;
+    std::array<Build, std::size_t{forest_details} * variant_count> builds{};
+    std::array<std::uint32_t, forest_details> most_wood{};
+    std::array<std::uint32_t, forest_details> most_leaves{};
+};
+
+Carpentry bake() {
+    Carpentry carpentry;
+    const flora::Species species = flora::pine();
+    for (std::uint32_t variant = 0; variant < variant_count; ++variant) {
+        const flora::Skeleton skeleton = flora::grow(species, 101U + variant);
+        float height = 0.0F;
+        for (const flora::Bough& bough : skeleton.boughs) {
+            for (const flora::Ring& ring : bough.rings) {
+                height = std::max(height, ring.centre.z);
+            }
+        }
+        for (int detail = 0; detail < forest_details; ++detail) {
+            const flora::TreeMesh grown =
+                flora::mesh(skeleton, details[static_cast<std::size_t>(detail)]);
+            Build& build =
+                carpentry.builds[(static_cast<std::size_t>(detail) * variant_count) + variant];
+            build.wood.x = static_cast<std::uint32_t>(carpentry.blob.size());
+            append(carpentry.blob, grown.wood.data(),
+                   grown.wood.size() * sizeof(flora::WoodVertex));
+            build.wood.y = static_cast<std::uint32_t>(carpentry.blob.size());
+            append(carpentry.blob, grown.wood_indices.data(),
+                   grown.wood_indices.size() * sizeof(std::uint32_t));
+            build.wood.z = static_cast<std::uint32_t>(grown.wood_indices.size());
+            build.wood.w = std::bit_cast<std::uint32_t>(height);
+            build.leaf.x = static_cast<std::uint32_t>(carpentry.blob.size());
+            append(carpentry.blob, grown.leaves.data(),
+                   grown.leaves.size() * sizeof(flora::LeafVertex));
+            build.leaf.y = static_cast<std::uint32_t>(carpentry.blob.size());
+            append(carpentry.blob, grown.leaf_indices.data(),
+                   grown.leaf_indices.size() * sizeof(std::uint32_t));
+            build.leaf.z = static_cast<std::uint32_t>(grown.leaf_indices.size());
+            auto& wood_most = carpentry.most_wood[static_cast<std::size_t>(detail)];
+            wood_most = std::max(wood_most, build.wood.z);
+            auto& leaf_most = carpentry.most_leaves[static_cast<std::size_t>(detail)];
+            leaf_most = std::max(leaf_most, build.leaf.z);
+        }
+    }
+    return carpentry;
+}
+
+Settings forest_settings(std::span<const Vec3> palette, const Carpentry& carpentry) noexcept {
+    Settings settings{};
+    for (int biome = 0; biome < planet::biome_count; ++biome) {
+        const BiomePines pines = pines_of(static_cast<planet::Biome>(biome));
+        settings.crown.at(static_cast<std::size_t>(biome)) =
+            glm::vec4{needle_colour(palette[static_cast<std::size_t>(biome)]), pines.height};
+        settings.grow.at(static_cast<std::size_t>(biome)) =
+            glm::vec4{pines.inside, pines.edge, pines.lone, 0.0F};
+    }
+    settings.builds = carpentry.builds;
+    return settings;
+}
+
+} // namespace
+
+Result<Forest> Forest::create(Device& device, VkFormat colour_format, VkFormat depth_format,
+                              std::span<const Vec3> palette) {
+    if (palette.size() != planet::biome_count) {
+        return make_error(
+            ErrorCode::InvalidArgument,
+            std::format("{} colours for {} biomes", palette.size(), planet::biome_count));
+    }
+    Forest forest;
+    const Carpentry carpentry = bake();
+    forest.most_wood_ = carpentry.most_wood;
+    forest.most_leaves_ = carpentry.most_leaves;
+    const Settings settings = forest_settings(palette, carpentry);
+    auto settings_buffer = make_filled_buffer(device, std::as_bytes(std::span{&settings, 1}),
+                                              VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+    if (!settings_buffer) {
+        return std::unexpected(std::move(settings_buffer).error());
+    }
+    forest.settings_ = std::move(settings_buffer).value();
+    auto carpentry_buffer =
+        make_filled_buffer(device, std::span{carpentry.blob}, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    if (!carpentry_buffer) {
+        return std::unexpected(std::move(carpentry_buffer).error());
+    }
+    forest.carpentry_ = std::move(carpentry_buffer).value();
+
+    auto wood = make_pipeline(device, {.spirv = shaders::forest,
+                                       .vertex_entry = "wood_vertex",
+                                       .fragment_entry = "wood_fragment",
+                                       .colour_format = colour_format,
+                                       .depth_format = depth_format,
+                                       .cull = VK_CULL_MODE_NONE,
+                                       .push_constant_bytes = sizeof(Push),
+                                       .descriptors = descriptors});
+    if (!wood) {
+        return std::unexpected(std::move(wood).error());
+    }
+    forest.wood_ = std::move(wood).value();
+    auto leaves = make_pipeline(device, {.spirv = shaders::forest,
+                                         .vertex_entry = "leaf_vertex",
+                                         .fragment_entry = "leaf_fragment",
+                                         .colour_format = colour_format,
+                                         .depth_format = depth_format,
+                                         .cull = VK_CULL_MODE_NONE,
+                                         .push_constant_bytes = sizeof(Push),
+                                         .descriptors = descriptors});
+    if (!leaves) {
+        return std::unexpected(std::move(leaves).error());
+    }
+    forest.leaves_ = std::move(leaves).value();
+    return forest;
+}
+
+void Forest::draw(VkCommandBuffer commands, VkExtent2D extent, const TerrainPool& pool,
+                  std::span<const ForestDraw> draws, const GrassView& view) const {
+    if (extent.width == 0 || extent.height == 0 || draws.empty()) {
+        return;
+    }
+    const double aspect = static_cast<double>(extent.width) / static_cast<double>(extent.height);
+    Push push{.clip_from_eye = Mat4{view_projection(view.camera, aspect)},
+              .bend_up = glm::vec4{Vec3{view.bend.up}, static_cast<float>(view.bend.eye_height)},
+              .bend_radii =
+                  glm::vec4{static_cast<float>(view.bend.radius),
+                            static_cast<float>(view.bend.faked), static_cast<float>(view.seconds),
+                            static_cast<float>(view.camera.vertical_fov / extent.height)},
+              .wind = glm::vec4{Vec3{view.wind}, 0.0F},
+              .origin = {}};
+    constexpr VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    const auto plant_all = [&](const Pipeline& pipeline,
+                               const std::array<std::uint32_t, forest_details>& most) {
+        vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
+        push_uniform_buffer(commands, pipeline, 0, settings_.handle());
+        HOG_ASSERT(view.air.lighting != VK_NULL_HANDLE,
+                   "growing a forest lit by the air without it");
+        push_uniform_buffer(commands, pipeline, 2, view.air.air);
+        push_uniform_buffer(commands, pipeline, 3, view.air.lighting);
+        push_sampled_image(commands, pipeline, 4, view.air.transmittance, view.air.sampler);
+        push_sampled_image(commands, pipeline, 5, view.air.aerial, view.air.sampler);
+        push_sampled_image(commands, pipeline, 6, view.air.cloud_shadow, view.air.sampler);
+        push_storage_buffer(commands, pipeline, 7, carpentry_.handle());
+        vkCmdPushConstants(commands, pipeline.layout(), stages, 0, offsetof(Push, wind), &push);
+        for (const ForestDraw& draw : draws) {
+            HOG_ASSERT(draw.slot < pool.capacity(), "growing a forest on a slot beyond the pool");
+            HOG_ASSERT(draw.shift >= -1 && draw.shift <= 5, "a lattice shift beyond its packing");
+            HOG_ASSERT(draw.lattice_i < (1U << 16U) && draw.lattice_j < (1U << 16U),
+                       "a lattice base beyond its packing");
+            HOG_ASSERT(draw.detail >= 0 && draw.detail < forest_details,
+                       "a detail beyond those baked");
+            constexpr VkDeviceSize alignment = 256;
+            const VkDeviceSize begin = VkDeviceSize{draw.slot} * patch_bytes;
+            const VkDeviceSize aligned = begin & ~(alignment - 1);
+            const auto bias = static_cast<std::uint32_t>(begin - aligned);
+            push_storage_buffer(commands, pipeline, 1, pool.vertices(), aligned,
+                                bias + patch_bytes);
+            const auto fade = static_cast<std::uint32_t>(
+                std::lround(std::clamp(draw.fade_far, 1.0, furthest_grass)));
+            push.wind.w = std::bit_cast<float>((draw.lattice_i << 16U) | draw.lattice_j);
+            push.origin =
+                glm::vec4{relative_to(draw.origin, view.camera.eye),
+                          std::bit_cast<float>((static_cast<std::uint32_t>(draw.detail) << 26U) |
+                                               (fade << 14U) |
+                                               (static_cast<std::uint32_t>(draw.shift + 1) << 11U) |
+                                               (draw.face << 8U) | bias)};
+            vkCmdPushConstants(commands, pipeline.layout(), stages, offsetof(Push, wind),
+                               sizeof(Push) - offsetof(Push, wind), &push.wind);
+            const std::uint32_t side = draw.shift >= 0
+                                           ? (32U >> static_cast<std::uint32_t>(draw.shift))
+                                           : (32U << static_cast<std::uint32_t>(-draw.shift));
+            vkCmdDraw(commands, most[static_cast<std::size_t>(draw.detail)], side * side, 0, 0);
+        }
+    };
+    plant_all(wood_, most_wood_);
+    plant_all(leaves_, most_leaves_);
+}
+
+} // namespace hog::render

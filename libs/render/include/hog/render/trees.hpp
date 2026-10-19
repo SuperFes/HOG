@@ -32,6 +32,7 @@ struct TreeDraw {
     std::uint32_t lattice_j = 0;
     int shift = 0;               // grid cells across a lattice cell, as a power of two; -1 for half
     double fade_far = trees_far; // metres from the eye its trees have shrunk away by
+    double hold_off = 0.0;       // metres the stamps keep off, where the grown forest covers
 };
 
 // Pines grown on the ground's own patches: crossed quads cut to a tiered conical crown over a

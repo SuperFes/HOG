@@ -1,5 +1,6 @@
 #pragma once
 
+#include <hog/core/math.hpp>
 #include <hog/planet/climate.hpp>
 
 namespace hog::render {
@@ -40,6 +41,11 @@ constexpr BiomePines pines_of(planet::Biome biome) noexcept {
         return {};
     }
     return {};
+}
+
+// Needles far darker than the ground's mean, cool and green, so a forest reads as its own mass.
+constexpr Vec3 needle_colour(Vec3 ground) noexcept {
+    return (ground * 0.3F) + (Vec3{0.012F, 0.05F, 0.028F});
 }
 
 } // namespace hog::render

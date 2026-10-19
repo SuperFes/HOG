@@ -20,8 +20,9 @@ struct Push {
     // sixteen bits each.
     float4 wind;
     // xyz the patch's origin from the eye, in metres; w (as bits) the bytes before the patch's
-    // vertices in what's bound, the face in three bits, the lattice shift plus one in three, and
-    // the metres trees have shrunk away by in twelve.
+    // vertices in what's bound, the face in three bits, the lattice shift plus one in three, the
+    // metres trees have shrunk away by in twelve, and sixteenths of the metres the stamps hold
+    // off while the grown forest covers, in six.
     float4 origin;
 };
 
@@ -109,6 +110,7 @@ Tree vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const uint face = (packed >> 8) & 7u;
     const int shift = int((packed >> 11) & 7u) - 1;
     const float fade_far = float((packed >> 14) & 0xfffu);
+    const float hold_off = float((packed >> 26) & 0x3fu) * 16.0;
     const uint base = asuint(push.wind.w);
     const uint lattice_i = base >> 16;
     const uint lattice_j = base & 0xffffu;
@@ -156,7 +158,8 @@ Tree vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const float away = length(root);
     // Full sized until near the edge of their reach, then shrinking away.
     const float fade = saturate((fade_far - away) / (0.2 * fade_far));
-    if (above < shore || fade <= 0.0 || dot(normal, push.bend_up.xyz) < steepest) {
+    if (above < shore || fade <= 0.0 || away < hold_off ||
+        dot(normal, push.bend_up.xyz) < steepest) {
         return nothing();
     }
 

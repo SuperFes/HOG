@@ -259,6 +259,50 @@ TEST_CASE("trees key their patches to their own, coarser lattice", "[client][gro
     CHECK(hog::client::tree_draws(slots, far_off, eye, radius).empty());
 }
 
+TEST_CASE("the grown forest covers the near ground, its stamps holding off", "[client][ground]") {
+    constexpr double radius = 115'000.0;
+    const CellId fine = CellId::from_face_ij(0, 5, 3, 11);
+    const CellId coarse = CellId::from_face_ij(0, 1, 0, 8);
+    FakePool pool;
+    GroundSlots slots;
+    REQUIRE(slots.take(pool, 1, arriving({fine, coarse})));
+    const hog::WorldPosition eye{radius, 0.0, 0.0};
+    const auto patch = [&](CellId cell, double away) {
+        return hog::terrain::StreamedPatch{
+            .cell = cell, .origin = hog::WorldPosition{radius, away, 0.0}, .coarser_edges = 0};
+    };
+
+    // A fine patch under the eye grows whole trees at the fullest detail, coarsening with
+    // distance (measured to its nearest ground, a span within its origin) until the forest's
+    // reach; its stamps hold off to that reach. The coarse patch is too rough for grown trees,
+    // so its stamps grow everywhere.
+    const std::vector<hog::terrain::StreamedPatch> drawn{patch(fine, 0.0), patch(fine, 250.0),
+                                                         patch(coarse, 0.0)};
+    const std::vector<hog::render::ForestDraw> woods =
+        hog::client::forest_draws(slots, drawn, eye, radius);
+    REQUIRE(woods.size() == 2);
+    CHECK(woods[0].detail == 0);
+    CHECK(woods[0].lattice_i == 5U << 3U);
+    CHECK(woods[1].detail == 2);
+    const std::vector<hog::render::TreeDraw> stands =
+        hog::client::tree_draws(slots, drawn, eye, radius);
+    REQUIRE(stands.size() == 3);
+    CHECK(stands[0].hold_off == hog::render::forest_far);
+    CHECK(stands[2].hold_off == 0.0);
+
+    // A middling patch lands the middle detail.
+    const std::vector<hog::terrain::StreamedPatch> middling{patch(fine, 200.0)};
+    const std::vector<hog::render::ForestDraw> mid =
+        hog::client::forest_draws(slots, middling, eye, radius);
+    REQUIRE(mid.size() == 1);
+    CHECK(mid[0].detail == 1);
+
+    // Beyond the forest's reach, only the stamps grow.
+    const std::vector<hog::terrain::StreamedPatch> beyond{patch(fine, 340.0)};
+    CHECK(hog::client::forest_draws(slots, beyond, eye, radius).empty());
+    CHECK(hog::client::tree_draws(slots, beyond, eye, radius).size() == 1);
+}
+
 TEST_CASE("each biome is coloured as it looks from above", "[client][ground]") {
     const hog::client::BiomePalette palette = hog::client::biome_palette();
     for (const hog::Vec3 colour : palette) {

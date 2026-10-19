@@ -15,6 +15,7 @@
 #include <hog/render/camera.hpp>
 #include <hog/render/capsules.hpp>
 #include <hog/render/clouds.hpp>
+#include <hog/render/forest.hpp>
 #include <hog/render/glare.hpp>
 #include <hog/render/gpu_timer.hpp>
 #include <hog/render/grass.hpp>
@@ -127,11 +128,11 @@ public:
 private:
     Scene(const render::Device& device, const planet::World& world, jobs::JobSystem& jobs,
           const sim::Calendar& calendar, render::Terrain terrain, render::Ocean ocean,
-          render::Grass grass, render::Bushes bushes, render::Trees trees, render::TerrainPool pool,
-          render::Atmosphere atmosphere, render::Sky sky, render::Capsules others,
-          render::WeatherMaps weather, render::Clouds clouds, render::Precipitation precipitation,
-          render::Glare glare, render::GpuTimer timer, std::optional<render::Billboard> companion,
-          std::uint32_t frames);
+          render::Grass grass, render::Bushes bushes, render::Trees trees, render::Forest forest,
+          render::TerrainPool pool, render::Atmosphere atmosphere, render::Sky sky,
+          render::Capsules others, render::WeatherMaps weather, render::Clouds clouds,
+          render::Precipitation precipitation, render::Glare glare, render::GpuTimer timer,
+          std::optional<render::Billboard> companion, std::uint32_t frames);
 
     render::SkyView sky_view(const Shot& shot, render::CloudShade shade);
     // Adds the grass, bush and tree passes over the drawn patches, blown by `wind`.
@@ -148,6 +149,7 @@ private:
     render::Grass grass_;
     render::Bushes bushes_;
     render::Trees trees_;
+    render::Forest forest_;
     render::TerrainPool pool_;
     GroundSlots slots_;
     render::TransientImages transients_;

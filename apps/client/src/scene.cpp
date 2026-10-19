@@ -96,6 +96,10 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
     if (!trees) {
         return failed("grow the trees", trees.error());
     }
+    auto forest = render::Forest::create(device, colour_format, depth_format, palette);
+    if (!forest) {
+        return failed("grow the forest", forest.error());
+    }
     auto pool = render::TerrainPool::create(
         device, {.patches = settings.capacity, .frames = frames, .uploads = settings.uploads});
     if (!pool) {
@@ -142,6 +146,7 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
                  std::move(grass).value(),
                  std::move(bushes).value(),
                  std::move(trees).value(),
+                 std::move(forest).value(),
                  std::move(pool).value(),
                  std::move(atmosphere).value(),
                  std::move(sky).value(),
@@ -157,18 +162,18 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
 
 Scene::Scene(const render::Device& device, const planet::World& world, jobs::JobSystem& jobs,
              const sim::Calendar& calendar, render::Terrain terrain, render::Ocean ocean,
-             render::Grass grass, render::Bushes bushes, render::Trees trees,
+             render::Grass grass, render::Bushes bushes, render::Trees trees, render::Forest forest,
              render::TerrainPool pool, render::Atmosphere atmosphere, render::Sky sky,
              render::Capsules others, render::WeatherMaps weather, render::Clouds clouds,
              render::Precipitation precipitation, render::Glare glare, render::GpuTimer timer,
              std::optional<render::Billboard> companion, std::uint32_t frames)
     : baker_{world, jobs}, terrain_{std::move(terrain)}, ocean_{std::move(ocean)},
       grass_{std::move(grass)}, bushes_{std::move(bushes)}, trees_{std::move(trees)},
-      pool_{std::move(pool)}, transients_{device, frames}, others_{std::move(others)},
-      companion_{std::move(companion)}, atmosphere_{std::move(atmosphere)}, sky_{std::move(sky)},
-      weather_{std::move(weather)}, clouds_{std::move(clouds)},
-      precipitation_{std::move(precipitation)}, glare_{std::move(glare)}, timer_{std::move(timer)},
-      calendar_{calendar} {}
+      forest_{std::move(forest)}, pool_{std::move(pool)}, transients_{device, frames},
+      others_{std::move(others)}, companion_{std::move(companion)},
+      atmosphere_{std::move(atmosphere)}, sky_{std::move(sky)}, weather_{std::move(weather)},
+      clouds_{std::move(clouds)}, precipitation_{std::move(precipitation)},
+      glare_{std::move(glare)}, timer_{std::move(timer)}, calendar_{calendar} {}
 
 Scene::~Scene() {
     (void)baker_.finish();
@@ -240,6 +245,20 @@ void Scene::grow_vegetation(render::RenderGraph& graph, const render::Frame& fra
                              .air = air,
                              .wind = wind,
                              .seconds = swaying_for_});
+            });
+    }
+    const std::vector<render::ForestDraw> woods =
+        forest_draws(slots_, patches, shot.camera.eye, shot.bend.radius);
+    if (!woods.empty()) {
+        graph.add(
+            {.name = "forest", .uses = {through_air.begin(), through_air.end()}, .targets = drawn},
+            [&, woods, wind](VkCommandBuffer commands) {
+                forest_.draw(commands, frame.extent, pool_, woods,
+                             {.camera = shot.camera,
+                              .bend = shot.bend,
+                              .air = air,
+                              .wind = wind,
+                              .seconds = swaying_for_});
             });
     }
 }

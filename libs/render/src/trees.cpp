@@ -62,11 +62,6 @@ struct Settings {
 constexpr VkDeviceSize patch_bytes =
     VkDeviceSize{patch_vertex_count} * sizeof(terrain::PatchVertex);
 
-// Needles far darker than the ground's mean, cool and green, so a forest reads as its own mass.
-constexpr Vec3 needle_colour(Vec3 ground) noexcept {
-    return (ground * 0.3F) + (Vec3{0.012F, 0.05F, 0.028F});
-}
-
 Settings tree_settings(std::span<const Vec3> palette) noexcept {
     Settings settings{};
     for (int biome = 0; biome < planet::biome_count; ++biome) {
@@ -150,10 +145,12 @@ void Trees::draw(VkCommandBuffer commands, VkExtent2D extent, const TerrainPool&
         push_storage_buffer(commands, pipeline_, 1, pool.vertices(), aligned, bias + patch_bytes);
         const auto fade =
             static_cast<std::uint32_t>(std::lround(std::clamp(draw.fade_far, 1.0, furthest_grass)));
+        const auto hold =
+            static_cast<std::uint32_t>(std::lround(std::clamp(draw.hold_off, 0.0, 1008.0) / 16.0));
         push.wind.w = std::bit_cast<float>((draw.lattice_i << 16U) | draw.lattice_j);
         push.origin =
             glm::vec4{relative_to(draw.origin, view.camera.eye),
-                      std::bit_cast<float>((fade << 14U) |
+                      std::bit_cast<float>((hold << 26U) | (fade << 14U) |
                                            (static_cast<std::uint32_t>(draw.shift + 1) << 11U) |
                                            (draw.face << 8U) | bias)};
         vkCmdPushConstants(commands, pipeline_.layout(), stages, offsetof(Push, wind),
