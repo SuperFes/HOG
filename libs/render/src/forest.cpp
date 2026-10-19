@@ -30,7 +30,9 @@ constexpr std::uint32_t variant_count = 8;
 // nearest its own age, scaled to its own height.
 constexpr std::array stage_ages{0.15F, 0.42F, flora::prime_age, 0.93F};
 constexpr std::size_t stage_count = stage_ages.size();
-constexpr std::size_t build_count = std::size_t{forest_details} * stage_count * variant_count;
+constexpr std::size_t genus_count = flora::genus_count;
+constexpr std::size_t build_count =
+    genus_count * std::size_t{forest_details} * stage_count * variant_count;
 
 constexpr VkDeviceSize tile_bytes = VkDeviceSize{tile_trees} * sizeof(TreeAnchor);
 // A whole tile is aligned for any device's storage binding.
@@ -77,32 +79,31 @@ constexpr std::array descriptors{
     binding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
     binding(7, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT)};
 
-// How much each baked detail keeps, finest first. Only the trunk is ever wood: each twig's solid
-// frond runs its own spine, so a tube under it would never be seen. Dropped fronds are covered by
-// widening the kept ones a little, not doubling them: each tree sheds detail by its own distance.
+// How much each baked detail keeps, finest first; the species says which levels are wood, its
+// twigs' fronds running their own spines. Dropped fronds are covered by widening the kept ones a
+// little, not doubling them: each tree sheds detail by its own distance.
 constexpr std::array<flora::Detail, forest_details> details{
-    flora::Detail{
-        .ring_stride = 1, .sides = 1.0F, .frond_stride = 1, .frond_scale = 1.0F, .wood_levels = 1},
-    flora::Detail{
-        .ring_stride = 2, .sides = 0.75F, .frond_stride = 2, .frond_scale = 1.4F, .wood_levels = 1},
-    flora::Detail{
-        .ring_stride = 3, .sides = 0.5F, .frond_stride = 3, .frond_scale = 1.9F, .wood_levels = 1}};
+    flora::Detail{.ring_stride = 1, .sides = 1.0F, .frond_stride = 1, .frond_scale = 1.0F},
+    flora::Detail{.ring_stride = 2, .sides = 0.75F, .frond_stride = 2, .frond_scale = 1.4F},
+    flora::Detail{.ring_stride = 3, .sides = 0.5F, .frond_stride = 3, .frond_scale = 1.9F}};
 
 void append(std::vector<std::byte>& blob, const void* bytes, std::size_t count) {
     const std::span<const std::byte> source{static_cast<const std::byte*>(bytes), count};
     blob.insert(blob.end(), source.begin(), source.end());
 }
 
-// Every variant at every stage and detail, in one buffer's bytes, with the builds table.
+// Every genus' variants at every stage and detail, in one buffer's bytes, with the builds table.
 struct Carpentry {
     std::vector<std::byte> blob;
     std::array<Build, build_count> builds{};
-    std::array<std::uint32_t, forest_details> most_wood{};
-    std::array<std::uint32_t, forest_details> most_leaves{};
+    std::array<std::array<std::uint32_t, forest_details>, genus_count> most_wood{};
+    std::array<std::array<std::uint32_t, forest_details>, genus_count> most_leaves{};
 };
 
-// Bakes one grown tree at every detail, as the builds table's `grown_as` entry at each.
-void bake_variant(Carpentry& carpentry, const flora::Skeleton& skeleton, std::size_t grown_as) {
+// Bakes one grown tree of `genus` at every detail, as the builds table's `grown_as` entry at each
+// of the genus' details.
+void bake_variant(Carpentry& carpentry, std::size_t genus, int woody,
+                  const flora::Skeleton& skeleton, std::size_t grown_as) {
     float height = 0.0F;
     for (const flora::Bough& bough : skeleton.boughs) {
         for (const flora::Ring& ring : bough.rings) {
@@ -110,10 +111,13 @@ void bake_variant(Carpentry& carpentry, const flora::Skeleton& skeleton, std::si
         }
     }
     for (int detail = 0; detail < forest_details; ++detail) {
-        const flora::TreeMesh grown =
-            flora::mesh(skeleton, details[static_cast<std::size_t>(detail)]);
-        Build& build = carpentry.builds.at(
-            (static_cast<std::size_t>(detail) * stage_count * variant_count) + grown_as);
+        flora::Detail kept = details[static_cast<std::size_t>(detail)];
+        kept.wood_levels = woody;
+        const flora::TreeMesh grown = flora::mesh(skeleton, kept);
+        Build& build =
+            carpentry.builds.at((((genus * forest_details) + static_cast<std::size_t>(detail)) *
+                                 stage_count * variant_count) +
+                                grown_as);
         build.wood.x = static_cast<std::uint32_t>(carpentry.blob.size());
         append(carpentry.blob, grown.wood.data(), grown.wood.size() * sizeof(flora::WoodVertex));
         build.wood.y = static_cast<std::uint32_t>(carpentry.blob.size());
@@ -128,22 +132,26 @@ void bake_variant(Carpentry& carpentry, const flora::Skeleton& skeleton, std::si
         append(carpentry.blob, grown.leaf_indices.data(),
                grown.leaf_indices.size() * sizeof(std::uint32_t));
         build.leaf.z = static_cast<std::uint32_t>(grown.leaf_indices.size());
-        auto& wood_most = carpentry.most_wood[static_cast<std::size_t>(detail)];
+        auto& wood_most = carpentry.most_wood.at(genus)[static_cast<std::size_t>(detail)];
         wood_most = std::max(wood_most, build.wood.z);
-        auto& leaf_most = carpentry.most_leaves[static_cast<std::size_t>(detail)];
+        auto& leaf_most = carpentry.most_leaves.at(genus)[static_cast<std::size_t>(detail)];
         leaf_most = std::max(leaf_most, build.leaf.z);
     }
 }
 
-// Bakes every variant at every stage and detail.
+// Bakes every genus' variants at every stage and detail.
 Carpentry bake() {
     Carpentry carpentry;
-    const flora::Species species = flora::pine();
-    for (std::size_t stage = 0; stage < stage_count; ++stage) {
-        for (std::uint32_t variant = 0; variant < variant_count; ++variant) {
-            bake_variant(carpentry,
-                         flora::grow(flora::aged(species, stage_ages.at(stage)), 101U + variant),
-                         (stage * variant_count) + variant);
+    for (std::size_t genus = 0; genus < genus_count; ++genus) {
+        const flora::Species species = flora::species_of(static_cast<flora::Genus>(genus));
+        for (std::size_t stage = 0; stage < stage_count; ++stage) {
+            for (std::uint32_t variant = 0; variant < variant_count; ++variant) {
+                const std::uint32_t seed =
+                    101U + (static_cast<std::uint32_t>(genus) * 100U) + variant;
+                bake_variant(carpentry, genus, species.woody,
+                             flora::grow(flora::aged(species, stage_ages.at(stage)), seed),
+                             (stage * variant_count) + variant);
+            }
         }
     }
     return carpentry;
@@ -221,8 +229,7 @@ void Forest::draw(VkCommandBuffer commands, VkExtent2D extent, const AnchorPool&
               .origin = {}};
     constexpr VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    const auto plant_all = [&](const Pipeline& pipeline,
-                               const std::array<std::uint32_t, forest_details>& most) {
+    const auto plant_all = [&](const Pipeline& pipeline, const Most& most) {
         vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
         push_uniform_buffer(commands, pipeline, 0, settings_.handle());
         HOG_ASSERT(view.air.lighting != VK_NULL_HANDLE,
@@ -250,7 +257,10 @@ void Forest::draw(VkCommandBuffer commands, VkExtent2D extent, const AnchorPool&
                 glm::vec4{relative_to(draw.origin, view.camera.eye), std::bit_cast<float>(chosen)};
             vkCmdPushConstants(commands, pipeline.layout(), stages, offsetof(Push, wind),
                                sizeof(Push) - offsetof(Push, wind), &push.wind);
-            vkCmdDraw(commands, most[static_cast<std::size_t>(draw.detail)], draw.count, 0, 0);
+            vkCmdDraw(commands,
+                      most.at(static_cast<std::size_t>(draw.genus))
+                          .at(static_cast<std::size_t>(draw.detail)),
+                      draw.count, 0, 0);
         }
     };
     plant_all(wood_, most_wood_);

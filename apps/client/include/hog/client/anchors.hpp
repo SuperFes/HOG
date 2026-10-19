@@ -25,17 +25,17 @@ inline constexpr int anchor_tile_level = render::tree_lattice_level - 4;
 inline constexpr std::uint32_t tile_blocks = 16;
 
 struct TileTrees {
-    // Block by block, each block's in lattice order.
+    // Block by block, each block's pines first, then its oaks, each in lattice order.
     std::vector<render::TreeAnchor> anchors;
     // Where each block's trees begin; the last entry is the count.
     std::array<std::uint32_t, tile_blocks + 1> starts{};
 };
 
 // The tile's trees, each sampled from the world at its own spot, relative to `origin`: the one
-// placement, for the server to share one day. Pure, and deterministic for a fixed world. Needles
-// take their colour from their biome's ground colour.
+// placement, for the server to share one day. Pure, and deterministic for a fixed world. Foliage
+// takes its colour from its biome's ground colour.
 [[nodiscard]] TileTrees tile_anchors(const planet::World& world, planet::CellId tile,
-                                     WorldPosition origin, const BiomePalette& needles);
+                                     WorldPosition origin, const BiomePalette& ground);
 
 // What the eye can see: a cone round its forward, wide enough to hold the picture's corners.
 struct Sight {
@@ -93,8 +93,9 @@ private:
     struct Block {
         std::uint32_t first = 0;
         std::uint32_t count = 0;
-        Vec3 centre{0.0F};  // from the tile's origin
-        float reach = 0.0F; // metres from the centre to its farthest tree's root
+        std::uint32_t pines = 0; // of the count, the oaks after them
+        Vec3 centre{0.0F};       // from the tile's origin
+        float reach = 0.0F;      // metres from the centre to its farthest tree's root
     };
 
     struct Tile {

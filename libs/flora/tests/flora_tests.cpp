@@ -236,9 +236,9 @@ TEST_CASE("an oak spreads a broad crown of leaves on gnarled limbs", "[flora]") 
         CHECK(fingered(mesh(grow(aged(oak(), prime_age), seed))) ==
               fingered(mesh(grow(oak(), seed))));
     }
-    CHECK(fingered(mesh(tree, Detail{.wood_levels = oak().woody})) == 0x204f'ff67'f29e'e35cULL);
-    CHECK(fingered(mesh(grow(aged(oak(), 0.15F), 7U))) == 0x0c5c'0094'2b6c'00afULL);
-    CHECK(fingered(mesh(grow(aged(oak(), 0.95F), 7U))) == 0x7406'ecd4'14f8'63c4ULL);
+    CHECK(fingered(mesh(tree, Detail{.wood_levels = oak().woody})) == 0xd26c'1353'cae4'6736ULL);
+    CHECK(fingered(mesh(grow(aged(oak(), 0.15F), 7U))) == 0x42b3'4987'2012'bb37ULL);
+    CHECK(fingered(mesh(grow(aged(oak(), 0.95F), 7U))) == 0x4028'5d46'9695'8f1bULL);
 }
 
 TEST_CASE("leaves hold full along a frond, needles thin evenly", "[flora]") {

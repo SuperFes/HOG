@@ -57,8 +57,8 @@ float unit(uint at) {
     return float(hashed(at) & 0xffffu) / 65536.0;
 }
 
-// As render::needles_of unpacks them: square-rooted bytes, squared back.
-float3 needles_of(uint packed) {
+// As render::foliage_of unpacks them: square-rooted bytes, squared back.
+float3 foliage_of(uint packed) {
     const float3 rooted = float3(float(packed & 0xffu), float((packed >> 8) & 0xffu),
                                  float((packed >> 16) & 0xffu)) / 255.0;
     return rooted * rooted;
@@ -110,7 +110,7 @@ Tree vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const float grown = asfloat(anchors.Load(at + 12));
     const float3 normal = asfloat(anchors.Load3(at + 16));
     const uint hash = anchors.Load(at + 28);
-    const float3 crown = needles_of(anchors.Load(at + 32));
+    const float3 crown = foliage_of(anchors.Load(at + 32));
     const float age = saturate(asfloat(anchors.Load(at + 36)));
 
     const float away = length(root);

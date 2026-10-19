@@ -21,9 +21,9 @@ inline constexpr double forest_far = 240.0;
 // Baked levels of detail, finest first.
 inline constexpr int forest_details = 3;
 
-// Pines grown whole by libs/flora, a few variants baked at a few details, each planted on a tree
-// anchor bound to its spot in the world: solid trunks and boughs, needle-spray cards. Every tree
-// sheds detail by its own distance.
+// Trees grown whole by libs/flora, each genus a few variants baked at a few stages and details,
+// each planted on a tree anchor bound to its spot in the world: solid wood, foliage as solid
+// fronds. Every tree sheds detail by its own distance.
 class Forest {
 public:
     // The fullest detail reaches `full` metres and the middle one `mid`; the forest itself ends
@@ -43,9 +43,10 @@ private:
     Pipeline leaves_;
     Buffer settings_;
     Buffer carpentry_;
-    // The most indices any variant carries at each detail: a draw's vertex counts.
-    std::array<std::uint32_t, forest_details> most_wood_{};
-    std::array<std::uint32_t, forest_details> most_leaves_{};
+    // The most indices any of a genus' variants carries at each detail: a draw's vertex counts.
+    using Most = std::array<std::array<std::uint32_t, forest_details>, flora::genus_count>;
+    Most most_wood_{};
+    Most most_leaves_{};
 };
 
 } // namespace hog::render

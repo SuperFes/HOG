@@ -2,6 +2,7 @@
 
 #include <hog/client/anchors.hpp>
 #include <hog/client/scene.hpp>
+#include <hog/flora/species.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/render/forest.hpp>
 
@@ -71,7 +72,7 @@ TEST_CASE("anchored trees are bound to their spots, the same every build", "[cli
         CHECK(anchor.height < 25.0F);
         const hog::DVec3 up = glm::normalize(origin.metres());
         CHECK(glm::dot(glm::dvec3{anchor.normal}, up) > 0.65);
-        CHECK(hog::render::needles_of(anchor.colour).g > 0.0F);
+        CHECK(hog::render::foliage_of(anchor.colour).g > 0.0F);
         CHECK(anchor.age >= 0.0F);
         CHECK(anchor.age <= 1.0F);
     }
@@ -102,6 +103,14 @@ TEST_CASE("a tile's trees are kept in blocks, each a patch of ground of its own"
     for (std::size_t block = 0; block < hog::client::tile_blocks; ++block) {
         REQUIRE(trees.starts.at(block) <= trees.starts.at(block + 1));
         CHECK(trees.starts.at(block + 1) - trees.starts.at(block) <= 16);
+        // Pines first, then oaks: each genus a run the grown forest draws by its own count.
+        bool oaks = false;
+        for (std::uint32_t at = trees.starts.at(block); at < trees.starts.at(block + 1); ++at) {
+            const bool oak =
+                hog::render::genus_of(trees.anchors.at(at).colour) == hog::flora::Genus::Oak;
+            CHECK((oak || !oaks));
+            oaks = oaks || oak;
+        }
         for (std::uint32_t a = trees.starts.at(block); a < trees.starts.at(block + 1); ++a) {
             for (std::uint32_t b = a; b < trees.starts.at(block + 1); ++b) {
                 const glm::vec3 apart = trees.anchors.at(a).position - trees.anchors.at(b).position;

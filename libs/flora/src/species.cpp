@@ -79,10 +79,10 @@ Species oak() {
                      .taper = 0.75F,
                      .sections = 8,
                      .sides = 7,
-                     .children = 6,
+                     .children = 7,
                      .whorl = 1,
                      .start = 0.35F,
-                     .angle = 0.85F,
+                     .angle = 0.9F,
                      .fall = 0.25F,
                      .gnarl = 0.09F,
                      .rise = 0.0F};
@@ -92,14 +92,14 @@ Species oak() {
                      .taper = 0.8F,
                      .sections = 5,
                      .sides = 5,
-                     .children = 8,
+                     .children = 16,
                      .whorl = 1,
-                     .start = 0.2F,
+                     .start = 0.1F,
                      .angle = 0.75F,
                      .fall = 0.4F,
                      .gnarl = 0.18F,
-                     .rise = 0.01F};
-    oak.levels[2] = {.length = 2.2F,
+                     .rise = 0.012F};
+    oak.levels[2] = {.length = 1.8F,
                      .sway = 0.3F,
                      .radius = 0.5F,
                      .taper = 0.9F,
@@ -112,7 +112,7 @@ Species oak() {
                      .fall = 0.0F,
                      .gnarl = 0.2F,
                      .rise = 0.0F};
-    oak.frond_width = 0.5F;
+    oak.frond_width = 0.6F;
     oak.frond_sway = 0.3F;
     oak.frond_tilt = 0.7F;
     oak.frond_fullness = 1.0F;
@@ -121,12 +121,12 @@ Species oak() {
     // spread wide and level, gnarled with age.
     oak.ageing = {.girth = {.young = 0.2F, .old = 1.5F},
                   .crowded = {.young = 0.5F, .old = 1.0F},
-                  .raised = {.young = 0.6F, .old = 1.2F},
+                  .raised = {.young = 0.6F, .old = 1.3F},
                   .fall = {.young = 1.0F, .old = 1.0F},
-                  .lean = {.young = 0.6F, .old = 1.25F},
+                  .lean = {.young = 0.6F, .old = 1.0F},
                   .gnarl = {.young = 0.5F, .old = 1.8F},
-                  .reach = {.young = 0.4F, .old = 1.3F},
-                  .rise = {.young = 2.0F, .old = 0.3F}};
+                  .reach = {.young = 0.4F, .old = 1.2F},
+                  .rise = {.young = 2.0F, .old = 1.0F}};
     return oak;
 }
 

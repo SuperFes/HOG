@@ -54,9 +54,10 @@ std::uint32_t hashed(std::uint32_t at) {
     return at;
 }
 
-// A rank of pines anchored east to west, `away` metres north of the tile's origin.
+// A rank of trees anchored east to west, `away` metres north of the tile's origin.
 std::vector<TreeAnchor> rank_of(int count, double away, float height = 11.0F,
-                                float age = hog::flora::prime_age) {
+                                float age = hog::flora::prime_age,
+                                hog::flora::Genus genus = hog::flora::Genus::Pine) {
     std::vector<TreeAnchor> anchors;
     for (int tree = 0; tree < count; ++tree) {
         const double spread = (static_cast<double>(tree) - ((count - 1) * 0.5)) * 8.0;
@@ -64,7 +65,7 @@ std::vector<TreeAnchor> rank_of(int count, double away, float height = 11.0F,
                            .height = height,
                            .normal = Vec3{0.0F, 0.0F, 1.0F},
                            .hash = hashed(static_cast<std::uint32_t>(tree) * 2654435761U),
-                           .colour = hog::render::packed_needles(needles, 1.0F),
+                           .colour = hog::render::packed_foliage(needles, genus),
                            .age = age});
     }
     return anchors;
@@ -181,19 +182,22 @@ std::size_t leafy_pixels(const Pixels& pixels, std::uint32_t from = 0) {
 
 } // namespace
 
-TEST_CASE("needles pack into a word, dark shades kept", "[render]") {
+TEST_CASE("foliage packs into a word with its genus, dark shades kept", "[render]") {
+    using hog::flora::Genus;
     const Vec3 dark{0.02F, 0.06F, 0.03F};
-    const std::uint32_t packed = hog::render::packed_needles(dark, 0.4F);
-    const Vec3 back = hog::render::needles_of(packed);
+    const std::uint32_t packed = hog::render::packed_foliage(dark, Genus::Oak);
+    const Vec3 back = hog::render::foliage_of(packed);
     for (glm::length_t channel = 0; channel < 3; ++channel) {
         CHECK(std::abs(back[channel] - dark[channel]) < dark[channel] * 0.05F);
     }
-    CHECK(std::abs(hog::render::wooded_of(packed) - 0.4F) < 0.003F);
-    // Out of range clamps rather than spilling into the next channel.
-    const std::uint32_t bright = hog::render::packed_needles(Vec3{2.0F, -1.0F, 0.5F}, 3.0F);
-    CHECK(hog::render::needles_of(bright).r == 1.0F);
-    CHECK(hog::render::needles_of(bright).g == 0.0F);
-    CHECK(hog::render::wooded_of(bright) == 1.0F);
+    CHECK(hog::render::genus_of(packed) == Genus::Oak);
+    CHECK(hog::render::genus_of(hog::render::packed_foliage(dark, Genus::Pine)) == Genus::Pine);
+    // Out of range clamps rather than spilling into the next channel; an unknown genus is a pine.
+    const std::uint32_t bright = hog::render::packed_foliage(Vec3{2.0F, -1.0F, 0.5F}, Genus::Oak);
+    CHECK(hog::render::foliage_of(bright).r == 1.0F);
+    CHECK(hog::render::foliage_of(bright).g == 0.0F);
+    CHECK(hog::render::genus_of(bright) == Genus::Oak);
+    CHECK(hog::render::genus_of(0xff00'0000U) == Genus::Pine);
 }
 
 TEST_CASE("a stamp stands on its anchor, trunk under a tiered crown", "[render]") {

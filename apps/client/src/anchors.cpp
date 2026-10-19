@@ -7,7 +7,9 @@
 #include <glm/geometric.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <numbers>
 #include <optional>
@@ -84,7 +86,7 @@ std::set<planet::CellId> tiles_wanted(WorldPosition eye, double radius, double s
 // The tree a lattice cell stands, if any, sampled from the world at its own spot.
 std::optional<render::TreeAnchor> anchor_at(const planet::World& world, std::uint32_t face,
                                             std::uint32_t i, std::uint32_t j, WorldPosition origin,
-                                            const BiomePalette& needles) {
+                                            const BiomePalette& palette) {
     const double radius = world.geology().planet_radius();
     const auto across = static_cast<double>(std::uint32_t{1} << render::tree_lattice_level);
     // The normal leans over the hillside around the spot, half a lattice cell each way: a tree
@@ -119,17 +121,16 @@ std::optional<render::TreeAnchor> anchor_at(const planet::World& world, std::uin
         .height = stood->height,
         .normal = Vec3{normal},
         .hash = stood->hash,
-        .colour = render::packed_needles(
-            flora::foliage_colour(flora::Genus::Pine,
-                                  needles[static_cast<std::size_t>(ground.biome)]),
-            stood->wooded),
+        .colour = render::packed_foliage(
+            flora::foliage_colour(stood->genus, palette[static_cast<std::size_t>(ground.biome)]),
+            stood->genus),
         .age = stood->age};
 }
 
 } // namespace
 
 TileTrees tile_anchors(const planet::World& world, planet::CellId tile, WorldPosition origin,
-                       const BiomePalette& needles) {
+                       const BiomePalette& ground) {
     TileTrees trees;
     const planet::FaceIJ at = tile.to_face_ij();
     for (std::uint32_t block = 0; block < tile_blocks; ++block) {
@@ -141,12 +142,18 @@ TileTrees tile_anchors(const planet::World& world, planet::CellId tile, WorldPos
                 const std::optional<render::TreeAnchor> anchor =
                     anchor_at(world, static_cast<std::uint32_t>(at.face),
                               (static_cast<std::uint32_t>(at.i) * tile_side) + a,
-                              (static_cast<std::uint32_t>(at.j) * tile_side) + b, origin, needles);
+                              (static_cast<std::uint32_t>(at.j) * tile_side) + b, origin, ground);
                 if (anchor) {
                     trees.anchors.push_back(*anchor);
                 }
             }
         }
+        // Each genus a run of its own, for the grown forest to draw by its own vertex count.
+        std::stable_partition(
+            std::next(trees.anchors.begin(), static_cast<std::ptrdiff_t>(trees.starts.at(block))),
+            trees.anchors.end(), [](const render::TreeAnchor& anchor) {
+                return render::genus_of(anchor.colour) == flora::Genus::Pine;
+            });
     }
     trees.starts.back() = static_cast<std::uint32_t>(trees.anchors.size());
     return trees;
@@ -268,6 +275,10 @@ TreeAnchors::Tile TreeAnchors::held_tile(std::uint32_t slot, WorldPosition origi
             sum += anchor.position;
         }
         block.centre = sum / static_cast<float>(block.count);
+        block.pines = static_cast<std::uint32_t>(
+            std::ranges::count_if(stood, [](const render::TreeAnchor& anchor) {
+                return render::genus_of(anchor.colour) == flora::Genus::Pine;
+            }));
         for (const render::TreeAnchor& anchor : stood) {
             block.reach = std::max(block.reach, glm::length(anchor.position - block.centre));
         }
@@ -324,12 +335,22 @@ std::vector<render::StandDraw> TreeAnchors::forest_draws(const Sight& sight,
             } else if (distance < budget.forest_mid) {
                 detail = 1;
             }
-            stands.push_back({.slot = tile.slot,
-                              .first = block.first,
-                              .count = block.count,
-                              .origin = tile.origin,
-                              .detail = detail,
-                              .distance = distance});
+            const std::array<std::pair<flora::Genus, std::uint32_t>, 2> runs{
+                {{flora::Genus::Pine, block.pines},
+                 {flora::Genus::Oak, block.count - block.pines}}};
+            std::uint32_t first = block.first;
+            for (const auto& [genus, count] : runs) {
+                if (count > 0) {
+                    stands.push_back({.slot = tile.slot,
+                                      .first = first,
+                                      .count = count,
+                                      .origin = tile.origin,
+                                      .detail = detail,
+                                      .genus = genus,
+                                      .distance = distance});
+                }
+                first += count;
+            }
         }
     }
     return stands;

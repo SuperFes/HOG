@@ -2,6 +2,7 @@
 
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
+#include <hog/flora/species.hpp>
 #include <hog/render/memory.hpp>
 #include <hog/render/vulkan.hpp>
 
@@ -22,15 +23,15 @@ struct TreeAnchor {
     float height = 0.0F;           // the tree's, metres
     Vec3 normal{0.0F, 0.0F, 1.0F}; // the ground's, unit
     std::uint32_t hash = 0;        // the tree's own dice
-    std::uint32_t colour = 0;      // its needles' and how wooded, as packed_needles() packs them
+    std::uint32_t colour = 0;      // its foliage's and its genus, as packed_foliage() packs them
     float age = 0.0F;              // 0 a sapling, 1 full grown
 };
 
-// Needles' colour in a byte a channel, kept square-rooted so dark needles keep their shades, with
-// how deep in a stand the tree grows, 0 to 1, in the last byte.
-[[nodiscard]] std::uint32_t packed_needles(Vec3 colour, float wooded) noexcept;
-[[nodiscard]] Vec3 needles_of(std::uint32_t packed) noexcept;
-[[nodiscard]] float wooded_of(std::uint32_t packed) noexcept;
+// Foliage's colour in a byte a channel, kept square-rooted so dark needles keep their shades, with
+// the tree's genus in the last byte.
+[[nodiscard]] std::uint32_t packed_foliage(Vec3 colour, flora::Genus genus) noexcept;
+[[nodiscard]] Vec3 foliage_of(std::uint32_t packed) noexcept;
+[[nodiscard]] flora::Genus genus_of(std::uint32_t packed) noexcept;
 
 // The fixed lattice trees are anchored to, coarser than the bushes': one tree at most in each
 // level-14 cell, bound to its spot in the world for ever.
@@ -96,7 +97,9 @@ struct StandDraw {
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     WorldPosition origin = {}; // the tile's, the anchors' positions relative to it
     int detail = 0;            // the finest build the nearest tree drawn needs
-    double distance = 0.0;     // metres to the nearest tree drawn, generously
+    // The grown forest's draws hold one genus each, bounding their vertex counts by its own.
+    flora::Genus genus = flora::Genus::Pine;
+    double distance = 0.0; // metres to the nearest tree drawn, generously
 };
 
 } // namespace hog::render

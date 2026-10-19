@@ -3,7 +3,7 @@ import bend;
 import shadow;
 import tone;
 
-// The grown forest: whole pines from libs/flora, a few variants baked at a few details, each
+// The grown forest: whole trees from libs/flora, a few variants baked at a few details, each
 // planted on a tree anchor bound to its spot in the world. The far stamps draw from the very same
 // anchors, so the handoff at the forest's reach swaps representation, never trees.
 
@@ -23,11 +23,12 @@ struct Push {
 
 [[vk::push_constant]] ConstantBuffer<Push> push;
 
+static const uint genus_count = 2;
 static const uint detail_count = 3;
 static const uint stage_count = 4;
 static const uint variant_count = 8;
 
-// Where each variant's wood and leaves lie in the carpentry, per detail and stage of growth: x the
+// Where each variant's wood and leaves lie in the carpentry, per genus, detail and stage of growth: x the
 // vertex bytes' start, y the index bytes' start, z the index count; wood's w the baked height's
 // bits.
 struct Build {
@@ -41,7 +42,7 @@ struct Settings {
     float4 bands;
     // The ages between one baked stage and the next, sapling to old; w unused.
     float4 stages;
-    Build builds[detail_count * stage_count * variant_count];
+    Build builds[genus_count * detail_count * stage_count * variant_count];
 };
 
 [[vk::binding(0, 0)]] ConstantBuffer<Settings> settings;
@@ -60,7 +61,9 @@ static const uint anchor_stride = 40; // bytes, as render::TreeAnchor lies
 static const uint wood_stride = 24;   // bytes, as flora::WoodVertex lies
 static const uint leaf_stride = 36;   // bytes, as flora::LeafVertex lies
 
-static const float3 bark = float3(0.055, 0.045, 0.038);
+// Pine bark dark and red-brown, oak's paler and grey.
+static const float3 barks[genus_count] = { float3(0.055, 0.045, 0.038), float3(0.07, 0.064, 0.056) };
+static const uint oak = 1;
 
 uint hashed(uint at) {
     at ^= at >> 16;
@@ -75,11 +78,17 @@ float unit(uint at) {
     return float(hashed(at) & 0xffffu) / 65536.0;
 }
 
-// As render::needles_of unpacks them: square-rooted bytes, squared back.
-float3 needles_of(uint packed) {
+// As render::foliage_of unpacks them: square-rooted bytes, squared back.
+float3 foliage_of(uint packed) {
     const float3 rooted = float3(float(packed & 0xffu), float((packed >> 8) & 0xffu),
                                  float((packed >> 16) & 0xffu)) / 255.0;
     return rooted * rooted;
+}
+
+// As render::genus_of: the last byte, anything unknown a pine.
+uint genus_of(uint packed) {
+    const uint genus = packed >> 24;
+    return genus < genus_count ? genus : 0u;
 }
 
 struct Planted {
@@ -93,6 +102,7 @@ struct Planted {
     float3 along;     // the wind's direction
     float height_above; // of its ground, over the sea
     uint hash;
+    uint genus;
     uint build;       // into the carpentry's builds
 };
 
@@ -112,6 +122,7 @@ Planted plant(uint instance) {
     const float3 normal = asfloat(anchors.Load3(at + 16));
     const uint hash = anchors.Load(at + 28);
     const float age = asfloat(anchors.Load(at + 36));
+    const uint genus = genus_of(anchors.Load(at + 32));
 
     const float away = length(root);
     if (away >= settings.bands.z) {
@@ -138,7 +149,9 @@ Planted plant(uint instance) {
     const uint variant = hashed(hash + 9u) % variant_count;
     const uint stage = uint(age >= settings.stages.x) + uint(age >= settings.stages.y) +
                        uint(age >= settings.stages.z);
-    planted.build = (((lod * stage_count) + stage) * variant_count) + variant;
+    planted.build =
+        (((((genus * detail_count) + lod) * stage_count) + stage) * variant_count) + variant;
+    planted.genus = genus;
     const Build build = settings.builds[planted.build];
     planted.scale = grown / max(asfloat(build.wood.w), 0.1);
 
@@ -213,7 +226,7 @@ Timber wood_vertex(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     timber.drawn = bent(timber.from_eye, push.bend_up, push.bend_radii.xy);
     timber.position = mul(push.clip_from_eye, float4(timber.drawn, 1.0));
     timber.normal = turned(planted, local_normal);
-    timber.colour = bark * (0.85 + (0.3 * unit(planted.hash + 7u)));
+    timber.colour = barks[planted.genus] * (0.85 + (0.3 * unit(planted.hash + 7u)));
     timber.height = planted.height_above;
     return timber;
 }
@@ -260,6 +273,7 @@ struct Spray {
     float2 card;  // -0.5 to 0.5 across the frond, 0 at its spine; 0 to 1 along it
     float pixels; // the frond's length in pixels, for shedding detail far off
     nointerpolation uint seed;
+    nointerpolation uint genus;
 };
 
 Spray no_spray() {
@@ -273,6 +287,7 @@ Spray no_spray() {
     gone.card = float2(0.0);
     gone.pixels = 0.0;
     gone.seed = 0;
+    gone.genus = 0;
     return gone;
 }
 
@@ -286,7 +301,7 @@ Spray leaf_vertex(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     if (vertex >= build.leaf.z) {
         return no_spray();
     }
-    const float3 needles = needles_of(anchors.Load(anchored(instance) + 32));
+    const float3 foliage = foliage_of(anchors.Load(anchored(instance) + 32));
     const uint index = carpentry.Load(build.leaf.y + (vertex * 4));
     const uint at = build.leaf.x + (index * leaf_stride);
     const float3 local = asfloat(carpentry.Load3(at));
@@ -304,13 +319,14 @@ Spray leaf_vertex(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
                                              (normalize(bulge) * 0.5)));
     // Toned as the stamps tone the same tree: the tree's own cast, darker low in the crown.
     const float toward_top = saturate(local.z / max(asfloat(build.wood.w), 0.1));
-    spray.colour = needles * (0.75 + (0.45 * unit(planted.hash + 7u))) *
+    spray.colour = foliage * (0.75 + (0.45 * unit(planted.hash + 7u))) *
                    (0.85 + (0.3 * unit(seed + 1u))) * (0.75 + (0.25 * toward_top));
     spray.height = planted.height_above;
     spray.card = card;
     spray.pixels =
         (2.4 * planted.scale) / max(push.bend_radii.w * max(length(planted.root), 1.0), 1e-6);
     spray.seed = seed;
+    spray.genus = planted.genus;
     return spray;
 }
 
@@ -326,11 +342,30 @@ float needled(uint seed, float2 card, float pixels) {
     return 1.0 + (melt * 0.5 * (streak - 0.5));
 }
 
+// Leaves' own texture: clusters each catching the light its own way, a mottle rather than a comb,
+// melting to one tone as the needles do.
+float leafed(uint seed, float2 card, float pixels) {
+    if (pixels < 12.0) {
+        return 1.0;
+    }
+    const uint across = uint((card.x + 0.5) * 4.0);
+    const uint along = uint(card.y * 6.0);
+    const float cluster = unit(seed + (across * 7u) + (along * 31u));
+    const float melt = saturate((pixels - 12.0) / 24.0);
+    return 1.0 + (melt * 0.6 * (cluster - 0.5));
+}
+
 [shader("fragment")]
 float4 leaf_fragment(Spray spray, bool front: SV_IsFrontFace) : SV_Target {
-    // Brightest along the outer needles, shadowed at the stem, dark beneath the bough.
-    const float shaped = (0.75 + (0.5 * saturate(abs(spray.card.x) * 2.0))) * (front ? 1.0 : 0.72);
-    const float3 albedo = spray.colour * shaped * needled(spray.seed, spray.card, spray.pixels);
+    // Needles brightest along the outer edge, shadowed at the stem; leaves lit across their face.
+    // Either is dark beneath the bough.
+    const bool leaves = spray.genus == oak;
+    const float edge = leaves ? 0.3 : 0.5;
+    const float shaped =
+        (1.0 - (edge * 0.5) + (edge * saturate(abs(spray.card.x) * 2.0))) * (front ? 1.0 : 0.72);
+    const float texture = leaves ? leafed(spray.seed, spray.card, spray.pixels)
+                                 : needled(spray.seed, spray.card, spray.pixels);
+    const float3 albedo = spray.colour * shaped * texture;
     return float4(
         forest_lit(albedo, spray.normal, spray.from_eye, spray.drawn, spray.height, 0.3), 1.0);
 }
