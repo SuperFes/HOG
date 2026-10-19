@@ -468,7 +468,7 @@ Builds on Phase 5's condition states. The server owns every tree's record, as it
 - [ ] Regrowth: suckers and coppice shoots from stumps of the species that do it, and seedlings filling gaps, as the succession rules decide.
 - [ ] Fire's marks: scorched bark on survivors, burned snags, ash ground that greens over again.
 - [ ] Lightning strikes, disease and pest outbreaks as rare sim events that kill trees in patches.
-- [ ] Seasons for deciduous species: leaf-out, autumn colour, bare winter crowns, snow resting on boughs.
+- [ ] Seasons for deciduous species: leaf-out, autumn colour, bare winter crowns, snow resting on boughs. Each tree turns on its own date, set by its seed and age and the same every year, so one tree is already red while its neighbours are still green. Autumn crowns mix colours. Leaves fall as wind-blown GPU particles near the eye, and the ground under the trees is tinted with them.
 - [ ] Harvest yields from the same records: wood by species and age, bark, resin, fruit and seed. Crafting (Phase 7) reads them.
 - [ ] Tree changes replicated to clients by cell, as weather is. The anchor tiles rebuild from them (`TreeAnchors::changed`, not yet wired to world changes).
 
@@ -477,6 +477,7 @@ Builds on Phase 5's condition states. The server owns every tree's record, as it
 - [ ] Bushes onto CPU anchors like the trees, so they too stay put at every terrain level and the server can own them
 - [ ] Anchor tiles built off the main thread, if building them ever shows in frame times
 - [ ] Forest beyond the stamps' 900 m folded into the ground as density and colour, so woods don't end at a line seen from the air
+- [ ] Solid leaf masses ("tree haircut"): crowns modelled as clumped blobs and lit like the clouds, textured in the tree's current leaf colours, and a billboard far off. Bushes get the same treatment, replacing their billboards.
 - [ ] Needle and bark textures, CC0 or procedural, to replace the shader's streaks if they earn it
 - [ ] Richer growth per species at `flora::grow`, such as space colonisation for broadleaf crowns that grow toward light and around their neighbours
 
