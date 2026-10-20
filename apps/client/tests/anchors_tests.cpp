@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstring>
 #include <numbers>
+#include <optional>
 #include <vector>
 
 using hog::client::anchor_tile_level;
@@ -86,6 +87,46 @@ TEST_CASE("the open sea anchors no trees", "[client][anchors]") {
     const hog::planet::CellId tile = hog::planet::cell_at(opposite, anchor_tile_level);
     const hog::WorldPosition origin{hog::planet::cell_center(tile) * radius};
     CHECK(tile_anchors(world(), tile, origin, palette).anchors.empty());
+}
+
+TEST_CASE("palms anchor on the islands' warmest shores, and only where it is warm enough",
+          "[client][anchors]") {
+    const hog::client::BiomePalette palette = hog::client::biome_palette();
+    const double radius = world().geology().planet_radius();
+    // A warm stretch of beach, found by walking each island's ground.
+    std::optional<hog::planet::CellId> shore;
+    for (const auto& island : world().geology().terrain().archipelago().islands()) {
+        const hog::DVec3 east =
+            glm::normalize(glm::cross(hog::DVec3{0.0, 0.0, 1.0}, island.center));
+        const hog::DVec3 north = glm::cross(island.center, east);
+        const double step = 200.0 / radius;
+        for (int a = -30; a <= 30 && !shore; ++a) {
+            for (int b = -30; b <= 30 && !shore; ++b) {
+                const hog::planet::CellId cell = hog::planet::cell_at(
+                    glm::normalize(island.center + (east * (a * step)) + (north * (b * step))), 18);
+                const hog::planet::CellState state = world().state(cell);
+                if (state.biome == hog::planet::Biome::Beach &&
+                    state.temperature > 17 * hog::planet::fixed_one) {
+                    shore = cell;
+                }
+            }
+        }
+    }
+    REQUIRE(shore.has_value());
+    const hog::planet::CellId tile =
+        shore.value_or(hog::planet::CellId::from_face_ij(0, 0, 0, 0)).parent(anchor_tile_level);
+    const hog::WorldPosition origin{hog::planet::cell_center(tile) * radius};
+    std::size_t palms = 0;
+    for (const TreeAnchor& anchor : tile_anchors(world(), tile, origin, palette).anchors) {
+        if (hog::render::genus_of(anchor.colour) != hog::flora::Genus::Palm) {
+            continue;
+        }
+        ++palms;
+        const hog::planet::CellState ground =
+            world().state(hog::planet::cell_at(origin + hog::DVec3{anchor.position}));
+        CHECK(ground.temperature > 14 * hog::planet::fixed_one);
+    }
+    CHECK(palms > 0);
 }
 
 TEST_CASE("a tile's trees are kept in blocks, each a patch of ground of its own",

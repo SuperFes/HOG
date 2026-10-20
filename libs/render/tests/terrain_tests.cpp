@@ -879,3 +879,18 @@ TEST_CASE("woods far off turn with the year, the pines' all year green", "[rende
           from_above(*device, {.woods = pines, .air = true, .daylight = summer}));
     CHECK(device->validation_errors() == 0);
 }
+
+TEST_CASE("palm groves far off are woods of their own, green the year round", "[render][gpu]") {
+    const auto device = test_device();
+    constexpr hog::flora::Daylight summer{.hours = 15.0F, .longest = 15.4F};
+    constexpr hog::flora::Daylight winter{.hours = 9.0F, .longest = 15.4F, .lengthening = true};
+    constexpr hog::terrain::Woods palms{80, 120, 0, 0, 255};
+    constexpr hog::terrain::Woods pines{80, 120, 0, 0, 0};
+    const auto summer_palms =
+        from_above(*device, {.woods = palms, .air = true, .daylight = summer});
+    CHECK(summer_palms == from_above(*device, {.woods = palms, .air = true, .daylight = winter}));
+    CHECK(summer_palms != from_above(*device, {.woods = pines, .air = true, .daylight = summer}));
+    const auto none = from_above(*device, {.canopy = 0.0, .air = true});
+    CHECK(mean_of(summer_palms, 1, true) < mean_of(none, 1, true) - 10.0);
+    CHECK(device->validation_errors() == 0);
+}

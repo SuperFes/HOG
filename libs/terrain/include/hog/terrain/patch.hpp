@@ -73,8 +73,9 @@ struct Corner {
 
 // The woods over a vertex, as flora::woodland_at averages them, a byte each from 0 to 255: the
 // trees to every hundred square metres, up to woods_crowding; their mean height as pines, up to
-// woods_tallest metres; of them the broadleaves; and of those the maples.
-using Woods = std::array<std::uint8_t, 4>;
+// woods_tallest metres; of those not palms the broadleaves; of those the maples; and of all the
+// trees the palms.
+using Woods = std::array<std::uint8_t, 5>;
 inline constexpr float woods_crowding = 2.0F;
 inline constexpr float woods_tallest = 32.0F;
 
@@ -85,8 +86,10 @@ struct PatchVertex {
     Vec3 position{0.0F}; // metres from the patch's origin
     Vec3 normal{0.0F};
     planet::Biome biome = planet::Biome::Ocean;
-    alignas(4) Woods woods{};
+    Woods woods{};
 };
+
+static_assert(sizeof(PatchVertex) == 32);
 
 // Metres from sea level.
 struct HeightRange {

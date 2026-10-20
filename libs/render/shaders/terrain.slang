@@ -56,6 +56,7 @@ struct Vertex {
     [[vk::location(1)]] float3 normal;
     [[vk::location(2)]] uint biome;
     [[vk::location(3)]] float4 woods; // as terrain::Woods, each byte read 0 to 1
+    [[vk::location(4)]] float palms;  // the last of them
 };
 
 struct Ground {
@@ -67,6 +68,7 @@ struct Ground {
     // Each biome's share, four to a vector: all of one at a corner, blended across a triangle.
     float4 biomes[(biome_count + 3) / 4];
     float4 woods;
+    float palms;
 };
 
 // Ground no higher above sea level than this, by the metre it lies from the eye, is too near level
@@ -170,6 +172,7 @@ Ground vertex_main(Vertex vertex) {
     }
     ground.biomes[biome / 4][biome % 4] = 1.0;
     ground.woods = vertex.woods;
+    ground.palms = vertex.palms;
     return ground;
 }
 
@@ -245,8 +248,9 @@ float3 wooded(Ground ground, float3 bare, float4 year) {
     const float tall = ground.woods.y * woods_tallest;
     const float broadleaf = ground.woods.z;
     const float maple = ground.woods.w;
-    const float shares[genus_count] = { 1.0 - broadleaf, broadleaf * (1.0 - maple),
-                                        broadleaf * maple, 0.0 };
+    const float others = 1.0 - ground.palms;
+    const float shares[genus_count] = { others * (1.0 - broadleaf), others * broadleaf * (1.0 - maple),
+                                        others * broadleaf * maple, ground.palms };
     const float steep = dot(-ground.from_eye / max(away, 1e-3), up_at(ground));
     const float aslant = min(sqrt(max(1.0 - (steep * steep), 0.0)) / max(steep, 1e-3), grazing);
 

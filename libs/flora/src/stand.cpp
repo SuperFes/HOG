@@ -72,6 +72,8 @@ constexpr std::uint32_t broadleaf_period_log = 5;
 constexpr std::uint32_t broadleaf_salt = 0x0a4c1U;
 constexpr std::uint32_t maple_period_log = 4;
 constexpr std::uint32_t maple_salt = 0x3a91eU;
+constexpr std::uint32_t palm_period_log = 3;
+constexpr std::uint32_t palm_salt = 0x9a1f3U;
 
 // How deep into a stand a tree grows makes it older, and its age taller.
 float stand_age(float wooded) noexcept {
@@ -105,6 +107,12 @@ std::uint32_t cell_hash(std::uint32_t lattice_i, std::uint32_t lattice_j,
     return hashed(hashed(lattice_i ^ (face * 0x9e3779b9U)) + lattice_j);
 }
 
+float suited(Genus genus, float temperature) noexcept {
+    const Range range = range_of(genus);
+    return saturated((temperature - (range.coldest - range.margin)) / range.margin) *
+           saturated(((range.warmest + range.margin) - temperature) / range.margin);
+}
+
 float stand_field(Vec2 cell, std::uint32_t face) noexcept {
     return (0.65F * stand_octave(cell, face, 6U, 0x51a9dU)) +
            (0.35F * stand_octave(cell, face, 4U, 0xb07a7U));
@@ -116,7 +124,8 @@ Vec2 tree_spot(std::uint32_t lattice_i, std::uint32_t lattice_j, std::uint32_t f
 }
 
 std::optional<Stood> tree_grown(std::uint32_t lattice_i, std::uint32_t lattice_j,
-                                std::uint32_t face, planet::Biome biome) noexcept {
+                                std::uint32_t face, planet::Biome biome,
+                                float temperature) noexcept {
     const BiomeTrees trees = trees_of(biome);
     if (trees.height <= 0.0F) {
         return std::nullopt;
@@ -136,22 +145,46 @@ std::optional<Stood> tree_grown(std::uint32_t lattice_i, std::uint32_t lattice_j
     // Quick to rise while young, then barely taller.
     float height =
         trees.height * reached(age) * (0.85F + (0.3F * unit(hash + 5U))) * stand_scale(wooded);
-    // Broadleaves gather in groves of their own, maples in smaller stands within them.
+    // Palms gather in groves of their own; of the rest, broadleaves in theirs, maples in smaller
+    // stands within them.
     Genus genus = Genus::Pine;
-    if (trees.broadleaf > 0.0F && drawn_in(cell, face, broadleaf_period_log, broadleaf_salt,
-                                           unit(hash + 8U), trees.broadleaf)) {
+    if (trees.palm > 0.0F &&
+        drawn_in(cell, face, palm_period_log, palm_salt, unit(hash + 16U), trees.palm)) {
+        genus = Genus::Palm;
+    } else if (trees.broadleaf > 0.0F && drawn_in(cell, face, broadleaf_period_log, broadleaf_salt,
+                                                  unit(hash + 8U), trees.broadleaf)) {
         genus = drawn_in(cell, face, maple_period_log, maple_salt, unit(hash + 14U), trees.maple)
                     ? Genus::Maple
                     : Genus::Oak;
-        height *= stature(genus);
     }
+    // Each kind thins out toward the edges of its climate, leaving the ground to the others.
+    if (unit(hash + 18U) >= suited(genus, temperature)) {
+        return std::nullopt;
+    }
+    height *= stature(genus);
     return Stood{
         .spot = spot, .height = height, .wooded = wooded, .age = age, .hash = hash, .genus = genus};
 }
 
-Woodland woodland_at(Vec2 cell, std::uint32_t face, planet::Biome biome) noexcept {
+Woodland woodland_at(Vec2 cell, std::uint32_t face, planet::Biome biome,
+                     float temperature) noexcept {
     const BiomeTrees trees = trees_of(biome);
     if (trees.height <= 0.0F) {
+        return {};
+    }
+    // Of the cells, the share each kind is drawn to, kept as far as the climate suits it.
+    const float palm =
+        trees.palm > 0.0F ? drawn_share(cell, face, palm_period_log, palm_salt, trees.palm) : 0.0F;
+    const float broadleaf = trees.broadleaf > 0.0F ? drawn_share(cell, face, broadleaf_period_log,
+                                                                 broadleaf_salt, trees.broadleaf)
+                                                   : 0.0F;
+    const float maple = drawn_share(cell, face, maple_period_log, maple_salt, trees.maple);
+    const float palms = palm * suited(Genus::Palm, temperature);
+    const float oaks = broadleaf * (1.0F - maple) * suited(Genus::Oak, temperature);
+    const float maples = broadleaf * maple * suited(Genus::Maple, temperature);
+    const float pines = (1.0F - broadleaf) * suited(Genus::Pine, temperature);
+    const float kept = palms + ((1.0F - palm) * (oaks + maples + pines));
+    if (kept <= 0.0F) {
         return {};
     }
     const float wooded = smoothstepped(trees.edge, trees.edge + 0.1F, stand_field(cell, face));
@@ -159,13 +192,12 @@ Woodland woodland_at(Vec2 cell, std::uint32_t face, planet::Biome biome) noexcep
     // square 8/15 of the stand's squared.
     const float oldest = stand_age(wooded);
     const float mean_reach = 0.2F + ((4.0F / 3.0F) * oldest) - ((8.0F / 15.0F) * oldest * oldest);
-    return Woodland{.grown = mixed(trees.lone, trees.inside, wooded),
+    const float others = oaks + maples + pines;
+    return Woodland{.grown = mixed(trees.lone, trees.inside, wooded) * kept,
                     .height = trees.height * mean_reach * stand_scale(wooded),
-                    .broadleaf = trees.broadleaf > 0.0F
-                                     ? drawn_share(cell, face, broadleaf_period_log, broadleaf_salt,
-                                                   trees.broadleaf)
-                                     : 0.0F,
-                    .maple = drawn_share(cell, face, maple_period_log, maple_salt, trees.maple)};
+                    .broadleaf = others > 0.0F ? (oaks + maples) / others : 0.0F,
+                    .maple = oaks + maples > 0.0F ? maples / (oaks + maples) : 0.0F,
+                    .palm = palms / kept};
 }
 
 } // namespace hog::flora

@@ -38,6 +38,9 @@ std::uint64_t fingered(std::span<const std::byte> bytes, std::uint64_t hash) {
     return hash;
 }
 
+// Mild enough for every kind but the palms.
+constexpr float temperate = 12.0F;
+
 // The whole mesh as one number, for the golden tests.
 std::uint64_t fingered(const TreeMesh& grown) {
     std::uint64_t hash = 0xcbf2'9ce4'8422'2325ULL;
@@ -378,7 +381,8 @@ TEST_CASE("trees stand by the same dice on every machine", "[flora]") {
     std::size_t grown = 0;
     for (std::uint32_t i = 2048; i < 2112; ++i) {
         for (std::uint32_t j = 56576; j < 56640; ++j) {
-            const auto tree = hog::flora::tree_grown(i, j, 0, hog::planet::Biome::BorealForest);
+            const auto tree =
+                hog::flora::tree_grown(i, j, 0, hog::planet::Biome::BorealForest, temperate);
             if (!tree) {
                 continue;
             }
@@ -411,7 +415,8 @@ TEST_CASE("stands are mostly grown, the young at their edges, height following a
     std::size_t old = 0;
     for (std::uint32_t i = 2048; i < 2112; ++i) {
         for (std::uint32_t j = 56576; j < 56640; ++j) {
-            const auto tree = hog::flora::tree_grown(i, j, 0, hog::planet::Biome::BorealForest);
+            const auto tree =
+                hog::flora::tree_grown(i, j, 0, hog::planet::Biome::BorealForest, temperate);
             if (!tree) {
                 continue;
             }
@@ -458,9 +463,9 @@ TEST_CASE("broadleaves gather in groves among temperate pines, the boreal woods 
     std::uint64_t hash = 0xcbf2'9ce4'8422'2325ULL;
     for (std::uint32_t row = 0; row < rows; ++row) {
         for (std::uint32_t at = 0; at < across; ++at) {
-            const auto tree =
-                hog::flora::tree_grown(2048 + at, 56576 + row, 0, Biome::TemperateForest);
-            CHECK(hog::flora::tree_grown(2048 + at, 56576 + row, 0, Biome::BorealForest)
+            const auto tree = hog::flora::tree_grown(2048 + at, 56576 + row, 0,
+                                                     Biome::TemperateForest, temperate);
+            CHECK(hog::flora::tree_grown(2048 + at, 56576 + row, 0, Biome::BorealForest, temperate)
                       .value_or(hog::flora::Stood{})
                       .genus == Genus::Pine);
             if (!tree) {
@@ -517,7 +522,7 @@ TEST_CASE("maples crowd the wet woods more than the dry", "[flora]") {
         std::size_t maples = 0;
         for (std::uint32_t i = 2048; i < 2304; ++i) {
             for (std::uint32_t j = 56576; j < 56640; ++j) {
-                const auto tree = hog::flora::tree_grown(i, j, 0, biome);
+                const auto tree = hog::flora::tree_grown(i, j, 0, biome, temperate);
                 if (tree && tree->genus != Genus::Pine) {
                     ++broadleaves;
                     maples += tree->genus == Genus::Maple ? 1U : 0U;
@@ -531,10 +536,78 @@ TEST_CASE("maples crowd the wet woods more than the dry", "[flora]") {
     CHECK(maple_share(Biome::Wetland) > 2.0F * maple_share(Biome::Shrubland));
 }
 
+TEST_CASE("each kind grows within its own climate, thinning at its edges", "[flora]") {
+    using hog::flora::Genus;
+    using hog::flora::suited;
+    // Frost-tender palms only where it is warm all year; pines to a cold treeline, giving way to
+    // the broadleaves in the heat.
+    CHECK(suited(Genus::Palm, 13.0F) == 0.0F);
+    CHECK(suited(Genus::Palm, 15.0F) > 0.0F);
+    CHECK(suited(Genus::Palm, 15.0F) < 1.0F);
+    CHECK(suited(Genus::Palm, 17.0F) == 1.0F);
+    CHECK(suited(Genus::Palm, 30.0F) == 1.0F);
+    CHECK(suited(Genus::Pine, -11.0F) == 0.0F);
+    CHECK(suited(Genus::Pine, -3.0F) == 1.0F);
+    CHECK(suited(Genus::Pine, 26.0F) == 0.0F);
+    CHECK(suited(Genus::Oak, 27.0F) == 1.0F);
+    CHECK(suited(Genus::Maple, 24.0F) == 0.0F);
+    for (const Genus genus : {Genus::Pine, Genus::Oak, Genus::Maple, Genus::Palm}) {
+        const hog::flora::Range range = hog::flora::range_of(genus);
+        CHECK(range.coldest < range.warmest);
+        CHECK(suited(genus, 0.5F * (range.coldest + range.warmest)) == 1.0F);
+    }
+}
+
+TEST_CASE("palms line warm shores and stand among the tropics' broadleaves, never in the cold",
+          "[flora]") {
+    using hog::flora::Genus;
+    using hog::planet::Biome;
+    struct Count {
+        std::size_t trees = 0;
+        std::size_t palms = 0;
+        std::size_t pines = 0;
+        std::size_t maples = 0;
+    };
+    const auto count = [](Biome biome, float temperature) {
+        Count counted;
+        for (std::uint32_t i = 2048; i < 2304; ++i) {
+            for (std::uint32_t j = 56576; j < 56640; ++j) {
+                const auto tree = hog::flora::tree_grown(i, j, 0, biome, temperature);
+                if (!tree) {
+                    continue;
+                }
+                ++counted.trees;
+                counted.palms += tree->genus == Genus::Palm ? 1U : 0U;
+                counted.pines += tree->genus == Genus::Pine ? 1U : 0U;
+                counted.maples += tree->genus == Genus::Maple ? 1U : 0U;
+            }
+        }
+        return counted;
+    };
+    // A warm beach is all palms; a cold one bare; a cool one thinner.
+    const Count warm_shore = count(Biome::Beach, 24.0F);
+    CHECK(warm_shore.trees > 1000);
+    CHECK(warm_shore.palms == warm_shore.trees);
+    CHECK(count(Biome::Beach, 10.0F).trees == 0);
+    const Count cool_shore = count(Biome::Beach, 15.0F);
+    CHECK(cool_shore.trees > warm_shore.trees / 4);
+    CHECK(cool_shore.trees < 3 * warm_shore.trees / 4);
+    // The rainforest a mix of palms and broadleaves, too hot for pines or maples.
+    const Count rainforest = count(Biome::TropicalRainforest, 27.0F);
+    CHECK(rainforest.trees > 3000);
+    CHECK(rainforest.palms > rainforest.trees / 8);
+    CHECK(rainforest.palms < rainforest.trees / 2);
+    CHECK(rainforest.pines == 0);
+    CHECK(rainforest.maples == 0);
+    // No palms in mild woods, and nothing past the pines' treeline.
+    CHECK(count(Biome::TemperateForest, temperate).palms == 0);
+    CHECK(count(Biome::BorealForest, -11.0F).trees == 0);
+}
+
 TEST_CASE("no tree grows where its biome grows none", "[flora]") {
     for (std::uint32_t i = 2048; i < 2112; ++i) {
-        CHECK(!hog::flora::tree_grown(i, 56576, 0, hog::planet::Biome::Ocean));
-        CHECK(!hog::flora::tree_grown(i, 56576, 0, hog::planet::Biome::Desert));
+        CHECK(!hog::flora::tree_grown(i, 56576, 0, hog::planet::Biome::Ocean, temperate));
+        CHECK(!hog::flora::tree_grown(i, 56576, 0, hog::planet::Biome::Desert, temperate));
     }
     // The spot within a cell is answered even where nothing grows, for sampling the ground first.
     const hog::Vec2 spot = hog::flora::tree_spot(2048, 56576, 0);
@@ -667,18 +740,35 @@ TEST_CASE("woodland far off holds the trees grown there: as many, as tall, of th
     using hog::planet::Biome;
     constexpr std::uint32_t across = 320;
     constexpr std::uint32_t block = 32;
-    for (const Biome biome : {Biome::TemperateForest, Biome::BorealForest, Biome::Grassland,
-                              Biome::Shrubland, Biome::Wetland}) {
-        INFO("biome " << static_cast<int>(biome));
+    struct Site {
+        Biome biome;
+        float temperature;
+    };
+    // Mild woods of every kind, and those where a kind thins at the edge of its climate: the oaks
+    // in a cold wetland, the pines at their treeline, the palms on a cool shore.
+    for (const Site site : {Site{Biome::TemperateForest, temperate},
+                            {Biome::BorealForest, temperate},
+                            {Biome::Grassland, temperate},
+                            {Biome::Shrubland, temperate},
+                            {Biome::Wetland, temperate},
+                            {Biome::Wetland, 2.5F},
+                            {Biome::BorealForest, -8.0F},
+                            {Biome::Beach, 15.0F},
+                            {Biome::TropicalRainforest, 27.0F},
+                            {Biome::Savanna, 28.0F}}) {
+        const Biome biome = site.biome;
+        INFO("biome " << static_cast<int>(biome) << " at " << site.temperature << " C");
         // Counted from the trees, then expected from the woodland, over the whole and by block.
         double trees = 0.0;
         double heights = 0.0;
         double broadleaves = 0.0;
         double maples = 0.0;
+        double palms = 0.0;
         double grown = 0.0;
         double tall = 0.0;
         double broad = 0.0;
         double maple = 0.0;
+        double palm = 0.0;
         double worst_block = 0.0;
         for (std::uint32_t block_j = 0; block_j < across; block_j += block) {
             for (std::uint32_t block_i = 0; block_i < across; block_i += block) {
@@ -691,20 +781,26 @@ TEST_CASE("woodland far off holds the trees grown there: as many, as tall, of th
                         const hog::flora::Woodland woodland =
                             hog::flora::woodland_at({static_cast<float>(lattice_i) + 0.5F,
                                                      static_cast<float>(lattice_j) + 0.5F},
-                                                    1, biome);
+                                                    1, biome, site.temperature);
                         const auto share = static_cast<double>(woodland.grown);
+                        const double others = 1.0 - double{woodland.palm};
                         expected += share;
                         tall += share * double{woodland.height};
-                        broad += share * double{woodland.broadleaf};
-                        maple += share * double{woodland.broadleaf} * double{woodland.maple};
-                        const auto tree = hog::flora::tree_grown(lattice_i, lattice_j, 1, biome);
+                        broad += share * others * double{woodland.broadleaf};
+                        maple +=
+                            share * others * double{woodland.broadleaf} * double{woodland.maple};
+                        palm += share * double{woodland.palm};
+                        const auto tree = hog::flora::tree_grown(lattice_i, lattice_j, 1, biome,
+                                                                 site.temperature);
                         if (!tree) {
                             continue;
                         }
                         counted += 1.0;
                         heights += double{tree->height / hog::flora::stature(tree->genus)};
-                        broadleaves += tree->genus != Genus::Pine ? 1.0 : 0.0;
+                        broadleaves +=
+                            tree->genus == Genus::Oak || tree->genus == Genus::Maple ? 1.0 : 0.0;
                         maples += tree->genus == Genus::Maple ? 1.0 : 0.0;
+                        palms += tree->genus == Genus::Palm ? 1.0 : 0.0;
                     }
                 }
                 trees += counted;
@@ -719,6 +815,7 @@ TEST_CASE("woodland far off holds the trees grown there: as many, as tall, of th
         CHECK(worst_block < 0.05);
         CHECK(std::abs((tall / grown) / (heights / trees) - 1.0) < 0.03);
         CHECK(std::abs((broad / grown) - (broadleaves / trees)) < 0.03);
+        CHECK(std::abs((palm / grown) - (palms / trees)) < 0.03);
         if (broadleaves > 500.0) {
             CHECK(std::abs((maple / broad) - (maples / broadleaves)) < 0.04);
         }

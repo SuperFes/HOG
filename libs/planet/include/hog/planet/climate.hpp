@@ -88,6 +88,8 @@ public:
 
     // Fixed-point mean annual temperature in °C, at the surface or the sea surface.
     [[nodiscard]] std::int64_t temperature(CellId cell) const;
+    // The same, for a cell whose fixed-point elevation is already known.
+    [[nodiscard]] std::int64_t temperature(CellId cell, std::int64_t elevation) const;
 
     // Fixed-point wetness from 0 (arid) to 1 (saturated). Only continents dry out inland; islands
     // are too small to.
@@ -100,7 +102,6 @@ public:
     [[nodiscard]] Biome biome(CellId cell) const;
 
 private:
-    [[nodiscard]] std::int64_t temperature(CellId cell, std::int64_t elevation) const;
     [[nodiscard]] std::int64_t water_table(CellId cell, std::int64_t moisture) const;
 
     Elevation terrain_;

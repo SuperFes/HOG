@@ -36,13 +36,14 @@ constexpr double skirt_spacings = patch_cells / 4.0;
     return static_cast<std::uint8_t>(std::lround(std::clamp(value, 0.0, 1.0) * 255.0));
 }
 
-// The woods about a lattice corner on `biome` ground, `point` being where it lies.
-[[nodiscard]] Woods woods_at(Corner at, DVec3 point, planet::Biome biome) {
+// The woods about a lattice corner on `biome` ground at a mean annual `temperature` in °C, `point`
+// being where it lies.
+[[nodiscard]] Woods woods_at(Corner at, DVec3 point, planet::Biome biome, float temperature) {
     const int finer = flora::lattice_level - at.level;
     const Vec2 cell{static_cast<float>(std::ldexp(static_cast<double>(at.i), finer)),
                     static_cast<float>(std::ldexp(static_cast<double>(at.j), finer))};
     const flora::Woodland woodland =
-        flora::woodland_at(cell, static_cast<std::uint32_t>(at.face), biome);
+        flora::woodland_at(cell, static_cast<std::uint32_t>(at.face), biome, temperature);
     if (woodland.grown <= 0.0F) {
         return {};
     }
@@ -58,7 +59,8 @@ Woods packed_woods(const flora::Woodland& woodland, double cell_area) noexcept {
     return {byte_of(crowding / double{woods_crowding}),
             byte_of(static_cast<double>(woodland.height / woods_tallest)),
             byte_of(static_cast<double>(woodland.broadleaf)),
-            byte_of(static_cast<double>(woodland.maple))};
+            byte_of(static_cast<double>(woodland.maple)),
+            byte_of(static_cast<double>(woodland.palm))};
 }
 
 Corner canonical(Corner corner) {
@@ -146,8 +148,9 @@ Patch bake_patch(const planet::World& world, planet::CellId cell) {
             points[bordered_index(i, j)] = direction(corner) * (radius + height);
             if (inside(i) && inside(j)) {
                 biomes[index(i, j)] = state.biome;
-                woods[index(i, j)] =
-                    woods_at(canonical(corner), points[bordered_index(i, j)], state.biome);
+                woods[index(i, j)] = woods_at(
+                    canonical(corner), points[bordered_index(i, j)], state.biome,
+                    static_cast<float>(static_cast<double>(state.temperature) / planet::fixed_one));
                 heights.lowest = std::min(heights.lowest, height);
                 heights.highest = std::max(heights.highest, height);
             }

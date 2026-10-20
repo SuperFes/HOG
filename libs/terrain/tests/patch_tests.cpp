@@ -358,9 +358,9 @@ TEST_CASE("a patch too fine for its vertices is refused", "[terrain][patch]") {
 TEST_CASE("woods pack a byte a measure, crowding and height to their own ranges",
           "[terrain][patch]") {
     const hog::terrain::Woods woods = hog::terrain::packed_woods(
-        {.grown = 0.6F, .height = 16.0F, .broadleaf = 0.5F, .maple = 1.0F}, 120.0);
+        {.grown = 0.6F, .height = 16.0F, .broadleaf = 0.5F, .maple = 1.0F, .palm = 0.25F}, 120.0);
     // Half a tree a hundred square metres, a quarter of the most.
-    CHECK(woods == hog::terrain::Woods{64, 128, 128, 255});
+    CHECK(woods == hog::terrain::Woods{64, 128, 128, 255, 64});
     CHECK(hog::terrain::packed_woods({.grown = 0.9F, .height = 60.0F}, 10.0)[0] == 255);
     CHECK(hog::terrain::packed_woods({.grown = 0.9F, .height = 60.0F}, 10.0)[1] == 255);
 }
@@ -381,10 +381,13 @@ TEST_CASE("a patch carries the woods flora stands about each of its vertices", "
                                 .level = level};
             const hog::terrain::PatchVertex& vertex = patch.vertices.at(vertex_index(i, j));
             const int finer = hog::flora::lattice_level - level;
+            const auto temperature = static_cast<float>(
+                static_cast<double>(world.state(hog::terrain::sample_cell(corner)).temperature) /
+                hog::planet::fixed_one);
             const hog::flora::Woodland woodland = hog::flora::woodland_at(
                 {static_cast<float>(std::ldexp(static_cast<double>(corner.i), finer)),
                  static_cast<float>(std::ldexp(static_cast<double>(corner.j), finer))},
-                static_cast<std::uint32_t>(at.face), vertex.biome);
+                static_cast<std::uint32_t>(at.face), vertex.biome, temperature);
             const DVec3 point = world_at(patch, vertex_index(i, j));
             const double area =
                 hog::planet::cell_area(hog::planet::cell_at(point, hog::flora::lattice_level)) *
@@ -398,6 +401,7 @@ TEST_CASE("a patch carries the woods flora stands about each of its vertices", "
             CHECK(vertex.woods[1] == expected[1]);
             CHECK(vertex.woods[2] == expected[2]);
             CHECK(vertex.woods[3] == expected[3]);
+            CHECK(vertex.woods[4] == expected[4]);
             wooded += vertex.woods[0] > 20 ? 1 : 0;
             bare += vertex.woods[0] == 0 ? 1 : 0;
         }

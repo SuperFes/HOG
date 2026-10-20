@@ -78,6 +78,7 @@ CellState seed_state(CellId at_cell) {
     const auto& geology = shared_world().geology();
     return {.elevation = geology.terrain().elevation(at_cell),
             .biome = geology.climate().biome(at_cell),
+            .temperature = geology.climate().temperature(at_cell),
             .excavated = 0,
             .hollows = {}};
 }
@@ -101,6 +102,8 @@ TEST_CASE("changes apply over the seed", "[planet][world]") {
     CHECK(state.elevation == 45 * fixed_one);
     CHECK(state.excavated == 5 * fixed_one);
     CHECK(state.biome == Biome::Grassland);
+    // The climate is the generated ground's, whatever is dug or raised on it.
+    CHECK(state.temperature == seed_state(cell).temperature);
     CHECK(w.size() == 4);
 }
 

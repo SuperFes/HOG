@@ -21,8 +21,9 @@ namespace hog::planet {
 struct CellState {
     std::int64_t elevation = 0; // fixed-point metres above sea level
     Biome biome = Biome::Ocean;
-    std::int64_t excavated = 0;  // fixed-point metres dug out below the generated surface
-    std::vector<Hollow> hollows; // dug out below the ground left, shallowest first, never touching
+    std::int64_t temperature = 0; // fixed-point mean annual °C, at the generated surface
+    std::int64_t excavated = 0;   // fixed-point metres dug out below the generated surface
+    std::vector<Hollow> hollows;  // dug out below the ground left, shallowest first, never touching
 
     friend bool operator==(const CellState&, const CellState&) = default;
 };
