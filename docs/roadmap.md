@@ -474,6 +474,8 @@ Builds on Phase 5's condition states. The server owns every tree's record, as it
 - [ ] A server-owned record per tree: species, age, condition, and when it changed. Unchanged trees stay implied by the seed, so only the trees that changed are stored or sent.
 - [ ] Ageing on the server's clock: seedlings grow up, mature trees grow old, old trees die. Growth rate follows the cell's moisture, light and crowding.
 - [ ] Dying and dead plants: thinning and browning crowns, then a bare standing snag, then a fall. Bushes and grass brown off and die back the same way. (Crowns thinning and browning and bare snags done, from the forest sim's shares. Once fallen, a dead tree leaves the tree records to become a deadwood game object of its own that decays, scattering natural deadwood through the woods.)
+- [ ] Bushes that live and die with no record each: a shrub layer in the forest sim, cell by cell like the trees' shares, and each bush's fate rolled against it, so bushes sprout, grow, thin and die where they stand. A record per bush would cost gigabytes (about 2 billion on the development planet); only bushes players cut or trample get one.
+- [ ] Tumbleweeds: dead bushes of a tumbleweed species in dry biomes break off as their fate says, roll with the ground wind as small server objects (about 32 B each, only while moving), and settle and decay where they lodge
 - [ ] Felled trees: cut by players or blown down by storms. The trunk falls as a physics body along the cut or the wind, lands where everyone sees it land, and leaves a stump.
 - [ ] Deadwood that decays over seasons: fallen logs go mossy and soften, then sink into the forest floor. Nurse logs come from here.
 - [ ] Regrowth: suckers and coppice shoots from stumps of the species that do it, and seedlings filling gaps, as the succession rules decide.
@@ -485,7 +487,7 @@ Builds on Phase 5's condition states. The server owns every tree's record, as it
 
 **Vegetation engineering**
 
-- [ ] Bushes onto CPU anchors like the trees, so they too stay put at every terrain level and the server can own them
+- [ ] Bushes onto CPU anchors like the trees, so they too stay put at every terrain level and the server can own them. Today a bush's spot is fixed but whether it grows, its kind and its size come from the nearest vertex of whichever terrain level is loaded, so bushes pop as the ground refines. A `libs/flora` placement reading the world and the fates at the bush's own spot ends that.
 - [ ] Anchor tiles built off the main thread, if building them ever shows in frame times
 - [x] Forest beyond the stamps' 900 m folded into the ground as density and colour, so woods don't end at a line seen from the air (flora's woodland averaged per patch vertex, crowned and turning with the year in the ground's shader; ~free on the 860M)
 - [ ] Solid leaf masses ("tree haircut"): crowns modelled as clumped blobs and lit like the clouds, textured in the tree's current leaf colours, and a billboard far off. Bushes get the same treatment, replacing their billboards.
