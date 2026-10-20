@@ -99,10 +99,38 @@ Result<Ocean> Ocean::create(const Device& device, VkFormat colour_format, VkForm
         return std::unexpected(std::move(pipeline).error());
     }
     ocean.pipeline_ = std::move(pipeline).value();
+    if (air) {
+        auto deep = make_pipeline(device, {.spirv = shaders::ocean,
+                                           .fragment_entry = "fragment_deep",
+                                           .bindings = vertex_bindings,
+                                           .attributes = vertex_attributes,
+                                           .colour_format = colour_format,
+                                           .depth_format = depth_format,
+                                           .depth_write = false,
+                                           .push_constant_bytes = sizeof(Push),
+                                           .descriptors = air_descriptors});
+        if (!deep) {
+            return std::unexpected(std::move(deep).error());
+        }
+        ocean.deep_ = std::move(deep).value();
+    }
     return ocean;
 }
 
 void Ocean::draw(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view) const {
+    record(commands, extent, view, pipeline_);
+}
+
+void Ocean::draw_deep(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view) const {
+    HOG_ASSERT(air_, "the deep water drawn without the air");
+    // From under the sea, the sky shows through its surface overhead.
+    if (view.bend.eye_height > 0.0) {
+        record(commands, extent, view, deep_);
+    }
+}
+
+void Ocean::record(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view,
+                   const Pipeline& pipeline) const {
     if (extent.width == 0 || extent.height == 0) {
         return;
     }
@@ -116,22 +144,22 @@ void Ocean::draw(VkCommandBuffer commands, VkExtent2D extent, const OceanView& v
                     .sun_nearest = glm::vec4{Vec3{view.sun}, static_cast<float>(reach.nearest)},
                     .sky_furthest = glm::vec4{view.sky, static_cast<float>(reach.furthest)}};
 
-    vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.handle());
+    vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
     if (air_) {
         HOG_ASSERT(view.air.lighting != VK_NULL_HANDLE,
                    "drawing the sea lit by the air without it");
-        push_uniform_buffer(commands, pipeline_, 0, view.air.air);
-        push_uniform_buffer(commands, pipeline_, 1, view.air.lighting);
-        push_sampled_image(commands, pipeline_, 2, view.air.transmittance, view.air.sampler);
-        push_sampled_image(commands, pipeline_, 3, view.air.sky_view, view.air.sampler);
-        push_sampled_image(commands, pipeline_, 4, view.air.aerial, view.air.sampler);
-        push_sampled_image(commands, pipeline_, 5, view.air.cloud_shadow, view.air.sampler);
+        push_uniform_buffer(commands, pipeline, 0, view.air.air);
+        push_uniform_buffer(commands, pipeline, 1, view.air.lighting);
+        push_sampled_image(commands, pipeline, 2, view.air.transmittance, view.air.sampler);
+        push_sampled_image(commands, pipeline, 3, view.air.sky_view, view.air.sampler);
+        push_sampled_image(commands, pipeline, 4, view.air.aerial, view.air.sampler);
+        push_sampled_image(commands, pipeline, 5, view.air.cloud_shadow, view.air.sampler);
     }
     const std::array vertices{vertices_.handle()};
     const VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(commands, 0, 1, vertices.data(), &offset);
     vkCmdBindIndexBuffer(commands, indices_.handle(), 0, VK_INDEX_TYPE_UINT16);
-    vkCmdPushConstants(commands, pipeline_.layout(),
+    vkCmdPushConstants(commands, pipeline.layout(),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(Push),
                        &push);
     vkCmdDrawIndexed(commands, index_count_, 1, 0, 0, 0);

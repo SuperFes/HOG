@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstddef>
 #include <numbers>
+#include <random>
 
 using hog::DVec2;
 using hog::DVec3;
@@ -18,6 +19,7 @@ using hog::terrain::sea_along;
 using hog::terrain::sea_disc;
 using hog::terrain::sea_from_eye;
 using hog::terrain::sea_reach;
+using hog::terrain::seabed_showing;
 using hog::terrain::SeaDisc;
 using hog::terrain::SeaReach;
 
@@ -35,6 +37,27 @@ Bend bend_at(double eye_height) {
 
 double horizon_on(double sphere, double eye_height) {
     return sphere * std::acos(sphere / (sphere + eye_height));
+}
+
+double schlick(double facing) {
+    return hog::terrain::water_facing_reflection +
+           ((1.0 - hog::terrain::water_facing_reflection) * std::pow(1.0 - facing, 5.0));
+}
+
+// As the sea and the ground beneath it are drawn: the surface's Fresnel where the line of sight
+// crosses it, and the water passed on the way to the ground at `depth`, `round` radians from under
+// the eye.
+double seen_through_sea(double eye, double sea, double depth, double round) {
+    const double ground = sea - depth;
+    const DVec2 from{0.0, eye};
+    const DVec2 to{ground * std::sin(round), ground * std::cos(round)};
+    const DVec2 looking = glm::normalize(to - from);
+    const double b = glm::dot(from, looking);
+    const double crossed = -b - std::sqrt((b * b) - ((eye * eye) - (sea * sea)));
+    const double facing = glm::dot(-looking, (from + (looking * crossed)) / sea);
+    const double down = std::max(glm::dot(-looking, to / ground), hog::terrain::water_least_facing);
+    return (1.0 - schlick(facing)) *
+           std::exp(-hog::terrain::water_clearest_absorbing * depth * (1.0 + (1.0 / down)));
 }
 
 } // namespace
@@ -112,4 +135,52 @@ TEST_CASE("the sea's disc is whole and faces up", "[terrain][sea]") {
     // Laid flat, a regular polygon reaching out to 1.
     const double polygon = spokes / 2.0 * std::sin(2.0 * std::numbers::pi / spokes);
     CHECK(std::abs(area - polygon) < 1e-6);
+}
+
+TEST_CASE("the seabed shows through the sea least at a glance, and the deeper it lies",
+          "[terrain][sea]") {
+    const double eye = earth + 400.0;
+    const auto at = [&](double depth, double along) {
+        return seabed_showing(eye, earth, earth - depth, earth - depth, along / earth,
+                              along / earth);
+    };
+    // Straight down through ten metres, and back up.
+    CHECK(std::abs(at(10.0, 0.0) - ((1.0 - 0.02) * std::exp(-0.03 * 10.0 * 2.0))) < 1e-12);
+    CHECK(at(30.0, 0.0) < at(10.0, 0.0));
+    CHECK(at(10.0, 2'000.0) < at(10.0, 0.0));
+    // Twenty kilometres off, the sea mirrors nearly all and the long way through the water does
+    // the rest.
+    CHECK(at(10.0, 20'000.0) < at(10.0, 0.0) / 100.0);
+    CHECK(at(30.0, 20'000.0) < 1e-4);
+}
+
+TEST_CASE("ground not under the sea, or not seen from above it, shows whole", "[terrain][sea]") {
+    CHECK(seabed_showing(earth + 400.0, earth, earth - 50.0, earth + 1.0, 0.01, 0.02) == 1.0);
+    CHECK(seabed_showing(earth - 5.0, earth, earth - 50.0, earth - 40.0, 0.01, 0.02) == 1.0);
+}
+
+TEST_CASE("no part of the seabed shows more than its bound says", "[terrain][sea]") {
+    std::mt19937 dice{17};
+    const auto uniform = [&](double low, double high) {
+        return std::uniform_real_distribution<double>{low, high}(dice);
+    };
+    for (int trial = 0; trial < 400; ++trial) {
+        const double sea = trial % 2 == 0 ? earth : radius;
+        const double eye = sea + uniform(1.0, 5'000.0);
+        const double shallowest = uniform(0.0, 100.0);
+        const double deepest = shallowest + uniform(0.0, 300.0);
+        const double nearest = uniform(0.0, 0.04);
+        const double farthest = nearest + uniform(0.0, 0.01);
+        const double bound =
+            seabed_showing(eye, sea, sea - deepest, sea - shallowest, nearest, farthest);
+        constexpr int steps = 8;
+        for (int i = 0; i <= steps; ++i) {
+            for (int j = 0; j <= steps; ++j) {
+                const double depth = shallowest + ((deepest - shallowest) * i / steps);
+                const double round = nearest + ((farthest - nearest) * j / steps);
+                CAPTURE(trial, depth, round);
+                CHECK(seen_through_sea(eye, sea, depth, round) <= (bound * (1.0 + 1e-9)) + 1e-15);
+            }
+        }
+    }
 }

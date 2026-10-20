@@ -38,6 +38,9 @@ struct SelectionSettings {
     // Only ground in view is picked; otherwise ground all round the eye is, out to its horizon,
     // each patch saying whether it's in view.
     bool only_in_view = true;
+    // Ground under the sea showing through it no more than this, as seabed_showing has it, is
+    // picked but not drawn; none is left out at 0.
+    double seabed_unseen = 0.0;
 };
 
 // What some cells' patches are known to keep between, such as from baking them, tighter than the
@@ -49,6 +52,7 @@ struct SelectedPatch {
     std::uint8_t coarser_edges = 0; // edge bits, where the neighbour is a level coarser
     double distance = 0.0;          // least metres from the eye to the patch's ground
     bool in_view = true;
+    bool under_sea = false; // too deep under the sea to show through it, so not drawn
 };
 
 // The patches to draw: a quadtree over the six faces, split until each patch's vertex spacing is

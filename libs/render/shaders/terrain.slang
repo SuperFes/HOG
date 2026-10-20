@@ -4,6 +4,7 @@ import projection;
 import season;
 import shadow;
 import tone;
+import water;
 
 struct Push {
     float4x4 clip_from_eye;
@@ -67,10 +68,6 @@ struct Ground {
     float4 biomes[(biome_count + 3) / 4];
     float4 woods;
 };
-
-// Of clear seawater, by the metre of it light passes through, and the light it scatters back.
-static const float3 water_absorbing = float3(0.35, 0.07, 0.03);
-static const float3 water_colour = float3(0.0, 0.15, 0.25);
 
 // Ground no higher above sea level than this, by the metre it lies from the eye, is too near level
 // with the sea for depth to tell which is in front, so it's drawn under it.
@@ -267,9 +264,9 @@ float3 wooded(Ground ground, float3 bare, float4 year) {
     return lerp(bare, tint / max(depth, 1e-6), (1.0 - exp(-depth)) * band);
 }
 
-// The depth at which the eye, above sea level, sees the sea's surface past `drawn`, if it does: on
-// the faked sphere drawing bends sea level onto.
-float sea_depth(float3 drawn, out bool seen) {
+// Where the eye, above sea level, sees the sea's surface towards `drawn`, if it does: on the faked
+// sphere drawing bends sea level onto.
+float3 sea_towards(float3 drawn, out bool seen) {
     const float3 up = push.bend_up.xyz;
     const float eye_height = push.bend_up.w;
     const float faked = push.bend_radii.y;
@@ -280,9 +277,33 @@ float sea_depth(float3 drawn, out bool seen) {
     const float discriminant = (k * k) - c;
     seen = eye_height > 0.0 && k > 0.0 && discriminant >= 0.0;
     // The nearer root, without cancelling.
-    const float t = c / (k + sqrt(max(discriminant, 0.0)));
-    const float4 clip = mul(push.clip_from_eye, float4(looking * t, 1.0));
+    return looking * (c / (k + sqrt(max(discriminant, 0.0))));
+}
+
+// The depth at which the eye sees the sea's surface past `drawn`, if it does.
+float sea_depth(float3 drawn, out bool seen) {
+    const float4 clip = mul(push.clip_from_eye, float4(sea_towards(drawn, seen), 1.0));
     return clip.z / clip.w;
+}
+
+// Where the line of sight to the ground leaves the air, and which way is up there: at the sea's
+// surface over ground beneath it, as the deep water drawn in its place has it.
+struct AirEnd {
+    float3 at; // from the eye, bent
+    float3 up;
+};
+
+AirEnd air_ends(Ground ground) {
+    AirEnd end = { ground.drawn, up_at(ground) };
+    if (settings.tiling.z > 0.0 && ground.height < 0.0) {
+        bool seen;
+        const float3 surface = sea_towards(ground.drawn, seen);
+        if (seen) {
+            end.at = surface;
+            end.up = normalize(surface + (push.bend_up.xyz * (push.bend_radii.y + push.bend_up.w)));
+        }
+    }
+    return end;
 }
 
 struct Shaded {
@@ -300,8 +321,8 @@ float3 shaded(Ground ground, float3 normal, float3 on_ground, float3 on_water, f
     }
 
     // Light down through the water and back up to the eye, the steeper the shorter.
-    const float looking_down = max(dot(-normalize(ground.from_eye), up_at(ground)), 0.1);
-    const float3 passed = exp(-water_absorbing * under_sea * (1.0 + (1.0 / looking_down)));
+    const float3 passed =
+        water_passed(under_sea, dot(-normalize(ground.from_eye), up_at(ground)));
     return (lit_ground * passed) + (water_colour * on_water * (1.0 - passed));
 }
 
@@ -341,18 +362,26 @@ Shaded fragment_air(Ground ground) {
     const float3 up = up_at(ground);
     const float3 clear =
         transmittance(air, transmittance_table, max(ground.height, 0.0) * scale, dot(up, sun));
-    const Shade shade = shade_at(lighting, cloud_shadow, ground.drawn);
+    const AirEnd end = air_ends(ground);
+    const Shade shade = shade_at(lighting, cloud_shadow, end.at);
     const float3 sunlight = through_cloud(shade, clear);
     const float3 sky = sky_under_cloud(lighting, shade, clear * saturate(dot(up, sun)));
     const float3 on_ground =
         (sunlight * saturate(dot(normal, sun))) + (sky * (0.5 + (0.5 * dot(normal, up))));
-    const float3 on_water = (sunlight * saturate(dot(up, sun))) + sky;
+    // The water over ground beneath the sea, lit where the eye looks into it.
+    float3 on_water = float3(0.0);
+    if (ground.height < 0.0) {
+        const float facing = saturate(dot(end.up, sun));
+        const float3 clear_water = transmittance(air, transmittance_table, 0.0, dot(end.up, sun));
+        on_water = (through_cloud(shade, clear_water) * facing) +
+                   sky_under_cloud(lighting, shade, clear_water * facing);
+    }
     const float3 radiance = shaded(ground, normal, on_ground, on_water, lighting.year) / pi;
 
     const float4 clip = mul(push.clip_from_eye, float4(ground.drawn, 1.0));
     const float2 uv = ((clip.xy / clip.w) * 0.5) + 0.5;
     const float4 between =
-        aerial_perspective(aerial_volume, uv, length(ground.drawn) * scale, lighting.reach.x);
+        aerial_perspective(aerial_volume, uv, length(end.at) * scale, lighting.reach.x);
     Shaded result;
     result.colour =
         float4(tone_mapped((radiance * between.a) + between.rgb, lighting.sun_exposure.w), 1.0);

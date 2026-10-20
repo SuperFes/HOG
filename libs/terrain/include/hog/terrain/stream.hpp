@@ -59,8 +59,9 @@ public:
     // A cell of the world changed, or had a change rolled back. No bake may be running while the
     // world changes; those in flight across it are dropped when they arrive.
     void changed(planet::CellId cell);
-    // Once a frame, with the patches selected for it. Those in view are drawn; all are baked and
-    // kept, so selecting all round the eye has ground ready before it turns into view.
+    // Once a frame, with the patches selected for it. Those in view and not under the sea are
+    // drawn; all are baked and kept, so selecting all round the eye has ground ready before it
+    // turns into view.
     [[nodiscard]] StreamFrame update(std::span<const SelectedPatch> selected);
 
     [[nodiscard]] bool held(planet::CellId cell) const { return held_.contains(cell); }

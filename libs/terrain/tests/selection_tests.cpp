@@ -323,6 +323,31 @@ TEST_CASE("only ground in view is picked unless all round is asked for", "[terra
     }
 }
 
+TEST_CASE("seabed too deep to show through the sea is picked but not drawn",
+          "[terrain][selection]") {
+    const Viewpoint view = walking(300.0, level_with(somewhere));
+    hog::terrain::SelectionSettings deep{.lowest = -40.0, .highest = -39.0, .only_in_view = false};
+    const auto all = select_patches(view, radius, deep);
+    CHECK(std::ranges::none_of(all, &SelectedPatch::under_sea));
+
+    deep.seabed_unseen = 0.002;
+    const auto hidden = select_patches(view, radius, deep);
+    REQUIRE(hidden.size() == all.size());
+    for (std::size_t at = 0; at < all.size(); ++at) {
+        CHECK(hidden[at].cell == all[at].cell);
+    }
+    // Seen steeply enough under the eye, it shows; seen at a glance far off, it doesn't.
+    const auto under = drawn_over(hidden, hog::planet::cell_at(along_ground(0.0, view.forward)));
+    REQUIRE(under.has_value());
+    CHECK_FALSE(under.value_or(SelectedPatch{}).under_sea);
+    CHECK(hidden.back().under_sea);
+    CHECK(std::ranges::count_if(hidden, &SelectedPatch::under_sea) > std::ssize(hidden) / 2);
+
+    // Ground that may stand above the sea is always drawn.
+    deep.highest = 1.0;
+    CHECK(std::ranges::none_of(select_patches(view, radius, deep), &SelectedPatch::under_sea));
+}
+
 TEST_CASE("picked all round, the patches are the same whichever way the eye faces",
           "[terrain][selection]") {
     hog::terrain::SelectionSettings around = flat_ground;

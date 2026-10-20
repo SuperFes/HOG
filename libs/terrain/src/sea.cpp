@@ -74,4 +74,29 @@ DVec3 sea_from_eye(const Bend& bend, double along, DVec3 towards) {
            (towards * (bend.faked * std::sin(turned)));
 }
 
+double seabed_showing(double eye, double sea, double deepest, double shallowest, double nearest,
+                      double farthest) {
+    if (eye <= sea || shallowest >= sea) {
+        return 1.0;
+    }
+    // A line of sight meets every sphere round the centre the more steeply the nearer it passes
+    // the centre, and meets the ground beneath no more steeply than it does the sea's surface.
+    // Lines to ground further round pass the centre further off, up to where they first dip below
+    // its depth; lines to deeper ground nearer.
+    const auto passing = [&](double round) {
+        round = std::min(round, std::numbers::pi);
+        const double half = std::sin(round / 2.0);
+        const double apart =
+            std::sqrt(((eye - deepest) * (eye - deepest)) + (4.0 * eye * deepest * half * half));
+        return eye * deepest * std::sin(round) / apart;
+    };
+    const double closest = std::min(passing(nearest), passing(farthest));
+    const double facing = std::sqrt(std::max(0.0, 1.0 - ((closest / sea) * (closest / sea))));
+    const double reflected =
+        water_facing_reflection + ((1.0 - water_facing_reflection) * std::pow(1.0 - facing, 5.0));
+    const double passed = std::exp(-water_clearest_absorbing * (sea - shallowest) *
+                                   (1.0 + (1.0 / std::max(facing, water_least_facing))));
+    return (1.0 - reflected) * passed;
+}
+
 } // namespace hog::terrain

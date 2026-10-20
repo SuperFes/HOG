@@ -348,7 +348,9 @@ StreamFrame PatchStream::update(std::span<const SelectedPatch> selected) {
     arrive(selected, frame);
 
     std::vector<SelectedPatch> in_view;
-    std::ranges::copy_if(selected, std::back_inserter(in_view), &SelectedPatch::in_view);
+    std::ranges::copy_if(selected, std::back_inserter(in_view), [](const SelectedPatch& patch) {
+        return patch.in_view && !patch.under_sea;
+    });
     const auto drawn = cover(in_view);
     std::set<planet::CellId> leaves;
     for (const auto& [cell, distance] : drawn) {

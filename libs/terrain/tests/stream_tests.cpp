@@ -195,6 +195,15 @@ TEST_CASE("ground selected out of view is baked and held, but not drawn", "[terr
     CHECK(turned.bakes.empty());
 }
 
+TEST_CASE("ground selected under the sea is baked and held, but not drawn", "[terrain][stream]") {
+    PatchStream stream{fine_first};
+    std::vector<SelectedPatch> selected = selecting_children(parent);
+    selected.at(1).under_sea = true;
+    const StreamFrame frame = settle(stream, selected);
+    CHECK(drawn(frame) == std::set{parent.child(0), parent.child(2), parent.child(3)});
+    CHECK(stream.held(parent.child(1)));
+}
+
 TEST_CASE("turning on the spot never turns what's drawn coarser", "[terrain][stream]") {
     // Selected in view only, ground turned to has nothing baked finer than the first, coarsest
     // patches; selected all round, it's baked before it's turned to.

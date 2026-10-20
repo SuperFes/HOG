@@ -27,6 +27,10 @@ namespace {
 // Behind the sky, which covers it.
 constexpr VkClearColorValue cleared{.float32 = {0.0F, 0.0F, 0.0F, 1.0F}};
 
+// Seabed showing through the sea no more than this is left undrawn: about half a step of 8-bit
+// colour.
+constexpr double seabed_unseen = 0.002;
+
 std::unexpected<Error> failed(std::string_view doing, const Error& error) {
     return std::unexpected(
         Error{.code = error.code, .message = std::format("can't {}: {}", doing, error.message)});
@@ -296,7 +300,8 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     seen.bend = shot.bend;
     // All round the eye, so the ground is baked before it's turned to.
     const std::vector<terrain::SelectedPatch> selected = terrain::select_patches(
-        seen, shot.bend.radius, {.only_in_view = false}, stream_.known_heights());
+        seen, shot.bend.radius, {.only_in_view = false, .seabed_unseen = seabed_unseen},
+        stream_.known_heights());
     const terrain::StreamFrame streamed = stream_.update(selected);
     for (const planet::CellId cell : streamed.bakes) {
         baker_.start(cell);
@@ -416,17 +421,17 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
               [&](VkCommandBuffer commands) {
                   sky_.draw(commands, frame.extent, frame.slot, atmosphere_, sky);
               });
+    const render::OceanView sea{
+        .camera = shot.camera, .sun = sky.sun, .bend = shot.bend, .air = through};
     graph.add({.name = "ground", .uses = through_air, .targets = drawn},
               [&](VkCommandBuffer commands) {
+                  ocean_.draw_deep(commands, frame.extent, sea);
                   terrain_.draw(
                       commands, frame.extent, pool_, slots_.draws(streamed.drawn),
                       {.camera = shot.camera, .sun = sky.sun, .bend = shot.bend, .air = through});
               });
-    graph.add(
-        {.name = "sea", .uses = through_air, .targets = drawn}, [&](VkCommandBuffer commands) {
-            ocean_.draw(commands, frame.extent,
-                        {.camera = shot.camera, .sun = sky.sun, .bend = shot.bend, .air = through});
-        });
+    graph.add({.name = "sea", .uses = through_air, .targets = drawn},
+              [&](VkCommandBuffer commands) { ocean_.draw(commands, frame.extent, sea); });
     swaying_for_ += shot.seconds;
     if (grass_on_) {
         grow_vegetation(graph, frame, shot, streamed.drawn, through_air, drawn, through,

@@ -1,6 +1,7 @@
 import atmosphere;
 import shadow;
 import tone;
+import water;
 
 struct Push {
     float4x4 clip_from_eye;
@@ -36,8 +37,6 @@ struct Surface {
     float3 normal;
 };
 
-// Reflected straight back, as water does.
-static const float facing_reflection = 0.02;
 static const float glint_sharpness = 2000.0;
 static const float glint_brightness = 50.0;
 // Through the air, the glint is the sun's light reflected by a normalised Blinn-Phong lobe.
@@ -61,13 +60,6 @@ Surface vertex_main(Vertex vertex) {
     surface.position = mul(push.clip_from_eye, float4(surface.from_eye, 1.0));
     surface.normal = (up * cos(turned)) + (towards * sin(turned));
     return surface;
-}
-
-// Schlick's: how much is reflected, more the more glancing the view. From under the sea, its
-// surface reflects as much back down.
-float reflected_at(float3 looking, float3 normal) {
-    const float facing = abs(dot(looking, normal));
-    return facing_reflection + ((1.0 - facing_reflection) * pow(1.0 - facing, 5.0));
 }
 
 // How much of the sun's light the glint reflects towards the eye, but for the reflection.
@@ -128,4 +120,26 @@ float4 fragment_air(Surface surface) : SV_Target {
     // through the air, and the glint.
     const float3 radiance = (reflected * ((sky * between.a) + between.rgb)) + (glint * between.a);
     return float4(tone_mapped(radiance, lighting.sun_exposure.w), reflected);
+}
+
+// The water under the surface as the ground's shading has it where it lies too deep to show: the
+// light the water scatters back, lit facing up at sea level, seen through the air between, and
+// tone mapped. Drawn behind all else, so ground under the sea left undrawn looks as it would.
+[shader("fragment")]
+float4 fragment_deep(Surface surface) : SV_Target {
+    const float3 up = normalize(surface.normal);
+    const float3 sun = push.sun_nearest.xyz;
+    const float scale = lighting.sky_scale.w;
+    const float3 clear = transmittance(air, transmittance_table, 0.0, dot(up, sun));
+    const Shade shade = shade_at(lighting, cloud_shadow, surface.from_eye);
+    const float3 sunlight = through_cloud(shade, clear);
+    const float3 sky = sky_under_cloud(lighting, shade, clear * saturate(dot(up, sun)));
+    const float3 on_water = (sunlight * saturate(dot(up, sun))) + sky;
+    const float3 radiance = water_colour * on_water / pi;
+
+    const float4 clip = mul(push.clip_from_eye, float4(surface.from_eye, 1.0));
+    const float2 uv = ((clip.xy / clip.w) * 0.5) + 0.5;
+    const float4 between =
+        aerial_perspective(aerial_volume, uv, length(surface.from_eye) * scale, lighting.reach.x);
+    return float4(tone_mapped((radiance * between.a) + between.rgb, lighting.sun_exposure.w), 1.0);
 }

@@ -40,4 +40,19 @@ struct SeaReach {
 // ground there, is drawn: as bent puts it, relative to the eye.
 [[nodiscard]] DVec3 sea_from_eye(const Bend& bend, double along, DVec3 towards);
 
+// Seawater as shaders/water.slang draws it; change both together. Schlick's reflectance looking
+// straight down, the clearest colour's absorption per metre, and the most glancing a view down
+// through the water is taken as, for the length of its path there.
+inline constexpr double water_facing_reflection = 0.02;
+inline constexpr double water_clearest_absorbing = 0.03;
+inline constexpr double water_least_facing = 0.1;
+
+// The most that ground under the sea can show through it: what the sea's surface lets through, as
+// Fresnel has it, times what of the clearest colour the water passes down to the ground and back
+// up. Seen from `eye` metres from the centre of a sea `sea` metres in radius, of ground between
+// `deepest` and `shallowest` metres from the centre, `nearest` to `farthest` radians round from
+// under the eye. 1 for ground that isn't under the sea, or an eye that isn't above it.
+[[nodiscard]] double seabed_showing(double eye, double sea, double deepest, double shallowest,
+                                    double nearest, double farthest);
+
 } // namespace hog::terrain

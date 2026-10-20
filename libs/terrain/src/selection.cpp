@@ -3,6 +3,7 @@
 #include <hog/core/assert.hpp>
 #include <hog/planet/neighbors.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/terrain/sea.hpp>
 #include <hog/terrain/selection.hpp>
 
 #include <algorithm>
@@ -47,6 +48,7 @@ struct Bounds {
     DVec3 from_eye; // metres from the eye to the sphere's centre
     double radius;  // metres
     double gap;     // radians from the eye's direction to the nearest of the cell
+    double reach;   // and to the farthest
     double spacing; // metres between the patch's vertices, at most
     double lowest;  // metres from the centre the patch keeps between
     double highest;
@@ -148,6 +150,8 @@ public:
         return {.from_eye = (cone.direction * along) - eye_,
                 .radius = std::max(apart(low, along, cone.angle), apart(high, along, cone.angle)),
                 .gap = cone.gap,
+                .reach = std::min(small_angle_between(eye_direction_, cone.direction) + cone.angle,
+                                  std::numbers::pi),
                 .spacing = spacing,
                 .lowest = low,
                 .highest = high};
@@ -183,6 +187,12 @@ public:
         const double nearest =
             std::clamp(eye_height_ * std::cos(bounds.gap), bounds.lowest, bounds.highest);
         return apart(nearest, eye_height_, bounds.gap);
+    }
+
+    [[nodiscard]] bool under_sea(const Bounds& bounds) const {
+        return settings_.seabed_unseen > 0.0 &&
+               seabed_showing(eye_height_, drawn_radius_, bounds.lowest, bounds.highest, bounds.gap,
+                              bounds.reach) <= settings_.seabed_unseen;
     }
 
     [[nodiscard]] bool too_coarse(planet::CellId cell, const Bounds& bounds) const {
@@ -276,7 +286,8 @@ std::vector<SelectedPatch> select_patches(const Viewpoint& view, double planet_r
         drawn.push_back({.cell = cell,
                          .coarser_edges = detail::coarser_edges(leaves, cell),
                          .distance = selector.distance(around),
-                         .in_view = selector.in_view(around)});
+                         .in_view = selector.in_view(around),
+                         .under_sea = selector.under_sea(around)});
     }
     std::ranges::stable_sort(drawn, {}, &SelectedPatch::distance);
     return drawn;

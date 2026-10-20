@@ -16,10 +16,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <numbers>
 #include <optional>
 #include <span>
@@ -235,6 +237,84 @@ std::vector<std::uint8_t> through_air(hog::render::Device& device, double sun_el
     return std::move(pixels).value();
 }
 
+// What lies beneath the sea's surface.
+enum class Beneath : std::uint8_t { Seabed, Deep, Nothing };
+
+// From `height` metres up, looking east and steeply down through the air at the sea over ground
+// four kilometres beneath it, too deep to show, drawn either as the ground or as the deep water; or
+// over nothing.
+std::vector<std::uint8_t> over_deep_sea(hog::render::Device& device, Beneath beneath,
+                                        double height = 20'000.0) {
+    auto atmosphere = hog::render::Atmosphere::create(device);
+    REQUIRE(atmosphere);
+    auto sky = hog::render::Sky::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
+    REQUIRE(sky);
+    auto ocean =
+        hog::render::Ocean::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT, true);
+    REQUIRE(ocean);
+    const std::vector<hog::terrain::MaterialImage> materials(
+        hog::planet::biome_count,
+        hog::terrain::material_image({.colour = DVec3{0.0, 0.75, 0.25}}, 64));
+    auto terrain =
+        hog::render::Terrain::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT,
+                                     {.materials = materials, .sea = true, .air = true});
+    REQUIRE(terrain);
+    auto pool = hog::render::TerrainPool::create(device, {});
+    REQUIRE(pool);
+    const Patch seabed = level_patch(40'000.0, 160'000.0, -4'000.0);
+    const std::uint32_t slot = pool->acquire().value_or(1);
+    REQUIRE(pool->stage(0, slot, seabed.vertices));
+    const std::vector<hog::render::TerrainDraw> draws{{.slot = slot, .origin = seabed.origin}};
+
+    const WorldPosition eye{up * (radius + height)};
+    // From under the sea, steeply up at its surface.
+    const double steep = height > 0.0 ? 3.0 : -3.0;
+    const DVec3 sun = glm::normalize(up + north);
+    const hog::terrain::Bend bend = hog::terrain::bend_from(eye, radius, 0.0);
+    const hog::render::Camera camera{.eye = eye,
+                                     .forward = glm::normalize(east - (up * steep)),
+                                     .up = glm::normalize((east * steep) + up)};
+    const hog::render::SkyView seen{.camera = camera, .sun = sun, .bend = bend, .exposure = 10.0};
+    const hog::render::AirBindings air = sky->bindings(0, *atmosphere);
+    const OceanView view{.camera = camera, .sun = sun, .bend = bend, .air = air};
+
+    auto target = hog::render::make_image(
+        device, {.format = VK_FORMAT_R8G8B8A8_UNORM,
+                 .extent = extent,
+                 .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT});
+    REQUIRE(target);
+    auto depth =
+        hog::render::make_image(device, {.format = VK_FORMAT_D32_SFLOAT,
+                                         .extent = extent,
+                                         .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+                                         .aspect = VK_IMAGE_ASPECT_DEPTH_BIT});
+    REQUIRE(depth);
+    REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
+        namespace use = hog::render::image_use;
+        REQUIRE(pool->record_uploads(commands, 0));
+        CHECK(sky->record_frame(commands, extent, 0, *atmosphere, seen));
+        hog::render::transition(commands, target->handle(), VK_IMAGE_ASPECT_COLOR_BIT, use::discard,
+                                use::colour_target);
+        hog::render::transition(commands, depth->handle(), VK_IMAGE_ASPECT_DEPTH_BIT, use::discard,
+                                use::depth_target);
+        hog::render::begin_rendering(commands, target->view(), extent,
+                                     VkClearColorValue{.float32 = {0.0F, 0.0F, 0.0F, 1.0F}},
+                                     {.view = depth->view()});
+        sky->draw(commands, extent, 0, *atmosphere, seen);
+        if (beneath == Beneath::Seabed) {
+            terrain->draw(commands, extent, *pool, draws,
+                          {.camera = camera, .sun = sun, .bend = bend, .air = air});
+        } else if (beneath == Beneath::Deep) {
+            ocean->draw_deep(commands, extent, view);
+        }
+        ocean->draw(commands, extent, view);
+        vkCmdEndRendering(commands);
+    }));
+    auto pixels = hog::render::read_pixels(device, *target, hog::render::image_use::colour_target);
+    REQUIRE(pixels);
+    return std::move(pixels).value();
+}
+
 int brightness(Pixel pixel) {
     return pixel[0] + pixel[1] + pixel[2];
 }
@@ -407,5 +487,35 @@ TEST_CASE("through the air, the sun's glint on the sea reddens as it sets",
                   << "; aside " << int{aside[0]} << ", " << int{aside[1]} << ", " << int{aside[2]});
     CHECK(brightness(brightest) > 2 * brightness(aside));
     CHECK(brightest[0] > 2 * brightest[2]);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("through the air, the deep water drawn beneath the sea looks as ground too deep to show",
+          "[render][gpu]") {
+    const auto device = test_device();
+    const auto seabed = over_deep_sea(*device, Beneath::Seabed);
+    const auto deep = over_deep_sea(*device, Beneath::Deep);
+    const auto nothing = over_deep_sea(*device, Beneath::Nothing);
+    int furthest = 0;
+    int without = 0;
+    for (std::uint32_t x = 0; x < extent.width; ++x) {
+        for (std::uint32_t y = 0; y < extent.height; ++y) {
+            const Pixel drawn = pixel_at(seabed, x, y);
+            for (std::size_t channel = 0; channel < 3; ++channel) {
+                furthest = std::max(furthest,
+                                    std::abs(drawn.at(channel) - pixel_at(deep, x, y).at(channel)));
+                without = std::max(
+                    without, std::abs(drawn.at(channel) - pixel_at(nothing, x, y).at(channel)));
+            }
+        }
+    }
+    CAPTURE(furthest);
+    CHECK(furthest <= 2);
+    // Without it, the sky would show through.
+    CHECK(without > 20);
+
+    // From under the sea, the sky shows through its surface overhead as before.
+    CHECK(over_deep_sea(*device, Beneath::Deep, -20.0) ==
+          over_deep_sea(*device, Beneath::Nothing, -20.0));
     CHECK(device->validation_errors() == 0);
 }

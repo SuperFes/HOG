@@ -40,11 +40,19 @@ public:
     // Records drawing into the colour and depth images being rendered to, of `extent`, over what's
     // already drawn there.
     void draw(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view) const;
+    // Lit through the air and seen from above the sea, records the water beneath the surface as
+    // the ground's shading has it where it lies too deep to show, behind all else: drawn before the
+    // ground, so ground under the sea left undrawn looks as it would.
+    void draw_deep(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view) const;
 
 private:
     Ocean() = default;
 
+    void record(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view,
+                const Pipeline& pipeline) const;
+
     Pipeline pipeline_;
+    Pipeline deep_;
     Buffer vertices_;
     Buffer indices_;
     std::uint32_t index_count_ = 0;
