@@ -197,6 +197,27 @@ std::size_t leafy_pixels(const Pixels& pixels, std::uint32_t from = 0) {
     return leafy;
 }
 
+// The lowest row of the picture any leaves cover, counted from the top; 0 for none.
+std::uint32_t lowest_leafy_row(const Pixels& pixels) {
+    std::uint32_t lowest = 0;
+    for (std::uint32_t row = 0; row < extent.height; ++row) {
+        for (std::uint32_t column = 0; column < extent.width; ++column) {
+            const std::size_t at = 4 * ((std::size_t{row} * extent.width) + column);
+            if (pixels.at(at + 1) > 20 && pixels.at(at + 1) > pixels.at(at)) {
+                lowest = row;
+                break;
+            }
+        }
+    }
+    return lowest;
+}
+
+// Bark below row `from`, counted from the top.
+std::size_t barky_below(const Pixels& pixels, std::uint32_t from) {
+    const auto begin = static_cast<std::ptrdiff_t>(4 * std::size_t{from + 1} * extent.width);
+    return barky_pixels(Pixels(pixels.begin() + begin, pixels.end()));
+}
+
 // Leaves gone yellow, orange or red: warm and well saturated, as no bark is.
 std::size_t autumnal_pixels(const Pixels& pixels) {
     std::size_t autumnal = 0;
@@ -361,4 +382,27 @@ TEST_CASE("a maple's stamp stands narrower than an oak and turns and falls befor
     CHECK(10 * leafy_pixels(turned) < green_oaks);
     CHECK(3 * autumnal_pixels(draw(*device, {.anchors = maples, .daylight = november})) <
           autumnal_pixels(draw(*device, {.anchors = oaks, .daylight = november})));
+}
+
+TEST_CASE("a palm's stamp is a crown of fronds high on a bare stem, green the year round",
+          "[render]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    using hog::flora::Genus;
+    const Pixels palm =
+        draw(*device, {.anchors = rank_of(1, 0.0, 11.0F, hog::flora::prime_age, Genus::Palm)});
+    const Pixels oak =
+        draw(*device, {.anchors = rank_of(1, 0.0, 11.0F, hog::flora::prime_age, Genus::Oak)});
+    CHECK(leafy_pixels(palm) > 30);
+    // Its crown all high up, the stem bare beneath it, where an oak's head hangs lower.
+    CHECK(lowest_leafy_row(palm) + 3 < lowest_leafy_row(oak));
+    CHECK(barky_below(palm, lowest_leafy_row(palm)) > 3);
+    // Evergreen.
+    const auto palms = rank_of(3, 0.0, 11.0F, hog::flora::prime_age, Genus::Palm);
+    constexpr hog::flora::Daylight summer{.hours = 15.0F, .longest = 15.4F};
+    constexpr hog::flora::Daylight winter{.hours = 9.0F, .longest = 15.4F, .lengthening = true};
+    CHECK(leafy_pixels(draw(*device, {.anchors = palms, .daylight = winter})) ==
+          leafy_pixels(draw(*device, {.anchors = palms, .daylight = summer})));
 }

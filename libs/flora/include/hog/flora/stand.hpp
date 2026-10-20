@@ -85,13 +85,15 @@ struct Foliage {
 };
 
 // Foliage far darker than the ground's mean, so a forest reads as its own mass: needles cool and
-// deep, leaves warmer and brighter, a maple's the brightest.
+// deep, leaves warmer and brighter, a maple's the brightest, a palm's fronds between.
 [[nodiscard]] constexpr Foliage foliage_of(Genus genus) noexcept {
     switch (genus) {
     case Genus::Oak:
         return {.of_ground = 0.38F, .own = {0.022F, 0.062F, 0.012F}};
     case Genus::Maple:
         return {.of_ground = 0.38F, .own = {0.03F, 0.072F, 0.01F}};
+    case Genus::Palm:
+        return {.of_ground = 0.34F, .own = {0.028F, 0.066F, 0.018F}};
     case Genus::Pine:
         break;
     }
@@ -111,6 +113,7 @@ struct Foliage {
         return 0.85F;
     case Genus::Maple:
         return 0.9F;
+    case Genus::Palm:
     case Genus::Pine:
         break;
     }

@@ -6,7 +6,8 @@ import tone;
 
 // Tree stamps, each drawn from a tree anchor bound to its spot in the world: three crossed quads, a
 // mask cut in the fragment shader shaping the tree's crown over a bare trunk — a pine's tiered cone
-// of boughs, an oak's lumpy round head of leaves, a maple's taller smoother oval.
+// of boughs, an oak's lumpy round head of leaves, a maple's taller smoother oval, a palm's arching
+// fronds high on a bare stem.
 // The anchors are shared with the grown forest, which covers the near ground; the stamps hold off
 // inside its reach and carry on beyond, shrinking away at the edge of their own.
 
@@ -25,7 +26,7 @@ struct Push {
 
 [[vk::push_constant]] ConstantBuffer<Push> push;
 
-static const uint genus_count = 3;
+static const uint genus_count = 4;
 
 struct Settings {
     // x metres the stamps hold off while the grown forest covers; y metres from the eye they
@@ -49,11 +50,12 @@ struct Settings {
 
 static const uint anchor_stride = 40; // bytes, as render::TreeAnchor lies
 
-// Bare wood, for the trunk, as the grown forest's bark: pine, oak, then maple.
+// Bare wood, for the trunk, as the grown forest's bark: pine, oak, maple, then palm.
 static const float3 woods[genus_count] = { float3(0.055, 0.045, 0.038), float3(0.07, 0.064, 0.056),
-                                           float3(0.08, 0.075, 0.068) };
+                                           float3(0.08, 0.075, 0.068), float3(0.085, 0.072, 0.055) };
 static const uint pine = 0;
 static const uint oak = 1;
+static const uint palm = 3;
 
 uint hashed(uint at) {
     at ^= at >> 16;
@@ -87,6 +89,12 @@ static const float prime_age = 0.7;
 float across(float age, float young, float old) {
     return age >= prime_age ? lerp(1.0, old, (age - prime_age) / (1.0 - prime_age))
                             : lerp(young, 1.0, age / prime_age);
+}
+
+// How far a palm's fronds reach, over its height: further the younger it is, its stem not yet grown
+// up under them, as flora::palm() ages.
+float palm_reach(uint seed, float age) {
+    return (0.3 + (0.05 * unit(seed + 5u))) * across(age, 1.7, 0.95);
 }
 
 // The two triangles of a quad: bottom left and right, then top left and right.
@@ -149,10 +157,12 @@ Tree vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const float above = height_above_sea(root, push.bend_up, push.bend_radii.x);
     const float height = grown * fade;
     // Pine saplings and old pines spread wider for their height than one in its prime; the
-    // broadleaves spread wider every year, a maple narrower than an oak.
-    const float spread = genus == pine  ? (0.42 + (0.12 * unit(hash + 5u))) * across(age, 1.15, 1.2)
-                         : genus == oak ? (0.7 + (0.12 * unit(hash + 5u))) * across(age, 0.85, 1.2)
-                                        : (0.52 + (0.1 * unit(hash + 5u))) * across(age, 0.9, 1.2);
+    // broadleaves spread wider every year, a maple narrower than an oak; a palm's quad holds its
+    // fronds' reach either way.
+    const float spread = genus == pine   ? (0.42 + (0.12 * unit(hash + 5u))) * across(age, 1.15, 1.2)
+                         : genus == oak  ? (0.7 + (0.12 * unit(hash + 5u))) * across(age, 0.85, 1.2)
+                         : genus == palm ? 2.2 * palm_reach(hash, age)
+                                         : (0.52 + (0.1 * unit(hash + 5u))) * across(age, 0.9, 1.2);
     const float width = height * spread;
 
     // Three quads crossed about the tree's own up: near vertical, with a shade of the ground's
@@ -326,6 +336,63 @@ Cut broadleaf_cut(uint seed, float age, float2 uv, float pixels, Head head) {
     return cut;
 }
 
+// What of the palm the point falls on: fronds springing from the top of a bare stem, arching out
+// either way and down, each narrow at its stalk, combed into leaflets; coconuts under them once it
+// bears. Never thinner than a pixel, so far off it stays a starburst rather than sparkling apart.
+Cut palm_cut(uint seed, float age, float2 uv, float pixels) {
+    Cut cut;
+    cut.part = air_part;
+    cut.shade = 1.0;
+    cut.patch = float2(0.0);
+    cut.twig = false;
+    const float reach = palm_reach(seed, age);
+    const float width = 2.2 * reach;
+    // In tree heights from the crown's heart, which stands a frond's rise below the quad's top.
+    const float top = 1.0 - (0.15 * reach);
+    const float2 at = float2(uv.x * width, uv.y - top);
+    const float least = 0.6 * width / max(pixels, 1.0);
+    const float droop = across(age, 0.5, 1.25);
+    for (uint frond = 0; frond < 4; ++frond) {
+        // Two fronds either way in this quad's plane, the second turned partly toward the eye.
+        const float way = ((frond & 1u) == 0 ? 1.0 : -1.0) * (frond < 2 ? 1.0 : 0.55);
+        const float length = reach * (0.85 + (0.3 * unit(seed + 50u + frond)));
+        const float t = at.x / (way * length);
+        if (t < 0.0 || t > 1.0) {
+            continue;
+        }
+        const float rise = lerp(0.1, 0.45, unit(seed + 30u + frond));
+        const float fall = lerp(0.45, 0.75, unit(seed + 40u + frond)) * droop;
+        const float off = at.y - (length * ((rise * t) - (fall * t * t)));
+        const float slope = (rise - (2.0 * fall * t)) / abs(way);
+        const float half_width =
+            (length * 0.11 * (1.0 - (0.7 * t)) * saturate(t * 6.0)) + least;
+        if (abs(off) < half_width * sqrt(1.0 + (slope * slope))) {
+            cut.part = needles;
+            // Leaflets combed along the frond, lit above its midrib and shaded below.
+            const float comb = frac((t * 16.0) + unit(seed + 60u + frond));
+            cut.shade = (off > 0.0 ? 1.05 : 0.8) * (0.8 + (0.3 * comb));
+            cut.patch = float2(t * 5.0, float(frond));
+            return cut;
+        }
+    }
+    // The crown's heart, where the fronds spring from.
+    if (length(at / float2(0.05 * reach, 0.035 * reach)) < 1.0) {
+        cut.part = needles;
+        cut.shade = 0.7;
+        return cut;
+    }
+    if (pixels >= 7.0 && age > 0.35 && length((at - float2(0.0, -0.05 * reach)) /
+                                              float2(0.07 * reach, 0.05 * reach)) < 1.0) {
+        cut.part = bark;
+        cut.shade = 0.8;
+        return cut;
+    }
+    if (abs(at.x) < 0.012 + least && uv.y < top) {
+        cut.part = bark;
+    }
+    return cut;
+}
+
 // Dice rolled at each whole point of `at` and blended smoothly between, 0 to 1.
 float smooth_dice(uint seed, float2 at) {
     const float2 whole = floor(at);
@@ -341,13 +408,18 @@ float smooth_dice(uint seed, float2 at) {
 // Lit as the ground beneath it, as grass.slang lights its blades.
 [shader("fragment")]
 float4 fragment_main(Tree tree) : SV_Target {
-    const Cut cut = tree.genus == pine ? pine_cut(tree.seed, tree.age, tree.uv, tree.pixels)
-                                       : broadleaf_cut(tree.seed, tree.age, tree.uv, tree.pixels,
-                                                       head_of(tree.genus));
+    Cut cut;
+    if (tree.genus == pine) {
+        cut = pine_cut(tree.seed, tree.age, tree.uv, tree.pixels);
+    } else if (tree.genus == palm) {
+        cut = palm_cut(tree.seed, tree.age, tree.uv, tree.pixels);
+    } else {
+        cut = broadleaf_cut(tree.seed, tree.age, tree.uv, tree.pixels, head_of(tree.genus));
+    }
     if (cut.part == air_part) {
         discard;
     }
-    float3 albedo = woods[tree.genus];
+    float3 albedo = woods[tree.genus] * (cut.part == bark ? cut.shade : 1.0);
     if (cut.part == needles) {
         // Each patch keeps the tree's dates give or take a week or so, the crown's top first;
         // where its leaves are down, the bare branches show through.

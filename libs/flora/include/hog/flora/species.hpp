@@ -72,8 +72,8 @@ struct Species {
 };
 
 // The kinds of tree grown, each its own species.
-enum class Genus : std::uint8_t { Pine, Oak, Maple };
-inline constexpr int genus_count = 3;
+enum class Genus : std::uint8_t { Pine, Oak, Maple, Palm };
+inline constexpr int genus_count = 4;
 
 // The pine analogue: whorled boughs off a single trunk, a conical crown.
 [[nodiscard]] Species pine();

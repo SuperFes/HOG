@@ -261,6 +261,8 @@ Species species_of(Genus genus) {
         return oak();
     case Genus::Maple:
         return maple();
+    case Genus::Palm:
+        return palm();
     case Genus::Pine:
         break;
     }

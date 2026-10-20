@@ -21,7 +21,7 @@ struct Push {
 [[vk::push_constant]] ConstantBuffer<Push> push;
 
 static const uint biome_count = 14;
-static const uint genus_count = 3;
+static const uint genus_count = 4;
 
 struct Settings {
     // Metres a material spans near and far, and 1 if ground below sea level is seen through water.
@@ -84,10 +84,11 @@ static const float4 midsummer = float4(24.0, 24.0, 0.0, 0.0);
 
 static const uint pine = 0;
 static const uint oak = 1;
+static const uint palm = 3;
 
-// Bare wood, as the trees': pine, oak, then maple.
+// Bare wood, as the trees': pine, oak, maple, then palm.
 static const float3 woods[genus_count] = { float3(0.055, 0.045, 0.038), float3(0.07, 0.064, 0.056),
-                                           float3(0.08, 0.075, 0.068) };
+                                           float3(0.08, 0.075, 0.068), float3(0.085, 0.072, 0.055) };
 
 // A crown as the stamps draw one, for the tree's height: how wide, how much of the height it
 // fills, how much of the box about it its outline fills seen from aside, and how tall its genus
@@ -107,6 +108,11 @@ Crown crown_of(uint genus) {
     if (genus == oak) {
         const Crown oak_crown = { 0.81, 0.7, 0.785, 0.85 };
         return oak_crown;
+    }
+    if (genus == palm) {
+        // A starburst of fronds, open between them, on top of a bare stem.
+        const Crown palm_crown = { 0.62, 0.3, 0.45, 1.0 };
+        return palm_crown;
     }
     const Crown maple_crown = { 0.61, 0.75, 0.785, 0.9 };
     return maple_crown;
@@ -240,7 +246,7 @@ float3 wooded(Ground ground, float3 bare, float4 year) {
     const float broadleaf = ground.woods.z;
     const float maple = ground.woods.w;
     const float shares[genus_count] = { 1.0 - broadleaf, broadleaf * (1.0 - maple),
-                                        broadleaf * maple };
+                                        broadleaf * maple, 0.0 };
     const float steep = dot(-ground.from_eye / max(away, 1e-3), up_at(ground));
     const float aslant = min(sqrt(max(1.0 - (steep * steep), 0.0)) / max(steep, 1e-3), grazing);
 
