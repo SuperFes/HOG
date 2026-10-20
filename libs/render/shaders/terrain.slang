@@ -58,6 +58,8 @@ struct Vertex {
     [[vk::location(3)]] float4 woods; // as terrain::Woods, each byte read 0 to 1
     [[vk::location(4)]] float palms;  // the last of them
     [[vk::location(5)]] float scar;   // as terrain::Cover's first byte, 0 to 1
+    [[vk::location(6)]] uint blend_biome;
+    [[vk::location(7)]] float blend; // blend_biome's share, 0 to 1
 };
 
 struct Ground {
@@ -66,7 +68,7 @@ struct Ground {
     float3 from_eye;
     float3 drawn; // from the eye, bent
     float height; // above sea level
-    // Each biome's share, four to a vector: all of one at a corner, blended across a triangle.
+    // Each biome's share, four to a vector: at most two at a corner, blended across a triangle.
     float4 biomes[(biome_count + 3) / 4];
     float4 woods;
     float palms;
@@ -172,7 +174,9 @@ Ground vertex_main(Vertex vertex) {
     for (uint group = 0; group < (biome_count + 3) / 4; ++group) {
         ground.biomes[group] = float4(0.0);
     }
-    ground.biomes[biome / 4][biome % 4] = 1.0;
+    const uint other = min(vertex.blend_biome, biome_count - 1);
+    ground.biomes[biome / 4][biome % 4] = 1.0 - vertex.blend;
+    ground.biomes[other / 4][other % 4] += vertex.blend;
     ground.woods = vertex.woods;
     ground.palms = vertex.palms;
     ground.scar = vertex.scar;

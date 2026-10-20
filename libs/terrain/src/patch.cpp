@@ -13,6 +13,8 @@
 #include <cstdlib>
 #include <limits>
 #include <numbers>
+#include <span>
+#include <utility>
 
 namespace hog::terrain {
 
@@ -64,7 +66,70 @@ constexpr double skirt_spacings = patch_cells / 4.0;
     return static_cast<std::uint8_t>(std::lround(std::clamp(value, 0.0F, 1.0F) * 15.0F));
 }
 
+// A corner of `face` that may lie off it; off both ways, where only a cube's corner is, it's
+// brought back onto the face along the way it lies least off.
+[[nodiscard]] Corner on_one_face(int face, std::int64_t i, std::int64_t j, int level) {
+    const std::int64_t side = side_of(level);
+    const auto off = [&](std::int64_t at) {
+        return at < 0 ? -at : std::max(at - side, std::int64_t{0});
+    };
+    if (off(i) > 0 && off(j) > 0) {
+        std::int64_t& nearer = off(i) <= off(j) ? i : j;
+        nearer = std::clamp<std::int64_t>(nearer, 0, side);
+    }
+    return {.face = face, .i = i, .j = j, .level = level};
+}
+
+// Whether a grid point is a patch's or in the border about it the normals need, its corners
+// aside.
+[[nodiscard]] constexpr bool bordering(int i, int j) noexcept {
+    const auto inside = [](int along) { return along >= 0 && along < patch_side; };
+    const auto beside = [](int along) { return along >= -1 && along <= patch_side; };
+    return beside(i) && beside(j) && (inside(i) || inside(j));
+}
+
+struct Blend {
+    planet::Biome biome;
+    std::uint8_t share;
+};
+
+// Of the biomes within `steps` of (i, j) on a grid `width` wide, the most common other than the
+// one there, and its share of the two.
+[[nodiscard]] Blend blend_at(std::span<const planet::Biome> biomes, int width, int steps, int i,
+                             int j) {
+    const auto at = [&](int x, int y) {
+        return biomes[(static_cast<std::size_t>(y) * static_cast<std::size_t>(width)) +
+                      static_cast<std::size_t>(x)];
+    };
+    std::array<int, planet::biome_count> counts{};
+    for (int y = j - steps; y <= j + steps; ++y) {
+        for (int x = i - steps; x <= i + steps; ++x) {
+            ++counts.at(std::to_underlying(at(x, y)));
+        }
+    }
+    const planet::Biome own = at(i, j);
+    Blend blend{.biome = own, .share = 0};
+    int most = 0;
+    for (int biome = 0; biome < planet::biome_count; ++biome) {
+        const int count = counts.at(static_cast<std::size_t>(biome));
+        if (biome != static_cast<int>(own) && count > most) {
+            most = count;
+            blend.biome = static_cast<planet::Biome>(biome);
+        }
+    }
+    const int mine = counts.at(std::to_underlying(own));
+    blend.share =
+        byte_of(static_cast<double>(most) / static_cast<double>(std::max(mine + most, 1)));
+    return blend;
+}
+
 } // namespace
+
+int blend_steps(int level, double radius) {
+    const double spacing = radius * std::numbers::pi / 2.0 / static_cast<double>(side_of(level));
+    return static_cast<int>(
+        std::min(std::floor(biome_blend_reach / spacing), static_cast<double>(most_blend_steps)));
+}
 
 Cover packed_cover(const flora::Fate& fate, bool wooded) noexcept {
     const std::uint8_t scar = byte_of(static_cast<double>(fate.scar));
@@ -87,8 +152,9 @@ Woods packed_woods(const flora::Woodland& woodland, double cell_area) noexcept {
 
 Corner canonical(Corner corner) {
     const std::int64_t side = side_of(corner.level);
-    HOG_ASSERT(corner.i >= -1 && corner.i <= side + 1 && corner.j >= -1 && corner.j <= side + 1,
-               "corner more than a step off its face");
+    HOG_ASSERT(corner.i >= -side && corner.i <= 2 * side && corner.j >= -side &&
+                   corner.j <= 2 * side,
+               "corner more than a face off its face");
     HOG_ASSERT(on_face(corner.i, side) || on_face(corner.j, side),
                "corner off its face in both directions");
     // The corners of every face's cells make one lattice over the cube, from 0 to side on each
@@ -152,25 +218,33 @@ Patch bake_patch(const planet::World& world, planet::CellId cell, const flora::F
     const auto index = [](int i, int j) {
         return (static_cast<std::size_t>(j) * patch_side) + static_cast<std::size_t>(i);
     };
+    // A border `steps` corners wide, at least the normals', for the biomes each vertex blends.
+    const int steps = blend_steps(level, radius);
+    const int reach = std::max(steps, 1);
+    const int blended = patch_side + (2 * reach);
+    const auto blended_index = [&](int i, int j) {
+        return (static_cast<std::size_t>(j + reach) * static_cast<std::size_t>(blended)) +
+               static_cast<std::size_t>(i + reach);
+    };
 
     std::vector<DVec3> points(std::size_t{bordered} * bordered);
-    std::vector<planet::Biome> biomes(std::size_t{patch_side} * patch_side);
-    std::vector<Woods> woods(biomes.size());
-    std::vector<Cover> covers(biomes.size());
+    std::vector<planet::Biome> biomes(static_cast<std::size_t>(blended) *
+                                      static_cast<std::size_t>(blended));
+    std::vector<Woods> woods(std::size_t{patch_side} * patch_side);
+    std::vector<Cover> covers(woods.size());
     HeightRange heights{.lowest = std::numeric_limits<double>::infinity(),
                         .highest = -std::numeric_limits<double>::infinity()};
-    for (int j = -1; j <= patch_side; ++j) {
-        for (int i = -1; i <= patch_side; ++i) {
-            if (!inside(i) && !inside(j)) {
+    for (int j = -reach; j < patch_side + reach; ++j) {
+        for (int i = -reach; i < patch_side + reach; ++i) {
+            const Corner corner = on_one_face(at.face, first_i + i, first_j + j, level);
+            const planet::CellState state = world.state(sample_cell(corner));
+            biomes[blended_index(i, j)] = state.biome;
+            if (!bordering(i, j)) {
                 continue;
             }
-            const Corner corner{
-                .face = at.face, .i = first_i + i, .j = first_j + j, .level = level};
-            const planet::CellState state = world.state(sample_cell(corner));
             const double height = static_cast<double>(state.elevation) / planet::fixed_one;
             points[bordered_index(i, j)] = direction(corner) * (radius + height);
             if (inside(i) && inside(j)) {
-                biomes[index(i, j)] = state.biome;
                 const flora::Fate fate = fate_at(canonical(corner), fates);
                 woods[index(i, j)] =
                     woods_at(canonical(corner), points[bordered_index(i, j)], state.biome,
@@ -194,12 +268,15 @@ Patch bake_patch(const planet::World& world, planet::CellId cell, const flora::F
                 points[bordered_index(i + 1, j)] - points[bordered_index(i - 1, j)];
             const DVec3 along_j =
                 points[bordered_index(i, j + 1)] - points[bordered_index(i, j - 1)];
+            const Blend blend = blend_at(biomes, blended, steps, i + reach, j + reach);
             patch.vertices.push_back(
                 {.position = relative_to(WorldPosition{points[bordered_index(i, j)]}, patch.origin),
                  .normal = Vec3(glm::normalize(glm::cross(along_i, along_j))),
-                 .biome = biomes[index(i, j)],
+                 .biome = biomes[blended_index(i, j)],
                  .woods = woods[index(i, j)],
-                 .cover = covers[index(i, j)]});
+                 .cover = covers[index(i, j)],
+                 .blend_biome = blend.biome,
+                 .blend = blend.share});
         }
     }
 

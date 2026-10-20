@@ -60,8 +60,8 @@ struct Corner {
 };
 
 // The corner as named on the lowest of the faces it lies on, so every face sharing it names it
-// alike. Either of i and j may lie one step off the face, which names the point that step onto
-// the neighbouring face, folded over the edge.
+// alike. Either of i and j, not both, may lie off the face by up to its width, which names the
+// point that far onto the neighbouring face, folded over the edge.
 [[nodiscard]] Corner canonical(Corner corner);
 
 // Unit direction from the planet's centre. Corners naming one point give the same bits, however
@@ -92,15 +92,28 @@ using Cover = std::array<std::uint8_t, 2>;
 // The cover a fate leaves, on ground that grows woods or not.
 [[nodiscard]] Cover packed_cover(const flora::Fate& fate, bool wooded) noexcept;
 
+// Metres either side of a vertex its ground's look is averaged over, so biomes fade into each
+// other rather than meeting at a line.
+inline constexpr double biome_blend_reach = 6.0;
+// Vertices either side a vertex averages over at most, however fine its patch.
+inline constexpr int most_blend_steps = 6;
+
+// The vertices either side a vertex at `level` averages its look over, on a planet of `radius`.
+[[nodiscard]] int blend_steps(int level, double radius);
+
 struct PatchVertex {
     Vec3 position{0.0F}; // metres from the patch's origin
     Vec3 normal{0.0F};
     planet::Biome biome = planet::Biome::Ocean;
     Woods woods{};
     Cover cover{};
+    // The biome the ground about it most fades into, and that biome's share from 0 to 255 of the
+    // two: the look drawn, not what grows.
+    planet::Biome blend_biome = planet::Biome::Ocean;
+    std::uint8_t blend = 0;
 };
 
-static_assert(sizeof(PatchVertex) == 32);
+static_assert(sizeof(PatchVertex) == 36);
 
 // Metres from sea level.
 struct HeightRange {

@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <numbers>
 #include <optional>
@@ -145,8 +146,20 @@ TEST_CASE("a corner off its face both ways is refused", "[terrain][patch]") {
     const hog::testing::AssertionGuard guard;
     CHECK_THROWS_AS(canonical({.face = 2, .i = -1, .j = 17, .level = 4}),
                     hog::testing::AssertionFailed);
-    CHECK_THROWS_AS(canonical({.face = 2, .i = 3, .j = 19, .level = 4}),
+    CHECK_THROWS_AS(canonical({.face = 2, .i = 3, .j = 33, .level = 4}),
                     hog::testing::AssertionFailed);
+}
+
+TEST_CASE("steps off a face land as many steps onto the next", "[terrain][patch]") {
+    // Face 0's +u edge is face 1's +v edge, as above.
+    constexpr int level = 4;
+    for (std::int64_t off = 1; off <= 16; ++off) {
+        CAPTURE(off);
+        const Corner beyond{.face = 0, .i = 16 + off, .j = 5, .level = level};
+        const Corner onto{.face = 1, .i = 5, .j = 16 - off, .level = level};
+        CHECK(canonical(beyond) == canonical(onto));
+        CHECK(direction(beyond) == direction(onto));
+    }
 }
 
 TEST_CASE("a patch lies on the ground over its cell", "[terrain][patch]") {
@@ -347,6 +360,89 @@ TEST_CASE("a patch is altered only by changes that reach it", "[terrain][patch]"
         CAPTURE(cell.raw());
         CHECK(!altered_by(cell));
     }
+}
+
+TEST_CASE("biomes blend over the same metres whatever the patch's level", "[terrain][patch]") {
+    // Vertices 88, 5.5, 1.4 and 0.17 metres apart.
+    CHECK(hog::terrain::blend_steps(11, planet.radius) == 0);
+    CHECK(hog::terrain::blend_steps(15, planet.radius) == 1);
+    CHECK(hog::terrain::blend_steps(17, planet.radius) == 4);
+    CHECK(hog::terrain::blend_steps(20, planet.radius) == hog::terrain::most_blend_steps);
+}
+
+TEST_CASE("a patch's biomes fade into each other, alike either side of its edges",
+          "[terrain][patch]") {
+    using hog::planet::Biome;
+    World& world = shared_world();
+    const CellId cell =
+        hog::planet::cell_at(world.geology().terrain().archipelago().center(), 17 - patch_depth);
+    const int steps = hog::terrain::blend_steps(17, planet.radius);
+    REQUIRE(steps > 1);
+    // Another biome from well west of the patch to halfway across it, so its edge runs straight
+    // down the patch's middle.
+    const Biome natural = bake_patch(world, cell).vertices.back().biome;
+    const Biome changed = natural == Biome::Desert ? Biome::Grassland : Biome::Desert;
+    const hog::planet::FaceIJ at = cell.to_face_ij();
+    for (const CellId part :
+         {CellId::from_face_ij(at.face, at.i - 1, at.j, at.level),
+          CellId::from_face_ij(at.face, 2 * at.i, 2 * at.j, at.level + 1),
+          CellId::from_face_ij(at.face, 2 * at.i, (2 * at.j) + 1, at.level + 1)}) {
+        REQUIRE(world.apply({.cell = part,
+                             .time = {},
+                             .author = {},
+                             .layer = hog::planet::Layer::Player,
+                             .payload = hog::planet::SetBiome{.biome = changed}}));
+    }
+    const Patch patch = bake_patch(world, cell);
+    std::vector<Patch> beside;
+    beside.reserve(4);
+    for (const CellId next : hog::planet::edge_neighbors(cell)) {
+        beside.push_back(bake_patch(world, next));
+    }
+    world.roll_back({});
+
+    // The share of the changed biome in what's drawn at a vertex.
+    const auto share = [&](const hog::terrain::PatchVertex& vertex) {
+        const double blend = vertex.blend / 255.0;
+        if (vertex.biome == changed) {
+            return vertex.blend_biome == changed ? 1.0 : 1.0 - blend;
+        }
+        return vertex.blend_biome == changed ? blend : 0.0;
+    };
+    // Rows clear of the band's ends fade from all of it to none, over the vertices that see both.
+    for (int j = steps; j < patch_cells - steps; ++j) {
+        CAPTURE(j);
+        std::vector<double> row;
+        row.reserve(patch_side);
+        for (int i = 0; i < patch_side; ++i) {
+            row.push_back(share(patch.vertices.at(vertex_index(i, j))));
+        }
+        CHECK(row.front() == 1.0);
+        CHECK(row.back() == 0.0);
+        CHECK(std::ranges::is_sorted(row, std::greater{}));
+        CHECK(std::ranges::count_if(row, [](double s) { return s > 0.0 && s < 1.0; }) == 2 * steps);
+        CHECK(std::ranges::any_of(row, [](double s) { return std::abs(s - 0.5) < 0.1; }));
+    }
+
+    int shared = 0;
+    for (const Patch& next : beside) {
+        for (std::size_t vertex = 0; vertex < grid_vertices; ++vertex) {
+            if (!on_border(vertex)) {
+                continue;
+            }
+            const auto match = vertex_near(next, world_at(patch, vertex), near_enough);
+            if (!match) {
+                continue;
+            }
+            const auto& mine = patch.vertices.at(vertex);
+            const auto& theirs = next.vertices.at(*match);
+            shared += mine.blend > 0 ? 1 : 0;
+            CHECK(mine.biome == theirs.biome);
+            CHECK(mine.blend_biome == theirs.blend_biome);
+            CHECK(mine.blend == theirs.blend);
+        }
+    }
+    CHECK(shared > 0);
 }
 
 TEST_CASE("a patch too fine for its vertices is refused", "[terrain][patch]") {
