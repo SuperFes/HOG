@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -30,7 +31,35 @@ constexpr double skirt_spacings = patch_cells / 4.0;
     return at >= 0 && at <= side;
 }
 
+// A byte from 0 to 1, rounded.
+[[nodiscard]] std::uint8_t byte_of(double value) noexcept {
+    return static_cast<std::uint8_t>(std::lround(std::clamp(value, 0.0, 1.0) * 255.0));
+}
+
+// The woods about a lattice corner on `biome` ground, `point` being where it lies.
+[[nodiscard]] Woods woods_at(Corner at, DVec3 point, planet::Biome biome) {
+    const int finer = flora::lattice_level - at.level;
+    const Vec2 cell{static_cast<float>(std::ldexp(static_cast<double>(at.i), finer)),
+                    static_cast<float>(std::ldexp(static_cast<double>(at.j), finer))};
+    const flora::Woodland woodland =
+        flora::woodland_at(cell, static_cast<std::uint32_t>(at.face), biome);
+    if (woodland.grown <= 0.0F) {
+        return {};
+    }
+    const double area =
+        planet::cell_area(planet::cell_at(point, flora::lattice_level)) * glm::dot(point, point);
+    return packed_woods(woodland, area);
+}
+
 } // namespace
+
+Woods packed_woods(const flora::Woodland& woodland, double cell_area) noexcept {
+    const double crowding = 100.0 * static_cast<double>(woodland.grown) / cell_area;
+    return {byte_of(crowding / double{woods_crowding}),
+            byte_of(static_cast<double>(woodland.height / woods_tallest)),
+            byte_of(static_cast<double>(woodland.broadleaf)),
+            byte_of(static_cast<double>(woodland.maple))};
+}
 
 Corner canonical(Corner corner) {
     const std::int64_t side = side_of(corner.level);
@@ -102,6 +131,7 @@ Patch bake_patch(const planet::World& world, planet::CellId cell) {
 
     std::vector<DVec3> points(std::size_t{bordered} * bordered);
     std::vector<planet::Biome> biomes(std::size_t{patch_side} * patch_side);
+    std::vector<Woods> woods(biomes.size());
     HeightRange heights{.lowest = std::numeric_limits<double>::infinity(),
                         .highest = -std::numeric_limits<double>::infinity()};
     for (int j = -1; j <= patch_side; ++j) {
@@ -116,6 +146,8 @@ Patch bake_patch(const planet::World& world, planet::CellId cell) {
             points[bordered_index(i, j)] = direction(corner) * (radius + height);
             if (inside(i) && inside(j)) {
                 biomes[index(i, j)] = state.biome;
+                woods[index(i, j)] =
+                    woods_at(canonical(corner), points[bordered_index(i, j)], state.biome);
                 heights.lowest = std::min(heights.lowest, height);
                 heights.highest = std::max(heights.highest, height);
             }
@@ -136,7 +168,8 @@ Patch bake_patch(const planet::World& world, planet::CellId cell) {
             patch.vertices.push_back(
                 {.position = relative_to(WorldPosition{points[bordered_index(i, j)]}, patch.origin),
                  .normal = Vec3(glm::normalize(glm::cross(along_i, along_j))),
-                 .biome = biomes[index(i, j)]});
+                 .biome = biomes[index(i, j)],
+                 .woods = woods[index(i, j)]});
         }
     }
 

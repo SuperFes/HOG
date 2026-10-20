@@ -1,4 +1,6 @@
 #include <hog/core/assert.hpp>
+#include <hog/flora/stand.hpp>
+#include <hog/render/anchors.hpp>
 #include <hog/render/device.hpp>
 #include <hog/render/streamed_image.hpp>
 #include <hog/render/terrain.hpp>
@@ -50,7 +52,11 @@ constexpr std::array vertex_attributes{
     VkVertexInputAttributeDescription{.location = 2,
                                       .binding = 0,
                                       .format = VK_FORMAT_R8_UINT,
-                                      .offset = offsetof(PatchVertex, biome)}};
+                                      .offset = offsetof(PatchVertex, biome)},
+    VkVertexInputAttributeDescription{.location = 3,
+                                      .binding = 0,
+                                      .format = VK_FORMAT_R8G8B8A8_UNORM,
+                                      .offset = offsetof(PatchVertex, woods)}};
 constexpr VkDescriptorSetLayoutBinding binding(std::uint32_t at, VkDescriptorType type,
                                                VkShaderStageFlags stages) noexcept {
     return {.binding = at,
@@ -75,10 +81,14 @@ constexpr std::array air_descriptors{
     binding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)};
 
 // The near tile's size, the far one's, and 1 if ground below sea level is seen through water; then
-// what each biome's material averages to, in linear light.
+// what each biome's material averages to, in linear light. Then the woods, as terrain.slang reads
+// them.
 struct Settings {
     glm::vec4 tiling;
     std::array<glm::vec4, planet::biome_count> means;
+    glm::vec4 canopy;
+    std::array<glm::vec4, flora::genus_count> foliage;
+    GenusSeasons seasons;
 };
 
 // The far tile, as many times the near one's size.
@@ -292,10 +302,17 @@ Result<Terrain> Terrain::create(Device& device, VkFormat colour_format, VkFormat
     drawn.period_ = look.tile * far_tiles;
     Settings settings{.tiling = {static_cast<float>(look.tile), static_cast<float>(drawn.period_),
                                  look.sea ? 1.0F : 0.0F, 0.0F},
-                      .means = {}};
+                      .means = {},
+                      .canopy = {static_cast<float>(look.canopy), 0.0F, 0.0F, 0.0F},
+                      .foliage = {},
+                      .seasons = genus_seasons()};
     for (std::size_t biome = 0; biome < settings.means.size(); ++biome) {
         settings.means.at(biome) =
             glm::vec4{Vec3{terrain::material_mean(look.materials[biome])}, 1.0F};
+    }
+    for (std::size_t genus = 0; genus < flora::genus_count; ++genus) {
+        const flora::Foliage foliage = flora::foliage_of(static_cast<flora::Genus>(genus));
+        settings.foliage.at(genus) = glm::vec4{foliage.own, foliage.of_ground};
     }
     auto settings_buffer = make_filled_buffer(device, std::as_bytes(std::span{&settings, 1}),
                                               VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);

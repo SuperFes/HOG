@@ -74,8 +74,10 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
                             std::optional<render::Billboard> companion) {
     const terrain::StreamSettings settings;
     const std::vector<terrain::MaterialImage> materials = biome_materials();
-    auto terrain = render::Terrain::create(device, colour_format, depth_format,
-                                           {.materials = materials, .sea = true, .air = true});
+    const BiomePalette palette = biome_palette();
+    auto terrain = render::Terrain::create(
+        device, colour_format, depth_format,
+        {.materials = materials, .sea = true, .air = true, .canopy = render::trees_far});
     if (!terrain) {
         return failed("draw the ground", terrain.error());
     }
@@ -83,7 +85,6 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
     if (!ocean) {
         return failed("draw the sea", ocean.error());
     }
-    const BiomePalette palette = biome_palette();
     auto grass = render::Grass::create(device, colour_format, depth_format, palette);
     if (!grass) {
         return failed("grow the grass", grass.error());

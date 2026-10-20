@@ -52,7 +52,7 @@ struct Settings {
 
 static const uint patch_cells = 32;
 static const uint patch_side = 33;
-static const uint vertex_stride = 28; // bytes, as terrain::PatchVertex lies
+static const uint vertex_stride = 32; // bytes, as terrain::PatchVertex lies
 
 // Bushes keep off ground this close to sea level.
 static const float shore = 0.3;

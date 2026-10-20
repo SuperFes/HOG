@@ -10,7 +10,7 @@ add_library(hog_terrain
 add_library(hog::terrain ALIAS hog_terrain)
 
 target_include_directories(hog_terrain PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(hog_terrain PUBLIC hog::core hog::jobs hog::planet)
+target_link_libraries(hog_terrain PUBLIC hog::core hog::flora hog::jobs hog::planet)
 hog_target_defaults(hog_terrain)
 
 hog_add_tests(hog_terrain

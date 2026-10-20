@@ -1,10 +1,12 @@
 #pragma once
 
 #include <hog/core/math.hpp>
+#include <hog/flora/stand.hpp>
 #include <hog/planet/cell_id.hpp>
 #include <hog/planet/climate.hpp>
 #include <hog/planet/world.hpp>
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -69,10 +71,21 @@ struct Corner {
 // it is, or the last one at the face's far edges. The same at every level the corner lies on.
 [[nodiscard]] planet::CellId sample_cell(Corner corner);
 
+// The woods over a vertex, as flora::woodland_at averages them, a byte each from 0 to 255: the
+// trees to every hundred square metres, up to woods_crowding; their mean height as pines, up to
+// woods_tallest metres; of them the broadleaves; and of those the maples.
+using Woods = std::array<std::uint8_t, 4>;
+inline constexpr float woods_crowding = 2.0F;
+inline constexpr float woods_tallest = 32.0F;
+
+// Woodland over cells of `cell_area` square metres.
+[[nodiscard]] Woods packed_woods(const flora::Woodland& woodland, double cell_area) noexcept;
+
 struct PatchVertex {
     Vec3 position{0.0F}; // metres from the patch's origin
     Vec3 normal{0.0F};
     planet::Biome biome = planet::Biome::Ocean;
+    alignas(4) Woods woods{};
 };
 
 // Metres from sea level.

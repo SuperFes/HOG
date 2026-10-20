@@ -112,6 +112,10 @@ struct TerrainLook {
     // Whether it's lit by the sun and sky through the air, seen through the air and tone mapped,
     // rather than lit by the sun alone.
     bool air = false;
+    // Metres from the eye beyond which the woods baked into the patches are folded into the
+    // ground's colour, rising as the tree stamps shrink away; 0 for none. They keep the air's
+    // year, so lit by the sun alone they stay green.
+    double canopy = 0.0;
 };
 
 // Ground drawn from patches in a pool, each placed from the eye so floats keep their precision

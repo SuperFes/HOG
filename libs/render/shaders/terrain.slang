@@ -1,6 +1,7 @@
 import atmosphere;
 import bend;
 import projection;
+import season;
 import shadow;
 import tone;
 
@@ -19,12 +20,23 @@ struct Push {
 [[vk::push_constant]] ConstantBuffer<Push> push;
 
 static const uint biome_count = 14;
+static const uint genus_count = 3;
 
 struct Settings {
     // Metres a material spans near and far, and 1 if ground below sea level is seen through water.
     float4 tiling;
     // What each biome's material averages to.
     float4 means[biome_count];
+    // x metres from the eye the tree stamps have shrunk away by, 0 for no woods drawn in the
+    // ground.
+    float4 canopy;
+    // Each genus' foliage as flora::Foliage has it: its own colour, then the share of the
+    // ground's.
+    float4 foliage[genus_count];
+    // Each genus' year, as render::GenusSeasons has it.
+    float4 leafing[genus_count];
+    float4 first[genus_count];
+    float4 last[genus_count];
 };
 
 [[vk::binding(0, 0)]] ConstantBuffer<Settings> settings;
@@ -42,6 +54,7 @@ struct Vertex {
     [[vk::location(0)]] float3 position; // metres from the patch's origin
     [[vk::location(1)]] float3 normal;
     [[vk::location(2)]] uint biome;
+    [[vk::location(3)]] float4 woods; // as terrain::Woods, each byte read 0 to 1
 };
 
 struct Ground {
@@ -52,6 +65,7 @@ struct Ground {
     float height; // above sea level
     // Each biome's share, four to a vector: all of one at a corner, blended across a triangle.
     float4 biomes[(biome_count + 3) / 4];
+    float4 woods;
 };
 
 // Of clear seawater, by the metre of it light passes through, and the light it scatters back.
@@ -67,6 +81,74 @@ static const float behind_sea = 1e-3;
 
 // Shares below this aren't worth sampling for.
 static const float least_biome = 1.0 / 256.0;
+
+// A year that keeps every leaf green, for ground lit without the air's.
+static const float4 midsummer = float4(24.0, 24.0, 0.0, 0.0);
+
+static const uint pine = 0;
+static const uint oak = 1;
+
+// Bare wood, as the trees': pine, oak, then maple.
+static const float3 woods[genus_count] = { float3(0.055, 0.045, 0.038), float3(0.07, 0.064, 0.056),
+                                           float3(0.08, 0.075, 0.068) };
+
+// A crown as the stamps draw one, for the tree's height: how wide, how much of the height it
+// fills, how much of the box about it its outline fills seen from aside, and how tall its genus
+// stands, as flora::stature.
+struct Crown {
+    float width;
+    float length;
+    float fill;
+    float height;
+};
+
+Crown crown_of(uint genus) {
+    if (genus == pine) {
+        const Crown pine_crown = { 0.51, 0.84, 0.5, 1.0 };
+        return pine_crown;
+    }
+    if (genus == oak) {
+        const Crown oak_crown = { 0.81, 0.7, 0.785, 0.85 };
+        return oak_crown;
+    }
+    const Crown maple_crown = { 0.61, 0.75, 0.785, 0.9 };
+    return maple_crown;
+}
+
+// Of what its leaves hid, a bare broadleaf's twigs still hide this much.
+static const float twigs = 0.35;
+// The stamps' own shading of their crowns, averaged, and their sides lit by less of the sky than
+// ground facing up.
+static const float crown_shade = 0.5;
+// The most a grazing look's cotangent counts for.
+static const float grazing = 20.0;
+
+// A genus' crowns through the year, its trees' own dates spread early to late: their colour as
+// `green` times their foliage plus `rest`, over `hiding`; and how much of a leafy crown's
+// hiding they keep, averaged.
+struct Leafed {
+    float green;
+    float3 rest;
+    float hiding;
+};
+
+Leafed leafed(uint genus, float4 year) {
+    Leafed leafed;
+    leafed.green = 0.0;
+    leafed.rest = float3(0.0);
+    leafed.hiding = 0.0;
+    for (int own = -1; own <= 1; ++own) {
+        const Leaves leaves = leaves_at(settings.leafing[genus], 0.7 * float(own), year);
+        // The autumn colour is linear in the green it turns from.
+        const float3 turned = autumn_colour(float3(0.0), leaves.turned, settings.first[genus].rgb,
+                                            settings.last[genus].rgb);
+        const float bare = twigs * (1.0 - leaves.held);
+        leafed.green += leaves.held * max(1.0 - (2.0 * leaves.turned), 0.0) * crown_shade;
+        leafed.rest += (leaves.held * turned * crown_shade) + (woods[genus] * 0.8 * bare);
+        leafed.hiding += leaves.held + bare;
+    }
+    return leafed;
+}
 
 [shader("vertex")]
 Ground vertex_main(Vertex vertex) {
@@ -84,6 +166,7 @@ Ground vertex_main(Vertex vertex) {
         ground.biomes[group] = float4(0.0);
     }
     ground.biomes[biome / 4][biome % 4] = 1.0;
+    ground.woods = vertex.woods;
     return ground;
 }
 
@@ -138,6 +221,52 @@ float3 albedo(Ground ground, float3 normal) {
     return colour;
 }
 
+// As terrain::woods_crowding and woods_tallest.
+static const float woods_crowding = 2.0;
+static const float woods_tallest = 32.0;
+
+// The ground's colour with woods folded in beyond where the tree stamps shrink away: as many
+// crowns as flora stands there, shaped and coloured as the stamps draw them, hiding the more of
+// the ground the more grazing the look. The foliage is drawn from the ground's own colour.
+float3 wooded(Ground ground, float3 bare, float4 year) {
+    const float reach = settings.canopy.x;
+    const float away = length(ground.from_eye);
+    // Rising as the stamps shrink, so the two keep the woods' cover between them.
+    const float fade = saturate((reach - away) / (0.2 * reach));
+    const float band = 1.0 - (fade * fade);
+    // Trees to the square metre.
+    const float crowding = ground.woods.x * (woods_crowding / 100.0);
+    if (reach <= 0.0 || band <= 0.0 || crowding <= 0.0) {
+        return bare;
+    }
+    const float tall = ground.woods.y * woods_tallest;
+    const float broadleaf = ground.woods.z;
+    const float maple = ground.woods.w;
+    const float shares[genus_count] = { 1.0 - broadleaf, broadleaf * (1.0 - maple),
+                                        broadleaf * maple };
+    const float steep = dot(-ground.from_eye / max(away, 1e-3), up_at(ground));
+    const float aslant = min(sqrt(max(1.0 - (steep * steep), 0.0)) / max(steep, 1e-3), grazing);
+
+    float depth = 0.0;
+    float3 tint = float3(0.0);
+    for (uint genus = 0; genus < genus_count; ++genus) {
+        if (shares[genus] <= 0.0) {
+            continue;
+        }
+        const Crown crown = crown_of(genus);
+        const float height = tall * crown.height;
+        const float width = height * crown.width;
+        const float seen_area =
+            (0.785 * width * width) + (crown.fill * width * height * crown.length * aslant);
+        const Leafed kind = leafed(genus, year);
+        const float hiding = crowding * shares[genus] * (kind.hiding / 3.0) * seen_area;
+        const float3 foliage = (bare * settings.foliage[genus].w) + settings.foliage[genus].rgb;
+        depth += hiding;
+        tint += hiding * ((foliage * kind.green) + kind.rest) / max(kind.hiding, 1e-4);
+    }
+    return lerp(bare, tint / max(depth, 1e-6), (1.0 - exp(-depth)) * band);
+}
+
 // The depth at which the eye, above sea level, sees the sea's surface past `drawn`, if it does: on
 // the faked sphere drawing bends sea level onto.
 float sea_depth(float3 drawn, out bool seen) {
@@ -163,8 +292,8 @@ struct Shaded {
 
 // The ground's colour lit by `on_ground` facing its normal and `on_water` facing up, each times
 // pi, with water over it where it lies below the sea.
-float3 shaded(Ground ground, float3 normal, float3 on_ground, float3 on_water) {
-    const float3 lit_ground = albedo(ground, normal) * on_ground;
+float3 shaded(Ground ground, float3 normal, float3 on_ground, float3 on_water, float4 year) {
+    const float3 lit_ground = wooded(ground, albedo(ground, normal), year) * on_ground;
     const float under_sea = settings.tiling.z > 0.0 ? -ground.height : 0.0;
     if (under_sea <= 0.0) {
         return lit_ground;
@@ -197,7 +326,7 @@ Shaded fragment_main(Ground ground) {
     const float3 on_ground = night + ((1.0 - night) * saturate(dot(normal, sun)));
     const float3 on_water = night + ((1.0 - night) * saturate(dot(up_at(ground), sun)));
     Shaded result;
-    result.colour = float4(saturate(shaded(ground, normal, on_ground, on_water)), 1.0);
+    result.colour = float4(saturate(shaded(ground, normal, on_ground, on_water, midsummer)), 1.0);
     result.depth = depth_of(ground);
     return result;
 }
@@ -218,7 +347,7 @@ Shaded fragment_air(Ground ground) {
     const float3 on_ground =
         (sunlight * saturate(dot(normal, sun))) + (sky * (0.5 + (0.5 * dot(normal, up))));
     const float3 on_water = (sunlight * saturate(dot(up, sun))) + sky;
-    const float3 radiance = shaded(ground, normal, on_ground, on_water) / pi;
+    const float3 radiance = shaded(ground, normal, on_ground, on_water, lighting.year) / pi;
 
     const float4 clip = mul(push.clip_from_eye, float4(ground.drawn, 1.0));
     const float2 uv = ((clip.xy / clip.w) * 0.5) + 0.5;

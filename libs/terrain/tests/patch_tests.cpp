@@ -1,5 +1,6 @@
 #include "shared_world.hpp"
 
+#include <hog/flora/stand.hpp>
 #include <hog/planet/neighbors.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
@@ -352,4 +353,56 @@ TEST_CASE("a patch too fine for its vertices is refused", "[terrain][patch]") {
     const hog::testing::AssertionGuard guard;
     const CellId leafward = CellId::from_face_ij(1, 0, 0, hog::terrain::max_patch_level + 1);
     CHECK_THROWS_AS(bake_patch(shared_world(), leafward), hog::testing::AssertionFailed);
+}
+
+TEST_CASE("woods pack a byte a measure, crowding and height to their own ranges",
+          "[terrain][patch]") {
+    const hog::terrain::Woods woods = hog::terrain::packed_woods(
+        {.grown = 0.6F, .height = 16.0F, .broadleaf = 0.5F, .maple = 1.0F}, 120.0);
+    // Half a tree a hundred square metres, a quarter of the most.
+    CHECK(woods == hog::terrain::Woods{64, 128, 128, 255});
+    CHECK(hog::terrain::packed_woods({.grown = 0.9F, .height = 60.0F}, 10.0)[0] == 255);
+    CHECK(hog::terrain::packed_woods({.grown = 0.9F, .height = 60.0F}, 10.0)[1] == 255);
+}
+
+TEST_CASE("a patch carries the woods flora stands about each of its vertices", "[terrain][patch]") {
+    const World& world = shared_world();
+    const CellId cell = land_patch();
+    const Patch patch = bake_patch(world, cell);
+    const hog::planet::FaceIJ at = cell.to_face_ij();
+    const int level = at.level + patch_depth;
+    int wooded = 0;
+    int bare = 0;
+    for (int j = 0; j < patch_side; ++j) {
+        for (int i = 0; i < patch_side; ++i) {
+            const Corner corner{.face = at.face,
+                                .i = (std::int64_t{at.i} << patch_depth) + i,
+                                .j = (std::int64_t{at.j} << patch_depth) + j,
+                                .level = level};
+            const hog::terrain::PatchVertex& vertex = patch.vertices.at(vertex_index(i, j));
+            const int finer = hog::flora::lattice_level - level;
+            const hog::flora::Woodland woodland = hog::flora::woodland_at(
+                {static_cast<float>(std::ldexp(static_cast<double>(corner.i), finer)),
+                 static_cast<float>(std::ldexp(static_cast<double>(corner.j), finer))},
+                static_cast<std::uint32_t>(at.face), vertex.biome);
+            const DVec3 point = world_at(patch, vertex_index(i, j));
+            const double area =
+                hog::planet::cell_area(hog::planet::cell_at(point, hog::flora::lattice_level)) *
+                glm::dot(point, point);
+            const hog::terrain::Woods expected = woodland.grown > 0.0F
+                                                     ? hog::terrain::packed_woods(woodland, area)
+                                                     : hog::terrain::Woods{};
+            INFO("vertex " << i << ", " << j);
+            // The point is rebuilt from the patch's floats, so the area may round a step apart.
+            CHECK(std::abs(int{vertex.woods[0]} - int{expected[0]}) <= 1);
+            CHECK(vertex.woods[1] == expected[1]);
+            CHECK(vertex.woods[2] == expected[2]);
+            CHECK(vertex.woods[3] == expected[3]);
+            wooded += vertex.woods[0] > 20 ? 1 : 0;
+            bare += vertex.woods[0] == 0 ? 1 : 0;
+        }
+    }
+    INFO(wooded << " wooded vertices, " << bare << " bare");
+    CHECK(wooded > 0);
+    CHECK(bare > 0);
 }

@@ -287,7 +287,7 @@ Borrowed from real species to make forests feel grown rather than scattered. A m
 
 **Rendering**
 
-- [ ] Instanced rendering with LOD tiers: full geometry near (done: three baked details to 240 m), billboard impostors mid-range (done: crossed-quad stamps to 900 m), density and colour folded into the terrain far away
+- [x] Instanced rendering with LOD tiers: full geometry near (three baked details to 240 m), billboard impostors mid-range (crossed-quad stamps to 900 m), density and colour folded into the terrain far away (baked into the patches' vertices)
 - [x] Grass as instanced blades and patches near the eye, fading into the ground material
 - [x] Per-tier budgets checked on the minimum-spec iGPU, with counts in the frame overlay (Radeon 860M at 1600×900, deep woods: grown forest ~0.7 ms, stamps ~0.2 ms, after per-block 3D-distance and view-cone culling)
 
@@ -476,7 +476,7 @@ Builds on Phase 5's condition states. The server owns every tree's record, as it
 
 - [ ] Bushes onto CPU anchors like the trees, so they too stay put at every terrain level and the server can own them
 - [ ] Anchor tiles built off the main thread, if building them ever shows in frame times
-- [ ] Forest beyond the stamps' 900 m folded into the ground as density and colour, so woods don't end at a line seen from the air
+- [x] Forest beyond the stamps' 900 m folded into the ground as density and colour, so woods don't end at a line seen from the air (flora's woodland averaged per patch vertex, crowned and turning with the year in the ground's shader; ~free on the 860M)
 - [ ] Solid leaf masses ("tree haircut"): crowns modelled as clumped blobs and lit like the clouds, textured in the tree's current leaf colours, and a billboard far off. Bushes get the same treatment, replacing their billboards.
 - [ ] Needle and bark textures, CC0 or procedural, to replace the shader's streaks if they earn it
 - [ ] Richer growth per species at `flora::grow`, such as space colonisation for broadleaf crowns that grow toward light and around their neighbours

@@ -1,6 +1,7 @@
 #include "test_device.hpp"
 
 #include <hog/atmosphere/model.hpp>
+#include <hog/flora/season.hpp>
 #include <hog/render/atmosphere.hpp>
 #include <hog/render/barrier.hpp>
 #include <hog/render/memory.hpp>
@@ -744,5 +745,137 @@ TEST_CASE("steep ground follows its normal", "[render][gpu]") {
     CHECK(shares[0] == DVec3{1.0, 0.0, 0.0});
     CHECK(shares[1] == DVec3{0.0, 1.0, 0.0});
     CHECK(shares[2] == DVec3{0.0, 0.0, 1.0});
+    CHECK(device->validation_errors() == 0);
+}
+
+namespace {
+
+// Woods a temperate stand might hold: about two thirds of its cells grown, 15 metres tall, half
+// broadleaves and of those a third maples.
+constexpr hog::terrain::Woods temperate{80, 120, 128, 85};
+
+// Grey ground on top of a small planet seen straight down from `height` metres, its west half
+// wooded with `woods` and its east bare, the woods drawn in beyond `canopy` metres, none for 0.
+struct Seen {
+    hog::terrain::Woods woods = temperate;
+    double height = 3'000.0;
+    double canopy = 900.0;
+    bool air = false;
+    hog::flora::Daylight daylight{};
+};
+
+std::vector<std::uint8_t> from_above(hog::render::Device& device, const Seen& seen) {
+    constexpr double small_planet = 115'000.0;
+    auto terrain = hog::render::Terrain::create(
+        device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT,
+        {.materials = grey_materials(), .air = seen.air, .canopy = seen.canopy});
+    REQUIRE(terrain);
+    auto pool = make_pool(device, {});
+    const std::uint32_t slot = pool.acquire().value_or(1);
+    // Wide enough to fill the view.
+    std::vector<PatchVertex> patch =
+        flat_patch(static_cast<float>(seen.height) * 1.5F / patch_cells);
+    for (PatchVertex& vertex : patch) {
+        vertex.woods = vertex.position.x < 0.0F ? seen.woods : hog::terrain::Woods{};
+    }
+    REQUIRE(pool.stage(0, slot, patch));
+
+    const DVec3 top{0.0, 0.0, small_planet};
+    const DVec3 sun{0.0, 0.0, 1.0};
+    hog::render::TerrainView view = looking_down(top, seen.height, sun);
+    view.bend = {.up = {0.0, 0.0, 1.0},
+                 .eye_height = seen.height,
+                 .radius = small_planet,
+                 .faked = small_planet};
+    const std::array draws{TerrainDraw{.slot = slot, .origin = WorldPosition{top}}};
+    if (!seen.air) {
+        return draw(device, *terrain, pool, draws, view);
+    }
+    auto atmosphere = hog::render::Atmosphere::create(device);
+    REQUIRE(atmosphere);
+    auto sky = hog::render::Sky::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
+    REQUIRE(sky);
+    const hog::atmosphere::Model model;
+    const double scale = hog::render::air_scale(model.air(), view.bend);
+    view.air = sky->bindings(0, *atmosphere);
+    const hog::render::SkyView sky_view{.camera = view.camera,
+                                        .sun = sun,
+                                        .bend = view.bend,
+                                        .exposure = 10.0,
+                                        .sky_light = model.sky_irradiance(seen.height * scale, sun),
+                                        .daylight = seen.daylight};
+    return draw(device, *terrain, pool, draws, view, [&](VkCommandBuffer commands) {
+        CHECK(sky->record_frame(commands, extent, 0, *atmosphere, sky_view));
+    });
+}
+
+// A channel's mean over the west or east quarter of the view, away from where the woods end.
+double mean_of(const std::vector<std::uint8_t>& pixels, std::size_t channel, bool west) {
+    double sum = 0.0;
+    int counted = 0;
+    const std::uint32_t from = west ? 0 : 3 * extent.width / 4;
+    for (std::uint32_t y = 0; y < extent.height; ++y) {
+        for (std::uint32_t x = from; x < from + (extent.width / 4); ++x) {
+            sum += pixel_at(pixels, x, y).at(channel);
+            ++counted;
+        }
+    }
+    return sum / counted;
+}
+
+} // namespace
+
+TEST_CASE("woods beyond the stamps darken the ground they stand on, and only it", "[render][gpu]") {
+    const auto device = test_device();
+    const auto none = from_above(*device, {.canopy = 0.0});
+    const auto woods = from_above(*device, {});
+    INFO("west green " << mean_of(woods, 1, true) << " against " << mean_of(none, 1, true));
+    CHECK(mean_of(woods, 1, true) < mean_of(none, 1, true) - 20.0);
+    CHECK(mean_of(woods, 1, false) == mean_of(none, 1, false));
+
+    // Thinner woods hide less of it, and none hide none.
+    const auto thin = from_above(*device, {.woods = {20, 120, 128, 85}});
+    CHECK(mean_of(thin, 1, true) > mean_of(woods, 1, true) + 5.0);
+    CHECK(mean_of(thin, 1, true) < mean_of(none, 1, true));
+    CHECK(from_above(*device, {.woods = {}}) == none);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("within the stamps' reach the ground is left bare for them", "[render][gpu]") {
+    const auto device = test_device();
+    CHECK(from_above(*device, {.canopy = 10'000.0}) == from_above(*device, {.canopy = 0.0}));
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("woods far off turn with the year, the pines' all year green", "[render][gpu]") {
+    const auto device = test_device();
+    // Earth's days at 45 degrees north: a July day, one in late October, and January's.
+    constexpr hog::flora::Daylight summer{.hours = 15.0F, .longest = 15.4F};
+    constexpr hog::flora::Daylight autumn{.hours = 10.7F, .longest = 15.4F};
+    constexpr hog::flora::Daylight winter{.hours = 9.0F, .longest = 15.4F, .lengthening = true};
+    // Broadleaves alone, seen through less of the air's haze.
+    constexpr hog::terrain::Woods broadleaves{80, 120, 255, 85};
+    const auto seen_on = [&](hog::flora::Daylight day) {
+        return from_above(*device,
+                          {.woods = broadleaves, .height = 1'500.0, .air = true, .daylight = day});
+    };
+    const auto green = seen_on(summer);
+    const auto turned = seen_on(autumn);
+    const auto bare = seen_on(winter);
+    // What the woods take from the ground's red against its green, the haze over both alike.
+    const auto none = from_above(*device, {.height = 1'500.0, .canopy = 0.0, .air = true});
+    const auto redness = [&](const std::vector<std::uint8_t>& pixels) {
+        return (mean_of(none, 0, true) - mean_of(pixels, 0, true)) /
+               std::max(mean_of(none, 1, true) - mean_of(pixels, 1, true), 1.0);
+    };
+    INFO("red to green taken: summer " << redness(green) << ", autumn " << redness(turned));
+    CHECK(redness(turned) < redness(green) * 0.92);
+    // Bare, the woods hide less of the ground.
+    INFO("green: summer " << mean_of(green, 1, true) << ", winter " << mean_of(bare, 1, true));
+    CHECK(mean_of(bare, 1, true) > mean_of(green, 1, true) + 2.0);
+
+    constexpr hog::terrain::Woods pines{80, 120, 0, 0};
+    CHECK(from_above(*device, {.woods = pines, .air = true, .daylight = winter}) ==
+          from_above(*device, {.woods = pines, .air = true, .daylight = summer}));
     CHECK(device->validation_errors() == 0);
 }

@@ -50,17 +50,39 @@ float smoothstepped(float from, float to, float value) noexcept {
     return smooth(saturated((value - from) / (to - from)));
 }
 
-// The broadleaves stand a little lower than the pines around them, their crowns spread rather than
-// raised.
-constexpr float oak_height = 0.85F;
-constexpr float maple_height = 0.9F;
+// A broad field stretched to span its range.
+float drawing_field(Vec2 cell, std::uint32_t face, std::uint32_t period_log,
+                    std::uint32_t salt) noexcept {
+    return saturated(0.5F + (2.2F * (stand_octave(cell, face, period_log, salt) - 0.5F)));
+}
 
-// A broad field stretched to span its range, roughened by the cell's own dice, against a share.
+// The field roughened by the cell's own dice, against a share.
 bool drawn_in(Vec2 cell, std::uint32_t face, std::uint32_t period_log, std::uint32_t salt,
               float dice, float share) noexcept {
-    const float field =
-        saturated(0.5F + (2.2F * (stand_octave(cell, face, period_log, salt) - 0.5F)));
-    return mixed(field, dice, 0.3F) < share;
+    return mixed(drawing_field(cell, face, period_log, salt), dice, 0.3F) < share;
+}
+
+// Of the cells about `cell`, the share drawn_in draws, their dice evenly spread.
+float drawn_share(Vec2 cell, std::uint32_t face, std::uint32_t period_log, std::uint32_t salt,
+                  float share) noexcept {
+    return saturated((share - (0.7F * drawing_field(cell, face, period_log, salt))) / 0.3F);
+}
+
+constexpr std::uint32_t broadleaf_period_log = 5;
+constexpr std::uint32_t broadleaf_salt = 0x0a4c1U;
+constexpr std::uint32_t maple_period_log = 4;
+constexpr std::uint32_t maple_salt = 0x3a91eU;
+
+// How deep into a stand a tree grows makes it older, and its age taller.
+float stand_age(float wooded) noexcept {
+    return mixed(0.55F, 1.0F, wooded);
+}
+float reached(float age) noexcept {
+    return mixed(0.2F, 1.2F, age * (2.0F - age));
+}
+// Tallest deep in a stand.
+float stand_scale(float wooded) noexcept {
+    return mixed(0.8F, 1.05F, wooded);
 }
 
 } // namespace
@@ -110,25 +132,40 @@ std::optional<Stood> tree_grown(std::uint32_t lattice_i, std::uint32_t lattice_j
     // Most trees in a stand are grown; its edges and the open are where the young stand, the
     // woods spreading outward.
     const float drawn = 1.0F - unit(hash + 4U);
-    const float age = (1.0F - (drawn * drawn)) * mixed(0.55F, 1.0F, wooded);
-    // Quick to rise while young, then barely taller; tallest deep in a stand.
-    const float reached = mixed(0.2F, 1.2F, age * (2.0F - age));
+    const float age = (1.0F - (drawn * drawn)) * stand_age(wooded);
+    // Quick to rise while young, then barely taller.
     float height =
-        trees.height * reached * (0.85F + (0.3F * unit(hash + 5U))) * mixed(0.8F, 1.05F, wooded);
+        trees.height * reached(age) * (0.85F + (0.3F * unit(hash + 5U))) * stand_scale(wooded);
     // Broadleaves gather in groves of their own, maples in smaller stands within them.
     Genus genus = Genus::Pine;
-    if (trees.broadleaf > 0.0F &&
-        drawn_in(cell, face, 5U, 0x0a4c1U, unit(hash + 8U), trees.broadleaf)) {
-        if (drawn_in(cell, face, 4U, 0x3a91eU, unit(hash + 14U), trees.maple)) {
-            genus = Genus::Maple;
-            height *= maple_height;
-        } else {
-            genus = Genus::Oak;
-            height *= oak_height;
-        }
+    if (trees.broadleaf > 0.0F && drawn_in(cell, face, broadleaf_period_log, broadleaf_salt,
+                                           unit(hash + 8U), trees.broadleaf)) {
+        genus = drawn_in(cell, face, maple_period_log, maple_salt, unit(hash + 14U), trees.maple)
+                    ? Genus::Maple
+                    : Genus::Oak;
+        height *= stature(genus);
     }
     return Stood{
         .spot = spot, .height = height, .wooded = wooded, .age = age, .hash = hash, .genus = genus};
+}
+
+Woodland woodland_at(Vec2 cell, std::uint32_t face, planet::Biome biome) noexcept {
+    const BiomeTrees trees = trees_of(biome);
+    if (trees.height <= 0.0F) {
+        return {};
+    }
+    const float wooded = smoothstepped(trees.edge, trees.edge + 0.1F, stand_field(cell, face));
+    // A tree's age is the stand's times 1 - d^2 for its dice d, so on average 2/3 of it, and its
+    // square 8/15 of the stand's squared.
+    const float oldest = stand_age(wooded);
+    const float mean_reach = 0.2F + ((4.0F / 3.0F) * oldest) - ((8.0F / 15.0F) * oldest * oldest);
+    return Woodland{.grown = mixed(trees.lone, trees.inside, wooded),
+                    .height = trees.height * mean_reach * stand_scale(wooded),
+                    .broadleaf = trees.broadleaf > 0.0F
+                                     ? drawn_share(cell, face, broadleaf_period_log, broadleaf_salt,
+                                                   trees.broadleaf)
+                                     : 0.0F,
+                    .maple = drawn_share(cell, face, maple_period_log, maple_salt, trees.maple)};
 }
 
 } // namespace hog::flora

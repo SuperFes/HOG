@@ -576,3 +576,67 @@ TEST_CASE("each tree keeps its own dates, the old turning first", "[flora][seaso
     CHECK(most > 0.6F);
     CHECK(old > young + (0.3F * trees));
 }
+
+TEST_CASE("woodland far off holds the trees grown there: as many, as tall, of the same kinds",
+          "[flora]") {
+    using hog::flora::Genus;
+    using hog::planet::Biome;
+    constexpr std::uint32_t across = 320;
+    constexpr std::uint32_t block = 32;
+    for (const Biome biome : {Biome::TemperateForest, Biome::BorealForest, Biome::Grassland,
+                              Biome::Shrubland, Biome::Wetland}) {
+        INFO("biome " << static_cast<int>(biome));
+        // Counted from the trees, then expected from the woodland, over the whole and by block.
+        double trees = 0.0;
+        double heights = 0.0;
+        double broadleaves = 0.0;
+        double maples = 0.0;
+        double grown = 0.0;
+        double tall = 0.0;
+        double broad = 0.0;
+        double maple = 0.0;
+        double worst_block = 0.0;
+        for (std::uint32_t block_j = 0; block_j < across; block_j += block) {
+            for (std::uint32_t block_i = 0; block_i < across; block_i += block) {
+                double counted = 0.0;
+                double expected = 0.0;
+                for (std::uint32_t j = block_j; j < block_j + block; ++j) {
+                    for (std::uint32_t i = block_i; i < block_i + block; ++i) {
+                        const std::uint32_t lattice_i = 4096 + i;
+                        const std::uint32_t lattice_j = 9000 + j;
+                        const hog::flora::Woodland woodland =
+                            hog::flora::woodland_at({static_cast<float>(lattice_i) + 0.5F,
+                                                     static_cast<float>(lattice_j) + 0.5F},
+                                                    1, biome);
+                        const auto share = static_cast<double>(woodland.grown);
+                        expected += share;
+                        tall += share * double{woodland.height};
+                        broad += share * double{woodland.broadleaf};
+                        maple += share * double{woodland.broadleaf} * double{woodland.maple};
+                        const auto tree = hog::flora::tree_grown(lattice_i, lattice_j, 1, biome);
+                        if (!tree) {
+                            continue;
+                        }
+                        counted += 1.0;
+                        heights += double{tree->height / hog::flora::stature(tree->genus)};
+                        broadleaves += tree->genus != Genus::Pine ? 1.0 : 0.0;
+                        maples += tree->genus == Genus::Maple ? 1.0 : 0.0;
+                    }
+                }
+                trees += counted;
+                grown += expected;
+                worst_block = std::max(worst_block, std::abs(counted - expected) / (block * block));
+            }
+        }
+        REQUIRE(trees > 2000.0);
+        INFO("trees " << trees << " against " << grown << ", worst block off by " << worst_block
+                      << " of its cells");
+        CHECK(std::abs((grown / trees) - 1.0) < 0.03);
+        CHECK(worst_block < 0.05);
+        CHECK(std::abs((tall / grown) / (heights / trees) - 1.0) < 0.03);
+        CHECK(std::abs((broad / grown) - (broadleaves / trees)) < 0.03);
+        if (broadleaves > 500.0) {
+            CHECK(std::abs((maple / broad) - (maples / broadleaves)) < 0.04);
+        }
+    }
+}

@@ -13,6 +13,9 @@ namespace hog::flora {
 // stand field. This is the one placement, shared by whoever plants — the client's anchors today,
 // the server's felling and regrowth tomorrow — so it is bit-stable across machines, like grow().
 
+// The level of the planet's cells trees are planted on, one at most to a cell.
+inline constexpr int lattice_level = 14;
+
 // Each biome's trees against the stand field: how deep the field must read before woods begin
 // (`edge`, 1 grows none), how full the woods are inside, the odd lone tree in the open, and how
 // many are broadleaves, gathered in groves among the pines, and of those how many are maples, in
@@ -75,18 +78,43 @@ struct BiomeTrees {
     return {};
 }
 
+// Foliage as a share of the ground's colour under it, plus its own.
+struct Foliage {
+    float of_ground = 0.0F;
+    Vec3 own{0.0F};
+};
+
 // Foliage far darker than the ground's mean, so a forest reads as its own mass: needles cool and
 // deep, leaves warmer and brighter, a maple's the brightest.
-[[nodiscard]] constexpr Vec3 foliage_colour(Genus genus, Vec3 ground) noexcept {
+[[nodiscard]] constexpr Foliage foliage_of(Genus genus) noexcept {
     switch (genus) {
     case Genus::Oak:
-        return (ground * 0.38F) + (Vec3{0.022F, 0.062F, 0.012F});
+        return {.of_ground = 0.38F, .own = {0.022F, 0.062F, 0.012F}};
     case Genus::Maple:
-        return (ground * 0.38F) + (Vec3{0.03F, 0.072F, 0.01F});
+        return {.of_ground = 0.38F, .own = {0.03F, 0.072F, 0.01F}};
     case Genus::Pine:
         break;
     }
-    return (ground * 0.3F) + (Vec3{0.012F, 0.05F, 0.028F});
+    return {.of_ground = 0.3F, .own = {0.012F, 0.05F, 0.028F}};
+}
+
+[[nodiscard]] constexpr Vec3 foliage_colour(Genus genus, Vec3 ground) noexcept {
+    const Foliage foliage = foliage_of(genus);
+    return (ground * foliage.of_ground) + foliage.own;
+}
+
+// How tall a genus stands against a pine in the same stand: the broadleaves a little lower, their
+// crowns spread rather than raised.
+[[nodiscard]] constexpr float stature(Genus genus) noexcept {
+    switch (genus) {
+    case Genus::Oak:
+        return 0.85F;
+    case Genus::Maple:
+        return 0.9F;
+    case Genus::Pine:
+        break;
+    }
+    return 1.0F;
 }
 
 // The dice a lattice cell rolls, the same from every patch and machine over it.
@@ -118,5 +146,16 @@ struct Stood {
 // The tree the cell grows on `biome` ground, if its dice land one there.
 [[nodiscard]] std::optional<Stood> tree_grown(std::uint32_t lattice_i, std::uint32_t lattice_j,
                                               std::uint32_t face, planet::Biome biome) noexcept;
+
+// The woods about a spot, as tree_grown grows them there averaged over the cells' own dice: for
+// drawing woods too far off to stand each tree.
+struct Woodland {
+    float grown = 0.0F;     // of the lattice cells, the share standing a tree
+    float height = 0.0F;    // metres, the trees' mean as pines; the broadleaves stand to stature()
+    float broadleaf = 0.0F; // of the trees, the share broadleaves
+    float maple = 0.0F;     // of the broadleaves, the share maples
+};
+
+[[nodiscard]] Woodland woodland_at(Vec2 cell, std::uint32_t face, planet::Biome biome) noexcept;
 
 } // namespace hog::flora
