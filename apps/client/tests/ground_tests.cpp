@@ -192,39 +192,6 @@ TEST_CASE("tall swaths reach far over coarser ground, thinning as they go", "[cl
     CHECK(swaths[1].blades_per_cell < swaths[0].blades_per_cell);
 }
 
-TEST_CASE("bushes key their patches to the fixed lattice", "[client][ground]") {
-    constexpr double radius = 115'000.0;
-    const CellId fine = CellId::from_face_ij(0, 5, 3, 13);
-    const CellId coarse = CellId::from_face_ij(0, 1, 0, 10);
-    const CellId coarsest = CellId::from_face_ij(0, 0, 0, 9);
-    FakePool pool;
-    GroundSlots slots;
-    REQUIRE(slots.take(pool, 1, arriving({fine, coarse, coarsest})));
-    const hog::WorldPosition eye{radius, 0.0, 0.0};
-    const auto patch = [&](CellId cell, double away) {
-        return hog::terrain::StreamedPatch{
-            .cell = cell, .origin = hog::WorldPosition{radius, away, 0.0}, .coarser_edges = 0};
-    };
-    const std::vector<hog::terrain::StreamedPatch> drawn{patch(fine, 0.0), patch(coarse, 0.0),
-                                                         patch(coarsest, 0.0)};
-    const std::vector<hog::render::BushDraw> stands =
-        hog::client::bush_draws(slots, drawn, eye, radius);
-    // The coarsest ground is beyond even the far bushes; the rest key to the lattice.
-    REQUIRE(stands.size() == 2);
-    CHECK(stands[0].slot == 0);
-    CHECK(stands[0].shift == 2);
-    CHECK(stands[0].lattice_i == 5U << 3U);
-    CHECK(stands[0].lattice_j == 3U << 3U);
-    CHECK(stands[1].slot == 1);
-    CHECK(stands[1].shift == -1);
-    CHECK(stands[1].lattice_i == 1U << 6U);
-    CHECK(stands[1].lattice_j == 0);
-
-    // Out of reach altogether, nothing grows.
-    const std::vector<hog::terrain::StreamedPatch> far_off{patch(fine, 400.0)};
-    CHECK(hog::client::bush_draws(slots, far_off, eye, radius).empty());
-}
-
 TEST_CASE("each biome is coloured as it looks from above", "[client][ground]") {
     const hog::client::BiomePalette palette = hog::client::biome_palette();
     for (const hog::Vec3 colour : palette) {
@@ -262,35 +229,4 @@ TEST_CASE("each biome's ground varies up close and averages to its colour", "[cl
     for (std::size_t biome = 1; biome < looks.size(); ++biome) {
         CHECK(looks.at(biome).seed != looks.at(biome - 1).seed);
     }
-}
-
-TEST_CASE("ground finer than the bushes' lattice keys through its held ancestor",
-          "[client][ground]") {
-    constexpr double radius = 115'000.0;
-    const CellId ancestor = CellId::from_face_ij(0, 32768, 32768, 16);
-    const CellId left = CellId::from_face_ij(0, 65536, 65536, 17);
-    const CellId right = CellId::from_face_ij(0, 65537, 65536, 17);
-    FakePool pool;
-    GroundSlots slots;
-    REQUIRE(slots.take(pool, 1, arriving({ancestor})));
-    const hog::WorldPosition eye{radius, 0.0, 0.0};
-    const auto patch = [&](CellId cell) {
-        return hog::terrain::StreamedPatch{
-            .cell = cell, .origin = hog::WorldPosition{radius, 0.0, 0.0}, .coarser_edges = 0};
-    };
-
-    // Both fine siblings key to the one ancestor patch: one stand between them, not one each, so
-    // the bushes keep standing as the ground refines past the lattice underfoot.
-    const std::vector<hog::terrain::StreamedPatch> drawn{patch(left), patch(right)};
-    const std::vector<hog::render::BushDraw> stands =
-        hog::client::bush_draws(slots, drawn, eye, radius);
-    REQUIRE(stands.size() == 1);
-    CHECK(stands[0].slot == 0);
-    CHECK(stands[0].shift == 5);
-    CHECK(stands[0].lattice_i == 32768);
-    CHECK(stands[0].lattice_j == 32768);
-
-    // An ancestor no longer held carries nothing; the fine ground is passed over, not mis-keyed.
-    const GroundSlots bare;
-    CHECK(hog::client::bush_draws(bare, drawn, eye, radius).empty());
 }

@@ -1,8 +1,10 @@
 #pragma once
 
 #include <hog/client/ground.hpp>
+#include <hog/client/tiles.hpp>
 #include <hog/core/result.hpp>
 #include <hog/flora/fates.hpp>
+#include <hog/jobs/job_system.hpp>
 #include <hog/planet/cell_id.hpp>
 #include <hog/planet/world.hpp>
 #include <hog/render/anchors.hpp>
@@ -10,7 +12,6 @@
 
 #include <array>
 #include <cstdint>
-#include <map>
 #include <memory>
 #include <span>
 #include <vector>
@@ -68,12 +69,13 @@ struct TreeCounts {
 // Builds and keeps the tiles within reach of the eye, each bound to a slot of an anchor pool.
 class TreeAnchors {
 public:
-    // Trees take their needles' colour from their biome's ground colour.
-    explicit TreeAnchors(const BiomePalette& palette);
+    // Trees take their needles' colour from their biome's ground colour. Tiles are built on
+    // `jobs` when given, else in place.
+    explicit TreeAnchors(const BiomePalette& palette, jobs::JobSystem* jobs = nullptr);
 
     // Keeps the tiles within `reach` metres of the eye built and staged, a few new tiles a call,
     // nearest first; tiles well beyond the reach give their slots back. The world must not change
-    // during the call, and the frame's last submit must have finished.
+    // while tiles are building, and the frame's last submit must have finished.
     Result<> update(render::AnchorPool& pool, std::uint32_t frame, const planet::World& world,
                     WorldPosition eye, double reach, int builds = 2);
 
@@ -93,9 +95,11 @@ public:
     [[nodiscard]] std::vector<render::StandDraw> forest_draws(const Sight& sight,
                                                               const GrassBudget& budget = {}) const;
 
-    [[nodiscard]] std::size_t size() const noexcept { return tiles_.size(); }
+    [[nodiscard]] std::size_t size() const noexcept { return tiles_.tiles().size(); }
     // Whether the last update left nothing more to build within its reach.
-    [[nodiscard]] bool settled() const noexcept { return settled_; }
+    [[nodiscard]] bool settled() const noexcept { return tiles_.settled(); }
+    // Waits for the tiles building, for the updates to come to stage.
+    void finish() { tiles_.finish(); }
 
 private:
     struct Block {
@@ -118,9 +122,9 @@ private:
     static Tile held_tile(std::uint32_t slot, WorldPosition origin, const TileTrees& trees);
 
     std::array<Vec3, planet::biome_count> needles_{};
+    jobs::JobSystem* jobs_ = nullptr;
     std::shared_ptr<const flora::Fates> fates_ = std::make_shared<const flora::Fates>();
-    std::map<planet::CellId, Tile> tiles_;
-    bool settled_ = false;
+    tiles::Keeper<Tile, TileTrees> tiles_{anchor_tile_level};
 };
 
 } // namespace hog::client

@@ -23,9 +23,25 @@ static_assert(offsetof(TreeAnchor, normal) == 16);
 static_assert(offsetof(TreeAnchor, hash) == 28);
 static_assert(offsetof(TreeAnchor, colour) == 32);
 static_assert(offsetof(TreeAnchor, age) == 36);
+// Held in the same slots, read by the bushes' shader at this layout.
+static_assert(std::is_trivially_copyable_v<BushAnchor> && std::is_standard_layout_v<BushAnchor>);
+static_assert(sizeof(BushAnchor) == sizeof(TreeAnchor));
+static_assert(offsetof(BushAnchor, normal) == 16);
+static_assert(offsetof(BushAnchor, hash) == 28);
+static_assert(offsetof(BushAnchor, colour) == 32);
+static_assert(offsetof(BushAnchor, width) == 36);
+
+constexpr std::size_t anchor_bytes = sizeof(TreeAnchor);
 
 std::uint32_t byte_of(float value) noexcept {
     return static_cast<std::uint32_t>(std::lround(std::clamp(value, 0.0F, 1.0F) * 255.0F));
+}
+
+// A colour in a byte a channel, square-rooted so dark leaves keep their shades.
+std::uint32_t packed_rgb(Vec3 colour) noexcept {
+    return byte_of(std::sqrt(std::max(colour.r, 0.0F))) |
+           (byte_of(std::sqrt(std::max(colour.g, 0.0F))) << 8U) |
+           (byte_of(std::sqrt(std::max(colour.b, 0.0F))) << 16U);
 }
 
 float from_byte(std::uint32_t packed, std::uint32_t shift) noexcept {
@@ -58,11 +74,16 @@ void memory_barrier(VkCommandBuffer commands, VkPipelineStageFlags2 from_stage,
 } // namespace
 
 std::uint32_t packed_foliage(Vec3 colour, flora::Genus genus, flora::Condition condition) noexcept {
-    return byte_of(std::sqrt(std::max(colour.r, 0.0F))) |
-           (byte_of(std::sqrt(std::max(colour.g, 0.0F))) << 8U) |
-           (byte_of(std::sqrt(std::max(colour.b, 0.0F))) << 16U) |
-           (static_cast<std::uint32_t>(genus) << 24U) |
+    return packed_rgb(colour) | (static_cast<std::uint32_t>(genus) << 24U) |
            (static_cast<std::uint32_t>(condition) << 28U);
+}
+
+std::uint32_t packed_leaves(Vec3 colour, flora::BushKind kind) noexcept {
+    return packed_rgb(colour) | (static_cast<std::uint32_t>(kind) << 24U);
+}
+
+flora::BushKind kind_of(std::uint32_t packed) noexcept {
+    return static_cast<flora::BushKind>((packed >> 24U) & 3U);
 }
 
 Vec3 foliage_of(std::uint32_t packed) noexcept {
@@ -142,6 +163,16 @@ void AnchorPool::release(std::uint32_t slot) {
 
 Result<> AnchorPool::stage(std::uint32_t frame, std::uint32_t slot,
                            std::span<const TreeAnchor> anchors) {
+    return stage_bytes(frame, slot, std::as_bytes(anchors));
+}
+
+Result<> AnchorPool::stage(std::uint32_t frame, std::uint32_t slot,
+                           std::span<const BushAnchor> anchors) {
+    return stage_bytes(frame, slot, std::as_bytes(anchors));
+}
+
+Result<> AnchorPool::stage_bytes(std::uint32_t frame, std::uint32_t slot,
+                                 std::span<const std::byte> bytes) {
     if (frame >= staging_.size()) {
         return make_error(ErrorCode::InvalidArgument,
                           std::format("no frame {} of {}", frame, staging_.size()));
@@ -149,9 +180,10 @@ Result<> AnchorPool::stage(std::uint32_t frame, std::uint32_t slot,
     if (slot >= held_.size() || !held_[slot]) {
         return make_error(ErrorCode::InvalidArgument, std::format("slot {} isn't held", slot));
     }
-    if (anchors.size() > tile_trees) {
+    const auto count = static_cast<std::uint32_t>(bytes.size() / anchor_bytes);
+    if (count > tile_trees) {
         return make_error(ErrorCode::InvalidArgument,
-                          std::format("{} anchors for a tile of {}", anchors.size(), tile_trees));
+                          std::format("{} anchors for a tile of {}", count, tile_trees));
     }
     std::vector<Staged>& staged = staged_[frame];
     // Staging a slot again in the same frame replaces what was staged.
@@ -162,9 +194,7 @@ Result<> AnchorPool::stage(std::uint32_t frame, std::uint32_t slot,
     }
     const std::uint32_t at =
         again == staged.end() ? static_cast<std::uint32_t>(staged.size()) : again->at;
-    const auto count = static_cast<std::uint32_t>(anchors.size());
-    std::ranges::copy(std::as_bytes(anchors),
-                      staging_[frame].mapped().subspan(at * tile_bytes, tile_bytes).begin());
+    std::ranges::copy(bytes, staging_[frame].mapped().subspan(at * tile_bytes, tile_bytes).begin());
     if (again == staged.end()) {
         staged.push_back({.slot = slot, .at = at, .count = count});
     } else {
@@ -193,13 +223,13 @@ Result<> AnchorPool::record_uploads(VkCommandBuffer commands, std::uint32_t fram
         }
         regions.push_back({.srcOffset = upload.at * tile_bytes,
                            .dstOffset = upload.slot * tile_bytes,
-                           .size = VkDeviceSize{upload.count} * sizeof(TreeAnchor)});
+                           .size = VkDeviceSize{upload.count} * anchor_bytes});
     }
     staged.clear();
     if (regions.empty()) {
         return {};
     }
-    // Earlier frames may still be drawing trees from a slot about to be replaced.
+    // Earlier frames may still be drawing from a slot about to be replaced.
     memory_barrier(commands, VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT, VK_ACCESS_2_NONE,
                    VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
     vkCmdCopyBuffer(commands, staging_[frame].handle(), anchors_.handle(),

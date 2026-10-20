@@ -7,6 +7,7 @@ target_compile_definitions(stb_image PUBLIC STBI_ONLY_PNG)
 
 add_library(hog_client
     src/anchors.cpp
+    src/bushes.cpp
     src/chat.cpp
     src/daylight.cpp
     src/flight.cpp
@@ -20,6 +21,7 @@ add_library(hog_client
     src/player.cpp
     src/scene.cpp
     src/session.cpp
+    src/tiles.cpp
     src/views.cpp
     src/woodlands.cpp)
 add_library(hog::client ALIAS hog_client)
@@ -37,6 +39,7 @@ hog_add_tests(hog_client
     tests/flight_tests.cpp
     tests/forecast_tests.cpp
     tests/anchors_tests.cpp
+    tests/bushes_tests.cpp
     tests/frame_times_tests.cpp
     tests/ground_tests.cpp
     tests/likeness_tests.cpp

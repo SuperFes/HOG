@@ -2,6 +2,7 @@
 
 #include <hog/atmosphere/model.hpp>
 #include <hog/client/anchors.hpp>
+#include <hog/client/bushes.hpp>
 #include <hog/client/forecast.hpp>
 #include <hog/client/ground.hpp>
 #include <hog/client/picture.hpp>
@@ -105,7 +106,7 @@ public:
     // slot must have finished its last submit.
     Result<> record(render::Frame& frame, const Shot& shot);
 
-    // Waits for the bakes in flight, so they arrive with the next frame.
+    // Waits for the bakes and the plants' tiles in flight, so they arrive with the frames to come.
     void finish_bakes();
 
     // Takes the server's word of how the woods fare: the trees and far woods over the cells it
@@ -137,10 +138,11 @@ private:
     Scene(const render::Device& device, const planet::World& world, jobs::JobSystem& jobs,
           const sim::Calendar& calendar, render::Terrain terrain, render::Ocean ocean,
           render::Grass grass, render::Bushes bushes, render::Trees trees, render::Forest forest,
-          render::TerrainPool pool, render::AnchorPool anchors, render::Atmosphere atmosphere,
-          render::Sky sky, render::Capsules others, render::WeatherMaps weather,
-          render::Clouds clouds, render::Precipitation precipitation, render::Glare glare,
-          render::GpuTimer timer, std::optional<render::Billboard> companion, std::uint32_t frames);
+          render::TerrainPool pool, render::AnchorPool anchors, render::AnchorPool bush_pool,
+          render::Atmosphere atmosphere, render::Sky sky, render::Capsules others,
+          render::WeatherMaps weather, render::Clouds clouds, render::Precipitation precipitation,
+          render::Glare glare, render::GpuTimer timer, std::optional<render::Billboard> companion,
+          std::uint32_t frames);
 
     render::SkyView sky_view(const Shot& shot, render::CloudShade shade);
     // Adds the grass, bush and tree passes over the drawn patches, blown by `wind`.
@@ -163,6 +165,8 @@ private:
     render::TerrainPool pool_;
     render::AnchorPool anchor_pool_;
     TreeAnchors anchors_;
+    render::AnchorPool bush_pool_;
+    BushAnchors bush_anchors_;
     Woodlands woodlands_;
     GroundSlots slots_;
     render::TransientImages transients_;

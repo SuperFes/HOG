@@ -2,7 +2,9 @@
 
 #include <hog/atmosphere/model.hpp>
 #include <hog/core/math.hpp>
-#include <hog/planet/climate.hpp>
+#include <hog/flora/bushes.hpp>
+#include <hog/flora/stand.hpp>
+#include <hog/render/anchors.hpp>
 #include <hog/render/atmosphere.hpp>
 #include <hog/render/bushes.hpp>
 #include <hog/render/memory.hpp>
@@ -10,7 +12,6 @@
 #include <hog/render/rendering.hpp>
 #include <hog/render/sky.hpp>
 #include <hog/terrain/bend.hpp>
-#include <hog/terrain/patch.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -19,15 +20,16 @@
 #include <cstddef>
 #include <cstdint>
 #include <numbers>
+#include <span>
 #include <utility>
 #include <vector>
 
 using hog::DVec3;
 using hog::Vec3;
 using hog::WorldPosition;
-using hog::render::BushDraw;
 using hog::render::Bushes;
 using hog::render::GrassView;
+using hog::render::StandDraw;
 using hog::render::testing::test_device;
 
 namespace {
@@ -36,74 +38,61 @@ constexpr VkExtent2D extent{.width = 96, .height = 54};
 constexpr VkFormat colour_format = VK_FORMAT_R8G8B8A8_UNORM;
 constexpr VkFormat depth_format = VK_FORMAT_D32_SFLOAT;
 constexpr double radius = 115'000.0;
-constexpr double ground_height = 1.0; // above sea level, clear of the bushes' shore
+constexpr double ground_height = 1.0; // above sea level
 constexpr DVec3 up{0.0, 0.0, 1.0};
 constexpr DVec3 east{1.0, 0.0, 0.0};
 
 using Pixels = std::vector<std::uint8_t>;
 
-// A flat patch of one biome, or two blended, level at `ground_height`, centred on its origin.
-std::vector<hog::terrain::PatchVertex>
-field(hog::planet::Biome biome, double spacing, hog::terrain::Cover cover = {},
-      hog::planet::Biome blend_biome = hog::planet::Biome::Ocean, std::uint8_t blend = 0) {
-    std::vector<hog::terrain::PatchVertex> vertices(hog::render::patch_vertex_count);
-    constexpr int middle = hog::terrain::patch_cells / 2;
-    for (int i = 0; i < hog::terrain::patch_side; ++i) {
-        for (int j = 0; j < hog::terrain::patch_side; ++j) {
-            const std::size_t at = (static_cast<std::size_t>(i) * hog::terrain::patch_side) +
-                                   static_cast<std::size_t>(j);
-            vertices[at] = {.position = Vec3{static_cast<float>((i - middle) * spacing),
-                                             static_cast<float>((j - middle) * spacing), 0.0F},
-                            .normal = Vec3{0.0F, 0.0F, 1.0F},
-                            .biome = biome,
-                            .cover = cover,
-                            .blend_biome = blend_biome,
-                            .blend = blend};
+// A square of bushes of one kind, `spacing` apart, round the ground under the eye.
+std::vector<hog::render::BushAnchor>
+stand(hog::flora::BushKind kind, Vec3 leaves = Vec3{0.12F, 0.3F, 0.06F}, float spacing = 1.5F) {
+    std::vector<hog::render::BushAnchor> bushes;
+    constexpr int across = 16;
+    for (int i = 0; i < across; ++i) {
+        for (int j = 0; j < across; ++j) {
+            const auto at = static_cast<std::uint32_t>((i * across) + j);
+            bushes.push_back({.position = Vec3{(static_cast<float>(i) - 7.5F) * spacing,
+                                               (static_cast<float>(j) - 7.5F) * spacing, 0.0F},
+                              .height = 1.0F,
+                              .normal = Vec3{0.0F, 0.0F, 1.0F},
+                              .hash = hog::flora::cell_hash(at, at * 7U, 0),
+                              .colour = hog::render::packed_leaves(leaves, kind),
+                              .width = 1.4F});
         }
     }
-    return vertices;
+    return bushes;
 }
 
-struct Patch {
-    hog::planet::Biome biome = hog::planet::Biome::Shrubland;
-    double spacing = 0.5;
-    DVec3 offset{0.0}; // of the patch's origin, metres east and north of the up point
-    std::uint32_t lattice_i = 4;
-    std::uint32_t lattice_j = 4;
-    int shift = 0;
+struct Drawn {
+    std::vector<hog::render::BushAnchor> anchors = stand(hog::flora::BushKind::Floofy);
+    double fade_far = hog::render::bushes_far;
     DVec3 wind{0.0};
     double seconds = 0.0;
-    hog::terrain::Cover cover{};
-    hog::planet::Biome blend_biome = hog::planet::Biome::Ocean;
-    std::uint8_t blend = 0;
 };
 
-// The patch's bushes alone over black, seen from overhead so every one is in view.
-Pixels draw(hog::render::Device& device, const Patch& grown) {
+// The bushes alone over black, seen from overhead so every one is in view.
+Pixels draw(hog::render::Device& device, const Drawn& drawn) {
     auto atmosphere = hog::render::Atmosphere::create(device);
     REQUIRE(atmosphere);
     auto sky = hog::render::Sky::create(device, colour_format, depth_format);
     REQUIRE(sky);
-    std::array<Vec3, hog::planet::biome_count> palette{};
-    palette.fill(Vec3{0.35F, 0.55F, 0.25F});
-    auto bushes = Bushes::create(device, colour_format, depth_format, palette);
+    auto bushes = Bushes::create(device, colour_format, depth_format, drawn.fade_far);
     REQUIRE(bushes);
-    auto pool = hog::render::TerrainPool::create(device, {.patches = 1, .frames = 1, .uploads = 1});
+    auto pool = hog::render::AnchorPool::create(device, {.tiles = 1, .frames = 1, .uploads = 1});
     REQUIRE(pool);
     const std::uint32_t slot = pool->acquire().value_or(99);
     REQUIRE(slot == 0);
-    REQUIRE(pool->stage(
-        0, slot, field(grown.biome, grown.spacing, grown.cover, grown.blend_biome, grown.blend)));
+    REQUIRE(pool->stage(0, slot, std::span<const hog::render::BushAnchor>{drawn.anchors}));
 
-    const WorldPosition origin{(up * (radius + ground_height)) + (east * grown.offset.x) +
-                               (DVec3{0.0, 1.0, 0.0} * grown.offset.y)};
+    const WorldPosition origin{up * (radius + ground_height)};
     const WorldPosition eye{up * (radius + ground_height + 24.0)};
     const hog::terrain::Bend bend = hog::terrain::bend_from(eye, radius, ground_height);
     const double elevation = 40.0 * std::numbers::pi / 180.0;
     const DVec3 sun = (east * std::cos(elevation)) + (up * std::sin(elevation));
-    // Straight down over the up point, seeing only ground every tested patch covers.
+    // Straight down over the bushes.
     const hog::render::Camera camera{
-        .eye = eye, .forward = -up, .up = DVec3{0.0, 1.0, 0.0}, .vertical_fov = 0.35};
+        .eye = eye, .forward = -up, .up = DVec3{0.0, 1.0, 0.0}, .vertical_fov = 0.9};
     const hog::atmosphere::Model model;
     const double scale = hog::render::air_scale(model.air(), bend);
     const hog::render::SkyView seen{.camera = camera,
@@ -111,18 +100,15 @@ Pixels draw(hog::render::Device& device, const Patch& grown) {
                                     .bend = bend,
                                     .exposure = 10.0,
                                     .sky_light = model.sky_irradiance(2.0 * scale, sun)};
-    const BushDraw stand{.slot = slot,
-                         .origin = origin,
-                         .face = 0,
-                         .lattice_i = grown.lattice_i,
-                         .lattice_j = grown.lattice_j,
-                         .shift = grown.shift,
-                         .fade_far = 260.0};
+    const StandDraw tile{.slot = slot,
+                         .first = 0,
+                         .count = static_cast<std::uint32_t>(drawn.anchors.size()),
+                         .origin = origin};
     const GrassView view{.camera = camera,
                          .bend = bend,
                          .air = sky->bindings(0, *atmosphere),
-                         .wind = grown.wind,
-                         .seconds = grown.seconds};
+                         .wind = drawn.wind,
+                         .seconds = drawn.seconds};
 
     auto colour = hog::render::make_image(
         device, {.format = colour_format,
@@ -146,7 +132,7 @@ Pixels draw(hog::render::Device& device, const Patch& grown) {
         hog::render::begin_rendering(commands, colour->view(), extent,
                                      VkClearColorValue{.float32 = {0.0F, 0.0F, 0.0F, 1.0F}},
                                      {.view = depth->view(), .clear = 0.0F});
-        bushes->draw(commands, extent, *pool, {&stand, 1}, view);
+        bushes->draw(commands, extent, *pool, {&tile, 1}, view);
         vkCmdEndRendering(commands);
     }));
     CHECK(device.validation_errors() == 0);
@@ -165,72 +151,62 @@ std::size_t lit_pixels(const Pixels& pixels) {
     return lit;
 }
 
+// Summed over the picture, red then green.
+std::array<std::size_t, 2> red_green(const Pixels& pixels) {
+    std::array<std::size_t, 2> sums{};
+    for (std::size_t pixel = 0; pixel < pixels.size() / 4; ++pixel) {
+        sums[0] += pixels.at(4 * pixel);
+        sums[1] += pixels.at((4 * pixel) + 1);
+    }
+    return sums;
+}
+
 } // namespace
 
-TEST_CASE("bushes grow where their biome grows them", "[render]") {
+TEST_CASE("bushes stand where they are anchored, of every kind", "[render]") {
     auto device = test_device();
     if (!device) {
         SKIP("no Vulkan device");
     }
-    const std::size_t shrubland =
-        lit_pixels(draw(*device, {.biome = hog::planet::Biome::Shrubland}));
-    CHECK(shrubland > 100);
-    CHECK(lit_pixels(draw(*device, {.biome = hog::planet::Biome::Ocean})) == 0);
-    // A grassland grows the odd lone bush, far sparser than a shrubland.
-    const std::size_t lone = lit_pixels(draw(*device, {.biome = hog::planet::Biome::Grassland}));
-    CHECK(lone < shrubland / 3);
+    using hog::flora::BushKind;
+    const Pixels floofy = draw(*device, {});
+    CHECK(lit_pixels(floofy) > 200);
+    CHECK(lit_pixels(draw(*device, {.anchors = {}})) == 0);
+    const Pixels spiky = draw(*device, {.anchors = stand(BushKind::Spiky)});
+    const Pixels twiggy = draw(*device, {.anchors = stand(BushKind::Twiggy)});
+    const Pixels mats = draw(*device, {.anchors = stand(BushKind::Mat)});
+    CHECK(lit_pixels(spiky) > 0);
+    CHECK(lit_pixels(mats) > 0);
+    // A twiggy skeleton is mostly air.
+    CHECK(lit_pixels(twiggy) > 0);
+    CHECK(lit_pixels(twiggy) < lit_pixels(floofy) / 2);
 }
 
-TEST_CASE("bushes stray past their own biome, thinning with that biome's share", "[render]") {
+TEST_CASE("a bush's leaves take its anchor's colour", "[render]") {
     auto device = test_device();
     if (!device) {
         SKIP("no Vulkan device");
     }
-    using hog::planet::Biome;
-    const std::size_t shrubland = lit_pixels(draw(*device, {.biome = Biome::Shrubland}));
-    const std::size_t half = lit_pixels(
-        draw(*device, {.biome = Biome::Ocean, .blend_biome = Biome::Shrubland, .blend = 128}));
-    const std::size_t fringe = lit_pixels(
-        draw(*device, {.biome = Biome::Ocean, .blend_biome = Biome::Shrubland, .blend = 32}));
-    INFO("shrubland " << shrubland << ", half " << half << ", fringe " << fringe);
-    CHECK(half > shrubland / 4);
-    CHECK(half < shrubland);
-    CHECK(fringe > 0);
-    CHECK(fringe < half);
+    using hog::flora::BushKind;
+    const auto green = red_green(draw(*device, {}));
+    const auto red =
+        red_green(draw(*device, {.anchors = stand(BushKind::Floofy, Vec3{0.4F, 0.05F, 0.03F})}));
+    CHECK(green[1] > green[0]);
+    CHECK(red[0] > red[1]);
 }
 
-TEST_CASE("shrubs crowd in where the dead trees have fallen, and not on black ground", "[render]") {
+TEST_CASE("bushes shrink away at the edge of their reach", "[render]") {
     auto device = test_device();
     if (!device) {
         SKIP("no Vulkan device");
     }
-    using hog::planet::Biome;
-    const std::size_t woods = lit_pixels(draw(*device, {.biome = Biome::TemperateForest}));
-    // The trees gone, the dead still standing: the canopy's shade lifted, no more.
-    const std::size_t standing =
-        lit_pixels(draw(*device, {.biome = Biome::TemperateForest, .cover = {0, 0xf0}}));
-    const std::size_t fallen =
-        lit_pixels(draw(*device, {.biome = Biome::TemperateForest, .cover = {0, 0xff}}));
-    INFO("woods " << woods << ", dead standing " << standing << ", fallen " << fallen);
-    CHECK(standing >= woods);
-    CHECK(fallen > standing + (standing / 2));
-    CHECK(lit_pixels(draw(*device, {.biome = Biome::TemperateForest, .cover = {255, 0xff}})) == 0);
-}
-
-TEST_CASE("a bush stands its ground at every terrain level", "[render]") {
-    auto device = test_device();
-    if (!device) {
-        SKIP("no Vulkan device");
-    }
-    // The same ground baked fine and coarse: the finer patch spans the south-west quarter of the
-    // coarser, so it shares its lattice base, keyed a shift apart; the finer grid packs more
-    // cells into each lattice cell. The same bushes must stand in the same spots either way.
-    const Patch coarse{.spacing = 1.0, .offset = DVec3{8.0, 8.0, 0.0}, .shift = 0};
-    const Patch fine{.spacing = 0.5, .offset = DVec3{0.0, 0.0, 0.0}, .shift = 1};
-    const Pixels coarsely = draw(*device, coarse);
-    const Pixels finely = draw(*device, fine);
-    CHECK(lit_pixels(finely) > 20);
-    CHECK(coarsely == finely);
+    // The bushes lie some 24 to 28 metres from the eye overhead.
+    const std::size_t near = lit_pixels(draw(*device, {.fade_far = 200.0}));
+    const std::size_t shrinking = lit_pixels(draw(*device, {.fade_far = 31.0}));
+    CHECK(near > 200);
+    CHECK(shrinking > 0);
+    CHECK(shrinking < near);
+    CHECK(lit_pixels(draw(*device, {.fade_far = 20.0})) == 0);
 }
 
 TEST_CASE("the wind rustles the bushes, and still air leaves them still", "[render]") {
@@ -245,4 +221,17 @@ TEST_CASE("the wind rustles the bushes, and still air leaves them still", "[rend
     const Pixels still_now = draw(*device, {.seconds = 1.0});
     const Pixels still_later = draw(*device, {.seconds = 1.7});
     CHECK(still_now == still_later);
+}
+
+TEST_CASE("a bush's leaves pack with its kind, as a tree's foliage packs", "[render]") {
+    using hog::flora::BushKind;
+    const Vec3 leaves{0.12F, 0.3F, 0.06F};
+    for (const BushKind kind :
+         {BushKind::Floofy, BushKind::Spiky, BushKind::Twiggy, BushKind::Mat}) {
+        const std::uint32_t packed = hog::render::packed_leaves(leaves, kind);
+        CHECK(hog::render::kind_of(packed) == kind);
+        CHECK(hog::render::foliage_of(packed).g ==
+              hog::render::foliage_of(hog::render::packed_foliage(leaves, hog::flora::Genus::Pine))
+                  .g);
+    }
 }

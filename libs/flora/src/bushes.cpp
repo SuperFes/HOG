@@ -25,7 +25,7 @@ float smoothstepped(float from, float to, float value) noexcept {
     return t * t * (3.0F - (2.0F * t));
 }
 
-// The bushes' lattice lies this many levels finer than the trees'.
+// A bush's lattice cell across, in the trees' cells.
 constexpr float trees_per_bush =
     1.0F / static_cast<float>(1U << (bush_lattice_level - lattice_level));
 

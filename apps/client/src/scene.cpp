@@ -95,11 +95,11 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
     if (!grass) {
         return failed("grow the grass", grass.error());
     }
-    auto bushes = render::Bushes::create(device, colour_format, depth_format, palette);
+    const GrassBudget budget;
+    auto bushes = render::Bushes::create(device, colour_format, depth_format, budget.tall_far);
     if (!bushes) {
         return failed("grow the bushes", bushes.error());
     }
-    const GrassBudget budget;
     auto trees = render::Trees::create(device, colour_format, depth_format, render::forest_far);
     if (!trees) {
         return failed("grow the trees", trees.error());
@@ -114,16 +114,25 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
     if (!pool) {
         return failed("hold the ground", pool.error());
     }
-    // Enough tiles for the trees' whole reach round the eye, within reason on a small planet.
-    const double tile_span = (std::numbers::pi / 2.0) * world.geology().planet_radius() /
-                             static_cast<double>(std::uint32_t{1} << anchor_tile_level);
-    const double rings = (budget.tree_far / tile_span) + 3.0;
-    const auto tiles =
-        static_cast<std::uint32_t>(std::clamp(std::numbers::pi * rings * rings, 64.0, 1024.0));
-    auto anchors =
-        render::AnchorPool::create(device, {.tiles = tiles, .frames = frames, .uploads = 4});
+    // Enough tiles for the plants' whole reach round the eye, within reason on a small planet.
+    const auto tiles_for = [&](int level, double reach) {
+        const double tile_span = (std::numbers::pi / 2.0) * world.geology().planet_radius() /
+                                 static_cast<double>(std::uint32_t{1} << level);
+        const double rings = (reach / tile_span) + 3.0;
+        return static_cast<std::uint32_t>(
+            std::clamp(std::numbers::pi * rings * rings, 64.0, 1024.0));
+    };
+    auto anchors = render::AnchorPool::create(
+        device,
+        {.tiles = tiles_for(anchor_tile_level, budget.tree_far), .frames = frames, .uploads = 4});
     if (!anchors) {
         return failed("hold the trees", anchors.error());
+    }
+    auto bush_pool = render::AnchorPool::create(
+        device,
+        {.tiles = tiles_for(bush_tile_level, budget.tall_far), .frames = frames, .uploads = 4});
+    if (!bush_pool) {
+        return failed("hold the bushes", bush_pool.error());
     }
     auto atmosphere = render::Atmosphere::create(device);
     if (!atmosphere) {
@@ -169,6 +178,7 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
                  std::move(forest).value(),
                  std::move(pool).value(),
                  std::move(anchors).value(),
+                 std::move(bush_pool).value(),
                  std::move(atmosphere).value(),
                  std::move(sky).value(),
                  std::move(others).value(),
@@ -184,25 +194,28 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
 Scene::Scene(const render::Device& device, const planet::World& world, jobs::JobSystem& jobs,
              const sim::Calendar& calendar, render::Terrain terrain, render::Ocean ocean,
              render::Grass grass, render::Bushes bushes, render::Trees trees, render::Forest forest,
-             render::TerrainPool pool, render::AnchorPool anchors, render::Atmosphere atmosphere,
-             render::Sky sky, render::Capsules others, render::WeatherMaps weather,
-             render::Clouds clouds, render::Precipitation precipitation, render::Glare glare,
-             render::GpuTimer timer, std::optional<render::Billboard> companion,
-             std::uint32_t frames)
+             render::TerrainPool pool, render::AnchorPool anchors, render::AnchorPool bush_pool,
+             render::Atmosphere atmosphere, render::Sky sky, render::Capsules others,
+             render::WeatherMaps weather, render::Clouds clouds,
+             render::Precipitation precipitation, render::Glare glare, render::GpuTimer timer,
+             std::optional<render::Billboard> companion, std::uint32_t frames)
     : world_{&world}, baker_{world, jobs}, terrain_{std::move(terrain)}, ocean_{std::move(ocean)},
       grass_{std::move(grass)}, bushes_{std::move(bushes)}, trees_{std::move(trees)},
       forest_{std::move(forest)}, pool_{std::move(pool)}, anchor_pool_{std::move(anchors)},
-      anchors_{biome_palette()}, transients_{device, frames}, others_{std::move(others)},
-      companion_{std::move(companion)}, atmosphere_{std::move(atmosphere)}, sky_{std::move(sky)},
-      weather_{std::move(weather)}, clouds_{std::move(clouds)},
-      precipitation_{std::move(precipitation)}, glare_{std::move(glare)}, timer_{std::move(timer)},
-      calendar_{calendar} {}
+      anchors_{biome_palette(), &jobs}, bush_pool_{std::move(bush_pool)},
+      bush_anchors_{biome_palette(), &jobs}, transients_{device, frames},
+      others_{std::move(others)}, companion_{std::move(companion)},
+      atmosphere_{std::move(atmosphere)}, sky_{std::move(sky)}, weather_{std::move(weather)},
+      clouds_{std::move(clouds)}, precipitation_{std::move(precipitation)},
+      glare_{std::move(glare)}, timer_{std::move(timer)}, calendar_{calendar} {}
 
 Scene::~Scene() {
     (void)baker_.finish();
 }
 
 void Scene::finish_bakes() {
+    anchors_.finish();
+    bush_anchors_.finish();
     for (terrain::Patch& patch : baker_.finish()) {
         stream_.baked(std::move(patch));
     }
@@ -214,6 +227,7 @@ void Scene::fare(const protocol::Woodlands& told) {
         return;
     }
     anchors_.fare(woodlands_.fates(), changed);
+    bush_anchors_.fare(woodlands_.fates(), changed);
     // Bakes in flight read the fates they started with, and are dropped as stale on arrival.
     baker_.fates(woodlands_.fates());
     for (const planet::CellId cell : changed) {
@@ -256,13 +270,16 @@ void Scene::grow_vegetation(render::RenderGraph& graph, const render::Frame& fra
                              .seconds = swaying_for_});
             });
     }
-    const std::vector<render::BushDraw> shrubs =
-        bush_draws(slots_, patches, shot.camera.eye, shot.bend.radius);
+    const Sight sight =
+        sight_of(shot.camera, static_cast<double>(frame.extent.width) /
+                                  static_cast<double>(std::max(frame.extent.height, 1U)));
+    const std::vector<render::StandDraw> shrubs =
+        bush_anchors_.draws(sight, GrassBudget{}.tall_far);
     if (!shrubs.empty()) {
         graph.add(
             {.name = "bushes", .uses = {through_air.begin(), through_air.end()}, .targets = drawn},
             [&, shrubs, wind](VkCommandBuffer commands) {
-                bushes_.draw(commands, frame.extent, pool_, shrubs,
+                bushes_.draw(commands, frame.extent, bush_pool_, shrubs,
                              {.camera = shot.camera,
                               .bend = shot.bend,
                               .air = air,
@@ -272,9 +289,6 @@ void Scene::grow_vegetation(render::RenderGraph& graph, const render::Frame& fra
     }
     // Both tree tiers draw from the same anchored stands: the stamps over whole tiles, holding off
     // where the grown forest covers, and the grown trees over the near blocks alone.
-    const Sight sight =
-        sight_of(shot.camera, static_cast<double>(frame.extent.width) /
-                                  static_cast<double>(std::max(frame.extent.height, 1U)));
     const std::vector<render::StandDraw> stands = anchors_.draws(sight);
     if (!stands.empty()) {
         graph.add(
@@ -321,16 +335,23 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     for (const planet::CellId cell : streamed.bakes) {
         baker_.start(cell);
     }
-    // The ground into its slots, and the anchored trees round the eye, a few tiles a frame.
-    if (auto taken = slots_.take(pool_, frame.slot, streamed).and_then([&] {
-            return anchors_.update(anchor_pool_, frame.slot, *world_, shot.camera.eye,
-                                   GrassBudget{}.tree_far);
-        });
+    // The ground into its slots, and the anchored trees and bushes round the eye, a few tiles a
+    // frame.
+    const GrassBudget budget;
+    if (auto taken = slots_.take(pool_, frame.slot, streamed)
+                         .and_then([&] {
+                             return anchors_.update(anchor_pool_, frame.slot, *world_,
+                                                    shot.camera.eye, budget.tree_far);
+                         })
+                         .and_then([&] {
+                             return bush_anchors_.update(bush_pool_, frame.slot, *world_,
+                                                         shot.camera.eye, budget.tall_far);
+                         });
         !taken) {
         return taken;
     }
     settled_ = streamed.bakes.empty() && streamed.arrived.empty() && streamed.evicted.empty() &&
-               baker_.in_flight() == 0 && anchors_.settled();
+               baker_.in_flight() == 0 && anchors_.settled() && bush_anchors_.settled();
     const protocol::CellWeather here = weather_at_eye(shot);
     const DVec3 sun = calendar_.sun_direction(shot.time);
     const double sun_mu = glm::dot(sun, shot.bend.up);
@@ -408,9 +429,9 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                           return updated;
                       }
                   }
-                  return pool_.record_uploads(commands, frame.slot).and_then([&] {
-                      return anchor_pool_.record_uploads(commands, frame.slot);
-                  });
+                  return pool_.record_uploads(commands, frame.slot)
+                      .and_then([&] { return anchor_pool_.record_uploads(commands, frame.slot); })
+                      .and_then([&] { return bush_pool_.record_uploads(commands, frame.slot); });
               });
     if (shadow) {
         graph.add({.name = "cloud shadow",

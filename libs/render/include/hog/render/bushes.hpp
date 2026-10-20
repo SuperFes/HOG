@@ -2,53 +2,39 @@
 
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
+#include <hog/render/anchors.hpp>
 #include <hog/render/camera.hpp>
 #include <hog/render/grass.hpp>
 #include <hog/render/memory.hpp>
 #include <hog/render/pipeline.hpp>
 #include <hog/render/sky.hpp>
-#include <hog/render/terrain.hpp>
 #include <hog/render/vulkan.hpp>
-#include <hog/terrain/bend.hpp>
 
-#include <cstdint>
 #include <span>
 
 namespace hog::render {
 
 class Device;
 
-// The fixed lattice bushes are keyed to: every patch maps its grid onto cells of this level, so
-// a bush stands in the same spot at every terrain level and on every machine.
-inline constexpr int bush_lattice_level = 16;
 // Metres from the eye bushes have shrunk away by.
 inline constexpr double bushes_far = 260.0;
 
-// A patch's bushes: at most one in each lattice cell over it.
-struct BushDraw {
-    std::uint32_t slot = 0;
-    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
-    WorldPosition origin = {};
-    std::uint32_t face = 0;      // the patch's cube face
-    std::uint32_t lattice_i = 0; // the patch's first lattice cell
-    std::uint32_t lattice_j = 0;
-    int shift = 0; // grid cells across a lattice cell, as a power of two; -1 for half
-    double fade_far = bushes_far; // metres from the eye its bushes have shrunk away by
-};
+// Leaves a touch darker and greener than the ground's mean, so bushes sit in their biome.
+[[nodiscard]] constexpr Vec3 leaf_colour(Vec3 ground) noexcept {
+    return (ground * 0.55F) + Vec3{0.02F, 0.065F, 0.02F};
+}
 
-// Bushes grown on the ground's own patches: blobs, rosettes, twiggy skeletons and low mats,
-// mixed and placed by biome, swaying slightly with the wind.
+// Bushes drawn from their anchors: blobs, rosettes, twiggy skeletons and low mats, swaying
+// slightly with the wind, shrinking away toward the edge of their reach.
 class Bushes {
 public:
-    // Leaves take each biome's colour blended from `palette`, as grass blades do.
     [[nodiscard]] static Result<Bushes> create(Device& device, VkFormat colour_format,
-                                               VkFormat depth_format,
-                                               std::span<const Vec3> palette);
+                                               VkFormat depth_format, double fade_far = bushes_far);
 
     // Records drawing into the colour and depth images being rendered to, of `extent`. The draws'
-    // slots must hold patches already uploaded.
-    void draw(VkCommandBuffer commands, VkExtent2D extent, const TerrainPool& pool,
-              std::span<const BushDraw> draws, const GrassView& view) const;
+    // slots must hold bush anchors already uploaded.
+    void draw(VkCommandBuffer commands, VkExtent2D extent, const AnchorPool& pool,
+              std::span<const StandDraw> draws, const GrassView& view) const;
 
 private:
     Bushes() = default;
