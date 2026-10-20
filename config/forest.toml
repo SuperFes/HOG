@@ -1,5 +1,5 @@
-# Plants for the development server: how much each biome holds, how fast it grows back, and how
-# it burns.
+# Plants for the development server: how much each biome holds, how fast it grows back, how it
+# burns, and how it dies back in a drought.
 [growth]
 seeds = 0.02
 cold = 0
@@ -45,3 +45,14 @@ wind = 0.15
 burn_days = 2
 douse = 5
 out = 0.05
+
+[dying]
+# Plants feel the ground water's shortfall below its usual level over a season; past a third
+# below, they die back over a couple of years. The dead stand a decade or so, and regrowth takes
+# most of a century to count as old growth.
+days = 120
+tolerance = 0.3
+worst = 0.6
+years = 2
+standing = 12
+maturing = 80

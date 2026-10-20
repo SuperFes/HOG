@@ -53,7 +53,9 @@ ForestConditions forest_conditions_of(const Weather& weather) {
                             .rain = fields.rain,
                             .rain_days = Seconds{weather.config().step}.count() / 86'400.0,
                             .storm = fields.storm,
-                            .wind = fields.wind};
+                            .wind = fields.wind,
+                            .groundwater = weather.land().fields().groundwater,
+                            .usual_groundwater = weather.land().fields().usual_groundwater};
 }
 
 Stage stage_of(double biomass, double capacity) noexcept {
@@ -107,6 +109,11 @@ Forest::Forest(const ForestConfig& config, std::vector<Soil> soil, GameTime now)
     fields_.biomass.reserve(size);
     fields_.dryness.resize(size);
     fields_.fire.resize(size);
+    fields_.established.resize(size, 1.0F);
+    fields_.failing.resize(size);
+    fields_.dead.resize(size);
+    fields_.charred.resize(size);
+    fields_.shortfall.resize(size);
     catching_.resize(size);
     for (std::uint32_t cell = 0; cell < size; ++cell) {
         areas_.push_back(grid_.area(cell) * square_km);
@@ -120,6 +127,18 @@ double Forest::capacity(std::uint32_t cell) const {
 
 Stage Forest::stage(std::uint32_t cell) const {
     return stage_of(static_cast<double>(fields_.biomass[cell]), capacity(cell));
+}
+
+double Forest::living(std::uint32_t cell) const {
+    const double holds = capacity(cell);
+    return holds > 0.0 ? static_cast<double>(fields_.biomass[cell]) / holds : 1.0;
+}
+
+double Forest::sustainable(std::uint32_t cell) const {
+    const DyingConfig& dying = config_.vegetation.dying;
+    const double short_by =
+        (static_cast<double>(fields_.shortfall[cell]) - dying.tolerance) / (1.0 - dying.tolerance);
+    return 1.0 - (dying.worst * std::clamp(short_by, 0.0, 1.0));
 }
 
 double Forest::flammability(std::uint32_t cell) const {
@@ -169,6 +188,10 @@ std::uint64_t Forest::advance_to(GameTime now, const ForestConditions& condition
                    conditions.snow.size() == size && conditions.rain.size() == size &&
                    conditions.storm.size() == size && conditions.wind.size() == size,
                "need conditions for every cell");
+    HOG_ASSERT(
+        (conditions.groundwater.empty() && conditions.usual_groundwater.empty()) ||
+            (conditions.groundwater.size() == size && conditions.usual_groundwater.size() == size),
+        "need ground water for every cell or none");
     std::uint64_t steps = 0;
     while (next_step() <= now) {
         step(next_step(), conditions, jobs);
@@ -184,6 +207,7 @@ void Forest::step(GameTime at, const ForestConditions& conditions, jobs::JobSyst
         fields_.dryness[cell] =
             static_cast<float>(dryness(static_cast<double>(conditions.soil[cell]),
                                        static_cast<double>(conditions.snow[cell])));
+        feel(cell, conditions, days);
     });
     detail::for_cells(&jobs, grid_.size(), [&](std::uint32_t cell) {
         catching_[cell] = catching(cell, conditions, days, step_number);
@@ -244,6 +268,7 @@ void Forest::tend(std::uint32_t cell, const ForestConditions& conditions, double
         burning = static_cast<float>(flammability(cell));
         return;
     }
+    const double before = living(cell);
     if (burning > 0.0F) {
         const double least = growth.seeds * holds;
         const double burn = std::log((1.0 - growth.seeds) / fire.out) / fire.burn_days;
@@ -261,14 +286,68 @@ void Forest::tend(std::uint32_t cell, const ForestConditions& conditions, double
         if (burning == 0.0F && left - least < fire.out * holds) {
             biomass = static_cast<float>(least);
         }
+        fields_.failing[cell] = 0.0F;
+        settle(cell, before, living(cell), true, days);
         return;
     }
-    const auto temperature = static_cast<double>(conditions.temperature[cell]);
-    const auto biome = static_cast<std::size_t>(soil_[cell].biome);
-    biomass = static_cast<float>(
-        grown(growth, holds, growth.years.at(biome), static_cast<double>(biomass),
-              speed(growth, temperature, static_cast<double>(fields_.dryness[cell])),
-              Seconds{config_.step}.count() / (86'400.0 * days_per_year)));
+    // More than the ground water can keep dies back toward what it can; less grows toward it.
+    const double keeps = sustainable(cell);
+    if (before > keeps) {
+        const double dying = std::exp(-days / (config_.vegetation.dying.years * days_per_year));
+        biomass = static_cast<float>((keeps + ((before - keeps) * dying)) * holds);
+    } else {
+        const double temperature = static_cast<double>(conditions.temperature[cell]);
+        const auto biome = static_cast<std::size_t>(soil_[cell].biome);
+        biomass = static_cast<float>(
+            std::min(grown(growth, holds, growth.years.at(biome), static_cast<double>(biomass),
+                           speed(growth, temperature, static_cast<double>(fields_.dryness[cell])),
+                           Seconds{config_.step}.count() / (86'400.0 * days_per_year)),
+                     keeps * holds));
+    }
+    const double after = living(cell);
+    fields_.failing[cell] = static_cast<float>(std::max(after - keeps, 0.0));
+    settle(cell, before, after, false, days);
+}
+
+void Forest::feel(std::uint32_t cell, const ForestConditions& conditions, double days) {
+    if (conditions.groundwater.empty()) {
+        return;
+    }
+    const double usual = conditions.usual_groundwater[cell];
+    // Under a millimetre or so, there's no ground water to speak of to fall short.
+    const double felt =
+        usual > 1.0 ? std::clamp(1.0 - (conditions.groundwater[cell] / usual), 0.0, 1.0) : 0.0;
+    float& shortfall = fields_.shortfall[cell];
+    const double toward = 1.0 - std::exp(-days / config_.vegetation.dying.days);
+    shortfall = static_cast<float>(static_cast<double>(shortfall) +
+                                   ((felt - static_cast<double>(shortfall)) * toward));
+}
+
+void Forest::settle(std::uint32_t cell, double before, double after, bool burned, double days) {
+    const DyingConfig& dying = config_.vegetation.dying;
+    double dead = static_cast<double>(fields_.dead[cell]);
+    double charred = static_cast<double>(fields_.charred[cell]);
+    if (after < before) {
+        // What died stands dead; the burned share of the standing dead takes in what burned.
+        const double lost = before - after;
+        const double black = (charred * dead) + (burned ? lost : 0.0);
+        dead += lost;
+        charred = std::min(black / dead, 1.0);
+    } else {
+        // What grows back takes the places of the dead, so those fallen stay fallen.
+        dead = std::max(dead - (after - before), 0.0);
+    }
+    dead = std::min(dead, std::max(1.0 - after, 0.0)) *
+           std::exp(-days / (dying.standing * days_per_year));
+    fields_.dead[cell] = static_cast<float>(dead);
+    fields_.charred[cell] = dead > 0.0 ? static_cast<float>(charred) : 0.0F;
+
+    float& established = fields_.established[cell];
+    const auto old = static_cast<double>(established);
+    established = static_cast<float>(
+        after <= old
+            ? after
+            : old + ((after - old) * (1.0 - std::exp(-days / (dying.maturing * days_per_year)))));
 }
 
 double Forest::total() const {

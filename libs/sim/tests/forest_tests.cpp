@@ -64,10 +64,13 @@ struct Weather {
     std::vector<float> rain;
     std::vector<float> storm;
     std::vector<hog::Vec2> wind;
+    // At its usual level unless set.
+    std::vector<double> groundwater;
+    std::vector<double> usual_groundwater;
 
     Weather(std::size_t size, float degrees, float fullness)
         : temperature(size, degrees), soil(size, fullness), snow(size), rain(size), storm(size),
-          wind(size, hog::Vec2{0.0F}) {}
+          wind(size, hog::Vec2{0.0F}), groundwater(size, 100.0), usual_groundwater(size, 100.0) {}
 
     [[nodiscard]] ForestConditions conditions() const {
         return ForestConditions{.temperature = temperature,
@@ -76,7 +79,9 @@ struct Weather {
                                 .rain = rain,
                                 .rain_days = 1.0,
                                 .storm = storm,
-                                .wind = wind};
+                                .wind = wind,
+                                .groundwater = groundwater,
+                                .usual_groundwater = usual_groundwater};
     }
 };
 
@@ -209,6 +214,91 @@ TEST_CASE("a fire burns its cell down and the plants grow back through their sta
     CHECK(stages ==
           std::vector{Stage::Bare, Stage::Grass, Stage::Shrub, Stage::Young, Stage::Mature});
     CHECK(mature >= 58);
+}
+
+TEST_CASE("a fire leaves its dead standing charred, and what grows back is young for generations",
+          "[sim][forest]") {
+    ForestConfig settings = config();
+    settings.vegetation.fire.spread = 0.0;
+    Forest forest{settings, woods(), start};
+    JobSystem jobs{2};
+    const std::uint32_t cell = middle();
+    const std::uint32_t untouched = middle() + 1;
+    const Weather dry = drought(forest.grid().size());
+    forest.advance_to(forest.next_step(), dry.conditions(), jobs);
+    REQUIRE(forest.ignite(cell));
+    forest.advance_to(forest.time() + days{3}, dry.conditions(), jobs);
+    REQUIRE(forest.burning() == 0);
+    const hog::sim::ForestFields& fields = forest.fields();
+    // Burned down to its seeds, the rest standing dead and black.
+    CHECK_THAT(forest.living(cell), WithinAbs(0.02, 1e-3));
+    CHECK_THAT(static_cast<double>(fields.dead[cell]), WithinAbs(0.98, 0.01));
+    CHECK_THAT(static_cast<double>(fields.charred[cell]), WithinAbs(1.0, 1e-5));
+    CHECK(static_cast<double>(fields.established[cell]) <= forest.living(cell) + 1e-6);
+    CHECK(fields.failing[cell] == 0.0F);
+    // Its neighbour untouched.
+    CHECK(forest.living(untouched) == 1.0);
+    CHECK(fields.established[untouched] == 1.0F);
+    CHECK(fields.dead[untouched] == 0.0F);
+
+    const Weather good = good_year(forest.grid().size());
+    forest.advance_to(forest.time() + days{365 * 10}, good.conditions(), jobs);
+    const double living = forest.living(cell);
+    // A decade on, the snags thinning, the regrowth all young, never more alive and dead than
+    // the ground holds.
+    CHECK(fields.dead[cell] < 0.6F);
+    CHECK(fields.dead[cell] > 0.1F);
+    CHECK(static_cast<double>(fields.dead[cell]) + living <= 1.0 + 1e-6);
+    CHECK(living > 0.05);
+    CHECK(static_cast<double>(fields.established[cell]) < 0.5 * living);
+    forest.advance_to(forest.time() + days{365 * 140}, good.conditions(), jobs);
+    // Generations on, grown back, the dead all fallen, the most of it old growth again.
+    CHECK(forest.living(cell) > 0.95);
+    CHECK(fields.dead[cell] < 0.01F);
+    CHECK(static_cast<double>(fields.established[cell]) > 0.7 * forest.living(cell));
+}
+
+TEST_CASE("a drought kills back what the ground water can't keep, the failing first",
+          "[sim][forest]") {
+    Forest forest{config(), woods(), start};
+    JobSystem jobs{2};
+    const std::uint32_t cell = middle();
+    Weather weather = good_year(forest.grid().size());
+    // A dry season plants are used to costs them nothing.
+    std::ranges::fill(weather.groundwater, 80.0);
+    forest.advance_to(start + days{365}, weather.conditions(), jobs);
+    CHECK(forest.living(cell) == 1.0);
+    CHECK(forest.fields().failing[cell] == 0.0F);
+
+    // Years with the ground water well down: dying back toward what it keeps.
+    std::ranges::fill(weather.groundwater, 30.0);
+    forest.advance_to(forest.time() + days{120}, weather.conditions(), jobs);
+    const hog::sim::ForestFields& fields = forest.fields();
+    CHECK(fields.shortfall[cell] > 0.4F);
+    CHECK(fields.failing[cell] > 0.0F);
+    forest.advance_to(forest.time() + days{365 * 5}, weather.conditions(), jobs);
+    const double keeps = forest.sustainable(cell);
+    CHECK_THAT(static_cast<double>(fields.shortfall[cell]), WithinAbs(0.7, 0.01));
+    CHECK_THAT(keeps, WithinAbs(1.0 - (0.6 * 0.4 / 0.7), 0.01));
+    CHECK_THAT(forest.living(cell), WithinAbs(keeps, 0.05));
+    CHECK(fields.dead[cell] > 0.15F);
+    CHECK(fields.charred[cell] == 0.0F);
+    CHECK(static_cast<double>(fields.established[cell]) <= forest.living(cell) + 1e-6);
+    CHECK(fields.failing[cell] < 0.05F);
+
+    // The water back, the woods grow back, nothing failing.
+    std::ranges::fill(weather.groundwater, 100.0);
+    forest.advance_to(forest.time() + days{365 * 30}, weather.conditions(), jobs);
+    CHECK(forest.living(cell) > 0.9);
+    CHECK(fields.failing[cell] == 0.0F);
+    CHECK(fields.shortfall[cell] < 0.01F);
+    // With none known, nothing dies of drought.
+    Forest unknown{config(), woods(), start};
+    Weather unmeasured = good_year(unknown.grid().size());
+    unmeasured.groundwater.clear();
+    unmeasured.usual_groundwater.clear();
+    unknown.advance_to(start + days{365}, unmeasured.conditions(), jobs);
+    CHECK(unknown.living(cell) == 1.0);
 }
 
 TEST_CASE("wet ground and water don't burn", "[sim][forest]") {
@@ -351,6 +441,7 @@ TEST_CASE("a forest saves and loads, fires and all", "[sim][forest]") {
 
     Forest loaded{config(), woods(), start + days{400}};
     REQUIRE(loaded.load(Forest::save_version, bytes));
+    CHECK(loaded.fields().dead[middle()] > 0.0F);
     CHECK(loaded.time() == saved.time());
     CHECK(loaded.fields() == saved.fields());
     saved.advance_to(saved.time() + days{5}, dry.conditions(), jobs);
@@ -366,6 +457,20 @@ TEST_CASE("a forest saves and loads, fires and all", "[sim][forest]") {
     const auto newer = loaded.load(Forest::save_version + 1, bytes);
     REQUIRE_FALSE(newer);
     CHECK(newer.error().code == hog::ErrorCode::Unsupported);
+
+    // The first version, without the fates: the living counted old growth, nothing dead.
+    const std::size_t cells = saved.grid().size();
+    const std::span<const std::byte> first{bytes.data(), 1 + 8 + (3 * 4 * cells)};
+    Forest older{config(), woods(), start};
+    REQUIRE(older.load(1, first));
+    Forest current{config(), woods(), start};
+    REQUIRE(current.load(Forest::save_version, bytes));
+    CHECK(older.fields().biomass == current.fields().biomass);
+    for (std::uint32_t cell = 0; cell < cells; ++cell) {
+        CHECK_THAT(static_cast<double>(older.fields().established[cell]),
+                   WithinAbs(older.living(cell), 1e-6));
+        CHECK(older.fields().dead[cell] == 0.0F);
+    }
 
     const auto before = loaded.fields();
     const std::span<const std::byte> all{bytes};

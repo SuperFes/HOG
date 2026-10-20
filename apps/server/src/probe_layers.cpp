@@ -129,6 +129,11 @@ void each_layer(const LayerSources& sources, Use use) {
         });
         use("forest/dryness", "", [&](auto& values) { copy(fields.dryness, values); });
         use("forest/fire", "", [&](auto& values) { copy(fields.fire, values); });
+        use("forest/established", "", [&](auto& values) { copy(fields.established, values); });
+        use("forest/failing", "", [&](auto& values) { copy(fields.failing, values); });
+        use("forest/dead", "", [&](auto& values) { copy(fields.dead, values); });
+        use("forest/charred", "", [&](auto& values) { copy(fields.charred, values); });
+        use("forest/shortfall", "", [&](auto& values) { copy(fields.shortfall, values); });
     }
 }
 

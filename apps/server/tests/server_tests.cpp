@@ -340,6 +340,8 @@ TEST_CASE("the world's layers are laid out for debug tools", "[app][server]") {
     CHECK(named("land/snow"));
     CHECK(named("land/flow_ratio"));
     CHECK(named("forest/biomass"));
+    CHECK(named("forest/dead"));
+    CHECK(named("forest/shortfall"));
     CHECK_FALSE(named("wildlife/forage"));
 
     const auto layers = hog::app::fetch_layers(

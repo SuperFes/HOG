@@ -22,7 +22,7 @@ std::string error_of(std::string_view text) {
 
 } // namespace
 
-TEST_CASE("vegetation reads growth and fire", "[sim][vegetation]") {
+TEST_CASE("vegetation reads growth, fire and dying", "[sim][vegetation]") {
     const auto vegetation = parse_vegetation(R"(
 [growth]
 capacity = { temperate_forest = 20, "boreal forest" = 10 }
@@ -34,6 +34,10 @@ warm = 12
 damp = 0.3
 spread = 4
 burn_days = 3
+
+[dying]
+tolerance = 0.4
+standing = 20
 )");
     REQUIRE(vegetation);
     CHECK(vegetation->growth.capacity[at(Biome::TemperateForest)] == 20.0);
@@ -48,6 +52,9 @@ burn_days = 3
     CHECK(vegetation->fire.parched == 0.9);
     CHECK(vegetation->fire.spread == 4.0);
     CHECK(vegetation->fire.burn_days == 3.0);
+    CHECK(vegetation->dying.tolerance == 0.4);
+    CHECK(vegetation->dying.standing == 20.0);
+    CHECK(vegetation->dying.worst == hog::sim::DyingConfig{}.worst);
 
     const auto empty = parse_vegetation("");
     REQUIRE(empty);
@@ -67,6 +74,10 @@ TEST_CASE("vegetation reports what it can't read", "[sim][vegetation]") {
     CHECK_THAT(error_of("[fire]\nburn_days = 0"), ContainsSubstring("fire.burn_days"));
     CHECK_THAT(error_of("[fire]\nsmoke = 1"), ContainsSubstring("fire.smoke"));
     CHECK_THAT(error_of("[weather]"), ContainsSubstring("weather"));
+    CHECK_THAT(error_of("[dying]\ntolerance = 1"), ContainsSubstring("dying.tolerance"));
+    CHECK_THAT(error_of("[dying]\nyears = 0"), ContainsSubstring("dying.years"));
+    CHECK_THAT(error_of("[dying]\nworst = 2"), ContainsSubstring("dying.worst"));
+    CHECK_THAT(error_of("[dying]\nrot = 1"), ContainsSubstring("dying.rot"));
     CHECK(parse_vegetation("[fire").error().code == hog::ErrorCode::Parse);
 }
 
@@ -75,6 +86,7 @@ TEST_CASE("vegetation loads from a file", "[sim][vegetation]") {
     REQUIRE(development);
     CHECK(development->growth.capacity[at(Biome::TemperateForest)] > 0.0);
     CHECK(development->growth.capacity[at(Biome::Ocean)] == 0.0);
+    CHECK(development->dying.standing > 0.0);
     CHECK(hog::sim::load_vegetation("no/such/forest.toml").error().code ==
           hog::ErrorCode::NotFound);
 }

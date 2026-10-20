@@ -42,10 +42,23 @@ struct FireConfig {
     double out = 0.05;
 };
 
-// How the planet's plants grow and burn.
+// How plants die back when the ground water falls well below its usual level, and how long the
+// dead and the regrown take to pass. The shortfall felt is a running mean, so a dry season the
+// plants are used to costs them nothing.
+struct DyingConfig {
+    double days = 120.0;    // the shortfall's running mean is taken over about this long
+    double tolerance = 0.3; // share the ground water may fall below its usual without loss
+    double worst = 0.6;     // share of what a cell holds lost once the ground water is gone
+    double years = 2.0;     // for the dying to die, about
+    double standing = 12.0; // years the dead stand before they fall, about
+    double maturing = 80.0; // years for regrowth to be counted old growth, about
+};
+
+// How the planet's plants grow, burn and die.
 struct Vegetation {
     GrowthConfig growth{};
     FireConfig fire{};
+    DyingConfig dying{};
 };
 
 // Reads vegetation from TOML, where missing keys keep their defaults:
@@ -57,6 +70,14 @@ struct Vegetation {
 //     cold = 0
 //     warm = 15
 //     wet = 0.5
+//
+//     [dying]
+//     days = 120
+//     tolerance = 0.3
+//     worst = 0.6
+//     years = 2
+//     standing = 12
+//     maturing = 80
 //
 //     [fire]
 //     damp = 0.5

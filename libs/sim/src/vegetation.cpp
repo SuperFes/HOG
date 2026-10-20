@@ -48,13 +48,27 @@ void parse_fire(Table fire, FireConfig& config) {
     fire.number("out", positive, 1.0, config.out);
 }
 
+void parse_dying(Table dying, DyingConfig& config) {
+    dying.only({"days"sv, "tolerance"sv, "worst"sv, "years"sv, "standing"sv, "maturing"sv});
+    dying.number("days", positive, 1e5, config.days);
+    dying.number("tolerance", 0.0, 1.0, config.tolerance);
+    if (config.tolerance >= 1.0) {
+        dying.fail(std::format("{} must be below 1", dying.where("tolerance")));
+    }
+    dying.number("worst", 0.0, 1.0, config.worst);
+    dying.number("years", positive, 1e4, config.years);
+    dying.number("standing", positive, 1e4, config.standing);
+    dying.number("maturing", positive, 1e4, config.maturing);
+}
+
 Result<Vegetation> parse(const toml::table& root) {
     std::optional<Error> error;
     Table top{&root, "vegetation", &error};
-    top.only({"growth"sv, "fire"sv});
+    top.only({"growth"sv, "fire"sv, "dying"sv});
     Vegetation vegetation;
     parse_growth(Table{top.table("growth"), "growth", &error}, vegetation.growth);
     parse_fire(Table{top.table("fire"), "fire", &error}, vegetation.fire);
+    parse_dying(Table{top.table("dying"), "dying", &error}, vegetation.dying);
     if (error) {
         return std::unexpected(std::move(*error));
     }

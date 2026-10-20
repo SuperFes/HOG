@@ -48,6 +48,10 @@ struct ForestConditions {
     double rain_days = 1.0;
     std::span<const float> storm; // thunderstorm strength now, 0 to 1
     std::span<const Vec2> wind;   // (east, north) m/s at the surface
+    // mm stored below the soil, and its running mean; both empty where it isn't known, and then
+    // nothing dies of drought.
+    std::span<const double> groundwater;
+    std::span<const double> usual_groundwater;
 };
 
 // Precondition: the weather's grid has the forest's level.
@@ -57,6 +61,16 @@ struct ForestFields {
     std::vector<float> biomass; // kg per m² of living plants
     std::vector<float> dryness; // of the ground at the last step, 0 (wet) to 1 (parched)
     std::vector<float> fire;    // share of the cell burning, 0 to 1
+    // The fates of what each cell holds, each a share of it as the living share (biomass over
+    // capacity) is: the living since before their last loss, at most all the living; the living
+    // dying back; the dead still standing; and of those, the share burned.
+    std::vector<float> established;
+    std::vector<float> failing;
+    std::vector<float> dead;
+    std::vector<float> charred;
+    // How far the ground water has fallen below its usual level, as a share of it, felt as a
+    // running mean.
+    std::vector<float> shortfall;
 
     friend bool operator==(const ForestFields&, const ForestFields&) = default;
 };
@@ -83,6 +97,9 @@ enum class Stage : std::uint8_t { Bare, Grass, Shrub, Young, Mature };
 // fast as the warmth and the wetness of the ground allow. Lightning sets dry fuel alight, and
 // fire spreads to neighbours that will burn, most readily downwind; it burns its cell's plants
 // down to the seeds they grow back from, and goes out as the fuel runs low or the rain puts it out.
+// Where the ground water stays well below its usual level, the plants die back to what it can
+// keep. What dies stands dead, burned or not, until it falls; what grows back takes generations
+// to be old growth again.
 class Forest {
 public:
     // Fully grown, as of the last step at or before `now`. Precondition: soil for every cell at
@@ -98,6 +115,10 @@ public:
     // kg per m² the cell's biome holds fully grown.
     [[nodiscard]] double capacity(std::uint32_t cell) const;
     [[nodiscard]] Stage stage(std::uint32_t cell) const;
+    // Of what the cell holds, the share living: 1 where it holds nothing.
+    [[nodiscard]] double living(std::uint32_t cell) const;
+    // Of what the cell holds, the share the ground water can keep alive now.
+    [[nodiscard]] double sustainable(std::uint32_t cell) const;
     // How readily the cell burns as it stands, 0 to 1, from its dryness and fuel.
     [[nodiscard]] double flammability(std::uint32_t cell) const;
     // When the last step was taken, and when the next is due.
@@ -124,7 +145,7 @@ public:
     // newer version, and InvalidArgument for a forest saved at another grid level.
     [[nodiscard]] Result<void> load(std::uint16_t version, std::span<const std::byte> bytes);
 
-    static constexpr std::uint16_t save_version = 1;
+    static constexpr std::uint16_t save_version = 2;
 
 private:
     // How a cell catches fire on a step.
@@ -137,6 +158,11 @@ private:
                                     double days, std::uint64_t step_number) const;
     // Burns or grows the cell's plants over the step.
     void tend(std::uint32_t cell, const ForestConditions& conditions, double days);
+    // Feels the cell's ground water against its usual level.
+    void feel(std::uint32_t cell, const ForestConditions& conditions, double days);
+    // Keeps the cell's fates as its living share went from `before` to `after` over the step,
+    // what was lost burned or not.
+    void settle(std::uint32_t cell, double before, double after, bool burned, double days);
 
     ForestConfig config_;
     CellGrid grid_;
