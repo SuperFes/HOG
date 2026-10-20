@@ -1,4 +1,5 @@
 add_library(hog_flora
+    src/fates.cpp
     src/mesh.cpp
     src/skeleton.cpp
     src/season.cpp

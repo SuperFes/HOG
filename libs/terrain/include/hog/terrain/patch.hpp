@@ -1,6 +1,7 @@
 #pragma once
 
 #include <hog/core/math.hpp>
+#include <hog/flora/fates.hpp>
 #include <hog/flora/stand.hpp>
 #include <hog/planet/cell_id.hpp>
 #include <hog/planet/climate.hpp>
@@ -109,8 +110,10 @@ struct Patch {
     std::vector<PatchVertex> vertices;
 };
 
-// The ground of a cell at most max_patch_level deep, changes and digging included.
-[[nodiscard]] Patch bake_patch(const planet::World& world, planet::CellId cell);
+// The ground of a cell at most max_patch_level deep, changes and digging included, its woods
+// faring as `fates` have them.
+[[nodiscard]] Patch bake_patch(const planet::World& world, planet::CellId cell,
+                               const flora::Fates& fates = flora::Fates{});
 
 // Whether a change to a cell can alter a patch's bake: whether it overlaps the patch or a cell
 // beside it, which the border and far edges sample. A change anywhere in a cell beside it counts,

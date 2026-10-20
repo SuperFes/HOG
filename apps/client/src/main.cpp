@@ -527,6 +527,9 @@ public:
     }
 
     // The newest weather the server sent since last asked.
+    [[nodiscard]] std::optional<protocol::Woodlands> take_woodlands() noexcept {
+        return session_ ? session_->take_woodlands() : std::nullopt;
+    }
     [[nodiscard]] std::optional<protocol::Weather> take_weather() noexcept {
         return session_ ? session_->take_weather() : std::nullopt;
     }
@@ -789,6 +792,9 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
         shaders.look(device, now);
         take_part(controls, player, flight, camera, world);
         report(connection, player, forecast, chat, options.chat_filter, now);
+        if (const auto woodlands = connection.take_woodlands()) {
+            scene.fare(*woodlands);
+        }
         camera = move(controls, player, flight, world, seconds);
         const double ground_height = client::ground_under(world, camera.eye);
         for (; controls.faster_time > 0; --controls.faster_time) {

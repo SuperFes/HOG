@@ -2,6 +2,7 @@
 
 #include <hog/client/ground.hpp>
 #include <hog/core/result.hpp>
+#include <hog/flora/fates.hpp>
 #include <hog/planet/cell_id.hpp>
 #include <hog/planet/world.hpp>
 #include <hog/render/anchors.hpp>
@@ -10,6 +11,7 @@
 #include <array>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <span>
 #include <vector>
 
@@ -31,11 +33,13 @@ struct TileTrees {
     std::array<std::uint32_t, tile_blocks + 1> starts{};
 };
 
-// The tile's trees, each sampled from the world at its own spot, relative to `origin`: the one
-// placement, for the server to share one day. Pure, and deterministic for a fixed world. Foliage
-// takes its colour from its biome's ground colour.
+// The tile's trees, each sampled from the world at its own spot, relative to `origin`, faring as
+// `fates` have their woods: the one placement, for the server to share one day. Pure, and
+// deterministic for a fixed world and fates. Foliage takes its colour from its biome's ground
+// colour.
 [[nodiscard]] TileTrees tile_anchors(const planet::World& world, planet::CellId tile,
-                                     WorldPosition origin, const BiomePalette& ground);
+                                     WorldPosition origin, const BiomePalette& ground,
+                                     const flora::Fates& fates = flora::Fates{});
 
 // What the eye can see: a cone round its forward, wide enough to hold the picture's corners.
 struct Sight {
@@ -77,6 +81,10 @@ public:
     // update.
     void changed(render::AnchorPool& pool, planet::CellId cell);
 
+    // The woods fare as `fates` have them from now on. The tiles over the cells whose fates
+    // changed are built again by the updates to come, drawn as they were until then.
+    void fare(std::shared_ptr<const flora::Fates> fates, std::span<const planet::CellId> changed);
+
     // The held tiles in sight as whole-tile draws, for the stamps.
     [[nodiscard]] std::vector<render::StandDraw> draws(const Sight& sight) const;
 
@@ -104,11 +112,13 @@ private:
         // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
         WorldPosition origin = {};
         std::array<Block, tile_blocks> blocks{};
+        bool stale = false; // its woods' fates changed since it was built
     };
 
     static Tile held_tile(std::uint32_t slot, WorldPosition origin, const TileTrees& trees);
 
     std::array<Vec3, planet::biome_count> needles_{};
+    std::shared_ptr<const flora::Fates> fates_ = std::make_shared<const flora::Fates>();
     std::map<planet::CellId, Tile> tiles_;
     bool settled_ = false;
 };

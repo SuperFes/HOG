@@ -5,6 +5,7 @@
 #include <hog/client/forecast.hpp>
 #include <hog/client/ground.hpp>
 #include <hog/client/picture.hpp>
+#include <hog/client/woodlands.hpp>
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
 #include <hog/core/time.hpp>
@@ -107,6 +108,10 @@ public:
     // Waits for the bakes in flight, so they arrive with the next frame.
     void finish_bakes();
 
+    // Takes the server's word of how the woods fare: the trees and far woods over the cells it
+    // changed are grown again, drawn as they were until then.
+    void fare(const protocol::Woodlands& told);
+
     // The last frame recorded wanted nothing more baked, and all it wanted had arrived.
     [[nodiscard]] bool settled() const noexcept { return settled_; }
     // How long the GPU took over the passes of the last frame recorded in the slot before, as
@@ -158,6 +163,7 @@ private:
     render::TerrainPool pool_;
     render::AnchorPool anchor_pool_;
     TreeAnchors anchors_;
+    Woodlands woodlands_;
     GroundSlots slots_;
     render::TransientImages transients_;
     render::Capsules others_;

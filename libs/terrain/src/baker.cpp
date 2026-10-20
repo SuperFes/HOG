@@ -8,8 +8,10 @@
 namespace hog::terrain {
 
 void PatchBaker::start(planet::CellId cell) {
-    baking_.push_back(std::make_unique<jobs::Async<Patch>>(
-        *jobs_, [world = world_, cell] { return bake_patch(*world, cell); }));
+    baking_.push_back(
+        std::make_unique<jobs::Async<Patch>>(*jobs_, [world = world_, cell, fates = fates_] {
+            return bake_patch(*world, cell, *fates);
+        }));
 }
 
 std::vector<Patch> PatchBaker::collect() {

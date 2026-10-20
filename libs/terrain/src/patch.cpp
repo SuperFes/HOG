@@ -36,14 +36,19 @@ constexpr double skirt_spacings = patch_cells / 4.0;
     return static_cast<std::uint8_t>(std::lround(std::clamp(value, 0.0, 1.0) * 255.0));
 }
 
-// The woods about a lattice corner on `biome` ground in `habitat`, `point` being where it lies.
+// The woods about a lattice corner on `biome` ground in `habitat`, faring as `fates` have them
+// there, `point` being where it lies.
 [[nodiscard]] Woods woods_at(Corner at, DVec3 point, planet::Biome biome,
-                             const flora::Habitat& habitat) {
+                             const flora::Habitat& habitat, const flora::Fates& fates) {
     const int finer = flora::lattice_level - at.level;
     const Vec2 cell{static_cast<float>(std::ldexp(static_cast<double>(at.i), finer)),
                     static_cast<float>(std::ldexp(static_cast<double>(at.j), finer))};
+    const auto face = static_cast<std::uint32_t>(at.face);
+    const auto side = static_cast<double>(side_of(at.level));
     const flora::Woodland woodland =
-        flora::woodland_at(cell, static_cast<std::uint32_t>(at.face), biome, habitat);
+        flora::woodland_at(cell, face, biome,
+                           flora::fared(habitat, fates.at(face, static_cast<double>(at.i) / side,
+                                                          static_cast<double>(at.j) / side)));
     if (woodland.grown <= 0.0F) {
         return {};
     }
@@ -113,7 +118,7 @@ planet::CellId sample_cell(Corner corner) {
     return planet::CellId::from_face_ij(at.face, leaf(at.i), leaf(at.j), planet::max_level);
 }
 
-Patch bake_patch(const planet::World& world, planet::CellId cell) {
+Patch bake_patch(const planet::World& world, planet::CellId cell, const flora::Fates& fates) {
     HOG_ASSERT(cell.is_valid() && cell.level() <= max_patch_level, "patch level out of range");
     const planet::FaceIJ at = cell.to_face_ij();
     const int level = at.level + patch_depth;
@@ -149,7 +154,7 @@ Patch bake_patch(const planet::World& world, planet::CellId cell) {
             if (inside(i) && inside(j)) {
                 biomes[index(i, j)] = state.biome;
                 woods[index(i, j)] = woods_at(canonical(corner), points[bordered_index(i, j)],
-                                              state.biome, flora::habitat_of(state));
+                                              state.biome, flora::habitat_of(state), fates);
                 heights.lowest = std::min(heights.lowest, height);
                 heights.highest = std::max(heights.highest, height);
             }

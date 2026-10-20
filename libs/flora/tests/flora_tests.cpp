@@ -1,3 +1,4 @@
+#include <hog/flora/fates.hpp>
 #include <hog/flora/mesh.hpp>
 #include <hog/flora/skeleton.hpp>
 #include <hog/flora/species.hpp>
@@ -973,4 +974,50 @@ TEST_CASE("woodland far off holds the trees grown there: as many, as tall, of th
             CHECK(std::abs((maple / broad) - (maples / broadleaves)) < 0.04);
         }
     }
+}
+
+TEST_CASE("the woods' fates are read between the cells' middles, held at a face's edges",
+          "[flora]") {
+    using hog::flora::Fate;
+    using hog::flora::Fates;
+    // Untouched where nothing was told.
+    CHECK(Fates{}.at(3, 0.3, 0.8) == Fate{});
+    CHECK(Fates{}.untouched());
+
+    // Level 1: two cells a side, each face's cells their own.
+    std::vector<Fate> cells(24);
+    for (std::uint32_t index = 0; index < cells.size(); ++index) {
+        cells[index] = {.living = static_cast<float>(index) / 32.0F,
+                        .established = static_cast<float>(index) / 64.0F,
+                        .failing = 0.0F,
+                        .dead = 1.0F - (static_cast<float>(index) / 32.0F),
+                        .charred = 0.5F};
+    }
+    const Fates fates{1, cells};
+    CHECK(fates.level() == 1);
+    CHECK(fates.size() == 24);
+    // Face 2's cells: (0,0) is 8, (1,0) 9, (0,1) 10, (1,1) 11. Each its own at its middle.
+    CHECK(fates.at(2, 0.25, 0.25) == cells[8]);
+    CHECK(fates.at(2, 0.75, 0.75) == cells[11]);
+    // Halfway between two, half of each; at the face's edges and corners, the cell there.
+    CHECK(fates.at(2, 0.5, 0.25).living == (cells[8].living + cells[9].living) / 2.0F);
+    CHECK(fates.at(2, 0.5, 0.5).living ==
+          (cells[8].living + cells[9].living + cells[10].living + cells[11].living) / 4.0F);
+    CHECK(fates.at(2, 0.0, 0.0) == cells[8]);
+    CHECK(fates.at(2, 1.0, 0.1) == cells[9]);
+    CHECK(fates.at(2, 0.9, 1.0) == cells[11]);
+    // Read between, the shares keep their order: never more established or dead than they can be.
+    for (double s = 0.0; s <= 1.0; s += 0.0625) {
+        for (double t = 0.0; t <= 1.0; t += 0.0625) {
+            const Fate fate = fates.at(4, s, t);
+            CHECK(fate.established <= fate.living);
+            CHECK(fate.living + fate.dead <= 1.0F + 1e-6F);
+        }
+    }
+    // Taken into a habitat, its climate kept.
+    const hog::flora::Habitat fared = hog::flora::fared(temperate, cells[5]);
+    CHECK(fared.temperature == temperate.temperature);
+    CHECK(fared.living == cells[5].living);
+    CHECK(fared.dead == cells[5].dead);
+    CHECK(fared.charred == 0.5F);
 }

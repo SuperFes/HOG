@@ -88,7 +88,8 @@ std::set<planet::CellId> tiles_wanted(WorldPosition eye, double radius, double s
 // The tree a lattice cell stands, if any, sampled from the world at its own spot.
 std::optional<render::TreeAnchor> anchor_at(const planet::World& world, std::uint32_t face,
                                             std::uint32_t i, std::uint32_t j, WorldPosition origin,
-                                            const BiomePalette& palette) {
+                                            const BiomePalette& palette,
+                                            const flora::Fates& fates) {
     const double radius = world.geology().planet_radius();
     const auto across = static_cast<double>(std::uint32_t{1} << render::tree_lattice_level);
     // The normal leans over the hillside around the spot, half a lattice cell each way: a tree
@@ -98,8 +99,8 @@ std::optional<render::TreeAnchor> anchor_at(const planet::World& world, std::uin
     const double s = (static_cast<double>(i) + static_cast<double>(spot.x)) / across;
     const double t = (static_cast<double>(j) + static_cast<double>(spot.y)) / across;
     const Ground ground = ground_at(world, face, s, t);
-    const std::optional<flora::Stood> stood =
-        flora::tree_grown(i, j, face, ground.biome, ground.habitat);
+    const std::optional<flora::Stood> stood = flora::tree_grown(
+        i, j, face, ground.biome, flora::fared(ground.habitat, fates.at(face, s, t)));
     if (!stood || ground.elevation < shore) {
         return std::nullopt;
     }
@@ -133,7 +134,7 @@ std::optional<render::TreeAnchor> anchor_at(const planet::World& world, std::uin
 } // namespace
 
 TileTrees tile_anchors(const planet::World& world, planet::CellId tile, WorldPosition origin,
-                       const BiomePalette& ground) {
+                       const BiomePalette& ground, const flora::Fates& fates) {
     TileTrees trees;
     const planet::FaceIJ at = tile.to_face_ij();
     for (std::uint32_t block = 0; block < tile_blocks; ++block) {
@@ -142,10 +143,10 @@ TileTrees tile_anchors(const planet::World& world, planet::CellId tile, WorldPos
         const std::uint32_t block_b = (block % blocks_across) * block_side;
         for (std::uint32_t a = block_a; a < block_a + block_side; ++a) {
             for (std::uint32_t b = block_b; b < block_b + block_side; ++b) {
-                const std::optional<render::TreeAnchor> anchor =
-                    anchor_at(world, static_cast<std::uint32_t>(at.face),
-                              (static_cast<std::uint32_t>(at.i) * tile_side) + a,
-                              (static_cast<std::uint32_t>(at.j) * tile_side) + b, origin, ground);
+                const std::optional<render::TreeAnchor> anchor = anchor_at(
+                    world, static_cast<std::uint32_t>(at.face),
+                    (static_cast<std::uint32_t>(at.i) * tile_side) + a,
+                    (static_cast<std::uint32_t>(at.j) * tile_side) + b, origin, ground, fates);
                 if (anchor) {
                     trees.anchors.push_back(*anchor);
                 }
@@ -214,10 +215,12 @@ Result<> TreeAnchors::update(render::AnchorPool& pool, std::uint32_t frame,
         }
     }
 
-    // The missing tiles, built nearest first, a few a call.
+    // The missing tiles, and those whose woods changed, built nearest first, a few a call. Those
+    // changed are built again into their own slots, drawn as they were until then.
     std::vector<std::pair<double, planet::CellId>> missing;
     for (const planet::CellId cell : wanted) {
-        if (!tiles_.contains(cell)) {
+        const auto held = tiles_.find(cell);
+        if (held == tiles_.end() || held->second.stale) {
             const WorldPosition origin{planet::cell_center(cell) * radius};
             missing.emplace_back(distance_to(eye, origin, span), cell);
         }
@@ -229,19 +232,23 @@ Result<> TreeAnchors::update(render::AnchorPool& pool, std::uint32_t frame,
         if (built >= builds) {
             break;
         }
-        const std::optional<std::uint32_t> slot = pool.acquire();
+        const auto held = tiles_.find(cell);
+        const std::optional<std::uint32_t> slot =
+            held != tiles_.end() ? std::optional{held->second.slot} : pool.acquire();
         if (!slot) {
             // The pool is full: nothing more can be built, so nothing more is waited for.
             settled_ = true;
             break;
         }
         const WorldPosition origin{planet::cell_center(cell) * radius};
-        const TileTrees trees = tile_anchors(world, cell, origin, needles_);
+        const TileTrees trees = tile_anchors(world, cell, origin, needles_, *fates_);
         if (auto staged = pool.stage(frame, *slot, trees.anchors); !staged) {
-            pool.release(*slot);
+            if (held == tiles_.end()) {
+                pool.release(*slot);
+            }
             return staged;
         }
-        tiles_.emplace(cell, held_tile(*slot, origin, trees));
+        tiles_.insert_or_assign(cell, held_tile(*slot, origin, trees));
         ++built;
     }
     return {};
@@ -258,6 +265,17 @@ void TreeAnchors::changed(render::AnchorPool& pool, planet::CellId cell) {
         } else {
             ++held;
         }
+    }
+}
+
+void TreeAnchors::fare(std::shared_ptr<const flora::Fates> fates,
+                       std::span<const planet::CellId> changed) {
+    fates_ = std::move(fates);
+    for (auto& [tile, held] : tiles_) {
+        held.stale = held.stale || std::ranges::any_of(changed, [&](planet::CellId cell) {
+                         return tile.level() <= cell.level() ? cell.parent(tile.level()) == tile
+                                                             : tile.parent(cell.level()) == cell;
+                     });
     }
 }
 

@@ -409,3 +409,36 @@ TEST_CASE("a patch carries the woods flora stands about each of its vertices", "
     CHECK(wooded > 0);
     CHECK(bare > 0);
 }
+
+TEST_CASE("a patch's woods thin where they died, and grow back younger", "[terrain][patch]") {
+    const World& world = shared_world();
+    const CellId cell = land_patch();
+    const Patch untouched = bake_patch(world, cell);
+    // Three in ten of the woods alive everywhere, most of those grown back since a loss.
+    const hog::flora::Fates thinned{
+        2, std::vector<hog::flora::Fate>(
+               6 * 16, {.living = 0.3F, .established = 0.05F, .dead = 0.5F, .charred = 1.0F})};
+    const Patch burned = bake_patch(world, cell, thinned);
+    int wooded = 0;
+    for (std::size_t at = 0; at < untouched.vertices.size(); ++at) {
+        const hog::terrain::Woods& before = untouched.vertices[at].woods;
+        const hog::terrain::Woods& after = burned.vertices[at].woods;
+        if (before[0] < 40) {
+            continue;
+        }
+        ++wooded;
+        INFO("vertex " << at);
+        CHECK(std::abs(int{after[0]} - static_cast<int>(std::lround(0.3 * before[0]))) <= 1);
+        CHECK(after[1] < before[1]);
+        // The kinds the same.
+        CHECK(after[2] == before[2]);
+        CHECK(after[4] == before[4]);
+    }
+    CHECK(wooded > 0);
+    // Untouched fates bake as no fates at all.
+    const Patch told =
+        bake_patch(world, cell, hog::flora::Fates{2, std::vector<hog::flora::Fate>(96)});
+    for (std::size_t at = 0; at < told.vertices.size(); ++at) {
+        CHECK(told.vertices[at].woods == untouched.vertices[at].woods);
+    }
+}

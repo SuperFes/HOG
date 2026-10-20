@@ -2,6 +2,7 @@
 
 #include <hog/client/anchors.hpp>
 #include <hog/client/scene.hpp>
+#include <hog/flora/fates.hpp>
 #include <hog/flora/species.hpp>
 #include <hog/flora/stand.hpp>
 #include <hog/planet/projection.hpp>
@@ -10,8 +11,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <test_device.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstring>
+#include <memory>
 #include <numbers>
 #include <optional>
 #include <vector>
@@ -31,8 +34,8 @@ hog::WorldPosition islands_centre() {
     return hog::WorldPosition{islands.islands().front().center * radius};
 }
 
-// A nearby tile that anchors trees, walking outward from the islands' middle.
-hog::planet::CellId wooded_tile(const hog::client::BiomePalette& palette) {
+// A nearby tile that anchors at least `least` trees, walking outward from the islands' middle.
+hog::planet::CellId wooded_tile(const hog::client::BiomePalette& palette, std::size_t least = 1) {
     const double radius = world().geology().planet_radius();
     const hog::planet::CellId middle = hog::planet::cell_at(islands_centre(), anchor_tile_level);
     const hog::planet::FaceIJ at = middle.to_face_ij();
@@ -42,7 +45,7 @@ hog::planet::CellId wooded_tile(const hog::client::BiomePalette& palette) {
                 const hog::planet::CellId tile =
                     hog::planet::CellId::from_face_ij(at.face, i, j, anchor_tile_level);
                 const hog::WorldPosition origin{hog::planet::cell_center(tile) * radius};
-                if (!tile_anchors(world(), tile, origin, palette).anchors.empty()) {
+                if (tile_anchors(world(), tile, origin, palette).anchors.size() >= least) {
                     return tile;
                 }
             }
@@ -261,4 +264,74 @@ TEST_CASE("a frame's tree count sums its draws", "[client][anchors]") {
                                                     {.slot = 3, .first = 16, .count = 5}};
     CHECK(hog::client::anchors_in(draws) == 17);
     CHECK(hog::client::anchors_in({}) == 0);
+}
+
+TEST_CASE("burned woods anchor as charred snags over their own spots, untouched woods as ever",
+          "[client][anchors]") {
+    const hog::client::BiomePalette palette = hog::client::biome_palette();
+    const double radius = world().geology().planet_radius();
+    const hog::planet::CellId tile = wooded_tile(palette, 40);
+    const hog::WorldPosition origin{hog::planet::cell_center(tile) * radius};
+    const std::vector<TreeAnchor> untouched = tile_anchors(world(), tile, origin, palette).anchors;
+    // Told untouched, the same trees bit for bit.
+    const hog::flora::Fates told{2, std::vector<hog::flora::Fate>(96)};
+    const std::vector<TreeAnchor> same = tile_anchors(world(), tile, origin, palette, told).anchors;
+    REQUIRE(same.size() == untouched.size());
+    CHECK(std::memcmp(same.data(), untouched.data(), same.size() * sizeof(TreeAnchor)) == 0);
+
+    // Burned everywhere: a few survivors, scorched, among the charred dead.
+    const hog::flora::Fates burned{
+        2, std::vector<hog::flora::Fate>(
+               96, {.living = 0.05F, .established = 0.05F, .dead = 0.9F, .charred = 1.0F})};
+    const std::vector<TreeAnchor> black =
+        tile_anchors(world(), tile, origin, palette, burned).anchors;
+    REQUIRE(!black.empty());
+    CHECK(black.size() <= untouched.size());
+    std::size_t charred = 0;
+    for (const TreeAnchor& anchor : black) {
+        const hog::flora::Condition condition = hog::render::condition_of(anchor.colour);
+        charred += condition == hog::flora::Condition::Charred ? 1U : 0U;
+        CHECK(condition != hog::flora::Condition::Sound);
+        // Each stands where an untouched tree stands.
+        CHECK(std::ranges::any_of(untouched, [&](const TreeAnchor& tree) {
+            return tree.hash == anchor.hash && tree.position == anchor.position;
+        }));
+    }
+    CHECK(charred > black.size() / 2);
+}
+
+TEST_CASE("a tile whose woods changed is built again in its own slot, drawn until then",
+          "[client][anchors][gpu]") {
+    const auto device = test_device();
+    auto pool = hog::render::AnchorPool::create(*device, {.tiles = 64, .frames = 1, .uploads = 64});
+    REQUIRE(pool);
+    const hog::client::BiomePalette palette = hog::client::biome_palette();
+    const double radius = world().geology().planet_radius();
+    const hog::planet::CellId tile = wooded_tile(palette);
+    const hog::DVec3 up = hog::planet::cell_center(tile);
+    const double ground = hog::client::ground_under(world(), hog::WorldPosition{up * radius});
+    const hog::WorldPosition standing{up * (radius + ground + 2.0)};
+    hog::client::TreeAnchors anchors{palette};
+    // Settled once an update finds nothing left to build.
+    REQUIRE(anchors.update(*pool, 0, world(), standing, 300.0, 64));
+    REQUIRE(anchors.update(*pool, 0, world(), standing, 300.0, 64));
+    REQUIRE(anchors.settled());
+    const std::size_t tiles = anchors.size();
+    const std::uint32_t free = pool->free_slots();
+    const std::size_t before = hog::client::anchors_in(anchors.draws({.eye = standing}));
+
+    // Burned over the eye's tile: still drawn as it was, then built again in place.
+    const auto burned = std::make_shared<const hog::flora::Fates>(
+        2, std::vector<hog::flora::Fate>(
+               96, {.living = 0.05F, .established = 0.05F, .dead = 0.0F, .charred = 0.0F}));
+    const std::vector<hog::planet::CellId> changed{tile.parent(2)};
+    anchors.fare(burned, changed);
+    CHECK(hog::client::anchors_in(anchors.draws({.eye = standing})) == before);
+    REQUIRE(anchors.update(*pool, 0, world(), standing, 300.0, 64));
+    CHECK_FALSE(anchors.settled());
+    REQUIRE(anchors.update(*pool, 0, world(), standing, 300.0, 64));
+    CHECK(anchors.settled());
+    CHECK(anchors.size() == tiles);
+    CHECK(pool->free_slots() == free);
+    CHECK(hog::client::anchors_in(anchors.draws({.eye = standing})) < before / 4);
 }

@@ -206,6 +206,19 @@ void Scene::finish_bakes() {
     }
 }
 
+void Scene::fare(const protocol::Woodlands& told) {
+    const std::vector<planet::CellId> changed = woodlands_.receive(told);
+    if (changed.empty()) {
+        return;
+    }
+    anchors_.fare(woodlands_.fates(), changed);
+    // Bakes in flight read the fates they started with, and are dropped as stale on arrival.
+    baker_.fates(woodlands_.fates());
+    for (const planet::CellId cell : changed) {
+        stream_.changed(cell);
+    }
+}
+
 render::SkyView Scene::sky_view(const Shot& shot, render::CloudShade shade) {
     const DVec3 sun = calendar_.sun_direction(shot.time);
     const EyeLight light =
