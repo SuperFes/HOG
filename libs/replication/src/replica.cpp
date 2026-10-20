@@ -27,7 +27,7 @@ Result<bool> Replica::receive(const protocol::Snapshot& snapshot) {
         }
         baseline = &found->second;
     }
-    auto states = apply(*baseline, snapshot);
+    auto states = replication::apply(*baseline, snapshot);
     if (!states) {
         return std::unexpected(std::move(states.error()));
     }

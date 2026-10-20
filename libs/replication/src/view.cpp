@@ -101,7 +101,7 @@ protocol::Snapshot View::next(std::span<const Nearby> nearby) {
     std::ranges::sort(snapshot.entered, {}, &protocol::Entered::id);
     std::ranges::sort(snapshot.changed, {}, &protocol::Changed::id);
 
-    auto holding = apply(*baseline, snapshot);
+    auto holding = replication::apply(*baseline, snapshot);
     HOG_ASSERT(holding.has_value(), "a view's snapshot must apply to its own baseline");
     tick_ = snapshot.tick;
     sent_.emplace_back(tick_, std::move(*holding));

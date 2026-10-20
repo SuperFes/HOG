@@ -302,11 +302,11 @@ TEST_CASE("weather too fine is refused", "[protocol]") {
 TEST_CASE("woodlands are sent to a 255th of a share, clamped to a byte", "[protocol]") {
     const CellWoodland sent = as_sent(
         {.living = 0.6F, .established = 0.123F, .failing = 0.05F, .dead = 0.33F, .charred = 0.9F});
-    for (const auto [given, back] : {std::pair{0.6F, sent.living},
-                                     {0.123F, sent.established},
-                                     {0.05F, sent.failing},
-                                     {0.33F, sent.dead},
-                                     {0.9F, sent.charred}}) {
+    for (const auto& [given, back] : {std::pair{0.6F, sent.living},
+                                      {0.123F, sent.established},
+                                      {0.05F, sent.failing},
+                                      {0.33F, sent.dead},
+                                      {0.9F, sent.charred}}) {
         CHECK_THAT(back, Catch::Matchers::WithinAbs(static_cast<double>(given), 0.51 / 255.0));
     }
     const float nan = std::numeric_limits<float>::quiet_NaN();

@@ -61,7 +61,7 @@ constexpr double skirt_spacings = patch_cells / 4.0;
 
 Woods packed_woods(const flora::Woodland& woodland, double cell_area) noexcept {
     const double crowding = 100.0 * static_cast<double>(woodland.grown) / cell_area;
-    return {byte_of(crowding / double{woods_crowding}),
+    return {byte_of(crowding / static_cast<double>(woods_crowding)),
             byte_of(static_cast<double>(woodland.height / woods_tallest)),
             byte_of(static_cast<double>(woodland.broadleaf)),
             byte_of(static_cast<double>(woodland.maple)),

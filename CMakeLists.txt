@@ -125,6 +125,8 @@ CPMAddPackage(
     SYSTEM YES
     OPTIONS "BUILD_STATIC_LIB ON" "BUILD_SHARED_LIB OFF" "ENABLE_ICE OFF"
             "USE_CRYPTO ${hog_gns_crypto}")
+# Its debug builds otherwise reach for libstdc++'s <debug/map>, which libc++ doesn't have.
+target_compile_definitions(GameNetworkingSockets_s PRIVATE STEAMNETWORKINGSOCKETS_SNP_PARANOIA=1)
 
 # Ed25519 for connect tokens; BSD-2-Clause or CC0. Two C files, built by hog_login.
 CPMAddPackage(
