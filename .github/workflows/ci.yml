@@ -1,9 +1,10 @@
 name: CI
 
-# Runs on release tags (v*) and by hand (gh workflow run ci.yml), not every push: each change passes
-# the same builds, tests, tidy and format locally first, and these platforms are checked per release.
+# Runs on every push to main, on release tags (v*) and by hand (gh workflow run ci.yml). Each push
+# passes its own tests and the debug suite locally; this catches the rest, on every platform.
 on:
   push:
+    branches: [main]
     tags: ['v*']
   workflow_dispatch:
 
