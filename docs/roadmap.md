@@ -268,8 +268,9 @@ This phase covers the planet in procedurally generated plant life, grown from pe
 - [x] Placement from the sim: biome, forest biomass, moisture and the water table decide what grows where and how densely (each kind's niche in warmth and the ground's wetness, the water table wetting dry ground within the roots' reach; the forest sim's living, regrown, failing and standing dead shares per cell sent to players as woodlands and read between cells by every tree and the far woods, rebuilt in place as they change)
 - [x] Deterministic per-cell scatter, so every client grows the same world with nothing sent over the network (grass by patch seed, bushes keyed to a fixed lattice that holds across terrain levels; trees as anchors sampled from the world itself on the CPU — one placement in libs/flora, bound to the ground at every terrain level, ready for the server to own as it owns the clouds)
 - [ ] Placement reads the change store over the seed, so planted and cleared ground diverges — the hook farming (Phase 7) builds on (the tree anchors already rebuild their tiles on a changed cell)
-- [ ] Succession on burned or emptied cells from the forest sim's history: pioneer grass, then shrubs, then young forest among the burned trunks (young forest among the burned trunks done: trees come back young in the spots above the old growth, taking generations to be old growth again; pioneer grass and shrubs still to come)
-- [ ] A burned-in-the-past, regrowing forest somewhere on the starting islands to prove it
+- [x] Succession on burned or emptied cells from the forest sim's history: pioneer grass, then shrubs, then young forest among the burned trunks (the fire's black fades over a year or two; grass takes the ground where the trees are gone, shrubs where the dead have fallen, and the regrowth stands as many small stems, taking generations to be old growth)
+- [ ] Seeds carried by birds and animals: burns heal inward from their living edges, faster where seed-eaters are plentiful, the light-seeded pioneers (birch, pine, berry shrubs) back first and the oaks last
+- [x] A burned-in-the-past, regrowing forest somewhere on the starting islands to prove it (the dev server's new worlds begin with the first island burned eight years before)
 
 **Life cycle and spread**
 
@@ -407,6 +408,9 @@ These tracks can start once Phase 4 works and can run side by side; four people 
 - [x] Volumetric clouds that fill the sky's volume and can be flown through (raymarched, likely at reduced resolution)
 - [x] Weather-driven visibility: haze as the air nears forming cloud, and fog lying in the low ground
 - [x] Rain and snow seen from afar, falling in veils from the cloud base to the ground
+- [ ] Showers within a weather cell: heavier cores and lighter gaps drifting with the wind, lumpier under storms, the same on every client, so a 6 km cell's mean rate becomes passing downpours and drizzle rather than one even rain
+- [ ] Heavy rain looks heavy: bigger, faster drops and longer streaks, visibility closing in, and splashes on the ground, past today's cap of about 14 mm/h of drops
+- [ ] The live weather's rain agrees with the planet's climate map, so biomes get the rain they were placed for (some forest cells now get little rain and dry out over the first years)
 - [ ] Ground materials with roughness and wetness, wet where weather reaches and dry where it's sheltered (mud, rain on rocks)
 - [ ] Art direction pass once the references are chosen
 
