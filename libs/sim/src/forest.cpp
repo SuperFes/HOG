@@ -330,10 +330,13 @@ void Forest::feel(std::uint32_t cell, const ForestConditions& conditions, double
     const double toward = 1.0 - std::exp(-days / config_.vegetation.dying.days);
     shortfall = static_cast<float>(static_cast<double>(shortfall) +
                                    ((felt - static_cast<double>(shortfall)) * toward));
-    // Learning, they take the worst seen as usual; after, they grow used to worse only slowly.
+    // Learning, they take the worst of about the last year as usual, so what the ground water did
+    // as a new world settled is forgotten; after, they grow used to worse only slowly.
     float& accustomed = fields_.accustomed[cell];
     if (time_ < learning_until_) {
-        accustomed = std::max(accustomed, shortfall);
+        const double forgetting = 1.0 - std::exp(-days / days_per_year);
+        accustomed = std::max(
+            shortfall, static_cast<float>(static_cast<double>(accustomed) * (1.0 - forgetting)));
     } else if (shortfall > accustomed) {
         const double adapting =
             1.0 - std::exp(-days / (config_.vegetation.dying.adapting * days_per_year));

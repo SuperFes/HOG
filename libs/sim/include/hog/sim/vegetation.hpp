@@ -49,8 +49,8 @@ struct FireConfig {
 struct DyingConfig {
     double days = 120.0;    // the shortfall's running mean is taken over about this long
     double tolerance = 0.1; // share of the ground water below what they're used to, without loss
-    double learning = 1.0;  // years a new forest takes to learn what's usual, losing nothing
-    double adapting = 30.0; // years plants take to grow used to worse droughts, about
+    double learning = 2.0;  // years a new forest takes to learn what's usual, losing nothing
+    double adapting = 10.0; // years plants take to grow used to worse droughts, about
     double worst = 0.6;     // share of what a cell holds lost once the ground water is gone
     double years = 2.0;     // for the dying to die, about
     double standing = 12.0; // years the dead stand before they fall, about

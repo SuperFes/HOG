@@ -48,13 +48,13 @@ out = 0.05
 
 [dying]
 # Plants feel the ground water's shortfall below its usual level over a season. A new forest's
-# first year teaches them the dry season they're used to; a tenth worse, they die back over a
-# couple of years, and only grow used to worse over decades. The dead stand a decade or so, and
+# first two years teach them the dry season they're used to; a tenth worse, they die back over a
+# couple of years, and grow used to worse over a decade or so. The dead stand a decade or so, and
 # regrowth takes most of a century to count as old growth.
 days = 120
 tolerance = 0.1
-learning = 1
-adapting = 30
+learning = 2
+adapting = 10
 worst = 0.6
 years = 2
 standing = 12

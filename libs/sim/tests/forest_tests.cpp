@@ -260,7 +260,9 @@ TEST_CASE("a fire leaves its dead standing charred, and what grows back is young
 
 TEST_CASE("a drought kills back what the ground water can't keep, the failing first",
           "[sim][forest]") {
-    Forest forest{config(), woods(), start};
+    ForestConfig learning = config();
+    learning.vegetation.dying.learning = 1.0;
+    Forest forest{learning, woods(), start};
     JobSystem jobs{2};
     const std::uint32_t cell = middle();
     Weather weather = good_year(forest.grid().size());
@@ -310,7 +312,9 @@ TEST_CASE("a drought kills back what the ground water can't keep, the failing fi
 }
 
 TEST_CASE("a new forest loses nothing to drought while it learns what's usual", "[sim][forest]") {
-    Forest forest{config(), woods(), start};
+    ForestConfig learning = config();
+    learning.vegetation.dying.learning = 1.0;
+    Forest forest{learning, woods(), start};
     JobSystem jobs{2};
     const std::uint32_t cell = middle();
     Weather weather = good_year(forest.grid().size());
@@ -321,7 +325,18 @@ TEST_CASE("a new forest loses nothing to drought while it learns what's usual", 
     CHECK(forest.living(cell) == 1.0);
     // Learned, a drought as bad as that one is usual.
     forest.advance_to(start + days{730}, weather.conditions(), jobs);
+    CHECK(forest.time() >= forest.learning_until());
     CHECK(forest.living(cell) == 1.0);
+    // What the ground water did as a new world settled is forgotten by the time they've learned.
+    ForestConfig two_years = config();
+    two_years.vegetation.dying.learning = 2.0;
+    Forest settling{two_years, woods(), start};
+    settling.advance_to(start + days{180}, weather.conditions(), jobs);
+    std::ranges::fill(weather.groundwater, 80.0);
+    settling.advance_to(start + days{731}, weather.conditions(), jobs);
+    REQUIRE(settling.time() >= settling.learning_until());
+    CHECK(settling.fields().accustomed[cell] < 0.35F);
+    std::ranges::fill(weather.groundwater, 10.0);
     // Without learning, it's a drought from the first.
     ForestConfig hasty = config();
     hasty.vegetation.dying.learning = 0.0;
