@@ -83,6 +83,8 @@ TEST_CASE("woods as coarse as may be sent go cell for cell, untouched where noth
     CHECK(black.established == forest.fields().established[burned]);
     CHECK(black.dead == forest.fields().dead[burned]);
     CHECK_THAT(black.charred, WithinAbs(1.0, 1e-5));
+    CHECK(black.scar == forest.fields().scar[burned]);
+    CHECK(black.scar > 0.9F);
     CHECK(woodlands.cells[0] == CellWoodland{});
     CHECK(woodlands.cells[burned + 1] == CellWoodland{});
 }
@@ -116,6 +118,16 @@ TEST_CASE("finer woods are sent averaged over each cell sent, by what each holds
         living += weight * mixed.living(index);
     }
     CHECK_THAT(cell.living, WithinAbs(living / weights, 1e-5));
+    // The scar lies on the ground, so it's averaged by area alone: one of four burned.
+    double scar = 0.0;
+    double area = 0.0;
+    for (const std::uint32_t index : under) {
+        scar += grid.area(index) * static_cast<double>(mixed.fields().scar[index]);
+        area += grid.area(index);
+    }
+    CHECK_THAT(cell.scar, WithinAbs(scar / area, 1e-5));
+    CHECK(cell.scar > 0.2F);
+    CHECK(cell.scar < 0.3F);
     CHECK(cell.living < 0.8F);
     CHECK(cell.dead > 0.2F);
     CHECK_THAT(cell.charred, WithinAbs(1.0, 1e-5));

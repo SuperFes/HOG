@@ -134,6 +134,8 @@ void each_layer(const LayerSources& sources, Use use) {
         use("forest/dead", "", [&](auto& values) { copy(fields.dead, values); });
         use("forest/charred", "", [&](auto& values) { copy(fields.charred, values); });
         use("forest/shortfall", "", [&](auto& values) { copy(fields.shortfall, values); });
+        use("forest/accustomed", "", [&](auto& values) { copy(fields.accustomed, values); });
+        use("forest/scar", "", [&](auto& values) { copy(fields.scar, values); });
     }
 }
 

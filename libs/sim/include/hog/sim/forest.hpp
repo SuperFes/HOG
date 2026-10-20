@@ -72,6 +72,8 @@ struct ForestFields {
     // running mean, and the worst of it the plants are used to.
     std::vector<float> shortfall;
     std::vector<float> accustomed;
+    // Of the cell's ground, the share a fire left black, greening again over the years.
+    std::vector<float> scar;
 
     friend bool operator==(const ForestFields&, const ForestFields&) = default;
 };

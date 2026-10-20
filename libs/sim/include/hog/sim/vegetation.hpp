@@ -40,6 +40,7 @@ struct FireConfig {
     // A fire goes out burning less than this share of its cell, or with less than this share of
     // its cell's plants left to burn.
     double out = 0.05;
+    double scar = 1.5; // years for the ground a fire blackened to green again, about
 };
 
 // How plants die back when the ground water falls well below its usual level, and how long the

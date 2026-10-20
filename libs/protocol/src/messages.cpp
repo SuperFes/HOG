@@ -77,15 +77,15 @@ constexpr std::size_t weather_cell_bytes = 9;
     return static_cast<float>(static_cast<std::int8_t>(byte));
 }
 
-constexpr std::size_t woodland_cell_bytes = 5;
+constexpr std::size_t woodland_cell_bytes = 6;
 constexpr float share_steps = 255.0F;
 
 using CodedWoodland = std::array<std::uint8_t, woodland_cell_bytes>;
 
 [[nodiscard]] CodedWoodland coded(const CellWoodland& cell) noexcept {
-    return {to_byte(cell.living * share_steps), to_byte(cell.established * share_steps),
+    return {to_byte(cell.living * share_steps),  to_byte(cell.established * share_steps),
             to_byte(cell.failing * share_steps), to_byte(cell.dead * share_steps),
-            to_byte(cell.charred * share_steps)};
+            to_byte(cell.charred * share_steps), to_byte(cell.scar * share_steps)};
 }
 
 [[nodiscard]] CellWoodland decoded(const CodedWoodland& bytes) noexcept {
@@ -93,7 +93,8 @@ using CodedWoodland = std::array<std::uint8_t, woodland_cell_bytes>;
             .established = static_cast<float>(bytes[1]) / share_steps,
             .failing = static_cast<float>(bytes[2]) / share_steps,
             .dead = static_cast<float>(bytes[3]) / share_steps,
-            .charred = static_cast<float>(bytes[4]) / share_steps};
+            .charred = static_cast<float>(bytes[4]) / share_steps,
+            .scar = static_cast<float>(bytes[5]) / share_steps};
 }
 
 using CodedCell = std::array<std::uint8_t, weather_cell_bytes>;

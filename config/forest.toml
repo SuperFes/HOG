@@ -45,6 +45,8 @@ wind = 0.15
 burn_days = 2
 douse = 5
 out = 0.05
+# Years for the blackened ground to green again, about.
+scar = 1.5
 
 [dying]
 # Plants feel the ground water's shortfall below its usual level over a season. A new forest's

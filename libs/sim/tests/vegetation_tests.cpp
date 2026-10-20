@@ -34,6 +34,7 @@ warm = 12
 damp = 0.3
 spread = 4
 burn_days = 3
+scar = 3
 
 [dying]
 tolerance = 0.4
@@ -54,6 +55,7 @@ standing = 20
     CHECK(vegetation->fire.parched == 0.9);
     CHECK(vegetation->fire.spread == 4.0);
     CHECK(vegetation->fire.burn_days == 3.0);
+    CHECK(vegetation->fire.scar == 3.0);
     CHECK(vegetation->dying.tolerance == 0.4);
     CHECK(vegetation->dying.learning == 2.0);
     CHECK(vegetation->dying.adapting == 50.0);

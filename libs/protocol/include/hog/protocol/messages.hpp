@@ -17,7 +17,7 @@
 namespace hog::protocol {
 
 // Raised whenever any message changes; the two sides must speak the same one.
-inline constexpr std::uint32_t version = 8;
+inline constexpr std::uint32_t version = 9;
 // The longest connect token a client may present; more is a broken or hostile client.
 inline constexpr std::size_t most_token = 1'024;
 // The longest line of text a refusal carries.
@@ -160,13 +160,14 @@ struct Weather {
 };
 
 // How a cell's woods fare, as flora::Habitat takes them, each a share of the trees its ground
-// would hold. Sent a byte each, to a 255th.
+// would hold, and the share of its ground a fire left black. Sent a byte each, to a 255th.
 struct CellWoodland {
     float living = 1.0F;
     float established = 1.0F;
     float failing = 0.0F;
     float dead = 0.0F;
     float charred = 0.0F;
+    float scar = 0.0F;
 
     friend bool operator==(const CellWoodland&, const CellWoodland&) = default;
 };

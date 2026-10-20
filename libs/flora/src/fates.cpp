@@ -18,7 +18,8 @@ Fate mixed(const Fate& a, const Fate& b, float t) noexcept {
             .established = mixed(a.established, b.established, t),
             .failing = mixed(a.failing, b.failing, t),
             .dead = mixed(a.dead, b.dead, t),
-            .charred = mixed(a.charred, b.charred, t)};
+            .charred = mixed(a.charred, b.charred, t),
+            .scar = mixed(a.scar, b.scar, t)};
 }
 
 // The cell a coordinate of `side` cells falls in, and how far toward the next it lies: between

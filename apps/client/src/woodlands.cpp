@@ -14,7 +14,8 @@ std::vector<planet::CellId> Woodlands::receive(const protocol::Woodlands& told) 
                          .established = cell.established,
                          .failing = cell.failing,
                          .dead = cell.dead,
-                         .charred = cell.charred});
+                         .charred = cell.charred,
+                         .scar = cell.scar});
     }
     auto fates = std::make_shared<const flora::Fates>(told.level, std::move(cells));
     const flora::Fates& was = *fates_;

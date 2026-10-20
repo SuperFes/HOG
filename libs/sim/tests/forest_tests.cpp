@@ -236,13 +236,21 @@ TEST_CASE("a fire leaves its dead standing charred, and what grows back is young
     CHECK_THAT(static_cast<double>(fields.charred[cell]), WithinAbs(1.0, 1e-5));
     CHECK(static_cast<double>(fields.established[cell]) <= forest.living(cell) + 1e-6);
     CHECK(fields.failing[cell] == 0.0F);
+    // The ground it burned left black.
+    CHECK_THAT(static_cast<double>(fields.scar[cell]), WithinAbs(0.98, 0.02));
     // Its neighbour untouched.
     CHECK(forest.living(untouched) == 1.0);
     CHECK(fields.established[untouched] == 1.0F);
     CHECK(fields.dead[untouched] == 0.0F);
+    CHECK(fields.scar[untouched] == 0.0F);
 
     const Weather good = good_year(forest.grid().size());
-    forest.advance_to(forest.time() + days{365 * 10}, good.conditions(), jobs);
+    // Greening again within a couple of years, long before the snags fall.
+    forest.advance_to(forest.time() + days{365}, good.conditions(), jobs);
+    CHECK_THAT(static_cast<double>(fields.scar[cell]),
+               WithinAbs(0.98 * std::exp(-1.0 / 1.5), 0.03));
+    forest.advance_to(forest.time() + days{365 * 9}, good.conditions(), jobs);
+    CHECK(fields.scar[cell] < 0.01F);
     const double living = forest.living(cell);
     // A decade on, the snags thinning, the regrowth all young, never more alive and dead than
     // the ground holds.
@@ -516,7 +524,7 @@ TEST_CASE("a forest saves and loads, fires and all", "[sim][forest]") {
         CHECK(older.fields().dead[cell] == 0.0F);
     }
     // The second, without what the plants are used to: they learn it afresh.
-    const std::span<const std::byte> second{bytes.data(), bytes.size() - (4 * cells) - 8};
+    const std::span<const std::byte> second{bytes.data(), bytes.size() - (2 * 4 * cells) - 8};
     Forest unlearned{config(), woods(), start};
     REQUIRE(unlearned.load(2, second));
     CHECK(unlearned.fields().accustomed == current.fields().shortfall);

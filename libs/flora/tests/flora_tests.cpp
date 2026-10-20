@@ -1011,7 +1011,8 @@ TEST_CASE("the woods' fates are read between the cells' middles, held at a face'
                         .established = static_cast<float>(index) / 64.0F,
                         .failing = 0.0F,
                         .dead = 1.0F - (static_cast<float>(index) / 32.0F),
-                        .charred = 0.5F};
+                        .charred = 0.5F,
+                        .scar = static_cast<float>(index) / 24.0F};
     }
     const Fates fates{1, cells};
     CHECK(fates.level() == 1);
@@ -1021,6 +1022,7 @@ TEST_CASE("the woods' fates are read between the cells' middles, held at a face'
     CHECK(fates.at(2, 0.75, 0.75) == cells[11]);
     // Halfway between two, half of each; at the face's edges and corners, the cell there.
     CHECK(fates.at(2, 0.5, 0.25).living == (cells[8].living + cells[9].living) / 2.0F);
+    CHECK(fates.at(2, 0.5, 0.25).scar == (cells[8].scar + cells[9].scar) / 2.0F);
     CHECK(fates.at(2, 0.5, 0.5).living ==
           (cells[8].living + cells[9].living + cells[10].living + cells[11].living) / 4.0F);
     CHECK(fates.at(2, 0.0, 0.0) == cells[8]);

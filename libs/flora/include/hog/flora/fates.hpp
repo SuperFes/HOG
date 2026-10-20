@@ -7,13 +7,15 @@
 
 namespace hog::flora {
 
-// How one cell's woods fare, as the forest sim keeps them: Habitat's shares of its trees.
+// How one cell's woods fare, as the forest sim keeps them: Habitat's shares of its trees, and the
+// share of its ground a fire left black.
 struct Fate {
     float living = 1.0F;
     float established = 1.0F;
     float failing = 0.0F;
     float dead = 0.0F;
     float charred = 0.0F;
+    float scar = 0.0F;
 
     friend bool operator==(const Fate&, const Fate&) = default;
 };

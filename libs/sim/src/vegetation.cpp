@@ -33,7 +33,7 @@ void parse_growth(Table growth, GrowthConfig& config) {
 
 void parse_fire(Table fire, FireConfig& config) {
     fire.only({"damp"sv, "parched"sv, "fuel"sv, "lightning"sv, "spread"sv, "wind"sv, "burn_days"sv,
-               "douse"sv, "out"sv});
+               "douse"sv, "out"sv, "scar"sv});
     fire.number("damp", 0.0, 1.0, config.damp);
     fire.number("parched", 0.0, 1.0, config.parched);
     if (config.parched <= config.damp) {
@@ -46,6 +46,7 @@ void parse_fire(Table fire, FireConfig& config) {
     fire.number("burn_days", positive, 1e4, config.burn_days);
     fire.number("douse", positive, 1e6, config.douse);
     fire.number("out", positive, 1.0, config.out);
+    fire.number("scar", positive, 1e4, config.scar);
 }
 
 void parse_dying(Table dying, DyingConfig& config) {

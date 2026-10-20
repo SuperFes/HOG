@@ -76,7 +76,8 @@ Woodlands woodlands(std::uint8_t level) {
                              .established = (255.0F - (2.0F * step)) / 255.0F,
                              .failing = step / 255.0F,
                              .dead = (3.0F * step) / 255.0F,
-                             .charred = index % 2 == 0 ? 1.0F : 0.0F});
+                             .charred = index % 2 == 0 ? 1.0F : 0.0F,
+                             .scar = (4.0F * step) / 255.0F});
     }
     return out;
 }
@@ -300,13 +301,18 @@ TEST_CASE("weather too fine is refused", "[protocol]") {
 }
 
 TEST_CASE("woodlands are sent to a 255th of a share, clamped to a byte", "[protocol]") {
-    const CellWoodland sent = as_sent(
-        {.living = 0.6F, .established = 0.123F, .failing = 0.05F, .dead = 0.33F, .charred = 0.9F});
+    const CellWoodland sent = as_sent({.living = 0.6F,
+                                       .established = 0.123F,
+                                       .failing = 0.05F,
+                                       .dead = 0.33F,
+                                       .charred = 0.9F,
+                                       .scar = 0.71F});
     for (const auto& [given, back] : {std::pair{0.6F, sent.living},
                                       {0.123F, sent.established},
                                       {0.05F, sent.failing},
                                       {0.33F, sent.dead},
-                                      {0.9F, sent.charred}}) {
+                                      {0.9F, sent.charred},
+                                      {0.71F, sent.scar}}) {
         CHECK_THAT(back, Catch::Matchers::WithinAbs(static_cast<double>(given), 0.51 / 255.0));
     }
     const float nan = std::numeric_limits<float>::quiet_NaN();
@@ -318,8 +324,8 @@ TEST_CASE("woodlands are sent to a 255th of a share, clamped to a byte", "[proto
           CellWoodland{.living = 1.0F, .established = 0.0F, .failing = 0.0F});
     // Untouched woods read back untouched.
     CHECK(as_sent(CellWoodland{}) == CellWoodland{});
-    // Five bytes a cell over the planet.
-    CHECK(encode(woodlands(most_weather_level)).size() == 2 + 1 + (5 * 6'144));
+    // Six bytes a cell over the planet.
+    CHECK(encode(woodlands(most_weather_level)).size() == 2 + 1 + (6 * 6'144));
     auto finer = encode(woodlands(1));
     finer[2] = std::byte{most_weather_level + 1};
     CHECK(decode(finer).error().code == hog::ErrorCode::OutOfRange);

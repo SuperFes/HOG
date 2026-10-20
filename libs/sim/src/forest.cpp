@@ -116,6 +116,7 @@ Forest::Forest(const ForestConfig& config, std::vector<Soil> soil, GameTime now)
     fields_.charred.resize(size);
     fields_.shortfall.resize(size);
     fields_.accustomed.resize(size);
+    fields_.scar.resize(size);
     catching_.resize(size);
     for (std::uint32_t cell = 0; cell < size; ++cell) {
         areas_.push_back(grid_.area(cell) * square_km);
@@ -363,6 +364,12 @@ void Forest::settle(std::uint32_t cell, double before, double after, bool burned
            std::exp(-days / (dying.standing * days_per_year));
     fields_.dead[cell] = static_cast<float>(dead);
     fields_.charred[cell] = dead > 0.0 ? static_cast<float>(charred) : 0.0F;
+
+    float& scar = fields_.scar[cell];
+    const double blackened =
+        std::min(static_cast<double>(scar) + (burned ? std::max(before - after, 0.0) : 0.0), 1.0);
+    scar = static_cast<float>(blackened *
+                              std::exp(-days / (config_.vegetation.fire.scar * days_per_year)));
 
     float& established = fields_.established[cell];
     const auto old = static_cast<double>(established);

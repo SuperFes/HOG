@@ -17,6 +17,8 @@ struct Sums {
     double failing = 0.0;
     double dead = 0.0;
     double charred = 0.0; // weighted by the dead too
+    double ground = 0.0;  // the scar weighted by area alone, as it lies on the ground
+    double scar = 0.0;
 };
 
 } // namespace
@@ -43,6 +45,8 @@ protocol::Woodlands woodlands_report(const sim::Forest& forest) {
         sum.failing += weight * static_cast<double>(fields.failing[index]);
         sum.dead += weight * dead;
         sum.charred += weight * dead * static_cast<double>(fields.charred[index]);
+        sum.ground += grid.area(index);
+        sum.scar += grid.area(index) * static_cast<double>(fields.scar[index]);
     }
 
     protocol::Woodlands woodlands{.level = level, .cells = {}};
@@ -57,7 +61,8 @@ protocol::Woodlands woodlands_report(const sim::Forest& forest) {
              .established = static_cast<float>(sum.established / sum.weight),
              .failing = static_cast<float>(sum.failing / sum.weight),
              .dead = static_cast<float>(sum.dead / sum.weight),
-             .charred = sum.dead > 0.0 ? static_cast<float>(sum.charred / sum.dead) : 0.0F});
+             .charred = sum.dead > 0.0 ? static_cast<float>(sum.charred / sum.dead) : 0.0F,
+             .scar = static_cast<float>(sum.scar / sum.ground)});
     }
     return woodlands;
 }

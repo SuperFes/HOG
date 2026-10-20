@@ -40,6 +40,7 @@ std::vector<std::byte> Forest::save() const {
     write_floats(out, fields_.charred);
     write_floats(out, fields_.shortfall);
     write_floats(out, fields_.accustomed);
+    write_floats(out, fields_.scar);
     out.write(static_cast<std::uint64_t>(learning_until_.time_since_epoch().count()));
     return std::move(out).take();
 }
@@ -84,6 +85,7 @@ Result<void> Forest::load(std::uint16_t version, std::span<const std::byte> byte
     std::uint64_t learning_until = 0;
     if (version >= 3) {
         read_floats(in, loaded.accustomed);
+        read_floats(in, loaded.scar);
         learning_until = in.integer<std::uint64_t>();
     }
     if (auto finished = in.finish(); !finished) {
@@ -96,6 +98,7 @@ Result<void> Forest::load(std::uint16_t version, std::span<const std::byte> byte
     } else {
         // Older forests never learned what's usual, so they learn it from here.
         std::ranges::copy(fields_.shortfall, fields_.accustomed.begin());
+        std::ranges::fill(fields_.scar, 0.0F);
         learning_until_ = time_ + detail::years_of(config_.vegetation.dying.learning);
     }
     return {};
