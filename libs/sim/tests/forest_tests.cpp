@@ -353,6 +353,46 @@ TEST_CASE("a new forest loses nothing to drought while it learns what's usual", 
     CHECK(unready.living(cell) < 0.9);
 }
 
+TEST_CASE("a new world's forest can carry a fire from years ago", "[sim][forest]") {
+    Forest forest{config(), woods(), start};
+    const std::uint32_t cell = middle();
+    const hog::sim::ForestFields& fields = forest.fields();
+    // Just burned: down to the seeds, the rest standing dead and black, the ground with it.
+    forest.burned_ago(cell, 0.0, 12.0, 0.2);
+    CHECK_THAT(forest.living(cell), WithinAbs(0.02, 1e-3));
+    CHECK_THAT(static_cast<double>(fields.dead[cell]), WithinAbs(0.98, 1e-3));
+    CHECK(fields.charred[cell] == 1.0F);
+    CHECK_THAT(static_cast<double>(fields.scar[cell]), WithinAbs(0.98, 1e-3));
+
+    // Eight years on: the ground green again, snags still standing among young regrowth.
+    forest.burned_ago(cell, 8.0, 12.0, 0.2);
+    const double living = forest.living(cell);
+    CHECK(living > 0.03);
+    CHECK(living < 0.3);
+    CHECK(fields.dead[cell] > 0.2F);
+    CHECK(fields.dead[cell] < 0.7F);
+    CHECK(fields.charred[cell] == 1.0F);
+    CHECK(fields.scar[cell] < 0.01F);
+    // Of the living, all but what the fire spared grown back since.
+    CHECK(static_cast<double>(fields.established[cell]) < 0.03);
+    CHECK(static_cast<double>(fields.established[cell]) < living);
+    CHECK(static_cast<double>(fields.dead[cell]) + living <= 1.0 + 1e-6);
+    // A colder, drier place grows back slower.
+    Forest colder{config(), woods(), start};
+    colder.burned_ago(cell, 8.0, 4.0, 0.6);
+    CHECK(colder.living(cell) < living);
+    // Nothing to burn, nothing changes.
+    const std::vector<Soil> banded = soil();
+    Forest coast{config(), banded, start};
+    const auto ocean = static_cast<std::uint32_t>(
+        std::ranges::find_if(banded, [](const Soil& soil) { return soil.biome == Biome::Ocean; }) -
+        banded.begin());
+    REQUIRE(ocean < banded.size());
+    coast.burned_ago(ocean, 8.0, 12.0, 0.2);
+    CHECK(coast.fields().scar[ocean] == 0.0F);
+    CHECK(coast.fields().dead[ocean] == 0.0F);
+}
+
 TEST_CASE("wet ground and water don't burn", "[sim][forest]") {
     Forest forest{config(), soil(), start};
     JobSystem jobs{1};

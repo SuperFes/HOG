@@ -123,6 +123,8 @@ private:
     void step_forest(GameTime at);
     // Counts the fires and measures the forest.
     void report_forest();
+    // Gives a new world's forest its history: the first starting island burned, if configured.
+    void burn_history();
     // Logs and counts what has happened to wildlife since last asked.
     void report_wildlife();
     // Logs the species that are gone from everywhere, as the server opens.

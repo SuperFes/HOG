@@ -26,6 +26,7 @@ constexpr double max_weather_minutes = 24.0 * 60.0;
 constexpr double max_weather_day_hours = 24.0 * 365.0;
 constexpr double max_wildlife_step_hours = 24.0 * 365.0;
 constexpr double max_forest_step_hours = 24.0;
+constexpr double max_burned_years = 1'000.0;
 constexpr double max_view_m = 10'000.0;
 constexpr std::int64_t least_snapshot_bytes = 64;
 constexpr std::int64_t most_snapshot_bytes = 65'536;
@@ -332,7 +333,7 @@ private:
 
 [[nodiscard]] Result<void> parse_forest(const Table& forest, const std::filesystem::path& base,
                                         ForestSettings& config) {
-    if (auto known = forest.only({"vegetation", "step_hours"}); !known) {
+    if (auto known = forest.only({"vegetation", "step_hours", "burned_years_ago"}); !known) {
         return known;
     }
     const auto vegetation = forest.string("vegetation");
@@ -348,6 +349,19 @@ private:
         return std::unexpected(step.error());
     }
     config.step = step->value_or(config.step);
+    const auto burned = forest.number("burned_years_ago");
+    if (!burned) {
+        return std::unexpected(burned.error());
+    }
+    if (*burned) {
+        // NaN fails every comparison, so it is out of range too.
+        const bool in_range = **burned >= 0.0 && **burned <= max_burned_years;
+        if (!in_range) {
+            return invalid(
+                std::format("forest.burned_years_ago must be from 0 to {}", max_burned_years));
+        }
+        config.burned_years_ago = **burned;
+    }
     return {};
 }
 

@@ -55,6 +55,7 @@ TEST_CASE("a minimal server config takes the defaults", "[server][config]") {
     CHECK(config->wildlife.step == 24h);
     CHECK_FALSE(config->forest.vegetation);
     CHECK(config->forest.step == 1h);
+    CHECK_FALSE(config->forest.burned_years_ago);
     CHECK_FALSE(config->net.port);
     CHECK_FALSE(config->net.login_key);
     CHECK(config->net.simulate.off());
@@ -98,6 +99,7 @@ step_hours = 6
 [forest]
 vegetation = "forest.toml"
 step_hours = 0.5
+burned_years_ago = 8
 
 [net]
 port = 27100
@@ -137,6 +139,7 @@ start = 2030-06-01T12:00:00+02:00
     CHECK(config->wildlife.step == 6h);
     CHECK(config->forest.vegetation == base() / "forest.toml");
     CHECK(config->forest.step == 30min);
+    CHECK(config->forest.burned_years_ago == 8.0);
     CHECK(config->net.port == 27100);
     CHECK(config->net.login_key == (base() / "../var/login.pub").lexically_normal());
     CHECK(config->net.simulate == hog::net::Simulation{.lag = 75ms, .loss = 2});
@@ -189,6 +192,8 @@ TEST_CASE("bad server configs are rejected", "[server][config]") {
         {with("[wildlife]\nspecies = \"a.toml\"\n"), ErrorCode::InvalidArgument},
         {with("[forest]\nvegetation = 3\n"), ErrorCode::InvalidArgument},
         {with("[forest]\nstep_hours = 25\n"), ErrorCode::InvalidArgument},
+        {with("[forest]\nburned_years_ago = -1\n"), ErrorCode::InvalidArgument},
+        {with("[forest]\nburned_years_ago = 1001\n"), ErrorCode::InvalidArgument},
         {with("[forest]\nfire = \"a.toml\"\n"), ErrorCode::InvalidArgument},
         {with("[net]\nport = 0\n"), ErrorCode::InvalidArgument},
         {with("[net]\nport = 65536\n"), ErrorCode::InvalidArgument},

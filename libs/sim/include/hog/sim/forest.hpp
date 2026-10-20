@@ -141,6 +141,9 @@ public:
     [[nodiscard]] std::uint32_t burning() const;
     // Sets a cell alight, as someone starting a fire does; fails where too little would burn.
     bool ignite(std::uint32_t cell);
+    // Leaves a cell as a fire `years` ago would have, burned to the seeds and grown back since
+    // under a climate of `temperature` °C and `dryness` year round: for a new world's history.
+    void burned_ago(std::uint32_t cell, double years, double temperature, double dryness);
     // Fires since the last call. They aren't saved.
     [[nodiscard]] FireReport drain_fires();
 

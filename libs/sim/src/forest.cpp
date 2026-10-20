@@ -379,6 +379,31 @@ void Forest::settle(std::uint32_t cell, double before, double after, bool burned
             : old + ((after - old) * (1.0 - std::exp(-days / (dying.maturing * days_per_year)))));
 }
 
+void Forest::burned_ago(std::uint32_t cell, double years, double temperature, double dryness) {
+    const GrowthConfig& growth = config_.vegetation.growth;
+    const double holds = capacity(cell);
+    if (holds <= 0.0) {
+        return;
+    }
+    fields_.fire[cell] = 0.0F;
+    fields_.failing[cell] = 0.0F;
+    fields_.biomass[cell] = static_cast<float>(holds);
+    const double before = living(cell);
+    fields_.biomass[cell] = static_cast<float>(growth.seeds * holds);
+    settle(cell, before, living(cell), true, 0.0);
+    // Grown back a month at a time, as tend grows it.
+    const double grows = speed(growth, temperature, dryness);
+    const double years_to_grow = growth.years.at(static_cast<std::size_t>(soil_[cell].biome));
+    constexpr double month = 1.0 / 12.0;
+    for (double grown_for = 0.0; grown_for + (month / 2.0) < years; grown_for += month) {
+        const double was = living(cell);
+        fields_.biomass[cell] =
+            static_cast<float>(grown(growth, holds, years_to_grow,
+                                     static_cast<double>(fields_.biomass[cell]), grows, month));
+        settle(cell, was, living(cell), false, month * days_per_year);
+    }
+}
+
 double Forest::total() const {
     double sum = 0.0;
     for (std::uint32_t cell = 0; cell < grid_.size(); ++cell) {

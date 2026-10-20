@@ -2,6 +2,7 @@
 #include <hog/chat/filter.hpp>
 #include <hog/net/simulation.hpp>
 #include <hog/planet/cell_id.hpp>
+#include <hog/planet/geology.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/save/snapshot_store.hpp>
 #include <hog/server/spatial_tracking.hpp>
@@ -14,6 +15,7 @@
 #include <cmath>
 #include <filesystem>
 #include <format>
+#include <limits>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -205,6 +207,7 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
     } else {
         server->time_ = first;
         log::info(save_log, "no snapshot; starting a new world at {}", format_time(first));
+        server->burn_history();
     }
     if (server->wildlife_) {
         server->report_wildlife();
@@ -266,6 +269,35 @@ Result<void> Server::start_simulation(const planet::PlanetConfig& shape, GameTim
         log::info(server_log, "forest: {:.0f} Mt of plants", forest_->total() / 1e9);
     }
     return {};
+}
+
+void Server::burn_history() {
+    const std::optional<double> years = config_.forest.burned_years_ago;
+    if (!forest_ || !years) {
+        return;
+    }
+    // The wooded cell nearest the island's middle: an island is about a cell across, so the cell
+    // its middle falls in may be sea.
+    const DVec3 middle = planet_.geology().terrain().archipelago().islands().front().center;
+    const sim::CellGrid& grid = forest_->grid();
+    std::optional<std::uint32_t> nearest;
+    double closest = std::numeric_limits<double>::infinity();
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        const double away = glm::distance(planet::cell_center(grid.cell(index)), middle);
+        if (forest_->capacity(index) > 0.0 && away < closest) {
+            nearest = index;
+            closest = away;
+        }
+    }
+    if (!nearest) {
+        return;
+    }
+    const std::uint32_t cell = *nearest;
+    const planet::CellState state = planet_.state(grid.cell(cell));
+    constexpr auto one = static_cast<double>(planet::fixed_one);
+    forest_->burned_ago(cell, *years, static_cast<double>(state.temperature) / one,
+                        1.0 - (static_cast<double>(state.moisture) / one));
+    log::info(server_log, "forest: the first island burned {} years ago", *years);
 }
 
 void Server::simulate(GameTime from, GameDuration step) {

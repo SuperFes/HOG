@@ -312,6 +312,28 @@ capacity = { grassland = 0.5, savanna = 3, temperate_forest = 20, boreal_forest 
     }
     CHECK(opened(config, later)->forest()->fields() == before);
 
+    // A new world may begin with its first island burned years before; reopened, it isn't burned
+    // again.
+    {
+        const World fresh;
+        auto history = fresh.config();
+        history.forest.vegetation = config.forest.vegetation;
+        history.forest.burned_years_ago = 8.0;
+        std::vector<float> dead;
+        {
+            const auto server = opened(history);
+            const hog::sim::ForestFields& fields = server->forest()->fields();
+            CHECK(std::ranges::count_if(fields.charred, [](float c) { return c > 0.0F; }) == 1);
+            const auto cell = static_cast<std::size_t>(std::ranges::max_element(fields.dead) -
+                                                       fields.dead.begin());
+            CHECK(fields.dead[cell] > 0.2F);
+            CHECK(fields.charred[cell] == 1.0F);
+            dead = fields.dead;
+            REQUIRE(server->save());
+        }
+        CHECK(opened(history, start + 1h)->forest()->fields().dead == dead);
+    }
+
     config.forest.vegetation = world.write_vegetation("[fire]\nsmoke = 1\n");
     const auto broken = Server::open(config, later);
     REQUIRE_FALSE(broken);
