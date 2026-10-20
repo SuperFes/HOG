@@ -414,7 +414,8 @@ TEST_CASE("a patch's woods thin where they died, and grow back younger", "[terra
     const World& world = shared_world();
     const CellId cell = land_patch();
     const Patch untouched = bake_patch(world, cell);
-    // Three in ten of the woods alive everywhere, most of those grown back since a loss.
+    // Three in ten of the woods alive everywhere, most of those grown back since a loss: the young
+    // in sqrt(0.25) of the spots, as far as the half standing dead leave room, so 0.45 of them.
     const hog::flora::Fates thinned{
         2, std::vector<hog::flora::Fate>(
                6 * 16, {.living = 0.3F, .established = 0.05F, .dead = 0.5F, .charred = 1.0F})};
@@ -428,7 +429,7 @@ TEST_CASE("a patch's woods thin where they died, and grow back younger", "[terra
         }
         ++wooded;
         INFO("vertex " << at);
-        CHECK(std::abs(int{after[0]} - static_cast<int>(std::lround(0.3 * before[0]))) <= 1);
+        CHECK(std::abs(int{after[0]} - static_cast<int>(std::lround(0.5 * before[0]))) <= 1);
         CHECK(after[1] < before[1]);
         // The kinds the same.
         CHECK(after[2] == before[2]);

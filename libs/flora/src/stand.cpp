@@ -95,21 +95,43 @@ float within(const Range& range, float value) noexcept {
 // Metres down a tree's roots reach for water.
 constexpr float rooting = 4.0F;
 
+// Grown back since the last loss, young trees hold more of the ground than of the wood: many small
+// stems where the old stood. Of their share y of the wood, they take sqrt(y) of the spots, as far
+// as the old and the standing dead leave room, and reach up to 2 sqrt(y) of the old's age.
+struct Regrowth {
+    float old = 0.0F; // the spots of the old growth, as its share of the wood
+    float spots = 0.0F;
+    float maturity = 1.0F;
+};
+
+Regrowth regrowth(const Habitat& habitat) noexcept {
+    const float old = std::min(habitat.established, habitat.living);
+    const float young = habitat.living - old;
+    if (young <= 0.0F) {
+        return {.old = old};
+    }
+    const float root = std::sqrt(young);
+    const float room = std::max(1.0F - old - habitat.dead, young);
+    return {.old = old, .spots = std::min(root, room), .maturity = std::min(2.0F * root, 1.0F)};
+}
+
 // How a tree fares by its own place among its woods' shares, if it stands at all; a tree grown
 // back since the last loss is made younger, the youngest those that came back last.
 std::optional<Condition> fared(std::uint32_t hash, const Habitat& habitat, float& age) noexcept {
+    const Regrowth young = regrowth(habitat);
+    const float living = young.old + young.spots;
     const float fate = unit(hash + 20U);
-    if (fate >= habitat.living) {
-        if (fate >= habitat.living + habitat.dead) {
+    if (fate >= living) {
+        if (fate >= living + habitat.dead) {
             return std::nullopt;
         }
         return unit(hash + 22U) < habitat.charred ? Condition::Charred : Condition::Dead;
     }
-    if (fate >= habitat.living - habitat.failing) {
+    if (fate >= living - habitat.failing) {
         return Condition::Failing;
     }
-    if (fate >= habitat.established) {
-        age *= (habitat.living - fate) / (habitat.living - habitat.established);
+    if (fate >= young.old) {
+        age *= young.maturity * (living - fate) / young.spots;
         return Condition::Sound;
     }
     // The old trees that lived through a fire bear its marks while its dead still stand thick
@@ -248,16 +270,17 @@ Woodland woodland_at(Vec2 cell, std::uint32_t face, planet::Biome biome,
     // square 8/15 of the stand's squared.
     const float oldest = stand_age(wooded);
     float mean_reach = 0.2F + ((4.0F / 3.0F) * oldest) - ((8.0F / 15.0F) * oldest * oldest);
-    // Those grown back since the last loss are younger by an even share of their age, so 1/3 as
-    // much of it on average and 8/45 of its square.
-    if (habitat.established < habitat.living) {
-        const float old_growth = habitat.established / habitat.living;
-        const float young_reach =
-            0.2F + ((2.0F / 3.0F) * oldest) - ((8.0F / 45.0F) * oldest * oldest);
-        mean_reach = mixed(young_reach, mean_reach, old_growth);
+    // Those grown back since the last loss are younger by an even share of their age up to their
+    // maturity m, so m/3 as much of it on average and 8/45 m^2 of its square.
+    const Regrowth young = regrowth(habitat);
+    const float living = young.old + young.spots;
+    if (young.spots > 0.0F) {
+        const float m = young.maturity * oldest;
+        const float young_reach = 0.2F + ((2.0F / 3.0F) * m) - ((8.0F / 45.0F) * m * m);
+        mean_reach = mixed(young_reach, mean_reach, young.old / living);
     }
     const float others = oaks + maples + pines;
-    return Woodland{.grown = mixed(trees.lone, trees.inside, wooded) * kept * habitat.living,
+    return Woodland{.grown = mixed(trees.lone, trees.inside, wooded) * kept * living,
                     .height = trees.height * mean_reach * stand_scale(wooded),
                     .broadleaf = others > 0.0F ? (oaks + maples) / others : 0.0F,
                     .maple = oaks + maples > 0.0F ? maples / (oaks + maples) : 0.0F,

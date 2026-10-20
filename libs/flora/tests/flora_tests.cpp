@@ -731,7 +731,27 @@ TEST_CASE("trees live, fail, die and grow back in the order their own dice set",
     // Of the old growth, those scorched as the dead still stand thick (4 x 0.1 of them) about them.
     CHECK(std::abs((kept / all) - 0.06) < 0.02);
     CHECK(std::abs((counted(regrowing, Condition::Scorched) / all) - 0.04) < 0.02);
-    CHECK(std::abs((younger / all) - 0.4) < 0.03);
+    // The regrowth, 0.4 of the wood, stands in sqrt(0.4) of the spots.
+    CHECK(std::abs((younger / all) - std::sqrt(0.4)) < 0.03);
+
+    // Barely grown back, the young are many and small: 0.05 of the wood in sqrt(0.05) of the
+    // spots, none older than 2 sqrt(0.05) of the old.
+    const std::vector<std::optional<Stood>> sprouting =
+        grown(Habitat{.living = 0.05F, .established = 0.0F, .dead = 0.3F, .charred = 1.0F});
+    CHECK(std::abs((counted(sprouting, Condition::Sound) / all) - std::sqrt(0.05)) < 0.03);
+    double sprouts = 0.0;
+    double sprout_heights = 0.0;
+    double untouched_heights = 0.0;
+    for (std::size_t at = 0; at < untouched.size(); ++at) {
+        if (sprouting[at] && sprouting[at]->condition == Condition::Sound) {
+            CHECK(sprouting[at]->age <= 2.0F * std::sqrt(0.05F) * untouched[at]->age + 1e-6F);
+            sprouts += 1.0;
+            sprout_heights += static_cast<double>(sprouting[at]->height);
+            untouched_heights += static_cast<double>(untouched[at]->height);
+        }
+    }
+    REQUIRE(sprouts > 0.0);
+    CHECK(sprout_heights < 0.5 * untouched_heights);
 
     // The golden number for woods the sim has touched.
     std::uint64_t hash = 0xcbf2'9ce4'8422'2325ULL;
@@ -744,7 +764,7 @@ TEST_CASE("trees live, fail, die and grow back in the order their own dice set",
             hash = fingered(std::as_bytes(std::span{parts}), hash);
         }
     }
-    CHECK(hash == 0xbdce'5fbd'628f'3f43ULL);
+    CHECK(hash == 0x017d'8f09'd506'3975ULL);
 }
 
 TEST_CASE("no tree grows where its biome grows none", "[flora]") {
