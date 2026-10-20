@@ -114,6 +114,17 @@ constexpr std::string_view grawlix = "@#$%&!";
     }
 }
 
+// How many bytes a sequence led by `first` takes; 1 for a byte that leads none.
+[[nodiscard]] std::size_t utf8_length(unsigned char first) noexcept {
+    if (first >= 0xF0U) {
+        return 4;
+    }
+    if (first >= 0xE0U) {
+        return 3;
+    }
+    return first >= 0xC0U ? 2 : 1;
+}
+
 struct Decoded {
     char32_t point = 0;
     std::size_t length = 1;
@@ -124,7 +135,7 @@ struct Decoded {
     if (first < 0x80U) {
         return {.point = first, .length = 1};
     }
-    const std::size_t length = first >= 0xF0U ? 4 : first >= 0xE0U ? 3 : first >= 0xC0U ? 2 : 1;
+    const std::size_t length = utf8_length(first);
     if (length == 1 || at + length > text.size()) {
         return {.point = 0xFFFD, .length = 1};
     }
@@ -280,6 +291,13 @@ struct Shadow {
     return at < read.size() && letter(read[at]);
 }
 
+[[nodiscard]] std::size_t past_separators(std::string_view read, std::size_t at) noexcept {
+    while (at < read.size() && !letter(read[at])) {
+        ++at;
+    }
+    return at;
+}
+
 // Reads `word` at `start` of the shadow, letting each letter stretch ("fuuuck") and separators
 // fall between letters ("f u c k"); where it ends, or nothing. `split` says separators were
 // leant on, which the caller holds to a stricter standard.
@@ -296,10 +314,9 @@ struct Shadow {
             ++index;
         }
         if (at != start) {
-            while (at < read.size() && !letter(read[at])) {
-                ++at;
-                split = true;
-            }
+            const std::size_t next = past_separators(read, at);
+            split = split || next != at;
+            at = next;
         }
         std::size_t got = 0;
         while (true) {
@@ -308,10 +325,7 @@ struct Shadow {
                 ++at;
             }
             // The letter may run on across separators too: "a s s".
-            std::size_t over = at;
-            while (over < read.size() && !letter(read[over])) {
-                ++over;
-            }
+            const std::size_t over = past_separators(read, at);
             if (got >= need || over == at || !letter_at(read, over) || read[over] != expect) {
                 break;
             }

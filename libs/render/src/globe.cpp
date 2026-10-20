@@ -33,8 +33,11 @@ struct Push {
     float relief_steps = 0.0F;
     float cloud_lift = 0.0F;
     float air_lift = 0.0F;
-    alignas(16) glm::vec4 eye{};
+    glm::vec3 padding{};
+    glm::vec4 eye{};
 };
+// The shader's push block puts eye on a 16-byte boundary.
+static_assert(offsetof(Push, eye) % 16 == 0);
 
 Push push_for(const GlobeView& view, VkExtent2D extent, const Image& relief) {
     const double aspect = static_cast<double>(extent.width) / static_cast<double>(extent.height);

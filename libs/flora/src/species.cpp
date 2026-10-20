@@ -285,7 +285,7 @@ Species aged(const Species& species, float age) noexcept {
     const int whorl = std::max(trunk.whorl, 1);
     const float whorls =
         static_cast<float>(trunk.children) * across(at, ageing.crowded) / static_cast<float>(whorl);
-    trunk.children = whorl * std::max(static_cast<int>(whorls + 0.5F), 3);
+    trunk.children = whorl * std::max(static_cast<int>(std::lround(whorls)), 3);
     trunk.start *= across(at, ageing.raised);
     trunk.fall *= across(at, ageing.fall);
     trunk.angle *= across(at, ageing.lean);

@@ -552,7 +552,7 @@ TEST_CASE("a forest saves and loads, fires and all", "[sim][forest]") {
 
     // The first version, without the fates: the living counted old growth, nothing dead.
     const std::size_t cells = saved.grid().size();
-    const std::span<const std::byte> first{bytes.data(), 1 + 8 + (3 * 4 * cells)};
+    const std::span<const std::byte> first{bytes.data(), 1 + 8 + (std::size_t{3} * 4 * cells)};
     Forest older{config(), woods(), start};
     REQUIRE(older.load(1, first));
     Forest current{config(), woods(), start};
@@ -564,7 +564,8 @@ TEST_CASE("a forest saves and loads, fires and all", "[sim][forest]") {
         CHECK(older.fields().dead[cell] == 0.0F);
     }
     // The second, without what the plants are used to: they learn it afresh.
-    const std::span<const std::byte> second{bytes.data(), bytes.size() - (2 * 4 * cells) - 8};
+    const std::span<const std::byte> second{bytes.data(),
+                                            bytes.size() - (std::size_t{2} * 4 * cells) - 8};
     Forest unlearned{config(), woods(), start};
     REQUIRE(unlearned.load(2, second));
     CHECK(unlearned.fields().accustomed == current.fields().shortfall);

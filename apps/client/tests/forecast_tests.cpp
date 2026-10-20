@@ -36,7 +36,7 @@ Weather everywhere(CellWeather cell, std::chrono::milliseconds fade = 10s, std::
 }
 
 double cloud_at(const Forecast& forecast, MonotonicClock::time_point now) {
-    return double{forecast.at(glm::normalize(DVec3{1.0, 2.0, 3.0}), now).cloud};
+    return static_cast<double>(forecast.at(glm::normalize(DVec3{1.0, 2.0, 3.0}), now).cloud);
 }
 
 // Where Vulkan samples a direction: its face, and s and t across it from 0 to 1.
@@ -126,22 +126,23 @@ TEST_CASE("the first weather is shown at once", "[client][forecast]") {
     CHECK(forecast.received() == 1);
     CHECK(forecast.faded(start) == 1.0);
     const CellWeather here = forecast.at(glm::normalize(DVec3{-1.0, 0.5, 0.2}), start);
-    CHECK_THAT(double{here.cloud}, WithinAbs(2.0, 1e-5));
-    CHECK_THAT(double{here.falling}, WithinAbs(4.0, 1e-5));
-    CHECK_THAT(double{here.snow}, WithinAbs(0.25, 1e-6));
-    CHECK_THAT(double{here.drift.x}, WithinAbs(3.0, 1e-5));
-    CHECK_THAT(double{here.drift.y}, WithinAbs(-1.0, 1e-5));
+    CHECK_THAT(static_cast<double>(here.cloud), WithinAbs(2.0, 1e-5));
+    CHECK_THAT(static_cast<double>(here.falling), WithinAbs(4.0, 1e-5));
+    CHECK_THAT(static_cast<double>(here.snow), WithinAbs(0.25, 1e-6));
+    CHECK_THAT(static_cast<double>(here.drift.x), WithinAbs(3.0, 1e-5));
+    CHECK_THAT(static_cast<double>(here.drift.y), WithinAbs(-1.0, 1e-5));
     REQUIRE(forecast.before().size() == std::size_t{6} * weather_map_size * weather_map_size);
     CHECK(forecast.after() == forecast.before());
-    const auto cover = static_cast<int>(std::lround(double{hog::sim::cloud_cover(2.0F)} * 255.0));
+    const auto cover =
+        static_cast<int>(std::lround(static_cast<double>(hog::sim::cloud_cover(2.0F)) * 255.0));
     // The roots of 2/16 and of 4/256, and a quarter.
     const hog::client::WeatherTexel expected{static_cast<std::uint8_t>(cover), 90, 32, 64};
     CHECK(std::ranges::all_of(forecast.before(),
                               [&](const auto& texel) { return texel == expected; }));
-    CHECK_THAT(double{here.humidity}, WithinAbs(0.6, 1e-6));
-    CHECK_THAT(double{here.fog_top}, WithinAbs(320.0, 1e-3));
-    CHECK_THAT(double{here.base}, WithinAbs(1'280.0, 1e-3));
-    CHECK_THAT(double{here.top}, WithinAbs(3'200.0, 1e-3));
+    CHECK_THAT(static_cast<double>(here.humidity), WithinAbs(0.6, 1e-6));
+    CHECK_THAT(static_cast<double>(here.fog_top), WithinAbs(320.0, 1e-3));
+    CHECK_THAT(static_cast<double>(here.base), WithinAbs(1'280.0, 1e-3));
+    CHECK_THAT(static_cast<double>(here.top), WithinAbs(3'200.0, 1e-3));
     REQUIRE(forecast.sky_before().size() == forecast.before().size());
     CHECK(forecast.sky_after() == forecast.sky_before());
     // In steps of 32 and 64 metres.

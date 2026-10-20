@@ -52,24 +52,26 @@ protocol::CellWeather weather_at_eye(const Shot& shot) {
 
 DVec3 drift_at(DVec3 up, const protocol::CellWeather& weather) {
     return planet::tangent_frame(up).to_world(
-        {double{weather.drift.x}, double{weather.drift.y}, 0.0});
+        {static_cast<double>(weather.drift.x), static_cast<double>(weather.drift.y), 0.0});
 }
 
 double falling_at_eye(const terrain::Bend& bend, const protocol::CellWeather& weather) noexcept {
-    return bend.eye_height < double{weather.base} ? double{weather.falling} : 0.0;
+    return bend.eye_height < static_cast<double>(weather.base)
+               ? static_cast<double>(weather.falling)
+               : 0.0;
 }
 
 render::CloudShade shade_at_eye(const terrain::Bend& bend, const protocol::CellWeather& weather) {
-    const auto base = double{weather.base};
-    const auto top = double{weather.top};
+    const auto base = static_cast<double>(weather.base);
+    const auto top = static_cast<double>(weather.top);
     if (bend.eye_height >= top) {
         return {};
     }
     // Within the cloud, only what's over the eye shades it.
     const double over =
         top > base ? std::clamp((top - bend.eye_height) / (top - base), 0.0, 1.0) : 1.0;
-    return render::cloud_shade(double{sim::cloud_cover(weather.cloud)},
-                               double{weather.cloud} * over);
+    return render::cloud_shade(static_cast<double>(sim::cloud_cover(weather.cloud)),
+                               static_cast<double>(weather.cloud) * over);
 }
 
 Result<Scene> Scene::create(render::Device& device, const planet::World& world,
@@ -333,8 +335,8 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     const DVec3 sun = calendar_.sun_direction(shot.time);
     const double sun_mu = glm::dot(sun, shot.bend.up);
     const render::CloudShade shade =
-        render::under_mist(shade_at_eye(shot.bend, here), double{here.humidity},
-                           double{here.fog_top}, shot.bend.eye_height, sun_mu);
+        render::under_mist(shade_at_eye(shot.bend, here), static_cast<double>(here.humidity),
+                           static_cast<double>(here.fog_top), shot.bend.eye_height, sun_mu);
     const DVec3 drift = drift_at(shot.bend.up, here);
     const double falling = falling_at_eye(shot.bend, here);
     drifted_ = render::within_period(drifted_ + (drift * shot.seconds));
@@ -347,8 +349,9 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     // sky.
     const auto weather = [&] { return weather_.bindings(faded); };
     render::SkyView sky = sky_view(shot, shade);
-    sky.mist = render::mist_through(double{here.humidity}, double{here.fog_top},
-                                    shot.bend.eye_height, sun_mu);
+    sky.mist =
+        render::mist_through(static_cast<double>(here.humidity), static_cast<double>(here.fog_top),
+                             shot.bend.eye_height, sun_mu);
     if (cloudy) {
         sky.cloud_shadow = clouds_.shadow_image().view();
     }
@@ -466,7 +469,7 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                 companion_->draw(commands, frame.extent, shot.camera, *shot.companion, shot.bend);
             });
     }
-    if (render::precipitation_count(falling, double{here.snow}) > 0) {
+    if (render::precipitation_count(falling, static_cast<double>(here.snow)) > 0) {
         graph.add({.name = "rain", .uses = through_air, .targets = drawn},
                   [&](VkCommandBuffer commands) {
                       precipitation_.draw(commands, frame.extent,
@@ -475,7 +478,7 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                                            .up = shot.bend.up,
                                            .wind = drift * surface_wind,
                                            .falling = falling,
-                                           .snow = double{here.snow},
+                                           .snow = static_cast<double>(here.snow),
                                            .seconds = falling_for_});
                   });
     }

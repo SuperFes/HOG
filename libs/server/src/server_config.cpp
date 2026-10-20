@@ -360,7 +360,7 @@ private:
             return invalid(
                 std::format("forest.burned_years_ago must be from 0 to {}", max_burned_years));
         }
-        config.burned_years_ago = **burned;
+        config.burned_years_ago = *burned;
     }
     return {};
 }

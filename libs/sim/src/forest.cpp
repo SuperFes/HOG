@@ -306,7 +306,7 @@ void Forest::tend(std::uint32_t cell, const ForestConditions& conditions, double
         const double dying = std::exp(-days / (config_.vegetation.dying.years * days_per_year));
         biomass = static_cast<float>((keeps + ((before - keeps) * dying)) * holds);
     } else {
-        const double temperature = static_cast<double>(conditions.temperature[cell]);
+        const auto temperature = static_cast<double>(conditions.temperature[cell]);
         const auto biome = static_cast<std::size_t>(soil_[cell].biome);
         biomass = static_cast<float>(
             std::min(grown(growth, holds, growth.years.at(biome), static_cast<double>(biomass),
@@ -348,8 +348,8 @@ void Forest::feel(std::uint32_t cell, const ForestConditions& conditions, double
 
 void Forest::settle(std::uint32_t cell, double before, double after, bool burned, double days) {
     const DyingConfig& dying = config_.vegetation.dying;
-    double dead = static_cast<double>(fields_.dead[cell]);
-    double charred = static_cast<double>(fields_.charred[cell]);
+    auto dead = static_cast<double>(fields_.dead[cell]);
+    auto charred = static_cast<double>(fields_.charred[cell]);
     if (after < before) {
         // What died stands dead; the burned share of the standing dead takes in what burned.
         const double lost = before - after;
@@ -395,7 +395,8 @@ void Forest::burned_ago(std::uint32_t cell, double years, double temperature, do
     const double grows = speed(growth, temperature, dryness);
     const double years_to_grow = growth.years.at(static_cast<std::size_t>(soil_[cell].biome));
     constexpr double month = 1.0 / 12.0;
-    for (double grown_for = 0.0; grown_for + (month / 2.0) < years; grown_for += month) {
+    const auto months = std::lround(years / month);
+    for (long grown_for = 0; grown_for < months; ++grown_for) {
         const double was = living(cell);
         fields_.biomass[cell] =
             static_cast<float>(grown(growth, holds, years_to_grow,

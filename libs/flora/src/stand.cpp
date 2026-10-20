@@ -25,7 +25,7 @@ float stand_corner(std::uint32_t base_x, std::uint32_t base_y, std::uint32_t fac
 // never negative, so truncation is the floor.
 float stand_octave(Vec2 cell, std::uint32_t face, std::uint32_t period_log,
                    std::uint32_t salt) noexcept {
-    const float period = static_cast<float>(std::uint32_t{1} << period_log);
+    const auto period = static_cast<float>(std::uint32_t{1} << period_log);
     const float at_x = cell.x / period;
     const float at_y = cell.y / period;
     const auto base_x = static_cast<std::uint32_t>(at_x);

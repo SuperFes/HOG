@@ -200,7 +200,7 @@ TEST_CASE("a filled image holds each mip of each layer as given", "[render][gpu]
     auto readback = hog::render::make_buffer(*device, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                                              hog::render::Memory::Readback);
     REQUIRE(readback);
-    REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
+    const auto copy_out = [&](VkCommandBuffer commands) {
         hog::render::transition(commands, image->handle(), VK_IMAGE_ASPECT_COLOR_BIT,
                                 hog::render::image_use::sampled,
                                 hog::render::image_use::copy_source);
@@ -224,7 +224,8 @@ TEST_CASE("a filled image holds each mip of each layer as given", "[render][gpu]
         vkCmdCopyImageToBuffer(commands, image->handle(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                                readback->handle(), static_cast<std::uint32_t>(regions.size()),
                                regions.data());
-    }));
+    };
+    REQUIRE(device->submit_now(copy_out));
     const auto read = hog::render::read_back(*readback);
     REQUIRE(read);
     REQUIRE(read->size() == size);

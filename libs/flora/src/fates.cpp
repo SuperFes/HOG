@@ -35,7 +35,7 @@ Between between(double st, std::uint32_t side) noexcept {
     if (!(at > 0.0F)) {
         return {};
     }
-    const float last = static_cast<float>(side - 1);
+    const auto last = static_cast<float>(side - 1);
     if (at >= last) {
         return {.low = side - 1, .high = side - 1, .toward = 0.0F};
     }

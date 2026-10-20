@@ -38,15 +38,15 @@ protocol::CellWeather interpolated(const sim::CellGrid& grid, const Cells& cells
         return static_cast<float>(
             grid.interpolate(direction, [&](std::uint32_t index) { return part(cells[index]); }));
     };
-    return {.cloud = field([](const auto& cell) { return double{cell.cloud}; }),
-            .falling = field([](const auto& cell) { return double{cell.falling}; }),
-            .snow = field([](const auto& cell) { return double{cell.snow}; }),
-            .drift = {field([](const auto& cell) { return double{cell.drift.x}; }),
-                      field([](const auto& cell) { return double{cell.drift.y}; })},
-            .humidity = field([](const auto& cell) { return double{cell.humidity}; }),
-            .fog_top = field([](const auto& cell) { return double{cell.fog_top}; }),
-            .base = field([](const auto& cell) { return double{cell.base}; }),
-            .top = field([](const auto& cell) { return double{cell.top}; })};
+    return {.cloud = field([](const auto& cell) { return static_cast<double>(cell.cloud); }),
+            .falling = field([](const auto& cell) { return static_cast<double>(cell.falling); }),
+            .snow = field([](const auto& cell) { return static_cast<double>(cell.snow); }),
+            .drift = {field([](const auto& cell) { return static_cast<double>(cell.drift.x); }),
+                      field([](const auto& cell) { return static_cast<double>(cell.drift.y); })},
+            .humidity = field([](const auto& cell) { return static_cast<double>(cell.humidity); }),
+            .fog_top = field([](const auto& cell) { return static_cast<double>(cell.fog_top); }),
+            .base = field([](const auto& cell) { return static_cast<double>(cell.base); }),
+            .top = field([](const auto& cell) { return static_cast<double>(cell.top); })};
 }
 
 std::uint8_t to_byte(double share) noexcept {
@@ -69,14 +69,15 @@ Maps maps_of(const sim::CellGrid& grid, const Cells& cells) {
                 const protocol::CellWeather cell =
                     interpolated(grid, cells, cube_direction(face, x, y, size));
                 maps.weather.push_back(
-                    {to_byte(double{sim::cloud_cover(cell.cloud)}),
-                     to_byte(std::sqrt(std::max(double{cell.cloud}, 0.0) / 16.0)),
-                     to_byte(std::sqrt(std::max(double{cell.falling}, 0.0) / 256.0)),
-                     to_byte(double{cell.snow})});
-                maps.sky.push_back({to_byte(double{cell.humidity}),
-                                    to_byte(double{cell.fog_top} / (255.0 * fog_texel_step)),
-                                    to_byte(double{cell.base} / (255.0 * height_texel_step)),
-                                    to_byte(double{cell.top} / (255.0 * height_texel_step))});
+                    {to_byte(static_cast<double>(sim::cloud_cover(cell.cloud))),
+                     to_byte(std::sqrt(std::max(static_cast<double>(cell.cloud), 0.0) / 16.0)),
+                     to_byte(std::sqrt(std::max(static_cast<double>(cell.falling), 0.0) / 256.0)),
+                     to_byte(static_cast<double>(cell.snow))});
+                maps.sky.push_back(
+                    {to_byte(static_cast<double>(cell.humidity)),
+                     to_byte(static_cast<double>(cell.fog_top) / (255.0 * fog_texel_step)),
+                     to_byte(static_cast<double>(cell.base) / (255.0 * height_texel_step)),
+                     to_byte(static_cast<double>(cell.top) / (255.0 * height_texel_step))});
             }
         }
     }
@@ -86,20 +87,22 @@ Maps maps_of(const sim::CellGrid& grid, const Cells& cells) {
 } // namespace
 
 std::string describe(const protocol::CellWeather& weather) {
-    const double cover = 100.0 * double{sim::cloud_cover(weather.cloud)};
+    const double cover = 100.0 * static_cast<double>(sim::cloud_cover(weather.cloud));
     std::string line = std::format("{:.0f}% cloud", cover);
     if (cover >= 0.5) {
-        line += std::format(" at {:.0f}-{:.0f} m", double{weather.base}, double{weather.top});
+        line += std::format(" at {:.0f}-{:.0f} m", static_cast<double>(weather.base),
+                            static_cast<double>(weather.top));
     }
     if (weather.falling > 0.0F) {
         const char* falls = weather.snow >= 0.5F ? "snow" : "rain";
-        line += std::format(", {} {:.1f} mm/h", falls, double{weather.falling});
+        line += std::format(", {} {:.1f} mm/h", falls, static_cast<double>(weather.falling));
     }
-    line += std::format(", {:.0f}% humid", 100.0 * double{weather.humidity});
+    line += std::format(", {:.0f}% humid", 100.0 * static_cast<double>(weather.humidity));
     if (weather.fog_top > 0.0F) {
-        line += std::format(", fog to {:.0f} m", double{weather.fog_top});
+        line += std::format(", fog to {:.0f} m", static_cast<double>(weather.fog_top));
     }
-    return line + std::format(", drifting {:.0f} m/s", double{glm::length(weather.drift)});
+    return line +
+           std::format(", drifting {:.0f} m/s", static_cast<double>(glm::length(weather.drift)));
 }
 
 DVec3 cube_direction(std::uint32_t face, std::uint32_t x, std::uint32_t y,

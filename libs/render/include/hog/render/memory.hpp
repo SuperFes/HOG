@@ -30,8 +30,8 @@ public:
     // Empty for GPU memory. What the CPU writes to upload memory is made visible to the GPU with
     // flush(), and what the GPU writes to readback memory to the CPU with invalidate().
     [[nodiscard]] std::span<std::byte> mapped() const noexcept { return mapped_; }
-    Result<> flush() const;
-    Result<> invalidate() const;
+    [[nodiscard]] Result<> flush() const;
+    [[nodiscard]] Result<> invalidate() const;
 
 private:
     friend Result<Buffer> make_buffer(const Device& device, VkDeviceSize size,

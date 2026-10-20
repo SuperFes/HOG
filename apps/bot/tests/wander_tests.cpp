@@ -46,9 +46,10 @@ TEST_CASE("walking heads along the ground towards the target", "[bot][wander]") 
     const WorldPosition feet{up * radius};
     const Walked walked = walk(wander, feet, radius, 0.033);
     REQUIRE(walked.heading);
+    const DVec3 heading = walked.heading.value_or(DVec3{});
     // Along the ground, and closing the distance.
-    CHECK(std::abs(glm::dot(*walked.heading, up)) < 1e-9);
-    CHECK(glm::dot(*walked.heading, walked.wander.target - up) > 0.0);
+    CHECK(std::abs(glm::dot(heading, up)) < 1e-9);
+    CHECK(glm::dot(heading, walked.wander.target - up) > 0.0);
     CHECK(walked.wander.patience < wander.patience);
 }
 

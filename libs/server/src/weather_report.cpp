@@ -45,16 +45,18 @@ protocol::Weather weather_report(const sim::CellGrid& grid, const sim::WeatherFi
         const DVec2 wind{fields.wind[index]};
         const DVec2 jet{fields.jet[index]};
         sum.area += area;
-        sum.cloud += area * double{fields.cloud[index]};
+        sum.cloud += area * static_cast<double>(fields.cloud[index]);
         sum.falling +=
-            area * double{fields.rain[index] + fields.snow[index] + fields.hail[index]} / hours;
-        sum.snowing += area * double{fields.snow[index]} / hours;
+            area *
+            static_cast<double>(fields.rain[index] + fields.snow[index] + fields.hail[index]) /
+            hours;
+        sum.snowing += area * static_cast<double>(fields.snow[index]) / hours;
         sum.drift += area * (wind + ((jet - wind) * steering));
         const sim::Sky sky = sim::sky_over(fields, ground[index], config.tuning, index);
-        sum.humidity += area * double{sky.humidity};
-        sum.fog_top += area * double{sky.fog_top};
-        sum.base += area * double{sky.base};
-        sum.top += area * double{sky.top};
+        sum.humidity += area * static_cast<double>(sky.humidity);
+        sum.fog_top += area * static_cast<double>(sky.fog_top);
+        sum.base += area * static_cast<double>(sky.base);
+        sum.top += area * static_cast<double>(sky.top);
     }
 
     protocol::Weather weather{.level = level, .fade = fade, .cells = {}};

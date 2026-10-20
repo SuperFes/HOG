@@ -30,7 +30,7 @@ std::vector<Shown> blend(const EntityStates& members, const EntityStates& from,
         WorldPosition at = protocol::to_world(member.at);
         const EntityState* start = find(from, member.id);
         const EntityState* end = find(to, member.id);
-        if (start && end) {
+        if (start != nullptr && end != nullptr) {
             const WorldPosition first = protocol::to_world(start->at);
             at = first + ((protocol::to_world(end->at) - first) * along);
         }

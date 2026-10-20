@@ -418,7 +418,8 @@ TEST_CASE("a patch's woods thin where they died, and grow back younger", "[terra
     // in sqrt(0.25) of the spots, as far as the half standing dead leave room, so 0.45 of them.
     const hog::flora::Fates thinned{
         2, std::vector<hog::flora::Fate>(
-               6 * 16, {.living = 0.3F, .established = 0.05F, .dead = 0.5F, .charred = 1.0F})};
+               std::size_t{6} * 16,
+               {.living = 0.3F, .established = 0.05F, .dead = 0.5F, .charred = 1.0F})};
     const Patch burned = bake_patch(world, cell, thinned);
     int wooded = 0;
     for (std::size_t at = 0; at < untouched.vertices.size(); ++at) {
@@ -460,7 +461,8 @@ TEST_CASE("a patch's ground keeps a fire's black, and how much of its woods are 
     const World& world = shared_world();
     const CellId cell = land_patch();
     const Patch burned =
-        bake_patch(world, cell, hog::flora::Fates{2, std::vector<hog::flora::Fate>(6 * 16, fate)});
+        bake_patch(world, cell,
+                   hog::flora::Fates{2, std::vector<hog::flora::Fate>(std::size_t{6} * 16, fate)});
     int wooded = 0;
     for (const hog::terrain::PatchVertex& vertex : burned.vertices) {
         const bool woods = hog::flora::trees_of(vertex.biome).height > 0.0F;

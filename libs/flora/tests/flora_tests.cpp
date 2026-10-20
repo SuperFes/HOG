@@ -7,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
 #include <cstddef>
@@ -654,26 +655,63 @@ TEST_CASE("palms line warm shores and stand among the tropics' broadleaves, neve
     CHECK(count(Biome::BorealForest, -11.0F).trees == 0);
 }
 
+namespace {
+
+using Grown = std::vector<std::optional<hog::flora::Stood>>;
+
+// Each lattice cell's tree under a habitat, by cell.
+Grown grown_under(const hog::flora::Habitat& habitat) {
+    Grown trees;
+    for (std::uint32_t i = 2048; i < 2176; ++i) {
+        for (std::uint32_t j = 56576; j < 56640; ++j) {
+            trees.push_back(
+                hog::flora::tree_grown(i, j, 0, hog::planet::Biome::TemperateForest, habitat));
+        }
+    }
+    return trees;
+}
+
+std::optional<hog::flora::Condition> condition_of(const std::optional<hog::flora::Stood>& tree) {
+    return tree.transform([](const hog::flora::Stood& stood) { return stood.condition; });
+}
+
+bool alive(const std::optional<hog::flora::Stood>& tree) {
+    return tree.has_value() && hog::flora::alive(tree->condition);
+}
+
+double counted(const Grown& trees, hog::flora::Condition condition) {
+    return static_cast<double>(std::ranges::count_if(
+        trees, [&](const auto& tree) { return condition_of(tree) == condition; }));
+}
+
+// A tree the sim's woods stand is one the untouched woods stand, of the same kind and spot.
+bool stands_untouched(const std::optional<hog::flora::Stood>& tree,
+                      const std::optional<hog::flora::Stood>& untouched) {
+    if (!tree) {
+        return true;
+    }
+    return untouched.has_value() && tree->genus == untouched->genus &&
+           tree->hash == untouched->hash && tree->age <= untouched->age;
+}
+
+// Grown back since the old growth: younger, and shorter.
+bool grown_back(const std::optional<hog::flora::Stood>& tree,
+                const std::optional<hog::flora::Stood>& untouched) {
+    return tree.has_value() && hog::flora::alive(tree->condition) && untouched.has_value() &&
+           tree->age < untouched->age;
+}
+
+bool shorter(const std::optional<hog::flora::Stood>& tree,
+             const std::optional<hog::flora::Stood>& than) {
+    return tree.has_value() && than.has_value() && tree->height < than->height;
+}
+
+} // namespace
+
 TEST_CASE("trees live, fail, die and grow back in the order their own dice set", "[flora]") {
     using hog::flora::Condition;
     using hog::flora::Habitat;
-    using hog::flora::Stood;
-    using hog::planet::Biome;
-    // Each lattice cell's tree under a habitat, by cell.
-    const auto grown = [](const Habitat& habitat) {
-        std::vector<std::optional<Stood>> trees;
-        for (std::uint32_t i = 2048; i < 2176; ++i) {
-            for (std::uint32_t j = 56576; j < 56640; ++j) {
-                trees.push_back(hog::flora::tree_grown(i, j, 0, Biome::TemperateForest, habitat));
-            }
-        }
-        return trees;
-    };
-    const auto counted = [](const std::vector<std::optional<Stood>>& trees, Condition condition) {
-        return static_cast<double>(std::ranges::count_if(
-            trees, [&](const auto& tree) { return tree && tree->condition == condition; }));
-    };
-    const std::vector<std::optional<Stood>> untouched = grown(temperate);
+    const Grown untouched = grown_under(temperate);
     const double all = counted(untouched, Condition::Sound);
     REQUIRE(all > 3000.0);
     CHECK(counted(untouched, Condition::Sound) ==
@@ -681,14 +719,12 @@ TEST_CASE("trees live, fail, die and grow back in the order their own dice set",
               std::ranges::count_if(untouched, [](const auto& tree) { return tree.has_value(); })));
 
     // A drought killing a fifth, with a fifth more dying; a fire and its standing dead.
-    const std::vector<std::optional<Stood>> drought =
-        grown(Habitat{.living = 0.6F, .failing = 0.2F, .dead = 0.2F});
-    const std::vector<std::optional<Stood>> later =
-        grown(Habitat{.living = 0.4F, .established = 0.4F, .dead = 0.4F});
-    const std::vector<std::optional<Stood>> burned =
-        grown(Habitat{.living = 0.05F, .established = 0.05F, .dead = 0.9F, .charred = 1.0F});
-    const std::vector<std::optional<Stood>> regrowing =
-        grown(Habitat{.living = 0.5F, .established = 0.1F, .dead = 0.1F, .charred = 1.0F});
+    const Grown drought = grown_under(Habitat{.living = 0.6F, .failing = 0.2F, .dead = 0.2F});
+    const Grown later = grown_under(Habitat{.living = 0.4F, .established = 0.4F, .dead = 0.4F});
+    const Grown burned =
+        grown_under(Habitat{.living = 0.05F, .established = 0.05F, .dead = 0.9F, .charred = 1.0F});
+    const Grown regrowing =
+        grown_under(Habitat{.living = 0.5F, .established = 0.1F, .dead = 0.1F, .charred = 1.0F});
     CHECK(std::abs((counted(drought, Condition::Sound) / all) - 0.4) < 0.03);
     CHECK(std::abs((counted(drought, Condition::Failing) / all) - 0.2) < 0.03);
     CHECK(std::abs((counted(drought, Condition::Dead) / all) - 0.2) < 0.03);
@@ -696,36 +732,24 @@ TEST_CASE("trees live, fail, die and grow back in the order their own dice set",
     CHECK(std::abs((counted(burned, Condition::Charred) / all) - 0.9) < 0.03);
     CHECK(std::abs((counted(burned, Condition::Scorched) / all) - 0.05) < 0.02);
     CHECK(counted(burned, Condition::Sound) == 0.0);
-    for (std::size_t at = 0; at < untouched.size(); ++at) {
-        // Every tree standing is one the untouched woods stand, of the same kind and spot.
-        for (const auto* fared : {&drought, &later, &burned, &regrowing}) {
-            const std::optional<Stood>& tree = (*fared)[at];
-            if (tree) {
-                REQUIRE(untouched[at].has_value());
-                CHECK(tree->genus == untouched[at]->genus);
-                CHECK(tree->hash == untouched[at]->hash);
-                CHECK(tree->age <= untouched[at]->age);
-            }
-        }
-        // Those failing are the next to die; those dead stay dead.
-        if (drought[at] && drought[at]->condition == Condition::Failing) {
-            REQUIRE(later[at].has_value());
-            CHECK(later[at]->condition == Condition::Dead);
-        }
-        if (drought[at] && drought[at]->condition == Condition::Dead) {
-            CHECK(!(later[at] && hog::flora::alive(later[at]->condition)));
-        }
-        // Grown back since the fire: the trees above the old growth younger, and shorter.
-        if (regrowing[at] && hog::flora::alive(regrowing[at]->condition) &&
-            regrowing[at]->age < untouched[at]->age) {
-            CHECK(regrowing[at]->height < untouched[at]->height);
-        }
-    }
     double younger = 0.0;
     double kept = 0.0;
     for (std::size_t at = 0; at < untouched.size(); ++at) {
-        if (regrowing[at] && regrowing[at]->condition == Condition::Sound) {
-            (regrowing[at]->age < untouched[at]->age ? younger : kept) += 1.0;
+        for (const Grown* fared : {&drought, &later, &burned, &regrowing}) {
+            CHECK(stands_untouched((*fared)[at], untouched[at]));
+        }
+        // Those failing are the next to die; those dead stay dead.
+        if (condition_of(drought[at]) == Condition::Failing) {
+            CHECK(condition_of(later[at]) == Condition::Dead);
+        }
+        if (condition_of(drought[at]) == Condition::Dead) {
+            CHECK(!alive(later[at]));
+        }
+        if (grown_back(regrowing[at], untouched[at])) {
+            CHECK(shorter(regrowing[at], untouched[at]));
+        }
+        if (condition_of(regrowing[at]) == Condition::Sound) {
+            (grown_back(regrowing[at], untouched[at]) ? younger : kept) += 1.0;
         }
     }
     // Of the old growth, those scorched as the dead still stand thick (4 x 0.1 of them) about them.
@@ -733,34 +757,46 @@ TEST_CASE("trees live, fail, die and grow back in the order their own dice set",
     CHECK(std::abs((counted(regrowing, Condition::Scorched) / all) - 0.04) < 0.02);
     // The regrowth, 0.4 of the wood, stands in sqrt(0.4) of the spots.
     CHECK(std::abs((younger / all) - std::sqrt(0.4)) < 0.03);
+}
 
-    // Barely grown back, the young are many and small: 0.05 of the wood in sqrt(0.05) of the
-    // spots, none older than 2 sqrt(0.05) of the old.
-    const std::vector<std::optional<Stood>> sprouting =
-        grown(Habitat{.living = 0.05F, .established = 0.0F, .dead = 0.3F, .charred = 1.0F});
+TEST_CASE("woods barely grown back stand many small young trees", "[flora]") {
+    using hog::flora::Condition;
+    const Grown untouched = grown_under(temperate);
+    const double all = counted(untouched, Condition::Sound);
+    // 0.05 of the wood in sqrt(0.05) of the spots, none older than 2 sqrt(0.05) of the old.
+    const Grown sprouting = grown_under(
+        hog::flora::Habitat{.living = 0.05F, .established = 0.0F, .dead = 0.3F, .charred = 1.0F});
     CHECK(std::abs((counted(sprouting, Condition::Sound) / all) - std::sqrt(0.05)) < 0.03);
     double sprouts = 0.0;
     double sprout_heights = 0.0;
     double untouched_heights = 0.0;
     for (std::size_t at = 0; at < untouched.size(); ++at) {
-        if (sprouting[at] && sprouting[at]->condition == Condition::Sound) {
-            CHECK(sprouting[at]->age <= 2.0F * std::sqrt(0.05F) * untouched[at]->age + 1e-6F);
-            sprouts += 1.0;
-            sprout_heights += static_cast<double>(sprouting[at]->height);
-            untouched_heights += static_cast<double>(untouched[at]->height);
+        const std::optional<hog::flora::Stood>& sprout = sprouting[at];
+        const std::optional<hog::flora::Stood>& old = untouched[at];
+        if (!sprout || !old || sprout->condition != Condition::Sound) {
+            continue;
         }
+        CHECK(sprout->age <= (2.0F * std::sqrt(0.05F) * old->age) + 1e-6F);
+        sprouts += 1.0;
+        sprout_heights += static_cast<double>(sprout->height);
+        untouched_heights += static_cast<double>(old->height);
     }
     REQUIRE(sprouts > 0.0);
     CHECK(sprout_heights < 0.5 * untouched_heights);
+}
 
-    // The golden number for woods the sim has touched.
+TEST_CASE("woods the sim has touched grow as they always have", "[flora]") {
+    using hog::flora::Habitat;
     std::uint64_t hash = 0xcbf2'9ce4'8422'2325ULL;
-    for (const auto* fared : {&drought, &burned, &regrowing}) {
-        for (const std::optional<Stood>& tree : *fared) {
-            const std::uint32_t parts[] = {tree ? static_cast<std::uint32_t>(tree->condition) + 1U
-                                                : 0U,
-                                           tree ? std::bit_cast<std::uint32_t>(tree->age) : 0U,
-                                           tree ? std::bit_cast<std::uint32_t>(tree->height) : 0U};
+    for (const Habitat& habitat :
+         {Habitat{.living = 0.6F, .failing = 0.2F, .dead = 0.2F},
+          Habitat{.living = 0.05F, .established = 0.05F, .dead = 0.9F, .charred = 1.0F},
+          Habitat{.living = 0.5F, .established = 0.1F, .dead = 0.1F, .charred = 1.0F}}) {
+        for (const std::optional<hog::flora::Stood>& tree : grown_under(habitat)) {
+            const std::array<std::uint32_t, 3> parts{
+                tree ? static_cast<std::uint32_t>(tree->condition) + 1U : 0U,
+                tree ? std::bit_cast<std::uint32_t>(tree->age) : 0U,
+                tree ? std::bit_cast<std::uint32_t>(tree->height) : 0U};
             hash = fingered(std::as_bytes(std::span{parts}), hash);
         }
     }
@@ -897,13 +933,78 @@ TEST_CASE("each tree keeps its own dates, the old turning first", "[flora][seaso
     CHECK(old > young + (0.3F * trees));
 }
 
-TEST_CASE("woodland far off holds the trees grown there: as many, as tall, of the same kinds",
-          "[flora]") {
+namespace {
+
+// A site's trees, counted, against what its woodland says is grown there.
+struct Tally {
+    double trees = 0.0;
+    double heights = 0.0;
+    double broadleaves = 0.0;
+    double maples = 0.0;
+    double palms = 0.0;
+    double grown = 0.0;
+    double tall = 0.0;
+    double broad = 0.0;
+    double maple = 0.0;
+    double palm = 0.0;
+    double worst_block = 0.0;
+};
+
+// Adds what the woodland expects at a lattice cell; returns whether a living tree stands there.
+bool tally_cell(Tally& tally, std::uint32_t lattice_i, std::uint32_t lattice_j,
+                hog::planet::Biome biome, const hog::flora::Habitat& habitat) {
     using hog::flora::Genus;
-    using hog::planet::Biome;
+    const hog::flora::Woodland woodland = hog::flora::woodland_at(
+        {static_cast<float>(lattice_i) + 0.5F, static_cast<float>(lattice_j) + 0.5F}, 1, biome,
+        habitat);
+    const auto share = static_cast<double>(woodland.grown);
+    const double others = 1.0 - static_cast<double>(woodland.palm);
+    const double broadleaf = share * others * static_cast<double>(woodland.broadleaf);
+    tally.grown += share;
+    tally.tall += share * static_cast<double>(woodland.height);
+    tally.broad += broadleaf;
+    tally.maple += broadleaf * static_cast<double>(woodland.maple);
+    tally.palm += share * static_cast<double>(woodland.palm);
+    const auto tree = hog::flora::tree_grown(lattice_i, lattice_j, 1, biome, habitat);
+    if (!tree || !hog::flora::alive(tree->condition)) {
+        return false;
+    }
+    tally.trees += 1.0;
+    tally.heights += static_cast<double>(tree->height / hog::flora::stature(tree->genus));
+    tally.broadleaves += tree->genus == Genus::Oak || tree->genus == Genus::Maple ? 1.0 : 0.0;
+    tally.maples += tree->genus == Genus::Maple ? 1.0 : 0.0;
+    tally.palms += tree->genus == Genus::Palm ? 1.0 : 0.0;
+    return true;
+}
+
+// Over the whole site, and how far off the worst of its blocks is.
+Tally tally_site(hog::planet::Biome biome, const hog::flora::Habitat& habitat) {
     constexpr std::uint32_t across = 320;
     constexpr std::uint32_t block = 32;
+    Tally tally;
+    for (std::uint32_t block_j = 0; block_j < across; block_j += block) {
+        for (std::uint32_t block_i = 0; block_i < across; block_i += block) {
+            const double grown_before = tally.grown;
+            double counted = 0.0;
+            for (std::uint32_t j = block_j; j < block_j + block; ++j) {
+                for (std::uint32_t i = block_i; i < block_i + block; ++i) {
+                    counted += tally_cell(tally, 4096 + i, 9000 + j, biome, habitat) ? 1.0 : 0.0;
+                }
+            }
+            const double expected = tally.grown - grown_before;
+            tally.worst_block =
+                std::max(tally.worst_block, std::abs(counted - expected) / (block * block));
+        }
+    }
+    return tally;
+}
+
+} // namespace
+
+TEST_CASE("woodland far off holds the trees grown there: as many, as tall, of the same kinds",
+          "[flora]") {
     using hog::flora::Habitat;
+    using hog::planet::Biome;
     struct Site {
         Biome biome;
         Habitat habitat;
@@ -929,69 +1030,20 @@ TEST_CASE("woodland far off holds the trees grown there: as many, as tall, of th
            .habitat = {.living = 0.6F, .established = 0.15F, .dead = 0.2F, .charred = 1.0F}},
           {.biome = Biome::BorealForest,
            .habitat = {.living = 0.7F, .failing = 0.2F, .dead = 0.25F}}}) {
-        const Biome biome = site.biome;
-        INFO("biome " << static_cast<int>(biome) << " at " << site.habitat.temperature << " C, "
-                      << hog::flora::wetness(site.habitat) << " wet");
-        // Counted from the trees, then expected from the woodland, over the whole and by block.
-        double trees = 0.0;
-        double heights = 0.0;
-        double broadleaves = 0.0;
-        double maples = 0.0;
-        double palms = 0.0;
-        double grown = 0.0;
-        double tall = 0.0;
-        double broad = 0.0;
-        double maple = 0.0;
-        double palm = 0.0;
-        double worst_block = 0.0;
-        for (std::uint32_t block_j = 0; block_j < across; block_j += block) {
-            for (std::uint32_t block_i = 0; block_i < across; block_i += block) {
-                double counted = 0.0;
-                double expected = 0.0;
-                for (std::uint32_t j = block_j; j < block_j + block; ++j) {
-                    for (std::uint32_t i = block_i; i < block_i + block; ++i) {
-                        const std::uint32_t lattice_i = 4096 + i;
-                        const std::uint32_t lattice_j = 9000 + j;
-                        const hog::flora::Woodland woodland =
-                            hog::flora::woodland_at({static_cast<float>(lattice_i) + 0.5F,
-                                                     static_cast<float>(lattice_j) + 0.5F},
-                                                    1, biome, site.habitat);
-                        const auto share = static_cast<double>(woodland.grown);
-                        const double others = 1.0 - double{woodland.palm};
-                        expected += share;
-                        tall += share * double{woodland.height};
-                        broad += share * others * double{woodland.broadleaf};
-                        maple +=
-                            share * others * double{woodland.broadleaf} * double{woodland.maple};
-                        palm += share * double{woodland.palm};
-                        const auto tree =
-                            hog::flora::tree_grown(lattice_i, lattice_j, 1, biome, site.habitat);
-                        if (!tree || !hog::flora::alive(tree->condition)) {
-                            continue;
-                        }
-                        counted += 1.0;
-                        heights += double{tree->height / hog::flora::stature(tree->genus)};
-                        broadleaves +=
-                            tree->genus == Genus::Oak || tree->genus == Genus::Maple ? 1.0 : 0.0;
-                        maples += tree->genus == Genus::Maple ? 1.0 : 0.0;
-                        palms += tree->genus == Genus::Palm ? 1.0 : 0.0;
-                    }
-                }
-                trees += counted;
-                grown += expected;
-                worst_block = std::max(worst_block, std::abs(counted - expected) / (block * block));
-            }
-        }
-        REQUIRE(trees > 2000.0);
-        INFO("trees " << trees << " against " << grown << ", worst block off by " << worst_block
-                      << " of its cells");
-        CHECK(std::abs((grown / trees) - 1.0) < 0.03);
-        CHECK(worst_block < 0.05);
-        CHECK(std::abs((tall / grown) / (heights / trees) - 1.0) < 0.03);
-        CHECK(std::abs((broad / grown) - (broadleaves / trees)) < 0.03);
-        CHECK(std::abs((palm / grown) - (palms / trees)) < 0.03);
-        if (broadleaves > 500.0) {
-            CHECK(std::abs((maple / broad) - (maples / broadleaves)) < 0.04);
+        INFO("biome " << static_cast<int>(site.biome) << " at " << site.habitat.temperature
+                      << " C, " << hog::flora::wetness(site.habitat) << " wet");
+        const Tally tally = tally_site(site.biome, site.habitat);
+        REQUIRE(tally.trees > 2000.0);
+        INFO("trees " << tally.trees << " against " << tally.grown << ", worst block off by "
+                      << tally.worst_block << " of its cells");
+        CHECK(std::abs((tally.grown / tally.trees) - 1.0) < 0.03);
+        CHECK(tally.worst_block < 0.05);
+        CHECK(std::abs(((tally.tall / tally.grown) / (tally.heights / tally.trees)) - 1.0) < 0.03);
+        CHECK(std::abs((tally.broad / tally.grown) - (tally.broadleaves / tally.trees)) < 0.03);
+        CHECK(std::abs((tally.palm / tally.grown) - (tally.palms / tally.trees)) < 0.03);
+        if (tally.broadleaves > 500.0) {
+            CHECK(std::abs((tally.maple / tally.broad) - (tally.maples / tally.broadleaves)) <
+                  0.04);
         }
     }
 }
@@ -1029,9 +1081,9 @@ TEST_CASE("the woods' fates are read between the cells' middles, held at a face'
     CHECK(fates.at(2, 1.0, 0.1) == cells[9]);
     CHECK(fates.at(2, 0.9, 1.0) == cells[11]);
     // Read between, the shares keep their order: never more established or dead than they can be.
-    for (double s = 0.0; s <= 1.0; s += 0.0625) {
-        for (double t = 0.0; t <= 1.0; t += 0.0625) {
-            const Fate fate = fates.at(4, s, t);
+    for (int s = 0; s <= 16; ++s) {
+        for (int t = 0; t <= 16; ++t) {
+            const Fate fate = fates.at(4, s / 16.0, t / 16.0);
             CHECK(fate.established <= fate.living);
             CHECK(fate.living + fate.dead <= 1.0F + 1e-6F);
         }

@@ -111,7 +111,8 @@ TEST_CASE("varints take a byte for every seven bits", "[core][bytes]") {
     writer.write_varint(127);
     writer.write_varint(128);
     writer.write_varint(300);
-    CHECK(std::move(writer).take() == bytes_of({0x00, 0x7F, 0x80, 0x01, 0xAC, 0x02}));
+    const auto written = std::move(writer).take();
+    CHECK(written == bytes_of({0x00, 0x7F, 0x80, 0x01, 0xAC, 0x02}));
 
     hog::ByteWriter widest;
     widest.write_varint(std::numeric_limits<std::uint64_t>::max());
@@ -123,7 +124,8 @@ TEST_CASE("signed varints keep small values short either side of zero", "[core][
     for (const std::int64_t value : {0, -1, 1, -2, 63, -64}) {
         writer.write_signed(value);
     }
-    CHECK(std::move(writer).take() == bytes_of({0x00, 0x01, 0x02, 0x03, 0x7E, 0x7F}));
+    const auto written = std::move(writer).take();
+    CHECK(written == bytes_of({0x00, 0x01, 0x02, 0x03, 0x7E, 0x7F}));
 }
 
 TEST_CASE("varints read back as written", "[core][bytes]") {

@@ -92,9 +92,9 @@ TEST_CASE("cube sphere vertices know which way the surface runs", "[render][cube
         // A step of one cell along s, by the mean of the ends' tangents, lands on the next vertex.
         if ((at % across) + 1 < across) {
             const DVec3 mean = (along_s + DVec3{mesh.along_s[at + 1]}) / 2.0;
-            CHECK_THAT(
-                glm::distance(position + (mean / double{cells}), DVec3{mesh.positions[at + 1]}),
-                WithinAbs(0.0, 0.05 / cells));
+            CHECK_THAT(glm::distance(position + (mean / static_cast<double>(cells)),
+                                     DVec3{mesh.positions[at + 1]}),
+                       WithinAbs(0.0, 0.05 / cells));
         }
     }
 }

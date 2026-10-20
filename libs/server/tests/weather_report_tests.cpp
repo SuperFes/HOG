@@ -64,13 +64,13 @@ TEST_CASE("weather as coarse as may be sent goes cell for cell", "[server][weath
         CAPTURE(index);
         const auto value = static_cast<double>(index);
         const auto& cell = weather.cells[index];
-        CHECK_THAT(double{cell.cloud}, WithinAbs(value / 100.0, 1e-6));
+        CHECK_THAT(static_cast<double>(cell.cloud), WithinAbs(value / 100.0, 1e-6));
         // Ten minutes' worth, six times over in an hour.
         const double falling = 6.0 * ((value / 10.0) + 0.3);
-        CHECK_THAT(double{cell.falling}, WithinRel(falling, 1e-5));
-        CHECK_THAT(double{cell.snow}, WithinRel(0.6 / falling, 1e-5));
-        CHECK_THAT(double{cell.drift.x}, WithinAbs(value + 4.0, 1e-4));
-        CHECK_THAT(double{cell.drift.y}, WithinAbs(-1.0, 1e-5));
+        CHECK_THAT(static_cast<double>(cell.falling), WithinRel(falling, 1e-5));
+        CHECK_THAT(static_cast<double>(cell.snow), WithinRel(0.6 / falling, 1e-5));
+        CHECK_THAT(static_cast<double>(cell.drift.x), WithinAbs(value + 4.0, 1e-4));
+        CHECK_THAT(static_cast<double>(cell.drift.y), WithinAbs(-1.0, 1e-5));
         const hog::sim::Sky sky = hog::sim::sky_over(fields, under[index], config().tuning, index);
         CHECK(cell.humidity == sky.humidity);
         CHECK(cell.fog_top == sky.fog_top);
@@ -103,7 +103,7 @@ TEST_CASE("finer weather is averaged over the cells sent", "[server][weather]") 
         fields.rain[index] = first ? 0.0F : 3.0F;
         fields.wind[index] = {first ? 8.0F : 0.0F, 1.0F};
         fields.jet[index] = fields.wind[index];
-        cloud += grid.area(index) * double{fields.cloud[index]};
+        cloud += grid.area(index) * static_cast<double>(fields.cloud[index]);
     }
     const auto weather = weather_report(grid, fields, ground(grid), config(), 0ms);
     CHECK(weather.level == hog::protocol::most_weather_level);
@@ -112,14 +112,14 @@ TEST_CASE("finer weather is averaged over the cells sent", "[server][weather]") 
     for (std::uint32_t index = 0; index < sent.size(); ++index) {
         CAPTURE(index);
         const auto& cell = weather.cells[index];
-        sent_cloud += sent.area(index) * double{cell.cloud};
+        sent_cloud += sent.area(index) * static_cast<double>(cell.cloud);
         // The four under a cell are near enough the same size.
-        CHECK_THAT(double{cell.cloud}, WithinRel(0.5, 0.05));
-        CHECK_THAT(double{cell.falling}, WithinRel(6.0 * 10.0 / 4.0, 0.05));
-        CHECK_THAT(double{cell.snow}, WithinRel(0.1, 0.05));
-        CHECK_THAT(double{cell.drift.x}, WithinRel(2.0, 0.05));
-        CHECK_THAT(double{cell.drift.y}, WithinAbs(1.0, 1e-5));
+        CHECK_THAT(static_cast<double>(cell.cloud), WithinRel(0.5, 0.05));
+        CHECK_THAT(static_cast<double>(cell.falling), WithinRel(6.0 * 10.0 / 4.0, 0.05));
+        CHECK_THAT(static_cast<double>(cell.snow), WithinRel(0.1, 0.05));
+        CHECK_THAT(static_cast<double>(cell.drift.x), WithinRel(2.0, 0.05));
+        CHECK_THAT(static_cast<double>(cell.drift.y), WithinAbs(1.0, 1e-5));
     }
     // Nothing is lost or made in averaging.
-    CHECK_THAT(double{sent_cloud}, WithinRel(cloud, 1e-3));
+    CHECK_THAT(static_cast<double>(sent_cloud), WithinRel(cloud, 1e-3));
 }

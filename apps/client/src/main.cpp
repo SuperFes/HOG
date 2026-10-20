@@ -729,6 +729,16 @@ std::uint32_t world_rate(const Connection& connection) {
     return session != nullptr ? session->world_rate() : 1;
 }
 
+// Doubles or halves the local clock as `]` and `[` asked.
+void change_pace(Controls& controls, client::PlanetClock& clock) {
+    for (; controls.faster_time > 0; --controls.faster_time) {
+        clock.faster();
+    }
+    for (; controls.faster_time < 0; ++controls.faster_time) {
+        clock.slower();
+    }
+}
+
 // Asks the server to double or halve the world's time as `{` and `}` asked, from the rate it
 // last said it runs at; the server obliges only where its config allows time control.
 void hurry_world(Controls& controls, Connection& connection) {
@@ -797,12 +807,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
         }
         camera = move(controls, player, flight, world, seconds);
         const double ground_height = client::ground_under(world, camera.eye);
-        for (; controls.faster_time > 0; --controls.faster_time) {
-            clock.faster();
-        }
-        for (; controls.faster_time < 0; ++controls.faster_time) {
-            clock.slower();
-        }
+        change_pace(controls, clock);
         hurry_world(controls, connection);
         clock.advance(seconds);
         title.count(
