@@ -240,8 +240,13 @@ Species palm() {
     palm.frond_fullness = 0.3F;
     palm.woody = 1;
     palm.lean = 0.3F;
-    palm.fruit = {
-        .count = 9, .radius = 0.12F, .length = 1.3F, .bearing = {.young = 0.0F, .old = 0.6F}};
+    palm.fruit = {.count = 9,
+                  .radius = 0.12F,
+                  .length = 1.3F,
+                  .bearing = {.young = 0.0F, .old = 0.6F},
+                  .fallen = 5,
+                  .scatter = 2.5F,
+                  .lying = {.young = 0.0F, .old = 1.6F}};
     // A young palm is a short stem under a spray of short, upswept fronds and no fruit; an old one
     // stands its crown of drooping fronds on a trunk grown hardly thicker, bearing less.
     palm.ageing = {.girth = {.young = 0.75F, .old = 1.05F},
@@ -289,6 +294,8 @@ Species aged(const Species& species, float age) noexcept {
     boughs.rise *= across(at, ageing.rise);
     grown.fruit.count = static_cast<int>(
         std::lround(static_cast<float>(species.fruit.count) * across(at, species.fruit.bearing)));
+    grown.fruit.fallen = static_cast<int>(
+        std::lround(static_cast<float>(species.fruit.fallen) * across(at, species.fruit.lying)));
     return grown;
 }
 

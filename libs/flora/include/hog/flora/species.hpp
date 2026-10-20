@@ -44,12 +44,16 @@ struct Ageing {
     Span rise;    // their pull toward upright, or droop
 };
 
-// Fruit hung in a ring just under where the trunk's crown begins, each an ellipsoid of wood.
+// Fruit hung in a ring just under where the trunk's crown begins, each an ellipsoid of wood, and
+// more lying fallen on the ground beneath.
 struct Fruit {
-    int count = 0;       // in its prime
-    float radius = 0.1F; // metres across its middle
-    float length = 1.4F; // of its width, end to end
-    Span bearing;        // the count's factor with age
+    int count = 0;        // hanging, in its prime
+    float radius = 0.1F;  // metres across its middle
+    float length = 1.4F;  // of its width, end to end
+    Span bearing;         // the count's factor with age
+    int fallen = 0;       // lying beneath, in its prime
+    float scatter = 2.0F; // metres past the trunk they roll
+    Span lying;           // the fallen count's factor with age
 };
 
 // A species is a small rule set the grammar grows an individual from, deterministically from a

@@ -57,12 +57,25 @@ void lay_frond(const Species& species, const Bough& bough, const Shoot& shoot, D
                            .seed = seed});
 }
 
-// Fruit hung round the trunk at `under`, just below its crown, each an ellipsoid of wood on a
-// short stalk, hanging down and out.
-void hang_fruit(const Fruit& fruit, const Ring& under, Dice& dice, Skeleton& tree) {
+// One fruit, an ellipsoid of wood running from `from` along its frame's heading.
+Bough one_fruit(const Fruit& fruit, Vec3 from, Quat frame) {
     constexpr std::array<float, 5> along{0.0F, 0.15F, 0.5F, 0.85F, 1.0F};
     constexpr std::array<float, 5> across{0.0F, 0.75F, 1.0F, 0.75F, 0.0F};
     const float length = 2.0F * fruit.radius * fruit.length;
+    const Vec3 heading = frame * up;
+    Bough bough{.level = 0, .sides = 6, .rings = {}};
+    for (std::size_t ring = 0; ring < along.size(); ++ring) {
+        bough.rings.push_back({.centre = from + (heading * (length * along.at(ring))),
+                               .frame = frame,
+                               .radius = fruit.radius * across.at(ring)});
+    }
+    return bough;
+}
+
+// Fruit hung round the trunk at `under`, just below its crown, each on a short stalk, hanging
+// down and out; then the fallen, lying on their sides on the ground beneath, rolled out from the
+// trunk and sunk a third into the ground, which also hides a gentle slope under them.
+void hang_fruit(const Fruit& fruit, const Ring& under, Dice& dice, Skeleton& tree) {
     for (int nut = 0; nut < fruit.count; ++nut) {
         const float radial =
             (tau * (static_cast<float>(nut) / static_cast<float>(fruit.count))) + dice.around(0.4F);
@@ -73,14 +86,18 @@ void hang_fruit(const Fruit& fruit, const Ring& under, Dice& dice, Skeleton& tre
         const Vec3 out = under.frame * (about_z(radial) * Vec3{0.0F, -1.0F, 0.0F});
         const Vec3 stalk = under.centre + (out * (under.radius + (0.5F * fruit.radius))) -
                            ((under.frame * up) * drop);
-        const Vec3 heading = frame * up;
-        Bough bough{.level = 0, .sides = 6, .rings = {}};
-        for (std::size_t ring = 0; ring < along.size(); ++ring) {
-            bough.rings.push_back({.centre = stalk + (heading * (length * along.at(ring))),
-                                   .frame = frame,
-                                   .radius = fruit.radius * across.at(ring)});
-        }
-        tree.boughs.push_back(std::move(bough));
+        tree.boughs.push_back(one_fruit(fruit, stalk, frame));
+    }
+    const float length = 2.0F * fruit.radius * fruit.length;
+    for (int lying = 0; lying < fruit.fallen; ++lying) {
+        const float way = dice.unit() * tau;
+        const float roll = under.radius + fruit.radius + (dice.unit() * fruit.scatter);
+        const float turn = dice.unit() * tau;
+        const float tip = dice.around(0.25F);
+        const Vec3 landed = Vec3{under.centre.x + (turning_cos(way) * roll),
+                                 under.centre.y + (turning_sin(way) * roll), fruit.radius / 3.0F};
+        const Quat frame = glm::normalize(about_z(turn) * about_x((0.25F * tau) + tip));
+        tree.boughs.push_back(one_fruit(fruit, landed - ((frame * up) * (0.5F * length)), frame));
     }
 }
 
@@ -171,7 +188,8 @@ Skeleton grow(const Species& species, std::uint32_t seed) {
         } else {
             lay_frond(species, bough, shoot, dice, tree);
         }
-        const bool bearing = shoot.level == 0 && species.fruit.count > 0;
+        const bool bearing =
+            shoot.level == 0 && (species.fruit.count > 0 || species.fruit.fallen > 0);
         const Ring under = bearing ? between(bough, level.start) : Ring{};
         tree.boughs.push_back(std::move(bough));
         if (bearing) {

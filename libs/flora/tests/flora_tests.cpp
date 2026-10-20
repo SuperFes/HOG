@@ -271,7 +271,7 @@ TEST_CASE("a palm leans from its foot and curves back up under a crown of archin
         const Bough& trunk = tree.boughs.front();
         const float height = trunk.rings.back().centre.z;
         CHECK(tree.fronds.size() == 21);
-        CHECK(tree.boughs.size() == 1 + 21 + 9);
+        CHECK(tree.boughs.size() == 1 + 21 + 9 + 5);
         // Bare to its crown, every frond sprouting from the top of the trunk.
         for (const hog::flora::Frond& frond : tree.fronds) {
             CHECK(frond.spine.front().centre.z > 0.9F * height);
@@ -316,33 +316,54 @@ TEST_CASE("coconuts hang round a palm's trunk under its crown, once it is old en
     for (const hog::flora::Frond& frond : tree.fronds) {
         lowest_frond = std::min(lowest_frond, frond.spine.front().centre.z);
     }
-    int nuts = 0;
+    int hanging = 0;
+    int fallen = 0;
     for (const Bough& bough : tree.boughs) {
         if (bough.rings.size() != 5) {
             continue;
         }
-        ++nuts;
-        // Wood, closed at both ends, as wide as the species says, hanging downward.
+        // Wood, closed at both ends, as wide as the species says.
         CHECK(bough.level == 0);
         CHECK(bough.rings.front().radius == 0.0F);
         CHECK(bough.rings.back().radius == 0.0F);
         CHECK(bough.rings[2].radius == species.fruit.radius);
-        CHECK(bough.rings.back().centre.z < bough.rings.front().centre.z);
-        // Under the crown and against the trunk.
         const Vec3 middle = bough.rings[2].centre;
-        CHECK(middle.z < lowest_frond);
-        CHECK(middle.z > lowest_frond - 1.0F);
-        CHECK(glm::length(hog::Vec2{middle} - hog::Vec2{top.centre}) < 1.0F);
+        const float from_crown = glm::length(hog::Vec2{middle} - hog::Vec2{top.centre});
+        if (middle.z > 1.0F) {
+            ++hanging;
+            // Hanging downward, under the crown and against the trunk.
+            CHECK(bough.rings.back().centre.z < bough.rings.front().centre.z);
+            CHECK(middle.z < lowest_frond);
+            CHECK(middle.z > lowest_frond - 1.0F);
+            CHECK(from_crown < 1.0F);
+            continue;
+        }
+        ++fallen;
+        // On its side, part sunk, rolled out from under the crown but not far.
+        const float span = bough.rings.back().centre.z - bough.rings.front().centre.z;
+        CHECK(std::abs(span) < 0.5F * species.fruit.length * 2.0F * species.fruit.radius);
+        CHECK(middle.z > 0.0F);
+        CHECK(middle.z < species.fruit.radius);
+        CHECK(from_crown > species.fruit.radius);
+        CHECK(from_crown < 1.0F + species.fruit.scatter);
     }
-    CHECK(nuts == species.fruit.count);
+    CHECK(hanging == species.fruit.count);
+    CHECK(fallen == species.fruit.fallen);
     CHECK(aged(species, 0.15F).fruit.count < 3);
     CHECK(aged(species, 0.0F).fruit.count == 0);
     CHECK(aged(species, prime_age).fruit.count == species.fruit.count);
     CHECK(aged(species, 1.0F).fruit.count < species.fruit.count);
+    // None under a sapling; more lie under an old palm than in its prime, as they gather.
+    CHECK(aged(species, 0.0F).fruit.fallen == 0);
+    CHECK(aged(species, prime_age).fruit.fallen == species.fruit.fallen);
+    CHECK(aged(species, 1.0F).fruit.fallen > species.fruit.fallen);
+    const Skeleton sapling = grow(aged(species, 0.0F), 7U);
+    CHECK(std::ranges::none_of(sapling.boughs,
+                               [](const Bough& bough) { return bough.rings.size() == 5; }));
     // Bare species grow as they always have: leaning and bearing roll dice only where set.
     CHECK(pine().lean == 0.0F);
     CHECK(pine().fruit.count == 0);
-    CHECK(fingered(mesh(tree)) == 0x6d45'f8c5'd5f8'c960ULL);
+    CHECK(fingered(mesh(tree)) == 0x2f2b'8190'c3f8'9c0fULL);
 }
 
 TEST_CASE("leaves hold full along a frond, needles thin evenly", "[flora]") {
