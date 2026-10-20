@@ -1,4 +1,5 @@
 add_library(hog_flora
+    src/bushes.cpp
     src/fates.cpp
     src/mesh.cpp
     src/skeleton.cpp
@@ -17,6 +18,7 @@ hog_target_defaults(hog_flora)
 target_compile_options(hog_flora PRIVATE -ffp-contract=off)
 
 hog_add_tests(hog_flora
+    tests/bush_tests.cpp
     tests/flora_tests.cpp)
 if(TARGET hog_flora_tests)
     target_compile_options(hog_flora_tests PRIVATE -ffp-contract=off)
