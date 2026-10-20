@@ -44,6 +44,14 @@ struct Ageing {
     Span rise;    // their pull toward upright, or droop
 };
 
+// Fruit hung in a ring just under where the trunk's crown begins, each an ellipsoid of wood.
+struct Fruit {
+    int count = 0;       // in its prime
+    float radius = 0.1F; // metres across its middle
+    float length = 1.4F; // of its width, end to end
+    Span bearing;        // the count's factor with age
+};
+
 // A species is a small rule set the grammar grows an individual from, deterministically from a
 // seed: the same on every machine, as many times as it's grown.
 struct Species {
@@ -55,6 +63,10 @@ struct Species {
     // 0 thins a frond evenly to its tip, as needles; 1 holds it full and rounds it off, as leaves.
     float frond_fullness = 0.0F;
     int woody = 1; // levels meshed as wood; the fronds cover the twigs past them
+    // Radians the trunk leans off upright at its foot, at most, its own way for each tree; its
+    // rise curves it back.
+    float lean = 0.0F;
+    Fruit fruit;
     Ageing ageing;
     Leafing leafing; // evergreen unless set
 };
@@ -70,6 +82,9 @@ inline constexpr int genus_count = 3;
 // The maple analogue: a straight trunk carried up into steeply climbing limbs, a dense oval crown
 // that turns early and bright.
 [[nodiscard]] Species maple();
+// The palm analogue: a bare trunk leaning from its foot and curving back up, a crown of long
+// arching fronds, coconuts hung beneath it.
+[[nodiscard]] Species palm();
 [[nodiscard]] Species species_of(Genus genus);
 
 // The age a species' rules describe it at, in its prime; 0 is a sapling, 1 old.

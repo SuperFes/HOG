@@ -1,6 +1,7 @@
 #include <hog/flora/species.hpp>
 
 #include <algorithm>
+#include <cmath>
 
 namespace hog::flora {
 
@@ -204,6 +205,56 @@ Species maple() {
     return maple;
 }
 
+Species palm() {
+    Species palm;
+    palm.grown = 2;
+    palm.levels[0] = {.length = 15.0F,
+                      .sway = 0.2F,
+                      .radius = 0.2F,
+                      .taper = 0.3F,
+                      .sections = 12,
+                      .sides = 7,
+                      .children = 21,
+                      .whorl = 7,
+                      .start = 0.96F,
+                      .angle = 1.15F,
+                      .fall = 0.0F,
+                      .gnarl = 0.02F,
+                      .rise = 0.004F};
+    palm.levels[1] = {.length = 5.0F,
+                      .sway = 0.2F,
+                      .radius = 0.4F,
+                      .taper = 0.9F,
+                      .sections = 6,
+                      .sides = 3,
+                      .children = 0,
+                      .whorl = 1,
+                      .start = 0.3F,
+                      .angle = 0.8F,
+                      .fall = 0.0F,
+                      .gnarl = 0.04F,
+                      .rise = -0.012F};
+    palm.frond_width = 0.17F;
+    palm.frond_sway = 0.2F;
+    palm.frond_tilt = 0.45F;
+    palm.frond_fullness = 0.3F;
+    palm.woody = 1;
+    palm.lean = 0.3F;
+    palm.fruit = {
+        .count = 9, .radius = 0.12F, .length = 1.3F, .bearing = {.young = 0.0F, .old = 0.6F}};
+    // A young palm is a short stem under a spray of short, upswept fronds and no fruit; an old one
+    // stands its crown of drooping fronds on a trunk grown hardly thicker, bearing less.
+    palm.ageing = {.girth = {.young = 0.75F, .old = 1.05F},
+                   .crowded = {.young = 1.0F, .old = 1.0F},
+                   .raised = {.young = 1.0F, .old = 1.0F},
+                   .fall = {.young = 1.0F, .old = 1.0F},
+                   .lean = {.young = 0.75F, .old = 1.1F},
+                   .gnarl = {.young = 0.5F, .old = 1.5F},
+                   .reach = {.young = 0.6F, .old = 1.0F},
+                   .rise = {.young = 0.4F, .old = 1.3F}};
+    return palm;
+}
+
 Species species_of(Genus genus) {
     switch (genus) {
     case Genus::Oak:
@@ -234,6 +285,8 @@ Species aged(const Species& species, float age) noexcept {
     trunk.gnarl *= across(at, ageing.gnarl);
     boughs.length *= across(at, ageing.reach);
     boughs.rise *= across(at, ageing.rise);
+    grown.fruit.count = static_cast<int>(
+        std::lround(static_cast<float>(species.fruit.count) * across(at, species.fruit.bearing)));
     return grown;
 }
 
