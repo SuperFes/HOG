@@ -43,9 +43,10 @@ constexpr DVec3 east{1.0, 0.0, 0.0};
 
 using Pixels = std::vector<std::uint8_t>;
 
-// A flat patch of one biome, level at `ground_height`, centred on its origin.
-std::vector<hog::terrain::PatchVertex> field(hog::planet::Biome biome,
-                                             hog::terrain::Cover cover = {}) {
+// A flat patch of one biome, or two blended, level at `ground_height`, centred on its origin.
+std::vector<hog::terrain::PatchVertex>
+field(hog::planet::Biome biome, hog::terrain::Cover cover = {},
+      hog::planet::Biome blend_biome = hog::planet::Biome::Ocean, std::uint8_t blend = 0) {
     std::vector<hog::terrain::PatchVertex> vertices(hog::render::patch_vertex_count);
     constexpr int middle = hog::terrain::patch_cells / 2;
     for (int i = 0; i < hog::terrain::patch_side; ++i) {
@@ -56,7 +57,9 @@ std::vector<hog::terrain::PatchVertex> field(hog::planet::Biome biome,
                                              static_cast<float>((j - middle) * spacing), 0.0F},
                             .normal = Vec3{0.0F, 0.0F, 1.0F},
                             .biome = biome,
-                            .cover = cover};
+                            .cover = cover,
+                            .blend_biome = blend_biome,
+                            .blend = blend};
         }
     }
     return vertices;
@@ -71,6 +74,8 @@ struct Field {
     bool tall_only = false;
     double ground = ground_height; // metres above sea level
     hog::terrain::Cover cover{};
+    hog::planet::Biome blend_biome = hog::planet::Biome::Ocean;
+    std::uint8_t blend = 0;
 };
 
 // The field's grass alone over black, seen from standing height looking slightly down, east.
@@ -87,7 +92,7 @@ Pixels draw(hog::render::Device& device, const Field& grown) {
     REQUIRE(pool);
     const std::uint32_t slot = pool->acquire().value_or(99);
     REQUIRE(slot == 0);
-    REQUIRE(pool->stage(0, slot, field(grown.biome, grown.cover)));
+    REQUIRE(pool->stage(0, slot, field(grown.biome, grown.cover, grown.blend_biome, grown.blend)));
 
     const WorldPosition origin{(up * (radius + grown.ground)) + (east * grown.away)};
     const WorldPosition eye{up * (radius + grown.ground + 1.5)};
@@ -184,6 +189,24 @@ TEST_CASE("grass grows over grassland and not over the sea", "[render]") {
     const std::size_t tufts = lit_pixels(draw(*device, {.biome = hog::planet::Biome::Desert}));
     CHECK(tufts > 0);
     CHECK(tufts < lit / 4);
+}
+
+TEST_CASE("grass strays past its own biome, thinning with that biome's share", "[render]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    using hog::planet::Biome;
+    const std::size_t grassland = lit_pixels(draw(*device, {.biome = Biome::Grassland}));
+    const std::size_t half = lit_pixels(
+        draw(*device, {.biome = Biome::Ocean, .blend_biome = Biome::Grassland, .blend = 128}));
+    const std::size_t fringe = lit_pixels(
+        draw(*device, {.biome = Biome::Ocean, .blend_biome = Biome::Grassland, .blend = 32}));
+    INFO("grassland " << grassland << ", half " << half << ", fringe " << fringe);
+    CHECK(half > grassland / 4);
+    CHECK(half < grassland);
+    CHECK(fringe > 0);
+    CHECK(fringe < half);
 }
 
 TEST_CASE("grass takes the ground where the trees are gone, once a fire's black has greened",

@@ -42,9 +42,10 @@ constexpr DVec3 east{1.0, 0.0, 0.0};
 
 using Pixels = std::vector<std::uint8_t>;
 
-// A flat patch of one biome, level at `ground_height`, centred on its origin.
-std::vector<hog::terrain::PatchVertex> field(hog::planet::Biome biome, double spacing,
-                                             hog::terrain::Cover cover = {}) {
+// A flat patch of one biome, or two blended, level at `ground_height`, centred on its origin.
+std::vector<hog::terrain::PatchVertex>
+field(hog::planet::Biome biome, double spacing, hog::terrain::Cover cover = {},
+      hog::planet::Biome blend_biome = hog::planet::Biome::Ocean, std::uint8_t blend = 0) {
     std::vector<hog::terrain::PatchVertex> vertices(hog::render::patch_vertex_count);
     constexpr int middle = hog::terrain::patch_cells / 2;
     for (int i = 0; i < hog::terrain::patch_side; ++i) {
@@ -55,7 +56,9 @@ std::vector<hog::terrain::PatchVertex> field(hog::planet::Biome biome, double sp
                                              static_cast<float>((j - middle) * spacing), 0.0F},
                             .normal = Vec3{0.0F, 0.0F, 1.0F},
                             .biome = biome,
-                            .cover = cover};
+                            .cover = cover,
+                            .blend_biome = blend_biome,
+                            .blend = blend};
         }
     }
     return vertices;
@@ -71,6 +74,8 @@ struct Patch {
     DVec3 wind{0.0};
     double seconds = 0.0;
     hog::terrain::Cover cover{};
+    hog::planet::Biome blend_biome = hog::planet::Biome::Ocean;
+    std::uint8_t blend = 0;
 };
 
 // The patch's bushes alone over black, seen from overhead so every one is in view.
@@ -87,7 +92,8 @@ Pixels draw(hog::render::Device& device, const Patch& grown) {
     REQUIRE(pool);
     const std::uint32_t slot = pool->acquire().value_or(99);
     REQUIRE(slot == 0);
-    REQUIRE(pool->stage(0, slot, field(grown.biome, grown.spacing, grown.cover)));
+    REQUIRE(pool->stage(
+        0, slot, field(grown.biome, grown.spacing, grown.cover, grown.blend_biome, grown.blend)));
 
     const WorldPosition origin{(up * (radius + ground_height)) + (east * grown.offset.x) +
                                (DVec3{0.0, 1.0, 0.0} * grown.offset.y)};
@@ -173,6 +179,24 @@ TEST_CASE("bushes grow where their biome grows them", "[render]") {
     // A grassland grows the odd lone bush, far sparser than a shrubland.
     const std::size_t lone = lit_pixels(draw(*device, {.biome = hog::planet::Biome::Grassland}));
     CHECK(lone < shrubland / 3);
+}
+
+TEST_CASE("bushes stray past their own biome, thinning with that biome's share", "[render]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    using hog::planet::Biome;
+    const std::size_t shrubland = lit_pixels(draw(*device, {.biome = Biome::Shrubland}));
+    const std::size_t half = lit_pixels(
+        draw(*device, {.biome = Biome::Ocean, .blend_biome = Biome::Shrubland, .blend = 128}));
+    const std::size_t fringe = lit_pixels(
+        draw(*device, {.biome = Biome::Ocean, .blend_biome = Biome::Shrubland, .blend = 32}));
+    INFO("shrubland " << shrubland << ", half " << half << ", fringe " << fringe);
+    CHECK(half > shrubland / 4);
+    CHECK(half < shrubland);
+    CHECK(fringe > 0);
+    CHECK(fringe < half);
 }
 
 TEST_CASE("shrubs crowd in where the dead trees have fallen, and not on black ground", "[render]") {

@@ -67,6 +67,9 @@ struct Corner {
     float3 position;
     float3 normal;
     uint biome;
+    // The biome the ground about it fades into, and that biome's share.
+    uint blend_biome;
+    float blend;
     // As terrain::Cover: the ground a fire left black, and of the trees it would hold those gone
     // and those fallen.
     float scar;
@@ -80,6 +83,9 @@ Corner corner_at(uint bias, uint index) {
     corner.position = asfloat(vertices.Load3(at));
     corner.normal = asfloat(vertices.Load3(at + 12));
     corner.biome = min(vertices.Load(at + 24) & 0xffu, biome_count - 1);
+    const uint blend = vertices.Load(at + 32);
+    corner.blend_biome = min(blend & 0xffu, biome_count - 1);
+    corner.blend = float((blend >> 8) & 0xffu) / 255.0;
     const uint cover = vertices.Load(at + 28) >> 16;
     corner.scar = float(cover & 0xffu) / 255.0;
     corner.gone = float((cover >> 12) & 0xfu) / 15.0;
@@ -173,8 +179,10 @@ Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const float v = unit(hash + 1u);
     const uint at = (i * patch_side) + j;
     const Corner near = corner_at(bias, at + (u < 0.5 ? 0 : patch_side) + (v < 0.5 ? 0 : 1));
-    const float4 kind = settings.blade[near.biome];
-    const float4 spread = settings.spread[near.biome];
+    // Near another biome a plant may be one of its, the fewer the further in.
+    const uint biome = unit(hash + 10u) < near.blend ? near.blend_biome : near.biome;
+    const float4 kind = settings.blade[biome];
+    const float4 spread = settings.spread[biome];
     // Where the trees are gone, grass takes the open ground, once the black of a fire has greened.
     const float sown = lerp(spread.x, max(spread.x, pioneers), near.gone) * (1.0 - near.scar);
     const bool lawn_here = kind.w > (tall_only ? tall_floor : 0.0) && unit(hash + 2u) < sown;

@@ -70,6 +70,9 @@ struct Corner {
     float3 position;
     float3 normal;
     uint biome;
+    // The biome the ground about it fades into, and that biome's share.
+    uint blend_biome;
+    float blend;
     // As terrain::Cover: the ground a fire left black, and of the trees it would hold those gone
     // and those fallen.
     float scar;
@@ -83,6 +86,9 @@ Corner corner_at(uint bias, uint index) {
     corner.position = asfloat(vertices.Load3(at));
     corner.normal = asfloat(vertices.Load3(at + 12));
     corner.biome = min(vertices.Load(at + 24) & 0xffu, biome_count - 1);
+    const uint blend = vertices.Load(at + 32);
+    corner.blend_biome = min(blend & 0xffu, biome_count - 1);
+    corner.blend = float((blend >> 8) & 0xffu) / 255.0;
     const uint cover = vertices.Load(at + 28) >> 16;
     corner.scar = float(cover & 0xffu) / 255.0;
     corner.gone = float((cover >> 12) & 0xfu) / 15.0;
@@ -151,11 +157,13 @@ Bush vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
 
     const uint at = (i * patch_side) + j;
     const Corner near = corner_at(bias, at + (u < 0.5 ? 0 : patch_side) + (v < 0.5 ? 0 : 1));
-    const float4 leaf = settings.leaf[near.biome];
-    const float4 shapes = settings.shapes[near.biome];
+    // Near another biome a plant may be one of its, the fewer the further in.
+    const uint biome = unit(hash + 8u) < near.blend ? near.blend_biome : near.biome;
+    const float4 leaf = settings.leaf[biome];
+    const float4 shapes = settings.shapes[biome];
     // Where trees stand, bushes keep to their place: crowding the woods' sunny edges, thinning
     // under the canopy, and spread as ever where no woods grow at all.
-    const float4 woods = settings.woods[near.biome];
+    const float4 woods = settings.woods[biome];
     float share = shapes.x;
     if (woods.y > 0.5) {
         // This lattice lies two levels finer than the trees'.
