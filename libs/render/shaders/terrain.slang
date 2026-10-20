@@ -57,6 +57,7 @@ struct Vertex {
     [[vk::location(2)]] uint biome;
     [[vk::location(3)]] float4 woods; // as terrain::Woods, each byte read 0 to 1
     [[vk::location(4)]] float palms;  // the last of them
+    [[vk::location(5)]] float scar;   // as terrain::Cover's first byte, 0 to 1
 };
 
 struct Ground {
@@ -69,6 +70,7 @@ struct Ground {
     float4 biomes[(biome_count + 3) / 4];
     float4 woods;
     float palms;
+    float scar;
 };
 
 // Ground no higher above sea level than this, by the metre it lies from the eye, is too near level
@@ -173,6 +175,7 @@ Ground vertex_main(Vertex vertex) {
     ground.biomes[biome / 4][biome % 4] = 1.0;
     ground.woods = vertex.woods;
     ground.palms = vertex.palms;
+    ground.scar = vertex.scar;
     return ground;
 }
 
@@ -225,6 +228,13 @@ float3 albedo(Ground ground, float3 normal) {
         colour += share * near * far / max(settings.means[biome].rgb, 1.0 / 1024.0);
     }
     return colour;
+}
+
+// Ground a fire left black: charcoal and ash, greening back as the scar fades.
+static const float3 charcoal = float3(0.03, 0.027, 0.024);
+
+float3 scorched(Ground ground, float3 colour) {
+    return lerp(colour, charcoal, 0.9 * saturate(ground.scar));
 }
 
 // As terrain::woods_crowding and woods_tallest.
@@ -324,7 +334,8 @@ struct Shaded {
 // The ground's colour lit by `on_ground` facing its normal and `on_water` facing up, each times
 // pi, with water over it where it lies below the sea.
 float3 shaded(Ground ground, float3 normal, float3 on_ground, float3 on_water, float4 year) {
-    const float3 lit_ground = wooded(ground, albedo(ground, normal), year) * on_ground;
+    const float3 lit_ground =
+        wooded(ground, scorched(ground, albedo(ground, normal)), year) * on_ground;
     const float under_sea = settings.tiling.z > 0.0 ? -ground.height : 0.0;
     if (under_sea <= 0.0) {
         return lit_ground;

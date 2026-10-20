@@ -60,7 +60,11 @@ constexpr std::array vertex_attributes{
     VkVertexInputAttributeDescription{.location = 4,
                                       .binding = 0,
                                       .format = VK_FORMAT_R8_UNORM,
-                                      .offset = offsetof(PatchVertex, woods) + 4}};
+                                      .offset = offsetof(PatchVertex, woods) + 4},
+    VkVertexInputAttributeDescription{.location = 5,
+                                      .binding = 0,
+                                      .format = VK_FORMAT_R8_UNORM,
+                                      .offset = offsetof(PatchVertex, cover)}};
 constexpr VkDescriptorSetLayoutBinding binding(std::uint32_t at, VkDescriptorType type,
                                                VkShaderStageFlags stages) noexcept {
     return {.binding = at,

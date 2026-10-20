@@ -43,7 +43,8 @@ constexpr DVec3 east{1.0, 0.0, 0.0};
 using Pixels = std::vector<std::uint8_t>;
 
 // A flat patch of one biome, level at `ground_height`, centred on its origin.
-std::vector<hog::terrain::PatchVertex> field(hog::planet::Biome biome, double spacing) {
+std::vector<hog::terrain::PatchVertex> field(hog::planet::Biome biome, double spacing,
+                                             hog::terrain::Cover cover = {}) {
     std::vector<hog::terrain::PatchVertex> vertices(hog::render::patch_vertex_count);
     constexpr int middle = hog::terrain::patch_cells / 2;
     for (int i = 0; i < hog::terrain::patch_side; ++i) {
@@ -53,7 +54,8 @@ std::vector<hog::terrain::PatchVertex> field(hog::planet::Biome biome, double sp
             vertices[at] = {.position = Vec3{static_cast<float>((i - middle) * spacing),
                                              static_cast<float>((j - middle) * spacing), 0.0F},
                             .normal = Vec3{0.0F, 0.0F, 1.0F},
-                            .biome = biome};
+                            .biome = biome,
+                            .cover = cover};
         }
     }
     return vertices;
@@ -68,6 +70,7 @@ struct Patch {
     int shift = 0;
     DVec3 wind{0.0};
     double seconds = 0.0;
+    hog::terrain::Cover cover{};
 };
 
 // The patch's bushes alone over black, seen from overhead so every one is in view.
@@ -84,7 +87,7 @@ Pixels draw(hog::render::Device& device, const Patch& grown) {
     REQUIRE(pool);
     const std::uint32_t slot = pool->acquire().value_or(99);
     REQUIRE(slot == 0);
-    REQUIRE(pool->stage(0, slot, field(grown.biome, grown.spacing)));
+    REQUIRE(pool->stage(0, slot, field(grown.biome, grown.spacing, grown.cover)));
 
     const WorldPosition origin{(up * (radius + ground_height)) + (east * grown.offset.x) +
                                (DVec3{0.0, 1.0, 0.0} * grown.offset.y)};
@@ -170,6 +173,24 @@ TEST_CASE("bushes grow where their biome grows them", "[render]") {
     // A grassland grows the odd lone bush, far sparser than a shrubland.
     const std::size_t lone = lit_pixels(draw(*device, {.biome = hog::planet::Biome::Grassland}));
     CHECK(lone < shrubland / 3);
+}
+
+TEST_CASE("shrubs crowd in where the dead trees have fallen, and not on black ground", "[render]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    using hog::planet::Biome;
+    const std::size_t woods = lit_pixels(draw(*device, {.biome = Biome::TemperateForest}));
+    // The trees gone, the dead still standing: the canopy's shade lifted, no more.
+    const std::size_t standing =
+        lit_pixels(draw(*device, {.biome = Biome::TemperateForest, .cover = {0, 0xf0}}));
+    const std::size_t fallen =
+        lit_pixels(draw(*device, {.biome = Biome::TemperateForest, .cover = {0, 0xff}}));
+    INFO("woods " << woods << ", dead standing " << standing << ", fallen " << fallen);
+    CHECK(standing >= woods);
+    CHECK(fallen > standing + (standing / 2));
+    CHECK(lit_pixels(draw(*device, {.biome = Biome::TemperateForest, .cover = {255, 0xff}})) == 0);
 }
 
 TEST_CASE("a bush stands its ground at every terrain level", "[render]") {

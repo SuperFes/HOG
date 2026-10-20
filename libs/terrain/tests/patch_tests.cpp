@@ -441,5 +441,31 @@ TEST_CASE("a patch's woods thin where they died, and grow back younger", "[terra
         bake_patch(world, cell, hog::flora::Fates{2, std::vector<hog::flora::Fate>(96)});
     for (std::size_t at = 0; at < told.vertices.size(); ++at) {
         CHECK(told.vertices[at].woods == untouched.vertices[at].woods);
+        CHECK(told.vertices[at].cover == hog::terrain::Cover{});
     }
+}
+
+TEST_CASE("a patch's ground keeps a fire's black, and how much of its woods are gone and fallen",
+          "[terrain][patch]") {
+    using hog::terrain::Cover;
+    using hog::terrain::packed_cover;
+    // Seven in ten of the woods gone, half of those still standing dead, the ground two fifths
+    // black.
+    const hog::flora::Fate fate{.living = 0.3F, .established = 0.3F, .dead = 0.35F, .scar = 0.4F};
+    CHECK(packed_cover(fate, true) == Cover{102, (11U << 4U) | 5U});
+    // Where no woods grow, only the black.
+    CHECK(packed_cover(fate, false) == Cover{102, 0});
+    CHECK(packed_cover(hog::flora::Fate{}, true) == Cover{});
+
+    const World& world = shared_world();
+    const CellId cell = land_patch();
+    const Patch burned =
+        bake_patch(world, cell, hog::flora::Fates{2, std::vector<hog::flora::Fate>(6 * 16, fate)});
+    int wooded = 0;
+    for (const hog::terrain::PatchVertex& vertex : burned.vertices) {
+        const bool woods = hog::flora::trees_of(vertex.biome).height > 0.0F;
+        CHECK(vertex.cover == packed_cover(fate, woods));
+        wooded += woods ? 1 : 0;
+    }
+    CHECK(wooded > 0);
 }

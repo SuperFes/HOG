@@ -36,19 +36,21 @@ constexpr double skirt_spacings = patch_cells / 4.0;
     return static_cast<std::uint8_t>(std::lround(std::clamp(value, 0.0, 1.0) * 255.0));
 }
 
-// The woods about a lattice corner on `biome` ground in `habitat`, faring as `fates` have them
-// there, `point` being where it lies.
+// How `fates` have the woods fare at a lattice corner.
+[[nodiscard]] flora::Fate fate_at(Corner at, const flora::Fates& fates) {
+    const auto side = static_cast<double>(side_of(at.level));
+    return fates.at(static_cast<std::uint32_t>(at.face), static_cast<double>(at.i) / side,
+                    static_cast<double>(at.j) / side);
+}
+
+// The woods about a lattice corner on `biome` ground in `habitat`, `point` being where it lies.
 [[nodiscard]] Woods woods_at(Corner at, DVec3 point, planet::Biome biome,
-                             const flora::Habitat& habitat, const flora::Fates& fates) {
+                             const flora::Habitat& habitat) {
     const int finer = flora::lattice_level - at.level;
     const Vec2 cell{static_cast<float>(std::ldexp(static_cast<double>(at.i), finer)),
                     static_cast<float>(std::ldexp(static_cast<double>(at.j), finer))};
-    const auto face = static_cast<std::uint32_t>(at.face);
-    const auto side = static_cast<double>(side_of(at.level));
     const flora::Woodland woodland =
-        flora::woodland_at(cell, face, biome,
-                           flora::fared(habitat, fates.at(face, static_cast<double>(at.i) / side,
-                                                          static_cast<double>(at.j) / side)));
+        flora::woodland_at(cell, static_cast<std::uint32_t>(at.face), biome, habitat);
     if (woodland.grown <= 0.0F) {
         return {};
     }
@@ -57,7 +59,22 @@ constexpr double skirt_spacings = patch_cells / 4.0;
     return packed_woods(woodland, area);
 }
 
+// A nibble from 0 to 1, rounded.
+[[nodiscard]] std::uint8_t nibble_of(float value) noexcept {
+    return static_cast<std::uint8_t>(std::lround(std::clamp(value, 0.0F, 1.0F) * 15.0F));
+}
+
 } // namespace
+
+Cover packed_cover(const flora::Fate& fate, bool wooded) noexcept {
+    const std::uint8_t scar = byte_of(static_cast<double>(fate.scar));
+    if (!wooded) {
+        return {scar, 0};
+    }
+    const float gone = 1.0F - fate.living;
+    const float fallen = gone - fate.dead;
+    return {scar, static_cast<std::uint8_t>((nibble_of(gone) << 4U) | nibble_of(fallen))};
+}
 
 Woods packed_woods(const flora::Woodland& woodland, double cell_area) noexcept {
     const double crowding = 100.0 * static_cast<double>(woodland.grown) / cell_area;
@@ -139,6 +156,7 @@ Patch bake_patch(const planet::World& world, planet::CellId cell, const flora::F
     std::vector<DVec3> points(std::size_t{bordered} * bordered);
     std::vector<planet::Biome> biomes(std::size_t{patch_side} * patch_side);
     std::vector<Woods> woods(biomes.size());
+    std::vector<Cover> covers(biomes.size());
     HeightRange heights{.lowest = std::numeric_limits<double>::infinity(),
                         .highest = -std::numeric_limits<double>::infinity()};
     for (int j = -1; j <= patch_side; ++j) {
@@ -153,8 +171,12 @@ Patch bake_patch(const planet::World& world, planet::CellId cell, const flora::F
             points[bordered_index(i, j)] = direction(corner) * (radius + height);
             if (inside(i) && inside(j)) {
                 biomes[index(i, j)] = state.biome;
-                woods[index(i, j)] = woods_at(canonical(corner), points[bordered_index(i, j)],
-                                              state.biome, flora::habitat_of(state), fates);
+                const flora::Fate fate = fate_at(canonical(corner), fates);
+                woods[index(i, j)] =
+                    woods_at(canonical(corner), points[bordered_index(i, j)], state.biome,
+                             flora::fared(flora::habitat_of(state), fate));
+                covers[index(i, j)] =
+                    packed_cover(fate, flora::trees_of(state.biome).height > 0.0F);
                 heights.lowest = std::min(heights.lowest, height);
                 heights.highest = std::max(heights.highest, height);
             }
@@ -176,7 +198,8 @@ Patch bake_patch(const planet::World& world, planet::CellId cell, const flora::F
                 {.position = relative_to(WorldPosition{points[bordered_index(i, j)]}, patch.origin),
                  .normal = Vec3(glm::normalize(glm::cross(along_i, along_j))),
                  .biome = biomes[index(i, j)],
-                 .woods = woods[index(i, j)]});
+                 .woods = woods[index(i, j)],
+                 .cover = covers[index(i, j)]});
         }
     }
 

@@ -59,6 +59,8 @@ static const float shore = 0.3;
 // Bare wood, for twiggy skeletons and the shade under leaves.
 static const float3 wood = float3(0.09, 0.055, 0.03);
 
+static const float shrubs = 0.45; // of the ground the fallen dead leave, shrubs take
+
 static const uint floofy = 0;
 static const uint spiky = 1;
 static const uint twiggy = 2;
@@ -68,6 +70,11 @@ struct Corner {
     float3 position;
     float3 normal;
     uint biome;
+    // As terrain::Cover: the ground a fire left black, and of the trees it would hold those gone
+    // and those fallen.
+    float scar;
+    float gone;
+    float fallen;
 };
 
 Corner corner_at(uint bias, uint index) {
@@ -76,6 +83,10 @@ Corner corner_at(uint bias, uint index) {
     corner.position = asfloat(vertices.Load3(at));
     corner.normal = asfloat(vertices.Load3(at + 12));
     corner.biome = min(vertices.Load(at + 24) & 0xffu, biome_count - 1);
+    const uint cover = vertices.Load(at + 28) >> 16;
+    corner.scar = float(cover & 0xffu) / 255.0;
+    corner.gone = float((cover >> 12) & 0xfu) / 15.0;
+    corner.fallen = float((cover >> 8) & 0xfu) / 15.0;
     return corner;
 }
 
@@ -150,10 +161,13 @@ Bush vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
         // This lattice lies two levels finer than the trees'.
         const float2 spot = float2(float(lattice_i + li), float(lattice_j + lj)) * 0.25;
         const float field = stand_field(spot, face);
-        const float canopy = smoothstep(woods.x, woods.x + 0.1, field);
+        // The trees gone shade them no longer.
+        const float canopy = smoothstep(woods.x, woods.x + 0.1, field) * (1.0 - near.gone);
         const float hem = saturate(1.0 - (abs(field - woods.x - 0.05) / 0.1));
         share *= lerp(1.0, 0.4, canopy) + (0.8 * hem);
     }
+    // Shrubs crowd in where the dead have fallen, and nothing grows on ground still black.
+    share = (share + (shrubs * near.fallen)) * (1.0 - near.scar);
     if (leaf.w <= 0.0 || unit(hash + 2u) >= share) {
         return nothing();
     }

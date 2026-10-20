@@ -44,7 +44,8 @@ constexpr DVec3 east{1.0, 0.0, 0.0};
 using Pixels = std::vector<std::uint8_t>;
 
 // A flat patch of one biome, level at `ground_height`, centred on its origin.
-std::vector<hog::terrain::PatchVertex> field(hog::planet::Biome biome) {
+std::vector<hog::terrain::PatchVertex> field(hog::planet::Biome biome,
+                                             hog::terrain::Cover cover = {}) {
     std::vector<hog::terrain::PatchVertex> vertices(hog::render::patch_vertex_count);
     constexpr int middle = hog::terrain::patch_cells / 2;
     for (int i = 0; i < hog::terrain::patch_side; ++i) {
@@ -54,7 +55,8 @@ std::vector<hog::terrain::PatchVertex> field(hog::planet::Biome biome) {
             vertices[at] = {.position = Vec3{static_cast<float>((i - middle) * spacing),
                                              static_cast<float>((j - middle) * spacing), 0.0F},
                             .normal = Vec3{0.0F, 0.0F, 1.0F},
-                            .biome = biome};
+                            .biome = biome,
+                            .cover = cover};
         }
     }
     return vertices;
@@ -68,6 +70,7 @@ struct Field {
     double fade_far = hog::render::grass_far;
     bool tall_only = false;
     double ground = ground_height; // metres above sea level
+    hog::terrain::Cover cover{};
 };
 
 // The field's grass alone over black, seen from standing height looking slightly down, east.
@@ -84,7 +87,7 @@ Pixels draw(hog::render::Device& device, const Field& grown) {
     REQUIRE(pool);
     const std::uint32_t slot = pool->acquire().value_or(99);
     REQUIRE(slot == 0);
-    REQUIRE(pool->stage(0, slot, field(grown.biome)));
+    REQUIRE(pool->stage(0, slot, field(grown.biome, grown.cover)));
 
     const WorldPosition origin{(up * (radius + grown.ground)) + (east * grown.away)};
     const WorldPosition eye{up * (radius + grown.ground + 1.5)};
@@ -181,6 +184,26 @@ TEST_CASE("grass grows over grassland and not over the sea", "[render]") {
     const std::size_t tufts = lit_pixels(draw(*device, {.biome = hog::planet::Biome::Desert}));
     CHECK(tufts > 0);
     CHECK(tufts < lit / 4);
+}
+
+TEST_CASE("grass takes the ground where the trees are gone, once a fire's black has greened",
+          "[render]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    using hog::planet::Biome;
+    const std::size_t shaded = lit_pixels(draw(*device, {.biome = Biome::TemperateForest}));
+    const std::size_t open =
+        lit_pixels(draw(*device, {.biome = Biome::TemperateForest, .cover = {0, 0xf0}}));
+    INFO("under the trees " << shaded << ", the trees gone " << open);
+    CHECK(shaded > 0);
+    CHECK(open > 2 * shaded);
+    CHECK(lit_pixels(draw(*device, {.biome = Biome::TemperateForest, .cover = {255, 0xf0}})) == 0);
+    const std::size_t greening =
+        lit_pixels(draw(*device, {.biome = Biome::TemperateForest, .cover = {128, 0xf0}}));
+    CHECK(greening > 0);
+    CHECK(greening < open);
 }
 
 TEST_CASE("reeds fringe the waterline and leave higher ground alone", "[render]") {

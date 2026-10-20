@@ -758,6 +758,7 @@ constexpr hog::terrain::Woods temperate{80, 120, 128, 85};
 // wooded with `woods` and its east bare, the woods drawn in beyond `canopy` metres, none for 0.
 struct Seen {
     hog::terrain::Woods woods = temperate;
+    std::uint8_t scar = 0; // of the west half, as terrain::Cover's
     double height = 3'000.0;
     double canopy = 900.0;
     bool air = false;
@@ -777,6 +778,7 @@ std::vector<std::uint8_t> from_above(hog::render::Device& device, const Seen& se
         flat_patch(static_cast<float>(seen.height) * 1.5F / patch_cells);
     for (PatchVertex& vertex : patch) {
         vertex.woods = vertex.position.x < 0.0F ? seen.woods : hog::terrain::Woods{};
+        vertex.cover = {vertex.position.x < 0.0F ? seen.scar : std::uint8_t{0}, 0};
     }
     REQUIRE(pool.stage(0, slot, patch));
 
@@ -824,6 +826,19 @@ double mean_of(const std::vector<std::uint8_t>& pixels, std::size_t channel, boo
 }
 
 } // namespace
+
+TEST_CASE("ground a fire left black is drawn charred, and only it", "[render][gpu]") {
+    const auto device = test_device();
+    const auto bare = from_above(*device, {.woods = {}, .canopy = 0.0});
+    const auto black = from_above(*device, {.woods = {}, .scar = 255, .canopy = 0.0});
+    const auto greening = from_above(*device, {.woods = {}, .scar = 100, .canopy = 0.0});
+    INFO("west red " << mean_of(bare, 0, true) << ", black " << mean_of(black, 0, true)
+                     << ", greening " << mean_of(greening, 0, true));
+    CHECK(mean_of(black, 0, true) < 0.3 * mean_of(bare, 0, true));
+    CHECK(mean_of(greening, 0, true) > mean_of(black, 0, true));
+    CHECK(mean_of(greening, 0, true) < mean_of(bare, 0, true));
+    CHECK(mean_of(black, 0, false) == mean_of(bare, 0, false));
+}
 
 TEST_CASE("woods beyond the stamps darken the ground they stand on, and only it", "[render][gpu]") {
     const auto device = test_device();

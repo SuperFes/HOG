@@ -83,11 +83,21 @@ inline constexpr float woods_tallest = 32.0F;
 // Woodland over cells of `cell_area` square metres.
 [[nodiscard]] Woods packed_woods(const flora::Woodland& woodland, double cell_area) noexcept;
 
+// The ground over a vertex as fires and the years since have left it, for what grows back there:
+// the share blackened, a byte from 0 to 255; then, where woods grow, of the trees the ground would
+// hold the share gone in the high four bits, and of those the share fallen, standing dead no
+// longer, in the low four.
+using Cover = std::array<std::uint8_t, 2>;
+
+// The cover a fate leaves, on ground that grows woods or not.
+[[nodiscard]] Cover packed_cover(const flora::Fate& fate, bool wooded) noexcept;
+
 struct PatchVertex {
     Vec3 position{0.0F}; // metres from the patch's origin
     Vec3 normal{0.0F};
     planet::Biome biome = planet::Biome::Ocean;
     Woods woods{};
+    Cover cover{};
 };
 
 static_assert(sizeof(PatchVertex) == 32);

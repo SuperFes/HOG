@@ -51,6 +51,7 @@ static const uint vertex_stride = 32; // bytes, as terrain::PatchVertex lies
 static const float shore = 0.15;
 // Blades this tall stand in the far swaths; shorter grass stays a near effect.
 static const float tall_floor = 0.45;
+static const float pioneers = 0.9; // of the open ground the grass takes where trees are gone
 
 // Reeds stand where the ground sits this close over the water, stiff stems with a cattail head:
 // the quad is cut as wide as the head, and the stem trimmed from it in the fragment shader.
@@ -66,6 +67,11 @@ struct Corner {
     float3 position;
     float3 normal;
     uint biome;
+    // As terrain::Cover: the ground a fire left black, and of the trees it would hold those gone
+    // and those fallen.
+    float scar;
+    float gone;
+    float fallen;
 };
 
 Corner corner_at(uint bias, uint index) {
@@ -74,6 +80,10 @@ Corner corner_at(uint bias, uint index) {
     corner.position = asfloat(vertices.Load3(at));
     corner.normal = asfloat(vertices.Load3(at + 12));
     corner.biome = min(vertices.Load(at + 24) & 0xffu, biome_count - 1);
+    const uint cover = vertices.Load(at + 28) >> 16;
+    corner.scar = float(cover & 0xffu) / 255.0;
+    corner.gone = float((cover >> 12) & 0xfu) / 15.0;
+    corner.fallen = float((cover >> 8) & 0xfu) / 15.0;
     return corner;
 }
 
@@ -165,8 +175,9 @@ Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const Corner near = corner_at(bias, at + (u < 0.5 ? 0 : patch_side) + (v < 0.5 ? 0 : 1));
     const float4 kind = settings.blade[near.biome];
     const float4 spread = settings.spread[near.biome];
-    const bool lawn_here =
-        kind.w > (tall_only ? tall_floor : 0.0) && unit(hash + 2u) < spread.x;
+    // Where the trees are gone, grass takes the open ground, once the black of a fire has greened.
+    const float sown = lerp(spread.x, max(spread.x, pioneers), near.gone) * (1.0 - near.scar);
+    const bool lawn_here = kind.w > (tall_only ? tall_floor : 0.0) && unit(hash + 2u) < sown;
     if (!lawn_here && spread.w <= 0.0) {
         return nothing();
     }
@@ -207,7 +218,8 @@ Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
         normal + ((reed ? 0.05 : 0.2) * ((beside * cos(leaning)) + (ahead * sin(leaning)))));
 
     const float height = (reed ? reed_height * (0.75 + (0.45 * unit(hash + 5u)))
-                               : kind.w * (0.6 + (0.8 * unit(hash + 5u)))) *
+                               : kind.w * (1.0 + (0.6 * near.gone)) *
+                                     (0.6 + (0.8 * unit(hash + 5u)))) *
                          fade;
     // At least a pixel wide, so far blades don't shatter into bright specks; drawn wider than
     // they are, they wear the ground's colour instead, melting into it.
