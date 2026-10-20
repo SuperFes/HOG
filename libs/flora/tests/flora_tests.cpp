@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -652,6 +653,99 @@ TEST_CASE("palms line warm shores and stand among the tropics' broadleaves, neve
     CHECK(count(Biome::BorealForest, -11.0F).trees == 0);
 }
 
+TEST_CASE("trees live, fail, die and grow back in the order their own dice set", "[flora]") {
+    using hog::flora::Condition;
+    using hog::flora::Habitat;
+    using hog::flora::Stood;
+    using hog::planet::Biome;
+    // Each lattice cell's tree under a habitat, by cell.
+    const auto grown = [](const Habitat& habitat) {
+        std::vector<std::optional<Stood>> trees;
+        for (std::uint32_t i = 2048; i < 2176; ++i) {
+            for (std::uint32_t j = 56576; j < 56640; ++j) {
+                trees.push_back(hog::flora::tree_grown(i, j, 0, Biome::TemperateForest, habitat));
+            }
+        }
+        return trees;
+    };
+    const auto counted = [](const std::vector<std::optional<Stood>>& trees, Condition condition) {
+        return static_cast<double>(std::ranges::count_if(
+            trees, [&](const auto& tree) { return tree && tree->condition == condition; }));
+    };
+    const std::vector<std::optional<Stood>> untouched = grown(temperate);
+    const double all = counted(untouched, Condition::Sound);
+    REQUIRE(all > 3000.0);
+    CHECK(counted(untouched, Condition::Sound) ==
+          static_cast<double>(
+              std::ranges::count_if(untouched, [](const auto& tree) { return tree.has_value(); })));
+
+    // A drought killing a fifth, with a fifth more dying; a fire and its standing dead.
+    const std::vector<std::optional<Stood>> drought =
+        grown(Habitat{.living = 0.6F, .failing = 0.2F, .dead = 0.2F});
+    const std::vector<std::optional<Stood>> later =
+        grown(Habitat{.living = 0.4F, .established = 0.4F, .dead = 0.4F});
+    const std::vector<std::optional<Stood>> burned =
+        grown(Habitat{.living = 0.05F, .established = 0.05F, .dead = 0.9F, .charred = 1.0F});
+    const std::vector<std::optional<Stood>> regrowing =
+        grown(Habitat{.living = 0.5F, .established = 0.1F, .dead = 0.1F, .charred = 1.0F});
+    CHECK(std::abs((counted(drought, Condition::Sound) / all) - 0.4) < 0.03);
+    CHECK(std::abs((counted(drought, Condition::Failing) / all) - 0.2) < 0.03);
+    CHECK(std::abs((counted(drought, Condition::Dead) / all) - 0.2) < 0.03);
+    CHECK(counted(drought, Condition::Charred) == 0.0);
+    CHECK(std::abs((counted(burned, Condition::Charred) / all) - 0.9) < 0.03);
+    CHECK(std::abs((counted(burned, Condition::Scorched) / all) - 0.05) < 0.02);
+    CHECK(counted(burned, Condition::Sound) == 0.0);
+    for (std::size_t at = 0; at < untouched.size(); ++at) {
+        // Every tree standing is one the untouched woods stand, of the same kind and spot.
+        for (const auto* fared : {&drought, &later, &burned, &regrowing}) {
+            const std::optional<Stood>& tree = (*fared)[at];
+            if (tree) {
+                REQUIRE(untouched[at].has_value());
+                CHECK(tree->genus == untouched[at]->genus);
+                CHECK(tree->hash == untouched[at]->hash);
+                CHECK(tree->age <= untouched[at]->age);
+            }
+        }
+        // Those failing are the next to die; those dead stay dead.
+        if (drought[at] && drought[at]->condition == Condition::Failing) {
+            REQUIRE(later[at].has_value());
+            CHECK(later[at]->condition == Condition::Dead);
+        }
+        if (drought[at] && drought[at]->condition == Condition::Dead) {
+            CHECK(!(later[at] && hog::flora::alive(later[at]->condition)));
+        }
+        // Grown back since the fire: the trees above the old growth younger, and shorter.
+        if (regrowing[at] && hog::flora::alive(regrowing[at]->condition) &&
+            regrowing[at]->age < untouched[at]->age) {
+            CHECK(regrowing[at]->height < untouched[at]->height);
+        }
+    }
+    double younger = 0.0;
+    double kept = 0.0;
+    for (std::size_t at = 0; at < untouched.size(); ++at) {
+        if (regrowing[at] && regrowing[at]->condition == Condition::Sound) {
+            (regrowing[at]->age < untouched[at]->age ? younger : kept) += 1.0;
+        }
+    }
+    // Of the old growth, those scorched as the dead still stand thick (4 x 0.1 of them) about them.
+    CHECK(std::abs((kept / all) - 0.06) < 0.02);
+    CHECK(std::abs((counted(regrowing, Condition::Scorched) / all) - 0.04) < 0.02);
+    CHECK(std::abs((younger / all) - 0.4) < 0.03);
+
+    // The golden number for woods the sim has touched.
+    std::uint64_t hash = 0xcbf2'9ce4'8422'2325ULL;
+    for (const auto* fared : {&drought, &burned, &regrowing}) {
+        for (const std::optional<Stood>& tree : *fared) {
+            const std::uint32_t parts[] = {tree ? static_cast<std::uint32_t>(tree->condition) + 1U
+                                                : 0U,
+                                           tree ? std::bit_cast<std::uint32_t>(tree->age) : 0U,
+                                           tree ? std::bit_cast<std::uint32_t>(tree->height) : 0U};
+            hash = fingered(std::as_bytes(std::span{parts}), hash);
+        }
+    }
+    CHECK(hash == 0xbdce'5fbd'628f'3f43ULL);
+}
+
 TEST_CASE("no tree grows where its biome grows none", "[flora]") {
     for (std::uint32_t i = 2048; i < 2112; ++i) {
         CHECK(!hog::flora::tree_grown(i, 56576, 0, hog::planet::Biome::Ocean, temperate));
@@ -796,18 +890,24 @@ TEST_CASE("woodland far off holds the trees grown there: as many, as tall, of th
     // Mild woods of every kind, and those where a kind thins at the edge of its climate: the oaks
     // in a cold wetland and over a shallow water table, the pines at their treeline, the palms on
     // a cool shore, the maples in drier woods.
-    for (const Site site : {Site{.biome = Biome::TemperateForest, .habitat = temperate},
-                            {.biome = Biome::BorealForest, .habitat = temperate},
-                            {.biome = Biome::Grassland, .habitat = temperate},
-                            {.biome = Biome::Shrubland, .habitat = temperate},
-                            {.biome = Biome::Wetland, .habitat = temperate},
-                            {.biome = Biome::Wetland, .habitat = {.temperature = 2.5F}},
-                            {.biome = Biome::Wetland, .habitat = {.water_table = 0.5F}},
-                            {.biome = Biome::TemperateForest, .habitat = {.moisture = 0.42F}},
-                            {.biome = Biome::BorealForest, .habitat = {.temperature = -8.0F}},
-                            {.biome = Biome::Beach, .habitat = {.temperature = 15.0F}},
-                            {.biome = Biome::TropicalRainforest, .habitat = {.temperature = 27.0F}},
-                            {.biome = Biome::Savanna, .habitat = {.temperature = 28.0F}}}) {
+    for (const Site site :
+         {Site{.biome = Biome::TemperateForest, .habitat = temperate},
+          {.biome = Biome::BorealForest, .habitat = temperate},
+          {.biome = Biome::Grassland, .habitat = temperate},
+          {.biome = Biome::Shrubland, .habitat = temperate},
+          {.biome = Biome::Wetland, .habitat = temperate},
+          {.biome = Biome::Wetland, .habitat = {.temperature = 2.5F}},
+          {.biome = Biome::Wetland, .habitat = {.water_table = 0.5F}},
+          {.biome = Biome::TemperateForest, .habitat = {.moisture = 0.42F}},
+          {.biome = Biome::BorealForest, .habitat = {.temperature = -8.0F}},
+          {.biome = Biome::Beach, .habitat = {.temperature = 15.0F}},
+          {.biome = Biome::TropicalRainforest, .habitat = {.temperature = 27.0F}},
+          {.biome = Biome::Savanna, .habitat = {.temperature = 28.0F}},
+          // Growing back after a fire, and dying back in a drought.
+          {.biome = Biome::TemperateForest,
+           .habitat = {.living = 0.6F, .established = 0.15F, .dead = 0.2F, .charred = 1.0F}},
+          {.biome = Biome::BorealForest,
+           .habitat = {.living = 0.7F, .failing = 0.2F, .dead = 0.25F}}}) {
         const Biome biome = site.biome;
         INFO("biome " << static_cast<int>(biome) << " at " << site.habitat.temperature << " C, "
                       << hog::flora::wetness(site.habitat) << " wet");
@@ -845,7 +945,7 @@ TEST_CASE("woodland far off holds the trees grown there: as many, as tall, of th
                         palm += share * double{woodland.palm};
                         const auto tree =
                             hog::flora::tree_grown(lattice_i, lattice_j, 1, biome, site.habitat);
-                        if (!tree) {
+                        if (!tree || !hog::flora::alive(tree->condition)) {
                             continue;
                         }
                         counted += 1.0;

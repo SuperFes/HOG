@@ -95,6 +95,31 @@ float within(const Range& range, float value) noexcept {
 // Metres down a tree's roots reach for water.
 constexpr float rooting = 4.0F;
 
+// How a tree fares by its own place among its woods' shares, if it stands at all; a tree grown
+// back since the last loss is made younger, the youngest those that came back last.
+std::optional<Condition> fared(std::uint32_t hash, const Habitat& habitat, float& age) noexcept {
+    const float fate = unit(hash + 20U);
+    if (fate >= habitat.living) {
+        if (fate >= habitat.living + habitat.dead) {
+            return std::nullopt;
+        }
+        return unit(hash + 22U) < habitat.charred ? Condition::Charred : Condition::Dead;
+    }
+    if (fate >= habitat.living - habitat.failing) {
+        return Condition::Failing;
+    }
+    if (fate >= habitat.established) {
+        age *= (habitat.living - fate) / (habitat.living - habitat.established);
+        return Condition::Sound;
+    }
+    // The old trees that lived through a fire bear its marks while its dead still stand thick
+    // about them.
+    if (unit(hash + 22U) < habitat.charred * saturated(4.0F * habitat.dead)) {
+        return Condition::Scorched;
+    }
+    return Condition::Sound;
+}
+
 } // namespace
 
 std::uint32_t hashed(std::uint32_t at) noexcept {
@@ -163,10 +188,7 @@ std::optional<Stood> tree_grown(std::uint32_t lattice_i, std::uint32_t lattice_j
     // Most trees in a stand are grown; its edges and the open are where the young stand, the
     // woods spreading outward.
     const float drawn = 1.0F - unit(hash + 4U);
-    const float age = (1.0F - (drawn * drawn)) * stand_age(wooded);
-    // Quick to rise while young, then barely taller.
-    float height =
-        trees.height * reached(age) * (0.85F + (0.3F * unit(hash + 5U))) * stand_scale(wooded);
+    float age = (1.0F - (drawn * drawn)) * stand_age(wooded);
     // Palms gather in groves of their own; of the rest, broadleaves in theirs, maples in smaller
     // stands within them.
     Genus genus = Genus::Pine;
@@ -183,9 +205,21 @@ std::optional<Stood> tree_grown(std::uint32_t lattice_i, std::uint32_t lattice_j
     if (unit(hash + 18U) >= suited(genus, habitat)) {
         return std::nullopt;
     }
+    const std::optional<Condition> condition = fared(hash, habitat, age);
+    if (!condition) {
+        return std::nullopt;
+    }
+    // Quick to rise while young, then barely taller.
+    float height =
+        trees.height * reached(age) * (0.85F + (0.3F * unit(hash + 5U))) * stand_scale(wooded);
     height *= stature(genus);
-    return Stood{
-        .spot = spot, .height = height, .wooded = wooded, .age = age, .hash = hash, .genus = genus};
+    return Stood{.spot = spot,
+                 .height = height,
+                 .wooded = wooded,
+                 .age = age,
+                 .hash = hash,
+                 .genus = genus,
+                 .condition = *condition};
 }
 
 Woodland woodland_at(Vec2 cell, std::uint32_t face, planet::Biome biome,
@@ -213,9 +247,17 @@ Woodland woodland_at(Vec2 cell, std::uint32_t face, planet::Biome biome,
     // A tree's age is the stand's times 1 - d^2 for its dice d, so on average 2/3 of it, and its
     // square 8/15 of the stand's squared.
     const float oldest = stand_age(wooded);
-    const float mean_reach = 0.2F + ((4.0F / 3.0F) * oldest) - ((8.0F / 15.0F) * oldest * oldest);
+    float mean_reach = 0.2F + ((4.0F / 3.0F) * oldest) - ((8.0F / 15.0F) * oldest * oldest);
+    // Those grown back since the last loss are younger by an even share of their age, so 1/3 as
+    // much of it on average and 8/45 of its square.
+    if (habitat.established < habitat.living) {
+        const float old_growth = habitat.established / habitat.living;
+        const float young_reach =
+            0.2F + ((2.0F / 3.0F) * oldest) - ((8.0F / 45.0F) * oldest * oldest);
+        mean_reach = mixed(young_reach, mean_reach, old_growth);
+    }
     const float others = oaks + maples + pines;
-    return Woodland{.grown = mixed(trees.lone, trees.inside, wooded) * kept,
+    return Woodland{.grown = mixed(trees.lone, trees.inside, wooded) * kept * habitat.living,
                     .height = trees.height * mean_reach * stand_scale(wooded),
                     .broadleaf = others > 0.0F ? (oaks + maples) / others : 0.0F,
                     .maple = oaks + maples > 0.0F ? maples / (oaks + maples) : 0.0F,

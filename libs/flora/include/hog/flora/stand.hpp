@@ -96,14 +96,24 @@ struct BiomeTrees {
     return {};
 }
 
-// What a spot offers its trees: its climate, as the planet gives it.
+// What a spot offers its trees: its climate, as the planet gives it, and how its woods fare, as the
+// forest sim keeps them, each a share of the trees the ground would hold. Each tree's own dice
+// place it among those shares, the same for every machine and the same as the shares move: as the
+// living share falls, the trees above it die in turn, failing first; the dead stand, burned or
+// not, until they fall; and as the share grows back, trees come back young in the spots above
+// the old growth.
 struct Habitat {
     float temperature = 12.0F; // mean annual °C
     float moisture = 0.5F;     // the climate's, 0 (arid) to 1 (saturated)
     float water_table = 50.0F; // metres down to it
+    float living = 1.0F;       // alive
+    float established = 1.0F;  // alive since before the last loss, never more than living
+    float failing = 0.0F;      // alive but dying, never more than living
+    float dead = 0.0F;         // dead and still standing
+    float charred = 0.0F;      // of the standing dead, the share burned
 };
 
-// A cell's habitat as the planet gives it.
+// A cell's habitat as the planet gives it, its woods untouched.
 [[nodiscard]] Habitat habitat_of(const planet::CellState& state) noexcept;
 
 // How wet the ground is to a tree's roots, 0 to 1: its climate's moisture, or wetter over a water
@@ -200,6 +210,16 @@ struct Foliage {
 // stands with clearings between, edged by a finer grain.
 [[nodiscard]] float stand_field(Vec2 cell, std::uint32_t face) noexcept;
 
+// How a tree fares: sound; alive but dying back, its crown thinning and browning; an old tree
+// that lived through the fire that killed its neighbours, its bark scorched; or dead and still
+// standing, weathered grey or burned black.
+enum class Condition : std::uint8_t { Sound, Failing, Scorched, Dead, Charred };
+inline constexpr int condition_count = 5;
+
+[[nodiscard]] constexpr bool alive(Condition condition) noexcept {
+    return condition != Condition::Dead && condition != Condition::Charred;
+}
+
 // A tree stood in its lattice cell: what kind, where within the cell, how old, and how tall for
 // its age and the stand around it.
 struct Stood {
@@ -209,6 +229,7 @@ struct Stood {
     float age = 0.0F;    // 0 a sapling, 1 full grown
     std::uint32_t hash = 0;
     Genus genus = Genus::Pine;
+    Condition condition = Condition::Sound;
 };
 
 // Where within its cell the cell's tree would root — always answered, so the ground and biome
@@ -222,9 +243,9 @@ struct Stood {
                                               const Habitat& habitat) noexcept;
 
 // The woods about a spot, as tree_grown grows them there averaged over the cells' own dice: for
-// drawing woods too far off to stand each tree.
+// drawing woods too far off to stand each tree. Only the living are counted.
 struct Woodland {
-    float grown = 0.0F;     // of the lattice cells, the share standing a tree
+    float grown = 0.0F;     // of the lattice cells, the share standing a living tree
     float height = 0.0F;    // metres, the trees' mean as pines; the broadleaves stand to stature()
     float broadleaf = 0.0F; // of the trees not palms, the share broadleaves
     float maple = 0.0F;     // of the broadleaves, the share maples
