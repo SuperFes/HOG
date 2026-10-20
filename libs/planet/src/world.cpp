@@ -109,9 +109,12 @@ std::size_t World::roll_back(const ChangeFilter& filter) {
 
 CellState World::state(CellId cell) const {
     const std::int64_t elevation = geology_.terrain().elevation(cell);
+    const Climate::Surface surface = geology_.climate().surface(cell, elevation);
     CellState state{.elevation = elevation,
-                    .biome = geology_.climate().biome(cell),
-                    .temperature = geology_.climate().temperature(cell, elevation),
+                    .biome = surface.biome,
+                    .temperature = surface.temperature,
+                    .moisture = surface.moisture,
+                    .water_table = surface.water_table,
                     .excavated = 0,
                     .hollows = {}};
     if (cells_.empty()) {

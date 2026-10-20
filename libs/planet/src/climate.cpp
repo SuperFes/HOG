@@ -111,29 +111,43 @@ std::int64_t Climate::water_table(CellId cell, std::int64_t moisture) const {
 }
 
 Biome Climate::biome(CellId cell) const {
+    // Water needs no temperature.
     if (!terrain_.is_land(cell)) {
         return Biome::Ocean;
     }
     if (terrain_.lake(cell)) {
         return Biome::Lake;
     }
-    const std::int64_t elevation = terrain_.elevation(cell);
-    const std::int64_t temperature = this->temperature(cell, elevation);
-    const std::int64_t moisture = moisture_.at(cell, terrain_.continents().height(cell));
-    const Biome climate = classify_biome(temperature, moisture);
+    return surface(cell, terrain_.elevation(cell)).biome;
+}
+
+Climate::Surface Climate::surface(CellId cell, std::int64_t elevation) const {
+    Surface surface{.biome = Biome::Ocean,
+                    .temperature = temperature(cell, elevation),
+                    .moisture = fixed_one,
+                    .water_table = 0};
+    if (!terrain_.is_land(cell)) {
+        return surface;
+    }
+    if (terrain_.lake(cell)) {
+        surface.biome = Biome::Lake;
+        return surface;
+    }
+    surface.moisture = moisture_.at(cell, terrain_.continents().height(cell));
+    surface.water_table = water_table(cell, surface.moisture);
+    const Biome climate = classify_biome(surface.temperature, surface.moisture);
+    surface.biome = climate;
     if (climate == Biome::Ice) {
-        return climate;
+        return surface;
     }
     if (elevation > alpine_height * fixed_one) {
-        return temperature < glacier_temperature ? Biome::Ice : Biome::Alpine;
+        surface.biome = surface.temperature < glacier_temperature ? Biome::Ice : Biome::Alpine;
+    } else if (elevation < beach_height * fixed_one && surface.temperature > beach_temperature) {
+        surface.biome = Biome::Beach;
+    } else if (climate != Biome::Desert && surface.water_table < wetland_depth * fixed_one) {
+        surface.biome = Biome::Wetland;
     }
-    if (elevation < beach_height * fixed_one && temperature > beach_temperature) {
-        return Biome::Beach;
-    }
-    if (climate != Biome::Desert && water_table(cell, moisture) < wetland_depth * fixed_one) {
-        return Biome::Wetland;
-    }
-    return climate;
+    return surface;
 }
 
 } // namespace hog::planet

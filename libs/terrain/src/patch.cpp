@@ -36,14 +36,14 @@ constexpr double skirt_spacings = patch_cells / 4.0;
     return static_cast<std::uint8_t>(std::lround(std::clamp(value, 0.0, 1.0) * 255.0));
 }
 
-// The woods about a lattice corner on `biome` ground at a mean annual `temperature` in °C, `point`
-// being where it lies.
-[[nodiscard]] Woods woods_at(Corner at, DVec3 point, planet::Biome biome, float temperature) {
+// The woods about a lattice corner on `biome` ground in `habitat`, `point` being where it lies.
+[[nodiscard]] Woods woods_at(Corner at, DVec3 point, planet::Biome biome,
+                             const flora::Habitat& habitat) {
     const int finer = flora::lattice_level - at.level;
     const Vec2 cell{static_cast<float>(std::ldexp(static_cast<double>(at.i), finer)),
                     static_cast<float>(std::ldexp(static_cast<double>(at.j), finer))};
     const flora::Woodland woodland =
-        flora::woodland_at(cell, static_cast<std::uint32_t>(at.face), biome, temperature);
+        flora::woodland_at(cell, static_cast<std::uint32_t>(at.face), biome, habitat);
     if (woodland.grown <= 0.0F) {
         return {};
     }
@@ -148,9 +148,8 @@ Patch bake_patch(const planet::World& world, planet::CellId cell) {
             points[bordered_index(i, j)] = direction(corner) * (radius + height);
             if (inside(i) && inside(j)) {
                 biomes[index(i, j)] = state.biome;
-                woods[index(i, j)] = woods_at(
-                    canonical(corner), points[bordered_index(i, j)], state.biome,
-                    static_cast<float>(static_cast<double>(state.temperature) / planet::fixed_one));
+                woods[index(i, j)] = woods_at(canonical(corner), points[bordered_index(i, j)],
+                                              state.biome, flora::habitat_of(state));
                 heights.lowest = std::min(heights.lowest, height);
                 heights.highest = std::max(heights.highest, height);
             }

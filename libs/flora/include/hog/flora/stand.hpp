@@ -3,6 +3,7 @@
 #include <hog/core/math.hpp>
 #include <hog/flora/species.hpp>
 #include <hog/planet/climate.hpp>
+#include <hog/planet/world.hpp>
 
 #include <cstdint>
 #include <optional>
@@ -95,31 +96,57 @@ struct BiomeTrees {
     return {};
 }
 
-// The mean annual temperatures a kind grows at, °C: fully from `coldest` to `warmest`, thinning to
-// none `margin` past either. Frost keeps the palms to warm coasts and the tropics; cold sets the
-// pines' treeline, and heat ends them where the broadleaves take over.
+// What a spot offers its trees: its climate, as the planet gives it.
+struct Habitat {
+    float temperature = 12.0F; // mean annual °C
+    float moisture = 0.5F;     // the climate's, 0 (arid) to 1 (saturated)
+    float water_table = 50.0F; // metres down to it
+};
+
+// A cell's habitat as the planet gives it.
+[[nodiscard]] Habitat habitat_of(const planet::CellState& state) noexcept;
+
+// How wet the ground is to a tree's roots, 0 to 1: its climate's moisture, or wetter over a water
+// table within their reach.
+[[nodiscard]] float wetness(const Habitat& habitat) noexcept;
+
+// Where a kind grows along one measure: fully from `low` to `high`, thinning to none `margin` past
+// either.
 struct Range {
-    float coldest = 0.0F;
-    float warmest = 0.0F;
+    float low = 0.0F;
+    float high = 0.0F;
     float margin = 1.0F;
 };
 
-[[nodiscard]] constexpr Range range_of(Genus genus) noexcept {
+// The climate a kind grows in: mean annual °C and the ground's wetness. Frost keeps the palms to
+// warm coasts and the tropics; cold sets the pines' treeline, and heat ends them where the
+// broadleaves take over. Pines and palms bear dry ground best, maples want it wet, and oaks drown
+// where it's waterlogged.
+struct Niche {
+    Range warmth;
+    Range wetness;
+};
+
+[[nodiscard]] constexpr Niche niche_of(Genus genus) noexcept {
     switch (genus) {
     case Genus::Oak:
-        return {.coldest = 4.0F, .warmest = 30.0F, .margin = 3.0F};
+        return {.warmth = {.low = 4.0F, .high = 30.0F, .margin = 3.0F},
+                .wetness = {.low = 0.2F, .high = 0.8F, .margin = 0.1F}};
     case Genus::Maple:
-        return {.coldest = 2.0F, .warmest = 20.0F, .margin = 3.0F};
+        return {.warmth = {.low = 2.0F, .high = 20.0F, .margin = 3.0F},
+                .wetness = {.low = 0.45F, .high = 1.0F, .margin = 0.1F}};
     case Genus::Palm:
-        return {.coldest = 16.0F, .warmest = 40.0F, .margin = 2.0F};
+        return {.warmth = {.low = 16.0F, .high = 40.0F, .margin = 2.0F},
+                .wetness = {.low = 0.2F, .high = 1.0F, .margin = 0.1F}};
     case Genus::Pine:
         break;
     }
-    return {.coldest = -6.0F, .warmest = 21.0F, .margin = 4.0F};
+    return {.warmth = {.low = -6.0F, .high = 21.0F, .margin = 4.0F},
+            .wetness = {.low = 0.15F, .high = 1.0F, .margin = 0.1F}};
 }
 
-// How well a kind grows at `temperature`, 0 to 1, by its range.
-[[nodiscard]] float suited(Genus genus, float temperature) noexcept;
+// How well a kind grows in a habitat, 0 to 1, by its niche.
+[[nodiscard]] float suited(Genus genus, const Habitat& habitat) noexcept;
 
 // Foliage as a share of the ground's colour under it, plus its own.
 struct Foliage {
@@ -189,11 +216,10 @@ struct Stood {
 [[nodiscard]] Vec2 tree_spot(std::uint32_t lattice_i, std::uint32_t lattice_j,
                              std::uint32_t face) noexcept;
 
-// The tree the cell grows on `biome` ground at a mean annual `temperature` in °C, if its dice
-// land one there.
+// The tree the cell grows on `biome` ground in `habitat`, if its dice land one there.
 [[nodiscard]] std::optional<Stood> tree_grown(std::uint32_t lattice_i, std::uint32_t lattice_j,
                                               std::uint32_t face, planet::Biome biome,
-                                              float temperature) noexcept;
+                                              const Habitat& habitat) noexcept;
 
 // The woods about a spot, as tree_grown grows them there averaged over the cells' own dice: for
 // drawing woods too far off to stand each tree.
@@ -206,6 +232,6 @@ struct Woodland {
 };
 
 [[nodiscard]] Woodland woodland_at(Vec2 cell, std::uint32_t face, planet::Biome biome,
-                                   float temperature) noexcept;
+                                   const Habitat& habitat) noexcept;
 
 } // namespace hog::flora

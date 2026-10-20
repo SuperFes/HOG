@@ -76,9 +76,13 @@ ChangeFilter during(std::int64_t from, std::int64_t until) {
 
 CellState seed_state(CellId at_cell) {
     const auto& geology = shared_world().geology();
-    return {.elevation = geology.terrain().elevation(at_cell),
-            .biome = geology.climate().biome(at_cell),
-            .temperature = geology.climate().temperature(at_cell),
+    const std::int64_t elevation = geology.terrain().elevation(at_cell);
+    const hog::planet::Climate::Surface surface = geology.climate().surface(at_cell, elevation);
+    return {.elevation = elevation,
+            .biome = surface.biome,
+            .temperature = surface.temperature,
+            .moisture = surface.moisture,
+            .water_table = surface.water_table,
             .excavated = 0,
             .hollows = {}};
 }

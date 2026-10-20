@@ -101,6 +101,17 @@ public:
 
     [[nodiscard]] Biome biome(CellId cell) const;
 
+    // A cell's surface climate, read in one pass.
+    struct Surface {
+        Biome biome = Biome::Ocean;
+        std::int64_t temperature = 0; // as temperature()
+        std::int64_t moisture = 0;    // as moisture(); saturated under water
+        std::int64_t water_table = 0; // as water_table(); zero under water
+    };
+
+    // For a cell whose fixed-point elevation is already known.
+    [[nodiscard]] Surface surface(CellId cell, std::int64_t elevation) const;
+
 private:
     [[nodiscard]] std::int64_t water_table(CellId cell, std::int64_t moisture) const;
 

@@ -87,6 +87,14 @@ float stand_scale(float wooded) noexcept {
     return mixed(0.8F, 1.05F, wooded);
 }
 
+float within(const Range& range, float value) noexcept {
+    return saturated((value - (range.low - range.margin)) / range.margin) *
+           saturated(((range.high + range.margin) - value) / range.margin);
+}
+
+// Metres down a tree's roots reach for water.
+constexpr float rooting = 4.0F;
+
 } // namespace
 
 std::uint32_t hashed(std::uint32_t at) noexcept {
@@ -107,10 +115,24 @@ std::uint32_t cell_hash(std::uint32_t lattice_i, std::uint32_t lattice_j,
     return hashed(hashed(lattice_i ^ (face * 0x9e3779b9U)) + lattice_j);
 }
 
-float suited(Genus genus, float temperature) noexcept {
-    const Range range = range_of(genus);
-    return saturated((temperature - (range.coldest - range.margin)) / range.margin) *
-           saturated(((range.warmest + range.margin) - temperature) / range.margin);
+Habitat habitat_of(const planet::CellState& state) noexcept {
+    const auto real = [](std::int64_t fixed) {
+        return static_cast<float>(static_cast<double>(fixed) /
+                                  static_cast<double>(planet::fixed_one));
+    };
+    return {.temperature = real(state.temperature),
+            .moisture = real(state.moisture),
+            .water_table = real(state.water_table)};
+}
+
+float wetness(const Habitat& habitat) noexcept {
+    const float table = saturated(1.0F - (habitat.water_table / rooting));
+    return habitat.moisture > table ? habitat.moisture : table;
+}
+
+float suited(Genus genus, const Habitat& habitat) noexcept {
+    const Niche niche = niche_of(genus);
+    return within(niche.warmth, habitat.temperature) * within(niche.wetness, wetness(habitat));
 }
 
 float stand_field(Vec2 cell, std::uint32_t face) noexcept {
@@ -125,7 +147,7 @@ Vec2 tree_spot(std::uint32_t lattice_i, std::uint32_t lattice_j, std::uint32_t f
 
 std::optional<Stood> tree_grown(std::uint32_t lattice_i, std::uint32_t lattice_j,
                                 std::uint32_t face, planet::Biome biome,
-                                float temperature) noexcept {
+                                const Habitat& habitat) noexcept {
     const BiomeTrees trees = trees_of(biome);
     if (trees.height <= 0.0F) {
         return std::nullopt;
@@ -158,7 +180,7 @@ std::optional<Stood> tree_grown(std::uint32_t lattice_i, std::uint32_t lattice_j
                     : Genus::Oak;
     }
     // Each kind thins out toward the edges of its climate, leaving the ground to the others.
-    if (unit(hash + 18U) >= suited(genus, temperature)) {
+    if (unit(hash + 18U) >= suited(genus, habitat)) {
         return std::nullopt;
     }
     height *= stature(genus);
@@ -167,7 +189,7 @@ std::optional<Stood> tree_grown(std::uint32_t lattice_i, std::uint32_t lattice_j
 }
 
 Woodland woodland_at(Vec2 cell, std::uint32_t face, planet::Biome biome,
-                     float temperature) noexcept {
+                     const Habitat& habitat) noexcept {
     const BiomeTrees trees = trees_of(biome);
     if (trees.height <= 0.0F) {
         return {};
@@ -179,10 +201,10 @@ Woodland woodland_at(Vec2 cell, std::uint32_t face, planet::Biome biome,
                                                                  broadleaf_salt, trees.broadleaf)
                                                    : 0.0F;
     const float maple = drawn_share(cell, face, maple_period_log, maple_salt, trees.maple);
-    const float palms = palm * suited(Genus::Palm, temperature);
-    const float oaks = broadleaf * (1.0F - maple) * suited(Genus::Oak, temperature);
-    const float maples = broadleaf * maple * suited(Genus::Maple, temperature);
-    const float pines = (1.0F - broadleaf) * suited(Genus::Pine, temperature);
+    const float palms = palm * suited(Genus::Palm, habitat);
+    const float oaks = broadleaf * (1.0F - maple) * suited(Genus::Oak, habitat);
+    const float maples = broadleaf * maple * suited(Genus::Maple, habitat);
+    const float pines = (1.0F - broadleaf) * suited(Genus::Pine, habitat);
     const float kept = palms + ((1.0F - palm) * (oaks + maples + pines));
     if (kept <= 0.0F) {
         return {};

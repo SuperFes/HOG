@@ -41,7 +41,7 @@ struct Ground {
     DVec3 direction;
     double elevation;
     planet::Biome biome;
-    float temperature; // mean annual, °C
+    flora::Habitat habitat;
 };
 
 Ground ground_at(const planet::World& world, std::uint32_t face, double s, double t) {
@@ -52,8 +52,7 @@ Ground ground_at(const planet::World& world, std::uint32_t face, double s, doubl
             .elevation =
                 static_cast<double>(state.elevation) / static_cast<double>(planet::fixed_one),
             .biome = state.biome,
-            .temperature = static_cast<float>(static_cast<double>(state.temperature) /
-                                              static_cast<double>(planet::fixed_one))};
+            .habitat = flora::habitat_of(state)};
 }
 
 // Metres from the eye to the tile's nearest ground, generously.
@@ -100,7 +99,7 @@ std::optional<render::TreeAnchor> anchor_at(const planet::World& world, std::uin
     const double t = (static_cast<double>(j) + static_cast<double>(spot.y)) / across;
     const Ground ground = ground_at(world, face, s, t);
     const std::optional<flora::Stood> stood =
-        flora::tree_grown(i, j, face, ground.biome, ground.temperature);
+        flora::tree_grown(i, j, face, ground.biome, ground.habitat);
     if (!stood || ground.elevation < shore) {
         return std::nullopt;
     }

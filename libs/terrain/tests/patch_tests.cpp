@@ -381,13 +381,12 @@ TEST_CASE("a patch carries the woods flora stands about each of its vertices", "
                                 .level = level};
             const hog::terrain::PatchVertex& vertex = patch.vertices.at(vertex_index(i, j));
             const int finer = hog::flora::lattice_level - level;
-            const auto temperature = static_cast<float>(
-                static_cast<double>(world.state(hog::terrain::sample_cell(corner)).temperature) /
-                hog::planet::fixed_one);
+            const hog::flora::Habitat habitat =
+                hog::flora::habitat_of(world.state(hog::terrain::sample_cell(corner)));
             const hog::flora::Woodland woodland = hog::flora::woodland_at(
                 {static_cast<float>(std::ldexp(static_cast<double>(corner.i), finer)),
                  static_cast<float>(std::ldexp(static_cast<double>(corner.j), finer))},
-                static_cast<std::uint32_t>(at.face), vertex.biome, temperature);
+                static_cast<std::uint32_t>(at.face), vertex.biome, habitat);
             const DVec3 point = world_at(patch, vertex_index(i, j));
             const double area =
                 hog::planet::cell_area(hog::planet::cell_at(point, hog::flora::lattice_level)) *

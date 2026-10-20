@@ -275,7 +275,7 @@ This phase covers the planet in procedurally generated plant life, grown from pe
 
 Borrowed from real species to make forests feel grown rather than scattered. A menu, not a contract: each mechanic is cheap once placement reads the sim, and we take the ones that earn their keep.
 
-- [x] Climate niche per species: a temperature and moisture envelope decides each range — palm analogues frost-limited to warm coasts, pines climbing to a cold treeline, nothing growing where it shouldn't (each genus a range of mean annual temperature, thinning at its edges: palms on warm shores and in the tropics, pines to a cold treeline, giving way to broadleaves in the heat; moisture still decided through the biome tables)
+- [x] Climate niche per species: a temperature and moisture envelope decides each range — palm analogues frost-limited to warm coasts, pines climbing to a cold treeline, nothing growing where it shouldn't (each genus a range of mean annual temperature, thinning at its edges: palms on warm shores and in the tropics, pines to a cold treeline, giving way to broadleaves in the heat; and a range of the ground's wetness, the climate's moisture or a water table within the roots' reach: maples on wet ground, oaks off waterlogged ground, pines on the driest)
 - [ ] Dispersal, pretended like the insect damage: winged seeds drift downwind of parents, bird-cached seeds jump gaps and march uphill (how oak and stone-pine analogues spread), water-borne seeds follow shores and rivers
 - [ ] Allelopathy: a walnut-analogue poisons the soil around it and stands in a clearing of its own making; grass-suppressing crowns keep bare ground beneath them
 - [ ] Serotiny: fire-sealed cones that open only in a burn, so burned ground reseeds first in the fire-pine analogue

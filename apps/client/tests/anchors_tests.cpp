@@ -3,6 +3,7 @@
 #include <hog/client/anchors.hpp>
 #include <hog/client/scene.hpp>
 #include <hog/flora/species.hpp>
+#include <hog/flora/stand.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/render/forest.hpp>
 
@@ -127,6 +128,41 @@ TEST_CASE("palms anchor on the islands' warmest shores, and only where it is war
         CHECK(ground.temperature > 14 * hog::planet::fixed_one);
     }
     CHECK(palms > 0);
+}
+
+TEST_CASE("maples anchor only on ground wet enough for them, oaks never on waterlogged ground",
+          "[client][anchors]") {
+    const hog::client::BiomePalette palette = hog::client::biome_palette();
+    const double radius = world().geology().planet_radius();
+    const hog::planet::FaceIJ at =
+        hog::planet::cell_at(islands_centre(), anchor_tile_level).to_face_ij();
+    const hog::flora::Niche maple = hog::flora::niche_of(hog::flora::Genus::Maple);
+    const hog::flora::Niche oak = hog::flora::niche_of(hog::flora::Genus::Oak);
+    // Read a little loosely: the anchor's spot is found again from where it stands.
+    constexpr float slack = 0.02F;
+    std::size_t maples = 0;
+    std::size_t oaks = 0;
+    for (std::uint32_t i = at.i - 4; i <= at.i + 4; ++i) {
+        for (std::uint32_t j = at.j - 4; j <= at.j + 4; ++j) {
+            const hog::planet::CellId tile =
+                hog::planet::CellId::from_face_ij(at.face, i, j, anchor_tile_level);
+            const hog::WorldPosition origin{hog::planet::cell_center(tile) * radius};
+            for (const TreeAnchor& anchor : tile_anchors(world(), tile, origin, palette).anchors) {
+                const hog::flora::Genus genus = hog::render::genus_of(anchor.colour);
+                const float wet = hog::flora::wetness(hog::flora::habitat_of(
+                    world().state(hog::planet::cell_at(origin + hog::DVec3{anchor.position}))));
+                if (genus == hog::flora::Genus::Maple) {
+                    ++maples;
+                    CHECK(wet > maple.wetness.low - maple.wetness.margin - slack);
+                } else if (genus == hog::flora::Genus::Oak) {
+                    ++oaks;
+                    CHECK(wet < oak.wetness.high + oak.wetness.margin + slack);
+                }
+            }
+        }
+    }
+    CHECK(maples > 0);
+    CHECK(oaks > 0);
 }
 
 TEST_CASE("a tile's trees are kept in blocks, each a patch of ground of its own",

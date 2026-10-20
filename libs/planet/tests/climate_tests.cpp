@@ -339,3 +339,27 @@ TEST_CASE("ground under a lake is lake", "[planet][climate]") {
     }
     CHECK(lakes > 0);
 }
+
+TEST_CASE("a cell's surface reads as its climate does, wet through under water",
+          "[planet][climate]") {
+    const Climate climate{planet(1)};
+    int land = 0;
+    int water = 0;
+    for (const CellId cell : cells_at(7)) {
+        const std::int64_t elevation = climate.terrain().elevation(cell);
+        const Climate::Surface surface = climate.surface(cell, elevation);
+        REQUIRE(surface.biome == climate.biome(cell));
+        REQUIRE(surface.temperature == climate.temperature(cell));
+        if (surface.biome == Biome::Ocean || surface.biome == Biome::Lake) {
+            ++water;
+            REQUIRE(surface.moisture == fixed_one);
+            REQUIRE(surface.water_table == 0);
+            continue;
+        }
+        ++land;
+        REQUIRE(surface.moisture == climate.moisture(cell));
+        REQUIRE(surface.water_table == climate.water_table(cell));
+    }
+    CHECK(land > 0);
+    CHECK(water > 0);
+}
