@@ -266,7 +266,7 @@ This phase covers the planet in procedurally generated plant life, grown from pe
 **Placement**
 
 - [x] Placement from the sim: biome, forest biomass, moisture and the water table decide what grows where and how densely (each kind's niche in warmth and the ground's wetness, the water table wetting dry ground within the roots' reach; the forest sim's living, regrown, failing and standing dead shares per cell sent to players as woodlands and read between cells by every tree and the far woods, rebuilt in place as they change)
-- [x] Deterministic per-cell scatter, so every client grows the same world with nothing sent over the network (grass by patch seed, bushes keyed to a fixed lattice that holds across terrain levels; trees as anchors sampled from the world itself on the CPU — one placement in libs/flora, bound to the ground at every terrain level, ready for the server to own as it owns the clouds)
+- [x] Deterministic per-cell scatter, so every client grows the same world with nothing sent over the network (grass by patch seed; trees and bushes as anchors sampled from the world itself on the CPU — one placement in libs/flora, bound to the ground at every terrain level, ready for the server to own as it owns the clouds)
 - [ ] Placement reads the change store over the seed, so planted and cleared ground diverges — the hook farming (Phase 7) builds on (the tree anchors already rebuild their tiles on a changed cell)
 - [x] Succession on burned or emptied cells from the forest sim's history: pioneer grass, then shrubs, then young forest among the burned trunks (the fire's black fades over a year or two; grass takes the ground where the trees are gone, shrubs where the dead have fallen, and the regrowth stands as many small stems, taking generations to be old growth)
 - [ ] Seeds carried by birds and animals: burns heal inward from their living edges, faster where seed-eaters are plentiful, the light-seeded pioneers (birch, pine, berry shrubs) back first and the oaks last
@@ -412,6 +412,13 @@ These tracks can start once Phase 4 works and can run side by side; four people 
 - [ ] Heavy rain looks heavy: bigger, faster drops and longer streaks, visibility closing in, and splashes on the ground, past today's cap of about 14 mm/h of drops
 - [ ] The live weather's rain agrees with the planet's climate map, so biomes get the rain they were placed for (some forest cells now get little rain and dry out over the first years)
 - [ ] Ground materials with roughness and wetness, wet where weather reaches and dry where it's sheltered (mud, rain on rocks)
+- [ ] Clouds hide the sun's glare: today the glare pass runs after the clouds, tests only the depth buffer, and is dimmed by the eye's cell's mean cover, so at half cover it is always at least half strength. Dim it by the clouds' own opacity along the way to the sun (the march's alpha at the disc and its ring, or a short march sunward), so thin cloud mutes it by what it blocks and heavy rain cloud, already denser, nearly hides it
+- [ ] Fog is cloud that has come down: fog's density varies (thicker in hollows and valleys, patchy by noise, by how far the air is past saturation) rather than one constant below its top; the cloud base comes from temperature and dew point (about 125 m a degree of spread), so as the air cools the base settles to the ground as fog, and as the day warms the fog lifts back into low stratus. Today fog tops out about 300 m up and the cloud base never comes below 500 m, so the two never meet
+- [ ] Lying snow with depth, in steps:
+  1. Seen: the server already keeps lying snow per weather cell (snowfall, melt, sublimation; `sim::LandFields::snow`) but never sends it. Send it as the woods' fates are sent; the client spreads it into fine depth the same on every machine (more up high, less on steep or sunny slopes, drifted to the lee, thinner under trees), baked into the patch vertex's two spare bytes. The ground whitens by depth, thin snow letting grass through, deep snow burying grass and bushes.
+  2. On top of things: snow on the upward faces of trees, bushes and rocks (snow on boughs joins the deciduous seasons); the snow's surface raises the ground and the physics ground with it, so feet sink in and slow down.
+  3. Tracks: a trail map about players that feet stamp, pressing dents and turning shallow snow to mud, filling with new snow and fading as it melts; the server keeping them later, so animals can be tracked.
+  4. Weight: the sim keeps the snow's density as powder settles to heavy wet snow, so its load is known: boughs bend and break under it, feeding the trees' fates, and later it loads roofs (see the buildings' wind and snow)
 - [ ] Art direction pass once the references are chosen
 
 ## Phase 8 — Tools, scripting and moderation
@@ -487,7 +494,7 @@ Builds on Phase 5's condition states. The server owns every tree's record, as it
 
 **Vegetation engineering**
 
-- [ ] Bushes onto CPU anchors like the trees, so they too stay put at every terrain level and the server can own them. Today a bush's spot is fixed but whether it grows, its kind and its size come from the nearest vertex of whichever terrain level is loaded, so bushes pop as the ground refines. A `libs/flora` placement reading the world and the fates at the bush's own spot ends that.
+- [x] Bushes onto CPU anchors like the trees, so they too stay put at every terrain level and the server can own them: `libs/flora` places each from the world and the fates at its own spot, near another biome rolling which one it grows as. Tree and bush tiles build on the job pool, off the frame.
 - [ ] Anchor tiles built off the main thread, if building them ever shows in frame times
 - [x] Forest beyond the stamps' 900 m folded into the ground as density and colour, so woods don't end at a line seen from the air (flora's woodland averaged per patch vertex, crowned and turning with the year in the ground's shader; ~free on the 860M)
 - [ ] Solid leaf masses ("tree haircut"): crowns modelled as clumped blobs and lit like the clouds, textured in the tree's current leaf colours, and a billboard far off. Bushes get the same treatment, replacing their billboards.
