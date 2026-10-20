@@ -1,5 +1,6 @@
 import atmosphere;
 import bend;
+import condition;
 import season;
 import shadow;
 import tone;
@@ -93,9 +94,9 @@ float3 foliage_of(uint packed) {
     return rooted * rooted;
 }
 
-// As render::genus_of: the last byte, anything unknown a pine.
+// As render::genus_of: the low half of the last byte, anything unknown a pine.
 uint genus_of(uint packed) {
-    const uint genus = packed >> 24;
+    const uint genus = (packed >> 24) & 0xfu;
     return genus < genus_count ? genus : 0u;
 }
 
@@ -112,6 +113,7 @@ struct Planted {
     uint hash;
     float age;
     uint genus;
+    uint condition;
     uint build;       // into the carpentry's builds
 };
 
@@ -131,7 +133,8 @@ Planted plant(uint instance) {
     const float3 normal = asfloat(anchors.Load3(at + 16));
     const uint hash = anchors.Load(at + 28);
     const float age = asfloat(anchors.Load(at + 36));
-    const uint genus = genus_of(anchors.Load(at + 32));
+    const uint packed = anchors.Load(at + 32);
+    const uint genus = genus_of(packed);
 
     const float away = length(root);
     if (away >= settings.bands.z) {
@@ -161,6 +164,7 @@ Planted plant(uint instance) {
     planted.build =
         (((((genus * detail_count) + lod) * stage_count) + stage) * variant_count) + variant;
     planted.genus = genus;
+    planted.condition = condition_of(packed);
     const Build build = settings.builds[planted.build];
     planted.scale = grown / max(asfloat(build.wood.w), 0.1);
 
@@ -236,7 +240,14 @@ Timber wood_vertex(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     timber.drawn = bent(timber.from_eye, push.bend_up, push.bend_radii.xy);
     timber.position = mul(push.clip_from_eye, float4(timber.drawn, 1.0));
     timber.normal = turned(planted, local_normal);
-    timber.colour = barks[planted.genus] * (0.85 + (0.3 * unit(planted.hash + 7u)));
+    const float tone = 0.85 + (0.3 * unit(planted.hash + 7u));
+    timber.colour = barks[planted.genus] * tone;
+    if (standing_dead(planted.condition)) {
+        timber.colour = dead_wood(planted.condition, tone);
+    } else if (planted.condition == scorched &&
+               local.z < scorch_height(unit(planted.hash + 24u)) * asfloat(build.wood.w)) {
+        timber.colour = charcoal;
+    }
     timber.height = planted.height_above;
     return timber;
 }
@@ -308,7 +319,8 @@ Spray leaf_vertex(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
         return no_spray();
     }
     const Build build = settings.builds[planted.build];
-    if (vertex >= build.leaf.z) {
+    // A dead tree's crown is gone.
+    if (vertex >= build.leaf.z || standing_dead(planted.condition)) {
         return no_spray();
     }
     const float3 foliage = foliage_of(anchors.Load(anchored(instance) + 32));
@@ -330,9 +342,17 @@ Spray leaf_vertex(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     if (unit(seed + 5u) >= leaves_at(leafing, frond_own, lighting.year).held) {
         return no_spray();
     }
+    // A failing crown has shed fronds of its own, and what's left browns.
+    const bool failing_crown = planted.condition == failing;
+    if (failing_crown && unit(seed + 7u) < shed) {
+        return no_spray();
+    }
     const Leaves leaves = leaves_at(leafing, frond_own + (0.3 * toward_top), lighting.year);
-    const float3 hue = autumn_colour(foliage, leaves.turned, settings.first[planted.genus].rgb,
-                                     settings.last[planted.genus].rgb);
+    float3 hue = autumn_colour(foliage, leaves.turned, settings.first[planted.genus].rgb,
+                               settings.last[planted.genus].rgb);
+    if (failing_crown) {
+        hue = failing_foliage(hue);
+    }
 
     Spray spray;
     spray.from_eye = carried(planted, local, asfloat(build.wood.w));

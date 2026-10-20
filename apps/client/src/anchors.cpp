@@ -126,7 +126,7 @@ std::optional<render::TreeAnchor> anchor_at(const planet::World& world, std::uin
         .hash = stood->hash,
         .colour = render::packed_foliage(
             flora::foliage_colour(stood->genus, palette[static_cast<std::size_t>(ground.biome)]),
-            stood->genus),
+            stood->genus, stood->condition),
         .age = stood->age};
 }
 

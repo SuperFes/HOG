@@ -1,5 +1,6 @@
 import atmosphere;
 import bend;
+import condition;
 import season;
 import shadow;
 import tone;
@@ -77,9 +78,9 @@ float3 foliage_of(uint packed) {
     return rooted * rooted;
 }
 
-// As render::genus_of: the last byte, anything unknown a pine.
+// As render::genus_of: the low half of the last byte, anything unknown a pine.
 uint genus_of(uint packed) {
-    const uint genus = packed >> 24;
+    const uint genus = (packed >> 24) & 0xfu;
     return genus < genus_count ? genus : 0u;
 }
 
@@ -114,6 +115,7 @@ struct Tree {
     nointerpolation float age; // 0 a sapling, 1 old
     nointerpolation float own; // how early it keeps its kind's dates, as season.slang's
     nointerpolation uint genus;
+    nointerpolation uint condition;
 };
 
 // Nothing: a point's triangles cover no pixels.
@@ -132,6 +134,7 @@ Tree nothing() {
     gone.own = 0.0;
     gone.seed = 0;
     gone.genus = 0;
+    gone.condition = sound;
     return gone;
 }
 
@@ -207,6 +210,7 @@ Tree vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     tree.seed = hash;
     tree.age = age;
     tree.genus = genus;
+    tree.condition = condition_of(packed);
     return tree;
 }
 
@@ -256,6 +260,8 @@ Cut pine_cut(uint seed, float age, float2 uv, float pixels) {
         const float half_width = (0.42 * spread * step) + 0.012 + ragged;
         if (abs(uv.x) < half_width) {
             cut.part = needles;
+            // Under each tier, the bough it hangs from.
+            cut.twig = along < 0.15 && abs(uv.x) < 0.7 * half_width;
             // Darkest under a bough, lit along its top; deeper toward the trunk.
             cut.shade = lerp(0.55, 1.1, saturate(along * 1.6)) *
                         (0.8 + (0.25 * saturate(abs(uv.x) / max(half_width, 0.02))));
@@ -416,10 +422,35 @@ float4 fragment_main(Tree tree) : SV_Target {
     } else {
         cut = broadleaf_cut(tree.seed, tree.age, tree.uv, tree.pixels, head_of(tree.genus));
     }
+    const bool snag = standing_dead(tree.condition);
+    if (snag) {
+        // Dead, its crown is gone, the limbs left bare near enough to see; a stem stands up
+        // through where it was, never thinner than a pixel, snapped off short of the top.
+        if (cut.part == needles) {
+            cut.part = cut.twig && tree.pixels >= 7.0 ? bark : air_part;
+            cut.shade = 1.0;
+        }
+        const float snapped = 0.6 + (0.3 * unit(tree.seed + 23u));
+        const float stem =
+            (0.03 * (1.0 - (0.6 * tree.uv.y))) + 0.004 + (0.5 / max(tree.pixels, 1.0));
+        if (cut.part == air_part && abs(tree.uv.x) < stem) {
+            cut.part = bark;
+            cut.shade = 1.0;
+        }
+        if (tree.uv.y >= snapped) {
+            cut.part = air_part;
+        }
+    }
     if (cut.part == air_part) {
         discard;
     }
     float3 albedo = woods[tree.genus] * (cut.part == bark ? cut.shade : 1.0);
+    if (snag) {
+        albedo = dead_wood(tree.condition, cut.shade * (0.85 + (0.3 * unit(tree.seed + 7u))));
+    } else if (tree.condition == scorched && cut.part == bark &&
+               tree.uv.y < scorch_height(unit(tree.seed + 24u))) {
+        albedo = charcoal;
+    }
     if (cut.part == needles) {
         // Each patch keeps the tree's dates give or take a week or so, the crown's top first;
         // where its leaves are down, the bare branches show through.
@@ -435,6 +466,17 @@ float4 fragment_main(Tree tree) : SV_Target {
             albedo = autumn_colour(tree.colour, leaves.turned, settings.first[tree.genus].rgb,
                                    settings.last[tree.genus].rgb) *
                      tree.tone * cut.shade;
+            // A failing crown thins in patches, its branches showing through, and browns.
+            if (tree.condition == failing) {
+                if (smooth_dice(tree.seed + 4u, tree.uv * float2(7.0, 11.0)) < shed) {
+                    if (!cut.twig) {
+                        discard;
+                    }
+                    albedo = woods[tree.genus] * 0.8;
+                } else {
+                    albedo = failing_foliage(albedo);
+                }
+            }
         }
     }
     const float3 sun = lighting.sun_exposure.xyz;

@@ -230,6 +230,31 @@ std::size_t autumnal_pixels(const Pixels& pixels) {
     return autumnal;
 }
 
+// The same anchors in another condition.
+std::vector<TreeAnchor> fared(std::vector<TreeAnchor> anchors, hog::flora::Condition condition) {
+    for (TreeAnchor& anchor : anchors) {
+        anchor.colour =
+            hog::render::packed_foliage(hog::render::foliage_of(anchor.colour),
+                                        hog::render::genus_of(anchor.colour), condition);
+    }
+    return anchors;
+}
+
+// The mean of red, green and blue over the pixels lit, 0 to 255.
+double mean_brightness(const Pixels& pixels) {
+    double sum = 0.0;
+    double lit = 0.0;
+    for (std::size_t pixel = 0; pixel < pixels.size() / 4; ++pixel) {
+        const int brightness =
+            pixels.at(4 * pixel) + pixels.at((4 * pixel) + 1) + pixels.at((4 * pixel) + 2);
+        if (brightness > 0) {
+            sum += brightness / 3.0;
+            lit += 1.0;
+        }
+    }
+    return lit > 0.0 ? sum / lit : 0.0;
+}
+
 } // namespace
 
 TEST_CASE("foliage packs into a word with its genus, dark shades kept", "[render]") {
@@ -248,6 +273,17 @@ TEST_CASE("foliage packs into a word with its genus, dark shades kept", "[render
     CHECK(hog::render::foliage_of(bright).g == 0.0F);
     CHECK(hog::render::genus_of(bright) == Genus::Oak);
     CHECK(hog::render::genus_of(0xff00'0000U) == Genus::Pine);
+    // The tree's condition beside its genus, neither spilling into the other.
+    using hog::flora::Condition;
+    CHECK(hog::render::condition_of(packed) == Condition::Sound);
+    for (const Condition condition :
+         {Condition::Failing, Condition::Scorched, Condition::Dead, Condition::Charred}) {
+        const std::uint32_t fared = hog::render::packed_foliage(dark, Genus::Palm, condition);
+        CHECK(hog::render::condition_of(fared) == condition);
+        CHECK(hog::render::genus_of(fared) == Genus::Palm);
+        CHECK(hog::render::foliage_of(fared) == hog::render::foliage_of(packed));
+    }
+    CHECK(hog::render::condition_of(0xf000'0000U) == Condition::Sound);
 }
 
 TEST_CASE("a stamp stands on its anchor, trunk under a tiered crown", "[render]") {
@@ -405,4 +441,43 @@ TEST_CASE("a palm's stamp is a crown of fronds high on a bare stem, green the ye
     constexpr hog::flora::Daylight winter{.hours = 9.0F, .longest = 15.4F, .lengthening = true};
     CHECK(leafy_pixels(draw(*device, {.anchors = palms, .daylight = winter})) ==
           leafy_pixels(draw(*device, {.anchors = palms, .daylight = summer})));
+}
+
+TEST_CASE(
+    "a dead stamp stands bare, weathered grey or burned black; a failing one thins and browns",
+    "[render]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    using hog::flora::Condition;
+    using hog::flora::Genus;
+    for (const Genus genus : {Genus::Pine, Genus::Oak, Genus::Maple, Genus::Palm}) {
+        INFO("genus " << static_cast<int>(genus));
+        const auto trees = rank_of(3, 0.0, 11.0F, hog::flora::prime_age, genus);
+        const Pixels sound = draw(*device, {.anchors = trees});
+        const Pixels failing = draw(*device, {.anchors = fared(trees, Condition::Failing)});
+        const Pixels dead = draw(*device, {.anchors = fared(trees, Condition::Dead)});
+        const Pixels charred = draw(*device, {.anchors = fared(trees, Condition::Charred)});
+        const Pixels scorched = draw(*device, {.anchors = fared(trees, Condition::Scorched)});
+        INFO("bright " << mean_brightness(dead) << " " << mean_brightness(charred));
+        // Its crown gone, a dead tree stands as its wood alone, burned darker than weathered.
+        CHECK(leafy_pixels(dead) == 0);
+        CHECK(leafy_pixels(charred) == 0);
+        CHECK(lit_pixels(dead) > 0);
+        CHECK(lit_pixels(dead) < lit_pixels(sound) / 2);
+        // Some of the charcoal is too dark to light a pixel at all.
+        CHECK(lit_pixels(charred) > 0);
+        CHECK(lit_pixels(charred) <= lit_pixels(dead));
+        CHECK(mean_brightness(charred) < 0.5 * mean_brightness(dead));
+        // A failing crown thinner and browner.
+        CHECK(lit_pixels(failing) < lit_pixels(sound));
+        CHECK(2 * leafy_pixels(failing) < leafy_pixels(sound));
+        CHECK(autumnal_pixels(failing) > autumnal_pixels(sound));
+        // A scorched survivor's crown untouched, its trunk blackened where it shows.
+        CHECK(leafy_pixels(scorched) == leafy_pixels(sound));
+        if (barky_pixels(sound) > 4) {
+            CHECK(barky_pixels(scorched) < barky_pixels(sound));
+        }
+    }
 }

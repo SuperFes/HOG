@@ -3,6 +3,7 @@
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
 #include <hog/flora/species.hpp>
+#include <hog/flora/stand.hpp>
 #include <hog/render/memory.hpp>
 #include <hog/render/vulkan.hpp>
 
@@ -24,15 +25,18 @@ struct TreeAnchor {
     float height = 0.0F;           // the tree's, metres
     Vec3 normal{0.0F, 0.0F, 1.0F}; // the ground's, unit
     std::uint32_t hash = 0;        // the tree's own dice
-    std::uint32_t colour = 0;      // its foliage's and its genus, as packed_foliage() packs them
-    float age = 0.0F;              // 0 a sapling, 1 full grown
+    std::uint32_t colour = 0; // its foliage's, genus and condition, as packed_foliage() packs them
+    float age = 0.0F;         // 0 a sapling, 1 full grown
 };
 
 // Foliage's colour in a byte a channel, kept square-rooted so dark needles keep their shades, with
-// the tree's genus in the last byte.
-[[nodiscard]] std::uint32_t packed_foliage(Vec3 colour, flora::Genus genus) noexcept;
+// the tree's genus in the low half of the last byte and its condition in the high.
+[[nodiscard]] std::uint32_t
+packed_foliage(Vec3 colour, flora::Genus genus,
+               flora::Condition condition = flora::Condition::Sound) noexcept;
 [[nodiscard]] Vec3 foliage_of(std::uint32_t packed) noexcept;
 [[nodiscard]] flora::Genus genus_of(std::uint32_t packed) noexcept;
+[[nodiscard]] flora::Condition condition_of(std::uint32_t packed) noexcept;
 
 // Each genus' year as the tree shaders read it, from its species' flora::Leafing: x turn, y fall,
 // z flush, w spread; then the colours its leaves turn through, first and last.

@@ -57,11 +57,12 @@ void memory_barrier(VkCommandBuffer commands, VkPipelineStageFlags2 from_stage,
 
 } // namespace
 
-std::uint32_t packed_foliage(Vec3 colour, flora::Genus genus) noexcept {
+std::uint32_t packed_foliage(Vec3 colour, flora::Genus genus, flora::Condition condition) noexcept {
     return byte_of(std::sqrt(std::max(colour.r, 0.0F))) |
            (byte_of(std::sqrt(std::max(colour.g, 0.0F))) << 8U) |
            (byte_of(std::sqrt(std::max(colour.b, 0.0F))) << 16U) |
-           (static_cast<std::uint32_t>(genus) << 24U);
+           (static_cast<std::uint32_t>(genus) << 24U) |
+           (static_cast<std::uint32_t>(condition) << 28U);
 }
 
 Vec3 foliage_of(std::uint32_t packed) noexcept {
@@ -70,9 +71,16 @@ Vec3 foliage_of(std::uint32_t packed) noexcept {
 }
 
 flora::Genus genus_of(std::uint32_t packed) noexcept {
-    const std::uint32_t genus = packed >> 24U;
+    const std::uint32_t genus = (packed >> 24U) & 0xfU;
     return genus < static_cast<std::uint32_t>(flora::genus_count) ? static_cast<flora::Genus>(genus)
                                                                   : flora::Genus::Pine;
+}
+
+flora::Condition condition_of(std::uint32_t packed) noexcept {
+    const std::uint32_t condition = packed >> 28U;
+    return condition < static_cast<std::uint32_t>(flora::condition_count)
+               ? static_cast<flora::Condition>(condition)
+               : flora::Condition::Sound;
 }
 
 GenusSeasons genus_seasons() {
