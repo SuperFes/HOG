@@ -396,6 +396,13 @@ These tracks can start once Phase 4 works and can run side by side; four people 
 **Rendering, continued**
 
 - [ ] Mid-distance hierarchical LOD and far-field impostors
+  - Buildings in five steps:
+    1. the full mesh;
+    2. one or two simplified meshes, decimated at bake time;
+    3. a shell with only the outer walls and roof;
+    4. an octahedral impostor, rendered from many angles so it turns as you circle it;
+    5. folded into the ground or the horizon panorama, as a few pixels of colour or a bump on the skyline.
+  - Trees already have five tiers: three grown meshes, the stamps, and the canopy band in the ground. If the stamps prove costly between 240 and 900 m, add an impostor of a whole clump of trees.
 - [ ] Horizon panorama relit every frame and refreshed as the player moves
 - [x] Volumetric clouds that fill the sky's volume and can be flown through (raymarched, likely at reduced resolution)
 - [x] Weather-driven visibility: haze as the air nears forming cloud, and fog lying in the low ground
