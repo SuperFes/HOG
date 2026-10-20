@@ -49,12 +49,15 @@ void parse_fire(Table fire, FireConfig& config) {
 }
 
 void parse_dying(Table dying, DyingConfig& config) {
-    dying.only({"days"sv, "tolerance"sv, "worst"sv, "years"sv, "standing"sv, "maturing"sv});
+    dying.only({"days"sv, "tolerance"sv, "learning"sv, "adapting"sv, "worst"sv, "years"sv,
+                "standing"sv, "maturing"sv});
     dying.number("days", positive, 1e5, config.days);
     dying.number("tolerance", 0.0, 1.0, config.tolerance);
     if (config.tolerance >= 1.0) {
         dying.fail(std::format("{} must be below 1", dying.where("tolerance")));
     }
+    dying.number("learning", 0.0, 1e4, config.learning);
+    dying.number("adapting", positive, 1e4, config.adapting);
     dying.number("worst", 0.0, 1.0, config.worst);
     dying.number("years", positive, 1e4, config.years);
     dying.number("standing", positive, 1e4, config.standing);

@@ -43,11 +43,14 @@ struct FireConfig {
 };
 
 // How plants die back when the ground water falls well below its usual level, and how long the
-// dead and the regrown take to pass. The shortfall felt is a running mean, so a dry season the
-// plants are used to costs them nothing.
+// dead and the regrown take to pass. The shortfall felt is a running mean, and plants are used to
+// the worst of it they see in a usual year, so only a drought worse than their dry season costs
+// them.
 struct DyingConfig {
     double days = 120.0;    // the shortfall's running mean is taken over about this long
-    double tolerance = 0.3; // share the ground water may fall below its usual without loss
+    double tolerance = 0.1; // share of the ground water below what they're used to, without loss
+    double learning = 1.0;  // years a new forest takes to learn what's usual, losing nothing
+    double adapting = 30.0; // years plants take to grow used to worse droughts, about
     double worst = 0.6;     // share of what a cell holds lost once the ground water is gone
     double years = 2.0;     // for the dying to die, about
     double standing = 12.0; // years the dead stand before they fall, about

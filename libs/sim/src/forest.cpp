@@ -99,7 +99,8 @@ double dryness(double soil, double snow) noexcept {
 
 Forest::Forest(const ForestConfig& config, std::vector<Soil> soil, GameTime now)
     : config_(config), grid_(config_.level), soil_(std::move(soil)),
-      time_(detail::last_step(now, positive(config_.step))) {
+      time_(detail::last_step(now, positive(config_.step))),
+      learning_until_(time_ + detail::years_of(config_.vegetation.dying.learning)) {
     HOG_ASSERT(config_.step > GameDuration::zero(), "forest step must be positive");
     HOG_ASSERT(soil_.size() == grid_.size(), "need soil for every cell");
     HOG_ASSERT(config_.planet_radius > 0.0, "planet radius must be positive");
@@ -114,6 +115,7 @@ Forest::Forest(const ForestConfig& config, std::vector<Soil> soil, GameTime now)
     fields_.dead.resize(size);
     fields_.charred.resize(size);
     fields_.shortfall.resize(size);
+    fields_.accustomed.resize(size);
     catching_.resize(size);
     for (std::uint32_t cell = 0; cell < size; ++cell) {
         areas_.push_back(grid_.area(cell) * square_km);
@@ -136,8 +138,15 @@ double Forest::living(std::uint32_t cell) const {
 
 double Forest::sustainable(std::uint32_t cell) const {
     const DyingConfig& dying = config_.vegetation.dying;
+    if (time_ < learning_until_) {
+        return 1.0;
+    }
+    const double bearable = static_cast<double>(fields_.accustomed[cell]) + dying.tolerance;
+    if (bearable >= 1.0) {
+        return 1.0;
+    }
     const double short_by =
-        (static_cast<double>(fields_.shortfall[cell]) - dying.tolerance) / (1.0 - dying.tolerance);
+        (static_cast<double>(fields_.shortfall[cell]) - bearable) / (1.0 - bearable);
     return 1.0 - (dying.worst * std::clamp(short_by, 0.0, 1.0));
 }
 
@@ -321,6 +330,16 @@ void Forest::feel(std::uint32_t cell, const ForestConditions& conditions, double
     const double toward = 1.0 - std::exp(-days / config_.vegetation.dying.days);
     shortfall = static_cast<float>(static_cast<double>(shortfall) +
                                    ((felt - static_cast<double>(shortfall)) * toward));
+    // Learning, they take the worst seen as usual; after, they grow used to worse only slowly.
+    float& accustomed = fields_.accustomed[cell];
+    if (time_ < learning_until_) {
+        accustomed = std::max(accustomed, shortfall);
+    } else if (shortfall > accustomed) {
+        const double adapting =
+            1.0 - std::exp(-days / (config_.vegetation.dying.adapting * days_per_year));
+        accustomed = static_cast<float>(static_cast<double>(accustomed) +
+                                        (static_cast<double>(shortfall - accustomed) * adapting));
+    }
 }
 
 void Forest::settle(std::uint32_t cell, double before, double after, bool burned, double days) {

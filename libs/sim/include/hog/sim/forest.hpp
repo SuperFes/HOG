@@ -69,8 +69,9 @@ struct ForestFields {
     std::vector<float> dead;
     std::vector<float> charred;
     // How far the ground water has fallen below its usual level, as a share of it, felt as a
-    // running mean.
+    // running mean, and the worst of it the plants are used to.
     std::vector<float> shortfall;
+    std::vector<float> accustomed;
 
     friend bool operator==(const ForestFields&, const ForestFields&) = default;
 };
@@ -97,9 +98,9 @@ enum class Stage : std::uint8_t { Bare, Grass, Shrub, Young, Mature };
 // fast as the warmth and the wetness of the ground allow. Lightning sets dry fuel alight, and
 // fire spreads to neighbours that will burn, most readily downwind; it burns its cell's plants
 // down to the seeds they grow back from, and goes out as the fuel runs low or the rain puts it out.
-// Where the ground water stays well below its usual level, the plants die back to what it can
-// keep. What dies stands dead, burned or not, until it falls; what grows back takes generations
-// to be old growth again.
+// Where the ground water stays further below its usual level than in the dry seasons the plants
+// are used to, they die back to what it can keep. What dies stands dead, burned or not, until it
+// falls; what grows back takes generations to be old growth again.
 class Forest {
 public:
     // Fully grown, as of the last step at or before `now`. Precondition: soil for every cell at
@@ -124,6 +125,8 @@ public:
     // When the last step was taken, and when the next is due.
     [[nodiscard]] GameTime time() const noexcept { return time_; }
     [[nodiscard]] GameTime next_step() const noexcept { return time_ + config_.step; }
+    // Until then, the plants are still learning what dry seasons are usual, and none die of them.
+    [[nodiscard]] GameTime learning_until() const noexcept { return learning_until_; }
 
     // Takes every step due by `now`, all under the same conditions; returns how many. Call from
     // the jobs' owning thread. Precondition: conditions for every cell.
@@ -145,7 +148,7 @@ public:
     // newer version, and InvalidArgument for a forest saved at another grid level.
     [[nodiscard]] Result<void> load(std::uint16_t version, std::span<const std::byte> bytes);
 
-    static constexpr std::uint16_t save_version = 2;
+    static constexpr std::uint16_t save_version = 3;
 
 private:
     // How a cell catches fire on a step.
@@ -171,6 +174,7 @@ private:
     ForestFields fields_;
     FireReport fires_;
     GameTime time_;
+    GameTime learning_until_;
     // Scratch for stepping.
     std::vector<Catching> catching_;
 };

@@ -2,6 +2,7 @@
 
 #include <hog/core/time.hpp>
 #include <hog/jobs/job_system.hpp>
+#include <hog/sim/ecology.hpp>
 
 #include <cstdint>
 
@@ -15,6 +16,12 @@ namespace hog::sim::detail {
         --steps;
     }
     return GameTime{steps * step};
+}
+
+// A span of game time this many years long.
+[[nodiscard]] inline GameDuration years_of(double years) {
+    return std::chrono::round<GameDuration>(
+        std::chrono::duration<double>{years * days_per_year * 86'400.0});
 }
 
 // A hash as a number from 0 up to 1.

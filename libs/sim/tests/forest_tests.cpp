@@ -264,24 +264,32 @@ TEST_CASE("a drought kills back what the ground water can't keep, the failing fi
     JobSystem jobs{2};
     const std::uint32_t cell = middle();
     Weather weather = good_year(forest.grid().size());
-    // A dry season plants are used to costs them nothing.
+    const hog::sim::ForestFields& fields = forest.fields();
+    // The first year, the plants learn the dry season they're used to, and the next costs them
+    // nothing.
     std::ranges::fill(weather.groundwater, 80.0);
-    forest.advance_to(start + days{365}, weather.conditions(), jobs);
+    forest.advance_to(start + days{366}, weather.conditions(), jobs);
+    CHECK(forest.time() >= forest.learning_until());
+    CHECK_THAT(static_cast<double>(fields.accustomed[cell]), WithinAbs(0.2, 0.02));
+    forest.advance_to(forest.time() + days{365}, weather.conditions(), jobs);
     CHECK(forest.living(cell) == 1.0);
-    CHECK(forest.fields().failing[cell] == 0.0F);
+    CHECK(fields.failing[cell] == 0.0F);
 
     // Years with the ground water well down: dying back toward what it keeps.
     std::ranges::fill(weather.groundwater, 30.0);
     forest.advance_to(forest.time() + days{120}, weather.conditions(), jobs);
-    const hog::sim::ForestFields& fields = forest.fields();
     CHECK(fields.shortfall[cell] > 0.4F);
     CHECK(fields.failing[cell] > 0.0F);
     forest.advance_to(forest.time() + days{365 * 5}, weather.conditions(), jobs);
     const double keeps = forest.sustainable(cell);
+    const double bearable = static_cast<double>(fields.accustomed[cell]) + 0.1;
     CHECK_THAT(static_cast<double>(fields.shortfall[cell]), WithinAbs(0.7, 0.01));
-    CHECK_THAT(keeps, WithinAbs(1.0 - (0.6 * 0.4 / 0.7), 0.01));
+    // Slowly growing used to it.
+    CHECK(fields.accustomed[cell] > 0.25F);
+    CHECK(fields.accustomed[cell] < 0.4F);
+    CHECK_THAT(keeps, WithinAbs(1.0 - (0.6 * (0.7 - bearable) / (1.0 - bearable)), 0.01));
     CHECK_THAT(forest.living(cell), WithinAbs(keeps, 0.05));
-    CHECK(fields.dead[cell] > 0.15F);
+    CHECK(fields.dead[cell] > 0.1F);
     CHECK(fields.charred[cell] == 0.0F);
     CHECK(static_cast<double>(fields.established[cell]) <= forest.living(cell) + 1e-6);
     CHECK(fields.failing[cell] < 0.05F);
@@ -299,6 +307,27 @@ TEST_CASE("a drought kills back what the ground water can't keep, the failing fi
     unmeasured.usual_groundwater.clear();
     unknown.advance_to(start + days{365}, unmeasured.conditions(), jobs);
     CHECK(unknown.living(cell) == 1.0);
+}
+
+TEST_CASE("a new forest loses nothing to drought while it learns what's usual", "[sim][forest]") {
+    Forest forest{config(), woods(), start};
+    JobSystem jobs{2};
+    const std::uint32_t cell = middle();
+    Weather weather = good_year(forest.grid().size());
+    std::ranges::fill(weather.groundwater, 10.0);
+    forest.advance_to(start + days{300}, weather.conditions(), jobs);
+    CHECK(forest.fields().shortfall[cell] > 0.8F);
+    CHECK(forest.sustainable(cell) == 1.0);
+    CHECK(forest.living(cell) == 1.0);
+    // Learned, a drought as bad as that one is usual.
+    forest.advance_to(start + days{730}, weather.conditions(), jobs);
+    CHECK(forest.living(cell) == 1.0);
+    // Without learning, it's a drought from the first.
+    ForestConfig hasty = config();
+    hasty.vegetation.dying.learning = 0.0;
+    Forest unready{hasty, woods(), start};
+    unready.advance_to(start + days{300}, weather.conditions(), jobs);
+    CHECK(unready.living(cell) < 0.9);
 }
 
 TEST_CASE("wet ground and water don't burn", "[sim][forest]") {
@@ -471,6 +500,12 @@ TEST_CASE("a forest saves and loads, fires and all", "[sim][forest]") {
                    WithinAbs(older.living(cell), 1e-6));
         CHECK(older.fields().dead[cell] == 0.0F);
     }
+    // The second, without what the plants are used to: they learn it afresh.
+    const std::span<const std::byte> second{bytes.data(), bytes.size() - (4 * cells) - 8};
+    Forest unlearned{config(), woods(), start};
+    REQUIRE(unlearned.load(2, second));
+    CHECK(unlearned.fields().accustomed == current.fields().shortfall);
+    CHECK(unlearned.learning_until() > unlearned.time());
 
     const auto before = loaded.fields();
     const std::span<const std::byte> all{bytes};

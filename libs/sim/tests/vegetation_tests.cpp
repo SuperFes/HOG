@@ -37,6 +37,8 @@ burn_days = 3
 
 [dying]
 tolerance = 0.4
+learning = 2
+adapting = 50
 standing = 20
 )");
     REQUIRE(vegetation);
@@ -53,6 +55,8 @@ standing = 20
     CHECK(vegetation->fire.spread == 4.0);
     CHECK(vegetation->fire.burn_days == 3.0);
     CHECK(vegetation->dying.tolerance == 0.4);
+    CHECK(vegetation->dying.learning == 2.0);
+    CHECK(vegetation->dying.adapting == 50.0);
     CHECK(vegetation->dying.standing == 20.0);
     CHECK(vegetation->dying.worst == hog::sim::DyingConfig{}.worst);
 

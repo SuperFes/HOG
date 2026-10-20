@@ -1,3 +1,5 @@
+#include "cells.hpp"
+
 #include <hog/core/bytes.hpp>
 #include <hog/sim/forest.hpp>
 
@@ -37,6 +39,8 @@ std::vector<std::byte> Forest::save() const {
     write_floats(out, fields_.dead);
     write_floats(out, fields_.charred);
     write_floats(out, fields_.shortfall);
+    write_floats(out, fields_.accustomed);
+    out.write(static_cast<std::uint64_t>(learning_until_.time_since_epoch().count()));
     return std::move(out).take();
 }
 
@@ -77,11 +81,23 @@ Result<void> Forest::load(std::uint16_t version, std::span<const std::byte> byte
         std::ranges::fill(loaded.charred, 0.0F);
         std::ranges::fill(loaded.shortfall, 0.0F);
     }
+    std::uint64_t learning_until = 0;
+    if (version >= 3) {
+        read_floats(in, loaded.accustomed);
+        learning_until = in.integer<std::uint64_t>();
+    }
     if (auto finished = in.finish(); !finished) {
         return finished;
     }
     fields_ = std::move(loaded);
     time_ = GameTime{GameDuration{static_cast<GameDuration::rep>(time)}};
+    if (version >= 3) {
+        learning_until_ = GameTime{GameDuration{static_cast<GameDuration::rep>(learning_until)}};
+    } else {
+        // Older forests never learned what's usual, so they learn it from here.
+        std::ranges::copy(fields_.shortfall, fields_.accustomed.begin());
+        learning_until_ = time_ + detail::years_of(config_.vegetation.dying.learning);
+    }
     return {};
 }
 
