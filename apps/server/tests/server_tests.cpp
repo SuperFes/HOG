@@ -898,11 +898,9 @@ private:
 };
 
 // Open on a free players' port.
-std::unique_ptr<Server> playing(const World& world, bool time_control = false) {
+std::unique_ptr<Server> playing(hog::server::ServerConfig config) {
     std::random_device random;
     const auto first = static_cast<std::uint16_t>(40'000 + (random() % 20'000));
-    auto config = world.config();
-    config.debug.time_control = time_control;
     for (std::uint16_t port = first; port < first + 100; ++port) {
         config.net.port = port;
         auto server = opened(config);
@@ -912,6 +910,12 @@ std::unique_ptr<Server> playing(const World& world, bool time_control = false) {
     }
     FAIL("no free port");
     std::unreachable();
+}
+
+std::unique_ptr<Server> playing(const World& world, bool time_control = false) {
+    auto config = world.config();
+    config.debug.time_control = time_control;
+    return playing(config);
 }
 
 } // namespace
@@ -949,6 +953,51 @@ TEST_CASE("a player is sent the weather as they join", "[app][server]") {
     CHECK(weather->level == server->weather().grid().level());
     CHECK(weather->fade == 10min);
     CHECK(weather->cells.size() == server->weather().grid().size());
+}
+
+TEST_CASE("a player is sent how the woods fare as they join, where the world grows a forest",
+          "[app][server]") {
+    const World world;
+    auto config = world.config();
+    config.forest.vegetation = world.write_vegetation(R"(
+[growth]
+capacity = { temperate_forest = 20 }
+)");
+    const auto server = playing(config);
+    REQUIRE(server->forest() != nullptr);
+    auto client = hog::net::Client::connect(std::format("127.0.0.1:{}", server->players()->port()));
+    REQUIRE(client);
+    std::optional<hog::protocol::Woodlands> woodlands;
+    std::vector<hog::net::Event> events;
+    std::atomic<bool> stop = false;
+    const auto give_up = MonotonicClock::now() + 10s;
+    Visited timer{[&] {
+        client->poll(events);
+        for (const hog::net::Event& event : events) {
+            if (std::holds_alternative<hog::net::Connected>(event)) {
+                REQUIRE(client->send(hog::net::Delivery::Reliable,
+                                     hog::protocol::encode(hog::protocol::Hello{})));
+            } else if (const auto* message = std::get_if<hog::net::Message>(&event)) {
+                auto decoded = hog::protocol::decode(message->bytes());
+                REQUIRE(decoded);
+                if (auto* told = std::get_if<hog::protocol::Woodlands>(&*decoded)) {
+                    woodlands = std::move(*told);
+                }
+            }
+        }
+        if (woodlands || MonotonicClock::now() >= give_up) {
+            stop = true;
+        }
+    }};
+    REQUIRE(server->run(timer, [] { return start; }, stop));
+    REQUIRE(woodlands.has_value());
+    const hog::protocol::Woodlands& told = woodlands.value_or(hog::protocol::Woodlands{});
+    CHECK(told.level == server->forest()->grid().level());
+    CHECK(told.cells.size() == server->forest()->grid().size());
+    // A forest just grown is untouched everywhere.
+    CHECK(std::ranges::all_of(told.cells, [](const hog::protocol::CellWoodland& cell) {
+        return cell == hog::protocol::CellWoodland{};
+    }));
 }
 
 TEST_CASE("players hear each other's chat, named by the server", "[app][server]") {

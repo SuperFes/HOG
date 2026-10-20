@@ -10,7 +10,8 @@ add_library(hog_server
     src/spatial_tracking.cpp
     src/survey.cpp
     src/tick_clock.cpp
-    src/weather_report.cpp)
+    src/weather_report.cpp
+    src/woodlands_report.cpp)
 add_library(hog::server ALIAS hog_server)
 
 target_include_directories(hog_server PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -34,7 +35,8 @@ hog_add_tests(hog_server
     tests/survey_tests.cpp
     tests/tick_clock_tests.cpp
     tests/tick_loop_tests.cpp
-    tests/weather_report_tests.cpp)
+    tests/weather_report_tests.cpp
+    tests/woodlands_report_tests.cpp)
 
 if(TARGET hog_server_tests)
     target_compile_definitions(hog_server_tests PRIVATE HOG_SOURCE_DIR="${PROJECT_SOURCE_DIR}")

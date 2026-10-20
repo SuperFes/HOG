@@ -54,6 +54,10 @@ public:
     [[nodiscard]] std::optional<protocol::Weather> take_weather() noexcept {
         return std::exchange(weather_, std::nullopt);
     }
+    // How the woods fare as the server last said, since last asked, once.
+    [[nodiscard]] std::optional<protocol::Woodlands> take_woodlands() noexcept {
+        return std::exchange(woodlands_, std::nullopt);
+    }
 
     // Says `text` to everyone, tidied to what chat may carry; nothing of it before being
     // welcomed, or once tidied to nothing.
@@ -105,6 +109,7 @@ private:
     std::uint32_t corrections_ = 0;
     std::optional<WorldPosition> correction_;
     std::optional<protocol::Weather> weather_;
+    std::optional<protocol::Woodlands> woodlands_;
     std::vector<ChatLine> chat_;
     std::uint32_t world_rate_ = 1;
     std::optional<MonotonicClock::time_point> last_snapshot_;

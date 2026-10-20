@@ -17,7 +17,7 @@
 namespace hog::protocol {
 
 // Raised whenever any message changes; the two sides must speak the same one.
-inline constexpr std::uint32_t version = 7;
+inline constexpr std::uint32_t version = 8;
 // The longest connect token a client may present; more is a broken or hostile client.
 inline constexpr std::size_t most_token = 1'024;
 // The longest line of text a refusal carries.
@@ -159,6 +159,27 @@ struct Weather {
     friend bool operator==(const Weather&, const Weather&) = default;
 };
 
+// How a cell's woods fare, as flora::Habitat takes them, each a share of the trees its ground
+// would hold. Sent a byte each, to a 255th.
+struct CellWoodland {
+    float living = 1.0F;
+    float established = 1.0F;
+    float failing = 0.0F;
+    float dead = 0.0F;
+    float charred = 0.0F;
+
+    friend bool operator==(const CellWoodland&, const CellWoodland&) = default;
+};
+
+// Server to client: how the woods fare over the whole planet, a cell for each cube-sphere cell at
+// `level`, in sim::CellGrid's order. Sent when it changes, and on joining.
+struct Woodlands {
+    std::uint8_t level = 0;          // at most most_weather_level
+    std::vector<CellWoodland> cells; // 6 × 4^level of them
+
+    friend bool operator==(const Woodlands&, const Woodlands&) = default;
+};
+
 // A line of chat. A client says it with `from` empty; the server sends it on to every player,
 // the speaker included so all read the same order, with the speaker's name it holds itself
 // rather than any the client claims. Neither part carries control characters.
@@ -192,13 +213,16 @@ struct Clock {
 
 // As a cell's weather reads back once sent.
 [[nodiscard]] CellWeather as_sent(const CellWeather& cell) noexcept;
+// As a cell's woods read back once sent.
+[[nodiscard]] CellWoodland as_sent(const CellWoodland& cell) noexcept;
 
 using Message = std::variant<Hello, Welcome, Refused, Moved, Ack, Snapshot, Corrected, Weather,
-                             Said, Hurry, Clock>;
+                             Said, Hurry, Clock, Woodlands>;
 
 [[nodiscard]] std::vector<std::byte> encode(const Message& message);
 // Fails on an unknown kind, a message cut short or with bytes left over, one too long, a snapshot
-// out of order, weather too fine or with too few or many cells, or chat with control characters.
+// out of order, weather or woods too fine or with too few or many cells, or chat with control
+// characters.
 [[nodiscard]] Result<Message> decode(std::span<const std::byte> bytes);
 
 // A refusal as a person reads it, on a client speaking `own` version.

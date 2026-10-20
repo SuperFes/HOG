@@ -245,6 +245,29 @@ TEST_CASE("a session takes the newest weather once", "[client][session]") {
     CHECK_FALSE(session.take_weather());
 }
 
+TEST_CASE("a session takes the newest word of the woods once", "[client][session]") {
+    Stand stand;
+    Session session = connected(stand.server);
+    welcome(session, stand);
+    CHECK_FALSE(session.take_woodlands());
+
+    const auto woodlands = [](float living) {
+        return protocol::Woodlands{
+            .level = 0, .cells = std::vector<protocol::CellWoodland>(6, {.living = living})};
+    };
+    stand.send(woodlands(0.2F));
+    stand.send(woodlands(1.0F));
+    std::optional<protocol::Woodlands> taken;
+    look_until(session, stand, [&] {
+        if (auto newest = session.take_woodlands()) {
+            taken = std::move(newest);
+        }
+        return taken && taken->cells[0].living == 1.0F;
+    });
+    REQUIRE(taken.has_value());
+    CHECK_FALSE(session.take_woodlands());
+}
+
 TEST_CASE("a session says chat once welcomed, tidied to what it may carry", "[client][session]") {
     Stand stand;
     Session session = connected(stand.server);

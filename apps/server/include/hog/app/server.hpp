@@ -147,6 +147,9 @@ private:
     // Sends every player the weather once it has stepped, to fade to over a step at `scale`.
     void tell_weather(std::int64_t scale);
     void send_weather(net::ConnectionId connection);
+    // Sends every player how the woods fare once the forest has stepped, if that's changed.
+    void tell_woodlands();
+    void send_woodlands(net::ConnectionId connection);
     // Sends every player how fast the world's clock runs.
     void tell_clock();
     void send_clock(net::ConnectionId connection);
@@ -186,6 +189,9 @@ private:
     // The weather players were last sent, coded, and the step it's from.
     std::vector<std::byte> weather_told_;
     std::optional<GameTime> weather_told_at_;
+    // The same for the woods.
+    std::vector<std::byte> woodlands_told_;
+    std::optional<GameTime> woodlands_told_at_;
     // The newest wish to run the clock at another speed, and whose it was.
     std::optional<std::pair<net::ConnectionId, std::uint32_t>> hurry_;
     // The loop's scale as of its last turn, for players joining between them.
@@ -374,6 +380,7 @@ Result<void> Server::run(T& timer, Now now, const std::atomic<bool>& stop) {
         serve_players();
         hurry_clock(loop, now);
         tell_weather(loop.scale());
+        tell_woodlands();
         if (const MonotonicClock::time_point at = timer.now(); at >= next_share) {
             share();
             next_share += protocol::snapshot_interval;

@@ -7,6 +7,7 @@
 #include <hog/server/spatial_tracking.hpp>
 #include <hog/server/survey.hpp>
 #include <hog/server/weather_report.hpp>
+#include <hog/server/woodlands_report.hpp>
 
 #include <algorithm>
 #include <array>
@@ -521,6 +522,7 @@ void Server::answer(net::ConnectionId connection, const protocol::Answer& answer
                                         : std::format("player {}", std::to_underlying(connection)));
         handshakes_.erase(shaking);
         send_weather(connection);
+        send_woodlands(connection);
         // A world at real time goes without saying.
         if (clock_scale_ != 1) {
             send_clock(connection);
@@ -632,6 +634,31 @@ void Server::send_weather(net::ConnectionId connection) {
     }
     if (auto sent = players_->send(connection, net::Delivery::Reliable, weather_told_); !sent) {
         log::debug(server_log, "couldn't send connection {} the weather: {}",
+                   std::to_underlying(connection), sent.error());
+    }
+}
+
+void Server::tell_woodlands() {
+    if (!players_ || !forest_ || woodlands_told_at_ == forest_->time()) {
+        return;
+    }
+    woodlands_told_at_ = forest_->time();
+    std::vector<std::byte> told = protocol::encode(server::woodlands_report(*forest_));
+    if (told == woodlands_told_) {
+        return;
+    }
+    woodlands_told_ = std::move(told);
+    for (const net::ConnectionId connection : joined_.connections()) {
+        send_woodlands(connection);
+    }
+}
+
+void Server::send_woodlands(net::ConnectionId connection) {
+    if (!players_ || woodlands_told_.empty()) {
+        return;
+    }
+    if (auto sent = players_->send(connection, net::Delivery::Reliable, woodlands_told_); !sent) {
+        log::debug(server_log, "couldn't send connection {} the woodlands: {}",
                    std::to_underlying(connection), sent.error());
     }
 }
