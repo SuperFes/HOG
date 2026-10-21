@@ -105,11 +105,10 @@ Facing facing_at(Surface surface, float3 looking) {
     Facing facing;
     facing.normal = as_drawn(water.normal, push.up_height.xyz, normalize(surface.normal));
     facing.roughness = water.roughness + ripples;
-    // A wave's back seen at a glance, which the eye could only see past its crest, is taken as
-    // facing the eye just enough to be seen.
+    // A wave's back, which the eye could only see past its crest, is taken as seen edge on.
     const float towards = dot(facing.normal, -looking);
-    if (towards < 0.02) {
-        facing.normal = normalize(facing.normal - (looking * (0.02 - towards)));
+    if (towards < 0.0) {
+        facing.normal = normalize(facing.normal + (looking * towards));
     }
     return facing;
 }
