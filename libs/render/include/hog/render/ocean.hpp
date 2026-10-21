@@ -23,6 +23,8 @@ class Device;
 
 // The most waves the sea is drawn with. As shaders/waves.slang has it.
 inline constexpr std::size_t drawn_waves = 48;
+// The plane waves summed for the pattern of its foam. Likewise.
+inline constexpr std::size_t foam_waves = 26;
 
 // The waves the sea is drawn with, as shaders/waves.slang takes them.
 struct DrawnWaves {
@@ -32,21 +34,28 @@ struct DrawnWaves {
         glm::vec4 along{0.0F};
         glm::vec4 breaking{0.0F};
     };
+    struct FoamWave {
+        glm::vec4 wavenumber_phase{0.0F};
+        glm::vec4 amplitude_length{0.0F};
+    };
     glm::vec4 count_left_radius{0.0F};
     glm::vec4 up_height{0.0F};
     glm::vec4 first{0.0F};
     glm::vec4 second{0.0F};
     glm::vec4 foam{0.0F};
+    glm::vec4 foam_left{0.0F};
     std::array<Wave, drawn_waves> waves{};
+    std::array<FoamWave, foam_waves> foam_pattern{};
 };
 
 // The strongest of the waves round an eye at `eye`, bent by `bend`, at `time`, as
 // waves::strongest picks them, each as it runs under the eye; and where `sea`, which raised them,
-// breaks white.
+// is white with foam, carried with the water at its surface, which has drifted `drifted` metres
+// since the epoch.
 [[nodiscard]] DrawnWaves drawn_waves_at(std::span<const waves::Train> trains,
                                         std::span<const waves::Wave> waves,
                                         const waves::SeaState& sea, WorldPosition eye,
-                                        const terrain::Bend& bend, GameTime time);
+                                        const terrain::Bend& bend, GameTime time, DVec3 drifted);
 
 // Where the sea is seen from and what it reflects.
 struct OceanView {

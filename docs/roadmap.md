@@ -208,7 +208,8 @@ This phase builds a client that flies over the generated planet with a real sky.
 - [x] Waves: one wave function the client, the server and physics all evaluate alike (the planet's fixed trains, phased by the seed and the world's time, sized by the local spectrum, so everyone sees the same wave at the same place), the long waves moving the surface and fine chop in its shading, what's too fine to draw widening the sun's glint
 - [x] Waves from the sea state: several systems at once, the local wind sea crossing swells from distant storms, so crests criss-cross and pile up where they meet, blended from cell to cell
 - [ ] The surface's height under things standing in the sea, for their tint and for swimming
-- [ ] Foam: whitecaps where crests steepen past breaking, streaked along the wind in a gale, lingering and fading where they broke and drifting with the current; heaped where waves cross and break on the shore
+- [x] Foam: whitecaps where crests bunch past breaking, over as much of the sea as the wind breaks, ragged and streaked along it in a gale; the foam they leave lying in patches of lace, drifting with the current and the wind's drag
+- [ ] Foam left where each crest broke, fading as it thins, and heaped where waves cross
 - [ ] Waves at the shore: slowing and shortening in shallow water, turning to face the beach, steepening and breaking as surf, with foam and run-up
 - [ ] Ripples and wakes where bodies cross the surface, and what's seen through it bent by the waves
 - [x] Hillaire atmosphere and sun lighting driven by planet time

@@ -41,6 +41,9 @@ struct Surface {
     float3 normal;
     // The water's place at rest, at sea level from the eye as it truly lies.
     float3 rest;
+    // The coarse waves of the foam's pattern there: as FoamPattern's coarse, across, coarse_seen
+    // and coarse_slope.
+    float4 foam;
 };
 
 // As ocean.cpp makes the disc.
@@ -52,8 +55,13 @@ static const float ripples = 0.001;
 // Without the air, the glint off the stillest water peaks this bright.
 static const float glint_brightness = 50.0;
 static const float stillest_lobe = ((2.0 / ripples) + 6.0) / (8.0 * pi);
-// Of the light falling on foam fresh from a breaking crest, the share it scatters back.
+// Of the light falling on foam fresh from a breaking crest, the share it scatters back; and on the
+// thinner foam it leaves.
 static const float breaking_albedo = 0.5;
+static const float left_albedo = 0.3;
+static const float left_thickness = 0.7;
+// How thick breaking foam is on the whole.
+static const float breaking_thickness = 0.8;
 
 // Turns `v` as sea level's up under the eye, `truly`, turns to as it's drawn, `drawn`.
 float3 as_drawn(float3 v, float3 truly, float3 drawn) {
@@ -90,6 +98,11 @@ Surface vertex_main(Vertex vertex) {
         max(nearest * log(spread) * pow(spread, vertex.out) / rings, along * 2.0 * pi / spokes);
     const WaveSurface water = wave_surface(waves, surface.rest, between);
     surface.from_eye += as_drawn(water.moved, up, surface.normal);
+    surface.foam = float4(0.0);
+    if (waves.foam.z > 0.0) {
+        const FoamPattern coarse = coarse_foam_at(waves, surface.rest, between);
+        surface.foam = float4(coarse.coarse, coarse.across, coarse.coarse_seen, coarse.coarse_slope);
+    }
     surface.position = mul(push.clip_from_eye, float4(surface.from_eye, 1.0));
     return surface;
 }
@@ -109,8 +122,33 @@ Facing facing_at(Surface surface, float3 looking) {
     Facing facing;
     facing.normal = as_drawn(water.normal, push.up_height.xyz, normalize(surface.normal));
     facing.roughness = water.roughness + ripples;
-    facing.white = water.breaking;
+    facing.white = 0.0;
     facing.albedo = breaking_albedo;
+    if (waves.foam.z > 0.0) {
+        FoamPattern coarse;
+        coarse.coarse = surface.foam.x;
+        coarse.across = surface.foam.y;
+        coarse.coarse_seen = surface.foam.z;
+        coarse.coarse_slope = surface.foam.w;
+        coarse.fine = 0.0;
+        coarse.fine_seen = 0.0;
+        coarse.fine_slope = 0.0;
+        const FoamPattern pattern = foam_pattern_at(waves, water, coarse, surface.rest, footprint);
+        const float over = breaking_over(waves, water, pattern);
+        const Foam foam = foam_at(waves, water, pattern, footprint);
+        // Where it's seen, thickest well over where they break and thin where they barely do;
+        // what's left is thinner still.
+        const float seen = (pattern.coarse_seen + pattern.fine_seen) / 2.0;
+        const float thickness =
+            lerp(breaking_thickness,
+                 saturate(0.5 + (over / waves.foam_left.z) + (0.35 * pattern.fine)), seen);
+        const float breaking = foam.breaking * thickness;
+        const float left = foam.left * left_thickness * (1.0 - breaking);
+        facing.white = breaking + left;
+        facing.albedo = facing.white > 0.0
+                            ? ((breaking_albedo * breaking) + (left_albedo * left)) / facing.white
+                            : breaking_albedo;
+    }
     // A wave's back, which the eye could only see past its crest, is taken as seen edge on.
     const float towards = dot(facing.normal, -looking);
     if (towards < 0.0) {
