@@ -39,5 +39,6 @@ hog_add_tests(hog_server
     tests/woodlands_report_tests.cpp)
 
 if(TARGET hog_server_tests)
+    target_link_libraries(hog_server_tests PRIVATE hog::waves)
     target_compile_definitions(hog_server_tests PRIVATE HOG_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 endif()

@@ -3,12 +3,14 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
 #include <limits>
+#include <numbers>
 #include <span>
 #include <string>
 #include <utility>
@@ -255,6 +257,36 @@ TEST_CASE("weather is sent near enough to draw", "[protocol]") {
     CHECK_THAT(heights.top, Catch::Matchers::WithinAbs(9'000.0, 32.0));
 }
 
+TEST_CASE("the sea's waves and current are sent near enough to draw", "[protocol]") {
+    const CellWeather sent =
+        as_sent({.wind_sea = {.height = 2.3F, .peak = 0.9F, .heading = {0.6F, 0.8F}},
+                 .swells = {CellWaves{.height = 0.4F, .peak = 0.45F, .heading = {-1.0F, 0.0F}},
+                            CellWaves{.height = 12.0F, .peak = 3.0F, .heading = {0.0F, -1.0F}}},
+                 .current = {0.71F, -1.2F}});
+    const auto period = [](float peak) {
+        return 2.0 * std::numbers::pi / static_cast<double>(peak);
+    };
+    const std::array<CellWaves, 3> given{
+        CellWaves{.height = 2.3F, .peak = 0.9F, .heading = {0.6F, 0.8F}},
+        CellWaves{.height = 0.4F, .peak = 0.45F, .heading = {-1.0F, 0.0F}},
+        CellWaves{.height = 12.0F, .peak = 3.0F, .heading = {0.0F, -1.0F}}};
+    const std::array<CellWaves, 3> got{sent.wind_sea, sent.swells[0], sent.swells[1]};
+    for (std::size_t i = 0; i < given.size(); ++i) {
+        CAPTURE(i);
+        CHECK(std::abs(std::sqrt(got.at(i).height) - std::sqrt(given.at(i).height)) <=
+              0.5F / 56.0F);
+        CHECK_THAT(period(got.at(i).peak),
+                   Catch::Matchers::WithinAbs(period(given.at(i).peak), 0.05));
+        CHECK(glm::dot(got.at(i).heading, given.at(i).heading) >
+              std::cos(std::numbers::pi_v<float> / 256.0F) - 1e-6F);
+        CHECK_THAT(glm::length(got.at(i).heading), Catch::Matchers::WithinAbs(1.0, 1e-6));
+    }
+    CHECK_THAT(sent.current.x, Catch::Matchers::WithinAbs(0.71, 0.5 / 32.0));
+    CHECK_THAT(sent.current.y, Catch::Matchers::WithinAbs(-1.2, 0.5 / 32.0));
+    // Waves too short to tell a period for still have one.
+    CHECK(as_sent({.wind_sea = {.height = 0.01F, .peak = 200.0F}}).wind_sea.peak > 0.0F);
+}
+
 TEST_CASE("weather past what a byte holds is clamped", "[protocol]") {
     const float nan = std::numeric_limits<float>::quiet_NaN();
     const CellWeather over = as_sent({.cloud = 100.0F,
@@ -264,7 +296,10 @@ TEST_CASE("weather past what a byte holds is clamped", "[protocol]") {
                                       .humidity = 3.0F,
                                       .fog_top = 20'000.0F,
                                       .base = 20'000.0F,
-                                      .top = 20'000.0F});
+                                      .top = 20'000.0F,
+                                      .wind_sea = {.height = 40.0F, .peak = 0.01F},
+                                      .swells = {},
+                                      .current = {9.0F, -9.0F}});
     CHECK(over.cloud < 16.0F);
     CHECK(over.cloud > 15.8F);
     CHECK(over.falling < 255.0F);
@@ -275,6 +310,10 @@ TEST_CASE("weather past what a byte holds is clamped", "[protocol]") {
     CHECK(over.fog_top == 8'160.0F);
     CHECK(over.base == 16'320.0F);
     CHECK(over.top == 16'320.0F);
+    CHECK(over.wind_sea.height < 20.8F);
+    CHECK(over.wind_sea.height > 20.6F);
+    CHECK_THAT(over.wind_sea.peak, Catch::Matchers::WithinAbs(2.0 * std::numbers::pi / 25.5, 1e-6));
+    CHECK(over.current == hog::Vec2{127.0F / 32.0F, -127.0F / 32.0F});
     CHECK(as_sent({.cloud = -1.0F,
                    .falling = nan,
                    .snow = -0.5F,
@@ -282,12 +321,15 @@ TEST_CASE("weather past what a byte holds is clamped", "[protocol]") {
                    .humidity = nan,
                    .fog_top = -5.0F,
                    .base = nan,
-                   .top = -1.0F}) == CellWeather{});
+                   .top = -1.0F,
+                   .wind_sea = {.height = nan, .peak = nan, .heading = {nan, nan}},
+                   .swells = {CellWaves{.height = -1.0F, .peak = -1.0F}, CellWaves{}},
+                   .current = {nan, nan}}) == CellWeather{});
 }
 
-TEST_CASE("the planet's weather takes nine bytes a cell", "[protocol]") {
+TEST_CASE("the planet's weather takes twenty bytes a cell", "[protocol]") {
     CHECK(weather_cells(most_weather_level) == 6'144);
-    CHECK(encode(weather(most_weather_level)).size() == 2 + 1 + 4 + (9 * 6'144));
+    CHECK(encode(weather(most_weather_level)).size() == 2 + 1 + 4 + (20 * 6'144));
 }
 
 TEST_CASE("weather too fine is refused", "[protocol]") {

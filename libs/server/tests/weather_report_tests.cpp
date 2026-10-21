@@ -1,4 +1,5 @@
 #include <hog/server/weather_report.hpp>
+#include <hog/waves/waves.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -37,6 +38,14 @@ std::vector<Ground> ground(const CellGrid& grid) {
     return out;
 }
 
+// A calm sea with no current, under every cell.
+struct Still {
+    hog::sim::SeaFields sea;
+    std::vector<Vec2> current;
+
+    explicit Still(const CellGrid& grid) : sea(grid.size()), current(grid.size(), Vec2{0.0F}) {}
+};
+
 } // namespace
 
 TEST_CASE("weather as coarse as may be sent goes cell for cell", "[server][weather]") {
@@ -56,7 +65,9 @@ TEST_CASE("weather as coarse as may be sent goes cell for cell", "[server][weath
         fields.storm[index] = value / 200.0F;
     }
     const std::vector<Ground> under = ground(grid);
-    const auto weather = weather_report(grid, fields, ground(grid), config(), 600'000ms);
+    const Still still{grid};
+    const auto weather =
+        weather_report(grid, fields, ground(grid), still.sea, still.current, config(), 600'000ms);
     CHECK(weather.level == 2);
     CHECK(weather.fade == 600'000ms);
     REQUIRE(weather.cells.size() == grid.size());
@@ -81,8 +92,8 @@ TEST_CASE("weather as coarse as may be sent goes cell for cell", "[server][weath
 
 TEST_CASE("nothing falling is no snow", "[server][weather]") {
     const CellGrid grid{0};
-    const auto weather =
-        weather_report(grid, WeatherFields{grid.size()}, ground(grid), config(), 0ms);
+    const auto weather = weather_report(grid, WeatherFields{grid.size()}, ground(grid),
+                                        Still{grid}.sea, Still{grid}.current, config(), 0ms);
     for (const auto& cell : weather.cells) {
         CHECK(cell.falling == 0.0F);
         CHECK(cell.snow == 0.0F);
@@ -105,7 +116,9 @@ TEST_CASE("finer weather is averaged over the cells sent", "[server][weather]") 
         fields.jet[index] = fields.wind[index];
         cloud += grid.area(index) * static_cast<double>(fields.cloud[index]);
     }
-    const auto weather = weather_report(grid, fields, ground(grid), config(), 0ms);
+    const Still still{grid};
+    const auto weather =
+        weather_report(grid, fields, ground(grid), still.sea, still.current, config(), 0ms);
     CHECK(weather.level == hog::protocol::most_weather_level);
     REQUIRE(weather.cells.size() == sent.size());
     double sent_cloud = 0.0;
@@ -122,4 +135,46 @@ TEST_CASE("finer weather is averaged over the cells sent", "[server][weather]") 
     }
     // Nothing is lost or made in averaging.
     CHECK_THAT(static_cast<double>(sent_cloud), WithinRel(cloud, 1e-3));
+}
+
+TEST_CASE("the sea's waves and currents go with the weather", "[server][weather]") {
+    const CellGrid grid{hog::protocol::most_weather_level + 1};
+    const CellGrid sent{hog::protocol::most_weather_level};
+    Still still{grid};
+    // Under each cell sent, one of its four has a wind sea running north and a swell east, and
+    // each of them a current.
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        const hog::planet::CellId cell = grid.cell(index);
+        still.current[index] = {0.4F, -0.2F};
+        if (cell.parent().child(0) != cell) {
+            continue;
+        }
+        still.sea.wind_sea[index] = 4.0F;
+        still.sea.peak[index] = 0.7F;
+        still.sea.heading[index] = {0.0F, 1.0F};
+        const auto banded =
+            hog::waves::band_variances({.height = 4.0, .peak = 0.5, .peakedness = 7.0});
+        for (int band = 0; band < hog::sim::swell_bands; ++band) {
+            still.sea.swell[(index * hog::sim::swell_bins) +
+                            static_cast<std::size_t>(band * hog::sim::swell_headings)] =
+                static_cast<float>(banded.at(static_cast<std::size_t>(band)));
+        }
+    }
+    const auto weather = weather_report(grid, WeatherFields{grid.size()}, ground(grid), still.sea,
+                                        still.current, config(), 0ms);
+    REQUIRE(weather.cells.size() == sent.size());
+    for (std::uint32_t index = 0; index < sent.size(); ++index) {
+        CAPTURE(index);
+        const auto& cell = weather.cells[index];
+        // A quarter of the variance, so half the height.
+        CHECK_THAT(static_cast<double>(cell.wind_sea.height), WithinRel(4.0 * 2.0 / 2.0, 0.05));
+        CHECK_THAT(static_cast<double>(cell.wind_sea.peak), WithinRel(0.7, 1e-5));
+        CHECK(cell.wind_sea.heading == Vec2{0.0F, 1.0F});
+        CHECK_THAT(static_cast<double>(cell.swells[0].height), WithinRel(4.0 / 2.0, 0.05));
+        CHECK_THAT(static_cast<double>(cell.swells[0].peak), WithinRel(0.5, 0.1));
+        CHECK(cell.swells[0].heading.x > 0.999F);
+        CHECK(cell.swells[1].height == 0.0F);
+        CHECK_THAT(static_cast<double>(cell.current.x), WithinRel(0.4, 1e-5));
+        CHECK_THAT(static_cast<double>(cell.current.y), WithinRel(-0.2, 1e-5));
+    }
 }

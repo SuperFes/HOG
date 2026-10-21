@@ -7,6 +7,7 @@
 #include <cmath>
 #include <format>
 #include <limits>
+#include <numbers>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -45,7 +46,11 @@ constexpr float fastest_drift = 127.0F;
 constexpr float humidity_steps = 255.0F;
 constexpr float fog_step = 32.0F; // metres
 constexpr float height_step = 64.0F;
-constexpr std::size_t weather_cell_bytes = 9;
+constexpr float wave_steps = 56.0F;     // to the root of a metre
+constexpr float period_steps = 10.0F;   // to the second
+constexpr float heading_steps = 256.0F; // to the turn
+constexpr float current_steps = 32.0F;  // to the metre a second
+constexpr std::size_t weather_cell_bytes = 20;
 
 [[nodiscard]] std::uint8_t to_byte(float value) noexcept {
     // Also NaN to 0.
@@ -99,7 +104,35 @@ using CodedWoodland = std::array<std::uint8_t, woodland_cell_bytes>;
 
 using CodedCell = std::array<std::uint8_t, weather_cell_bytes>;
 
+constexpr float turn = 2.0F * std::numbers::pi_v<float>;
+
+// Each wave system's three bytes: its height, its period, then its heading.
+[[nodiscard]] std::array<std::uint8_t, 3> coded(const CellWaves& waves) noexcept {
+    const float period = waves.peak > 0.0F ? turn / waves.peak : 0.0F;
+    const float angle = std::atan2(waves.heading.y, waves.heading.x) / turn;
+    const float round = std::isnan(angle) ? 0.0F : angle - std::floor(angle);
+    return {rooted(waves.height, wave_steps),
+            period > 0.0F ? std::max(to_byte(period * period_steps), std::uint8_t{1})
+                          : std::uint8_t{0},
+            static_cast<std::uint8_t>(std::lround(round * heading_steps) % 256)};
+}
+
+[[nodiscard]] CellWaves decoded_waves(std::uint8_t height, std::uint8_t period,
+                                      std::uint8_t heading) noexcept {
+    const float angle = static_cast<float>(heading) / heading_steps * turn;
+    return {.height = squared(height, wave_steps),
+            .peak = period > 0 ? turn * period_steps / static_cast<float>(period) : 0.0F,
+            .heading = {std::cos(angle), std::sin(angle)}};
+}
+
+[[nodiscard]] std::uint8_t current(float value) noexcept {
+    return speed(value * current_steps);
+}
+
 [[nodiscard]] CodedCell coded(const CellWeather& cell) noexcept {
+    const auto wind_sea = coded(cell.wind_sea);
+    const auto first = coded(cell.swells[0]);
+    const auto second = coded(cell.swells[1]);
     return {rooted(cell.cloud, cloud_steps),
             rooted(cell.falling, falling_steps),
             to_byte(cell.snow * snow_steps),
@@ -108,7 +141,18 @@ using CodedCell = std::array<std::uint8_t, weather_cell_bytes>;
             to_byte(cell.humidity * humidity_steps),
             to_byte(cell.fog_top / fog_step),
             to_byte(cell.base / height_step),
-            to_byte(cell.top / height_step)};
+            to_byte(cell.top / height_step),
+            wind_sea[0],
+            wind_sea[1],
+            wind_sea[2],
+            first[0],
+            first[1],
+            first[2],
+            second[0],
+            second[1],
+            second[2],
+            current(cell.current.x),
+            current(cell.current.y)};
 }
 
 [[nodiscard]] CellWeather decoded(const CodedCell& bytes) noexcept {
@@ -119,7 +163,11 @@ using CodedCell = std::array<std::uint8_t, weather_cell_bytes>;
             .humidity = static_cast<float>(bytes[5]) / humidity_steps,
             .fog_top = static_cast<float>(bytes[6]) * fog_step,
             .base = static_cast<float>(bytes[7]) * height_step,
-            .top = static_cast<float>(bytes[8]) * height_step};
+            .top = static_cast<float>(bytes[8]) * height_step,
+            .wind_sea = decoded_waves(bytes[9], bytes[10], bytes[11]),
+            .swells = {decoded_waves(bytes[12], bytes[13], bytes[14]),
+                       decoded_waves(bytes[15], bytes[16], bytes[17])},
+            .current = {speed_of(bytes[18]) / current_steps, speed_of(bytes[19]) / current_steps}};
 }
 
 template <typename T>

@@ -3,6 +3,7 @@
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
 
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -17,7 +18,7 @@
 namespace hog::protocol {
 
 // Raised whenever any message changes; the two sides must speak the same one.
-inline constexpr std::uint32_t version = 9;
+inline constexpr std::uint32_t version = 10;
 // The longest connect token a client may present; more is a broken or hostile client.
 inline constexpr std::size_t most_token = 1'024;
 // The longest line of text a refusal carries.
@@ -130,10 +131,22 @@ struct Snapshot {
     friend bool operator==(const Snapshot&, const Snapshot&) = default;
 };
 
+// A system of waves over a cell, as hog::waves takes one. Sent its height as its square root to
+// the nearest 56th, so 20 metres at most; the time from crest to crest to a tenth of a second, at
+// most 25.5; and its heading to a 256th of a turn.
+struct CellWaves {
+    float height = 0.0F;      // significant, metres
+    float peak = 0.0F;        // rad/s; 0 where there are none
+    Vec2 heading{1.0F, 0.0F}; // unit (east, north), the way they run
+
+    friend bool operator==(const CellWaves&, const CellWaves&) = default;
+};
+
 // The weather over a cell, as much of it as is drawn. It's sent a byte each, so only near what's
 // given: cloud and falling as their square roots to the nearest 64th and 16th, so the lightest keep
 // their detail; snow and humidity to a 255th; drift to the metre a second; the fog's top to 32
-// metres and the cloud's base and top to 64; each clamped to its byte.
+// metres and the cloud's base and top to 64; the sea's current to a 32nd of a metre a second; each
+// clamped to its byte.
 struct CellWeather {
     float cloud = 0.0F;    // mm of condensed water, under 16
     float falling = 0.0F;  // rain and snow, mm an hour, under 255
@@ -144,6 +157,10 @@ struct CellWeather {
     float fog_top = 0.0F; // under 8160
     float base = 0.0F;    // under 16320
     float top = 0.0F;
+    // The sea's wind sea, its two strongest swells and its current, (east, north) m/s within ±4.
+    CellWaves wind_sea{};
+    std::array<CellWaves, 2> swells{};
+    Vec2 current{0.0F};
 
     friend bool operator==(const CellWeather&, const CellWeather&) = default;
 };

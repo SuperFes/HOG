@@ -652,7 +652,8 @@ void Server::tell_weather(std::int64_t scale) {
     }
     weather_told_at_ = weather_->time();
     weather_told_ = protocol::encode(server::weather_report(
-        weather_->grid(), weather_->fields(), weather_->ground(), weather_->config(),
+        weather_->grid(), weather_->fields(), weather_->ground(), weather_->sea().fields(),
+        weather_->ocean().current, weather_->config(),
         std::chrono::duration_cast<std::chrono::milliseconds>(weather_->config().step) / scale));
     for (const net::ConnectionId connection : joined_.connections()) {
         send_weather(connection);
