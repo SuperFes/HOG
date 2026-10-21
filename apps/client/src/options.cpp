@@ -1,6 +1,5 @@
 #include <hog/client/options.hpp>
 
-#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cmath>
@@ -163,6 +162,16 @@ constexpr std::array flags{
          .set = [](Options& options) { options.reload_shaders = false; }},
 };
 
+// The flag named `argument`, or none.
+const Flag* flag_named(std::string_view argument) noexcept {
+    for (const Flag& flag : flags) {
+        if (flag.name == argument) {
+            return &flag;
+        }
+    }
+    return nullptr;
+}
+
 // Options that only make sense with others.
 Result<void> check_together(const Options& options) {
     if (options.login && (!options.name || !options.connect)) {
@@ -250,8 +259,7 @@ Result<Options> parse_options(std::span<const std::string_view> arguments) {
     Options options;
     for (std::size_t i = 0; i < arguments.size(); ++i) {
         const std::string_view argument = arguments[i];
-        if (const auto flag = std::ranges::find(flags, argument, &Flag::name);
-            flag != flags.end()) {
+        if (const Flag* const flag = flag_named(argument); flag != nullptr) {
             flag->set(options);
             continue;
         }
