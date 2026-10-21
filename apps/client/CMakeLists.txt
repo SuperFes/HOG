@@ -56,6 +56,10 @@ if(TARGET hog_client_tests)
     target_link_libraries(hog_client_tests PRIVATE hog::app hog::planet hog::render_testing)
     target_compile_definitions(hog_client_tests PRIVATE HOG_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
                                                         HOG_BINARY_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    # Tests read their options from the environment before any thread starts.
+    if(MSVC)
+        target_compile_definitions(hog_client_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
+    endif()
 endif()
 
 if(NOT HOG_BUILD_CLIENT)
