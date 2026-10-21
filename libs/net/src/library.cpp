@@ -52,13 +52,14 @@ Result<std::unique_ptr<Owner>> Owner::create() {
     Registry& owners = registry();
     const std::scoped_lock lock{owners.mutex};
     if (owners.users == 0) {
+        // Before its service thread starts, which reads the output's level unlocked.
+        ISteamNetworkingUtils& utils = *SteamNetworkingUtils();
+        utils.SetDebugOutputFunction(k_ESteamNetworkingSocketsDebugOutputType_Warning, on_output);
         SteamNetworkingErrMsg error{};
         if (!GameNetworkingSockets_Init(nullptr, error)) {
             return make_error(ErrorCode::Io,
                               std::format("couldn't start networking: {}", std::data(error)));
         }
-        ISteamNetworkingUtils& utils = *SteamNetworkingUtils();
-        utils.SetDebugOutputFunction(k_ESteamNetworkingSocketsDebugOutputType_Warning, on_output);
         utils.SetGlobalCallback_SteamNetConnectionStatusChanged(on_status);
         // Encrypted, but no one's identity is checked here: the handshake's token does that.
         utils.SetGlobalConfigValueInt32(k_ESteamNetworkingConfig_IP_AllowWithoutAuth, 2);

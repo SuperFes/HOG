@@ -128,9 +128,10 @@ CPMAddPackage(
 # Its debug builds otherwise reach for libstdc++'s <debug/map>, which libc++ doesn't have.
 target_compile_definitions(GameNetworkingSockets_s PRIVATE STEAMNETWORKINGSOCKETS_SNP_PARANOIA=1)
 # It calls its packet callbacks through a pointer taking void *, which UBSan's function check
-# refuses.
+# refuses. Only its C++, as its C may be built by a compiler without that check.
 if(HOG_SANITIZE AND "undefined" IN_LIST HOG_SANITIZE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(GameNetworkingSockets_s PRIVATE -fno-sanitize=function)
+    target_compile_options(GameNetworkingSockets_s
+                           PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-sanitize=function>)
 endif()
 
 # Ed25519 for connect tokens; BSD-2-Clause or CC0. Two C files, built by hog_login.
