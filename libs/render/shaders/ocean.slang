@@ -1,6 +1,7 @@
 import atmosphere;
 import bend;
 import shadow;
+import shore;
 import tone;
 import water;
 import waves;
@@ -29,6 +30,8 @@ struct Push {
 [[vk::binding(5, 0)]] Sampler2D cloud_shadow;
 // Lit through the air or not.
 [[vk::binding(6, 0)]] ConstantBuffer<Waves> waves;
+// As shore_depth takes them.
+[[vk::binding(7, 0)]] Sampler2DArray shore_depths;
 
 struct Vertex {
     [[vk::location(0)]] float out; // from 0 under the eye to 1 at the rim
@@ -45,7 +48,31 @@ struct Surface {
     // The coarse waves of the foam's pattern there: as FoamPattern's coarse, across, coarse_seen
     // and coarse_slope.
     float4 foam;
+    // The sea's floor there, as wave_surface takes it.
+    float3 floor;
 };
+
+// Metres over which the floor's slope is taken: half the finest depths' spacing, so it changes
+// smoothly across them.
+static const float floor_step = 4.0;
+
+float depth_at(float3 rest) {
+    return shore_depth(shore_depths, waves.shore_anchor, waves.shore_east, waves.shore_north,
+                       waves.count_left_radius.z, rest);
+}
+
+// The sea's floor under `rest`, a point of sea level from the eye.
+float3 floor_at(float3 rest) {
+    const float depth = depth_at(rest);
+    if (depth >= waves.count_left_radius.w) {
+        return deep_floor();
+    }
+    const float3 first = waves.first.xyz * floor_step;
+    const float3 second = waves.second.xyz * floor_step;
+    return float3(depth, depth_at(rest + first) - depth_at(rest - first),
+                  depth_at(rest + second) - depth_at(rest - second)) /
+           float3(1.0, 2.0 * floor_step, 2.0 * floor_step);
+}
 
 // As ocean.cpp makes the disc.
 static const float rings = 96.0;
@@ -99,7 +126,8 @@ Surface vertex_main(Vertex vertex) {
     // The corners lie apart by the larger of the rings' spacing and the spokes'.
     const float between =
         max(nearest * log(spread) * pow(spread, vertex.out) / rings, along * 2.0 * pi / spokes);
-    const WaveSurface water = wave_surface(waves, surface.rest, between);
+    surface.floor = floor_at(surface.rest);
+    const WaveSurface water = wave_surface(waves, surface.rest, between, surface.floor);
     surface.from_eye += as_drawn(water.moved, up, surface.normal);
     surface.foam = float4(0.0);
     if (waves.foam.z > 0.0) {
@@ -121,7 +149,7 @@ struct Facing {
 
 Facing facing_at(Surface surface, float3 looking) {
     const float footprint = max(length(ddx(surface.rest)), length(ddy(surface.rest)));
-    const WaveSurface water = wave_surface(waves, surface.rest, footprint);
+    const WaveSurface water = wave_surface(waves, surface.rest, footprint, surface.floor);
     Facing facing;
     facing.normal = as_drawn(water.normal, push.up_height.xyz, normalize(surface.normal));
     facing.roughness = water.roughness + ripples;

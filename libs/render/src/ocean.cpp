@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <numbers>
 #include <span>
 #include <type_traits>
@@ -26,6 +27,10 @@
 namespace hog::render {
 
 namespace {
+
+double square(double x) {
+    return x * x;
+}
 
 using terrain::SeaVertex;
 
@@ -58,7 +63,7 @@ constexpr std::array vertex_attributes{
                                       .format = VK_FORMAT_R32G32_SFLOAT,
                                       .offset = offsetof(SeaVertex, towards)}};
 
-static_assert(sizeof(DrawnWaves) == (9 * sizeof(glm::vec4)) +
+static_assert(sizeof(DrawnWaves) == ((9 + (kept_samples / 4)) * sizeof(glm::vec4)) +
                                         (drawn_waves * sizeof(DrawnWaves::Wave)) +
                                         (foam_waves * sizeof(DrawnWaves::FoamWave)));
 
@@ -177,14 +182,19 @@ constexpr VkDescriptorSetLayoutBinding waves_descriptor =
     binding(waves_binding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
             VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
 
-constexpr std::array descriptors{waves_descriptor};
+constexpr std::uint32_t shore_binding = 7;
+constexpr VkDescriptorSetLayoutBinding shore_descriptor =
+    binding(shore_binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_VERTEX_BIT);
+
+constexpr std::array descriptors{waves_descriptor, shore_descriptor};
 constexpr std::array air_descriptors{binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
                                      binding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
                                      binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
                                      binding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
                                      binding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
                                      binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-                                     waves_descriptor};
+                                     waves_descriptor,
+                                     shore_descriptor};
 
 } // namespace
 
@@ -210,12 +220,33 @@ DrawnWaves drawn_waves_at(std::span<const waves::Train> trains, std::span<const 
     }
     const waves::Strongest strongest = waves::strongest(trains, shown, drawn_waves);
     const planet::TangentFrame frame = planet::tangent_frame(bend.up);
+    // The longest wave drawn feels the floor from deepest.
+    double longest = std::numeric_limits<double>::infinity();
+    for (const waves::Wave& wave : strongest.waves) {
+        const waves::Train& train = trains[wave.train];
+        longest = std::min(longest, train.wavenumber *
+                                        std::sqrt(1.0 - square(glm::dot(bend.up, train.heading))));
+    }
     DrawnWaves drawn{.count_left_radius = {static_cast<float>(strongest.waves.size()),
                                            static_cast<float>(strongest.slope_left),
-                                           static_cast<float>(bend.radius), 0.0F},
+                                           static_cast<float>(bend.radius),
+                                           static_cast<float>(waves::deep_enough / longest)},
                      .up_height = {Vec3{bend.up}, static_cast<float>(bend.eye_height)},
                      .first = {Vec3{frame.east}, 0.0F},
                      .second = {Vec3{frame.north}, 0.0F}};
+    // How much of those drawn runs where it's shallow, as waves::surface_at has it.
+    for (std::size_t sample = 0; sample < kept_samples; ++sample) {
+        const double depth = square(std::sqrt(kept_deepest) * static_cast<double>(sample) /
+                                    static_cast<double>(kept_samples - 1));
+        double squares = 0.0;
+        for (const waves::Wave& wave : strongest.waves) {
+            const waves::Train& train = trains[wave.train];
+            const double flat = std::sqrt(1.0 - square(glm::dot(bend.up, train.heading)));
+            squares += square(wave.amplitude * waves::shoaling(train.wavenumber * flat, depth));
+        }
+        drawn.kept.at(sample / 4)[static_cast<glm::length_t>(sample % 4)] =
+            static_cast<float>(waves::depth_limited(2.0 * std::sqrt(squares), depth));
+    }
     double shorter = 0.0;
     double breaking_shorter = 0.0;
     for (std::size_t i = strongest.waves.size(); i-- > 0;) {
@@ -229,6 +260,7 @@ DrawnWaves drawn_waves_at(std::span<const waves::Train> trains, std::span<const 
         shorter += slope * slope / 2.0;
         breaking_shorter += slope * slope * share * share / 2.0;
         breaking_all -= breaking_slope(wave);
+        const waves::LagTerms lag = waves::lag_terms(wavenumber);
         drawn.waves.at(i) = {
             .heading_wavenumber = {Vec3{train.heading}, static_cast<float>(train.wavenumber)},
             .amplitude_phase_slope_length =
@@ -239,7 +271,8 @@ DrawnWaves drawn_waves_at(std::span<const waves::Train> trains, std::span<const 
             .along = {static_cast<float>(glm::dot(along, frame.east) / flat),
                       static_cast<float>(glm::dot(along, frame.north) / flat),
                       static_cast<float>(wavenumber), static_cast<float>(share)},
-            .breaking = {static_cast<float>(breaking_shorter), 0.0F, 0.0F, 0.0F}};
+            .breaking = {static_cast<float>(breaking_shorter), static_cast<float>(lag.turn),
+                         static_cast<float>(lag.scale), static_cast<float>(lag.offset)}};
     }
     // What's left over is what wasn't drawn; the bunching of all that breaks, drawn or not, is
     // near enough normal, so whitecaps cover as much as they should where it's highest.
@@ -268,8 +301,8 @@ DrawnWaves drawn_waves_at(std::span<const waves::Train> trains, std::span<const 
     return drawn;
 }
 
-Result<Ocean> Ocean::create(const Device& device, VkFormat colour_format, VkFormat depth_format,
-                            bool air, std::uint32_t frames) {
+Result<Ocean> Ocean::create(Device& device, VkFormat colour_format, VkFormat depth_format, bool air,
+                            std::uint32_t frames) {
     Ocean ocean;
     for (std::uint32_t frame = 0; frame < frames; ++frame) {
         auto waves = make_buffer(device, sizeof(DrawnWaves), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
@@ -305,6 +338,18 @@ Result<Ocean> Ocean::create(const Device& device, VkFormat colour_format, VkForm
         return std::unexpected(std::move(sampler).error());
     }
     ocean.shore_sampler_ = std::move(sampler).value();
+    // Deep water, until there are depths.
+    const std::vector<std::uint16_t> deep_water =
+        shore_texels(std::vector<float>(terrain::shore_spacing.size(), 1'000.0F));
+    auto none =
+        make_filled_image(device,
+                          {.format = VK_FORMAT_R16_SFLOAT,
+                           .layers = static_cast<std::uint32_t>(terrain::shore_spacing.size())},
+                          std::as_bytes(std::span{deep_water}));
+    if (!none) {
+        return std::unexpected(std::move(none).error());
+    }
+    ocean.no_shore_ = std::move(none).value();
 
     // Seen from below too, from under the sea.
     ocean.air_ = air;
@@ -423,6 +468,9 @@ Result<> Ocean::record(VkCommandBuffer commands, VkExtent2D extent, const OceanV
         push_sampled_image(commands, pipeline, 5, view.air.cloud_shadow, view.air.sampler);
     }
     push_uniform_buffer(commands, pipeline, waves_binding, waves.handle());
+    push_sampled_image(commands, pipeline, shore_binding,
+                       shore_ ? shore_depths_.image().view() : no_shore_.view(),
+                       shore_sampler_.handle());
     const std::array vertices{vertices_.handle()};
     const VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(commands, 0, 1, vertices.data(), &offset);

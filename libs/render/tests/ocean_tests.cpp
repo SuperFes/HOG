@@ -18,6 +18,7 @@
 #include <hog/terrain/material.hpp>
 #include <hog/terrain/shore.hpp>
 #include <hog/terrain/stitching.hpp>
+#include <hog/waves/shoaling.hpp>
 #include <hog/waves/waves.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -551,12 +552,17 @@ struct Probed {
     double seen;
 };
 
+// Over floors as wave_surface takes them, one for each point, or deep water.
 std::vector<Probed> probe_waves(hog::render::Device& device, const hog::render::DrawnWaves& drawn,
-                                std::span<const DVec3> rest, double footprint) {
+                                std::span<const DVec3> rest, double footprint,
+                                std::span<const hog::Vec3> floors = {}) {
     std::vector<std::array<float, 4>> asked;
-    for (const DVec3& point : rest) {
+    for (std::size_t i = 0; i < rest.size(); ++i) {
+        const DVec3& point = rest[i];
         asked.push_back({static_cast<float>(point.x), static_cast<float>(point.y),
                          static_cast<float>(point.z), static_cast<float>(footprint)});
+        const hog::Vec3 floor = floors.empty() ? hog::Vec3{1.0e6F, 0.0F, 0.0F} : floors[i];
+        asked.push_back({floor.x, floor.y, floor.z, 0.0F});
     }
     constexpr auto binding = [](std::uint32_t at, VkDescriptorType type) {
         return VkDescriptorSetLayoutBinding{.binding = at,
@@ -577,7 +583,7 @@ std::vector<Probed> probe_waves(hog::render::Device& device, const hog::render::
     auto questions = hog::render::make_filled_buffer(device, std::as_bytes(std::span{asked}),
                                                      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
     REQUIRE(questions);
-    std::vector<std::array<float, 4>> found(3 * asked.size());
+    std::vector<std::array<float, 4>> found(3 * rest.size());
     auto answers =
         hog::render::make_buffer(device, std::span{found}.size_bytes(),
                                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, hog::render::Memory::Readback);
@@ -587,7 +593,7 @@ std::vector<Probed> probe_waves(hog::render::Device& device, const hog::render::
         hog::render::push_uniform_buffer(commands, *probe, 0, waves->handle());
         hog::render::push_storage_buffer(commands, *probe, 1, questions->handle());
         hog::render::push_storage_buffer(commands, *probe, 2, answers->handle());
-        vkCmdDispatch(commands, static_cast<std::uint32_t>((asked.size() + 63) / 64), 1, 1);
+        vkCmdDispatch(commands, static_cast<std::uint32_t>((rest.size() + 63) / 64), 1, 1);
         const VkMemoryBarrier2 to_host{.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
                                        .pNext = nullptr,
                                        .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -685,6 +691,63 @@ TEST_CASE("the sea's drawn waves move and face it as hog::waves has them", "[ren
         CHECK(glm::length(probed[i].moved - surface.moved) < 0.01);
         CHECK(glm::dot(probed[i].normal, surface.normal) > 0.9999);
         CHECK(probed[i].roughness == static_cast<double>(sea.drawn.count_left_radius.y));
+    }
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("over a shore the sea's drawn waves shoal as hog::waves has them", "[render][gpu]") {
+    const auto device = test_device();
+    // A swell running in at a shore lying east of the eye, and the wind sea.
+    WavySea sea{9.0};
+    const DVec3 first{hog::Vec3{sea.drawn.first}};
+    sea.sea.systems.push_back({.heading = glm::normalize(-first + (north * 0.4)),
+                               .height = 1.5,
+                               .peak = 0.55,
+                               .peakedness = hog::waves::swell_peakedness,
+                               .spread = hog::waves::swell_spread});
+    sea.waves = hog::waves::waves_at(sea.trains, sea.bend.up, sea.sea);
+    sea.drawn = hog::render::drawn_waves_at(sea.trains, sea.waves, sea.sea, sea.eye, sea.bend, noon,
+                                            DVec3{0.0});
+    std::vector<hog::waves::Wave> shown;
+    for (const hog::waves::Wave& wave : sea.waves) {
+        const double showing =
+            std::sqrt(hog::waves::showing(glm::dot(sea.bend.up, sea.trains[wave.train].heading)));
+        if (showing > 0.0) {
+            shown.push_back({.train = wave.train, .amplitude = wave.amplitude * showing});
+        }
+    }
+    std::vector<hog::waves::Wave> kept =
+        hog::waves::strongest(sea.trains, shown, hog::render::drawn_waves).waves;
+    for (hog::waves::Wave& wave : kept) {
+        wave.amplitude /=
+            std::sqrt(hog::waves::showing(glm::dot(sea.bend.up, sea.trains[wave.train].heading)));
+    }
+    // From the waterline 300 m east out past the shelf's turn; not so far that the precision
+    // floats keep there is what's tested.
+    std::vector<DVec3> rest;
+    std::vector<hog::Vec3> floors;
+    std::vector<hog::waves::Floor> cpu_floors;
+    for (const double west : {295.0, 280.0, 240.0, 150.0, 0.0, -1'500.0}) {
+        for (const double across : {-20.0, 35.0}) {
+            const double out = 300.0 - west;
+            const double depth = std::max(hog::waves::dean_scale * std::cbrt(out * out),
+                                          out / hog::waves::shelf_run);
+            const double deepening = depth < hog::waves::shelf_depth
+                                         ? 2.0 / 3.0 * hog::waves::dean_scale / std::cbrt(out)
+                                         : 1.0 / hog::waves::shelf_run;
+            rest.push_back(sea.rest((first * west) + (north * across)));
+            floors.emplace_back(static_cast<float>(depth), static_cast<float>(-deepening), 0.0F);
+            cpu_floors.push_back({.depth = depth, .deepening = -first * deepening});
+        }
+    }
+    const std::vector<Probed> probed = probe_waves(*device, sea.drawn, rest, 1e-3, floors);
+    for (std::size_t i = 0; i < rest.size(); ++i) {
+        const hog::waves::Surface surface = hog::waves::surface_at(
+            sea.trains, kept, sea.eye.metres() + rest[i], noon, cpu_floors[i]);
+        CAPTURE(i, cpu_floors[i].depth);
+        CHECK(glm::length(probed[i].moved - surface.moved) <
+              0.01 + (0.01 * glm::length(surface.moved)));
+        CHECK(glm::dot(probed[i].normal, surface.normal) > 0.999);
     }
     CHECK(device->validation_errors() == 0);
 }

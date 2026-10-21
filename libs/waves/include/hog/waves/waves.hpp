@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <vector>
 
@@ -106,14 +107,24 @@ struct Surface {
     DVec3 normal{0.0, 0.0, 1.0};
 };
 
-// At `rest`, a point of sea level in the planet's frame.
+// The sea's floor under a point: how deep the water over it is at rest, and which way, along the
+// ground, and how fast it deepens, metres per metre. Taken as lying on a sandy shore's profile, as
+// waves/shoaling.hpp has it.
+struct Floor {
+    double depth = std::numeric_limits<double>::infinity();
+    DVec3 deepening{0.0};
+};
+
+// At `rest`, a point of sea level in the planet's frame, over `floor`: in shallow water the waves
+// that run towards the shore shorten, turn towards it and rise until they break, and the rest die
+// away.
 [[nodiscard]] Surface surface_at(std::span<const Train> trains, std::span<const Wave> waves,
-                                 DVec3 rest, GameTime time);
+                                 DVec3 rest, GameTime time, const Floor& floor = {});
 
 // Metres above sea level of the water's surface over or under `point`, on a planet whose sea
-// level lies `radius` from its centre.
+// level lies `radius` from its centre, over `floor`.
 [[nodiscard]] double height_at(std::span<const Train> trains, std::span<const Wave> waves,
-                               DVec3 point, double radius, GameTime time);
+                               DVec3 point, double radius, GameTime time, const Floor& floor = {});
 
 // At most `count` of the waves, the strongest of each band in turn, longest first; and the mean
 // square slope of those left out.

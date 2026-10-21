@@ -66,6 +66,26 @@ Shot over_the_islands(double altitude = 1'500.0, double pitch = -0.2) {
     return shot_of(flight);
 }
 
+// `altitude` metres over the sea `out` metres off the first island's coast along its longest
+// width, looking back at it if `back`, else out to sea, `pitch` radians up.
+Shot off_the_coast(double out, double altitude, bool back, double pitch) {
+    const double radius = world().geology().planet_radius();
+    const auto& island = world().geology().terrain().archipelago().islands().front();
+    const hog::DVec3 outward =
+        glm::normalize(island.axis - (island.center * glm::dot(island.axis, island.center)));
+    const auto at = [&](double along) {
+        return glm::normalize(island.center + (outward * (along / radius)));
+    };
+    double coast = 0.0;
+    while (hog::client::ground_under(world(), hog::WorldPosition{at(coast) * radius}) > 0.0) {
+        coast += 5.0;
+    }
+    hog::client::Flight flight = hog::client::start_flight(
+        at(coast + out), radius, altitude, back ? island.center : at(coast + out + 1'000.0));
+    flight.pitch = pitch;
+    return shot_of(flight);
+}
+
 // Six metres over water at least five deep, looking `pitch` radians up over more of it.
 Shot at_sea(double pitch) {
     const double radius = world().geology().planet_radius();
@@ -430,8 +450,17 @@ TEST_CASE("a windy sea, to look at", "[.look]") {
                              Look{.name = "out", .pitch = -0.12, .time_of_day = 0.5},
                              Look{.name = "level", .pitch = 0.0, .time_of_day = 0.5},
                              Look{.name = "evening", .pitch = -0.05, .time_of_day = 0.64},
-                             Look{.name = "shore", .pitch = -0.1, .time_of_day = 0.5}}) {
-        Shot shot = look.name == "shore" ? over_the_islands(20.0, look.pitch) : at_sea(look.pitch);
+                             Look{.name = "shore", .pitch = -0.1, .time_of_day = 0.5},
+                             Look{.name = "beach", .pitch = -0.08, .time_of_day = 0.45},
+                             Look{.name = "coast", .pitch = -0.25, .time_of_day = 0.45}}) {
+        Shot shot = at_sea(look.pitch);
+        if (look.name == "shore") {
+            shot = over_the_islands(20.0, look.pitch);
+        } else if (look.name == "beach") {
+            shot = off_the_coast(-3.0, 2.0, false, look.pitch);
+        } else if (look.name == "coast") {
+            shot = off_the_coast(350.0, 60.0, true, look.pitch);
+        }
         const hog::DVec3 up = glm::normalize(shot.camera.eye.metres());
         shot.time =
             hog::client::start_time(calendar(),

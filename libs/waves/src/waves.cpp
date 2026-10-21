@@ -1,4 +1,5 @@
 #include <hog/core/hash.hpp>
+#include <hog/waves/shoaling.hpp>
 #include <hog/waves/waves.hpp>
 
 #include <algorithm>
@@ -6,6 +7,7 @@
 #include <chrono>
 #include <cmath>
 #include <numbers>
+#include <utility>
 
 namespace hog::waves {
 
@@ -224,8 +226,31 @@ double phase_at(const Train& train, DVec3 point, GameTime time) {
 }
 
 Surface surface_at(std::span<const Train> trains, std::span<const Wave> waves, DVec3 rest,
-                   GameTime time) {
+                   GameTime time, const Floor& floor) {
     const DVec3 up = glm::normalize(rest);
+    const bool shallow = std::isfinite(floor.depth);
+    const DVec3 deepening = floor.deepening - (up * glm::dot(up, floor.deepening));
+    const double steepness = glm::length(deepening);
+    const DVec3 offshore = steepness > 0.0 ? deepening / steepness : DVec3{0.0};
+    // Each wave as it shows here, along the ground: how high and its wavenumber in deep water.
+    const auto shown_at = [&](const Wave& wave) {
+        const Train& train = trains[wave.train];
+        const double rising = glm::dot(up, train.heading);
+        const double shown = std::sqrt(showing(rising));
+        const double flat = std::sqrt(std::max(1.0 - (rising * rising), 0.0));
+        return std::pair{wave.amplitude * shown, train.wavenumber * flat};
+    };
+    // Those too high for the depth break, as many as it takes to bring them down to it.
+    double kept = 1.0;
+    if (shallow) {
+        double squares = 0.0;
+        for (const Wave& wave : waves) {
+            const auto [amplitude, deep] = shown_at(wave);
+            const double shoaled = amplitude * shoaling(deep, floor.depth);
+            squares += shoaled * shoaled;
+        }
+        kept = depth_limited(2.0 * std::sqrt(squares), floor.depth);
+    }
     Surface surface;
     // How the surface slopes, and how its water bunches along the ground, against the ground
     // beneath at rest.
@@ -233,22 +258,38 @@ Surface surface_at(std::span<const Train> trains, std::span<const Wave> waves, D
     glm::dmat3 bunching{0.0};
     for (const Wave& wave : waves) {
         const Train& train = trains[wave.train];
-        const double rising = glm::dot(up, train.heading);
-        const double shown = std::sqrt(showing(rising));
-        if (shown <= 0.0) {
+        auto [amplitude, wavenumber] = shown_at(wave);
+        if (amplitude <= 0.0) {
             continue;
         }
-        const DVec3 along = train.heading - (up * rising);
-        const double flat = glm::length(along);
-        const DVec3 heading = along / flat;
-        const double amplitude = wave.amplitude * shown;
-        const double wavenumber = train.wavenumber * flat;
-        const double phase = phase_at(train, rest, time);
+        const double rising = glm::dot(up, train.heading);
+        DVec3 heading = glm::normalize(train.heading - (up * rising));
+        double phase = phase_at(train, rest, time);
+        double stretch = 1.0;
+        if (shallow) {
+            const double deep = wavenumber;
+            // Waves running out to sea where it's shallow have come off the shore, and are lost.
+            const double thinned = deep / shallow_wavenumber(deep, floor.depth);
+            const double towards = std::clamp((0.3 - glm::dot(heading, offshore)) / 0.6, 0.0, 1.0);
+            const double sheltered = towards * towards * (3.0 - (2.0 * towards));
+            amplitude *= shoaling(deep, floor.depth) * kept * std::lerp(sheltered, 1.0, thinned);
+            stretch = orbit_stretch(deep, floor.depth);
+            phase += phase_lag(deep, floor.depth);
+            // The lag's gradient turns and shortens it.
+            const DVec3 turned =
+                (heading * deep) + (deepening * phase_lag_slope(deep, floor.depth));
+            wavenumber = glm::length(turned);
+            if (wavenumber <= 0.0) {
+                continue;
+            }
+            heading = turned / wavenumber;
+        }
         const double c = std::cos(phase);
         const double s = std::sin(phase);
-        surface.moved += (up * (amplitude * c)) - (heading * (choppiness * amplitude * s));
+        const double swing = choppiness * amplitude * stretch;
+        surface.moved += (up * (amplitude * c)) - (heading * (swing * s));
         slope += heading * (amplitude * wavenumber * s);
-        bunching += glm::outerProduct(heading, heading) * (choppiness * amplitude * wavenumber * c);
+        bunching += glm::outerProduct(heading, heading) * (swing * wavenumber * c);
     }
     const auto [first, second] = across(up);
     const DVec3 one = first - (up * glm::dot(slope, first)) - (bunching * first);
@@ -258,12 +299,12 @@ Surface surface_at(std::span<const Train> trains, std::span<const Wave> waves, D
 }
 
 double height_at(std::span<const Train> trains, std::span<const Wave> waves, DVec3 point,
-                 double radius, GameTime time) {
+                 double radius, GameTime time, const Floor& floor) {
     const DVec3 over = glm::normalize(point) * radius;
     // The water at rest that the waves carry over the point: found by stepping back along how
     // far they carry it, which shrinks while the crests don't fold.
     DVec3 rest = over;
-    Surface surface = surface_at(trains, waves, rest, time);
+    Surface surface = surface_at(trains, waves, rest, time, floor);
     constexpr int steps = 12;
     for (int step = 0; step < steps; ++step) {
         const DVec3 up = glm::normalize(rest);
@@ -274,7 +315,7 @@ double height_at(std::span<const Train> trains, std::span<const Wave> waves, DVe
             break;
         }
         rest = glm::normalize(rest + off) * radius;
-        surface = surface_at(trains, waves, rest, time);
+        surface = surface_at(trains, waves, rest, time, floor);
     }
     return glm::length(rest + surface.moved) - radius;
 }

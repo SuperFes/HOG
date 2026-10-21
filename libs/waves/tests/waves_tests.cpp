@@ -1,3 +1,4 @@
+#include <hog/waves/shoaling.hpp>
 #include <hog/waves/waves.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -433,5 +434,147 @@ TEST_CASE("even a gale's sea doesn't fold its crests over", "[waves]") {
         const double area = ((one.x * two.y) - (one.y * two.x)) / (4.0 * step * step);
         CAPTURE(sample);
         CHECK(area > 0.2);
+    }
+}
+
+namespace {
+
+// The floor `out` metres from the waterline of a sandy shore whose sea lies east, as the
+// planet's sea floor has it.
+hog::waves::Floor shore_floor(double out) {
+    const double shoreface = hog::waves::dean_scale * std::cbrt(out * out);
+    if (shoreface > out / hog::waves::shelf_run) {
+        return {.depth = shoreface,
+                .deepening = east * (2.0 / 3.0 * hog::waves::dean_scale / std::cbrt(out))};
+    }
+    return {.depth = out / hog::waves::shelf_run, .deepening = east / hog::waves::shelf_run};
+}
+
+// The train running most nearly along `heading` over the top of the planet.
+std::uint32_t train_along(const std::vector<Train>& trains, DVec3 heading, int band) {
+    std::uint32_t chosen = 0;
+    double best = -1.0;
+    for (std::uint32_t i = 0; i < trains.size(); ++i) {
+        if (trains[i].band == band && glm::dot(trains[i].heading, heading) > best) {
+            best = glm::dot(trains[i].heading, heading);
+            chosen = i;
+        }
+    }
+    return chosen;
+}
+
+} // namespace
+
+TEST_CASE("over deep water the floor changes nothing", "[waves][shoaling]") {
+    const std::vector<Train> trains = hog::waves::planet_trains(seed);
+    const std::vector<Wave> waves = hog::waves::waves_at(trains, up, windy(north * 9.0));
+    const DVec3 rest = glm::normalize((up * radius) + (east * 31.0)) * radius;
+    const hog::waves::Surface open = hog::waves::surface_at(trains, waves, rest, noon);
+    const hog::waves::Surface over = hog::waves::surface_at(
+        trains, waves, rest, noon, {.depth = 4'000.0, .deepening = east * 0.1});
+    CHECK(glm::distance(open.moved, over.moved) < 1e-9);
+    CHECK(glm::distance(open.normal, over.normal) < 1e-9);
+}
+
+TEST_CASE("in the shallows the water's surface still faces as its neighbours lie",
+          "[waves][shoaling]") {
+    const std::vector<Train> trains = hog::waves::planet_trains(seed);
+    // A swell running in at the shore, and a breeze along it.
+    SeaState sea = windy(north * 6.0);
+    sea.systems.push_back({.heading = glm::normalize(north - east),
+                           .height = 1.2,
+                           .peak = 0.6,
+                           .peakedness = hog::waves::swell_peakedness,
+                           .spread = hog::waves::swell_spread});
+    const std::vector<Wave> waves = hog::waves::waves_at(trains, up, sea);
+    constexpr double step = 0.002;
+    for (const double out : {20.0, 150.0, 900.0, 3'000.0}) {
+        for (const double along : {-7.0, 0.0, 13.0}) {
+            const auto at = [&](double east_of) {
+                return glm::normalize((up * radius) + (east * east_of) + (north * along)) * radius;
+            };
+            const auto moved = [&](double east_of, double north_of) {
+                const DVec3 on = glm::normalize(at(east_of) + (north * north_of)) * radius;
+                return on +
+                       hog::waves::surface_at(trains, waves, on, noon, shore_floor(out + east_of))
+                           .moved;
+            };
+            const DVec3 one = moved(step, 0.0) - moved(-step, 0.0);
+            const DVec3 two = moved(0.0, step) - moved(0.0, -step);
+            const DVec3 found = glm::normalize(glm::cross(one, two));
+            const DVec3 normal =
+                hog::waves::surface_at(trains, waves, at(0.0), noon, shore_floor(out)).normal;
+            CAPTURE(out, along);
+            CHECK(glm::dot(found, normal) > 0.9995);
+        }
+    }
+}
+
+TEST_CASE("waves running in shorten and turn towards the shore", "[waves][shoaling]") {
+    const std::vector<Train> trains = hog::waves::planet_trains(seed);
+    // A swell of about 9 s running in at 45 degrees, tiny so it doesn't break.
+    const DVec3 slant = glm::normalize(north - east);
+    const std::uint32_t chosen = train_along(trains, slant, 3);
+    const Train& train = trains[chosen];
+    REQUIRE(glm::dot(train.heading, slant) > 0.97);
+    const std::vector<Wave> waves{{.train = chosen, .amplitude = 0.001}};
+    constexpr double out = 60.0;
+    const hog::waves::Floor floor = shore_floor(out);
+    // The heights round a point, whose gradient runs along the wave's wavevector.
+    constexpr double step = 0.01;
+    const auto height = [&](double east_of, double north_of, GameTime time) {
+        const DVec3 on =
+            glm::normalize((up * radius) + (east * east_of) + (north * north_of)) * radius;
+        return glm::dot(
+            up, hog::waves::surface_at(trains, waves, on, time, shore_floor(out + east_of)).moved);
+    };
+    // When the slope's steepest here.
+    double steepest = 0.0;
+    hog::DVec2 gradient{0.0};
+    for (int tick = 0; tick < 40; ++tick) {
+        const GameTime time = later(tick * 0.25);
+        const hog::DVec2 found{(height(step, 0.0, time) - height(-step, 0.0, time)) / (2.0 * step),
+                               (height(0.0, step, time) - height(0.0, -step, time)) / (2.0 * step)};
+        if (glm::length(found) > steepest) {
+            steepest = glm::length(found);
+            gradient = found;
+        }
+    }
+    const double incoming =
+        std::acos(std::abs(glm::dot(glm::normalize(gradient), hog::DVec2{-1.0, 0.0})));
+    // Turned well round from 45 degrees off the shore's normal, as Snell's law would have it.
+    const double deep = train.wavenumber;
+    const double local = hog::waves::shallow_wavenumber(deep, floor.depth);
+    const double snell = std::asin(std::sin(std::numbers::pi / 4.0) * deep / local);
+    CHECK(incoming < (std::numbers::pi / 4.0) - 0.1);
+    CHECK(std::abs(incoming - snell) < 0.15);
+    // And shortened: the slope over the height is the local wavenumber.
+    const double amplitude = 0.001 * hog::waves::shoaling(deep, floor.depth);
+    CHECK(steepest / amplitude > deep * 1.5);
+}
+
+TEST_CASE("in the shallows waves break down to what the depth holds", "[waves][shoaling]") {
+    const std::vector<Train> trains = hog::waves::planet_trains(seed);
+    const SeaState sea = windy(glm::normalize(-east + (north * 0.3)) * 12.0);
+    const std::vector<Wave> waves = hog::waves::waves_at(trains, up, sea);
+    std::mt19937_64 random{17};
+    std::uniform_real_distribution<double> spot{-300.0, 300.0};
+    std::uniform_real_distribution<double> when{0.0, 600.0};
+    for (const double out : {10.0, 60.0}) {
+        const hog::waves::Floor floor = shore_floor(out);
+        double squares = 0.0;
+        constexpr int samples = 3000;
+        for (int sample = 0; sample < samples; ++sample) {
+            const DVec3 rest = glm::normalize((up * radius) + (north * spot(random))) * radius;
+            const double height = glm::dot(
+                glm::normalize(rest),
+                hog::waves::surface_at(trains, waves, rest, later(when(random)), floor).moved);
+            squares += height * height;
+        }
+        // The root-mean-square height is the root of eight times the variance.
+        const double rms = std::sqrt(8.0 * squares / samples);
+        CAPTURE(out, floor.depth, rms);
+        CHECK(rms < hog::waves::breaking_depth * floor.depth * 1.1);
+        CHECK(rms > hog::waves::breaking_depth * floor.depth * 0.5);
     }
 }

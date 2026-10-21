@@ -12,6 +12,7 @@
 #include <hog/render/vulkan.hpp>
 #include <hog/terrain/bend.hpp>
 #include <hog/terrain/shore.hpp>
+#include <hog/waves/shoaling.hpp>
 #include <hog/waves/waves.hpp>
 
 #include <array>
@@ -29,6 +30,10 @@ class Device;
 inline constexpr std::size_t drawn_waves = 48;
 // The plane waves summed for the pattern of its foam. Likewise.
 inline constexpr std::size_t foam_waves = 26;
+// How much of the waves runs where the water's shallow, once those too high for it have broken:
+// samples evenly over the root of the depth up to kept_deepest metres, past which all of it does.
+inline constexpr std::size_t kept_samples = 32;
+inline constexpr double kept_deepest = 64.0;
 
 // The waves the sea is drawn with, as shaders/waves.slang takes them.
 struct DrawnWaves {
@@ -52,6 +57,7 @@ struct DrawnWaves {
     glm::vec4 shore_anchor{0.0F};
     glm::vec4 shore_east{0.0F};
     glm::vec4 shore_north{0.0F};
+    std::array<glm::vec4, kept_samples / 4> kept{};
     std::array<Wave, drawn_waves> waves{};
     std::array<FoamWave, foam_waves> foam_pattern{};
 };
@@ -91,7 +97,7 @@ public:
     // Lit through the air, it reflects the sky as the eye sees it and the sun's light through the
     // air, is seen through the air and is tone mapped; otherwise it reflects a sky of one colour.
     // `frames` in flight, each with its own waves.
-    [[nodiscard]] static Result<Ocean> create(const Device& device, VkFormat colour_format,
+    [[nodiscard]] static Result<Ocean> create(Device& device, VkFormat colour_format,
                                               VkFormat depth_format, bool air = false,
                                               std::uint32_t frames = 1);
 
@@ -126,6 +132,7 @@ private:
     Buffer indices_;
     std::vector<Buffer> waves_;
     StreamedImage shore_depths_;
+    Image no_shore_;
     Sampler shore_sampler_;
     std::optional<terrain::ShoreFrame> shore_;
     std::uint32_t index_count_ = 0;

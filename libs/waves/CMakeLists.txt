@@ -1,5 +1,6 @@
 add_library(hog_waves
     src/foam.cpp
+    src/shoaling.cpp
     src/waves.cpp)
 add_library(hog::waves ALIAS hog_waves)
 
@@ -9,4 +10,5 @@ hog_target_defaults(hog_waves)
 
 hog_add_tests(hog_waves
     tests/foam_tests.cpp
+    tests/shoaling_tests.cpp
     tests/waves_tests.cpp)
