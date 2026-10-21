@@ -8,7 +8,7 @@ static const float height_texel_step = 64.0;
 static const float haze_per_metre = 3e-5;
 static const float haze_height = 1000.0;
 static const float driest_share = 0.97;
-static const float fog_per_metre = 0.015;
+public static const float fog_per_metre = 0.015;
 public static const float fog_edge = 60.0;
 // Fog lies under an inversion, above which the air's drier: the haze over it thins this quickly,
 // fully over fog this deep.
@@ -67,25 +67,6 @@ public float haze_extinction(SkyCell cell, float height) {
                                 saturate(cell.fog_top / inversion_fog));
     return haze_per_metre * ((1.0 / (1.0 - (driest_share * saturate(cell.humidity)))) - 1.0) *
            exp(-above / haze_height) * over_fog;
-}
-
-// How deep into the fog's edge a stretch has gone, summed up to `deep` edges below the top.
-float edge_sum(float deep) {
-    if (deep <= 0.0) {
-        return 0.0;
-    }
-    return deep < 1.0 ? 0.5 * deep * deep : deep - 0.5;
-}
-
-// As render::fog_depth: of the light along a straight stretch `length` long, from `from` to `to`
-// metres above sea level, how much the fog in `cell` takes.
-public float fog_depth(SkyCell cell, float from, float to, float length) {
-    const float deep_from = (cell.fog_top - max(from, 0.0)) / fog_edge;
-    const float deep_to = (cell.fog_top - max(to, 0.0)) / fog_edge;
-    const float across = deep_to - deep_from;
-    const float mean = abs(across) < 1e-3 ? saturate((deep_from + deep_to) * 0.5)
-                                          : (edge_sum(deep_to) - edge_sum(deep_from)) / across;
-    return fog_per_metre * mean * length;
 }
 
 // As weather_maps.cpp's: how much of the light falling straight down from above the mist the mist

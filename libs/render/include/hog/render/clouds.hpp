@@ -51,6 +51,9 @@ struct CloudsView {
 // sun `sun_mu` above the horizon, the share let through to `height` metres above sea level.
 [[nodiscard]] double mist_through(double humidity, double fog_top, double height,
                                   double sun_mu) noexcept;
+// As mist_through(), of the haze alone, less any fog, which is marched as cloud.
+[[nodiscard]] double haze_through(double humidity, double fog_top, double height,
+                                  double sun_mu) noexcept;
 // `shade` with what's over `height` metres above sea level of mist in air of `humidity` under fog
 // to `fog_top`, with the sun `sun_mu` above the horizon: the mist takes from the sun's light, and
 // scatters most of it on down.
@@ -76,9 +79,10 @@ struct CloudsView {
 // higher it is over the cloud, as what's marched moves less across the picture.
 [[nodiscard]] double furthest_blended(double eye_height, double highest_top) noexcept;
 
-// Clouds filling the sky where the weather has them, between the heights it has them at, their
-// shapes from noise drifting with the wind, and what falls from them to the ground; marched at a
-// share of the picture's size, as their quality has it, then drawn over it with any fog lying low.
+// Clouds filling the sky where the weather has them, between the heights it has them at, and fog,
+// cloud lying on the ground, under its top; their shapes from noise drifting with the wind, and
+// what falls from them to the ground; marched at a share of the picture's size, as their quality
+// has it, then drawn over it.
 // All are lit through the air and seen through it, and hidden by anything drawn nearer. Their
 // shadow's mapped round the eye, for all that's lit under them.
 class Clouds {
@@ -99,7 +103,10 @@ public:
     Result<> set_quality(CloudQuality quality);
     // Of the images the clouds are marched into.
     static constexpr VkFormat marched_format = VK_FORMAT_R16G16B16A16_SFLOAT;
-    static constexpr VkFormat distances_format = VK_FORMAT_R32_SFLOAT;
+    // x the metres to what's marched, weighed by what it hides, 0 for nothing; y the metres to
+    // what's drawn furthest under its texel, which it was marched no further than, 1e30 for
+    // nothing.
+    static constexpr VkFormat distances_format = VK_FORMAT_R32G32_SFLOAT;
     // Of the map of the cloud's shadow, as cloud_march.slang's shadow_main() leaves it.
     static constexpr VkFormat shadow_format = VK_FORMAT_R16G16B16A16_SFLOAT;
 

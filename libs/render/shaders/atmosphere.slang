@@ -323,7 +323,8 @@ public struct Lighting {
     public float4 weather;
     // Of the cloud's shadow, as shadow.slang reads it: x the metres its map reaches from the eye
     // east, west, north and south, 0 for none; y the metres above sea level the map's laid at; z
-    // of the light falling straight down, the share the mist over the eye lets through.
+    // of the light falling straight down, the share the mist over the eye lets through, and w the
+    // haze alone, less any fog.
     public float4 shadow;
     // The year at the eye, as season.slang keeps it: x hours of daylight, y the longest day's, z 1
     // while the days lengthen.

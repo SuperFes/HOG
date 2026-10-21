@@ -36,12 +36,10 @@ struct WeatherBindings {
 // or at sea level below it, in air of `humidity`, as client::SkyTexel holds it, under fog whose top
 // is at `fog_top`.
 [[nodiscard]] double mist_extinction(double humidity, double fog_top, double height) noexcept;
-// Of light falling straight down from above the mist, how much the mist over `height` takes.
+// Of light falling straight down from above the mist, how much the mist over `height` takes; and
+// of that, the haze, less any fog.
+[[nodiscard]] double haze_above(double humidity, double fog_top, double height) noexcept;
 [[nodiscard]] double mist_above(double humidity, double fog_top, double height) noexcept;
-// Of the light along a straight stretch `length` long, from `from` to `to` metres above sea level,
-// how much fog whose top is at `fog_top` takes.
-[[nodiscard]] double fog_depth(double fog_top, double from, double to, double length) noexcept;
-
 // The weather's and the sky's cube maps, each before and after, as the server last sent them. Until
 // they're first written they read as a clear, dry sky.
 class WeatherMaps {

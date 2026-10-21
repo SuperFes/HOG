@@ -3,7 +3,7 @@
 
 // As cloud_march.slang leaves them.
 [[vk::binding(0, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> marched;
-[[vk::binding(1, 0)]] [[vk::image_format("r32f")]] RWTexture2D<float> distances;
+[[vk::binding(1, 0)]] [[vk::image_format("rg32f")]] RWTexture2D<float2> distances;
 // The last frame's blend.
 [[vk::binding(2, 0)]] Sampler2D history;
 [[vk::binding(3, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> blended;
@@ -61,7 +61,7 @@ void resolve_main(uint3 id: SV_DispatchThreadID) {
     // Of what's marched round it now: the spread, and that blurred, where there's nothing before to
     // blend it with and its noise would show; but only from what's about as far, or nothing, as
     // what's further may be hidden here.
-    const float distance = distances[id.xy];
+    const float distance = distances[id.xy].x;
     float4 sum = float4(0.0);
     float4 squares = float4(0.0);
     float4 smoothed = float4(0.0);
@@ -72,7 +72,7 @@ void resolve_main(uint3 id: SV_DispatchThreadID) {
             const float4 there = marched[next];
             sum += there;
             squares += there * there;
-            const float there_distance = distances[next];
+            const float there_distance = distances[next].x;
             if (there_distance <= 0.0 ||
                 abs(there_distance - distance) <= alike * max(there_distance, distance)) {
                 const float weight = (dx == 0 ? 2.0 : 1.0) * (dy == 0 ? 2.0 : 1.0);

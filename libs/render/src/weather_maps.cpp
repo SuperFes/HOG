@@ -39,14 +39,6 @@ double haze_extinction(double humidity, double fog_top, double height) noexcept 
            std::exp(-above / haze_height) * over_fog;
 }
 
-// How deep into the fog's edge a stretch has gone, summed up to `deep` edges below the top.
-double edge_sum(double deep) noexcept {
-    if (deep <= 0.0) {
-        return 0.0;
-    }
-    return deep < 1.0 ? 0.5 * deep * deep : deep - 0.5;
-}
-
 } // namespace
 
 double mist_extinction(double humidity, double fog_top, double height) noexcept {
@@ -55,19 +47,13 @@ double mist_extinction(double humidity, double fog_top, double height) noexcept 
     return haze_extinction(humidity, fog_top, height) + fog;
 }
 
-double mist_above(double humidity, double fog_top, double height) noexcept {
-    return (haze_extinction(humidity, fog_top, height) * haze_height) +
-           (fog_per_metre * std::max(fog_top - std::max(height, 0.0), 0.0));
+double haze_above(double humidity, double fog_top, double height) noexcept {
+    return haze_extinction(humidity, fog_top, height) * haze_height;
 }
 
-double fog_depth(double fog_top, double from, double to, double length) noexcept {
-    const double deep_from = (fog_top - std::max(from, 0.0)) / fog_edge;
-    const double deep_to = (fog_top - std::max(to, 0.0)) / fog_edge;
-    const double across = deep_to - deep_from;
-    const double mean = std::abs(across) < 1e-3
-                            ? std::clamp((deep_from + deep_to) * 0.5, 0.0, 1.0)
-                            : (edge_sum(deep_to) - edge_sum(deep_from)) / across;
-    return fog_per_metre * mean * length;
+double mist_above(double humidity, double fog_top, double height) noexcept {
+    return haze_above(humidity, fog_top, height) +
+           (fog_per_metre * std::max(fog_top - std::max(height, 0.0), 0.0));
 }
 
 Result<WeatherMaps> WeatherMaps::create(Device& device, std::uint32_t map_size,

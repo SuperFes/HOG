@@ -45,8 +45,10 @@ struct SkyView {
     // The cloud's shadow round the eye, as Clouds::shadow() makes it, ready to sample, which
     // shades what's drawn in its reach in place of `shade`; none for no shadow.
     VkImageView cloud_shadow = VK_NULL_HANDLE;
-    // Of light falling straight down, the share the mist over the eye lets through.
+    // Of light falling straight down, the share the mist over the eye lets through; and the haze
+    // alone, less any fog.
     double mist = 1.0;
+    double haze = 1.0;
     // The year at the eye, which the leaves drawn keep.
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     flora::Daylight daylight = {};

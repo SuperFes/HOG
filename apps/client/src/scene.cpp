@@ -373,6 +373,9 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     sky.mist =
         render::mist_through(static_cast<double>(here.humidity), static_cast<double>(here.fog_top),
                              shot.bend.eye_height, sun_mu);
+    sky.haze =
+        render::haze_through(static_cast<double>(here.humidity), static_cast<double>(here.fog_top),
+                             shot.bend.eye_height, sun_mu);
     if (cloudy) {
         sky.cloud_shadow = clouds_.shadow_image().view();
     }

@@ -90,9 +90,10 @@ float seen() {
     return seen / float(ring_points + 1);
 }
 
-// Of the light, the share any cloud and mist let straight through to the eye: as the clouds marched
-// for the picture have it over the light's disc, as they're seen; else, out of the picture, as the
-// cloud's shadow over the eye has it, which follows the light up through the same cloud.
+// Of the light, the share any cloud, fog and mist let straight through to the eye: as the clouds
+// marched for the picture have it over the light's disc, as they're seen, with the fog among them,
+// through the haze; else, out of the picture, as the cloud's shadow and the mist over the eye have
+// it.
 float through_clouds() {
     const float shadowed = shade_at(lighting, cloud_shadow, float3(0.0)).sun;
     if (push.disc.w == 0.0) {
@@ -110,7 +111,7 @@ float through_clouds() {
     for (uint at = 0; at < ring_points; ++at) {
         hidden += clouds.SampleLevel((push.disc.xy + ring_point(at)) / picture, 0.0).a;
     }
-    const float marched = saturate(1.0 - (hidden / float(ring_points + 1))) * lighting.shadow.z;
+    const float marched = saturate(1.0 - (hidden / float(ring_points + 1))) * lighting.shadow.w;
     return lerp(shadowed, marched, within);
 }
 
