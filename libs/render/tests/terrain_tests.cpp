@@ -949,14 +949,14 @@ std::vector<BendProbed> bend_probed(hog::render::Device& device, const hog::terr
         const Probed& point = found[2 * at];
         const Probed& more = found[(2 * at) + 1];
         results.push_back({.bent = DVec3{glm::vec3{point[0], point[1], point[2]}},
-                           .sine = double{more[0]},
-                           .arctangent = double{more[1]}});
+                           .sine = static_cast<double>(more[0]),
+                           .arctangent = static_cast<double>(more[1])});
     }
     return results;
 }
 
 double as_float(double value) {
-    return double{static_cast<float>(value)};
+    return static_cast<double>(static_cast<float>(value));
 }
 
 } // namespace
