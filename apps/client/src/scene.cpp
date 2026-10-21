@@ -213,6 +213,7 @@ Scene::Scene(const render::Device& device, const planet::World& world, jobs::Job
              render::Precipitation precipitation, render::Glare glare, render::GpuTimer timer,
              std::optional<render::Billboard> companion, std::uint32_t frames)
     : world_{&world}, baker_{world, jobs}, terrain_{std::move(terrain)}, ocean_{std::move(ocean)},
+      shore_{world.geology().terrain(), world.geology().planet_radius(), jobs},
       wave_trains_{waves::planet_trains(hash_combine(world.geology().seed(), waves_salt))},
       grass_{std::move(grass)}, bushes_{std::move(bushes)}, trees_{std::move(trees)},
       forest_{std::move(forest)}, pool_{std::move(pool)}, anchor_pool_{std::move(anchors)},
@@ -225,6 +226,7 @@ Scene::Scene(const render::Device& device, const planet::World& world, jobs::Job
 
 Scene::~Scene() {
     (void)baker_.finish();
+    (void)shore_.finish();
 }
 
 void Scene::finish_bakes() {
@@ -232,6 +234,9 @@ void Scene::finish_bakes() {
     bush_anchors_.finish();
     for (terrain::Patch& patch : baker_.finish()) {
         stream_.baked(std::move(patch));
+    }
+    if (auto depths = shore_.finish()) {
+        shore_depths_ = std::move(depths);
     }
 }
 
@@ -333,6 +338,25 @@ void Scene::grow_vegetation(render::RenderGraph& graph, const render::Frame& fra
     }
 }
 
+void Scene::follow_shore(const Shot& shot) {
+    shore_.follow(glm::normalize(shot.camera.eye.metres()));
+    if (auto depths = shore_.collect()) {
+        shore_depths_ = std::move(depths);
+    }
+}
+
+Result<> Scene::give_shore(VkCommandBuffer commands, std::uint32_t slot) {
+    if (!shore_depths_) {
+        return {};
+    }
+    const terrain::ShoreDepths& depths = shore_depths_.value();
+    if (auto updated = ocean_.update_shore(commands, slot, depths.frame, depths.depths); !updated) {
+        return updated;
+    }
+    shore_depths_.reset();
+    return {};
+}
+
 Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     const std::span<const render::GpuSpan> timed = timer_.read(frame.commands, frame.slot);
     timings_.assign(timed.begin(), timed.end());
@@ -364,8 +388,10 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
         !taken) {
         return taken;
     }
+    follow_shore(shot);
     settled_ = streamed.bakes.empty() && streamed.arrived.empty() && streamed.evicted.empty() &&
-               baker_.in_flight() == 0 && anchors_.settled() && bush_anchors_.settled();
+               baker_.in_flight() == 0 && anchors_.settled() && bush_anchors_.settled() &&
+               !shore_.in_flight() && !shore_depths_;
     const protocol::CellWeather here = weather_at_eye(shot);
     const DVec3 sun = calendar_.sun_direction(shot.time);
     const double sun_mu = glm::dot(sun, shot.bend.up);
@@ -446,7 +472,8 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                           return updated;
                       }
                   }
-                  return pool_.record_uploads(commands, frame.slot)
+                  return give_shore(commands, frame.slot)
+                      .and_then([&] { return pool_.record_uploads(commands, frame.slot); })
                       .and_then([&] { return anchor_pool_.record_uploads(commands, frame.slot); })
                       .and_then([&] { return bush_pool_.record_uploads(commands, frame.slot); });
               });

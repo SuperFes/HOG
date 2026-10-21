@@ -6,14 +6,18 @@
 #include <hog/render/camera.hpp>
 #include <hog/render/memory.hpp>
 #include <hog/render/pipeline.hpp>
+#include <hog/render/sampler.hpp>
 #include <hog/render/sky.hpp>
+#include <hog/render/streamed_image.hpp>
 #include <hog/render/vulkan.hpp>
 #include <hog/terrain/bend.hpp>
+#include <hog/terrain/shore.hpp>
 #include <hog/waves/waves.hpp>
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -44,6 +48,10 @@ struct DrawnWaves {
     glm::vec4 second{0.0F};
     glm::vec4 foam{0.0F};
     glm::vec4 foam_left{0.0F};
+    // Where the depths round the eye lie, as shaders/shore.slang takes them: none unless any.
+    glm::vec4 shore_anchor{0.0F};
+    glm::vec4 shore_east{0.0F};
+    glm::vec4 shore_north{0.0F};
     std::array<Wave, drawn_waves> waves{};
     std::array<FoamWave, foam_waves> foam_pattern{};
 };
@@ -56,6 +64,9 @@ struct DrawnWaves {
                                         std::span<const waves::Wave> waves,
                                         const waves::SeaState& sea, WorldPosition eye,
                                         const terrain::Bend& bend, GameTime time, DVec3 drifted);
+
+// Depths of the sea as the ocean's shaders sample them: half floats.
+[[nodiscard]] std::vector<std::uint16_t> shore_texels(std::span<const float> depths);
 
 // Where the sea is seen from and what it reflects.
 struct OceanView {
@@ -94,6 +105,15 @@ public:
     Result<> draw_deep(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view,
                        std::uint32_t frame = 0) const;
 
+    // Records copying in the depths of the sea round the eye on `shore`, each of its layers in
+    // turn as terrain::shore_depths gives them, for the frames from `frame` on, whose last submit
+    // must have finished.
+    Result<> update_shore(VkCommandBuffer commands, std::uint32_t frame,
+                          const terrain::ShoreFrame& shore, std::span<const float> depths);
+    [[nodiscard]] const std::optional<terrain::ShoreFrame>& shore() const noexcept {
+        return shore_;
+    }
+
 private:
     Ocean() = default;
 
@@ -105,6 +125,9 @@ private:
     Buffer vertices_;
     Buffer indices_;
     std::vector<Buffer> waves_;
+    StreamedImage shore_depths_;
+    Sampler shore_sampler_;
+    std::optional<terrain::ShoreFrame> shore_;
     std::uint32_t index_count_ = 0;
     bool air_ = false;
 };

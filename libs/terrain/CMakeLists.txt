@@ -5,6 +5,7 @@ add_library(hog_terrain
     src/sea.cpp
     src/patch.cpp
     src/selection.cpp
+    src/shore.cpp
     src/stitching.cpp
     src/stream.cpp)
 add_library(hog::terrain ALIAS hog_terrain)
@@ -20,6 +21,7 @@ hog_add_tests(hog_terrain
     tests/sea_tests.cpp
     tests/patch_tests.cpp
     tests/selection_tests.cpp
+    tests/shore_tests.cpp
     tests/stitching_tests.cpp
     tests/stream_tests.cpp)
 

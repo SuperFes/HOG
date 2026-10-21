@@ -53,6 +53,10 @@ public struct Waves {
     // y how near its fine field's mean the lace in them lies, both in standard deviations; z the
     // standard deviation of the bunching of the waves that break, and w of how whitecaps churn.
     public float4 foam_left;
+    // As shore_depth takes them: where the depths round the eye lie, and how finely.
+    public float4 shore_anchor;
+    public float4 shore_east;
+    public float4 shore_north;
     public Wave waves[drawn_waves];
     public FoamWave foam_pattern[foam_waves];
 };

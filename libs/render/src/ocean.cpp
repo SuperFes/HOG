@@ -5,7 +5,10 @@
 #include <hog/render/ocean.hpp>
 #include <hog/shaders/ocean.hpp>
 #include <hog/terrain/sea.hpp>
+#include <hog/terrain/shore.hpp>
 #include <hog/waves/foam.hpp>
+
+#include <glm/gtc/packing.hpp>
 
 #include <algorithm>
 #include <array>
@@ -55,7 +58,7 @@ constexpr std::array vertex_attributes{
                                       .format = VK_FORMAT_R32G32_SFLOAT,
                                       .offset = offsetof(SeaVertex, towards)}};
 
-static_assert(sizeof(DrawnWaves) == (6 * sizeof(glm::vec4)) +
+static_assert(sizeof(DrawnWaves) == (9 * sizeof(glm::vec4)) +
                                         (drawn_waves * sizeof(DrawnWaves::Wave)) +
                                         (foam_waves * sizeof(DrawnWaves::FoamWave)));
 
@@ -290,6 +293,18 @@ Result<Ocean> Ocean::create(const Device& device, VkFormat colour_format, VkForm
     }
     ocean.indices_ = std::move(indices).value();
     ocean.index_count_ = static_cast<std::uint32_t>(disc.indices.size());
+    auto shore = make_streamed_image(
+        device, VK_FORMAT_R16_SFLOAT, {.width = terrain::shore_size, .height = terrain::shore_size},
+        frames, static_cast<std::uint32_t>(terrain::shore_spacing.size()));
+    if (!shore) {
+        return std::unexpected(std::move(shore).error());
+    }
+    ocean.shore_depths_ = std::move(shore).value();
+    auto sampler = make_sampler(device, VK_FILTER_LINEAR);
+    if (!sampler) {
+        return std::unexpected(std::move(sampler).error());
+    }
+    ocean.shore_sampler_ = std::move(sampler).value();
 
     // Seen from below too, from under the sea.
     ocean.air_ = air;
@@ -326,6 +341,26 @@ Result<Ocean> Ocean::create(const Device& device, VkFormat colour_format, VkForm
     return ocean;
 }
 
+std::vector<std::uint16_t> shore_texels(std::span<const float> depths) {
+    std::vector<std::uint16_t> halves;
+    halves.reserve(depths.size());
+    for (const float depth : depths) {
+        halves.push_back(static_cast<std::uint16_t>(glm::packHalf1x16(depth)));
+    }
+    return halves;
+}
+
+Result<> Ocean::update_shore(VkCommandBuffer commands, std::uint32_t frame,
+                             const terrain::ShoreFrame& shore, std::span<const float> depths) {
+    const std::vector<std::uint16_t> halves = shore_texels(depths);
+    if (auto updated = shore_depths_.update(commands, frame, std::as_bytes(std::span{halves}));
+        !updated) {
+        return updated;
+    }
+    shore_ = shore;
+    return {};
+}
+
 Result<> Ocean::draw(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view,
                      std::uint32_t frame) const {
     return record(commands, extent, view, frame, pipeline_);
@@ -353,6 +388,14 @@ Result<> Ocean::record(VkCommandBuffer commands, VkExtent2D extent, const OceanV
     drawn.up_height = {Vec3{view.bend.up}, static_cast<float>(view.bend.eye_height)};
     drawn.first = {Vec3{ground.east}, 0.0F};
     drawn.second = {Vec3{ground.north}, 0.0F};
+    if (shore_) {
+        const DVec3 eye = view.bend.up * (view.bend.radius + view.bend.eye_height);
+        drawn.shore_anchor = {Vec3{(shore_->anchor * view.bend.radius) - eye},
+                              static_cast<float>(1.0 / terrain::shore_spacing[0])};
+        drawn.shore_east = {Vec3{shore_->east},
+                            static_cast<float>(1.0 / terrain::shore_spacing[1])};
+        drawn.shore_north = {Vec3{shore_->north}, 0.0F};
+    }
     const Buffer& waves = waves_.at(frame);
     std::memcpy(waves.mapped().data(), &drawn, sizeof(drawn));
     if (auto flushed = waves.flush(); !flushed) {

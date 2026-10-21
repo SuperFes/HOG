@@ -35,6 +35,7 @@
 #include <hog/sim/calendar.hpp>
 #include <hog/terrain/baker.hpp>
 #include <hog/terrain/bend.hpp>
+#include <hog/terrain/shore.hpp>
 #include <hog/terrain/stream.hpp>
 #include <hog/waves/waves.hpp>
 
@@ -148,6 +149,9 @@ private:
           std::uint32_t frames);
 
     render::SkyView sky_view(const Shot& shot, render::CloudShade shade);
+    // Wants the depths round the eye, and takes any worked out; or gives the ocean those taken.
+    void follow_shore(const Shot& shot);
+    Result<> give_shore(VkCommandBuffer commands, std::uint32_t slot);
     // Adds the grass, bush and tree passes over the drawn patches, blown by `wind`.
     void grow_vegetation(render::RenderGraph& graph, const render::Frame& frame, const Shot& shot,
                          std::span<const terrain::StreamedPatch> patches,
@@ -161,6 +165,9 @@ private:
     terrain::PatchStream stream_;
     render::Terrain terrain_;
     render::Ocean ocean_;
+    terrain::ShoreStream shore_;
+    // Worked out, and yet to be given to the ocean.
+    std::optional<terrain::ShoreDepths> shore_depths_;
     std::vector<waves::Train> wave_trains_;
     render::Grass grass_;
     render::Bushes bushes_;

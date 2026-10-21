@@ -8,11 +8,15 @@
 #include <hog/render/ocean.hpp>
 #include <hog/render/readback.hpp>
 #include <hog/render/rendering.hpp>
+#include <hog/render/sampler.hpp>
 #include <hog/render/sky.hpp>
+#include <hog/render/streamed_image.hpp>
 #include <hog/render/terrain.hpp>
+#include <hog/shaders/shore_probe.hpp>
 #include <hog/shaders/waves_probe.hpp>
 #include <hog/terrain/bend.hpp>
 #include <hog/terrain/material.hpp>
+#include <hog/terrain/shore.hpp>
 #include <hog/terrain/stitching.hpp>
 #include <hog/waves/waves.hpp>
 
@@ -813,5 +817,126 @@ TEST_CASE("waves scatter the sun's glint over the sea", "[render][gpu]") {
     CHECK(glinting(wavy) > 4 * glinting(calm));
     const std::uint32_t middle = extent.width / 2;
     CHECK(pixel_at(wavy, middle, middle)[0] < pixel_at(calm, middle, middle)[0]);
+    CHECK(device->validation_errors() == 0);
+}
+
+namespace {
+
+// Of a field of depths over the plane of `frame` round an eye 5 m up at its anchor, what the
+// ocean's shaders find under each of `points`, metres east and north on that plane.
+std::vector<double> probe_shore(hog::render::Device& device, const hog::terrain::ShoreFrame& frame,
+                                const auto& depth_at, std::span<const hog::DVec2> points) {
+    using hog::terrain::shore_size;
+    using hog::terrain::shore_spacing;
+    std::vector<float> depths;
+    for (const double spacing : shore_spacing) {
+        const double first = (0.5 - (shore_size / 2.0)) * spacing;
+        for (int row = 0; row < shore_size; ++row) {
+            for (int column = 0; column < shore_size; ++column) {
+                depths.push_back(static_cast<float>(
+                    depth_at(hog::DVec2{first + (column * spacing), first + (row * spacing)})));
+            }
+        }
+    }
+    auto image = hog::render::make_streamed_image(device, VK_FORMAT_R16_SFLOAT,
+                                                  {.width = shore_size, .height = shore_size}, 1,
+                                                  static_cast<std::uint32_t>(shore_spacing.size()));
+    REQUIRE(image);
+    const std::vector<std::uint16_t> texels = hog::render::shore_texels(depths);
+    REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
+        REQUIRE(image->update(commands, 0, std::as_bytes(std::span{texels})));
+    }));
+    auto sampler = hog::render::make_sampler(device, VK_FILTER_LINEAR);
+    REQUIRE(sampler);
+
+    const DVec3 eye = frame.anchor * (radius + 5.0);
+    std::vector<glm::vec4> asked{
+        glm::vec4{hog::Vec3{(frame.anchor * radius) - eye},
+                  static_cast<float>(1.0 / shore_spacing[0])},
+        glm::vec4{hog::Vec3{frame.east}, static_cast<float>(1.0 / shore_spacing[1])},
+        glm::vec4{hog::Vec3{frame.north}, 0.0F}};
+    for (const hog::DVec2 point : points) {
+        const DVec3 rest = (hog::terrain::shore_direction(frame, radius, point) * radius) - eye;
+        asked.emplace_back(hog::Vec3{rest}, static_cast<float>(radius));
+    }
+    constexpr auto binding = [](std::uint32_t at, VkDescriptorType type) {
+        return VkDescriptorSetLayoutBinding{.binding = at,
+                                            .descriptorType = type,
+                                            .descriptorCount = 1,
+                                            .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+                                            .pImmutableSamplers = nullptr};
+    };
+    const std::array bindings{binding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+                              binding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
+                              binding(2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)};
+    auto probe = hog::render::make_compute_pipeline(
+        device, {.spirv = hog::shaders::shore_probe, .descriptors = bindings});
+    REQUIRE(probe);
+    auto questions = hog::render::make_filled_buffer(device, std::as_bytes(std::span{asked}),
+                                                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    REQUIRE(questions);
+    std::vector<std::array<float, 4>> found(points.size());
+    auto answers =
+        hog::render::make_buffer(device, std::span{found}.size_bytes(),
+                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, hog::render::Memory::Readback);
+    REQUIRE(answers);
+    REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
+        vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, probe->handle());
+        hog::render::push_sampled_image(commands, *probe, 0, image->image().view(),
+                                        sampler->handle());
+        hog::render::push_storage_buffer(commands, *probe, 1, questions->handle());
+        hog::render::push_storage_buffer(commands, *probe, 2, answers->handle());
+        vkCmdDispatch(commands, static_cast<std::uint32_t>((points.size() + 63) / 64), 1, 1);
+        const VkMemoryBarrier2 to_host{.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+                                       .pNext = nullptr,
+                                       .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                                       .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                                       .dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT,
+                                       .dstAccessMask = VK_ACCESS_2_HOST_READ_BIT};
+        const VkDependencyInfo dependency{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                                          .pNext = nullptr,
+                                          .dependencyFlags = 0,
+                                          .memoryBarrierCount = 1,
+                                          .pMemoryBarriers = &to_host,
+                                          .bufferMemoryBarrierCount = 0,
+                                          .pBufferMemoryBarriers = nullptr,
+                                          .imageMemoryBarrierCount = 0,
+                                          .pImageMemoryBarriers = nullptr};
+        vkCmdPipelineBarrier2(commands, &dependency);
+    }));
+    REQUIRE(answers->invalidate());
+    std::memcpy(found.data(), answers->mapped().data(), std::span{found}.size_bytes());
+    std::vector<double> depths_found;
+    depths_found.reserve(found.size());
+    for (const auto& depth : found) {
+        depths_found.push_back(static_cast<double>(depth[0]));
+    }
+    return depths_found;
+}
+
+} // namespace
+
+TEST_CASE("the sea's shaders find the depths round the eye", "[render][ocean][gpu]") {
+    const auto device = test_device();
+    const hog::terrain::ShoreFrame frame =
+        hog::terrain::shore_frame(glm::normalize(DVec3{0.2, -0.4, 0.9}), radius);
+    // Rising to the east and falling to the north, which filtering keeps as it is.
+    const auto depth_at = [](hog::DVec2 at) { return 20.0 + (0.004 * at.x) - (0.002 * at.y); };
+    // Fine, where the fine grid fades into the coarse, coarse, and fading out of it.
+    const std::array<hog::DVec2, 7> points{hog::DVec2{0.0, 0.0},      hog::DVec2{300.0, -420.0},
+                                           hog::DVec2{-950.0, 100.0}, hog::DVec2{4000.0, -3000.0},
+                                           hog::DVec2{7000.0, 0.0},   hog::DVec2{0.0, -9000.0},
+                                           hog::DVec2{-20000.0, 5.0}};
+    const std::vector<double> found = probe_shore(*device, frame, depth_at, points);
+    REQUIRE(found.size() == points.size());
+    // Half floats keep about three digits.
+    for (std::size_t i = 0; i < 4; ++i) {
+        CAPTURE(i);
+        CHECK_THAT(found[i], WithinAbs(depth_at(points[i]), 0.05));
+    }
+    const double inside = (1.0 - (7000.0 / 8192.0)) / 0.2;
+    CHECK_THAT(found[4], WithinAbs(1000.0 + ((depth_at(points[4]) - 1000.0) * inside), 1.0));
+    CHECK(found[5] == 1000.0);
+    CHECK(found[6] == 1000.0);
     CHECK(device->validation_errors() == 0);
 }
