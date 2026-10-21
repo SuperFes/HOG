@@ -250,7 +250,7 @@ Result<Options> parse_options(std::span<const std::string_view> arguments) {
     Options options;
     for (std::size_t i = 0; i < arguments.size(); ++i) {
         const std::string_view argument = arguments[i];
-        if (const auto* const flag = std::ranges::find(flags, argument, &Flag::name);
+        if (const auto flag = std::ranges::find(flags, argument, &Flag::name);
             flag != flags.end()) {
             flag->set(options);
             continue;

@@ -246,7 +246,7 @@ TEST_CASE("round bushes seen from overhead cover their footprint, not a cross", 
     constexpr std::size_t picture = std::size_t{extent.width} * extent.height;
     // Near enough that each bush is shaped in full, the stand filling the picture, and far enough
     // that each is a tuft, the stand filling half of it.
-    for (const auto [above, least] :
+    for (const auto& [above, least] :
          {std::pair{5.0, picture * 2 / 5}, std::pair{24.0, picture / 4}}) {
         for (const BushKind kind : {BushKind::Floofy, BushKind::Mat}) {
             CAPTURE(above, kind);

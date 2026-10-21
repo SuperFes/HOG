@@ -20,7 +20,10 @@ const hog::window::Sdl& offscreen() {
 TEST_CASE("a window's drawable size is its size in pixels", "[window]") {
     REQUIRE(offscreen().started());
     const hog::window::Window window{SDL_CreateWindow("test", 320, 200, 0)};
-    REQUIRE(window);
+    // Some drivers start but make no windows without a display, as macOS's runners have none.
+    if (!window) {
+        SKIP(SDL_GetError());
+    }
     const VkExtent2D extent = hog::window::drawable(window.get());
     CHECK(extent.width == 320);
     CHECK(extent.height == 200);
