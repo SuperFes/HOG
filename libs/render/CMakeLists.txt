@@ -78,7 +78,7 @@ target_compile_definitions(hog_render PUBLIC
     VMA_DYNAMIC_VULKAN_FUNCTIONS=0)
 set_source_files_properties(src/vma.cpp PROPERTIES COMPILE_DEFINITIONS VMA_IMPLEMENTATION)
 target_link_libraries(hog_render
-    PUBLIC hog::atmosphere hog::core hog::flora hog::terrain volk::volk
+    PUBLIC hog::atmosphere hog::core hog::flora hog::terrain hog::waves volk::volk
     PRIVATE hog::planet vk-bootstrap::vk-bootstrap)
 hog_target_defaults(hog_render)
 hog_add_shaders(hog_render CATALOGUE shaders/aerial.slang shaders/air_tables.slang shaders/billboard.slang shaders/bushes.slang shaders/capsules.slang shaders/cloud_march.slang shaders/cloud_resolve.slang shaders/clouds.slang shaders/forest.slang shaders/glare.slang shaders/globe.slang shaders/grass.slang shaders/ocean.slang shaders/precipitation.slang shaders/sky.slang shaders/sky_view.slang
@@ -125,7 +125,7 @@ hog_add_tests(hog_render
     tests/tree_tests.cpp)
 if(TARGET hog_render_tests)
     target_link_libraries(hog_render_tests PRIVATE hog::flora hog::planet)
-    hog_add_shaders(hog_render_tests tests/shaders/aerial_probe.slang tests/shaders/air_probe.slang tests/shaders/dispatch.slang tests/shaders/fill.slang tests/shaders/layer.slang tests/shaders/projection_probe.slang tests/shaders/volume_probe.slang
+    hog_add_shaders(hog_render_tests tests/shaders/aerial_probe.slang tests/shaders/air_probe.slang tests/shaders/dispatch.slang tests/shaders/fill.slang tests/shaders/layer.slang tests/shaders/projection_probe.slang tests/shaders/volume_probe.slang tests/shaders/waves_probe.slang
                     tests/shaders/triangle.slang)
     target_link_libraries(hog_render_tests PRIVATE hog::render_testing)
 endif()

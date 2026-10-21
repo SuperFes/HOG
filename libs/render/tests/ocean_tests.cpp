@@ -10,9 +10,11 @@
 #include <hog/render/rendering.hpp>
 #include <hog/render/sky.hpp>
 #include <hog/render/terrain.hpp>
+#include <hog/shaders/waves_probe.hpp>
 #include <hog/terrain/bend.hpp>
 #include <hog/terrain/material.hpp>
 #include <hog/terrain/stitching.hpp>
+#include <hog/waves/waves.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -22,8 +24,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <numbers>
 #include <optional>
+#include <random>
 #include <span>
 #include <utility>
 #include <vector>
@@ -162,7 +166,7 @@ std::vector<std::uint8_t> draw_patch(hog::render::Device& device, const OceanVie
         terrain->draw(commands, extent, *pool, draws,
                       {.camera = view.camera, .sun = view.sun, .bend = view.bend});
         if (sea) {
-            ocean->draw(commands, extent, view);
+            CHECK(ocean->draw(commands, extent, view));
         }
         vkCmdEndRendering(commands);
     }));
@@ -229,7 +233,7 @@ std::vector<std::uint8_t> through_air(hog::render::Device& device, double sun_el
                                      VkClearColorValue{.float32 = {0.0F, 0.0F, 0.0F, 1.0F}},
                                      {.view = depth->view()});
         sky->draw(commands, extent, 0, *atmosphere, seen);
-        ocean->draw(commands, extent, view);
+        CHECK(ocean->draw(commands, extent, view));
         vkCmdEndRendering(commands);
     }));
     auto pixels = hog::render::read_pixels(device, *target, hog::render::image_use::colour_target);
@@ -305,9 +309,9 @@ std::vector<std::uint8_t> over_deep_sea(hog::render::Device& device, Beneath ben
             terrain->draw(commands, extent, *pool, draws,
                           {.camera = camera, .sun = sun, .bend = bend, .air = air});
         } else if (beneath == Beneath::Deep) {
-            ocean->draw_deep(commands, extent, view);
+            CHECK(ocean->draw_deep(commands, extent, view));
         }
-        ocean->draw(commands, extent, view);
+        CHECK(ocean->draw(commands, extent, view));
         vkCmdEndRendering(commands);
     }));
     auto pixels = hog::render::read_pixels(device, *target, hog::render::image_use::colour_target);
@@ -517,5 +521,193 @@ TEST_CASE("through the air, the deep water drawn beneath the sea looks as ground
     // From under the sea, the sky shows through its surface overhead as before.
     CHECK(over_deep_sea(*device, Beneath::Deep, -20.0) ==
           over_deep_sea(*device, Beneath::Nothing, -20.0));
+    CHECK(device->validation_errors() == 0);
+}
+
+namespace {
+
+// Late in 2026, so phases are taken far from the epoch, as they will be.
+constexpr hog::GameTime noon{std::chrono::seconds{1'792'000'000}};
+
+// Where the drawn waves move points of sea level `rest` from the eye, seen over `footprint`
+// metres each, and how the surface faces there; and how rough what's left is.
+struct Probed {
+    DVec3 moved;
+    DVec3 normal;
+    double roughness;
+};
+
+std::vector<Probed> probe_waves(hog::render::Device& device, const hog::render::DrawnWaves& drawn,
+                                std::span<const DVec3> rest, double footprint) {
+    std::vector<std::array<float, 4>> asked;
+    for (const DVec3& point : rest) {
+        asked.push_back({static_cast<float>(point.x), static_cast<float>(point.y),
+                         static_cast<float>(point.z), static_cast<float>(footprint)});
+    }
+    constexpr auto binding = [](std::uint32_t at, VkDescriptorType type) {
+        return VkDescriptorSetLayoutBinding{.binding = at,
+                                            .descriptorType = type,
+                                            .descriptorCount = 1,
+                                            .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+                                            .pImmutableSamplers = nullptr};
+    };
+    const std::array bindings{binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
+                              binding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
+                              binding(2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)};
+    auto probe = hog::render::make_compute_pipeline(
+        device, {.spirv = hog::shaders::waves_probe, .descriptors = bindings});
+    REQUIRE(probe);
+    auto waves = hog::render::make_filled_buffer(device, std::as_bytes(std::span{&drawn, 1}),
+                                                 VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+    REQUIRE(waves);
+    auto questions = hog::render::make_filled_buffer(device, std::as_bytes(std::span{asked}),
+                                                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    REQUIRE(questions);
+    std::vector<std::array<float, 4>> found(2 * asked.size());
+    auto answers =
+        hog::render::make_buffer(device, std::span{found}.size_bytes(),
+                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, hog::render::Memory::Readback);
+    REQUIRE(answers);
+    REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
+        vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, probe->handle());
+        hog::render::push_uniform_buffer(commands, *probe, 0, waves->handle());
+        hog::render::push_storage_buffer(commands, *probe, 1, questions->handle());
+        hog::render::push_storage_buffer(commands, *probe, 2, answers->handle());
+        vkCmdDispatch(commands, static_cast<std::uint32_t>((asked.size() + 63) / 64), 1, 1);
+        const VkMemoryBarrier2 to_host{.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+                                       .pNext = nullptr,
+                                       .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                                       .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                                       .dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT,
+                                       .dstAccessMask = VK_ACCESS_2_HOST_READ_BIT};
+        const VkDependencyInfo dependency{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                                          .pNext = nullptr,
+                                          .dependencyFlags = 0,
+                                          .memoryBarrierCount = 1,
+                                          .pMemoryBarriers = &to_host,
+                                          .bufferMemoryBarrierCount = 0,
+                                          .pBufferMemoryBarriers = nullptr,
+                                          .imageMemoryBarrierCount = 0,
+                                          .pImageMemoryBarriers = nullptr};
+        vkCmdPipelineBarrier2(commands, &dependency);
+    }));
+    REQUIRE(answers->invalidate());
+    std::memcpy(found.data(), answers->mapped().data(), std::span{found}.size_bytes());
+    std::vector<Probed> probed;
+    for (std::size_t i = 0; i < rest.size(); ++i) {
+        const auto& moved = found.at(2 * i);
+        const auto& normal = found.at((2 * i) + 1);
+        probed.push_back({.moved = DVec3{hog::Vec3{moved[0], moved[1], moved[2]}},
+                          .normal = DVec3{hog::Vec3{normal[0], normal[1], normal[2]}},
+                          .roughness = static_cast<double>(moved[3])});
+    }
+    return probed;
+}
+
+// Eight metres over a sea raised by a wind of `wind` m/s, somewhere off the top of the planet.
+struct WavySea {
+    std::vector<hog::waves::Train> trains = hog::waves::planet_trains(5);
+    WorldPosition eye{glm::normalize(DVec3{0.03, -0.02, 1.0}) * (radius + 8.0)};
+    hog::terrain::Bend bend = hog::terrain::bend_from(eye, radius, 0.0);
+    std::vector<hog::waves::Wave> waves;
+    hog::render::DrawnWaves drawn;
+
+    explicit WavySea(double wind) {
+        const DVec3 along = glm::normalize(glm::cross(bend.up, north));
+        waves = hog::waves::waves_at(trains, bend.up, {.wind = along * wind});
+        drawn = hog::render::drawn_waves_at(trains, waves, eye, bend, noon);
+    }
+
+    // Sea level `out` metres from under the eye along the ground, from the eye.
+    [[nodiscard]] DVec3 rest(DVec3 out) const {
+        const DVec3 flat = out - (bend.up * glm::dot(out, bend.up));
+        const DVec3 under = bend.up * radius;
+        return (glm::normalize(under + flat) * radius) - eye.metres();
+    }
+};
+
+} // namespace
+
+TEST_CASE("the sea's drawn waves move and face it as hog::waves has them", "[render][gpu]") {
+    const auto device = test_device();
+    const WavySea sea{9.0};
+    REQUIRE(sea.drawn.count_left_radius.x == static_cast<float>(hog::render::drawn_waves));
+    // The strongest as they show under the eye, and those as hog::waves takes them.
+    std::vector<hog::waves::Wave> shown;
+    for (const hog::waves::Wave& wave : sea.waves) {
+        const double showing =
+            std::sqrt(hog::waves::showing(glm::dot(sea.bend.up, sea.trains[wave.train].heading)));
+        if (showing > 0.0) {
+            shown.push_back({.train = wave.train, .amplitude = wave.amplitude * showing});
+        }
+    }
+    std::vector<hog::waves::Wave> kept =
+        hog::waves::strongest(sea.trains, shown, hog::render::drawn_waves).waves;
+    for (hog::waves::Wave& wave : kept) {
+        wave.amplitude /=
+            std::sqrt(hog::waves::showing(glm::dot(sea.bend.up, sea.trains[wave.train].heading)));
+    }
+    std::mt19937_64 random{2};
+    std::uniform_real_distribution<double> spot{-150.0, 150.0};
+    std::vector<DVec3> rest;
+    rest.reserve(100);
+    for (int i = 0; i < 100; ++i) {
+        rest.push_back(sea.rest(DVec3{spot(random), spot(random), 0.0}));
+    }
+    const std::vector<Probed> probed = probe_waves(*device, sea.drawn, rest, 1e-3);
+    for (std::size_t i = 0; i < rest.size(); ++i) {
+        const hog::waves::Surface surface =
+            hog::waves::surface_at(sea.trains, kept, sea.eye.metres() + rest[i], noon);
+        CAPTURE(i);
+        CHECK(glm::length(probed[i].moved - surface.moved) < 0.01);
+        CHECK(glm::dot(probed[i].normal, surface.normal) > 0.9999);
+        CHECK(probed[i].roughness == static_cast<double>(sea.drawn.count_left_radius.y));
+    }
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("waves too short to see from afar fade into the sea's roughness", "[render][gpu]") {
+    const auto device = test_device();
+    const WavySea sea{9.0};
+    const std::vector<DVec3> rest{sea.rest(DVec3{40.0, 0.0, 0.0})};
+    const Probed near = probe_waves(*device, sea.drawn, rest, 1e-3).front();
+    const Probed far = probe_waves(*device, sea.drawn, rest, 5.0).front();
+    const Probed farther = probe_waves(*device, sea.drawn, rest, 1e4).front();
+    const auto all = static_cast<double>(sea.drawn.count_left_radius.y +
+                                         sea.drawn.waves.front().amplitude_phase_slope_length.z);
+    CHECK(near.roughness < far.roughness);
+    CHECK(far.roughness < farther.roughness);
+    // Seen from afar all of it is roughness, and what showed of the shape is gone.
+    CHECK(std::abs(farther.roughness - all) < all * 1e-3);
+    CHECK(glm::length(farther.moved) == 0.0);
+    CHECK(glm::length(far.moved) > 0.0);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("waves scatter the sun's glint over the sea", "[render][gpu]") {
+    const auto device = test_device();
+    // Looking down with the sun overhead.
+    OceanView view = seen_from(4.0, -up, north, up);
+    const auto calm = draw(*device, view, std::nullopt);
+    const std::vector<hog::waves::Train> trains = hog::waves::planet_trains(5);
+    view.waves =
+        hog::render::drawn_waves_at(trains, hog::waves::waves_at(trains, up, {.wind = east * 9.0}),
+                                    view.camera.eye, view.bend, noon);
+    REQUIRE(view.waves.count_left_radius.x > 0.0F);
+    const auto wavy = draw(*device, view, std::nullopt);
+    const auto glinting = [](const std::vector<std::uint8_t>& pixels) {
+        int lit = 0;
+        for (std::uint32_t y = 0; y < extent.height; ++y) {
+            for (std::uint32_t x = 0; x < extent.width; ++x) {
+                lit += pixel_at(pixels, x, y)[0] > 10 ? 1 : 0;
+            }
+        }
+        return lit;
+    };
+    // Glittering over more of it, each glint dimmer.
+    CAPTURE(glinting(calm), glinting(wavy));
+    CHECK(glinting(wavy) > 4 * glinting(calm));
+    const std::uint32_t middle = extent.width / 2;
+    CHECK(pixel_at(wavy, middle, middle)[0] < pixel_at(calm, middle, middle)[0]);
     CHECK(device->validation_errors() == 0);
 }

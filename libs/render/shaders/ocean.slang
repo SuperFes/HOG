@@ -2,6 +2,7 @@ import atmosphere;
 import shadow;
 import tone;
 import water;
+import waves;
 
 struct Push {
     float4x4 clip_from_eye;
@@ -25,6 +26,8 @@ struct Push {
 [[vk::binding(4, 0)]] Sampler2DArray aerial_volume;
 // As cloud_march.slang's.
 [[vk::binding(5, 0)]] Sampler2D cloud_shadow;
+// Lit through the air or not.
+[[vk::binding(6, 0)]] ConstantBuffer<Waves> waves;
 
 struct Vertex {
     [[vk::location(0)]] float out; // from 0 under the eye to 1 at the rim
@@ -34,22 +37,38 @@ struct Vertex {
 struct Surface {
     float4 position : SV_Position;
     float3 from_eye;
+    // Sea level's up, as it's drawn there.
     float3 normal;
+    // The water's place at rest, at sea level from the eye as it truly lies.
+    float3 rest;
 };
 
-static const float glint_sharpness = 2000.0;
-static const float glint_brightness = 50.0;
-// Through the air, the glint is the sun's light reflected by a normalised Blinn-Phong lobe.
-static const float glint_lobe = (glint_sharpness + 8.0) / (8.0 * pi);
+// As ocean.cpp makes the disc.
+static const float rings = 96.0;
+static const float spokes = 128.0;
 
-// As hog::terrain::sea_along and sea_from_eye place it.
+// The mean square slope of ripples shorter than any wave: the glint's least spread.
+static const float ripples = 0.001;
+// Without the air, the glint off the stillest water peaks this bright.
+static const float glint_brightness = 50.0;
+static const float stillest_lobe = ((2.0 / ripples) + 6.0) / (8.0 * pi);
+
+// Turns `v` as sea level's up under the eye, `truly`, turns to as it's drawn, `drawn`.
+float3 as_drawn(float3 v, float3 truly, float3 drawn) {
+    const float3 axis = cross(truly, drawn);
+    const float facing = dot(truly, drawn);
+    return (v * facing) + cross(axis, v) + (axis * (dot(axis, v) / (1.0 + facing)));
+}
+
+// As hog::terrain::sea_along and sea_from_eye place it, moved by the waves.
 [shader("vertex")]
 Surface vertex_main(Vertex vertex) {
     const float3 up = push.up_height.xyz;
     const float3 east = push.east_faked.xyz;
     const float faked = push.east_faked.w;
     const float nearest = push.sun_nearest.w;
-    const float along = nearest * (pow((push.sky_furthest.w / nearest) + 1.0, vertex.out) - 1.0);
+    const float spread = (push.sky_furthest.w / nearest) + 1.0;
+    const float along = nearest * (pow(spread, vertex.out) - 1.0);
 
     const float3 towards = (east * vertex.towards.x) + (cross(up, east) * vertex.towards.y);
     const float turned = along / faked;
@@ -57,24 +76,61 @@ Surface vertex_main(Vertex vertex) {
     Surface surface;
     surface.from_eye =
         (up * ((-2.0 * faked * half * half) - push.up_height.w)) + (towards * (faked * sin(turned)));
-    surface.position = mul(push.clip_from_eye, float4(surface.from_eye, 1.0));
     surface.normal = (up * cos(turned)) + (towards * sin(turned));
+
+    const float radius = waves.count_left_radius.z;
+    const float truly = along / radius;
+    const float truly_half = sin(truly / 2.0);
+    surface.rest = (up * ((-2.0 * radius * truly_half * truly_half) - push.up_height.w)) +
+                   (towards * (radius * sin(truly)));
+    // The corners lie apart by the larger of the rings' spacing and the spokes'.
+    const float between =
+        max(nearest * log(spread) * pow(spread, vertex.out) / rings, along * 2.0 * pi / spokes);
+    const WaveSurface water = wave_surface(waves, surface.rest, between);
+    surface.from_eye += as_drawn(water.moved, up, surface.normal);
+    surface.position = mul(push.clip_from_eye, float4(surface.from_eye, 1.0));
     return surface;
 }
 
-// How much of the sun's light the glint reflects towards the eye, but for the reflection.
-float glint_at(float3 looking, float3 normal, float3 sun) {
+// How the water's surface faces at a pixel, and the mean square slope of what's too small to
+// draw there.
+struct Facing {
+    float3 normal;
+    float roughness;
+};
+
+Facing facing_at(Surface surface, float3 looking) {
+    const float footprint = max(length(ddx(surface.rest)), length(ddy(surface.rest)));
+    const WaveSurface water = wave_surface(waves, surface.rest, footprint);
+    Facing facing;
+    facing.normal = as_drawn(water.normal, push.up_height.xyz, normalize(surface.normal));
+    facing.roughness = water.roughness + ripples;
+    // A wave's back seen at a glance, which the eye could only see past its crest, is taken as
+    // facing the eye just enough to be seen.
+    const float towards = dot(facing.normal, -looking);
+    if (towards < 0.02) {
+        facing.normal = normalize(facing.normal - (looking * (0.02 - towards)));
+    }
+    return facing;
+}
+
+// How much of the sun's light the glint reflects towards the eye, but for the reflection: a
+// normalised Blinn-Phong lobe as wide as the surface is rough.
+float glint_at(float3 looking, Facing facing, float3 sun) {
+    const float sharpness = (2.0 / facing.roughness) - 2.0;
     const float3 halfway = normalize(sun - looking);
-    const float lit = saturate(dot(normal, sun) * 10.0);
-    return lit * pow(saturate(dot(normal, halfway)), glint_sharpness);
+    const float lit = saturate(dot(facing.normal, sun) * 10.0);
+    return lit * ((sharpness + 8.0) / (8.0 * pi)) *
+           pow(saturate(dot(facing.normal, halfway)), sharpness);
 }
 
 [shader("fragment")]
 float4 fragment_main(Surface surface) : SV_Target {
-    const float3 normal = normalize(surface.normal);
     const float3 looking = normalize(surface.from_eye);
-    const float reflected = reflected_at(looking, normal);
-    const float glint = glint_brightness * reflected * glint_at(looking, normal, push.sun_nearest.xyz);
+    const Facing facing = facing_at(surface, looking);
+    const float reflected = reflected_at(looking, facing.normal);
+    const float glint =
+        glint_brightness * reflected * glint_at(looking, facing, push.sun_nearest.xyz) / stillest_lobe;
     // Premultiplied: the sky by how much is reflected, and the glint over all.
     return float4((push.sky_furthest.rgb * reflected) + glint, reflected);
 }
@@ -83,8 +139,9 @@ float4 fragment_main(Surface surface) : SV_Target {
 // between, and tone mapped.
 [shader("fragment")]
 float4 fragment_air(Surface surface) : SV_Target {
-    const float3 normal = normalize(surface.normal);
     const float3 looking = normalize(surface.from_eye);
+    const Facing facing = facing_at(surface, looking);
+    const float3 normal = facing.normal;
     const float reflected = reflected_at(looking, normal);
     const float3 sun = push.sun_nearest.xyz;
     const float3 up = push.up_height.xyz;
@@ -93,7 +150,8 @@ float4 fragment_air(Surface surface) : SV_Target {
 
     // The reflected view, read from the eye's sky-view table as if seen from the eye.
     const float3 mirrored = reflect(looking, normal);
-    const float mu = dot(mirrored, up);
+    // Reflected down, it meets another wave, as bright as the sky low down.
+    const float mu = max(dot(mirrored, up), 0.0);
     const float sun_mu = dot(sun, up);
     const float3 flat_view = mirrored - (up * mu);
     const float3 flat_sun = sun - (up * sun_mu);
@@ -110,7 +168,7 @@ float4 fragment_air(Surface surface) : SV_Target {
     const float3 sky = lerp(under, clear_sky, shade.open);
     const float3 sunlight =
         through_cloud(shade, transmittance(air, transmittance_table, 0.0, dot(normal, sun)));
-    const float3 glint = sunlight * glint_lobe * reflected * glint_at(looking, normal, sun);
+    const float3 glint = sunlight * reflected * glint_at(looking, facing, sun);
 
     const float4 clip = mul(push.clip_from_eye, float4(surface.from_eye, 1.0));
     const float2 uv = ((clip.xy / clip.w) * 0.5) + 0.5;
