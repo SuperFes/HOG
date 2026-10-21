@@ -14,7 +14,7 @@ public float height_above_sea(float3 from_eye, float4 up_height, float radius) {
 // The sine and the arctangent of y over x > 0, for the small angles bending turns through: GPUs'
 // own need only be precise to an absolute 2^-11 or so near zero, and NVIDIA's are, which the
 // planet's radius then multiplies into metres of ground drawn in rings about the eye.
-float small_sin(float x) {
+public float small_sin(float x) {
     if (abs(x) >= 0.5) {
         return sin(x);
     }
@@ -25,7 +25,7 @@ float small_sin(float x) {
     return x * (1.0 - ((x2 / 6.0) * series));
 }
 
-float small_atan(float y, float x) {
+public float small_atan(float y, float x) {
     if (x <= 0.0 || abs(y) >= 0.25 * x) {
         return atan2(y, x);
     }

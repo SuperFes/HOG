@@ -1,4 +1,5 @@
 import atmosphere;
+import bend;
 import shadow;
 import tone;
 import water;
@@ -81,18 +82,20 @@ Surface vertex_main(Vertex vertex) {
     const float along = nearest * (pow(spread, vertex.out) - 1.0);
 
     const float3 towards = (east * vertex.towards.x) + (cross(up, east) * vertex.towards.y);
+    // Turned through angles small enough that the GPU's own sines would err by metres.
     const float turned = along / faked;
-    const float half = sin(turned / 2.0);
+    const float half = small_sin(turned / 2.0);
+    const float turned_sin = small_sin(turned);
     Surface surface;
     surface.from_eye =
-        (up * ((-2.0 * faked * half * half) - push.up_height.w)) + (towards * (faked * sin(turned)));
-    surface.normal = (up * cos(turned)) + (towards * sin(turned));
+        (up * ((-2.0 * faked * half * half) - push.up_height.w)) + (towards * (faked * turned_sin));
+    surface.normal = (up * (1.0 - (2.0 * half * half))) + (towards * turned_sin);
 
     const float radius = waves.count_left_radius.z;
     const float truly = along / radius;
-    const float truly_half = sin(truly / 2.0);
+    const float truly_half = small_sin(truly / 2.0);
     surface.rest = (up * ((-2.0 * radius * truly_half * truly_half) - push.up_height.w)) +
-                   (towards * (radius * sin(truly)));
+                   (towards * (radius * small_sin(truly)));
     // The corners lie apart by the larger of the rings' spacing and the spokes'.
     const float between =
         max(nearest * log(spread) * pow(spread, vertex.out) / rings, along * 2.0 * pi / spokes);

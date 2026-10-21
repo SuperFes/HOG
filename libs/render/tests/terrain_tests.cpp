@@ -10,6 +10,7 @@
 #include <hog/render/rendering.hpp>
 #include <hog/render/sky.hpp>
 #include <hog/render/terrain.hpp>
+#include <hog/shaders/bend_probe.hpp>
 #include <hog/shaders/projection_probe.hpp>
 #include <hog/terrain/bend.hpp>
 #include <hog/terrain/material.hpp>
@@ -601,16 +602,11 @@ TEST_CASE("ground facing the setting sun is lit red", "[render][gpu][atmosphere]
 
 namespace {
 
-// The plane shares ground facing `normal` takes where the planet's up is `up`, a case each.
-std::vector<DVec3> plane_shares(hog::render::Device& device,
-                                std::span<const std::pair<DVec3, DVec3>> cases) {
-    std::vector<std::array<float, 4>> asked;
-    for (const auto& [up, normal] : cases) {
-        const glm::vec3 u{glm::normalize(up)};
-        const glm::vec3 n{glm::normalize(normal)};
-        asked.push_back({u.x, u.y, u.z, 0.0F});
-        asked.push_back({n.x, n.y, n.z, 0.0F});
-    }
+using Probed = std::array<float, 4>;
+
+// What the compute shader `spirv` finds, `count` of them, from what it's asked.
+std::vector<Probed> probed(hog::render::Device& device, std::span<const std::uint32_t> spirv,
+                           std::span<const Probed> asked, std::size_t count) {
     constexpr auto binding = [](std::uint32_t at) {
         return VkDescriptorSetLayoutBinding{.binding = at,
                                             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -619,13 +615,13 @@ std::vector<DVec3> plane_shares(hog::render::Device& device,
                                             .pImmutableSamplers = nullptr};
     };
     const std::array bindings{binding(0), binding(1)};
-    auto probe = hog::render::make_compute_pipeline(
-        device, {.spirv = hog::shaders::projection_probe, .descriptors = bindings});
+    auto probe =
+        hog::render::make_compute_pipeline(device, {.spirv = spirv, .descriptors = bindings});
     REQUIRE(probe);
-    auto questions = hog::render::make_filled_buffer(device, std::as_bytes(std::span{asked}),
+    auto questions = hog::render::make_filled_buffer(device, std::as_bytes(asked),
                                                      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
     REQUIRE(questions);
-    std::vector<std::array<float, 4>> found(cases.size());
+    std::vector<Probed> found(count);
     auto answers =
         hog::render::make_buffer(device, std::span{found}.size_bytes(),
                                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, hog::render::Memory::Readback);
@@ -634,7 +630,7 @@ std::vector<DVec3> plane_shares(hog::render::Device& device,
         vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, probe->handle());
         hog::render::push_storage_buffer(commands, *probe, 0, questions->handle());
         hog::render::push_storage_buffer(commands, *probe, 1, answers->handle());
-        vkCmdDispatch(commands, static_cast<std::uint32_t>((cases.size() + 63) / 64), 1, 1);
+        vkCmdDispatch(commands, static_cast<std::uint32_t>((count + 63) / 64), 1, 1);
         const VkMemoryBarrier2 to_host{.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
                                        .pNext = nullptr,
                                        .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -655,9 +651,23 @@ std::vector<DVec3> plane_shares(hog::render::Device& device,
     REQUIRE(run);
     REQUIRE(answers->invalidate());
     std::memcpy(found.data(), answers->mapped().data(), std::span{found}.size_bytes());
+    return found;
+}
+
+// The plane shares ground facing `normal` takes where the planet's up is `up`, a case each.
+std::vector<DVec3> plane_shares(hog::render::Device& device,
+                                std::span<const std::pair<DVec3, DVec3>> cases) {
+    std::vector<Probed> asked;
+    for (const auto& [up, normal] : cases) {
+        const glm::vec3 u{glm::normalize(up)};
+        const glm::vec3 n{glm::normalize(normal)};
+        asked.push_back({u.x, u.y, u.z, 0.0F});
+        asked.push_back({n.x, n.y, n.z, 0.0F});
+    }
     std::vector<DVec3> shares;
-    shares.reserve(found.size());
-    for (const auto& share : found) {
+    shares.reserve(cases.size());
+    for (const Probed& share :
+         probed(device, hog::shaders::projection_probe, asked, cases.size())) {
         shares.emplace_back(share[0], share[1], share[2]);
     }
     return shares;
@@ -907,5 +917,99 @@ TEST_CASE("palm groves far off are woods of their own, green the year round", "[
     CHECK(summer_palms != from_above(*device, {.woods = pines, .air = true, .daylight = summer}));
     const auto none = from_above(*device, {.canopy = 0.0, .air = true});
     CHECK(mean_of(summer_palms, 1, true) < mean_of(none, 1, true) - 10.0);
+    CHECK(device->validation_errors() == 0);
+}
+
+namespace {
+
+struct BendProbed {
+    DVec3 bent;
+    double sine = 0.0;
+    double arctangent = 0.0;
+};
+
+// Each point from the eye bent as `bend` has it, and the sine of each angle and the arctangent of
+// each y over x.
+std::vector<BendProbed> bend_probed(hog::render::Device& device, const hog::terrain::Bend& bend,
+                                    std::span<const DVec3> points, std::span<const double> angles,
+                                    std::span<const std::pair<double, double>> over) {
+    std::vector<Probed> asked;
+    for (std::size_t at = 0; at < points.size(); ++at) {
+        const glm::vec3 point{points[at]};
+        const glm::vec3 up{bend.up};
+        asked.push_back({point.x, point.y, point.z, static_cast<float>(angles[at])});
+        asked.push_back({up.x, up.y, up.z, static_cast<float>(bend.eye_height)});
+        asked.push_back({static_cast<float>(bend.radius), static_cast<float>(bend.faked),
+                         static_cast<float>(over[at].first), static_cast<float>(over[at].second)});
+    }
+    const std::vector<Probed> found =
+        probed(device, hog::shaders::bend_probe, asked, 2 * points.size());
+    std::vector<BendProbed> results;
+    for (std::size_t at = 0; at < points.size(); ++at) {
+        const Probed& point = found[2 * at];
+        const Probed& more = found[(2 * at) + 1];
+        results.push_back({.bent = DVec3{glm::vec3{point[0], point[1], point[2]}},
+                           .sine = double{more[0]},
+                           .arctangent = double{more[1]}});
+    }
+    return results;
+}
+
+double as_float(double value) {
+    return double{static_cast<float>(value)};
+}
+
+} // namespace
+
+TEST_CASE("bent, ground near the eye is drawn within a millimetre of where the bend puts it",
+          "[render][gpu]") {
+    const auto device = test_device();
+    const hog::terrain::Bend bend{.up = glm::normalize(DVec3{0.3, -0.5, 0.8}),
+                                  .eye_height = 2.0,
+                                  .radius = 115'000.0,
+                                  .faked = 6'371'000.0};
+    const DVec3 across = glm::normalize(glm::cross(bend.up, DVec3{1.0, 0.0, 0.0}));
+    std::vector<DVec3> points;
+    // From half a metre out to five kilometres.
+    for (int step = 0; step < 36; ++step) {
+        const double out = 0.5 * std::pow(1.3, step);
+        points.emplace_back(glm::vec3{(across * out) - (bend.up * 1.5)});
+    }
+    const std::vector<double> angles(points.size(), 0.0);
+    const std::vector<std::pair<double, double>> over(points.size(), {0.0, 1.0});
+    const std::vector<BendProbed> found = bend_probed(*device, bend, points, angles, over);
+    for (std::size_t at = 0; at < points.size(); ++at) {
+        const DVec3 expected = hog::terrain::bent(bend, points[at]);
+        INFO("out " << glm::length(points[at]) << ": off by "
+                    << glm::length(found[at].bent - expected));
+        CHECK(glm::length(found[at].bent - expected) < 1e-3 + (1e-6 * glm::length(points[at])));
+    }
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("the bend's sines and arctangents of small angles are as precise as of large ones",
+          "[render][gpu]") {
+    const auto device = test_device();
+    std::vector<double> angles;
+    std::vector<std::pair<double, double>> over;
+    // From a tenth of a microradian to past where the series give way.
+    for (int step = 0; step < 39; ++step) {
+        const double small = 1e-7 * std::pow(1.5, step);
+        for (const double sign : {1.0, -1.0}) {
+            angles.push_back(as_float(sign * small));
+            over.emplace_back(as_float(sign * small * 0.4 * 3'000.0), 3'000.0);
+        }
+    }
+    const std::vector<DVec3> points(angles.size(), DVec3{0.0});
+    const std::vector<BendProbed> found =
+        bend_probed(*device, hog::terrain::Bend{}, points, angles, over);
+    for (std::size_t at = 0; at < angles.size(); ++at) {
+        const double sine = std::sin(angles[at]);
+        const double arctangent = std::atan2(over[at].first, over[at].second);
+        INFO("angle " << angles[at] << ": sine " << found[at].sine << " for " << sine
+                      << ", arctangent " << found[at].arctangent << " for " << arctangent);
+        CHECK(std::abs(found[at].sine - sine) <= 1e-6 * std::abs(sine));
+        CHECK(std::abs(found[at].arctangent - arctangent) <= 1e-6 * std::abs(arctangent));
+    }
     CHECK(device->validation_errors() == 0);
 }
