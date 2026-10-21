@@ -36,6 +36,7 @@
 #include <hog/terrain/baker.hpp>
 #include <hog/terrain/bend.hpp>
 #include <hog/terrain/stream.hpp>
+#include <hog/waves/waves.hpp>
 
 #include <cstdint>
 #include <optional>
@@ -158,6 +159,7 @@ private:
     terrain::PatchStream stream_;
     render::Terrain terrain_;
     render::Ocean ocean_;
+    std::vector<waves::Train> wave_trains_;
     render::Grass grass_;
     render::Bushes bushes_;
     render::Trees trees_;

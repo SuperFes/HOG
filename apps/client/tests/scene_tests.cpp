@@ -3,6 +3,7 @@
 #include <hog/client/daylight.hpp>
 #include <hog/client/flight.hpp>
 #include <hog/client/forecast.hpp>
+#include <hog/client/picture.hpp>
 #include <hog/client/scene.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/planet/tangent_frame.hpp>
@@ -23,6 +24,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
+#include <format>
 #include <string_view>
 #include <vector>
 
@@ -378,4 +381,41 @@ TEST_CASE("a still of ground that's still arriving fails", "[client][scene][gpu]
     REQUIRE(scene);
     CHECK(!hog::client::draw_still(*device, *scene, over_the_islands(), extent, 1));
     CHECK(device->validation_errors() == 0);
+}
+
+// Not a check: stills of a windy sea, from near and far and against the sun, to look at. Saved
+// where HOG_LOOK names.
+TEST_CASE("a windy sea, to look at", "[.look]") {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
+    const char* where = std::getenv("HOG_LOOK");
+    REQUIRE(where != nullptr);
+    const auto device = test_device();
+    hog::jobs::JobSystem jobs{4};
+    auto scene = Scene::create(*device, world(), jobs, calendar(), hog::client::still_format, 1);
+    REQUIRE(scene);
+    const hog::client::Forecast forecast = everywhere({.drift = {16.0F, 6.0F}});
+    struct Look {
+        std::string_view name;
+        double pitch;
+        double time_of_day;
+    };
+    for (const Look& look : {Look{.name = "down", .pitch = -0.6, .time_of_day = 0.5},
+                             Look{.name = "out", .pitch = -0.12, .time_of_day = 0.5},
+                             Look{.name = "level", .pitch = 0.0, .time_of_day = 0.5},
+                             Look{.name = "evening", .pitch = -0.05, .time_of_day = 0.64},
+                             Look{.name = "shore", .pitch = -0.1, .time_of_day = 0.5}}) {
+        Shot shot = look.name == "shore" ? over_the_islands(20.0, look.pitch) : at_sea(look.pitch);
+        const hog::DVec3 up = glm::normalize(shot.camera.eye.metres());
+        shot.time =
+            hog::client::start_time(calendar(),
+                                    hog::to_game_time(hog::WallClock::time_point{
+                                        std::chrono::sys_days{std::chrono::year{2026} / 6 / 21}}),
+                                    up, look.time_of_day);
+        shot.forecast = &forecast;
+        const auto still =
+            hog::client::draw_still(*device, *scene, shot, {.width = 960, .height = 540});
+        REQUIRE(still);
+        REQUIRE(hog::client::save_picture(
+            std::filesystem::path{where} / std::format("{}.png", look.name), *still));
+    }
 }

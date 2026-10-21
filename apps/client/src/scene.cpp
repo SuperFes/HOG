@@ -1,6 +1,7 @@
 #include <hog/client/daylight.hpp>
 #include <hog/client/flight.hpp>
 #include <hog/client/scene.hpp>
+#include <hog/core/hash.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tangent_frame.hpp>
@@ -11,6 +12,7 @@
 #include <hog/sim/weather.hpp>
 #include <hog/terrain/patch.hpp>
 #include <hog/terrain/selection.hpp>
+#include <hog/waves/waves.hpp>
 
 #include <glm/glm.hpp>
 
@@ -26,6 +28,9 @@ namespace {
 
 // Behind the sky, which covers it.
 constexpr VkClearColorValue cleared{.float32 = {0.0F, 0.0F, 0.0F, 1.0F}};
+
+// Mixed into the planet's seed for its waves, so they don't follow its ground.
+constexpr std::uint64_t waves_salt = 0x5741564553ULL;
 
 // Seabed showing through the sea no more than this is left undrawn: about half a step of 8-bit
 // colour.
@@ -87,7 +92,7 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
     if (!terrain) {
         return failed("draw the ground", terrain.error());
     }
-    auto ocean = render::Ocean::create(device, colour_format, depth_format, true);
+    auto ocean = render::Ocean::create(device, colour_format, depth_format, true, frames);
     if (!ocean) {
         return failed("draw the sea", ocean.error());
     }
@@ -200,6 +205,7 @@ Scene::Scene(const render::Device& device, const planet::World& world, jobs::Job
              render::Precipitation precipitation, render::Glare glare, render::GpuTimer timer,
              std::optional<render::Billboard> companion, std::uint32_t frames)
     : world_{&world}, baker_{world, jobs}, terrain_{std::move(terrain)}, ocean_{std::move(ocean)},
+      wave_trains_{waves::planet_trains(hash_combine(world.geology().seed(), waves_salt))},
       grass_{std::move(grass)}, bushes_{std::move(bushes)}, trees_{std::move(trees)},
       forest_{std::move(forest)}, pool_{std::move(pool)}, anchor_pool_{std::move(anchors)},
       anchors_{biome_palette(), &jobs}, bush_pool_{std::move(bush_pool)},
@@ -461,14 +467,21 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
               [&](VkCommandBuffer commands) {
                   sky_.draw(commands, frame.extent, frame.slot, atmosphere_, sky);
               });
-    const render::OceanView sea{
-        .camera = shot.camera, .sun = sky.sun, .bend = shot.bend, .air = through};
+    const std::vector<waves::Wave> waves =
+        waves::waves_at(wave_trains_, shot.bend.up, {.wind = drift * surface_wind});
+    const render::OceanView sea{.camera = shot.camera,
+                                .sun = sky.sun,
+                                .bend = shot.bend,
+                                .air = through,
+                                .waves = render::drawn_waves_at(
+                                    wave_trains_, waves, shot.camera.eye, shot.bend, shot.time)};
     graph.add({.name = "ground", .uses = through_air, .targets = drawn},
               [&](VkCommandBuffer commands) {
-                  ocean_.draw_deep(commands, frame.extent, sea);
+                  Result<> deep = ocean_.draw_deep(commands, frame.extent, sea, frame.slot);
                   terrain_.draw(
                       commands, frame.extent, pool_, slots_.draws(streamed.drawn),
                       {.camera = shot.camera, .sun = sky.sun, .bend = shot.bend, .air = through});
+                  return deep;
               });
     swaying_for_ += shot.seconds;
     if (grass_on_) {
@@ -493,7 +506,9 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     }
     // Over all that stands in the sea, each seen through the water to its surface.
     graph.add({.name = "sea", .uses = through_air, .targets = drawn},
-              [&](VkCommandBuffer commands) { ocean_.draw(commands, frame.extent, sea); });
+              [&](VkCommandBuffer commands) {
+                  return ocean_.draw(commands, frame.extent, sea, frame.slot);
+              });
     if (render::precipitation_count(falling, static_cast<double>(here.snow)) > 0) {
         graph.add({.name = "rain", .uses = through_air, .targets = drawn},
                   [&](VkCommandBuffer commands) {
