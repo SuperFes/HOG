@@ -7,15 +7,19 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <utility>
 #include <vector>
 
 using hog::planet::CellId;
 using hog::planet::Elevation;
+using hog::planet::fine_fraction_bits;
 using hog::planet::fixed_one;
+using hog::planet::fixed_to_double;
 
 namespace {
 
@@ -170,9 +174,62 @@ TEST_CASE("land is where the ground stands above the sea, to the finest cell",
     }
 }
 
+TEST_CASE("a sandy shore's floor follows Dean's profile out to a shelf", "[planet][elevation]") {
+    // Read as metres off the shore as the islands' flanks fall.
+    const auto floor = [](double out) {
+        const std::int64_t below =
+            std::llround(out * hog::planet::Archipelago::skirt_slope *
+                         static_cast<double>(hog::planet::fixed_unit<fine_fraction_bits>));
+        return fixed_to_double<fine_fraction_bits>(Elevation::sea_floor<fine_fraction_bits>(below));
+    };
+    for (const double out : {1.0, 10.0, 100.0, 500.0, 1'000.0, 1'500.0}) {
+        CAPTURE(out);
+        CHECK_THAT(floor(out), Catch::Matchers::WithinAbs(-0.12 * std::cbrt(out * out), 1e-3));
+    }
+    for (const double out : {2'000.0, 3'000.0, 4'990.0}) {
+        CAPTURE(out);
+        CHECK_THAT(floor(out), Catch::Matchers::WithinAbs(-out / 100.0, 1e-3));
+    }
+    CHECK(floor(30'000.0) < -3'000.0);
+    CHECK(floor(1e6) == -static_cast<double>(Elevation::ocean_depth));
+
+    // Down without a rise or a step anywhere from the shore to the ocean floor.
+    std::int64_t previous = 0;
+    for (std::int64_t below = 0; below < hog::planet::fixed_unit<fine_fraction_bits> / 4; ++below) {
+        const std::int64_t next = Elevation::sea_floor<fine_fraction_bits>(below);
+        REQUIRE(next <= previous);
+        REQUIRE(previous - next < hog::planet::fixed_unit<fine_fraction_bits> / 100);
+        previous = next;
+    }
+}
+
+TEST_CASE("the sea stays shallow off a coast", "[planet][elevation]") {
+    // Continents' coasts fall faster than the islands' flanks, so their floor lies deeper.
+    const std::uint64_t seed = GENERATE(1U, 4U);
+    const Elevation terrain{planet(seed)};
+    for (const auto& [land, sea] : coasts(terrain, 12)) {
+        const hog::DVec3 at = shore(terrain, land, sea);
+        const auto depth = [&](double out) {
+            return -fixed_to_double(terrain.elevation(hog::planet::cell_at(along(at, sea, out))));
+        };
+        CHECK(depth(100.0) > 1.5);
+        CHECK(depth(100.0) < 8.0);
+        CHECK(depth(1'000.0) > 5.0);
+        CHECK(depth(1'000.0) < 40.0);
+    }
+    for (const auto& island : terrain.archipelago().islands()) {
+        const hog::DVec3 sea = along(island.center, island.center + island.axis, 20'000.0);
+        const hog::DVec3 at = shore(terrain, island.center, sea);
+        const double depth =
+            -fixed_to_double(terrain.elevation(hog::planet::cell_at(along(at, sea, 100.0))));
+        // Deeper than a round island's where an elongated one's flank falls across it.
+        CHECK(depth > 1.0);
+        CHECK(depth < 5.0);
+    }
+}
+
 TEST_CASE("the sea floor deepens off a coast without steps", "[planet][elevation]") {
-    // Off a coast the floor falls by about a third of a metre per metre; generated with too few
-    // bits, it held for over a metre and then dropped by 0.4 m.
+    // Generated with too few bits, the floor held for over a metre and then dropped by 0.4 m.
     const Elevation terrain{planet(4)};
     for (const auto& [land, sea] : coasts(terrain, 8)) {
         const hog::DVec3 at = shore(terrain, land, sea);

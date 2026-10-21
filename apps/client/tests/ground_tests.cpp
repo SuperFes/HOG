@@ -215,7 +215,8 @@ TEST_CASE("each biome's ground varies up close and averages to its colour", "[cl
         INFO(hog::planet::to_string(static_cast<hog::planet::Biome>(biome)));
         const hog::terrain::Look& look = looks.at(biome);
         CHECK(hog::Vec3{look.colour} == palette.at(biome));
-        CHECK(look.accent != look.colour);
+        // Any patches stand out.
+        CHECK((look.accent_share == 0.0 || look.accent != look.colour));
         CHECK(look.grain > 0.0);
         const hog::terrain::MaterialImage material = hog::terrain::material_image(look, 64);
         const std::vector<std::uint8_t>& largest = material.levels.front();

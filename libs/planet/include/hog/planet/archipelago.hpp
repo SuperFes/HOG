@@ -28,6 +28,8 @@ public:
     static constexpr double reach = 25'000.0;
     // Metres around the centre that must be open ocean.
     static constexpr double clearance = 35'000.0;
+    // Continent height lost per metre down an island's underwater flank.
+    static constexpr double skirt_slope = 1e-5;
 
     struct Island {
         DVec3 center;      // unit direction

@@ -29,6 +29,20 @@ template <int Bits = fixed_fraction_bits>
     return static_cast<double>(fixed) / static_cast<double>(fixed_unit<Bits>);
 }
 
+// The cube root, rounded down: a bit of the root for every three of the value.
+[[nodiscard]] constexpr std::uint64_t cube_root(std::uint64_t value) noexcept {
+    std::uint64_t root = 0;
+    for (int shift = 63; shift >= 0; shift -= 3) {
+        root <<= 1U;
+        const std::uint64_t grown = (3 * root * (root + 1)) + 1;
+        if ((value >> shift) >= grown) {
+            value -= grown << shift;
+            ++root;
+        }
+    }
+    return root;
+}
+
 // A point in noise space, each coordinate in fixed point with `Bits` fractional bits. Lattice
 // cells are one unit wide.
 template <int Bits = fixed_fraction_bits>

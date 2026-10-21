@@ -43,8 +43,8 @@ std::array<terrain::Look, planet::biome_count> biome_looks() {
     };
     using planet::Biome;
     constexpr std::array variations{
-        // Ripples of darker, wetter sand.
-        vary(Biome::Ocean, {0.7, 0.7, 0.7}, 0.2, 0.25, 0.15),
+        // Sand seen through clear shallows, where any patches would show the tiling.
+        vary(Biome::Ocean, {1.0, 1.0, 1.0}, 0.0, 0.25, 0.15),
         vary(Biome::Beach, {1.2, 1.2, 1.15}, 0.3, 0.3, 0.1),
         vary(Biome::Ice, {0.85, 0.95, 1.05}, 0.3, 0.06, 0.08),
         // Lichen and bare stone.

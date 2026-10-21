@@ -116,6 +116,19 @@ Rgb pixel(const Picture& picture, hog::DVec2 at) {
             .b = std::to_integer<int>(picture.texels.at(first + 2))};
 }
 
+// Of the pixels in the row through `at`, up to `reach` either side, the reddest: across a figure
+// only pixels wide, its sunlit side rather than whichever its axis falls on.
+Rgb reddest(const Picture& picture, hog::DVec2 at, int reach = 3) {
+    Rgb found = pixel(picture, at);
+    for (int step = -reach; step <= reach; ++step) {
+        const Rgb next = pixel(picture, at + hog::DVec2{step, 0.0});
+        if (next.r - next.g > found.r - found.g) {
+            found = next;
+        }
+    }
+    return found;
+}
+
 // Where in the picture a point is drawn.
 hog::DVec2 drawn_at(const Shot& shot, hog::WorldPosition at) {
     const hog::DVec2 size{extent.width, extent.height};
@@ -338,8 +351,8 @@ TEST_CASE("a scene shows someone wading in the sea through the water over them",
     REQUIRE(seen);
     const hog::DVec2 under = drawn_at(shot, surface - (up * 0.5));
     const Rgb water = pixel(*alone, under);
-    const Rgb wet = pixel(*seen, under);
-    const Rgb dry = pixel(*seen, drawn_at(shot, surface + (up * 0.5)));
+    const Rgb wet = reddest(*seen, under);
+    const Rgb dry = reddest(*seen, drawn_at(shot, surface + (up * 0.5)));
     INFO("water " << water.r << ", " << water.g << ", " << water.b);
     INFO("wet " << wet.r << ", " << wet.g << ", " << wet.b);
     INFO("dry " << dry.r << ", " << dry.g << ", " << dry.b);

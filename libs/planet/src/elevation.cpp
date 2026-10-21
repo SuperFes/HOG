@@ -61,6 +61,17 @@ constexpr double granite_hardness = 0.5;
 // Generated height over which the change fades in from the shore.
 constexpr std::int64_t coast_blend = 50 * fixed_one;
 
+// Off a coast, height below the sea is read as metres from the shore as the islands' flanks fall;
+// continents' coasts fall about twice as fast on a small planet.
+constexpr std::int64_t shore_metres = 100'000;
+static_assert(static_cast<double>(shore_metres) * Archipelago::skirt_slope > 0.999'999 &&
+              static_cast<double>(shore_metres) * Archipelago::skirt_slope < 1.000'001);
+// Fine sand's A in Dean's h = A·x^(2/3), in m^(1/3) with 16 fractional bits.
+constexpr std::int64_t dean_scale = (12 * fixed_one) / 100;
+// Metres out per metre down across the shelf, and how far out it breaks.
+constexpr std::int64_t shelf_run = 100;
+constexpr std::int64_t shelf_break = 5'000;
+
 // 0 at or below zero, rising linearly to 1 at `width`.
 template <int Bits = fixed_fraction_bits>
 [[nodiscard]] std::int64_t ramp(std::int64_t value, std::int64_t width) {
@@ -217,6 +228,28 @@ std::int64_t Elevation::worn(CellId cell, std::int64_t generated, const Landform
     return std::max(generated + change, (generated + 3) / 4);
 }
 
+template <int Bits>
+std::int64_t Elevation::sea_floor(std::int64_t below) {
+    constexpr std::int64_t one = fixed_unit<Bits>;
+    constexpr std::int64_t break_depth = shelf_break / shelf_run;
+    constexpr std::int64_t break_below = (shelf_break * one) / shore_metres;
+    if (below >= break_below) {
+        // Reaching the ocean floor where it always has.
+        return -(break_depth * one) -
+               ((ocean_depth - break_depth) *
+                ramp<Bits>(below - break_below, depth_width<Bits> - break_below));
+    }
+    const std::int64_t out = below * shore_metres;
+    // The cube root with 16 fractional bits, of metres with 48: inside the break, below 2^61.
+    const auto root =
+        static_cast<std::int64_t>(cube_root(static_cast<std::uint64_t>(out) << (48 - Bits)));
+    const std::int64_t shoreface = (dean_scale * ((root * root) >> 16)) >> (32 - Bits);
+    return -std::max(shoreface, out / shelf_run);
+}
+
+template std::int64_t Elevation::sea_floor<fixed_fraction_bits>(std::int64_t below);
+template std::int64_t Elevation::sea_floor<fine_fraction_bits>(std::int64_t below);
+
 std::int64_t Elevation::generated(CellId cell) const {
     // Generated finer than it's kept, so the noise's steps stay well below a centimetre.
     constexpr int finer = fine_fraction_bits - fixed_fraction_bits;
@@ -229,7 +262,7 @@ std::int64_t Elevation::generated(CellId cell) const {
     const std::int64_t continent = continents_.height<Bits>(cell);
     const std::int64_t height = archipelago_.raise<Bits>(cell, continent);
     if (height <= 0) {
-        return -ocean_depth * ramp<Bits>(-height, depth_width<Bits>);
+        return sea_floor<Bits>(-height);
     }
     // Islands keep to lowland hills; only continents roll and carry mountain belts.
     const std::int64_t relief =

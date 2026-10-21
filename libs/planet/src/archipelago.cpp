@@ -42,8 +42,6 @@ constexpr double coast_gain = 2.5;
 constexpr double coast_wobble = 0.4;
 // Each island keeps this many times its undisturbed extent clear, for the coastline noise.
 constexpr double spread = 1.0 + coast_wobble;
-// Continent height lost per metre down an island's underwater flank: about 15 degrees.
-constexpr double skirt_slope = 1e-5;
 
 using Island = Archipelago::Island;
 

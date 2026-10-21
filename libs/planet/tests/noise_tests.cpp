@@ -97,6 +97,22 @@ static_assert(hog::planet::fbm(seed, FinePoint{.x = (fine_one << 22) - 1, .y = -
 static_assert(hog::planet::ridges(seed, FinePoint{.x = (fine_one << 22) - 1, .y = 5, .z = -9},
                                   hog::planet::max_octaves, 4 * fine_one) != 0);
 
+TEST_CASE("the integer cube root is the largest whose cube fits", "[planet][noise]") {
+    using hog::planet::cube_root;
+    CHECK(cube_root(0) == 0);
+    CHECK(cube_root(1) == 1);
+    CHECK(cube_root(7) == 1);
+    CHECK(cube_root(8) == 2);
+    for (std::uint64_t root = 2; root <= 2'642'245; root += 997) {
+        const std::uint64_t cube = root * root * root;
+        REQUIRE(cube_root(cube) == root);
+        REQUIRE(cube_root(cube - 1) == root - 1);
+    }
+    // The largest cube a 64-bit value holds, and the top of the range.
+    CHECK(cube_root(std::uint64_t{2'642'245} * 2'642'245 * 2'642'245) == 2'642'245);
+    CHECK(cube_root(~std::uint64_t{0}) == 2'642'245);
+}
+
 TEST_CASE("fixed-point Perlin stays within two steps of the exact value", "[planet][noise]") {
     std::mt19937_64 rng{4};
     for (int sample = 0; sample < 100'000; ++sample) {

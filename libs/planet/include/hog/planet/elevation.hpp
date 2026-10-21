@@ -52,6 +52,12 @@ public:
     // sea; zero at sea.
     [[nodiscard]] std::int64_t above_water(CellId cell) const;
 
+    // The elevation of the sea floor at a height `below` sea level, both in fixed point with `Bits`
+    // fractional bits: a sandy shoreface on Dean's equilibrium profile, a shelf, then the slope
+    // down to the ocean's depth.
+    template <int Bits = fixed_fraction_bits>
+    [[nodiscard]] static std::int64_t sea_floor(std::int64_t below);
+
     // How strongly mountains rise here, in fixed point from 0 to 1.
     [[nodiscard]] std::int64_t mountain_strength(CellId cell) const;
 
@@ -100,5 +106,8 @@ private:
     };
     std::shared_ptr<Evolving> evolving_;
 };
+
+extern template std::int64_t Elevation::sea_floor<fixed_fraction_bits>(std::int64_t below);
+extern template std::int64_t Elevation::sea_floor<fine_fraction_bits>(std::int64_t below);
 
 } // namespace hog::planet
