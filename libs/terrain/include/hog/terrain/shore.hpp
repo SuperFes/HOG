@@ -7,6 +7,7 @@
 #include <array>
 #include <memory>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace hog::terrain {
@@ -20,6 +21,9 @@ inline constexpr std::array<double, 2> shore_spacing{8.0, 64.0}; // metres betwe
 inline constexpr double shore_anchoring = 512.0; // metres
 // Depths are kept from as high as this above the sea, which is only told apart from land.
 inline constexpr float shore_highest = -10.0F; // metres
+// The sea rises no higher than this over its mean, with the tide in and the waves running up the
+// shore.
+inline constexpr float shore_reach = 5.0F; // metres
 
 struct ShoreFrame {
     DVec3 anchor{0.0, 0.0, 1.0}; // unit, from the planet's centre
@@ -43,6 +47,12 @@ struct ShoreFrame {
 [[nodiscard]] std::vector<float> shore_depths(const planet::Elevation& terrain,
                                               const ShoreFrame& frame, double radius,
                                               double spacing);
+
+// Of depths in layers as ShoreStream works them out, keeps as high as shore_highest whatever the
+// open sea can't reach: ground behind higher ground, and hollows and water cut off by it, so the
+// tide and the waves' run-up flood none of them. The open sea is what's deep, or what's at the
+// coarsest layer's edge; each finer layer's is where the next coarser one's reaches.
+void keep_to_sea_reach(std::span<float> depths);
 
 // The depths round an anchor, each layer in turn, finest first.
 struct ShoreDepths {
