@@ -164,7 +164,7 @@ This phase builds a server that runs the world with nobody connected: time passe
 - [x] Forest biomass per cell, with growth and a stub fire spread
 - [x] Hydrology: rivers carve the land over geological time, with meandering channels, a water table, wetlands and mountain glaciers
 - [x] Ocean currents: wind-driven gyres steered by the coasts, carrying sea temperature that feeds back into the weather
-- [ ] Sea state: waves raised by the wind over the time and distance it blows, travelling on as swell beyond it, sheltered behind land and steepened against the currents; kept by direction, so swells from several storms cross the same water; sent to players with the weather
+- [x] Sea state: waves raised by the wind over the time and distance it blows, travelling on as swell beyond it, sheltered behind land and steepened against the currents; kept by direction, so swells from several storms cross the same water; sent to players with the weather
 
 **Debug viewer**
 
@@ -205,8 +205,9 @@ This phase builds a client that flies over the generated planet with a real sky.
 - [ ] The sea as water, not a sheet: everything under its surface seen through the water between, a wader's legs as much as the seabed (one water model, laid by the sea's pass over what depth says lies behind it)
 - [ ] From under the sea: water along the whole view, darker the deeper; the sky only through the window overhead, the surface a mirror beyond it; a waterline across the screen where the eye straddles the surface
 - [ ] Under the sea, felt: caustics on the bed and on what's in the water, light shafts, drifting motes, a wobble to the view
-- [x] Waves: one wave function the client, the server and physics all evaluate alike (the planet's fixed trains, phased by the seed and the world's time, sized by the local spectrum, so everyone sees the same wave at the same place), the long waves moving the surface and fine chop in its shading, what's too fine to draw widening the sun's glint; raised by the wind at the eye until the sea state comes
-- [ ] Waves from the sea state: several systems at once, the local wind sea crossing swells from distant storms, so crests criss-cross and pile up where they meet; the surface's height under things standing in the sea, for their tint and for swimming
+- [x] Waves: one wave function the client, the server and physics all evaluate alike (the planet's fixed trains, phased by the seed and the world's time, sized by the local spectrum, so everyone sees the same wave at the same place), the long waves moving the surface and fine chop in its shading, what's too fine to draw widening the sun's glint
+- [x] Waves from the sea state: several systems at once, the local wind sea crossing swells from distant storms, so crests criss-cross and pile up where they meet, blended from cell to cell
+- [ ] The surface's height under things standing in the sea, for their tint and for swimming
 - [ ] Foam: whitecaps where crests steepen past breaking, streaked along the wind in a gale, lingering and fading where they broke and drifting with the current; heaped where waves cross and break on the shore
 - [ ] Waves at the shore: slowing and shortening in shallow water, turning to face the beach, steepening and breaking as surf, with foam and run-up
 - [ ] Ripples and wakes where bodies cross the surface, and what's seen through it bent by the waves
