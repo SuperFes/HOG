@@ -516,7 +516,11 @@ Builds on Phase 5's condition states. The server owns every tree's record, as it
 
 Plugs into the calendar (Phase 2) and the sea state. The moon is a body on its own orbit, so everything below is a function of the world's time, the same for everyone with nothing sent.
 
-- [ ] A moon: its orbit, phases and light, the night lit by it rather than the faint glow standing in for it, and eclipses where its orbit says
+- [ ] A moon on a real orbit, tilted to the planet's, so its rising, its height and its eclipses come where and when the orbit says
+- [ ] Phases from where the sun lies: the disc lit from the sun's side, new to full and back, the dark side faintly lit by the planet's own light, a textured face (CC0 or procedural)
+- [ ] Moonlight: the night lit by it, bright at full and dark at new, the sky scattering it as the atmosphere scatters the sun's, and a moon road glittering across the waves
+- [ ] Solar eclipses: the disc covering the sun, the corona and the diamond ring at the edges of totality, the light dimming and the sky darkening to dusk all round, the moon's shadow racing across the land and the clouds
+- [ ] Lunar eclipses: the moon turned copper by sunlight bent through the planet's air, its colour from the same atmosphere tables the sky is drawn with
 - [ ] Tides raised by the moon and the sun: springs at new and full moon, neaps between; the sea level everywhere follows them, a tidal range larger on wide shelves and in funnelling bays, and tidal currents through narrows
 - [ ] Surfing: breaking waves the physics rides, because it evaluates the same wave function the surface is drawn with; a board, paddling out, catching and riding a face, wiping out
 
