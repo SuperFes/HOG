@@ -92,8 +92,8 @@ TEST_CASE("a shore's depths are the sea's at each texel", "[terrain][shore]") {
         CHECK(std::ranges::count(depths, hog::terrain::shore_highest) > 0);
         CHECK(std::ranges::count_if(depths, [](float depth) { return depth > 1.0F; }) > 0);
         CHECK(std::ranges::min(depths) >= hog::terrain::shore_highest);
-        for (const auto [column, row] : {std::pair{0, 0}, std::pair{17, 200}, std::pair{128, 128},
-                                         std::pair{255, 3}, std::pair{90, 255}}) {
+        for (const auto& [column, row] : {std::pair{0, 0}, std::pair{17, 200}, std::pair{128, 128},
+                                          std::pair{255, 3}, std::pair{90, 255}}) {
             const double half = shore_size / 2.0;
             const DVec3 at = shore_direction(
                 frame, radius, {(column + 0.5 - half) * spacing, (row + 0.5 - half) * spacing});
