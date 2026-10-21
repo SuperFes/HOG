@@ -69,6 +69,7 @@ struct Drawn {
     double fade_far = hog::render::bushes_far;
     DVec3 wind{0.0};
     double seconds = 0.0;
+    double above = 24.0; // metres the eye is over the ground
 };
 
 // The bushes alone over black, seen from overhead so every one is in view.
@@ -86,7 +87,7 @@ Pixels draw(hog::render::Device& device, const Drawn& drawn) {
     REQUIRE(pool->stage(0, slot, std::span<const hog::render::BushAnchor>{drawn.anchors}));
 
     const WorldPosition origin{up * (radius + ground_height)};
-    const WorldPosition eye{up * (radius + ground_height + 24.0)};
+    const WorldPosition eye{up * (radius + ground_height + drawn.above)};
     const hog::terrain::Bend bend = hog::terrain::bend_from(eye, radius, ground_height);
     const double elevation = 40.0 * std::numbers::pi / 180.0;
     const DVec3 sun = (east * std::cos(elevation)) + (up * std::sin(elevation));
@@ -233,5 +234,23 @@ TEST_CASE("a bush's leaves pack with its kind, as a tree's foliage packs", "[ren
         CHECK(hog::render::foliage_of(packed).g ==
               hog::render::foliage_of(hog::render::packed_foliage(leaves, hog::flora::Genus::Pine))
                   .g);
+    }
+}
+
+TEST_CASE("round bushes seen from overhead cover their footprint, not a cross", "[render]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    using hog::flora::BushKind;
+    constexpr std::size_t picture = std::size_t{extent.width} * extent.height;
+    // Near enough that each bush is shaped in full, the stand filling the picture, and far enough
+    // that each is a tuft, the stand filling half of it.
+    for (const auto [above, least] :
+         {std::pair{5.0, picture * 2 / 5}, std::pair{24.0, picture / 4}}) {
+        for (const BushKind kind : {BushKind::Floofy, BushKind::Mat}) {
+            CAPTURE(above, kind);
+            CHECK(lit_pixels(draw(*device, {.anchors = stand(kind), .above = above})) > least);
+        }
     }
 }

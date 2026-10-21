@@ -90,7 +90,7 @@ void Bushes::draw(VkCommandBuffer commands, VkExtent2D extent, const AnchorPool&
               .wind = glm::vec4{Vec3{view.wind}, 0.0F},
               .origin = {}};
     constexpr VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    constexpr std::uint32_t bush_vertices = 18; // three crossed quads
+    constexpr std::uint32_t bush_vertices = 18; // three quads
 
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.handle());
     push_uniform_buffer(commands, pipeline_, 0, settings_.handle());
