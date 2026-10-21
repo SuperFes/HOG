@@ -393,13 +393,20 @@ TEST_CASE("a windy sea, to look at", "[.look]") {
     hog::jobs::JobSystem jobs{4};
     auto scene = Scene::create(*device, world(), jobs, calendar(), hog::client::still_format, 1);
     REQUIRE(scene);
-    // A sea grown under a fresh breeze, crossed by a swell from a storm far off.
-    const hog::client::Forecast forecast =
+    // A sea grown under a fresh breeze, crossed by a swell from a storm far off; and one under a
+    // gale.
+    const hog::protocol::CellWaves swell{.height = 1.4F, .peak = 0.45F, .heading = {-0.3F, 0.95F}};
+    const hog::client::Forecast fresh =
         everywhere({.drift = {16.0F, 6.0F},
+                    .wind = {9.4F, 3.5F},
                     .wind_sea = {.height = 2.2F, .peak = 0.75F, .heading = {0.94F, 0.35F}},
-                    .swells = {hog::protocol::CellWaves{
-                                   .height = 1.4F, .peak = 0.45F, .heading = {-0.3F, 0.95F}},
-                               hog::protocol::CellWaves{}},
+                    .swells = {swell, hog::protocol::CellWaves{}},
+                    .current = {}});
+    const hog::client::Forecast gale =
+        everywhere({.drift = {30.0F, 11.0F},
+                    .wind = {17.0F, 6.3F},
+                    .wind_sea = {.height = 5.5F, .peak = 0.52F, .heading = {0.94F, 0.35F}},
+                    .swells = {swell, hog::protocol::CellWaves{}},
                     .current = {}});
     struct Look {
         std::string_view name;
@@ -418,11 +425,13 @@ TEST_CASE("a windy sea, to look at", "[.look]") {
                                     hog::to_game_time(hog::WallClock::time_point{
                                         std::chrono::sys_days{std::chrono::year{2026} / 6 / 21}}),
                                     up, look.time_of_day);
-        shot.forecast = &forecast;
-        const auto still =
-            hog::client::draw_still(*device, *scene, shot, {.width = 960, .height = 540});
-        REQUIRE(still);
-        REQUIRE(hog::client::save_picture(
-            std::filesystem::path{where} / std::format("{}.png", look.name), *still));
+        for (const auto& [sea, forecast] : {std::pair{"fresh", &fresh}, std::pair{"gale", &gale}}) {
+            shot.forecast = forecast;
+            const auto still =
+                hog::client::draw_still(*device, *scene, shot, {.width = 960, .height = 540});
+            REQUIRE(still);
+            REQUIRE(hog::client::save_picture(
+                std::filesystem::path{where} / std::format("{}_{}.png", sea, look.name), *still));
+        }
     }
 }

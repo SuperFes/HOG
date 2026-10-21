@@ -52,6 +52,8 @@ static const float ripples = 0.001;
 // Without the air, the glint off the stillest water peaks this bright.
 static const float glint_brightness = 50.0;
 static const float stillest_lobe = ((2.0 / ripples) + 6.0) / (8.0 * pi);
+// Of the light falling on foam fresh from a breaking crest, the share it scatters back.
+static const float breaking_albedo = 0.5;
 
 // Turns `v` as sea level's up under the eye, `truly`, turns to as it's drawn, `drawn`.
 float3 as_drawn(float3 v, float3 truly, float3 drawn) {
@@ -92,11 +94,13 @@ Surface vertex_main(Vertex vertex) {
     return surface;
 }
 
-// How the water's surface faces at a pixel, and the mean square slope of what's too small to
-// draw there.
+// How the water's surface faces at a pixel, the mean square slope of what's too small to draw
+// there, and how much of it is white with foam, and how bright that is.
 struct Facing {
     float3 normal;
     float roughness;
+    float white;
+    float albedo;
 };
 
 Facing facing_at(Surface surface, float3 looking) {
@@ -105,6 +109,8 @@ Facing facing_at(Surface surface, float3 looking) {
     Facing facing;
     facing.normal = as_drawn(water.normal, push.up_height.xyz, normalize(surface.normal));
     facing.roughness = water.roughness + ripples;
+    facing.white = water.breaking;
+    facing.albedo = breaking_albedo;
     // A wave's back, which the eye could only see past its crest, is taken as seen edge on.
     const float towards = dot(facing.normal, -looking);
     if (towards < 0.0) {
@@ -130,8 +136,12 @@ float4 fragment_main(Surface surface) : SV_Target {
     const float reflected = reflected_at(looking, facing.normal);
     const float glint =
         glint_brightness * reflected * glint_at(looking, facing, push.sun_nearest.xyz) / stillest_lobe;
-    // Premultiplied: the sky by how much is reflected, and the glint over all.
-    return float4((push.sky_furthest.rgb * reflected) + glint, reflected);
+    // Premultiplied: the sky by how much is reflected, and the glint over all; and over that the
+    // foam, lit by the sun and as much again by the sky.
+    const float3 foam =
+        facing.albedo * (saturate(dot(facing.normal, push.sun_nearest.xyz)) + push.sky_furthest.rgb);
+    return lerp(float4((push.sky_furthest.rgb * reflected) + glint, reflected), float4(foam, 1.0),
+                facing.white);
 }
 
 // Reflecting the sky as the eye sees it, and the sun's light through the air, seen through the air
@@ -174,9 +184,15 @@ float4 fragment_air(Surface surface) : SV_Target {
     const float4 between =
         aerial_perspective(aerial_volume, uv, length(surface.from_eye) * scale, lighting.reach.x);
     // Premultiplied: over what's beneath, which has the air between already, the reflection seen
-    // through the air, and the glint.
+    // through the air, and the glint; and over that the foam, lit as the ground is.
     const float3 radiance = (reflected * ((sky * between.a) + between.rgb)) + (glint * between.a);
-    return float4(tone_mapped(radiance, lighting.sun_exposure.w), reflected);
+    const float3 on_foam = (sunlight * saturate(dot(normal, sun))) +
+                           sky_under_cloud(lighting, shade,
+                                           transmittance(air, transmittance_table, 0.0, sun_mu) *
+                                               max(sun_mu, 0.0));
+    const float3 foam = (facing.albedo * on_foam * between.a / pi) + between.rgb;
+    return float4(tone_mapped(lerp(radiance, foam, facing.white), lighting.sun_exposure.w),
+                  lerp(reflected, 1.0, facing.white));
 }
 
 // The water under the surface as the ground's shading has it where it lies too deep to show: the

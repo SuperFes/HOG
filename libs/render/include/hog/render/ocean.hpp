@@ -30,18 +30,22 @@ struct DrawnWaves {
         glm::vec4 heading_wavenumber{0.0F};
         glm::vec4 amplitude_phase_slope_length{0.0F};
         glm::vec4 along{0.0F};
+        glm::vec4 breaking{0.0F};
     };
     glm::vec4 count_left_radius{0.0F};
     glm::vec4 up_height{0.0F};
     glm::vec4 first{0.0F};
     glm::vec4 second{0.0F};
+    glm::vec4 foam{0.0F};
     std::array<Wave, drawn_waves> waves{};
 };
 
 // The strongest of the waves round an eye at `eye`, bent by `bend`, at `time`, as
-// waves::strongest picks them, each as it runs under the eye.
+// waves::strongest picks them, each as it runs under the eye; and where `sea`, which raised them,
+// breaks white.
 [[nodiscard]] DrawnWaves drawn_waves_at(std::span<const waves::Train> trains,
-                                        std::span<const waves::Wave> waves, WorldPosition eye,
+                                        std::span<const waves::Wave> waves,
+                                        const waves::SeaState& sea, WorldPosition eye,
                                         const terrain::Bend& bend, GameTime time);
 
 // Where the sea is seen from and what it reflects.

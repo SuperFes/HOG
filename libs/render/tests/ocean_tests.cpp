@@ -17,6 +17,7 @@
 #include <hog/waves/waves.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <algorithm>
 #include <array>
@@ -32,6 +33,7 @@
 #include <utility>
 #include <vector>
 
+using Catch::Matchers::WithinRel;
 using hog::DVec3;
 using hog::WorldPosition;
 using hog::planet::Biome;
@@ -530,11 +532,13 @@ namespace {
 constexpr hog::GameTime noon{std::chrono::seconds{1'792'000'000}};
 
 // Where the drawn waves move points of sea level `rest` from the eye, seen over `footprint`
-// metres each, and how the surface faces there; and how rough what's left is.
+// metres each, and how the surface faces there; how rough what's left is; and how much of it
+// breaks white.
 struct Probed {
     DVec3 moved;
     DVec3 normal;
     double roughness;
+    double breaking;
 };
 
 std::vector<Probed> probe_waves(hog::render::Device& device, const hog::render::DrawnWaves& drawn,
@@ -599,7 +603,8 @@ std::vector<Probed> probe_waves(hog::render::Device& device, const hog::render::
         const auto& normal = found.at((2 * i) + 1);
         probed.push_back({.moved = DVec3{hog::Vec3{moved[0], moved[1], moved[2]}},
                           .normal = DVec3{hog::Vec3{normal[0], normal[1], normal[2]}},
-                          .roughness = static_cast<double>(moved[3])});
+                          .roughness = static_cast<double>(moved[3]),
+                          .breaking = static_cast<double>(normal[3])});
     }
     return probed;
 }
@@ -609,15 +614,16 @@ struct WavySea {
     std::vector<hog::waves::Train> trains = hog::waves::planet_trains(5);
     WorldPosition eye{glm::normalize(DVec3{0.03, -0.02, 1.0}) * (radius + 8.0)};
     hog::terrain::Bend bend = hog::terrain::bend_from(eye, radius, 0.0);
+    hog::waves::SeaState sea;
     std::vector<hog::waves::Wave> waves;
     hog::render::DrawnWaves drawn;
 
     explicit WavySea(double wind) {
         const DVec3 along = glm::normalize(glm::cross(bend.up, north));
-        waves = hog::waves::waves_at(
-            trains, bend.up,
-            {.systems = {hog::waves::grown_sea(along * wind)}, .current = {}, .wind = {}});
-        drawn = hog::render::drawn_waves_at(trains, waves, eye, bend, noon);
+        sea = {
+            .systems = {hog::waves::grown_sea(along * wind)}, .current = {}, .wind = along * wind};
+        waves = hog::waves::waves_at(trains, bend.up, sea);
+        drawn = hog::render::drawn_waves_at(trains, waves, sea, eye, bend, noon);
     }
 
     // Sea level `out` metres from under the eye along the ground, from the eye.
@@ -686,6 +692,41 @@ TEST_CASE("waves too short to see from afar fade into the sea's roughness", "[re
     CHECK(device->validation_errors() == 0);
 }
 
+TEST_CASE("crests break white over as much of the sea as the wind breaks", "[render][gpu]") {
+    const auto device = test_device();
+    const WavySea sea{20.0};
+    const auto share = static_cast<double>(sea.drawn.foam.z);
+    REQUIRE(share > 0.01);
+    // Close by, each place is breaking or not; over kilometres, about as much as the wind breaks.
+    std::mt19937_64 random{3};
+    std::uniform_real_distribution<double> spot{-3'000.0, 3'000.0};
+    std::vector<DVec3> rest;
+    rest.reserve(4'000);
+    for (int i = 0; i < 4'000; ++i) {
+        rest.push_back(sea.rest(DVec3{spot(random), spot(random), 0.0}));
+    }
+    double mean = 0.0;
+    for (const Probed& probed : probe_waves(*device, sea.drawn, rest, 1e-3)) {
+        mean += probed.breaking;
+    }
+    mean /= static_cast<double>(rest.size());
+    CHECK_THAT(mean, WithinRel(share, 0.1));
+    // From afar, each footprint is that much white.
+    const std::vector<DVec3> far{sea.rest(DVec3{0.0, 0.0, 0.0}), sea.rest(DVec3{900.0, 0.0, 0.0})};
+    for (const Probed& probed : probe_waves(*device, sea.drawn, far, 1e5)) {
+        CHECK_THAT(probed.breaking, WithinRel(share, 0.02));
+    }
+    // A breeze breaks next to nothing.
+    const WavySea breeze{2.0};
+    CHECK(breeze.drawn.foam.z < 1e-4F);
+    int broke = 0;
+    for (const Probed& probed : probe_waves(*device, breeze.drawn, rest, 1e-3)) {
+        broke += probed.breaking > 0.5 ? 1 : 0;
+    }
+    CHECK(broke < 4);
+    CHECK(device->validation_errors() == 0);
+}
+
 TEST_CASE("waves scatter the sun's glint over the sea", "[render][gpu]") {
     const auto device = test_device();
     // Looking down with the sun overhead.
@@ -694,7 +735,7 @@ TEST_CASE("waves scatter the sun's glint over the sea", "[render][gpu]") {
     const std::vector<hog::waves::Train> trains = hog::waves::planet_trains(5);
     const hog::waves::SeaState windy{
         .systems = {hog::waves::grown_sea(east * 9.0)}, .current = {}, .wind = {}};
-    view.waves = hog::render::drawn_waves_at(trains, hog::waves::waves_at(trains, up, windy),
+    view.waves = hog::render::drawn_waves_at(trains, hog::waves::waves_at(trains, up, windy), windy,
                                              view.camera.eye, view.bend, noon);
     REQUIRE(view.waves.count_left_radius.x > 0.0F);
     const auto wavy = draw(*device, view, std::nullopt);

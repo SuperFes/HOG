@@ -4,6 +4,7 @@
 #include <hog/render/ocean.hpp>
 #include <hog/shaders/ocean.hpp>
 #include <hog/terrain/sea.hpp>
+#include <hog/waves/foam.hpp>
 
 #include <array>
 #include <cmath>
@@ -52,7 +53,7 @@ constexpr std::array vertex_attributes{
                                       .offset = offsetof(SeaVertex, towards)}};
 
 static_assert(sizeof(DrawnWaves) ==
-              (4 * sizeof(glm::vec4)) + (drawn_waves * sizeof(DrawnWaves::Wave)));
+              (5 * sizeof(glm::vec4)) + (drawn_waves * sizeof(DrawnWaves::Wave)));
 
 constexpr VkDescriptorSetLayoutBinding
 binding(std::uint32_t at, VkDescriptorType type,
@@ -82,13 +83,23 @@ constexpr std::array air_descriptors{binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFE
 } // namespace
 
 DrawnWaves drawn_waves_at(std::span<const waves::Train> trains, std::span<const waves::Wave> waves,
-                          WorldPosition eye, const terrain::Bend& bend, GameTime time) {
+                          const waves::SeaState& sea, WorldPosition eye, const terrain::Bend& bend,
+                          GameTime time) {
+    const double wind = glm::length(sea.wind);
+    const auto breaking_slope = [&](const waves::Wave& wave) {
+        const waves::Train& train = trains[wave.train];
+        const double slope =
+            train.wavenumber * wave.amplitude * waves::breaking_share(train.frequency, wind);
+        return slope * slope / 2.0;
+    };
     std::vector<waves::Wave> shown;
+    double breaking_all = 0.0;
     for (const waves::Wave& wave : waves) {
         const double showing =
             std::sqrt(waves::showing(glm::dot(bend.up, trains[wave.train].heading)));
         if (showing > 0.0) {
             shown.push_back({.train = wave.train, .amplitude = wave.amplitude * showing});
+            breaking_all += breaking_slope(shown.back());
         }
     }
     const waves::Strongest strongest = waves::strongest(trains, shown, drawn_waves);
@@ -100,6 +111,7 @@ DrawnWaves drawn_waves_at(std::span<const waves::Train> trains, std::span<const 
                      .first = {Vec3{frame.east}, 0.0F},
                      .second = {Vec3{frame.north}, 0.0F}};
     double shorter = 0.0;
+    double breaking_shorter = 0.0;
     for (std::size_t i = strongest.waves.size(); i-- > 0;) {
         const waves::Wave& wave = strongest.waves[i];
         const waves::Train& train = trains[wave.train];
@@ -107,7 +119,10 @@ DrawnWaves drawn_waves_at(std::span<const waves::Train> trains, std::span<const 
         const double flat = glm::length(along);
         const double wavenumber = train.wavenumber * flat;
         const double slope = wavenumber * wave.amplitude;
+        const double share = waves::breaking_share(train.frequency, wind);
         shorter += slope * slope / 2.0;
+        breaking_shorter += slope * slope * share * share / 2.0;
+        breaking_all -= breaking_slope(wave);
         drawn.waves.at(i) = {
             .heading_wavenumber = {Vec3{train.heading}, static_cast<float>(train.wavenumber)},
             .amplitude_phase_slope_length =
@@ -117,7 +132,19 @@ DrawnWaves drawn_waves_at(std::span<const waves::Train> trains, std::span<const 
                  static_cast<float>(2.0 * std::numbers::pi / wavenumber)},
             .along = {static_cast<float>(glm::dot(along, frame.east) / flat),
                       static_cast<float>(glm::dot(along, frame.north) / flat),
-                      static_cast<float>(wavenumber), 0.0F}};
+                      static_cast<float>(wavenumber), 0.0F},
+            .breaking = {static_cast<float>(share), static_cast<float>(breaking_shorter), 0.0F,
+                         0.0F}};
+    }
+    // What's left over is what wasn't drawn; the bunching of all that breaks, drawn or not, is
+    // near enough normal, so whitecaps cover as much as they should where it's highest.
+    const double breaking_left = std::max(breaking_all, 0.0);
+    const waves::Whitecaps white = waves::whitecaps(sea);
+    const double breaking = breaking_shorter + breaking_left;
+    if (white.breaking > 0.0 && breaking > 0.0) {
+        drawn.foam = {static_cast<float>(std::sqrt(breaking) * waves::exceeded(white.breaking)),
+                      static_cast<float>(breaking_left), static_cast<float>(white.breaking),
+                      static_cast<float>(white.left)};
     }
     return drawn;
 }
