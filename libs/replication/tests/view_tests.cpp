@@ -42,7 +42,7 @@ std::vector<NetId> ids(const std::vector<Entered>& entered) {
 
 // What a client holds after applying `snapshot` to `held`, which it acknowledges.
 EntityStates receive(View& view, const EntityStates& held, const Snapshot& snapshot) {
-    auto states = apply(held, snapshot);
+    auto states = hog::replication::apply(held, snapshot);
     REQUIRE(states);
     view.acknowledged(snapshot.tick);
     return *states;
