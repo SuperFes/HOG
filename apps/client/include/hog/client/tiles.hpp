@@ -46,6 +46,30 @@ struct Ground {
 [[nodiscard]] std::set<planet::CellId> wanted(WorldPosition eye, double radius, int level,
                                               double reach);
 
+// A sphere about anchors' roots, relative to where their tile's laid out from: the cell's middle at
+// sea level, which on high ground lies far below them.
+struct Bounds {
+    Vec3 centre{0.0F};
+    float radius = 0.0F;
+};
+
+template <class Anchor>
+[[nodiscard]] Bounds bounds_of(std::span<const Anchor> anchors) {
+    Bounds bounds;
+    if (anchors.empty()) {
+        return bounds;
+    }
+    Vec3 sum{0.0F};
+    for (const Anchor& anchor : anchors) {
+        sum += anchor.position;
+    }
+    bounds.centre = sum / static_cast<float>(anchors.size());
+    for (const Anchor& anchor : anchors) {
+        bounds.radius = std::max(bounds.radius, glm::length(anchor.position - bounds.centre));
+    }
+    return bounds;
+}
+
 // Whether a tile and a cell share any ground: one lies within the other.
 [[nodiscard]] bool over(planet::CellId tile, planet::CellId cell);
 

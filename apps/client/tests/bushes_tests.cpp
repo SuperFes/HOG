@@ -294,3 +294,48 @@ TEST_CASE("bush tiles built on the job pool come out as those built in place",
     CHECK(hog::client::anchors_in(background.draws({.eye = standing}, 100.0)) ==
           hog::client::anchors_in(built.draws({.eye = standing}, 100.0)));
 }
+
+TEST_CASE("bush tiles on high ground are drawn round an eye standing among them",
+          "[client][bushes][gpu]") {
+    const auto device = test_device();
+    auto pool =
+        hog::render::AnchorPool::create(*device, {.tiles = 512, .frames = 1, .uploads = 512});
+    REQUIRE(pool);
+    const hog::client::BiomePalette palette = hog::client::biome_palette();
+    const double radius = world().geology().planet_radius();
+    // Well over the sea, so where a tile's laid out from is far below its bushes.
+    std::optional<hog::planet::CellId> high;
+    double ground = 0.0;
+    for (const hog::planet::CellId found : bushy_tiles(palette, 20, 200)) {
+        ground = hog::client::ground_under(
+            world(), hog::WorldPosition{hog::planet::cell_center(found) * radius});
+        if (ground > 80.0) {
+            high = found;
+            break;
+        }
+    }
+    REQUIRE(high);
+    const hog::planet::CellId tile = high.value_or(hog::planet::CellId{});
+    const hog::DVec3 up = hog::planet::cell_center(tile);
+    const hog::WorldPosition standing{up * (radius + ground + 2.0)};
+    hog::client::BushAnchors anchors{palette};
+    REQUIRE(anchors.update(*pool, 0, world(), standing, 120.0, 512));
+    REQUIRE(anchors.update(*pool, 0, world(), standing, 120.0, 512));
+    REQUIRE(anchors.settled());
+    // Looking level along the ground, as from a walk.
+    const hog::DVec3 level = glm::normalize(glm::cross(up, hog::DVec3{0.0, 0.0, 1.0}));
+    const hog::render::Camera camera{
+        .eye = standing, .forward = level, .up = up, .vertical_fov = 1.0};
+    const hog::client::Sight sight = hog::client::sight_of(camera, 16.0 / 9.0);
+    const std::vector<hog::render::StandDraw> drawn = anchors.draws(sight, 120.0);
+    INFO("ground " << ground << " m");
+    CHECK(std::ranges::any_of(drawn, [&](const hog::render::StandDraw& stand) {
+        return glm::length(stand.origin - origin_of(tile)) < 1.0;
+    }));
+    // Of all those round about, those ahead are drawn, out to as far as they're drawn.
+    std::size_t ahead = 0;
+    for (const hog::render::StandDraw& stand : drawn) {
+        ahead += glm::dot(stand.origin - standing, level) > 30.0 ? 1U : 0U;
+    }
+    CHECK(ahead > 3);
+}

@@ -167,8 +167,10 @@ void TreeAnchors::fare(std::shared_ptr<const flora::Fates> fates,
 
 TreeAnchors::Tile TreeAnchors::held_tile(std::uint32_t slot, WorldPosition origin,
                                          const TileTrees& trees) {
-    Tile tile{
-        .slot = slot, .count = static_cast<std::uint32_t>(trees.anchors.size()), .origin = origin};
+    Tile tile{.slot = slot,
+              .count = static_cast<std::uint32_t>(trees.anchors.size()),
+              .origin = origin,
+              .bounds = tiles::bounds_of(std::span<const render::TreeAnchor>{trees.anchors})};
     for (std::uint32_t at = 0; at < tile_blocks; ++at) {
         Block& block = tile.blocks.at(at);
         block.first = trees.starts.at(at);
@@ -178,14 +180,11 @@ TreeAnchors::Tile TreeAnchors::held_tile(std::uint32_t slot, WorldPosition origi
         }
         const auto stood =
             std::span<const render::TreeAnchor>{trees.anchors}.subspan(block.first, block.count);
-        Vec3 sum{0.0F};
-        for (const render::TreeAnchor& anchor : stood) {
-            sum += anchor.position;
-        }
-        block.centre = sum / static_cast<float>(block.count);
+        const tiles::Bounds bounds = tiles::bounds_of(stood);
+        block.centre = bounds.centre;
+        block.reach = bounds.radius;
         for (const render::TreeAnchor& anchor : stood) {
             ++block.genera.at(static_cast<std::size_t>(render::genus_of(anchor.colour)));
-            block.reach = std::max(block.reach, glm::length(anchor.position - block.centre));
         }
     }
     return tile;
@@ -201,8 +200,8 @@ std::vector<render::StandDraw> TreeAnchors::draws(const Sight& sight) const {
         // The tile spans half its own width from its centre, out to its corners.
         const double span = glm::length(tile.origin.metres()) * (std::numbers::pi / 4.0) /
                             static_cast<double>(std::uint32_t{1} << anchor_tile_level);
-        if (!within_sight(sight, tile.origin - sight.eye,
-                          (span * std::numbers::sqrt2) + crown_spread)) {
+        if (!within_sight(sight, tile.origin + DVec3{tile.bounds.centre} - sight.eye,
+                          static_cast<double>(tile.bounds.radius) + crown_spread)) {
             continue;
         }
         stands.push_back({.slot = tile.slot,

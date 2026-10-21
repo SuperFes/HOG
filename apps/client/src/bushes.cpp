@@ -102,8 +102,10 @@ Result<> BushAnchors::update(render::AnchorPool& pool, std::uint32_t frame,
                 !staged) {
                 return std::unexpected(std::move(staged).error());
             }
-            return Tile{
-                .slot = slot, .count = static_cast<std::uint32_t>(bushes.size()), .origin = origin};
+            return Tile{.slot = slot,
+                        .count = static_cast<std::uint32_t>(bushes.size()),
+                        .origin = origin,
+                        .bounds = tiles::bounds_of(std::span<const render::BushAnchor>{bushes})};
         });
 }
 
@@ -123,15 +125,11 @@ std::vector<render::StandDraw> BushAnchors::draws(const Sight& sight, double rea
         if (tile.count == 0) {
             continue;
         }
-        // The tile spans half its own width from its centre, out to its corners.
-        const double span = glm::length(tile.origin.metres()) * (std::numbers::pi / 4.0) /
-                            static_cast<double>(std::uint32_t{1} << bush_tile_level);
-        const DVec3 from_eye = tile.origin - sight.eye;
+        const DVec3 from_eye = tile.origin + DVec3{tile.bounds.centre} - sight.eye;
+        const double around = static_cast<double>(tile.bounds.radius) + bush_spread;
         // Through the air, as each bush shrinks away by its own distance.
-        const double distance =
-            std::max(0.0, glm::length(from_eye) - (span * std::numbers::sqrt2) - bush_spread);
-        if (distance >= reach ||
-            !within_sight(sight, from_eye, (span * std::numbers::sqrt2) + bush_spread)) {
+        const double distance = std::max(0.0, glm::length(from_eye) - around);
+        if (distance >= reach || !within_sight(sight, from_eye, around)) {
             continue;
         }
         stands.push_back({.slot = tile.slot,

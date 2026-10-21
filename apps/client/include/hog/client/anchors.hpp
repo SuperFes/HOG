@@ -116,6 +116,8 @@ private:
         // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
         WorldPosition origin = {};
         std::array<Block, tile_blocks> blocks{};
+        // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+        tiles::Bounds bounds = {};
         bool stale = false; // its woods' fates changed since it was built
     };
 

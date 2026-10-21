@@ -58,6 +58,8 @@ private:
         std::uint32_t count = 0;
         // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
         WorldPosition origin = {};
+        // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+        tiles::Bounds bounds = {};
         bool stale = false;
     };
 
