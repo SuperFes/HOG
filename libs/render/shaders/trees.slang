@@ -4,6 +4,7 @@ import condition;
 import season;
 import shadow;
 import tone;
+import water;
 
 // Tree stamps, each drawn from a tree anchor bound to its spot in the world: three crossed quads, a
 // mask cut in the fragment shader shaping the tree's crown over a bare trunk — a pine's tiered cone
@@ -491,7 +492,9 @@ float4 fragment_main(Tree tree) : SV_Target {
     const float3 sky = sky_under_cloud(lighting, shade, clear * saturate(dot(up, sun)));
     const float3 lit =
         (sunlight * saturate(dot(normal, sun))) + (sky * (0.5 + (0.5 * dot(normal, up))));
-    const float3 radiance = albedo * lit / pi;
+    const float3 radiance =
+        through_water_at(albedo * lit / pi, ((sunlight * saturate(dot(up, sun))) + sky) / pi,
+                         tree.from_eye, push.bend_up, push.bend_radii.x);
 
     const float4 clip = mul(push.clip_from_eye, float4(tree.drawn, 1.0));
     const float2 uv = ((clip.xy / clip.w) * 0.5) + 0.5;

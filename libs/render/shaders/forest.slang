@@ -4,6 +4,7 @@ import condition;
 import season;
 import shadow;
 import tone;
+import water;
 
 // The grown forest: whole trees from libs/flora, a few variants baked at a few details, each
 // planted on a tree anchor bound to its spot in the world. The far stamps draw from the very same
@@ -269,7 +270,9 @@ float3 forest_lit(float3 albedo, float3 normal_raw, float3 from_eye, float3 draw
     const float3 lit =
         (sunlight * saturate((dot(normal, sun) + wrap) / (1.0 + wrap))) +
         (sky * (0.5 + (0.5 * dot(normal, up))));
-    const float3 radiance = albedo * lit / pi;
+    const float3 radiance =
+        through_water_at(albedo * lit / pi, ((sunlight * saturate(dot(up, sun))) + sky) / pi,
+                         from_eye, push.bend_up, push.bend_radii.x);
     const float4 clip = mul(push.clip_from_eye, float4(drawn, 1.0));
     const float2 uv = ((clip.xy / clip.w) * 0.5) + 0.5;
     const float4 between =

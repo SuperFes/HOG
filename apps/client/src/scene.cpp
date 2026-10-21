@@ -470,8 +470,6 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                       commands, frame.extent, pool_, slots_.draws(streamed.drawn),
                       {.camera = shot.camera, .sun = sky.sun, .bend = shot.bend, .air = through});
               });
-    graph.add({.name = "sea", .uses = through_air, .targets = drawn},
-              [&](VkCommandBuffer commands) { ocean_.draw(commands, frame.extent, sea); });
     swaying_for_ += shot.seconds;
     if (grass_on_) {
         grow_vegetation(graph, frame, shot, streamed.drawn, through_air, drawn, through,
@@ -493,6 +491,9 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                 companion_->draw(commands, frame.extent, shot.camera, *shot.companion, shot.bend);
             });
     }
+    // Over all that stands in the sea, each seen through the water to its surface.
+    graph.add({.name = "sea", .uses = through_air, .targets = drawn},
+              [&](VkCommandBuffer commands) { ocean_.draw(commands, frame.extent, sea); });
     if (render::precipitation_count(falling, static_cast<double>(here.snow)) > 0) {
         graph.add({.name = "rain", .uses = through_air, .targets = drawn},
                   [&](VkCommandBuffer commands) {

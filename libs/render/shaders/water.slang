@@ -1,5 +1,7 @@
 module water;
 
+import bend;
+
 // Seawater, as libs/terrain's sea.hpp has it: change both together.
 
 // Reflected straight back, as water does.
@@ -17,8 +19,34 @@ public float reflected_at(float3 looking, float3 normal) {
     return facing_reflection + ((1.0 - facing_reflection) * pow(1.0 - facing, 5.0));
 }
 
-// What the water passes of the light down to ground `depth` metres under it and back up to an eye
-// looking down at it `looking_down`, the cosine from straight down.
-public float3 water_passed(float depth, float looking_down) {
-    return exp(-water_absorbing * depth * (1.0 + (1.0 / max(looking_down, least_facing))));
+// `lit` at a point `depth` metres under the sea (negative above it), `along` metres from an eye
+// `eye_height` above sea level, looking down at it `looking_down`, the cosine from straight down:
+// dimmed by the water the light passes down to it and back to the eye, and filled in by what
+// that water scatters of `on_water`, the light falling on the sea. From above, the way through
+// the water is the depth over how steeply the eye looks down.
+public float3 through_water(float3 lit, float3 on_water, float depth, float eye_height,
+                            float along, float looking_down) {
+    if (depth <= 0.0 && eye_height >= 0.0) {
+        return lit;
+    }
+    float seen_through;
+    if (eye_height >= 0.0) {
+        seen_through = depth / max(looking_down, least_facing);
+    } else if (depth >= 0.0) {
+        seen_through = along;
+    } else {
+        // Of the line up out of the water, the part under its surface.
+        seen_through = along * eye_height / (eye_height + depth);
+    }
+    const float3 passed = exp(-water_absorbing * (max(depth, 0.0) + seen_through));
+    return (lit * passed) + (water_colour * on_water * (1.0 - passed));
+}
+
+// As through_water, for a point `from_eye` on the planet of `radius`, under an eye `up_height` as
+// bend.slang takes it.
+public float3 through_water_at(float3 lit, float3 on_water, float3 from_eye, float4 up_height,
+                               float radius) {
+    const float3 up = normalize(from_eye + (up_height.xyz * (radius + up_height.w)));
+    return through_water(lit, on_water, -height_above_sea(from_eye, up_height, radius),
+                         up_height.w, length(from_eye), dot(-normalize(from_eye), up));
 }

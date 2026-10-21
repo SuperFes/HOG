@@ -340,15 +340,11 @@ struct Shaded {
 float3 shaded(Ground ground, float3 normal, float3 on_ground, float3 on_water, float4 year) {
     const float3 lit_ground =
         wooded(ground, scorched(ground, albedo(ground, normal)), year) * on_ground;
-    const float under_sea = settings.tiling.z > 0.0 ? -ground.height : 0.0;
-    if (under_sea <= 0.0) {
+    if (settings.tiling.z <= 0.0) {
         return lit_ground;
     }
-
-    // Light down through the water and back up to the eye, the steeper the shorter.
-    const float3 passed =
-        water_passed(under_sea, dot(-normalize(ground.from_eye), up_at(ground)));
-    return (lit_ground * passed) + (water_colour * on_water * (1.0 - passed));
+    return through_water(lit_ground, on_water, -ground.height, push.bend_up.w,
+                         length(ground.from_eye), dot(-normalize(ground.from_eye), up_at(ground)));
 }
 
 // Ground at or within depth precision of sea level is put just behind the sea, which then wins.
@@ -395,7 +391,7 @@ Shaded fragment_air(Ground ground) {
         (sunlight * saturate(dot(normal, sun))) + (sky * (0.5 + (0.5 * dot(normal, up))));
     // The water over ground beneath the sea, lit where the eye looks into it.
     float3 on_water = float3(0.0);
-    if (ground.height < 0.0) {
+    if (ground.height < 0.0 || push.bend_up.w < 0.0) {
         const float facing = saturate(dot(end.up, sun));
         const float3 clear_water = transmittance(air, transmittance_table, 0.0, dot(end.up, sun));
         on_water = (through_cloud(shade, clear_water) * facing) +

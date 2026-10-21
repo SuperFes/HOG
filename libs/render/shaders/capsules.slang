@@ -1,6 +1,7 @@
 import atmosphere;
 import shadow;
 import tone;
+import water;
 
 struct Push {
     float4x4 clip_from_eye;
@@ -8,8 +9,9 @@ struct Push {
     float4 feet_radius;
     // xyz from the feet to the top; w how bright the side away from the sun stays.
     float4 tall_night;
+    // rgb its colour; w the eye's height above sea level.
     float4 colour;
-    // xyz towards the sun.
+    // xyz towards the sun; w the feet's height above sea level.
     float4 sun;
 };
 
@@ -80,10 +82,17 @@ float4 fragment_air(Surface surface) : SV_Target {
     const float scale = lighting.sky_scale.w;
     const float3 clear = transmittance(air, transmittance_table, lighting.up_height.w, dot(up, sun));
     const Shade shade = shade_at(lighting, cloud_shadow, surface.from_eye);
-    const float3 lit = (through_cloud(shade, clear) * saturate(dot(normal, sun))) +
-                       (sky_under_cloud(lighting, shade, clear * saturate(dot(up, sun))) *
-                        (0.5 + (0.5 * dot(normal, up))));
-    const float3 radiance = push.colour.rgb * lit / pi;
+    const float3 sunlight = through_cloud(shade, clear);
+    const float3 sky = sky_under_cloud(lighting, shade, clear * saturate(dot(up, sun)));
+    const float3 lit =
+        (sunlight * saturate(dot(normal, sun))) + (sky * (0.5 + (0.5 * dot(normal, up))));
+    // Short enough that up is the same along it, from its feet.
+    const float3 feet = push.feet_radius.xyz;
+    const float height = push.sun.w + dot(surface.from_eye - feet, up);
+    const float3 radiance =
+        through_water(push.colour.rgb * lit / pi, ((sunlight * saturate(dot(up, sun))) + sky) / pi,
+                      -height, push.colour.w, length(surface.from_eye),
+                      dot(-normalize(surface.from_eye), up));
 
     const float4 clip = mul(push.clip_from_eye, float4(surface.from_eye, 1.0));
     const float2 uv = ((clip.xy / clip.w) * 0.5) + 0.5;

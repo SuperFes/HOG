@@ -39,13 +39,9 @@ namespace {
 
 constexpr VkExtent2D extent{.width = 160, .height = 90};
 
-// From `altitude` metres over the starting islands at noon, looking `pitch` radians up.
-Shot over_the_islands(double altitude = 1'500.0, double pitch = -0.2) {
+// Of a flight at noon on midsummer's day.
+Shot shot_of(const hog::client::Flight& flight) {
     const double radius = world().geology().planet_radius();
-    const auto& islands = world().geology().terrain().archipelago();
-    hog::client::Flight flight = hog::client::start_flight(islands.center(), radius, altitude,
-                                                           islands.islands().front().center);
-    flight.pitch = pitch;
     const hog::DVec3 up = glm::normalize(flight.eye.metres());
     const hog::GameTime date = hog::to_game_time(
         hog::WallClock::time_point{std::chrono::sys_days{std::chrono::year{2026} / 6 / 21}});
@@ -55,6 +51,39 @@ Shot over_the_islands(double altitude = 1'500.0, double pitch = -0.2) {
             .time = hog::client::start_time(calendar(), date, up, 0.5),
             .seconds = 0.0,
             .companion = std::nullopt};
+}
+
+// From `altitude` metres over the starting islands at noon, looking `pitch` radians up.
+Shot over_the_islands(double altitude = 1'500.0, double pitch = -0.2) {
+    const double radius = world().geology().planet_radius();
+    const auto& islands = world().geology().terrain().archipelago();
+    hog::client::Flight flight = hog::client::start_flight(islands.center(), radius, altitude,
+                                                           islands.islands().front().center);
+    flight.pitch = pitch;
+    return shot_of(flight);
+}
+
+// Six metres over water at least five deep, looking `pitch` radians up over more of it.
+Shot at_sea(double pitch) {
+    const double radius = world().geology().planet_radius();
+    const hog::DVec3 centre = world().geology().terrain().archipelago().center();
+    const hog::DVec3 east = glm::normalize(glm::cross(hog::DVec3{0.0, 0.0, 1.0}, centre));
+    const auto out_to = [&](double along) {
+        return glm::normalize(centre + (east * (along / radius)));
+    };
+    const auto deep = [&](double along) {
+        return hog::client::ground_under(world(), hog::WorldPosition{out_to(along) * radius}) <
+               -5.0;
+    };
+    double along = 0.0;
+    while (!(deep(along) && deep(along + 15.0) && deep(along + 30.0))) {
+        along += 250.0;
+        REQUIRE(along < 200'000.0);
+    }
+    hog::client::Flight flight =
+        hog::client::start_flight(out_to(along), radius, 6.0, out_to(along + 30.0));
+    flight.pitch = pitch;
+    return shot_of(flight);
 }
 
 struct Rgb {
@@ -289,6 +318,34 @@ TEST_CASE("a scene draws others where they stand", "[client][scene][gpu]") {
     CHECK(device->validation_errors() == 0);
 }
 
+TEST_CASE("a scene shows someone wading in the sea through the water over them",
+          "[client][scene][gpu]") {
+    const auto device = test_device();
+    hog::jobs::JobSystem jobs{2};
+    auto scene = Scene::create(*device, world(), jobs, calendar(), hog::client::still_format, 1);
+    REQUIRE(scene);
+    // Looking down at someone ten metres off, standing a metre deep.
+    Shot shot = at_sea(-0.5);
+    const auto alone = hog::client::draw_still(*device, *scene, shot, extent);
+    REQUIRE(alone);
+    const hog::WorldPosition surface = ahead(shot, 10.0);
+    const hog::DVec3 up = glm::normalize(surface.metres());
+    shot.others = {{.feet = surface - (up * 1.0), .up = up, .colour = {0.6F, 0.0F, 0.0F}}};
+    const auto seen = hog::client::draw_still(*device, *scene, shot, extent);
+    REQUIRE(seen);
+    const hog::DVec2 under = drawn_at(shot, surface - (up * 0.5));
+    const Rgb water = pixel(*alone, under);
+    const Rgb wet = pixel(*seen, under);
+    const Rgb dry = pixel(*seen, drawn_at(shot, surface + (up * 0.5)));
+    INFO("water " << water.r << ", " << water.g << ", " << water.b);
+    INFO("wet " << wet.r << ", " << wet.g << ", " << wet.b);
+    INFO("dry " << dry.r << ", " << dry.g << ", " << dry.b);
+    // Not hidden by the surface, but dimmed by the water above.
+    CHECK(wet.r - wet.g > water.r - water.g + 15);
+    CHECK(wet.r < dry.r - 15);
+    CHECK(device->validation_errors() == 0);
+}
+
 TEST_CASE("a scene times its passes on the GPU", "[client][scene][gpu]") {
     const auto device = test_device();
     hog::jobs::JobSystem jobs{2};
@@ -305,8 +362,8 @@ TEST_CASE("a scene times its passes on the GPU", "[client][scene][gpu]") {
         CHECK(span.milliseconds >= 0.0);
     }
     // From this high no tree is near enough to grow, so the forest pass isn't added at all.
-    CHECK(names == std::vector<std::string_view>{"uploads", "sky tables", "sky", "ground", "sea",
-                                                 "trees", "glare"});
+    CHECK(names == std::vector<std::string_view>{"uploads", "sky tables", "sky", "ground", "trees",
+                                                 "sea", "glare"});
     // Over the islands' woods, the stamps draw trees; from this high, none are grown.
     CHECK(scene->tree_counts().tiles > 0);
     CHECK(scene->tree_counts().stamped > 0);

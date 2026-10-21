@@ -85,11 +85,13 @@ void Capsules::draw(VkCommandBuffer commands, VkExtent2D extent, const CapsuleVi
         const DVec3 feet = terrain::bent(view.bend, unbent_feet);
         const DVec3 tall =
             terrain::bent(view.bend, unbent_feet + (capsule.up * capsule.height)) - feet;
-        const Push push{.clip_from_eye = clip_from_eye,
-                        .feet_radius = glm::vec4{Vec3{feet}, static_cast<float>(capsule.radius)},
-                        .tall_night = glm::vec4{Vec3{tall}, static_cast<float>(view.night)},
-                        .colour = glm::vec4{capsule.colour, 1.0F},
-                        .sun = glm::vec4{Vec3{view.sun}, 0.0F}};
+        const Push push{
+            .clip_from_eye = clip_from_eye,
+            .feet_radius = glm::vec4{Vec3{feet}, static_cast<float>(capsule.radius)},
+            .tall_night = glm::vec4{Vec3{tall}, static_cast<float>(view.night)},
+            .colour = glm::vec4{capsule.colour, static_cast<float>(view.bend.eye_height)},
+            .sun = glm::vec4{Vec3{view.sun}, static_cast<float>(glm::length(capsule.feet.metres()) -
+                                                                view.bend.radius)}};
         vkCmdPushConstants(commands, pipeline_.layout(),
                            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                            sizeof(Push), &push);
