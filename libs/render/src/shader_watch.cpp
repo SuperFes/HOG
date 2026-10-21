@@ -63,32 +63,43 @@ const ShaderCatalogue& shader_catalogue() noexcept {
 std::vector<std::filesystem::path> read_depfile(std::string_view text) {
     std::vector<std::filesystem::path> files;
     std::string word;
+    // Targets end with a colon; what they depend on doesn't, though a path may hold one escaped,
+    // as Windows' drive letters do.
+    bool target = false;
     const auto finish = [&] {
-        // Targets end with a colon; what they depend on doesn't.
-        if (!word.empty() && word.back() != ':') {
+        if (!word.empty() && !target) {
             files.emplace_back(word);
         }
         word.clear();
+        target = false;
     };
+    // As slangc escapes them.
+    constexpr std::string_view escaped = " #:[]\\";
     for (std::size_t at = 0; at < text.size(); ++at) {
         const char c = text[at];
-        if (c == '\\' && at + 1 < text.size()) {
-            const char next = text[at + 1];
-            if (next == ' ' || next == '#') {
-                word += next;
-                ++at;
-                continue;
-            }
-            if (next == '\n' || next == '\r') {
-                finish();
-                ++at;
-                continue;
-            }
+        const char next = at + 1 < text.size() ? text[at + 1] : '\0';
+        if (c == '\\' && escaped.contains(next)) {
+            word += next;
+            target = false;
+            ++at;
+            continue;
+        }
+        if (c == '\\' && (next == '\n' || next == '\r')) {
+            finish();
+            ++at;
+            continue;
+        }
+        if (c == '$' && next == '$') {
+            word += c;
+            target = false;
+            ++at;
+            continue;
         }
         if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
             finish();
         } else {
             word += c;
+            target = c == ':';
         }
     }
     finish();

@@ -87,11 +87,12 @@ ShaderWatch::Changes settle(ShaderWatch& watch) {
 // A shader named shine in a directory of its own, importing colour beside it.
 struct Shine {
     explicit Shine(bool with_depfile = false) {
-        write(directory.path() / "colour.slang", red);
-        write(directory.path() / "shine.slang", shine);
+        std::filesystem::create_directories(folder);
+        write(folder / "colour.slang", red);
+        write(folder / "shine.slang", shine);
         if (with_depfile) {
-            write(depfile, std::format("{}: {} {}\n", (directory.path() / "shine.spv").string(),
-                                       source, (directory.path() / "colour.slang").string()));
+            write(depfile, std::format("{}: {} {}\n", (folder / "shine.spv").string(), source,
+                                       (folder / "colour.slang").string()));
         }
         sources = {ShaderSource{.name = "shine",
                                 .source = source,
@@ -105,9 +106,15 @@ struct Shine {
     }
 
     TemporaryDirectory directory;
-    std::string source = (directory.path() / "shine.slang").string();
-    std::string depfile = (directory.path() / "shine.spv.d").string();
-    std::string scratch = (directory.path() / "compiled").string();
+    // Named as slangc's depfiles must escape, as they do Windows' drive letters.
+#ifdef _WIN32
+    std::filesystem::path folder = directory.path() / "my[shaders]";
+#else
+    std::filesystem::path folder = directory.path() / "my:[shaders]";
+#endif
+    std::string source = (folder / "shine.slang").string();
+    std::string depfile = (folder / "shine.spv.d").string();
+    std::string scratch = (folder / "compiled").string();
     std::array<ShaderSource, 1> sources{};
 };
 
@@ -121,6 +128,18 @@ TEST_CASE("a depfile names what its targets depend on", "[render][shader_watch]"
           std::vector<std::filesystem::path>{"a.slang", "b.slang", "c.slang"});
     CHECK(read_depfile("my\\ out.spv: my\\ shader.slang") ==
           std::vector<std::filesystem::path>{"my shader.slang"});
+}
+
+TEST_CASE("a depfile's paths come out as slangc escaped them", "[render][shader_watch]") {
+    // Windows' drive letters, with their backslashes escaped or not.
+    CHECK(read_depfile("C\\:\\\\a\\\\out.spv: C\\:\\\\a\\\\b.slang") ==
+          std::vector<std::filesystem::path>{"C:\\a\\b.slang"});
+    CHECK(read_depfile("C\\:\\a\\out.spv: C\\:\\a\\b.slang") ==
+          std::vector<std::filesystem::path>{"C:\\a\\b.slang"});
+    CHECK(read_depfile("dep\\:t\\[1\\]/out.spv: dep\\:t\\[1\\]/a\\#b.slang cost$$.slang") ==
+          std::vector<std::filesystem::path>{"dep:t[1]/a#b.slang", "cost$.slang"});
+    // Escaped, a colon ending a path doesn't make it a target.
+    CHECK(read_depfile("out.spv: odd\\:") == std::vector<std::filesystem::path>{"odd:"});
 }
 
 TEST_CASE("the renderer's shaders are catalogued as they were built", "[render][shader_watch]") {
@@ -159,7 +178,7 @@ TEST_CASE("a watched shader is compiled again when it changes", "[render][shader
     CHECK(same.reloaded.empty());
 
     // Then a module it imports changes, which its first compile found it importing.
-    write(shader.directory.path() / "colour.slang", green);
+    write(shader.folder / "colour.slang", green);
     const auto imported = settle(watch);
     CHECK(imported.failed.empty());
     CHECK(imported.reloaded.size() == 1);
@@ -186,7 +205,7 @@ TEST_CASE("a shader's build depfile says what it imports", "[render][shader_watc
     const Shine shader{true};
     ShaderWatch watch{shader.catalogue()};
     CHECK(settle(watch).reloaded.empty());
-    write(shader.directory.path() / "colour.slang", green);
+    write(shader.folder / "colour.slang", green);
     const auto imported = settle(watch);
     CHECK(imported.failed.empty());
     CHECK(imported.reloaded.size() == 1);
