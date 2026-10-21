@@ -16,7 +16,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <ranges>
 #include <span>
 #include <vector>
 
@@ -102,9 +101,12 @@ TEST_CASE("the clouds' noise repeats across its edges and comes out the same eac
         for (std::uint32_t c = 0; c < 4; ++c) {
             CAPTURE(c, found.across.at(c), found.within.at(c));
             CHECK(found.across.at(c) < (2.0 * found.within.at(c)) + 1.0);
-            const auto [least, most] = std::ranges::minmax(
-                std::span{volume} | std::views::drop(c) | std::views::stride(4) |
-                std::views::transform([](std::byte b) { return std::to_integer<int>(b); }));
+            int least = 255;
+            int most = 0;
+            for (std::size_t at = c; at < volume.size(); at += 4) {
+                least = std::min(least, std::to_integer<int>(volume[at]));
+                most = std::max(most, std::to_integer<int>(volume[at]));
+            }
             CHECK(most - least > 80);
         }
     }
