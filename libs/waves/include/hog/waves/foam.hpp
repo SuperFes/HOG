@@ -24,6 +24,15 @@ struct Whitecaps {
 // mean square slope of the waves that break, against a sea grown full under that wind.
 [[nodiscard]] Whitecaps whitecaps(const SeaState& sea);
 
+// Of waves of root-mean-square height `height` metres running where it's `depth` deep, the share
+// breaking as they pass, as Thornton and Guza weighted those too high for it: nothing in deep
+// water, and 1 - 1/e once they're as high as it holds.
+[[nodiscard]] double breaking_waves(double height, double depth) noexcept;
+
+// How much of the sea is white in the surf there: of the waves breaking, their rollers, and the
+// foam they leave.
+[[nodiscard]] Whitecaps surf(double height, double depth) noexcept;
+
 // How many standard deviations above its mean a normally distributed value exceeds `share` of the
 // time; `share` is taken within (0, 1).
 [[nodiscard]] double exceeded(double share) noexcept;

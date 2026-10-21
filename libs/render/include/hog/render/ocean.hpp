@@ -30,16 +30,12 @@ class Device;
 inline constexpr std::size_t drawn_waves = 48;
 // The plane waves summed for the pattern of its foam. Likewise.
 inline constexpr std::size_t foam_waves = 26;
-// How much of the waves runs where the water's shallow, once those too high for it have broken:
-// samples evenly over the root of the depth up to kept_deepest metres, past which all of it does.
-inline constexpr std::size_t kept_samples = 32;
-inline constexpr double kept_deepest = 64.0;
 
 // The waves the sea is drawn with, as shaders/waves.slang takes them.
 struct DrawnWaves {
     struct Wave {
         glm::vec4 heading_wavenumber{0.0F};
-        glm::vec4 amplitude_phase_slope_length{0.0F};
+        glm::vec4 amplitude_phase_slope_heave{0.0F};
         glm::vec4 along{0.0F};
         glm::vec4 breaking{0.0F};
     };
@@ -57,7 +53,6 @@ struct DrawnWaves {
     glm::vec4 shore_anchor{0.0F};
     glm::vec4 shore_east{0.0F};
     glm::vec4 shore_north{0.0F};
-    std::array<glm::vec4, kept_samples / 4> kept{};
     std::array<Wave, drawn_waves> waves{};
     std::array<FoamWave, foam_waves> foam_pattern{};
 };

@@ -240,14 +240,27 @@ Surface surface_at(std::span<const Train> trains, std::span<const Wave> waves, D
         const double flat = std::sqrt(std::max(1.0 - (rising * rising), 0.0));
         return std::pair{wave.amplitude * shown, train.wavenumber * flat};
     };
+    // How much higher each runs here than in deep water: shoaled, and lost if it runs out to sea
+    // where it's shallow, as then it's come off the shore.
+    const auto arriving = [&](const DVec3& heading, double deep) {
+        const double thinned = deep / shallow_wavenumber(deep, floor.depth);
+        const double towards = std::clamp((0.3 - glm::dot(heading, offshore)) / 0.6, 0.0, 1.0);
+        const double sheltered = towards * towards * (3.0 - (2.0 * towards));
+        return shoaling(deep, floor.depth) * std::lerp(sheltered, 1.0, thinned);
+    };
+    const auto heading_of = [&](const Train& train) {
+        return glm::normalize(train.heading - (up * glm::dot(up, train.heading)));
+    };
     // Those too high for the depth break, as many as it takes to bring them down to it.
     double kept = 1.0;
     if (shallow) {
         double squares = 0.0;
         for (const Wave& wave : waves) {
             const auto [amplitude, deep] = shown_at(wave);
-            const double shoaled = amplitude * shoaling(deep, floor.depth);
-            squares += shoaled * shoaled;
+            if (amplitude > 0.0) {
+                const double arrived = amplitude * arriving(heading_of(trains[wave.train]), deep);
+                squares += arrived * arrived;
+            }
         }
         kept = depth_limited(2.0 * std::sqrt(squares), floor.depth);
     }
@@ -262,17 +275,12 @@ Surface surface_at(std::span<const Train> trains, std::span<const Wave> waves, D
         if (amplitude <= 0.0) {
             continue;
         }
-        const double rising = glm::dot(up, train.heading);
-        DVec3 heading = glm::normalize(train.heading - (up * rising));
+        DVec3 heading = heading_of(train);
         double phase = phase_at(train, rest, time);
         double stretch = 1.0;
         if (shallow) {
             const double deep = wavenumber;
-            // Waves running out to sea where it's shallow have come off the shore, and are lost.
-            const double thinned = deep / shallow_wavenumber(deep, floor.depth);
-            const double towards = std::clamp((0.3 - glm::dot(heading, offshore)) / 0.6, 0.0, 1.0);
-            const double sheltered = towards * towards * (3.0 - (2.0 * towards));
-            amplitude *= shoaling(deep, floor.depth) * kept * std::lerp(sheltered, 1.0, thinned);
+            amplitude *= arriving(heading, deep) * kept;
             stretch = orbit_stretch(deep, floor.depth);
             phase += phase_lag(deep, floor.depth);
             // The lag's gradient turns and shortens it.

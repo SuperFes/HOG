@@ -63,7 +63,7 @@ constexpr std::array vertex_attributes{
                                       .format = VK_FORMAT_R32G32_SFLOAT,
                                       .offset = offsetof(SeaVertex, towards)}};
 
-static_assert(sizeof(DrawnWaves) == ((9 + (kept_samples / 4)) * sizeof(glm::vec4)) +
+static_assert(sizeof(DrawnWaves) == (9 * sizeof(glm::vec4)) +
                                         (drawn_waves * sizeof(DrawnWaves::Wave)) +
                                         (foam_waves * sizeof(DrawnWaves::FoamWave)));
 
@@ -87,7 +87,7 @@ constexpr double foam_changing = 0.15;
 constexpr double foam_coarseness = 0.5;
 // How much of the lace's waves along the wind it streaks leaves out, by how much it streaks.
 constexpr double streaking_down = 0.5;
-// How much whitecaps churn, against how much the waves that break bunch.
+// How much whitecaps churn, against how much the waves that break bunch; as waves.slang has it.
 constexpr double foam_ragged = 0.4;
 // As waves.slang's breaking_edges and foam_edges.
 constexpr double breaking_edges = 0.12;
@@ -234,20 +234,8 @@ DrawnWaves drawn_waves_at(std::span<const waves::Train> trains, std::span<const 
                      .up_height = {Vec3{bend.up}, static_cast<float>(bend.eye_height)},
                      .first = {Vec3{frame.east}, 0.0F},
                      .second = {Vec3{frame.north}, 0.0F}};
-    // How much of those drawn runs where it's shallow, as waves::surface_at has it.
-    for (std::size_t sample = 0; sample < kept_samples; ++sample) {
-        const double depth = square(std::sqrt(kept_deepest) * static_cast<double>(sample) /
-                                    static_cast<double>(kept_samples - 1));
-        double squares = 0.0;
-        for (const waves::Wave& wave : strongest.waves) {
-            const waves::Train& train = trains[wave.train];
-            const double flat = std::sqrt(1.0 - square(glm::dot(bend.up, train.heading)));
-            squares += square(wave.amplitude * waves::shoaling(train.wavenumber * flat, depth));
-        }
-        drawn.kept.at(sample / 4)[static_cast<glm::length_t>(sample % 4)] =
-            static_cast<float>(waves::depth_limited(2.0 * std::sqrt(squares), depth));
-    }
     double shorter = 0.0;
+    double heave = 0.0;
     double breaking_shorter = 0.0;
     for (std::size_t i = strongest.waves.size(); i-- > 0;) {
         const waves::Wave& wave = strongest.waves[i];
@@ -258,16 +246,16 @@ DrawnWaves drawn_waves_at(std::span<const waves::Train> trains, std::span<const 
         const double slope = wavenumber * wave.amplitude;
         const double share = waves::breaking_share(train.frequency, wind);
         shorter += slope * slope / 2.0;
+        heave += wave.amplitude * wave.amplitude / 2.0;
         breaking_shorter += slope * slope * share * share / 2.0;
         breaking_all -= breaking_slope(wave);
         const waves::LagTerms lag = waves::lag_terms(wavenumber);
         drawn.waves.at(i) = {
             .heading_wavenumber = {Vec3{train.heading}, static_cast<float>(train.wavenumber)},
-            .amplitude_phase_slope_length =
-                {static_cast<float>(wave.amplitude),
-                 static_cast<float>(waves::phase_at(train, eye.metres(), time)),
-                 static_cast<float>(shorter),
-                 static_cast<float>(2.0 * std::numbers::pi / wavenumber)},
+            .amplitude_phase_slope_heave = {static_cast<float>(wave.amplitude),
+                                            static_cast<float>(
+                                                waves::phase_at(train, eye.metres(), time)),
+                                            static_cast<float>(shorter), static_cast<float>(heave)},
             .along = {static_cast<float>(glm::dot(along, frame.east) / flat),
                       static_cast<float>(glm::dot(along, frame.north) / flat),
                       static_cast<float>(wavenumber), static_cast<float>(share)},
@@ -279,24 +267,25 @@ DrawnWaves drawn_waves_at(std::span<const waves::Train> trains, std::span<const 
     const double breaking_left = std::max(breaking_all, 0.0);
     const waves::Whitecaps white = waves::whitecaps(sea);
     const double breaking = breaking_shorter + breaking_left;
+    // What's left lies in patches, in each as a lace along where the pattern crosses its mean, so
+    // wide as to cover as much as is left in all; each share found as blurred over the foam's
+    // edges. The surf leaves foam in the pattern too, wind or none.
+    const double blurred = std::sqrt(1.0 + (foam_edges * foam_edges));
+    const double patches = std::sqrt(white.left);
+    drawn.foam_left = {static_cast<float>(blurred * waves::exceeded(patches)),
+                       static_cast<float>(blurred * waves::exceeded((1.0 - patches) / 2.0)), 0.0F,
+                       0.0F};
+    drawn.foam_pattern = foam_pattern_at(sea, eye, bend.up, time, drifted);
     if (white.breaking > 0.0 && breaking > 0.0) {
-        // What's left lies in patches, in each as a lace along where the pattern crosses its
-        // mean, so wide as to cover as much as is left in all.
-        const double patches = std::sqrt(white.left);
-        // Whitecaps are ragged: their own churning adds to how much the waves bunch. Each share
-        // is found as blurred over the foam's edges.
+        // Whitecaps are ragged: their own churning adds to how much the waves bunch.
         const double ragged = foam_ragged * std::sqrt(breaking);
-        const double blurred = std::sqrt(1.0 + (foam_edges * foam_edges));
         drawn.foam = {static_cast<float>(std::sqrt(breaking * (1.0 + (foam_ragged * foam_ragged) +
                                                                (breaking_edges * breaking_edges))) *
                                          waves::exceeded(white.breaking)),
                       static_cast<float>(breaking_left), static_cast<float>(white.breaking),
                       static_cast<float>(white.left)};
-        drawn.foam_left = {
-            static_cast<float>(blurred * waves::exceeded(patches)),
-            static_cast<float>(blurred * waves::exceeded((1.0 - (white.left / patches)) / 2.0)),
-            static_cast<float>(std::sqrt(breaking)), static_cast<float>(ragged)};
-        drawn.foam_pattern = foam_pattern_at(sea, eye, bend.up, time, drifted);
+        drawn.foam_left.z = static_cast<float>(std::sqrt(breaking));
+        drawn.foam_left.w = static_cast<float>(ragged);
     }
     return drawn;
 }

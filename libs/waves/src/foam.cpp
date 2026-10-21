@@ -1,4 +1,5 @@
 #include <hog/waves/foam.hpp>
+#include <hog/waves/shoaling.hpp>
 
 #include <algorithm>
 #include <array>
@@ -79,6 +80,22 @@ Whitecaps whitecaps(const SeaState& sea) {
     }
     const double grown = std::min(breaking_slope(sea, speed) / full, 1.0);
     return {.breaking = open.breaking * grown, .left = open.left * grown};
+}
+
+double breaking_waves(double height, double depth) noexcept {
+    if (!(height > 0.0)) {
+        return 0.0;
+    }
+    const double most = breaking_depth * std::max(depth, 0.0);
+    const double over = height < most ? height / most : 1.0;
+    const double squared = over * over;
+    return squared * squared * (1.0 - std::exp(-squared));
+}
+
+Whitecaps surf(double height, double depth) noexcept {
+    const double white = breaking_waves(height, depth);
+    const double breaking = white * breaking_lasts / (breaking_lasts + left_lasts);
+    return {.breaking = breaking, .left = white - breaking};
 }
 
 double exceeded(double share) noexcept {

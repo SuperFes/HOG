@@ -18,6 +18,7 @@
 #include <hog/terrain/material.hpp>
 #include <hog/terrain/shore.hpp>
 #include <hog/terrain/stitching.hpp>
+#include <hog/waves/foam.hpp>
 #include <hog/waves/shoaling.hpp>
 #include <hog/waves/waves.hpp>
 
@@ -550,6 +551,9 @@ struct Probed {
     double coarse;
     double fine;
     double seen;
+    // The root mean square of how high the drawn waves rise, and the share white in the surf.
+    double heave;
+    double surf;
 };
 
 // Over floors as wave_surface takes them, one for each point, or deep water.
@@ -583,7 +587,7 @@ std::vector<Probed> probe_waves(hog::render::Device& device, const hog::render::
     auto questions = hog::render::make_filled_buffer(device, std::as_bytes(std::span{asked}),
                                                      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
     REQUIRE(questions);
-    std::vector<std::array<float, 4>> found(3 * rest.size());
+    std::vector<std::array<float, 4>> found(4 * rest.size());
     auto answers =
         hog::render::make_buffer(device, std::span{found}.size_bytes(),
                                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, hog::render::Memory::Readback);
@@ -615,9 +619,10 @@ std::vector<Probed> probe_waves(hog::render::Device& device, const hog::render::
     std::memcpy(found.data(), answers->mapped().data(), std::span{found}.size_bytes());
     std::vector<Probed> probed;
     for (std::size_t i = 0; i < rest.size(); ++i) {
-        const auto& moved = found.at(3 * i);
-        const auto& normal = found.at((3 * i) + 1);
-        const auto& foam = found.at((3 * i) + 2);
+        const auto& moved = found.at(4 * i);
+        const auto& normal = found.at((4 * i) + 1);
+        const auto& foam = found.at((4 * i) + 2);
+        const auto& surf = found.at((4 * i) + 3);
         probed.push_back({.moved = DVec3{hog::Vec3{moved[0], moved[1], moved[2]}},
                           .normal = DVec3{hog::Vec3{normal[0], normal[1], normal[2]}},
                           .roughness = static_cast<double>(moved[3]),
@@ -625,7 +630,9 @@ std::vector<Probed> probe_waves(hog::render::Device& device, const hog::render::
                           .left = static_cast<double>(foam[0]),
                           .coarse = static_cast<double>(foam[1]),
                           .fine = static_cast<double>(foam[2]),
-                          .seen = static_cast<double>(foam[3])});
+                          .seen = static_cast<double>(foam[3]),
+                          .heave = static_cast<double>(surf[0]),
+                          .surf = static_cast<double>(surf[1])});
     }
     return probed;
 }
@@ -760,7 +767,7 @@ TEST_CASE("waves too short to see from afar fade into the sea's roughness", "[re
     const Probed far = probe_waves(*device, sea.drawn, rest, 5.0).front();
     const Probed farther = probe_waves(*device, sea.drawn, rest, 1e4).front();
     const auto all = static_cast<double>(sea.drawn.count_left_radius.y +
-                                         sea.drawn.waves.front().amplitude_phase_slope_length.z);
+                                         sea.drawn.waves.front().amplitude_phase_slope_heave.z);
     CHECK(near.roughness < far.roughness);
     CHECK(far.roughness < farther.roughness);
     // Seen from afar all of it is roughness, and what showed of the shape is gone.
@@ -826,6 +833,83 @@ TEST_CASE("crests break white over as much of the sea as the wind breaks", "[ren
     CHECK(white < 4);
     // The fine pattern is only taken where there might be foam.
     CHECK(static_cast<double>(fine) < count / 10.0);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("in the surf, as much of the sea breaks white as its waves break, wind or none",
+          "[render][gpu]") {
+    const auto device = test_device();
+    // A swell running in over a shore under a breeze too light to whiten the sea.
+    WavySea sea{3.0};
+    const DVec3 first{hog::Vec3{sea.drawn.first}};
+    sea.sea.systems.push_back({.heading = glm::normalize(first + (north * 0.4)),
+                               .height = 1.5,
+                               .peak = 0.55,
+                               .peakedness = hog::waves::swell_peakedness,
+                               .spread = hog::waves::swell_spread});
+    sea.waves = hog::waves::waves_at(sea.trains, sea.bend.up, sea.sea);
+    sea.drawn = hog::render::drawn_waves_at(sea.trains, sea.waves, sea.sea, sea.eye, sea.bend, noon,
+                                            DVec3{0.0});
+    REQUIRE(sea.drawn.foam.z < 1e-4F);
+    std::mt19937_64 random{4};
+    std::uniform_real_distribution<double> spot{-1'500.0, 1'500.0};
+    std::vector<DVec3> rest;
+    rest.reserve(4'000);
+    for (int i = 0; i < 4'000; ++i) {
+        rest.push_back(sea.rest(DVec3{spot(random), spot(random), 0.0}));
+    }
+    for (const double depth : {0.8, 1.5, 3.0, 6.0}) {
+        CAPTURE(depth);
+        const double deepening =
+            2.0 / 3.0 * hog::waves::dean_scale / std::sqrt(depth / hog::waves::dean_scale);
+        const std::vector<hog::Vec3> floors(
+            rest.size(),
+            hog::Vec3{static_cast<float>(depth), static_cast<float>(-deepening), 0.0F});
+        double breaking = 0.0;
+        double left = 0.0;
+        double expected_breaking = 0.0;
+        double expected_left = 0.0;
+        for (const Probed& probed : probe_waves(*device, sea.drawn, rest, 1e-3, floors)) {
+            const double height = std::sqrt(8.0) * probed.heave;
+            CHECK_THAT(probed.surf, WithinRel(hog::waves::breaking_waves(height, depth), 1e-3) ||
+                                        WithinAbs(0.0, 1e-9));
+            const hog::waves::Whitecaps surf = hog::waves::surf(height, depth);
+            breaking += probed.breaking;
+            left += probed.left;
+            expected_breaking += surf.breaking;
+            expected_left += surf.left;
+        }
+        // Close by, each place is white or not; over the shore, as much as breaks. Where little
+        // does, only near it: a swell's few trains rise less often far over their mean than a
+        // normal sea.
+        const auto count = static_cast<double>(rest.size());
+        CHECK(expected_breaking > 0.0);
+        CHECK_THAT(breaking / count, WithinRel(expected_breaking / count, 0.1) ||
+                                         WithinAbs(expected_breaking / count, 0.003));
+        CHECK_THAT(left / count, WithinRel(expected_left / count, 0.1) ||
+                                     WithinAbs(expected_left / count, 0.003));
+        // From afar, each footprint is that much white.
+        const std::vector<DVec3> far{rest.front(), rest.back()};
+        const std::vector<hog::Vec3> far_floors(far.size(), floors.front());
+        for (const Probed& probed : probe_waves(*device, sea.drawn, far, 1e5, far_floors)) {
+            // Or as much as the breeze whitens, if more.
+            const hog::waves::Whitecaps surf =
+                hog::waves::surf(std::sqrt(8.0) * probed.heave, depth);
+            CHECK(probed.seen == 0.0);
+            CHECK_THAT(
+                probed.breaking,
+                WithinRel(std::max(surf.breaking, static_cast<double>(sea.drawn.foam.z)), 0.02));
+            CHECK_THAT(probed.left,
+                       WithinRel(std::max(surf.left, static_cast<double>(sea.drawn.foam.w)), 0.02));
+        }
+    }
+    // Out where it's deep, the breeze whitens next to nothing.
+    int white = 0;
+    for (const Probed& probed : probe_waves(*device, sea.drawn, rest, 1e-3)) {
+        white += probed.breaking + probed.left > 0.5 ? 1 : 0;
+        CHECK(probed.surf == 0.0);
+    }
+    CHECK(white < 4);
     CHECK(device->validation_errors() == 0);
 }
 

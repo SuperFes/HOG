@@ -50,7 +50,18 @@ struct Surface {
     float4 foam;
     // The sea's floor there, as wave_surface takes it.
     float3 floor;
+    // The surf there, as Surf's breaking, trailing, lace and white.
+    float4 surf;
 };
+
+Surf as_surf(float4 surf) {
+    Surf taken;
+    taken.breaking = surf.x;
+    taken.trailing = surf.y;
+    taken.lace = surf.z;
+    taken.white = surf.w;
+    return taken;
+}
 
 // Metres over which the floor's slope is taken: half the finest depths' spacing, so it changes
 // smoothly across them.
@@ -129,8 +140,10 @@ Surface vertex_main(Vertex vertex) {
     surface.floor = floor_at(surface.rest);
     const WaveSurface water = wave_surface(waves, surface.rest, between, surface.floor);
     surface.from_eye += as_drawn(water.moved, up, surface.normal);
+    const Surf surf = surf_at(waves, water, surface.floor);
+    surface.surf = float4(surf.breaking, surf.trailing, surf.lace, surf.white);
     surface.foam = float4(0.0);
-    if (waves.foam.z > 0.0) {
+    if (waves.foam.z > 0.0 || surf.white > 0.0) {
         const FoamPattern coarse = coarse_foam_at(waves, surface.rest, between);
         surface.foam = float4(coarse.coarse, coarse.across, coarse.coarse_seen, coarse.coarse_slope);
     }
@@ -155,7 +168,8 @@ Facing facing_at(Surface surface, float3 looking) {
     facing.roughness = water.roughness + ripples;
     facing.white = 0.0;
     facing.albedo = breaking_albedo;
-    if (waves.foam.z > 0.0) {
+    const Surf surf = as_surf(surface.surf);
+    if (waves.foam.z > 0.0 || surf.white > 0.0) {
         FoamPattern coarse;
         coarse.coarse = surface.foam.x;
         coarse.across = surface.foam.y;
@@ -164,17 +178,19 @@ Facing facing_at(Surface surface, float3 looking) {
         coarse.fine = 0.0;
         coarse.fine_seen = 0.0;
         coarse.fine_slope = 0.0;
-        const FoamPattern pattern = foam_pattern_at(waves, water, coarse, surface.rest, footprint);
-        const float over = breaking_over(waves, water, pattern);
-        const Foam foam = foam_at(waves, water, pattern, footprint);
+        const FoamPattern pattern =
+            foam_pattern_at(waves, water, surf, coarse, surface.rest, footprint);
+        const Foam foam = foam_at(waves, water, surf, pattern, footprint);
         // Where it's seen, thickest well over where they break and thin where they barely do;
         // what's left is thinner still.
         const float seen = (pattern.coarse_seen + pattern.fine_seen) / 2.0;
         const float thickness =
             lerp(breaking_thickness,
-                 saturate(0.5 + (over / waves.foam_left.z) + (0.35 * pattern.fine)), seen);
+                 saturate(0.5 + foam.over + (0.35 * pattern.fine)), seen);
         const float breaking = foam.breaking * thickness;
-        const float left = foam.left * left_thickness * (1.0 - breaking);
+        // Foam left thins as it ages.
+        const float left = foam.left * min(left_thickness * (0.4 + (1.2 * foam.fresh)), 1.0) *
+                           (1.0 - breaking);
         facing.white = breaking + left;
         facing.albedo = facing.white > 0.0
                             ? ((breaking_albedo * breaking) + (left_albedo * left)) / facing.white

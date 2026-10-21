@@ -13,16 +13,14 @@ static const float choppiness = 1.0;
 // Waves fade as their length falls from this many footprints to half as many.
 static const float footprints_shown = 4.0;
 
-// As hog::render's kept_samples and kept_deepest, and hog::waves' deep_enough and the shore's
-// profile in waves/shoaling.hpp.
-static const int kept_samples = 32;
-static const float kept_deepest = 64.0;
+// As hog::waves' deep_enough, the shore's profile and breaking_depth in waves/shoaling.hpp.
 static const float deep_enough = 3.14159265358979;
 static const float dean_scale = 0.12;
 static const float shelf_run = 100.0;
 static const float shelf_depth = shelf_run * shelf_run * dean_scale * dean_scale * dean_scale;
 static const float shallowest = 0.01;
 static const float full_turn = 6.283185307;
+static const float breaking_depth = 0.42;
 
 // Each as it runs round the eye: over the few kilometres seen, the planet's up turns too little to
 // change how high a wave shows or which way it runs along the ground.
@@ -30,8 +28,8 @@ public struct Wave {
     // xyz unit, in the planet's frame; w the wavenumber, rad/m.
     public float4 heading_wavenumber;
     // x metres high, y its phase through the eye, z the mean square slope of it and every shorter
-    // wave, w its length.
-    public float4 amplitude_phase_slope_length;
+    // wave, w the mean square of how high they rise.
+    public float4 amplitude_phase_slope_heave;
     // xy which way it runs along the ground, in the eye's frame; z its wavenumber along it; w how
     // much it takes part in breaking white.
     public float4 along;
@@ -69,8 +67,6 @@ public struct Waves {
     public float4 shore_anchor;
     public float4 shore_east;
     public float4 shore_north;
-    // How much of the waves runs where the water's shallow, against the root of its depth.
-    public float4 kept[kept_samples / 4];
     public Wave waves[drawn_waves];
     public FoamWave foam_pattern[foam_waves];
 };
@@ -117,18 +113,6 @@ float2 lag_at(float3 terms, float kappa) {
     return float2(terms.z, 0.0) + (terms.y * float2(value, slope / (2.0 * deep_enough)));
 }
 
-// How much of the waves runs `depth` deep, once those too high for it have broken.
-float kept_at(Waves waves, float depth) {
-    const float at = sqrt(max(depth, 0.0) / kept_deepest) * float(kept_samples - 1);
-    if (at >= float(kept_samples - 1)) {
-        return 1.0;
-    }
-    const int below = int(at);
-    const float low = waves.kept[below / 4][below % 4];
-    const float high = waves.kept[(below + 1) / 4][(below + 1) % 4];
-    return lerp(low, high, at - float(below));
-}
-
 // The sea's floor under a point: x how deep the water over it is at rest, and yz how fast it
 // deepens along the eye's first and second ways across, metres per metre.
 public float3 deep_floor() {
@@ -138,13 +122,20 @@ public float3 deep_floor() {
 // Of the water at a point of sea level, where the waves move it, how its surface faces there, and
 // how rough with waves too short to draw it is: their mean square slope. Taken in the frame under
 // the eye. And of the waves that break, how much they bunch the water there, and the mean square of
-// that of those too short to draw.
+// that of those too short to draw. And how high the drawn waves rise there as seen, and how high
+// they stood a quarter of their period before; the mean square of that, all told and of what's not
+// seen; and the mean square of its slope as seen.
 public struct WaveSurface {
     public float3 moved;
     public float3 normal;
     public float roughness;
     public float breaking;
     public float breaking_left;
+    public float rise;
+    public float risen;
+    public float heave;
+    public float heave_unseen;
+    public float rise_slope;
 };
 
 float square(float x) {
@@ -165,12 +156,16 @@ public WaveSurface wave_surface(Waves waves, float3 rest, float footprint, float
     WaveSurface surface;
     surface.roughness = waves.count_left_radius.y;
     float rising = 0.0;
+    float risen = 0.0;
     float2 carried = float2(0.0);
     float2 slope = float2(0.0);
     // Symmetric: xx, xy and yy.
     float3 bunching = float3(0.0);
     surface.breaking = 0.0;
     surface.breaking_left = waves.foam.y;
+    surface.heave = 0.0;
+    surface.heave_unseen = 0.0;
+    surface.rise_slope = 0.0;
     const float shown_from = 1.0 / (footprint * footprints_shown / 2.0);
     const int count = int(waves.count_left_radius.x);
     // Where it's shallow enough for any wave to feel the floor.
@@ -179,13 +174,14 @@ public WaveSurface wave_surface(Waves waves, float3 rest, float footprint, float
     const float2 deepening = floor.yz;
     const float steepness = length(deepening);
     const float2 offshore = steepness > 0.0 ? deepening / steepness : float2(0.0);
-    const float kept_shallow = shallow ? kept_at(waves, depth) : 1.0;
+    // Of the waves drawn, the mean square slope and breaking bunching of what's not seen.
+    float drawn_roughness = 0.0;
+    float drawn_breaking = 0.0;
     for (int i = 0; i < count; ++i) {
         const float4 heading = waves.waves[i].heading_wavenumber;
-        const float4 shape = waves.waves[i].amplitude_phase_slope_length;
+        const float4 shape = waves.waves[i].amplitude_phase_slope_heave;
         const float4 along = waves.waves[i].along;
-        // Those too high for the depth break, short or long.
-        float full = shape.x * kept_shallow;
+        float full = shape.x;
         float wavenumber = along.z;
         float2 ahead = along.xy;
         float phase = (heading.w * dot(heading.xyz, rest)) + shape.y;
@@ -212,25 +208,50 @@ public WaveSurface wave_surface(Waves waves, float3 rest, float footprint, float
         if (kept <= 0.0) {
             surface.roughness += shape.z;
             surface.breaking_left += waves.waves[i].breaking.x;
+            // The shorter waves shoal less than this one, which is near enough for them.
+            const float shoaled = shape.x > 0.0 ? full / shape.x : 1.0;
+            surface.heave_unseen += shape.w * shoaled * shoaled;
             break;
         }
         const float steep_full = full * wavenumber;
         const float unseen = (1.0 - (kept * kept)) / 2.0;
-        surface.roughness += steep_full * steep_full * unseen;
+        drawn_roughness += steep_full * steep_full * unseen;
         const float breaking_full = steep_full * along.w;
-        surface.breaking_left += breaking_full * breaking_full * unseen;
+        drawn_breaking += breaking_full * breaking_full * unseen;
+        surface.heave_unseen += full * full * unseen;
         const float amplitude = full * kept;
         const float steep = steep_full * kept;
+        surface.heave += amplitude * amplitude / 2.0;
+        surface.rise_slope += steep * steep / 2.0;
         float s;
         float c;
         sincos(phase, s, c);
         rising += amplitude * c;
+        risen -= amplitude * s;
         carried -= ahead * (choppiness * amplitude * stretch * s);
         slope += ahead * (steep * s);
         bunching += float3(ahead.x * ahead.x, ahead.x * ahead.y, ahead.y * ahead.y) *
                     (choppiness * steep * stretch * c);
         surface.breaking += choppiness * steep * stretch * c * along.w;
     }
+    // Those too high for the depth break, short or long, as many as it takes to bring them down to
+    // what it holds: as hog::waves::surface_at, and all that's summed of them scales with them.
+    const float all_heave = surface.heave + surface.heave_unseen;
+    const float held =
+        shallow && all_heave > 0.0 ? min(breaking_depth * depth / sqrt(8.0 * all_heave), 1.0) : 1.0;
+    const float held_squared = held * held;
+    rising *= held;
+    carried *= held;
+    slope *= held;
+    bunching *= held;
+    surface.breaking *= held;
+    surface.roughness += drawn_roughness * held_squared;
+    surface.breaking_left += drawn_breaking * held_squared;
+    surface.heave = all_heave * held_squared;
+    surface.heave_unseen *= held_squared;
+    surface.rise_slope *= held_squared;
+    surface.rise = rising;
+    surface.risen = risen * held;
     surface.moved = (up * rising) + (first * carried.x) + (second * carried.y);
     const float3 one = (first * (1.0 - bunching.x)) - (second * bunching.y) - (up * slope.x);
     const float3 two = (second * (1.0 - bunching.z)) - (first * bunching.y) - (up * slope.y);
@@ -282,23 +303,119 @@ void add_foam_waves(Waves waves, inout FoamPattern pattern, float3 rest, float f
     }
 }
 
-// How much of the sea is white where `water` lies: breaking, and with foam left.
+// How much of the sea is white where `water` lies: breaking, and with foam left; how far over
+// where they break the waves are, in standard deviations of what places it; and how fresh what's
+// left is, from 0 to 1.
 public struct Foam {
     public float breaking;
     public float left;
+    public float over;
+    public float fresh;
 };
 
 // How far the bunching of the waves that break rises over where they break, with the whole
 // pattern standing in for what the waves too short to draw add, and how the whitecaps churn.
-public float breaking_over(Waves waves, WaveSurface water, FoamPattern pattern) {
+float breaking_over(Waves waves, WaveSurface water, FoamPattern pattern) {
     return water.breaking + (sqrt(water.breaking_left / 2.0) * (pattern.coarse + pattern.fine)) +
            (waves.foam_left.w * pattern.across) - waves.foam.x;
 }
 
 // Foam fades out over its edges, not at a line: over this much of the spread of what places them,
-// less for whitecaps than for the foam they leave. As ocean.cpp has it.
+// less for whitecaps than for the foam they leave; and how much breaking crests churn, to that of
+// what places them. As ocean.cpp has them.
 static const float breaking_edges = 0.12;
 static const float foam_edges = 0.3;
+static const float foam_ragged = 0.4;
+
+// Of what's white in the surf, the share of it breaking, as hog::waves::surf has it; and over how
+// much of the waves' period the foam they leave fades out at its edges.
+static const float surf_breaking = 0.25;
+static const float trailing_edges = 0.04;
+
+// How many standard deviations above its mean a normal value exceeds `share` of the time, as
+// `below` has it: so the root of a cubic in it.
+float exceeding(float share) {
+    const float within = clamp(share, 1e-6, 1.0 - 1e-6);
+    const float logit = log((1.0 - within) / within);
+    const float u = 0.3417661882 * abs(logit);
+    return sign(logit) * 5.4944485142 * sinh(log(u + sqrt((u * u) + 1.0)) / 3.0);
+}
+
+// Where the waves break in the surf: x how far over their mean the drawn waves must rise there for
+// them to break white, in standard deviations; y how much of each wave's period behind its crest
+// the foam they leave lies in, and z how near the foam pattern's fine field's mean the lace in it
+// lies, in standard deviations; w the share of the sea white in the surf.
+public struct Surf {
+    public float breaking;
+    public float trailing;
+    public float lace;
+    public float white;
+};
+
+// The surf where `water` lies over `floor`: smooth enough to take between points a few pixels
+// apart.
+public Surf surf_at(Waves waves, WaveSurface water, float3 floor) {
+    Surf surf;
+    surf.breaking = 0.0;
+    surf.trailing = 0.0;
+    surf.lace = 0.0;
+    surf.white = 0.0;
+    const float depth = max(floor.x, shallowest);
+    if (depth >= waves.count_left_radius.w) {
+        return surf;
+    }
+    // As hog::waves::breaking_waves, of the drawn waves' root-mean-square height.
+    const float over = min(sqrt(8.0 * water.heave) / (breaking_depth * depth), 1.0);
+    const float squared = over * over;
+    surf.white = squared * squared * (1.0 - exp(-squared));
+    const float breaking = surf.white * surf_breaking;
+    surf.breaking = exceeding(breaking);
+    // What's left trails the crests, as a lace, so wide as to cover as much as is left in all;
+    // the lace's share found as blurred over the foam's edges, as ocean.cpp has the wind's.
+    const float trailing = sqrt(surf.white - breaking);
+    surf.trailing = trailing;
+    surf.lace = sqrt(1.0 + square(foam_edges)) * exceeding((1.0 - trailing) / 2.0);
+    return surf;
+}
+
+// How far the drawn waves rise over where they break in the surf, and how the rollers churn.
+float surf_over(WaveSurface water, Surf surf, FoamPattern pattern) {
+    const float heave = sqrt(water.heave);
+    const float blurred = sqrt(1.0 + square(foam_ragged) + square(breaking_edges));
+    return water.rise + (foam_ragged * heave * pattern.across) - (surf.breaking * heave * blurred);
+}
+
+// How fresh foam left is where it's not known how long ago it was left.
+static const float middling_fresh = 0.5;
+
+// How likely the water is to lie where the foam left trails the crests, and how fresh that is: by
+// how far through the waves' period it is since a crest passed, as the drawn waves sum, where
+// they're seen.
+float2 trailing_crests(WaveSurface water, Surf surf, float footprint) {
+    const float seen_heave = water.heave - water.heave_unseen;
+    if (!(seen_heave > 0.0) || (water.rise == 0.0 && water.risen == 0.0)) {
+        return float2(surf.trailing, middling_fresh);
+    }
+    const float seen = saturate(seen_heave / water.heave);
+    const float since = frac(atan2(water.risen, water.rise) / full_turn);
+    // From the middle of the band behind the crest, in periods.
+    const float off = abs(frac(since - (surf.trailing / 2.0) + 0.5) - 0.5);
+    const float wavenumber = sqrt(water.rise_slope / seen_heave);
+    const float edges = trailing_edges + (footprint * wavenumber / full_turn);
+    const float fresh = saturate(1.0 - (since / max(surf.trailing, 1e-6)));
+    return lerp(float2(surf.trailing, middling_fresh),
+                float2(below(((surf.trailing / 2.0) - off) / edges), fresh), seen);
+}
+
+// How that spreads where the waves and the pattern aren't seen, or change across the footprint.
+float surf_spread_at(WaveSurface water, FoamPattern pattern, float footprint) {
+    const float coarse_unseen = max(1.0 - pattern.coarse_seen, 0.0);
+    const float churning = square(foam_ragged) * water.heave;
+    const float hard = sqrt(water.heave_unseen + (churning * coarse_unseen) +
+                            (square(breaking_edges) * water.heave));
+    const float soft = footprint * sqrt(water.rise_slope + (churning * pattern.coarse_slope));
+    return max(max(hard, soft), 1e-6);
+}
 
 // How far apart, in their spreads, values may lie and still each count.
 static const float reaching = 3.0;
@@ -334,42 +451,68 @@ public FoamPattern coarse_foam_at(Waves waves, float3 rest, float footprint) {
 
 // To `coarse`, the pattern's coarse waves where `water` lies, adds its fine waves at `rest`, seen
 // over `footprint` metres, where they might make any of it white.
-public FoamPattern foam_pattern_at(Waves waves, WaveSurface water, FoamPattern coarse, float3 rest,
-                                   float footprint) {
+public FoamPattern foam_pattern_at(Waves waves, WaveSurface water, Surf surf, FoamPattern coarse,
+                                   float3 rest, float footprint) {
     FoamPattern pattern = coarse;
     const float fine_reach = reaching * sqrt(water.breaking_left / 2.0);
-    const bool near_breaking = breaking_over(waves, water, pattern) >
-                               -fine_reach - (reaching * breaking_spread_at(waves, water, pattern));
-    const bool in_patch = pattern.across - waves.foam_left.x >
-                          -reaching * across_spread_at(pattern, footprint);
-    if (near_breaking || in_patch) {
+    const bool near_breaking =
+        waves.foam.z > 0.0 &&
+        breaking_over(waves, water, pattern) >
+            -fine_reach - (reaching * breaking_spread_at(waves, water, pattern));
+    const bool in_patch =
+        pattern.across - waves.foam_left.x > -reaching * across_spread_at(pattern, footprint);
+    if (near_breaking || surf.white > 0.0 || in_patch) {
         add_foam_waves(waves, pattern, rest, footprint, coarse_foam, foam_waves);
     }
     return pattern;
 }
 
 // Where the waves and the pattern are seen, whether the sea is white there; where not, how likely.
-public Foam foam_at(Waves waves, WaveSurface water, FoamPattern pattern, float footprint) {
+public Foam foam_at(Waves waves, WaveSurface water, Surf surf, FoamPattern pattern,
+                    float footprint) {
     Foam foam;
-    if (waves.foam.z <= 0.0) {
-        foam.breaking = 0.0;
-        foam.left = 0.0;
+    foam.breaking = 0.0;
+    foam.left = 0.0;
+    foam.over = -reaching;
+    foam.fresh = middling_fresh;
+    if (waves.foam.z <= 0.0 && surf.white <= 0.0) {
         return foam;
     }
-    // Blurred over how much each changes across what's seen.
-    const float half_left = water.breaking_left / 2.0;
-    const float breaking_soft =
-        footprint * sqrt((half_left * (pattern.coarse_slope + pattern.fine_slope)) +
-                         (square(waves.foam_left.w) * pattern.coarse_slope));
-    const float breaking_spread =
-        max(max(breaking_spread_at(waves, water, pattern), breaking_soft), 1e-6);
-    foam.breaking = below(breaking_over(waves, water, pattern) / breaking_spread);
+    if (waves.foam.z > 0.0) {
+        // Blurred over how much each changes across what's seen.
+        const float half_left = water.breaking_left / 2.0;
+        const float breaking_soft =
+            footprint * sqrt((half_left * (pattern.coarse_slope + pattern.fine_slope)) +
+                             (square(waves.foam_left.w) * pattern.coarse_slope));
+        const float breaking_spread =
+            max(max(breaking_spread_at(waves, water, pattern), breaking_soft), 1e-6);
+        const float over = breaking_over(waves, water, pattern);
+        foam.breaking = below(over / breaking_spread);
+        foam.over = over / waves.foam_left.z;
+    }
+    if (surf.white > 0.0) {
+        const float over = surf_over(water, surf, pattern);
+        foam.breaking =
+            max(foam.breaking, below(over / surf_spread_at(water, pattern, footprint)));
+        foam.over = max(foam.over, over / max(sqrt(water.heave), 1e-6));
+    }
     const float fine_spread = max(sqrt(max(1.0 - pattern.fine_seen, 0.0) + square(foam_edges)),
                                   footprint * sqrt(pattern.fine_slope));
-    const float lace = waves.foam_left.y;
-    const float in_lace = below((lace - pattern.fine) / fine_spread) -
-                          below((-lace - pattern.fine) / fine_spread);
-    foam.left = in_lace *
-                below((pattern.across - waves.foam_left.x) / across_spread_at(pattern, footprint));
+    if (waves.foam.z > 0.0) {
+        const float lace = waves.foam_left.y;
+        const float in_lace = below((lace - pattern.fine) / fine_spread) -
+                              below((-lace - pattern.fine) / fine_spread);
+        foam.left = in_lace * below((pattern.across - waves.foam_left.x) /
+                                    across_spread_at(pattern, footprint));
+    }
+    if (surf.white > 0.0) {
+        const float in_lace = below((surf.lace - pattern.fine) / fine_spread) -
+                              below((-surf.lace - pattern.fine) / fine_spread);
+        const float2 trailing = trailing_crests(water, surf, footprint);
+        if (in_lace * trailing.x > foam.left) {
+            foam.left = in_lace * trailing.x;
+            foam.fresh = trailing.y;
+        }
+    }
     return foam;
 }

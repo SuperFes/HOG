@@ -1,4 +1,5 @@
 #include <hog/waves/foam.hpp>
+#include <hog/waves/shoaling.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -107,4 +108,30 @@ TEST_CASE("foam drifts with the current and the wind, streaking in a gale", "[wa
         CHECK(streaks >= before);
         before = streaks;
     }
+}
+
+TEST_CASE("waves break in the surf as they come to be too high for the depth", "[waves][foam]") {
+    constexpr double height = 1.0;
+    // Thornton and Guza's weighting at what the depth holds, and a little short of it.
+    const double holds = height / hog::waves::breaking_depth;
+    CHECK_THAT(hog::waves::breaking_waves(height, holds), WithinRel(1.0 - std::exp(-1.0), 1e-12));
+    CHECK_THAT(hog::waves::breaking_waves(height, 2.0 * holds),
+               WithinRel(std::pow(0.5, 4.0) * (1.0 - std::exp(-0.25)), 1e-12));
+    // No more break where it's shallower still: there they're no higher than it holds.
+    CHECK(hog::waves::breaking_waves(height, holds / 3.0) ==
+          hog::waves::breaking_waves(height, holds));
+    CHECK(hog::waves::breaking_waves(height, 0.0) == hog::waves::breaking_waves(height, holds));
+    CHECK(hog::waves::breaking_waves(height, 50.0) < 1e-6);
+    CHECK(hog::waves::breaking_waves(0.0, 1.0) == 0.0);
+    double before = 0.0;
+    for (int step = 40; step >= 0; --step) {
+        const double breaking = hog::waves::breaking_waves(height, step * 0.5);
+        CHECK(breaking >= before);
+        before = breaking;
+    }
+    // As much of the surf is white as breaks, most of it foam left.
+    const Whitecaps surf = hog::waves::surf(height, 1.5 * holds);
+    CHECK_THAT(white(surf), WithinRel(hog::waves::breaking_waves(height, 1.5 * holds), 1e-12));
+    CHECK(surf.left > surf.breaking);
+    CHECK(white(hog::waves::surf(0.0, 1.0)) == 0.0);
 }

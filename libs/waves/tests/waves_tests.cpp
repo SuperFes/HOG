@@ -2,6 +2,7 @@
 #include <hog/waves/waves.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -555,7 +556,10 @@ TEST_CASE("waves running in shorten and turn towards the shore", "[waves][shoali
 
 TEST_CASE("in the shallows waves break down to what the depth holds", "[waves][shoaling]") {
     const std::vector<Train> trains = hog::waves::planet_trains(seed);
-    const SeaState sea = windy(glm::normalize(-east + (north * 0.3)) * 12.0);
+    // A gale's sea running in at the shore, and one running along it: what of it comes in
+    // still breaks down to the depth.
+    const auto heading = GENERATE(glm::normalize(-east + (north * 0.3)), north);
+    const SeaState sea = windy(heading * 12.0);
     const std::vector<Wave> waves = hog::waves::waves_at(trains, up, sea);
     std::mt19937_64 random{17};
     std::uniform_real_distribution<double> spot{-300.0, 300.0};
@@ -573,8 +577,8 @@ TEST_CASE("in the shallows waves break down to what the depth holds", "[waves][s
         }
         // The root-mean-square height is the root of eight times the variance.
         const double rms = std::sqrt(8.0 * squares / samples);
-        CAPTURE(out, floor.depth, rms);
+        CAPTURE(heading, out, floor.depth, rms);
         CHECK(rms < hog::waves::breaking_depth * floor.depth * 1.1);
-        CHECK(rms > hog::waves::breaking_depth * floor.depth * 0.5);
+        CHECK(rms > hog::waves::breaking_depth * floor.depth * 0.9);
     }
 }
