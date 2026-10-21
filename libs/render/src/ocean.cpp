@@ -7,6 +7,7 @@
 #include <hog/terrain/sea.hpp>
 #include <hog/terrain/shore.hpp>
 #include <hog/waves/foam.hpp>
+#include <hog/waves/tide.hpp>
 
 #include <glm/gtc/packing.hpp>
 
@@ -63,7 +64,7 @@ constexpr std::array vertex_attributes{
                                       .format = VK_FORMAT_R32G32_SFLOAT,
                                       .offset = offsetof(SeaVertex, towards)}};
 
-static_assert(sizeof(DrawnWaves) == (9 * sizeof(glm::vec4)) +
+static_assert(sizeof(DrawnWaves) == (10 * sizeof(glm::vec4)) +
                                         (drawn_waves * sizeof(DrawnWaves::Wave)) +
                                         (foam_waves * sizeof(DrawnWaves::FoamWave)));
 
@@ -200,7 +201,7 @@ constexpr std::array air_descriptors{binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFE
 
 DrawnWaves drawn_waves_at(std::span<const waves::Train> trains, std::span<const waves::Wave> waves,
                           const waves::SeaState& sea, WorldPosition eye, const terrain::Bend& bend,
-                          GameTime time, DVec3 drifted) {
+                          GameTime time, DVec3 drifted, GameDuration day) {
     const double wind = glm::length(sea.wind);
     const auto breaking_slope = [&](const waves::Wave& wave) {
         const waves::Train& train = trains[wave.train];
@@ -276,6 +277,16 @@ DrawnWaves drawn_waves_at(std::span<const waves::Train> trains, std::span<const 
                        static_cast<float>(blurred * waves::exceeded((1.0 - patches) / 2.0)), 0.0F,
                        0.0F};
     drawn.foam_pattern = foam_pattern_at(sea, eye, bend.up, time, drifted);
+    // Over the few kilometres seen, the tide rises evenly enough along the ground.
+    constexpr double tide_step = 1'000.0;
+    const auto tide_towards = [&](const DVec3& way) {
+        return (waves::tide_at(bend.up + (way * (tide_step / bend.radius)), time, day) -
+                waves::tide_at(bend.up - (way * (tide_step / bend.radius)), time, day)) /
+               (2.0 * tide_step);
+    };
+    drawn.tide = {
+        Vec3{(frame.east * tide_towards(frame.east)) + (frame.north * tide_towards(frame.north))},
+        static_cast<float>(waves::tide_at(bend.up, time, day))};
     if (white.breaking > 0.0 && breaking > 0.0) {
         // Whitecaps are ragged: their own churning adds to how much the waves bunch.
         const double ragged = foam_ragged * std::sqrt(breaking);
@@ -298,6 +309,12 @@ Result<Ocean> Ocean::create(Device& device, VkFormat colour_format, VkFormat dep
                                  Memory::Upload);
         if (!waves) {
             return std::unexpected(std::move(waves).error());
+        }
+        // A calm sea at its mean, for ground drawn before the sea's first drawn.
+        const DrawnWaves calm{};
+        std::memcpy(waves->mapped().data(), &calm, sizeof(calm));
+        if (auto flushed = waves->flush(); !flushed) {
+            return std::unexpected(std::move(flushed).error());
         }
         ocean.waves_.push_back(std::move(waves).value());
     }
@@ -393,6 +410,12 @@ Result<> Ocean::update_shore(VkCommandBuffer commands, std::uint32_t frame,
     }
     shore_ = shore;
     return {};
+}
+
+SeaBindings Ocean::bindings(std::uint32_t frame) const {
+    return {.waves = waves_.at(frame).handle(),
+            .shore = shore_ ? shore_depths_.image().view() : no_shore_.view(),
+            .sampler = shore_sampler_.handle()};
 }
 
 Result<> Ocean::draw(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view,

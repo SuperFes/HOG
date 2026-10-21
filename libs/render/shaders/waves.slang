@@ -1,5 +1,7 @@
 module waves;
 
+import shore;
+
 // As hog::render::drawn_waves: the most waves the sea is drawn with; and foam_waves, those of its
 // foam's pattern.
 public static const int drawn_waves = 48;
@@ -67,6 +69,9 @@ public struct Waves {
     public float4 shore_anchor;
     public float4 shore_east;
     public float4 shore_north;
+    // xyz how the tide rises per metre from the eye, w how high it stands over the sea's mean at
+    // the eye.
+    public float4 tide;
     public Wave waves[drawn_waves];
     public FoamWave foam_pattern[foam_waves];
 };
@@ -111,6 +116,17 @@ float2 lag_at(float3 terms, float kappa) {
     }
     value = (value * t * t) + shoreface_lag[0];
     return float2(terms.z, 0.0) + (terms.y * float2(value, slope / (2.0 * deep_enough)));
+}
+
+// How high the sea stands over its mean at `point`, from the eye: the tide, where the sea can reach,
+// as shore_depth finds it in `depths`.
+public float sea_level_at(Waves waves, Sampler2DArray depths, float3 point) {
+    const float tide = waves.tide.w + dot(waves.tide.xyz, point);
+    if (tide == 0.0) {
+        return 0.0;
+    }
+    return tide * sea_reached(shore_depth(depths, waves.shore_anchor, waves.shore_east,
+                                          waves.shore_north, waves.count_left_radius.z, point));
 }
 
 // The sea's floor under a point: x how deep the water over it is at rest, and yz how fast it

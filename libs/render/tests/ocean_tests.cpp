@@ -20,6 +20,7 @@
 #include <hog/terrain/stitching.hpp>
 #include <hog/waves/foam.hpp>
 #include <hog/waves/shoaling.hpp>
+#include <hog/waves/tide.hpp>
 #include <hog/waves/waves.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -27,6 +28,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -126,10 +128,18 @@ Patch level_patch(double along, double across, double height) {
             })};
 }
 
+// The tide standing `tide` metres over the sea's mean, round the eye over depths of `depth`
+// everywhere as the shore's grids keep them.
+struct Tide {
+    double tide = 0.0;
+    float depth = 0.0F;
+};
+
 // Draws over a black background the ground, if any, tinted below sea level if asked, and then, if
-// asked, the sea's surface; reads it back.
-std::vector<std::uint8_t> draw_patch(hog::render::Device& device, const OceanView& view,
-                                     const std::optional<Patch>& ground, bool sea, bool tinted) {
+// asked, the sea's surface, with the tide if any; reads it back.
+std::vector<std::uint8_t> draw_patch(hog::render::Device& device, OceanView view,
+                                     const std::optional<Patch>& ground, bool sea, bool tinted,
+                                     std::optional<Tide> tide = std::nullopt) {
     auto ocean = hog::render::Ocean::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
     REQUIRE(ocean);
     std::vector<hog::terrain::MaterialImage> materials;
@@ -165,6 +175,14 @@ std::vector<std::uint8_t> draw_patch(hog::render::Device& device, const OceanVie
     REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
         namespace use = hog::render::image_use;
         REQUIRE(pool->record_uploads(commands, 0));
+        if (tide) {
+            view.waves.tide.w = static_cast<float>(tide->tide);
+            const std::vector<float> depths(hog::terrain::shore_spacing.size() *
+                                                hog::terrain::shore_size * hog::terrain::shore_size,
+                                            tide->depth);
+            REQUIRE(ocean->update_shore(commands, 0,
+                                        hog::terrain::shore_frame(view.bend.up, radius), depths));
+        }
         hog::render::transition(commands, target->handle(), VK_IMAGE_ASPECT_COLOR_BIT, use::discard,
                                 use::colour_target);
         hog::render::transition(commands, depth->handle(), VK_IMAGE_ASPECT_DEPTH_BIT, use::discard,
@@ -172,8 +190,9 @@ std::vector<std::uint8_t> draw_patch(hog::render::Device& device, const OceanVie
         hog::render::begin_rendering(commands, target->view(), extent,
                                      VkClearColorValue{.float32 = {0.0F, 0.0F, 0.0F, 1.0F}},
                                      {.view = depth->view()});
-        terrain->draw(commands, extent, *pool, draws,
-                      {.camera = view.camera, .sun = view.sun, .bend = view.bend});
+        terrain->draw(
+            commands, extent, *pool, draws,
+            {.camera = view.camera, .sun = view.sun, .bend = view.bend, .sea = ocean->bindings()});
         if (sea) {
             CHECK(ocean->draw(commands, extent, view));
         }
@@ -186,12 +205,13 @@ std::vector<std::uint8_t> draw_patch(hog::render::Device& device, const OceanVie
 
 // As draw_patch, with level ground, if any, `ground` metres above sea level under the eye.
 std::vector<std::uint8_t> draw(hog::render::Device& device, const OceanView& view,
-                               std::optional<double> ground, bool sea = true, bool tinted = false) {
+                               std::optional<double> ground, bool sea = true, bool tinted = false,
+                               std::optional<Tide> tide = std::nullopt) {
     std::optional<Patch> patch;
     if (ground) {
         patch = Patch{.origin = WorldPosition{up * (radius + *ground)}, .vertices = flat_patch()};
     }
-    return draw_patch(device, view, patch, sea, tinted);
+    return draw_patch(device, view, patch, sea, tinted, tide);
 }
 
 Pixel pixel_at(const std::vector<std::uint8_t>& pixels, std::uint32_t x, std::uint32_t y) {
@@ -377,6 +397,28 @@ TEST_CASE("ground above sea level hides the sea, and the sea lies over ground be
     const Pixel through = pixel_at(draw(*device, aside, -1.0), middle, middle);
     CHECK(through[1] + 10 > beneath[1]);
     CHECK(through[1] < beneath[1]);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("the tide floods low ground the sea reaches, and bares ground under its mean",
+          "[render][gpu]") {
+    const auto device = test_device();
+    const OceanView view = seen_from(4.0, -up, north, glm::normalize(east + up));
+    const std::uint32_t middle = extent.width / 2;
+    const auto seen = [&](double ground, bool sea, std::optional<Tide> tide) {
+        return pixel_at(draw(*device, view, ground, sea, true, tide), middle, middle);
+    };
+    // Half a metre above the sea's mean: dry with the tide out, and with it a metre in as deep
+    // under it as ground half a metre below the mean is at the mean, unless the sea can't reach it.
+    const Pixel dry = seen(0.5, false, std::nullopt);
+    CHECK(seen(0.5, true, Tide{.tide = 0.0, .depth = -0.5F}) == dry);
+    const Pixel flooded = seen(0.5, true, Tide{.tide = 1.0, .depth = -0.5F});
+    CHECK(flooded != dry);
+    CHECK(flooded == seen(-0.5, true, Tide{.tide = 0.0, .depth = 0.5F}));
+    CHECK(seen(0.5, true, Tide{.tide = 1.0, .depth = hog::terrain::shore_highest}) == dry);
+    // Half a metre below it, bared with the tide well out.
+    CHECK(seen(-0.5, true, Tide{.tide = -1.0, .depth = 0.5F}) ==
+          pixel_at(draw(*device, view, -0.5, false, false), middle, middle));
     CHECK(device->validation_errors() == 0);
 }
 
@@ -757,6 +799,31 @@ TEST_CASE("over a shore the sea's drawn waves shoal as hog::waves has them", "[r
         CHECK(glm::dot(probed[i].normal, surface.normal) > 0.999);
     }
     CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("the sea's drawn waves carry the tide round the eye", "[render]") {
+    // Eight metres over a calm sea at middling latitudes, where the tide runs high.
+    const std::vector<hog::waves::Train> trains = hog::waves::planet_trains(5);
+    const WorldPosition eye{glm::normalize(DVec3{0.6, 0.5, 0.4}) * (radius + 8.0)};
+    const hog::terrain::Bend bend = hog::terrain::bend_from(eye, radius, 0.0);
+    const hog::waves::SeaState calm{};
+    constexpr hog::GameDuration day = std::chrono::hours{4};
+    for (int hour = 0; hour < 8; ++hour) {
+        const hog::GameTime time = noon + std::chrono::minutes{17 * hour};
+        const hog::render::DrawnWaves drawn =
+            hog::render::drawn_waves_at(trains, {}, calm, eye, bend, time, DVec3{0.0}, day);
+        CHECK_THAT(static_cast<double>(drawn.tide.w),
+                   WithinAbs(hog::waves::tide_at(bend.up, time, day), 1e-6));
+        // As it rises a kilometre off along the ground.
+        const DVec3 off = glm::normalize(north - (bend.up * glm::dot(north, bend.up)));
+        const double there =
+            hog::waves::tide_at(glm::normalize(bend.up + (off * (1'000.0 / radius))), time, day);
+        CHECK_THAT(static_cast<double>(drawn.tide.w) +
+                       (1'000.0 * glm::dot(DVec3{hog::Vec3{drawn.tide}}, off)),
+                   WithinAbs(there, 1e-3));
+    }
+    CHECK(hog::render::drawn_waves_at(trains, {}, calm, eye, bend, noon, DVec3{0.0}).tide ==
+          glm::vec4{0.0F});
 }
 
 TEST_CASE("waves too short to see from afar fade into the sea's roughness", "[render][gpu]") {

@@ -5,6 +5,7 @@ import season;
 import shadow;
 import tone;
 import water;
+import waves;
 
 struct Push {
     float4x4 clip_from_eye;
@@ -50,6 +51,9 @@ struct Settings {
 [[vk::binding(5, 0)]] Sampler2DArray aerial_volume;
 // As cloud_march.slang's.
 [[vk::binding(6, 0)]] Sampler2D cloud_shadow;
+// The sea, as ocean.slang reads it, for how high it stands over the ground.
+[[vk::binding(7, 0)]] ConstantBuffer<Waves> sea;
+[[vk::binding(8, 0)]] Sampler2DArray shore_depths;
 
 struct Vertex {
     [[vk::location(0)]] float3 position; // metres from the patch's origin
@@ -68,6 +72,7 @@ struct Ground {
     float3 from_eye;
     float3 drawn; // from the eye, bent
     float height; // above sea level
+    float level;  // how high the sea stands over its mean there
     // Each biome's share, four to a vector: at most two at a corner, blended across a triangle.
     float4 biomes[(biome_count + 3) / 4];
     float4 woods;
@@ -170,6 +175,7 @@ Ground vertex_main(Vertex vertex) {
     ground.normal = vertex.normal;
     ground.from_eye = from_eye;
     ground.height = height_above_sea(from_eye, push.bend_up, push.bend_radii.x);
+    ground.level = settings.tiling.z > 0.0 ? sea_level_at(sea, shore_depths, from_eye) : 0.0;
     const uint biome = min(vertex.biome, biome_count - 1);
     for (uint group = 0; group < (biome_count + 3) / 4; ++group) {
         ground.biomes[group] = float4(0.0);
@@ -288,25 +294,26 @@ float3 wooded(Ground ground, float3 bare, float4 year) {
     return lerp(bare, tint / max(depth, 1e-6), (1.0 - exp(-depth)) * band);
 }
 
-// Where the eye, above sea level, sees the sea's surface towards `drawn`, if it does: on the faked
-// sphere drawing bends sea level onto.
-float3 sea_towards(float3 drawn, out bool seen) {
+// Where the eye, above the sea standing `level` over its mean, sees its surface towards `drawn`, if
+// it does: on the faked sphere drawing bends sea level onto, raised by the level.
+float3 sea_towards(float3 drawn, float level, out bool seen) {
     const float3 up = push.bend_up.xyz;
     const float eye_height = push.bend_up.w;
     const float faked = push.bend_radii.y;
     const float3 looking = normalize(drawn);
     // Along `looking` from the eye, the sphere is met where t^2 - 2kt + c = 0.
     const float k = (faked + eye_height) * dot(looking, -up);
-    const float c = eye_height * ((2.0 * faked) + eye_height);
+    const float c = (eye_height - level) * ((2.0 * faked) + eye_height + level);
     const float discriminant = (k * k) - c;
-    seen = eye_height > 0.0 && k > 0.0 && discriminant >= 0.0;
+    seen = eye_height > level && k > 0.0 && discriminant >= 0.0;
     // The nearer root, without cancelling.
     return looking * (c / (k + sqrt(max(discriminant, 0.0))));
 }
 
-// The depth at which the eye sees the sea's surface past `drawn`, if it does.
-float sea_depth(float3 drawn, out bool seen) {
-    const float4 clip = mul(push.clip_from_eye, float4(sea_towards(drawn, seen), 1.0));
+// The depth at which the eye sees the sea's surface past `drawn`, standing `level` over its mean,
+// if it does.
+float sea_depth(float3 drawn, float level, out bool seen) {
+    const float4 clip = mul(push.clip_from_eye, float4(sea_towards(drawn, level, seen), 1.0));
     return clip.z / clip.w;
 }
 
@@ -319,9 +326,9 @@ struct AirEnd {
 
 AirEnd air_ends(Ground ground) {
     AirEnd end = { ground.drawn, up_at(ground) };
-    if (settings.tiling.z > 0.0 && ground.height < 0.0) {
+    if (settings.tiling.z > 0.0 && ground.height < ground.level) {
         bool seen;
-        const float3 surface = sea_towards(ground.drawn, seen);
+        const float3 surface = sea_towards(ground.drawn, ground.level, seen);
         if (seen) {
             end.at = surface;
             end.up = normalize(surface + (push.bend_up.xyz * (push.bend_radii.y + push.bend_up.w)));
@@ -336,23 +343,25 @@ struct Shaded {
 };
 
 // The ground's colour lit by `on_ground` facing its normal and `on_water` facing up, each times
-// pi, with water over it where it lies below the sea.
+// pi, with water over it where it lies below the sea as high as it stands.
 float3 shaded(Ground ground, float3 normal, float3 on_ground, float3 on_water, float4 year) {
     const float3 lit_ground =
         wooded(ground, scorched(ground, albedo(ground, normal)), year) * on_ground;
     if (settings.tiling.z <= 0.0) {
         return lit_ground;
     }
-    return through_water(lit_ground, on_water, -ground.height, push.bend_up.w,
+    return through_water(lit_ground, on_water, ground.level - ground.height,
+                         push.bend_up.w - ground.level,
                          length(ground.from_eye), dot(-normalize(ground.from_eye), up_at(ground)));
 }
 
-// Ground at or within depth precision of sea level is put just behind the sea, which then wins.
+// Ground at or within depth precision of the sea's surface is put just behind it, which then wins.
 float depth_of(Ground ground) {
     float depth = ground.position.z;
-    if (settings.tiling.z > 0.0 && ground.height <= level_with_sea * length(ground.from_eye)) {
+    if (settings.tiling.z > 0.0 &&
+        ground.height - ground.level <= level_with_sea * length(ground.from_eye)) {
         bool seen;
-        const float sea = sea_depth(ground.drawn, seen);
+        const float sea = sea_depth(ground.drawn, ground.level, seen);
         if (seen) {
             depth = min(depth, sea * (1.0 - behind_sea));
         }
@@ -391,7 +400,7 @@ Shaded fragment_air(Ground ground) {
         (sunlight * saturate(dot(normal, sun))) + (sky * (0.5 + (0.5 * dot(normal, up))));
     // The water over ground beneath the sea, lit where the eye looks into it.
     float3 on_water = float3(0.0);
-    if (ground.height < 0.0 || push.bend_up.w < 0.0) {
+    if (ground.height < ground.level || push.bend_up.w < ground.level) {
         const float facing = saturate(dot(end.up, sun));
         const float3 clear_water = transmittance(air, transmittance_table, 0.0, dot(end.up, sun));
         on_water = (through_cloud(shade, clear_water) * facing) +

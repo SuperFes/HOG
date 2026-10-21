@@ -48,8 +48,8 @@ struct Surface {
     // The coarse waves of the foam's pattern there: as FoamPattern's coarse, across, coarse_seen
     // and coarse_slope.
     float4 foam;
-    // The sea's floor there, as wave_surface takes it.
-    float3 floor;
+    // The sea's floor there, as wave_surface takes it; w how high the sea stands over its mean.
+    float4 floor;
     // The surf there, as Surf's breaking, trailing, lace and white.
     float4 surf;
 };
@@ -72,17 +72,19 @@ float depth_at(float3 rest) {
                        waves.count_left_radius.z, rest);
 }
 
-// The sea's floor under `rest`, a point of sea level from the eye.
-float3 floor_at(float3 rest) {
+// The sea's floor under `rest`, a point of sea level from the eye, with the water deepened by the
+// sea standing over its mean there, as sea_level_at has it; and w how high it stands.
+float4 floor_at(float3 rest) {
     const float depth = depth_at(rest);
-    if (depth >= waves.count_left_radius.w) {
-        return deep_floor();
+    const float level = (waves.tide.w + dot(waves.tide.xyz, rest)) * sea_reached(depth);
+    if (depth + level >= waves.count_left_radius.w) {
+        return float4(deep_floor(), level);
     }
     const float3 first = waves.first.xyz * floor_step;
     const float3 second = waves.second.xyz * floor_step;
-    return float3(depth, depth_at(rest + first) - depth_at(rest - first),
-                  depth_at(rest + second) - depth_at(rest - second)) /
-           float3(1.0, 2.0 * floor_step, 2.0 * floor_step);
+    return float4(depth + level,
+                  (depth_at(rest + first) - depth_at(rest - first)) / (2.0 * floor_step),
+                  (depth_at(rest + second) - depth_at(rest - second)) / (2.0 * floor_step), level);
 }
 
 // As ocean.cpp makes the disc.
@@ -138,9 +140,9 @@ Surface vertex_main(Vertex vertex) {
     const float between =
         max(nearest * log(spread) * pow(spread, vertex.out) / rings, along * 2.0 * pi / spokes);
     surface.floor = floor_at(surface.rest);
-    const WaveSurface water = wave_surface(waves, surface.rest, between, surface.floor);
-    surface.from_eye += as_drawn(water.moved, up, surface.normal);
-    const Surf surf = surf_at(waves, water, surface.floor);
+    const WaveSurface water = wave_surface(waves, surface.rest, between, surface.floor.xyz);
+    surface.from_eye += as_drawn(water.moved + (up * surface.floor.w), up, surface.normal);
+    const Surf surf = surf_at(waves, water, surface.floor.xyz);
     surface.surf = float4(surf.breaking, surf.trailing, surf.lace, surf.white);
     surface.foam = float4(0.0);
     if (waves.foam.z > 0.0 || surf.white > 0.0) {
@@ -162,7 +164,7 @@ struct Facing {
 
 Facing facing_at(Surface surface, float3 looking) {
     const float footprint = max(length(ddx(surface.rest)), length(ddy(surface.rest)));
-    const WaveSurface water = wave_surface(waves, surface.rest, footprint, surface.floor);
+    const WaveSurface water = wave_surface(waves, surface.rest, footprint, surface.floor.xyz);
     Facing facing;
     facing.normal = as_drawn(water.normal, push.up_height.xyz, normalize(surface.normal));
     facing.roughness = water.roughness + ripples;

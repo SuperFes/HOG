@@ -5,6 +5,7 @@
 #include <hog/planet/climate.hpp>
 #include <hog/render/camera.hpp>
 #include <hog/render/memory.hpp>
+#include <hog/render/ocean.hpp>
 #include <hog/render/pipeline.hpp>
 #include <hog/render/sampler.hpp>
 #include <hog/render/sky.hpp>
@@ -87,6 +88,9 @@ struct TerrainView {
     // The frame's air, for ground lit through it.
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     AirBindings air = {};
+    // The frame's sea, for ground tinted under it as high as it stands; at its mean if none.
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    SeaBindings sea = {};
 };
 
 // A patch held in a pool's slot.
@@ -143,6 +147,9 @@ private:
     Buffer settings_;
     Image materials_;
     Sampler sampler_;
+    // A calm sea at its mean with no depths round the eye, for ground drawn without the sea's own.
+    Buffer calm_sea_;
+    Image no_shore_;
     double period_ = 0.0; // metres over which the tiling repeats
     bool air_ = false;
     std::array<Range, terrain::stitchings> stitchings_{};

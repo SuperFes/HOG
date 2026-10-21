@@ -82,10 +82,16 @@ constexpr VkDescriptorSetLayoutBinding binding(std::uint32_t at, VkDescriptorTyp
             .pImmutableSamplers = nullptr};
 }
 
+// The sea, as high as it stands over the ground.
+constexpr std::uint32_t sea_binding = 7;
+constexpr std::uint32_t shore_binding = 8;
+
 constexpr std::array descriptors{
     binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
             VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT),
-    binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)};
+    binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
+    binding(sea_binding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT),
+    binding(shore_binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_VERTEX_BIT)};
 // Lit through the air, it reads the air too.
 constexpr std::array air_descriptors{
     descriptors[0],
@@ -94,7 +100,9 @@ constexpr std::array air_descriptors{
     binding(3, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT),
     binding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
     binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
-    binding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)};
+    binding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
+    descriptors[2],
+    descriptors[3]};
 
 // The near tile's size, the far one's, and 1 if ground below sea level is seen through water; then
 // what each biome's material averages to, in linear light. Then the woods, as terrain.slang reads
@@ -337,6 +345,25 @@ Result<Terrain> Terrain::create(Device& device, VkFormat colour_format, VkFormat
     }
     drawn.settings_ = std::move(settings_buffer).value();
 
+    const DrawnWaves calm{};
+    auto calm_sea = make_filled_buffer(device, std::as_bytes(std::span{&calm, 1}),
+                                       VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+    if (!calm_sea) {
+        return std::unexpected(std::move(calm_sea).error());
+    }
+    drawn.calm_sea_ = std::move(calm_sea).value();
+    const std::vector<std::uint16_t> deep_water =
+        shore_texels(std::vector<float>(terrain::shore_spacing.size(), 1'000.0F));
+    auto no_shore =
+        make_filled_image(device,
+                          {.format = VK_FORMAT_R16_SFLOAT,
+                           .layers = static_cast<std::uint32_t>(terrain::shore_spacing.size())},
+                          std::as_bytes(std::span{deep_water}));
+    if (!no_shore) {
+        return std::unexpected(std::move(no_shore).error());
+    }
+    drawn.no_shore_ = std::move(no_shore).value();
+
     drawn.air_ = look.air;
     auto pipeline = make_pipeline(
         device,
@@ -384,6 +411,11 @@ void Terrain::draw(VkCommandBuffer commands, VkExtent2D extent, const TerrainPoo
         push_sampled_image(commands, pipeline_, 5, view.air.aerial, view.air.sampler);
         push_sampled_image(commands, pipeline_, 6, view.air.cloud_shadow, view.air.sampler);
     }
+    const bool sea = view.sea.waves != VK_NULL_HANDLE;
+    push_uniform_buffer(commands, pipeline_, sea_binding,
+                        sea ? view.sea.waves : calm_sea_.handle());
+    push_sampled_image(commands, pipeline_, shore_binding, sea ? view.sea.shore : no_shore_.view(),
+                       sea ? view.sea.sampler : sampler_.handle());
     const std::array vertices{pool.vertices()};
     const VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(commands, 0, 1, vertices.data(), &offset);

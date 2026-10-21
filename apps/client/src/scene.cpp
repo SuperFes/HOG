@@ -505,19 +505,22 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     const waves::SeaState sea_state = sea_at_eye(shot);
     foam_drifted_ += waves::foam_drift(sea_state) * shot.seconds;
     const std::vector<waves::Wave> waves = waves::waves_at(wave_trains_, shot.bend.up, sea_state);
-    const render::OceanView sea{.camera = shot.camera,
-                                .sun = sky.sun,
-                                .bend = shot.bend,
-                                .air = through,
-                                .waves = render::drawn_waves_at(wave_trains_, waves, sea_state,
-                                                                shot.camera.eye, shot.bend,
-                                                                shot.time, foam_drifted_)};
+    const render::OceanView sea{
+        .camera = shot.camera,
+        .sun = sky.sun,
+        .bend = shot.bend,
+        .air = through,
+        .waves = render::drawn_waves_at(wave_trains_, waves, sea_state, shot.camera.eye, shot.bend,
+                                        shot.time, foam_drifted_, calendar_.day_length())};
     graph.add({.name = "ground", .uses = through_air, .targets = drawn},
               [&](VkCommandBuffer commands) {
                   Result<> deep = ocean_.draw_deep(commands, frame.extent, sea, frame.slot);
-                  terrain_.draw(
-                      commands, frame.extent, pool_, slots_.draws(streamed.drawn),
-                      {.camera = shot.camera, .sun = sky.sun, .bend = shot.bend, .air = through});
+                  terrain_.draw(commands, frame.extent, pool_, slots_.draws(streamed.drawn),
+                                {.camera = shot.camera,
+                                 .sun = sky.sun,
+                                 .bend = shot.bend,
+                                 .air = through,
+                                 .sea = ocean_.bindings(frame.slot)});
                   return deep;
               });
     swaying_for_ += shot.seconds;

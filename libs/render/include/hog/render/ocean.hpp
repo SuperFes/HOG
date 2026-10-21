@@ -53,18 +53,30 @@ struct DrawnWaves {
     glm::vec4 shore_anchor{0.0F};
     glm::vec4 shore_east{0.0F};
     glm::vec4 shore_north{0.0F};
+    // xyz how the tide rises per metre from the eye, in the planet's frame; w how high it stands
+    // over the sea's mean at the eye.
+    glm::vec4 tide{0.0F};
     std::array<Wave, drawn_waves> waves{};
     std::array<FoamWave, foam_waves> foam_pattern{};
 };
 
 // The strongest of the waves round an eye at `eye`, bent by `bend`, at `time`, as
-// waves::strongest picks them, each as it runs under the eye; and where `sea`, which raised them,
-// is white with foam, carried with the water at its surface, which has drifted `drifted` metres
-// since the epoch.
+// waves::strongest picks them, each as it runs under the eye; where `sea`, which raised them, is
+// white with foam, carried with the water at its surface, which has drifted `drifted` metres
+// since the epoch; and the tide round the eye on a planet whose day lasts `day`, none if none.
 [[nodiscard]] DrawnWaves drawn_waves_at(std::span<const waves::Train> trains,
                                         std::span<const waves::Wave> waves,
                                         const waves::SeaState& sea, WorldPosition eye,
-                                        const terrain::Bend& bend, GameTime time, DVec3 drifted);
+                                        const terrain::Bend& bend, GameTime time, DVec3 drifted,
+                                        GameDuration day = {});
+
+// What draws over the ground at sea level read of the sea: as shaders/waves.slang's Waves and the
+// depths shaders/shore.slang reads.
+struct SeaBindings {
+    VkBuffer waves = VK_NULL_HANDLE;
+    VkImageView shore = VK_NULL_HANDLE;
+    VkSampler sampler = VK_NULL_HANDLE;
+};
 
 // Depths of the sea as the ocean's shaders sample them: half floats.
 [[nodiscard]] std::vector<std::uint16_t> shore_texels(std::span<const float> depths);
@@ -114,6 +126,10 @@ public:
     [[nodiscard]] const std::optional<terrain::ShoreFrame>& shore() const noexcept {
         return shore_;
     }
+
+    // The sea of the frame `frame`, as it's drawn there: ground drawn before the sea in that frame
+    // reads it as the sea draws itself.
+    [[nodiscard]] SeaBindings bindings(std::uint32_t frame = 0) const;
 
 private:
     Ocean() = default;
