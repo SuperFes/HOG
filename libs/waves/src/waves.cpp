@@ -87,53 +87,131 @@ std::vector<Train> planet_trains(std::uint64_t seed) {
     return trains;
 }
 
-double spectrum(const SeaState& sea, double frequency) {
-    const double wind = glm::length(sea.wind) * wind_19_5;
-    if (wind <= 0.0 || frequency <= 0.0) {
-        return 0.0;
+System grown_sea(DVec3 wind) {
+    const double speed = glm::length(wind) * wind_19_5;
+    if (speed <= 0.0) {
+        return {};
     }
-    const double peak = gravity / wind;
-    const double ratio = peak / frequency;
-    return pm_alpha * gravity * gravity / std::pow(frequency, 5.0) *
-           std::exp(-pm_beta * ratio * ratio * ratio * ratio);
+    // Pierson and Moskowitz's spectrum integrates to α U⁴ / 4βg², and peaks where its slope
+    // turns.
+    return {.heading = wind / glm::length(wind),
+            .height = 4.0 * std::sqrt(pm_alpha / (4.0 * pm_beta)) * speed * speed / gravity,
+            .peak = std::pow(0.8 * pm_beta, 0.25) * gravity / speed,
+            .peakedness = 1.0,
+            .spread = 2.0};
 }
 
-double spreading(double across) {
-    if (std::abs(across) >= std::numbers::pi / 2.0) {
+std::array<double, bands> band_variances(const System& system) {
+    std::array<double, bands> variances{};
+    if (system.height <= 0.0 || system.peak <= 0.0) {
+        return variances;
+    }
+    const auto shape = [&](double frequency) {
+        const double ratio = system.peak / frequency;
+        const double fourth = ratio * ratio * ratio * ratio;
+        const double width = frequency <= system.peak ? 0.07 : 0.09;
+        const double off = (frequency - system.peak) / (width * system.peak);
+        return fourth * ratio * std::exp(-1.25 * fourth) *
+               std::pow(system.peakedness, std::exp(-off * off / 2.0));
+    };
+    // Sampled finely enough within each band that even a narrow swell's peak isn't missed.
+    constexpr int samples = 8;
+    double sum = 0.0;
+    for (int band = 0; band < bands; ++band) {
+        double variance = 0.0;
+        double from = band_lowest(band);
+        for (int sample = 1; sample <= samples; ++sample) {
+            const double to =
+                band_lowest(band) * std::pow(band_ratio, static_cast<double>(sample) / samples);
+            variance += shape(std::sqrt(from * to)) * (to - from);
+            from = to;
+        }
+        variances.at(static_cast<std::size_t>(band)) = variance;
+        sum += variance;
+    }
+    const double scale = sum > 0.0 ? system.height * system.height / 16.0 / sum : 0.0;
+    for (double& variance : variances) {
+        variance *= scale;
+    }
+    return variances;
+}
+
+double spreading(const System& system, double along) {
+    if (along <= 0.0) {
         return 0.0;
     }
-    const double along = std::cos(across);
-    return 2.0 / std::numbers::pi * along * along;
+    const double half = system.spread / 2.0;
+    return std::tgamma(half + 1.0) / (std::sqrt(std::numbers::pi) * std::tgamma(half + 0.5)) *
+           std::pow(along, system.spread);
+}
+
+double steepened(double speed, double current) {
+    if (speed <= 0.0) {
+        return 1.0;
+    }
+    // Longuet-Higgins and Stewart's, in deep water: with s the root of 1 + 4U/c, a wave's height
+    // grows by 2 / (1 + s)√s, without bound as an opposing current nears a quarter of its speed.
+    // Before then it has doubled, and breaks, and less of it gets through until none does.
+    constexpr double most = 2.0;
+    constexpr double breaking_root = 0.46557; // where (1 + s)√s is 1
+    const double root_squared = 1.0 + (4.0 * current / speed);
+    if (root_squared <= 0.0) {
+        return 0.0;
+    }
+    const double root = std::sqrt(root_squared);
+    if (root < breaking_root) {
+        return most * root_squared / (breaking_root * breaking_root);
+    }
+    return 2.0 / ((1.0 + root) * std::sqrt(root));
 }
 
 std::vector<Wave> waves_at(std::span<const Train> trains, DVec3 up, const SeaState& sea,
                            double least) {
-    std::vector<Wave> waves;
-    const double wind = glm::length(sea.wind);
-    if (wind <= 0.0) {
-        return waves;
-    }
-    // How much each band shows here, weighed by how much each of its trains shows: about as much
-    // anywhere, its headings being spread evenly over the sphere, but not quite.
-    std::array<double, bands> shown{};
-    for (const Train& train : trains) {
-        shown.at(static_cast<std::size_t>(train.band)) += showing(glm::dot(up, train.heading));
-    }
+    struct Here {
+        std::uint32_t train = 0;
+        double shown = 0.0;
+        DVec3 along{0.0};
+    };
+    std::vector<Here> here;
     for (std::size_t i = 0; i < trains.size(); ++i) {
-        const Train& train = trains[i];
-        const double rising = glm::dot(up, train.heading);
-        if (showing(rising) <= 0.0) {
+        const double rising = glm::dot(up, trains[i].heading);
+        const double shown = showing(rising);
+        if (shown > 0.0) {
+            here.push_back({.train = static_cast<std::uint32_t>(i),
+                            .shown = shown,
+                            .along = glm::normalize(trains[i].heading - (up * rising))});
+        }
+    }
+    // Each system's variance in a band goes to its trains showing here by how near they run to
+    // its heading, and how much they show: so all of it lands, however few run near.
+    std::vector<double> variances(here.size());
+    std::vector<double> spread(here.size());
+    for (const System& system : sea.systems) {
+        if (system.height <= 0.0) {
             continue;
         }
-        const double per_radian = shown.at(static_cast<std::size_t>(train.band)) / tau;
-        const DVec3 along = train.heading - (up * rising);
-        const double off = std::acos(
-            std::clamp(glm::dot(along, sea.wind) / (glm::length(along) * wind), -1.0, 1.0));
-        const double variance =
-            spectrum(sea, train.frequency) * spreading(off) * band_width(train.band) / per_radian;
-        const double amplitude = std::sqrt(2.0 * variance);
-        if (amplitude >= least) {
-            waves.push_back({.train = static_cast<std::uint32_t>(i), .amplitude = amplitude});
+        const std::array<double, bands> banded = band_variances(system);
+        std::array<double, bands> totals{};
+        for (std::size_t i = 0; i < here.size(); ++i) {
+            spread[i] = spreading(system, glm::dot(here[i].along, system.heading));
+            totals.at(static_cast<std::size_t>(trains[here[i].train].band)) +=
+                spread[i] * here[i].shown;
+        }
+        for (std::size_t i = 0; i < here.size(); ++i) {
+            const auto band = static_cast<std::size_t>(trains[here[i].train].band);
+            if (totals.at(band) > 0.0) {
+                variances[i] += banded.at(band) * spread[i] / totals.at(band);
+            }
+        }
+    }
+    std::vector<Wave> waves;
+    for (std::size_t i = 0; i < here.size(); ++i) {
+        const Train& train = trains[here[i].train];
+        const double amplitude =
+            std::sqrt(2.0 * variances[i]) *
+            steepened(train.frequency / train.wavenumber, glm::dot(sea.current, here[i].along));
+        if (amplitude > 0.0 && amplitude >= least) {
+            waves.push_back({.train = here[i].train, .amplitude = amplitude});
         }
     }
     return waves;

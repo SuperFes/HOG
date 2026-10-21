@@ -468,7 +468,8 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                   sky_.draw(commands, frame.extent, frame.slot, atmosphere_, sky);
               });
     const std::vector<waves::Wave> waves =
-        waves::waves_at(wave_trains_, shot.bend.up, {.wind = drift * surface_wind});
+        waves::waves_at(wave_trains_, shot.bend.up,
+                        {.systems = {waves::grown_sea(drift * surface_wind)}, .current = {}});
     const render::OceanView sea{.camera = shot.camera,
                                 .sun = sky.sun,
                                 .bend = shot.bend,

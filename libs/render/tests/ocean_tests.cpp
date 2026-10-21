@@ -614,7 +614,8 @@ struct WavySea {
 
     explicit WavySea(double wind) {
         const DVec3 along = glm::normalize(glm::cross(bend.up, north));
-        waves = hog::waves::waves_at(trains, bend.up, {.wind = along * wind});
+        waves = hog::waves::waves_at(
+            trains, bend.up, {.systems = {hog::waves::grown_sea(along * wind)}, .current = {}});
         drawn = hog::render::drawn_waves_at(trains, waves, eye, bend, noon);
     }
 
@@ -690,9 +691,9 @@ TEST_CASE("waves scatter the sun's glint over the sea", "[render][gpu]") {
     OceanView view = seen_from(4.0, -up, north, up);
     const auto calm = draw(*device, view, std::nullopt);
     const std::vector<hog::waves::Train> trains = hog::waves::planet_trains(5);
-    view.waves =
-        hog::render::drawn_waves_at(trains, hog::waves::waves_at(trains, up, {.wind = east * 9.0}),
-                                    view.camera.eye, view.bend, noon);
+    const hog::waves::SeaState windy{.systems = {hog::waves::grown_sea(east * 9.0)}, .current = {}};
+    view.waves = hog::render::drawn_waves_at(trains, hog::waves::waves_at(trains, up, windy),
+                                             view.camera.eye, view.bend, noon);
     REQUIRE(view.waves.count_left_radius.x > 0.0F);
     const auto wavy = draw(*device, view, std::nullopt);
     const auto glinting = [](const std::vector<std::uint8_t>& pixels) {

@@ -15,6 +15,7 @@ using hog::DVec3;
 using hog::GameDuration;
 using hog::GameTime;
 using hog::waves::SeaState;
+using hog::waves::System;
 using hog::waves::Train;
 using hog::waves::Wave;
 
@@ -42,6 +43,10 @@ DVec3 random_up(std::mt19937_64& random) {
 // A wind sea's significant height, as Pierson and Moskowitz found it.
 double grown_height(double wind) {
     return 0.21 * (wind * 1.026) * (wind * 1.026) / g;
+}
+
+SeaState windy(DVec3 wind) {
+    return {.systems = {hog::waves::grown_sea(wind)}, .current = DVec3{0.0}};
 }
 
 // The variance of the surface where the waves run, as their amplitudes and showing have it.
@@ -118,54 +123,152 @@ TEST_CASE("a train shows fully along the ground and not at all steeply off it", 
 
 TEST_CASE("the wind raises a sea as high as Pierson and Moskowitz found", "[waves]") {
     for (const double wind : {5.0, 10.0, 20.0}) {
-        const SeaState sea{.wind = east * wind};
-        double variance = 0.0;
-        constexpr int steps = 200'000;
-        const double step = 40.0 / steps;
-        for (int i = 1; i <= steps; ++i) {
-            variance += hog::waves::spectrum(sea, step * i) * step;
-        }
+        const System sea = hog::waves::grown_sea(east * wind);
         CAPTURE(wind);
-        CHECK(std::abs((4.0 * std::sqrt(variance)) - grown_height(wind)) <
-              grown_height(wind) * 0.01);
+        CHECK(std::abs(sea.height - grown_height(wind)) < grown_height(wind) * 0.01);
+        // The peak lies where the longest waves run a little faster than the wind.
+        CHECK(std::abs(sea.peak - (0.877 * g / (wind * 1.026))) < sea.peak * 0.001);
+        CHECK(glm::length(sea.heading - east) < 1e-12);
+        CHECK(sea.peakedness == 1.0);
     }
-    CHECK(hog::waves::spectrum({}, 1.0) == 0.0);
-    // The peak lies where the longest waves run as fast as the wind.
-    const SeaState sea{.wind = north * 10.0};
-    const double peak = 0.877 * g / (10.0 * 1.026);
-    CHECK(hog::waves::spectrum(sea, peak) > hog::waves::spectrum(sea, peak * 0.9));
-    CHECK(hog::waves::spectrum(sea, peak) > hog::waves::spectrum(sea, peak * 1.1));
+    CHECK(hog::waves::grown_sea(DVec3{0.0}).height == 0.0);
 }
 
-TEST_CASE("waves spread about the wind, none against it", "[waves]") {
-    double total = 0.0;
-    constexpr int steps = 10'000;
-    for (int i = 0; i < steps; ++i) {
-        const double across = (-std::numbers::pi) + ((2.0 * std::numbers::pi) * (i + 0.5) / steps);
-        total += hog::waves::spreading(across) * (2.0 * std::numbers::pi / steps);
+TEST_CASE("a system's bands carry its height, most of it about its peak", "[waves]") {
+    for (const double peakedness : {1.0, hog::waves::wind_sea_peakedness}) {
+        const System sea{.height = 3.0, .peak = 0.9, .peakedness = peakedness};
+        const auto banded = hog::waves::band_variances(sea);
+        double sum = 0.0;
+        for (const double variance : banded) {
+            CHECK(variance >= 0.0);
+            sum += variance;
+        }
+        CAPTURE(peakedness);
+        CHECK(std::abs(sum - (3.0 * 3.0 / 16.0)) < 1e-12);
+        std::size_t peak_band = 0;
+        while (hog::waves::band_lowest(static_cast<int>(peak_band) + 1) <= sea.peak) {
+            ++peak_band;
+        }
+        CHECK(std::ranges::max_element(banded) - banded.begin() ==
+              static_cast<std::ptrdiff_t>(peak_band));
     }
-    CHECK(std::abs(total - 1.0) < 1e-6);
-    CHECK(hog::waves::spreading(0.0) > hog::waves::spreading(0.5));
-    CHECK(hog::waves::spreading(std::numbers::pi) == 0.0);
+    // A swell, run far from its wind, gathers more of its variance about its peak.
+    const System wide{.height = 2.0, .peak = 0.6};
+    const System swell{.height = 2.0, .peak = 0.6, .peakedness = hog::waves::swell_peakedness};
+    CHECK(std::ranges::max(hog::waves::band_variances(swell)) >
+          1.3 * std::ranges::max(hog::waves::band_variances(wide)));
+    CHECK(std::ranges::max(hog::waves::band_variances(System{})) == 0.0);
 }
 
-TEST_CASE("the trains showing anywhere carry the sea the wind would raise there", "[waves]") {
+TEST_CASE("waves spread about their system's heading, none against it", "[waves]") {
+    for (const double spread : {2.0, hog::waves::swell_spread}) {
+        const System system{.spread = spread};
+        double total = 0.0;
+        constexpr int steps = 10'000;
+        for (int i = 0; i < steps; ++i) {
+            const double across =
+                (-std::numbers::pi) + ((2.0 * std::numbers::pi) * (i + 0.5) / steps);
+            total +=
+                hog::waves::spreading(system, std::cos(across)) * (2.0 * std::numbers::pi / steps);
+        }
+        CAPTURE(spread);
+        CHECK(std::abs(total - 1.0) < 1e-6);
+        CHECK(hog::waves::spreading(system, 1.0) > hog::waves::spreading(system, 0.9));
+        CHECK(hog::waves::spreading(system, -0.5) == 0.0);
+    }
+    // As the wind sea always spread.
+    CHECK(std::abs(hog::waves::spreading(System{}, 1.0) - (2.0 / std::numbers::pi)) < 1e-12);
+}
+
+TEST_CASE("a current steepens the waves it runs against and stretches those it runs with",
+          "[waves]") {
+    constexpr double speed = 8.0;
+    CHECK(hog::waves::steepened(speed, 0.0) == 1.0);
+    CHECK(hog::waves::steepened(speed, 1.0) < 1.0);
+    CHECK(hog::waves::steepened(speed, -0.5) > 1.0);
+    // Against a current a quarter their speed they can't make headway, and none get through.
+    CHECK(hog::waves::steepened(speed, -speed / 4.0) == 0.0);
+    CHECK(hog::waves::steepened(speed, -speed) == 0.0);
+    double last = hog::waves::steepened(speed, -0.24 * speed);
+    for (int step = -240; step < 1000; ++step) {
+        const double current = speed * step / 1000.0;
+        const double factor = hog::waves::steepened(speed, current);
+        CAPTURE(current);
+        CHECK(factor <= 2.0 + 1e-6);
+        CHECK(std::abs(factor - last) < 0.05);
+        last = factor;
+    }
+    CHECK(hog::waves::steepened(0.0, 1.0) == 1.0);
+}
+
+TEST_CASE("the trains showing anywhere carry all the sea's systems", "[waves]") {
     const std::vector<Train> trains = hog::waves::planet_trains(seed);
     std::mt19937_64 random{5};
-    for (const double wind : {6.0, 12.0}) {
-        double sum = 0.0;
-        constexpr int places = 30;
-        for (int place = 0; place < places; ++place) {
-            const DVec3 at = random_up(random);
-            const DVec3 along = glm::normalize(glm::cross(at, random_up(random)));
-            const SeaState sea{.wind = along * wind};
-            const std::vector<Wave> waves = hog::waves::waves_at(trains, at, sea, 0.0);
-            sum += 4.0 * std::sqrt(variance_of(trains, waves, at));
-        }
-        CAPTURE(wind);
-        CHECK(std::abs((sum / places) - grown_height(wind)) < grown_height(wind) * 0.1);
+    for (int place = 0; place < 30; ++place) {
+        const DVec3 at = random_up(random);
+        const DVec3 along = glm::normalize(glm::cross(at, random_up(random)));
+        const DVec3 aside = glm::cross(at, along);
+        const SeaState sea{.systems = {hog::waves::grown_sea(along * 9.0),
+                                       {.heading = aside,
+                                        .height = 1.5,
+                                        .peak = 0.5,
+                                        .peakedness = hog::waves::swell_peakedness,
+                                        .spread = hog::waves::swell_spread}},
+                           .current = DVec3{0.0}};
+        const double expected = std::hypot(grown_height(9.0), 1.5);
+        const std::vector<Wave> waves = hog::waves::waves_at(trains, at, sea, 0.0);
+        CAPTURE(place);
+        CHECK(std::abs((4.0 * std::sqrt(variance_of(trains, waves, at))) - expected) <
+              expected * 0.01);
     }
     CHECK(hog::waves::waves_at(trains, up, {}).empty());
+}
+
+TEST_CASE("waves run mostly along their system's heading", "[waves]") {
+    const std::vector<Train> trains = hog::waves::planet_trains(seed);
+    const SeaState sea{.systems = {{.heading = north,
+                                    .height = 2.0,
+                                    .peak = 0.6,
+                                    .peakedness = hog::waves::swell_peakedness,
+                                    .spread = hog::waves::swell_spread}},
+                       .current = DVec3{0.0}};
+    double ahead = 0.0;
+    double all = 0.0;
+    for (const Wave& wave : hog::waves::waves_at(trains, up, sea, 0.0)) {
+        const DVec3 heading = trains[wave.train].heading;
+        const double variance =
+            wave.amplitude * wave.amplitude * hog::waves::showing(heading.z) / 2.0;
+        all += variance;
+        if (glm::dot(glm::normalize(heading - (up * heading.z)), north) > std::cos(0.6)) {
+            ahead += variance;
+        }
+    }
+    CHECK(ahead > 0.9 * all);
+}
+
+TEST_CASE("the sea's current steepens the waves running against it", "[waves]") {
+    const std::vector<Train> trains = hog::waves::planet_trains(seed);
+    SeaState sea = windy(east * 10.0);
+    const std::vector<Wave> still = hog::waves::waves_at(trains, up, sea, 0.0);
+    sea.current = east * -0.4;
+    const std::vector<Wave> against = hog::waves::waves_at(trains, up, sea, 0.0);
+    REQUIRE(!still.empty());
+    std::size_t matched = 0;
+    for (const Wave& wave : still) {
+        const Train& train = trains[wave.train];
+        const DVec3 along = glm::normalize(train.heading - (up * train.heading.z));
+        const double factor =
+            hog::waves::steepened(train.frequency / train.wavenumber, -0.4 * along.x);
+        const auto found = std::ranges::find(against, wave.train, &Wave::train);
+        if (factor == 0.0) {
+            CHECK(found == against.end());
+            continue;
+        }
+        REQUIRE(found != against.end());
+        CHECK(std::abs(found->amplitude - (wave.amplitude * factor)) < 1e-12);
+        ++matched;
+    }
+    CHECK(matched > 10);
 }
 
 TEST_CASE("a calm sea lies flat", "[waves]") {
@@ -206,7 +309,7 @@ TEST_CASE("a wave's crests run along its heading at its speed", "[waves]") {
 
 TEST_CASE("the water's surface faces as its neighbours lie", "[waves]") {
     const std::vector<Train> trains = hog::waves::planet_trains(seed);
-    const SeaState sea{.wind = glm::normalize(east + north) * 9.0};
+    const SeaState sea = windy(glm::normalize(east + north) * 9.0);
     const std::vector<Wave> waves = hog::waves::waves_at(trains, up, sea);
     REQUIRE(waves.size() > 40);
     std::mt19937_64 random{9};
@@ -232,7 +335,7 @@ TEST_CASE("the water's surface faces as its neighbours lie", "[waves]") {
 
 TEST_CASE("the height over a point is where the waves carry the water over it", "[waves]") {
     const std::vector<Train> trains = hog::waves::planet_trains(seed);
-    const SeaState sea{.wind = north * 11.0};
+    const SeaState sea = windy(north * 11.0);
     const std::vector<Wave> waves = hog::waves::waves_at(trains, up, sea);
     std::mt19937_64 random{11};
     std::uniform_real_distribution<double> spot{-200.0, 200.0};
@@ -248,7 +351,7 @@ TEST_CASE("the height over a point is where the waves carry the water over it", 
 
 TEST_CASE("the sea's surface rises and falls as high as the wind raised it", "[waves]") {
     const std::vector<Train> trains = hog::waves::planet_trains(seed);
-    const SeaState sea{.wind = east * 8.0};
+    const SeaState sea = windy(east * 8.0);
     const std::vector<Wave> waves = hog::waves::waves_at(trains, up, sea);
     std::mt19937_64 random{13};
     std::uniform_real_distribution<double> spot{-2000.0, 2000.0};
@@ -273,7 +376,7 @@ TEST_CASE("the sea's surface rises and falls as high as the wind raised it", "[w
 
 TEST_CASE("the strongest waves are taken a band at a time, longest first", "[waves]") {
     const std::vector<Train> trains = hog::waves::planet_trains(seed);
-    const SeaState sea{.wind = east * 10.0};
+    const SeaState sea = windy(east * 10.0);
     const std::vector<Wave> waves = hog::waves::waves_at(trains, up, sea);
     REQUIRE(waves.size() > 48);
     const hog::waves::Strongest kept = hog::waves::strongest(trains, waves, 48);
@@ -312,7 +415,7 @@ TEST_CASE("the strongest waves are taken a band at a time, longest first", "[wav
 
 TEST_CASE("even a gale's sea doesn't fold its crests over", "[waves]") {
     const std::vector<Train> trains = hog::waves::planet_trains(seed);
-    const std::vector<Wave> waves = hog::waves::waves_at(trains, up, {.wind = east * 20.0});
+    const std::vector<Wave> waves = hog::waves::waves_at(trains, up, windy(east * 20.0));
     std::mt19937_64 random{17};
     std::uniform_real_distribution<double> spot{-500.0, 500.0};
     constexpr double step = 0.01;

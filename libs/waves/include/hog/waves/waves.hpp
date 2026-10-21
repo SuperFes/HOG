@@ -3,6 +3,7 @@
 #include <hog/core/math.hpp>
 #include <hog/core/time.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -48,16 +49,42 @@ struct Train {
 // How much of a train shows, by its amplitude, where it runs `rising` (the sine) off the ground.
 [[nodiscard]] double showing(double rising) noexcept;
 
-// The sea somewhere: as the wind over it, ten metres up, would raise it, had it blown long and
-// far enough.
-struct SeaState {
-    DVec3 wind{0.0}; // m/s, along the ground, in the planet's frame
+// One system of waves at sea: the wind sea a wind is raising, or a swell run on from a wind
+// elsewhere. Its variance runs by frequency as JONSWAP's spectrum, and by heading as a power of
+// the cosine off its own.
+struct System {
+    DVec3 heading{1.0, 0.0, 0.0}; // unit, along the ground, in the planet's frame
+    double height = 0.0;          // significant, metres
+    double peak = 1.0;            // rad/s
+    double peakedness = 1.0;      // JONSWAP's γ; 1 is Pierson and Moskowitz's
+    double spread = 2.0;          // the cosine's power
 };
 
-// The sea's variance by frequency, m²·s/rad: Pierson and Moskowitz's.
-[[nodiscard]] double spectrum(const SeaState& sea, double frequency);
-// How that variance spreads by heading, per radian, for a heading `across` radians off the wind.
-[[nodiscard]] double spreading(double across);
+// As waves are measured: a sea still growing under its wind peaks more sharply than one grown
+// full, and a swell, sorted by speed over the distance it ran, more sharply still and narrower.
+inline constexpr double wind_sea_peakedness = 3.3;
+inline constexpr double swell_peakedness = 7.0;
+inline constexpr double swell_spread = 8.0;
+
+// The sea a wind ten metres up raises, blowing long and far enough: Pierson and Moskowitz's.
+// Precondition: the wind lies along the ground.
+[[nodiscard]] System grown_sea(DVec3 wind);
+
+// The sea somewhere: its systems, and the current under them, which steepens the waves it runs
+// against and stretches those it runs with.
+struct SeaState {
+    std::vector<System> systems;
+    DVec3 current{0.0}; // m/s, along the ground, in the planet's frame
+};
+
+// The system's variance falling in each band, m², summing to its height squared over 16.
+[[nodiscard]] std::array<double, bands> band_variances(const System& system);
+// How its variance spreads by heading, per radian, for a heading whose cosine off its own is
+// `along`.
+[[nodiscard]] double spreading(const System& system, double along);
+// How much higher a wave runs, at `speed` m/s on still water, over a current of `current` m/s
+// along its heading: none at all once the current is too strong for it to run against.
+[[nodiscard]] double steepened(double speed, double current);
 
 // A train as it runs somewhere.
 struct Wave {
