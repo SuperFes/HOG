@@ -85,6 +85,116 @@ double between(std::span<const float> band, double at) {
            (static_cast<double>(band[second]) * part);
 }
 
+// Where a swell's variance by band peaks: between the band holding most and its neighbours,
+// along a parabola.
+double peak_among(const std::array<double, swell_bands>& by_band) {
+    const auto top = static_cast<std::size_t>(std::ranges::max_element(by_band) - by_band.begin());
+    double off = 0.0;
+    if (top > 0 && top + 1 < by_band.size()) {
+        const double below = by_band.at(top - 1);
+        const double above = by_band.at(top + 1);
+        const double bend = below - (2.0 * by_band.at(top)) + above;
+        if (bend < 0.0) {
+            off = std::clamp(0.5 * (below - above) / bend, -0.5, 0.5);
+        }
+    }
+    const double ratio = waves::band_lowest(1) / waves::band_lowest(0);
+    return band_frequency(static_cast<int>(top)) * std::pow(ratio, off);
+}
+
+// A wind sea as it arrives in a cell.
+struct Arriving {
+    double variance = 0.0;
+    double peak = 0.0;
+    DVec2 heading{1.0, 0.0};
+};
+
+// Carried along at the group speed of its peak; into a calm cell, at that of the sea around it,
+// so it runs on out of the wind that raised it, and is left there as swell.
+Arriving carried_in(const CellGrid& grid, const std::vector<bool>& wet, const SeaFields& before,
+                    std::uint32_t index, double seconds) {
+    Arriving arriving{.variance = static_cast<double>(before.wind_sea[index]),
+                      .peak = static_cast<double>(before.peak[index]),
+                      .heading = DVec2{before.heading[index]}};
+    const planet::TangentFrame& frame = grid.frame(index);
+    DVec3 moving{0.0};
+    double weight = 0.0;
+    const auto add = [&](std::uint32_t cell) {
+        const auto peak = static_cast<double>(before.peak[cell]);
+        if (!wet[cell] || peak <= 0.0) {
+            return;
+        }
+        const planet::TangentFrame& there = grid.frame(cell);
+        const Vec2 way = before.heading[cell];
+        const auto amount = static_cast<double>(before.wind_sea[cell]);
+        moving += ((there.east * static_cast<double>(way.x)) +
+                   (there.north * static_cast<double>(way.y))) *
+                  (group_speed(peak) * amount);
+        weight += amount;
+    };
+    add(index);
+    if (weight == 0.0) {
+        for (const std::uint32_t there : grid.neighbors(index)) {
+            add(there);
+        }
+    }
+    const DVec3 velocity = weight > 0.0 ? moving / weight : DVec3{0.0};
+    const DVec2 along{glm::dot(velocity, frame.east), glm::dot(velocity, frame.north)};
+    const double fast = glm::length(along);
+    if (fast <= 0.0) {
+        return arriving;
+    }
+    if (arriving.peak <= 0.0) {
+        arriving.peak = g / (2.0 * fast);
+        arriving.heading = along / fast;
+    }
+    const DVec3 from = detail::departure(frame, Vec2{along}, seconds);
+    arriving.variance = grid.interpolate(from, [&](std::uint32_t cell) {
+        return wet[cell] ? static_cast<double>(before.wind_sea[cell]) : 0.0;
+    });
+    return arriving;
+}
+
+// Leaves `variance` of a wind sea as swell in a cell's bins, spread about its heading as the
+// wind sea was.
+void leave_swell(std::span<float> swell, double variance, double peak, DVec2 heading) {
+    const waves::System left{.heading = DVec3{heading, 0.0},
+                             .height = 4.0 * std::sqrt(variance),
+                             .peak = peak,
+                             .peakedness = waves::wind_sea_peakedness,
+                             .spread = 2.0};
+    const auto banded = waves::band_variances(left);
+    std::array<double, swell_headings> spread{};
+    double spreads = 0.0;
+    for (int at = 0; at < swell_headings; ++at) {
+        const double facing = std::max(glm::dot(heading_of(at), heading), 0.0);
+        spread.at(static_cast<std::size_t>(at)) = facing * facing;
+        spreads += facing * facing;
+    }
+    for (int band = 0; band < swell_bands; ++band) {
+        for (int at = 0; at < swell_headings; ++at) {
+            swell[bin(0, band, at)] +=
+                static_cast<float>(banded.at(static_cast<std::size_t>(band)) *
+                                   spread.at(static_cast<std::size_t>(at)) / spreads);
+        }
+    }
+}
+
+// Swell running with the wind no longer than the wind sea's own waves is soon part of it, which
+// the wind already holds as high as it can.
+void absorb_swell(std::span<float> swell, double peak, DVec2 way, double kept) {
+    for (int band = 0; band < swell_bands; ++band) {
+        if (band_frequency(band) < peak) {
+            continue;
+        }
+        for (int at = 0; at < swell_headings; ++at) {
+            if (glm::dot(heading_of(at), way) > 0.0) {
+                swell[bin(0, band, at)] *= static_cast<float>(kept);
+            }
+        }
+    }
+}
+
 } // namespace
 
 SeaFields::SeaFields(std::size_t size)
@@ -132,22 +242,8 @@ std::array<WaveSystem, 2> strongest_swells(std::span<const float> swell) {
                     static_cast<double>(swell[bin(0, band, static_cast<int>(heading))]);
             }
         }
-        // The peak, between the band holding most and its neighbours, along a parabola.
-        const auto top =
-            static_cast<std::size_t>(std::ranges::max_element(by_band) - by_band.begin());
-        double off = 0.0;
-        if (top > 0 && top + 1 < by_band.size()) {
-            const double below = by_band.at(top - 1);
-            const double above = by_band.at(top + 1);
-            const double bend = below - (2.0 * by_band.at(top)) + above;
-            if (bend < 0.0) {
-                off = std::clamp(0.5 * (below - above) / bend, -0.5, 0.5);
-            }
-        }
-        const double ratio = waves::band_lowest(1) / waves::band_lowest(0);
         system = {.height = static_cast<float>(4.0 * std::sqrt(variance)),
-                  .peak = static_cast<float>(band_frequency(static_cast<int>(top)) *
-                                             std::pow(ratio, off)),
+                  .peak = static_cast<float>(peak_among(by_band)),
                   .heading = Vec2{glm::normalize(way)}};
     }
     return found;
@@ -202,8 +298,8 @@ void Sea::raise(const CellGrid& grid, std::span<const Vec2> wind, double seconds
 void Sea::step(const CellGrid& grid, std::span<const Vec2> wind, double seconds,
                jobs::JobSystem* jobs) {
     HOG_ASSERT(wind.size() == grid.size(), "need wind for every cell");
-    const double steps = std::max(std::ceil(seconds / longest_step_), 1.0);
-    for (double step = 0.0; step < steps; step += 1.0) {
+    const auto steps = static_cast<int>(std::max(std::ceil(seconds / longest_step_), 1.0));
+    for (int step = 0; step < steps; ++step) {
         run_swell(grid, seconds / steps, jobs);
         run_wind_sea(grid, wind, seconds / steps, jobs);
     }
@@ -283,74 +379,19 @@ void Sea::run_wind_sea(const CellGrid& grid, std::span<const Vec2> wind, double 
             fields_.peak[index] = 0.0F;
             return;
         }
-        auto peak = static_cast<double>(before_.peak[index]);
-        DVec2 heading{before_.heading[index]};
-        double variance = static_cast<double>(before_.wind_sea[index]);
-        // Carried along at the group speed of its peak; into a calm cell, at that of the sea
-        // around it, so it runs on out of the wind that raised it, and is left there as swell.
-        const planet::TangentFrame& frame = grid.frame(index);
-        DVec3 moving{0.0};
-        double weight = 0.0;
-        const auto add = [&](std::uint32_t cell) {
-            const auto from = static_cast<double>(before_.peak[cell]);
-            if (!wet_[cell] || from <= 0.0) {
-                return;
-            }
-            const planet::TangentFrame& there = grid.frame(cell);
-            const Vec2 way = before_.heading[cell];
-            const auto amount = static_cast<double>(before_.wind_sea[cell]);
-            moving += ((there.east * static_cast<double>(way.x)) +
-                       (there.north * static_cast<double>(way.y))) *
-                      (group_speed(from) * amount);
-            weight += amount;
-        };
-        add(index);
-        if (weight == 0.0) {
-            for (const std::uint32_t there : grid.neighbors(index)) {
-                add(there);
-            }
-        }
-        const DVec3 velocity = weight > 0.0 ? moving / weight : DVec3{0.0};
-        const DVec2 along{glm::dot(velocity, frame.east), glm::dot(velocity, frame.north)};
-        const double fast = glm::length(along);
-        if (fast > 0.0) {
-            if (peak <= 0.0) {
-                peak = g / (2.0 * fast);
-                heading = along / fast;
-            }
-            const DVec3 from = detail::departure(frame, Vec2{along}, seconds);
-            variance = grid.interpolate(from, [&](std::uint32_t cell) {
-                return wet_[cell] ? static_cast<double>(before_.wind_sea[cell]) : 0.0;
-            });
-        }
+        const Arriving arriving = carried_in(grid, wet_, before_, index, seconds);
+        const std::span<float> swell =
+            std::span{fields_.swell}.subspan(bin(index, 0, 0), swell_bins);
+        double variance = arriving.variance;
         const DVec2 blowing{wind[index]};
         const double speed = glm::length(blowing);
-        const DVec2 way = speed > 0.0 ? blowing / speed : heading;
+        const DVec2 way = speed > 0.0 ? blowing / speed : arriving.heading;
         // As much as the wind holds up along the sea's heading; the rest outruns it, or is left
         // running across it, as swell.
-        const double held = grown_variance(speed * std::max(glm::dot(heading, way), 0.0));
+        const double held = grown_variance(speed * std::max(glm::dot(arriving.heading, way), 0.0));
         if (variance > held) {
-            if (peak > 0.0) {
-                const waves::System left{.heading = DVec3{heading, 0.0},
-                                         .height = 4.0 * std::sqrt(variance - held),
-                                         .peak = peak,
-                                         .peakedness = waves::wind_sea_peakedness,
-                                         .spread = 2.0};
-                const auto banded = waves::band_variances(left);
-                std::array<double, swell_headings> spread{};
-                double spreads = 0.0;
-                for (int at = 0; at < swell_headings; ++at) {
-                    const double facing = std::max(glm::dot(heading_of(at), heading), 0.0);
-                    spread.at(static_cast<std::size_t>(at)) = facing * facing;
-                    spreads += facing * facing;
-                }
-                for (int band = 0; band < swell_bands; ++band) {
-                    for (int at = 0; at < swell_headings; ++at) {
-                        fields_.swell[bin(index, band, at)] +=
-                            static_cast<float>(banded.at(static_cast<std::size_t>(band)) *
-                                               spread.at(static_cast<std::size_t>(at)) / spreads);
-                    }
-                }
+            if (arriving.peak > 0.0) {
+                leave_swell(swell, variance - held, arriving.peak, arriving.heading);
             }
             variance = held;
         }
@@ -364,18 +405,7 @@ void Sea::run_wind_sea(const CellGrid& grid, std::span<const Vec2> wind, double 
         fields_.wind_sea[index] = static_cast<float>(variance);
         fields_.peak[index] = static_cast<float>(grown_peak);
         fields_.heading[index] = Vec2{way};
-        // Swell running with the wind no longer than the wind sea's own waves is soon part of
-        // it, which the wind already holds as high as it can.
-        for (int band = 0; band < swell_bands; ++band) {
-            if (band_frequency(band) < grown_peak) {
-                continue;
-            }
-            for (int at = 0; at < swell_headings; ++at) {
-                if (glm::dot(heading_of(at), way) > 0.0) {
-                    fields_.swell[bin(index, band, at)] *= static_cast<float>(absorbing);
-                }
-            }
-        }
+        absorb_swell(swell, grown_peak, way, absorbing);
     });
 }
 

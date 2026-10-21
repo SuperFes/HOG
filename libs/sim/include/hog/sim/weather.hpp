@@ -159,6 +159,8 @@ private:
     void spin_up_land();
     // Raises the wind sea as a day or so of the winds as they stand would, without swell.
     void spin_up_sea();
+    // Takes the sea, land and waves as loaded, or spins up those saved before they were.
+    void restore(std::uint16_t version, OceanFields sea, LandFields land, SeaFields waves);
     void step(GameTime at, jobs::JobSystem& jobs);
     // Pressure follows temperature; winds follow pressure and the upper air's temperature.
     void balance_winds(jobs::JobSystem* jobs);

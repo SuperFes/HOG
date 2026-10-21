@@ -87,9 +87,8 @@ double height_after(double speed, double seconds) {
     return std::min(4.0 * std::sqrt(1.6e-7 * fetch) * speed * speed / g, grown_height(speed));
 }
 
-void run(Sea& sea, const CellGrid& grid, std::span<const Vec2> wind, double hours,
-         JobSystem& jobs) {
-    for (double done = 0.0; done < hours; done += 1.0) {
+void run(Sea& sea, const CellGrid& grid, std::span<const Vec2> wind, int hours, JobSystem& jobs) {
+    for (int done = 0; done < hours; ++done) {
         sea.step(grid, wind, hour, &jobs);
     }
 }
@@ -105,7 +104,7 @@ TEST_CASE("a wind sea grows with time as JONSWAP found, to Pierson and Moskowitz
     double last_peak = 1e9;
     for (const double hours : {3.0, 6.0, 12.0}) {
         sea.raise(grid, wind, 0.0);
-        run(sea, grid, wind, hours, jobs);
+        run(sea, grid, wind, static_cast<int>(hours), jobs);
         const WaveSystem grown = sea.wind_sea(middle);
         CAPTURE(hours);
         CHECK(std::abs(static_cast<double>(grown.height) - height_after(15.0, hours * hour)) <
@@ -115,7 +114,7 @@ TEST_CASE("a wind sea grows with time as JONSWAP found, to Pierson and Moskowitz
         CHECK(grown.heading == Vec2{1.0F, 0.0F});
         last_peak = static_cast<double>(grown.peak);
     }
-    run(sea, grid, wind, 72.0, jobs);
+    run(sea, grid, wind, 72, jobs);
     const WaveSystem full = sea.wind_sea(middle);
     CHECK(std::abs(static_cast<double>(full.height) - grown_height(15.0)) <
           grown_height(15.0) * 1e-3);
@@ -136,7 +135,7 @@ TEST_CASE("a wind sea grows with its distance from the coast upwind", "[sim][sea
     Sea sea{grid, ground, SeaTuning{}};
     const std::vector<Vec2> wind = east_wind(grid, 30.0);
     sea.raise(grid, wind, 0.0);
-    run(sea, grid, wind, 60.0, jobs);
+    run(sea, grid, wind, 60, jobs);
     double last = 0.0;
     for (const double longitude : {2.0, 6.0, 10.0, 14.0}) {
         const std::uint32_t index = cell_at(grid, 0.0, longitude);
@@ -186,7 +185,7 @@ TEST_CASE("swell runs on from a storm along great circles, the longest first", "
     const std::vector<Vec2> storm = east_wind(grid, 25.0, [&](std::uint32_t index) {
         return glm::dot(grid.frame(index).up, DVec3{1.0, 0.0, 0.0}) > std::cos(10.0 * degree);
     });
-    run(sea, grid, storm, 24.0, jobs);
+    run(sea, grid, storm, 24, jobs);
     const std::vector<Vec2> calm = east_wind(grid, 0.0);
     const std::uint32_t ahead = cell_at(grid, 0.0, 45.0);
     const std::uint32_t behind = cell_at(grid, 0.0, -45.0);
@@ -227,7 +226,7 @@ TEST_CASE("land shelters the sea behind it from swell", "[sim][sea]") {
     };
     const auto swell_after = [&](const std::vector<Ground>& ground) {
         Sea sea{grid, ground, SeaTuning{}};
-        run(sea, grid, east_wind(grid, 25.0, stormy), 12.0, jobs);
+        run(sea, grid, east_wind(grid, 25.0, stormy), 12, jobs);
         const std::vector<Vec2> calm = east_wind(grid, 0.0);
         double most = 0.0;
         for (int hours = 0; hours < 150; ++hours) {
@@ -253,7 +252,8 @@ TEST_CASE("the strongest swells are told apart by heading", "[sim][sea]") {
         const auto banded =
             hog::waves::band_variances({.height = height, .peak = peak, .peakedness = 7.0});
         for (int band = 0; band < hog::sim::swell_bands; ++band) {
-            swell[static_cast<std::size_t>((band * hog::sim::swell_headings) + heading)] +=
+            swell[(static_cast<std::size_t>(band) * hog::sim::swell_headings) +
+                  static_cast<std::size_t>(heading)] +=
                 static_cast<float>(banded.at(static_cast<std::size_t>(band)));
         }
     };
@@ -282,8 +282,8 @@ TEST_CASE("the sea comes out the same on any number of threads", "[sim][sea]") {
     Sea b{grid, ground, SeaTuning{}};
     const std::vector<Vec2> wind =
         east_wind(grid, 18.0, [&](std::uint32_t index) { return grid.frame(index).up.y > 0.5; });
-    run(a, grid, wind, 12.0, one);
-    run(b, grid, wind, 12.0, many);
+    run(a, grid, wind, 12, one);
+    run(b, grid, wind, 12, many);
     CHECK(a.fields() == b.fields());
     CHECK(std::ranges::any_of(a.fields().swell, [](float swell) { return swell > 0.0F; }));
 }

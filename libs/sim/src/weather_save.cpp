@@ -215,6 +215,11 @@ Result<void> Weather::load(std::uint16_t version, std::span<const std::byte> byt
     systems_ = std::move(systems);
     next_system_ = next_system;
     time_ = GameTime{GameDuration{static_cast<GameDuration::rep>(time)}};
+    restore(version, std::move(sea), std::move(land), std::move(waves));
+    return {};
+}
+
+void Weather::restore(std::uint16_t version, OceanFields sea, LandFields land, SeaFields waves) {
     if (version >= 4) {
         ocean_.set_fields(grid_, std::move(sea));
     } else {
@@ -230,7 +235,6 @@ Result<void> Weather::load(std::uint16_t version, std::span<const std::byte> byt
     } else {
         spin_up_sea();
     }
-    return {};
 }
 
 } // namespace hog::sim
