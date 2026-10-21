@@ -67,6 +67,15 @@ public:
     template <typename Value>
     [[nodiscard]] double interpolate(DVec3 point, Value value) const;
 
+    // The cells interpolate() reads at a point, each neighbour then the cell under it, with how
+    // much each counts, out of `total`.
+    struct Shares {
+        std::array<std::uint32_t, 5> cells{};
+        std::array<double, 5> weights{};
+        double total = 1.0;
+    };
+    [[nodiscard]] Shares shares(DVec3 point) const;
+
 private:
     [[nodiscard]] std::array<double, 4> laplacian(std::uint32_t index,
                                                   const std::array<std::uint32_t, 4>& around) const;
@@ -83,25 +92,12 @@ private:
 
 template <typename Value>
 double CellGrid::interpolate(DVec3 point, Value value) const {
-    const std::uint32_t cell = index(planet::cell_at(point, level_));
-    const planet::TangentFrame& here = frames_[cell];
-    const DVec2 heading{glm::dot(point, here.east), glm::dot(point, here.north)};
-    const double length = glm::length(heading);
-    if (length == 0.0) {
-        return value(cell);
-    }
-    const double arc = std::atan2(length, glm::dot(point, here.up));
-    const DVec2 offset = heading * (arc / length);
+    const Shares around = shares(point);
     double total = 0.0;
-    double toward = 0.0;
-    for (std::size_t k = 0; k < 4; ++k) {
-        const DVec2 to = offsets_[cell][k];
-        const double share = std::clamp(glm::dot(offset, to) / glm::dot(to, to), 0.0, 1.0);
-        total += share * value(neighbors_[cell][k]);
-        toward += share;
+    for (std::size_t k = 0; k < around.cells.size(); ++k) {
+        total += around.weights.at(k) * value(around.cells.at(k));
     }
-    const double stay = std::max(1.0 - toward, 0.0);
-    return (total + (stay * value(cell))) / (toward + stay);
+    return total / around.total;
 }
 
 } // namespace hog::sim

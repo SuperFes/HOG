@@ -1,5 +1,6 @@
 #include <hog/client/forecast.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/planet/tangent_frame.hpp>
 #include <hog/sim/cell_grid.hpp>
 #include <hog/sim/weather.hpp>
 
@@ -182,6 +183,46 @@ TEST_CASE("weather with no fade, or at another level, is shown at once", "[clien
     CHECK(forecast.after() == forecast.before());
     forecast.receive(everywhere({.cloud = 1.0F}, 10s, 3), start);
     CHECK_THAT(cloud_at(forecast, start), WithinAbs(1.0, 1e-5));
+}
+
+TEST_CASE("the sea is the waves of the cells around, each as much as it counts there",
+          "[client][forecast]") {
+    const CellWeather wavy{
+        .wind_sea = {.height = 2.0F, .peak = 0.8F, .heading = {1.0F, 0.0F}},
+        .swells = {hog::protocol::CellWaves{.height = 1.0F, .peak = 0.5F, .heading = {0.0F, 1.0F}},
+                   hog::protocol::CellWaves{}},
+        .current = {0.5F, 0.0F}};
+    const auto variance = [](const hog::waves::SeaState& sea) {
+        double sum = 0.0;
+        for (const hog::waves::System& system : sea.systems) {
+            sum += system.height * system.height;
+        }
+        return sum;
+    };
+    Forecast forecast;
+    CHECK(forecast.sea_at(DVec3{0.0, 0.0, 1.0}, start).systems.empty());
+    forecast.receive(everywhere({}, 10s, hog::protocol::most_weather_level), start);
+    CHECK(forecast.sea_at(DVec3{0.0, 0.0, 1.0}, start).systems.empty());
+    forecast.receive(everywhere(wavy, 10s, hog::protocol::most_weather_level), start);
+    const DVec3 at = glm::normalize(DVec3{1.0, 2.0, 0.5});
+    const hog::planet::TangentFrame frame = hog::planet::tangent_frame(at);
+    const hog::waves::SeaState half = forecast.sea_at(at, start + 5s);
+    CHECK_THAT(variance(half), WithinAbs(5.0 / 2.0, 1e-9));
+    const hog::waves::SeaState sea = forecast.sea_at(at, start + 10s);
+    CHECK_THAT(variance(sea), WithinAbs(5.0, 1e-9));
+    REQUIRE(!sea.systems.empty());
+    for (const hog::waves::System& system : sea.systems) {
+        CHECK_THAT(glm::length(system.heading), WithinAbs(1.0, 1e-9));
+        if (system.peak == static_cast<double>(0.8F)) {
+            CHECK(glm::dot(system.heading, frame.east) > 0.98);
+            CHECK(system.peakedness == hog::waves::wind_sea_peakedness);
+        } else {
+            CHECK(system.peak == static_cast<double>(0.5F));
+            CHECK(glm::dot(system.heading, frame.north) > 0.98);
+            CHECK(system.spread == hog::waves::swell_spread);
+        }
+    }
+    CHECK(glm::length(sea.current - (frame.east * 0.5)) < 0.02);
 }
 
 TEST_CASE("the weather's map holds what's at each texel's direction", "[client][forecast]") {

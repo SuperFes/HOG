@@ -93,4 +93,31 @@ std::uint32_t CellGrid::index(CellId cell) const {
     return (static_cast<std::uint32_t>(at.face) * side_ * side_) + (at.j * side_) + at.i;
 }
 
+CellGrid::Shares CellGrid::shares(DVec3 point) const {
+    const std::uint32_t cell = index(planet::cell_at(point, level_));
+    Shares around;
+    around.cells = {neighbors_[cell][0], neighbors_[cell][1], neighbors_[cell][2],
+                    neighbors_[cell][3], cell};
+    const planet::TangentFrame& here = frames_[cell];
+    const DVec2 heading{glm::dot(point, here.east), glm::dot(point, here.north)};
+    const double length = glm::length(heading);
+    if (length == 0.0) {
+        around.weights.back() = 1.0;
+        return around;
+    }
+    const double arc = std::atan2(length, glm::dot(point, here.up));
+    const DVec2 offset = heading * (arc / length);
+    double toward = 0.0;
+    for (std::size_t k = 0; k < 4; ++k) {
+        const DVec2 to = offsets_[cell][k];
+        const double share = std::clamp(glm::dot(offset, to) / glm::dot(to, to), 0.0, 1.0);
+        around.weights.at(k) = share;
+        toward += share;
+    }
+    const double stay = std::max(1.0 - toward, 0.0);
+    around.weights.back() = stay;
+    around.total = toward + stay;
+    return around;
+}
+
 } // namespace hog::sim

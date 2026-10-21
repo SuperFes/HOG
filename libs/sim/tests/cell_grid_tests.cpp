@@ -91,6 +91,31 @@ TEST_CASE("grids interpolate between cells", "[sim][grid]") {
     }
 }
 
+TEST_CASE("a grid tells which cells it interpolates from, and how much", "[sim][grid]") {
+    const CellGrid grid{4};
+    const auto value = [](std::uint32_t index) { return static_cast<double>(index % 11); };
+    for (std::uint32_t index = 0; index < grid.size(); index += 29) {
+        const DVec3 near = glm::normalize(grid.frame(index).up + (grid.frame(index).east * 0.02) +
+                                          (grid.frame(index).north * 0.01));
+        const CellGrid::Shares around = grid.shares(near);
+        double sum = 0.0;
+        double weighed = 0.0;
+        for (std::size_t k = 0; k < around.cells.size(); ++k) {
+            CHECK(around.weights.at(k) >= 0.0);
+            sum += around.weights.at(k);
+            weighed += around.weights.at(k) * value(around.cells.at(k));
+        }
+        CAPTURE(index);
+        CHECK(around.cells.back() == index);
+        CHECK_THAT(sum, Catch::Matchers::WithinRel(around.total, 1e-12));
+        CHECK(grid.interpolate(near, value) == weighed / around.total);
+        // Off towards a neighbour, some of it counts.
+        CHECK(around.weights.back() < around.total);
+    }
+    const CellGrid::Shares centre = grid.shares(grid.frame(5).up);
+    CHECK_THAT(centre.weights.back() / centre.total, Catch::Matchers::WithinAbs(1.0, 1e-9));
+}
+
 TEST_CASE("solving with grid Laplacians recovers a smooth field", "[sim][grid]") {
     // Height along an axis is a first spherical harmonic, whose Laplacian is -2 times itself, so
     // it solves laplacian(u) - u = -3 height. Cells are skewed, so single cells are off by more

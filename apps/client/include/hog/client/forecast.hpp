@@ -4,6 +4,7 @@
 #include <hog/core/time.hpp>
 #include <hog/protocol/messages.hpp>
 #include <hog/sim/cell_grid.hpp>
+#include <hog/waves/waves.hpp>
 
 #include <array>
 #include <cstdint>
@@ -48,6 +49,10 @@ public:
     [[nodiscard]] double faded(MonotonicClock::time_point now) const noexcept;
     // The weather at a unit direction as shown at `now`; a clear sky while none is known.
     [[nodiscard]] protocol::CellWeather at(DVec3 direction, MonotonicClock::time_point now) const;
+    // The sea at a unit direction as shown at `now`, in the planet's frame: the wave systems of
+    // the cells around it, each as much as that cell counts there, so the waves change smoothly
+    // from cell to cell. A calm sea while none is known.
+    [[nodiscard]] waves::SeaState sea_at(DVec3 direction, MonotonicClock::time_point now) const;
 
     // Cube maps of the weather faded from and to, face by face, each row by row from the top;
     // empty while none is known.

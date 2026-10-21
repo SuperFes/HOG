@@ -170,4 +170,48 @@ protocol::CellWeather Forecast::at(DVec3 direction, MonotonicClock::time_point n
                  static_cast<float>(faded(now)));
 }
 
+waves::SeaState Forecast::sea_at(DVec3 direction, MonotonicClock::time_point now) const {
+    waves::SeaState sea;
+    if (!grid_) {
+        return sea;
+    }
+    const sim::CellGrid::Shares around = grid_->shares(direction);
+    const double by = faded(now);
+    const auto add = [&](const Cells& cells, double counts) {
+        for (std::size_t k = 0; k < around.cells.size(); ++k) {
+            const double weight = counts * around.weights.at(k) / around.total;
+            if (weight <= 0.0) {
+                continue;
+            }
+            const std::uint32_t index = around.cells.at(k);
+            const planet::TangentFrame& frame = grid_->frame(index);
+            const auto along = [&](Vec2 vector) {
+                return (frame.east * static_cast<double>(vector.x)) +
+                       (frame.north * static_cast<double>(vector.y));
+            };
+            const protocol::CellWeather& cell = cells[index];
+            sea.current += along(cell.current) * weight;
+            // Each system's variance counts as much as its cell does.
+            const auto system = [&](const protocol::CellWaves& waves, double peakedness,
+                                    double spread) {
+                if (waves.height > 0.0F && waves.peak > 0.0F) {
+                    sea.systems.push_back(
+                        {.heading = glm::normalize(along(waves.heading)),
+                         .height = static_cast<double>(waves.height) * std::sqrt(weight),
+                         .peak = static_cast<double>(waves.peak),
+                         .peakedness = peakedness,
+                         .spread = spread});
+                }
+            };
+            system(cell.wind_sea, waves::wind_sea_peakedness, 2.0);
+            for (const protocol::CellWaves& swell : cell.swells) {
+                system(swell, waves::swell_peakedness, waves::swell_spread);
+            }
+        }
+    };
+    add(from_, 1.0 - by);
+    add(to_, by);
+    return sea;
+}
+
 } // namespace hog::client

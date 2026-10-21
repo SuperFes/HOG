@@ -393,7 +393,14 @@ TEST_CASE("a windy sea, to look at", "[.look]") {
     hog::jobs::JobSystem jobs{4};
     auto scene = Scene::create(*device, world(), jobs, calendar(), hog::client::still_format, 1);
     REQUIRE(scene);
-    const hog::client::Forecast forecast = everywhere({.drift = {16.0F, 6.0F}});
+    // A sea grown under a fresh breeze, crossed by a swell from a storm far off.
+    const hog::client::Forecast forecast =
+        everywhere({.drift = {16.0F, 6.0F},
+                    .wind_sea = {.height = 2.2F, .peak = 0.75F, .heading = {0.94F, 0.35F}},
+                    .swells = {hog::protocol::CellWaves{
+                                   .height = 1.4F, .peak = 0.45F, .heading = {-0.3F, 0.95F}},
+                               hog::protocol::CellWaves{}},
+                    .current = {}});
     struct Look {
         std::string_view name;
         double pitch;

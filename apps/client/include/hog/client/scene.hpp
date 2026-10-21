@@ -74,6 +74,8 @@ struct Shot {
 
 // The weather at the eye as the shot shows it: a clear sky while none is known.
 [[nodiscard]] protocol::CellWeather weather_at_eye(const Shot& shot);
+// The sea under the eye as the shot shows it: a calm one while none is known.
+[[nodiscard]] waves::SeaState sea_at_eye(const Shot& shot);
 // The weather's drift at the eye in the planet's frame, m/s.
 [[nodiscard]] DVec3 drift_at(DVec3 up, const protocol::CellWeather& weather);
 // mm an hour falling round the eye: none above the cloud it falls from.

@@ -55,6 +55,13 @@ protocol::CellWeather weather_at_eye(const Shot& shot) {
     return shot.forecast->at(shot.bend.up, shot.now);
 }
 
+waves::SeaState sea_at_eye(const Shot& shot) {
+    if (shot.forecast == nullptr) {
+        return {};
+    }
+    return shot.forecast->sea_at(shot.bend.up, shot.now);
+}
+
 DVec3 drift_at(DVec3 up, const protocol::CellWeather& weather) {
     return planet::tangent_frame(up).to_world(
         {static_cast<double>(weather.drift.x), static_cast<double>(weather.drift.y), 0.0});
@@ -468,8 +475,7 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                   sky_.draw(commands, frame.extent, frame.slot, atmosphere_, sky);
               });
     const std::vector<waves::Wave> waves =
-        waves::waves_at(wave_trains_, shot.bend.up,
-                        {.systems = {waves::grown_sea(drift * surface_wind)}, .current = {}});
+        waves::waves_at(wave_trains_, shot.bend.up, sea_at_eye(shot));
     const render::OceanView sea{.camera = shot.camera,
                                 .sun = sky.sun,
                                 .bend = shot.bend,
