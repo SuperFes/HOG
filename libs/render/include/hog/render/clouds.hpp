@@ -118,6 +118,9 @@ public:
     // image, from the last march() and its `distances`, ready to sample.
     void draw(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth, VkImageView distances,
               const CloudsView& view) const noexcept;
+    // What the last march() left, as draw() draws it, ready to sample: premultiplied, before tone
+    // mapping, its alpha the share of the view hidden.
+    [[nodiscard]] VkImageView marched() const noexcept { return blends_.at(blended_).view(); }
 
 private:
     Clouds() = default;

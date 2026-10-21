@@ -3,8 +3,10 @@
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
 #include <hog/render/camera.hpp>
+#include <hog/render/memory.hpp>
 #include <hog/render/pipeline.hpp>
 #include <hog/render/sampler.hpp>
+#include <hog/render/sky.hpp>
 #include <hog/render/vulkan.hpp>
 
 namespace hog::render {
@@ -19,9 +21,16 @@ struct GlareView {
     Camera camera;
     DVec3 towards{1.0, 0.0, 0.0}; // unit, towards the light
     double angular_radius = sun_angular_radius;
-    // Reaching the eye, on a surface facing the light, in the sky's units.
+    // Reaching the eye, on a surface facing the light, in the sky's units, as if through no cloud
+    // or mist.
     DVec3 irradiance{0.0};
     double exposure = 1.0; // as the rest of the picture is drawn with
+    // The frame's air, whose cloud's shadow and mist over the eye dim the light.
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    AirBindings air = {};
+    // The clouds as Clouds::marched() holds them for this picture, ready to sample, which dim the
+    // light by what they hide of its disc while it's in the picture; none for no clouds.
+    VkImageView clouds = VK_NULL_HANDLE;
 };
 
 // Of light from a point reaching the eye, the share per steradian scattered within the eye to
@@ -36,10 +45,10 @@ struct GlareView {
 
 // Light scattered within the eye round a bright light, as a glow fading over tens of degrees and
 // streaked close in, laid over what's drawn. It's hidden as much as the light's disc is by anything
-// drawn in front.
+// drawn in front, and dimmed by the cloud and mist the light comes through.
 class Glare {
 public:
-    [[nodiscard]] static Result<Glare> create(const Device& device, VkFormat colour_format);
+    [[nodiscard]] static Result<Glare> create(Device& device, VkFormat colour_format);
 
     // Records drawing the glare over the colour image being rendered to, of `extent`, with no
     // depth image. `depth` is the picture's, ready to sample.
@@ -51,6 +60,8 @@ private:
 
     Pipeline pipeline_;
     Sampler sampler_;
+    Sampler linear_;
+    Image cloudless_; // hiding nothing
 };
 
 } // namespace hog::render

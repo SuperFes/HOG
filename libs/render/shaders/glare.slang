@@ -1,6 +1,13 @@
+import atmosphere;
+import shadow;
 import tone;
 
 [[vk::binding(0, 0)]] Sampler2D<float> depth_image;
+[[vk::binding(1, 0)]] ConstantBuffer<Lighting> lighting;
+// As cloud_march.slang's.
+[[vk::binding(2, 0)]] Sampler2D cloud_shadow;
+// As cloud_resolve.slang leaves them, premultiplied: a the share of the view they hide.
+[[vk::binding(3, 0)]] Sampler2D clouds;
 
 struct Push {
     float4x4 eye_from_clip;
@@ -19,12 +26,20 @@ static const float degrees_per_radian = 57.2957795;
 static const float sky_depth = 2e-7;
 static const uint ring_points = 16;
 static const float ring_share = 0.7; // of the disc's radius
+// Of the picture's height, how far in from its edge the light's disc is wholly seen through the
+// clouds marched for it, rather than the cloud's shadow over the eye.
+static const float clouds_edge = 0.05;
 
 struct Glow {
     float4 position : SV_Position;
     float2 clip;
     nointerpolation float seen;
 };
+
+float2 ring_point(uint at) {
+    const float turn = 6.2831853 * (float(at) / float(ring_points));
+    return float2(cos(turn), sin(turn)) * (push.disc.z * ring_share);
+}
 
 // As glare.hpp's eye_spread, eye_spread_streaked and streaks.
 float eye_spread(float degrees) {
@@ -70,11 +85,33 @@ float seen() {
     depth_image.GetDimensions(size.x, size.y);
     float seen = seen_at(push.disc.xy, size) ? 1.0 : 0.0;
     for (uint at = 0; at < ring_points; ++at) {
-        const float turn = 6.2831853 * (float(at) / float(ring_points));
-        const float2 offset = float2(cos(turn), sin(turn)) * (push.disc.z * ring_share);
-        seen += seen_at(push.disc.xy + offset, size) ? 1.0 : 0.0;
+        seen += seen_at(push.disc.xy + ring_point(at), size) ? 1.0 : 0.0;
     }
     return seen / float(ring_points + 1);
+}
+
+// Of the light, the share any cloud and mist let straight through to the eye: as the clouds marched
+// for the picture have it over the light's disc, as they're seen; else, out of the picture, as the
+// cloud's shadow over the eye has it, which follows the light up through the same cloud.
+float through_clouds() {
+    const float shadowed = shade_at(lighting, cloud_shadow, float3(0.0)).sun;
+    if (push.disc.w == 0.0) {
+        return shadowed;
+    }
+    uint2 size;
+    depth_image.GetDimensions(size.x, size.y);
+    const float2 picture = float2(size);
+    const float2 from_edge = min(push.disc.xy, picture - push.disc.xy);
+    const float within = saturate(min(from_edge.x, from_edge.y) / (clouds_edge * picture.y));
+    if (within <= 0.0) {
+        return shadowed;
+    }
+    float hidden = clouds.SampleLevel(push.disc.xy / picture, 0.0).a;
+    for (uint at = 0; at < ring_points; ++at) {
+        hidden += clouds.SampleLevel((push.disc.xy + ring_point(at)) / picture, 0.0).a;
+    }
+    const float marched = saturate(1.0 - (hidden / float(ring_points + 1))) * lighting.shadow.z;
+    return lerp(shadowed, marched, within);
 }
 
 // A triangle covering the whole picture, with how much of the light is seen worked out once for
@@ -85,7 +122,7 @@ Glow vertex_main(uint id: SV_VertexID) {
     Glow glow;
     glow.position = float4(clip, 0.0, 1.0);
     glow.clip = clip;
-    glow.seen = seen();
+    glow.seen = seen() * through_clouds();
     return glow;
 }
 

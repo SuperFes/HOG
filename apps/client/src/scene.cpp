@@ -544,18 +544,22 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                   });
     }
     const double height = shot.bend.eye_height * render::air_scale(model_.air(), shot.bend);
+    // Dimmed by the cloud's shadow, through the air.
+    std::vector<render::GraphUse> glare_uses = through_air;
+    glare_uses.push_back({.image = depth, .use = render::image_use::sampled});
     graph.add(
         {.name = "glare",
-         .uses = {{.image = depth, .use = render::image_use::sampled}},
+         .uses = glare_uses,
          .targets = {{.colour = {.image = target, .clear = std::nullopt}, .depth = std::nullopt}}},
         [&](VkCommandBuffer commands) {
             glare_.draw(
                 commands, frame.extent, graph.view(depth),
                 {.camera = shot.camera,
                  .towards = sky.sun,
-                 .irradiance =
-                     model_.transmittance(height, glm::dot(sky.sun, shot.bend.up)) * shade.direct,
-                 .exposure = sky.exposure});
+                 .irradiance = model_.transmittance(height, glm::dot(sky.sun, shot.bend.up)),
+                 .exposure = sky.exposure,
+                 .air = through,
+                 .clouds = cloudy ? clouds_.marched() : VK_NULL_HANDLE});
         });
     if (new_weather) {
         weather_taken_ = shot.forecast->received();

@@ -1,9 +1,14 @@
+#include <hog/core/assert.hpp>
 #include <hog/render/glare.hpp>
+#include <hog/render/streamed_image.hpp>
 #include <hog/shaders/glare.hpp>
 
 #include <array>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <numbers>
+#include <span>
 #include <utility>
 
 namespace hog::render {
@@ -19,12 +24,18 @@ struct Push {
 
 static_assert(sizeof(Push) <= 128);
 
-constexpr std::array bindings{
-    VkDescriptorSetLayoutBinding{.binding = 0,
-                                 .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                                 .descriptorCount = 1,
-                                 .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-                                 .pImmutableSamplers = nullptr}};
+constexpr VkDescriptorSetLayoutBinding binding(std::uint32_t at, VkDescriptorType type) noexcept {
+    return {.binding = at,
+            .descriptorType = type,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+            .pImmutableSamplers = nullptr};
+}
+
+constexpr std::array bindings{binding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+                              binding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
+                              binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+                              binding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)};
 
 } // namespace
 
@@ -56,7 +67,7 @@ double streaks(double turn) noexcept {
                                (width * std::sqrt(std::numbers::pi)));
 }
 
-Result<Glare> Glare::create(const Device& device, VkFormat colour_format) {
+Result<Glare> Glare::create(Device& device, VkFormat colour_format) {
     Glare glare;
     auto pipeline = make_pipeline(device, {.spirv = shaders::glare,
                                            .colour_format = colour_format,
@@ -73,6 +84,18 @@ Result<Glare> Glare::create(const Device& device, VkFormat colour_format) {
         return std::unexpected(std::move(sampler).error());
     }
     glare.sampler_ = std::move(sampler).value();
+    auto linear = make_sampler(device, VK_FILTER_LINEAR);
+    if (!linear) {
+        return std::unexpected(std::move(linear).error());
+    }
+    glare.linear_ = std::move(linear).value();
+    constexpr std::array<std::byte, 4> cloudless{};
+    auto filled =
+        make_filled_image(device, {.format = VK_FORMAT_R8G8B8A8_UNORM}, std::span{cloudless});
+    if (!filled) {
+        return std::unexpected(std::move(filled).error());
+    }
+    glare.cloudless_ = std::move(filled).value();
     return glare;
 }
 
@@ -81,6 +104,7 @@ void Glare::draw(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth,
     if (extent.width == 0 || extent.height == 0) {
         return;
     }
+    HOG_ASSERT(view.air.lighting != VK_NULL_HANDLE, "drawing the glare without the air");
     const DVec2 size{extent.width, extent.height};
     const double aspect = size.x / size.y;
     const glm::dmat4 clip_from_eye{view_projection(view.camera, aspect)};
@@ -96,6 +120,11 @@ void Glare::draw(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth,
                              in_front ? 1.0F : 0.0F}};
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.handle());
     push_sampled_image(commands, pipeline_, 0, depth, sampler_.handle());
+    push_uniform_buffer(commands, pipeline_, 1, view.air.lighting);
+    push_sampled_image(commands, pipeline_, 2, view.air.cloud_shadow, view.air.sampler);
+    push_sampled_image(commands, pipeline_, 3,
+                       view.clouds != VK_NULL_HANDLE ? view.clouds : cloudless_.view(),
+                       linear_.handle());
     vkCmdPushConstants(commands, pipeline_.layout(),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push),
                        &push);

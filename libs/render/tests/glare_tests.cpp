@@ -1,23 +1,30 @@
 #include "test_device.hpp"
 
+#include <hog/render/atmosphere.hpp>
 #include <hog/render/barrier.hpp>
 #include <hog/render/device.hpp>
 #include <hog/render/glare.hpp>
 #include <hog/render/memory.hpp>
 #include <hog/render/readback.hpp>
 #include <hog/render/rendering.hpp>
+#include <hog/render/sky.hpp>
+#include <hog/render/streamed_image.hpp>
+#include <hog/terrain/bend.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <glm/gtc/packing.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <numbers>
 #include <optional>
+#include <span>
+#include <utility>
 #include <vector>
 
 using Catch::Matchers::WithinRel;
@@ -78,12 +85,56 @@ double expected(const GlareView& view, std::uint32_t x, std::uint32_t y) {
 // The radiance each pixel's red was tone mapped from.
 using Picture = std::vector<double>;
 
+// Cloud between the eye and the light, each as a share of the light it lets through; none where
+// not given.
+struct Clouded {
+    // As the cloud's shadow over the eye has it.
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    std::optional<float> shadow = {};
+    // As the clouds marched for the picture have it, everywhere in it.
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    std::optional<float> marched = {};
+};
+
+std::optional<hog::render::Image> filled(hog::render::Device& device, glm::vec4 texel) {
+    const std::array<std::uint16_t, 4> halves{
+        glm::packHalf1x16(texel.r), glm::packHalf1x16(texel.g), glm::packHalf1x16(texel.b),
+        glm::packHalf1x16(texel.a)};
+    auto image = hog::render::make_filled_image(device, {.format = VK_FORMAT_R16G16B16A16_SFLOAT},
+                                                std::as_bytes(std::span{halves}));
+    REQUIRE(image);
+    return std::move(image).value();
+}
+
 // The glare drawn over black, with depth cleared to the sky's and then, within `covered`, to
-// the nearest.
-Picture draw(hog::render::Device& device, const GlareView& view,
-             std::optional<VkRect2D> covered = std::nullopt) {
+// the nearest, from 10 m over a planet the size of the islands'.
+Picture draw(hog::render::Device& device, const GlareView& seen,
+             std::optional<VkRect2D> covered = std::nullopt, Clouded clouded = {}) {
+    constexpr double radius = 115'000.0;
+    constexpr DVec3 up{0.0, 0.0, 1.0};
     auto glare = Glare::create(device, colour_format);
     REQUIRE(glare);
+    auto atmosphere = hog::render::Atmosphere::create(device);
+    REQUIRE(atmosphere);
+    auto sky = hog::render::Sky::create(device, colour_format, depth_format);
+    REQUIRE(sky);
+    // Straight through, scattering nothing, from a cloud whose top is far over the eye.
+    const std::optional<hog::render::Image> shadow =
+        clouded.shadow ? filled(device, {*clouded.shadow, 1.0F, 0.0F, 8'000.0F}) : std::nullopt;
+    const std::optional<hog::render::Image> marched =
+        clouded.marched ? filled(device, {0.0F, 0.0F, 0.0F, 1.0F - *clouded.marched})
+                        : std::nullopt;
+    VkImageView shadow_view = shadow ? shadow->view() : VK_NULL_HANDLE;
+    const hog::WorldPosition eye{up * (radius + 10.0)};
+    hog::render::Camera camera = seen.camera;
+    camera.eye = eye;
+    const hog::render::SkyView sky_view{.camera = camera,
+                                        .sun = seen.towards,
+                                        .bend = hog::terrain::bend_from(eye, radius, 0.0),
+                                        .cloud_shadow = shadow_view};
+    GlareView view = seen;
+    view.air = sky->bindings(0, *atmosphere, shadow_view);
+    view.clouds = marched ? marched->view() : VK_NULL_HANDLE;
     auto colour = hog::render::make_image(
         device, {.format = colour_format,
                  .extent = extent,
@@ -97,6 +148,7 @@ Picture draw(hog::render::Device& device, const GlareView& view,
     REQUIRE(depth);
     const auto drawn = device.submit_now([&](VkCommandBuffer commands) {
         namespace use = hog::render::image_use;
+        CHECK(sky->record_frame(commands, extent, 0, *atmosphere, sky_view));
         hog::render::transition(commands, colour->handle(), VK_IMAGE_ASPECT_COLOR_BIT, use::discard,
                                 use::colour_target);
         hog::render::transition(commands, depth->handle(), VK_IMAGE_ASPECT_DEPTH_BIT, use::discard,
@@ -120,6 +172,7 @@ Picture draw(hog::render::Device& device, const GlareView& view,
         vkCmdEndRendering(commands);
     });
     REQUIRE(drawn);
+    CHECK(device.validation_errors() == 0);
     const auto bytes =
         hog::render::read_pixels(device, *colour, hog::render::image_use::colour_target);
     REQUIRE(bytes);
@@ -141,6 +194,19 @@ double total(const Picture& picture) {
     double sum = 0.0;
     for (const double radiance : picture) {
         sum += radiance;
+    }
+    return sum;
+}
+
+// Of the pixels a degree or more from the light, past where tone mapping saturates.
+double total_round(const GlareView& view, const Picture& picture) {
+    double sum = 0.0;
+    for (std::uint32_t y = 0; y < extent.height; ++y) {
+        for (std::uint32_t x = 0; x < extent.width; ++x) {
+            if (angle_at(view, x, y) >= 1.0) {
+                sum += at(picture, x, y);
+            }
+        }
     }
     return sum;
 }
@@ -258,4 +324,29 @@ TEST_CASE("a light just out of view glares in from the edge", "[render][gpu][gla
     CHECK_THAT(at(picture, edge, middle), WithinRel(expected(view, edge, middle), 0.02));
     CHECK(at(picture, edge, middle) > at(picture, 0, middle));
     CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("cloud over a light in the picture dims its glare by what it's seen to hide",
+          "[render][gpu][glare]") {
+    const auto device = test_device();
+    const GlareView view = view_of(10.0);
+    const double clear = total_round(view, draw(*device, view));
+    REQUIRE(clear > 0.0);
+    CHECK_THAT(total_round(view, draw(*device, view, std::nullopt, {.marched = 0.25F})),
+               WithinRel(0.25 * clear, 0.01));
+    CHECK(total(draw(*device, view, std::nullopt, {.marched = 0.0F})) == 0.0);
+    // As it's seen, though the cloud's shadow over the eye, coarser, has it hidden.
+    CHECK_THAT(
+        total_round(view, draw(*device, view, std::nullopt, {.shadow = 0.0F, .marched = 1.0F})),
+        WithinRel(clear, 0.01));
+}
+
+TEST_CASE("cloud over a light out of the picture dims its glare as its shadow over the eye has it",
+          "[render][gpu][glare]") {
+    const auto device = test_device();
+    const GlareView view = view_of(60.0);
+    const std::uint32_t edge = extent.width - 1;
+    const std::uint32_t middle = extent.height / 2;
+    const Picture picture = draw(*device, view, std::nullopt, {.shadow = 0.5F, .marched = 0.0F});
+    CHECK_THAT(at(picture, edge, middle), WithinRel(0.5 * expected(view, edge, middle), 0.02));
 }
