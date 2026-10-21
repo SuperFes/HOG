@@ -72,16 +72,20 @@ Sky sky_over(const WeatherFields& fields, const Ground& ground, const WeatherTun
                        (1.0 - smooth(sky.fog_calm, sky.fog_windy, speed)) * (1.0 - rising) *
                        (1.0 - storm);
 
-    const double base =
-        elevation +
-        std::min(sky.saturated_base + (sky.base_per_dryness * (1.0 - humidity)), sky.highest_base);
+    const double fog_top = fog * (std::max(elevation, 0.0) + sky.fog_depth);
+    const double dew_base =
+        elevation + std::min(sky.base_per_degree *
+                                 detail::dew_spread(humidity * tuning.water.condensing_humidity),
+                             sky.highest_base);
+    // Fog is cloud that's come down as the air cooled.
+    const double base = std::lerp(dew_base, fog_top, fog);
     const double depth = sky.thinnest +
                          (sky.depth_per_mm * static_cast<double>(fields.cloud[index])) +
                          (sky.rising_depth * rising);
     const double top = std::max(base + depth, sky.storm_top * storm);
     return {.humidity = static_cast<float>(humidity),
             .fog = static_cast<float>(fog),
-            .fog_top = static_cast<float>(fog * (std::max(elevation, 0.0) + sky.fog_depth)),
+            .fog_top = static_cast<float>(fog_top),
             .base = static_cast<float>(base),
             .top = static_cast<float>(top)};
 }

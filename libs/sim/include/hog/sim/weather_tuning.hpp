@@ -182,15 +182,16 @@ struct LandTuning {
 // Where cloud sits and how deep, and where fog lies, as the weather is drawn. Heights are in
 // metres.
 struct SkyTuning {
-    double saturated_base = 500.0;    // above the ground, cloud's base in air about to condense
-    double base_per_dryness = 2500.0; // higher per share of humidity short of forming cloud
-    double highest_base = 3000.0;     // above the ground
+    // Above the ground, cloud's base is as high as the air must rise to cool to its dew point,
+    // cooling faster than its dew point falls by this much a degree.
+    double base_per_degree = 125.0;
+    double highest_base = 3000.0; // above the ground
     double thinnest = 300.0;
     double depth_per_mm = 1200.0; // thicker per mm of cloud
     double rising_depth = 2500.0; // strongly rising air builds its tops this much higher
     double storm_top = 11000.0;   // above sea level, a full thunderstorm's anvil
     // Fog forms from this humidity, fully in air as calm as `fog_calm` m/s
-    // and not at all in wind of `fog_windy`.
+    // and not at all in wind of `fog_windy`; the cloud's base comes down to its top as it does.
     double fog_humidity = 0.95;
     double fog_calm = 2.0;
     double fog_windy = 5.0;

@@ -720,13 +720,23 @@ TEST_CASE("humidity is the share of the water the air holds when it starts formi
     CHECK(sky_of(air(0.0F)).humidity == 0.0F);
 }
 
-TEST_CASE("cloud sits higher in drier air, and above the ground beneath", "[sim][weather]") {
-    const hog::sim::Sky damp = sky_of(air(45.0F));
-    CHECK(std::abs(damp.base - 500.0F) < 1.0F);
-    CHECK(std::abs(sky_of(air(30.0F)).base - 1'333.3F) < 1.0F);
-    CHECK(sky_of(air(0.0F)).base == 3'000.0F);
-    CHECK(std::abs(sky_of(air(45.0F), 1'000.0F).base - 1'500.0F) < 1.0F);
-    CHECK(damp.top > damp.base);
+TEST_CASE("cloud sits as high as the air must rise to cool to its dew point", "[sim][weather]") {
+    // Windy, so no fog brings it down.
+    const auto windy = [](float vapour, float temperature = 25.0F) {
+        WeatherFields fields = air(vapour);
+        fields.temperature[0] = temperature;
+        fields.wind[0] = {8.0F, 0.0F};
+        return fields;
+    };
+    // 125 m a degree, the air holding 90% of what it could as it starts forming cloud.
+    const float damp = sky_of(windy(45.0F)).base;
+    CHECK(std::abs(damp - (125.0F * std::log(0.9F) / -0.06F)) < 1.0F);
+    CHECK(std::abs(sky_of(windy(30.0F)).base - (125.0F * std::log(0.6F) / -0.06F)) < 1.0F);
+    CHECK(sky_of(windy(0.0F)).base == 3'000.0F);
+    CHECK(std::abs(sky_of(windy(45.0F), 1'000.0F).base - (1'000.0F + damp)) < 1.0F);
+    CHECK(sky_of(windy(45.0F)).top > damp);
+    // The same water in cooler air, nearer its dew point, as at night.
+    CHECK(sky_of(windy(30.0F, 20.0F)).base < 0.5F * sky_of(windy(30.0F)).base);
 }
 
 TEST_CASE("more cloud and rising air build deeper cloud, and storms tower", "[sim][weather]") {
@@ -769,4 +779,16 @@ TEST_CASE("fog lies in calm, damp air and fills the low ground first", "[sim][we
     CHECK(partly.fog > 0.0F);
     CHECK(partly.fog < 1.0F);
     CHECK(partly.fog_top < 1'000.0F);
+}
+
+TEST_CASE("fog is cloud come down to the ground, its base on the fog's top", "[sim][weather]") {
+    const hog::sim::Sky fog = sky_of(air(45.0F));
+    CHECK(fog.base == fog.fog_top);
+    WeatherFields breezy = air(45.0F);
+    breezy.wind[0] = {8.0F, 0.0F};
+    const float clear = sky_of(breezy).base;
+    breezy.wind[0] = {4.0F, 0.0F};
+    const hog::sim::Sky lifting = sky_of(breezy, 1'000.0F);
+    CHECK(lifting.base < 1'000.0F + clear);
+    CHECK(lifting.base > lifting.fog_top);
 }

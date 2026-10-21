@@ -4,6 +4,7 @@
 
 #include <hog/sim/weather.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <numbers>
@@ -39,9 +40,18 @@ struct StepContext {
     const Land* land = nullptr;
 };
 
+inline constexpr double saturation_growth = 0.06; // per °C
+
 // Column water the air holds at saturation, rising about 6% per °C.
 [[nodiscard]] inline double saturation(double temperature) {
-    return 50.0 * std::exp(0.06 * (temperature - 25.0));
+    return 50.0 * std::exp(saturation_growth * (temperature - 25.0));
+}
+
+// Degrees air holding `relative` of the water it could must cool by to saturate: how far its
+// temperature is over its dew point.
+[[nodiscard]] inline double dew_spread(double relative) {
+    constexpr double driest = 1e-3;
+    return -std::log(std::clamp(relative, driest, 1.0)) / saturation_growth;
 }
 
 // Fraction of the way a value relaxing over `response` moves in `step` seconds.
