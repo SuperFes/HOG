@@ -76,6 +76,14 @@ void each_sea_field(Fields& fields, Visit visit) {
 }
 
 template <typename Fields, typename Visit>
+void each_wave_field(Fields& fields, Visit visit) {
+    visit(fields.wind_sea);
+    visit(fields.peak);
+    visit(fields.heading);
+    visit(fields.swell);
+}
+
+template <typename Fields, typename Visit>
 void each_land_field(Fields& fields, Visit visit) {
     visit(fields.snow);
     visit(fields.soil);
@@ -142,6 +150,7 @@ std::vector<std::byte> Weather::save() const {
     };
     each_sea_field(ocean_.fields(), write_values);
     each_land_field(land_.fields(), write_values);
+    each_wave_field(sea_.fields(), write_values);
     return std::move(out).take();
 }
 
@@ -189,6 +198,10 @@ Result<void> Weather::load(std::uint16_t version, std::span<const std::byte> byt
     if (version >= 5) {
         each_land_field(land, read_values);
     }
+    SeaFields waves{grid_.size()};
+    if (version >= 6) {
+        each_wave_field(waves, read_values);
+    }
     if (auto finished = in.finish(); !finished) {
         return finished;
     }
@@ -211,6 +224,11 @@ Result<void> Weather::load(std::uint16_t version, std::span<const std::byte> byt
         land_.set_fields(grid_, std::move(land));
     } else {
         spin_up_land();
+    }
+    if (version >= 6) {
+        sea_.set_fields(grid_, std::move(waves));
+    } else {
+        spin_up_sea();
     }
     return {};
 }

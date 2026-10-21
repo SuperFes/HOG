@@ -7,6 +7,7 @@ add_library(hog_sim
     src/land.cpp
     src/natural.cpp
     src/ocean.cpp
+    src/sea.cpp
     src/vegetation.cpp
     src/weather.cpp
     src/weather_heat.cpp
@@ -25,7 +26,7 @@ add_library(hog_sim
 add_library(hog::sim ALIAS hog_sim)
 
 target_include_directories(hog_sim PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(hog_sim PUBLIC hog::core hog::planet hog::jobs PRIVATE tomlplusplus)
+target_link_libraries(hog_sim PUBLIC hog::core hog::planet hog::jobs PRIVATE hog::waves tomlplusplus)
 hog_target_defaults(hog_sim)
 
 hog_add_tests(hog_sim
@@ -37,10 +38,12 @@ hog_add_tests(hog_sim
     tests/land_tests.cpp
     tests/natural_tests.cpp
     tests/ocean_tests.cpp
+    tests/sea_tests.cpp
     tests/vegetation_tests.cpp
     tests/weather_tests.cpp
     tests/wildlife_tests.cpp)
 
 if(TARGET hog_sim_tests)
+    target_link_libraries(hog_sim_tests PRIVATE hog::waves)
     target_compile_definitions(hog_sim_tests PRIVATE HOG_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 endif()

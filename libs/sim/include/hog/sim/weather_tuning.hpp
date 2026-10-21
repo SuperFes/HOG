@@ -155,6 +155,20 @@ struct OceanTuning {
     double min_spin_latitude = 10.0;
 };
 
+// The sea's waves: a wind sea growing as JONSWAP's measurements found, with the time and distance
+// its wind has had, and the swells it leaves where the wind drops or turns, running on along
+// great circles until they wear away or reach land. Distances are Earth's, as the air's.
+struct SeaTuning {
+    Seconds step = std::chrono::hours{1};
+    // A swell half a radian a second, 12.6 s from crest to crest, loses most of its height over
+    // this many metres; shorter ones, steeper, by the fourth power of their frequency sooner.
+    double swell_reach = 8.0e6;
+    // Swell short enough that the wind sea's own waves are as long is soon part of it.
+    Seconds absorbing = std::chrono::hours{1};
+    // A new sea starts with its wind sea grown as long as this under the winds as they stand.
+    Seconds spin_up = std::chrono::hours{24};
+};
+
 // Water on and under the land: snow lying until it melts, soil holding rain until plants and the
 // sun draw it out, and ground water below seeping slowly out to the rivers.
 struct LandTuning {
@@ -209,6 +223,7 @@ struct WeatherTuning {
     StormTuning storms{};
     RecentTuning recent{};
     OceanTuning ocean{};
+    SeaTuning sea{};
     LandTuning land{};
     SkyTuning sky{};
 };

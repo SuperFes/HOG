@@ -35,6 +35,10 @@ GameDuration ocean_step(const WeatherConfig& config) {
     return positive(std::chrono::round<GameDuration>(config.tuning.ocean.step));
 }
 
+GameDuration sea_step(const WeatherConfig& config) {
+    return positive(std::chrono::round<GameDuration>(config.tuning.sea.step));
+}
+
 } // namespace
 
 WeatherFields::WeatherFields(std::size_t size)
@@ -117,6 +121,7 @@ Weather::Weather(const WeatherConfig& config, std::vector<Ground> ground, GameTi
       before_(grid_.size()), time_(detail::last_step(now, positive(config.step))),
       ocean_(grid_, ground_, config.tuning.ocean, rotation(config),
              detail::seasons(config, time_).now),
+      sea_(grid_, ground_, config.tuning.sea),
       land_(grid_, ground_, config.tuning.land, config.planet_radius) {
     HOG_ASSERT(config.step > GameDuration::zero(), "weather step must be positive");
     HOG_ASSERT(config.day > GameDuration::zero(), "weather day must be positive");
@@ -136,6 +141,7 @@ Weather::Weather(const WeatherConfig& config, std::vector<Ground> ground, GameTi
     spin_up_ocean();
     start_air();
     spin_up_land();
+    spin_up_sea();
 }
 
 void Weather::start_air() {
@@ -162,6 +168,10 @@ void Weather::spin_up_ocean() {
         ocean_.warm(grid_, detail::seasons(config_, time_ - (left * day)).now, Seconds{day}.count(),
                     nullptr);
     }
+}
+
+void Weather::spin_up_sea() {
+    sea_.raise(grid_, fields_.wind, config_.tuning.sea.spin_up.count());
 }
 
 void Weather::spin_up_land() {
@@ -234,12 +244,18 @@ std::uint64_t Weather::advance_to(GameTime now, jobs::JobSystem& jobs) {
 }
 
 void Weather::step(GameTime at, jobs::JobSystem& jobs) {
-    const GameDuration sea_step = ocean_step(config_);
-    const GameDuration sea_since =
-        detail::last_step(at, sea_step) - detail::last_step(time_, sea_step);
-    if (sea_since > GameDuration::zero()) {
+    const GameDuration currents_step = ocean_step(config_);
+    const GameDuration currents_since =
+        detail::last_step(at, currents_step) - detail::last_step(time_, currents_step);
+    if (currents_since > GameDuration::zero()) {
         ocean_.step(grid_, fields_.wind, detail::seasons(config_, at).now,
-                    Seconds{sea_since}.count(), &jobs);
+                    Seconds{currents_since}.count(), &jobs);
+    }
+    const GameDuration waves_step = sea_step(config_);
+    const GameDuration waves_since =
+        detail::last_step(at, waves_step) - detail::last_step(time_, waves_step);
+    if (waves_since > GameDuration::zero()) {
+        sea_.step(grid_, fields_.wind, Seconds{waves_since}.count(), &jobs);
     }
     const GameTime middle = at - (config_.step / 2);
     const detail::StepContext context{

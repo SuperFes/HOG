@@ -426,6 +426,7 @@ TEST_CASE("weather comes out the same on any number of threads", "[sim][weather]
     b.advance_to(later, many);
     CHECK(a.fields() == b.fields());
     CHECK(a.systems() == b.systems());
+    CHECK(a.sea().fields() == b.sea().fields());
 }
 
 TEST_CASE("the sea warms western coasts and the air over them", "[sim][weather]") {
@@ -459,11 +460,13 @@ TEST_CASE("weather saves and loads", "[sim][weather]") {
     CHECK(loaded.fields() == saved.fields());
     CHECK(loaded.ocean() == saved.ocean());
     CHECK(loaded.land().fields() == saved.land().fields());
+    CHECK(loaded.sea().fields() == saved.sea().fields());
     saved.advance_to(march_equinox + hours{9}, jobs);
     loaded.advance_to(march_equinox + hours{9}, jobs);
     CHECK(loaded.fields() == saved.fields());
     CHECK(loaded.ocean() == saved.ocean());
     CHECK(loaded.land().fields() == saved.land().fields());
+    CHECK(loaded.sea().fields() == saved.sea().fields());
 
     Weather finer{WeatherConfig{.level = level + 1}, std::vector<Ground>(6U << 8U), june_solstice};
     const auto other_level = finer.load(Weather::save_version, bytes);
@@ -486,18 +489,29 @@ TEST_CASE("weather saves and loads", "[sim][weather]") {
     // Without saved means, they start from the weather as it stands.
     CHECK(old.fields().recent_temperature == old.fields().temperature);
     CHECK(old.fields().recent_precipitation[0] > 0.0F);
+    // Without saved waves, the wind sea is raised under the saved winds, without swell.
+    Weather calm{config(), basin(), june_solstice};
+    const std::size_t wave_bytes = calm.ocean().size() * ((2 * sizeof(float)) + sizeof(Vec2) +
+                                                          (hog::sim::swell_bins * sizeof(float)));
+    REQUIRE(calm.load(5, std::span{bytes}.first(bytes.size() - wave_bytes)));
+    CHECK(calm.land().fields() == current.land().fields());
+    CHECK(std::ranges::any_of(calm.sea().fields().wind_sea,
+                              [](float raised) { return raised > 0.0F; }));
+    CHECK(
+        std::ranges::all_of(calm.sea().fields().swell, [](float swell) { return swell == 0.0F; }));
     // Without saved land, it spins up under the saved time's seasons.
     Weather bare{config(), basin(), june_solstice};
     const std::size_t land_bytes =
         bare.ocean().size() * ((4 * sizeof(float)) + (4 * sizeof(double)));
-    REQUIRE(bare.load(4, std::span{bytes}.first(bytes.size() - land_bytes)));
+    REQUIRE(bare.load(4, std::span{bytes}.first(bytes.size() - wave_bytes - land_bytes)));
     CHECK(bare.ocean() == current.ocean());
     CHECK(std::ranges::any_of(bare.land().fields().soil, [](float soil) { return soil > 0.1F; }));
     // Without a saved sea, it settles one under the saved winds.
     Weather dry{config(), basin(), june_solstice};
     const std::size_t sea_bytes =
         dry.ocean().size() * (sizeof(float) + (2 * sizeof(Vec2)) + sizeof(double));
-    REQUIRE(dry.load(3, std::span{bytes}.first(bytes.size() - sea_bytes - land_bytes)));
+    REQUIRE(
+        dry.load(3, std::span{bytes}.first(bytes.size() - wave_bytes - sea_bytes - land_bytes)));
     CHECK(dry.fields() == saved_fields);
     CHECK(std::ranges::any_of(dry.ocean().current, [](Vec2 flow) { return flow != Vec2{0.0F}; }));
 
