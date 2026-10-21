@@ -35,6 +35,7 @@ struct Push {
     Mat4 eye_from_clip;
     glm::vec4 up_height;
     glm::vec4 radii;
+    glm::vec4 moved;
 };
 
 static_assert(sizeof(MarchPush) <= 128);
@@ -82,7 +83,8 @@ constexpr std::array descriptors{binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, f
                                  binding(6, sampled, fragment),
                                  binding(7, sampled, fragment),
                                  binding(8, sampled, fragment),
-                                 binding(9, sampled, fragment)};
+                                 binding(9, sampled, fragment),
+                                 binding(10, sampled, fragment)};
 
 constexpr std::array march_descriptors{binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, compute),
                                        binding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, compute),
@@ -472,12 +474,12 @@ void Clouds::draw(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth
     HOG_ASSERT(view.air.lighting != VK_NULL_HANDLE, "drawing clouds without the air");
     HOG_ASSERT(view.weather.weather_before != VK_NULL_HANDLE, "drawing clouds without weather");
     HOG_ASSERT(blend_extent_.width > 0, "drawing clouds before marching them");
-    const Push push{.eye_from_clip = eye_from_clip(view.camera, extent),
-                    .up_height = {Vec3{view.bend.up}, static_cast<float>(view.bend.eye_height)},
-                    .radii = {static_cast<float>(view.bend.radius),
-                              static_cast<float>(view.bend.faked),
-                              static_cast<float>(view.weather.faded),
-                              static_cast<float>(view.weather.fog_top)}};
+    const Push push{
+        .eye_from_clip = eye_from_clip(view.camera, extent),
+        .up_height = {Vec3{view.bend.up}, static_cast<float>(view.bend.eye_height)},
+        .radii = {static_cast<float>(view.bend.radius), static_cast<float>(view.bend.faked),
+                  static_cast<float>(view.weather.faded), static_cast<float>(view.weather.fog_top)},
+        .moved = {Vec3{within_period(view.moved)}, 0.0F}};
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.handle());
     push_uniform_buffer(commands, pipeline_, 0, view.air.air);
     push_uniform_buffer(commands, pipeline_, 1, view.air.lighting);
@@ -489,6 +491,7 @@ void Clouds::draw(VkCommandBuffer commands, VkExtent2D extent, VkImageView depth
     push_sampled_image(commands, pipeline_, 7, blends_.at(blended_).view(), linear_.handle());
     push_sampled_image(commands, pipeline_, 8, distances, nearest_.handle());
     push_sampled_image(commands, pipeline_, 9, view.air.cloud_shadow, view.air.sampler);
+    push_sampled_image(commands, pipeline_, 10, noise_.shape.view(), tiling_.handle());
     vkCmdPushConstants(commands, pipeline_.layout(),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push),
                        &push);

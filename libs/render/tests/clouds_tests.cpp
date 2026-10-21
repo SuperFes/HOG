@@ -535,7 +535,8 @@ TEST_CASE("fog hides all round the eye but what's drawn nearest, lit by the day"
     const VkRect2D covered{.offset = {.x = 10, .y = 2}, .extent = {.width = 8, .height = 6}};
     const Pixels pixels =
         draw(*device, {.before = everywhere(clear), .sky = everywhere(foggy), .covered = covered});
-    CHECK(brightness(pixels, 12, 4) == 0);
+    // But a hair of it, in its thicker wisps.
+    CHECK(brightness(pixels, 12, 4) < 8);
     // Above the horizon: below it the sea's near, and seen through less of the fog.
     std::uint32_t grey = 0;
     int dimmest = 765;
@@ -566,6 +567,33 @@ TEST_CASE("from over fog, its top lies below and the air over it is clear",
     Scene dry = over;
     dry.sky = everywhere(clear);
     CHECK(lit_pixels(draw(*device, dry), extent.height) == 0);
+}
+
+TEST_CASE("fog lies in banks and wisps, drifting with the wind and repeating over its period",
+          "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    const Scene still{.eye_height = 1'000.0,
+                      .forward = glm::normalize(east - up),
+                      .before = everywhere(clear),
+                      .sky = everywhere(foggy)};
+    Scene around = still;
+    around.moved = DVec3{cloud_period, -2.0 * cloud_period, 0.0};
+    Scene drifted = still;
+    drifted.moved = DVec3{1'500.0, 0.0, 0.0};
+    const Pixels pixels = draw(*device, still);
+    int dimmest = 765;
+    int brightest = 0;
+    for (std::uint32_t y = extent.height / 2; y < extent.height; ++y) {
+        for (std::uint32_t x = 0; x < extent.width; ++x) {
+            dimmest = std::min(dimmest, brightness(pixels, x, y));
+            brightest = std::max(brightest, brightness(pixels, x, y));
+        }
+    }
+    INFO("dimmest " << dimmest << ", brightest " << brightest);
+    CHECK(dimmest > 0);
+    CHECK(brightest > dimmest + 30);
+    CHECK(draw(*device, around) == pixels);
+    CHECK(draw(*device, drifted) != pixels);
 }
 
 TEST_CASE("fog lying low far off is seen, however far past the highest fog's top",

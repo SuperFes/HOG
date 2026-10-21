@@ -16,6 +16,8 @@ import weather;
 [[vk::binding(8, 0)]] Sampler2D<float> distances;
 // As cloud_march.slang's.
 [[vk::binding(9, 0)]] Sampler2D cloud_shadow;
+// As render::shape_noise.
+[[vk::binding(10, 0)]] Sampler3D shape_noise;
 
 struct Push {
     float4x4 eye_from_clip;
@@ -25,6 +27,8 @@ struct Push {
     // faded from the maps before to those after, w the highest fog's top anywhere, in metres above
     // sea level, 0 for none.
     float4 radii;
+    // xyz the metres the clouds have drifted, as cloud_march.slang's.
+    float4 moved;
 };
 
 [[vk::push_constant]] ConstantBuffer<Push> push;
@@ -36,6 +40,13 @@ static const float far_fog_reach = 40000.0;
 static const uint fog_steps = 24;
 // Metres of fog marched through at most from within it, past which it hides everything.
 static const float fog_reach = 3000.0;
+// Metres across the noise the fog's banks and its wisps are shaped by, and its texels a side.
+static const float bank_tile = 6000.0;
+static const float wisp_tile = 600.0;
+static const float shape_texels = 64.0;
+// How far the banks and the wisps thicken and thin the fog, as shares of its mean.
+static const float banked = 0.7;
+static const float wisped = 0.5;
 
 struct Layer {
     float4 position : SV_Position;
@@ -55,6 +66,23 @@ Layer vertex_main(uint id: SV_VertexID) {
 SkyCell sky_at(float3 direction) {
     return sky_cell(lerp(sky_before.SampleLevel(direction, 0.0),
                          sky_after.SampleLevel(direction, 0.0), push.radii.z));
+}
+
+// How much thicker than its mean the fog is at `at`, in the planet's frame, over a stretch `along`
+// metres long: in banks with wisps among them, drifting with the wind, both evened out over
+// stretches longer than they are.
+float fog_thickness(float3 at, float along) {
+    const float3 drifted = at + push.moved.xyz;
+    const float bank = shape_noise
+                           .SampleLevel(drifted / bank_tile,
+                                        max(log2(along * shape_texels / bank_tile), 0.0))
+                           .r;
+    const float wisp = shape_noise
+                           .SampleLevel(drifted / wisp_tile,
+                                        max(log2(along * shape_texels / wisp_tile), 0.0))
+                           .r;
+    // The billows are spread evenly, so both average 1.
+    return (1.0 + (banked * ((2.0 * bank) - 1.0))) * (1.0 + (wisped * ((2.0 * wisp) - 1.0)));
 }
 
 // The fog from `start` to `end` along the view, premultiplied, before tone mapping. Each step takes
@@ -83,7 +111,11 @@ float4 fog_between(float3 view, float start, float end, float2 uv, float jitter)
         const float3 from_eye = view * along;
         const float3 direction = on_planet(from_eye, up, faked + eye_height, faked, radius);
         const SkyCell cell = sky_at(direction);
-        const float depth = fog_depth(cell, from_height, to_height, to - from);
+        float depth = fog_depth(cell, from_height, to_height, to - from);
+        if (depth > 0.0) {
+            const float height_at = drawn_height(from_eye, up, eye_height, faked);
+            depth *= fog_thickness(direction * (radius + height_at), to - from);
+        }
         const float lowest = min(from_height, to_height);
         from = to;
         from_height = to_height;
