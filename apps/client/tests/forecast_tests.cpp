@@ -188,6 +188,7 @@ TEST_CASE("weather with no fade, or at another level, is shown at once", "[clien
 TEST_CASE("the sea is the waves of the cells around, each as much as it counts there",
           "[client][forecast]") {
     const CellWeather wavy{
+        .wind = {0.0F, 12.0F},
         .wind_sea = {.height = 2.0F, .peak = 0.8F, .heading = {1.0F, 0.0F}},
         .swells = {hog::protocol::CellWaves{.height = 1.0F, .peak = 0.5F, .heading = {0.0F, 1.0F}},
                    hog::protocol::CellWaves{}},
@@ -223,6 +224,8 @@ TEST_CASE("the sea is the waves of the cells around, each as much as it counts t
         }
     }
     CHECK(glm::length(sea.current - (frame.east * 0.5)) < 0.02);
+    CHECK(glm::length(sea.wind - (frame.north * 12.0)) < 0.5);
+    CHECK(glm::length(forecast.at(at, start + 10s).wind - hog::Vec2{0.0F, 12.0F}) < 1e-4F);
 }
 
 TEST_CASE("the weather's map holds what's at each texel's direction", "[client][forecast]") {

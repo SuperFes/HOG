@@ -50,7 +50,8 @@ constexpr float wave_steps = 56.0F;     // to the root of a metre
 constexpr float period_steps = 10.0F;   // to the second
 constexpr float heading_steps = 256.0F; // to the turn
 constexpr float current_steps = 32.0F;  // to the metre a second
-constexpr std::size_t weather_cell_bytes = 20;
+constexpr float wind_steps = 2.0F;
+constexpr std::size_t weather_cell_bytes = 22;
 
 [[nodiscard]] std::uint8_t to_byte(float value) noexcept {
     // Also NaN to 0.
@@ -125,8 +126,8 @@ constexpr float turn = 2.0F * std::numbers::pi_v<float>;
             .heading = {std::cos(angle), std::sin(angle)}};
 }
 
-[[nodiscard]] std::uint8_t current(float value) noexcept {
-    return speed(value * current_steps);
+[[nodiscard]] std::uint8_t finer(float value, float steps) noexcept {
+    return speed(value * steps);
 }
 
 [[nodiscard]] CodedCell coded(const CellWeather& cell) noexcept {
@@ -138,6 +139,8 @@ constexpr float turn = 2.0F * std::numbers::pi_v<float>;
             to_byte(cell.snow * snow_steps),
             speed(cell.drift.x),
             speed(cell.drift.y),
+            finer(cell.wind.x, wind_steps),
+            finer(cell.wind.y, wind_steps),
             to_byte(cell.humidity * humidity_steps),
             to_byte(cell.fog_top / fog_step),
             to_byte(cell.base / height_step),
@@ -151,8 +154,8 @@ constexpr float turn = 2.0F * std::numbers::pi_v<float>;
             second[0],
             second[1],
             second[2],
-            current(cell.current.x),
-            current(cell.current.y)};
+            finer(cell.current.x, current_steps),
+            finer(cell.current.y, current_steps)};
 }
 
 [[nodiscard]] CellWeather decoded(const CodedCell& bytes) noexcept {
@@ -160,14 +163,15 @@ constexpr float turn = 2.0F * std::numbers::pi_v<float>;
             .falling = squared(bytes[1], falling_steps),
             .snow = static_cast<float>(bytes[2]) / snow_steps,
             .drift = {speed_of(bytes[3]), speed_of(bytes[4])},
-            .humidity = static_cast<float>(bytes[5]) / humidity_steps,
-            .fog_top = static_cast<float>(bytes[6]) * fog_step,
-            .base = static_cast<float>(bytes[7]) * height_step,
-            .top = static_cast<float>(bytes[8]) * height_step,
-            .wind_sea = decoded_waves(bytes[9], bytes[10], bytes[11]),
-            .swells = {decoded_waves(bytes[12], bytes[13], bytes[14]),
-                       decoded_waves(bytes[15], bytes[16], bytes[17])},
-            .current = {speed_of(bytes[18]) / current_steps, speed_of(bytes[19]) / current_steps}};
+            .wind = {speed_of(bytes[5]) / wind_steps, speed_of(bytes[6]) / wind_steps},
+            .humidity = static_cast<float>(bytes[7]) / humidity_steps,
+            .fog_top = static_cast<float>(bytes[8]) * fog_step,
+            .base = static_cast<float>(bytes[9]) * height_step,
+            .top = static_cast<float>(bytes[10]) * height_step,
+            .wind_sea = decoded_waves(bytes[11], bytes[12], bytes[13]),
+            .swells = {decoded_waves(bytes[14], bytes[15], bytes[16]),
+                       decoded_waves(bytes[17], bytes[18], bytes[19])},
+            .current = {speed_of(bytes[20]) / current_steps, speed_of(bytes[21]) / current_steps}};
 }
 
 template <typename T>

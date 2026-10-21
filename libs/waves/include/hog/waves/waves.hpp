@@ -70,11 +70,12 @@ inline constexpr double swell_spread = 8.0;
 // Precondition: the wind lies along the ground.
 [[nodiscard]] System grown_sea(DVec3 wind);
 
-// The sea somewhere: its systems, and the current under them, which steepens the waves it runs
-// against and stretches those it runs with.
+// The sea somewhere: its systems; the current under them, which steepens the waves it runs
+// against and stretches those it runs with; and the wind over them, which breaks them.
 struct SeaState {
     std::vector<System> systems;
     DVec3 current{0.0}; // m/s, along the ground, in the planet's frame
+    DVec3 wind{0.0};    // m/s ten metres up, likewise
 };
 
 // The system's variance falling in each band, m², summing to its height squared over 16.

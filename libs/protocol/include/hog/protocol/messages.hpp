@@ -18,7 +18,7 @@
 namespace hog::protocol {
 
 // Raised whenever any message changes; the two sides must speak the same one.
-inline constexpr std::uint32_t version = 10;
+inline constexpr std::uint32_t version = 11;
 // The longest connect token a client may present; more is a broken or hostile client.
 inline constexpr std::size_t most_token = 1'024;
 // The longest line of text a refusal carries.
@@ -144,14 +144,15 @@ struct CellWaves {
 
 // The weather over a cell, as much of it as is drawn. It's sent a byte each, so only near what's
 // given: cloud and falling as their square roots to the nearest 64th and 16th, so the lightest keep
-// their detail; snow and humidity to a 255th; drift to the metre a second; the fog's top to 32
-// metres and the cloud's base and top to 64; the sea's current to a 32nd of a metre a second; each
-// clamped to its byte.
+// their detail; snow and humidity to a 255th; drift to the metre a second and the wind to half
+// of one; the fog's top to 32 metres and the cloud's base and top to 64; the sea's current to a
+// 32nd of a metre a second; each clamped to its byte.
 struct CellWeather {
     float cloud = 0.0F;    // mm of condensed water, under 16
     float falling = 0.0F;  // rain and snow, mm an hour, under 255
     float snow = 0.0F;     // share of what falls that's snow, 0 to 1
     Vec2 drift{0.0F};      // (east, north) m/s the weather moves with, within ±127
+    Vec2 wind{0.0F};       // (east, north) m/s ten metres up, within ±63.5
     float humidity = 0.0F; // as sim::Sky's
     // Metres above sea level, as sim::Sky's.
     float fog_top = 0.0F; // under 8160

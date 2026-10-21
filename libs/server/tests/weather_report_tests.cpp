@@ -82,6 +82,7 @@ TEST_CASE("weather as coarse as may be sent goes cell for cell", "[server][weath
         CHECK_THAT(static_cast<double>(cell.snow), WithinRel(0.6 / falling, 1e-5));
         CHECK_THAT(static_cast<double>(cell.drift.x), WithinAbs(value + 4.0, 1e-4));
         CHECK_THAT(static_cast<double>(cell.drift.y), WithinAbs(-1.0, 1e-5));
+        CHECK(cell.wind == fields.wind[index]);
         const hog::sim::Sky sky = hog::sim::sky_over(fields, under[index], config().tuning, index);
         CHECK(cell.humidity == sky.humidity);
         CHECK(cell.fog_top == sky.fog_top);
@@ -132,6 +133,8 @@ TEST_CASE("finer weather is averaged over the cells sent", "[server][weather]") 
         CHECK_THAT(static_cast<double>(cell.snow), WithinRel(0.1, 0.05));
         CHECK_THAT(static_cast<double>(cell.drift.x), WithinRel(2.0, 0.05));
         CHECK_THAT(static_cast<double>(cell.drift.y), WithinAbs(1.0, 1e-5));
+        CHECK_THAT(static_cast<double>(cell.wind.x), WithinRel(2.0, 0.05));
+        CHECK_THAT(static_cast<double>(cell.wind.y), WithinAbs(1.0, 1e-5));
     }
     // Nothing is lost or made in averaging.
     CHECK_THAT(static_cast<double>(sent_cloud), WithinRel(cloud, 1e-3));

@@ -249,6 +249,7 @@ TEST_CASE("weather is sent near enough to draw", "[protocol]") {
     }
     CHECK_THAT(as_sent({.snow = 0.31F}).snow, Catch::Matchers::WithinAbs(0.31, 0.5 / 255.0));
     CHECK(as_sent({.drift = {12.4F, -3.6F}}).drift == hog::Vec2{12.0F, -4.0F});
+    CHECK(as_sent({.wind = {12.4F, -3.6F}}).wind == hog::Vec2{12.5F, -3.5F});
     CHECK_THAT(as_sent({.humidity = 0.83F}).humidity,
                Catch::Matchers::WithinAbs(0.83, 0.5 / 255.0));
     CHECK_THAT(as_sent({.fog_top = 250.0F}).fog_top, Catch::Matchers::WithinAbs(250.0, 16.0));
@@ -293,6 +294,7 @@ TEST_CASE("weather past what a byte holds is clamped", "[protocol]") {
                                       .falling = 1'000.0F,
                                       .snow = 2.0F,
                                       .drift = {500.0F, -500.0F},
+                                      .wind = {500.0F, -500.0F},
                                       .humidity = 3.0F,
                                       .fog_top = 20'000.0F,
                                       .base = 20'000.0F,
@@ -306,6 +308,7 @@ TEST_CASE("weather past what a byte holds is clamped", "[protocol]") {
     CHECK(over.falling > 253.0F);
     CHECK(over.snow == 1.0F);
     CHECK(over.drift == hog::Vec2{127.0F, -127.0F});
+    CHECK(over.wind == hog::Vec2{63.5F, -63.5F});
     CHECK(over.humidity == 1.0F);
     CHECK(over.fog_top == 8'160.0F);
     CHECK(over.base == 16'320.0F);
@@ -318,6 +321,7 @@ TEST_CASE("weather past what a byte holds is clamped", "[protocol]") {
                    .falling = nan,
                    .snow = -0.5F,
                    .drift = {nan, nan},
+                   .wind = {nan, nan},
                    .humidity = nan,
                    .fog_top = -5.0F,
                    .base = nan,
@@ -327,9 +331,9 @@ TEST_CASE("weather past what a byte holds is clamped", "[protocol]") {
                    .current = {nan, nan}}) == CellWeather{});
 }
 
-TEST_CASE("the planet's weather takes twenty bytes a cell", "[protocol]") {
+TEST_CASE("the planet's weather takes twenty-two bytes a cell", "[protocol]") {
     CHECK(weather_cells(most_weather_level) == 6'144);
-    CHECK(encode(weather(most_weather_level)).size() == 2 + 1 + 4 + (20 * 6'144));
+    CHECK(encode(weather(most_weather_level)).size() == 2 + 1 + 4 + (22 * 6'144));
 }
 
 TEST_CASE("weather too fine is refused", "[protocol]") {

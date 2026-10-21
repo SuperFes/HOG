@@ -19,6 +19,7 @@ struct Sums {
     double falling = 0.0;
     double snowing = 0.0;
     DVec2 drift{0.0};
+    DVec2 wind{0.0};
     double humidity = 0.0;
     double fog_top = 0.0;
     double base = 0.0;
@@ -64,6 +65,7 @@ protocol::Weather weather_report(const sim::CellGrid& grid, const sim::WeatherFi
             hours;
         sum.snowing += area * static_cast<double>(fields.snow[index]) / hours;
         sum.drift += area * (wind + ((jet - wind) * steering));
+        sum.wind += area * wind;
         const sim::Sky sky = sim::sky_over(fields, ground[index], config.tuning, index);
         sum.humidity += area * static_cast<double>(sky.humidity);
         sum.fog_top += area * static_cast<double>(sky.fog_top);
@@ -101,6 +103,7 @@ protocol::Weather weather_report(const sim::CellGrid& grid, const sim::WeatherFi
              .falling = static_cast<float>(sum.falling / sum.area),
              .snow = sum.falling > 0.0 ? static_cast<float>(sum.snowing / sum.falling) : 0.0F,
              .drift = Vec2{sum.drift / sum.area},
+             .wind = Vec2{sum.wind / sum.area},
              .humidity = static_cast<float>(sum.humidity / sum.area),
              .fog_top = static_cast<float>(sum.fog_top / sum.area),
              .base = static_cast<float>(sum.base / sum.area),

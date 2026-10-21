@@ -27,6 +27,7 @@ protocol::CellWeather mixed(const protocol::CellWeather& from, const protocol::C
             .falling = mix(from.falling, to.falling, by),
             .snow = mix(from.snow, to.snow, by),
             .drift = from.drift + ((to.drift - from.drift) * by),
+            .wind = from.wind + ((to.wind - from.wind) * by),
             .humidity = mix(from.humidity, to.humidity, by),
             .fog_top = mix(from.fog_top, to.fog_top, by),
             .base = mix(from.base, to.base, by),
@@ -43,6 +44,8 @@ protocol::CellWeather interpolated(const sim::CellGrid& grid, const Cells& cells
             .snow = field([](const auto& cell) { return static_cast<double>(cell.snow); }),
             .drift = {field([](const auto& cell) { return static_cast<double>(cell.drift.x); }),
                       field([](const auto& cell) { return static_cast<double>(cell.drift.y); })},
+            .wind = {field([](const auto& cell) { return static_cast<double>(cell.wind.x); }),
+                     field([](const auto& cell) { return static_cast<double>(cell.wind.y); })},
             .humidity = field([](const auto& cell) { return static_cast<double>(cell.humidity); }),
             .fog_top = field([](const auto& cell) { return static_cast<double>(cell.fog_top); }),
             .base = field([](const auto& cell) { return static_cast<double>(cell.base); }),
@@ -191,6 +194,7 @@ waves::SeaState Forecast::sea_at(DVec3 direction, MonotonicClock::time_point now
             };
             const protocol::CellWeather& cell = cells[index];
             sea.current += along(cell.current) * weight;
+            sea.wind += along(cell.wind) * weight;
             // Each system's variance counts as much as its cell does.
             const auto system = [&](const protocol::CellWaves& waves, double peakedness,
                                     double spread) {

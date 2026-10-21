@@ -46,7 +46,7 @@ double grown_height(double wind) {
 }
 
 SeaState windy(DVec3 wind) {
-    return {.systems = {hog::waves::grown_sea(wind)}, .current = DVec3{0.0}};
+    return {.systems = {hog::waves::grown_sea(wind)}, .current = DVec3{0.0}, .wind = wind};
 }
 
 // The variance of the surface where the waves run, as their amplitudes and showing have it.
@@ -214,7 +214,8 @@ TEST_CASE("the trains showing anywhere carry all the sea's systems", "[waves]") 
                                         .peak = 0.5,
                                         .peakedness = hog::waves::swell_peakedness,
                                         .spread = hog::waves::swell_spread}},
-                           .current = DVec3{0.0}};
+                           .current = DVec3{0.0},
+                           .wind = DVec3{0.0}};
         const double expected = std::hypot(grown_height(9.0), 1.5);
         const std::vector<Wave> waves = hog::waves::waves_at(trains, at, sea, 0.0);
         CAPTURE(place);
@@ -231,7 +232,8 @@ TEST_CASE("waves run mostly along their system's heading", "[waves]") {
                                     .peak = 0.6,
                                     .peakedness = hog::waves::swell_peakedness,
                                     .spread = hog::waves::swell_spread}},
-                       .current = DVec3{0.0}};
+                       .current = DVec3{0.0},
+                       .wind = DVec3{0.0}};
     double ahead = 0.0;
     double all = 0.0;
     for (const Wave& wave : hog::waves::waves_at(trains, up, sea, 0.0)) {
