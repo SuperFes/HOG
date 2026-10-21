@@ -164,6 +164,7 @@ This phase builds a server that runs the world with nobody connected: time passe
 - [x] Forest biomass per cell, with growth and a stub fire spread
 - [x] Hydrology: rivers carve the land over geological time, with meandering channels, a water table, wetlands and mountain glaciers
 - [x] Ocean currents: wind-driven gyres steered by the coasts, carrying sea temperature that feeds back into the weather
+- [ ] Sea state: waves raised by the wind over the time and distance it blows, travelling on as swell beyond it, sheltered behind land and steepened against the currents; sent to players with the weather
 
 **Debug viewer**
 
@@ -201,6 +202,12 @@ This phase builds a client that flies over the generated planet with a real sky.
 - [x] Biome-driven materials (flat colors first, textures later)
 - [x] Basic ocean surface
 - [x] Sea drawn over ground at and just below sea level, so shorelines don't flicker
+- [ ] The sea as water, not a sheet: everything under its surface seen through the water between, a wader's legs as much as the seabed (one water model, laid by the sea's pass over what depth says lies behind it)
+- [ ] From under the sea: water along the whole view, darker the deeper; the sky only through the window overhead, the surface a mirror beyond it; a waterline across the screen where the eye straddles the surface
+- [ ] Under the sea, felt: caustics on the bed and on what's in the water, light shafts, drifting motes, a wobble to the view
+- [ ] Waves from the sea state: one wave function the client, the server and physics all evaluate alike (trains drawn from the local spectrum, phased by the seed and the world's time, so everyone sees the same wave at the same place), the long waves moving the surface and fine chop in its shading
+- [ ] Waves at the shore: slowing and shortening in shallow water, turning to face the beach, steepening and breaking as surf, with foam and run-up
+- [ ] Ripples and wakes where bodies cross the surface, and what's seen through it bent by the waves
 - [x] Hillaire atmosphere and sun lighting driven by planet time
 - [x] The sun as people see it: a glow and glare round its disc, rather than the bare disc a camera records
 
@@ -285,6 +292,17 @@ Borrowed from real species to make forests feel grown rather than scattered. A m
 - [ ] Nurse logs: seedlings rooted in rows on fallen trunks in wet forests
 - [ ] Krummholz: trees at the treeline grow stunted and bent to the prevailing wind
 - [ ] One endemic giant: a redwood-analogue growing only in a single fog-wet pocket of the planet
+
+**Under the sea**
+
+The sea is part of the same world, not a backdrop: its life is placed, grows and dies by the same rules as the land's, and its animals are populations in the same sim.
+
+- [ ] Sea flora placed by the same anchors as the land's, by depth, the light reaching the bed, warmth and what the bed is: seagrass meadows on sandy shallows, kelp forests on cool rocky coasts, coral on warm reefs
+- [ ] Rock and shore: barnacles, mussels and weed crusting rocks at the waterline, anemones and sponges deeper, wrack washed up along the beach
+- [ ] Sways with the swell and the current rather than the wind
+- [ ] Lives and dies as the land's does: kelp torn out by storms, coral bleached by hot water, beds regrowing from their edges
+- [ ] Sea fauna as Phase 2's wildlife: plankton, grazers (urchins, small fish), shoals and their predators, crabs scavenging, with the balances real coasts show (urchins stripping kelp where their predators are gone)
+- [ ] Tides, so the shore has a band that is sometimes sea and sometimes land (see Later: the moon and tides)
 
 **Rendering**
 
@@ -493,6 +511,14 @@ Builds on Phase 5's condition states. The server owns every tree's record, as it
 - [ ] Seasons for deciduous species: leaf-out, autumn colour, bare winter crowns, snow resting on boughs (timing, colour, leaf fall and bare crowns done: each broadleaf keys off the day's length at the eye, so autumn comes sooner further from the equator and never in the tropics). Each tree turns on its own date, set by its seed and age and the same every year, so one tree is already red while its neighbours are still green. Autumn crowns mix colours. Leaves fall as wind-blown GPU particles near the eye, and the ground under the trees is tinted with them.
 - [ ] Harvest yields from the same records: wood by species and age, bark, resin, fruit and seed. Crafting (Phase 7) reads them.
 - [ ] Tree changes replicated to clients by cell, as weather is. The anchor tiles rebuild from them (`TreeAnchors::changed`, not yet wired to world changes).
+
+**The moon and tides**
+
+Plugs into the calendar (Phase 2) and the sea state. The moon is a body on its own orbit, so everything below is a function of the world's time, the same for everyone with nothing sent.
+
+- [ ] A moon: its orbit, phases and light, the night lit by it rather than the faint glow standing in for it, and eclipses where its orbit says
+- [ ] Tides raised by the moon and the sun: springs at new and full moon, neaps between; the sea level everywhere follows them, a tidal range larger on wide shelves and in funnelling bays, and tidal currents through narrows
+- [ ] Surfing: breaking waves the physics rides, because it evaluates the same wave function the surface is drawn with; a board, paddling out, catching and riding a face, wiping out
 
 **Vegetation engineering**
 
