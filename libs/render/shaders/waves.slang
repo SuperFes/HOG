@@ -45,8 +45,7 @@ public struct Wave {
     // takes part in breaking white; yzw its lag terms, as hog::waves::lag_terms has them.
     public float4 breaking;
     // As it runs on still water in a sea grown full under the wind: x metres high, and of it and
-    // every shorter wave y the mean square slope, z the mean square of how high they rise and w
-    // the mean square slope by how much each takes part in breaking white.
+    // every shorter wave y the mean square slope and z the mean square of how high they rise.
     public float4 still;
 };
 
@@ -93,10 +92,12 @@ public struct Waves {
     // Of the waves on still water, as hog::waves::fetched has them: xyz which way the wind blows,
     // in the planet's frame, and w the fourth power of the peak of a sea grown full under it, or
     // none without wind. Then x and y how the sea's height and peak grow by its fetch, as
-    // still_growth_at takes them. Then the mean square slope of those left out of each band, in a
-    // sea grown full, four bands to each.
+    // still_growth_at takes them, and z the wind's speed, m/s. Then of a sea grown full, x the
+    // share of it breaking white and y with foam left, as the wind whitens the open sea. Then the
+    // mean square slope of those left out of each band, in a sea grown full, four bands to each.
     public float4 still_wind;
     public float4 still_growth;
+    public float4 still_white;
     public float4 still_left[bands / 4];
     public Wave waves[drawn_waves];
     public FoamWave foam_pattern[foam_waves];
@@ -202,46 +203,97 @@ public float still_fetch_at(Waves waves, Sampler2DArray fetches, float3 point) {
 }
 
 // How a sea on still water has grown over `fetch` metres, as hog::waves::fetched takes it: x by
-// how much a wave's height grows, at most, and y by how much less of it the longer waves grow.
-float2 still_growth_at(Waves waves, float fetch) {
+// how much a wave's height grows, at most, and y by how much less of it the longer waves grow; z
+// how many times faster its peak turns than a sea grown full's, as hog::waves::fetched_peak.
+float3 still_growth_at(Waves waves, float fetch) {
     const float height = min(waves.still_growth.x * sqrt(fetch), 1.0);
     const float peak = max(waves.still_growth.y * pow(fetch, -fetch_peak_power), 1.0);
     const float squared = peak * peak;
-    return float2(height * squared, 0.625 * waves.still_wind.w * ((squared * squared) - 1.0));
+    return float3(height * squared, 0.625 * waves.still_wind.w * ((squared * squared) - 1.0),
+                  peak);
 }
 
 // How high a wave of `frequency` rad/s runs on still water grown as `growth` has it, against how
 // high it runs in a sea grown full.
-float fetched(float2 growth, float frequency) {
+float fetched(float3 growth, float frequency) {
     const float squared = frequency * frequency;
     return growth.x * exp(-growth.y / (squared * squared));
 }
 
-// Of the drawn waves on still water grown as `growth` has it, from the `from`th of `count` on, as
-// Wave's still has them of each and every shorter wave: the mean square slope, of how high they
-// rise and of their slope breaking.
-float3 still_unseen(Waves waves, float2 growth, int from, int count) {
+// As hog::waves::breaking_share takes them.
+static const float outrun = 1.6;
+static const float kept_up = 1.2;
+static const float short_from = 0.33;
+static const float too_short = 0.2;
+
+float smoothly(float from, float to, float at) {
+    const float t = saturate((at - from) / (to - from));
+    return t * t * (3.0 - (2.0 * t));
+}
+
+// How much a wave of `frequency` rad/s takes part in breaking white on still water grown as
+// `growth` has it, as hog::waves::breaking_share has it there.
+float still_breaking_share(Waves waves, float3 growth, float frequency) {
+    const float age = gravity * growth.z / (frequency * waves.still_growth.z);
+    return smoothly(outrun, kept_up, age) * smoothly(too_short, short_from, age);
+}
+
+// Of the `i`th drawn wave on still water grown as `growth` has it, as it runs there: x how high
+// against grown full, y its mean square slope, z the mean square of how high it rises, and w how
+// much it takes part in breaking white.
+float4 still_wave(Waves waves, float3 growth, int i, int count) {
+    const float frequency = sqrt(gravity * waves.waves[i].heading_wavenumber.w);
+    const float grown = fetched(growth, frequency);
+    const float2 next = i + 1 < count ? waves.waves[i + 1].still.yz : float2(0.0);
+    return float4(grown, (waves.waves[i].still.yz - next) * (grown * grown),
+                  still_breaking_share(waves, growth, frequency));
+}
+
+// Of the drawn waves on still water grown as `growth` has it, from the `from`th of `count` on: the
+// mean square slope, of how high they rise and of their slope breaking.
+float3 still_unseen(Waves waves, float3 growth, int from, int count) {
     float3 unseen = float3(0.0);
     for (int i = from; i < count; ++i) {
-        const float3 next = i + 1 < count ? waves.waves[i + 1].still.yzw : float3(0.0);
-        const float grown = fetched(growth, sqrt(gravity * waves.waves[i].heading_wavenumber.w));
-        unseen += (waves.waves[i].still.yzw - next) * (grown * grown);
+        const float4 wave = still_wave(waves, growth, i, count);
+        unseen += float3(wave.yz, wave.y * wave.w * wave.w);
     }
     return unseen;
 }
 
-// The mean square slope of the waves left out on still water grown as `growth` has it, each band's
-// taken at its middle.
-float still_left_at(Waves waves, float2 growth) {
+// Of the waves left out on still water grown as `growth` has it, each band's taken at its middle:
+// the mean square slope, and that of the waves breaking.
+float2 still_left_at(Waves waves, float3 growth) {
     const float ratio = pow(highest_frequency / lowest_frequency, 1.0 / float(bands));
-    float left = 0.0;
+    float2 left = float2(0.0);
     float middle = lowest_frequency * sqrt(ratio);
     for (int band = 0; band < bands; ++band) {
         const float grown = fetched(growth, middle);
-        left += waves.still_left[band / 4][band % 4] * grown * grown;
+        const float slope = waves.still_left[band / 4][band % 4] * grown * grown;
+        left += float2(slope, slope * square(still_breaking_share(waves, growth, middle)));
         middle *= ratio;
     }
     return left;
+}
+
+// How white still water grown as `growth` has it is, where the waves that break have `breaking`
+// for their mean square slope and those too short to draw `left`: as hog::waves::whitecaps has it
+// over its fetch. As Waves' foam, then its foam_left.
+float4[2] still_whitecaps(Waves waves, float3 growth, float breaking, float left) {
+    float4 white[2] = { float4(0.0, left, 0.0, 0.0), float4(0.0) };
+    if (!(breaking > 0.0) || !(waves.still_white.x > 0.0)) {
+        return white;
+    }
+    // As ocean.cpp works out the open sea's.
+    const float2 shares = waves.still_white.xy / growth.z;
+    const float spread = sqrt(breaking);
+    const float blurred = sqrt(1.0 + square(foam_edges));
+    const float patches = sqrt(shares.y);
+    white[0] = float4(spread * sqrt(1.0 + square(foam_ragged) + square(breaking_edges)) *
+                          exceeding(shares.x),
+                      left, shares.x, shares.y);
+    white[1] = float4(blurred * exceeding(patches), blurred * exceeding((1.0 - patches) / 2.0),
+                      spread, foam_ragged * spread);
+    return white;
 }
 
 // As hog::waves::run_up takes them: the slopes beaches are taken to lie within.
@@ -316,6 +368,9 @@ public struct WaveSurface {
     public float heave;
     public float heave_unseen;
     public float rise_slope;
+    // As Waves' foam and foam_left, where the water lies: the sea's own, or still water's.
+    public float4 white;
+    public float4 white_left;
 };
 
 float square(float x) {
@@ -338,8 +393,11 @@ public WaveSurface wave_surface(Waves waves, float3 rest, float footprint, float
     const float3 second = waves.second.xyz;
     WaveSurface surface;
     const bool still = fetch > 0.0;
-    const float2 growth = still ? still_growth_at(waves, fetch) : float2(0.0);
-    surface.roughness = still ? still_left_at(waves, growth) : waves.count_left_radius.y;
+    const float3 growth = still ? still_growth_at(waves, fetch) : float3(0.0);
+    const float2 left = still ? still_left_at(waves, growth) : float2(0.0);
+    surface.roughness = still ? left.x : waves.count_left_radius.y;
+    // On still water, of the waves that break, the mean square slope of those drawn and seen.
+    float still_breaking = 0.0;
     float rising = 0.0;
     float risen = 0.0;
     float2 carried = float2(0.0);
@@ -347,7 +405,7 @@ public WaveSurface wave_surface(Waves waves, float3 rest, float footprint, float
     // Symmetric: xx, xy and yy.
     float3 bunching = float3(0.0);
     surface.breaking = 0.0;
-    surface.breaking_left = still ? 0.0 : waves.foam.y;
+    surface.breaking_left = still ? left.y : waves.foam.y;
     surface.heave = 0.0;
     surface.heave_unseen = 0.0;
     surface.rise_slope = 0.0;
@@ -366,14 +424,14 @@ public WaveSurface wave_surface(Waves waves, float3 rest, float footprint, float
         const float4 heading = waves.waves[i].heading_wavenumber;
         const float4 shape = waves.waves[i].amplitude_phase_slope_heave;
         const float4 along = waves.waves[i].along;
-        // How high it runs, and of it and every shorter wave the mean square slope, of how high
-        // they rise and of their slope breaking.
+        // How high it runs, and how much it takes part in breaking white; on still water, as
+        // still_wave has it there.
         float base = shape.x;
-        float3 shorter = float3(shape.z, shape.w, waves.waves[i].breaking.x);
+        float share = along.w;
+        const float4 still_here = still ? still_wave(waves, growth, i, count) : float4(0.0);
         if (still) {
-            const float grown = fetched(growth, sqrt(gravity * heading.w));
-            base = waves.waves[i].still.x * grown;
-            shorter = waves.waves[i].still.yzw * (grown * grown);
+            base = waves.waves[i].still.x * still_here.x;
+            share = still_here.w;
         }
         float full = base;
         float wavenumber = along.z;
@@ -400,10 +458,13 @@ public WaveSurface wave_surface(Waves waves, float3 rest, float footprint, float
         }
         const float kept = saturate((full_turn / wavenumber * shown_from) - 1.0);
         if (kept <= 0.0) {
-            // On still water the shorter waves have grown more than this one, each as far as its
-            // own fetch lets it.
+            // Of it and every shorter wave, the mean square slope, of how high they rise and of
+            // their slope breaking; on still water the shorter waves have grown more than this
+            // one, each as far as its own fetch lets it.
+            float3 shorter = float3(shape.z, shape.w, waves.waves[i].breaking.x);
             if (still) {
                 shorter = still_unseen(waves, growth, i, count);
+                still_breaking += shorter.z;
             }
             surface.roughness += shorter.x;
             surface.breaking_left += shorter.z;
@@ -412,10 +473,11 @@ public WaveSurface wave_surface(Waves waves, float3 rest, float footprint, float
             surface.heave_unseen += shorter.y * shoaled * shoaled;
             break;
         }
+        still_breaking += still_here.y * share * share;
         const float steep_full = full * wavenumber;
         const float unseen = (1.0 - (kept * kept)) / 2.0;
         drawn_roughness += steep_full * steep_full * unseen;
-        const float breaking_full = steep_full * along.w;
+        const float breaking_full = steep_full * share;
         drawn_breaking += breaking_full * breaking_full * unseen;
         surface.heave_unseen += full * full * unseen;
         const float amplitude = full * kept;
@@ -431,7 +493,7 @@ public WaveSurface wave_surface(Waves waves, float3 rest, float footprint, float
         slope += ahead * (steep * s);
         bunching += float3(ahead.x * ahead.x, ahead.x * ahead.y, ahead.y * ahead.y) *
                     (choppiness * steep * stretch * c);
-        surface.breaking += choppiness * steep * stretch * c * along.w;
+        surface.breaking += choppiness * steep * stretch * c * share;
     }
     // Those too high for the depth break, short or long, as many as it takes to bring them down to
     // what it holds: as hog::waves::surface_at, and all that's summed of them scales with them.
@@ -451,6 +513,14 @@ public WaveSurface wave_surface(Waves waves, float3 rest, float footprint, float
     surface.rise_slope *= held_squared;
     surface.rise = rising;
     surface.risen = risen * held;
+    surface.white = waves.foam;
+    surface.white_left = waves.foam_left;
+    if (still) {
+        const float4 white[2] =
+            still_whitecaps(waves, growth, still_breaking + left.y, surface.breaking_left);
+        surface.white = white[0];
+        surface.white_left = white[1];
+    }
     surface.moved = (up * rising) + (first * carried.x) + (second * carried.y);
     const float3 one = (first * (1.0 - bunching.x)) - (second * bunching.y) - (up * slope.x);
     const float3 two = (second * (1.0 - bunching.z)) - (first * bunching.y) - (up * slope.y);
@@ -516,7 +586,7 @@ public struct Foam {
 // pattern standing in for what the waves too short to draw add, and how the whitecaps churn.
 float breaking_over(Waves waves, WaveSurface water, FoamPattern pattern) {
     return water.breaking + (sqrt(water.breaking_left / 2.0) * (pattern.coarse + pattern.fine)) +
-           (waves.foam_left.w * pattern.across) - waves.foam.x;
+           (water.white_left.w * pattern.across) - water.white.x;
 }
 
 // Foam fades out over its edges, not at a line: over this much of the spread of what places them,
@@ -624,8 +694,8 @@ float breaking_spread_at(Waves waves, WaveSurface water, FoamPattern pattern) {
     const float coarse_unseen = max(1.0 - pattern.coarse_seen, 0.0);
     const float fine_unseen = max(1.0 - pattern.fine_seen, 0.0);
     return sqrt((water.breaking_left * (coarse_unseen + fine_unseen) / 2.0) +
-                (square(waves.foam_left.w) * coarse_unseen) +
-                square(breaking_edges * waves.foam_left.z));
+                (square(water.white_left.w) * coarse_unseen) +
+                square(breaking_edges * water.white_left.z));
 }
 
 float across_spread_at(FoamPattern pattern, float footprint) {
@@ -655,11 +725,11 @@ public FoamPattern foam_pattern_at(Waves waves, WaveSurface water, Surf surf, Fo
     FoamPattern pattern = coarse;
     const float fine_reach = reaching * sqrt(water.breaking_left / 2.0);
     const bool near_breaking =
-        waves.foam.z > 0.0 &&
+        water.white.z > 0.0 &&
         breaking_over(waves, water, pattern) >
             -fine_reach - (reaching * breaking_spread_at(waves, water, pattern));
     const bool in_patch =
-        pattern.across - waves.foam_left.x > -reaching * across_spread_at(pattern, footprint);
+        pattern.across - water.white_left.x > -reaching * across_spread_at(pattern, footprint);
     if (near_breaking || surf.white > 0.0 || in_patch) {
         add_foam_waves(waves, pattern, rest, footprint, coarse_foam, foam_waves);
     }
@@ -674,20 +744,20 @@ public Foam foam_at(Waves waves, WaveSurface water, Surf surf, FoamPattern patte
     foam.left = 0.0;
     foam.over = -reaching;
     foam.fresh = middling_fresh;
-    if (waves.foam.z <= 0.0 && surf.white <= 0.0) {
+    if (water.white.z <= 0.0 && surf.white <= 0.0) {
         return foam;
     }
-    if (waves.foam.z > 0.0) {
+    if (water.white.z > 0.0) {
         // Blurred over how much each changes across what's seen.
         const float half_left = water.breaking_left / 2.0;
         const float breaking_soft =
             footprint * sqrt((half_left * (pattern.coarse_slope + pattern.fine_slope)) +
-                             (square(waves.foam_left.w) * pattern.coarse_slope));
+                             (square(water.white_left.w) * pattern.coarse_slope));
         const float breaking_spread =
             max(max(breaking_spread_at(waves, water, pattern), breaking_soft), 1e-6);
         const float over = breaking_over(waves, water, pattern);
         foam.breaking = below(over / breaking_spread);
-        foam.over = over / waves.foam_left.z;
+        foam.over = over / water.white_left.z;
     }
     if (surf.white > 0.0) {
         const float over = surf_over(water, surf, pattern);
@@ -697,11 +767,11 @@ public Foam foam_at(Waves waves, WaveSurface water, Surf surf, FoamPattern patte
     }
     const float fine_spread = max(sqrt(max(1.0 - pattern.fine_seen, 0.0) + square(foam_edges)),
                                   footprint * sqrt(pattern.fine_slope));
-    if (waves.foam.z > 0.0) {
-        const float lace = waves.foam_left.y;
+    if (water.white.z > 0.0) {
+        const float lace = water.white_left.y;
         const float in_lace = below((lace - pattern.fine) / fine_spread) -
                               below((-lace - pattern.fine) / fine_spread);
-        foam.left = in_lace * below((pattern.across - waves.foam_left.x) /
+        foam.left = in_lace * below((pattern.across - water.white_left.x) /
                                     across_spread_at(pattern, footprint));
     }
     if (surf.white > 0.0) {

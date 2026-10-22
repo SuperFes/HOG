@@ -135,3 +135,29 @@ TEST_CASE("waves break in the surf as they come to be too high for the depth", "
     CHECK(surf.left > surf.breaking);
     CHECK(white(hog::waves::surf(0.0, 1.0)) == 0.0);
 }
+
+TEST_CASE("still water whitens less the younger its sea", "[waves][foam]") {
+    constexpr double speed = 20.0;
+    const hog::waves::Whitecaps open = hog::waves::whitecaps(speed);
+    // Grown full, as the open sea; none without water.
+    const hog::waves::Whitecaps grown = hog::waves::whitecaps(speed, 1e6);
+    CHECK(grown.breaking == open.breaking);
+    CHECK(grown.left == open.left);
+    CHECK(hog::waves::whitecaps(speed, 0.0).breaking == 0.0);
+    // Younger, less, by how much faster its peak turns.
+    double before = 0.0;
+    for (const double fetch : {30.0, 300.0, 3'000.0, 30'000.0}) {
+        CAPTURE(fetch);
+        const hog::waves::Whitecaps young = hog::waves::whitecaps(speed, fetch);
+        CHECK(young.breaking > before);
+        CHECK(young.breaking < open.breaking);
+        CHECK_THAT(young.breaking * hog::waves::fetched_peak(fetch, speed),
+                   WithinRel(open.breaking, 1e-12));
+        before = young.breaking;
+        // Its own peak breaks as a grown sea's does.
+        const double peak = hog::waves::grown_sea({speed, 0.0, 0.0}).peak;
+        const double faster = hog::waves::fetched_peak(fetch, speed);
+        CHECK_THAT(hog::waves::breaking_share(peak * faster, speed, faster),
+                   WithinRel(hog::waves::breaking_share(peak, speed), 1e-12));
+    }
+}

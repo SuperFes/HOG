@@ -1007,6 +1007,56 @@ TEST_CASE("waves too short to see from afar fade into the sea's roughness", "[re
     CHECK(device->validation_errors() == 0);
 }
 
+TEST_CASE("still water whitens only as far as the wind has grown its waves", "[render][gpu]") {
+    const auto device = test_device();
+    // Inland, with no sea, under a gale.
+    WavySea sea{20.0};
+    sea.sea.systems.clear();
+    sea.waves.clear();
+    sea.drawn = hog::render::drawn_waves_at(sea.trains, sea.waves, sea.sea, sea.eye, sea.bend, noon,
+                                            DVec3{0.0});
+    REQUIRE(sea.drawn.foam.z == 0.0F);
+    const hog::waves::Whitecaps open = hog::waves::whitecaps(20.0);
+    // Seen from afar, each footprint's as white as the water is on the whole there.
+    const std::vector<DVec3> far{sea.rest(DVec3{0.0, 0.0, 0.0}), sea.rest(DVec3{900.0, 0.0, 0.0})};
+    const std::vector<hog::Vec3> deep(far.size(), hog::Vec3{1.0e6F, 0.0F, 0.0F});
+    const auto white_at = [&](float fetch) {
+        const std::vector<float> fetches(far.size(), fetch);
+        return probe_waves(*device, sea.drawn, far, 1e5, deep, fetches);
+    };
+    // Grown full, as white as the open sea under the same wind.
+    for (const Probed& probed : white_at(1.0e6F)) {
+        CHECK_THAT(probed.breaking, WithinRel(open.breaking, 0.02));
+        CHECK_THAT(probed.left, WithinRel(open.left, 0.02));
+    }
+    // Less so the younger it is, as hog::waves has it.
+    for (const float fetch : {3'000.0F, 30.0F}) {
+        CAPTURE(fetch);
+        const hog::waves::Whitecaps young = hog::waves::whitecaps(20.0, static_cast<double>(fetch));
+        CHECK(young.breaking < open.breaking / 2.0);
+        for (const Probed& probed : white_at(fetch)) {
+            CHECK_THAT(probed.breaking, WithinRel(young.breaking, 0.02));
+            CHECK_THAT(probed.left, WithinRel(young.left, 0.02));
+        }
+    }
+    // Close by, each place is white or not, as much of it as there should be.
+    std::mt19937_64 random{4};
+    std::uniform_real_distribution<double> spot{-3'000.0, 3'000.0};
+    std::vector<DVec3> rest;
+    rest.reserve(4'000);
+    for (int i = 0; i < 4'000; ++i) {
+        rest.push_back(sea.rest(DVec3{spot(random), spot(random), 0.0}));
+    }
+    const std::vector<hog::Vec3> floors(rest.size(), hog::Vec3{1.0e6F, 0.0F, 0.0F});
+    const std::vector<float> fetches(rest.size(), 1.0e6F);
+    double mean_breaking = 0.0;
+    for (const Probed& probed : probe_waves(*device, sea.drawn, rest, 1e-3, floors, fetches)) {
+        mean_breaking += probed.breaking;
+    }
+    CHECK_THAT(mean_breaking / static_cast<double>(rest.size()), WithinRel(open.breaking, 0.1));
+    CHECK(device->validation_errors() == 0);
+}
+
 TEST_CASE("crests break white over as much of the sea as the wind breaks", "[render][gpu]") {
     const auto device = test_device();
     const WavySea sea{20.0};

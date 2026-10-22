@@ -67,6 +67,19 @@ double breaking_share(double frequency, double speed) noexcept {
     return smoothstep(outrun, kept_up, age) * smoothstep(too_short, short_from, age);
 }
 
+Whitecaps whitecaps(double speed, double fetch) noexcept {
+    const double peak = fetched_peak(fetch, speed);
+    if (!(peak > 0.0)) {
+        return {};
+    }
+    const Whitecaps grown = whitecaps(speed);
+    return {.breaking = grown.breaking / peak, .left = grown.left / peak};
+}
+
+double breaking_share(double frequency, double speed, double peak) noexcept {
+    return peak > 0.0 ? breaking_share(frequency / peak, speed) : 0.0;
+}
+
 Whitecaps whitecaps(const SeaState& sea) {
     const double speed = glm::length(sea.wind);
     const Whitecaps open = whitecaps(speed);

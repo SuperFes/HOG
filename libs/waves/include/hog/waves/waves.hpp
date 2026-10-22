@@ -83,6 +83,9 @@ inline constexpr double fetch_peak_power = 0.33;
 // the shape of grown_sea's spectrum, at the height and peak JONSWAP's laws give, so its longer
 // waves are missing and its shorter ones steeper, until it has grown as full.
 [[nodiscard]] double fetched(double frequency, double fetch, double speed) noexcept;
+// How many times faster the peak of a sea grown so turns than that of grown_sea's: 1 once grown
+// full, and none without water or wind.
+[[nodiscard]] double fetched_peak(double fetch, double speed) noexcept;
 
 // The sea somewhere: its systems; the current under them, which steepens the waves it runs
 // against and stretches those it runs with; and the wind over them, which breaks them.

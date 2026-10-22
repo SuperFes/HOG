@@ -24,6 +24,15 @@ struct Whitecaps {
 // mean square slope of the waves that break, against a sea grown full under that wind.
 [[nodiscard]] Whitecaps whitecaps(const SeaState& sea);
 
+// As whitecaps(speed), over still water with `fetch` metres of it upwind: less the younger its sea,
+// in proportion to how much faster its peak turns than a sea grown full's, as Zhao and Toba found
+// whitecaps cover nearly in proportion to the wind's stress over the peak's frequency.
+[[nodiscard]] Whitecaps whitecaps(double speed, double fetch) noexcept;
+
+// As breaking_share, on still water whose sea's peak turns `peak` times as fast as a sea grown
+// full's: the waves that break are those as young, against its peak, as in a sea grown full.
+[[nodiscard]] double breaking_share(double frequency, double speed, double peak) noexcept;
+
 // Of waves of root-mean-square height `height` metres running where it's `depth` deep, the share
 // breaking as they pass, as Thornton and Guza weighted those too high for it: nothing in deep
 // water, and 1 - 1/e once they're as high as it holds.

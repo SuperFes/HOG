@@ -150,7 +150,7 @@ Surface vertex_main(Vertex vertex) {
     const Surf surf = surf_at(waves, water, surface.floor.xyz);
     surface.surf = float4(surf.breaking, surf.trailing, surf.lace, surf.white);
     surface.foam = float4(0.0);
-    if (waves.foam.z > 0.0 || surf.white > 0.0) {
+    if (water.white.z > 0.0 || surf.white > 0.0) {
         const FoamPattern coarse = coarse_foam_at(waves, surface.rest, between);
         surface.foam = float4(coarse.coarse, coarse.across, coarse.coarse_seen, coarse.coarse_slope);
     }
@@ -177,7 +177,7 @@ Facing facing_at(Surface surface, float3 looking) {
     facing.white = 0.0;
     facing.albedo = breaking_albedo;
     const Surf surf = as_surf(surface.surf);
-    if (waves.foam.z > 0.0 || surf.white > 0.0) {
+    if (water.white.z > 0.0 || surf.white > 0.0) {
         FoamPattern coarse;
         coarse.coarse = surface.foam.x;
         coarse.across = surface.foam.y;

@@ -64,9 +64,10 @@ struct DrawnWaves {
     glm::vec4 swash_incident{0.0F};
     glm::vec4 swash_surging{0.0F};
     // Of the waves on still water, as shaders/waves.slang takes them: the wind over it and how they
-    // grow by their fetch under it, and of those left out.
+    // grow by their fetch under it, how white they'd be grown full, and of those left out.
     glm::vec4 still_wind{0.0F};
     glm::vec4 still_growth{0.0F};
+    glm::vec4 still_white{0.0F};
     std::array<glm::vec4, waves::bands / 4> still_left{};
     std::array<Wave, drawn_waves> waves{};
     std::array<FoamWave, foam_waves> foam_pattern{};

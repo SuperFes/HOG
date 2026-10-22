@@ -66,7 +66,7 @@ constexpr std::array vertex_attributes{
                                       .format = VK_FORMAT_R32G32_SFLOAT,
                                       .offset = offsetof(SeaVertex, towards)}};
 
-static_assert(sizeof(DrawnWaves) == (19 * sizeof(glm::vec4)) +
+static_assert(sizeof(DrawnWaves) == (20 * sizeof(glm::vec4)) +
                                         (drawn_waves * sizeof(DrawnWaves::Wave)) +
                                         (foam_waves * sizeof(DrawnWaves::FoamWave)));
 
@@ -336,7 +336,6 @@ DrawnWaves drawn_waves_at(std::span<const waves::Train> trains, std::span<const 
     double breaking_shorter = 0.0;
     double still_shorter = 0.0;
     double still_heave = 0.0;
-    double still_breaking = 0.0;
     for (std::size_t i = strongest.waves.size(); i-- > 0;) {
         const waves::Wave wave{.train = strongest.waves[i].train,
                                .amplitude = open.at(strongest.waves[i].train)};
@@ -354,7 +353,6 @@ DrawnWaves drawn_waves_at(std::span<const waves::Train> trains, std::span<const 
         const double still_slope = wavenumber * calm;
         still_shorter += still_slope * still_slope / 2.0;
         still_heave += calm * calm / 2.0;
-        still_breaking += still_slope * still_slope * share * share / 2.0;
         const waves::LagTerms lag = waves::lag_terms(wavenumber);
         drawn.waves.at(i) = {
             .heading_wavenumber = {Vec3{train.heading}, static_cast<float>(train.wavenumber)},
@@ -368,7 +366,7 @@ DrawnWaves drawn_waves_at(std::span<const waves::Train> trains, std::span<const 
             .breaking = {static_cast<float>(breaking_shorter), static_cast<float>(lag.turn),
                          static_cast<float>(lag.scale), static_cast<float>(lag.offset)},
             .still = {static_cast<float>(calm), static_cast<float>(still_shorter),
-                      static_cast<float>(still_heave), static_cast<float>(still_breaking)}};
+                      static_cast<float>(still_heave), 0.0F}};
     }
     if (wind > 0.0) {
         // As waves::fetched has it: a sea's height grows by the root of its fetch, and its peak
@@ -381,11 +379,14 @@ DrawnWaves drawn_waves_at(std::span<const waves::Train> trains, std::span<const 
             static_cast<float>(waves::fetch_peak_scale *
                                std::pow(waves::gravity / (wind * wind), -waves::fetch_peak_power) *
                                waves::gravity / (wind * grown.peak)),
-            0.0F, 0.0F};
+            static_cast<float>(wind), 0.0F};
         for (std::size_t band = 0; band < still_left.size(); ++band) {
             drawn.still_left.at(band / 4)[static_cast<glm::length_t>(band % 4)] =
                 static_cast<float>(still_left.at(band));
         }
+        const waves::Whitecaps grown_white = waves::whitecaps(wind);
+        drawn.still_white = {static_cast<float>(grown_white.breaking),
+                             static_cast<float>(grown_white.left), 0.0F, 0.0F};
     }
     // What's left over is what wasn't drawn; the bunching of all that breaks, drawn or not, is
     // near enough normal, so whitecaps cover as much as they should where it's highest.
