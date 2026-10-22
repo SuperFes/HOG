@@ -316,7 +316,8 @@ public struct Lighting {
     public float4 sky_scale;
     // x the air's metres the aerial-perspective volume reaches out to; y and z of the light falling
     // on any cloud over the eye, the shares let straight through and scattered through, and any
-    // mist over it as well.
+    // mist over it as well; w 1 where the sea's pass lays the water over what's drawn beneath it,
+    // as the sea writes it.
     public float4 reach;
     // As drawn: x the planet's radius, y the faked radius drawing bends it onto, z how far the
     // weather has faded from its maps before to those after, w the eye's height above sea level.

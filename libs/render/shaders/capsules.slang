@@ -134,7 +134,8 @@ float4 fragment_air(Surface surface) : SV_Target {
     const float3 radiance =
         through_water(push.colour.rgb * lit / pi, ((sunlight * saturate(dot(up, sun))) + sky) / pi,
                       surface.water - height, push.colour.w - surface.water,
-                      length(surface.from_eye), dot(-normalize(surface.from_eye), up));
+                      length(surface.from_eye), dot(-normalize(surface.from_eye), up),
+                      sea_lays_water(lighting));
 
     const float4 clip = mul(push.clip_from_eye, float4(surface.from_eye, 1.0));
     const float2 uv = ((clip.xy / clip.w) * 0.5) + 0.5;

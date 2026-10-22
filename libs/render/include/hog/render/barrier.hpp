@@ -64,6 +64,12 @@ void transition(VkCommandBuffer commands, VkImage image, VkImageAspectFlags aspe
 void record_barriers(VkCommandBuffer commands,
                      std::span<const VkImageMemoryBarrier2> barriers) noexcept;
 
+// Records a barrier between what's done in `from_stage` and `to_stage`, making what was written by
+// `from_access` seen by `to_access`.
+void memory_barrier(VkCommandBuffer commands, VkPipelineStageFlags2 from_stage,
+                    VkAccessFlags2 from_access, VkPipelineStageFlags2 to_stage,
+                    VkAccessFlags2 to_access) noexcept;
+
 // Whether moving between two uses needs a barrier: a layout change, or a write on either side.
 [[nodiscard]] bool needs_barrier(ImageUse from, ImageUse to) noexcept;
 

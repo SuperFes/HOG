@@ -154,7 +154,8 @@ struct OceanView {
     // A calm sea unless any.
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     DrawnWaves waves = {};
-    // Seen through as drawn beneath it, unless none.
+    // What's drawn beneath it, as copied, for a sea lit through the air to see through: where it
+    // lays the water itself, as lay_water works out, over what's drawn there as in air.
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     std::optional<SeaBehind> behind = {};
 };
@@ -180,6 +181,13 @@ public:
     // ground, so ground under the sea left undrawn looks as it would.
     Result<> draw_deep(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view,
                        std::uint32_t frame = 0) const;
+
+    // Lit through the air, records working out whether the sea lays its water over what's drawn
+    // beneath it: where it's `seen_through`, given what's drawn there as copied, as long as the eye
+    // stands over its surface as drawn. Written into the frame's lighting, view.air's, for all
+    // drawn after to read, which are then drawn as in air under it.
+    Result<> lay_water(VkCommandBuffer commands, const OceanView& view, std::uint32_t frame,
+                       bool seen_through) const;
 
     // Records copying in the depths round the eye, of the sea and of still water and the fetch
     // over both, for the frames from `frame` on, whose last submit must have finished.
@@ -219,6 +227,9 @@ private:
 
     Pipeline pipeline_;
     Pipeline deep_;
+    // Laying the water over what's drawn beneath, as copied, and whether to.
+    Pipeline through_;
+    Pipeline laid_;
     Buffer vertices_;
     Buffer indices_;
     std::vector<Buffer> waves_;

@@ -30,14 +30,21 @@ public float glint_lobe(float3 looking, float3 normal, float roughness, float3 s
     return lit * ((sharpness + 8.0) / (8.0 * pi)) * pow(saturate(dot(normal, halfway)), sharpness);
 }
 
+// Whether the sea's own pass lays the water over what's drawn beneath it, seen from above, as
+// Lighting's reach.w has it; then what's drawn there is drawn as in air.
+public bool sea_lays_water(Lighting lighting) {
+    return lighting.reach.w > 0.0;
+}
+
 // `lit` at a point `depth` metres under the sea (negative above it), `along` metres from an eye
 // `eye_height` above sea level, looking down at it `looking_down`, the cosine from straight down:
 // dimmed by the water the light passes down to it and back to the eye, and filled in by what
 // that water scatters of `on_water`, the light falling on the sea. From above, the way through
-// the water is the depth over how steeply the eye looks down.
+// the water is the depth over how steeply the eye looks down; and where the sea's pass lays the
+// water, `laid`, it's left as it is.
 public float3 through_water(float3 lit, float3 on_water, float depth, float eye_height,
-                            float along, float looking_down) {
-    if (depth <= 0.0 && eye_height >= 0.0) {
+                            float along, float looking_down, bool laid = false) {
+    if ((depth <= 0.0 || laid) && eye_height >= 0.0) {
         return lit;
     }
     float seen_through;
@@ -56,8 +63,8 @@ public float3 through_water(float3 lit, float3 on_water, float depth, float eye_
 // As through_water, for a point `from_eye` on the planet of `radius`, under an eye `up_height` as
 // bend.slang takes it.
 public float3 through_water_at(float3 lit, float3 on_water, float3 from_eye, float4 up_height,
-                               float radius) {
+                               float radius, bool laid) {
     const float3 up = normalize(from_eye + (up_height.xyz * (radius + up_height.w)));
     return through_water(lit, on_water, -height_above_sea(from_eye, up_height, radius),
-                         up_height.w, length(from_eye), dot(-normalize(from_eye), up));
+                         up_height.w, length(from_eye), dot(-normalize(from_eye), up), laid);
 }

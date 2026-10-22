@@ -364,6 +364,148 @@ std::vector<std::uint8_t> over_deep_sea(hog::render::Device& device, Beneath ben
     return std::move(pixels).value();
 }
 
+// How the water over ground under the sea is drawn: by the ground's own shading, the sea only
+// reflecting over it; by the sea, over what's drawn beneath it as copied; or as copied, but with
+// the sea finding it isn't to lay the water.
+enum class Laid : std::uint8_t { ByGround, BySea, NotBySea };
+
+void copy_whole(VkCommandBuffer commands, VkImage from, VkImage to, VkImageAspectFlags aspect) {
+    const VkImageSubresourceLayers layers{
+        .aspectMask = aspect, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1};
+    const VkImageCopy region{
+        .srcSubresource = layers,
+        .srcOffset = {},
+        .dstSubresource = layers,
+        .dstOffset = {},
+        .extent = {.width = extent.width, .height = extent.height, .depth = 1}};
+    vkCmdCopyImage(commands, from, hog::render::image_use::copy_source.layout, to,
+                   hog::render::image_use::copy_target.layout, 1, &region);
+}
+
+// From `height` metres up, looking east and steeply down through the air at the sea over ground
+// `deep` metres beneath its surface, the water over it drawn `laid`; and in `beneath`, if any,
+// what was drawn before the sea, as copied.
+std::vector<std::uint8_t> over_seabed(hog::render::Device& device, double deep, Laid laid,
+                                      double height = 20.0,
+                                      std::vector<std::uint8_t>* beneath = nullptr) {
+    auto atmosphere = hog::render::Atmosphere::create(device);
+    REQUIRE(atmosphere);
+    auto sky = hog::render::Sky::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
+    REQUIRE(sky);
+    auto ocean =
+        hog::render::Ocean::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT, true);
+    REQUIRE(ocean);
+    const std::vector<hog::terrain::MaterialImage> materials(
+        hog::planet::biome_count,
+        hog::terrain::material_image({.colour = DVec3{0.8, 0.7, 0.5}}, 64));
+    auto terrain =
+        hog::render::Terrain::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT,
+                                     {.materials = materials, .sea = true, .air = true});
+    REQUIRE(terrain);
+    auto pool = hog::render::TerrainPool::create(device, {});
+    REQUIRE(pool);
+    const Patch seabed = level_patch(0.0, 400.0, -deep);
+    const std::uint32_t slot = pool->acquire().value_or(1);
+    REQUIRE(pool->stage(0, slot, seabed.vertices));
+    const std::vector<hog::render::TerrainDraw> draws{{.slot = slot, .origin = seabed.origin}};
+
+    const WorldPosition eye{up * (radius + height)};
+    const double steep = height > 0.0 ? 2.0 : -2.0;
+    const DVec3 sun = glm::normalize(up + north);
+    const hog::terrain::Bend bend = hog::terrain::bend_from(eye, radius, 0.0);
+    const hog::render::Camera camera{.eye = eye,
+                                     .forward = glm::normalize(east - (up * steep)),
+                                     .up = glm::normalize((east * steep) + up)};
+    const hog::render::SkyView seen{.camera = camera, .sun = sun, .bend = bend, .exposure = 10.0};
+    const hog::render::AirBindings air = sky->bindings(0, *atmosphere);
+    OceanView view{.camera = camera, .sun = sun, .bend = bend, .air = air};
+
+    const VkImageUsageFlags copied = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                     VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    auto target =
+        hog::render::make_image(device, {.format = VK_FORMAT_R8G8B8A8_UNORM,
+                                         .extent = extent,
+                                         .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | copied});
+    REQUIRE(target);
+    auto depth = hog::render::make_image(
+        device, {.format = VK_FORMAT_D32_SFLOAT,
+                 .extent = extent,
+                 .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | copied,
+                 .aspect = VK_IMAGE_ASPECT_DEPTH_BIT});
+    REQUIRE(depth);
+    auto behind_colour = hog::render::make_image(
+        device, {.format = VK_FORMAT_R8G8B8A8_UNORM, .extent = extent, .usage = copied});
+    REQUIRE(behind_colour);
+    auto behind_depth = hog::render::make_image(device, {.format = VK_FORMAT_D32_SFLOAT,
+                                                         .extent = extent,
+                                                         .usage = copied,
+                                                         .aspect = VK_IMAGE_ASPECT_DEPTH_BIT});
+    REQUIRE(behind_depth);
+    const bool behind = laid != Laid::ByGround;
+    if (behind) {
+        view.behind =
+            hog::render::SeaBehind{.colour = behind_colour->view(), .depth = behind_depth->view()};
+    }
+    REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
+        namespace use = hog::render::image_use;
+        REQUIRE(pool->record_uploads(commands, 0));
+        CHECK(sky->record_frame(commands, extent, 0, *atmosphere, seen));
+        if (behind) {
+            CHECK(ocean->lay_water(commands, view, 0, laid == Laid::BySea));
+        }
+        hog::render::transition(commands, target->handle(), VK_IMAGE_ASPECT_COLOR_BIT, use::discard,
+                                use::colour_target);
+        hog::render::transition(commands, depth->handle(), VK_IMAGE_ASPECT_DEPTH_BIT, use::discard,
+                                use::depth_target);
+        hog::render::begin_rendering(commands, target->view(), extent,
+                                     VkClearColorValue{.float32 = {0.0F, 0.0F, 0.0F, 1.0F}},
+                                     {.view = depth->view()});
+        sky->draw(commands, extent, 0, *atmosphere, seen);
+        terrain->draw(commands, extent, *pool, draws,
+                      {.camera = camera, .sun = sun, .bend = bend, .air = air});
+        if (behind) {
+            vkCmdEndRendering(commands);
+            for (const auto& [from, to, aspect, drawn] :
+                 {std::tuple{&*target, &*behind_colour,
+                             VkImageAspectFlags{VK_IMAGE_ASPECT_COLOR_BIT}, use::colour_target},
+                  std::tuple{&*depth, &*behind_depth, VkImageAspectFlags{VK_IMAGE_ASPECT_DEPTH_BIT},
+                             use::depth_target}}) {
+                hog::render::transition(commands, from->handle(), aspect, drawn, use::copy_source);
+                hog::render::transition(commands, to->handle(), aspect, use::discard,
+                                        use::copy_target);
+                copy_whole(commands, from->handle(), to->handle(), aspect);
+                hog::render::transition(commands, from->handle(), aspect, use::copy_source, drawn);
+                hog::render::transition(commands, to->handle(), aspect, use::copy_target,
+                                        use::sampled);
+            }
+            hog::render::begin_rendering(commands, target->view(), extent, std::nullopt,
+                                         {.view = depth->view(), .clear = std::nullopt});
+        }
+        CHECK(ocean->draw(commands, extent, view));
+        vkCmdEndRendering(commands);
+    }));
+    if (beneath != nullptr) {
+        auto drawn_beneath =
+            hog::render::read_pixels(device, *behind_colour, hog::render::image_use::sampled);
+        REQUIRE(drawn_beneath);
+        *beneath = std::move(drawn_beneath).value();
+    }
+    auto pixels = hog::render::read_pixels(device, *target, hog::render::image_use::colour_target);
+    REQUIRE(pixels);
+    return std::move(pixels).value();
+}
+
+// The most any channel of any pixel differs between two pictures.
+int furthest_apart(const std::vector<std::uint8_t>& one, const std::vector<std::uint8_t>& other) {
+    int furthest = 0;
+    for (std::size_t at = 0; at < one.size(); ++at) {
+        if (at % 4 != 3) {
+            furthest = std::max(furthest, std::abs(int{one.at(at)} - int{other.at(at)}));
+        }
+    }
+    return furthest;
+}
+
 int brightness(Pixel pixel) {
     return pixel[0] + pixel[1] + pixel[2];
 }
@@ -680,6 +822,35 @@ TEST_CASE("through the air, the deep water drawn beneath the sea looks as ground
     // From under the sea, the sky shows through its surface overhead as before.
     CHECK(over_deep_sea(*device, Beneath::Deep, -20.0) ==
           over_deep_sea(*device, Beneath::Nothing, -20.0));
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("through the air, the sea lays the water over the ground beneath it as the ground did",
+          "[render][gpu]") {
+    const auto device = test_device();
+    for (const double deep : {0.5, 3.0, 12.0}) {
+        CAPTURE(deep);
+        const auto by_ground = over_seabed(*device, deep, Laid::ByGround);
+        const auto by_sea = over_seabed(*device, deep, Laid::BySea);
+        // The same water, but for the sea blending its reflection in light rather than as tone
+        // mapped.
+        CHECK(furthest_apart(by_ground, by_sea) <= 6);
+        // Told not to, it blends over what's beneath as it did.
+        CHECK(furthest_apart(by_ground, over_seabed(*device, deep, Laid::NotBySea)) <= 1);
+    }
+    // Where the sea lays it, the ground's drawn as in air beneath; otherwise under the water.
+    std::vector<std::uint8_t> in_air;
+    std::vector<std::uint8_t> in_water;
+    static_cast<void>(over_seabed(*device, 3.0, Laid::BySea, 20.0, &in_air));
+    static_cast<void>(over_seabed(*device, 3.0, Laid::NotBySea, 20.0, &in_water));
+    CHECK(pixel_at(in_air, 32, 32)[0] > pixel_at(in_water, 32, 32)[0] + 40);
+    // Deeper, the ground is lost in the water's colour.
+    const Pixel middle_shallow = pixel_at(over_seabed(*device, 0.5, Laid::BySea), 32, 32);
+    const Pixel middle_deep = pixel_at(over_seabed(*device, 12.0, Laid::BySea), 32, 32);
+    CHECK(middle_shallow[0] > middle_deep[0] + 20);
+    // From under the sea, the eye is in the water, so the ground's shading lays it.
+    CHECK(furthest_apart(over_seabed(*device, 30.0, Laid::ByGround, -10.0),
+                         over_seabed(*device, 30.0, Laid::BySea, -10.0)) <= 1);
     CHECK(device->validation_errors() == 0);
 }
 

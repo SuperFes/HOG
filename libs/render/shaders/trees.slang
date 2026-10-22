@@ -494,7 +494,8 @@ float4 fragment_main(Tree tree) : SV_Target {
         (sunlight * saturate(dot(normal, sun))) + (sky * (0.5 + (0.5 * dot(normal, up))));
     const float3 radiance =
         through_water_at(albedo * lit / pi, ((sunlight * saturate(dot(up, sun))) + sky) / pi,
-                         tree.from_eye, push.bend_up, push.bend_radii.x);
+                         tree.from_eye, push.bend_up, push.bend_radii.x,
+                         sea_lays_water(lighting));
 
     const float4 clip = mul(push.clip_from_eye, float4(tree.drawn, 1.0));
     const float2 uv = ((clip.xy / clip.w) * 0.5) + 0.5;

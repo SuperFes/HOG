@@ -1,10 +1,12 @@
 #include <hog/core/assert.hpp>
 #include <hog/core/hash.hpp>
 #include <hog/planet/tangent_frame.hpp>
+#include <hog/render/barrier.hpp>
 #include <hog/render/capsules.hpp>
 #include <hog/render/device.hpp>
 #include <hog/render/ocean.hpp>
 #include <hog/shaders/ocean.hpp>
+#include <hog/shaders/sea_laid.hpp>
 #include <hog/terrain/sea.hpp>
 #include <hog/terrain/shore.hpp>
 #include <hog/waves/foam.hpp>
@@ -209,20 +211,37 @@ constexpr std::uint32_t rain_binding = 11;
 constexpr VkDescriptorSetLayoutBinding rain_descriptor =
     binding(rain_binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 
+// What's drawn before the sea, colour and depth, as copied.
+constexpr std::uint32_t behind_binding = 12;
+
+// As sea_laid.slang has them.
+struct LaidPush {
+    glm::uvec4 laying{0U};
+};
+
+constexpr std::array laid_descriptors{
+    binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT),
+    binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT),
+    binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT),
+    binding(3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT)};
+
 constexpr std::array descriptors{waves_descriptor, shore_descriptor,  fetch_descriptor,
                                  foam_descriptor,  ripple_descriptor, rain_descriptor};
-constexpr std::array air_descriptors{binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
-                                     binding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
-                                     binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-                                     binding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-                                     binding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-                                     binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-                                     waves_descriptor,
-                                     shore_descriptor,
-                                     fetch_descriptor,
-                                     foam_descriptor,
-                                     ripple_descriptor,
-                                     rain_descriptor};
+constexpr std::array air_descriptors{
+    binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
+    binding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
+    binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+    binding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+    binding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+    binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+    waves_descriptor,
+    shore_descriptor,
+    fetch_descriptor,
+    foam_descriptor,
+    ripple_descriptor,
+    rain_descriptor,
+    binding(behind_binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+    binding(behind_binding + 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)};
 
 // How the swash of the waves, and of their groups' surges, turns along the ground: fixed to the
 // planet, each a way and a length, so it runs up one stretch of shore while it draws back from the
@@ -600,6 +619,26 @@ Result<Ocean> Ocean::create(Device& device, VkFormat colour_format, VkFormat dep
             return std::unexpected(std::move(deep).error());
         }
         ocean.deep_ = std::move(deep).value();
+        auto through = make_pipeline(device, {.spirv = shaders::ocean,
+                                              .fragment_entry = "fragment_through",
+                                              .bindings = vertex_bindings,
+                                              .attributes = vertex_attributes,
+                                              .colour_format = colour_format,
+                                              .depth_format = depth_format,
+                                              .push_constant_bytes = sizeof(Push),
+                                              .descriptors = air_descriptors});
+        if (!through) {
+            return std::unexpected(std::move(through).error());
+        }
+        ocean.through_ = std::move(through).value();
+        auto laid = make_compute_pipeline(device, {.spirv = shaders::sea_laid,
+                                                   .entry = "laid_main",
+                                                   .push_constant_bytes = sizeof(LaidPush),
+                                                   .descriptors = laid_descriptors});
+        if (!laid) {
+            return std::unexpected(std::move(laid).error());
+        }
+        ocean.laid_ = std::move(laid).value();
     }
     return ocean;
 }
@@ -669,7 +708,7 @@ SeaBindings Ocean::bindings(std::uint32_t frame) const {
 
 Result<> Ocean::draw(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view,
                      std::uint32_t frame) const {
-    return record(commands, extent, view, frame, pipeline_);
+    return record(commands, extent, view, frame, air_ && view.behind ? through_ : pipeline_);
 }
 
 Result<> Ocean::draw_deep(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view,
@@ -679,6 +718,34 @@ Result<> Ocean::draw_deep(VkCommandBuffer commands, VkExtent2D extent, const Oce
     if (view.bend.eye_height > 0.0) {
         return record(commands, extent, view, frame, deep_);
     }
+    return {};
+}
+
+Result<> Ocean::lay_water(VkCommandBuffer commands, const OceanView& view, std::uint32_t frame,
+                          bool seen_through) const {
+    HOG_ASSERT(air_ && view.air.lighting != VK_NULL_HANDLE, "laying the water without the air");
+    if (auto written = write_waves(view, frame); !written) {
+        return written;
+    }
+    // After all that read the frame's lighting before.
+    memory_barrier(commands, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_NONE,
+                   VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_NONE);
+    const LaidPush push{.laying = {sea_laying_at, seen_through ? 1U : 0U, 0U, 0U}};
+    vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, laid_.handle());
+    push_uniform_buffer(commands, laid_, 0, waves_.at(frame).handle());
+    push_sampled_image(commands, laid_, 1,
+                       shore_ ? shore_depths_.image().view() : calm_.bindings().shore,
+                       shore_sampler_.handle());
+    push_sampled_image(commands, laid_, 2,
+                       shore_ ? shore_fetches_.image().view() : calm_.bindings().fetches,
+                       shore_sampler_.handle());
+    push_storage_buffer(commands, laid_, 3, view.air.lighting);
+    vkCmdPushConstants(commands, laid_.layout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push),
+                       &push);
+    vkCmdDispatch(commands, 1, 1, 1);
+    memory_barrier(commands, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                   VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                   VK_ACCESS_2_UNIFORM_READ_BIT);
     return {};
 }
 
@@ -790,6 +857,12 @@ Result<> Ocean::record(VkCommandBuffer commands, VkExtent2D extent, const OceanV
     push_sampled_image(commands, pipeline, ripple_binding, ripples_.kept().view(),
                        ripples_.sampler());
     push_sampled_image(commands, pipeline, rain_binding, rain_.kept().view(), rain_.sampler());
+    if (view.behind && &pipeline == &through_) {
+        push_sampled_image(commands, pipeline, behind_binding, view.behind->colour,
+                           shore_sampler_.handle());
+        push_sampled_image(commands, pipeline, behind_binding + 1, view.behind->depth,
+                           shore_sampler_.handle());
+    }
     const std::array vertices{vertices_.handle()};
     const VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(commands, 0, 1, vertices.data(), &offset);

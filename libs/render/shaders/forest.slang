@@ -272,7 +272,8 @@ float3 forest_lit(float3 albedo, float3 normal_raw, float3 from_eye, float3 draw
         (sky * (0.5 + (0.5 * dot(normal, up))));
     const float3 radiance =
         through_water_at(albedo * lit / pi, ((sunlight * saturate(dot(up, sun))) + sky) / pi,
-                         from_eye, push.bend_up, push.bend_radii.x);
+                         from_eye, push.bend_up, push.bend_radii.x,
+                         sea_lays_water(lighting));
     const float4 clip = mul(push.clip_from_eye, float4(drawn, 1.0));
     const float2 uv = ((clip.xy / clip.w) * 0.5) + 0.5;
     const float4 between =

@@ -358,6 +358,50 @@ Result<> Scene::give_shore(VkCommandBuffer commands, std::uint32_t slot) {
     return {};
 }
 
+namespace {
+
+// What's drawn before the sea, copied for it to see through.
+struct SeaCopies {
+    render::GraphImage colour;
+    render::GraphImage depth;
+};
+
+// Where the frame's target can be copied, sampled by the sea's pass, which `uses` them.
+std::optional<SeaCopies> copy_behind_sea(render::RenderGraph& graph, render::GraphImage target,
+                                         render::GraphImage depth, const render::Frame& frame,
+                                         std::vector<render::GraphUse>& uses) {
+    if (!frame.copyable) {
+        return std::nullopt;
+    }
+    const auto copy_of = [&](VkFormat format, VkImageAspectFlags aspect) {
+        return graph.transient(
+            {.format = format,
+             .extent = frame.extent,
+             .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+             .aspect = aspect,
+             .layers = 1,
+             .levels = 1});
+    };
+    const SeaCopies copies{.colour = copy_of(frame.format, VK_IMAGE_ASPECT_COLOR_BIT),
+                           .depth = copy_of(depth_format, VK_IMAGE_ASPECT_DEPTH_BIT)};
+    graph.copy("behind sea", target, copies.colour);
+    graph.copy("behind sea depth", depth, copies.depth);
+    uses.push_back({.image = copies.colour, .use = render::image_use::sampled});
+    uses.push_back({.image = copies.depth, .use = render::image_use::sampled});
+    return copies;
+}
+
+std::optional<render::SeaBehind> seen_behind(const render::RenderGraph& graph,
+                                             const std::optional<SeaCopies>& copies) {
+    if (!copies) {
+        return std::nullopt;
+    }
+    return render::SeaBehind{.colour = graph.view(copies->colour),
+                             .depth = graph.view(copies->depth)};
+}
+
+} // namespace
+
 Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     const std::span<const render::GpuSpan> timed = timer_.read(frame.commands, frame.slot);
     timings_.assign(timed.begin(), timed.end());
@@ -527,6 +571,10 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                   return ocean_.step_ripples(commands, sea, frame.slot, shot.time,
                                              waves::foam_drift(sea_state), shot.others);
               });
+    graph.add({.name = "sea laid", .uses = {}, .targets = std::nullopt},
+              [&](VkCommandBuffer commands) {
+                  return ocean_.lay_water(commands, sea, frame.slot, frame.copyable);
+              });
     graph.add({.name = "ground", .uses = through_air, .targets = drawn},
               [&](VkCommandBuffer commands) {
                   Result<> deep = ocean_.draw_deep(commands, frame.extent, sea, frame.slot);
@@ -563,31 +611,11 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     }
     // Over all that stands in the sea, each seen through the water to its surface, as copied.
     std::vector<render::GraphUse> sea_uses = through_air;
-    std::optional<std::pair<render::GraphImage, render::GraphImage>> behind;
-    if (frame.copyable) {
-        const auto copy_of = [&](VkFormat format, VkImageAspectFlags aspect) {
-            return graph.transient(
-                {.format = format,
-                 .extent = frame.extent,
-                 .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-                 .aspect = aspect,
-                 .layers = 1,
-                 .levels = 1});
-        };
-        behind = {copy_of(frame.format, VK_IMAGE_ASPECT_COLOR_BIT),
-                  copy_of(depth_format, VK_IMAGE_ASPECT_DEPTH_BIT)};
-        graph.copy("behind sea", target, behind->first);
-        graph.copy("behind sea depth", depth, behind->second);
-        sea_uses.push_back({.image = behind->first, .use = render::image_use::sampled});
-        sea_uses.push_back({.image = behind->second, .use = render::image_use::sampled});
-    }
+    const std::optional<SeaCopies> behind = copy_behind_sea(graph, target, depth, frame, sea_uses);
     graph.add({.name = "sea", .uses = sea_uses, .targets = drawn},
               [&, behind](VkCommandBuffer commands) {
                   render::OceanView seen = sea;
-                  if (behind) {
-                      seen.behind = render::SeaBehind{.colour = graph.view(behind->first),
-                                                      .depth = graph.view(behind->second)};
-                  }
+                  seen.behind = seen_behind(graph, behind);
                   return ocean_.draw(commands, frame.extent, seen, frame.slot);
               });
     if (render::precipitation_count(falling, static_cast<double>(here.snow)) > 0) {

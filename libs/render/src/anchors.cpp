@@ -1,5 +1,6 @@
 #include <hog/core/assert.hpp>
 #include <hog/render/anchors.hpp>
+#include <hog/render/barrier.hpp>
 #include <hog/render/device.hpp>
 
 #include <algorithm>
@@ -49,27 +50,6 @@ float from_byte(std::uint32_t packed, std::uint32_t shift) noexcept {
 }
 
 constexpr VkDeviceSize tile_bytes = VkDeviceSize{tile_trees} * sizeof(TreeAnchor);
-
-void memory_barrier(VkCommandBuffer commands, VkPipelineStageFlags2 from_stage,
-                    VkAccessFlags2 from_access, VkPipelineStageFlags2 to_stage,
-                    VkAccessFlags2 to_access) noexcept {
-    const VkMemoryBarrier2 barrier{.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
-                                   .pNext = nullptr,
-                                   .srcStageMask = from_stage,
-                                   .srcAccessMask = from_access,
-                                   .dstStageMask = to_stage,
-                                   .dstAccessMask = to_access};
-    const VkDependencyInfo dependency{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                                      .pNext = nullptr,
-                                      .dependencyFlags = 0,
-                                      .memoryBarrierCount = 1,
-                                      .pMemoryBarriers = &barrier,
-                                      .bufferMemoryBarrierCount = 0,
-                                      .pBufferMemoryBarriers = nullptr,
-                                      .imageMemoryBarrierCount = 0,
-                                      .pImageMemoryBarriers = nullptr};
-    vkCmdPipelineBarrier2(commands, &dependency);
-}
 
 } // namespace
 

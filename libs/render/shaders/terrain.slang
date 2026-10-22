@@ -457,8 +457,10 @@ struct Shaded {
 };
 
 // The ground's colour lit by `on_ground` facing its normal and `on_water` facing up, each times
-// pi, with water over it where it lies below the sea as high as it stands.
-float3 shaded(Ground ground, float3 normal, float3 on_ground, float3 on_water, float4 year) {
+// pi, with water over it where it lies below the sea as high as it stands, unless the sea's pass
+// lays it, `laid`.
+float3 shaded(Ground ground, float3 normal, float3 on_ground, float3 on_water, float4 year,
+              bool laid) {
     const float3 bare = wooded(ground, scorched(ground, albedo(ground, normal)), year) *
                         lerp(1.0, wet_darkening, wetness(ground));
     const float3 lit_ground = lerp(bare, float3(stranded_albedo), stranded_at(ground)) * on_ground;
@@ -467,7 +469,8 @@ float3 shaded(Ground ground, float3 normal, float3 on_ground, float3 on_water, f
     }
     return through_water(lit_ground, on_water, sea_level(ground) - ground.height,
                          eye_above(ground),
-                         length(ground.from_eye), dot(-normalize(ground.from_eye), up_at(ground)));
+                         length(ground.from_eye), dot(-normalize(ground.from_eye), up_at(ground)),
+                         laid);
 }
 
 // Ground at or within depth precision of the sea's surface is put just behind it, which then wins.
@@ -492,7 +495,8 @@ Shaded fragment_main(Ground ground) {
     const float3 on_ground = night + ((1.0 - night) * saturate(dot(normal, sun)));
     const float3 on_water = night + ((1.0 - night) * saturate(dot(up_at(ground), sun)));
     Shaded result;
-    result.colour = float4(saturate(shaded(ground, normal, on_ground, on_water, midsummer)), 1.0);
+    result.colour =
+        float4(saturate(shaded(ground, normal, on_ground, on_water, midsummer, false)), 1.0);
     result.depth = depth_of(ground);
     return result;
 }
@@ -522,7 +526,8 @@ Shaded fragment_air(Ground ground) {
         on_water = (through_cloud(shade, clear_water) * facing) +
                    sky_under_cloud(lighting, shade, clear_water * facing);
     }
-    float3 radiance = shaded(ground, normal, on_ground, on_water, lighting.year) / pi;
+    float3 radiance =
+        shaded(ground, normal, on_ground, on_water, lighting.year, sea_lays_water(lighting)) / pi;
     if (far > 0.0) {
         // Too far to see into, a lake is its deep water's colour, mirroring the sky and the sun
         // as the sea does; facing up from the faked sphere the sea is drawn on.

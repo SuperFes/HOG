@@ -9,6 +9,7 @@
 #include <hog/shaders/sky_view.hpp>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <span>
@@ -38,6 +39,8 @@ struct Lighting {
     glm::vec4 shadow;
     glm::vec4 year;
 };
+
+static_assert(offsetof(Lighting, reach) + (3 * sizeof(float)) == sea_laying_at);
 
 struct TablePush {
     glm::vec2 height_sun;
@@ -157,8 +160,11 @@ Result<Sky> Sky::create(Device& device, VkFormat colour_format, VkFormat depth_f
             return std::unexpected(std::move(volume).error());
         }
         sky.aerial_volumes_.push_back(std::move(volume).value());
-        auto lighting = make_buffer(device, sizeof(Lighting), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                                    Memory::Upload);
+        // Written by the sea too.
+        auto lighting =
+            make_buffer(device, sizeof(Lighting),
+                        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                        Memory::Upload);
         if (!lighting) {
             return std::unexpected(std::move(lighting).error());
         }

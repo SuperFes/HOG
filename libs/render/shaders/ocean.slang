@@ -39,6 +39,9 @@ struct Push {
 [[vk::binding(10, 0)]] Sampler2D ripples_kept;
 // As hog::render::RainTile draws it.
 [[vk::binding(11, 0)]] Sampler2DArray<float2> rain_tile;
+// What's drawn before the sea, as copied for it to lay the water over, when lit through the air.
+[[vk::binding(12, 0)]] Sampler2D behind_colour;
+[[vk::binding(13, 0)]] Sampler2D behind_depth;
 
 struct Vertex {
     [[vk::location(0)]] float out; // from 0 under the eye to 1 at the rim
@@ -341,6 +344,53 @@ float4 fragment_main(Surface surface) : SV_Target {
                 facing.white);
 }
 
+// Of the sea at a pixel lit through the air: how much of the sky it reflects and what of it, the
+// glint, the light falling on its foam, and the air between it and the eye.
+struct AirLit {
+    float reflected;
+    float3 sky;
+    float3 glint;
+    float3 on_foam;
+    float4 between;
+    Shade shade;
+};
+
+AirLit air_lit(Surface surface, Facing facing, float3 looking) {
+    const float3 normal = facing.normal;
+    const float3 sun = push.sun_nearest.xyz;
+    const float3 up = push.up_height.xyz;
+    const float sun_mu = dot(sun, up);
+    AirLit lit;
+    lit.reflected = reflected_at(looking, normal);
+    lit.shade = shade_at(lighting, cloud_shadow, surface.from_eye);
+    lit.sky = sky_mirrored(air, lighting, sky_view_table, transmittance_table, lit.shade,
+                           reflect(looking, normal), up, sun);
+    const float3 sunlight =
+        through_cloud(lit.shade, transmittance(air, transmittance_table, 0.0, dot(normal, sun)));
+    lit.glint = sunlight * lit.reflected * glint_at(looking, facing, sun);
+    lit.on_foam = (sunlight * saturate(dot(normal, sun))) +
+                  sky_under_cloud(lighting, lit.shade,
+                                  transmittance(air, transmittance_table, 0.0, sun_mu) *
+                                      max(sun_mu, 0.0));
+    const float4 clip = mul(push.clip_from_eye, float4(surface.from_eye, 1.0));
+    const float2 uv = ((clip.xy / clip.w) * 0.5) + 0.5;
+    lit.between = aerial_perspective(aerial_volume, uv,
+                                     length(surface.from_eye) * lighting.sky_scale.w,
+                                     lighting.reach.x);
+    return lit;
+}
+
+// Premultiplied: over what's beneath, which has the air between already, the reflection seen
+// through the air, and the glint; and over that the foam, lit as the ground is.
+float4 air_premultiplied(Facing facing, AirLit lit) {
+    const float4 between = lit.between;
+    const float3 radiance =
+        (lit.reflected * ((lit.sky * between.a) + between.rgb)) + (lit.glint * between.a);
+    const float3 foam = (facing.albedo * lit.on_foam * between.a / pi) + between.rgb;
+    return float4(tone_mapped(lerp(radiance, foam, facing.white), lighting.sun_exposure.w),
+                  lerp(lit.reflected, 1.0, facing.white));
+}
+
 // Reflecting the sky as the eye sees it, and the sun's light through the air, seen through the air
 // between, and tone mapped.
 [shader("fragment")]
@@ -350,34 +400,59 @@ float4 fragment_air(Surface surface) : SV_Target {
     }
     const float3 looking = normalize(surface.from_eye);
     const Facing facing = facing_at(surface, looking);
-    const float3 normal = facing.normal;
-    const float reflected = reflected_at(looking, normal);
+    return air_premultiplied(facing, air_lit(surface, facing, looking));
+}
+
+// The light falling on the water under the surface facing `up`, over pi, as the ground's shading
+// has it.
+float3 on_water_at(Shade shade, float3 up) {
     const float3 sun = push.sun_nearest.xyz;
-    const float3 up = push.up_height.xyz;
-    const float scale = lighting.sky_scale.w;
+    const float facing = saturate(dot(up, sun));
+    const float3 clear = transmittance(air, transmittance_table, 0.0, dot(up, sun));
+    return ((through_cloud(shade, clear) * facing) +
+            sky_under_cloud(lighting, shade, clear * facing)) /
+           pi;
+}
 
-    const float sun_mu = dot(sun, up);
-    const Shade shade = shade_at(lighting, cloud_shadow, surface.from_eye);
-    const float3 sky = sky_mirrored(air, lighting, sky_view_table, transmittance_table, shade,
-                                    reflect(looking, normal), up, sun);
-    const float3 sunlight =
-        through_cloud(shade, transmittance(air, transmittance_table, 0.0, dot(normal, sun)));
-    const float3 glint = sunlight * reflected * glint_at(looking, facing, sun);
+// As fragment_air, but over what's drawn beneath, as copied; where the sea lays the water itself,
+// what lies behind the surface is dimmed and filled in by the water between, as deep under the
+// surface drawn as it lies, and where nothing does, deep water.
+[shader("fragment")]
+float4 fragment_through(Surface surface) : SV_Target {
+    if (over_dry(surface)) {
+        discard;
+    }
+    const float3 looking = normalize(surface.from_eye);
+    const Facing facing = facing_at(surface, looking);
+    const AirLit lit = air_lit(surface, facing, looking);
+    const int3 pixel = int3(int2(surface.position.xy), 0);
+    if (!sea_lays_water(lighting)) {
+        const float4 over = air_premultiplied(facing, lit);
+        return float4(over.rgb + ((1.0 - over.a) * behind_colour.Load(pixel).rgb), 1.0);
+    }
+    const float4 between = lit.between;
+    const float exposure = lighting.sun_exposure.w;
+    const float3 up = normalize(surface.normal);
+    const float3 on_water = on_water_at(lit.shade, up);
 
-    const float4 clip = mul(push.clip_from_eye, float4(surface.from_eye, 1.0));
-    const float2 uv = ((clip.xy / clip.w) * 0.5) + 0.5;
-    const float4 between =
-        aerial_perspective(aerial_volume, uv, length(surface.from_eye) * scale, lighting.reach.x);
-    // Premultiplied: over what's beneath, which has the air between already, the reflection seen
-    // through the air, and the glint; and over that the foam, lit as the ground is.
-    const float3 radiance = (reflected * ((sky * between.a) + between.rgb)) + (glint * between.a);
-    const float3 on_foam = (sunlight * saturate(dot(normal, sun))) +
-                           sky_under_cloud(lighting, shade,
-                                           transmittance(air, transmittance_table, 0.0, sun_mu) *
-                                               max(sun_mu, 0.0));
-    const float3 foam = (facing.albedo * on_foam * between.a / pi) + between.rgb;
-    return float4(tone_mapped(lerp(radiance, foam, facing.white), lighting.sun_exposure.w),
-                  lerp(reflected, 1.0, facing.white));
+    const float depth = behind_depth.Load(pixel).x;
+    float3 water = water_colour * on_water;
+    if (depth > 0.0) {
+        const float4 clip = mul(push.clip_from_eye, float4(surface.from_eye, 1.0));
+        const float4 seen = mul(lighting.eye_from_clip, float4(clip.xy / clip.w, depth, 1.0));
+        const float3 behind = seen.xyz / seen.w;
+        // Drawn with the air between it and the eye, which the surface's stands in for.
+        const float3 drawn = max((untoned(behind_colour.Load(pixel).rgb, exposure) - between.rgb) /
+                                     max(between.a, 1e-4),
+                                 0.0);
+        water = through_water(drawn, on_water, dot(surface.from_eye - behind, up),
+                              push.up_height.w, length(behind), dot(-looking, up));
+    }
+    const float3 radiance =
+        between.rgb +
+        (between.a * ((lit.reflected * lit.sky) + lit.glint + ((1.0 - lit.reflected) * water)));
+    const float3 foam = (facing.albedo * lit.on_foam * between.a / pi) + between.rgb;
+    return float4(tone_mapped(lerp(radiance, foam, facing.white), exposure), 1.0);
 }
 
 // The water under the surface as the ground's shading has it where it lies too deep to show: the
