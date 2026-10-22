@@ -34,6 +34,8 @@ using Catch::Matchers::WithinAbs;
 using hog::DVec2;
 using hog::DVec3;
 using hog::render::GridStep;
+using hog::render::ripple_calming;
+using hog::render::ripple_settling;
 using hog::render::ripple_size;
 using hog::render::ripple_spacing;
 using hog::render::RippleBody;
@@ -345,6 +347,7 @@ TEST_CASE("ripples run as fast as waves on deep water, short or long, any way", 
          {DVec2{64.0 * turn, 0.0}, DVec2{0.0, 8.0 * turn}, DVec2{8.0 * turn, 8.0 * turn},
           DVec2{-3.0 * turn, 20.0 * turn}}) {
         lay_kept(*device, *map, train(wavenumber, high, 0.0));
+        map->stir();
         REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
             REQUIRE(map->step(commands, {.shift = {0, 0}, .seconds = seconds, .kept = true},
                               calm->bindings()));
@@ -377,6 +380,8 @@ TEST_CASE("ripples run off the grid's edge rather than back onto it from the oth
     double most = 0.0;
     std::vector<DVec2> ran;
     for (int second = 0; second < 60; ++second) {
+        // However long they run, they're soaked up rather than left still.
+        map->stir();
         REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
             REQUIRE(map->step(commands, {.shift = {0, 0}, .seconds = 1.0, .kept = true},
                               calm->bindings()));
@@ -406,6 +411,7 @@ TEST_CASE("ripples stay on the water as the grid steps under them, and none are 
         }
     }
     lay_kept(*device, *map, laid);
+    map->stir();
     const auto stepped = [&](const GridStep& step) {
         REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
             REQUIRE(map->step(commands, step, calm->bindings()));
@@ -456,6 +462,7 @@ TEST_CASE("ripples stop at the shore", "[render][gpu]") {
             REQUIRE(ocean->step_ripples(commands, view, 0, time, DVec3{0.0}));
         }));
         lay_kept(*device, ocean->ripples(), laid);
+        ocean->ripples().stir();
         time += std::chrono::milliseconds{100};
         REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
             REQUIRE(ocean->step_ripples(commands, view, 0, time, DVec3{0.0}));
@@ -725,5 +732,58 @@ TEST_CASE("rain's rings are drawn on a tile that repeats seamlessly, as many as 
     }
     CHECK(worst < 1e-3);
     CHECK(worst_edge < 1e-3);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("ripples nothing stirs calm, then are left still and no longer stepped until stirred",
+          "[render][gpu]") {
+    const auto device = test_device();
+    auto map = hog::render::RippleMap::create(*device);
+    REQUIRE(map);
+    auto calm = hog::render::CalmSea::create(*device);
+    REQUIRE(calm);
+    const auto stepped = [&](std::span<const RippleBody> bodies = {}) {
+        REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
+            REQUIRE(map->step(commands, {.shift = {0, 0}, .seconds = 1.0, .kept = true},
+                              calm->bindings(), 0, bodies));
+        }));
+        return kept_texels(*device, *map);
+    };
+    // Away from the edge, where they're soaked up.
+    const auto inner_height = [](std::span<const DVec2> ripples) {
+        double sum = 0.0;
+        for (int y = 128; y < 384; ++y) {
+            for (int x = 128; x < 384; ++x) {
+                sum += ripples[index_of(x, y)].x * ripples[index_of(x, y)].x;
+            }
+        }
+        return sum;
+    };
+    const double turn = 2.0 * std::numbers::pi / (ripple_size * ripple_spacing);
+    const std::vector<DVec2> laid = train({64.0 * turn, 0.0}, 0.02, 0.0);
+    lay_kept(*device, *map, laid);
+    map->stir();
+    std::vector<DVec2> ran;
+    double before_calming = 0.0;
+    const int calming_from = static_cast<int>(ripple_settling - ripple_calming);
+    for (int second = 1; second < static_cast<int>(ripple_settling); ++second) {
+        ran = stepped();
+        if (second == calming_from) {
+            before_calming = inner_height(ran);
+        }
+    }
+    CHECK(before_calming > inner_height(laid) * 0.5);
+    // Calmed before they're left still, so they're never seen to vanish.
+    CHECK(inner_height(ran) < before_calming * 0.01);
+    ran = stepped();
+    CHECK(std::ranges::all_of(ran, [](DVec2 ripple) { return ripple == DVec2{0.0}; }));
+    // Left still, ripples aren't stepped, even those laid on afresh.
+    lay_kept(*device, *map, laid);
+    const std::vector<glm::vec2> as_laid{laid.begin(), laid.end()};
+    const std::vector<DVec2> kept{as_laid.begin(), as_laid.end()};
+    CHECK(stepped() == kept);
+    // Until a body stirs them.
+    const RippleBody wading{.feet = {256.0F, 256.0F}, .above = -0.5F};
+    CHECK(stepped(std::span{&wading, 1}) != kept);
     CHECK(device->validation_errors() == 0);
 }

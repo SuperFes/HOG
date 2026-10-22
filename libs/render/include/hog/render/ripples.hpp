@@ -38,6 +38,11 @@ inline constexpr double ripple_shallowest = 0.05;
 // it, as though pressing on it; only so many bodies do so at once.
 inline constexpr double ripple_push = 0.05;
 inline constexpr std::size_t ripple_most_bodies = 16;
+// Once nothing's stirred them for so many seconds, ripples are left still and no longer stepped;
+// over the last so many of those they're calmed this fast, 1/s, so none are seen to vanish.
+inline constexpr double ripple_settling = 20.0;
+inline constexpr double ripple_calming = 5.0;
+inline constexpr double ripple_calming_rate = 1.0;
 
 // Rain rings the water where each drop falls, drawn where they'd be seen: each from a random
 // point of a cell so many metres across, of so many layers of cells laid over each other, a ring
@@ -84,11 +89,14 @@ public:
 
     // Records stepping the ripples on as `step` has the grid move, over the sea as `sea` has it,
     // its waves laying the grid as a GridPlacing does, as the frame `frame`; pushed by `bodies`
-    // where they cross the surface, those past ripple_most_bodies left out. Leaves them ready for
-    // any shader to sample.
+    // where they cross the surface, those past ripple_most_bodies left out, any of them stirring
+    // the water. Leaves them ready for any shader to sample.
     [[nodiscard]] Result<> step(VkCommandBuffer commands, const GridStep& step,
                                 const SeaBindings& sea, std::uint32_t frame = 0,
                                 std::span<const RippleBody> bodies = {});
+
+    // Keeps the ripples stepping as though something had just stirred the water.
+    void stir() noexcept { calm_for_ = 0.0; }
 
     // What's kept from the last step, ready to sample: x how high the water stands, y its
     // potential.
@@ -105,10 +113,13 @@ private:
     TrackedImage spectrum_use_;
     Sampler sampler_;
     std::vector<Buffer> bodies_;
+    // Seconds since anything stirred the water, and whether it's been left still since.
+    double calm_for_ = ripple_settling;
+    bool still_ = true;
 
     void clear(VkCommandBuffer commands);
-    void record(VkCommandBuffer commands, glm::ivec2 shift, double seconds, const SeaBindings& sea,
-                VkBuffer bodies);
+    void record(VkCommandBuffer commands, glm::ivec2 shift, double seconds, double calming,
+                const SeaBindings& sea, VkBuffer bodies);
 };
 
 // Rain's rings on the water, drawn on a tile as the sea lays them.

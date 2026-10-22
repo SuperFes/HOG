@@ -149,6 +149,16 @@ Result<> RippleMap::step(VkCommandBuffer commands, const GridStep& step, const S
         laid.tall.at(i) = {body.tall, 0.0F};
     }
     laid.count.x = static_cast<int>(count);
+    calm_for_ = count > 0 ? 0.0 : calm_for_ + step.seconds;
+    if (calm_for_ >= ripple_settling) {
+        if (!still_) {
+            clear(commands);
+            still_ = true;
+        }
+        return {};
+    }
+    still_ = false;
+    const double calming = calm_for_ > ripple_settling - ripple_calming ? ripple_calming_rate : 0.0;
     const Buffer& buffer = bodies_.at(frame);
     std::memcpy(buffer.mapped().data(), &laid, sizeof(laid));
     if (auto flushed = buffer.flush(); !flushed) {
@@ -158,7 +168,8 @@ Result<> RippleMap::step(VkCommandBuffer commands, const GridStep& step, const S
         std::clamp(static_cast<int>(std::ceil(step.seconds / ripple_step)), 1, ripple_most_steps);
     const double seconds = step.seconds / steps;
     for (int i = 0; i < steps; ++i) {
-        record(commands, i == 0 ? step.shift : glm::ivec2{0}, seconds, sea, buffer.handle());
+        record(commands, i == 0 ? step.shift : glm::ivec2{0}, seconds, calming, sea,
+               buffer.handle());
     }
     state_use_.use_as(commands, image_use::sampled);
     return {};
@@ -172,10 +183,11 @@ void RippleMap::clear(VkCommandBuffer commands) {
     state_use_.use_as(commands, image_use::sampled);
 }
 
-void RippleMap::record(VkCommandBuffer commands, glm::ivec2 shift, double seconds,
+void RippleMap::record(VkCommandBuffer commands, glm::ivec2 shift, double seconds, double calming,
                        const SeaBindings& sea, VkBuffer bodies) {
-    const Push push{.shift = {shift, 1, 0},
-                    .timing = {static_cast<float>(seconds), 0.0F, 0.0F, 0.0F}};
+    const Push push{
+        .shift = {shift, 1, 0},
+        .timing = {static_cast<float>(seconds), static_cast<float>(calming), 0.0F, 0.0F}};
     for (const auto& [pipeline, groups] :
          {std::pair{&rows_, ripple_size}, std::pair{&columns_, column_pairs},
           std::pair{&settle_, ripple_size}}) {

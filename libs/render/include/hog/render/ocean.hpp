@@ -196,6 +196,7 @@ public:
     Result<> step_ripples(VkCommandBuffer commands, const OceanView& view, std::uint32_t frame,
                           GameTime time, DVec3 drift, std::span<const Capsule> bodies = {});
     [[nodiscard]] const RippleMap& ripples() const noexcept { return ripples_; }
+    [[nodiscard]] RippleMap& ripples() noexcept { return ripples_; }
     [[nodiscard]] const RainTile& rain() const noexcept { return rain_; }
 
 private:

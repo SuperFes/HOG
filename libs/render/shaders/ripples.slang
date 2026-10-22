@@ -27,7 +27,7 @@ struct Push {
     // xy how many texels the grid moved by, as hog::render::GridStep's shift; z whether anything
     // is kept.
     int4 shift;
-    // x how many seconds the step lasts.
+    // x how many seconds the step lasts, and y how fast ripples everywhere are calmed, 1/s.
     float4 timing;
 };
 
@@ -228,11 +228,11 @@ void columns_main(uint3 thread: SV_GroupThreadID, uint3 group: SV_GroupID) {
 }
 
 // How much of a ripple at `texel` is kept over a step: less towards the grid's edge, where they're
-// soaked up, and none on ground or water too shallow to ripple.
+// soaked up, or as they're calmed, and none on ground or water too shallow to ripple.
 float kept_at(int2 texel) {
     const int2 inside = min(texel, int2(ripple_size - 1) - texel);
     const float edge = saturate(1.0 - ((float(min(inside.x, inside.y)) + 0.5) / ripple_edge));
-    float kept = exp(-ripple_soaking * edge * edge * push.timing.x);
+    float kept = exp(-((ripple_soaking * edge * edge) + push.timing.y) * push.timing.x);
     if (waves.ripple_anchor.w > 0.0) {
         const float3 rest = grid_rest(waves, waves.ripple_anchor, waves.ripple_east,
                                       waves.ripple_north, float2(texel) + 0.5);
