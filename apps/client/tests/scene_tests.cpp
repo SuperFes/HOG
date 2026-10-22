@@ -648,10 +648,16 @@ TEST_CASE("a lake, to look at", "[.look]") {
         {.drift = {16.0F, 6.0F}, .wind = {9.4F, 3.5F}, .swells = {none, none}, .current = {}});
     const hog::client::Forecast gale = everywhere(
         {.drift = {30.0F, 11.0F}, .wind = {17.0F, 6.3F}, .swells = {none, none}, .current = {}});
-    for (const auto& [name, altitude, pitch] :
-         {std::tuple{"low", 2.0, -0.08}, std::tuple{"high", 60.0, -0.45},
-          std::tuple{"far", 400.0, -0.35}}) {
-        Shot shot = looking_north(middle, level + altitude, pitch);
+    const double radius = world().geology().planet_radius();
+    const hog::DVec3 pole{0.0, 0.0, 1.0};
+    const hog::DVec3 north = glm::normalize(pole - (middle * glm::dot(middle, pole)));
+    // The last from well beyond the depths kept round the eye, to see the lake as the ground has
+    // it.
+    for (const auto& [name, altitude, pitch, back] :
+         {std::tuple{"low", 2.0, -0.08, 0.0}, std::tuple{"high", 60.0, -0.45, 0.0},
+          std::tuple{"far", 400.0, -0.35, 0.0}, std::tuple{"distant", 3'000.0, -0.24, 12'000.0}}) {
+        Shot shot = looking_north(glm::normalize(middle - (north * (back / radius))),
+                                  level + altitude, pitch);
         const hog::client::Forecast calm = everywhere(
             {.drift = {0.0F, 0.0F}, .wind = {0.0F, 0.0F}, .swells = {none, none}, .current = {}});
         for (const auto& [sea, forecast] :

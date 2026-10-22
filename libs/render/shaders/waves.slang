@@ -186,6 +186,12 @@ public float2 still_water_at(Waves waves, Sampler2DArray depths, float3 point) {
         .zy;
 }
 
+// How far inside the shore grids `point`, from the eye, lies, as shore_inside has it.
+public float shore_covering(Waves waves, float3 point) {
+    return shore_inside(waves.shore_anchor, waves.shore_east, waves.shore_north,
+                        waves.count_left_radius.z, point);
+}
+
 // Ground the grids find this far above a lake's level is taken as dry, though its level is kept
 // over it: between their texels, the level may run out over lower ground.
 static const float lake_guard = 1.0; // metres

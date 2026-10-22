@@ -1,5 +1,6 @@
 module water;
 
+import atmosphere;
 import bend;
 
 // Seawater, as libs/terrain's sea.hpp has it: change both together.
@@ -17,6 +18,16 @@ public static const float least_facing = 0.1;
 public float reflected_at(float3 looking, float3 normal) {
     const float facing = abs(dot(looking, normal));
     return facing_reflection + ((1.0 - facing_reflection) * pow(1.0 - facing, 5.0));
+}
+
+// How much of the sun's light water facing `normal`, its mean square slope `roughness` too fine to
+// draw, glints towards the eye, but for the reflection: a normalised Blinn-Phong lobe as wide as it's
+// rough.
+public float glint_lobe(float3 looking, float3 normal, float roughness, float3 sun) {
+    const float sharpness = (2.0 / roughness) - 2.0;
+    const float3 halfway = normalize(sun - looking);
+    const float lit = saturate(dot(normal, sun) * 10.0);
+    return lit * ((sharpness + 8.0) / (8.0 * pi)) * pow(saturate(dot(normal, halfway)), sharpness);
 }
 
 // `lit` at a point `depth` metres under the sea (negative above it), `along` metres from an eye

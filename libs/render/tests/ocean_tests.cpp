@@ -1293,6 +1293,7 @@ struct ShoreFound {
     double still;
     double fetch;
     double level;
+    double covered; // how far inside the grids
 };
 
 // Of fields over the plane of `frame`, each by metres east and north on it: of the sea's depths,
@@ -1375,7 +1376,7 @@ std::vector<ShoreFound> probe_shore(hog::render::Device& device,
     auto questions = hog::render::make_filled_buffer(device, std::as_bytes(std::span{asked}),
                                                      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
     REQUIRE(questions);
-    std::vector<std::array<float, 4>> found(points.size());
+    std::vector<std::array<float, 4>> found(points.size() * 2);
     auto answers =
         hog::render::make_buffer(device, std::span{found}.size_bytes(),
                                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, hog::render::Memory::Readback);
@@ -1410,11 +1411,13 @@ std::vector<ShoreFound> probe_shore(hog::render::Device& device,
     std::memcpy(found.data(), answers->mapped().data(), std::span{found}.size_bytes());
     std::vector<ShoreFound> shore_found;
     shore_found.reserve(found.size());
-    for (const auto& at : found) {
+    for (std::size_t i = 0; i < points.size(); ++i) {
+        const auto& at = found[2 * i];
         shore_found.push_back({.depth = static_cast<double>(at[0]),
                                .still = static_cast<double>(at[1]),
                                .fetch = static_cast<double>(at[2]),
-                               .level = static_cast<double>(at[3])});
+                               .level = static_cast<double>(at[3]),
+                               .covered = static_cast<double>(found[(2 * i) + 1][0])});
     }
     return shore_found;
 }
@@ -1445,6 +1448,13 @@ TEST_CASE("the sea's shaders find the depths round the eye", "[render][ocean][gp
     CHECK_THAT(found[4].depth, WithinAbs(1000.0 + ((depth_at(points[4]) - 1000.0) * inside), 1.0));
     CHECK(found[5].depth == 1000.0);
     CHECK(found[6].depth == 1000.0);
+    // The ground draws lakes beyond the grids, fading them in as the grids fade out.
+    for (std::size_t i = 0; i < 4; ++i) {
+        CHECK(found[i].covered == 1.0);
+    }
+    CHECK_THAT(found[4].covered, WithinAbs(inside, 1e-4));
+    CHECK(found[5].covered == 0.0);
+    CHECK(found[6].covered == 0.0);
     CHECK(device->validation_errors() == 0);
 }
 

@@ -373,6 +373,25 @@ public float3 sky_under_cloud(Lighting lighting, Shade shade, float3 level_sunli
     return (lighting.sky_scale.rgb * shade.sky) + (level_sunlight * shade.scattered);
 }
 
+// The sky water shows along `mirrored`, read from the eye's sky-view table as if seen from the eye,
+// whose up is `up`: where cloud hides it, the cloud's underside, as bright as the light it lets
+// through. Reflected down, a view meets another wave, as bright as the sky low down.
+public float3 sky_mirrored(Air air, Lighting lighting, Sampler2D sky_view, Sampler2D table,
+                           Shade shade, float3 mirrored, float3 up, float3 sun) {
+    const float mu = max(dot(mirrored, up), 0.0);
+    const float sun_mu = dot(sun, up);
+    const float3 flat_view = mirrored - (up * mu);
+    const float3 flat_sun = sun - (up * sun_mu);
+    const float across = length(flat_view) * length(flat_sun);
+    const float cos_azimuth = across > 1e-6 ? dot(flat_view, flat_sun) / across : 1.0;
+    const float3 clear_sky =
+        sky_view.SampleLevel(sky_view_uv(air, lighting.up_height.w, mu, cos_azimuth), 0.0).rgb;
+    const float3 under =
+        sky_under_cloud(lighting, shade, transmittance(air, table, 0.0, sun_mu) * max(sun_mu, 0.0)) /
+        pi;
+    return lerp(under, clear_sky, shade.open);
+}
+
 public static const uint aerial_size = 32;
 public static const uint aerial_slices = 32;
 // After the slices, a layer holding only what the haze adds and lets through along each view to the

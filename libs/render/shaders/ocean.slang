@@ -234,11 +234,7 @@ Facing facing_at(Surface surface, float3 looking) {
 // How much of the sun's light the glint reflects towards the eye, but for the reflection: a
 // normalised Blinn-Phong lobe as wide as the surface is rough.
 float glint_at(float3 looking, Facing facing, float3 sun) {
-    const float sharpness = (2.0 / facing.roughness) - 2.0;
-    const float3 halfway = normalize(sun - looking);
-    const float lit = saturate(dot(facing.normal, sun) * 10.0);
-    return lit * ((sharpness + 8.0) / (8.0 * pi)) *
-           pow(saturate(dot(facing.normal, halfway)), sharpness);
+    return glint_lobe(looking, facing.normal, facing.roughness, sun);
 }
 
 [shader("fragment")]
@@ -272,27 +268,12 @@ float4 fragment_air(Surface surface) : SV_Target {
     const float reflected = reflected_at(looking, normal);
     const float3 sun = push.sun_nearest.xyz;
     const float3 up = push.up_height.xyz;
-    const float height = lighting.up_height.w;
     const float scale = lighting.sky_scale.w;
 
-    // The reflected view, read from the eye's sky-view table as if seen from the eye.
-    const float3 mirrored = reflect(looking, normal);
-    // Reflected down, it meets another wave, as bright as the sky low down.
-    const float mu = max(dot(mirrored, up), 0.0);
     const float sun_mu = dot(sun, up);
-    const float3 flat_view = mirrored - (up * mu);
-    const float3 flat_sun = sun - (up * sun_mu);
-    const float across = length(flat_view) * length(flat_sun);
-    const float cos_azimuth = across > 1e-6 ? dot(flat_view, flat_sun) / across : 1.0;
-    const float3 clear_sky =
-        sky_view_table.SampleLevel(sky_view_uv(air, height, mu, cos_azimuth), 0.0).rgb;
-    // Where cloud hides the sky, the cloud's underside, as bright as the light it lets through.
     const Shade shade = shade_at(lighting, cloud_shadow, surface.from_eye);
-    const float3 under =
-        sky_under_cloud(lighting, shade,
-                        transmittance(air, transmittance_table, 0.0, sun_mu) * max(sun_mu, 0.0)) /
-        pi;
-    const float3 sky = lerp(under, clear_sky, shade.open);
+    const float3 sky = sky_mirrored(air, lighting, sky_view_table, transmittance_table, shade,
+                                    reflect(looking, normal), up, sun);
     const float3 sunlight =
         through_cloud(shade, transmittance(air, transmittance_table, 0.0, dot(normal, sun)));
     const float3 glint = sunlight * reflected * glint_at(looking, facing, sun);

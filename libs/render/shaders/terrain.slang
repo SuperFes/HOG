@@ -54,6 +54,8 @@ struct Settings {
 // The sea, as ocean.slang reads it, for how high it stands over the ground.
 [[vk::binding(7, 0)]] ConstantBuffer<Waves> sea;
 [[vk::binding(8, 0)]] Sampler2DArray shore_depths;
+// When lit through the air, for what water mirrors.
+[[vk::binding(9, 0)]] Sampler2D sky_view_table;
 
 struct Vertex {
     [[vk::location(0)]] float3 position; // metres from the patch's origin
@@ -101,6 +103,12 @@ static const float least_biome = 1.0 / 256.0;
 
 // A year that keeps every leaf green, for ground lit without the air's.
 static const float4 midsummer = float4(24.0, 24.0, 0.0, 0.0);
+
+// As planet::Biome::Lake.
+static const uint lake_biome = 13;
+// The mean square slope of water too far off to draw its waves: a light breeze's, as Cox and Munk
+// measured it.
+static const float far_water_roughness = 0.02;
 
 static const uint pine = 0;
 static const uint oak = 1;
@@ -228,6 +236,17 @@ float lake_level(Ground ground) {
 float sea_level(Ground ground) {
     const float lake = lake_level(ground);
     return lake > 0.0 ? lake : level_now(shore_level(ground));
+}
+
+// How much of the ground is a lake beyond the shore grids, which draw the lakes within them as the
+// sea: its share of the lake's biome, sharpened to an edge half way, fading in over the grids' edge.
+float far_lake(Ground ground) {
+    if (settings.tiling.z <= 0.0) {
+        return 0.0;
+    }
+    const float share = ground.biomes[lake_biome / 4][lake_biome % 4];
+    const float edge = saturate(((share - 0.5) / max(fwidth(share), 1e-4)) + 0.5);
+    return edge * (1.0 - shore_covering(sea, ground.from_eye));
 }
 
 // How high the eye stands over the water at the ground: never under a lake, which it's only taken
@@ -454,6 +473,7 @@ Shaded fragment_main(Ground ground) {
 Shaded fragment_air(Ground ground) {
     const float3 sun = push.sun.xyz;
     const float scale = lighting.sky_scale.w;
+    const float far = far_lake(ground);
     const float3 normal = normalize(ground.normal);
     const float3 up = up_at(ground);
     const float3 clear =
@@ -466,13 +486,29 @@ Shaded fragment_air(Ground ground) {
         (sunlight * saturate(dot(normal, sun))) + (sky * (0.5 + (0.5 * dot(normal, up))));
     // The water over ground beneath the sea, lit where the eye looks into it.
     float3 on_water = float3(0.0);
-    if (ground.height < sea_level(ground) || eye_above(ground) < 0.0) {
+    if (ground.height < sea_level(ground) || eye_above(ground) < 0.0 || far > 0.0) {
         const float facing = saturate(dot(end.up, sun));
         const float3 clear_water = transmittance(air, transmittance_table, 0.0, dot(end.up, sun));
         on_water = (through_cloud(shade, clear_water) * facing) +
                    sky_under_cloud(lighting, shade, clear_water * facing);
     }
-    const float3 radiance = shaded(ground, normal, on_ground, on_water, lighting.year) / pi;
+    float3 radiance = shaded(ground, normal, on_ground, on_water, lighting.year) / pi;
+    if (far > 0.0) {
+        // Too far to see into, a lake is its deep water's colour, mirroring the sky and the sun
+        // as the sea does; facing up from the faked sphere the sea is drawn on.
+        const float3 looking = normalize(ground.drawn);
+        const float3 surface_up =
+            normalize(ground.drawn + (push.bend_up.xyz * (push.bend_radii.y + push.bend_up.w)));
+        const float reflected = reflected_at(looking, surface_up);
+        const float3 sky = sky_mirrored(air, lighting, sky_view_table, transmittance_table, shade,
+                                        reflect(looking, surface_up), push.bend_up.xyz, sun);
+        const float3 glint =
+            through_cloud(shade, transmittance(air, transmittance_table, 0.0,
+                                               dot(surface_up, sun))) *
+            glint_lobe(looking, surface_up, far_water_roughness, sun);
+        const float3 water = (water_colour * on_water / pi) * (1.0 - reflected);
+        radiance = lerp(radiance, water + (reflected * (sky + glint)), far);
+    }
 
     const float4 clip = mul(push.clip_from_eye, float4(ground.drawn, 1.0));
     const float2 uv = ((clip.xy / clip.w) * 0.5) + 0.5;

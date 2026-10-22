@@ -66,6 +66,12 @@ public float3 shore_waters(Sampler2DArray depths, float4 anchor, float4 east, fl
     return waters;
 }
 
+// How far inside the grids `rest` lies, laid as shore_at has them: 1 well inside, fading to none
+// over the coarsest layer's edge.
+public float shore_inside(float4 anchor, float4 east, float4 north, float radius, float3 rest) {
+    return shore_at(anchor, east, north, radius, rest).inside[1];
+}
+
 // Metres of sea under `rest`, as shore_waters finds it.
 public float shore_depth(Sampler2DArray depths, float4 anchor, float4 east, float4 north,
                          float radius, float3 rest) {

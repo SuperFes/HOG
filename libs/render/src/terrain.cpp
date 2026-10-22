@@ -104,7 +104,8 @@ constexpr std::array air_descriptors{
     binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
     binding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
     descriptors[2],
-    descriptors[3]};
+    descriptors[3],
+    binding(9, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)};
 
 // The near tile's size, the far one's, and 1 if ground below sea level is seen through water; then
 // what each biome's material averages to, in linear light. Then the woods, as terrain.slang reads
@@ -414,6 +415,7 @@ void Terrain::draw(VkCommandBuffer commands, VkExtent2D extent, const TerrainPoo
         push_sampled_image(commands, pipeline_, 4, view.air.transmittance, view.air.sampler);
         push_sampled_image(commands, pipeline_, 5, view.air.aerial, view.air.sampler);
         push_sampled_image(commands, pipeline_, 6, view.air.cloud_shadow, view.air.sampler);
+        push_sampled_image(commands, pipeline_, 9, view.air.sky_view, view.air.sampler);
     }
     const bool sea = view.sea.waves != VK_NULL_HANDLE;
     push_uniform_buffer(commands, pipeline_, sea_binding,
