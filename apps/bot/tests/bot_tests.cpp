@@ -4,6 +4,7 @@
 #include <hog/net/server.hpp>
 #include <hog/planet/planet_config.hpp>
 #include <hog/planet/world.hpp>
+#include <hog/testing/ports.hpp>
 #include <hog/testing/temporary_directory.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -17,7 +18,6 @@
 #include <fstream>
 #include <functional>
 #include <memory>
-#include <random>
 #include <thread>
 #include <utility>
 
@@ -38,10 +38,8 @@ std::unique_ptr<hog::app::Server> serving(const std::filesystem::path& directory
     config.world = directory / "var" / "world.db";
     config.planet = directory / "planet.toml";
     config.metrics_interval = 0s;
-    std::random_device random;
-    const auto first = static_cast<std::uint16_t>(40'000 + (random() % 20'000));
-    for (std::uint16_t port = first; port < first + 100; ++port) {
-        config.net.port = port;
+    for (int tries = 0; tries < hog::testing::port_tries; ++tries) {
+        config.net.port = hog::testing::random_port();
         auto server = hog::app::Server::open(config, start);
         REQUIRE(server);
         if ((*server)->players() != nullptr) {

@@ -1,6 +1,7 @@
 # Helpers shared by every library's unit tests; never linked into shipping targets.
 add_library(hog_testing
     src/assertion_guard.cpp
+    src/ports.cpp
     src/quick.cpp)
 add_library(hog::testing ALIAS hog_testing)
 
@@ -13,4 +14,5 @@ if(MSVC)
 endif()
 
 hog_add_tests(hog_testing
+    tests/ports_tests.cpp
     tests/quick_tests.cpp)

@@ -6,6 +6,7 @@
 #include <hog/probe/channel.hpp>
 #include <hog/protocol/messages.hpp>
 #include <hog/server/survey.hpp>
+#include <hog/testing/ports.hpp>
 #include <hog/testing/temporary_directory.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -26,7 +27,6 @@
 #include <numbers>
 #include <numeric>
 #include <optional>
-#include <random>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -921,12 +921,10 @@ private:
     std::function<void()> visit_;
 };
 
-// Open on a free players' port. Each tried apart from the last, since Windows reserves ports in
-// blocks, and below its dynamic range, where most of them lie.
+// Open on a free players' port.
 std::unique_ptr<Server> playing(hog::server::ServerConfig config) {
-    std::random_device random;
-    for (int tries = 0; tries < 20; ++tries) {
-        config.net.port = static_cast<std::uint16_t>(20'000 + (random() % 29'000));
+    for (int tries = 0; tries < hog::testing::port_tries; ++tries) {
+        config.net.port = hog::testing::random_port();
         auto server = opened(config);
         if (server->players() != nullptr) {
             return server;

@@ -3,6 +3,7 @@
 #include <hog/client/session.hpp>
 #include <hog/net/server.hpp>
 #include <hog/net/simulation.hpp>
+#include <hog/testing/ports.hpp>
 #include <hog/testing/temporary_directory.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -20,7 +21,6 @@
 #include <functional>
 #include <memory>
 #include <optional>
-#include <random>
 #include <string>
 #include <thread>
 #include <utility>
@@ -46,16 +46,9 @@ WorldPosition along(double metres) {
     return WorldPosition{DVec3{radius + 2.0, metres, 0.0}};
 }
 
-// A port from a random start, so tests running side by side rarely meet.
-std::uint16_t random_port() {
-    std::random_device random;
-    return static_cast<std::uint16_t>(40'000 + (random() % 20'000));
-}
-
 net::Server listening() {
-    const std::uint16_t first = random_port();
-    for (std::uint16_t port = first; port < first + 100; ++port) {
-        if (auto server = net::Server::listen(port)) {
+    for (int tries = 0; tries < hog::testing::port_tries; ++tries) {
+        if (auto server = net::Server::listen(hog::testing::random_port())) {
             return std::move(*server);
         }
     }
@@ -451,9 +444,8 @@ std::unique_ptr<hog::app::Server> serving(const std::filesystem::path& directory
     config.world = directory / "var" / "world.db";
     config.planet = directory / "planet.toml";
     config.metrics_interval = 0s;
-    const std::uint16_t first = random_port();
-    for (std::uint16_t port = first; port < first + 100; ++port) {
-        config.net.port = port;
+    for (int tries = 0; tries < hog::testing::port_tries; ++tries) {
+        config.net.port = hog::testing::random_port();
         auto server = hog::app::Server::open(config, start);
         REQUIRE(server);
         if ((*server)->players() != nullptr) {

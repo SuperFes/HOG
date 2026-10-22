@@ -127,11 +127,12 @@ CPMAddPackage(
             "USE_CRYPTO ${hog_gns_crypto}" "Protobuf_USE_STATIC_LIBS ON")
 # Its debug builds otherwise reach for libstdc++'s <debug/map>, which libc++ doesn't have.
 target_compile_definitions(GameNetworkingSockets_s PRIVATE STEAMNETWORKINGSOCKETS_SNP_PARANOIA=1)
-# It calls its packet callbacks through a pointer taking void *, which UBSan's function check
-# refuses. Only its C++, as its C may be built by a compiler without that check.
+# It calls its packet callbacks through a pointer taking void *, and writes packet headers through
+# unaligned integer pointers, which UBSan's function and alignment checks refuse. Only its C++, as
+# its C may be built by a compiler without the function check.
 if(HOG_SANITIZE AND "undefined" IN_LIST HOG_SANITIZE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     target_compile_options(GameNetworkingSockets_s
-                           PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-sanitize=function>)
+                           PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-sanitize=function,alignment>)
 endif()
 
 # Ed25519 for connect tokens; BSD-2-Clause or CC0. Two C files, built by hog_login.

@@ -1,6 +1,7 @@
 #include <hog/net/client.hpp>
 #include <hog/net/server.hpp>
 #include <hog/net/simulation.hpp>
+#include <hog/testing/ports.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -11,7 +12,6 @@
 #include <format>
 #include <functional>
 #include <optional>
-#include <random>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -85,12 +85,10 @@ struct Pair {
     [[nodiscard]] ConnectionId connection() const { return at_server.connected.front().connection; }
 };
 
-// A server on a free port, from a random start so tests run side by side rarely meet.
+// A server on a free port.
 Server listening() {
-    std::random_device random;
-    const auto first = static_cast<std::uint16_t>(40'000 + (random() % 20'000));
-    for (std::uint16_t port = first; port < first + 100; ++port) {
-        if (auto server = Server::listen(port)) {
+    for (int tries = 0; tries < hog::testing::port_tries; ++tries) {
+        if (auto server = Server::listen(hog::testing::random_port())) {
             return std::move(*server);
         }
     }
