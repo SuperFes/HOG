@@ -4,6 +4,7 @@
 #include <hog/terrain/patch.hpp>
 #include <hog/terrain/selection.hpp>
 #include <hog/terrain/stream.hpp>
+#include <hog/testing/quick.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -225,7 +226,7 @@ TEST_CASE("turning on the spot never turns what's drawn coarser", "[terrain][str
     std::deque<std::pair<int, CellId>> baking;
     std::set<CellId> before;
     int coarsened = 0;
-    for (int frame = 0; frame < 400; ++frame) {
+    for (int frame = 0; frame < hog::testing::full_or(400, 200); ++frame) {
         const double bearing = turn * frame;
         const hog::DVec3 level = (east * std::cos(bearing)) + (north * std::sin(bearing));
         const hog::DVec3 forward = (level * std::cos(pitch)) - (up * std::sin(pitch));

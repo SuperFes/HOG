@@ -3,13 +3,16 @@
 #include <hog/planet/neighbors.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tile.hpp>
+#include <hog/testing/quick.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <catch2/generators/catch_generators_adapters.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <set>
 #include <string_view>
@@ -126,7 +129,7 @@ TEST_CASE("the poles are colder than the equator", "[planet][climate]") {
 }
 
 TEST_CASE("temperature falls with height", "[planet][climate]") {
-    const std::uint64_t seed = GENERATE(1U, 2U);
+    const std::uint64_t seed = GENERATE(take(hog::testing::cases(2), values({1U, 2U})));
     const Climate climate{planet(seed)};
     Mean lowland;
     Mean highland;
@@ -192,7 +195,7 @@ TEST_CASE("the interior is drier than the coast", "[planet][climate]") {
 
 TEST_CASE("biomes cover the land in plausible shares", "[planet][climate]") {
     std::set<Biome> seen;
-    for (std::uint64_t seed = 1; seed <= 4; ++seed) {
+    for (std::uint64_t seed = 1; seed <= hog::testing::full_or<std::uint64_t>(4, 2); ++seed) {
         INFO("seed " << seed);
         const Climate climate{planet(seed)};
         std::array<double, hog::planet::biome_count> areas{};
@@ -328,7 +331,9 @@ TEST_CASE("glaciers cap high ground that stays cold", "[planet][climate]") {
 TEST_CASE("ground under a lake is lake", "[planet][climate]") {
     const Climate climate{planet(1)};
     int lakes = 0;
-    for (const CellId cell : cells_at(9)) {
+    const std::vector<CellId> cells = cells_at(9);
+    for (std::size_t at = 0; at < cells.size(); at += hog::testing::full_or<std::size_t>(1, 4)) {
+        const CellId cell = cells[at];
         const auto water = climate.terrain().lake(cell);
         REQUIRE((climate.biome(cell) == Biome::Lake) == water.has_value());
         if (water) {

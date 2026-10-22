@@ -3,6 +3,7 @@
 #include <hog/planet/world.hpp>
 #include <hog/sim/weather.hpp>
 #include <hog/sim/wildlife.hpp>
+#include <hog/testing/quick.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -59,15 +60,15 @@ Species grazer() {
     return deer;
 }
 
-WildlifeConfig config(std::vector<Species> species) {
-    WildlifeConfig config{.level = level};
+WildlifeConfig config(std::vector<Species> species, int grid_level = level) {
+    WildlifeConfig config{.level = grid_level};
     config.ecology.forage.capacity[at(Biome::Grassland)] = 100'000.0;
     config.ecology.species = std::move(species);
     return config;
 }
 
-std::vector<Habitat> grassland() {
-    return std::vector<Habitat>(hog::sim::CellGrid{level}.size(), Habitat{});
+std::vector<Habitat> grassland(int grid_level = level) {
+    return std::vector<Habitat>(hog::sim::CellGrid{grid_level}.size(), Habitat{});
 }
 
 // Weather that stays the same everywhere.
@@ -75,8 +76,8 @@ struct Steady {
     std::vector<float> temperature;
     std::vector<float> precipitation;
 
-    explicit Steady(float warmth = 15.0F, float wet = 3.0F)
-        : temperature(hog::sim::CellGrid{level}.size(), warmth),
+    explicit Steady(float warmth = 15.0F, float wet = 3.0F, int grid_level = level)
+        : temperature(hog::sim::CellGrid{grid_level}.size(), warmth),
           precipitation(temperature.size(), wet) {}
 
     [[nodiscard]] Conditions conditions() const {
@@ -226,8 +227,9 @@ TEST_CASE("predators and prey rise and fall over years", "[sim][wildlife]") {
         .starving = 0.02,
     };
     wolf.habitat[at(Biome::Grassland)] = 1.0;
-    Wildlife wildlife{config({deer, wolf}), grassland(), march_equinox};
-    const Steady weather;
+    const int coarse = hog::testing::full_or(level, level - 1);
+    Wildlife wildlife{config({deer, wolf}, coarse), grassland(coarse), march_equinox};
+    const Steady weather{15.0F, 3.0F, coarse};
     std::vector<double> deer_years;
     std::vector<double> wolf_years;
     for (int year = 1; year <= 40; ++year) {

@@ -5,9 +5,11 @@
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tangent_frame.hpp>
 #include <hog/testing/assertion_guard.hpp>
+#include <hog/testing/quick.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <catch2/generators/catch_generators_adapters.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -82,7 +84,7 @@ double square_kilometres(const std::vector<CellId>& cells, double planet_radius)
 
 TEST_CASE("the starting islands are separate and 10 to 60 square kilometres",
           "[planet][archipelago]") {
-    const std::uint64_t seed = GENERATE(1U, 2U, 3U, 4U);
+    const std::uint64_t seed = GENERATE(take(hog::testing::cases(4), values({1U, 2U, 3U, 4U})));
     const Elevation terrain{planet(seed)};
     const auto islands = terrain.archipelago().islands();
     REQUIRE(islands.size() >= Archipelago::min_islands);
@@ -186,7 +188,7 @@ TEST_CASE("the starting islands sit in temperate open ocean", "[planet][archipel
 }
 
 TEST_CASE("the starting islands are mostly habitable", "[planet][archipelago]") {
-    const std::uint64_t seed = GENERATE(1U, 2U, 3U, 4U);
+    const std::uint64_t seed = GENERATE(take(hog::testing::cases(4), values({1U, 2U, 3U, 4U})));
     const hog::planet::Climate climate{planet(seed)};
     double land = 0.0;
     double habitable = 0.0;
@@ -226,7 +228,7 @@ TEST_CASE("the starting islands rise smoothly from the sea floor", "[planet][arc
     // Cells here are about 2.7 m across; flanks of 15 degrees or so climb under 1 m per cell,
     // steepening off rugged coasts but never into cliffs or seams.
     constexpr int fine_level = 16;
-    const std::uint64_t seed = GENERATE(1U, 2U, 3U, 4U);
+    const std::uint64_t seed = GENERATE(take(hog::testing::cases(4), values({1U, 2U, 3U, 4U})));
     const Elevation terrain{planet(seed)};
     std::vector<std::int64_t> steps;
     for (const auto& island : terrain.archipelago().islands()) {
@@ -239,7 +241,7 @@ TEST_CASE("the starting islands rise smoothly from the sea floor", "[planet][arc
             // A line of cells from the centre out across the coast and flank.
             const double longest = island.radius * std::sqrt(island.elongation);
             const auto count = static_cast<int>(2.5 * longest / 2.0);
-            for (int step = 0; step < count; ++step) {
+            for (int step = 0; step < count; step += hog::testing::full_or(1, 4)) {
                 const double metres = 2.0 * step;
                 const CellId cell = hog::planet::cell_at(
                     glm::normalize(island.center + (direction * (metres / radius))), fine_level);

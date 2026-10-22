@@ -4,14 +4,17 @@
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tangent_frame.hpp>
 #include <hog/planet/tile.hpp>
+#include <hog/testing/quick.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <catch2/generators/catch_generators_adapters.hpp>
 
 #include <algorithm>
 #include <array>
 #include <bit>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <set>
@@ -158,7 +161,7 @@ TEST_CASE("every rock and resource has a distinct name", "[planet][geology]") {
 }
 
 TEST_CASE("continents stand on granite and the deep ocean on basalt", "[planet][geology]") {
-    const std::uint64_t seed = GENERATE(1U, 2U);
+    const std::uint64_t seed = GENERATE(take(hog::testing::cases(2), values({1U, 2U})));
     const Geology geology{planet(seed)};
     std::set<Rock> sediments;
     std::set<Rock> shelf_sediments;
@@ -213,7 +216,7 @@ TEST_CASE("shelves end partway down to the ocean floor", "[planet][geology]") {
 
 TEST_CASE("the crust is thick under continents and mountains and thin under the sea",
           "[planet][geology]") {
-    const std::uint64_t seed = GENERATE(1U, 2U);
+    const std::uint64_t seed = GENERATE(take(hog::testing::cases(2), values({1U, 2U})));
     const Geology geology{planet(seed)};
     const auto km = [](std::int64_t depth) { return static_cast<double>(depth) / fixed_one / 1e3; };
     double thinnest_land = 1e9;
@@ -255,8 +258,10 @@ TEST_CASE("the crust is thick under continents and mountains and thin under the 
 TEST_CASE("the crust thickens smoothly across the shelves", "[planet][geology]") {
     const Geology geology{planet(1)};
     constexpr int level = 9;
+    const std::vector<CellId> cells = cells_at(level);
     std::int64_t steepest = 0;
-    for (const CellId cell : cells_at(level)) {
+    for (std::size_t at = 0; at < cells.size(); at += hog::testing::full_or<std::size_t>(1, 5)) {
+        const CellId cell = cells[at];
         if (geology.terrain().is_land(cell) || geology.terrain().mountain_strength(cell) > 0) {
             continue;
         }
@@ -281,7 +286,7 @@ TEST_CASE("the starting islands have thickened ocean crust under them", "[planet
 }
 
 TEST_CASE("mountains are stripped down to granite", "[planet][geology]") {
-    const std::uint64_t seed = GENERATE(1U, 2U);
+    const std::uint64_t seed = GENERATE(take(hog::testing::cases(2), values({1U, 2U})));
     const Geology geology{planet(seed)};
     double lowland = 0.0;
     double lowland_count = 0.0;
@@ -321,7 +326,7 @@ TEST_CASE("the starting islands are bare basalt under their soil", "[planet][geo
 }
 
 TEST_CASE("a magma chamber lies in the crust under each starting island", "[planet][geology]") {
-    const std::uint64_t seed = GENERATE(1U, 2U, 3U, 4U);
+    const std::uint64_t seed = GENERATE(take(hog::testing::cases(4), values({1U, 2U, 3U, 4U})));
     const Geology geology{planet(seed)};
     const auto islands = geology.terrain().archipelago().islands();
     REQUIRE(geology.chambers().size() == islands.size());
@@ -401,7 +406,8 @@ TEST_CASE("rock warms with depth through the crust and the mantle", "[planet][ge
         REQUIRE(geology.rock_temperature(cell, mantle) == 800 * fixed_one);
         REQUIRE(geology.rock_temperature(cell, mantle + (10'000 * fixed_one)) == 900 * fixed_one);
         std::int64_t last = surface;
-        for (std::int64_t depth = 0; depth <= 110'000 * fixed_one; depth += 500 * fixed_one) {
+        for (std::int64_t depth = 0; depth <= 110'000 * fixed_one;
+             depth += hog::testing::full_or<std::int64_t>(500, 2'500) * fixed_one) {
             const std::int64_t heat = geology.rock_temperature(cell, depth);
             REQUIRE(heat >= last);
             last = heat;
@@ -504,7 +510,7 @@ TEST_CASE("deposits are sparse seams in their host rock", "[planet][geology]") {
 }
 
 TEST_CASE("the starting islands hold clay, iron and copper", "[planet][geology]") {
-    const std::uint64_t seed = GENERATE(1U, 2U, 3U, 4U);
+    const std::uint64_t seed = GENERATE(take(hog::testing::cases(4), values({1U, 2U, 3U, 4U})));
     const Geology geology{planet(seed)};
     std::array<int, hog::planet::resource_count> found{};
     // A grid of cells about 150 m apart over each island.

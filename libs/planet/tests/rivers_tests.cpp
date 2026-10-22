@@ -4,11 +4,13 @@
 #include <hog/planet/projection.hpp>
 #include <hog/planet/rivers.hpp>
 #include <hog/planet/tangent_frame.hpp>
+#include <hog/testing/quick.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -59,6 +61,16 @@ std::vector<std::int64_t> ground(const Landform& landform) {
 const Rivers& rivers() {
     static const Rivers rivers{landform(), ground(landform()), {1, landform().grid()}, radius};
     return rivers;
+}
+
+// The reaches looked across: all of them, or every fourth when the longest tests run small.
+std::vector<Reach> looked_across() {
+    std::vector<Reach> reaches;
+    const auto all = rivers().reaches();
+    for (std::size_t at = 0; at < all.size(); at += hog::testing::full_or<std::size_t>(1, 4)) {
+        reaches.push_back(all[at]);
+    }
+    return reaches;
 }
 
 // The ground before rivers, a gentle slope up to the north, high above any river's bed.
@@ -114,7 +126,7 @@ TEST_CASE("rivers run downhill to the sea or a lake, growing on the way", "[plan
 }
 
 TEST_CASE("a river cuts its channel below the ground, under water", "[planet][rivers]") {
-    for (const Reach& reach : rivers().reaches()) {
+    for (const Reach& reach : looked_across()) {
         std::optional<hog::planet::Channel> found;
         for (const CellId cell : across(reach)) {
             if (const auto channel =
@@ -130,7 +142,7 @@ TEST_CASE("a river cuts its channel below the ground, under water", "[planet][ri
 }
 
 TEST_CASE("a river follows dips in the ground rather than standing above it", "[planet][rivers]") {
-    for (const Reach& reach : rivers().reaches()) {
+    for (const Reach& reach : looked_across()) {
         const std::int64_t low = std::min(reach.from_surface, reach.to_surface) - (50 * fixed_one);
         for (const CellId cell : across(reach)) {
             if (const auto channel = rivers().channel(cell, low)) {
@@ -142,7 +154,7 @@ TEST_CASE("a river follows dips in the ground rather than standing above it", "[
 }
 
 TEST_CASE("banks slope up from the water rather than standing as walls", "[planet][rivers]") {
-    for (const Reach& reach : rivers().reaches()) {
+    for (const Reach& reach : looked_across()) {
         // Shifting points to make meanders can bunch them up to about twice as close.
         const double step = reach.width / 4.0;
         const double half = reach.width / 2.0;

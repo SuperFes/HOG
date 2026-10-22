@@ -3,6 +3,7 @@
 #include <hog/sim/ecology.hpp>
 #include <hog/sim/weather.hpp>
 #include <hog/sim/wildlife.hpp>
+#include <hog/testing/quick.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -37,7 +38,10 @@ struct RecordedYear {
 
     RecordedYear(const hog::planet::World& world, JobSystem& jobs) {
         const hog::sim::WeatherConfig config{
-            .level = level, .step = hours{2}, .planet_radius = 115'000.0, .seed = 1};
+            .level = level,
+            .step = hog::testing::full_or(hours{2}, hours{6}),
+            .planet_radius = 115'000.0,
+            .seed = 1};
         hog::sim::Weather weather{config, hog::sim::ground_for(hog::sim::CellGrid{level}, world),
                                   march_equinox};
         for (int day = 1; day <= 365; ++day) {

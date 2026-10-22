@@ -76,8 +76,11 @@ jobs:
           -DHOG_USE_LIBCXX=${{ matrix.libcxx }}
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }}
+      # Sanitizers run the longest tests small on each push, and in full on releases.
       - name: Test
         run: ctest --preset ${{ matrix.preset }}
+        env:
+          HOG_QUICK_TESTS: ${{ startsWith(matrix.preset, 'ci-') && !startsWith(github.ref, 'refs/tags/') && '1' || '' }}
 
   format:
     name: clang-format

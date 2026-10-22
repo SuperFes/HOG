@@ -1,6 +1,7 @@
 #include <hog/jobs/job_system.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/sim/weather.hpp>
+#include <hog/testing/quick.hpp>
 #include <hog/testing/assertion_guard.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -643,15 +644,16 @@ struct Year {
 
 TEST_CASE("a year of weather matches the planet's climate", "[sim][weather][climate]") {
     const hog::planet::World world{hog::planet::PlanetConfig{.seed = 1, .radius = 115'000.0}};
-    const WeatherConfig coarse{.level = 4, .step = hours{2}, .planet_radius = 115'000.0, .seed = 1};
+    const hours step = hog::testing::full_or(hours{2}, hours{6});
+    const WeatherConfig coarse{.level = 4, .step = step, .planet_radius = 115'000.0, .seed = 1};
     const hog::sim::CellGrid grid{coarse.level};
     Weather weather{coarse, hog::sim::ground_for(grid, world), at(2026y / January / 1)};
     JobSystem jobs{0};
 
     const std::size_t size = grid.size();
     Year year{size};
-    for (GameTime time = weather.time(); time < at(2027y / January / 1); time += hours{2}) {
-        weather.advance_to(time + hours{2}, jobs);
+    for (GameTime time = weather.time(); time < at(2027y / January / 1); time += step) {
+        weather.advance_to(time + step, jobs);
         const year_month_day date{
             floor<days>(sys_time<hog::GameDuration>{time.time_since_epoch()})};
         year.add(weather, static_cast<unsigned>(date.month()));

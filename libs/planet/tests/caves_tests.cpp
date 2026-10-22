@@ -3,9 +3,11 @@
 #include <hog/planet/neighbors.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tangent_frame.hpp>
+#include <hog/testing/quick.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <catch2/generators/catch_generators_adapters.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <algorithm>
@@ -214,7 +216,7 @@ TEST_CASE("caves are found where their passages run", "[planet][caves]") {
 }
 
 TEST_CASE("lava tubes run downhill from each vent, a few metres down", "[planet][caves]") {
-    const std::uint64_t seed = GENERATE(1U, 2U);
+    const std::uint64_t seed = GENERATE(take(hog::testing::cases(2), values({1U, 2U})));
     const Caves caves{geology(seed)};
     const auto chambers = caves.geology().chambers();
     std::vector<int> per_chamber(chambers.size(), 0);
@@ -283,7 +285,7 @@ TEST_CASE("lava tubes are found in the basalt they run through", "[planet][caves
 }
 
 TEST_CASE("sea caves run inland from cliffs at the water's edge", "[planet][caves]") {
-    const std::uint64_t seed = GENERATE(1U, 2U);
+    const std::uint64_t seed = GENERATE(take(hog::testing::cases(2), values({1U, 2U})));
     const Caves caves{geology(seed)};
     Caves::Lookup lookup{caves};
     const hog::planet::Elevation& terrain = caves.geology().terrain();

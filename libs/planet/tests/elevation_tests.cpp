@@ -4,9 +4,11 @@
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tile.hpp>
+#include <hog/testing/quick.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <catch2/generators/catch_generators_adapters.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <algorithm>
@@ -83,7 +85,7 @@ hog::DVec3 along(hog::DVec3 from, hog::DVec3 towards, double metres) {
 } // namespace
 
 TEST_CASE("land stays above sea level and the ocean floor below it", "[planet][elevation]") {
-    const std::uint64_t seed = GENERATE(1U, 2U);
+    const std::uint64_t seed = GENERATE(take(hog::testing::cases(2), values({1U, 2U})));
     const Elevation terrain{planet(seed)};
     for (const CellId cell : cells_at(6)) {
         const std::int64_t elevation = terrain.elevation(cell);
@@ -99,7 +101,7 @@ TEST_CASE("land stays above sea level and the ocean floor below it", "[planet][e
 }
 
 TEST_CASE("mountains rise on part of the land and the ocean is deep", "[planet][elevation]") {
-    const std::uint64_t seed = GENERATE(1U, 2U, 3U, 4U);
+    const std::uint64_t seed = GENERATE(take(hog::testing::cases(4), values({1U, 2U, 3U, 4U})));
     const Elevation terrain{planet(seed)};
     std::size_t land = 0;
     std::size_t high = 0;
