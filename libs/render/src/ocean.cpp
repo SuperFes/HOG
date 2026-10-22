@@ -344,8 +344,8 @@ DrawnWaves drawn_waves_at(std::span<const waves::Train> trains, std::span<const 
         Vec3{(frame.east * tide_towards(frame.east)) + (frame.north * tide_towards(frame.north))},
         static_cast<float>(waves::tide_at(bend.up, time, day))};
     drawn.run_up = run_up_at(trains, shown);
-    drawn.swash_incident = swash_at(swash_incident, drawn.run_up.z, eye, time);
-    drawn.swash_surging = swash_at(swash_surging, drawn.run_up.w, eye, time);
+    drawn.swash_incident = swash_at(swash_incident, static_cast<double>(drawn.run_up.z), eye, time);
+    drawn.swash_surging = swash_at(swash_surging, static_cast<double>(drawn.run_up.w), eye, time);
     if (white.breaking > 0.0 && breaking > 0.0) {
         // Whitecaps are ragged: their own churning adds to how much the waves bunch.
         const double ragged = foam_ragged * std::sqrt(breaking);
