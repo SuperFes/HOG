@@ -505,6 +505,31 @@ TEST_CASE("the swash runs up the shore and draws back, leaving the sand wet", "[
     CHECK(device->validation_errors() == 0);
 }
 
+TEST_CASE("ground under the sea's mean or a lake is wet, however calm the water", "[render][gpu]") {
+    const auto device = test_device();
+    const std::uint32_t middle = extent.width / 2;
+    const auto seen = [&](double eye, double ground, bool sea, std::optional<Tide> tide) {
+        const OceanView view = seen_from(eye, -up, north, glm::normalize(east + up));
+        return pixel_at(draw(*device, view, ground, sea, true, tide), middle, middle);
+    };
+    // A tenth of a metre under still water, which barely tints it, against as far over it.
+    const Pixel over_sea = seen(4.0, 0.1, false, Tide{.depth = -0.1F});
+    const Pixel under_sea = seen(4.0, -0.1, false, Tide{.depth = 0.1F});
+    CAPTURE(over_sea, under_sea);
+    CHECK(under_sea[1] * 10 < over_sea[1] * 7);
+    // A lake's bed as wet as the sea's as deep under it; the lake is found only once the sea's
+    // pass has told the ground where its grids lie.
+    const Pixel under_lake =
+        seen(104.0, 99.9, true,
+             Tide{.depth = hog::terrain::shore_highest, .still = 0.1F, .level = 100.0F});
+    const Pixel under_drawn_sea = seen(4.0, -0.1, true, Tide{.depth = 0.1F});
+    CAPTURE(under_lake, under_drawn_sea);
+    for (std::size_t channel = 0; channel < 3; ++channel) {
+        CHECK(std::abs(under_lake.at(channel) - under_drawn_sea.at(channel)) <= 2);
+    }
+    CHECK(device->validation_errors() == 0);
+}
+
 TEST_CASE("the sea reflects more of the sky the more glancing the view", "[render][gpu]") {
     const auto device = test_device();
     // The sun along the horizon behind, out of the way.
@@ -529,7 +554,7 @@ TEST_CASE("ground below sea level is lost in the water's colour the deeper it li
     const Pixel shallow = seen(-1.0, true);
     const Pixel deep = seen(-20.0, true);
     CHECK(shallow[1] < seen(-1.0, false)[1]);
-    CHECK(shallow[1] > deep[1] + 50);
+    CHECK(shallow[1] > deep[1] + 30);
     // Most of the way to the water's own colour, lit as the ground is.
     CHECK(deep[1] < 40);
     CHECK(device->validation_errors() == 0);

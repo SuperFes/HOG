@@ -256,16 +256,24 @@ float eye_above(Ground ground) {
     return lake > 0.0 ? max(push.bend_up.w - lake, 0.0) : push.bend_up.w - sea_level(ground);
 }
 
-// How wet the ground is: from 1 where the swash covers it or has only just left it, drying over a
-// surge of the waves' groups, to 0 where it hasn't run for longer or never does.
+// How wet the ground is: 1 under a lake or the sea's mean, and above that from 1 where the swash
+// covers it or has only just left it, drying over a surge of the waves' groups, to 0 where it
+// hasn't run for longer or never does.
 float wetness(Ground ground) {
-    const ShoreLevel level = shore_level(ground);
-    const float highest = level.mean + level.swash.x + level.swash.y;
-    if (level.swash.y <= 0.0 || ground.height >= highest) {
+    if (settings.tiling.z <= 0.0) {
         return 0.0;
     }
+    const float lake = lake_level(ground);
+    if (lake > 0.0) {
+        return saturate(0.5 + ((lake - ground.height) / wet_edges));
+    }
+    const ShoreLevel level = shore_level(ground);
+    const float highest = level.mean + level.swash.x + level.swash.y;
+    float wet = saturate(0.5 + ((level.mean - ground.height) / wet_edges));
+    if (level.swash.y <= 0.0 || ground.height >= highest) {
+        return wet;
+    }
     const float surge = 2.0 * pi / max(sea.run_up.w, 1e-3);
-    float wet = 0.0;
     for (int back = 0; back < wet_samples; ++back) {
         const float ago = float(back) * surge / float(wet_samples);
         const float over = swash_high(sea, level, ago) - ground.height;
