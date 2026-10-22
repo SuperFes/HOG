@@ -5,11 +5,17 @@
 #include <hog/render/device.hpp>
 #include <hog/render/foam.hpp>
 #include <hog/render/memory.hpp>
+#include <hog/render/ocean.hpp>
 #include <hog/render/readback.hpp>
+#include <hog/terrain/bend.hpp>
+#include <hog/waves/foam.hpp>
+#include <hog/waves/waves.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -156,8 +162,12 @@ TEST_CASE("foam left fades and stays on the sea as the grid steps", "[render][gp
                                 hog::render::image_use::copy_target,
                                 hog::render::image_use::sampled);
     }));
+    auto calm = hog::render::CalmSea::create(*device);
+    REQUIRE(calm);
     const auto stepped = [&](const FoamStep& step) {
-        REQUIRE(device->submit_now([&](VkCommandBuffer commands) { map->step(commands, step); }));
+        REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
+            map->step(commands, step, calm->bindings(), DVec3{0.0});
+        }));
         auto pixels =
             hog::render::read_pixels(*device, map->kept(), hog::render::image_use::sampled);
         REQUIRE(pixels);
@@ -191,5 +201,63 @@ TEST_CASE("foam left fades and stays on the sea as the grid steps", "[render][gp
     // Nor anything at all where nothing's kept.
     const std::vector<float> none = stepped({.shift = {0, 0}, .seconds = 0.1, .kept = false});
     CHECK(at(none, 100, 300) == 0.0);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("foam left covers as much of the sea as the wind leaves white, in patches",
+          "[render][gpu]") {
+    const auto device = test_device();
+    auto ocean =
+        hog::render::Ocean::create(*device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
+    REQUIRE(ocean);
+    const Start at;
+    const std::vector<hog::waves::Train> trains = hog::waves::planet_trains(5);
+    const hog::WorldPosition eye{at.up * (radius + 8.0)};
+    const hog::terrain::Bend bend = hog::terrain::bend_from(eye, radius, 0.0);
+    // Late in 2026, so phases are taken far from the epoch, as they will be; each sea an hour
+    // apart, so none is kept from the one before.
+    hog::GameTime time{std::chrono::seconds{1'792'000'000}};
+    for (const double wind : {10.0, 16.0}) {
+        time += std::chrono::hours{1};
+        const DVec3 blowing = at.east * wind;
+        const hog::waves::SeaState sea{
+            .systems = {hog::waves::grown_sea(blowing)}, .current = {}, .wind = blowing};
+        hog::render::OceanView view;
+        view.bend = bend;
+        view.waves = hog::render::drawn_waves_at(trains, hog::waves::waves_at(trains, bend.up, sea),
+                                                 sea, eye, bend, time, DVec3{0.0});
+        hog::Result<> stepped;
+        REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
+            stepped = ocean->step_foam(commands, view, 0, time, hog::waves::foam_drift(sea));
+        }));
+        REQUIRE(stepped);
+        auto pixels = hog::render::read_pixels(*device, ocean->foam().kept(),
+                                               hog::render::image_use::sampled);
+        REQUIRE(pixels);
+        REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
+            hog::render::transition(commands, ocean->foam().kept().handle(),
+                                    VK_IMAGE_ASPECT_COLOR_BIT, hog::render::image_use::copy_source,
+                                    hog::render::image_use::sampled);
+        }));
+        std::vector<float> foam(std::size_t{foam_size} * foam_size);
+        REQUIRE(pixels->size() == std::span{foam}.size_bytes());
+        std::memcpy(foam.data(), pixels->data(), pixels->size());
+        double sum = 0.0;
+        std::size_t holding = 0;
+        for (const float texel : foam) {
+            sum += static_cast<double>(texel);
+            holding += texel > 0.05F ? 1U : 0U;
+        }
+        const double mean = sum / static_cast<double>(foam.size());
+        const double most = static_cast<double>(*std::ranges::max_element(foam));
+        const double share = static_cast<double>(holding) / static_cast<double>(foam.size());
+        const hog::waves::Whitecaps white = hog::waves::whitecaps(sea);
+        INFO(wind << " m/s: " << mean << " left of " << white.left << ", most " << most << " on "
+                  << share << " of the sea");
+        CHECK_THAT(mean, WithinRel(white.left, 0.25));
+        // Heaped behind where crests broke, and none on most of the sea.
+        CHECK(most > 0.5);
+        CHECK(share < 0.5);
+    }
     CHECK(device->validation_errors() == 0);
 }

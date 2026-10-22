@@ -66,7 +66,7 @@ constexpr std::array vertex_attributes{
                                       .format = VK_FORMAT_R32G32_SFLOAT,
                                       .offset = offsetof(SeaVertex, towards)}};
 
-static_assert(sizeof(DrawnWaves) == (20 * sizeof(glm::vec4)) +
+static_assert(sizeof(DrawnWaves) == (23 * sizeof(glm::vec4)) +
                                         (drawn_waves * sizeof(DrawnWaves::Wave)) +
                                         (foam_waves * sizeof(DrawnWaves::FoamWave)));
 
@@ -528,6 +528,11 @@ Result<Ocean> Ocean::create(Device& device, VkFormat colour_format, VkFormat dep
         return std::unexpected(std::move(calm).error());
     }
     ocean.calm_ = std::move(calm).value();
+    auto foam = FoamMap::create(device);
+    if (!foam) {
+        return std::unexpected(std::move(foam).error());
+    }
+    ocean.foam_ = std::move(foam).value();
 
     // Seen from below too, from under the sea.
     ocean.air_ = air;
@@ -637,11 +642,7 @@ Result<> Ocean::draw_deep(VkCommandBuffer commands, VkExtent2D extent, const Oce
     return {};
 }
 
-Result<> Ocean::record(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view,
-                       std::uint32_t frame, const Pipeline& pipeline) const {
-    if (extent.width == 0 || extent.height == 0) {
-        return {};
-    }
+Result<> Ocean::write_waves(const OceanView& view, std::uint32_t frame) const {
     // A calm sea too lies on the planet round the eye.
     DrawnWaves drawn = view.waves;
     const planet::TangentFrame ground = planet::tangent_frame(view.bend.up);
@@ -657,11 +658,40 @@ Result<> Ocean::record(VkCommandBuffer commands, VkExtent2D extent, const OceanV
                             static_cast<float>(1.0 / terrain::shore_spacing[1])};
         drawn.shore_north = {Vec3{shore_->north}, 0.0F};
     }
+    if (foam_time_) {
+        const FoamPlacing placing =
+            foam_grid_.placing(view.bend.up, view.bend.radius, view.bend.eye_height);
+        drawn.foam_anchor = {Vec3{placing.anchor}, static_cast<float>(1.0 / foam_spacing)};
+        drawn.foam_east = {Vec3{placing.east}, static_cast<float>(placing.corner.x)};
+        drawn.foam_north = {Vec3{placing.north}, static_cast<float>(placing.corner.y)};
+    }
     const Buffer& waves = waves_.at(frame);
     std::memcpy(waves.mapped().data(), &drawn, sizeof(drawn));
-    if (auto flushed = waves.flush(); !flushed) {
-        return flushed;
+    return waves.flush();
+}
+
+Result<> Ocean::step_foam(VkCommandBuffer commands, const OceanView& view, std::uint32_t frame,
+                          GameTime time, DVec3 drift) {
+    const double seconds =
+        foam_time_ ? std::chrono::duration<double>(time - *foam_time_).count() : -1.0;
+    const FoamStep step = foam_grid_.follow(view.bend.up, view.bend.radius, drift, seconds);
+    foam_time_ = time;
+    if (auto written = write_waves(view, frame); !written) {
+        return written;
     }
+    foam_.step(commands, step, bindings(frame), drift);
+    return {};
+}
+
+Result<> Ocean::record(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view,
+                       std::uint32_t frame, const Pipeline& pipeline) const {
+    if (extent.width == 0 || extent.height == 0) {
+        return {};
+    }
+    if (auto written = write_waves(view, frame); !written) {
+        return written;
+    }
+    const Buffer& waves = waves_.at(frame);
     const double aspect = static_cast<double>(extent.width) / static_cast<double>(extent.height);
     const terrain::SeaReach reach =
         terrain::sea_reach(view.bend, terrain::water_below(lake_levels_, view.bend.eye_height));

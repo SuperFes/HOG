@@ -89,6 +89,12 @@ public struct Waves {
     public float4 run_up;
     public float4 swash_incident;
     public float4 swash_surging;
+    // Where the grid of foam left round the eye lies, as hog::render::FoamPlacing has it: xyz where
+    // its plane touches sea level, from the eye, and w its texels per metre, none without a grid;
+    // then the ways its rows and columns run, and in their w its first texel's corner.
+    public float4 foam_anchor;
+    public float4 foam_east;
+    public float4 foam_north;
     // Of the waves on still water, as hog::waves::fetched has them: xyz which way the wind blows,
     // in the planet's frame, and w the fourth power of the peak of a sea grown full under it, or
     // none without wind. Then x and y how the sea's height and peak grow by its fetch, as
@@ -334,9 +340,9 @@ public struct ShoreLevel {
 };
 
 // At `point`, from the eye, over `floor` as shore_floor finds it: the tide, and the waves' set-up
-// and swash as hog::waves::run_up has them, each wherever the sea reaches. The swash runs up
-// beaches and over the shallows, and the set-up rises across the surf.
-public ShoreLevel shore_level_at(Waves waves, float3 floor, float3 point) {
+// and swash as hog::waves::run_up has them, each wherever the sea reaches, `ago` seconds before
+// now. The swash runs up beaches and over the shallows, and the set-up rises across the surf.
+public ShoreLevel shore_level_at(Waves waves, float3 floor, float3 point, float ago = 0.0) {
     ShoreLevel level;
     const float reached = sea_reached(floor.x);
     const float tide = (waves.tide.w + dot(waves.tide.xyz, point)) * reached;
@@ -348,8 +354,12 @@ public ShoreLevel shore_level_at(Waves waves, float3 floor, float3 point) {
     // Half each part's significant height, as high as it's taken to run.
     const float2 swash = scale * float2(sqrt(0.563) * beach, sqrt(0.004)) / 2.0;
     level.swash = swash * saturate(1.0 - (under / max(2.0 * (swash.x + swash.y), 1e-3)));
-    const float incident = waves.swash_incident.w + dot(waves.swash_incident.xyz, point);
-    const float surging = waves.swash_surging.w + dot(waves.swash_surging.xyz, point);
+    float incident = waves.swash_incident.w + dot(waves.swash_incident.xyz, point);
+    float surging = waves.swash_surging.w + dot(waves.swash_surging.xyz, point);
+    if (ago != 0.0) {
+        incident -= waves.run_up.z * ago;
+        surging -= waves.run_up.w * ago;
+    }
     level.turning = float4(cos(incident), sin(incident), cos(surging), sin(surging));
     return level;
 }
@@ -409,9 +419,9 @@ float below(float x) {
 // At `rest`, a point of sea level from the eye, seen over `footprint` metres, over `floor`: as
 // hog::waves::surface_at, but for the waves shorter than the footprint, which only roughen it.
 // Over still water with `fetch` metres of it upwind, its own waves, as far as the wind has grown
-// them over it; over the sea where there's none.
+// them over it; over the sea where there's none. As they stood `ago` seconds before now.
 public WaveSurface wave_surface(Waves waves, float3 rest, float footprint, float3 floor,
-                                float fetch = 0.0) {
+                                float fetch = 0.0, float ago = 0.0) {
     const float3 up = waves.up_height.xyz;
     const float3 first = waves.first.xyz;
     const float3 second = waves.second.xyz;
@@ -461,6 +471,9 @@ public WaveSurface wave_surface(Waves waves, float3 rest, float footprint, float
         float wavenumber = along.z;
         float2 ahead = along.xy;
         float phase = (heading.w * dot(heading.xyz, rest)) + shape.y;
+        if (ago != 0.0) {
+            phase += sqrt(gravity * heading.w) * ago;
+        }
         float stretch = 1.0;
         const float deep = along.z;
         const float kappa = deep * depth;
@@ -598,12 +611,15 @@ void add_foam_waves(Waves waves, inout FoamPattern pattern, float3 rest, float f
 
 // How much of the sea is white where `water` lies: breaking, and with foam left; how far over
 // where they break the waves are, in standard deviations of what places it; and how fresh what's
-// left is, from 0 to 1.
+// left is, from 0 to 1. And of what's breaking, how much is whitecaps and how much the surf's
+// rollers.
 public struct Foam {
     public float breaking;
     public float left;
     public float over;
     public float fresh;
+    public float whitecaps;
+    public float rollers;
 };
 
 // How far the bunching of the waves that break rises over where they break, with the whole
@@ -768,6 +784,8 @@ public Foam foam_at(Waves waves, WaveSurface water, Surf surf, FoamPattern patte
     foam.left = 0.0;
     foam.over = -reaching;
     foam.fresh = middling_fresh;
+    foam.whitecaps = 0.0;
+    foam.rollers = 0.0;
     if (water.white.z <= 0.0 && surf.white <= 0.0) {
         return foam;
     }
@@ -780,13 +798,14 @@ public Foam foam_at(Waves waves, WaveSurface water, Surf surf, FoamPattern patte
         const float breaking_spread =
             max(max(breaking_spread_at(waves, water, pattern), breaking_soft), 1e-6);
         const float over = breaking_over(waves, water, pattern);
-        foam.breaking = below(over / breaking_spread);
+        foam.whitecaps = below(over / breaking_spread);
+        foam.breaking = foam.whitecaps;
         foam.over = over / water.white_left.z;
     }
     if (surf.white > 0.0) {
         const float over = surf_over(water, surf, pattern);
-        foam.breaking =
-            max(foam.breaking, below(over / surf_spread_at(water, pattern, footprint)));
+        foam.rollers = below(over / surf_spread_at(water, pattern, footprint));
+        foam.breaking = max(foam.breaking, foam.rollers);
         foam.over = max(foam.over, over / max(sqrt(water.heave), 1e-6));
     }
     const float fine_spread = max(sqrt(max(1.0 - pattern.fine_seen, 0.0) + square(foam_edges)),
@@ -814,11 +833,12 @@ public Foam foam_at(Waves waves, WaveSurface water, Surf surf, FoamPattern patte
 static const float shallowest_fetch = 0.01;
 
 // The sea's floor under `rest`, a point of sea level from the eye, with the water deepened by the
-// sea standing over its mean there; and w how high it stands. Or still water's, where the sea
-// doesn't reach, with `fetch` metres of it upwind, and w the level it's kept to: a lake's is kept
-// out over the ground round it, so its surface runs on level under the ground, which hides it.
+// sea standing over its mean there, `ago` seconds before now; and w how high it stands. Or still
+// water's, where the sea doesn't reach, with `fetch` metres of it upwind, and w the level it's kept
+// to: a lake's is kept out over the ground round it, so its surface runs on level under the
+// ground, which hides it.
 public float4 floor_at(Waves waves, Sampler2DArray depths, Sampler2DArray fetches, float3 rest,
-                       out float fetch) {
+                       out float fetch, float ago = 0.0) {
     fetch = 0.0;
     const float3 floor = shore_floor(waves, depths, rest);
     if (sea_reached(floor.x) <= 0.0) {
@@ -829,7 +849,7 @@ public float4 floor_at(Waves waves, Sampler2DArray depths, Sampler2DArray fetche
             return float4(still.x >= waves.count_left_radius.w ? deep_floor() : still, level);
         }
     }
-    const float level = level_now(shore_level_at(waves, floor, rest));
+    const float level = level_now(shore_level_at(waves, floor, rest, ago));
     if (floor.x + level >= waves.count_left_radius.w) {
         return float4(deep_floor(), level);
     }

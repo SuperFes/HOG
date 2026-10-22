@@ -16,6 +16,7 @@
 namespace hog::render {
 
 class Device;
+struct SeaBindings;
 
 // The foam left on the sea round the eye is kept on a grid of foam_size texels a side, foam_spacing
 // metres apart, on a plane touching sea level near the eye. The grid drifts with the water at the
@@ -23,8 +24,13 @@ class Device;
 // under the eye. As shaders/foam.slang has them.
 inline constexpr std::uint32_t foam_size = 512;
 inline constexpr double foam_spacing = 1.0; // metres
-// Foam left fades to 1/e of itself over so many seconds.
-inline constexpr double foam_lasting = 4.0;
+// Foam left fades to 1/e of itself over so many seconds, as long as hog::waves takes it to last;
+// in the surf, longer.
+inline constexpr double foam_lasting = 3.0;
+inline constexpr double foam_lasting_surf = 10.0;
+// Where nothing's kept, the foam's caught up over so many steps of so many seconds before now.
+inline constexpr int foam_catch_up = 48;
+inline constexpr double foam_catch_up_step = 0.25;
 // Nothing's kept over a longer step, or once the eye is further than this from where the plane
 // touches sea level, where the plane strays from it.
 inline constexpr double foam_longest_step = 2.0;    // seconds
@@ -82,9 +88,11 @@ public:
     // With no foam on it.
     [[nodiscard]] static Result<FoamMap> create(Device& device);
 
-    // Records stepping the foam on as `step` has the grid move, leaving it ready for any shader to
-    // sample.
-    void step(VkCommandBuffer commands, const FoamStep& step);
+    // Records stepping the foam on as `step` has the grid move, over the sea as `sea` has it, its
+    // waves laying the grid as a FoamPlacing does, the water at the surface drifting at `drift`,
+    // m/s. Foam is left as fast as the waves break; where nothing's kept, as long before as it
+    // takes to cover as much as it would. Leaves it ready for any shader to sample.
+    void step(VkCommandBuffer commands, const FoamStep& step, const SeaBindings& sea, DVec3 drift);
 
     // What's kept from the last step, ready to sample.
     [[nodiscard]] const Image& kept() const noexcept { return images_[latest_]; }
@@ -96,6 +104,9 @@ private:
     std::array<TrackedImage, 2> uses_;
     Sampler sampler_;
     std::size_t latest_ = 0;
+
+    void record(VkCommandBuffer commands, const FoamStep& step, const SeaBindings& sea, DVec3 drift,
+                double ago);
 };
 
 } // namespace hog::render

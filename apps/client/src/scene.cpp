@@ -512,6 +512,9 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
         .air = through,
         .waves = render::drawn_waves_at(wave_trains_, waves, sea_state, shot.camera.eye, shot.bend,
                                         shot.time, foam_drifted_, calendar_.day_length())};
+    graph.add({.name = "foam", .uses = {}, .targets = std::nullopt}, [&](VkCommandBuffer commands) {
+        return ocean_.step_foam(commands, sea, frame.slot, shot.time, waves::foam_drift(sea_state));
+    });
     graph.add({.name = "ground", .uses = through_air, .targets = drawn},
               [&](VkCommandBuffer commands) {
                   Result<> deep = ocean_.draw_deep(commands, frame.extent, sea, frame.slot);

@@ -4,6 +4,7 @@
 #include <hog/core/result.hpp>
 #include <hog/core/time.hpp>
 #include <hog/render/camera.hpp>
+#include <hog/render/foam.hpp>
 #include <hog/render/memory.hpp>
 #include <hog/render/pipeline.hpp>
 #include <hog/render/sampler.hpp>
@@ -63,6 +64,11 @@ struct DrawnWaves {
     glm::vec4 run_up{0.0F};
     glm::vec4 swash_incident{0.0F};
     glm::vec4 swash_surging{0.0F};
+    // Where the grid of foam left round the eye lies, as shaders/waves.slang takes it from a
+    // FoamPlacing: none unless any.
+    glm::vec4 foam_anchor{0.0F};
+    glm::vec4 foam_east{0.0F};
+    glm::vec4 foam_north{0.0F};
     // Of the waves on still water, as shaders/waves.slang takes them: the wind over it and how they
     // grow by their fetch under it, how white they'd be grown full, and of those left out.
     glm::vec4 still_wind{0.0F};
@@ -167,8 +173,18 @@ public:
     // reads it as the sea draws itself.
     [[nodiscard]] SeaBindings bindings(std::uint32_t frame = 0) const;
 
+    // Records stepping the foam left on the sea round the eye on to `time`, as the sea's seen in
+    // the frame `frame`, the water at its surface drifting at `drift`, m/s, outside any rendering.
+    // The frame's last submit must have finished.
+    Result<> step_foam(VkCommandBuffer commands, const OceanView& view, std::uint32_t frame,
+                       GameTime time, DVec3 drift);
+    [[nodiscard]] const FoamMap& foam() const noexcept { return foam_; }
+
 private:
     Ocean() = default;
+
+    // Of the frame `frame`, writes its waves as the sea's seen.
+    Result<> write_waves(const OceanView& view, std::uint32_t frame) const;
 
     Result<> record(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view,
                     std::uint32_t frame, const Pipeline& pipeline) const;
@@ -186,6 +202,9 @@ private:
     std::optional<terrain::ShoreFrame> shore_;
     // Of the lakes round the eye, as terrain::lake_levels has them.
     std::vector<float> lake_levels_;
+    FoamGrid foam_grid_;
+    FoamMap foam_;
+    std::optional<GameTime> foam_time_;
     std::uint32_t index_count_ = 0;
     bool air_ = false;
 };
