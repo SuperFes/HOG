@@ -3,13 +3,16 @@
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
 #include <hog/render/camera.hpp>
+#include <hog/render/drifting_grid.hpp>
 #include <hog/render/ocean.hpp>
 #include <hog/render/pipeline.hpp>
+#include <hog/render/ripples.hpp>
 #include <hog/render/sky.hpp>
 #include <hog/render/vulkan.hpp>
 #include <hog/terrain/bend.hpp>
 
 #include <span>
+#include <vector>
 
 namespace hog::render {
 
@@ -24,6 +27,12 @@ struct Capsule {
     double radius = 0.3;     // metres
     Vec3 colour{0.5F};       // linear
 };
+
+// Of `capsules`, those on the ripples' grid as `placing` lays it from the eye `bend` has, as
+// bodies on it: the nearest the eye first, no more than ripple_most_bodies.
+[[nodiscard]] std::vector<RippleBody> ripple_bodies(std::span<const Capsule> capsules,
+                                                    const GridPlacing& placing,
+                                                    const terrain::Bend& bend);
 
 // Where capsules are seen from and lit by.
 struct CapsuleView {

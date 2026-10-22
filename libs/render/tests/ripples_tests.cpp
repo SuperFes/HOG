@@ -1,8 +1,11 @@
 #include "test_device.hpp"
 
 #include <hog/core/math.hpp>
+#include <hog/planet/tangent_frame.hpp>
 #include <hog/render/barrier.hpp>
+#include <hog/render/capsules.hpp>
 #include <hog/render/device.hpp>
+#include <hog/render/drifting_grid.hpp>
 #include <hog/render/memory.hpp>
 #include <hog/render/ocean.hpp>
 #include <hog/render/readback.hpp>
@@ -16,6 +19,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <complex>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -29,6 +33,7 @@ using hog::DVec3;
 using hog::render::GridStep;
 using hog::render::ripple_size;
 using hog::render::ripple_spacing;
+using hog::render::RippleBody;
 using hog::render::testing::test_device;
 
 namespace {
@@ -124,6 +129,31 @@ double squared_height(std::span<const DVec2> ripples) {
     return sum;
 }
 
+// Of wavenumbers from `lowest` to `highest`, rad/m, the one `heights` along a line of texels rise
+// and fall by most.
+double strongest(std::span<const double> heights, double lowest, double highest) {
+    double best = lowest;
+    double most = -1.0;
+    const int tries = static_cast<int>(std::ceil(std::log(highest / lowest) / std::log(1.002)));
+    for (int tried = 0; tried <= tries; ++tried) {
+        const double wavenumber = lowest * std::pow(1.002, tried);
+        std::complex<double> sum{0.0};
+        for (std::size_t i = 0; i < heights.size(); ++i) {
+            // Hann windowed, so the line's ends don't blur the peak.
+            const double windowing =
+                0.5 - (0.5 * std::cos(2.0 * std::numbers::pi * static_cast<double>(i) /
+                                      static_cast<double>(heights.size() - 1)));
+            sum += heights[i] * windowing *
+                   std::polar(1.0, -wavenumber * static_cast<double>(i) * ripple_spacing);
+        }
+        if (std::abs(sum) > most) {
+            most = std::abs(sum);
+            best = wavenumber;
+        }
+    }
+    return best;
+}
+
 } // namespace
 
 TEST_CASE("ripples run as fast as waves on deep water, short or long, any way", "[render][gpu]") {
@@ -141,8 +171,8 @@ TEST_CASE("ripples run as fast as waves on deep water, short or long, any way", 
           DVec2{-3.0 * turn, 20.0 * turn}}) {
         lay_kept(*device, *map, train(wavenumber, high, 0.0));
         REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
-            map->step(commands, {.shift = {0, 0}, .seconds = seconds, .kept = true},
-                      calm->bindings());
+            REQUIRE(map->step(commands, {.shift = {0, 0}, .seconds = seconds, .kept = true},
+                              calm->bindings()));
         }));
         const std::vector<DVec2> ran = kept_texels(*device, *map);
         const std::vector<DVec2> expected = train(wavenumber, high, seconds);
@@ -173,7 +203,8 @@ TEST_CASE("ripples run off the grid's edge rather than back onto it from the oth
     std::vector<DVec2> ran;
     for (int second = 0; second < 60; ++second) {
         REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
-            map->step(commands, {.shift = {0, 0}, .seconds = 1.0, .kept = true}, calm->bindings());
+            REQUIRE(map->step(commands, {.shift = {0, 0}, .seconds = 1.0, .kept = true},
+                              calm->bindings()));
         }));
         ran = kept_texels(*device, *map);
         most = std::max(most, squared_height(ran));
@@ -201,8 +232,9 @@ TEST_CASE("ripples stay on the water as the grid steps under them, and none are 
     }
     lay_kept(*device, *map, laid);
     const auto stepped = [&](const GridStep& step) {
-        REQUIRE(device->submit_now(
-            [&](VkCommandBuffer commands) { map->step(commands, step, calm->bindings()); }));
+        REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
+            REQUIRE(map->step(commands, step, calm->bindings()));
+        }));
         return kept_texels(*device, *map);
     };
     const glm::ivec2 shift{3, -2};
@@ -257,5 +289,153 @@ TEST_CASE("ripples stop at the shore", "[render][gpu]") {
     };
     CHECK(squared_height(stepped(2.0F)) > squared_height(laid) * 0.5);
     CHECK(squared_height(stepped(-0.5F)) == 0.0);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("a body wading through the water leaves a wake behind it, its crests as far apart as "
+          "waves running as fast as it",
+          "[render][gpu]") {
+    const auto device = test_device();
+    auto map = hog::render::RippleMap::create(*device);
+    REQUIRE(map);
+    auto calm = hog::render::CalmSea::create(*device);
+    REQUIRE(calm);
+    const double speed = 2.0;
+    const double frame = 1.0 / 30.0;
+    RippleBody body{.feet = {100.0F, 256.5F}, .above = -1.0F};
+    for (int i = 0; i < 360; ++i) {
+        body.feet.x = static_cast<float>(100.0 + (speed * frame * i / ripple_spacing));
+        REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
+            REQUIRE(map->step(commands, {.shift = {0, 0}, .seconds = frame, .kept = true},
+                              calm->bindings(), 0, std::span{&body, 1}));
+        }));
+    }
+    const std::vector<DVec2> ran = kept_texels(*device, *map);
+    // Along its track, past where it pushes the water down, the waves across it.
+    const int at = static_cast<int>(body.feet.x);
+    std::vector<double> behind;
+    for (int x = at - 128; x < at - 16; ++x) {
+        behind.push_back(ran.at(index_of(x, 256)).x);
+    }
+    const double wavenumber = gravity / (speed * speed);
+    CHECK_THAT(strongest(behind, wavenumber * 0.5, wavenumber * 2.0) / wavenumber,
+               WithinAbs(1.0, 0.03));
+    double most_behind = 0.0;
+    for (const double height : behind) {
+        most_behind = std::max(most_behind, std::abs(height));
+    }
+    CHECK(most_behind > 0.005);
+    double most_ahead = 0.0;
+    for (int x = at + 24; x < at + 64; ++x) {
+        most_ahead = std::max(most_ahead, std::abs(ran.at(index_of(x, 256)).x));
+    }
+    CHECK(most_ahead < most_behind * 0.2);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("a body out of the water leaves it still", "[render][gpu]") {
+    const auto device = test_device();
+    auto map = hog::render::RippleMap::create(*device);
+    REQUIRE(map);
+    auto calm = hog::render::CalmSea::create(*device);
+    REQUIRE(calm);
+    RippleBody body{.feet = {256.0F, 256.0F}, .above = 0.5F};
+    for (int i = 0; i < 4; ++i) {
+        body.feet.x += 2.0F;
+        REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
+            REQUIRE(map->step(commands, {.shift = {0, 0}, .seconds = 0.1, .kept = true},
+                              calm->bindings(), 0, std::span{&body, 1}));
+        }));
+    }
+    const std::vector<DVec2> ran = kept_texels(*device, *map);
+    CHECK(std::ranges::all_of(ran, [](DVec2 texel) { return texel == DVec2{0.0}; }));
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("bodies are laid on the ripples' grid where they stand, the nearest the eye first",
+          "[render]") {
+    constexpr double radius = 115'000.0;
+    constexpr double height = 2.0;
+    const DVec3 up = glm::normalize(DVec3{0.2, -0.1, 1.0});
+    const hog::terrain::Bend bend =
+        hog::terrain::bend_from(hog::WorldPosition{up * (radius + height)}, radius, 0.0);
+    hog::render::DriftingGrid grid{ripple_size, ripple_spacing};
+    (void)grid.follow(up, radius, DVec3{0.0}, 0.0);
+    const hog::render::GridPlacing placing = grid.placing(up, radius, height);
+    const hog::planet::TangentFrame ground = hog::planet::tangent_frame(up);
+    // Upright, `along` metres east and north of under the eye, its feet `above` sea level.
+    const auto standing = [&](DVec2 along, double above) {
+        const DVec3 at =
+            glm::normalize((up * radius) + (ground.east * along.x) + (ground.north * along.y));
+        return hog::render::Capsule{.feet = hog::WorldPosition{at * (radius + above)}, .up = at};
+    };
+    std::vector<hog::render::Capsule> capsules{standing({2.0, 1.0}, -1.0),
+                                               standing({100.0, 0.0}, 0.0)};
+    for (int i = 0; i < 20; ++i) {
+        capsules.push_back(standing({-5.0 - i, 0.0}, 0.0));
+    }
+    const std::vector<RippleBody> bodies = hog::render::ripple_bodies(capsules, placing, bend);
+    REQUIRE(bodies.size() == hog::render::ripple_most_bodies);
+    const DVec2 under = hog::render::grid_texel(placing, -up * height);
+    const RippleBody& wading = bodies.front();
+    CHECK_THAT(glm::distance(DVec2{wading.feet}, under + DVec2{16.0, 8.0}), WithinAbs(0.0, 1e-2));
+    CHECK_THAT(wading.above, WithinAbs(-1.0, 1e-3));
+    CHECK_THAT(glm::distance(wading.tall, glm::vec3{0.0F, 0.0F, 1.8F}), WithinAbs(0.0, 1e-3));
+    // The one off the grid is left out, as are the furthest of the rest.
+    CHECK(
+        std::ranges::none_of(bodies, [](const RippleBody& body) { return body.feet.x > 400.0F; }));
+    CHECK_THAT(bodies.back().feet.x, WithinAbs(under.x - (19.0 / ripple_spacing), 1e-2));
+}
+
+TEST_CASE("a body pushes the sea where it crosses the surface, not where it's wholly under it",
+          "[render][gpu]") {
+    const auto device = test_device();
+    auto ocean =
+        hog::render::Ocean::create(*device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
+    REQUIRE(ocean);
+    constexpr double radius = 115'000.0;
+    constexpr double height = 2.0;
+    const DVec3 up = glm::normalize(DVec3{0.2, -0.1, 1.0});
+    hog::render::OceanView view;
+    view.bend = hog::terrain::bend_from(hog::WorldPosition{up * (radius + height)}, radius, 0.0);
+    const std::size_t shore_texels =
+        hog::terrain::shore_spacing.size() * hog::terrain::shore_size * hog::terrain::shore_size;
+    const hog::terrain::ShoreDepths shore{
+        .frame = hog::terrain::shore_frame(view.bend.up, radius),
+        .depths = std::vector<float>(shore_texels, 4.0F),
+        .still = std::vector<float>(shore_texels, hog::terrain::shore_highest),
+        .levels = std::vector<float>(shore_texels, 0.0F),
+        .fetches = std::vector<float>(shore_texels * hog::terrain::fetch_headings, 0.0F)};
+    const hog::planet::TangentFrame ground = hog::planet::tangent_frame(up);
+    const DVec3 at = glm::normalize((up * radius) + (ground.east * 2.0) + (ground.north * 1.0));
+    hog::GameTime time{std::chrono::seconds{1'792'000'000}};
+    // Stood `above` sea level, 2 m east and 1 m north of under the eye, stepped on 0.1 s.
+    const auto pushed_by = [&](double above) {
+        const hog::render::Capsule body{.feet = hog::WorldPosition{at * (radius + above)},
+                                        .up = at};
+        REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
+            REQUIRE(ocean->update_shore(commands, 0, shore));
+            REQUIRE(ocean->step_ripples(commands, view, 0, time, DVec3{0.0}));
+        }));
+        time += std::chrono::milliseconds{100};
+        REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
+            REQUIRE(ocean->step_ripples(commands, view, 0, time, DVec3{0.0}, std::span{&body, 1}));
+        }));
+        // Forgotten before the next, by stepping too long.
+        time += std::chrono::seconds{10};
+        return kept_texels(*device, ocean->ripples());
+    };
+    const std::vector<DVec2> wading = pushed_by(-1.0);
+    // The grid's centred under the eye to within half a texel.
+    double near = 0.0;
+    for (int y = 256 + 8 - 2; y <= 256 + 8 + 2; ++y) {
+        for (int x = 256 + 16 - 2; x <= 256 + 16 + 2; ++x) {
+            near = std::min(near, wading.at(index_of(x, y)).x);
+        }
+    }
+    CHECK(near < -0.002);
+    CHECK(std::abs(wading.at(index_of(256 - 80, 256)).x) < 1e-5);
+    const std::vector<DVec2> under = pushed_by(-3.0);
+    CHECK(std::ranges::all_of(under, [](DVec2 texel) { return texel == DVec2{0.0}; }));
     CHECK(device->validation_errors() == 0);
 }

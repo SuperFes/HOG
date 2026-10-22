@@ -27,6 +27,7 @@
 namespace hog::render {
 
 class Device;
+struct Capsule;
 
 // The most waves the sea is drawn with. As shaders/waves.slang has it.
 inline constexpr std::size_t drawn_waves = 48;
@@ -189,9 +190,9 @@ public:
                        GameTime time, DVec3 drift, bool catch_up);
     [[nodiscard]] const FoamMap& foam() const noexcept { return foam_; }
     // Records stepping the ripples on the water round the eye on to `time`, as step_foam does the
-    // foam.
+    // foam, pushed by `bodies` where they cross the surface.
     Result<> step_ripples(VkCommandBuffer commands, const OceanView& view, std::uint32_t frame,
-                          GameTime time, DVec3 drift);
+                          GameTime time, DVec3 drift, std::span<const Capsule> bodies = {});
     [[nodiscard]] const RippleMap& ripples() const noexcept { return ripples_; }
 
 private:

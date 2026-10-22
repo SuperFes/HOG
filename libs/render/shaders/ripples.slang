@@ -1,12 +1,20 @@
 import shore;
 import waves;
 
-// As hog::render::ripple_size, ripple_spacing, ripple_edge, ripple_soaking and ripple_shallowest.
+// As hog::render::ripple_size, ripple_spacing, ripple_edge, ripple_soaking, ripple_shallowest,
+// ripple_push and ripple_most_bodies.
 static const int ripple_size = 512;
 static const float ripple_spacing = 0.125;
 static const int ripple_edge = 48;
 static const float ripple_soaking = 6.0;
 static const float ripple_shallowest = 0.05;
+static const float ripple_push = 0.1;
+static const int ripple_most_bodies = 16;
+// How far past a body, metres, its push fades out, smoothly enough that it makes no ripples too
+// short for the grid.
+static const float push_fading = 0.25;
+// The water's surface at a body is found as the sea draws it seen over so many metres.
+static const float body_footprint = 0.25;
 // How many times ripple_size halves to one, and the threads that step a row or column of it, a
 // pair of texels each.
 static const uint ripple_halvings = 9;
@@ -33,6 +41,18 @@ struct Push {
 [[vk::binding(2, 0)]] ConstantBuffer<Waves> waves;
 [[vk::binding(3, 0)]] Sampler2DArray shore_depths;
 [[vk::binding(4, 0)]] Sampler2DArray shore_fetches;
+
+// As hog::render::RippleBody has them.
+struct Bodies {
+    // xy under the feet, texels; z metres they stand over sea level; w the radius.
+    float4 feet[ripple_most_bodies];
+    // xyz from the feet to the top, metres along the grid's rows, its columns and up.
+    float4 tall[ripple_most_bodies];
+    // x how many there are.
+    int4 count;
+};
+
+[[vk::binding(5, 0)]] ConstantBuffer<Bodies> bodies;
 
 // A row or column being transformed, or a pair of columns.
 groupshared float2 line[2 * ripple_size];
@@ -100,8 +120,58 @@ float2 carried(float2 own, float2 opposite, float2 wavenumber) {
     return height_after + float2(-potential_after.y, potential_after.x);
 }
 
+// Metres from `point` to the segment from `low` to `high`.
+float from_segment(float3 point, float3 low, float3 high) {
+    const float3 along = high - low;
+    const float length_squared = dot(along, along);
+    const float t = length_squared > 0.0 ? saturate(dot(point - low, along) / length_squared) : 0.0;
+    return distance(point, low + (along * t));
+}
+
+float from_segment(float2 point, float2 low, float2 high) {
+    return from_segment(float3(point, 0.0), float3(low, 0.0), float3(high, 0.0));
+}
+
+// Metres over sea level the water's surface stands at `texel` of the grid; sea level without one.
+float waterline_at(float2 texel) {
+    if (waves.ripple_anchor.w <= 0.0) {
+        return 0.0;
+    }
+    const float3 rest =
+        grid_rest(waves, waves.ripple_anchor, waves.ripple_east, waves.ripple_north, texel);
+    float fetch;
+    const float4 floor = floor_at(waves, shore_depths, shore_fetches, rest, fetch);
+    return water_height_over(waves, rest, body_footprint, floor, fetch);
+}
+
+// How far the bodies crossing the surface push the water down at `texel`, metres: as far as
+// ripple_push where they cross it, fading out round them.
+float pushed_at(int2 texel) {
+    const float2 point = (float2(texel) + 0.5) * ripple_spacing;
+    float pushed = 0.0;
+    for (int i = 0; i < min(bodies.count.x, ripple_most_bodies); ++i) {
+        const float4 feet = bodies.feet[i];
+        const float3 tall = bodies.tall[i].xyz;
+        const float radius = feet.w;
+        const float reach = radius + push_fading;
+        // Between the middles of its ends.
+        const float3 rising = tall * (radius / max(length(tall), 1e-6));
+        const float3 low = float3(feet.xy * ripple_spacing, feet.z) + rising;
+        const float3 high = float3(feet.xy * ripple_spacing, feet.z) + tall - rising;
+        if (from_segment(point, low.xy, high.xy) >= reach) {
+            continue;
+        }
+        const float off = from_segment(float3(point, waterline_at(feet.xy)), low, high);
+        const float across = saturate(off / reach);
+        const float pressing = 1.0 - (across * across);
+        pushed = max(pushed, ripple_push * pressing * pressing);
+    }
+    return pushed;
+}
+
 // Along each row, the ripples as they lay before the step, where the grid now lies: height plus i
-// times potential, none beyond the grid as it lay.
+// times potential, none beyond the grid as it lay; pushed on over the step as though the water
+// stood as much higher as the bodies push it down, and so pushed back up by it.
 [shader("compute")]
 [numthreads(threads, 1, 1)]
 void rows_main(uint3 thread: SV_GroupThreadID, uint3 group: SV_GroupID) {
@@ -112,7 +182,7 @@ void rows_main(uint3 thread: SV_GroupThreadID, uint3 group: SV_GroupID) {
         if (push.shift.z != 0 && all(from >= 0) && all(from < ripple_size)) {
             ripple = ripples[from];
         }
-        line[reversed(at)] = ripple;
+        line[reversed(at)] = ripple + float2(pushed_at(int2(int(at), row)), 0.0);
     }
     transform(0, thread.x, false);
     for (uint at = thread.x; at < ripple_size; at += threads) {
@@ -173,7 +243,8 @@ float kept_at(int2 texel) {
     return kept;
 }
 
-// Along each row, back from waves to the ripples they make; and what's kept of them.
+// Along each row, back from waves to the ripples they make, as high as the water stands; and
+// what's kept of them.
 [shader("compute")]
 [numthreads(threads, 1, 1)]
 void settle_main(uint3 thread: SV_GroupThreadID, uint3 group: SV_GroupID) {
@@ -185,6 +256,7 @@ void settle_main(uint3 thread: SV_GroupThreadID, uint3 group: SV_GroupID) {
     const float scale = 1.0 / float(ripple_size * ripple_size);
     for (uint at = thread.x; at < ripple_size; at += threads) {
         const int2 texel = int2(int(at), row);
-        ripples[texel] = line[at] * scale * kept_at(texel);
+        const float2 ripple = (line[at] * scale) - float2(pushed_at(texel), 0.0);
+        ripples[texel] = ripple * kept_at(texel);
     }
 }

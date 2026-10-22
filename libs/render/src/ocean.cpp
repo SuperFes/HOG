@@ -1,6 +1,7 @@
 #include <hog/core/assert.hpp>
 #include <hog/core/hash.hpp>
 #include <hog/planet/tangent_frame.hpp>
+#include <hog/render/capsules.hpp>
 #include <hog/render/device.hpp>
 #include <hog/render/ocean.hpp>
 #include <hog/shaders/ocean.hpp>
@@ -547,7 +548,7 @@ Result<Ocean> Ocean::create(Device& device, VkFormat colour_format, VkFormat dep
         return std::unexpected(std::move(foam).error());
     }
     ocean.foam_ = std::move(foam).value();
-    auto ripples = RippleMap::create(device);
+    auto ripples = RippleMap::create(device, frames);
     if (!ripples) {
         return std::unexpected(std::move(ripples).error());
     }
@@ -717,7 +718,7 @@ Result<> Ocean::step_foam(VkCommandBuffer commands, const OceanView& view, std::
 }
 
 Result<> Ocean::step_ripples(VkCommandBuffer commands, const OceanView& view, std::uint32_t frame,
-                             GameTime time, DVec3 drift) {
+                             GameTime time, DVec3 drift, std::span<const Capsule> bodies) {
     const double seconds =
         ripple_time_ ? std::chrono::duration<double>(time - *ripple_time_).count() : -1.0;
     const GridStep step = ripple_grid_.follow(view.bend.up, view.bend.radius, drift, seconds);
@@ -725,8 +726,10 @@ Result<> Ocean::step_ripples(VkCommandBuffer commands, const OceanView& view, st
     if (auto written = write_waves(view, frame); !written) {
         return written;
     }
-    ripples_.step(commands, step, bindings(frame));
-    return {};
+    const std::vector<RippleBody> laid = ripple_bodies(
+        bodies, ripple_grid_.placing(view.bend.up, view.bend.radius, view.bend.eye_height),
+        view.bend);
+    return ripples_.step(commands, step, bindings(frame), frame, laid);
 }
 
 Result<> Ocean::record(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view,

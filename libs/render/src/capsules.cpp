@@ -3,9 +3,13 @@
 #include <hog/render/device.hpp>
 #include <hog/shaders/capsules.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <span>
 #include <utility>
+#include <vector>
 
 namespace hog::render {
 
@@ -77,6 +81,43 @@ Result<Capsules> Capsules::create(Device& device, VkFormat colour_format, VkForm
     }
     capsules.pipeline_ = std::move(pipeline).value();
     return capsules;
+}
+
+std::vector<RippleBody> ripple_bodies(std::span<const Capsule> capsules, const GridPlacing& placing,
+                                      const terrain::Bend& bend) {
+    const DVec3 eye = bend.up * (bend.radius + bend.eye_height);
+    const DVec3 up = glm::cross(placing.east, placing.north);
+    struct Near {
+        double distance;
+        RippleBody body;
+    };
+    std::vector<Near> near;
+    for (const Capsule& capsule : capsules) {
+        const DVec3 feet = capsule.feet.metres();
+        const DVec2 texel = grid_texel(placing, (glm::normalize(feet) * bend.radius) - eye);
+        // However it leans.
+        const double margin = (capsule.height + capsule.radius) / placing.spacing;
+        if (glm::any(glm::lessThan(texel, DVec2{-margin})) ||
+            glm::any(glm::greaterThan(texel, DVec2{ripple_size + margin}))) {
+            continue;
+        }
+        const DVec3 tall = capsule.up * capsule.height;
+        near.push_back(
+            {.distance = glm::distance(feet, eye),
+             .body = {.feet = glm::vec2{texel},
+                      .above = static_cast<float>(glm::length(feet) - bend.radius),
+                      .radius = static_cast<float>(capsule.radius),
+                      .tall = glm::vec3{glm::dot(tall, placing.east), glm::dot(tall, placing.north),
+                                        glm::dot(tall, up)}}});
+    }
+    const auto kept = static_cast<std::ptrdiff_t>(std::min(near.size(), ripple_most_bodies));
+    std::ranges::partial_sort(near, near.begin() + kept, {}, &Near::distance);
+    std::vector<RippleBody> bodies;
+    bodies.reserve(static_cast<std::size_t>(kept));
+    for (const Near& body : std::span{near}.first(static_cast<std::size_t>(kept))) {
+        bodies.push_back(body.body);
+    }
+    return bodies;
 }
 
 void Capsules::draw(VkCommandBuffer commands, VkExtent2D extent, const CapsuleView& view,

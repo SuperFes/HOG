@@ -6,7 +6,11 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <span>
+#include <tuple>
 #include <utility>
 
 namespace hog::render {
@@ -30,7 +34,18 @@ constexpr std::array descriptors{binding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
                                  binding(1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE),
                                  binding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
                                  binding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-                                 binding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)};
+                                 binding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+                                 binding(5, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)};
+
+// As shaders/ripples.slang has them.
+struct Bodies {
+    // xy under the feet, texels; z how high they stand; w the radius.
+    std::array<glm::vec4, ripple_most_bodies> feet{};
+    // xyz from the feet to the top.
+    std::array<glm::vec4, ripple_most_bodies> tall{};
+    // x how many there are.
+    glm::ivec4 count{0};
+};
 
 // Each column is stepped with the one holding the waves running the other way along the rows.
 constexpr std::uint32_t column_pairs = (ripple_size / 2) + 1;
@@ -50,8 +65,16 @@ Result<Pipeline> stage(const Device& device, const char* entry) {
 
 } // namespace
 
-Result<RippleMap> RippleMap::create(Device& device) {
+Result<RippleMap> RippleMap::create(Device& device, std::uint32_t frames) {
     RippleMap map;
+    for (std::uint32_t frame = 0; frame < frames; ++frame) {
+        auto bodies =
+            make_buffer(device, sizeof(Bodies), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, Memory::Upload);
+        if (!bodies) {
+            return std::unexpected(std::move(bodies).error());
+        }
+        map.bodies_.push_back(std::move(bodies).value());
+    }
     for (auto [pipeline, entry] :
          {std::pair{&map.rows_, "rows_main"}, std::pair{&map.columns_, "columns_main"},
           std::pair{&map.settle_, "settle_main"}}) {
@@ -89,18 +112,33 @@ Result<RippleMap> RippleMap::create(Device& device) {
     return map;
 }
 
-void RippleMap::step(VkCommandBuffer commands, const GridStep& step, const SeaBindings& sea) {
+Result<> RippleMap::step(VkCommandBuffer commands, const GridStep& step, const SeaBindings& sea,
+                         std::uint32_t frame, std::span<const RippleBody> bodies) {
     if (!step.kept) {
         clear(commands);
-        return;
+        return {};
+    }
+    Bodies laid;
+    const std::size_t count = std::min(bodies.size(), ripple_most_bodies);
+    for (std::size_t i = 0; i < count; ++i) {
+        const RippleBody& body = bodies[i];
+        laid.feet.at(i) = {body.feet, body.above, body.radius};
+        laid.tall.at(i) = {body.tall, 0.0F};
+    }
+    laid.count.x = static_cast<int>(count);
+    const Buffer& buffer = bodies_.at(frame);
+    std::memcpy(buffer.mapped().data(), &laid, sizeof(laid));
+    if (auto flushed = buffer.flush(); !flushed) {
+        return flushed;
     }
     const int steps =
         std::clamp(static_cast<int>(std::ceil(step.seconds / ripple_step)), 1, ripple_most_steps);
     const double seconds = step.seconds / steps;
     for (int i = 0; i < steps; ++i) {
-        record(commands, i == 0 ? step.shift : glm::ivec2{0}, seconds, sea);
+        record(commands, i == 0 ? step.shift : glm::ivec2{0}, seconds, sea, buffer.handle());
     }
     state_use_.use_as(commands, image_use::sampled);
+    return {};
 }
 
 void RippleMap::clear(VkCommandBuffer commands) {
@@ -112,7 +150,7 @@ void RippleMap::clear(VkCommandBuffer commands) {
 }
 
 void RippleMap::record(VkCommandBuffer commands, glm::ivec2 shift, double seconds,
-                       const SeaBindings& sea) {
+                       const SeaBindings& sea, VkBuffer bodies) {
     const Push push{.shift = {shift, 1, 0},
                     .timing = {static_cast<float>(seconds), 0.0F, 0.0F, 0.0F}};
     for (const auto& [pipeline, groups] :
@@ -126,6 +164,7 @@ void RippleMap::record(VkCommandBuffer commands, glm::ivec2 shift, double second
         push_uniform_buffer(commands, *pipeline, 2, sea.waves);
         push_sampled_image(commands, *pipeline, 3, sea.shore, sea.sampler);
         push_sampled_image(commands, *pipeline, 4, sea.fetches, sea.sampler);
+        push_uniform_buffer(commands, *pipeline, 5, bodies);
         vkCmdPushConstants(commands, pipeline->layout(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
                            sizeof(push), &push);
         vkCmdDispatch(commands, groups, 1, 1);
