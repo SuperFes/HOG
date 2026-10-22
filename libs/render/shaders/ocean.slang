@@ -170,7 +170,7 @@ Facing facing_at(Surface surface, float3 looking) {
     facing.white = 0.0;
     facing.albedo = breaking_albedo;
     const Surf surf = as_surf(surface.surf);
-    const float2 kept = kept_foam_at(waves, foam_kept, surface.rest);
+    const float2 kept = kept_foam_at(waves, foam_kept, surface.rest).xy;
     const bool any_kept = kept.x > least_kept;
     if (water.white.z > 0.0 || surf.white > 0.0 || any_kept) {
         FoamPattern coarse;
@@ -198,8 +198,8 @@ Facing facing_at(Surface surface, float3 looking) {
                            saturate(2.0 * (pattern.fine + pattern.across + 0.3));
         const float breaking = max(foam.breaking * thickness, edge * breaking_thickness);
         // Foam left thins as it ages.
-        const float left = left_with_kept(foam, pattern, kept, footprint) * min(left_thickness * (0.4 + (1.2 * foam.fresh)), 1.0) *
-                           (1.0 - breaking);
+        const float left = left_with_kept(foam, pattern, kept, footprint) *
+                           min(left_thickness * (0.4 + (1.2 * foam.fresh)), 1.0) * (1.0 - breaking);
         facing.white = breaking + left;
         facing.albedo = facing.white > 0.0
                             ? ((breaking_albedo * breaking) + (left_albedo * left)) / facing.white

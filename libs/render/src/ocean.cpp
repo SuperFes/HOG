@@ -66,7 +66,7 @@ constexpr std::array vertex_attributes{
                                       .format = VK_FORMAT_R32G32_SFLOAT,
                                       .offset = offsetof(SeaVertex, towards)}};
 
-static_assert(sizeof(DrawnWaves) == (23 * sizeof(glm::vec4)) +
+static_assert(sizeof(DrawnWaves) == (24 * sizeof(glm::vec4)) +
                                         (drawn_waves * sizeof(DrawnWaves::Wave)) +
                                         (foam_waves * sizeof(DrawnWaves::FoamWave)));
 
@@ -464,6 +464,13 @@ Result<CalmSea> CalmSea::create(Device& device) {
         return std::unexpected(std::move(fetches).error());
     }
     calm.fetches_ = std::move(fetches).value();
+    const std::array<float, 4> no_foam{};
+    auto foam = make_filled_image(device, {.format = VK_FORMAT_R32G32B32A32_SFLOAT},
+                                  std::as_bytes(std::span{no_foam}));
+    if (!foam) {
+        return std::unexpected(std::move(foam).error());
+    }
+    calm.foam_ = std::move(foam).value();
     auto sampler = make_sampler(device, VK_FILTER_LINEAR);
     if (!sampler) {
         return std::unexpected(std::move(sampler).error());
@@ -476,6 +483,7 @@ SeaBindings CalmSea::bindings() const {
     return {.waves = waves_.handle(),
             .shore = depths_.view(),
             .fetches = fetches_.view(),
+            .foam = foam_.view(),
             .sampler = sampler_.handle()};
 }
 
@@ -634,6 +642,7 @@ SeaBindings Ocean::bindings(std::uint32_t frame) const {
     return {.waves = waves_.at(frame).handle(),
             .shore = shore_ ? shore_depths_.image().view() : calm_.bindings().shore,
             .fetches = shore_ ? shore_fetches_.image().view() : calm_.bindings().fetches,
+            .foam = foam_.kept().view(),
             .sampler = shore_sampler_.handle()};
 }
 
@@ -674,6 +683,8 @@ Result<> Ocean::write_waves(const OceanView& view, std::uint32_t frame) const {
         drawn.foam_anchor = {Vec3{placing.anchor}, static_cast<float>(1.0 / foam_spacing)};
         drawn.foam_east = {Vec3{placing.east}, static_cast<float>(placing.corner.x)};
         drawn.foam_north = {Vec3{placing.north}, static_cast<float>(placing.corner.y)};
+        drawn.foam_drifted = {static_cast<float>(placing.drifted.x),
+                              static_cast<float>(placing.drifted.y), 0.0F, 0.0F};
     }
     const Buffer& waves = waves_.at(frame);
     std::memcpy(waves.mapped().data(), &drawn, sizeof(drawn));

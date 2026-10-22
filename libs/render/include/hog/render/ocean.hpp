@@ -69,6 +69,7 @@ struct DrawnWaves {
     glm::vec4 foam_anchor{0.0F};
     glm::vec4 foam_east{0.0F};
     glm::vec4 foam_north{0.0F};
+    glm::vec4 foam_drifted{0.0F};
     // Of the waves on still water, as shaders/waves.slang takes them: the wind over it and how they
     // grow by their fetch under it, how white they'd be grown full, and of those left out.
     glm::vec4 still_wind{0.0F};
@@ -91,11 +92,12 @@ struct DrawnWaves {
                                         GameDuration day = {});
 
 // What draws over the ground at sea level read of the sea: as shaders/waves.slang's Waves and the
-// depths and fetches shaders/shore.slang reads.
+// depths and fetches shaders/shore.slang reads, and the foam a FoamMap keeps.
 struct SeaBindings {
     VkBuffer waves = VK_NULL_HANDLE;
     VkImageView shore = VK_NULL_HANDLE;
     VkImageView fetches = VK_NULL_HANDLE;
+    VkImageView foam = VK_NULL_HANDLE;
     VkSampler sampler = VK_NULL_HANDLE;
 };
 
@@ -111,6 +113,7 @@ private:
     Buffer waves_;
     Image depths_;
     Image fetches_;
+    Image foam_;
     Sampler sampler_;
 };
 

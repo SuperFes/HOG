@@ -56,6 +56,8 @@ struct Settings {
 [[vk::binding(8, 0)]] Sampler2DArray shore_depths;
 // When lit through the air, for what water mirrors.
 [[vk::binding(9, 0)]] Sampler2D sky_view_table;
+// The foam kept round the eye, as foam.slang keeps it, for what's stranded on the ground.
+[[vk::binding(10, 0)]] Sampler2D foam_kept;
 
 struct Vertex {
     [[vk::location(0)]] float3 position; // metres from the patch's origin
@@ -97,6 +99,11 @@ static const int wet_samples = 8;
 static const float wet_edges = 0.05;
 // How dark wet ground is, against dry.
 static const float wet_darkening = 0.55;
+// Of the light falling on foam stranded on the ground, the share it scatters back, and how thick
+// it lies; and less of it than this is too little to see.
+static const float stranded_albedo = 0.5;
+static const float stranded_thickness = 0.7;
+static const float least_stranded = 0.004;
 
 // Shares below this aren't worth sampling for.
 static const float least_biome = 1.0 / 256.0;
@@ -282,6 +289,20 @@ float wetness(Ground ground) {
     return wet;
 }
 
+// How much of the ground is white with foam the swash stranded on it as it drew back.
+float stranded_at(Ground ground) {
+    // Taken while every fragment is still running.
+    const float footprint = max(length(ddx(ground.from_eye)), length(ddy(ground.from_eye)));
+    if (settings.tiling.z <= 0.0) {
+        return 0.0;
+    }
+    const float stranded = kept_foam_at(sea, foam_kept, ground.from_eye).z;
+    if (stranded <= least_stranded) {
+        return 0.0;
+    }
+    return stranded_thickness * stranded_white(sea, ground.from_eye, stranded, footprint);
+}
+
 // Up from the planet's centre through the ground.
 float3 up_at(Ground ground) {
     return normalize(ground.from_eye + (push.bend_up.xyz * (push.bend_radii.x + push.bend_up.w)));
@@ -438,8 +459,9 @@ struct Shaded {
 // The ground's colour lit by `on_ground` facing its normal and `on_water` facing up, each times
 // pi, with water over it where it lies below the sea as high as it stands.
 float3 shaded(Ground ground, float3 normal, float3 on_ground, float3 on_water, float4 year) {
-    const float3 lit_ground = wooded(ground, scorched(ground, albedo(ground, normal)), year) *
-                              on_ground * lerp(1.0, wet_darkening, wetness(ground));
+    const float3 bare = wooded(ground, scorched(ground, albedo(ground, normal)), year) *
+                        lerp(1.0, wet_darkening, wetness(ground));
+    const float3 lit_ground = lerp(bare, float3(stranded_albedo), stranded_at(ground)) * on_ground;
     if (settings.tiling.z <= 0.0) {
         return lit_ground;
     }

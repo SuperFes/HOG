@@ -82,9 +82,10 @@ constexpr VkDescriptorSetLayoutBinding binding(std::uint32_t at, VkDescriptorTyp
             .pImmutableSamplers = nullptr};
 }
 
-// The sea, as high as it stands over the ground.
+// The sea, as high as it stands over the ground, and the foam it strands there.
 constexpr std::uint32_t sea_binding = 7;
 constexpr std::uint32_t shore_binding = 8;
+constexpr std::uint32_t foam_binding = 10;
 
 constexpr std::array descriptors{
     binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
@@ -93,7 +94,8 @@ constexpr std::array descriptors{
     binding(sea_binding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
             VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT),
     binding(shore_binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)};
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT),
+    binding(foam_binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)};
 // Lit through the air, it reads the air too.
 constexpr std::array air_descriptors{
     descriptors[0],
@@ -105,7 +107,8 @@ constexpr std::array air_descriptors{
     binding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
     descriptors[2],
     descriptors[3],
-    binding(9, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)};
+    binding(9, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
+    descriptors[4]};
 
 // The near tile's size, the far one's, and 1 if ground below sea level is seen through water; then
 // what each biome's material averages to, in linear light. Then the woods, as terrain.slang reads
@@ -405,6 +408,7 @@ void Terrain::draw(VkCommandBuffer commands, VkExtent2D extent, const TerrainPoo
     const SeaBindings sea = view.sea.waves != VK_NULL_HANDLE ? view.sea : calm_.bindings();
     push_uniform_buffer(commands, pipeline_, sea_binding, sea.waves);
     push_sampled_image(commands, pipeline_, shore_binding, sea.shore, sea.sampler);
+    push_sampled_image(commands, pipeline_, foam_binding, sea.foam, sea.sampler);
     const std::array vertices{pool.vertices()};
     const VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(commands, 0, 1, vertices.data(), &offset);

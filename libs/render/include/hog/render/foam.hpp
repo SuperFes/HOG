@@ -25,9 +25,12 @@ struct SeaBindings;
 inline constexpr std::uint32_t foam_size = 512;
 inline constexpr double foam_spacing = 1.0; // metres
 // Foam left fades to 1/e of itself over so many seconds, as long as hog::waves takes it to last;
-// in the surf, longer.
+// in the surf, longer; and stranded on the ground as the swash draws back, longer still.
 inline constexpr double foam_lasting = 3.0;
 inline constexpr double foam_lasting_surf = 10.0;
+inline constexpr double foam_lasting_stranded = 20.0;
+// Of the foam on water drawing back off the ground, the share left stranded there.
+inline constexpr double foam_stranding = 0.3;
 // Where nothing's kept, the foam's caught up over so many steps of so many seconds before now.
 inline constexpr int foam_catch_up = 48;
 inline constexpr double foam_catch_up_step = 0.25;
@@ -46,12 +49,14 @@ struct FoamStep {
 };
 
 // Where the grid lies from the eye: where its plane touches sea level, the ways its rows and
-// columns run along it, and its first texel's corner, metres along those from where it touches.
+// columns run along it, and its first texel's corner, metres along those from where it touches;
+// and how far the water's drifted along them since it was laid.
 struct FoamPlacing {
     DVec3 anchor{0.0};
     DVec3 east{1.0, 0.0, 0.0};
     DVec3 north{0.0, 1.0, 0.0};
     DVec2 corner{0.0};
+    DVec2 drifted{0.0};
 };
 
 class FoamGrid {
@@ -83,8 +88,9 @@ private:
 [[nodiscard]] DVec2 foam_texel(const FoamPlacing& placing, DVec3 rest) noexcept;
 
 // The foam left on the sea round the eye: how much lies on each texel of the grid, fading as it
-// ages; and how much of what would have left it there the grid saw, which is less where it's
-// only just come over it.
+// ages; how much of what would have left it there the grid saw, which is less where it's only just
+// come over it; and how much the water left stranded on the ground there, which stays with the
+// ground as the water drifts on, till the water comes back for it.
 class FoamMap {
 public:
     FoamMap() = default;

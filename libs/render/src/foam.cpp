@@ -74,7 +74,8 @@ FoamPlacing FoamGrid::placing(DVec3 up, double radius, double height) const {
     return {.anchor = (plane_->touching * radius) - (up * (radius + height)),
             .east = plane_->east,
             .north = plane_->north,
-            .corner = drifted_ + (DVec2{centre_ - glm::ivec2{foam_size / 2}} * foam_spacing)};
+            .corner = drifted_ + (DVec2{centre_ - glm::ivec2{foam_size / 2}} * foam_spacing),
+            .drifted = drifted_};
 }
 
 DVec2 foam_texel(const FoamPlacing& placing, DVec3 rest) noexcept {
