@@ -505,13 +505,17 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     const waves::SeaState sea_state = sea_at_eye(shot);
     foam_drifted_ += waves::foam_drift(sea_state) * shot.seconds;
     const std::vector<waves::Wave> waves = waves::waves_at(wave_trains_, shot.bend.up, sea_state);
-    const render::OceanView sea{
-        .camera = shot.camera,
-        .sun = sky.sun,
-        .bend = shot.bend,
-        .air = through,
-        .waves = render::drawn_waves_at(wave_trains_, waves, sea_state, shot.camera.eye, shot.bend,
-                                        shot.time, foam_drifted_, calendar_.day_length())};
+    render::DrawnWaves drawn_waves =
+        render::drawn_waves_at(wave_trains_, waves, sea_state, shot.camera.eye, shot.bend,
+                               shot.time, foam_drifted_, calendar_.day_length());
+    drawn_waves.rain = {
+        static_cast<float>(render::rain_ring_chance(falling, static_cast<double>(here.snow))),
+        static_cast<float>(render::rain_ring_seconds(shot.time)), 0.0F, 0.0F};
+    const render::OceanView sea{.camera = shot.camera,
+                                .sun = sky.sun,
+                                .bend = shot.bend,
+                                .air = through,
+                                .waves = drawn_waves};
     graph.add({.name = "foam", .uses = {}, .targets = std::nullopt}, [&](VkCommandBuffer commands) {
         return ocean_.step_foam(commands, sea, frame.slot, shot.time, waves::foam_drift(sea_state),
                                 shot.still);

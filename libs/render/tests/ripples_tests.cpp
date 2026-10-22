@@ -177,9 +177,10 @@ double glint_reach(std::span<const std::uint8_t> pixels, int bright) {
 }
 
 // The calm sea seen straight down from `height` metres, the sun overhead, with `ripples` laid
-// round the eye if any; read back.
+// round the eye if any, and `rain` as DrawnWaves has it; read back.
 std::vector<std::uint8_t> seen_down(hog::render::Device& device, double height,
-                                    const std::optional<std::vector<DVec2>>& ripples) {
+                                    const std::optional<std::vector<DVec2>>& ripples,
+                                    glm::vec4 rain = glm::vec4{0.0F}) {
     auto ocean = hog::render::Ocean::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
     REQUIRE(ocean);
     constexpr double radius = 115'000.0;
@@ -189,7 +190,8 @@ std::vector<std::uint8_t> seen_down(hog::render::Device& device, double height,
         .camera = {.eye = eye, .forward = -up, .up = DVec3{0.0, 1.0, 0.0}},
         .sun = up,
         .sky = {0.2F, 0.4F, 0.8F},
-        .bend = hog::terrain::bend_from(eye, radius, 0.0)};
+        .bend = hog::terrain::bend_from(eye, radius, 0.0),
+        .waves = {.rain = rain}};
     if (ripples) {
         REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
             REQUIRE(ocean->step_ripples(
@@ -524,5 +526,45 @@ TEST_CASE("ripples scatter the sun's glint off the sea, or blur it where too fin
     const std::vector<std::uint8_t> rippled_far = seen_down(*device, 200.0, ripples);
     CAPTURE(glint_reach(calm_far, 20), glint_reach(rippled_far, 20));
     CHECK(glint_reach(rippled_far, 20) > 1.2 * glint_reach(calm_far, 20));
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("rain rings the water as often as drops big enough fall, not snow", "[render]") {
+    using hog::render::rain_ring_chance;
+    CHECK(rain_ring_chance(0.0, 0.0) == 0.0);
+    CHECK(rain_ring_chance(4.0, 1.0) == 0.0);
+    CHECK_THAT(rain_ring_chance(2.0, 0.5), WithinAbs(rain_ring_chance(1.0, 0.0), 1e-12));
+    // Each cell of each layer rings once a life as often as so many drops fall on it.
+    const double cell = hog::render::rain_ring_cell * hog::render::rain_ring_cell;
+    CHECK_THAT(rain_ring_chance(1.0, 0.0) * hog::render::rain_ring_layers /
+                   (cell * hog::render::rain_ring_life),
+               WithinAbs(hog::render::rings_per_rain, 1e-9));
+    CHECK(rain_ring_chance(200.0, 0.0) == 1.0);
+    // Counted round, but on to the next second the same.
+    const hog::GameTime now{std::chrono::seconds{1'792'000'000}};
+    const double seconds = hog::render::rain_ring_seconds(now);
+    CHECK(seconds >= 0.0);
+    CHECK(seconds < hog::render::rain_ring_life * 5'000.0);
+    CHECK_THAT(std::fmod(hog::render::rain_ring_seconds(now + std::chrono::milliseconds{250}) -
+                             seconds + 3'500.0,
+                         3'500.0),
+               WithinAbs(0.25, 1e-6));
+}
+
+TEST_CASE("rain rings scatter the sun's glint off the sea, or blur it where too fine to draw",
+          "[render][gpu]") {
+    const auto device = test_device();
+    const std::vector<DVec2> still(texels);
+    const glm::vec4 rain{static_cast<float>(hog::render::rain_ring_chance(5.0, 0.0)), 12.3F, 0.0F,
+                         0.0F};
+    const std::vector<std::uint8_t> dry = seen_down(*device, 0.5, still);
+    const std::vector<std::uint8_t> wet = seen_down(*device, 0.5, still, rain);
+    CAPTURE(glint_reach(dry, 100), glint_reach(wet, 100));
+    CHECK(glint_reach(wet, 100) > 2.0 * glint_reach(dry, 100));
+    const std::vector<std::uint8_t> dry_far = seen_down(*device, 200.0, still);
+    const std::vector<std::uint8_t> wet_far = seen_down(*device, 200.0, still, rain);
+    // Dimmer, so seen fainter.
+    CAPTURE(glint_reach(dry_far, 5), glint_reach(wet_far, 5));
+    CHECK(glint_reach(wet_far, 5) > 1.5 * glint_reach(dry_far, 5));
     CHECK(device->validation_errors() == 0);
 }

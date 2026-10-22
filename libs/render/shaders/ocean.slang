@@ -195,6 +195,79 @@ float2 ripple_slope_at(float3 rest, float footprint, out float unseen) {
     return slope * seen;
 }
 
+// As hog::render::rain_ring_cell, rain_ring_layers and rain_ring_life.
+static const float rain_ring_cell = 0.3;
+static const int rain_ring_layers = 4;
+static const float rain_ring_life = 0.7;
+// A ring spreads as fast as the slowest ripples on water run, m/s; its ripples so many metres
+// long, as steep as this as it starts.
+static const float ring_speed = 0.3;
+static const float ring_length = 0.03;
+static const float ring_steepest = 0.3;
+// The mean square slope the most rain rings lend the sea where they're too fine to draw.
+static const float rain_roughness = 0.02;
+
+// Three numbers from 0 to 1 that look random, the same for the same `seed`.
+float3 random_of(int3 seed) {
+    // Jarzynski and Olano's PCG3D.
+    uint3 v = uint3(seed) * 1664525u + 1013904223u;
+    v.x += v.y * v.z;
+    v.y += v.z * v.x;
+    v.z += v.x * v.y;
+    v ^= v >> 16u;
+    v.x += v.y * v.z;
+    v.y += v.z * v.x;
+    v.z += v.x * v.y;
+    return float3(v) / 4294967296.0;
+}
+
+// How steeply the rain's rings slope the water at `rest`, a point of sea level from the eye, along
+// the ripples' grid's rows and columns, as drawn seen over `footprint` metres; and in `unseen`,
+// the mean square slope of them too fine to draw. None without a grid to lay them on.
+float2 rain_slope_at(float3 rest, float footprint, out float unseen) {
+    const float chance = waves.rain.x;
+    // Drawn only as fine as the pixels can show their ripples.
+    const float seen = saturate(2.0 - (2.0 * footprint / ring_length));
+    unseen = rain_roughness * chance * (1.0 - seen);
+    if (chance <= 0.0 || seen <= 0.0 || waves.ripple_anchor.w <= 0.0) {
+        unseen = rain_roughness * chance;
+        return float2(0.0);
+    }
+    const float3 from_anchor = rest - waves.ripple_anchor.xyz;
+    const float2 along =
+        float2(dot(from_anchor, waves.ripple_east.xyz), dot(from_anchor, waves.ripple_north.xyz));
+    float2 slope = float2(0.0);
+    for (int layer = 0; layer < rain_ring_layers; ++layer) {
+        const float2 within = (along / rain_ring_cell) + (float2(0.37, 0.71) * float(layer));
+        const int2 cell = int2(floor(within));
+        for (int y = -1; y <= 1; ++y) {
+            for (int x = -1; x <= 1; ++x) {
+                const int2 at = cell + int2(x, y);
+                // Each cell rings in its own time.
+                const float lived = (waves.rain.y / rain_ring_life) +
+                                    random_of(int3(at, layer - rain_ring_layers)).x;
+                const float age = frac(lived);
+                const float3 drop = random_of(int3(at, (int(floor(lived)) * rain_ring_layers) + layer));
+                if (drop.z >= chance) {
+                    continue;
+                }
+                const float2 from = (within - (float2(at) + drop.xy)) * rain_ring_cell;
+                const float out = length(from);
+                const float behind = out - (age * rain_ring_life * ring_speed);
+                if (abs(behind) > 2.0 * ring_length) {
+                    continue;
+                }
+                const float fading = (1.0 - age) * (1.0 - age);
+                const float across = behind / ring_length;
+                const float steepness = -ring_steepest * fading * exp(-across * across) *
+                                        sin(2.0 * pi * across);
+                slope += from * (steepness / max(out, 1e-4));
+            }
+        }
+    }
+    return slope * seen;
+}
+
 // Whether the surface is a lake's kept out over ground the grids find dry, which isn't drawn: the
 // ground would hide it, but where the level runs out over lower ground between their texels, or
 // waves lift it up the shore between the disc's corners far off. Told at each pixel. The ground's
@@ -209,12 +282,14 @@ Facing facing_at(Surface surface, float3 looking) {
     const WaveSurface water =
         wave_surface(waves, surface.rest, footprint, surface.floor.xyz, surface.fetch);
     float unseen;
-    const float2 slope = ripple_slope_at(surface.rest, footprint, unseen);
+    float unseen_rain;
+    const float2 slope = ripple_slope_at(surface.rest, footprint, unseen) +
+                         rain_slope_at(surface.rest, footprint, unseen_rain);
     const float3 rippled = normalize(water.normal - (waves.ripple_east.xyz * slope.x) -
                                      (waves.ripple_north.xyz * slope.y));
     Facing facing;
     facing.normal = as_drawn(rippled, push.up_height.xyz, normalize(surface.normal));
-    facing.roughness = water.roughness + ripples + unseen;
+    facing.roughness = water.roughness + ripples + unseen + unseen_rain;
     facing.white = 0.0;
     facing.albedo = breaking_albedo;
     const Surf surf = as_surf(surface.surf);

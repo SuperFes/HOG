@@ -2,6 +2,7 @@
 
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
+#include <hog/core/time.hpp>
 #include <hog/render/barrier.hpp>
 #include <hog/render/drifting_grid.hpp>
 #include <hog/render/memory.hpp>
@@ -37,6 +38,22 @@ inline constexpr double ripple_shallowest = 0.05;
 // it, as though pressing on it; only so many bodies do so at once.
 inline constexpr double ripple_push = 0.05;
 inline constexpr std::size_t ripple_most_bodies = 16;
+
+// Rain rings the water where each drop falls, drawn where they'd be seen: each from a random
+// point of a cell so many metres across, of so many layers of cells laid over each other, a ring
+// at a time, each spreading over so many seconds.
+inline constexpr double rain_ring_cell = 0.3;
+inline constexpr int rain_ring_layers = 4;
+inline constexpr double rain_ring_life = 0.7;
+// So many drops ring the water each second over a square metre, for each mm an hour of rain: the
+// drops big enough to show.
+inline constexpr double rings_per_rain = 10.0;
+
+// The chance each cell of each layer rings once over a ring's life, with `falling` mm an hour
+// falling, `snow` of it as snow; the most rain rings show no more.
+[[nodiscard]] double rain_ring_chance(double falling, double snow) noexcept;
+// Seconds at `time`, counted round every so many rings' lives, as rain rings are timed by.
+[[nodiscard]] double rain_ring_seconds(GameTime time) noexcept;
 
 // A body as a capsule standing on its feet, laid on the ripples' grid.
 struct RippleBody {

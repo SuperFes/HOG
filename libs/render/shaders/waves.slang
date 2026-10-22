@@ -106,6 +106,9 @@ public struct Waves {
     public float4 ripple_anchor;
     public float4 ripple_east;
     public float4 ripple_north;
+    // Of rain ringing the water: x the chance each cell of each layer rings once over a ring's life,
+    // as hog::render::rain_ring_chance has it; y seconds, counted round now and then.
+    public float4 rain;
     // Of the waves on still water, as hog::waves::fetched has them: xyz which way the wind blows,
     // in the planet's frame, and w the fourth power of the peak of a sea grown full under it, or
     // none without wind. Then x and y how the sea's height and peak grow by its fetch, as

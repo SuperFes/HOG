@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -64,6 +65,19 @@ Result<Pipeline> stage(const Device& device, const char* entry) {
 }
 
 } // namespace
+
+double rain_ring_chance(double falling, double snow) noexcept {
+    const double rain = std::max(falling, 0.0) * std::clamp(1.0 - snow, 0.0, 1.0);
+    return std::min(rain * rings_per_rain * rain_ring_cell * rain_ring_cell * rain_ring_life /
+                        rain_ring_layers,
+                    1.0);
+}
+
+double rain_ring_seconds(GameTime time) noexcept {
+    // Short enough to time a ring to a hair in a float.
+    constexpr double round = rain_ring_life * 5'000.0;
+    return std::fmod(std::chrono::duration<double>(time.time_since_epoch()).count(), round);
+}
 
 Result<RippleMap> RippleMap::create(Device& device, std::uint32_t frames) {
     RippleMap map;

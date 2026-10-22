@@ -809,3 +809,40 @@ TEST_CASE("wakes, to look at", "[.look]") {
         }
     }
 }
+
+// Not a check: stills of rain falling on a calm sea, lighter and heavier, seen from standing in the
+// shallows and from over them. Saved where HOG_LOOK names.
+TEST_CASE("rain on the sea, to look at", "[.look]") {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
+    const char* where = std::getenv("HOG_LOOK");
+    REQUIRE(where != nullptr);
+    const auto device = test_device();
+    hog::jobs::JobSystem jobs{4};
+    auto scene = Scene::create(*device, world(), jobs, calendar(), hog::client::still_format, 1);
+    REQUIRE(scene);
+    const auto raining = [](float falling) {
+        return everywhere({.cloud = 0.8F,
+                           .falling = falling,
+                           .drift = {2.0F, 0.5F},
+                           .wind = {1.5F, 0.4F},
+                           .base = 1'200.0F,
+                           .top = 3'000.0F,
+                           .swells = {hog::protocol::CellWaves{}, hog::protocol::CellWaves{}},
+                           .current = {}});
+    };
+    const hog::client::Forecast light = raining(2.0F);
+    const hog::client::Forecast heavy = raining(12.0F);
+    for (const auto& [name, altitude, pitch] :
+         {std::tuple{"standing", 1.7, -0.45}, std::tuple{"over", 6.0, -0.5}}) {
+        Shot shot = off_the_coast(-3.0, altitude, false, pitch);
+        for (const auto& [rain, forecast] :
+             {std::pair{"light", &light}, std::pair{"heavy", &heavy}}) {
+            shot.forecast = forecast;
+            const auto still =
+                hog::client::draw_still(*device, *scene, shot, {.width = 960, .height = 540});
+            REQUIRE(still);
+            REQUIRE(hog::client::save_picture(
+                std::filesystem::path{where} / std::format("{}_rain_{}.png", rain, name), *still));
+        }
+    }
+}

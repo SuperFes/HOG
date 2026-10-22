@@ -76,6 +76,8 @@ struct DrawnWaves {
     glm::vec4 ripple_anchor{0.0F};
     glm::vec4 ripple_east{0.0F};
     glm::vec4 ripple_north{0.0F};
+    // Of rain ringing the water: x rain_ring_chance, y seconds, counted round now and then.
+    glm::vec4 rain{0.0F};
     // Of the waves on still water, as shaders/waves.slang takes them: the wind over it and how they
     // grow by their fetch under it, how white they'd be grown full, and of those left out.
     glm::vec4 still_wind{0.0F};
