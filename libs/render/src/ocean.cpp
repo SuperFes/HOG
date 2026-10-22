@@ -187,7 +187,8 @@ constexpr VkDescriptorSetLayoutBinding waves_descriptor =
 
 constexpr std::uint32_t shore_binding = 7;
 constexpr VkDescriptorSetLayoutBinding shore_descriptor =
-    binding(shore_binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_VERTEX_BIT);
+    binding(shore_binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
 
 constexpr std::uint32_t fetch_binding = 8;
 // Layers of fetches to each of the depths', four headings to each.
@@ -481,7 +482,8 @@ Result<Ocean> Ocean::create(Device& device, VkFormat colour_format, VkFormat dep
     ocean.shore_sampler_ = std::move(sampler).value();
     // Deep water, until there are depths.
     const std::vector<std::uint16_t> deep_water = shore_texels(
-        std::vector<float>(layers, 1'000.0F), std::vector<float>(layers, terrain::shore_highest));
+        std::vector<float>(layers, 1'000.0F), std::vector<float>(layers, terrain::shore_highest),
+        std::vector<float>(layers, 0.0F));
     auto none =
         make_filled_image(device, {.format = VK_FORMAT_R16G16B16A16_SFLOAT, .layers = layers},
                           std::as_bytes(std::span{deep_water}));
@@ -533,16 +535,20 @@ Result<Ocean> Ocean::create(Device& device, VkFormat colour_format, VkFormat dep
     return ocean;
 }
 
-std::vector<std::uint16_t> shore_texels(std::span<const float> depths,
-                                        std::span<const float> still) {
-    HOG_ASSERT(depths.size() == still.size(), "depths of the sea and still water don't match");
+std::vector<std::uint16_t> shore_texels(std::span<const float> depths, std::span<const float> still,
+                                        std::span<const float> levels) {
+    HOG_ASSERT(depths.size() == still.size() && depths.size() == levels.size(),
+               "depths of the sea and still water and its levels don't match");
     std::vector<std::uint16_t> halves;
     halves.reserve(depths.size() * 4);
     for (std::size_t at = 0; at < depths.size(); ++at) {
         halves.push_back(static_cast<std::uint16_t>(glm::packHalf1x16(depths[at])));
         halves.push_back(static_cast<std::uint16_t>(glm::packHalf1x16(still[at])));
-        halves.push_back(0);
-        halves.push_back(0);
+        // A half float alone would put a lake high in the mountains metres out.
+        const auto near = static_cast<std::uint16_t>(glm::packHalf1x16(levels[at]));
+        halves.push_back(near);
+        halves.push_back(
+            static_cast<std::uint16_t>(glm::packHalf1x16(levels[at] - glm::unpackHalf1x16(near))));
     }
     return halves;
 }
@@ -565,7 +571,7 @@ std::vector<std::uint16_t> fetch_texels(std::span<const float> fetches) {
 
 Result<> Ocean::update_shore(VkCommandBuffer commands, std::uint32_t frame,
                              const terrain::ShoreDepths& shore) {
-    const std::vector<std::uint16_t> depths = shore_texels(shore.depths, shore.still);
+    const std::vector<std::uint16_t> depths = shore_texels(shore.depths, shore.still, shore.levels);
     if (auto updated = shore_depths_.update(commands, frame, std::as_bytes(std::span{depths}));
         !updated) {
         return updated;
@@ -576,6 +582,7 @@ Result<> Ocean::update_shore(VkCommandBuffer commands, std::uint32_t frame,
         return updated;
     }
     shore_ = shore.frame;
+    lake_levels_ = terrain::lake_levels(shore);
     return {};
 }
 
@@ -626,7 +633,8 @@ Result<> Ocean::record(VkCommandBuffer commands, VkExtent2D extent, const OceanV
         return flushed;
     }
     const double aspect = static_cast<double>(extent.width) / static_cast<double>(extent.height);
-    const terrain::SeaReach reach = terrain::sea_reach(view.bend);
+    const terrain::SeaReach reach =
+        terrain::sea_reach(view.bend, terrain::water_below(lake_levels_, view.bend.eye_height));
     const Push push{.clip_from_eye = Mat4{view_projection(view.camera, aspect)},
                     .up_height =
                         glm::vec4{Vec3{view.bend.up}, static_cast<float>(view.bend.eye_height)},

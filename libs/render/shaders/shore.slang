@@ -49,17 +49,18 @@ ShoreAt shore_at(float4 anchor, float4 east, float4 north, float radius, float3 
 }
 
 // Of the sea and still water under `rest`, from `depths` laid as shore_at has them: x metres of the
-// sea, y of still water the sea can't reach. Where no layer lies, the sea is too deep for any wave
-// to feel its floor; over land, as high above the water as the grids keep.
-public float2 shore_waters(Sampler2DArray depths, float4 anchor, float4 east, float4 north,
+// sea, y of still water the sea can't reach, and z the level, metres above the sea, still water is
+// kept to there. Where no layer lies, the sea is too deep for any wave to feel its floor; over
+// land, as high above the water as the grids keep.
+public float3 shore_waters(Sampler2DArray depths, float4 anchor, float4 east, float4 north,
                            float radius, float3 rest) {
     const ShoreAt at = shore_at(anchor, east, north, radius, rest);
-    float2 waters = float2(shore_deep, shore_highest);
+    float3 waters = float3(shore_deep, shore_highest, 0.0);
     for (int layer = 1; layer >= 0; --layer) {
         if (at.inside[layer] > 0.0) {
-            const float2 found =
-                depths.SampleLevel(float3(at.centred[layer] + 0.5, float(layer)), 0.0).xy;
-            waters = lerp(waters, found, at.inside[layer]);
+            const float4 found =
+                depths.SampleLevel(float3(at.centred[layer] + 0.5, float(layer)), 0.0);
+            waters = lerp(waters, float3(found.xy, found.z + found.w), at.inside[layer]);
         }
     }
     return waters;

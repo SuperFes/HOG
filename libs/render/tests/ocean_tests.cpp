@@ -131,11 +131,14 @@ Patch level_patch(double along, double across, double height) {
 }
 
 // The tide standing `tide` metres over the sea's mean, round the eye over depths of `depth`
-// everywhere as the shore's grids keep them; and the waves running up the shore there, as
-// DrawnWaves has them, their swash turned as far as `incident` and `surging` through the eye.
+// everywhere as the shore's grids keep them, and of still water `still` kept to `level`; and the
+// waves running up the shore there, as DrawnWaves has them, their swash turned as far as
+// `incident` and `surging` through the eye.
 struct Tide {
     double tide = 0.0;
     float depth = 0.0F;
+    float still = hog::terrain::shore_highest;
+    float level = 0.0F;
     glm::vec4 run_up{0.0F};
     float incident = 0.0F;
     float surging = 0.0F;
@@ -192,7 +195,8 @@ std::vector<std::uint8_t> draw_patch(hog::render::Device& device, OceanView view
                 commands, 0,
                 {.frame = hog::terrain::shore_frame(view.bend.up, radius),
                  .depths = std::vector<float>(texels, tide->depth),
-                 .still = std::vector<float>(texels, hog::terrain::shore_highest),
+                 .still = std::vector<float>(texels, tide->still),
+                 .levels = std::vector<float>(texels, tide->level),
                  .fetches = std::vector<float>(texels * hog::terrain::fetch_headings, 0.0F)}));
         }
         hog::render::transition(commands, target->handle(), VK_IMAGE_ASPECT_COLOR_BIT, use::discard,
@@ -431,6 +435,40 @@ TEST_CASE("the tide floods low ground the sea reaches, and bares ground under it
     // Half a metre below it, bared with the tide well out.
     CHECK(seen(-0.5, true, Tide{.tide = -1.0, .depth = 0.5F}) ==
           pixel_at(draw(*device, view, -0.5, false, false), middle, middle));
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("a lake stands at its level over its bed, high above the sea", "[render][gpu]") {
+    const auto device = test_device();
+    const std::uint32_t middle = extent.width / 2;
+    const auto seen = [&](double eye, double ground, bool sea, std::optional<Tide> tide) {
+        const OceanView view = seen_from(eye, -up, north, glm::normalize(east + up));
+        return pixel_at(draw(*device, view, ground, sea, true, tide), middle, middle);
+    };
+    const auto near = [](Pixel a, Pixel b) {
+        for (std::size_t channel = 0; channel < 3; ++channel) {
+            if (std::abs(a.at(channel) - b.at(channel)) > 2) {
+                return false;
+            }
+        }
+        return true;
+    };
+    // Four metres over a lake whose bed lies half a metre under its level, a hundred metres up, as
+    // over the sea's.
+    constexpr float lake = 100.0F;
+    const Pixel dry = seen(104.0, 99.5, false, std::nullopt);
+    const Pixel under =
+        seen(104.0, 99.5, true,
+             Tide{.depth = hog::terrain::shore_highest, .still = 0.5F, .level = lake});
+    CAPTURE(dry, under);
+    CHECK(under != dry);
+    CHECK(near(under, seen(4.0, -0.5, true, Tide{.depth = 0.5F})));
+    // Over its shore, dry; and where the grids find the ground far over it, though it lies under.
+    CHECK(seen(104.0, 100.5, true,
+               Tide{.depth = hog::terrain::shore_highest, .still = -0.5F, .level = lake}) ==
+          seen(104.0, 100.5, false, std::nullopt));
+    CHECK(seen(104.0, 99.5, true,
+               Tide{.depth = hog::terrain::shore_highest, .still = -3.0F, .level = lake}) == dry);
     CHECK(device->validation_errors() == 0);
 }
 
@@ -1254,20 +1292,23 @@ struct ShoreFound {
     double depth;
     double still;
     double fetch;
+    double level;
 };
 
 // Of fields over the plane of `frame`, each by metres east and north on it: of the sea's depths,
-// still water's and the fetch towards each heading. What the ocean's shaders find under each of
-// `points`, the fetch for a wind blowing towards `wind`.
+// still water's, the level it's kept to and the fetch towards each heading. What the ocean's
+// shaders find under each of `points`, the fetch for a wind blowing towards `wind`.
 std::vector<ShoreFound> probe_shore(hog::render::Device& device,
                                     const hog::terrain::ShoreFrame& frame, const auto& depth_at,
-                                    const auto& still_at, const auto& fetch_at, DVec3 wind,
+                                    const auto& still_at, const auto& level_at,
+                                    const auto& fetch_at, DVec3 wind,
                                     std::span<const hog::DVec2> points) {
     using hog::terrain::fetch_headings;
     using hog::terrain::shore_size;
     using hog::terrain::shore_spacing;
     std::vector<float> depths;
     std::vector<float> still;
+    std::vector<float> levels;
     std::vector<float> fetches;
     const auto each = [&](double spacing, const auto& at) {
         const double first = (0.5 - (shore_size / 2.0)) * spacing;
@@ -1281,6 +1322,7 @@ std::vector<ShoreFound> probe_shore(hog::render::Device& device,
         each(spacing, [&](hog::DVec2 at) {
             depths.push_back(static_cast<float>(depth_at(at)));
             still.push_back(static_cast<float>(still_at(at)));
+            levels.push_back(static_cast<float>(level_at(at)));
         });
         for (int heading = 0; heading < fetch_headings; ++heading) {
             each(spacing, [&](hog::DVec2 at) {
@@ -1297,7 +1339,7 @@ std::vector<ShoreFound> probe_shore(hog::render::Device& device,
                                                         {.width = shore_size, .height = shore_size},
                                                         1, layers * fetch_headings / 4);
     REQUIRE(fetch_image);
-    const std::vector<std::uint16_t> texels = hog::render::shore_texels(depths, still);
+    const std::vector<std::uint16_t> texels = hog::render::shore_texels(depths, still, levels);
     const std::vector<std::uint16_t> fetch_texels = hog::render::fetch_texels(fetches);
     REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
         REQUIRE(image->update(commands, 0, std::as_bytes(std::span{texels})));
@@ -1371,7 +1413,8 @@ std::vector<ShoreFound> probe_shore(hog::render::Device& device,
     for (const auto& at : found) {
         shore_found.push_back({.depth = static_cast<double>(at[0]),
                                .still = static_cast<double>(at[1]),
-                               .fetch = static_cast<double>(at[2])});
+                               .fetch = static_cast<double>(at[2]),
+                               .level = static_cast<double>(at[3])});
     }
     return shore_found;
 }
@@ -1391,7 +1434,7 @@ TEST_CASE("the sea's shaders find the depths round the eye", "[render][ocean][gp
                                            hog::DVec2{-20000.0, 5.0}};
     const std::vector<ShoreFound> found = probe_shore(
         *device, frame, depth_at, [](hog::DVec2) { return hog::terrain::shore_highest; },
-        [](hog::DVec2, int) { return 0.0; }, frame.east, points);
+        [](hog::DVec2) { return 0.0; }, [](hog::DVec2, int) { return 0.0; }, frame.east, points);
     REQUIRE(found.size() == points.size());
     // Half floats keep about three digits.
     for (std::size_t i = 0; i < 4; ++i) {
@@ -1425,7 +1468,7 @@ TEST_CASE("the sea's shaders find still water round the eye, and the fetch over 
         CAPTURE(degrees);
         const std::vector<ShoreFound> found = probe_shore(
             *device, frame, [](hog::DVec2) { return hog::terrain::shore_highest; }, still_at,
-            fetch_at, towards(degrees), points);
+            [](hog::DVec2) { return 0.0; }, fetch_at, towards(degrees), points);
         const double between = std::fmod(degrees, 45.0) / 45.0;
         for (std::size_t i = 0; i < points.size(); ++i) {
             CAPTURE(i);
@@ -1434,6 +1477,27 @@ TEST_CASE("the sea's shaders find still water round the eye, and the fetch over 
                                                            fetch_at(points[i], after), between),
                                                  0.5));
         }
+    }
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("the sea's shaders find a lake's level high in the mountains to a hair",
+          "[render][ocean][gpu]") {
+    const auto device = test_device();
+    const hog::terrain::ShoreFrame frame =
+        hog::terrain::shore_frame(glm::normalize(DVec3{0.6, 0.1, -0.7}), radius);
+    // Not a level lake, so filtering between texels is seen to keep it.
+    const auto level_at = [](hog::DVec2 at) { return 2'345.678 + (0.0003 * at.x); };
+    const std::array<hog::DVec2, 3> points{hog::DVec2{0.0, 0.0}, hog::DVec2{301.0, -419.0},
+                                           hog::DVec2{-2'003.0, 3'001.0}};
+    const std::vector<ShoreFound> found = probe_shore(
+        *device, frame, [](hog::DVec2) { return hog::terrain::shore_highest; },
+        [](hog::DVec2) { return 4.0; }, level_at, [](hog::DVec2, int) { return 100.0; }, frame.east,
+        points);
+    for (std::size_t i = 0; i < points.size(); ++i) {
+        CAPTURE(i);
+        CHECK_THAT(found[i].level, WithinAbs(level_at(points[i]), 0.01));
+        CHECK_THAT(found[i].still, WithinAbs(4.0, 1e-3));
     }
     CHECK(device->validation_errors() == 0);
 }

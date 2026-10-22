@@ -11,6 +11,8 @@
 #include <cstddef>
 #include <cstdlib>
 #include <functional>
+#include <numbers>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -33,6 +35,13 @@ constexpr double radius = 115'000.0;
 const hog::planet::Elevation& terrain() {
     static const hog::planet::Elevation elevation{
         {.seed = 4, .ocean_fraction = 0.7, .radius = radius}};
+    return elevation;
+}
+
+// A planet with lakes on it.
+const hog::planet::Elevation& lakeland() {
+    static const hog::planet::Elevation elevation{
+        {.seed = 1, .ocean_fraction = 0.7, .radius = radius}};
     return elevation;
 }
 
@@ -90,8 +99,12 @@ TEST_CASE("a shore's depths are the sea's at each texel", "[terrain][shore]") {
     const ShoreFrame frame = shore_frame(coast, radius);
     for (const double spacing : shore_spacing) {
         CAPTURE(spacing);
-        const std::vector<float> depths = shore_depths(terrain(), frame, radius, spacing);
+        const hog::terrain::ShoreGround ground =
+            hog::terrain::shore_ground(terrain(), frame, radius, spacing);
+        const std::vector<float> depths = shore_depths(ground);
         REQUIRE(depths.size() == static_cast<std::size_t>(shore_size) * shore_size);
+        REQUIRE(ground.elevations.size() == depths.size());
+        REQUIRE(ground.lakes.size() == depths.size());
         // Round an island, both land and sea.
         CHECK(std::ranges::count(depths, hog::terrain::shore_highest) > 0);
         CHECK(std::ranges::count_if(depths, [](float depth) { return depth > 1.0F; }) > 0);
@@ -101,11 +114,14 @@ TEST_CASE("a shore's depths are the sea's at each texel", "[terrain][shore]") {
             const double half = shore_size / 2.0;
             const DVec3 at = shore_direction(
                 frame, radius, {(column + 0.5 - half) * spacing, (row + 0.5 - half) * spacing});
-            const double expected = std::max(
-                -hog::planet::fixed_to_double(terrain().elevation(hog::planet::cell_at(at))),
-                static_cast<double>(hog::terrain::shore_highest));
-            CHECK_THAT(depths.at(static_cast<std::size_t>((row * shore_size) + column)),
-                       WithinAbs(expected, 1e-3));
+            const double elevation =
+                hog::planet::fixed_to_double(terrain().elevation(hog::planet::cell_at(at)));
+            const double expected =
+                std::max(-elevation, static_cast<double>(hog::terrain::shore_highest));
+            const std::size_t texel =
+                (static_cast<std::size_t>(row) * shore_size) + static_cast<std::size_t>(column);
+            CHECK_THAT(depths.at(texel), WithinAbs(expected, 1e-3));
+            CHECK_THAT(ground.elevations.at(texel), WithinAbs(elevation, 1e-3));
         }
     }
 }
@@ -124,14 +140,26 @@ TEST_CASE("the depths round the eye are worked out anew as it moves on", "[terra
     CHECK(first.depths.size() == shore_spacing.size() * layer);
     // As the terrain has them, but where the sea can't reach.
     std::vector<float> expected;
+    std::vector<float> elevations;
+    std::vector<float> lakes;
     for (const double spacing : shore_spacing) {
-        const std::vector<float> one = shore_depths(terrain(), first.frame, radius, spacing);
+        const hog::terrain::ShoreGround ground =
+            hog::terrain::shore_ground(terrain(), first.frame, radius, spacing);
+        const std::vector<float> one = shore_depths(ground);
         expected.insert(expected.end(), one.begin(), one.end());
+        elevations.insert(elevations.end(), ground.elevations.begin(), ground.elevations.end());
+        lakes.insert(lakes.end(), ground.lakes.begin(), ground.lakes.end());
     }
-    const std::vector<float> still = hog::terrain::keep_to_sea_reach(expected);
+    std::vector<float> still = hog::terrain::keep_to_sea_reach(expected);
+    const std::vector<float> levels = hog::terrain::keep_lakes(elevations, lakes, still);
     CHECK(first.depths == expected);
     CHECK(first.still == still);
+    CHECK(first.levels == levels);
     CHECK(first.fetches == hog::terrain::shore_fetches(expected, still));
+    const hog::terrain::ShoreDepths again =
+        hog::terrain::work_out_shore(terrain(), first.frame, radius);
+    CHECK(again.depths == first.depths);
+    CHECK(again.levels == first.levels);
 
     // Nearby, the same; far off, others, and only the last wanted once those in flight are done.
     stream.follow(first.frame.anchor);
@@ -289,4 +317,126 @@ TEST_CASE("fetch runs on into the coarser layer and out to sea", "[terrain][shor
     CHECK_THAT(fine_fetch(fetches, 0, 10, 128), WithinRel(edge + (fine * 10.0), 1e-5));
     // Towards the west, from beyond all that's known.
     CHECK(fine_fetch(fetches, 4, 128, 128) == static_cast<double>(hog::terrain::longest_fetch));
+}
+
+TEST_CASE("a lake's level is kept over it and the ground round it higher than it",
+          "[terrain][shore]") {
+    // A lake at 50 m over a bed at 45, in ground at 52, with a valley at 40 two texels east of its
+    // east shore and a lower lake at 20 over a bed at 15 beyond that.
+    const auto in_lake = [](int column, int row) {
+        return column >= 100 && column < 110 && row >= 50 && row < 60;
+    };
+    const auto elevation = [&](int column, int row) {
+        if (in_lake(column, row)) {
+            return 45.0F;
+        }
+        if (column == 111) {
+            return 40.0F;
+        }
+        return column >= 113 && column < 116 && row >= 50 && row < 60 ? 15.0F : 52.0F;
+    };
+    const auto lake = [&](int column, int row) {
+        if (in_lake(column, row)) {
+            return 50.0F;
+        }
+        return column >= 113 && column < 116 && row >= 50 && row < 60 ? 20.0F : 0.0F;
+    };
+    const std::vector<float> elevations = layered(elevation, [](int, int) { return 52.0F; });
+    const std::vector<float> lakes = layered(lake, [](int, int) { return 0.0F; });
+    std::vector<float> still(elevations.size(), hog::terrain::shore_highest);
+    const std::vector<float> levels = hog::terrain::keep_lakes(elevations, lakes, still);
+    REQUIRE(levels.size() == elevations.size());
+    // Over the lake, its level, and as deep as it lies under it.
+    CHECK(fine_at(levels, 105, 55) == 50.0F);
+    CHECK(fine_at(still, 105, 55) == 5.0F);
+    // Out over the ground round it, as far as the margin, kept as far below it.
+    CHECK(fine_at(levels, 98, 55) == 50.0F);
+    CHECK(fine_at(levels, 98, 48) == 50.0F);
+    CHECK(fine_at(still, 98, 55) == -2.0F);
+    CHECK(fine_at(levels, 97, 55) == 0.0F);
+    CHECK(fine_at(still, 97, 55) == hog::terrain::shore_highest);
+    // Never over lower ground, which the lower lake's margin reaches instead.
+    CHECK(fine_at(levels, 110, 55) == 50.0F);
+    CHECK(fine_at(levels, 111, 55) == 20.0F);
+    CHECK(fine_at(levels, 112, 55) == 20.0F);
+    CHECK(fine_at(still, 112, 55) == -10.0F);
+    // The lower lake keeps its own.
+    CHECK(fine_at(levels, 114, 55) == 20.0F);
+    CHECK(fine_at(still, 114, 55) == 5.0F);
+    // Nor where there's no lake.
+    CHECK(levels.at(layer_texels + 10) == 0.0F);
+}
+
+TEST_CASE("the sea never floods a lake's bed", "[terrain][shore]") {
+    const hog::terrain::ShoreGround ground{.elevations = {2.0F, 2.0F, -3.0F, -3.0F},
+                                           .lakes = {3.0F, 0.0F, 0.0F, 0.0F}};
+    const std::vector<float> depths = shore_depths(ground);
+    CHECK(depths == std::vector<float>{hog::terrain::shore_highest, -2.0F, 3.0F, 3.0F});
+}
+
+TEST_CASE("a lake on the terrain has its level and depth round it", "[terrain][shore]") {
+    // A lake's middle, the first found along a spiral over the planet.
+    std::optional<DVec3> found;
+    constexpr int points = 40'000;
+    for (int i = 0; i < points && !found; ++i) {
+        const double z = 1.0 - ((2.0 * (i + 0.5)) / points);
+        const double around = i * std::numbers::pi * (3.0 - std::sqrt(5.0));
+        const double across = std::sqrt(1.0 - (z * z));
+        const DVec3 at{across * std::cos(around), across * std::sin(around), z};
+        if (lakeland().lake(hog::planet::cell_at(at))) {
+            found = at;
+        }
+    }
+    REQUIRE(found.has_value());
+    const DVec3 at = found.value_or(DVec3{0.0, 0.0, 1.0});
+    const auto found_lake = lakeland().lake(hog::planet::cell_at(at));
+    REQUIRE(found_lake.has_value());
+    const hog::planet::Channel lake = found_lake.value_or(hog::planet::Channel{});
+    const double level = hog::planet::fixed_to_double(lake.surface);
+    const double bed = hog::planet::fixed_to_double(lake.bed);
+    const hog::terrain::ShoreDepths shore =
+        hog::terrain::work_out_shore(lakeland(), shore_frame(at, radius), radius);
+    // The texel the lake's middle lies in.
+    const DVec2 along = shore_along(shore.frame, radius, at);
+    const double spacing = shore_spacing.front();
+    const auto texel = [&](double metres) {
+        return static_cast<int>(std::floor((metres / spacing) + (shore_size / 2.0)));
+    };
+    const std::size_t middle = (static_cast<std::size_t>(texel(along.y)) * shore_size) +
+                               static_cast<std::size_t>(texel(along.x));
+    const DVec3 centre = shore_direction(shore.frame, radius,
+                                         {(texel(along.x) + 0.5 - (shore_size / 2.0)) * spacing,
+                                          (texel(along.y) + 0.5 - (shore_size / 2.0)) * spacing});
+    const auto found_under = lakeland().lake(hog::planet::cell_at(centre));
+    REQUIRE(found_under.has_value());
+    const hog::planet::Channel under = found_under.value_or(hog::planet::Channel{});
+    CHECK_THAT(shore.levels.at(middle),
+               WithinAbs(hog::planet::fixed_to_double(under.surface), 1e-3));
+    CHECK_THAT(shore.still.at(middle),
+               WithinAbs(hog::planet::fixed_to_double(under.surface - under.bed), 1e-3));
+    CHECK(shore.depths.at(middle) == hog::terrain::shore_highest);
+    CHECK(level > bed);
+}
+
+TEST_CASE("the water nearest below a height is the highest lake under it, or the sea",
+          "[terrain][shore]") {
+    // Two lakes in the fine layer, one under the other's margin, and one only in the coarse.
+    hog::terrain::ShoreDepths shore;
+    shore.levels = layered(
+        [](int column, int) {
+            if (column < 10) {
+                return 120.0F;
+            }
+            return column < 20 ? 35.5F : 0.0F;
+        },
+        [](int, int) { return 900.0F; });
+    shore.still = layered([](int column, int) { return column == 9 ? -2.0F : 3.0F; },
+                          [](int, int) { return 3.0F; });
+    const std::vector<float> levels = hog::terrain::lake_levels(shore);
+    CHECK(levels == std::vector<float>{35.5F, 120.0F});
+    CHECK(hog::terrain::water_below(levels, 2'000.0) == 120.0);
+    CHECK(hog::terrain::water_below(levels, 120.0) == 120.0);
+    CHECK(hog::terrain::water_below(levels, 100.0) == 35.5);
+    CHECK(hog::terrain::water_below(levels, 20.0) == 0.0);
+    CHECK(hog::terrain::water_below({}, 20.0) == 0.0);
 }

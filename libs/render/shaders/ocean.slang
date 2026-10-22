@@ -68,15 +68,17 @@ Surf as_surf(float4 surf) {
 
 // The sea's floor under `rest`, a point of sea level from the eye, with the water deepened by the
 // sea standing over its mean there; and w how high it stands. Or still water's, where the sea
-// doesn't reach, with `fetch` metres of it upwind.
+// doesn't reach, with `fetch` metres of it upwind, and w the level it's kept to: a lake's is kept
+// out over the ground round it, so its surface runs on level under the ground, which hides it.
 float4 floor_at(float3 rest, out float fetch) {
     fetch = 0.0;
     const float3 floor = shore_floor(waves, shore_depths, rest);
     if (sea_reached(floor.x) <= 0.0) {
+        const float level = still_water_at(waves, shore_depths, rest).x;
         const float3 still = still_floor(waves, shore_depths, rest);
-        if (still.x > 0.0) {
+        if (still.x > 0.0 || level > 0.0) {
             fetch = max(still_fetch_at(waves, shore_fetches, rest), shallowest_fetch);
-            return float4(still.x >= waves.count_left_radius.w ? deep_floor() : still, 0.0);
+            return float4(still.x >= waves.count_left_radius.w ? deep_floor() : still, level);
         }
     }
     const float level = level_now(shore_level_at(waves, floor, rest));
@@ -147,7 +149,10 @@ Surface vertex_main(Vertex vertex) {
     const WaveSurface water =
         wave_surface(waves, surface.rest, between, surface.floor.xyz, surface.fetch);
     surface.from_eye += as_drawn(water.moved + (up * surface.floor.w), up, surface.normal);
-    const Surf surf = surf_at(waves, water, surface.floor.xyz);
+    // Still water's surface kept out under the ground round it breaks on nothing, as over the deep;
+    // left to break there, it would whiten the water it's drawn across to.
+    const bool kept_under = surface.fetch > 0.0 && surface.floor.x <= 0.0;
+    const Surf surf = surf_at(waves, water, kept_under ? deep_floor() : surface.floor.xyz);
     surface.surf = float4(surf.breaking, surf.trailing, surf.lace, surf.white);
     surface.foam = float4(0.0);
     if (water.white.z > 0.0 || surf.white > 0.0) {
@@ -166,6 +171,15 @@ struct Facing {
     float white;
     float albedo;
 };
+
+// Whether the surface is a lake's kept out over ground the grids find dry, which isn't drawn: the
+// ground would hide it, but where the level runs out over lower ground between their texels, or
+// waves lift it up the shore between the disc's corners far off. Told at each pixel. The ground's
+// shading tints ground under the lake as far as its own height tells it, so no water is lost.
+bool over_dry(Surface surface) {
+    return surface.fetch > 0.0 && surface.floor.w > 0.0 &&
+           still_water_at(waves, shore_depths, surface.rest).y <= 0.0;
+}
 
 Facing facing_at(Surface surface, float3 looking) {
     const float footprint = max(length(ddx(surface.rest)), length(ddy(surface.rest)));
@@ -229,6 +243,9 @@ float glint_at(float3 looking, Facing facing, float3 sun) {
 
 [shader("fragment")]
 float4 fragment_main(Surface surface) : SV_Target {
+    if (over_dry(surface)) {
+        discard;
+    }
     const float3 looking = normalize(surface.from_eye);
     const Facing facing = facing_at(surface, looking);
     const float reflected = reflected_at(looking, facing.normal);
@@ -246,6 +263,9 @@ float4 fragment_main(Surface surface) : SV_Target {
 // between, and tone mapped.
 [shader("fragment")]
 float4 fragment_air(Surface surface) : SV_Target {
+    if (over_dry(surface)) {
+        discard;
+    }
     const float3 looking = normalize(surface.from_eye);
     const Facing facing = facing_at(surface, looking);
     const float3 normal = facing.normal;

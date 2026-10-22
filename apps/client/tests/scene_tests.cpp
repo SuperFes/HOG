@@ -6,6 +6,7 @@
 #include <hog/client/picture.hpp>
 #include <hog/client/scene.hpp>
 #include <hog/jobs/job_system.hpp>
+#include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tangent_frame.hpp>
 #include <hog/planet/world.hpp>
@@ -218,14 +219,10 @@ std::pair<double, hog::DVec3> widest_still_water(hog::DVec3 around) {
     constexpr auto texels = static_cast<std::size_t>(shore_size) * shore_size;
     const double radius = world().geology().planet_radius();
     const hog::terrain::ShoreFrame frame = hog::terrain::shore_frame(around, radius);
-    std::vector<float> depths;
-    for (const double spacing : shore_spacing) {
-        const std::vector<float> layer =
-            hog::terrain::shore_depths(world().geology().terrain(), frame, radius, spacing);
-        depths.insert(depths.end(), layer.begin(), layer.end());
-    }
-    const std::vector<float> still = hog::terrain::keep_to_sea_reach(depths);
-    const std::vector<float> fetches = hog::terrain::shore_fetches(depths, still);
+    const hog::terrain::ShoreDepths shore =
+        hog::terrain::work_out_shore(world().geology().terrain(), frame, radius);
+    const std::vector<float>& still = shore.still;
+    const std::vector<float>& fetches = shore.fetches;
     std::pair<double, hog::DVec3> widest{0.0, around};
     for (std::size_t in_layers = 0; in_layers < still.size(); ++in_layers) {
         const std::size_t layer = in_layers / texels;
@@ -578,6 +575,93 @@ TEST_CASE("a windy sea, to look at", "[.look]") {
             REQUIRE(still);
             REQUIRE(hog::client::save_picture(
                 std::filesystem::path{where} / std::format("{}_{}.png", sea, look.name), *still));
+        }
+    }
+}
+
+namespace {
+
+// The middle of the widest lake of the first few found anywhere, and its level.
+std::optional<std::pair<hog::DVec3, double>> a_lake() {
+    using hog::terrain::shore_size;
+    using hog::terrain::shore_spacing;
+    const hog::planet::Elevation& terrain = world().geology().terrain();
+    const double radius = world().geology().planet_radius();
+    std::optional<std::pair<hog::DVec3, double>> widest;
+    std::size_t most = 0;
+    int found = 0;
+    constexpr int points = 400'000;
+    for (int i = 0; i < points && found < 6; ++i) {
+        const double z = 1.0 - ((2.0 * (i + 0.5)) / points);
+        const double around = i * std::numbers::pi * (3.0 - std::sqrt(5.0));
+        const double across = std::sqrt(1.0 - (z * z));
+        const hog::DVec3 at{across * std::cos(around), across * std::sin(around), z};
+        const auto lake = terrain.lake(hog::planet::cell_at(at));
+        if (!lake) {
+            continue;
+        }
+        ++found;
+        const auto level = static_cast<float>(hog::planet::fixed_to_double(lake->surface));
+        const hog::terrain::ShoreDepths shore =
+            hog::terrain::work_out_shore(terrain, hog::terrain::shore_frame(at, radius), radius);
+        // Its texels in the finest layer, and their middle.
+        hog::DVec2 sum{0.0};
+        std::size_t count = 0;
+        const double first = (0.5 - (shore_size / 2.0)) * shore_spacing[0];
+        for (std::size_t texel = 0; texel < std::size_t{shore_size} * shore_size; ++texel) {
+            if (shore.levels[texel] == level && shore.still[texel] > 0.0F) {
+                const std::size_t row = texel / shore_size;
+                const std::size_t column = texel % shore_size;
+                sum += hog::DVec2{first + (static_cast<double>(column) * shore_spacing[0]),
+                                  first + (static_cast<double>(row) * shore_spacing[0])};
+                ++count;
+            }
+        }
+        if (count > most) {
+            most = count;
+            widest = {hog::terrain::shore_direction(shore.frame, radius,
+                                                    sum / static_cast<double>(count)),
+                      static_cast<double>(level)};
+        }
+    }
+    return widest;
+}
+
+} // namespace
+
+// Not a check: stills of a lake above the sea, under a breeze and a gale, to look at. Saved where
+// HOG_LOOK names.
+TEST_CASE("a lake, to look at", "[.look]") {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
+    const char* where = std::getenv("HOG_LOOK");
+    REQUIRE(where != nullptr);
+    const auto lake = a_lake();
+    REQUIRE(lake);
+    const auto [middle, level] = lake.value_or(std::pair{hog::DVec3{0.0, 0.0, 1.0}, 0.0});
+    WARN("a lake " << level << " m up, at " << middle.x << ", " << middle.y << ", " << middle.z);
+    const auto device = test_device();
+    hog::jobs::JobSystem jobs{4};
+    auto scene = Scene::create(*device, world(), jobs, calendar(), hog::client::still_format, 1);
+    REQUIRE(scene);
+    const hog::protocol::CellWaves none{};
+    const hog::client::Forecast fresh = everywhere(
+        {.drift = {16.0F, 6.0F}, .wind = {9.4F, 3.5F}, .swells = {none, none}, .current = {}});
+    const hog::client::Forecast gale = everywhere(
+        {.drift = {30.0F, 11.0F}, .wind = {17.0F, 6.3F}, .swells = {none, none}, .current = {}});
+    for (const auto& [name, altitude, pitch] :
+         {std::tuple{"low", 2.0, -0.08}, std::tuple{"high", 60.0, -0.45},
+          std::tuple{"far", 400.0, -0.35}}) {
+        Shot shot = looking_north(middle, level + altitude, pitch);
+        const hog::client::Forecast calm = everywhere(
+            {.drift = {0.0F, 0.0F}, .wind = {0.0F, 0.0F}, .swells = {none, none}, .current = {}});
+        for (const auto& [sea, forecast] :
+             {std::pair{"fresh", &fresh}, std::pair{"gale", &gale}, std::pair{"calm", &calm}}) {
+            shot.forecast = forecast;
+            const auto still =
+                hog::client::draw_still(*device, *scene, shot, {.width = 960, .height = 540});
+            REQUIRE(still);
+            REQUIRE(hog::client::save_picture(
+                std::filesystem::path{where} / std::format("{}_lake_{}.png", sea, name), *still));
         }
     }
 }

@@ -30,8 +30,9 @@ struct SeaReach {
     double furthest = 1.0;
 };
 
-// Out to just past the horizon of sea level as it's drawn.
-[[nodiscard]] SeaReach sea_reach(const Bend& bend);
+// Out to just past the horizon of sea level as it's drawn, starting as far apart as the eye stands
+// over the water nearest below it, `water` metres above sea level.
+[[nodiscard]] SeaReach sea_reach(const Bend& bend, double water = 0.0);
 
 // Metres along the ground from under the eye to the ring `out` of the way to the rim.
 [[nodiscard]] double sea_along(const SeaReach& reach, double out);

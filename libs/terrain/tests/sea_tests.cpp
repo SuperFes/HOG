@@ -91,6 +91,16 @@ TEST_CASE("the sea reaches just past the horizon", "[terrain][sea]") {
     CHECK(reaches(sea_reach(under).furthest, horizon_on(under.faked, 1.0)));
 }
 
+TEST_CASE("the sea's rings start as far apart as the eye stands over the water below it",
+          "[terrain][sea]") {
+    CHECK(sea_reach(bend_at(500.0)).nearest == 500.0);
+    const SeaReach over_lake = sea_reach(bend_at(500.0), 480.0);
+    CHECK(over_lake.nearest == 20.0);
+    CHECK(over_lake.furthest == sea_reach(bend_at(500.0)).furthest);
+    CHECK(sea_reach(bend_at(500.0), 499.9).nearest == 1.0);
+    CHECK(sea_reach(bend_at(-20.0)).nearest == 1.0);
+}
+
 TEST_CASE("the sea's rings spread with their distance from under the eye", "[terrain][sea]") {
     for (const double eye_height : {3.0, 500.0, 400'000.0}) {
         const SeaReach reach = sea_reach(bend_at(eye_height));

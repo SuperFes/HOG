@@ -178,6 +178,24 @@ float still_depth_at(Waves waves, Sampler2DArray depths, float3 point) {
         .y;
 }
 
+// The level still water under `point`, from the eye, is kept to, metres above the sea, and how deep
+// it lies under that, as shore_waters finds them in `depths`.
+public float2 still_water_at(Waves waves, Sampler2DArray depths, float3 point) {
+    return shore_waters(depths, waves.shore_anchor, waves.shore_east, waves.shore_north,
+                        waves.count_left_radius.z, point)
+        .zy;
+}
+
+// Ground the grids find this far above a lake's level is taken as dry, though its level is kept
+// over it: between their texels, the level may run out over lower ground.
+static const float lake_guard = 1.0; // metres
+
+// Whether a lake, as still_water_at finds it, stands at its level there, over the ground or as
+// near it as is told.
+public bool lake_over(float2 water) {
+    return water.x > 0.0 && water.y > -lake_guard;
+}
+
 // The floor of still water under `point`, from the eye, as shore_waters finds it in `depths`, as
 // shore_floor has the sea's; or as high as is kept where there's none.
 public float3 still_floor(Waves waves, Sampler2DArray depths, float3 point) {

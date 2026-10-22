@@ -92,10 +92,12 @@ struct SeaBindings {
     VkSampler sampler = VK_NULL_HANDLE;
 };
 
-// Depths of the sea and of still water, as terrain::ShoreDepths has them, as the ocean's shaders
-// sample them: four half floats a texel, the sea's then still water's, and the rest none.
+// Depths of the sea and of still water, and the level still water is kept to, as
+// terrain::ShoreDepths has them, as the ocean's shaders sample them: four half floats a texel, the
+// sea's depth, still water's, and the level split in two, a half float near it and what's left.
 [[nodiscard]] std::vector<std::uint16_t> shore_texels(std::span<const float> depths,
-                                                      std::span<const float> still);
+                                                      std::span<const float> still,
+                                                      std::span<const float> levels);
 // Fetches as terrain::shore_fetches works them out, as the ocean's shaders sample them: four
 // headings to a texel of half floats, two layers of them to each of the depths'.
 [[nodiscard]] std::vector<std::uint16_t> fetch_texels(std::span<const float> fetches);
@@ -166,6 +168,8 @@ private:
     Image no_fetch_;
     Sampler shore_sampler_;
     std::optional<terrain::ShoreFrame> shore_;
+    // Of the lakes round the eye, as terrain::lake_levels has them.
+    std::vector<float> lake_levels_;
     std::uint32_t index_count_ = 0;
     bool air_ = false;
 };

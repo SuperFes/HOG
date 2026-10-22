@@ -92,7 +92,8 @@ constexpr std::array descriptors{
     binding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
     binding(sea_binding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
             VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT),
-    binding(shore_binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_VERTEX_BIT)};
+    binding(shore_binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)};
 // Lit through the air, it reads the air too.
 constexpr std::array air_descriptors{
     descriptors[0],
@@ -355,7 +356,8 @@ Result<Terrain> Terrain::create(Device& device, VkFormat colour_format, VkFormat
     drawn.calm_sea_ = std::move(calm_sea).value();
     const std::vector<std::uint16_t> deep_water =
         shore_texels(std::vector<float>(terrain::shore_spacing.size(), 1'000.0F),
-                     std::vector<float>(terrain::shore_spacing.size(), terrain::shore_highest));
+                     std::vector<float>(terrain::shore_spacing.size(), terrain::shore_highest),
+                     std::vector<float>(terrain::shore_spacing.size(), 0.0F));
     auto no_shore =
         make_filled_image(device,
                           {.format = VK_FORMAT_R16G16B16A16_SFLOAT,

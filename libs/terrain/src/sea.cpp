@@ -53,13 +53,13 @@ SeaDisc sea_disc(int rings, int spokes) {
     return disc;
 }
 
-SeaReach sea_reach(const Bend& bend) {
+SeaReach sea_reach(const Bend& bend, double water) {
     // Under the sea, the surface overhead is drawn as if from just above it.
     const double above = std::max(bend.eye_height, 1.0);
     const double horizon =
         bend.faked *
         std::atan2(std::sqrt((2.0 * bend.faked * above) + (above * above)), bend.faked);
-    return {.nearest = above, .furthest = horizon * past_horizon};
+    return {.nearest = std::max(bend.eye_height - water, 1.0), .furthest = horizon * past_horizon};
 }
 
 double sea_along(const SeaReach& reach, double out) {

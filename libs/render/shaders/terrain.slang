@@ -213,9 +213,28 @@ ShoreLevel shore_level(Ground ground) {
     return level;
 }
 
-// How high the sea stands over its mean at the ground.
+// The level of the lake standing over the ground, as the sea's surface tells it at each pixel, or
+// none. Lakes too small to show between the ground's corners far off are still found.
+float lake_level(Ground ground) {
+    if (settings.tiling.z <= 0.0) {
+        return 0.0;
+    }
+    const float2 water = still_water_at(sea, shore_depths, ground.from_eye);
+    return lake_over(water) ? water.x : 0.0;
+}
+
+// How high the water stands over sea level at the ground: a lake's level, where one stands over it,
+// or else the sea's over its mean.
 float sea_level(Ground ground) {
-    return level_now(shore_level(ground));
+    const float lake = lake_level(ground);
+    return lake > 0.0 ? lake : level_now(shore_level(ground));
+}
+
+// How high the eye stands over the water at the ground: never under a lake, which it's only taken
+// to look down on.
+float eye_above(Ground ground) {
+    const float lake = lake_level(ground);
+    return lake > 0.0 ? max(push.bend_up.w - lake, 0.0) : push.bend_up.w - sea_level(ground);
 }
 
 // How wet the ground is: from 1 where the swash covers it or has only just left it, drying over a
@@ -398,7 +417,7 @@ float3 shaded(Ground ground, float3 normal, float3 on_ground, float3 on_water, f
         return lit_ground;
     }
     return through_water(lit_ground, on_water, sea_level(ground) - ground.height,
-                         push.bend_up.w - sea_level(ground),
+                         eye_above(ground),
                          length(ground.from_eye), dot(-normalize(ground.from_eye), up_at(ground)));
 }
 
@@ -447,7 +466,7 @@ Shaded fragment_air(Ground ground) {
         (sunlight * saturate(dot(normal, sun))) + (sky * (0.5 + (0.5 * dot(normal, up))));
     // The water over ground beneath the sea, lit where the eye looks into it.
     float3 on_water = float3(0.0);
-    if (ground.height < sea_level(ground) || push.bend_up.w < sea_level(ground)) {
+    if (ground.height < sea_level(ground) || eye_above(ground) < 0.0) {
         const float facing = saturate(dot(end.up, sun));
         const float3 clear_water = transmittance(air, transmittance_table, 0.0, dot(end.up, sun));
         on_water = (through_cloud(shade, clear_water) * facing) +

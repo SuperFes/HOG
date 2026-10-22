@@ -6,6 +6,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <iterator>
 
 namespace hog::terrain {
 
@@ -31,19 +33,32 @@ DVec2 shore_along(const ShoreFrame& frame, double radius, DVec3 direction) {
     return DVec2{glm::dot(direction, frame.east), glm::dot(direction, frame.north)} * scale;
 }
 
-std::vector<float> shore_depths(const planet::Elevation& terrain, const ShoreFrame& frame,
-                                double radius, double spacing) {
-    std::vector<float> depths;
-    depths.reserve(static_cast<std::size_t>(shore_size) * shore_size);
+ShoreGround shore_ground(const planet::Elevation& terrain, const ShoreFrame& frame, double radius,
+                         double spacing) {
+    ShoreGround ground;
+    ground.elevations.reserve(static_cast<std::size_t>(shore_size) * shore_size);
+    ground.lakes.reserve(ground.elevations.capacity());
     const double first = (0.5 - (shore_size / 2.0)) * spacing;
     for (int row = 0; row < shore_size; ++row) {
         for (int column = 0; column < shore_size; ++column) {
-            const DVec3 at = shore_direction(frame, radius,
-                                             {first + (column * spacing), first + (row * spacing)});
-            const double elevation =
-                planet::fixed_to_double(terrain.elevation(planet::cell_at(at)));
-            depths.push_back(std::max(static_cast<float>(-elevation), shore_highest));
+            const planet::CellId cell = planet::cell_at(shore_direction(
+                frame, radius, {first + (column * spacing), first + (row * spacing)}));
+            const std::int64_t elevation = terrain.elevation(cell);
+            const auto lake = elevation > 0 ? terrain.rivers().lake(cell, elevation) : std::nullopt;
+            ground.elevations.push_back(static_cast<float>(planet::fixed_to_double(elevation)));
+            ground.lakes.push_back(lake ? static_cast<float>(planet::fixed_to_double(*lake))
+                                        : 0.0F);
         }
+    }
+    return ground;
+}
+
+std::vector<float> shore_depths(const ShoreGround& ground) {
+    std::vector<float> depths;
+    depths.reserve(ground.elevations.size());
+    for (std::size_t at = 0; at < ground.elevations.size(); ++at) {
+        depths.push_back(ground.lakes[at] > 0.0F ? shore_highest
+                                                 : std::max(-ground.elevations[at], shore_highest));
     }
     return depths;
 }
@@ -149,6 +164,59 @@ std::vector<float> keep_to_sea_reach(std::span<float> depths) {
 
 namespace {
 
+// Of a layer's levels, `level`, over its ground, `ground`, and its lakes', `lake`: keeps over each
+// texel off the lakes the highest level about it that its ground stands over.
+void keep_lakes_out(std::span<float> level, std::span<const float> ground,
+                    std::span<const float> lake) {
+    const auto size = static_cast<std::size_t>(shore_size);
+    const std::vector<float> before(level.begin(), level.end());
+    for (std::size_t row = 0; row < size; ++row) {
+        for (std::size_t column = 0; column < size; ++column) {
+            const std::size_t at = (row * size) + column;
+            if (lake[at] > 0.0F) {
+                continue;
+            }
+            for (std::size_t down = std::max(row, std::size_t{1}) - 1;
+                 down <= std::min(row + 1, size - 1); ++down) {
+                for (std::size_t across = std::max(column, std::size_t{1}) - 1;
+                     across <= std::min(column + 1, size - 1); ++across) {
+                    const float around = before[(down * size) + across];
+                    if (around <= ground[at]) {
+                        level[at] = std::max(level[at], around);
+                    }
+                }
+            }
+        }
+    }
+}
+
+} // namespace
+
+std::vector<float> keep_lakes(std::span<const float> elevations, std::span<const float> lakes,
+                              std::span<float> still) {
+    std::vector<float> levels(lakes.begin(), lakes.end());
+    const std::size_t layers = levels.size() / shore_texels;
+    for (std::size_t layer = 0; layer < layers; ++layer) {
+        const std::span<float> level =
+            std::span{levels}.subspan(layer * shore_texels, shore_texels);
+        const std::span<const float> ground =
+            elevations.subspan(layer * shore_texels, shore_texels);
+        // A step out from the shore at a time.
+        for (int out = 0; out < lake_margin; ++out) {
+            keep_lakes_out(level, ground, lakes.subspan(layer * shore_texels, shore_texels));
+        }
+        for (std::size_t at = 0; at < shore_texels; ++at) {
+            if (level[at] > 0.0F) {
+                still[(layer * shore_texels) + at] =
+                    std::max(level[at] - ground[at], shore_highest);
+            }
+        }
+    }
+    return levels;
+}
+
+namespace {
+
 // The step to the texel upwind of a wind blowing towards each heading.
 constexpr std::array<std::array<int, 2>, fetch_headings> upwind{
     {{-1, 0}, {-1, -1}, {0, -1}, {1, -1}, {1, 0}, {1, 1}, {0, 1}, {-1, 1}}};
@@ -236,18 +304,49 @@ void ShoreStream::follow(DVec3 eye) {
     }
 }
 
+std::vector<float> lake_levels(const ShoreDepths& shore) {
+    std::vector<float> levels;
+    const std::size_t texels = std::min(shore.levels.size(), shore_texels);
+    for (std::size_t at = 0; at < texels; ++at) {
+        if (shore.levels[at] > 0.0F && shore.still[at] > 0.0F) {
+            levels.push_back(shore.levels[at]);
+        }
+    }
+    std::ranges::sort(levels);
+    const auto [last, end] = std::ranges::unique(levels);
+    levels.erase(last, end);
+    return levels;
+}
+
+double water_below(std::span<const float> levels, double height) {
+    const auto above = std::ranges::upper_bound(
+        levels, height, std::less{}, [](float level) { return static_cast<double>(level); });
+    return above == levels.begin() ? 0.0 : static_cast<double>(*std::prev(above));
+}
+
+ShoreDepths work_out_shore(const planet::Elevation& terrain, const ShoreFrame& frame,
+                           double radius) {
+    ShoreDepths found{.frame = frame, .depths = {}, .still = {}, .levels = {}, .fetches = {}};
+    std::vector<float> elevations;
+    std::vector<float> lakes;
+    for (const double spacing : shore_spacing) {
+        const ShoreGround ground = shore_ground(terrain, frame, radius, spacing);
+        const std::vector<float> layer = shore_depths(ground);
+        found.depths.insert(found.depths.end(), layer.begin(), layer.end());
+        elevations.insert(elevations.end(), ground.elevations.begin(), ground.elevations.end());
+        lakes.insert(lakes.end(), ground.lakes.begin(), ground.lakes.end());
+    }
+    found.still = keep_to_sea_reach(found.depths);
+    found.levels = keep_lakes(elevations, lakes, found.still);
+    found.fetches = shore_fetches(found.depths, found.still);
+    return found;
+}
+
 void ShoreStream::start(const ShoreFrame& frame) {
     started_ = frame;
     working_ = std::make_unique<jobs::Async<ShoreDepths>>(
         *jobs_, [terrain = terrain_, frame, radius = radius_] {
-            ShoreDepths found{.frame = frame, .depths = {}, .still = {}, .fetches = {}};
-            for (const double spacing : shore_spacing) {
-                const std::vector<float> layer = shore_depths(*terrain, frame, radius, spacing);
-                found.depths.insert(found.depths.end(), layer.begin(), layer.end());
-            }
-            found.still = keep_to_sea_reach(found.depths);
-            found.fetches = shore_fetches(found.depths, found.still);
-            return found;
+            return work_out_shore(*terrain, frame, radius);
         });
 }
 

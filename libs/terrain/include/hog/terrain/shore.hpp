@@ -42,11 +42,19 @@ struct ShoreFrame {
 // Metres east and north on the frame's plane of where the unit direction `direction` meets it.
 [[nodiscard]] DVec2 shore_along(const ShoreFrame& frame, double radius, DVec3 direction);
 
-// Metres of sea at each texel's centre of a layer, rows from the south and texels from the west:
-// positive under the sea, as high as shore_highest over land.
-[[nodiscard]] std::vector<float> shore_depths(const planet::Elevation& terrain,
-                                              const ShoreFrame& frame, double radius,
-                                              double spacing);
+// The ground at each texel's centre of a layer, rows from the south and texels from the west, in
+// metres above sea level; and the level of the lake over it, or sea level where there's none.
+struct ShoreGround {
+    std::vector<float> elevations;
+    std::vector<float> lakes;
+};
+
+[[nodiscard]] ShoreGround shore_ground(const planet::Elevation& terrain, const ShoreFrame& frame,
+                                       double radius, double spacing);
+
+// Metres of sea at each texel of `ground`: positive under the sea, as high as shore_highest over
+// land and lakes' beds, which the sea never floods.
+[[nodiscard]] std::vector<float> shore_depths(const ShoreGround& ground);
 
 // Of depths in layers as ShoreStream works them out, keeps as high as shore_highest whatever the
 // open sea can't reach: ground behind higher ground, and hollows and water cut off by it, so the
@@ -54,6 +62,18 @@ struct ShoreFrame {
 // coarsest layer's edge; each finer layer's is where the next coarser one's reaches. Returns the
 // depths of the still water it cut off, as high as shore_highest elsewhere.
 std::vector<float> keep_to_sea_reach(std::span<float> depths);
+
+// A lake's level is kept over the ground round it, as far as it stands higher, out to this many
+// texels from its shore: its surface is drawn across them, under the ground, so it meets the shore
+// level all along it.
+inline constexpr int lake_margin = 2;
+
+// Of layers of ground as shore_ground has them, and of still water as keep_to_sea_reach keeps it,
+// `still`: puts each lake's water into `still`, as deep as it lies under the lake's level, and
+// keeps as deep as is kept below it, negative, over the ground lake_margin finds it kept over.
+// Returns the level of the water each texel is kept to: the lake's, or sea level.
+std::vector<float> keep_lakes(std::span<const float> elevations, std::span<const float> lakes,
+                              std::span<float> still);
 
 // Fetch, how far water stretches upwind, is measured for winds blowing towards each of these
 // headings in turn: east first, then each an eighth of a turn anticlockwise.
@@ -69,13 +89,26 @@ inline constexpr float longest_fetch = 50'000.0F; // metres
                                                std::span<const float> still);
 
 // The depths round an anchor, each layer in turn, finest first: of the sea where the open sea
-// reaches, of still water where it doesn't, and the fetch over both, as shore_fetches has it.
+// reaches, of still water where it doesn't, the level still water is kept to, as keep_lakes has
+// it, and the fetch over all of it, as shore_fetches has it.
 struct ShoreDepths {
     ShoreFrame frame;
     std::vector<float> depths;
     std::vector<float> still;
+    std::vector<float> levels;
     std::vector<float> fetches;
 };
+
+// The levels of the lakes in the finest layer of `shore`, lowest first, each once.
+[[nodiscard]] std::vector<float> lake_levels(const ShoreDepths& shore);
+
+// Of `levels` as lake_levels has them, the highest no higher than `height` metres above sea level;
+// or sea level, if none is.
+[[nodiscard]] double water_below(std::span<const float> levels, double height);
+
+// Works out the depths round the anchor of `frame`.
+[[nodiscard]] ShoreDepths work_out_shore(const planet::Elevation& terrain, const ShoreFrame& frame,
+                                         double radius);
 
 // Works out the depths round the eye in the background on the pool, anew whenever the eye comes
 // nearer another anchor, for the thread that made it. One set at a time is in flight; the terrain
