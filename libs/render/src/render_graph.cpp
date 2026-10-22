@@ -192,6 +192,27 @@ void RenderGraph::add_pass(GraphPass pass, Record record) {
     records_.push_back(std::move(record));
 }
 
+void RenderGraph::copy(std::string_view name, GraphImage from, GraphImage to) {
+    add({.name = name,
+         .uses = {{.image = from, .use = image_use::copy_source},
+                  {.image = to, .use = image_use::copy_target}},
+         .targets = std::nullopt},
+        [this, from, to](VkCommandBuffer commands) {
+            const TrackedImage& source = tracked(from.index);
+            const VkImageSubresourceLayers layers{
+                .aspectMask = source.aspect(), .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1};
+            const VkExtent2D size = extent(from);
+            const VkImageCopy region{
+                .srcSubresource = layers,
+                .srcOffset = {},
+                .dstSubresource = layers,
+                .dstOffset = {},
+                .extent = {.width = size.width, .height = size.height, .depth = 1}};
+            vkCmdCopyImage(commands, source.handle(), image_use::copy_source.layout,
+                           tracked(to.index).handle(), image_use::copy_target.layout, 1, &region);
+        });
+}
+
 VkImageView RenderGraph::view(GraphImage image) const noexcept {
     return images_[image.index].view;
 }

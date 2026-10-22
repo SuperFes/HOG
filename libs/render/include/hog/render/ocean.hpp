@@ -135,6 +135,12 @@ private:
 // headings to a texel of half floats, two layers of them to each of the depths'.
 [[nodiscard]] std::vector<std::uint16_t> fetch_texels(std::span<const float> fetches);
 
+// Copies of what's drawn before the sea, colour and depth, as it's seen through.
+struct SeaBehind {
+    VkImageView colour = VK_NULL_HANDLE;
+    VkImageView depth = VK_NULL_HANDLE;
+};
+
 // Where the sea is seen from and what it reflects.
 struct OceanView {
     Camera camera;
@@ -148,6 +154,9 @@ struct OceanView {
     // A calm sea unless any.
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     DrawnWaves waves = {};
+    // Seen through as drawn beneath it, unless none.
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    std::optional<SeaBehind> behind = {};
 };
 
 // The sea's surface, moved by its waves about sea level, out to the horizon round the point under

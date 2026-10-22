@@ -141,6 +141,10 @@ public:
         }
     }
 
+    // Adds a pass copying the whole of `from` into `to`, which must match it in size, format and
+    // aspect. The graph mustn't be moved before it executes.
+    void copy(std::string_view name, GraphImage from, GraphImage to);
+
     [[nodiscard]] VkImageView view(GraphImage image) const noexcept;
     [[nodiscard]] VkExtent2D extent(GraphImage image) const noexcept;
 
@@ -158,6 +162,9 @@ private:
     };
 
     [[nodiscard]] TrackedImage& tracked(std::size_t image) noexcept {
+        return images_[image].imported != nullptr ? *images_[image].imported : images_[image].made;
+    }
+    [[nodiscard]] const TrackedImage& tracked(std::size_t image) const noexcept {
         return images_[image].imported != nullptr ? *images_[image].imported : images_[image].made;
     }
     [[nodiscard]] Result<> make_transients(const GraphFrame& frame);

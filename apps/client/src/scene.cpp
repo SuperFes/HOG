@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <format>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -430,13 +431,14 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
 
     render::RenderGraph graph;
     const render::GraphImage target = graph.import(frame.target, frame.view, frame.extent);
-    const render::GraphImage depth = graph.transient(
-        {.format = depth_format,
-         .extent = frame.extent,
-         .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-         .aspect = VK_IMAGE_ASPECT_DEPTH_BIT,
-         .layers = 1,
-         .levels = 1});
+    const render::GraphImage depth =
+        graph.transient({.format = depth_format,
+                         .extent = frame.extent,
+                         .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+                                  VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                         .aspect = VK_IMAGE_ASPECT_DEPTH_BIT,
+                         .layers = 1,
+                         .levels = 1});
     // Made afresh each frame, so what the slot's last frame left in them isn't needed.
     const render::Image& sky_table = sky_.table(frame.slot);
     const render::Image& aerial_volume = sky_.aerial_volume(frame.slot);
@@ -559,10 +561,34 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                 companion_->draw(commands, frame.extent, shot.camera, *shot.companion, shot.bend);
             });
     }
-    // Over all that stands in the sea, each seen through the water to its surface.
-    graph.add({.name = "sea", .uses = through_air, .targets = drawn},
-              [&](VkCommandBuffer commands) {
-                  return ocean_.draw(commands, frame.extent, sea, frame.slot);
+    // Over all that stands in the sea, each seen through the water to its surface, as copied.
+    std::vector<render::GraphUse> sea_uses = through_air;
+    std::optional<std::pair<render::GraphImage, render::GraphImage>> behind;
+    if (frame.copyable) {
+        const auto copy_of = [&](VkFormat format, VkImageAspectFlags aspect) {
+            return graph.transient(
+                {.format = format,
+                 .extent = frame.extent,
+                 .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                 .aspect = aspect,
+                 .layers = 1,
+                 .levels = 1});
+        };
+        behind = {copy_of(frame.format, VK_IMAGE_ASPECT_COLOR_BIT),
+                  copy_of(depth_format, VK_IMAGE_ASPECT_DEPTH_BIT)};
+        graph.copy("behind sea", target, behind->first);
+        graph.copy("behind sea depth", depth, behind->second);
+        sea_uses.push_back({.image = behind->first, .use = render::image_use::sampled});
+        sea_uses.push_back({.image = behind->second, .use = render::image_use::sampled});
+    }
+    graph.add({.name = "sea", .uses = sea_uses, .targets = drawn},
+              [&, behind](VkCommandBuffer commands) {
+                  render::OceanView seen = sea;
+                  if (behind) {
+                      seen.behind = render::SeaBehind{.colour = graph.view(behind->first),
+                                                      .depth = graph.view(behind->second)};
+                  }
+                  return ocean_.draw(commands, frame.extent, seen, frame.slot);
               });
     if (render::precipitation_count(falling, static_cast<double>(here.snow)) > 0) {
         graph.add({.name = "rain", .uses = through_air, .targets = drawn},
@@ -663,7 +689,8 @@ Result<Picture> draw_still(render::Device& device, Scene& scene, const Shot& sho
                                     .format = still_format,
                                     .extent = extent,
                                     .slot = 0,
-                                    .image = 0};
+                                    .image = 0,
+                                    .copyable = true};
                 recorded = scene.record(frame, still);
             });
             !submitted) {

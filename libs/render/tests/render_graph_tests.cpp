@@ -262,7 +262,7 @@ struct Targets {
 
     // The frame: a far red cleared into, a near green drawn after, then a pass sampling depth,
     // which is made by the graph where it's transient.
-    void add_to(RenderGraph& graph, bool transient = false) {
+    std::pair<GraphImage, GraphImage> add_to(RenderGraph& graph, bool transient = false) {
         const GraphImage drawn = graph.import(tracked_colour, colour.view(), extent);
         const GraphImage tested = transient ? graph.transient(depth_desc)
                                             : graph.import(tracked_depth, depth.view(), extent);
@@ -285,6 +285,7 @@ struct Targets {
                    .targets = {{.colour = {.image = drawn, .clear = std::nullopt},
                                 .depth = std::nullopt}}},
                   [](VkCommandBuffer) {});
+        return {drawn, tested};
     }
 
     hog::render::Image colour;
@@ -296,9 +297,8 @@ struct Targets {
 
 using Pixel = std::array<std::uint8_t, 4>;
 
-Pixel middle(hog::render::Device& device, const Targets& targets) {
-    const auto pixels =
-        hog::render::read_pixels(device, targets.colour, targets.tracked_colour.use());
+Pixel middle(hog::render::Device& device, const hog::render::Image& image, ImageUse use) {
+    const auto pixels = hog::render::read_pixels(device, image, use);
     REQUIRE(pixels);
     const std::size_t at = std::size_t{4} * ((std::size_t{2} * extent.width) + 2);
     return {pixels->at(at), pixels->at(at + 1), pixels->at(at + 2), pixels->at(at + 3)};
@@ -318,7 +318,7 @@ TEST_CASE("a graph's passes draw in order through the barriers it works out",
     REQUIRE(executed);
     CHECK(targets.tracked_colour.use() == use::colour_target);
     CHECK(targets.tracked_depth.use() == use::sampled);
-    CHECK(middle(*device, targets) == Pixel{0, 255, 0, 255});
+    CHECK(middle(*device, targets.colour, targets.tracked_colour.use()) == Pixel{0, 255, 0, 255});
     CHECK(device->validation_errors() == 0);
 }
 
@@ -387,9 +387,55 @@ TEST_CASE("a graph draws with the images it makes", "[render][gpu][render_graph]
                 graph.execute(commands, {.slot = 0, .timer = nullptr, .transients = &transients});
         }));
         REQUIRE(executed);
-        CHECK(middle(*device, targets) == Pixel{0, 255, 0, 255});
+        CHECK(middle(*device, targets.colour, targets.tracked_colour.use()) ==
+              Pixel{0, 255, 0, 255});
         CHECK(transients.held(0) == 1);
     }
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("a graph copies what's drawn, colour and depth, to draw over again",
+          "[render][gpu][render_graph]") {
+    const auto device = test_device();
+    Targets targets{*device};
+    hog::render::ImageDesc drawn_depth = depth_desc;
+    drawn_depth.usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    auto remade = hog::render::make_image(*device, drawn_depth);
+    REQUIRE(remade);
+    targets.depth = std::move(remade).value();
+    targets.tracked_depth = {targets.depth.handle(), VK_IMAGE_ASPECT_DEPTH_BIT};
+    hog::render::ImageDesc copied_depth = depth_desc;
+    copied_depth.usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    auto depth_copy = hog::render::make_image(*device, copied_depth);
+    REQUIRE(depth_copy);
+    auto colour_copy = hog::render::make_image(
+        *device, {.format = VK_FORMAT_R8G8B8A8_UNORM,
+                  .extent = extent,
+                  .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                           VK_IMAGE_USAGE_TRANSFER_DST_BIT});
+    REQUIRE(colour_copy);
+    TrackedImage tracked_colour{colour_copy->handle(), VK_IMAGE_ASPECT_COLOR_BIT};
+    TrackedImage tracked_depth{depth_copy->handle(), VK_IMAGE_ASPECT_DEPTH_BIT};
+
+    RenderGraph graph;
+    const auto [drawn, tested] = targets.add_to(graph);
+    const GraphImage colour_to = graph.import(tracked_colour, colour_copy->view(), extent);
+    const GraphImage depth_to = graph.import(tracked_depth, depth_copy->view(), extent);
+    graph.copy("colour", drawn, colour_to);
+    graph.copy("depth", tested, depth_to);
+    // Behind the near green copied, so drawn only if its depth wasn't.
+    graph.add({.name = "behind",
+               .uses = {},
+               .targets = {{.colour = {.image = colour_to, .clear = std::nullopt},
+                            .depth = {{.image = depth_to, .clear = std::nullopt}}}}},
+              [&](VkCommandBuffer commands) {
+                  targets.draw(commands, {.colour = {0.0F, 0.0F, 1.0F, 1.0F}, .depth = 0.5F});
+              });
+    Result<> executed;
+    REQUIRE(
+        device->submit_now([&](VkCommandBuffer commands) { executed = graph.execute(commands); }));
+    REQUIRE(executed);
+    CHECK(middle(*device, *colour_copy, tracked_colour.use()) == Pixel{0, 255, 0, 255});
     CHECK(device->validation_errors() == 0);
 }
 

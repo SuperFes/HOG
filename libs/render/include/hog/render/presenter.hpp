@@ -29,6 +29,8 @@ struct Frame {
     // Which frame in flight this is, for resources kept one per frame.
     std::uint32_t slot = 0;
     std::uint32_t image = 0;
+    // Whether the target can be copied from.
+    bool copyable = false;
 };
 
 // Whether the swapchain must be rebuilt before the next frame: it said it was stale, or the window

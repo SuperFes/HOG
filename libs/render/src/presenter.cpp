@@ -187,7 +187,8 @@ Result<std::optional<Frame>> Presenter::begin(VkExtent2D window) {
                  .format = swapchain_.format(),
                  .extent = swapchain_.extent(),
                  .slot = slot_,
-                 .image = image};
+                 .image = image,
+                 .copyable = (swapchain_.usage() & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0};
 }
 
 Result<> Presenter::end(Frame& frame) {
