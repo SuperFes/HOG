@@ -40,17 +40,9 @@ struct Push {
 [[vk::binding(3, 0)]] Sampler2DArray shore_depths;
 [[vk::binding(4, 0)]] Sampler2DArray shore_fetches;
 
-// The point of sea level, from the eye, at `texel` on the grid: as hog::render::grid_texel finds
-// texels, the other way.
+// The point of sea level, from the eye, at `texel` on the grid.
 float3 foam_rest(float2 texel) {
-    const float3 east = waves.foam_east.xyz;
-    const float3 north = waves.foam_north.xyz;
-    const float2 along = float2(waves.foam_east.w, waves.foam_north.w) + (texel * foam_spacing);
-    const float radius = waves.count_left_radius.z;
-    const float across = dot(along, along);
-    const float sagging = across / (radius + sqrt(max((radius * radius) - across, 0.0)));
-    return waves.foam_anchor.xyz + (east * along.x) + (north * along.y) -
-           (cross(east, north) * sagging);
+    return grid_rest(waves, waves.foam_anchor, waves.foam_east, waves.foam_north, texel);
 }
 
 // How much foam is left there, the step's share of it all told, as fast as it breaks there now;

@@ -28,7 +28,7 @@ static const float shallowest = 0.01;
 static const float full_turn = 6.283185307;
 static const float breaking_depth = 0.42;
 // As hog::waves' gravity, fetch_peak_power and bands of frequency.
-static const float gravity = 9.81;
+public static const float gravity = 9.81;
 static const float fetch_peak_power = 0.33;
 static const int bands = 16;
 static const float lowest_frequency = 0.25;
@@ -101,6 +101,11 @@ public struct Waves {
     public float4 foam_east;
     public float4 foam_north;
     public float4 foam_drifted;
+    // Where the grid of ripples round the eye lies, as foam_anchor, foam_east and foam_north have
+    // the foam's.
+    public float4 ripple_anchor;
+    public float4 ripple_east;
+    public float4 ripple_north;
     // Of the waves on still water, as hog::waves::fetched has them: xyz which way the wind blows,
     // in the planet's frame, and w the fourth power of the peak of a sea grown full under it, or
     // none without wind. Then x and y how the sea's height and peak grow by its fetch, as
@@ -857,6 +862,18 @@ public Foam foam_at(Waves waves, WaveSurface water, Surf surf, FoamPattern patte
         }
     }
     return foam;
+}
+
+// The point of sea level, from the eye, at `texel` on a grid laid as `anchor`, `east` and `north`
+// have it, as Waves' foam_anchor, foam_east and foam_north: as hog::render::grid_texel finds
+// texels, the other way.
+public float3 grid_rest(Waves waves, float4 anchor, float4 east, float4 north, float2 texel) {
+    const float2 along = float2(east.w, north.w) + (texel / anchor.w);
+    const float radius = waves.count_left_radius.z;
+    const float across = dot(along, along);
+    const float sagging = across / (radius + sqrt(max((radius * radius) - across, 0.0)));
+    return anchor.xyz + (east.xyz * along.x) + (north.xyz * along.y) -
+           (cross(east.xyz, north.xyz) * sagging);
 }
 
 // The foam left kept on the grid round the eye at `rest`, a point of sea level from the eye, as

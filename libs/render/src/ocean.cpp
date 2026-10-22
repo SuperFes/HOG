@@ -66,7 +66,7 @@ constexpr std::array vertex_attributes{
                                       .format = VK_FORMAT_R32G32_SFLOAT,
                                       .offset = offsetof(SeaVertex, towards)}};
 
-static_assert(sizeof(DrawnWaves) == (24 * sizeof(glm::vec4)) +
+static_assert(sizeof(DrawnWaves) == (27 * sizeof(glm::vec4)) +
                                         (drawn_waves * sizeof(DrawnWaves::Wave)) +
                                         (foam_waves * sizeof(DrawnWaves::FoamWave)));
 
@@ -547,6 +547,11 @@ Result<Ocean> Ocean::create(Device& device, VkFormat colour_format, VkFormat dep
         return std::unexpected(std::move(foam).error());
     }
     ocean.foam_ = std::move(foam).value();
+    auto ripples = RippleMap::create(device);
+    if (!ripples) {
+        return std::unexpected(std::move(ripples).error());
+    }
+    ocean.ripples_ = std::move(ripples).value();
 
     // Seen from below too, from under the sea.
     ocean.air_ = air;
@@ -686,6 +691,13 @@ Result<> Ocean::write_waves(const OceanView& view, std::uint32_t frame) const {
         drawn.foam_drifted = {static_cast<float>(placing.drifted.x),
                               static_cast<float>(placing.drifted.y), 0.0F, 0.0F};
     }
+    if (ripple_time_) {
+        const GridPlacing placing =
+            ripple_grid_.placing(view.bend.up, view.bend.radius, view.bend.eye_height);
+        drawn.ripple_anchor = {Vec3{placing.anchor}, static_cast<float>(1.0 / ripple_spacing)};
+        drawn.ripple_east = {Vec3{placing.east}, static_cast<float>(placing.corner.x)};
+        drawn.ripple_north = {Vec3{placing.north}, static_cast<float>(placing.corner.y)};
+    }
     const Buffer& waves = waves_.at(frame);
     std::memcpy(waves.mapped().data(), &drawn, sizeof(drawn));
     return waves.flush();
@@ -701,6 +713,19 @@ Result<> Ocean::step_foam(VkCommandBuffer commands, const OceanView& view, std::
         return written;
     }
     foam_.step(commands, step, bindings(frame), drift, catch_up);
+    return {};
+}
+
+Result<> Ocean::step_ripples(VkCommandBuffer commands, const OceanView& view, std::uint32_t frame,
+                             GameTime time, DVec3 drift) {
+    const double seconds =
+        ripple_time_ ? std::chrono::duration<double>(time - *ripple_time_).count() : -1.0;
+    const GridStep step = ripple_grid_.follow(view.bend.up, view.bend.radius, drift, seconds);
+    ripple_time_ = time;
+    if (auto written = write_waves(view, frame); !written) {
+        return written;
+    }
+    ripples_.step(commands, step, bindings(frame));
     return {};
 }
 

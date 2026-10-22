@@ -13,6 +13,7 @@ namespace {
 std::uint32_t pixel_bytes_of(VkFormat format) noexcept {
     switch (format) {
     case VK_FORMAT_R16G16B16A16_SFLOAT:
+    case VK_FORMAT_R32G32_SFLOAT:
         return 8;
     case VK_FORMAT_R32G32B32A32_SFLOAT:
         return 16;

@@ -59,6 +59,7 @@ add_library(hog_render
     src/readback.cpp
     src/render_graph.cpp
     src/rendering.cpp
+    src/ripples.cpp
     src/sampler.cpp
     src/shader_watch.cpp
     src/sky.cpp
@@ -83,7 +84,7 @@ target_link_libraries(hog_render
     PUBLIC hog::atmosphere hog::core hog::flora hog::terrain hog::waves volk::volk
     PRIVATE hog::planet vk-bootstrap::vk-bootstrap)
 hog_target_defaults(hog_render)
-hog_add_shaders(hog_render CATALOGUE shaders/aerial.slang shaders/air_tables.slang shaders/billboard.slang shaders/bushes.slang shaders/capsules.slang shaders/cloud_march.slang shaders/cloud_resolve.slang shaders/clouds.slang shaders/foam.slang shaders/forest.slang shaders/glare.slang shaders/globe.slang shaders/grass.slang shaders/ocean.slang shaders/precipitation.slang shaders/sky.slang shaders/sky_view.slang
+hog_add_shaders(hog_render CATALOGUE shaders/aerial.slang shaders/air_tables.slang shaders/billboard.slang shaders/bushes.slang shaders/capsules.slang shaders/cloud_march.slang shaders/cloud_resolve.slang shaders/clouds.slang shaders/foam.slang shaders/forest.slang shaders/glare.slang shaders/globe.slang shaders/grass.slang shaders/ocean.slang shaders/precipitation.slang shaders/ripples.slang shaders/sky.slang shaders/sky_view.slang
                 shaders/terrain.slang shaders/trees.slang)
 
 # A test device, for tests here and elsewhere that draw.
@@ -121,6 +122,7 @@ hog_add_tests(hog_render
     tests/precipitation_tests.cpp
     tests/presenter_tests.cpp
     tests/render_graph_tests.cpp
+    tests/ripples_tests.cpp
     tests/shader_watch_tests.cpp
     tests/sky_tests.cpp
     tests/streamed_image_tests.cpp

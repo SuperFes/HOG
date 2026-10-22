@@ -7,6 +7,7 @@
 #include <hog/render/foam.hpp>
 #include <hog/render/memory.hpp>
 #include <hog/render/pipeline.hpp>
+#include <hog/render/ripples.hpp>
 #include <hog/render/sampler.hpp>
 #include <hog/render/sky.hpp>
 #include <hog/render/streamed_image.hpp>
@@ -70,6 +71,10 @@ struct DrawnWaves {
     glm::vec4 foam_east{0.0F};
     glm::vec4 foam_north{0.0F};
     glm::vec4 foam_drifted{0.0F};
+    // Where the grid of ripples round the eye lies, likewise.
+    glm::vec4 ripple_anchor{0.0F};
+    glm::vec4 ripple_east{0.0F};
+    glm::vec4 ripple_north{0.0F};
     // Of the waves on still water, as shaders/waves.slang takes them: the wind over it and how they
     // grow by their fetch under it, how white they'd be grown full, and of those left out.
     glm::vec4 still_wind{0.0F};
@@ -183,6 +188,11 @@ public:
     Result<> step_foam(VkCommandBuffer commands, const OceanView& view, std::uint32_t frame,
                        GameTime time, DVec3 drift, bool catch_up);
     [[nodiscard]] const FoamMap& foam() const noexcept { return foam_; }
+    // Records stepping the ripples on the water round the eye on to `time`, as step_foam does the
+    // foam.
+    Result<> step_ripples(VkCommandBuffer commands, const OceanView& view, std::uint32_t frame,
+                          GameTime time, DVec3 drift);
+    [[nodiscard]] const RippleMap& ripples() const noexcept { return ripples_; }
 
 private:
     Ocean() = default;
@@ -209,6 +219,9 @@ private:
     DriftingGrid foam_grid_{foam_size, foam_spacing};
     FoamMap foam_;
     std::optional<GameTime> foam_time_;
+    DriftingGrid ripple_grid_{ripple_size, ripple_spacing};
+    RippleMap ripples_;
+    std::optional<GameTime> ripple_time_;
     std::uint32_t index_count_ = 0;
     bool air_ = false;
 };
