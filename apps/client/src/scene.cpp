@@ -516,6 +516,11 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
         return ocean_.step_foam(commands, sea, frame.slot, shot.time, waves::foam_drift(sea_state),
                                 shot.still);
     });
+    graph.add({.name = "ripples", .uses = {}, .targets = std::nullopt},
+              [&](VkCommandBuffer commands) {
+                  return ocean_.step_ripples(commands, sea, frame.slot, shot.time,
+                                             waves::foam_drift(sea_state), shot.others);
+              });
     graph.add({.name = "ground", .uses = through_air, .targets = drawn},
               [&](VkCommandBuffer commands) {
                   Result<> deep = ocean_.draw_deep(commands, frame.extent, sea, frame.slot);

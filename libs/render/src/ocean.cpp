@@ -201,8 +201,12 @@ constexpr std::uint32_t foam_binding = 9;
 constexpr VkDescriptorSetLayoutBinding foam_descriptor =
     binding(foam_binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 
+constexpr std::uint32_t ripple_binding = 10;
+constexpr VkDescriptorSetLayoutBinding ripple_descriptor =
+    binding(ripple_binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+
 constexpr std::array descriptors{waves_descriptor, shore_descriptor, fetch_descriptor,
-                                 foam_descriptor};
+                                 foam_descriptor, ripple_descriptor};
 constexpr std::array air_descriptors{binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
                                      binding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
                                      binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
@@ -212,7 +216,8 @@ constexpr std::array air_descriptors{binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFE
                                      waves_descriptor,
                                      shore_descriptor,
                                      fetch_descriptor,
-                                     foam_descriptor};
+                                     foam_descriptor,
+                                     ripple_descriptor};
 
 // How the swash of the waves, and of their groups' surges, turns along the ground: fixed to the
 // planet, each a way and a length, so it runs up one stretch of shore while it draws back from the
@@ -771,6 +776,8 @@ Result<> Ocean::record(VkCommandBuffer commands, VkExtent2D extent, const OceanV
                        shore_ ? shore_fetches_.image().view() : calm_.bindings().fetches,
                        shore_sampler_.handle());
     push_sampled_image(commands, pipeline, foam_binding, foam_.kept().view(), foam_.sampler());
+    push_sampled_image(commands, pipeline, ripple_binding, ripples_.kept().view(),
+                       ripples_.sampler());
     const std::array vertices{vertices_.handle()};
     const VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(commands, 0, 1, vertices.data(), &offset);

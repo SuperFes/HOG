@@ -9,6 +9,7 @@
 #include <hog/render/memory.hpp>
 #include <hog/render/ocean.hpp>
 #include <hog/render/readback.hpp>
+#include <hog/render/rendering.hpp>
 #include <hog/render/ripples.hpp>
 #include <hog/terrain/bend.hpp>
 #include <hog/terrain/shore.hpp>
@@ -24,7 +25,9 @@
 #include <cstdint>
 #include <cstring>
 #include <numbers>
+#include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
@@ -152,6 +155,74 @@ double strongest(std::span<const double> heights, double lowest, double highest)
         }
     }
     return best;
+}
+
+constexpr VkExtent2D seen_extent{.width = 64, .height = 64};
+
+// Of a picture of seen_extent, how far from its middle the furthest pixel the sun glints off lies,
+// pixels: that's brighter red than `bright`.
+double glint_reach(std::span<const std::uint8_t> pixels, int bright) {
+    double reach = 0.0;
+    for (std::uint32_t y = 0; y < seen_extent.height; ++y) {
+        for (std::uint32_t x = 0; x < seen_extent.width; ++x) {
+            const std::size_t at = ((std::size_t{y} * seen_extent.width) + x) * 4;
+            if (std::cmp_greater(pixels[at], bright)) {
+                reach = std::max(
+                    reach, glm::distance(DVec2{x, y} + 0.5,
+                                         DVec2{seen_extent.width / 2.0, seen_extent.height / 2.0}));
+            }
+        }
+    }
+    return reach;
+}
+
+// The calm sea seen straight down from `height` metres, the sun overhead, with `ripples` laid
+// round the eye if any; read back.
+std::vector<std::uint8_t> seen_down(hog::render::Device& device, double height,
+                                    const std::optional<std::vector<DVec2>>& ripples) {
+    auto ocean = hog::render::Ocean::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
+    REQUIRE(ocean);
+    constexpr double radius = 115'000.0;
+    const DVec3 up{0.0, 0.0, 1.0};
+    const hog::WorldPosition eye{up * (radius + height)};
+    const hog::render::OceanView view{
+        .camera = {.eye = eye, .forward = -up, .up = DVec3{0.0, 1.0, 0.0}},
+        .sun = up,
+        .sky = {0.2F, 0.4F, 0.8F},
+        .bend = hog::terrain::bend_from(eye, radius, 0.0)};
+    if (ripples) {
+        REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
+            REQUIRE(ocean->step_ripples(
+                commands, view, 0, hog::GameTime{std::chrono::seconds{1'792'000'000}}, DVec3{0.0}));
+        }));
+        lay_kept(device, ocean->ripples(), *ripples);
+    }
+    auto target = hog::render::make_image(
+        device, {.format = VK_FORMAT_R8G8B8A8_UNORM,
+                 .extent = seen_extent,
+                 .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT});
+    REQUIRE(target);
+    auto depth =
+        hog::render::make_image(device, {.format = VK_FORMAT_D32_SFLOAT,
+                                         .extent = seen_extent,
+                                         .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+                                         .aspect = VK_IMAGE_ASPECT_DEPTH_BIT});
+    REQUIRE(depth);
+    REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
+        namespace use = hog::render::image_use;
+        hog::render::transition(commands, target->handle(), VK_IMAGE_ASPECT_COLOR_BIT, use::discard,
+                                use::colour_target);
+        hog::render::transition(commands, depth->handle(), VK_IMAGE_ASPECT_DEPTH_BIT, use::discard,
+                                use::depth_target);
+        hog::render::begin_rendering(commands, target->view(), seen_extent,
+                                     VkClearColorValue{.float32 = {0.0F, 0.0F, 0.0F, 1.0F}},
+                                     {.view = depth->view()});
+        CHECK(ocean->draw(commands, seen_extent, view));
+        vkCmdEndRendering(commands);
+    }));
+    auto pixels = hog::render::read_pixels(device, *target, hog::render::image_use::colour_target);
+    REQUIRE(pixels);
+    return std::move(pixels).value();
 }
 
 } // namespace
@@ -437,5 +508,21 @@ TEST_CASE("a body pushes the sea where it crosses the surface, not where it's wh
     CHECK(std::abs(wading.at(index_of(256 - 80, 256)).x) < 1e-5);
     const std::vector<DVec2> under = pushed_by(-3.0);
     CHECK(std::ranges::all_of(under, [](DVec2 texel) { return texel == DVec2{0.0}; }));
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("ripples scatter the sun's glint off the sea, or blur it where too fine to draw",
+          "[render][gpu]") {
+    const auto device = test_device();
+    const std::vector<DVec2> ripples = train({8.0, 3.0}, 0.01, 0.0);
+    const std::vector<std::uint8_t> calm = seen_down(*device, 4.0, std::nullopt);
+    const std::vector<std::uint8_t> rippled = seen_down(*device, 4.0, ripples);
+    CAPTURE(glint_reach(calm, 100), glint_reach(rippled, 100));
+    CHECK(glint_reach(rippled, 100) > 2.0 * glint_reach(calm, 100));
+    // From high over them, too fine to draw, they only blur it.
+    const std::vector<std::uint8_t> calm_far = seen_down(*device, 200.0, std::nullopt);
+    const std::vector<std::uint8_t> rippled_far = seen_down(*device, 200.0, ripples);
+    CAPTURE(glint_reach(calm_far, 20), glint_reach(rippled_far, 20));
+    CHECK(glint_reach(rippled_far, 20) > 1.2 * glint_reach(calm_far, 20));
     CHECK(device->validation_errors() == 0);
 }

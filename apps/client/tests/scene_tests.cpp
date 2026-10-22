@@ -499,8 +499,8 @@ TEST_CASE("a scene times its passes on the GPU", "[client][scene][gpu]") {
         CHECK(span.milliseconds >= 0.0);
     }
     // From this high no tree is near enough to grow, so the forest pass isn't added at all.
-    CHECK(names == std::vector<std::string_view>{"uploads", "sky tables", "sky", "foam", "ground",
-                                                 "trees", "sea", "glare"});
+    CHECK(names == std::vector<std::string_view>{"uploads", "sky tables", "sky", "foam", "ripples",
+                                                 "ground", "trees", "sea", "glare"});
     // Over the islands' woods, the stamps draw trees; from this high, none are grown.
     CHECK(scene->tree_counts().tiles > 0);
     CHECK(scene->tree_counts().stamped > 0);
@@ -750,6 +750,62 @@ TEST_CASE("still water, to look at", "[.look]") {
             REQUIRE(still);
             REQUIRE(hog::client::save_picture(
                 std::filesystem::path{where} / std::format("{}_still_{}.png", sea, name), *still));
+        }
+    }
+}
+
+// Not a check: stills of people walking and running through the shallows of a calm sea, the wakes
+// they leave seen from beside them and from over them. Saved where HOG_LOOK names.
+TEST_CASE("wakes, to look at", "[.look]") {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
+    const char* where = std::getenv("HOG_LOOK");
+    REQUIRE(where != nullptr);
+    const auto device = test_device();
+    hog::jobs::JobSystem jobs{4};
+    auto scene = Scene::create(*device, world(), jobs, calendar(), hog::client::still_format, 1);
+    REQUIRE(scene);
+    const hog::client::Forecast calm =
+        everywhere({.drift = {3.0F, 1.0F},
+                    .wind = {2.5F, 0.8F},
+                    .wind_sea = {.height = 0.15F, .peak = 2.0F, .heading = {0.94F, 0.35F}},
+                    .swells = {hog::protocol::CellWaves{}, hog::protocol::CellWaves{}},
+                    .current = {}});
+    const double radius = world().geology().planet_radius();
+    for (const auto& [name, altitude, pitch] :
+         {std::tuple{"beside", 2.0, -0.12}, std::tuple{"over", 8.0, -0.6}}) {
+        Shot shot = off_the_coast(-3.0, altitude, false, pitch);
+        shot.forecast = &calm;
+        const hog::DVec3 up = glm::normalize(shot.camera.eye.metres());
+        const hog::DVec3 aside = glm::normalize(glm::cross(shot.camera.forward, up));
+        // Each from `along` metres ahead, `across` aside, at so many m/s across the view.
+        const auto walking = [&](double along, double across, double speed, double seconds) {
+            const hog::DVec3 there = glm::normalize(
+                (ahead(shot, along) + (aside * (across + (speed * seconds)))).metres());
+            const double ground =
+                hog::client::ground_under(world(), hog::WorldPosition{there * radius});
+            return hog::render::Capsule{.feet = hog::WorldPosition{there * (radius + ground)},
+                                        .up = there,
+                                        .colour = {0.6F, 0.1F, 0.05F}};
+        };
+        const auto stood = [&](double seconds) {
+            return std::vector{walking(14.0, -8.0, 1.4, seconds), walking(20.0, 6.0, -1.4, seconds),
+                               walking(26.0, -14.0, 3.5, seconds)};
+        };
+        shot.others = stood(0.0);
+        REQUIRE(hog::client::draw_still(*device, *scene, shot, {.width = 96, .height = 54}));
+        constexpr int frames = 180;
+        for (int frame = 1; frame <= frames; ++frame) {
+            shot.time = shot.time + std::chrono::microseconds{33'333};
+            shot.others = stood(frame / 30.0);
+            const auto still =
+                hog::client::draw_still(*device, *scene, shot,
+                                        frame < frames ? VkExtent2D{.width = 96, .height = 54}
+                                                       : VkExtent2D{.width = 960, .height = 540});
+            REQUIRE(still);
+            if (frame == frames) {
+                REQUIRE(hog::client::save_picture(
+                    std::filesystem::path{where} / std::format("calm_wakes_{}.png", name), *still));
+            }
         }
     }
 }

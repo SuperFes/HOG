@@ -35,7 +35,7 @@ inline constexpr double ripple_soaking = 6.0;
 inline constexpr double ripple_shallowest = 0.05;
 // A body crossing the surface pushes the water down by so much, metres, round where it crosses
 // it, as though pressing on it; only so many bodies do so at once.
-inline constexpr double ripple_push = 0.1;
+inline constexpr double ripple_push = 0.05;
 inline constexpr std::size_t ripple_most_bodies = 16;
 
 // A body as a capsule standing on its feet, laid on the ripples' grid.

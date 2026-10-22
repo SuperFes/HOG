@@ -35,6 +35,8 @@ struct Push {
 [[vk::binding(8, 0)]] Sampler2DArray shore_fetches;
 // As hog::render::FoamMap keeps it.
 [[vk::binding(9, 0)]] Sampler2D foam_kept;
+// As hog::render::RippleMap keeps them.
+[[vk::binding(10, 0)]] Sampler2D ripples_kept;
 
 struct Vertex {
     [[vk::location(0)]] float out; // from 0 under the eye to 1 at the rim
@@ -151,6 +153,48 @@ struct Facing {
     float albedo;
 };
 
+// As hog::render::ripple_size and ripple_spacing.
+static const float ripple_size = 512.0;
+static const float ripple_spacing = 0.125;
+// Ripples fade out over so many texels in from the grid's edge, where they're mostly soaked up.
+static const float ripple_fading = 32.0;
+// Ripples are drawn where their texels span a pixel; seen over more than so many texels, they
+// only spread the glint.
+static const float ripples_unseen = 4.0;
+
+// How steeply the ripples kept at `rest`, a point of sea level from the eye, slope along the
+// grid's rows and columns, as drawn seen over `footprint` metres; and in `unseen`, the mean square
+// slope of them too fine to draw. None without a grid.
+float2 ripple_slope_at(float3 rest, float footprint, out float unseen) {
+    unseen = 0.0;
+    const float per_metre = waves.ripple_anchor.w;
+    if (per_metre <= 0.0) {
+        return float2(0.0);
+    }
+    const float3 from_anchor = rest - waves.ripple_anchor.xyz;
+    const float2 texel = (float2(dot(from_anchor, waves.ripple_east.xyz),
+                                 dot(from_anchor, waves.ripple_north.xyz)) -
+                          float2(waves.ripple_east.w, waves.ripple_north.w)) *
+                         per_metre;
+    const float2 inside = min(texel, ripple_size - texel);
+    const float fading = saturate(min(inside.x, inside.y) / ripple_fading);
+    if (fading <= 0.0) {
+        return float2(0.0);
+    }
+    const float2 at = texel / ripple_size;
+    const float across = 1.0 / ripple_size;
+    const float2 slope =
+        float2(ripples_kept.SampleLevel(at + float2(across, 0.0), 0.0).x -
+                   ripples_kept.SampleLevel(at - float2(across, 0.0), 0.0).x,
+               ripples_kept.SampleLevel(at + float2(0.0, across), 0.0).x -
+                   ripples_kept.SampleLevel(at - float2(0.0, across), 0.0).x) /
+        (2.0 * ripple_spacing) * fading;
+    const float seen =
+        saturate((ripples_unseen - (footprint / ripple_spacing)) / (ripples_unseen - 1.0));
+    unseen = dot(slope, slope) * (1.0 - seen);
+    return slope * seen;
+}
+
 // Whether the surface is a lake's kept out over ground the grids find dry, which isn't drawn: the
 // ground would hide it, but where the level runs out over lower ground between their texels, or
 // waves lift it up the shore between the disc's corners far off. Told at each pixel. The ground's
@@ -164,9 +208,13 @@ Facing facing_at(Surface surface, float3 looking) {
     const float footprint = max(length(ddx(surface.rest)), length(ddy(surface.rest)));
     const WaveSurface water =
         wave_surface(waves, surface.rest, footprint, surface.floor.xyz, surface.fetch);
+    float unseen;
+    const float2 slope = ripple_slope_at(surface.rest, footprint, unseen);
+    const float3 rippled = normalize(water.normal - (waves.ripple_east.xyz * slope.x) -
+                                     (waves.ripple_north.xyz * slope.y));
     Facing facing;
-    facing.normal = as_drawn(water.normal, push.up_height.xyz, normalize(surface.normal));
-    facing.roughness = water.roughness + ripples;
+    facing.normal = as_drawn(rippled, push.up_height.xyz, normalize(surface.normal));
+    facing.roughness = water.roughness + ripples + unseen;
     facing.white = 0.0;
     facing.albedo = breaking_albedo;
     const Surf surf = as_surf(surface.surf);

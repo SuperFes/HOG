@@ -8,7 +8,7 @@ static const float ripple_spacing = 0.125;
 static const int ripple_edge = 48;
 static const float ripple_soaking = 6.0;
 static const float ripple_shallowest = 0.05;
-static const float ripple_push = 0.1;
+static const float ripple_push = 0.05;
 static const int ripple_most_bodies = 16;
 // How far past a body, metres, its push fades out, smoothly enough that it makes no ripples too
 // short for the grid.
