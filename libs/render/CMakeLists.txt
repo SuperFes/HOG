@@ -42,6 +42,7 @@ add_library(hog_render
     src/clouds.cpp
     src/cube_sphere.cpp
     src/device.cpp
+    src/drifting_grid.cpp
     src/foam.cpp
     src/forest.cpp
     src/glare.cpp
@@ -106,6 +107,7 @@ hog_add_tests(hog_render
     tests/clouds_tests.cpp
     tests/cube_sphere_tests.cpp
     tests/device_tests.cpp
+    tests/drifting_grid_tests.cpp
     tests/foam_tests.cpp
     tests/forest_tests.cpp
     tests/glare_tests.cpp

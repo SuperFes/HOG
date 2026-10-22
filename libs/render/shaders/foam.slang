@@ -21,7 +21,7 @@ static const float dry_enough = 1.0;
 static const float stranding = 0.3;
 
 struct Push {
-    // xy how many texels the grid moved by, as hog::render::FoamStep's shift; z whether anything
+    // xy how many texels the grid moved by, as hog::render::GridStep's shift; z whether anything
     // is kept.
     int4 shift;
     // x how many seconds the step lasts, and y how long before now it's taken.
@@ -40,7 +40,7 @@ struct Push {
 [[vk::binding(3, 0)]] Sampler2DArray shore_depths;
 [[vk::binding(4, 0)]] Sampler2DArray shore_fetches;
 
-// The point of sea level, from the eye, at `texel` on the grid: as hog::render::foam_texel finds
+// The point of sea level, from the eye, at `texel` on the grid: as hog::render::grid_texel finds
 // texels, the other way.
 float3 foam_rest(float2 texel) {
     const float3 east = waves.foam_east.xyz;

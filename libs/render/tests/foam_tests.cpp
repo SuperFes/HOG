@@ -33,10 +33,10 @@ using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
 using hog::DVec2;
 using hog::DVec3;
+using hog::render::DriftingGrid;
 using hog::render::foam_size;
 using hog::render::foam_spacing;
-using hog::render::FoamGrid;
-using hog::render::FoamStep;
+using hog::render::GridStep;
 using hog::render::testing::test_device;
 
 namespace {
@@ -54,12 +54,6 @@ struct Start {
 DVec3 up_at(DVec2 along) {
     const Start at;
     return glm::normalize((at.up * radius) + (at.east * along.x) + (at.north * along.y));
-}
-
-// Of `point`, on sea level, the texel it lies on from an eye over `up`.
-DVec2 texel_of(const FoamGrid& grid, DVec3 up, DVec3 point) {
-    return hog::render::foam_texel(grid.placing(up, radius, height),
-                                   (point * radius) - (up * (radius + height)));
 }
 
 // Each texel the map keeps: the foam left there, how much of what would have left it is known, and
@@ -207,80 +201,6 @@ DVec3 texel_at(const std::vector<DVec3>& texels, int x, int y) {
 
 } // namespace
 
-TEST_CASE("the foam grid stays centred under the eye a whole texel at a time", "[render]") {
-    const Start at;
-    const DVec3 start = at.up;
-    FoamGrid grid;
-    const FoamStep laid = grid.follow(start, radius, DVec3{0.0}, 0.0);
-    CHECK(!laid.kept);
-    const DVec2 middle{foam_size / 2.0};
-    CHECK_THAT(glm::distance(texel_of(grid, start, start), middle), WithinAbs(0.0, 0.5));
-    // A little way on, it doesn't step; further on, it steps by as many texels as it's gone.
-    const DVec3 near = up_at({0.3, 0.0});
-    const FoamStep stayed = grid.follow(near, radius, DVec3{0.0}, 0.1);
-    CHECK(stayed.kept);
-    CHECK(stayed.shift == glm::ivec2{0});
-    const DVec3 on = up_at({10.4 * foam_spacing, -3.2 * foam_spacing});
-    const FoamStep stepped = grid.follow(on, radius, DVec3{0.0}, 0.1);
-    CHECK(stepped.kept);
-    CHECK(stepped.shift == glm::ivec2{10, -3});
-    CHECK(glm::distance(texel_of(grid, on, on), middle) <= (0.5 * std::sqrt(2.0)) + 1e-3);
-    // What's on the sea stays on the same texel as the grid steps under it, but for the step.
-    const DVec3 mark = up_at({40.0, 25.0});
-    const DVec2 before = texel_of(grid, on, mark);
-    const DVec3 further = up_at({30.0, 20.0});
-    const FoamStep again = grid.follow(further, radius, DVec3{0.0}, 0.1);
-    const DVec2 after = texel_of(grid, further, mark);
-    CHECK_THAT(glm::distance(after + DVec2{again.shift}, before), WithinAbs(0.0, 1e-3));
-}
-
-TEST_CASE("the foam grid drifts with the water at the surface", "[render]") {
-    const Start at;
-    const DVec3 start = at.up;
-    FoamGrid grid;
-    (void)grid.follow(start, radius, DVec3{0.0}, 0.0);
-    const DVec3 drift = (at.east * 0.6) - (at.north * 0.2);
-    // A fleck of foam on the water drifts with it, and stays on the same texel but for the grid's
-    // steps.
-    const DVec2 laid = texel_of(grid, start, up_at({5.0, 5.0}));
-    glm::ivec2 shifted{0};
-    for (int second = 1; second <= 10; ++second) {
-        const FoamStep step = grid.follow(start, radius, drift, 1.0);
-        REQUIRE(step.kept);
-        shifted += step.shift;
-        const DVec2 drifted = DVec2{5.0, 5.0} + (DVec2{0.6, -0.2} * static_cast<double>(second));
-        const DVec2 now = texel_of(grid, start, up_at(drifted)) + DVec2{shifted};
-        CHECK_THAT(glm::distance(now, laid), WithinAbs(0.0, 1e-3));
-    }
-    // The eye stayed put, so the grid stepped back against the drift.
-    CHECK(shifted == glm::ivec2{-6, 2});
-}
-
-TEST_CASE("the foam grid keeps nothing over a long pause, a step back in time, a long way or "
-          "when it's to forget it",
-          "[render]") {
-    const Start at;
-    const DVec3 start = at.up;
-    FoamGrid grid;
-    (void)grid.follow(start, radius, DVec3{0.0}, 0.0);
-    CHECK(grid.follow(start, radius, DVec3{0.0}, 0.5).kept);
-    CHECK(!grid.follow(start, radius, DVec3{0.0}, hog::render::foam_longest_step + 0.5).kept);
-    CHECK(!grid.follow(start, radius, DVec3{0.0}, -0.5).kept);
-    CHECK(grid.follow(start, radius, DVec3{0.0}, 0.5).kept);
-    grid.forget();
-    CHECK(!grid.follow(start, radius, DVec3{0.0}, 0.5).kept);
-    CHECK(grid.follow(start, radius, DVec3{0.0}, 0.5).kept);
-    // Further than the grid is wide.
-    CHECK(!grid.follow(up_at({foam_size * foam_spacing, 0.0}), radius, DVec3{0.0}, 0.5).kept);
-    // Far from where the plane touched sea level, it's laid again, under the eye.
-    const DVec3 far = up_at({hog::render::foam_plane_reach * 1.5, 0.0});
-    (void)grid.follow(up_at({hog::render::foam_plane_reach * 0.8, 0.0}), radius, DVec3{0.0}, 0.5);
-    CHECK(!grid.follow(far, radius, DVec3{0.0}, 0.5).kept);
-    CHECK_THAT(glm::distance(texel_of(grid, far, far), DVec2{foam_size / 2.0}),
-               WithinAbs(0.0, 0.5));
-    CHECK_THAT(glm::length(grid.placing(far, radius, height).anchor), WithinAbs(height, 1e-6));
-}
-
 TEST_CASE("foam left fades and stays on the sea as the grid steps", "[render][gpu]") {
     const auto device = test_device();
     auto map = hog::render::FoamMap::create(*device);
@@ -297,7 +217,7 @@ TEST_CASE("foam left fades and stays on the sea as the grid steps", "[render][gp
     lay_kept(*device, *map, laid);
     auto calm = hog::render::CalmSea::create(*device);
     REQUIRE(calm);
-    const auto stepped = [&](const FoamStep& step, bool catch_up = true) {
+    const auto stepped = [&](const GridStep& step, bool catch_up = true) {
         REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
             map->step(commands, step, calm->bindings(), DVec3{0.0}, catch_up);
         }));
@@ -448,9 +368,9 @@ TEST_CASE("foam the water draws back from is stranded on the ground, and stays w
         }
     }
     SECTION("what's stranded stays where it lies on the ground as the grid drifts on") {
-        FoamGrid grid;
+        DriftingGrid grid{foam_size, foam_spacing};
         static_cast<void>(grid.follow(view.bend.up, radius, DVec3{0.0}, -1.0));
-        const hog::render::FoamPlacing laid = grid.placing(view.bend.up, radius, height);
+        const hog::render::GridPlacing laid = grid.placing(view.bend.up, radius, height);
         // Over a whole texel and part of one, so the grid steps as well.
         const DVec3 drift = (laid.east * 1.3) + (laid.north * -0.4);
         static_cast<void>(stepped(-0.5F, drift));
@@ -466,9 +386,9 @@ TEST_CASE("foam the water draws back from is stranded on the ground, and stays w
         lay_kept(*device, ocean->foam(), along);
         time += std::chrono::seconds{1};
         const std::vector<DVec3> drifted = stepped(std::nullopt, drift);
-        const FoamStep step = grid.follow(view.bend.up, radius, drift, 1.0);
+        const GridStep step = grid.follow(view.bend.up, radius, drift, 1.0);
         REQUIRE(step.shift != glm::ivec2{0});
-        const hog::render::FoamPlacing placing = grid.placing(view.bend.up, radius, height);
+        const hog::render::GridPlacing placing = grid.placing(view.bend.up, radius, height);
         for (const glm::ivec2 texel : texels) {
             // Where that texel's middle lay on the grid before it drifted.
             const DVec2 before =
@@ -495,12 +415,12 @@ TEST_CASE("foam kept round the eye is drawn as much as is kept, what's not known
         const DVec3 blowing = at.east * wind;
         const hog::waves::SeaState sea{
             .systems = {hog::waves::grown_sea(blowing)}, .current = {}, .wind = blowing};
-        FoamGrid grid;
+        DriftingGrid grid{foam_size, foam_spacing};
         static_cast<void>(grid.follow(at.up, radius, DVec3{0.0}, -1.0));
-        const hog::render::FoamPlacing laid = grid.placing(at.up, radius, height);
+        const hog::render::GridPlacing laid = grid.placing(at.up, radius, height);
         const DVec3 drift = (laid.east * drifting.x) + (laid.north * drifting.y);
         static_cast<void>(grid.follow(at.up, radius, drift, 1.0));
-        const hog::render::FoamPlacing placing = grid.placing(at.up, radius, height);
+        const hog::render::GridPlacing placing = grid.placing(at.up, radius, height);
         hog::render::DrawnWaves drawn = hog::render::drawn_waves_at(
             trains, hog::waves::waves_at(trains, bend.up, sea), sea, eye, bend, time, drift);
         drawn.foam_anchor = {hog::Vec3{placing.anchor}, static_cast<float>(1.0 / foam_spacing)};

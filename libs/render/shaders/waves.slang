@@ -93,7 +93,7 @@ public struct Waves {
     public float4 run_up;
     public float4 swash_incident;
     public float4 swash_surging;
-    // Where the grid of foam left round the eye lies, as hog::render::FoamPlacing has it: xyz where
+    // Where the grid of foam left round the eye lies, as hog::render::GridPlacing has it: xyz where
     // its plane touches sea level, from the eye, and w its texels per metre, none without a grid;
     // then the ways its rows and columns run, and in their w its first texel's corner; then xy how
     // far the water's drifted along them since it was laid.

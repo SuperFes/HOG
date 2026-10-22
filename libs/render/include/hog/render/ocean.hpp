@@ -65,7 +65,7 @@ struct DrawnWaves {
     glm::vec4 swash_incident{0.0F};
     glm::vec4 swash_surging{0.0F};
     // Where the grid of foam left round the eye lies, as shaders/waves.slang takes it from a
-    // FoamPlacing: none unless any.
+    // GridPlacing: none unless any.
     glm::vec4 foam_anchor{0.0F};
     glm::vec4 foam_east{0.0F};
     glm::vec4 foam_north{0.0F};
@@ -206,7 +206,7 @@ private:
     std::optional<terrain::ShoreFrame> shore_;
     // Of the lakes round the eye, as terrain::lake_levels has them.
     std::vector<float> lake_levels_;
-    FoamGrid foam_grid_;
+    DriftingGrid foam_grid_{foam_size, foam_spacing};
     FoamMap foam_;
     std::optional<GameTime> foam_time_;
     std::uint32_t index_count_ = 0;

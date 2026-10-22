@@ -678,7 +678,7 @@ Result<> Ocean::write_waves(const OceanView& view, std::uint32_t frame) const {
         drawn.shore_north = {Vec3{shore_->north}, 0.0F};
     }
     if (foam_time_) {
-        const FoamPlacing placing =
+        const GridPlacing placing =
             foam_grid_.placing(view.bend.up, view.bend.radius, view.bend.eye_height);
         drawn.foam_anchor = {Vec3{placing.anchor}, static_cast<float>(1.0 / foam_spacing)};
         drawn.foam_east = {Vec3{placing.east}, static_cast<float>(placing.corner.x)};
@@ -695,7 +695,7 @@ Result<> Ocean::step_foam(VkCommandBuffer commands, const OceanView& view, std::
                           GameTime time, DVec3 drift, bool catch_up) {
     const double seconds =
         foam_time_ ? std::chrono::duration<double>(time - *foam_time_).count() : -1.0;
-    const FoamStep step = foam_grid_.follow(view.bend.up, view.bend.radius, drift, seconds);
+    const GridStep step = foam_grid_.follow(view.bend.up, view.bend.radius, drift, seconds);
     foam_time_ = time;
     if (auto written = write_waves(view, frame); !written) {
         return written;

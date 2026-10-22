@@ -1,11 +1,9 @@
-#include <hog/planet/tangent_frame.hpp>
 #include <hog/render/device.hpp>
 #include <hog/render/foam.hpp>
 #include <hog/render/ocean.hpp>
 #include <hog/shaders/foam.hpp>
 
 #include <array>
-#include <cmath>
 #include <cstdint>
 #include <utility>
 
@@ -36,54 +34,6 @@ constexpr std::array descriptors{binding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SA
 constexpr std::uint32_t group = 8;
 
 } // namespace
-
-FoamStep FoamGrid::follow(DVec3 up, double radius, DVec3 drift, double seconds) {
-    bool kept = plane_.has_value() && seconds >= 0.0 && seconds <= foam_longest_step;
-    if (plane_) {
-        const DVec2 along{glm::dot(up, plane_->east), glm::dot(up, plane_->north)};
-        if (glm::dot(up, plane_->touching) <= 0.0 ||
-            glm::length(along) * radius > foam_plane_reach) {
-            plane_.reset();
-        }
-    }
-    if (!plane_) {
-        const planet::TangentFrame frame = planet::tangent_frame(up);
-        plane_ = Plane{.touching = up, .east = frame.east, .north = frame.north};
-        drifted_ = DVec2{0.0};
-        kept = false;
-    } else if (kept) {
-        drifted_ += DVec2{glm::dot(drift, plane_->east), glm::dot(drift, plane_->north)} * seconds;
-    }
-    const DVec2 eye =
-        DVec2{glm::dot(up, plane_->east), glm::dot(up, plane_->north)} * radius - drifted_;
-    const glm::ivec2 centre{static_cast<int>(std::lround(eye.x / foam_spacing)),
-                            static_cast<int>(std::lround(eye.y / foam_spacing))};
-    const glm::ivec2 shift = centre - centre_;
-    centre_ = centre;
-    constexpr int size = foam_size;
-    if (std::abs(shift.x) >= size || std::abs(shift.y) >= size) {
-        kept = false;
-    }
-    return {.shift = shift, .seconds = seconds, .kept = kept};
-}
-
-FoamPlacing FoamGrid::placing(DVec3 up, double radius, double height) const {
-    if (!plane_) {
-        return {};
-    }
-    return {.anchor = (plane_->touching * radius) - (up * (radius + height)),
-            .east = plane_->east,
-            .north = plane_->north,
-            .corner = drifted_ + (DVec2{centre_ - glm::ivec2{foam_size / 2}} * foam_spacing),
-            .drifted = drifted_};
-}
-
-DVec2 foam_texel(const FoamPlacing& placing, DVec3 rest) noexcept {
-    const DVec3 from_anchor = rest - placing.anchor;
-    return (DVec2{glm::dot(from_anchor, placing.east), glm::dot(from_anchor, placing.north)} -
-            placing.corner) /
-           foam_spacing;
-}
 
 Result<FoamMap> FoamMap::create(Device& device) {
     FoamMap map;
@@ -131,7 +81,7 @@ Result<FoamMap> FoamMap::create(Device& device) {
     return map;
 }
 
-void FoamMap::step(VkCommandBuffer commands, const FoamStep& step, const SeaBindings& sea,
+void FoamMap::step(VkCommandBuffer commands, const GridStep& step, const SeaBindings& sea,
                    DVec3 drift, bool catch_up) {
     if (step.kept) {
         record(commands, step, sea, drift, 0.0);
@@ -149,7 +99,7 @@ void FoamMap::step(VkCommandBuffer commands, const FoamStep& step, const SeaBind
     }
 }
 
-void FoamMap::record(VkCommandBuffer commands, const FoamStep& step, const SeaBindings& sea,
+void FoamMap::record(VkCommandBuffer commands, const GridStep& step, const SeaBindings& sea,
                      DVec3 drift, double ago) {
     const std::size_t next = 1 - latest_;
     uses_.at(latest_).use_as(commands, image_use::sampled);
