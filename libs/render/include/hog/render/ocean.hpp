@@ -192,10 +192,11 @@ public:
                        GameTime time, DVec3 drift, bool catch_up);
     [[nodiscard]] const FoamMap& foam() const noexcept { return foam_; }
     // Records stepping the ripples on the water round the eye on to `time`, as step_foam does the
-    // foam, pushed by `bodies` where they cross the surface.
+    // foam, pushed by `bodies` where they cross the surface; and drawing the rain's rings on them.
     Result<> step_ripples(VkCommandBuffer commands, const OceanView& view, std::uint32_t frame,
                           GameTime time, DVec3 drift, std::span<const Capsule> bodies = {});
     [[nodiscard]] const RippleMap& ripples() const noexcept { return ripples_; }
+    [[nodiscard]] const RainTile& rain() const noexcept { return rain_; }
 
 private:
     Ocean() = default;
@@ -224,6 +225,7 @@ private:
     std::optional<GameTime> foam_time_;
     DriftingGrid ripple_grid_{ripple_size, ripple_spacing};
     RippleMap ripples_;
+    RainTile rain_;
     std::optional<GameTime> ripple_time_;
     std::uint32_t index_count_ = 0;
     bool air_ = false;

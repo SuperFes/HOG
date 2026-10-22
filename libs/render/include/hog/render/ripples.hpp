@@ -54,6 +54,13 @@ inline constexpr double rings_per_rain = 10.0;
 [[nodiscard]] double rain_ring_chance(double falling, double snow) noexcept;
 // Seconds at `time`, counted round every so many rings' lives, as rain rings are timed by.
 [[nodiscard]] double rain_ring_seconds(GameTime time) noexcept;
+// The rings are drawn ahead on a tile of rain_tile_size texels a side, rain_tile_cells cells
+// across, repeating past its edges; of rain_tile_layers layers, each holding its share of the
+// layers of cells, which the sea lays over each other each turned its own way.
+inline constexpr std::uint32_t rain_tile_size = 384;
+inline constexpr int rain_tile_cells = 8;
+inline constexpr std::uint32_t rain_tile_layers = 2;
+static_assert(rain_ring_layers % rain_tile_layers == 0);
 
 // A body as a capsule standing on its feet, laid on the ripples' grid.
 struct RippleBody {
@@ -102,6 +109,29 @@ private:
     void clear(VkCommandBuffer commands);
     void record(VkCommandBuffer commands, glm::ivec2 shift, double seconds, const SeaBindings& sea,
                 VkBuffer bodies);
+};
+
+// Rain's rings on the water, drawn on a tile as the sea lays them.
+class RainTile {
+public:
+    RainTile() = default;
+    // With no rings drawn on it.
+    [[nodiscard]] static Result<RainTile> create(Device& device);
+
+    // Records drawing the rings of rain as `rain` has it, as hog::render::DrawnWaves' rain, where
+    // any fall. Leaves them ready for any shader to sample.
+    void draw(VkCommandBuffer commands, glm::vec4 rain);
+
+    // How steeply the rings slope the water along the tile's rows and columns.
+    [[nodiscard]] const Image& kept() const noexcept { return tile_; }
+    // Filtered linearly, repeating past the tile's edges.
+    [[nodiscard]] VkSampler sampler() const noexcept { return sampler_.handle(); }
+
+private:
+    Pipeline pipeline_;
+    Image tile_;
+    TrackedImage tile_use_;
+    Sampler sampler_;
 };
 
 } // namespace hog::render

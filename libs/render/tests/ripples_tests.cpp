@@ -227,6 +227,108 @@ std::vector<std::uint8_t> seen_down(hog::render::Device& device, double height,
     return std::move(pixels).value();
 }
 
+using hog::render::rain_tile_cells;
+using hog::render::rain_tile_layers;
+using hog::render::rain_tile_size;
+
+constexpr std::size_t rain_texels = std::size_t{rain_tile_size} * rain_tile_size;
+
+// Of each layer of what `tile` has drawn, how steeply the rings slope each texel; read back.
+std::vector<DVec2> drawn_rings(hog::render::Device& device, const hog::render::RainTile& tile) {
+    const std::size_t count = rain_texels * rain_tile_layers;
+    auto buffer =
+        hog::render::make_buffer(device, count * sizeof(glm::vec2),
+                                 VK_BUFFER_USAGE_TRANSFER_DST_BIT, hog::render::Memory::Readback);
+    REQUIRE(buffer);
+    REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
+        namespace use = hog::render::image_use;
+        hog::render::transition(commands, tile.kept().handle(), VK_IMAGE_ASPECT_COLOR_BIT,
+                                use::sampled, use::copy_source);
+        const VkBufferImageCopy copy{
+            .bufferOffset = 0,
+            .bufferRowLength = 0,
+            .bufferImageHeight = 0,
+            .imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                                 .mipLevel = 0,
+                                 .baseArrayLayer = 0,
+                                 .layerCount = rain_tile_layers},
+            .imageOffset = {.x = 0, .y = 0, .z = 0},
+            .imageExtent = {.width = rain_tile_size, .height = rain_tile_size, .depth = 1}};
+        vkCmdCopyImageToBuffer(commands, tile.kept().handle(), use::copy_source.layout,
+                               buffer->handle(), 1, &copy);
+        hog::render::transition(commands, tile.kept().handle(), VK_IMAGE_ASPECT_COLOR_BIT,
+                                use::copy_source, use::sampled);
+    }));
+    REQUIRE(buffer->invalidate());
+    std::vector<glm::vec2> drawn(count);
+    std::memcpy(drawn.data(), buffer->mapped().data(), std::span{drawn}.size_bytes());
+    return {drawn.begin(), drawn.end()};
+}
+
+// As rain_rings.slang's random_of.
+glm::dvec3 random_of(glm::ivec3 seed) {
+    glm::uvec3 v = (glm::uvec3(seed) * 1664525U) + 1013904223U;
+    v.x += v.y * v.z;
+    v.y += v.z * v.x;
+    v.z += v.x * v.y;
+    v ^= v >> 16U;
+    v.x += v.y * v.z;
+    v.y += v.z * v.x;
+    v.z += v.x * v.y;
+    return glm::dvec3(v) / 4294967296.0;
+}
+
+// How steeply the rings of the tile's layer `layer` slope the water at `at`, cells from its
+// corner, inside it or past its edges, with `rain` as DrawnWaves has it: worked out as
+// rain_rings.slang draws them.
+DVec2 rings_at(DVec2 at, int layer, glm::dvec2 rain) {
+    using hog::render::rain_ring_cell;
+    using hog::render::rain_ring_layers;
+    using hog::render::rain_ring_life;
+    constexpr int each_layers = rain_ring_layers / static_cast<int>(rain_tile_layers);
+    constexpr double speed = 0.3;
+    constexpr double length = 0.03;
+    constexpr double steepest = 0.3;
+    DVec2 slope{0.0};
+    for (int each = 0; each < each_layers; ++each) {
+        const int ringing = (layer * each_layers) + each;
+        const DVec2 within = at + (DVec2{0.37, 0.71} * static_cast<double>(ringing));
+        const glm::ivec2 cell{glm::floor(within)};
+        for (int y = -1; y <= 1; ++y) {
+            for (int x = -1; x <= 1; ++x) {
+                const glm::ivec2 near = cell + glm::ivec2{x, y};
+                const glm::ivec2 seed =
+                    ((near % rain_tile_cells) + rain_tile_cells) % rain_tile_cells;
+                const double lived = (rain.y / rain_ring_life) +
+                                     random_of(glm::ivec3{seed, ringing - rain_ring_layers}).x;
+                const double age = lived - std::floor(lived);
+                const glm::dvec3 drop = random_of(glm::ivec3{
+                    seed, (static_cast<int>(std::floor(lived)) * rain_ring_layers) + ringing});
+                if (drop.z >= rain.x) {
+                    continue;
+                }
+                const DVec2 from = (within - (DVec2{near} + DVec2{drop})) * rain_ring_cell;
+                const double out = glm::length(from);
+                const double behind = out - (age * rain_ring_life * speed);
+                if (std::abs(behind) > 2.0 * length) {
+                    continue;
+                }
+                const double across = behind / length;
+                const double steepness = -steepest * (1.0 - age) * (1.0 - age) *
+                                         std::exp(-across * across) *
+                                         std::sin(2.0 * std::numbers::pi * across);
+                slope += from * (steepness / std::max(out, 1e-4));
+            }
+        }
+    }
+    return slope;
+}
+
+// Cells from the tile's corner to the middle of the texel at `x`, `y`.
+DVec2 rain_texel_at(int x, int y) {
+    return (DVec2{x, y} + 0.5) * (static_cast<double>(rain_tile_cells) / rain_tile_size);
+}
+
 } // namespace
 
 TEST_CASE("ripples run as fast as waves on deep water, short or long, any way", "[render][gpu]") {
@@ -566,5 +668,62 @@ TEST_CASE("rain rings scatter the sun's glint off the sea, or blur it where too 
     // Dimmer, so seen fainter.
     CAPTURE(glint_reach(dry_far, 5), glint_reach(wet_far, 5));
     CHECK(glint_reach(wet_far, 5) > 1.5 * glint_reach(dry_far, 5));
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("rain's rings are drawn on a tile that repeats seamlessly, as many as rain falls",
+          "[render][gpu]") {
+    const auto device = test_device();
+    auto tile = hog::render::RainTile::create(*device);
+    REQUIRE(tile);
+    const auto drawn_with = [&](double chance) {
+        REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
+            tile->draw(commands, {static_cast<float>(chance), 12.3F, 0.0F, 0.0F});
+        }));
+        return drawn_rings(*device, *tile);
+    };
+    const auto ringed = [](std::span<const DVec2> rings) {
+        return std::ranges::count_if(rings, [](DVec2 slope) { return glm::length(slope) > 0.01; });
+    };
+    // Without rain, nothing's drawn.
+    const std::vector<DVec2> dry = drawn_with(0.0);
+    CHECK(std::ranges::all_of(dry, [](DVec2 slope) { return slope == DVec2{0.0}; }));
+    const double light = hog::render::rain_ring_chance(2.0, 0.0);
+    const std::vector<DVec2> few = drawn_with(light);
+    const std::vector<DVec2> many = drawn_with(1.0);
+    CAPTURE(ringed(few), ringed(many));
+    CHECK(ringed(few) > 0);
+    CHECK(ringed(many) > 2 * ringed(few));
+    // Each layer rings its own way.
+    const std::span<const DVec2> first = std::span{many}.first(rain_texels);
+    const std::span<const DVec2> second = std::span{many}.subspan(rain_texels);
+    CHECK_FALSE(std::ranges::equal(first, second));
+    const glm::dvec2 rain{1.0, 12.3};
+    const auto drawn_at = [&](int x, int y, int layer) {
+        return many.at((static_cast<std::size_t>(layer) * rain_texels) +
+                       (static_cast<std::size_t>(y) * rain_tile_size) +
+                       static_cast<std::size_t>(x));
+    };
+    double worst = 0.0;
+    double worst_edge = 0.0;
+    for (int layer = 0; std::cmp_less(layer, rain_tile_layers); ++layer) {
+        for (int y = 0; std::cmp_less(y, rain_tile_size); y += 5) {
+            for (int x = 0; std::cmp_less(x, rain_tile_size); x += 7) {
+                worst = std::max(worst, glm::length(drawn_at(x, y, layer) -
+                                                    rings_at(rain_texel_at(x, y), layer, rain)));
+            }
+            // What's drawn at the tile's first column and row carries on from its last.
+            const DVec2 past{rain_tile_cells, 0.0};
+            worst_edge = std::max(worst_edge,
+                                  glm::length(drawn_at(0, y, layer) -
+                                              rings_at(rain_texel_at(0, y) + past, layer, rain)));
+            worst_edge = std::max(
+                worst_edge,
+                glm::length(drawn_at(y, 0, layer) -
+                            rings_at(rain_texel_at(y, 0) + DVec2{past.y, past.x}, layer, rain)));
+        }
+    }
+    CHECK(worst < 1e-3);
+    CHECK(worst_edge < 1e-3);
     CHECK(device->validation_errors() == 0);
 }

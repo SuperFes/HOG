@@ -1,6 +1,7 @@
 #include <hog/render/device.hpp>
 #include <hog/render/ocean.hpp>
 #include <hog/render/ripples.hpp>
+#include <hog/shaders/rain_rings.hpp>
 #include <hog/shaders/ripples.hpp>
 
 #include <algorithm>
@@ -63,6 +64,14 @@ Result<Pipeline> stage(const Device& device, const char* entry) {
                                           .push_constant_bytes = sizeof(Push),
                                           .descriptors = descriptors});
 }
+
+struct RainPush {
+    glm::vec4 rain{0.0F};
+};
+
+constexpr std::array rain_descriptors{binding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)};
+
+constexpr std::uint32_t rain_groups = (rain_tile_size + 7) / 8;
 
 } // namespace
 
@@ -183,6 +192,65 @@ void RippleMap::record(VkCommandBuffer commands, glm::ivec2 shift, double second
                            sizeof(push), &push);
         vkCmdDispatch(commands, groups, 1, 1);
     }
+}
+
+Result<RainTile> RainTile::create(Device& device) {
+    RainTile tile;
+    auto pipeline = make_compute_pipeline(device, {.spirv = shaders::rain_rings,
+                                                   .entry = "rings_main",
+                                                   .push_constant_bytes = sizeof(RainPush),
+                                                   .descriptors = rain_descriptors});
+    if (!pipeline) {
+        return std::unexpected(std::move(pipeline).error());
+    }
+    tile.pipeline_ = std::move(pipeline).value();
+    auto sampler = make_tiling_sampler(device);
+    if (!sampler) {
+        return std::unexpected(std::move(sampler).error());
+    }
+    tile.sampler_ = std::move(sampler).value();
+    auto image = make_image(
+        device, {.format = VK_FORMAT_R32G32_SFLOAT,
+                 .extent = {.width = rain_tile_size, .height = rain_tile_size},
+                 .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                          VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                 .layers = rain_tile_layers});
+    if (!image) {
+        return std::unexpected(std::move(image).error());
+    }
+    tile.tile_ = std::move(image).value();
+    tile.tile_use_ = TrackedImage{tile.tile_.handle(), VK_IMAGE_ASPECT_COLOR_BIT};
+    if (auto cleared = device.submit_now([&](VkCommandBuffer commands) {
+            const VkClearColorValue none{.float32 = {0.0F, 0.0F, 0.0F, 0.0F}};
+            const VkImageSubresourceRange all{.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                                              .baseMipLevel = 0,
+                                              .levelCount = 1,
+                                              .baseArrayLayer = 0,
+                                              .layerCount = rain_tile_layers};
+            tile.tile_use_.use_as(commands, image_use::copy_target);
+            vkCmdClearColorImage(commands, tile.tile_.handle(), image_use::copy_target.layout,
+                                 &none, 1, &all);
+            tile.tile_use_.use_as(commands, image_use::sampled);
+        });
+        !cleared) {
+        return std::unexpected(std::move(cleared).error());
+    }
+    return tile;
+}
+
+void RainTile::draw(VkCommandBuffer commands, glm::vec4 rain) {
+    // Without rain the sea never samples it.
+    if (rain.x <= 0.0F) {
+        return;
+    }
+    const RainPush push{.rain = rain};
+    tile_use_.use_as(commands, image_use::storage);
+    vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_.handle());
+    push_storage_image(commands, pipeline_, 0, tile_.view());
+    vkCmdPushConstants(commands, pipeline_.layout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push),
+                       &push);
+    vkCmdDispatch(commands, rain_groups, rain_groups, rain_tile_layers);
+    tile_use_.use_as(commands, image_use::sampled);
 }
 
 } // namespace hog::render

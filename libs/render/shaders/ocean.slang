@@ -37,6 +37,8 @@ struct Push {
 [[vk::binding(9, 0)]] Sampler2D foam_kept;
 // As hog::render::RippleMap keeps them.
 [[vk::binding(10, 0)]] Sampler2D ripples_kept;
+// As hog::render::RainTile draws it.
+[[vk::binding(11, 0)]] Sampler2DArray<float2> rain_tile;
 
 struct Vertex {
     [[vk::location(0)]] float out; // from 0 under the eye to 1 at the rim
@@ -195,31 +197,17 @@ float2 ripple_slope_at(float3 rest, float footprint, out float unseen) {
     return slope * seen;
 }
 
-// As hog::render::rain_ring_cell, rain_ring_layers and rain_ring_life.
+// As hog::render::rain_ring_cell and rain_tile_cells.
 static const float rain_ring_cell = 0.3;
-static const int rain_ring_layers = 4;
-static const float rain_ring_life = 0.7;
-// A ring spreads as fast as the slowest ripples on water run, m/s; its ripples so many metres
-// long, as steep as this as it starts.
-static const float ring_speed = 0.3;
+static const float rain_tile_cells = 8.0;
+// The rings' ripples so many metres long.
 static const float ring_length = 0.03;
-static const float ring_steepest = 0.3;
 // The mean square slope the most rain rings lend the sea where they're too fine to draw.
 static const float rain_roughness = 0.02;
-
-// Three numbers from 0 to 1 that look random, the same for the same `seed`.
-float3 random_of(int3 seed) {
-    // Jarzynski and Olano's PCG3D.
-    uint3 v = uint3(seed) * 1664525u + 1013904223u;
-    v.x += v.y * v.z;
-    v.y += v.z * v.x;
-    v.z += v.x * v.y;
-    v ^= v >> 16u;
-    v.x += v.y * v.z;
-    v.y += v.z * v.x;
-    v.z += v.x * v.y;
-    return float3(v) / 4294967296.0;
-}
+// The tile's second layer is laid turned by 0.9 radians, a turn that never brings a square back
+// onto itself, and moved over by so many tiles, so the two never repeat together.
+static const float2 tile_turning = float2(0.62161, 0.78333);
+static const float2 tile_moved = float2(0.37, 0.71);
 
 // How steeply the rain's rings slope the water at `rest`, a point of sea level from the eye, along
 // the ripples' grid's rows and columns, as drawn seen over `footprint` metres; and in `unseen`,
@@ -235,37 +223,17 @@ float2 rain_slope_at(float3 rest, float footprint, out float unseen) {
     }
     const float3 from_anchor = rest - waves.ripple_anchor.xyz;
     const float2 along =
-        float2(dot(from_anchor, waves.ripple_east.xyz), dot(from_anchor, waves.ripple_north.xyz));
-    float2 slope = float2(0.0);
-    for (int layer = 0; layer < rain_ring_layers; ++layer) {
-        const float2 within = (along / rain_ring_cell) + (float2(0.37, 0.71) * float(layer));
-        const int2 cell = int2(floor(within));
-        for (int y = -1; y <= 1; ++y) {
-            for (int x = -1; x <= 1; ++x) {
-                const int2 at = cell + int2(x, y);
-                // Each cell rings in its own time.
-                const float lived = (waves.rain.y / rain_ring_life) +
-                                    random_of(int3(at, layer - rain_ring_layers)).x;
-                const float age = frac(lived);
-                const float3 drop = random_of(int3(at, (int(floor(lived)) * rain_ring_layers) + layer));
-                if (drop.z >= chance) {
-                    continue;
-                }
-                const float2 from = (within - (float2(at) + drop.xy)) * rain_ring_cell;
-                const float out = length(from);
-                const float behind = out - (age * rain_ring_life * ring_speed);
-                if (abs(behind) > 2.0 * ring_length) {
-                    continue;
-                }
-                const float fading = (1.0 - age) * (1.0 - age);
-                const float across = behind / ring_length;
-                const float steepness = -ring_steepest * fading * exp(-across * across) *
-                                        sin(2.0 * pi * across);
-                slope += from * (steepness / max(out, 1e-4));
-            }
-        }
-    }
-    return slope * seen;
+        float2(dot(from_anchor, waves.ripple_east.xyz), dot(from_anchor, waves.ripple_north.xyz)) /
+        (rain_ring_cell * rain_tile_cells);
+    const float2 turned = float2((tile_turning.x * along.x) - (tile_turning.y * along.y),
+                                 (tile_turning.y * along.x) + (tile_turning.x * along.y)) +
+                          tile_moved;
+    const float2 first = rain_tile.SampleLevel(float3(along, 0.0), 0.0);
+    // Sloping along the turned layer's own rows and columns, turned back onto the grid's.
+    const float2 second = rain_tile.SampleLevel(float3(turned, 1.0), 0.0);
+    return (first + float2((tile_turning.x * second.x) + (tile_turning.y * second.y),
+                           (tile_turning.x * second.y) - (tile_turning.y * second.x))) *
+           seen;
 }
 
 // How deep the sea stands at `rest`, as floor_at finds it, but at each pixel rather than between
