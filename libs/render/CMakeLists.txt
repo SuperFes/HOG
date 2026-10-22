@@ -42,6 +42,7 @@ add_library(hog_render
     src/clouds.cpp
     src/cube_sphere.cpp
     src/device.cpp
+    src/foam.cpp
     src/forest.cpp
     src/glare.cpp
     src/gpu_timer.cpp
@@ -81,7 +82,7 @@ target_link_libraries(hog_render
     PUBLIC hog::atmosphere hog::core hog::flora hog::terrain hog::waves volk::volk
     PRIVATE hog::planet vk-bootstrap::vk-bootstrap)
 hog_target_defaults(hog_render)
-hog_add_shaders(hog_render CATALOGUE shaders/aerial.slang shaders/air_tables.slang shaders/billboard.slang shaders/bushes.slang shaders/capsules.slang shaders/cloud_march.slang shaders/cloud_resolve.slang shaders/clouds.slang shaders/forest.slang shaders/glare.slang shaders/globe.slang shaders/grass.slang shaders/ocean.slang shaders/precipitation.slang shaders/sky.slang shaders/sky_view.slang
+hog_add_shaders(hog_render CATALOGUE shaders/aerial.slang shaders/air_tables.slang shaders/billboard.slang shaders/bushes.slang shaders/capsules.slang shaders/cloud_march.slang shaders/cloud_resolve.slang shaders/clouds.slang shaders/foam.slang shaders/forest.slang shaders/glare.slang shaders/globe.slang shaders/grass.slang shaders/ocean.slang shaders/precipitation.slang shaders/sky.slang shaders/sky_view.slang
                 shaders/terrain.slang shaders/trees.slang)
 
 # A test device, for tests here and elsewhere that draw.
@@ -105,6 +106,7 @@ hog_add_tests(hog_render
     tests/clouds_tests.cpp
     tests/cube_sphere_tests.cpp
     tests/device_tests.cpp
+    tests/foam_tests.cpp
     tests/forest_tests.cpp
     tests/glare_tests.cpp
     tests/gpu_timer_tests.cpp
