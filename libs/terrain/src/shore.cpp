@@ -2,6 +2,7 @@
 #include <hog/terrain/shore.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -118,9 +119,10 @@ bool open_sea_at(std::span<const float> depths, std::size_t layer, std::size_t c
 
 } // namespace
 
-void keep_to_sea_reach(std::span<float> depths) {
+std::vector<float> keep_to_sea_reach(std::span<float> depths) {
     const std::size_t layers = depths.size() / shore_texels;
     const auto size = static_cast<std::size_t>(shore_size);
+    std::vector<float> still(depths.size(), shore_highest);
     std::vector<std::uint8_t> coarser;
     for (std::size_t layer = layers; layer-- > 0;) {
         std::vector<std::uint8_t> reached(shore_texels, 0);
@@ -134,11 +136,97 @@ void keep_to_sea_reach(std::span<float> depths) {
         spread(here, reached);
         for (std::size_t at = 0; at < shore_texels; ++at) {
             if (reached[at] == 0) {
+                if (here[at] > 0.0F) {
+                    still[(layer * shore_texels) + at] = here[at];
+                }
                 here[at] = shore_highest;
             }
         }
         coarser = std::move(reached);
     }
+    return still;
+}
+
+namespace {
+
+// The step to the texel upwind of a wind blowing towards each heading.
+constexpr std::array<std::array<int, 2>, fetch_headings> upwind{
+    {{-1, 0}, {-1, -1}, {0, -1}, {1, -1}, {1, 0}, {1, 1}, {0, 1}, {-1, 1}}};
+
+// Of a layer's fetch towards a heading, where its upwind step leaves the layer from `column` and
+// `row`: the next coarser layer's at the point it leaves to, `coarser`, or the furthest kept from
+// the coarsest.
+float fetch_beyond(std::size_t layer, int column, int row, std::span<const float> coarser) {
+    if (coarser.empty()) {
+        return longest_fetch;
+    }
+    const double ratio = shore_spacing.at(layer) / shore_spacing.at(layer + 1);
+    const auto coarse = [&](int at) {
+        return static_cast<int>(
+            std::floor(((at + 0.5 - (shore_size / 2.0)) * ratio) + (shore_size / 2.0)));
+    };
+    const int coarse_column = std::clamp(coarse(column), 0, shore_size - 1);
+    const int coarse_row = std::clamp(coarse(row), 0, shore_size - 1);
+    return coarser[(static_cast<std::size_t>(coarse_row) * shore_size) +
+                   static_cast<std::size_t>(coarse_column)];
+}
+
+} // namespace
+
+namespace {
+
+// Of a layer's water, `wet`, its fetch towards `heading` into `here`, running on from `coarser`.
+void sweep(std::size_t layer, int heading, const std::vector<std::uint8_t>& wet,
+           std::span<float> here, std::span<const float> coarser) {
+    const auto size = static_cast<std::size_t>(shore_size);
+    const auto [dx, dy] = upwind.at(static_cast<std::size_t>(heading));
+    const auto step = static_cast<float>(shore_spacing.at(layer) * std::hypot(dx, dy));
+    const auto inside = [](int at) { return at >= 0 && at < shore_size; };
+    // Upwind texels first.
+    for (int across = 0; across < shore_size; ++across) {
+        const int row = dy > 0 ? shore_size - 1 - across : across;
+        for (int down = 0; down < shore_size; ++down) {
+            const int column = dx > 0 ? shore_size - 1 - down : down;
+            const std::size_t at =
+                (static_cast<std::size_t>(row) * size) + static_cast<std::size_t>(column);
+            if (wet[at] == 0) {
+                continue;
+            }
+            const int from_column = column + dx;
+            const int from_row = row + dy;
+            const float before = inside(from_column) && inside(from_row)
+                                     ? here[(static_cast<std::size_t>(from_row) * size) +
+                                            static_cast<std::size_t>(from_column)]
+                                     : fetch_beyond(layer, from_column, from_row, coarser);
+            // From the shore halfway to the texel upwind, or on from that texel.
+            here[at] = std::min(before > 0.0F ? before + step : step / 2.0F, longest_fetch);
+        }
+    }
+}
+
+} // namespace
+
+std::vector<float> shore_fetches(std::span<const float> depths, std::span<const float> still) {
+    const std::size_t layers = depths.size() / shore_texels;
+    std::vector<float> fetches(layers * fetch_headings * shore_texels, 0.0F);
+    const std::span<float> all{fetches};
+    const auto plane = [&](std::size_t layer, int heading) {
+        return all.subspan(((layer * fetch_headings) + static_cast<std::size_t>(heading)) *
+                               shore_texels,
+                           shore_texels);
+    };
+    for (std::size_t layer = layers; layer-- > 0;) {
+        std::vector<std::uint8_t> wet(shore_texels);
+        for (std::size_t at = 0; at < shore_texels; ++at) {
+            const std::size_t in_layer = (layer * shore_texels) + at;
+            wet[at] = depths[in_layer] > 0.0F || still[in_layer] > 0.0F ? 1 : 0;
+        }
+        for (int heading = 0; heading < fetch_headings; ++heading) {
+            sweep(layer, heading, wet, plane(layer, heading),
+                  layer + 1 < layers ? plane(layer + 1, heading) : std::span<float>{});
+        }
+    }
+    return fetches;
 }
 
 void ShoreStream::follow(DVec3 eye) {
@@ -152,12 +240,13 @@ void ShoreStream::start(const ShoreFrame& frame) {
     started_ = frame;
     working_ = std::make_unique<jobs::Async<ShoreDepths>>(
         *jobs_, [terrain = terrain_, frame, radius = radius_] {
-            ShoreDepths found{.frame = frame, .depths = {}};
+            ShoreDepths found{.frame = frame, .depths = {}, .still = {}, .fetches = {}};
             for (const double spacing : shore_spacing) {
                 const std::vector<float> layer = shore_depths(*terrain, frame, radius, spacing);
                 found.depths.insert(found.depths.end(), layer.begin(), layer.end());
             }
-            keep_to_sea_reach(found.depths);
+            found.still = keep_to_sea_reach(found.depths);
+            found.fetches = shore_fetches(found.depths, found.still);
             return found;
         });
 }

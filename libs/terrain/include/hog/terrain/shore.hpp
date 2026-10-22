@@ -51,13 +51,30 @@ struct ShoreFrame {
 // Of depths in layers as ShoreStream works them out, keeps as high as shore_highest whatever the
 // open sea can't reach: ground behind higher ground, and hollows and water cut off by it, so the
 // tide and the waves' run-up flood none of them. The open sea is what's deep, or what's at the
-// coarsest layer's edge; each finer layer's is where the next coarser one's reaches.
-void keep_to_sea_reach(std::span<float> depths);
+// coarsest layer's edge; each finer layer's is where the next coarser one's reaches. Returns the
+// depths of the still water it cut off, as high as shore_highest elsewhere.
+std::vector<float> keep_to_sea_reach(std::span<float> depths);
 
-// The depths round an anchor, each layer in turn, finest first.
+// Fetch, how far water stretches upwind, is measured for winds blowing towards each of these
+// headings in turn: east first, then each an eighth of a turn anticlockwise.
+inline constexpr int fetch_headings = 8;
+// Water stretching beyond what's known is taken as this far, the furthest kept.
+inline constexpr float longest_fetch = 50'000.0F; // metres
+
+// Of layers of depths of the open sea, `depths`, and of still water, `still`, as ShoreDepths has
+// them: metres of either kind of water upwind of each texel, none over land. Layer by layer, a
+// plane of texels for each heading in turn; each finer layer's fetch runs on into the next
+// coarser one's.
+[[nodiscard]] std::vector<float> shore_fetches(std::span<const float> depths,
+                                               std::span<const float> still);
+
+// The depths round an anchor, each layer in turn, finest first: of the sea where the open sea
+// reaches, of still water where it doesn't, and the fetch over both, as shore_fetches has it.
 struct ShoreDepths {
     ShoreFrame frame;
     std::vector<float> depths;
+    std::vector<float> still;
+    std::vector<float> fetches;
 };
 
 // Works out the depths round the eye in the background on the pool, anew whenever the eye comes

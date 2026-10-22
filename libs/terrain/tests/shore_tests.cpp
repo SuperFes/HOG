@@ -15,6 +15,7 @@
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
+using Catch::Matchers::WithinRel;
 using hog::DVec2;
 using hog::DVec3;
 using hog::terrain::shore_along;
@@ -127,8 +128,10 @@ TEST_CASE("the depths round the eye are worked out anew as it moves on", "[terra
         const std::vector<float> one = shore_depths(terrain(), first.frame, radius, spacing);
         expected.insert(expected.end(), one.begin(), one.end());
     }
-    hog::terrain::keep_to_sea_reach(expected);
+    const std::vector<float> still = hog::terrain::keep_to_sea_reach(expected);
     CHECK(first.depths == expected);
+    CHECK(first.still == still);
+    CHECK(first.fetches == hog::terrain::shore_fetches(expected, still));
 
     // Nearby, the same; far off, others, and only the last wanted once those in flight are done.
     stream.follow(first.frame.anchor);
@@ -192,7 +195,7 @@ TEST_CASE("the sea floods only what it can reach from the open sea", "[terrain][
     };
     const auto coarse = [](int column, int) { return column < 128 ? 30.0F : -20.0F; };
     std::vector<float> depths = layered(fine, coarse);
-    hog::terrain::keep_to_sea_reach(depths);
+    const std::vector<float> still = hog::terrain::keep_to_sea_reach(depths);
     constexpr float kept = hog::terrain::shore_highest;
     CHECK(fine_at(depths, 20, 30) == 2.0F);
     CHECK(fine_at(depths, 140, 30) == -1.0F);
@@ -201,6 +204,11 @@ TEST_CASE("the sea floods only what it can reach from the open sea", "[terrain][
     CHECK(fine_at(depths, 175, 30) == kept); // the pond, below the sea but cut off from it
     CHECK(fine_at(depths, 150, 200) == -0.5F);
     CHECK(fine_at(depths, 160, 230) == 0.5F); // the lagoon
+    // Only the pond's water is still.
+    CHECK(fine_at(still, 175, 30) == 1.0F);
+    CHECK(fine_at(still, 160, 30) == kept);
+    CHECK(fine_at(still, 160, 230) == kept);
+    CHECK(fine_at(still, 20, 30) == kept);
     // The coarse layer's open sea is kept, and its high ground as high as is kept.
     CHECK(depths.at(layer_texels + 10) == 30.0F);
     CHECK(depths.at(layer_texels + 200) == kept);
@@ -220,8 +228,65 @@ TEST_CASE("shallow water at the edge of what's known is taken as the open sea",
         return std::abs(column - 128) < 5 && std::abs(row - 128) < 5 ? -6.0F : 3.0F;
     };
     std::vector<float> depths = layered(fine, coarse);
-    hog::terrain::keep_to_sea_reach(depths);
+    const std::vector<float> still = hog::terrain::keep_to_sea_reach(depths);
     CHECK(fine_at(depths, 0, 0) == 3.0F);
+    CHECK(fine_at(still, 128, 128) == 1.0F);
     CHECK(fine_at(depths, 128, 128) == hog::terrain::shore_highest);
     CHECK(depths.at(layer_texels + (std::size_t{10} * shore_size) + 10) == 3.0F);
+}
+
+namespace {
+
+// The fetch at a fine texel for a wind blowing towards `heading`.
+double fine_fetch(const std::vector<float>& fetches, int heading, int column, int row) {
+    return static_cast<double>(fetches.at((static_cast<std::size_t>(heading) * layer_texels) +
+                                          (static_cast<std::size_t>(row) * shore_size) +
+                                          static_cast<std::size_t>(column)));
+}
+
+} // namespace
+
+TEST_CASE("fetch runs upwind over still water to its shore", "[terrain][shore]") {
+    // A pond ten texels east to west and four south to north, in land.
+    const auto pond = [](int column, int row) {
+        return column >= 100 && column < 110 && row >= 50 && row < 54;
+    };
+    const std::vector<float> depths =
+        layered([](int, int) { return -3.0F; }, [](int, int) { return -3.0F; });
+    const std::vector<float> still =
+        layered([&](int column, int row) { return pond(column, row) ? 2.0F : -10.0F; },
+                [](int, int) { return -10.0F; });
+    const std::vector<float> fetches = hog::terrain::shore_fetches(depths, still);
+    REQUIRE(fetches.size() == std::size_t{2} * hog::terrain::fetch_headings * layer_texels);
+    const double spacing = shore_spacing.front();
+    // Towards the east, from half a texel in at the west shore to its east shore.
+    CHECK_THAT(fine_fetch(fetches, 0, 100, 51), WithinAbs(spacing / 2.0, 1e-3));
+    CHECK_THAT(fine_fetch(fetches, 0, 109, 51), WithinAbs(spacing * 9.5, 1e-3));
+    // Towards the west, the other way round.
+    CHECK_THAT(fine_fetch(fetches, 4, 100, 51), WithinAbs(spacing * 9.5, 1e-3));
+    // Towards the north, only across it.
+    CHECK_THAT(fine_fetch(fetches, 2, 105, 53), WithinAbs(spacing * 3.5, 1e-3));
+    // Diagonally, by the diagonal step.
+    CHECK_THAT(fine_fetch(fetches, 1, 102, 52), WithinAbs(spacing * std::sqrt(2.0) * 2.5, 1e-3));
+    // None over land.
+    CHECK(fine_fetch(fetches, 0, 99, 51) == 0.0);
+    CHECK(fine_fetch(fetches, 0, 110, 51) == 0.0);
+}
+
+TEST_CASE("fetch runs on into the coarser layer and out to sea", "[terrain][shore]") {
+    // The open sea everywhere fine, and east of land coarse.
+    const std::vector<float> depths =
+        layered([](int, int) { return 30.0F; },
+                [](int column, int) { return column >= 100 ? 30.0F : -3.0F; });
+    const std::vector<float> still =
+        layered([](int, int) { return -10.0F; }, [](int, int) { return -10.0F; });
+    const std::vector<float> fetches = hog::terrain::shore_fetches(depths, still);
+    const double fine = shore_spacing.front();
+    const double coarse = shore_spacing.back();
+    // West of the fine layer lies the coarse texel 111, 11.5 coarse texels from its shore.
+    const double edge = (coarse * 11.5) + fine;
+    CHECK_THAT(fine_fetch(fetches, 0, 0, 128), WithinRel(edge, 1e-5));
+    CHECK_THAT(fine_fetch(fetches, 0, 10, 128), WithinRel(edge + (fine * 10.0), 1e-5));
+    // Towards the west, from beyond all that's known.
+    CHECK(fine_fetch(fetches, 4, 128, 128) == static_cast<double>(hog::terrain::longest_fetch));
 }
