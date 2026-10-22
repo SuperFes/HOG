@@ -59,6 +59,8 @@ public:
     // Moves the grid on to an eye over sea level at `up` on a planet of `radius`, `seconds` after
     // the step before, the water at the surface drifting at `drift`, m/s.
     FoamStep follow(DVec3 up, double radius, DVec3 drift, double seconds);
+    // Keeps nothing on the next step, as where what's kept was left over a sea not as it is.
+    void forget() noexcept { plane_.reset(); }
     // Where it lies from an eye `height` metres above sea level at `up`.
     [[nodiscard]] FoamPlacing placing(DVec3 up, double radius, double height) const;
 
@@ -81,7 +83,8 @@ private:
 [[nodiscard]] DVec2 foam_texel(const FoamPlacing& placing, DVec3 rest) noexcept;
 
 // The foam left on the sea round the eye: how much lies on each texel of the grid, fading as it
-// ages.
+// ages; and how much of what would have left it there the grid saw, which is less where it's
+// only just come over it.
 class FoamMap {
 public:
     FoamMap() = default;

@@ -8,6 +8,10 @@ public static const int drawn_waves = 48;
 public static const int foam_waves = 26;
 // Of those, the longer, which place the foam's patches; the rest make its lace.
 static const int coarse_foam = 12;
+// As hog::render::foam_size: the texels to a side of the grid foam left is kept on round the eye.
+public static const int foam_size = 512;
+// Foam kept on it fades out over so many texels to its edges, where what's likely takes over.
+static const float kept_fading = 64.0;
 // As hog::waves::choppiness: how much of its orbit's width the water moves along a wave as well as
 // up and down.
 static const float choppiness = 1.0;
@@ -416,6 +420,19 @@ float below(float x) {
     return 1.0 / (1.0 + exp(-x * (1.5976 + (0.07056 * x * x))));
 }
 
+float cube_root(float x) {
+    return sign(x) * pow(abs(x), 1.0 / 3.0);
+}
+
+// What `share` of standard normal values lie over, as below has it: the cubic it fits, solved.
+float exceeded(float share) {
+    const float within = clamp(share, 1e-6, 1.0 - 1e-6);
+    const float p = 1.5976 / 0.07056;
+    const float q = log(within / (1.0 - within)) / 0.07056;
+    const float root = sqrt((q * q / 4.0) + (p * p * p / 27.0));
+    return cube_root((-q / 2.0) + root) + cube_root((-q / 2.0) - root);
+}
+
 // At `rest`, a point of sea level from the eye, seen over `footprint` metres, over `floor`: as
 // hog::waves::surface_at, but for the waves shorter than the footprint, which only roughen it.
 // Over still water with `fetch` metres of it upwind, its own waves, as far as the wind has grown
@@ -567,12 +584,12 @@ public WaveSurface wave_surface(Waves waves, float3 rest, float footprint, float
 
 // The foam's pattern at a point of sea level, as much of it as is seen: of its coarse waves and its
 // fine, fields of unit variance of what's seen of them, the share of their variance that's seen,
-// and the mean square of their slope, per metre; and another of its coarse waves, a quarter turn
-// on.
+// and the mean square of their slope, per metre; and another of each, a quarter turn on.
 public struct FoamPattern {
     public float coarse;
     public float fine;
     public float across;
+    public float fine_across;
     public float coarse_seen;
     public float fine_seen;
     public float coarse_slope;
@@ -603,6 +620,7 @@ void add_foam_waves(Waves waves, inout FoamPattern pattern, float3 rest, float f
             pattern.coarse_slope += slope;
         } else {
             pattern.fine += amplitude * c;
+            pattern.fine_across += amplitude * s;
             pattern.fine_seen += seen;
             pattern.fine_slope += slope;
         }
@@ -743,6 +761,11 @@ float across_spread_at(FoamPattern pattern, float footprint) {
                footprint * sqrt(pattern.coarse_slope));
 }
 
+float fine_spread_at(FoamPattern pattern, float footprint) {
+    return max(sqrt(max(1.0 - pattern.fine_seen, 0.0) + square(foam_edges)),
+               footprint * sqrt(pattern.fine_slope));
+}
+
 // The pattern's coarse waves at `rest`, a point of sea level from the eye, seen over `footprint`
 // metres: smooth enough to take between points a few pixels apart.
 public FoamPattern coarse_foam_at(Waves waves, float3 rest, float footprint) {
@@ -750,6 +773,7 @@ public FoamPattern coarse_foam_at(Waves waves, float3 rest, float footprint) {
     pattern.coarse = 0.0;
     pattern.fine = 0.0;
     pattern.across = 0.0;
+    pattern.fine_across = 0.0;
     pattern.coarse_seen = 0.0;
     pattern.fine_seen = 0.0;
     pattern.coarse_slope = 0.0;
@@ -759,9 +783,9 @@ public FoamPattern coarse_foam_at(Waves waves, float3 rest, float footprint) {
 }
 
 // To `coarse`, the pattern's coarse waves where `water` lies, adds its fine waves at `rest`, seen
-// over `footprint` metres, where they might make any of it white.
+// over `footprint` metres, where they might make any of it white, or wherever foam's `kept`.
 public FoamPattern foam_pattern_at(Waves waves, WaveSurface water, Surf surf, FoamPattern coarse,
-                                   float3 rest, float footprint) {
+                                   float3 rest, float footprint, bool kept = false) {
     FoamPattern pattern = coarse;
     const float fine_reach = reaching * sqrt(water.breaking_left / 2.0);
     const bool near_breaking =
@@ -770,7 +794,7 @@ public FoamPattern foam_pattern_at(Waves waves, WaveSurface water, Surf surf, Fo
             -fine_reach - (reaching * breaking_spread_at(waves, water, pattern));
     const bool in_patch =
         pattern.across - water.white_left.x > -reaching * across_spread_at(pattern, footprint);
-    if (near_breaking || surf.white > 0.0 || in_patch) {
+    if (near_breaking || surf.white > 0.0 || in_patch || kept) {
         add_foam_waves(waves, pattern, rest, footprint, coarse_foam, foam_waves);
     }
     return pattern;
@@ -808,8 +832,7 @@ public Foam foam_at(Waves waves, WaveSurface water, Surf surf, FoamPattern patte
         foam.breaking = max(foam.breaking, foam.rollers);
         foam.over = max(foam.over, over / max(sqrt(water.heave), 1e-6));
     }
-    const float fine_spread = max(sqrt(max(1.0 - pattern.fine_seen, 0.0) + square(foam_edges)),
-                                  footprint * sqrt(pattern.fine_slope));
+    const float fine_spread = fine_spread_at(pattern, footprint);
     if (water.white.z > 0.0) {
         const float lace = water.white_left.y;
         const float in_lace = below((lace - pattern.fine) / fine_spread) -
@@ -827,6 +850,43 @@ public Foam foam_at(Waves waves, WaveSurface water, Surf surf, FoamPattern patte
         }
     }
     return foam;
+}
+
+// The foam left kept on the grid round the eye at `rest`, a point of sea level from the eye, as
+// `kept` holds it: x how much is left all told, and y how much of what would have left it the grid
+// saw; both fading out to its edges, and none without a grid.
+public float2 kept_foam_at(Waves waves, Sampler2D kept, float3 rest) {
+    const float per_metre = waves.foam_anchor.w;
+    if (per_metre <= 0.0) {
+        return float2(0.0);
+    }
+    const float3 from_anchor = rest - waves.foam_anchor.xyz;
+    const float2 texel = (float2(dot(from_anchor, waves.foam_east.xyz),
+                                 dot(from_anchor, waves.foam_north.xyz)) -
+                          float2(waves.foam_east.w, waves.foam_north.w)) *
+                         per_metre;
+    const float2 inside = min(texel, float(foam_size) - texel);
+    const float fading = saturate(min(inside.x, inside.y) / kept_fading);
+    if (fading <= 0.0) {
+        return float2(0.0);
+    }
+    return kept.SampleLevel(texel / float(foam_size), 0.0).xy * fading;
+}
+
+// How much of the sea is white with foam left where `pattern` lies, seen over `footprint` metres:
+// what's `kept` there, as kept_foam_at has it, in the pattern's fine lace where it crosses the fine
+// pattern a quarter turn on, so much of each as to cover as much all told; and over what the grid
+// didn't see, as much as `foam` likely leaves. Split so, a little foam is a little sharp lace, not
+// lace thinner than its edges' blur.
+public float left_with_kept(Foam foam, FoamPattern pattern, float2 kept, float footprint) {
+    const float each = sqrt(saturate(kept.x));
+    const float blurred = sqrt(1.0 + square(foam_edges));
+    const float lace = blurred * exceeded((1.0 - each) / 2.0);
+    const float spread = fine_spread_at(pattern, footprint);
+    const float in_lace =
+        below((lace - pattern.fine) / spread) - below((-lace - pattern.fine) / spread);
+    const float crossing = below((pattern.fine_across - (blurred * exceeded(each))) / spread);
+    return saturate((in_lace * crossing) + ((1.0 - kept.y) * foam.left));
 }
 
 // Still water has at least this much of it upwind, so it's told from the sea.

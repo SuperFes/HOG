@@ -1,8 +1,7 @@
 import shore;
 import waves;
 
-// As hog::render::foam_size, foam_spacing, foam_lasting and foam_lasting_surf.
-static const int foam_size = 512;
+// As hog::render::foam_spacing, foam_lasting and foam_lasting_surf.
 static const float foam_spacing = 1.0;
 static const float foam_lasting = 3.0;
 static const float foam_lasting_surf = 10.0;
@@ -30,7 +29,9 @@ struct Push {
 [[vk::push_constant]] ConstantBuffer<Push> push;
 
 [[vk::binding(0, 0)]] Sampler2D kept;
-[[vk::binding(1, 0)]] [[vk::image_format("r32f")]] RWTexture2D<float> foam;
+// x the foam left, all told; y how much of what it would have been left by is known, as the grid
+// saw it.
+[[vk::binding(1, 0)]] [[vk::image_format("rgba32f")]] RWTexture2D<float4> foam;
 [[vk::binding(2, 0)]] ConstantBuffer<Waves> waves;
 [[vk::binding(3, 0)]] Sampler2DArray shore_depths;
 [[vk::binding(4, 0)]] Sampler2DArray shore_fetches;
@@ -82,13 +83,13 @@ float2 breaking_at(float3 rest) {
 [numthreads(8, 8, 1)]
 void compute_main(uint3 id: SV_DispatchThreadID) {
     const int2 from = int2(id.xy) + push.shift.xy;
-    float left = 0.0;
+    float2 left = float2(0.0);
     if (push.shift.z != 0 && all(from >= 0) && all(from < foam_size)) {
-        left = kept.Load(int3(from, 0)).x;
+        left = kept.Load(int3(from, 0)).xy;
     }
     const float2 breaking =
         waves.foam_anchor.w > 0.0 ? breaking_at(foam_rest(float2(id.xy) + 0.5))
                                   : float2(0.0, foam_lasting);
     const float fading = exp(-push.timing.x / breaking.y);
-    foam[id.xy] = (left * fading) + ((1.0 - fading) * breaking.x);
+    foam[id.xy] = float4((left * fading) + ((1.0 - fading) * float2(breaking.x, 1.0)), 0.0, 0.0);
 }

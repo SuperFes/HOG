@@ -100,7 +100,7 @@ Result<FoamMap> FoamMap::create(Device& device) {
     map.sampler_ = std::move(sampler).value();
     for (std::size_t i = 0; i < map.images_.size(); ++i) {
         auto image = make_image(
-            device, {.format = VK_FORMAT_R32_SFLOAT,
+            device, {.format = VK_FORMAT_R32G32B32A32_SFLOAT,
                      .extent = {.width = foam_size, .height = foam_size},
                      .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
                               VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT});

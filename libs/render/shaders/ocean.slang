@@ -33,6 +33,8 @@ struct Push {
 // As shore_waters and shore_fetch take them.
 [[vk::binding(7, 0)]] Sampler2DArray shore_depths;
 [[vk::binding(8, 0)]] Sampler2DArray shore_fetches;
+// As hog::render::FoamMap keeps it.
+[[vk::binding(9, 0)]] Sampler2D foam_kept;
 
 struct Vertex {
     [[vk::location(0)]] float out; // from 0 under the eye to 1 at the rim
@@ -84,6 +86,8 @@ static const float left_thickness = 0.7;
 static const float breaking_thickness = 0.8;
 // Water shallower than this, metres, foams at the swash's edge.
 static const float swash_foam = 0.12;
+// Less foam kept than this is too little to see.
+static const float least_kept = 0.004;
 
 // Turns `v` as sea level's up under the eye, `truly`, turns to as it's drawn, `drawn`.
 float3 as_drawn(float3 v, float3 truly, float3 drawn) {
@@ -166,7 +170,9 @@ Facing facing_at(Surface surface, float3 looking) {
     facing.white = 0.0;
     facing.albedo = breaking_albedo;
     const Surf surf = as_surf(surface.surf);
-    if (water.white.z > 0.0 || surf.white > 0.0) {
+    const float2 kept = kept_foam_at(waves, foam_kept, surface.rest);
+    const bool any_kept = kept.x > least_kept;
+    if (water.white.z > 0.0 || surf.white > 0.0 || any_kept) {
         FoamPattern coarse;
         coarse.coarse = surface.foam.x;
         coarse.across = surface.foam.y;
@@ -174,9 +180,10 @@ Facing facing_at(Surface surface, float3 looking) {
         coarse.coarse_slope = surface.foam.w;
         coarse.fine = 0.0;
         coarse.fine_seen = 0.0;
+        coarse.fine_across = 0.0;
         coarse.fine_slope = 0.0;
         const FoamPattern pattern =
-            foam_pattern_at(waves, water, surf, coarse, surface.rest, footprint);
+            foam_pattern_at(waves, water, surf, coarse, surface.rest, footprint, any_kept);
         const Foam foam = foam_at(waves, water, surf, pattern, footprint);
         // Where it's seen, thickest well over where they break and thin where they barely do;
         // what's left is thinner still.
@@ -191,7 +198,7 @@ Facing facing_at(Surface surface, float3 looking) {
                            saturate(2.0 * (pattern.fine + pattern.across + 0.3));
         const float breaking = max(foam.breaking * thickness, edge * breaking_thickness);
         // Foam left thins as it ages.
-        const float left = foam.left * min(left_thickness * (0.4 + (1.2 * foam.fresh)), 1.0) *
+        const float left = left_with_kept(foam, pattern, kept, footprint) * min(left_thickness * (0.4 + (1.2 * foam.fresh)), 1.0) *
                            (1.0 - breaking);
         facing.white = breaking + left;
         facing.albedo = facing.white > 0.0
