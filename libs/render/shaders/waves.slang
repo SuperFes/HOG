@@ -395,6 +395,12 @@ public float swash_high(Waves waves, ShoreLevel level, float ago) {
 
 // The sea's floor under a point: x how deep the water over it is at rest, and yz how fast it
 // deepens along the eye's first and second ways across, metres per metre.
+// The root mean square height, metres, of the waves running up the shore, before they broke on
+// it: as Waves' run_up has them.
+public float running_up(Waves waves) {
+    return waves.run_up.y * breaking_depth;
+}
+
 public float3 deep_floor() {
     return float3(1.0e6, 0.0, 0.0);
 }

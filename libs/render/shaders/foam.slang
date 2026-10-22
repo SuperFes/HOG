@@ -67,8 +67,10 @@ float3 breaking_at(float3 rest) {
     const FoamPattern pattern = foam_pattern_at(
         waves, water, surf, coarse_foam_at(waves, rest, foam_spacing), rest, foam_spacing);
     const Foam now = foam_at(waves, water, surf, pattern, foam_spacing);
-    // The swash's edge leaves its foam on the sand as it draws back.
-    const float edge = (still ? 0.0 : 1.0) * saturate(floor.x / swash_rim) *
+    // The swash's edge leaves its foam on the sand as it draws back, as ocean.slang foams it: as
+    // much as the waves running up are high.
+    const float edge = (still ? 0.0 : 1.0) * saturate(running_up(waves) / swash_foam) *
+                       saturate(floor.x / swash_rim) *
                        (1.0 - smoothstep(0.0, swash_foam, floor.x)) *
                        saturate(2.0 * (pattern.fine + pattern.across + 0.3));
     const float rate = left_per_breaking * (now.whitecaps + max(now.rollers, edge));

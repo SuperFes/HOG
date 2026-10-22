@@ -1546,3 +1546,32 @@ TEST_CASE("the sea's shaders find a lake's level high in the mountains to a hair
     }
     CHECK(device->validation_errors() == 0);
 }
+
+TEST_CASE("the swash's edge foams as much as the waves running up it are high, not on a calm sea",
+          "[render][gpu]") {
+    const auto device = test_device();
+    OceanView view = seen_from(4.0, -up, north, glm::normalize(east + up));
+    const std::uint32_t middle = extent.width / 2;
+    // A breath of wind barely ripples the water over the shore.
+    const std::vector<hog::waves::Train> trains = hog::waves::planet_trains(5);
+    const hog::waves::SeaState breeze{
+        .systems = {hog::waves::grown_sea(east * 1.5)}, .current = {}, .wind = east * 1.5};
+    view.waves = hog::render::drawn_waves_at(trains, hog::waves::waves_at(trains, up, breeze),
+                                             breeze, view.camera.eye, view.bend, noon, DVec3{0.0});
+    // Over ground `depth` under the sea's mean, with waves of significant height `height` running
+    // up the shore, as DrawnWaves has them, but not lifting the sea.
+    const auto seen = [&](double depth, double height) {
+        const auto breaking = static_cast<float>(height / (std::numbers::sqrt2 * 0.42));
+        return pixel_at(
+            draw(*device, view, -depth, true, true,
+                 Tide{.depth = static_cast<float>(depth), .run_up = {0.0F, breaking, 0.0F, 0.0F}}),
+            middle, middle);
+    };
+    const Pixel off_shore = seen(0.3, 0.0);
+    const Pixel calm = seen(0.02, 0.02);
+    const Pixel rough = seen(0.02, 1.0);
+    CAPTURE(brightness(off_shore), brightness(calm), brightness(rough));
+    CHECK(brightness(calm) < brightness(off_shore) + 100);
+    CHECK(brightness(rough) > brightness(calm) + 150);
+    CHECK(device->validation_errors() == 0);
+}

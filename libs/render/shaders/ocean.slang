@@ -268,6 +268,19 @@ float2 rain_slope_at(float3 rest, float footprint, out float unseen) {
     return slope * seen;
 }
 
+// How deep the sea stands at `rest`, as floor_at finds it, but at each pixel rather than between
+// the disc's corners, so what's drawn by it follows the shore rather than the disc.
+float sea_depth_at(float3 rest) {
+    const float3 floor = shore_floor(waves, shore_depths, rest);
+    return floor.x + level_now(shore_level_at(waves, floor, rest));
+}
+
+// How much the swash's edge foams: as much as the waves running up to it are high, beside how deep
+// it foams over.
+float swashing() {
+    return saturate(running_up(waves) / swash_foam);
+}
+
 // Whether the surface is a lake's kept out over ground the grids find dry, which isn't drawn: the
 // ground would hide it, but where the level runs out over lower ground between their texels, or
 // waves lift it up the shore between the disc's corners far off. Told at each pixel. The ground's
@@ -314,10 +327,10 @@ Facing facing_at(Surface surface, float3 looking) {
         const float thickness =
             lerp(breaking_thickness,
                  saturate(0.5 + foam.over + (0.35 * pattern.fine)), seen);
-        // The swash's edge runs foaming up the shore, ragged with the pattern's lace.
-        // Still water has no swash.
-        const float edge = (surface.fetch > 0.0 ? 0.0 : 1.0) *
-                           (1.0 - smoothstep(0.0, swash_foam, surface.floor.x)) *
+        // The swash's edge runs foaming up the shore, ragged with the pattern's lace, as much as
+        // the waves running up it are high. Still water has no swash.
+        const float edge = (surface.fetch > 0.0 ? 0.0 : 1.0) * swashing() *
+                           (1.0 - smoothstep(0.0, swash_foam, sea_depth_at(surface.rest))) *
                            saturate(2.0 * (pattern.fine + pattern.across + 0.3));
         const float breaking = max(foam.breaking * thickness, edge * breaking_thickness);
         // Foam left thins as it ages.
