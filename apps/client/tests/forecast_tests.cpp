@@ -185,6 +185,36 @@ TEST_CASE("weather with no fade, or at another level, is shown at once", "[clien
     CHECK_THAT(cloud_at(forecast, start), WithinAbs(1.0, 1e-5));
 }
 
+TEST_CASE("the sea goes on from where it stood when the next weather comes", "[client][forecast]") {
+    const CellWeather wavy{
+        .wind_sea = {.height = 2.0F, .peak = 0.8F, .heading = {1.0F, 0.0F}},
+        .swells = {hog::protocol::CellWaves{.height = 1.0F, .peak = 0.5F, .heading = {0.0F, 1.0F}},
+                   hog::protocol::CellWaves{}},
+        .current = {0.5F, 0.0F}};
+    const auto variance = [](const hog::waves::SeaState& sea) {
+        double sum = 0.0;
+        for (const hog::waves::System& system : sea.systems) {
+            sum += system.height * system.height;
+        }
+        return sum;
+    };
+    const DVec3 at = glm::normalize(DVec3{1.0, 2.0, 0.5});
+    const hog::planet::TangentFrame frame = hog::planet::tangent_frame(at);
+    const auto stood = [&](MonotonicClock::time_point when, double expected, double current) {
+        Forecast forecast;
+        forecast.receive(everywhere({}, 10s, hog::protocol::most_weather_level), start);
+        forecast.receive(everywhere(wavy, 10s, hog::protocol::most_weather_level), start);
+        const hog::waves::SeaState before = forecast.sea_at(at, when);
+        forecast.receive(everywhere(wavy, 10s, hog::protocol::most_weather_level), when);
+        const hog::waves::SeaState after = forecast.sea_at(at, when);
+        CHECK_THAT(variance(before), WithinAbs(expected, 1e-5));
+        CHECK_THAT(variance(after), WithinAbs(expected, 1e-5));
+        CHECK(glm::length(after.current - (frame.east * current)) < 0.02);
+    };
+    stood(start + 10s, 5.0, 0.5);
+    stood(start + 5s, 2.5, 0.25);
+}
+
 TEST_CASE("the sea is the waves of the cells around, each as much as it counts there",
           "[client][forecast]") {
     const CellWeather wavy{

@@ -17,21 +17,44 @@ namespace {
 
 using Cells = std::vector<protocol::CellWeather>;
 
-float mix(float from, float to, float by) noexcept {
+template <typename T>
+T blend(T from, T to, float by) noexcept {
     return from + ((to - from) * by);
+}
+
+// Waves add by variance, so each system counts by its height's square.
+protocol::CellWaves mixed(const protocol::CellWaves& from, const protocol::CellWaves& to,
+                          float by) noexcept {
+    const float before = from.peak > 0.0F ? (1.0F - by) * from.height * from.height : 0.0F;
+    const float after = to.peak > 0.0F ? by * to.height * to.height : 0.0F;
+    const float total = before + after;
+    if (total <= 0.0F) {
+        return {};
+    }
+    const float share = after / total;
+    const Vec2 heading = blend(from.heading, to.heading, share);
+    // Running opposite ways, as evenly, they run the stronger's way.
+    const Vec2 stronger = share >= 0.5F ? to.heading : from.heading;
+    return {.height = std::sqrt(total),
+            .peak = blend(from.peak, to.peak, share),
+            .heading = glm::length(heading) > 1e-6F ? glm::normalize(heading) : stronger};
 }
 
 protocol::CellWeather mixed(const protocol::CellWeather& from, const protocol::CellWeather& to,
                             float by) noexcept {
-    return {.cloud = mix(from.cloud, to.cloud, by),
-            .falling = mix(from.falling, to.falling, by),
-            .snow = mix(from.snow, to.snow, by),
-            .drift = from.drift + ((to.drift - from.drift) * by),
-            .wind = from.wind + ((to.wind - from.wind) * by),
-            .humidity = mix(from.humidity, to.humidity, by),
-            .fog_top = mix(from.fog_top, to.fog_top, by),
-            .base = mix(from.base, to.base, by),
-            .top = mix(from.top, to.top, by)};
+    return {.cloud = blend(from.cloud, to.cloud, by),
+            .falling = blend(from.falling, to.falling, by),
+            .snow = blend(from.snow, to.snow, by),
+            .drift = blend(from.drift, to.drift, by),
+            .wind = blend(from.wind, to.wind, by),
+            .humidity = blend(from.humidity, to.humidity, by),
+            .fog_top = blend(from.fog_top, to.fog_top, by),
+            .base = blend(from.base, to.base, by),
+            .top = blend(from.top, to.top, by),
+            .wind_sea = mixed(from.wind_sea, to.wind_sea, by),
+            .swells = {mixed(from.swells[0], to.swells[0], by),
+                       mixed(from.swells[1], to.swells[1], by)},
+            .current = blend(from.current, to.current, by)};
 }
 
 protocol::CellWeather interpolated(const sim::CellGrid& grid, const Cells& cells, DVec3 direction) {
