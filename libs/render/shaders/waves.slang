@@ -809,3 +809,49 @@ public Foam foam_at(Waves waves, WaveSurface water, Surf surf, FoamPattern patte
     }
     return foam;
 }
+
+// Still water has at least this much of it upwind, so it's told from the sea.
+static const float shallowest_fetch = 0.01;
+
+// The sea's floor under `rest`, a point of sea level from the eye, with the water deepened by the
+// sea standing over its mean there; and w how high it stands. Or still water's, where the sea
+// doesn't reach, with `fetch` metres of it upwind, and w the level it's kept to: a lake's is kept
+// out over the ground round it, so its surface runs on level under the ground, which hides it.
+public float4 floor_at(Waves waves, Sampler2DArray depths, Sampler2DArray fetches, float3 rest,
+                       out float fetch) {
+    fetch = 0.0;
+    const float3 floor = shore_floor(waves, depths, rest);
+    if (sea_reached(floor.x) <= 0.0) {
+        const float level = still_water_at(waves, depths, rest).x;
+        const float3 still = still_floor(waves, depths, rest);
+        if (still.x > 0.0 || level > 0.0) {
+            fetch = max(still_fetch_at(waves, fetches, rest), shallowest_fetch);
+            return float4(still.x >= waves.count_left_radius.w ? deep_floor() : still, level);
+        }
+    }
+    const float level = level_now(shore_level_at(waves, floor, rest));
+    if (floor.x + level >= waves.count_left_radius.w) {
+        return float4(deep_floor(), level);
+    }
+    return float4(floor.x + level, floor.yz, level);
+}
+
+// How many times the water the waves carry over a point is stepped back towards where it rests.
+static const int height_steps = 6;
+
+// Metres the water's surface stands over sea level at `over`, a point of sea level from the eye
+// near it, as the sea is drawn seen over `footprint` metres: over `floor` and with `fetch` as
+// floor_at finds them under it, taken as the same under the water the waves carry over it. As
+// hog::waves::height_at does, that water is found by stepping back along how far they carry it.
+public float water_height_over(Waves waves, float3 over, float footprint, float4 floor,
+                               float fetch) {
+    const float3 up = waves.up_height.xyz;
+    float3 rest = over;
+    WaveSurface water = wave_surface(waves, rest, footprint, floor.xyz, fetch);
+    for (int step = 0; step < height_steps; ++step) {
+        const float3 missed = over - (rest + water.moved);
+        rest += missed - (up * dot(up, missed));
+        water = wave_surface(waves, rest, footprint, floor.xyz, fetch);
+    }
+    return dot(water.moved, up) + floor.w;
+}

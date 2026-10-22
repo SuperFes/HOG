@@ -66,31 +66,6 @@ Surf as_surf(float4 surf) {
     return taken;
 }
 
-// The sea's floor under `rest`, a point of sea level from the eye, with the water deepened by the
-// sea standing over its mean there; and w how high it stands. Or still water's, where the sea
-// doesn't reach, with `fetch` metres of it upwind, and w the level it's kept to: a lake's is kept
-// out over the ground round it, so its surface runs on level under the ground, which hides it.
-float4 floor_at(float3 rest, out float fetch) {
-    fetch = 0.0;
-    const float3 floor = shore_floor(waves, shore_depths, rest);
-    if (sea_reached(floor.x) <= 0.0) {
-        const float level = still_water_at(waves, shore_depths, rest).x;
-        const float3 still = still_floor(waves, shore_depths, rest);
-        if (still.x > 0.0 || level > 0.0) {
-            fetch = max(still_fetch_at(waves, shore_fetches, rest), shallowest_fetch);
-            return float4(still.x >= waves.count_left_radius.w ? deep_floor() : still, level);
-        }
-    }
-    const float level = level_now(shore_level_at(waves, floor, rest));
-    if (floor.x + level >= waves.count_left_radius.w) {
-        return float4(deep_floor(), level);
-    }
-    return float4(floor.x + level, floor.yz, level);
-}
-
-// Still water has at least this much of it upwind, so it's told from the sea.
-static const float shallowest_fetch = 0.01;
-
 // As ocean.cpp makes the disc.
 static const float rings = 96.0;
 static const float spokes = 128.0;
@@ -145,7 +120,7 @@ Surface vertex_main(Vertex vertex) {
     // The corners lie apart by the larger of the rings' spacing and the spokes'.
     const float between =
         max(nearest * log(spread) * pow(spread, vertex.out) / rings, along * 2.0 * pi / spokes);
-    surface.floor = floor_at(surface.rest, surface.fetch);
+    surface.floor = floor_at(waves, shore_depths, shore_fetches, surface.rest, surface.fetch);
     const WaveSurface water =
         wave_surface(waves, surface.rest, between, surface.floor.xyz, surface.fetch);
     surface.from_eye += as_drawn(water.moved + (up * surface.floor.w), up, surface.normal);

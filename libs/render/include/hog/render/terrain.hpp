@@ -147,9 +147,8 @@ private:
     Buffer settings_;
     Image materials_;
     Sampler sampler_;
-    // A calm sea at its mean with no depths round the eye, for ground drawn without the sea's own.
-    Buffer calm_sea_;
-    Image no_shore_;
+    // For ground drawn without the sea's own.
+    CalmSea calm_;
     double period_ = 0.0; // metres over which the tiling repeats
     bool air_ = false;
     std::array<Range, terrain::stitchings> stitchings_{};

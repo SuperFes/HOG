@@ -3,6 +3,7 @@
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
 #include <hog/render/camera.hpp>
+#include <hog/render/ocean.hpp>
 #include <hog/render/pipeline.hpp>
 #include <hog/render/sky.hpp>
 #include <hog/render/vulkan.hpp>
@@ -35,14 +36,19 @@ struct CapsuleView {
     // The frame's air, for capsules lit through it.
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     AirBindings air = {};
+    // The frame's sea, for capsules lit through the air seen through the water they stand in; a
+    // calm one at its mean if none.
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    SeaBindings sea = {};
 };
 
 // Capsules, solid and lit, hiding and hidden by what's drawn by depth.
 class Capsules {
 public:
     // Lit through the air, they're lit by the sun's light through it and the sky's, seen through
-    // the air and tone mapped, as the ground is; otherwise by the sun alone.
-    [[nodiscard]] static Result<Capsules> create(const Device& device, VkFormat colour_format,
+    // the air and tone mapped, as the ground is, and through the water the sea draws round them;
+    // otherwise by the sun alone.
+    [[nodiscard]] static Result<Capsules> create(Device& device, VkFormat colour_format,
                                                  VkFormat depth_format, bool air = false);
 
     // Records drawing into the colour and depth images being rendered to, of `extent`, each bent
@@ -54,6 +60,7 @@ private:
     Capsules() = default;
 
     Pipeline pipeline_;
+    CalmSea calm_;
     bool air_ = false;
 };
 

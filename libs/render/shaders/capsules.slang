@@ -2,6 +2,7 @@ import atmosphere;
 import shadow;
 import tone;
 import water;
+import waves;
 
 struct Push {
     float4x4 clip_from_eye;
@@ -24,6 +25,10 @@ struct Push {
 [[vk::binding(3, 0)]] Sampler2DArray aerial_volume;
 // As cloud_march.slang's.
 [[vk::binding(4, 0)]] Sampler2D cloud_shadow;
+// The sea, as ocean.slang reads it, for how high the water stands at the feet.
+[[vk::binding(5, 0)]] ConstantBuffer<Waves> sea;
+[[vk::binding(6, 0)]] Sampler2DArray shore_depths;
+[[vk::binding(7, 0)]] Sampler2DArray shore_fetches;
 
 // Around, and up each half from its pole to its equator; as hog::render::Capsules counts.
 static const uint segments = 16;
@@ -33,12 +38,20 @@ struct Surface {
     float4 position : SV_Position;
     float3 from_eye;
     float3 normal;
+    // Metres over sea level the water stands at the feet, or far below them where it can't reach.
+    nointerpolation float water;
 };
+
+// The water's surface at the feet is found as the sea draws it seen over so many metres.
+static const float wading_footprint = 0.25;
+// The waves rise no higher over the water's level than so many times the root mean square of it.
+static const float highest_rise = 4.0;
+// Far below anything drawn.
+static const float no_water = -1.0e6;
 
 // Quads round each band between rows of corners, the lower half's rows then the upper's, the
 // band between the halves being the cylinder.
-[shader("vertex")]
-Surface vertex_main(uint index : SV_VertexID) {
+Surface placed(uint index) {
     static const uint2 corners[6] = {uint2(0, 0), uint2(1, 0), uint2(1, 1),
                                      uint2(0, 0), uint2(1, 1), uint2(0, 1)};
     const uint quad = index / 6;
@@ -62,6 +75,35 @@ Surface vertex_main(uint index : SV_VertexID) {
                      (up * sin(latitude));
     surface.from_eye = centre + (surface.normal * radius);
     surface.position = mul(push.clip_from_eye, float4(surface.from_eye, 1.0));
+    surface.water = no_water;
+    return surface;
+}
+
+[shader("vertex")]
+Surface vertex_main(uint index : SV_VertexID) {
+    return placed(index);
+}
+
+// How high the water stands at the feet, as the sea draws it: looked for closely only where its
+// waves might reach them.
+float water_at_feet() {
+    const float3 up = normalize(push.tall_night.xyz);
+    const float feet = push.sun.w;
+    const float3 over = push.feet_radius.xyz - (up * feet);
+    float fetch;
+    const float4 floor = floor_at(sea, shore_depths, shore_fetches, over, fetch);
+    const WaveSurface water = wave_surface(sea, over, wading_footprint, floor.xyz, fetch);
+    if (feet > floor.w + (highest_rise * sqrt(water.heave))) {
+        return no_water;
+    }
+    return water_height_over(sea, over, wading_footprint, floor, fetch);
+}
+
+// As vertex_main, with the water at the feet.
+[shader("vertex")]
+Surface vertex_air(uint index : SV_VertexID) {
+    Surface surface = placed(index);
+    surface.water = water_at_feet();
     return surface;
 }
 
@@ -91,8 +133,8 @@ float4 fragment_air(Surface surface) : SV_Target {
     const float height = push.sun.w + dot(surface.from_eye - feet, up);
     const float3 radiance =
         through_water(push.colour.rgb * lit / pi, ((sunlight * saturate(dot(up, sun))) + sky) / pi,
-                      -height, push.colour.w, length(surface.from_eye),
-                      dot(-normalize(surface.from_eye), up));
+                      surface.water - height, push.colour.w - surface.water,
+                      length(surface.from_eye), dot(-normalize(surface.from_eye), up));
 
     const float4 clip = mul(push.clip_from_eye, float4(surface.from_eye, 1.0));
     const float2 uv = ((clip.xy / clip.w) * 0.5) + 0.5;

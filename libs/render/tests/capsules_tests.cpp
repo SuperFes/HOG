@@ -93,8 +93,11 @@ int brightness(Pixel pixel) {
 constexpr double earth = 6'371'000.0;
 
 // From two metres over the sea of an Earth-sized planet, looking level east at a pale capsule
-// ten metres away, lit through the air with the sun `sun_elevation` degrees up behind the eye.
-std::vector<std::uint8_t> through_air(hog::render::Device& device, double sun_elevation) {
+// ten metres away, standing `standing` metres over it, lit through the air with the sun
+// `sun_elevation` degrees up behind the eye; over a calm deep sea with its tide standing `tide`
+// metres over its mean.
+std::vector<std::uint8_t> through_air(hog::render::Device& device, double sun_elevation,
+                                      double standing = 0.0, double tide = 0.0) {
     const DVec3 up{0.0, 0.0, 1.0};
     const DVec3 east{1.0, 0.0, 0.0};
     auto atmosphere = hog::render::Atmosphere::create(device);
@@ -110,10 +113,24 @@ std::vector<std::uint8_t> through_air(hog::render::Device& device, double sun_el
     const hog::terrain::Bend bend = hog::terrain::bend_from(eye, earth, 0.0);
     const Camera camera{.eye = eye, .forward = east, .up = up};
     const hog::render::SkyView seen{.camera = camera, .sun = sun, .bend = bend, .exposure = 10.0};
-    const CapsuleView view{
-        .camera = camera, .sun = sun, .bend = bend, .air = sky->bindings(0, *atmosphere)};
+    auto calm = hog::render::CalmSea::create(device);
+    REQUIRE(calm);
+    hog::render::DrawnWaves tidal{};
+    tidal.tide.w = static_cast<float>(tide);
+    auto waves = hog::render::make_filled_buffer(device, std::as_bytes(std::span{&tidal, 1}),
+                                                 VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+    REQUIRE(waves);
+    hog::render::SeaBindings sea = calm->bindings();
+    sea.waves = waves->handle();
+    const CapsuleView view{.camera = camera,
+                           .sun = sun,
+                           .bend = bend,
+                           .air = sky->bindings(0, *atmosphere),
+                           .sea = sea};
     const std::vector<Capsule> capsules{
-        {.feet = WorldPosition{(up * earth) + (east * 10.0)}, .up = up, .colour = hog::Vec3{0.8F}}};
+        {.feet = WorldPosition{(up * (earth + standing)) + (east * 10.0)},
+         .up = up,
+         .colour = hog::Vec3{0.8F}}};
 
     auto target = hog::render::make_image(
         device, {.format = VK_FORMAT_R8G8B8A8_UNORM,
@@ -229,5 +246,17 @@ TEST_CASE("through the air, a capsule is lit by day and dark by night", "[render
     const auto night = through_air(*device, -30.0);
     CHECK(brightness(pixel_at(day, 32, 38)) > 200);
     CHECK(brightness(pixel_at(night, 32, 38)) < 30);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("through the air, a capsule is seen through the water as high as the sea stands",
+          "[render][gpu]") {
+    const auto device = test_device();
+    // Half a metre over the sea's mean, dry until the tide comes two metres in.
+    const Pixel dry = pixel_at(through_air(*device, 30.0, 0.5), 32, 38);
+    const Pixel wading = pixel_at(through_air(*device, 30.0, 0.5, 2.0), 32, 38);
+    CHECK(std::abs(static_cast<int>(dry[0]) - static_cast<int>(dry[2])) < 40);
+    CHECK(brightness(wading) < brightness(dry) - 100);
+    CHECK(wading[2] > wading[0] + 20);
     CHECK(device->validation_errors() == 0);
 }

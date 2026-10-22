@@ -529,14 +529,16 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                         drift * surface_wind);
     }
     if (!shot.others.empty()) {
-        graph.add(
-            {.name = "others", .uses = through_air, .targets = drawn},
-            [&](VkCommandBuffer commands) {
-                others_.draw(
-                    commands, frame.extent,
-                    {.camera = shot.camera, .sun = sky.sun, .bend = shot.bend, .air = through},
-                    shot.others);
-            });
+        graph.add({.name = "others", .uses = through_air, .targets = drawn},
+                  [&](VkCommandBuffer commands) {
+                      others_.draw(commands, frame.extent,
+                                   {.camera = shot.camera,
+                                    .sun = sky.sun,
+                                    .bend = shot.bend,
+                                    .air = through,
+                                    .sea = ocean_.bindings(frame.slot)},
+                                   shot.others);
+                  });
     }
     if (companion_ && shot.companion) {
         graph.add(

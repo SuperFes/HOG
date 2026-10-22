@@ -672,6 +672,57 @@ TEST_CASE("a lake, to look at", "[.look]") {
     }
 }
 
+// Not a check: stills of people standing in the surf off a beach, seen through the water as high
+// as the waves stand round them, under a breeze and a gale. Saved where HOG_LOOK names.
+TEST_CASE("wading in the surf, to look at", "[.look]") {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
+    const char* where = std::getenv("HOG_LOOK");
+    REQUIRE(where != nullptr);
+    const auto device = test_device();
+    hog::jobs::JobSystem jobs{4};
+    auto scene = Scene::create(*device, world(), jobs, calendar(), hog::client::still_format, 1);
+    REQUIRE(scene);
+    const hog::protocol::CellWaves swell{.height = 1.4F, .peak = 0.45F, .heading = {-0.3F, 0.95F}};
+    const hog::client::Forecast fresh =
+        everywhere({.drift = {16.0F, 6.0F},
+                    .wind = {9.4F, 3.5F},
+                    .wind_sea = {.height = 2.2F, .peak = 0.75F, .heading = {0.94F, 0.35F}},
+                    .swells = {swell, hog::protocol::CellWaves{}},
+                    .current = {}});
+    const hog::client::Forecast gale =
+        everywhere({.drift = {30.0F, 11.0F},
+                    .wind = {17.0F, 6.3F},
+                    .wind_sea = {.height = 5.5F, .peak = 0.52F, .heading = {0.94F, 0.35F}},
+                    .swells = {swell, hog::protocol::CellWaves{}},
+                    .current = {}});
+    Shot shot = off_the_coast(-3.0, 2.0, false, -0.12);
+    const double radius = world().geology().planet_radius();
+    // Each where the ground under them lies, from a little way out to further, a little apart.
+    const hog::DVec3 up = glm::normalize(shot.camera.eye.metres());
+    const hog::DVec3 aside = glm::normalize(glm::cross(shot.camera.forward, up));
+    for (const auto& [along, across] : {std::pair{12.0, -2.0}, std::pair{20.0, 2.0},
+                                        std::pair{32.0, -4.0}, std::pair{50.0, 4.0}}) {
+        const hog::DVec3 there = glm::normalize((ahead(shot, along) + (aside * across)).metres());
+        const double ground =
+            hog::client::ground_under(world(), hog::WorldPosition{there * radius});
+        shot.others.push_back({.feet = hog::WorldPosition{there * (radius + ground)},
+                               .up = there,
+                               .colour = {0.6F, 0.1F, 0.05F}});
+    }
+    for (const auto& [sea, forecast] : {std::pair{"fresh", &fresh}, std::pair{"gale", &gale}}) {
+        shot.forecast = forecast;
+        for (int moment = 0; moment < 3; ++moment) {
+            shot.time = shot.time + std::chrono::seconds{3};
+            const auto still =
+                hog::client::draw_still(*device, *scene, shot, {.width = 960, .height = 540});
+            REQUIRE(still);
+            REQUIRE(hog::client::save_picture(std::filesystem::path{where} /
+                                                  std::format("{}_wading_{}.png", sea, moment),
+                                              *still));
+        }
+    }
+}
+
 // Not a check: stills of still water cut off from the sea, under a breeze and a gale, to look at.
 // Saved where HOG_LOOK names.
 TEST_CASE("still water, to look at", "[.look]") {

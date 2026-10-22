@@ -430,6 +430,49 @@ DrawnWaves drawn_waves_at(std::span<const waves::Train> trains, std::span<const 
     return drawn;
 }
 
+Result<CalmSea> CalmSea::create(Device& device) {
+    CalmSea calm;
+    const DrawnWaves none{};
+    auto waves = make_filled_buffer(device, std::as_bytes(std::span{&none, 1}),
+                                    VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+    if (!waves) {
+        return std::unexpected(std::move(waves).error());
+    }
+    calm.waves_ = std::move(waves).value();
+    constexpr auto layers = static_cast<std::uint32_t>(terrain::shore_spacing.size());
+    const std::vector<std::uint16_t> deep_water = shore_texels(
+        std::vector<float>(layers, 1'000.0F), std::vector<float>(layers, terrain::shore_highest),
+        std::vector<float>(layers, 0.0F));
+    auto depths =
+        make_filled_image(device, {.format = VK_FORMAT_R16G16B16A16_SFLOAT, .layers = layers},
+                          std::as_bytes(std::span{deep_water}));
+    if (!depths) {
+        return std::unexpected(std::move(depths).error());
+    }
+    calm.depths_ = std::move(depths).value();
+    const std::vector<std::uint16_t> no_fetch(std::size_t{4} * layers * fetch_layers, 0);
+    auto fetches = make_filled_image(
+        device, {.format = VK_FORMAT_R16G16B16A16_SFLOAT, .layers = layers * fetch_layers},
+        std::as_bytes(std::span{no_fetch}));
+    if (!fetches) {
+        return std::unexpected(std::move(fetches).error());
+    }
+    calm.fetches_ = std::move(fetches).value();
+    auto sampler = make_sampler(device, VK_FILTER_LINEAR);
+    if (!sampler) {
+        return std::unexpected(std::move(sampler).error());
+    }
+    calm.sampler_ = std::move(sampler).value();
+    return calm;
+}
+
+SeaBindings CalmSea::bindings() const {
+    return {.waves = waves_.handle(),
+            .shore = depths_.view(),
+            .fetches = fetches_.view(),
+            .sampler = sampler_.handle()};
+}
+
 Result<Ocean> Ocean::create(Device& device, VkFormat colour_format, VkFormat depth_format, bool air,
                             std::uint32_t frames) {
     Ocean ocean;
@@ -480,25 +523,11 @@ Result<Ocean> Ocean::create(Device& device, VkFormat colour_format, VkFormat dep
         return std::unexpected(std::move(sampler).error());
     }
     ocean.shore_sampler_ = std::move(sampler).value();
-    // Deep water, until there are depths.
-    const std::vector<std::uint16_t> deep_water = shore_texels(
-        std::vector<float>(layers, 1'000.0F), std::vector<float>(layers, terrain::shore_highest),
-        std::vector<float>(layers, 0.0F));
-    auto none =
-        make_filled_image(device, {.format = VK_FORMAT_R16G16B16A16_SFLOAT, .layers = layers},
-                          std::as_bytes(std::span{deep_water}));
-    if (!none) {
-        return std::unexpected(std::move(none).error());
+    auto calm = CalmSea::create(device);
+    if (!calm) {
+        return std::unexpected(std::move(calm).error());
     }
-    ocean.no_shore_ = std::move(none).value();
-    const std::vector<std::uint16_t> no_fetch(std::size_t{4} * layers * fetch_layers, 0);
-    auto unfetched = make_filled_image(
-        device, {.format = VK_FORMAT_R16G16B16A16_SFLOAT, .layers = layers * fetch_layers},
-        std::as_bytes(std::span{no_fetch}));
-    if (!unfetched) {
-        return std::unexpected(std::move(unfetched).error());
-    }
-    ocean.no_fetch_ = std::move(unfetched).value();
+    ocean.calm_ = std::move(calm).value();
 
     // Seen from below too, from under the sea.
     ocean.air_ = air;
@@ -588,7 +617,8 @@ Result<> Ocean::update_shore(VkCommandBuffer commands, std::uint32_t frame,
 
 SeaBindings Ocean::bindings(std::uint32_t frame) const {
     return {.waves = waves_.at(frame).handle(),
-            .shore = shore_ ? shore_depths_.image().view() : no_shore_.view(),
+            .shore = shore_ ? shore_depths_.image().view() : calm_.bindings().shore,
+            .fetches = shore_ ? shore_fetches_.image().view() : calm_.bindings().fetches,
             .sampler = shore_sampler_.handle()};
 }
 
@@ -656,10 +686,10 @@ Result<> Ocean::record(VkCommandBuffer commands, VkExtent2D extent, const OceanV
     }
     push_uniform_buffer(commands, pipeline, waves_binding, waves.handle());
     push_sampled_image(commands, pipeline, shore_binding,
-                       shore_ ? shore_depths_.image().view() : no_shore_.view(),
+                       shore_ ? shore_depths_.image().view() : calm_.bindings().shore,
                        shore_sampler_.handle());
     push_sampled_image(commands, pipeline, fetch_binding,
-                       shore_ ? shore_fetches_.image().view() : no_fetch_.view(),
+                       shore_ ? shore_fetches_.image().view() : calm_.bindings().fetches,
                        shore_sampler_.handle());
     const std::array vertices{vertices_.handle()};
     const VkDeviceSize offset = 0;

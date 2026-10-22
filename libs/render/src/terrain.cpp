@@ -348,26 +348,11 @@ Result<Terrain> Terrain::create(Device& device, VkFormat colour_format, VkFormat
     }
     drawn.settings_ = std::move(settings_buffer).value();
 
-    const DrawnWaves calm{};
-    auto calm_sea = make_filled_buffer(device, std::as_bytes(std::span{&calm, 1}),
-                                       VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
-    if (!calm_sea) {
-        return std::unexpected(std::move(calm_sea).error());
+    auto calm = CalmSea::create(device);
+    if (!calm) {
+        return std::unexpected(std::move(calm).error());
     }
-    drawn.calm_sea_ = std::move(calm_sea).value();
-    const std::vector<std::uint16_t> deep_water =
-        shore_texels(std::vector<float>(terrain::shore_spacing.size(), 1'000.0F),
-                     std::vector<float>(terrain::shore_spacing.size(), terrain::shore_highest),
-                     std::vector<float>(terrain::shore_spacing.size(), 0.0F));
-    auto no_shore =
-        make_filled_image(device,
-                          {.format = VK_FORMAT_R16G16B16A16_SFLOAT,
-                           .layers = static_cast<std::uint32_t>(terrain::shore_spacing.size())},
-                          std::as_bytes(std::span{deep_water}));
-    if (!no_shore) {
-        return std::unexpected(std::move(no_shore).error());
-    }
-    drawn.no_shore_ = std::move(no_shore).value();
+    drawn.calm_ = std::move(calm).value();
 
     drawn.air_ = look.air;
     auto pipeline = make_pipeline(
@@ -417,11 +402,9 @@ void Terrain::draw(VkCommandBuffer commands, VkExtent2D extent, const TerrainPoo
         push_sampled_image(commands, pipeline_, 6, view.air.cloud_shadow, view.air.sampler);
         push_sampled_image(commands, pipeline_, 9, view.air.sky_view, view.air.sampler);
     }
-    const bool sea = view.sea.waves != VK_NULL_HANDLE;
-    push_uniform_buffer(commands, pipeline_, sea_binding,
-                        sea ? view.sea.waves : calm_sea_.handle());
-    push_sampled_image(commands, pipeline_, shore_binding, sea ? view.sea.shore : no_shore_.view(),
-                       sea ? view.sea.sampler : sampler_.handle());
+    const SeaBindings sea = view.sea.waves != VK_NULL_HANDLE ? view.sea : calm_.bindings();
+    push_uniform_buffer(commands, pipeline_, sea_binding, sea.waves);
+    push_sampled_image(commands, pipeline_, shore_binding, sea.shore, sea.sampler);
     const std::array vertices{pool.vertices()};
     const VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(commands, 0, 1, vertices.data(), &offset);

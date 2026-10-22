@@ -27,28 +27,45 @@ constexpr std::uint32_t segments = 16;
 constexpr std::uint32_t rings = 6;
 constexpr std::uint32_t corner_count = ((2 * rings) + 1) * segments * 6;
 
-constexpr VkDescriptorSetLayoutBinding binding(std::uint32_t at, VkDescriptorType type) noexcept {
+constexpr VkDescriptorSetLayoutBinding
+binding(std::uint32_t at, VkDescriptorType type,
+        VkShaderStageFlags stages = VK_SHADER_STAGE_FRAGMENT_BIT) noexcept {
     return {.binding = at,
             .descriptorType = type,
             .descriptorCount = 1,
-            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+            .stageFlags = stages,
             .pImmutableSamplers = nullptr};
 }
 
-constexpr std::array air_descriptors{binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
-                                     binding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
-                                     binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-                                     binding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-                                     binding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)};
+// The sea's, read at the feet.
+constexpr std::uint32_t sea_binding = 5;
+constexpr std::array air_descriptors{
+    binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
+    binding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
+    binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+    binding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+    binding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+    binding(sea_binding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT),
+    binding(sea_binding + 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_VERTEX_BIT),
+    binding(sea_binding + 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_SHADER_STAGE_VERTEX_BIT)};
 
 } // namespace
 
-Result<Capsules> Capsules::create(const Device& device, VkFormat colour_format,
-                                  VkFormat depth_format, bool air) {
+Result<Capsules> Capsules::create(Device& device, VkFormat colour_format, VkFormat depth_format,
+                                  bool air) {
     Capsules capsules;
     capsules.air_ = air;
+    if (air) {
+        auto calm = CalmSea::create(device);
+        if (!calm) {
+            return std::unexpected(std::move(calm).error());
+        }
+        capsules.calm_ = std::move(calm).value();
+    }
     auto pipeline = make_pipeline(
         device, {.spirv = shaders::capsules,
+                 .vertex_entry = air ? "vertex_air" : "vertex_main",
                  .fragment_entry = air ? "fragment_air" : "fragment_main",
                  .colour_format = colour_format,
                  .depth_format = depth_format,
@@ -78,6 +95,10 @@ void Capsules::draw(VkCommandBuffer commands, VkExtent2D extent, const CapsuleVi
         push_sampled_image(commands, pipeline_, 2, view.air.transmittance, view.air.sampler);
         push_sampled_image(commands, pipeline_, 3, view.air.aerial, view.air.sampler);
         push_sampled_image(commands, pipeline_, 4, view.air.cloud_shadow, view.air.sampler);
+        const SeaBindings sea = view.sea.waves != VK_NULL_HANDLE ? view.sea : calm_.bindings();
+        push_uniform_buffer(commands, pipeline_, sea_binding, sea.waves);
+        push_sampled_image(commands, pipeline_, sea_binding + 1, sea.shore, sea.sampler);
+        push_sampled_image(commands, pipeline_, sea_binding + 2, sea.fetches, sea.sampler);
     }
     for (const Capsule& capsule : capsules) {
         // Bent at its feet and its top, and upright between, too short to bend itself.

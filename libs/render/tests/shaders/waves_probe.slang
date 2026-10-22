@@ -4,7 +4,7 @@ import waves;
 // Two to a point: of sea level from the eye, with the footprint it's seen over; and the floor under
 // it, with w the fetch over still water there, none over the sea. Where the waves move each, how its surface faces, and how much of it is white with foam
 // breaking and left, and the foam's pattern there; and the root mean square of how high the drawn
-// waves rise there, and the share of the sea white in the surf.
+// waves rise there, the share of the sea white in the surf, and how high the water stands over it.
 [[vk::binding(1, 0)]] RWStructuredBuffer<float4> asked;
 [[vk::binding(2, 0)]] RWStructuredBuffer<float4> found;
 
@@ -28,5 +28,7 @@ void compute_main(uint3 id: SV_DispatchThreadID) {
     found[4 * id.x] = float4(water.moved, water.roughness);
     found[(4 * id.x) + 1] = float4(water.normal, foam.breaking);
     found[(4 * id.x) + 2] = float4(foam.left, pattern.coarse, pattern.fine, pattern.fine_seen);
-    found[(4 * id.x) + 3] = float4(sqrt(water.heave), surf.white, 0.0, 0.0);
+    found[(4 * id.x) + 3] =
+        float4(sqrt(water.heave), surf.white,
+               water_height_over(drawn, point.xyz, point.w, float4(floor, 0.0), fetch), 0.0);
 }

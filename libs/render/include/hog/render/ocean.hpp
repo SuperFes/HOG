@@ -85,11 +85,27 @@ struct DrawnWaves {
                                         GameDuration day = {});
 
 // What draws over the ground at sea level read of the sea: as shaders/waves.slang's Waves and the
-// depths shaders/shore.slang reads.
+// depths and fetches shaders/shore.slang reads.
 struct SeaBindings {
     VkBuffer waves = VK_NULL_HANDLE;
     VkImageView shore = VK_NULL_HANDLE;
+    VkImageView fetches = VK_NULL_HANDLE;
     VkSampler sampler = VK_NULL_HANDLE;
+};
+
+// A calm sea at its mean with no depths round the eye, for what's drawn without the sea's own.
+class CalmSea {
+public:
+    CalmSea() = default;
+    [[nodiscard]] static Result<CalmSea> create(Device& device);
+
+    [[nodiscard]] SeaBindings bindings() const;
+
+private:
+    Buffer waves_;
+    Image depths_;
+    Image fetches_;
+    Sampler sampler_;
 };
 
 // Depths of the sea and of still water, and the level still water is kept to, as
@@ -164,8 +180,8 @@ private:
     std::vector<Buffer> waves_;
     StreamedImage shore_depths_;
     StreamedImage shore_fetches_;
-    Image no_shore_;
-    Image no_fetch_;
+    // Deep water, until there are depths.
+    CalmSea calm_;
     Sampler shore_sampler_;
     std::optional<terrain::ShoreFrame> shore_;
     // Of the lakes round the eye, as terrain::lake_levels has them.

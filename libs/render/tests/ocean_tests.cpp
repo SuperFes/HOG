@@ -679,6 +679,8 @@ struct Probed {
     // The root mean square of how high the drawn waves rise, and the share white in the surf.
     double heave;
     double surf;
+    // How high the water stands over the point, the floor under it taken as under all it carries.
+    double height;
 };
 
 // Over floors as wave_surface takes them, one for each point, or deep water; and over still water
@@ -759,7 +761,8 @@ std::vector<Probed> probe_waves(hog::render::Device& device, const hog::render::
                           .fine = static_cast<double>(foam[2]),
                           .seen = static_cast<double>(foam[3]),
                           .heave = static_cast<double>(surf[0]),
-                          .surf = static_cast<double>(surf[1])});
+                          .surf = static_cast<double>(surf[1]),
+                          .height = static_cast<double>(surf[2])});
     }
     return probed;
 }
@@ -825,6 +828,10 @@ TEST_CASE("the sea's drawn waves move and face it as hog::waves has them", "[ren
         CHECK(glm::length(probed[i].moved - surface.moved) < 0.01);
         CHECK(glm::dot(probed[i].normal, surface.normal) > 0.9999);
         CHECK(probed[i].roughness == static_cast<double>(sea.drawn.count_left_radius.y));
+        CHECK_THAT(probed[i].height,
+                   WithinAbs(hog::waves::height_at(sea.trains, kept, sea.eye.metres() + rest[i],
+                                                   radius, noon),
+                             0.01));
     }
     CHECK(device->validation_errors() == 0);
 }
@@ -975,6 +982,9 @@ TEST_CASE("over a shore the sea's drawn waves shoal as hog::waves has them", "[r
         CHECK(glm::length(probed[i].moved - surface.moved) <
               0.01 + (0.01 * glm::length(surface.moved)));
         CHECK(glm::dot(probed[i].normal, surface.normal) > 0.999);
+        const double height = hog::waves::height_at(sea.trains, kept, sea.eye.metres() + rest[i],
+                                                    radius, noon, cpu_floors[i]);
+        CHECK_THAT(probed[i].height, WithinAbs(height, 0.01 + (0.01 * std::abs(height))));
     }
     CHECK(device->validation_errors() == 0);
 }
