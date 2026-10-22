@@ -1,8 +1,8 @@
 #include <hog/jobs/job_system.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/sim/weather.hpp>
-#include <hog/testing/quick.hpp>
 #include <hog/testing/assertion_guard.hpp>
+#include <hog/testing/quick.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
