@@ -297,9 +297,9 @@ TEST_CASE("foam left fades and stays on the sea as the grid steps", "[render][gp
     lay_kept(*device, *map, laid);
     auto calm = hog::render::CalmSea::create(*device);
     REQUIRE(calm);
-    const auto stepped = [&](const FoamStep& step) {
+    const auto stepped = [&](const FoamStep& step, bool catch_up = true) {
         REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
-            map->step(commands, step, calm->bindings(), DVec3{0.0});
+            map->step(commands, step, calm->bindings(), DVec3{0.0}, catch_up);
         }));
         return kept_texels(*device, *map);
     };
@@ -328,6 +328,10 @@ TEST_CASE("foam left fades and stays on the sea as the grid steps", "[render][gp
     CHECK(texel_at(none, 100, 300).x == 0.0);
     CHECK_THAT(texel_at(none, 100, 300).y,
                WithinRel(1.0 - std::exp(-caught_up / hog::render::foam_lasting), 1e-4));
+    // Or, not caught up on, nothing's known.
+    const std::vector<DVec3> unknown =
+        stepped({.shift = {0, 0}, .seconds = 0.1, .kept = false}, false);
+    CHECK(std::ranges::all_of(unknown, [](DVec3 texel) { return texel == DVec3{0.0}; }));
     CHECK(device->validation_errors() == 0);
 }
 
@@ -355,7 +359,7 @@ TEST_CASE("foam left covers as much of the sea as the wind leaves white, in patc
                                                  sea, eye, bend, time, DVec3{0.0});
         hog::Result<> stepped;
         REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
-            stepped = ocean->step_foam(commands, view, 0, time, hog::waves::foam_drift(sea));
+            stepped = ocean->step_foam(commands, view, 0, time, hog::waves::foam_drift(sea), true);
         }));
         REQUIRE(stepped);
         const std::vector<DVec3> foam = kept_texels(*device, ocean->foam());
@@ -412,7 +416,7 @@ TEST_CASE("foam the water draws back from is stranded on the ground, and stays w
             if (depth) {
                 REQUIRE(ocean->update_shore(commands, 0, shore_of(*depth)));
             }
-            foamed = ocean->step_foam(commands, view, 0, time, drift);
+            foamed = ocean->step_foam(commands, view, 0, time, drift, true);
         }));
         REQUIRE(foamed);
         return kept_texels(*device, ocean->foam());

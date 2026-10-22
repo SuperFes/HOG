@@ -132,9 +132,13 @@ Result<FoamMap> FoamMap::create(Device& device) {
 }
 
 void FoamMap::step(VkCommandBuffer commands, const FoamStep& step, const SeaBindings& sea,
-                   DVec3 drift) {
+                   DVec3 drift, bool catch_up) {
     if (step.kept) {
         record(commands, step, sea, drift, 0.0);
+        return;
+    }
+    if (!catch_up) {
+        record(commands, {.shift = glm::ivec2{0}, .seconds = 0.0, .kept = false}, sea, drift, 0.0);
         return;
     }
     for (int back = foam_catch_up; back >= 0; --back) {

@@ -99,9 +99,11 @@ public:
 
     // Records stepping the foam on as `step` has the grid move, over the sea as `sea` has it, its
     // waves laying the grid as a FoamPlacing does, the water at the surface drifting at `drift`,
-    // m/s. Foam is left as fast as the waves break; where nothing's kept, as long before as it
-    // takes to cover as much as it would. Leaves it ready for any shader to sample.
-    void step(VkCommandBuffer commands, const FoamStep& step, const SeaBindings& sea, DVec3 drift);
+    // m/s. Foam is left as fast as the waves break; where nothing's kept, if `catch_up`, as long
+    // before as it takes to cover as much as it would, else none is known. Leaves it ready for any
+    // shader to sample.
+    void step(VkCommandBuffer commands, const FoamStep& step, const SeaBindings& sea, DVec3 drift,
+              bool catch_up);
 
     // What's kept from the last step, ready to sample.
     [[nodiscard]] const Image& kept() const noexcept { return images_[latest_]; }

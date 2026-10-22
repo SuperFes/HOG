@@ -692,7 +692,7 @@ Result<> Ocean::write_waves(const OceanView& view, std::uint32_t frame) const {
 }
 
 Result<> Ocean::step_foam(VkCommandBuffer commands, const OceanView& view, std::uint32_t frame,
-                          GameTime time, DVec3 drift) {
+                          GameTime time, DVec3 drift, bool catch_up) {
     const double seconds =
         foam_time_ ? std::chrono::duration<double>(time - *foam_time_).count() : -1.0;
     const FoamStep step = foam_grid_.follow(view.bend.up, view.bend.radius, drift, seconds);
@@ -700,7 +700,7 @@ Result<> Ocean::step_foam(VkCommandBuffer commands, const OceanView& view, std::
     if (auto written = write_waves(view, frame); !written) {
         return written;
     }
-    foam_.step(commands, step, bindings(frame), drift);
+    foam_.step(commands, step, bindings(frame), drift, catch_up);
     return {};
 }
 

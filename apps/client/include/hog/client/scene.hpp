@@ -71,6 +71,9 @@ struct Shot {
     // The weather shown, if any is known, and the real time it's shown at, for its fades.
     const Forecast* forecast = nullptr;
     MonotonicClock::time_point now{};
+    // Drawn on its own, with no frames before it: what's kept over frames is caught up on at once,
+    // which would stall a frame in play.
+    bool still = false;
 };
 
 // The weather at the eye as the shot shows it: a clear sky while none is known.

@@ -513,7 +513,8 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
         .waves = render::drawn_waves_at(wave_trains_, waves, sea_state, shot.camera.eye, shot.bend,
                                         shot.time, foam_drifted_, calendar_.day_length())};
     graph.add({.name = "foam", .uses = {}, .targets = std::nullopt}, [&](VkCommandBuffer commands) {
-        return ocean_.step_foam(commands, sea, frame.slot, shot.time, waves::foam_drift(sea_state));
+        return ocean_.step_foam(commands, sea, frame.slot, shot.time, waves::foam_drift(sea_state),
+                                shot.still);
     });
     graph.add({.name = "ground", .uses = through_air, .targets = drawn},
               [&](VkCommandBuffer commands) {
@@ -641,6 +642,8 @@ Result<Picture> draw_still(render::Device& device, Scene& scene, const Shot& sho
     if (!target) {
         return std::unexpected(std::move(target).error());
     }
+    Shot still = shot;
+    still.still = true;
     // At least once, though the scene settled drawing another shot.
     for (int drawn = 0; drawn < most_frames && (drawn == 0 || !scene.settled()); ++drawn) {
         Result<> recorded;
@@ -652,7 +655,7 @@ Result<Picture> draw_still(render::Device& device, Scene& scene, const Shot& sho
                                     .extent = extent,
                                     .slot = 0,
                                     .image = 0};
-                recorded = scene.record(frame, shot);
+                recorded = scene.record(frame, still);
             });
             !submitted) {
             return std::unexpected(std::move(submitted).error());

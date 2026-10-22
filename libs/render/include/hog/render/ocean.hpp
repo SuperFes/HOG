@@ -177,10 +177,11 @@ public:
     [[nodiscard]] SeaBindings bindings(std::uint32_t frame = 0) const;
 
     // Records stepping the foam left on the sea round the eye on to `time`, as the sea's seen in
-    // the frame `frame`, the water at its surface drifting at `drift`, m/s, outside any rendering.
-    // The frame's last submit must have finished.
+    // the frame `frame`, the water at its surface drifting at `drift`, m/s, outside any rendering;
+    // where nothing's kept, catching up on what was left before if `catch_up`. The frame's last
+    // submit must have finished.
     Result<> step_foam(VkCommandBuffer commands, const OceanView& view, std::uint32_t frame,
-                       GameTime time, DVec3 drift);
+                       GameTime time, DVec3 drift, bool catch_up);
     [[nodiscard]] const FoamMap& foam() const noexcept { return foam_; }
 
 private:
