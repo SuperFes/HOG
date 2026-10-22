@@ -38,6 +38,7 @@ struct DrawnWaves {
         glm::vec4 amplitude_phase_slope_heave{0.0F};
         glm::vec4 along{0.0F};
         glm::vec4 breaking{0.0F};
+        glm::vec4 still{0.0F};
     };
     struct FoamWave {
         glm::vec4 wavenumber_phase{0.0F};
@@ -62,6 +63,11 @@ struct DrawnWaves {
     glm::vec4 run_up{0.0F};
     glm::vec4 swash_incident{0.0F};
     glm::vec4 swash_surging{0.0F};
+    // Of the waves on still water, as shaders/waves.slang takes them: the wind over it and how they
+    // grow by their fetch under it, and of those left out.
+    glm::vec4 still_wind{0.0F};
+    glm::vec4 still_growth{0.0F};
+    std::array<glm::vec4, waves::bands / 4> still_left{};
     std::array<Wave, drawn_waves> waves{};
     std::array<FoamWave, foam_waves> foam_pattern{};
 };
@@ -70,6 +76,7 @@ struct DrawnWaves {
 // waves::strongest picks them, each as it runs under the eye; where `sea`, which raised them, is
 // white with foam, carried with the water at its surface, which has drifted `drifted` metres
 // since the epoch; and the tide round the eye on a planet whose day lasts `day`, none if none.
+// Picked with them, the waves the sea's wind raises on still water, as far as it has grown there.
 [[nodiscard]] DrawnWaves drawn_waves_at(std::span<const waves::Train> trains,
                                         std::span<const waves::Wave> waves,
                                         const waves::SeaState& sea, WorldPosition eye,
@@ -84,8 +91,13 @@ struct SeaBindings {
     VkSampler sampler = VK_NULL_HANDLE;
 };
 
-// Depths of the sea as the ocean's shaders sample them: half floats.
-[[nodiscard]] std::vector<std::uint16_t> shore_texels(std::span<const float> depths);
+// Depths of the sea and of still water, as terrain::ShoreDepths has them, as the ocean's shaders
+// sample them: four half floats a texel, the sea's then still water's, and the rest none.
+[[nodiscard]] std::vector<std::uint16_t> shore_texels(std::span<const float> depths,
+                                                      std::span<const float> still);
+// Fetches as terrain::shore_fetches works them out, as the ocean's shaders sample them: four
+// headings to a texel of half floats, two layers of them to each of the depths'.
+[[nodiscard]] std::vector<std::uint16_t> fetch_texels(std::span<const float> fetches);
 
 // Where the sea is seen from and what it reflects.
 struct OceanView {
@@ -124,11 +136,10 @@ public:
     Result<> draw_deep(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view,
                        std::uint32_t frame = 0) const;
 
-    // Records copying in the depths of the sea round the eye on `shore`, each of its layers in
-    // turn as terrain::shore_depths gives them, for the frames from `frame` on, whose last submit
-    // must have finished.
+    // Records copying in the depths round the eye, of the sea and of still water and the fetch
+    // over both, for the frames from `frame` on, whose last submit must have finished.
     Result<> update_shore(VkCommandBuffer commands, std::uint32_t frame,
-                          const terrain::ShoreFrame& shore, std::span<const float> depths);
+                          const terrain::ShoreDepths& shore);
     [[nodiscard]] const std::optional<terrain::ShoreFrame>& shore() const noexcept {
         return shore_;
     }
@@ -149,7 +160,9 @@ private:
     Buffer indices_;
     std::vector<Buffer> waves_;
     StreamedImage shore_depths_;
+    StreamedImage shore_fetches_;
     Image no_shore_;
+    Image no_fetch_;
     Sampler shore_sampler_;
     std::optional<terrain::ShoreFrame> shore_;
     std::uint32_t index_count_ = 0;

@@ -3,6 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -13,6 +14,8 @@
 #include <random>
 #include <vector>
 
+using Catch::Matchers::WithinAbs;
+using Catch::Matchers::WithinRel;
 using hog::DVec3;
 using hog::GameDuration;
 using hog::GameTime;
@@ -580,5 +583,50 @@ TEST_CASE("in the shallows waves break down to what the depth holds", "[waves][s
         CAPTURE(heading, out, floor.depth, rms);
         CHECK(rms < hog::waves::breaking_depth * floor.depth * 1.1);
         CHECK(rms > hog::waves::breaking_depth * floor.depth * 0.9);
+    }
+}
+
+TEST_CASE("a wind over a short fetch raises lower, shorter waves", "[waves]") {
+    using hog::waves::fetched;
+    constexpr double speed = 10.0;
+    const System grown = hog::waves::grown_sea({speed, 0.0, 0.0});
+    // Pierson and Moskowitz's spectrum, as grown_sea has it.
+    const auto spectrum = [&](double frequency) {
+        const double ratio = grown.peak / frequency;
+        return 5.0 * grown.height * grown.height / 16.0 / grown.peak * std::pow(ratio, 5.0) *
+               std::exp(-1.25 * std::pow(ratio, 4.0));
+    };
+    for (const double fetch : {300.0, 3'000.0, 30'000.0}) {
+        CAPTURE(fetch);
+        double variance = 0.0;
+        double peak = 0.0;
+        double highest = 0.0;
+        constexpr int steps = 20'000;
+        const double step = std::log(1'000.0) / steps;
+        for (int i = 0; i < steps; ++i) {
+            const double frequency = 0.1 * std::exp((i + 0.5) * step);
+            const double density =
+                std::pow(fetched(frequency, fetch, speed), 2.0) * spectrum(frequency);
+            variance += density * frequency * step;
+            if (density > highest) {
+                highest = density;
+                peak = frequency;
+            }
+        }
+        // As JONSWAP's laws have it.
+        const double reach = g * fetch / (speed * speed);
+        CHECK_THAT(
+            variance,
+            WithinRel(hog::waves::fetch_growth * reach * std::pow(speed, 4.0) / (g * g), 0.01));
+        CHECK_THAT(peak, WithinRel(hog::waves::fetch_peak_scale *
+                                       std::pow(reach, -hog::waves::fetch_peak_power) * g / speed,
+                                   0.01));
+        // Shorter waves grow first.
+        CHECK(fetched(peak * 3.0, fetch, speed) > fetched(peak / 1.5, fetch, speed));
+    }
+    // Grown full, as grown_sea; and none without water to grow over.
+    for (const double frequency : {0.5, 1.0, 4.0}) {
+        CHECK_THAT(fetched(frequency, 1e6, speed), WithinAbs(1.0, 1e-12));
+        CHECK(fetched(frequency, 0.0, speed) == 0.0);
     }
 }

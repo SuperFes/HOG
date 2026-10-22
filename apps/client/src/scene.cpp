@@ -350,7 +350,7 @@ Result<> Scene::give_shore(VkCommandBuffer commands, std::uint32_t slot) {
         return {};
     }
     const terrain::ShoreDepths& depths = shore_depths_.value();
-    if (auto updated = ocean_.update_shore(commands, slot, depths.frame, depths.depths); !updated) {
+    if (auto updated = ocean_.update_shore(commands, slot, depths); !updated) {
         return updated;
     }
     shore_depths_.reset();

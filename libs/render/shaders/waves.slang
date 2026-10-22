@@ -23,6 +23,12 @@ static const float shelf_depth = shelf_run * shelf_run * dean_scale * dean_scale
 static const float shallowest = 0.01;
 static const float full_turn = 6.283185307;
 static const float breaking_depth = 0.42;
+// As hog::waves' gravity, fetch_peak_power and bands of frequency.
+static const float gravity = 9.81;
+static const float fetch_peak_power = 0.33;
+static const int bands = 16;
+static const float lowest_frequency = 0.25;
+static const float highest_frequency = 14.0;
 
 // Each as it runs round the eye: over the few kilometres seen, the planet's up turns too little to
 // change how high a wave shows or which way it runs along the ground.
@@ -38,6 +44,10 @@ public struct Wave {
     // x the mean square slope of it and every shorter wave, each by the square of how much it
     // takes part in breaking white; yzw its lag terms, as hog::waves::lag_terms has them.
     public float4 breaking;
+    // As it runs on still water in a sea grown full under the wind: x metres high, and of it and
+    // every shorter wave y the mean square slope, z the mean square of how high they rise and w
+    // the mean square slope by how much each takes part in breaking white.
+    public float4 still;
 };
 
 // Of the foam's pattern: xyz its wavenumber in the planet's frame, rad/m, w its phase through the
@@ -80,6 +90,14 @@ public struct Waves {
     public float4 run_up;
     public float4 swash_incident;
     public float4 swash_surging;
+    // Of the waves on still water, as hog::waves::fetched has them: xyz which way the wind blows,
+    // in the planet's frame, and w the fourth power of the peak of a sea grown full under it, or
+    // none without wind. Then x and y how the sea's height and peak grow by its fetch, as
+    // still_growth_at takes them. Then the mean square slope of those left out of each band, in a
+    // sea grown full, four bands to each.
+    public float4 still_wind;
+    public float4 still_growth;
+    public float4 still_left[bands / 4];
     public Wave waves[drawn_waves];
     public FoamWave foam_pattern[foam_waves];
 };
@@ -151,6 +169,79 @@ public float3 shore_floor(Waves waves, Sampler2DArray depths, float3 point) {
                   (depth_at(waves, depths, point + second) -
                    depth_at(waves, depths, point - second)) /
                       (2.0 * floor_step));
+}
+
+float still_depth_at(Waves waves, Sampler2DArray depths, float3 point) {
+    return shore_waters(depths, waves.shore_anchor, waves.shore_east, waves.shore_north,
+                        waves.count_left_radius.z, point)
+        .y;
+}
+
+// The floor of still water under `point`, from the eye, as shore_waters finds it in `depths`, as
+// shore_floor has the sea's; or as high as is kept where there's none.
+public float3 still_floor(Waves waves, Sampler2DArray depths, float3 point) {
+    const float depth = still_depth_at(waves, depths, point);
+    if (depth <= 0.0 || depth >= waves.count_left_radius.w) {
+        return float3(depth, 0.0, 0.0);
+    }
+    const float3 first = waves.first.xyz * floor_step;
+    const float3 second = waves.second.xyz * floor_step;
+    return float3(depth,
+                  (still_depth_at(waves, depths, point + first) -
+                   still_depth_at(waves, depths, point - first)) /
+                      (2.0 * floor_step),
+                  (still_depth_at(waves, depths, point + second) -
+                   still_depth_at(waves, depths, point - second)) /
+                      (2.0 * floor_step));
+}
+
+// Metres of water upwind of `point`, from the eye, as shore_fetch finds them in `fetches`.
+public float still_fetch_at(Waves waves, Sampler2DArray fetches, float3 point) {
+    return shore_fetch(fetches, waves.shore_anchor, waves.shore_east, waves.shore_north,
+                       waves.count_left_radius.z, point, waves.still_wind.xyz);
+}
+
+// How a sea on still water has grown over `fetch` metres, as hog::waves::fetched takes it: x by
+// how much a wave's height grows, at most, and y by how much less of it the longer waves grow.
+float2 still_growth_at(Waves waves, float fetch) {
+    const float height = min(waves.still_growth.x * sqrt(fetch), 1.0);
+    const float peak = max(waves.still_growth.y * pow(fetch, -fetch_peak_power), 1.0);
+    const float squared = peak * peak;
+    return float2(height * squared, 0.625 * waves.still_wind.w * ((squared * squared) - 1.0));
+}
+
+// How high a wave of `frequency` rad/s runs on still water grown as `growth` has it, against how
+// high it runs in a sea grown full.
+float fetched(float2 growth, float frequency) {
+    const float squared = frequency * frequency;
+    return growth.x * exp(-growth.y / (squared * squared));
+}
+
+// Of the drawn waves on still water grown as `growth` has it, from the `from`th of `count` on, as
+// Wave's still has them of each and every shorter wave: the mean square slope, of how high they
+// rise and of their slope breaking.
+float3 still_unseen(Waves waves, float2 growth, int from, int count) {
+    float3 unseen = float3(0.0);
+    for (int i = from; i < count; ++i) {
+        const float3 next = i + 1 < count ? waves.waves[i + 1].still.yzw : float3(0.0);
+        const float grown = fetched(growth, sqrt(gravity * waves.waves[i].heading_wavenumber.w));
+        unseen += (waves.waves[i].still.yzw - next) * (grown * grown);
+    }
+    return unseen;
+}
+
+// The mean square slope of the waves left out on still water grown as `growth` has it, each band's
+// taken at its middle.
+float still_left_at(Waves waves, float2 growth) {
+    const float ratio = pow(highest_frequency / lowest_frequency, 1.0 / float(bands));
+    float left = 0.0;
+    float middle = lowest_frequency * sqrt(ratio);
+    for (int band = 0; band < bands; ++band) {
+        const float grown = fetched(growth, middle);
+        left += waves.still_left[band / 4][band % 4] * grown * grown;
+        middle *= ratio;
+    }
+    return left;
 }
 
 // As hog::waves::run_up takes them: the slopes beaches are taken to lie within.
@@ -238,12 +329,17 @@ float below(float x) {
 
 // At `rest`, a point of sea level from the eye, seen over `footprint` metres, over `floor`: as
 // hog::waves::surface_at, but for the waves shorter than the footprint, which only roughen it.
-public WaveSurface wave_surface(Waves waves, float3 rest, float footprint, float3 floor) {
+// Over still water with `fetch` metres of it upwind, its own waves, as far as the wind has grown
+// them over it; over the sea where there's none.
+public WaveSurface wave_surface(Waves waves, float3 rest, float footprint, float3 floor,
+                                float fetch = 0.0) {
     const float3 up = waves.up_height.xyz;
     const float3 first = waves.first.xyz;
     const float3 second = waves.second.xyz;
     WaveSurface surface;
-    surface.roughness = waves.count_left_radius.y;
+    const bool still = fetch > 0.0;
+    const float2 growth = still ? still_growth_at(waves, fetch) : float2(0.0);
+    surface.roughness = still ? still_left_at(waves, growth) : waves.count_left_radius.y;
     float rising = 0.0;
     float risen = 0.0;
     float2 carried = float2(0.0);
@@ -251,7 +347,7 @@ public WaveSurface wave_surface(Waves waves, float3 rest, float footprint, float
     // Symmetric: xx, xy and yy.
     float3 bunching = float3(0.0);
     surface.breaking = 0.0;
-    surface.breaking_left = waves.foam.y;
+    surface.breaking_left = still ? 0.0 : waves.foam.y;
     surface.heave = 0.0;
     surface.heave_unseen = 0.0;
     surface.rise_slope = 0.0;
@@ -270,7 +366,16 @@ public WaveSurface wave_surface(Waves waves, float3 rest, float footprint, float
         const float4 heading = waves.waves[i].heading_wavenumber;
         const float4 shape = waves.waves[i].amplitude_phase_slope_heave;
         const float4 along = waves.waves[i].along;
-        float full = shape.x;
+        // How high it runs, and of it and every shorter wave the mean square slope, of how high
+        // they rise and of their slope breaking.
+        float base = shape.x;
+        float3 shorter = float3(shape.z, shape.w, waves.waves[i].breaking.x);
+        if (still) {
+            const float grown = fetched(growth, sqrt(gravity * heading.w));
+            base = waves.waves[i].still.x * grown;
+            shorter = waves.waves[i].still.yzw * (grown * grown);
+        }
+        float full = base;
         float wavenumber = along.z;
         float2 ahead = along.xy;
         float phase = (heading.w * dot(heading.xyz, rest)) + shape.y;
@@ -295,11 +400,16 @@ public WaveSurface wave_surface(Waves waves, float3 rest, float footprint, float
         }
         const float kept = saturate((full_turn / wavenumber * shown_from) - 1.0);
         if (kept <= 0.0) {
-            surface.roughness += shape.z;
-            surface.breaking_left += waves.waves[i].breaking.x;
+            // On still water the shorter waves have grown more than this one, each as far as its
+            // own fetch lets it.
+            if (still) {
+                shorter = still_unseen(waves, growth, i, count);
+            }
+            surface.roughness += shorter.x;
+            surface.breaking_left += shorter.z;
             // The shorter waves shoal less than this one, which is near enough for them.
-            const float shoaled = shape.x > 0.0 ? full / shape.x : 1.0;
-            surface.heave_unseen += shape.w * shoaled * shoaled;
+            const float shoaled = base > 0.0 ? full / base : 1.0;
+            surface.heave_unseen += shorter.y * shoaled * shoaled;
             break;
         }
         const float steep_full = full * wavenumber;

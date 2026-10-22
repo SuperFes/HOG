@@ -6,6 +6,7 @@
 #include <hog/client/picture.hpp>
 #include <hog/client/scene.hpp>
 #include <hog/jobs/job_system.hpp>
+#include <hog/planet/projection.hpp>
 #include <hog/planet/tangent_frame.hpp>
 #include <hog/planet/world.hpp>
 #include <hog/protocol/messages.hpp>
@@ -14,6 +15,7 @@
 #include <hog/render/gpu_timer.hpp>
 #include <hog/sim/calendar.hpp>
 #include <hog/terrain/bend.hpp>
+#include <hog/terrain/shore.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -26,7 +28,10 @@
 #include <cstdlib>
 #include <filesystem>
 #include <format>
+#include <numbers>
+#include <optional>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 using namespace std::chrono_literals;
@@ -169,6 +174,105 @@ hog::WorldPosition ahead(const Shot& shot, double along) {
         there *
         (radius +
          std::max(hog::client::ground_under(world(), hog::WorldPosition{there * radius}), 0.0))};
+}
+
+// Ground below the sea ringed by land some hundreds of metres round, at most `most` of it, sampled
+// evenly over the planet a few hundred metres apart, as Fibonacci's lattice spreads them.
+std::vector<hog::DVec3> ringed_lows(std::size_t most) {
+    const double radius = world().geology().planet_radius();
+    const hog::planet::Elevation& terrain = world().geology().terrain();
+    const auto below_sea = [&](hog::DVec3 at) {
+        return hog::planet::fixed_to_double(terrain.elevation(hog::planet::cell_at(at))) < 0.0;
+    };
+    constexpr int samples = 2'000'000;
+    constexpr double ring = 600.0; // metres
+    std::vector<hog::DVec3> lows;
+    for (int i = 0; i < samples && lows.size() < most; ++i) {
+        const double z = 1.0 - ((2.0 * (i + 0.5)) / samples);
+        const double turned = i * std::numbers::pi * (3.0 - std::sqrt(5.0));
+        const double across = std::sqrt(1.0 - (z * z));
+        const hog::DVec3 at{across * std::cos(turned), across * std::sin(turned), z};
+        if (!below_sea(at)) {
+            continue;
+        }
+        const hog::planet::TangentFrame frame = hog::planet::tangent_frame(at);
+        bool ringed = true;
+        for (int k = 0; k < 8 && ringed; ++k) {
+            const double way = k * std::numbers::pi / 4.0;
+            ringed = !below_sea(glm::normalize(
+                at + (((frame.east * std::cos(way)) + (frame.north * std::sin(way))) *
+                      (ring / radius))));
+        }
+        if (ringed) {
+            lows.push_back(at);
+        }
+    }
+    return lows;
+}
+
+// Of the still water the shore's grids round `around` find, cut off from the sea, the middle of
+// the widest: the most fetch it has whichever way the wind blows, and where it lies.
+std::pair<double, hog::DVec3> widest_still_water(hog::DVec3 around) {
+    using hog::terrain::shore_size;
+    using hog::terrain::shore_spacing;
+    constexpr auto texels = static_cast<std::size_t>(shore_size) * shore_size;
+    const double radius = world().geology().planet_radius();
+    const hog::terrain::ShoreFrame frame = hog::terrain::shore_frame(around, radius);
+    std::vector<float> depths;
+    for (const double spacing : shore_spacing) {
+        const std::vector<float> layer =
+            hog::terrain::shore_depths(world().geology().terrain(), frame, radius, spacing);
+        depths.insert(depths.end(), layer.begin(), layer.end());
+    }
+    const std::vector<float> still = hog::terrain::keep_to_sea_reach(depths);
+    const std::vector<float> fetches = hog::terrain::shore_fetches(depths, still);
+    std::pair<double, hog::DVec3> widest{0.0, around};
+    for (std::size_t in_layers = 0; in_layers < still.size(); ++in_layers) {
+        const std::size_t layer = in_layers / texels;
+        const std::size_t at = in_layers % texels;
+        float least = still[in_layers] > 0.0F ? hog::terrain::longest_fetch : 0.0F;
+        for (std::size_t heading = 0; heading < hog::terrain::fetch_headings; ++heading) {
+            least = std::min(
+                least, fetches[(((layer * hog::terrain::fetch_headings) + heading) * texels) + at]);
+        }
+        if (static_cast<double>(least) > widest.first) {
+            const double spacing = shore_spacing.at(layer);
+            const double first = (0.5 - (shore_size / 2.0)) * spacing;
+            const std::size_t row = at / shore_size;
+            const std::size_t column = at % shore_size;
+            widest = {
+                static_cast<double>(least),
+                hog::terrain::shore_direction(frame, radius,
+                                              {first + (static_cast<double>(column) * spacing),
+                                               first + (static_cast<double>(row) * spacing)})};
+        }
+    }
+    return widest;
+}
+
+// The middle of the widest still water cut off from the sea anywhere, of the first few found.
+std::optional<hog::DVec3> still_water() {
+    std::pair<double, hog::DVec3> widest{0.0, hog::DVec3{0.0}};
+    for (const hog::DVec3& low : ringed_lows(24)) {
+        if (const auto found = widest_still_water(low); found.first > widest.first) {
+            widest = found;
+        }
+    }
+    if (widest.first <= 0.0) {
+        return std::nullopt;
+    }
+    return widest.second;
+}
+
+// `altitude` metres over `under`, looking north `pitch` radians up.
+Shot looking_north(hog::DVec3 under, double altitude, double pitch) {
+    const double radius = world().geology().planet_radius();
+    const hog::DVec3 pole{0.0, 0.0, 1.0};
+    const hog::DVec3 ahead = glm::normalize(pole - (under * glm::dot(under, pole)));
+    hog::client::Flight flight = hog::client::start_flight(
+        under, radius, altitude, glm::normalize(under + (ahead * (1'000.0 / radius))));
+    flight.pitch = pitch;
+    return shot_of(flight);
 }
 
 // The same weather everywhere, shown at once.
@@ -474,6 +578,37 @@ TEST_CASE("a windy sea, to look at", "[.look]") {
             REQUIRE(still);
             REQUIRE(hog::client::save_picture(
                 std::filesystem::path{where} / std::format("{}_{}.png", sea, look.name), *still));
+        }
+    }
+}
+
+// Not a check: stills of still water cut off from the sea, under a breeze and a gale, to look at.
+// Saved where HOG_LOOK names.
+TEST_CASE("still water, to look at", "[.look]") {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
+    const char* where = std::getenv("HOG_LOOK");
+    REQUIRE(where != nullptr);
+    const auto device = test_device();
+    hog::jobs::JobSystem jobs{4};
+    auto scene = Scene::create(*device, world(), jobs, calendar(), hog::client::still_format, 1);
+    REQUIRE(scene);
+    const hog::protocol::CellWaves none{};
+    const hog::client::Forecast fresh = everywhere(
+        {.drift = {16.0F, 6.0F}, .wind = {9.4F, 3.5F}, .swells = {none, none}, .current = {}});
+    const hog::client::Forecast gale = everywhere(
+        {.drift = {30.0F, 11.0F}, .wind = {17.0F, 6.3F}, .swells = {none, none}, .current = {}});
+    const std::optional<hog::DVec3> under = still_water();
+    REQUIRE(under);
+    for (const auto& [name, altitude, pitch] :
+         {std::tuple{"low", 2.0, -0.08}, std::tuple{"high", 60.0, -0.45}}) {
+        Shot shot = looking_north(under.value_or(hog::DVec3{0.0, 0.0, 1.0}), altitude, pitch);
+        for (const auto& [sea, forecast] : {std::pair{"fresh", &fresh}, std::pair{"gale", &gale}}) {
+            shot.forecast = forecast;
+            const auto still =
+                hog::client::draw_still(*device, *scene, shot, {.width = 960, .height = 540});
+            REQUIRE(still);
+            REQUIRE(hog::client::save_picture(
+                std::filesystem::path{where} / std::format("{}_still_{}.png", sea, name), *still));
         }
     }
 }

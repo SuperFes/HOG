@@ -20,6 +20,10 @@ constexpr double pm_alpha = 8.1e-3;
 constexpr double pm_beta = 0.74;
 constexpr double wind_19_5 = 1.026;
 
+constexpr double square(double x) noexcept {
+    return x * x;
+}
+
 const double band_ratio = std::pow(highest_frequency / lowest_frequency, 1.0 / bands);
 
 double uniform(std::uint64_t seed, int band, int train, int which) noexcept {
@@ -101,6 +105,23 @@ System grown_sea(DVec3 wind) {
             .peak = std::pow(0.8 * pm_beta, 0.25) * gravity / speed,
             .peakedness = 1.0,
             .spread = 2.0};
+}
+
+double fetched(double frequency, double fetch, double speed) noexcept {
+    if (!(speed > 0.0) || !(frequency > 0.0) || !(fetch > 0.0)) {
+        return 0.0;
+    }
+    const double reach = gravity * fetch / (speed * speed);
+    const double grown_height =
+        4.0 * std::sqrt(pm_alpha / (4.0 * pm_beta)) * square(speed * wind_19_5) / gravity;
+    const double grown_peak = std::pow(0.8 * pm_beta, 0.25) * gravity / (speed * wind_19_5);
+    const double height = std::min(
+        4.0 * std::sqrt(fetch_growth * reach) * speed * speed / gravity / grown_height, 1.0);
+    const double peak = std::max(
+        fetch_peak_scale * std::pow(reach, -fetch_peak_power) * gravity / speed / grown_peak, 1.0);
+    // Both spectra integrate to their height squared over 16, so scale as height² peak⁴.
+    const double fourth = square(square(grown_peak / frequency));
+    return height * peak * peak * std::exp(-0.625 * fourth * (square(square(peak)) - 1.0));
 }
 
 std::array<double, bands> band_variances(const System& system) {

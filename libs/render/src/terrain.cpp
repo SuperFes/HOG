@@ -354,10 +354,11 @@ Result<Terrain> Terrain::create(Device& device, VkFormat colour_format, VkFormat
     }
     drawn.calm_sea_ = std::move(calm_sea).value();
     const std::vector<std::uint16_t> deep_water =
-        shore_texels(std::vector<float>(terrain::shore_spacing.size(), 1'000.0F));
+        shore_texels(std::vector<float>(terrain::shore_spacing.size(), 1'000.0F),
+                     std::vector<float>(terrain::shore_spacing.size(), terrain::shore_highest));
     auto no_shore =
         make_filled_image(device,
-                          {.format = VK_FORMAT_R16_SFLOAT,
+                          {.format = VK_FORMAT_R16G16B16A16_SFLOAT,
                            .layers = static_cast<std::uint32_t>(terrain::shore_spacing.size())},
                           std::as_bytes(std::span{deep_water}));
     if (!no_shore) {

@@ -21,11 +21,9 @@ constexpr double g = waves::gravity;
 constexpr double tau = 2.0 * std::numbers::pi;
 constexpr double heading_angle = tau / swell_headings;
 
-// JONSWAP's seas, grown over X metres of a wind of U: their variance·g²/U⁴ is growth·χ and their
-// peak·U/g is peak_scale·χ^-peak_power, with χ = gX/U².
-constexpr double growth = 1.6e-7;
-constexpr double peak_scale = tau * 3.5;
-constexpr double peak_power = 0.33;
+constexpr double growth = waves::fetch_growth;
+constexpr double peak_scale = waves::fetch_peak_scale;
+constexpr double peak_power = waves::fetch_peak_power;
 // A sea following its peak at the peak's group speed, g/2ω, grows over time as it would over the
 // distance it crossed: gt/U = duration_scale·χ^(1 - peak_power).
 constexpr double duration_scale = 2.0 * peak_scale / (1.0 - peak_power);

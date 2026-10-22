@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <numbers>
 #include <span>
 #include <vector>
 
@@ -70,6 +71,18 @@ inline constexpr double swell_spread = 8.0;
 // The sea a wind ten metres up raises, blowing long and far enough: Pierson and Moskowitz's.
 // Precondition: the wind lies along the ground.
 [[nodiscard]] System grown_sea(DVec3 wind);
+
+// JONSWAP's seas, grown over X metres of a wind of U ten metres up: their variance·g²/U⁴ is
+// fetch_growth·χ and their peak·U/g fetch_peak_scale·χ^-fetch_peak_power, with χ = gX/U².
+inline constexpr double fetch_growth = 1.6e-7;
+inline constexpr double fetch_peak_scale = 2.0 * std::numbers::pi * 3.5;
+inline constexpr double fetch_peak_power = 0.33;
+
+// How high a train of `frequency` rad/s runs where a wind of `speed` m/s ten metres up has blown
+// over only `fetch` metres of water, against how high it runs in grown_sea's: the sea there has
+// the shape of grown_sea's spectrum, at the height and peak JONSWAP's laws give, so its longer
+// waves are missing and its shorter ones steeper, until it has grown as full.
+[[nodiscard]] double fetched(double frequency, double fetch, double speed) noexcept;
 
 // The sea somewhere: its systems; the current under them, which steepens the waves it runs
 // against and stretches those it runs with; and the wind over them, which breaks them.

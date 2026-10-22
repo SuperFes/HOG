@@ -39,6 +39,7 @@
 #include <optional>
 #include <random>
 #include <span>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -185,11 +186,14 @@ std::vector<std::uint8_t> draw_patch(hog::render::Device& device, OceanView view
             view.waves.run_up = tide->run_up;
             view.waves.swash_incident.w = tide->incident;
             view.waves.swash_surging.w = tide->surging;
-            const std::vector<float> depths(hog::terrain::shore_spacing.size() *
-                                                hog::terrain::shore_size * hog::terrain::shore_size,
-                                            tide->depth);
-            REQUIRE(ocean->update_shore(commands, 0,
-                                        hog::terrain::shore_frame(view.bend.up, radius), depths));
+            const std::size_t texels = hog::terrain::shore_spacing.size() *
+                                       hog::terrain::shore_size * hog::terrain::shore_size;
+            REQUIRE(ocean->update_shore(
+                commands, 0,
+                {.frame = hog::terrain::shore_frame(view.bend.up, radius),
+                 .depths = std::vector<float>(texels, tide->depth),
+                 .still = std::vector<float>(texels, hog::terrain::shore_highest),
+                 .fetches = std::vector<float>(texels * hog::terrain::fetch_headings, 0.0F)}));
         }
         hog::render::transition(commands, target->handle(), VK_IMAGE_ASPECT_COLOR_BIT, use::discard,
                                 use::colour_target);
@@ -639,17 +643,19 @@ struct Probed {
     double surf;
 };
 
-// Over floors as wave_surface takes them, one for each point, or deep water.
+// Over floors as wave_surface takes them, one for each point, or deep water; and over still water
+// with as much fetch, one for each point, or the sea.
 std::vector<Probed> probe_waves(hog::render::Device& device, const hog::render::DrawnWaves& drawn,
                                 std::span<const DVec3> rest, double footprint,
-                                std::span<const hog::Vec3> floors = {}) {
+                                std::span<const hog::Vec3> floors = {},
+                                std::span<const float> fetches = {}) {
     std::vector<std::array<float, 4>> asked;
     for (std::size_t i = 0; i < rest.size(); ++i) {
         const DVec3& point = rest[i];
         asked.push_back({static_cast<float>(point.x), static_cast<float>(point.y),
                          static_cast<float>(point.z), static_cast<float>(footprint)});
         const hog::Vec3 floor = floors.empty() ? hog::Vec3{1.0e6F, 0.0F, 0.0F} : floors[i];
-        asked.push_back({floor.x, floor.y, floor.z, 0.0F});
+        asked.push_back({floor.x, floor.y, floor.z, fetches.empty() ? 0.0F : fetches[i]});
     }
     constexpr auto binding = [](std::uint32_t at, VkDescriptorType type) {
         return VkDescriptorSetLayoutBinding{.binding = at,
@@ -781,6 +787,99 @@ TEST_CASE("the sea's drawn waves move and face it as hog::waves has them", "[ren
         CHECK(glm::length(probed[i].moved - surface.moved) < 0.01);
         CHECK(glm::dot(probed[i].normal, surface.normal) > 0.9999);
         CHECK(probed[i].roughness == static_cast<double>(sea.drawn.count_left_radius.y));
+    }
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("still water rises only in the waves the wind has grown over it", "[render][gpu]") {
+    const auto device = test_device();
+    // Inland, with no sea, under a wind of 9 m/s.
+    WavySea sea{9.0};
+    const double wind = glm::length(sea.sea.wind);
+    sea.sea.systems.clear();
+    sea.waves.clear();
+    sea.drawn = hog::render::drawn_waves_at(sea.trains, sea.waves, sea.sea, sea.eye, sea.bend, noon,
+                                            DVec3{0.0});
+    // The strongest as they'd run grown full under the wind, as hog::waves takes them.
+    const hog::waves::SeaState grown{
+        .systems = {hog::waves::grown_sea(sea.sea.wind)}, .current = {}, .wind = sea.sea.wind};
+    const auto showing = [&](const hog::waves::Wave& wave) {
+        return std::sqrt(
+            hog::waves::showing(glm::dot(sea.bend.up, sea.trains[wave.train].heading)));
+    };
+    std::vector<hog::waves::Wave> shown;
+    for (const hog::waves::Wave& wave : hog::waves::waves_at(sea.trains, sea.bend.up, grown)) {
+        if (showing(wave) > 0.0) {
+            shown.push_back({.train = wave.train, .amplitude = wave.amplitude * showing(wave)});
+        }
+    }
+    const std::vector<hog::waves::Wave> kept =
+        hog::waves::strongest(sea.trains, shown, hog::render::drawn_waves).waves;
+    REQUIRE(sea.drawn.count_left_radius.x == static_cast<float>(kept.size()));
+    std::mt19937_64 random{3};
+    std::uniform_real_distribution<double> spot{-100.0, 100.0};
+    std::vector<DVec3> rest;
+    rest.reserve(40);
+    for (int i = 0; i < 40; ++i) {
+        rest.push_back(sea.rest(DVec3{spot(random), spot(random), 0.0}));
+    }
+    const std::vector<hog::Vec3> deep(rest.size(), hog::Vec3{1.0e6F, 0.0F, 0.0F});
+    double lower = 0.0;
+    for (const float fetch : {40.0F, 400.0F, 4'000.0F}) {
+        CAPTURE(fetch);
+        std::vector<hog::waves::Wave> fetched;
+        for (const hog::waves::Wave& wave : kept) {
+            const hog::waves::Train& train = sea.trains[wave.train];
+            fetched.push_back({.train = wave.train,
+                               .amplitude = wave.amplitude / showing(wave) *
+                                            hog::waves::fetched(train.frequency,
+                                                                static_cast<double>(fetch), wind)});
+        }
+        // What's left out of each band, as grown at its middle.
+        double left = 0.0;
+        for (int band = 0; band < hog::waves::bands; ++band) {
+            const double growth = hog::waves::fetched(
+                std::sqrt(hog::waves::band_lowest(band) * hog::waves::band_lowest(band + 1)),
+                static_cast<double>(fetch), wind);
+            left += static_cast<double>(sea.drawn.still_left.at(
+                        static_cast<std::size_t>(band / 4))[static_cast<glm::length_t>(band % 4)]) *
+                    growth * growth;
+        }
+        const std::vector<float> fetches(rest.size(), fetch);
+        const std::vector<Probed> probed =
+            probe_waves(*device, sea.drawn, rest, 1e-3, deep, fetches);
+        double heave = 0.0;
+        for (std::size_t i = 0; i < rest.size(); ++i) {
+            const hog::waves::Surface surface =
+                hog::waves::surface_at(sea.trains, fetched, sea.eye.metres() + rest[i], noon);
+            CAPTURE(i);
+            CHECK(glm::length(probed[i].moved - surface.moved) < 0.005);
+            CHECK(glm::dot(probed[i].normal, surface.normal) > 0.9999);
+            CHECK_THAT(probed[i].roughness, WithinRel(left, 1e-3));
+            heave += probed[i].heave;
+        }
+        // The further the wind has blown over it, the higher it rises.
+        CHECK(heave > lower * 1.5);
+        lower = heave;
+        // Seen from afar, all of it is roughness, each wave grown as far as its own fetch lets it.
+        double all = left;
+        for (const hog::waves::Wave& wave : kept) {
+            const hog::waves::Train& train = sea.trains[wave.train];
+            const double rising = glm::dot(sea.bend.up, train.heading);
+            const double slope =
+                train.wavenumber * std::sqrt(1.0 - (rising * rising)) * wave.amplitude *
+                hog::waves::fetched(train.frequency, static_cast<double>(fetch), wind);
+            all += slope * slope / 2.0;
+        }
+        const Probed far = probe_waves(*device, sea.drawn, std::span{rest}.first(1), 1e4,
+                                       std::span{deep}.first(1), std::span{fetches}.first(1))
+                               .front();
+        CHECK_THAT(far.roughness, WithinRel(all, 1e-3));
+        CHECK(glm::length(far.moved) == 0.0);
+    }
+    // Over the sea, where there's none, it lies flat.
+    for (const Probed& probed : probe_waves(*device, sea.drawn, rest, 1e-3, deep)) {
+        CHECK(glm::length(probed.moved) < 1e-6);
     }
     CHECK(device->validation_errors() == 0);
 }
@@ -1100,29 +1199,59 @@ TEST_CASE("waves scatter the sun's glint over the sea", "[render][gpu]") {
 
 namespace {
 
-// Of a field of depths over the plane of `frame` round an eye 5 m up at its anchor, what the
-// ocean's shaders find under each of `points`, metres east and north on that plane.
-std::vector<double> probe_shore(hog::render::Device& device, const hog::terrain::ShoreFrame& frame,
-                                const auto& depth_at, std::span<const hog::DVec2> points) {
+// What the ocean's shaders find over the plane of `frame` round an eye 5 m up at its anchor.
+struct ShoreFound {
+    double depth;
+    double still;
+    double fetch;
+};
+
+// Of fields over the plane of `frame`, each by metres east and north on it: of the sea's depths,
+// still water's and the fetch towards each heading. What the ocean's shaders find under each of
+// `points`, the fetch for a wind blowing towards `wind`.
+std::vector<ShoreFound> probe_shore(hog::render::Device& device,
+                                    const hog::terrain::ShoreFrame& frame, const auto& depth_at,
+                                    const auto& still_at, const auto& fetch_at, DVec3 wind,
+                                    std::span<const hog::DVec2> points) {
+    using hog::terrain::fetch_headings;
     using hog::terrain::shore_size;
     using hog::terrain::shore_spacing;
     std::vector<float> depths;
-    for (const double spacing : shore_spacing) {
+    std::vector<float> still;
+    std::vector<float> fetches;
+    const auto each = [&](double spacing, const auto& at) {
         const double first = (0.5 - (shore_size / 2.0)) * spacing;
         for (int row = 0; row < shore_size; ++row) {
             for (int column = 0; column < shore_size; ++column) {
-                depths.push_back(static_cast<float>(
-                    depth_at(hog::DVec2{first + (column * spacing), first + (row * spacing)})));
+                at(hog::DVec2{first + (column * spacing), first + (row * spacing)});
             }
         }
+    };
+    for (const double spacing : shore_spacing) {
+        each(spacing, [&](hog::DVec2 at) {
+            depths.push_back(static_cast<float>(depth_at(at)));
+            still.push_back(static_cast<float>(still_at(at)));
+        });
+        for (int heading = 0; heading < fetch_headings; ++heading) {
+            each(spacing, [&](hog::DVec2 at) {
+                fetches.push_back(static_cast<float>(fetch_at(at, heading)));
+            });
+        }
     }
-    auto image = hog::render::make_streamed_image(device, VK_FORMAT_R16_SFLOAT,
-                                                  {.width = shore_size, .height = shore_size}, 1,
-                                                  static_cast<std::uint32_t>(shore_spacing.size()));
+    const auto layers = static_cast<std::uint32_t>(shore_spacing.size());
+    auto image =
+        hog::render::make_streamed_image(device, VK_FORMAT_R16G16B16A16_SFLOAT,
+                                         {.width = shore_size, .height = shore_size}, 1, layers);
     REQUIRE(image);
-    const std::vector<std::uint16_t> texels = hog::render::shore_texels(depths);
+    auto fetch_image = hog::render::make_streamed_image(device, VK_FORMAT_R16G16B16A16_SFLOAT,
+                                                        {.width = shore_size, .height = shore_size},
+                                                        1, layers * fetch_headings / 4);
+    REQUIRE(fetch_image);
+    const std::vector<std::uint16_t> texels = hog::render::shore_texels(depths, still);
+    const std::vector<std::uint16_t> fetch_texels = hog::render::fetch_texels(fetches);
     REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
         REQUIRE(image->update(commands, 0, std::as_bytes(std::span{texels})));
+        REQUIRE(fetch_image->update(commands, 0, std::as_bytes(std::span{fetch_texels})));
     }));
     auto sampler = hog::render::make_sampler(device, VK_FILTER_LINEAR);
     REQUIRE(sampler);
@@ -1132,7 +1261,7 @@ std::vector<double> probe_shore(hog::render::Device& device, const hog::terrain:
         glm::vec4{hog::Vec3{(frame.anchor * radius) - eye},
                   static_cast<float>(1.0 / shore_spacing[0])},
         glm::vec4{hog::Vec3{frame.east}, static_cast<float>(1.0 / shore_spacing[1])},
-        glm::vec4{hog::Vec3{frame.north}, 0.0F}};
+        glm::vec4{hog::Vec3{frame.north}, 0.0F}, glm::vec4{hog::Vec3{wind}, 0.0F}};
     for (const hog::DVec2 point : points) {
         const DVec3 rest = (hog::terrain::shore_direction(frame, radius, point) * radius) - eye;
         asked.emplace_back(hog::Vec3{rest}, static_cast<float>(radius));
@@ -1146,7 +1275,8 @@ std::vector<double> probe_shore(hog::render::Device& device, const hog::terrain:
     };
     const std::array bindings{binding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
                               binding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
-                              binding(2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)};
+                              binding(2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
+                              binding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)};
     auto probe = hog::render::make_compute_pipeline(
         device, {.spirv = hog::shaders::shore_probe, .descriptors = bindings});
     REQUIRE(probe);
@@ -1164,6 +1294,8 @@ std::vector<double> probe_shore(hog::render::Device& device, const hog::terrain:
                                         sampler->handle());
         hog::render::push_storage_buffer(commands, *probe, 1, questions->handle());
         hog::render::push_storage_buffer(commands, *probe, 2, answers->handle());
+        hog::render::push_sampled_image(commands, *probe, 3, fetch_image->image().view(),
+                                        sampler->handle());
         vkCmdDispatch(commands, static_cast<std::uint32_t>((points.size() + 63) / 64), 1, 1);
         const VkMemoryBarrier2 to_host{.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
                                        .pNext = nullptr,
@@ -1184,12 +1316,14 @@ std::vector<double> probe_shore(hog::render::Device& device, const hog::terrain:
     }));
     REQUIRE(answers->invalidate());
     std::memcpy(found.data(), answers->mapped().data(), std::span{found}.size_bytes());
-    std::vector<double> depths_found;
-    depths_found.reserve(found.size());
-    for (const auto& depth : found) {
-        depths_found.push_back(static_cast<double>(depth[0]));
+    std::vector<ShoreFound> shore_found;
+    shore_found.reserve(found.size());
+    for (const auto& at : found) {
+        shore_found.push_back({.depth = static_cast<double>(at[0]),
+                               .still = static_cast<double>(at[1]),
+                               .fetch = static_cast<double>(at[2])});
     }
-    return depths_found;
+    return shore_found;
 }
 
 } // namespace
@@ -1205,16 +1339,51 @@ TEST_CASE("the sea's shaders find the depths round the eye", "[render][ocean][gp
                                            hog::DVec2{-950.0, 100.0}, hog::DVec2{4000.0, -3000.0},
                                            hog::DVec2{7000.0, 0.0},   hog::DVec2{0.0, -9000.0},
                                            hog::DVec2{-20000.0, 5.0}};
-    const std::vector<double> found = probe_shore(*device, frame, depth_at, points);
+    const std::vector<ShoreFound> found = probe_shore(
+        *device, frame, depth_at, [](hog::DVec2) { return hog::terrain::shore_highest; },
+        [](hog::DVec2, int) { return 0.0; }, frame.east, points);
     REQUIRE(found.size() == points.size());
     // Half floats keep about three digits.
     for (std::size_t i = 0; i < 4; ++i) {
         CAPTURE(i);
-        CHECK_THAT(found[i], WithinAbs(depth_at(points[i]), 0.05));
+        CHECK_THAT(found[i].depth, WithinAbs(depth_at(points[i]), 0.05));
     }
     const double inside = (1.0 - (7000.0 / 8192.0)) / 0.2;
-    CHECK_THAT(found[4], WithinAbs(1000.0 + ((depth_at(points[4]) - 1000.0) * inside), 1.0));
-    CHECK(found[5] == 1000.0);
-    CHECK(found[6] == 1000.0);
+    CHECK_THAT(found[4].depth, WithinAbs(1000.0 + ((depth_at(points[4]) - 1000.0) * inside), 1.0));
+    CHECK(found[5].depth == 1000.0);
+    CHECK(found[6].depth == 1000.0);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("the sea's shaders find still water round the eye, and the fetch over it",
+          "[render][ocean][gpu]") {
+    const auto device = test_device();
+    const hog::terrain::ShoreFrame frame =
+        hog::terrain::shore_frame(glm::normalize(DVec3{-0.3, 0.5, 0.8}), radius);
+    const auto still_at = [](hog::DVec2 at) { return 3.0 + (0.001 * at.x); };
+    const auto fetch_at = [](hog::DVec2 at, int heading) {
+        return (100.0 * (heading + 1)) + (0.05 * at.y);
+    };
+    const std::array<hog::DVec2, 3> points{hog::DVec2{0.0, 0.0}, hog::DVec2{300.0, -420.0},
+                                           hog::DVec2{-2000.0, 3000.0}};
+    // Blowing a third of the way from one heading to the next, and across east.
+    const auto towards = [&](double degrees) {
+        const double turned = degrees * std::numbers::pi / 180.0;
+        return (frame.east * std::cos(turned)) + (frame.north * std::sin(turned));
+    };
+    for (const auto& [degrees, before, after] : {std::tuple{15.0, 0, 1}, std::tuple{330.0, 7, 0}}) {
+        CAPTURE(degrees);
+        const std::vector<ShoreFound> found = probe_shore(
+            *device, frame, [](hog::DVec2) { return hog::terrain::shore_highest; }, still_at,
+            fetch_at, towards(degrees), points);
+        const double between = std::fmod(degrees, 45.0) / 45.0;
+        for (std::size_t i = 0; i < points.size(); ++i) {
+            CAPTURE(i);
+            CHECK_THAT(found[i].still, WithinAbs(still_at(points[i]), 0.01));
+            CHECK_THAT(found[i].fetch, WithinAbs(std::lerp(fetch_at(points[i], before),
+                                                           fetch_at(points[i], after), between),
+                                                 0.5));
+        }
+    }
     CHECK(device->validation_errors() == 0);
 }

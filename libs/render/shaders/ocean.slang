@@ -30,8 +30,9 @@ struct Push {
 [[vk::binding(5, 0)]] Sampler2D cloud_shadow;
 // Lit through the air or not.
 [[vk::binding(6, 0)]] ConstantBuffer<Waves> waves;
-// As shore_depth takes them.
+// As shore_waters and shore_fetch take them.
 [[vk::binding(7, 0)]] Sampler2DArray shore_depths;
+[[vk::binding(8, 0)]] Sampler2DArray shore_fetches;
 
 struct Vertex {
     [[vk::location(0)]] float out; // from 0 under the eye to 1 at the rim
@@ -50,6 +51,8 @@ struct Surface {
     float4 foam;
     // The sea's floor there, as wave_surface takes it; w how high the sea stands over its mean.
     float4 floor;
+    // Over still water, metres of it upwind; none over the sea.
+    float fetch;
     // The surf there, as Surf's breaking, trailing, lace and white.
     float4 surf;
 };
@@ -64,15 +67,27 @@ Surf as_surf(float4 surf) {
 }
 
 // The sea's floor under `rest`, a point of sea level from the eye, with the water deepened by the
-// sea standing over its mean there; and w how high it stands.
-float4 floor_at(float3 rest) {
+// sea standing over its mean there; and w how high it stands. Or still water's, where the sea
+// doesn't reach, with `fetch` metres of it upwind.
+float4 floor_at(float3 rest, out float fetch) {
+    fetch = 0.0;
     const float3 floor = shore_floor(waves, shore_depths, rest);
+    if (sea_reached(floor.x) <= 0.0) {
+        const float3 still = still_floor(waves, shore_depths, rest);
+        if (still.x > 0.0) {
+            fetch = max(still_fetch_at(waves, shore_fetches, rest), shallowest_fetch);
+            return float4(still.x >= waves.count_left_radius.w ? deep_floor() : still, 0.0);
+        }
+    }
     const float level = level_now(shore_level_at(waves, floor, rest));
     if (floor.x + level >= waves.count_left_radius.w) {
         return float4(deep_floor(), level);
     }
     return float4(floor.x + level, floor.yz, level);
 }
+
+// Still water has at least this much of it upwind, so it's told from the sea.
+static const float shallowest_fetch = 0.01;
 
 // As ocean.cpp makes the disc.
 static const float rings = 96.0;
@@ -128,8 +143,9 @@ Surface vertex_main(Vertex vertex) {
     // The corners lie apart by the larger of the rings' spacing and the spokes'.
     const float between =
         max(nearest * log(spread) * pow(spread, vertex.out) / rings, along * 2.0 * pi / spokes);
-    surface.floor = floor_at(surface.rest);
-    const WaveSurface water = wave_surface(waves, surface.rest, between, surface.floor.xyz);
+    surface.floor = floor_at(surface.rest, surface.fetch);
+    const WaveSurface water =
+        wave_surface(waves, surface.rest, between, surface.floor.xyz, surface.fetch);
     surface.from_eye += as_drawn(water.moved + (up * surface.floor.w), up, surface.normal);
     const Surf surf = surf_at(waves, water, surface.floor.xyz);
     surface.surf = float4(surf.breaking, surf.trailing, surf.lace, surf.white);
@@ -153,7 +169,8 @@ struct Facing {
 
 Facing facing_at(Surface surface, float3 looking) {
     const float footprint = max(length(ddx(surface.rest)), length(ddy(surface.rest)));
-    const WaveSurface water = wave_surface(waves, surface.rest, footprint, surface.floor.xyz);
+    const WaveSurface water =
+        wave_surface(waves, surface.rest, footprint, surface.floor.xyz, surface.fetch);
     Facing facing;
     facing.normal = as_drawn(water.normal, push.up_height.xyz, normalize(surface.normal));
     facing.roughness = water.roughness + ripples;
@@ -179,7 +196,9 @@ Facing facing_at(Surface surface, float3 looking) {
             lerp(breaking_thickness,
                  saturate(0.5 + foam.over + (0.35 * pattern.fine)), seen);
         // The swash's edge runs foaming up the shore, ragged with the pattern's lace.
-        const float edge = (1.0 - smoothstep(0.0, swash_foam, surface.floor.x)) *
+        // Still water has no swash.
+        const float edge = (surface.fetch > 0.0 ? 0.0 : 1.0) *
+                           (1.0 - smoothstep(0.0, swash_foam, surface.floor.x)) *
                            saturate(2.0 * (pattern.fine + pattern.across + 0.3));
         const float breaking = max(foam.breaking * thickness, edge * breaking_thickness);
         // Foam left thins as it ages.
