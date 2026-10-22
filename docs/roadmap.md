@@ -47,6 +47,7 @@ Five choices block Phase 0. Each one can be settled in an evening. The rest of t
 | macOS Vulkan layer | KosmicKrisp, MoltenVK | Phase 3 | Support both and test against each |
 | Network library | GameNetworkingSockets, QUIC with datagrams | Phase 4 | **Decided ([#83](https://github.com/SuperFes/HOG/issues/83)):** GameNetworkingSockets |
 | Art direction | Three or four reference games | Phase 3 end | Open |
+| Audio library | miniaudio, SoLoud, OpenAL Soft, SDL3 audio with our own mixer | Sound framework | Leaning miniaudio (MIT-0, one file, mixes hundreds of voices, its own spatialiser; output through SDL3 or the OS directly) |
 | Death penalty, PvP default | See the plan's open questions | Phase 7 | Open |
 | Generative AI in content | None, internal concept reference only | Before any content production | None in shipped assets |
 | Content and art license | CC BY 4.0, CC BY-SA 4.0, proprietary | Phase 7 | Open |
@@ -527,6 +528,20 @@ Plugs into the calendar (Phase 2) and the sea state. The moon is a body on its o
 - [ ] Lunar eclipses: the moon turned copper by sunlight bent through the planet's air, its colour from the same atmosphere tables the sky is drawn with
 - [ ] Tides raised by the moon and the sun: springs at new and full moon, neaps between; the sea level everywhere follows them, a tidal range larger on wide shelves and in funnelling bays, and tidal currents through narrows
 - [ ] Surfing: breaking waves the physics rides, because it evaluates the same wave function the surface is drawn with; a board, paddling out, catching and riding a face, wiping out
+
+**Sound**
+
+Can start any time after Phase 4. Sound is driven by the same world state that's drawn, so what's heard matches what's seen: the wave function, the sea's breaking and swash, the weather, and the ecology's populations. None of it is sent; each client works it out where the listener stands.
+
+- [ ] Framework: one audio thread mixing hundreds of voices into one stream, fed by lock-free commands from the game thread; virtual voices ranked by how loud each would be, so only the loudest few dozen are mixed; buses for the world, ambience, interface and music, each with its own volume
+- [ ] Placing sounds: direction and distance from the listener on the bent planet, air absorbing the highs with distance, and wind carrying sound downwind; HRTF on headphones later (Steam Audio, Apache-2.0, if ours isn't enough)
+- [ ] Layered ambience beds: crossfaded loops picked by biome, weather, time of day and the listener's height, so the forest, the open sea and a storm each have their own bed
+- [ ] The sea as it's drawn: a far roar from how much surf breaks within a kilometre, darker with distance; nearby breaking crests and whitecaps as single crashes where and when the wave function breaks them; the swash's hiss rising and falling with each surge, and the fizz of foam left as it draws back; a lake's lap against the shore from its fetch; all read from the CPU wave function, never the GPU
+- [ ] Wind: gusting with the weather, louder through trees by how wooded the ground is and how much they sway, whistling over ridges
+- [ ] Rain and snow: on water, on leaves, on rock and on whatever's overhead, thunder delayed by the flash's distance
+- [ ] Hulls in the water: slaps where the wave function strikes the hull faster than it rides, a bow wave's rush with speed, creaking under load (with boats in Phase 7)
+- [ ] Birds and animals: calls from the ecology's populations round the listener, a dawn chorus and dusk, seabirds over the shore, each species' calls placed in the trees and the sky; silence where nothing lives
+- [ ] Footsteps and bodies: by the ground's material and wetness, wading and swimming splashes from the water's height at the feet
 
 **Vegetation engineering**
 
