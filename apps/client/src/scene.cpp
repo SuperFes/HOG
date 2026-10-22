@@ -391,6 +391,15 @@ std::optional<SeaCopies> copy_behind_sea(render::RenderGraph& graph, render::Gra
     return copies;
 }
 
+// The deep water beneath the sea, unless it sees through what's drawn beneath it, as copied.
+Result<> draw_deep(const render::Ocean& ocean, VkCommandBuffer commands, const render::Frame& frame,
+                   const render::OceanView& sea) {
+    if (frame.copyable) {
+        return {};
+    }
+    return ocean.draw_deep(commands, frame.extent, sea, frame.slot);
+}
+
 std::optional<render::SeaBehind> seen_behind(const render::RenderGraph& graph,
                                              const std::optional<SeaCopies>& copies) {
     if (!copies) {
@@ -577,7 +586,7 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
               });
     graph.add({.name = "ground", .uses = through_air, .targets = drawn},
               [&](VkCommandBuffer commands) {
-                  Result<> deep = ocean_.draw_deep(commands, frame.extent, sea, frame.slot);
+                  Result<> deep = draw_deep(ocean_, commands, frame, sea);
                   terrain_.draw(commands, frame.extent, pool_, slots_.draws(streamed.drawn),
                                 {.camera = shot.camera,
                                  .sun = sky.sun,

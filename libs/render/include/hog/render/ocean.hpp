@@ -178,7 +178,8 @@ public:
                   std::uint32_t frame = 0) const;
     // Lit through the air and seen from above the sea, records the water beneath the surface as
     // the ground's shading has it where it lies too deep to show, behind all else: drawn before the
-    // ground, so ground under the sea left undrawn looks as it would.
+    // ground, so ground under the sea left undrawn looks as it would. A sea seeing through what's
+    // drawn beneath it, as copied, needs none.
     Result<> draw_deep(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view,
                        std::uint32_t frame = 0) const;
 

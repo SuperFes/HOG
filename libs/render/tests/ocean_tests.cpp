@@ -384,10 +384,12 @@ void copy_whole(VkCommandBuffer commands, VkImage from, VkImage to, VkImageAspec
 
 // From `height` metres up, looking east and steeply down through the air at the sea over ground
 // `deep` metres beneath its surface, the water over it drawn `laid`; and in `beneath`, if any,
-// what was drawn before the sea, as copied.
+// what was drawn before the sea, as copied. Without the `ground`, the deep water drawn beneath
+// where it's drawn by the ground.
 std::vector<std::uint8_t> over_seabed(hog::render::Device& device, double deep, Laid laid,
                                       double height = 20.0,
-                                      std::vector<std::uint8_t>* beneath = nullptr) {
+                                      std::vector<std::uint8_t>* beneath = nullptr,
+                                      bool ground = true) {
     auto atmosphere = hog::render::Atmosphere::create(device);
     REQUIRE(atmosphere);
     auto sky = hog::render::Sky::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
@@ -461,8 +463,12 @@ std::vector<std::uint8_t> over_seabed(hog::render::Device& device, double deep, 
                                      VkClearColorValue{.float32 = {0.0F, 0.0F, 0.0F, 1.0F}},
                                      {.view = depth->view()});
         sky->draw(commands, extent, 0, *atmosphere, seen);
-        terrain->draw(commands, extent, *pool, draws,
-                      {.camera = camera, .sun = sun, .bend = bend, .air = air});
+        if (ground) {
+            terrain->draw(commands, extent, *pool, draws,
+                          {.camera = camera, .sun = sun, .bend = bend, .air = air});
+        } else if (!behind) {
+            CHECK(ocean->draw_deep(commands, extent, view));
+        }
         if (behind) {
             vkCmdEndRendering(commands);
             for (const auto& [from, to, aspect, drawn] :
@@ -848,6 +854,12 @@ TEST_CASE("through the air, the sea lays the water over the ground beneath it as
     const Pixel middle_shallow = pixel_at(over_seabed(*device, 0.5, Laid::BySea), 32, 32);
     const Pixel middle_deep = pixel_at(over_seabed(*device, 12.0, Laid::BySea), 32, 32);
     CHECK(middle_shallow[0] > middle_deep[0] + 20);
+    // Over nothing, the sea sees deep water beneath, as the deep water drawn there was.
+    const auto drawn_deep = over_seabed(*device, 0.0, Laid::ByGround, 20.0, nullptr, false);
+    CHECK(furthest_apart(drawn_deep,
+                         over_seabed(*device, 0.0, Laid::BySea, 20.0, nullptr, false)) <= 6);
+    CHECK(furthest_apart(drawn_deep,
+                         over_seabed(*device, 0.0, Laid::NotBySea, 20.0, nullptr, false)) <= 1);
     // From under the sea, the eye is in the water, so the ground's shading lays it.
     CHECK(furthest_apart(over_seabed(*device, 30.0, Laid::ByGround, -10.0),
                          over_seabed(*device, 30.0, Laid::BySea, -10.0)) <= 1);

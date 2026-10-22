@@ -426,16 +426,20 @@ float4 fragment_through(Surface surface) : SV_Target {
     const Facing facing = facing_at(surface, looking);
     const AirLit lit = air_lit(surface, facing, looking);
     const int3 pixel = int3(int2(surface.position.xy), 0);
+    const float depth = behind_depth.Load(pixel).x;
     if (!sea_lays_water(lighting)) {
+        // Where nothing's drawn beneath, from over the sea, the deep water fragment_deep draws.
+        const float3 beneath = depth <= 0.0 && push.up_height.w > 0.0
+                                   ? deep_water(surface)
+                                   : behind_colour.Load(pixel).rgb;
         const float4 over = air_premultiplied(facing, lit);
-        return float4(over.rgb + ((1.0 - over.a) * behind_colour.Load(pixel).rgb), 1.0);
+        return float4(over.rgb + ((1.0 - over.a) * beneath), 1.0);
     }
     const float4 between = lit.between;
     const float exposure = lighting.sun_exposure.w;
     const float3 up = normalize(surface.normal);
     const float3 on_water = on_water_at(lit.shade, up);
 
-    const float depth = behind_depth.Load(pixel).x;
     float3 water = water_colour * on_water;
     if (depth > 0.0) {
         const float4 clip = mul(push.clip_from_eye, float4(surface.from_eye, 1.0));
@@ -457,9 +461,8 @@ float4 fragment_through(Surface surface) : SV_Target {
 
 // The water under the surface as the ground's shading has it where it lies too deep to show: the
 // light the water scatters back, lit facing up at sea level, seen through the air between, and
-// tone mapped. Drawn behind all else, so ground under the sea left undrawn looks as it would.
-[shader("fragment")]
-float4 fragment_deep(Surface surface) : SV_Target {
+// tone mapped.
+float3 deep_water(Surface surface) {
     const float3 up = normalize(surface.normal);
     const float3 sun = push.sun_nearest.xyz;
     const float scale = lighting.sky_scale.w;
@@ -474,5 +477,11 @@ float4 fragment_deep(Surface surface) : SV_Target {
     const float2 uv = ((clip.xy / clip.w) * 0.5) + 0.5;
     const float4 between =
         aerial_perspective(aerial_volume, uv, length(surface.from_eye) * scale, lighting.reach.x);
-    return float4(tone_mapped((radiance * between.a) + between.rgb, lighting.sun_exposure.w), 1.0);
+    return tone_mapped((radiance * between.a) + between.rgb, lighting.sun_exposure.w);
+}
+
+// Drawn behind all else, so ground under the sea left undrawn looks as it would.
+[shader("fragment")]
+float4 fragment_deep(Surface surface) : SV_Target {
+    return float4(deep_water(surface), 1.0);
 }
