@@ -436,6 +436,7 @@ These tracks can start once Phase 4 works and can run side by side; four people 
 - [ ] The live weather's rain agrees with the planet's climate map, so biomes get the rain they were placed for (some forest cells now get little rain and dry out over the first years)
 - [ ] Ground materials with roughness and wetness, wet where weather reaches and dry where it's sheltered (mud, rain on rocks)
 - [x] Clouds hide the sun's glare by what they block of it: the marched clouds' opacity over the sun's disc while it's in the picture, the cloud's shadow over the eye (the same cloud along the sun's ray) when it isn't
+- [ ] The sun's glare still shines through distant clouds low over the horizon
 - [x] Fog is cloud that has come down: the cloud base is 125 m a degree of dew-point spread, so it falls as the air cools at night, and where fog forms it comes down to the fog's top; fog is marched as cloud lying on the ground, lit, seen and hiding the sun as cloud does, in banks and wisps drifting with the wind, so walking through it patches pass by
 - [ ] Fog thickest at the ground and pooled in hollows, rather than even under a top flat across a weather cell, and denser the further the air is past saturation
 - [ ] Fog in the cloud's shadow map, so the ground under a fog bank is shaded by it rather than by the mist over the eye
