@@ -211,6 +211,8 @@ This phase builds a client that flies over the generated planet with a real sky.
 - [ ] The surface's height under things standing in the sea, for their tint and for swimming
 - [x] Foam: whitecaps where crests bunch past breaking, over as much of the sea as the wind breaks, ragged and streaked along it in a gale; the foam they leave lying in patches of lace, drifting with the current and the wind's drag
 - [ ] Foam left where each crest broke, fading as it thins, and heaped where waves cross
+- [ ] Surf of waves only centimetres high breaks as white as a metre's, whitening water a few centimetres deep off a calm beach
+- [ ] From inside a breaking wave in a gale's surf, the eye sees a white sheet cut off by the wave's dark back
 - [ ] Waves at the shore: slowing and shortening in shallow water, turning to face the beach, steepening and breaking as surf, with foam and run-up
 - [ ] Ripples and wakes where bodies cross the surface, and what's seen through it bent by the waves
 - [x] Hillaire atmosphere and sun lighting driven by planet time
