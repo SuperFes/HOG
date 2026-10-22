@@ -19,6 +19,7 @@
 #include <hog/terrain/shore.hpp>
 #include <hog/terrain/stitching.hpp>
 #include <hog/waves/foam.hpp>
+#include <hog/waves/run_up.hpp>
 #include <hog/waves/shoaling.hpp>
 #include <hog/waves/tide.hpp>
 #include <hog/waves/waves.hpp>
@@ -129,10 +130,14 @@ Patch level_patch(double along, double across, double height) {
 }
 
 // The tide standing `tide` metres over the sea's mean, round the eye over depths of `depth`
-// everywhere as the shore's grids keep them.
+// everywhere as the shore's grids keep them; and the waves running up the shore there, as
+// DrawnWaves has them, their swash turned as far as `incident` and `surging` through the eye.
 struct Tide {
     double tide = 0.0;
     float depth = 0.0F;
+    glm::vec4 run_up{0.0F};
+    float incident = 0.0F;
+    float surging = 0.0F;
 };
 
 // Draws over a black background the ground, if any, tinted below sea level if asked, and then, if
@@ -177,6 +182,9 @@ std::vector<std::uint8_t> draw_patch(hog::render::Device& device, OceanView view
         REQUIRE(pool->record_uploads(commands, 0));
         if (tide) {
             view.waves.tide.w = static_cast<float>(tide->tide);
+            view.waves.run_up = tide->run_up;
+            view.waves.swash_incident.w = tide->incident;
+            view.waves.swash_surging.w = tide->surging;
             const std::vector<float> depths(hog::terrain::shore_spacing.size() *
                                                 hog::terrain::shore_size * hog::terrain::shore_size,
                                             tide->depth);
@@ -419,6 +427,39 @@ TEST_CASE("the tide floods low ground the sea reaches, and bares ground under it
     // Half a metre below it, bared with the tide well out.
     CHECK(seen(-0.5, true, Tide{.tide = -1.0, .depth = 0.5F}) ==
           pixel_at(draw(*device, view, -0.5, false, false), middle, middle));
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("the swash runs up the shore and draws back, leaving the sand wet", "[render][gpu]") {
+    const auto device = test_device();
+    const OceanView view = seen_from(4.0, -up, north, glm::normalize(east + up));
+    const std::uint32_t middle = extent.width / 2;
+    // Two-metre waves of ten seconds, as drawn_waves_at would have them, on the gentlest beach:
+    // they set the sea up a few centimetres and its swash runs half a metre above and below that.
+    const double scale = std::sqrt(2.0 * hog::waves::gravity * 100.0 / (2.0 * std::numbers::pi));
+    const glm::vec4 waves{static_cast<float>(scale), 3.4F, 0.63F,
+                          static_cast<float>(0.63 / hog::waves::surging)};
+    const auto seen = [&](double ground, float surging) {
+        return pixel_at(draw(*device, view, ground, true, true,
+                             Tide{.depth = static_cast<float>(-ground),
+                                  .run_up = waves,
+                                  .incident = 2.0F,
+                                  .surging = surging}),
+                        middle, middle);
+    };
+    const auto dry = [&](double ground) {
+        return pixel_at(draw(*device, view, ground, false, true), middle, middle);
+    };
+    // Four tenths of a metre up the beach: under the swash as it surges up, bare as it draws back
+    // but darker for its having just been under it.
+    const Pixel up_beach = dry(0.4);
+    const Pixel surged = seen(0.4, 0.0F);
+    CHECK(surged != up_beach);
+    const Pixel drawn_back = seen(0.4, static_cast<float>(std::numbers::pi));
+    CHECK(drawn_back[1] + 20 < up_beach[1]);
+    CHECK(drawn_back[0] <= up_beach[0]);
+    // Above where it ever runs, the sand stays dry.
+    CHECK(seen(2.0, 0.0F) == dry(2.0));
     CHECK(device->validation_errors() == 0);
 }
 
@@ -824,6 +865,29 @@ TEST_CASE("the sea's drawn waves carry the tide round the eye", "[render]") {
     }
     CHECK(hog::render::drawn_waves_at(trains, {}, calm, eye, bend, noon, DVec3{0.0}).tide ==
           glm::vec4{0.0F});
+}
+
+TEST_CASE("the sea's drawn waves carry their run-up, its swash fixed to the world", "[render]") {
+    const WavySea sea{9.0};
+    const hog::render::DrawnWaves drawn = sea.drawn;
+    // As waves::run_up scales it, from the drawn waves' significant height and peak period.
+    CHECK(drawn.run_up.x > 0.0F);
+    CHECK(drawn.run_up.y > 0.0F);
+    CHECK_THAT(static_cast<double>(drawn.run_up.w),
+               WithinRel(static_cast<double>(drawn.run_up.z) / hog::waves::surging, 1e-6));
+    // From an eye a few metres on, the swash lies where it did.
+    const DVec3 step = glm::normalize(east - (sea.bend.up * glm::dot(east, sea.bend.up))) * 7.0;
+    const WorldPosition moved{sea.eye.metres() + step};
+    const hog::render::DrawnWaves there =
+        hog::render::drawn_waves_at(sea.trains, sea.waves, sea.sea, moved,
+                                    hog::terrain::bend_from(moved, radius, 0.0), noon, DVec3{0.0});
+    for (const auto& [here, after] : {std::pair{drawn.swash_incident, there.swash_incident},
+                                      std::pair{drawn.swash_surging, there.swash_surging}}) {
+        const double expected =
+            static_cast<double>(here.w) + glm::dot(DVec3{hog::Vec3{here}}, step);
+        CHECK_THAT(std::remainder(static_cast<double>(after.w) - expected, 2.0 * std::numbers::pi),
+                   WithinAbs(0.0, 1e-3));
+    }
 }
 
 TEST_CASE("waves too short to see from afar fade into the sea's roughness", "[render][gpu]") {

@@ -56,6 +56,12 @@ struct DrawnWaves {
     // xyz how the tide rises per metre from the eye, in the planet's frame; w how high it stands
     // over the sea's mean at the eye.
     glm::vec4 tide{0.0F};
+    // Of the waves running up the shore, as shaders/waves.slang takes them: their scale, the depth
+    // they set the sea up from, and how fast each part of their swash turns; then each's wavenumber
+    // along the ground and phase through the eye.
+    glm::vec4 run_up{0.0F};
+    glm::vec4 swash_incident{0.0F};
+    glm::vec4 swash_surging{0.0F};
     std::array<Wave, drawn_waves> waves{};
     std::array<FoamWave, foam_waves> foam_pattern{};
 };

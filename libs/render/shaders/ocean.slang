@@ -63,28 +63,15 @@ Surf as_surf(float4 surf) {
     return taken;
 }
 
-// Metres over which the floor's slope is taken: half the finest depths' spacing, so it changes
-// smoothly across them.
-static const float floor_step = 4.0;
-
-float depth_at(float3 rest) {
-    return shore_depth(shore_depths, waves.shore_anchor, waves.shore_east, waves.shore_north,
-                       waves.count_left_radius.z, rest);
-}
-
 // The sea's floor under `rest`, a point of sea level from the eye, with the water deepened by the
-// sea standing over its mean there, as sea_level_at has it; and w how high it stands.
+// sea standing over its mean there; and w how high it stands.
 float4 floor_at(float3 rest) {
-    const float depth = depth_at(rest);
-    const float level = (waves.tide.w + dot(waves.tide.xyz, rest)) * sea_reached(depth);
-    if (depth + level >= waves.count_left_radius.w) {
+    const float3 floor = shore_floor(waves, shore_depths, rest);
+    const float level = level_now(shore_level_at(waves, floor, rest));
+    if (floor.x + level >= waves.count_left_radius.w) {
         return float4(deep_floor(), level);
     }
-    const float3 first = waves.first.xyz * floor_step;
-    const float3 second = waves.second.xyz * floor_step;
-    return float4(depth + level,
-                  (depth_at(rest + first) - depth_at(rest - first)) / (2.0 * floor_step),
-                  (depth_at(rest + second) - depth_at(rest - second)) / (2.0 * floor_step), level);
+    return float4(floor.x + level, floor.yz, level);
 }
 
 // As ocean.cpp makes the disc.
@@ -103,6 +90,8 @@ static const float left_albedo = 0.3;
 static const float left_thickness = 0.7;
 // How thick breaking foam is on the whole.
 static const float breaking_thickness = 0.8;
+// Water shallower than this, metres, foams at the swash's edge.
+static const float swash_foam = 0.12;
 
 // Turns `v` as sea level's up under the eye, `truly`, turns to as it's drawn, `drawn`.
 float3 as_drawn(float3 v, float3 truly, float3 drawn) {
@@ -189,7 +178,10 @@ Facing facing_at(Surface surface, float3 looking) {
         const float thickness =
             lerp(breaking_thickness,
                  saturate(0.5 + foam.over + (0.35 * pattern.fine)), seen);
-        const float breaking = foam.breaking * thickness;
+        // The swash's edge runs foaming up the shore, ragged with the pattern's lace.
+        const float edge = (1.0 - smoothstep(0.0, swash_foam, surface.floor.x)) *
+                           saturate(2.0 * (pattern.fine + pattern.across + 0.3));
+        const float breaking = max(foam.breaking * thickness, edge * breaking_thickness);
         // Foam left thins as it ages.
         const float left = foam.left * min(left_thickness * (0.4 + (1.2 * foam.fresh)), 1.0) *
                            (1.0 - breaking);

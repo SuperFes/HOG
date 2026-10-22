@@ -72,6 +72,14 @@ public struct Waves {
     // xyz how the tide rises per metre from the eye, w how high it stands over the sea's mean at
     // the eye.
     public float4 tide;
+    // Of the waves running up the shore, as hog::waves::run_up takes them: x the root of their
+    // height times their wavelength in deep water, y how deep the water is where they begin to
+    // set the sea up, and z and w how fast the swash of the waves and of their groups' surges
+    // turn, rad/s. Then each's turning through the eye, as its wavenumber along the ground in xyz
+    // and its phase in w.
+    public float4 run_up;
+    public float4 swash_incident;
+    public float4 swash_surging;
     public Wave waves[drawn_waves];
     public FoamWave foam_pattern[foam_waves];
 };
@@ -118,15 +126,80 @@ float2 lag_at(float3 terms, float kappa) {
     return float2(terms.z, 0.0) + (terms.y * float2(value, slope / (2.0 * deep_enough)));
 }
 
-// How high the sea stands over its mean at `point`, from the eye: the tide, where the sea can reach,
-// as shore_depth finds it in `depths`.
-public float sea_level_at(Waves waves, Sampler2DArray depths, float3 point) {
-    const float tide = waves.tide.w + dot(waves.tide.xyz, point);
-    if (tide == 0.0) {
-        return 0.0;
+// Metres over which the floor's slope is taken: half the finest depths' spacing, so it changes
+// smoothly across them.
+static const float floor_step = 4.0;
+
+float depth_at(Waves waves, Sampler2DArray depths, float3 point) {
+    return shore_depth(depths, waves.shore_anchor, waves.shore_east, waves.shore_north,
+                       waves.count_left_radius.z, point);
+}
+
+// The sea's floor under `point`, from the eye, as shore_depth finds it in `depths`: x how deep the
+// sea is over it at its mean, and yz how fast it deepens along the eye's first and second ways
+// across, metres per metre; none at all where it's too deep for any wave to feel.
+public float3 shore_floor(Waves waves, Sampler2DArray depths, float3 point) {
+    const float depth = depth_at(waves, depths, point);
+    if (depth >= waves.count_left_radius.w + shore_reach || sea_reached(depth) <= 0.0) {
+        return float3(depth, 0.0, 0.0);
     }
-    return tide * sea_reached(shore_depth(depths, waves.shore_anchor, waves.shore_east,
-                                          waves.shore_north, waves.count_left_radius.z, point));
+    const float3 first = waves.first.xyz * floor_step;
+    const float3 second = waves.second.xyz * floor_step;
+    return float3(depth,
+                  (depth_at(waves, depths, point + first) - depth_at(waves, depths, point - first)) /
+                      (2.0 * floor_step),
+                  (depth_at(waves, depths, point + second) -
+                   depth_at(waves, depths, point - second)) /
+                      (2.0 * floor_step));
+}
+
+// As hog::waves::run_up takes them: the slopes beaches are taken to lie within.
+static const float gentlest_beach = 0.01;
+static const float steepest_beach = 0.2;
+
+// How high the sea stands over its mean at a point: `mean`, as the tide and the waves' set-up
+// raise it, and the swash about that, each part as high as `swash` and turned through its period
+// as the cosine and sine in `turning`.
+public struct ShoreLevel {
+    public float mean;
+    public float2 swash;
+    public float4 turning;
+};
+
+// At `point`, from the eye, over `floor` as shore_floor finds it: the tide, and the waves' set-up
+// and swash as hog::waves::run_up has them, each wherever the sea reaches. The swash runs up
+// beaches and over the shallows, and the set-up rises across the surf.
+public ShoreLevel shore_level_at(Waves waves, float3 floor, float3 point) {
+    ShoreLevel level;
+    const float reached = sea_reached(floor.x);
+    const float tide = (waves.tide.w + dot(waves.tide.xyz, point)) * reached;
+    const float scale = waves.run_up.x * reached;
+    const float beach = clamp(length(floor.yz), gentlest_beach, steepest_beach);
+    const float under = floor.x + tide;
+    const float setting = saturate(1.0 - (under / max(waves.run_up.y, 1e-3)));
+    level.mean = tide + (setting * 0.35 * beach * scale);
+    // Half each part's significant height, as high as it's taken to run.
+    const float2 swash = scale * float2(sqrt(0.563) * beach, sqrt(0.004)) / 2.0;
+    level.swash = swash * saturate(1.0 - (under / max(2.0 * (swash.x + swash.y), 1e-3)));
+    const float incident = waves.swash_incident.w + dot(waves.swash_incident.xyz, point);
+    const float surging = waves.swash_surging.w + dot(waves.swash_surging.xyz, point);
+    level.turning = float4(cos(incident), sin(incident), cos(surging), sin(surging));
+    return level;
+}
+
+// How high it stands now.
+public float level_now(ShoreLevel level) {
+    return level.mean + (level.swash.x * level.turning.x) + (level.swash.y * level.turning.z);
+}
+
+// The highest the waves' swash ran `ago` seconds before: as high as each wave runs, on the
+// surging of their groups as it stood then.
+public float swash_high(Waves waves, ShoreLevel level, float ago) {
+    float s;
+    float c;
+    sincos(waves.run_up.w * ago, s, c);
+    return level.mean + level.swash.x +
+           (level.swash.y * ((level.turning.z * c) + (level.turning.w * s)));
 }
 
 // The sea's floor under a point: x how deep the water over it is at rest, and yz how fast it

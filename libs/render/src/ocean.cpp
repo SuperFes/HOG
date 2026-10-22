@@ -7,6 +7,8 @@
 #include <hog/terrain/sea.hpp>
 #include <hog/terrain/shore.hpp>
 #include <hog/waves/foam.hpp>
+#include <hog/waves/run_up.hpp>
+#include <hog/waves/shoaling.hpp>
 #include <hog/waves/tide.hpp>
 
 #include <glm/gtc/packing.hpp>
@@ -64,7 +66,7 @@ constexpr std::array vertex_attributes{
                                       .format = VK_FORMAT_R32G32_SFLOAT,
                                       .offset = offsetof(SeaVertex, towards)}};
 
-static_assert(sizeof(DrawnWaves) == (10 * sizeof(glm::vec4)) +
+static_assert(sizeof(DrawnWaves) == (13 * sizeof(glm::vec4)) +
                                         (drawn_waves * sizeof(DrawnWaves::Wave)) +
                                         (foam_waves * sizeof(DrawnWaves::FoamWave)));
 
@@ -197,6 +199,60 @@ constexpr std::array air_descriptors{binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFE
                                      waves_descriptor,
                                      shore_descriptor};
 
+// How the swash of the waves, and of their groups' surges, turns along the ground: fixed to the
+// planet, each a way and a length, so it runs up one stretch of shore while it draws back from the
+// next.
+struct Swash {
+    DVec3 way;
+    double length;
+};
+constexpr Swash swash_incident{.way = DVec3{0.8, 0.6, 0.0}, .length = 90.0};
+constexpr Swash swash_surging{.way = DVec3{-0.6, 0.0, 0.8}, .length = 400.0};
+
+// Of the waves shown, as waves::run_up takes them: the root of their significant height times
+// their peak's wavelength, in deep water; the depth at which they start to break; and how fast
+// their swash, and their groups', turn.
+glm::vec4 run_up_at(std::span<const waves::Train> trains, std::span<const waves::Wave> shown) {
+    std::array<double, waves::bands> variances{};
+    std::array<double, waves::bands> frequencies{};
+    for (const waves::Wave& wave : shown) {
+        const waves::Train& train = trains[wave.train];
+        const auto band = static_cast<std::size_t>(train.band);
+        variances.at(band) += wave.amplitude * wave.amplitude / 2.0;
+        frequencies.at(band) = train.frequency;
+    }
+    double variance = 0.0;
+    std::size_t peak = 0;
+    for (std::size_t band = 0; band < variances.size(); ++band) {
+        variance += variances.at(band);
+        if (variances.at(band) > variances.at(peak)) {
+            peak = band;
+        }
+    }
+    if (!(variance > 0.0) || !(frequencies.at(peak) > 0.0)) {
+        return glm::vec4{0.0F};
+    }
+    const double height = 4.0 * std::sqrt(variance);
+    const double turning = frequencies.at(peak);
+    const double period = 2.0 * std::numbers::pi / turning;
+    // As run_up has it, with the beach's slope left for the shaders.
+    const double scale =
+        std::sqrt(height * waves::gravity * period * period / (2.0 * std::numbers::pi));
+    return {static_cast<float>(scale),
+            static_cast<float>(height / (std::numbers::sqrt2 * waves::breaking_depth)),
+            static_cast<float>(turning), static_cast<float>(turning / waves::surging)};
+}
+
+// `swash` turning `turning` rad/s, as it lies through the eye at `eye` at `time`.
+glm::vec4 swash_at(const Swash& swash, double turning, WorldPosition eye, GameTime time) {
+    const double wavenumber = 2.0 * std::numbers::pi / swash.length;
+    const double seconds = std::chrono::duration<double>(time.time_since_epoch()).count();
+    return {Vec3{swash.way * wavenumber},
+            static_cast<float>(std::remainder((turning * seconds) +
+                                                  (wavenumber * glm::dot(swash.way, eye.metres())),
+                                              2.0 * std::numbers::pi))};
+}
+
 } // namespace
 
 DrawnWaves drawn_waves_at(std::span<const waves::Train> trains, std::span<const waves::Wave> waves,
@@ -287,6 +343,9 @@ DrawnWaves drawn_waves_at(std::span<const waves::Train> trains, std::span<const 
     drawn.tide = {
         Vec3{(frame.east * tide_towards(frame.east)) + (frame.north * tide_towards(frame.north))},
         static_cast<float>(waves::tide_at(bend.up, time, day))};
+    drawn.run_up = run_up_at(trains, shown);
+    drawn.swash_incident = swash_at(swash_incident, drawn.run_up.z, eye, time);
+    drawn.swash_surging = swash_at(swash_surging, drawn.run_up.w, eye, time);
     if (white.breaking > 0.0 && breaking > 0.0) {
         // Whitecaps are ragged: their own churning adds to how much the waves bunch.
         const double ragged = foam_ragged * std::sqrt(breaking);

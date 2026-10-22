@@ -72,7 +72,9 @@ struct Ground {
     float3 from_eye;
     float3 drawn; // from the eye, bent
     float height; // above sea level
-    float level;  // how high the sea stands over its mean there
+    // How high the sea stands over its mean there, as ShoreLevel's mean and swash, and its turning.
+    float3 shore;
+    float4 turning;
     // Each biome's share, four to a vector: at most two at a corner, blended across a triangle.
     float4 biomes[(biome_count + 3) / 4];
     float4 woods;
@@ -86,6 +88,13 @@ static const float level_with_sea = 1e-5;
 // How far behind the sea's true surface such ground is put, relative to its depth, to stay behind
 // the flat triangles the sea is drawn with.
 static const float behind_sea = 1e-3;
+
+// How many times back through a surge of the waves' groups the swash is looked for, and over how
+// many metres of height its edge is blurred.
+static const int wet_samples = 8;
+static const float wet_edges = 0.05;
+// How dark wet ground is, against dry.
+static const float wet_darkening = 0.55;
 
 // Shares below this aren't worth sampling for.
 static const float least_biome = 1.0 / 256.0;
@@ -175,7 +184,14 @@ Ground vertex_main(Vertex vertex) {
     ground.normal = vertex.normal;
     ground.from_eye = from_eye;
     ground.height = height_above_sea(from_eye, push.bend_up, push.bend_radii.x);
-    ground.level = settings.tiling.z > 0.0 ? sea_level_at(sea, shore_depths, from_eye) : 0.0;
+    ground.shore = float3(0.0);
+    ground.turning = float4(1.0, 0.0, 1.0, 0.0);
+    if (settings.tiling.z > 0.0) {
+        const ShoreLevel level =
+            shore_level_at(sea, shore_floor(sea, shore_depths, from_eye), from_eye);
+        ground.shore = float3(level.mean, level.swash);
+        ground.turning = level.turning;
+    }
     const uint biome = min(vertex.biome, biome_count - 1);
     for (uint group = 0; group < (biome_count + 3) / 4; ++group) {
         ground.biomes[group] = float4(0.0);
@@ -187,6 +203,37 @@ Ground vertex_main(Vertex vertex) {
     ground.palms = vertex.palms;
     ground.scar = vertex.scar;
     return ground;
+}
+
+ShoreLevel shore_level(Ground ground) {
+    ShoreLevel level;
+    level.mean = ground.shore.x;
+    level.swash = ground.shore.yz;
+    level.turning = ground.turning;
+    return level;
+}
+
+// How high the sea stands over its mean at the ground.
+float sea_level(Ground ground) {
+    return level_now(shore_level(ground));
+}
+
+// How wet the ground is: from 1 where the swash covers it or has only just left it, drying over a
+// surge of the waves' groups, to 0 where it hasn't run for longer or never does.
+float wetness(Ground ground) {
+    const ShoreLevel level = shore_level(ground);
+    const float highest = level.mean + level.swash.x + level.swash.y;
+    if (level.swash.y <= 0.0 || ground.height >= highest) {
+        return 0.0;
+    }
+    const float surge = 2.0 * pi / max(sea.run_up.w, 1e-3);
+    float wet = 0.0;
+    for (int back = 0; back < wet_samples; ++back) {
+        const float ago = float(back) * surge / float(wet_samples);
+        const float over = swash_high(sea, level, ago) - ground.height;
+        wet = max(wet, saturate(0.5 + (over / wet_edges)) * exp(-ago / surge));
+    }
+    return wet;
 }
 
 // Up from the planet's centre through the ground.
@@ -326,9 +373,9 @@ struct AirEnd {
 
 AirEnd air_ends(Ground ground) {
     AirEnd end = { ground.drawn, up_at(ground) };
-    if (settings.tiling.z > 0.0 && ground.height < ground.level) {
+    if (settings.tiling.z > 0.0 && ground.height < sea_level(ground)) {
         bool seen;
-        const float3 surface = sea_towards(ground.drawn, ground.level, seen);
+        const float3 surface = sea_towards(ground.drawn, sea_level(ground), seen);
         if (seen) {
             end.at = surface;
             end.up = normalize(surface + (push.bend_up.xyz * (push.bend_radii.y + push.bend_up.w)));
@@ -345,13 +392,13 @@ struct Shaded {
 // The ground's colour lit by `on_ground` facing its normal and `on_water` facing up, each times
 // pi, with water over it where it lies below the sea as high as it stands.
 float3 shaded(Ground ground, float3 normal, float3 on_ground, float3 on_water, float4 year) {
-    const float3 lit_ground =
-        wooded(ground, scorched(ground, albedo(ground, normal)), year) * on_ground;
+    const float3 lit_ground = wooded(ground, scorched(ground, albedo(ground, normal)), year) *
+                              on_ground * lerp(1.0, wet_darkening, wetness(ground));
     if (settings.tiling.z <= 0.0) {
         return lit_ground;
     }
-    return through_water(lit_ground, on_water, ground.level - ground.height,
-                         push.bend_up.w - ground.level,
+    return through_water(lit_ground, on_water, sea_level(ground) - ground.height,
+                         push.bend_up.w - sea_level(ground),
                          length(ground.from_eye), dot(-normalize(ground.from_eye), up_at(ground)));
 }
 
@@ -359,9 +406,9 @@ float3 shaded(Ground ground, float3 normal, float3 on_ground, float3 on_water, f
 float depth_of(Ground ground) {
     float depth = ground.position.z;
     if (settings.tiling.z > 0.0 &&
-        ground.height - ground.level <= level_with_sea * length(ground.from_eye)) {
+        ground.height - sea_level(ground) <= level_with_sea * length(ground.from_eye)) {
         bool seen;
-        const float sea = sea_depth(ground.drawn, ground.level, seen);
+        const float sea = sea_depth(ground.drawn, sea_level(ground), seen);
         if (seen) {
             depth = min(depth, sea * (1.0 - behind_sea));
         }
@@ -400,7 +447,7 @@ Shaded fragment_air(Ground ground) {
         (sunlight * saturate(dot(normal, sun))) + (sky * (0.5 + (0.5 * dot(normal, up))));
     // The water over ground beneath the sea, lit where the eye looks into it.
     float3 on_water = float3(0.0);
-    if (ground.height < ground.level || push.bend_up.w < ground.level) {
+    if (ground.height < sea_level(ground) || push.bend_up.w < sea_level(ground)) {
         const float facing = saturate(dot(end.up, sun));
         const float3 clear_water = transmittance(air, transmittance_table, 0.0, dot(end.up, sun));
         on_water = (through_cloud(shade, clear_water) * facing) +

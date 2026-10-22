@@ -8,8 +8,8 @@ public static const float shore_deep = 1000.0;
 static const float shore_fading = 0.2;
 // As hog::terrain's shore_highest and shore_reach: depths over ground the sea can't reach are kept
 // at the first, and it reaches nothing higher than the second.
-static const float shore_highest = -10.0;
-static const float shore_reach = 5.0;
+public static const float shore_highest = -10.0;
+public static const float shore_reach = 5.0;
 
 // How much of the sea's rise over its mean reaches where shore_depth found `depth`: none where the
 // grids keep it from, all wherever they let it reach, and so much between along their edges.
