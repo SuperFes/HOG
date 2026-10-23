@@ -18,7 +18,7 @@ using hog::render::testing::test_device;
 namespace {
 
 // A timer on the device, or a skipped test where its queue can't time.
-GpuTimer timer_on(const hog::render::Device& device) {
+GpuTimer timer_on(hog::render::Device& device) {
     auto timer = GpuTimer::create(device, 2);
     REQUIRE(timer);
     if (!timer->timing()) {

@@ -20,12 +20,14 @@ struct GpuSpan {
 
 // Times spans of the frames in flight with timestamp queries, each read back once its frame's
 // submit has finished, so the CPU never waits on the GPU for them. Where the queue can't time, it
-// records and reads nothing.
+// records and reads nothing. Instrumented builds also hand the spans to the profiler while one is
+// connected.
 class GpuTimer {
 public:
-    static constexpr std::uint32_t most_spans = 16; // a frame
+    static constexpr std::uint32_t most_spans = 48; // a frame
 
-    [[nodiscard]] static Result<GpuTimer> create(const Device& device, std::uint32_t frames);
+    // Instrumented builds submit to `device` and wait, to set the GPU's clock beside the CPU's.
+    [[nodiscard]] static Result<GpuTimer> create(Device& device, std::uint32_t frames);
 
     GpuTimer() = default;
     GpuTimer(const GpuTimer&) = delete;
@@ -50,9 +52,11 @@ private:
     struct Slot {
         std::vector<std::string_view> names; // of the spans begun, each with two queries
         std::vector<GpuSpan> spans;          // read back
+        std::uint64_t profiled = 0;          // one bit a span, for those the profiler was told of
         bool ready = false;                  // its queries reset, so spans can begin
         bool open = false;
     };
+    static_assert(most_spans <= 64, "a span's bit in Slot::profiled");
 
     void release() noexcept;
 
@@ -60,6 +64,7 @@ private:
     VkQueryPool pool_ = VK_NULL_HANDLE;
     double milliseconds_per_tick_ = 0.0;
     std::uint64_t tick_mask_ = 0;
+    std::uint8_t context_ = 0; // the profiler's
     std::vector<Slot> slots_;
 };
 
