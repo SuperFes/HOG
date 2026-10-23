@@ -1,0 +1,6 @@
+# GameNetworkingSockets checks a connection's receive queue against its limit without the queue's
+# lock, while the application's thread drains that queue; at worst one message slips past the limit.
+race:SteamNetworkingSocketsLib::CSteamNetworkConnectionBase::AllocateNewRecvMessage
+# It takes a connection's lock then the tables lock when accepting a connection, and the other way
+# round when destroying a poll group, but always under its global lock, so the two never interleave.
+deadlock:SteamNetworkingSocketsLib::CSteamNetworkConnectionBase::BInitConnection

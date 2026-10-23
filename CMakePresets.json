@@ -79,10 +79,16 @@
     { "name": "debug", "inherits": "base", "configurePreset": "debug" },
     { "name": "release", "inherits": "base", "configurePreset": "release" },
     { "name": "asan", "inherits": "base", "configurePreset": "asan" },
-    { "name": "tsan", "inherits": "base", "configurePreset": "tsan" },
+    {
+      "name": "thread",
+      "hidden": true,
+      "inherits": "base",
+      "environment": { "TSAN_OPTIONS": "suppressions=${sourceDir}/cmake/tsan.supp" }
+    },
+    { "name": "tsan", "inherits": "thread", "configurePreset": "tsan" },
     { "name": "ci", "inherits": "base", "configurePreset": "ci" },
     { "name": "ci-asan", "inherits": "base", "configurePreset": "ci-asan" },
-    { "name": "ci-tsan", "inherits": "base", "configurePreset": "ci-tsan" }
+    { "name": "ci-tsan", "inherits": "thread", "configurePreset": "ci-tsan" }
   ],
   "workflowPresets": [
     {
