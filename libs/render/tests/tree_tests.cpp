@@ -78,6 +78,7 @@ struct Stand {
     double seconds = 0.0;
     DVec3 eye_back{0.0, -40.0, 6.0}; // east, north, up of the tile's origin
     hog::flora::Daylight daylight{};
+    DVec3 gusts_drifted{0.0};
 };
 
 // The stand's stamps alone over black, from south of the origin facing north.
@@ -108,7 +109,8 @@ Pixels draw(hog::render::Device& device, const Stand& stand) {
                                     .bend = bend,
                                     .exposure = 10.0,
                                     .sky_light = model.sky_irradiance(2.0 * scale, sun),
-                                    .daylight = stand.daylight};
+                                    .daylight = stand.daylight,
+                                    .gusts_drifted = stand.gusts_drifted};
     const StandDraw stamps{.slot = slot,
                            .count = static_cast<std::uint32_t>(stand.anchors.size()),
                            .origin = origin,
@@ -329,6 +331,21 @@ TEST_CASE("the wind rocks the stamps' tops, and still air leaves them still", "[
     Stand still_later = still_stand;
     still_later.seconds = 1.1;
     CHECK(draw(*device, still_stand) == draw(*device, still_later));
+}
+
+TEST_CASE("gusts move the stamps' tops as they drift over them", "[render]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    const DVec3 wind{14.0, 0.0, 0.0};
+    const DVec3 drifted{30.0, 0.0, 0.0};
+    CHECK(
+        draw(*device, {.anchors = rank_of(5, 0.0), .wind = wind, .seconds = 1.0}) !=
+        draw(*device,
+             {.anchors = rank_of(5, 0.0), .wind = wind, .seconds = 1.0, .gusts_drifted = drifted}));
+    CHECK(draw(*device, {.anchors = rank_of(5, 0.0), .seconds = 1.0}) ==
+          draw(*device, {.anchors = rank_of(5, 0.0), .seconds = 1.0, .gusts_drifted = drifted}));
 }
 
 TEST_CASE("each stamp stands as its age: saplings green to the ground, old trees bare below",

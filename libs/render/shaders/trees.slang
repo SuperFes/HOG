@@ -1,6 +1,7 @@
 import atmosphere;
 import bend;
 import condition;
+import gusts;
 import season;
 import shadow;
 import tone;
@@ -182,15 +183,14 @@ Tree vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
 
     const float side_x = (corner & 1u) == 0 ? -0.5 : 0.5;
     const float t = corner < 2 ? 0.0 : 1.0;
-    // Trunks hold fast; the crown's top sways, held over by strong wind.
+    // Trunks hold fast; the crown's top sways, held over in the gusts.
     const float speed = length(push.wind.xyz);
     float3 sway = float3(0.0);
     if (speed > 1e-3) {
         const float3 along = push.wind.xyz / speed;
-        const float held = (speed * speed) / ((speed * speed) + 320.0);
-        const float rock =
-            0.025 * sin((push.bend_radii.z * (0.9 + (0.15 * speed))) + (6.2831853 * unit(hash + 6u)));
-        sway = along * (height * ((held * 0.16) + (rock * saturate(speed / 8.0))));
+        const float field = gust_field(root, lighting.gusts.xyz);
+        const float apart = 1.2 * (unit(hash + 6u) - 0.5);
+        sway = along * (height * tree_sway(push.bend_radii.z, speed, field, apart));
     }
     const float3 placed =
         root + (width_dir * (side_x * width)) + (upright * (height * t)) + (sway * (t * t * t));

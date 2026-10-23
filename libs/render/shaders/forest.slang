@@ -1,6 +1,7 @@
 import atmosphere;
 import bend;
 import condition;
+import gusts;
 import season;
 import shadow;
 import tone;
@@ -174,10 +175,9 @@ Planted plant(uint instance) {
     planted.along = float3(0.0);
     if (speed > 1e-3) {
         planted.along = push.wind.xyz / speed;
-        const float held = (speed * speed) / ((speed * speed) + 320.0);
-        const float rock = 0.025 * sin((push.bend_radii.z * (0.9 + (0.15 * speed))) +
-                                       (6.2831853 * unit(hash + 6u)));
-        planted.sway = grown * ((held * 0.16) + (rock * saturate(speed / 8.0)));
+        const float field = gust_field(root, lighting.gusts.xyz);
+        const float apart = 1.2 * (unit(hash + 6u) - 0.5);
+        planted.sway = grown * tree_sway(push.bend_radii.z, speed, field, apart);
     }
     planted.grows = true;
     planted.root = root;

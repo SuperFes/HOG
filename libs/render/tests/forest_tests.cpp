@@ -81,6 +81,7 @@ struct Stand {
     double eye_up = 6.0;
     double eye_back = -40.0;
     hog::flora::Daylight daylight{};
+    DVec3 gusts_drifted{0.0};
 };
 
 // The stand's grown trees over black, from south of the origin facing north.
@@ -114,7 +115,8 @@ Pixels draw(hog::render::Device& device, const Stand& stand) {
                                     .bend = bend,
                                     .exposure = 10.0,
                                     .sky_light = model.sky_irradiance(2.0 * scale, sun),
-                                    .daylight = stand.daylight};
+                                    .daylight = stand.daylight,
+                                    .gusts_drifted = stand.gusts_drifted};
     const StandDraw grown{.slot = slot,
                           .count = static_cast<std::uint32_t>(stand.anchors.size()),
                           .origin = origin,
@@ -292,6 +294,21 @@ TEST_CASE("grown pines carry trunks and needles on their anchors", "[render]") {
     CHECK(leafy_pixels(stand) > 100);
     // An empty tile grows nothing.
     CHECK(lit_pixels(draw(*device, {.anchors = {}})) == 0);
+}
+
+TEST_CASE("gusts move the grown trees' crowns as they drift over them", "[render]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    const DVec3 wind{14.0, 0.0, 0.0};
+    const DVec3 drifted{30.0, 0.0, 0.0};
+    CHECK(
+        draw(*device, {.anchors = rank_of(5, 0.0), .wind = wind, .seconds = 1.0}) !=
+        draw(*device,
+             {.anchors = rank_of(5, 0.0), .wind = wind, .seconds = 1.0, .gusts_drifted = drifted}));
+    CHECK(draw(*device, {.anchors = rank_of(5, 0.0), .seconds = 1.0}) ==
+          draw(*device, {.anchors = rank_of(5, 0.0), .seconds = 1.0, .gusts_drifted = drifted}));
 }
 
 TEST_CASE("the baked details thin with distance, holding the stand", "[render]") {
