@@ -111,3 +111,40 @@ public float gust_sheen(float speed, float field, float seconds, float seen) {
     return gust_laid(speed, gust) +
            (seen * swaying(gusting(speed, gust)) * sin(sway_phase(seconds, speed, field)));
 }
+
+// How a woody plant gives to the wind: held over by it as stiffly as `holds` has it, at most `lean`
+// of its height, and rocking `rock` of its height either way once it blows `rocks_from` m/s, at
+// `rate` radians a second and `quickening` more for each m/s on the whole.
+struct Woody {
+    float holds;
+    float lean;
+    float rock;
+    float rocks_from;
+    float rate;
+    float quickening;
+}
+
+// Stiffer than grass by far, and trees stiffer and slower still than bushes.
+static const Woody bush_wood = { 220.0, 0.25, 0.04, 6.0, 1.1, 0.2 };
+static const Woody tree_wood = { 320.0, 0.16, 0.025, 8.0, 0.9, 0.15 };
+
+// How far a woody plant's top is held over downwind where the gusts' field is `field`, swayed
+// `seconds` in, as a share of its height, where the wind blows `speed` on the whole. Rocking at
+// the same rate everywhere, as grass sways, so the gusts' field sets plants side by side apart
+// smoothly and waves run through them; `apart` sets each a little apart from its neighbours.
+float woody_sway(Woody wood, float seconds, float speed, float field, float apart) {
+    const float gusted = gusting(speed, gust_of(field));
+    const float held = (gusted * gusted) / ((gusted * gusted) + wood.holds);
+    const float phase = (seconds * (wood.rate + (wood.quickening * speed))) + (6.0 * field) + apart;
+    return (held * wood.lean) + (wood.rock * saturate(gusted / wood.rocks_from) * sin(phase));
+}
+
+public float bush_sway(float seconds, float speed, float field, float apart) {
+    return woody_sway(bush_wood, seconds, speed, field, apart);
+}
+
+// For the trees drawn one by one and the grown forest alike, so neither moves as one gives way to
+// the other.
+public float tree_sway(float seconds, float speed, float field, float apart) {
+    return woody_sway(tree_wood, seconds, speed, field, apart);
+}

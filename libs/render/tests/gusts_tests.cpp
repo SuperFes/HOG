@@ -46,6 +46,8 @@ struct Gusting {
     double speed = 0.0; // m/s
     double laid = 0.0;  // how much further grass is laid over than on the whole
     double sheen = 0.0; // and swaying with it
+    double bush = 0.0;  // how far a bush's top is held over, of its height
+    double tree = 0.0;  // and a tree's
 };
 
 // How hard the gusts blow at each point, how fast the wind blows there and how it lays grass over,
@@ -61,12 +63,18 @@ std::vector<Gusting> gusting_at(hog::render::Device& device, const WorldPosition
         asked.push_back({from_eye.x, from_eye.y, from_eye.z, static_cast<float>(speed)});
         asked.push_back({anchor.x, anchor.y, anchor.z, static_cast<float>(seconds)});
     }
+    const std::vector<Probed> found =
+        probed(device, hog::shaders::gusts_probe, asked, 2 * points.size());
     std::vector<Gusting> gusting;
-    for (const Probed& found : probed(device, hog::shaders::gusts_probe, asked, points.size())) {
-        gusting.push_back({.gust = static_cast<double>(found[0]),
-                           .speed = static_cast<double>(found[1]),
-                           .laid = static_cast<double>(found[2]),
-                           .sheen = static_cast<double>(found[3])});
+    for (std::size_t at = 0; at < points.size(); ++at) {
+        const Probed& grass = found[2 * at];
+        const Probed& woody = found[(2 * at) + 1];
+        gusting.push_back({.gust = static_cast<double>(grass[0]),
+                           .speed = static_cast<double>(grass[1]),
+                           .laid = static_cast<double>(grass[2]),
+                           .sheen = static_cast<double>(grass[3]),
+                           .bush = static_cast<double>(woody[0]),
+                           .tree = static_cast<double>(woody[1])});
     }
     return gusting;
 }
@@ -303,5 +311,76 @@ TEST_CASE("grass sways about how far the gusts lay it over, in waves across the 
     CHECK(swing > 0.4);
     CHECK(mean_difference(sheens, laid) > 0.1);
     CHECK(std::ranges::minmax(sheens).max - std::ranges::minmax(sheens).min > 0.6);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("bushes and trees are held over in the gusts and rock in waves, stiffer than grass",
+          "[render][gpu]") {
+    const auto device = test_device();
+    const Ground ground;
+    const WorldPosition eye = ground.here + (ground.up * 1.7);
+    const std::vector<WorldPosition> points = square(ground, 120.0, 4.0);
+    constexpr double speed = 6.0;
+    constexpr int steps = 24;
+    std::vector<double> bush_least(points.size(), 1.0);
+    std::vector<double> bush_most(points.size(), -1.0);
+    std::vector<double> tree_least(points.size(), 1.0);
+    std::vector<double> tree_most(points.size(), -1.0);
+    std::vector<Gusting> first;
+    for (int step = 0; step < steps; ++step) {
+        const double seconds = 5.0 + (step * 0.25);
+        const std::vector<Gusting> found =
+            gusting_at(*device, eye, DVec3{0.0}, points, speed, seconds);
+        for (std::size_t at = 0; at < points.size(); ++at) {
+            bush_least[at] = std::min(bush_least[at], found[at].bush);
+            bush_most[at] = std::max(bush_most[at], found[at].bush);
+            tree_least[at] = std::min(tree_least[at], found[at].tree);
+            tree_most[at] = std::max(tree_most[at], found[at].tree);
+        }
+        if (step == 0) {
+            first = found;
+        }
+    }
+    // Held over furthest in the heart of a gust, for all they rock.
+    double gusty_bush = 0.0;
+    double lull_bush = 0.0;
+    double gusty_tree = 0.0;
+    double lull_tree = 0.0;
+    int gusty = 0;
+    int lulls = 0;
+    for (std::size_t at = 0; at < points.size(); ++at) {
+        const double bush = (bush_least[at] + bush_most[at]) / 2.0;
+        const double tree = (tree_least[at] + tree_most[at]) / 2.0;
+        if (first[at].gust > 0.9) {
+            gusty_bush += bush;
+            gusty_tree += tree;
+            ++gusty;
+        } else if (first[at].gust < 0.1) {
+            lull_bush += bush;
+            lull_tree += tree;
+            ++lulls;
+        }
+        // Stiffer than grass, trees stiffer still, and never blown back upwind.
+        const double gusted = first[at].speed * first[at].speed;
+        CHECK(bush_most[at] < 0.3 * gusted / (gusted + 36.0));
+        CHECK(tree_most[at] < bush_most[at]);
+        CHECK(tree_least[at] > -0.03);
+        CHECK(bush_most[at] - bush_least[at] > 0.01);
+    }
+    REQUIRE(gusty > 0);
+    REQUIRE(lulls > 0);
+    INFO("bushes " << gusty_bush / gusty << " in the gusts, " << lull_bush / lulls << " in lulls");
+    INFO("trees " << gusty_tree / gusty << " in the gusts, " << lull_tree / lulls << " in lulls");
+    CHECK(gusty_bush / gusty > 2.0 * (lull_bush / lulls));
+    CHECK(gusty_tree / gusty > 2.0 * (lull_tree / lulls));
+    // At any moment they aren't all rocking one way, but in waves.
+    std::vector<double> bushes;
+    std::vector<double> trees;
+    for (const Gusting& found : first) {
+        bushes.push_back(found.bush);
+        trees.push_back(found.tree);
+    }
+    CHECK(std::ranges::minmax(bushes).max - std::ranges::minmax(bushes).min > 0.05);
+    CHECK(std::ranges::minmax(trees).max - std::ranges::minmax(trees).min > 0.02);
     CHECK(device->validation_errors() == 0);
 }
