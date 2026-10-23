@@ -15,9 +15,9 @@ TEST_CASE("graphics config left empty keeps the defaults", "[client][graphics]")
     CHECK(*config == GraphicsConfig{});
 }
 
-TEST_CASE("the shipped graphics config is the defaults", "[client][graphics]") {
+TEST_CASE("the example graphics config is the defaults", "[client][graphics]") {
     const auto config = hog::client::load_graphics_config(std::filesystem::path{HOG_SOURCE_DIR} /
-                                                          "config/graphics.toml");
+                                                          "config/graphics.example.toml");
     REQUIRE(config);
     CHECK(*config == GraphicsConfig{});
 }
@@ -88,9 +88,12 @@ TEST_CASE("graphics config rejects what it can't draw", "[client][graphics]") {
 }
 
 TEST_CASE("a machine without a graphics config draws the defaults", "[client][graphics]") {
-    // Out of the source tree, so nothing above it keeps one.
+    // Run from out of the source tree, so neither it nor anything above it keeps one.
     const std::filesystem::path nowhere = std::filesystem::temp_directory_path() / "hog-nowhere";
+    const std::filesystem::path was = std::filesystem::current_path();
+    std::filesystem::current_path(std::filesystem::temp_directory_path());
     const auto config = find_graphics_config(std::nullopt, nowhere);
+    std::filesystem::current_path(was);
     REQUIRE(config);
     CHECK(*config == GraphicsConfig{});
     // One asked for has to be there.

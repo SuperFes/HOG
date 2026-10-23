@@ -14,3 +14,6 @@ CMakeUserPresets.json
 
 # Server worlds and logs
 /var/
+
+# This machine's own graphics, from config/graphics.example.toml.
+config/graphics.toml

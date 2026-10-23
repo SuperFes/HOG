@@ -213,7 +213,8 @@ Flies or walks over the planet.
 options:
   --planet PATH          the planet's config (default config/planet.toml)
   --graphics PATH        what to draw, for what the GPU can afford (default
-                         config/graphics.toml, if there is one)
+                         config/graphics.toml if there is one, as
+                         config/graphics.example.toml shows)
   --at LAT,LON,ALT       start at degrees of latitude and longitude, metres above
                          sea level (default over the starting islands)
   --time HH:MM           start at this local time of day (default the planet's own)
