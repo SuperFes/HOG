@@ -26,4 +26,5 @@ hog_add_tests(hog_terrain
     tests/stream_tests.cpp)
 
 hog_add_benchmarks(hog_terrain
-    bench/patch_bench.cpp)
+    bench/patch_bench.cpp
+    bench/stream_bench.cpp)
