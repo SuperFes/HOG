@@ -204,10 +204,9 @@ void Grass::draw(VkCommandBuffer commands, VkExtent2D extent, const TerrainPool&
         const auto fade =
             static_cast<std::uint32_t>(std::lround(std::clamp(draw.fade_far, 1.0, furthest_grass)));
         push.wind.w = std::bit_cast<float>(draw.seed);
-        push.origin =
-            glm::vec4{relative_to(draw.origin, view.camera.eye),
-                      std::bit_cast<float>((draw.tall_only ? 1U << 26U : 0U) | (fade << 14U) |
-                                           (bias << 6U) | draw.blades_per_cell)};
+        push.origin = glm::vec4{
+            relative_to(draw.origin, view.camera.eye),
+            std::bit_cast<float>((draw.tall_only ? 1U << 26U : 0U) | (fade << 14U) | (bias << 6U))};
         vkCmdPushConstants(commands, pipeline_.layout(), stages, offsetof(Push, wind),
                            sizeof(Push) - offsetof(Push, wind), &push.wind);
         vkCmdDraw(commands, blade_vertices, cells * draw.blades_per_cell, 0, 0);

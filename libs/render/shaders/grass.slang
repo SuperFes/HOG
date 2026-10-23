@@ -17,9 +17,9 @@ struct Push {
     float4 bend_radii;
     // xyz the wind near the ground, m/s; w (as bits) the patch's seed.
     float4 wind;
-    // xyz the patch's origin from the eye, in metres; w (as bits) the blades grown in each grid
-    // cell, the bytes before the patch's vertices in what's bound times 64, the metres blades
-    // have shrunk away by times 16384, and bit 26 set to grow only the tall biomes' blades.
+    // xyz the patch's origin from the eye, in metres; w (as bits) the bytes before the patch's
+    // vertices in what's bound times 64, the metres blades have shrunk away by times 16384, and
+    // bit 26 set to grow only the tall biomes' blades.
     float4 origin;
 };
 
@@ -163,7 +163,6 @@ float3 blown(float3 root, float height, uint hash) {
 [shader("vertex")]
 Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const uint packed = asuint(push.origin.w);
-    const uint blades = packed & 63u;
     const uint bias = (packed >> 6) & 0xffu;
     const float fade_far = float((packed >> 14) & 0xfffu);
     const bool tall_only = (packed & (1u << 26)) != 0u;
@@ -171,7 +170,9 @@ Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const float fade_near = 0.45 * fade_far;
     const uint seed = asuint(push.wind.w);
 
-    const uint cell = instance / blades;
+    // A layer of blades a cell, every cell's nth blade in the nth layer, so each blade is the
+    // same however many are grown: thinning lets the last go and moves none.
+    const uint cell = instance & ((patch_cells * patch_cells) - 1u);
     const uint i = cell >> 5;
     const uint j = cell & 31u;
     const uint hash = hashed(seed ^ instance);

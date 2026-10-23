@@ -72,6 +72,7 @@ struct Field {
     DVec3 gusts_drifted{0.0};
     double away = 0.0; // metres east of the eye to the patch's centre
     double fade_far = hog::render::grass_far;
+    std::uint32_t blades = 8; // a cell
     bool tall_only = false;
     double ground = ground_height; // metres above sea level
     hog::terrain::Cover cover{};
@@ -113,7 +114,7 @@ Pixels draw(hog::render::Device& device, const Field& grown) {
     const GrassDraw lawn{.slot = slot,
                          .origin = origin,
                          .spacing = spacing,
-                         .blades_per_cell = 8,
+                         .blades_per_cell = grown.blades,
                          .seed = 7,
                          .fade_far = grown.fade_far,
                          .tall_only = grown.tall_only};
@@ -191,6 +192,24 @@ TEST_CASE("grass grows over grassland and not over the sea", "[render]") {
     const std::size_t tufts = lit_pixels(draw(*device, {.biome = hog::planet::Biome::Desert}));
     CHECK(tufts > 0);
     CHECK(tufts < lit / 4);
+}
+
+TEST_CASE("thinner grass is the thicker grass with blades left out", "[render]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    const Pixels thin = draw(*device, {.blades = 3});
+    const Pixels thick = draw(*device, {.blades = 9});
+    CHECK(lit_pixels(thick) > lit_pixels(thin));
+    // Every blade of the thin field stands in the thick one too, where it was.
+    std::size_t lost = 0;
+    for (std::size_t pixel = 0; pixel < thin.size() / 4; ++pixel) {
+        const bool was = thin.at(4 * pixel) + thin.at((4 * pixel) + 1) > 0;
+        const bool is = thick.at(4 * pixel) + thick.at((4 * pixel) + 1) > 0;
+        lost += was && !is ? 1U : 0U;
+    }
+    CHECK(lost == 0);
 }
 
 TEST_CASE("grass strays past its own biome, thinning with that biome's share", "[render]") {
