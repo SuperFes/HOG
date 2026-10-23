@@ -12,6 +12,7 @@
 #include <hog/render/terrain.hpp>
 #include <hog/shaders/bend_probe.hpp>
 #include <hog/shaders/projection_probe.hpp>
+#include <hog/shaders/water_probe.hpp>
 #include <hog/terrain/bend.hpp>
 #include <hog/terrain/material.hpp>
 #include <hog/terrain/stitching.hpp>
@@ -1010,6 +1011,67 @@ TEST_CASE("the bend's sines and arctangents of small angles are as precise as of
                       << ", arctangent " << found[at].arctangent << " for " << arctangent);
         CHECK(std::abs(found[at].sine - sine) <= 1e-6 * std::abs(sine));
         CHECK(std::abs(found[at].arctangent - arctangent) <= 1e-6 * std::abs(arctangent));
+    }
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("waves bend what's seen through the sea's surface by how they tilt it, as refracted",
+          "[render][gpu]") {
+    const auto device = test_device();
+    constexpr DVec3 level{0.0, 0.0, 1.0};
+    constexpr double into_water = 1.0 / 1.333;
+    // Down and ahead, along x, steeply and at a glance.
+    const std::array<DVec3, 2> lookings{glm::normalize(DVec3{1.0, 0.0, -2.0}),
+                                        glm::normalize(DVec3{1.0, 0.0, -0.2})};
+    // Level, tilted ahead, back and aside.
+    const std::array<DVec3, 4> normals{level, glm::normalize(DVec3{0.2, 0.0, 1.0}),
+                                       glm::normalize(DVec3{-0.2, 0.0, 1.0}),
+                                       glm::normalize(DVec3{0.0, 0.2, 1.0})};
+    constexpr std::array unders{1.0, 2.0};
+    std::vector<Probed> asked;
+    std::vector<DVec3> wanted;
+    for (const DVec3& looking : lookings) {
+        for (const DVec3& normal : normals) {
+            for (const double under : unders) {
+                asked.push_back({static_cast<float>(looking.x), static_cast<float>(looking.y),
+                                 static_cast<float>(looking.z), 0.0F});
+                asked.push_back({static_cast<float>(normal.x), static_cast<float>(normal.y),
+                                 static_cast<float>(normal.z), 0.0F});
+                asked.push_back({static_cast<float>(level.x), static_cast<float>(level.y),
+                                 static_cast<float>(level.z), static_cast<float>(under)});
+                wanted.push_back((glm::refract(looking, normal, into_water) -
+                                  glm::refract(looking, level, into_water)) *
+                                 under);
+            }
+        }
+    }
+    const std::vector<Probed> found =
+        probed(*device, hog::shaders::water_probe, asked, wanted.size());
+    for (std::size_t i = 0; i < wanted.size(); ++i) {
+        CAPTURE(i);
+        const DVec3 moved{found[i][0], found[i][1], found[i][2]};
+        CHECK(glm::length(moved - wanted[i]) < 1e-4);
+    }
+    for (std::size_t i = 0; i < wanted.size(); i += 2) {
+        const std::size_t normal = (i / 2) % normals.size();
+        CAPTURE(i);
+        // Still water bends nothing; the further beyond the surface, the further it's moved.
+        if (normal == 0) {
+            CHECK(glm::length(wanted[i]) == 0.0);
+        } else {
+            CHECK(glm::length(wanted[i + 1] - (2.0 * wanted[i])) < 1e-9);
+        }
+        // Into the water the line of sight bends towards the normal's underside, against the way
+        // the surface tilts.
+        if (normal == 1) {
+            CHECK(wanted[i].x < 0.0);
+        }
+        if (normal == 2) {
+            CHECK(wanted[i].x > 0.0);
+        }
+        if (normal == 3) {
+            CHECK(wanted[i].y < 0.0);
+        }
     }
     CHECK(device->validation_errors() == 0);
 }

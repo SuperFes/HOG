@@ -414,6 +414,44 @@ float3 on_water_at(Shade shade, float3 up) {
            pi;
 }
 
+// What's drawn beneath the sea at a pixel, as copied: where, from the eye, and which.
+struct Behind {
+    float3 at;
+    int3 pixel;
+};
+
+// At `ndc`, the picture's own coordinates, in `pixel`, `depth` as the copy keeps it.
+Behind behind_at(float2 ndc, int3 pixel, float depth) {
+    const float4 seen = mul(lighting.eye_from_clip, float4(ndc, depth, 1.0));
+    Behind behind;
+    behind.at = seen.xyz / seen.w;
+    behind.pixel = pixel;
+    return behind;
+}
+
+// What's seen beneath the surface in place of `straight` as the waves bend the line of sight,
+// tilting the surface to `normal` from `level`; unless that's off the picture, or out of the
+// water, where it would be seen through the surface from beneath.
+Behind bent_behind(Surface surface, Behind straight, float3 looking, float3 normal, float3 level) {
+    const float under = length(straight.at - surface.from_eye);
+    const float3 moved = straight.at + bent_by_waves(looking, normal, level, under);
+    const float4 clip = mul(push.clip_from_eye, float4(moved, 1.0));
+    const float2 ndc = clip.xy / clip.w;
+    if (clip.w <= 0.0 || any(abs(ndc) >= 1.0)) {
+        return straight;
+    }
+    uint width;
+    uint height;
+    behind_depth.GetDimensions(width, height);
+    const int3 pixel = int3(int2(((ndc * 0.5) + 0.5) * float2(width, height)), 0);
+    const float depth = behind_depth.Load(pixel).x;
+    if (depth <= 0.0) {
+        return straight;
+    }
+    const Behind bent = behind_at(ndc, pixel, depth);
+    return dot(surface.from_eye - bent.at, level) > 0.0 ? bent : straight;
+}
+
 // As fragment_air, but over what's drawn beneath, as copied; where the sea lays the water itself,
 // what lies behind the surface is dimmed and filled in by the water between, as deep under the
 // surface drawn as it lies, and where nothing does, deep water.
@@ -443,12 +481,14 @@ float4 fragment_through(Surface surface) : SV_Target {
     float3 water = water_colour * on_water;
     if (depth > 0.0) {
         const float4 clip = mul(push.clip_from_eye, float4(surface.from_eye, 1.0));
-        const float4 seen = mul(lighting.eye_from_clip, float4(clip.xy / clip.w, depth, 1.0));
-        const float3 behind = seen.xyz / seen.w;
+        const Behind straight = behind_at(clip.xy / clip.w, pixel, depth);
+        const Behind bent = bent_behind(surface, straight, looking, facing.normal, up);
+        const float3 behind = bent.at;
         // Drawn with the air between it and the eye, which the surface's stands in for.
-        const float3 drawn = max((untoned(behind_colour.Load(pixel).rgb, exposure) - between.rgb) /
-                                     max(between.a, 1e-4),
-                                 0.0);
+        const float3 drawn =
+            max((untoned(behind_colour.Load(bent.pixel).rgb, exposure) - between.rgb) /
+                    max(between.a, 1e-4),
+                0.0);
         water = through_water(drawn, on_water, dot(surface.from_eye - behind, up),
                               push.up_height.w, length(behind), dot(-looking, up));
     }

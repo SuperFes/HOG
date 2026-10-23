@@ -13,6 +13,16 @@ public static const float3 water_colour = float3(0.0, 0.15, 0.25);
 // The most glancing a view down through the water is taken as, for the length of its path there.
 public static const float least_facing = 0.1;
 
+// Of light passing from air into water, the ratio of their refractive indices.
+public static const float into_water = 1.0 / 1.333;
+
+// How far a point `under` metres beyond the surface along `looking` seems to move as waves tilt
+// the surface's `normal` from `level`'s: as the line of sight bends through it, against as it bends
+// through still water.
+public float3 bent_by_waves(float3 looking, float3 normal, float3 level, float under) {
+    return (refract(looking, normal, into_water) - refract(looking, level, into_water)) * under;
+}
+
 // Schlick's: how much is reflected, more the more glancing the view. From under the sea, its
 // surface reflects as much back down.
 public float reflected_at(float3 looking, float3 normal) {
