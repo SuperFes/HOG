@@ -153,7 +153,7 @@ float3 blown(float3 root, float height, uint hash) {
     const float3 along = push.wind.xyz / mean;
     const float gust = gust_at(root, lighting.gusts.xyz);
     const float speed = gusting(mean, gust);
-    const float held = (speed * speed) / ((speed * speed) + 36.0);
+    const float held = laid_over(speed);
     const float swaying = 0.3 * speed / (1.0 + (0.08 * speed * speed));
     // Swaying as fast everywhere, so blades side by side never drift apart as time goes on.
     const float phase =

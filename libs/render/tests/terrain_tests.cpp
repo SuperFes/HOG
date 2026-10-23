@@ -725,6 +725,9 @@ struct Seen {
     double canopy = 900.0;
     bool air = false;
     hog::flora::Daylight daylight{};
+    Biome biome = Biome::Grassland;
+    double wind = 0.0; // m/s near the ground, lit through the air
+    DVec3 gusts_drifted{0.0};
 };
 
 std::vector<std::uint8_t> from_above(hog::render::Device& device, const Seen& seen) {
@@ -741,6 +744,7 @@ std::vector<std::uint8_t> from_above(hog::render::Device& device, const Seen& se
     for (PatchVertex& vertex : patch) {
         vertex.woods = vertex.position.x < 0.0F ? seen.woods : hog::terrain::Woods{};
         vertex.cover = {vertex.position.x < 0.0F ? seen.scar : std::uint8_t{0}, 0};
+        vertex.biome = seen.biome;
     }
     REQUIRE(pool.stage(0, slot, patch));
 
@@ -767,7 +771,9 @@ std::vector<std::uint8_t> from_above(hog::render::Device& device, const Seen& se
                                         .bend = view.bend,
                                         .exposure = 10.0,
                                         .sky_light = model.sky_irradiance(seen.height * scale, sun),
-                                        .daylight = seen.daylight};
+                                        .daylight = seen.daylight,
+                                        .gusts_drifted = seen.gusts_drifted,
+                                        .gusts_wind = seen.wind};
     return draw(device, *terrain, pool, draws, view, [&](VkCommandBuffer commands) {
         CHECK(sky->record_frame(commands, extent, 0, *atmosphere, sky_view));
     });
@@ -785,6 +791,23 @@ double mean_of(const std::vector<std::uint8_t>& pixels, std::size_t channel, boo
         }
     }
     return sum / counted;
+}
+
+// How far apart two pictures' channels lie on the whole, and at most.
+struct Apart {
+    double mean = 0.0;
+    int most = 0;
+};
+
+Apart apart(const std::vector<std::uint8_t>& a, const std::vector<std::uint8_t>& b) {
+    Apart found;
+    for (std::size_t at = 0; at < a.size(); ++at) {
+        const int by = std::abs(int{a[at]} - int{b[at]});
+        found.mean += by;
+        found.most = std::max(found.most, by);
+    }
+    found.mean /= static_cast<double>(a.size());
+    return found;
 }
 
 } // namespace
@@ -815,6 +838,35 @@ TEST_CASE("woods beyond the stamps darken the ground they stand on, and only it"
     CHECK(mean_of(thin, 1, true) > mean_of(woods, 1, true) + 5.0);
     CHECK(mean_of(thin, 1, true) < mean_of(none, 1, true));
     CHECK(from_above(*device, {.woods = {}}) == none);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("gusts cross far meadows as faint patches of light, and leave bare ground be",
+          "[render][gpu]") {
+    const auto device = test_device();
+    const Seen still{.woods = {}, .height = 300.0, .canopy = 0.0, .air = true};
+    Seen blowing = still;
+    blowing.wind = 6.0;
+    const auto before = from_above(*device, blowing);
+    blowing.gusts_drifted = DVec3{40.0, -25.0, 10.0};
+    const auto after = from_above(*device, blowing);
+    const Apart drifted = apart(before, after);
+    const Apart lit = apart(before, from_above(*device, still));
+    INFO("drifting apart " << drifted.mean << " on the whole, " << drifted.most
+                           << " at most; from still air " << lit.mean << ", " << lit.most);
+    CHECK(drifted.mean > 1.5);
+    CHECK(drifted.most < 16);
+    CHECK(lit.most < 16);
+
+    Seen calm = still;
+    calm.gusts_drifted = blowing.gusts_drifted;
+    CHECK(from_above(*device, calm) == from_above(*device, still));
+    Seen beach = still;
+    beach.biome = Biome::Beach;
+    const auto bare = from_above(*device, beach);
+    beach.wind = 6.0;
+    beach.gusts_drifted = blowing.gusts_drifted;
+    CHECK(from_above(*device, beach) == bare);
     CHECK(device->validation_errors() == 0);
 }
 

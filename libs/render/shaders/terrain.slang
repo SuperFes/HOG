@@ -1,5 +1,6 @@
 import atmosphere;
 import bend;
+import gusts;
 import projection;
 import season;
 import shadow;
@@ -27,7 +28,7 @@ static const uint genus_count = 4;
 struct Settings {
     // Metres a material spans near and far, and 1 if ground below sea level is seen through water.
     float4 tiling;
-    // What each biome's material averages to.
+    // Each biome's: rgb what its material averages to, w how much is grass waving in the wind.
     float4 means[biome_count];
     // x metres from the eye the tree stamps have shrunk away by, 0 for no woods drawn in the
     // ground.
@@ -354,6 +355,28 @@ float3 albedo(Ground ground, float3 normal) {
     return colour;
 }
 
+// How much brighter the grass a gust lays over shows than the field on the whole, at most.
+static const float gust_brightening = 0.25;
+
+// Grass laid over by a gust catches the light on its flanks, so gusts cross meadows as faint
+// patches of light, beyond where blades are drawn as well as beneath them. `gusts` as Lighting's.
+float gust_lit(Ground ground, float4 gusts) {
+    const float wind = gusts.w;
+    if (wind < 1e-3) {
+        return 1.0;
+    }
+    float waving = 0.0;
+    [unroll]
+    for (uint biome = 0; biome < biome_count; ++biome) {
+        waving += ground.biomes[biome / 4][biome % 4] * settings.means[biome].w;
+    }
+    if (waving < least_biome) {
+        return 1.0;
+    }
+    const float gust = gust_at(ground.from_eye, gusts.xyz);
+    return 1.0 + (gust_brightening * waving * gust_sheen(wind, gust));
+}
+
 // Ground a fire left black: charcoal and ash, greening back as the scar fades.
 static const float3 charcoal = float3(0.03, 0.027, 0.024);
 
@@ -457,11 +480,12 @@ struct Shaded {
 };
 
 // The ground's colour lit by `on_ground` facing its normal and `on_water` facing up, each times
-// pi, with water over it where it lies below the sea as high as it stands, unless the sea's pass
-// lays it, `laid`.
+// pi, its grass laid over by `gusts`, with water over it where it lies below the sea as high as it
+// stands, unless the sea's pass lays it, `laid`.
 float3 shaded(Ground ground, float3 normal, float3 on_ground, float3 on_water, float4 year,
-              bool laid) {
-    const float3 bare = wooded(ground, scorched(ground, albedo(ground, normal)), year) *
+              float4 gusts, bool laid) {
+    const float3 grown = albedo(ground, normal) * gust_lit(ground, gusts);
+    const float3 bare = wooded(ground, scorched(ground, grown), year) *
                         lerp(1.0, wet_darkening, wetness(ground));
     const float3 lit_ground = lerp(bare, float3(stranded_albedo), stranded_at(ground)) * on_ground;
     if (settings.tiling.z <= 0.0) {
@@ -496,7 +520,7 @@ Shaded fragment_main(Ground ground) {
     const float3 on_water = night + ((1.0 - night) * saturate(dot(up_at(ground), sun)));
     Shaded result;
     result.colour =
-        float4(saturate(shaded(ground, normal, on_ground, on_water, midsummer, false)), 1.0);
+        float4(saturate(shaded(ground, normal, on_ground, on_water, midsummer, float4(0.0), false)), 1.0);
     result.depth = depth_of(ground);
     return result;
 }
@@ -527,7 +551,9 @@ Shaded fragment_air(Ground ground) {
                    sky_under_cloud(lighting, shade, clear_water * facing);
     }
     float3 radiance =
-        shaded(ground, normal, on_ground, on_water, lighting.year, sea_lays_water(lighting)) / pi;
+        shaded(ground, normal, on_ground, on_water, lighting.year, lighting.gusts,
+               sea_lays_water(lighting)) /
+        pi;
     if (far > 0.0) {
         // Too far to see into, a lake is its deep water's colour, mirroring the sky and the sun
         // as the sea does; facing up from the faked sphere the sea is drawn on.

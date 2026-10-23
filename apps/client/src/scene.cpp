@@ -494,6 +494,7 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     const auto weather = [&] { return weather_.bindings(faded); };
     render::SkyView sky = sky_view(shot, shade);
     sky.gusts_drifted = gusts_drifted_;
+    sky.gusts_wind = glm::length(drift * surface_wind);
     sky.mist =
         render::mist_through(static_cast<double>(here.humidity), static_cast<double>(here.fog_top),
                              shot.bend.eye_height, sun_mu);

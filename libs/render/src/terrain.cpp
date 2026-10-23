@@ -3,6 +3,7 @@
 #include <hog/render/anchors.hpp>
 #include <hog/render/barrier.hpp>
 #include <hog/render/device.hpp>
+#include <hog/render/grass.hpp>
 #include <hog/render/streamed_image.hpp>
 #include <hog/render/terrain.hpp>
 #include <hog/shaders/terrain.hpp>
@@ -112,8 +113,8 @@ constexpr std::array air_descriptors{
     descriptors[4]};
 
 // The near tile's size, the far one's, and 1 if ground below sea level is seen through water; then
-// what each biome's material averages to, in linear light. Then the woods, as terrain.slang reads
-// them.
+// what each biome's material averages to, in linear light, and how much of it is grass waving in
+// the wind. Then the woods, as terrain.slang reads them.
 struct Settings {
     glm::vec4 tiling;
     std::array<glm::vec4, planet::biome_count> means;
@@ -317,8 +318,8 @@ Result<Terrain> Terrain::create(Device& device, VkFormat colour_format, VkFormat
                       .foliage = {},
                       .seasons = genus_seasons()};
     for (std::size_t biome = 0; biome < settings.means.size(); ++biome) {
-        settings.means.at(biome) =
-            glm::vec4{Vec3{terrain::material_mean(look.materials[biome])}, 1.0F};
+        settings.means.at(biome) = glm::vec4{Vec3{terrain::material_mean(look.materials[biome])},
+                                             waving_grass(static_cast<planet::Biome>(biome))};
     }
     for (std::size_t genus = 0; genus < flora::genus_count; ++genus) {
         const flora::Foliage foliage = flora::foliage_of(static_cast<flora::Genus>(genus));

@@ -293,3 +293,17 @@ TEST_CASE("gusts move the grass as they drift over it", "[render]") {
     CHECK(draw(*device, {.seconds = 1.0}) ==
           draw(*device, {.seconds = 1.0, .gusts_drifted = drifted}));
 }
+
+TEST_CASE("meadows of tall grass wave in the wind, and lawns, bare ground and water don't",
+          "[render]") {
+    using enum hog::planet::Biome;
+    using hog::render::waving_grass;
+    CHECK(waving_grass(Grassland) == 1.0F);
+    CHECK(waving_grass(Savanna) > 0.7F);
+    CHECK(waving_grass(Wetland) > 0.7F);
+    CHECK(waving_grass(Shrubland) < 0.3F);
+    CHECK(waving_grass(Desert) < 0.1F);
+    for (const hog::planet::Biome bare : {Tundra, Alpine, Ocean, Beach, Ice, Lake}) {
+        CHECK(waving_grass(bare) == 0.0F);
+    }
+}

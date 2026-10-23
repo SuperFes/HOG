@@ -54,6 +54,7 @@ struct SkyView {
     flora::Daylight daylight = {};
     // Metres the gusts' field has drifted, in the planet's frame.
     DVec3 gusts_drifted{0.0};
+    double gusts_wind = 0.0; // m/s the wind blows near the ground on the whole
 };
 
 // Where in the frame's Lighting, in bytes, the sea writes whether it lays the water over what's

@@ -333,7 +333,8 @@ public struct Lighting {
     // The sea's surface at the eye, as the sea writes it: xyz how it faces, w how far the eye
     // stands above it along that, negative in the water.
     public float4 water;
-    // xyz where the gusts' field lies from the eye, as gusts.slang reads it.
+    // xyz where the gusts' field lies from the eye, as gusts.slang reads it, w the wind's speed
+    // near the ground on the whole.
     public float4 gusts;
 };
 

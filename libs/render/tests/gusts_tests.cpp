@@ -43,10 +43,11 @@ struct Ground {
 struct Gusting {
     double gust = 0.0;  // how hard the gusts blow, 0 to 1
     double speed = 0.0; // m/s
+    double sheen = 0.0; // how much further grass is laid over than on the whole
 };
 
-// How hard the gusts blow at each point and how fast the wind blows there, seen from `eye` with
-// the field drifted `drifted`, the wind blowing `speed` on the whole.
+// How hard the gusts blow at each point, how fast the wind blows there and how it lays grass over,
+// seen from `eye` with the field drifted `drifted`, the wind blowing `speed` on the whole.
 std::vector<Gusting> gusting_at(hog::render::Device& device, const WorldPosition& eye,
                                 DVec3 drifted, std::span<const WorldPosition> points,
                                 double speed) {
@@ -59,8 +60,9 @@ std::vector<Gusting> gusting_at(hog::render::Device& device, const WorldPosition
     }
     std::vector<Gusting> gusting;
     for (const Probed& found : probed(device, hog::shaders::gusts_probe, asked, points.size())) {
-        gusting.push_back(
-            {.gust = static_cast<double>(found[0]), .speed = static_cast<double>(found[1])});
+        gusting.push_back({.gust = static_cast<double>(found[0]),
+                           .speed = static_cast<double>(found[1]),
+                           .sheen = static_cast<double>(found[2])});
     }
     return gusting;
 }
@@ -232,6 +234,25 @@ TEST_CASE("the wind slackens in the lulls and blows harder in the gusts, as hard
     CHECK(mean < 1.15 * speed);
     for (const Gusting& found : gusting_at(*device, eye, DVec3{0.0}, points, 0.0)) {
         CHECK(found.speed == 0.0);
+    }
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("grass is laid further over in the gusts and stands up in the lulls", "[render][gpu]") {
+    const auto device = test_device();
+    const Ground ground;
+    const WorldPosition eye = ground.here + (ground.up * 1.7);
+    const std::vector<WorldPosition> points = square(ground, 600.0, 3.0);
+    for (const Gusting& found : gusting_at(*device, eye, DVec3{0.0}, points, 6.0)) {
+        if (found.gust < 0.1) {
+            CHECK(found.sheen < -0.15);
+        }
+        if (found.gust > 0.9) {
+            CHECK(found.sheen > 0.1);
+        }
+    }
+    for (const Gusting& found : gusting_at(*device, eye, DVec3{0.0}, points, 0.0)) {
+        CHECK(found.sheen == 0.0);
     }
     CHECK(device->validation_errors() == 0);
 }

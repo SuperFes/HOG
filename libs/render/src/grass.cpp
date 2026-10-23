@@ -106,6 +106,19 @@ constexpr BiomeGrass grass_of(planet::Biome biome) noexcept {
     return {};
 }
 
+} // namespace
+
+float waving_grass(planet::Biome biome) noexcept {
+    // Lawns shorter than this stand stiff, and from this tall wave freely.
+    constexpr float stiff = 0.15F;
+    constexpr float free = 0.7F;
+    const BiomeGrass grass = grass_of(biome);
+    return grass.share * grass.clumps *
+           std::clamp((grass.height - stiff) / (free - stiff), 0.0F, 1.0F);
+}
+
+namespace {
+
 Settings grass_settings(std::span<const Vec3> palette) noexcept {
     Settings settings{};
     for (int biome = 0; biome < planet::biome_count; ++biome) {

@@ -2,7 +2,7 @@ import gusts;
 
 // Two to a case: a point from the eye with w the wind's speed on the whole, and where the gusts'
 // field lies from it. One found to a case: x how hard the gusts blow there, y the wind's speed
-// there.
+// there, z how much further grass is laid over there.
 [[vk::binding(0, 0)]] RWStructuredBuffer<float4> asked;
 [[vk::binding(1, 0)]] RWStructuredBuffer<float4> found;
 
@@ -17,5 +17,5 @@ void compute_main(uint3 id: SV_DispatchThreadID) {
     }
     const float4 point = asked[2 * id.x];
     const float gust = gust_at(point.xyz, asked[(2 * id.x) + 1].xyz);
-    found[id.x] = float4(gust, gusting(point.w, gust), 0.0, 0.0);
+    found[id.x] = float4(gust, gusting(point.w, gust), gust_sheen(point.w, gust), 0.0);
 }

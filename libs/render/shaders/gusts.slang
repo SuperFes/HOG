@@ -70,3 +70,14 @@ public float gust_at(float3 from_eye, float3 anchor) {
 public float gusting(float speed, float gust) {
     return speed * lerp(0.55, 1.5, gust);
 }
+
+// How far grass is held over by wind of `speed`, 0 standing to 1 laid flat.
+public float laid_over(float speed) {
+    return (speed * speed) / ((speed * speed) + 36.0);
+}
+
+// How much further grass is laid over at `gust` than by wind of `speed` on the whole: catching
+// more light on its flanks in a gust, less in a lull.
+public float gust_sheen(float speed, float gust) {
+    return laid_over(gusting(speed, gust)) - laid_over(speed);
+}

@@ -2,6 +2,7 @@
 
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
+#include <hog/planet/climate.hpp>
 #include <hog/render/camera.hpp>
 #include <hog/render/memory.hpp>
 #include <hog/render/pipeline.hpp>
@@ -25,6 +26,9 @@ inline constexpr double grass_far = 55.0;
 inline constexpr double furthest_grass = 4095.0;
 // Blades grown in one grid cell of a patch at most.
 inline constexpr std::uint32_t most_blades_per_cell = 63;
+
+// How much of a biome's ground is grass tall enough to wave in the wind, 0 to 1.
+[[nodiscard]] float waving_grass(planet::Biome biome) noexcept;
 
 // A patch's grass: blades grown in each of its grid cells, hashed from its seed.
 struct GrassDraw {

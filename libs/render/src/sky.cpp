@@ -222,7 +222,8 @@ Result<> Sky::record_tables(VkCommandBuffer commands, VkExtent2D extent, std::ui
                  view.daylight.lengthening ? 1.0F : 0.0F, 0.0F},
         // Without a sea to say otherwise, the eye is out of the water.
         .water = {Vec3{view.bend.up}, std::numeric_limits<float>::max()},
-        .gusts = {Vec3{gust_anchor(view.camera.eye, view.gusts_drifted)}, 0.0F}};
+        .gusts = {Vec3{gust_anchor(view.camera.eye, view.gusts_drifted)},
+                  static_cast<float>(view.gusts_wind)}};
     const Buffer& buffer = lighting_.at(frame);
     std::memcpy(buffer.mapped().data(), &lighting, sizeof(lighting));
     if (auto flushed = buffer.flush(); !flushed) {
