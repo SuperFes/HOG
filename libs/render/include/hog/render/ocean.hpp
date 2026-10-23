@@ -221,7 +221,7 @@ private:
     Ocean() = default;
 
     // Of the frame `frame`, writes its waves as the sea's seen.
-    Result<> write_waves(const OceanView& view, std::uint32_t frame) const;
+    [[nodiscard]] Result<> write_waves(const OceanView& view, std::uint32_t frame) const;
 
     Result<> record(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view,
                     std::uint32_t frame, const Pipeline& pipeline) const;
