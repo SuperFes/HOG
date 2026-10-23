@@ -623,9 +623,9 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     const std::optional<SeaCopies> behind = copy_behind_sea(graph, target, depth, frame, sea_uses);
     graph.add({.name = "sea", .uses = sea_uses, .targets = drawn},
               [&, behind](VkCommandBuffer commands) {
-                  render::OceanView seen = sea;
-                  seen.behind = seen_behind(graph, behind);
-                  return ocean_.draw(commands, frame.extent, seen, frame.slot);
+                  render::OceanView looking = sea;
+                  looking.behind = seen_behind(graph, behind);
+                  return ocean_.draw(commands, frame.extent, looking, frame.slot);
               });
     if (render::precipitation_count(falling, static_cast<double>(here.snow)) > 0) {
         graph.add({.name = "rain", .uses = through_air, .targets = drawn},
