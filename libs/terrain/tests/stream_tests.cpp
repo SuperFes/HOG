@@ -41,6 +41,7 @@ Patch fake_bake(CellId cell, HeightRange heights = {}) {
     return {.cell = cell,
             .origin = hog::WorldPosition{hog::planet::cell_center(cell) * radius},
             .heights = heights,
+            .coarser_error = 0.0,
             .vertices = {}};
 }
 

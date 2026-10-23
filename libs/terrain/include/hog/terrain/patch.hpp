@@ -127,6 +127,9 @@ struct Patch {
     planet::CellId cell;
     WorldPosition origin; // over the patch's centre at sea level
     HeightRange heights;  // of its grid
+    // Metres its ground strays at most from the grid at every other vertex, split along the same
+    // diagonals: what a patch a level coarser leaves out over it.
+    double coarser_error = 0.0;
     // The grid row by row, i fastest, from the corner at the lowest i and j; then the skirts,
     // deep enough to hide the gaps beside a neighbour several levels coarser or finer, each
     // vertex lit like the one above it.

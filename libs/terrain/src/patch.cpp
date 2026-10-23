@@ -123,6 +123,27 @@ struct Blend {
     return blend;
 }
 
+// How far heights on a patch's grid stray from the grid at every other vertex. Each vertex left
+// out lies midway between two kept, along a row, a column or the diagonal the cells split along.
+[[nodiscard]] double coarser_error(std::span<const double> heights) {
+    const auto at = [&](int i, int j) {
+        return heights[(static_cast<std::size_t>(j) * patch_side) + static_cast<std::size_t>(i)];
+    };
+    double error = 0.0;
+    for (int j = 0; j < patch_side; ++j) {
+        for (int i = 0; i < patch_side; ++i) {
+            const int across = i % 2;
+            const int up = j % 2;
+            if (across == 0 && up == 0) {
+                continue;
+            }
+            const double between = (at(i - across, j - up) + at(i + across, j + up)) / 2.0;
+            error = std::max(error, std::abs(at(i, j) - between));
+        }
+    }
+    return error;
+}
+
 } // namespace
 
 int blend_steps(int level, double radius) {
@@ -232,6 +253,7 @@ Patch bake_patch(const planet::World& world, planet::CellId cell, const flora::F
                                       static_cast<std::size_t>(blended));
     std::vector<Woods> woods(std::size_t{patch_side} * patch_side);
     std::vector<Cover> covers(woods.size());
+    std::vector<double> grid_heights(woods.size());
     HeightRange heights{.lowest = std::numeric_limits<double>::infinity(),
                         .highest = -std::numeric_limits<double>::infinity()};
     for (int j = -reach; j < patch_side + reach; ++j) {
@@ -251,6 +273,7 @@ Patch bake_patch(const planet::World& world, planet::CellId cell, const flora::F
                              flora::fared(flora::habitat_of(state), fate));
                 covers[index(i, j)] =
                     packed_cover(fate, flora::trees_of(state.biome).height > 0.0F);
+                grid_heights[index(i, j)] = height;
                 heights.lowest = std::min(heights.lowest, height);
                 heights.highest = std::max(heights.highest, height);
             }
@@ -260,6 +283,7 @@ Patch bake_patch(const planet::World& world, planet::CellId cell, const flora::F
     Patch patch{.cell = cell,
                 .origin = WorldPosition{planet::cell_center(cell) * radius},
                 .heights = heights,
+                .coarser_error = coarser_error(grid_heights),
                 .vertices = {}};
     patch.vertices.reserve(patch_vertices);
     for (int j = 0; j < patch_side; ++j) {

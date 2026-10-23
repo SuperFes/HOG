@@ -52,7 +52,7 @@ static_assert(hog::client::SlotPool<hog::render::TerrainPool>);
 constexpr CellId face = CellId::from_face(0);
 
 Patch patch(CellId cell) {
-    return {.cell = cell, .origin = {}, .heights = {}, .vertices = {}};
+    return {.cell = cell, .origin = {}, .heights = {}, .coarser_error = 0.0, .vertices = {}};
 }
 
 StreamFrame arriving(const std::vector<CellId>& cells, std::vector<CellId> evicted = {}) {

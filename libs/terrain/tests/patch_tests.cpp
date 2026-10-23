@@ -246,6 +246,42 @@ TEST_CASE("a patch's children meet it at its own vertices", "[terrain][patch]") 
     CHECK(highest >= parent.heights.highest);
 }
 
+TEST_CASE("a patch knows how far its parent strays from its ground", "[terrain][patch]") {
+    const World& world = shared_world();
+    const CellId parent = land_patch();
+    const Patch coarse = bake_patch(world, parent);
+    const Patch fine = bake_patch(world, parent.child(1));
+    const auto height = [](const Patch& patch, std::size_t vertex) {
+        return glm::length(world_at(patch, vertex)) - planet.radius;
+    };
+    // The parent's surface over each of the child's vertices it leaves out: midway between two
+    // of its own vertices, along a row, a column or the diagonal its cells split along.
+    double strays = 0.0;
+    for (int j = 0; j < patch_side; ++j) {
+        for (int i = 0; i < patch_side; ++i) {
+            const int across = i % 2;
+            const int up = j % 2;
+            if (across == 0 && up == 0) {
+                continue;
+            }
+            double between = 0.0;
+            for (const int side : {-1, 1}) {
+                const auto kept = vertex_near(
+                    coarse, world_at(fine, vertex_index(i + (side * across), j + (side * up))),
+                    near_enough);
+                REQUIRE(kept);
+                between += height(coarse, kept.value_or(0)) / 2.0;
+            }
+            strays = std::max(strays, std::abs(height(fine, vertex_index(i, j)) - between));
+        }
+    }
+    CHECK(strays > 0.1);
+    CHECK(std::abs(fine.coarser_error - strays) < 2.0 * near_enough);
+    // The ground's roughness shrinks finer down.
+    const Patch finest = bake_patch(world, parent.child(1).child(2).child(0).child(3));
+    CHECK(finest.coarser_error < fine.coarser_error);
+}
+
 TEST_CASE("a patch faces outwards and tilts with its slopes", "[terrain][patch]") {
     const Patch patch = bake_patch(shared_world(), land_patch());
     float least = 1.0F;
