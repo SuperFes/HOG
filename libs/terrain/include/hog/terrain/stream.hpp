@@ -1,5 +1,6 @@
 #pragma once
 
+#include <hog/core/flat_map.hpp>
 #include <hog/core/math.hpp>
 #include <hog/planet/cell_id.hpp>
 #include <hog/terrain/patch.hpp>
@@ -111,7 +112,8 @@ private:
     void spread_heights(planet::CellId cell);
 
     StreamSettings settings_;
-    std::map<planet::CellId, Held> held_;
+    // Looked up for every patch selected, every frame, but changed by a few at most.
+    FlatMap<planet::CellId, Held> held_;
     std::set<planet::CellId> baking_;
     std::set<planet::CellId> outdated_; // baking from ground since changed
     std::vector<Patch> waiting_;        // baked, not yet arrived

@@ -30,6 +30,7 @@ endif()
 hog_add_tests(hog_core
     tests/assert_tests.cpp
     tests/build_info_tests.cpp
+    tests/flat_map_tests.cpp
     tests/bytes_tests.cpp
     tests/hash_tests.cpp
     tests/line_sink_tests.cpp
