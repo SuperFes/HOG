@@ -485,12 +485,17 @@ TEST_CASE("two players see each other through a bad network", "[client][session]
     const WorldPosition anna_at = standing(server->planet(), 0.0);
     WorldPosition matt_at = standing(server->planet(), 100.0);
     int stage = 0;
+    // Both are told the weather as they join; large, it may take a while to get through.
+    bool anna_told = false;
+    bool matt_told = false;
     std::atomic<bool> stop = false;
     const auto give_up = MonotonicClock::now() + 30s;
     Visited timer{[&] {
         const MonotonicClock::time_point now = MonotonicClock::now();
         anna->look(anna_at, now);
         matt->look(matt_at, now);
+        anna_told = anna->take_weather().has_value() || anna_told;
+        matt_told = matt->take_weather().has_value() || matt_told;
         if (stage == 0 && sees(*anna, matt_at) && sees(*matt, anna_at)) {
             stage = 1;
             matt_at = standing(server->planet(), 103.0);
@@ -503,10 +508,9 @@ TEST_CASE("two players see each other through a bad network", "[client][session]
                 CHECK(protocol::to_millimetres(*back) ==
                       protocol::to_millimetres(standing(server->planet(), 103.0)));
                 stage = 3;
-                stop = true;
             }
         }
-        if (now >= give_up) {
+        if ((stage == 3 && anna_told && matt_told) || now >= give_up) {
             stop = true;
         }
     }};
@@ -516,7 +520,6 @@ TEST_CASE("two players see each other through a bad network", "[client][session]
     CHECK(sees(*anna, standing(server->planet(), 103.0)));
     CHECK(anna->last_snapshot());
     CHECK(matt->stats());
-    // Both were told the weather as they joined.
-    CHECK(anna->take_weather());
-    CHECK(matt->take_weather());
+    CHECK(anna_told);
+    CHECK(matt_told);
 }
