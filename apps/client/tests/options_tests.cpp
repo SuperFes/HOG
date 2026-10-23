@@ -18,6 +18,7 @@ TEST_CASE("client options default to the development planet", "[client][options]
     const auto options = parse_options({});
     REQUIRE(options);
     CHECK(options->planet == "config/planet.toml");
+    CHECK_FALSE(options->graphics);
     CHECK_FALSE(options->start);
     CHECK_FALSE(options->time_of_day);
     CHECK(options->threads == 0);
@@ -112,6 +113,12 @@ TEST_CASE("a client can be told to show chat as it was said", "[client][options]
     const auto options = parse_options(Arguments{"--chat-filter", "--no-chat-filter"});
     REQUIRE(options);
     CHECK_FALSE(options->chat_filter);
+}
+
+TEST_CASE("a client can be given what to draw", "[client][options]") {
+    const auto options = parse_options(Arguments{"--graphics", "fast.toml"});
+    REQUIRE(options);
+    CHECK(options->graphics == "fast.toml");
 }
 
 TEST_CASE("a client can be told not to grow grass", "[client][options]") {

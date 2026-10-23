@@ -223,6 +223,13 @@ TEST_CASE("the grown forest draws only the blocks near the eye, through the air"
         finest = finest || draw.detail == 0;
     }
     CHECK(finest);
+    // A shorter reach, as the graphics config may ask, draws fewer.
+    const std::vector<hog::render::StandDraw> nearer =
+        anchors.forest_draws({.eye = standing}, {.forest_far = 60.0});
+    CHECK(nearer.size() < near.size());
+    for (const hog::render::StandDraw& draw : nearer) {
+        CHECK(draw.distance < 60.0);
+    }
     // Fewer than all the held blocks: the forest's reach is shorter than the stamps'.
     std::size_t held = 0;
     for (const hog::render::StandDraw& draw : anchors.draws({.eye = standing})) {

@@ -164,6 +164,35 @@ TEST_CASE("grass grows on fine ground near the eye, thinning with distance", "[c
     CHECK(hog::client::grass_draws(slots, far_off, eye, radius).empty());
 }
 
+TEST_CASE("the lawn reaches as far as the budget has it", "[client][ground]") {
+    constexpr double radius = 115'000.0;
+    const CellId fine = CellId::from_face_ij(0, 1, 0, 13);
+    FakePool pool;
+    GroundSlots slots;
+    REQUIRE(slots.take(pool, 1, arriving({fine})));
+    const hog::WorldPosition eye{radius, 0.0, 0.0};
+    const std::vector<hog::terrain::StreamedPatch> drawn{
+        {.cell = fine, .origin = hog::WorldPosition{radius, 90.0, 0.0}, .coarser_edges = 0}};
+    const auto lawn = [&](const hog::client::GrassBudget& budget) {
+        std::vector<hog::render::GrassDraw> found;
+        for (const hog::render::GrassDraw& draw :
+             hog::client::grass_draws(slots, drawn, eye, radius, budget)) {
+            if (!draw.tall_only) {
+                found.push_back(draw);
+            }
+        }
+        return found;
+    };
+    // Out of the default lawn's reach, but in a longer one's, thinning towards its end.
+    CHECK(lawn({}).empty());
+    const std::vector<hog::render::GrassDraw> longer = lawn({.lawn_near = 40.0, .lawn_far = 120.0});
+    REQUIRE(longer.size() == 1);
+    CHECK(longer[0].fade_far == 120.0);
+    const std::vector<hog::render::GrassDraw> held = lawn({.lawn_near = 110.0, .lawn_far = 120.0});
+    REQUIRE(held.size() == 1);
+    CHECK(longer[0].blades_per_cell < held[0].blades_per_cell);
+}
+
 TEST_CASE("tall swaths reach far over coarser ground, thinning as they go", "[client][ground]") {
     constexpr double radius = 115'000.0;
     // Vertex spacing ~5.5 m at level 10 on this planet; a level up is too coarse even for swaths.

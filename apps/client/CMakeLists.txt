@@ -13,6 +13,7 @@ add_library(hog_client
     src/flight.cpp
     src/forecast.cpp
     src/frame_times.cpp
+    src/graphics_config.cpp
     src/ground.cpp
     src/likeness.cpp
     src/options.cpp
@@ -30,7 +31,7 @@ target_include_directories(hog_client PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/includ
 target_link_libraries(hog_client
     PUBLIC hog::atmosphere hog::core hog::flora hog::jobs hog::net hog::physics hog::planet
         hog::protocol hog::render hog::replication hog::sim hog::terrain
-    PRIVATE hog::mapgen stb_image)
+    PRIVATE hog::mapgen stb_image tomlplusplus)
 hog_target_defaults(hog_client)
 
 hog_add_tests(hog_client
@@ -41,6 +42,7 @@ hog_add_tests(hog_client
     tests/anchors_tests.cpp
     tests/bushes_tests.cpp
     tests/frame_times_tests.cpp
+    tests/graphics_config_tests.cpp
     tests/ground_tests.cpp
     tests/likeness_tests.cpp
     tests/options_tests.cpp

@@ -230,7 +230,7 @@ std::vector<render::StandDraw> TreeAnchors::forest_draws(const Sight& sight,
             const double distance =
                 std::max(0.0, glm::length(from_eye + DVec3{block.centre}) -
                                   static_cast<double>(block.reach) - crown_spread);
-            if (distance >= render::forest_far ||
+            if (distance >= budget.forest_far ||
                 !within_sight(sight, from_eye + DVec3{block.centre},
                               static_cast<double>(block.reach) + crown_spread)) {
                 continue;

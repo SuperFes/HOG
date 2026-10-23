@@ -27,9 +27,10 @@ inline constexpr int forest_details = 3;
 class Forest {
 public:
     // The fullest detail reaches `full` metres and the middle one `mid`; the forest itself ends
-    // at forest_far, where the stamps take over.
+    // at `edge`, where the stamps take over.
     [[nodiscard]] static Result<Forest> create(Device& device, VkFormat colour_format,
-                                               VkFormat depth_format, double full, double mid);
+                                               VkFormat depth_format, double full, double mid,
+                                               double edge = forest_far);
 
     // Records drawing into the colour and depth images being rendered to, of `extent`. The draws'
     // slots must hold anchors already uploaded.

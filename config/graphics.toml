@@ -1,0 +1,29 @@
+# What this machine draws, for what its GPU can afford. Every key may be left out, keeping the
+# default shown. Distances are metres from the eye.
+
+[grass]
+# The lawn: every biome's blades, at full density out to lawn_near, thinning away by lawn_far.
+# lawn_near = 25.0
+# lawn_far = 55.0
+# density = 40.0         # blades a square metre up close
+# finest = 0.75          # metres between the ground's vertices at most for the lawn
+
+# The far swaths: the tall biomes' blades only, out to tall_far.
+# tall_density = 4.0     # blades a square metre, held out to tall_hold
+# tall_hold = 60.0       # past which they thin with distance squared
+# tall_far = 260.0
+# tall_coarsest = 6.0    # metres between the ground's vertices at most for the swaths
+
+[bushes]
+# far = 260.0
+
+# The grown trees near the eye, shedding detail with distance: the fullest out to full, the
+# middle to mid, the coarsest to far, where the stamps take over.
+[forest]
+# full = 80.0
+# mid = 150.0
+# far = 240.0
+
+# The stamps, out to far; the ground wears the canopy's colour beyond.
+[trees]
+# far = 900.0

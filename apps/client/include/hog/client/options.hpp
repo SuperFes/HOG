@@ -26,6 +26,8 @@ struct Place {
 
 struct Options {
     std::filesystem::path planet = "config/planet.toml";
+    // What this machine draws; config/graphics.toml without one, or the defaults if there's none.
+    std::optional<std::filesystem::path> graphics;
     // Over the starting islands without one.
     std::optional<Place> start;
     // The local time of day to start at, from 0 at midnight to 1; the planet's own without one.

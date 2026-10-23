@@ -4,6 +4,7 @@
 #include <hog/client/flight.hpp>
 #include <hog/client/forecast.hpp>
 #include <hog/client/frame_times.hpp>
+#include <hog/client/graphics_config.hpp>
 #include <hog/client/options.hpp>
 #include <hog/client/others.hpp>
 #include <hog/client/picture.hpp>
@@ -904,9 +905,9 @@ std::optional<render::Billboard> companion(const client::Options& options, rende
     return std::move(billboard).value();
 }
 
-int show(const client::Options& options, const planet::PlanetConfig& planet,
-         const planet::World& world, render::Device& device, render::Presenter& presenter,
-         SDL_Window* window) {
+int show(const client::Options& options, const client::GraphicsConfig& graphics,
+         const planet::PlanetConfig& planet, const planet::World& world, render::Device& device,
+         render::Presenter& presenter, SDL_Window* window) {
     auto connection = Connection::open(options);
     if (!connection) {
         std::cerr << std::format("hog-client: {}\n", connection.error());
@@ -928,9 +929,9 @@ int show(const client::Options& options, const planet::PlanetConfig& planet,
                                   ImGuiConfigFlags_NoKeyboard;
     // Before the scene, whose bakes run on it.
     jobs::JobSystem jobs{options.threads};
-    auto scene = client::Scene::create(device, world, jobs, calendar,
-                                       presenter.swapchain().format(), render::frames_in_flight,
-                                       companion(options, device, presenter.swapchain().format()));
+    auto scene = client::Scene::create(
+        device, world, jobs, calendar, presenter.swapchain().format(), render::frames_in_flight,
+        companion(options, device, presenter.swapchain().format()), graphics.plants);
     if (!scene) {
         std::cerr << std::format("hog-client: {}\n", scene.error());
         return EXIT_FAILURE;
@@ -979,6 +980,13 @@ int run(std::span<const std::string_view> arguments) {
         return EXIT_FAILURE;
     }
     const planet::World world{*planet};
+    const char* const base = SDL_GetBasePath();
+    const auto graphics =
+        client::find_graphics_config(options->graphics, base != nullptr ? base : "");
+    if (!graphics) {
+        std::cerr << std::format("hog-client: {}\n", graphics.error());
+        return EXIT_FAILURE;
+    }
 
     // Declared in the order they're made, so each goes before what it was made with.
     const window::Sdl sdl;
@@ -1014,7 +1022,7 @@ int run(std::span<const std::string_view> arguments) {
         std::cerr << std::format("hog-client: can't show frames: {}\n", presenter.error());
         return EXIT_FAILURE;
     }
-    return show(*options, *planet, world, **device, **presenter, window.get());
+    return show(*options, *graphics, *planet, world, **device, **presenter, window.get());
 }
 
 } // namespace

@@ -168,10 +168,10 @@ std::vector<render::GrassDraw> grass_draws(const GroundSlots& slots,
                              .tall_only = tall_only});
         };
         // The lawn: every biome's blades, on fine ground near the eye.
-        if (spacing <= budget.finest && distance < render::grass_far) {
-            const double fade = std::min(
-                (render::grass_far - distance) / (render::grass_far - render::grass_near), 1.0);
-            grow(budget.density * fade, render::grass_far, false, grass_seed(patch.cell));
+        if (spacing <= budget.finest && distance < budget.lawn_far) {
+            const double fade =
+                std::min((budget.lawn_far - distance) / (budget.lawn_far - budget.lawn_near), 1.0);
+            grow(budget.density * fade, budget.lawn_far, false, grass_seed(patch.cell));
         }
         // The far swaths: tall biomes only, their stand thinning with the square of distance,
         // seeded apart from the lawn so the two don't grow twin blades where they overlap.

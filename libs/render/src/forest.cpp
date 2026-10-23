@@ -161,14 +161,14 @@ Carpentry bake() {
 } // namespace
 
 Result<Forest> Forest::create(Device& device, VkFormat colour_format, VkFormat depth_format,
-                              double full, double mid) {
+                              double full, double mid, double edge) {
     Forest forest;
     const Carpentry carpentry = bake();
     forest.most_wood_ = carpentry.most_wood;
     forest.most_leaves_ = carpentry.most_leaves;
     Settings settings{};
-    settings.bands = {static_cast<float>(full), static_cast<float>(mid),
-                      static_cast<float>(forest_far), 0.0F};
+    settings.bands = {static_cast<float>(full), static_cast<float>(mid), static_cast<float>(edge),
+                      0.0F};
     for (std::size_t stage = 0; stage + 1 < stage_count; ++stage) {
         settings.stages[static_cast<glm::length_t>(stage)] =
             0.5F * (stage_ages.at(stage) + stage_ages.at(stage + 1));

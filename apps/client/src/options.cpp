@@ -1,5 +1,6 @@
 #include <hog/client/options.hpp>
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cmath>
@@ -80,10 +81,35 @@ Result<void> read_clouds(Options& options, std::string_view value) {
     return {};
 }
 
+// Options that keep their value as given, and where.
+struct Kept {
+    std::string_view name;
+    void (*keep)(Options&, std::string_view);
+};
+
+constexpr std::array kept{
+    Kept{.name = "--planet",
+         .keep = [](Options& options, std::string_view value) { options.planet = value; }},
+    Kept{.name = "--graphics",
+         .keep = [](Options& options, std::string_view value) { options.graphics = value; }},
+    Kept{.name = "--connect",
+         .keep = [](Options& options, std::string_view value) { options.connect = value; }},
+    Kept{.name = "--login",
+         .keep = [](Options& options, std::string_view value) { options.login = value; }},
+    Kept{.name = "--name",
+         .keep = [](Options& options, std::string_view value) { options.name = value; }},
+    Kept{.name = "--companion",
+         .keep = [](Options& options, std::string_view value) { options.companion = value; }},
+    Kept{.name = "--capture",
+         .keep = [](Options& options, std::string_view value) { options.capture = value; }},
+};
+
 // Reads an option that takes a value.
 Result<void> read_option(Options& options, std::string_view option, std::string_view value) {
-    if (option == "--planet") {
-        options.planet = std::filesystem::path{value};
+    if (const auto* const found =
+            std::ranges::find_if(kept, [&](const Kept& each) { return each.name == option; });
+        found != kept.end()) {
+        found->keep(options, value);
     } else if (option == "--at") {
         options.start = place(value);
         if (!options.start) {
@@ -98,12 +124,6 @@ Result<void> read_option(Options& options, std::string_view option, std::string_
             return make_error(ErrorCode::InvalidArgument,
                               std::format("--time takes a time of day as HH:MM, not {}", value));
         }
-    } else if (option == "--connect") {
-        options.connect = std::string{value};
-    } else if (option == "--login") {
-        options.login = std::string{value};
-    } else if (option == "--name") {
-        options.name = std::string{value};
     } else if (option == "--simulate") {
         auto simulation = net::parse_simulation(value);
         if (!simulation) {
@@ -111,10 +131,6 @@ Result<void> read_option(Options& options, std::string_view option, std::string_
                               std::format("--simulate: {}", simulation.error().message));
         }
         options.simulate = *simulation;
-    } else if (option == "--companion") {
-        options.companion = std::filesystem::path{value};
-    } else if (option == "--capture") {
-        options.capture = std::filesystem::path{value};
     } else if (option == "--threads") {
         const std::optional<int> threads = integer(value);
         if (!threads || *threads < 0 || *threads > most_threads) {
@@ -196,6 +212,8 @@ Flies or walks over the planet.
 
 options:
   --planet PATH          the planet's config (default config/planet.toml)
+  --graphics PATH        what to draw, for what the GPU can afford (default
+                         config/graphics.toml, if there is one)
   --at LAT,LON,ALT       start at degrees of latitude and longitude, metres above
                          sea level (default over the starting islands)
   --time HH:MM           start at this local time of day (default the planet's own)

@@ -96,11 +96,12 @@ struct Shot {
 class Scene {
 public:
     // Drawn into colour images of `colour_format`, `frames` in flight, with the sun and seasons
-    // from `calendar`.
+    // from `calendar`, and the plants as far and thick as `budget` has them.
     [[nodiscard]] static Result<Scene>
     create(render::Device& device, const planet::World& world, jobs::JobSystem& jobs,
            const sim::Calendar& calendar, VkFormat colour_format, std::uint32_t frames,
-           std::optional<render::Billboard> companion = std::nullopt);
+           std::optional<render::Billboard> companion = std::nullopt,
+           const GrassBudget& budget = {});
 
     Scene(const Scene&) = delete;
     Scene(Scene&&) noexcept = default;
@@ -149,7 +150,7 @@ private:
           render::Atmosphere atmosphere, render::Sky sky, render::Capsules others,
           render::WeatherMaps weather, render::Clouds clouds, render::Precipitation precipitation,
           render::Glare glare, render::GpuTimer timer, std::optional<render::Billboard> companion,
-          std::uint32_t frames);
+          std::uint32_t frames, const GrassBudget& budget);
 
     render::SkyView sky_view(const Shot& shot, render::CloudShade shade);
     // Takes in the bakes done, and streams the ground selected from `seen`.
@@ -201,6 +202,7 @@ private:
     render::GpuTimer timer_;
     std::vector<render::GpuSpan> timings_;
     sim::Calendar calendar_;
+    GrassBudget budget_;
     terrain::SelectionSettings selection_;
     std::optional<double> exposure_;
     // How many times weather had come when its maps were last taken.

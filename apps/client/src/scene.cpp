@@ -43,11 +43,10 @@ constexpr double seabed_unseen = 0.002;
 // How the ground is selected all round the eye, so it's baked before it's turned to: as finely as
 // its own roughness shows, as the grass needs near the eye, and coarse enough elsewhere to keep
 // the triangles a few pixels across.
-terrain::SelectionSettings ground_selection() {
-    const GrassBudget budget;
+terrain::SelectionSettings ground_selection(const GrassBudget& budget) {
     return {.max_spacing = 32.0,
             .max_error = 1.0,
-            .fine_within = {{.within = render::grass_far, .spacing = budget.finest},
+            .fine_within = {{.within = budget.lawn_far, .spacing = budget.finest},
                             {.within = budget.tall_far, .spacing = budget.tall_coarsest}},
             .only_in_view = false,
             .seabed_unseen = seabed_unseen};
@@ -106,13 +105,13 @@ render::CloudShade shade_at_eye(const terrain::Bend& bend, const protocol::CellW
 Result<Scene> Scene::create(render::Device& device, const planet::World& world,
                             jobs::JobSystem& jobs, const sim::Calendar& calendar,
                             VkFormat colour_format, std::uint32_t frames,
-                            std::optional<render::Billboard> companion) {
+                            std::optional<render::Billboard> companion, const GrassBudget& budget) {
     const terrain::StreamSettings settings;
     const std::vector<terrain::MaterialImage> materials = biome_materials();
     const BiomePalette palette = biome_palette();
     auto terrain = render::Terrain::create(
         device, colour_format, depth_format,
-        {.materials = materials, .sea = true, .air = true, .canopy = render::trees_far});
+        {.materials = materials, .sea = true, .air = true, .canopy = budget.tree_far});
     if (!terrain) {
         return failed("draw the ground", terrain.error());
     }
@@ -124,17 +123,17 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
     if (!grass) {
         return failed("grow the grass", grass.error());
     }
-    const GrassBudget budget;
-    auto bushes = render::Bushes::create(device, colour_format, depth_format, budget.tall_far);
+    auto bushes = render::Bushes::create(device, colour_format, depth_format, budget.bush_far);
     if (!bushes) {
         return failed("grow the bushes", bushes.error());
     }
-    auto trees = render::Trees::create(device, colour_format, depth_format, render::forest_far);
+    auto trees = render::Trees::create(device, colour_format, depth_format, budget.forest_far,
+                                       budget.tree_far);
     if (!trees) {
         return failed("grow the trees", trees.error());
     }
     auto forest = render::Forest::create(device, colour_format, depth_format, budget.forest_full,
-                                         budget.forest_mid);
+                                         budget.forest_mid, budget.forest_far);
     if (!forest) {
         return failed("grow the forest", forest.error());
     }
@@ -159,7 +158,7 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
     }
     auto bush_pool = render::AnchorPool::create(
         device,
-        {.tiles = tiles_for(bush_tile_level, budget.tall_far), .frames = frames, .uploads = 4});
+        {.tiles = tiles_for(bush_tile_level, budget.bush_far), .frames = frames, .uploads = 4});
     if (!bush_pool) {
         return failed("hold the bushes", bush_pool.error());
     }
@@ -217,7 +216,8 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
                  std::move(glare).value(),
                  std::move(timer).value(),
                  std::move(companion),
-                 frames};
+                 frames,
+                 budget};
 }
 
 Scene::Scene(const render::Device& device, const planet::World& world, jobs::JobSystem& jobs,
@@ -227,7 +227,8 @@ Scene::Scene(const render::Device& device, const planet::World& world, jobs::Job
              render::Atmosphere atmosphere, render::Sky sky, render::Capsules others,
              render::WeatherMaps weather, render::Clouds clouds,
              render::Precipitation precipitation, render::Glare glare, render::GpuTimer timer,
-             std::optional<render::Billboard> companion, std::uint32_t frames)
+             std::optional<render::Billboard> companion, std::uint32_t frames,
+             const GrassBudget& budget)
     : world_{&world}, jobs_{&jobs}, baker_{world, jobs}, terrain_{std::move(terrain)},
       ocean_{std::move(ocean)},
       shore_{world.geology().terrain(), world.geology().planet_radius(), jobs},
@@ -239,8 +240,8 @@ Scene::Scene(const render::Device& device, const planet::World& world, jobs::Job
       others_{std::move(others)}, companion_{std::move(companion)},
       atmosphere_{std::move(atmosphere)}, sky_{std::move(sky)}, weather_{std::move(weather)},
       clouds_{std::move(clouds)}, precipitation_{std::move(precipitation)},
-      glare_{std::move(glare)}, timer_{std::move(timer)}, calendar_{calendar},
-      selection_{ground_selection()} {}
+      glare_{std::move(glare)}, timer_{std::move(timer)}, calendar_{calendar}, budget_{budget},
+      selection_{ground_selection(budget)} {}
 
 Scene::~Scene() {
     (void)baker_.finish();
@@ -295,7 +296,7 @@ void Scene::grow_vegetation(render::RenderGraph& graph, const render::Frame& fra
                             DVec3 wind) {
     HOG_ZONE("vegetation");
     const std::vector<render::GrassDraw> lawn =
-        grass_draws(slots_, patches, shot.camera.eye, shot.bend.radius);
+        grass_draws(slots_, patches, shot.camera.eye, shot.bend.radius, budget_);
     if (!lawn.empty()) {
         graph.add(
             {.name = "grass", .uses = {through_air.begin(), through_air.end()}, .targets = drawn},
@@ -311,8 +312,7 @@ void Scene::grow_vegetation(render::RenderGraph& graph, const render::Frame& fra
     const Sight sight =
         sight_of(shot.camera, static_cast<double>(frame.extent.width) /
                                   static_cast<double>(std::max(frame.extent.height, 1U)));
-    const std::vector<render::StandDraw> shrubs =
-        bush_anchors_.draws(sight, GrassBudget{}.tall_far);
+    const std::vector<render::StandDraw> shrubs = bush_anchors_.draws(sight, budget_.bush_far);
     if (!shrubs.empty()) {
         graph.add(
             {.name = "bushes", .uses = {through_air.begin(), through_air.end()}, .targets = drawn},
@@ -340,7 +340,7 @@ void Scene::grow_vegetation(render::RenderGraph& graph, const render::Frame& fra
                              .seconds = swaying_for_});
             });
     }
-    const std::vector<render::StandDraw> woods = anchors_.forest_draws(sight);
+    const std::vector<render::StandDraw> woods = anchors_.forest_draws(sight, budget_);
     tree_counts_ = {
         .tiles = anchors_.size(), .stamped = anchors_in(stands), .grown = anchors_in(woods)};
     if (!woods.empty()) {
@@ -457,15 +457,14 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     const terrain::StreamFrame streamed = stream_ground(seen);
     // The ground into its slots, and the anchored trees and bushes round the eye, a few tiles a
     // frame.
-    const GrassBudget budget;
     if (auto taken = slots_.take(pool_, frame.slot, streamed)
                          .and_then([&] {
                              return anchors_.update(anchor_pool_, frame.slot, *world_,
-                                                    shot.camera.eye, budget.tree_far);
+                                                    shot.camera.eye, budget_.tree_far);
                          })
                          .and_then([&] {
                              return bush_anchors_.update(bush_pool_, frame.slot, *world_,
-                                                         shot.camera.eye, budget.tall_far);
+                                                         shot.camera.eye, budget_.bush_far);
                          });
         !taken) {
         return taken;
