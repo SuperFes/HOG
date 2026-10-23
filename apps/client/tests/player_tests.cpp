@@ -146,8 +146,10 @@ TEST_CASE("a player placed by the server flies there, or stands on the ground un
     // Where the ground has sunk or risen since.
     for (const double height : {ground + 40.0, ground - 10.0}) {
         const Placing walking = placed_at(height, protocol::Stance::Walking);
-        REQUIRE(walking.player);
-        CHECK(height_of(walking.player->feet()) == Approx(ground).margin(2.0));
-        CHECK(apart(walking.player->feet(), WorldPosition{on_land() * radius()}) < 0.01);
+        const Player* const player = walking.player ? &*walking.player : nullptr;
+        REQUIRE(player != nullptr);
+        const WorldPosition feet = player->feet();
+        CHECK(height_of(feet) == Approx(ground).margin(2.0));
+        CHECK(apart(feet, WorldPosition{on_land() * radius()}) < 0.01);
     }
 }

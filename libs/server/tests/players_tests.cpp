@@ -242,10 +242,11 @@ TEST_CASE("a player with an account is remembered where they were, and how", "[s
     CHECK_FALSE(taken(mover.move(ConnectionId{7}, along(500.0))));
     const auto left = players.leave(ConnectionId{7});
     REQUIRE(left);
-    CHECK(left->account == 42);
-    CHECK(left->place == hog::protocol::Placed{.at = hog::protocol::to_millimetres(along(1.0)),
-                                               .stance = Stance::Walking,
-                                               .facing = {}});
+    const hog::server::Remembered kept = left.value_or(hog::server::Remembered{});
+    CHECK(kept.account == 42);
+    CHECK(kept.place == hog::protocol::Placed{.at = hog::protocol::to_millimetres(along(1.0)),
+                                              .stance = Stance::Walking,
+                                              .facing = {}});
     CHECK_FALSE(players.leave(ConnectionId{8}));
     CHECK_FALSE(players.leave(ConnectionId{9}));
     CHECK_FALSE(players.leave(ConnectionId{7}));

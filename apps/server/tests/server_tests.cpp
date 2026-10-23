@@ -986,7 +986,7 @@ class Returning {
 public:
     Returning(const Server& server, const hog::login::KeyPair& keys, std::uint64_t account,
               hog::protocol::Placed place)
-        : place_(place) {
+        : place_(place), client_(connected(server)) {
         const auto issued = std::chrono::floor<std::chrono::seconds>(hog::WallClock::now());
         token_ = hog::login::sign({.account = account,
                                    .name = "Matt",
@@ -994,19 +994,15 @@ public:
                                    .expires = issued + hog::login::token_life,
                                    .nonce = {}},
                                   keys);
-        auto client =
-            hog::net::Client::connect(std::format("127.0.0.1:{}", server.players()->port()));
-        REQUIRE(client);
-        client_.emplace(std::move(*client));
     }
 
     void visit() {
-        client_->poll(events_);
+        client_.poll(events_);
         for (const hog::net::Event& event : events_) {
             if (std::holds_alternative<hog::net::Connected>(event)) {
-                REQUIRE(client_->send(hog::net::Delivery::Reliable,
-                                      hog::protocol::encode(hog::protocol::Hello{
-                                          .version = hog::protocol::version, .token = token_})));
+                REQUIRE(client_.send(hog::net::Delivery::Reliable,
+                                     hog::protocol::encode(hog::protocol::Hello{
+                                         .version = hog::protocol::version, .token = token_})));
             } else if (const auto* message = std::get_if<hog::net::Message>(&event)) {
                 auto decoded = hog::protocol::decode(message->bytes());
                 REQUIRE(decoded);
@@ -1018,26 +1014,33 @@ public:
             }
         }
         if (welcomed_) {
-            REQUIRE(client_->send(
-                hog::net::Delivery::Unreliable,
-                hog::protocol::encode(hog::protocol::Moved{.sequence = ++moves_,
-                                                           .corrections = 0,
-                                                           .at = place_.at,
-                                                           .stance = place_.stance,
-                                                           .facing = place_.facing})));
+            REQUIRE(
+                client_.send(hog::net::Delivery::Unreliable,
+                             hog::protocol::encode(hog::protocol::Moved{.sequence = ++moves_,
+                                                                        .corrections = 0,
+                                                                        .at = place_.at,
+                                                                        .stance = place_.stance,
+                                                                        .facing = place_.facing})));
         }
     }
 
     // Long enough after the welcome for the moves sent to have been taken.
     [[nodiscard]] bool settled() const {
-        return welcomed_ && MonotonicClock::now() - *welcomed_ >= 200ms;
+        return welcomed_.has_value() && MonotonicClock::now() - welcomed_.value() >= 200ms;
     }
     [[nodiscard]] const std::optional<hog::protocol::Placed>& placed() const { return placed_; }
 
 private:
+    static hog::net::Client connected(const Server& server) {
+        auto client =
+            hog::net::Client::connect(std::format("127.0.0.1:{}", server.players()->port()));
+        REQUIRE(client);
+        return std::move(*client);
+    }
+
     hog::protocol::Placed place_;
+    hog::net::Client client_;
     std::vector<std::byte> token_;
-    std::optional<hog::net::Client> client_;
     std::vector<hog::net::Event> events_;
     std::optional<MonotonicClock::time_point> welcomed_;
     std::optional<hog::protocol::Placed> placed_;
