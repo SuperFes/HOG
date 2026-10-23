@@ -32,9 +32,26 @@ struct Viewpoint {
     friend bool operator==(const Viewpoint&, const Viewpoint&) = default;
 };
 
+// Metres between vertices at most, within so many metres of the eye: for what grows only on fine
+// enough ground.
+struct Fineness {
+    double within = 0.0;
+    double spacing = 0.0;
+};
+
 struct SelectionSettings {
-    // Pixels a patch's vertex spacing may span on screen before the patch splits.
-    double max_error = 8.0;
+    // Pixels a patch's vertex spacing may span on screen before the patch splits, however smooth
+    // its ground: what's drawn per vertex, its normals and biomes, needs some.
+    double max_spacing = 8.0;
+    // Pixels the ground may stray on screen from the patch drawn over it before the patch splits,
+    // where how far is known. Known shores split as though the ground strayed far.
+    double max_error = 1.0;
+    // Pixels a patch's vertex spacing spans on screen below which straying ground no longer
+    // splits it: on rough ground, how far it strays shrinks more slowly than the spacing.
+    double min_spacing = 8.0;
+    // Splits patches near the eye, however smooth their ground.
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    std::vector<Fineness> fine_within = {};
     // Metres between vertices below which patches stop splitting.
     double finest_spacing = 0.25;
     // Metres from sea level the ground is assumed to stay between, for the patches' bounds;

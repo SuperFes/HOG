@@ -422,3 +422,88 @@ TEST_CASE("selecting on a pool picks just what selecting alone does", "[terrain]
         }
     }
 }
+
+namespace {
+
+// Metres between a patch's vertices, at most, over ground at most two metres high.
+double spacing_of(CellId cell) {
+    const auto corners = hog::planet::cell_vertices(cell);
+    double edge = 0.0;
+    for (std::size_t corner = 0; corner < corners.size(); ++corner) {
+        edge = std::max(
+            edge, glm::distance(corners.at(corner), corners.at((corner + 1) % corners.size())));
+    }
+    return edge * (radius + 2.0) / hog::terrain::patch_cells;
+}
+
+// Low ground, off the shore, straying from each patch by `roughness` of its vertex spacing.
+hog::terrain::KnownGround straying(double roughness) {
+    return [roughness](CellId cell) {
+        return hog::terrain::GroundBounds{.heights = {.lowest = 1.0, .highest = 2.0},
+                                          .error = roughness * spacing_of(cell)};
+    };
+}
+
+} // namespace
+
+TEST_CASE("rough ground is drawn finer than smooth ground", "[terrain][selection]") {
+    const Viewpoint view = looking(somewhere * (radius + 2.0), level_with(somewhere));
+    const hog::terrain::SelectionSettings settings{
+        .max_spacing = 32.0, .max_error = 1.0, .min_spacing = 0.0};
+    const auto smooth = select_patches(view, radius, settings, straying(0.0));
+    const auto rough = select_patches(view, radius, settings, straying(0.25));
+    REQUIRE_FALSE(smooth.empty());
+    CHECK(smooth.size() < rough.size());
+    // As finely as its spacing alone would ask for.
+    const hog::terrain::SelectionSettings by_spacing{
+        .max_spacing = 4.0, .max_error = 1.0, .min_spacing = 0.0};
+    CHECK(rough == select_patches(view, radius, by_spacing, straying(0.0)));
+}
+
+TEST_CASE("rough ground is split no finer than the least spacing", "[terrain][selection]") {
+    const Viewpoint view = looking(somewhere * (radius + 2.0), level_with(somewhere));
+    const hog::terrain::SelectionSettings settings{
+        .max_spacing = 32.0, .max_error = 1.0, .min_spacing = 8.0};
+    const hog::terrain::SelectionSettings by_spacing{
+        .max_spacing = 8.0, .max_error = 1.0, .min_spacing = 8.0};
+    CHECK(select_patches(view, radius, settings, straying(0.25)) ==
+          select_patches(view, radius, by_spacing, straying(0.0)));
+}
+
+TEST_CASE("ground near the eye is drawn as finely as asked, however smooth",
+          "[terrain][selection]") {
+    const Viewpoint view = looking(somewhere * (radius + 2.0), level_with(somewhere));
+    const hog::terrain::SelectionSettings settings{
+        .max_spacing = 1e9,
+        .max_error = 1e9,
+        .fine_within = {{.within = 300.0, .spacing = 8.0}, {.within = 50.0, .spacing = 1.0}}};
+    const auto drawn = select_patches(view, radius, settings, straying(0.0));
+    REQUIRE_FALSE(drawn.empty());
+    for (const SelectedPatch& patch : drawn) {
+        if (patch.distance < 50.0) {
+            CHECK(spacing_of(patch.cell) <= 1.0);
+        } else if (patch.distance < 300.0) {
+            CHECK(spacing_of(patch.cell) <= 8.0);
+        }
+    }
+    // Coarse beyond, smooth as it is.
+    CHECK(std::ranges::any_of(drawn, [](const SelectedPatch& patch) {
+        return patch.distance > 300.0 && spacing_of(patch.cell) > 8.0;
+    }));
+}
+
+TEST_CASE("smooth shores are split as finely as rough ground", "[terrain][selection]") {
+    const Viewpoint view = looking(somewhere * (radius + 2.0), level_with(somewhere));
+    const hog::terrain::KnownGround shore = [](CellId) {
+        return hog::terrain::GroundBounds{.heights = {.lowest = -1.0, .highest = 1.0},
+                                          .error = 0.0};
+    };
+    const hog::terrain::SelectionSettings settings{
+        .max_spacing = 32.0, .max_error = 1.0, .min_spacing = 8.0};
+    const hog::terrain::SelectionSettings by_spacing{
+        .max_spacing = 8.0, .max_error = 1.0, .min_spacing = 8.0};
+    CHECK(select_patches(view, radius, settings, shore) ==
+          select_patches(view, radius, by_spacing, shore));
+    CHECK(select_patches(view, radius, settings, straying(0.0)).size() <
+          select_patches(view, radius, settings, shore).size());
+}

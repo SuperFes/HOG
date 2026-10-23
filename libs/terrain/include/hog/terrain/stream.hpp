@@ -78,7 +78,7 @@ public:
     // Of a patch baked so far, or bounding one whose children have all been.
     [[nodiscard]] std::optional<HeightRange> heights(planet::CellId cell) const;
     // heights(), or else its nearest ancestor's with the margin, as far as anything's known; with
-    // how far the ground strays from its patch, or from its ancestor's, which is rougher.
+    // how far the ground strays from its patch, or its ancestor's halved for each level below it.
     [[nodiscard]] std::optional<GroundBounds> bounds(planet::CellId cell) const;
     // bounds(), for selection, for as long as the stream lives.
     [[nodiscard]] KnownGround known_ground() const {

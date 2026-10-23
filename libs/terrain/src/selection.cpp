@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <limits>
 #include <numbers>
 #include <optional>
 #include <span>
@@ -70,6 +71,7 @@ struct Bounds {
     double spacing; // metres between the patch's vertices, at most
     double lowest;  // metres from the centre the patch keeps between
     double highest;
+    double error; // metres the ground strays from the patch, 0 if unknown
 };
 
 class Selector {
@@ -152,9 +154,14 @@ public:
         const double angle = std::acos(std::max(along_middle, -1.0));
         double highest = settings_.highest;
         double lowest = settings_.lowest;
+        double error = 0.0;
         if (const auto ground = *known_ ? (*known_)(cell) : std::nullopt) {
             highest = ground->heights.highest;
             lowest = ground->heights.lowest;
+            // A shore moves far over gentle ground for a little height, so it's split as
+            // though rough.
+            error = lowest <= 0.0 && highest >= 0.0 ? std::numeric_limits<double>::infinity()
+                                                    : ground->error;
         }
         const double spacing = edge * (planet_radius_ + highest) / patch_cells;
         // Triangles sag below their vertices towards the centre, most midway along a diagonal;
@@ -174,7 +181,8 @@ public:
                                   std::numbers::pi),
                 .spacing = spacing,
                 .lowest = low,
-                .highest = high};
+                .highest = high,
+                .error = error};
     }
 
     // Picked: above the horizon, and in view unless all round the eye is wanted.
@@ -220,7 +228,17 @@ public:
             return false;
         }
         const double away = distance(bounds);
-        return away <= 0.0 || bounds.spacing * pixels_per_radian_ / away > settings_.max_error;
+        if (away <= 0.0) {
+            return true;
+        }
+        const double pixels_per_metre = pixels_per_radian_ / away;
+        const double spacing = bounds.spacing * pixels_per_metre;
+        return spacing > settings_.max_spacing ||
+               (spacing > settings_.min_spacing &&
+                bounds.error * pixels_per_metre > settings_.max_error) ||
+               std::ranges::any_of(settings_.fine_within, [&](const Fineness& fine) {
+                   return away < fine.within && bounds.spacing > fine.spacing;
+               });
     }
 
     // Splits from the six faces down, a level at a time, keeping patches culled or fine enough

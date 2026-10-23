@@ -39,6 +39,19 @@ constexpr std::uint64_t waves_salt = 0x5741564553ULL;
 // colour.
 constexpr double seabed_unseen = 0.002;
 
+// How the ground is selected all round the eye, so it's baked before it's turned to: as finely as
+// its own roughness shows, as the grass needs near the eye, and coarse enough elsewhere to keep
+// the triangles a few pixels across.
+terrain::SelectionSettings ground_selection() {
+    const GrassBudget budget;
+    return {.max_spacing = 32.0,
+            .max_error = 1.0,
+            .fine_within = {{.within = render::grass_far, .spacing = budget.finest},
+                            {.within = budget.tall_far, .spacing = budget.tall_coarsest}},
+            .only_in_view = false,
+            .seabed_unseen = seabed_unseen};
+}
+
 std::unexpected<Error> failed(std::string_view doing, const Error& error) {
     return std::unexpected(
         Error{.code = error.code, .message = std::format("can't {}: {}", doing, error.message)});
@@ -225,7 +238,8 @@ Scene::Scene(const render::Device& device, const planet::World& world, jobs::Job
       others_{std::move(others)}, companion_{std::move(companion)},
       atmosphere_{std::move(atmosphere)}, sky_{std::move(sky)}, weather_{std::move(weather)},
       clouds_{std::move(clouds)}, precipitation_{std::move(precipitation)},
-      glare_{std::move(glare)}, timer_{std::move(timer)}, calendar_{calendar} {}
+      glare_{std::move(glare)}, timer_{std::move(timer)}, calendar_{calendar},
+      selection_{ground_selection()} {}
 
 Scene::~Scene() {
     (void)baker_.finish();
@@ -422,8 +436,7 @@ terrain::StreamFrame Scene::stream_ground(const terrain::Viewpoint& seen) {
     // All round the eye, so the ground is baked before it's turned to. Settled, the same view
     // selects the same again.
     if (!stream_.settled() || seen != selected_from_) {
-        selected_ = terrain::select_patches(seen, seen.bend.radius,
-                                            {.only_in_view = false, .seabed_unseen = seabed_unseen},
+        selected_ = terrain::select_patches(seen, seen.bend.radius, selection_,
                                             stream_.known_ground(), jobs_);
         selected_from_ = seen;
     }

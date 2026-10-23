@@ -5,6 +5,7 @@
 #include <hog/terrain/stream.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
@@ -149,11 +150,13 @@ std::optional<GroundBounds> PatchStream::bounds(planet::CellId cell) const {
         if (level == cell.level()) {
             return GroundBounds{.heights = known.heights, .error = known.error};
         }
-        // Finer ground can rise and fall between the ancestor's vertices.
+        // Finer ground can rise and fall between the ancestor's vertices. How far it strays is
+        // taken as halving with each level, as for ground alike at every scale; were it kept
+        // whole, all unknown ground near enough to show it would be refined as finely as can be.
         const double margin = settings_.margin * known.spacing;
         return GroundBounds{.heights = {.lowest = known.heights.lowest - margin,
                                         .highest = known.heights.highest + margin},
-                            .error = known.error};
+                            .error = std::ldexp(known.error, level - cell.level())};
     }
     return std::nullopt;
 }

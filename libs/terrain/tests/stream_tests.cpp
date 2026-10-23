@@ -560,8 +560,9 @@ TEST_CASE("how far the ground strays from a patch is known from its children onc
     // Its own bake overstates it, measuring a grid twice as coarse.
     stream.baked(fake_bake(parent, {}, 8.0));
     CHECK(error(parent) == 8.0);
-    // Ground not yet baked is taken to be as rough as its nearest known ancestor's.
-    CHECK(error(parent.child(2).child(1)) == 8.0);
+    // Ground not yet baked strays half as far as its nearest known ancestor's, a level down.
+    CHECK(error(parent.child(2)) == 4.0);
+    CHECK(error(parent.child(2).child(1)) == 2.0);
     for (int child = 0; child < 4; ++child) {
         stream.baked(fake_bake(parent.child(child), {}, 1.0 + child));
     }

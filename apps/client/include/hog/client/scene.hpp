@@ -201,6 +201,7 @@ private:
     render::GpuTimer timer_;
     std::vector<render::GpuSpan> timings_;
     sim::Calendar calendar_;
+    terrain::SelectionSettings selection_;
     std::optional<double> exposure_;
     // How many times weather had come when its maps were last taken.
     std::optional<std::uint64_t> weather_taken_;
