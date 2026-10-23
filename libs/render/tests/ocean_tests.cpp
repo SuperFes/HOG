@@ -383,13 +383,14 @@ void copy_whole(VkCommandBuffer commands, VkImage from, VkImage to, VkImageAspec
 }
 
 // From `height` metres up, looking east and steeply down through the air at the sea over ground
-// `deep` metres beneath its surface, the water over it drawn `laid`; and in `beneath`, if any,
-// what was drawn before the sea, as copied. Without the `ground`, the deep water drawn beneath
-// where it's drawn by the ground.
+// `deep` metres beneath its surface, or from under it steeply up, unless looking `forward`; the
+// water over it drawn `laid`; and in `beneath`, if any, what was drawn before the sea, as copied.
+// Without the `ground`, the deep water drawn beneath where it's drawn by the ground.
 std::vector<std::uint8_t> over_seabed(hog::render::Device& device, double deep, Laid laid,
                                       double height = 20.0,
                                       std::vector<std::uint8_t>* beneath = nullptr,
-                                      bool ground = true) {
+                                      bool ground = true,
+                                      std::optional<DVec3> forward = std::nullopt) {
     auto atmosphere = hog::render::Atmosphere::create(device);
     REQUIRE(atmosphere);
     auto sky = hog::render::Sky::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
@@ -415,9 +416,10 @@ std::vector<std::uint8_t> over_seabed(hog::render::Device& device, double deep, 
     const double steep = height > 0.0 ? 2.0 : -2.0;
     const DVec3 sun = glm::normalize(up + north);
     const hog::terrain::Bend bend = hog::terrain::bend_from(eye, radius, 0.0);
+    const DVec3 looking = forward.value_or(glm::normalize(east - (up * steep)));
     const hog::render::Camera camera{.eye = eye,
-                                     .forward = glm::normalize(east - (up * steep)),
-                                     .up = glm::normalize((east * steep) + up)};
+                                     .forward = looking,
+                                     .up = glm::normalize(up - (looking * glm::dot(up, looking)))};
     const hog::render::SkyView seen{.camera = camera, .sun = sun, .bend = bend, .exposure = 10.0};
     const hog::render::AirBindings air = sky->bindings(0, *atmosphere);
     OceanView view{.camera = camera, .sun = sun, .bend = bend, .air = air};
@@ -863,6 +865,54 @@ TEST_CASE("through the air, the sea lays the water over the ground beneath it as
     // From under the sea, the eye is in the water, so the ground's shading lays it.
     CHECK(furthest_apart(over_seabed(*device, 30.0, Laid::ByGround, -10.0),
                          over_seabed(*device, 30.0, Laid::BySea, -10.0)) <= 1);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("from under the sea, the water lies along the whole view, darker the deeper",
+          "[render][gpu]") {
+    const auto device = test_device();
+    const std::uint32_t middle = extent.width / 2;
+    // Looking level, over ground too far below to show.
+    const auto level = [&](double height) {
+        return pixel_at(over_seabed(*device, 200.0, Laid::BySea, height, nullptr, true, east),
+                        middle, middle);
+    };
+    const Pixel shallow = level(-3.0);
+    const Pixel deep = level(-40.0);
+    INFO("shallow " << int{shallow[0]} << ", " << int{shallow[1]} << ", " << int{shallow[2]}
+                    << "; deep " << int{deep[0]} << ", " << int{deep[1]} << ", " << int{deep[2]});
+    // The water's own colour, blue-green, not the sky's behind it.
+    CHECK(shallow[2] > shallow[0] + 20);
+    CHECK(shallow[1] > shallow[0] + 10);
+    CHECK(brightness(shallow) < brightness(level(20.0)));
+    CHECK(brightness(deep) + 20 < brightness(shallow));
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("from under the sea, the seabed shows near and is lost in the water far off",
+          "[render][gpu]") {
+    const auto device = test_device();
+    const std::uint32_t middle = extent.width / 2;
+    // Two metres up off a sandy seabed in shallows, looking down at it ahead, near and far.
+    const auto seen = [&](double off) {
+        const DVec3 forward = glm::normalize((east * off) - (up * 2.0));
+        return pixel_at(over_seabed(*device, 3.0, Laid::BySea, -1.0, nullptr, true, forward),
+                        middle, middle);
+    };
+    const Pixel near = seen(1.0);
+    const Pixel far = seen(60.0);
+    INFO("near " << int{near[0]} << ", " << int{near[1]} << ", " << int{near[2]} << "; far "
+                 << int{far[0]} << ", " << int{far[1]} << ", " << int{far[2]});
+    // The sand's red is what the water takes first.
+    // Drawn as in air beneath it, the water laid by the sea.
+    std::vector<std::uint8_t> in_air;
+    static_cast<void>(over_seabed(*device, 3.0, Laid::BySea, -1.0, &in_air, true,
+                                  glm::normalize(east - (up * 2.0))));
+    const Pixel drawn = pixel_at(in_air, middle, middle);
+    INFO("drawn " << int{drawn[0]} << ", " << int{drawn[1]} << ", " << int{drawn[2]});
+    CHECK(drawn[0] > near[0]);
+    CHECK(near[0] > far[0] + 10);
+    CHECK(far[2] > far[0] + 20);
     CHECK(device->validation_errors() == 0);
 }
 

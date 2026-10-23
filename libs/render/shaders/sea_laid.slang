@@ -20,8 +20,7 @@ struct Push {
 static const float footprint = 0.01;
 
 // The plane of the sea's surface at the eye, and whether the sea lays the water over what's drawn
-// beneath it: where it's seen through, as long as the eye stands over its surface. Otherwise the
-// eye is in the water, with no surface between it and what's drawn beneath.
+// beneath it: wherever it's seen through, from over its surface or in the water.
 [shader("compute")]
 [numthreads(1, 1, 1)]
 void laid_main() {
@@ -32,6 +31,6 @@ void laid_main() {
     const WaveSurface water = water_over(waves, under, footprint, floor, fetch);
     const float3 normal = normalize(water.normal);
     const float above = -dot(under + (up * (dot(water.moved, up) + floor.w)), normal);
-    lighting.Store(push.laying.x, asuint(push.laying.y != 0 && above > 0.0 ? 1.0 : 0.0));
+    lighting.Store(push.laying.x, asuint(push.laying.y != 0 ? 1.0 : 0.0));
     lighting.Store4(push.laying.z, asuint(float4(normal, above)));
 }

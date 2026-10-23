@@ -214,6 +214,10 @@ constexpr VkDescriptorSetLayoutBinding rain_descriptor =
 // What's drawn before the sea, colour and depth, as copied.
 constexpr std::uint32_t behind_binding = 12;
 
+// Metres no crest, tide or swash stands over the level of the water it's on: higher than that, the
+// eye can't be in the water.
+constexpr double highest_crest = 40.0;
+
 // As sea_laid.slang has them.
 struct LaidPush {
     glm::uvec4 laying{0U};
@@ -606,31 +610,33 @@ Result<Ocean> Ocean::create(Device& device, VkFormat colour_format, VkFormat dep
     }
     ocean.pipeline_ = std::move(pipeline).value();
     if (air) {
-        auto deep = make_pipeline(device, {.spirv = shaders::ocean,
-                                           .fragment_entry = "fragment_deep",
-                                           .bindings = vertex_bindings,
-                                           .attributes = vertex_attributes,
-                                           .colour_format = colour_format,
-                                           .depth_format = depth_format,
-                                           .depth_write = false,
-                                           .push_constant_bytes = sizeof(Push),
-                                           .descriptors = air_descriptors});
-        if (!deep) {
-            return std::unexpected(std::move(deep).error());
+        const PipelineDesc drawn{.spirv = shaders::ocean,
+                                 .bindings = vertex_bindings,
+                                 .attributes = vertex_attributes,
+                                 .colour_format = colour_format,
+                                 .depth_format = depth_format,
+                                 .push_constant_bytes = sizeof(Push),
+                                 .descriptors = air_descriptors};
+        PipelineDesc deep = drawn;
+        deep.fragment_entry = "fragment_deep";
+        deep.depth_write = false;
+        PipelineDesc through = drawn;
+        through.fragment_entry = "fragment_through";
+        PipelineDesc under = drawn;
+        under.vertex_entry = "vertex_screen";
+        under.fragment_entry = "fragment_under";
+        under.bindings = {};
+        under.attributes = {};
+        under.depth_write = false;
+        for (const auto& [made, desc] :
+             {std::pair{&ocean.deep_, &deep}, std::pair{&ocean.through_, &through},
+              std::pair{&ocean.under_, &under}}) {
+            auto drawing = make_pipeline(device, *desc);
+            if (!drawing) {
+                return std::unexpected(std::move(drawing).error());
+            }
+            *made = std::move(drawing).value();
         }
-        ocean.deep_ = std::move(deep).value();
-        auto through = make_pipeline(device, {.spirv = shaders::ocean,
-                                              .fragment_entry = "fragment_through",
-                                              .bindings = vertex_bindings,
-                                              .attributes = vertex_attributes,
-                                              .colour_format = colour_format,
-                                              .depth_format = depth_format,
-                                              .push_constant_bytes = sizeof(Push),
-                                              .descriptors = air_descriptors});
-        if (!through) {
-            return std::unexpected(std::move(through).error());
-        }
-        ocean.through_ = std::move(through).value();
         auto laid = make_compute_pipeline(device, {.spirv = shaders::sea_laid,
                                                    .entry = "laid_main",
                                                    .push_constant_bytes = sizeof(LaidPush),
@@ -708,7 +714,19 @@ SeaBindings Ocean::bindings(std::uint32_t frame) const {
 
 Result<> Ocean::draw(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view,
                      std::uint32_t frame) const {
-    return record(commands, extent, view, frame, air_ && view.behind ? through_ : pipeline_);
+    if (!air_ || !view.behind) {
+        return record(commands, extent, view, frame, pipeline_);
+    }
+    float highest = 0.0F;
+    for (const float level : lake_levels_) {
+        highest = std::max(highest, level);
+    }
+    if (view.bend.eye_height < static_cast<double>(highest) + highest_crest) {
+        if (auto under = record(commands, extent, view, frame, under_); !under) {
+            return under;
+        }
+    }
+    return record(commands, extent, view, frame, through_);
 }
 
 Result<> Ocean::draw_deep(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view,
@@ -857,11 +875,18 @@ Result<> Ocean::record(VkCommandBuffer commands, VkExtent2D extent, const OceanV
     push_sampled_image(commands, pipeline, ripple_binding, ripples_.kept().view(),
                        ripples_.sampler());
     push_sampled_image(commands, pipeline, rain_binding, rain_.kept().view(), rain_.sampler());
-    if (view.behind && &pipeline == &through_) {
+    if (view.behind && (&pipeline == &through_ || &pipeline == &under_)) {
         push_sampled_image(commands, pipeline, behind_binding, view.behind->colour,
                            shore_sampler_.handle());
         push_sampled_image(commands, pipeline, behind_binding + 1, view.behind->depth,
                            shore_sampler_.handle());
+    }
+    if (&pipeline == &under_) {
+        vkCmdPushConstants(commands, pipeline.layout(),
+                           VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                           sizeof(Push), &push);
+        vkCmdDraw(commands, 3, 1, 0, 0);
+        return {};
     }
     const std::array vertices{vertices_.handle()};
     const VkDeviceSize offset = 0;

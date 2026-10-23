@@ -489,8 +489,9 @@ float4 fragment_through(Surface surface) : SV_Target {
             max((untoned(behind_colour.Load(bent.pixel).rgb, exposure) - between.rgb) /
                     max(between.a, 1e-4),
                 0.0);
+        // Seen from over the surface, though the eye may stand in a trough under the sea's level.
         water = through_water(drawn, on_water, dot(surface.from_eye - behind, up),
-                              push.up_height.w, length(behind), dot(-looking, up));
+                              max(push.up_height.w, 0.0), length(behind), dot(-looking, up));
     }
     const float3 radiance =
         between.rgb +
@@ -524,4 +525,51 @@ float3 deep_water(Surface surface) {
 [shader("fragment")]
 float4 fragment_deep(Surface surface) : SV_Target {
     return float4(deep_water(surface), 1.0);
+}
+
+// A triangle covering the whole picture at the near plane, where nothing drawn hides it.
+struct Screen {
+    float4 position : SV_Position;
+    float2 clip;
+};
+
+[shader("vertex")]
+Screen vertex_screen(uint id: SV_VertexID) {
+    const float2 clip = (float2((id << 1) & 2, id & 2) * 2.0) - 1.0;
+    Screen screen;
+    screen.position = float4(clip, 1.0, 1.0);
+    screen.clip = clip;
+    return screen;
+}
+
+// Farther than any light gets through the water.
+static const float endless = 1.0e30;
+
+// From an eye in the water, what's drawn in it, as copied, seen through the water between: dimmed
+// by the water the light passes down to it and on to the eye, and filled in by what that water
+// scatters of the light falling on the sea, less the deeper it's scattered; where nothing's drawn,
+// the water alone. Drawn before the sea's surface, which hides it where it's seen from beneath.
+[shader("fragment")]
+float4 fragment_under(Screen screen) : SV_Target {
+    const int3 pixel = int3(int2(screen.position.xy), 0);
+    // Where the near plane is out of the water, the eye sees out of it.
+    const float3 near = behind_at(screen.clip, pixel, 1.0).at;
+    if (!in_water(lighting, near)) {
+        discard;
+    }
+    const float3 up = push.up_height.xyz;
+    const float exposure = lighting.sun_exposure.w;
+    const float3 on_water = on_water_at(shade_at(lighting, cloud_shadow, float3(0.0)), up);
+    const float deep = max(-lighting.water.w, 0.0);
+    const float sinking = -dot(normalize(near), up);
+    const float depth = behind_depth.Load(pixel).x;
+    const float along = depth > 0.0 ? length(behind_at(screen.clip, pixel, depth).at) : endless;
+    const WaterBetween between = water_between(on_water, deep, sinking, along);
+    float3 seen = between.scattered;
+    if (depth > 0.0) {
+        const float3 drawn = untoned(behind_colour.Load(pixel).rgb, exposure);
+        seen += drawn * between.passed *
+                exp(-water_absorbing * max(deep + (sinking * along), 0.0));
+    }
+    return float4(tone_mapped(seen, exposure), 1.0);
 }

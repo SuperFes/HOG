@@ -173,7 +173,9 @@ public:
                                               std::uint32_t frames = 1);
 
     // Records drawing into the colour and depth images being rendered to, of `extent`, over what's
-    // already drawn there. The frame's last submit must have finished.
+    // already drawn there. Seeing through what's drawn beneath it, as copied, where the eye is in
+    // the water it lays the water over all it sees from there too. The frame's last submit must
+    // have finished.
     Result<> draw(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view,
                   std::uint32_t frame = 0) const;
     // Lit through the air and seen from above the sea, records the water beneath the surface as
@@ -184,9 +186,9 @@ public:
                        std::uint32_t frame = 0) const;
 
     // Lit through the air, records working out whether the sea lays its water over what's drawn
-    // beneath it: where it's `seen_through`, given what's drawn there as copied, as long as the eye
-    // stands over its surface as drawn. Written into the frame's lighting, view.air's, for all
-    // drawn after to read, which are then drawn as in air under it.
+    // beneath it: where it's `seen_through`, given what's drawn there as copied, from over its
+    // surface or under it; and the plane of its surface at the eye. Written into the frame's
+    // lighting, view.air's, for all drawn after to read, which are then drawn as in air under it.
     Result<> lay_water(VkCommandBuffer commands, const OceanView& view, std::uint32_t frame,
                        bool seen_through) const;
 
@@ -231,6 +233,8 @@ private:
     // Laying the water over what's drawn beneath, as copied, and whether to.
     Pipeline through_;
     Pipeline laid_;
+    // Laying the water over what's seen from an eye in it, as copied.
+    Pipeline under_;
     Buffer vertices_;
     Buffer indices_;
     std::vector<Buffer> waves_;

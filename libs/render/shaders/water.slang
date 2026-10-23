@@ -57,10 +57,10 @@ public bool in_water(Lighting lighting, float3 from_eye) {
 // dimmed by the water the light passes down to it and back to the eye, and filled in by what
 // that water scatters of `on_water`, the light falling on the sea. From above, the way through
 // the water is the depth over how steeply the eye looks down; and where the sea's pass lays the
-// water, `laid`, it's left as it is.
+// water, `laid`, from over it or under it, it's left as it is.
 public float3 through_water(float3 lit, float3 on_water, float depth, float eye_height,
                             float along, float looking_down, bool laid = false) {
-    if ((depth <= 0.0 || laid) && eye_height >= 0.0) {
+    if (laid || (depth <= 0.0 && eye_height >= 0.0)) {
         return lit;
     }
     float seen_through;
@@ -74,6 +74,27 @@ public float3 through_water(float3 lit, float3 on_water, float depth, float eye_
     }
     const float3 passed = exp(-water_absorbing * (max(depth, 0.0) + seen_through));
     return (lit * passed) + (water_colour * on_water * (1.0 - passed));
+}
+
+// Of light passing through the water from a point `deep` metres under its surface, `along` metres
+// on, sinking `sinking` metres for each (rising if negative): the share let through, and what the
+// water scatters on to the end of the way of `on_water`, the light falling on its surface, which
+// is dimmed by the water it passes down through to where it's scattered.
+public struct WaterBetween {
+    public float3 passed;
+    public float3 scattered;
+};
+
+public WaterBetween water_between(float3 on_water, float deep, float sinking, float along) {
+    // Rising, it's in the water only as far as the surface.
+    const float under = sinking < 0.0 ? min(along, deep / -sinking) : along;
+    const float steepness = 1.0 + sinking;
+    const float3 reached = 1.0 - exp(-water_absorbing * steepness * under);
+    WaterBetween between;
+    between.passed = exp(-water_absorbing * under);
+    between.scattered = water_colour * on_water * exp(-water_absorbing * deep) *
+                        (steepness > 1e-3 ? reached / steepness : water_absorbing * under);
+    return between;
 }
 
 // As through_water, for a point `from_eye` on the planet of `radius`, under an eye `up_height` as

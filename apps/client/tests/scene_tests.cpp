@@ -724,6 +724,46 @@ TEST_CASE("wading in the surf, to look at", "[.look]") {
     }
 }
 
+// Not a check: stills from under the sea and at its surface, someone standing in it ahead, to look
+// at. Saved where HOG_LOOK names.
+TEST_CASE("under the sea, to look at", "[.look]") {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
+    const char* where = std::getenv("HOG_LOOK");
+    REQUIRE(where != nullptr);
+    const auto device = test_device();
+    hog::jobs::JobSystem jobs{4};
+    auto scene = Scene::create(*device, world(), jobs, calendar(), hog::client::still_format, 1);
+    REQUIRE(scene);
+    const hog::client::Forecast fresh =
+        everywhere({.drift = {16.0F, 6.0F},
+                    .wind = {9.4F, 3.5F},
+                    .wind_sea = {.height = 1.2F, .peak = 0.75F, .heading = {0.94F, 0.35F}},
+                    .swells = {},
+                    .current = {}});
+    const double radius = world().geology().planet_radius();
+    // Over four metres of water, the eye a metre over where it flies.
+    for (const auto& [name, altitude, pitch] :
+         {std::tuple{"waterline", -1.0, 0.0}, std::tuple{"shallow", -2.5, -0.1},
+          std::tuple{"up", -3.0, 0.7}, std::tuple{"bed", -3.5, -0.3}}) {
+        Shot shot = off_the_coast(120.0, altitude, true, pitch);
+        shot.forecast = &fresh;
+        const hog::DVec3 there = glm::normalize(ahead(shot, 8.0).metres());
+        const double ground = hog::client::ground_under(world(), hog::WorldPosition{there * radius});
+        shot.others = {{.feet = hog::WorldPosition{there * (radius + std::min(ground, -1.2))},
+                        .up = there,
+                        .colour = {0.6F, 0.1F, 0.05F}}};
+        for (int moment = 0; moment < 3; ++moment) {
+            shot.time = shot.time + std::chrono::milliseconds{700};
+            const auto still =
+                hog::client::draw_still(*device, *scene, shot, {.width = 960, .height = 540});
+            REQUIRE(still);
+            REQUIRE(hog::client::save_picture(std::filesystem::path{where} /
+                                                  std::format("under_{}_{}.png", name, moment),
+                                              *still));
+        }
+    }
+}
+
 // Not a check: stills of still water cut off from the sea, under a breeze and a gale, to look at.
 // Saved where HOG_LOOK names.
 TEST_CASE("still water, to look at", "[.look]") {
