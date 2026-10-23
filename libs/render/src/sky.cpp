@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <span>
 #include <utility>
 
@@ -38,9 +39,11 @@ struct Lighting {
     glm::vec4 weather;
     glm::vec4 shadow;
     glm::vec4 year;
+    glm::vec4 water;
 };
 
 static_assert(offsetof(Lighting, reach) + (3 * sizeof(float)) == sea_laying_at);
+static_assert(offsetof(Lighting, water) == sea_water_at);
 
 struct TablePush {
     glm::vec2 height_sun;
@@ -160,10 +163,11 @@ Result<Sky> Sky::create(Device& device, VkFormat colour_format, VkFormat depth_f
             return std::unexpected(std::move(volume).error());
         }
         sky.aerial_volumes_.push_back(std::move(volume).value());
-        // Written by the sea too.
+        // Written by the sea too, and read back by tests.
         auto lighting =
             make_buffer(device, sizeof(Lighting),
-                        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                         Memory::Upload);
         if (!lighting) {
             return std::unexpected(std::move(lighting).error());
@@ -213,7 +217,9 @@ Result<> Sky::record_tables(VkCommandBuffer commands, VkExtent2D extent, std::ui
                    static_cast<float>(view.weather.lowest_base), static_cast<float>(view.mist),
                    static_cast<float>(view.haze)},
         .year = {view.daylight.hours, view.daylight.longest,
-                 view.daylight.lengthening ? 1.0F : 0.0F, 0.0F}};
+                 view.daylight.lengthening ? 1.0F : 0.0F, 0.0F},
+        // Without a sea to say otherwise, the eye is out of the water.
+        .water = {Vec3{view.bend.up}, std::numeric_limits<float>::max()}};
     const Buffer& buffer = lighting_.at(frame);
     std::memcpy(buffer.mapped().data(), &lighting, sizeof(lighting));
     if (auto flushed = buffer.flush(); !flushed) {

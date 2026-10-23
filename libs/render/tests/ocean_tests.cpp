@@ -975,16 +975,18 @@ std::vector<Probed> probe_waves(hog::render::Device& device, const hog::render::
     return probed;
 }
 
-// Eight metres over a sea raised by a wind of `wind` m/s, somewhere off the top of the planet.
+// `height` metres over a sea raised by a wind of `wind` m/s, somewhere off the top of the planet.
 struct WavySea {
     std::vector<hog::waves::Train> trains = hog::waves::planet_trains(5);
-    WorldPosition eye{glm::normalize(DVec3{0.03, -0.02, 1.0}) * (radius + 8.0)};
-    hog::terrain::Bend bend = hog::terrain::bend_from(eye, radius, 0.0);
+    WorldPosition eye;
+    hog::terrain::Bend bend;
     hog::waves::SeaState sea;
     std::vector<hog::waves::Wave> waves;
     hog::render::DrawnWaves drawn;
 
-    explicit WavySea(double wind) {
+    explicit WavySea(double wind, double height = 8.0)
+        : eye{glm::normalize(DVec3{0.03, -0.02, 1.0}) * (radius + height)},
+          bend{hog::terrain::bend_from(eye, radius, 0.0)} {
         const DVec3 along = glm::normalize(glm::cross(bend.up, north));
         sea = {
             .systems = {hog::waves::grown_sea(along * wind)}, .current = {}, .wind = along * wind};
@@ -1000,7 +1002,74 @@ struct WavySea {
     }
 };
 
+// The plane of the sea's surface at the eye, as the sea writes it into the frame's Lighting: how it
+// faces, and how far the eye stands above it along that.
+glm::vec4 water_at_eye(hog::render::Device& device, const WavySea& sea) {
+    auto atmosphere = hog::render::Atmosphere::create(device);
+    REQUIRE(atmosphere);
+    auto sky = hog::render::Sky::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
+    REQUIRE(sky);
+    auto ocean =
+        hog::render::Ocean::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT, true);
+    REQUIRE(ocean);
+    const hog::render::Camera camera{.eye = sea.eye,
+                                     .forward = glm::normalize(glm::cross(sea.bend.up, north)),
+                                     .up = sea.bend.up};
+    const hog::render::SkyView seen{
+        .camera = camera, .sun = sea.bend.up, .bend = sea.bend, .exposure = 10.0};
+    const hog::render::AirBindings air = sky->bindings(0, *atmosphere);
+    const OceanView view{
+        .camera = camera, .sun = sea.bend.up, .bend = sea.bend, .air = air, .waves = sea.drawn};
+    auto read = hog::render::make_buffer(
+        device, sizeof(glm::vec4), VK_BUFFER_USAGE_TRANSFER_DST_BIT, hog::render::Memory::Readback);
+    REQUIRE(read);
+    REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
+        CHECK(sky->record_frame(commands, extent, 0, *atmosphere, seen));
+        CHECK(ocean->lay_water(commands, view, 0, true));
+        hog::render::memory_barrier(commands, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                    VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                                    VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+        const VkBufferCopy region{
+            .srcOffset = hog::render::sea_water_at, .dstOffset = 0, .size = sizeof(glm::vec4)};
+        vkCmdCopyBuffer(commands, air.lighting, read->handle(), 1, &region);
+        hog::render::memory_barrier(commands, VK_PIPELINE_STAGE_2_COPY_BIT,
+                                    VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_HOST_BIT,
+                                    VK_ACCESS_2_HOST_READ_BIT);
+    }));
+    REQUIRE(read->invalidate());
+    glm::vec4 water{0.0F};
+    std::memcpy(&water, read->mapped().data(), sizeof(water));
+    CHECK(device.validation_errors() == 0);
+    return water;
+}
+
 } // namespace
+
+TEST_CASE("the sea finds its surface at the eye, over it or under it", "[render][gpu]") {
+    const auto device = test_device();
+    for (const double wind : {0.0, 12.0}) {
+        for (const double height : {8.0, 0.3, 0.0, -0.3, -6.0}) {
+            CAPTURE(wind, height);
+            const WavySea sea{wind, height};
+            const glm::vec4 water = water_at_eye(*device, sea);
+            const DVec3 normal{hog::Vec3{water}};
+            // As high as the water stands under the eye, as the waders find it.
+            const DVec3 under = sea.rest(DVec3{0.0});
+            const double surface =
+                probe_waves(*device, sea.drawn, std::span{&under, 1}, 0.01).front().height;
+            CHECK_THAT(static_cast<double>(water.w),
+                       WithinAbs((height - surface) * glm::dot(normal, sea.bend.up), 2e-3));
+            CHECK_THAT(glm::length(normal), WithinAbs(1.0, 1e-5));
+            if (wind == 0.0) {
+                CHECK(glm::dot(normal, sea.bend.up) > 1.0 - 1e-6);
+            } else {
+                // Tilted by the waves under the eye, but not so far as to stand on end.
+                CHECK(glm::dot(normal, sea.bend.up) < 1.0 - 1e-5);
+                CHECK(glm::dot(normal, sea.bend.up) > 0.7);
+            }
+        }
+    }
+}
 
 TEST_CASE("the sea's drawn waves move and face it as hog::waves has them", "[render][gpu]") {
     const auto device = test_device();

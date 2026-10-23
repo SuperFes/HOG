@@ -57,6 +57,8 @@ struct SkyView {
 // Where in the frame's Lighting, in bytes, the sea writes whether it lays the water over what's
 // drawn beneath it, as atmosphere.slang's reach.w.
 inline constexpr std::uint32_t sea_laying_at = 124;
+// Where the sea writes the plane of its surface at the eye, as atmosphere.slang's water.
+inline constexpr std::uint32_t sea_water_at = 176;
 
 // What's drawn through the air reads it from these, all ready for any shader once a frame's
 // record_frame() has been recorded.

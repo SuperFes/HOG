@@ -330,6 +330,9 @@ public struct Lighting {
     // The year at the eye, as season.slang keeps it: x hours of daylight, y the longest day's, z 1
     // while the days lengthen.
     public float4 year;
+    // The sea's surface at the eye, as the sea writes it: xyz how it faces, w how far the eye
+    // stands above it along that, negative in the water.
+    public float4 water;
 };
 
 // Of the light falling on any cloud over a place, what reaches it, as render::CloudShade has it.

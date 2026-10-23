@@ -46,6 +46,12 @@ public bool sea_lays_water(Lighting lighting) {
     return lighting.reach.w > 0.0;
 }
 
+// Whether a point `from_eye` lies in the water, as the plane of the sea's surface at the eye has
+// it: true to the waves within a hand of the eye, as the near plane is.
+public bool in_water(Lighting lighting, float3 from_eye) {
+    return dot(from_eye, lighting.water.xyz) + lighting.water.w < 0.0;
+}
+
 // `lit` at a point `depth` metres under the sea (negative above it), `along` metres from an eye
 // `eye_height` above sea level, looking down at it `looking_down`, the cosine from straight down:
 // dimmed by the water the light passes down to it and back to the eye, and filled in by what

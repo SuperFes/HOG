@@ -970,12 +970,12 @@ public float4 floor_at(Waves waves, Sampler2DArray depths, Sampler2DArray fetche
 // How many times the water the waves carry over a point is stepped back towards where it rests.
 static const int height_steps = 6;
 
-// Metres the water's surface stands over sea level at `over`, a point of sea level from the eye
-// near it, as the sea is drawn seen over `footprint` metres: over `floor` and with `fetch` as
-// floor_at finds them under it, taken as the same under the water the waves carry over it. As
+// The waves where they carry the water standing over `over`, a point of sea level from the eye near
+// it, as the sea is drawn seen over `footprint` metres: over `floor` and with `fetch` as floor_at
+// finds them under it, taken as the same under the water the waves carry over it. As
 // hog::waves::height_at does, that water is found by stepping back along how far they carry it.
-public float water_height_over(Waves waves, float3 over, float footprint, float4 floor,
-                               float fetch) {
+public WaveSurface water_over(Waves waves, float3 over, float footprint, float4 floor,
+                              float fetch) {
     const float3 up = waves.up_height.xyz;
     float3 rest = over;
     WaveSurface water = wave_surface(waves, rest, footprint, floor.xyz, fetch);
@@ -984,5 +984,12 @@ public float water_height_over(Waves waves, float3 over, float footprint, float4
         rest += missed - (up * dot(up, missed));
         water = wave_surface(waves, rest, footprint, floor.xyz, fetch);
     }
-    return dot(water.moved, up) + floor.w;
+    return water;
+}
+
+// Metres the water's surface stands over sea level at `over`, as water_over finds it.
+public float water_height_over(Waves waves, float3 over, float footprint, float4 floor,
+                               float fetch) {
+    return dot(water_over(waves, over, footprint, floor, fetch).moved, waves.up_height.xyz) +
+           floor.w;
 }
