@@ -25,6 +25,12 @@
       "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
     },
     {
+      "name": "profile",
+      "displayName": "Release, instrumented for the Tracy profiler",
+      "inherits": "release",
+      "cacheVariables": { "HOG_PROFILE": "ON" }
+    },
+    {
       "name": "asan",
       "displayName": "Address + undefined-behaviour sanitizers",
       "inherits": "base",
@@ -68,6 +74,7 @@
   "buildPresets": [
     { "name": "debug", "configurePreset": "debug" },
     { "name": "release", "configurePreset": "release" },
+    { "name": "profile", "configurePreset": "profile" },
     { "name": "asan", "configurePreset": "asan" },
     { "name": "tsan", "configurePreset": "tsan" },
     { "name": "ci", "configurePreset": "ci" },

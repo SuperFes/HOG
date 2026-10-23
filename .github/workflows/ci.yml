@@ -27,7 +27,8 @@ jobs:
           - { name: Linux Clang libc++, os: ubuntu-24.04, cxx: clang++-22, llvm: 22, libcxx: 'ON', preset: ci }
           - { name: Linux sanitizers, os: ubuntu-24.04, cxx: clang++-22, llvm: 22, libcxx: 'ON', preset: ci-asan }
           - { name: Linux thread sanitizer, os: ubuntu-24.04, cxx: clang++-22, llvm: 22, libcxx: 'ON', preset: ci-tsan }
-          - { name: Linux GCC, os: ubuntu-24.04, cxx: g++-14, libcxx: 'OFF', preset: ci }
+          # GCC also keeps the profiler's instrumentation building.
+          - { name: Linux GCC, os: ubuntu-24.04, cxx: g++-14, libcxx: 'OFF', preset: ci, profile: 'ON' }
           - { name: Windows MSVC, os: windows-2025, cxx: cl, libcxx: 'OFF', preset: ci }
           - { name: macOS AppleClang, os: macos-15, cxx: clang++, libcxx: 'OFF', preset: ci }
     steps:
@@ -74,6 +75,7 @@ jobs:
           cmake --preset ${{ matrix.preset }}
           -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
           -DHOG_USE_LIBCXX=${{ matrix.libcxx }}
+          -DHOG_PROFILE=${{ matrix.profile || 'OFF' }}
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }}
       # Sanitizers run the longest tests small on each push, and in full on releases.

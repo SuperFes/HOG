@@ -3,6 +3,7 @@ option(HOG_BUILD_TESTS "Build unit tests" ON)
 option(HOG_BUILD_VIEWER "Build the debug viewer app, with SDL3 and Dear ImGui" ON)
 option(HOG_BUILD_CLIENT "Build the game client app, with SDL3" ON)
 set(HOG_SANITIZE "" CACHE STRING "Semicolon-separated sanitizers, e.g. address;undefined or thread")
+option(HOG_PROFILE "Instrument for the Tracy profiler, gathering only while one is connected" OFF)
 option(HOG_USE_LIBCXX "Build against LLVM libc++ (what macOS ships) instead of the platform default" OFF)
 
 # Global so dependencies share the same standard library ABI.

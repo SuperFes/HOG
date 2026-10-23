@@ -22,6 +22,10 @@ target_compile_definitions(hog_core PUBLIC
     GLM_FORCE_EXPLICIT_CTOR
     GLM_FORCE_SIZE_T_LENGTH)
 hog_target_defaults(hog_core)
+if(HOG_PROFILE)
+    target_link_libraries(hog_core PUBLIC Tracy::TracyClient)
+    target_compile_definitions(hog_core PUBLIC HOG_PROFILE)
+endif()
 
 hog_add_tests(hog_core
     tests/assert_tests.cpp
@@ -32,6 +36,7 @@ hog_add_tests(hog_core
     tests/log_tests.cpp
     tests/math_tests.cpp
     tests/metrics_tests.cpp
+    tests/profile_tests.cpp
     tests/result_tests.cpp
     tests/slot_map_tests.cpp
     tests/text_file_tests.cpp

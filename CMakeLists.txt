@@ -135,6 +135,16 @@ if(HOG_SANITIZE AND "undefined" IN_LIST HOG_SANITIZE AND CMAKE_CXX_COMPILER_ID M
                            PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-sanitize=function,alignment>)
 endif()
 
+# Profiler; BSD-3. Fetched only for instrumented builds, which serve only this machine.
+if(HOG_PROFILE)
+    CPMAddPackage(
+        NAME tracy
+        URL https://github.com/wolfpld/tracy/archive/refs/tags/v0.14.1.tar.gz
+        SYSTEM YES
+        OPTIONS "TRACY_ENABLE ON" "TRACY_ON_DEMAND ON" "TRACY_ONLY_LOCALHOST ON"
+            "TRACY_NO_BROADCAST ON")
+endif()
+
 # Ed25519 for connect tokens; BSD-2-Clause or CC0. Two C files, built by hog_login.
 CPMAddPackage(
     NAME Monocypher
