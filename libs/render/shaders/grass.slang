@@ -1,5 +1,6 @@
 import atmosphere;
 import bend;
+import gusts;
 import shadow;
 import tone;
 import water;
@@ -142,21 +143,22 @@ Blade nothing() {
 }
 
 // How far the tip is held and swayed by the wind: held over in strong wind, swaying most in a
-// breeze, still in still air.
+// breeze, still in still air. Gusts lay the grass over as they pass, and blades in the same part
+// of a gust sway together, so the field moves in clumps.
 float3 blown(float3 root, float height, uint hash) {
-    const float speed = length(push.wind.xyz);
-    if (speed < 1e-3) {
+    const float mean = length(push.wind.xyz);
+    if (mean < 1e-3) {
         return float3(0.0);
     }
-    const float3 along = push.wind.xyz / speed;
+    const float3 along = push.wind.xyz / mean;
+    const float gust = gust_at(root, lighting.gusts.xyz);
+    const float speed = gusting(mean, gust);
     const float held = (speed * speed) / ((speed * speed) + 36.0);
     const float swaying = 0.3 * speed / (1.0 + (0.08 * speed * speed));
-    const float time = push.bend_radii.z;
-    // Waves cross the field along the wind, gusts rolling over them.
-    const float phase = (time * (1.4 + (0.3 * speed))) - (dot(root, along) * 0.35) +
-                        (6.2831853 * unit(hash));
-    const float gust = 0.6 + (0.4 * sin((time * 0.7) - (dot(root, along) * 0.05)));
-    return along * (height * (held + (swaying * gust * sin(phase))));
+    // Swaying as fast everywhere, so blades side by side never drift apart as time goes on.
+    const float phase =
+        (push.bend_radii.z * (1.4 + (0.3 * mean))) + (9.0 * gust) + (1.2 * unit(hash));
+    return along * (height * (held + (swaying * sin(phase))));
 }
 
 [shader("vertex")]
@@ -264,7 +266,7 @@ Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     blade.side = side;
     blade.stem_half = reed ? lerp(0.5, 0.18, itself) : 1.0;
     // Blades bent along the wind catch the light on their flanks, so gusts cross far fields as
-    // bands of light even where single blades have melted away.
+    // patches of light even where single blades have melted away.
     const float speed = length(push.wind.xyz);
     const float waving =
         speed > 1e-3 ? dot(tip_away, push.wind.xyz) / (speed * height) : 0.0;

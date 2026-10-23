@@ -40,19 +40,36 @@ struct Ground {
     }
 };
 
-// How hard the gusts blow at each point, seen from `eye` with the field drifted `drifted`.
-std::vector<double> gusts_at(hog::render::Device& device, const WorldPosition& eye, DVec3 drifted,
-                             std::span<const WorldPosition> points) {
+struct Gusting {
+    double gust = 0.0;  // how hard the gusts blow, 0 to 1
+    double speed = 0.0; // m/s
+};
+
+// How hard the gusts blow at each point and how fast the wind blows there, seen from `eye` with
+// the field drifted `drifted`, the wind blowing `speed` on the whole.
+std::vector<Gusting> gusting_at(hog::render::Device& device, const WorldPosition& eye,
+                                DVec3 drifted, std::span<const WorldPosition> points,
+                                double speed) {
     const glm::vec3 anchor{gust_anchor(eye, drifted)};
     std::vector<Probed> asked;
     for (const WorldPosition& point : points) {
         const glm::vec3 from_eye{point - eye};
-        asked.push_back({from_eye.x, from_eye.y, from_eye.z, 0.0F});
+        asked.push_back({from_eye.x, from_eye.y, from_eye.z, static_cast<float>(speed)});
         asked.push_back({anchor.x, anchor.y, anchor.z, 0.0F});
     }
-    std::vector<double> gusts;
+    std::vector<Gusting> gusting;
     for (const Probed& found : probed(device, hog::shaders::gusts_probe, asked, points.size())) {
-        gusts.push_back(static_cast<double>(found[0]));
+        gusting.push_back(
+            {.gust = static_cast<double>(found[0]), .speed = static_cast<double>(found[1])});
+    }
+    return gusting;
+}
+
+std::vector<double> gusts_at(hog::render::Device& device, const WorldPosition& eye, DVec3 drifted,
+                             std::span<const WorldPosition> points) {
+    std::vector<double> gusts;
+    for (const Gusting& found : gusting_at(device, eye, drifted, points, 0.0)) {
+        gusts.push_back(found.gust);
     }
     return gusts;
 }
@@ -189,5 +206,32 @@ TEST_CASE("gusts blow in patches tens of metres across, with lulls between", "[r
     CHECK(lull < 0.7);
     CHECK(metre < 0.05);
     CHECK(near < 0.5 * apart);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("the wind slackens in the lulls and blows harder in the gusts, as hard on the whole",
+          "[render][gpu]") {
+    const auto device = test_device();
+    const Ground ground;
+    const WorldPosition eye = ground.here + (ground.up * 1.7);
+    const std::vector<WorldPosition> points = square(ground, 600.0, 3.0);
+    constexpr double speed = 6.0;
+    double sum = 0.0;
+    for (const Gusting& found : gusting_at(*device, eye, DVec3{0.0}, points, speed)) {
+        if (found.gust < 0.1) {
+            CHECK(found.speed < 0.7 * speed);
+        }
+        if (found.gust > 0.9) {
+            CHECK(found.speed > 1.3 * speed);
+        }
+        sum += found.speed;
+    }
+    const double mean = sum / static_cast<double>(points.size());
+    INFO("blowing " << mean << " m/s on the whole");
+    CHECK(mean > 0.85 * speed);
+    CHECK(mean < 1.15 * speed);
+    for (const Gusting& found : gusting_at(*device, eye, DVec3{0.0}, points, 0.0)) {
+        CHECK(found.speed == 0.0);
+    }
     CHECK(device->validation_errors() == 0);
 }

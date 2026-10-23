@@ -69,6 +69,7 @@ struct Field {
     hog::planet::Biome biome = hog::planet::Biome::Grassland;
     DVec3 wind{0.0};
     double seconds = 0.0;
+    DVec3 gusts_drifted{0.0};
     double away = 0.0; // metres east of the eye to the patch's centre
     double fade_far = hog::render::grass_far;
     bool tall_only = false;
@@ -107,7 +108,8 @@ Pixels draw(hog::render::Device& device, const Field& grown) {
                                     .sun = sun,
                                     .bend = bend,
                                     .exposure = 10.0,
-                                    .sky_light = model.sky_irradiance(2.0 * scale, sun)};
+                                    .sky_light = model.sky_irradiance(2.0 * scale, sun),
+                                    .gusts_drifted = grown.gusts_drifted};
     const GrassDraw lawn{.slot = slot,
                          .origin = origin,
                          .spacing = spacing,
@@ -277,4 +279,17 @@ TEST_CASE("the wind moves the grass, and still air leaves it still", "[render]")
     const Pixels still_now = draw(*device, {.seconds = 1.0});
     const Pixels still_later = draw(*device, {.seconds = 1.4});
     CHECK(still_now == still_later);
+}
+
+TEST_CASE("gusts move the grass as they drift over it", "[render]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    const DVec3 wind = east * 6.0;
+    const DVec3 drifted = east * 30.0;
+    CHECK(draw(*device, {.wind = wind, .seconds = 1.0}) !=
+          draw(*device, {.wind = wind, .seconds = 1.0, .gusts_drifted = drifted}));
+    CHECK(draw(*device, {.seconds = 1.0}) ==
+          draw(*device, {.seconds = 1.0, .gusts_drifted = drifted}));
 }
