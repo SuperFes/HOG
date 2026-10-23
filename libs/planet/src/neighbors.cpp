@@ -49,6 +49,12 @@ using Point = std::array<std::int64_t, 3>;
 [[nodiscard]] std::optional<CellId> step(CellId cell, int du, int dv) {
     const FaceIJ ij = cell.to_face_ij();
     const std::int64_t n = std::int64_t{1} << ij.level;
+    const std::int64_t i = std::int64_t{ij.i} + du;
+    const std::int64_t j = std::int64_t{ij.j} + dv;
+    if (i >= 0 && i < n && j >= 0 && j < n) {
+        return CellId::from_face_ij(ij.face, static_cast<std::uint32_t>(i),
+                                    static_cast<std::uint32_t>(j), ij.level);
+    }
     const FaceFrame frame = face_frame(ij.face);
 
     Point point = centre(ij, n);
