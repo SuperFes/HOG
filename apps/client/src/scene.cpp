@@ -415,23 +415,32 @@ std::optional<render::SeaBehind> seen_behind(const render::RenderGraph& graph,
 
 } // namespace
 
+terrain::StreamFrame Scene::stream_ground(const terrain::Viewpoint& seen) {
+    for (terrain::Patch& patch : baker_.collect()) {
+        stream_.baked(std::move(patch));
+    }
+    // All round the eye, so the ground is baked before it's turned to. Settled, the same view
+    // selects the same again.
+    if (!stream_.settled() || seen != selected_from_) {
+        selected_ = terrain::select_patches(seen, seen.bend.radius,
+                                            {.only_in_view = false, .seabed_unseen = seabed_unseen},
+                                            stream_.known_heights(), jobs_);
+        selected_from_ = seen;
+    }
+    terrain::StreamFrame streamed = stream_.update(selected_);
+    for (const planet::CellId cell : streamed.bakes) {
+        baker_.start(cell);
+    }
+    return streamed;
+}
+
 Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     HOG_ZONE("scene");
     const std::span<const render::GpuSpan> timed = timer_.read(frame.commands, frame.slot);
     timings_.assign(timed.begin(), timed.end());
-    for (terrain::Patch& patch : baker_.collect()) {
-        stream_.baked(std::move(patch));
-    }
     terrain::Viewpoint seen = viewpoint(shot.camera, frame.extent);
     seen.bend = shot.bend;
-    // All round the eye, so the ground is baked before it's turned to.
-    const std::vector<terrain::SelectedPatch> selected = terrain::select_patches(
-        seen, shot.bend.radius, {.only_in_view = false, .seabed_unseen = seabed_unseen},
-        stream_.known_heights(), jobs_);
-    const terrain::StreamFrame streamed = stream_.update(selected);
-    for (const planet::CellId cell : streamed.bakes) {
-        baker_.start(cell);
-    }
+    const terrain::StreamFrame streamed = stream_ground(seen);
     // The ground into its slots, and the anchored trees and bushes round the eye, a few tiles a
     // frame.
     const GrassBudget budget;

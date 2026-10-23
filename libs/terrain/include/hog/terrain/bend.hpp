@@ -20,6 +20,8 @@ struct Bend {
     double eye_height = 0.0; // above sea level
     double radius = 1.0;
     double faked = 1.0;
+
+    friend bool operator==(const Bend&, const Bend&) = default;
 };
 
 // The faked radius seen from `over_ground` metres above the ground, blending its curvature to the

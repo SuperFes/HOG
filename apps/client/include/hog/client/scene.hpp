@@ -152,6 +152,8 @@ private:
           std::uint32_t frames);
 
     render::SkyView sky_view(const Shot& shot, render::CloudShade shade);
+    // Takes in the bakes done, and streams the ground selected from `seen`.
+    terrain::StreamFrame stream_ground(const terrain::Viewpoint& seen);
     // Wants the depths round the eye, and takes any worked out; or gives the ocean those taken.
     void follow_shore(const Shot& shot);
     Result<> give_shore(VkCommandBuffer commands, std::uint32_t slot);
@@ -167,6 +169,8 @@ private:
     TreeCounts tree_counts_;
     terrain::PatchBaker baker_;
     terrain::PatchStream stream_;
+    std::vector<terrain::SelectedPatch> selected_;
+    terrain::Viewpoint selected_from_;
     render::Terrain terrain_;
     render::Ocean ocean_;
     terrain::ShoreStream shore_;

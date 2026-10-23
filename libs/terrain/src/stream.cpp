@@ -99,6 +99,7 @@ double spacing_of(const Patch& patch) {
 } // namespace
 
 void PatchStream::baked(Patch patch) {
+    settled_ = false;
     baking_.erase(patch.cell);
     if (outdated_.erase(patch.cell) != 0) {
         return;
@@ -112,6 +113,7 @@ void PatchStream::baked(Patch patch) {
 }
 
 void PatchStream::changed(planet::CellId cell) {
+    settled_ = false;
     for (const planet::CellId held : reached(held_, cell)) {
         held_.at(held).stale = true;
     }
@@ -361,6 +363,13 @@ void PatchStream::arrive(std::span<const SelectedPatch> selected, StreamFrame& f
 
 StreamFrame PatchStream::update(std::span<const SelectedPatch> selected) {
     HOG_ZONE("stream patches");
+    // Settled on the same selection, it would draw just the same again: what stood in still would,
+    // and the patches' drawn stamps keep their order.
+    if (settled_ && std::ranges::equal(selected, settled_on_)) {
+        StreamFrame same;
+        same.drawn = settled_drawn_;
+        return same;
+    }
     ++frame_;
     StreamFrame frame;
     arrive(selected, frame);
@@ -421,6 +430,12 @@ StreamFrame PatchStream::update(std::span<const SelectedPatch> selected) {
         }
         baking_.insert(cell);
         frame.bakes.push_back(cell);
+    }
+    settled_ = frame.bakes.empty() && frame.arrived.empty() && frame.evicted.empty() &&
+               baking_.empty() && waiting_.empty();
+    if (settled_) {
+        settled_on_.assign(selected.begin(), selected.end());
+        settled_drawn_ = frame.drawn;
     }
     return frame;
 }

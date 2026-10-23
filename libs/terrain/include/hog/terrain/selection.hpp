@@ -28,6 +28,8 @@ struct Viewpoint {
     // How the ground is bent as it's drawn, which is what's culled and refined.
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     Bend bend = {};
+
+    friend bool operator==(const Viewpoint&, const Viewpoint&) = default;
 };
 
 struct SelectionSettings {

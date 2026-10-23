@@ -35,6 +35,8 @@ struct StreamedPatch {
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     WorldPosition origin = {};
     std::uint8_t coarser_edges = 0; // edge bits, where the patch beside it is coarser
+
+    friend bool operator==(const StreamedPatch&, const StreamedPatch&) = default;
 };
 
 struct StreamFrame {
@@ -64,6 +66,10 @@ public:
     // drawn; all are baked and kept, so selecting all round the eye has ground ready before it
     // turns into view.
     [[nodiscard]] StreamFrame update(std::span<const SelectedPatch> selected);
+    // Whether the last update left nothing to do: none baking or waiting, and none asked for,
+    // arriving or evicted. Settled, the same view selects the same ground, and updating with it
+    // draws the same again, so it's answered at once.
+    [[nodiscard]] bool settled() const noexcept { return settled_; }
 
     [[nodiscard]] bool held(planet::CellId cell) const { return held_.contains(cell); }
     [[nodiscard]] std::size_t held_count() const noexcept { return held_.size(); }
@@ -119,6 +125,9 @@ private:
     std::vector<Patch> waiting_;        // baked, not yet arrived
     std::map<planet::CellId, Known> heights_;
     std::uint64_t frame_ = 0;
+    bool settled_ = false;
+    std::vector<SelectedPatch> settled_on_;
+    std::vector<StreamedPatch> settled_drawn_;
 };
 
 } // namespace hog::terrain

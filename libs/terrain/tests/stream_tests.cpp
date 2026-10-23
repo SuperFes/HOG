@@ -10,6 +10,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <deque>
@@ -501,4 +502,47 @@ TEST_CASE("selected ground shares the coarser bakes over it", "[terrain][stream]
     PatchStream stream{{.coarse_steps = 3}};
     const auto frame = stream.update(selecting_children(parent.child(2).child(1)));
     CHECK(frame.bakes == std::vector{parent.parent(2)});
+}
+
+TEST_CASE("settled, a stream draws the same selection again at once", "[terrain][stream]") {
+    PatchStream stream{fine_first};
+    const auto selected = selecting_children(parent);
+    CHECK_FALSE(stream.settled());
+    const StreamFrame first = settle(stream, selected);
+    REQUIRE(stream.settled());
+    const StreamFrame again = stream.update(selected);
+    CHECK(again.drawn == first.drawn);
+    CHECK(again.bakes.empty());
+    CHECK(again.arrived.empty());
+    CHECK(again.evicted.empty());
+    CHECK(stream.settled());
+
+    // Another selection is worked out afresh.
+    const auto fewer = selecting({parent.child(0), parent.child(1)});
+    CHECK(drawn(stream.update(fewer)) == std::set{parent.child(0), parent.child(1)});
+}
+
+TEST_CASE("a stream with bakes to do isn't settled", "[terrain][stream]") {
+    PatchStream stream{fine_first};
+    const auto selected = selecting_children(parent);
+    const StreamFrame asked = stream.update(selected);
+    REQUIRE_FALSE(asked.bakes.empty());
+    CHECK_FALSE(stream.settled());
+    // In flight, the bakes keep it unsettled.
+    CHECK(stream.update(selected).bakes.empty());
+    CHECK_FALSE(stream.settled());
+    for (const CellId cell : asked.bakes) {
+        stream.baked(fake_bake(cell));
+    }
+    (void)settle(stream, selected);
+    REQUIRE(stream.settled());
+
+    stream.changed(parent.child(2));
+    CHECK_FALSE(stream.settled());
+    const StreamFrame rebaking = stream.update(selected);
+    CHECK(std::ranges::contains(rebaking.bakes, parent.child(2)));
+    // Still drawn until baked again.
+    CHECK(drawn(rebaking) == children(parent));
+    stream.baked(fake_bake(parent.child(2)));
+    CHECK_FALSE(stream.settled());
 }
