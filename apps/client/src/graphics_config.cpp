@@ -46,12 +46,19 @@ constexpr std::array keys{
 // Further than any tile pool holds, so a typo can't ask for the whole planet.
 constexpr double furthest_plants = 10'000.0;
 
+const Key* find_key(std::string_view table, std::string_view name) {
+    for (const Key& key : keys) {
+        if (key.table == table && key.name == name) {
+            return &key;
+        }
+    }
+    return nullptr;
+}
+
 Result<void> read_table(std::string_view name, const toml::table& table, GrassBudget& budget) {
     for (const auto& [key, node] : table) {
-        const auto* const known = std::ranges::find_if(keys, [&](const Key& candidate) {
-            return candidate.table == name && candidate.name == key.str();
-        });
-        if (known == keys.end()) {
+        const Key* const known = find_key(name, key.str());
+        if (known == nullptr) {
             return invalid(std::format("unknown key {}.{}", name, key.str()));
         }
         const std::optional<double> value = node.value<double>();

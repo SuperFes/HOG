@@ -104,11 +104,18 @@ constexpr std::array kept{
          .keep = [](Options& options, std::string_view value) { options.capture = value; }},
 };
 
+const Kept* kept_named(std::string_view option) {
+    for (const Kept& each : kept) {
+        if (each.name == option) {
+            return &each;
+        }
+    }
+    return nullptr;
+}
+
 // Reads an option that takes a value.
 Result<void> read_option(Options& options, std::string_view option, std::string_view value) {
-    if (const auto* const found =
-            std::ranges::find_if(kept, [&](const Kept& each) { return each.name == option; });
-        found != kept.end()) {
+    if (const Kept* const found = kept_named(option); found != nullptr) {
         found->keep(options, value);
     } else if (option == "--at") {
         options.start = place(value);
