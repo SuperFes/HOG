@@ -70,6 +70,7 @@ struct Drawn {
     DVec3 wind{0.0};
     double seconds = 0.0;
     double above = 24.0; // metres the eye is over the ground
+    DVec3 gusts_drifted{0.0};
 };
 
 // The bushes alone over black, seen from overhead so every one is in view.
@@ -100,7 +101,8 @@ Pixels draw(hog::render::Device& device, const Drawn& drawn) {
                                     .sun = sun,
                                     .bend = bend,
                                     .exposure = 10.0,
-                                    .sky_light = model.sky_irradiance(2.0 * scale, sun)};
+                                    .sky_light = model.sky_irradiance(2.0 * scale, sun),
+                                    .gusts_drifted = drawn.gusts_drifted};
     const StandDraw tile{.slot = slot,
                          .first = 0,
                          .count = static_cast<std::uint32_t>(drawn.anchors.size()),
@@ -222,6 +224,19 @@ TEST_CASE("the wind rustles the bushes, and still air leaves them still", "[rend
     const Pixels still_now = draw(*device, {.seconds = 1.0});
     const Pixels still_later = draw(*device, {.seconds = 1.7});
     CHECK(still_now == still_later);
+}
+
+TEST_CASE("gusts move the bushes as they drift over them", "[render]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    const DVec3 wind = east * 9.0;
+    const DVec3 drifted = east * 30.0;
+    CHECK(draw(*device, {.wind = wind, .seconds = 1.0}) !=
+          draw(*device, {.wind = wind, .seconds = 1.0, .gusts_drifted = drifted}));
+    CHECK(draw(*device, {.seconds = 1.0}) ==
+          draw(*device, {.seconds = 1.0, .gusts_drifted = drifted}));
 }
 
 TEST_CASE("a bush's leaves pack with its kind, as a tree's foliage packs", "[render]") {

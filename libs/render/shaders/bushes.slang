@@ -1,6 +1,7 @@
 import atmosphere;
 import bend;
 import flora;
+import gusts;
 import shadow;
 import tone;
 import water;
@@ -129,15 +130,14 @@ Bush vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const float side_x = (corner & 1u) == 0 ? -0.5 : 0.5;
     const float t = corner < 2 ? 0.0 : 1.0;
     const float up_by = lying ? lid_at : t;
-    // A lean held by strong wind and a slight rustle, stiffer than grass by far.
+    // Held over in the gusts and rustling, stiffer than grass by far.
     const float speed = length(push.wind.xyz);
     float3 sway = float3(0.0);
     if (speed > 1e-3) {
         const float3 along = push.wind.xyz / speed;
-        const float held = (speed * speed) / ((speed * speed) + 220.0);
-        const float rustle =
-            0.04 * sin((push.bend_radii.z * (1.1 + (0.2 * speed))) + (6.2831853 * unit(hash + 6u)));
-        sway = along * (height * (held * 0.25 + rustle * saturate(speed / 6.0)));
+        const float field = gust_field(root, lighting.gusts.xyz);
+        const float apart = 1.2 * (unit(hash + 6u) - 0.5);
+        sway = along * (height * bush_sway(push.bend_radii.z, speed, field, apart));
     }
     const float lid = kind == floofy ? floofy_lid : 1.0;
     const float3 spread =
