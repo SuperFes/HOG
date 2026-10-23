@@ -586,6 +586,7 @@ Plugs into the calendar and the sky. Like the moons, it's a function of the worl
 
 - [ ] Temporal anti-aliasing, since grass, needles and wave crests shimmer, with upscaling so the iGPU can draw under its window's resolution
 - [ ] A graphics settings screen: quality presets with a switch per feature, resolution scale, frame cap and vsync, saved per machine
+- [ ] A view distance preference: ground, trees and the rest culled beyond it, the edge hidden in haze; and a terrain detail scale over the selection's pixel spacings
 - [ ] Pipelines cached to disk and built ahead of need, so a second launch compiles nothing and a new effect never hitches the frame it first appears in
 - [ ] CPU and GPU profiling with Tracy, frame by frame, beside the overlay's timings
 - [ ] Photo mode: a free camera, time of day held, and screenshots
