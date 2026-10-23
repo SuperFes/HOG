@@ -204,7 +204,7 @@ This phase builds a client that flies over the generated planet with a real sky.
 - [x] Basic ocean surface
 - [x] Sea drawn over ground at and just below sea level, so shorelines don't flicker
 - [x] The sea as water, not a sheet: everything under its surface seen through the water between, a wader's legs as much as the seabed, bent by the waves (one water model, laid by the sea's pass over what depth says lies behind it)
-- [ ] From under the sea: water along the whole view, darker the deeper; the sky only through the window overhead, the surface a mirror beyond it, and what stands out of the water bent through it; a waterline across the screen where the eye straddles the surface, with no clipping as waves pass the eye
+- [x] From under the sea: water along the whole view, darker the deeper; the sky only through the window overhead, the surface a mirror beyond it, and what stands out of the water bent through it; a waterline across the screen where the eye straddles the surface, with no clipping as waves pass the eye
 - [ ] Under the sea, felt: caustics on the bed and on what's in the water, light shafts, drifting motes, a wobble to the view
 - [x] Waves: one wave function the client, the server and physics all evaluate alike (the planet's fixed trains, phased by the seed and the world's time, sized by the local spectrum, so everyone sees the same wave at the same place), the long waves moving the surface and fine chop in its shading, what's too fine to draw widening the sun's glint
 - [x] Waves from the sea state: several systems at once, the local wind sea crossing swells from distant storms, so crests criss-cross and pile up where they meet, blended from cell to cell
