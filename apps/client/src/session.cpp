@@ -50,7 +50,7 @@ Session::Session(net::Client client, std::string address, std::vector<std::byte>
     : client_(std::move(client)), address_(std::move(address)), token_(std::move(token)),
       counting_since_(MonotonicClock::now()) {}
 
-void Session::look(std::optional<WorldPosition> feet, MonotonicClock::time_point now) {
+void Session::look(std::optional<Whereabouts> player, MonotonicClock::time_point now) {
     client_.poll(events_);
     for (const net::Event& event : events_) {
         if (std::holds_alternative<net::Connected>(event)) {
@@ -67,10 +67,12 @@ void Session::look(std::optional<WorldPosition> feet, MonotonicClock::time_point
             }
         }
     }
-    if (state_ == State::Welcomed && feet && (!next_move_ || now >= *next_move_)) {
+    if (state_ == State::Welcomed && player && (!next_move_ || now >= *next_move_)) {
         send(protocol::Moved{.sequence = ++moves_,
                              .corrections = corrections_,
-                             .at = protocol::to_millimetres(*feet)},
+                             .at = protocol::to_millimetres(player->at),
+                             .stance = player->stance,
+                             .facing = player->facing},
              net::Delivery::Unreliable);
         next_move_ = next_move_.value_or(now) + move_interval;
         // After a stall, carry on from now rather than send the missed ones at once.
@@ -113,6 +115,8 @@ void Session::heard(std::span<const std::byte> bytes, MonotonicClock::time_point
             correction_ = protocol::to_world(corrected->at);
             log::debug(session_log, "{} put the player back", address_);
         }
+    } else if (const auto* placed = std::get_if<protocol::Placed>(&*message)) {
+        placed_ = *placed;
     } else if (auto* weather = std::get_if<protocol::Weather>(&*message)) {
         weather_ = std::move(*weather);
     } else if (auto* woodlands = std::get_if<protocol::Woodlands>(&*message)) {

@@ -34,7 +34,7 @@ Bot::Bot(client::Player player, client::Session session, double planet_radius, s
       planet_radius_(planet_radius), settings_(settings) {}
 
 void Bot::update(MonotonicClock::time_point now, double seconds) {
-    session_.look(player_.feet(), now);
+    session_.look(client::Whereabouts{.at = player_.feet()}, now);
     if (const auto back = session_.take_correction()) {
         player_.place(*back);
     }

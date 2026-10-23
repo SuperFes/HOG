@@ -32,6 +32,7 @@ using hog::DVec3;
 using hog::MonotonicClock;
 using hog::WorldPosition;
 using hog::client::Session;
+using hog::client::Whereabouts;
 namespace net = hog::net;
 namespace protocol = hog::protocol;
 
@@ -44,6 +45,10 @@ constexpr hog::GameTime start{
 // On the surface, `metres` along it from the first player's place.
 WorldPosition along(double metres) {
     return WorldPosition{DVec3{radius + 2.0, metres, 0.0}};
+}
+
+Whereabouts walking(double metres) {
+    return {.at = along(metres), .stance = protocol::Stance::Walking, .facing = {}};
 }
 
 net::Server listening() {
@@ -111,16 +116,16 @@ struct Stand {
     }
 };
 
-// Has the session look, with the player's feet at `feet`, until `done`, failing if that takes too
+// Has the session look, with the player at `player`, until `done`, failing if that takes too
 // long.
 void look_until(Session& session, Stand& stand, const std::function<bool()>& done,
-                std::optional<WorldPosition> feet = along(0.0)) {
+                std::optional<Whereabouts> player = walking(0.0)) {
     const auto give_up = MonotonicClock::now() + 10s;
     while (!done()) {
         if (MonotonicClock::now() >= give_up) {
             FAIL("gave up waiting");
         }
-        session.look(feet, MonotonicClock::now());
+        session.look(player, MonotonicClock::now());
         stand.poll();
         std::this_thread::sleep_for(1ms);
     }
@@ -177,17 +182,42 @@ TEST_CASE("a welcomed session says where the player is, as often as it may", "[c
 
     // Ahead of the real time the session has seen, so none of these is held back by it.
     const MonotonicClock::time_point later = MonotonicClock::now() + 1h;
-    session.look(along(5.0), later);
-    session.look(along(6.0), later + Session::move_interval / 2);
-    // Nothing while flying.
+    session.look(walking(5.0), later);
+    session.look(walking(6.0), later + Session::move_interval / 2);
+    // Nothing when not given.
     session.look(std::nullopt, later + Session::move_interval);
-    session.look(along(7.0), later + (Session::move_interval * 2));
+    const protocol::Facing facing{.heading = 300, .pitch = -2};
+    session.look(
+        Whereabouts{.at = along(7.0), .stance = protocol::Stance::Flying, .facing = facing},
+        later + (Session::move_interval * 2));
     look_until(session, stand, [&] { return moves(stand).size() == 2; }, std::nullopt);
     const auto moved = moves(stand);
     CHECK(moved[0].at == protocol::to_millimetres(along(5.0)));
+    CHECK(moved[0].stance == protocol::Stance::Walking);
     CHECK(moved[1].at == protocol::to_millimetres(along(7.0)));
+    CHECK(moved[1].stance == protocol::Stance::Flying);
+    CHECK(moved[1].facing == facing);
     CHECK(moved[1].sequence > moved[0].sequence);
     CHECK(moved[1].corrections == 0);
+}
+
+TEST_CASE("a session takes where the server placed the player once", "[client][session]") {
+    Stand stand;
+    Session session = connected(stand.server);
+    welcome(session, stand);
+    CHECK_FALSE(session.take_placed());
+
+    const protocol::Placed placed{.at = protocol::to_millimetres(along(3.0)),
+                                  .stance = protocol::Stance::Flying,
+                                  .facing = {.heading = 9, .pitch = 4}};
+    stand.send(placed);
+    std::optional<protocol::Placed> taken;
+    look_until(session, stand, [&] {
+        taken = session.take_placed();
+        return taken.has_value();
+    });
+    CHECK(taken == placed);
+    CHECK_FALSE(session.take_placed());
 }
 
 TEST_CASE("a session takes the server's corrections once each", "[client][session]") {
@@ -207,7 +237,7 @@ TEST_CASE("a session takes the server's corrections once each", "[client][sessio
 
     // A repeat of one already taken is passed over; moves made since say it was taken.
     stand.send(protocol::Corrected{.count = 1, .at = protocol::to_millimetres(along(9.0))});
-    session.look(along(4.0), MonotonicClock::now() + 1h);
+    session.look(walking(4.0), MonotonicClock::now() + 1h);
     look_until(session, stand, [&] { return !moves(stand).empty(); }, std::nullopt);
     CHECK(moves(stand).back().corrections == 1);
     CHECK_FALSE(session.take_correction());
@@ -492,8 +522,8 @@ TEST_CASE("two players see each other through a bad network", "[client][session]
     const auto give_up = MonotonicClock::now() + 30s;
     Visited timer{[&] {
         const MonotonicClock::time_point now = MonotonicClock::now();
-        anna->look(anna_at, now);
-        matt->look(matt_at, now);
+        anna->look(Whereabouts{.at = anna_at}, now);
+        matt->look(Whereabouts{.at = matt_at}, now);
         anna_told = anna->take_weather().has_value() || anna_told;
         matt_told = matt->take_weather().has_value() || matt_told;
         if (stage == 0 && sees(*anna, matt_at) && sees(*matt, anna_at)) {

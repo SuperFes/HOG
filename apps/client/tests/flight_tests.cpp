@@ -190,3 +190,28 @@ TEST_CASE("from the third person, the eye looks at its mark from behind", "[clie
     CHECK(glm::length(above.eye - flight.eye) == Approx(4.0));
     CHECK(glm::dot(glm::normalize(flight.eye - above.eye), above.forward) == Approx(1.0));
 }
+
+TEST_CASE("a flight's facing reads back as it was sent, wherever it is", "[client][flight]") {
+    using hog::client::faced;
+    using hog::client::facing_of;
+    for (const DVec3 direction : {DVec3{1.0, 0.0, 0.0}, DVec3{0.3, -0.5, 0.8}, DVec3{0.0, 0.0, 1.0},
+                                  DVec3{0.0, 0.0, -1.0}}) {
+        for (const double turned : {0.0, 1.0, 3.1, -2.0, -0.001}) {
+            const Flight start = start_flight(direction, radius, 50.0, hog::planet::north_pole);
+            Flight flight = hog::client::looked(start, {turned / 0.002, -0.4 / 0.002});
+            const Flight back = faced(start, facing_of(flight));
+            CAPTURE(direction.x, direction.y, direction.z, turned);
+            check_level(back);
+            CHECK(glm::dot(back.heading, flight.heading) > std::cos(1e-3));
+            CHECK(back.pitch == Approx(flight.pitch).margin(1e-3));
+        }
+    }
+    // Due north and east, and looking up.
+    const Flight north = start_flight({1.0, 0.0, 0.0}, radius, 0.0, hog::planet::north_pole);
+    CHECK(facing_of(north).heading == 0);
+    CHECK(facing_of(north).pitch == 0);
+    const Flight east = faced(north, {.heading = 16'384, .pitch = 8'192});
+    CHECK(glm::dot(east.heading, hog::planet::tangent_frame(DVec3{1.0, 0.0, 0.0}).east) ==
+          Approx(1.0));
+    CHECK(east.pitch == Approx(std::numbers::pi / 4.0));
+}

@@ -29,6 +29,14 @@ struct ChatLine {
     friend bool operator==(const ChatLine&, const ChatLine&) = default;
 };
 
+// Where the player is, as the server is told: their feet on foot, or their eye flying.
+struct Whereabouts {
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    WorldPosition at = {};
+    protocol::Stance stance = protocol::Stance::Walking;
+    protocol::Facing facing{};
+};
+
 // A player's connection to the game server: says hello, then keeps what's near them from its
 // snapshots and tells it where their feet are, taking it back when the server won't have it.
 class Session {
@@ -41,13 +49,17 @@ public:
     // Starts connecting to `address`, to say hello with the login service's token, or none.
     [[nodiscard]] static Result<Session> connect(std::string address, std::vector<std::byte> token);
 
-    // Takes in what the server sent, answering it, and once welcomed tells it the player's feet
-    // are at `feet`; nothing while they have none, flying about to look at the world.
-    void look(std::optional<WorldPosition> feet, MonotonicClock::time_point now);
+    // Takes in what the server sent, answering it, and once welcomed tells it where the player
+    // is, when given.
+    void look(std::optional<Whereabouts> player, MonotonicClock::time_point now);
 
     // Where the server put the player back to since last asked, once for each time.
     [[nodiscard]] std::optional<WorldPosition> take_correction() noexcept {
         return std::exchange(correction_, std::nullopt);
+    }
+    // Where the server says the player was when they last left, once.
+    [[nodiscard]] std::optional<protocol::Placed> take_placed() noexcept {
+        return std::exchange(placed_, std::nullopt);
     }
 
     // The newest weather the server sent since last asked, once.
@@ -108,6 +120,7 @@ private:
     std::uint32_t moves_ = 0;
     std::uint32_t corrections_ = 0;
     std::optional<WorldPosition> correction_;
+    std::optional<protocol::Placed> placed_;
     std::optional<protocol::Weather> weather_;
     std::optional<protocol::Woodlands> woodlands_;
     std::vector<ChatLine> chat_;

@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <numbers>
 #include <optional>
 
 namespace hog::client {
@@ -34,6 +36,9 @@ Flight carried(Flight flight) {
         along_ground(glm::normalize(flight.eye.metres()), flight.heading).value_or(flight.heading);
     return flight;
 }
+
+// Facing is sent in 65536ths of a turn.
+constexpr double per_radian = 65'536.0 / (2.0 * std::numbers::pi);
 
 } // namespace
 
@@ -78,6 +83,25 @@ Flight carried_to(const Flight& flight, WorldPosition eye) {
     Flight moved = flight;
     moved.eye = eye;
     return carried(moved);
+}
+
+protocol::Facing facing_of(const Flight& flight) {
+    const planet::TangentFrame frame = planet::tangent_frame(flight.eye.metres());
+    const double turned =
+        std::atan2(glm::dot(flight.heading, frame.east), glm::dot(flight.heading, frame.north));
+    const double pitch = std::clamp(flight.pitch * per_radian, -32'768.0, 32'767.0);
+    // Wrapped round the turn, so a heading just west of north is near the top.
+    return {.heading = static_cast<std::uint16_t>(std::lround(turned * per_radian) & 0xFFFF),
+            .pitch = static_cast<std::int16_t>(std::lround(pitch))};
+}
+
+Flight faced(const Flight& flight, protocol::Facing facing) {
+    const planet::TangentFrame frame = planet::tangent_frame(flight.eye.metres());
+    const double turned = static_cast<double>(facing.heading) / per_radian;
+    Flight next = flight;
+    next.heading = (frame.east * std::sin(turned)) + (frame.north * std::cos(turned));
+    next.pitch = static_cast<double>(facing.pitch) / per_radian;
+    return next;
 }
 
 render::Camera flight_camera(const Flight& flight, double vertical_fov) {

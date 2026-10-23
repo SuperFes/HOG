@@ -517,13 +517,13 @@ public:
         return connection;
     }
 
-    // Tells the server where the player's feet are, once in; nothing while they're flying.
-    void look(std::optional<WorldPosition> feet, MonotonicClock::time_point now) {
+    // Tells the server where the player is, once in.
+    void look(const client::Whereabouts& player, MonotonicClock::time_point now) {
         if (login_) {
             look_at_login(*login_);
         }
         if (session_) {
-            session_->look(feet, now);
+            session_->look(player, now);
         }
     }
 
@@ -646,13 +646,16 @@ private:
     MonotonicClock::time_point looked_ = MonotonicClock::now();
 };
 
-// Sends the server where the player's feet are, puts them back where it says, and takes the
-// weather and chat it sends, chat censored unless the player turned that off.
+// Sends the server where the player's feet are, or their eye flying, puts them back where it
+// says, and takes the weather and chat it sends, chat censored unless the player turned that off.
 void report(Connection& connection, std::optional<client::Player>& player,
-            client::Forecast& forecast, ChatBox& chat, bool filter,
+            const client::Flight& flight, client::Forecast& forecast, ChatBox& chat, bool filter,
             MonotonicClock::time_point now) {
     HOG_ZONE("network");
-    connection.look(player ? std::optional{player->feet()} : std::nullopt, now);
+    connection.look({.at = player ? player->feet() : flight.eye,
+                     .stance = player ? protocol::Stance::Walking : protocol::Stance::Flying,
+                     .facing = client::facing_of(flight)},
+                    now);
     if (const auto back = connection.take_correction(); back && player) {
         player->place(*back);
     }
@@ -812,7 +815,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
         times.add(passed, scene.timings());
         shaders.look(device, now);
         take_part(controls, player, flight, camera, world);
-        report(connection, player, forecast, chat, options.chat_filter, now);
+        report(connection, player, flight, forecast, chat, options.chat_filter, now);
         if (const auto woodlands = connection.take_woodlands()) {
             scene.fare(*woodlands);
         }

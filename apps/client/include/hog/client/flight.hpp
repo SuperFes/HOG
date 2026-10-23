@@ -1,6 +1,7 @@
 #pragma once
 
 #include <hog/core/math.hpp>
+#include <hog/protocol/messages.hpp>
 #include <hog/render/camera.hpp>
 #include <hog/render/vulkan.hpp>
 #include <hog/terrain/selection.hpp>
@@ -52,6 +53,11 @@ struct FlySettings {
 
 // The eye moved to `eye`, still facing the same way along the ground.
 [[nodiscard]] Flight carried_to(const Flight& flight, WorldPosition eye);
+
+// Which way the flight looks, as the server keeps it.
+[[nodiscard]] protocol::Facing facing_of(const Flight& flight);
+// Looking as `facing` says, at its eye.
+[[nodiscard]] Flight faced(const Flight& flight, protocol::Facing facing);
 
 [[nodiscard]] render::Camera flight_camera(const Flight& flight, double vertical_fov);
 
