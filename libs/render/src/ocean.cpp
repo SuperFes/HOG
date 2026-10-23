@@ -233,17 +233,14 @@ constexpr std::array descriptors{waves_descriptor, shore_descriptor,  fetch_desc
                                  foam_descriptor,  ripple_descriptor, rain_descriptor};
 constexpr std::array air_descriptors{
     binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
-    binding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
+    // Read where drawing from in the water too.
+    binding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT),
     binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
     binding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
     binding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-    binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-    waves_descriptor,
-    shore_descriptor,
-    fetch_descriptor,
-    foam_descriptor,
-    ripple_descriptor,
-    rain_descriptor,
+    binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER), waves_descriptor, shore_descriptor,
+    fetch_descriptor, foam_descriptor, ripple_descriptor, rain_descriptor,
     binding(behind_binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
     binding(behind_binding + 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)};
 

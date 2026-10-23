@@ -604,7 +604,8 @@ float4 fragment_deep(Surface surface) : SV_Target {
     return float4(deep_water(surface), 1.0);
 }
 
-// A triangle covering the whole picture at the near plane, where nothing drawn hides it.
+// A triangle covering the whole picture at the near plane, where nothing drawn hides it; none
+// where the eye stands too far out of the water for any of the near plane to be in it.
 struct Screen {
     float4 position : SV_Position;
     float2 clip;
@@ -613,8 +614,14 @@ struct Screen {
 [shader("vertex")]
 Screen vertex_screen(uint id: SV_VertexID) {
     const float2 clip = (float2((id << 1) & 2, id & 2) * 2.0) - 1.0;
+    float reach = 0.0;
+    for (int corner = 0; corner < 4; ++corner) {
+        const float2 at = float2(corner & 1, corner >> 1) * 2.0 - 1.0;
+        const float4 near = mul(lighting.eye_from_clip, float4(at, 1.0, 1.0));
+        reach = max(reach, length(near.xyz / near.w));
+    }
     Screen screen;
-    screen.position = float4(clip, 1.0, 1.0);
+    screen.position = lighting.water.w > reach ? float4(0.0, 0.0, 1.0, 1.0) : float4(clip, 1.0, 1.0);
     screen.clip = clip;
     return screen;
 }
