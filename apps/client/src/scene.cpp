@@ -424,7 +424,7 @@ terrain::StreamFrame Scene::stream_ground(const terrain::Viewpoint& seen) {
     if (!stream_.settled() || seen != selected_from_) {
         selected_ = terrain::select_patches(seen, seen.bend.radius,
                                             {.only_in_view = false, .seabed_unseen = seabed_unseen},
-                                            stream_.known_heights(), jobs_);
+                                            stream_.known_ground(), jobs_);
         selected_from_ = seen;
     }
     terrain::StreamFrame streamed = stream_.update(selected_);

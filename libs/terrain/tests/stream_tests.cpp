@@ -37,11 +37,11 @@ constexpr CellId parent = CellId::from_face_ij(2, 5, 9, 6);
 // Baking the selection straight away, without coarser ground first.
 constexpr hog::terrain::StreamSettings fine_first{.coarse_steps = 0};
 
-Patch fake_bake(CellId cell, HeightRange heights = {}) {
+Patch fake_bake(CellId cell, HeightRange heights = {}, double coarser_error = 0.0) {
     return {.cell = cell,
             .origin = hog::WorldPosition{hog::planet::cell_center(cell) * radius},
             .heights = heights,
-            .coarser_error = 0.0,
+            .coarser_error = coarser_error,
             .vertices = {}};
 }
 
@@ -242,7 +242,7 @@ TEST_CASE("turning on the spot never turns what's drawn coarser", "[terrain][str
             baking.pop_front();
         }
         const auto selected = hog::terrain::select_patches(
-            view, radius, {.only_in_view = only_in_view}, stream.known_heights());
+            view, radius, {.only_in_view = only_in_view}, stream.known_ground());
         const StreamFrame streamed = stream.update(selected);
         for (const CellId cell : streamed.bakes) {
             baking.emplace_back(frame + bake_frames, cell);
@@ -353,8 +353,8 @@ TEST_CASE("heights are known from bakes, and a parent's from all its children's"
     stream.baked(fake_bake(parent, {.lowest = 5.0, .highest = 90.0}));
     stream.baked(fake_bake(parent.child(0), {.lowest = 0.0, .highest = 100.0}));
     CHECK(stream.heights(parent) == HeightRange{.lowest = 5.0, .highest = 90.0});
-    const auto known = stream.known_heights();
-    CHECK(known(parent) == stream.heights(parent));
+    const auto known = stream.known_ground();
+    CHECK(known(parent).value_or(hog::terrain::GroundBounds{}).heights == stream.heights(parent));
 }
 
 TEST_CASE("edges towards nothing drawn keep the selection's stitching", "[terrain][stream]") {
@@ -472,12 +472,13 @@ TEST_CASE("ground of unknown heights is bounded by its nearest known ancestor's,
     const double spacing = radius * std::numbers::pi / 2.0 / 2'048.0;
     const CellId inside = parent.child(1).child(2);
     REQUIRE(stream.bounds(inside));
-    const HeightRange bounds = stream.bounds(inside).value_or(HeightRange{});
+    const HeightRange bounds = stream.bounds(inside).value_or(hog::terrain::GroundBounds{}).heights;
     CHECK(bounds.lowest == Approx(10.0 - (2.0 * spacing)));
     CHECK(bounds.highest == Approx(20.0 + (2.0 * spacing)));
-    CHECK(stream.known_heights()(inside) == bounds);
+    CHECK(stream.known_ground()(inside) == stream.bounds(inside));
     CHECK(!stream.heights(inside));
-    CHECK(stream.bounds(parent) == HeightRange{.lowest = 10.0, .highest = 20.0});
+    CHECK(stream.bounds(parent).value_or(hog::terrain::GroundBounds{}).heights ==
+          HeightRange{.lowest = 10.0, .highest = 20.0});
     CHECK(!stream.bounds(parent.parent()));
     CHECK(!stream.bounds(CellId::from_face_ij(4, 1, 1, 6).child(0)));
 }
@@ -546,4 +547,35 @@ TEST_CASE("a stream with bakes to do isn't settled", "[terrain][stream]") {
     CHECK(drawn(rebaking) == children(parent));
     stream.baked(fake_bake(parent.child(2)));
     CHECK_FALSE(stream.settled());
+}
+
+TEST_CASE("how far the ground strays from a patch is known from its children once all are baked",
+          "[terrain][stream]") {
+    PatchStream stream{fine_first};
+    const auto error = [&](CellId cell) {
+        return stream.bounds(cell)
+            .value_or(hog::terrain::GroundBounds{.heights = {}, .error = -1.0})
+            .error;
+    };
+    // Its own bake overstates it, measuring a grid twice as coarse.
+    stream.baked(fake_bake(parent, {}, 8.0));
+    CHECK(error(parent) == 8.0);
+    // Ground not yet baked is taken to be as rough as its nearest known ancestor's.
+    CHECK(error(parent.child(2).child(1)) == 8.0);
+    for (int child = 0; child < 4; ++child) {
+        stream.baked(fake_bake(parent.child(child), {}, 1.0 + child));
+    }
+    // Each child measures how far the parent strays over it.
+    CHECK(error(parent) == 4.0);
+    CHECK(error(parent.child(3)) == 4.0);
+    // Baked again, it keeps what its children measured.
+    stream.baked(fake_bake(parent, {}, 8.0));
+    CHECK(error(parent) == 4.0);
+    // Bounding its children unbaked, a parent's comes from them too.
+    const CellId other = parent.child(1).child(2);
+    REQUIRE_FALSE(stream.heights(other));
+    for (int child = 0; child < 4; ++child) {
+        stream.baked(fake_bake(other.child(child), {}, 0.5));
+    }
+    CHECK(error(other) == 0.5);
 }

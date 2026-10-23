@@ -104,8 +104,15 @@ void PatchStream::baked(Patch patch) {
     if (outdated_.erase(patch.cell) != 0) {
         return;
     }
-    heights_.insert_or_assign(
-        patch.cell, Known{.heights = patch.heights, .spacing = spacing_of(patch), .baked = true});
+    Known known{.heights = patch.heights,
+                .spacing = spacing_of(patch),
+                .baked = true,
+                .error = patch.coarser_error,
+                .coarser = patch.coarser_error};
+    if (const auto children = from_children(patch.cell)) {
+        known.error = children->error;
+    }
+    heights_.insert_or_assign(patch.cell, known);
     spread_heights(patch.cell);
     if (!fresh(patch.cell)) {
         waiting_.push_back(std::move(patch));
@@ -132,19 +139,21 @@ std::optional<HeightRange> PatchStream::heights(planet::CellId cell) const {
     return found == heights_.end() ? std::nullopt : std::optional{found->second.heights};
 }
 
-std::optional<HeightRange> PatchStream::bounds(planet::CellId cell) const {
+std::optional<GroundBounds> PatchStream::bounds(planet::CellId cell) const {
     for (int level = cell.level(); level >= 0; --level) {
         const auto found = heights_.find(cell.parent(level));
         if (found == heights_.end()) {
             continue;
         }
+        const Known& known = found->second;
         if (level == cell.level()) {
-            return found->second.heights;
+            return GroundBounds{.heights = known.heights, .error = known.error};
         }
         // Finer ground can rise and fall between the ancestor's vertices.
-        const double margin = settings_.margin * found->second.spacing;
-        return HeightRange{.lowest = found->second.heights.lowest - margin,
-                           .highest = found->second.heights.highest + margin};
+        const double margin = settings_.margin * known.spacing;
+        return GroundBounds{.heights = {.lowest = known.heights.lowest - margin,
+                                        .highest = known.heights.highest + margin},
+                            .error = known.error};
     }
     return std::nullopt;
 }
@@ -166,28 +175,44 @@ planet::CellId PatchStream::to_bake(planet::CellId cell) const {
     return cell.parent(known + settings_.coarse_steps);
 }
 
+std::optional<PatchStream::Known> PatchStream::from_children(planet::CellId cell) const {
+    if (cell.level() >= planet::max_level) {
+        return std::nullopt;
+    }
+    Known bounds{.heights = {.lowest = std::numeric_limits<double>::infinity(),
+                             .highest = -std::numeric_limits<double>::infinity()},
+                 .spacing = 0.0,
+                 .baked = false,
+                 .error = 0.0,
+                 .coarser = 0.0};
+    for (int index = 0; index < 4; ++index) {
+        const auto child = heights_.find(cell.child(index));
+        if (child == heights_.end()) {
+            return std::nullopt;
+        }
+        const Known& known = child->second;
+        bounds.heights.lowest = std::min(bounds.heights.lowest, known.heights.lowest);
+        bounds.heights.highest = std::max(bounds.heights.highest, known.heights.highest);
+        bounds.spacing = std::max(bounds.spacing, known.spacing);
+        bounds.error = std::max(bounds.error, known.coarser);
+    }
+    bounds.coarser = 2.0 * bounds.error;
+    return bounds;
+}
+
 void PatchStream::spread_heights(planet::CellId cell) {
     // A parent's vertices are all its children's too.
     while (!cell.is_face()) {
         const planet::CellId parent = cell.parent();
-        if (const auto own = heights_.find(parent); own != heights_.end() && own->second.baked) {
+        const auto bounds = from_children(parent);
+        if (!bounds) {
             return;
         }
-        Known bounds{.heights = {.lowest = std::numeric_limits<double>::infinity(),
-                                 .highest = -std::numeric_limits<double>::infinity()},
-                     .spacing = 0.0,
-                     .baked = false};
-        for (int index = 0; index < 4; ++index) {
-            const auto child = heights_.find(parent.child(index));
-            if (child == heights_.end()) {
-                return;
-            }
-            bounds.heights.lowest = std::min(bounds.heights.lowest, child->second.heights.lowest);
-            bounds.heights.highest =
-                std::max(bounds.heights.highest, child->second.heights.highest);
-            bounds.spacing = std::max(bounds.spacing, child->second.spacing);
+        if (const auto own = heights_.find(parent); own != heights_.end() && own->second.baked) {
+            own->second.error = bounds->error;
+            return;
         }
-        heights_.insert_or_assign(parent, bounds);
+        heights_.insert_or_assign(parent, *bounds);
         cell = parent;
     }
 }

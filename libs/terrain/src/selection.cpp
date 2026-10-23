@@ -75,7 +75,7 @@ struct Bounds {
 class Selector {
 public:
     Selector(const Viewpoint& view, double planet_radius, const SelectionSettings& settings,
-             const KnownHeights& known)
+             const KnownGround& known)
         : settings_(settings), known_(&known), planet_radius_(planet_radius),
           drawn_radius_(view.bend.faked == view.bend.radius ? planet_radius : view.bend.faked),
           squeeze_(planet_radius / drawn_radius_), lowest_(drawn_radius_ + settings.lowest),
@@ -152,9 +152,9 @@ public:
         const double angle = std::acos(std::max(along_middle, -1.0));
         double highest = settings_.highest;
         double lowest = settings_.lowest;
-        if (const auto heights = *known_ ? (*known_)(cell) : std::nullopt) {
-            highest = heights->highest;
-            lowest = heights->lowest;
+        if (const auto ground = *known_ ? (*known_)(cell) : std::nullopt) {
+            highest = ground->heights.highest;
+            lowest = ground->heights.lowest;
         }
         const double spacing = edge * (planet_radius_ + highest) / patch_cells;
         // Triangles sag below their vertices towards the centre, most midway along a diagonal;
@@ -266,7 +266,7 @@ public:
 
 private:
     SelectionSettings settings_;
-    const KnownHeights* known_;
+    const KnownGround* known_;
     double planet_radius_;
     double drawn_radius_;
     double squeeze_; // the planet's radius over the drawn one
@@ -365,7 +365,7 @@ void balance(std::vector<planet::CellId>& leaves, jobs::JobSystem* jobs) {
 
 std::vector<SelectedPatch> select_patches(const Viewpoint& view, double planet_radius,
                                           const SelectionSettings& settings,
-                                          const KnownHeights& known, jobs::JobSystem* jobs) {
+                                          const KnownGround& known, jobs::JobSystem* jobs) {
     HOG_ZONE("select patches");
     const Selector selector{view, planet_radius, settings, known};
     const std::vector<std::pair<planet::CellId, Bounds>> refined = selector.refine(jobs);

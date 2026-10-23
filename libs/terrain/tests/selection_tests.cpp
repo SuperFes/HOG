@@ -210,8 +210,9 @@ TEST_CASE("a ground range out of order is refused", "[terrain][selection]") {
 TEST_CASE("ground known to lie low draws fewer patches from above", "[terrain][selection]") {
     const DVec3 eye = somewhere * (radius + 20'000.0);
     const auto view = looking(eye, (somewhere * radius) + (level_with(eye) * 30'000.0) - eye);
-    const hog::terrain::KnownHeights lowland = [](CellId) {
-        return hog::terrain::HeightRange{.lowest = 0.0, .highest = 50.0};
+    const hog::terrain::KnownGround lowland = [](CellId) {
+        return hog::terrain::GroundBounds{.heights = {.lowest = 0.0, .highest = 50.0},
+                                          .error = 0.0};
     };
     const auto assumed = select_patches(view, radius);
     const auto known = select_patches(view, radius, {}, lowland);
@@ -223,8 +224,9 @@ TEST_CASE("ground known to lie low draws fewer patches from above", "[terrain][s
 TEST_CASE("ground known to stand higher than assumed is drawn finer", "[terrain][selection]") {
     const DVec3 eye = somewhere * (radius + 12'000.0);
     const auto view = looking(eye, -somewhere);
-    const hog::terrain::KnownHeights plateau = [](CellId) {
-        return hog::terrain::HeightRange{.lowest = 11'000.0, .highest = 11'500.0};
+    const hog::terrain::KnownGround plateau = [](CellId) {
+        return hog::terrain::GroundBounds{.heights = {.lowest = 11'000.0, .highest = 11'500.0},
+                                          .error = 0.0};
     };
     CHECK(finest(select_patches(view, radius, {}, plateau)) > finest(select_patches(view, radius)));
 }
@@ -240,8 +242,8 @@ TEST_CASE("ground known to lie low hides sooner past the horizon", "[terrain][se
         }
         return angle;
     };
-    const hog::terrain::KnownHeights flat = [](CellId) {
-        return hog::terrain::HeightRange{.lowest = 0.0, .highest = 1.0};
+    const hog::terrain::KnownGround flat = [](CellId) {
+        return hog::terrain::GroundBounds{.heights = {.lowest = 0.0, .highest = 1.0}, .error = 0.0};
     };
     CHECK(farthest(select_patches(view, radius, {}, flat)) <
           farthest(select_patches(view, radius)));
@@ -404,9 +406,10 @@ TEST_CASE("selecting on a pool picks just what selecting alone does", "[terrain]
     hog::jobs::JobSystem jobs{4};
     const hog::terrain::SelectionSettings all_round{.only_in_view = false, .seabed_unseen = 0.01};
     // Known heights narrower than assumed, so they're asked for from every thread.
-    const hog::terrain::KnownHeights known = [](CellId cell) {
+    const hog::terrain::KnownGround known = [](CellId cell) {
         return cell.level() % 2 == 0
-                   ? std::optional{hog::terrain::HeightRange{.lowest = -50.0, .highest = 300.0}}
+                   ? std::optional{hog::terrain::GroundBounds{
+                         .heights = {.lowest = -50.0, .highest = 300.0}, .error = 2.0}}
                    : std::nullopt;
     };
     for (const Viewpoint& view : {walking(1.7, level_with(somewhere)), walking(40.0, -somewhere),

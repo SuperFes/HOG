@@ -49,9 +49,19 @@ struct SelectionSettings {
     double seabed_unseen = 0.0;
 };
 
-// What some cells' patches are known to keep between, such as from baking them, tighter than the
-// settings' range. A patch's ground lies within its children's.
-using KnownHeights = std::function<std::optional<HeightRange>(planet::CellId)>;
+// What's known of a cell's ground, such as from baking it.
+struct GroundBounds {
+    // What its patch keeps between, tighter than the settings' range. A patch's ground lies within
+    // its children's.
+    HeightRange heights;
+    // Metres the ground strays at most from its patch, the vertices joined straight.
+    double error = 0.0;
+
+    friend bool operator==(const GroundBounds&, const GroundBounds&) = default;
+};
+
+// What's known of some cells' ground.
+using KnownGround = std::function<std::optional<GroundBounds>(planet::CellId)>;
 
 struct SelectedPatch {
     planet::CellId cell;
@@ -69,7 +79,7 @@ struct SelectedPatch {
 // Nearest first. Spread over the pool if given one.
 [[nodiscard]] std::vector<SelectedPatch> select_patches(const Viewpoint& view, double planet_radius,
                                                         const SelectionSettings& settings = {},
-                                                        const KnownHeights& known = {},
+                                                        const KnownGround& known = {},
                                                         jobs::JobSystem* jobs = nullptr);
 
 } // namespace hog::terrain

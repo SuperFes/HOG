@@ -99,7 +99,7 @@ TEST_CASE("a view streamed from the world settles on what it selects, changes an
             for (Patch& patch : baker.collect()) {
                 stream.baked(std::move(patch));
             }
-            selected = select_patches(view, radius, {}, stream.known_heights());
+            selected = select_patches(view, radius, {}, stream.known_ground());
             frame = stream.update(selected);
             for (const CellId cell : frame.evicted) {
                 uploaded.erase(cell);

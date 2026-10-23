@@ -41,7 +41,7 @@ TEST_CASE("selecting and streaming the ground", "[benchmark]") {
     const hog::terrain::SelectionSettings settings{.only_in_view = false, .seabed_unseen = 0.002};
 
     const auto select = [&](hog::jobs::JobSystem* pool) {
-        return hog::terrain::select_patches(view, radius, settings, stream.known_heights(), pool);
+        return hog::terrain::select_patches(view, radius, settings, stream.known_ground(), pool);
     };
     // Until every bake the view asks for is held.
     for (bool settled = false; !settled;) {

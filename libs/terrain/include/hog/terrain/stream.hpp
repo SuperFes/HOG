@@ -77,10 +77,11 @@ public:
 
     // Of a patch baked so far, or bounding one whose children have all been.
     [[nodiscard]] std::optional<HeightRange> heights(planet::CellId cell) const;
-    // heights(), or else its nearest ancestor's with the margin, as far as anything's known.
-    [[nodiscard]] std::optional<HeightRange> bounds(planet::CellId cell) const;
+    // heights(), or else its nearest ancestor's with the margin, as far as anything's known; with
+    // how far the ground strays from its patch, or from its ancestor's, which is rougher.
+    [[nodiscard]] std::optional<GroundBounds> bounds(planet::CellId cell) const;
     // bounds(), for selection, for as long as the stream lives.
-    [[nodiscard]] KnownHeights known_heights() const {
+    [[nodiscard]] KnownGround known_ground() const {
         return [this](planet::CellId cell) { return bounds(cell); };
     }
 
@@ -94,6 +95,12 @@ private:
         HeightRange heights;
         double spacing = 0.0; // metres between the vertices the heights were taken from
         bool baked = false;   // rather than bounding its children
+        // Metres the ground strays from its patch: as its children measured, once all of them
+        // have, or else as from a level coarser, which overstates it.
+        double error = 0.0;
+        // Metres the ground strays from its parent's patch, as a bake measures it; twice its own
+        // otherwise.
+        double coarser = 0.0;
     };
 
     // Held cells covering the selection, without overlapping, with the least distance of what
@@ -116,6 +123,8 @@ private:
     wanted_waiting(std::span<const SelectedPatch> selected) const;
     void arrive(std::span<const SelectedPatch> selected, StreamFrame& frame);
     void spread_heights(planet::CellId cell);
+    // The most the ground strays from the patch over all four children, if they're all known.
+    [[nodiscard]] std::optional<Known> from_children(planet::CellId cell) const;
 
     StreamSettings settings_;
     // Looked up for every patch selected, every frame, but changed by a few at most.
