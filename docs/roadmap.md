@@ -224,7 +224,8 @@ This phase builds a client that flies over the generated planet with a real sky.
 
 - [ ] A particle system on the GPU: emitters spawn, a compute pass moves (gravity, drag, the wind, the current) and retires them, drawn as soft sprites lit by the same sky light, haze and water as everything else; budgets per effect and per frame, scaled by the quality setting
 - [ ] Splashes first, to prove it: water thrown up where feet and bodies break the surface, by how fast they cross it
-- [ ] Then, each its own small effect: spray blown off breaking crests and surf, rain splashing on ground and leaves, dust kicked up from dry ground and blown off it in a gale, drifting motes under the sea, drops on the lens, sparks and embers from fires, falling leaves in autumn and in the wind
+- [ ] Then, each its own small effect: spray blown off breaking crests and surf, rain splashing on ground and leaves, dust kicked up from dry ground and blown off it in a gale, drifting motes under the sea, drops on the lens, fire and smoke with its sparks and embers, falling leaves in autumn and in the wind
+- [ ] Spells drawn by the same system: what a spell gathers, shapes and releases (Phase 7's magic) given to emitters as data, so players' own spells look like what they do
 
 **Water clarity**
 
@@ -564,7 +565,8 @@ Plugs into the calendar and the sky. Like the moons, it's a function of the worl
 - [ ] Ambient occlusion: dark under trees, in creases and doorways, and where feet and rocks meet the ground, at reduced resolution
 - [ ] Local lights: fires, torches, lanterns and lit windows at night, many small lights culled in clusters on the GPU, flickering as flames do, the nearest few casting shadows
 - [ ] Light shafts: sunbeams through gaps in the clouds, through tree canopies and down through the sea's surface, from the cloud and shadow maps already made
-- [ ] Lightning: bolts to the ground and within the clouds, lighting the clouds from inside and the land for an instant, with thunder from the sound's distance
+- [ ] Lightning from the weather's storms: the server rolls strikes from each cell's storm strength (the same odds that start forest fires) and sends each as a time, a place and a seed, so everyone sees the same bolt; flashes within the clouds several times as often as strikes to the ground, and tall, high, lone things struck first
+- [ ] Lightning as it looks: a channel grown from the seed, kinked at every scale with branches that die out short of the ground (a dielectric-breakdown look without the solver); a flash of three or four strokes 40–150 ms apart, the first lighting every branch, the rest only the main channel, some held glowing for a tenth of a second; drawn far brighter than the sky so the glare spreads it, blurred and dimmed by the rain and haze it shines through, hidden inside the clouds it lights from within; the land, the sea and the clouds lit by it for each stroke, and far storms flashing on cloud tops past the horizon
 - [ ] Eyes that adapt: exposure following the scene's light, slowly into the dark and quickly into the bright, and bloom round bright lights against the night
 - [ ] Reflections of what's near in wet ground and still water, from the screen, falling back to the sky map
 
@@ -604,7 +606,8 @@ Can start any time after Phase 4. Sound is driven by the same world state that's
 - [ ] Layered ambience beds: crossfaded loops picked by biome, weather, time of day and the listener's height, so the forest, the open sea and a storm each have their own bed
 - [ ] The sea as it's drawn: a far roar from how much surf breaks within a kilometre, darker with distance; nearby breaking crests and whitecaps as single crashes where and when the wave function breaks them; the swash's hiss rising and falling with each surge, and the fizz of foam left as it draws back; a lake's lap against the shore from its fetch; all read from the CPU wave function, never the GPU
 - [ ] Wind: gusting with the weather, louder through trees by how wooded the ground is and how much they sway, whistling over ridges
-- [ ] Rain and snow: on water, on leaves, on rock and on whatever's overhead, thunder delayed by the flash's distance
+- [ ] Rain and snow: on water, on leaves, on rock and on whatever's overhead
+- [ ] Thunder made from the bolt that was drawn: every stretch of the channel sends out a pressure pulse as the stroke passes, each heard at its own distance's delay, so stretches broadside to the listener arrive together as claps and those end-on draw out into rumble; a close strike's tearing crack, the highs lost with distance, echoes off hills and cliffs; heard to about 15 km as the air bends it upward, farther with a sharper clap where cold air lies under warm, and silent flashes beyond
 - [ ] Hulls in the water: slaps where the wave function strikes the hull faster than it rides, a bow wave's rush with speed, creaking under load (with boats in Phase 7)
 - [ ] Birds and animals: calls from the ecology's populations round the listener, a dawn chorus and dusk, seabirds over the shore, each species' calls placed in the trees and the sky; silence where nothing lives
 - [ ] Footsteps and bodies: by the ground's material and wetness, wading and swimming splashes from the water's height at the feet
