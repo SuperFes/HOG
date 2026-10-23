@@ -1,5 +1,6 @@
 #include <hog/core/assert.hpp>
 #include <hog/planet/climate.hpp>
+#include <hog/render/barrier.hpp>
 #include <hog/render/device.hpp>
 #include <hog/render/grass.hpp>
 #include <hog/shaders/grass.hpp>
@@ -43,13 +44,26 @@ constexpr VkDescriptorSetLayoutBinding binding(std::uint32_t at, VkDescriptorTyp
 constexpr std::array descriptors{
     binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
             VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT),
-    binding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT),
     binding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT),
-    binding(3, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT),
+    binding(3, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT),
     binding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
     binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
-    binding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)};
+    binding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
+    binding(9, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT)};
+
+constexpr std::array growing_descriptors{
+    binding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT),
+    binding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT),
+    binding(3, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT),
+    binding(7, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT),
+    binding(8, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT)};
+
+// As the shader packs a grown blade.
+constexpr VkDeviceSize blade_bytes = 48;
+// Six vertices, the blades grown, then neither first vertex nor first instance.
+constexpr std::array<std::uint32_t, 4> no_blades{6, 0, 0, 0};
+// Threads in each of the shader's groups.
+constexpr std::uint32_t group_size = 64;
 
 // Each biome's blades: colour in linear light and height, then the share grown and their width;
 // and how it thins, as density, hold and far.
@@ -174,28 +188,114 @@ Result<Grass> Grass::create(Device& device, VkFormat colour_format, VkFormat dep
         return std::unexpected(std::move(pipeline).error());
     }
     grass.pipeline_ = std::move(pipeline).value();
+
+    auto growing = make_compute_pipeline(device, {.spirv = shaders::grass,
+                                                  .push_constant_bytes = sizeof(Push),
+                                                  .descriptors = growing_descriptors});
+    if (!growing) {
+        return std::unexpected(std::move(growing).error());
+    }
+    grass.growing_ = std::move(growing).value();
+    auto blades = make_buffer(device, blade_bytes * most_grown_blades,
+                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, Memory::Gpu);
+    if (!blades) {
+        return std::unexpected(std::move(blades).error());
+    }
+    grass.blades_ = std::move(blades).value();
+    auto grown_draw =
+        make_buffer(device, sizeof(no_blades),
+                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
+                        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                    Memory::Gpu);
+    if (!grown_draw) {
+        return std::unexpected(std::move(grown_draw).error());
+    }
+    grass.grown_draw_ = std::move(grown_draw).value();
     return grass;
 }
 
-void Grass::draw(VkCommandBuffer commands, VkExtent2D extent, const TerrainPool& pool,
+namespace {
+
+Push push_for(VkExtent2D extent, const GrassView& view) {
+    const double aspect = static_cast<double>(extent.width) / static_cast<double>(extent.height);
+    return {.clip_from_eye = Mat4{view_projection(view.camera, aspect)},
+            .bend_up = glm::vec4{Vec3{view.bend.up}, static_cast<float>(view.bend.eye_height)},
+            .bend_radii =
+                glm::vec4{static_cast<float>(view.bend.radius), static_cast<float>(view.bend.faked),
+                          static_cast<float>(view.seconds),
+                          static_cast<float>(view.camera.vertical_fov / extent.height)},
+            .wind = glm::vec4{Vec3{view.wind}, 0.0F},
+            .origin = {}};
+}
+
+} // namespace
+
+void Grass::grow(VkCommandBuffer commands, VkExtent2D extent, const TerrainPool& pool,
                  std::span<const GrassDraw> draws, const GrassView& view) const {
-    if (extent.width == 0 || extent.height == 0 || draws.empty()) {
+    // Not until the last frame's draw has read what's grown.
+    memory_barrier(commands,
+                   VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
+                   VK_ACCESS_2_NONE,
+                   VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                   VK_ACCESS_2_NONE);
+    vkCmdUpdateBuffer(commands, grown_draw_.handle(), 0, sizeof(no_blades), no_blades.data());
+    memory_barrier(commands, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                   VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                   VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+    if (extent.width > 0 && extent.height > 0 && !draws.empty()) {
+        Push push = push_for(extent, view);
+        constexpr std::uint32_t cells = static_cast<std::uint32_t>(terrain::patch_cells) *
+                                        static_cast<std::uint32_t>(terrain::patch_cells);
+        vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, growing_.handle());
+        push_uniform_buffer(commands, growing_, 0, settings_.handle());
+        HOG_ASSERT(view.air.lighting != VK_NULL_HANDLE, "growing grass in the wind without it");
+        push_uniform_buffer(commands, growing_, 3, view.air.lighting);
+        push_storage_buffer(commands, growing_, 7, blades_.handle());
+        push_storage_buffer(commands, growing_, 8, grown_draw_.handle());
+        vkCmdPushConstants(commands, growing_.layout(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                           offsetof(Push, wind), &push);
+        for (const GrassDraw& draw : draws) {
+            HOG_ASSERT(draw.slot < pool.capacity(), "growing grass on a slot beyond the pool");
+            HOG_ASSERT(draw.spacing > 0.0 && draw.spacing <= coarsest_grass_cells,
+                       "grass on cells coarser than a draw packs");
+            // As many layers as its nearest cells grow; the shader lets each blade go by its own
+            // distance.
+            const auto layers = static_cast<std::uint32_t>(
+                std::ceil(std::min(grass_layers(tier_, draw.spacing, draw.nearest),
+                                   static_cast<double>(most_blades_per_cell))));
+            if (draw.nearest >= tier_.reach || layers == 0) {
+                continue;
+            }
+            // The patch's own vertices, from an offset aligned for any device: whole pools can
+            // outgrow what a storage binding may span.
+            constexpr VkDeviceSize alignment = 256;
+            const VkDeviceSize begin = VkDeviceSize{draw.slot} * patch_bytes;
+            const VkDeviceSize aligned = begin & ~(alignment - 1);
+            const auto bias = static_cast<std::uint32_t>(begin - aligned);
+            push_storage_buffer(commands, growing_, 1, pool.vertices(), aligned,
+                                bias + patch_bytes);
+            const auto spacing = static_cast<std::uint32_t>(std::lround(draw.spacing * 256.0));
+            push.wind.w = std::bit_cast<float>(draw.seed);
+            push.origin = glm::vec4{relative_to(draw.origin, view.camera.eye),
+                                    std::bit_cast<float>((spacing << 14U) | (bias << 6U) | layers)};
+            vkCmdPushConstants(commands, growing_.layout(), VK_SHADER_STAGE_COMPUTE_BIT,
+                               offsetof(Push, wind), sizeof(Push) - offsetof(Push, wind),
+                               &push.wind);
+            vkCmdDispatch(commands, (cells * layers) / group_size, 1, 1);
+        }
+    }
+    memory_barrier(commands, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                   VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                   VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
+                   VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
+}
+
+void Grass::draw(VkCommandBuffer commands, VkExtent2D extent, const GrassView& view) const {
+    if (extent.width == 0 || extent.height == 0) {
         return;
     }
-    const double aspect = static_cast<double>(extent.width) / static_cast<double>(extent.height);
-    Push push{.clip_from_eye = Mat4{view_projection(view.camera, aspect)},
-              .bend_up = glm::vec4{Vec3{view.bend.up}, static_cast<float>(view.bend.eye_height)},
-              .bend_radii =
-                  glm::vec4{static_cast<float>(view.bend.radius),
-                            static_cast<float>(view.bend.faked), static_cast<float>(view.seconds),
-                            static_cast<float>(view.camera.vertical_fov / extent.height)},
-              .wind = glm::vec4{Vec3{view.wind}, 0.0F},
-              .origin = {}};
+    const Push push = push_for(extent, view);
     constexpr VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    constexpr std::uint32_t blade_vertices = 6;
-    constexpr std::uint32_t cells = static_cast<std::uint32_t>(terrain::patch_cells) *
-                                    static_cast<std::uint32_t>(terrain::patch_cells);
-
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.handle());
     push_uniform_buffer(commands, pipeline_, 0, settings_.handle());
     HOG_ASSERT(view.air.lighting != VK_NULL_HANDLE, "drawing grass lit by the air without it");
@@ -204,34 +304,9 @@ void Grass::draw(VkCommandBuffer commands, VkExtent2D extent, const TerrainPool&
     push_sampled_image(commands, pipeline_, 4, view.air.transmittance, view.air.sampler);
     push_sampled_image(commands, pipeline_, 5, view.air.aerial, view.air.sampler);
     push_sampled_image(commands, pipeline_, 6, view.air.cloud_shadow, view.air.sampler);
-    vkCmdPushConstants(commands, pipeline_.layout(), stages, 0, offsetof(Push, wind), &push);
-    for (const GrassDraw& draw : draws) {
-        HOG_ASSERT(draw.slot < pool.capacity(), "growing grass on a slot beyond the pool");
-        HOG_ASSERT(draw.spacing > 0.0 && draw.spacing <= coarsest_grass_cells,
-                   "grass on cells coarser than a draw packs");
-        // As many layers as its nearest cells grow; the shader lets each blade go by its own
-        // distance.
-        const auto layers = static_cast<std::uint32_t>(
-            std::ceil(std::min(grass_layers(tier_, draw.spacing, draw.nearest),
-                               static_cast<double>(most_blades_per_cell))));
-        if (draw.nearest >= tier_.reach || layers == 0) {
-            continue;
-        }
-        // The patch's own vertices, from an offset aligned for any device: whole pools can
-        // outgrow what a storage binding may span.
-        constexpr VkDeviceSize alignment = 256;
-        const VkDeviceSize begin = VkDeviceSize{draw.slot} * patch_bytes;
-        const VkDeviceSize aligned = begin & ~(alignment - 1);
-        const auto bias = static_cast<std::uint32_t>(begin - aligned);
-        push_storage_buffer(commands, pipeline_, 1, pool.vertices(), aligned, bias + patch_bytes);
-        const auto spacing = static_cast<std::uint32_t>(std::lround(draw.spacing * 256.0));
-        push.wind.w = std::bit_cast<float>(draw.seed);
-        push.origin = glm::vec4{relative_to(draw.origin, view.camera.eye),
-                                std::bit_cast<float>((spacing << 14U) | (bias << 6U) | layers)};
-        vkCmdPushConstants(commands, pipeline_.layout(), stages, offsetof(Push, wind),
-                           sizeof(Push) - offsetof(Push, wind), &push.wind);
-        vkCmdDraw(commands, blade_vertices, cells * layers, 0, 0);
-    }
+    push_storage_buffer(commands, pipeline_, 9, blades_.handle());
+    vkCmdPushConstants(commands, pipeline_.layout(), stages, 0, sizeof(Push), &push);
+    vkCmdDrawIndirect(commands, grown_draw_.handle(), 0, 1, sizeof(no_blades));
 }
 
 } // namespace hog::render

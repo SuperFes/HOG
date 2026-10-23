@@ -24,6 +24,8 @@ inline constexpr double furthest_grass = 4095.0;
 inline constexpr double coarsest_grass_cells = 15.9;
 // Blades grown in one grid cell of a patch at most.
 inline constexpr std::uint32_t most_blades_per_cell = 63;
+// Blades grown in a frame at most, in view; those past it are left out.
+inline constexpr std::uint32_t most_grown_blades = 1U << 19U;
 
 // How grass thins away from the eye: `density` blades a square metre out to `hold` metres,
 // falling with the square of distance beyond, the blades left drawn wider to cover the ground as
@@ -84,16 +86,26 @@ public:
                                               VkFormat depth_format, std::span<const Vec3> palette,
                                               const GrassTier& tier = {});
 
-    // Records drawing into the colour and depth images being rendered to, of `extent`. The draws'
-    // slots must hold patches already uploaded.
-    void draw(VkCommandBuffer commands, VkExtent2D extent, const TerrainPool& pool,
+    // Records growing the frame's blades on the draws' patches, those that may be seen in a view
+    // of `extent`, ready to draw. Recorded outside rendering, after the last frame's draw. The
+    // draws' slots must hold patches already uploaded.
+    void grow(VkCommandBuffer commands, VkExtent2D extent, const TerrainPool& pool,
               std::span<const GrassDraw> draws, const GrassView& view) const;
+    // Records drawing the blades last grown into the colour and depth images being rendered to,
+    // of `extent`, seen as they were grown.
+    void draw(VkCommandBuffer commands, VkExtent2D extent, const GrassView& view) const;
+
+    // The draw's indirect arguments: six vertices, and the blades grown, those left out too.
+    [[nodiscard]] VkBuffer grown_draw() const noexcept { return grown_draw_.handle(); }
 
 private:
     Grass() = default;
 
     Pipeline pipeline_;
+    Pipeline growing_;
     Buffer settings_;
+    Buffer blades_;
+    Buffer grown_draw_;
     GrassTier tier_;
 };
 

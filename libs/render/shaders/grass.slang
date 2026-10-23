@@ -161,8 +161,23 @@ float3 blown(float3 root, float height, uint hash) {
     return along * (height * (laid_over(speed) + (swaying(speed) * sin(phase))));
 }
 
-[shader("vertex")]
-Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
+// A blade as grown for the frame: where it stands and how it's shaped and coloured.
+struct Grown {
+    float3 root;   // from the eye, unbent
+    float above;   // the root's height above sea level
+    float3 across; // the quad's full width at the root, side to side
+    float3 rise;   // root to tip, standing
+    float3 tip;    // how far the wind carries the tip
+    float3 normal; // of the ground under it
+    uint biome;
+    bool reed;
+    float itself; // its true width's share of that drawn
+    float tone;   // its own shade, about 1
+};
+
+// The patch's blade `instance` as it grows this frame, if it grows at all.
+bool grow(uint instance, out Grown grown) {
+    grown = (Grown)0;
     const uint packed = asuint(push.origin.w);
     const uint layers = packed & 63u;
     const uint bias = (packed >> 6) & 0xffu;
@@ -177,6 +192,9 @@ Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     // same however many are grown: thinning lets the last go and moves none.
     const uint cell = instance & ((patch_cells * patch_cells) - 1u);
     const uint layer = instance >> 10;
+    if (layer >= layers) {
+        return false;
+    }
     const uint i = cell >> 5;
     const uint j = cell & 31u;
     const uint hash = hashed(seed ^ instance);
@@ -193,7 +211,7 @@ Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const float kept = min(full * held * held, float(layers));
     const float thinning = saturate((kept - float(layer) - (0.75 * unit(hash + 11u))) * 4.0);
     if (thinning <= 0.0) {
-        return nothing();
+        return false;
     }
     // Those left stand for those gone, as wide as they'd cover together.
     const float stands_for = full / max(kept, 0.25);
@@ -205,13 +223,13 @@ Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const float sown = lerp(spread.x, max(spread.x, pioneers), near.gone) * (1.0 - near.scar);
     const bool lawn_here = kind.w > 0.0 && unit(hash + 2u) < sown;
     if (!lawn_here && spread.w <= 0.0) {
-        return nothing();
+        return false;
     }
     // Sparse biomes grow in clumps rather than an evenly thinned lawn: desert bunchgrass stands
     // in tufts of its own, bare ground between.
     const uint clump = ((i >> 2) << 3) | (j >> 2);
     if (unit(hashed(seed ^ (0x517Cu + clump))) >= spread.z) {
-        return nothing();
+        return false;
     }
     const Corner c00 = corner_at(bias, at);
     const Corner c10 = corner_at(bias, at + patch_side);
@@ -227,15 +245,15 @@ Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     // At the waterline a reed may stand; elsewhere the lawn grows, keeping off the surf.
     const bool reed = spread.w > 0.0 && above >= reed_low && above <= reed_high &&
                       unit(hash + 9u) < spread.w;
-    const float grown = reed ? reed_height * (0.75 + (0.45 * unit(hash + 5u)))
-                             : kind.w * (1.0 + (0.6 * near.gone)) * (0.6 + (0.8 * unit(hash + 5u)));
+    const float tall = reed ? reed_height * (0.75 + (0.45 * unit(hash + 5u)))
+                            : kind.w * (1.0 + (0.6 * near.gone)) * (0.6 + (0.8 * unit(hash + 5u)));
     // Shrinking away under two pixels tall, gone under one, so short grass stays near and tall
     // grass reaches further.
     const float pixel = push.bend_radii.w * length(root);
     const float fade = saturate((fade_far - length(root)) / (fade_far - fade_near)) *
-                       saturate((grown / pixel) - 1.0);
+                       saturate((tall / pixel) - 1.0);
     if (fade <= 0.0 || (!reed && (!lawn_here || above < shore))) {
-        return nothing();
+        return false;
     }
 
     // Leaning its own slight way, facing its own way.
@@ -249,46 +267,169 @@ Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const float3 up = normalize(
         normal + ((reed ? 0.05 : 0.2) * ((beside * cos(leaning)) + (ahead * sin(leaning)))));
 
-    const float height = grown * fade * thinning;
+    const float height = tall * fade * thinning;
     // At least a pixel wide, so far blades don't shatter into bright specks; drawn wider than
     // they are, they wear the ground's colour instead, melting into it.
     const float true_width =
         (reed ? reed_width : spread.y * stands_for) * (0.7 + (0.6 * unit(hash + 6u)));
     const float width = max(true_width, 0.8 * pixel);
-    const float itself = true_width / width;
+
+    grown.root = root;
+    grown.above = above;
+    grown.across = width_dir * width;
+    grown.rise = up * height;
     // Stems are stiff where blades are carried.
-    const float3 tip_away = blown(root, height, hash + 7u) * (reed ? 0.4 : 1.0);
+    grown.tip = blown(root, height, hash + 7u) * (reed ? 0.4 : 1.0);
+    grown.normal = normal;
+    grown.biome = biome;
+    grown.reed = reed;
+    grown.itself = true_width / width;
+    grown.tone = 0.8 + (0.4 * unit(hash + 8u));
+    return true;
+}
+
+// Whether any of a blade may be seen, as far as the view's sides and near plane go.
+bool in_view(Grown grown) {
+    const float3 middle = bent(grown.root + (0.5 * (grown.rise + grown.tip)), push.bend_up,
+                               push.bend_radii.xy);
+    const float reach = (0.5 * length(grown.rise)) + length(grown.tip) + length(grown.across);
+    const float4x4 clip = push.clip_from_eye;
+    const float4 planes[5] = { clip[3] + clip[0], clip[3] - clip[0], clip[3] + clip[1],
+                               clip[3] - clip[1], clip[3] - clip[2] };
+    for (uint plane = 0; plane < 5; ++plane) {
+        const float4 side = planes[plane];
+        if (dot(side.xyz, middle) + side.w < -reach * length(side.xyz)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// The frame's blades, packed: the root and its height above sea level; then the quad's width,
+// rise and tip, the ground's normal, and its kind, as pairs of 16-bit fractions of a span.
+struct Packed {
+    float4 root;
+    uint4 shape;
+    uint4 more;
+};
+
+// Metres either way the quad's width, rise and tip may reach, as packed.
+static const float shape_span = 4.0;
+
+uint pair(float low, float high, float span) {
+    const int2 whole = int2(round(clamp(float2(low, high) / span, -1.0, 1.0) * 32767.0));
+    return (uint(whole.x) & 0xffffu) | (uint(whole.y) << 16);
+}
+
+float low_of(uint both, float span) {
+    return float(int(both << 16) >> 16) * (span / 32767.0);
+}
+
+float high_of(uint both, float span) {
+    return float(int(both) >> 16) * (span / 32767.0);
+}
+
+Packed packed(Grown grown) {
+    Packed out;
+    out.root = float4(grown.root, grown.above);
+    out.shape = uint4(pair(grown.across.x, grown.across.y, shape_span),
+                      pair(grown.across.z, grown.rise.x, shape_span),
+                      pair(grown.rise.y, grown.rise.z, shape_span),
+                      pair(grown.tip.x, grown.tip.y, shape_span));
+    out.more = uint4(pair(grown.tip.z, 0.0, shape_span), pair(grown.normal.x, grown.normal.y, 1.0),
+                     pair(grown.normal.z, grown.itself, 1.0),
+                     grown.biome | (grown.reed ? 0x100u : 0u) |
+                         (uint(round(saturate(grown.tone / 2.0) * 255.0)) << 16));
+    return out;
+}
+
+Grown unpacked(Packed from) {
+    Grown grown;
+    grown.root = from.root.xyz;
+    grown.above = from.root.w;
+    grown.across = float3(low_of(from.shape.x, shape_span), high_of(from.shape.x, shape_span),
+                          low_of(from.shape.y, shape_span));
+    grown.rise = float3(high_of(from.shape.y, shape_span), low_of(from.shape.z, shape_span),
+                        high_of(from.shape.z, shape_span));
+    grown.tip = float3(low_of(from.shape.w, shape_span), high_of(from.shape.w, shape_span),
+                       low_of(from.more.x, shape_span));
+    grown.normal =
+        float3(low_of(from.more.y, 1.0), high_of(from.more.y, 1.0), low_of(from.more.z, 1.0));
+    grown.itself = high_of(from.more.z, 1.0);
+    grown.tone = float((from.more.w >> 16) & 0xffu) * (2.0 / 255.0);
+    grown.biome = min(from.more.w & 0xffu, biome_count - 1);
+    grown.reed = (from.more.w & 0x100u) != 0;
+    return grown;
+}
+
+// The blades grown this frame, as many as it holds, and the draw that draws them: six vertices,
+// and as many instances as were grown, counted as they're added, those past what it holds too.
+[[vk::binding(7, 0)]] RWStructuredBuffer<Packed> grown_blades;
+[[vk::binding(8, 0)]] RWStructuredBuffer<uint> grown_draw;
+// The same blades, as they're drawn.
+[[vk::binding(9, 0)]] StructuredBuffer<Packed> blades;
+
+static const uint group_size = 64;
+
+[shader("compute")]
+[numthreads(group_size, 1, 1)]
+void compute_main(uint3 id: SV_DispatchThreadID) {
+    Grown grown;
+    if (!grow(id.x, grown) || !in_view(grown)) {
+        return;
+    }
+    uint at;
+    InterlockedAdd(grown_draw[1], 1u, at);
+    uint capacity;
+    uint stride;
+    grown_blades.GetDimensions(capacity, stride);
+    if (at < capacity) {
+        grown_blades[at] = packed(grown);
+    }
+}
+
+[shader("vertex")]
+Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
+    uint capacity;
+    uint stride;
+    blades.GetDimensions(capacity, stride);
+    if (instance >= capacity) {
+        return nothing();
+    }
+    const Grown grown = unpacked(blades[instance]);
+    const float4 kind = settings.blade[grown.biome];
 
     // Two triangles tapering to a narrow tip, the tip carried by the wind.
     const uint corner = corners[vertex];
     const float side = (corner & 1u) == 0 ? -0.5 : 0.5;
     const float t = corner < 2 ? 0.0 : 1.0;
-    const float taper = reed ? 0.25 : 0.8;
-    const float3 placed = root + (width_dir * (side * width * (1.0 - (taper * t)))) +
-                          (up * (height * t)) + (tip_away * (t * t));
+    const float taper = grown.reed ? 0.25 : 0.8;
+    const float3 placed = grown.root + (grown.across * (side * (1.0 - (taper * t)))) +
+                          (grown.rise * t) + (grown.tip * (t * t));
 
     Blade blade;
     blade.from_eye = placed;
     blade.drawn = bent(placed, push.bend_up, push.bend_radii.xy);
     blade.position = mul(push.clip_from_eye, float4(blade.drawn, 1.0));
-    blade.normal = normal;
-    blade.height = above;
+    blade.normal = grown.normal;
+    blade.height = grown.above;
     // Darker towards the root, as fields shade themselves; the ground's own tone where the blade
     // is really thinner than drawn.
-    const float its_own = (0.8 + (0.4 * unit(hash + 8u))) * (0.55 + (0.45 * t));
-    const float3 own = reed ? reed_stem : kind.rgb;
-    blade.colour = lerp(kind.rgb * 1.25, own * its_own, itself);
-    blade.head = lerp(kind.rgb * 1.25, reed_head, itself);
+    const float its_own = grown.tone * (0.55 + (0.45 * t));
+    const float3 own = grown.reed ? reed_stem : kind.rgb;
+    blade.colour = lerp(kind.rgb * 1.25, own * its_own, grown.itself);
+    blade.head = lerp(kind.rgb * 1.25, reed_head, grown.itself);
     blade.t_up = t;
-    blade.cut = reed ? head_cut : 2.0;
+    blade.cut = grown.reed ? head_cut : 2.0;
     blade.side = side;
-    blade.stem_half = reed ? lerp(0.5, 0.18, itself) : 1.0;
+    blade.stem_half = grown.reed ? lerp(0.5, 0.18, grown.itself) : 1.0;
     // Blades bent along the wind catch the light on their flanks, so gusts cross far fields as
     // patches of light even where single blades have melted away.
     const float speed = length(push.wind.xyz);
+    const float height = length(grown.rise);
     const float waving =
-        speed > 1e-3 ? dot(tip_away, push.wind.xyz) / (speed * height) : 0.0;
-    blade.colour *= 1.0 + (waving * lerp(0.15, 0.35, 1.0 - itself));
+        speed > 1e-3 && height > 0.0 ? dot(grown.tip, push.wind.xyz) / (speed * height) : 0.0;
+    blade.colour *= 1.0 + (waving * lerp(0.15, 0.35, 1.0 - grown.itself));
     return blade;
 }
 

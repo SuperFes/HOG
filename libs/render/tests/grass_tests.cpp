@@ -4,6 +4,7 @@
 #include <hog/core/math.hpp>
 #include <hog/planet/climate.hpp>
 #include <hog/render/atmosphere.hpp>
+#include <hog/render/barrier.hpp>
 #include <hog/render/grass.hpp>
 #include <hog/render/memory.hpp>
 #include <hog/render/readback.hpp>
@@ -18,6 +19,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <numbers>
 #include <utility>
 #include <vector>
@@ -77,10 +79,12 @@ struct Field {
     hog::planet::Biome blend_biome = hog::planet::Biome::Ocean;
     std::uint8_t blend = 0;
     VkExtent2D size = extent;
+    bool looking_away = false; // west, with the field behind the eye
 };
 
-// The field's grass alone over black, seen from standing height looking slightly down, east.
-Pixels draw(hog::render::Device& device, const Field& grown) {
+// The field's grass alone over black, seen from standing height looking slightly down, east;
+// and the blades grown, where asked.
+Pixels draw(hog::render::Device& device, const Field& grown, std::uint32_t* counted = nullptr) {
     const VkExtent2D frame = grown.size;
     auto atmosphere = hog::render::Atmosphere::create(device);
     REQUIRE(atmosphere);
@@ -101,8 +105,9 @@ Pixels draw(hog::render::Device& device, const Field& grown) {
     const hog::terrain::Bend bend = hog::terrain::bend_from(eye, radius, grown.ground);
     const double elevation = 40.0 * std::numbers::pi / 180.0;
     const DVec3 sun = (east * std::cos(elevation)) + (up * std::sin(elevation));
+    const DVec3 ahead = grown.looking_away ? -east : east;
     const hog::render::Camera camera{
-        .eye = eye, .forward = glm::normalize(east - (up * 0.35)), .up = up, .vertical_fov = 1.2};
+        .eye = eye, .forward = glm::normalize(ahead - (up * 0.35)), .up = up, .vertical_fov = 1.2};
     const hog::atmosphere::Model model;
     const double scale = hog::render::air_scale(model.air(), bend);
     const hog::render::SkyView seen{.camera = camera,
@@ -129,10 +134,14 @@ Pixels draw(hog::render::Device& device, const Field& grown) {
                                          .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
                                          .aspect = VK_IMAGE_ASPECT_DEPTH_BIT});
     REQUIRE(depth);
+    auto count = hog::render::make_buffer(device, 16, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                          hog::render::Memory::Readback);
+    REQUIRE(count);
     REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
         namespace use = hog::render::image_use;
         CHECK(pool->record_uploads(commands, 0));
         CHECK(sky->record_frame(commands, frame, 0, *atmosphere, seen));
+        grass->grow(commands, frame, *pool, {&lawn, 1}, view);
         hog::render::transition(commands, colour->handle(), VK_IMAGE_ASPECT_COLOR_BIT, use::discard,
                                 use::colour_target);
         hog::render::transition(commands, depth->handle(), VK_IMAGE_ASPECT_DEPTH_BIT, use::discard,
@@ -140,9 +149,24 @@ Pixels draw(hog::render::Device& device, const Field& grown) {
         hog::render::begin_rendering(commands, colour->view(), frame,
                                      VkClearColorValue{.float32 = {0.0F, 0.0F, 0.0F, 1.0F}},
                                      {.view = depth->view(), .clear = 0.0F});
-        grass->draw(commands, frame, *pool, {&lawn, 1}, view);
+        grass->draw(commands, frame, view);
         vkCmdEndRendering(commands);
+        hog::render::memory_barrier(commands, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
+                                    VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_COPY_BIT,
+                                    VK_ACCESS_2_TRANSFER_READ_BIT);
+        const VkBufferCopy whole{.srcOffset = 0, .dstOffset = 0, .size = 16};
+        vkCmdCopyBuffer(commands, grass->grown_draw(), count->handle(), 1, &whole);
+        hog::render::memory_barrier(commands, VK_PIPELINE_STAGE_2_COPY_BIT,
+                                    VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_HOST_BIT,
+                                    VK_ACCESS_2_HOST_READ_BIT);
     }));
+    if (counted != nullptr) {
+        REQUIRE(count->invalidate());
+        std::array<std::uint32_t, 4> arguments{};
+        std::memcpy(arguments.data(), count->mapped().data(), sizeof(arguments));
+        CHECK(arguments[0] == 6);
+        *counted = arguments[1];
+    }
     CHECK(device.validation_errors() == 0);
     auto pixels = hog::render::read_pixels(device, *colour, hog::render::image_use::colour_target);
     REQUIRE(pixels);
@@ -350,4 +374,20 @@ TEST_CASE("meadows of tall grass wave in the wind, and lawns, bare ground and wa
     for (const hog::planet::Biome bare : {Tundra, Alpine, Ocean, Beach, Ice, Lake}) {
         CHECK(waving_grass(bare) == 0.0F);
     }
+}
+
+TEST_CASE("only grass that may be seen is grown", "[render]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    std::uint32_t ahead = 0;
+    const Pixels seen = draw(*device, {.away = 10.0}, &ahead);
+    CHECK(lit_pixels(seen) > 0);
+    CHECK(ahead > 0);
+    CHECK(ahead < hog::render::most_grown_blades);
+    std::uint32_t behind = 0;
+    const Pixels unseen = draw(*device, {.away = 10.0, .looking_away = true}, &behind);
+    CHECK(lit_pixels(unseen) == 0);
+    CHECK(behind == 0);
 }

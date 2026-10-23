@@ -158,10 +158,14 @@ private:
     // Wants the depths round the eye, and takes any worked out; or gives the ocean those taken.
     void follow_shore(const Shot& shot);
     Result<> give_shore(VkCommandBuffer commands, std::uint32_t slot);
-    // Adds the grass, bush and tree passes over the drawn patches, blown by `wind`.
+    // Adds the pass growing the grass on the drawn patches, blown by `wind`, ready to draw; false
+    // where none grows.
+    [[nodiscard]] bool grow_grass(render::RenderGraph& graph, const render::Frame& frame,
+                                  const Shot& shot, std::span<const terrain::StreamedPatch> patches,
+                                  const render::AirBindings& air, DVec3 wind);
+    // Adds the grass pass, if `lawn` was grown, and the bush and tree passes, blown by `wind`.
     void grow_vegetation(render::RenderGraph& graph, const render::Frame& frame, const Shot& shot,
-                         std::span<const terrain::StreamedPatch> patches,
-                         std::span<const render::GraphUse> through_air,
+                         bool lawn, std::span<const render::GraphUse> through_air,
                          const render::GraphTargets& drawn, const render::AirBindings& air,
                          DVec3 wind);
 

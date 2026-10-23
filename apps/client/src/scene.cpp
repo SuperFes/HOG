@@ -293,19 +293,38 @@ render::SkyView Scene::sky_view(const Shot& shot, render::CloudShade shade) {
             .daylight = daylight_at(calendar_, shot.time, shot.bend.up)};
 }
 
+bool Scene::grow_grass(render::RenderGraph& graph, const render::Frame& frame, const Shot& shot,
+                       std::span<const terrain::StreamedPatch> patches,
+                       const render::AirBindings& air, DVec3 wind) {
+    HOG_ZONE("grass");
+    const std::vector<render::GrassDraw> lawn =
+        grass_draws(slots_, patches, shot.camera.eye, shot.bend.radius, budget_);
+    if (lawn.empty()) {
+        return false;
+    }
+    graph.add({.name = "grass grown", .uses = {}, .targets = std::nullopt},
+              [&, lawn, wind](VkCommandBuffer commands) {
+                  grass_.grow(commands, frame.extent, pool_, lawn,
+                              {.camera = shot.camera,
+                               .bend = shot.bend,
+                               .air = air,
+                               .wind = wind,
+                               .seconds = swaying_for_});
+              });
+    return true;
+}
+
 void Scene::grow_vegetation(render::RenderGraph& graph, const render::Frame& frame,
-                            const Shot& shot, std::span<const terrain::StreamedPatch> patches,
+                            const Shot& shot, bool lawn,
                             std::span<const render::GraphUse> through_air,
                             const render::GraphTargets& drawn, const render::AirBindings& air,
                             DVec3 wind) {
     HOG_ZONE("vegetation");
-    const std::vector<render::GrassDraw> lawn =
-        grass_draws(slots_, patches, shot.camera.eye, shot.bend.radius, budget_);
-    if (!lawn.empty()) {
+    if (lawn) {
         graph.add(
             {.name = "grass", .uses = {through_air.begin(), through_air.end()}, .targets = drawn},
-            [&, lawn, wind](VkCommandBuffer commands) {
-                grass_.draw(commands, frame.extent, pool_, lawn,
+            [&, wind](VkCommandBuffer commands) {
+                grass_.draw(commands, frame.extent,
                             {.camera = shot.camera,
                              .bend = shot.bend,
                              .air = air,
@@ -620,6 +639,8 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
               [&](VkCommandBuffer commands) {
                   return ocean_.lay_water(commands, sea, frame.slot, frame.copyable);
               });
+    const bool lawn =
+        grass_on_ && grow_grass(graph, frame, shot, streamed.drawn, through, drift * surface_wind);
     graph.add({.name = "ground", .uses = through_air, .targets = drawn},
               [&](VkCommandBuffer commands) {
                   Result<> deep = draw_deep(ocean_, commands, frame, sea);
@@ -632,7 +653,7 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                   return deep;
               });
     if (grass_on_) {
-        grow_vegetation(graph, frame, shot, streamed.drawn, through_air, drawn, through,
+        grow_vegetation(graph, frame, shot, lawn, through_air, drawn, through,
                         drift * surface_wind);
     }
     if (!shot.others.empty()) {
