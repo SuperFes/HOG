@@ -52,6 +52,13 @@ public bool in_water(Lighting lighting, float3 from_eye) {
     return dot(from_eye, lighting.water.xyz) + lighting.water.w < 0.0;
 }
 
+// Whether a pixel at `ndc`, the picture's own coordinates, is seen from in the water: where the near
+// plane there is under the sea's surface.
+public bool seen_from_water(Lighting lighting, float2 ndc) {
+    const float4 near = mul(lighting.eye_from_clip, float4(ndc, 1.0, 1.0));
+    return in_water(lighting, near.xyz / near.w);
+}
+
 // `lit` at a point `depth` metres under the sea (negative above it), `along` metres from an eye
 // `eye_height` above sea level, looking down at it `looking_down`, the cosine from straight down:
 // dimmed by the water the light passes down to it and back to the eye, and filled in by what

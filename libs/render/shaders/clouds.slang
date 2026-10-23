@@ -1,5 +1,6 @@
 import atmosphere;
 import tone;
+import water;
 import weather;
 
 [[vk::binding(0, 0)]] ConstantBuffer<Lighting> lighting;
@@ -40,6 +41,10 @@ Layer vertex_main(uint id: SV_VertexID) {
 
 [shader("fragment")]
 float4 fragment_main(Layer layer) : SV_Target {
+    // From in the water, the sea's pass has laid it over all that's seen.
+    if (seen_from_water(lighting, layer.clip)) {
+        discard;
+    }
     const float4 far = mul(push.eye_from_clip, float4(layer.clip, 1.0, 1.0));
     const float3 view = normalize(far.xyz / far.w);
     const float3 up = push.up_height.xyz;

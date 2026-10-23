@@ -5,6 +5,7 @@
 #include <hog/render/atmosphere.hpp>
 #include <hog/render/barrier.hpp>
 #include <hog/render/memory.hpp>
+#include <hog/render/ocean.hpp>
 #include <hog/render/precipitation.hpp>
 #include <hog/render/readback.hpp>
 #include <hog/render/rendering.hpp>
@@ -50,10 +51,11 @@ struct Scene {
     double snow = 0.0;
     double seconds = 0.0;
     DVec3 wind{0.0};
-    double depth = 0.0; // cleared to, nearer the greater
+    double depth = 0.0;  // cleared to, nearer the greater
+    double height = 2.0; // metres over a calm sea
 };
 
-// What falls, alone over black, seen from walking height looking level east by day.
+// What falls, alone over black, seen from `height` looking level east by day.
 Pixels draw(hog::render::Device& device, const Scene& scene) {
     auto atmosphere = hog::render::Atmosphere::create(device);
     REQUIRE(atmosphere);
@@ -61,8 +63,10 @@ Pixels draw(hog::render::Device& device, const Scene& scene) {
     REQUIRE(sky);
     auto precipitation = Precipitation::create(device, colour_format, depth_format);
     REQUIRE(precipitation);
+    auto ocean = hog::render::Ocean::create(device, colour_format, depth_format, true);
+    REQUIRE(ocean);
 
-    const WorldPosition eye{up * (radius + 2.0)};
+    const WorldPosition eye{up * (radius + scene.height)};
     const hog::terrain::Bend bend = hog::terrain::bend_from(eye, radius, 0.0);
     const double elevation = 40.0 * std::numbers::pi / 180.0;
     const DVec3 sun = (east * std::cos(elevation)) + (up * std::sin(elevation));
@@ -81,6 +85,7 @@ Pixels draw(hog::render::Device& device, const Scene& scene) {
                                  .falling = scene.falling,
                                  .snow = scene.snow,
                                  .seconds = scene.seconds};
+    const hog::render::OceanView sea{.camera = camera, .sun = sun, .bend = bend, .air = view.air};
 
     auto colour = hog::render::make_image(
         device, {.format = colour_format,
@@ -96,6 +101,7 @@ Pixels draw(hog::render::Device& device, const Scene& scene) {
     REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
         namespace use = hog::render::image_use;
         CHECK(sky->record_frame(commands, extent, 0, *atmosphere, seen));
+        CHECK(ocean->lay_water(commands, sea, 0, true));
         hog::render::transition(commands, colour->handle(), VK_IMAGE_ASPECT_COLOR_BIT, use::discard,
                                 use::colour_target);
         hog::render::transition(commands, depth->handle(), VK_IMAGE_ASPECT_DEPTH_BIT, use::discard,
@@ -189,6 +195,11 @@ TEST_CASE("rain is drawn round the eye, more of it the heavier", "[render][gpu][
 TEST_CASE("rain is hidden by what's drawn nearer", "[render][gpu][atmosphere]") {
     const auto device = test_device();
     CHECK(lit_pixels(draw(*device, {.falling = 10.0, .depth = 1.0})) == 0);
+}
+
+TEST_CASE("rain falling round an eye in the sea is gone into it", "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    CHECK(lit_pixels(draw(*device, {.falling = 10.0, .height = -1.0})) == 0);
 }
 
 TEST_CASE("rain falls as time passes", "[render][gpu][atmosphere]") {

@@ -862,9 +862,6 @@ TEST_CASE("through the air, the sea lays the water over the ground beneath it as
                          over_seabed(*device, 0.0, Laid::BySea, 20.0, nullptr, false)) <= 6);
     CHECK(furthest_apart(drawn_deep,
                          over_seabed(*device, 0.0, Laid::NotBySea, 20.0, nullptr, false)) <= 1);
-    // From under the sea, the eye is in the water, so the ground's shading lays it.
-    CHECK(furthest_apart(over_seabed(*device, 30.0, Laid::ByGround, -10.0),
-                         over_seabed(*device, 30.0, Laid::BySea, -10.0)) <= 1);
     CHECK(device->validation_errors() == 0);
 }
 
@@ -913,6 +910,75 @@ TEST_CASE("from under the sea, the seabed shows near and is lost in the water fa
     CHECK(drawn[0] > near[0]);
     CHECK(near[0] > far[0] + 10);
     CHECK(far[2] > far[0] + 20);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("from under the sea, the sky shows through a window overhead, the surface a mirror "
+          "beyond it",
+          "[render][gpu]") {
+    const auto device = test_device();
+    const std::uint32_t middle = extent.width / 2;
+    // A metre down over deep water, looking up at so many degrees from straight up.
+    const auto looking_up = [&](double degrees) {
+        const double angle = degrees * std::numbers::pi / 180.0;
+        const DVec3 forward = (up * std::cos(angle)) + (east * std::sin(angle));
+        return pixel_at(over_seabed(*device, 200.0, Laid::BySea, -1.0, nullptr, true, forward),
+                        middle, middle);
+    };
+    const Pixel overhead = looking_up(1.0);
+    const Pixel inside = looking_up(40.0);
+    const Pixel beyond = looking_up(60.0);
+    INFO("overhead " << int{overhead[0]} << ", " << int{overhead[1]} << ", " << int{overhead[2]}
+                     << "; inside " << int{inside[0]} << ", " << int{inside[1]} << ", "
+                     << int{inside[2]} << "; beyond " << int{beyond[0]} << ", " << int{beyond[1]}
+                     << ", " << int{beyond[2]});
+    // Within the window's edge, some 49 degrees out, the sky, its red not yet all taken by the
+    // water; past it, the water turned back.
+    CHECK(overhead[0] > beyond[0] + 10);
+    CHECK(inside[0] > beyond[0] + 15);
+    CHECK(brightness(overhead) > brightness(beyond) + 50);
+    CHECK(brightness(inside) > brightness(beyond) + 80);
+    CHECK(beyond[2] > beyond[0] + 40);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("an eye straddling the sea's surface sees out of it above a waterline and into it below",
+          "[render][gpu]") {
+    const auto device = test_device();
+    const std::uint32_t middle = extent.width / 2;
+    // Looking level from about sea level over deep water: the rows seen as from well under it
+    // rather than well over it.
+    const auto seen_from = [&](double height) {
+        return over_seabed(*device, 200.0, Laid::BySea, height, nullptr, true, east);
+    };
+    const auto in_water = seen_from(-0.2);
+    const auto in_air = seen_from(0.2);
+    const auto under = [&](double height) {
+        const auto pixels = seen_from(height);
+        int rows = 0;
+        for (std::uint32_t y = 0; y < extent.height; ++y) {
+            const auto apart = [&](const std::vector<std::uint8_t>& other) {
+                int most = 0;
+                for (std::size_t channel = 0; channel < 3; ++channel) {
+                    most = std::max(most, std::abs(pixel_at(pixels, middle, y).at(channel) -
+                                                   pixel_at(other, middle, y).at(channel)));
+                }
+                return most;
+            };
+            rows += apart(in_water) < apart(in_air) ? 1 : 0;
+        }
+        return rows;
+    };
+    const int straddling = under(0.0);
+    CAPTURE(straddling);
+    // The near plane reaches some five centimetres either side of the eye.
+    CHECK(under(-0.1) == static_cast<int>(extent.height));
+    CHECK(under(0.1) == 0);
+    CHECK(straddling > 10);
+    CHECK(straddling < static_cast<int>(extent.height) - 10);
+    // The lower the eye, the more of the picture is under the waterline.
+    CHECK(under(-0.02) > straddling);
+    CHECK(under(0.02) < straddling);
     CHECK(device->validation_errors() == 0);
 }
 

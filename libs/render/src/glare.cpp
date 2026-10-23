@@ -24,16 +24,20 @@ struct Push {
 
 static_assert(sizeof(Push) <= 128);
 
-constexpr VkDescriptorSetLayoutBinding binding(std::uint32_t at, VkDescriptorType type) noexcept {
+constexpr VkDescriptorSetLayoutBinding
+binding(std::uint32_t at, VkDescriptorType type,
+        VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT) noexcept {
     return {.binding = at,
             .descriptorType = type,
             .descriptorCount = 1,
-            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+            .stageFlags = stages,
             .pImmutableSamplers = nullptr};
 }
 
+// The lighting tells the picture's pixels seen from in the water too.
 constexpr std::array bindings{binding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-                              binding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER),
+                              binding(1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                                      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT),
                               binding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
                               binding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)};
 

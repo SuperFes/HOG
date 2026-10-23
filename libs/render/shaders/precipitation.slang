@@ -1,6 +1,7 @@
 import atmosphere;
 import shadow;
 import tone;
+import water;
 
 [[vk::binding(0, 0)]] ConstantBuffer<Air> air;
 [[vk::binding(1, 0)]] ConstantBuffer<Lighting> lighting;
@@ -33,6 +34,7 @@ static const float nearest = 0.3;          // metres, nearer than which they fad
 
 struct Particle {
     float4 position : SV_Position;
+    noperspective float2 clip;
     float2 corner; // -1 to 1 across, and 0 at the head to 1 at the tail
     nointerpolation float opacity;
     nointerpolation uint flake;
@@ -103,6 +105,7 @@ Particle vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
 
     Particle particle;
     particle.position = mul(push.clip_from_eye, float4(placed, 1.0));
+    particle.clip = particle.position.xy / particle.position.w;
     particle.corner = float2(corner.x, (corner.y * 0.5) + 0.5);
     particle.opacity = coverage * fade * (flake ? flake_opacity : drop_opacity);
     particle.flake = flake ? 1u : 0u;
@@ -111,6 +114,10 @@ Particle vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
 
 [shader("fragment")]
 float4 fragment_main(Particle particle) : SV_Target {
+    // Falling into the sea, it's gone.
+    if (seen_from_water(lighting, particle.clip)) {
+        discard;
+    }
     const float3 sun = lighting.sun_exposure.xyz;
     const float3 up = lighting.up_height.xyz;
     const float sun_mu = dot(sun, up);

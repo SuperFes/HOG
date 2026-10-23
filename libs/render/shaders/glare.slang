@@ -1,6 +1,7 @@
 import atmosphere;
 import shadow;
 import tone;
+import water;
 
 [[vk::binding(0, 0)]] Sampler2D<float> depth_image;
 [[vk::binding(1, 0)]] ConstantBuffer<Lighting> lighting;
@@ -129,6 +130,10 @@ Glow vertex_main(uint id: SV_VertexID) {
 
 [shader("fragment")]
 float4 fragment_main(Glow glow) : SV_Target {
+    // From in the water, the sea's pass has laid it over all that's seen.
+    if (seen_from_water(lighting, glow.clip)) {
+        discard;
+    }
     const float4 far = mul(push.eye_from_clip, float4(glow.clip, 1.0, 1.0));
     const float3 view = normalize(far.xyz / far.w);
     // Exact close to the light, where acos of the dot isn't.

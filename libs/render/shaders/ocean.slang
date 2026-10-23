@@ -261,7 +261,8 @@ bool over_dry(Surface surface) {
            still_water_at(waves, shore_depths, surface.rest).y <= 0.0;
 }
 
-Facing facing_at(Surface surface, float3 looking) {
+// From `beneath`, its underside is what faces the eye.
+Facing facing_at(Surface surface, float3 looking, bool beneath = false) {
     const float footprint = max(length(ddx(surface.rest)), length(ddy(surface.rest)));
     const WaveSurface water =
         wave_surface(waves, surface.rest, footprint, surface.floor.xyz, surface.fetch);
@@ -313,9 +314,10 @@ Facing facing_at(Surface surface, float3 looking) {
                             : breaking_albedo;
     }
     // A wave's back, which the eye could only see past its crest, is taken as seen edge on.
-    const float towards = dot(facing.normal, -looking);
+    const float3 to_eye = beneath ? looking : -looking;
+    const float towards = dot(facing.normal, to_eye);
     if (towards < 0.0) {
-        facing.normal = normalize(facing.normal + (looking * towards));
+        facing.normal = normalize(facing.normal - (to_eye * towards));
     }
     return facing;
 }
@@ -452,18 +454,93 @@ Behind bent_behind(Surface surface, Behind straight, float3 looking, float3 norm
     return dot(surface.from_eye - bent.at, level) > 0.0 ? bent : straight;
 }
 
+// The radius drawing bends the planet onto.
+float faked_radius() {
+    return push.east_faked.w;
+}
+
+// What's seen out of the water from `surface` along `out`: what's drawn there, as copied, where it
+// stands out of the water, as near as the picture tells, found first as if far off and then as far
+// as what's drawn there; otherwise the sky.
+float3 out_of_water(Surface surface, float3 out, Shade shade) {
+    const float exposure = lighting.sun_exposure.w;
+    const float3 sky = sky_mirrored(air, lighting, sky_view_table, transmittance_table, shade, out,
+                                    push.up_height.xyz, push.sun_nearest.xyz);
+    uint width;
+    uint height;
+    behind_depth.GetDimensions(width, height);
+    float4 clip = mul(push.clip_from_eye, float4(out, 0.0));
+    int3 pixel = int3(0);
+    for (int step = 0; step < 2; ++step) {
+        const float2 ndc = clip.xy / clip.w;
+        if (clip.w <= 0.0 || any(abs(ndc) >= 1.0)) {
+            return sky;
+        }
+        pixel = int3(int2(((ndc * 0.5) + 0.5) * float2(width, height)), 0);
+        const float depth = behind_depth.Load(pixel).x;
+        if (depth <= 0.0) {
+            break;
+        }
+        const float3 drawn = behind_at(ndc, pixel, depth).at;
+        if (height_above_sea(drawn, push.up_height, faked_radius()) <= 0.0) {
+            return sky;
+        }
+        clip = mul(push.clip_from_eye,
+                   float4(surface.from_eye + (out * length(drawn - surface.from_eye)), 1.0));
+    }
+    return untoned(behind_colour.Load(pixel).rgb, exposure);
+}
+
+// Of the sea's surface seen from an eye in the water, the light coming down through it: out of
+// the air within the window the water bends it all into, the rest turned back off the surface from
+// the water beneath; under foam, what the foam lets through; and the water between it and the eye.
+float4 from_beneath(Surface surface, float3 looking) {
+    const Facing facing = facing_at(surface, looking, true);
+    const float3 up = push.up_height.xyz;
+    const float3 normal = facing.normal;
+    const Shade shade = shade_at(lighting, cloud_shadow, surface.from_eye);
+    const float3 on_water = on_water_at(shade, up);
+    // None bends out past the window's edge, where the surface turns all of it back.
+    const float3 out = refract(looking, -normal, 1.0 / into_water);
+    float reflected = 1.0;
+    float3 seen = float3(0.0);
+    if (dot(out, out) > 0.0) {
+        reflected = reflected_at(out, normal);
+        // Crowded into the window as it bends, brighter by the square of how much.
+        seen = (1.0 - reflected) * out_of_water(surface, out, shade) / (into_water * into_water);
+    }
+    // Turned back up off a wave's slope, it would meet the surface again, taken as seen level.
+    const float3 down = reflect(looking, normal);
+    seen += reflected * water_between(on_water, 0.0, max(-dot(down, up), 0.0), endless).scattered;
+    seen = lerp(seen, on_water * (1.0 - facing.albedo), facing.white);
+    // The water between, deepest at the eye, as far under this surface as it is.
+    const float along = length(surface.from_eye);
+    const WaterBetween between =
+        water_between(on_water, max(dot(surface.from_eye, up), 0.0), -dot(looking, up), along);
+    return float4(tone_mapped((seen * between.passed) + between.scattered,
+                              lighting.sun_exposure.w),
+                  1.0);
+}
+
 // As fragment_air, but over what's drawn beneath, as copied; where the sea lays the water itself,
 // what lies behind the surface is dimmed and filled in by the water between, as deep under the
-// surface drawn as it lies, and where nothing does, deep water.
+// surface drawn as it lies, and where nothing does, deep water. Seen from an eye in the water,
+// as from_beneath has it.
 [shader("fragment")]
 float4 fragment_through(Surface surface) : SV_Target {
     if (over_dry(surface)) {
         discard;
     }
     const float3 looking = normalize(surface.from_eye);
+    const int3 pixel = int3(int2(surface.position.xy), 0);
+    if (sea_lays_water(lighting)) {
+        const float4 clip = mul(push.clip_from_eye, float4(surface.from_eye, 1.0));
+        if (in_water(lighting, behind_at(clip.xy / clip.w, pixel, 1.0).at)) {
+            return from_beneath(surface, looking);
+        }
+    }
     const Facing facing = facing_at(surface, looking);
     const AirLit lit = air_lit(surface, facing, looking);
-    const int3 pixel = int3(int2(surface.position.xy), 0);
     const float depth = behind_depth.Load(pixel).x;
     if (!sea_lays_water(lighting)) {
         // Where nothing's drawn beneath, from over the sea, the deep water fragment_deep draws.

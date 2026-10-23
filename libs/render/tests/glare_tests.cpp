@@ -5,6 +5,7 @@
 #include <hog/render/device.hpp>
 #include <hog/render/glare.hpp>
 #include <hog/render/memory.hpp>
+#include <hog/render/ocean.hpp>
 #include <hog/render/readback.hpp>
 #include <hog/render/rendering.hpp>
 #include <hog/render/sky.hpp>
@@ -107,9 +108,10 @@ std::optional<hog::render::Image> filled(hog::render::Device& device, glm::vec4 
 }
 
 // The glare drawn over black, with depth cleared to the sky's and then, within `covered`, to
-// the nearest, from 10 m over a planet the size of the islands'.
+// the nearest, from `height` metres over the calm sea of a planet the size of the islands'.
 Picture draw(hog::render::Device& device, const GlareView& seen,
-             std::optional<VkRect2D> covered = std::nullopt, Clouded clouded = {}) {
+             std::optional<VkRect2D> covered = std::nullopt, Clouded clouded = {},
+             double height = 10.0) {
     constexpr double radius = 115'000.0;
     constexpr DVec3 up{0.0, 0.0, 1.0};
     auto glare = Glare::create(device, colour_format);
@@ -125,15 +127,18 @@ Picture draw(hog::render::Device& device, const GlareView& seen,
         clouded.marched ? filled(device, {0.0F, 0.0F, 0.0F, 1.0F - *clouded.marched})
                         : std::nullopt;
     VkImageView shadow_view = shadow ? shadow->view() : VK_NULL_HANDLE;
-    const hog::WorldPosition eye{up * (radius + 10.0)};
+    auto ocean = hog::render::Ocean::create(device, colour_format, depth_format, true);
+    REQUIRE(ocean);
+    const hog::WorldPosition eye{up * (radius + height)};
     hog::render::Camera camera = seen.camera;
     camera.eye = eye;
-    const hog::render::SkyView sky_view{.camera = camera,
-                                        .sun = seen.towards,
-                                        .bend = hog::terrain::bend_from(eye, radius, 0.0),
-                                        .cloud_shadow = shadow_view};
+    const hog::terrain::Bend bend = hog::terrain::bend_from(eye, radius, 0.0);
+    const hog::render::SkyView sky_view{
+        .camera = camera, .sun = seen.towards, .bend = bend, .cloud_shadow = shadow_view};
     GlareView view = seen;
     view.air = sky->bindings(0, *atmosphere, shadow_view);
+    const hog::render::OceanView sea{
+        .camera = camera, .sun = seen.towards, .bend = bend, .air = view.air};
     view.clouds = marched ? marched->view() : VK_NULL_HANDLE;
     auto colour = hog::render::make_image(
         device, {.format = colour_format,
@@ -149,6 +154,7 @@ Picture draw(hog::render::Device& device, const GlareView& seen,
     const auto drawn = device.submit_now([&](VkCommandBuffer commands) {
         namespace use = hog::render::image_use;
         CHECK(sky->record_frame(commands, extent, 0, *atmosphere, sky_view));
+        CHECK(ocean->lay_water(commands, sea, 0, true));
         hog::render::transition(commands, colour->handle(), VK_IMAGE_ASPECT_COLOR_BIT, use::discard,
                                 use::colour_target);
         hog::render::transition(commands, depth->handle(), VK_IMAGE_ASPECT_DEPTH_BIT, use::discard,
@@ -278,6 +284,15 @@ TEST_CASE("the glare round a light is as the eye spreads it, streaked", "[render
         }
     }
     CHECK(checked > 100);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("from in the sea, the eye sees no glare, the sea having laid the water over all it sees",
+          "[render][gpu][glare]") {
+    const auto device = test_device();
+    const GlareView view = view_of(10.0);
+    CHECK(total(draw(*device, view, std::nullopt, {}, 1.0)) > 0.0);
+    CHECK(total(draw(*device, view, std::nullopt, {}, -1.0)) == 0.0);
     CHECK(device->validation_errors() == 0);
 }
 
