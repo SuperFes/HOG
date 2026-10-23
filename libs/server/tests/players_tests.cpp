@@ -15,8 +15,10 @@
 using hog::DVec3;
 using hog::WorldPosition;
 using hog::net::ConnectionId;
+using hog::protocol::Facing;
 using hog::protocol::NetId;
 using hog::protocol::Snapshot;
+using hog::protocol::Stance;
 using hog::server::MoveResult;
 using hog::server::Players;
 using hog::server::Position;
@@ -42,12 +44,15 @@ class Mover {
 public:
     explicit Mover(Players& players) : players_(&players) {}
 
-    MoveResult move(ConnectionId connection, WorldPosition at) {
+    MoveResult move(ConnectionId connection, WorldPosition at, Stance stance = Stance::Walking,
+                    Facing facing = {}) {
         now_ += std::chrono::seconds{10};
         return players_->move(connection,
                               {.sequence = ++sequences_[connection],
                                .corrections = corrections_[connection],
-                               .at = hog::protocol::to_millimetres(at)},
+                               .at = hog::protocol::to_millimetres(at),
+                               .stance = stance,
+                               .facing = facing},
                               now_, space_);
     }
 
@@ -190,6 +195,60 @@ TEST_CASE("a player's feet can't be put under the ground", "[server][players]") 
     players.join(ConnectionId{7}, "Matt");
     REQUIRE(taken(mover.move(ConnectionId{7}, at(radius))));
     CHECK(mover.move(ConnectionId{7}, at(radius - 2.0)).ruling == Ruling::UnderGround);
+}
+
+TEST_CASE("a player flying goes anywhere, and lands anywhere", "[server][players]") {
+    flecs::world world;
+    Players players{world, radius};
+    Mover mover{players};
+    const flecs::entity matt = players.join(ConnectionId{7}, "Matt");
+    REQUIRE(taken(mover.move(ConnectionId{7}, along(0.0))));
+
+    CHECK(taken(mover.move(ConnectionId{7}, along(5'000.0), Stance::Flying)));
+    CHECK(matt.get<Position>().at == along(5'000.0));
+    // Only those on foot keep the ground about them.
+    CHECK(players.placed().empty());
+    const MoveResult out = mover.move(ConnectionId{7}, at(radius * 3.0), Stance::Flying);
+    CHECK(out.ruling == Ruling::OutOfBounds);
+    CHECK_FALSE(out.correction);
+
+    CHECK(taken(mover.move(ConnectionId{7}, along(5'100.0))));
+    CHECK(players.placed() == std::vector{along(5'100.0)});
+    // On foot again, and checked again.
+    CHECK(mover.move(ConnectionId{7}, along(5'200.0)).ruling == Ruling::TooFast);
+}
+
+TEST_CASE("a player with an account is remembered where they were, and how", "[server][players]") {
+    flecs::world world;
+    Players players{world, radius};
+    Mover mover{players};
+    players.join(ConnectionId{7}, "Matt", 42);
+    players.join(ConnectionId{8}, "Anna");
+    players.join(ConnectionId{9}, "Unplaced", 43);
+    const Facing facing{.heading = 16'384, .pitch = -100};
+    REQUIRE(taken(mover.move(ConnectionId{7}, along(0.0), Stance::Flying, facing)));
+    REQUIRE(taken(mover.move(ConnectionId{8}, along(10.0))));
+
+    const auto remembered = players.remembered();
+    REQUIRE(remembered.size() == 1);
+    CHECK(remembered.front().account == 42);
+    CHECK(remembered.front().place ==
+          hog::protocol::Placed{.at = hog::protocol::to_millimetres(along(0.0)),
+                                .stance = Stance::Flying,
+                                .facing = facing});
+
+    // As last taken, not as last asked.
+    REQUIRE(taken(mover.move(ConnectionId{7}, along(1.0))));
+    CHECK_FALSE(taken(mover.move(ConnectionId{7}, along(500.0))));
+    const auto left = players.leave(ConnectionId{7});
+    REQUIRE(left);
+    CHECK(left->account == 42);
+    CHECK(left->place == hog::protocol::Placed{.at = hog::protocol::to_millimetres(along(1.0)),
+                                               .stance = Stance::Walking,
+                                               .facing = {}});
+    CHECK_FALSE(players.leave(ConnectionId{8}));
+    CHECK_FALSE(players.leave(ConnectionId{9}));
+    CHECK_FALSE(players.leave(ConnectionId{7}));
 }
 
 TEST_CASE("a player who leaves is gone, and the id isn't used again", "[server][players]") {

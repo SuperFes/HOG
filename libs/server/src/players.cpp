@@ -30,13 +30,16 @@ Players::Players(flecs::world& world, double radius, const replication::ViewSett
                  const MoveRules& rules) noexcept
     : world_(&world), nearest_(radius / 2.0), farthest_(radius * 2.0), view_(view), rules_(rules) {}
 
-flecs::entity Players::join(net::ConnectionId connection, std::string name) {
+flecs::entity Players::join(net::ConnectionId connection, std::string name,
+                            std::optional<std::uint64_t> account) {
     HOG_ASSERT(!joined_.contains(connection), "a connection joins once");
     const flecs::entity entity = world_->entity().set<Replicated>(
         {.id = protocol::NetId{next_id_++}, .name = std::move(name)});
     joined_.emplace(connection, Joined{.entity = entity,
                                        .view = replication::View{view_},
+                                       .account = account,
                                        .check = {},
+                                       .placed = {},
                                        .sequence = 0,
                                        .corrections = 0});
     return entity;
@@ -57,20 +60,30 @@ MoveResult Players::move(net::ConnectionId connection, const protocol::Moved& mo
     const WorldPosition to = protocol::to_world(moved.at);
     const double from_centre = glm::length(to.metres());
     const bool inside = from_centre >= nearest_ && from_centre <= farthest_;
-    if (!joined.check) {
+    const auto take = [&] {
+        joined.entity.set<Position>({to});
+        joined.placed =
+            protocol::Placed{.at = moved.at, .stance = moved.stance, .facing = moved.facing};
+        return MoveResult{.ruling = Ruling::Taken, .correction = std::nullopt};
+    };
+    // Flying is let off the checks, so a client can land anywhere; there's nothing to send a
+    // flight back to.
+    if (moved.stance == protocol::Stance::Flying || !joined.check) {
         if (!inside) {
             return {.ruling = Ruling::OutOfBounds, .correction = std::nullopt};
         }
-        joined.check.emplace(to, now, rules_);
-        joined.entity.set<Position>({to});
-        return {.ruling = Ruling::Taken, .correction = std::nullopt};
+        if (moved.stance == protocol::Stance::Flying) {
+            joined.check.reset();
+        } else {
+            joined.check.emplace(to, now, rules_);
+        }
+        return take();
     }
     Ruling ruling = Ruling::OutOfBounds;
     if (inside) {
         switch (joined.check->judge(to, now, space)) {
         case Verdict::Taken:
-            joined.entity.set<Position>({to});
-            return {.ruling = Ruling::Taken, .correction = std::nullopt};
+            return take();
         case Verdict::TooFast:
             ruling = Ruling::TooFast;
             break;
@@ -85,13 +98,28 @@ MoveResult Players::move(net::ConnectionId connection, const protocol::Moved& mo
                                               .at = protocol::to_millimetres(joined.check->at())}};
 }
 
-void Players::leave(net::ConnectionId connection) {
+std::optional<Remembered> Players::leave(net::ConnectionId connection) {
     const auto found = joined_.find(connection);
     if (found == joined_.end()) {
-        return;
+        return std::nullopt;
+    }
+    std::optional<Remembered> kept;
+    if (const Joined& joined = found->second; joined.account && joined.placed) {
+        kept = Remembered{.account = *joined.account, .place = *joined.placed};
     }
     found->second.entity.destruct();
     joined_.erase(found);
+    return kept;
+}
+
+std::vector<Remembered> Players::remembered() const {
+    std::vector<Remembered> kept;
+    for (const auto& [connection, joined] : joined_) {
+        if (joined.account && joined.placed) {
+            kept.push_back({.account = *joined.account, .place = *joined.placed});
+        }
+    }
+    return kept;
 }
 
 void Players::acknowledged(net::ConnectionId connection, std::uint32_t tick) noexcept {
