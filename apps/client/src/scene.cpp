@@ -109,9 +109,12 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
     const terrain::StreamSettings settings;
     const std::vector<terrain::MaterialImage> materials = biome_materials();
     const BiomePalette palette = biome_palette();
-    auto terrain = render::Terrain::create(
-        device, colour_format, depth_format,
-        {.materials = materials, .sea = true, .air = true, .canopy = budget.tree_far});
+    auto terrain = render::Terrain::create(device, colour_format, depth_format,
+                                           {.materials = materials,
+                                            .sea = true,
+                                            .air = true,
+                                            .canopy = budget.tree_far,
+                                            .grass = budget.reach});
     if (!terrain) {
         return failed("draw the ground", terrain.error());
     }

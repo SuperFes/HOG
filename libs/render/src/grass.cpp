@@ -115,6 +115,11 @@ double grass_layers(const GrassTier& tier, double spacing, double distance) noex
     return tier.density * spacing * spacing * held * held;
 }
 
+GrassStand grass_stand(planet::Biome biome) noexcept {
+    const BiomeGrass grass = grass_of(biome);
+    return {.height = grass.height, .cover = grass.share * grass.clumps};
+}
+
 float waving_grass(planet::Biome biome) noexcept {
     // Lawns shorter than this stand stiff, and from this tall wave freely.
     constexpr float stiff = 0.15F;

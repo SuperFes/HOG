@@ -225,7 +225,10 @@ Result<> Sky::record_tables(VkCommandBuffer commands, VkExtent2D extent, std::ui
         .water = {Vec3{view.bend.up}, std::numeric_limits<float>::max()},
         .gusts = {Vec3{gust_anchor(view.camera.eye, view.gusts_drifted)},
                   static_cast<float>(view.gusts_wind)},
-        .swaying = {static_cast<float>(view.swaying_for), 0.0F, 0.0F, 0.0F}};
+        .swaying = {static_cast<float>(view.swaying_for),
+                    extent.height > 0 ? static_cast<float>(view.camera.vertical_fov / extent.height)
+                                      : 0.0F,
+                    0.0F, 0.0F}};
     const Buffer& buffer = lighting_.at(frame);
     std::memcpy(buffer.mapped().data(), &lighting, sizeof(lighting));
     if (auto flushed = buffer.flush(); !flushed) {

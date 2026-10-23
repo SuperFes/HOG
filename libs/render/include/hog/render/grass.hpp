@@ -42,6 +42,15 @@ struct GrassTier {
 // How much of a biome's ground is grass tall enough to wave in the wind, 0 to 1.
 [[nodiscard]] float waving_grass(planet::Biome biome) noexcept;
 
+// A biome's grass on the whole: its blades' mean height in metres, and the share of the ground
+// they cover.
+struct GrassStand {
+    float height = 0.0F;
+    float cover = 0.0F;
+};
+
+[[nodiscard]] GrassStand grass_stand(planet::Biome biome) noexcept;
+
 // A patch's grass: blades grown in each of its grid cells, hashed from its seed, as many as grow
 // that far from the eye.
 struct GrassDraw {

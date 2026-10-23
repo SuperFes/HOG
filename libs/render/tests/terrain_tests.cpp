@@ -878,6 +878,90 @@ TEST_CASE("gusts cross far meadows as patches of light swaying in waves, and lea
     CHECK(device->validation_errors() == 0);
 }
 
+namespace {
+
+// Flat ground of `biome` two metres above the sea, `spacing` metres between its vertices and
+// stretching east from `near` metres off, seen level from standing height through the air, its
+// grass reaching `grass` metres.
+std::vector<std::uint8_t> level_over(hog::render::Device& device, Biome biome, double grass,
+                                     double near, double spacing) {
+    constexpr double ground = 2.0;
+    constexpr double eye_over = 1.5;
+    auto terrain =
+        hog::render::Terrain::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT,
+                                     {.materials = grey_materials(), .air = true, .grass = grass});
+    REQUIRE(terrain);
+    auto pool = make_pool(device, {});
+    const std::uint32_t slot = pool.acquire().value_or(1);
+    std::vector<PatchVertex> patch = flat_patch(static_cast<float>(spacing));
+    for (PatchVertex& vertex : patch) {
+        vertex.biome = biome;
+    }
+    REQUIRE(pool.stage(0, slot, patch));
+
+    const DVec3 up{0.0, 0.0, 1.0};
+    const DVec3 east{1.0, 0.0, 0.0};
+    const DVec3 sun = glm::normalize(up + east);
+    const WorldPosition origin{(up * (earth + ground)) +
+                               (east * (near + (spacing * patch_cells / 2.0)))};
+    hog::render::TerrainView view{.camera = {.eye = WorldPosition{up * (earth + ground + eye_over)},
+                                             .forward = east,
+                                             .up = up,
+                                             .vertical_fov = 0.25,
+                                             .near_plane = 0.05},
+                                  .sun = sun,
+                                  .night_light = 0.5};
+    view.bend = {.up = up, .eye_height = ground + eye_over, .radius = earth, .faked = earth};
+    auto atmosphere = hog::render::Atmosphere::create(device);
+    REQUIRE(atmosphere);
+    auto sky = hog::render::Sky::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
+    REQUIRE(sky);
+    const hog::atmosphere::Model model;
+    const double scale = hog::render::air_scale(model.air(), view.bend);
+    view.air = sky->bindings(0, *atmosphere);
+    const hog::render::SkyView sky_view{.camera = view.camera,
+                                        .sun = sun,
+                                        .bend = view.bend,
+                                        .exposure = 10.0,
+                                        .sky_light = model.sky_irradiance(ground * scale, sun)};
+    const std::array draws{TerrainDraw{.slot = slot, .origin = origin}};
+    return draw(device, *terrain, pool, draws, view, [&](VkCommandBuffer commands) {
+        CHECK(sky->record_frame(commands, extent, 0, *atmosphere, sky_view));
+    });
+}
+
+// Rows of a level look that ground is drawn in, all under the eye.
+int rows_drawn(const std::vector<std::uint8_t>& pixels) {
+    int rows = 0;
+    for (std::uint32_t y = 0; y < extent.height; ++y) {
+        bool drawn = false;
+        for (std::uint32_t x = 0; x < extent.width; ++x) {
+            drawn = drawn || pixel_at(pixels, x, y) != background;
+        }
+        rows += drawn ? 1 : 0;
+    }
+    return rows;
+}
+
+} // namespace
+
+TEST_CASE("past where its blades show, grass stands up from the ground, and bare ground lies flat",
+          "[render][gpu]") {
+    const auto device = test_device();
+    // Beyond 50 m the blades are all gone, so the meadow from 60 m off stands its full height,
+    // its near edge drawn nearer the horizon than flat ground's.
+    const int flat = rows_drawn(level_over(*device, Biome::Grassland, 0.0, 60.0, 8.0));
+    const int meadow = rows_drawn(level_over(*device, Biome::Grassland, 50.0, 60.0, 8.0));
+    INFO("flat " << flat << ", meadow " << meadow);
+    CHECK(flat >= 5);
+    CHECK(meadow < flat * 3 / 4);
+    CHECK(rows_drawn(level_over(*device, Biome::Beach, 50.0, 60.0, 8.0)) == flat);
+    // Up close the blades are drawn, so the ground stays where it is under them.
+    CHECK(level_over(*device, Biome::Grassland, 260.0, 4.0, 0.25) ==
+          level_over(*device, Biome::Grassland, 0.0, 4.0, 0.25));
+    CHECK(device->validation_errors() == 0);
+}
+
 TEST_CASE("within the stamps' reach the ground is left bare for them", "[render][gpu]") {
     const auto device = test_device();
     CHECK(from_above(*device, {.canopy = 10'000.0}) == from_above(*device, {.canopy = 0.0}));

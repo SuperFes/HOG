@@ -31,7 +31,7 @@ struct Settings {
     // Each biome's: rgb what its material averages to, w how much is grass waving in the wind.
     float4 means[biome_count];
     // x metres from the eye the tree stamps have shrunk away by, 0 for no woods drawn in the
-    // ground.
+    // ground; y metres the grass reaches, 0 for no grass standing up from the ground.
     float4 canopy;
     // Each genus' foliage as flora::Foliage has it: its own colour, then the share of the
     // ground's.
@@ -40,6 +40,9 @@ struct Settings {
     float4 leafing[genus_count];
     float4 first[genus_count];
     float4 last[genus_count];
+    // Each biome's grass, as render::GrassStand: x its blades' mean height in metres, y the share
+    // of the ground they cover.
+    float4 grass[biome_count];
 };
 
 [[vk::binding(0, 0)]] ConstantBuffer<Settings> settings;
@@ -189,22 +192,61 @@ Leafed leafed(uint genus, float4 year) {
     return leafed;
 }
 
-[shader("vertex")]
-Ground vertex_main(Vertex vertex) {
+// Grass keeps off ground this close to sea level, as grass.slang's shore, rising over this much
+// above it.
+static const float grass_shore = 0.15;
+static const float grass_rising = 0.3;
+// Grass laid flat stands this much lower.
+static const float grass_pressed = 0.4;
+
+// Past where its blades show, grass stands up as the ground's top: as tall as it grows there on the
+// whole, rising as the blades shrink away under two pixels tall or towards the end of their reach,
+// and pressed down where the gusts lay it over. `ground` must hold its biomes and height.
+float standing_grass(Ground ground, float3 from_eye) {
+    const float reach = settings.canopy.y;
+    if (reach <= 0.0) {
+        return 0.0;
+    }
+    float height = 0.0;
+    float top = 0.0;
+    [unroll]
+    for (uint biome = 0; biome < biome_count; ++biome) {
+        const float share = ground.biomes[biome / 4][biome % 4];
+        height += share * settings.grass[biome].x;
+        top += share * settings.grass[biome].x * settings.grass[biome].y;
+    }
+    if (top <= 0.0) {
+        return 0.0;
+    }
+    const float distance = length(from_eye);
+    const float pixel = max(lighting.swaying.y * distance, 1e-6);
+    const float blades =
+        saturate((height / pixel) - 1.0) * saturate((reach - distance) / (0.2 * reach));
+    const float wind = lighting.gusts.w;
+    float pressed = 0.0;
+    if (wind > 1e-3) {
+        const float field = gust_field(from_eye, lighting.gusts.xyz);
+        const float speed = gusting(wind, gust_of(field));
+        pressed = saturate(laid_over(speed) +
+                           (swaying(speed) * sin(sway_phase(lighting.swaying.x, wind, field))));
+    }
+    const float clear = saturate((ground.height - grass_shore) / grass_rising);
+    return top * (1.0 - blades) * (1.0 - (grass_pressed * pressed)) * clear *
+           (1.0 - saturate(ground.scar));
+}
+
+// The vertex's ground, all but where it's drawn.
+Ground grounded(Vertex vertex) {
     Ground ground;
     // Both terms are small near the eye, where precision matters.
-    const float3 from_eye = push.origin.xyz + vertex.position;
-    const float3 drawn = bent(from_eye, push.bend_up, push.bend_radii.xy);
-    ground.position = mul(push.clip_from_eye, float4(drawn, 1.0));
-    ground.drawn = drawn;
+    const float3 on_ground = push.origin.xyz + vertex.position;
     ground.normal = vertex.normal;
-    ground.from_eye = from_eye;
-    ground.height = height_above_sea(from_eye, push.bend_up, push.bend_radii.x);
+    ground.height = height_above_sea(on_ground, push.bend_up, push.bend_radii.x);
     ground.shore = float3(0.0);
     ground.turning = float4(1.0, 0.0, 1.0, 0.0);
     if (settings.tiling.z > 0.0) {
         const ShoreLevel level =
-            shore_level_at(sea, shore_floor(sea, shore_depths, from_eye), from_eye);
+            shore_level_at(sea, shore_floor(sea, shore_depths, on_ground), on_ground);
         ground.shore = float3(level.mean, level.swash);
         ground.turning = level.turning;
     }
@@ -219,6 +261,27 @@ Ground vertex_main(Vertex vertex) {
     ground.palms = vertex.palms;
     ground.scar = vertex.scar;
     return ground;
+}
+
+Ground placed(Ground ground, float3 from_eye) {
+    const float3 drawn = bent(from_eye, push.bend_up, push.bend_radii.xy);
+    ground.position = mul(push.clip_from_eye, float4(drawn, 1.0));
+    ground.drawn = drawn;
+    ground.from_eye = from_eye;
+    return ground;
+}
+
+[shader("vertex")]
+Ground vertex_main(Vertex vertex) {
+    return placed(grounded(vertex), push.origin.xyz + vertex.position);
+}
+
+// Lit through the air, which says how wide a pixel is, far grass stands up from the ground.
+[shader("vertex")]
+Ground vertex_air(Vertex vertex) {
+    const Ground ground = grounded(vertex);
+    const float3 on_ground = push.origin.xyz + vertex.position;
+    return placed(ground, on_ground + (vertex.normal * standing_grass(ground, on_ground)));
 }
 
 ShoreLevel shore_level(Ground ground) {

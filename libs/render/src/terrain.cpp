@@ -103,7 +103,8 @@ constexpr std::array air_descriptors{
     descriptors[0],
     descriptors[1],
     binding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT),
-    binding(3, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT),
+    binding(3, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT),
     binding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
     binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
     binding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
@@ -114,13 +115,14 @@ constexpr std::array air_descriptors{
 
 // The near tile's size, the far one's, and 1 if ground below sea level is seen through water; then
 // what each biome's material averages to, in linear light, and how much of it is grass waving in
-// the wind. Then the woods, as terrain.slang reads them.
+// the wind. Then the woods, as terrain.slang reads them, and each biome's grass, as GrassStand.
 struct Settings {
     glm::vec4 tiling;
     std::array<glm::vec4, planet::biome_count> means;
     glm::vec4 canopy;
     std::array<glm::vec4, flora::genus_count> foliage;
     GenusSeasons seasons;
+    std::array<glm::vec4, planet::biome_count> grass;
 };
 
 // The far tile, as many times the near one's size.
@@ -314,12 +316,16 @@ Result<Terrain> Terrain::create(Device& device, VkFormat colour_format, VkFormat
     Settings settings{.tiling = {static_cast<float>(look.tile), static_cast<float>(drawn.period_),
                                  look.sea ? 1.0F : 0.0F, 0.0F},
                       .means = {},
-                      .canopy = {static_cast<float>(look.canopy), 0.0F, 0.0F, 0.0F},
+                      .canopy = {static_cast<float>(look.canopy),
+                                 look.air ? static_cast<float>(look.grass) : 0.0F, 0.0F, 0.0F},
                       .foliage = {},
-                      .seasons = genus_seasons()};
+                      .seasons = genus_seasons(),
+                      .grass = {}};
     for (std::size_t biome = 0; biome < settings.means.size(); ++biome) {
         settings.means.at(biome) = glm::vec4{Vec3{terrain::material_mean(look.materials[biome])},
                                              waving_grass(static_cast<planet::Biome>(biome))};
+        const GrassStand stand = grass_stand(static_cast<planet::Biome>(biome));
+        settings.grass.at(biome) = glm::vec4{stand.height, stand.cover, 0.0F, 0.0F};
     }
     for (std::size_t genus = 0; genus < flora::genus_count; ++genus) {
         const flora::Foliage foliage = flora::foliage_of(static_cast<flora::Genus>(genus));
@@ -342,6 +348,7 @@ Result<Terrain> Terrain::create(Device& device, VkFormat colour_format, VkFormat
     auto pipeline = make_pipeline(
         device,
         {.spirv = shaders::terrain,
+         .vertex_entry = look.air ? "vertex_air" : "vertex_main",
          .fragment_entry = look.air ? "fragment_air" : "fragment_main",
          .bindings = vertex_bindings,
          .attributes = vertex_attributes,
