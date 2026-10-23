@@ -1,6 +1,8 @@
 #include <hog/app/probe_layers.hpp>
 #include <hog/app/server.hpp>
 #include <hog/chat/filter.hpp>
+#include <hog/login/keys.hpp>
+#include <hog/login/token.hpp>
 #include <hog/net/client.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/probe/channel.hpp>
@@ -975,6 +977,119 @@ TEST_CASE("a player is sent the weather as they join", "[app][server]") {
     CHECK(weather->level == server->weather().grid().level());
     CHECK(weather->fade == 10min);
     CHECK(weather->cells.size() == server->weather().grid().size());
+}
+
+namespace {
+
+// A player logged in as `account`, who goes on saying they're at `place` once welcomed.
+class Returning {
+public:
+    Returning(const Server& server, const hog::login::KeyPair& keys, std::uint64_t account,
+              hog::protocol::Placed place)
+        : place_(place) {
+        const auto issued = std::chrono::floor<std::chrono::seconds>(hog::WallClock::now());
+        token_ = hog::login::sign({.account = account,
+                                   .name = "Matt",
+                                   .issued = issued,
+                                   .expires = issued + hog::login::token_life,
+                                   .nonce = {}},
+                                  keys);
+        auto client =
+            hog::net::Client::connect(std::format("127.0.0.1:{}", server.players()->port()));
+        REQUIRE(client);
+        client_.emplace(std::move(*client));
+    }
+
+    void visit() {
+        client_->poll(events_);
+        for (const hog::net::Event& event : events_) {
+            if (std::holds_alternative<hog::net::Connected>(event)) {
+                REQUIRE(client_->send(hog::net::Delivery::Reliable,
+                                      hog::protocol::encode(hog::protocol::Hello{
+                                          .version = hog::protocol::version, .token = token_})));
+            } else if (const auto* message = std::get_if<hog::net::Message>(&event)) {
+                auto decoded = hog::protocol::decode(message->bytes());
+                REQUIRE(decoded);
+                if (std::holds_alternative<hog::protocol::Welcome>(*decoded)) {
+                    welcomed_ = MonotonicClock::now();
+                } else if (const auto* placed = std::get_if<hog::protocol::Placed>(&*decoded)) {
+                    placed_ = *placed;
+                }
+            }
+        }
+        if (welcomed_) {
+            REQUIRE(client_->send(
+                hog::net::Delivery::Unreliable,
+                hog::protocol::encode(hog::protocol::Moved{.sequence = ++moves_,
+                                                           .corrections = 0,
+                                                           .at = place_.at,
+                                                           .stance = place_.stance,
+                                                           .facing = place_.facing})));
+        }
+    }
+
+    // Long enough after the welcome for the moves sent to have been taken.
+    [[nodiscard]] bool settled() const {
+        return welcomed_ && MonotonicClock::now() - *welcomed_ >= 200ms;
+    }
+    [[nodiscard]] const std::optional<hog::protocol::Placed>& placed() const { return placed_; }
+
+private:
+    hog::protocol::Placed place_;
+    std::vector<std::byte> token_;
+    std::optional<hog::net::Client> client_;
+    std::vector<hog::net::Event> events_;
+    std::optional<MonotonicClock::time_point> welcomed_;
+    std::optional<hog::protocol::Placed> placed_;
+    std::uint32_t moves_ = 0;
+};
+
+} // namespace
+
+TEST_CASE("a logged in player is placed where they were when the server stopped", "[app][server]") {
+    const World world;
+    const hog::testing::TemporaryDirectory keys_directory;
+    const auto keys = hog::login::load_or_make_keys(keys_directory.path() / "login.seed",
+                                                    keys_directory.path() / "login.pub");
+    REQUIRE(keys);
+    auto config = world.config();
+    config.net.login_key = keys_directory.path() / "login.pub";
+    const double radius = 115'000.0;
+    const hog::protocol::Placed flying{.at = hog::protocol::to_millimetres(hog::WorldPosition{
+                                           hog::DVec3{0.0, radius + 300.0, 0.0}}),
+                                       .stance = hog::protocol::Stance::Flying,
+                                       .facing = {.heading = 12'345, .pitch = -678}};
+    {
+        const auto server = playing(config);
+        Returning matt{*server, *keys, 7, flying};
+        std::atomic<bool> stop = false;
+        const auto give_up = MonotonicClock::now() + 10s;
+        Visited timer{[&] {
+            matt.visit();
+            if (matt.settled() || MonotonicClock::now() >= give_up) {
+                stop = true;
+            }
+        }};
+        REQUIRE(server->run(timer, [] { return start; }, stop));
+        REQUIRE(matt.settled());
+        // Never here before.
+        CHECK_FALSE(matt.placed());
+    }
+    const auto server = playing(config);
+    Returning matt{*server, *keys, 7, flying};
+    Returning anna{*server, *keys, 8, flying};
+    std::atomic<bool> stop = false;
+    const auto give_up = MonotonicClock::now() + 10s;
+    Visited timer{[&] {
+        matt.visit();
+        anna.visit();
+        if ((matt.placed() && anna.settled()) || MonotonicClock::now() >= give_up) {
+            stop = true;
+        }
+    }};
+    REQUIRE(server->run(timer, [] { return start; }, stop));
+    CHECK(matt.placed() == flying);
+    CHECK_FALSE(anna.placed());
 }
 
 TEST_CASE("a player is sent how the woods fare as they join, where the world grows a forest",

@@ -72,9 +72,9 @@ void mirror(metrics::Counter& counter, std::uint64_t total, std::uint64_t& mirro
 
 Server::Server(Opened /*unused*/, const server::ServerConfig& config,
                const planet::PlanetConfig& planet, store::SqliteSnapshotStore snapshots,
-               store::SqliteChangeStore changes)
+               store::SqliteChangeStore changes, store::SqlitePlayerStore places)
     : config_(config), world_id_(planet::world_id(planet)), planet_(planet),
-      changes_(std::move(changes)), snapshots_(std::move(snapshots)),
+      changes_(std::move(changes)), snapshots_(std::move(snapshots)), places_(std::move(places)),
       writer_(snapshots_, config.keep_snapshots),
       nearby_(
           std::min(planet::level_for(config.net.view.radius, planet.radius), planet::max_level)),
@@ -165,6 +165,10 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
     if (!changes) {
         return context(world_file, changes.error());
     }
+    auto places = store::SqlitePlayerStore::open(config.world);
+    if (!places) {
+        return context(world_file, places.error());
+    }
     auto loaded = save::load_newest(*snapshots, planet::world_id(*planet));
     if (!loaded) {
         return context(world_file, loaded.error());
@@ -175,7 +179,7 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
     }
 
     auto server = std::make_unique<Server>(Opened{}, config, *planet, std::move(*snapshots),
-                                           std::move(*changes));
+                                           std::move(*changes), std::move(*places));
     if (auto replayed = server->planet_.replay(*stored_changes); !replayed) {
         return context("planet changes", replayed.error());
     }
@@ -516,7 +520,9 @@ void Server::serve_players() {
             log::info(server_log, "connection {} closed: {}", std::to_underlying(lost->connection),
                       lost->reason);
             handshakes_.erase(lost->connection);
-            joined_.leave(lost->connection);
+            if (const auto left = joined_.leave(lost->connection)) {
+                keep(*left);
+            }
         }
     }
     const MonotonicClock::time_point now = MonotonicClock::now();
@@ -556,8 +562,13 @@ void Server::answer(net::ConnectionId connection, const protocol::Answer& answer
         const auto& player = shaking->second.player();
         log::info(server_log, "connection {} welcomed{}", std::to_underlying(connection),
                   player ? std::format(": {}", player->name) : std::string{});
-        joined_.join(connection, player ? player->name
-                                        : std::format("player {}", std::to_underlying(connection)));
+        joined_.join(connection,
+                     player ? player->name
+                            : std::format("player {}", std::to_underlying(connection)),
+                     player ? std::optional{player->account} : std::nullopt);
+        if (player) {
+            send_placed(connection, player->account);
+        }
         handshakes_.erase(shaking);
         send_weather(connection);
         send_woodlands(connection);
@@ -598,6 +609,40 @@ void Server::heard(net::ConnectionId connection, std::span<const std::byte> byte
     } else {
         log::debug(server_log, "connection {} sent a message out of place",
                    std::to_underlying(connection));
+    }
+}
+
+void Server::keep(const server::Remembered& remembered) {
+    const protocol::Placed& place = remembered.place;
+    if (auto kept =
+            places_.keep(remembered.account, {.at = place.at,
+                                              .flying = place.stance == protocol::Stance::Flying,
+                                              .heading = place.facing.heading,
+                                              .pitch = place.facing.pitch});
+        !kept) {
+        log::warn(save_log, "couldn't keep where account {} was: {}", remembered.account,
+                  kept.error());
+    }
+}
+
+void Server::send_placed(net::ConnectionId connection, std::uint64_t account) {
+    const auto found = places_.find(account);
+    if (!found) {
+        log::warn(save_log, "couldn't find where account {} was: {}", account, found.error());
+        return;
+    }
+    if (!*found || !players_) {
+        return;
+    }
+    const store::PlayerPlace& place = **found;
+    const protocol::Placed placed{.at = place.at,
+                                  .stance = place.flying ? protocol::Stance::Flying
+                                                         : protocol::Stance::Walking,
+                                  .facing = {.heading = place.heading, .pitch = place.pitch}};
+    if (auto sent = players_->send(connection, net::Delivery::Reliable, protocol::encode(placed));
+        !sent) {
+        log::warn(server_log, "couldn't place connection {}: {}", std::to_underlying(connection),
+                  sent.error());
     }
 }
 
@@ -768,6 +813,9 @@ void Server::submit() {
 
 Result<void> Server::save() {
     HOG_ZONE("save");
+    for (const server::Remembered& remembered : joined_.remembered()) {
+        keep(remembered);
+    }
     submit();
     auto flushed = writer_.flush();
     if (!flushed) {

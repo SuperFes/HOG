@@ -26,6 +26,7 @@
 #include <hog/sim/weather.hpp>
 #include <hog/sim/wildlife.hpp>
 #include <hog/store/sqlite_change_store.hpp>
+#include <hog/store/sqlite_player_store.hpp>
 #include <hog/store/sqlite_snapshot_store.hpp>
 
 #include <flecs.h>
@@ -61,7 +62,7 @@ public:
 
     Server(Opened /*unused*/, const server::ServerConfig& config,
            const planet::PlanetConfig& planet, store::SqliteSnapshotStore snapshots,
-           store::SqliteChangeStore changes);
+           store::SqliteChangeStore changes, store::SqlitePlayerStore places);
     Server(const Server&) = delete;
     Server(Server&&) = delete;
     Server& operator=(const Server&) = delete;
@@ -83,7 +84,7 @@ public:
         requires std::same_as<std::invoke_result_t<Now&>, GameTime>
     [[nodiscard]] Result<void> run(T& timer, Now now, const std::atomic<bool>& stop);
 
-    // Snapshots the world and waits until it is written.
+    // Snapshots the world and waits until it is written, keeping where the players in are.
     [[nodiscard]] Result<void> save();
 
     // The game time and tick the world has reached.
@@ -142,6 +143,10 @@ private:
     void answer(net::ConnectionId connection, const protocol::Answer& answer);
     // Does what a player who's in asks.
     void heard(net::ConnectionId connection, std::span<const std::byte> bytes);
+    // Keeps where an account's player was, to place them there when they come back.
+    void keep(const server::Remembered& remembered);
+    // Sends a player who's been in before where they were.
+    void send_placed(net::ConnectionId connection, std::uint64_t account);
     // Sends a player's chat to everyone, under the name the server holds for them.
     void say(net::ConnectionId connection, const protocol::Said& said);
     // Sends each player a snapshot of those near them.
@@ -171,6 +176,7 @@ private:
     planet::World planet_;
     store::SqliteChangeStore changes_;
     store::SqliteSnapshotStore snapshots_;
+    store::SqlitePlayerStore places_;
     // After the store it writes to.
     server::SnapshotWriter writer_;
     // Before the world, which it must outlive.
