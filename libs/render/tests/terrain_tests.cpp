@@ -880,22 +880,33 @@ TEST_CASE("gusts cross far meadows as patches of light swaying in waves, and lea
 
 namespace {
 
-// Flat ground of `biome` two metres above the sea, `spacing` metres between its vertices and
-// stretching east from `near` metres off, seen level from standing height through the air, its
-// grass reaching `grass` metres.
-std::vector<std::uint8_t> level_over(hog::render::Device& device, Biome biome, double grass,
-                                     double near, double spacing) {
+// Flat ground two metres above the sea, seen level from standing height through the air.
+struct Level {
+    Biome biome = Biome::Grassland;
+    double grass = 0.0;  // metres its grass reaches
+    double canopy = 0.0; // metres beyond which its woods are drawn in the ground
+    // Of the half further off; none nearer.
+    hog::terrain::Woods woods{};
+    double near = 60.0;   // metres east to where it begins
+    double spacing = 8.0; // metres between its vertices
+};
+
+std::vector<std::uint8_t> level_over(hog::render::Device& device, const Level& level) {
+    const Biome biome = level.biome;
+    const double near = level.near;
+    const double spacing = level.spacing;
     constexpr double ground = 2.0;
     constexpr double eye_over = 1.5;
-    auto terrain =
-        hog::render::Terrain::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT,
-                                     {.materials = grey_materials(), .air = true, .grass = grass});
+    auto terrain = hog::render::Terrain::create(
+        device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT,
+        {.materials = grey_materials(), .air = true, .canopy = level.canopy, .grass = level.grass});
     REQUIRE(terrain);
     auto pool = make_pool(device, {});
     const std::uint32_t slot = pool.acquire().value_or(1);
     std::vector<PatchVertex> patch = flat_patch(static_cast<float>(spacing));
     for (PatchVertex& vertex : patch) {
         vertex.biome = biome;
+        vertex.woods = vertex.position.x > 0.0F ? level.woods : hog::terrain::Woods{};
     }
     REQUIRE(pool.stage(0, slot, patch));
 
@@ -930,10 +941,11 @@ std::vector<std::uint8_t> level_over(hog::render::Device& device, Biome biome, d
     });
 }
 
-// Rows of a level look that ground is drawn in, all under the eye.
-int rows_drawn(const std::vector<std::uint8_t>& pixels) {
+// Rows of a level look, from the top down to `to`, that ground is drawn in: to the bottom, all of
+// them, and to half way down, those over the eye.
+int rows_drawn(const std::vector<std::uint8_t>& pixels, std::uint32_t to = extent.height) {
     int rows = 0;
-    for (std::uint32_t y = 0; y < extent.height; ++y) {
+    for (std::uint32_t y = 0; y < to; ++y) {
         bool drawn = false;
         for (std::uint32_t x = 0; x < extent.width; ++x) {
             drawn = drawn || pixel_at(pixels, x, y) != background;
@@ -950,15 +962,37 @@ TEST_CASE("past where its blades show, grass stands up from the ground, and bare
     const auto device = test_device();
     // Beyond 50 m the blades are all gone, so the meadow from 60 m off stands its full height,
     // its near edge drawn nearer the horizon than flat ground's.
-    const int flat = rows_drawn(level_over(*device, Biome::Grassland, 0.0, 60.0, 8.0));
-    const int meadow = rows_drawn(level_over(*device, Biome::Grassland, 50.0, 60.0, 8.0));
+    const int flat = rows_drawn(level_over(*device, {}));
+    const int meadow = rows_drawn(level_over(*device, {.grass = 50.0}));
     INFO("flat " << flat << ", meadow " << meadow);
     CHECK(flat >= 5);
     CHECK(meadow < flat * 3 / 4);
-    CHECK(rows_drawn(level_over(*device, Biome::Beach, 50.0, 60.0, 8.0)) == flat);
+    CHECK(rows_drawn(level_over(*device, {.biome = Biome::Beach, .grass = 50.0})) == flat);
     // Up close the blades are drawn, so the ground stays where it is under them.
-    CHECK(level_over(*device, Biome::Grassland, 260.0, 4.0, 0.25) ==
-          level_over(*device, Biome::Grassland, 0.0, 4.0, 0.25));
+    CHECK(level_over(*device, {.grass = 260.0, .near = 4.0, .spacing = 0.25}) ==
+          level_over(*device, {.near = 4.0, .spacing = 0.25}));
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("beyond the tree stamps, woods stand up from the ground as high as their crowns",
+          "[render][gpu]") {
+    const auto device = test_device();
+    // Dense woods 20 m tall over the further half, their edge some 190 m off.
+    constexpr hog::terrain::Woods dense{255, 160, 0, 0, 0};
+    const auto over_the_eye = [&](const Level& level) {
+        return rows_drawn(level_over(*device, level), extent.height / 2);
+    };
+    CHECK(over_the_eye({.woods = dense}) == 0);
+    // Past the stamps' reach, the woods' edge stands over the eye, a wall of crowns.
+    const int woods =
+        over_the_eye({.biome = Biome::TemperateForest, .canopy = 50.0, .woods = dense});
+    INFO("woods " << woods);
+    CHECK(woods >= 4);
+    // Still within it, the stamps stand there instead.
+    CHECK(over_the_eye({.biome = Biome::TemperateForest, .canopy = 900.0, .woods = dense}) == 0);
+    // Sparse woods close over less of the ground, so stand lower.
+    constexpr hog::terrain::Woods sparse{40, 160, 0, 0, 0};
+    CHECK(over_the_eye({.biome = Biome::TemperateForest, .canopy = 50.0, .woods = sparse}) < woods);
     CHECK(device->validation_errors() == 0);
 }
 

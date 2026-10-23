@@ -235,6 +235,42 @@ float standing_grass(Ground ground, float3 from_eye) {
            (1.0 - saturate(ground.scar));
 }
 
+// As terrain::woods_crowding and woods_tallest.
+static const float woods_crowding = 2.0;
+static const float woods_tallest = 32.0;
+
+// Beyond the tree stamps, the woods stand up as the ground's top: as high as their crowns reach on
+// the whole, by how much of the ground the crowns close over seen from above, rising as the stamps
+// shrink away so the two keep the woods' height between them. `ground` must hold its woods.
+float standing_woods(Ground ground, float3 from_eye) {
+    const float reach = settings.canopy.x;
+    const float crowding = ground.woods.x * (woods_crowding / 100.0);
+    if (reach <= 0.0 || crowding <= 0.0) {
+        return 0.0;
+    }
+    const float fade = saturate((reach - length(from_eye)) / (0.2 * reach));
+    const float band = 1.0 - (fade * fade);
+    if (band <= 0.0) {
+        return 0.0;
+    }
+    const float tall = ground.woods.y * woods_tallest;
+    const float broadleaf = ground.woods.z;
+    const float maple = ground.woods.w;
+    const float others = 1.0 - ground.palms;
+    const float shares[genus_count] = { others * (1.0 - broadleaf), others * broadleaf * (1.0 - maple),
+                                        others * broadleaf * maple, ground.palms };
+    float top = 0.0;
+    float closing = 0.0;
+    for (uint genus = 0; genus < genus_count; ++genus) {
+        const Crown crown = crown_of(genus);
+        const float height = tall * crown.height;
+        const float width = height * crown.width;
+        top += shares[genus] * height;
+        closing += crowding * shares[genus] * 0.785 * width * width;
+    }
+    return top * (1.0 - exp(-closing)) * band;
+}
+
 // The vertex's ground, all but where it's drawn.
 Ground grounded(Vertex vertex) {
     Ground ground;
@@ -276,12 +312,16 @@ Ground vertex_main(Vertex vertex) {
     return placed(grounded(vertex), push.origin.xyz + vertex.position);
 }
 
-// Lit through the air, which says how wide a pixel is, far grass stands up from the ground.
+// Lit through the air, which says how wide a pixel is, far grass and woods stand up from the
+// ground: the grass along the ground's normal, the woods straight up, the taller of the two.
 [shader("vertex")]
 Ground vertex_air(Vertex vertex) {
     const Ground ground = grounded(vertex);
     const float3 on_ground = push.origin.xyz + vertex.position;
-    return placed(ground, on_ground + (vertex.normal * standing_grass(ground, on_ground)));
+    const float3 up = normalize(on_ground + (push.bend_up.xyz * (push.bend_radii.x + push.bend_up.w)));
+    const float3 grass = vertex.normal * standing_grass(ground, on_ground);
+    const float3 woods = up * standing_woods(ground, on_ground);
+    return placed(ground, on_ground + (dot(woods, up) > dot(grass, up) ? woods : grass));
 }
 
 ShoreLevel shore_level(Ground ground) {
@@ -451,10 +491,6 @@ static const float3 charcoal = float3(0.03, 0.027, 0.024);
 float3 scorched(Ground ground, float3 colour) {
     return lerp(colour, charcoal, 0.9 * saturate(ground.scar));
 }
-
-// As terrain::woods_crowding and woods_tallest.
-static const float woods_crowding = 2.0;
-static const float woods_tallest = 32.0;
 
 // The ground's colour with woods folded in beyond where the tree stamps shrink away: as many
 // crowns as flora stands there, shaped and coloured as the stamps draw them, hiding the more of

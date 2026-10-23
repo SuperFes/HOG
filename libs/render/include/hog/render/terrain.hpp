@@ -117,8 +117,9 @@ struct TerrainLook {
     // rather than lit by the sun alone.
     bool air = false;
     // Metres from the eye beyond which the woods baked into the patches are folded into the
-    // ground's colour, rising as the tree stamps shrink away; 0 for none. They keep the air's
-    // year, so lit by the sun alone they stay green.
+    // ground's colour, rising as the tree stamps shrink away, and lit by the air stand up from it
+    // as high as their crowns close over it; 0 for none. They keep the air's year, so lit by the
+    // sun alone they stay green.
     double canopy = 0.0;
     // Metres the grass reaches, as its GrassTier has it: past where its blades show, lit by the
     // air, the ground stands up as the grass's top, as tall as it grows there; 0 for none.
