@@ -955,6 +955,21 @@ int rows_drawn(const std::vector<std::uint8_t>& pixels, std::uint32_t to = exten
     return rows;
 }
 
+// The row under the lowest that ground is drawn in, counting from the top: where its near edge
+// is drawn.
+int drawn_down_to(const std::vector<std::uint8_t>& pixels) {
+    int below = 0;
+    for (std::uint32_t y = 0; y < extent.height; ++y) {
+        for (std::uint32_t x = 0; x < extent.width; ++x) {
+            if (pixel_at(pixels, x, y) != background) {
+                below = static_cast<int>(y) + 1;
+                break;
+            }
+        }
+    }
+    return below;
+}
+
 } // namespace
 
 TEST_CASE("past where its blades show, grass stands up from the ground, and bare ground lies flat",
@@ -962,11 +977,13 @@ TEST_CASE("past where its blades show, grass stands up from the ground, and bare
     const auto device = test_device();
     // Beyond 50 m the blades are all gone, so the meadow from 60 m off stands its full height,
     // its near edge drawn nearer the horizon than flat ground's.
-    const int flat = rows_drawn(level_over(*device, {}));
-    const int meadow = rows_drawn(level_over(*device, {.grass = 50.0}));
-    INFO("flat " << flat << ", meadow " << meadow);
+    const auto flat_look = level_over(*device, {});
+    const int flat = rows_drawn(flat_look);
+    const int flat_edge = drawn_down_to(flat_look);
+    const int meadow_edge = drawn_down_to(level_over(*device, {.grass = 50.0}));
+    INFO("flat " << flat << " rows to " << flat_edge << ", meadow to " << meadow_edge);
     CHECK(flat >= 5);
-    CHECK(meadow < flat * 3 / 4);
+    CHECK(meadow_edge <= flat_edge - 2);
     CHECK(rows_drawn(level_over(*device, {.biome = Biome::Beach, .grass = 50.0})) == flat);
     // Up close the blades are drawn, so the ground stays where it is under them.
     CHECK(level_over(*device, {.grass = 260.0, .near = 4.0, .spacing = 0.25}) ==

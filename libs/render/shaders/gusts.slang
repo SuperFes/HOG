@@ -5,7 +5,7 @@ module gusts;
 // period, placed about the eye as render::gust_anchor has it.
 
 // Metres the field repeats over, as render::gust_period.
-static const float period = 2048.0;
+public static const float period = 2048.0;
 
 uint hashed(uint at) {
     at ^= at >> 16;
@@ -26,7 +26,7 @@ float along_gradient(uint hash, float3 offset) {
 }
 
 // Gradient noise, about -1 to 1, over a lattice of `cells` to the period; `at` in cells.
-float noise(float3 at, int cells, uint octave) {
+public float periodic_noise(float3 at, int cells, uint octave) {
     const float3 below = floor(at);
     const float3 within = at - below;
     // The lattice points either side on each axis, wrapped to the period, each axis scrambled
@@ -60,8 +60,8 @@ float noise(float3 at, int cells, uint octave) {
 public float gust_field(float3 from_eye, float3 anchor) {
     const float3 at = (from_eye + anchor) / period;
     // Lattices of uneven sizes, so their cells never line up into a grid; about 41, 17 and 8 m.
-    return (0.65 * noise(at * 50.0, 50, 0u)) + (0.3 * noise(at * 117.0, 117, 1u)) +
-           (0.15 * noise(at * 263.0, 263, 2u));
+    return (0.65 * periodic_noise(at * 50.0, 50, 0u)) + (0.3 * periodic_noise(at * 117.0, 117, 1u)) +
+           (0.15 * periodic_noise(at * 263.0, 263, 2u));
 }
 
 // How hard the gusts blow where their field is `field`, 0 in a lull to 1 in the heart of a gust.

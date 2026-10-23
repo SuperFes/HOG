@@ -238,6 +238,11 @@ TEST_CASE("a cell grows the full density out to its hold, thinning with distance
     CHECK(hog::render::grass_layers(tier, 0.5, 20.0) == 10.0);
     CHECK(hog::render::grass_layers(tier, 0.5, 40.0) == 2.5);
     CHECK(hog::render::grass_layers(tier, 1.0, 80.0) == 2.5);
+    // Thicker grass, thicker only until it's thinned to the rest of the field's density.
+    CHECK(hog::render::grass_layers(tier, 0.5, 0.0, 4.0) == 40.0);
+    CHECK(hog::render::grass_layers(tier, 0.5, 20.0, 4.0) == 2.5 * 4.0);
+    CHECK(hog::render::grass_layers(tier, 0.5, 40.0, 4.0) == 2.5);
+    CHECK(hog::render::grass_layers(tier, 1.0, 80.0, 4.0) == 2.5);
 }
 
 TEST_CASE("thinned grass is drawn wider, covering the ground near as thickly", "[render]") {

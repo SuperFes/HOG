@@ -1,6 +1,7 @@
 import atmosphere;
 import bend;
 import gusts;
+import lush;
 import projection;
 import season;
 import shadow;
@@ -200,8 +201,9 @@ static const float grass_rising = 0.3;
 static const float grass_pressed = 0.4;
 
 // Past where its blades show, grass stands up as the ground's top: as tall as it grows there on the
-// whole, rising as the blades shrink away under two pixels tall or towards the end of their reach,
-// and pressed down where the gusts lay it over. `ground` must hold its biomes and height.
+// whole, taller in its thick patches, rising as the blades shrink away under two pixels tall or
+// towards the end of their reach, and pressed down where the gusts lay it over. `ground` must hold
+// its biomes and height.
 float standing_grass(Ground ground, float3 from_eye) {
     const float reach = settings.canopy.y;
     if (reach <= 0.0) {
@@ -231,7 +233,8 @@ float standing_grass(Ground ground, float3 from_eye) {
                            (swaying(speed) * sin(sway_phase(lighting.swaying.x, wind, field))));
     }
     const float clear = saturate((ground.height - grass_shore) / grass_rising);
-    return top * (1.0 - blades) * (1.0 - (grass_pressed * pressed)) * clear *
+    const float thick = thick_height(thickness(from_eye, lighting.ground.xyz));
+    return top * thick * (1.0 - blades) * (1.0 - (grass_pressed * pressed)) * clear *
            (1.0 - saturate(ground.scar));
 }
 

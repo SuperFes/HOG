@@ -42,12 +42,14 @@ struct Ground {
 };
 
 struct Gusting {
-    double gust = 0.0;  // how hard the gusts blow, 0 to 1
-    double speed = 0.0; // m/s
-    double laid = 0.0;  // how much further grass is laid over than on the whole
-    double sheen = 0.0; // and swaying with it
-    double bush = 0.0;  // how far a bush's top is held over, of its height
-    double tree = 0.0;  // and a tree's
+    double gust = 0.0;   // how hard the gusts blow, 0 to 1
+    double speed = 0.0;  // m/s
+    double laid = 0.0;   // how much further grass is laid over than on the whole
+    double sheen = 0.0;  // and swaying with it
+    double bush = 0.0;   // how far a bush's top is held over, of its height
+    double tree = 0.0;   // and a tree's
+    double thick = 0.0;  // times its density grass grows, the field lying where the gusts' does
+    double taller = 0.0; // times its height grass stands for it
 };
 
 // How hard the gusts blow at each point, how fast the wind blows there and how it lays grass over,
@@ -74,7 +76,9 @@ std::vector<Gusting> gusting_at(hog::render::Device& device, const WorldPosition
                            .laid = static_cast<double>(grass[2]),
                            .sheen = static_cast<double>(grass[3]),
                            .bush = static_cast<double>(woody[0]),
-                           .tree = static_cast<double>(woody[1])});
+                           .tree = static_cast<double>(woody[1]),
+                           .thick = static_cast<double>(woody[2]),
+                           .taller = static_cast<double>(woody[3])});
     }
     return gusting;
 }
@@ -383,4 +387,38 @@ TEST_CASE("bushes and trees are held over in the gusts and rock in waves, stiffe
     CHECK(std::ranges::minmax(bushes).max - std::ranges::minmax(bushes).min > 0.05);
     CHECK(std::ranges::minmax(trees).max - std::ranges::minmax(trees).min > 0.02);
     CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("grass grows thicker and thinner in patches fixed to the ground", "[render][gusts]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    const Ground ground;
+    std::vector<WorldPosition> points;
+    for (int i = 0; i < 40; ++i) {
+        for (int j = 0; j < 40; ++j) {
+            points.push_back(ground.at(i * 5.0, j * 5.0));
+        }
+    }
+    // Wherever the eye is, as the ground's anchor has it; the gusts' drift doesn't move them.
+    const auto from = gusting_at(*device, ground.at(-30.0, 10.0), DVec3{0.0}, points, 0.0);
+    const auto moved = gusting_at(*device, ground.at(150.0, 60.0), DVec3{0.0}, points, 0.0);
+    double thinnest = 10.0;
+    double thickest = 0.0;
+    int thick_patches = 0;
+    for (std::size_t at = 0; at < points.size(); ++at) {
+        CHECK_THAT(moved[at].thick, WithinAbs(from[at].thick, 1e-3));
+        thinnest = std::min(thinnest, from[at].thick);
+        thickest = std::max(thickest, from[at].thick);
+        thick_patches += from[at].thick > 2.0 ? 1 : 0;
+        CHECK(from[at].taller >= 1.0);
+        CHECK(from[at].taller <= 1.35 + 1e-4);
+        CHECK((from[at].taller > 1.0) == (from[at].thick > 1.0));
+    }
+    // Thin and thick both, over the 200 m square, and thick in patches rather than everywhere.
+    CHECK(thinnest < 0.9);
+    CHECK(thickest > 2.5);
+    CHECK(thick_patches > 40);
+    CHECK(thick_patches < 800);
 }

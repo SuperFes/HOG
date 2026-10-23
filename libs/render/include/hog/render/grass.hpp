@@ -37,9 +37,14 @@ struct GrassTier {
     double reach = 260.0;
 };
 
+// The most times its biome's density grass grows in its thickest patches, as lush.slang's.
+inline constexpr double thickest_grass = 3.0;
+
 // Blades a grid cell `spacing` metres across grows `distance` metres from the eye, before
-// most_blades_per_cell holds it back.
-[[nodiscard]] double grass_layers(const GrassTier& tier, double spacing, double distance) noexcept;
+// most_blades_per_cell holds it back, where it grows `thickness` times its density. Thicker grass
+// holds that density only until it's thinned to the density of grass of thickness 1.
+[[nodiscard]] double grass_layers(const GrassTier& tier, double spacing, double distance,
+                                  double thickness = 1.0) noexcept;
 
 // How much of a biome's ground is grass tall enough to wave in the wind, 0 to 1.
 [[nodiscard]] float waving_grass(planet::Biome biome) noexcept;

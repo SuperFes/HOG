@@ -1,9 +1,12 @@
 import gusts;
+import lush;
 
 // Two to a case: a point from the eye with w the wind's speed on the whole, and where the gusts'
 // field lies from it with w the seconds plants have swayed for. Two found to a case: x how hard
 // the gusts blow there, y the wind's speed there, z how much further grass is laid over there, w
-// that and its swaying, seen whole; then x how far a bush's top is held over, y a tree's.
+// that and its swaying, seen whole; then x how far a bush's top is held over, y a tree's, z how
+// thick grass grows there, with the field lying where the gusts' does, and w how tall it stands
+// for it.
 [[vk::binding(0, 0)]] RWStructuredBuffer<float4> asked;
 [[vk::binding(1, 0)]] RWStructuredBuffer<float4> found;
 
@@ -22,6 +25,8 @@ void compute_main(uint3 id: SV_DispatchThreadID) {
     const float gust = gust_of(there);
     found[2 * id.x] = float4(gust, gusting(point.w, gust), gust_laid(point.w, gust),
                              gust_sheen(point.w, there, field.w, 1.0));
+    const float thick = thickness(point.xyz, field.xyz);
     found[(2 * id.x) + 1] = float4(bush_sway(field.w, point.w, there, 0.0),
-                                   tree_sway(field.w, point.w, there, 0.0), 0.0, 0.0);
+                                   tree_sway(field.w, point.w, there, 0.0), thick,
+                                   thick_height(thick));
 }

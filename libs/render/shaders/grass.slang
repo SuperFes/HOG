@@ -1,6 +1,7 @@
 import atmosphere;
 import bend;
 import gusts;
+import lush;
 import shadow;
 import tone;
 import water;
@@ -205,9 +206,13 @@ bool grow(uint instance, out Grown grown) {
     const uint at = (i * patch_side) + j;
     const Corner near = corner_at(bias, at + (u < 0.5 ? 0 : patch_side) + (v < 0.5 ? 0 : 1));
     // Fewer layers grow further off, each blade going at its own point in its layer's going and
-    // shrinking away as it does, so the field thins without a pop.
-    const float full = tier.x * spacing * spacing;
-    const float held = tier.y / max(length(push.origin.xyz + near.position), tier.y);
+    // shrinking away as it does, so the field thins without a pop. Thick patches hold their
+    // density only as far as it takes them to thin to the rest of the field's, as no one sees
+    // far into thick grass: they cost no more blades than it, but grow them all up close.
+    const float thick = thickness(push.origin.xyz + near.position, lighting.ground.xyz);
+    const float full = tier.x * thick * spacing * spacing;
+    const float hold = tier.y / sqrt(thick);
+    const float held = hold / max(length(push.origin.xyz + near.position), hold);
     const float kept = min(full * held * held, float(layers));
     const float thinning = saturate((kept - float(layer) - (0.75 * unit(hash + 11u))) * 4.0);
     if (thinning <= 0.0) {
@@ -246,7 +251,8 @@ bool grow(uint instance, out Grown grown) {
     const bool reed = spread.w > 0.0 && above >= reed_low && above <= reed_high &&
                       unit(hash + 9u) < spread.w;
     const float tall = reed ? reed_height * (0.75 + (0.45 * unit(hash + 5u)))
-                            : kind.w * (1.0 + (0.6 * near.gone)) * (0.6 + (0.8 * unit(hash + 5u)));
+                            : kind.w * thick_height(thick) * (1.0 + (0.6 * near.gone)) *
+                                  (0.6 + (0.8 * unit(hash + 5u)));
     // Shrinking away under two pixels tall, gone under one, so short grass stays near and tall
     // grass reaches further.
     const float pixel = push.bend_radii.w * length(root);
@@ -284,7 +290,9 @@ bool grow(uint instance, out Grown grown) {
     grown.biome = biome;
     grown.reed = reed;
     grown.itself = true_width / width;
-    grown.tone = 0.8 + (0.4 * unit(hash + 8u));
+    // Darker where it grows thick and shades itself, paler where it's thin.
+    const float lushness = saturate((thick - thinnest) / (thickest - thinnest));
+    grown.tone = (0.8 + (0.4 * unit(hash + 8u))) * lerp(1.12, 0.85, lushness);
     return true;
 }
 

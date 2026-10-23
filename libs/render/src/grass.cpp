@@ -124,9 +124,11 @@ constexpr BiomeGrass grass_of(planet::Biome biome) noexcept {
 
 } // namespace
 
-double grass_layers(const GrassTier& tier, double spacing, double distance) noexcept {
-    const double held = tier.hold / std::max(distance, tier.hold);
-    return tier.density * spacing * spacing * held * held;
+double grass_layers(const GrassTier& tier, double spacing, double distance,
+                    double thickness) noexcept {
+    const double hold = tier.hold / std::sqrt(thickness);
+    const double held = hold / std::max(distance, hold);
+    return tier.density * thickness * spacing * spacing * held * held;
 }
 
 GrassStand grass_stand(planet::Biome biome) noexcept {
@@ -261,7 +263,7 @@ void Grass::grow(VkCommandBuffer commands, VkExtent2D extent, const TerrainPool&
             // As many layers as its nearest cells grow; the shader lets each blade go by its own
             // distance.
             const auto layers = static_cast<std::uint32_t>(
-                std::ceil(std::min(grass_layers(tier_, draw.spacing, draw.nearest),
+                std::ceil(std::min(grass_layers(tier_, draw.spacing, draw.nearest, thickest_grass),
                                    static_cast<double>(most_blades_per_cell))));
             if (draw.nearest >= tier_.reach || layers == 0) {
                 continue;
