@@ -153,33 +153,22 @@ std::vector<render::GrassDraw> grass_draws(const GroundSlots& slots,
         if (!held) {
             continue;
         }
-        const auto grow = [&](double density, double fade_far, bool tall_only, std::uint32_t seed) {
-            const auto blades =
-                static_cast<std::uint32_t>(std::lround(density * spacing * spacing));
-            if (blades == 0) {
-                return;
-            }
+        const auto grow = [&](bool tall_only, std::uint32_t seed) {
             draws.push_back({.slot = *held,
                              .origin = patch.origin,
                              .spacing = spacing,
-                             .blades_per_cell = std::min(blades, render::most_blades_per_cell),
                              .seed = seed,
-                             .fade_far = fade_far,
+                             .nearest = distance,
                              .tall_only = tall_only});
         };
         // The lawn: every biome's blades, on fine ground near the eye.
         if (spacing <= budget.finest && distance < budget.lawn_far) {
-            const double fade =
-                std::min((budget.lawn_far - distance) / (budget.lawn_far - budget.lawn_near), 1.0);
-            grow(budget.density * fade, budget.lawn_far, false, grass_seed(patch.cell));
+            grow(false, grass_seed(patch.cell));
         }
-        // The far swaths: tall biomes only, their stand thinning with the square of distance,
-        // seeded apart from the lawn so the two don't grow twin blades where they overlap.
+        // The far swaths: tall biomes only, seeded apart from the lawn so the two don't grow twin
+        // blades where they overlap.
         if (distance < budget.tall_far) {
-            const double middle = distance + (span * 0.5);
-            const double held_to = budget.tall_hold / std::max(middle, budget.tall_hold);
-            grow(budget.tall_density * held_to * held_to, budget.tall_far, true,
-                 grass_seed(patch.cell) ^ 0x7a11'f1e1U);
+            grow(true, grass_seed(patch.cell) ^ 0x7a11'f1e1U);
         }
     }
     return draws;

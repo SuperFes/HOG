@@ -51,10 +51,12 @@ constexpr std::array descriptors{
     binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT),
     binding(6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)};
 
-// Each biome's blades: colour in linear light and height, then the share grown and their width.
+// Each biome's blades: colour in linear light and height, then the share grown and their width;
+// and the lawn's and swaths' tiers, as density, hold and far.
 struct Settings {
     std::array<glm::vec4, planet::biome_count> blade;
     std::array<glm::vec4, planet::biome_count> spread;
+    std::array<glm::vec4, 2> tiers;
 };
 
 struct BiomeGrass {
@@ -108,6 +110,11 @@ constexpr BiomeGrass grass_of(planet::Biome biome) noexcept {
 
 } // namespace
 
+double grass_layers(const GrassTier& tier, double spacing, double distance) noexcept {
+    const double held = tier.hold / std::max(distance, tier.hold);
+    return tier.density * spacing * spacing * held * held;
+}
+
 float waving_grass(planet::Biome biome) noexcept {
     // Lawns shorter than this stand stiff, and from this tall wave freely.
     constexpr float stiff = 0.15F;
@@ -119,8 +126,15 @@ float waving_grass(planet::Biome biome) noexcept {
 
 namespace {
 
-Settings grass_settings(std::span<const Vec3> palette) noexcept {
+glm::vec4 packed(const GrassTier& tier) noexcept {
+    return {static_cast<float>(tier.density), static_cast<float>(tier.hold),
+            static_cast<float>(tier.far), 0.0F};
+}
+
+Settings grass_settings(std::span<const Vec3> palette, const GrassTier& lawn,
+                        const GrassTier& swaths) noexcept {
     Settings settings{};
+    settings.tiers = {packed(lawn), packed(swaths)};
     for (int biome = 0; biome < planet::biome_count; ++biome) {
         const BiomeGrass grass = grass_of(static_cast<planet::Biome>(biome));
         settings.blade.at(static_cast<std::size_t>(biome)) =
@@ -134,14 +148,17 @@ Settings grass_settings(std::span<const Vec3> palette) noexcept {
 } // namespace
 
 Result<Grass> Grass::create(Device& device, VkFormat colour_format, VkFormat depth_format,
-                            std::span<const Vec3> palette) {
+                            std::span<const Vec3> palette, const GrassTier& lawn,
+                            const GrassTier& swaths) {
     if (palette.size() != planet::biome_count) {
         return make_error(
             ErrorCode::InvalidArgument,
             std::format("{} colours for {} biomes", palette.size(), planet::biome_count));
     }
     Grass grass;
-    const Settings settings = grass_settings(palette);
+    grass.lawn_ = lawn;
+    grass.swaths_ = swaths;
+    const Settings settings = grass_settings(palette, lawn, swaths);
     auto settings_buffer = make_filled_buffer(device, std::as_bytes(std::span{&settings, 1}),
                                               VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
     if (!settings_buffer) {
@@ -192,8 +209,17 @@ void Grass::draw(VkCommandBuffer commands, VkExtent2D extent, const TerrainPool&
     vkCmdPushConstants(commands, pipeline_.layout(), stages, 0, offsetof(Push, wind), &push);
     for (const GrassDraw& draw : draws) {
         HOG_ASSERT(draw.slot < pool.capacity(), "growing grass on a slot beyond the pool");
-        HOG_ASSERT(draw.blades_per_cell >= 1 && draw.blades_per_cell <= most_blades_per_cell,
-                   "blades beyond what a cell packs");
+        HOG_ASSERT(draw.spacing > 0.0 && draw.spacing <= coarsest_grass_cells,
+                   "grass on cells coarser than a draw packs");
+        // As many layers as its nearest cells grow; the shader lets each blade go by its own
+        // distance.
+        const GrassTier& tier = draw.tall_only ? swaths_ : lawn_;
+        const auto layers = static_cast<std::uint32_t>(
+            std::ceil(std::min(grass_layers(tier, draw.spacing, draw.nearest),
+                               static_cast<double>(most_blades_per_cell))));
+        if (draw.nearest >= tier.far || layers == 0) {
+            continue;
+        }
         // The patch's own vertices, from an offset aligned for any device: whole pools can
         // outgrow what a storage binding may span.
         constexpr VkDeviceSize alignment = 256;
@@ -201,15 +227,14 @@ void Grass::draw(VkCommandBuffer commands, VkExtent2D extent, const TerrainPool&
         const VkDeviceSize aligned = begin & ~(alignment - 1);
         const auto bias = static_cast<std::uint32_t>(begin - aligned);
         push_storage_buffer(commands, pipeline_, 1, pool.vertices(), aligned, bias + patch_bytes);
-        const auto fade =
-            static_cast<std::uint32_t>(std::lround(std::clamp(draw.fade_far, 1.0, furthest_grass)));
+        const auto spacing = static_cast<std::uint32_t>(std::lround(draw.spacing * 256.0));
         push.wind.w = std::bit_cast<float>(draw.seed);
-        push.origin = glm::vec4{
-            relative_to(draw.origin, view.camera.eye),
-            std::bit_cast<float>((draw.tall_only ? 1U << 26U : 0U) | (fade << 14U) | (bias << 6U))};
+        push.origin = glm::vec4{relative_to(draw.origin, view.camera.eye),
+                                std::bit_cast<float>((draw.tall_only ? 1U << 26U : 0U) |
+                                                     (spacing << 14U) | (bias << 6U) | layers)};
         vkCmdPushConstants(commands, pipeline_.layout(), stages, offsetof(Push, wind),
                            sizeof(Push) - offsetof(Push, wind), &push.wind);
-        vkCmdDraw(commands, blade_vertices, cells * draw.blades_per_cell, 0, 0);
+        vkCmdDraw(commands, blade_vertices, cells * layers, 0, 0);
     }
 }
 

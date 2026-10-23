@@ -119,7 +119,8 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
     if (!ocean) {
         return failed("draw the sea", ocean.error());
     }
-    auto grass = render::Grass::create(device, colour_format, depth_format, palette);
+    auto grass = render::Grass::create(device, colour_format, depth_format, palette, budget.lawn(),
+                                       budget.swaths());
     if (!grass) {
         return failed("grow the grass", grass.error());
     }

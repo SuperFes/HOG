@@ -141,19 +141,18 @@ TEST_CASE("grass grows on fine ground near the eye, thinning with distance", "[c
     for (const hog::render::GrassDraw& draw : grown) {
         (draw.tall_only ? swaths : lawn).push_back(draw);
     }
-    // Only the fine patches grow the lawn, and the far one fewer blades than the near.
+    // Only the fine patches grow the lawn, the far one as far off as its nearest ground, which
+    // thins it.
     REQUIRE(lawn.size() == 2);
     CHECK(lawn[0].slot == 0);
     CHECK(lawn[1].slot == 1);
-    CHECK(lawn[0].blades_per_cell >= 1);
-    CHECK(lawn[1].blades_per_cell >= 1);
-    CHECK(lawn[1].blades_per_cell < lawn[0].blades_per_cell);
+    CHECK(lawn[0].nearest == 0.0);
+    CHECK(lawn[1].nearest > 30.0);
+    CHECK(lawn[1].nearest < 60.0);
     CHECK(lawn[0].spacing < 0.75);
-    CHECK(lawn[0].fade_far == hog::render::grass_far);
     // Every patch this fine also grows a far swath, seeded apart from its lawn.
     REQUIRE(swaths.size() == 3);
     CHECK(swaths[2].slot == 2);
-    CHECK(swaths[2].fade_far > hog::render::grass_far);
     CHECK(swaths[0].seed != lawn[0].seed);
     // The same cell seeds the same grass on every machine.
     CHECK(lawn[0].seed == hog::client::grass_draws(slots, drawn, eye, radius)[0].seed);
@@ -183,17 +182,18 @@ TEST_CASE("the lawn reaches as far as the budget has it", "[client][ground]") {
         }
         return found;
     };
-    // Out of the default lawn's reach, but in a longer one's, thinning towards its end.
+    // Out of the default lawn's reach, but in a longer one's.
     CHECK(lawn({}).empty());
-    const std::vector<hog::render::GrassDraw> longer = lawn({.lawn_near = 40.0, .lawn_far = 120.0});
-    REQUIRE(longer.size() == 1);
-    CHECK(longer[0].fade_far == 120.0);
-    const std::vector<hog::render::GrassDraw> held = lawn({.lawn_near = 110.0, .lawn_far = 120.0});
-    REQUIRE(held.size() == 1);
-    CHECK(longer[0].blades_per_cell < held[0].blades_per_cell);
+    CHECK(lawn({.lawn_near = 40.0, .lawn_far = 120.0}).size() == 1);
+    // And the lawn thins as the budget has it.
+    const hog::render::GrassTier tier =
+        hog::client::GrassBudget{.lawn_near = 40.0, .density = 20.0}.lawn();
+    CHECK(tier.density == 20.0);
+    CHECK(tier.hold == 40.0);
+    CHECK(tier.far == hog::render::grass_far);
 }
 
-TEST_CASE("tall swaths reach far over coarser ground, thinning as they go", "[client][ground]") {
+TEST_CASE("tall swaths reach far over coarser ground", "[client][ground]") {
     constexpr double radius = 115'000.0;
     // Vertex spacing ~5.5 m at level 10 on this planet; a level up is too coarse even for swaths.
     const CellId coarse = CellId::from_face_ij(0, 0, 0, 10);
@@ -211,14 +211,13 @@ TEST_CASE("tall swaths reach far over coarser ground, thinning as they go", "[cl
         patch(coarse, 0.0), patch(coarse_far, 400.0), patch(coarsest, 0.0)};
     const std::vector<hog::render::GrassDraw> swaths =
         hog::client::grass_draws(slots, drawn, eye, radius);
-    // Only tall grass grows this coarse, and the far patch thinner than the near.
+    // Only tall grass grows this coarse.
     REQUIRE(swaths.size() == 2);
     CHECK(swaths[0].tall_only);
     CHECK(swaths[1].tall_only);
     CHECK(swaths[0].slot == 0);
     CHECK(swaths[1].slot == 1);
-    CHECK(swaths[1].blades_per_cell >= 1);
-    CHECK(swaths[1].blades_per_cell < swaths[0].blades_per_cell);
+    CHECK(swaths[1].nearest > swaths[0].nearest);
 }
 
 TEST_CASE("each biome is coloured as it looks from above", "[client][ground]") {

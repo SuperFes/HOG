@@ -17,9 +17,9 @@ struct Push {
     float4 bend_radii;
     // xyz the wind near the ground, m/s; w (as bits) the patch's seed.
     float4 wind;
-    // xyz the patch's origin from the eye, in metres; w (as bits) the bytes before the patch's
-    // vertices in what's bound times 64, the metres blades have shrunk away by times 16384, and
-    // bit 26 set to grow only the tall biomes' blades.
+    // xyz the patch's origin from the eye, in metres; w (as bits) the layers of blades drawn, the
+    // bytes before the patch's vertices in what's bound times 64, the metres across its grid cells
+    // times 256 << 14, and bit 26 set for the swaths' tier, growing only the tall biomes' blades.
     float4 origin;
 };
 
@@ -33,6 +33,10 @@ struct Settings {
     // x the share of blades grown, y their width in metres, z the share of clumps grown,
     // w the share of reed stems standing in the band at the waterline.
     float4 spread[biome_count];
+    // The lawn's tier, then the swaths': x blades a square metre up close, y the metres that
+    // density holds to before falling with the square of distance, z the metres blades have
+    // shrunk away by.
+    float4 tiers[2];
 };
 
 [[vk::binding(0, 0)]] ConstantBuffer<Settings> settings;
@@ -163,9 +167,12 @@ float3 blown(float3 root, float height, uint hash) {
 [shader("vertex")]
 Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const uint packed = asuint(push.origin.w);
+    const uint layers = packed & 63u;
     const uint bias = (packed >> 6) & 0xffu;
-    const float fade_far = float((packed >> 14) & 0xfffu);
+    const float spacing = float((packed >> 14) & 0xfffu) / 256.0;
     const bool tall_only = (packed & (1u << 26)) != 0u;
+    const float4 tier = settings.tiers[tall_only ? 1 : 0];
+    const float fade_far = tier.z;
     // Blades keep their height to here, shrinking away by fade_far.
     const float fade_near = 0.45 * fade_far;
     const uint seed = asuint(push.wind.w);
@@ -173,6 +180,7 @@ Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     // A layer of blades a cell, every cell's nth blade in the nth layer, so each blade is the
     // same however many are grown: thinning lets the last go and moves none.
     const uint cell = instance & ((patch_cells * patch_cells) - 1u);
+    const uint layer = instance >> 10;
     const uint i = cell >> 5;
     const uint j = cell & 31u;
     const uint hash = hashed(seed ^ instance);
@@ -182,6 +190,17 @@ Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const float v = unit(hash + 1u);
     const uint at = (i * patch_side) + j;
     const Corner near = corner_at(bias, at + (u < 0.5 ? 0 : patch_side) + (v < 0.5 ? 0 : 1));
+    // Fewer layers grow further off, each blade going at its own point in its layer's going and
+    // shrinking away as it does, so the field thins without a pop.
+    const float full = tier.x * spacing * spacing;
+    const float held = tier.y / max(length(push.origin.xyz + near.position), tier.y);
+    const float kept = min(full * held * held, float(layers));
+    const float thinning = saturate((kept - float(layer) - (0.75 * unit(hash + 11u))) * 4.0);
+    if (thinning <= 0.0) {
+        return nothing();
+    }
+    // Those left stand for those gone, as wide as they'd cover together.
+    const float stands_for = full / max(kept, 0.25);
     // Near another biome a plant may be one of its, the fewer the further in.
     const uint biome = unit(hash + 10u) < near.blend ? near.blend_biome : near.biome;
     const float4 kind = settings.blade[biome];
@@ -231,10 +250,11 @@ Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const float height = (reed ? reed_height * (0.75 + (0.45 * unit(hash + 5u)))
                                : kind.w * (1.0 + (0.6 * near.gone)) *
                                      (0.6 + (0.8 * unit(hash + 5u)))) *
-                         fade;
+                         fade * thinning;
     // At least a pixel wide, so far blades don't shatter into bright specks; drawn wider than
     // they are, they wear the ground's colour instead, melting into it.
-    const float true_width = (reed ? reed_width : spread.y) * (0.7 + (0.6 * unit(hash + 6u)));
+    const float true_width =
+        (reed ? reed_width : spread.y * stands_for) * (0.7 + (0.6 * unit(hash + 6u)));
     const float pixel = push.bend_radii.w * length(root);
     const float width = max(true_width, 0.8 * pixel);
     const float itself = true_width / width;

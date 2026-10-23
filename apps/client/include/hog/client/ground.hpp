@@ -42,17 +42,18 @@ concept SlotPool =
 
 // How much grass is grown, on ground how fine.
 struct GrassBudget {
-    // The lawn: every biome's blades, at full density to lawn_near and thinning away by lawn_far.
+    // The lawn: every biome's blades, at full density to lawn_near, thinning with distance squared
+    // beyond, and shrunk away by lawn_far.
     double lawn_near = render::grass_near;
     double lawn_far = render::grass_far;
-    double finest = 0.75;  // metres between a patch's vertices at most, so only fine ground grows
-    double density = 40.0; // blades a square metre up close
+    double finest = 0.75; // metres between a patch's vertices at most, so only fine ground grows
+    double density = render::GrassTier{}.density; // blades a square metre up close
     // The tall swaths seen far off: coarser ground grows only the tall biomes' blades.
     double tall_coarsest = 6.0; // metres between vertices at most for the far swaths
-    double tall_density = 4.0;  // blades a square metre, held out to tall_hold
-    double tall_hold = 60.0;    // metres the density holds to, falling with distance squared
-    double tall_far = 260.0;    // metres the tall swaths reach
-    double bush_far = 260.0;    // metres the bushes reach
+    double tall_density = render::swath_tier.density; // blades a square metre, held to tall_hold
+    double tall_hold = render::swath_tier.hold; // metres, past which it falls with distance squared
+    double tall_far = render::swath_tier.far;   // metres the tall swaths reach
+    double bush_far = 260.0;                    // metres the bushes reach
     // The trees, standing far beyond the rest and on far coarser ground; the ground wears their
     // canopy's colour beyond.
     double tree_coarsest = 24.0;         // metres between vertices at most for the trees
@@ -62,6 +63,13 @@ struct GrassBudget {
     double forest_full = 80.0;              // metres the fullest detail reaches
     double forest_mid = 150.0;              // metres the middle detail reaches
     double forest_far = render::forest_far; // metres the coarsest reaches, where stamps take over
+
+    [[nodiscard]] render::GrassTier lawn() const noexcept {
+        return {.density = density, .hold = lawn_near, .far = lawn_far};
+    }
+    [[nodiscard]] render::GrassTier swaths() const noexcept {
+        return {.density = tall_density, .hold = tall_hold, .far = tall_far};
+    }
 
     friend bool operator==(const GrassBudget&, const GrassBudget&) = default;
 };

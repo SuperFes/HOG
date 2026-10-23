@@ -68,8 +68,11 @@ Result<void> read_table(std::string_view name, const toml::table& table, GrassBu
 // Each kind's distances in order from the eye out, and the lawn's thinning over a stretch of
 // ground.
 Result<void> check(const GrassBudget& budget) {
-    if (budget.finest <= 0.0 || budget.tall_coarsest < budget.finest) {
-        return invalid("grass.finest must be over 0 and no more than grass.tall_coarsest");
+    if (budget.finest <= 0.0 || budget.tall_coarsest < budget.finest ||
+        budget.tall_coarsest > render::coarsest_grass_cells) {
+        return invalid(std::format("grass.finest must be over 0, no more than grass.tall_coarsest, "
+                                   "and that no more than {} m",
+                                   render::coarsest_grass_cells));
     }
     if (budget.tall_hold <= 0.0) {
         return invalid("grass.tall_hold must be over 0");
