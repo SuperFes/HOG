@@ -236,6 +236,15 @@ Real waters range from clear blue to green, tea-brown, milky and mud. One model 
 - [ ] Silt stirred by whatever walks or swims: feet and bodies kick sediment off a soft bed into a small grid round the eye, read by the water's optics as more sediment, so the cloud hides the bed, browns the water and drifts off with the current, settling out over a minute or so; none off rock
 - [ ] Clarity that changes: storms and surf stirring the shallows' bed muddy, settling clear over the days after; spring melt and floods clouding the rivers; plankton blooming green in warm, rich water through the seasons
 
+**Terrain, levelled up**
+
+All in the planet library's fixed point, so the ground stays the same for everyone; each step that moves heights re-bakes the golden hashes.
+
+- [ ] Rock where it would show: soil thinning with slope and gone past about 35°, so steep faces show the bedrock the strata hold, each rock its own material (grey granite, dark basalt, pale limestone, banded sandstone)
+- [ ] An erosion filter over the generated heights (Rune Skovbo Johansen's): branching gullies and sharp ridges at 10 m to 1 km, finer than the landform's 1.5 km stream-power erosion, from the noise's own gradients, a point at a time so tiles stay seamless
+- [ ] Stepped cliffs from the strata: hard layers standing out as ledges over soft ones worn back into slopes, mesas and buttes in dry country
+- [ ] Landforms from what the planet already knows: scree below cliffs, fans where streams leave the mountains, U-shaped valleys and cirques under the glaciers, dunes shaped by the wind, sinkholes over karst, cones and calderas over magma chambers, river terraces
+
 **Tests**
 
 - [x] Headless render of fixed camera views, compared with reference images within a tolerance
@@ -424,7 +433,10 @@ These tracks can start once Phase 4 works and can run side by side; four people 
 - [ ] Apex succession (the dragon example)
 - [ ] Consequences of wiping out wildlife, driven by ecology events: bounties, wardens, hunting bans, scarce-goods prices
 - [ ] Planting and farming by players: sow, tend and harvest through the change store, growth riding the same climate and season rules as wild plants
-- [ ] Quarries and mines as voxel volumes; finite deposits
+- [ ] The ground as a volume wherever it needs one, never as cubes: the height map stays for untouched ground (nearly all of it, and everything far off), and where there are caves, overhangs or digging, chunks of a smooth distance field take over, meshed with dual contouring so cut stone keeps its sharp edges and rubble stays rough, stitched to the height map without seams
+- [ ] Something at every depth: what's under any point comes from the strata (soil, then sediment, then bedrock down to the mantle, ore deposits in their seams), shaded by the rock it is, freshly cut faces paler and tool-marked, weathering over the years from the change's timestamp
+- [ ] Digging as shapes, not voxels: each dig, cut or fill a shape and a tool kept in the change store, so it's small to send, replays from the seed, and rolls back by author like any other change; the volume rebuilt from them chunk by chunk, Jolt colliding with the rebuilt mesh
+- [ ] Quarries and mines: what comes out is the rock and ore the dug volume held, finite, hauled as cut blocks or rubble; spoil heaps where the waste is dumped; digging below the water table floods (see structural integrity for what holds the roof up)
 - [ ] Building by players and NPCs, from tents and lean-tos to castles, walls and trails: posts sunk in the ground, foundations on soil or bedrock, and wind and snow that topple weak builds
 - [ ] Structural integrity under Earth gravity for tunnels, buildings and bridges: span, load and material decide what holds; supports, cave-ins and sinkholes
 - [ ] Upkeep as a job players and NPCs take; places nobody maintains crumble into ruins over the centuries
