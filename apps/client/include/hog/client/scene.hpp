@@ -207,6 +207,7 @@ private:
     std::optional<std::uint64_t> weather_taken_;
     DVec3 drifted_{0.0};       // metres the clouds have drifted
     DVec3 foam_drifted_{0.0};  // and the water at the sea's surface
+    DVec3 gusts_drifted_{0.0}; // and the gusts over the ground
     double falling_for_ = 0.0; // seconds what falls has been falling
     double swaying_for_ = 0.0; // seconds the grass has swayed
     bool grass_on_ = true;

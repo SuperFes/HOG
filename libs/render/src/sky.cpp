@@ -2,6 +2,7 @@
 #include <hog/render/barrier.hpp>
 #include <hog/render/clouds.hpp>
 #include <hog/render/device.hpp>
+#include <hog/render/gusts.hpp>
 #include <hog/render/sky.hpp>
 #include <hog/render/streamed_image.hpp>
 #include <hog/shaders/aerial.hpp>
@@ -40,6 +41,7 @@ struct Lighting {
     glm::vec4 shadow;
     glm::vec4 year;
     glm::vec4 water;
+    glm::vec4 gusts;
 };
 
 static_assert(offsetof(Lighting, reach) + (3 * sizeof(float)) == sea_laying_at);
@@ -219,7 +221,8 @@ Result<> Sky::record_tables(VkCommandBuffer commands, VkExtent2D extent, std::ui
         .year = {view.daylight.hours, view.daylight.longest,
                  view.daylight.lengthening ? 1.0F : 0.0F, 0.0F},
         // Without a sea to say otherwise, the eye is out of the water.
-        .water = {Vec3{view.bend.up}, std::numeric_limits<float>::max()}};
+        .water = {Vec3{view.bend.up}, std::numeric_limits<float>::max()},
+        .gusts = {Vec3{gust_anchor(view.camera.eye, view.gusts_drifted)}, 0.0F}};
     const Buffer& buffer = lighting_.at(frame);
     std::memcpy(buffer.mapped().data(), &lighting, sizeof(lighting));
     if (auto flushed = buffer.flush(); !flushed) {

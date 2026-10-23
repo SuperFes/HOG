@@ -8,6 +8,7 @@
 #include <hog/planet/tangent_frame.hpp>
 #include <hog/render/barrier.hpp>
 #include <hog/render/device.hpp>
+#include <hog/render/gusts.hpp>
 #include <hog/render/readback.hpp>
 #include <hog/render/render_graph.hpp>
 #include <hog/sim/weather.hpp>
@@ -482,6 +483,7 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     const DVec3 drift = drift_at(shot.bend.up, here);
     const double falling = falling_at_eye(shot.bend, here);
     drifted_ = render::within_period(drifted_ + (drift * shot.seconds));
+    gusts_drifted_ += render::gust_drift(drift * surface_wind, shot.bend.up) * shot.seconds;
     falling_for_ += shot.seconds;
     const bool new_weather = shot.forecast != nullptr && shot.forecast->known() &&
                              weather_taken_ != shot.forecast->received();
@@ -491,6 +493,7 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     // sky.
     const auto weather = [&] { return weather_.bindings(faded); };
     render::SkyView sky = sky_view(shot, shade);
+    sky.gusts_drifted = gusts_drifted_;
     sky.mist =
         render::mist_through(static_cast<double>(here.humidity), static_cast<double>(here.fog_top),
                              shot.bend.eye_height, sun_mu);

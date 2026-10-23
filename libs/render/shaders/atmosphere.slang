@@ -333,6 +333,8 @@ public struct Lighting {
     // The sea's surface at the eye, as the sea writes it: xyz how it faces, w how far the eye
     // stands above it along that, negative in the water.
     public float4 water;
+    // xyz where the gusts' field lies from the eye, as gusts.slang reads it.
+    public float4 gusts;
 };
 
 // Of the light falling on any cloud over a place, what reaches it, as render::CloudShade has it.

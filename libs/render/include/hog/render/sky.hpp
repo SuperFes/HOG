@@ -52,6 +52,8 @@ struct SkyView {
     // The year at the eye, which the leaves drawn keep.
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     flora::Daylight daylight = {};
+    // Metres the gusts' field has drifted, in the planet's frame.
+    DVec3 gusts_drifted{0.0};
 };
 
 // Where in the frame's Lighting, in bytes, the sea writes whether it lays the water over what's
