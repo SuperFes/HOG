@@ -2,6 +2,7 @@
 
 #include <hog/core/assert.hpp>
 #include <hog/core/profile.hpp>
+#include <hog/jobs/job_system.hpp>
 #include <hog/planet/neighbors.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/terrain/sea.hpp>
@@ -11,9 +12,12 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <iterator>
 #include <numbers>
 #include <optional>
-#include <set>
+#include <span>
+#include <utility>
 #include <vector>
 
 namespace hog::terrain {
@@ -34,6 +38,19 @@ namespace {
 [[nodiscard]] double apart(double a, double b, double angle) {
     const double half = std::sin(angle / 2.0);
     return std::sqrt(((a - b) * (a - b)) + (4.0 * a * b * half * half));
+}
+
+// Cells a thread takes at once; fewer than two chunks' worth aren't worth sharing.
+constexpr std::uint32_t cells_per_chunk = 32;
+
+// Calls body(range, thread) over [0, count) on the pool in chunks, or all here without one.
+template <typename F>
+void for_chunks(jobs::JobSystem* jobs, std::size_t count, std::uint32_t chunk, F body) {
+    if (jobs == nullptr || count < 2 * std::size_t{chunk}) {
+        body(jobs::Range{.begin = 0, .end = static_cast<std::uint32_t>(count)}, 0U);
+        return;
+    }
+    jobs->parallel_for(static_cast<std::uint32_t>(count), chunk, std::move(body));
 }
 
 // A cone from the planet's centre, as drawn.
@@ -124,13 +141,15 @@ public:
     [[nodiscard]] Bounds bounds(planet::CellId cell) const {
         const DVec3 middle = planet::cell_center(cell);
         const std::array<DVec3, 4> corners = planet::cell_vertices(cell);
-        double angle = 0.0;
+        // The farthest corner is the one least along the middle.
+        double along_middle = 1.0;
         double edge = 0.0;
         for (std::size_t corner = 0; corner < corners.size(); ++corner) {
-            angle = std::max(angle, angle_between(middle, corners.at(corner)));
+            along_middle = std::min(along_middle, glm::dot(middle, corners.at(corner)));
             edge = std::max(
                 edge, glm::distance(corners.at(corner), corners.at((corner + 1) % corners.size())));
         }
+        const double angle = std::acos(std::max(along_middle, -1.0));
         double highest = settings_.highest;
         double lowest = settings_.lowest;
         if (const auto heights = *known_ ? (*known_)(cell) : std::nullopt) {
@@ -204,26 +223,44 @@ public:
         return away <= 0.0 || bounds.spacing * pixels_per_radian_ / away > settings_.max_error;
     }
 
-    // Splits from the six faces down, keeping patches culled or fine enough as leaves.
-    [[nodiscard]] std::set<planet::CellId> refine() const {
-        std::set<planet::CellId> leaves;
-        std::vector<planet::CellId> pending;
-        pending.reserve(planet::face_count);
+    // Splits from the six faces down, a level at a time, keeping patches culled or fine enough
+    // as leaves, sorted.
+    [[nodiscard]] std::vector<std::pair<planet::CellId, Bounds>>
+    refine(jobs::JobSystem* jobs) const {
+        HOG_ZONE("refine patches");
+        std::vector<std::pair<planet::CellId, Bounds>> leaves;
+        std::vector<planet::CellId> level;
+        level.reserve(planet::face_count);
         for (int face = 0; face < planet::face_count; ++face) {
-            pending.push_back(planet::CellId::from_face(face));
+            level.push_back(planet::CellId::from_face(face));
         }
-        while (!pending.empty()) {
-            const planet::CellId cell = pending.back();
-            pending.pop_back();
-            const Bounds around = bounds(cell);
-            if (!visible(around) || !too_coarse(cell, around)) {
-                leaves.insert(cell);
-                continue;
+        std::vector<Bounds> around;
+        std::vector<std::uint8_t> split; // not vector<bool>, written from several threads
+        std::vector<planet::CellId> finer;
+        while (!level.empty()) {
+            around.resize(level.size());
+            split.resize(level.size());
+            for_chunks(jobs, level.size(), cells_per_chunk,
+                       [&](jobs::Range range, std::uint32_t /*thread*/) {
+                           for (std::uint32_t at = range.begin; at < range.end; ++at) {
+                               around[at] = bounds(level[at]);
+                               split[at] =
+                                   visible(around[at]) && too_coarse(level[at], around[at]) ? 1 : 0;
+                           }
+                       });
+            finer.clear();
+            for (std::size_t at = 0; at < level.size(); ++at) {
+                if (split[at] == 0) {
+                    leaves.emplace_back(level[at], around[at]);
+                    continue;
+                }
+                for (int child = 0; child < 4; ++child) {
+                    finer.push_back(level[at].child(child));
+                }
             }
-            for (int child = 0; child < 4; ++child) {
-                pending.push_back(cell.child(child));
-            }
+            level.swap(finer);
         }
+        std::ranges::sort(leaves, {}, &std::pair<planet::CellId, Bounds>::first);
         return leaves;
     }
 
@@ -243,28 +280,83 @@ private:
     std::optional<double> eye_horizon_;
 };
 
-// Splits leaves until every pair sharing an edge differs by at most a level.
-void balance(std::set<planet::CellId>& leaves) {
-    std::vector<planet::CellId> pending(leaves.begin(), leaves.end());
-    while (!pending.empty()) {
-        const planet::CellId cell = pending.back();
-        pending.pop_back();
-        if (!leaves.contains(cell)) {
+// What a round of balancing found, a list a thread: leaves too coarse beside those checked, and
+// those checked they were too coarse for.
+struct Unbalanced {
+    std::vector<std::vector<planet::CellId>> split;
+    std::vector<std::vector<planet::CellId>> asking;
+};
+
+void find_unbalanced(std::span<const planet::CellId> leaves,
+                     std::span<const planet::CellId> pending, jobs::JobSystem* jobs,
+                     Unbalanced& found) {
+    for_chunks(jobs, pending.size(), cells_per_chunk, [&](jobs::Range range, std::uint32_t thread) {
+        for (std::uint32_t at = range.begin; at < range.end; ++at) {
+            const planet::CellId cell = pending[at];
+            bool asks = false;
+            for (const planet::CellId next : planet::edge_neighbors(cell)) {
+                const auto over = detail::leaf_over(leaves, next);
+                if (over && over->level() < cell.level() - 1) {
+                    found.split[thread].push_back(*over);
+                    asks = true;
+                }
+            }
+            if (asks) {
+                found.asking[thread].push_back(cell);
+            }
+        }
+    });
+}
+
+// Replaces the leaves to split, sorted, with their children, adding those to `made`.
+void split_leaves(std::vector<planet::CellId>& leaves, std::span<const planet::CellId> split,
+                  std::vector<planet::CellId>& made) {
+    std::vector<planet::CellId> finer;
+    finer.reserve(leaves.size() + (3 * split.size()));
+    auto next_split = split.begin();
+    for (const planet::CellId cell : leaves) {
+        if (next_split == split.end() || *next_split != cell) {
+            finer.push_back(cell);
             continue;
         }
-        for (const planet::CellId next : planet::edge_neighbors(cell)) {
-            const auto over = detail::leaf_over(leaves, next);
-            if (!over || over->level() >= cell.level() - 1) {
-                continue;
-            }
-            leaves.erase(*over);
-            for (int child = 0; child < 4; ++child) {
-                leaves.insert(over->child(child));
-                pending.push_back(over->child(child));
-            }
-            // The split child beside it may still be too coarse.
-            pending.push_back(cell);
-            break;
+        ++next_split;
+        for (int child = 0; child < 4; ++child) {
+            finer.push_back(cell.child(child));
+            made.push_back(cell.child(child));
+        }
+    }
+    leaves.swap(finer);
+}
+
+// Splits leaves, sorted by cell, until every pair sharing an edge differs by at most a level.
+// The coarsest such splitting is the only one, so they're split in rounds, each checking only the
+// leaves the last could have unsettled: those it made, and those beside that asked for it.
+void balance(std::vector<planet::CellId>& leaves, jobs::JobSystem* jobs) {
+    HOG_ZONE("balance patches");
+    const std::size_t threads = jobs == nullptr ? 1 : jobs->thread_count();
+    Unbalanced found{.split = std::vector<std::vector<planet::CellId>>(threads),
+                     .asking = std::vector<std::vector<planet::CellId>>(threads)};
+    std::vector<planet::CellId> pending = leaves;
+    std::vector<planet::CellId> split;
+    while (!pending.empty()) {
+        find_unbalanced(leaves, pending, jobs, found);
+        split.clear();
+        for (std::vector<planet::CellId>& some : found.split) {
+            split.insert(split.end(), some.begin(), some.end());
+            some.clear();
+        }
+        std::ranges::sort(split);
+        const auto [last, end] = std::ranges::unique(split);
+        split.erase(last, end);
+
+        pending.clear();
+        split_leaves(leaves, split, pending);
+        // The split child beside one asking may still be too coarse for it.
+        for (std::vector<planet::CellId>& asking : found.asking) {
+            std::ranges::copy_if(asking, std::back_inserter(pending), [&](planet::CellId cell) {
+                return std::ranges::binary_search(leaves, cell);
+            });
+            asking.clear();
         }
     }
 }
@@ -273,23 +365,53 @@ void balance(std::set<planet::CellId>& leaves) {
 
 std::vector<SelectedPatch> select_patches(const Viewpoint& view, double planet_radius,
                                           const SelectionSettings& settings,
-                                          const KnownHeights& known) {
+                                          const KnownHeights& known, jobs::JobSystem* jobs) {
     HOG_ZONE("select patches");
     const Selector selector{view, planet_radius, settings, known};
-    std::set<planet::CellId> leaves = selector.refine();
-    balance(leaves);
+    const std::vector<std::pair<planet::CellId, Bounds>> refined = selector.refine(jobs);
+    std::vector<planet::CellId> leaves;
+    leaves.reserve(refined.size());
+    for (const auto& [cell, around] : refined) {
+        leaves.push_back(cell);
+    }
+    balance(leaves, jobs);
 
-    std::vector<SelectedPatch> drawn;
-    for (const planet::CellId cell : leaves) {
-        const Bounds around = selector.bounds(cell);
-        if (!selector.visible(around)) {
-            continue;
+    // The bounds each leaf was refined with, found walking alongside as both are sorted, unless
+    // balancing split it.
+    std::vector<const Bounds*> unsplit(leaves.size(), nullptr);
+    auto next_refined = refined.begin();
+    for (std::size_t at = 0; at < leaves.size(); ++at) {
+        while (next_refined != refined.end() && next_refined->first < leaves[at]) {
+            ++next_refined;
         }
-        drawn.push_back({.cell = cell,
-                         .coarser_edges = detail::coarser_edges(leaves, cell),
-                         .distance = selector.distance(around),
-                         .in_view = selector.in_view(around),
-                         .under_sea = selector.under_sea(around)});
+        if (next_refined != refined.end() && next_refined->first == leaves[at]) {
+            unsplit[at] = &next_refined->second;
+        }
+    }
+    std::vector<SelectedPatch> picked(leaves.size());
+    std::vector<std::uint8_t> shown(leaves.size());
+    for_chunks(
+        jobs, leaves.size(), cells_per_chunk, [&](jobs::Range range, std::uint32_t /*thread*/) {
+            for (std::uint32_t at = range.begin; at < range.end; ++at) {
+                const planet::CellId cell = leaves[at];
+                const Bounds around = unsplit[at] != nullptr ? *unsplit[at] : selector.bounds(cell);
+                if (!selector.visible(around)) {
+                    continue;
+                }
+                shown[at] = 1;
+                picked[at] = {.cell = cell,
+                              .coarser_edges = detail::coarser_edges(leaves, cell),
+                              .distance = selector.distance(around),
+                              .in_view = selector.in_view(around),
+                              .under_sea = selector.under_sea(around)};
+            }
+        });
+    std::vector<SelectedPatch> drawn;
+    drawn.reserve(leaves.size());
+    for (std::size_t at = 0; at < leaves.size(); ++at) {
+        if (shown[at] != 0) {
+            drawn.push_back(picked[at]);
+        }
     }
     std::ranges::stable_sort(drawn, {}, &SelectedPatch::distance);
     return drawn;

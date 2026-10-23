@@ -24,11 +24,13 @@ namespace hog::terrain {
 namespace {
 
 // Against what's drawn beside a patch, or where nothing is, as the selection stitched it to the
-// patches it culled.
-std::uint8_t stitching(const std::set<planet::CellId>& drawn,
-                       const std::map<planet::CellId, std::uint8_t>& selected,
+// patches it culled. Both sorted by cell.
+std::uint8_t stitching(detail::Leaves drawn,
+                       std::span<const std::pair<planet::CellId, std::uint8_t>> selected,
                        planet::CellId cell) {
-    const auto chosen = selected.find(cell);
+    const auto chosen = std::ranges::lower_bound(selected, cell, {},
+                                                 &std::pair<planet::CellId, std::uint8_t>::first);
+    const bool was_chosen = chosen != selected.end() && chosen->first == cell;
     std::uint8_t coarser = 0;
     const auto neighbours = planet::edge_neighbors(cell);
     for (std::size_t edge = 0; edge < neighbours.size(); ++edge) {
@@ -40,9 +42,7 @@ std::uint8_t stitching(const std::set<planet::CellId>& drawn,
             }
             continue;
         }
-        const auto within = drawn.lower_bound(next.range_min());
-        const bool beside = within != drawn.end() && *within <= next.range_max();
-        if (!beside && chosen != selected.end()) {
+        if (!detail::any_within(drawn, next) && was_chosen) {
             coarser |= static_cast<std::uint8_t>(chosen->second & bit);
         }
     }
@@ -236,6 +236,7 @@ void PatchStream::stand_in(const std::map<planet::CellId, double>& standing,
 }
 
 std::map<planet::CellId, double> PatchStream::cover(std::span<const SelectedPatch> selected) const {
+    HOG_ZONE("cover patches");
     std::map<planet::CellId, double> drawn;
     const auto add = [&](planet::CellId cell, double distance) {
         const auto [at, fresh] = drawn.try_emplace(cell, distance);
@@ -305,22 +306,37 @@ PatchStream::wanted_waiting(std::span<const SelectedPatch> selected) const {
 }
 
 void PatchStream::arrive(std::span<const SelectedPatch> selected, StreamFrame& frame) {
+    HOG_ZONE("arrive patches");
+    if (waiting_.empty()) {
+        return;
+    }
     const std::map<planet::CellId, double> wanted = wanted_waiting(selected);
     std::erase_if(waiting_, [&](const Patch& patch) { return !wanted.contains(patch.cell); });
     std::ranges::stable_sort(waiting_, {}, [&](const Patch& patch) {
         return std::pair{covered(patch.cell), wanted.at(patch.cell)};
     });
 
-    // Room is made from what isn't drawn now, the least recently drawn first.
-    const auto now = cover(selected);
+    // Room is made from what isn't drawn now, the least recently drawn first, if what arrives
+    // can run out of it.
+    const std::size_t arriving = std::min<std::size_t>(waiting_.size(), settings_.uploads);
+    const auto unheld = std::ranges::count_if(
+        waiting_.begin(), waiting_.begin() + static_cast<std::ptrdiff_t>(arriving),
+        [&](const Patch& patch) { return !held_.contains(patch.cell); });
     std::vector<planet::CellId> spare;
-    for (const auto& [cell, held] : held_) {
-        if (!now.contains(cell)) {
+    if (held_.size() + static_cast<std::size_t>(unheld) > settings_.capacity) {
+        const auto now = cover(selected);
+        std::vector<std::pair<std::uint64_t, planet::CellId>> by_drawn;
+        for (const auto& [cell, held] : held_) {
+            if (!now.contains(cell)) {
+                by_drawn.emplace_back(held.drawn, cell);
+            }
+        }
+        std::ranges::sort(by_drawn, std::ranges::greater{});
+        spare.reserve(by_drawn.size());
+        for (const auto& [drawn, cell] : by_drawn) {
             spare.push_back(cell);
         }
     }
-    std::ranges::sort(spare, std::ranges::greater{},
-                      [&](planet::CellId cell) { return std::pair{held_.at(cell).drawn, cell}; });
 
     std::size_t taken = 0;
     for (; taken < waiting_.size() && frame.arrived.size() < settings_.uploads; ++taken) {
@@ -354,14 +370,17 @@ StreamFrame PatchStream::update(std::span<const SelectedPatch> selected) {
         return patch.in_view && !patch.under_sea;
     });
     const auto drawn = cover(in_view);
-    std::set<planet::CellId> leaves;
+    std::vector<planet::CellId> leaves;
+    leaves.reserve(drawn.size());
     for (const auto& [cell, distance] : drawn) {
-        leaves.insert(cell);
+        leaves.push_back(cell);
     }
-    std::map<planet::CellId, std::uint8_t> selected_edges;
+    std::vector<std::pair<planet::CellId, std::uint8_t>> selected_edges;
+    selected_edges.reserve(in_view.size());
     for (const SelectedPatch& patch : in_view) {
-        selected_edges.emplace(patch.cell, patch.coarser_edges);
+        selected_edges.emplace_back(patch.cell, patch.coarser_edges);
     }
+    std::ranges::sort(selected_edges);
     std::vector<std::pair<double, StreamedPatch>> nearest;
     nearest.reserve(drawn.size());
     for (const auto& [cell, distance] : drawn) {
@@ -385,6 +404,10 @@ StreamFrame PatchStream::update(std::span<const SelectedPatch> selected) {
     std::vector<std::tuple<bool, double, planet::CellId>> missing;
     std::set<planet::CellId> asked;
     for (const SelectedPatch& patch : selected) {
+        // Held fresh, its heights are known, so it's its own bake, and needs none.
+        if (fresh(patch.cell)) {
+            continue;
+        }
         const planet::CellId cell = to_bake(patch.cell);
         if (!fresh(cell) && !baking_.contains(cell) && !waiting.contains(cell) &&
             asked.insert(cell).second) {

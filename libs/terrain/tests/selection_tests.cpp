@@ -1,3 +1,4 @@
+#include <hog/jobs/job_system.hpp>
 #include <hog/planet/neighbors.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/terrain/bend.hpp>
@@ -397,4 +398,24 @@ TEST_CASE("blended out, the bend changes nothing picked", "[terrain][selection]"
     };
     CHECK(cells(select_patches(high, radius)) ==
           cells(select_patches(looking(high.eye.metres(), ahead - somewhere), radius)));
+}
+
+TEST_CASE("selecting on a pool picks just what selecting alone does", "[terrain][selection]") {
+    hog::jobs::JobSystem jobs{4};
+    const hog::terrain::SelectionSettings all_round{.only_in_view = false, .seabed_unseen = 0.01};
+    // Known heights narrower than assumed, so they're asked for from every thread.
+    const hog::terrain::KnownHeights known = [](CellId cell) {
+        return cell.level() % 2 == 0
+                   ? std::optional{hog::terrain::HeightRange{.lowest = -50.0, .highest = 300.0}}
+                   : std::nullopt;
+    };
+    for (const Viewpoint& view : {walking(1.7, level_with(somewhere)), walking(40.0, -somewhere),
+                                  looking(somewhere * (radius + 3e4), -somewhere)}) {
+        for (const hog::terrain::SelectionSettings& settings :
+             {hog::terrain::SelectionSettings{}, all_round}) {
+            const auto alone = select_patches(view, radius, settings, known);
+            REQUIRE(alone.size() > 100);
+            CHECK(select_patches(view, radius, settings, known, &jobs) == alone);
+        }
+    }
 }

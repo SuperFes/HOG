@@ -11,6 +11,10 @@
 #include <optional>
 #include <vector>
 
+namespace hog::jobs {
+class JobSystem;
+} // namespace hog::jobs
+
 namespace hog::terrain {
 
 // Where the patches are seen from, with the planet centred on the origin.
@@ -53,14 +57,17 @@ struct SelectedPatch {
     double distance = 0.0;          // least metres from the eye to the patch's ground
     bool in_view = true;
     bool under_sea = false; // too deep under the sea to show through it, so not drawn
+
+    friend bool operator==(const SelectedPatch&, const SelectedPatch&) = default;
 };
 
 // The patches to draw: a quadtree over the six faces, split until each patch's vertex spacing is
 // within the error on screen, then balanced so neighbours differ by at most a level. Patches
 // below the horizon are left out, and unless the settings say otherwise, those outside the view.
-// Nearest first.
+// Nearest first. Spread over the pool if given one.
 [[nodiscard]] std::vector<SelectedPatch> select_patches(const Viewpoint& view, double planet_radius,
                                                         const SelectionSettings& settings = {},
-                                                        const KnownHeights& known = {});
+                                                        const KnownHeights& known = {},
+                                                        jobs::JobSystem* jobs = nullptr);
 
 } // namespace hog::terrain

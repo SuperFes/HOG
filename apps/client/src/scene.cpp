@@ -214,7 +214,8 @@ Scene::Scene(const render::Device& device, const planet::World& world, jobs::Job
              render::WeatherMaps weather, render::Clouds clouds,
              render::Precipitation precipitation, render::Glare glare, render::GpuTimer timer,
              std::optional<render::Billboard> companion, std::uint32_t frames)
-    : world_{&world}, baker_{world, jobs}, terrain_{std::move(terrain)}, ocean_{std::move(ocean)},
+    : world_{&world}, jobs_{&jobs}, baker_{world, jobs}, terrain_{std::move(terrain)},
+      ocean_{std::move(ocean)},
       shore_{world.geology().terrain(), world.geology().planet_radius(), jobs},
       wave_trains_{waves::planet_trains(hash_combine(world.geology().seed(), waves_salt))},
       grass_{std::move(grass)}, bushes_{std::move(bushes)}, trees_{std::move(trees)},
@@ -426,7 +427,7 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     // All round the eye, so the ground is baked before it's turned to.
     const std::vector<terrain::SelectedPatch> selected = terrain::select_patches(
         seen, shot.bend.radius, {.only_in_view = false, .seabed_unseen = seabed_unseen},
-        stream_.known_heights());
+        stream_.known_heights(), jobs_);
     const terrain::StreamFrame streamed = stream_.update(selected);
     for (const planet::CellId cell : streamed.bakes) {
         baker_.start(cell);

@@ -163,6 +163,7 @@ private:
                          DVec3 wind);
 
     const planet::World* world_ = nullptr;
+    jobs::JobSystem* jobs_ = nullptr;
     TreeCounts tree_counts_;
     terrain::PatchBaker baker_;
     terrain::PatchStream stream_;
