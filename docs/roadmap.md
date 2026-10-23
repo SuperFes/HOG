@@ -206,6 +206,7 @@ This phase builds a client that flies over the generated planet with a real sky.
 - [x] The sea as water, not a sheet: everything under its surface seen through the water between, a wader's legs as much as the seabed, bent by the waves (one water model, laid by the sea's pass over what depth says lies behind it)
 - [x] From under the sea: water along the whole view, darker the deeper; the sky only through the window overhead, the surface a mirror beyond it, and what stands out of the water bent through it; a waterline across the screen where the eye straddles the surface, with no clipping as waves pass the eye
 - [ ] Under the sea, felt: caustics on the bed and on what's in the water, light shafts, drifting motes, a wobble to the view
+- [ ] Crossing the surface, felt on the lens: a splash and a blur going under; coming up, water sheeting off the view and drops running down it, fewer as it dries
 - [ ] The whole sky out of the water: a small map of the sky round the eye, made each frame with the clouds and all else that hangs in it, seen through the window from under the sea and mirrored in the sea from above, so whatever the sky gains is seen from the water too
 - [x] Waves: one wave function the client, the server and physics all evaluate alike (the planet's fixed trains, phased by the seed and the world's time, sized by the local spectrum, so everyone sees the same wave at the same place), the long waves moving the surface and fine chop in its shading, what's too fine to draw widening the sun's glint
 - [x] Waves from the sea state: several systems at once, the local wind sea crossing swells from distant storms, so crests criss-cross and pile up where they meet, blended from cell to cell
@@ -219,12 +220,19 @@ This phase builds a client that flies over the generated planet with a real sky.
 - [x] Hillaire atmosphere and sun lighting driven by planet time
 - [x] The sun as people see it: a glow and glare round its disc, rather than the bare disc a camera records
 
+**Effects**
+
+- [ ] A particle system on the GPU: emitters spawn, a compute pass moves (gravity, drag, the wind, the current) and retires them, drawn as soft sprites lit by the same sky light, haze and water as everything else; budgets per effect and per frame, scaled by the quality setting
+- [ ] Splashes first, to prove it: water thrown up where feet and bodies break the surface, by how fast they cross it
+- [ ] Then, each its own small effect: spray blown off breaking crests and surf, rain splashing on ground and leaves, dust kicked up from dry ground and blown off it in a gale, drifting motes under the sea, drops on the lens, sparks and embers from fires, falling leaves in autumn and in the wind
+
 **Water clarity**
 
 Real waters range from clear blue to green, tea-brown, milky and mud. One model of what's in the water decides how far light gets through it and what colour it turns, seen from above as much as from in it.
 
 - [ ] The water's optics read per place, in place of the fixed constants: absorption and scattering summed from the water itself (red lost first, so clear water is blue), dissolved organic matter (tea-brown to near black), suspended sediment (muddy or milky) and plankton (green); the seabed cull keyed to the clearest water in view
 - [ ] Where it comes from: lakes and rivers stained by the peat, bogs and forest litter of their catchments; glacier-fed lakes milky turquoise with rock flour, bluer or greener by the flour's grain size; rivers carrying mud out to sea in plumes that drift with the current; clear water where little runs in
+- [ ] Silt stirred by whatever walks or swims: feet and bodies kick sediment off a soft bed into a small grid round the eye, read by the water's optics as more sediment, so the cloud hides the bed, browns the water and drifts off with the current, settling out over a minute or so; none off rock
 - [ ] Clarity that changes: storms and surf stirring the shallows' bed muddy, settling clear over the days after; spring melt and floods clouding the rivers; plankton blooming green in warm, rich water through the seasons
 
 **Tests**
@@ -549,6 +557,43 @@ Plugs into the calendar and the sky. Like the moons, it's a function of the worl
 - [ ] Stars: a fixed catalogue grown from the seed, with real stars' spread of brightness and colour (many faint, few bright, blue-white to red) and the galaxy's band across it; the planet turns under it once a sidereal day and the sun crosses it through the year, so each season has its own constellations, the same every year, round a pole fixed by the axis
 - [ ] Stars as seen: lost in the sky's own light by day, coming out one by one at dusk, dimmed and reddened near the horizon by the air they shine through, twinkling low down, hidden by cloud
 - [ ] Rings in the planet's equatorial plane, lit by the sun: an arch whose height is set by the latitude, edge-on at the equator; bright at night and fading against the sky's brightness by day; the planet's shadow cut across them at night, their shadow a band across the ground that moves north and south with the seasons, and the night faintly lit by their shine
+
+**Light and shadow**
+
+- [ ] Sun and moon shadows from everything that stands: cascaded shadow maps over the terrain, trees, bushes, buildings and bodies, softer the farther the shadow falls from its caster; the far woods' shade folded into the ground as their colour is
+- [ ] Ambient occlusion: dark under trees, in creases and doorways, and where feet and rocks meet the ground, at reduced resolution
+- [ ] Local lights: fires, torches, lanterns and lit windows at night, many small lights culled in clusters on the GPU, flickering as flames do, the nearest few casting shadows
+- [ ] Light shafts: sunbeams through gaps in the clouds, through tree canopies and down through the sea's surface, from the cloud and shadow maps already made
+- [ ] Lightning: bolts to the ground and within the clouds, lighting the clouds from inside and the land for an instant, with thunder from the sound's distance
+- [ ] Eyes that adapt: exposure following the scene's light, slowly into the dark and quickly into the bright, and bloom round bright lights against the night
+- [ ] Reflections of what's near in wet ground and still water, from the screen, falling back to the sky map
+
+**Image and frame**
+
+- [ ] Temporal anti-aliasing, since grass, needles and wave crests shimmer, with upscaling so the iGPU can draw under its window's resolution
+- [ ] A graphics settings screen: quality presets with a switch per feature, resolution scale, frame cap and vsync, saved per machine
+- [ ] Pipelines cached to disk and built ahead of need, so a second launch compiles nothing and a new effect never hitches the frame it first appears in
+- [ ] CPU and GPU profiling with Tracy, frame by frame, beside the overlay's timings
+- [ ] Photo mode: a free camera, time of day held, and screenshots
+
+**Water on the land**
+
+- [ ] Rivers and streams drawn as flowing water: a surface moving downstream at the sim's flow, rippled by the bed, white over rapids, and waterfalls where the bed drops
+- [ ] Wet and dry bodies: skin and clothes darkened by water as high as they were in it, dripping and drying over time
+- [ ] Decals: footprints in sand, mud and snow, scorch marks, blood, ruts where wagons pass; lasting ones kept in the change store
+
+**Bodies in the world**
+
+- [ ] Grass and bushes pushed aside by what passes through them, springing back after
+- [ ] Ragdolls and hit reactions, blended back into animation
+- [ ] Cloth that moves with the wind: cloaks, flags, sails and awnings
+
+**Playing it**
+
+- [ ] A game UI library for the HUD, menus, inventory and map, past the debug ImGui windows
+- [ ] Gamepad support and keys that can be rebound, saved per player
+- [ ] Accessibility: subtitles for sounds that matter, cues that don't rely on colour alone, text scale, and options against motion sickness (field of view, camera sway)
+- [ ] Localisation: every string from tables, fonts covering the scripts we ship
 
 **Sound**
 
