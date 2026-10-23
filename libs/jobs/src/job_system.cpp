@@ -1,13 +1,29 @@
+#include <hog/core/profile.hpp>
 #include <hog/jobs/job_system.hpp>
+
+#include <format>
 
 namespace hog::jobs {
 
+#ifdef HOG_PROFILE
+namespace {
+
+void name_worker(std::uint32_t thread) {
+    HOG_THREAD(std::format("worker {}", thread).c_str());
+}
+
+} // namespace
+#endif
+
 JobSystem::JobSystem(std::uint32_t thread_count) {
-    if (thread_count == 0) {
-        scheduler_.Initialize();
-    } else {
-        scheduler_.Initialize(thread_count);
+    enki::TaskSchedulerConfig config;
+    if (thread_count != 0) {
+        config.numTaskThreadsToCreate = thread_count - 1;
     }
+#ifdef HOG_PROFILE
+    config.profilerCallbacks.threadStart = name_worker;
+#endif
+    scheduler_.Initialize(config);
 }
 
 JobSystem::~JobSystem() {

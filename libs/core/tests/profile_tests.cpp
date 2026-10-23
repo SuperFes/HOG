@@ -2,6 +2,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <string_view>
+
 TEST_CASE("profiling is on only where the build asks for it") {
 #ifdef HOG_PROFILE
     CHECK(hog::profile::enabled);
@@ -17,6 +19,7 @@ TEST_CASE("profiling marks leave what they mark alone, with no profiler connecte
         HOG_ZONE("frame");
         for (int part = 0; part < 4; ++part) {
             HOG_ZONE("part");
+            HOG_ZONE_TEXT(std::string_view{"labelled"});
             ++counted;
         }
         HOG_PLOT("counted", static_cast<double>(counted));

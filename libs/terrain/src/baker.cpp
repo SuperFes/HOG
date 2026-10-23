@@ -1,3 +1,4 @@
+#include <hog/core/profile.hpp>
 #include <hog/terrain/baker.hpp>
 
 #include <cstddef>
@@ -10,6 +11,7 @@ namespace hog::terrain {
 void PatchBaker::start(planet::CellId cell) {
     baking_.push_back(
         std::make_unique<jobs::Async<Patch>>(*jobs_, [world = world_, cell, fates = fates_] {
+            HOG_ZONE("bake patch");
             return bake_patch(*world, cell, *fates);
         }));
 }

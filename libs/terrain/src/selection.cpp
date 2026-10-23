@@ -1,6 +1,7 @@
 #include "leaves.hpp"
 
 #include <hog/core/assert.hpp>
+#include <hog/core/profile.hpp>
 #include <hog/planet/neighbors.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/terrain/sea.hpp>
@@ -273,6 +274,7 @@ void balance(std::set<planet::CellId>& leaves) {
 std::vector<SelectedPatch> select_patches(const Viewpoint& view, double planet_radius,
                                           const SelectionSettings& settings,
                                           const KnownHeights& known) {
+    HOG_ZONE("select patches");
     const Selector selector{view, planet_radius, settings, known};
     std::set<planet::CellId> leaves = selector.refine();
     balance(leaves);

@@ -1,3 +1,4 @@
+#include <hog/core/profile.hpp>
 #include <hog/render/device.hpp>
 #include <hog/render/gpu_timer.hpp>
 #include <hog/render/render_graph.hpp>
@@ -239,6 +240,7 @@ Result<> RenderGraph::check_targets() const {
 }
 
 Result<> RenderGraph::execute(VkCommandBuffer commands, GraphFrame frame) {
+    HOG_ZONE("record graph");
     std::vector<ImageUse> uses;
     uses.reserve(images_.size());
     for (std::size_t image = 0; image < images_.size(); ++image) {
@@ -281,7 +283,11 @@ Result<> RenderGraph::execute(VkCommandBuffer commands, GraphFrame frame) {
             begin_targets(commands, *pass.targets);
             rendering = true;
         }
-        recorded = records_[at](commands);
+        {
+            HOG_ZONE("record pass");
+            HOG_ZONE_TEXT(pass.name);
+            recorded = records_[at](commands);
+        }
         if (frame.timer != nullptr) {
             frame.timer->end(commands, frame.slot);
         }

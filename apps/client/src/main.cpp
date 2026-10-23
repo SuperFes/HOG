@@ -11,6 +11,7 @@
 #include <hog/client/scene.hpp>
 #include <hog/client/session.hpp>
 #include <hog/core/log.hpp>
+#include <hog/core/profile.hpp>
 #include <hog/core/time.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/login/service.hpp>
@@ -398,6 +399,7 @@ struct Overlay {
 Result<bool> draw(client::Scene& scene, const client::Shot& shot, const render::Device& device,
                   render::Presenter& presenter, SDL_Window* window, const Overlay& overlay,
                   const std::optional<std::filesystem::path>& capture) {
+    HOG_ZONE("draw");
     auto begun = presenter.begin(window::drawable(window));
     if (!begun) {
         return std::unexpected(std::move(begun).error());
@@ -409,26 +411,29 @@ Result<bool> draw(client::Scene& scene, const client::Shot& shot, const render::
     if (auto recorded = scene.record(frame, shot); !recorded) {
         return std::unexpected(std::move(recorded).error());
     }
-    ImGui_ImplVulkan_NewFrame();
-    ImGui_ImplSDL3_NewFrame();
-    ImGui::NewFrame();
-    const ImVec2 size = ImGui::GetIO().DisplaySize;
-    show_tags(client::tags(overlay.others, shot.camera, shot.bend, {size.x, size.y}));
-    if (overlay.chat != nullptr) {
-        show_chat(*overlay.chat, *overlay.chatting, overlay.chat_opened, overlay.now);
-    }
-    if (overlay.timings) {
-        show_timings(*overlay.times, overlay.clouds, overlay.trees);
-        if (overlay.session != nullptr) {
-            show_network(client::summarise(*overlay.session, overlay.eye, overlay.now),
-                         overlay.weather);
+    {
+        HOG_ZONE("overlay");
+        ImGui_ImplVulkan_NewFrame();
+        ImGui_ImplSDL3_NewFrame();
+        ImGui::NewFrame();
+        const ImVec2 size = ImGui::GetIO().DisplaySize;
+        show_tags(client::tags(overlay.others, shot.camera, shot.bend, {size.x, size.y}));
+        if (overlay.chat != nullptr) {
+            show_chat(*overlay.chat, *overlay.chatting, overlay.chat_opened, overlay.now);
         }
-    }
-    ImGui::Render();
-    if (ImGui::GetDrawData()->TotalVtxCount > 0) {
-        render::begin_rendering(frame.commands, frame.view, frame.extent, std::nullopt);
-        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), frame.commands);
-        vkCmdEndRendering(frame.commands);
+        if (overlay.timings) {
+            show_timings(*overlay.times, overlay.clouds, overlay.trees);
+            if (overlay.session != nullptr) {
+                show_network(client::summarise(*overlay.session, overlay.eye, overlay.now),
+                             overlay.weather);
+            }
+        }
+        ImGui::Render();
+        if (ImGui::GetDrawData()->TotalVtxCount > 0) {
+            render::begin_rendering(frame.commands, frame.view, frame.extent, std::nullopt);
+            ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), frame.commands);
+            vkCmdEndRendering(frame.commands);
+        }
     }
     std::optional<Result<render::Buffer>> captured;
     if (capture) {
@@ -645,6 +650,7 @@ private:
 void report(Connection& connection, std::optional<client::Player>& player,
             client::Forecast& forecast, ChatBox& chat, bool filter,
             MonotonicClock::time_point now) {
+    HOG_ZONE("network");
     connection.look(player ? std::optional{player->feet()} : std::nullopt, now);
     if (const auto back = connection.take_correction(); back && player) {
         player->place(*back);
@@ -699,6 +705,7 @@ void take_part(Controls& controls, std::optional<client::Player>& player, client
 // Plays the character or flies a frame on, as the controls ask; what the camera then sees.
 render::Camera move(const Controls& controls, std::optional<client::Player>& player,
                     client::Flight& flight, const planet::World& world, double seconds) {
+    HOG_ZONE("move");
     const bool faster = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
     if (!player) {
         flight = client::fly(
@@ -787,10 +794,13 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
         controls.look = {};
         controls.faster_time = 0;
         controls.may_chat = connection.session() != nullptr;
-        SDL_Event event;
-        while (SDL_PollEvent(&event)) {
-            ImGui_ImplSDL3_ProcessEvent(&event);
-            handle(event, window, controls);
+        {
+            HOG_ZONE("events");
+            SDL_Event event;
+            while (SDL_PollEvent(&event)) {
+                ImGui_ImplSDL3_ProcessEvent(&event);
+                handle(event, window, controls);
+            }
         }
         const bool chat_opened = route_keys(window, controls.chatting, routed_to_chat);
         change_clouds(controls, scene, device);
@@ -867,6 +877,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
         if (!*drawn) {
             SDL_Delay(idle_ms);
         }
+        HOG_FRAME();
     }
     return {};
 }

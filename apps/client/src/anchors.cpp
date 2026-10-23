@@ -1,5 +1,6 @@
 #include <hog/client/anchors.hpp>
 #include <hog/client/tiles.hpp>
+#include <hog/core/profile.hpp>
 #include <hog/flora/stand.hpp>
 #include <hog/planet/neighbors.hpp>
 #include <hog/planet/projection.hpp>
@@ -141,6 +142,7 @@ TreeAnchors::TreeAnchors(const BiomePalette& palette, jobs::JobSystem* jobs) : j
 Result<> TreeAnchors::update(render::AnchorPool& pool, std::uint32_t frame,
                              const planet::World& world, WorldPosition eye, double reach,
                              int builds) {
+    HOG_ZONE("tree anchors");
     return tiles_.keep(
         pool, jobs_, world, eye, reach, builds,
         [world = &world, needles = needles_, fates = fates_](planet::CellId cell,

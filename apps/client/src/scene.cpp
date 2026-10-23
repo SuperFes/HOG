@@ -2,6 +2,7 @@
 #include <hog/client/flight.hpp>
 #include <hog/client/scene.hpp>
 #include <hog/core/hash.hpp>
+#include <hog/core/profile.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tangent_frame.hpp>
@@ -276,6 +277,7 @@ void Scene::grow_vegetation(render::RenderGraph& graph, const render::Frame& fra
                             std::span<const render::GraphUse> through_air,
                             const render::GraphTargets& drawn, const render::AirBindings& air,
                             DVec3 wind) {
+    HOG_ZONE("vegetation");
     const std::vector<render::GrassDraw> lawn =
         grass_draws(slots_, patches, shot.camera.eye, shot.bend.radius);
     if (!lawn.empty()) {
@@ -340,6 +342,7 @@ void Scene::grow_vegetation(render::RenderGraph& graph, const render::Frame& fra
 }
 
 void Scene::follow_shore(const Shot& shot) {
+    HOG_ZONE("shore");
     shore_.follow(glm::normalize(shot.camera.eye.metres()));
     if (auto depths = shore_.collect()) {
         shore_depths_ = std::move(depths);
@@ -412,6 +415,7 @@ std::optional<render::SeaBehind> seen_behind(const render::RenderGraph& graph,
 } // namespace
 
 Result<> Scene::record(render::Frame& frame, const Shot& shot) {
+    HOG_ZONE("scene");
     const std::span<const render::GpuSpan> timed = timer_.read(frame.commands, frame.slot);
     timings_.assign(timed.begin(), timed.end());
     for (terrain::Patch& patch : baker_.collect()) {

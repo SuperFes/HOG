@@ -1,5 +1,6 @@
 #include <hog/client/bushes.hpp>
 #include <hog/client/tiles.hpp>
+#include <hog/core/profile.hpp>
 #include <hog/render/bushes.hpp>
 #include <hog/terrain/patch.hpp>
 
@@ -90,6 +91,7 @@ BushAnchors::BushAnchors(const BiomePalette& palette, jobs::JobSystem* jobs)
 Result<> BushAnchors::update(render::AnchorPool& pool, std::uint32_t frame,
                              const planet::World& world, WorldPosition eye, double reach,
                              int builds) {
+    HOG_ZONE("bush anchors");
     return tiles_.keep(
         pool, jobs_, world, eye, reach, builds,
         [world = &world, leaves = leaves_, fates = fates_](planet::CellId cell,

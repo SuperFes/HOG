@@ -1,5 +1,6 @@
 #include "leaves.hpp"
 
+#include <hog/core/profile.hpp>
 #include <hog/planet/neighbors.hpp>
 #include <hog/terrain/stream.hpp>
 
@@ -343,6 +344,7 @@ void PatchStream::arrive(std::span<const SelectedPatch> selected, StreamFrame& f
 }
 
 StreamFrame PatchStream::update(std::span<const SelectedPatch> selected) {
+    HOG_ZONE("stream patches");
     ++frame_;
     StreamFrame frame;
     arrive(selected, frame);

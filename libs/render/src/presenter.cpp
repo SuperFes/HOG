@@ -1,3 +1,4 @@
+#include <hog/core/profile.hpp>
 #include <hog/render/device.hpp>
 #include <hog/render/presenter.hpp>
 
@@ -149,13 +150,21 @@ Result<std::optional<Frame>> Presenter::begin(VkExtent2D window) {
 
     VkDevice handle = device_->handle();
     const Slot& slot = slots_.at(slot_);
-    if (const VkResult waited = vkWaitForFences(handle, 1, &slot.done, VK_TRUE, forever);
-        waited != VK_SUCCESS) {
-        return vulkan_error(waited, "waiting for a frame in flight");
+    {
+        // Long here means the GPU is behind, or the compositor is holding it.
+        HOG_ZONE("wait for a frame in flight");
+        if (const VkResult waited = vkWaitForFences(handle, 1, &slot.done, VK_TRUE, forever);
+            waited != VK_SUCCESS) {
+            return vulkan_error(waited, "waiting for a frame in flight");
+        }
     }
     std::uint32_t image = 0;
-    const VkResult acquire = vkAcquireNextImageKHR(handle, swapchain_.handle(), forever,
-                                                   slot.acquired, VK_NULL_HANDLE, &image);
+    VkResult acquire = VK_SUCCESS;
+    {
+        HOG_ZONE("acquire");
+        acquire = vkAcquireNextImageKHR(handle, swapchain_.handle(), forever, slot.acquired,
+                                        VK_NULL_HANDLE, &image);
+    }
     const auto stale = swapchain_stale(acquire, "taking a swapchain image");
     if (!stale) {
         return std::unexpected(stale.error());
@@ -224,9 +233,12 @@ Result<> Presenter::end(Frame& frame) {
                                .pCommandBufferInfos = &commands,
                                .signalSemaphoreInfoCount = 1,
                                .pSignalSemaphoreInfos = &signal};
-    if (const VkResult submitted = vkQueueSubmit2(device_->queue(), 1, &submit, slot.done);
-        submitted != VK_SUCCESS) {
-        return vulkan_error(submitted, "submitting a frame");
+    {
+        HOG_ZONE("submit");
+        if (const VkResult submitted = vkQueueSubmit2(device_->queue(), 1, &submit, slot.done);
+            submitted != VK_SUCCESS) {
+            return vulkan_error(submitted, "submitting a frame");
+        }
     }
     slot_ = (slot_ + 1) % frames_in_flight;
 
@@ -239,8 +251,12 @@ Result<> Presenter::end(Frame& frame) {
                                    .pSwapchains = &swapchain,
                                    .pImageIndices = &frame.image,
                                    .pResults = nullptr};
-    const auto stale =
-        swapchain_stale(vkQueuePresentKHR(device_->queue(), &present), "showing a frame");
+    VkResult presented = VK_SUCCESS;
+    {
+        HOG_ZONE("present");
+        presented = vkQueuePresentKHR(device_->queue(), &present);
+    }
+    const auto stale = swapchain_stale(presented, "showing a frame");
     if (!stale) {
         return std::unexpected(stale.error());
     }

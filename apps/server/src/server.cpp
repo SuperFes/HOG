@@ -1,5 +1,6 @@
 #include <hog/app/server.hpp>
 #include <hog/chat/filter.hpp>
+#include <hog/core/profile.hpp>
 #include <hog/net/simulation.hpp>
 #include <hog/planet/cell_id.hpp>
 #include <hog/planet/geology.hpp>
@@ -301,6 +302,7 @@ void Server::burn_history() {
 }
 
 void Server::simulate(GameTime from, GameDuration step) {
+    HOG_ZONE("simulate");
     entities_.progress(std::chrono::duration<float>(step).count());
     const GameTime to = from + step;
     // Wildlife and forest steps see the weather as it was when they fell due.
@@ -344,6 +346,7 @@ std::optional<GameTime> Server::next_due() const {
 }
 
 void Server::step_wildlife(GameTime at) {
+    HOG_ZONE("wildlife");
     const MonotonicClock::time_point started = MonotonicClock::now();
     wildlife_->advance_to(at, sim::conditions_of(*weather_), jobs_);
     wildlife_steps_.add(1);
@@ -353,6 +356,7 @@ void Server::step_wildlife(GameTime at) {
 }
 
 void Server::step_forest(GameTime at) {
+    HOG_ZONE("forest");
     const MonotonicClock::time_point started = MonotonicClock::now();
     forest_->advance_to(at, sim::forest_conditions_of(*weather_), jobs_);
     forest_steps_.add(1);
@@ -439,6 +443,7 @@ void Server::recall_extinctions() const {
 }
 
 void Server::advance_weather(GameTime to) {
+    HOG_ZONE("weather");
     const MonotonicClock::time_point started = MonotonicClock::now();
     if (const std::uint64_t steps = weather_->advance_to(to, jobs_); steps > 0) {
         weather_steps_.add(steps);
@@ -486,6 +491,7 @@ void Server::open_players() {
 }
 
 void Server::serve_players() {
+    HOG_ZONE("serve players");
     if (!players_) {
         return;
     }
@@ -627,6 +633,7 @@ void Server::say(net::ConnectionId connection, const protocol::Said& said) {
 }
 
 void Server::share() {
+    HOG_ZONE("share");
     if (!players_) {
         return;
     }
@@ -760,6 +767,7 @@ void Server::submit() {
 }
 
 Result<void> Server::save() {
+    HOG_ZONE("save");
     submit();
     auto flushed = writer_.flush();
     if (!flushed) {

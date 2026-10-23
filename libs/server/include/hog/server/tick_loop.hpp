@@ -1,5 +1,6 @@
 #pragma once
 
+#include <hog/core/profile.hpp>
 #include <hog/core/time.hpp>
 #include <hog/server/catch_up.hpp>
 #include <hog/server/pacer.hpp>
@@ -152,7 +153,11 @@ template <Timer T>
 template <typename Step>
 void TickLoop<T>::timed(Step& step) {
     const MonotonicClock::time_point started = timer_->now();
-    step(std::as_const(clock_));
+    {
+        HOG_ZONE("tick");
+        step(std::as_const(clock_));
+    }
+    HOG_FRAME();
     stats_.last_step = timer_->now() - started;
     stats_.longest_step = std::max(stats_.longest_step, stats_.last_step);
 }

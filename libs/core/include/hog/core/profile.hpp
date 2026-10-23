@@ -21,6 +21,9 @@ inline constexpr bool enabled = false;
 // Times the rest of the enclosing scope.
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage): declares a scoped zone at the caller's line
 #define HOG_ZONE(name) ZoneScopedN(name)
+// Labels the enclosing zone with text that changes from call to call, such as a pass's name.
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage): reaches the zone HOG_ZONE declared
+#define HOG_ZONE_TEXT(text) ZoneText((text).data(), (text).size())
 // Ends a frame; the profiler shows the time between marks.
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage): the profiler's frame mark is a macro
 #define HOG_FRAME() FrameMark
@@ -33,6 +36,7 @@ inline constexpr bool enabled = false;
 #else
 // NOLINTBEGIN(cppcoreguidelines-macro-usage): no-op twins of the marks above
 #define HOG_ZONE(name) static_cast<void>(0)
+#define HOG_ZONE_TEXT(text) static_cast<void>(0)
 #define HOG_FRAME() static_cast<void>(0)
 #define HOG_PLOT(name, value) static_cast<void>(0)
 #define HOG_THREAD(name) static_cast<void>(0)
