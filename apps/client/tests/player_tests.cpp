@@ -123,3 +123,31 @@ TEST_CASE("the keys stride the way the aim faces, jumping with up", "[client][pl
     CHECK(aside.running);
     CHECK(aside.jumping);
 }
+
+TEST_CASE("a player placed by the server flies there, or stands on the ground under it",
+          "[client][player]") {
+    const double ground = ground_under(testing::world(), WorldPosition{on_land() * radius()});
+    const protocol::Facing facing{.heading = 40'000, .pitch = -1'000};
+    const auto placed_at = [&](double height, protocol::Stance stance) {
+        auto placed =
+            placing(testing::world(),
+                    {.at = protocol::to_millimetres(WorldPosition{on_land() * (radius() + height)}),
+                     .stance = stance,
+                     .facing = facing});
+        REQUIRE(placed);
+        CHECK(facing_of(placed->flight) == facing);
+        return std::move(placed).value();
+    };
+
+    const Placing flying = placed_at(ground + 300.0, protocol::Stance::Flying);
+    CHECK_FALSE(flying.player);
+    CHECK(height_of(flying.flight.eye) == Approx(ground + 300.0).margin(0.01));
+
+    // Where the ground has sunk or risen since.
+    for (const double height : {ground + 40.0, ground - 10.0}) {
+        const Placing walking = placed_at(height, protocol::Stance::Walking);
+        REQUIRE(walking.player);
+        CHECK(height_of(walking.player->feet()) == Approx(ground).margin(2.0));
+        CHECK(apart(walking.player->feet(), WorldPosition{on_land() * radius()}) < 0.01);
+    }
+}

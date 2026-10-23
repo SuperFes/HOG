@@ -67,6 +67,20 @@ double Player::room(WorldPosition from, DVec3 back, double wanted) const {
     return std::max(glm::length(hit->at - from) - settings_.clearance, closest);
 }
 
+Result<Placing> placing(const planet::World& world, const protocol::Placed& placed,
+                        const PlaySettings& settings) {
+    Placing placing{.flight = faced({.eye = protocol::to_world(placed.at)}, placed.facing),
+                    .player = std::nullopt};
+    if (placed.stance == protocol::Stance::Walking) {
+        auto player = Player::create(world, glm::normalize(placing.flight.eye.metres()), settings);
+        if (!player) {
+            return std::unexpected(player.error());
+        }
+        placing.player.emplace(std::move(player).value());
+    }
+    return placing;
+}
+
 physics::Stride stride(const Flight& aim, DVec3 move, bool running) {
     const DVec3 right = glm::cross(aim.heading, glm::normalize(aim.eye.metres()));
     return {.along = (right * move.x) + (aim.heading * move.z),

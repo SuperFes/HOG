@@ -7,8 +7,10 @@
 #include <hog/physics/ground.hpp>
 #include <hog/physics/space.hpp>
 #include <hog/planet/world.hpp>
+#include <hog/protocol/messages.hpp>
 
 #include <memory>
+#include <optional>
 
 namespace hog::client {
 
@@ -49,6 +51,15 @@ private:
     physics::Character character_;
     PlaySettings settings_;
 };
+
+// The player where the server says they were when they last left: the flight there, facing as
+// it says, and on foot, the player stood on the ground under it, wherever that is now.
+struct Placing {
+    Flight flight;
+    std::optional<Player> player;
+};
+[[nodiscard]] Result<Placing> placing(const planet::World& world, const protocol::Placed& placed,
+                                      const PlaySettings& settings = {});
 
 // What the keys held ask of the character: `move` is right, up and forwards, each from -1 to 1,
 // facing the way `aim` does along the ground; up jumps.

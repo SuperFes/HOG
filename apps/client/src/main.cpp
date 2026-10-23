@@ -531,6 +531,10 @@ public:
     [[nodiscard]] std::optional<WorldPosition> take_correction() noexcept {
         return session_ ? session_->take_correction() : std::nullopt;
     }
+    // Where the server says the player was when they last left, once.
+    [[nodiscard]] std::optional<protocol::Placed> take_placed() noexcept {
+        return session_ ? session_->take_placed() : std::nullopt;
+    }
 
     // The newest weather the server sent since last asked.
     [[nodiscard]] std::optional<protocol::Woodlands> take_woodlands() noexcept {
@@ -666,6 +670,23 @@ void report(Connection& connection, std::optional<client::Player>& player,
         chat.log.add(hog::chat::shown_name(line.from, filter),
                      hog::chat::shown_chat(line.text, filter), now);
     }
+}
+
+// Puts the player back where the server says they were when they last left.
+void return_to(Connection& connection, Controls& controls, std::optional<client::Player>& player,
+               client::Flight& flight, const planet::World& world) {
+    const auto placed = connection.take_placed();
+    if (!placed) {
+        return;
+    }
+    auto placing = client::placing(world, *placed);
+    if (!placing) {
+        log::warn(player_log, "can't go back to where the player was: {}", placing.error());
+        return;
+    }
+    flight = placing->flight;
+    player = std::move(placing->player);
+    controls.walking = player.has_value();
 }
 
 // While typing chat the keys go to its box, not the game; back when it closes. Whether the box
@@ -816,6 +837,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
         shaders.look(device, now);
         take_part(controls, player, flight, camera, world);
         report(connection, player, flight, forecast, chat, options.chat_filter, now);
+        return_to(connection, controls, player, flight, world);
         if (const auto woodlands = connection.take_woodlands()) {
             scene.fare(*woodlands);
         }
