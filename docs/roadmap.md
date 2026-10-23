@@ -206,6 +206,7 @@ This phase builds a client that flies over the generated planet with a real sky.
 - [x] The sea as water, not a sheet: everything under its surface seen through the water between, a wader's legs as much as the seabed, bent by the waves (one water model, laid by the sea's pass over what depth says lies behind it)
 - [x] From under the sea: water along the whole view, darker the deeper; the sky only through the window overhead, the surface a mirror beyond it, and what stands out of the water bent through it; a waterline across the screen where the eye straddles the surface, with no clipping as waves pass the eye
 - [ ] Under the sea, felt: caustics on the bed and on what's in the water, light shafts, drifting motes, a wobble to the view
+- [ ] The whole sky out of the water: a small map of the sky round the eye, made each frame with the clouds and all else that hangs in it, seen through the window from under the sea and mirrored in the sea from above, so whatever the sky gains is seen from the water too
 - [x] Waves: one wave function the client, the server and physics all evaluate alike (the planet's fixed trains, phased by the seed and the world's time, sized by the local spectrum, so everyone sees the same wave at the same place), the long waves moving the surface and fine chop in its shading, what's too fine to draw widening the sun's glint
 - [x] Waves from the sea state: several systems at once, the local wind sea crossing swells from distant storms, so crests criss-cross and pile up where they meet, blended from cell to cell
 - [ ] The surface's height under things standing in the sea, for their tint and for swimming
@@ -217,6 +218,14 @@ This phase builds a client that flies over the generated planet with a real sky.
 - [x] Ripples and wakes where bodies cross the surface
 - [x] Hillaire atmosphere and sun lighting driven by planet time
 - [x] The sun as people see it: a glow and glare round its disc, rather than the bare disc a camera records
+
+**Water clarity**
+
+Real waters range from clear blue to green, tea-brown, milky and mud. One model of what's in the water decides how far light gets through it and what colour it turns, seen from above as much as from in it.
+
+- [ ] The water's optics read per place, in place of the fixed constants: absorption and scattering summed from the water itself (red lost first, so clear water is blue), dissolved organic matter (tea-brown to near black), suspended sediment (muddy or milky) and plankton (green); the seabed cull keyed to the clearest water in view
+- [ ] Where it comes from: lakes and rivers stained by the peat, bogs and forest litter of their catchments; glacier-fed lakes milky turquoise with rock flour, bluer or greener by the flour's grain size; rivers carrying mud out to sea in plumes that drift with the current; clear water where little runs in
+- [ ] Clarity that changes: storms and surf stirring the shallows' bed muddy, settling clear over the days after; spring melt and floods clouding the rivers; plankton blooming green in warm, rich water through the seasons
 
 **Tests**
 
@@ -309,7 +318,7 @@ The sea is part of the same world, not a backdrop: its life is placed, grows and
 - [ ] Sways with the swell and the current rather than the wind
 - [ ] Lives and dies as the land's does: kelp torn out by storms, coral bleached by hot water, beds regrowing from their edges
 - [ ] Sea fauna as Phase 2's wildlife: plankton, grazers (urchins, small fish), shoals and their predators, crabs scavenging, with the balances real coasts show (urchins stripping kelp where their predators are gone)
-- [ ] Tides, so the shore has a band that is sometimes sea and sometimes land (see Later: the moon and tides)
+- [ ] Tides, so the shore has a band that is sometimes sea and sometimes land (see Later: moons and tides)
 
 **Rendering**
 
@@ -520,17 +529,26 @@ Builds on Phase 5's condition states. The server owns every tree's record, as it
 - [ ] Harvest yields from the same records: wood by species and age, bark, resin, fruit and seed. Crafting (Phase 7) reads them.
 - [ ] Tree changes replicated to clients by cell, as weather is. The anchor tiles rebuild from them (`TreeAnchors::changed`, not yet wired to world changes).
 
-**The moon and tides**
+**Moons and tides**
 
-Plugs into the calendar (Phase 2) and the sea state. The moon is a body on its own orbit, so everything below is a function of the world's time, the same for everyone with nothing sent.
+Plugs into the calendar (Phase 2) and the sea state. Each moon is a body on its own orbit, so everything below is a function of the world's time, the same for everyone with nothing sent.
 
-- [ ] A moon on a real orbit, tilted to the planet's, so its rising, its height and its eclipses come where and when the orbit says
+- [ ] One or two moons, each on a real orbit tilted to the planet's, so their rising, their height and their eclipses come where and when the orbits say
 - [ ] Phases from where the sun lies: the disc lit from the sun's side, new to full and back, the dark side faintly lit by the planet's own light, a textured face (CC0 or procedural)
 - [ ] Moonlight: the night lit by it, bright at full and dark at new, the sky scattering it as the atmosphere scatters the sun's, and a moon road glittering across the waves
 - [ ] Solar eclipses: the disc covering the sun, the corona and the diamond ring at the edges of totality, the light dimming and the sky darkening to dusk all round, the moon's shadow racing across the land and the clouds
 - [ ] Lunar eclipses: the moon turned copper by sunlight bent through the planet's air, its colour from the same atmosphere tables the sky is drawn with
 - [ ] Tides raised by the moon and the sun: springs at new and full moon, neaps between; the sea level everywhere follows them, a tidal range larger on wide shelves and in funnelling bays, and tidal currents through narrows
+- [ ] Moons as worlds: grown by the planet library as the planet is, to be visited, with travel between the bodies and the second world streamed in
 - [ ] Surfing: breaking waves the physics rides, because it evaluates the same wave function the surface is drawn with; a board, paddling out, catching and riding a face, wiping out
+
+**The night sky**
+
+Plugs into the calendar and the sky. Like the moons, it's a function of the world's time and the seed, with nothing sent.
+
+- [ ] Stars: a fixed catalogue grown from the seed, with real stars' spread of brightness and colour (many faint, few bright, blue-white to red) and the galaxy's band across it; the planet turns under it once a sidereal day and the sun crosses it through the year, so each season has its own constellations, the same every year, round a pole fixed by the axis
+- [ ] Stars as seen: lost in the sky's own light by day, coming out one by one at dusk, dimmed and reddened near the horizon by the air they shine through, twinkling low down, hidden by cloud
+- [ ] Rings in the planet's equatorial plane, lit by the sun: an arch whose height is set by the latitude, edge-on at the equator; bright at night and fading against the sky's brightness by day; the planet's shadow cut across them at night, their shadow a band across the ground that moves north and south with the seasons, and the night faintly lit by their shine
 
 **Sound**
 
