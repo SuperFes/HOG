@@ -724,8 +724,8 @@ TEST_CASE("wading in the surf, to look at", "[.look]") {
     }
 }
 
-// Not a check: stills from under the sea and at its surface, someone standing out of it ahead, to look
-// at. Saved where HOG_LOOK names.
+// Not a check: stills from under the sea and at its surface, someone standing out of it ahead, to
+// look at. Saved where HOG_LOOK names.
 TEST_CASE("under the sea, to look at", "[.look]") {
     // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
     const char* where = std::getenv("HOG_LOOK");
@@ -748,7 +748,8 @@ TEST_CASE("under the sea, to look at", "[.look]") {
         Shot shot = off_the_coast(120.0, altitude, true, pitch);
         shot.forecast = &fresh;
         const hog::DVec3 there = glm::normalize(ahead(shot, 8.0).metres());
-        const double ground = hog::client::ground_under(world(), hog::WorldPosition{there * radius});
+        const double ground =
+            hog::client::ground_under(world(), hog::WorldPosition{there * radius});
         shot.others = {{.feet = hog::WorldPosition{there * (radius + std::max(ground, -1.0))},
                         .up = there,
                         .colour = {0.6F, 0.1F, 0.05F}}};
@@ -769,9 +770,9 @@ TEST_CASE("under the sea, to look at", "[.look]") {
         const auto still =
             hog::client::draw_still(*device, *scene, shot, {.width = 960, .height = 540});
         REQUIRE(still);
-        REQUIRE(hog::client::save_picture(
-            std::filesystem::path{where} / std::format("under_straddling_{:02}.png", step),
-            *still));
+        REQUIRE(hog::client::save_picture(std::filesystem::path{where} /
+                                              std::format("under_straddling_{:02}.png", step),
+                                          *still));
     }
 }
 
