@@ -40,20 +40,18 @@ concept SlotPool =
         { pool.stage(slot, slot, vertices) } -> std::same_as<Result<>>;
     };
 
-// How much grass is grown, on ground how fine.
+// How far and thick the plants grow, on ground how fine.
 struct GrassBudget {
-    // The lawn: every biome's blades, at full density to lawn_near, thinning with distance squared
-    // beyond, and shrunk away by lawn_far.
-    double lawn_near = render::grass_near;
-    double lawn_far = render::grass_far;
-    double finest = 0.75; // metres between a patch's vertices at most, so only fine ground grows
+    // The grass, thinning as render::GrassTier has it: on ground with vertices no further apart
+    // than `finest` metres within `fine` of the eye, where single blades show, and than
+    // `coarsest` beyond.
     double density = render::GrassTier{}.density; // blades a square metre up close
-    // The tall swaths seen far off: coarser ground grows only the tall biomes' blades.
-    double tall_coarsest = 6.0; // metres between vertices at most for the far swaths
-    double tall_density = render::swath_tier.density; // blades a square metre, held to tall_hold
-    double tall_hold = render::swath_tier.hold; // metres, past which it falls with distance squared
-    double tall_far = render::swath_tier.far;   // metres the tall swaths reach
-    double bush_far = 260.0;                    // metres the bushes reach
+    double hold = render::GrassTier{}.hold;       // metres that density holds to
+    double reach = render::GrassTier{}.reach;     // metres the grass reaches
+    double finest = 0.75;
+    double fine = 55.0;
+    double coarsest = 6.0;
+    double bush_far = 260.0; // metres the bushes reach
     // The trees, standing far beyond the rest and on far coarser ground; the ground wears their
     // canopy's colour beyond.
     double tree_coarsest = 24.0;         // metres between vertices at most for the trees
@@ -64,11 +62,8 @@ struct GrassBudget {
     double forest_mid = 150.0;              // metres the middle detail reaches
     double forest_far = render::forest_far; // metres the coarsest reaches, where stamps take over
 
-    [[nodiscard]] render::GrassTier lawn() const noexcept {
-        return {.density = density, .hold = lawn_near, .far = lawn_far};
-    }
-    [[nodiscard]] render::GrassTier swaths() const noexcept {
-        return {.density = tall_density, .hold = tall_hold, .far = tall_far};
+    [[nodiscard]] render::GrassTier grass() const noexcept {
+        return {.density = density, .hold = hold, .reach = reach};
     }
 
     friend bool operator==(const GrassBudget&, const GrassBudget&) = default;
@@ -93,9 +88,8 @@ private:
     std::map<planet::CellId, std::uint32_t> slots_;
 };
 
-// The grass grown on the drawn patches: the near lawn on ground fine enough and close enough,
-// and the far swaths of tall grass on coarser ground, fewer blades a cell the further they lie.
-// Patches without slots are passed over.
+// The grass grown on the drawn patches fine enough and near enough to grow it. Patches without
+// slots are passed over.
 [[nodiscard]] std::vector<render::GrassDraw>
 grass_draws(const GroundSlots& slots, std::span<const terrain::StreamedPatch> drawn,
             WorldPosition eye, double planet_radius, const GrassBudget& budget = {});

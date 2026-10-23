@@ -2,19 +2,18 @@
 # git leaves alone, to change. Every key may be left out, keeping the default shown. Distances are
 # metres from the eye.
 
+# Every biome's grass, at full density out to hold, thinning with distance squared beyond, those
+# blades left drawn wider to cover the ground as thickly. Each blade shrinks away as it comes under
+# a couple of pixels tall, so short grass stays near and tall grass reaches further, all by far.
 [grass]
-# The lawn: every biome's blades, at full density out to lawn_near, thinning with distance squared
-# beyond, those left drawn wider to cover the ground as thickly; all shrunk away by lawn_far.
-# lawn_near = 25.0
-# lawn_far = 55.0
 # density = 40.0         # blades a square metre up close
-# finest = 0.75          # metres between the ground's vertices at most for the lawn
-
-# The far swaths: the tall biomes' blades only, thinning as the lawn does, out to tall_far.
-# tall_density = 4.0     # blades a square metre, held out to tall_hold
-# tall_hold = 60.0
-# tall_far = 260.0
-# tall_coarsest = 6.0    # metres between the ground's vertices at most for the swaths, 15.9 at most
+# hold = 25.0
+# far = 260.0
+# The ground grown on, by the metres between its vertices: no more than finest within fine, where
+# single blades show, and no more than coarsest beyond, 15.9 at most.
+# finest = 0.75
+# fine = 55.0
+# coarsest = 6.0
 
 [bushes]
 # far = 260.0

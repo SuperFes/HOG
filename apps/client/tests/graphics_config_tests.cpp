@@ -25,14 +25,12 @@ TEST_CASE("the example graphics config is the defaults", "[client][graphics]") {
 TEST_CASE("graphics config sets how far and thick the grass grows", "[client][graphics]") {
     const auto config = parse_graphics_config(R"(
 [grass]
-lawn_near = 15
-lawn_far = 35.5
 density = 20.0
+hold = 15
+far = 180.5
 finest = 0.5
-tall_density = 0
-tall_hold = 40.0
-tall_far = 180.0
-tall_coarsest = 4.0
+fine = 35
+coarsest = 4.0
 
 [bushes]
 far = 120
@@ -47,14 +45,13 @@ far = 600
 )");
     REQUIRE(config);
     const hog::client::GrassBudget& grass = config->plants;
-    CHECK(grass.lawn_near == 15.0);
-    CHECK(grass.lawn_far == 35.5);
     CHECK(grass.density == 20.0);
+    CHECK(grass.hold == 15.0);
+    CHECK(grass.reach == 180.5);
     CHECK(grass.finest == 0.5);
-    CHECK(grass.tall_density == 0.0);
-    CHECK(grass.tall_hold == 40.0);
-    CHECK(grass.tall_far == 180.0);
-    CHECK(grass.tall_coarsest == 4.0);
+    CHECK(grass.fine == 35.0);
+    CHECK(grass.coarsest == 4.0);
+    CHECK(grass.grass().reach == 180.5);
     CHECK(grass.bush_far == 120.0);
     CHECK(grass.forest_full == 40.0);
     CHECK(grass.forest_mid == 90.0);
@@ -75,10 +72,11 @@ TEST_CASE("graphics config rejects what it can't draw", "[client][graphics]") {
     CHECK_FALSE(parse_graphics_config("[grass]\ndensity = 'thick'\n"));
     CHECK_FALSE(parse_graphics_config("[grass]\nfinest = 0\n"));
     CHECK_FALSE(parse_graphics_config("[grass]\nfinest = 8\n"));
-    CHECK_FALSE(parse_graphics_config("[grass]\ntall_hold = 0\n"));
-    CHECK_FALSE(parse_graphics_config("[grass]\nlawn_near = 60\n"));
-    CHECK_FALSE(parse_graphics_config("[grass]\nlawn_far = 300\n"));
-    CHECK_FALSE(parse_graphics_config("[grass]\ntall_far = 5000\n"));
+    CHECK_FALSE(parse_graphics_config("[grass]\ncoarsest = 20\n"));
+    CHECK_FALSE(parse_graphics_config("[grass]\nhold = 0\n"));
+    CHECK_FALSE(parse_graphics_config("[grass]\nfine = 0\n"));
+    CHECK_FALSE(parse_graphics_config("[grass]\nfine = 300\n"));
+    CHECK_FALSE(parse_graphics_config("[grass]\nfar = 5000\n"));
     CHECK_FALSE(parse_graphics_config("[bushes]\nfar = 20000\n"));
     CHECK_FALSE(parse_graphics_config("[forest]\nfull = 0\n"));
     CHECK_FALSE(parse_graphics_config("[forest]\nfull = 200\n"));

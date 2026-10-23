@@ -18,8 +18,8 @@ struct Push {
     // xyz the wind near the ground, m/s; w (as bits) the patch's seed.
     float4 wind;
     // xyz the patch's origin from the eye, in metres; w (as bits) the layers of blades drawn, the
-    // bytes before the patch's vertices in what's bound times 64, the metres across its grid cells
-    // times 256 << 14, and bit 26 set for the swaths' tier, growing only the tall biomes' blades.
+    // bytes before the patch's vertices in what's bound times 64, and the metres across its grid
+    // cells times 256 << 14.
     float4 origin;
 };
 
@@ -33,10 +33,9 @@ struct Settings {
     // x the share of blades grown, y their width in metres, z the share of clumps grown,
     // w the share of reed stems standing in the band at the waterline.
     float4 spread[biome_count];
-    // The lawn's tier, then the swaths': x blades a square metre up close, y the metres that
-    // density holds to before falling with the square of distance, z the metres blades have
-    // shrunk away by.
-    float4 tiers[2];
+    // How it thins: x blades a square metre up close, y the metres that density holds to before
+    // falling with the square of distance, z the metres every blade has shrunk away by.
+    float4 tier;
 };
 
 [[vk::binding(0, 0)]] ConstantBuffer<Settings> settings;
@@ -55,8 +54,6 @@ static const uint vertex_stride = 36; // bytes, as terrain::PatchVertex lies
 
 // Blades keep off ground this close to sea level, so the surf stays clear.
 static const float shore = 0.15;
-// Blades this tall stand in the far swaths; shorter grass stays a near effect.
-static const float tall_floor = 0.45;
 static const float pioneers = 0.9; // of the open ground the grass takes where trees are gone
 
 // Reeds stand where the ground sits this close over the water, stiff stems with a cattail head:
@@ -170,11 +167,10 @@ Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const uint layers = packed & 63u;
     const uint bias = (packed >> 6) & 0xffu;
     const float spacing = float((packed >> 14) & 0xfffu) / 256.0;
-    const bool tall_only = (packed & (1u << 26)) != 0u;
-    const float4 tier = settings.tiers[tall_only ? 1 : 0];
+    const float4 tier = settings.tier;
     const float fade_far = tier.z;
     // Blades keep their height to here, shrinking away by fade_far.
-    const float fade_near = 0.45 * fade_far;
+    const float fade_near = 0.8 * fade_far;
     const uint seed = asuint(push.wind.w);
 
     // A layer of blades a cell, every cell's nth blade in the nth layer, so each blade is the
@@ -207,7 +203,7 @@ Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const float4 spread = settings.spread[biome];
     // Where the trees are gone, grass takes the open ground, once the black of a fire has greened.
     const float sown = lerp(spread.x, max(spread.x, pioneers), near.gone) * (1.0 - near.scar);
-    const bool lawn_here = kind.w > (tall_only ? tall_floor : 0.0) && unit(hash + 2u) < sown;
+    const bool lawn_here = kind.w > 0.0 && unit(hash + 2u) < sown;
     if (!lawn_here && spread.w <= 0.0) {
         return nothing();
     }
@@ -228,10 +224,16 @@ Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
 
     const float3 root = push.origin.xyz + ground;
     const float above = height_above_sea(root, push.bend_up, push.bend_radii.x);
-    const float fade = saturate((fade_far - length(root)) / (fade_far - fade_near));
     // At the waterline a reed may stand; elsewhere the lawn grows, keeping off the surf.
     const bool reed = spread.w > 0.0 && above >= reed_low && above <= reed_high &&
                       unit(hash + 9u) < spread.w;
+    const float grown = reed ? reed_height * (0.75 + (0.45 * unit(hash + 5u)))
+                             : kind.w * (1.0 + (0.6 * near.gone)) * (0.6 + (0.8 * unit(hash + 5u)));
+    // Shrinking away under two pixels tall, gone under one, so short grass stays near and tall
+    // grass reaches further.
+    const float pixel = push.bend_radii.w * length(root);
+    const float fade = saturate((fade_far - length(root)) / (fade_far - fade_near)) *
+                       saturate((grown / pixel) - 1.0);
     if (fade <= 0.0 || (!reed && (!lawn_here || above < shore))) {
         return nothing();
     }
@@ -247,15 +249,11 @@ Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     const float3 up = normalize(
         normal + ((reed ? 0.05 : 0.2) * ((beside * cos(leaning)) + (ahead * sin(leaning)))));
 
-    const float height = (reed ? reed_height * (0.75 + (0.45 * unit(hash + 5u)))
-                               : kind.w * (1.0 + (0.6 * near.gone)) *
-                                     (0.6 + (0.8 * unit(hash + 5u)))) *
-                         fade * thinning;
+    const float height = grown * fade * thinning;
     // At least a pixel wide, so far blades don't shatter into bright specks; drawn wider than
     // they are, they wear the ground's colour instead, melting into it.
     const float true_width =
         (reed ? reed_width : spread.y * stands_for) * (0.7 + (0.6 * unit(hash + 6u)));
-    const float pixel = push.bend_radii.w * length(root);
     const float width = max(true_width, 0.8 * pixel);
     const float itself = true_width / width;
     // Stems are stiff where blades are carried.

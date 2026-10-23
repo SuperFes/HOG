@@ -117,53 +117,46 @@ TEST_CASE("patches are drawn from their slots", "[client][ground]") {
     CHECK(draws[1].slot == 0);
 }
 
-TEST_CASE("grass grows on fine ground near the eye, thinning with distance", "[client][ground]") {
+TEST_CASE("grass grows on ground fine enough, each patch as far off as its nearest ground",
+          "[client][ground]") {
     constexpr double radius = 115'000.0;
-    // Vertex spacing ~0.69 m at level 13 on this planet; a level up is too coarse for grass.
+    // Vertex spacing ~0.69 m at level 13 on this planet, ~5.5 m at level 10, and too coarse for
+    // grass at level 9.
     const CellId fine = CellId::from_face_ij(0, 0, 0, 13);
     const CellId fine_far = CellId::from_face_ij(0, 1, 0, 13);
-    const CellId coarse = CellId::from_face_ij(0, 0, 0, 12);
+    const CellId coarse = CellId::from_face_ij(0, 0, 0, 10);
+    const CellId coarsest = CellId::from_face_ij(0, 0, 0, 9);
     FakePool pool;
+    pool.free = {3, 2, 1, 0};
     GroundSlots slots;
-    REQUIRE(slots.take(pool, 1, arriving({fine, fine_far, coarse})));
+    REQUIRE(slots.take(pool, 1, arriving({fine, fine_far, coarse, coarsest})));
     const hog::WorldPosition eye{radius, 0.0, 0.0};
     const auto patch = [&](CellId cell, double away) {
         return hog::terrain::StreamedPatch{
             .cell = cell, .origin = hog::WorldPosition{radius, away, 0.0}, .coarser_edges = 0};
     };
-    const std::vector<hog::terrain::StreamedPatch> drawn{patch(fine, 0.0), patch(fine_far, 60.0),
-                                                         patch(coarse, 0.0)};
+    const std::vector<hog::terrain::StreamedPatch> drawn{
+        patch(fine, 0.0), patch(fine_far, 60.0), patch(coarse, 400.0), patch(coarsest, 0.0)};
 
     const std::vector<hog::render::GrassDraw> grown =
         hog::client::grass_draws(slots, drawn, eye, radius);
-    std::vector<hog::render::GrassDraw> lawn;
-    std::vector<hog::render::GrassDraw> swaths;
-    for (const hog::render::GrassDraw& draw : grown) {
-        (draw.tall_only ? swaths : lawn).push_back(draw);
-    }
-    // Only the fine patches grow the lawn, the far one as far off as its nearest ground, which
-    // thins it.
-    REQUIRE(lawn.size() == 2);
-    CHECK(lawn[0].slot == 0);
-    CHECK(lawn[1].slot == 1);
-    CHECK(lawn[0].nearest == 0.0);
-    CHECK(lawn[1].nearest > 30.0);
-    CHECK(lawn[1].nearest < 60.0);
-    CHECK(lawn[0].spacing < 0.75);
-    // Every patch this fine also grows a far swath, seeded apart from its lawn.
-    REQUIRE(swaths.size() == 3);
-    CHECK(swaths[2].slot == 2);
-    CHECK(swaths[0].seed != lawn[0].seed);
+    REQUIRE(grown.size() == 3);
+    CHECK(grown[0].slot == 0);
+    CHECK(grown[1].slot == 1);
+    CHECK(grown[2].slot == 2);
+    CHECK(grown[0].nearest == 0.0);
+    CHECK(grown[1].nearest > 30.0);
+    CHECK(grown[1].nearest < 60.0);
+    // The coarse patch spans far enough that its near edge is in reach.
+    CHECK(grown[2].nearest < hog::render::GrassTier{}.reach);
+    CHECK(grown[0].spacing < 0.75);
+    CHECK(grown[2].spacing > 5.0);
     // The same cell seeds the same grass on every machine.
-    CHECK(lawn[0].seed == hog::client::grass_draws(slots, drawn, eye, radius)[0].seed);
-    CHECK(lawn[0].seed != lawn[1].seed);
-
-    // Out of reach altogether, nothing grows.
-    const std::vector<hog::terrain::StreamedPatch> far_off{patch(fine, 300.0)};
-    CHECK(hog::client::grass_draws(slots, far_off, eye, radius).empty());
+    CHECK(grown[0].seed == hog::client::grass_draws(slots, drawn, eye, radius)[0].seed);
+    CHECK(grown[0].seed != grown[1].seed);
 }
 
-TEST_CASE("the lawn reaches as far as the budget has it", "[client][ground]") {
+TEST_CASE("the grass reaches as far as the budget has it", "[client][ground]") {
     constexpr double radius = 115'000.0;
     const CellId fine = CellId::from_face_ij(0, 1, 0, 13);
     FakePool pool;
@@ -171,53 +164,16 @@ TEST_CASE("the lawn reaches as far as the budget has it", "[client][ground]") {
     REQUIRE(slots.take(pool, 1, arriving({fine})));
     const hog::WorldPosition eye{radius, 0.0, 0.0};
     const std::vector<hog::terrain::StreamedPatch> drawn{
-        {.cell = fine, .origin = hog::WorldPosition{radius, 90.0, 0.0}, .coarser_edges = 0}};
-    const auto lawn = [&](const hog::client::GrassBudget& budget) {
-        std::vector<hog::render::GrassDraw> found;
-        for (const hog::render::GrassDraw& draw :
-             hog::client::grass_draws(slots, drawn, eye, radius, budget)) {
-            if (!draw.tall_only) {
-                found.push_back(draw);
-            }
-        }
-        return found;
-    };
-    // Out of the default lawn's reach, but in a longer one's.
-    CHECK(lawn({}).empty());
-    CHECK(lawn({.lawn_near = 40.0, .lawn_far = 120.0}).size() == 1);
-    // And the lawn thins as the budget has it.
+        {.cell = fine, .origin = hog::WorldPosition{radius, 300.0, 0.0}, .coarser_edges = 0}};
+    // Out of the default reach, but in a longer one's.
+    CHECK(hog::client::grass_draws(slots, drawn, eye, radius).empty());
+    CHECK(hog::client::grass_draws(slots, drawn, eye, radius, {.reach = 400.0}).size() == 1);
+    // And it thins as the budget has it.
     const hog::render::GrassTier tier =
-        hog::client::GrassBudget{.lawn_near = 40.0, .density = 20.0}.lawn();
+        hog::client::GrassBudget{.density = 20.0, .hold = 40.0, .reach = 400.0}.grass();
     CHECK(tier.density == 20.0);
     CHECK(tier.hold == 40.0);
-    CHECK(tier.far == hog::render::grass_far);
-}
-
-TEST_CASE("tall swaths reach far over coarser ground", "[client][ground]") {
-    constexpr double radius = 115'000.0;
-    // Vertex spacing ~5.5 m at level 10 on this planet; a level up is too coarse even for swaths.
-    const CellId coarse = CellId::from_face_ij(0, 0, 0, 10);
-    const CellId coarse_far = CellId::from_face_ij(0, 1, 0, 10);
-    const CellId coarsest = CellId::from_face_ij(0, 0, 0, 9);
-    FakePool pool;
-    GroundSlots slots;
-    REQUIRE(slots.take(pool, 1, arriving({coarse, coarse_far, coarsest})));
-    const hog::WorldPosition eye{radius, 0.0, 0.0};
-    const auto patch = [&](CellId cell, double away) {
-        return hog::terrain::StreamedPatch{
-            .cell = cell, .origin = hog::WorldPosition{radius, away, 0.0}, .coarser_edges = 0};
-    };
-    const std::vector<hog::terrain::StreamedPatch> drawn{
-        patch(coarse, 0.0), patch(coarse_far, 400.0), patch(coarsest, 0.0)};
-    const std::vector<hog::render::GrassDraw> swaths =
-        hog::client::grass_draws(slots, drawn, eye, radius);
-    // Only tall grass grows this coarse.
-    REQUIRE(swaths.size() == 2);
-    CHECK(swaths[0].tall_only);
-    CHECK(swaths[1].tall_only);
-    CHECK(swaths[0].slot == 0);
-    CHECK(swaths[1].slot == 1);
-    CHECK(swaths[1].nearest > swaths[0].nearest);
+    CHECK(tier.reach == 400.0);
 }
 
 TEST_CASE("each biome is coloured as it looks from above", "[client][ground]") {

@@ -30,14 +30,12 @@ struct Key {
 };
 
 constexpr std::array keys{
-    Key{.table = "grass", .name = "lawn_near", .field = &GrassBudget::lawn_near},
-    Key{.table = "grass", .name = "lawn_far", .field = &GrassBudget::lawn_far},
-    Key{.table = "grass", .name = "finest", .field = &GrassBudget::finest},
     Key{.table = "grass", .name = "density", .field = &GrassBudget::density},
-    Key{.table = "grass", .name = "tall_coarsest", .field = &GrassBudget::tall_coarsest},
-    Key{.table = "grass", .name = "tall_density", .field = &GrassBudget::tall_density},
-    Key{.table = "grass", .name = "tall_hold", .field = &GrassBudget::tall_hold},
-    Key{.table = "grass", .name = "tall_far", .field = &GrassBudget::tall_far},
+    Key{.table = "grass", .name = "hold", .field = &GrassBudget::hold},
+    Key{.table = "grass", .name = "far", .field = &GrassBudget::reach},
+    Key{.table = "grass", .name = "finest", .field = &GrassBudget::finest},
+    Key{.table = "grass", .name = "fine", .field = &GrassBudget::fine},
+    Key{.table = "grass", .name = "coarsest", .field = &GrassBudget::coarsest},
     Key{.table = "bushes", .name = "far", .field = &GrassBudget::bush_far},
     Key{.table = "trees", .name = "far", .field = &GrassBudget::tree_far},
     Key{.table = "forest", .name = "full", .field = &GrassBudget::forest_full},
@@ -65,24 +63,18 @@ Result<void> read_table(std::string_view name, const toml::table& table, GrassBu
     return {};
 }
 
-// Each kind's distances in order from the eye out, and the lawn's thinning over a stretch of
-// ground.
+// Each kind's distances in order from the eye out, and ground fine enough to grow on.
 Result<void> check(const GrassBudget& budget) {
-    if (budget.finest <= 0.0 || budget.tall_coarsest < budget.finest ||
-        budget.tall_coarsest > render::coarsest_grass_cells) {
-        return invalid(std::format("grass.finest must be over 0, no more than grass.tall_coarsest, "
-                                   "and that no more than {} m",
+    if (budget.finest <= 0.0 || budget.coarsest < budget.finest ||
+        budget.coarsest > render::coarsest_grass_cells) {
+        return invalid(std::format("grass.finest must be over 0, no more than grass.coarsest, and "
+                                   "that no more than {} m",
                                    render::coarsest_grass_cells));
     }
-    if (budget.tall_hold <= 0.0) {
-        return invalid("grass.tall_hold must be over 0");
-    }
-    if (budget.lawn_near >= budget.lawn_far) {
-        return invalid("grass.lawn_near must be less than grass.lawn_far");
-    }
-    if (budget.lawn_far > budget.tall_far || budget.tall_far > render::furthest_grass) {
-        return invalid(std::format("grass.lawn_far must be no more than grass.tall_far, and that "
-                                   "no more than {} m",
+    if (budget.hold <= 0.0 || budget.fine <= 0.0 || budget.fine > budget.reach ||
+        budget.reach > render::furthest_grass) {
+        return invalid(std::format("grass.hold and grass.fine must be over 0, grass.fine no more "
+                                   "than grass.far, and that no more than {} m",
                                    render::furthest_grass));
     }
     if (budget.bush_far > furthest_plants) {

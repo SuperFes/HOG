@@ -46,8 +46,8 @@ constexpr double seabed_unseen = 0.002;
 terrain::SelectionSettings ground_selection(const GrassBudget& budget) {
     return {.max_spacing = 32.0,
             .max_error = 1.0,
-            .fine_within = {{.within = budget.lawn_far, .spacing = budget.finest},
-                            {.within = budget.tall_far, .spacing = budget.tall_coarsest}},
+            .fine_within = {{.within = budget.fine, .spacing = budget.finest},
+                            {.within = budget.reach, .spacing = budget.coarsest}},
             .only_in_view = false,
             .seabed_unseen = seabed_unseen};
 }
@@ -119,8 +119,8 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
     if (!ocean) {
         return failed("draw the sea", ocean.error());
     }
-    auto grass = render::Grass::create(device, colour_format, depth_format, palette, budget.lawn(),
-                                       budget.swaths());
+    auto grass =
+        render::Grass::create(device, colour_format, depth_format, palette, budget.grass());
     if (!grass) {
         return failed("grow the grass", grass.error());
     }

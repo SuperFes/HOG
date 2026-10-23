@@ -71,9 +71,7 @@ struct Field {
     double seconds = 0.0;
     DVec3 gusts_drifted{0.0};
     double away = 0.0; // metres east of the eye to the patch's centre
-    hog::render::GrassTier lawn{};
-    hog::render::GrassTier swaths = hog::render::swath_tier;
-    bool tall_only = false;
+    hog::render::GrassTier grass{};
     double ground = ground_height; // metres above sea level
     hog::terrain::Cover cover{};
     hog::planet::Biome blend_biome = hog::planet::Biome::Ocean;
@@ -90,8 +88,7 @@ Pixels draw(hog::render::Device& device, const Field& grown) {
     REQUIRE(sky);
     std::array<Vec3, hog::planet::biome_count> palette{};
     palette.fill(Vec3{0.35F, 0.55F, 0.25F});
-    auto grass =
-        Grass::create(device, colour_format, depth_format, palette, grown.lawn, grown.swaths);
+    auto grass = Grass::create(device, colour_format, depth_format, palette, grown.grass);
     REQUIRE(grass);
     auto pool = hog::render::TerrainPool::create(device, {.patches = 1, .frames = 1, .uploads = 1});
     REQUIRE(pool);
@@ -114,11 +111,7 @@ Pixels draw(hog::render::Device& device, const Field& grown) {
                                     .exposure = 10.0,
                                     .sky_light = model.sky_irradiance(2.0 * scale, sun),
                                     .gusts_drifted = grown.gusts_drifted};
-    const GrassDraw lawn{.slot = slot,
-                         .origin = origin,
-                         .spacing = spacing,
-                         .seed = 7,
-                         .tall_only = grown.tall_only};
+    const GrassDraw lawn{.slot = slot, .origin = origin, .spacing = spacing, .seed = 7};
     const GrassView view{.camera = camera,
                          .bend = bend,
                          .air = sky->bindings(0, *atmosphere),
@@ -201,8 +194,8 @@ TEST_CASE("thinner grass is the thicker grass with blades left out", "[render]")
         SKIP("no Vulkan device");
     }
     // Held at full density all the way, no blade drawn wider to stand for others.
-    const Pixels thin = draw(*device, {.lawn = {.density = 12.0, .hold = 1'000.0}});
-    const Pixels thick = draw(*device, {.lawn = {.density = 36.0, .hold = 1'000.0}});
+    const Pixels thin = draw(*device, {.grass = {.density = 12.0, .hold = 1'000.0}});
+    const Pixels thick = draw(*device, {.grass = {.density = 36.0, .hold = 1'000.0}});
     CHECK(lit_pixels(thick) > lit_pixels(thin));
     // Every blade of the thin field stands in the thick one too, where it was.
     std::size_t lost = 0;
@@ -214,9 +207,9 @@ TEST_CASE("thinner grass is the thicker grass with blades left out", "[render]")
     CHECK(lost == 0);
 }
 
-TEST_CASE("a cell grows its tier's density out to its hold, thinning with distance squared",
+TEST_CASE("a cell grows the full density out to its hold, thinning with distance squared",
           "[render]") {
-    const hog::render::GrassTier tier{.density = 40.0, .hold = 20.0, .far = 100.0};
+    const hog::render::GrassTier tier{.density = 40.0, .hold = 20.0, .reach = 100.0};
     CHECK(hog::render::grass_layers(tier, 0.5, 0.0) == 10.0);
     CHECK(hog::render::grass_layers(tier, 0.5, 20.0) == 10.0);
     CHECK(hog::render::grass_layers(tier, 0.5, 40.0) == 2.5);
@@ -230,8 +223,8 @@ TEST_CASE("thinned grass is drawn wider, covering the ground near as thickly", "
     }
     // Finer, so the widened blades span pixels of their own.
     constexpr VkExtent2D fine{.width = 384, .height = 216};
-    const auto lit = [&](const hog::render::GrassTier& lawn) {
-        return lit_pixels(draw(*device, {.away = 10.0, .lawn = lawn, .size = fine}));
+    const auto lit = [&](const hog::render::GrassTier& grass) {
+        return lit_pixels(draw(*device, {.away = 10.0, .grass = grass, .size = fine}));
     };
     const std::size_t full = lit({.density = 40.0, .hold = 1'000.0});
     // Thinning from 6 m, to a quarter by 12 m.
@@ -301,23 +294,21 @@ TEST_CASE("reeds fringe the waterline and leave higher ground alone", "[render]"
     CHECK(lit_pixels(draw(*device, {.biome = hog::planet::Biome::Lake, .ground = 2.0})) == 0);
 }
 
-TEST_CASE("tall swaths stand where the lawn has faded away", "[render]") {
+TEST_CASE("tall grass reaches further than short, and none beyond the reach", "[render]") {
     auto device = test_device();
     if (!device) {
         SKIP("no Vulkan device");
     }
-    // Fine enough that blades this far off span pixels.
+    // Fine enough that tall blades this far off span pixels.
     constexpr VkExtent2D fine{.width = 384, .height = 216};
-    // 70 m out the lawn's fade has taken it; a far-swath draw holds its full height.
-    const Field faded{.biome = hog::planet::Biome::Grassland, .away = 70.0, .size = fine};
-    CHECK(lit_pixels(draw(*device, faded)) == 0);
-    const Field swath{
-        .biome = hog::planet::Biome::Grassland, .away = 70.0, .tall_only = true, .size = fine};
-    CHECK(lit_pixels(draw(*device, swath)) > 0);
-    // Short grass stays a near effect: no tundra in the far swaths.
-    const Field tundra{
-        .biome = hog::planet::Biome::Tundra, .away = 70.0, .tall_only = true, .size = fine};
-    CHECK(lit_pixels(draw(*device, tundra)) == 0);
+    using enum hog::planet::Biome;
+    CHECK(lit_pixels(draw(*device, {.biome = Tundra, .size = fine})) > 0);
+    // 70 m out short tundra grass is under a pixel tall and gone, and tall grassland stands.
+    CHECK(lit_pixels(draw(*device, {.biome = Tundra, .away = 70.0, .size = fine})) == 0);
+    CHECK(lit_pixels(draw(*device, {.biome = Grassland, .away = 70.0, .size = fine})) > 0);
+    CHECK(lit_pixels(draw(
+              *device,
+              {.biome = Grassland, .away = 70.0, .grass = {.reach = 50.0}, .size = fine})) == 0);
 }
 
 TEST_CASE("the wind moves the grass, and still air leaves it still", "[render]") {

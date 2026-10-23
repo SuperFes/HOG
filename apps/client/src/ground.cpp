@@ -140,7 +140,7 @@ std::vector<render::GrassDraw> grass_draws(const GroundSlots& slots,
             (std::numbers::pi / 2.0) * planet_radius /
             static_cast<double>(std::uint64_t{1} << static_cast<unsigned>(patch.cell.level())) /
             terrain::patch_cells;
-        if (spacing > budget.tall_coarsest) {
+        if (spacing > budget.coarsest) {
             continue;
         }
         // Distance level with the ground, generously: an origin lies at sea level under its
@@ -153,22 +153,12 @@ std::vector<render::GrassDraw> grass_draws(const GroundSlots& slots,
         if (!held) {
             continue;
         }
-        const auto grow = [&](bool tall_only, std::uint32_t seed) {
+        if (distance < budget.reach) {
             draws.push_back({.slot = *held,
                              .origin = patch.origin,
                              .spacing = spacing,
-                             .seed = seed,
-                             .nearest = distance,
-                             .tall_only = tall_only});
-        };
-        // The lawn: every biome's blades, on fine ground near the eye.
-        if (spacing <= budget.finest && distance < budget.lawn_far) {
-            grow(false, grass_seed(patch.cell));
-        }
-        // The far swaths: tall biomes only, seeded apart from the lawn so the two don't grow twin
-        // blades where they overlap.
-        if (distance < budget.tall_far) {
-            grow(true, grass_seed(patch.cell) ^ 0x7a11'f1e1U);
+                             .seed = grass_seed(patch.cell),
+                             .nearest = distance});
         }
     }
     return draws;
