@@ -91,6 +91,13 @@ std::vector<Message> examples() {
             Refused{.reason = Refusal::Version, .version = 7, .detail = "too new"},
             Refused{.reason = Refusal::Silent, .version = version, .detail = ""},
             Moved{.sequence = 0xFFFF'FFFF, .corrections = 3, .at = far_out},
+            Moved{.sequence = 2,
+                  .corrections = 0,
+                  .at = far_out,
+                  .stance = Stance::Flying,
+                  .facing = {.heading = 0xFFFF, .pitch = -16'384}},
+            Placed{.at = far_out, .stance = Stance::Walking, .facing = {.heading = 1, .pitch = 7}},
+            Placed{.at = far_out, .stance = Stance::Flying, .facing = {}},
             Corrected{.count = 1, .at = far_out},
             Ack{.tick = 0xFFFF'FFF0},
             whole(),
@@ -167,7 +174,9 @@ TEST_CASE("a hurry or a clock to no time at all is refused", "[protocol]") {
 }
 
 TEST_CASE("unknown kinds and refusals, and tokens too long, are refused", "[protocol]") {
-    CHECK(decode(bytes({13, 0})).error().code == ErrorCode::Unsupported);
+    CHECK(decode(bytes({14, 0})).error().code == ErrorCode::Unsupported);
+    // A placing at the centre in a stance after flying.
+    CHECK(decode(bytes({13, 0, 0, 0, 0, 2, 0, 0, 0, 0})).error().code == ErrorCode::Unsupported);
     CHECK(decode(bytes({3, 0, 1, 0, 0, 0, 200, 0, 0})).error().code == ErrorCode::Parse);
     // A hello of this version with no token, but saying it has one too long.
     std::vector<std::byte> long_token = encode(Hello{});

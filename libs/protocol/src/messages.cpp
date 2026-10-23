@@ -32,6 +32,7 @@ enum class Kind : std::uint16_t {
     Hurry = 10,
     Clock = 11,
     Woodlands = 12,
+    Placed = 13,
 }; // NOLINT(performance-enum-size)
 
 // Which of an entity's changes follow its id in a snapshot.
@@ -227,6 +228,33 @@ void write_position(ByteWriter& out, Millimetres at) {
     for (std::size_t axis = 0; axis < 3; ++axis) {
         out.write_signed(at[axis]);
     }
+}
+
+// A stance and facing, as a move or a placing ends with.
+void write_stance(ByteWriter& out, Stance stance, Facing facing) {
+    out.write(static_cast<std::uint8_t>(stance));
+    out.write(facing.heading);
+    out.write(static_cast<std::uint16_t>(facing.pitch));
+}
+
+struct StanceAndFacing {
+    Stance stance = Stance::Walking;
+    Facing facing{};
+};
+
+[[nodiscard]] Result<StanceAndFacing> read_stance(ByteReader& in, std::string_view what) {
+    const auto stance = read<std::uint8_t>(in, what);
+    const auto heading = read<std::uint16_t>(in, what);
+    const auto pitch = read<std::uint16_t>(in, what);
+    if (!stance || !heading || !pitch) {
+        return make_error(ErrorCode::Parse, std::format("{} cut short", what));
+    }
+    if (*stance > static_cast<std::uint8_t>(Stance::Flying)) {
+        return make_error(ErrorCode::Unsupported, std::format("{} of stance {}", what, *stance));
+    }
+    return StanceAndFacing{
+        .stance = static_cast<Stance>(*stance),
+        .facing = {.heading = *heading, .pitch = static_cast<std::int16_t>(*pitch)}};
 }
 
 // A list's length, which can't be more than the bytes left, as each entry takes one at least.
@@ -632,6 +660,11 @@ std::vector<std::byte> encode(const Message& message) {
                 out.write(body.sequence);
                 out.write(body.corrections);
                 write_position(out, body.at);
+                write_stance(out, body.stance, body.facing);
+            } else if constexpr (std::is_same_v<Body, Placed>) {
+                out.write(static_cast<std::uint16_t>(Kind::Placed));
+                write_position(out, body.at);
+                write_stance(out, body.stance, body.facing);
             } else if constexpr (std::is_same_v<Body, Ack>) {
                 out.write(static_cast<std::uint16_t>(Kind::Ack));
                 out.write(body.tick);
@@ -698,7 +731,26 @@ Result<Message> decode(std::span<const std::byte> bytes) {
         if (!sequence || !corrections || !at) {
             return make_error(ErrorCode::Parse, "a move cut short");
         }
-        return finished(in, Moved{.sequence = *sequence, .corrections = *corrections, .at = *at});
+        const auto stance = read_stance(in, "a move");
+        if (!stance) {
+            return std::unexpected(stance.error());
+        }
+        return finished(in, Moved{.sequence = *sequence,
+                                  .corrections = *corrections,
+                                  .at = *at,
+                                  .stance = stance->stance,
+                                  .facing = stance->facing});
+    }
+    case Kind::Placed: {
+        const auto at = read_position(in, "a placing");
+        if (!at) {
+            return std::unexpected(at.error());
+        }
+        const auto stance = read_stance(in, "a placing");
+        if (!stance) {
+            return std::unexpected(stance.error());
+        }
+        return finished(in, Placed{.at = *at, .stance = stance->stance, .facing = stance->facing});
     }
     case Kind::Corrected: {
         const auto count = read<std::uint32_t>(in, "a correction");

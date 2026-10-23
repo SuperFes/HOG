@@ -18,7 +18,7 @@
 namespace hog::protocol {
 
 // Raised whenever any message changes; the two sides must speak the same one.
-inline constexpr std::uint32_t version = 11;
+inline constexpr std::uint32_t version = 12;
 // The longest connect token a client may present; more is a broken or hostile client.
 inline constexpr std::size_t most_token = 1'024;
 // The longest line of text a refusal carries.
@@ -74,13 +74,27 @@ struct Refused {
     friend bool operator==(const Refused&, const Refused&) = default;
 };
 
-// Client to server: where the client has moved the player's feet to. Moves count up from 1, so
-// one overtaken on the way is left out; `corrections` is how many Corrected the client has taken,
-// so moves it made before the newest reached it are left out too.
+// How a player gets about: on foot, or flying freely to look at the world.
+enum class Stance : std::uint8_t { Walking, Flying };
+
+// Which way a player looks, in 65536ths of a turn: `heading` from north towards east along the
+// ground, and `pitch` up from the horizon.
+struct Facing {
+    std::uint16_t heading = 0;
+    std::int16_t pitch = 0;
+
+    friend bool operator==(const Facing&, const Facing&) = default;
+};
+
+// Client to server: where the client has moved the player's feet to, or their eye while flying.
+// Moves count up from 1, so one overtaken on the way is left out; `corrections` is how many
+// Corrected the client has taken, so moves it made before the newest reached it are left out too.
 struct Moved {
     std::uint32_t sequence = 0;
     std::uint32_t corrections = 0;
     Millimetres at{0};
+    Stance stance = Stance::Walking;
+    Facing facing{};
 
     friend bool operator==(const Moved&, const Moved&) = default;
 };
@@ -92,6 +106,16 @@ struct Corrected {
     Millimetres at{0};
 
     friend bool operator==(const Corrected&, const Corrected&) = default;
+};
+
+// Server to client, on joining: where the player was when they last left, and how. A walker is
+// stood on the ground under `at`, which may have changed since.
+struct Placed {
+    Millimetres at{0};
+    Stance stance = Stance::Walking;
+    Facing facing{};
+
+    friend bool operator==(const Placed&, const Placed&) = default;
 };
 
 // Client to server: the newest snapshot it has applied, for the next to be coded against.
@@ -236,12 +260,12 @@ struct Clock {
 [[nodiscard]] CellWoodland as_sent(const CellWoodland& cell) noexcept;
 
 using Message = std::variant<Hello, Welcome, Refused, Moved, Ack, Snapshot, Corrected, Weather,
-                             Said, Hurry, Clock, Woodlands>;
+                             Said, Hurry, Clock, Woodlands, Placed>;
 
 [[nodiscard]] std::vector<std::byte> encode(const Message& message);
 // Fails on an unknown kind, a message cut short or with bytes left over, one too long, a snapshot
-// out of order, weather or woods too fine or with too few or many cells, or chat with control
-// characters.
+// out of order, weather or woods too fine or with too few or many cells, chat with control
+// characters, or a stance it doesn't know.
 [[nodiscard]] Result<Message> decode(std::span<const std::byte> bytes);
 
 // A refusal as a person reads it, on a client speaking `own` version.
