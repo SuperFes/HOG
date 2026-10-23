@@ -18,7 +18,7 @@ using sqlite::Statement;
 
 // Step N takes the schema from version N to N + 1. Steps are only ever appended, so every
 // database ever written can be brought up to date.
-constexpr std::array<std::string_view, 2> migrations{
+constexpr std::array<std::string_view, 3> migrations{
     R"sql(
 CREATE TABLE changes (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -38,6 +38,17 @@ CREATE TABLE snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     time INTEGER NOT NULL,
     data BLOB NOT NULL
+);
+)sql",
+    R"sql(
+CREATE TABLE players (
+    account INTEGER PRIMARY KEY,
+    x INTEGER NOT NULL,
+    y INTEGER NOT NULL,
+    z INTEGER NOT NULL,
+    flying INTEGER NOT NULL,
+    heading INTEGER NOT NULL,
+    pitch INTEGER NOT NULL
 );
 )sql",
 };

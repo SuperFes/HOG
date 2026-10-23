@@ -16,6 +16,7 @@ target_link_libraries(sqlite3 PUBLIC Threads::Threads)
 add_library(hog_store
     src/database.cpp
     src/sqlite_change_store.cpp
+    src/sqlite_player_store.cpp
     src/sqlite_snapshot_store.cpp)
 add_library(hog::store ALIAS hog_store)
 
@@ -26,6 +27,7 @@ hog_target_defaults(hog_store)
 hog_add_tests(hog_store
     tests/database_tests.cpp
     tests/sqlite_change_store_tests.cpp
+    tests/sqlite_player_store_tests.cpp
     tests/sqlite_snapshot_store_tests.cpp)
 
 if(TARGET hog_store_tests)

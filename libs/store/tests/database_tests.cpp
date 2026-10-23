@@ -25,7 +25,7 @@ TEST_CASE("a new database starts at the newest schema", "[store][database]") {
     REQUIRE(open_database(file.path()));
     CHECK(query(file.path(), "PRAGMA user_version") == schema_version());
     CHECK(query(file.path(), "SELECT count(*) FROM sqlite_schema WHERE name IN "
-                             "('changes', 'snapshots')") == 2);
+                             "('changes', 'snapshots', 'players')") == 3);
     // Opening again changes nothing.
     REQUIRE(open_database(file.path()));
     CHECK(query(file.path(), "PRAGMA user_version") == schema_version());
