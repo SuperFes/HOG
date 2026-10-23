@@ -55,14 +55,22 @@ float noise(float3 at, int cells, uint octave) {
     return lerp(along_y.x, along_y.y, eased.z);
 }
 
-// How hard the gusts blow at a point given from the eye, 0 in a lull to 1 in the heart of a gust,
-// with the field lying `anchor` from the eye.
-public float gust_at(float3 from_eye, float3 anchor) {
+// The gusts' field at a point given from the eye, with the field lying `anchor` from the eye:
+// smooth, about -1 to 1, rising into the gusts.
+public float gust_field(float3 from_eye, float3 anchor) {
     const float3 at = (from_eye + anchor) / period;
     // Lattices of uneven sizes, so their cells never line up into a grid; about 41, 17 and 8 m.
-    const float broad = (0.65 * noise(at * 50.0, 50, 0u)) + (0.3 * noise(at * 117.0, 117, 1u)) +
-                        (0.15 * noise(at * 263.0, 263, 2u));
-    return smoothstep(-0.12, 0.22, broad);
+    return (0.65 * noise(at * 50.0, 50, 0u)) + (0.3 * noise(at * 117.0, 117, 1u)) +
+           (0.15 * noise(at * 263.0, 263, 2u));
+}
+
+// How hard the gusts blow where their field is `field`, 0 in a lull to 1 in the heart of a gust.
+public float gust_of(float field) {
+    return smoothstep(-0.12, 0.22, field);
+}
+
+public float gust_at(float3 from_eye, float3 anchor) {
+    return gust_of(gust_field(from_eye, anchor));
 }
 
 // How fast the wind blows at `gust`, as gust_at has it, where it blows `speed` on the whole:
@@ -76,8 +84,30 @@ public float laid_over(float speed) {
     return (speed * speed) / ((speed * speed) + 36.0);
 }
 
+// How far either way grass sways in wind of `speed`, as a share of its height: most in a breeze,
+// little once the wind holds it down.
+public float swaying(float speed) {
+    return 0.3 * speed / (1.0 + (0.08 * speed * speed));
+}
+
+// Where in its sway grass is `seconds` in, where the gusts' field is `field`, in wind of `speed`
+// on the whole. As fast everywhere, so blades side by side never drift apart as time goes on;
+// the field sets them apart, smoothly, so waves some 20 m long run through the grass as it
+// drifts downwind.
+public float sway_phase(float seconds, float speed, float field) {
+    return (seconds * (1.4 + (0.3 * speed))) + (6.0 * field);
+}
+
 // How much further grass is laid over at `gust` than by wind of `speed` on the whole: catching
 // more light on its flanks in a gust, less in a lull.
-public float gust_sheen(float speed, float gust) {
+public float gust_laid(float speed, float gust) {
     return laid_over(gusting(speed, gust)) - laid_over(speed);
+}
+
+// As gust_laid where the gusts' field is `field`, and swaying with it `seconds` in, as a field of
+// grass seen whole; its sway's share `seen`, less where waves are too fine to make out.
+public float gust_sheen(float speed, float field, float seconds, float seen) {
+    const float gust = gust_of(field);
+    return gust_laid(speed, gust) +
+           (seen * swaying(gusting(speed, gust)) * sin(sway_phase(seconds, speed, field)));
 }

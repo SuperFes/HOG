@@ -485,6 +485,7 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     drifted_ = render::within_period(drifted_ + (drift * shot.seconds));
     gusts_drifted_ += render::gust_drift(drift * surface_wind, shot.bend.up) * shot.seconds;
     falling_for_ += shot.seconds;
+    swaying_for_ += shot.seconds;
     const bool new_weather = shot.forecast != nullptr && shot.forecast->known() &&
                              weather_taken_ != shot.forecast->received();
     const bool cloudy = shot.forecast != nullptr && shot.forecast->known();
@@ -495,6 +496,7 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     render::SkyView sky = sky_view(shot, shade);
     sky.gusts_drifted = gusts_drifted_;
     sky.gusts_wind = glm::length(drift * surface_wind);
+    sky.swaying_for = swaying_for_;
     sky.mist =
         render::mist_through(static_cast<double>(here.humidity), static_cast<double>(here.fog_top),
                              shot.bend.eye_height, sun_mu);
@@ -626,7 +628,6 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                                  .sea = ocean_.bindings(frame.slot)});
                   return deep;
               });
-    swaying_for_ += shot.seconds;
     if (grass_on_) {
         grow_vegetation(graph, frame, shot, streamed.drawn, through_air, drawn, through,
                         drift * surface_wind);

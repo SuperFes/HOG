@@ -336,6 +336,8 @@ public struct Lighting {
     // xyz where the gusts' field lies from the eye, as gusts.slang reads it, w the wind's speed
     // near the ground on the whole.
     public float4 gusts;
+    // x the seconds grass has swayed for, as grass.slang's.
+    public float4 swaying;
 };
 
 // Of the light falling on any cloud over a place, what reaches it, as render::CloudShade has it.

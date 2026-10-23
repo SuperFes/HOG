@@ -728,6 +728,7 @@ struct Seen {
     Biome biome = Biome::Grassland;
     double wind = 0.0; // m/s near the ground, lit through the air
     DVec3 gusts_drifted{0.0};
+    double seconds = 0.0; // the grass has swayed for
 };
 
 std::vector<std::uint8_t> from_above(hog::render::Device& device, const Seen& seen) {
@@ -773,7 +774,8 @@ std::vector<std::uint8_t> from_above(hog::render::Device& device, const Seen& se
                                         .sky_light = model.sky_irradiance(seen.height * scale, sun),
                                         .daylight = seen.daylight,
                                         .gusts_drifted = seen.gusts_drifted,
-                                        .gusts_wind = seen.wind};
+                                        .gusts_wind = seen.wind,
+                                        .swaying_for = seen.seconds};
     return draw(device, *terrain, pool, draws, view, [&](VkCommandBuffer commands) {
         CHECK(sky->record_frame(commands, extent, 0, *atmosphere, sky_view));
     });
@@ -841,7 +843,7 @@ TEST_CASE("woods beyond the stamps darken the ground they stand on, and only it"
     CHECK(device->validation_errors() == 0);
 }
 
-TEST_CASE("gusts cross far meadows as faint patches of light, and leave bare ground be",
+TEST_CASE("gusts cross far meadows as patches of light swaying in waves, and leave bare ground be",
           "[render][gpu]") {
     const auto device = test_device();
     const Seen still{.woods = {}, .height = 300.0, .canopy = 0.0, .air = true};
@@ -854,18 +856,24 @@ TEST_CASE("gusts cross far meadows as faint patches of light, and leave bare gro
     const Apart lit = apart(before, from_above(*device, still));
     INFO("drifting apart " << drifted.mean << " on the whole, " << drifted.most
                            << " at most; from still air " << lit.mean << ", " << lit.most);
-    CHECK(drifted.mean > 1.5);
-    CHECK(drifted.most < 16);
-    CHECK(lit.most < 16);
+    CHECK(drifted.mean > 3.0);
+    CHECK(drifted.most < 48);
+    CHECK(lit.most < 48);
+
+    // And sways as time goes on.
+    blowing.seconds = 0.7;
+    CHECK(apart(after, from_above(*device, blowing)).mean > 2.0);
 
     Seen calm = still;
     calm.gusts_drifted = blowing.gusts_drifted;
+    calm.seconds = blowing.seconds;
     CHECK(from_above(*device, calm) == from_above(*device, still));
     Seen beach = still;
     beach.biome = Biome::Beach;
     const auto bare = from_above(*device, beach);
     beach.wind = 6.0;
     beach.gusts_drifted = blowing.gusts_drifted;
+    beach.seconds = blowing.seconds;
     CHECK(from_above(*device, beach) == bare);
     CHECK(device->validation_errors() == 0);
 }

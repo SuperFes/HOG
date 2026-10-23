@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <numbers>
 #include <span>
 #include <vector>
 
@@ -43,26 +44,29 @@ struct Ground {
 struct Gusting {
     double gust = 0.0;  // how hard the gusts blow, 0 to 1
     double speed = 0.0; // m/s
-    double sheen = 0.0; // how much further grass is laid over than on the whole
+    double laid = 0.0;  // how much further grass is laid over than on the whole
+    double sheen = 0.0; // and swaying with it
 };
 
 // How hard the gusts blow at each point, how fast the wind blows there and how it lays grass over,
-// seen from `eye` with the field drifted `drifted`, the wind blowing `speed` on the whole.
+// seen from `eye` with the field drifted `drifted`, the wind blowing `speed` on the whole and
+// the grass swayed for `seconds`.
 std::vector<Gusting> gusting_at(hog::render::Device& device, const WorldPosition& eye,
-                                DVec3 drifted, std::span<const WorldPosition> points,
-                                double speed) {
+                                DVec3 drifted, std::span<const WorldPosition> points, double speed,
+                                double seconds = 0.0) {
     const glm::vec3 anchor{gust_anchor(eye, drifted)};
     std::vector<Probed> asked;
     for (const WorldPosition& point : points) {
         const glm::vec3 from_eye{point - eye};
         asked.push_back({from_eye.x, from_eye.y, from_eye.z, static_cast<float>(speed)});
-        asked.push_back({anchor.x, anchor.y, anchor.z, 0.0F});
+        asked.push_back({anchor.x, anchor.y, anchor.z, static_cast<float>(seconds)});
     }
     std::vector<Gusting> gusting;
     for (const Probed& found : probed(device, hog::shaders::gusts_probe, asked, points.size())) {
         gusting.push_back({.gust = static_cast<double>(found[0]),
                            .speed = static_cast<double>(found[1]),
-                           .sheen = static_cast<double>(found[2])});
+                           .laid = static_cast<double>(found[2]),
+                           .sheen = static_cast<double>(found[3])});
     }
     return gusting;
 }
@@ -245,14 +249,59 @@ TEST_CASE("grass is laid further over in the gusts and stands up in the lulls", 
     const std::vector<WorldPosition> points = square(ground, 600.0, 3.0);
     for (const Gusting& found : gusting_at(*device, eye, DVec3{0.0}, points, 6.0)) {
         if (found.gust < 0.1) {
-            CHECK(found.sheen < -0.15);
+            CHECK(found.laid < -0.15);
         }
         if (found.gust > 0.9) {
-            CHECK(found.sheen > 0.1);
+            CHECK(found.laid > 0.1);
         }
     }
-    for (const Gusting& found : gusting_at(*device, eye, DVec3{0.0}, points, 0.0)) {
+    for (const Gusting& found : gusting_at(*device, eye, DVec3{0.0}, points, 0.0, 3.0)) {
+        CHECK(found.laid == 0.0);
         CHECK(found.sheen == 0.0);
     }
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("grass sways about how far the gusts lay it over, in waves across the field",
+          "[render][gpu]") {
+    const auto device = test_device();
+    const Ground ground;
+    const WorldPosition eye = ground.here + (ground.up * 1.7);
+    const std::vector<WorldPosition> points = square(ground, 120.0, 4.0);
+    constexpr double speed = 6.0;
+    // A whole sway and more, in even steps through it.
+    constexpr double turning = 1.4 + (0.3 * speed);
+    constexpr int steps = 16;
+    std::vector<double> mean(points.size(), 0.0);
+    std::vector<double> least(points.size(), 1.0);
+    std::vector<double> most(points.size(), -1.0);
+    std::vector<Gusting> first;
+    for (int step = 0; step < steps; ++step) {
+        const double seconds = 5.0 + (step * 2.0 * std::numbers::pi / turning / steps);
+        const std::vector<Gusting> found =
+            gusting_at(*device, eye, DVec3{0.0}, points, speed, seconds);
+        for (std::size_t at = 0; at < points.size(); ++at) {
+            mean[at] += found[at].sheen / steps;
+            least[at] = std::min(least[at], found[at].sheen);
+            most[at] = std::max(most[at], found[at].sheen);
+        }
+        if (step == 0) {
+            first = found;
+        }
+    }
+    double swing = 0.0;
+    std::vector<double> sheens;
+    std::vector<double> laid;
+    for (std::size_t at = 0; at < points.size(); ++at) {
+        CHECK_THAT(mean[at], WithinAbs(first[at].laid, 0.01));
+        swing += (most[at] - least[at]) / static_cast<double>(points.size());
+        sheens.push_back(first[at].sheen);
+        laid.push_back(first[at].laid);
+    }
+    // At any moment the field isn't swaying all one way, but in waves.
+    INFO("swinging " << swing << " on the whole");
+    CHECK(swing > 0.4);
+    CHECK(mean_difference(sheens, laid) > 0.1);
+    CHECK(std::ranges::minmax(sheens).max - std::ranges::minmax(sheens).min > 0.6);
     CHECK(device->validation_errors() == 0);
 }

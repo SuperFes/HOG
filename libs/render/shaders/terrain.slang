@@ -355,12 +355,17 @@ float3 albedo(Ground ground, float3 normal) {
     return colour;
 }
 
-// How much brighter the grass a gust lays over shows than the field on the whole, at most.
-static const float gust_brightening = 0.25;
+// How much brighter grass bent further along the wind shows than the field on the whole, per
+// share of its height.
+static const float gust_brightening = 0.4;
 
-// Grass laid over by a gust catches the light on its flanks, so gusts cross meadows as faint
-// patches of light, beyond where blades are drawn as well as beneath them. `gusts` as Lighting's.
-float gust_lit(Ground ground, float4 gusts) {
+// Grass bent over by a gust or as it sways catches the light on its flanks, so gusts cross
+// meadows as patches of light and waves run through them, beyond where blades are drawn as well
+// as beneath them; the more grass, the plainer. `gusts` as Lighting's, `seconds` its swaying's x.
+float gust_lit(Ground ground, float4 gusts, float seconds) {
+    // Waves average away within a pixel spanning more than a few metres, rather than flicker.
+    const float footprint = max(length(ddx(ground.from_eye)), length(ddy(ground.from_eye)));
+    const float seen = 1.0 - smoothstep(2.0, 8.0, footprint);
     const float wind = gusts.w;
     if (wind < 1e-3) {
         return 1.0;
@@ -373,8 +378,8 @@ float gust_lit(Ground ground, float4 gusts) {
     if (waving < least_biome) {
         return 1.0;
     }
-    const float gust = gust_at(ground.from_eye, gusts.xyz);
-    return 1.0 + (gust_brightening * waving * gust_sheen(wind, gust));
+    const float field = gust_field(ground.from_eye, gusts.xyz);
+    return 1.0 + (gust_brightening * waving * gust_sheen(wind, field, seconds, seen));
 }
 
 // Ground a fire left black: charcoal and ash, greening back as the scar fades.
@@ -480,11 +485,11 @@ struct Shaded {
 };
 
 // The ground's colour lit by `on_ground` facing its normal and `on_water` facing up, each times
-// pi, its grass laid over by `gusts`, with water over it where it lies below the sea as high as it
-// stands, unless the sea's pass lays it, `laid`.
+// pi, its grass bent by `gusts` swaying `seconds` in, with water over it where it lies below the
+// sea as high as it stands, unless the sea's pass lays it, `laid`.
 float3 shaded(Ground ground, float3 normal, float3 on_ground, float3 on_water, float4 year,
-              float4 gusts, bool laid) {
-    const float3 grown = albedo(ground, normal) * gust_lit(ground, gusts);
+              float4 gusts, float seconds, bool laid) {
+    const float3 grown = albedo(ground, normal) * gust_lit(ground, gusts, seconds);
     const float3 bare = wooded(ground, scorched(ground, grown), year) *
                         lerp(1.0, wet_darkening, wetness(ground));
     const float3 lit_ground = lerp(bare, float3(stranded_albedo), stranded_at(ground)) * on_ground;
@@ -520,7 +525,9 @@ Shaded fragment_main(Ground ground) {
     const float3 on_water = night + ((1.0 - night) * saturate(dot(up_at(ground), sun)));
     Shaded result;
     result.colour =
-        float4(saturate(shaded(ground, normal, on_ground, on_water, midsummer, float4(0.0), false)), 1.0);
+        float4(saturate(shaded(ground, normal, on_ground, on_water, midsummer, float4(0.0), 0.0,
+                               false)),
+               1.0);
     result.depth = depth_of(ground);
     return result;
 }
@@ -552,7 +559,7 @@ Shaded fragment_air(Ground ground) {
     }
     float3 radiance =
         shaded(ground, normal, on_ground, on_water, lighting.year, lighting.gusts,
-               sea_lays_water(lighting)) /
+               lighting.swaying.x, sea_lays_water(lighting)) /
         pi;
     if (far > 0.0) {
         // Too far to see into, a lake is its deep water's colour, mirroring the sky and the sun
