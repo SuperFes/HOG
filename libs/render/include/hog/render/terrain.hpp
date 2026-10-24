@@ -153,7 +153,7 @@ private:
     Sampler sampler_;
     // For ground drawn without the sea's own.
     CalmSea calm_;
-    double period_ = 0.0; // metres over which the tiling repeats
+    double period_ = 0.0; // metres over which the materials' coordinates repeat
     bool air_ = false;
     std::array<Range, terrain::stitchings> stitchings_{};
 };

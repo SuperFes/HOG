@@ -127,6 +127,9 @@ struct Settings {
 
 // The far tile, as many times the near one's size.
 constexpr double far_tiles = 8.0;
+// Far tiles the materials' coordinates run over before they repeat: far enough for each part of the
+// ground to wear its tiles as it does nowhere near it, and near enough to keep their precision.
+constexpr double far_tiles_held = 64.0;
 
 // Each mip of every material in turn, the biomes' layers one after another.
 Result<std::vector<std::byte>> material_texels(std::span<const terrain::MaterialImage> materials) {
@@ -311,9 +314,10 @@ Result<Terrain> Terrain::create(Device& device, VkFormat colour_format, VkFormat
     }
     drawn.sampler_ = std::move(sampler).value();
 
-    drawn.period_ = look.tile * far_tiles;
-    Settings settings{.tiling = {static_cast<float>(look.tile), static_cast<float>(drawn.period_),
-                                 look.sea ? 1.0F : 0.0F, 0.0F},
+    drawn.period_ = look.tile * far_tiles * far_tiles_held;
+    Settings settings{.tiling = {static_cast<float>(look.tile),
+                                 static_cast<float>(look.tile * far_tiles), look.sea ? 1.0F : 0.0F,
+                                 static_cast<float>(drawn.period_)},
                       .means = {},
                       .canopy = {static_cast<float>(look.canopy),
                                  look.air ? static_cast<float>(look.grass) : 0.0F, 0.0F, 0.0F},

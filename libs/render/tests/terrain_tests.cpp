@@ -246,6 +246,17 @@ std::vector<hog::terrain::MaterialImage> grey_materials() {
             hog::terrain::material_image({.colour = DVec3{0.5}}, 64)};
 }
 
+std::vector<hog::terrain::MaterialImage> patterned_materials() {
+    return {static_cast<std::size_t>(hog::planet::biome_count),
+            hog::terrain::material_image({.colour = DVec3{0.4},
+                                          .accent = DVec3{0.8},
+                                          .accent_share = 0.3,
+                                          .grain = 0.2,
+                                          .mottle = 0.3,
+                                          .seed = 7},
+                                         64)};
+}
+
 DVec3 towards(double elevation) {
     const double radians = elevation * std::numbers::pi / 180.0;
     return {std::cos(radians), 0.0, std::sin(radians)};
@@ -525,8 +536,9 @@ TEST_CASE("up close the ground shows its material, and from afar what it average
     const auto close = one_patch(*device, {}, {0.0, 0.0, 1.0}, grainy_materials());
     CHECK(spread(close) > 20);
     CHECK(spread(one_patch(*device, {})) == 0);
-    // Wherever on the planet it's seen from.
-    CHECK(one_patch(*device, {6.4e6, -3.2e6, 1.6e6}, {0.0, 0.0, 1.0}, grainy_materials()) == close);
+    // Wherever on the planet it's seen from, a whole number of the materials' 2048 m period off.
+    CHECK(one_patch(*device, {3'125.0 * 2'048.0, -1'562.0 * 2'048.0, 781.0 * 2'048.0},
+                    {0.0, 0.0, 1.0}, grainy_materials()) == close);
 
     // Two kilometres across, from high enough that a pixel spans tens of tiles.
     const auto far = [&](const std::vector<hog::terrain::MaterialImage>& materials) {
@@ -725,6 +737,8 @@ struct Seen {
     double canopy = 900.0;
     double grass = 0.0; // metres the grass reaches, standing up from the ground
     bool air = false;
+    bool patterned = false; // the ground's materials patched and mottled rather than plain grey
+    DVec3 away{0.0};        // metres the eye and the ground are moved together
     hog::flora::Daylight daylight{};
     Biome biome = Biome::Grassland;
     double wind = 0.0; // m/s near the ground, lit through the air
@@ -734,12 +748,12 @@ struct Seen {
 
 std::vector<std::uint8_t> from_above(hog::render::Device& device, const Seen& seen) {
     constexpr double small_planet = 115'000.0;
-    auto terrain =
-        hog::render::Terrain::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT,
-                                     {.materials = grey_materials(),
-                                      .air = seen.air,
-                                      .canopy = seen.canopy,
-                                      .grass = seen.grass});
+    auto terrain = hog::render::Terrain::create(
+        device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT,
+        {.materials = seen.patterned ? patterned_materials() : grey_materials(),
+         .air = seen.air,
+         .canopy = seen.canopy,
+         .grass = seen.grass});
     REQUIRE(terrain);
     auto pool = make_pool(device, {});
     const std::uint32_t slot = pool.acquire().value_or(1);
@@ -753,7 +767,7 @@ std::vector<std::uint8_t> from_above(hog::render::Device& device, const Seen& se
     }
     REQUIRE(pool.stage(0, slot, patch));
 
-    const DVec3 top{0.0, 0.0, small_planet};
+    const DVec3 top = DVec3{0.0, 0.0, small_planet} + seen.away;
     const DVec3 sun{0.0, 0.0, 1.0};
     hog::render::TerrainView view = looking_down(top, seen.height, sun);
     view.bend = {.up = {0.0, 0.0, 1.0},
@@ -845,6 +859,23 @@ TEST_CASE("woods beyond the stamps darken the ground they stand on, and only it"
     CHECK(mean_of(thin, 1, true) > mean_of(woods, 1, true) + 5.0);
     CHECK(mean_of(thin, 1, true) < mean_of(none, 1, true));
     CHECK(from_above(*device, {.woods = {}}) == none);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("the ground's far tiles are shifted part by part, so they never repeat in rows",
+          "[render][gpu]") {
+    const auto device = test_device();
+    // Looking down on a few hundred metres of ground, then on the same moved along by whole far
+    // tiles: where each tile wore the same, the two would be drawn alike.
+    const Seen here{.woods = {}, .height = 300.0, .canopy = 0.0, .patterned = true};
+    const auto seen = from_above(*device, here);
+    Seen tiles_on = here;
+    tiles_on.away = DVec3{32.0 * 5.0, 32.0 * 3.0, 0.0};
+    const Apart moved = apart(seen, from_above(*device, tiles_on));
+    INFO("moved along whole tiles, apart by " << moved.mean << " on the whole");
+    CHECK(moved.mean > 2.0);
+    // Yet the same ground looks the same each time it's drawn.
+    CHECK(from_above(*device, here) == seen);
     CHECK(device->validation_errors() == 0);
 }
 

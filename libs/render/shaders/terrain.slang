@@ -14,7 +14,8 @@ struct Push {
     // xyz towards the sun, w how bright ground facing away from it stays.
     float4 sun;
     // xyz up through the eye, w its height above sea level; then the planet's radius and the
-    // faked one drawing bends it onto, and x and y of where the eye lies in the materials' tiling.
+    // faked one drawing bends it onto, and x and y of where the eye lies in the materials'
+    // coordinates.
     float4 bend_up;
     float4 bend_radii;
     // xyz the patch's origin from the eye, in metres; w z of where the eye lies in the tiling.
@@ -27,7 +28,8 @@ static const uint biome_count = 14;
 static const uint genus_count = 4;
 
 struct Settings {
-    // Metres a material spans near and far, and 1 if ground below sea level is seen through water.
+    // Metres a material spans near and far, 1 if ground below sea level is seen through water, and
+    // metres the materials' coordinates repeat over, a whole number of far tiles.
     float4 tiling;
     // Each biome's: rgb what its material averages to, w how much is grass waving in the wind.
     float4 means[biome_count];
@@ -89,6 +91,7 @@ struct Ground {
     float4 woods;
     float palms;
     float scar;
+    float tile_part; // as tile_part_at has it
 };
 
 // Ground no higher above sea level than this, by the metre it lies from the eye, is too near level
@@ -310,7 +313,35 @@ Ground grounded(Vertex vertex) {
     return ground;
 }
 
+// Parts of the ground this many metres across wear their far tiles shifted their own way.
+static const float tile_parts = 48.0;
+
+// The `n`th way a part of the ground shifts its far tiles: anywhere across one.
+float2 tile_shift(uint n) {
+    uint at = n * 0x9e3779b9u;
+    at ^= at >> 16;
+    at *= 0x7feb352du;
+    at ^= at >> 15;
+    at *= 0x846ca68bu;
+    at ^= at >> 16;
+    return float2(float(at & 0xffffu), float(at >> 16)) / 65536.0;
+}
+
+// Where the materials' coordinates lie, `from_eye`.
+float3 tiled_at(float3 from_eye) {
+    return from_eye + float3(push.bend_radii.zw, push.origin.w);
+}
+
+// Which part of the ground `from_eye` lies in, smoothly: the whole number the part, the fraction
+// how far into the next. Slow to change, so worked out at the corners and blended across.
+float tile_part_at(float3 from_eye) {
+    const float held = settings.tiling.w;
+    const int parts = max(int(held / tile_parts), 1);
+    return 3.0 * (1.0 + periodic_noise(tiled_at(from_eye) * (float(parts) / held), parts, 9u));
+}
+
 Ground placed(Ground ground, float3 from_eye) {
+    ground.tile_part = tile_part_at(from_eye);
     const float3 drawn = bent(from_eye, push.bend_up, push.bend_radii.xy);
     ground.position = mul(push.clip_from_eye, float4(drawn, 1.0));
     ground.drawn = drawn;
@@ -424,11 +455,17 @@ float3 up_at(Ground ground) {
 }
 
 // The ground's colour from its biomes' materials, each projected along the planet's axes as
-// plane_shares has it, and mixed at two scales.
+// plane_shares has it, and mixed at two scales. Each part of the ground wears its far tiles
+// shifted its own way, blending into the next part's, so they never line up in rows.
 float3 albedo(Ground ground, float3 normal) {
-    const float3 tiled = ground.from_eye + float3(push.bend_radii.zw, push.origin.w);
+    const float3 tiled = tiled_at(ground.from_eye);
     const float3 planes = plane_shares(up_at(ground), normal);
     const float2 across[3] = { tiled.yz, tiled.zx, tiled.xy };
+    const float part = ground.tile_part;
+    const float which = floor(part);
+    const float2 shift = tile_shift(uint(which));
+    const float2 next = tile_shift(uint(which) + 1u);
+    const float blend = smoothstep(0.4, 0.6, part - which);
 
     // Gradients taken while every fragment is still running, as sampling skips biomes and planes.
     float2 at[6];
@@ -460,8 +497,16 @@ float3 albedo(Ground ground, float3 normal) {
             const uint index = plane * 2;
             near += planes[plane] * materials.SampleGrad(float3(at[index], biome), along_x[index],
                                                          along_y[index]).rgb;
-            far += planes[plane] * materials.SampleGrad(float3(at[index + 1], biome),
-                                                        along_x[index + 1], along_y[index + 1]).rgb;
+            const float2 far_at = at[index + 1];
+            float3 tiles = materials.SampleGrad(float3(far_at + shift, biome), along_x[index + 1],
+                                                along_y[index + 1]).rgb;
+            if (blend > 0.0) {
+                tiles = lerp(tiles,
+                             materials.SampleGrad(float3(far_at + next, biome), along_x[index + 1],
+                                                  along_y[index + 1]).rgb,
+                             blend);
+            }
+            far += planes[plane] * tiles;
         }
         // Each scale strays from the mean in its own way, so together they still average to it.
         // Only where grass stands up from the ground at all.
