@@ -1,4 +1,5 @@
 #include <hog/core/assert.hpp>
+#include <hog/core/hash.hpp>
 #include <hog/mapgen/render.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tangent_frame.hpp>
@@ -10,6 +11,7 @@
 #include <format>
 #include <fstream>
 #include <numbers>
+#include <optional>
 #include <span>
 
 namespace hog::mapgen {
@@ -119,6 +121,15 @@ constexpr std::array<Rgb, planet::rock_count> rock_colours{{
     {95, 120, 70},   // peridotite
     {240, 90, 20},   // magma
 }};
+
+// Until plates shape the ground, they are grown here as the planet would grow them.
+constexpr int plate_level = 7;
+constexpr int plate_count = 10;
+// Metres per million years at which a boundary shows in its full colour.
+constexpr double vivid_rate = 40'000.0;
+constexpr Rgb closing_colour{220, 40, 30};
+constexpr Rgb parting_colour{40, 90, 230};
+constexpr Rgb sliding_colour{240, 210, 40};
 
 [[nodiscard]] double radians(double angle) {
     return angle * std::numbers::pi / 180.0;
@@ -242,6 +253,25 @@ Rgb deposit_colour(const std::array<planet::Deposit, planet::resource_count>& de
     return {grey, grey, grey};
 }
 
+Rgb plate_colour(std::uint32_t plate, const planet::Plates::Boundary& boundary) noexcept {
+    const std::uint64_t hash = hash_values(0, plate);
+    const auto channel = [&](unsigned shift) {
+        return static_cast<std::uint8_t>(80U + ((hash >> shift) % 120U));
+    };
+    const Rgb own{channel(0U), channel(8U), channel(16U)};
+    const double near = 1.0 - (planet::fixed_to_double(boundary.distance) / boundary_band);
+    if (near <= 0.0) {
+        return own;
+    }
+    const bool slides = boundary.sliding > std::abs(boundary.closing);
+    const double rate = slides ? boundary.sliding : std::abs(boundary.closing);
+    Rgb edge = boundary.closing > 0.0 ? closing_colour : parting_colour;
+    if (slides) {
+        edge = sliding_colour;
+    }
+    return mix(own, edge, near * std::min(rate / vivid_rate, 1.0));
+}
+
 Image render(const planet::Geology& geology, double planet_radius, const View& view, Layer layer,
              int width, jobs::JobSystem& jobs) {
     const View resolved = resolve(view, geology);
@@ -257,6 +287,11 @@ Image render(const planet::Geology& geology, double planet_radius, const View& v
                planet_radius;
     };
     const planet::Elevation& terrain = geology.terrain();
+    std::optional<planet::Plates> plates;
+    if (layer == Layer::Plates) {
+        plates.emplace(geology.seed(), planet::LevelGrid{plate_level, planet_radius}, planet_radius,
+                       plate_count);
+    }
     // Rivers are drawn at least a pixel wide, so they show at any scale.
     const auto over_land = [&](Rgb ground, planet::CellId cell, DVec3 at, int x, int y) {
         if (!terrain.is_land(cell)) {
@@ -283,6 +318,10 @@ Image render(const planet::Geology& geology, double planet_radius, const View& v
                                    ? height_colour(elevation)
                                    : water_table_colour(geology.climate().water_table(cell));
             return over_land(ground, cell, at, x, y);
+        }
+        case Layer::Plates: {
+            const auto index = plates->grid().index(cell.parent(plate_level));
+            return plate_colour(plates->plate()[index], plates->boundaries()[index]);
         }
         }
         return {};

@@ -302,3 +302,27 @@ TEST_CASE("maps are written as PNG", "[mapgen]") {
 
     CHECK_FALSE(hog::mapgen::write_png(std::filesystem::temp_directory_path(), image));
 }
+
+TEST_CASE("plates show in their own colours and boundaries in what they do", "[mapgen]") {
+    using Boundary = hog::planet::Plates::Boundary;
+    const Boundary inland{.distance = 10'000 * fixed_one, .other = 1, .closing = 50'000.0};
+    std::set<hog::mapgen::Rgb> colours;
+    for (std::uint32_t plate = 0; plate < 10; ++plate) {
+        colours.insert(hog::mapgen::plate_colour(plate, inland));
+    }
+    CHECK(colours.size() == 10);
+
+    const auto own = hog::mapgen::plate_colour(0, inland);
+    const auto at = [](double closing, double sliding) {
+        return hog::mapgen::plate_colour(
+            0, Boundary{.distance = 0, .other = 1, .closing = closing, .sliding = sliding});
+    };
+    const auto closing = at(50'000.0, 0.0);
+    const auto parting = at(-50'000.0, 0.0);
+    const auto sliding = at(0.0, 50'000.0);
+    CHECK(closing[0] > closing[2]);
+    CHECK(parting[2] > parting[0]);
+    CHECK(sliding[0] > sliding[2]);
+    CHECK(sliding[1] > sliding[2]);
+    CHECK(at(0.0, 0.0) == own);
+}

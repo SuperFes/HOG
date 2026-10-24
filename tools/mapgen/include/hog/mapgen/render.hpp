@@ -7,6 +7,7 @@
 #include <hog/mapgen/options.hpp>
 #include <hog/planet/caves.hpp>
 #include <hog/planet/geology.hpp>
+#include <hog/planet/plates.hpp>
 
 #include <array>
 #include <cstdint>
@@ -74,6 +75,14 @@ deposit_colour(const std::array<planet::Deposit, planet::resource_count>& deposi
 
 // What lies on land: a lake, a river in blue deepening as it widens, or else the ground's colour.
 [[nodiscard]] Rgb with_water(Rgb ground, bool lake, const planet::Reach* river) noexcept;
+
+// Metres either side of a plate boundary drawn in what it does.
+inline constexpr double boundary_band = 4'000.0;
+
+// A plate in its own muted colour, and near a boundary red where plates close, blue where they
+// part and yellow where they slide past each other.
+[[nodiscard]] Rgb plate_colour(std::uint32_t plate,
+                               const planet::Plates::Boundary& boundary) noexcept;
 
 [[nodiscard]] Image render(const planet::Geology& geology, double planet_radius, const View& view,
                            Layer layer, int width, jobs::JobSystem& jobs);
