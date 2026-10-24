@@ -1,5 +1,6 @@
 #include "test_planet.hpp"
 
+#include <hog/core/profile.hpp>
 #include <hog/client/daylight.hpp>
 #include <hog/client/flight.hpp>
 #include <hog/client/forecast.hpp>
@@ -29,8 +30,13 @@
 #include <cstdlib>
 #include <filesystem>
 #include <format>
+#include <fstream>
+#include <map>
+#include <memory>
 #include <numbers>
 #include <optional>
+#include <sstream>
+#include <string>
 #include <string_view>
 #include <tuple>
 #include <vector>
@@ -70,6 +76,91 @@ Shot over_the_islands(double altitude = 1'500.0, double pitch = -0.2) {
                                                            islands.islands().front().center);
     flight.pitch = pitch;
     return shot_of(flight);
+}
+
+Shot on_the_island(double altitude, double pitch) {
+    const double radius = world().geology().planet_radius();
+    const auto tall = [&](hog::DVec3 point) {
+        const auto biome = world().state(hog::planet::cell_at(glm::normalize(point))).biome;
+        return biome == hog::planet::Biome::Grassland || biome == hog::planet::Biome::Savanna ||
+               biome == hog::planet::Biome::Wetland;
+    };
+    std::map<int, int> seen;
+    for (const auto& island : world().geology().terrain().archipelago().islands()) {
+        const hog::DVec3 outward =
+            glm::normalize(island.axis - (island.center * glm::dot(island.axis, island.center)));
+        const hog::DVec3 aside = glm::cross(island.center, outward);
+        for (int a = -40; a <= 40; ++a) {
+            for (int b = -40; b <= 40; ++b) {
+                const hog::DVec3 there = glm::normalize(
+                    island.center + (((outward * static_cast<double>(a)) +
+                                      (aside * static_cast<double>(b))) *
+                                     (150.0 / radius)));
+                ++seen[static_cast<int>(world().state(hog::planet::cell_at(there)).biome)];
+                bool all = tall(there);
+                for (const double off : {-150.0, 150.0}) {
+                    all = all && tall(there + (outward * (off / radius))) &&
+                          tall(there + (aside * (off / radius)));
+                }
+                if (all && hog::client::ground_under(world(), hog::WorldPosition{there * radius}) > 3.0) {
+                    const double ground =
+                        hog::client::ground_under(world(), hog::WorldPosition{there * radius});
+                    hog::client::Flight flight = hog::client::start_flight(
+                        there, radius, ground + altitude,
+                        glm::normalize(there + (outward * (1'000.0 / radius))));
+                    flight.pitch = pitch;
+                    return shot_of(flight);
+                }
+            }
+        }
+    }
+    for (const auto& [biome, count] : seen) {
+        WARN("biome " << biome << ": " << count);
+    }
+    FAIL("no tall grass");
+    return {};
+}
+
+Shot facing_woods(double away, double altitude, double pitch) {
+    const double radius = world().geology().planet_radius();
+    const auto woods = [&](hog::DVec3 point) {
+        const auto biome = world().state(hog::planet::cell_at(glm::normalize(point))).biome;
+        return biome == hog::planet::Biome::TemperateForest ||
+               biome == hog::planet::Biome::BorealForest ||
+               biome == hog::planet::Biome::TropicalRainforest;
+    };
+    for (const auto& island : world().geology().terrain().archipelago().islands()) {
+        const hog::DVec3 outward =
+            glm::normalize(island.axis - (island.center * glm::dot(island.axis, island.center)));
+        const hog::DVec3 aside = glm::cross(island.center, outward);
+        for (int a = -40; a <= 40; ++a) {
+            for (int b = -40; b <= 40; ++b) {
+                const hog::DVec3 there = glm::normalize(
+                    island.center + (((outward * static_cast<double>(a)) +
+                                      (aside * static_cast<double>(b))) *
+                                     (150.0 / radius)));
+                bool all = woods(there);
+                for (const double off : {-300.0, 300.0}) {
+                    all = all && woods(there + (outward * (off / radius))) &&
+                          woods(there + (aside * (off / radius)));
+                }
+                const hog::DVec3 stand = glm::normalize(there - (outward * (away / radius)));
+                for (double along = 0.0; all && along < away - 400.0; along += 50.0) {
+                    all = !woods(stand + (outward * (along / radius)));
+                }
+                const double ground =
+                    hog::client::ground_under(world(), hog::WorldPosition{stand * radius});
+                if (all && ground > 3.0) {
+                    hog::client::Flight flight =
+                        hog::client::start_flight(stand, radius, ground + altitude, there);
+                    flight.pitch = pitch;
+                    return shot_of(flight);
+                }
+            }
+        }
+    }
+    FAIL("no woods");
+    return {};
 }
 
 // `altitude` metres over the sea `out` metres off the first island's coast along its longest
@@ -898,4 +989,156 @@ TEST_CASE("rain on the sea, to look at", "[.look]") {
                 std::filesystem::path{where} / std::format("{}_rain_{}.png", rain, name), *still));
         }
     }
+}
+
+TEST_CASE("profile the sea seen through", "[.profile]") {
+    const auto device = hog::render::Device::create({});
+    REQUIRE(device);
+    hog::jobs::JobSystem jobs{4};
+    const hog::protocol::CellWaves swell{.height = 1.4F, .peak = 0.45F, .heading = {-0.3F, 0.95F}};
+    const hog::client::Forecast fresh =
+        everywhere({.drift = {16.0F, 6.0F},
+                    .wind = {9.4F, 3.5F},
+                    .wind_sea = {.height = 2.2F, .peak = 0.75F, .heading = {0.94F, 0.35F}},
+                    .swells = {swell, hog::protocol::CellWaves{}},
+                    .current = {}});
+    const double radius = world().geology().planet_radius();
+    struct Case {
+        std::string name;
+        int bodies;
+        double altitude;
+        double pitch;
+        bool copyable;
+    };
+    std::vector<Case> cases;
+    std::vector<std::string> modes;
+    {
+        const char* listed = std::getenv("HOG_TMP_MODES");
+        std::istringstream in{listed != nullptr ? listed : "-"};
+        for (std::string mode; in >> mode;) {
+            modes.push_back(mode);
+        }
+    }
+    for (const std::string& mode : modes) {
+        const std::string way = " " + mode;
+        cases.push_back({"meadow" + way, 0, 1.7, -0.15, true});
+        cases.push_back({"meadow down" + way, 0, 1.7, -0.6, true});
+        cases.push_back({"meadow far" + way, 0, 60.0, -0.12, true});
+        cases.push_back({"islands low" + way, 0, 30.0, -0.12, true});
+        cases.push_back({"woods" + way, 0, 1.7, 0.0, true});
+        cases.push_back({"woods stamped" + way, 0, 1.7, 0.0, true});
+    }
+    std::vector<std::unique_ptr<Scene>> scenes;
+    std::vector<Shot> shots;
+    for (const Case& c : cases) {
+        const std::string mode = c.name.substr(c.name.rfind(' ') + 1);
+        ::setenv("HOG_TMP_FLAT", mode == "flat" ? "1" : "0", 1);
+        hog::client::GrassBudget budget;
+        if (c.name.starts_with("woods stamped")) {
+            budget.tree_far = 4'000.0;
+        }
+        auto scene = Scene::create(**device, world(), jobs, calendar(),
+                                   hog::client::still_format, 1, std::nullopt, budget);
+        REQUIRE(scene);
+        scenes.push_back(std::make_unique<Scene>(std::move(*scene)));
+        Shot shot = c.name.starts_with("woods") ? facing_woods(1'500.0, c.altitude, c.pitch)
+                    : c.name.starts_with("meadow") ? on_the_island(c.altitude, c.pitch)
+                    : c.name.starts_with("islands") || c.name.starts_with("hills")
+                        ? over_the_islands(c.altitude, c.pitch)
+                    : c.altitude < 0.0 ? off_the_coast(120.0, c.altitude, true, c.pitch)
+                                       : off_the_coast(-3.0, c.altitude, false, c.pitch);
+        shot.forecast = &fresh;
+        const hog::DVec3 up = glm::normalize(shot.camera.eye.metres());
+        const hog::DVec3 aside = glm::normalize(glm::cross(shot.camera.forward, up));
+        for (int i = 0; i < c.bodies; ++i) {
+            const hog::DVec3 there = glm::normalize(
+                (ahead(shot, 8.0 + (i % 4) * 4.0) + (aside * ((i / 4) * 4.0 - 6.0))).metres());
+            const double ground =
+                hog::client::ground_under(world(), hog::WorldPosition{there * radius});
+            shot.others.push_back({.feet = hog::WorldPosition{there * (radius + ground)},
+                                   .up = there,
+                                   .colour = {0.6F, 0.1F, 0.05F}});
+        }
+        shots.push_back(shot);
+    }
+    const VkExtent2D size{.width = 1600, .height = 900};
+    auto target = hog::render::make_image(
+        **device, {.format = hog::client::still_format,
+                   .extent = size,
+                   .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT});
+    REQUIRE(target);
+    // Settled first, as stills are.
+    for (std::size_t c = 0; c < cases.size(); ++c) {
+        const auto settled = hog::client::draw_still(**device, *scenes[c], shots[c], size,
+                                                     cases[c].name.starts_with("woods") ? 3000 : 400);
+        INFO(cases[c].name << ": " << (settled ? "" : settled.error().message));
+        REQUIRE(settled);
+    }
+    std::vector<std::map<std::string, double>> sums(cases.size());
+    constexpr int rounds = 30;
+    for (int round = 0; round < rounds + 2; ++round) {
+        for (std::size_t c = 0; c < cases.size(); ++c) {
+            shots[c].time = shots[c].time + std::chrono::milliseconds{33};
+            hog::Result<> recorded;
+            REQUIRE((*device)->submit_now([&](VkCommandBuffer commands) {
+                hog::render::Frame frame{.commands = commands,
+                                         .target = {target->handle(), VK_IMAGE_ASPECT_COLOR_BIT},
+                                         .view = target->view(),
+                                         .format = hog::client::still_format,
+                                         .extent = cases[c].name.ends_with(" half")
+                                                       ? VkExtent2D{size.width / 2, size.height / 2}
+                                                       : size,
+                                         .slot = 0,
+                                         .image = 0,
+                                         .copyable = cases[c].copyable};
+                recorded = scenes[c]->record(frame, shots[c]);
+            }));
+            REQUIRE(recorded);
+            HOG_FRAME();
+            if (round < 2) {
+                continue;
+            }
+            double total = 0.0;
+            for (const hog::render::GpuSpan& span : scenes[c]->timings()) {
+                sums[c][std::string{span.name}] += span.milliseconds;
+                total += span.milliseconds;
+            }
+            sums[c]["total"] += total;
+        }
+    }
+    if (const char* where = std::getenv("HOG_TMP_FRAMES")) {
+        for (std::size_t c = 0; c < cases.size(); ++c) {
+            if (!cases[c].name.starts_with("meadow ")) {
+                continue;
+            }
+            for (int at = 0; at < 80; ++at) {
+                shots[c].time = shots[c].time + std::chrono::milliseconds{100};
+                shots[c].seconds = 0.1;
+                const auto still = hog::client::draw_still(**device, *scenes[c], shots[c], size, 1);
+                REQUIRE(still);
+                REQUIRE(hog::client::save_picture(
+                    std::filesystem::path{where} / std::format("{}-{:03}.png", cases[c].name, at),
+                    *still));
+            }
+        }
+    }
+    if (const char* where = std::getenv("HOG_TMP_STILLS")) {
+        for (std::size_t c = 0; c < cases.size(); ++c) {
+            const auto still = hog::client::draw_still(**device, *scenes[c], shots[c], size, 1);
+            REQUIRE(still);
+            REQUIRE(hog::client::save_picture(
+                std::filesystem::path{where} / std::format("{}.png", cases[c].name), *still));
+        }
+    }
+    std::ofstream table{"/home/Fester/.cache/claude/claude-1000/-Development-Netscape-HOG/"
+                        "c7cbf0d2-871c-4d8b-8c87-3b8947ca2604/scratchpad/profile.txt",
+                        std::ios::app};
+    for (std::size_t c = 0; c < cases.size(); ++c) {
+        std::string line = std::format("{:20}", cases[c].name);
+        for (const char* name : {"ground", "grass grown", "grass", "bushes", "trees", "total"}) {
+            line += std::format(" | {} {:.3f}", name, sums[c][name] / rounds);
+        }
+        table << line << "\n";
+    }
+    table << "\n";
 }
