@@ -31,7 +31,8 @@ Drainage erode(const LevelGrid& grid, std::vector<std::int64_t>& heights, const 
         if (receiver == cell) {
             continue;
         }
-        const bool to_sea = heights[receiver] <= sea_level;
+        const bool to_sea =
+            drainage.receiver[receiver] == receiver && heights[receiver] <= sea_level;
         const std::int64_t base = to_sea ? sea_level : heights[receiver];
         if (heights[cell] <= base) {
             continue;

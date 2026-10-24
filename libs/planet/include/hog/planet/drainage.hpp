@@ -23,7 +23,8 @@ struct Drainage {
     std::vector<std::uint32_t> order;
 };
 
-// The sea covers every cell at or below `sea_level`, all fixed point.
+// The sea is the largest stretch of neighbouring cells at or below `sea_level`, all fixed point.
+// Lower ground cut off from it fills to its rim like any other.
 [[nodiscard]] Drainage drain(const LevelGrid& grid, std::span<const std::int64_t> heights,
                              std::int64_t sea_level = 0);
 

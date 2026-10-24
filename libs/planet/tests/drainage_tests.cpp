@@ -51,6 +51,16 @@ std::vector<std::int64_t> bowl() {
     });
 }
 
+// The same slope with the bowl dug below the sea, and maybe a trench joining it to the sea.
+std::vector<std::int64_t> sunken_bowl(bool trench) {
+    return field([trench](hog::DVec3 at) {
+        const double away = glm::length(at - bowl_center);
+        const double ground = (1000.0 * at.z) - (1200.0 * std::max(0.0, 1.0 - (away / 0.25)));
+        const bool dug = trench && at.x > 0.0 && std::abs(at.y) < 0.15 && at.z < bowl_center.z;
+        return dug ? std::min(ground, -50.0) : ground;
+    });
+}
+
 void require_drains_to_outlets(const Drainage& drainage) {
     const std::uint32_t count = grid().size();
     REQUIRE(drainage.order.size() == count);
@@ -138,4 +148,23 @@ TEST_CASE("what collects downstream adds up", "[planet][drainage]") {
         }
     }
     CHECK(at_outlets == std::accumulate(rain.begin(), rain.end(), std::int64_t{0}));
+}
+
+TEST_CASE("ground below the sea but cut off from it fills to its rim", "[planet][drainage]") {
+    const auto heights = sunken_bowl(false);
+    const Drainage drainage = hog::planet::drain(grid(), heights);
+    require_drains_to_outlets(drainage);
+    const std::uint32_t bottom = grid().index(hog::planet::cell_at(bowl_center, grid().level()));
+    REQUIRE(heights[bottom] < 0);
+    CHECK(drainage.receiver[bottom] != bottom);
+    CHECK(drainage.surface[bottom] > 0);
+}
+
+TEST_CASE("a trench to the sea lets it into ground below its level", "[planet][drainage]") {
+    const auto heights = sunken_bowl(true);
+    const Drainage drainage = hog::planet::drain(grid(), heights);
+    require_drains_to_outlets(drainage);
+    const std::uint32_t bottom = grid().index(hog::planet::cell_at(bowl_center, grid().level()));
+    CHECK(drainage.receiver[bottom] == bottom);
+    CHECK(drainage.surface[bottom] == 0);
 }
