@@ -159,13 +159,13 @@ float3 blown(float3 root, float height, uint hash) {
     }
     const float3 along = push.wind.xyz / mean;
     const GustFrame frame = gust_frame(lighting);
-    const float field = gust_field(root, frame);
-    const float gust = gust_of(field);
+    const float4 fields = gust_fields(root, frame);
+    const float gust = gust_of(fields.x);
     const float speed = gusting(mean, gust);
     // Each blade a little apart from its neighbours, as many as ahead of the wave as behind it.
     const float phase =
-        sway_phase(lighting.downwind.w, root, frame, field) + (1.2 * (unit(hash) - 0.5));
-    return along * (height * (laid_over(speed) + (swung(gust) * swaying(speed) * sin(phase))));
+        sway_phase(lighting.downwind.w, root, frame, fields) + (1.2 * (unit(hash) - 0.5));
+    return along * (height * (laid_over(speed) + (swung(gust, fields) * swaying(speed) * swing(phase, fields))));
 }
 
 // A blade as grown for the frame: where it stands and how it's shaped and coloured.

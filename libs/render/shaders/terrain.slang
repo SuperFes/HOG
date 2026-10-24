@@ -237,11 +237,11 @@ float standing_grass(Ground ground, float3 from_eye) {
     float pressed = 0.0;
     if (wind > 1e-3) {
         const GustFrame frame = gust_frame(lighting);
-        const float field = gust_field(from_eye, frame);
-        const float gust = gust_of(field);
+        const float4 fields = gust_fields(from_eye, frame);
+        const float gust = gust_of(fields.x);
         const float speed = gusting(wind, gust);
-        const float phase = sway_phase(lighting.downwind.w, from_eye, frame, field);
-        pressed = saturate(laid_over(speed) + (swung(gust) * swaying(speed) * sin(phase)));
+        const float phase = sway_phase(lighting.downwind.w, from_eye, frame, fields);
+        pressed = saturate(laid_over(speed) + (swung(gust, fields) * swaying(speed) * swing(phase, fields)));
     }
     const float clear = saturate((ground.height - grass_shore) / grass_rising);
     const float thick = thick_height(thickness(from_eye, lighting.ground.xyz));
@@ -540,9 +540,9 @@ float gust_lit(Ground ground, GustFrame frame, float wind, float wave) {
     if (waving < least_biome) {
         return 1.0;
     }
-    const float field = gust_field(ground.from_eye, frame);
-    const float phase = sway_phase(wave, ground.from_eye, frame, field);
-    return 1.0 + (gust_brightening * waving * gust_sheen(wind, field, phase, seen));
+    const float4 fields = gust_fields(ground.from_eye, frame);
+    const float phase = sway_phase(wave, ground.from_eye, frame, fields);
+    return 1.0 + (gust_brightening * waving * gust_sheen(wind, fields, phase, seen));
 }
 
 // Ground a fire left black: charcoal and ash, greening back as the scar fades.

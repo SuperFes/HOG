@@ -15,9 +15,9 @@ inline constexpr double gust_period = 2'048.0;
 // How many times longer the gusts' patches are downwind than across it, as gusts.slang's.
 inline constexpr double gust_stretch = 2.5;
 
-// Metres from crest to crest of the waves running downwind through swaying grass, as
-// gusts.slang's.
-inline constexpr double sway_wavelength = 12.0;
+// Metres from crest to crest of the longest waves running downwind through swaying grass, the
+// rest a half and a third of it, as gusts.slang's.
+inline constexpr double sway_wavelength = 24.0;
 
 // Where in the planet's frame the fields fixed to the ground lie from `eye`, within their period,
 // so their precision is kept.

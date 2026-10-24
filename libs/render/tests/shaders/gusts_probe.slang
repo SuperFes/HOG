@@ -26,11 +26,12 @@ void compute_main(uint3 id: SV_DispatchThreadID) {
     const float4 up = asked[(5 * id.x) + 3];
     const float4 ground = asked[(5 * id.x) + 4];
     const GustFrame frame = { anchor.xyz, along.xyz, up.xyz };
-    const float there = gust_field(point.xyz, frame);
+    const float4 fields = gust_fields(point.xyz, frame);
+    const float there = fields.x;
     const float gust = gust_of(there);
-    const float phase = sway_phase(along.w, point.xyz, frame, there);
+    const float phase = sway_phase(along.w, point.xyz, frame, fields);
     found[2 * id.x] = float4(gust, gusting(point.w, gust), gust_laid(point.w, gust),
-                             gust_sheen(point.w, there, phase, 1.0));
+                             gust_sheen(point.w, fields, phase, 1.0));
     const float thick = thickness(point.xyz, ground.xyz);
     found[(2 * id.x) + 1] = float4(bush_sway(anchor.w, point.w, there, 0.0),
                                    tree_sway(anchor.w, point.w, there, 0.0), thick,

@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstddef>
 #include <numbers>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -229,11 +230,12 @@ TEST_CASE("the grass's sway runs downwind in waves as fast as the gusts", "[rend
     gusts.blow(ground.eye + (ground.east * sway_wavelength) + (ground.north * 7.0),
                ground.east * 4.0, ground.up, 0.0);
     CHECK_THAT(round_by(before, gusts.seen().wave), WithinAbs(0.0, 1e-6));
-    gusts.blow(ground.eye + (ground.east * 3.0), ground.east * 4.0, ground.up, 0.0);
+    const double quarter = sway_wavelength / 4.0;
+    gusts.blow(ground.eye + (ground.east * quarter), ground.east * 4.0, ground.up, 0.0);
     CHECK_THAT(round_by(before, gusts.seen().wave), WithinAbs(turn / 4.0, 1e-6));
     // Carried downwind at 1.5 times the wind's 4 m/s, the wave the eye was on is 3 m further on
     // half a second later, and so is the eye.
-    gusts.blow(ground.eye + (ground.east * 6.0), ground.east * 4.0, ground.up, 0.5);
+    gusts.blow(ground.eye + (ground.east * (quarter + 3.0)), ground.east * 4.0, ground.up, 0.5);
     CHECK_THAT(round_by(before, gusts.seen().wave), WithinAbs(turn / 4.0, 1e-6));
 }
 
@@ -436,8 +438,10 @@ TEST_CASE("grass sways about how far the gusts lay it over, in waves running thr
             lull_swing += most[at] - least[at];
             ++lulls;
         }
-        sheens.push_back(first[at].sheen);
-        laid.push_back(first[at].laid);
+        if (first[at].gust > 0.5) {
+            sheens.push_back(first[at].sheen);
+            laid.push_back(first[at].laid);
+        }
     }
     REQUIRE(gusty > 0);
     REQUIRE(lulls > 0);
@@ -446,7 +450,7 @@ TEST_CASE("grass sways about how far the gusts lay it over, in waves running thr
     INFO("swinging " << gusty_swing << " in the gusts, " << lull_swing << " in the lulls");
     CHECK(gusty_swing > 0.5);
     CHECK(lull_swing < 0.4 * gusty_swing);
-    // At any moment the field isn't swaying all one way, but in waves.
+    // At any moment the gusts aren't swaying all one way, but in waves.
     CHECK(mean_difference(sheens, laid) > 0.05);
     CHECK(std::ranges::minmax(sheens).max - std::ranges::minmax(sheens).min > 0.6);
     CHECK(device->validation_errors() == 0);
@@ -482,6 +486,101 @@ TEST_CASE("the grass's waves run downwind with the gusts, rather than rising and
     const double changed = mean_difference(sheens(before), in_place);
     INFO("following the wind " << travelled << ", in place " << changed);
     CHECK(travelled < 0.2 * changed);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("the grass's waves break into short crests out of step across the wind, not long lines",
+          "[render][gpu]") {
+    const auto device = test_device();
+    const Ground ground;
+    const std::vector<WorldPosition> points = square(ground, 240.0, 3.0);
+    constexpr double speed = 6.0;
+    const GustsSeen seen = ground.blowing_east(ground.eye, speed);
+    const auto swaying = [&](DVec3 by) {
+        std::vector<double> sway;
+        for (const Gusting& found :
+             gusting_at(*device, ground, ground.eye, seen, moved(points, by), speed)) {
+            sway.push_back(found.sheen - found.laid);
+        }
+        return sway;
+    };
+    const std::vector<double> here = swaying(DVec3{0.0});
+    // Half a middling wave downwind, crests and troughs swap; along a crest a few metres across the
+    // wind, it's as likely to be a trough.
+    const double downwind = mean_difference(here, swaying(ground.east * (sway_wavelength / 4.0)));
+    const double across = mean_difference(here, swaying(ground.north * 15.0));
+    INFO("half a wave downwind differing " << downwind << ", 15 m across " << across);
+    CHECK(across > 0.6 * downwind);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("the grass's waves come in bands of many sizes, swinging further in some clumps",
+          "[render][gpu]") {
+    const auto device = test_device();
+    const Ground ground;
+    constexpr double speed = 6.0;
+    constexpr double step = 0.5;
+    constexpr int along = 600;
+    GustsSeen seen = ground.blowing_east(ground.eye, speed);
+    // Rows running downwind, 20 m apart.
+    std::vector<WorldPosition> points;
+    for (int row = 0; row < 30; ++row) {
+        for (int at = 0; at < along; ++at) {
+            points.push_back(ground.at(at * step, row * 20.0));
+        }
+    }
+    // A whole sway, in even steps through it.
+    constexpr int steps = 8;
+    std::vector<double> least(points.size(), 1.0);
+    std::vector<double> most(points.size(), -1.0);
+    std::vector<Gusting> first;
+    for (int sway = 0; sway < steps; ++sway) {
+        seen.wave = sway * turn / steps;
+        const std::vector<Gusting> found =
+            gusting_at(*device, ground, ground.eye, seen, points, speed);
+        for (std::size_t at = 0; at < points.size(); ++at) {
+            least[at] = std::min(least[at], found[at].sheen);
+            most[at] = std::max(most[at], found[at].sheen);
+        }
+        if (sway == 0) {
+            first = found;
+        }
+    }
+    // Half a wave between where the sway crosses from one side to the other, within gusts.
+    std::vector<double> halves;
+    std::vector<double> swings;
+    for (std::size_t row = 0; row < points.size(); row += along) {
+        std::optional<std::size_t> crossed;
+        for (std::size_t at = row + 1; at < row + along; ++at) {
+            if (first[at].gust < 0.5 || first[at - 1].gust < 0.5) {
+                crossed.reset();
+                continue;
+            }
+            swings.push_back(most[at] - least[at]);
+            if ((first[at].sheen - first[at].laid > 0.0) !=
+                (first[at - 1].sheen - first[at - 1].laid > 0.0)) {
+                if (crossed) {
+                    halves.push_back(static_cast<double>(at - *crossed) * step);
+                }
+                crossed = at;
+            }
+        }
+    }
+    const auto share = [](std::vector<double> values, double kept) {
+        std::ranges::sort(values);
+        return values.at(static_cast<std::size_t>(kept * static_cast<double>(values.size() - 1)));
+    };
+    REQUIRE(halves.size() > 50);
+    const double shortest = share(halves, 0.1);
+    const double longest = share(halves, 0.9);
+    const double least_swing = share(swings, 0.1);
+    const double most_swing = share(swings, 0.9);
+    INFO(halves.size() << " half waves, " << shortest << " m to " << longest << " m; swinging "
+                       << least_swing << " to " << most_swing);
+    CHECK(longest > 2.0 * shortest);
+    CHECK(shortest > 2.0);
+    CHECK(longest < 14.0);
+    CHECK(most_swing > 2.0 * least_swing);
     CHECK(device->validation_errors() == 0);
 }
 

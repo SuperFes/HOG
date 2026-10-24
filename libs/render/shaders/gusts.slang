@@ -11,9 +11,9 @@ public static const float period = 2048.0;
 // How many times longer patches are downwind than across it, as render::gust_stretch.
 static const float stretch = 2.5;
 
-// Metres from crest to crest of the waves running downwind through swaying grass, as
-// render::sway_wavelength.
-static const float wavelength = 12.0;
+// Metres from crest to crest of the longest waves running downwind through swaying grass, the
+// rest a half and a third of it, as render::sway_wavelength.
+static const float wavelength = 24.0;
 
 // The gusts' field as a frame draws it, as render::GustsSeen has it: where it lies from the eye in
 // its own axes, which way the wind blows, level, and which way is up.
@@ -71,15 +71,24 @@ public float periodic_noise(float3 at, int cells, uint octave) {
     return lerp(along_y.x, along_y.y, eased.z);
 }
 
-// The gusts' field at a point given from the eye: smooth, about -1 to 1, rising into the gusts.
-public float gust_field(float3 from_eye, GustFrame frame) {
+// The gusts' field at a point given from the eye in x: smooth, about -1 to 1, rising into the
+// gusts; and its parts about 41, 17 and 8 m across alone in y, z and w, which the grass's waves
+// are sized, staggered and clumped by.
+public float4 gust_fields(float3 from_eye, GustFrame frame) {
     const float3 axes = float3(dot(from_eye, frame.along) / stretch,
                                dot(from_eye, cross(frame.up, frame.along)), dot(from_eye, frame.up));
     const float3 at = (axes + frame.anchor) / period;
     // Lattices of uneven sizes, so their cells never line up into a grid; about 41, 17 and 8 m
     // across the wind, and gustier and calmer stretches about 230 m.
-    return (0.6 * periodic_noise(at * 50.0, 50, 0u)) + (0.28 * periodic_noise(at * 117.0, 117, 1u)) +
-           (0.14 * periodic_noise(at * 263.0, 263, 2u)) + (0.4 * periodic_noise(at * 9.0, 9, 3u));
+    const float3 parts = float3(periodic_noise(at * 50.0, 50, 0u),
+                                periodic_noise(at * 117.0, 117, 1u),
+                                periodic_noise(at * 263.0, 263, 2u));
+    return float4(dot(parts, float3(0.6, 0.28, 0.14)) + (0.4 * periodic_noise(at * 9.0, 9, 3u)),
+                  parts);
+}
+
+public float gust_field(float3 from_eye, GustFrame frame) {
+    return gust_fields(from_eye, frame).x;
 }
 
 // How hard the gusts blow where their field is `field`, 0 in a lull to 1 in the heart of a gust.
@@ -108,17 +117,35 @@ public float swaying(float speed) {
     return 0.3 * speed / (1.0 + (0.08 * speed * speed));
 }
 
-// Where in its sway grass is `from_eye`, where the gusts' field is `field`, with grass at the eye
-// `wave` into its sway: in waves running downwind, their crests bent by the gusts.
-public float sway_phase(float wave, float3 from_eye, GustFrame frame, float field) {
-    return wave + ((2.0 * 3.14159265 / wavelength) * dot(from_eye, frame.along)) + (3.0 * field);
+// Radians of the longest waves their crests are put out of step by across the gusts' fields'
+// finer part, gently enough that they curve rather than kink.
+static const float staggering = 2.0;
+
+// Where in its sway grass is `from_eye`, where the gusts' fields are `fields`, as gust_fields has
+// them, with grass at the eye `wave` into its sway: in the longest of the waves running downwind,
+// as swing takes it, their crests bent and staggered by the gusts, so they pass in clumps rather
+// than lines.
+public float sway_phase(float wave, float3 from_eye, GustFrame frame, float4 fields) {
+    return wave + ((2.0 * 3.14159265 / wavelength) * dot(from_eye, frame.along)) +
+           (1.5 * fields.x) + (staggering * fields.z);
 }
 
-// How much of its sway grass swings through together at `gust`, as gust_of has it: the waves
-// running mostly through the gusts, so they cross a field in passing bands, and blades in a lull
-// stirring little.
-public float swung(float gust) {
-    return lerp(0.2, 1.0, gust);
+// How far into its swing grass is `phase` into its sway, as sway_phase has it, -1 to 1, where
+// the gusts' fields are `fields`: in bands as long as the longest waves, a half or a third of them
+// as the fields' broad part has it, and mixing between, so they come in many sizes.
+public float swing(float phase, float4 fields) {
+    const float picked = 2.0 * smoothstep(-0.35, 0.35, fields.y);
+    const float3 shares =
+        float3(saturate(1.0 - picked), 1.0 - abs(picked - 1.0), saturate(picked - 1.0));
+    return dot(shares, float3(sin(phase), sin(2.0 * phase), sin(3.0 * phase)));
+}
+
+// How much of its sway grass swings through together at `gust`, as gust_of has it, where the
+// gusts' fields are `fields`: the waves running only through the gusts, so they cross a field in
+// passing patches, and blades in a lull standing still; each clump of them swinging its own way
+// further or less far.
+public float swung(float gust, float4 fields) {
+    return gust * lerp(0.25, 1.25, smoothstep(-0.3, 0.3, fields.w));
 }
 
 // How much further grass is laid over at `gust` than by wind of `speed` on the whole: catching
@@ -127,12 +154,13 @@ public float gust_laid(float speed, float gust) {
     return laid_over(gusting(speed, gust)) - laid_over(speed);
 }
 
-// As gust_laid where the gusts' field is `field`, and swaying with it `phase` into its sway, as
-// sway_phase has it, as a field of grass seen whole; its sway's share `seen`, less where waves are
-// too fine to make out.
-public float gust_sheen(float speed, float field, float phase, float seen) {
-    const float gust = gust_of(field);
-    return gust_laid(speed, gust) + (seen * swung(gust) * swaying(gusting(speed, gust)) * sin(phase));
+// As gust_laid where the gusts' fields are `fields`, as gust_fields has them, and swaying with
+// it `phase` into its sway, as sway_phase has it, as a field of grass seen whole; its sway's share
+// `seen`, less where waves are too fine to make out.
+public float gust_sheen(float speed, float4 fields, float phase, float seen) {
+    const float gust = gust_of(fields.x);
+    return gust_laid(speed, gust) +
+           (seen * swung(gust, fields) * swaying(gusting(speed, gust)) * swing(phase, fields));
 }
 
 // How a woody plant gives to the wind: held over by it as stiffly as `holds` has it, at most `lean`

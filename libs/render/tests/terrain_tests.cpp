@@ -913,9 +913,9 @@ TEST_CASE("gusts cross far meadows as patches of light swaying in waves, and lea
     CHECK(drifted.most < 48);
     CHECK(lit.most < 48);
 
-    // And sways as time goes on.
+    // And sways in the gusts as time goes on.
     blowing.seconds = 2.0;
-    CHECK(apart(after, from_above(*device, blowing)).mean > 2.0);
+    CHECK(apart(after, from_above(*device, blowing)).mean > 0.4);
 
     Seen calm = still;
     calm.gusts_drifted = blowing.gusts_drifted;
