@@ -151,9 +151,10 @@ TEST_CASE("grass grows on ground fine enough, each patch as far off as its neare
     CHECK(grown[2].nearest < hog::render::GrassTier{}.reach);
     CHECK(grown[0].spacing < 0.75);
     CHECK(grown[2].spacing > 5.0);
-    // The same cell seeds the same grass on every machine.
-    CHECK(grown[0].seed == hog::client::grass_draws(slots, drawn, eye, radius)[0].seed);
-    CHECK(grown[0].seed != grown[1].seed);
+    // Each grows the grass of its own cell.
+    CHECK(grown[0].cell == fine.to_face_ij());
+    CHECK(grown[1].cell == fine_far.to_face_ij());
+    CHECK(grown[2].cell == coarse.to_face_ij());
 }
 
 TEST_CASE("the grass reaches as far as the budget has it", "[client][ground]") {

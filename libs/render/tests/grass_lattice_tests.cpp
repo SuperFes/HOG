@@ -61,6 +61,15 @@ TEST_CASE("the grass lattice is as fine as the thickest grass grows", "[grass]")
     CHECK(across > hog::render::finest_grass_cell / 2.0);
 }
 
+TEST_CASE("each world casts its grass lattice's dice its own way", "[grass]") {
+    const hog::render::GrassLattice world = hog::render::grass_lattice(radius, 0x1234'5678'9abcULL);
+    CHECK(world.level == lattice);
+    CHECK(world.seed == hog::render::grass_lattice(radius, 0x1234'5678'9abcULL).seed);
+    CHECK(world.seed != hog::render::grass_lattice(radius, 0x1234'5678'9abdULL).seed);
+    // The high half counts too.
+    CHECK(world.seed != hog::render::grass_lattice(radius, 0x1235'5678'9abcULL).seed);
+}
+
 TEST_CASE("a grass lattice cell's dice and spot are the same for ever", "[grass]") {
     const FaceIJ cell{.face = 3, .i = 123'456, .j = 1'654'321, .level = lattice};
     const std::uint32_t hash = grass_hash(cell, seed);

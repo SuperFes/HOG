@@ -17,6 +17,11 @@ int grass_lattice_level(double planet_radius) {
     return planet::level_for(finest_grass_cell, planet_radius);
 }
 
+GrassLattice grass_lattice(double planet_radius, std::uint64_t world_seed) {
+    return {.level = grass_lattice_level(planet_radius),
+            .seed = static_cast<std::uint32_t>(world_seed ^ (world_seed >> 32U))};
+}
+
 std::uint32_t grass_hash(planet::FaceIJ cell, std::uint32_t seed) noexcept {
     const auto where =
         static_cast<std::uint32_t>(cell.level) | (static_cast<std::uint32_t>(cell.face) << 8U);

@@ -113,21 +113,6 @@ std::optional<std::uint32_t> GroundSlots::slot(planet::CellId cell) const {
     return held->second;
 }
 
-namespace {
-
-// The same on every machine, so everyone grows the same field.
-std::uint32_t grass_seed(planet::CellId cell) noexcept {
-    std::uint64_t mixed = cell.raw();
-    mixed ^= mixed >> 30U;
-    mixed *= 0xbf58'476d'1ce4'e5b9;
-    mixed ^= mixed >> 27U;
-    mixed *= 0x94d0'49bb'1331'11eb;
-    mixed ^= mixed >> 31U;
-    return static_cast<std::uint32_t>(mixed);
-}
-
-} // namespace
-
 std::vector<render::GrassDraw> grass_draws(const GroundSlots& slots,
                                            std::span<const terrain::StreamedPatch> drawn,
                                            WorldPosition eye, double planet_radius,
@@ -157,7 +142,7 @@ std::vector<render::GrassDraw> grass_draws(const GroundSlots& slots,
             draws.push_back({.slot = *held,
                              .origin = patch.origin,
                              .spacing = spacing,
-                             .seed = grass_seed(patch.cell),
+                             .cell = patch.cell.to_face_ij(),
                              .nearest = distance});
         }
     }

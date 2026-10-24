@@ -1,13 +1,14 @@
 import atmosphere;
 import bend;
+import grass_lattice;
 import gusts;
 import lush;
 import shadow;
 import tone;
 import water;
 
-// Blades grown on the ground's own patches: each one hashed from its patch's seed, so every
-// machine grows the same field, swaying with the weather's wind.
+// Blades grown on the ground's own patches: each one on its own spot of the world's lattice, so
+// every machine grows the same field whichever patches draw it, swaying with the weather's wind.
 
 struct Push {
     float4x4 clip_from_eye;
@@ -16,11 +17,11 @@ struct Push {
     // x the planet's radius and y the faked one drawing bends it onto; z seconds of sway so far,
     // w the radians across a pixel.
     float4 bend_radii;
-    // xyz the wind near the ground, m/s; w (as bits) the patch's seed.
+    // xyz the wind near the ground, m/s; w (as bits) the patch's index among those grown.
     float4 wind;
-    // xyz the patch's origin from the eye, in metres; w (as bits) the layers of blades drawn, the
-    // bytes before the patch's vertices in what's bound times 64, and the metres across its grid
-    // cells times 256 << 14.
+    // xyz the patch's origin from the eye, in metres; w (as bits) the levels into it its blades
+    // are sown, the bytes before the patch's vertices in what's bound times 64, and the metres
+    // across its grid cells times 256 << 14.
     float4 origin;
 };
 
@@ -37,6 +38,8 @@ struct Settings {
     // How it thins: x blades a square metre up close, y the metres that density holds to before
     // falling with the square of distance, z the metres every blade has shrunk away by.
     float4 tier;
+    // x the level of the lattice the blades stand on, y the seed its dice are cast from.
+    uint4 lattice;
 };
 
 [[vk::binding(0, 0)]] ConstantBuffer<Settings> settings;
@@ -51,6 +54,7 @@ struct Settings {
 
 static const uint patch_cells = 32;
 static const uint patch_side = 33;
+static const uint patch_depth = 5; // levels from a patch's cell to its grid cells
 static const uint vertex_stride = 36; // bytes, as terrain::PatchVertex lies
 
 // Blades keep off ground this close to sea level, so the surf stays clear.
@@ -61,6 +65,10 @@ static const float fraying = 0.4;
 // How much darker a field of grass shows than its ground's colour, as terrain.slang's
 // grass_field_shade: what blades melting into the ground wear.
 static const float field_shade = 0.7;
+// Levels up the lattice from a blade to the cell of the clump it grows in.
+static const uint clump_levels = 5;
+// Levels up the lattice a blade is looked at for whether it's kept, at most.
+static const uint most_kept_up = 16;
 
 // Reeds stand where the ground sits this close over the water, stiff stems with a cattail head:
 // the quad is cut as wide as the head, and the stem trimmed from it in the fragment shader.
@@ -182,74 +190,97 @@ struct Grown {
     float tone;   // its own shade, about 1
 };
 
+// The patches grown on this frame: each one's cell, as face, i, j and level.
+[[vk::binding(10, 0)]] StructuredBuffer<uint4> grass_patches;
+
 // The patch's blade `instance` as it grows this frame, if it grows at all.
 bool grow(uint instance, out Grown grown) {
     grown = (Grown)0;
     const uint packed = asuint(push.origin.w);
-    const uint layers = packed & 63u;
+    const uint depth = packed & 63u;
     const uint bias = (packed >> 6) & 0xffu;
     const float spacing = float((packed >> 14) & 0xfffu) / 256.0;
     const float4 tier = settings.tier;
     const float fade_far = tier.z;
-    const uint seed = asuint(push.wind.w);
+    const uint lattice = settings.lattice.x;
+    const uint seed = settings.lattice.y;
+    const uint4 patch_cell = grass_patches[asuint(push.wind.w)];
 
-    // A layer of blades a cell, every cell's nth blade in the nth layer, so each blade is the
-    // same however many are grown: thinning lets the last go and moves none.
-    const uint cell = instance & ((patch_cells * patch_cells) - 1u);
-    const uint layer = instance >> 10;
-    if (layer >= layers) {
+    // The blade standing on the lattice for one of the patch's cells `depth` levels in: the same
+    // blade, in the same spot, whichever patch grows it.
+    if (instance >= (1u << (2 * depth))) {
         return false;
     }
-    const uint i = cell >> 5;
-    const uint j = cell & 31u;
-    const uint hash = hashed(seed ^ instance);
+    const FaceCell sown = { patch_cell.x, (patch_cell.y << depth) + (instance & ((1u << depth) - 1u)),
+                            (patch_cell.z << depth) + (instance >> depth), patch_cell.w + depth };
+    const FaceCell blade = standing_for(sown, lattice, seed);
+    const uint hash = grass_hash(blade, seed);
+    const uint to_lattice = lattice - patch_cell.w;
+    // Lattice cells to a grid cell, as a fraction of one.
+    const float to_grid = exp2(float(patch_cell.w + patch_depth) - float(lattice));
+    const float2 on_grid =
+        min((float2(float(blade.i - (patch_cell.y << to_lattice)),
+                    float(blade.j - (patch_cell.z << to_lattice))) + grass_spot(hash)) * to_grid,
+            float(patch_cells) - 1e-4);
 
     // Rooted within its grid cell, on ground interpolated between the cell's corners.
-    const float u = unit(hash);
-    const float v = unit(hash + 1u);
-    const uint at = (i * patch_side) + j;
-    const Corner near = corner_at(bias, at + (u < 0.5 ? 0 : patch_side) + (v < 0.5 ? 0 : 1));
-    // Fewer layers grow further off, each blade going at its own point in its layer's going and
-    // shrinking away as it does, so the field thins without a pop. Thick patches hold their
-    // density only as far as it takes them to thin to the rest of the field's, as no one sees
-    // far into thick grass: they cost no more blades than it, but grow them all up close.
-    const float thick = thickness(push.origin.xyz + near.position, lighting.ground.xyz);
-    const float full = tier.x * thick * spacing * spacing;
+    const uint2 cell = uint2(on_grid);
+    const float u = on_grid.x - float(cell.x);
+    const float v = on_grid.y - float(cell.y);
+    const uint at = (cell.y * patch_side) + cell.x;
+    const Corner c00 = corner_at(bias, at);
+    const Corner c10 = corner_at(bias, at + 1);
+    const Corner c01 = corner_at(bias, at + patch_side);
+    const Corner c11 = corner_at(bias, at + patch_side + 1);
+    const Corner near = v < 0.5 ? (u < 0.5 ? c00 : c10) : (u < 0.5 ? c01 : c11);
+    const float3 ground = lerp(lerp(c00.position, c10.position, u),
+                               lerp(c01.position, c11.position, u), v);
+    const float3 normal =
+        normalize(lerp(lerp(c00.normal, c10.normal, u), lerp(c01.normal, c11.normal, u), v));
+    const float3 root = push.origin.xyz + ground;
+
+    // Thinner further off, down to those standing for cells further up the lattice, each blade
+    // going at its own point as the field thins past it and shrinking away as it does, so the
+    // field thins without a pop. Thick patches hold their density only as far as it takes them to
+    // thin to the rest of the field's, as no one sees far into thick grass: they cost no more
+    // blades than it, but grow them all up close.
+    const float thick = thickness(root, lighting.ground.xyz);
+    const float full = tier.x * thick;
     const float hold = tier.y / sqrt(thick);
-    const float held = hold / max(length(push.origin.xyz + near.position), hold);
-    const float kept = min(full * held * held, float(layers));
-    const float thinning = saturate((kept - float(layer) - (0.75 * unit(hash + 11u))) * 4.0);
+    const float held = hold / max(length(root), hold);
+    const float lattice_cell = spacing * to_grid;
+    const float most = exp2(2.0 * float(depth)) / pow(float(patch_cells) * spacing, 2.0);
+    const float kept = min(full * held * held, most);
+    const float thinned_up = -0.5 * log2(kept * lattice_cell * lattice_cell);
+    const uint stood_up = (lattice - sown.level) + stands_up(sown, seed, most_kept_up);
+    // Of those standing just short of how far up it's thinned, the share still kept.
+    const float short_of = min(float(stood_up) + 1.0 - thinned_up, 2.0);
+    const float share = (exp2(2.0 * short_of) - 1.0) / 3.0;
+    const float thinning = saturate((share - (0.75 * unit(hash + 11u))) * 4.0);
     if (thinning <= 0.0) {
         return false;
     }
     // Those left stand for those gone, as wide as they'd cover together.
-    const float stands_for = full / max(kept, 0.25);
+    const float stands_for = full / max(kept, 1.0);
     // Near another biome a plant may be one of its, the fewer the further in.
     const uint biome = unit(hash + 10u) < near.blend ? near.blend_biome : near.biome;
     const float4 kind = settings.blade[biome];
     const float4 spread = settings.spread[biome];
     // Where the trees are gone, grass takes the open ground, once the black of a fire has greened.
-    const float sown = lerp(spread.x, max(spread.x, pioneers), near.gone) * (1.0 - near.scar);
-    const bool lawn_here = kind.w > 0.0 && unit(hash + 2u) < sown;
+    const float sown_share =
+        lerp(spread.x, max(spread.x, pioneers), near.gone) * (1.0 - near.scar);
+    const bool lawn_here = kind.w > 0.0 && unit(hash + 2u) < sown_share;
     if (!lawn_here && spread.w <= 0.0) {
         return false;
     }
     // Sparse biomes grow in clumps rather than an evenly thinned lawn: desert bunchgrass stands
     // in tufts of its own, bare ground between.
-    const uint clump = ((i >> 2) << 3) | (j >> 2);
-    if (unit(hashed(seed ^ (0x517Cu + clump))) >= spread.z) {
+    const FaceCell clump = { blade.face, blade.i >> clump_levels, blade.j >> clump_levels,
+                             blade.level - clump_levels };
+    if (unit(grass_hash(clump, seed ^ 0x517Cu)) >= spread.z) {
         return false;
     }
-    const Corner c00 = corner_at(bias, at);
-    const Corner c10 = corner_at(bias, at + patch_side);
-    const Corner c01 = corner_at(bias, at + 1);
-    const Corner c11 = corner_at(bias, at + patch_side + 1);
-    const float3 ground = lerp(lerp(c00.position, c10.position, u),
-                               lerp(c01.position, c11.position, u), v);
-    const float3 normal =
-        normalize(lerp(lerp(c00.normal, c10.normal, u), lerp(c01.normal, c11.normal, u), v));
 
-    const float3 root = push.origin.xyz + ground;
     const float above = height_above_sea(root, push.bend_up, push.bend_radii.x);
     // At the waterline a reed may stand; elsewhere the lawn grows, keeping off the surf.
     const bool reed = spread.w > 0.0 && above >= reed_low && above <= reed_high &&

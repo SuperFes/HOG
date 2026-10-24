@@ -8,6 +8,7 @@
 #include <hog/planet/tangent_frame.hpp>
 #include <hog/render/barrier.hpp>
 #include <hog/render/device.hpp>
+#include <hog/render/grass_lattice.hpp>
 #include <hog/render/gusts.hpp>
 #include <hog/render/readback.hpp>
 #include <hog/render/render_graph.hpp>
@@ -122,8 +123,10 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
     if (!ocean) {
         return failed("draw the sea", ocean.error());
     }
-    auto grass =
-        render::Grass::create(device, colour_format, depth_format, palette, budget.grass());
+    auto grass = render::Grass::create(
+        device, colour_format, depth_format, palette,
+        render::grass_lattice(world.geology().planet_radius(), world.geology().seed()),
+        budget.grass());
     if (!grass) {
         return failed("grow the grass", grass.error());
     }

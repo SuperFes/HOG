@@ -12,6 +12,14 @@ namespace hog::render {
 inline constexpr double finest_grass_cell = 0.09; // metres across, at most
 [[nodiscard]] int grass_lattice_level(double planet_radius);
 
+// A world's grass lattice: its level, and the seed its dice are cast from.
+struct GrassLattice {
+    int level = 0;
+    std::uint32_t seed = 0;
+};
+
+[[nodiscard]] GrassLattice grass_lattice(double planet_radius, std::uint64_t world_seed);
+
 // A cell's own dice, at any level, from the world's `seed`.
 [[nodiscard]] std::uint32_t grass_hash(planet::FaceIJ cell, std::uint32_t seed) noexcept;
 

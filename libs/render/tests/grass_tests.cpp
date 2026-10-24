@@ -2,10 +2,12 @@
 
 #include <hog/atmosphere/model.hpp>
 #include <hog/core/math.hpp>
+#include <hog/planet/cell_id.hpp>
 #include <hog/planet/climate.hpp>
 #include <hog/render/atmosphere.hpp>
 #include <hog/render/barrier.hpp>
 #include <hog/render/grass.hpp>
+#include <hog/render/grass_lattice.hpp>
 #include <hog/render/memory.hpp>
 #include <hog/render/readback.hpp>
 #include <hog/render/rendering.hpp>
@@ -14,19 +16,23 @@
 #include <hog/terrain/patch.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <glm/geometric.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <numbers>
+#include <span>
 #include <utility>
 #include <vector>
 
 using hog::DVec3;
 using hog::Vec3;
 using hog::WorldPosition;
+using hog::planet::FaceIJ;
 using hog::render::Grass;
 using hog::render::GrassDraw;
 using hog::render::GrassView;
@@ -45,18 +51,24 @@ constexpr DVec3 east{1.0, 0.0, 0.0};
 
 using Pixels = std::vector<std::uint8_t>;
 
-// A flat patch of one biome, or two blended, level at `ground_height`, centred on its origin.
+// The world the test fields grow on, and the cell of a patch `spacing` across, near enough.
+constexpr hog::render::GrassLattice lattice{.level = 21, .seed = 0x5eedU};
+constexpr FaceIJ field_cell{.face = 0, .i = 4'100, .j = 4'100, .level = 13};
+
+// A flat patch of one biome, or two blended, level at `ground_height`, centred on its origin, i
+// running east and j north.
 std::vector<hog::terrain::PatchVertex>
 field(hog::planet::Biome biome, hog::terrain::Cover cover = {},
-      hog::planet::Biome blend_biome = hog::planet::Biome::Ocean, std::uint8_t blend = 0) {
+      hog::planet::Biome blend_biome = hog::planet::Biome::Ocean, std::uint8_t blend = 0,
+      double across = spacing) {
     std::vector<hog::terrain::PatchVertex> vertices(hog::render::patch_vertex_count);
     constexpr int middle = hog::terrain::patch_cells / 2;
-    for (int i = 0; i < hog::terrain::patch_side; ++i) {
-        for (int j = 0; j < hog::terrain::patch_side; ++j) {
-            const std::size_t at = (static_cast<std::size_t>(i) * hog::terrain::patch_side) +
-                                   static_cast<std::size_t>(j);
-            vertices[at] = {.position = Vec3{static_cast<float>((i - middle) * spacing),
-                                             static_cast<float>((j - middle) * spacing), 0.0F},
+    for (int j = 0; j < hog::terrain::patch_side; ++j) {
+        for (int i = 0; i < hog::terrain::patch_side; ++i) {
+            const std::size_t at = (static_cast<std::size_t>(j) * hog::terrain::patch_side) +
+                                   static_cast<std::size_t>(i);
+            vertices[at] = {.position = Vec3{static_cast<float>((i - middle) * across),
+                                             static_cast<float>((j - middle) * across), 0.0F},
                             .normal = Vec3{0.0F, 0.0F, 1.0F},
                             .biome = biome,
                             .cover = cover,
@@ -92,7 +104,7 @@ Pixels draw(hog::render::Device& device, const Field& grown, std::uint32_t* coun
     REQUIRE(sky);
     std::array<Vec3, hog::planet::biome_count> palette{};
     palette.fill(Vec3{0.35F, 0.55F, 0.25F});
-    auto grass = Grass::create(device, colour_format, depth_format, palette, grown.grass);
+    auto grass = Grass::create(device, colour_format, depth_format, palette, lattice, grown.grass);
     REQUIRE(grass);
     auto pool = hog::render::TerrainPool::create(device, {.patches = 1, .frames = 1, .uploads = 1});
     REQUIRE(pool);
@@ -118,7 +130,7 @@ Pixels draw(hog::render::Device& device, const Field& grown, std::uint32_t* coun
                                     .gusts = {.anchor = DVec3{1'000.0} - grown.gusts_drifted,
                                               .along = east,
                                               .wave = -grown.seconds}};
-    const GrassDraw lawn{.slot = slot, .origin = origin, .spacing = spacing, .seed = 7};
+    const GrassDraw lawn{.slot = slot, .origin = origin, .spacing = spacing, .cell = field_cell};
     const GrassView view{.camera = camera,
                          .bend = bend,
                          .air = sky->bindings(0, *atmosphere),
@@ -419,4 +431,171 @@ TEST_CASE("the field frays away towards the end of its reach rather than stoppin
     INFO(left << " of the blades left");
     CHECK(left > 0.2);
     CHECK(left < 0.85);
+}
+
+TEST_CASE("a patch's blades are sown as deep as its grid cells grow them", "[render]") {
+    using hog::render::grass_depth;
+    // Its grid cells, five levels in, grow one each; each level further four times as many.
+    CHECK(grass_depth(1.0, 10) == 5);
+    CHECK(grass_depth(1.1, 10) == 6);
+    CHECK(grass_depth(4.0, 10) == 6);
+    CHECK(grass_depth(5.0, 10) == 7);
+    CHECK(grass_depth(64.0, 10) == 8);
+    CHECK(grass_depth(0.25, 10) == 4);
+    // A blade or none for the whole patch, far off.
+    CHECK(grass_depth(1.0 / 1024.0, 10) == 0);
+    CHECK(grass_depth(1e-9, 10) == 0);
+    // No deeper than most_grass_depth, nor than the lattice.
+    CHECK(grass_depth(1'000.0, 10) == hog::render::most_grass_depth);
+    CHECK(grass_depth(1'000.0, 6) == 6);
+}
+
+namespace {
+
+// One patch of a flat grassland: its cell, its centre east and north of the field's, and the
+// metres between its grid vertices.
+struct Piece {
+    FaceIJ cell;
+    double east = 0.0;
+    double north = 0.0;
+    double across = spacing;
+};
+
+// Where the blades grown on `pieces` of a flat grassland stand, from the eye, seen as draw()
+// sees a field 10 m off.
+std::vector<Vec3> grown_roots(hog::render::Device& device, std::span<const Piece> pieces,
+                              const hog::render::GrassTier& tier) {
+    constexpr VkExtent2D frame{.width = 384, .height = 216};
+    constexpr std::uint32_t most = 1U << 17U;
+    auto atmosphere = hog::render::Atmosphere::create(device);
+    REQUIRE(atmosphere);
+    auto sky = hog::render::Sky::create(device, colour_format, depth_format);
+    REQUIRE(sky);
+    std::array<Vec3, hog::planet::biome_count> palette{};
+    palette.fill(Vec3{0.35F, 0.55F, 0.25F});
+    auto grass = Grass::create(device, colour_format, depth_format, palette, lattice, tier);
+    REQUIRE(grass);
+    const auto count = static_cast<std::uint32_t>(pieces.size());
+    auto pool =
+        hog::render::TerrainPool::create(device, {.patches = count, .frames = 1, .uploads = count});
+    REQUIRE(pool);
+
+    const DVec3 north{0.0, 1.0, 0.0};
+    const WorldPosition eye{up * (radius + ground_height + 1.5)};
+    std::vector<GrassDraw> draws;
+    for (const Piece& piece : pieces) {
+        const std::uint32_t slot = pool->acquire().value_or(99);
+        REQUIRE(pool->stage(
+            0, slot,
+            field(hog::planet::Biome::Grassland, {}, hog::planet::Biome::Ocean, 0, piece.across)));
+        const DVec3 centre = (east * (10.0 + piece.east)) + (north * piece.north);
+        const double reach = piece.across * hog::terrain::patch_cells * std::numbers::sqrt2 / 2.0;
+        draws.push_back({.slot = slot,
+                         .origin = WorldPosition{(up * (radius + ground_height)) + centre},
+                         .spacing = piece.across,
+                         .cell = piece.cell,
+                         .nearest = std::max(0.0, glm::length(centre) - reach)});
+    }
+    const hog::terrain::Bend bend = hog::terrain::bend_from(eye, radius, ground_height);
+    const hog::render::Camera camera{
+        .eye = eye, .forward = glm::normalize(east - (up * 0.35)), .up = up, .vertical_fov = 1.2};
+    const hog::atmosphere::Model model;
+    const DVec3 sun = glm::normalize(east + up);
+    const hog::render::SkyView seen{
+        .camera = camera,
+        .sun = sun,
+        .bend = bend,
+        .exposure = 10.0,
+        .sky_light = model.sky_irradiance(2.0 * hog::render::air_scale(model.air(), bend), sun),
+        .gusts = {}};
+    const GrassView view{.camera = camera, .bend = bend, .air = sky->bindings(0, *atmosphere)};
+
+    constexpr VkDeviceSize arguments_bytes = 16;
+    auto grown = hog::render::make_buffer(
+        device, arguments_bytes + (VkDeviceSize{most} * hog::render::grown_blade_bytes),
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT, hog::render::Memory::Readback);
+    REQUIRE(grown);
+    REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
+        CHECK(pool->record_uploads(commands, 0));
+        CHECK(sky->record_frame(commands, frame, 0, *atmosphere, seen));
+        grass->grow(commands, frame, *pool, draws, view);
+        hog::render::memory_barrier(commands, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
+                                    VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_COPY_BIT,
+                                    VK_ACCESS_2_TRANSFER_READ_BIT);
+        const VkBufferCopy arguments{.srcOffset = 0, .dstOffset = 0, .size = arguments_bytes};
+        vkCmdCopyBuffer(commands, grass->grown_draw(), grown->handle(), 1, &arguments);
+        const VkBufferCopy blades{.srcOffset = 0,
+                                  .dstOffset = arguments_bytes,
+                                  .size = VkDeviceSize{most} * hog::render::grown_blade_bytes};
+        vkCmdCopyBuffer(commands, grass->grown_blades(), grown->handle(), 1, &blades);
+        hog::render::memory_barrier(commands, VK_PIPELINE_STAGE_2_COPY_BIT,
+                                    VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_HOST_BIT,
+                                    VK_ACCESS_2_HOST_READ_BIT);
+    }));
+    CHECK(device.validation_errors() == 0);
+    REQUIRE(grown->invalidate());
+    const std::span<const std::byte> read = grown->mapped();
+    std::uint32_t blades = 0;
+    std::memcpy(&blades, read.subspan(sizeof(std::uint32_t)).data(), sizeof(blades));
+    REQUIRE(blades <= most);
+    std::vector<Vec3> roots(blades);
+    for (std::size_t at = 0; at < roots.size(); ++at) {
+        std::memcpy(&roots[at],
+                    read.subspan(arguments_bytes + (at * hog::render::grown_blade_bytes)).data(),
+                    sizeof(Vec3));
+    }
+    std::ranges::sort(roots, {}, [](const Vec3& root) { return root.x; });
+    return roots;
+}
+
+// How many of `roots` have none of `others` standing within a millimetre of them.
+std::size_t unmatched(const std::vector<Vec3>& roots, const std::vector<Vec3>& others) {
+    constexpr float close = 1e-3F;
+    std::size_t lone = 0;
+    for (const Vec3& root : roots) {
+        const auto from = std::ranges::lower_bound(others, root.x - close, {},
+                                                   [](const Vec3& other) { return other.x; });
+        bool matched = false;
+        for (auto at = from; at != others.end() && at->x <= root.x + close && !matched; ++at) {
+            matched = glm::length(*at - root) < close;
+        }
+        lone += matched ? 0U : 1U;
+    }
+    return lone;
+}
+
+} // namespace
+
+TEST_CASE("a patch grows the very blades its four children do", "[render]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    const Piece whole{.cell = field_cell};
+    std::vector<Piece> quarters;
+    for (std::uint32_t child = 0; child < 4; ++child) {
+        const std::uint32_t across = child & 1U;
+        const std::uint32_t up_it = child >> 1U;
+        const double offset = hog::terrain::patch_cells * spacing / 4.0;
+        quarters.push_back({.cell = {.face = field_cell.face,
+                                     .i = (field_cell.i << 1U) | across,
+                                     .j = (field_cell.j << 1U) | up_it,
+                                     .level = field_cell.level + 1},
+                            .east = across == 0 ? -offset : offset,
+                            .north = up_it == 0 ? -offset : offset,
+                            .across = spacing / 2.0});
+    }
+    // Held thick throughout, and thinning from 3 m, each child sown as deep as its own nearest
+    // blades need.
+    for (const double hold : {1'000.0, 3.0}) {
+        const hog::render::GrassTier tier{.density = 40.0, .hold = hold};
+        const std::vector<Vec3> parent = grown_roots(*device, {&whole, 1}, tier);
+        const std::vector<Vec3> children = grown_roots(*device, quarters, tier);
+        INFO("held to " << hold << " m: " << parent.size() << " blades grown on the patch, "
+                        << children.size() << " on its children");
+        CHECK(parent.size() > 1'000);
+        CHECK(parent.size() == children.size());
+        CHECK(unmatched(parent, children) == 0);
+        CHECK(unmatched(children, parent) == 0);
+    }
 }
