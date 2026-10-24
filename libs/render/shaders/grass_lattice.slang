@@ -41,37 +41,113 @@ public FaceCell standing_for(FaceCell cell, uint lattice_level, uint seed) {
     return cell;
 }
 
-// As render::stands_up, and render::thinning_dice as `dice`.
-public uint stands_up(FaceCell cell, uint seed, uint most, out uint dice) {
+public uint stands_up(FaceCell cell, uint seed, uint most) {
     uint up = 0;
-    uint child = 4;
-    uint hash = 0;
-    bool cast = false;
     while (up < most && cell.level > 0) {
-        child = (cell.i & 1u) | ((cell.j & 1u) << 1);
+        const uint child = (cell.i & 1u) | ((cell.j & 1u) << 1);
         cell.i >>= 1;
         cell.j >>= 1;
         cell.level -= 1;
-        hash = grass_hash(cell, seed);
-        cast = true;
-        if (picked_child(hash) != child) {
+        if (picked_child(grass_hash(cell, seed)) != child) {
             break;
         }
-        child = 4;
         up += 1;
     }
-    dice = lattice_hashed((cast ? hash : grass_hash(cell, seed)) + child + 1u);
     return up;
 }
 
-// As render::unpicked_child, with render::thinning_dice of it as `dice`.
-public FaceCell unpicked_child(FaceCell cell, uint which, uint seed, out uint dice) {
-    const uint hash = grass_hash(cell, seed);
-    const uint child = which + (which >= picked_child(hash) ? 1u : 0u);
-    dice = lattice_hashed(hash + child + 1u);
+public FaceCell unpicked_child(FaceCell cell, uint which, uint seed) {
+    const uint child = which + (which >= picked_child(grass_hash(cell, seed)) ? 1u : 0u);
     const FaceCell finer = { cell.face, (cell.i << 1) | (child & 1u), (cell.j << 1) | (child >> 1),
                              cell.level + 1 };
     return finer;
+}
+
+// As render::dithered and its fellows.
+public static const uint dither_levels = 3;
+static const uint dither_salt = 0xd17eu;
+
+// How the dither block within `block` flips its cells' i and j.
+uint2 dither_of(FaceCell block, uint seed) {
+    const uint hash = grass_hash(block, seed ^ dither_salt);
+    return uint2(hash, hash >> 8);
+}
+
+float dice_of(uint order, uint bits) {
+    return (float(order) + 0.5) / float(3u << (2 * bits));
+}
+
+public float dithered(FaceCell parent, uint which, uint seed) {
+    const uint bits = min(dither_levels, parent.level);
+    const FaceCell block = { parent.face, parent.i >> bits, parent.j >> bits, parent.level - bits };
+    const uint2 flip = dither_of(block, seed);
+    const uint mask = (1u << bits) - 1u;
+    const uint x = (parent.i ^ flip.x) & mask;
+    const uint y = (parent.j ^ flip.y) & mask;
+    uint rank = 0;
+    for (uint level = 0; level < bits; ++level) {
+        const uint across = (x >> level) & 1u;
+        const uint up = (y >> level) & 1u;
+        rank = (rank << 2) | ((across ^ up) << 1) | up;
+    }
+    return dice_of((which << (2 * bits)) + rank, bits);
+}
+
+public float thinning_dice(FaceCell cell, uint seed, uint most) {
+    for (uint up = 0; up < most && cell.level > 0; ++up) {
+        const uint child = (cell.i & 1u) | ((cell.j & 1u) << 1);
+        cell.i >>= 1;
+        cell.j >>= 1;
+        cell.level -= 1;
+        const uint picked = picked_child(grass_hash(cell, seed));
+        if (picked != child) {
+            return dithered(cell, child - (child > picked ? 1u : 0u), seed);
+        }
+    }
+    return 0.0;
+}
+
+public struct Sowing {
+    public FaceCell parent;
+    public uint which;
+    public float dice;
+};
+
+public Sowing sown_in_layer(FaceCell patch, uint above, uint into, uint seed) {
+    const uint level = patch.level + above;
+    const uint bits = min(dither_levels, level);
+    Sowing sowing;
+    if (above < bits) {
+        const uint cell = into / 3;
+        const FaceCell parent = { patch.face, (patch.i << above) + (cell & ((1u << above) - 1u)),
+                                  (patch.j << above) + (cell >> above), level };
+        sowing.parent = parent;
+        sowing.which = into % 3;
+        sowing.dice = dithered(parent, sowing.which, seed);
+        return sowing;
+    }
+    const uint blocks = above - bits;
+    const uint order = into >> (2 * blocks);
+    const uint block = into & ((1u << (2 * blocks)) - 1u);
+    const FaceCell corner = { patch.face, (patch.i << blocks) + (block & ((1u << blocks) - 1u)),
+                              (patch.j << blocks) + (block >> blocks), level - bits };
+    const uint2 flip = dither_of(corner, seed);
+    const uint rank = order & ((1u << (2 * bits)) - 1u);
+    uint x = 0;
+    uint y = 0;
+    for (uint level_in = 0; level_in < bits; ++level_in) {
+        const uint digit = (rank >> (2 * (bits - 1 - level_in))) & 3u;
+        const uint up = digit & 1u;
+        x |= ((digit >> 1) ^ up) << level_in;
+        y |= up << level_in;
+    }
+    const uint mask = (1u << bits) - 1u;
+    const FaceCell parent = { patch.face, (corner.i << bits) + ((x ^ flip.x) & mask),
+                              (corner.j << bits) + ((y ^ flip.y) & mask), level };
+    sowing.parent = parent;
+    sowing.which = order >> (2 * bits);
+    sowing.dice = dice_of(order, bits);
+    return sowing;
 }
 
 public float2 grass_spot(uint hash) {

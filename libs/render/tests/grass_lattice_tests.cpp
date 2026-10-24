@@ -50,6 +50,16 @@ std::vector<FaceIJ> cells_at(int level, std::size_t count) {
     return cells;
 }
 
+// A layer's depth, 0 to 5, and a blade's place in it, for the probe's `at`th ask.
+std::uint32_t layer_of(std::size_t at) {
+    return static_cast<std::uint32_t>(at % 6U);
+}
+
+std::uint32_t into_of(std::size_t at) {
+    const std::uint64_t dice = hog::hash_values(11, at);
+    return static_cast<std::uint32_t>(dice % (3U << (2U * layer_of(at))));
+}
+
 FaceIJ parent_of(FaceIJ cell) {
     return {.face = cell.face, .i = cell.i >> 1U, .j = cell.j >> 1U, .level = cell.level - 1};
 }
@@ -117,10 +127,9 @@ TEST_CASE("thinner grass keeps some of the blades thicker grass grows", "[grass]
 
 TEST_CASE("a blade is thinned by the same dice whichever cell it's sown from", "[grass]") {
     using hog::render::thinning_dice;
-    std::size_t alike = 0;
     for (const FaceIJ& cell : cells_at(lattice - 6, 400)) {
         const FaceIJ blade = standing_for(cell, lattice, seed);
-        const std::uint32_t dice = thinning_dice(blade, seed, 16);
+        const float dice = thinning_dice(blade, seed, 16);
         // Sown from any cell on the way up to the highest it stands for.
         FaceIJ sown = blade;
         for (int up = stands_up(blade, seed, 16); up > 0; --up) {
@@ -128,14 +137,77 @@ TEST_CASE("a blade is thinned by the same dice whichever cell it's sown from", "
             CHECK(thinning_dice(sown, seed, 16) == dice);
         }
         CHECK(thinning_dice(cell, seed, 16) == dice);
-        // Its neighbours' their own.
-        alike +=
-            thinning_dice({.face = blade.face, .i = blade.i ^ 1U, .j = blade.j, .level = lattice},
-                          seed, 16) == dice
-                ? 1U
-                : 0U;
     }
-    CHECK(alike == 0U);
+}
+
+TEST_CASE("thinning keeps a share of unpicked blades as evenly as it can", "[grass]") {
+    using hog::render::dithered;
+    constexpr std::uint32_t across = 1U << static_cast<unsigned>(hog::render::dither_levels);
+    constexpr std::uint32_t ranks = across * across;
+    for (const FaceIJ& block : cells_at(lattice - 8, 50)) {
+        std::vector<float> shares;
+        for (int which = 0; which < 3; ++which) {
+            for (std::uint32_t at = 0; at < ranks; ++at) {
+                const FaceIJ parent{.face = block.face,
+                                    .i = (block.i * across) + (at % across),
+                                    .j = (block.j * across) + (at / across),
+                                    .level = block.level + hog::render::dither_levels};
+                const float share = dithered(parent, which, seed);
+                // Each child after the cells' first ones.
+                CHECK(share >= static_cast<float>(which) / 3.0F);
+                CHECK(share < static_cast<float>(which + 1) / 3.0F);
+                shares.push_back(share);
+            }
+        }
+        // Each its own place in the block's order.
+        std::ranges::sort(shares);
+        CHECK(std::ranges::adjacent_find(shares) == shares.end());
+        // The first quarter of the first children kept, one in each two by two.
+        for (std::uint32_t quad = 0; quad < ranks / 4; ++quad) {
+            const std::uint32_t qi = (quad % (across / 2)) * 2;
+            const std::uint32_t qj = (quad / (across / 2)) * 2;
+            int kept = 0;
+            for (std::uint32_t at = 0; at < 4; ++at) {
+                const FaceIJ parent{.face = block.face,
+                                    .i = (block.i * across) + qi + (at & 1U),
+                                    .j = (block.j * across) + qj + (at >> 1U),
+                                    .level = block.level + hog::render::dither_levels};
+                kept += dithered(parent, 0, seed) < 1.0F / 12.0F ? 1 : 0;
+            }
+            CHECK(kept == 1);
+        }
+    }
+}
+
+TEST_CASE("a patch's layer sows each cell's unpicked children once, in thinning's order",
+          "[grass]") {
+    using hog::render::sown_in_layer;
+    for (const FaceIJ& patch : cells_at(lattice - 9, 6)) {
+        for (int above = 0; above <= 5; ++above) {
+            const std::uint32_t count = 3U << (2U * static_cast<unsigned>(above));
+            std::vector<std::uint64_t> sown;
+            float last = 0.0F;
+            bool ordered = true;
+            for (std::uint32_t into = 0; into < count; ++into) {
+                const hog::render::Sowing sowing = sown_in_layer(patch, above, into, seed);
+                CHECK(sowing.parent.level == patch.level + above);
+                CHECK(sowing.parent.i >> static_cast<unsigned>(above) == patch.i);
+                CHECK(sowing.parent.j >> static_cast<unsigned>(above) == patch.j);
+                CHECK(sowing.dice == hog::render::dithered(sowing.parent, sowing.which, seed));
+                ordered = ordered && sowing.dice >= last;
+                last = sowing.dice;
+                sown.push_back((std::uint64_t{sowing.parent.i} << 34U) |
+                               (std::uint64_t{sowing.parent.j} << 2U) |
+                               static_cast<std::uint64_t>(sowing.which));
+            }
+            std::ranges::sort(sown);
+            CHECK(std::ranges::adjacent_find(sown) == sown.end());
+            // Kept in order, where the layer spans a block.
+            if (above >= hog::render::dither_levels) {
+                CHECK(ordered);
+            }
+        }
+    }
 }
 
 TEST_CASE("a cell's unpicked children grow the blades it doesn't stand for", "[grass]") {
@@ -151,6 +223,8 @@ TEST_CASE("a cell's unpicked children grow the blades it doesn't stand for", "[g
             CHECK(stands_up(blade, seed, 16) == lattice - child.level);
             CHECK(hog::render::thinning_dice(child, seed, 16) ==
                   hog::render::thinning_dice(blade, seed, 16));
+            CHECK(hog::render::thinning_dice(blade, seed, 16) ==
+                  hog::render::dithered(cell, which, seed));
             blades.push_back(blade);
         }
         // With the cell's own, one for each of its children.
@@ -217,33 +291,50 @@ TEST_CASE("the GPU's grass lattice is the CPU's to the bit", "[grass][gpu]") {
         asked.push_back({std::bit_cast<float>(seed),
                          std::bit_cast<float>(static_cast<std::uint32_t>(lattice)),
                          std::bit_cast<float>(8U), on});
+        const std::size_t at = asked.size() / 3;
+        asked.push_back({std::bit_cast<float>(layer_of(at)), std::bit_cast<float>(into_of(at)),
+                         std::bit_cast<float>(static_cast<std::uint32_t>(at % 3U)), 0.0F});
     }
     const std::vector<Probed> found =
-        probed(*device, hog::shaders::grass_lattice_probe, asked, 4 * cells.size());
+        probed(*device, hog::shaders::grass_lattice_probe, asked, 6 * cells.size());
     for (std::size_t at = 0; at < cells.size(); ++at) {
         const FaceIJ& cell = cells[at];
         const std::uint32_t hash = grass_hash(cell, seed);
-        const Probed& dice = found[4 * at];
+        const Probed& dice = found[6 * at];
         CHECK(std::bit_cast<std::uint32_t>(dice[0]) == hash);
         CHECK(dice[1] == static_cast<float>(stands_up(cell, seed, 8)));
         const hog::Vec2 spot = grass_spot(hash);
         CHECK(dice[2] == spot.x);
         CHECK(dice[3] == spot.y);
         const FaceIJ standing = standing_for(cell, lattice, seed);
-        const Probed& stood = found[(4 * at) + 1];
+        const Probed& stood = found[(6 * at) + 1];
         CHECK(std::bit_cast<std::uint32_t>(stood[0]) == static_cast<std::uint32_t>(standing.face));
         CHECK(std::bit_cast<std::uint32_t>(stood[1]) == standing.i);
         CHECK(std::bit_cast<std::uint32_t>(stood[2]) == standing.j);
         CHECK(std::bit_cast<std::uint32_t>(stood[3]) == static_cast<std::uint32_t>(standing.level));
-        CHECK(std::abs(found[(4 * at) + 2][0] - clumped(cell, spot, seed, on)) < 1e-5F);
-        CHECK(std::bit_cast<std::uint32_t>(found[(4 * at) + 2][1]) ==
-              hog::render::thinning_dice(cell, seed, 8));
+        CHECK(std::abs(found[(6 * at) + 2][0] - clumped(cell, spot, seed, on)) < 1e-5F);
+        CHECK(found[(6 * at) + 2][1] == hog::render::thinning_dice(cell, seed, 8));
+        const auto which = std::bit_cast<std::uint32_t>(asked[(3 * at) + 2][2]);
+        CHECK(found[(6 * at) + 2][2] == hog::render::dithered(cell, static_cast<int>(which), seed));
         const FaceIJ child = hog::render::unpicked_child(cell, 0, seed);
-        const Probed& sown = found[(4 * at) + 3];
+        const Probed& sown = found[(6 * at) + 3];
         CHECK(std::bit_cast<std::uint32_t>(sown[0]) == static_cast<std::uint32_t>(child.face));
         CHECK(std::bit_cast<std::uint32_t>(sown[1]) == child.i);
         CHECK(std::bit_cast<std::uint32_t>(sown[2]) == child.j);
         CHECK(std::bit_cast<std::uint32_t>(sown[3]) == static_cast<std::uint32_t>(child.level));
+        const hog::render::Sowing sowing = hog::render::sown_in_layer(
+            cell, static_cast<int>(std::bit_cast<std::uint32_t>(asked[(3 * at) + 2][0])),
+            std::bit_cast<std::uint32_t>(asked[(3 * at) + 2][1]), seed);
+        const Probed& parent = found[(6 * at) + 4];
+        CHECK(std::bit_cast<std::uint32_t>(parent[0]) ==
+              static_cast<std::uint32_t>(sowing.parent.face));
+        CHECK(std::bit_cast<std::uint32_t>(parent[1]) == sowing.parent.i);
+        CHECK(std::bit_cast<std::uint32_t>(parent[2]) == sowing.parent.j);
+        CHECK(std::bit_cast<std::uint32_t>(parent[3]) ==
+              static_cast<std::uint32_t>(sowing.parent.level));
+        CHECK(std::bit_cast<std::uint32_t>(found[(6 * at) + 5][0]) ==
+              static_cast<std::uint32_t>(sowing.which));
+        CHECK(found[(6 * at) + 5][1] == sowing.dice);
     }
 }
 

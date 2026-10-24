@@ -38,11 +38,33 @@ struct GrassLattice {
 [[nodiscard]] planet::FaceIJ unpicked_child(planet::FaceIJ cell, int which,
                                             std::uint32_t seed) noexcept;
 
-// The dice the blade in lattice cell `cell` is thinned by, looking `most` levels up at most: cast
-// at the cell just over the highest it stands for, so the same whichever of those it's sown from,
-// and found on the way up to it.
-[[nodiscard]] std::uint32_t thinning_dice(planet::FaceIJ cell, std::uint32_t seed,
-                                          int most) noexcept;
+// Thinning keeps unpicked children's blades in an ordered dither over blocks of cells this many
+// levels across, each block's scrambled its own way: a share of them always as even as it can be,
+// and those kept first found first.
+inline constexpr int dither_levels = 3;
+
+// The share, 0 to 1, of the blades of `parent`'s unpicked children thinning has kept by the time
+// it keeps that of its `which`th: first one child's of each cell, in the block's order, then
+// another's.
+[[nodiscard]] float dithered(planet::FaceIJ parent, int which, std::uint32_t seed) noexcept;
+
+// The dice the blade in lattice cell `cell` is thinned by, looking `most` levels up at most: as
+// dithered has it for the highest cell it stands for, so the same whichever of those it's sown
+// from, and found on the way up to it. Those standing for `most` levels or more keep 0.
+[[nodiscard]] float thinning_dice(planet::FaceIJ cell, std::uint32_t seed, int most) noexcept;
+
+// A blade a patch grows in its layer `above` levels into its cell, the blades of the unpicked
+// children of the cells that deep: the cell, which of its unpicked children, and its dice.
+struct Sowing {
+    planet::FaceIJ parent;
+    int which = 0;
+    float dice = 0.0F;
+};
+
+// The `into`th blade, of three for each cell, of `patch`'s layer `above` levels in: in the order
+// thinning keeps them, where a layer spans a dither block or more.
+[[nodiscard]] Sowing sown_in_layer(planet::FaceIJ patch, int above, std::uint32_t into,
+                                   std::uint32_t seed) noexcept;
 
 // Where in its lattice cell the blade of `hash`, as grass_hash has it, stands: s and t, 0 to 1,
 // as the face's.

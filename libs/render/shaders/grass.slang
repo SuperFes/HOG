@@ -225,10 +225,11 @@ bool grow(uint instance, out Grown grown) {
         return false;
     }
     FaceCell sown = { record.x, record.y, record.z, patch_level };
-    uint dice;
+    float dice;
     uint stood_up;
     if (instance == 0) {
-        stood_up = (lattice - patch_level) + stands_up(sown, seed, most_kept_up, dice);
+        stood_up = (lattice - patch_level) + stands_up(sown, seed, most_kept_up);
+        dice = thinning_dice(sown, seed, most_kept_up);
     } else {
         const uint above = firstbithigh(instance) / 2;
         stood_up = lattice - (patch_level + above + 1);
@@ -236,13 +237,15 @@ bool grow(uint instance, out Grown grown) {
         if (kept_share(stood_up, least_up) <= 0.0) {
             return false;
         }
-        const uint into = instance - (1u << (2 * above));
-        const uint cell = into / 3;
-        const FaceCell parent = { record.x, (record.y << above) + (cell & ((1u << above) - 1u)),
-                                  (record.z << above) + (cell >> above), patch_level + above };
-        sown = unpicked_child(parent, into % 3, seed, dice);
+        const Sowing sowing = sown_in_layer(sown, above, instance - (1u << (2 * above)), seed);
+        dice = sowing.dice;
+        // Thinned in order, so whole waves of them go together here too.
+        if (kept_share(stood_up, least_up) <= 0.75 * dice) {
+            return false;
+        }
+        sown = unpicked_child(sowing.parent, sowing.which, seed);
     }
-    const float thinned_by = 0.75 * unit(dice);
+    const float thinned_by = 0.75 * dice;
     if (kept_share(stood_up, least_up) <= thinned_by) {
         return false;
     }
