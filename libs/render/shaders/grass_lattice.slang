@@ -60,3 +60,56 @@ public float2 grass_spot(uint hash) {
     const uint spot = lattice_hashed(hash);
     return float2(float(spot & 0xffffu), float(spot >> 16)) / 65536.0;
 }
+
+// As render::clumped: the clumps sparse grass grows in, corners clump_levels up the lattice each
+// on or off, the grass growing where they blend to over half, its edges roughened by finer corners.
+public static const uint clump_levels = 5;
+static const uint clump_wobble_levels = 3;
+static const uint clump_salt = 0x517cu;
+static const uint wobble_salt = 0xc0bbu;
+static const float wobble = 0.2;
+
+float unit_of(uint hash) {
+    return float(hash >> 8) / 16777216.0;
+}
+
+float mixed(float from, float to, float by) {
+    return from + ((to - from) * by);
+}
+
+// Where in the cell `levels` up from `blade` the blade stands, 0 to 1 across it.
+float2 within(FaceCell blade, float2 spot, uint levels) {
+    const uint inside = (1u << levels) - 1u;
+    return (float2(float(blade.i & inside), float(blade.j & inside)) + spot) /
+           float(inside + 1u);
+}
+
+FaceCell corner_of(FaceCell blade, uint levels, uint across, uint up) {
+    const FaceCell corner = { blade.face, (blade.i >> levels) + across,
+                              (blade.j >> levels) + up, blade.level - levels };
+    return corner;
+}
+
+float corner_on(FaceCell blade, uint across, uint up, uint seed, float on) {
+    return unit_of(grass_hash(corner_of(blade, clump_levels, across, up), seed ^ clump_salt)) < on
+               ? 1.0
+               : 0.0;
+}
+
+float corner_rough(FaceCell blade, uint across, uint up, uint seed) {
+    return unit_of(grass_hash(corner_of(blade, clump_wobble_levels, across, up), seed ^ wobble_salt));
+}
+
+public float clumped(FaceCell blade, float2 spot, uint seed, float on) {
+    const float2 at = within(blade, spot, clump_levels);
+    const float corners =
+        mixed(mixed(corner_on(blade, 0, 0, seed, on), corner_on(blade, 1, 0, seed, on), at.x),
+              mixed(corner_on(blade, 0, 1, seed, on), corner_on(blade, 1, 1, seed, on), at.x),
+              at.y);
+    const float2 fine = within(blade, spot, clump_wobble_levels);
+    const float rough =
+        mixed(mixed(corner_rough(blade, 0, 0, seed), corner_rough(blade, 1, 0, seed), fine.x),
+              mixed(corner_rough(blade, 0, 1, seed), corner_rough(blade, 1, 1, seed), fine.x),
+              fine.y);
+    return corners + (2.0 * wobble * (rough - 0.5)) - 0.5;
+}

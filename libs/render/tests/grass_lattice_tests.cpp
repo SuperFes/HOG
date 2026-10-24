@@ -9,6 +9,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cmath>
@@ -18,6 +19,8 @@
 #include <vector>
 
 using hog::planet::FaceIJ;
+using hog::render::clump_corners_on;
+using hog::render::clumped;
 using hog::render::grass_hash;
 using hog::render::grass_lattice_level;
 using hog::render::grass_spot;
@@ -149,6 +152,7 @@ TEST_CASE("blades stand anywhere in their cells, evenly", "[grass]") {
 
 TEST_CASE("the GPU's grass lattice is the CPU's to the bit", "[grass][gpu]") {
     auto device = test_device();
+    constexpr float on = 0.4F;
     const std::vector<FaceIJ> cells = [] {
         std::vector<FaceIJ> all = cells_at(lattice, 300);
         for (const FaceIJ& coarse : cells_at(lattice - 5, 100)) {
@@ -163,24 +167,70 @@ TEST_CASE("the GPU's grass lattice is the CPU's to the bit", "[grass][gpu]") {
                          std::bit_cast<float>(static_cast<std::uint32_t>(cell.level))});
         asked.push_back({std::bit_cast<float>(seed),
                          std::bit_cast<float>(static_cast<std::uint32_t>(lattice)),
-                         std::bit_cast<float>(8U), 0.0F});
+                         std::bit_cast<float>(8U), on});
     }
     const std::vector<Probed> found =
-        probed(*device, hog::shaders::grass_lattice_probe, asked, 2 * cells.size());
+        probed(*device, hog::shaders::grass_lattice_probe, asked, 3 * cells.size());
     for (std::size_t at = 0; at < cells.size(); ++at) {
         const FaceIJ& cell = cells[at];
         const std::uint32_t hash = grass_hash(cell, seed);
-        const Probed& dice = found[2 * at];
+        const Probed& dice = found[3 * at];
         CHECK(std::bit_cast<std::uint32_t>(dice[0]) == hash);
         CHECK(dice[1] == static_cast<float>(stands_up(cell, seed, 8)));
         const hog::Vec2 spot = grass_spot(hash);
         CHECK(dice[2] == spot.x);
         CHECK(dice[3] == spot.y);
         const FaceIJ standing = standing_for(cell, lattice, seed);
-        const Probed& stood = found[(2 * at) + 1];
+        const Probed& stood = found[(3 * at) + 1];
         CHECK(std::bit_cast<std::uint32_t>(stood[0]) == static_cast<std::uint32_t>(standing.face));
         CHECK(std::bit_cast<std::uint32_t>(stood[1]) == standing.i);
         CHECK(std::bit_cast<std::uint32_t>(stood[2]) == standing.j);
         CHECK(std::bit_cast<std::uint32_t>(stood[3]) == static_cast<std::uint32_t>(standing.level));
+        CHECK(std::abs(found[(3 * at) + 2][0] - clumped(cell, spot, seed, on)) < 1e-5F);
     }
+}
+
+TEST_CASE("clumps of sparse grass cover the share of the ground asked of them", "[grass]") {
+    const std::vector<FaceIJ> cells = cells_at(lattice, 40'000);
+    for (const float share : {0.08F, 0.25F, 0.45F, 0.75F, 0.9F}) {
+        const float on = clump_corners_on(share);
+        std::size_t covered = 0;
+        for (const FaceIJ& cell : cells) {
+            const std::uint32_t hash = grass_hash(cell, seed);
+            covered += clumped(cell, grass_spot(hash), seed, on) > 0.0F ? 1U : 0U;
+        }
+        const double found = static_cast<double>(covered) / static_cast<double>(cells.size());
+        INFO(share << " of the ground asked, corners on " << on << ", " << found << " covered");
+        CHECK(std::abs(found - static_cast<double>(share)) < 0.03);
+    }
+    CHECK(clump_corners_on(0.0F) == 0.0F);
+    CHECK(clump_corners_on(1.0F) == 1.0F);
+    for (const FaceIJ& cell : cells_at(lattice, 1'000)) {
+        const hog::Vec2 spot = grass_spot(grass_hash(cell, seed));
+        CHECK(clumped(cell, spot, seed, 0.0F) < 0.0F);
+        CHECK(clumped(cell, spot, seed, 1.0F) > 0.0F);
+    }
+}
+
+TEST_CASE("a clump's edge runs on unbroken from one clump cell to the next", "[grass]") {
+    constexpr std::uint32_t across = 1U << static_cast<unsigned>(hog::render::clump_levels);
+    constexpr float edge = 65'535.0F / 65'536.0F;
+    const float on = clump_corners_on(0.45F);
+    float steepest = 0.0F;
+    for (const FaceIJ& clump : cells_at(lattice - hog::render::clump_levels, 2'000)) {
+        // The last lattice cell of one clump cell, and the first of the next, east and north.
+        const FaceIJ last{.face = clump.face,
+                          .i = (clump.i * across) + across - 1,
+                          .j = (clump.j * across) + across - 1,
+                          .level = lattice};
+        const float here = clumped(last, {edge, edge}, seed, on);
+        const float east =
+            clumped({.face = last.face, .i = last.i + 1, .j = last.j, .level = lattice},
+                    {0.0F, edge}, seed, on);
+        const float north =
+            clumped({.face = last.face, .i = last.i, .j = last.j + 1, .level = lattice},
+                    {edge, 0.0F}, seed, on);
+        steepest = std::max({steepest, std::abs(east - here), std::abs(north - here)});
+    }
+    CHECK(steepest < 1e-3F);
 }

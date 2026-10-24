@@ -2,6 +2,9 @@
 #include <hog/planet/projection.hpp>
 #include <hog/render/grass_lattice.hpp>
 
+#include <cstdint>
+#include <numbers>
+
 namespace hog::render {
 
 namespace {
@@ -9,6 +12,37 @@ namespace {
 // The child of a cell its dice pick: i in the low bit, j in the high.
 std::uint32_t picked_child(std::uint32_t hash) noexcept {
     return hash >> 30U;
+}
+
+// Salts of the clump corners' dice, set apart from the blades'.
+constexpr std::uint32_t clump_salt = 0x517cU;
+constexpr std::uint32_t wobble_salt = 0xc0bbU;
+// How far either way the finer corners shift where a clump's edge falls.
+constexpr float wobble = 0.2F;
+
+float unit(std::uint32_t hash) noexcept {
+    return static_cast<float>(hash >> 8U) / 16'777'216.0F;
+}
+
+float mixed(float from, float to, float by) noexcept {
+    return from + ((to - from) * by);
+}
+
+// The dice of the corners of the cell `levels` up from `blade`, blended to where in it the blade
+// stands; each corner's dice as `dice` casts it.
+template <typename Dice>
+float blended(planet::FaceIJ blade, Vec2 spot, int levels, Dice dice) noexcept {
+    const std::uint32_t inside = (1U << static_cast<unsigned>(levels)) - 1U;
+    const auto cells = static_cast<float>(inside + 1U);
+    const float x = (static_cast<float>(blade.i & inside) + spot.x) / cells;
+    const float y = (static_cast<float>(blade.j & inside) + spot.y) / cells;
+    const auto corner = [&](std::uint32_t across, std::uint32_t up) {
+        return dice(planet::FaceIJ{.face = blade.face,
+                                   .i = (blade.i >> static_cast<unsigned>(levels)) + across,
+                                   .j = (blade.j >> static_cast<unsigned>(levels)) + up,
+                                   .level = blade.level - levels});
+    };
+    return mixed(mixed(corner(0, 0), corner(1, 0), x), mixed(corner(0, 1), corner(1, 1), x), y);
 }
 
 } // namespace
@@ -51,6 +85,37 @@ int stands_up(planet::FaceIJ cell, std::uint32_t seed, int most) noexcept {
         ++up;
     }
     return up;
+}
+
+float clumped(planet::FaceIJ blade, Vec2 spot, std::uint32_t seed, float on) noexcept {
+    const float corners = blended(blade, spot, clump_levels, [&](planet::FaceIJ corner) {
+        return unit(grass_hash(corner, seed ^ clump_salt)) < on ? 1.0F : 0.0F;
+    });
+    const float rough = blended(blade, spot, clump_wobble_levels, [&](planet::FaceIJ corner) {
+        return unit(grass_hash(corner, seed ^ wobble_salt));
+    });
+    return corners + (2.0F * wobble * (rough - 0.5F)) - 0.5F;
+}
+
+float clump_corners_on(float share) noexcept {
+    if (share <= 0.0F || share >= 1.0F) {
+        return share <= 0.0F ? 0.0F : 1.0F;
+    }
+    // A cell's ground over half its corners' blend, with one corner on: from a corner to where
+    // x y = 1/2. Two on cover half of it, three all but one corner's share.
+    const double one = (1.0 - std::numbers::ln2) / 2.0;
+    const auto covered = [&](double on) {
+        const double off = 1.0 - on;
+        return (4.0 * on * off * off * off * one) + (6.0 * on * on * off * off * 0.5) +
+               (4.0 * on * on * on * off * (1.0 - one)) + (on * on * on * on);
+    };
+    double low = 0.0;
+    double high = 1.0;
+    for (int step = 0; step < 40; ++step) {
+        const double middle = (low + high) / 2.0;
+        (covered(middle) < static_cast<double>(share) ? low : high) = middle;
+    }
+    return static_cast<float>((low + high) / 2.0);
 }
 
 Vec2 grass_spot(std::uint32_t hash) noexcept {

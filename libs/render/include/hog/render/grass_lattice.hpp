@@ -37,4 +37,17 @@ struct GrassLattice {
 // as the face's.
 [[nodiscard]] Vec2 grass_spot(std::uint32_t hash) noexcept;
 
+// The clumps sparse grass grows in: corners this many levels up the lattice from its blades, each
+// on or off, the grass growing where they blend to over half, so lone corners grow round tufts
+// and neighbours join into bands and fields; its edges roughened by finer corners.
+inline constexpr int clump_levels = 5;
+inline constexpr int clump_wobble_levels = 3;
+
+// How far into a clump the blade of lattice cell `blade`, at `spot` in it, stands: above 0 within
+// one, below 0 outside, where each clump corner is on with chance `on`.
+[[nodiscard]] float clumped(planet::FaceIJ blade, Vec2 spot, std::uint32_t seed, float on) noexcept;
+
+// The chance each clump corner is on for clumps to cover `share` of the ground.
+[[nodiscard]] float clump_corners_on(float share) noexcept;
+
 } // namespace hog::render

@@ -85,7 +85,7 @@ struct BiomeGrass {
     float height = 0.0F; // metres; none grows no grass
     float share = 0.0F;  // of blades grown within a clump, 0 to 1
     float width = 0.02F; // metres
-    float clumps = 1.0F; // of clumps grown: 1 everywhere, low for lone tufts on bare ground
+    float clumps = 1.0F; // of the ground in clumps: 1 everywhere, low for lone tufts on bare ground
     float reeds = 0.0F;  // share of stems standing in the band at the waterline
 };
 
@@ -172,7 +172,7 @@ Settings grass_settings(std::span<const Vec3> palette, const GrassLattice& latti
         settings.blade.at(static_cast<std::size_t>(biome)) =
             glm::vec4{palette[static_cast<std::size_t>(biome)] * blade_shade, grass.height};
         settings.spread.at(static_cast<std::size_t>(biome)) =
-            glm::vec4{grass.share, grass.width, grass.clumps, grass.reeds};
+            glm::vec4{grass.share, grass.width, clump_corners_on(grass.clumps), grass.reeds};
     }
     return settings;
 }

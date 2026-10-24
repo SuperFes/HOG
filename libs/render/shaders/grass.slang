@@ -32,7 +32,7 @@ static const uint biome_count = 14;
 struct Settings {
     // Each biome's blades: rgb their colour, w their height in metres, none for no grass.
     float4 blade[biome_count];
-    // x the share of blades grown, y their width in metres, z the share of clumps grown,
+    // x the share of blades grown, y their width in metres, z the chance each clump corner is on,
     // w the share of reed stems standing in the band at the waterline.
     float4 spread[biome_count];
     // How it thins: x blades a square metre up close, y the metres that density holds to before
@@ -65,8 +65,6 @@ static const float fraying = 0.4;
 // How much darker a field of grass shows than its ground's colour, as terrain.slang's
 // grass_field_shade: what blades melting into the ground wear.
 static const float field_shade = 0.7;
-// Levels up the lattice from a blade to the cell of the clump it grows in.
-static const uint clump_levels = 5;
 // Levels up the lattice a blade is looked at for whether it's kept, at most.
 static const uint most_kept_up = 16;
 
@@ -215,12 +213,13 @@ bool grow(uint instance, out Grown grown) {
                             (patch_cell.z << depth) + (instance >> depth), patch_cell.w + depth };
     const FaceCell blade = standing_for(sown, lattice, seed);
     const uint hash = grass_hash(blade, seed);
+    const float2 spot = grass_spot(hash);
     const uint to_lattice = lattice - patch_cell.w;
     // Lattice cells to a grid cell, as a fraction of one.
     const float to_grid = exp2(float(patch_cell.w + patch_depth) - float(lattice));
     const float2 on_grid =
         min((float2(float(blade.i - (patch_cell.y << to_lattice)),
-                    float(blade.j - (patch_cell.z << to_lattice))) + grass_spot(hash)) * to_grid,
+                    float(blade.j - (patch_cell.z << to_lattice))) + spot) * to_grid,
             float(patch_cells) - 1e-4);
 
     // Rooted within its grid cell, on ground interpolated between the cell's corners.
@@ -275,9 +274,7 @@ bool grow(uint instance, out Grown grown) {
     }
     // Sparse biomes grow in clumps rather than an evenly thinned lawn: desert bunchgrass stands
     // in tufts of its own, bare ground between.
-    const FaceCell clump = { blade.face, blade.i >> clump_levels, blade.j >> clump_levels,
-                             blade.level - clump_levels };
-    if (unit(grass_hash(clump, seed ^ 0x517Cu)) >= spread.z) {
+    if (spread.z < 1.0 && clumped(blade, spot, seed, spread.z) <= 0.0) {
         return false;
     }
 
