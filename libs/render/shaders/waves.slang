@@ -955,7 +955,8 @@ public float4 floor_at(Waves waves, Sampler2DArray depths, Sampler2DArray fetche
     if (sea_reached(floor.x) <= 0.0) {
         const float level = still_water_at(waves, depths, rest).x;
         const float3 still = still_floor(waves, depths, rest);
-        if (still.x > 0.0 || level > 0.0) {
+        // Low ground nothing covers has its level kept under it, a lake's above the sea.
+        if (still.x > 0.0 || level != 0.0) {
             fetch = max(still_fetch_at(waves, fetches, rest), shallowest_fetch);
             return float4(still.x >= waves.count_left_radius.w ? deep_floor() : still, level);
         }

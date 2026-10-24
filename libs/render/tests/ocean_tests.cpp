@@ -625,6 +625,27 @@ TEST_CASE("a lake stands at its level over its bed, high above the sea", "[rende
     CHECK(device->validation_errors() == 0);
 }
 
+TEST_CASE("low ground the grids find dry shows no water, however far below the sea",
+          "[render][gpu]") {
+    const auto device = test_device();
+    const std::uint32_t middle = extent.width / 2;
+    const OceanView view = seen_from(-16.0, -up, north, glm::normalize(east + up));
+    const auto seen = [&](bool sea, bool tinted, std::optional<Tide> tide) {
+        return pixel_at(draw(*device, view, -20.0, sea, tinted, tide), middle, middle);
+    };
+    // Twenty metres below the sea, its level kept under the ground as for ground nothing covers.
+    const Pixel bare = seen(false, false, std::nullopt);
+    const Pixel dry = seen(true, true,
+                           Tide{.depth = hog::terrain::shore_highest,
+                                .still = hog::terrain::shore_highest,
+                                .level = -20.0F + hog::terrain::shore_highest});
+    CAPTURE(bare, dry);
+    CHECK(dry == bare);
+    // Where the sea reaches it instead, the eye is under it.
+    CHECK(seen(true, true, Tide{.depth = 20.0F}) != bare);
+    CHECK(device->validation_errors() == 0);
+}
+
 TEST_CASE("the swash runs up the shore and draws back, leaving the sand wet", "[render][gpu]") {
     const auto device = test_device();
     const OceanView view = seen_from(4.0, -up, north, glm::normalize(east + up));

@@ -322,6 +322,17 @@ TEST_CASE("low ground the sea can't reach lies dry unless the sea stands over it
     CHECK(fine_at(still, 160, 30) == kept);
 }
 
+TEST_CASE("dry low ground keeps its level under the ground", "[terrain][shore]") {
+    constexpr float kept = hog::terrain::shore_highest;
+    // Dry low ground, low ground under the sea, under still water, under a lake, and high ground.
+    const std::vector<float> elevations{-20.0F, -20.0F, -20.0F, 5.0F, 30.0F};
+    const std::vector<float> depths{kept, 20.0F, kept, kept, kept};
+    const std::vector<float> still{kept, kept, 20.0F, 2.0F, kept};
+    std::vector<float> levels{0.0F, 0.0F, 0.0F, 7.0F, 0.0F};
+    hog::terrain::keep_dry(elevations, depths, still, levels);
+    CHECK(levels == std::vector<float>{-20.0F + kept, 0.0F, 0.0F, 7.0F, 0.0F});
+}
+
 TEST_CASE("the shore's ground is the world's as changed, its water as generated",
           "[terrain][shore]") {
     hog::planet::World dug{planet};

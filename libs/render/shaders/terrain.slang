@@ -384,11 +384,16 @@ float lake_level(Ground ground) {
     return lake_over(water) ? water.x : 0.0;
 }
 
-// How high the water stands over sea level at the ground: a lake's level, where one stands over it,
-// or else the sea's over its mean.
+// How high the water stands over sea level at the ground: a lake's level, where one stands over it;
+// under the ground, where the grids find it low but dry; or else the sea's over its mean.
 float sea_level(Ground ground) {
-    const float lake = lake_level(ground);
-    return lake > 0.0 ? lake : level_now(shore_level(ground));
+    if (settings.tiling.z > 0.0) {
+        const float2 water = still_water_at(sea, shore_depths, ground.from_eye);
+        if (lake_over(water) || water.x < 0.0) {
+            return water.x;
+        }
+    }
+    return level_now(shore_level(ground));
 }
 
 // How much of the ground is a lake beyond the shore grids, which draw the lakes within them as the
@@ -416,9 +421,13 @@ float wetness(Ground ground) {
     if (settings.tiling.z <= 0.0) {
         return 0.0;
     }
-    const float lake = lake_level(ground);
-    if (lake > 0.0) {
-        return saturate(0.5 + ((lake - ground.height) / wet_edges));
+    const float2 water = still_water_at(sea, shore_depths, ground.from_eye);
+    if (lake_over(water)) {
+        return saturate(0.5 + ((water.x - ground.height) / wet_edges));
+    }
+    // Low ground the grids find dry.
+    if (water.x < 0.0) {
+        return 0.0;
     }
     const ShoreLevel level = shore_level(ground);
     const float highest = level.mean + level.swash.x + level.swash.y;

@@ -80,6 +80,13 @@ inline constexpr int lake_margin = 2;
 std::vector<float> keep_lakes(std::span<const float> elevations, std::span<const float> lakes,
                               std::span<float> still);
 
+// Of layers of ground as shore_ground has them, of depths and still water as keep_to_sea_reach
+// keeps them, and of the levels keep_lakes keeps, `levels`: keeps the level of low ground that
+// neither the sea nor any still water covers as far under its ground as depths are kept above it,
+// so water drawn at that level is hidden under the ground, however the texels between are blended.
+void keep_dry(std::span<const float> elevations, std::span<const float> depths,
+              std::span<const float> still, std::span<float> levels);
+
 // Fetch, how far water stretches upwind, is measured for winds blowing towards each of these
 // headings in turn: east first, then each an eighth of a turn anticlockwise.
 inline constexpr int fetch_headings = 8;
@@ -94,8 +101,8 @@ inline constexpr float longest_fetch = 50'000.0F; // metres
                                                std::span<const float> still);
 
 // The depths round an anchor, each layer in turn, finest first: of the sea where the open sea
-// reaches, of still water where it doesn't, the level still water is kept to, as keep_lakes has
-// it, and the fetch over all of it, as shore_fetches has it.
+// reaches, of still water where it doesn't, the level still water is kept to, as keep_lakes and
+// keep_dry have it, and the fetch over all of it, as shore_fetches has it.
 struct ShoreDepths {
     ShoreFrame frame;
     std::vector<float> depths;

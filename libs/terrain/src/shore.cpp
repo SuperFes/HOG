@@ -222,6 +222,16 @@ std::vector<float> keep_lakes(std::span<const float> elevations, std::span<const
     return levels;
 }
 
+void keep_dry(std::span<const float> elevations, std::span<const float> depths,
+              std::span<const float> still, std::span<float> levels) {
+    for (std::size_t at = 0; at < levels.size(); ++at) {
+        if (elevations[at] < 0.0F && depths[at] <= shore_highest && still[at] <= 0.0F &&
+            levels[at] == 0.0F) {
+            levels[at] = elevations[at] + shore_highest;
+        }
+    }
+}
+
 namespace {
 
 // The step to the texel upwind of a wind blowing towards each heading.
@@ -346,6 +356,7 @@ ShoreDepths work_out_shore(const planet::World& world, const ShoreFrame& frame, 
     }
     found.still = keep_to_sea_reach(found.depths, sea);
     found.levels = keep_lakes(elevations, lakes, found.still);
+    keep_dry(elevations, found.depths, found.still, found.levels);
     found.fetches = shore_fetches(found.depths, found.still);
     return found;
 }
