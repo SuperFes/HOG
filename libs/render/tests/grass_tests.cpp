@@ -398,3 +398,25 @@ TEST_CASE("only grass that may be seen is grown", "[render]") {
     CHECK(lit_pixels(unseen) == 0);
     CHECK(behind == 0);
 }
+
+TEST_CASE("the field frays away towards the end of its reach rather than stopping along a line",
+          "[render]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    // Wide enough that blades stand many pixels tall right out to the end of the reach.
+    constexpr VkExtent2D wide{.width = 960, .height = 540};
+    const auto grown = [&](double away, double reach) {
+        std::uint32_t count = 0;
+        draw(*device, {.away = away, .grass = {.reach = reach}, .size = wide}, &count);
+        return count;
+    };
+    // Well short of where any blade ends, all grow.
+    CHECK(grown(8.0, 40.0) == grown(8.0, 400.0));
+    // Towards the end of the reach, some have ended and some not.
+    const double left = static_cast<double>(grown(28.0, 40.0)) / grown(28.0, 400.0);
+    INFO(left << " of the blades left");
+    CHECK(left > 0.2);
+    CHECK(left < 0.85);
+}

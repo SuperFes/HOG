@@ -56,6 +56,11 @@ static const uint vertex_stride = 36; // bytes, as terrain::PatchVertex lies
 // Blades keep off ground this close to sea level, so the surf stays clear.
 static const float shore = 0.15;
 static const float pioneers = 0.9; // of the open ground the grass takes where trees are gone
+// Of the reach, the last share over which blades end, as terrain.slang's grass_fraying.
+static const float fraying = 0.4;
+// How much darker a field of grass shows than its ground's colour, as terrain.slang's
+// grass_field_shade: what blades melting into the ground wear.
+static const float field_shade = 0.7;
 
 // Reeds stand where the ground sits this close over the water, stiff stems with a cattail head:
 // the quad is cut as wide as the head, and the stem trimmed from it in the fragment shader.
@@ -186,8 +191,6 @@ bool grow(uint instance, out Grown grown) {
     const float spacing = float((packed >> 14) & 0xfffu) / 256.0;
     const float4 tier = settings.tier;
     const float fade_far = tier.z;
-    // Blades keep their height to here, shrinking away by fade_far.
-    const float fade_near = 0.8 * fade_far;
     const uint seed = asuint(push.wind.w);
 
     // A layer of blades a cell, every cell's nth blade in the nth layer, so each blade is the
@@ -254,11 +257,15 @@ bool grow(uint instance, out Grown grown) {
     const float tall = reed ? reed_height * (0.75 + (0.45 * unit(hash + 5u)))
                             : kind.w * thick_height(thick) * (1.0 + (0.6 * near.gone)) *
                                   (0.6 + (0.8 * unit(hash + 5u)));
-    // Shrinking away under two pixels tall, gone under one, so short grass stays near and tall
-    // grass reaches further.
-    const float pixel = push.bend_radii.w * length(root);
-    const float fade = saturate((fade_far - length(root)) / (fade_far - fade_near)) *
-                       saturate((tall / pixel) - 1.0);
+    // Each blade ends at its own point towards the end of the reach, and under its own few pixels
+    // tall, so short grass stays near, tall grass reaches further, and the field frays away over a
+    // wide band rather than stopping along a line.
+    const float distance = length(root);
+    const float pixel = push.bend_radii.w * distance;
+    const float ends = fade_far * (1.0 - (fraying * unit(hash + 12u)));
+    const float least = 1.0 + (2.0 * unit(hash + 13u));
+    const float fade = saturate((ends - distance) / (0.1 * fade_far)) *
+                       saturate((tall / pixel) - least);
     if (fade <= 0.0 || (!reed && (!lawn_here || above < shore))) {
         return false;
     }
@@ -290,7 +297,10 @@ bool grow(uint instance, out Grown grown) {
     grown.normal = normal;
     grown.biome = biome;
     grown.reed = reed;
-    grown.itself = true_width / width;
+    // Wearing the ground's colour as it goes, so the field fades into the ground beyond.
+    const float going = max(smoothstep(fade_far * (1.0 - (2.0 * fraying)), ends, distance),
+                            smoothstep(least + 1.5, least, tall / pixel));
+    grown.itself = (true_width / width) * (1.0 - going);
     // Darker where it grows thick and shades itself, paler where it's thin.
     const float lushness = saturate((thick - thinnest) / (thickest - thinnest));
     grown.tone = (0.8 + (0.4 * unit(hash + 8u))) * lerp(1.12, 0.85, lushness);
@@ -426,8 +436,9 @@ Blade vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     // is really thinner than drawn.
     const float its_own = grown.tone * (0.55 + (0.45 * t));
     const float3 own = grown.reed ? reed_stem : kind.rgb;
-    blade.colour = lerp(kind.rgb * 1.25, own * its_own, grown.itself);
-    blade.head = lerp(kind.rgb * 1.25, reed_head, grown.itself);
+    const float3 field = kind.rgb * 1.25 * field_shade;
+    blade.colour = lerp(field, own * its_own, grown.itself);
+    blade.head = lerp(field, reed_head, grown.itself);
     blade.t_up = t;
     blade.cut = grown.reed ? head_cut : 2.0;
     blade.side = side;

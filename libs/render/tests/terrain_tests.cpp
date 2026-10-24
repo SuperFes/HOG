@@ -723,6 +723,7 @@ struct Seen {
     std::uint8_t scar = 0; // of the west half, as terrain::Cover's
     double height = 3'000.0;
     double canopy = 900.0;
+    double grass = 0.0; // metres the grass reaches, standing up from the ground
     bool air = false;
     hog::flora::Daylight daylight{};
     Biome biome = Biome::Grassland;
@@ -733,9 +734,12 @@ struct Seen {
 
 std::vector<std::uint8_t> from_above(hog::render::Device& device, const Seen& seen) {
     constexpr double small_planet = 115'000.0;
-    auto terrain = hog::render::Terrain::create(
-        device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT,
-        {.materials = grey_materials(), .air = seen.air, .canopy = seen.canopy});
+    auto terrain =
+        hog::render::Terrain::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT,
+                                     {.materials = grey_materials(),
+                                      .air = seen.air,
+                                      .canopy = seen.canopy,
+                                      .grass = seen.grass});
     REQUIRE(terrain);
     auto pool = make_pool(device, {});
     const std::uint32_t slot = pool.acquire().value_or(1);
@@ -841,6 +845,21 @@ TEST_CASE("woods beyond the stamps darken the ground they stand on, and only it"
     CHECK(mean_of(thin, 1, true) > mean_of(woods, 1, true) + 5.0);
     CHECK(mean_of(thin, 1, true) < mean_of(none, 1, true));
     CHECK(from_above(*device, {.woods = {}}) == none);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE(
+    "grassy ground shows as dark as a field of its blades seen whole, bare ground its own colour",
+    "[render][gpu]") {
+    const auto device = test_device();
+    const Seen grass{.woods = {}, .canopy = 0.0, .grass = 50.0, .air = true};
+    Seen beach = grass;
+    beach.biome = Biome::Beach;
+    const auto bare = from_above(*device, beach);
+    const auto grassy = from_above(*device, grass);
+    INFO("bare " << mean_of(bare, 1, true) << ", grassy " << mean_of(grassy, 1, true));
+    CHECK(mean_of(grassy, 1, true) < 0.9 * mean_of(bare, 1, true));
+    CHECK(mean_of(grassy, 1, true) > 0.6 * mean_of(bare, 1, true));
     CHECK(device->validation_errors() == 0);
 }
 

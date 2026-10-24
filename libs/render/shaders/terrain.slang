@@ -199,10 +199,15 @@ static const float grass_shore = 0.15;
 static const float grass_rising = 0.3;
 // Grass laid flat stands this much lower.
 static const float grass_pressed = 0.4;
+// Of its reach, the last share over which blades end, as grass.slang's fraying.
+static const float grass_fraying = 0.4;
+// How much darker a field of grass shows than its ground's colour, as its blades shade one another
+// and their roots, as grass.slang's field_shade.
+static const float grass_field_shade = 0.7;
 
 // Past where its blades show, grass stands up as the ground's top: as tall as it grows there on the
-// whole, taller in its thick patches, rising as the blades shrink away under two pixels tall or
-// towards the end of their reach, and pressed down where the gusts lay it over. `ground` must hold
+// whole, taller in its thick patches, rising as the blades shrink away under a few pixels tall or
+// fray away towards the end of their reach, and pressed down where the gusts lay it over. `ground` must hold
 // its biomes and height.
 float standing_grass(Ground ground, float3 from_eye) {
     const float reach = settings.canopy.y;
@@ -222,8 +227,9 @@ float standing_grass(Ground ground, float3 from_eye) {
     }
     const float distance = length(from_eye);
     const float pixel = max(lighting.swaying.y * distance, 1e-6);
-    const float blades =
-        saturate((height / pixel) - 1.0) * saturate((reach - distance) / (0.2 * reach));
+    // As many as are left on the whole, each blade ending at its own point.
+    const float blades = saturate(((height / pixel) - 1.0) / 3.0) *
+                         saturate((reach - distance) / (grass_fraying * reach));
     const float wind = lighting.gusts.w;
     float pressed = 0.0;
     if (wind > 1e-3) {
@@ -458,7 +464,10 @@ float3 albedo(Ground ground, float3 normal) {
                                                         along_x[index + 1], along_y[index + 1]).rgb;
         }
         // Each scale strays from the mean in its own way, so together they still average to it.
-        colour += share * near * far / max(settings.means[biome].rgb, 1.0 / 1024.0);
+        // Only where grass stands up from the ground at all.
+        const float shading =
+            settings.canopy.y > 0.0 ? lerp(1.0, grass_field_shade, settings.grass[biome].y) : 1.0;
+        colour += share * shading * near * far / max(settings.means[biome].rgb, 1.0 / 1024.0);
     }
     return colour;
 }
