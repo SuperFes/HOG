@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <numbers>
+#include <optional>
 
 namespace hog::render {
 
@@ -85,6 +86,33 @@ int stands_up(planet::FaceIJ cell, std::uint32_t seed, int most) noexcept {
         ++up;
     }
     return up;
+}
+
+planet::FaceIJ unpicked_child(planet::FaceIJ cell, int which, std::uint32_t seed) noexcept {
+    const auto picked = picked_child(grass_hash(cell, seed));
+    const auto nth = static_cast<std::uint32_t>(which);
+    const std::uint32_t child = nth + (nth >= picked ? 1U : 0U);
+    return {.face = cell.face,
+            .i = (cell.i << 1U) | (child & 1U),
+            .j = (cell.j << 1U) | (child >> 1U),
+            .level = cell.level + 1};
+}
+
+std::uint32_t thinning_dice(planet::FaceIJ cell, std::uint32_t seed, int most) noexcept {
+    int up = 0;
+    std::uint32_t child = 4;
+    std::optional<std::uint32_t> hash;
+    while (up < most && cell.level > 0) {
+        child = (cell.i & 1U) | ((cell.j & 1U) << 1U);
+        cell = {.face = cell.face, .i = cell.i >> 1U, .j = cell.j >> 1U, .level = cell.level - 1};
+        hash = grass_hash(cell, seed);
+        if (picked_child(*hash) != child) {
+            break;
+        }
+        child = 4;
+        ++up;
+    }
+    return flora::hashed(hash.value_or(grass_hash(cell, seed)) + child + 1U);
 }
 
 float clumped(planet::FaceIJ blade, Vec2 spot, std::uint32_t seed, float on) noexcept {

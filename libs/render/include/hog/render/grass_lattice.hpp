@@ -33,6 +33,17 @@ struct GrassLattice {
 // most: grass thinned to a blade in each cell that many levels up keeps it.
 [[nodiscard]] int stands_up(planet::FaceIJ cell, std::uint32_t seed, int most) noexcept;
 
+// The `which`th, 0 to 2, of `cell`'s children whose blades it doesn't stand for: each child's blade
+// stands for no cell further up than it.
+[[nodiscard]] planet::FaceIJ unpicked_child(planet::FaceIJ cell, int which,
+                                            std::uint32_t seed) noexcept;
+
+// The dice the blade in lattice cell `cell` is thinned by, looking `most` levels up at most: cast
+// at the cell just over the highest it stands for, so the same whichever of those it's sown from,
+// and found on the way up to it.
+[[nodiscard]] std::uint32_t thinning_dice(planet::FaceIJ cell, std::uint32_t seed,
+                                          int most) noexcept;
+
 // Where in its lattice cell the blade of `hash`, as grass_hash has it, stands: s and t, 0 to 1,
 // as the face's.
 [[nodiscard]] Vec2 grass_spot(std::uint32_t hash) noexcept;

@@ -450,6 +450,20 @@ TEST_CASE("a patch's blades are sown as deep as its grid cells grow them", "[ren
     CHECK(grass_depth(1'000.0, 6) == 6);
 }
 
+TEST_CASE("a patch's record bounds how thick its grass grows", "[grass]") {
+    for (const double layers : {1e-6, 0.01, 0.3, 1.0, 1.1, 5.0, 64.0, 900.0}) {
+        const std::uint32_t record = hog::render::grass_patch_level(13, layers);
+        CHECK((record & 0xffU) == 13U);
+        const double half_log = (static_cast<double>(record >> 8U) - 128.0) / 8.0;
+        INFO(layers << " layers, " << half_log);
+        CHECK(half_log >= std::log2(layers) / 2.0);
+        CHECK(half_log < (std::log2(layers) / 2.0) + 0.125);
+    }
+    // Clamped either way, never under.
+    CHECK((hog::render::grass_patch_level(0, 1e-300) >> 8U) == 0U);
+    CHECK((hog::render::grass_patch_level(0, 1e300) >> 8U) == 255U);
+}
+
 namespace {
 
 // One patch of a flat grassland: its cell, its centre east and north of the field's, and the

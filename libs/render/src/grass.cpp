@@ -145,6 +145,12 @@ int grass_depth(double layers, int to_lattice) noexcept {
         std::clamp(deep, 0.0, static_cast<double>(std::min(most_grass_depth, to_lattice))));
 }
 
+std::uint32_t grass_patch_level(int level, double layers) noexcept {
+    const double eighths = std::clamp(std::ceil(4.0 * std::log2(layers)), -128.0, 127.0);
+    return static_cast<std::uint32_t>(level) |
+           (static_cast<std::uint32_t>(static_cast<int>(eighths) + 128) << 8U);
+}
+
 GrassStand grass_stand(planet::Biome biome) noexcept {
     const BiomeGrass grass = grass_of(biome);
     return {.height = grass.height, .cover = grass.share * grass.clumps};
@@ -283,7 +289,7 @@ void Grass::grow(VkCommandBuffer commands, VkExtent2D extent, const TerrainPool&
                             .depth = static_cast<std::uint32_t>(
                                 grass_depth(layers, lattice_.level - draw.cell.level))});
             patches.emplace_back(static_cast<std::uint32_t>(draw.cell.face), draw.cell.i,
-                                 draw.cell.j, static_cast<std::uint32_t>(draw.cell.level));
+                                 draw.cell.j, grass_patch_level(draw.cell.level, layers));
         }
     }
     // Not until the last frame's draw has read what's grown.

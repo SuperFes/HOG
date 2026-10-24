@@ -41,19 +41,37 @@ public FaceCell standing_for(FaceCell cell, uint lattice_level, uint seed) {
     return cell;
 }
 
-public uint stands_up(FaceCell cell, uint seed, uint most) {
+// As render::stands_up, and render::thinning_dice as `dice`.
+public uint stands_up(FaceCell cell, uint seed, uint most, out uint dice) {
     uint up = 0;
+    uint child = 4;
+    uint hash = 0;
+    bool cast = false;
     while (up < most && cell.level > 0) {
-        const uint child = (cell.i & 1u) | ((cell.j & 1u) << 1);
+        child = (cell.i & 1u) | ((cell.j & 1u) << 1);
         cell.i >>= 1;
         cell.j >>= 1;
         cell.level -= 1;
-        if (picked_child(grass_hash(cell, seed)) != child) {
+        hash = grass_hash(cell, seed);
+        cast = true;
+        if (picked_child(hash) != child) {
             break;
         }
+        child = 4;
         up += 1;
     }
+    dice = lattice_hashed((cast ? hash : grass_hash(cell, seed)) + child + 1u);
     return up;
+}
+
+// As render::unpicked_child, with render::thinning_dice of it as `dice`.
+public FaceCell unpicked_child(FaceCell cell, uint which, uint seed, out uint dice) {
+    const uint hash = grass_hash(cell, seed);
+    const uint child = which + (which >= picked_child(hash) ? 1u : 0u);
+    dice = lattice_hashed(hash + child + 1u);
+    const FaceCell finer = { cell.face, (cell.i << 1) | (child & 1u), (cell.j << 1) | (child >> 1),
+                             cell.level + 1 };
+    return finer;
 }
 
 public float2 grass_spot(uint hash) {

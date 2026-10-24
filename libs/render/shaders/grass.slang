@@ -188,7 +188,16 @@ struct Grown {
     float tone;   // its own shade, about 1
 };
 
-// The patches grown on this frame: each one's cell, as face, i, j and level.
+// Of the blades standing for cells `stood_up` levels up the lattice, the share kept where the field
+// is thinned to a blade a cell `thinned_up` levels up: all of those standing just short of it, and
+// a share of those standing a level shorter.
+float kept_share(uint stood_up, float thinned_up) {
+    const float short_of = min(float(stood_up) + 1.0 - thinned_up, 2.0);
+    return (exp2(2.0 * short_of) - 1.0) / 3.0;
+}
+
+// The patches grown on this frame: each one's cell, as face, i, j and level; with the level, in
+// eighths, how far below its sowing depth the patch thins at least, as grass_patch_level packs it.
 [[vk::binding(10, 0)]] StructuredBuffer<uint4> grass_patches;
 
 // The patch's blade `instance` as it grows this frame, if it grows at all.
@@ -202,24 +211,50 @@ bool grow(uint instance, out Grown grown) {
     const float fade_far = tier.z;
     const uint lattice = settings.lattice.x;
     const uint seed = settings.lattice.y;
-    const uint4 patch_cell = grass_patches[asuint(push.wind.w)];
+    const uint4 record = grass_patches[asuint(push.wind.w)];
+    const uint patch_level = record.w & 0xffu;
+    // How far up the lattice the patch thins at least, where it's thickest.
+    const float least_up = float(lattice - patch_level - patch_depth) -
+                           (float(int(record.w >> 8) - 128) / 8.0) - 0.01;
 
-    // The blade standing on the lattice for one of the patch's cells `depth` levels in: the same
-    // blade, in the same spot, whichever patch grows it.
+    // The blades standing on the lattice for the patch's cells `depth` levels in, the same blade in
+    // the same spot whichever patch grows it, sown in layers as the field thickens: the patch
+    // cell's own, then a level at a time the blades of each cell's children it doesn't stand for.
+    // A layer's blades all stand for cells as far up, so whole waves of them go or stay together.
     if (instance >= (1u << (2 * depth))) {
         return false;
     }
-    const FaceCell sown = { patch_cell.x, (patch_cell.y << depth) + (instance & ((1u << depth) - 1u)),
-                            (patch_cell.z << depth) + (instance >> depth), patch_cell.w + depth };
+    FaceCell sown = { record.x, record.y, record.z, patch_level };
+    uint dice;
+    uint stood_up;
+    if (instance == 0) {
+        stood_up = (lattice - patch_level) + stands_up(sown, seed, most_kept_up, dice);
+    } else {
+        const uint above = firstbithigh(instance) / 2;
+        stood_up = lattice - (patch_level + above + 1);
+        // Most layers are thinned out, even where the patch is thickest.
+        if (kept_share(stood_up, least_up) <= 0.0) {
+            return false;
+        }
+        const uint into = instance - (1u << (2 * above));
+        const uint cell = into / 3;
+        const FaceCell parent = { record.x, (record.y << above) + (cell & ((1u << above) - 1u)),
+                                  (record.z << above) + (cell >> above), patch_level + above };
+        sown = unpicked_child(parent, into % 3, seed, dice);
+    }
+    const float thinned_by = 0.75 * unit(dice);
+    if (kept_share(stood_up, least_up) <= thinned_by) {
+        return false;
+    }
     const FaceCell blade = standing_for(sown, lattice, seed);
     const uint hash = grass_hash(blade, seed);
     const float2 spot = grass_spot(hash);
-    const uint to_lattice = lattice - patch_cell.w;
+    const uint to_lattice = lattice - patch_level;
     // Lattice cells to a grid cell, as a fraction of one.
-    const float to_grid = exp2(float(patch_cell.w + patch_depth) - float(lattice));
+    const float to_grid = exp2(float(patch_level + patch_depth) - float(lattice));
     const float2 on_grid =
-        min((float2(float(blade.i - (patch_cell.y << to_lattice)),
-                    float(blade.j - (patch_cell.z << to_lattice))) + spot) * to_grid,
+        min((float2(float(blade.i - (record.y << to_lattice)),
+                    float(blade.j - (record.z << to_lattice))) + spot) * to_grid,
             float(patch_cells) - 1e-4);
 
     // Rooted within its grid cell, on ground interpolated between the cell's corners.
@@ -251,11 +286,7 @@ bool grow(uint instance, out Grown grown) {
     const float most = exp2(2.0 * float(depth)) / pow(float(patch_cells) * spacing, 2.0);
     const float kept = min(full * held * held, most);
     const float thinned_up = -0.5 * log2(kept * lattice_cell * lattice_cell);
-    const uint stood_up = (lattice - sown.level) + stands_up(sown, seed, most_kept_up);
-    // Of those standing just short of how far up it's thinned, the share still kept.
-    const float short_of = min(float(stood_up) + 1.0 - thinned_up, 2.0);
-    const float share = (exp2(2.0 * short_of) - 1.0) / 3.0;
-    const float thinning = saturate((share - (0.75 * unit(hash + 11u))) * 4.0);
+    const float thinning = saturate((kept_share(stood_up, thinned_up) - thinned_by) * 4.0);
     if (thinning <= 0.0) {
         return false;
     }

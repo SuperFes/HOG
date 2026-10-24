@@ -58,6 +58,10 @@ inline constexpr double thickest_grass = 3.0;
 // that its cells hold as many, at most most_grass_depth and `to_lattice` deep.
 [[nodiscard]] int grass_depth(double layers, int to_lattice) noexcept;
 
+// A patch's lattice level as its blades grow from it, with half the log2 of the `layers` blades
+// its grid cells grow at most in eighths above: rounded up, so no cell grows more.
+[[nodiscard]] std::uint32_t grass_patch_level(int level, double layers) noexcept;
+
 // How much of a biome's ground is grass tall enough to wave in the wind, 0 to 1.
 [[nodiscard]] float waving_grass(planet::Biome biome) noexcept;
 
