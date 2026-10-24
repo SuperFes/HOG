@@ -33,21 +33,26 @@ DVec2 shore_along(const ShoreFrame& frame, double radius, DVec3 direction) {
     return DVec2{glm::dot(direction, frame.east), glm::dot(direction, frame.north)} * scale;
 }
 
-ShoreGround shore_ground(const planet::Elevation& terrain, const ShoreFrame& frame, double radius,
+ShoreGround shore_ground(const planet::World& world, const ShoreFrame& frame, double radius,
                          double spacing) {
+    const planet::Elevation& terrain = world.geology().terrain();
     ShoreGround ground;
     ground.elevations.reserve(static_cast<std::size_t>(shore_size) * shore_size);
     ground.lakes.reserve(ground.elevations.capacity());
+    ground.sea.reserve(ground.elevations.capacity());
     const double first = (0.5 - (shore_size / 2.0)) * spacing;
     for (int row = 0; row < shore_size; ++row) {
         for (int column = 0; column < shore_size; ++column) {
             const planet::CellId cell = planet::cell_at(shore_direction(
                 frame, radius, {first + (column * spacing), first + (row * spacing)}));
-            const std::int64_t elevation = terrain.elevation(cell);
-            const auto lake = elevation > 0 ? terrain.rivers().lake(cell, elevation) : std::nullopt;
-            ground.elevations.push_back(static_cast<float>(planet::fixed_to_double(elevation)));
-            ground.lakes.push_back(lake ? static_cast<float>(planet::fixed_to_double(*lake))
+            const std::int64_t generated = terrain.elevation(cell);
+            const auto water = terrain.rivers().standing(cell, generated);
+            const bool lake = water && !water->sea;
+            ground.elevations.push_back(
+                static_cast<float>(planet::fixed_to_double(world.elevation(cell, generated))));
+            ground.lakes.push_back(lake ? static_cast<float>(planet::fixed_to_double(water->level))
                                         : 0.0F);
+            ground.sea.push_back(water && water->sea ? 1 : 0);
         }
     }
     return ground;
@@ -103,14 +108,16 @@ namespace {
 
 // Whether the texel at `column` and `row` of layer `layer` is open sea: on the coarsest, deep or
 // water at its edge; on any finer, water where the coarser layer's sea, `coarser`, reaches.
-bool open_sea_at(std::span<const float> depths, std::size_t layer, std::size_t column,
-                 std::size_t row, const std::vector<std::uint8_t>& coarser) {
+bool open_sea_at(std::span<const float> depths, std::span<const std::uint8_t> sea,
+                 std::size_t layer, std::size_t column, std::size_t row,
+                 const std::vector<std::uint8_t>& coarser) {
     const auto size = static_cast<std::size_t>(shore_size);
     const std::size_t layers = depths.size() / shore_texels;
-    const float depth = depths[(layer * shore_texels) + (row * size) + column];
+    const std::size_t at = (layer * shore_texels) + (row * size) + column;
+    const float depth = depths[at];
     if (layer + 1 == layers) {
         const bool edge = row == 0 || column == 0 || row + 1 == size || column + 1 == size;
-        return depth >= open_sea || (edge && depth > 0.0F);
+        return sea[at] != 0 && (depth >= open_sea || (edge && depth > 0.0F));
     }
     if (depth <= 0.0F) {
         return false;
@@ -134,7 +141,7 @@ bool open_sea_at(std::span<const float> depths, std::size_t layer, std::size_t c
 
 } // namespace
 
-std::vector<float> keep_to_sea_reach(std::span<float> depths) {
+std::vector<float> keep_to_sea_reach(std::span<float> depths, std::span<const std::uint8_t> sea) {
     const std::size_t layers = depths.size() / shore_texels;
     const auto size = static_cast<std::size_t>(shore_size);
     std::vector<float> still(depths.size(), shore_highest);
@@ -144,14 +151,14 @@ std::vector<float> keep_to_sea_reach(std::span<float> depths) {
         for (std::size_t row = 0; row < size; ++row) {
             for (std::size_t column = 0; column < size; ++column) {
                 reached[(row * size) + column] =
-                    open_sea_at(depths, layer, column, row, coarser) ? 1 : 0;
+                    open_sea_at(depths, sea, layer, column, row, coarser) ? 1 : 0;
             }
         }
         const std::span<float> here = depths.subspan(layer * shore_texels, shore_texels);
         spread(here, reached);
         for (std::size_t at = 0; at < shore_texels; ++at) {
             if (reached[at] == 0) {
-                if (here[at] > 0.0F) {
+                if (here[at] > 0.0F && sea[(layer * shore_texels) + at] != 0) {
                     still[(layer * shore_texels) + at] = here[at];
                 }
                 here[at] = shore_highest;
@@ -324,19 +331,20 @@ double water_below(std::span<const float> levels, double height) {
     return above == levels.begin() ? 0.0 : static_cast<double>(*std::prev(above));
 }
 
-ShoreDepths work_out_shore(const planet::Elevation& terrain, const ShoreFrame& frame,
-                           double radius) {
+ShoreDepths work_out_shore(const planet::World& world, const ShoreFrame& frame, double radius) {
     ShoreDepths found{.frame = frame, .depths = {}, .still = {}, .levels = {}, .fetches = {}};
     std::vector<float> elevations;
     std::vector<float> lakes;
+    std::vector<std::uint8_t> sea;
     for (const double spacing : shore_spacing) {
-        const ShoreGround ground = shore_ground(terrain, frame, radius, spacing);
+        const ShoreGround ground = shore_ground(world, frame, radius, spacing);
         const std::vector<float> layer = shore_depths(ground);
         found.depths.insert(found.depths.end(), layer.begin(), layer.end());
         elevations.insert(elevations.end(), ground.elevations.begin(), ground.elevations.end());
         lakes.insert(lakes.end(), ground.lakes.begin(), ground.lakes.end());
+        sea.insert(sea.end(), ground.sea.begin(), ground.sea.end());
     }
-    found.still = keep_to_sea_reach(found.depths);
+    found.still = keep_to_sea_reach(found.depths, sea);
     found.levels = keep_lakes(elevations, lakes, found.still);
     found.fetches = shore_fetches(found.depths, found.still);
     return found;
@@ -345,8 +353,8 @@ ShoreDepths work_out_shore(const planet::Elevation& terrain, const ShoreFrame& f
 void ShoreStream::start(const ShoreFrame& frame) {
     started_ = frame;
     working_ = std::make_unique<jobs::Async<ShoreDepths>>(
-        *jobs_, [terrain = terrain_, frame, radius = radius_] {
-            return work_out_shore(*terrain, frame, radius);
+        *jobs_, [world = world_, frame, radius = radius_] {
+            return work_out_shore(*world, frame, radius);
         });
 }
 

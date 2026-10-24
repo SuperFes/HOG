@@ -5,6 +5,7 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 namespace hog::planet {
 
@@ -117,10 +118,34 @@ CellState World::state(CellId cell) const {
                     .water_table = surface.water_table,
                     .excavated = 0,
                     .hollows = {}};
-    if (cells_.empty()) {
-        return state;
+    for (const Entry* entry : applying(cell)) {
+        fold(state, entry->change.payload);
     }
+    return state;
+}
+
+std::int64_t World::elevation(CellId cell) const {
+    return elevation(cell, geology_.terrain().elevation(cell));
+}
+
+std::int64_t World::elevation(CellId cell, std::int64_t generated) const {
+    CellState ground;
+    ground.elevation = generated;
+    for (const Entry* entry : applying(cell)) {
+        const ChangePayload& payload = entry->change.payload;
+        if (std::holds_alternative<SetElevation>(payload) ||
+            std::holds_alternative<Excavate>(payload)) {
+            fold(ground, payload);
+        }
+    }
+    return ground.elevation;
+}
+
+std::vector<const World::Entry*> World::applying(CellId cell) const {
     std::vector<const Entry*> entries;
+    if (cells_.empty()) {
+        return entries;
+    }
     for (int level = cell.level(); level >= 0; --level) {
         if (const auto found = cells_.find(cell.parent(level).raw()); found != cells_.end()) {
             for (const Entry& entry : found->second) {
@@ -131,10 +156,7 @@ CellState World::state(CellId cell) const {
     std::ranges::sort(entries, {}, [](const Entry* entry) {
         return std::tuple{entry->change.layer, entry->change.time, entry->sequence};
     });
-    for (const Entry* entry : entries) {
-        fold(state, entry->change.payload);
-    }
-    return state;
+    return entries;
 }
 
 std::optional<Opening> World::opening_at(CellId cell, std::int64_t depth) const {

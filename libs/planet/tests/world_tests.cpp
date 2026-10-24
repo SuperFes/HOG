@@ -111,6 +111,19 @@ TEST_CASE("changes apply over the seed", "[planet][world]") {
     CHECK(w.size() == 4);
 }
 
+TEST_CASE("the ground's elevation alone is the state's", "[planet][world]") {
+    World& w = fresh_world();
+    CHECK(w.elevation(cell) == seed_state(cell).elevation);
+    REQUIRE(w.apply(change(cell, SetElevation{.elevation = 50 * fixed_one})));
+    REQUIRE(w.apply(change(cell.child(1), Excavate{.depth = 3 * fixed_one}, 1)));
+    REQUIRE(w.apply(change(cell, Hollow{.top = fixed_one, .bottom = 2 * fixed_one}, 2)));
+    REQUIRE(w.apply(change(cell, SetBiome{.biome = Biome::Grassland}, 3)));
+    for (const CellId at : {cell, cell.child(1), cell.child(1).child(0), cell.child(2)}) {
+        CHECK(w.elevation(at) == w.state(at).elevation);
+    }
+    CHECK(w.elevation(cell.child(1)) == 47 * fixed_one);
+}
+
 TEST_CASE("a change covers everything inside its cell", "[planet][world]") {
     World& w = fresh_world();
     REQUIRE(w.apply(change(cell, SetBiome{.biome = Biome::Desert})));

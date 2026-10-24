@@ -237,8 +237,7 @@ Scene::Scene(const render::Device& device, const planet::World& world, jobs::Job
              std::optional<render::Billboard> companion, std::uint32_t frames,
              const GrassBudget& budget)
     : world_{&world}, jobs_{&jobs}, baker_{world, jobs}, terrain_{std::move(terrain)},
-      ocean_{std::move(ocean)},
-      shore_{world.geology().terrain(), world.geology().planet_radius(), jobs},
+      ocean_{std::move(ocean)}, shore_{world, world.geology().planet_radius(), jobs},
       wave_trains_{waves::planet_trains(hash_combine(world.geology().seed(), waves_salt))},
       grass_{std::move(grass)}, bushes_{std::move(bushes)}, trees_{std::move(trees)},
       forest_{std::move(forest)}, pool_{std::move(pool)}, anchor_pool_{std::move(anchors)},

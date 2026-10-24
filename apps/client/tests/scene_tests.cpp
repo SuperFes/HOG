@@ -219,8 +219,7 @@ std::pair<double, hog::DVec3> widest_still_water(hog::DVec3 around) {
     constexpr auto texels = static_cast<std::size_t>(shore_size) * shore_size;
     const double radius = world().geology().planet_radius();
     const hog::terrain::ShoreFrame frame = hog::terrain::shore_frame(around, radius);
-    const hog::terrain::ShoreDepths shore =
-        hog::terrain::work_out_shore(world().geology().terrain(), frame, radius);
+    const hog::terrain::ShoreDepths shore = hog::terrain::work_out_shore(world(), frame, radius);
     const std::vector<float>& still = shore.still;
     const std::vector<float>& fetches = shore.fetches;
     std::pair<double, hog::DVec3> widest{0.0, around};
@@ -604,7 +603,7 @@ std::optional<std::pair<hog::DVec3, double>> a_lake() {
         ++found;
         const auto level = static_cast<float>(hog::planet::fixed_to_double(lake->surface));
         const hog::terrain::ShoreDepths shore =
-            hog::terrain::work_out_shore(terrain, hog::terrain::shore_frame(at, radius), radius);
+            hog::terrain::work_out_shore(world(), hog::terrain::shore_frame(at, radius), radius);
         // Its texels in the finest layer, and their middle.
         hog::DVec2 sum{0.0};
         std::size_t count = 0;

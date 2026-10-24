@@ -2,9 +2,10 @@
 
 #include <hog/core/math.hpp>
 #include <hog/jobs/job_system.hpp>
-#include <hog/planet/elevation.hpp>
+#include <hog/planet/world.hpp>
 
 #include <array>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <span>
@@ -43,25 +44,29 @@ struct ShoreFrame {
 [[nodiscard]] DVec2 shore_along(const ShoreFrame& frame, double radius, DVec3 direction);
 
 // The ground at each texel's centre of a layer, rows from the south and texels from the west, in
-// metres above sea level; and the level of the lake over it, or sea level where there's none.
+// metres above sea level, as changed; the level of the lake over it, or sea level where there's
+// none; and whether the sea stands over it. What stands over the ground is told from the ground as
+// generated, so ground dug below the water lets it in only where the sea reaches through.
 struct ShoreGround {
     std::vector<float> elevations;
     std::vector<float> lakes;
+    std::vector<std::uint8_t> sea;
 };
 
-[[nodiscard]] ShoreGround shore_ground(const planet::Elevation& terrain, const ShoreFrame& frame,
+[[nodiscard]] ShoreGround shore_ground(const planet::World& world, const ShoreFrame& frame,
                                        double radius, double spacing);
 
 // Metres of sea at each texel of `ground`: positive under the sea, as high as shore_highest over
 // land and lakes' beds, which the sea never floods.
 [[nodiscard]] std::vector<float> shore_depths(const ShoreGround& ground);
 
-// Of depths in layers as ShoreStream works them out, keeps as high as shore_highest whatever the
-// open sea can't reach: ground behind higher ground, and hollows and water cut off by it, so the
-// tide and the waves' run-up flood none of them. The open sea is what's deep, or what's at the
-// coarsest layer's edge; each finer layer's is where the next coarser one's reaches. Returns the
-// depths of the still water it cut off, as high as shore_highest elsewhere.
-std::vector<float> keep_to_sea_reach(std::span<float> depths);
+// Of depths in layers as ShoreStream works them out, and where the sea stands over them, `sea`,
+// keeps as high as shore_highest whatever the open sea can't reach: ground behind higher ground,
+// and hollows and water cut off by it, so the tide and the waves' run-up flood none of them. The
+// open sea is the sea where it's deep or at the coarsest layer's edge; each finer layer's is where
+// the next coarser one's reaches. Returns the depths of the sea it cut off, still water, as high
+// as shore_highest elsewhere: low ground the sea neither stands over nor reaches lies dry.
+std::vector<float> keep_to_sea_reach(std::span<float> depths, std::span<const std::uint8_t> sea);
 
 // A lake's level is kept over the ground round it, as far as it stands higher, out to this many
 // texels from its shore: its surface is drawn across them, under the ground, so it meets the shore
@@ -107,16 +112,16 @@ struct ShoreDepths {
 [[nodiscard]] double water_below(std::span<const float> levels, double height);
 
 // Works out the depths round the anchor of `frame`.
-[[nodiscard]] ShoreDepths work_out_shore(const planet::Elevation& terrain, const ShoreFrame& frame,
+[[nodiscard]] ShoreDepths work_out_shore(const planet::World& world, const ShoreFrame& frame,
                                          double radius);
 
 // Works out the depths round the eye in the background on the pool, anew whenever the eye comes
-// nearer another anchor, for the thread that made it. One set at a time is in flight; the terrain
-// must outlive it.
+// nearer another anchor, for the thread that made it. One set at a time is in flight; the world
+// must outlive it, unchanged while one is.
 class ShoreStream {
 public:
-    ShoreStream(const planet::Elevation& terrain, double radius, jobs::JobSystem& jobs) noexcept
-        : terrain_(&terrain), jobs_(&jobs), radius_(radius) {}
+    ShoreStream(const planet::World& world, double radius, jobs::JobSystem& jobs) noexcept
+        : world_(&world), jobs_(&jobs), radius_(radius) {}
 
     // Wants the depths round the unit direction `eye`.
     void follow(DVec3 eye);
@@ -129,7 +134,7 @@ public:
 private:
     void start(const ShoreFrame& frame);
 
-    const planet::Elevation* terrain_;
+    const planet::World* world_;
     jobs::JobSystem* jobs_;
     double radius_;
     std::optional<ShoreFrame> wanted_;

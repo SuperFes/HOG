@@ -64,6 +64,12 @@ public:
 
     [[nodiscard]] CellState state(CellId cell) const;
 
+    // The ground's fixed-point metres above sea level with its changes applied, as state has it,
+    // without working out the rest of the state.
+    [[nodiscard]] std::int64_t elevation(CellId cell) const;
+    // The same from the cell's generated elevation, where that's known already.
+    [[nodiscard]] std::int64_t elevation(CellId cell, std::int64_t generated) const;
+
     // What is open at a fixed-point depth in metres below a cell's generated surface: dug out,
     // whether from the surface or as a hollow, or else a cave.
     [[nodiscard]] std::optional<Opening> opening_at(CellId cell, std::int64_t depth) const;
@@ -78,6 +84,9 @@ private:
         std::uint64_t sequence = 0;
         Change change;
     };
+
+    // The changes to a cell and the cells it lies in, in the order they apply.
+    [[nodiscard]] std::vector<const Entry*> applying(CellId cell) const;
 
     Geology geology_;
     Caves caves_;
