@@ -3,6 +3,7 @@ add_library(hog_terrain
     src/bend.cpp
     src/material.cpp
     src/sea.cpp
+    src/water.cpp
     src/patch.cpp
     src/selection.cpp
     src/shore.cpp
@@ -19,6 +20,7 @@ hog_add_tests(hog_terrain
     tests/bend_tests.cpp
     tests/material_tests.cpp
     tests/sea_tests.cpp
+    tests/water_tests.cpp
     tests/patch_tests.cpp
     tests/selection_tests.cpp
     tests/shore_tests.cpp

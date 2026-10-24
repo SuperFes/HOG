@@ -133,7 +133,7 @@ float4 fragment_air(Surface surface) : SV_Target {
     const float height = push.sun.w + dot(surface.from_eye - feet, up);
     const float3 radiance =
         through_water(push.colour.rgb * lit / pi, ((sunlight * saturate(dot(up, sun))) + sky) / pi,
-                      surface.water - height, push.colour.w - surface.water,
+                      lighting.carried, surface.water - height, push.colour.w - surface.water,
                       length(surface.from_eye), dot(-normalize(surface.from_eye), up),
                       sea_lays_water(lighting));
 

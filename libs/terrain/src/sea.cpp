@@ -75,7 +75,7 @@ DVec3 sea_from_eye(const Bend& bend, double along, DVec3 towards) {
 }
 
 double seabed_showing(double eye, double sea, double deepest, double shallowest, double nearest,
-                      double farthest) {
+                      double farthest, const Optics& water) {
     if (eye <= sea || shallowest >= sea) {
         return 1.0;
     }
@@ -94,9 +94,9 @@ double seabed_showing(double eye, double sea, double deepest, double shallowest,
     const double facing = std::sqrt(std::max(0.0, 1.0 - ((closest / sea) * (closest / sea))));
     const double reflected =
         water_facing_reflection + ((1.0 - water_facing_reflection) * std::pow(1.0 - facing, 5.0));
-    const double passed = std::exp(-water_clearest_absorbing * (sea - shallowest) *
-                                   (1.0 + (1.0 / std::max(facing, water_least_facing))));
-    return (1.0 - reflected) * passed;
+    const DVec3 lost = (water.dimming + (water.hiding / std::max(facing, water_least_facing))) *
+                       (sea - shallowest);
+    return (1.0 - reflected) * std::exp(-std::min({lost.x, lost.y, lost.z}));
 }
 
 } // namespace hog::terrain

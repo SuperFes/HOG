@@ -81,7 +81,7 @@ public:
         : settings_(settings), known_(&known), planet_radius_(planet_radius),
           drawn_radius_(view.bend.faked == view.bend.radius ? planet_radius : view.bend.faked),
           squeeze_(planet_radius / drawn_radius_), lowest_(drawn_radius_ + settings.lowest),
-          highest_(drawn_radius_ + settings.highest),
+          highest_(drawn_radius_ + settings.highest), seabed_water_(optics(settings.seabed_water)),
           pixels_per_radian_(view.viewport_height / (2.0 * std::tan(view.vertical_fov / 2.0))) {
         HOG_ASSERT(lowest_ > 0.0 && highest_ > lowest_, "ground range out of order");
         HOG_ASSERT(view.bend.faked == view.bend.radius || view.bend.radius == planet_radius,
@@ -220,7 +220,7 @@ public:
     [[nodiscard]] bool under_sea(const Bounds& bounds) const {
         return settings_.seabed_unseen > 0.0 &&
                seabed_showing(eye_height_, drawn_radius_, bounds.lowest, bounds.highest, bounds.gap,
-                              bounds.reach) <= settings_.seabed_unseen;
+                              bounds.reach, seabed_water_) <= settings_.seabed_unseen;
     }
 
     [[nodiscard]] bool too_coarse(planet::CellId cell, const Bounds& bounds) const {
@@ -293,6 +293,7 @@ private:
     DVec3 eye_{};             // as drawn
     double lowest_;
     double highest_;
+    Optics seabed_water_;
     double pixels_per_radian_;
     std::array<DVec3, 5> planes_{};
     std::optional<double> eye_horizon_;

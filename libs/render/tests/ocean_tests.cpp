@@ -18,6 +18,7 @@
 #include <hog/terrain/material.hpp>
 #include <hog/terrain/shore.hpp>
 #include <hog/terrain/stitching.hpp>
+#include <hog/terrain/water.hpp>
 #include <hog/waves/foam.hpp>
 #include <hog/waves/run_up.hpp>
 #include <hog/waves/shoaling.hpp>
@@ -384,13 +385,14 @@ void copy_whole(VkCommandBuffer commands, VkImage from, VkImage to, VkImageAspec
 
 // From `height` metres up, looking east and steeply down through the air at the sea over ground
 // `deep` metres beneath its surface, or from under it steeply up, unless looking `forward`; the
-// water over it drawn `laid`; and in `beneath`, if any, what was drawn before the sea, as copied.
-// Without the `ground`, the deep water drawn beneath where it's drawn by the ground.
-std::vector<std::uint8_t> over_seabed(hog::render::Device& device, double deep, Laid laid,
-                                      double height = 20.0,
-                                      std::vector<std::uint8_t>* beneath = nullptr,
-                                      bool ground = true,
-                                      std::optional<DVec3> forward = std::nullopt) {
+// water over it drawn `laid`, carrying `carried`; and in `beneath`, if any, what was drawn before
+// the sea, as copied. Without the `ground`, the deep water drawn beneath where it's drawn by the
+// ground.
+std::vector<std::uint8_t>
+over_seabed(hog::render::Device& device, double deep, Laid laid, double height = 20.0,
+            std::vector<std::uint8_t>* beneath = nullptr, bool ground = true,
+            std::optional<DVec3> forward = std::nullopt,
+            const hog::terrain::Carried& carried = hog::terrain::open_sea) {
     auto atmosphere = hog::render::Atmosphere::create(device);
     REQUIRE(atmosphere);
     auto sky = hog::render::Sky::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
@@ -420,7 +422,8 @@ std::vector<std::uint8_t> over_seabed(hog::render::Device& device, double deep, 
     const hog::render::Camera camera{.eye = eye,
                                      .forward = looking,
                                      .up = glm::normalize(up - (looking * glm::dot(up, looking)))};
-    const hog::render::SkyView seen{.camera = camera, .sun = sun, .bend = bend, .exposure = 10.0};
+    const hog::render::SkyView seen{
+        .camera = camera, .sun = sun, .bend = bend, .exposure = 10.0, .carried = carried};
     const hog::render::AirBindings air = sky->bindings(0, *atmosphere);
     OceanView view{.camera = camera, .sun = sun, .bend = bend, .air = air};
 
@@ -865,6 +868,38 @@ TEST_CASE("through the air, the sea lays the water over the ground beneath it as
     CHECK(device->validation_errors() == 0);
 }
 
+TEST_CASE("through the air, what the water carries hides the seabed and colours the water",
+          "[render][gpu]") {
+    const auto device = test_device();
+    const hog::terrain::Carried mud{.organics = 0.5, .sediment = 200.0, .plankton = 1.0};
+    const hog::terrain::Carried glacial{
+        .organics = 0.1, .sediment = 5.0, .plankton = 0.3, .flour = 1.0};
+    const auto seen = [&](double deep, const hog::terrain::Carried& carried, Laid laid) {
+        return over_seabed(*device, deep, laid, 20.0, nullptr, true, std::nullopt, carried);
+    };
+    const auto middle = [&](double deep, const hog::terrain::Carried& carried) {
+        return pixel_at(seen(deep, carried, Laid::BySea), 32, 32);
+    };
+    // The sea lays any water over the ground as the ground does.
+    for (const hog::terrain::Carried& carried : {mud, glacial}) {
+        CHECK(furthest_apart(seen(3.0, carried, Laid::ByGround), seen(3.0, carried, Laid::BySea)) <=
+              6);
+    }
+    // Through mud, the sand doesn't show a hand down, and the water's brown.
+    const Pixel muddy = middle(3.0, mud);
+    const Pixel shallow_mud = middle(0.3, mud);
+    for (std::size_t channel = 0; channel < 3; ++channel) {
+        CHECK(std::abs(muddy.at(channel) - shallow_mud.at(channel)) <= 2);
+    }
+    CHECK(muddy[0] > muddy[1] + 10);
+    CHECK(muddy[1] > muddy[2] + 10);
+    // Glacial water is turquoise over a bed too deep to show.
+    const Pixel turquoise = middle(12.0, glacial);
+    CHECK(turquoise[1] > turquoise[0] + 10);
+    CHECK(turquoise[2] > turquoise[0] + 10);
+    CHECK(device->validation_errors() == 0);
+}
+
 TEST_CASE("from under the sea, the water lies along the whole view, darker the deeper",
           "[render][gpu]") {
     const auto device = test_device();
@@ -938,7 +973,8 @@ TEST_CASE("from under the sea, the sky shows through a window overhead, the surf
     CHECK(inside[0] > beyond[0] + 15);
     CHECK(brightness(overhead) > brightness(beyond) + 50);
     CHECK(brightness(inside) > brightness(beyond) + 80);
-    CHECK(beyond[2] > beyond[0] + 40);
+    CHECK(beyond[2] > beyond[1] + 10);
+    CHECK(beyond[1] > beyond[0] + 10);
     CHECK(device->validation_errors() == 0);
 }
 

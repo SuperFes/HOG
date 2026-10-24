@@ -500,6 +500,7 @@ float4 from_beneath(Surface surface, float3 looking) {
     const float3 normal = facing.normal;
     const Shade shade = shade_at(lighting, cloud_shadow, surface.from_eye);
     const float3 on_water = on_water_at(shade, up);
+    const Optics water = optics(lighting.carried);
     // None bends out past the window's edge, where the surface turns all of it back.
     const float3 out = refract(looking, -normal, 1.0 / into_water);
     float reflected = 1.0;
@@ -511,12 +512,13 @@ float4 from_beneath(Surface surface, float3 looking) {
     }
     // Turned back up off a wave's slope, it would meet the surface again, taken as seen level.
     const float3 down = reflect(looking, normal);
-    seen += reflected * water_between(on_water, 0.0, max(-dot(down, up), 0.0), endless).scattered;
+    seen += reflected *
+            water_between(water, on_water, 0.0, max(-dot(down, up), 0.0), endless).scattered;
     seen = lerp(seen, on_water * (1.0 - facing.albedo), facing.white);
     // The water between, deepest at the eye, as far under this surface as it is.
     const float along = length(surface.from_eye);
-    const WaterBetween between =
-        water_between(on_water, max(dot(surface.from_eye, up), 0.0), -dot(looking, up), along);
+    const WaterBetween between = water_between(water, on_water, max(dot(surface.from_eye, up), 0.0),
+                                               -dot(looking, up), along);
     return float4(tone_mapped((seen * between.passed) + between.scattered,
                               lighting.sun_exposure.w),
                   1.0);
@@ -555,7 +557,7 @@ float4 fragment_through(Surface surface) : SV_Target {
     const float3 up = normalize(surface.normal);
     const float3 on_water = on_water_at(lit.shade, up);
 
-    float3 water = water_colour * on_water;
+    float3 water = optics(lighting.carried).colour * on_water;
     if (depth > 0.0) {
         const float4 clip = mul(push.clip_from_eye, float4(surface.from_eye, 1.0));
         const Behind straight = behind_at(clip.xy / clip.w, pixel, depth);
@@ -567,7 +569,7 @@ float4 fragment_through(Surface surface) : SV_Target {
                     max(between.a, 1e-4),
                 0.0);
         // Seen from over the surface, though the eye may stand in a trough under the sea's level.
-        water = through_water(drawn, on_water, dot(surface.from_eye - behind, up),
+        water = through_water(drawn, on_water, lighting.carried, dot(surface.from_eye - behind, up),
                               max(push.up_height.w, 0.0), length(behind), dot(-looking, up));
     }
     const float3 radiance =
@@ -589,7 +591,7 @@ float3 deep_water(Surface surface) {
     const float3 sunlight = through_cloud(shade, clear);
     const float3 sky = sky_under_cloud(lighting, shade, clear * saturate(dot(up, sun)));
     const float3 on_water = (sunlight * saturate(dot(up, sun))) + sky;
-    const float3 radiance = water_colour * on_water / pi;
+    const float3 radiance = optics(lighting.carried).colour * on_water / pi;
 
     const float4 clip = mul(push.clip_from_eye, float4(surface.from_eye, 1.0));
     const float2 uv = ((clip.xy / clip.w) * 0.5) + 0.5;
@@ -648,12 +650,13 @@ float4 fragment_under(Screen screen) : SV_Target {
     const float sinking = -dot(normalize(near), up);
     const float depth = behind_depth.Load(pixel).x;
     const float along = depth > 0.0 ? length(behind_at(screen.clip, pixel, depth).at) : endless;
-    const WaterBetween between = water_between(on_water, deep, sinking, along);
+    const Optics water = optics(lighting.carried);
+    const WaterBetween between = water_between(water, on_water, deep, sinking, along);
     float3 seen = between.scattered;
     if (depth > 0.0) {
         const float3 drawn = untoned(behind_colour.Load(pixel).rgb, exposure);
         seen += drawn * between.passed *
-                exp(-water_absorbing * max(deep + (sinking * along), 0.0));
+                exp(-water.dimming * max(deep + (sinking * along), 0.0));
     }
     return float4(tone_mapped(seen, exposure), 1.0);
 }

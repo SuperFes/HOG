@@ -45,6 +45,7 @@ struct Lighting {
     glm::vec4 swaying;
     glm::vec4 ground;
     glm::vec4 downwind;
+    glm::vec4 carried;
 };
 
 static_assert(offsetof(Lighting, reach) + (3 * sizeof(float)) == sea_laying_at);
@@ -231,7 +232,10 @@ Result<> Sky::record_tables(VkCommandBuffer commands, VkExtent2D extent, std::ui
                                       : 0.0F,
                     0.0F, 0.0F},
         .ground = {Vec3{gust_anchor(view.camera.eye, DVec3{0.0})}, 0.0F},
-        .downwind = {Vec3{view.gusts.along}, static_cast<float>(view.gusts.wave)}};
+        .downwind = {Vec3{view.gusts.along}, static_cast<float>(view.gusts.wave)},
+        .carried = {
+            static_cast<float>(view.carried.organics), static_cast<float>(view.carried.sediment),
+            static_cast<float>(view.carried.plankton), static_cast<float>(view.carried.flour)}};
     const Buffer& buffer = lighting_.at(frame);
     std::memcpy(buffer.mapped().data(), &lighting, sizeof(lighting));
     if (auto flushed = buffer.flush(); !flushed) {

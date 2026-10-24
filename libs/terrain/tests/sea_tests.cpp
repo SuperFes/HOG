@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <numbers>
@@ -15,6 +16,9 @@ using hog::terrain::Bend;
 using hog::terrain::bend_from;
 using hog::terrain::BendSettings;
 using hog::terrain::bent;
+using hog::terrain::open_sea;
+using hog::terrain::Optics;
+using hog::terrain::optics;
 using hog::terrain::sea_along;
 using hog::terrain::sea_disc;
 using hog::terrain::sea_from_eye;
@@ -47,7 +51,7 @@ double schlick(double facing) {
 // As the sea and the ground beneath it are drawn: the surface's Fresnel where the line of sight
 // crosses it, and the water passed on the way to the ground at `depth`, `round` radians from under
 // the eye.
-double seen_through_sea(double eye, double sea, double depth, double round) {
+double seen_through_sea(double eye, double sea, double depth, double round, const Optics& water) {
     const double ground = sea - depth;
     const DVec2 from{0.0, eye};
     const DVec2 to{ground * std::sin(round), ground * std::cos(round)};
@@ -56,8 +60,8 @@ double seen_through_sea(double eye, double sea, double depth, double round) {
     const double crossed = -b - std::sqrt((b * b) - ((eye * eye) - (sea * sea)));
     const double facing = glm::dot(-looking, (from + (looking * crossed)) / sea);
     const double down = std::max(glm::dot(-looking, to / ground), hog::terrain::water_least_facing);
-    return (1.0 - schlick(facing)) *
-           std::exp(-hog::terrain::water_clearest_absorbing * depth * (1.0 + (1.0 / down)));
+    const DVec3 passed = glm::exp(-(water.dimming + (water.hiding / down)) * depth);
+    return (1.0 - schlick(facing)) * std::max({passed.x, passed.y, passed.z});
 }
 
 } // namespace
@@ -150,12 +154,13 @@ TEST_CASE("the sea's disc is whole and faces up", "[terrain][sea]") {
 TEST_CASE("the seabed shows through the sea least at a glance, and the deeper it lies",
           "[terrain][sea]") {
     const double eye = earth + 400.0;
+    const Optics water{.dimming = {0.3, 0.06, 0.03}, .hiding = {0.4, 0.07, 0.05}};
     const auto at = [&](double depth, double along) {
         return seabed_showing(eye, earth, earth - depth, earth - depth, along / earth,
-                              along / earth);
+                              along / earth, water);
     };
-    // Straight down through ten metres, and back up.
-    CHECK(std::abs(at(10.0, 0.0) - ((1.0 - 0.02) * std::exp(-0.03 * 10.0 * 2.0))) < 1e-12);
+    // Straight down through ten metres, and back up, in the blue that gets through best.
+    CHECK(std::abs(at(10.0, 0.0) - ((1.0 - 0.02) * std::exp(-(0.03 + 0.05) * 10.0))) < 1e-12);
     CHECK(at(30.0, 0.0) < at(10.0, 0.0));
     CHECK(at(10.0, 2'000.0) < at(10.0, 0.0));
     // Twenty kilometres off, the sea mirrors nearly all and the long way through the water does
@@ -165,8 +170,10 @@ TEST_CASE("the seabed shows through the sea least at a glance, and the deeper it
 }
 
 TEST_CASE("ground not under the sea, or not seen from above it, shows whole", "[terrain][sea]") {
-    CHECK(seabed_showing(earth + 400.0, earth, earth - 50.0, earth + 1.0, 0.01, 0.02) == 1.0);
-    CHECK(seabed_showing(earth - 5.0, earth, earth - 50.0, earth - 40.0, 0.01, 0.02) == 1.0);
+    const Optics water = optics(open_sea);
+    CHECK(seabed_showing(earth + 400.0, earth, earth - 50.0, earth + 1.0, 0.01, 0.02, water) ==
+          1.0);
+    CHECK(seabed_showing(earth - 5.0, earth, earth - 50.0, earth - 40.0, 0.01, 0.02, water) == 1.0);
 }
 
 TEST_CASE("no part of the seabed shows more than its bound says", "[terrain][sea]") {
@@ -174,7 +181,11 @@ TEST_CASE("no part of the seabed shows more than its bound says", "[terrain][sea
     const auto uniform = [&](double low, double high) {
         return std::uniform_real_distribution<double>{low, high}(dice);
     };
+    // Clear water, and water whose clearest colour is the red.
+    const std::array<Optics, 2> waters{
+        optics(open_sea), Optics{.dimming = {0.2, 3.0, 9.0}, .hiding = {0.3, 4.0, 12.0}}};
     for (int trial = 0; trial < 400; ++trial) {
+        const Optics& water = waters.at(trial % 4 < 2 ? 0 : 1);
         const double sea = trial % 2 == 0 ? earth : radius;
         const double eye = sea + uniform(1.0, 5'000.0);
         const double shallowest = uniform(0.0, 100.0);
@@ -182,14 +193,15 @@ TEST_CASE("no part of the seabed shows more than its bound says", "[terrain][sea
         const double nearest = uniform(0.0, 0.04);
         const double farthest = nearest + uniform(0.0, 0.01);
         const double bound =
-            seabed_showing(eye, sea, sea - deepest, sea - shallowest, nearest, farthest);
+            seabed_showing(eye, sea, sea - deepest, sea - shallowest, nearest, farthest, water);
         constexpr int steps = 8;
         for (int i = 0; i <= steps; ++i) {
             for (int j = 0; j <= steps; ++j) {
                 const double depth = shallowest + ((deepest - shallowest) * i / steps);
                 const double round = nearest + ((farthest - nearest) * j / steps);
                 CAPTURE(trial, depth, round);
-                CHECK(seen_through_sea(eye, sea, depth, round) <= (bound * (1.0 + 1e-9)) + 1e-15);
+                CHECK(seen_through_sea(eye, sea, depth, round, water) <=
+                      (bound * (1.0 + 1e-9)) + 1e-15);
             }
         }
     }

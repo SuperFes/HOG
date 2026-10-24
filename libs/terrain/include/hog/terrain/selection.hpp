@@ -5,6 +5,7 @@
 #include <hog/terrain/bend.hpp>
 #include <hog/terrain/patch.hpp>
 #include <hog/terrain/stitching.hpp>
+#include <hog/terrain/water.hpp>
 
 #include <cstdint>
 #include <functional>
@@ -62,8 +63,10 @@ struct SelectionSettings {
     // each patch saying whether it's in view.
     bool only_in_view = true;
     // Ground under the sea showing through it no more than this, as seabed_showing has it, is
-    // picked but not drawn; none is left out at 0.
+    // picked but not drawn; none is left out at 0. The water's taken to carry this, as clear as
+    // any in view.
     double seabed_unseen = 0.0;
+    Carried seabed_water = open_sea;
 };
 
 // What's known of a cell's ground, such as from baking it.

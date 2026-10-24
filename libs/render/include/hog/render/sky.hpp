@@ -11,6 +11,7 @@
 #include <hog/render/vulkan.hpp>
 #include <hog/render/weather_maps.hpp>
 #include <hog/terrain/bend.hpp>
+#include <hog/terrain/water.hpp>
 
 #include <cstdint>
 #include <optional>
@@ -55,6 +56,8 @@ struct SkyView {
     flora::Daylight daylight = {};
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     GustsSeen gusts = {};
+    // What the water carries at the eye.
+    terrain::Carried carried = terrain::open_sea;
 };
 
 // Where in the frame's Lighting, in bytes, the sea writes whether it lays the water over what's

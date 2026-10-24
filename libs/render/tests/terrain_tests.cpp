@@ -12,11 +12,13 @@
 #include <hog/render/sky.hpp>
 #include <hog/render/terrain.hpp>
 #include <hog/shaders/bend_probe.hpp>
+#include <hog/shaders/optics_probe.hpp>
 #include <hog/shaders/projection_probe.hpp>
 #include <hog/shaders/water_probe.hpp>
 #include <hog/terrain/bend.hpp>
 #include <hog/terrain/material.hpp>
 #include <hog/terrain/stitching.hpp>
+#include <hog/terrain/water.hpp>
 #include <hog/testing/assertion_guard.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -1268,6 +1270,39 @@ TEST_CASE("waves bend what's seen through the sea's surface by how they tilt it,
         }
         if (normal == 3) {
             CHECK(wanted[i].y < 0.0);
+        }
+    }
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("the shaders find water's optics from what it carries as hog::terrain does",
+          "[render][gpu]") {
+    using hog::terrain::Carried;
+    const auto device = test_device();
+    const std::array<Carried, 7> waters{
+        Carried{},
+        hog::terrain::open_sea,
+        Carried{.organics = 5.0, .sediment = 1.0, .plankton = 2.0},
+        Carried{.organics = 0.5, .sediment = 200.0, .plankton = 1.0},
+        Carried{.organics = 0.1, .sediment = 5.0, .plankton = 0.3, .flour = 1.0},
+        Carried{.sediment = 20.0, .plankton = 30.0, .flour = 0.4},
+        Carried{.plankton = -1.0, .flour = 2.0}};
+    std::vector<Probed> asked;
+    asked.reserve(waters.size());
+    for (const Carried& carried : waters) {
+        asked.push_back({static_cast<float>(carried.organics), static_cast<float>(carried.sediment),
+                         static_cast<float>(carried.plankton), static_cast<float>(carried.flour)});
+    }
+    const std::vector<Probed> found =
+        probed(*device, hog::shaders::optics_probe, asked, 3 * waters.size());
+    for (std::size_t i = 0; i < waters.size(); ++i) {
+        const hog::terrain::Optics wanted = hog::terrain::optics(waters.at(i));
+        for (std::size_t part = 0; part < 3; ++part) {
+            const DVec3 want = std::array{wanted.dimming, wanted.hiding, wanted.colour}.at(part);
+            const Probed& got = found.at((3 * i) + part);
+            CAPTURE(i, part);
+            const DVec3 got_rgb{got[0], got[1], got[2]};
+            CHECK(glm::all(glm::lessThanEqual(glm::abs(got_rgb - want), 1e-5 + (1e-5 * want))));
         }
     }
     CHECK(device->validation_errors() == 0);

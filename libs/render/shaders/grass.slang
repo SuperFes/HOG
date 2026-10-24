@@ -478,7 +478,7 @@ float4 fragment_main(Blade blade) : SV_Target {
         (sunlight * saturate(dot(normal, sun))) + (sky * (0.5 + (0.5 * dot(normal, up))));
     const float3 radiance =
         through_water_at(albedo * lit / pi, ((sunlight * saturate(dot(up, sun))) + sky) / pi,
-                         blade.from_eye, push.bend_up, push.bend_radii.x,
+                         lighting.carried, blade.from_eye, push.bend_up, push.bend_radii.x,
                          sea_lays_water(lighting));
 
     const float4 clip = mul(push.clip_from_eye, float4(blade.drawn, 1.0));

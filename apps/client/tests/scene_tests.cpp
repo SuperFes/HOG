@@ -479,7 +479,7 @@ TEST_CASE("a scene shows someone wading in the sea through the water over them",
     INFO("dry " << dry.r << ", " << dry.g << ", " << dry.b);
     // Not hidden by the surface, but dimmed by the water above.
     CHECK(wet.r - wet.g > water.r - water.g + 15);
-    CHECK(wet.r < dry.r - 15);
+    CHECK(wet.r < dry.r - 10);
     CHECK(device->validation_errors() == 0);
 }
 

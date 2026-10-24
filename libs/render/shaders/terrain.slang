@@ -644,10 +644,10 @@ struct Shaded {
 };
 
 // The ground's colour lit by `on_ground` facing its normal and `on_water` facing up, each times
-// pi, its grass bent by the gusts as gust_lit has it, with water over it where it lies below the
-// sea as high as it stands, unless the sea's pass lays it, `laid`.
+// pi, its grass bent by the gusts as gust_lit has it, with water carrying `carried` over it where
+// it lies below the sea as high as it stands, unless the sea's pass lays it, `laid`.
 float3 shaded(Ground ground, float3 normal, float3 on_ground, float3 on_water, float4 year,
-              GustFrame frame, float wind, float wave, bool laid) {
+              GustFrame frame, float wind, float wave, float4 carried, bool laid) {
     const float3 grown = albedo(ground, normal) * gust_lit(ground, frame, wind, wave);
     const float3 bare = wooded(ground, scorched(ground, grown), year) *
                         lerp(1.0, wet_darkening, wetness(ground));
@@ -655,7 +655,7 @@ float3 shaded(Ground ground, float3 normal, float3 on_ground, float3 on_water, f
     if (settings.tiling.z <= 0.0) {
         return lit_ground;
     }
-    return through_water(lit_ground, on_water, sea_level(ground) - ground.height,
+    return through_water(lit_ground, on_water, carried, sea_level(ground) - ground.height,
                          eye_above(ground),
                          length(ground.from_eye), dot(-normalize(ground.from_eye), up_at(ground)),
                          laid);
@@ -686,7 +686,8 @@ Shaded fragment_main(Ground ground) {
     const GustFrame still = { float3(0.0), float3(0.0), float3(0.0) };
     Shaded result;
     result.colour = float4(
-        saturate(shaded(ground, normal, on_ground, on_water, midsummer, still, 0.0, 0.0, false)),
+        saturate(shaded(ground, normal, on_ground, on_water, midsummer, still, 0.0, 0.0,
+                        open_sea, false)),
         1.0);
     result.depth = depth_of(ground);
     return result;
@@ -719,7 +720,7 @@ Shaded fragment_air(Ground ground) {
     }
     float3 radiance =
         shaded(ground, normal, on_ground, on_water, lighting.year, gust_frame(lighting),
-               lighting.gusts.w, lighting.downwind.w, sea_lays_water(lighting)) /
+               lighting.gusts.w, lighting.downwind.w, lighting.carried, sea_lays_water(lighting)) /
         pi;
     if (far > 0.0) {
         // Too far to see into, a lake is its deep water's colour, mirroring the sky and the sun
@@ -734,7 +735,8 @@ Shaded fragment_air(Ground ground) {
             through_cloud(shade, transmittance(air, transmittance_table, 0.0,
                                                dot(surface_up, sun))) *
             glint_lobe(looking, surface_up, far_water_roughness, sun);
-        const float3 water = (water_colour * on_water / pi) * (1.0 - reflected);
+        const float3 water =
+            (optics(lighting.carried).colour * on_water / pi) * (1.0 - reflected);
         radiance = lerp(radiance, water + (reflected * (sky + glint)), far);
     }
 

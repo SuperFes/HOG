@@ -345,6 +345,8 @@ public struct Lighting {
     // xyz which way the wind blows near the ground, level; w radians into its sway grass at the
     // eye is.
     public float4 downwind;
+    // What the water at the eye carries, as water.slang's optics takes it.
+    public float4 carried;
 };
 
 // The gusts' field as `lighting` lays it.
