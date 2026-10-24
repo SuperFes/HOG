@@ -205,12 +205,12 @@ namespace {
 // Land rising north of a sea with a bowl sunk in it, left as it is.
 constexpr hog::DVec3 bowl_center{0.6, 0.0, 0.8};
 
-Landform bowl(std::int64_t runoff) {
+Landform bowl(std::int64_t runoff, double depth = 600.0) {
     LevelGrid grid{level, radius};
     std::vector<std::int64_t> heights;
     for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
         const hog::DVec3 at = hog::planet::cell_center(grid.cell(cell));
-        const double dip = 600.0 * std::max(0.0, 1.0 - (glm::length(at - bowl_center) / 0.25));
+        const double dip = depth * std::max(0.0, 1.0 - (glm::length(at - bowl_center) / 0.25));
         const double metres = at.z > 0.0 ? 20.0 + (900.0 * at.z) - dip : -1000.0;
         heights.push_back(std::llround(metres * static_cast<double>(fixed_one)));
     }
@@ -286,4 +286,23 @@ TEST_CASE("each cell drains into water no higher than itself downstream", "[plan
             REQUIRE(levels[receiver] <= levels[cell]);
         }
     }
+}
+
+TEST_CASE("low ground cut off from the sea holds a lake or lies dry, never the sea",
+          "[planet][rivers]") {
+    const CellId middle = hog::planet::cell_at(bowl_center, 22);
+    const std::int64_t bottom = -400 * fixed_one;
+    const Landform wet_basin = bowl(fixed_one / 2, 1200.0);
+    const Rivers wet{wet_basin, ground(wet_basin), {1, wet_basin.grid()}, radius};
+    const auto lake = wet.standing(middle, bottom).value_or(hog::planet::StandingWater{});
+    CHECK_FALSE(lake.sea);
+    CHECK(lake.level > 0);
+
+    const Landform dry_basin = bowl(fixed_one / 1'000, 1200.0);
+    const Rivers dry{dry_basin, ground(dry_basin), {1, dry_basin.grid()}, radius};
+    CHECK_FALSE(dry.standing(middle, bottom));
+
+    const CellId offshore = hog::planet::cell_at(glm::normalize(hog::DVec3{0.6, 0.0, -0.8}), 22);
+    CHECK(dry.standing(offshore, bottom) == hog::planet::StandingWater{.level = 0, .sea = true});
+    CHECK_FALSE(dry.lake(offshore, bottom));
 }

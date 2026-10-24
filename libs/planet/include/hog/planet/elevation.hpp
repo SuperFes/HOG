@@ -35,11 +35,11 @@ public:
     [[nodiscard]] std::int64_t height(CellId cell) const {
         return archipelago_.raise<Bits>(cell, continents_.height<Bits>(cell));
     }
-    // Told by the fine height, so land is exactly where the elevation is above the sea.
-    [[nodiscard]] bool is_land(CellId cell) const { return height<fine_fraction_bits>(cell) > 0; }
+    // Out of the sea: above its level, told by the fine height, or below it but cut off from it.
+    [[nodiscard]] bool is_land(CellId cell) const;
 
-    // Fixed-point metres above sea level of the ground, a river's bed included: positive on
-    // land, negative under the ocean.
+    // Fixed-point metres above sea level of the ground, a river's bed included: positive above
+    // the sea, negative below it.
     [[nodiscard]] std::int64_t elevation(CellId cell) const;
 
     // The river running through a cell, if one does.
@@ -48,8 +48,8 @@ public:
     // The lake over a cell, if one is: the ground under it and the level of its water.
     [[nodiscard]] std::optional<Channel> lake(CellId cell) const;
 
-    // Fixed-point metres of the ground above the water it drains into first, a river or the
-    // sea; zero at sea.
+    // Fixed-point metres of the ground above the water it drains into first, a river, a lake or
+    // the sea; zero under water.
     [[nodiscard]] std::int64_t above_water(CellId cell) const;
 
     // The elevation of the sea floor at a height `below` sea level, both in fixed point with `Bits`

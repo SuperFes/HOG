@@ -20,6 +20,14 @@ struct Channel {
     friend bool operator==(const Channel&, const Channel&) = default;
 };
 
+// Water standing over a point, the sea or a lake: its fixed-point level and which it is.
+struct StandingWater {
+    std::int64_t level = 0;
+    bool sea = false;
+
+    friend bool operator==(const StandingWater&, const StandingWater&) = default;
+};
+
 // A river from one landform cell's centre to the next downstream: its water falls from one end to
 // the other, in fixed-point metres.
 struct Reach {
@@ -36,7 +44,8 @@ struct Reach {
 // water they carry. A river's water only falls downstream, so it cuts through rises in the ground
 // rather than pooling behind them, between banks sloping up to meet the ground. Basins in the
 // landform hold lakes where enough water runs in to make up for what evaporates, and stay dry
-// where it doesn't; rivers end at their shores and leave from their outlets.
+// where it doesn't; rivers end at their shores and leave from their outlets. Only the landform's
+// sea holds the sea: low ground cut off from it is a basin like any other.
 class Rivers {
 public:
     // Square metres of rain-weighted ground a cell must drain for a river to start there.
@@ -61,8 +70,12 @@ public:
     // The channel through a cell's centre, or nothing out of the water.
     [[nodiscard]] std::optional<Channel> channel(CellId cell, std::int64_t ground) const;
 
+    // The water standing over a cell's centre, where `ground` is the height there, or nothing out
+    // of the water.
+    [[nodiscard]] std::optional<StandingWater> standing(CellId cell, std::int64_t ground) const;
+
     // The fixed-point level of the lake over a cell's centre, where `ground` is the height there,
-    // or nothing out of the water.
+    // or nothing out of a lake.
     [[nodiscard]] std::optional<std::int64_t> lake(CellId cell, std::int64_t ground) const;
 
     // The widest reach whose water comes within `margin` metres of a cell's centre, or none: for
@@ -85,8 +98,12 @@ private:
     double radius_;
     std::vector<Reach> reaches_;
     std::vector<std::int64_t> levels_;
-    // The level of the lake over each landform cell, or the lowest value where there's none.
-    std::vector<std::int64_t> lakes_;
+    // The level of the sea or lake over each landform cell, or the lowest value where there's
+    // none, and whether it's the sea.
+    std::vector<std::int64_t> standing_;
+    std::vector<bool> sea_;
+    // Landform cells below the sea's level but cut off from it.
+    std::vector<bool> sunken_;
     // Reaches coming within a cell of each landform cell.
     std::vector<std::uint32_t> first_;
     std::vector<std::uint32_t> nearby_;

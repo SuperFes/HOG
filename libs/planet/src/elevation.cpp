@@ -183,15 +183,18 @@ std::optional<Channel> Elevation::river(CellId cell) const {
     return evolved.rivers.channel(cell, worn(cell, generated, evolved.landform, evolved.meander));
 }
 
-std::optional<Channel> Elevation::lake(CellId cell) const {
-    const std::int64_t generated = this->generated(cell);
-    if (generated <= 0) {
-        return std::nullopt;
+bool Elevation::is_land(CellId cell) const {
+    if (height<fine_fraction_bits>(cell) > 0) {
+        return true;
     }
-    const Evolved& evolved = this->evolved();
-    const std::int64_t ground =
-        evolved.rivers.cut(cell, worn(cell, generated, evolved.landform, evolved.meander));
-    const auto level = evolved.rivers.lake(cell, ground);
+    // At or below sea level, told by the fine height, so ground right at it is the sea's.
+    const auto water = evolved().rivers.standing(cell, std::min<std::int64_t>(generated(cell), -1));
+    return !water || !water->sea;
+}
+
+std::optional<Channel> Elevation::lake(CellId cell) const {
+    const std::int64_t ground = elevation(cell);
+    const auto level = evolved().rivers.lake(cell, ground);
     if (!level) {
         return std::nullopt;
     }
@@ -199,14 +202,9 @@ std::optional<Channel> Elevation::lake(CellId cell) const {
 }
 
 std::int64_t Elevation::above_water(CellId cell) const {
-    const std::int64_t generated = this->generated(cell);
-    if (generated <= 0) {
-        return 0;
-    }
+    const std::int64_t ground = elevation(cell);
     const Evolved& evolved = this->evolved();
-    const std::int64_t ground =
-        evolved.rivers.cut(cell, worn(cell, generated, evolved.landform, evolved.meander));
-    if (evolved.rivers.lake(cell, ground)) {
+    if (evolved.rivers.standing(cell, ground)) {
         return 0;
     }
     const std::int64_t water = evolved.landform.sample(evolved.rivers.levels(),

@@ -259,7 +259,7 @@ Image render(const planet::Geology& geology, double planet_radius, const View& v
     const planet::Elevation& terrain = geology.terrain();
     // Rivers are drawn at least a pixel wide, so they show at any scale.
     const auto over_land = [&](Rgb ground, planet::CellId cell, DVec3 at, int x, int y) {
-        if (terrain.elevation(cell) <= 0) {
+        if (!terrain.is_land(cell)) {
             return ground;
         }
         return with_water(ground, terrain.lake(cell).has_value(),

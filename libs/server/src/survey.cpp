@@ -71,7 +71,7 @@ void survey_row(planet::Caves::Lookup& caves, double planet_radius, const probe:
 
 std::uint8_t river_width(const planet::Geology& geology, planet::CellId cell, double margin) {
     const planet::Elevation& terrain = geology.terrain();
-    if (terrain.elevation(cell) <= 0 || terrain.lake(cell)) {
+    if (!terrain.is_land(cell) || terrain.lake(cell)) {
         return 0;
     }
     const planet::Reach* river = terrain.rivers().near(cell, margin);

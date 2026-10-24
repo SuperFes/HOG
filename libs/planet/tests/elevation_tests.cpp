@@ -89,7 +89,7 @@ TEST_CASE("land stays above sea level and the ocean floor below it", "[planet][e
     const Elevation terrain{planet(seed)};
     for (const CellId cell : cells_at(6)) {
         const std::int64_t elevation = terrain.elevation(cell);
-        if (terrain.is_land(cell)) {
+        if (terrain.height<hog::planet::fine_fraction_bits>(cell) > 0) {
             REQUIRE(elevation >= 0);
             REQUIRE(elevation <= metres(Elevation::lowland_height + Elevation::mountain_height));
         } else {
@@ -267,4 +267,22 @@ TEST_CASE("ground stands above the water it drains to", "[planet][elevation]") {
         }
     }
     CHECK(land > 0);
+}
+
+TEST_CASE("only ground joined to the sea lies under it", "[planet][elevation]") {
+    // This planet has a stretch below sea level cut off from the sea, thousands of km² across.
+    const Elevation terrain{planet(6)};
+    const auto& landform = terrain.landform();
+    const auto& drainage = landform.drainage();
+    int cut_off = 0;
+    for (std::uint32_t index = 0; index < landform.grid().size(); ++index) {
+        const CellId cell = landform.grid().cell(index);
+        if (landform.heights()[index] > 0 || terrain.elevation(cell) >= 0) {
+            continue;
+        }
+        const bool sea = drainage.receiver[index] == index;
+        REQUIRE(terrain.is_land(cell) != sea);
+        cut_off += sea ? 0 : 1;
+    }
+    CHECK(cut_off > 1'000);
 }
