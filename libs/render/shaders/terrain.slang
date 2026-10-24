@@ -227,10 +227,12 @@ float standing_grass(Ground ground, float3 from_eye) {
     const float wind = lighting.gusts.w;
     float pressed = 0.0;
     if (wind > 1e-3) {
-        const float field = gust_field(from_eye, lighting.gusts.xyz);
-        const float speed = gusting(wind, gust_of(field));
-        pressed = saturate(laid_over(speed) +
-                           (swaying(speed) * sin(sway_phase(lighting.swaying.x, wind, field))));
+        const GustFrame frame = gust_frame(lighting);
+        const float field = gust_field(from_eye, frame);
+        const float gust = gust_of(field);
+        const float speed = gusting(wind, gust);
+        const float phase = sway_phase(lighting.downwind.w, from_eye, frame, field);
+        pressed = saturate(laid_over(speed) + (swung(gust) * swaying(speed) * sin(phase)));
     }
     const float clear = saturate((ground.height - grass_shore) / grass_rising);
     const float thick = thick_height(thickness(from_eye, lighting.ground.xyz));
@@ -467,12 +469,12 @@ static const float gust_brightening = 0.4;
 
 // Grass bent over by a gust or as it sways catches the light on its flanks, so gusts cross
 // meadows as patches of light and waves run through them, beyond where blades are drawn as well
-// as beneath them; the more grass, the plainer. `gusts` as Lighting's, `seconds` its swaying's x.
-float gust_lit(Ground ground, float4 gusts, float seconds) {
+// as beneath them; the more grass, the plainer. The wind blowing `wind` on the whole, with grass at
+// the eye `wave` into its sway.
+float gust_lit(Ground ground, GustFrame frame, float wind, float wave) {
     // Waves average away within a pixel spanning more than a few metres, rather than flicker.
     const float footprint = max(length(ddx(ground.from_eye)), length(ddy(ground.from_eye)));
     const float seen = 1.0 - smoothstep(2.0, 8.0, footprint);
-    const float wind = gusts.w;
     if (wind < 1e-3) {
         return 1.0;
     }
@@ -484,8 +486,9 @@ float gust_lit(Ground ground, float4 gusts, float seconds) {
     if (waving < least_biome) {
         return 1.0;
     }
-    const float field = gust_field(ground.from_eye, gusts.xyz);
-    return 1.0 + (gust_brightening * waving * gust_sheen(wind, field, seconds, seen));
+    const float field = gust_field(ground.from_eye, frame);
+    const float phase = sway_phase(wave, ground.from_eye, frame, field);
+    return 1.0 + (gust_brightening * waving * gust_sheen(wind, field, phase, seen));
 }
 
 // Ground a fire left black: charcoal and ash, greening back as the scar fades.
@@ -587,11 +590,11 @@ struct Shaded {
 };
 
 // The ground's colour lit by `on_ground` facing its normal and `on_water` facing up, each times
-// pi, its grass bent by `gusts` swaying `seconds` in, with water over it where it lies below the
+// pi, its grass bent by the gusts as gust_lit has it, with water over it where it lies below the
 // sea as high as it stands, unless the sea's pass lays it, `laid`.
 float3 shaded(Ground ground, float3 normal, float3 on_ground, float3 on_water, float4 year,
-              float4 gusts, float seconds, bool laid) {
-    const float3 grown = albedo(ground, normal) * gust_lit(ground, gusts, seconds);
+              GustFrame frame, float wind, float wave, bool laid) {
+    const float3 grown = albedo(ground, normal) * gust_lit(ground, frame, wind, wave);
     const float3 bare = wooded(ground, scorched(ground, grown), year) *
                         lerp(1.0, wet_darkening, wetness(ground));
     const float3 lit_ground = lerp(bare, float3(stranded_albedo), stranded_at(ground)) * on_ground;
@@ -625,11 +628,12 @@ Shaded fragment_main(Ground ground) {
     const float3 normal = normalize(ground.normal);
     const float3 on_ground = night + ((1.0 - night) * saturate(dot(normal, sun)));
     const float3 on_water = night + ((1.0 - night) * saturate(dot(up_at(ground), sun)));
+    // In still air.
+    const GustFrame still = { float3(0.0), float3(0.0), float3(0.0) };
     Shaded result;
-    result.colour =
-        float4(saturate(shaded(ground, normal, on_ground, on_water, midsummer, float4(0.0), 0.0,
-                               false)),
-               1.0);
+    result.colour = float4(
+        saturate(shaded(ground, normal, on_ground, on_water, midsummer, still, 0.0, 0.0, false)),
+        1.0);
     result.depth = depth_of(ground);
     return result;
 }
@@ -660,8 +664,8 @@ Shaded fragment_air(Ground ground) {
                    sky_under_cloud(lighting, shade, clear_water * facing);
     }
     float3 radiance =
-        shaded(ground, normal, on_ground, on_water, lighting.year, lighting.gusts,
-               lighting.swaying.x, sea_lays_water(lighting)) /
+        shaded(ground, normal, on_ground, on_water, lighting.year, gust_frame(lighting),
+               lighting.gusts.w, lighting.downwind.w, sea_lays_water(lighting)) /
         pi;
     if (far > 0.0) {
         // Too far to see into, a lake is its deep water's colour, mirroring the sky and the sun

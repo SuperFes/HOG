@@ -1,5 +1,7 @@
 module atmosphere;
 
+import gusts;
+
 // As hog::atmosphere::Air, and its tables as hog::atmosphere::Model makes them. Heights are given
 // rather than radii, so floats keep their precision near the ground.
 public struct Air {
@@ -333,14 +335,22 @@ public struct Lighting {
     // The sea's surface at the eye, as the sea writes it: xyz how it faces, w how far the eye
     // stands above it along that, negative in the water.
     public float4 water;
-    // xyz where the gusts' field lies from the eye, as gusts.slang reads it, w the wind's speed
-    // near the ground on the whole.
+    // xyz where the gusts' field lies from the eye in its own axes, as gusts.slang reads it, w the
+    // wind's speed near the ground on the whole.
     public float4 gusts;
-    // x the seconds grass has swayed for, as grass.slang's; y the radians across a pixel.
+    // y the radians across a pixel.
     public float4 swaying;
     // xyz where fields fixed to the ground lie from the eye, as gusts.slang reads them.
     public float4 ground;
+    // xyz which way the wind blows near the ground, level; w radians into its sway grass at the
+    // eye is.
+    public float4 downwind;
 };
+
+// The gusts' field as `lighting` lays it.
+public GustFrame gust_frame(Lighting lighting) {
+    return { lighting.gusts.xyz, lighting.downwind.xyz, lighting.up_height.xyz };
+}
 
 // Of the light falling on any cloud over a place, what reaches it, as render::CloudShade has it.
 public struct Shade {

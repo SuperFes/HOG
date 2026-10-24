@@ -145,21 +145,22 @@ Blade nothing() {
 }
 
 // How far the tip is held and swayed by the wind: held over in strong wind, swaying most in a
-// breeze, still in still air. Gusts lay the grass over as they pass, and blades in the same part
-// of a gust sway together, so the field moves in clumps.
+// breeze, still in still air. Gusts lay the grass over as they pass, and blades sway in waves
+// running downwind.
 float3 blown(float3 root, float height, uint hash) {
     const float mean = length(push.wind.xyz);
     if (mean < 1e-3) {
         return float3(0.0);
     }
     const float3 along = push.wind.xyz / mean;
-    const float field = gust_field(root, lighting.gusts.xyz);
+    const GustFrame frame = gust_frame(lighting);
+    const float field = gust_field(root, frame);
     const float gust = gust_of(field);
     const float speed = gusting(mean, gust);
-    // Each blade a little apart from its neighbours, as many as ahead of the field as behind it.
+    // Each blade a little apart from its neighbours, as many as ahead of the wave as behind it.
     const float phase =
-        sway_phase(push.bend_radii.z, mean, field) + (1.2 * (unit(hash) - 0.5));
-    return along * (height * (laid_over(speed) + (swaying(speed) * sin(phase))));
+        sway_phase(lighting.downwind.w, root, frame, field) + (1.2 * (unit(hash) - 0.5));
+    return along * (height * (laid_over(speed) + (swung(gust) * swaying(speed) * sin(phase))));
 }
 
 // A blade as grown for the frame: where it stands and how it's shaped and coloured.

@@ -773,9 +773,10 @@ std::vector<std::uint8_t> from_above(hog::render::Device& device, const Seen& se
                                         .exposure = 10.0,
                                         .sky_light = model.sky_irradiance(seen.height * scale, sun),
                                         .daylight = seen.daylight,
-                                        .gusts_drifted = seen.gusts_drifted,
-                                        .gusts_wind = seen.wind,
-                                        .swaying_for = seen.seconds};
+                                        .gusts = {.anchor = DVec3{1'000.0} - seen.gusts_drifted,
+                                                  .along = {1.0, 0.0, 0.0},
+                                                  .wave = -seen.seconds,
+                                                  .wind = seen.wind}};
     return draw(device, *terrain, pool, draws, view, [&](VkCommandBuffer commands) {
         CHECK(sky->record_frame(commands, extent, 0, *atmosphere, sky_view));
     });
@@ -861,7 +862,7 @@ TEST_CASE("gusts cross far meadows as patches of light swaying in waves, and lea
     CHECK(lit.most < 48);
 
     // And sways as time goes on.
-    blowing.seconds = 0.7;
+    blowing.seconds = 2.0;
     CHECK(apart(after, from_above(*device, blowing)).mean > 2.0);
 
     Seen calm = still;

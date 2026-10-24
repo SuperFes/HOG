@@ -175,7 +175,7 @@ Planted plant(uint instance) {
     planted.along = float3(0.0);
     if (speed > 1e-3) {
         planted.along = push.wind.xyz / speed;
-        const float field = gust_field(root, lighting.gusts.xyz);
+        const float field = gust_field(root, gust_frame(lighting));
         const float apart = 1.2 * (unit(hash + 6u) - 0.5);
         planted.sway = grown * tree_sway(push.bend_radii.z, speed, field, apart);
     }

@@ -110,13 +110,14 @@ Pixels draw(hog::render::Device& device, const Stand& stand) {
     const hog::render::Camera camera{.eye = eye, .forward = north, .up = up, .vertical_fov = 0.6};
     const hog::atmosphere::Model model;
     const double scale = hog::render::air_scale(model.air(), bend);
-    const hog::render::SkyView seen{.camera = camera,
-                                    .sun = sun,
-                                    .bend = bend,
-                                    .exposure = 10.0,
-                                    .sky_light = model.sky_irradiance(2.0 * scale, sun),
-                                    .daylight = stand.daylight,
-                                    .gusts_drifted = stand.gusts_drifted};
+    const hog::render::SkyView seen{
+        .camera = camera,
+        .sun = sun,
+        .bend = bend,
+        .exposure = 10.0,
+        .sky_light = model.sky_irradiance(2.0 * scale, sun),
+        .daylight = stand.daylight,
+        .gusts = {.anchor = DVec3{1'000.0} - stand.gusts_drifted, .along = east}};
     const StandDraw grown{.slot = slot,
                           .count = static_cast<std::uint32_t>(stand.anchors.size()),
                           .origin = origin,

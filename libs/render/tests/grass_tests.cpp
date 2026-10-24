@@ -115,7 +115,9 @@ Pixels draw(hog::render::Device& device, const Field& grown, std::uint32_t* coun
                                     .bend = bend,
                                     .exposure = 10.0,
                                     .sky_light = model.sky_irradiance(2.0 * scale, sun),
-                                    .gusts_drifted = grown.gusts_drifted};
+                                    .gusts = {.anchor = DVec3{1'000.0} - grown.gusts_drifted,
+                                              .along = east,
+                                              .wave = -grown.seconds}};
     const GrassDraw lawn{.slot = slot, .origin = origin, .spacing = spacing, .seed = 7};
     const GrassView view{.camera = camera,
                          .bend = bend,

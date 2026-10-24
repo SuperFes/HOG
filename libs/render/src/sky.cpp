@@ -44,6 +44,7 @@ struct Lighting {
     glm::vec4 gusts;
     glm::vec4 swaying;
     glm::vec4 ground;
+    glm::vec4 downwind;
 };
 
 static_assert(offsetof(Lighting, reach) + (3 * sizeof(float)) == sea_laying_at);
@@ -224,13 +225,13 @@ Result<> Sky::record_tables(VkCommandBuffer commands, VkExtent2D extent, std::ui
                  view.daylight.lengthening ? 1.0F : 0.0F, 0.0F},
         // Without a sea to say otherwise, the eye is out of the water.
         .water = {Vec3{view.bend.up}, std::numeric_limits<float>::max()},
-        .gusts = {Vec3{gust_anchor(view.camera.eye, view.gusts_drifted)},
-                  static_cast<float>(view.gusts_wind)},
-        .swaying = {static_cast<float>(view.swaying_for),
+        .gusts = {Vec3{view.gusts.anchor}, static_cast<float>(view.gusts.wind)},
+        .swaying = {0.0F,
                     extent.height > 0 ? static_cast<float>(view.camera.vertical_fov / extent.height)
                                       : 0.0F,
                     0.0F, 0.0F},
-        .ground = {Vec3{gust_anchor(view.camera.eye, DVec3{0.0})}, 0.0F}};
+        .ground = {Vec3{gust_anchor(view.camera.eye, DVec3{0.0})}, 0.0F},
+        .downwind = {Vec3{view.gusts.along}, static_cast<float>(view.gusts.wave)}};
     const Buffer& buffer = lighting_.at(frame);
     std::memcpy(buffer.mapped().data(), &lighting, sizeof(lighting));
     if (auto flushed = buffer.flush(); !flushed) {

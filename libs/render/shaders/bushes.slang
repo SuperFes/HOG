@@ -135,7 +135,7 @@ Bush vertex_main(uint vertex: SV_VertexID, uint instance: SV_InstanceID) {
     float3 sway = float3(0.0);
     if (speed > 1e-3) {
         const float3 along = push.wind.xyz / speed;
-        const float field = gust_field(root, lighting.gusts.xyz);
+        const float field = gust_field(root, gust_frame(lighting));
         const float apart = 1.2 * (unit(hash + 6u) - 0.5);
         sway = along * (height * bush_sway(push.bend_radii.z, speed, field, apart));
     }
