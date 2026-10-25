@@ -65,10 +65,12 @@ constexpr double ridge_reach = 60'000.0;
 constexpr double trench_out = 6'000.0;
 constexpr double trench_reach = 10'000.0;
 // The plate it dives under melts above it, raising a line of volcanoes this far in, this wide; out
-// at sea, they build the floor under them up this many metres.
+// at sea, they build the floor under them up this many metres. Even slow plates, or ones diving
+// aslant, feed them fully.
 constexpr double arc_inland = 20'000.0;
-constexpr double arc_reach = 8'000.0;
-constexpr double arc_rise = 2'000.0;
+constexpr double arc_reach = 12'000.0;
+constexpr std::int64_t arc_rise = 3'000;
+constexpr double arc_full_rate = 0.5;
 
 // 1 at `middle`, falling smoothly to 0 at `reach` either side.
 double bump(double at, double middle, double reach) {
@@ -149,7 +151,8 @@ Tectonics tectonics(const Plates& plates) {
         const bool other_dives =
             !continental(boundary.other) && (continental(own) || boundary.other < own);
         if (rate > 0.0 && other_dives) {
-            arcs[index] = rate * head_on * bump(distance, arc_inland, arc_reach);
+            arcs[index] = std::min(rate / arc_full_rate, 1.0) * std::sqrt(head_on) *
+                          bump(distance, arc_inland, arc_reach);
         }
         if (!continental(own)) {
             if (rate < 0.0) {
@@ -158,8 +161,6 @@ Tectonics tectonics(const Plates& plates) {
             } else if (!other_dives) {
                 floor[index] = -rate * head_on * static_cast<double>(Continents::trench_depth) *
                                bump(distance, trench_out, trench_reach);
-            } else {
-                floor[index] = arc_rise * arcs[index];
             }
             continue;
         }
@@ -250,13 +251,17 @@ template <int Bits>
 Continents::Crust Continents::crust(CellId cell) const {
     const CellId at = warped(cell);
     constexpr int finer = Bits - fixed_fraction_bits;
-    Crust crust{
-        .height = field<Bits>(cell, at) - (sea_level_ << finer),
-        .mountains = std::clamp<std::int64_t>(plates_->grid().sample(mountains_, at), 0, fixed_one)
-                     << finer,
-        .grain = {},
-        .floor = plates_->grid().sample(floor_, at) << finer,
-        .arcs = std::clamp<std::int64_t>(plates_->grid().sample(arcs_, at), 0, fixed_one) << finer};
+    const std::int64_t arcs =
+        std::clamp<std::int64_t>(plates_->grid().sample(arcs_, at), 0, fixed_one);
+    // Built up fully wherever volcanoes rise all along the arc.
+    const std::int64_t platform = (arc_rise * std::min(arcs, full_arc) * fixed_one) / full_arc;
+    Crust crust{.height = field<Bits>(cell, at) - (sea_level_ << finer),
+                .mountains =
+                    std::clamp<std::int64_t>(plates_->grid().sample(mountains_, at), 0, fixed_one)
+                    << finer,
+                .grain = {},
+                .floor = (plates_->grid().sample(floor_, at) + platform) << finer,
+                .arcs = arcs << finer};
     for (std::size_t axis = 0; axis < 3; ++axis) {
         crust.grain.at(axis) =
             std::max<std::int64_t>(plates_->grid().sample(grain_.at(axis), at), 0);

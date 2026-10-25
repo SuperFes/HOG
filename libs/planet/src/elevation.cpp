@@ -84,6 +84,7 @@ Elevation::Elevation(const PlanetConfig& config)
                                                  LevelGrid{Plates::level, config.radius},
                                                  config.radius, config.plates)},
       archipelago_{config.seed, config.radius, continents_},
+      volcanoes_{config.seed, config.radius, continents_},
       ridge_seed_{hash_combine(config.seed, ridge_salt)},
       ridge_frequency_{config.radius / ridge_wavelength},
       hill_seed_{hash_combine(config.seed, hill_salt)},
@@ -178,10 +179,10 @@ std::optional<Channel> Elevation::river(CellId cell) const {
 }
 
 bool Elevation::is_land(CellId cell) const {
-    if (height<fine_fraction_bits>(cell) > 0) {
+    // Told by the fine elevation, so ground right at sea level is the sea's.
+    if (generated<fine_fraction_bits>(cell) > 0) {
         return true;
     }
-    // At or below sea level, told by the fine height, so ground right at it is the sea's.
     const auto water = evolved().rivers.standing(cell, std::min<std::int64_t>(generated(cell), -1));
     return !water || !water->sea;
 }
@@ -283,12 +284,13 @@ std::int64_t Elevation::generated(CellId cell) const {
     const auto crust = continents_.crust<Bits>(cell);
     const std::int64_t continent = crust.height;
     const std::int64_t height = archipelago_.raise<Bits>(cell, continent);
+    const std::int64_t volcanoes = volcanoes_.lift<Bits>(cell);
     if (height <= 0) {
         const std::int64_t hills =
             (abyssal_hill_height *
              (ridge<Bits>(hill_seed_, hill_frequency_, hill_octaves, cell, crust.grain) -
               (one / 2)));
-        return sea_floor<Bits>(-height, (ocean_depth * one) - crust.floor - hills);
+        return sea_floor<Bits>(-height, (ocean_depth * one) - crust.floor - hills) + volcanoes;
     }
     // Islands keep to lowland hills; only continents roll and carry mountain belts.
     const std::int64_t relief =
@@ -300,11 +302,11 @@ std::int64_t Elevation::generated(CellId cell) const {
         (((lowland_height * one) + relief) * ramp<Bits>(height, lowland_width<Bits>)) >> Bits;
     const std::int64_t strength = mountain_strength<Bits>(continent, crust.mountains);
     if (strength == 0) {
-        return lowland;
+        return lowland + volcanoes;
     }
     const std::int64_t ridge =
         Elevation::ridge<Bits>(ridge_seed_, ridge_frequency_, ridge_octaves, cell, crust.grain);
-    return lowland + (mountain_height * ((strength * ridge) >> Bits));
+    return lowland + (mountain_height * ((strength * ridge) >> Bits)) + volcanoes;
 }
 
 } // namespace hog::planet

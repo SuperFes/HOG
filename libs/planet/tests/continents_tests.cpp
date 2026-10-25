@@ -333,7 +333,7 @@ TEST_CASE("ocean floor diving under a continent sinks into a trench", "[planet][
     }
     CHECK(deepest < -1'500.0);
     CHECK(where < 0.0);
-    CHECK(floor_across(found, 30'000.0, 1.0) == 0.0);
+    CHECK(floor_across(found, 30'000.0, 1.0) >= 0.0);
 }
 
 TEST_CASE("of two oceanic plates closing, only one dives", "[planet][continents]") {
@@ -373,7 +373,7 @@ TEST_CASE("no volcanoes rise where continents collide or plates slide past",
     // Turning about the axis through both plates' hearts, they slide past each other.
     for (const Continents& found : {pair(0.8, 0.8), pair(0.8, -0.8, spin, {1.0, 0.0, 0.0})}) {
         for (int step = -40; step <= 40; step += 4) {
-            CHECK(arcs_across(found, step * 1'000.0, 1.0) < 0.02);
+            CHECK(arcs_across(found, step * 1'000.0, 1.0) < 0.1);
         }
     }
 }

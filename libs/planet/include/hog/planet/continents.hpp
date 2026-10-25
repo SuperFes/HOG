@@ -22,6 +22,8 @@ public:
     static constexpr int survey_level = 6;
     // Metres below the abyss that ocean floor sinks where it dives under another plate.
     static constexpr std::int64_t trench_depth = 3'000;
+    // Arcs this strong, in fixed point, raise volcanoes all along them.
+    static constexpr std::int64_t full_arc = fixed_one * 45 / 100;
 
     Continents(std::uint64_t seed, double ocean_fraction, std::shared_ptr<const Plates> plates);
 

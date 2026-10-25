@@ -84,16 +84,19 @@ hog::DVec3 along(hog::DVec3 from, hog::DVec3 towards, double metres) {
 
 } // namespace
 
-TEST_CASE("land stays above sea level and the ocean floor below it", "[planet][elevation]") {
+TEST_CASE("land stays above sea level and the ocean floor below it, but for volcanoes",
+          "[planet][elevation]") {
     const std::uint64_t seed = GENERATE(take(hog::testing::cases(2), values({1U, 2U})));
     const Elevation terrain{planet(seed)};
+    const auto volcanoes = metres(static_cast<std::int64_t>(hog::planet::Volcanoes::max_height));
     for (const CellId cell : cells_at(6)) {
         const std::int64_t elevation = terrain.elevation(cell);
         if (terrain.height<hog::planet::fine_fraction_bits>(cell) > 0) {
             REQUIRE(elevation >= 0);
-            REQUIRE(elevation <= metres(Elevation::lowland_height + Elevation::mountain_height));
+            REQUIRE(elevation <=
+                    metres(Elevation::lowland_height + Elevation::mountain_height) + volcanoes);
         } else {
-            REQUIRE(elevation <= 0);
+            REQUIRE(elevation <= terrain.volcanoes().lift(cell));
             REQUIRE(elevation >= metres(-Elevation::deepest));
             REQUIRE(terrain.mountain_strength(cell) == 0);
         }
@@ -310,7 +313,7 @@ TEST_CASE("the deep ocean floor rises at ridges, sinks into trenches and rolls b
     double shallowest_plain = depth * 2.0;
     double deepest_plain = 0.0;
     for (const CellId cell : cells_at(6)) {
-        if (terrain.height(cell) > -fixed_one / 5) {
+        if (terrain.height(cell) > -fixed_one / 5 || terrain.volcanoes().lift(cell) > 0) {
             continue;
         }
         const double below = -fixed_to_double(terrain.elevation(cell));

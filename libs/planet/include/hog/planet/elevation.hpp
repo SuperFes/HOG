@@ -6,6 +6,7 @@
 #include <hog/planet/landform.hpp>
 #include <hog/planet/planet_config.hpp>
 #include <hog/planet/rivers.hpp>
+#include <hog/planet/volcanoes.hpp>
 
 #include <array>
 #include <cstdint>
@@ -16,7 +17,8 @@
 namespace hog::planet {
 
 // Terrain height: continents and the starting islands give the coastline, lowlands and ocean
-// floor; ridges raise mountain ranges where the plates push them up, away from the coast. Rivers
+// floor; ridges raise mountain ranges where the plates push them up, away from the coast, and
+// volcanoes stand along the arcs above plates diving. Rivers
 // then wear the land over geological time while the ranges keep rising, which carves valleys and
 // drainage, and cut channels where they run.
 class Elevation {
@@ -36,13 +38,15 @@ public:
     [[nodiscard]] const Plates& plates() const noexcept { return continents_.plates(); }
     [[nodiscard]] const Continents& continents() const noexcept { return continents_; }
     [[nodiscard]] const Archipelago& archipelago() const noexcept { return archipelago_; }
+    [[nodiscard]] const Volcanoes& volcanoes() const noexcept { return volcanoes_; }
 
     // Fixed-point continent height with the islands raised on it; land is positive.
     template <int Bits = fixed_fraction_bits>
     [[nodiscard]] std::int64_t height(CellId cell) const {
         return archipelago_.raise<Bits>(cell, continents_.height<Bits>(cell));
     }
-    // Out of the sea: above its level, told by the fine height, or below it but cut off from it.
+    // Out of the sea: ground above its level, told by the fine elevation, or below it but cut off
+    // from it.
     [[nodiscard]] bool is_land(CellId cell) const;
 
     // Fixed-point metres above sea level of the ground, a river's bed included: positive above
@@ -111,6 +115,7 @@ private:
 
     Continents continents_;
     Archipelago archipelago_;
+    Volcanoes volcanoes_;
     std::uint64_t ridge_seed_;
     double ridge_frequency_; // per unit of the sphere's radius
     std::uint64_t hill_seed_;
