@@ -264,7 +264,8 @@ void Plates::find_boundaries() {
         boundaries_[index] = {.distance = 0,
                               .other = edge.other,
                               .closing = closing,
-                              .sliding = glm::length(relative - (normal * closing))};
+                              .sliding = glm::length(relative - (normal * closing)),
+                              .normal = normal};
         frontier.emplace(0, index, index);
     }
     std::vector<bool> reached(grid_.size(), false);

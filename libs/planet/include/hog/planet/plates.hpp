@@ -36,6 +36,8 @@ public:
         // fast they slide past each other.
         double closing = 0.0;
         double sliding = 0.0;
+        // Unit tangent where the boundary is nearest, across it towards the other plate.
+        DVec3 normal{};
     };
 
     // Precondition: 2 <= count <= max_count, and `radius` is the grid's. Some of the plates

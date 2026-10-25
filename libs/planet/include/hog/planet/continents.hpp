@@ -4,6 +4,7 @@
 #include <hog/planet/noise.hpp>
 #include <hog/planet/plates.hpp>
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -38,10 +39,12 @@ public:
     [[nodiscard]] bool is_land(CellId cell) const { return height<fine_fraction_bits>(cell) > 0; }
 
     // The height above sea level and how strongly mountains rise, from 0 to 1, both in fixed
-    // point with `Bits` fractional bits.
+    // point with `Bits` fractional bits; and the grain ranges follow, as how much of the way along
+    // them lies along each axis, in fixed point and summing to about 1.
     struct Crust {
         std::int64_t height = 0;
         std::int64_t mountains = 0;
+        std::array<std::int64_t, 3> grain{};
     };
     template <int Bits = fixed_fraction_bits>
     [[nodiscard]] Crust crust(CellId cell) const;
@@ -62,6 +65,7 @@ private:
     // rise.
     std::vector<std::int64_t> rifts_;
     std::vector<std::int64_t> mountains_;
+    std::array<std::vector<std::int64_t>, 3> grain_;
     std::int64_t sea_level_ = 0;
 };
 

@@ -7,6 +7,7 @@
 #include <hog/planet/planet_config.hpp>
 #include <hog/planet/rivers.hpp>
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -86,6 +87,10 @@ private:
     template <int Bits>
     [[nodiscard]] static std::int64_t mountain_strength(std::int64_t height,
                                                         std::int64_t mountains);
+    // Ridged noise from 0 to 1 in fixed point with `Bits` fractional bits, its ridges running
+    // with a range's grain.
+    template <int Bits>
+    [[nodiscard]] std::int64_t ridge(CellId cell, const std::array<std::int64_t, 3>& grain) const;
     // The elevation as generated, before rivers wore it.
     [[nodiscard]] std::int64_t generated(CellId cell) const;
     // The same with `Bits` fractional bits.
@@ -100,6 +105,7 @@ private:
     Continents continents_;
     Archipelago archipelago_;
     std::uint64_t ridge_seed_;
+    double ridge_frequency_; // per unit of the sphere's radius
     std::uint64_t relief_seed_;
     struct Evolving {
         PlanetConfig config;

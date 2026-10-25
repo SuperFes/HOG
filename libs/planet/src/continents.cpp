@@ -6,6 +6,7 @@
 #include <hog/planet/tile.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <span>
@@ -39,6 +40,8 @@ constexpr int warp_octaves = 2;
 // What plates do to the ground near where they meet, spread over this many passes of smoothing so
 // that no seam shows where a cell's nearest boundary changes.
 constexpr int tectonic_passes = 8;
+// Ranges bend gently, following the boundary's way more smoothly than its wanderings.
+constexpr int grain_passes = 24;
 // Metres per million years at which plates closing or parting do all they can; slower, they do
 // less, but not proportionally less, as even slow collisions pile up ranges over time.
 constexpr double full_rate = 25'000.0;
@@ -96,18 +99,28 @@ std::vector<std::int64_t> plate_crust(const Plates& plates) {
 struct Tectonics {
     std::vector<std::int64_t> rifts;     // field lowered
     std::vector<std::int64_t> mountains; // strength from 0 to 1
+    std::array<std::vector<std::int64_t>, 3> grain;
 };
 
 Tectonics tectonics(const Plates& plates) {
     const std::size_t size = plates.grid().size();
     std::vector<double> rifts(size, 0.0);
     std::vector<double> mountains(size, 0.0);
+    // Squares of the way along the nearest boundary, which have no sign to cancel as they smooth.
+    std::array<std::vector<double>, 3> grain;
+    std::ranges::fill(grain, std::vector<double>(size, 0.0));
     const auto continental = [&](std::uint32_t plate) {
         return plates.plates()[plate].continental > 0.0;
     };
     for (std::uint32_t index = 0; index < size; ++index) {
         const auto& boundary = plates.boundaries()[index];
         const std::uint32_t own = plates.plate()[index];
+        const DVec3 along =
+            glm::normalize(glm::cross(cell_center(plates.grid().cell(index)), boundary.normal));
+        for (std::size_t axis = 0; axis < 3; ++axis) {
+            grain.at(axis)[index] =
+                along[static_cast<glm::length_t>(axis)] * along[static_cast<glm::length_t>(axis)];
+        }
         if (!continental(own)) {
             continue;
         }
@@ -126,7 +139,12 @@ Tectonics tectonics(const Plates& plates) {
     }
     smooth(plates.grid(), rifts, tectonic_passes);
     smooth(plates.grid(), mountains, tectonic_passes);
-    return {.rifts = to_fixed(rifts), .mountains = to_fixed(mountains)};
+    Tectonics made{.rifts = to_fixed(rifts), .mountains = to_fixed(mountains), .grain = {}};
+    for (std::size_t axis = 0; axis < 3; ++axis) {
+        smooth(plates.grid(), grain.at(axis), grain_passes);
+        made.grain.at(axis) = to_fixed(grain.at(axis));
+    }
+    return made;
 }
 
 } // namespace
@@ -138,6 +156,7 @@ Continents::Continents(std::uint64_t seed, double ocean_fraction,
     Tectonics made = tectonics(*plates_);
     rifts_ = std::move(made.rifts);
     mountains_ = std::move(made.mountains);
+    grain_ = std::move(made.grain);
     HOG_ASSERT(ocean_fraction >= 0.0 && ocean_fraction < 1.0, "ocean fraction must be in [0, 1)");
 
     std::vector<std::int64_t> survey;
@@ -187,10 +206,16 @@ template <int Bits>
 Continents::Crust Continents::crust(CellId cell) const {
     const CellId at = warped(cell);
     constexpr int finer = Bits - fixed_fraction_bits;
-    return {.height = field<Bits>(cell, at) - (sea_level_ << finer),
-            .mountains =
-                std::clamp<std::int64_t>(plates_->grid().sample(mountains_, at), 0, fixed_one)
-                << finer};
+    Crust crust{.height = field<Bits>(cell, at) - (sea_level_ << finer),
+                .mountains =
+                    std::clamp<std::int64_t>(plates_->grid().sample(mountains_, at), 0, fixed_one)
+                    << finer,
+                .grain = {}};
+    for (std::size_t axis = 0; axis < 3; ++axis) {
+        crust.grain.at(axis) =
+            std::max<std::int64_t>(plates_->grid().sample(grain_.at(axis), at), 0);
+    }
+    return crust;
 }
 
 template std::int64_t Continents::field<fixed_fraction_bits>(CellId cell) const;

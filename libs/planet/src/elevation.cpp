@@ -34,7 +34,9 @@ constexpr std::int64_t relief_height = 80;
 constexpr double relief_frequency = 8.0;
 constexpr int relief_octaves = 4;
 
-constexpr double ridge_frequency = 6.0;
+// Ridges lie this far apart, and run this many times longer along a range than across it.
+constexpr double ridge_wavelength = 12'000.0; // metres
+constexpr std::int64_t ridge_stretch = 2;
 constexpr int ridge_octaves = 6;
 template <int Bits>
 constexpr std::int64_t erosion = 2 * fixed_unit<Bits>;
@@ -79,6 +81,7 @@ Elevation::Elevation(const PlanetConfig& config)
                                                  config.radius, config.plates)},
       archipelago_{config.seed, config.radius, continents_},
       ridge_seed_{hash_combine(config.seed, ridge_salt)},
+      ridge_frequency_{config.radius / ridge_wavelength},
       relief_seed_{hash_combine(config.seed, relief_salt)},
       evolving_{std::make_shared<Evolving>(config)} {}
 
@@ -233,6 +236,32 @@ std::int64_t Elevation::sea_floor(std::int64_t below) {
 template std::int64_t Elevation::sea_floor<fixed_fraction_bits>(std::int64_t below);
 template std::int64_t Elevation::sea_floor<fine_fraction_bits>(std::int64_t below);
 
+template <int Bits>
+std::int64_t Elevation::ridge(CellId cell, const std::array<std::int64_t, 3>& grain) const {
+    // Noise stretched along each axis, weighted by how far the range runs along it: stretching
+    // along fixed axes bends nothing, however the range turns.
+    const auto point = noise_point<Bits>(cell_center(cell), ridge_frequency_);
+    std::int64_t total = 0;
+    std::int64_t weights = 0;
+    for (std::size_t axis = 0; axis < 3; ++axis) {
+        // Squared, so the axis nearest the grain leads and blending blurs the crests less.
+        const std::int64_t weight = (grain.at(axis) * grain.at(axis)) >> fixed_fraction_bits;
+        if (weight < fixed_one / 50) {
+            continue;
+        }
+        auto stretched = point;
+        std::array<std::int64_t*, 3> along{&stretched.x, &stretched.y, &stretched.z};
+        *along.at(axis) /= ridge_stretch;
+        total += weight *
+                 ridges(hash_values(ridge_seed_, axis), stretched, ridge_octaves, erosion<Bits>);
+        weights += weight;
+    }
+    if (weights == 0) {
+        return ridges(ridge_seed_, point, ridge_octaves, erosion<Bits>);
+    }
+    return total / weights;
+}
+
 std::int64_t Elevation::generated(CellId cell) const {
     // Generated finer than it's kept, so the noise's steps stay well below a centimetre.
     constexpr int finer = fine_fraction_bits - fixed_fraction_bits;
@@ -260,9 +289,7 @@ std::int64_t Elevation::generated(CellId cell) const {
     if (strength == 0) {
         return lowland;
     }
-    const std::int64_t ridge =
-        ridges(ridge_seed_, noise_point<Bits>(cell_center(cell), ridge_frequency), ridge_octaves,
-               erosion<Bits>);
+    const std::int64_t ridge = this->ridge<Bits>(cell, crust.grain);
     return lowland + (mountain_height * ((strength * ridge) >> Bits));
 }
 

@@ -263,3 +263,11 @@ TEST_CASE("continents parting sink into a rift", "[planet][continents]") {
     const CellId far = hog::planet::cell_at(hog::DVec3{1.0, 0.0, 0.0});
     CHECK(parting.field(far) == still.field(far));
 }
+
+TEST_CASE("ranges run with the boundary that raised them", "[planet][continents]") {
+    // The plates meet along the meridian through +y, which runs along z there.
+    const Continents found = pair(0.8, 0.8);
+    const auto grain = found.crust(east_of(0.0, 1.0)).grain;
+    CHECK(hog::planet::fixed_to_double(grain[2]) > 0.7);
+    CHECK(hog::planet::fixed_to_double(grain[0] + grain[1] + grain[2]) > 0.9);
+}

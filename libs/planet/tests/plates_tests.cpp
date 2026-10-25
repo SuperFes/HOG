@@ -182,3 +182,26 @@ TEST_CASE("continental plates touch one other at most", "[plates]") {
     CHECK(continents >= 2);
     CHECK(continents < plates.plates().size());
 }
+
+TEST_CASE("a boundary's normal points across it to the other plate", "[plates]") {
+    const Plates& plates = random_plates();
+    const auto& cells = plates.grid();
+    for (std::uint32_t index = 0; index < cells.size(); ++index) {
+        const auto& boundary = plates.boundaries()[index];
+        const DVec3 at = hog::planet::cell_center(cells.cell(index));
+        REQUIRE(std::abs(glm::length(boundary.normal) - 1.0) < 1e-9);
+        if (boundary.distance != 0) {
+            continue;
+        }
+        REQUIRE(std::abs(glm::dot(boundary.normal, at)) < 1e-9);
+        // Towards the other plate's neighbours of the cell more than away from them.
+        double towards = 0.0;
+        for (const std::uint32_t neighbor : cells.neighbors(index)) {
+            if (plates.plate()[neighbor] == boundary.other) {
+                towards +=
+                    glm::dot(hog::planet::cell_center(cells.cell(neighbor)) - at, boundary.normal);
+            }
+        }
+        REQUIRE(towards > 0.0);
+    }
+}
