@@ -114,11 +114,11 @@ constexpr auto inland = std::numeric_limits<std::uint32_t>::max();
                 ++across[plates[neighbor]];
             }
         }
-        const auto* const most = std::ranges::max_element(across);
-        if (*most == 0) {
+        const auto other =
+            static_cast<std::uint32_t>(std::ranges::max_element(across) - across.begin());
+        if (across[other] == 0) {
             continue;
         }
-        const auto other = static_cast<std::uint32_t>(most - across.begin());
         const DVec3 at = cell_center(grid.cell(index));
         DVec3 normal{};
         for (const std::uint32_t neighbor : grid.neighbors(index)) {
