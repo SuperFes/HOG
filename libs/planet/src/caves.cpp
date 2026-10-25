@@ -170,6 +170,8 @@ LavaTube Caves::lava_tube(DVec3 vent, std::uint64_t seed) const {
     const TangentFrame frame = tangent_frame(vent);
     DVec3 heading = glm::normalize((frame.east * ((2.0 * fraction(hash_values(seed, 0))) - 1.0)) +
                                    (frame.north * ((2.0 * fraction(hash_values(seed, 1))) - 1.0)));
+    // A vent off the summit leads down only some ways, so a tube turns until it finds one.
+    int quarter_turns = 0;
     for (int step = 0; step < longest_tube && nodes.back().elevation > 0; ++step) {
         const Node& here = nodes.back();
         const DVec3 side = glm::normalize(glm::cross(here.direction, heading));
@@ -191,6 +193,12 @@ LavaTube Caves::lava_tube(DVec3 vent, std::uint64_t seed) const {
                 lowest_choice = choice;
                 lowest_heading = way;
             }
+        }
+        if (!lowest && nodes.size() == 1 && quarter_turns < 3) {
+            heading = glm::cross(here.direction, heading);
+            ++quarter_turns;
+            --step;
+            continue;
         }
         if (!lowest) {
             break;
