@@ -64,6 +64,11 @@ constexpr double ridge_reach = 60'000.0;
 // Where ocean floor dives under another plate, its trench runs this far out, this wide.
 constexpr double trench_out = 6'000.0;
 constexpr double trench_reach = 10'000.0;
+// The plate it dives under melts above it, raising a line of volcanoes this far in, this wide; out
+// at sea, they build the floor under them up this many metres.
+constexpr double arc_inland = 20'000.0;
+constexpr double arc_reach = 8'000.0;
+constexpr double arc_rise = 2'000.0;
 
 // 1 at `middle`, falling smoothly to 0 at `reach` either side.
 double bump(double at, double middle, double reach) {
@@ -108,6 +113,7 @@ struct Tectonics {
     std::vector<std::int64_t> mountains; // strength from 0 to 1
     std::array<std::vector<std::int64_t>, 3> grain;
     std::vector<std::int64_t> floor; // metres
+    std::vector<std::int64_t> arcs;  // strength from 0 to 1
 };
 
 Tectonics tectonics(const Plates& plates) {
@@ -115,6 +121,7 @@ Tectonics tectonics(const Plates& plates) {
     std::vector<double> rifts(size, 0.0);
     std::vector<double> mountains(size, 0.0);
     std::vector<double> floor(size, 0.0);
+    std::vector<double> arcs(size, 0.0);
     // Squares of the way along the nearest boundary, which have no sign to cancel as they smooth.
     std::array<std::vector<double>, 3> grain;
     std::ranges::fill(grain, std::vector<double>(size, 0.0));
@@ -133,19 +140,26 @@ Tectonics tectonics(const Plates& plates) {
         const double distance = fixed_to_double(boundary.distance);
         const double pace = std::min(std::abs(boundary.closing) / full_rate, 1.0);
         const double rate = std::copysign(std::sqrt(pace), boundary.closing);
+        // Plates sliding past each other neither open a ridge nor dive, however their boundary
+        // wobbles.
+        const double motion = std::hypot(boundary.closing, boundary.sliding);
+        const double head_on =
+            motion > 0.0 ? (boundary.closing * boundary.closing) / (motion * motion) : 0.0;
+        // Of two oceanic plates, the one first in order dives.
+        const bool other_dives =
+            !continental(boundary.other) && (continental(own) || boundary.other < own);
+        if (rate > 0.0 && other_dives) {
+            arcs[index] = rate * head_on * bump(distance, arc_inland, arc_reach);
+        }
         if (!continental(own)) {
-            // Plates sliding past each other neither open a ridge nor dive, however their
-            // boundary wobbles.
-            const double motion = std::hypot(boundary.closing, boundary.sliding);
-            const double head_on =
-                motion > 0.0 ? (boundary.closing * boundary.closing) / (motion * motion) : 0.0;
             if (rate < 0.0) {
                 const double cooled = std::sqrt(std::min(distance / ridge_reach, 1.0));
                 floor[index] = -rate * head_on * ridge_rise * (1.0 - cooled);
-            } else if (continental(boundary.other) || own < boundary.other) {
-                // Of two oceanic plates, the one first in order dives.
+            } else if (!other_dives) {
                 floor[index] = -rate * head_on * static_cast<double>(Continents::trench_depth) *
                                bump(distance, trench_out, trench_reach);
+            } else {
+                floor[index] = arc_rise * arcs[index];
             }
             continue;
         }
@@ -162,10 +176,12 @@ Tectonics tectonics(const Plates& plates) {
     smooth(plates.grid(), rifts, tectonic_passes);
     smooth(plates.grid(), mountains, tectonic_passes);
     smooth(plates.grid(), floor, tectonic_passes);
+    smooth(plates.grid(), arcs, tectonic_passes);
     Tectonics made{.rifts = to_fixed(rifts),
                    .mountains = to_fixed(mountains),
                    .grain = {},
-                   .floor = to_fixed(floor)};
+                   .floor = to_fixed(floor),
+                   .arcs = to_fixed(arcs)};
     for (std::size_t axis = 0; axis < 3; ++axis) {
         smooth(plates.grid(), grain.at(axis), grain_passes);
         made.grain.at(axis) = to_fixed(grain.at(axis));
@@ -184,6 +200,7 @@ Continents::Continents(std::uint64_t seed, double ocean_fraction,
     mountains_ = std::move(made.mountains);
     grain_ = std::move(made.grain);
     floor_ = std::move(made.floor);
+    arcs_ = std::move(made.arcs);
     HOG_ASSERT(ocean_fraction >= 0.0 && ocean_fraction < 1.0, "ocean fraction must be in [0, 1)");
 
     std::vector<std::int64_t> survey;
@@ -233,12 +250,13 @@ template <int Bits>
 Continents::Crust Continents::crust(CellId cell) const {
     const CellId at = warped(cell);
     constexpr int finer = Bits - fixed_fraction_bits;
-    Crust crust{.height = field<Bits>(cell, at) - (sea_level_ << finer),
-                .mountains =
-                    std::clamp<std::int64_t>(plates_->grid().sample(mountains_, at), 0, fixed_one)
-                    << finer,
-                .grain = {},
-                .floor = plates_->grid().sample(floor_, at) << finer};
+    Crust crust{
+        .height = field<Bits>(cell, at) - (sea_level_ << finer),
+        .mountains = std::clamp<std::int64_t>(plates_->grid().sample(mountains_, at), 0, fixed_one)
+                     << finer,
+        .grain = {},
+        .floor = plates_->grid().sample(floor_, at) << finer,
+        .arcs = std::clamp<std::int64_t>(plates_->grid().sample(arcs_, at), 0, fixed_one) << finer};
     for (std::size_t axis = 0; axis < 3; ++axis) {
         crust.grain.at(axis) =
             std::max<std::int64_t>(plates_->grid().sample(grain_.at(axis), at), 0);

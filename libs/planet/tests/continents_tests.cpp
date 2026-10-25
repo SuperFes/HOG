@@ -199,17 +199,16 @@ namespace {
 constexpr double spin = 50'000.0 / radius;
 
 // Two plates grown from opposite sides of the planet, turning about the pole so they close over
-// +y and part over -y, carrying the given crust.
-Continents pair(double east_crust, double west_crust, double turning = spin) {
+// +y and part over -y, carrying the given crust; or turning about `axis`.
+Continents pair(double east_crust, double west_crust, double turning = spin,
+                hog::DVec3 axis = {0.0, 0.0, 1.0}) {
     return Continents{
         1, 0.3,
         std::make_shared<const Plates>(
             1, hog::planet::LevelGrid{Plates::level, radius}, radius,
             std::vector<Plates::Plate>{
-                {.origin = {1.0, 0.0, 0.0}, .spin = {0.0, 0.0, turning}, .continental = east_crust},
-                {.origin = {-1.0, 0.0, 0.0},
-                 .spin = {0.0, 0.0, -turning},
-                 .continental = west_crust}})};
+                {.origin = {1.0, 0.0, 0.0}, .spin = axis * turning, .continental = east_crust},
+                {.origin = {-1.0, 0.0, 0.0}, .spin = axis * -turning, .continental = west_crust}})};
 }
 
 // `metres` east of the boundary over +y or -y, about where the plates meet.
@@ -274,18 +273,39 @@ TEST_CASE("ranges run with the boundary that raised them", "[planet][continents]
 
 namespace {
 
-// Metres the floor rises `metres` east of the boundary over +y or -y, averaged along the boundary,
+// A field of the crust `metres` east of the boundary over +y or -y, averaged along the boundary,
 // which wanders.
-double floor_across(const Continents& continents, double metres, double y) {
+double across(const Continents& continents, std::int64_t Continents::Crust::* field, double metres,
+              double y) {
     double sum = 0.0;
     for (int along = -10; along <= 10; ++along) {
         const double z = along * 2'000.0 / radius;
-        sum += hog::planet::fixed_to_double(
-            continents
-                .crust(hog::planet::cell_at(glm::normalize(hog::DVec3{metres / radius, y, z})))
-                .floor);
+        sum += hog::planet::fixed_to_double(continents.crust(hog::planet::cell_at(glm::normalize(
+                                                hog::DVec3{metres / radius, y, z}))).*
+                                            field);
     }
     return sum / 21.0;
+}
+
+// Metres the floor rises.
+double floor_across(const Continents& continents, double metres, double y) {
+    return across(continents, &Continents::Crust::floor, metres, y);
+}
+
+double arcs_across(const Continents& continents, double metres, double y) {
+    return across(continents, &Continents::Crust::arcs, metres, y);
+}
+
+// Where along the line east of the boundary over +y the arc is strongest, and how strong.
+std::pair<double, double> arc_peak(const Continents& continents) {
+    std::pair<double, double> peak{0.0, 0.0};
+    for (int step = -40; step <= 40; ++step) {
+        const double metres = step * 1'000.0;
+        if (arcs_across(continents, metres, 1.0) > peak.second) {
+            peak = {metres, arcs_across(continents, metres, 1.0)};
+        }
+    }
+    return peak;
 }
 
 } // namespace
@@ -323,4 +343,37 @@ TEST_CASE("of two oceanic plates closing, only one dives", "[planet][continents]
     CHECK(floor_across(found, 3'000.0, 1.0) < floor_across(found, -3'000.0, 1.0));
     CHECK(floor_across(found, 15'000.0, 1.0) < -150.0);
     CHECK(floor_across(found, -15'000.0, 1.0) > -50.0);
+}
+
+TEST_CASE("volcanoes rise in an arc inland of where ocean floor dives under a continent",
+          "[planet][continents]") {
+    const Continents found = pair(0.8, -0.8);
+    const auto [where, strength] = arc_peak(found);
+    CHECK(strength > 0.3);
+    CHECK(where > 12'000.0);
+    CHECK(where < 28'000.0);
+    CHECK(arcs_across(found, -20'000.0, 1.0) < 0.01);
+    CHECK(arcs_across(found, 20'000.0, -1.0) == 0.0);
+}
+
+TEST_CASE("of two oceanic plates closing, volcanoes rise on the one not diving",
+          "[planet][continents]") {
+    const Continents found = pair(-0.8, -0.8);
+    const auto [where, strength] = arc_peak(found);
+    CHECK(strength > 0.3);
+    CHECK(where < -12'000.0);
+    CHECK(where > -28'000.0);
+    CHECK(arcs_across(found, 20'000.0, 1.0) < 0.01);
+    // Building the floor under them up.
+    CHECK(floor_across(found, where, 1.0) > 700.0);
+}
+
+TEST_CASE("no volcanoes rise where continents collide or plates slide past",
+          "[planet][continents]") {
+    // Turning about the axis through both plates' hearts, they slide past each other.
+    for (const Continents& found : {pair(0.8, 0.8), pair(0.8, -0.8, spin, {1.0, 0.0, 0.0})}) {
+        for (int step = -40; step <= 40; step += 4) {
+            CHECK(arcs_across(found, step * 1'000.0, 1.0) < 0.02);
+        }
+    }
 }
