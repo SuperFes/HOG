@@ -1,9 +1,11 @@
 #include "space_impl.hpp"
 
 #include <hog/core/assert.hpp>
+#include <hog/core/log.hpp>
 #include <hog/physics/space.hpp>
 
 #include <Jolt/Core/Factory.h>
+#include <Jolt/Core/IssueReporting.h>
 #include <Jolt/Core/Memory.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyLock.h>
@@ -19,8 +21,22 @@
 
 namespace hog::physics {
 
+namespace {
+
+const log::Category jolt{"jolt"};
+
+// Jolt's traces are warnings, such as a mesh it builds a slower tree for; left unset, they stop a
+// debug build. Their text is logged as it comes, unformatted.
+// NOLINTNEXTLINE(cert-dcl50-cpp,modernize-avoid-variadic-functions): Jolt's hook is printf-style
+void trace(const char* format, ...) {
+    log::debug(jolt, "{}", format);
+}
+
+} // namespace
+
 void register_jolt() {
     static const bool registered = [] {
+        JPH::Trace = trace;
         JPH::RegisterDefaultAllocator();
         static JPH::Factory factory;
         JPH::Factory::sInstance = &factory;

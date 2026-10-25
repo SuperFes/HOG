@@ -120,3 +120,15 @@ TEST_CASE("ground let go of, or moved, takes its bodies along", "[physics][groun
     }
     CHECK(space.size() == 0);
 }
+
+TEST_CASE("the ground holds over the even floor of the deep ocean", "[physics][ground]") {
+    // A patch of floor this even is one Jolt can only split at random as it builds its tree, and
+    // warns of.
+    const DVec3 deep{1.0, 0.0, 0.0};
+    REQUIRE(world().state(planet::cell_at(deep)).elevation < -3'000 * planet::fixed_one);
+    Space space;
+    Ground ground{space, world()};
+    const std::array around{over(deep)};
+    REQUIRE(ground.keep(around));
+    CHECK(ground.size() > 0);
+}
