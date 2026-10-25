@@ -7,6 +7,7 @@
 #include <hog/testing/assertion_guard.hpp>
 #include <hog/testing/quick.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <catch2/generators/catch_generators_adapters.hpp>
@@ -97,9 +98,10 @@ TEST_CASE("the starting islands are separate and 10 to 60 square kilometres",
         CHECK(area > 10.0);
         CHECK(area < 60.0);
         for (const CellId cell : cells) {
-            // Never joined to a continent, never above lowland hills.
+            // Never joined to a continent, never above lowland hills and the island's volcano.
             REQUIRE_FALSE(terrain.continents().is_land(cell));
-            REQUIRE(terrain.elevation(cell) <= Elevation::lowland_height * fixed_one);
+            REQUIRE(hog::planet::fixed_to_double(terrain.elevation(cell)) <=
+                    static_cast<double>(Elevation::lowland_height) + island.summit);
         }
         for (const auto& other : islands) {
             if (&other != &island) {
@@ -265,4 +267,47 @@ TEST_CASE("the starting islands depend on the seed", "[planet][archipelago]") {
 TEST_CASE("archipelago preconditions", "[planet][archipelago]") {
     const hog::testing::AssertionGuard guard;
     CHECK_THROWS_AS(Elevation{planet(1, Archipelago::clearance)}, hog::testing::AssertionFailed);
+}
+
+TEST_CASE("each starting island rises to a volcano, the first the tallest",
+          "[planet][archipelago]") {
+    const std::uint64_t seed = GENERATE(take(hog::testing::cases(2), values({1U, 2U, 3U, 4U})));
+    const Elevation terrain{planet(seed)};
+    const auto islands = terrain.archipelago().islands();
+    for (std::size_t index = 0; index < islands.size(); ++index) {
+        CAPTURE(index);
+        const auto& island = islands[index];
+        const CellId heart = hog::planet::cell_at(island.center);
+        CHECK(island.summit > 150.0);
+        if (index > 0) {
+            CHECK(island.summit < islands[index - 1].summit);
+        }
+        CHECK(hog::planet::fixed_to_double(terrain.archipelago().volcano(heart)) ==
+              Catch::Approx(island.summit).epsilon(0.001));
+        // Well above the lowland, though rivers have worn it down.
+        CHECK(hog::planet::fixed_to_double(terrain.elevation(heart)) > island.summit * 0.4);
+        // Gone past the coast, however far it wanders.
+        const double longest = island.radius * std::sqrt(island.elongation);
+        CHECK(terrain.archipelago().volcano(hog::planet::cell_at(
+                  glm::normalize(island.center + (island.axis * (longest * 1.45 / radius))))) == 0);
+    }
+}
+
+TEST_CASE("the starting islands mostly follow on the way their plate moves",
+          "[planet][archipelago]") {
+    for (std::uint64_t seed = 1; seed <= 4; ++seed) {
+        CAPTURE(seed);
+        const Elevation terrain{planet(seed)};
+        const auto& plates = terrain.plates();
+        const auto islands = terrain.archipelago().islands();
+        const hog::DVec3 home = islands.front().center;
+        const auto index = plates.grid().index(hog::planet::cell_at(home, plates.grid().level()));
+        const hog::DVec3 moving = plates.velocity(plates.plate()[index], home);
+        // Downstream of the first, youngest island.
+        int following = 0;
+        for (std::size_t island = 1; island < islands.size(); ++island) {
+            following += glm::dot(islands[island].center - home, moving) > 0.0 ? 1 : 0;
+        }
+        CHECK(following * 4 >= (static_cast<int>(islands.size()) - 1) * 3);
+    }
 }

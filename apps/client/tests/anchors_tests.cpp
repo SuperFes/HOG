@@ -71,11 +71,13 @@ TEST_CASE("anchored trees are bound to their spots, the same every build", "[cli
     // Every tree stands within its tile, above the shore, near upright, a pine's size for its age.
     const double span = (std::numbers::pi / 2.0) * radius /
                         static_cast<double>(std::uint32_t{1} << anchor_tile_level);
+    const hog::DVec3 up = glm::normalize(origin.metres());
     for (const TreeAnchor& anchor : first) {
-        CHECK(glm::length(glm::dvec3{anchor.position}) < span * 1.5);
+        // Across the ground, however high it stands.
+        const hog::DVec3 offset{anchor.position};
+        CHECK(glm::length(offset - (up * glm::dot(offset, up))) < span * 1.5);
         CHECK(anchor.height > 0.5F);
         CHECK(anchor.height < 25.0F);
-        const hog::DVec3 up = glm::normalize(origin.metres());
         CHECK(glm::dot(glm::dvec3{anchor.normal}, up) > 0.65);
         CHECK(hog::render::foliage_of(anchor.colour).g > 0.0F);
         CHECK(anchor.age >= 0.0F);

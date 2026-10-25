@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <functional>
 #include <numbers>
 #include <optional>
 #include <tuple>
@@ -29,10 +30,21 @@ constexpr double band_high = 0.719339800338651;
 // below sea level at every probe.
 constexpr int candidate_level = 4;
 constexpr std::int64_t open_ocean = -fixed_one / 20;
+constexpr double across_steps = 4.0;
 
 constexpr std::int64_t min_peak = fixed_one / 10;
 constexpr std::int64_t max_peak = fixed_one / 5;
 constexpr int placement_attempts = 10'000;
+// Islands follow on down the chain from the last for this many attempts, then down from any for
+// this many more, before fitting in wherever they can; down the chain, they turn from the plate's
+// way by at most the angle with this cosine.
+constexpr int chain_attempts = 2'000;
+constexpr int row_attempts = 5'000;
+constexpr double chain_turn = 0.7;
+// A volcano rises this many metres per metre of its island's radius, its flanks about 17 degrees at
+// their steepest, and each island after the first a little lower, older.
+constexpr double summit_slope = 0.22;
+constexpr double aging = 0.08;
 
 constexpr double coast_wavelength = 4'000.0; // metres
 constexpr int coast_octaves = 5;
@@ -106,20 +118,32 @@ template <typename Draw>
     return highest;
 }
 
-// The open ocean nearest the temperate band, or failing any, the most open spot; ties go to the
-// lowest hash so the choice is seeded.
+// The way the plate carries the ground at `center`, which islands follow off the plume in turn.
+[[nodiscard]] DVec3 carried(const Plates& plates, DVec3 center) {
+    const std::uint32_t under = plates.grid().index(cell_at(center, plates.grid().level()));
+    const DVec3 moving = plates.velocity(plates.plate()[under], center);
+    return glm::length(moving - (center * glm::dot(moving, center))) > 1.0
+               ? tangent_at(center, moving)
+               : tangent_frame(center).east;
+}
+
+// The open ocean nearest the temperate band, or failing any, the most open spot; then where the
+// plate carries the chain along the band rather than out of it; ties go to the lowest hash so the
+// choice is seeded.
 [[nodiscard]] DVec3 choose_center(std::uint64_t seed, double planet_radius,
                                   const Continents& continents) {
     struct Candidate {
         bool open = false;
         double off_band = 0.0;
         std::int64_t highest = 0;
+        int across_band = 0;
         std::uint64_t hash = 0;
         DVec3 center{};
     };
     const auto key = [](const Candidate& c) {
-        return std::tuple{!c.open, c.off_band, c.highest, c.hash};
+        return std::tuple{!c.open, c.off_band, c.highest, c.across_band, c.hash};
     };
+    const Plates& plates = continents.plates();
     std::vector<Candidate> candidates;
     for (int face = 0; face < face_count; ++face) {
         for (const CellId cell : sample_tile(CellId::from_face(face), candidate_level,
@@ -133,11 +157,27 @@ template <typename Draw>
                 {.open = open,
                  .off_band = std::max({band_low - latitude, latitude - band_high, 0.0}),
                  .highest = open ? 0 : highest,
+                 // In steps, so the hash still chooses among chains running much the same way.
+                 .across_band = static_cast<int>(std::lround(
+                     across_steps *
+                     std::abs(glm::dot(carried(plates, center), DVec3{0.0, 0.0, 1.0})))),
                  .hash = hash_values(seed, cell.raw()),
                  .center = center});
         }
     }
     return std::ranges::min(candidates, {}, key).center;
+}
+
+// Square metres of each island, largest first, as the youngest has yet to sink or wear down.
+[[nodiscard]] std::vector<double> island_areas(std::uint64_t placement, std::size_t count) {
+    std::vector<double> areas(count);
+    for (std::size_t index = 0; index < count; ++index) {
+        areas[index] = Archipelago::min_target_area +
+                       ((Archipelago::max_target_area - Archipelago::min_target_area) *
+                        unit(hash_values(placement, 1, index)));
+    }
+    std::ranges::sort(areas, std::greater{});
+    return areas;
 }
 
 } // namespace
@@ -153,10 +193,11 @@ Archipelago::Archipelago(std::uint64_t seed, double planet_radius, const Contine
     const std::size_t count =
         min_islands + (hash_values(placement, 0) % (max_islands - min_islands + 1));
     islands_.reserve(count);
+    const std::vector<double> areas = island_areas(placement, count);
     const TangentFrame home = tangent_frame(center_);
+    const DVec3 downstream = carried(continents.plates(), center_);
     for (std::size_t index = 0; index < count; ++index) {
-        const double area = min_target_area + ((max_target_area - min_target_area) *
-                                               unit(hash_values(placement, 1, index)));
+        const double area = areas[index];
         std::optional<std::array<double, 2>> heading;
         for (std::uint64_t attempt = 0; !heading; ++attempt) {
             heading = planar_direction([&](std::uint64_t what) {
@@ -170,7 +211,9 @@ Archipelago::Archipelago(std::uint64_t seed, double planet_radius, const Contine
             .axis = tangent_at(center_, axis),
             .elongation = 1.0 + ((max_elongation - 1.0) * unit(hash_values(placement, 6, index))),
             .peak = min_peak + static_cast<std::int64_t>(hash_values(placement, 2, index) %
-                                                         (max_peak - min_peak + 1))};
+                                                         (max_peak - min_peak + 1)),
+            .summit = summit_slope * std::sqrt(area / std::numbers::pi) *
+                      (1.0 - (aging * static_cast<double>(index)))};
         if (islands_.empty()) {
             islands_.push_back(shape);
             continue;
@@ -179,8 +222,11 @@ Archipelago::Archipelago(std::uint64_t seed, double planet_radius, const Contine
         const double longest = shape.radius * std::sqrt(shape.elongation);
         bool placed = false;
         for (std::uint64_t attempt = 0; attempt < placement_attempts && !placed; ++attempt) {
+            const bool chained = attempt < row_attempts;
             const Island& anchor =
-                islands_[hash_values(placement, 4, index, attempt) % islands_.size()];
+                attempt < chain_attempts
+                    ? islands_.back()
+                    : islands_[hash_values(placement, 4, index, attempt) % islands_.size()];
             const auto direction = planar_direction([&](std::uint64_t what) {
                 return unit(hash_values(placement, 3, index, attempt, what));
             });
@@ -189,6 +235,9 @@ Archipelago::Archipelago(std::uint64_t seed, double planet_radius, const Contine
             }
             const TangentFrame frame = tangent_frame(anchor.center);
             const DVec3 outward = (frame.east * (*direction)[0]) + (frame.north * (*direction)[1]);
+            if (chained && glm::dot(outward, tangent_at(anchor.center, downstream)) < chain_turn) {
+                continue;
+            }
             // Sized as if it sat on the anchor, which is close enough to choose the distance.
             Island island = shape;
             island.center = anchor.center;
@@ -216,6 +265,23 @@ Archipelago::Archipelago(std::uint64_t seed, double planet_radius, const Contine
     }
 }
 
+double Archipelago::coast_moved(DVec3 position) const {
+    return coast_wobble *
+           std::clamp(coast_gain * fixed_to_double(
+                                       fbm(noise_seed_,
+                                           noise_point(position, planet_radius_ / coast_wavelength),
+                                           coast_octaves)),
+                      -1.0, 1.0);
+}
+
+double Archipelago::from_heart(const Island& island, DVec3 between, double wobble) {
+    // The coast moves out to the radius times 1 + wobble: the dome is scaled to it, while the
+    // flank is shifted so it keeps its slope however far out it reaches.
+    const double distance = stretched(island, between);
+    const double coast = island.radius * (1.0 + wobble);
+    return distance < coast ? distance * island.radius / coast : distance - coast + island.radius;
+}
+
 template <int Bits>
 std::int64_t Archipelago::raise(CellId cell, std::int64_t height) const {
     constexpr std::int64_t one = fixed_unit<Bits>;
@@ -237,20 +303,9 @@ std::int64_t Archipelago::raise(CellId cell, std::int64_t height) const {
             continue;
         }
         if (!wobble) {
-            wobble = coast_wobble *
-                     std::clamp(coast_gain *
-                                    fixed_to_double(fbm(
-                                        noise_seed_,
-                                        noise_point(position, planet_radius_ / coast_wavelength),
-                                        coast_octaves)),
-                                -1.0, 1.0);
+            wobble = coast_moved(position);
         }
-        // The coast moves out to the radius times 1 + wobble: the dome is scaled to it, while the
-        // flank is shifted so it keeps its slope however far out it reaches.
-        const double distance = stretched(island, between);
-        const double coast = island.radius * (1.0 + *wobble);
-        const double from_center =
-            distance < coast ? distance * island.radius / coast : distance - coast + island.radius;
+        const double from_center = from_heart(island, between, *wobble);
         std::int64_t island_height = 0;
         if (from_center < island.radius) {
             const std::int64_t ratio =
@@ -266,6 +321,29 @@ std::int64_t Archipelago::raise(CellId cell, std::int64_t height) const {
     }
     return height;
 }
+
+template <int Bits>
+std::int64_t Archipelago::volcano(CellId cell) const {
+    const DVec3 position = cell_center(cell);
+    const double largest = std::sqrt(max_target_area / std::numbers::pi);
+    if (glm::length(position - center_) * planet_radius_ >
+        reach + (largest * std::sqrt(max_elongation) * (1.0 + coast_wobble))) {
+        return 0;
+    }
+    // Shaped as the island is, so it meets the coast however far the coast wanders.
+    const double wobble = coast_moved(position);
+    double highest = 0.0;
+    for (const Island& island : islands_) {
+        const double out =
+            from_heart(island, (position - island.center) * planet_radius_, wobble) / island.radius;
+        const double inside = std::max(0.0, 1.0 - (out * out));
+        highest = std::max(highest, island.summit * inside * inside);
+    }
+    return std::llround(highest * static_cast<double>(fixed_unit<Bits>));
+}
+
+template std::int64_t Archipelago::volcano<fixed_fraction_bits>(CellId cell) const;
+template std::int64_t Archipelago::volcano<fine_fraction_bits>(CellId cell) const;
 
 template std::int64_t Archipelago::raise<fixed_fraction_bits>(CellId cell,
                                                               std::int64_t height) const;

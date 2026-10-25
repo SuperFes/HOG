@@ -499,7 +499,13 @@ TEST_CASE("woods pack a byte a measure, crowding and height to their own ranges"
 
 TEST_CASE("a patch carries the woods flora stands about each of its vertices", "[terrain][patch]") {
     const World& world = shared_world();
-    const CellId cell = land_patch();
+    // Across the first island's coast, so woods give way to bare shore.
+    const auto& island = world.geology().terrain().archipelago().islands().front();
+    const CellId cell = hog::planet::cell_at(
+        glm::normalize(island.center +
+                       (island.axis * (island.radius * std::sqrt(island.elongation) /
+                                       world.geology().planet_radius()))),
+        6);
     const Patch patch = bake_patch(world, cell);
     const hog::planet::FaceIJ at = cell.to_face_ij();
     const int level = at.level + patch_depth;

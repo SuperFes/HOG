@@ -308,7 +308,8 @@ std::int64_t Elevation::generated(CellId cell) const {
                                relief_octaves)) >>
                           Bits));
     const std::int64_t lowland =
-        (((lowland_height * one) + relief) * ramp<Bits>(height, lowland_width<Bits>)) >> Bits;
+        ((((lowland_height * one) + relief) * ramp<Bits>(height, lowland_width<Bits>)) >> Bits) +
+        archipelago_.volcano<Bits>(cell);
     const std::int64_t strength = mountain_strength<Bits>(continent, crust.mountains);
     if (strength == 0) {
         return built(lowland + volcanoes);

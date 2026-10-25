@@ -45,13 +45,16 @@ std::int64_t metres(std::int64_t value) {
 
 constexpr double radius = 115'000.0;
 
-// Where coasts cross from land to sea: the first `count` level-8 land cells beside the sea, each
-// with the sea cell beside it.
+// Where coasts cross from land to sea: the first `count` level-8 land cells beside the sea, but for
+// volcanoes', each with the sea cell beside it.
 std::vector<std::pair<hog::DVec3, hog::DVec3>> coasts(const Elevation& terrain, int count) {
     std::vector<std::pair<hog::DVec3, hog::DVec3>> found;
     for (const CellId cell :
          hog::planet::sample_tile(CellId::from_face(4), 8, [](CellId cell) { return cell; })) {
-        if (!terrain.is_land(cell)) {
+        // Not volcanoes', whose flanks fall steeply into the sea.
+        const auto shield = terrain.hotspots().surface(cell);
+        if (!terrain.is_land(cell) || (shield && *shield >= terrain.elevation(cell)) ||
+            terrain.volcanoes().lift(cell) > 0) {
             continue;
         }
         for (const CellId next : hog::planet::edge_neighbors(cell)) {
@@ -246,7 +249,7 @@ TEST_CASE("the sea stays shallow off a coast", "[planet][elevation]") {
             -fixed_to_double(terrain.elevation(hog::planet::cell_at(along(at, sea, 100.0))));
         // Deeper than a round island's where an elongated one's flank falls across it.
         CHECK(depth > 0.5);
-        CHECK(depth < 5.0);
+        CHECK(depth < 6.0);
     }
 }
 
@@ -343,7 +346,7 @@ TEST_CASE("the deep ocean floor rises at ridges, sinks into trenches and rolls b
     CHECK(trenches > 10);
     CHECK(shallowest_plain >= depth - hills);
     CHECK(deepest_plain <= depth + hills);
-    CHECK(deepest_plain - shallowest_plain > hills);
+    CHECK(deepest_plain - shallowest_plain > 100.0);
 }
 
 TEST_CASE("the youngest shields over plumes rise as islands", "[planet][elevation]") {

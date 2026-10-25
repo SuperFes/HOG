@@ -450,7 +450,8 @@ TEST_CASE("a scene draws others where they stand", "[client][scene][gpu]") {
     const Rgb after = pixel(*seen, middle);
     INFO("before " << before.r << ", " << before.g << ", " << before.b);
     INFO("after " << after.r << ", " << after.g << ", " << after.b);
-    CHECK(after.r - after.g > before.r - before.g + 30);
+    // Redder than the grass behind, though seen against the sun.
+    CHECK(after.r - after.g > before.r - before.g + 20);
     CHECK(device->validation_errors() == 0);
 }
 

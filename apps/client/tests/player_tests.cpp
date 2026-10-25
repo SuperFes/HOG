@@ -57,7 +57,8 @@ TEST_CASE("a player starts standing on the ground under them", "[client][player]
     Player player = standing();
     CHECK(player.standing());
     CHECK(height_of(player.feet()) == Approx(ground).margin(2.0));
-    CHECK(apart(player.feet(), WorldPosition{on_land() * radius()}) < 0.01);
+    // Settling on the volcano's flank, though hardly moving.
+    CHECK(apart(player.feet(), WorldPosition{on_land() * radius()}) < 0.05);
 
     const WorldPosition before = player.feet();
     REQUIRE(player.play({}, 1.0));
