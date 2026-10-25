@@ -54,6 +54,16 @@ Landform::Landform(LevelGrid grid, std::vector<std::int64_t> heights, const Eros
     find_lakes();
 }
 
+Landform::Landform(LevelGrid grid, std::vector<std::int64_t> heights,
+                   std::vector<std::int64_t> change, std::vector<std::int64_t> drained)
+    : grid_{std::move(grid)}, heights_{std::move(heights)}, change_{std::move(change)},
+      drainage_{drain(grid_, heights_)}, drained_{std::move(drained)} {
+    HOG_ASSERT(heights_.size() == grid_.size() && change_.size() == grid_.size() &&
+                   drained_.size() == grid_.size(),
+               "one value per grid cell");
+    find_lakes();
+}
+
 void Landform::find_lakes() {
     const std::uint32_t count = grid_.size();
     const auto& surface = drainage_.surface;

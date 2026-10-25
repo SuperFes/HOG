@@ -6,7 +6,7 @@
 
 namespace hog::terrain::testing {
 
-inline constexpr planet::PlanetConfig planet{.seed = 1, .ocean_fraction = 0.7, .radius = 115'000.0};
+inline const planet::PlanetConfig planet{.seed = 1, .ocean_fraction = 0.7, .radius = 115'000.0};
 
 // One World for each test run: the seed's generators are costly to set up.
 inline planet::World& shared_world() {

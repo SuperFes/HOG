@@ -34,7 +34,7 @@ namespace {
 
 constexpr double radius = 115'000.0;
 
-constexpr hog::planet::PlanetConfig planet{.seed = 4, .ocean_fraction = 0.7, .radius = radius};
+const hog::planet::PlanetConfig planet{.seed = 4, .ocean_fraction = 0.7, .radius = radius};
 
 const hog::planet::World& world() {
     static const hog::planet::World world{planet};

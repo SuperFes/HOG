@@ -999,10 +999,14 @@ int run(std::span<const std::string_view> arguments) {
             options->companion = client::locate(*options->companion, base);
         }
     }
-    const auto planet = planet::load_planet_config(options->planet);
+    auto planet = planet::load_planet_config(options->planet);
     if (!planet) {
         std::cerr << std::format("hog-client: {}\n", planet.error());
         return EXIT_FAILURE;
+    }
+    if (char* const kept = SDL_GetPrefPath("Netscape", "HOG"); kept != nullptr) {
+        planet->bakes = std::filesystem::path{kept} / "bakes";
+        SDL_free(kept);
     }
     const planet::World world{*planet};
     const char* const base = SDL_GetBasePath();

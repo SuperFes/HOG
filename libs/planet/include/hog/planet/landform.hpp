@@ -24,6 +24,9 @@ public:
 
     // Evolves `heights`, fixed point and one per grid cell, through `steps` steps of `erosion`.
     Landform(LevelGrid grid, std::vector<std::int64_t> heights, const Erosion& erosion, int steps);
+    // One evolved before, as its heights, change and drained left it.
+    Landform(LevelGrid grid, std::vector<std::int64_t> heights, std::vector<std::int64_t> change,
+             std::vector<std::int64_t> drained);
 
     [[nodiscard]] const LevelGrid& grid() const noexcept { return grid_; }
     // Fixed-point metres per grid cell, after evolving.

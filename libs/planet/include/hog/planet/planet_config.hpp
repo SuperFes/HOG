@@ -31,6 +31,10 @@ struct PlanetConfig {
     // One turn of day and night, in real time; the year is Earth's.
     GameDuration day_length = std::chrono::hours{4};
     double axial_tilt = 23.44; // degrees
+    // Where the world's landform is kept once evolved, so it evolves once rather than whenever
+    // the world is built; HOG_BAKES names one where this is empty, and with neither it's never
+    // kept. Not part of the world, so never read from its config.
+    std::filesystem::path bakes{};
 };
 
 // Identifies a world by what shapes its ground, so state saved for one is never loaded into

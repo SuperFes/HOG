@@ -1,6 +1,7 @@
 #pragma once
 
 #include <hog/planet/archipelago.hpp>
+#include <hog/planet/bake.hpp>
 #include <hog/planet/cell_id.hpp>
 #include <hog/planet/continents.hpp>
 #include <hog/planet/hotspots.hpp>
@@ -14,6 +15,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 
 namespace hog::planet {
 
@@ -82,7 +84,8 @@ public:
 
 private:
     struct Evolved {
-        Evolved(Landform worn, const Elevation& terrain, const PlanetConfig& config);
+        // `ground` is the worn ground at each landform cell's centre, which rivers start from.
+        Evolved(Landform worn, std::span<const std::int64_t> ground, const PlanetConfig& config);
         Evolved(const Evolved&) = delete;
         Evolved& operator=(const Evolved&) = delete;
         Evolved(Evolved&&) = delete;
@@ -115,6 +118,11 @@ private:
                                            const Landform& landform, const Meander& meander);
     [[nodiscard]] const Evolved& evolved() const;
     [[nodiscard]] std::shared_ptr<const Evolved> evolve(const PlanetConfig& config) const;
+    // The landform on a grid, evolved from the generated ground.
+    [[nodiscard]] Landform wear(LevelGrid grid, std::uint64_t seed) const;
+    // What a bake for a grid of `level` holds, or nothing where it holds none.
+    [[nodiscard]] static std::shared_ptr<const Evolved>
+    unbake(std::optional<LandformBake> bake, int level, const PlanetConfig& config);
 
     Continents continents_;
     Archipelago archipelago_;

@@ -143,10 +143,11 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config,
 Server::~Server() = default;
 
 Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config, GameTime now) {
-    const auto planet = planet::load_planet_config(config.planet);
+    auto planet = planet::load_planet_config(config.planet);
     if (!planet) {
         return std::unexpected(planet.error());
     }
+    planet->bakes = config.world.parent_path() / "bakes";
     if (config.world.has_parent_path()) {
         std::error_code error;
         std::filesystem::create_directories(config.world.parent_path(), error);
