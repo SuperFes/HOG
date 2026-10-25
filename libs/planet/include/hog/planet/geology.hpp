@@ -102,6 +102,9 @@ struct Chamber {
     std::int64_t depth;       // fixed-point metres below sea level to its middle
     double radius;            // metres from its middle to its rim
     std::int64_t half_height; // fixed-point metres from its middle to its roof
+    // Runny basalt, flowing far enough to crust over into lava tubes, rather than the stickier
+    // magma under arcs that piles into steep cones.
+    bool basaltic;
 };
 
 // The rarest resource whose seam takes in a fixed-point depth in metres below the surface.
@@ -110,7 +113,7 @@ resource_at(const std::array<Deposit, resource_count>& deposits, std::int64_t de
 
 // Rock layers and ore deposits from terrain and climate: continents sit on granite under a cover
 // of sedimentary rock that mountains strip away, carrying on under the sea as shelves; the deep
-// ocean floor and the starting islands are basalt, with a magma chamber under each island.
+// ocean floor and the starting islands are basalt, with a magma chamber under each volcano.
 class Geology {
 public:
     explicit Geology(const PlanetConfig& config);
@@ -135,7 +138,8 @@ public:
     // more slowly through the mantle, and hotter near a magma chamber.
     [[nodiscard]] std::int64_t rock_temperature(CellId cell, std::int64_t depth) const;
 
-    // The magma chambers, one under each starting island.
+    // The magma chambers: one under each starting island, in order, then one under each arc
+    // volcano, then one under each hotspot's youngest shield.
     [[nodiscard]] std::span<const Chamber> chambers() const noexcept { return chambers_; }
 
     // Every resource's seam under the cell, indexed by resource. The deep ocean floor holds none.
@@ -147,6 +151,10 @@ public:
 private:
     [[nodiscard]] Strata strata(CellId cell, Biome biome) const;
     [[nodiscard]] NoisePoint noise_at(CellId cell, double wavelength) const;
+    // A chamber `below` fixed-point metres under `level`, fixed-point metres above sea, raised
+    // where needed to stay in the crust.
+    void add_chamber(DVec3 center, std::int64_t level, std::int64_t below, double radius,
+                     bool basaltic);
 
     Climate climate_;
     std::uint64_t seed_;

@@ -146,6 +146,9 @@ Caves::Caves(const Geology& geology)
     const std::uint64_t seed = hash_combine(geology.seed(), lava_salt);
     const auto chambers = geology.chambers();
     for (std::size_t chamber = 0; chamber < chambers.size(); ++chamber) {
+        if (!chambers[chamber].basaltic) {
+            continue;
+        }
         const std::uint64_t count =
             fewest_tubes + (hash_values(seed, chamber) % (most_tubes - fewest_tubes + 1));
         for (std::uint64_t tube = 0; tube < count; ++tube) {

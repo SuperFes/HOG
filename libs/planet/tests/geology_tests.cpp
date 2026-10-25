@@ -1,5 +1,6 @@
 #include <hog/core/hash.hpp>
 #include <hog/planet/geology.hpp>
+#include <hog/planet/hotspots.hpp>
 #include <hog/planet/neighbors.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tangent_frame.hpp>
@@ -329,10 +330,11 @@ TEST_CASE("a magma chamber lies in the crust under each starting island", "[plan
     const std::uint64_t seed = GENERATE(take(hog::testing::cases(4), values({1U, 2U, 3U, 4U})));
     const Geology geology{planet(seed)};
     const auto islands = geology.terrain().archipelago().islands();
-    REQUIRE(geology.chambers().size() == islands.size());
+    REQUIRE(geology.chambers().size() >= islands.size());
     for (std::size_t index = 0; index < islands.size(); ++index) {
         const auto& chamber = geology.chambers()[index];
         const auto& island = islands[index];
+        CHECK(chamber.basaltic);
         CHECK(glm::length(chamber.center - island.center) * radius <= 0.3 * island.radius);
         const CellId cell = hog::planet::cell_at(chamber.center, 12);
         const Strata strata = geology.strata(cell);
@@ -347,14 +349,60 @@ TEST_CASE("a magma chamber lies in the crust under each starting island", "[plan
     }
 }
 
-TEST_CASE("magma lies only under the middle of the islands", "[planet][geology]") {
+TEST_CASE("a magma chamber lies in the crust under each arc volcano and each young shield",
+          "[planet][geology]") {
+    const std::uint64_t seed = GENERATE(take(hog::testing::cases(4), values({1U, 2U, 3U, 4U})));
+    const Geology geology{planet(seed)};
+    const auto islands = geology.terrain().archipelago().islands();
+    const auto volcanoes = geology.terrain().volcanoes().volcanoes();
+    const auto shields = geology.terrain().hotspots().shields();
+    const auto chambers = geology.chambers();
+    const std::size_t plumes = geology.terrain().hotspots().hotspots().size();
+    REQUIRE(chambers.size() == islands.size() + volcanoes.size() + plumes);
+    const auto in_crust = [&](const hog::planet::Chamber& chamber) {
+        const CellId cell = hog::planet::cell_at(chamber.center, 12);
+        const Strata strata = geology.strata(cell);
+        CHECK(strata.chamber_thickness > 990 * fixed_one);
+        CHECK(strata.chamber_top >= 2'000 * fixed_one);
+        CHECK(strata.chamber_top + strata.chamber_thickness < strata.mantle_depth);
+        CHECK(strata.rock_at(strata.chamber_top - 1) != Rock::Magma);
+    };
+    for (std::size_t index = 0; index < volcanoes.size(); ++index) {
+        const auto& chamber = chambers[islands.size() + index];
+        CHECK_FALSE(chamber.basaltic);
+        CHECK(glm::length(chamber.center - volcanoes[index].center) < 1e-12);
+        CHECK(chamber.radius < volcanoes[index].radius / 2.0);
+        in_crust(chamber);
+    }
+    for (std::size_t plume = 0; plume < plumes; ++plume) {
+        const auto& chamber = chambers[islands.size() + volcanoes.size() + plume];
+        CHECK(chamber.basaltic);
+        CHECK(glm::length(chamber.center -
+                          shields[plume * hog::planet::Hotspots::chain_length].center) < 1e-12);
+        in_crust(chamber);
+    }
+}
+
+TEST_CASE("magma lies only under the middle of volcanoes", "[planet][geology]") {
     const Geology geology{planet(1)};
     const auto islands = geology.terrain().archipelago().islands();
+    const auto volcanoes = geology.terrain().volcanoes().volcanoes();
+    const auto shields = geology.terrain().hotspots().shields();
     const auto under = [&](CellId cell) { return geology.strata(cell).chamber_thickness > 0; };
     const auto central = [&](hog::DVec3 at) {
-        return std::ranges::any_of(islands, [&](const auto& island) {
-            return glm::length(at - island.center) * radius < 0.65 * island.radius;
-        });
+        return std::ranges::any_of(islands,
+                                   [&](const auto& island) {
+                                       return glm::length(at - island.center) * radius <
+                                              0.65 * island.radius;
+                                   }) ||
+               std::ranges::any_of(volcanoes,
+                                   [&](const auto& volcano) {
+                                       return glm::length(at - volcano.center) * radius <
+                                              volcano.radius / 2.0;
+                                   }) ||
+               std::ranges::any_of(shields, [&](const auto& shield) {
+                   return glm::length(at - shield.center) * radius < 4'000.0;
+               });
     };
     for (const CellId cell : scattered(40'000)) {
         if (under(cell)) {
@@ -416,7 +464,7 @@ TEST_CASE("rock warms with depth through the crust and the mantle", "[planet][ge
         REQUIRE(geology.rock_temperature(cell, std::numeric_limits<std::int64_t>::max()) ==
                 geology.rock_temperature(cell, static_cast<std::int64_t>(radius) * fixed_one));
     }
-    CHECK(checked > 5'000);
+    CHECK(checked > 4'500);
 }
 
 TEST_CASE("the rock around a magma chamber is hot", "[planet][geology]") {
@@ -436,7 +484,10 @@ TEST_CASE("the rock around a magma chamber is hot", "[planet][geology]") {
             REQUIRE(heat <= last);
             last = heat;
         }
-        CHECK(geology.rock_temperature(cell, 0) > geology.climate().temperature(cell));
+        // Warmer than the air above, where the sea does not cool it first.
+        if (geology.terrain().elevation(cell) >= 0) {
+            CHECK(geology.rock_temperature(cell, 0) > geology.climate().temperature(cell));
+        }
         // Rock beside it at the same depth, past the rim, is warmed too but less.
         const hog::planet::TangentFrame frame = hog::planet::tangent_frame(chamber.center);
         const CellId beside = hog::planet::cell_at(

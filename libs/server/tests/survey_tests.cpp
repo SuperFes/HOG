@@ -146,8 +146,11 @@ TEST_CASE("a survey reports the ground under each sample", "[server][survey]") {
     }
 }
 
-TEST_CASE("inspecting a starting island finds the magma under it", "[server][survey]") {
+TEST_CASE("inspecting a basalt volcano finds the magma under it", "[server][survey]") {
     for (const planet::Chamber& chamber : geology().chambers()) {
+        if (!chamber.basaltic) {
+            continue;
+        }
         const probe::Inspect inspect{
             .latitude = std::asin(chamber.center.z) * 180.0 / std::numbers::pi,
             .longitude = std::atan2(chamber.center.y, chamber.center.x) * 180.0 / std::numbers::pi};

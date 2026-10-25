@@ -1,5 +1,6 @@
 #include <hog/core/hash.hpp>
 #include <hog/planet/geology.hpp>
+#include <hog/planet/hotspots.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tangent_frame.hpp>
 #include <hog/planet/tile.hpp>
@@ -51,6 +52,11 @@ constexpr double chamber_reach = 0.4;
 constexpr std::int64_t shallowest_chamber = 3'000;
 constexpr std::int64_t deepest_chamber = 6'000;
 constexpr std::int64_t chamber_half_height = 500 * fixed_one;
+// An arc volcano's chamber sits as deep under its foot and reaches this much of the way out to
+// it; a shield's is this wide. Every chamber keeps `mantle_clearance` above the mantle.
+constexpr double arc_chamber_reach = 0.4;
+constexpr double shield_chamber_radius = 3'000.0;
+constexpr std::int64_t mantle_clearance = 500 * fixed_one;
 
 // °C: deep sea water, the base of the crust, and magma, with the mantle warming per kilometre.
 // The sea floor cools from the surface water's warmth over the first `cold_water_depth`.
@@ -253,8 +259,16 @@ Geology::Geology(const PlanetConfig& config)
       deposit_seed_{hash_combine(config.seed, deposit_salt)},
       crust_seed_{hash_combine(config.seed, crust_salt)} {
     const std::uint64_t placement = hash_combine(config.seed, chamber_salt);
+    const auto below = [&](int kind, std::size_t index) {
+        const auto depth = static_cast<std::int64_t>(
+            hash_values(placement, kind, index) %
+            static_cast<std::uint64_t>(deepest_chamber - shallowest_chamber + 1));
+        return (shallowest_chamber + depth) * fixed_one;
+    };
     const auto islands = terrain().archipelago().islands();
-    chambers_.reserve(islands.size());
+    const auto volcanoes = terrain().volcanoes().volcanoes();
+    const auto shields = terrain().hotspots().shields();
+    chambers_.reserve(islands.size() + volcanoes.size() + terrain().hotspots().hotspots().size());
     for (std::size_t index = 0; index < islands.size(); ++index) {
         const auto& island = islands[index];
         const TangentFrame frame = tangent_frame(island.center);
@@ -262,15 +276,32 @@ Geology::Geology(const PlanetConfig& config)
             return ((2.0 * fraction(hash_values(placement, axis, index))) - 1.0) * chamber_wander *
                    island.radius / planet_radius_;
         };
-        const auto depth = static_cast<std::int64_t>(
-            hash_values(placement, 2, index) %
-            static_cast<std::uint64_t>(deepest_chamber - shallowest_chamber + 1));
-        chambers_.push_back({.center = glm::normalize(island.center + (frame.east * wander(0)) +
-                                                      (frame.north * wander(1))),
-                             .depth = (shallowest_chamber + depth) * fixed_one,
-                             .radius = chamber_reach * island.radius,
-                             .half_height = chamber_half_height});
+        add_chamber(
+            glm::normalize(island.center + (frame.east * wander(0)) + (frame.north * wander(1))), 0,
+            below(2, index), chamber_reach * island.radius, true);
     }
+    for (std::size_t index = 0; index < volcanoes.size(); ++index) {
+        const auto& volcano = volcanoes[index];
+        const std::int64_t foot = terrain().elevation(cell_at(volcano.center)) -
+                                  std::llround(volcano.height * static_cast<double>(fixed_one));
+        add_chamber(volcano.center, foot, below(3, index), arc_chamber_reach * volcano.radius,
+                    false);
+    }
+    for (std::size_t index = 0; index < shields.size(); index += Hotspots::chain_length) {
+        add_chamber(shields[index].center, 0, below(4, index), shield_chamber_radius, true);
+    }
+}
+
+void Geology::add_chamber(DVec3 center, std::int64_t level, std::int64_t below, double radius,
+                          bool basaltic) {
+    const CellId cell = cell_at(center);
+    const std::int64_t deepest =
+        crust_thickness(cell) - mantle_clearance - chamber_half_height - terrain().elevation(cell);
+    chambers_.push_back({.center = center,
+                         .depth = std::min(below - level, deepest),
+                         .radius = radius,
+                         .half_height = chamber_half_height,
+                         .basaltic = basaltic});
 }
 
 NoisePoint Geology::noise_at(CellId cell, double wavelength) const {
@@ -381,6 +412,9 @@ std::int64_t Geology::rock_temperature(CellId cell, std::int64_t depth) const {
     double warmth = 0.0;
     for (const Chamber& chamber : chambers_) {
         const double across = glm::length(here - chamber.center) * planet_radius_;
+        if (across >= chamber.radius + magma_limit) {
+            continue;
+        }
         const double down = below_sea - fixed_to_double(chamber.depth);
         const double half = fixed_to_double(chamber.half_height);
         // How far out the point is in the chamber's own shape, and so its distance from the

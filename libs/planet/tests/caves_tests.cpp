@@ -249,9 +249,10 @@ TEST_CASE("lava tubes run downhill from each vent, a few metres down", "[planet]
         const Spot end = spot_at(caves, tube.passages.back().to);
         to_the_sea += caves.geology().terrain().elevation(end.cell) <= 0 ? 1 : 0;
     }
-    for (const int count : per_chamber) {
-        CHECK(count >= 1);
-        CHECK(count <= 4);
+    for (std::size_t chamber = 0; chamber < chambers.size(); ++chamber) {
+        // Arcs' sticky magma builds cones rather than running out in tubes.
+        CHECK(per_chamber[chamber] >= (chambers[chamber].basaltic ? 1 : 0));
+        CHECK(per_chamber[chamber] <= (chambers[chamber].basaltic ? 4 : 0));
     }
     INFO(to_the_sea << " of " << caves.lava_tubes().size() << " reach the sea");
     CHECK(to_the_sea * 3 >= static_cast<int>(caves.lava_tubes().size()));
