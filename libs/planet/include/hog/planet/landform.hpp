@@ -34,22 +34,12 @@ public:
     // The same at any cell's centre.
     [[nodiscard]] std::int64_t change(CellId cell) const;
 
-    // A field with one fixed-point value per grid cell at any cell's centre, bilinear between the
-    // four grid cells around it.
-    [[nodiscard]] std::int64_t sample(std::span<const std::int64_t> field, CellId cell) const;
-
 private:
-    // Grid cells around each one, by quadrant: the neighbour along u, along v and between the
-    // two, for -u-v, +u-v, -u+v and +u+v. At a cube corner there is none between, and the third
-    // is the cell itself.
-    using Quadrant = std::array<std::uint32_t, 3>;
-
     LevelGrid grid_;
     std::vector<std::int64_t> heights_;
     std::vector<std::int64_t> change_;
     Drainage drainage_;
     std::vector<std::int64_t> drained_;
-    std::vector<std::array<Quadrant, 4>> quadrants_;
 };
 
 // Smooth noise shifting points on the unit sphere by about a fifth of a grid cell, over bends a

@@ -1,3 +1,4 @@
+#include <hog/core/hash.hpp>
 #include <hog/planet/level_grid.hpp>
 #include <hog/planet/noise.hpp>
 
@@ -7,6 +8,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <numbers>
+#include <vector>
 
 using hog::planet::LevelGrid;
 
@@ -67,4 +69,33 @@ TEST_CASE("level grid areas cover the sphere", "[planet][level_grid]") {
         total += static_cast<double>(grid.area(index));
     }
     CHECK(total == Catch::Approx(4.0 * std::numbers::pi * radius * radius).epsilon(0.01));
+}
+
+TEST_CASE("a sampled field is each grid cell's own at its centre and between its neighbours'",
+          "[planet][level_grid]") {
+    const LevelGrid grid{3, radius};
+    std::vector<std::int64_t> field(grid.size());
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        field[index] = static_cast<std::int64_t>(hog::mix64(index) % 1'000'000);
+    }
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        const hog::planet::CellId cell = grid.cell(index);
+        REQUIRE(grid.sample(field, cell) == field[index]);
+        std::int64_t lowest = field[index];
+        std::int64_t highest = field[index];
+        for (const std::uint32_t neighbor : grid.neighbors(index)) {
+            lowest = std::min(lowest, field[neighbor]);
+            highest = std::max(highest, field[neighbor]);
+        }
+        for (int child = 0; child < 4; ++child) {
+            // Down to leaves, so the sample works in the finest cells' units.
+            hog::planet::CellId inside = cell.child(child);
+            while (!inside.is_leaf()) {
+                inside = inside.child(3 - child);
+            }
+            const std::int64_t value = grid.sample(field, inside);
+            REQUIRE(value >= lowest);
+            REQUIRE(value <= highest);
+        }
+    }
 }

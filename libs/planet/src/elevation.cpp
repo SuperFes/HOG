@@ -207,8 +207,8 @@ std::int64_t Elevation::above_water(CellId cell) const {
     if (evolved.rivers.standing(cell, ground)) {
         return 0;
     }
-    const std::int64_t water = evolved.landform.sample(evolved.rivers.levels(),
-                                                       cell_at(evolved.meander(cell_center(cell))));
+    const std::int64_t water = evolved.landform.grid().sample(
+        evolved.rivers.levels(), cell_at(evolved.meander(cell_center(cell))));
     return std::max<std::int64_t>(ground - water, 0);
 }
 
