@@ -99,3 +99,38 @@ TEST_CASE("a sampled field is each grid cell's own at its centre and between its
         }
     }
 }
+
+TEST_CASE("a sample blends only the four grid cells around a point", "[planet][level_grid]") {
+    const LevelGrid grid{3, radius};
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        const hog::planet::CellId cell = grid.cell(index);
+        for (int child = 0; child < 4; ++child) {
+            // Towards the cell's corner, where every corner weighs alike.
+            hog::planet::CellId inside = cell.child(child);
+            while (!inside.is_leaf()) {
+                inside = inside.child(child);
+            }
+            const auto corners = grid.corners(inside);
+            REQUIRE(corners[0] == index);
+            // Each corner touches every other, so a blend never reaches past its neighbours.
+            for (const std::uint32_t corner : corners) {
+                for (const std::uint32_t other : corners) {
+                    REQUIRE(
+                        (corner == other || std::ranges::contains(grid.neighbors(corner), other)));
+                }
+            }
+            for (const std::uint32_t one : corners) {
+                std::vector<std::int64_t> field(grid.size(), 0);
+                field[one] = hog::planet::fixed_one;
+                REQUIRE(grid.sample(field, inside) > 0);
+            }
+            for (const std::uint32_t other : grid.neighbors(index)) {
+                if (!std::ranges::contains(corners, other)) {
+                    std::vector<std::int64_t> field(grid.size(), 0);
+                    field[other] = hog::planet::fixed_one;
+                    REQUIRE(grid.sample(field, inside) == 0);
+                }
+            }
+        }
+    }
+}

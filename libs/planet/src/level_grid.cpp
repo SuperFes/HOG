@@ -93,8 +93,7 @@ std::uint32_t LevelGrid::index(CellId cell) const {
     return (static_cast<std::uint32_t>(at.face) * side_ * side_) + (at.j * side_) + at.i;
 }
 
-std::int64_t LevelGrid::sample(std::span<const std::int64_t> field, CellId cell) const {
-    HOG_ASSERT(field.size() == size(), "one value per grid cell");
+LevelGrid::Blend LevelGrid::blend(CellId cell) const {
     const int level = level_;
     const FaceIJ at = cell.to_face_ij();
     // Centres in units of 2^-31 of a face, so a cell's centre is a whole number at any level.
@@ -108,18 +107,27 @@ std::int64_t LevelGrid::sample(std::span<const std::int64_t> field, CellId cell)
     const auto coarse_j = static_cast<std::uint32_t>(v >> shift);
     const std::int64_t du = u - centre(coarse_i, level);
     const std::int64_t dv = v - centre(coarse_j, level);
-    const std::int64_t wu = (std::abs(du) << fixed_fraction_bits) >> shift;
-    const std::int64_t wv = (std::abs(dv) << fixed_fraction_bits) >> shift;
 
     const std::uint32_t here = index(CellId::from_face_ij(at.face, coarse_i, coarse_j, level));
     const Quadrant& around = quadrants_[here][(du < 0 ? 0U : 1U) + (dv < 0 ? 0U : 2U)];
-    const std::int64_t along_u = field[around[0]];
-    const std::int64_t along_v = field[around[1]];
+    return {.cells = {here, around[0], around[1], around[2]},
+            .along_u = (std::abs(du) << fixed_fraction_bits) >> shift,
+            .along_v = (std::abs(dv) << fixed_fraction_bits) >> shift};
+}
+
+std::int64_t LevelGrid::sample(std::span<const std::int64_t> field, CellId cell) const {
+    HOG_ASSERT(field.size() == size(), "one value per grid cell");
+    const auto [cells, wu, wv] = blend(cell);
+    const auto [here, along_u, along_v, between] = cells;
     // Where three cells meet at a cube corner, the missing fourth takes their mean, so the corner
     // gets the same value from each.
     const std::int64_t diagonal =
-        around[2] == here ? (field[here] + along_u + along_v) / 3 : field[around[2]];
-    return lerp(lerp(field[here], along_u, wu), lerp(along_v, diagonal, wu), wv);
+        between == here ? (field[here] + field[along_u] + field[along_v]) / 3 : field[between];
+    return lerp(lerp(field[here], field[along_u], wu), lerp(field[along_v], diagonal, wu), wv);
+}
+
+std::array<std::uint32_t, 4> LevelGrid::corners(CellId cell) const {
+    return blend(cell).cells;
 }
 
 } // namespace hog::planet

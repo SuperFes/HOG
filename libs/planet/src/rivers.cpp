@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <limits>
 #include <utility>
 #include <vector>
 
@@ -27,77 +26,15 @@ std::int64_t fixed(double metres) {
     return std::llround(metres * static_cast<double>(fixed_one));
 }
 
-constexpr std::int64_t no_lake = std::numeric_limits<std::int64_t>::min();
-// Ground this far under the landform's filled surface lies in a basin.
-constexpr std::int64_t basin_depth = fixed_one;
-// What a lake loses a year to evaporation, net of the rain on it, against what a saturated
-// catchment of its area runs off: a lake fills where its catchment, weighted by runoff, makes up
-// for it, so basins in wet country hold lakes and those in deserts stay dry.
-constexpr double evaporation = 0.4;
-
-struct Basins {
-    std::vector<bool> basin;         // per landform cell
-    std::vector<std::int64_t> lakes; // the level of the lake filling it, or no_lake when dry
-};
-
-// Groups of neighbouring cells deep under the filled surface: lakes where enough water comes in,
-// dry basins where it doesn't.
-Basins find_basins(const Landform& landform) {
-    const LevelGrid& grid = landform.grid();
-    const auto heights = landform.heights();
-    const auto& surface = landform.drainage().surface;
-    const auto drained = landform.drained();
-    const std::uint32_t count = grid.size();
-    const auto deep = [&](std::uint32_t cell) {
-        return landform.drainage().receiver[cell] != cell &&
-               surface[cell] - heights[cell] >= basin_depth;
-    };
-    Basins found{.basin = std::vector<bool>(count, false),
-                 .lakes = std::vector<std::int64_t>(count, no_lake)};
-    std::vector<std::uint32_t> cells;
-    for (std::uint32_t start = 0; start < count; ++start) {
-        if (found.basin[start] || !deep(start)) {
-            continue;
-        }
-        cells.assign(1, start);
-        found.basin[start] = true;
-        for (std::size_t next = 0; next < cells.size(); ++next) {
-            for (const std::uint32_t around : grid.neighbors(cells[next])) {
-                if (!found.basin[around] && deep(around)) {
-                    found.basin[around] = true;
-                    cells.push_back(around);
-                }
-            }
-        }
-        double area = 0.0;
-        std::int64_t inflow = 0;
-        std::int64_t level = no_lake;
-        for (const std::uint32_t cell : cells) {
-            area += static_cast<double>(grid.area(cell));
-            inflow = std::max(inflow, drained[cell]);
-            level = std::max(level, surface[cell]);
-        }
-        if (static_cast<double>(inflow) >= evaporation * area) {
-            for (const std::uint32_t cell : cells) {
-                found.lakes[cell] = level;
-            }
-        }
-    }
-    return found;
-}
-
-// The sea and lakes standing over landform cells, and the cells below the sea's level but cut off
-// from it.
+// The sea over landform cells, and the cells below the sea's level but cut off from it.
 struct Standing {
-    std::vector<std::int64_t> levels;
     std::vector<bool> sea;
     std::vector<bool> sunken;
 };
 
-Standing find_standing(const Landform& landform, std::span<const std::int64_t> lakes) {
+Standing find_standing(const Landform& landform) {
     const std::uint32_t count = landform.grid().size();
-    Standing found{.levels = {lakes.begin(), lakes.end()},
-                   .sea = std::vector<bool>(count, false),
+    Standing found{.sea = std::vector<bool>(count, false),
                    .sunken = std::vector<bool>(count, false)};
     for (std::uint32_t cell = 0; cell < count; ++cell) {
         if (landform.heights()[cell] > 0) {
@@ -105,7 +42,6 @@ Standing find_standing(const Landform& landform, std::span<const std::int64_t> l
         }
         // Only the sea's own cells drain nowhere.
         if (landform.drainage().receiver[cell] == cell) {
-            found.levels[cell] = 0;
             found.sea[cell] = true;
         } else {
             found.sunken[cell] = true;
@@ -126,23 +62,22 @@ double Rivers::depth(double area) {
 
 Rivers::Rivers(const Landform& landform, std::span<const std::int64_t> ground, Meander meander,
                double radius, double scale)
-    : grid_{&landform.grid()}, meander_{meander}, radius_{radius} {
+    : landform_{&landform}, grid_{&landform.grid()}, meander_{meander}, radius_{radius} {
     const LevelGrid& grid = landform.grid();
     const Drainage& drainage = landform.drainage();
     const auto drained = landform.drained();
     const std::uint32_t count = grid.size();
     HOG_ASSERT(ground.size() == count, "one ground height per landform cell");
 
-    Basins basins = find_basins(landform);
+    const auto lakes = landform.lakes();
     const auto outlet = [&](std::uint32_t cell) { return drainage.receiver[cell] == cell; };
-    const auto lake = [&](std::uint32_t cell) { return basins.lakes[cell] != no_lake; };
-    Standing standing = find_standing(landform, basins.lakes);
-    standing_ = std::move(standing.levels);
+    const auto lake = [&](std::uint32_t cell) { return lakes[cell] != Landform::dry; };
+    Standing standing = find_standing(landform);
     sea_ = std::move(standing.sea);
     sunken_ = std::move(standing.sunken);
     // Rivers stop at a lake's shore, and leave from its outlet; dry basins hold none.
     const auto flows = [&](std::uint32_t cell) {
-        return !outlet(cell) && !basins.basin[cell] &&
+        return !outlet(cell) && !landform.basin(cell) &&
                static_cast<double>(drained[cell]) >= source_area;
     };
     // A river's water stands at the ground of its cell's centre, but never above the water
@@ -162,7 +97,7 @@ Rivers::Rivers(const Landform& landform, std::span<const std::int64_t> ground, M
         if (outlet(cell)) {
             levels_[cell] = std::max<std::int64_t>(ground[cell], 0);
         } else if (lake(cell)) {
-            levels_[cell] = basins.lakes[cell];
+            levels_[cell] = lakes[cell];
         } else if (flows(cell)) {
             levels_[cell] = std::max(levels_[cell], levels_[receiver]);
         } else {
@@ -264,32 +199,36 @@ std::optional<Channel> Rivers::channel(CellId cell, std::int64_t ground) const {
 }
 
 std::optional<StandingWater> Rivers::standing(CellId cell, std::int64_t ground) const {
-    const auto over = [&](std::uint32_t at) -> std::optional<StandingWater> {
-        if (standing_[at] == no_lake || ground >= standing_[at]) {
-            return std::nullopt;
-        }
-        return StandingWater{.level = standing_[at], .sea = sea_[at]};
-    };
-    // Found about the shifted point, so shores follow the ground, not the grid: the water of its
-    // own cell, or else the highest around it.
-    const std::uint32_t here = grid_->index(cell_at(meander_(cell_center(cell)), grid_->level()));
-    std::optional<StandingWater> water = over(here);
-    if (water) {
-        return water;
+    // Found about the shifted point, so shores follow the ground, not the grid.
+    const CellId shifted = cell_at(meander_(cell_center(cell)));
+    // A lake fills the ground under its level wherever its cells are blended into it; the cells
+    // round it stand above its level, so the water meets the ground all along its shore.
+    std::int64_t lake = Landform::dry;
+    for (const std::uint32_t corner : grid_->corners(shifted)) {
+        lake = std::max(lake, landform_->lakes()[corner]);
     }
+    if (lake != Landform::dry) {
+        if (ground < lake) {
+            return StandingWater{.level = lake, .sea = false};
+        }
+        return std::nullopt;
+    }
+    // The sea stands over its own cells and those beside them, as low as the ground lies.
+    if (ground >= 0) {
+        return std::nullopt;
+    }
+    const std::uint32_t here = grid_->index(shifted.parent(grid_->level()));
+    bool sea = sea_[here];
     bool sunken = sunken_[here];
     for (const std::uint32_t around : grid_->neighbors(here)) {
-        const auto next = over(around);
-        if (next && (!water || next->level > water->level)) {
-            water = next;
-        }
+        sea = sea || sea_[around];
         sunken = sunken || sunken_[around];
     }
     // Low ground finer than the grid takes the sea, unless it lies by ground cut off from it.
-    if (!water && ground < 0 && !sunken) {
+    if (sea || !sunken) {
         return StandingWater{.level = 0, .sea = true};
     }
-    return water;
+    return std::nullopt;
 }
 
 std::optional<std::int64_t> Rivers::lake(CellId cell, std::int64_t ground) const {

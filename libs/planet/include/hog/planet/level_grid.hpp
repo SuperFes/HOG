@@ -42,8 +42,19 @@ public:
     // A field with one fixed-point value per grid cell at any cell's centre, bilinear between the
     // four grid cells around it.
     [[nodiscard]] std::int64_t sample(std::span<const std::int64_t> field, CellId cell) const;
+    // Those four grid cells; at a cube corner, where only three meet, the cell's own comes twice.
+    [[nodiscard]] std::array<std::uint32_t, 4> corners(CellId cell) const;
 
 private:
+    // The four cells sample blends between, here, along u, along v and between, with the weights
+    // along u and v.
+    struct Blend {
+        std::array<std::uint32_t, 4> cells;
+        std::int64_t along_u;
+        std::int64_t along_v;
+    };
+    [[nodiscard]] Blend blend(CellId cell) const;
+
     // Grid cells around each one, by quadrant: the neighbour along u, along v and between the
     // two, for -u-v, +u-v, -u+v and +u+v. At a cube corner there is none between, and the third
     // is the cell itself.

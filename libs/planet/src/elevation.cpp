@@ -162,12 +162,10 @@ std::int64_t Elevation::mountain_strength(std::int64_t height, std::int64_t moun
 
 std::int64_t Elevation::elevation(CellId cell) const {
     const std::int64_t generated = this->generated(cell);
-    if (generated <= 0) {
-        return generated;
-    }
     const Evolved& evolved = this->evolved();
     const std::int64_t ground = worn(cell, generated, evolved.landform, evolved.meander);
-    return evolved.rivers.cut(cell, ground);
+    // Rivers end at the sea, cutting nothing under it.
+    return generated <= 0 ? ground : evolved.rivers.cut(cell, ground);
 }
 
 std::optional<Channel> Elevation::river(CellId cell) const {
@@ -184,7 +182,12 @@ bool Elevation::is_land(CellId cell) const {
     if (generated<fine_fraction_bits>(cell) > 0) {
         return true;
     }
-    const auto water = evolved().rivers.standing(cell, std::min<std::int64_t>(generated(cell), -1));
+    // Lakes build their rims up out of low ground.
+    const std::int64_t ground = elevation(cell);
+    if (ground > 0) {
+        return true;
+    }
+    const auto water = evolved().rivers.standing(cell, std::min<std::int64_t>(ground, -1));
     return !water || !water->sea;
 }
 
@@ -210,16 +213,27 @@ std::int64_t Elevation::above_water(CellId cell) const {
 
 std::int64_t Elevation::worn(CellId cell, std::int64_t generated, const Landform& landform,
                              const Meander& meander) {
-    if (generated <= 0) {
+    if (generated <= 0 && !landform.near_lake(cell)) {
         return generated;
     }
-    // The change fades out towards the shore, and low ground is never worn below a quarter of
-    // its height, so coasts stay where generated and meet the sea without a step.
     // Sampled where the meanders shift the cell to, so valleys bend with the rivers in them.
-    const std::int64_t change =
-        (landform.change(cell_at(meander(cell_center(cell)))) * ramp(generated, coast_blend)) >>
-        fixed_fraction_bits;
-    return std::max(generated + change, (generated + 3) / 4);
+    const CellId shifted = cell_at(meander(cell_center(cell)));
+    std::int64_t ground = generated;
+    if (generated > 0) {
+        // The change fades out towards the shore, and low ground is never worn below a quarter
+        // of its height, so coasts stay where generated and meet the sea without a step.
+        const std::int64_t change =
+            (landform.change(shifted) * ramp(generated, coast_blend)) >> fixed_fraction_bits;
+        ground = std::max(generated + change, (generated + 3) / 4);
+    }
+    // Lakes fill the landform's ground under their levels, and the cells round them stand above,
+    // so the ground about them is the landform's, shading back into the finer ground beyond.
+    const std::int64_t lakeside = landform.grid().sample(landform.lakeside(), shifted);
+    if (lakeside == 0) {
+        return ground;
+    }
+    const std::int64_t smooth = landform.grid().sample(landform.heights(), shifted);
+    return ground + (((smooth - ground) * lakeside) >> fixed_fraction_bits);
 }
 
 template <int Bits>

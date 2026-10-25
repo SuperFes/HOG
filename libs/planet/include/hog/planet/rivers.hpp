@@ -93,14 +93,13 @@ private:
     template <typename Visit>
     void each_reach(CellId cell, Visit visit) const;
 
+    const Landform* landform_;
     const LevelGrid* grid_;
     Meander meander_;
     double radius_;
     std::vector<Reach> reaches_;
     std::vector<std::int64_t> levels_;
-    // The level of the sea or lake over each landform cell, or the lowest value where there's
-    // none, and whether it's the sea.
-    std::vector<std::int64_t> standing_;
+    // Landform cells under the sea.
     std::vector<bool> sea_;
     // Landform cells below the sea's level but cut off from it.
     std::vector<bool> sunken_;

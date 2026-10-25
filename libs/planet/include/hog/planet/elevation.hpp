@@ -109,7 +109,8 @@ private:
     // The same with `Bits` fractional bits.
     template <int Bits>
     [[nodiscard]] std::int64_t generated(CellId cell) const;
-    // The elevation as rivers wore it, before they cut their channels, given the generated one.
+    // The elevation as rivers wore it, before they cut their channels, given the generated one;
+    // about lakes, the landform's own ground, which holds them in.
     [[nodiscard]] static std::int64_t worn(CellId cell, std::int64_t generated,
                                            const Landform& landform, const Meander& meander);
     [[nodiscard]] const Evolved& evolved() const;

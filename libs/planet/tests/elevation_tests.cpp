@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -87,7 +88,7 @@ hog::DVec3 along(hog::DVec3 from, hog::DVec3 towards, double metres) {
 
 } // namespace
 
-TEST_CASE("land stays above sea level and the ocean floor below it, but for volcanoes",
+TEST_CASE("land stays above sea level and the ocean floor below it, but for volcanoes and lakes",
           "[planet][elevation]") {
     const std::uint64_t seed = GENERATE(take(hog::testing::cases(2), values({1U, 2U})));
     const Elevation terrain{planet(seed)};
@@ -95,12 +96,16 @@ TEST_CASE("land stays above sea level and the ocean floor below it, but for volc
     for (const CellId cell : cells_at(6)) {
         const std::int64_t elevation = terrain.elevation(cell);
         if (terrain.height<hog::planet::fine_fraction_bits>(cell) > 0) {
-            REQUIRE(elevation >= 0);
+            // Low ground cut off from the sea may lie under it, but only under a lake.
+            REQUIRE((elevation >= 0 || terrain.lake(cell)));
             REQUIRE(elevation <=
                     metres(Elevation::lowland_height + Elevation::mountain_height) + volcanoes);
         } else {
-            const auto shields = terrain.hotspots().surface(cell);
-            REQUIRE(elevation <= std::max(terrain.volcanoes().lift(cell), shields.value_or(0)));
+            // Lakes build their rims up out of low ground, the sea's too.
+            if (!terrain.landform().near_lake(cell)) {
+                const auto shields = terrain.hotspots().surface(cell);
+                REQUIRE(elevation <= std::max(terrain.volcanoes().lift(cell), shields.value_or(0)));
+            }
             REQUIRE(elevation >= metres(-Elevation::deepest));
             REQUIRE(terrain.mountain_strength(cell) == 0);
         }
@@ -365,4 +370,65 @@ TEST_CASE("the youngest shields over plumes rise as islands", "[planet][elevatio
             CHECK_FALSE(terrain.is_land(hog::planet::cell_at(old.center)));
         }
     }
+}
+
+namespace {
+
+// How far a lake's water at `level` over `cell` stands above whatever is beside it at `next`, the
+// ground or other water, where no rim between holds it in; 0 where it's held.
+std::int64_t wall(const Elevation& terrain, CellId cell, CellId next, std::int64_t level) {
+    const auto beside = terrain.lake(next);
+    const std::int64_t drop =
+        level - (beside ? beside->surface : std::max<std::int64_t>(terrain.elevation(next), 0));
+    if (drop <= fixed_one / 100) {
+        return 0;
+    }
+    // Lower ground beyond a rim is fine, as long as the water reaches no further.
+    const hog::DVec3 from = hog::planet::cell_center(cell);
+    const hog::DVec3 to = hog::planet::cell_center(next);
+    for (int step = 1; step < 32; ++step) {
+        const double t = step / 32.0;
+        if (terrain.elevation(hog::planet::cell_at(
+                glm::normalize((from * (1.0 - t)) + (to * t)))) >= level - (fixed_one / 100)) {
+            return 0;
+        }
+    }
+    return drop;
+}
+
+} // namespace
+
+TEST_CASE("the ground holds lakes in, the water never standing over lower ground beside it",
+          "[planet][elevation]") {
+    const Elevation terrain{planet(1)};
+    const auto& grid = terrain.landform().grid();
+    const auto lake_at = [&](std::uint32_t index) {
+        return terrain.lake(grid.cell(index)).has_value();
+    };
+    int shores = 0;
+    int walls = 0;
+    std::int64_t tallest = 0;
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        // Lakes reach a cell beyond those they stand over.
+        if (!lake_at(index) && std::ranges::none_of(grid.neighbors(index), lake_at)) {
+            continue;
+        }
+        for (const CellId cell :
+             hog::planet::sample_tile(grid.cell(index), 4, [](CellId at) { return at; })) {
+            const auto lake = terrain.lake(cell);
+            for (const CellId next : hog::planet::edge_neighbors(cell)) {
+                const auto beside = terrain.lake(next);
+                if (!lake || (beside && beside->surface == lake->surface)) {
+                    continue;
+                }
+                ++shores;
+                const std::int64_t drop = wall(terrain, cell, next, lake->surface);
+                walls += drop > 0 ? 1 : 0;
+                tallest = std::max(tallest, drop);
+            }
+        }
+    }
+    INFO("walls " << walls << " of " << shores << ", tallest " << fixed_to_double(tallest));
+    CHECK(shores > 1'000);
+    CHECK(walls == 0);
 }
