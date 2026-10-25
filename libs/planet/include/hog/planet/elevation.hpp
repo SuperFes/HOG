@@ -23,6 +23,11 @@ class Elevation {
 public:
     // Metres.
     static constexpr std::int64_t ocean_depth = 4'000;
+    // From the troughs to the crests of the hills on the ocean floor, and the deepest the floor
+    // reaches, in a trench.
+    static constexpr std::int64_t abyssal_hill_height = 300;
+    static constexpr std::int64_t deepest =
+        ocean_depth + Continents::trench_depth + (abyssal_hill_height / 2);
     static constexpr std::int64_t lowland_height = 300;
     static constexpr std::int64_t mountain_height = 4'000;
 
@@ -54,11 +59,12 @@ public:
     // the sea; zero under water.
     [[nodiscard]] std::int64_t above_water(CellId cell) const;
 
-    // The elevation of the sea floor at a height `below` sea level, both in fixed point with `Bits`
+    // The elevation of the sea floor at a height `below` sea level, all in fixed point with `Bits`
     // fractional bits: a sandy shoreface on Dean's equilibrium profile, a shelf, then the slope
-    // down to the ocean's depth.
+    // down to the abyss this deep.
     template <int Bits = fixed_fraction_bits>
-    [[nodiscard]] static std::int64_t sea_floor(std::int64_t below);
+    [[nodiscard]] static std::int64_t
+    sea_floor(std::int64_t below, std::int64_t abyss = ocean_depth * fixed_unit<Bits>);
 
     // How strongly mountains rise here, in fixed point from 0 to 1.
     [[nodiscard]] std::int64_t mountain_strength(CellId cell) const;
@@ -87,10 +93,11 @@ private:
     template <int Bits>
     [[nodiscard]] static std::int64_t mountain_strength(std::int64_t height,
                                                         std::int64_t mountains);
-    // Ridged noise from 0 to 1 in fixed point with `Bits` fractional bits, its ridges running
-    // with a range's grain.
+    // Ridged noise from 0 to 1 in fixed point with `Bits` fractional bits, at `frequency` per unit
+    // of the sphere's radius, its ridges running with the grain.
     template <int Bits>
-    [[nodiscard]] std::int64_t ridge(CellId cell, const std::array<std::int64_t, 3>& grain) const;
+    [[nodiscard]] static std::int64_t ridge(std::uint64_t seed, double frequency, int octaves,
+                                            CellId cell, const std::array<std::int64_t, 3>& grain);
     // The elevation as generated, before rivers wore it.
     [[nodiscard]] std::int64_t generated(CellId cell) const;
     // The same with `Bits` fractional bits.
@@ -106,6 +113,8 @@ private:
     Archipelago archipelago_;
     std::uint64_t ridge_seed_;
     double ridge_frequency_; // per unit of the sphere's radius
+    std::uint64_t hill_seed_;
+    double hill_frequency_;
     std::uint64_t relief_seed_;
     struct Evolving {
         PlanetConfig config;
@@ -115,7 +124,9 @@ private:
     std::shared_ptr<Evolving> evolving_;
 };
 
-extern template std::int64_t Elevation::sea_floor<fixed_fraction_bits>(std::int64_t below);
-extern template std::int64_t Elevation::sea_floor<fine_fraction_bits>(std::int64_t below);
+extern template std::int64_t Elevation::sea_floor<fixed_fraction_bits>(std::int64_t below,
+                                                                       std::int64_t abyss);
+extern template std::int64_t Elevation::sea_floor<fine_fraction_bits>(std::int64_t below,
+                                                                      std::int64_t abyss);
 
 } // namespace hog::planet

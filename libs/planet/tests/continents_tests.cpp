@@ -271,3 +271,56 @@ TEST_CASE("ranges run with the boundary that raised them", "[planet][continents]
     CHECK(hog::planet::fixed_to_double(grain[2]) > 0.7);
     CHECK(hog::planet::fixed_to_double(grain[0] + grain[1] + grain[2]) > 0.9);
 }
+
+namespace {
+
+// Metres the floor rises `metres` east of the boundary over +y or -y, averaged along the boundary,
+// which wanders.
+double floor_across(const Continents& continents, double metres, double y) {
+    double sum = 0.0;
+    for (int along = -10; along <= 10; ++along) {
+        const double z = along * 2'000.0 / radius;
+        sum += hog::planet::fixed_to_double(
+            continents
+                .crust(hog::planet::cell_at(glm::normalize(hog::DVec3{metres / radius, y, z})))
+                .floor);
+    }
+    return sum / 21.0;
+}
+
+} // namespace
+
+TEST_CASE("ocean floor rises into a ridge where plates part", "[planet][continents]") {
+    const Continents parting = pair(-0.8, -0.8);
+    CHECK(floor_across(parting, 0.0, -1.0) > 700.0);
+    CHECK(floor_across(parting, 0.0, -1.0) > floor_across(parting, 30'000.0, -1.0));
+    CHECK(floor_across(parting, 100'000.0, -1.0) < 50.0);
+    const Continents still = pair(-0.8, -0.8, 0.0);
+    CHECK(floor_across(still, 0.0, -1.0) == 0.0);
+}
+
+TEST_CASE("ocean floor diving under a continent sinks into a trench", "[planet][continents]") {
+    // The west plate's floor dives under the east one's continent where they close.
+    const Continents found = pair(0.8, -0.8);
+    double deepest = 0.0;
+    double where = 0.0;
+    for (int step = -20; step <= 20; ++step) {
+        const double metres = step * 1'000.0;
+        if (floor_across(found, metres, 1.0) < deepest) {
+            deepest = floor_across(found, metres, 1.0);
+            where = metres;
+        }
+    }
+    CHECK(deepest < -1'500.0);
+    CHECK(where < 0.0);
+    CHECK(floor_across(found, 30'000.0, 1.0) == 0.0);
+}
+
+TEST_CASE("of two oceanic plates closing, only one dives", "[planet][continents]") {
+    // The east plate dives; the trench lies on its side, blurred as the boundary wanders.
+    const Continents found = pair(-0.8, -0.8);
+    CHECK(floor_across(found, 3'000.0, 1.0) < -1'000.0);
+    CHECK(floor_across(found, 3'000.0, 1.0) < floor_across(found, -3'000.0, 1.0));
+    CHECK(floor_across(found, 15'000.0, 1.0) < -150.0);
+    CHECK(floor_across(found, -15'000.0, 1.0) > -50.0);
+}

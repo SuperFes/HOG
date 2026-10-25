@@ -18,6 +18,7 @@ namespace hog::mapgen {
 namespace {
 
 constexpr std::array ocean_stops{
+    ColourStop{.at = -7'000.0, .colour = {2, 8, 40}},
     ColourStop{.at = -4'000.0, .colour = {8, 30, 80}},
     ColourStop{.at = -1'000.0, .colour = {25, 70, 140}},
     ColourStop{.at = -100.0, .colour = {60, 130, 195}},

@@ -119,6 +119,8 @@ TEST_CASE("height colours run from deep blue to snow", "[mapgen]") {
         CHECK(rgb[2] > rgb[0]);
     }
     CHECK(brightness(colour(-3'000.0)) < brightness(colour(-500.0)));
+    // Trenches darker than the abyss.
+    CHECK(brightness(colour(-6'000.0)) < brightness(colour(-4'000.0)));
     const auto lowland = colour(50.0);
     CHECK(lowland[1] > lowland[0]);
     CHECK(lowland[1] > lowland[2]);

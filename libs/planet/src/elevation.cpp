@@ -19,6 +19,7 @@ namespace {
 
 constexpr std::uint64_t ridge_salt = 0x7269'6467'6573'0000ULL;  // "ridges"
 constexpr std::uint64_t relief_salt = 0x7265'6C69'6566'0000ULL; // "relief"
+constexpr std::uint64_t hill_salt = 0x6869'6C6C'7300'0000ULL;   // "hills"
 
 // Continent heights (fixed point) over which each effect ramps from nothing to full.
 template <int Bits>
@@ -38,6 +39,9 @@ constexpr int relief_octaves = 4;
 constexpr double ridge_wavelength = 12'000.0; // metres
 constexpr std::int64_t ridge_stretch = 2;
 constexpr int ridge_octaves = 6;
+// The ocean floor's hills, lying along the ridges the floor was made at.
+constexpr double hill_wavelength = 4'000.0; // metres
+constexpr int hill_octaves = 3;
 template <int Bits>
 constexpr std::int64_t erosion = 2 * fixed_unit<Bits>;
 
@@ -82,6 +86,8 @@ Elevation::Elevation(const PlanetConfig& config)
       archipelago_{config.seed, config.radius, continents_},
       ridge_seed_{hash_combine(config.seed, ridge_salt)},
       ridge_frequency_{config.radius / ridge_wavelength},
+      hill_seed_{hash_combine(config.seed, hill_salt)},
+      hill_frequency_{config.radius / hill_wavelength},
       relief_seed_{hash_combine(config.seed, relief_salt)},
       evolving_{std::make_shared<Evolving>(config)} {}
 
@@ -215,15 +221,16 @@ std::int64_t Elevation::worn(CellId cell, std::int64_t generated, const Landform
 }
 
 template <int Bits>
-std::int64_t Elevation::sea_floor(std::int64_t below) {
+std::int64_t Elevation::sea_floor(std::int64_t below, std::int64_t abyss) {
     constexpr std::int64_t one = fixed_unit<Bits>;
     constexpr std::int64_t break_depth = shelf_break / shelf_run;
     constexpr std::int64_t break_below = (shelf_break * one) / shore_metres;
     if (below >= break_below) {
         // Reaching the ocean floor where it always has.
         return -(break_depth * one) -
-               ((ocean_depth - break_depth) *
-                ramp<Bits>(below - break_below, depth_width<Bits> - break_below));
+               (((abyss - (break_depth * one)) *
+                 ramp<Bits>(below - break_below, depth_width<Bits> - break_below)) >>
+                Bits);
     }
     const std::int64_t out = below * shore_metres;
     // The cube root with 16 fractional bits, of metres with 48: inside the break, below 2^61.
@@ -233,14 +240,17 @@ std::int64_t Elevation::sea_floor(std::int64_t below) {
     return -std::max(shoreface, out / shelf_run);
 }
 
-template std::int64_t Elevation::sea_floor<fixed_fraction_bits>(std::int64_t below);
-template std::int64_t Elevation::sea_floor<fine_fraction_bits>(std::int64_t below);
+template std::int64_t Elevation::sea_floor<fixed_fraction_bits>(std::int64_t below,
+                                                                std::int64_t abyss);
+template std::int64_t Elevation::sea_floor<fine_fraction_bits>(std::int64_t below,
+                                                               std::int64_t abyss);
 
 template <int Bits>
-std::int64_t Elevation::ridge(CellId cell, const std::array<std::int64_t, 3>& grain) const {
+std::int64_t Elevation::ridge(std::uint64_t seed, double frequency, int octaves, CellId cell,
+                              const std::array<std::int64_t, 3>& grain) {
     // Noise stretched along each axis, weighted by how far the range runs along it: stretching
     // along fixed axes bends nothing, however the range turns.
-    const auto point = noise_point<Bits>(cell_center(cell), ridge_frequency_);
+    const auto point = noise_point<Bits>(cell_center(cell), frequency);
     std::int64_t total = 0;
     std::int64_t weights = 0;
     for (std::size_t axis = 0; axis < 3; ++axis) {
@@ -252,12 +262,11 @@ std::int64_t Elevation::ridge(CellId cell, const std::array<std::int64_t, 3>& gr
         auto stretched = point;
         std::array<std::int64_t*, 3> along{&stretched.x, &stretched.y, &stretched.z};
         *along.at(axis) /= ridge_stretch;
-        total += weight *
-                 ridges(hash_values(ridge_seed_, axis), stretched, ridge_octaves, erosion<Bits>);
+        total += weight * ridges(hash_values(seed, axis), stretched, octaves, erosion<Bits>);
         weights += weight;
     }
     if (weights == 0) {
-        return ridges(ridge_seed_, point, ridge_octaves, erosion<Bits>);
+        return ridges(seed, point, octaves, erosion<Bits>);
     }
     return total / weights;
 }
@@ -275,7 +284,11 @@ std::int64_t Elevation::generated(CellId cell) const {
     const std::int64_t continent = crust.height;
     const std::int64_t height = archipelago_.raise<Bits>(cell, continent);
     if (height <= 0) {
-        return sea_floor<Bits>(-height);
+        const std::int64_t hills =
+            (abyssal_hill_height *
+             (ridge<Bits>(hill_seed_, hill_frequency_, hill_octaves, cell, crust.grain) -
+              (one / 2)));
+        return sea_floor<Bits>(-height, (ocean_depth * one) - crust.floor - hills);
     }
     // Islands keep to lowland hills; only continents roll and carry mountain belts.
     const std::int64_t relief =
@@ -289,7 +302,8 @@ std::int64_t Elevation::generated(CellId cell) const {
     if (strength == 0) {
         return lowland;
     }
-    const std::int64_t ridge = this->ridge<Bits>(cell, crust.grain);
+    const std::int64_t ridge =
+        Elevation::ridge<Bits>(ridge_seed_, ridge_frequency_, ridge_octaves, cell, crust.grain);
     return lowland + (mountain_height * ((strength * ridge) >> Bits));
 }
 

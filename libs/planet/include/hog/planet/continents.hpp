@@ -19,6 +19,8 @@ class Continents {
 public:
     // Sea level is measured over every cell at this level.
     static constexpr int survey_level = 6;
+    // Metres below the abyss that ocean floor sinks where it dives under another plate.
+    static constexpr std::int64_t trench_depth = 3'000;
 
     Continents(std::uint64_t seed, double ocean_fraction, std::shared_ptr<const Plates> plates);
 
@@ -40,11 +42,13 @@ public:
 
     // The height above sea level and how strongly mountains rise, from 0 to 1, both in fixed
     // point with `Bits` fractional bits; and the grain ranges follow, as how much of the way along
-    // them lies along each axis, in fixed point and summing to about 1.
+    // them lies along each axis, in fixed point and summing to about 1; and metres the ocean floor
+    // rises above the abyss, or sinks below it into a trench, in fixed point with `Bits`.
     struct Crust {
         std::int64_t height = 0;
         std::int64_t mountains = 0;
         std::array<std::int64_t, 3> grain{};
+        std::int64_t floor = 0;
     };
     template <int Bits = fixed_fraction_bits>
     [[nodiscard]] Crust crust(CellId cell) const;
@@ -66,6 +70,8 @@ private:
     std::vector<std::int64_t> rifts_;
     std::vector<std::int64_t> mountains_;
     std::array<std::vector<std::int64_t>, 3> grain_;
+    // Fixed point metres per plate grid cell.
+    std::vector<std::int64_t> floor_;
     std::int64_t sea_level_ = 0;
 };
 

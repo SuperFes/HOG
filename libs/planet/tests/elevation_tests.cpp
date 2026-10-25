@@ -94,7 +94,7 @@ TEST_CASE("land stays above sea level and the ocean floor below it", "[planet][e
             REQUIRE(elevation <= metres(Elevation::lowland_height + Elevation::mountain_height));
         } else {
             REQUIRE(elevation <= 0);
-            REQUIRE(elevation >= metres(-Elevation::ocean_depth));
+            REQUIRE(elevation >= metres(-Elevation::deepest));
             REQUIRE(terrain.mountain_strength(cell) == 0);
         }
     }
@@ -298,4 +298,36 @@ TEST_CASE("only ground joined to the sea lies under it", "[planet][elevation]") 
         cut_off += sea ? 0 : 1;
     }
     CHECK(cut_off > 1'000);
+}
+
+TEST_CASE("the deep ocean floor rises at ridges, sinks into trenches and rolls between",
+          "[planet][elevation]") {
+    const Elevation terrain{planet(1)};
+    constexpr auto depth = static_cast<double>(Elevation::ocean_depth);
+    constexpr double hills = Elevation::abyssal_hill_height / 2.0;
+    int ridges = 0;
+    int trenches = 0;
+    double shallowest_plain = depth * 2.0;
+    double deepest_plain = 0.0;
+    for (const CellId cell : cells_at(6)) {
+        if (terrain.height(cell) > -fixed_one / 5) {
+            continue;
+        }
+        const double below = -fixed_to_double(terrain.elevation(cell));
+        const double floor = fixed_to_double(terrain.continents().crust(cell).floor);
+        REQUIRE(std::abs(below - (depth - floor)) <= hills + 0.01);
+        if (floor > 500.0) {
+            ++ridges;
+        } else if (floor < -500.0) {
+            ++trenches;
+        } else if (std::abs(floor) < 1.0) {
+            shallowest_plain = std::min(shallowest_plain, below);
+            deepest_plain = std::max(deepest_plain, below);
+        }
+    }
+    CHECK(ridges > 10);
+    CHECK(trenches > 10);
+    CHECK(shallowest_plain >= depth - hills);
+    CHECK(deepest_plain <= depth + hills);
+    CHECK(deepest_plain - shallowest_plain > hills);
 }
