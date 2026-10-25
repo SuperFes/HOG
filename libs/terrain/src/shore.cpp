@@ -124,8 +124,8 @@ bool open_sea_at(std::span<const float> depths, std::span<const std::uint8_t> se
     }
     // The coarser layer's texel this one's centre lies in.
     const double ratio = shore_spacing.at(layer) / shore_spacing.at(layer + 1);
-    const auto coarse = [&](std::size_t at) {
-        return std::floor(((static_cast<double>(at) + 0.5 - (shore_size / 2.0)) * ratio) +
+    const auto coarse = [&](std::size_t texel) {
+        return std::floor(((static_cast<double>(texel) + 0.5 - (shore_size / 2.0)) * ratio) +
                           (shore_size / 2.0));
     };
     const double coarse_column = coarse(column);
