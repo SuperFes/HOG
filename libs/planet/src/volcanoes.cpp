@@ -40,7 +40,7 @@ double unit(std::uint64_t hash) {
 }
 
 // A fraction of the height at a fraction of the way out to the foot: concave, as ash and lava
-// pile steepest near the vent.
+// pile steepest around the vent.
 constexpr double cone(double out) {
     const double in = 1.0 - out;
     return in * (1.0 + in) / 2.0;
@@ -80,11 +80,11 @@ std::int64_t Volcanoes::lift(CellId cell) const {
     const DVec3 at = cell_center(cell);
     const std::uint32_t index = grid_.index(cell_at(at, grid_.level()));
     double highest = 0.0;
-    const auto rise = [&](std::uint32_t near) {
-        if (standing_[near] == none) {
+    const auto rise = [&](std::uint32_t around) {
+        if (standing_[around] == none) {
             return;
         }
-        const Volcano& volcano = volcanoes_[standing_[near]];
+        const Volcano& volcano = volcanoes_[standing_[around]];
         const DVec3 off = at - volcano.center;
         const double length = glm::length(off);
         const double reach = length * planet_radius_ / volcano.radius;
@@ -94,7 +94,7 @@ std::int64_t Volcanoes::lift(CellId cell) const {
         // Read by the way out from the centre alone, so lobes and gullies run straight down.
         const double lobe =
             length > 0.0
-                ? fixed_to_double(fbm(hash_values(lobe_seed_, standing_[near]),
+                ? fixed_to_double(fbm(hash_values(lobe_seed_, standing_[around]),
                                       noise_point(off / length, lobe_frequency), lobe_octaves))
                 : 0.0;
         const double out = reach / (1.0 + (lobes * std::clamp(lobe, -1.0, 1.0)));
@@ -107,8 +107,8 @@ std::int64_t Volcanoes::lift(CellId cell) const {
         highest = std::max(highest, volcano.height * height);
     };
     rise(index);
-    for (const std::uint32_t near : grid_.neighbors(index)) {
-        rise(near);
+    for (const std::uint32_t around : grid_.neighbors(index)) {
+        rise(around);
     }
     return std::llround(highest * static_cast<double>(fixed_unit<Bits>));
 }

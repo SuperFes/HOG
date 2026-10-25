@@ -85,6 +85,7 @@ Elevation::Elevation(const PlanetConfig& config)
                                                  config.radius, config.plates)},
       archipelago_{config.seed, config.radius, continents_},
       volcanoes_{config.seed, config.radius, continents_},
+      hotspots_{config.seed, config.radius, continents_, archipelago_.center()},
       ridge_seed_{hash_combine(config.seed, ridge_salt)},
       ridge_frequency_{config.radius / ridge_wavelength},
       hill_seed_{hash_combine(config.seed, hill_salt)},
@@ -227,9 +228,10 @@ std::int64_t Elevation::sea_floor(std::int64_t below, std::int64_t abyss) {
     constexpr std::int64_t break_depth = shelf_break / shelf_run;
     constexpr std::int64_t break_below = (shelf_break * one) / shore_metres;
     if (below >= break_below) {
-        // Reaching the ocean floor where it always has.
+        // Reaching the ocean floor where it always has; however much is built up under it, the
+        // floor stays as deep as the shelf's edge.
         return -(break_depth * one) -
-               (((abyss - (break_depth * one)) *
+               (((std::max(abyss, break_depth * one) - (break_depth * one)) *
                  ramp<Bits>(below - break_below, depth_width<Bits> - break_below)) >>
                 Bits);
     }
@@ -285,12 +287,19 @@ std::int64_t Elevation::generated(CellId cell) const {
     const std::int64_t continent = crust.height;
     const std::int64_t height = archipelago_.raise<Bits>(cell, continent);
     const std::int64_t volcanoes = volcanoes_.lift<Bits>(cell);
+    // Shields stand over whatever else is there, their lava burying it.
+    const auto shields = hotspots_.surface<Bits>(cell);
+    const auto built = [&](std::int64_t ground) {
+        return shields ? std::max(ground, *shields) : ground;
+    };
     if (height <= 0) {
         const std::int64_t hills =
             (abyssal_hill_height *
              (ridge<Bits>(hill_seed_, hill_frequency_, hill_octaves, cell, crust.grain) -
               (one / 2)));
-        return sea_floor<Bits>(-height, (ocean_depth * one) - crust.floor - hills) + volcanoes;
+        const std::int64_t abyss =
+            (ocean_depth * one) - crust.floor - hills - hotspots_.swell<Bits>(cell);
+        return built(sea_floor<Bits>(-height, abyss) + volcanoes);
     }
     // Islands keep to lowland hills; only continents roll and carry mountain belts.
     const std::int64_t relief =
@@ -302,11 +311,11 @@ std::int64_t Elevation::generated(CellId cell) const {
         (((lowland_height * one) + relief) * ramp<Bits>(height, lowland_width<Bits>)) >> Bits;
     const std::int64_t strength = mountain_strength<Bits>(continent, crust.mountains);
     if (strength == 0) {
-        return lowland + volcanoes;
+        return built(lowland + volcanoes);
     }
     const std::int64_t ridge =
         Elevation::ridge<Bits>(ridge_seed_, ridge_frequency_, ridge_octaves, cell, crust.grain);
-    return lowland + (mountain_height * ((strength * ridge) >> Bits)) + volcanoes;
+    return built(lowland + (mountain_height * ((strength * ridge) >> Bits)) + volcanoes);
 }
 
 } // namespace hog::planet

@@ -96,7 +96,8 @@ TEST_CASE("land stays above sea level and the ocean floor below it, but for volc
             REQUIRE(elevation <=
                     metres(Elevation::lowland_height + Elevation::mountain_height) + volcanoes);
         } else {
-            REQUIRE(elevation <= terrain.volcanoes().lift(cell));
+            const auto shields = terrain.hotspots().surface(cell);
+            REQUIRE(elevation <= std::max(terrain.volcanoes().lift(cell), shields.value_or(0)));
             REQUIRE(elevation >= metres(-Elevation::deepest));
             REQUIRE(terrain.mountain_strength(cell) == 0);
         }
@@ -208,6 +209,15 @@ TEST_CASE("a sandy shore's floor follows Dean's profile out to a shelf", "[plane
     }
 }
 
+TEST_CASE("however much is built up under it, the ocean floor stays as deep as the shelf's edge",
+          "[planet][elevation]") {
+    constexpr std::int64_t one = hog::planet::fixed_unit<fine_fraction_bits>;
+    const std::int64_t below = one / 2;
+    CHECK(Elevation::sea_floor<fine_fraction_bits>(below, 2'000 * one) == -2'000 * one);
+    CHECK(Elevation::sea_floor<fine_fraction_bits>(below, 50 * one) == -50 * one);
+    CHECK(Elevation::sea_floor<fine_fraction_bits>(below, -1'000 * one) == -50 * one);
+}
+
 TEST_CASE("the sea stays shallow off a coast", "[planet][elevation]") {
     // Continents' coasts fall faster than the islands' flanks, so their floor lies deeper.
     const std::uint64_t seed = GENERATE(1U, 4U);
@@ -313,7 +323,8 @@ TEST_CASE("the deep ocean floor rises at ridges, sinks into trenches and rolls b
     double shallowest_plain = depth * 2.0;
     double deepest_plain = 0.0;
     for (const CellId cell : cells_at(6)) {
-        if (terrain.height(cell) > -fixed_one / 5 || terrain.volcanoes().lift(cell) > 0) {
+        if (terrain.height(cell) > -fixed_one / 5 || terrain.volcanoes().lift(cell) > 0 ||
+            terrain.hotspots().surface(cell) || terrain.hotspots().swell(cell) > 0) {
             continue;
         }
         const double below = -fixed_to_double(terrain.elevation(cell));
@@ -333,4 +344,22 @@ TEST_CASE("the deep ocean floor rises at ridges, sinks into trenches and rolls b
     CHECK(shallowest_plain >= depth - hills);
     CHECK(deepest_plain <= depth + hills);
     CHECK(deepest_plain - shallowest_plain > hills);
+}
+
+TEST_CASE("the youngest shields over plumes rise as islands", "[planet][elevation]") {
+    const Elevation terrain{planet(1)};
+    REQUIRE_FALSE(terrain.hotspots().hotspots().empty());
+    for (std::size_t plume = 0; plume < terrain.hotspots().hotspots().size(); ++plume) {
+        const auto& young =
+            terrain.hotspots().shields()[plume * hog::planet::Hotspots::chain_length];
+        const CellId summit = hog::planet::cell_at(young.center);
+        CHECK(terrain.is_land(summit));
+        CHECK(terrain.elevation(summit) > metres(500));
+        const auto& old =
+            terrain.hotspots().shields()[((plume + 1) * hog::planet::Hotspots::chain_length) - 1];
+        // Unless carried onto land.
+        if (terrain.height(hog::planet::cell_at(old.center)) < 0) {
+            CHECK_FALSE(terrain.is_land(hog::planet::cell_at(old.center)));
+        }
+    }
 }

@@ -3,6 +3,7 @@
 #include <hog/planet/archipelago.hpp>
 #include <hog/planet/cell_id.hpp>
 #include <hog/planet/continents.hpp>
+#include <hog/planet/hotspots.hpp>
 #include <hog/planet/landform.hpp>
 #include <hog/planet/planet_config.hpp>
 #include <hog/planet/rivers.hpp>
@@ -18,7 +19,7 @@ namespace hog::planet {
 
 // Terrain height: continents and the starting islands give the coastline, lowlands and ocean
 // floor; ridges raise mountain ranges where the plates push them up, away from the coast, and
-// volcanoes stand along the arcs above plates diving. Rivers
+// volcanoes stand along the arcs above plates diving and in chains carried off plumes. Rivers
 // then wear the land over geological time while the ranges keep rising, which carves valleys and
 // drainage, and cut channels where they run.
 class Elevation {
@@ -39,6 +40,7 @@ public:
     [[nodiscard]] const Continents& continents() const noexcept { return continents_; }
     [[nodiscard]] const Archipelago& archipelago() const noexcept { return archipelago_; }
     [[nodiscard]] const Volcanoes& volcanoes() const noexcept { return volcanoes_; }
+    [[nodiscard]] const Hotspots& hotspots() const noexcept { return hotspots_; }
 
     // Fixed-point continent height with the islands raised on it; land is positive.
     template <int Bits = fixed_fraction_bits>
@@ -116,6 +118,7 @@ private:
     Continents continents_;
     Archipelago archipelago_;
     Volcanoes volcanoes_;
+    Hotspots hotspots_;
     std::uint64_t ridge_seed_;
     double ridge_frequency_; // per unit of the sphere's radius
     std::uint64_t hill_seed_;
