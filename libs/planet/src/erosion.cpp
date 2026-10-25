@@ -42,7 +42,7 @@ Drainage erode(const LevelGrid& grid, std::vector<std::int64_t>& heights, const 
         while (neighbors[k] != receiver) {
             ++k;
         }
-        const double length = static_cast<double>(grid.distances(cell)[k]);
+        const auto length = static_cast<double>(grid.distance(cell, k));
         const double factor = static_cast<double>(erosion.erodibility[cell]) *
                               std::sqrt(static_cast<double>(drained[cell])) / length;
         const double height =

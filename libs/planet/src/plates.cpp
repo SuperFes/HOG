@@ -236,10 +236,10 @@ void Plates::grow(std::uint64_t seed) {
         }
         plate_[index] = plate;
         const auto around = grid_.neighbors(index);
-        const auto distances = grid_.distances(index);
         for (std::size_t k = 0; k < around.size(); ++k) {
             if (plate_[around[k]] == unclaimed) {
-                const std::int64_t step = (distances[k] * rough[around[k]]) / growth[plate];
+                const std::int64_t step =
+                    (grid_.distance(index, k) * rough[around[k]]) / growth[plate];
                 frontier.emplace(cost + step, around[k], plate);
             }
         }
@@ -279,11 +279,10 @@ void Plates::find_boundaries() {
         boundaries_[index] = boundaries_[from];
         boundaries_[index].distance = distance;
         const auto around = grid_.neighbors(index);
-        const auto distances = grid_.distances(index);
         for (std::size_t k = 0; k < around.size(); ++k) {
             // Each plate's ground measures to its own edge.
             if (!reached[around[k]] && plate_[around[k]] == plate_[index]) {
-                frontier.emplace(distance + distances[k], around[k], from);
+                frontier.emplace(distance + grid_.distance(index, k), around[k], from);
             }
         }
     }

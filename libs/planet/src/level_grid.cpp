@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
+#include <utility>
 
 namespace hog::planet {
 
@@ -53,7 +54,8 @@ LevelGrid::LevelGrid(int level, double radius)
     }
     first_.reserve(count + 1);
     around_.reserve(std::size_t{count} * 8);
-    distances_.reserve(std::size_t{count} * 8);
+    std::vector<std::int64_t> distances;
+    distances.reserve(std::size_t{count} * 8);
     for (std::uint32_t index = 0; index < count; ++index) {
         first_.push_back(static_cast<std::uint32_t>(around_.size()));
         const VertexNeighbors near = vertex_neighbors(cell(index));
@@ -62,21 +64,46 @@ LevelGrid::LevelGrid(int level, double radius)
             around_.push_back(there);
             // Chords, not arcs: no trigonometry, and the difference at these sizes is tiny.
             const double chord = glm::length(centers[there] - centers[index]) * radius;
-            distances_.push_back(std::llround(chord * static_cast<double>(fixed_one)));
+            distances.push_back(std::llround(chord * static_cast<double>(fixed_one)));
         }
     }
     first_.push_back(static_cast<std::uint32_t>(around_.size()));
+    const std::int64_t longest = std::ranges::max(distances);
+    while (!std::in_range<std::uint32_t>(longest >> distance_shift_)) {
+        ++distance_shift_;
+    }
+    distances_.reserve(distances.size());
+    for (const std::int64_t distance : distances) {
+        distances_.push_back(static_cast<std::uint32_t>(distance >> distance_shift_));
+    }
 
-    quadrants_.resize(count);
     for (std::uint32_t index = 0; index < count; ++index) {
+        const std::uint32_t on_face = index % (side_ * side_);
+        const std::uint32_t i = on_face % side_;
+        const std::uint32_t j = on_face / side_;
+        if (i != 0 && j != 0 && i + 1 != side_ && j + 1 != side_) {
+            continue;
+        }
         const auto edges = edge_neighbors(cell(index));
+        std::array<Quadrant, 4> around{};
         for (std::size_t quadrant = 0; quadrant < 4; ++quadrant) {
             const std::uint32_t along_u = this->index(edges[quadrant % 2]);
             const std::uint32_t along_v = this->index(edges[2 + (quadrant / 2)]);
-            quadrants_[index][quadrant] = {along_u, along_v,
-                                           between(*this, index, along_u, along_v)};
+            around.at(quadrant) = {along_u, along_v, between(*this, index, along_u, along_v)};
         }
+        edge_cells_.push_back(index);
+        edge_quadrants_.push_back(around);
     }
+}
+
+LevelGrid::Quadrant LevelGrid::quadrant(std::uint32_t here, std::size_t quadrant) const {
+    const auto edge = std::ranges::lower_bound(edge_cells_, here);
+    if (edge != edge_cells_.end() && *edge == here) {
+        return edge_quadrants_[static_cast<std::size_t>(edge - edge_cells_.begin())].at(quadrant);
+    }
+    const std::uint32_t along_u = quadrant % 2 == 0 ? here - 1 : here + 1;
+    const std::uint32_t across = quadrant / 2 == 0 ? here - side_ : here + side_;
+    return {along_u, across, along_u + across - here};
 }
 
 CellId LevelGrid::cell(std::uint32_t index) const {
@@ -109,7 +136,7 @@ LevelGrid::Blend LevelGrid::blend(CellId cell) const {
     const std::int64_t dv = v - centre(coarse_j, level);
 
     const std::uint32_t here = index(CellId::from_face_ij(at.face, coarse_i, coarse_j, level));
-    const Quadrant& around = quadrants_[here][(du < 0 ? 0U : 1U) + (dv < 0 ? 0U : 2U)];
+    const Quadrant around = quadrant(here, (du < 0 ? 0U : 1U) + (dv < 0 ? 0U : 2U));
     return {.cells = {here, around[0], around[1], around[2]},
             .along_u = (std::abs(du) << fixed_fraction_bits) >> shift,
             .along_v = (std::abs(dv) << fixed_fraction_bits) >> shift};

@@ -101,12 +101,12 @@ std::vector<bool> flood(const LevelGrid& grid, std::span<const std::int64_t> hei
 std::uint32_t steepest(const LevelGrid& grid, std::span<const std::int64_t> surface,
                        std::uint32_t cell) {
     const auto around = grid.neighbors(cell);
-    const auto distances = grid.distances(cell);
     std::uint32_t best = cell;
     double best_slope = 0.0;
     for (std::size_t k = 0; k < around.size(); ++k) {
         const std::int64_t drop = surface[cell] - surface[around[k]];
-        const double slope = static_cast<double>(drop) / static_cast<double>(distances[k]);
+        const double slope =
+            static_cast<double>(drop) / static_cast<double>(grid.distance(cell, k));
         if (drop > 0 && slope > best_slope) {
             best_slope = slope;
             best = around[k];

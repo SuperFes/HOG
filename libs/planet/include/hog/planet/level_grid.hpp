@@ -3,6 +3,7 @@
 #include <hog/planet/cell_id.hpp>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <vector>
@@ -32,9 +33,10 @@ public:
     [[nodiscard]] std::span<const std::uint32_t> neighbors(std::uint32_t index) const {
         return std::span{around_}.subspan(first_[index], first_[index + 1] - first_[index]);
     }
-    // Fixed-point metres between the centres, in the order of `neighbors`.
-    [[nodiscard]] std::span<const std::int64_t> distances(std::uint32_t index) const {
-        return std::span{distances_}.subspan(first_[index], first_[index + 1] - first_[index]);
+    // Fixed-point metres between the centres of a cell and its `k`th neighbour; exact for cells
+    // under 46 km across, to within a few millimetres beyond.
+    [[nodiscard]] std::int64_t distance(std::uint32_t index, std::size_t k) const {
+        return std::int64_t{distances_[first_[index] + k]} << distance_shift_;
     }
 
     // Square metres.
@@ -55,18 +57,24 @@ private:
     };
     [[nodiscard]] Blend blend(CellId cell) const;
 
-    // Grid cells around each one, by quadrant: the neighbour along u, along v and between the
-    // two, for -u-v, +u-v, -u+v and +u+v. At a cube corner there is none between, and the third
-    // is the cell itself.
+    // Grid cells around one, by quadrant: the neighbour along u, along v and between the two,
+    // for -u-v, +u-v, -u+v and +u+v. At a cube corner there is none between, and the third is
+    // the cell itself.
     using Quadrant = std::array<std::uint32_t, 3>;
+    [[nodiscard]] Quadrant quadrant(std::uint32_t here, std::size_t quadrant) const;
 
     int level_;
     std::uint32_t side_;
     std::vector<std::uint32_t> first_;
     std::vector<std::uint32_t> around_;
-    std::vector<std::int64_t> distances_;
+    // Kept in 32 bits, shifted down as far as the largest needs.
+    std::vector<std::uint32_t> distances_;
+    int distance_shift_ = 0;
     std::vector<std::int64_t> areas_;
-    std::vector<std::array<Quadrant, 4>> quadrants_;
+    // Inside a face the cells around one are next to it in the numbering; only those of cells
+    // on a face's edge, ordered by index, are kept.
+    std::vector<std::uint32_t> edge_cells_;
+    std::vector<std::array<Quadrant, 4>> edge_quadrants_;
 };
 
 } // namespace hog::planet

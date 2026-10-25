@@ -1,5 +1,6 @@
 #include <hog/core/hash.hpp>
 #include <hog/planet/level_grid.hpp>
+#include <hog/planet/neighbors.hpp>
 #include <hog/planet/noise.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -49,12 +50,26 @@ TEST_CASE("level grid distances are the same both ways, about a cell apart",
     const double edge = 2.0 * std::numbers::pi * radius / (4.0 * 32.0);
     for (std::uint32_t index = 0; index < grid.size(); ++index) {
         const auto around = grid.neighbors(index);
-        const auto distances = grid.distances(index);
         for (std::size_t k = 0; k < around.size(); ++k) {
             const auto back = grid.neighbors(around[k]);
             const auto at = std::ranges::find(back, index) - back.begin();
-            REQUIRE(grid.distances(around[k])[static_cast<std::size_t>(at)] == distances[k]);
-            const double metres = hog::planet::fixed_to_double(distances[k]);
+            REQUIRE(grid.distance(around[k], static_cast<std::size_t>(at)) ==
+                    grid.distance(index, k));
+            const double metres = hog::planet::fixed_to_double(grid.distance(index, k));
+            REQUIRE(metres > 0.5 * edge);
+            REQUIRE(metres < 2.0 * edge);
+        }
+    }
+}
+
+TEST_CASE("level grid distances hold for cells of any size", "[planet][level_grid]") {
+    // A face's cells on an Earth-sized planet, thousands of kilometres apart.
+    const double earth = 6'371'000.0;
+    const LevelGrid grid{1, earth};
+    const double edge = 2.0 * std::numbers::pi * earth / 8.0;
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        for (std::size_t k = 0; k < grid.neighbors(index).size(); ++k) {
+            const double metres = hog::planet::fixed_to_double(grid.distance(index, k));
             REQUIRE(metres > 0.5 * edge);
             REQUIRE(metres < 2.0 * edge);
         }
@@ -112,6 +127,14 @@ TEST_CASE("a sample blends only the four grid cells around a point", "[planet][l
             }
             const auto corners = grid.corners(inside);
             REQUIRE(corners[0] == index);
+            // Along u and v from the cell, whether inside a face or across its edge.
+            const auto edges = hog::planet::edge_neighbors(cell);
+            // Which side of the cell's centre the point lies on, along u and along v.
+            const auto leaf = inside.to_face_ij();
+            const int below = leaf.level - cell.level() - 1;
+            const std::size_t quadrant = ((leaf.i >> below) & 1U) + (2 * ((leaf.j >> below) & 1U));
+            REQUIRE(grid.cell(corners[1]) == edges.at(quadrant % 2));
+            REQUIRE(grid.cell(corners[2]) == edges.at(2 + (quadrant / 2)));
             // Each corner touches every other, so a blend never reaches past its neighbours.
             for (const std::uint32_t corner : corners) {
                 for (const std::uint32_t other : corners) {
