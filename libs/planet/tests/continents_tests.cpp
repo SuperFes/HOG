@@ -177,7 +177,7 @@ TEST_CASE("continents ride on the plates whose crust rises", "[planet][continent
             if (plates.plate()[index] == plate &&
                 plates.boundaries()[index].distance > 30'000 * hog::planet::fixed_one) {
                 ++inside;
-                land += found.is_land(plates.grid().cell(index)) ? 1 : 0;
+                land += found.is_land(plates.grid().cell(index)) ? 1U : 0U;
             }
         }
         return static_cast<double>(land) / static_cast<double>(std::max<std::size_t>(inside, 1));
