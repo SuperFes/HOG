@@ -81,7 +81,10 @@ template <int Bits = fixed_fraction_bits>
 } // namespace
 
 Elevation::Elevation(const PlanetConfig& config)
-    : continents_{config.seed, config.ocean_fraction},
+    : continents_{config.seed, config.ocean_fraction,
+                  std::make_shared<const Plates>(config.seed,
+                                                 LevelGrid{Plates::level, config.radius},
+                                                 config.radius, config.plates)},
       archipelago_{config.seed, config.radius, continents_},
       belt_seed_{hash_combine(config.seed, belt_salt)},
       ridge_seed_{hash_combine(config.seed, ridge_salt)},
@@ -105,12 +108,12 @@ const Elevation::Evolved& Elevation::evolved() const {
 
 std::shared_ptr<const Elevation::Evolved> Elevation::evolve(const PlanetConfig& config) const {
     // Evolving takes a while, so it's shared while any Elevation of the same planet lives.
-    using Key = std::tuple<std::uint64_t, std::uint64_t, std::uint64_t, std::uint64_t>;
+    using Key = std::tuple<std::uint64_t, std::uint64_t, std::uint64_t, std::uint64_t, int>;
     static std::mutex mutex;
     static std::map<Key, std::weak_ptr<const Evolved>> evolved;
     const Key key{config.seed, std::bit_cast<std::uint64_t>(config.radius),
                   std::bit_cast<std::uint64_t>(config.ocean_fraction),
-                  std::bit_cast<std::uint64_t>(config.river_scale)};
+                  std::bit_cast<std::uint64_t>(config.river_scale), config.plates};
     const std::scoped_lock lock{mutex};
     if (auto shared = evolved[key].lock()) {
         return shared;

@@ -320,6 +320,10 @@ TEST_CASE("glaciers cap high ground that stays cold", "[planet][climate]") {
             continue;
         }
         const Biome biome = climate.biome(cell);
+        // A tarn lies among the peaks unfrozen.
+        if (biome == Biome::Lake) {
+            continue;
+        }
         REQUIRE((biome == Biome::Ice || biome == Biome::Alpine));
         const bool cold = climate.temperature(cell) < celsius(-4);
         REQUIRE((biome == Biome::Ice) == cold);

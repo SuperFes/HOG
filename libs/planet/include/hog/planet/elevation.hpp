@@ -27,6 +27,7 @@ public:
 
     explicit Elevation(const PlanetConfig& config);
 
+    [[nodiscard]] const Plates& plates() const noexcept { return continents_.plates(); }
     [[nodiscard]] const Continents& continents() const noexcept { return continents_; }
     [[nodiscard]] const Archipelago& archipelago() const noexcept { return archipelago_; }
 

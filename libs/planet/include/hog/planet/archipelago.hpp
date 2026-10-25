@@ -21,9 +21,11 @@ public:
     static constexpr double max_target_area = 45e6;
     // Longest over shortest width of an undisturbed coast, which is an ellipse.
     static constexpr double max_elongation = 2.5;
-    // Metres of water between an island and its closest neighbour when placed.
+    // Metres of water between an island and its closest neighbour when placed. The coastline
+    // noise can pull two facing coasts back by nearly 5 km between them, and the islands must stay
+    // within 8 km, a short crossing.
     static constexpr double min_gap = 1'500.0;
-    static constexpr double max_gap = 6'000.0;
+    static constexpr double max_gap = 3'000.0;
     // Metres from the centre that every island stays within.
     static constexpr double reach = 25'000.0;
     // Metres around the centre that must be open ocean.

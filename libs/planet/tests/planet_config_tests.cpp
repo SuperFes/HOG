@@ -68,6 +68,15 @@ TEST_CASE("a config scales the rivers", "[planet][config]") {
     CHECK(config->river_scale == 3.0);
 }
 
+TEST_CASE("a config breaks the crust into plates", "[planet][config]") {
+    const auto plain = parse_planet_config("[planet]\nseed = 0\nradius_km = 1\n");
+    REQUIRE(plain.has_value());
+    CHECK(plain->plates == 10);
+    const auto config = parse_planet_config("[planet]\nseed = 0\nradius_km = 1\nplates = 24\n");
+    REQUIRE(config.has_value());
+    CHECK(config->plates == 24);
+}
+
 TEST_CASE("the shipped development config is the 500k planet", "[planet][config]") {
     const auto config = hog::planet::load_planet_config(HOG_SOURCE_DIR "/config/planet.toml");
     REQUIRE(config.has_value());
@@ -114,7 +123,12 @@ TEST_CASE("bad configs are rejected with a reason", "[planet][config]") {
         Case{"[planet]\nseed = 1\nradius_km = 5\nriver_scale = 21", ErrorCode::InvalidArgument,
              "river_scale"},
         Case{"[planet]\nseed = 1\nradius_km = 5\nriver_scale = nan", ErrorCode::InvalidArgument,
-             "river_scale"});
+             "river_scale"},
+        Case{"[planet]\nseed = 1\nradius_km = 5\nplates = 1", ErrorCode::InvalidArgument, "plates"},
+        Case{"[planet]\nseed = 1\nradius_km = 5\nplates = 65", ErrorCode::InvalidArgument,
+             "plates"},
+        Case{"[planet]\nseed = 1\nradius_km = 5\nplates = 2.5", ErrorCode::InvalidArgument,
+             "plates"});
 
     const auto config = parse_planet_config(bad.toml);
     INFO(bad.toml);
@@ -154,6 +168,9 @@ TEST_CASE("a world's id follows what shapes its ground", "[planet][config]") {
     CHECK(hog::planet::world_id(other) != id);
     other = base;
     other.river_scale = 2.0;
+    CHECK(hog::planet::world_id(other) != id);
+    other = base;
+    other.plates = 11;
     CHECK(hog::planet::world_id(other) != id);
 
     other = base;

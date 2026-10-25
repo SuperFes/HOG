@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -151,4 +152,33 @@ TEST_CASE("plates turning about the line between them slide past each other", "[
     const auto [rate, slide] = mean(sliding);
     CHECK(std::abs(rate) < 0.5 * speed);
     CHECK(slide > 1.5 * speed);
+}
+
+TEST_CASE("continental plates touch one other at most", "[plates]") {
+    const Plates& plates = random_plates();
+    const auto continental = [&](std::uint32_t plate) {
+        return plates.plates()[plate].continental > 0.0;
+    };
+    std::set<std::pair<std::uint32_t, std::uint32_t>> touching;
+    for (std::uint32_t index = 0; index < plates.grid().size(); ++index) {
+        const auto own = plates.plate()[index];
+        for (const std::uint32_t neighbor : plates.grid().neighbors(index)) {
+            const auto other = plates.plate()[neighbor];
+            if (own != other && continental(own) && continental(other)) {
+                touching.emplace(own, other);
+            }
+        }
+    }
+    std::size_t continents = 0;
+    for (std::uint32_t plate = 0; plate < plates.plates().size(); ++plate) {
+        if (!continental(plate)) {
+            continue;
+        }
+        ++continents;
+        const auto beside =
+            std::ranges::count_if(touching, [&](const auto& pair) { return pair.first == plate; });
+        CHECK(beside <= 1);
+    }
+    CHECK(continents >= 2);
+    CHECK(continents < plates.plates().size());
 }

@@ -42,14 +42,13 @@ std::int64_t noise_layer(CellId cell) {
     return hog::planet::fbm(seed, hog::planet::noise_point(hog::planet::cell_center(cell), 4.0), 8);
 }
 
-std::int64_t continents_layer(CellId cell) {
-    static const hog::planet::Continents continents{seed, 0.7};
-    return continents.height(cell);
-}
-
 const hog::planet::Elevation& terrain() {
     static const hog::planet::Elevation terrain{planet};
     return terrain;
+}
+
+std::int64_t continents_layer(CellId cell) {
+    return terrain().continents().height(cell);
 }
 
 std::int64_t elevation_layer(CellId cell) {

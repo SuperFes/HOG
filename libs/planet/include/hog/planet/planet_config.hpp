@@ -26,6 +26,8 @@ struct PlanetConfig {
     double radius = 0.0; // metres
     // Multiplies the width and depth rivers would have on Earth for the water they carry.
     double river_scale = 1.0;
+    // How many plates the crust is broken into.
+    int plates = 10;
     // One turn of day and night, in real time; the year is Earth's.
     GameDuration day_length = std::chrono::hours{4};
     double axial_tilt = 23.44; // degrees
@@ -45,6 +47,7 @@ struct PlanetConfig {
 //     settled_density = 30.0    # optional, with population
 //     wilderness_factor = 3.0   # optional, with population
 //     river_scale = 1.0         # optional, above 0 and at most 20
+//     plates = 10               # optional, 2 to 64
 //     day_hours = 4.0           # optional
 //     axial_tilt = 23.44        # optional, degrees
 //

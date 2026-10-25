@@ -24,6 +24,7 @@ namespace {
 constexpr std::uint64_t origin_salt = 0x6F72'6967'696E'0000ULL; // "origin"
 constexpr std::uint64_t spin_salt = 0x7370'696E'0000'0000ULL;   // "spin"
 constexpr std::uint64_t growth_salt = 0x6772'6F77'7468'0000ULL; // "growth"
+constexpr std::uint64_t crust_salt = 0x6372'7573'7400'0000ULL;  // "crust"
 constexpr std::uint64_t rough_salt = 0x726F'7567'6800'0000ULL;  // "rough"
 
 // Earth's plates move 2 to 8 cm a year.
@@ -151,7 +152,9 @@ constexpr auto inland = std::numeric_limits<std::uint32_t>::max();
 } // namespace
 
 Plates::Plates(std::uint64_t seed, LevelGrid grid, double radius, int count)
-    : Plates{seed, std::move(grid), radius, random_plates(seed, radius, count)} {}
+    : Plates{seed, std::move(grid), radius, random_plates(seed, radius, count)} {
+    choose_crust(seed);
+}
 
 Plates::Plates(std::uint64_t seed, LevelGrid grid, double radius, std::vector<Plate> plates)
     : grid_{std::move(grid)}, radius_{radius}, plates_{std::move(plates)}, plate_(grid_.size(), 0),
@@ -159,6 +162,46 @@ Plates::Plates(std::uint64_t seed, LevelGrid grid, double radius, std::vector<Pl
     HOG_ASSERT(plates_.size() >= 2 && plates_.size() <= max_count, "plate count out of range");
     grow(seed);
     find_boundaries();
+}
+
+void Plates::choose_crust(std::uint64_t seed) {
+    const std::size_t count = plates_.size();
+    std::vector<bool> touching(count * count, false);
+    for (std::uint32_t index = 0; index < grid_.size(); ++index) {
+        for (const std::uint32_t neighbor : grid_.neighbors(index)) {
+            touching[(plate_[index] * count) + plate_[neighbor]] = true;
+        }
+    }
+    std::vector<std::uint32_t> order(count);
+    for (std::uint32_t plate = 0; plate < count; ++plate) {
+        order[plate] = plate;
+    }
+    std::ranges::sort(order, {},
+                      [&](std::uint32_t plate) { return hash_values(seed, crust_salt, plate); });
+    // Continents join in pairs at most, so plates collide but the land never gathers into one.
+    constexpr auto alone = std::numeric_limits<std::uint32_t>::max();
+    std::vector<bool> continental(count, false);
+    std::vector<std::uint32_t> partner(count, alone);
+    for (const std::uint32_t plate : order) {
+        std::vector<std::uint32_t> beside;
+        for (std::uint32_t other = 0; other < count; ++other) {
+            if (other != plate && continental[other] && touching[(plate * count) + other]) {
+                beside.push_back(other);
+            }
+        }
+        if (beside.size() > 1 || (beside.size() == 1 && partner[beside[0]] != alone)) {
+            continue;
+        }
+        continental[plate] = true;
+        if (beside.size() == 1) {
+            partner[plate] = beside[0];
+            partner[beside[0]] = plate;
+        }
+    }
+    for (std::uint32_t plate = 0; plate < count; ++plate) {
+        const double strength = 0.4 + (0.6 * unit(hash_values(seed, crust_salt, plate, 1U)));
+        plates_[plate].continental = continental[plate] ? strength : -strength;
+    }
 }
 
 DVec3 Plates::velocity(std::uint32_t plate, DVec3 at) const {

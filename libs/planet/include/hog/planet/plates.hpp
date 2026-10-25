@@ -14,6 +14,8 @@ namespace hog::planet {
 class Plates {
 public:
     static constexpr int max_count = 64;
+    // The level of the grid plates grow on for a planet.
+    static constexpr int level = 6;
 
     struct Plate {
         DVec3 origin; // unit direction it grew from
@@ -22,6 +24,8 @@ public:
         DVec3 spin;
         // How readily it spreads as the plates grow; larger plates spread more readily.
         double growth = 1.0;
+        // How far its crust rises towards continent, from -1 for the ocean floor to 1.
+        double continental = 0.0;
     };
 
     // The nearest boundary to a grid cell, and how the plates move across it.
@@ -34,12 +38,14 @@ public:
         double sliding = 0.0;
     };
 
-    // Precondition: 2 <= count <= max_count, and `radius` is the grid's.
+    // Precondition: 2 <= count <= max_count, and `radius` is the grid's. Some of the plates
+    // carry continental crust, no more than two of them touching.
     Plates(std::uint64_t seed, LevelGrid grid, double radius, int count);
     // The given plates, grown over the grid.
     Plates(std::uint64_t seed, LevelGrid grid, double radius, std::vector<Plate> plates);
 
     [[nodiscard]] const LevelGrid& grid() const noexcept { return grid_; }
+    [[nodiscard]] double radius() const noexcept { return radius_; }
     [[nodiscard]] std::span<const Plate> plates() const noexcept { return plates_; }
     // The plate under each grid cell.
     [[nodiscard]] std::span<const std::uint32_t> plate() const noexcept { return plate_; }
@@ -50,6 +56,7 @@ public:
 
 private:
     void grow(std::uint64_t seed);
+    void choose_crust(std::uint64_t seed);
     void find_boundaries();
 
     LevelGrid grid_;

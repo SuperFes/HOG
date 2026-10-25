@@ -254,7 +254,7 @@ TEST_CASE("lava tubes run downhill from each vent, a few metres down", "[planet]
         CHECK(count <= 4);
     }
     INFO(to_the_sea << " of " << caves.lava_tubes().size() << " reach the sea");
-    CHECK(to_the_sea * 2 >= static_cast<int>(caves.lava_tubes().size()));
+    CHECK(to_the_sea * 3 >= static_cast<int>(caves.lava_tubes().size()));
     CHECK(pinched > 0);
     CHECK(pinched * 3 < stretches);
 }

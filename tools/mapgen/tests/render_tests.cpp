@@ -269,7 +269,13 @@ TEST_CASE("rendering doesn't depend on the thread count", "[mapgen]") {
     CHECK(single.height == 32);
     CHECK(single.pixels.size() == std::size_t{64} * 32 * 3);
     // A world of ocean and land both.
-    CHECK(single.at(0, 0) != single.at(40, 16));
+    std::set<hog::mapgen::Rgb> colours;
+    for (int y = 0; y < single.height; ++y) {
+        for (int x = 0; x < single.width; ++x) {
+            colours.insert(single.at(x, y));
+        }
+    }
+    CHECK(colours.size() > 20);
     hog::jobs::JobSystem many{4};
     CHECK(
         hog::mapgen::render(geology, radius, View{PlanetView{}}, Layer::Height, 64, many).pixels ==

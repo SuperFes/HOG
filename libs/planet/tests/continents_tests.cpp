@@ -14,14 +14,24 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <numeric>
 #include <random>
 #include <vector>
 
 using hog::planet::CellId;
 using hog::planet::Continents;
+using hog::planet::Plates;
 
 namespace {
+
+constexpr double radius = 115'000.0;
+
+Continents on_plates(std::uint64_t seed, double ocean_fraction) {
+    return Continents{seed, ocean_fraction,
+                      std::make_shared<const Plates>(
+                          seed, hog::planet::LevelGrid{Plates::level, radius}, radius, 10)};
+}
 
 std::vector<CellId> cells_at(int level) {
     std::vector<CellId> cells;
@@ -101,20 +111,20 @@ std::size_t total(const std::vector<std::size_t>& sizes) {
 TEST_CASE("the ocean covers the target fraction of the surface", "[planet][continents]") {
     const std::uint64_t seed = GENERATE(1U, 2U, 3U, 4U);
     const double ocean_fraction = GENERATE(0.3, 0.7);
-    const Continents continents{seed, ocean_fraction};
+    const Continents continents = on_plates(seed, ocean_fraction);
     CHECK(std::abs(ocean_area_fraction(continents, Continents::survey_level) - ocean_fraction) <
           0.02);
 }
 
 TEST_CASE("a planet without ocean is all land", "[planet][continents]") {
-    const Continents continents{1, 0.0};
+    const Continents continents = on_plates(1, 0.0);
     CHECK(std::ranges::all_of(cells_at(Continents::survey_level),
                               [&](CellId cell) { return continents.is_land(cell); }));
 }
 
 TEST_CASE("land forms several continents around one world ocean", "[planet][continents]") {
     const std::uint64_t seed = GENERATE(1U, 2U, 3U, 4U);
-    const Regions found = regions(Continents{seed, 0.7}, Continents::survey_level);
+    const Regions found = regions(on_plates(seed, 0.7), Continents::survey_level);
     const std::size_t land = total(found.land);
     REQUIRE(found.land.size() >= 2);
     CHECK(found.land[0] < land * 9 / 10);
@@ -123,7 +133,7 @@ TEST_CASE("land forms several continents around one world ocean", "[planet][cont
 }
 
 TEST_CASE("continent heights change smoothly between neighbours", "[planet][continents]") {
-    const Continents continents{1, 0.7};
+    const Continents continents = on_plates(1, 0.7);
     std::mt19937_64 rng{7};
     std::uniform_int_distribution<std::uint32_t> coordinate{0, (1U << 12U) - 1};
     std::uniform_int_distribution<int> face{0, hog::planet::face_count - 1};
@@ -140,19 +150,46 @@ TEST_CASE("continent heights change smoothly between neighbours", "[planet][cont
 
 TEST_CASE("continents depend on the seed", "[planet][continents]") {
     const CellId cell = CellId::from_face_ij(2, 100, 200, 10);
-    const Continents first{1, 0.7};
-    CHECK(Continents{1, 0.7}.sea_level() == first.sea_level());
-    CHECK(Continents{1, 0.7}.height(cell) == first.height(cell));
-    CHECK(Continents{2, 0.7}.height(cell) != first.height(cell));
+    const Continents first = on_plates(1, 0.7);
+    CHECK(on_plates(1, 0.7).sea_level() == first.sea_level());
+    CHECK(on_plates(1, 0.7).height(cell) == first.height(cell));
+    CHECK(on_plates(2, 0.7).height(cell) != first.height(cell));
     // Salted, so not the planet seed's plain noise.
     CHECK(first.field(cell) !=
           hog::planet::fbm(1, hog::planet::noise_point(hog::planet::cell_center(cell), 1.5), 6));
 }
 
+TEST_CASE("continents ride on the plates whose crust rises", "[planet][continents]") {
+    const std::uint64_t seed = GENERATE(1U, 2U, 3U);
+    const Continents found = on_plates(seed, 0.7);
+    const Plates& plates = found.plates();
+    const auto by_crust = [&](std::uint32_t plate) { return plates.plates()[plate].continental; };
+    std::vector<std::uint32_t> order;
+    for (std::uint32_t plate = 0; plate < plates.plates().size(); ++plate) {
+        order.push_back(plate);
+    }
+    std::ranges::sort(order, {}, by_crust);
+    // Land over each plate's ground well inside its boundaries.
+    const auto land_on = [&](std::uint32_t plate) {
+        std::size_t land = 0;
+        std::size_t inside = 0;
+        for (std::uint32_t index = 0; index < plates.grid().size(); ++index) {
+            if (plates.plate()[index] == plate &&
+                plates.boundaries()[index].distance > 30'000 * hog::planet::fixed_one) {
+                ++inside;
+                land += found.is_land(plates.grid().cell(index)) ? 1 : 0;
+            }
+        }
+        return static_cast<double>(land) / static_cast<double>(std::max<std::size_t>(inside, 1));
+    };
+    CHECK(land_on(order.back()) > 0.6);
+    CHECK(land_on(order.front()) < 0.1);
+}
+
 TEST_CASE("continent preconditions", "[planet][continents]") {
     const hog::testing::AssertionGuard guard;
     using hog::testing::AssertionFailed;
-    CHECK_THROWS_AS(Continents(1, -0.1), AssertionFailed);
-    CHECK_THROWS_AS(Continents(1, 1.0), AssertionFailed);
-    CHECK_THROWS_AS(Continents(1, std::numeric_limits<double>::quiet_NaN()), AssertionFailed);
+    CHECK_THROWS_AS(on_plates(1, -0.1), AssertionFailed);
+    CHECK_THROWS_AS(on_plates(1, 1.0), AssertionFailed);
+    CHECK_THROWS_AS(on_plates(1, std::numeric_limits<double>::quiet_NaN()), AssertionFailed);
 }

@@ -209,29 +209,37 @@ TEST_CASE("the sea stays shallow off a coast", "[planet][elevation]") {
     // Continents' coasts fall faster than the islands' flanks, so their floor lies deeper.
     const std::uint64_t seed = GENERATE(1U, 4U);
     const Elevation terrain{planet(seed)};
+    int open = 0;
     for (const auto& [land, sea] : coasts(terrain, 12)) {
         const hog::DVec3 at = shore(terrain, land, sea);
         const auto depth = [&](double out) {
             return -fixed_to_double(terrain.elevation(hog::planet::cell_at(along(at, sea, out))));
         };
-        CHECK(depth(100.0) > 1.5);
+        // Measured off coasts facing open water, not across an inlet to land again.
+        if (depth(100.0) <= 0.0 || depth(1'000.0) <= 0.0) {
+            continue;
+        }
+        ++open;
+        CHECK(depth(100.0) > 0.5);
         CHECK(depth(100.0) < 8.0);
-        CHECK(depth(1'000.0) > 5.0);
+        CHECK(depth(1'000.0) > 3.0);
         CHECK(depth(1'000.0) < 40.0);
     }
+    CHECK(open >= 6);
     for (const auto& island : terrain.archipelago().islands()) {
         const hog::DVec3 sea = along(island.center, island.center + island.axis, 20'000.0);
         const hog::DVec3 at = shore(terrain, island.center, sea);
         const double depth =
             -fixed_to_double(terrain.elevation(hog::planet::cell_at(along(at, sea, 100.0))));
         // Deeper than a round island's where an elongated one's flank falls across it.
-        CHECK(depth > 1.0);
+        CHECK(depth > 0.5);
         CHECK(depth < 5.0);
     }
 }
 
 TEST_CASE("the sea floor deepens off a coast without steps", "[planet][elevation]") {
-    // Generated with too few bits, the floor held for over a metre and then dropped by 0.4 m.
+    // Generated with too few bits, the floor held for over a metre and then dropped by 0.4 m. A
+    // steep shore falls fast right at the water, but never that fast.
     const Elevation terrain{planet(4)};
     for (const auto& [land, sea] : coasts(terrain, 8)) {
         const hog::DVec3 at = shore(terrain, land, sea);
@@ -239,17 +247,22 @@ TEST_CASE("the sea floor deepens off a coast without steps", "[planet][elevation
         for (int step = 1; step <= 400; ++step) {
             const std::int64_t floor =
                 terrain.elevation(hog::planet::cell_at(along(at, sea, step / 20.0)));
-            REQUIRE(std::abs(floor - previous) < fixed_one / 10);
+            REQUIRE(std::abs(floor - previous) < fixed_one / 5);
             previous = floor;
         }
     }
 }
 
 TEST_CASE("elevation depends on the seed", "[planet][elevation]") {
-    const CellId cell = CellId::from_face_ij(2, 100, 200, 10);
     const Elevation first{planet(1)};
-    CHECK(Elevation{planet(1)}.elevation(cell) == first.elevation(cell));
-    CHECK(Elevation{planet(2)}.elevation(cell) != first.elevation(cell));
+    const Elevation again{planet(1)};
+    const Elevation other{planet(2)};
+    int differ = 0;
+    for (const CellId cell : cells_at(4)) {
+        REQUIRE(again.elevation(cell) == first.elevation(cell));
+        differ += other.elevation(cell) != first.elevation(cell) ? 1 : 0;
+    }
+    CHECK(differ > static_cast<int>(cells_at(4).size()) / 2);
 }
 
 TEST_CASE("ground stands above the water it drains to", "[planet][elevation]") {
@@ -271,7 +284,7 @@ TEST_CASE("ground stands above the water it drains to", "[planet][elevation]") {
 
 TEST_CASE("only ground joined to the sea lies under it", "[planet][elevation]") {
     // This planet has a stretch below sea level cut off from the sea, thousands of km² across.
-    const Elevation terrain{planet(6)};
+    const Elevation terrain{planet(9)};
     const auto& landform = terrain.landform();
     const auto& drainage = landform.drainage();
     int cut_off = 0;

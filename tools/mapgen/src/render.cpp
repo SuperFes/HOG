@@ -11,7 +11,6 @@
 #include <format>
 #include <fstream>
 #include <numbers>
-#include <optional>
 #include <span>
 
 namespace hog::mapgen {
@@ -122,9 +121,6 @@ constexpr std::array<Rgb, planet::rock_count> rock_colours{{
     {240, 90, 20},   // magma
 }};
 
-// Until plates shape the ground, they are grown here as the planet would grow them.
-constexpr int plate_level = 7;
-constexpr int plate_count = 10;
 // Metres per million years at which a boundary shows in its full colour.
 constexpr double vivid_rate = 40'000.0;
 constexpr Rgb closing_colour{220, 40, 30};
@@ -287,11 +283,6 @@ Image render(const planet::Geology& geology, double planet_radius, const View& v
                planet_radius;
     };
     const planet::Elevation& terrain = geology.terrain();
-    std::optional<planet::Plates> plates;
-    if (layer == Layer::Plates) {
-        plates.emplace(geology.seed(), planet::LevelGrid{plate_level, planet_radius}, planet_radius,
-                       plate_count);
-    }
     // Rivers are drawn at least a pixel wide, so they show at any scale.
     const auto over_land = [&](Rgb ground, planet::CellId cell, DVec3 at, int x, int y) {
         if (!terrain.is_land(cell)) {
@@ -320,8 +311,9 @@ Image render(const planet::Geology& geology, double planet_radius, const View& v
             return over_land(ground, cell, at, x, y);
         }
         case Layer::Plates: {
-            const auto index = plates->grid().index(cell.parent(plate_level));
-            return plate_colour(plates->plate()[index], plates->boundaries()[index]);
+            const planet::Plates& plates = terrain.plates();
+            const auto index = plates.grid().index(cell.parent(planet::Plates::level));
+            return plate_colour(plates.plate()[index], plates.boundaries()[index]);
         }
         }
         return {};

@@ -2,6 +2,7 @@
 #include <hog/core/hash.hpp>
 #include <hog/core/text_file.hpp>
 #include <hog/planet/planet_config.hpp>
+#include <hog/planet/plates.hpp>
 
 #include <toml++/toml.hpp>
 
@@ -22,7 +23,7 @@ using namespace std::string_view_literals;
 
 constexpr std::array known_keys{
     "seed"sv,      "ocean_fraction"sv, "population"sv, "settled_density"sv, "wilderness_factor"sv,
-    "radius_km"sv, "day_hours"sv,      "axial_tilt"sv, "river_scale"sv};
+    "radius_km"sv, "day_hours"sv,      "axial_tilt"sv, "river_scale"sv,     "plates"sv};
 
 constexpr double min_day_hours = 0.01;
 constexpr double max_day_hours = 24.0 * 366.0;
@@ -58,6 +59,32 @@ constexpr double max_river_scale = 20.0;
 
 [[nodiscard]] bool in_range(double value, double low, double high) {
     return value >= low && value <= high;
+}
+
+[[nodiscard]] Result<void> parse_rivers(const toml::table& planet, PlanetConfig& config) {
+    const auto rivers = optional_number(planet, "river_scale");
+    if (!rivers) {
+        return std::unexpected(rivers.error());
+    }
+    config.river_scale = rivers->value_or(config.river_scale);
+    if (!positive(config.river_scale) || config.river_scale > max_river_scale) {
+        return invalid("planet.river_scale must be above 0 and at most 20");
+    }
+    return {};
+}
+
+[[nodiscard]] Result<void> parse_plates(const toml::table& planet, PlanetConfig& config) {
+    const auto plates = optional_number(planet, "plates");
+    if (!plates) {
+        return std::unexpected(plates.error());
+    }
+    const double count = plates->value_or(config.plates);
+    // Written so NaN fails too.
+    if (count < 2.0 || count > Plates::max_count || count != std::floor(count)) {
+        return invalid("planet.plates must be a whole number from 2 to 64");
+    }
+    config.plates = static_cast<int>(count);
+    return {};
 }
 
 [[nodiscard]] Result<void> parse_calendar(const toml::table& planet, PlanetConfig& config) {
@@ -132,15 +159,12 @@ Result<PlanetConfig> parse_planet_config(std::string_view text) {
         return invalid("planet.ocean_fraction must be at least 0 and below 1");
     }
 
-    const auto rivers = optional_number(*planet, "river_scale");
-    if (!rivers) {
+    if (auto rivers = parse_rivers(*planet, config); !rivers) {
         return std::unexpected(rivers.error());
     }
-    config.river_scale = rivers->value_or(config.river_scale);
-    if (!positive(config.river_scale) || config.river_scale > max_river_scale) {
-        return invalid("planet.river_scale must be above 0 and at most 20");
+    if (auto plates = parse_plates(*planet, config); !plates) {
+        return std::unexpected(plates.error());
     }
-
     if (auto calendar = parse_calendar(*planet, config); !calendar) {
         return std::unexpected(calendar.error());
     }
@@ -195,9 +219,13 @@ Result<PlanetConfig> load_planet_config(const std::filesystem::path& path) {
 std::uint64_t world_id(const PlanetConfig& config) noexcept {
     const std::uint64_t id = hash_values(config.seed, std::bit_cast<std::uint64_t>(config.radius),
                                          std::bit_cast<std::uint64_t>(config.ocean_fraction));
-    return config.river_scale == 1.0
-               ? id
-               : hash_combine(id, std::bit_cast<std::uint64_t>(config.river_scale));
+    const std::uint64_t rivers =
+        config.river_scale == 1.0
+            ? id
+            : hash_combine(id, std::bit_cast<std::uint64_t>(config.river_scale));
+    return config.plates == PlanetConfig{}.plates
+               ? rivers
+               : hash_combine(rivers, static_cast<std::uint64_t>(config.plates));
 }
 
 } // namespace hog::planet

@@ -56,9 +56,10 @@ if(TARGET hog_planet_tests)
     target_compile_definitions(hog_planet_tests PRIVATE HOG_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 endif()
 
-# Landform evolution runs whenever a planet is built; unoptimized it makes every test that builds
-# one take seconds.
+# Plates grow and landforms evolve whenever a planet is built; unoptimized it makes every test that
+# builds one take seconds.
 if(NOT MSVC)
-    set_source_files_properties(src/drainage.cpp src/erosion.cpp src/landform.cpp src/rivers.cpp
+    set_source_files_properties(src/drainage.cpp src/erosion.cpp src/landform.cpp src/plates.cpp
+        src/rivers.cpp
         PROPERTIES COMPILE_OPTIONS "$<$<CONFIG:Debug>:-O2>")
 endif()
