@@ -193,3 +193,73 @@ TEST_CASE("continent preconditions", "[planet][continents]") {
     CHECK_THROWS_AS(on_plates(1, 1.0), AssertionFailed);
     CHECK_THROWS_AS(on_plates(1, std::numeric_limits<double>::quiet_NaN()), AssertionFailed);
 }
+
+namespace {
+
+constexpr double spin = 50'000.0 / radius;
+
+// Two plates grown from opposite sides of the planet, turning about the pole so they close over
+// +y and part over -y, carrying the given crust.
+Continents pair(double east_crust, double west_crust, double turning = spin) {
+    return Continents{
+        1, 0.3,
+        std::make_shared<const Plates>(
+            1, hog::planet::LevelGrid{Plates::level, radius}, radius,
+            std::vector<Plates::Plate>{
+                {.origin = {1.0, 0.0, 0.0}, .spin = {0.0, 0.0, turning}, .continental = east_crust},
+                {.origin = {-1.0, 0.0, 0.0},
+                 .spin = {0.0, 0.0, -turning},
+                 .continental = west_crust}})};
+}
+
+// `metres` east of the boundary over +y or -y, about where the plates meet.
+CellId east_of(double metres, double y) {
+    return hog::planet::cell_at(glm::normalize(hog::DVec3{metres / radius, y, 0.0}));
+}
+
+double mountains(const Continents& continents, CellId cell) {
+    return hog::planet::fixed_to_double(continents.crust(cell).mountains);
+}
+
+} // namespace
+
+TEST_CASE("continents colliding raise a range along where they meet", "[planet][continents]") {
+    const Continents found = pair(0.8, 0.8);
+    CHECK(mountains(found, east_of(0.0, 1.0)) > 0.5);
+    CHECK(mountains(found, hog::planet::cell_at(hog::DVec3{1.0, 0.0, 0.0})) == 0.0);
+}
+
+TEST_CASE("a continent overriding ocean floor raises its range inland", "[planet][continents]") {
+    const Continents found = pair(0.8, -0.8);
+    // Averaged along the boundary, which wanders.
+    const auto across = [&](double metres) {
+        double sum = 0.0;
+        for (int along = -10; along <= 10; ++along) {
+            const double z = along * 2'000.0 / radius;
+            sum += mountains(
+                found, hog::planet::cell_at(glm::normalize(hog::DVec3{metres / radius, 1.0, z})));
+        }
+        return sum / 21.0;
+    };
+    double peak = 0.0;
+    double highest = 0.0;
+    for (int step = -20; step <= 30; ++step) {
+        const double metres = step * 2'000.0;
+        if (across(metres) > highest) {
+            highest = across(metres);
+            peak = metres;
+        }
+    }
+    CHECK(highest > 0.3);
+    CHECK(peak > 5'000.0);
+    CHECK(across(-30'000.0) < 0.01);
+}
+
+TEST_CASE("continents parting sink into a rift", "[planet][continents]") {
+    const Continents parting = pair(0.8, 0.8);
+    const Continents still = pair(0.8, 0.8, 0.0);
+    const CellId rift = east_of(0.0, -1.0);
+    CHECK(parting.field(rift) < still.field(rift) - (hog::planet::fixed_one / 20));
+    const CellId far = hog::planet::cell_at(hog::DVec3{1.0, 0.0, 0.0});
+    CHECK(parting.field(far) == still.field(far));
+}

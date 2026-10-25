@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -35,28 +36,97 @@ constexpr double warp_reach = 25'000.0;                       // metres
 constexpr double warp_wavelength = 80'000.0;
 constexpr int warp_octaves = 2;
 
-std::vector<std::int64_t> crust(const Plates& plates) {
-    const LevelGrid& grid = plates.grid();
-    std::vector<double> crust(grid.size());
-    for (std::uint32_t index = 0; index < grid.size(); ++index) {
-        crust[index] = plates.plates()[plates.plate()[index]].continental;
-    }
+// What plates do to the ground near where they meet, spread over this many passes of smoothing so
+// that no seam shows where a cell's nearest boundary changes.
+constexpr int tectonic_passes = 8;
+// Metres per million years at which plates closing or parting do all they can; slower, they do
+// less, but not proportionally less, as even slow collisions pile up ranges over time.
+constexpr double full_rate = 25'000.0;
+// Where continents collide, a range runs along the boundary this far either side; where a
+// continent overrides ocean floor, one rises this far inland and this wide.
+constexpr double collision_reach = 30'000.0;
+constexpr double coastal_inland = 18'000.0;
+constexpr double coastal_reach = 15'000.0;
+// Where a continent parts, the ground sinks this much of the field along a rift this wide,
+// raising low shoulders either side.
+constexpr double rift_depth = 0.3;
+constexpr double rift_reach = 10'000.0;
+constexpr double shoulder_out = 16'000.0;
+constexpr double shoulder_reach = 8'000.0;
+constexpr double shoulder_strength = 0.35;
+
+// 1 at `middle`, falling smoothly to 0 at `reach` either side.
+double bump(double at, double middle, double reach) {
+    const double off = (at - middle) / reach;
+    const double inside = std::max(0.0, 1.0 - (off * off));
+    return inside * inside;
+}
+
+void smooth(const LevelGrid& grid, std::vector<double>& field, int passes) {
     std::vector<double> smoothed(grid.size());
-    for (int pass = 0; pass < crust_passes; ++pass) {
+    for (int pass = 0; pass < passes; ++pass) {
         for (std::uint32_t index = 0; index < grid.size(); ++index) {
-            double sum = crust[index];
+            double sum = field[index];
             for (const std::uint32_t neighbor : grid.neighbors(index)) {
-                sum += crust[neighbor];
+                sum += field[neighbor];
             }
             smoothed[index] = sum / static_cast<double>(grid.neighbors(index).size() + 1);
         }
-        std::swap(crust, smoothed);
+        std::swap(field, smoothed);
     }
-    std::vector<std::int64_t> fixed(grid.size());
-    std::ranges::transform(crust, fixed.begin(), [](double value) {
+}
+
+std::vector<std::int64_t> to_fixed(std::span<const double> field) {
+    std::vector<std::int64_t> fixed(field.size());
+    std::ranges::transform(field, fixed.begin(), [](double value) {
         return std::llround(value * static_cast<double>(fixed_one));
     });
     return fixed;
+}
+
+std::vector<std::int64_t> plate_crust(const Plates& plates) {
+    std::vector<double> crust(plates.grid().size());
+    for (std::uint32_t index = 0; index < crust.size(); ++index) {
+        crust[index] = plates.plates()[plates.plate()[index]].continental;
+    }
+    smooth(plates.grid(), crust, crust_passes);
+    return to_fixed(crust);
+}
+
+struct Tectonics {
+    std::vector<std::int64_t> rifts;     // field lowered
+    std::vector<std::int64_t> mountains; // strength from 0 to 1
+};
+
+Tectonics tectonics(const Plates& plates) {
+    const std::size_t size = plates.grid().size();
+    std::vector<double> rifts(size, 0.0);
+    std::vector<double> mountains(size, 0.0);
+    const auto continental = [&](std::uint32_t plate) {
+        return plates.plates()[plate].continental > 0.0;
+    };
+    for (std::uint32_t index = 0; index < size; ++index) {
+        const auto& boundary = plates.boundaries()[index];
+        const std::uint32_t own = plates.plate()[index];
+        if (!continental(own)) {
+            continue;
+        }
+        const double distance = fixed_to_double(boundary.distance);
+        const double pace = std::min(std::abs(boundary.closing) / full_rate, 1.0);
+        const double rate = std::copysign(std::sqrt(pace), boundary.closing);
+        if (rate > 0.0) {
+            mountains[index] = rate * (continental(boundary.other)
+                                           ? bump(distance, 0.0, collision_reach)
+                                           : bump(distance, coastal_inland, coastal_reach));
+        } else if (continental(boundary.other)) {
+            rifts[index] = -rate * rift_depth * bump(distance, 0.0, rift_reach);
+            mountains[index] =
+                -rate * shoulder_strength * bump(distance, shoulder_out, shoulder_reach);
+        }
+    }
+    smooth(plates.grid(), rifts, tectonic_passes);
+    smooth(plates.grid(), mountains, tectonic_passes);
+    return {.rifts = to_fixed(rifts), .mountains = to_fixed(mountains)};
 }
 
 } // namespace
@@ -64,7 +134,10 @@ std::vector<std::int64_t> crust(const Plates& plates) {
 Continents::Continents(std::uint64_t seed, double ocean_fraction,
                        std::shared_ptr<const Plates> plates)
     : seed_{hash_combine(seed, layer_salt)}, warp_seed_{hash_combine(seed, warp_salt)},
-      plates_{std::move(plates)}, crust_{crust(*plates_)} {
+      plates_{std::move(plates)}, crust_{plate_crust(*plates_)} {
+    Tectonics made = tectonics(*plates_);
+    rifts_ = std::move(made.rifts);
+    mountains_ = std::move(made.mountains);
     HOG_ASSERT(ocean_fraction >= 0.0 && ocean_fraction < 1.0, "ocean fraction must be in [0, 1)");
 
     std::vector<std::int64_t> survey;
@@ -86,22 +159,43 @@ Continents::Continents(std::uint64_t seed, double ocean_fraction,
     sea_level_ = *highest_ocean;
 }
 
-template <int Bits>
-std::int64_t Continents::field(CellId cell) const {
-    constexpr int finer = Bits - fixed_fraction_bits;
-    const DVec3 center = cell_center(cell);
-    const std::int64_t noise = fbm(seed_, noise_point<Bits>(center, frequency), octaves);
+CellId Continents::warped(CellId cell) const {
     const double radius = plates_->radius();
+    const DVec3 center = cell_center(cell);
     const NoisePoint at = noise_point(center, radius / warp_wavelength);
     const DVec3 shift{fixed_to_double(fbm(warp_seed_, at, warp_octaves)),
                       fixed_to_double(fbm(warp_seed_ + 1, at, warp_octaves)),
                       fixed_to_double(fbm(warp_seed_ + 2, at, warp_octaves))};
-    const CellId warped = cell_at(glm::normalize(center + (shift * (warp_reach / radius))));
-    const std::int64_t crust = plates_->grid().sample(crust_, warped) << finer;
-    return ((noise * noise_share) + (crust * crust_share)) >> fixed_fraction_bits;
+    return cell_at(glm::normalize(center + (shift * (warp_reach / radius))));
+}
+
+template <int Bits>
+std::int64_t Continents::field(CellId cell, CellId warped) const {
+    constexpr int finer = Bits - fixed_fraction_bits;
+    const std::int64_t noise = fbm(seed_, noise_point<Bits>(cell_center(cell), frequency), octaves);
+    const std::int64_t plate = (plates_->grid().sample(crust_, warped) << finer) -
+                               (plates_->grid().sample(rifts_, warped) << finer);
+    return ((noise * noise_share) + (plate * crust_share)) >> fixed_fraction_bits;
+}
+
+template <int Bits>
+std::int64_t Continents::field(CellId cell) const {
+    return field<Bits>(cell, warped(cell));
+}
+
+template <int Bits>
+Continents::Crust Continents::crust(CellId cell) const {
+    const CellId at = warped(cell);
+    constexpr int finer = Bits - fixed_fraction_bits;
+    return {.height = field<Bits>(cell, at) - (sea_level_ << finer),
+            .mountains =
+                std::clamp<std::int64_t>(plates_->grid().sample(mountains_, at), 0, fixed_one)
+                << finer};
 }
 
 template std::int64_t Continents::field<fixed_fraction_bits>(CellId cell) const;
 template std::int64_t Continents::field<fine_fraction_bits>(CellId cell) const;
+template Continents::Crust Continents::crust<fixed_fraction_bits>(CellId cell) const;
+template Continents::Crust Continents::crust<fine_fraction_bits>(CellId cell) const;
 
 } // namespace hog::planet

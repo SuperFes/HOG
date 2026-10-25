@@ -15,9 +15,9 @@
 namespace hog::planet {
 
 // Terrain height: continents and the starting islands give the coastline, lowlands and ocean
-// floor; ridges raise mountain ranges inside belts away from continental coasts. Rivers then wear
-// the land over geological time while the belts keep rising, which carves valleys and drainage,
-// and cut channels where they run.
+// floor; ridges raise mountain ranges where the plates push them up, away from the coast. Rivers
+// then wear the land over geological time while the ranges keep rising, which carves valleys and
+// drainage, and cut channels where they run.
 class Elevation {
 public:
     // Metres.
@@ -81,9 +81,11 @@ private:
         Rivers rivers;
     };
 
-    // Both in fixed point with `Bits` fractional bits.
+    // From the continent's height and the plates' mountains there, all in fixed point with
+    // `Bits` fractional bits: mountains rise only well inland.
     template <int Bits>
-    [[nodiscard]] std::int64_t mountain_strength(CellId cell, std::int64_t height) const;
+    [[nodiscard]] static std::int64_t mountain_strength(std::int64_t height,
+                                                        std::int64_t mountains);
     // The elevation as generated, before rivers wore it.
     [[nodiscard]] std::int64_t generated(CellId cell) const;
     // The same with `Bits` fractional bits.
@@ -97,7 +99,6 @@ private:
 
     Continents continents_;
     Archipelago archipelago_;
-    std::uint64_t belt_seed_;
     std::uint64_t ridge_seed_;
     std::uint64_t relief_seed_;
     struct Evolving {

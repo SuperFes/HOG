@@ -17,7 +17,6 @@ namespace hog::planet {
 
 namespace {
 
-constexpr std::uint64_t belt_salt = 0x6265'6C74'7300'0000ULL;   // "belts"
 constexpr std::uint64_t ridge_salt = 0x7269'6467'6573'0000ULL;  // "ridges"
 constexpr std::uint64_t relief_salt = 0x7265'6C69'6566'0000ULL; // "relief"
 
@@ -28,13 +27,6 @@ template <int Bits>
 constexpr std::int64_t lowland_width = fixed_unit<Bits> / 5;
 template <int Bits>
 constexpr std::int64_t inland_width = fixed_unit<Bits> / 10;
-
-constexpr double belt_frequency = 2.0;
-constexpr int belt_octaves = 3;
-template <int Bits>
-constexpr std::int64_t belt_threshold = fixed_unit<Bits> / 8;
-template <int Bits>
-constexpr std::int64_t belt_width = fixed_unit<Bits> / 5;
 
 // Continental lowlands roll by some tens of metres over a dozen kilometres or so, so no plain is
 // dead flat and water always finds a way down.
@@ -86,7 +78,6 @@ Elevation::Elevation(const PlanetConfig& config)
                                                  LevelGrid{Plates::level, config.radius},
                                                  config.radius, config.plates)},
       archipelago_{config.seed, config.radius, continents_},
-      belt_seed_{hash_combine(config.seed, belt_salt)},
       ridge_seed_{hash_combine(config.seed, ridge_salt)},
       relief_seed_{hash_combine(config.seed, relief_salt)},
       evolving_{std::make_shared<Evolving>(config)} {}
@@ -149,22 +140,13 @@ std::shared_ptr<const Elevation::Evolved> Elevation::evolve(const PlanetConfig& 
 std::int64_t Elevation::mountain_strength(CellId cell) const {
     // As strong as the generated ground has it.
     constexpr int finer = fine_fraction_bits - fixed_fraction_bits;
-    return mountain_strength<fine_fraction_bits>(cell,
-                                                 continents_.height<fine_fraction_bits>(cell)) >>
-           finer;
+    const auto crust = continents_.crust<fine_fraction_bits>(cell);
+    return mountain_strength<fine_fraction_bits>(crust.height, crust.mountains) >> finer;
 }
 
 template <int Bits>
-std::int64_t Elevation::mountain_strength(CellId cell, std::int64_t height) const {
-    const std::int64_t inland = ramp<Bits>(height, inland_width<Bits>);
-    if (inland == 0) {
-        return 0;
-    }
-    const std::int64_t belt = ramp<Bits>(
-        fbm(belt_seed_, noise_point<Bits>(cell_center(cell), belt_frequency), belt_octaves) -
-            belt_threshold<Bits>,
-        belt_width<Bits>);
-    return (inland * belt) >> Bits;
+std::int64_t Elevation::mountain_strength(std::int64_t height, std::int64_t mountains) {
+    return (ramp<Bits>(height, inland_width<Bits>) * mountains) >> Bits;
 }
 
 std::int64_t Elevation::elevation(CellId cell) const {
@@ -260,7 +242,8 @@ std::int64_t Elevation::generated(CellId cell) const {
 template <int Bits>
 std::int64_t Elevation::generated(CellId cell) const {
     constexpr std::int64_t one = fixed_unit<Bits>;
-    const std::int64_t continent = continents_.height<Bits>(cell);
+    const auto crust = continents_.crust<Bits>(cell);
+    const std::int64_t continent = crust.height;
     const std::int64_t height = archipelago_.raise<Bits>(cell, continent);
     if (height <= 0) {
         return sea_floor<Bits>(-height);
@@ -273,7 +256,7 @@ std::int64_t Elevation::generated(CellId cell) const {
                           Bits));
     const std::int64_t lowland =
         (((lowland_height * one) + relief) * ramp<Bits>(height, lowland_width<Bits>)) >> Bits;
-    const std::int64_t strength = mountain_strength<Bits>(cell, continent);
+    const std::int64_t strength = mountain_strength<Bits>(continent, crust.mountains);
     if (strength == 0) {
         return lowland;
     }
