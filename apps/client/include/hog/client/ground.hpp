@@ -31,6 +31,12 @@ using BiomePalette = std::array<Vec3, planet::biome_count>;
 // Each biome's material from its look, in Biome's order.
 [[nodiscard]] std::vector<terrain::MaterialImage> biome_materials();
 
+// How each rock the ground lays bare looks up close, in render's bare rock order.
+[[nodiscard]] std::array<terrain::Look, render::bare_rock_count> rock_looks();
+
+// Each bare rock's material from its look, in the same order.
+[[nodiscard]] std::vector<terrain::MaterialImage> rock_materials();
+
 // Slots on the GPU that patches are held in, as render::TerrainPool hands them out.
 template <typename Pool>
 concept SlotPool =

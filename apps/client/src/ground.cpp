@@ -14,6 +14,13 @@
 
 namespace hog::client {
 
+namespace {
+
+// A texel about 1.5 cm across over the four metres a material spans.
+constexpr int material_size = 256;
+
+} // namespace
+
 BiomePalette biome_palette() {
     BiomePalette palette{};
     for (std::size_t biome = 0; biome < palette.size(); ++biome) {
@@ -83,11 +90,63 @@ std::array<terrain::Look, planet::biome_count> biome_looks() {
 }
 
 std::vector<terrain::MaterialImage> biome_materials() {
-    // A texel about 1.5 cm across over the four metres a material spans.
-    constexpr int size = 256;
     std::vector<terrain::MaterialImage> materials;
     for (const terrain::Look& look : biome_looks()) {
-        materials.push_back(terrain::material_image(look, size));
+        materials.push_back(terrain::material_image(look, material_size));
+    }
+    return materials;
+}
+
+std::array<terrain::Look, render::bare_rock_count> rock_looks() {
+    struct Variation {
+        planet::Rock rock;
+        DVec3 colour;
+        DVec3 accent;
+        double share;
+        double grain;
+        double mottle;
+    };
+    constexpr auto vary = [](planet::Rock rock, DVec3 colour, DVec3 accent, double share,
+                             double grain, double mottle) {
+        return Variation{.rock = rock,
+                         .colour = colour,
+                         .accent = accent,
+                         .share = share,
+                         .grain = grain,
+                         .mottle = mottle};
+    };
+    using planet::Rock;
+    constexpr std::array variations{
+        // Buff, with rusty patches.
+        vary(Rock::Sandstone, {0.51, 0.30, 0.16}, {0.85, 0.7, 0.6}, 0.3, 0.3, 0.2),
+        // Dark grey, browner where it weathers.
+        vary(Rock::Shale, {0.11, 0.105, 0.10}, {1.15, 1.0, 0.85}, 0.3, 0.35, 0.15),
+        // Pale, with darker lichen.
+        vary(Rock::Limestone, {0.51, 0.48, 0.40}, {0.75, 0.75, 0.72}, 0.3, 0.25, 0.3),
+        // Pinkish, speckled dark.
+        vary(Rock::Granite, {0.35, 0.28, 0.26}, {0.35, 0.35, 0.4}, 0.3, 0.5, 0.15),
+        // Near black, rusting.
+        vary(Rock::Basalt, {0.038, 0.038, 0.042}, {1.4, 1.1, 0.9}, 0.2, 0.35, 0.25)};
+    static_assert(variations.size() == render::bare_rock_count);
+
+    std::array<terrain::Look, render::bare_rock_count> looks{};
+    for (const Variation& variation : variations) {
+        const auto rock = static_cast<std::size_t>(variation.rock) -
+                          static_cast<std::size_t>(render::first_bare_rock);
+        looks.at(rock) = {.colour = variation.colour,
+                          .accent = glm::min(variation.colour * variation.accent, DVec3{1.0}),
+                          .accent_share = variation.share,
+                          .grain = variation.grain,
+                          .mottle = variation.mottle,
+                          .seed = planet::biome_count + rock + 1};
+    }
+    return looks;
+}
+
+std::vector<terrain::MaterialImage> rock_materials() {
+    std::vector<terrain::MaterialImage> materials;
+    for (const terrain::Look& look : rock_looks()) {
+        materials.push_back(terrain::material_image(look, material_size));
     }
     return materials;
 }

@@ -396,6 +396,57 @@ TEST_CASE("a patch is drawn where it lies from the eye, lit by the sun", "[rende
     CHECK(device->validation_errors() == 0);
 }
 
+TEST_CASE("bare rock is drawn over the biome's ground, banded along its beds", "[render][gpu]") {
+    const auto device = test_device();
+    const std::vector<hog::terrain::MaterialImage> materials = plain_materials();
+    std::vector<hog::terrain::MaterialImage> rocks;
+    rocks.reserve(hog::render::bare_rock_count);
+    for (std::size_t rock = 0; rock < hog::render::bare_rock_count; ++rock) {
+        rocks.push_back(hog::terrain::material_image(
+            {.colour =
+                 rock == hog::render::bare_rock_count - 1 ? DVec3{0.5, 0.0, 0.0} : DVec3{0.5}},
+            64));
+    }
+    auto terrain =
+        hog::render::Terrain::create(*device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT,
+                                     {.materials = materials, .rocks = rocks});
+    REQUIRE(terrain);
+    const auto drawn = [&](std::uint8_t bare) {
+        auto pool = make_pool(*device, {});
+        const std::uint32_t slot = pool.acquire().value_or(1);
+        REQUIRE(slot == 0);
+        std::vector<PatchVertex> vertices = flat_patch(2.0F / patch_cells);
+        for (PatchVertex& vertex : vertices) {
+            vertex.rock = hog::planet::Rock::Basalt;
+            vertex.bare = bare;
+            // Four beds a metre, up the view.
+            vertex.layer = vertex.position.y * 4.0F;
+        }
+        REQUIRE(pool.stage(0, slot, vertices));
+        const std::array draws{TerrainDraw{.slot = slot, .origin = WorldPosition{}}};
+        return draw(*device, *terrain, pool, draws, looking_down({}, 4.0));
+    };
+
+    const auto covered = drawn(0);
+    CHECK(near(pixel_at(covered, 32, 32), {0, 191, 64, 255}));
+
+    const auto bare = drawn(255);
+    int least = 255;
+    int most = 0;
+    for (std::uint32_t y = 24; y < 40; ++y) {
+        const Pixel row = pixel_at(bare, 24, y);
+        INFO("row " << y);
+        CHECK(row[1] == 0);
+        CHECK(row[0] > 64);
+        least = std::min(least, int{row[0]});
+        most = std::max(most, int{row[0]});
+        // The beds run straight across.
+        CHECK(near(pixel_at(bare, 40, y), row));
+    }
+    CHECK(most - least > 15);
+    CHECK(device->validation_errors() == 0);
+}
+
 TEST_CASE("far from the planet's centre, patches are drawn as they are near it", "[render][gpu]") {
     const auto device = test_device();
     // A float at this distance is half a metre apart from the next.

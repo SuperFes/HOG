@@ -109,9 +109,11 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
                             std::optional<render::Billboard> companion, const GrassBudget& budget) {
     const terrain::StreamSettings settings;
     const std::vector<terrain::MaterialImage> materials = biome_materials();
+    const std::vector<terrain::MaterialImage> rocks = rock_materials();
     const BiomePalette palette = biome_palette();
     auto terrain = render::Terrain::create(device, colour_format, depth_format,
                                            {.materials = materials,
+                                            .rocks = rocks,
                                             .sea = true,
                                             .air = true,
                                             .canopy = budget.tree_far,

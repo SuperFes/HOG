@@ -20,7 +20,7 @@ namespace hog::render {
 namespace {
 
 // The shader reads the pool's vertices by this layout.
-static_assert(sizeof(terrain::PatchVertex) == 36);
+static_assert(sizeof(terrain::PatchVertex) == 40);
 static_assert(offsetof(terrain::PatchVertex, normal) == 12);
 static_assert(offsetof(terrain::PatchVertex, biome) == 24);
 

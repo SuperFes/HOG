@@ -2,6 +2,7 @@
 
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
+#include <hog/planet/beds.hpp>
 #include <hog/planet/climate.hpp>
 #include <hog/render/camera.hpp>
 #include <hog/render/memory.hpp>
@@ -16,6 +17,7 @@
 #include <hog/terrain/stitching.hpp>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -102,12 +104,23 @@ struct TerrainDraw {
     std::uint8_t coarser_edges = 0;
 };
 
+// The rocks the ground lays bare, Rock's from sandstone to basalt in its order.
+inline constexpr planet::Rock first_bare_rock = planet::Rock::Sandstone;
+inline constexpr std::size_t bare_rock_count = 5;
+static_assert(static_cast<std::size_t>(planet::Rock::Basalt) -
+                  static_cast<std::size_t>(first_bare_rock) + 1 ==
+              bare_rock_count);
+
 // What the ground is drawn with.
 struct TerrainLook {
     // A material per biome, in Biome's order and all of one size; the sea's and lakes' are their
     // beds'.
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     std::span<const terrain::MaterialImage> materials = {};
+    // A material per bare rock, in bare rock order and the size of the biomes'; none draws them
+    // all a plain grey.
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    std::span<const terrain::MaterialImage> rocks = {};
     // Metres a material spans up close. It's mixed with itself eight times as large, which hides
     // the repeat.
     double tile = 4.0;

@@ -55,7 +55,7 @@ struct Settings {
 static const uint patch_cells = 32;
 static const uint patch_side = 33;
 static const uint patch_depth = 5; // levels from a patch's cell to its grid cells
-static const uint vertex_stride = 36; // bytes, as terrain::PatchVertex lies
+static const uint vertex_stride = 40; // bytes, as terrain::PatchVertex lies
 
 // Blades keep off ground this close to sea level, so the surf stays clear.
 static const float shore = 0.15;
@@ -90,6 +90,8 @@ struct Corner {
     float scar;
     float gone;
     float fallen;
+    // Of the ground, how much is bare rock.
+    float bare;
 };
 
 Corner corner_at(uint bias, uint index) {
@@ -101,6 +103,7 @@ Corner corner_at(uint bias, uint index) {
     const uint blend = vertices.Load(at + 32);
     corner.blend_biome = min(blend & 0xffu, biome_count - 1);
     corner.blend = float((blend >> 8) & 0xffu) / 255.0;
+    corner.bare = float(blend >> 24) / 255.0;
     const uint cover = vertices.Load(at + 28) >> 16;
     corner.scar = float(cover & 0xffu) / 255.0;
     corner.gone = float((cover >> 12) & 0xfu) / 15.0;
@@ -295,6 +298,10 @@ bool grow(uint instance, out Grown grown) {
     }
     // Those left stand for those gone, as wide as they'd cover together.
     const float stands_for = full / max(kept, 1.0);
+    // None grows on bare rock.
+    if (unit(hash + 11u) < near.bare) {
+        return false;
+    }
     // Near another biome a plant may be one of its, the fewer the further in.
     const uint biome = unit(hash + 10u) < near.blend ? near.blend_biome : near.biome;
     const float4 kind = settings.blade[biome];

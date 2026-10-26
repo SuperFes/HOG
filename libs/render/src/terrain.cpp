@@ -74,7 +74,19 @@ constexpr std::array vertex_attributes{
     VkVertexInputAttributeDescription{.location = 7,
                                       .binding = 0,
                                       .format = VK_FORMAT_R8_UNORM,
-                                      .offset = offsetof(PatchVertex, blend)}};
+                                      .offset = offsetof(PatchVertex, blend)},
+    VkVertexInputAttributeDescription{.location = 8,
+                                      .binding = 0,
+                                      .format = VK_FORMAT_R8_UINT,
+                                      .offset = offsetof(PatchVertex, rock)},
+    VkVertexInputAttributeDescription{.location = 9,
+                                      .binding = 0,
+                                      .format = VK_FORMAT_R8_UNORM,
+                                      .offset = offsetof(PatchVertex, bare)},
+    VkVertexInputAttributeDescription{.location = 10,
+                                      .binding = 0,
+                                      .format = VK_FORMAT_R32_SFLOAT,
+                                      .offset = offsetof(PatchVertex, layer)}};
 constexpr VkDescriptorSetLayoutBinding binding(std::uint32_t at, VkDescriptorType type,
                                                VkShaderStageFlags stages) noexcept {
     return {.binding = at,
@@ -115,7 +127,8 @@ constexpr std::array air_descriptors{
 
 // The near tile's size, the far one's, and 1 if ground below sea level is seen through water; then
 // what each biome's material averages to, in linear light, and how much of it is grass waving in
-// the wind. Then the woods, as terrain.slang reads them, and each biome's grass, as GrassStand.
+// the wind. Then the woods, as terrain.slang reads them, each biome's grass, as GrassStand, and
+// what each bare rock's material averages to.
 struct Settings {
     glm::vec4 tiling;
     std::array<glm::vec4, planet::biome_count> means;
@@ -123,7 +136,11 @@ struct Settings {
     std::array<glm::vec4, flora::genus_count> foliage;
     GenusSeasons seasons;
     std::array<glm::vec4, planet::biome_count> grass;
+    std::array<glm::vec4, bare_rock_count> rock_means;
 };
+
+// The plain grey bare rock is drawn with when no materials are given for it.
+constexpr double plain_rock = 0.25;
 
 // The far tile, as many times the near one's size.
 constexpr double far_tiles = 8.0;
@@ -131,12 +148,12 @@ constexpr double far_tiles = 8.0;
 // ground to wear its tiles as it does nowhere near it, and near enough to keep their precision.
 constexpr double far_tiles_held = 64.0;
 
-// Each mip of every material in turn, the biomes' layers one after another.
+// Each mip of every material in turn, the biomes' layers then the rocks' one after another.
 Result<std::vector<std::byte>> material_texels(std::span<const terrain::MaterialImage> materials) {
-    if (materials.size() != planet::biome_count) {
-        return make_error(
-            ErrorCode::InvalidArgument,
-            std::format("{} materials for {} biomes", materials.size(), planet::biome_count));
+    if (materials.size() != planet::biome_count + bare_rock_count) {
+        return make_error(ErrorCode::InvalidArgument,
+                          std::format("{} materials for {} biomes and {} rocks", materials.size(),
+                                      planet::biome_count, bare_rock_count));
     }
     const terrain::MaterialImage& first = materials.front();
     for (const terrain::MaterialImage& material : materials) {
@@ -291,17 +308,27 @@ Result<Terrain> Terrain::create(Device& device, VkFormat colour_format, VkFormat
     }
     drawn.indices_ = std::move(index_buffer).value();
 
-    auto texels = material_texels(look.materials);
+    if (look.materials.empty()) {
+        return make_error(ErrorCode::InvalidArgument, "no materials for the biomes");
+    }
+    const terrain::MaterialImage& first = look.materials.front();
+    std::vector<terrain::MaterialImage> layers(look.materials.begin(), look.materials.end());
+    if (look.rocks.empty()) {
+        layers.insert(layers.end(), bare_rock_count,
+                      terrain::material_image({.colour = DVec3{plain_rock}}, first.size));
+    } else {
+        layers.insert(layers.end(), look.rocks.begin(), look.rocks.end());
+    }
+    auto texels = material_texels(layers);
     if (!texels) {
         return std::unexpected(std::move(texels).error());
     }
-    const terrain::MaterialImage& first = look.materials.front();
     auto materials =
         make_filled_image(device,
                           {.format = VK_FORMAT_R8G8B8A8_SRGB,
                            .extent = {.width = static_cast<std::uint32_t>(first.size),
                                       .height = static_cast<std::uint32_t>(first.size)},
-                           .layers = planet::biome_count,
+                           .layers = static_cast<std::uint32_t>(layers.size()),
                            .levels = static_cast<std::uint32_t>(first.levels.size())},
                           *texels);
     if (!materials) {
@@ -323,7 +350,12 @@ Result<Terrain> Terrain::create(Device& device, VkFormat colour_format, VkFormat
                                  look.air ? static_cast<float>(look.grass) : 0.0F, 0.0F, 0.0F},
                       .foliage = {},
                       .seasons = genus_seasons(),
-                      .grass = {}};
+                      .grass = {},
+                      .rock_means = {}};
+    for (std::size_t rock = 0; rock < bare_rock_count; ++rock) {
+        settings.rock_means.at(rock) =
+            glm::vec4{Vec3{terrain::material_mean(layers[planet::biome_count + rock])}, 0.0F};
+    }
     for (std::size_t biome = 0; biome < settings.means.size(); ++biome) {
         settings.means.at(biome) = glm::vec4{Vec3{terrain::material_mean(look.materials[biome])},
                                              waving_grass(static_cast<planet::Biome>(biome))};

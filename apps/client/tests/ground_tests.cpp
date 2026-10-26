@@ -216,3 +216,31 @@ TEST_CASE("each biome's ground varies up close and averages to its colour", "[cl
         CHECK(looks.at(biome).seed != looks.at(biome - 1).seed);
     }
 }
+
+TEST_CASE("each bare rock looks its own, varying up close", "[client][ground]") {
+    const auto looks = hog::client::rock_looks();
+    const auto biomes = hog::client::biome_looks();
+    const auto of = [&](hog::planet::Rock rock) {
+        return looks.at(static_cast<std::size_t>(rock) -
+                        static_cast<std::size_t>(hog::render::first_bare_rock));
+    };
+    for (const hog::terrain::Look& look : looks) {
+        CHECK(look.accent != look.colour);
+        CHECK(look.grain > 0.0);
+        CHECK(std::ranges::none_of(
+            biomes, [&](const hog::terrain::Look& biome) { return biome.seed == look.seed; }));
+    }
+    const auto brightness = [](const hog::terrain::Look& look) {
+        return look.colour.r + look.colour.g + look.colour.b;
+    };
+    // Sandstone warm, limestone pale, basalt darkest of all.
+    CHECK(of(hog::planet::Rock::Sandstone).colour.r >
+          2.0 * of(hog::planet::Rock::Sandstone).colour.b);
+    CHECK(brightness(of(hog::planet::Rock::Limestone)) > brightness(of(hog::planet::Rock::Shale)));
+    for (const hog::terrain::Look& look : looks) {
+        CHECK(brightness(of(hog::planet::Rock::Basalt)) <= brightness(look));
+    }
+    const auto materials = hog::client::rock_materials();
+    REQUIRE(materials.size() == hog::render::bare_rock_count);
+    CHECK(materials.front().size == hog::client::biome_materials().front().size);
+}

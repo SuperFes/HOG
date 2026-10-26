@@ -25,6 +25,9 @@ struct Push {
 [[vk::push_constant]] ConstantBuffer<Push> push;
 
 static const uint biome_count = 14;
+// The rocks the ground lays bare, as render::first_bare_rock and bare_rock_count have them.
+static const uint first_bare_rock = 2;
+static const uint rock_count = 5;
 static const uint genus_count = 4;
 
 struct Settings {
@@ -46,10 +49,12 @@ struct Settings {
     // Each biome's grass, as render::GrassStand: x its blades' mean height in metres, y the share
     // of the ground they cover.
     float4 grass[biome_count];
+    // Each bare rock's: rgb what its material averages to.
+    float4 rock_means[rock_count];
 };
 
 [[vk::binding(0, 0)]] ConstantBuffer<Settings> settings;
-// A layer per biome.
+// A layer per biome, then one per bare rock.
 [[vk::binding(1, 0)]] Sampler2DArray materials;
 // When lit through the air.
 [[vk::binding(2, 0)]] ConstantBuffer<Air> air;
@@ -75,6 +80,9 @@ struct Vertex {
     [[vk::location(5)]] float scar;   // as terrain::Cover's first byte, 0 to 1
     [[vk::location(6)]] uint blend_biome;
     [[vk::location(7)]] float blend; // blend_biome's share, 0 to 1
+    [[vk::location(8)]] uint rock;
+    [[vk::location(9)]] float bare;   // of the ground, 0 to 1
+    [[vk::location(10)]] float layer; // as planet::Exposure, in beds
 };
 
 struct Ground {
@@ -88,6 +96,10 @@ struct Ground {
     float4 turning;
     // Each biome's share, four to a vector: at most two at a corner, blended across a triangle.
     float4 biomes[(biome_count + 3) / 4];
+    // Each bare rock's share, four to a vector, how much of the ground is bare, and the bed.
+    float4 rocks[(rock_count + 3) / 4];
+    float bare;
+    float layer;
     float4 woods;
     float palms;
     float scar;
@@ -225,6 +237,7 @@ float standing_grass(Ground ground, float3 from_eye) {
         height += share * settings.grass[biome].x;
         top += share * settings.grass[biome].x * settings.grass[biome].y;
     }
+    top *= 1.0 - ground.bare;
     if (top <= 0.0) {
         return 0.0;
     }
@@ -307,6 +320,14 @@ Ground grounded(Vertex vertex) {
     const uint other = min(vertex.blend_biome, biome_count - 1);
     ground.biomes[biome / 4][biome % 4] = 1.0 - vertex.blend;
     ground.biomes[other / 4][other % 4] += vertex.blend;
+    for (uint group = 0; group < (rock_count + 3) / 4; ++group) {
+        ground.rocks[group] = float4(0.0);
+    }
+    const uint rock = clamp(vertex.rock, first_bare_rock, first_bare_rock + rock_count - 1) -
+                      first_bare_rock;
+    ground.rocks[rock / 4][rock % 4] = 1.0;
+    ground.bare = vertex.bare;
+    ground.layer = vertex.layer;
     ground.woods = vertex.woods;
     ground.palms = vertex.palms;
     ground.scar = vertex.scar;
@@ -463,32 +484,103 @@ float3 up_at(Ground ground) {
     return normalize(ground.from_eye + (push.bend_up.xyz * (push.bend_radii.x + push.bend_up.w)));
 }
 
-// The ground's colour from its biomes' materials, each projected along the planet's axes as
-// plane_shares has it, and mixed at two scales. Each part of the ground wears its far tiles
-// shifted its own way, blending into the next part's, so they never line up in rows.
-float3 albedo(Ground ground, float3 normal) {
-    const float3 tiled = tiled_at(ground.from_eye);
-    const float3 planes = plane_shares(up_at(ground), normal);
-    const float2 across[3] = { tiled.yz, tiled.zx, tiled.xy };
-    const float part = ground.tile_part;
-    const float which = floor(part);
-    const float2 shift = tile_shift(uint(which));
-    const float2 next = tile_shift(uint(which) + 1u);
-    const float blend = smoothstep(0.4, 0.6, part - which);
-
-    // Gradients taken while every fragment is still running, as sampling skips biomes and planes.
+// Where each plane and scale samples the materials, and how the far tiles shift there.
+struct Tiling {
+    float3 planes;
     float2 at[6];
     float2 along_x[6];
     float2 along_y[6];
+    float2 shift;
+    float2 next;
+    float blend;
+};
+
+// Each part of the ground wears its far tiles shifted its own way, blending into the next part's,
+// so they never line up in rows. Gradients are taken while every fragment is still running, as
+// sampling skips layers and planes.
+Tiling tiling_at(Ground ground, float3 normal) {
+    Tiling tiling;
+    const float3 tiled = tiled_at(ground.from_eye);
+    tiling.planes = plane_shares(up_at(ground), normal);
+    const float2 across[3] = { tiled.yz, tiled.zx, tiled.xy };
+    const float part = ground.tile_part;
+    const float which = floor(part);
+    tiling.shift = tile_shift(uint(which));
+    tiling.next = tile_shift(uint(which) + 1u);
+    tiling.blend = smoothstep(0.4, 0.6, part - which);
     for (uint plane = 0; plane < 3; ++plane) {
         for (uint scale = 0; scale < 2; ++scale) {
             const uint index = (plane * 2) + scale;
-            at[index] = across[plane] / settings.tiling[scale];
-            along_x[index] = ddx(at[index]);
-            along_y[index] = ddy(at[index]);
+            tiling.at[index] = across[plane] / settings.tiling[scale];
+            tiling.along_x[index] = ddx(tiling.at[index]);
+            tiling.along_y[index] = ddy(tiling.at[index]);
         }
     }
+    return tiling;
+}
 
+// A material layer projected along the planet's axes as plane_shares has it, and mixed at two
+// scales, each straying from `mean` in its own way, so together they still average to it.
+float3 material_at(Tiling tiling, uint layer, float3 mean) {
+    float3 near = float3(0.0);
+    float3 far = float3(0.0);
+    for (uint plane = 0; plane < 3; ++plane) {
+        if (tiling.planes[plane] == 0.0) {
+            continue;
+        }
+        const uint index = plane * 2;
+        near += tiling.planes[plane] * materials.SampleGrad(float3(tiling.at[index], layer),
+                                                            tiling.along_x[index],
+                                                            tiling.along_y[index]).rgb;
+        const float2 far_at = tiling.at[index + 1];
+        float3 tiles = materials.SampleGrad(float3(far_at + tiling.shift, layer),
+                                            tiling.along_x[index + 1],
+                                            tiling.along_y[index + 1]).rgb;
+        if (tiling.blend > 0.0) {
+            tiles = lerp(tiles,
+                         materials.SampleGrad(float3(far_at + tiling.next, layer),
+                                              tiling.along_x[index + 1],
+                                              tiling.along_y[index + 1]).rgb,
+                         tiling.blend);
+        }
+        far += tiling.planes[plane] * tiles;
+    }
+    return near * far / max(mean, 1.0 / 1024.0);
+}
+
+// How much lighter or darker a bed may be than its rock on the whole, and each of the laminae
+// within it, and how many of those to a bed.
+static const float bed_shading = 0.14;
+static const float lamina_shading = 0.06;
+static const float laminae = 9.0;
+// Of a bed, the dark parting where it meets the next, and how much darker that is.
+static const float parting_width = 0.012;
+static const float parting_darkening = 0.45;
+
+// Lighter or darker by `shading` either way, by the `n`th bed or lamina; fading to neither once
+// they lie closer than a pixel or two, `across` to one.
+float strayed(float n, float across, float shading) {
+    const float stray = (tile_shift(uint(int(n)) * 2u + 1u).x * 2.0) - 1.0;
+    return 1.0 + (shading * stray * saturate(1.5 - across));
+}
+
+// How bare rock's beds shade it, `layer` beds up: each bed and each lamina in it its own shade,
+// and a dark parting where one bed meets the next.
+float banding(float layer) {
+    const float across = fwidth(layer);
+    float shade = strayed(floor(layer), across, bed_shading);
+    const float lamina = layer * laminae;
+    shade *= strayed(floor(lamina) + 7919.0, across * laminae, lamina_shading);
+    const float from_parting = min(frac(layer), 1.0 - frac(layer));
+    const float parting = saturate(((parting_width * 0.5) - from_parting) / max(across, 1e-6) + 0.5) *
+                          saturate(1.0 - (across / (4.0 * parting_width)));
+    return shade * (1.0 - (parting_darkening * parting));
+}
+
+// The ground's colour from its biomes' materials, with the rock it lays bare over them, banded
+// along its beds.
+float3 albedo(Ground ground, float3 normal) {
+    const Tiling tiling = tiling_at(ground, normal);
     float3 colour = float3(0.0);
     // Unrolled, so the interpolated shares are indexed statically.
     [unroll]
@@ -497,33 +589,24 @@ float3 albedo(Ground ground, float3 normal) {
         if (share < least_biome) {
             continue;
         }
-        float3 near = float3(0.0);
-        float3 far = float3(0.0);
-        for (uint plane = 0; plane < 3; ++plane) {
-            if (planes[plane] == 0.0) {
-                continue;
-            }
-            const uint index = plane * 2;
-            near += planes[plane] * materials.SampleGrad(float3(at[index], biome), along_x[index],
-                                                         along_y[index]).rgb;
-            const float2 far_at = at[index + 1];
-            float3 tiles = materials.SampleGrad(float3(far_at + shift, biome), along_x[index + 1],
-                                                along_y[index + 1]).rgb;
-            if (blend > 0.0) {
-                tiles = lerp(tiles,
-                             materials.SampleGrad(float3(far_at + next, biome), along_x[index + 1],
-                                                  along_y[index + 1]).rgb,
-                             blend);
-            }
-            far += planes[plane] * tiles;
-        }
-        // Each scale strays from the mean in its own way, so together they still average to it.
         // Only where grass stands up from the ground at all.
         const float shading =
             settings.canopy.y > 0.0 ? lerp(1.0, grass_field_shade, settings.grass[biome].y) : 1.0;
-        colour += share * shading * near * far / max(settings.means[biome].rgb, 1.0 / 1024.0);
+        colour += share * shading * material_at(tiling, biome, settings.means[biome].rgb);
     }
-    return colour;
+    if (ground.bare < least_biome) {
+        return colour;
+    }
+    float3 rock = float3(0.0);
+    [unroll]
+    for (uint kind = 0; kind < rock_count; ++kind) {
+        const float share = ground.rocks[kind / 4][kind % 4];
+        if (share < least_biome) {
+            continue;
+        }
+        rock += share * material_at(tiling, biome_count + kind, settings.rock_means[kind].rgb);
+    }
+    return lerp(colour, rock * banding(ground.layer), ground.bare);
 }
 
 // How much brighter grass bent further along the wind shows than the field on the whole, per
@@ -546,6 +629,7 @@ float gust_lit(Ground ground, GustFrame frame, float wind, float wave) {
     for (uint biome = 0; biome < biome_count; ++biome) {
         waving += ground.biomes[biome / 4][biome % 4] * settings.means[biome].w;
     }
+    waving *= 1.0 - ground.bare;
     if (waving < least_biome) {
         return 1.0;
     }
