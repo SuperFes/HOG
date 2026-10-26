@@ -27,7 +27,7 @@ constexpr std::array<std::byte, 8> magic{std::byte{'H'}, std::byte{'O'}, std::by
 
 template <typename Bake>
 auto fields(Bake& bake) {
-    return std::array{&bake.heights, &bake.change, &bake.drained, &bake.ground};
+    return std::array{&bake.heights, &bake.change, &bake.drained, &bake.ground, &bake.soil};
 }
 
 } // namespace
@@ -77,7 +77,8 @@ std::optional<LandformBake> read_bake(const std::filesystem::path& directory, Ba
                       .heights = {},
                       .change = {},
                       .drained = {},
-                      .ground = {}};
+                      .ground = {},
+                      .soil = {}};
     for (std::vector<std::int64_t>* field : fields(bake)) {
         field->reserve(*count);
         for (std::uint64_t cell = 0; cell < *count; ++cell) {

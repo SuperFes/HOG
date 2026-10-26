@@ -4,6 +4,7 @@
 #include <hog/planet/cell_id.hpp>
 #include <hog/planet/drainage.hpp>
 #include <hog/planet/erosion.hpp>
+#include <hog/planet/hillslope.hpp>
 #include <hog/planet/level_grid.hpp>
 
 #include <array>
@@ -23,13 +24,15 @@ public:
     // A cell's lake level where it holds none.
     static constexpr std::int64_t dry = std::numeric_limits<std::int64_t>::min();
 
-    // Evolves `heights`, fixed point and one per grid cell, through `steps` steps of `erosion`,
-    // calling `stepped` with how many are done after each.
-    Landform(LevelGrid grid, std::vector<std::int64_t> heights, const Erosion& erosion, int steps,
-             const std::function<void(int)>& stepped = {});
-    // One evolved before, as its heights, change and drained left it, by erosion with `wander`.
+    // Evolves `heights`, fixed point and one per grid cell, through `steps` steps of `erosion`
+    // and of `hillslope`, if it has fields, calling `stepped` with how many are done after each.
+    Landform(LevelGrid grid, std::vector<std::int64_t> heights, const Erosion& erosion,
+             const Hillslope& hillslope, int steps, const std::function<void(int)>& stepped = {});
+    // One evolved before, as its heights, change, drained and soil left it, by erosion with
+    // `wander`.
     Landform(LevelGrid grid, std::vector<std::int64_t> heights, std::vector<std::int64_t> change,
-             std::vector<std::int64_t> drained, std::uint64_t wander);
+             std::vector<std::int64_t> drained, std::vector<std::int64_t> soil,
+             std::uint64_t wander);
 
     [[nodiscard]] const LevelGrid& grid() const noexcept { return grid_; }
     // Fixed-point metres per grid cell, after evolving.
@@ -42,6 +45,9 @@ public:
 
     // Fixed-point metres the ground moved, per grid cell.
     [[nodiscard]] std::span<const std::int64_t> change() const noexcept { return change_; }
+    // Fixed-point metres of soil on each grid cell: thick where it has weathered and gathered,
+    // none on bare rock.
+    [[nodiscard]] std::span<const std::int64_t> soil() const noexcept { return soil_; }
     // The same at any cell's centre.
     [[nodiscard]] std::int64_t change(CellId cell) const;
 
@@ -64,6 +70,7 @@ private:
     LevelGrid grid_;
     std::vector<std::int64_t> heights_;
     std::vector<std::int64_t> change_;
+    std::vector<std::int64_t> soil_;
     Drainage drainage_;
     std::vector<std::int64_t> drained_;
     std::vector<bool> basins_;

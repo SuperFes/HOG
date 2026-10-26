@@ -87,6 +87,45 @@ constexpr double erodibility = 0.05;
     }
     return fixed_one;
 }
+
+// How each rock weathers into soil against middling, and the steepest slope between grid cells
+// it stands at: shale crumbles and slumps, and sandstone, limestone and crystalline rock stand
+// as crags.
+[[nodiscard]] Weathering weathering(Rock rock) {
+    switch (rock) {
+    case Rock::Soil:
+    case Rock::Sand:
+        return {.rate = fixed_one, .steepest = fixed_one * 6 / 10};
+    case Rock::Shale:
+        return {.rate = fixed_one * 3 / 2, .steepest = fixed_one * 7 / 10};
+    case Rock::Sandstone:
+        return {.rate = fixed_one * 8 / 10, .steepest = fixed_one * 6 / 5};
+    case Rock::Limestone:
+        return {.rate = fixed_one * 6 / 10, .steepest = fixed_one * 6 / 5};
+    case Rock::Basalt:
+        return {.rate = fixed_one, .steepest = fixed_one * 6 / 5};
+    case Rock::Granite:
+    case Rock::Peridotite:
+    case Rock::Magma:
+        return {.rate = fixed_one / 2, .steepest = fixed_one * 3 / 2};
+    }
+    return {};
+}
+
+// Square metres a slope of one carries over a step (0.004 m²/yr), as wet ground creeps more,
+// and more again where it freezes and thaws.
+constexpr double creep_per_step = 400.0;
+// Metres of bare rock weathered over a step (0.1 mm a year) where it's warm and wet, with frost
+// cracking it more where it freezes and thaws.
+constexpr double weathering_per_step = 10.0;
+constexpr double frost_weathering = 0.5;
+// °C: the sea-level warmth at the equator, how much colder the poles are, and the lapse rate.
+constexpr double equator_warmth = 28.0;
+constexpr double polar_chill = 45.0;
+constexpr double lapse_per_metre = 0.0065;
+// °C between which the ground freezes and thaws through the year.
+constexpr double frost_coldest = -12.0;
+constexpr double frost_warmest = 2.0;
 // Generated height over which the change fades in from the shore.
 constexpr std::int64_t coast_blend = 50 * fixed_one;
 
@@ -201,7 +240,8 @@ std::shared_ptr<const Elevation::Evolved> Elevation::evolve(const PlanetConfig& 
                             .heights = {landform.heights().begin(), landform.heights().end()},
                             .change = {landform.change().begin(), landform.change().end()},
                             .drained = {landform.drained().begin(), landform.drained().end()},
-                            .ground = ground});
+                            .ground = ground,
+                            .soil = {landform.soil().begin(), landform.soil().end()}});
         }
         shared = std::make_shared<const Evolved>(std::move(landform), ground, config);
         log::info(landform_log, "evolved the landform in {:.0f} s", seconds());
@@ -219,10 +259,11 @@ std::shared_ptr<const Elevation::Evolved> Elevation::unbake(std::optional<Landfo
     if (bake->heights.size() != grid.size()) {
         return nullptr;
     }
-    return std::make_shared<const Evolved>(
-        Landform{std::move(grid), std::move(bake->heights), std::move(bake->change),
-                 std::move(bake->drained), hash_combine(config.seed, wander_salt)},
-        bake->ground, config);
+    return std::make_shared<const Evolved>(Landform{std::move(grid), std::move(bake->heights),
+                                                    std::move(bake->change),
+                                                    std::move(bake->drained), std::move(bake->soil),
+                                                    hash_combine(config.seed, wander_salt)},
+                                           bake->ground, config);
 }
 
 Landform Elevation::wear(LevelGrid grid, std::uint64_t seed,
@@ -236,6 +277,8 @@ Landform Elevation::wear(LevelGrid grid, std::uint64_t seed,
     std::vector<std::int64_t> hardness(grid.size());
     std::vector<std::int64_t> runoff(grid.size());
     std::vector<BedColumn> columns(grid.size());
+    std::vector<std::int64_t> creeping(grid.size());
+    std::vector<std::int64_t> weathered(grid.size());
     for (std::uint32_t index = 0; index < grid.size(); ++index) {
         const CellId cell = grid.cell(index);
         const std::int64_t mountains = mountain_strength(cell);
@@ -247,8 +290,20 @@ Landform Elevation::wear(LevelGrid grid, std::uint64_t seed,
         hardness[index] = fixed(erodibility);
         runoff[index] = moisture.at(cell, continents_.height(cell));
         columns[index] = beds_.column(cell, {.continental = continental, .mountains = mountains});
+        // A rough climate, before there is one: warm low and near the equator, wet as the
+        // circulation bands have it.
+        const double sine = cell_center(cell).z;
+        const double warmth = equator_warmth - (polar_chill * sine * sine) -
+                              (lapse_per_metre * fixed_to_double(heights[index]));
+        const double wet = fixed_to_double(runoff[index]);
+        const bool frost = warmth > frost_coldest && warmth < frost_warmest;
+        creeping[index] = fixed(creep_per_step * (0.4 + (1.2 * wet)) * (frost ? 1.5 : 1.0));
+        const double warm = std::clamp((warmth + 10.0) / 35.0, 0.05, 1.0);
+        weathered[index] = fixed(weathering_per_step * (((0.15 + (0.85 * wet)) * warm) +
+                                                        (frost ? frost_weathering : 0.0)));
     }
-    return Landform{std::move(grid), std::move(heights),
+    return Landform{std::move(grid),
+                    std::move(heights),
                     Erosion{.uplift = uplift,
                             .erodibility = hardness,
                             .runoff = runoff,
@@ -257,7 +312,14 @@ Landform Elevation::wear(LevelGrid grid, std::uint64_t seed,
                                 [&](std::uint32_t index, std::int64_t height) {
                                     return yielding(beds_.rock_at(columns[index], height));
                                 }},
-                    landform_steps, stepped};
+                    Hillslope{.creep = creeping,
+                              .weathering = weathered,
+                              .rock =
+                                  [&](std::uint32_t index, std::int64_t height) {
+                                      return weathering(beds_.rock_at(columns[index], height));
+                                  }},
+                    landform_steps,
+                    stepped};
 }
 
 std::int64_t Elevation::mountain_strength(CellId cell) const {

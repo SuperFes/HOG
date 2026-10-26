@@ -40,6 +40,7 @@ const Landform& landform() {
         return Landform{std::move(grid),
                         std::move(heights),
                         {.uplift = uplift, .erodibility = erodibility, .runoff = runoff},
+                        hog::planet::Hillslope{},
                         30};
     }();
     return landform;
@@ -94,4 +95,56 @@ TEST_CASE("a landform's change runs on smoothly between cells, across faces too"
         }
     }
     CHECK(largest < range() / 16);
+}
+
+TEST_CASE("worn with its slopes, land never stands steeper than its rock, and soil gathers",
+          "[planet][landform]") {
+    LevelGrid grid{5, 115'000.0};
+    std::vector<std::int64_t> heights;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const hog::DVec3 at = hog::planet::cell_center(grid.cell(cell));
+        const double metres = at.z > -0.3
+                                  ? 50.0 + (3'000.0 * (at.z + 0.3)) +
+                                        (400.0 * std::sin(37.0 * at.x) * std::cos(29.0 * at.y))
+                                  : -1000.0;
+        heights.push_back(std::llround(metres * static_cast<double>(fixed_one)));
+    }
+    const std::vector<std::int64_t> uplift(grid.size(), 30 * fixed_one);
+    const std::vector<std::int64_t> erodibility(grid.size(), fixed_one / 10);
+    const std::vector<std::int64_t> runoff(grid.size(), fixed_one / 2);
+    const std::vector<std::int64_t> creep(grid.size(), 400 * fixed_one);
+    const std::vector<std::int64_t> weathering(grid.size(), 5 * fixed_one);
+    constexpr double steepest = 0.05;
+    const Landform worn{std::move(grid),
+                        std::move(heights),
+                        {.uplift = uplift, .erodibility = erodibility, .runoff = runoff},
+                        {.creep = creep,
+                         .weathering = weathering,
+                         .rock =
+                             [](std::uint32_t, std::int64_t) {
+                                 return hog::planet::Weathering{
+                                     .rate = fixed_one,
+                                     .steepest = std::llround(steepest * fixed_one)};
+                             }},
+                        20};
+    const auto& evolved = worn.grid();
+    const auto ground = worn.heights();
+    int soiled = 0;
+    for (std::uint32_t cell = 0; cell < evolved.size(); ++cell) {
+        soiled += worn.soil()[cell] > fixed_one / 10 ? 1 : 0;
+        if (ground[cell] <= 0) {
+            continue;
+        }
+        const auto around = evolved.neighbors(cell);
+        for (std::size_t k = 0; k < around.size(); ++k) {
+            const double rise = hog::planet::fixed_to_double(ground[cell] - ground[around[k]]);
+            if (rise > (steepest * hog::planet::fixed_to_double(evolved.distance(cell, k))) + 0.1) {
+                FAIL("cell " << hog::planet::fixed_to_double(ground[cell]) << " lower "
+                             << hog::planet::fixed_to_double(ground[around[k]]) << " distance "
+                             << hog::planet::fixed_to_double(evolved.distance(cell, k)) << " soil "
+                             << hog::planet::fixed_to_double(worn.soil()[cell]));
+            }
+        }
+    }
+    CHECK(soiled > static_cast<int>(evolved.size()) / 10);
 }

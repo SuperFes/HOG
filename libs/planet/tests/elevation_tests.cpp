@@ -460,3 +460,30 @@ TEST_CASE("the ground holds lakes in, the water never standing over lower ground
     CHECK(shores > 1'000);
     CHECK(walls == 0);
 }
+
+TEST_CASE("the ground never stands in sheer walls between neighbouring points",
+          "[planet][elevation]") {
+    // Worn as finely as a real world, where valleys cut deepest beside their walls.
+    const Elevation terrain{{.seed = 1, .ocean_fraction = 0.7, .radius = 115'000.0}};
+    const auto& landform = terrain.landform();
+    const auto& grid = landform.grid();
+    double steepest = 0.0;
+    for (std::uint32_t index = 0; index < grid.size(); index += 97) {
+        if (landform.heights()[index] <= 0) {
+            continue;
+        }
+        for (const CellId cell :
+             hog::planet::sample_tile(grid.cell(index), 3, [](CellId fine) { return fine; })) {
+            const std::int64_t here = terrain.elevation(cell);
+            for (const CellId next : hog::planet::edge_neighbors(cell)) {
+                const double apart =
+                    glm::length(hog::planet::cell_center(cell) - hog::planet::cell_center(next)) *
+                    115'000.0;
+                steepest = std::max(
+                    steepest, std::abs(fixed_to_double(terrain.elevation(next) - here)) / apart);
+            }
+        }
+    }
+    // Crags stand steeply, but nothing like a cliff a cell tall.
+    CHECK(steepest < 2.5);
+}

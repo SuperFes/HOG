@@ -11,6 +11,7 @@ add_library(hog_planet
     src/elevation.cpp
     src/erosion.cpp
     src/geology.cpp
+    src/hillslope.cpp
     src/hotspots.cpp
     src/landform.cpp
     src/level_grid.cpp
@@ -58,6 +59,7 @@ hog_add_tests(hog_planet
     tests/elevation_tests.cpp
     tests/erosion_tests.cpp
     tests/geology_tests.cpp
+    tests/hillslope_tests.cpp
     tests/hotspots_tests.cpp
     tests/golden_tests.cpp
     tests/landform_tests.cpp

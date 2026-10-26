@@ -12,9 +12,13 @@ namespace hog::planet {
 
 namespace {
 
+// How far from a river's edge its banks may climb, at most: some widths across, and never
+// beyond a third of its reach's length from its middle, which the cells it's found from always
+// cover.
+constexpr double bank_fade = 20.0;
+constexpr double bank_reach = 1.0 / 3.0;
 // A metre of rain a year runs off the rain-weighted area.
 constexpr double seconds_per_year = 31'557'600.0;
-
 
 double flow(double area) {
     return area / seconds_per_year;
@@ -164,11 +168,24 @@ void Rivers::each_reach(CellId cell, Visit visit) const {
     }
 }
 
+std::int64_t Rivers::sunk(const Reach& reach, std::int64_t level, std::int64_t ground) const {
+    // Reaches are only found from the cells about their ends, so the banks must climb back to
+    // the ground well within them; where the ground stands higher, so does the river in it.
+    const double half = reach.width / 2.0;
+    const double banks =
+        std::max(std::min(bank_fade * reach.width,
+                          bank_reach * glm::length(reach.to - reach.from) * radius_) -
+                     half,
+                 0.0);
+    const std::int64_t deepest = std::llround(banks * bank_slope * static_cast<double>(fixed_one));
+    // Where the ground dips below the river's line, the water follows it down.
+    return std::max(std::min(level, ground), ground - deepest);
+}
+
 std::int64_t Rivers::cut(CellId cell, std::int64_t ground) const {
     std::int64_t lowest = ground;
     each_reach(cell, [&](const Reach& reach, std::int64_t level, double away) {
-        // Where the ground dips below the river's line, the water follows it down.
-        const std::int64_t surface = std::min(level, ground);
+        const std::int64_t surface = sunk(reach, level, ground);
         const double half = reach.width / 2.0;
         std::int64_t bed = 0;
         if (away < half) {
@@ -187,7 +204,8 @@ std::optional<Channel> Rivers::channel(CellId cell, std::int64_t ground) const {
     std::optional<std::int64_t> surface;
     each_reach(cell, [&](const Reach& reach, std::int64_t level, double away) {
         if (away < reach.width / 2.0) {
-            surface = std::min({surface.value_or(level), level, ground});
+            const std::int64_t water = sunk(reach, level, ground);
+            surface = std::min(surface.value_or(water), water);
         }
     });
     if (!surface) {

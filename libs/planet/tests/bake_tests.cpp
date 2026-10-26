@@ -25,7 +25,8 @@ LandformBake sample() {
             .heights = {0, -5, 1'234'567'890'123},
             .change = {7, 0, -1},
             .drained = {1, 2, 3},
-            .ground = {-9'000'000'000'000, 4, 5}};
+            .ground = {-9'000'000'000'000, 4, 5},
+            .soil = {0, 1, 65'536}};
 }
 
 // A world coarse enough to evolve in a moment, keeping its landform in `bakes`.

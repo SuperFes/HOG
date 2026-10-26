@@ -46,6 +46,7 @@ Landform worn(std::int64_t runoff) {
     return Landform{std::move(grid),
                     std::move(heights),
                     {.uplift = uplift, .erodibility = erodibility, .runoff = rain},
+                    hog::planet::Hillslope{},
                     20};
 }
 
@@ -221,6 +222,7 @@ Landform bowl(std::int64_t runoff, double depth = 600.0) {
     return Landform{std::move(grid),
                     std::move(heights),
                     {.uplift = none, .erodibility = none, .runoff = rain},
+                    hog::planet::Hillslope{},
                     0};
 }
 

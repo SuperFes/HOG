@@ -95,6 +95,10 @@ private:
     // of its water there and the metres from its line.
     template <typename Visit>
     void each_reach(CellId cell, Visit visit) const;
+    // The fixed-point level of a reach's water where its line is at `level` and the ground at
+    // `ground`: no higher than the ground, nor deeper in it than its banks can climb.
+    [[nodiscard]] std::int64_t sunk(const Reach& reach, std::int64_t level,
+                                    std::int64_t ground) const;
 
     const Landform* landform_;
     const LevelGrid* grid_;
