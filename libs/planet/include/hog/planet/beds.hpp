@@ -1,8 +1,11 @@
 #pragma once
 
+#include <hog/core/math.hpp>
 #include <hog/planet/cell_id.hpp>
 
+#include <array>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string_view>
 
@@ -28,19 +31,26 @@ inline constexpr int rock_count = static_cast<int>(Rock::Magma) + 1;
 struct BedSetting {
     // Whether continental crust lies under the cell; elsewhere the rock is volcanic.
     bool continental = false;
-    // Fixed point from 0 to 1: how hard a mountain belt has folded the beds and lifted the
-    // basement.
+    // Fixed point from 0 to 1: how hard a mountain belt has folded and thrust the beds and lifted
+    // the basement.
     std::int64_t mountains = 0;
+    // How much of the way along each axis the belt runs, in fixed point summing to about 1: its
+    // folds and thrusts run with it.
+    std::array<std::int64_t, 3> grain{};
+    // Fixed-point metres: the height a volcano's lava lies above, burying the beds.
+    std::int64_t lava = std::numeric_limits<std::int32_t>::max();
 };
 
 // What the beds hold at one cell, for reading rock at many heights there cheaply.
 struct BedColumn {
-    // Fixed-point metres the layering is raised by its warps and folds.
+    // Fixed-point metres the layering is raised by its warps, folds and thrusts.
     std::int32_t shift = 0;
     // Fixed-point metres: the top of the granite.
     std::int32_t basement = 0;
     // Fixed point from -1 to 1: which rock the region favours, sandstone to limestone.
     std::int32_t leaning = 0;
+    // Fixed-point metres: the base of any volcano's lava.
+    std::int32_t lava = std::numeric_limits<std::int32_t>::max();
     bool continental = false;
 };
 
@@ -60,10 +70,12 @@ struct Bed {
 
 // Layered rock from the seed alone, so rivers can cut down through it while the landform
 // evolves, before the geology exists. On continents, sandstone, shale and limestone lie in beds
-// tens of metres thick on a granite basement; the beds are gently warped, folded hard in mountain
-// belts, and each region favours its own rock. Belts lift the basement high enough to be laid
-// bare. Away from continents it's basalt all the way down. Heights are fixed-point metres, on the
-// rock as it lay before any uplift.
+// tens of metres thick on a granite basement, and each region favours its own rock. Away from the
+// belts the beds lie nearly flat, gently warped; in them they are folded along the belt's grain
+// and stacked in thrust sheets, each tilted, the layering repeating across each thrust. Belts
+// lift the basement high enough to be laid bare, and volcanoes bury the beds in lava. Away from
+// continents it's basalt all the way down. Heights are fixed-point metres, on the rock as it lay
+// before any uplift.
 class Beds {
 public:
     Beds(std::uint64_t seed, double planet_radius);
@@ -78,8 +90,13 @@ public:
     [[nodiscard]] std::optional<Bed> bed_at(const BedColumn& column, std::int64_t height) const;
     // Fixed-point metres: the top of the granite.
     [[nodiscard]] std::int64_t basement(CellId cell, BedSetting setting) const;
+    // In fixed point, the tangent of the angle the belt's folds and thrusts tilt the beds by;
+    // the plains' gentle warp is taken as flat.
+    [[nodiscard]] std::int64_t dip(CellId cell, const BedSetting& setting) const;
 
 private:
+    // Fixed-point metres the belt's folds and thrusts raise the layering by at `center`.
+    [[nodiscard]] std::int64_t belt(DVec3 center, const BedSetting& setting) const;
     // Where bed `index` starts in the layering, unshifted.
     [[nodiscard]] std::int64_t base_of(std::int64_t index) const;
     // Which bed of the layering lies at `layer`.

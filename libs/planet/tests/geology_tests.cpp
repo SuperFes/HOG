@@ -199,14 +199,16 @@ TEST_CASE("continents stand on granite and the deep ocean on basalt", "[planet][
             }
         } else if (land && geology.terrain().continents().is_land(cell)) {
             REQUIRE(strata.bedrock == Rock::Granite);
-            if (strata.sediment_thickness > 0) {
+            // Volcanoes' lava may lie over the beds.
+            if (strata.sediment_thickness > 0 && sedimentary(strata.sediment)) {
                 sediments.insert(strata.sediment);
             }
         } else if (!land) {
             // The shelf: the continent's rock under sea sand.
             REQUIRE(strata.bedrock == Rock::Granite);
             REQUIRE(strata.cover == Rock::Sand);
-            if (strata.sediment_thickness > 0) {
+            // Volcanoes' lava may lie over the beds.
+            if (strata.sediment_thickness > 0 && sedimentary(strata.sediment)) {
                 shelf_sediments.insert(strata.sediment);
             }
         }
@@ -355,8 +357,14 @@ TEST_CASE("the ground under the cover cuts down through the beds", "[planet][geo
              depth += 20 * fixed_one) {
             const Rock rock = strata.rock_at(depth);
             REQUIRE(rock == beds.rock_at(strata.column, strata.surface - depth));
-            REQUIRE(sedimentary(rock));
             const auto bed = strata.bed_at(depth);
+            if (rock == Rock::Basalt) {
+                // A volcano's lava, over the beds.
+                REQUIRE_FALSE(bed.has_value());
+                REQUIRE(strata.surface - depth >= strata.column.lava);
+                continue;
+            }
+            REQUIRE(sedimentary(rock));
             REQUIRE(bed.has_value());
             REQUIRE(bed.value_or(hog::planet::Bed{}).rock == rock);
             rocks.insert(rock);

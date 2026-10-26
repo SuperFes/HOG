@@ -153,6 +153,8 @@ constexpr std::int64_t steepest_riser = 2 * fixed_one;
 constexpr std::int64_t crust_blend = fixed_one / 20;
 // Soil this deep hides the rock wholly.
 constexpr std::int64_t covering_soil = fixed_one / 2;
+// The tangent of the dip, about 15 degrees, past which beds stand in no benches.
+constexpr std::int64_t benched_dip = fixed_one * 27 / 100;
 
 // Off a coast, height below the sea is read as metres from the shore, a metre to each
 // hundred-thousandth of continent height.
@@ -312,7 +314,7 @@ Landform Elevation::wear(LevelGrid grid, std::uint64_t seed,
         uplift[index] = fixed(rising + (mountain_uplift * fixed_to_double(mountains)));
         hardness[index] = fixed(erodibility);
         runoff[index] = moisture.at(cell, continents_.height(cell));
-        columns[index] = beds_.column(cell, {.continental = continental, .mountains = mountains});
+        columns[index] = beds_.column(cell, bed_setting(cell, heights[index]));
         // A rough climate, before there is one: warm low and near the equator, wet as the
         // circulation bands have it.
         const double sine = cell_center(cell).z;
@@ -411,9 +413,20 @@ Layering Elevation::layering(CellId cell) const {
 }
 
 Layering Elevation::layering(CellId cell, CellId shifted, const Landform& landform) const {
-    return {.column = beds_.column(cell, {.continental = continents_.height(cell) > 0,
-                                          .mountains = mountain_strength(cell)}),
+    return {.column = beds_.column(cell, bed_setting(cell, generated(cell))),
             .risen = landform.grid().smooth(landform.risen(), shifted)};
+}
+
+BedSetting Elevation::bed_setting(CellId cell, std::int64_t generated) const {
+    const auto crust = continents_.crust(cell);
+    BedSetting setting{.continental = crust.height > 0,
+                       .mountains = mountain_strength(cell),
+                       .grain = crust.grain};
+    // Lava built the volcano up from the ground it stands on.
+    if (const std::int64_t lift = volcanoes_.lift(cell); lift > fixed_one) {
+        setting.lava = generated - lift;
+    }
+    return setting;
 }
 
 std::optional<Channel> Elevation::river(CellId cell) const {
@@ -523,7 +536,15 @@ std::int64_t Elevation::ledged(CellId cell, CellId shifted, std::int64_t ground,
     if (strength == 0) {
         return ground;
     }
-    const auto [column, risen] = layering(cell, shifted, landform);
+    // Benches stand on beds lying nearly flat, as in the folds' hinges, not on steep limbs.
+    const BedSetting setting = bed_setting(cell, generated);
+    strength = (strength * (fixed_one - ramp(beds_.dip(cell, setting), benched_dip))) >>
+               fixed_fraction_bits;
+    if (strength == 0) {
+        return ground;
+    }
+    const BedColumn column = beds_.column(cell, setting);
+    const std::int64_t risen = landform.grid().smooth(landform.risen(), shifted);
     const auto bed = beds_.bed_at(column, ground - risen);
     if (!bed) {
         return ground;

@@ -410,18 +410,23 @@ std::array<Deposit, resource_count> Geology::deposits(CellId cell) const {
         case Host::Ground:
             top += strata.cover_thickness;
             break;
-        case Host::Sediment:
+        case Host::Sediment: {
             top += strata.cover_thickness;
             thickness = std::min(thickness, strata.sediment_thickness - offset);
+            // In the beds, not the lava over them.
+            const auto bed = strata.bed_at(top);
+            if (!bed) {
+                continue;
+            }
             if (resource == Resource::Coal) {
                 // Coal measures lie in shale and sandstone, a seam within one bed.
-                const auto bed = strata.bed_at(top);
-                if (!bed || (bed->rock != Rock::Shale && bed->rock != Rock::Sandstone)) {
+                if (bed->rock != Rock::Shale && bed->rock != Rock::Sandstone) {
                     continue;
                 }
                 thickness = std::min(thickness, strata.surface - bed->base - top);
             }
             break;
+        }
         case Host::Bedrock:
             top += strata.bedrock_depth();
             break;

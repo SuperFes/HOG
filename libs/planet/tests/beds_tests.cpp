@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <numbers>
 #include <set>
 #include <vector>
 
@@ -173,4 +174,91 @@ TEST_CASE("a ledge leaves bed boundaries where they are, benched about them", "[
     CHECK(flattest < 0.05);
     CHECK(steepest > 1.8);
     CHECK(steepest < 1.9);
+}
+
+namespace {
+
+// Tangent directions at `center`, along the x axis and across it.
+struct Tangents {
+    hog::DVec3 along;
+    hog::DVec3 across;
+};
+
+[[nodiscard]] Tangents tangents(hog::DVec3 center) {
+    const hog::DVec3 axis{1.0, 0.0, 0.0};
+    const hog::DVec3 along = glm::normalize(axis - (center * glm::dot(center, axis)));
+    return {.along = along, .across = glm::cross(center, along)};
+}
+
+// Fixed-point metres the layering shifts between `center` and `metres` away along `toward`.
+[[nodiscard]] std::int64_t shift_change(const Beds& beds, const BedSetting& setting,
+                                        hog::DVec3 center, hog::DVec3 toward, double metres) {
+    const auto at = [&](hog::DVec3 direction) {
+        return beds.column(hog::planet::cell_at(direction, 14), setting).shift;
+    };
+    return std::abs(at(glm::normalize(center + (toward * (metres / radius)))) - at(center));
+}
+
+} // namespace
+
+TEST_CASE("belts tilt their beds steeply along the grain, thrusting them; the plains barely",
+          "[planet][beds]") {
+    const Beds beds{1, radius};
+    const BedSetting belt{.continental = true, .mountains = fixed_one, .grain = {fixed_one, 0, 0}};
+    constexpr double step = 50.0;
+    std::vector<double> belt_dips;
+    std::vector<double> plain_dips;
+    std::vector<std::int64_t> told_dips;
+    double along = 0.0;
+    double across = 0.0;
+    int thrusts = 0;
+    for (int i = 0; i < 400; ++i) {
+        const hog::DVec3 center =
+            glm::normalize(hog::DVec3{0.3 + (0.001 * i), 1.0, 0.2 + (0.0013 * (i % 37))});
+        const Tangents ways = tangents(center);
+        const std::int64_t across_change = shift_change(beds, belt, center, ways.across, step);
+        const std::int64_t along_change = shift_change(beds, belt, center, ways.along, step);
+        // A jump of more than a 60 degree slope over the step is a thrust, not the beds' dip.
+        if (static_cast<double>(across_change) > 1.7 * step * fixed_one) {
+            ++thrusts;
+        } else {
+            belt_dips.push_back(std::atan(static_cast<double>(across_change) / (step * fixed_one)) *
+                                180.0 / std::numbers::pi);
+        }
+        across += static_cast<double>(across_change);
+        along += static_cast<double>(along_change);
+        told_dips.push_back(beds.dip(hog::planet::cell_at(center, 14), belt));
+        const BedSetting plain{.continental = true, .grain = {fixed_one, 0, 0}};
+        CHECK(beds.dip(hog::planet::cell_at(center, 14), plain) == 0);
+        plain_dips.push_back(
+            std::atan(static_cast<double>(shift_change(beds, plain, center, ways.across, step)) /
+                      (step * fixed_one)) *
+            180.0 / std::numbers::pi);
+    }
+    std::ranges::sort(belt_dips);
+    std::ranges::sort(plain_dips);
+    const double belt_median = belt_dips.at(belt_dips.size() / 2);
+    const double plain_median = plain_dips.at(plain_dips.size() / 2);
+    INFO("belt " << belt_median << " degrees, plains " << plain_median << " degrees, " << thrusts
+                 << " thrusts, along " << along << " across " << across);
+    CHECK(belt_median > 20.0);
+    CHECK(belt_median < 60.0);
+    CHECK(plain_median < 3.0);
+    // As told, about as steep as measured: over 20 degrees, mostly.
+    std::ranges::sort(told_dips);
+    CHECK(told_dips.at(told_dips.size() / 2) > fixed_one * 36 / 100);
+    CHECK(thrusts > 0);
+    // Folds and thrusts run with the grain, so the layering changes far less along it.
+    CHECK(along * 2.0 < across);
+}
+
+TEST_CASE("a volcano's lava buries the beds above its base", "[planet][beds]") {
+    const Beds beds{1, radius};
+    const BedSetting volcano{.continental = true, .lava = 500 * fixed_one};
+    const auto column = beds.column(cell(100, 200), volcano);
+    CHECK(beds.rock_at(column, 600 * fixed_one) == Rock::Basalt);
+    CHECK(beds.rock_at(column, 2'000 * fixed_one) == Rock::Basalt);
+    CHECK_FALSE(beds.bed_at(column, 600 * fixed_one).has_value());
+    CHECK(beds.rock_at(column, 400 * fixed_one) != Rock::Basalt);
+    CHECK(beds.bed_at(column, 400 * fixed_one).has_value());
 }

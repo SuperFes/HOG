@@ -518,12 +518,16 @@ TEST_CASE("bare beds on steep ground step into ledges", "[planet][elevation]") {
         }
         for (const CellId cell :
              hog::planet::sample_tile(grid.cell(index), 3, [](CellId fine) { return fine; })) {
+            // Only beds lying nearly flat stand in benches.
             const std::int64_t crust = terrain.continents().height(cell);
-            if (crust < fixed_one / 20) {
+            const auto setting =
+                hog::planet::BedSetting{.continental = true,
+                                        .mountains = terrain.mountain_strength(cell),
+                                        .grain = terrain.continents().crust(cell).grain};
+            if (crust < fixed_one / 20 || terrain.beds().dip(cell, setting) > fixed_one / 10) {
                 continue;
             }
-            const auto column = terrain.beds().column(
-                cell, {.continental = true, .mountains = terrain.mountain_strength(cell)});
+            const auto column = terrain.layering(cell).column;
             const std::int64_t frame =
                 terrain.elevation(cell) - grid.smooth(landform.risen(), cell);
             const auto bed = terrain.beds().bed_at(column, frame);
@@ -577,9 +581,7 @@ TEST_CASE("steep or thin-soiled ground shows its rock, deep soil hides it", "[pl
         ++land_points;
         mostly_bare += exposure.bare > fixed_one / 2 ? 1 : 0;
         // Uplift is read where the meanders shift the cell to, so nearly always the same bed.
-        const auto column =
-            terrain.beds().column(cell, {.continental = terrain.continents().height(cell) > 0,
-                                         .mountains = terrain.mountain_strength(cell)});
+        const auto column = terrain.layering(cell).column;
         const std::int64_t frame = ground - grid.smooth(landform.risen(), cell);
         ++exposed;
         const auto bed = terrain.beds().bed_at(column, frame);
@@ -627,6 +629,26 @@ TEST_CASE("the ground shows the rock its layering puts there", "[planet][elevati
     }
     CHECK(risen > 100);
     CHECK(layered > 100);
+}
+
+TEST_CASE("volcanoes on the continents are lava, not the beds they stand on",
+          "[planet][elevation]") {
+    const Elevation terrain{{.seed = 1, .ocean_fraction = 0.7, .radius = 115'000.0}};
+    const auto& grid = terrain.landform().grid();
+    int cones = 0;
+    int lava = 0;
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        const CellId cell = grid.cell(index);
+        if (terrain.continents().height(cell) <= 0 ||
+            terrain.volcanoes().lift(cell) < 300 * fixed_one) {
+            continue;
+        }
+        ++cones;
+        lava += terrain.exposure(cell, terrain.elevation(cell)).rock == Rock::Basalt ? 1 : 0;
+    }
+    INFO(lava << " of " << cones << " cone cells lava");
+    REQUIRE(cones > 10);
+    CHECK(lava * 10 > cones * 9);
 }
 
 TEST_CASE("ground dug into shows bare rock", "[planet][elevation]") {

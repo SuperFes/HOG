@@ -2,10 +2,14 @@
 #include <hog/planet/beds.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/planet/tangent_frame.hpp>
 #include <hog/planet/tile.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <optional>
 
 namespace hog::planet {
@@ -24,11 +28,18 @@ constexpr std::int64_t sandstone_below = fixed_one * 35 / 100;
 constexpr std::int64_t shale_below = fixed_one * 70 / 100;
 constexpr std::int64_t facies_lean = fixed_one * 3 / 10;
 constexpr double facies_wavelength = 60'000.0;
-// A gentle warp everywhere, and folds in the belts.
+// A gentle warp everywhere. In the belts, folds a few kilometres across and thrust sheets, all
+// drawn out along the grain: dips of 20 to 60 degrees where the belt is strongest.
 constexpr std::int64_t warp = 150 * fixed_one;
 constexpr double warp_wavelength = 40'000.0;
-constexpr std::int64_t fold = 800 * fixed_one;
-constexpr double fold_wavelength = 8'000.0;
+constexpr std::int64_t fold = 2'200 * fixed_one;
+constexpr double fold_wavelength = 4'000.0;
+constexpr std::int64_t thrust_throw = 2'500 * fixed_one;
+constexpr double thrust_wavelength = 12'000.0;
+constexpr std::int64_t sheets_per_swing = 3;
+constexpr std::int64_t grain_stretch = 4;
+// Metres over which the beds' dip is told.
+constexpr double dip_step = 40.0;
 // The basement's top: deep under the plains, raised in the belts.
 constexpr std::int64_t basement_depth = -1'500 * fixed_one;
 constexpr std::int64_t basement_lift = 3'000 * fixed_one;
@@ -42,6 +53,26 @@ constexpr double basement_wavelength = 25'000.0;
 [[nodiscard]] std::int64_t floor_divide(std::int64_t value, std::int64_t divisor) {
     const std::int64_t quotient = value / divisor;
     return (value % divisor < 0) ? quotient - 1 : quotient;
+}
+
+// Noise drawn out along the grain, stretched along each axis by how far the belt runs along it,
+// as the ridges are.
+[[nodiscard]] std::int64_t grained(std::uint64_t seed, NoisePoint point,
+                                   const std::array<std::int64_t, 3>& grain) {
+    std::int64_t total = 0;
+    std::int64_t weights = 0;
+    for (std::size_t axis = 0; axis < 3; ++axis) {
+        const std::int64_t weight = multiply(grain.at(axis), grain.at(axis));
+        if (weight < fixed_one / 50) {
+            continue;
+        }
+        NoisePoint stretched = point;
+        std::array<std::int64_t*, 3> along{&stretched.x, &stretched.y, &stretched.z};
+        *along.at(axis) /= grain_stretch;
+        total += weight * fbm(hash_combine(seed, axis), stretched, octaves);
+        weights += weight;
+    }
+    return weights == 0 ? fbm(seed, point, octaves) : total / weights;
 }
 
 } // namespace
@@ -82,13 +113,48 @@ BedColumn Beds::column(CellId cell, BedSetting setting) const {
         return fbm(hash_combine(seed_, salt), noise_point(center, planet_radius_ / wavelength),
                    octaves);
     };
-    const std::int64_t shift =
-        multiply(warp, noise(1, warp_wavelength)) +
-        multiply(multiply(fold, setting.mountains), noise(2, fold_wavelength));
-    return {.shift = static_cast<std::int32_t>(shift),
-            .basement = static_cast<std::int32_t>(basement(cell, setting)),
+    const std::int64_t shift = multiply(warp, noise(1, warp_wavelength));
+    const std::int64_t belt = this->belt(center, setting);
+    // The granite folds and thrusts with the beds on it.
+    return {.shift = static_cast<std::int32_t>(shift + belt),
+            .basement = static_cast<std::int32_t>(basement(cell, setting) + belt),
             .leaning = static_cast<std::int32_t>(noise(4, facies_wavelength)),
+            .lava = static_cast<std::int32_t>(
+                std::min<std::int64_t>(setting.lava, std::numeric_limits<std::int32_t>::max())),
             .continental = true};
+}
+
+std::int64_t Beds::belt(DVec3 center, const BedSetting& setting) const {
+    if (setting.mountains == 0) {
+        return 0;
+    }
+    const auto grained_at = [&](std::uint64_t salt, double wavelength) {
+        return grained(hash_combine(seed_, salt), noise_point(center, planet_radius_ / wavelength),
+                       setting.grain);
+    };
+    // Each sheet's beds rise towards the thrust that ends it, then start again lower behind.
+    const std::int64_t swing = grained_at(6, thrust_wavelength) * sheets_per_swing;
+    const std::int64_t along_sheet = swing - (floor_divide(swing, fixed_one) * fixed_one);
+    const std::int64_t bend = multiply(fold, grained_at(2, fold_wavelength)) +
+                              multiply(thrust_throw, along_sheet - (fixed_one / 2));
+    return multiply(bend, setting.mountains);
+}
+
+std::int64_t Beds::dip(CellId cell, const BedSetting& setting) const {
+    if (!setting.continental || setting.mountains == 0) {
+        return 0;
+    }
+    const DVec3 center = cell_center(cell);
+    const TangentFrame frame = tangent_frame(center);
+    const double step = dip_step / planet_radius_;
+    const std::int64_t here = belt(center, setting);
+    const auto rise = [&](DVec3 toward) {
+        return fixed_to_double(belt(glm::normalize(center + (toward * step)), setting) - here);
+    };
+    const double east = rise(frame.east);
+    const double north = rise(frame.north);
+    return std::llround(std::sqrt((east * east) + (north * north)) / dip_step *
+                        static_cast<double>(fixed_one));
 }
 
 std::int64_t Beds::basement(CellId cell, BedSetting setting) const {
@@ -100,7 +166,7 @@ std::int64_t Beds::basement(CellId cell, BedSetting setting) const {
 }
 
 Rock Beds::rock_at(const BedColumn& column, std::int64_t height) const {
-    if (!column.continental) {
+    if (!column.continental || height >= column.lava) {
         return Rock::Basalt;
     }
     if (height < column.basement) {
@@ -110,7 +176,7 @@ Rock Beds::rock_at(const BedColumn& column, std::int64_t height) const {
 }
 
 std::optional<Bed> Beds::bed_at(const BedColumn& column, std::int64_t height) const {
-    if (!column.continental || height < column.basement) {
+    if (!column.continental || height < column.basement || height >= column.lava) {
         return std::nullopt;
     }
     const std::int64_t index = index_at(height - column.shift);

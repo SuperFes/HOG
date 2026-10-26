@@ -142,6 +142,8 @@ private:
     template <int Bits>
     [[nodiscard]] static std::int64_t ridge(std::uint64_t seed, double frequency, int octaves,
                                             CellId cell, const std::array<std::int64_t, 3>& grain);
+    // What the beds under a cell depend on, given the ground as generated there.
+    [[nodiscard]] BedSetting bed_setting(CellId cell, std::int64_t generated) const;
     // The same, while the landform is still being evolved; `shifted` is the cell the meanders
     // move `cell` to.
     [[nodiscard]] Layering layering(CellId cell, CellId shifted, const Landform& landform) const;
