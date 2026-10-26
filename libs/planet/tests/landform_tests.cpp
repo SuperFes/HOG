@@ -4,12 +4,15 @@
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <random>
+#include <ranges>
 #include <vector>
 
 using hog::planet::CellId;
@@ -179,5 +182,30 @@ TEST_CASE("a landform keeps how far each cell rose while it stood above the sea"
                         steps};
     for (std::uint32_t cell = 0; cell < worn.grid().size(); ++cell) {
         REQUIRE(worn.risen()[cell] == (start[cell] > 0 ? steps * 30 * fixed_one : 0));
+    }
+}
+
+TEST_CASE("a landform's steepness is its steepest slope to a neighbouring cell",
+          "[planet][landform]") {
+    LevelGrid grid{4, 115'000.0};
+    const std::uint32_t raised = 1'000;
+    std::vector<std::int64_t> heights(grid.size(), 50 * fixed_one);
+    heights[raised] = 150 * fixed_one;
+    const std::vector<std::uint32_t> around{grid.neighbors(raised).begin(),
+                                            grid.neighbors(raised).end()};
+    const std::int64_t nearest = std::ranges::min(
+        std::views::iota(std::size_t{0}, around.size()) |
+        std::views::transform([&](std::size_t k) { return grid.distance(raised, k); }));
+    const std::vector<std::int64_t> zeros(grid.size(), 0);
+    const Landform landform{std::move(grid), heights, zeros, zeros, zeros, zeros, 0};
+    const auto steepness = landform.steepness();
+    CHECK(hog::planet::fixed_to_double(steepness[raised]) ==
+          Catch::Approx(100.0 / hog::planet::fixed_to_double(nearest)).epsilon(1e-3));
+    for (std::uint32_t cell = 0; cell < landform.grid().size(); ++cell) {
+        if (cell != raised && !std::ranges::contains(around, cell)) {
+            REQUIRE(steepness[cell] == 0);
+        } else {
+            REQUIRE(steepness[cell] > 0);
+        }
     }
 }

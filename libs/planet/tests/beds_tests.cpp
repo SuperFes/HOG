@@ -5,6 +5,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <set>
 #include <vector>
@@ -113,4 +115,59 @@ TEST_CASE("beds come from the seed", "[planet][beds]") {
         }
     }
     CHECK(differ > 0);
+}
+
+TEST_CASE("a bed holds the height asked about, one bed running into the next", "[planet][beds]") {
+    const Beds beds{1, radius};
+    const auto column = beds.column(cell(30, 40), plains);
+    CHECK_FALSE(beds.bed_at(column, column.basement - fixed_one));
+    CHECK_FALSE(beds.bed_at(beds.column(cell(30, 40), {}), 0));
+    auto bed = beds.bed_at(column, column.basement);
+    REQUIRE(bed);
+    for (int k = 0; k < 40; ++k) {
+        CHECK(bed->top - bed->base >= 40 * fixed_one);
+        CHECK(bed->top - bed->base <= 120 * fixed_one);
+        for (const std::int64_t height : {bed->base, (bed->base + bed->top) / 2, bed->top - 1}) {
+            if (height >= column.basement) {
+                CHECK(beds.rock_at(column, height) == bed->rock);
+                CHECK(beds.bed_at(column, height)->base == bed->base);
+            }
+        }
+        const auto next = beds.bed_at(column, bed->top);
+        REQUIRE(next);
+        REQUIRE(next->base == bed->top);
+        bed = next;
+    }
+}
+
+TEST_CASE("a ledge leaves bed boundaries where they are, benched about them", "[planet][beds]") {
+    const hog::planet::Bed bed{
+        .base = 100 * fixed_one, .top = 180 * fixed_one, .rock = Rock::Limestone};
+    const auto at = [&](double metres, std::int64_t strength) {
+        return hog::planet::ledge(bed, std::llround(metres * fixed_one), strength);
+    };
+    for (const double metres : {100.0, 117.0, 140.0, 163.5, 179.9}) {
+        CHECK(at(metres, 0) == std::llround(metres * fixed_one));
+    }
+    CHECK(at(100.0, fixed_one) == 100 * fixed_one);
+    CHECK(at(140.0, fixed_one) == 140 * fixed_one);
+    CHECK(at(180.0, fixed_one) == 180 * fixed_one);
+    // Never folding back on itself, flat at the boundaries and steepest midway.
+    std::int64_t last = at(100.0, fixed_one);
+    double flattest = 10.0;
+    double steepest = 0.0;
+    for (int step = 1; step <= 800; ++step) {
+        const std::int64_t now = at(100.0 + (step / 10.0), fixed_one);
+        REQUIRE(now >= last);
+        const double slope = hog::planet::fixed_to_double(now - last) / 0.1;
+        if (step <= 40 || step > 760) {
+            flattest = std::min(flattest, slope);
+        } else if (step > 380 && step <= 420) {
+            steepest = std::max(steepest, slope);
+        }
+        last = now;
+    }
+    CHECK(flattest < 0.05);
+    CHECK(steepest > 1.8);
+    CHECK(steepest < 1.9);
 }

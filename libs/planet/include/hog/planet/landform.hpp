@@ -54,6 +54,9 @@ public:
     // Fixed-point metres each grid cell was lifted while it stood above the sea: the ground less
     // this is the height the rock lay at before, where its beds are found.
     [[nodiscard]] std::span<const std::int64_t> risen() const noexcept { return risen_; }
+    // Fixed point: the steepest slope from each grid cell down or up to a neighbour, rise over
+    // run.
+    [[nodiscard]] std::span<const std::int64_t> steepness() const noexcept { return steepness_; }
 
     // Whether a grid cell lies in a basin, holding a lake or dry.
     [[nodiscard]] bool basin(std::uint32_t index) const { return basins_[index]; }
@@ -68,6 +71,7 @@ public:
 
 private:
     void find_lakes();
+    void find_steepness();
     // Fills a basin's cells with a lake if enough water runs in.
     void fill(std::span<const std::uint32_t> basin);
 
@@ -76,6 +80,7 @@ private:
     std::vector<std::int64_t> change_;
     std::vector<std::int64_t> soil_;
     std::vector<std::int64_t> risen_;
+    std::vector<std::int64_t> steepness_;
     Drainage drainage_;
     std::vector<std::int64_t> drained_;
     std::vector<bool> basins_;

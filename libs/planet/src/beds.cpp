@@ -4,7 +4,9 @@
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tile.hpp>
 
+#include <algorithm>
 #include <cstdint>
+#include <optional>
 
 namespace hog::planet {
 
@@ -104,18 +106,47 @@ Rock Beds::rock_at(const BedColumn& column, std::int64_t height) const {
     if (height < column.basement) {
         return Rock::Granite;
     }
-    const std::int64_t layer = height - column.shift;
-    std::int64_t bed = floor_divide(layer, slot);
-    const std::int64_t base = (slot / 4) + multiply(slot / 2, lattice_value(seed_, bed, 0, 0));
-    if (layer - (bed * slot) < base) {
-        --bed;
+    return rock_of(index_at(height - column.shift), column);
+}
+
+std::optional<Bed> Beds::bed_at(const BedColumn& column, std::int64_t height) const {
+    if (!column.continental || height < column.basement) {
+        return std::nullopt;
     }
+    const std::int64_t index = index_at(height - column.shift);
+    return Bed{.base = base_of(index) + column.shift,
+               .top = base_of(index + 1) + column.shift,
+               .rock = rock_of(index, column)};
+}
+
+std::int64_t Beds::base_of(std::int64_t index) const {
+    return (index * slot) + (slot / 4) + multiply(slot / 2, lattice_value(seed_, index, 0, 0));
+}
+
+std::int64_t Beds::index_at(std::int64_t layer) const {
+    const std::int64_t index = floor_divide(layer, slot);
+    return layer < base_of(index) ? index - 1 : index;
+}
+
+Rock Beds::rock_of(std::int64_t index, const BedColumn& column) const {
     const std::int64_t pick =
-        lattice_value(hash_combine(seed_, 5), bed, 0, 0) + multiply(facies_lean, column.leaning);
+        lattice_value(hash_combine(seed_, 5), index, 0, 0) + multiply(facies_lean, column.leaning);
     if (pick < sandstone_below) {
         return Rock::Sandstone;
     }
     return pick < shale_below ? Rock::Shale : Rock::Limestone;
+}
+
+std::int64_t ledge(const Bed& bed, std::int64_t height, std::int64_t strength) {
+    const std::int64_t thickness = bed.top - bed.base;
+    const std::int64_t along = std::clamp<std::int64_t>(
+        ((height - bed.base) << fixed_fraction_bits) / thickness, 0, fixed_one);
+    constexpr int bits = detail::weight_bits;
+    const std::int64_t profile =
+        bed.base +
+        ((thickness * detail::fade<fixed_fraction_bits>(along) + (std::int64_t{1} << (bits - 1))) >>
+         bits);
+    return height + multiply(profile - height, strength);
 }
 
 } // namespace hog::planet

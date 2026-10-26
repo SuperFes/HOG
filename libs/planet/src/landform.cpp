@@ -83,6 +83,7 @@ Landform::Landform(LevelGrid grid, std::vector<std::int64_t> heights, const Eros
         change_[cell] = heights_[cell] - start[cell];
     }
     find_lakes();
+    find_steepness();
 }
 
 Landform::Landform(LevelGrid grid, std::vector<std::int64_t> heights,
@@ -97,6 +98,7 @@ Landform::Landform(LevelGrid grid, std::vector<std::int64_t> heights,
                    risen_.size() == grid_.size(),
                "one value per grid cell");
     find_lakes();
+    find_steepness();
 }
 
 void Landform::find_lakes() {
@@ -157,6 +159,19 @@ void Landform::fill(std::span<const std::uint32_t> basin) {
         lakeside_[cell] = fixed_one;
         for (const std::uint32_t around : grid_.neighbors(cell)) {
             lakeside_[around] = fixed_one;
+        }
+    }
+}
+
+void Landform::find_steepness() {
+    steepness_.assign(grid_.size(), 0);
+    for (std::uint32_t cell = 0; cell < grid_.size(); ++cell) {
+        const auto around = grid_.neighbors(cell);
+        for (std::size_t k = 0; k < around.size(); ++k) {
+            const std::int64_t rise = std::abs(heights_[cell] - heights_[around[k]]);
+            steepness_[cell] =
+                std::max(steepness_[cell], (rise << fixed_fraction_bits) /
+                                               std::max<std::int64_t>(grid_.distance(cell, k), 1));
         }
     }
 }
