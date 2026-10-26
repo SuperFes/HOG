@@ -134,13 +134,12 @@ TEST_CASE("a fixed view is drawn the same each time", "[client][views][gpu]") {
     CHECK(device->validation_errors() == 0);
 }
 
-TEST_CASE("the island is darker at night than at noon", "[client][views][gpu]") {
+TEST_CASE("the island is nearly black on a moonless night", "[client][views][gpu]") {
     const auto device = test_device();
     const double noon = brightness(still_of(*device, view_named("island-noon")));
     const double night = brightness(still_of(*device, view_named("island-night")));
     INFO("noon " << noon << ", night " << night);
-    CHECK(night < 0.5 * noon);
-    CHECK(night > 0.0);
+    CHECK(night < 0.02 * noon);
     CHECK(device->validation_errors() == 0);
 }
 
