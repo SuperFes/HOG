@@ -164,15 +164,6 @@ constexpr std::array flags{
              options.view = *region;
              return {};
          }},
-    Flag{.name = "--islands",
-         .handler = [](Options& options, std::string_view value) -> Result<void> {
-             const auto width = parse_double(value);
-             if (!width || *width <= 0.0) {
-                 return invalid(std::format("--islands {} is not a positive width", value));
-             }
-             options.view = IslandsView{.width = *width * 1'000.0};
-             return {};
-         }},
     Flag{.name = "--layer",
          .handler = [](Options& options, std::string_view value) -> Result<void> {
              const auto layer = parse_layer(value);
@@ -313,7 +304,6 @@ Writes PNG maps of a generated planet, one per layer, named <view>-<layer>.png.
   --planet             the whole planet, longitude across and latitude down (default)
   --face F             one cube face, 0 to 5
   --region LAT,LON,KM  a square KM across, centred on LAT,LON in degrees
-  --islands KM         a square KM across, centred on the starting islands
   --layer NAME         height, biome, temperature, moisture, deposits, water or
                        plates; repeat for several (default: all)
   --size PIXELS        image width (default 1024); the planet view is half as tall

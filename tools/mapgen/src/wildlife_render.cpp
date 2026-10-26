@@ -37,8 +37,7 @@ Rgb density_colour(Rgb ground, double share) noexcept {
 Image render_wildlife(const planet::Geology& geology, const sim::Wildlife& wildlife,
                       std::uint32_t species, double planet_radius, const View& view, int width,
                       jobs::JobSystem& jobs) {
-    const View resolved = resolve(view, geology);
-    const ImageSize size = image_size(resolved, width);
+    const ImageSize size = image_size(view, width);
     Image image{.width = size.width,
                 .height = size.height,
                 .pixels = std::vector<std::uint8_t>(3 * static_cast<std::size_t>(size.width) *
@@ -52,7 +51,7 @@ Image render_wildlife(const planet::Geology& geology, const sim::Wildlife& wildl
             for (std::uint32_t row = rows.begin; row < rows.end; ++row) {
                 const auto y = static_cast<int>(row);
                 for (int x = 0; x < size.width; ++x) {
-                    const DVec3 direction = pixel_direction(resolved, size, x, y, planet_radius);
+                    const DVec3 direction = pixel_direction(view, size, x, y, planet_radius);
                     const double density = grid.interpolate(direction, [&](std::uint32_t cell) {
                         return static_cast<double>(count[cell]) / wildlife.area(cell);
                     });

@@ -164,8 +164,8 @@ TEST_CASE("season maps are named for their view, month and map", "[mapgen][seaso
           "planet-seasons-202607-land.png");
     CHECK(hog::mapgen::season_file_name(hog::mapgen::FaceView{.face = 3}, SeasonMap::Rain,
                                         2027y / January) == "face3-seasons-202701-rain.png");
-    CHECK(hog::mapgen::season_sheet_name(hog::mapgen::IslandsView{.width = 1.0},
-                                         SeasonMap::Forest) == "islands-seasons-forest.png");
+    CHECK(hog::mapgen::season_sheet_name(hog::mapgen::RegionView{.width = 1.0},
+                                         SeasonMap::Forest) == "region-seasons-forest.png");
     std::set<std::string_view> names;
     for (int map = 0; map < hog::mapgen::season_map_count; ++map) {
         names.insert(hog::mapgen::to_string(static_cast<SeasonMap>(map)));

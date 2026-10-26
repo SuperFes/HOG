@@ -85,8 +85,7 @@ Rgb air_colour(double temperature, double front) noexcept {
 Image render_weather(const planet::Geology& geology, const sim::Weather& weather,
                      double planet_radius, const View& view, WeatherMap map, int width,
                      jobs::JobSystem& jobs) {
-    const View resolved = resolve(view, geology);
-    const ImageSize size = image_size(resolved, width);
+    const ImageSize size = image_size(view, width);
     Image image{.width = size.width,
                 .height = size.height,
                 .pixels = std::vector<std::uint8_t>(3 * static_cast<std::size_t>(size.width) *
@@ -113,21 +112,20 @@ Image render_weather(const planet::Geology& geology, const sim::Weather& weather
                               .hail = field(fields.hail) * per_hour};
         return sky_colour(ground, cover, falling, field(fields.storm));
     };
-    jobs.parallel_for(
-        static_cast<std::uint32_t>(size.height), 1,
-        [&](jobs::Range rows, std::uint32_t /*thread*/) {
-            for (std::uint32_t row = rows.begin; row < rows.end; ++row) {
-                const auto y = static_cast<int>(row);
-                for (int x = 0; x < size.width; ++x) {
-                    const auto pixel =
-                        (static_cast<std::size_t>(y) * static_cast<std::size_t>(size.width)) +
-                        static_cast<std::size_t>(x);
-                    put(image, x, y,
-                        colour_at(pixel_direction(resolved, size, x, y, planet_radius),
-                                  pressure[pixel]));
-                }
-            }
-        });
+    jobs.parallel_for(static_cast<std::uint32_t>(size.height), 1,
+                      [&](jobs::Range rows, std::uint32_t /*thread*/) {
+                          for (std::uint32_t row = rows.begin; row < rows.end; ++row) {
+                              const auto y = static_cast<int>(row);
+                              for (int x = 0; x < size.width; ++x) {
+                                  const auto pixel = (static_cast<std::size_t>(y) *
+                                                      static_cast<std::size_t>(size.width)) +
+                                                     static_cast<std::size_t>(x);
+                                  put(image, x, y,
+                                      colour_at(pixel_direction(view, size, x, y, planet_radius),
+                                                pressure[pixel]));
+                              }
+                          }
+                      });
     if (map == WeatherMap::Air) {
         draw_isobars(image, pressure);
     }

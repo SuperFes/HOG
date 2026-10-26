@@ -49,14 +49,7 @@ struct RegionView {
     friend bool operator==(const RegionView&, const RegionView&) = default;
 };
 
-// A square region centred on the starting islands, wherever the seed put them.
-struct IslandsView {
-    double width = 0.0; // metres across
-
-    friend bool operator==(const IslandsView&, const IslandsView&) = default;
-};
-
-using View = std::variant<PlanetView, FaceView, RegionView, IslandsView>;
+using View = std::variant<PlanetView, FaceView, RegionView>;
 
 // Weather maps: frames from a start date, after the weather has had time to settle.
 struct WeatherFrames {

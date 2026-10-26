@@ -60,10 +60,6 @@ TEST_CASE("mapgen reads every option", "[mapgen]") {
     CHECK(region->view ==
           hog::mapgen::View{RegionView{.latitude = -41.5, .longitude = 172.25, .width = 30'000.0}});
 
-    const auto islands = parse({"--islands", "40"});
-    REQUIRE(islands);
-    CHECK(islands->view == hog::mapgen::View{hog::mapgen::IslandsView{.width = 40'000.0}});
-
     const auto weather =
         parse({"--weather", "3", "--every", "2", "--date", "2026-07-04", "--cell-km", "12.5"});
     REQUIRE(weather);
@@ -117,8 +113,6 @@ TEST_CASE("mapgen rejects bad arguments", "[mapgen]") {
     CHECK(rejects({"--region", "0,0,0"}));
     CHECK(rejects({"--region", "0,0,nan"}));
     CHECK(rejects({"--region", "0,,10"}));
-    CHECK(rejects({"--islands", "0"}));
-    CHECK(rejects({"--islands", "wide"}));
     CHECK(rejects({"--weather", "0"}));
     CHECK(rejects({"--weather", "400"}));
     CHECK(rejects({"--every", "0"}));

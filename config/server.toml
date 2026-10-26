@@ -28,7 +28,7 @@ step_hours = 24
 [forest]
 vegetation = "forest.toml"
 step_hours = 1
-# A new world's first island burned this long before it begins: snags among young regrowth.
+# A new world's woods nearest the start burned this long before it begins: snags among young regrowth.
 burned_years_ago = 8
 
 [net]

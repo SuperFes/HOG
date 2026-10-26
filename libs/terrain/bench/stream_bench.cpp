@@ -1,5 +1,7 @@
 #include <hog/jobs/job_system.hpp>
+#include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/planet/tangent_frame.hpp>
 #include <hog/terrain/baker.hpp>
 #include <hog/terrain/bend.hpp>
 #include <hog/terrain/selection.hpp>
@@ -25,8 +27,10 @@ TEST_CASE("selecting and streaming the ground", "[benchmark]") {
     hog::terrain::PatchBaker baker{world, jobs};
     hog::terrain::PatchStream stream;
 
-    // Standing on the islands, looking along the ground, as the client's window sees it.
-    const hog::DVec3 up = glm::normalize(world.geology().terrain().archipelago().center());
+    // Standing on the land nearest the start, looking along the ground, as the client's window
+    // sees it.
+    const hog::DVec3 up = world.geology().terrain().nearest_land(hog::planet::start_direction,
+                                                                 50 * hog::planet::fixed_one);
     const double ground =
         hog::terrain::bake_patch(world, hog::planet::cell_at(up, 12)).heights.highest;
     const hog::WorldPosition eye{up * (radius + ground + 1.7)};

@@ -139,7 +139,7 @@ private:
 // Pixels are coloured, then lit by the slope of the ground around them and any higher ground
 // between them and the sun, under the clouds.
 Image render_photo(const planet::Geology& geology, const sim::Weather& weather,
-                   const sim::Forest& forest, double planet_radius, const View& resolved,
+                   const sim::Forest& forest, double planet_radius, const View& view,
                    ImageSize size, const Lighting& lighting, jobs::JobSystem& jobs) {
     const auto width = static_cast<std::size_t>(size.width);
     const auto count = width * static_cast<std::size_t>(size.height);
@@ -159,9 +159,9 @@ Image render_photo(const planet::Geology& geology, const sim::Weather& weather,
             const auto y = static_cast<int>(row);
             const int other = y + 1 < size.height ? y + 1 : y - 1;
             for (int x = 0; x < size.width; ++x) {
-                const DVec3 point = pixel_direction(resolved, size, x, y, planet_radius);
+                const DVec3 point = pixel_direction(view, size, x, y, planet_radius);
                 const double across =
-                    glm::length(point - pixel_direction(resolved, size, x, other, planet_radius)) *
+                    glm::length(point - pixel_direction(view, size, x, other, planet_radius)) *
                     planet_radius;
                 const Surface surface = sample_surface(geology, weather, forest, point, across);
                 points[pixel(x, y)] = point;
@@ -327,11 +327,9 @@ Image render_season(const planet::Geology& geology, const sim::Weather& weather,
                     const sim::Forest& forest, double planet_radius, const View& view,
                     SeasonMap map, int width, jobs::JobSystem& jobs, const Lighting& lighting) {
     HOG_ASSERT(forest.grid().level() == weather.grid().level(), "forest off the weather's grid");
-    const View resolved = resolve(view, geology);
-    const ImageSize size = image_size(resolved, width);
+    const ImageSize size = image_size(view, width);
     if (map == SeasonMap::Photo) {
-        return render_photo(geology, weather, forest, planet_radius, resolved, size, lighting,
-                            jobs);
+        return render_photo(geology, weather, forest, planet_radius, view, size, lighting, jobs);
     }
     Image image{.width = size.width,
                 .height = size.height,
@@ -346,7 +344,7 @@ Image render_season(const planet::Geology& geology, const sim::Weather& weather,
     // Half a pixel, in metres, at a pixel's centre.
     const auto margin = [&](DVec3 here, int x, int y) {
         const int other = y + 1 < size.height ? y + 1 : y - 1;
-        return 0.5 * glm::length(here - pixel_direction(resolved, size, x, other, planet_radius)) *
+        return 0.5 * glm::length(here - pixel_direction(view, size, x, other, planet_radius)) *
                planet_radius;
     };
     const auto land_colour = [&](planet::CellId cell, DVec3 point, int x, int y) {
@@ -403,7 +401,7 @@ Image render_season(const planet::Geology& geology, const sim::Weather& weather,
                 const auto y = static_cast<int>(row);
                 for (int x = 0; x < size.width; ++x) {
                     const Rgb colour =
-                        colour_at(pixel_direction(resolved, size, x, y, planet_radius), x, y);
+                        colour_at(pixel_direction(view, size, x, y, planet_radius), x, y);
                     const auto offset =
                         3 * ((static_cast<std::size_t>(y) * static_cast<std::size_t>(size.width)) +
                              static_cast<std::size_t>(x));

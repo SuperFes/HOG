@@ -132,27 +132,12 @@ constexpr Rgb sliding_colour{240, 210, 40};
     return angle * std::numbers::pi / 180.0;
 }
 
-[[nodiscard]] double degrees(double angle) {
-    return angle * 180.0 / std::numbers::pi;
-}
-
 } // namespace
 
 Rgb Image::at(int x, int y) const {
     const auto offset = 3 * ((static_cast<std::size_t>(y) * static_cast<std::size_t>(width)) +
                              static_cast<std::size_t>(x));
     return {pixels.at(offset), pixels.at(offset + 1), pixels.at(offset + 2)};
-}
-
-View resolve(const View& view, const planet::Geology& geology) {
-    const auto* islands = std::get_if<IslandsView>(&view);
-    if (islands == nullptr) {
-        return view;
-    }
-    const DVec3 center = geology.terrain().archipelago().center();
-    return RegionView{.latitude = degrees(std::asin(center.z)),
-                      .longitude = degrees(std::atan2(center.y, center.x)),
-                      .width = islands->width};
 }
 
 ImageSize image_size(const View& view, int width) noexcept {
@@ -174,7 +159,7 @@ DVec3 pixel_direction(const View& view, ImageSize size, int x, int y, double pla
         return glm::normalize(planet::face_uv_to_xyz(face->face, planet::st_to_uv(across),
                                                      planet::st_to_uv(1.0 - down)));
     }
-    HOG_ASSERT(std::holds_alternative<RegionView>(view), "view not resolved");
+    HOG_ASSERT(std::holds_alternative<RegionView>(view), "view not view");
     const auto& region = std::get<RegionView>(view);
     const DVec3 center = planet::direction_at(radians(region.latitude), radians(region.longitude));
     const planet::TangentFrame frame = planet::tangent_frame(center);
@@ -271,8 +256,7 @@ Rgb plate_colour(std::uint32_t plate, const planet::Plates::Boundary& boundary) 
 
 Image render(const planet::Geology& geology, double planet_radius, const View& view, Layer layer,
              int width, jobs::JobSystem& jobs) {
-    const View resolved = resolve(view, geology);
-    const ImageSize size = image_size(resolved, width);
+    const ImageSize size = image_size(view, width);
     Image image{.width = size.width,
                 .height = size.height,
                 .pixels = std::vector<std::uint8_t>(3 * static_cast<std::size_t>(size.width) *
@@ -280,7 +264,7 @@ Image render(const planet::Geology& geology, double planet_radius, const View& v
     // Half a pixel, in metres, at a pixel's centre.
     const auto margin = [&](DVec3 at, int x, int y) {
         const int other = y + 1 < size.height ? y + 1 : y - 1;
-        return 0.5 * glm::length(at - pixel_direction(resolved, size, x, other, planet_radius)) *
+        return 0.5 * glm::length(at - pixel_direction(view, size, x, other, planet_radius)) *
                planet_radius;
     };
     const planet::Elevation& terrain = geology.terrain();
@@ -325,7 +309,7 @@ Image render(const planet::Geology& geology, double planet_radius, const View& v
             for (std::uint32_t row = rows.begin; row < rows.end; ++row) {
                 const auto y = static_cast<int>(row);
                 for (int x = 0; x < size.width; ++x) {
-                    const DVec3 at = pixel_direction(resolved, size, x, y, planet_radius);
+                    const DVec3 at = pixel_direction(view, size, x, y, planet_radius);
                     const Rgb colour = colour_at(planet::cell_at(at), at, x, y);
                     const auto offset =
                         3 * ((static_cast<std::size_t>(y) * static_cast<std::size_t>(size.width)) +
@@ -345,8 +329,6 @@ std::string file_name(const View& view, Layer layer) {
     const char* name = "region";
     if (std::holds_alternative<PlanetView>(view)) {
         name = "planet";
-    } else if (std::holds_alternative<IslandsView>(view)) {
-        name = "islands";
     }
     return std::format("{}-{}.png", name, to_string(layer));
 }

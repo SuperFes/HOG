@@ -431,6 +431,24 @@ std::optional<Channel> Elevation::lake(CellId cell) const {
     return Channel{.bed = ground, .surface = *level};
 }
 
+DVec3 Elevation::nearest_land(DVec3 from, std::int64_t above) const {
+    const Landform& ground = landform();
+    const DVec3 toward = glm::normalize(from);
+    DVec3 nearest = toward;
+    double closest = -2.0; // cosine of the angle to it
+    for (std::uint32_t index = 0; index < ground.grid().size(); ++index) {
+        if (ground.heights()[index] <= above) {
+            continue;
+        }
+        const DVec3 center = cell_center(ground.grid().cell(index));
+        if (const double near = glm::dot(center, toward); near > closest) {
+            closest = near;
+            nearest = center;
+        }
+    }
+    return nearest;
+}
+
 std::int64_t Elevation::above_water(CellId cell) const {
     const std::int64_t ground = elevation(cell);
     const Evolved& evolved = this->evolved();

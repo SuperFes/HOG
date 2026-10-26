@@ -6,6 +6,7 @@
 #include <hog/login/service.hpp>
 #include <hog/net/client.hpp>
 #include <hog/planet/planet_config.hpp>
+#include <hog/planet/tangent_frame.hpp>
 #include <hog/planet/world.hpp>
 
 #include <chrono>
@@ -90,7 +91,7 @@ int run(std::span<const std::string_view> arguments) {
         return EXIT_FAILURE;
     }
     const planet::World world{*planet};
-    const planet::Archipelago& islands = world.geology().terrain().archipelago();
+    const DVec3 start = world.geology().terrain().nearest_land(planet::start_direction);
 
     std::vector<bot::Bot> bots;
     std::mt19937_64 scatter{options->seed};
@@ -105,9 +106,9 @@ int run(std::span<const std::string_view> arguments) {
             }
             token = std::move(*granted);
         }
-        // Scattered around the first island's middle, so they don't stand in one spot.
-        const bot::Wander spot = bot::pick(islands.center(), world.geology().planet_radius(),
-                                           scatter, {.furthest = 500.0, .nearest = 10.0});
+        // Scattered around the land nearest the start, so they don't stand in one spot.
+        const bot::Wander spot = bot::pick(start, world.geology().planet_radius(), scatter,
+                                           {.furthest = 500.0, .nearest = 10.0});
         auto started = bot::Bot::start(world, options->connect, std::move(token), spot.target,
                                        options->seed + which);
         if (!started) {

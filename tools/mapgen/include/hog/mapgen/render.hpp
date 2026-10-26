@@ -35,10 +35,7 @@ struct ImageSize {
 // The planet view is twice as wide as it is tall; the others are square.
 [[nodiscard]] ImageSize image_size(const View& view, int width) noexcept;
 
-// The view with any place named by the planet, such as the starting islands, turned into a region.
-[[nodiscard]] View resolve(const View& view, const planet::Geology& geology);
-
-// The unit direction under the centre of a pixel. Precondition: the view is resolved.
+// The unit direction under the centre of a pixel.
 [[nodiscard]] DVec3 pixel_direction(const View& view, ImageSize size, int x, int y,
                                     double planet_radius);
 

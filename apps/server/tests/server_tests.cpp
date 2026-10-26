@@ -315,8 +315,8 @@ capacity = { grassland = 0.5, savanna = 3, temperate_forest = 20, boreal_forest 
     }
     CHECK(opened(config, later)->forest()->fields() == before);
 
-    // A new world may begin with its first island burned years before; reopened, it isn't burned
-    // again.
+    // A new world may begin with the woods by the start burned years before; reopened, they
+    // aren't burned again.
     {
         const World fresh;
         auto history = fresh.config();

@@ -3,6 +3,7 @@
 #include <hog/planet/neighbors.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/planet/tangent_frame.hpp>
 #include <hog/planet/tile.hpp>
 #include <hog/testing/quick.hpp>
 #include <hog/testing/worlds.hpp>
@@ -306,6 +307,30 @@ TEST_CASE("ground stands above the water it drains to", "[planet][elevation]") {
         }
     }
     CHECK(land > 0);
+}
+
+TEST_CASE("the nearest land is land, with none nearer", "[planet][elevation]") {
+    const Elevation terrain{planet(1)};
+    const auto& landform = terrain.landform();
+    const auto& grid = landform.grid();
+    const std::int64_t above = metres(50);
+    for (const hog::DVec3 from : {hog::planet::start_direction, hog::planet::north_pole,
+                                  hog::planet::direction_at(-0.6, 2.1)}) {
+        const hog::DVec3 found = terrain.nearest_land(from, above);
+        const std::uint32_t there = grid.index(hog::planet::cell_at(found, grid.level()));
+        REQUIRE(landform.heights()[there] > above);
+        CHECK(terrain.is_land(hog::planet::cell_at(found)));
+        // Nothing on the way there stands so high.
+        const double angle = std::acos(std::clamp(glm::dot(found, from), -1.0, 1.0));
+        for (int step = 1; step < 200; ++step) {
+            const std::uint32_t index = grid.index(hog::planet::cell_at(
+                along(from, found, angle * radius * step / 200.0), grid.level()));
+            CHECK((index == there || landform.heights()[index] <= above));
+        }
+    }
+    // From land, the land itself.
+    const hog::DVec3 land = terrain.nearest_land(hog::planet::start_direction, above);
+    CHECK(terrain.nearest_land(land, above) == land);
 }
 
 TEST_CASE("only ground joined to the sea lies under it", "[planet][elevation]") {

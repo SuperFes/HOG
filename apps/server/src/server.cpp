@@ -6,6 +6,7 @@
 #include <hog/planet/cell_id.hpp>
 #include <hog/planet/geology.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/planet/tangent_frame.hpp>
 #include <hog/save/snapshot_store.hpp>
 #include <hog/server/spatial_tracking.hpp>
 #include <hog/server/survey.hpp>
@@ -286,9 +287,8 @@ void Server::burn_history() {
     if (!forest_ || !years) {
         return;
     }
-    // The wooded cell nearest the island's middle: an island is about a cell across, so the cell
-    // its middle falls in may be sea.
-    const DVec3 middle = planet_.geology().terrain().archipelago().islands().front().center;
+    // The wooded cell nearest the start, which may be out at sea.
+    const DVec3 middle = planet::start_direction;
     const sim::CellGrid& grid = forest_->grid();
     std::optional<std::uint32_t> nearest;
     double closest = std::numeric_limits<double>::infinity();
@@ -307,7 +307,7 @@ void Server::burn_history() {
     constexpr auto one = static_cast<double>(planet::fixed_one);
     forest_->burned_ago(cell, *years, static_cast<double>(state.temperature) / one,
                         1.0 - (static_cast<double>(state.moisture) / one));
-    log::info(server_log, "forest: the first island burned {} years ago", *years);
+    log::info(server_log, "forest: the woods by the start burned {} years ago", *years);
 }
 
 void Server::simulate(GameTime from, GameDuration step) {

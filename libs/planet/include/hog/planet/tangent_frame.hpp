@@ -7,6 +7,8 @@ namespace hog::planet {
 
 // The planet spins about +z; north is towards +z.
 inline constexpr DVec3 north_pole{0.0, 0.0, 1.0};
+// Where players start until there are towns to start in: latitude 0, longitude 0.
+inline constexpr DVec3 start_direction{1.0, 0.0, 0.0};
 
 // Right-handed orthonormal frame on the surface: east x north = up, with up pointing away from
 // the planet centre. At the poles, where east is undefined, east is taken as +x.

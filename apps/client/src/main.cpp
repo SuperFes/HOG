@@ -22,6 +22,7 @@
 #include <hog/planet/bake.hpp>
 #include <hog/planet/planet_config.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/planet/tangent_frame.hpp>
 #include <hog/planet/world.hpp>
 #include <hog/render/billboard.hpp>
 #include <hog/render/cloud_quality.hpp>
@@ -66,7 +67,7 @@ namespace {
 
 using namespace hog;
 
-constexpr double start_altitude = 1'500.0; // metres over the starting islands
+constexpr double start_altitude = 1'500.0; // metres over the start
 constexpr double start_pitch = -0.2;       // radians
 constexpr double fast = 5.0;               // times as fast with Shift held
 constexpr double speed_step = 1.25;        // per notch of the mouse wheel
@@ -188,9 +189,8 @@ client::Flight start(const client::Options& options, const planet::World& world)
                                                            options.start->longitude * degree),
                                       radius, options.start->altitude, planet::north_pole);
     } else {
-        const planet::Archipelago& islands = world.geology().terrain().archipelago();
-        flight = client::start_flight(islands.center(), radius, start_altitude,
-                                      islands.islands().front().center);
+        flight = client::start_flight(planet::start_direction, radius, start_altitude,
+                                      planet::north_pole);
     }
     flight.pitch = start_pitch;
     return flight;

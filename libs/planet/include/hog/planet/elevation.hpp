@@ -78,6 +78,10 @@ public:
     [[nodiscard]] Exposure exposure(CellId cell, std::int64_t ground,
                                     std::int64_t least_bare = 0) const;
 
+    // The unit direction of the landform cell nearest `from` whose ground stands more than `above`
+    // fixed-point metres above the sea, or `from` itself if none does.
+    [[nodiscard]] DVec3 nearest_land(DVec3 from, std::int64_t above = 0) const;
+
     // The river running through a cell, if one does.
     [[nodiscard]] std::optional<Channel> river(CellId cell) const;
 
