@@ -151,6 +151,8 @@ constexpr std::int64_t ledge_soil = fixed_one;
 constexpr std::int64_t steepest_riser = 2 * fixed_one;
 // Continental crust height over which ledges fade in from the crust's edge.
 constexpr std::int64_t crust_blend = fixed_one / 20;
+// Soil this deep hides the rock wholly.
+constexpr std::int64_t covering_soil = fixed_one / 2;
 
 // Off a coast, height below the sea is read as metres from the shore as the islands' flanks fall;
 // continents' coasts fall about twice as fast on a small planet.
@@ -364,6 +366,39 @@ std::int64_t Elevation::elevation(CellId cell) const {
     const std::int64_t ground = worn(cell, generated, evolved.landform, evolved.meander);
     // Rivers end at the sea, cutting nothing under it.
     return generated <= 0 ? ground : evolved.rivers.cut(cell, ground);
+}
+
+Exposure Elevation::exposure(CellId cell, std::int64_t ground, std::int64_t least_bare) const {
+    const std::int64_t generated = this->generated(cell);
+    if (generated <= 0) {
+        return {};
+    }
+    const Evolved& evolved = this->evolved();
+    const Landform& landform = evolved.landform;
+    const LevelGrid& grid = landform.grid();
+    const CellId shifted = cell_at(evolved.meander(cell_center(cell)));
+    const std::int64_t soil = std::max<std::int64_t>(grid.smooth(landform.soil(), shifted), 0);
+    const std::int64_t steep =
+        std::max<std::int64_t>(grid.smooth(landform.steepness(), shifted), 0);
+    const std::int64_t thin = fixed_one - ramp(soil, covering_soil);
+    const std::int64_t stripped = (ramp(steep - ledge_gentlest, ledge_steep - ledge_gentlest) *
+                                   ((ledge_soil << fixed_fraction_bits) / (ledge_soil + soil))) >>
+                                  fixed_fraction_bits;
+    const std::int64_t bare =
+        std::max((std::max(thin, stripped) * ramp(generated, coast_blend)) >> fixed_fraction_bits,
+                 least_bare);
+    if (bare == 0) {
+        return {};
+    }
+    const BedColumn column = beds_.column(
+        cell, {.continental = continents_.height(cell) > 0, .mountains = mountain_strength(cell)});
+    const std::int64_t height = ground - grid.smooth(landform.risen(), shifted);
+    Exposure exposure{.rock = beds_.rock_at(column, height), .bare = bare};
+    if (const auto bed = beds_.bed_at(column, height)) {
+        exposure.layer = (bed->index << fixed_fraction_bits) +
+                         (((height - bed->base) << fixed_fraction_bits) / (bed->top - bed->base));
+    }
+    return exposure;
 }
 
 std::optional<Channel> Elevation::river(CellId cell) const {

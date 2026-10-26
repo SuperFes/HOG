@@ -116,7 +116,8 @@ std::optional<Bed> Beds::bed_at(const BedColumn& column, std::int64_t height) co
     const std::int64_t index = index_at(height - column.shift);
     return Bed{.base = base_of(index) + column.shift,
                .top = base_of(index + 1) + column.shift,
-               .rock = rock_of(index, column)};
+               .rock = rock_of(index, column),
+               .index = index};
 }
 
 std::int64_t Beds::base_of(std::int64_t index) const {

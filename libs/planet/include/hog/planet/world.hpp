@@ -70,6 +70,9 @@ public:
     // The same from the cell's generated elevation, where that's known already.
     [[nodiscard]] std::int64_t elevation(CellId cell, std::int64_t generated) const;
 
+    // What rock a cell's ground shows, as state has it; ground dug into is bare.
+    [[nodiscard]] Exposure exposure(CellId cell, const CellState& state) const;
+
     // What is open at a fixed-point depth in metres below a cell's generated surface: dug out,
     // whether from the surface or as a hollow, or else a cave.
     [[nodiscard]] std::optional<Opening> opening_at(CellId cell, std::int64_t depth) const;

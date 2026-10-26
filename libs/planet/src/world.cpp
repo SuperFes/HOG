@@ -124,6 +124,10 @@ CellState World::state(CellId cell) const {
     return state;
 }
 
+Exposure World::exposure(CellId cell, const CellState& state) const {
+    return geology_.terrain().exposure(cell, state.elevation, state.excavated > 0 ? fixed_one : 0);
+}
+
 std::int64_t World::elevation(CellId cell) const {
     return elevation(cell, geology_.terrain().elevation(cell));
 }

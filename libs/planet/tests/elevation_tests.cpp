@@ -528,3 +528,84 @@ TEST_CASE("bare beds on steep ground step into ledges", "[planet][elevation]") {
     // Evenly spread, half would be.
     CHECK(midway < points * 2 / 5);
 }
+
+TEST_CASE("steep or thin-soiled ground shows its rock, deep soil hides it", "[planet][elevation]") {
+    const Elevation terrain{{.seed = 1, .ocean_fraction = 0.7, .radius = 115'000.0}};
+    const auto& landform = terrain.landform();
+    const auto& grid = landform.grid();
+    std::int64_t steep_bare = 0;
+    int steep = 0;
+    int covered = 0;
+    int land_points = 0;
+    int mostly_bare = 0;
+    int exposed = 0;
+    int agreeing = 0;
+    int layered = 0;
+    for (std::uint32_t index = 0; index < grid.size(); index += 7) {
+        const CellId cell = grid.cell(index);
+        const std::int64_t ground = terrain.elevation(cell);
+        const hog::planet::Exposure exposure = terrain.exposure(cell, ground);
+        CHECK(exposure.bare >= 0);
+        CHECK(exposure.bare <= fixed_one);
+        if (ground <= 0) {
+            CHECK(exposure.bare == 0);
+            continue;
+        }
+        if (landform.heights()[index] > 100 * fixed_one &&
+            landform.steepness()[index] > fixed_one * 7 / 10 &&
+            landform.soil()[index] < fixed_one / 5) {
+            ++steep;
+            steep_bare += exposure.bare;
+        }
+        if (landform.steepness()[index] < fixed_one / 10 && landform.soil()[index] > fixed_one &&
+            exposure.bare == 0) {
+            ++covered;
+        }
+        ++land_points;
+        mostly_bare += exposure.bare > fixed_one / 2 ? 1 : 0;
+        if (exposure.bare == 0) {
+            continue;
+        }
+        // Uplift is read where the meanders shift the cell to, so nearly always the same bed.
+        const auto column =
+            terrain.beds().column(cell, {.continental = terrain.continents().height(cell) > 0,
+                                         .mountains = terrain.mountain_strength(cell)});
+        const std::int64_t frame = ground - grid.smooth(landform.risen(), cell);
+        ++exposed;
+        const auto bed = terrain.beds().bed_at(column, frame);
+        if (bed && exposure.layer >> hog::planet::fixed_fraction_bits == bed->index) {
+            ++layered;
+        }
+        agreeing += exposure.rock == terrain.beds().rock_at(column, frame) &&
+                            (bed.has_value() || exposure.layer == 0)
+                        ? 1
+                        : 0;
+    }
+    INFO(steep << " steep, " << covered << " covered, " << agreeing << " of " << exposed
+               << " agreeing, " << layered << " layered, " << mostly_bare << " of " << land_points
+               << " land points mostly bare");
+    REQUIRE(steep > 20);
+    // Read smoothly between cells, so a little gentler than the steep cells alone.
+    CHECK(steep_bare / steep > fixed_one * 2 / 3);
+    // Bare rock is the exception: most land keeps its soil.
+    CHECK(mostly_bare > land_points / 50);
+    CHECK(mostly_bare < land_points / 5);
+    CHECK(covered > 100);
+    CHECK(layered > 100);
+    CHECK(agreeing > exposed * 95 / 100);
+}
+
+TEST_CASE("ground dug into shows bare rock", "[planet][elevation]") {
+    const Elevation terrain{{.seed = 1, .ocean_fraction = 0.7, .radius = 115'000.0}};
+    const auto& landform = terrain.landform();
+    const auto& grid = landform.grid();
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        const CellId cell = grid.cell(index);
+        const std::int64_t ground = terrain.elevation(cell);
+        if (ground > 100 * fixed_one && terrain.exposure(cell, ground).bare == 0) {
+            CHECK(terrain.exposure(cell, ground, fixed_one).bare == fixed_one);
+            return;
+        }
+    }
+    FAIL("no covered ground");
+}

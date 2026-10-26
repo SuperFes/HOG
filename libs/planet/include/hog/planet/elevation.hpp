@@ -21,6 +21,18 @@
 
 namespace hog::planet {
 
+// What the ground shows of the rock under it.
+struct Exposure {
+    Rock rock = Rock::Basalt;
+    // Fixed point from 0 to 1: how much of the ground is bare rock rather than soil.
+    std::int64_t bare = 0;
+    // Fixed point: the bed's index plus how far up it the ground cuts; zero in rock that lies in
+    // no beds.
+    std::int64_t layer = 0;
+
+    friend bool operator==(const Exposure&, const Exposure&) = default;
+};
+
 // Terrain height: continents and the starting islands give the coastline, lowlands and ocean
 // floor; ridges raise mountain ranges where the plates push them up, away from the coast, and
 // volcanoes stand along the arcs above plates diving and in chains carried off plumes. Rivers
@@ -59,6 +71,11 @@ public:
     // Fixed-point metres above sea level of the ground, a river's bed included: positive above
     // the sea, negative below it.
     [[nodiscard]] std::int64_t elevation(CellId cell) const;
+
+    // What rock ground at `ground` fixed-point metres shows there, and how bare it is: bare where
+    // soil is thin, or stripped from steep slopes as the ledges are, and at least `least_bare`.
+    [[nodiscard]] Exposure exposure(CellId cell, std::int64_t ground,
+                                    std::int64_t least_bare = 0) const;
 
     // The river running through a cell, if one does.
     [[nodiscard]] std::optional<Channel> river(CellId cell) const;

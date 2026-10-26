@@ -117,7 +117,8 @@ TEST_CASE("beds come from the seed", "[planet][beds]") {
     CHECK(differ > 0);
 }
 
-TEST_CASE("a bed holds the height asked about, one bed running into the next", "[planet][beds]") {
+TEST_CASE("a bed holds the height asked about, one bed running into the next, counted upwards",
+          "[planet][beds]") {
     const Beds beds{1, radius};
     const auto column = beds.column(cell(30, 40), plains);
     CHECK_FALSE(beds.bed_at(column, column.basement - fixed_one));
@@ -137,6 +138,7 @@ TEST_CASE("a bed holds the height asked about, one bed running into the next", "
         REQUIRE(beds.bed_at(column, bed.top));
         const hog::planet::Bed next = beds.bed_at(column, bed.top).value_or(hog::planet::Bed{});
         REQUIRE(next.base == bed.top);
+        CHECK(next.index == bed.index + 1);
         bed = next;
     }
 }

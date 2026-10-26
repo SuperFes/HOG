@@ -44,11 +44,13 @@ struct BedColumn {
     bool continental = false;
 };
 
-// One sedimentary bed: its base and top in fixed-point metres, and its rock.
+// One sedimentary bed: its base and top in fixed-point metres, its rock, and which it is,
+// counting upwards.
 struct Bed {
     std::int64_t base = 0;
     std::int64_t top = 0;
     Rock rock = Rock::Shale;
+    std::int64_t index = 0;
 };
 
 // Ground at `height` within `bed` moved towards the bed's own profile, by `strength` in fixed
