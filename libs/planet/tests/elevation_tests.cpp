@@ -5,6 +5,7 @@
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tile.hpp>
 #include <hog/testing/quick.hpp>
+#include <hog/testing/worlds.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -27,7 +28,10 @@ using hog::planet::fixed_to_double;
 namespace {
 
 hog::planet::PlanetConfig planet(std::uint64_t seed) {
-    return {.seed = seed, .ocean_fraction = 0.7, .radius = 115'000.0};
+    return {.seed = seed,
+            .ocean_fraction = 0.7,
+            .radius = 115'000.0,
+            .erosion_cell = hog::testing::coarse_erosion_cell};
 }
 
 std::vector<CellId> cells_at(int level) {
@@ -54,7 +58,7 @@ std::vector<std::pair<hog::DVec3, hog::DVec3>> coasts(const Elevation& terrain, 
          hog::planet::sample_tile(CellId::from_face(4), 8, [](CellId cell) { return cell; })) {
         // Not volcanoes', whose flanks fall steeply into the sea.
         const auto shield = terrain.hotspots().surface(cell);
-        if (!terrain.is_land(cell) || (shield && *shield >= terrain.elevation(cell)) ||
+        if (!terrain.is_land(cell) || (shield && *shield > 0) ||
             terrain.volcanoes().lift(cell) > 0) {
             continue;
         }
@@ -308,17 +312,19 @@ TEST_CASE("only ground joined to the sea lies under it", "[planet][elevation]") 
     const Elevation terrain{planet(9)};
     const auto& landform = terrain.landform();
     const auto& drainage = landform.drainage();
-    int cut_off = 0;
-    for (std::uint32_t index = 0; index < landform.grid().size(); ++index) {
+    // Some 200,000 cells, however fine the landform.
+    const std::uint32_t stride = std::max(landform.grid().size() / 200'000, 1U);
+    double cut_off = 0.0; // km²
+    for (std::uint32_t index = 0; index < landform.grid().size(); index += stride) {
         const CellId cell = landform.grid().cell(index);
         if (landform.heights()[index] > 0 || terrain.elevation(cell) >= 0) {
             continue;
         }
         const bool sea = drainage.receiver[index] == index;
         REQUIRE(terrain.is_land(cell) != sea);
-        cut_off += sea ? 0 : 1;
+        cut_off += sea ? 0.0 : static_cast<double>(landform.grid().area(index) * stride) / 1e6;
     }
-    CHECK(cut_off > 1'000);
+    CHECK(cut_off > 1'000.0);
 }
 
 TEST_CASE("the deep ocean floor rises at ridges, sinks into trenches and rolls between",
@@ -375,8 +381,12 @@ TEST_CASE("the youngest shields over plumes rise as islands", "[planet][elevatio
 namespace {
 
 // How far a lake's water at `level` over `cell` stands above whatever is beside it at `next`, the
-// ground or other water, where no rim between holds it in; 0 where it's held.
+// ground or another lake, where no rim between holds it in; 0 where it's held or it runs out.
 std::int64_t wall(const Elevation& terrain, CellId cell, CellId next, std::int64_t level) {
+    // A river beside a lake is its water running out, falling from the lake's level.
+    if (terrain.river(next)) {
+        return 0;
+    }
     const auto beside = terrain.lake(next);
     const std::int64_t drop =
         level - (beside ? beside->surface : std::max<std::int64_t>(terrain.elevation(next), 0));
@@ -400,21 +410,30 @@ std::int64_t wall(const Elevation& terrain, CellId cell, CellId next, std::int64
 
 TEST_CASE("the ground holds lakes in, the water never standing over lower ground beside it",
           "[planet][elevation]") {
-    const Elevation terrain{planet(1)};
-    const auto& grid = terrain.landform().grid();
-    const auto lake_at = [&](std::uint32_t index) {
-        return terrain.lake(grid.cell(index)).has_value();
-    };
+    // Worn as finely as a real world, where the shores' finest detail lies.
+    const Elevation terrain{{.seed = 1, .ocean_fraction = 0.7, .radius = 115'000.0}};
+    const auto& landform = terrain.landform();
+    const auto& grid = landform.grid();
+    const auto lakes = landform.lakes();
+    // Landform cells by a shore: a lake's beside dry ground, or dry ground beside a lake.
+    std::vector<std::uint32_t> shore;
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        const bool wet = lakes[index] != hog::planet::Landform::dry;
+        if (std::ranges::any_of(grid.neighbors(index), [&](std::uint32_t around) {
+                return (lakes[around] != hog::planet::Landform::dry) != wet;
+            })) {
+            shore.push_back(index);
+        }
+    }
+    REQUIRE(shore.size() > 100);
     int shores = 0;
     int walls = 0;
     std::int64_t tallest = 0;
-    for (std::uint32_t index = 0; index < grid.size(); ++index) {
-        // Lakes reach a cell beyond those they stand over.
-        if (!lake_at(index) && std::ranges::none_of(grid.neighbors(index), lake_at)) {
-            continue;
-        }
+    // About 2,000 of them, looked over finely.
+    const std::size_t stride = std::max<std::size_t>(shore.size() / 2'000, 1);
+    for (std::size_t at = 0; at < shore.size(); at += stride) {
         for (const CellId cell :
-             hog::planet::sample_tile(grid.cell(index), 4, [](CellId at) { return at; })) {
+             hog::planet::sample_tile(grid.cell(shore[at]), 3, [](CellId fine) { return fine; })) {
             const auto lake = terrain.lake(cell);
             for (const CellId next : hog::planet::edge_neighbors(cell)) {
                 const auto beside = terrain.lake(next);

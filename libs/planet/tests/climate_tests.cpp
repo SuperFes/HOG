@@ -4,6 +4,7 @@
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tile.hpp>
 #include <hog/testing/quick.hpp>
+#include <hog/testing/worlds.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -27,7 +28,10 @@ using hog::planet::fixed_one;
 namespace {
 
 hog::planet::PlanetConfig planet(std::uint64_t seed) {
-    return {.seed = seed, .ocean_fraction = 0.7, .radius = 115'000.0};
+    return {.seed = seed,
+            .ocean_fraction = 0.7,
+            .radius = 115'000.0,
+            .erosion_cell = hog::testing::coarse_erosion_cell};
 }
 
 std::vector<CellId> cells_at(int level) {

@@ -24,9 +24,11 @@ struct Drainage {
 };
 
 // The sea is the largest stretch of neighbouring cells at or below `sea_level`, all fixed point.
-// Lower ground cut off from it fills to its rim like any other.
+// Lower ground cut off from it fills to its rim like any other. With `wander` other than 0, each
+// cell drains to a lower neighbour picked at random, the steeper the likelier, keyed by it, rather
+// than always the steepest, so water on an even slope wanders rather than following the grid.
 [[nodiscard]] Drainage drain(const LevelGrid& grid, std::span<const std::int64_t> heights,
-                             std::int64_t sea_level = 0);
+                             std::int64_t sea_level = 0, std::uint64_t wander = 0);
 
 // What collects at each cell: its own share plus everything upstream of it.
 [[nodiscard]] std::vector<std::int64_t> accumulate(const Drainage& drainage,

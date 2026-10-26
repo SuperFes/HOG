@@ -3,6 +3,7 @@
 #include <hog/sim/weather.hpp>
 #include <hog/testing/assertion_guard.hpp>
 #include <hog/testing/quick.hpp>
+#include <hog/testing/worlds.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -579,7 +580,8 @@ TEST_CASE("recent weather follows the weather slowly", "[sim][weather]") {
 }
 
 TEST_CASE("weather ground comes from the planet", "[sim][weather]") {
-    const hog::planet::World world{hog::planet::PlanetConfig{.seed = 1, .radius = 115'000.0}};
+    const hog::planet::World world{hog::planet::PlanetConfig{
+        .seed = 1, .radius = 115'000.0, .erosion_cell = hog::testing::coarse_erosion_cell}};
     const hog::sim::CellGrid grid{level};
     const auto ground = hog::sim::ground_for(grid, world);
     REQUIRE(ground.size() == grid.size());
@@ -643,7 +645,8 @@ struct Year {
 } // namespace
 
 TEST_CASE("a year of weather matches the planet's climate", "[sim][weather][climate]") {
-    const hog::planet::World world{hog::planet::PlanetConfig{.seed = 1, .radius = 115'000.0}};
+    const hog::planet::World world{hog::planet::PlanetConfig{
+        .seed = 1, .radius = 115'000.0, .erosion_cell = hog::testing::coarse_erosion_cell}};
     const hours step = hog::testing::full_or(hours{2}, hours{6});
     const WeatherConfig coarse{.level = 4, .step = step, .planet_radius = 115'000.0, .seed = 1};
     const hog::sim::CellGrid grid{coarse.level};

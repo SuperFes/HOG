@@ -22,12 +22,15 @@ namespace {
 using namespace std::string_view_literals;
 
 constexpr std::array known_keys{
-    "seed"sv,      "ocean_fraction"sv, "population"sv, "settled_density"sv, "wilderness_factor"sv,
-    "radius_km"sv, "day_hours"sv,      "axial_tilt"sv, "river_scale"sv,     "plates"sv};
+    "seed"sv,        "ocean_fraction"sv, "population"sv, "settled_density"sv, "wilderness_factor"sv,
+    "radius_km"sv,   "day_hours"sv,      "axial_tilt"sv, "river_scale"sv,     "plates"sv,
+    "erosion_cell"sv};
 
 constexpr double min_day_hours = 0.01;
 constexpr double max_day_hours = 24.0 * 366.0;
 constexpr double max_river_scale = 20.0;
+constexpr double min_erosion_cell = 50.0;
+constexpr double max_erosion_cell = 5'000.0;
 
 [[nodiscard]] std::unexpected<Error> invalid(std::string message) {
     return make_error(ErrorCode::InvalidArgument, std::move(message));
@@ -69,6 +72,18 @@ constexpr double max_river_scale = 20.0;
     config.river_scale = rivers->value_or(config.river_scale);
     if (!positive(config.river_scale) || config.river_scale > max_river_scale) {
         return invalid("planet.river_scale must be above 0 and at most 20");
+    }
+    return {};
+}
+
+[[nodiscard]] Result<void> parse_erosion(const toml::table& planet, PlanetConfig& config) {
+    const auto cell = optional_number(planet, "erosion_cell");
+    if (!cell) {
+        return std::unexpected(cell.error());
+    }
+    config.erosion_cell = cell->value_or(config.erosion_cell);
+    if (!in_range(config.erosion_cell, min_erosion_cell, max_erosion_cell)) {
+        return invalid("planet.erosion_cell must be 50 to 5000 metres");
     }
     return {};
 }
@@ -165,6 +180,9 @@ Result<PlanetConfig> parse_planet_config(std::string_view text) {
     if (auto plates = parse_plates(*planet, config); !plates) {
         return std::unexpected(plates.error());
     }
+    if (auto erosion = parse_erosion(*planet, config); !erosion) {
+        return std::unexpected(erosion.error());
+    }
     if (auto calendar = parse_calendar(*planet, config); !calendar) {
         return std::unexpected(calendar.error());
     }
@@ -223,9 +241,13 @@ std::uint64_t world_id(const PlanetConfig& config) noexcept {
         config.river_scale == 1.0
             ? id
             : hash_combine(id, std::bit_cast<std::uint64_t>(config.river_scale));
-    return config.plates == PlanetConfig{}.plates
-               ? rivers
-               : hash_combine(rivers, static_cast<std::uint64_t>(config.plates));
+    const std::uint64_t plates =
+        config.plates == PlanetConfig{}.plates
+            ? rivers
+            : hash_combine(rivers, static_cast<std::uint64_t>(config.plates));
+    return config.erosion_cell == PlanetConfig{}.erosion_cell
+               ? plates
+               : hash_combine(plates, std::bit_cast<std::uint64_t>(config.erosion_cell));
 }
 
 } // namespace hog::planet

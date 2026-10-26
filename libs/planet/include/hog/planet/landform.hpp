@@ -8,6 +8,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <span>
 #include <vector>
@@ -22,11 +23,13 @@ public:
     // A cell's lake level where it holds none.
     static constexpr std::int64_t dry = std::numeric_limits<std::int64_t>::min();
 
-    // Evolves `heights`, fixed point and one per grid cell, through `steps` steps of `erosion`.
-    Landform(LevelGrid grid, std::vector<std::int64_t> heights, const Erosion& erosion, int steps);
-    // One evolved before, as its heights, change and drained left it.
+    // Evolves `heights`, fixed point and one per grid cell, through `steps` steps of `erosion`,
+    // calling `stepped` with how many are done after each.
+    Landform(LevelGrid grid, std::vector<std::int64_t> heights, const Erosion& erosion, int steps,
+             const std::function<void(int)>& stepped = {});
+    // One evolved before, as its heights, change and drained left it, by erosion with `wander`.
     Landform(LevelGrid grid, std::vector<std::int64_t> heights, std::vector<std::int64_t> change,
-             std::vector<std::int64_t> drained);
+             std::vector<std::int64_t> drained, std::uint64_t wander);
 
     [[nodiscard]] const LevelGrid& grid() const noexcept { return grid_; }
     // Fixed-point metres per grid cell, after evolving.
@@ -70,11 +73,12 @@ private:
 };
 
 // Smooth noise shifting points on the unit sphere by about a fifth of a grid cell, over bends a
-// few cells long: sampling a grid at shifted points bends the straight lines between its cell
-// centres into meanders.
+// few cells long, or as on 500 m cells where the grid is finer: sampling a grid at shifted points
+// bends the straight lines between its cell centres into meanders.
 class Meander {
 public:
-    Meander(std::uint64_t seed, const LevelGrid& grid);
+    // `radius` is the planet's, in metres.
+    Meander(std::uint64_t seed, const LevelGrid& grid, double radius);
 
     [[nodiscard]] DVec3 operator()(DVec3 point) const;
 

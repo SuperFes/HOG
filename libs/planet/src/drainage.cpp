@@ -1,8 +1,10 @@
 #include <hog/core/assert.hpp>
+#include <hog/core/hash.hpp>
 #include <hog/planet/drainage.hpp>
 #include <hog/planet/noise.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <functional>
 #include <queue>
@@ -96,20 +98,39 @@ std::vector<bool> flood(const LevelGrid& grid, std::span<const std::int64_t> hei
     return outlet;
 }
 
-// The neighbour down the steepest slope of the surface. Slopes are compared as doubles: one
-// correctly rounded division each, so the same on every platform.
-std::uint32_t steepest(const LevelGrid& grid, std::span<const std::int64_t> surface,
-                       std::uint32_t cell) {
+// The neighbour down the steepest slope of the surface, or with `wander` other than 0 one down any
+// slope, picked with odds as its steepness. Slopes are compared as doubles: one correctly rounded
+// division each, so the same on every platform.
+std::uint32_t downhill(const LevelGrid& grid, std::span<const std::int64_t> surface,
+                       std::uint32_t cell, std::uint64_t wander) {
     const auto around = grid.neighbors(cell);
+    std::array<double, 8> slopes{};
+    double steepest = 0.0;
+    double total = 0.0;
     std::uint32_t best = cell;
-    double best_slope = 0.0;
     for (std::size_t k = 0; k < around.size(); ++k) {
         const std::int64_t drop = surface[cell] - surface[around[k]];
-        const double slope =
-            static_cast<double>(drop) / static_cast<double>(grid.distance(cell, k));
-        if (drop > 0 && slope > best_slope) {
-            best_slope = slope;
+        if (drop <= 0) {
+            continue;
+        }
+        slopes.at(k) = static_cast<double>(drop) / static_cast<double>(grid.distance(cell, k));
+        total += slopes.at(k);
+        if (slopes.at(k) > steepest) {
+            steepest = slopes.at(k);
             best = around[k];
+        }
+    }
+    if (wander == 0 || best == cell) {
+        return best;
+    }
+    // From the hash's top 53 bits, uniform in [0, 1).
+    double pick = static_cast<double>(hash_values(wander, cell) >> 11U) * 0x1p-53 * total;
+    for (std::size_t k = 0; k < around.size(); ++k) {
+        if (slopes.at(k) > 0.0) {
+            if (pick < slopes.at(k)) {
+                return around[k];
+            }
+            pick -= slopes.at(k);
         }
     }
     return best;
@@ -117,8 +138,8 @@ std::uint32_t steepest(const LevelGrid& grid, std::span<const std::int64_t> surf
 
 } // namespace
 
-Drainage drain(const LevelGrid& grid, std::span<const std::int64_t> heights,
-               std::int64_t sea_level) {
+Drainage drain(const LevelGrid& grid, std::span<const std::int64_t> heights, std::int64_t sea_level,
+               std::uint64_t wander) {
     const std::uint32_t count = grid.size();
     HOG_ASSERT(heights.size() == count, "one height per cell");
     Drainage result;
@@ -128,7 +149,7 @@ Drainage drain(const LevelGrid& grid, std::span<const std::int64_t> heights,
     const std::vector<bool> outlet = flood(grid, heights, sea_level, result);
     HOG_ASSERT(result.order.size() == count, "every cell drains somewhere");
     for (std::uint32_t cell = 0; cell < count; ++cell) {
-        result.receiver[cell] = outlet[cell] ? cell : steepest(grid, result.surface, cell);
+        result.receiver[cell] = outlet[cell] ? cell : downhill(grid, result.surface, cell, wander);
         HOG_ASSERT(outlet[cell] || result.receiver[cell] != cell,
                    "an inland cell has a lower neighbour");
     }

@@ -3,11 +3,15 @@
 #include <hog/planet/cell_id.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/world.hpp>
+#include <hog/testing/worlds.hpp>
 
 namespace hog::terrain::testing {
 
 // NOLINTNEXTLINE(cert-err58-cpp,bugprone-throwing-static-initialization): nothing here throws
-inline const planet::PlanetConfig planet{.seed = 1, .ocean_fraction = 0.7, .radius = 115'000.0};
+inline const planet::PlanetConfig planet{.seed = 1,
+                                         .ocean_fraction = 0.7,
+                                         .radius = 115'000.0,
+                                         .erosion_cell = hog::testing::coarse_erosion_cell};
 
 // One World for each test run: the seed's generators are costly to set up.
 inline planet::World& shared_world() {

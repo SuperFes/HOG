@@ -1,6 +1,7 @@
 #include <hog/mapgen/weather_render.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/world.hpp>
+#include <hog/testing/worlds.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -56,7 +57,8 @@ TEST_CASE("air maps colour temperature and fronts", "[mapgen][weather]") {
 }
 
 TEST_CASE("weather renders over a view", "[mapgen][weather]") {
-    const hog::planet::World world{hog::planet::PlanetConfig{.seed = 1, .radius = 115'000.0}};
+    const hog::planet::World world{hog::planet::PlanetConfig{
+        .seed = 1, .radius = 115'000.0, .erosion_cell = hog::testing::coarse_erosion_cell}};
     const hog::sim::WeatherConfig config{.level = 3};
     const hog::sim::Weather weather{
         config, hog::sim::ground_for(hog::sim::CellGrid{config.level}, world), morning};

@@ -7,6 +7,7 @@
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tile.hpp>
+#include <hog/testing/worlds.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -31,7 +32,10 @@ namespace {
 
 constexpr std::uint64_t seed = 1;
 // NOLINTNEXTLINE(cert-err58-cpp,bugprone-throwing-static-initialization): nothing here throws
-const hog::planet::PlanetConfig planet{.seed = seed, .ocean_fraction = 0.7, .radius = 115'000.0};
+const hog::planet::PlanetConfig planet{.seed = seed,
+                                       .ocean_fraction = 0.7,
+                                       .radius = 115'000.0,
+                                       .erosion_cell = hog::testing::coarse_erosion_cell};
 
 struct Layer {
     std::string_view name;

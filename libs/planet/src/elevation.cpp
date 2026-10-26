@@ -1,4 +1,5 @@
 #include <hog/core/hash.hpp>
+#include <hog/core/log.hpp>
 #include <hog/planet/bake.hpp>
 #include <hog/planet/elevation.hpp>
 #include <hog/planet/moisture.hpp>
@@ -9,11 +10,13 @@
 
 #include <algorithm>
 #include <bit>
+#include <chrono>
 #include <cmath>
-#include <cstdlib>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <mutex>
+#include <numbers>
 #include <tuple>
 #include <vector>
 
@@ -21,9 +24,12 @@ namespace hog::planet {
 
 namespace {
 
+const log::Category landform_log{"landform"};
+
 constexpr std::uint64_t ridge_salt = 0x7269'6467'6573'0000ULL;  // "ridges"
 constexpr std::uint64_t relief_salt = 0x7265'6C69'6566'0000ULL; // "relief"
 constexpr std::uint64_t hill_salt = 0x6869'6C6C'7300'0000ULL;   // "hills"
+constexpr std::uint64_t wander_salt = 0x7761'6E64'6572'0000ULL; // "wander"
 
 // Continent heights (fixed point) over which each effect ramps from nothing to full.
 template <int Bits>
@@ -49,12 +55,11 @@ constexpr int hill_octaves = 3;
 template <int Bits>
 constexpr std::int64_t erosion = 2 * fixed_unit<Bits>;
 
-// Rivers wear the land for 5 million years in steps of 100,000, on cells about this wide, or as
-// fine as the time to evolve them allows on large planets.
-constexpr double landform_cell = 1'500.0; // metres
-constexpr int landform_level = 8;
+// Rivers wear the land for 5 million years in steps of 100,000, told every few steps.
 constexpr int landform_steps = 50;
-// Metres per step: 0.2 mm a year in the heart of a mountain belt, and a slow rise everywhere.
+constexpr int landform_progress = 5;
+// Metres per step: 0.2 mm a year in the heart of a mountain belt, and a slow rise over the
+// continents.
 constexpr double mountain_uplift = 20.0;
 constexpr double background_uplift = 1.0;
 // The stream-power K over a step (5e-7 a year); a belt's granite resists half as much again.
@@ -73,24 +78,6 @@ constexpr std::int64_t dean_scale = (12 * fixed_one) / 100;
 // Metres out per metre down across the shelf, and how far out it breaks.
 constexpr std::int64_t shelf_run = 100;
 constexpr std::int64_t shelf_break = 5'000;
-
-// Where HOG_BAKES says landforms are kept, or nowhere.
-std::filesystem::path bakes_named() {
-#ifdef _MSC_VER
-    char* named = nullptr;
-    std::size_t length = 0;
-    if (_dupenv_s(&named, &length, "HOG_BAKES") != 0 || named == nullptr) {
-        return {};
-    }
-    std::filesystem::path found{named};
-    std::free(named);
-    return found;
-#else
-    // Nothing sets the environment once running.
-    const char* const named = std::getenv("HOG_BAKES"); // NOLINT(concurrency-mt-unsafe)
-    return named != nullptr ? std::filesystem::path{named} : std::filesystem::path{};
-#endif
-}
 
 // 0 at or below zero, rising linearly to 1 at `width`.
 template <int Bits = fixed_fraction_bits>
@@ -117,7 +104,7 @@ Elevation::Elevation(const PlanetConfig& config)
 
 Elevation::Evolved::Evolved(Landform worn, std::span<const std::int64_t> ground,
                             const PlanetConfig& config)
-    : landform{std::move(worn)}, meander{config.seed, landform.grid()},
+    : landform{std::move(worn)}, meander{config.seed, landform.grid(), config.radius},
       rivers{landform, ground, meander, config.radius, config.river_scale} {}
 
 const Elevation::Evolved& Elevation::evolved() const {
@@ -127,30 +114,59 @@ const Elevation::Evolved& Elevation::evolved() const {
 
 std::shared_ptr<const Elevation::Evolved> Elevation::evolve(const PlanetConfig& config) const {
     // Evolving takes a while, so it's shared while any Elevation of the same planet lives.
-    using Key = std::tuple<std::uint64_t, std::uint64_t, std::uint64_t, std::uint64_t, int>;
+    using Key =
+        std::tuple<std::uint64_t, std::uint64_t, std::uint64_t, std::uint64_t, int, std::uint64_t>;
     static std::mutex mutex;
     static std::map<Key, std::weak_ptr<const Evolved>> evolved;
-    const Key key{config.seed, std::bit_cast<std::uint64_t>(config.radius),
+    const Key key{config.seed,
+                  std::bit_cast<std::uint64_t>(config.radius),
                   std::bit_cast<std::uint64_t>(config.ocean_fraction),
-                  std::bit_cast<std::uint64_t>(config.river_scale), config.plates};
+                  std::bit_cast<std::uint64_t>(config.river_scale),
+                  config.plates,
+                  std::bit_cast<std::uint64_t>(config.erosion_cell)};
     const std::scoped_lock lock{mutex};
     if (auto shared = evolved[key].lock()) {
         return shared;
     }
 
-    const int level = std::min(level_for(landform_cell, config.radius), landform_level);
+    const int level = std::min(level_for(config.erosion_cell, config.radius), LevelGrid::max_level);
     // Baked by this very code, so changing it evolves the world again.
     const BakeName bake{.world = hash_values(world_id(config), static_cast<std::uint64_t>(level),
                                              static_cast<std::uint64_t>(landform_steps)),
                         .code = planet_source_hash};
-    const std::filesystem::path bakes = config.bakes.empty() ? bakes_named() : config.bakes;
+    const std::filesystem::path bakes = config.bakes.empty() ? named_bakes() : config.bakes;
+    const auto started = std::chrono::steady_clock::now();
+    const auto seconds = [&] {
+        return std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+    };
     std::shared_ptr<const Evolved> shared;
+    std::optional<BakeClaim> claim;
     if (!bakes.empty()) {
         shared = unbake(read_bake(bakes, bake), level, config);
+        if (!shared) {
+            // Another process may be baking it; theirs is read once they're done.
+            claim.emplace(bakes, bake, [] {
+                log::info(landform_log, "waiting for another process to bake the landform");
+            });
+            shared = unbake(read_bake(bakes, bake), level, config);
+        }
+        if (shared) {
+            log::info(landform_log, "loaded the landform in {:.1f} s", seconds());
+        }
     }
     if (!shared) {
-        Landform landform = wear(LevelGrid{level, config.radius}, config.seed);
-        const Meander meander{config.seed, landform.grid()};
+        LevelGrid grid{level, config.radius};
+        log::info(landform_log,
+                  "evolving the landform, {} cells {:.0f} m apart: the first time for this world "
+                  "and build, which takes a while",
+                  grid.size(), std::numbers::pi / 2.0 * config.radius / std::ldexp(1.0, level));
+        Landform landform = wear(std::move(grid), config.seed, [&](int step) {
+            if (step % landform_progress == 0 && step < landform_steps) {
+                log::info(landform_log, "wearing the land: {} of {} steps, {:.0f} s", step,
+                          landform_steps, seconds());
+            }
+        });
+        const Meander meander{config.seed, landform.grid(), config.radius};
         std::vector<std::int64_t> ground(landform.grid().size());
         for (std::uint32_t index = 0; index < landform.grid().size(); ++index) {
             const CellId cell = landform.grid().cell(index);
@@ -166,6 +182,7 @@ std::shared_ptr<const Elevation::Evolved> Elevation::evolve(const PlanetConfig& 
                             .ground = ground});
         }
         shared = std::make_shared<const Evolved>(std::move(landform), ground, config);
+        log::info(landform_log, "evolved the landform in {:.0f} s", seconds());
     }
     evolved[key] = shared;
     return shared;
@@ -180,13 +197,14 @@ std::shared_ptr<const Elevation::Evolved> Elevation::unbake(std::optional<Landfo
     if (bake->heights.size() != grid.size()) {
         return nullptr;
     }
-    return std::make_shared<const Evolved>(Landform{std::move(grid), std::move(bake->heights),
-                                                    std::move(bake->change),
-                                                    std::move(bake->drained)},
-                                           bake->ground, config);
+    return std::make_shared<const Evolved>(
+        Landform{std::move(grid), std::move(bake->heights), std::move(bake->change),
+                 std::move(bake->drained), hash_combine(config.seed, wander_salt)},
+        bake->ground, config);
 }
 
-Landform Elevation::wear(LevelGrid grid, std::uint64_t seed) const {
+Landform Elevation::wear(LevelGrid grid, std::uint64_t seed,
+                         const std::function<void(int)>& stepped) const {
     const auto fixed = [](double value) {
         return std::llround(value * static_cast<double>(fixed_one));
     };
@@ -199,13 +217,18 @@ Landform Elevation::wear(LevelGrid grid, std::uint64_t seed) const {
         const CellId cell = grid.cell(index);
         const double strength = fixed_to_double(mountain_strength(cell));
         heights[index] = generated(cell);
-        uplift[index] = fixed(background_uplift + (mountain_uplift * strength));
+        // Only continents rise; the islands and volcanoes stand on ocean floor that doesn't.
+        const double rising = continents_.height(cell) > 0 ? background_uplift : 0.0;
+        uplift[index] = fixed(rising + (mountain_uplift * strength));
         hardness[index] = fixed(erodibility * (1.0 - (granite_hardness * strength)));
         runoff[index] = moisture.at(cell, continents_.height(cell));
     }
     return Landform{std::move(grid), std::move(heights),
-                    Erosion{.uplift = uplift, .erodibility = hardness, .runoff = runoff},
-                    landform_steps};
+                    Erosion{.uplift = uplift,
+                            .erodibility = hardness,
+                            .runoff = runoff,
+                            .wander = hash_combine(seed, wander_salt)},
+                    landform_steps, stepped};
 }
 
 std::int64_t Elevation::mountain_strength(CellId cell) const {

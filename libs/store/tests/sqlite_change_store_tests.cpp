@@ -3,6 +3,7 @@
 #include <hog/core/hash.hpp>
 #include <hog/planet/world.hpp>
 #include <hog/store/sqlite_change_store.hpp>
+#include <hog/testing/worlds.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <sqlite3.h>
@@ -176,7 +177,10 @@ TEST_CASE("a directory is not a store", "[store]") {
 
 TEST_CASE("a world rebuilt from its store matches one that never saw the erased changes",
           "[store]") {
-    const hog::planet::PlanetConfig planet{.seed = 1, .ocean_fraction = 0.7, .radius = 115'000.0};
+    const hog::planet::PlanetConfig planet{.seed = 1,
+                                           .ocean_fraction = 0.7,
+                                           .radius = 115'000.0,
+                                           .erosion_cell = hog::testing::coarse_erosion_cell};
     static hog::planet::World rebuilt{planet};
     static hog::planet::World replayed{planet};
     const CellId cell = CellId::from_face_ij(2, 300, 400, 10);

@@ -3,6 +3,7 @@
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/server/survey.hpp>
+#include <hog/testing/worlds.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -24,7 +25,10 @@ constexpr double radius = 115'000.0;
 
 const planet::Geology& geology() {
     static const planet::Geology made{
-        planet::PlanetConfig{.seed = 1, .ocean_fraction = 0.7, .radius = radius}};
+        planet::PlanetConfig{.seed = 1,
+                             .ocean_fraction = 0.7,
+                             .radius = radius,
+                             .erosion_cell = hog::testing::coarse_erosion_cell}};
     return made;
 }
 

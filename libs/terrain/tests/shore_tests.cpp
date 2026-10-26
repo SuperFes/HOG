@@ -3,6 +3,7 @@
 #include <hog/planet/projection.hpp>
 #include <hog/planet/world.hpp>
 #include <hog/terrain/shore.hpp>
+#include <hog/testing/worlds.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -35,7 +36,10 @@ namespace {
 constexpr double radius = 115'000.0;
 
 // NOLINTNEXTLINE(cert-err58-cpp,bugprone-throwing-static-initialization): nothing here throws
-const hog::planet::PlanetConfig planet{.seed = 4, .ocean_fraction = 0.7, .radius = radius};
+const hog::planet::PlanetConfig planet{.seed = 4,
+                                       .ocean_fraction = 0.7,
+                                       .radius = radius,
+                                       .erosion_cell = hog::testing::coarse_erosion_cell};
 
 const hog::planet::World& world() {
     static const hog::planet::World world{planet};
@@ -48,7 +52,10 @@ const hog::planet::Elevation& terrain() {
 
 // A planet with lakes on it.
 const hog::planet::World& lake_world() {
-    static const hog::planet::World world{{.seed = 1, .ocean_fraction = 0.7, .radius = radius}};
+    static const hog::planet::World world{{.seed = 1,
+                                           .ocean_fraction = 0.7,
+                                           .radius = radius,
+                                           .erosion_cell = hog::testing::coarse_erosion_cell}};
     return world;
 }
 

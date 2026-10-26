@@ -19,11 +19,11 @@ namespace {
 
 // On the first island, where there's ground to walk on.
 DVec3 on_land() {
-    return testing::world().geology().terrain().archipelago().islands().front().center;
+    return client::testing::world().geology().terrain().archipelago().islands().front().center;
 }
 
 double radius() {
-    return testing::world().geology().planet_radius();
+    return client::testing::world().geology().planet_radius();
 }
 
 double height_of(WorldPosition at) {
@@ -31,7 +31,7 @@ double height_of(WorldPosition at) {
 }
 
 Player standing() {
-    auto player = Player::create(testing::world(), on_land());
+    auto player = Player::create(client::testing::world(), on_land());
     REQUIRE(player);
     REQUIRE(player->play({}, 1.0));
     return std::move(player).value();
@@ -52,7 +52,8 @@ double apart(WorldPosition a, WorldPosition b) {
 } // namespace
 
 TEST_CASE("a player starts standing on the ground under them", "[client][player]") {
-    const double ground = ground_under(testing::world(), WorldPosition{on_land() * radius()});
+    const double ground =
+        ground_under(client::testing::world(), WorldPosition{on_land() * radius()});
     REQUIRE(ground > 1.0);
     Player player = standing();
     CHECK(player.standing());
@@ -127,11 +128,12 @@ TEST_CASE("the keys stride the way the aim faces, jumping with up", "[client][pl
 
 TEST_CASE("a player placed by the server flies there, or stands on the ground under it",
           "[client][player]") {
-    const double ground = ground_under(testing::world(), WorldPosition{on_land() * radius()});
+    const double ground =
+        ground_under(client::testing::world(), WorldPosition{on_land() * radius()});
     const protocol::Facing facing{.heading = 40'000, .pitch = -1'000};
     const auto placed_at = [&](double height, protocol::Stance stance) {
         auto placed =
-            placing(testing::world(),
+            placing(client::testing::world(),
                     {.at = protocol::to_millimetres(WorldPosition{on_land() * (radius() + height)}),
                      .stance = stance,
                      .facing = facing});

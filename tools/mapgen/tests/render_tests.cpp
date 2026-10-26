@@ -1,5 +1,6 @@
 #include <hog/mapgen/render.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/testing/worlds.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -94,7 +95,10 @@ TEST_CASE("the region view is the requested width, north up", "[mapgen]") {
 }
 
 TEST_CASE("the islands view centres on the starting islands", "[mapgen]") {
-    const hog::planet::PlanetConfig planet{.seed = 3, .ocean_fraction = 0.7, .radius = radius};
+    const hog::planet::PlanetConfig planet{.seed = 3,
+                                           .ocean_fraction = 0.7,
+                                           .radius = radius,
+                                           .erosion_cell = hog::testing::coarse_erosion_cell};
     const hog::planet::Geology geology{planet};
     const View view =
         hog::mapgen::resolve(View{hog::mapgen::IslandsView{.width = 2'000.0}}, geology);
@@ -210,7 +214,10 @@ TEST_CASE("lakes and rivers show over the ground", "[mapgen]") {
 }
 
 TEST_CASE("water maps draw rivers wherever they run", "[mapgen]") {
-    const hog::planet::PlanetConfig planet{.seed = 1, .ocean_fraction = 0.7, .radius = radius};
+    const hog::planet::PlanetConfig planet{.seed = 1,
+                                           .ocean_fraction = 0.7,
+                                           .radius = radius,
+                                           .erosion_cell = hog::testing::coarse_erosion_cell};
     const hog::planet::Geology geology{planet};
     hog::jobs::JobSystem jobs{2};
     const auto image =
@@ -248,7 +255,10 @@ TEST_CASE("deposit maps show the rarest deposit over grey land", "[mapgen]") {
 }
 
 TEST_CASE("every layer renders", "[mapgen]") {
-    const hog::planet::PlanetConfig planet{.seed = 1, .ocean_fraction = 0.7, .radius = radius};
+    const hog::planet::PlanetConfig planet{.seed = 1,
+                                           .ocean_fraction = 0.7,
+                                           .radius = radius,
+                                           .erosion_cell = hog::testing::coarse_erosion_cell};
     const hog::planet::Geology geology{planet};
     hog::jobs::JobSystem jobs{2};
     std::set<std::vector<std::uint8_t>> images;
@@ -262,7 +272,10 @@ TEST_CASE("every layer renders", "[mapgen]") {
 }
 
 TEST_CASE("rendering doesn't depend on the thread count", "[mapgen]") {
-    const hog::planet::PlanetConfig planet{.seed = 1, .ocean_fraction = 0.7, .radius = radius};
+    const hog::planet::PlanetConfig planet{.seed = 1,
+                                           .ocean_fraction = 0.7,
+                                           .radius = radius,
+                                           .erosion_cell = hog::testing::coarse_erosion_cell};
     const hog::planet::Geology geology{planet};
     hog::jobs::JobSystem one{1};
     const auto single =

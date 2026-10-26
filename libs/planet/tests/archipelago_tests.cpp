@@ -6,6 +6,7 @@
 #include <hog/planet/tangent_frame.hpp>
 #include <hog/testing/assertion_guard.hpp>
 #include <hog/testing/quick.hpp>
+#include <hog/testing/worlds.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -32,7 +33,10 @@ constexpr double radius = 115'000.0;
 constexpr int level = 11;
 
 hog::planet::PlanetConfig planet(std::uint64_t seed, double planet_radius = radius) {
-    return {.seed = seed, .ocean_fraction = 0.7, .radius = planet_radius};
+    return {.seed = seed,
+            .ocean_fraction = 0.7,
+            .radius = planet_radius,
+            .erosion_cell = hog::testing::coarse_erosion_cell};
 }
 
 struct CellHash {

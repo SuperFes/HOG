@@ -2,6 +2,7 @@
 #include <hog/chat/filter.hpp>
 #include <hog/core/profile.hpp>
 #include <hog/net/simulation.hpp>
+#include <hog/planet/bake.hpp>
 #include <hog/planet/cell_id.hpp>
 #include <hog/planet/geology.hpp>
 #include <hog/planet/projection.hpp>
@@ -147,7 +148,10 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
     if (!planet) {
         return std::unexpected(planet.error());
     }
-    planet->bakes = config.world.parent_path() / "bakes";
+    // Kept with the world, unless the environment names somewhere, as tests do.
+    if (planet::named_bakes().empty()) {
+        planet->bakes = config.world.parent_path() / "bakes";
+    }
     if (config.world.has_parent_path()) {
         std::error_code error;
         std::filesystem::create_directories(config.world.parent_path(), error);

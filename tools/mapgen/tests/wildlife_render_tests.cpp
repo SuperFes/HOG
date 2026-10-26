@@ -1,5 +1,6 @@
 #include <hog/mapgen/wildlife_render.hpp>
 #include <hog/planet/world.hpp>
+#include <hog/testing/worlds.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -40,7 +41,8 @@ TEST_CASE("denser wildlife shows brighter over dimmed ground", "[mapgen][wildlif
 }
 
 TEST_CASE("wildlife renders over a view", "[mapgen][wildlife]") {
-    const hog::planet::World world{hog::planet::PlanetConfig{.seed = 1, .radius = 115'000.0}};
+    const hog::planet::World world{hog::planet::PlanetConfig{
+        .seed = 1, .radius = 115'000.0, .erosion_cell = hog::testing::coarse_erosion_cell}};
     hog::sim::WildlifeConfig config{.level = 3};
     config.ecology = deer_only();
     const hog::sim::CellGrid grid{config.level};
@@ -64,7 +66,8 @@ TEST_CASE("wildlife maps and totals are named and laid out", "[mapgen][wildlife]
           "planet-wildlife-20260101T0000-red-deer.png");
     CHECK(hog::mapgen::wildlife_header(deer_only()) == "time,red deer,forage,carrion");
 
-    const hog::planet::World world{hog::planet::PlanetConfig{.seed = 1, .radius = 115'000.0}};
+    const hog::planet::World world{hog::planet::PlanetConfig{
+        .seed = 1, .radius = 115'000.0, .erosion_cell = hog::testing::coarse_erosion_cell}};
     hog::sim::WildlifeConfig config{.level = 2};
     config.ecology = deer_only();
     const hog::sim::CellGrid grid{config.level};

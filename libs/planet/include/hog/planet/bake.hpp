@@ -1,8 +1,11 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
+#include <thread>
 #include <vector>
 
 namespace hog::planet {
@@ -20,6 +23,9 @@ struct LandformBake {
 
     friend bool operator==(const LandformBake&, const LandformBake&) = default;
 };
+
+// Where HOG_BAKES says landforms are kept, or nowhere.
+[[nodiscard]] std::filesystem::path named_bakes();
 
 // Which world a bake is of, and which code baked it.
 struct BakeName {
@@ -41,5 +47,38 @@ struct BakeName {
 // bakes by other code; false where it can't, which leaves the world to evolve again next time.
 [[nodiscard]] bool write_bake(const std::filesystem::path& directory, BakeName name,
                               const LandformBake& bake);
+
+// How a claim keeps itself alive and how others wait on it.
+struct ClaimTiming {
+    // How often the holder marks its claim as alive.
+    std::chrono::milliseconds beat{5'000};
+    // How long a claim goes unmarked before it's taken as abandoned by a process that died.
+    std::chrono::milliseconds abandoned{30'000};
+    // How often a waiter looks again.
+    std::chrono::milliseconds poll{200};
+};
+
+// The right to bake one world in a directory, so processes that build it at once bake it once:
+// the first claims it and bakes, and the rest wait for the bake or for the claim to be let go.
+class BakeClaim {
+public:
+    // Waits while another holds the claim and its bake isn't kept yet, calling `waiting` once if
+    // it does.
+    BakeClaim(const std::filesystem::path& directory, BakeName name,
+              const std::function<void()>& waiting = {}, ClaimTiming timing = {});
+    BakeClaim(const BakeClaim&) = delete;
+    BakeClaim(BakeClaim&&) = delete;
+    BakeClaim& operator=(const BakeClaim&) = delete;
+    BakeClaim& operator=(BakeClaim&&) = delete;
+    ~BakeClaim();
+
+    // Whether this holds the claim, rather than finding the bake kept by another.
+    [[nodiscard]] bool held() const noexcept { return held_; }
+
+private:
+    std::filesystem::path claim_;
+    bool held_ = false;
+    std::jthread beating_;
+};
 
 } // namespace hog::planet

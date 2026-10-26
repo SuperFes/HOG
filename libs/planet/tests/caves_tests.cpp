@@ -4,6 +4,7 @@
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tangent_frame.hpp>
 #include <hog/testing/quick.hpp>
+#include <hog/testing/worlds.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -35,7 +36,10 @@ namespace {
 constexpr double radius = 115'000.0;
 
 hog::planet::PlanetConfig planet(std::uint64_t seed) {
-    return {.seed = seed, .ocean_fraction = 0.7, .radius = radius};
+    return {.seed = seed,
+            .ocean_fraction = 0.7,
+            .radius = radius,
+            .erosion_cell = hog::testing::coarse_erosion_cell};
 }
 
 const Geology& geology(std::uint64_t seed) {

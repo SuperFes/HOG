@@ -19,6 +19,7 @@
 #include <hog/mapgen/render.hpp>
 #include <hog/net/client.hpp>
 #include <hog/net/simulation.hpp>
+#include <hog/planet/bake.hpp>
 #include <hog/planet/planet_config.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/world.hpp>
@@ -1004,7 +1005,9 @@ int run(std::span<const std::string_view> arguments) {
         std::cerr << std::format("hog-client: {}\n", planet.error());
         return EXIT_FAILURE;
     }
-    if (char* const kept = SDL_GetPrefPath("Netscape", "HOG"); kept != nullptr) {
+    // Kept with the player's data, unless the environment names somewhere, as tests do.
+    char* const kept = planet::named_bakes().empty() ? SDL_GetPrefPath("Netscape", "HOG") : nullptr;
+    if (kept != nullptr) {
         planet->bakes = std::filesystem::path{kept} / "bakes";
         SDL_free(kept);
     }

@@ -4,6 +4,7 @@
 #include <hog/sim/weather.hpp>
 #include <hog/sim/wildlife.hpp>
 #include <hog/testing/quick.hpp>
+#include <hog/testing/worlds.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -829,7 +830,8 @@ TEST_CASE("wildlife loads saves from before it kept presence", "[sim][wildlife][
 }
 
 TEST_CASE("wildlife lives on the planet under its weather", "[sim][wildlife]") {
-    const hog::planet::World world{hog::planet::PlanetConfig{.seed = 1, .radius = 115'000.0}};
+    const hog::planet::World world{hog::planet::PlanetConfig{
+        .seed = 1, .radius = 115'000.0, .erosion_cell = hog::testing::coarse_erosion_cell}};
     const hog::sim::CellGrid grid{level};
     const auto habitat = hog::sim::habitat_for(grid, world);
     REQUIRE(habitat.size() == grid.size());

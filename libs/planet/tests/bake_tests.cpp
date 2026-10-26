@@ -5,10 +5,15 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 using hog::planet::LandformBake;
@@ -23,9 +28,13 @@ LandformBake sample() {
             .ground = {-9'000'000'000'000, 4, 5}};
 }
 
-// A world small enough to evolve in a moment, keeping its landform in `bakes`.
+// A world coarse enough to evolve in a moment, keeping its landform in `bakes`.
 hog::planet::PlanetConfig small(const std::filesystem::path& bakes) {
-    return {.seed = 3, .ocean_fraction = 0.6, .radius = 50'000.0, .bakes = bakes};
+    return {.seed = 3,
+            .ocean_fraction = 0.6,
+            .radius = 50'000.0,
+            .erosion_cell = 2'000.0,
+            .bakes = bakes};
 }
 
 // The name of the one bake kept in `directory`, read from its file's.
@@ -141,4 +150,67 @@ TEST_CASE("a damaged bake is evolved again and replaced", "[planet][bake]") {
     CHECK(std::vector<std::int64_t>(again.begin(), again.end()) == heights);
     CHECK(hog::planet::read_bake(directory.path(), name).value_or(LandformBake{}).heights ==
           heights);
+}
+
+TEST_CASE("one claims a world's bake, and the rest wait for it", "[planet][bake]") {
+    const hog::testing::TemporaryDirectory directory;
+    const hog::planet::BakeName name{.world = 5, .code = 6};
+    const hog::planet::ClaimTiming quick{.beat = std::chrono::milliseconds{20},
+                                         .abandoned = std::chrono::milliseconds{2'000},
+                                         .poll = std::chrono::milliseconds{10}};
+    std::optional<hog::planet::BakeClaim> first{std::in_place, directory.path(), name,
+                                                std::function<void()>{}, quick};
+    REQUIRE(first->held());
+
+    std::atomic<int> told{0};
+    std::atomic<bool> done{false};
+    std::atomic<bool> held{true};
+    std::atomic<bool> found{false};
+    std::thread second{[&] {
+        const hog::planet::BakeClaim claim{directory.path(), name, [&] { ++told; }, quick};
+        held = claim.held();
+        found = std::filesystem::exists(hog::planet::bake_path(directory.path(), name));
+        done = true;
+    }};
+    std::this_thread::sleep_for(std::chrono::milliseconds{200});
+    CHECK_FALSE(done);
+    REQUIRE(hog::planet::write_bake(directory.path(), name, sample()));
+    first.reset();
+    second.join();
+    // Let go only once the bake is kept, and then never claimed again.
+    CHECK(told == 1);
+    CHECK(found);
+    CHECK_FALSE(held);
+}
+
+TEST_CASE("a held claim stays alive, while one let go or left unmarked is claimed again",
+          "[planet][bake]") {
+    const hog::testing::TemporaryDirectory directory;
+    const hog::planet::ClaimTiming quick{.beat = std::chrono::milliseconds{20},
+                                         .abandoned = std::chrono::milliseconds{300},
+                                         .poll = std::chrono::milliseconds{10}};
+    const hog::planet::BakeName name{.world = 5, .code = 6};
+    {
+        const hog::planet::BakeClaim claim{directory.path(), name, {}, quick};
+        REQUIRE(claim.held());
+        // Marked alive while held, however long the bake takes.
+        const auto path =
+            hog::planet::bake_path(directory.path(), name).replace_extension(".claim");
+        std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now() -
+                                                   std::chrono::hours{1});
+        std::this_thread::sleep_for(std::chrono::milliseconds{200});
+        CHECK(std::filesystem::file_time_type::clock::now() -
+                  std::filesystem::last_write_time(path) <
+              std::chrono::seconds{10});
+    }
+    const hog::planet::BakeClaim again{directory.path(), name, {}, quick};
+    REQUIRE(again.held());
+
+    // Another's, left by a process that died before marking it again.
+    const hog::planet::BakeName other{.world = 7, .code = 6};
+    const auto left = hog::planet::bake_path(directory.path(), other).replace_extension(".claim");
+    std::filesystem::create_directory(left);
+    std::filesystem::last_write_time(left, std::filesystem::file_time_type::clock::now() -
+                                               std::chrono::seconds{1});
+    CHECK(hog::planet::BakeClaim{directory.path(), other, {}, quick}.held());
 }

@@ -18,7 +18,7 @@ Drainage erode(const LevelGrid& grid, std::vector<std::int64_t>& heights, const 
             heights[cell] += erosion.uplift[cell];
         }
     }
-    Drainage drainage = drain(grid, heights, sea_level);
+    Drainage drainage = drain(grid, heights, sea_level, erosion.wander);
 
     std::vector<std::int64_t> rain(count);
     for (std::uint32_t cell = 0; cell < count; ++cell) {
@@ -31,9 +31,8 @@ Drainage erode(const LevelGrid& grid, std::vector<std::int64_t>& heights, const 
         if (receiver == cell) {
             continue;
         }
-        const bool to_sea =
-            drainage.receiver[receiver] == receiver && heights[receiver] <= sea_level;
-        const std::int64_t base = to_sea ? sea_level : heights[receiver];
+        // Rivers cut down to the water they run into, a lake's or the sea's, or the ground.
+        const std::int64_t base = drainage.surface[receiver];
         if (heights[cell] <= base) {
             continue;
         }

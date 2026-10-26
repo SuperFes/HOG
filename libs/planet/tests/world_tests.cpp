@@ -1,6 +1,7 @@
 #include <hog/core/hash.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/world.hpp>
+#include <hog/testing/worlds.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -31,7 +32,10 @@ using hog::planet::World;
 namespace {
 
 // NOLINTNEXTLINE(cert-err58-cpp,bugprone-throwing-static-initialization): nothing here throws
-const hog::planet::PlanetConfig planet{.seed = 1, .ocean_fraction = 0.7, .radius = 115'000.0};
+const hog::planet::PlanetConfig planet{.seed = 1,
+                                       .ocean_fraction = 0.7,
+                                       .radius = 115'000.0,
+                                       .erosion_cell = hog::testing::coarse_erosion_cell};
 
 // One World for the whole file: the seed's generators are costly to set up.
 World& shared_world() {

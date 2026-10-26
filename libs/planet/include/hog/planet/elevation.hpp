@@ -12,6 +12,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -118,8 +119,10 @@ private:
                                            const Landform& landform, const Meander& meander);
     [[nodiscard]] const Evolved& evolved() const;
     [[nodiscard]] std::shared_ptr<const Evolved> evolve(const PlanetConfig& config) const;
-    // The landform on a grid, evolved from the generated ground.
-    [[nodiscard]] Landform wear(LevelGrid grid, std::uint64_t seed) const;
+    // The landform on a grid, evolved from the generated ground, calling `stepped` with how many
+    // steps are done after each.
+    [[nodiscard]] Landform wear(LevelGrid grid, std::uint64_t seed,
+                                const std::function<void(int)>& stepped) const;
     // What a bake for a grid of `level` holds, or nothing where it holds none.
     [[nodiscard]] static std::shared_ptr<const Evolved>
     unbake(std::optional<LandformBake> bake, int level, const PlanetConfig& config);

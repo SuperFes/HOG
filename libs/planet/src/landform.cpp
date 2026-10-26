@@ -20,7 +20,17 @@ constexpr std::uint64_t meander_salt = 0x6D65'616E'6465'7273ULL; // "meanders"
 // three quarters, without ever folding the shifted grid over itself.
 constexpr double meander_reach = 0.875;
 constexpr double meander_cells = 4.0;
+// On fine grids the bends keep to the size they'd have on cells this wide, metres, so rivers still
+// wander visibly.
+constexpr double meander_spacing = 500.0;
 constexpr int meander_octaves = 2;
+
+constexpr std::uint64_t settled_salt = 0x7365'7474'6C65'6400ULL; // "settled"
+
+// Keys the way water runs over the evolved ground, apart from every step's.
+std::uint64_t settled(std::uint64_t wander) {
+    return wander == 0 ? 0 : hash_combine(wander, settled_salt);
+}
 
 // Ground this far under the filled surface lies in a basin, which takes in the ground about it
 // filled at least a little deep: shallower is only a flat's slope towards its outlet.
@@ -34,14 +44,21 @@ constexpr double evaporation = 0.4;
 } // namespace
 
 Landform::Landform(LevelGrid grid, std::vector<std::int64_t> heights, const Erosion& erosion,
-                   int steps)
+                   int steps, const std::function<void(int)>& stepped)
     : grid_{std::move(grid)}, heights_{std::move(heights)} {
     HOG_ASSERT(heights_.size() == grid_.size(), "one height per grid cell");
     const std::vector<std::int64_t> start = heights_;
     for (int step = 0; step < steps; ++step) {
-        std::ignore = erode(grid_, heights_, erosion);
+        Erosion now = erosion;
+        // A new way down each step, so no one path is worn in by chance alone.
+        now.wander =
+            erosion.wander == 0 ? 0 : hash_values(erosion.wander, static_cast<std::uint64_t>(step));
+        std::ignore = erode(grid_, heights_, now);
+        if (stepped) {
+            stepped(step + 1);
+        }
     }
-    drainage_ = drain(grid_, heights_);
+    drainage_ = drain(grid_, heights_, 0, settled(erosion.wander));
     std::vector<std::int64_t> rain(grid_.size());
     for (std::uint32_t cell = 0; cell < grid_.size(); ++cell) {
         rain[cell] = (grid_.area(cell) * erosion.runoff[cell]) >> fixed_fraction_bits;
@@ -55,9 +72,10 @@ Landform::Landform(LevelGrid grid, std::vector<std::int64_t> heights, const Eros
 }
 
 Landform::Landform(LevelGrid grid, std::vector<std::int64_t> heights,
-                   std::vector<std::int64_t> change, std::vector<std::int64_t> drained)
+                   std::vector<std::int64_t> change, std::vector<std::int64_t> drained,
+                   std::uint64_t wander)
     : grid_{std::move(grid)}, heights_{std::move(heights)}, change_{std::move(change)},
-      drainage_{drain(grid_, heights_)}, drained_{std::move(drained)} {
+      drainage_{drain(grid_, heights_, 0, settled(wander))}, drained_{std::move(drained)} {
     HOG_ASSERT(heights_.size() == grid_.size() && change_.size() == grid_.size() &&
                    drained_.size() == grid_.size(),
                "one value per grid cell");
@@ -136,10 +154,11 @@ std::int64_t Landform::change(CellId cell) const {
     return grid_.sample(change_, cell);
 }
 
-Meander::Meander(std::uint64_t seed, const LevelGrid& grid)
+Meander::Meander(std::uint64_t seed, const LevelGrid& grid, double radius)
     : seed_{hash_combine(seed, meander_salt)} {
-    const double spacing =
-        glm::length(cell_center(grid.cell(0)) - cell_center(grid.cell(grid.neighbors(0)[0])));
+    const double spacing = std::max(
+        glm::length(cell_center(grid.cell(0)) - cell_center(grid.cell(grid.neighbors(0)[0]))),
+        meander_spacing / radius);
     reach_ = meander_reach * spacing;
     frequency_ = 1.0 / (meander_cells * spacing);
 }

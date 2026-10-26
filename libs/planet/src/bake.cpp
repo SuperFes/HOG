@@ -5,11 +5,15 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
+#include <cstdlib>
 #include <format>
 #include <fstream>
 #include <iterator>
+#include <mutex>
 #include <span>
+#include <stop_token>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -28,6 +32,23 @@ auto fields(Bake& bake) {
 }
 
 } // namespace
+
+std::filesystem::path named_bakes() {
+#ifdef _MSC_VER
+    char* named = nullptr;
+    std::size_t length = 0;
+    if (_dupenv_s(&named, &length, "HOG_BAKES") != 0 || named == nullptr) {
+        return {};
+    }
+    std::filesystem::path found{named};
+    std::free(named);
+    return found;
+#else
+    // Nothing sets the environment once running.
+    const char* const named = std::getenv("HOG_BAKES"); // NOLINT(concurrency-mt-unsafe)
+    return named != nullptr ? std::filesystem::path{named} : std::filesystem::path{};
+#endif
+}
 
 std::filesystem::path bake_path(const std::filesystem::path& directory, BakeName name) {
     return directory / std::format("landform-{:016x}-{:016x}.bin", name.world, name.code);
@@ -124,6 +145,59 @@ bool write_bake(const std::filesystem::path& directory, BakeName name, const Lan
         }
     }
     return true;
+}
+
+BakeClaim::BakeClaim(const std::filesystem::path& directory, BakeName name,
+                     const std::function<void()>& waiting, ClaimTiming timing)
+    : claim_{bake_path(directory, name).replace_extension(".claim")} {
+    const std::filesystem::path bake = bake_path(directory, name);
+    std::error_code error;
+    std::filesystem::create_directories(directory, error);
+    bool told = false;
+    while (true) {
+        if (std::filesystem::exists(bake, error)) {
+            return;
+        }
+        // Making a directory either makes it or finds it made, in one step everywhere.
+        if (std::filesystem::create_directory(claim_, error)) {
+            held_ = true;
+            break;
+        }
+        if (error) {
+            // Nowhere to keep it, so nothing to wait for.
+            return;
+        }
+        const auto marked = std::filesystem::last_write_time(claim_, error);
+        if (!error && std::filesystem::file_time_type::clock::now() - marked > timing.abandoned) {
+            std::filesystem::remove(claim_, error);
+            continue;
+        }
+        if (!told && waiting) {
+            waiting();
+            told = true;
+        }
+        std::this_thread::sleep_for(timing.poll);
+    }
+    beating_ = std::jthread{[claim = claim_, beat = timing.beat](const std::stop_token& stop) {
+        std::mutex mutex;
+        std::condition_variable_any woken;
+        std::unique_lock lock{mutex};
+        // Waking for a stop returns the predicate, so it must be what ends the loop.
+        while (!woken.wait_for(lock, stop, beat, [&stop] { return stop.stop_requested(); })) {
+            std::error_code ignored;
+            std::filesystem::last_write_time(claim, std::filesystem::file_time_type::clock::now(),
+                                             ignored);
+        }
+    }};
+}
+
+BakeClaim::~BakeClaim() {
+    if (held_) {
+        beating_.request_stop();
+        beating_.join();
+        std::error_code error;
+        std::filesystem::remove(claim_, error);
+    }
 }
 
 } // namespace hog::planet

@@ -4,6 +4,7 @@
 #include <hog/sim/weather.hpp>
 #include <hog/sim/wildlife.hpp>
 #include <hog/testing/quick.hpp>
+#include <hog/testing/worlds.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -196,7 +197,8 @@ TEST_CASE("the development species make a food chain", "[sim][wildlife][food-cha
                   .wolf = id_of(*ecology, "wolf"),
                   .raven = id_of(*ecology, "raven")};
 
-    const hog::planet::World world{hog::planet::PlanetConfig{.seed = 1, .radius = 115'000.0}};
+    const hog::planet::World world{hog::planet::PlanetConfig{
+        .seed = 1, .radius = 115'000.0, .erosion_cell = hog::testing::coarse_erosion_cell}};
     JobSystem jobs{0};
     const RecordedYear weather{world, jobs};
     const hog::sim::CellGrid grid{level};

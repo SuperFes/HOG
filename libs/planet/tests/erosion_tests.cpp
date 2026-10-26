@@ -102,7 +102,9 @@ TEST_CASE("without uplift, rivers only wear the land down", "[planet][erosion]")
 
 TEST_CASE("uplift and erosion settle into balance", "[planet][erosion]") {
     const Fields fields{2.0};
-    const auto settled = evolve(land(), fields, 400);
+    // Valleys only cut down to the lakes they run into, which fill as their floors rise, so it
+    // takes a while.
+    const auto settled = evolve(land(), fields, 800);
     const auto next = evolve(settled, fields, 1);
     std::int64_t largest = 0;
     for (std::uint32_t cell = 0; cell < grid().size(); ++cell) {
@@ -119,7 +121,7 @@ TEST_CASE("hard rock stands higher than soft once settled", "[planet][erosion]")
             fields.erodibility[cell] /= 4;
         }
     }
-    const auto settled = evolve(land(), fields, 400);
+    const auto settled = evolve(land(), fields, 800);
     const auto west = [&](std::uint32_t cell) { return !east(cell); };
     CHECK(mean_land(settled, east) > 1.5 * mean_land(settled, west));
 }

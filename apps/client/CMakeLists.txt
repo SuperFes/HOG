@@ -79,12 +79,12 @@ if(HOG_BUILD_TESTS AND NOT HOG_SANITIZE)
     # Flies for a moment without a window, on a software device with validation and the timings
     # shown, saving what it drew. Skipped where there's no Vulkan.
     add_test(NAME hog_client_smoke
-        COMMAND hog_client_cli --planet "${PROJECT_SOURCE_DIR}/config/planet.toml"
+        COMMAND hog_client_cli --planet "${CMAKE_CURRENT_SOURCE_DIR}/tests/smoke_planet.toml"
                 --companion "${PROJECT_SOURCE_DIR}/res/Matt.png"
                 --quit-after 1 --threads 2 --timings --software --validate
                 --capture "${CMAKE_CURRENT_BINARY_DIR}/smoke.png")
     set_tests_properties(hog_client_smoke PROPERTIES
-        ENVIRONMENT "SDL_VIDEO_DRIVER=offscreen"
+        ENVIRONMENT "SDL_VIDEO_DRIVER=offscreen;HOG_BAKES=${CMAKE_BINARY_DIR}/bakes"
         SKIP_RETURN_CODE 77
         TIMEOUT 120)
 endif()

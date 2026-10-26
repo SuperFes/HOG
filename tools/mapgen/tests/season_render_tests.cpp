@@ -2,6 +2,7 @@
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/world.hpp>
+#include <hog/testing/worlds.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -77,7 +78,8 @@ TEST_CASE("plants run from bare earth to grown and glow alight", "[mapgen][seaso
 }
 
 TEST_CASE("seasons render over a view", "[mapgen][seasons]") {
-    const hog::planet::World world{hog::planet::PlanetConfig{.seed = 1, .radius = 115'000.0}};
+    const hog::planet::World world{hog::planet::PlanetConfig{
+        .seed = 1, .radius = 115'000.0, .erosion_cell = hog::testing::coarse_erosion_cell}};
     const hog::sim::WeatherConfig config{.level = 3};
     const hog::sim::CellGrid grid{config.level};
     const hog::GameTime winter{sys_days{2026y / January / 15}.time_since_epoch()};
@@ -103,7 +105,8 @@ TEST_CASE("seasons render over a view", "[mapgen][seasons]") {
 }
 
 TEST_CASE("the surface is sampled as sea or land", "[mapgen][seasons]") {
-    const hog::planet::World world{hog::planet::PlanetConfig{.seed = 1, .radius = 115'000.0}};
+    const hog::planet::World world{hog::planet::PlanetConfig{
+        .seed = 1, .radius = 115'000.0, .erosion_cell = hog::testing::coarse_erosion_cell}};
     const hog::sim::WeatherConfig config{.level = 3};
     const hog::sim::CellGrid grid{config.level};
     const hog::GameTime summer{sys_days{2026y / July / 15}.time_since_epoch()};

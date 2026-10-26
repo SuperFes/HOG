@@ -10,6 +10,7 @@
 #include <hog/server/survey.hpp>
 #include <hog/testing/ports.hpp>
 #include <hog/testing/temporary_directory.hpp>
+#include <hog/testing/worlds.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -72,8 +73,8 @@ public:
     World() { write_planet(1); }
 
     void write_planet(std::uint64_t seed) const {
-        std::ofstream{directory_.path() / "planet.toml"} << "[planet]\nseed = " << seed
-                                                         << "\nradius_km = 115\n";
+        std::ofstream{directory_.path() / "planet.toml"}
+            << "[planet]\nseed = " << seed << "\nradius_km = 115\nerosion_cell = 1500\n";
     }
 
     [[nodiscard]] std::filesystem::path write_ecology(std::string_view text) const {
@@ -407,7 +408,10 @@ TEST_CASE("the world's layers are laid out for debug tools", "[app][server]") {
 TEST_CASE("inspecting a point shows what has been dug under it", "[app][server]") {
     const World world;
     const auto server = opened(world.config());
-    hog::planet::World dug{{.seed = 1, .ocean_fraction = 0.7, .radius = 115'000.0}};
+    hog::planet::World dug{{.seed = 1,
+                            .ocean_fraction = 0.7,
+                            .radius = 115'000.0,
+                            .erosion_cell = hog::testing::coarse_erosion_cell}};
     const hog::probe::Inspect inspect{.latitude = 21.5, .longitude = -40.25};
     const hog::planet::CellId cell =
         hog::planet::cell_at(hog::planet::direction_at(21.5 * std::numbers::pi / 180.0,

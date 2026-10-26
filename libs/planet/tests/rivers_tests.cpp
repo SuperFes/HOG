@@ -59,7 +59,8 @@ std::vector<std::int64_t> ground(const Landform& landform) {
 }
 
 const Rivers& rivers() {
-    static const Rivers rivers{landform(), ground(landform()), {1, landform().grid()}, radius};
+    static const Rivers rivers{
+        landform(), ground(landform()), {1, landform().grid(), radius}, radius};
     return rivers;
 }
 
@@ -172,7 +173,8 @@ TEST_CASE("banks slope up from the water rather than standing as walls", "[plane
 }
 
 TEST_CASE("scaled rivers run the same courses, wider and deeper", "[planet][rivers]") {
-    const Rivers scaled{landform(), ground(landform()), {1, landform().grid()}, radius, 3.0};
+    const Rivers scaled{
+        landform(), ground(landform()), {1, landform().grid(), radius}, radius, 3.0};
     const auto plain = rivers().reaches();
     const auto wide = scaled.reaches();
     REQUIRE(wide.size() == plain.size());
@@ -231,7 +233,7 @@ bool in_bowl(hog::DVec3 at, double within) {
 TEST_CASE("a basin with water enough holds a level lake, drained by a river from its outlet",
           "[planet][rivers]") {
     const Landform basin = bowl(fixed_one / 2);
-    const Rivers wet{basin, ground(basin), {1, basin.grid()}, radius};
+    const Rivers wet{basin, ground(basin), {1, basin.grid(), radius}, radius};
     const CellId middle = hog::planet::cell_at(bowl_center, 22);
     const auto lake = wet.lake(middle, std::numeric_limits<std::int64_t>::min() / 2);
     REQUIRE(lake);
@@ -288,7 +290,7 @@ TEST_CASE("a lake takes in all the ground under its level about it, its shores s
 
 TEST_CASE("the water of a lake meets the ground at its shore", "[planet][rivers]") {
     const Landform basin = bowl(fixed_one / 2);
-    const Rivers wet{basin, ground(basin), {1, basin.grid()}, radius};
+    const Rivers wet{basin, ground(basin), {1, basin.grid(), radius}, radius};
     const auto found = wet.lake(hog::planet::cell_at(bowl_center, 22), 0);
     REQUIRE(found);
     const std::int64_t lake = found.value_or(0);
@@ -300,7 +302,7 @@ TEST_CASE("the water of a lake meets the ground at its shore", "[planet][rivers]
             const CellId cell =
                 hog::planet::cell_at(glm::normalize(bowl_center + (out * (step * 0.001))), 22);
             const std::int64_t ground = basin.grid().sample(
-                basin.heights(), hog::planet::cell_at(hog::planet::Meander{1, basin.grid()}(
+                basin.heights(), hog::planet::cell_at(hog::planet::Meander{1, basin.grid(), radius}(
                                      hog::planet::cell_center(cell))));
             const bool water = wet.lake(cell, ground).has_value();
             REQUIRE(water == (ground < lake));
@@ -315,7 +317,7 @@ TEST_CASE("the water of a lake meets the ground at its shore", "[planet][rivers]
 
 TEST_CASE("a basin too dry to fill holds no lake and no rivers", "[planet][rivers]") {
     const Landform basin = bowl(fixed_one / 1'000);
-    const Rivers dry{basin, ground(basin), {1, basin.grid()}, radius};
+    const Rivers dry{basin, ground(basin), {1, basin.grid(), radius}, radius};
     CHECK_FALSE(dry.lake(hog::planet::cell_at(bowl_center, 22),
                          std::numeric_limits<std::int64_t>::min() / 2));
     for (const Reach& reach : dry.reaches()) {
@@ -325,7 +327,7 @@ TEST_CASE("a basin too dry to fill holds no lake and no rivers", "[planet][river
 
 TEST_CASE("without rain there are no rivers", "[planet][rivers]") {
     const Landform dry = worn(0);
-    const Rivers none{dry, ground(dry), {1, dry.grid()}, radius};
+    const Rivers none{dry, ground(dry), {1, dry.grid(), radius}, radius};
     CHECK(none.reaches().empty());
     for (std::uint32_t cell = 0; cell < dry.grid().size(); cell += 7) {
         REQUIRE_FALSE(none.channel(dry.grid().cell(cell).child(0), fixed_one));
@@ -352,13 +354,13 @@ TEST_CASE("low ground cut off from the sea holds a lake or lies dry, never the s
     const CellId middle = hog::planet::cell_at(bowl_center, 22);
     const std::int64_t bottom = -400 * fixed_one;
     const Landform wet_basin = bowl(fixed_one / 2, 1200.0);
-    const Rivers wet{wet_basin, ground(wet_basin), {1, wet_basin.grid()}, radius};
+    const Rivers wet{wet_basin, ground(wet_basin), {1, wet_basin.grid(), radius}, radius};
     const auto lake = wet.standing(middle, bottom).value_or(hog::planet::StandingWater{});
     CHECK_FALSE(lake.sea);
     CHECK(lake.level > 0);
 
     const Landform dry_basin = bowl(fixed_one / 1'000, 1200.0);
-    const Rivers dry{dry_basin, ground(dry_basin), {1, dry_basin.grid()}, radius};
+    const Rivers dry{dry_basin, ground(dry_basin), {1, dry_basin.grid(), radius}, radius};
     CHECK_FALSE(dry.standing(middle, bottom));
 
     const CellId offshore = hog::planet::cell_at(glm::normalize(hog::DVec3{0.6, 0.0, -0.8}), 22);

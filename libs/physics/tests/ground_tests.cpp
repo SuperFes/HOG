@@ -5,6 +5,7 @@
 #include <hog/planet/world.hpp>
 #include <hog/terrain/patch.hpp>
 #include <hog/terrain/stitching.hpp>
+#include <hog/testing/worlds.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -20,7 +21,10 @@ using namespace hog::physics;
 namespace {
 
 // NOLINTNEXTLINE(cert-err58-cpp,bugprone-throwing-static-initialization): nothing here throws
-const planet::PlanetConfig config{.seed = 1, .ocean_fraction = 0.7, .radius = 115'000.0};
+const planet::PlanetConfig config{.seed = 1,
+                                  .ocean_fraction = 0.7,
+                                  .radius = 115'000.0,
+                                  .erosion_cell = hog::testing::coarse_erosion_cell};
 
 // One World for each test run: the seed's generators are costly to set up.
 const planet::World& world() {
