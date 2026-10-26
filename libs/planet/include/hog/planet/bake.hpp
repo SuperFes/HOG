@@ -1,9 +1,11 @@
 #pragma once
 
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <mutex>
 #include <optional>
 #include <thread>
 #include <vector>
@@ -78,7 +80,10 @@ public:
 private:
     std::filesystem::path claim_;
     bool held_ = false;
-    std::jthread beating_;
+    std::mutex stopping_;
+    std::condition_variable stop_;
+    bool stopped_ = false;
+    std::thread beating_;
 };
 
 } // namespace hog::planet

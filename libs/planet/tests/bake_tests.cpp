@@ -199,9 +199,11 @@ TEST_CASE("a held claim stays alive, while one let go or left unmarked is claime
         std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now() -
                                                    std::chrono::hours{1});
         std::this_thread::sleep_for(std::chrono::milliseconds{200});
-        CHECK(std::filesystem::file_time_type::clock::now() -
-                  std::filesystem::last_write_time(path) <
-              std::chrono::seconds{10});
+        // Compared before checking, as libc++'s file clock counts in a type Catch can't print.
+        const bool marked =
+            std::filesystem::file_time_type::clock::now() - std::filesystem::last_write_time(path) <
+            std::chrono::seconds{10};
+        CHECK(marked);
     }
     const hog::planet::BakeClaim again{directory.path(), name, {}, quick};
     REQUIRE(again.held());

@@ -13,7 +13,6 @@
 #include <iterator>
 #include <mutex>
 #include <span>
-#include <stop_token>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -178,14 +177,11 @@ BakeClaim::BakeClaim(const std::filesystem::path& directory, BakeName name,
         }
         std::this_thread::sleep_for(timing.poll);
     }
-    beating_ = std::jthread{[claim = claim_, beat = timing.beat](const std::stop_token& stop) {
-        std::mutex mutex;
-        std::condition_variable_any woken;
-        std::unique_lock lock{mutex};
-        // Waking for a stop returns the predicate, so it must be what ends the loop.
-        while (!woken.wait_for(lock, stop, beat, [&stop] { return stop.stop_requested(); })) {
+    beating_ = std::thread{[this, beat = timing.beat] {
+        std::unique_lock lock{stopping_};
+        while (!stop_.wait_for(lock, beat, [this] { return stopped_; })) {
             std::error_code ignored;
-            std::filesystem::last_write_time(claim, std::filesystem::file_time_type::clock::now(),
+            std::filesystem::last_write_time(claim_, std::filesystem::file_time_type::clock::now(),
                                              ignored);
         }
     }};
@@ -193,7 +189,11 @@ BakeClaim::BakeClaim(const std::filesystem::path& directory, BakeName name,
 
 BakeClaim::~BakeClaim() {
     if (held_) {
-        beating_.request_stop();
+        {
+            const std::scoped_lock lock{stopping_};
+            stopped_ = true;
+        }
+        stop_.notify_one();
         beating_.join();
         std::error_code error;
         std::filesystem::remove(claim_, error);
