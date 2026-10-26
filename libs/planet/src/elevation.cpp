@@ -241,7 +241,8 @@ std::shared_ptr<const Elevation::Evolved> Elevation::evolve(const PlanetConfig& 
                             .change = {landform.change().begin(), landform.change().end()},
                             .drained = {landform.drained().begin(), landform.drained().end()},
                             .ground = ground,
-                            .soil = {landform.soil().begin(), landform.soil().end()}});
+                            .soil = {landform.soil().begin(), landform.soil().end()},
+                            .risen = {landform.risen().begin(), landform.risen().end()}});
         }
         shared = std::make_shared<const Evolved>(std::move(landform), ground, config);
         log::info(landform_log, "evolved the landform in {:.0f} s", seconds());
@@ -259,11 +260,11 @@ std::shared_ptr<const Elevation::Evolved> Elevation::unbake(std::optional<Landfo
     if (bake->heights.size() != grid.size()) {
         return nullptr;
     }
-    return std::make_shared<const Evolved>(Landform{std::move(grid), std::move(bake->heights),
-                                                    std::move(bake->change),
-                                                    std::move(bake->drained), std::move(bake->soil),
-                                                    hash_combine(config.seed, wander_salt)},
-                                           bake->ground, config);
+    return std::make_shared<const Evolved>(
+        Landform{std::move(grid), std::move(bake->heights), std::move(bake->change),
+                 std::move(bake->drained), std::move(bake->soil), std::move(bake->risen),
+                 hash_combine(config.seed, wander_salt)},
+        bake->ground, config);
 }
 
 Landform Elevation::wear(LevelGrid grid, std::uint64_t seed,

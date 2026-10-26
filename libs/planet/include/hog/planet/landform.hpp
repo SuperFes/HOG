@@ -28,11 +28,11 @@ public:
     // and of `hillslope`, if it has fields, calling `stepped` with how many are done after each.
     Landform(LevelGrid grid, std::vector<std::int64_t> heights, const Erosion& erosion,
              const Hillslope& hillslope, int steps, const std::function<void(int)>& stepped = {});
-    // One evolved before, as its heights, change, drained and soil left it, by erosion with
-    // `wander`.
+    // One evolved before, as its heights, change, drained, soil and risen left it, by erosion
+    // with `wander`.
     Landform(LevelGrid grid, std::vector<std::int64_t> heights, std::vector<std::int64_t> change,
              std::vector<std::int64_t> drained, std::vector<std::int64_t> soil,
-             std::uint64_t wander);
+             std::vector<std::int64_t> risen, std::uint64_t wander);
 
     [[nodiscard]] const LevelGrid& grid() const noexcept { return grid_; }
     // Fixed-point metres per grid cell, after evolving.
@@ -51,6 +51,9 @@ public:
     // Fixed-point metres of soil on each grid cell: thick where it has weathered and gathered,
     // none on bare rock.
     [[nodiscard]] std::span<const std::int64_t> soil() const noexcept { return soil_; }
+    // Fixed-point metres each grid cell was lifted while it stood above the sea: the ground less
+    // this is the height the rock lay at before, where its beds are found.
+    [[nodiscard]] std::span<const std::int64_t> risen() const noexcept { return risen_; }
 
     // Whether a grid cell lies in a basin, holding a lake or dry.
     [[nodiscard]] bool basin(std::uint32_t index) const { return basins_[index]; }
@@ -72,6 +75,7 @@ private:
     std::vector<std::int64_t> heights_;
     std::vector<std::int64_t> change_;
     std::vector<std::int64_t> soil_;
+    std::vector<std::int64_t> risen_;
     Drainage drainage_;
     std::vector<std::int64_t> drained_;
     std::vector<bool> basins_;

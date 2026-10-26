@@ -45,13 +45,13 @@ constexpr double evaporation = 0.4;
 
 Landform::Landform(LevelGrid grid, std::vector<std::int64_t> heights, const Erosion& erosion,
                    const Hillslope& hillslope, int steps, const std::function<void(int)>& stepped)
-    : grid_{std::move(grid)}, heights_{std::move(heights)}, soil_(heights_.size(), 0) {
+    : grid_{std::move(grid)}, heights_{std::move(heights)}, soil_(heights_.size(), 0),
+      risen_(heights_.size(), 0) {
     HOG_ASSERT(heights_.size() == grid_.size(), "one height per grid cell");
     const std::vector<std::int64_t> start = heights_;
-    std::vector<std::int64_t> risen(heights_.size());
     for (int step = 0; step < steps; ++step) {
         Erosion now = erosion;
-        now.risen = risen;
+        now.risen = risen_;
         // A new way down each step, so no one path is worn in by chance alone.
         now.wander =
             erosion.wander == 0 ? 0 : hash_values(erosion.wander, static_cast<std::uint64_t>(step));
@@ -65,7 +65,7 @@ Landform::Landform(LevelGrid grid, std::vector<std::int64_t> heights, const Eros
                 soil_[cell] = std::max<std::int64_t>(soil_[cell] - cut, 0);
             }
             Hillslope slopes = hillslope;
-            slopes.risen = risen;
+            slopes.risen = risen_;
             wear_slopes(grid_, heights_, soil_, slopes);
         }
         if (stepped) {
@@ -87,12 +87,14 @@ Landform::Landform(LevelGrid grid, std::vector<std::int64_t> heights, const Eros
 
 Landform::Landform(LevelGrid grid, std::vector<std::int64_t> heights,
                    std::vector<std::int64_t> change, std::vector<std::int64_t> drained,
-                   std::vector<std::int64_t> soil, std::uint64_t wander)
+                   std::vector<std::int64_t> soil, std::vector<std::int64_t> risen,
+                   std::uint64_t wander)
     : grid_{std::move(grid)}, heights_{std::move(heights)}, change_{std::move(change)},
-      soil_{std::move(soil)}, drainage_{drain(grid_, heights_, 0, settled(wander))},
-      drained_{std::move(drained)} {
+      soil_{std::move(soil)}, risen_{std::move(risen)},
+      drainage_{drain(grid_, heights_, 0, settled(wander))}, drained_{std::move(drained)} {
     HOG_ASSERT(heights_.size() == grid_.size() && change_.size() == grid_.size() &&
-                   drained_.size() == grid_.size() && soil_.size() == grid_.size(),
+                   drained_.size() == grid_.size() && soil_.size() == grid_.size() &&
+                   risen_.size() == grid_.size(),
                "one value per grid cell");
     find_lakes();
 }

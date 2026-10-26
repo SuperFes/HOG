@@ -158,3 +158,26 @@ TEST_CASE("worn with its slopes, land never stands steeper than its rock, and so
     }
     CHECK(soiled > static_cast<int>(evolved.size()) / 10);
 }
+
+TEST_CASE("a landform keeps how far each cell rose while it stood above the sea",
+          "[planet][landform]") {
+    LevelGrid grid{4, 115'000.0};
+    std::vector<std::int64_t> heights;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const double z = hog::planet::cell_center(grid.cell(cell)).z;
+        heights.push_back(z > 0.0 ? 2'000 * fixed_one : -1'000 * fixed_one);
+    }
+    const std::vector<std::int64_t> uplift(grid.size(), 30 * fixed_one);
+    const std::vector<std::int64_t> erodibility(grid.size(), fixed_one / 100);
+    const std::vector<std::int64_t> runoff(grid.size(), fixed_one / 2);
+    constexpr int steps = 5;
+    const std::vector<std::int64_t> start = heights;
+    const Landform worn{std::move(grid),
+                        std::move(heights),
+                        {.uplift = uplift, .erodibility = erodibility, .runoff = runoff},
+                        hog::planet::Hillslope{},
+                        steps};
+    for (std::uint32_t cell = 0; cell < worn.grid().size(); ++cell) {
+        REQUIRE(worn.risen()[cell] == (start[cell] > 0 ? steps * 30 * fixed_one : 0));
+    }
+}
