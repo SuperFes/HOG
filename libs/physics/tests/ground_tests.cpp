@@ -19,6 +19,7 @@ using namespace hog::physics;
 
 namespace {
 
+// NOLINTNEXTLINE(cert-err58-cpp,bugprone-throwing-static-initialization): nothing here throws
 const planet::PlanetConfig config{.seed = 1, .ocean_fraction = 0.7, .radius = 115'000.0};
 
 // One World for each test run: the seed's generators are costly to set up.

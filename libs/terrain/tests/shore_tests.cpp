@@ -34,6 +34,7 @@ namespace {
 
 constexpr double radius = 115'000.0;
 
+// NOLINTNEXTLINE(cert-err58-cpp,bugprone-throwing-static-initialization): nothing here throws
 const hog::planet::PlanetConfig planet{.seed = 4, .ocean_fraction = 0.7, .radius = radius};
 
 const hog::planet::World& world() {

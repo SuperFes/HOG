@@ -76,12 +76,20 @@ constexpr std::int64_t shelf_break = 5'000;
 
 // Where HOG_BAKES says landforms are kept, or nowhere.
 std::filesystem::path bakes_named() {
-    // Nothing sets the environment once running.
 #ifdef _MSC_VER
-#pragma warning(suppress : 4996)
-#endif
+    char* named = nullptr;
+    std::size_t length = 0;
+    if (_dupenv_s(&named, &length, "HOG_BAKES") != 0 || named == nullptr) {
+        return {};
+    }
+    std::filesystem::path found{named};
+    std::free(named);
+    return found;
+#else
+    // Nothing sets the environment once running.
     const char* const named = std::getenv("HOG_BAKES"); // NOLINT(concurrency-mt-unsafe)
     return named != nullptr ? std::filesystem::path{named} : std::filesystem::path{};
+#endif
 }
 
 // 0 at or below zero, rising linearly to 1 at `width`.
