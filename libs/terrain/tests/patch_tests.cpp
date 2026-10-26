@@ -548,6 +548,38 @@ TEST_CASE("a patch carries the woods flora stands about each of its vertices", "
     CHECK(bare > 0);
 }
 
+TEST_CASE("bare rock packs a byte from none to all", "[terrain][patch]") {
+    CHECK(hog::terrain::packed_bare(0) == 0);
+    CHECK(hog::terrain::packed_bare(hog::planet::fixed_one / 2) == 128);
+    CHECK(hog::terrain::packed_bare(hog::planet::fixed_one) == 255);
+    CHECK(hog::terrain::packed_bare(2 * hog::planet::fixed_one) == 255);
+}
+
+TEST_CASE("a patch carries the rock its ground shows about each of its vertices",
+          "[terrain][patch]") {
+    const World& world = shared_world();
+    const auto& island = world.geology().terrain().archipelago().islands().front();
+    const CellId cell = hog::planet::cell_at(island.center, 6);
+    const Patch patch = bake_patch(world, cell);
+    const hog::planet::FaceIJ at = cell.to_face_ij();
+    const int level = at.level + patch_depth;
+    for (int j = 0; j < patch_side; ++j) {
+        for (int i = 0; i < patch_side; ++i) {
+            const Corner corner{.face = at.face,
+                                .i = (std::int64_t{at.i} << patch_depth) + i,
+                                .j = (std::int64_t{at.j} << patch_depth) + j,
+                                .level = level};
+            const CellId sampled = hog::terrain::sample_cell(corner);
+            const hog::planet::Exposure expected = world.exposure(sampled, world.state(sampled));
+            const hog::terrain::PatchVertex& vertex = patch.vertices.at(vertex_index(i, j));
+            INFO("vertex " << i << ", " << j);
+            CHECK(vertex.rock == expected.rock);
+            CHECK(vertex.bare == hog::terrain::packed_bare(expected.bare));
+            CHECK(vertex.layer == static_cast<float>(hog::planet::fixed_to_double(expected.layer)));
+        }
+    }
+}
+
 TEST_CASE("a patch's woods thin where they died, and grow back younger", "[terrain][patch]") {
     const World& world = shared_world();
     const CellId cell = land_patch();

@@ -162,6 +162,10 @@ Cover packed_cover(const flora::Fate& fate, bool wooded) noexcept {
     return {scar, static_cast<std::uint8_t>((nibble_of(gone) << 4U) | nibble_of(fallen))};
 }
 
+std::uint8_t packed_bare(std::int64_t bare) noexcept {
+    return byte_of(planet::fixed_to_double(bare));
+}
+
 Woods packed_woods(const flora::Woodland& woodland, double cell_area) noexcept {
     const double crowding = 100.0 * static_cast<double>(woodland.grown) / cell_area;
     return {byte_of(crowding / static_cast<double>(woods_crowding)),
@@ -253,13 +257,15 @@ Patch bake_patch(const planet::World& world, planet::CellId cell, const flora::F
                                       static_cast<std::size_t>(blended));
     std::vector<Woods> woods(std::size_t{patch_side} * patch_side);
     std::vector<Cover> covers(woods.size());
+    std::vector<planet::Exposure> exposures(woods.size());
     std::vector<double> grid_heights(woods.size());
     HeightRange heights{.lowest = std::numeric_limits<double>::infinity(),
                         .highest = -std::numeric_limits<double>::infinity()};
     for (int j = -reach; j < patch_side + reach; ++j) {
         for (int i = -reach; i < patch_side + reach; ++i) {
             const Corner corner = on_one_face(at.face, first_i + i, first_j + j, level);
-            const planet::CellState state = world.state(sample_cell(corner));
+            const planet::CellId sampled = sample_cell(corner);
+            const planet::CellState state = world.state(sampled);
             biomes[blended_index(i, j)] = state.biome;
             if (!bordering(i, j)) {
                 continue;
@@ -271,6 +277,7 @@ Patch bake_patch(const planet::World& world, planet::CellId cell, const flora::F
                 woods[index(i, j)] =
                     woods_at(canonical(corner), points[bordered_index(i, j)], state.biome,
                              flora::fared(flora::habitat_of(state), fate));
+                exposures[index(i, j)] = world.exposure(sampled, state);
                 covers[index(i, j)] =
                     packed_cover(fate, flora::trees_of(state.biome).height > 0.0F);
                 grid_heights[index(i, j)] = height;
@@ -300,7 +307,11 @@ Patch bake_patch(const planet::World& world, planet::CellId cell, const flora::F
                  .woods = woods[index(i, j)],
                  .cover = covers[index(i, j)],
                  .blend_biome = blend.biome,
-                 .blend = blend.share});
+                 .blend = blend.share,
+                 .rock = exposures[index(i, j)].rock,
+                 .bare = packed_bare(exposures[index(i, j)].bare),
+                 .layer =
+                     static_cast<float>(planet::fixed_to_double(exposures[index(i, j)].layer))});
         }
     }
 

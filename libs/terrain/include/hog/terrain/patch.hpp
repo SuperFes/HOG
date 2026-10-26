@@ -92,6 +92,9 @@ using Cover = std::array<std::uint8_t, 2>;
 // The cover a fate leaves, on ground that grows woods or not.
 [[nodiscard]] Cover packed_cover(const flora::Fate& fate, bool wooded) noexcept;
 
+// A fixed-point share of bare rock from 0 to 1 as a byte from 0 to 255.
+[[nodiscard]] std::uint8_t packed_bare(std::int64_t bare) noexcept;
+
 // Metres either side of a vertex its ground's look is averaged over, so biomes fade into each
 // other rather than meeting at a line.
 inline constexpr double biome_blend_reach = 6.0;
@@ -111,9 +114,14 @@ struct PatchVertex {
     // two: the look drawn, not what grows.
     planet::Biome blend_biome = planet::Biome::Ocean;
     std::uint8_t blend = 0;
+    // The rock the ground shows, how bare it is from 0 to 255, and the bed it cuts as
+    // planet::Exposure has it, in beds.
+    planet::Rock rock = planet::Rock::Basalt;
+    std::uint8_t bare = 0;
+    float layer = 0.0F;
 };
 
-static_assert(sizeof(PatchVertex) == 36);
+static_assert(sizeof(PatchVertex) == 40);
 
 // Metres from sea level.
 struct HeightRange {
