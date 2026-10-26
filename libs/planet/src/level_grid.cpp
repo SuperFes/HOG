@@ -5,6 +5,7 @@
 #include <hog/planet/projection.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
@@ -33,6 +34,28 @@ std::uint32_t between(const LevelGrid& grid, std::uint32_t cell, std::uint32_t a
 
 std::int64_t lerp(std::int64_t from, std::int64_t to, std::int64_t weight) {
     return from + (((to - from) * weight) >> fixed_fraction_bits);
+}
+
+using Spline = std::array<std::int64_t, 3>;
+
+// Quadratic B-spline weights, in 2^-30, of the cells before, at and after a point `offset` from
+// the nearest centre, in 2^-shift of a cell.
+Spline spline(std::int64_t offset, int shift) {
+    constexpr int bits = detail::weight_bits;
+    constexpr std::int64_t half = std::int64_t{1} << (bits - 1);
+    const std::int64_t t = (offset * (std::int64_t{1} << bits)) >> shift;
+    const std::int64_t before = ((half - t) * (half - t)) >> (bits + 1);
+    const std::int64_t after = ((half + t) * (half + t)) >> (bits + 1);
+    return {before, (std::int64_t{1} << bits) - before - after, after};
+}
+
+// Weighed about the middle value, so a level field stays exactly level.
+std::int64_t mix(const Spline& values, const Spline& weights) {
+    constexpr int bits = detail::weight_bits;
+    return values[1] +
+           ((((values[0] - values[1]) * weights[0]) + ((values[2] - values[1]) * weights[2]) +
+             (std::int64_t{1} << (bits - 1))) >>
+            bits);
 }
 
 } // namespace
@@ -120,7 +143,7 @@ std::uint32_t LevelGrid::index(CellId cell) const {
     return (static_cast<std::uint32_t>(at.face) * side_ * side_) + (at.j * side_) + at.i;
 }
 
-LevelGrid::Blend LevelGrid::blend(CellId cell) const {
+LevelGrid::Offset LevelGrid::offset(CellId cell) const {
     const int level = level_;
     const FaceIJ at = cell.to_face_ij();
     // Centres in units of 2^-31 of a face, so a cell's centre is a whole number at any level.
@@ -132,10 +155,14 @@ LevelGrid::Blend LevelGrid::blend(CellId cell) const {
     const int shift = planet::max_level + 1 - level;
     const auto coarse_i = static_cast<std::uint32_t>(u >> shift);
     const auto coarse_j = static_cast<std::uint32_t>(v >> shift);
-    const std::int64_t du = u - centre(coarse_i, level);
-    const std::int64_t dv = v - centre(coarse_j, level);
+    return {.here = index(CellId::from_face_ij(at.face, coarse_i, coarse_j, level)),
+            .u = u - centre(coarse_i, level),
+            .v = v - centre(coarse_j, level),
+            .shift = shift};
+}
 
-    const std::uint32_t here = index(CellId::from_face_ij(at.face, coarse_i, coarse_j, level));
+LevelGrid::Blend LevelGrid::blend(CellId cell) const {
+    const auto [here, du, dv, shift] = offset(cell);
     const Quadrant around = quadrant(here, (du < 0 ? 0U : 1U) + (dv < 0 ? 0U : 2U));
     return {.cells = {here, around[0], around[1], around[2]},
             .along_u = (std::abs(du) << fixed_fraction_bits) >> shift,
@@ -151,6 +178,26 @@ std::int64_t LevelGrid::sample(std::span<const std::int64_t> field, CellId cell)
     const std::int64_t diagonal =
         between == here ? (field[here] + field[along_u] + field[along_v]) / 3 : field[between];
     return lerp(lerp(field[here], field[along_u], wu), lerp(field[along_v], diagonal, wu), wv);
+}
+
+std::int64_t LevelGrid::smooth(std::span<const std::int64_t> field, CellId cell) const {
+    HOG_ASSERT(field.size() == size(), "one value per grid cell");
+    const auto [here, du, dv, shift] = offset(cell);
+    const std::array<Quadrant, 4> quadrants{quadrant(here, 0), quadrant(here, 1), quadrant(here, 2),
+                                            quadrant(here, 3)};
+    const auto diagonal = [&](const Quadrant& around) {
+        return around[2] == here ? (field[here] + field[around[0]] + field[around[1]]) / 3
+                                 : field[around[2]];
+    };
+    // Rows along u, from -v to +v.
+    const std::array<std::array<std::int64_t, 3>, 3> rows{{
+        {diagonal(quadrants[0]), field[quadrants[0][1]], diagonal(quadrants[1])},
+        {field[quadrants[0][0]], field[here], field[quadrants[1][0]]},
+        {diagonal(quadrants[2]), field[quadrants[2][1]], diagonal(quadrants[3])},
+    }};
+    const auto along_u = spline(du, shift);
+    const auto along_v = spline(dv, shift);
+    return mix({mix(rows[0], along_u), mix(rows[1], along_u), mix(rows[2], along_u)}, along_v);
 }
 
 std::array<std::uint32_t, 4> LevelGrid::corners(CellId cell) const {

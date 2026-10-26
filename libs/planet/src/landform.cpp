@@ -166,7 +166,7 @@ bool Landform::near_lake(CellId cell) const {
 }
 
 std::int64_t Landform::change(CellId cell) const {
-    return grid_.sample(change_, cell);
+    return grid_.smooth(change_, cell);
 }
 
 Meander::Meander(std::uint64_t seed, const LevelGrid& grid, double radius)

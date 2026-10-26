@@ -7,8 +7,11 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <numbers>
+#include <utility>
 #include <vector>
 
 using hog::planet::LevelGrid;
@@ -156,4 +159,111 @@ TEST_CASE("a sample blends only the four grid cells around a point", "[planet][l
             }
         }
     }
+}
+
+namespace {
+
+// Probes this many levels below the grid's cells.
+constexpr int finer = 6;
+
+std::vector<std::int64_t> scattered(const LevelGrid& grid) {
+    std::vector<std::int64_t> field(grid.size());
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        field[index] = static_cast<std::int64_t>(hog::mix64(index) % 1'000'000);
+    }
+    return field;
+}
+
+} // namespace
+
+TEST_CASE("a smooth sample keeps a level field level and stays within the cells around a point",
+          "[planet][level_grid]") {
+    const LevelGrid grid{3, radius};
+    const std::vector<std::int64_t> level(grid.size(), 12'345);
+    const std::vector<std::int64_t> field = scattered(grid);
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        const hog::planet::CellId cell = grid.cell(index);
+        std::int64_t lowest = field[index];
+        std::int64_t highest = field[index];
+        for (const std::uint32_t neighbor : grid.neighbors(index)) {
+            lowest = std::min(lowest, field[neighbor]);
+            highest = std::max(highest, field[neighbor]);
+        }
+        REQUIRE(grid.smooth(level, cell) == 12'345);
+        for (int child = 0; child < 4; ++child) {
+            hog::planet::CellId inside = cell.child(child);
+            while (!inside.is_leaf()) {
+                inside = inside.child(child);
+            }
+            REQUIRE(grid.smooth(level, inside) == 12'345);
+            const std::int64_t value = grid.smooth(field, inside);
+            REQUIRE(value >= lowest);
+            REQUIRE(value <= highest);
+        }
+    }
+}
+
+TEST_CASE("a smooth sample follows a sloping field", "[planet][level_grid]") {
+    const LevelGrid grid{3, radius};
+    const std::uint32_t side = 1U << 3U;
+    std::vector<std::int64_t> field(grid.size(), 0);
+    for (std::uint32_t j = 0; j < side; ++j) {
+        for (std::uint32_t i = 0; i < side; ++i) {
+            field[grid.index(hog::planet::CellId::from_face_ij(0, i, j, 3))] =
+                (1'000 * std::int64_t{i}) + (300 * std::int64_t{j});
+        }
+    }
+    // Away from the face's edge, so all nine cells lie on the slope.
+    const std::uint32_t fine = 1U << static_cast<unsigned>(finer);
+    for (std::uint32_t y = fine + (fine / 2); y < ((side - 1) * fine) - (fine / 2); ++y) {
+        for (std::uint32_t x = fine + (fine / 2); x < ((side - 1) * fine) - (fine / 2); ++x) {
+            const double u = ((x + 0.5) / fine) - 0.5;
+            const double v = ((y + 0.5) / fine) - 0.5;
+            const auto value = static_cast<double>(
+                grid.smooth(field, hog::planet::CellId::from_face_ij(0, x, y, 3 + finer)));
+            REQUIRE(value == Catch::Approx((1'000 * u) + (300 * v)).margin(2.0));
+        }
+    }
+}
+
+TEST_CASE("a smooth sample has no steps or creases along cells' edges", "[planet][level_grid]") {
+    const LevelGrid grid{3, radius};
+    const std::vector<std::int64_t> field = scattered(grid);
+    const int level = 3 + finer;
+    const std::uint32_t side = 1U << static_cast<unsigned>(level);
+    const auto at = [&](int face, std::uint32_t i, std::uint32_t j) {
+        return grid.smooth(field, hog::planet::CellId::from_face_ij(face, i, j, level));
+    };
+    // Neighbouring cells differ by up to a million, a sixty-fourth of that a probe apart; a
+    // crease would turn the slope by as much again within one probe.
+    std::int64_t steepest = 0;
+    std::int64_t sharpest = 0;
+    for (int face = 0; face < 6; ++face) {
+        for (std::uint32_t row = 0; row < side; ++row) {
+            for (std::uint32_t k = 1; k + 1 < side; ++k) {
+                const std::array along_u{at(face, k - 1, row), at(face, k, row),
+                                         at(face, k + 1, row)};
+                const std::array along_v{at(face, row, k - 1), at(face, row, k),
+                                         at(face, row, k + 1)};
+                for (const auto& line : {along_u, along_v}) {
+                    steepest = std::max(steepest, std::abs(line[1] - line[0]));
+                    sharpest = std::max(sharpest, std::abs(line[2] - (2 * line[1]) + line[0]));
+                }
+            }
+        }
+        // Across the face's edges too.
+        for (std::uint32_t k = 0; k < side; ++k) {
+            for (const auto& [i, j] : {std::pair{0U, k}, std::pair{side - 1, k}, std::pair{k, 0U},
+                                       std::pair{k, side - 1}}) {
+                const hog::planet::CellId probe =
+                    hog::planet::CellId::from_face_ij(face, i, j, level);
+                for (const hog::planet::CellId across : hog::planet::edge_neighbors(probe)) {
+                    steepest = std::max(
+                        steepest, std::abs(grid.smooth(field, across) - grid.smooth(field, probe)));
+                }
+            }
+        }
+    }
+    CHECK(steepest < 2'000'000 / 64);
+    CHECK(sharpest < 1'000);
 }

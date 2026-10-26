@@ -45,11 +45,12 @@ public:
 
     // Fixed-point metres the ground moved, per grid cell.
     [[nodiscard]] std::span<const std::int64_t> change() const noexcept { return change_; }
+    // The same at any cell's centre, smoothly, so the worn ground shows no creases along the
+    // grid cells' edges.
+    [[nodiscard]] std::int64_t change(CellId cell) const;
     // Fixed-point metres of soil on each grid cell: thick where it has weathered and gathered,
     // none on bare rock.
     [[nodiscard]] std::span<const std::int64_t> soil() const noexcept { return soil_; }
-    // The same at any cell's centre.
-    [[nodiscard]] std::int64_t change(CellId cell) const;
 
     // Whether a grid cell lies in a basin, holding a lake or dry.
     [[nodiscard]] bool basin(std::uint32_t index) const { return basins_[index]; }

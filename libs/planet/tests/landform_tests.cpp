@@ -53,10 +53,20 @@ std::int64_t range() {
 
 } // namespace
 
-TEST_CASE("a landform's change at its own cells is the cell's", "[planet][landform]") {
+TEST_CASE("a landform's change at its own cells lies among the cell's and its neighbours'",
+          "[planet][landform]") {
     REQUIRE(range() > 100 * fixed_one);
+    const auto change = landform().change();
     for (std::uint32_t cell = 0; cell < landform().grid().size(); ++cell) {
-        REQUIRE(landform().change(landform().grid().cell(cell)) == landform().change()[cell]);
+        std::int64_t lowest = change[cell];
+        std::int64_t highest = change[cell];
+        for (const std::uint32_t around : landform().grid().neighbors(cell)) {
+            lowest = std::min(lowest, change[around]);
+            highest = std::max(highest, change[around]);
+        }
+        const std::int64_t value = landform().change(landform().grid().cell(cell));
+        REQUIRE(value >= lowest);
+        REQUIRE(value <= highest);
     }
 }
 

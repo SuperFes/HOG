@@ -44,10 +44,24 @@ public:
     // A field with one fixed-point value per grid cell at any cell's centre, bilinear between the
     // four grid cells around it.
     [[nodiscard]] std::int64_t sample(std::span<const std::int64_t> field, CellId cell) const;
+    // The same, as a quadratic B-spline over the nine grid cells around the nearest: smooth in
+    // value and slope, without creases along cells' edges, but short of a cell's own value at its
+    // centre where the field bends.
+    [[nodiscard]] std::int64_t smooth(std::span<const std::int64_t> field, CellId cell) const;
     // Those four grid cells; at a cube corner, where only three meet, the cell's own comes twice.
     [[nodiscard]] std::array<std::uint32_t, 4> corners(CellId cell) const;
 
 private:
+    // The grid cell under a point and the point's offset from its centre along u and v, in
+    // 2^-shift of a cell.
+    struct Offset {
+        std::uint32_t here;
+        std::int64_t u;
+        std::int64_t v;
+        int shift;
+    };
+    [[nodiscard]] Offset offset(CellId cell) const;
+
     // The four cells sample blends between, here, along u, along v and between, with the weights
     // along u and v.
     struct Blend {
