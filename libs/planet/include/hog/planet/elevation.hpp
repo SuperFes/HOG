@@ -32,6 +32,13 @@ struct Exposure {
     friend bool operator==(const Exposure&, const Exposure&) = default;
 };
 
+// Where the beds lie under a cell: ground at height `ground` cuts their layering at
+// `ground - risen`, the land having risen that many fixed-point metres since they were laid.
+struct Layering {
+    BedColumn column;
+    std::int64_t risen = 0;
+};
+
 // Terrain height: continents give the coastline, lowlands and ocean
 // floor; ridges raise mountain ranges where the plates push them up, away from the coast, and
 // volcanoes stand along the arcs above plates diving and in chains carried off plumes. Rivers
@@ -75,6 +82,8 @@ public:
     // and at least `least_bare`; never under water.
     [[nodiscard]] Exposure exposure(CellId cell, std::int64_t ground,
                                     std::int64_t least_bare = 0) const;
+
+    [[nodiscard]] Layering layering(CellId cell) const;
 
     // The unit direction of the landform cell nearest `from` whose ground stands more than `above`
     // fixed-point metres above the sea, or `from` itself if none does.
@@ -130,6 +139,9 @@ private:
     template <int Bits>
     [[nodiscard]] static std::int64_t ridge(std::uint64_t seed, double frequency, int octaves,
                                             CellId cell, const std::array<std::int64_t, 3>& grain);
+    // The same, while the landform is still being evolved; `shifted` is the cell the meanders
+    // move `cell` to.
+    [[nodiscard]] Layering layering(CellId cell, CellId shifted, const Landform& landform) const;
     // The elevation as generated, before rivers wore it.
     [[nodiscard]] std::int64_t generated(CellId cell) const;
     // The same with `Bits` fractional bits.

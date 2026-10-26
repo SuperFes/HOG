@@ -16,7 +16,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <limits>
 #include <utility>
 #include <vector>
 
@@ -604,6 +603,30 @@ TEST_CASE("steep or thin-soiled ground shows its rock, deep soil hides it", "[pl
     CHECK(covered > 100);
     CHECK(layered > 100);
     CHECK(agreeing > exposed * 95 / 100);
+}
+
+TEST_CASE("the ground shows the rock its layering puts there", "[planet][elevation]") {
+    const Elevation terrain{{.seed = 1, .ocean_fraction = 0.7, .radius = 115'000.0}};
+    const auto& grid = terrain.landform().grid();
+    int risen = 0;
+    int layered = 0;
+    for (std::uint32_t index = 0; index < grid.size(); index += 11) {
+        const CellId cell = grid.cell(index);
+        const std::int64_t ground = terrain.elevation(cell);
+        const hog::planet::Layering layering = terrain.layering(cell);
+        const std::int64_t height = ground - layering.risen;
+        const hog::planet::Exposure exposure = terrain.exposure(cell, ground);
+        REQUIRE(exposure.rock == terrain.beds().rock_at(layering.column, height));
+        const auto bed = terrain.beds().bed_at(layering.column, height);
+        REQUIRE((bed.has_value() || exposure.layer == 0));
+        if (bed) {
+            REQUIRE(exposure.layer >> hog::planet::fixed_fraction_bits == bed->index);
+            ++layered;
+        }
+        risen += layering.risen > 0 ? 1 : 0;
+    }
+    CHECK(risen > 100);
+    CHECK(layered > 100);
 }
 
 TEST_CASE("ground dug into shows bare rock", "[planet][elevation]") {

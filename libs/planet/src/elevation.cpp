@@ -385,15 +385,25 @@ Exposure Elevation::exposure(CellId cell, std::int64_t ground, std::int64_t leas
             (std::max(thin, stripped) * ramp(generated, coast_blend)) >> fixed_fraction_bits, bare);
     }
     // The rock and its bed are told even under soil, so they blend smoothly into bare ground.
-    const BedColumn column = beds_.column(
-        cell, {.continental = continents_.height(cell) > 0, .mountains = mountain_strength(cell)});
-    const std::int64_t height = ground - grid.smooth(landform.risen(), shifted);
-    Exposure exposure{.rock = beds_.rock_at(column, height), .bare = bare};
-    if (const auto bed = beds_.bed_at(column, height)) {
+    const Layering layering = this->layering(cell, shifted, landform);
+    const std::int64_t height = ground - layering.risen;
+    Exposure exposure{.rock = beds_.rock_at(layering.column, height), .bare = bare};
+    if (const auto bed = beds_.bed_at(layering.column, height)) {
         exposure.layer = (bed->index << fixed_fraction_bits) +
                          (((height - bed->base) << fixed_fraction_bits) / (bed->top - bed->base));
     }
     return exposure;
+}
+
+Layering Elevation::layering(CellId cell) const {
+    const Evolved& evolved = this->evolved();
+    return layering(cell, cell_at(evolved.meander(cell_center(cell))), evolved.landform);
+}
+
+Layering Elevation::layering(CellId cell, CellId shifted, const Landform& landform) const {
+    return {.column = beds_.column(cell, {.continental = continents_.height(cell) > 0,
+                                          .mountains = mountain_strength(cell)}),
+            .risen = landform.grid().smooth(landform.risen(), shifted)};
 }
 
 std::optional<Channel> Elevation::river(CellId cell) const {
@@ -503,9 +513,7 @@ std::int64_t Elevation::ledged(CellId cell, CellId shifted, std::int64_t ground,
     if (strength == 0) {
         return ground;
     }
-    const BedColumn column =
-        beds_.column(cell, {.continental = crust > 0, .mountains = mountain_strength(cell)});
-    const std::int64_t risen = grid.smooth(landform.risen(), shifted);
+    const auto [column, risen] = layering(cell, shifted, landform);
     const auto bed = beds_.bed_at(column, ground - risen);
     if (!bed) {
         return ground;
