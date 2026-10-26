@@ -147,6 +147,7 @@ TEST_CASE("karst runs through wet limestone near the water table", "[planet][cav
     int sinkholes = 0;
     int walkable = 0;
     int squeezes = 0;
+    int buried = 0;
     for (const CellId tile : tiles(caves, 3'000)) {
         for (const Passage& passage : lookup.passages_near(tile)) {
             if (passage.cave == Cave::Sinkhole) {
@@ -168,16 +169,21 @@ TEST_CASE("karst runs through wet limestone near the water table", "[planet][cav
             // One end is a junction in the limestone; the other may be a middle that wandered.
             const auto in_limestone = [&](DVec3 end) {
                 const Spot at = spot_at(caves, end);
-                const hog::planet::Strata strata = caves.geology().strata(at.cell);
-                return strata.sediment == Rock::Limestone && at.depth >= strata.cover_thickness &&
-                       at.depth <= strata.bedrock_depth();
+                return caves.geology().strata(at.cell).rock_at(at.depth) == Rock::Limestone;
             };
             CHECK((in_limestone(passage.from) || in_limestone(passage.to)));
+            // Limestone beds under other rock dissolve too.
+            const Spot from = spot_at(caves, passage.from);
+            buried += in_limestone(passage.from) &&
+                              caves.geology().strata(from.cell).sediment != Rock::Limestone
+                          ? 1
+                          : 0;
         }
     }
     INFO(passages << " passages, " << walkable << " walkable, " << squeezes << " squeezes");
     CHECK(passages > 100);
     CHECK(sinkholes > 0);
+    CHECK(buried > 0);
     // Most are too tight to walk, and plenty too tight even to crawl.
     CHECK(walkable < passages / 2);
     CHECK(walkable > passages / 10);
@@ -356,7 +362,11 @@ TEST_CASE("only limestone holds karst", "[planet][caves]") {
     for (const CellId tile : tiles(caves, 1'000)) {
         const CellId cell = tile.child(1).child(2);
         const hog::planet::Strata strata = caves.geology().strata(cell);
-        if (strata.sediment == Rock::Limestone) {
+        bool limestone = false;
+        for (std::int64_t depth = 0; depth <= 200 * fixed_one; depth += fixed_one) {
+            limestone = limestone || strata.rock_at(depth) == Rock::Limestone;
+        }
+        if (limestone) {
             continue;
         }
         for (const std::int64_t depth : {0, 5, 20, 80}) {

@@ -80,7 +80,13 @@ void check_host(Resource resource, const hog::planet::Deposit& deposit, const St
     case Resource::Clay:
         REQUIRE(deposit.top == strata.cover_thickness);
         break;
-    case Resource::Coal:
+    case Resource::Coal: {
+        const auto bed = strata.bed_at(deposit.top);
+        REQUIRE(bed.has_value());
+        REQUIRE((bed->rock == Rock::Shale || bed->rock == Rock::Sandstone));
+        REQUIRE(strata.bed_at(deposit.top + deposit.thickness - 1)->index == bed->index);
+        break;
+    }
     case Resource::Salt:
         REQUIRE(deposit.top + deposit.thickness <= strata.bedrock_depth());
         REQUIRE(sedimentary(strata.rock_at(deposit.top)));

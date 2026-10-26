@@ -166,7 +166,7 @@ constexpr std::int64_t gold_strength = fixed_one / 4;
         return elevation < clay_below && elevation > clay_above && biome != Biome::Desert &&
                biome != Biome::Ice && biome != Biome::Alpine;
     case Resource::Coal:
-        return strata.sediment == Rock::Shale || strata.sediment == Rock::Sandstone;
+        return strata.sediment_thickness > 0;
     case Resource::Salt:
         return moisture < salt_moisture;
     case Resource::Iron:
@@ -413,6 +413,14 @@ std::array<Deposit, resource_count> Geology::deposits(CellId cell) const {
         case Host::Sediment:
             top += strata.cover_thickness;
             thickness = std::min(thickness, strata.sediment_thickness - offset);
+            if (resource == Resource::Coal) {
+                // Coal measures lie in shale and sandstone, a seam within one bed.
+                const auto bed = strata.bed_at(top);
+                if (!bed || (bed->rock != Rock::Shale && bed->rock != Rock::Sandstone)) {
+                    continue;
+                }
+                thickness = std::min(thickness, strata.surface - bed->base - top);
+            }
             break;
         case Host::Bedrock:
             top += strata.bedrock_depth();

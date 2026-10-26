@@ -286,8 +286,7 @@ const Caves::Lookup::Junction& Caves::Lookup::junction(CellId tile) {
     Junction made;
     const std::int64_t elevation = geology.terrain().elevation(cell);
     const Strata strata = geology.strata(cell);
-    if (elevation > 0 && strata.sediment == Rock::Limestone &&
-        strata.sediment_thickness >= thinnest_karst &&
+    if (elevation > 0 && strata.sediment_thickness >= thinnest_karst &&
         geology.climate().moisture(cell) >= karst_moisture) {
         const std::int64_t wander =
             static_cast<std::int64_t>(
@@ -295,10 +294,13 @@ const Caves::Lookup::Junction& Caves::Lookup::junction(CellId tile) {
                 static_cast<std::uint64_t>((above_water_table + below_water_table + 1) *
                                            fixed_one)) -
             (above_water_table * fixed_one);
-        made.open = true;
         made.depth = std::clamp(geology.climate().water_table(cell) + wander,
                                 strata.cover_thickness + karst_margin,
                                 strata.bedrock_depth() - karst_margin);
+        const auto bed = strata.bed_at(made.depth);
+        made.open = bed && bed->rock == Rock::Limestone;
+    }
+    if (made.open) {
         made.radius = skewed(narrowest_karst, widest_karst, hash_values(seed, 3));
         made.point = point_over(direction, caves.planet_radius_, elevation, made.depth);
     }
@@ -466,7 +468,7 @@ std::optional<CaveHit> Caves::Lookup::cave_at(CellId cell, std::int64_t depth) {
     const Strata strata = caves_->geology_->strata(cell);
     const Rock rock = strata.rock_at(depth);
     const std::int64_t elevation = caves_->geology_->terrain().elevation(cell);
-    const bool karst = strata.sediment == Rock::Limestone && depth < strata.bedrock_depth();
+    const bool karst = strata.sediment_thickness > 0 && depth < strata.bedrock_depth();
     const bool lava = rock == Rock::Basalt && depth < below_tubes;
     // Sea caves are cut in solid rock, about level with the sea.
     const double height = fixed_to_double(elevation - depth);
