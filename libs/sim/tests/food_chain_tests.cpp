@@ -100,8 +100,8 @@ std::uint32_t id_of(const hog::sim::Ecology& ecology, std::string_view name) {
     return found.value_or(0);
 }
 
-// Yearly totals of each species, how far north the deer reach in the last summers and winters,
-// and what was reported along the way.
+// Yearly totals of each species, how far north the deer reach in the last summers and late
+// winters, and what was reported along the way.
 struct Run {
     std::vector<std::vector<double>> totals;
     double summer_reach = 0.0;
@@ -131,11 +131,11 @@ Run run(Wildlife& wildlife, const RecordedYear& weather, const hog::sim::CellGri
         for (int day = 0; day < 365; ++day) {
             wildlife.advance_to(march_equinox + days{(year * 365) + day + 1}, weather.on(day),
                                 jobs);
-            // Midsummer and midwinter in the north, over the last years.
+            // Midsummer, and late winter once the cold has thinned them, over the last years.
             if (year >= run_years - reach_years && day == 95) {
                 result.summer_reach += northern_reach(wildlife, grid, deer) / reach_years;
             }
-            if (year >= run_years - reach_years && day == 280) {
+            if (year >= run_years - reach_years && day == 340) {
                 result.winter_reach += northern_reach(wildlife, grid, deer) / reach_years;
             }
         }
