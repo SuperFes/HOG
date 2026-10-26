@@ -5,7 +5,9 @@
 #include <hog/flora/fates.hpp>
 #include <hog/flora/species.hpp>
 #include <hog/flora/stand.hpp>
+#include <hog/planet/places.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/planet/tangent_frame.hpp>
 #include <hog/render/forest.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -27,17 +29,15 @@ using hog::render::testing::test_device;
 
 namespace {
 
-// The starting islands' middle, where the test planet grows its woods.
-hog::WorldPosition islands_centre() {
-    const double radius = world().geology().planet_radius();
-    const auto& islands = world().geology().terrain().archipelago();
-    return hog::WorldPosition{islands.islands().front().center * radius};
+// Temperate woods, where pines, maples and oaks grow.
+hog::DVec3 temperate_woods() {
+    return hog::client::testing::nearest_biome(hog::planet::Biome::TemperateForest);
 }
 
-// A nearby tile that anchors at least `least` trees, walking outward from the islands' middle.
+// A nearby tile that anchors at least `least` trees, walking outward from temperate woods.
 hog::planet::CellId wooded_tile(const hog::client::BiomePalette& palette, std::size_t least = 1) {
     const double radius = world().geology().planet_radius();
-    const hog::planet::CellId middle = hog::planet::cell_at(islands_centre(), anchor_tile_level);
+    const hog::planet::CellId middle = hog::planet::cell_at(temperate_woods(), anchor_tile_level);
     const hog::planet::FaceIJ at = middle.to_face_ij();
     for (std::uint32_t ring = 0; ring < 8; ++ring) {
         for (std::uint32_t i = at.i - ring; i <= at.i + ring; ++i) {
@@ -51,7 +51,7 @@ hog::planet::CellId wooded_tile(const hog::client::BiomePalette& palette, std::s
             }
         }
     }
-    FAIL("no wooded tile near the starting islands");
+    FAIL("no wooded tile near the start");
     return middle;
 }
 
@@ -88,33 +88,37 @@ TEST_CASE("anchored trees are bound to their spots, the same every build", "[cli
 TEST_CASE("the open sea anchors no trees", "[client][anchors]") {
     const hog::client::BiomePalette palette = hog::client::biome_palette();
     const double radius = world().geology().planet_radius();
-    // The far side of the planet from the starting islands is open ocean on the test world.
-    const hog::WorldPosition opposite{-islands_centre().metres()};
-    const hog::planet::CellId tile = hog::planet::cell_at(opposite, anchor_tile_level);
+    // The start lies over open ocean on the test world.
+    const hog::planet::CellId tile =
+        hog::planet::cell_at(hog::planet::start_direction, anchor_tile_level);
     const hog::WorldPosition origin{hog::planet::cell_center(tile) * radius};
     CHECK(tile_anchors(world(), tile, origin, palette).anchors.empty());
 }
 
-TEST_CASE("palms anchor on the islands' warmest shores, and only where it is warm enough",
-          "[client][anchors]") {
+TEST_CASE("palms anchor on warm shores, and only where it is warm enough", "[client][anchors]") {
     const hog::client::BiomePalette palette = hog::client::biome_palette();
     const double radius = world().geology().planet_radius();
-    // A warm stretch of beach, found by walking each island's ground.
+    // A warm stretch of beach, found by walking the ground about the warm coast nearest the start.
     std::optional<hog::planet::CellId> shore;
-    for (const auto& island : world().geology().terrain().archipelago().islands()) {
-        const hog::DVec3 east =
-            glm::normalize(glm::cross(hog::DVec3{0.0, 0.0, 1.0}, island.center));
-        const hog::DVec3 north = glm::cross(island.center, east);
-        const double step = 200.0 / radius;
-        for (int a = -30; a <= 30 && !shore; ++a) {
-            for (int b = -30; b <= 30 && !shore; ++b) {
-                const hog::planet::CellId cell = hog::planet::cell_at(
-                    glm::normalize(island.center + (east * (a * step)) + (north * (b * step))), 18);
-                const hog::planet::CellState state = world().state(cell);
-                if (state.biome == hog::planet::Biome::Beach &&
-                    state.temperature > 17 * hog::planet::fixed_one) {
-                    shore = cell;
-                }
+    const auto& terrain = world().geology().terrain();
+    const std::optional<hog::planet::CellId> warm =
+        hog::planet::nearest_cell(hog::planet::start_direction, 8, [&](hog::planet::CellId cell) {
+            return hog::planet::coast(terrain, cell) &&
+                   world().state(cell).temperature > 20 * hog::planet::fixed_one;
+        });
+    REQUIRE(warm);
+    const hog::DVec3 coast = hog::planet::cell_center(warm.value_or(hog::planet::CellId{}));
+    const hog::DVec3 east = glm::normalize(glm::cross(hog::DVec3{0.0, 0.0, 1.0}, coast));
+    const hog::DVec3 north = glm::cross(coast, east);
+    const double step = 200.0 / radius;
+    for (int a = -30; a <= 30 && !shore; ++a) {
+        for (int b = -30; b <= 30 && !shore; ++b) {
+            const hog::planet::CellId cell = hog::planet::cell_at(
+                glm::normalize(coast + (east * (a * step)) + (north * (b * step))), 18);
+            const hog::planet::CellState state = world().state(cell);
+            if (state.biome == hog::planet::Biome::Beach &&
+                state.temperature > 17 * hog::planet::fixed_one) {
+                shore = cell;
             }
         }
     }
@@ -140,7 +144,7 @@ TEST_CASE("maples anchor only on ground wet enough for them, oaks never on water
     const hog::client::BiomePalette palette = hog::client::biome_palette();
     const double radius = world().geology().planet_radius();
     const hog::planet::FaceIJ at =
-        hog::planet::cell_at(islands_centre(), anchor_tile_level).to_face_ij();
+        hog::planet::cell_at(temperate_woods(), anchor_tile_level).to_face_ij();
     const hog::flora::Niche maple = hog::flora::niche_of(hog::flora::Genus::Maple);
     const hog::flora::Niche oak = hog::flora::niche_of(hog::flora::Genus::Oak);
     // Read a little loosely: the anchor's spot is found again from where it stands.

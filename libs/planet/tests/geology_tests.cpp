@@ -564,25 +564,23 @@ TEST_CASE("deposits are sparse seams in their host rock", "[planet][geology]") {
     }
 }
 
-TEST_CASE("the starting islands hold clay, iron and copper", "[planet][geology]") {
+TEST_CASE("the land nearest the start holds clay, iron and copper", "[planet][geology]") {
     const std::uint64_t seed = GENERATE(take(hog::testing::cases(4), values({1U, 2U, 3U, 4U})));
     const Geology geology{planet(seed)};
     std::array<int, hog::planet::resource_count> found{};
-    // A grid of cells about 150 m apart over each island.
-    for (const auto& island : geology.terrain().archipelago().islands()) {
-        const hog::planet::TangentFrame frame = hog::planet::tangent_frame(island.center);
-        const auto steps = static_cast<int>(island.radius / 150.0);
-        for (int east = -steps; east <= steps; ++east) {
-            for (int north = -steps; north <= steps; ++north) {
-                const hog::DVec3 offset = ((frame.east * static_cast<double>(east)) +
-                                           (frame.north * static_cast<double>(north))) *
-                                          (150.0 / radius);
-                const CellId cell =
-                    hog::planet::cell_at(glm::normalize(island.center + offset), 12);
-                const auto deposits = geology.deposits(cell);
-                for (std::size_t resource = 0; resource < deposits.size(); ++resource) {
-                    found.at(resource) += deposits.at(resource).empty() ? 0 : 1;
-                }
+    // A grid of cells about 150 m apart within a few kilometres of it.
+    const hog::DVec3 land = geology.terrain().nearest_land(hog::planet::start_direction);
+    const hog::planet::TangentFrame frame = hog::planet::tangent_frame(land);
+    constexpr int steps = 4'000 / 150;
+    for (int east = -steps; east <= steps; ++east) {
+        for (int north = -steps; north <= steps; ++north) {
+            const hog::DVec3 offset = ((frame.east * static_cast<double>(east)) +
+                                       (frame.north * static_cast<double>(north))) *
+                                      (150.0 / radius);
+            const CellId cell = hog::planet::cell_at(glm::normalize(land + offset), 12);
+            const auto deposits = geology.deposits(cell);
+            for (std::size_t resource = 0; resource < deposits.size(); ++resource) {
+                found.at(resource) += deposits.at(resource).empty() ? 0 : 1;
             }
         }
     }

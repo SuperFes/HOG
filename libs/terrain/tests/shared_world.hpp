@@ -2,6 +2,7 @@
 
 #include <hog/planet/cell_id.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/planet/tangent_frame.hpp>
 #include <hog/planet/world.hpp>
 #include <hog/testing/worlds.hpp>
 
@@ -22,7 +23,8 @@ inline planet::World& shared_world() {
 // A level-6 patch over land, a few kilometres across, so its heights vary.
 inline planet::CellId land_patch() {
     const auto& terrain = shared_world().geology().terrain();
-    return planet::cell_at(terrain.archipelago().center(), 6);
+    return planet::cell_at(terrain.nearest_land(planet::start_direction, 50 * planet::fixed_one),
+                           6);
 }
 
 } // namespace hog::terrain::testing

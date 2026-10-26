@@ -6,6 +6,7 @@
 #include <hog/planet/geology.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/planet/tangent_frame.hpp>
 #include <hog/planet/tile.hpp>
 #include <hog/testing/worlds.hpp>
 
@@ -153,7 +154,8 @@ std::vector<GoldenTile> golden_tiles() {
     tiles.push_back({.tile = CellId::from_face_ij(2, 8'191, 8'191, 14), .depth = 4});
     tiles.push_back({.tile = CellId::from_face_ij(1, 123'456, 654'321, 20), .depth = 4});
     tiles.push_back(
-        {.tile = hog::planet::cell_at(terrain().archipelago().center(), 3), .depth = 7});
+        {.tile = hog::planet::cell_at(terrain().nearest_land(hog::planet::start_direction), 3),
+         .depth = 7});
     return tiles;
 }
 

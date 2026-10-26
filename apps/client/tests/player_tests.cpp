@@ -17,9 +17,10 @@ using namespace hog::client;
 
 namespace {
 
-// On the first island, where there's ground to walk on.
+// The land nearest the start, where there's ground to walk on.
 DVec3 on_land() {
-    return client::testing::world().geology().terrain().archipelago().islands().front().center;
+    return client::testing::world().geology().terrain().nearest_land(planet::start_direction,
+                                                                     50 * planet::fixed_one);
 }
 
 double radius() {

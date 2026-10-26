@@ -18,6 +18,7 @@ add_library(hog_planet
     src/moisture.cpp
     src/neighbors.cpp
     src/planet_config.cpp
+    src/places.cpp
     src/plates.cpp
     src/projection.cpp
     src/rivers.cpp
@@ -67,6 +68,7 @@ hog_add_tests(hog_planet
     tests/neighbors_tests.cpp
     tests/noise_tests.cpp
     tests/planet_config_tests.cpp
+    tests/places_tests.cpp
     tests/plates_tests.cpp
     tests/projection_tests.cpp
     tests/rivers_tests.cpp

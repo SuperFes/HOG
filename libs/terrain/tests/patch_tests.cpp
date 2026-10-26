@@ -4,6 +4,7 @@
 #include <hog/planet/neighbors.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/planet/tangent_frame.hpp>
 #include <hog/terrain/patch.hpp>
 #include <hog/terrain/stitching.hpp>
 #include <hog/testing/assertion_guard.hpp>
@@ -410,8 +411,9 @@ TEST_CASE("a patch's biomes fade into each other, alike either side of its edges
           "[terrain][patch]") {
     using hog::planet::Biome;
     World& world = shared_world();
-    const CellId cell =
-        hog::planet::cell_at(world.geology().terrain().archipelago().center(), 17 - patch_depth);
+    const CellId cell = hog::planet::cell_at(
+        world.geology().terrain().nearest_land(hog::planet::start_direction, 50 * fixed_one),
+        17 - patch_depth);
     const int steps = hog::terrain::blend_steps(17, planet.radius);
     REQUIRE(steps > 1);
     // Another biome from well west of the patch to halfway across it, so its edge runs straight
@@ -499,13 +501,9 @@ TEST_CASE("woods pack a byte a measure, crowding and height to their own ranges"
 
 TEST_CASE("a patch carries the woods flora stands about each of its vertices", "[terrain][patch]") {
     const World& world = shared_world();
-    // Across the first island's coast, so woods give way to bare shore.
-    const auto& island = world.geology().terrain().archipelago().islands().front();
+    // Across the coast nearest the start, so woods give way to bare shore.
     const CellId cell = hog::planet::cell_at(
-        glm::normalize(island.center +
-                       (island.axis * (island.radius * std::sqrt(island.elongation) /
-                                       world.geology().planet_radius()))),
-        6);
+        world.geology().terrain().nearest_land(hog::planet::start_direction), 6);
     const Patch patch = bake_patch(world, cell);
     const hog::planet::FaceIJ at = cell.to_face_ij();
     const int level = at.level + patch_depth;
@@ -562,8 +560,7 @@ TEST_CASE("bare rock packs a byte from none to all", "[terrain][patch]") {
 TEST_CASE("a patch carries the rock its ground shows about each of its vertices",
           "[terrain][patch]") {
     const World& world = shared_world();
-    const auto& island = world.geology().terrain().archipelago().islands().front();
-    const CellId cell = hog::planet::cell_at(island.center, 6);
+    const CellId cell = land_patch();
     const Patch patch = bake_patch(world, cell);
     const hog::planet::FaceIJ at = cell.to_face_ij();
     const int level = at.level + patch_depth;

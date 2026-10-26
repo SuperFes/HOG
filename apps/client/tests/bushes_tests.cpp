@@ -33,13 +33,12 @@ hog::WorldPosition origin_of(hog::planet::CellId tile) {
     return hog::WorldPosition{hog::planet::cell_center(tile) * world().geology().planet_radius()};
 }
 
-// The bush tiles about the starting islands' middle, nearest first, that anchor at least
+// The bush tiles about the temperate woods nearest the start, nearest first, that anchor at least
 // `least` bushes, up to `wanted` of them.
-std::vector<hog::planet::CellId> bushy_tiles(const hog::client::BiomePalette& palette,
-                                             std::size_t least = 1, std::size_t wanted = 1) {
-    const double radius = world().geology().planet_radius();
-    const auto& islands = world().geology().terrain().archipelago();
-    const hog::WorldPosition middle{islands.islands().front().center * radius};
+std::vector<hog::planet::CellId> bushy_tiles(
+    const hog::client::BiomePalette& palette, std::size_t least = 1, std::size_t wanted = 1,
+    hog::DVec3 from = hog::client::testing::nearest_biome(hog::planet::Biome::TemperateForest)) {
+    const hog::WorldPosition middle{from * world().geology().planet_radius()};
     const hog::planet::FaceIJ at = hog::planet::cell_at(middle, bush_tile_level).to_face_ij();
     std::vector<hog::planet::CellId> found;
     for (std::uint32_t ring = 0; ring < 24 && found.size() < wanted; ++ring) {
@@ -64,12 +63,13 @@ hog::planet::Biome biome_at(hog::DVec3 point) {
     return world().state(hog::planet::cell_at(glm::normalize(point))).biome;
 }
 
-// Bush tiles about the starting islands where a biome that grows bushes meets another, up to
+// Bush tiles about the temperate woods nearest the start where a biome that grows bushes meets
+// another, up to
 // `wanted`.
 std::vector<hog::planet::CellId> edge_tiles(std::size_t wanted) {
     const double radius = world().geology().planet_radius();
-    const auto& islands = world().geology().terrain().archipelago();
-    const hog::WorldPosition middle{islands.islands().front().center * radius};
+    const hog::WorldPosition middle{
+        hog::client::testing::nearest_biome(hog::planet::Biome::TemperateForest) * radius};
     const hog::planet::FaceIJ at = hog::planet::cell_at(middle, bush_tile_level).to_face_ij();
     const auto bushy = [](hog::planet::Biome biome) {
         return hog::flora::bushes_of(biome).height > 0.0F;
@@ -306,7 +306,12 @@ TEST_CASE("bush tiles on high ground are drawn round an eye standing among them"
     // Well over the sea, so where a tile's laid out from is far below its bushes.
     std::optional<hog::planet::CellId> high;
     double ground = 0.0;
-    for (const hog::planet::CellId found : bushy_tiles(palette, 20, 200)) {
+    const hog::DVec3 upland =
+        hog::client::testing::nearest_place([](const hog::planet::CellState& state) {
+            return state.biome == hog::planet::Biome::TemperateForest &&
+                   state.elevation > 150 * hog::planet::fixed_one;
+        });
+    for (const hog::planet::CellId found : bushy_tiles(palette, 20, 200, upland)) {
         ground = hog::client::ground_under(
             world(), hog::WorldPosition{hog::planet::cell_center(found) * radius});
         if (ground > 80.0) {

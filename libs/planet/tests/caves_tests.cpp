@@ -1,6 +1,7 @@
 #include <hog/core/hash.hpp>
 #include <hog/planet/caves.hpp>
 #include <hog/planet/neighbors.hpp>
+#include <hog/planet/places.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tangent_frame.hpp>
 #include <hog/testing/quick.hpp>
@@ -76,26 +77,40 @@ Spot spot_at(const Caves& caves, DVec3 point) {
     return {.cell = cell, .depth = surface - std::llround(height * static_cast<double>(fixed_one))};
 }
 
-// Sea-cave tiles over and around each starting island.
-std::vector<CellId> island_coasts(const Caves& caves) {
+// Sea-cave tiles within a few kilometres of the coast nearest the start.
+// The sea-cave tiles within `reach` of `centre`.
+std::vector<CellId> sea_tiles(const Caves& caves, DVec3 centre, double reach) {
     std::vector<CellId> cells;
-    for (const auto& island : caves.geology().terrain().archipelago().islands()) {
-        const hog::planet::TangentFrame frame = hog::planet::tangent_frame(island.center);
-        const auto steps = static_cast<int>(island.radius * 2.0 / 150.0);
-        for (int east = -steps; east <= steps; ++east) {
-            for (int north = -steps; north <= steps; ++north) {
-                const DVec3 offset = ((frame.east * static_cast<double>(east)) +
-                                      (frame.north * static_cast<double>(north))) *
-                                     (150.0 / radius);
-                cells.push_back(hog::planet::cell_at(glm::normalize(island.center + offset),
-                                                     caves.sea_level()));
-            }
+    const hog::planet::TangentFrame frame = hog::planet::tangent_frame(centre);
+    const int steps = static_cast<int>(reach / 150.0);
+    for (int east = -steps; east <= steps; ++east) {
+        for (int north = -steps; north <= steps; ++north) {
+            const DVec3 offset = ((frame.east * static_cast<double>(east)) +
+                                  (frame.north * static_cast<double>(north))) *
+                                 (150.0 / radius);
+            cells.push_back(
+                hog::planet::cell_at(glm::normalize(centre + offset), caves.sea_level()));
         }
     }
     std::ranges::sort(cells);
     const auto [first, last] = std::ranges::unique(cells);
     cells.erase(first, last);
     return cells;
+}
+
+// The sea-cave tiles around the coast nearest the start that has cliffs the sea has cut into.
+std::vector<CellId> cliff_coasts(const Caves& caves, Caves::Lookup& lookup) {
+    const hog::planet::Elevation& terrain = caves.geology().terrain();
+    const auto cut = hog::planet::nearest_cell(hog::planet::start_direction, 8, [&](CellId cell) {
+        return hog::planet::coast(terrain, cell) &&
+               std::ranges::any_of(
+                   sea_tiles(caves, hog::planet::cell_center(cell), 1'000.0), [&](CellId tile) {
+                       return std::ranges::any_of(
+                           lookup.passages_near(tile),
+                           [](const Passage& passage) { return passage.cave == Cave::SeaCave; });
+                   });
+    });
+    return cut ? sea_tiles(caves, hog::planet::cell_center(*cut), 2'000.0) : std::vector<CellId>{};
 }
 
 } // namespace
@@ -297,7 +312,7 @@ TEST_CASE("sea caves run inland from cliffs at the water's edge", "[planet][cave
     std::set<std::pair<double, double>> seen;
     int found = 0;
     int entered = 0;
-    for (const CellId tile : island_coasts(caves)) {
+    for (const CellId tile : cliff_coasts(caves, lookup)) {
         for (const Passage& passage : lookup.passages_near(tile)) {
             if (passage.cave != Cave::SeaCave ||
                 !seen.insert({passage.from.x, passage.from.y}).second) {

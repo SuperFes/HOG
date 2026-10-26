@@ -3,6 +3,7 @@
 #include <hog/client/session.hpp>
 #include <hog/net/server.hpp>
 #include <hog/planet/planet_config.hpp>
+#include <hog/planet/tangent_frame.hpp>
 #include <hog/planet/world.hpp>
 #include <hog/testing/ports.hpp>
 #include <hog/testing/temporary_directory.hpp>
@@ -74,7 +75,8 @@ TEST_CASE("a bot joins a server and wanders the ground", "[bot]") {
     const hog::testing::TemporaryDirectory directory;
     const auto server = serving(directory.path());
     const hog::planet::World& world = server->planet();
-    const DVec3 middle = world.geology().terrain().archipelago().center();
+    const DVec3 middle = world.geology().terrain().nearest_land(hog::planet::start_direction,
+                                                                50 * hog::planet::fixed_one);
 
     auto bot = hog::bot::Bot::start(world, std::format("127.0.0.1:{}", server->players()->port()),
                                     {}, middle, 7);

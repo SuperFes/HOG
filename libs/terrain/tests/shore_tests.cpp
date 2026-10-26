@@ -1,6 +1,7 @@
 #include <hog/jobs/job_system.hpp>
 #include <hog/planet/elevation.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/planet/tangent_frame.hpp>
 #include <hog/planet/world.hpp>
 #include <hog/terrain/shore.hpp>
 #include <hog/testing/worlds.hpp>
@@ -108,11 +109,10 @@ TEST_CASE("a point on a shore's plane comes back where it was", "[terrain][shore
 }
 
 TEST_CASE("a shore's depths are the sea's at each texel", "[terrain][shore]") {
-    // Anchored on an island's coast.
-    const auto& island = terrain().archipelago().islands().front();
-    DVec3 coast = island.center;
+    // Anchored on the coast nearest the start, which lies out at sea.
+    DVec3 coast = terrain().nearest_land(hog::planet::start_direction);
     while (terrain().is_land(hog::planet::cell_at(coast))) {
-        coast = along(coast, island.center + island.axis, 50.0);
+        coast = along(coast, hog::planet::start_direction, 50.0);
     }
     const ShoreFrame frame = shore_frame(coast, radius);
     for (const double spacing : shore_spacing) {
@@ -123,7 +123,7 @@ TEST_CASE("a shore's depths are the sea's at each texel", "[terrain][shore]") {
         REQUIRE(depths.size() == static_cast<std::size_t>(shore_size) * shore_size);
         REQUIRE(ground.elevations.size() == depths.size());
         REQUIRE(ground.lakes.size() == depths.size());
-        // Round an island, both land and sea.
+        // Both land and sea.
         CHECK(std::ranges::count(depths, hog::terrain::shore_highest) > 0);
         CHECK(std::ranges::count_if(depths, [](float depth) { return depth > 1.0F; }) > 0);
         CHECK(std::ranges::min(depths) >= hog::terrain::shore_highest);
@@ -147,7 +147,7 @@ TEST_CASE("a shore's depths are the sea's at each texel", "[terrain][shore]") {
 TEST_CASE("the depths round the eye are worked out anew as it moves on", "[terrain][shore]") {
     hog::jobs::JobSystem jobs{2};
     hog::terrain::ShoreStream stream{world(), radius, jobs};
-    const DVec3 eye = terrain().archipelago().islands().front().center;
+    const DVec3 eye = terrain().nearest_land(hog::planet::start_direction);
     CHECK_FALSE(stream.collect());
     stream.follow(eye);
     const auto finished = stream.finish();
@@ -344,8 +344,8 @@ TEST_CASE("dry low ground keeps its level under the ground", "[terrain][shore]")
 TEST_CASE("the shore's ground is the world's as changed, its water as generated",
           "[terrain][shore]") {
     hog::planet::World dug{planet};
-    const auto& island = terrain().archipelago().islands().front();
-    const ShoreFrame frame = shore_frame(island.center, radius);
+    const ShoreFrame frame =
+        shore_frame(terrain().nearest_land(hog::planet::start_direction), radius);
     const double spacing = shore_spacing.front();
     const std::size_t middle =
         ((shore_size / 2) * static_cast<std::size_t>(shore_size)) + (shore_size / 2);

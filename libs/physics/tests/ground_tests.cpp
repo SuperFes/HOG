@@ -40,7 +40,8 @@ WorldPosition over(DVec3 direction) {
 }
 
 WorldPosition over_land() {
-    return over(world().geology().terrain().archipelago().center());
+    return over(
+        world().geology().terrain().nearest_land(planet::start_direction, 50 * planet::fixed_one));
 }
 
 } // namespace
