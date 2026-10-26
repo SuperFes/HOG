@@ -563,9 +563,6 @@ TEST_CASE("steep or thin-soiled ground shows its rock, deep soil hides it", "[pl
         }
         ++land_points;
         mostly_bare += exposure.bare > fixed_one / 2 ? 1 : 0;
-        if (exposure.bare == 0) {
-            continue;
-        }
         // Uplift is read where the meanders shift the cell to, so nearly always the same bed.
         const auto column =
             terrain.beds().column(cell, {.continental = terrain.continents().height(cell) > 0,

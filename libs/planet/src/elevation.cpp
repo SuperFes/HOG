@@ -370,26 +370,24 @@ std::int64_t Elevation::elevation(CellId cell) const {
 
 Exposure Elevation::exposure(CellId cell, std::int64_t ground, std::int64_t least_bare) const {
     const std::int64_t generated = this->generated(cell);
-    if (generated <= 0) {
-        return {};
-    }
     const Evolved& evolved = this->evolved();
     const Landform& landform = evolved.landform;
     const LevelGrid& grid = landform.grid();
     const CellId shifted = cell_at(evolved.meander(cell_center(cell)));
-    const std::int64_t soil = std::max<std::int64_t>(grid.smooth(landform.soil(), shifted), 0);
-    const std::int64_t steep =
-        std::max<std::int64_t>(grid.smooth(landform.steepness(), shifted), 0);
-    const std::int64_t thin = fixed_one - ramp(soil, covering_soil);
-    const std::int64_t stripped = (ramp(steep - ledge_gentlest, ledge_steep - ledge_gentlest) *
-                                   ((ledge_soil << fixed_fraction_bits) / (ledge_soil + soil))) >>
-                                  fixed_fraction_bits;
-    const std::int64_t bare =
-        std::max((std::max(thin, stripped) * ramp(generated, coast_blend)) >> fixed_fraction_bits,
-                 least_bare);
-    if (bare == 0) {
-        return {};
+    std::int64_t bare = least_bare;
+    if (generated > 0) {
+        const std::int64_t soil = std::max<std::int64_t>(grid.smooth(landform.soil(), shifted), 0);
+        const std::int64_t steep =
+            std::max<std::int64_t>(grid.smooth(landform.steepness(), shifted), 0);
+        const std::int64_t thin = fixed_one - ramp(soil, covering_soil);
+        const std::int64_t stripped =
+            (ramp(steep - ledge_gentlest, ledge_steep - ledge_gentlest) *
+             ((ledge_soil << fixed_fraction_bits) / (ledge_soil + soil))) >>
+            fixed_fraction_bits;
+        bare = std::max(
+            (std::max(thin, stripped) * ramp(generated, coast_blend)) >> fixed_fraction_bits, bare);
     }
+    // The rock and its bed are told even under soil, so they blend smoothly into bare ground.
     const BedColumn column = beds_.column(
         cell, {.continental = continents_.height(cell) > 0, .mountains = mountain_strength(cell)});
     const std::int64_t height = ground - grid.smooth(landform.risen(), shifted);

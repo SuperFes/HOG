@@ -72,8 +72,9 @@ public:
     // the sea, negative below it.
     [[nodiscard]] std::int64_t elevation(CellId cell) const;
 
-    // What rock ground at `ground` fixed-point metres shows there, and how bare it is: bare where
-    // soil is thin, or stripped from steep slopes as the ledges are, and at least `least_bare`.
+    // What rock ground at `ground` fixed-point metres shows there, or would under its soil, and
+    // how bare it is: bare where soil is thin, or stripped from steep slopes as the ledges are,
+    // and at least `least_bare`; never under water.
     [[nodiscard]] Exposure exposure(CellId cell, std::int64_t ground,
                                     std::int64_t least_bare = 0) const;
 
