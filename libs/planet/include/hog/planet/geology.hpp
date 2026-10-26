@@ -1,6 +1,7 @@
 #pragma once
 
 #include <hog/core/math.hpp>
+#include <hog/planet/beds.hpp>
 #include <hog/planet/cell_id.hpp>
 #include <hog/planet/climate.hpp>
 #include <hog/planet/noise.hpp>
@@ -15,22 +16,6 @@
 #include <vector>
 
 namespace hog::planet {
-
-enum class Rock : std::uint8_t {
-    Soil,
-    Sand,
-    Sandstone,
-    Shale,
-    Limestone,
-    Granite,
-    Basalt,
-    Peridotite,
-    Magma,
-};
-
-inline constexpr int rock_count = static_cast<int>(Rock::Magma) + 1;
-
-[[nodiscard]] std::string_view to_string(Rock rock) noexcept;
 
 // A cell's ground from the surface down: loose cover, then sedimentary rock, then bedrock down to
 // the base of the crust, then mantle rock that runs on without end, perhaps with a magma chamber

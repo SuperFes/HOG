@@ -1,6 +1,7 @@
 add_library(hog_planet
     src/archipelago.cpp
     src/bake.cpp
+    src/beds.cpp
     src/caves.cpp
     src/cell_id.cpp
     src/change.cpp
@@ -47,6 +48,7 @@ hog_target_defaults(hog_planet)
 hog_add_tests(hog_planet
     tests/archipelago_tests.cpp
     tests/bake_tests.cpp
+    tests/beds_tests.cpp
     tests/caves_tests.cpp
     tests/cell_id_tests.cpp
     tests/change_tests.cpp

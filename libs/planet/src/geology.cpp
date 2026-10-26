@@ -197,30 +197,6 @@ constexpr std::int64_t gold_strength = fixed_one / 4;
 
 } // namespace
 
-std::string_view to_string(Rock rock) noexcept {
-    switch (rock) {
-    case Rock::Soil:
-        return "soil";
-    case Rock::Sand:
-        return "sand";
-    case Rock::Sandstone:
-        return "sandstone";
-    case Rock::Shale:
-        return "shale";
-    case Rock::Limestone:
-        return "limestone";
-    case Rock::Granite:
-        return "granite";
-    case Rock::Basalt:
-        return "basalt";
-    case Rock::Peridotite:
-        return "peridotite";
-    case Rock::Magma:
-        return "magma";
-    }
-    return "unknown";
-}
-
 std::optional<Resource> resource_at(const std::array<Deposit, resource_count>& deposits,
                                     std::int64_t depth) noexcept {
     for (const Resource resource : rarest_first) {
