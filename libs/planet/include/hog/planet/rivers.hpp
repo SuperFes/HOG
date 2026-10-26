@@ -48,6 +48,9 @@ struct Reach {
 // sea holds the sea: low ground cut off from it is a basin like any other.
 class Rivers {
 public:
+    // Banks rise from the water at this slope until they meet the ground.
+    static constexpr double bank_slope = 0.5;
+
     // Square metres of rain-weighted ground a cell must drain for a river to start there.
     static constexpr double source_area = 20e6;
 

@@ -32,6 +32,17 @@ struct BedSetting {
     std::int64_t mountains = 0;
 };
 
+// What the beds hold at one cell, for reading rock at many heights there cheaply.
+struct BedColumn {
+    // Fixed-point metres the layering is raised by its warps and folds.
+    std::int32_t shift = 0;
+    // Fixed-point metres: the top of the granite.
+    std::int32_t basement = 0;
+    // Fixed point from -1 to 1: which rock the region favours, sandstone to limestone.
+    std::int32_t leaning = 0;
+    bool continental = false;
+};
+
 // Layered rock from the seed alone, so rivers can cut down through it while the landform
 // evolves, before the geology exists. On continents, sandstone, shale and limestone lie in beds
 // tens of metres thick on a granite basement; the beds are gently warped, folded hard in mountain
@@ -42,15 +53,16 @@ class Beds {
 public:
     Beds(std::uint64_t seed, double planet_radius);
 
-    [[nodiscard]] Rock rock_at(CellId cell, std::int64_t height, BedSetting setting) const;
+    [[nodiscard]] BedColumn column(CellId cell, BedSetting setting) const;
+    [[nodiscard]] Rock rock_at(const BedColumn& column, std::int64_t height) const;
+    [[nodiscard]] Rock rock_at(CellId cell, std::int64_t height, BedSetting setting) const {
+        return rock_at(column(cell, setting), height);
+    }
 
     // Fixed-point metres: the top of the granite.
     [[nodiscard]] std::int64_t basement(CellId cell, BedSetting setting) const;
 
 private:
-    // The height of the beds' layering at the cell, for a height in the rock.
-    [[nodiscard]] std::int64_t layered(CellId cell, std::int64_t height, BedSetting setting) const;
-
     std::uint64_t seed_;
     double planet_radius_;
 };

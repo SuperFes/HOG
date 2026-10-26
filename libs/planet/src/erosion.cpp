@@ -11,11 +11,15 @@ Drainage erode(const LevelGrid& grid, std::vector<std::int64_t>& heights, const 
                std::int64_t sea_level) {
     const std::uint32_t count = grid.size();
     HOG_ASSERT(heights.size() == count && erosion.uplift.size() == count &&
-                   erosion.erodibility.size() == count && erosion.runoff.size() == count,
+                   erosion.erodibility.size() == count && erosion.runoff.size() == count &&
+                   (erosion.risen.empty() || erosion.risen.size() == count),
                "one value per cell");
     for (std::uint32_t cell = 0; cell < count; ++cell) {
         if (heights[cell] > sea_level) {
             heights[cell] += erosion.uplift[cell];
+            if (!erosion.risen.empty()) {
+                erosion.risen[cell] += erosion.uplift[cell];
+            }
         }
     }
     Drainage drainage = drain(grid, heights, sea_level, erosion.wander);
@@ -42,7 +46,13 @@ Drainage erode(const LevelGrid& grid, std::vector<std::int64_t>& heights, const 
             ++k;
         }
         const auto length = static_cast<double>(grid.distance(cell, k));
-        const double factor = static_cast<double>(erosion.erodibility[cell]) *
+        std::int64_t erodibility = erosion.erodibility[cell];
+        if (erosion.yielding) {
+            const std::int64_t risen = erosion.risen.empty() ? 0 : erosion.risen[cell];
+            erodibility = (erodibility * erosion.yielding(cell, heights[cell] - risen)) >>
+                          fixed_fraction_bits;
+        }
+        const double factor = static_cast<double>(erodibility) *
                               std::sqrt(static_cast<double>(drained[cell])) / length;
         const double height =
             (static_cast<double>(heights[cell]) + (factor * static_cast<double>(base))) /

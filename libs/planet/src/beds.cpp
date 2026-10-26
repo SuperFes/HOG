@@ -71,13 +71,22 @@ std::string_view to_string(Rock rock) noexcept {
 Beds::Beds(std::uint64_t seed, double planet_radius)
     : seed_{hash_combine(seed, beds_salt)}, planet_radius_{planet_radius} {}
 
-std::int64_t Beds::layered(CellId cell, std::int64_t height, BedSetting setting) const {
+BedColumn Beds::column(CellId cell, BedSetting setting) const {
+    if (!setting.continental) {
+        return {};
+    }
     const DVec3 center = cell_center(cell);
-    const std::int64_t gentle =
-        fbm(hash_combine(seed_, 1), noise_point(center, planet_radius_ / warp_wavelength), octaves);
-    const std::int64_t folded =
-        fbm(hash_combine(seed_, 2), noise_point(center, planet_radius_ / fold_wavelength), octaves);
-    return height - multiply(warp, gentle) - multiply(multiply(fold, setting.mountains), folded);
+    const auto noise = [&](std::uint64_t salt, double wavelength) {
+        return fbm(hash_combine(seed_, salt), noise_point(center, planet_radius_ / wavelength),
+                   octaves);
+    };
+    const std::int64_t shift =
+        multiply(warp, noise(1, warp_wavelength)) +
+        multiply(multiply(fold, setting.mountains), noise(2, fold_wavelength));
+    return {.shift = static_cast<std::int32_t>(shift),
+            .basement = static_cast<std::int32_t>(basement(cell, setting)),
+            .leaning = static_cast<std::int32_t>(noise(4, facies_wavelength)),
+            .continental = true};
 }
 
 std::int64_t Beds::basement(CellId cell, BedSetting setting) const {
@@ -88,24 +97,21 @@ std::int64_t Beds::basement(CellId cell, BedSetting setting) const {
            multiply(basement_swell, swell);
 }
 
-Rock Beds::rock_at(CellId cell, std::int64_t height, BedSetting setting) const {
-    if (!setting.continental) {
+Rock Beds::rock_at(const BedColumn& column, std::int64_t height) const {
+    if (!column.continental) {
         return Rock::Basalt;
     }
-    if (height < basement(cell, setting)) {
+    if (height < column.basement) {
         return Rock::Granite;
     }
-    const std::int64_t layer = layered(cell, height, setting);
+    const std::int64_t layer = height - column.shift;
     std::int64_t bed = floor_divide(layer, slot);
     const std::int64_t base = (slot / 4) + multiply(slot / 2, lattice_value(seed_, bed, 0, 0));
     if (layer - (bed * slot) < base) {
         --bed;
     }
-    const std::int64_t leaning =
-        fbm(hash_combine(seed_, 4),
-            noise_point(cell_center(cell), planet_radius_ / facies_wavelength), octaves);
     const std::int64_t pick =
-        lattice_value(hash_combine(seed_, 5), bed, 0, 0) + multiply(facies_lean, leaning);
+        lattice_value(hash_combine(seed_, 5), bed, 0, 0) + multiply(facies_lean, column.leaning);
     if (pick < sandstone_below) {
         return Rock::Sandstone;
     }

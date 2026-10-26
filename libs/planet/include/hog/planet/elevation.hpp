@@ -2,6 +2,7 @@
 
 #include <hog/planet/archipelago.hpp>
 #include <hog/planet/bake.hpp>
+#include <hog/planet/beds.hpp>
 #include <hog/planet/cell_id.hpp>
 #include <hog/planet/continents.hpp>
 #include <hog/planet/hotspots.hpp>
@@ -41,6 +42,7 @@ public:
 
     [[nodiscard]] const Plates& plates() const noexcept { return continents_.plates(); }
     [[nodiscard]] const Continents& continents() const noexcept { return continents_; }
+    [[nodiscard]] const Beds& beds() const noexcept { return beds_; }
     [[nodiscard]] const Archipelago& archipelago() const noexcept { return archipelago_; }
     [[nodiscard]] const Volcanoes& volcanoes() const noexcept { return volcanoes_; }
     [[nodiscard]] const Hotspots& hotspots() const noexcept { return hotspots_; }
@@ -136,6 +138,7 @@ private:
     std::uint64_t hill_seed_;
     double hill_frequency_;
     std::uint64_t relief_seed_;
+    Beds beds_;
     struct Evolving {
         PlanetConfig config;
         std::once_flag once;

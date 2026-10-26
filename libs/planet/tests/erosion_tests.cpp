@@ -139,3 +139,47 @@ TEST_CASE("wet ground wears faster than dry", "[planet][erosion]") {
     const double dry_loss = mean_land(before, dry) - mean_land(after, dry);
     CHECK(wet_loss > 1.5 * dry_loss);
 }
+
+TEST_CASE("rivers cut slowly through hard beds and quickly through soft", "[planet][erosion]") {
+    const Fields fields{0.0};
+    // Hard rock from 300 m up, soft beneath.
+    Erosion layered = fields.erosion();
+    layered.yielding = [](std::uint32_t, std::int64_t height) {
+        return height >= 300 * fixed_one ? fixed_one / 4 : 2 * fixed_one;
+    };
+    const auto before = land();
+    std::vector<std::int64_t> after = before;
+    for (int step = 0; step < 20; ++step) {
+        std::ignore = hog::planet::erode(grid(), after, layered);
+    }
+    const auto plain = evolve(before, fields, 20);
+    const auto high = [&](std::uint32_t cell) { return before[cell] >= 320 * fixed_one; };
+    const auto low = [&](std::uint32_t cell) {
+        return before[cell] > 0 && before[cell] < 280 * fixed_one;
+    };
+    CHECK(mean_land(before, high) - mean_land(after, high) <
+          mean_land(before, high) - mean_land(plain, high));
+    CHECK(mean_land(before, low) - mean_land(after, low) >
+          mean_land(before, low) - mean_land(plain, low));
+}
+
+TEST_CASE("the beds rise with the ground, so rock is read where it lies", "[planet][erosion]") {
+    const Fields fields{2.0};
+    std::vector<std::int64_t> heights = land();
+    std::vector<std::int64_t> risen(grid().size());
+    int misread = 0;
+    Erosion erosion = fields.erosion();
+    erosion.risen = risen;
+    erosion.yielding = [&](std::uint32_t cell, std::int64_t height) {
+        misread += height == heights[cell] - risen[cell] ? 0 : 1;
+        return fixed_one;
+    };
+    const auto start = heights;
+    for (int step = 0; step < 5; ++step) {
+        std::ignore = hog::planet::erode(grid(), heights, erosion);
+    }
+    CHECK(misread == 0);
+    for (std::uint32_t cell = 0; cell < grid().size(); ++cell) {
+        CHECK(risen[cell] == (start[cell] > 0 ? 5 * fields.uplift[cell] : 0));
+    }
+}

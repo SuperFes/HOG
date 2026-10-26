@@ -15,8 +15,6 @@ namespace {
 // A metre of rain a year runs off the rain-weighted area.
 constexpr double seconds_per_year = 31'557'600.0;
 
-// Banks rise from the water at this slope until they meet the ground.
-constexpr double bank_slope = 0.5;
 
 double flow(double area) {
     return area / seconds_per_year;

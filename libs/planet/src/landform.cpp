@@ -48,8 +48,10 @@ Landform::Landform(LevelGrid grid, std::vector<std::int64_t> heights, const Eros
     : grid_{std::move(grid)}, heights_{std::move(heights)} {
     HOG_ASSERT(heights_.size() == grid_.size(), "one height per grid cell");
     const std::vector<std::int64_t> start = heights_;
+    std::vector<std::int64_t> risen(heights_.size());
     for (int step = 0; step < steps; ++step) {
         Erosion now = erosion;
+        now.risen = risen;
         // A new way down each step, so no one path is worn in by chance alone.
         now.wander =
             erosion.wander == 0 ? 0 : hash_values(erosion.wander, static_cast<std::uint64_t>(step));

@@ -4,10 +4,15 @@
 #include <hog/planet/level_grid.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <span>
 #include <vector>
 
 namespace hog::planet {
+
+// A fixed-point factor on a cell's erodibility for the rock at a fixed-point height in it,
+// measured on the rock as it lay before any uplift.
+using Yielding = std::function<std::int64_t(std::uint32_t cell, std::int64_t height)>;
 
 // Per cell, for one step of landscape evolution; all fixed point.
 struct Erosion {
@@ -21,6 +26,13 @@ struct Erosion {
     // Keys which way water wanders down the slopes, as drain takes it; 0 always takes the
     // steepest.
     std::uint64_t wander = 0;
+    // How the rock rivers reach yields to them; all alike if unset.
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    Yielding yielding = {};
+    // Metres each cell has risen so far, which the step adds to, so the rock is read where it
+    // now lies; none if empty.
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    std::span<std::int64_t> risen = {};
 };
 
 // One step of uplift and river erosion (stream power with n = 1 and m = 1/2, solved implicitly

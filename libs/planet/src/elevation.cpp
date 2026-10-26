@@ -62,9 +62,31 @@ constexpr int landform_progress = 5;
 // continents.
 constexpr double mountain_uplift = 20.0;
 constexpr double background_uplift = 1.0;
-// The stream-power K over a step (5e-7 a year); a belt's granite resists half as much again.
+// The stream-power K over a step (5e-7 a year), for rock of middling strength.
 constexpr double erodibility = 0.05;
-constexpr double granite_hardness = 0.5;
+
+// How readily rivers cut each rock against middling: shale crumbles, the sandstones and
+// limestones of arid country hold up as cliffs, and crystalline rock holds best.
+[[nodiscard]] std::int64_t yielding(Rock rock) {
+    switch (rock) {
+    case Rock::Soil:
+    case Rock::Sand:
+        return 3 * fixed_one;
+    case Rock::Shale:
+        return 2 * fixed_one;
+    case Rock::Sandstone:
+        return fixed_one * 6 / 10;
+    case Rock::Limestone:
+        return fixed_one / 2;
+    case Rock::Basalt:
+        return fixed_one * 6 / 10;
+    case Rock::Granite:
+    case Rock::Peridotite:
+    case Rock::Magma:
+        return fixed_one / 2;
+    }
+    return fixed_one;
+}
 // Generated height over which the change fades in from the shore.
 constexpr std::int64_t coast_blend = 50 * fixed_one;
 
@@ -99,7 +121,7 @@ Elevation::Elevation(const PlanetConfig& config)
       ridge_frequency_{config.radius / ridge_wavelength},
       hill_seed_{hash_combine(config.seed, hill_salt)},
       hill_frequency_{config.radius / hill_wavelength},
-      relief_seed_{hash_combine(config.seed, relief_salt)},
+      relief_seed_{hash_combine(config.seed, relief_salt)}, beds_{config.seed, config.radius},
       evolving_{std::make_shared<Evolving>(config)} {}
 
 Elevation::Evolved::Evolved(Landform worn, std::span<const std::int64_t> ground,
@@ -213,21 +235,28 @@ Landform Elevation::wear(LevelGrid grid, std::uint64_t seed,
     std::vector<std::int64_t> uplift(grid.size());
     std::vector<std::int64_t> hardness(grid.size());
     std::vector<std::int64_t> runoff(grid.size());
+    std::vector<BedColumn> columns(grid.size());
     for (std::uint32_t index = 0; index < grid.size(); ++index) {
         const CellId cell = grid.cell(index);
-        const double strength = fixed_to_double(mountain_strength(cell));
+        const std::int64_t mountains = mountain_strength(cell);
         heights[index] = generated(cell);
         // Only continents rise; the islands and volcanoes stand on ocean floor that doesn't.
-        const double rising = continents_.height(cell) > 0 ? background_uplift : 0.0;
-        uplift[index] = fixed(rising + (mountain_uplift * strength));
-        hardness[index] = fixed(erodibility * (1.0 - (granite_hardness * strength)));
+        const bool continental = continents_.height(cell) > 0;
+        const double rising = continental ? background_uplift : 0.0;
+        uplift[index] = fixed(rising + (mountain_uplift * fixed_to_double(mountains)));
+        hardness[index] = fixed(erodibility);
         runoff[index] = moisture.at(cell, continents_.height(cell));
+        columns[index] = beds_.column(cell, {.continental = continental, .mountains = mountains});
     }
     return Landform{std::move(grid), std::move(heights),
                     Erosion{.uplift = uplift,
                             .erodibility = hardness,
                             .runoff = runoff,
-                            .wander = hash_combine(seed, wander_salt)},
+                            .wander = hash_combine(seed, wander_salt),
+                            .yielding =
+                                [&](std::uint32_t index, std::int64_t height) {
+                                    return yielding(beds_.rock_at(columns[index], height));
+                                }},
                     landform_steps, stepped};
 }
 

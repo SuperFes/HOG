@@ -393,6 +393,15 @@ std::int64_t wall(const Elevation& terrain, CellId cell, CellId next, std::int64
     if (drop <= fixed_one / 100) {
         return 0;
     }
+    // As are the banks of the notch it cuts through the rim, as far out as they fall below the
+    // lake from the river's water.
+    if (const auto* reach = terrain.rivers().near(next, 200.0)) {
+        const std::int64_t river = std::min(reach->from_surface, reach->to_surface);
+        if (terrain.rivers().near(next, fixed_to_double(level - river) /
+                                            hog::planet::Rivers::bank_slope) != nullptr) {
+            return 0;
+        }
+    }
     // Lower ground beyond a rim is fine, as long as the water reaches no further.
     const hog::DVec3 from = hog::planet::cell_center(cell);
     const hog::DVec3 to = hog::planet::cell_center(next);
