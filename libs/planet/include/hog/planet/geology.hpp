@@ -98,7 +98,7 @@ resource_at(const std::array<Deposit, resource_count>& deposits, std::int64_t de
 
 // Rock layers and ore deposits from terrain and climate: continents sit on granite under a cover
 // of sedimentary rock that mountains strip away, carrying on under the sea as shelves; the deep
-// ocean floor and the starting islands are basalt, with a magma chamber under each volcano.
+// ocean floor and the volcanic islands are basalt, with a magma chamber under each volcano.
 class Geology {
 public:
     explicit Geology(const PlanetConfig& config);
@@ -115,7 +115,7 @@ public:
     [[nodiscard]] Strata strata(CellId cell) const;
 
     // Fixed-point metres from the surface to the mantle: thick under continents and thicker
-    // still under mountains, thin under the ocean floor, and thickened under the islands.
+    // still under mountains, and thin under the ocean floor.
     [[nodiscard]] std::int64_t crust_thickness(CellId cell) const;
 
     // Fixed-point °C of the rock at a fixed-point depth in metres below the surface: warming
@@ -123,8 +123,8 @@ public:
     // more slowly through the mantle, and hotter near a magma chamber.
     [[nodiscard]] std::int64_t rock_temperature(CellId cell, std::int64_t depth) const;
 
-    // The magma chambers: one under each starting island, in order, then one under each arc
-    // volcano, then one under each hotspot's youngest shield.
+    // The magma chambers: one under each arc volcano, in order, then one under each hotspot's
+    // youngest shield.
     [[nodiscard]] std::span<const Chamber> chambers() const noexcept { return chambers_; }
 
     // Every resource's seam under the cell, indexed by resource. The deep ocean floor holds none.

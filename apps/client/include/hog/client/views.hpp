@@ -19,7 +19,7 @@ struct FixedView {
     double time_of_day = 0.5; // local, from 0 at midnight to 1
 };
 
-// Round the starting islands, at times from morning to night.
+// Round the island nearest the start, at times from morning to night.
 [[nodiscard]] std::span<const FixedView> fixed_views() noexcept;
 
 // The view as a shot, on a date fixed so the season doesn't change.

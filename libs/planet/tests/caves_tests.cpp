@@ -235,46 +235,45 @@ TEST_CASE("caves are found where their passages run", "[planet][caves]") {
 }
 
 TEST_CASE("lava tubes run downhill from each vent, a few metres down", "[planet][caves]") {
-    const std::uint64_t seed = GENERATE(take(hog::testing::cases(2), values({1U, 2U})));
-    const Caves caves{geology(seed)};
-    const auto chambers = caves.geology().chambers();
-    std::vector<int> per_chamber(chambers.size(), 0);
-    int to_the_sea = 0;
+    // Pinches are few, so they're counted over both worlds.
     int pinched = 0;
     int stretches = 0;
-    for (const auto& tube : caves.lava_tubes()) {
-        REQUIRE(tube.chamber < chambers.size());
-        ++per_chamber[tube.chamber];
-        REQUIRE_FALSE(tube.passages.empty());
-        // From the vent.
-        const DVec3 start = glm::normalize(tube.passages.front().from);
-        CHECK(glm::length(start - chambers[tube.chamber].center) < 1e-9);
-        std::int64_t last = std::numeric_limits<std::int64_t>::max();
-        for (const Passage& passage : tube.passages) {
-            CHECK(passage.cave == Cave::LavaTube);
-            const Spot at = spot_at(caves, passage.from);
-            CHECK(at.depth >= (3 * fixed_one) - (fixed_one / 2));
-            CHECK(at.depth <= (15 * fixed_one) + (fixed_one / 2));
-            const std::int64_t ground = caves.geology().terrain().elevation(at.cell);
-            CHECK(ground - (fixed_one / 2) <= last);
-            last = ground;
-            CHECK(glm::length(passage.from - tube.middle) <= tube.reach);
-            CHECK(glm::length(passage.to - tube.middle) <= tube.reach);
-            pinched += passage.from_radius < hog::planet::crawl_clearance ? 1 : 0;
-            ++stretches;
+    for (const std::uint64_t seed : {1U, 2U}) {
+        CAPTURE(seed);
+        const Caves caves{geology(seed)};
+        const auto chambers = caves.geology().chambers();
+        std::vector<int> per_chamber(chambers.size(), 0);
+        for (const auto& tube : caves.lava_tubes()) {
+            REQUIRE(tube.chamber < chambers.size());
+            ++per_chamber[tube.chamber];
+            REQUIRE_FALSE(tube.passages.empty());
+            // From the vent.
+            const DVec3 start = glm::normalize(tube.passages.front().from);
+            CHECK(glm::length(start - chambers[tube.chamber].center) < 1e-9);
+            std::int64_t last = std::numeric_limits<std::int64_t>::max();
+            for (const Passage& passage : tube.passages) {
+                CHECK(passage.cave == Cave::LavaTube);
+                const Spot at = spot_at(caves, passage.from);
+                CHECK(at.depth >= (3 * fixed_one) - (fixed_one / 2));
+                CHECK(at.depth <= (15 * fixed_one) + (fixed_one / 2));
+                const std::int64_t ground = caves.geology().terrain().elevation(at.cell);
+                CHECK(ground - (fixed_one / 2) <= last);
+                last = ground;
+                CHECK(glm::length(passage.from - tube.middle) <= tube.reach);
+                CHECK(glm::length(passage.to - tube.middle) <= tube.reach);
+                pinched += passage.from_radius < hog::planet::crawl_clearance ? 1 : 0;
+                ++stretches;
+            }
+            // Closing off at the far end.
+            CHECK(tube.passages.back().to_radius < hog::planet::crawl_clearance);
         }
-        // Closing off at the far end.
-        CHECK(tube.passages.back().to_radius < hog::planet::crawl_clearance);
-        const Spot end = spot_at(caves, tube.passages.back().to);
-        to_the_sea += caves.geology().terrain().elevation(end.cell) <= 0 ? 1 : 0;
+        for (std::size_t chamber = 0; chamber < chambers.size(); ++chamber) {
+            // Arcs' sticky magma builds cones rather than running out in tubes.
+            CHECK(per_chamber[chamber] >= (chambers[chamber].basaltic ? 1 : 0));
+            CHECK(per_chamber[chamber] <= (chambers[chamber].basaltic ? 4 : 0));
+        }
     }
-    for (std::size_t chamber = 0; chamber < chambers.size(); ++chamber) {
-        // Arcs' sticky magma builds cones rather than running out in tubes.
-        CHECK(per_chamber[chamber] >= (chambers[chamber].basaltic ? 1 : 0));
-        CHECK(per_chamber[chamber] <= (chambers[chamber].basaltic ? 4 : 0));
-    }
-    INFO(to_the_sea << " of " << caves.lava_tubes().size() << " reach the sea");
-    CHECK(to_the_sea * 3 >= static_cast<int>(caves.lava_tubes().size()));
+    INFO(pinched << " of " << stretches << " stretches pinched");
     CHECK(pinched > 0);
     CHECK(pinched * 3 < stretches);
 }

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <hog/planet/archipelago.hpp>
 #include <hog/planet/bake.hpp>
 #include <hog/planet/beds.hpp>
 #include <hog/planet/cell_id.hpp>
@@ -33,7 +32,7 @@ struct Exposure {
     friend bool operator==(const Exposure&, const Exposure&) = default;
 };
 
-// Terrain height: continents and the starting islands give the coastline, lowlands and ocean
+// Terrain height: continents give the coastline, lowlands and ocean
 // floor; ridges raise mountain ranges where the plates push them up, away from the coast, and
 // volcanoes stand along the arcs above plates diving and in chains carried off plumes. Rivers
 // then wear the land over geological time while the ranges keep rising, which carves valleys and
@@ -55,14 +54,13 @@ public:
     [[nodiscard]] const Plates& plates() const noexcept { return continents_.plates(); }
     [[nodiscard]] const Continents& continents() const noexcept { return continents_; }
     [[nodiscard]] const Beds& beds() const noexcept { return beds_; }
-    [[nodiscard]] const Archipelago& archipelago() const noexcept { return archipelago_; }
     [[nodiscard]] const Volcanoes& volcanoes() const noexcept { return volcanoes_; }
     [[nodiscard]] const Hotspots& hotspots() const noexcept { return hotspots_; }
 
-    // Fixed-point continent height with the islands raised on it; land is positive.
+    // Fixed-point continent height; land is positive.
     template <int Bits = fixed_fraction_bits>
     [[nodiscard]] std::int64_t height(CellId cell) const {
-        return archipelago_.raise<Bits>(cell, continents_.height<Bits>(cell));
+        return continents_.height<Bits>(cell);
     }
     // Out of the sea: ground above its level, told by the fine elevation, or below it but cut off
     // from it.
@@ -156,7 +154,6 @@ private:
     unbake(std::optional<LandformBake> bake, int level, const PlanetConfig& config);
 
     Continents continents_;
-    Archipelago archipelago_;
     Volcanoes volcanoes_;
     Hotspots hotspots_;
     std::uint64_t ridge_seed_;

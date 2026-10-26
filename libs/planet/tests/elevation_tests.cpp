@@ -195,11 +195,10 @@ TEST_CASE("land is where the ground stands above the sea, to the finest cell",
 }
 
 TEST_CASE("a sandy shore's floor follows Dean's profile out to a shelf", "[planet][elevation]") {
-    // Read as metres off the shore as the islands' flanks fall.
+    // Read as metres off the shore, a metre to each hundred-thousandth of continent height.
     const auto floor = [](double out) {
-        const std::int64_t below =
-            std::llround(out * hog::planet::Archipelago::skirt_slope *
-                         static_cast<double>(hog::planet::fixed_unit<fine_fraction_bits>));
+        const std::int64_t below = std::llround(
+            out * 1e-5 * static_cast<double>(hog::planet::fixed_unit<fine_fraction_bits>));
         return fixed_to_double<fine_fraction_bits>(Elevation::sea_floor<fine_fraction_bits>(below));
     };
     for (const double out : {1.0, 10.0, 100.0, 500.0, 1'000.0, 1'500.0}) {
@@ -233,7 +232,6 @@ TEST_CASE("however much is built up under it, the ocean floor stays as deep as t
 }
 
 TEST_CASE("the sea stays shallow off a coast", "[planet][elevation]") {
-    // Continents' coasts fall faster than the islands' flanks, so their floor lies deeper.
     const std::uint64_t seed = GENERATE(1U, 4U);
     const Elevation terrain{planet(seed)};
     int open = 0;
@@ -253,15 +251,6 @@ TEST_CASE("the sea stays shallow off a coast", "[planet][elevation]") {
         CHECK(depth(1'000.0) < 40.0);
     }
     CHECK(open >= 6);
-    for (const auto& island : terrain.archipelago().islands()) {
-        const hog::DVec3 sea = along(island.center, island.center + island.axis, 20'000.0);
-        const hog::DVec3 at = shore(terrain, island.center, sea);
-        const double depth =
-            -fixed_to_double(terrain.elevation(hog::planet::cell_at(along(at, sea, 100.0))));
-        // Deeper than a round island's where an elongated one's flank falls across it.
-        CHECK(depth > 0.5);
-        CHECK(depth < 6.0);
-    }
 }
 
 TEST_CASE("the sea floor deepens off a coast without steps", "[planet][elevation]") {

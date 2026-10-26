@@ -223,7 +223,7 @@ options:
                          config/graphics.toml if there is one, as
                          config/graphics.example.toml shows)
   --at LAT,LON,ALT       start at degrees of latitude and longitude, metres above
-                         sea level (default over the starting islands)
+                         sea level (default over latitude 0, longitude 0)
   --time HH:MM           start at this local time of day (default the planet's own)
   --threads N            baking the ground (default one per hardware thread)
   --connect ADDRESS      connect to a server at an IP address and port, such as

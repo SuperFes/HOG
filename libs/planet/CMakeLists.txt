@@ -1,5 +1,4 @@
 add_library(hog_planet
-    src/archipelago.cpp
     src/bake.cpp
     src/beds.cpp
     src/caves.cpp
@@ -48,7 +47,6 @@ target_link_libraries(hog_planet PUBLIC hog::core PRIVATE tomlplusplus)
 hog_target_defaults(hog_planet)
 
 hog_add_tests(hog_planet
-    tests/archipelago_tests.cpp
     tests/bake_tests.cpp
     tests/beds_tests.cpp
     tests/caves_tests.cpp

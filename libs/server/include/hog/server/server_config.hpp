@@ -44,7 +44,7 @@ struct ForestSettings {
     // How plants grow and burn; without one, nothing grows on the planet.
     std::optional<std::filesystem::path> vegetation;
     GameDuration step = std::chrono::hours{1};
-    // A new world's first starting island burned this many years before it begins, if any.
+    // The woods by a new world's start burned this many years before it begins, if any.
     std::optional<double> burned_years_ago;
 };
 
@@ -122,7 +122,7 @@ struct ServerConfig {
 //     [forest]                   # optional
 //     vegetation = "forest.toml"
 //     step_hours = 1.0           # game time
-//     burned_years_ago = 8       # optional: a new world's first island burned that long ago
+//     burned_years_ago = 8       # optional: the woods by the start burned that long ago
 //
 //     [net]                      # optional
 //     port = 7675                # for players, on every address

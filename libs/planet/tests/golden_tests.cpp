@@ -142,8 +142,8 @@ struct GoldenTile {
     int depth = 0;
 };
 
-// Every face whole, then small deep tiles at a cube corner, at the north pole, mid-face and over
-// the starting islands.
+// Every face whole, then small deep tiles at a cube corner, at the north pole, mid-face and on the
+// land nearest the start.
 std::vector<GoldenTile> golden_tiles() {
     std::vector<GoldenTile> tiles;
     tiles.reserve(hog::planet::face_count + 4);

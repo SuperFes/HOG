@@ -154,11 +154,9 @@ constexpr std::int64_t crust_blend = fixed_one / 20;
 // Soil this deep hides the rock wholly.
 constexpr std::int64_t covering_soil = fixed_one / 2;
 
-// Off a coast, height below the sea is read as metres from the shore as the islands' flanks fall;
-// continents' coasts fall about twice as fast on a small planet.
+// Off a coast, height below the sea is read as metres from the shore, a metre to each
+// hundred-thousandth of continent height.
 constexpr std::int64_t shore_metres = 100'000;
-static_assert(static_cast<double>(shore_metres) * Archipelago::skirt_slope > 0.999'999 &&
-              static_cast<double>(shore_metres) * Archipelago::skirt_slope < 1.000'001);
 // Fine sand's A in Dean's h = A·x^(2/3), in m^(1/3) with 16 fractional bits.
 constexpr std::int64_t dean_scale = (12 * fixed_one) / 100;
 // Metres out per metre down across the shelf, and how far out it breaks.
@@ -178,9 +176,8 @@ Elevation::Elevation(const PlanetConfig& config)
                   std::make_shared<const Plates>(config.seed,
                                                  LevelGrid{Plates::level, config.radius},
                                                  config.radius, config.plates)},
-      archipelago_{config.seed, config.radius, continents_},
       volcanoes_{config.seed, config.radius, continents_},
-      hotspots_{config.seed, config.radius, continents_, archipelago_.center()},
+      hotspots_{config.seed, config.radius, continents_},
       ridge_seed_{hash_combine(config.seed, ridge_salt)},
       ridge_frequency_{config.radius / ridge_wavelength},
       hill_seed_{hash_combine(config.seed, hill_salt)},
@@ -309,7 +306,7 @@ Landform Elevation::wear(LevelGrid grid, std::uint64_t seed,
         const CellId cell = grid.cell(index);
         const std::int64_t mountains = mountain_strength(cell);
         heights[index] = generated(cell);
-        // Only continents rise; the islands and volcanoes stand on ocean floor that doesn't.
+        // Only continents rise; volcanoes stand on ocean floor that doesn't.
         const bool continental = continents_.height(cell) > 0;
         const double rising = continental ? background_uplift : 0.0;
         uplift[index] = fixed(rising + (mountain_uplift * fixed_to_double(mountains)));
@@ -585,31 +582,28 @@ std::int64_t Elevation::generated(CellId cell) const {
     constexpr std::int64_t one = fixed_unit<Bits>;
     const auto crust = continents_.crust<Bits>(cell);
     const std::int64_t continent = crust.height;
-    const std::int64_t height = archipelago_.raise<Bits>(cell, continent);
     const std::int64_t volcanoes = volcanoes_.lift<Bits>(cell);
     // Shields stand over whatever else is there, their lava burying it.
     const auto shields = hotspots_.surface<Bits>(cell);
     const auto built = [&](std::int64_t ground) {
         return shields ? std::max(ground, *shields) : ground;
     };
-    if (height <= 0) {
+    if (continent <= 0) {
         const std::int64_t hills =
             (abyssal_hill_height *
              (ridge<Bits>(hill_seed_, hill_frequency_, hill_octaves, cell, crust.grain) -
               (one / 2)));
         const std::int64_t abyss =
             (ocean_depth * one) - crust.floor - hills - hotspots_.swell<Bits>(cell);
-        return built(sea_floor<Bits>(-height, abyss) + volcanoes);
+        return built(sea_floor<Bits>(-continent, abyss) + volcanoes);
     }
-    // Islands keep to lowland hills; only continents roll and carry mountain belts.
     const std::int64_t relief =
         (relief_height * ((ramp<Bits>(continent, inland_width<Bits>) *
                            fbm(relief_seed_, noise_point<Bits>(cell_center(cell), relief_frequency),
                                relief_octaves)) >>
                           Bits));
     const std::int64_t lowland =
-        ((((lowland_height * one) + relief) * ramp<Bits>(height, lowland_width<Bits>)) >> Bits) +
-        archipelago_.volcano<Bits>(cell);
+        ((((lowland_height * one) + relief) * ramp<Bits>(continent, lowland_width<Bits>)) >> Bits);
     const std::int64_t strength = mountain_strength<Bits>(continent, crust.mountains);
     if (strength == 0) {
         return built(lowland + volcanoes);

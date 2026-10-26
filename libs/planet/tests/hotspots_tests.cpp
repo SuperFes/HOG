@@ -58,7 +58,7 @@ std::optional<double> surface(const Hotspots& hotspots, hog::DVec3 at) {
 
 TEST_CASE("plumes rise under deep open ocean, inside plates and apart", "[planet][hotspots]") {
     const Continents found = ocean();
-    const Hotspots hotspots{1, radius, found, pole()};
+    const Hotspots hotspots{1, radius, found};
     REQUIRE(hotspots.hotspots().size() == Hotspots::count);
     CHECK(hotspots.shields().size() == Hotspots::count * Hotspots::chain_length);
     const auto& plates = found.plates();
@@ -75,7 +75,7 @@ TEST_CASE("plumes rise under deep open ocean, inside plates and apart", "[planet
 
 TEST_CASE("chains trail the way the plate carries them", "[planet][hotspots]") {
     const Continents found = ocean();
-    const Hotspots hotspots{1, radius, found, pole()};
+    const Hotspots hotspots{1, radius, found};
     const auto& plates = found.plates();
     for (std::size_t plume = 0; plume < hotspots.hotspots().size(); ++plume) {
         const auto& hotspot = hotspots.hotspots()[plume];
@@ -97,7 +97,7 @@ TEST_CASE("chains trail the way the plate carries them", "[planet][hotspots]") {
 }
 
 TEST_CASE("shields sink as they age, from islands to seamounts", "[planet][hotspots]") {
-    const Hotspots hotspots{1, radius, ocean(), pole()};
+    const Hotspots hotspots{1, radius, ocean()};
     for (std::size_t plume = 0; plume < hotspots.hotspots().size(); ++plume) {
         const auto chain =
             hotspots.shields().subspan(plume * Hotspots::chain_length, Hotspots::chain_length);
@@ -110,7 +110,7 @@ TEST_CASE("shields sink as they age, from islands to seamounts", "[planet][hotsp
 }
 
 TEST_CASE("a shield's flanks fall ever steeper from its caldera", "[planet][hotspots]") {
-    const Hotspots hotspots{1, radius, ocean(), pole()};
+    const Hotspots hotspots{1, radius, ocean()};
     REQUIRE_FALSE(hotspots.hotspots().empty());
     const auto& hotspot = hotspots.hotspots().front();
     const auto& young = hotspots.shields().front();
@@ -146,7 +146,7 @@ TEST_CASE("a shield's flanks fall ever steeper from its caldera", "[planet][hots
 }
 
 TEST_CASE("the floor swells around a plume", "[planet][hotspots]") {
-    const Hotspots hotspots{1, radius, ocean(), pole()};
+    const Hotspots hotspots{1, radius, ocean()};
     REQUIRE_FALSE(hotspots.hotspots().empty());
     const auto swell = [&](hog::DVec3 at) {
         return hog::planet::fixed_to_double(hotspots.swell(hog::planet::cell_at(at)));
@@ -159,23 +159,11 @@ TEST_CASE("the floor swells around a plume", "[planet][hotspots]") {
     CHECK(swell(along(center, center + out, 45'000.0)) == 0.0);
 }
 
-TEST_CASE("plumes keep clear of the place to avoid", "[planet][hotspots]") {
-    const Continents found = ocean();
-    const Hotspots first{1, radius, found, pole()};
-    REQUIRE_FALSE(first.hotspots().empty());
-    const hog::DVec3 avoid = first.hotspots().front().center;
-    const Hotspots clear{1, radius, found, avoid};
-    REQUIRE_FALSE(clear.shields().empty());
-    for (const auto& shield : clear.shields()) {
-        CHECK(apart(shield.center, avoid) >= 60'000.0);
-    }
-}
-
 TEST_CASE("hotspots depend on the seed alone", "[planet][hotspots]") {
     const Continents found = ocean();
-    const Hotspots first{1, radius, found, pole()};
-    const Hotspots again{1, radius, found, pole()};
-    const Hotspots other{2, radius, found, pole()};
+    const Hotspots first{1, radius, found};
+    const Hotspots again{1, radius, found};
+    const Hotspots other{2, radius, found};
     REQUIRE(first.shields().size() == again.shields().size());
     for (std::size_t index = 0; index < first.shields().size(); ++index) {
         CHECK(first.shields()[index].center == again.shields()[index].center);

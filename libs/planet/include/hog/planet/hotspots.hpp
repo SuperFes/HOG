@@ -31,8 +31,7 @@ public:
         DVec3 heading; // unit tangent the plate carries the chain along
     };
 
-    // The plumes keep clear of `avoid`, a unit direction.
-    Hotspots(std::uint64_t seed, double planet_radius, const Continents& continents, DVec3 avoid);
+    Hotspots(std::uint64_t seed, double planet_radius, const Continents& continents);
 
     [[nodiscard]] std::span<const Hotspot> hotspots() const noexcept { return hotspots_; }
     // Each hotspot's chain in turn, youngest first.

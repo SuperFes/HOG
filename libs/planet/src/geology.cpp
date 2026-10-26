@@ -2,7 +2,6 @@
 #include <hog/planet/geology.hpp>
 #include <hog/planet/hotspots.hpp>
 #include <hog/planet/projection.hpp>
-#include <hog/planet/tangent_frame.hpp>
 #include <hog/planet/tile.hpp>
 
 #include <algorithm>
@@ -33,22 +32,16 @@ constexpr std::int64_t shelf_edge = -fixed_one / 20;
 constexpr std::int64_t shelf_wander = fixed_one / 50;
 
 // Earth's crust: thin under the ocean floor, thickening up the continental slope to its full
-// depth a little inland, with roots under mountains and islands, swelling by a tenth either way.
+// depth a little inland, with roots under mountains, swelling by a tenth either way.
 constexpr std::int64_t ocean_crust = 7'000 * fixed_one;
 constexpr std::int64_t continent_crust = 35'000 * fixed_one;
 constexpr std::int64_t mountain_root = 25'000 * fixed_one;
-constexpr std::int64_t island_root = 5'000 * fixed_one;
 constexpr std::int64_t crust_slope_foot = -fixed_one * 3 / 20;
 constexpr std::int64_t crust_slope_width = fixed_one / 5;
-// Continent height an island is raised through from the ocean floor to the shore.
-constexpr std::int64_t island_rise = fixed_one * 3 / 20;
 constexpr std::int64_t crust_swell = fixed_one / 10;
 constexpr double crust_wavelength = 30'000.0;
 
-// Each island's chamber lies within a fifth of its radius of its middle, reaches two fifths of
-// the way to its coast, and sits 3 to 6 km down.
-constexpr double chamber_wander = 0.2;
-constexpr double chamber_reach = 0.4;
+// Chambers sit 3 to 6 km down.
 constexpr std::int64_t shallowest_chamber = 3'000;
 constexpr std::int64_t deepest_chamber = 6'000;
 constexpr std::int64_t chamber_half_height = 500 * fixed_one;
@@ -148,11 +141,6 @@ constexpr std::int64_t gold_strength = fixed_one / 4;
     return (a * b) >> fixed_fraction_bits;
 }
 
-// A hash mapped to [0, 1).
-[[nodiscard]] double fraction(std::uint64_t hash) {
-    return static_cast<double>(hash >> 11U) * 0x1p-53;
-}
-
 // 0 to 1 over `width`, easing in and out.
 [[nodiscard]] std::int64_t smooth_ramp(std::int64_t value, std::int64_t width) {
     const std::int64_t t = ramp(value, width);
@@ -241,21 +229,9 @@ Geology::Geology(const PlanetConfig& config)
             static_cast<std::uint64_t>(deepest_chamber - shallowest_chamber + 1));
         return (shallowest_chamber + depth) * fixed_one;
     };
-    const auto islands = terrain().archipelago().islands();
     const auto volcanoes = terrain().volcanoes().volcanoes();
     const auto shields = terrain().hotspots().shields();
-    chambers_.reserve(islands.size() + volcanoes.size() + terrain().hotspots().hotspots().size());
-    for (std::size_t index = 0; index < islands.size(); ++index) {
-        const auto& island = islands[index];
-        const TangentFrame frame = tangent_frame(island.center);
-        const auto wander = [&](int axis) {
-            return ((2.0 * fraction(hash_values(placement, axis, index))) - 1.0) * chamber_wander *
-                   island.radius / planet_radius_;
-        };
-        add_chamber(
-            glm::normalize(island.center + (frame.east * wander(0)) + (frame.north * wander(1))), 0,
-            below(2, index), chamber_reach * island.radius, true);
-    }
+    chambers_.reserve(volcanoes.size() + terrain().hotspots().hotspots().size());
     for (std::size_t index = 0; index < volcanoes.size(); ++index) {
         const auto& volcano = volcanoes[index];
         const std::int64_t foot = terrain().elevation(cell_at(volcano.center)) -
@@ -310,13 +286,11 @@ Strata Geology::strata(CellId cell) const {
 
 std::int64_t Geology::crust_thickness(CellId cell) const {
     const std::int64_t continent = terrain().continents().height(cell);
-    const std::int64_t island = terrain().height(cell) - continent;
     const std::int64_t thickness =
         ocean_crust +
         multiply(continent_crust - ocean_crust,
                  smooth_ramp(continent - crust_slope_foot, crust_slope_width)) +
-        multiply(mountain_root, terrain().mountain_strength(cell)) +
-        multiply(island_root, smooth_ramp(island, island_rise));
+        multiply(mountain_root, terrain().mountain_strength(cell));
     const std::int64_t swell = fbm(crust_seed_, noise_at(cell, crust_wavelength), octaves);
     return thickness + multiply(thickness, multiply(crust_swell, swell));
 }
@@ -353,7 +327,7 @@ Strata Geology::strata(CellId cell, Biome biome) const {
         // One to two metres of soil.
         strata.cover_thickness = multiply(fixed_one + unit(swell), fixed_one - mountains);
     }
-    // The starting islands are volcanic, with nothing laid down on them yet.
+    // Land off the continents is volcanic, with nothing laid down on it yet.
     if (!sea && !terrain().continents().is_land(cell)) {
         strata.bedrock = Rock::Basalt;
         return strata;

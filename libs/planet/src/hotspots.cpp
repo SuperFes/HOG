@@ -21,8 +21,6 @@ constexpr int attempts = 512;
 constexpr std::int64_t deep_ocean = -fixed_one / 5;
 constexpr double inside_plate = 30'000.0; // metres
 constexpr double apart = 150'000.0;
-// Every shield keeps this far from the place to avoid.
-constexpr double clear_of = 60'000.0;
 
 // A new shield grows this far along the chain from the last, give or take this much across it.
 constexpr double spacing = 12'000.0;
@@ -85,8 +83,7 @@ double bump(double at, double width) {
 
 } // namespace
 
-Hotspots::Hotspots(std::uint64_t seed, double planet_radius, const Continents& continents,
-                   DVec3 avoid)
+Hotspots::Hotspots(std::uint64_t seed, double planet_radius, const Continents& continents)
     : planet_radius_{planet_radius}, lobe_seed_{hash_combine(seed, lobe_salt)},
       rough_seed_{hash_combine(seed, rough_salt)} {
     const std::uint64_t salted = hash_combine(seed, layer_salt);
@@ -127,11 +124,6 @@ Hotspots::Hotspots(std::uint64_t seed, double planet_radius, const Continents& c
             way = glm::normalize(tangent(along, way));
             summit -=
                 subsidence + (subsidence_spread * ((2.0 * unit(hash_values(shield, 1))) - 1.0));
-        }
-        if (std::ranges::any_of(chain, [&](const Shield& shield) {
-                return metres(shield.center, avoid) < clear_of;
-            })) {
-            continue;
         }
         hotspots_.push_back({.center = *center, .heading = heading});
         shields_.insert(shields_.end(), chain.begin(), chain.end());

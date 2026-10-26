@@ -100,20 +100,44 @@ TEST_CASE("a fixed view's shot is from its place, facing its way, at its time of
     }
 }
 
+TEST_CASE("the island views stand off its shore, facing it", "[client][views]") {
+    const double radius = world().geology().planet_radius();
+    for (const std::string_view name : {"island-noon", "shore-morning", "sun-morning"}) {
+        INFO(name);
+        const FixedView& view = view_named(name);
+        const DVec3 up =
+            hog::planet::direction_at(view.place.latitude * degree, view.place.longitude * degree);
+        const hog::planet::TangentFrame frame = hog::planet::tangent_frame(up);
+        const DVec3 ahead = (frame.north * std::cos(view.heading * degree)) +
+                            (frame.east * std::sin(view.heading * degree));
+        const auto ground = [&](double along) {
+            return hog::client::ground_under(
+                world(),
+                hog::WorldPosition{glm::normalize(up + (ahead * (along / radius))) * radius});
+        };
+        CHECK(ground(0.0) < 0.0);
+        bool land = false;
+        for (int step = 0; step < 120 && !land; ++step) {
+            land = ground(50.0 * step) > 0.0;
+        }
+        CHECK(land);
+    }
+}
+
 TEST_CASE("a fixed view is drawn the same each time", "[client][views][gpu]") {
     const auto device = test_device();
-    const Picture first = still_of(*device, view_named("islands-noon"));
-    const Picture again = still_of(*device, view_named("islands-noon"));
+    const Picture first = still_of(*device, view_named("island-noon"));
+    const Picture again = still_of(*device, view_named("island-noon"));
     const auto difference = hog::client::difference(first, again);
     REQUIRE(difference);
     CHECK(difference->mean == 0.0);
     CHECK(device->validation_errors() == 0);
 }
 
-TEST_CASE("the islands are darker at night than at noon", "[client][views][gpu]") {
+TEST_CASE("the island is darker at night than at noon", "[client][views][gpu]") {
     const auto device = test_device();
-    const double noon = brightness(still_of(*device, view_named("islands-noon")));
-    const double night = brightness(still_of(*device, view_named("islands-night")));
+    const double noon = brightness(still_of(*device, view_named("island-noon")));
+    const double night = brightness(still_of(*device, view_named("island-night")));
     INFO("noon " << noon << ", night " << night);
     CHECK(night < 0.5 * noon);
     CHECK(night > 0.0);
