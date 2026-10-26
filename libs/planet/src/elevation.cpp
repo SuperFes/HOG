@@ -395,6 +395,16 @@ Exposure Elevation::exposure(CellId cell, std::int64_t ground, std::int64_t leas
     return exposure;
 }
 
+std::int64_t Elevation::soil(CellId cell) const {
+    if (generated(cell) <= 0) {
+        return 0;
+    }
+    const Evolved& evolved = this->evolved();
+    const CellId shifted = cell_at(evolved.meander(cell_center(cell)));
+    return std::max<std::int64_t>(evolved.landform.grid().smooth(evolved.landform.soil(), shifted),
+                                  0);
+}
+
 Layering Elevation::layering(CellId cell) const {
     const Evolved& evolved = this->evolved();
     return layering(cell, cell_at(evolved.meander(cell_center(cell))), evolved.landform);

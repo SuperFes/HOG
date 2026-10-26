@@ -85,6 +85,9 @@ public:
 
     [[nodiscard]] Layering layering(CellId cell) const;
 
+    // Fixed-point metres of soil over the rock as the land evolved: none under the sea.
+    [[nodiscard]] std::int64_t soil(CellId cell) const;
+
     // The unit direction of the landform cell nearest `from` whose ground stands more than `above`
     // fixed-point metres above the sea, or `from` itself if none does.
     [[nodiscard]] DVec3 nearest_land(DVec3 from, std::int64_t above = 0) const;

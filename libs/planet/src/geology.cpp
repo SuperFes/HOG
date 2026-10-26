@@ -301,7 +301,6 @@ Strata Geology::strata(CellId cell, Biome biome) const {
                 .bedrock = Rock::Basalt,
                 .mantle_depth = crust_thickness(cell)};
     }
-    const std::int64_t swell = fbm(thickness_seed_, noise_at(cell, thickness_wavelength), octaves);
     const std::int64_t mountains = terrain().mountain_strength(cell);
     Strata strata{.mantle_depth = crust_thickness(cell)};
     switch (biome) {
@@ -315,11 +314,12 @@ Strata Geology::strata(CellId cell, Biome biome) const {
         strata.cover_thickness = ocean_sand;
         break;
     case Biome::Ice:
-    case Biome::Alpine:
         break;
-    default:
-        // One to two metres of soil.
-        strata.cover_thickness = multiply(fixed_one + unit(swell), fixed_one - mountains);
+    default: {
+        // None where the ground shows bare rock, as it is drawn.
+        const std::int64_t bare = terrain().exposure(cell, terrain().elevation(cell)).bare;
+        strata.cover_thickness = multiply(terrain().soil(cell), fixed_one - bare);
+    }
     }
     // Land off the continents is volcanic, with nothing laid down on it yet.
     if (!sea && !terrain().continents().is_land(cell)) {

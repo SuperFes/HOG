@@ -23,6 +23,7 @@
 #include <string_view>
 #include <vector>
 
+using hog::planet::Biome;
 using hog::planet::CellId;
 using hog::planet::fixed_one;
 using hog::planet::Geology;
@@ -362,6 +363,39 @@ TEST_CASE("the ground under the cover cuts down through the beds", "[planet][geo
     REQUIRE(columns > 100);
     // Beds tens of metres thick, so most columns hold more than one rock.
     CHECK(mixed > columns / 2);
+}
+
+TEST_CASE("the cover is the soil the land evolved, thin on bare rock", "[planet][geology]") {
+    const Geology geology{planet(1)};
+    const auto& terrain = geology.terrain();
+    int covered = 0;
+    int bare = 0;
+    int deep = 0;
+    const auto& grid = terrain.landform().grid();
+    for (std::uint32_t index = 0; index < grid.size(); index += 3) {
+        const CellId cell = grid.cell(index);
+        const Biome biome = geology.climate().biome(cell);
+        if (!terrain.is_land(cell) || biome == Biome::Beach || biome == Biome::Desert ||
+            biome == Biome::Ice) {
+            continue;
+        }
+        const Strata strata = geology.strata(cell);
+        REQUIRE(strata.cover == Rock::Soil);
+        REQUIRE(strata.cover_thickness <= terrain.soil(cell));
+        const std::int64_t shown = terrain.exposure(cell, terrain.elevation(cell)).bare;
+        if (shown > fixed_one / 2) {
+            REQUIRE(strata.cover_thickness <= (terrain.soil(cell) / 2) + 1);
+            ++bare;
+        } else if (shown == 0) {
+            REQUIRE(strata.cover_thickness == terrain.soil(cell));
+            ++covered;
+            deep += strata.cover_thickness > 2 * fixed_one ? 1 : 0;
+        }
+    }
+    INFO(covered << " covered, " << bare << " bare, " << deep << " deep");
+    CHECK(covered > 100);
+    CHECK(bare > 0);
+    CHECK(deep > 0);
 }
 
 TEST_CASE("volcanic islands are bare basalt under their soil", "[planet][geology]") {
