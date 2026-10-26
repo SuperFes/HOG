@@ -62,32 +62,38 @@ Shot shot_of(const hog::client::Flight& flight) {
             .companion = std::nullopt};
 }
 
-// From `altitude` metres over the starting islands at noon, looking `pitch` radians up.
-Shot over_the_islands(double altitude = 1'500.0, double pitch = -0.2) {
+// The woods nearest the start, wherever the seed put them.
+hog::DVec3 woods() {
+    static const hog::DVec3 found =
+        hog::client::testing::nearest_biome(hog::planet::Biome::TemperateForest);
+    return found;
+}
+
+// From `altitude` metres over the woods at noon, looking north and `pitch` radians up.
+Shot over_the_woods(double altitude = 1'500.0, double pitch = -0.2) {
     const double radius = world().geology().planet_radius();
-    const auto& islands = world().geology().terrain().archipelago();
-    hog::client::Flight flight = hog::client::start_flight(islands.center(), radius, altitude,
-                                                           islands.islands().front().center);
+    hog::client::Flight flight =
+        hog::client::start_flight(woods(), radius, altitude, hog::planet::north_pole);
     flight.pitch = pitch;
     return shot_of(flight);
 }
 
-// `altitude` metres over the sea `out` metres off the first island's coast along its longest
-// width, looking back at it if `back`, else out to sea, `pitch` radians up.
+// `altitude` metres over the sea `out` metres off the coast nearest the start, looking back at the
+// land if `back`, else out to sea, `pitch` radians up.
 Shot off_the_coast(double out, double altitude, bool back, double pitch) {
     const double radius = world().geology().planet_radius();
-    const auto& island = world().geology().terrain().archipelago().islands().front();
-    const hog::DVec3 outward =
-        glm::normalize(island.axis - (island.center * glm::dot(island.axis, island.center)));
+    const hog::DVec3 land = world().geology().terrain().nearest_land(hog::planet::start_direction);
+    const hog::DVec3 outward = glm::normalize(
+        hog::planet::start_direction - (land * glm::dot(hog::planet::start_direction, land)));
     const auto at = [&](double along) {
-        return glm::normalize(island.center + (outward * (along / radius)));
+        return glm::normalize(land + (outward * (along / radius)));
     };
     double coast = 0.0;
     while (hog::client::ground_under(world(), hog::WorldPosition{at(coast) * radius}) > 0.0) {
         coast += 5.0;
     }
-    hog::client::Flight flight = hog::client::start_flight(
-        at(coast + out), radius, altitude, back ? island.center : at(coast + out + 1'000.0));
+    hog::client::Flight flight = hog::client::start_flight(at(coast + out), radius, altitude,
+                                                           back ? land : at(coast + out + 1'000.0));
     flight.pitch = pitch;
     return shot_of(flight);
 }
@@ -95,7 +101,7 @@ Shot off_the_coast(double out, double altitude, bool back, double pitch) {
 // Six metres over water at least five deep, looking `pitch` radians up over more of it.
 Shot at_sea(double pitch) {
     const double radius = world().geology().planet_radius();
-    const hog::DVec3 centre = world().geology().terrain().archipelago().center();
+    const hog::DVec3 centre = hog::planet::start_direction;
     const hog::DVec3 east = glm::normalize(glm::cross(hog::DVec3{0.0, 0.0, 1.0}, centre));
     const auto out_to = [&](double along) {
         return glm::normalize(centre + (east * (along / radius)));
@@ -289,7 +295,7 @@ int brightness(const Rgb& rgb) {
 } // namespace
 
 TEST_CASE("the weather at the eye is clear until some is known", "[client][scene]") {
-    Shot shot = over_the_islands();
+    Shot shot = over_the_woods();
     CHECK(hog::client::weather_at_eye(shot) == hog::protocol::CellWeather{});
     const hog::client::Forecast forecast = everywhere({.cloud = 2.0F, .falling = 4.0F});
     shot.forecast = &forecast;
@@ -334,11 +340,11 @@ TEST_CASE("a scene under rain and overcast is grey and dim", "[client][scene][gp
     hog::jobs::JobSystem jobs{2};
     auto scene = Scene::create(*device, world(), jobs, calendar(), hog::client::still_format, 1);
     REQUIRE(scene);
-    const auto clear = hog::client::draw_still(*device, *scene, over_the_islands(), extent);
+    const auto clear = hog::client::draw_still(*device, *scene, over_the_woods(), extent);
     REQUIRE(clear);
     const hog::client::Forecast forecast =
         everywhere({.cloud = 1.0F, .falling = 8.0F, .base = 2'000.0F, .top = 3'000.0F});
-    Shot shot = over_the_islands();
+    Shot shot = over_the_woods();
     shot.forecast = &forecast;
     const auto overcast = hog::client::draw_still(*device, *scene, shot, extent);
     REQUIRE(overcast);
@@ -362,7 +368,7 @@ TEST_CASE("a scene draws its clouds at each quality alike", "[client][scene][gpu
     CHECK(scene->cloud_quality() == hog::render::CloudQuality::High);
     const hog::client::Forecast forecast =
         everywhere({.cloud = 1.0F, .falling = 8.0F, .base = 2'000.0F, .top = 3'000.0F});
-    Shot shot = over_the_islands();
+    Shot shot = over_the_woods();
     shot.forecast = &forecast;
     const auto high = hog::client::draw_still(*device, *scene, shot, extent);
     REQUIRE(high);
@@ -378,16 +384,15 @@ TEST_CASE("a scene draws its clouds at each quality alike", "[client][scene][gpu
     CHECK(device->validation_errors() == 0);
 }
 
-TEST_CASE("a scene in fog is grey, hiding the islands", "[client][scene][gpu]") {
+TEST_CASE("a scene in fog is grey, hiding the ground", "[client][scene][gpu]") {
     const auto device = test_device();
     hog::jobs::JobSystem jobs{2};
     auto scene = Scene::create(*device, world(), jobs, calendar(), hog::client::still_format, 1);
     REQUIRE(scene);
-    const auto clear =
-        hog::client::draw_still(*device, *scene, over_the_islands(300.0, 0.0), extent);
+    const auto clear = hog::client::draw_still(*device, *scene, over_the_woods(300.0, 0.0), extent);
     REQUIRE(clear);
     const hog::client::Forecast forecast = everywhere({.humidity = 1.0F, .fog_top = 1'000.0F});
-    Shot shot = over_the_islands(300.0, 0.0);
+    Shot shot = over_the_woods(300.0, 0.0);
     shot.forecast = &forecast;
     const auto fogged = hog::client::draw_still(*device, *scene, shot, extent);
     REQUIRE(fogged);
@@ -404,14 +409,14 @@ TEST_CASE("a scene in fog is grey, hiding the islands", "[client][scene][gpu]") 
     CHECK(device->validation_errors() == 0);
 }
 
-TEST_CASE("a scene drawn as a still settles, with the sky above and the islands below",
+TEST_CASE("a scene drawn as a still settles, with the sky above and the ground below",
           "[client][scene][gpu]") {
     const auto device = test_device();
     hog::jobs::JobSystem jobs{2};
     auto scene = Scene::create(*device, world(), jobs, calendar(), hog::client::still_format, 1);
     REQUIRE(scene);
     CHECK(!scene->settled());
-    const auto still = hog::client::draw_still(*device, *scene, over_the_islands(), extent);
+    const auto still = hog::client::draw_still(*device, *scene, over_the_woods(), extent);
     REQUIRE(still);
     CHECK(scene->settled());
     REQUIRE(still->width == extent.width);
@@ -432,12 +437,11 @@ TEST_CASE("a scene draws others where they stand", "[client][scene][gpu]") {
     auto scene = Scene::create(*device, world(), jobs, calendar(), hog::client::still_format, 1);
     REQUIRE(scene);
     // Standing two metres over the ground, with someone fifteen metres ahead.
-    const auto& islands = world().geology().terrain().archipelago();
-    const double ground = std::max(
-        hog::client::ground_under(
-            world(), hog::WorldPosition{islands.center() * world().geology().planet_radius()}),
-        0.0);
-    Shot shot = over_the_islands(ground + 2.0, 0.0);
+    const double ground =
+        std::max(hog::client::ground_under(
+                     world(), hog::WorldPosition{woods() * world().geology().planet_radius()}),
+                 0.0);
+    Shot shot = over_the_woods(ground + 2.0, 0.0);
     const auto alone = hog::client::draw_still(*device, *scene, shot, extent);
     REQUIRE(alone);
     const hog::WorldPosition feet = ahead(shot, 15.0);
@@ -492,7 +496,7 @@ TEST_CASE("a scene times its passes on the GPU", "[client][scene][gpu]") {
         SKIP("the Vulkan device's queue can't time");
     }
     // Over more than one frame, so one has been read back.
-    REQUIRE(hog::client::draw_still(*device, *scene, over_the_islands(), extent));
+    REQUIRE(hog::client::draw_still(*device, *scene, over_the_woods(), extent));
     std::vector<std::string_view> names;
     for (const hog::render::GpuSpan& span : scene->timings()) {
         names.push_back(span.name);
@@ -502,7 +506,7 @@ TEST_CASE("a scene times its passes on the GPU", "[client][scene][gpu]") {
     CHECK(names == std::vector<std::string_view>{"uploads", "sky tables", "sky", "foam", "ripples",
                                                  "sea laid", "ground", "trees", "behind sea",
                                                  "behind sea depth", "sea", "glare"});
-    // Over the islands' woods, the stamps draw trees; from this high, none are grown.
+    // Over the woods, the stamps draw trees; from this high, none are grown.
     CHECK(scene->tree_counts().tiles > 0);
     CHECK(scene->tree_counts().stamped > 0);
     CHECK(scene->tree_counts().grown == 0);
@@ -514,7 +518,7 @@ TEST_CASE("a still of ground that's still arriving fails", "[client][scene][gpu]
     hog::jobs::JobSystem jobs{2};
     auto scene = Scene::create(*device, world(), jobs, calendar(), hog::client::still_format, 1);
     REQUIRE(scene);
-    CHECK(!hog::client::draw_still(*device, *scene, over_the_islands(), extent, 1));
+    CHECK(!hog::client::draw_still(*device, *scene, over_the_woods(), extent, 1));
     CHECK(device->validation_errors() == 0);
 }
 
@@ -557,7 +561,7 @@ TEST_CASE("a windy sea, to look at", "[.look]") {
                              Look{.name = "coast", .pitch = -0.25, .time_of_day = 0.45}}) {
         Shot shot = at_sea(look.pitch);
         if (look.name == "shore") {
-            shot = over_the_islands(20.0, look.pitch);
+            shot = over_the_woods(20.0, look.pitch);
         } else if (look.name == "beach") {
             shot = off_the_coast(-3.0, 2.0, false, look.pitch);
         } else if (look.name == "coast") {
