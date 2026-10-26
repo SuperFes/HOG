@@ -70,6 +70,10 @@ constexpr std::size_t index(Resource resource) {
     return static_cast<std::size_t>(resource);
 }
 
+[[nodiscard]] bool sedimentary(Rock rock) {
+    return rock == Rock::Sandstone || rock == Rock::Shale || rock == Rock::Limestone;
+}
+
 // Each resource's seam lies in the rock it forms in.
 void check_host(Resource resource, const hog::planet::Deposit& deposit, const Strata& strata) {
     switch (resource) {
@@ -79,7 +83,7 @@ void check_host(Resource resource, const hog::planet::Deposit& deposit, const St
     case Resource::Coal:
     case Resource::Salt:
         REQUIRE(deposit.top + deposit.thickness <= strata.bedrock_depth());
-        REQUIRE(strata.rock_at(deposit.top) == strata.sediment);
+        REQUIRE(sedimentary(strata.rock_at(deposit.top)));
         break;
     case Resource::Tin:
     case Resource::Gold:
@@ -185,12 +189,16 @@ TEST_CASE("continents stand on granite and the deep ocean on basalt", "[planet][
             }
         } else if (land && geology.terrain().continents().is_land(cell)) {
             REQUIRE(strata.bedrock == Rock::Granite);
-            sediments.insert(strata.sediment);
+            if (strata.sediment_thickness > 0) {
+                sediments.insert(strata.sediment);
+            }
         } else if (!land) {
             // The shelf: the continent's rock under sea sand.
             REQUIRE(strata.bedrock == Rock::Granite);
             REQUIRE(strata.cover == Rock::Sand);
-            shelf_sediments.insert(strata.sediment);
+            if (strata.sediment_thickness > 0) {
+                shelf_sediments.insert(strata.sediment);
+            }
         }
     }
     CHECK(sediments == std::set{Rock::Sandstone, Rock::Shale, Rock::Limestone});
@@ -308,8 +316,46 @@ TEST_CASE("mountains are stripped down to granite", "[planet][geology]") {
         }
     }
     REQUIRE(mountain_count > 0.0);
-    CHECK(mountain / mountain_count < 0.2 * lowland / lowland_count);
+    // Belts lift the granite, but fold the beds deep into it as well.
+    CHECK(mountain / mountain_count < 0.5 * lowland / lowland_count);
     CHECK(exposed > 0);
+}
+
+TEST_CASE("the ground under the cover cuts down through the beds", "[planet][geology]") {
+    const Geology geology{planet(1)};
+    const auto& beds = geology.terrain().beds();
+    int columns = 0;
+    int mixed = 0;
+    for (const CellId cell : cells_at(6)) {
+        const Strata strata = geology.strata(cell);
+        if (strata.beds == nullptr) {
+            CHECK(strata.bedrock == Rock::Basalt);
+            continue;
+        }
+        REQUIRE(strata.beds == &beds);
+        if (strata.sediment_thickness == 0) {
+            CHECK(strata.rock_at(strata.cover_thickness) == Rock::Granite);
+            continue;
+        }
+        ++columns;
+        CHECK(strata.rock_at(strata.cover_thickness) == strata.sediment);
+        CHECK(strata.rock_at(strata.bedrock_depth()) == strata.bedrock);
+        std::set<Rock> rocks;
+        for (std::int64_t depth = strata.cover_thickness; depth < strata.bedrock_depth();
+             depth += 20 * fixed_one) {
+            const Rock rock = strata.rock_at(depth);
+            REQUIRE(rock == beds.rock_at(strata.column, strata.surface - depth));
+            REQUIRE(sedimentary(rock));
+            const auto bed = strata.bed_at(depth);
+            REQUIRE(bed.has_value());
+            REQUIRE(bed->rock == rock);
+            rocks.insert(rock);
+        }
+        mixed += rocks.size() > 1 ? 1 : 0;
+    }
+    REQUIRE(columns > 100);
+    // Beds tens of metres thick, so most columns hold more than one rock.
+    CHECK(mixed > columns / 2);
 }
 
 TEST_CASE("volcanic islands are bare basalt under their soil", "[planet][geology]") {

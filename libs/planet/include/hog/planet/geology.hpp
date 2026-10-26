@@ -19,19 +19,25 @@ namespace hog::planet {
 
 // A cell's ground from the surface down: loose cover, then sedimentary rock, then bedrock down to
 // the base of the crust, then mantle rock that runs on without end, perhaps with a magma chamber
-// somewhere in it. Thicknesses and depths are fixed-point metres; thicknesses may be zero.
+// somewhere in it. On land and the shelves the sedimentary rock lies in the beds, which the
+// surface cuts at `surface` in their layering; on the ocean floor it is one rock. Thicknesses,
+// depths and heights are fixed-point metres; thicknesses may be zero.
 struct Strata {
     Rock cover = Rock::Soil;
     std::int64_t cover_thickness = 0;
+    // The rock just under the cover.
     Rock sediment = Rock::Shale;
     std::int64_t sediment_thickness = 0;
     Rock bedrock = Rock::Granite;
     std::int64_t mantle_depth = std::numeric_limits<std::int64_t>::max();
     std::int64_t chamber_top = 0;
     std::int64_t chamber_thickness = 0;
+    const Beds* beds = nullptr;
+    BedColumn column{};
+    std::int64_t surface = 0;
 
     // The rock at a fixed-point depth in metres below the surface.
-    [[nodiscard]] constexpr Rock rock_at(std::int64_t depth) const noexcept {
+    [[nodiscard]] constexpr Rock rock_at(std::int64_t depth) const {
         if (depth >= chamber_top && depth < chamber_top + chamber_thickness) {
             return Rock::Magma;
         }
@@ -39,12 +45,21 @@ struct Strata {
             return cover;
         }
         if (depth < cover_thickness + sediment_thickness) {
-            return sediment;
+            return beds != nullptr ? beds->rock_at(column, surface - depth) : sediment;
         }
         if (depth >= mantle_depth) {
             return Rock::Peridotite;
         }
         return bedrock;
+    }
+
+    // The bed at a fixed-point depth in metres below the surface, its base and top as heights in
+    // the layering; none in the cover, the bedrock or a sea floor's single rock.
+    [[nodiscard]] std::optional<Bed> bed_at(std::int64_t depth) const {
+        if (beds == nullptr || depth < cover_thickness || depth >= bedrock_depth()) {
+            return std::nullopt;
+        }
+        return beds->bed_at(column, surface - depth);
     }
 
     // Fixed-point metres below the surface to the top of the bedrock.
@@ -144,7 +159,6 @@ private:
     Climate climate_;
     std::uint64_t seed_;
     double planet_radius_;
-    std::uint64_t facies_seed_;
     std::uint64_t thickness_seed_;
     std::uint64_t deposit_seed_;
     std::uint64_t crust_seed_;

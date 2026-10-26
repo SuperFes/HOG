@@ -11,7 +11,6 @@ namespace hog::planet {
 
 namespace {
 
-constexpr std::uint64_t facies_salt = 0x6661'6369'6573'0000ULL;    // "facies"
 constexpr std::uint64_t thickness_salt = 0x7468'6963'6B00'0000ULL; // "thick"
 constexpr std::uint64_t deposit_salt = 0x6465'706F'7369'7400ULL;   // "deposit"
 constexpr std::uint64_t crust_salt = 0x6372'7573'7400'0000ULL;     // "crust"
@@ -19,13 +18,11 @@ constexpr std::uint64_t chamber_salt = 0x6368'616D'6265'7200ULL;   // "chamber"
 
 constexpr int octaves = 3;
 // Metres across a sedimentary province and the swells in layer thickness.
-constexpr double facies_wavelength = 20'000.0;
 constexpr double thickness_wavelength = 8'000.0;
 
 constexpr std::int64_t ocean_sand = 3 * fixed_one;
 constexpr std::int64_t ocean_sediment = 200 * fixed_one;
 constexpr std::int64_t sand_cover = 2 * fixed_one;
-constexpr std::int64_t max_sediment = 600 * fixed_one;
 // Continent height where the shelf gives way to ocean floor, a third of the way down the slope to
 // the abyss (about 1,300 m deep), wandering up to `shelf_wander` either way.
 constexpr std::int64_t shelf_edge = -fixed_one / 20;
@@ -218,7 +215,6 @@ std::string_view to_string(Resource resource) noexcept {
 
 Geology::Geology(const PlanetConfig& config)
     : climate_{config}, seed_{config.seed}, planet_radius_{config.radius},
-      facies_seed_{hash_combine(config.seed, facies_salt)},
       thickness_seed_{hash_combine(config.seed, thickness_salt)},
       deposit_seed_{hash_combine(config.seed, deposit_salt)},
       crust_seed_{hash_combine(config.seed, crust_salt)} {
@@ -306,9 +302,7 @@ Strata Geology::strata(CellId cell, Biome biome) const {
                 .mantle_depth = crust_thickness(cell)};
     }
     const std::int64_t swell = fbm(thickness_seed_, noise_at(cell, thickness_wavelength), octaves);
-    // Mountains wear their cover and sedimentary rock away down to the granite.
     const std::int64_t mountains = terrain().mountain_strength(cell);
-    const std::int64_t exposure = multiply(fixed_one - mountains, fixed_one - mountains);
     Strata strata{.mantle_depth = crust_thickness(cell)};
     switch (biome) {
     case Biome::Beach:
@@ -332,15 +326,17 @@ Strata Geology::strata(CellId cell, Biome biome) const {
         strata.bedrock = Rock::Basalt;
         return strata;
     }
-    const std::int64_t facies = fbm(facies_seed_, noise_at(cell, facies_wavelength), octaves);
-    if (facies < -fixed_one / 4) {
-        strata.sediment = Rock::Sandstone;
-    } else if (facies > fixed_one / 4) {
-        strata.sediment = Rock::Limestone;
+    Layering layering = terrain().layering(cell);
+    strata.beds = &terrain().beds();
+    if (!layering.column.continental) {
+        // The shelf beyond the shore, still on the continent's rock.
+        layering.column = strata.beds->column(cell, {.continental = true, .mountains = mountains});
     }
-    // Thin to nothing in the deepest troughs of the swell, leaving granite outcrops.
-    strata.sediment_thickness =
-        multiply(multiply(max_sediment, exposure), ramp(swell + (fixed_one / 2), fixed_one));
+    strata.column = layering.column;
+    strata.surface = terrain().elevation(cell) - layering.risen;
+    const std::int64_t under = strata.surface - strata.cover_thickness;
+    strata.sediment = strata.beds->rock_at(layering.column, under);
+    strata.sediment_thickness = std::max<std::int64_t>(under - layering.column.basement, 0);
     return strata;
 }
 
