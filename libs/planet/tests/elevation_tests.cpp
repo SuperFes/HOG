@@ -24,6 +24,7 @@ using hog::planet::Elevation;
 using hog::planet::fine_fraction_bits;
 using hog::planet::fixed_one;
 using hog::planet::fixed_to_double;
+using hog::planet::Rock;
 
 namespace {
 
@@ -486,4 +487,44 @@ TEST_CASE("the ground never stands in sheer walls between neighbouring points",
     }
     // Crags stand steeply, but nothing like a cliff a cell tall.
     CHECK(steepest < 2.5);
+}
+
+TEST_CASE("bare beds on steep ground step into ledges", "[planet][elevation]") {
+    const Elevation terrain{{.seed = 1, .ocean_fraction = 0.7, .radius = 115'000.0}};
+    const auto& landform = terrain.landform();
+    const auto& grid = landform.grid();
+    // Where in their beds points on steep bare sandstone and limestone lie: ledges gather them
+    // on the benches at the beds' ends, away from the risers between.
+    int points = 0;
+    int midway = 0;
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        if (landform.heights()[index] <= 100 * fixed_one ||
+            landform.steepness()[index] < fixed_one * 7 / 10 ||
+            landform.soil()[index] > fixed_one / 5) {
+            continue;
+        }
+        for (const CellId cell :
+             hog::planet::sample_tile(grid.cell(index), 3, [](CellId fine) { return fine; })) {
+            const std::int64_t crust = terrain.continents().height(cell);
+            if (crust < fixed_one / 20) {
+                continue;
+            }
+            const auto column = terrain.beds().column(
+                cell, {.continental = true, .mountains = terrain.mountain_strength(cell)});
+            const std::int64_t frame =
+                terrain.elevation(cell) - grid.smooth(landform.risen(), cell);
+            const auto bed = terrain.beds().bed_at(column, frame);
+            if (!bed || (bed->rock != Rock::Sandstone && bed->rock != Rock::Limestone)) {
+                continue;
+            }
+            const double along =
+                static_cast<double>(frame - bed->base) / static_cast<double>(bed->top - bed->base);
+            ++points;
+            midway += along > 0.25 && along < 0.75 ? 1 : 0;
+        }
+    }
+    INFO(midway << " of " << points << " midway up their beds");
+    REQUIRE(points > 200);
+    // Evenly spread, half would be.
+    CHECK(midway < points * 2 / 5);
 }

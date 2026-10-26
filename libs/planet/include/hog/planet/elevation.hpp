@@ -117,8 +117,12 @@ private:
     [[nodiscard]] std::int64_t generated(CellId cell) const;
     // The elevation as rivers wore it, before they cut their channels, given the generated one;
     // about lakes, the landform's own ground, which holds them in.
-    [[nodiscard]] static std::int64_t worn(CellId cell, std::int64_t generated,
-                                           const Landform& landform, const Meander& meander);
+    [[nodiscard]] std::int64_t worn(CellId cell, std::int64_t generated, const Landform& landform,
+                                    const Meander& meander) const;
+    // Worn `ground` stepped into ledges along the beds, where bare rock stands steep; `shifted` is
+    // where the landform is sampled for it.
+    [[nodiscard]] std::int64_t ledged(CellId cell, CellId shifted, std::int64_t ground,
+                                      std::int64_t generated, const Landform& landform) const;
     [[nodiscard]] const Evolved& evolved() const;
     [[nodiscard]] std::shared_ptr<const Evolved> evolve(const PlanetConfig& config) const;
     // The landform on a grid, evolved from the generated ground, calling `stepped` with how many

@@ -181,7 +181,7 @@ TEST_CASE("a landform keeps how far each cell rose while it stood above the sea"
                         hog::planet::Hillslope{},
                         steps};
     for (std::uint32_t cell = 0; cell < worn.grid().size(); ++cell) {
-        REQUIRE(worn.risen()[cell] == (start[cell] > 0 ? steps * 30 * fixed_one : 0));
+        REQUIRE(worn.risen()[cell] == (start[cell] > 0 ? std::int64_t{steps} * 30 * fixed_one : 0));
     }
 }
 

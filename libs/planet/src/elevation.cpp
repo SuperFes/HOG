@@ -129,6 +129,29 @@ constexpr double frost_warmest = 2.0;
 // Generated height over which the change fades in from the shore.
 constexpr std::int64_t coast_blend = 50 * fixed_one;
 
+// How far each rock steps into ledges where it is laid bare on a steep slope: sandstone and
+// limestone stand in risers over flat benches, shale only softly, and rock in no beds not at all.
+[[nodiscard]] std::int64_t ledging(Rock rock) {
+    switch (rock) {
+    case Rock::Sandstone:
+    case Rock::Limestone:
+        return fixed_one;
+    case Rock::Shale:
+        return fixed_one * 35 / 100;
+    default:
+        return 0;
+    }
+}
+// Ledges start on slopes this steep between landform cells and are full grown on these, and
+// soil this deep halves them.
+constexpr std::int64_t ledge_gentlest = fixed_one / 4;
+constexpr std::int64_t ledge_steep = fixed_one * 6 / 10;
+constexpr std::int64_t ledge_soil = fixed_one;
+// The steepest a riser may make the ground, rise over run.
+constexpr std::int64_t steepest_riser = 2 * fixed_one;
+// Continental crust height over which ledges fade in from the crust's edge.
+constexpr std::int64_t crust_blend = fixed_one / 20;
+
 // Off a coast, height below the sea is read as metres from the shore as the islands' flanks fall;
 // continents' coasts fall about twice as fast on a small planet.
 constexpr std::int64_t shore_metres = 100'000;
@@ -387,7 +410,7 @@ std::int64_t Elevation::above_water(CellId cell) const {
 }
 
 std::int64_t Elevation::worn(CellId cell, std::int64_t generated, const Landform& landform,
-                             const Meander& meander) {
+                             const Meander& meander) const {
     if (generated <= 0 && !landform.near_lake(cell)) {
         return generated;
     }
@@ -400,6 +423,7 @@ std::int64_t Elevation::worn(CellId cell, std::int64_t generated, const Landform
         const std::int64_t change =
             (landform.change(shifted) * ramp(generated, coast_blend)) >> fixed_fraction_bits;
         ground = std::max(generated + change, (generated + 3) / 4);
+        ground = ledged(cell, shifted, ground, generated, landform);
     }
     // Lakes fill the landform's ground under their levels, and the cells round them stand above,
     // so the ground about them is the landform's, shading back into the finer ground beyond.
@@ -409,6 +433,42 @@ std::int64_t Elevation::worn(CellId cell, std::int64_t generated, const Landform
     }
     const std::int64_t smooth = landform.grid().sample(landform.heights(), shifted);
     return ground + (((smooth - ground) * lakeside) >> fixed_fraction_bits);
+}
+
+std::int64_t Elevation::ledged(CellId cell, CellId shifted, std::int64_t ground,
+                               std::int64_t generated, const Landform& landform) const {
+    const LevelGrid& grid = landform.grid();
+    const std::int64_t steep =
+        std::max<std::int64_t>(grid.smooth(landform.steepness(), shifted), 0);
+    const std::int64_t rising = ramp(steep - ledge_gentlest, ledge_steep - ledge_gentlest);
+    if (rising == 0) {
+        return ground;
+    }
+    const std::int64_t soil = std::max<std::int64_t>(grid.smooth(landform.soil(), shifted), 0);
+    const std::int64_t crust = continents_.height(cell);
+    // Fading out at the shore and the crust's edge, so the beds never start or stop sharply.
+    std::int64_t strength =
+        (rising * ((ledge_soil << fixed_fraction_bits) / (ledge_soil + soil))) >>
+        fixed_fraction_bits;
+    strength = (strength * ramp(generated, coast_blend)) >> fixed_fraction_bits;
+    strength = (strength * ramp(crust, crust_blend)) >> fixed_fraction_bits;
+    if (strength == 0) {
+        return ground;
+    }
+    const BedColumn column =
+        beds_.column(cell, {.continental = crust > 0, .mountains = mountain_strength(cell)});
+    const std::int64_t risen = grid.smooth(landform.risen(), shifted);
+    const auto bed = beds_.bed_at(column, ground - risen);
+    if (!bed) {
+        return ground;
+    }
+    strength = (strength * ledging(bed->rock)) >> fixed_fraction_bits;
+    // A riser is up to 1.875 times as steep as the ground it is cut into.
+    const std::int64_t room =
+        steep == 0 ? fixed_one
+                   : ((((steepest_riser << fixed_fraction_bits) / steep) - fixed_one) * 8) / 7;
+    strength = std::clamp<std::int64_t>(std::min(strength, room), 0, fixed_one);
+    return ledge(*bed, ground - risen, strength) + risen;
 }
 
 template <int Bits>

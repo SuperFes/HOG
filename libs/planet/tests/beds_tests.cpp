@@ -122,20 +122,21 @@ TEST_CASE("a bed holds the height asked about, one bed running into the next", "
     const auto column = beds.column(cell(30, 40), plains);
     CHECK_FALSE(beds.bed_at(column, column.basement - fixed_one));
     CHECK_FALSE(beds.bed_at(beds.column(cell(30, 40), {}), 0));
-    auto bed = beds.bed_at(column, column.basement);
-    REQUIRE(bed);
+    REQUIRE(beds.bed_at(column, column.basement));
+    hog::planet::Bed bed = beds.bed_at(column, column.basement).value_or(hog::planet::Bed{});
     for (int k = 0; k < 40; ++k) {
-        CHECK(bed->top - bed->base >= 40 * fixed_one);
-        CHECK(bed->top - bed->base <= 120 * fixed_one);
-        for (const std::int64_t height : {bed->base, (bed->base + bed->top) / 2, bed->top - 1}) {
+        CHECK(bed.top - bed.base >= 40 * fixed_one);
+        CHECK(bed.top - bed.base <= 120 * fixed_one);
+        for (const std::int64_t height : {bed.base, (bed.base + bed.top) / 2, bed.top - 1}) {
             if (height >= column.basement) {
-                CHECK(beds.rock_at(column, height) == bed->rock);
-                CHECK(beds.bed_at(column, height)->base == bed->base);
+                CHECK(beds.rock_at(column, height) == bed.rock);
+                REQUIRE(beds.bed_at(column, height));
+                CHECK(beds.bed_at(column, height).value_or(hog::planet::Bed{}).base == bed.base);
             }
         }
-        const auto next = beds.bed_at(column, bed->top);
-        REQUIRE(next);
-        REQUIRE(next->base == bed->top);
+        REQUIRE(beds.bed_at(column, bed.top));
+        const hog::planet::Bed next = beds.bed_at(column, bed.top).value_or(hog::planet::Bed{});
+        REQUIRE(next.base == bed.top);
         bed = next;
     }
 }

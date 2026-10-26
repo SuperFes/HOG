@@ -143,9 +143,9 @@ std::int64_t ledge(const Bed& bed, std::int64_t height, std::int64_t strength) {
         ((height - bed.base) << fixed_fraction_bits) / thickness, 0, fixed_one);
     constexpr int bits = detail::weight_bits;
     const std::int64_t profile =
-        bed.base +
-        ((thickness * detail::fade<fixed_fraction_bits>(along) + (std::int64_t{1} << (bits - 1))) >>
-         bits);
+        bed.base + (((thickness * detail::fade<fixed_fraction_bits>(along)) +
+                     (std::int64_t{1} << (bits - 1))) >>
+                    bits);
     return height + multiply(profile - height, strength);
 }
 
