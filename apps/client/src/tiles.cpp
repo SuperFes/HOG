@@ -12,11 +12,13 @@ namespace hog::client::tiles {
 Ground ground_at(const planet::World& world, std::uint32_t face, double s, double t) {
     const DVec3 direction = glm::normalize(
         planet::face_uv_to_xyz(static_cast<int>(face), planet::st_to_uv(s), planet::st_to_uv(t)));
-    const planet::CellState state = world.state(planet::cell_at(direction));
+    const planet::CellId cell = planet::cell_at(direction);
+    const planet::CellState state = world.state(cell);
     return {.direction = direction,
             .elevation =
                 static_cast<double>(state.elevation) / static_cast<double>(planet::fixed_one),
-            .state = state};
+            .state = state,
+            .cell = cell};
 }
 
 DVec3 hillside(const planet::World& world, std::uint32_t face, double s, double t, double half,

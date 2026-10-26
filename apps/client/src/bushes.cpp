@@ -48,8 +48,10 @@ std::optional<render::BushAnchor> anchor_at(const planet::World& world, std::uin
         tiles::ground_at(world, face, s + (static_cast<double>(stray.x) * reach),
                          t + (static_cast<double>(stray.y) * reach))
             .state.biome;
+    const auto bare =
+        static_cast<float>(planet::fixed_to_double(world.exposure(ground.cell, ground.state).bare));
     const std::optional<flora::Shrub> bush =
-        flora::bush_grown(i, j, face, biome, fates.at(face, s, t));
+        flora::bush_grown(i, j, face, biome, fates.at(face, s, t), bare);
     if (!bush) {
         return std::nullopt;
     }

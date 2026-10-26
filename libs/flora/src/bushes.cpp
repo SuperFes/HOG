@@ -52,8 +52,8 @@ Vec2 bush_stray(std::uint32_t lattice_i, std::uint32_t lattice_j, std::uint32_t 
 }
 
 std::optional<Shrub> bush_grown(std::uint32_t lattice_i, std::uint32_t lattice_j,
-                                std::uint32_t face, planet::Biome biome,
-                                const Fate& fate) noexcept {
+                                std::uint32_t face, planet::Biome biome, const Fate& fate,
+                                float bare) noexcept {
     const BiomeBushes bushes = bushes_of(biome);
     if (bushes.height <= 0.0F) {
         return std::nullopt;
@@ -70,7 +70,8 @@ std::optional<Shrub> bush_grown(std::uint32_t lattice_i, std::uint32_t lattice_j
                         static_cast<float>(lattice_j) + spot.y};
         share *= under_woods(trees, cell, face, gone);
     }
-    share = (share + (shrubs_in_fallen * fallen)) * (1.0F - saturated(fate.scar));
+    share = (share + (shrubs_in_fallen * fallen)) * (1.0F - saturated(fate.scar)) *
+            mixed(1.0F, shrubs_on_rock, saturated(bare));
     if (unit(hash + 2U) >= share) {
         return std::nullopt;
     }
@@ -84,7 +85,8 @@ std::optional<Shrub> bush_grown(std::uint32_t lattice_i, std::uint32_t lattice_j
     } else if (roll < bushes.floofy + bushes.spiky + bushes.twiggy) {
         kind = BushKind::Twiggy;
     }
-    float height = bushes.height * (0.7F + (0.6F * unit(hash + 4U)));
+    float height = bushes.height * (0.7F + (0.6F * unit(hash + 4U))) *
+                   mixed(1.0F, stunted_on_rock, saturated(bare));
     float width = height * 1.4F;
     switch (kind) {
     case BushKind::Spiky:

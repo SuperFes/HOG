@@ -52,9 +52,11 @@ std::optional<render::TreeAnchor> anchor_at(const planet::World& world, std::uin
     const double s = (static_cast<double>(i) + static_cast<double>(spot.x)) / across;
     const double t = (static_cast<double>(j) + static_cast<double>(spot.y)) / across;
     const tiles::Ground ground = tiles::ground_at(world, face, s, t);
-    const std::optional<flora::Stood> stood =
-        flora::tree_grown(i, j, face, ground.state.biome,
-                          flora::fared(flora::habitat_of(ground.state), fates.at(face, s, t)));
+    const std::optional<flora::Stood> stood = flora::tree_grown(
+        i, j, face, ground.state.biome,
+        flora::fared(
+            flora::habitat_of(ground.state, world.exposure(ground.cell, ground.state).bare),
+            fates.at(face, s, t)));
     if (!stood || ground.elevation < shore) {
         return std::nullopt;
     }

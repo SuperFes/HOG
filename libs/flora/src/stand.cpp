@@ -162,14 +162,15 @@ std::uint32_t cell_hash(std::uint32_t lattice_i, std::uint32_t lattice_j,
     return hashed(hashed(lattice_i ^ (face * 0x9e3779b9U)) + lattice_j);
 }
 
-Habitat habitat_of(const planet::CellState& state) noexcept {
+Habitat habitat_of(const planet::CellState& state, std::int64_t bare) noexcept {
     const auto real = [](std::int64_t fixed) {
         return static_cast<float>(static_cast<double>(fixed) /
                                   static_cast<double>(planet::fixed_one));
     };
     return {.temperature = real(state.temperature),
             .moisture = real(state.moisture),
-            .water_table = real(state.water_table)};
+            .water_table = real(state.water_table),
+            .bare = saturated(real(bare))};
 }
 
 float wetness(const Habitat& habitat) noexcept {
@@ -179,7 +180,8 @@ float wetness(const Habitat& habitat) noexcept {
 
 float suited(Genus genus, const Habitat& habitat) noexcept {
     const Niche niche = niche_of(genus);
-    return within(niche.warmth, habitat.temperature) * within(niche.wetness, wetness(habitat));
+    return within(niche.warmth, habitat.temperature) * within(niche.wetness, wetness(habitat)) *
+           mixed(1.0F, niche.on_rock, habitat.bare);
 }
 
 float stand_field(Vec2 cell, std::uint32_t face) noexcept {

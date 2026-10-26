@@ -29,11 +29,11 @@ struct Grown {
     std::size_t mats = 0;
 };
 
-Grown grown_as(Biome biome, const Fate& fate = Fate{}) {
+Grown grown_as(Biome biome, const Fate& fate = Fate{}, float bare = 0.0F) {
     Grown grown;
     for (std::uint32_t i = first_i; i < first_i + side; ++i) {
         for (std::uint32_t j = first_j; j < first_j + side; ++j) {
-            const auto bush = bush_grown(i, j, 0, biome, fate);
+            const auto bush = bush_grown(i, j, 0, biome, fate, bare);
             if (!bush) {
                 continue;
             }
@@ -176,4 +176,27 @@ TEST_CASE("a bush strays evenly about its spot, within the biomes' blending reac
     CHECK(std::abs(sum_x / side) < 0.15);
     CHECK(std::abs(sum_y / side) < 0.15);
     CHECK(far > side / 8);
+}
+
+TEST_CASE("a few bushes hold on in bare rock's cracks, stunted", "[flora][bushes]") {
+    const Grown soil = grown_as(Biome::Shrubland);
+    const Grown rock = grown_as(Biome::Shrubland, Fate{}, 1.0F);
+    const double kept = static_cast<double>(rock.bushes) / static_cast<double>(soil.bushes);
+    CHECK(rock.bushes > 0);
+    CHECK(kept > 0.2);
+    CHECK(kept < 0.4);
+    // Each bush on rock is one the soil grows too, and smaller.
+    for (std::uint32_t i = first_i; i < first_i + side; ++i) {
+        for (std::uint32_t j = first_j; j < first_j + side; ++j) {
+            const auto on_rock = bush_grown(i, j, 0, Biome::Shrubland, Fate{}, 1.0F);
+            if (!on_rock) {
+                continue;
+            }
+            const auto on_soil = bush_grown(i, j, 0, Biome::Shrubland);
+            REQUIRE(on_soil);
+            const hog::flora::Shrub soil_bush = on_soil.value_or(hog::flora::Shrub{});
+            CHECK(on_rock->height < soil_bush.height);
+            CHECK(on_rock->kind == soil_bush.kind);
+        }
+    }
 }

@@ -27,6 +27,7 @@ struct Ground {
     DVec3 direction;
     double elevation; // metres above sea level
     planet::CellState state;
+    planet::CellId cell;
 };
 
 [[nodiscard]] Ground ground_at(const planet::World& world, std::uint32_t face, double s, double t);

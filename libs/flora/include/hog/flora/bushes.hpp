@@ -62,6 +62,10 @@ struct BiomeBushes {
 
 // Of the ground the fallen dead leave, the share shrubs take.
 inline constexpr float shrubs_in_fallen = 0.45F;
+// Of the bushes bare rock would hold if it were soil, those rooted in its cracks, and how large
+// they grow there.
+inline constexpr float shrubs_on_rock = 0.3F;
+inline constexpr float stunted_on_rock = 0.6F;
 
 // Where within its cell the cell's bush would root, 0 to 1 across it.
 [[nodiscard]] Vec2 bush_spot(std::uint32_t lattice_i, std::uint32_t lattice_j,
@@ -84,9 +88,11 @@ struct Shrub {
 
 // The bush the cell grows as a `biome` bush, its woods faring as `fate` has them, if its dice land
 // one there. Bushes crowd the woods' sunny edges and thin under the canopy, crowd in where the
-// dead have fallen, and grow on no ground a fire left black.
+// dead have fallen, and grow on no ground a fire left black; on `bare` rock, 0 to 1 of the ground,
+// a few hold on in its cracks, stunted.
 [[nodiscard]] std::optional<Shrub> bush_grown(std::uint32_t lattice_i, std::uint32_t lattice_j,
                                               std::uint32_t face, planet::Biome biome,
-                                              const Fate& fate = Fate{}) noexcept;
+                                              const Fate& fate = Fate{},
+                                              float bare = 0.0F) noexcept;
 
 } // namespace hog::flora

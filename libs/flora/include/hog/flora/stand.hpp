@@ -111,10 +111,12 @@ struct Habitat {
     float failing = 0.0F;      // alive but dying, never more than living
     float dead = 0.0F;         // dead and still standing
     float charred = 0.0F;      // of the standing dead, the share burned
+    float bare = 0.0F;         // of the ground, the share bare rock, 0 to 1
 };
 
-// A cell's habitat as the planet gives it, its woods untouched.
-[[nodiscard]] Habitat habitat_of(const planet::CellState& state) noexcept;
+// A cell's habitat as the planet gives it, its woods untouched, with `bare` of its ground bare
+// rock in fixed point.
+[[nodiscard]] Habitat habitat_of(const planet::CellState& state, std::int64_t bare = 0) noexcept;
 
 // How wet the ground is to a tree's roots, 0 to 1: its climate's moisture, or wetter over a water
 // table within their reach.
@@ -135,6 +137,8 @@ struct Range {
 struct Niche {
     Range warmth;
     Range wetness;
+    // Of the trees bare rock would hold if it were soil, those whose roots find a crack in it.
+    float on_rock = 0.05F;
 };
 
 [[nodiscard]] constexpr Niche niche_of(Genus genus) noexcept {
@@ -147,15 +151,18 @@ struct Niche {
                 .wetness = {.low = 0.45F, .high = 1.0F, .margin = 0.1F}};
     case Genus::Palm:
         return {.warmth = {.low = 16.0F, .high = 40.0F, .margin = 2.0F},
-                .wetness = {.low = 0.2F, .high = 1.0F, .margin = 0.1F}};
+                .wetness = {.low = 0.2F, .high = 1.0F, .margin = 0.1F},
+                .on_rock = 0.0F};
     case Genus::Pine:
         break;
     }
+    // Pines cling to cliffs.
     return {.warmth = {.low = -6.0F, .high = 21.0F, .margin = 4.0F},
-            .wetness = {.low = 0.15F, .high = 1.0F, .margin = 0.1F}};
+            .wetness = {.low = 0.15F, .high = 1.0F, .margin = 0.1F},
+            .on_rock = 0.15F};
 }
 
-// How well a kind grows in a habitat, 0 to 1, by its niche.
+// How well a kind grows in a habitat, 0 to 1, by its niche and how bare the rock is.
 [[nodiscard]] float suited(Genus genus, const Habitat& habitat) noexcept;
 
 // Foliage as a share of the ground's colour under it, plus its own.

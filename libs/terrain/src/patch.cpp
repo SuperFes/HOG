@@ -274,10 +274,10 @@ Patch bake_patch(const planet::World& world, planet::CellId cell, const flora::F
             points[bordered_index(i, j)] = direction(corner) * (radius + height);
             if (inside(i) && inside(j)) {
                 const flora::Fate fate = fate_at(canonical(corner), fates);
-                woods[index(i, j)] =
-                    woods_at(canonical(corner), points[bordered_index(i, j)], state.biome,
-                             flora::fared(flora::habitat_of(state), fate));
                 exposures[index(i, j)] = world.exposure(sampled, state);
+                woods[index(i, j)] = woods_at(
+                    canonical(corner), points[bordered_index(i, j)], state.biome,
+                    flora::fared(flora::habitat_of(state, exposures[index(i, j)].bare), fate));
                 covers[index(i, j)] =
                     packed_cover(fate, flora::trees_of(state.biome).height > 0.0F);
                 grid_heights[index(i, j)] = height;

@@ -560,6 +560,22 @@ TEST_CASE("maples crowd the wet woods more than the dry", "[flora]") {
     CHECK(maple_share(Biome::Wetland) > 2.0F * maple_share(Biome::Shrubland));
 }
 
+TEST_CASE("few trees root in bare rock, pines the most and palms none", "[flora]") {
+    using hog::flora::Genus;
+    using hog::flora::Habitat;
+    using hog::flora::suited;
+    const Habitat soil{.temperature = 18.0F};
+    const Habitat rock{.temperature = 18.0F, .bare = 1.0F};
+    for (const Genus genus : {Genus::Pine, Genus::Oak, Genus::Maple, Genus::Palm}) {
+        CHECK(suited(genus, rock) < 0.2F * suited(genus, soil));
+        CHECK(suited(genus, Habitat{.temperature = 18.0F, .bare = 0.5F}) <= suited(genus, soil));
+    }
+    CHECK(suited(Genus::Pine, rock) > suited(Genus::Oak, rock));
+    CHECK(suited(Genus::Palm, rock) == 0.0F);
+    CHECK(hog::flora::habitat_of({}, hog::planet::fixed_one).bare == 1.0F);
+    CHECK(hog::flora::habitat_of({}).bare == 0.0F);
+}
+
 TEST_CASE("each kind grows within its own climate, thinning at its edges", "[flora]") {
     using hog::flora::Genus;
     using hog::flora::Habitat;

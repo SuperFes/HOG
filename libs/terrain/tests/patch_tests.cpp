@@ -520,7 +520,11 @@ TEST_CASE("a patch carries the woods flora stands about each of its vertices", "
             const hog::terrain::PatchVertex& vertex = patch.vertices.at(vertex_index(i, j));
             const int finer = hog::flora::lattice_level - level;
             const hog::flora::Habitat habitat =
-                hog::flora::habitat_of(world.state(hog::terrain::sample_cell(corner)));
+                hog::flora::habitat_of(world.state(hog::terrain::sample_cell(corner)),
+                                       world
+                                           .exposure(hog::terrain::sample_cell(corner),
+                                                     world.state(hog::terrain::sample_cell(corner)))
+                                           .bare);
             const hog::flora::Woodland woodland = hog::flora::woodland_at(
                 {static_cast<float>(std::ldexp(static_cast<double>(corner.i), finer)),
                  static_cast<float>(std::ldexp(static_cast<double>(corner.j), finer))},
