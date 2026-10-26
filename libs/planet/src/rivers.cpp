@@ -115,12 +115,18 @@ Rivers::Rivers(const Landform& landform, std::span<const std::int64_t> ground, M
         const std::uint32_t receiver = drainage.receiver[cell];
         const auto area = static_cast<double>(drained[cell]);
         const auto reach = static_cast<std::uint32_t>(reaches_.size());
-        reaches_.push_back({.from = cell_center(grid.cell(cell)),
-                            .to = cell_center(grid.cell(receiver)),
+        const DVec3 from = cell_center(grid.cell(cell));
+        const DVec3 to = cell_center(grid.cell(receiver));
+        const std::int64_t drop = levels_[cell] - levels_[receiver];
+        const bool falls = static_cast<double>(drop) >=
+                           falls_gradient * glm::length(to - from) * radius * fixed_one;
+        reaches_.push_back({.from = from,
+                            .to = to,
                             .from_surface = levels_[cell],
                             .to_surface = levels_[receiver],
                             .width = scale * width(area),
-                            .depth = fixed(scale * depth(area))});
+                            .depth = fixed(scale * depth(area)),
+                            .fall = falls ? drop : 0});
         for (const std::uint32_t end : {cell, receiver}) {
             near.emplace_back(end, reach);
             for (const std::uint32_t next : grid.neighbors(end)) {

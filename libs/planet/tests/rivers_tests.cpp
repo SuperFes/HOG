@@ -369,3 +369,39 @@ TEST_CASE("low ground cut off from the sea holds a lake or lies dry, never the s
     CHECK(dry.standing(offshore, bottom) == hog::planet::StandingWater{.level = 0, .sea = true});
     CHECK_FALSE(dry.lake(offshore, bottom));
 }
+
+TEST_CASE("rivers fall where their water drops steeply, and only there", "[planet][rivers]") {
+    // A gentle slope up from the sea, broken by a cliff.
+    constexpr double cliff = 0.5;
+    LevelGrid grid{level, radius};
+    std::vector<std::int64_t> heights;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const double z = hog::planet::cell_center(grid.cell(cell)).z;
+        const double metres = z > 0.0 ? 20.0 + (300.0 * z) + (z > cliff ? 600.0 : 0.0) : -1000.0;
+        heights.push_back(std::llround(metres * static_cast<double>(fixed_one)));
+    }
+    const std::vector<std::int64_t> uplift(grid.size(), 0);
+    const std::vector<std::int64_t> erodibility(grid.size(), 0);
+    const std::vector<std::int64_t> rain(grid.size(), fixed_one / 2);
+    const Landform stepped{std::move(grid),
+                           std::move(heights),
+                           {.uplift = uplift, .erodibility = erodibility, .runoff = rain},
+                           hog::planet::Hillslope{},
+                           0};
+    const Rivers flowing{stepped, ground(stepped), {1, stepped.grid(), radius}, radius};
+    int over = 0;
+    for (const Reach& reach : flowing.reaches()) {
+        const bool crosses = reach.from.z > cliff && reach.to.z <= cliff;
+        const double gradient =
+            hog::planet::fixed_to_double(reach.from_surface - reach.to_surface) /
+            (glm::length(reach.to - reach.from) * radius);
+        if (crosses) {
+            ++over;
+            CHECK(reach.fall == reach.from_surface - reach.to_surface);
+        } else if (gradient < Rivers::falls_gradient) {
+            CHECK(reach.fall == 0);
+        }
+        CHECK(reach.fall >= 0);
+    }
+    CHECK(over > 0);
+}

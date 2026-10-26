@@ -37,6 +37,9 @@ struct Reach {
     std::int64_t to_surface = 0;
     double width = 0.0; // metres
     std::int64_t depth = 0;
+    // How far its water falls where it runs steeply enough to tumble over falls or rapids, with a
+    // pool scoured at their foot; 0 elsewhere.
+    std::int64_t fall = 0;
 };
 
 // Rivers from every landform cell that drains enough ground, each running to the cell it drains
@@ -51,6 +54,8 @@ public:
     // Banks rise from the water at this slope until they meet the ground.
     static constexpr double bank_slope = 0.5;
 
+    // Rise over run of a reach's water from which it falls rather than runs.
+    static constexpr double falls_gradient = 0.1;
     // Square metres of rain-weighted ground a cell must drain for a river to start there.
     static constexpr double source_area = 20e6;
 
