@@ -83,9 +83,12 @@ void check_host(Resource resource, const hog::planet::Deposit& deposit, const St
         break;
     case Resource::Coal: {
         const auto bed = strata.bed_at(deposit.top);
+        const auto bottom = strata.bed_at(deposit.top + deposit.thickness - 1);
         REQUIRE(bed.has_value());
-        REQUIRE((bed->rock == Rock::Shale || bed->rock == Rock::Sandstone));
-        REQUIRE(strata.bed_at(deposit.top + deposit.thickness - 1)->index == bed->index);
+        REQUIRE(bottom.has_value());
+        const hog::planet::Bed in = bed.value_or(hog::planet::Bed{});
+        REQUIRE((in.rock == Rock::Shale || in.rock == Rock::Sandstone));
+        REQUIRE(bottom.value_or(hog::planet::Bed{}).index == in.index);
         break;
     }
     case Resource::Salt:
@@ -355,7 +358,7 @@ TEST_CASE("the ground under the cover cuts down through the beds", "[planet][geo
             REQUIRE(sedimentary(rock));
             const auto bed = strata.bed_at(depth);
             REQUIRE(bed.has_value());
-            REQUIRE(bed->rock == rock);
+            REQUIRE(bed.value_or(hog::planet::Bed{}).rock == rock);
             rocks.insert(rock);
         }
         mixed += rocks.size() > 1 ? 1 : 0;
