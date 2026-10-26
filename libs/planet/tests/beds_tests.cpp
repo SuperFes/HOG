@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
+#include <map>
 #include <numbers>
 #include <set>
 #include <vector>
@@ -46,6 +48,22 @@ constexpr BedSetting plains{.continental = true, .mountains = 0};
     return found;
 }
 
+// `count` beds in turn from the basement up.
+[[nodiscard]] std::vector<hog::planet::Bed> beds_up(const Beds& beds, CellId at, int count) {
+    const auto column = beds.column(at, plains);
+    std::vector<hog::planet::Bed> found;
+    std::int64_t height = column.basement;
+    for (int k = 0; k < count; ++k) {
+        const auto bed = beds.bed_at(column, height);
+        if (!bed) {
+            break;
+        }
+        found.push_back(*bed);
+        height = bed->top;
+    }
+    return found;
+}
+
 } // namespace
 
 TEST_CASE("away from continents the beds are basalt all the way down", "[planet][beds]") {
@@ -73,17 +91,83 @@ TEST_CASE("the beds alternate, tens of metres thick, with every sedimentary rock
     std::set<Rock> seen;
     for (std::uint32_t i = 0; i < 20; ++i) {
         const CellId at = cell(i * 31, i * 17);
-        const std::vector<std::int64_t> found = runs(beds, at, 2'000);
-        CHECK(found.size() >= 8);
-        // The first run starts partway into a bed.
-        for (std::size_t k = 1; k < found.size(); ++k) {
-            CHECK(found[k] >= 40);
-        }
+        CHECK(runs(beds, at, 2'000).size() >= 2);
         for (std::int64_t up = 0; up < 2'000; up += 10) {
             seen.insert(beds.rock_at(at, beds.basement(at, plains) + (up * fixed_one), plains));
         }
     }
     CHECK(seen == std::set<Rock>{Rock::Sandstone, Rock::Shale, Rock::Limestone});
+}
+
+TEST_CASE("one rock runs through several beds, a formation", "[planet][beds]") {
+    const Beds beds{1, radius};
+    int same = 0;
+    int pairs = 0;
+    for (std::uint32_t i = 0; i < 40; ++i) {
+        const std::vector<hog::planet::Bed> found = beds_up(beds, cell(i * 23, i * 11), 40);
+        for (std::size_t k = 1; k < found.size(); ++k) {
+            same += found[k].rock == found[k - 1].rock ? 1 : 0;
+            ++pairs;
+        }
+    }
+    CHECK(same * 2 > pairs);
+}
+
+TEST_CASE("sandstone and limestone mostly meet through shale", "[planet][beds]") {
+    const Beds beds{1, radius};
+    int across = 0;
+    int contacts = 0;
+    for (std::uint32_t i = 0; i < 40; ++i) {
+        const std::vector<hog::planet::Bed> found = beds_up(beds, cell(i * 23, i * 11), 40);
+        for (std::size_t k = 1; k < found.size(); ++k) {
+            if (found[k].rock != found[k - 1].rock) {
+                across += found[k].rock != Rock::Shale && found[k - 1].rock != Rock::Shale ? 1 : 0;
+                ++contacts;
+            }
+        }
+    }
+    CHECK(contacts > 100);
+    CHECK(across * 6 < contacts);
+}
+
+TEST_CASE("beds thin and thicken across the land, some pinching out", "[planet][beds]") {
+    const Beds beds{1, radius};
+    std::int64_t thinnest = std::numeric_limits<std::int64_t>::max();
+    std::int64_t thickest = 0;
+    int pinched = 0;
+    for (std::uint32_t i = 0; i < 40; ++i) {
+        const std::vector<hog::planet::Bed> found = beds_up(beds, cell(i * 23, i * 11), 40);
+        for (std::size_t k = 1; k < found.size(); ++k) {
+            thinnest = std::min(thinnest, found[k].top - found[k].base);
+            thickest = std::max(thickest, found[k].top - found[k].base);
+            pinched += found[k].index > found[k - 1].index + 1 ? 1 : 0;
+        }
+    }
+    CHECK(thinnest < 15 * fixed_one);
+    CHECK(thickest > 140 * fixed_one);
+    CHECK(pinched > 0);
+}
+
+TEST_CASE("a bed's rock changes sideways, tonguing into the next", "[planet][beds]") {
+    const Beds beds{1, radius};
+    int changed = 0;
+    int compared = 0;
+    for (std::uint32_t i = 0; i < 20; ++i) {
+        std::map<std::int64_t, Rock> near;
+        for (const hog::planet::Bed& bed : beds_up(beds, cell(i * 37, 200), 30)) {
+            near.emplace(bed.index, bed.rock);
+        }
+        // Some ten kilometres along.
+        for (const hog::planet::Bed& bed : beds_up(beds, cell((i * 37) + 60, 200), 30)) {
+            const auto there = near.find(bed.index);
+            if (there != near.end()) {
+                changed += there->second != bed.rock ? 1 : 0;
+                ++compared;
+            }
+        }
+    }
+    CHECK(changed > 0);
+    CHECK(changed * 3 < compared);
 }
 
 TEST_CASE("a bed carries on to the neighbouring ground", "[planet][beds]") {
@@ -127,8 +211,8 @@ TEST_CASE("a bed holds the height asked about, one bed running into the next, co
     REQUIRE(beds.bed_at(column, column.basement));
     hog::planet::Bed bed = beds.bed_at(column, column.basement).value_or(hog::planet::Bed{});
     for (int k = 0; k < 40; ++k) {
-        CHECK(bed.top - bed.base >= 40 * fixed_one);
-        CHECK(bed.top - bed.base <= 120 * fixed_one);
+        CHECK(bed.top > bed.base);
+        CHECK(bed.top - bed.base <= 160 * fixed_one);
         for (const std::int64_t height : {bed.base, (bed.base + bed.top) / 2, bed.top - 1}) {
             if (height >= column.basement) {
                 CHECK(beds.rock_at(column, height) == bed.rock);
@@ -139,7 +223,7 @@ TEST_CASE("a bed holds the height asked about, one bed running into the next, co
         REQUIRE(beds.bed_at(column, bed.top));
         const hog::planet::Bed next = beds.bed_at(column, bed.top).value_or(hog::planet::Bed{});
         REQUIRE(next.base == bed.top);
-        CHECK(next.index == bed.index + 1);
+        CHECK(next.index > bed.index);
         bed = next;
     }
 }

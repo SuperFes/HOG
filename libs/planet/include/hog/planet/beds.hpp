@@ -47,8 +47,12 @@ struct BedColumn {
     std::int32_t shift = 0;
     // Fixed-point metres: the top of the granite.
     std::int32_t basement = 0;
-    // Fixed point from -1 to 1: which rock the region favours, sandstone to limestone.
+    // Fixed point from -1 to 1: how far offshore the region lay, from sandstone by the shore to
+    // limestone far out.
     std::int32_t leaning = 0;
+    // Fixed point, local noise that thickens and thins each bed and moves where its rock
+    // changes, differently for each bed.
+    std::array<std::int32_t, 2> lateral{};
     // Fixed-point metres: the base of any volcano's lava.
     std::int32_t lava = std::numeric_limits<std::int32_t>::max();
     bool continental = false;
@@ -70,7 +74,10 @@ struct Bed {
 
 // Layered rock from the seed alone, so rivers can cut down through it while the landform
 // evolves, before the geology exists. On continents, sandstone, shale and limestone lie in beds
-// tens of metres thick on a granite basement, and each region favours its own rock. Away from the
+// tens of metres thick on a granite basement. Each bed's rock is how far offshore it was laid, as
+// the sea rose and fell, so formations of one rock step through shale between sandstone and
+// limestone; each region lay further out or in, and each rock tongues out sideways into the next
+// as beds thin, thicken and pinch out. Away from the
 // belts the beds lie nearly flat, gently warped; in them they are folded along the belt's grain
 // and stacked in thrust sheets, each tilted, the layering repeating across each thrust. Belts
 // lift the basement high enough to be laid bare, and volcanoes bury the beds in lava. Away from
@@ -98,9 +105,9 @@ private:
     // Fixed-point metres the belt's folds and thrusts raise the layering by at `center`.
     [[nodiscard]] std::int64_t belt(DVec3 center, const BedSetting& setting) const;
     // Where bed `index` starts in the layering, unshifted.
-    [[nodiscard]] std::int64_t base_of(std::int64_t index) const;
+    [[nodiscard]] std::int64_t base_of(std::int64_t index, const BedColumn& column) const;
     // Which bed of the layering lies at `layer`.
-    [[nodiscard]] std::int64_t index_at(std::int64_t layer) const;
+    [[nodiscard]] std::int64_t index_at(std::int64_t layer, const BedColumn& column) const;
     [[nodiscard]] Rock rock_of(std::int64_t index, const BedColumn& column) const;
 
     std::uint64_t seed_;

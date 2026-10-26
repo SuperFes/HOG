@@ -19,15 +19,24 @@ namespace {
 constexpr std::uint64_t beds_salt = 0x6265'6473'6265'6473ULL; // "bedsbeds"
 constexpr int octaves = 3;
 
-// Each slot of layering holds one bed's base, somewhere in its middle half, so beds are from half
-// a slot to one and a half thick.
+// Each slot of layering holds one bed's base, placed by the bed and swayed by local noise, so a
+// bed is up to two slots thick and here and there pinches out.
 constexpr std::int64_t slot = 80 * fixed_one;
-// Bed rock by its hash shifted by the region's leaning: sandstone below the first share, shale
-// below the second, limestone above.
-constexpr std::int64_t sandstone_below = fixed_one * 35 / 100;
-constexpr std::int64_t shale_below = fixed_one * 70 / 100;
-constexpr std::int64_t facies_lean = fixed_one * 3 / 10;
+constexpr std::int64_t base_scatter = fixed_one * 3 / 10;
+constexpr std::int64_t base_sway = fixed_one * 2;
+constexpr double lateral_wavelength = 6'000.0;
+// How far offshore a bed was laid: a long swing of the sea and a shorter ripple through the
+// beds, a little chance, the region's leaning and local sway. Sandstone below the first
+// threshold, shale below the second, limestone above.
+constexpr std::int64_t sea_beds = 6;
+constexpr std::int64_t ripple_beds = 2;
+constexpr std::int64_t ripple = fixed_one * 3 / 10;
+constexpr std::int64_t facies_chance = fixed_one * 15 / 100;
+constexpr std::int64_t facies_lean = fixed_one * 6 / 10;
+constexpr std::int64_t facies_sway = fixed_one * 4 / 10;
 constexpr double facies_wavelength = 60'000.0;
+constexpr std::int64_t sandstone_below = -fixed_one * 3 / 10;
+constexpr std::int64_t shale_below = fixed_one * 3 / 10;
 // A gentle warp everywhere. In the belts, folds a few kilometres across and thrust sheets, all
 // drawn out along the grain: dips of 20 to 60 degrees where the belt is strongest.
 constexpr std::int64_t warp = 150 * fixed_one;
@@ -53,6 +62,28 @@ constexpr double basement_wavelength = 25'000.0;
 [[nodiscard]] std::int64_t floor_divide(std::int64_t value, std::int64_t divisor) {
     const std::int64_t quotient = value / divisor;
     return (value % divisor < 0) ? quotient - 1 : quotient;
+}
+
+// A fixed-point value in [-1, 1) per bed.
+[[nodiscard]] std::int64_t signed_value(std::uint64_t seed, std::int64_t index) {
+    return (2 * lattice_value(seed, index, 0, 0)) - fixed_one;
+}
+
+// Smooth noise in [-1, 1] through the beds, eased between values `period` beds apart.
+[[nodiscard]] std::int64_t through_beds(std::uint64_t seed, std::int64_t index,
+                                        std::int64_t period) {
+    const std::int64_t at = floor_divide(index, period);
+    const std::int64_t along = ((index - (at * period)) << fixed_fraction_bits) / period;
+    const std::int64_t eased =
+        detail::fade<fixed_fraction_bits>(along) >> (detail::weight_bits - fixed_fraction_bits);
+    const std::int64_t from = signed_value(seed, at);
+    return from + multiply(signed_value(seed, at + 1) - from, eased);
+}
+
+// The column's local noise, mixed differently for each bed.
+[[nodiscard]] std::int64_t sway(std::uint64_t seed, std::int64_t index, const BedColumn& column) {
+    return multiply(column.lateral[0], signed_value(hash_combine(seed, 0), index)) +
+           multiply(column.lateral[1], signed_value(hash_combine(seed, 1), index));
 }
 
 // Noise drawn out along the grain, stretched along each axis by how far the belt runs along it,
@@ -119,6 +150,8 @@ BedColumn Beds::column(CellId cell, BedSetting setting) const {
     return {.shift = static_cast<std::int32_t>(shift + belt),
             .basement = static_cast<std::int32_t>(basement(cell, setting) + belt),
             .leaning = static_cast<std::int32_t>(noise(4, facies_wavelength)),
+            .lateral = {static_cast<std::int32_t>(noise(8, lateral_wavelength)),
+                        static_cast<std::int32_t>(noise(9, lateral_wavelength))},
             .lava = static_cast<std::int32_t>(
                 std::min<std::int64_t>(setting.lava, std::numeric_limits<std::int32_t>::max())),
             .continental = true};
@@ -172,36 +205,45 @@ Rock Beds::rock_at(const BedColumn& column, std::int64_t height) const {
     if (height < column.basement) {
         return Rock::Granite;
     }
-    return rock_of(index_at(height - column.shift), column);
+    return rock_of(index_at(height - column.shift, column), column);
 }
 
 std::optional<Bed> Beds::bed_at(const BedColumn& column, std::int64_t height) const {
     if (!column.continental || height < column.basement || height >= column.lava) {
         return std::nullopt;
     }
-    const std::int64_t index = index_at(height - column.shift);
-    return Bed{.base = base_of(index) + column.shift,
-               .top = base_of(index + 1) + column.shift,
+    const std::int64_t index = index_at(height - column.shift, column);
+    return Bed{.base = base_of(index, column) + column.shift,
+               .top = base_of(index + 1, column) + column.shift,
                .rock = rock_of(index, column),
                .index = index};
 }
 
-std::int64_t Beds::base_of(std::int64_t index) const {
-    return (index * slot) + (slot / 4) + multiply(slot / 2, lattice_value(seed_, index, 0, 0));
+std::int64_t Beds::base_of(std::int64_t index, const BedColumn& column) const {
+    // Kept within its own slot, every base lies above the last.
+    const std::int64_t place = (fixed_one / 2) +
+                               multiply(base_scatter, signed_value(seed_, index)) +
+                               multiply(base_sway, sway(hash_combine(seed_, 7), index, column));
+    return (index * slot) + multiply(slot, std::clamp<std::int64_t>(place, 0, fixed_one));
 }
 
-std::int64_t Beds::index_at(std::int64_t layer) const {
+std::int64_t Beds::index_at(std::int64_t layer, const BedColumn& column) const {
     const std::int64_t index = floor_divide(layer, slot);
-    return layer < base_of(index) ? index - 1 : index;
+    return layer < base_of(index, column) ? index - 1 : index;
 }
 
 Rock Beds::rock_of(std::int64_t index, const BedColumn& column) const {
-    const std::int64_t pick =
-        lattice_value(hash_combine(seed_, 5), index, 0, 0) + multiply(facies_lean, column.leaning);
-    if (pick < sandstone_below) {
+    const std::uint64_t facies = hash_combine(seed_, 5);
+    const std::int64_t offshore =
+        through_beds(hash_combine(facies, 0), index, sea_beds) +
+        multiply(ripple, through_beds(hash_combine(facies, 1), index, ripple_beds)) +
+        multiply(facies_chance, signed_value(hash_combine(facies, 2), index)) +
+        multiply(facies_lean, column.leaning) +
+        multiply(facies_sway, sway(hash_combine(facies, 3), index, column));
+    if (offshore < sandstone_below) {
         return Rock::Sandstone;
     }
-    return pick < shale_below ? Rock::Shale : Rock::Limestone;
+    return offshore < shale_below ? Rock::Shale : Rock::Limestone;
 }
 
 std::int64_t ledge(const Bed& bed, std::int64_t height, std::int64_t strength) {

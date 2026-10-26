@@ -214,7 +214,9 @@ TEST_CASE("continents stand on granite and the deep ocean on basalt", "[planet][
         }
     }
     CHECK(sediments == std::set{Rock::Sandstone, Rock::Shale, Rock::Limestone});
-    CHECK(shelf_sediments == sediments);
+    // Fewer shelf cells, which may see only some of the formations.
+    CHECK_FALSE(shelf_sediments.empty());
+    CHECK(std::ranges::includes(sediments, shelf_sediments));
 }
 
 TEST_CASE("shelves end partway down to the ocean floor", "[planet][geology]") {
