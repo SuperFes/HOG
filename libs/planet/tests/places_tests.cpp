@@ -76,7 +76,8 @@ TEST_CASE("the nearest cell that fits is found, nearest first", "[planet][places
     const std::optional<CellId> beside =
         hog::planet::nearest_cell(from, 4, [&](CellId cell) { return cell != under; });
     REQUIRE(beside.has_value());
-    const auto around = hog::planet::vertex_neighbors(under).cells();
+    const hog::planet::VertexNeighbors neighbors = hog::planet::vertex_neighbors(under);
+    const auto around = neighbors.cells();
     CHECK(std::ranges::find(around, beside.value_or(under)) != around.end());
     CHECK_FALSE(hog::planet::nearest_cell(from, 2, [](CellId) { return false; }).has_value());
 }
