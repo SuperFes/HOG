@@ -157,7 +157,8 @@ TEST_CASE("where the eye is can be given back to --at", "[client][options]") {
     CHECK(start.pitch == 20.0);
 }
 
-TEST_CASE("a place given --at without a heading and pitch faces the default way", "[client][options]") {
+TEST_CASE("a place given --at without a heading and pitch faces the default way",
+          "[client][options]") {
     const auto options = parse_options(Arguments{"--at", "1,2,3"});
     REQUIRE(options);
     REQUIRE(options->start);
