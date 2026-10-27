@@ -198,6 +198,25 @@ TEST_CASE("ground selected out of view is baked and held, but not drawn", "[terr
     CHECK(turned.bakes.empty());
 }
 
+TEST_CASE("all round the eye, ground out of view is drawn too, but not ground under the sea",
+          "[terrain][stream]") {
+    PatchStream stream{fine_first};
+    std::vector<SelectedPatch> selected = selecting_children(parent);
+    selected.at(1).under_sea = true;
+    selected.at(2).in_view = false;
+    settle(stream, selected);
+    const std::vector<hog::terrain::StreamedPatch> all_round = stream.drawn_all_round(selected);
+    std::set<CellId> cells;
+    for (const auto& patch : all_round) {
+        cells.insert(patch.cell);
+    }
+    CHECK(cells == std::set{parent.child(0), parent.child(2), parent.child(3)});
+    // Nearest first, as in view.
+    REQUIRE(all_round.size() == 3);
+    CHECK(all_round.front().cell == parent.child(0));
+    CHECK(all_round.back().cell == parent.child(3));
+}
+
 TEST_CASE("ground selected under the sea is baked and held, but not drawn", "[terrain][stream]") {
     PatchStream stream{fine_first};
     std::vector<SelectedPatch> selected = selecting_children(parent);

@@ -66,6 +66,10 @@ public:
     // drawn; all are baked and kept, so selecting all round the eye has ground ready before it
     // turns into view.
     [[nodiscard]] StreamFrame update(std::span<const SelectedPatch> selected);
+    // What would be drawn of the same selection all round the eye, in view or not, as held now:
+    // the ground out of the sea as a view in every direction at once sees it.
+    [[nodiscard]] std::vector<StreamedPatch>
+    drawn_all_round(std::span<const SelectedPatch> selected) const;
     // Whether the last update left nothing to do: none baking or waiting, and none asked for,
     // arriving or evicted. Settled, the same view selects the same ground, and updating with it
     // draws the same again, so it's answered at once.
@@ -107,6 +111,8 @@ private:
     // each covers.
     [[nodiscard]] std::map<planet::CellId, double>
     cover(std::span<const SelectedPatch> selected) const;
+    // The held cells covering `chosen`, stitched to one another, nearest first.
+    [[nodiscard]] std::vector<StreamedPatch> drawn_of(std::span<const SelectedPatch> chosen) const;
     // Adds to `drawn` the ancestors that may stand in for missing ground, with the least
     // distance of what each stands in for.
     void stand_in(const std::map<planet::CellId, double>& standing,

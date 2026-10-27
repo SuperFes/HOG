@@ -389,6 +389,44 @@ void PatchStream::arrive(std::span<const SelectedPatch> selected, StreamFrame& f
     waiting_.erase(waiting_.begin(), waiting_.begin() + static_cast<std::ptrdiff_t>(taken));
 }
 
+std::vector<StreamedPatch> PatchStream::drawn_of(std::span<const SelectedPatch> chosen) const {
+    const auto drawn = cover(chosen);
+    std::vector<planet::CellId> leaves;
+    leaves.reserve(drawn.size());
+    for (const auto& [cell, distance] : drawn) {
+        leaves.push_back(cell);
+    }
+    std::vector<std::pair<planet::CellId, std::uint8_t>> selected_edges;
+    selected_edges.reserve(chosen.size());
+    for (const SelectedPatch& patch : chosen) {
+        selected_edges.emplace_back(patch.cell, patch.coarser_edges);
+    }
+    std::ranges::sort(selected_edges);
+    std::vector<std::pair<double, StreamedPatch>> nearest;
+    nearest.reserve(drawn.size());
+    for (const auto& [cell, distance] : drawn) {
+        nearest.emplace_back(
+            distance, StreamedPatch{.cell = cell,
+                                    .origin = held_.at(cell).origin,
+                                    .coarser_edges = stitching(leaves, selected_edges, cell)});
+    }
+    std::ranges::stable_sort(nearest, {}, &std::pair<double, StreamedPatch>::first);
+    std::vector<StreamedPatch> patches;
+    patches.reserve(nearest.size());
+    for (const auto& [distance, patch] : nearest) {
+        patches.push_back(patch);
+    }
+    return patches;
+}
+
+std::vector<StreamedPatch>
+PatchStream::drawn_all_round(std::span<const SelectedPatch> selected) const {
+    std::vector<SelectedPatch> above;
+    std::ranges::copy_if(selected, std::back_inserter(above),
+                         [](const SelectedPatch& patch) { return !patch.under_sea; });
+    return drawn_of(above);
+}
+
 StreamFrame PatchStream::update(std::span<const SelectedPatch> selected) {
     HOG_ZONE("stream patches");
     // Settled on the same selection, it would draw just the same again: what stood in still would,
@@ -406,32 +444,9 @@ StreamFrame PatchStream::update(std::span<const SelectedPatch> selected) {
     std::ranges::copy_if(selected, std::back_inserter(in_view), [](const SelectedPatch& patch) {
         return patch.in_view && !patch.under_sea;
     });
-    const auto drawn = cover(in_view);
-    std::vector<planet::CellId> leaves;
-    leaves.reserve(drawn.size());
-    for (const auto& [cell, distance] : drawn) {
-        leaves.push_back(cell);
-    }
-    std::vector<std::pair<planet::CellId, std::uint8_t>> selected_edges;
-    selected_edges.reserve(in_view.size());
-    for (const SelectedPatch& patch : in_view) {
-        selected_edges.emplace_back(patch.cell, patch.coarser_edges);
-    }
-    std::ranges::sort(selected_edges);
-    std::vector<std::pair<double, StreamedPatch>> nearest;
-    nearest.reserve(drawn.size());
-    for (const auto& [cell, distance] : drawn) {
-        Held& held = held_.at(cell);
-        held.drawn = frame_;
-        nearest.emplace_back(
-            distance, StreamedPatch{.cell = cell,
-                                    .origin = held.origin,
-                                    .coarser_edges = stitching(leaves, selected_edges, cell)});
-    }
-    std::ranges::stable_sort(nearest, {}, &std::pair<double, StreamedPatch>::first);
-    frame.drawn.reserve(nearest.size());
-    for (const auto& [distance, patch] : nearest) {
-        frame.drawn.push_back(patch);
+    frame.drawn = drawn_of(in_view);
+    for (const StreamedPatch& patch : frame.drawn) {
+        held_.at(patch.cell).drawn = frame_;
     }
 
     std::set<planet::CellId> waiting;
