@@ -1752,16 +1752,16 @@ TEST_CASE("calm water mirrors the sun's own disc, and wind breaks its glint into
     // Looking down with the sun overhead.
     OceanView view = seen_from(4.0, -up, north, up);
     const auto lit = [](const std::vector<std::uint8_t>& pixels) {
-        std::vector<int> lit;
+        std::vector<int> shown;
         for (std::uint32_t y = 0; y < extent.height; ++y) {
             for (std::uint32_t x = 0; x < extent.width; ++x) {
-                lit.push_back(pixel_at(pixels, x, y)[0] > 10 ? 1 : 0);
+                shown.push_back(pixel_at(pixels, x, y)[0] > 10 ? 1 : 0);
             }
         }
-        return lit;
+        return shown;
     };
-    const auto count = [](const std::vector<int>& lit) {
-        return static_cast<int>(std::ranges::count(lit, 1));
+    const auto count = [](const std::vector<int>& shown) {
+        return static_cast<int>(std::ranges::count(shown, 1));
     };
     // The sun, all but a point at this size, mirrored over a pixel or so.
     const std::vector<int> calm = lit(draw(*device, view, std::nullopt));
