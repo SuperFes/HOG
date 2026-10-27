@@ -411,7 +411,7 @@ TEST_CASE("fetch runs on into the coarser layer and out to sea", "[terrain][shor
         layered([](int, int) { return -10.0F; }, [](int, int) { return -10.0F; });
     const std::vector<float> fetches = hog::terrain::shore_fetches(depths, still);
     const double fine = shore_spacing.front();
-    const double coarse = shore_spacing.back();
+    const double coarse = shore_spacing.at(1);
     // West of the fine layer lies the coarse texel 111, 11.5 coarse texels from its shore.
     const double edge = (coarse * 11.5) + fine;
     CHECK_THAT(fine_fetch(fetches, 0, 0, 128), WithinRel(edge, 1e-5));

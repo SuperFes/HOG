@@ -16,8 +16,8 @@ namespace hog::terrain {
 // The depth of the sea round the eye, which shapes the waves near a shore: grids of it in layers,
 // each the same size and coarser than the last, laid on the plane touching the planet at an anchor
 // fixed to the world, so they only change when the eye moves far enough to be nearer another.
-inline constexpr int shore_size = 256;                           // texels a side
-inline constexpr std::array<double, 2> shore_spacing{8.0, 64.0}; // metres between texels
+inline constexpr int shore_size = 256;                                  // texels a side
+inline constexpr std::array<double, 3> shore_spacing{8.0, 64.0, 512.0}; // metres between texels
 // Anchors lie at the centres of cells about this wide.
 inline constexpr double shore_anchoring = 512.0; // metres
 // Depths are kept from as high as this above the sea, which is only told apart from land.

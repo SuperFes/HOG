@@ -1868,7 +1868,8 @@ std::vector<ShoreFound> probe_shore(hog::render::Device& device,
         glm::vec4{hog::Vec3{(frame.anchor * radius) - eye},
                   static_cast<float>(1.0 / shore_spacing[0])},
         glm::vec4{hog::Vec3{frame.east}, static_cast<float>(1.0 / shore_spacing[1])},
-        glm::vec4{hog::Vec3{frame.north}, 0.0F}, glm::vec4{hog::Vec3{wind}, 0.0F}};
+        glm::vec4{hog::Vec3{frame.north}, static_cast<float>(1.0 / shore_spacing[2])},
+        glm::vec4{hog::Vec3{wind}, 0.0F}};
     for (const hog::DVec2 point : points) {
         const DVec3 rest = (hog::terrain::shore_direction(frame, radius, point) * radius) - eye;
         asked.emplace_back(hog::Vec3{rest}, static_cast<float>(radius));
@@ -1944,31 +1945,30 @@ TEST_CASE("the sea's shaders find the depths round the eye", "[render][ocean][gp
         hog::terrain::shore_frame(glm::normalize(DVec3{0.2, -0.4, 0.9}), radius);
     // Rising to the east and falling to the north, which filtering keeps as it is.
     const auto depth_at = [](hog::DVec2 at) { return 20.0 + (0.004 * at.x) - (0.002 * at.y); };
-    // Fine, where the fine grid fades into the coarse, coarse, and fading out of it.
-    const std::array<hog::DVec2, 7> points{hog::DVec2{0.0, 0.0},      hog::DVec2{300.0, -420.0},
+    // Fine, where the fine grid fades into the coarse, coarse, where that fades into the
+    // coarsest, coarsest, fading out of it, and beyond.
+    const std::array<hog::DVec2, 8> points{hog::DVec2{0.0, 0.0},      hog::DVec2{300.0, -420.0},
                                            hog::DVec2{-950.0, 100.0}, hog::DVec2{4000.0, -3000.0},
-                                           hog::DVec2{7000.0, 0.0},   hog::DVec2{0.0, -9000.0},
-                                           hog::DVec2{-20000.0, 5.0}};
+                                           hog::DVec2{7000.0, 0.0},   hog::DVec2{0.0, -20000.0},
+                                           hog::DVec2{60000.0, 0.0},  hog::DVec2{-70000.0, 5.0}};
     const std::vector<ShoreFound> found = probe_shore(
         *device, frame, depth_at, [](hog::DVec2) { return hog::terrain::shore_highest; },
         [](hog::DVec2) { return 0.0; }, [](hog::DVec2, int) { return 0.0; }, frame.east, points);
     REQUIRE(found.size() == points.size());
     // Half floats keep about three digits.
-    for (std::size_t i = 0; i < 4; ++i) {
+    for (std::size_t i = 0; i < 6; ++i) {
         CAPTURE(i);
-        CHECK_THAT(found[i].depth, WithinAbs(depth_at(points[i]), 0.05));
+        CHECK_THAT(found[i].depth, WithinAbs(depth_at(points[i]), 0.001 * depth_at(points[i])));
     }
-    const double inside = (1.0 - (7000.0 / 8192.0)) / 0.2;
-    CHECK_THAT(found[4].depth, WithinAbs(1000.0 + ((depth_at(points[4]) - 1000.0) * inside), 1.0));
-    CHECK(found[5].depth == 1000.0);
-    CHECK(found[6].depth == 1000.0);
+    const double inside = (1.0 - (60000.0 / 65536.0)) / 0.2;
+    CHECK_THAT(found[6].depth, WithinAbs(1000.0 + ((depth_at(points[6]) - 1000.0) * inside), 1.0));
+    CHECK(found[7].depth == 1000.0);
     // The ground draws lakes beyond the grids, fading them in as the grids fade out.
-    for (std::size_t i = 0; i < 4; ++i) {
+    for (std::size_t i = 0; i < 6; ++i) {
         CHECK(found[i].covered == 1.0);
     }
-    CHECK_THAT(found[4].covered, WithinAbs(inside, 1e-4));
-    CHECK(found[5].covered == 0.0);
-    CHECK(found[6].covered == 0.0);
+    CHECK_THAT(found[6].covered, WithinAbs(inside, 1e-4));
+    CHECK(found[7].covered == 0.0);
     CHECK(device->validation_errors() == 0);
 }
 

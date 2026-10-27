@@ -778,7 +778,8 @@ Result<> Ocean::write_waves(const OceanView& view, std::uint32_t frame) const {
                               static_cast<float>(1.0 / terrain::shore_spacing[0])};
         drawn.shore_east = {Vec3{shore_->east},
                             static_cast<float>(1.0 / terrain::shore_spacing[1])};
-        drawn.shore_north = {Vec3{shore_->north}, 0.0F};
+        drawn.shore_north = {Vec3{shore_->north},
+                             static_cast<float>(1.0 / terrain::shore_spacing[2])};
     }
     if (foam_time_) {
         const GridPlacing placing =

@@ -1,7 +1,8 @@
 module shore;
 
-// As hog::terrain's shore grids: texels a side of each layer, finest first.
+// As hog::terrain's shore grids: texels a side of each layer, and how many layers, finest first.
 static const float shore_size = 256.0;
+static const int shore_layers = 3;
 // Where no grid reaches, the sea is taken as too deep for any wave to feel its floor.
 public static const float shore_deep = 1000.0;
 // Of each layer's half-width, the outer share over which it fades into the next.
@@ -25,11 +26,11 @@ static const float whole_turn = 6.28318530718;
 // Where `rest`, a point of sea level from the eye on a planet of `radius`, lies on layers of
 // shore_size texels a side, finest first, centred on an anchor at xyz of `anchor` from the eye, in
 // the plane `east` and `north` lie along: on each layer, where on its texels, and how far inside it,
-// fading out over its edge. The w of `anchor` and `east` are each layer's texels per metre, and
-// none at all where there are no layers.
+// fading out over its edge. The w of `anchor`, `east` and `north` are each layer's texels per
+// metre, and none at all where there are no layers.
 struct ShoreAt {
-    float2 centred[2];
-    float inside[2];
+    float2 centred[shore_layers];
+    float inside[shore_layers];
 };
 
 ShoreAt shore_at(float4 anchor, float4 east, float4 north, float radius, float3 rest) {
@@ -39,8 +40,8 @@ ShoreAt shore_at(float4 anchor, float4 east, float4 north, float radius, float3 
     // Where the line from the planet's centre through it meets the anchor's plane.
     const float2 along = float2(dot(from_anchor, east.xyz), dot(from_anchor, north.xyz)) *
                          (radius / (radius + dot(from_anchor, up)));
-    const float per_metre[2] = { anchor.w, east.w };
-    for (int layer = 0; layer < 2; ++layer) {
+    const float per_metre[shore_layers] = { anchor.w, east.w, north.w };
+    for (int layer = 0; layer < shore_layers; ++layer) {
         at.centred[layer] = along * per_metre[layer] / shore_size;
         const float edge = 2.0 * max(abs(at.centred[layer].x), abs(at.centred[layer].y));
         at.inside[layer] = anchor.w > 0.0 ? saturate((1.0 - edge) / shore_fading) : 0.0;
@@ -56,7 +57,7 @@ public float3 shore_waters(Sampler2DArray depths, float4 anchor, float4 east, fl
                            float radius, float3 rest) {
     const ShoreAt at = shore_at(anchor, east, north, radius, rest);
     float3 waters = float3(shore_deep, shore_highest, 0.0);
-    for (int layer = 1; layer >= 0; --layer) {
+    for (int layer = shore_layers - 1; layer >= 0; --layer) {
         if (at.inside[layer] > 0.0) {
             const float4 found =
                 depths.SampleLevel(float3(at.centred[layer] + 0.5, float(layer)), 0.0);
@@ -69,7 +70,7 @@ public float3 shore_waters(Sampler2DArray depths, float4 anchor, float4 east, fl
 // How far inside the grids `rest` lies, laid as shore_at has them: 1 well inside, fading to none
 // over the coarsest layer's edge.
 public float shore_inside(float4 anchor, float4 east, float4 north, float radius, float3 rest) {
-    return shore_at(anchor, east, north, radius, rest).inside[1];
+    return shore_at(anchor, east, north, radius, rest).inside[shore_layers - 1];
 }
 
 // Metres of sea under `rest`, as shore_waters finds it.
@@ -96,7 +97,7 @@ public float shore_fetch(Sampler2DArray fetches, float4 anchor, float4 east, flo
     const int after = (before + 1) % fetch_headings;
     const float between = heading - float(before);
     float fetch = 0.0;
-    for (int layer = 1; layer >= 0; --layer) {
+    for (int layer = shore_layers - 1; layer >= 0; --layer) {
         if (at.inside[layer] > 0.0) {
             const float2 uv = at.centred[layer] + 0.5;
             const float found = lerp(fetch_towards(fetches, uv, layer, before),
