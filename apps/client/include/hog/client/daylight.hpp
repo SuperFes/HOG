@@ -43,7 +43,7 @@ private:
 // Irradiance on level ground at the eye.
 struct EyeLight {
     DVec3 sun{0.0};
-    // At night only starlight, until there are moons: nearly black.
+    // With a faint glow at night, from the moon and stars still to come, so the dark isn't black.
     DVec3 sky{0.0};
 };
 
@@ -55,8 +55,8 @@ struct EyeLight {
 // sky's scattered through lighting the ground as the sky does.
 [[nodiscard]] EyeLight under_cloud(const EyeLight& light, render::CloudShade shade) noexcept;
 
-// How much brighter the picture is than the light at the eye: adapting partly to it, down to
-// deep twilight, so night is darker than day and a moonless one nearly black.
+// How much brighter the picture is than the light at the eye: adapting partly to it, so night is
+// darker than day but can still be seen in.
 [[nodiscard]] double exposure_for(const EyeLight& light) noexcept;
 
 // From an exposure towards another over `seconds`, as eyes adapt.

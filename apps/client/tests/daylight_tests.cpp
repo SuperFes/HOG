@@ -66,14 +66,14 @@ TEST_CASE("the planet's day starts when asked where the eye is", "[client][dayli
     }
 }
 
-TEST_CASE("the eye is lit by the sun by day and only by starlight by night", "[client][daylight]") {
+TEST_CASE("the eye is lit by the sun by day and by a faint glow by night", "[client][daylight]") {
     const EyeLight noon = hog::client::light_at_eye(earth(), 2.0, 1.0);
     const EyeLight night = hog::client::light_at_eye(earth(), 2.0, -0.5);
     CHECK(noon.sun.g > 0.8);
     CHECK(noon.sun.g > 5.0 * noon.sky.g);
     CHECK(night.sun == DVec3{0.0});
     CHECK(night.sky.b > 0.0);
-    CHECK(night.sky.b < 1e-6 * (noon.sun.b + noon.sky.b));
+    CHECK(night.sky.b < 0.01 * (noon.sun.b + noon.sky.b));
 }
 
 TEST_CASE("under cloud the sun is hidden and the sky lit by what it scatters through",
@@ -109,8 +109,7 @@ TEST_CASE("exposure adapts to the light, but brighter light still looks brighter
     CHECK(night_exposure > low_exposure);
     CHECK(noon > low);
     CHECK(low > night);
-    // Eyes adapt only so far: a moonless night is nearly black.
-    CHECK(night < 0.001 * noon);
+    CHECK(night > 0.01 * noon);
 }
 
 TEST_CASE("exposure moves towards the light's over time", "[client][daylight]") {

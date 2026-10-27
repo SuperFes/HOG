@@ -8,8 +8,7 @@ namespace hog::client {
 
 namespace {
 
-// Starlight and the air's own glow on a moonless night: some ten-millionths of noon's light.
-constexpr DVec3 night_glow{1.5e-8, 1.8e-8, 2.5e-8};
+constexpr DVec3 night_glow{0.0015, 0.0018, 0.0025};
 // Noon's light on level ground is about 1, seen at this exposure.
 constexpr double noon_exposure = 10.0;
 // How far exposure follows the light, from 0 not at all to 1 wholly, and the least light it
