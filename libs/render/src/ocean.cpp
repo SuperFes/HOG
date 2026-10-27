@@ -770,6 +770,10 @@ Result<> Ocean::lay_water(VkCommandBuffer commands, const OceanView& view, std::
     memory_barrier(commands, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                    VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                    VK_ACCESS_2_UNIFORM_READ_BIT);
+    // For the CPU to tell next time whether the eye was in the water.
+    memory_barrier(commands, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                   VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_HOST_BIT,
+                   VK_ACCESS_2_HOST_READ_BIT);
     return {};
 }
 

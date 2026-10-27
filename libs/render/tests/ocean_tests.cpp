@@ -1252,6 +1252,8 @@ glm::vec4 water_at_eye(hog::render::Device& device, const WavySea& sea) {
     REQUIRE(read->invalidate());
     glm::vec4 water{0.0F};
     std::memcpy(&water, read->mapped().data(), sizeof(water));
+    // As the CPU reads it back once the frame's done.
+    CHECK(sky->eye_above_water(0) == static_cast<double>(water.w));
     CHECK(device.validation_errors() == 0);
     return water;
 }

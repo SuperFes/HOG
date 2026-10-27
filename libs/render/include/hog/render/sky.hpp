@@ -117,6 +117,10 @@ public:
         return aerial_volumes_.at(frame);
     }
 
+    // Metres the eye stood over the water's surface, negative under it, as the sea last laid
+    // the water in `frame`'s Lighting, once that frame has finished; none if it didn't.
+    [[nodiscard]] std::optional<double> eye_above_water(std::uint32_t frame) const;
+
     // With `cloud_shadow` as SkyView's.
     [[nodiscard]] AirBindings bindings(std::uint32_t frame, const Atmosphere& atmosphere,
                                        VkImageView cloud_shadow = VK_NULL_HANDLE) const noexcept;

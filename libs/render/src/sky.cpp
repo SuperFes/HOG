@@ -284,6 +284,21 @@ Result<Image> make_aerial_volume(const Device& device) {
                                .layers = aerial_layers});
 }
 
+std::optional<double> Sky::eye_above_water(std::uint32_t frame) const {
+    const Buffer& buffer = lighting_.at(frame);
+    if (!buffer.invalidate()) {
+        return std::nullopt;
+    }
+    float above = 0.0F;
+    std::memcpy(&above, buffer.mapped().subspan(sea_water_at + (3 * sizeof(float))).data(),
+                sizeof(above));
+    // As record_tables() leaves it, with no sea.
+    if (above >= std::numeric_limits<float>::max()) {
+        return std::nullopt;
+    }
+    return static_cast<double>(above);
+}
+
 AirBindings Sky::bindings(std::uint32_t frame, const Atmosphere& atmosphere,
                           VkImageView cloud_shadow) const noexcept {
     return {.air = atmosphere.constants(),
