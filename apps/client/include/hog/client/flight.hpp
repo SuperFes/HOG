@@ -54,6 +54,11 @@ struct FlySettings {
 // The eye moved to `eye`, still facing the same way along the ground.
 [[nodiscard]] Flight carried_to(const Flight& flight, WorldPosition eye);
 
+// Radians clockwise from north the flight faces along the ground.
+[[nodiscard]] double bearing_of(const Flight& flight);
+// Facing `bearing` radians clockwise from north, pitched `pitch` radians above the horizon.
+[[nodiscard]] Flight turned_to(const Flight& flight, double bearing, double pitch);
+
 // Which way the flight looks, as the server keeps it.
 [[nodiscard]] protocol::Facing facing_of(const Flight& flight);
 // Looking as `facing` says, at its eye.

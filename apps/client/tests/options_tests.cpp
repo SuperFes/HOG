@@ -1,11 +1,15 @@
 #include <hog/client/options.hpp>
 #include <hog/core/build_info.hpp>
+#include <hog/planet/projection.hpp>
 #include <hog/render/cloud_quality.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
+#include <cmath>
 #include <filesystem>
+#include <numbers>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -125,6 +129,43 @@ TEST_CASE("a client can be told not to grow grass", "[client][options]") {
     const auto options = parse_options(Arguments{"--grass", "--no-grass"});
     REQUIRE(options);
     CHECK_FALSE(options->grass);
+}
+
+TEST_CASE("a client can be told to draw the planet as curved as it is", "[client][options]") {
+    CHECK(parse_options(Arguments{})->bend);
+    const auto options = parse_options(Arguments{"--bend", "--no-bend"});
+    REQUIRE(options);
+    CHECK_FALSE(options->bend);
+}
+
+TEST_CASE("where the eye is can be given back to --at", "[client][options]") {
+    constexpr double radius = 115'000.0;
+    constexpr double degree = std::numbers::pi / 180.0;
+    Place place = hog::client::place_of(
+        hog::planet::direction_at(-12.5 * degree, 170.25 * degree) * (radius + 300.0), radius);
+    place.heading = -95.5;
+    place.pitch = 20.0;
+    const std::string at = hog::client::at_argument(place);
+    const auto options = parse_options(Arguments{"--at", at});
+    REQUIRE(options);
+    REQUIRE(options->start);
+    const Place start = options->start.value_or(Place{});
+    CHECK(std::abs(start.latitude + 12.5) < 1e-6);
+    CHECK(std::abs(start.longitude - 170.25) < 1e-6);
+    CHECK(start.altitude == 300.0);
+    CHECK(start.heading == -95.5);
+    CHECK(start.pitch == 20.0);
+}
+
+TEST_CASE("a place given --at without a heading and pitch faces the default way", "[client][options]") {
+    const auto options = parse_options(Arguments{"--at", "1,2,3"});
+    REQUIRE(options);
+    REQUIRE(options->start);
+    const Place start = options->start.value_or(Place{});
+    CHECK_FALSE(start.heading);
+    CHECK_FALSE(start.pitch);
+    CHECK_FALSE(parse_options(Arguments{"--at", "1,2,3,4,5,6"}));
+    CHECK_FALSE(parse_options(Arguments{"--at", "1,2,3,4,"}));
 }
 
 TEST_CASE("a client can be told not to reload shaders", "[client][options]") {

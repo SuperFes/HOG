@@ -215,3 +215,16 @@ TEST_CASE("a flight's facing reads back as it was sent, wherever it is", "[clien
           Approx(1.0));
     CHECK(east.pitch == Approx(std::numbers::pi / 4.0));
 }
+
+TEST_CASE("a flight turned to a bearing reads back as that bearing", "[client][flight]") {
+    for (const DVec3 direction : {DVec3{1.0, 0.0, 0.0}, DVec3{0.3, -0.5, 0.8}}) {
+        for (const double bearing : {0.0, 1.0, 3.1, -2.0, -0.001}) {
+            const Flight start = start_flight(direction, radius, 50.0, hog::planet::north_pole);
+            const Flight turned = hog::client::turned_to(start, bearing, -0.3);
+            CAPTURE(direction.x, direction.y, direction.z, bearing);
+            check_level(turned);
+            CHECK(hog::client::bearing_of(turned) == Approx(bearing).margin(1e-9));
+            CHECK(turned.pitch == -0.3);
+        }
+    }
+}

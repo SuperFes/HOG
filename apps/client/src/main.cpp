@@ -193,6 +193,11 @@ client::Flight start(const client::Options& options, const planet::World& world)
                                       planet::north_pole);
     }
     flight.pitch = start_pitch;
+    if (options.start && options.start->heading && options.start->pitch) {
+        constexpr double degree = std::numbers::pi / 180.0;
+        flight = client::turned_to(flight, *options.start->heading * degree,
+                                   *options.start->pitch * degree);
+    }
     return flight;
 }
 
@@ -455,22 +460,31 @@ Result<bool> draw(client::Scene& scene, const client::Shot& shot, const render::
     return true;
 }
 
-// Frames a second, height, the local time of day and how fast it runs, in the window's title once
-// a second.
+// Where the eye is and which way it looks, as --at takes it.
+client::Place seen_from(const client::Flight& flight, DVec3 eye, double radius) {
+    constexpr double degree = std::numbers::pi / 180.0;
+    client::Place place = client::place_of(eye, radius);
+    place.heading = client::bearing_of(flight) / degree;
+    place.pitch = flight.pitch / degree;
+    return place;
+}
+
+// Frames a second, height, the local time of day and how fast it runs, and where the eye is as
+// --at takes it, in the window's title once a second.
 class TitleCounter {
 public:
     void count(SDL_Window* window, double height, double time_of_day, double rate,
-               std::uint32_t world_rate) {
+               std::uint32_t world_rate, std::string_view at) {
         ++frames_;
         const MonotonicClock::time_point now = MonotonicClock::now();
         const std::chrono::duration<double> passed = now - since_;
         if (passed.count() >= 1.0) {
             const auto minutes = static_cast<int>(time_of_day * 24.0 * 60.0);
             const std::string title =
-                std::format("HOG - {:.0f} fps, {:.0f} m up, {:02}:{:02}{}{}",
+                std::format("HOG - {:.0f} fps, {:.0f} m up, {:02}:{:02}{}{}, at {}",
                             static_cast<double>(frames_) / passed.count(), height, minutes / 60,
                             minutes % 60, rate > 1.0 ? std::format(", time {:.0f}x", rate) : "",
-                            world_rate != 1 ? std::format(", world {}x", world_rate) : "");
+                            world_rate != 1 ? std::format(", world {}x", world_rate) : "", at);
             SDL_SetWindowTitle(window, title.c_str());
             frames_ = 0;
             since_ = now;
@@ -850,7 +864,8 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
         title.count(
             window, glm::length(camera.eye.metres()) - radius - ground_height,
             scene.calendar().local_time_of_day(clock.time(), glm::normalize(flight.eye.metres())),
-            clock.rate(), world_rate(connection));
+            clock.rate(), world_rate(connection),
+            client::at_argument(seen_from(flight, camera.eye.metres(), radius)));
 
         if (options.quit_after && now - started >= *options.quit_after) {
             controls.quit = true;
@@ -864,7 +879,9 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
                                                     radius, ground_ahead),
             .up = companion_up,
             .height = companion_height};
-        const terrain::Bend bend = terrain::bend_from(camera.eye, radius, ground_height);
+        const terrain::Bend bend = terrain::bend_from(
+            camera.eye, radius, ground_height,
+            options.bend ? terrain::BendSettings{} : terrain::BendSettings{.faked_radius = 0.0});
         const client::Session* session = connection.session();
         const std::vector<replication::Shown> others =
             session != nullptr ? session->others(now) : std::vector<replication::Shown>{};

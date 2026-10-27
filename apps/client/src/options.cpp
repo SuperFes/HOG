@@ -7,10 +7,12 @@
 #include <cstdlib>
 #include <format>
 #include <memory>
+#include <numbers>
 #include <optional>
 #include <string>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 namespace hog::client {
 
@@ -40,21 +42,25 @@ std::optional<double> real(std::string_view text) {
 }
 
 std::optional<Place> place(std::string_view text) {
-    const std::size_t first = text.find(',');
-    if (first == std::string_view::npos) {
+    std::vector<double> parts;
+    for (std::size_t start = 0; start <= text.size();) {
+        const std::size_t comma = std::min(text.find(',', start), text.size());
+        const auto part = real(text.substr(start, comma - start));
+        if (!part) {
+            return std::nullopt;
+        }
+        parts.push_back(*part);
+        start = comma + 1;
+    }
+    if ((parts.size() != 3 && parts.size() != 5) || std::abs(parts[0]) > 90.0) {
         return std::nullopt;
     }
-    const std::size_t second = text.find(',', first + 1);
-    if (second == std::string_view::npos) {
-        return std::nullopt;
+    Place found{.latitude = parts[0], .longitude = parts[1], .altitude = parts[2]};
+    if (parts.size() == 5) {
+        found.heading = parts[3];
+        found.pitch = parts[4];
     }
-    const auto latitude = real(text.substr(0, first));
-    const auto longitude = real(text.substr(first + 1, second - first - 1));
-    const auto altitude = real(text.substr(second + 1));
-    if (!latitude || !longitude || !altitude || std::abs(*latitude) > 90.0) {
-        return std::nullopt;
-    }
-    return Place{.latitude = *latitude, .longitude = *longitude, .altitude = *altitude};
+    return found;
 }
 
 // A fraction of the day from HH:MM.
@@ -176,6 +182,8 @@ constexpr std::array flags{
     Flag{.name = "--no-chat-filter", .set = [](Options& options) { options.chat_filter = false; }},
     Flag{.name = "--grass", .set = [](Options& options) { options.grass = true; }},
     Flag{.name = "--no-grass", .set = [](Options& options) { options.grass = false; }},
+    Flag{.name = "--bend", .set = [](Options& options) { options.bend = true; }},
+    Flag{.name = "--no-bend", .set = [](Options& options) { options.bend = false; }},
     Flag{.name = "--software", .set = [](Options& options) { options.software = true; }},
     Flag{.name = "--validate", .set = [](Options& options) { options.validate = true; }},
     Flag{.name = "--no-validate", .set = [](Options& options) { options.validate = false; }},
@@ -212,6 +220,23 @@ Result<void> check_together(const Options& options) {
 
 } // namespace
 
+Place place_of(DVec3 eye, double radius) {
+    constexpr double degree = std::numbers::pi / 180.0;
+    const double from_centre = glm::length(eye);
+    return {.latitude = std::asin(eye.z / from_centre) / degree,
+            .longitude = std::atan2(eye.y, eye.x) / degree,
+            .altitude = from_centre - radius};
+}
+
+std::string at_argument(const Place& place) {
+    std::string at =
+        std::format("{:.6f},{:.6f},{:.0f}", place.latitude, place.longitude, place.altitude);
+    if (place.heading && place.pitch) {
+        at += std::format(",{:.1f},{:.1f}", *place.heading, *place.pitch);
+    }
+    return at;
+}
+
 std::string_view usage() noexcept {
     return R"(usage: hog-client [options]
 
@@ -222,8 +247,11 @@ options:
   --graphics PATH        what to draw, for what the GPU can afford (default
                          config/graphics.toml if there is one, as
                          config/graphics.example.toml shows)
-  --at LAT,LON,ALT       start at degrees of latitude and longitude, metres above
-                         sea level (default over latitude 0, longitude 0)
+  --at LAT,LON,ALT[,HEADING,PITCH]
+                         start at degrees of latitude and longitude, metres above
+                         sea level (default over latitude 0, longitude 0), facing
+                         degrees clockwise from north and above the horizon, as the
+                         window's title shows
   --time HH:MM           start at this local time of day (default the planet's own)
   --threads N            baking the ground (default one per hardware thread)
   --connect ADDRESS      connect to a server at an IP address and port, such as
@@ -245,6 +273,8 @@ options:
   --clouds QUALITY       draw the clouds at low, medium or high quality, for what
                          the GPU can afford (default high)
   --no-grass             don't grow grass near the eye, for what the GPU can afford
+  --no-bend              draw the planet curving as tightly as it truly does, not
+                         flattened like Earth's near the eye
   --software             draw with a software Vulkan device, such as lavapipe
   --validate             check Vulkan use with its validation layer, failing on errors;
                          on by default in debug builds

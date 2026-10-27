@@ -85,10 +85,21 @@ Flight carried_to(const Flight& flight, WorldPosition eye) {
     return carried(moved);
 }
 
-protocol::Facing facing_of(const Flight& flight) {
+double bearing_of(const Flight& flight) {
     const planet::TangentFrame frame = planet::tangent_frame(flight.eye.metres());
-    const double turned =
-        std::atan2(glm::dot(flight.heading, frame.east), glm::dot(flight.heading, frame.north));
+    return std::atan2(glm::dot(flight.heading, frame.east), glm::dot(flight.heading, frame.north));
+}
+
+Flight turned_to(const Flight& flight, double bearing, double pitch) {
+    const planet::TangentFrame frame = planet::tangent_frame(flight.eye.metres());
+    Flight next = flight;
+    next.heading = (frame.east * std::sin(bearing)) + (frame.north * std::cos(bearing));
+    next.pitch = pitch;
+    return next;
+}
+
+protocol::Facing facing_of(const Flight& flight) {
+    const double turned = bearing_of(flight);
     const double pitch = std::clamp(flight.pitch * per_radian, -32'768.0, 32'767.0);
     // Wrapped round the turn, so a heading just west of north is near the top.
     return {.heading = static_cast<std::uint16_t>(std::lround(turned * per_radian) & 0xFFFF),
@@ -96,12 +107,8 @@ protocol::Facing facing_of(const Flight& flight) {
 }
 
 Flight faced(const Flight& flight, protocol::Facing facing) {
-    const planet::TangentFrame frame = planet::tangent_frame(flight.eye.metres());
-    const double turned = static_cast<double>(facing.heading) / per_radian;
-    Flight next = flight;
-    next.heading = (frame.east * std::sin(turned)) + (frame.north * std::cos(turned));
-    next.pitch = static_cast<double>(facing.pitch) / per_radian;
-    return next;
+    return turned_to(flight, static_cast<double>(facing.heading) / per_radian,
+                     static_cast<double>(facing.pitch) / per_radian);
 }
 
 render::Camera flight_camera(const Flight& flight, double vertical_fov) {

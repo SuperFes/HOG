@@ -1,6 +1,7 @@
 #pragma once
 
 #include <hog/core/build_info.hpp>
+#include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
 #include <hog/net/simulation.hpp>
 #include <hog/render/cloud_quality.hpp>
@@ -20,6 +21,9 @@ struct Place {
     double latitude = 0.0;  // degrees
     double longitude = 0.0; // degrees
     double altitude = 0.0;  // metres above sea level
+    // Which way the eye looks, given together, or as it starts by default.
+    std::optional<double> heading = std::nullopt; // degrees clockwise from north
+    std::optional<double> pitch = std::nullopt;   // degrees above the horizon
 
     friend constexpr bool operator==(const Place&, const Place&) = default;
 };
@@ -53,6 +57,8 @@ struct Options {
     bool chat_filter = true;
     // Grass grown on the ground near the eye.
     bool grass = true;
+    // The ground near the eye drawn curving like Earth's, not as tightly as the planet truly does.
+    bool bend = true;
     render::CloudQuality clouds = render::CloudQuality::High;
     // A software Vulkan device over a GPU, and the validation layer with its errors failing the
     // run, also for tests. Debug builds validate unless told not to.
@@ -62,6 +68,11 @@ struct Options {
     bool reload_shaders = debug_build;
     bool help = false;
 };
+
+// Where `eye`, metres from the centre of a planet of `radius`, stands.
+[[nodiscard]] Place place_of(DVec3 eye, double radius);
+// `place` as --at takes it.
+[[nodiscard]] std::string at_argument(const Place& place);
 
 [[nodiscard]] std::string_view usage() noexcept;
 
