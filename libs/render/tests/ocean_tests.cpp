@@ -387,12 +387,14 @@ void copy_whole(VkCommandBuffer commands, VkImage from, VkImage to, VkImageAspec
 // `deep` metres beneath its surface, or from under it steeply up, unless looking `forward`; the
 // water over it drawn `laid`, carrying `carried`; and in `beneath`, if any, what was drawn before
 // the sea, as copied. Without the `ground`, the deep water drawn beneath where it's drawn by the
-// ground.
-std::vector<std::uint8_t>
-over_seabed(hog::render::Device& device, double deep, Laid laid, double height = 20.0,
-            std::vector<std::uint8_t>* beneath = nullptr, bool ground = true,
-            std::optional<DVec3> forward = std::nullopt,
-            const hog::terrain::Carried& carried = hog::terrain::open_sea) {
+// ground. With `environment`, what's out of the water all round is taken from that cube.
+std::vector<std::uint8_t> over_seabed(hog::render::Device& device, double deep, Laid laid,
+                                      double height = 20.0,
+                                      std::vector<std::uint8_t>* beneath = nullptr,
+                                      bool ground = true,
+                                      std::optional<DVec3> forward = std::nullopt,
+                                      const hog::terrain::Carried& carried = hog::terrain::open_sea,
+                                      VkImageView environment = VK_NULL_HANDLE) {
     auto atmosphere = hog::render::Atmosphere::create(device);
     REQUIRE(atmosphere);
     auto sky = hog::render::Sky::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
@@ -450,8 +452,9 @@ over_seabed(hog::render::Device& device, double deep, Laid laid, double height =
     REQUIRE(behind_depth);
     const bool behind = laid != Laid::ByGround;
     if (behind) {
-        view.behind =
-            hog::render::SeaBehind{.colour = behind_colour->view(), .depth = behind_depth->view()};
+        view.behind = hog::render::SeaBehind{.colour = behind_colour->view(),
+                                             .depth = behind_depth->view(),
+                                             .environment = environment};
     }
     REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
         namespace use = hog::render::image_use;
@@ -996,6 +999,43 @@ TEST_CASE("from under the sea, the sky shows through a window overhead, the surf
     CHECK(brightness(inside) > brightness(beyond) + 80);
     CHECK(beyond[2] > beyond[1] + 10);
     CHECK(beyond[1] > beyond[0] + 10);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("from under the sea, the window overhead shows what the probe took all round",
+          "[render][gpu]") {
+    const auto device = test_device();
+    const std::uint32_t middle = extent.width / 2;
+    // Red all round, as if drawn so at an exposure of 1.
+    std::vector<std::byte> red;
+    for (int face = 0; face < 6; ++face) {
+        for (const std::uint8_t channel :
+             {std::uint8_t{180}, std::uint8_t{0}, std::uint8_t{0}, std::uint8_t{255}}) {
+            red.push_back(std::byte{channel});
+        }
+    }
+    auto cube = hog::render::make_filled_image(
+        *device, {.format = VK_FORMAT_R8G8B8A8_UNORM, .layers = 6, .cube = true}, red);
+    REQUIRE(cube);
+    const auto looking_up = [&](double degrees, VkImageView environment) {
+        const double angle = degrees * std::numbers::pi / 180.0;
+        const DVec3 forward = (up * std::cos(angle)) + (east * std::sin(angle));
+        return pixel_at(over_seabed(*device, 200.0, Laid::BySea, -1.0, nullptr, true, forward,
+                                    hog::terrain::open_sea, environment),
+                        middle, middle);
+    };
+    const Pixel sky = looking_up(1.0, VK_NULL_HANDLE);
+    const Pixel probed = looking_up(1.0, cube->view());
+    const Pixel beyond = looking_up(60.0, cube->view());
+    INFO("sky " << int{sky[0]} << ", " << int{sky[1]} << ", " << int{sky[2]} << "; probed "
+                << int{probed[0]} << ", " << int{probed[1]} << ", " << int{probed[2]} << "; beyond "
+                << int{beyond[0]} << ", " << int{beyond[1]} << ", " << int{beyond[2]});
+    // Through the window, the probe's red, dimmed by the metre of water; past its edge, the water
+    // turned back, as without it.
+    CHECK(probed[0] > sky[0] + 20);
+    CHECK(probed[0] > probed[2]);
+    CHECK(probed[2] < sky[2]);
+    CHECK(beyond[2] > beyond[0] + 10);
     CHECK(device->validation_errors() == 0);
 }
 

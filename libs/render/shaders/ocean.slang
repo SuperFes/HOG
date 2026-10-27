@@ -42,6 +42,9 @@ struct Push {
 // What's drawn before the sea, as copied for it to lay the water over, when lit through the air.
 [[vk::binding(12, 0)]] Sampler2D behind_colour;
 [[vk::binding(13, 0)]] Sampler2D behind_depth;
+// What's out of the water all round, as hog::render::EnvironmentProbe lays it out, or a cube
+// holding nothing, its alpha 0, where none's been taken.
+[[vk::binding(14, 0)]] SamplerCube environment;
 
 struct Vertex {
     [[vk::location(0)]] float out; // from 0 under the eye to 1 at the rim
@@ -530,11 +533,19 @@ float faked_radius() {
     return push.east_faked.w;
 }
 
-// What's seen out of the water from `surface` along `out`: what's drawn there, as copied, where it
-// stands out of the water, as near as the picture tells, found first as if far off and then as far
-// as what's drawn there; otherwise the sky.
+// What's seen out of the water from `surface` along `out`: as the probe took it all round, if it
+// did; or else what's drawn there, as copied, where it stands out of the water, as near as the
+// picture tells, found first as if far off and then as far as what's drawn there; otherwise the
+// sky.
 float3 out_of_water(Surface surface, float3 out, Shade shade) {
     const float exposure = lighting.sun_exposure.w;
+    const float3 up = push.up_height.xyz;
+    const float3 east = push.east_faked.xyz;
+    const float4 around =
+        environment.SampleLevel(float3(dot(out, east), dot(out, up), dot(out, cross(up, east))), 0.0);
+    if (around.a > 0.5) {
+        return untoned(around.rgb, exposure);
+    }
     const float3 sky = sky_mirrored(air, lighting, sky_view_table, transmittance_table, shade, out,
                                     push.up_height.xyz, push.sun_nearest.xyz);
     uint width;

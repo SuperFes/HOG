@@ -211,7 +211,8 @@ constexpr std::uint32_t rain_binding = 11;
 constexpr VkDescriptorSetLayoutBinding rain_descriptor =
     binding(rain_binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 
-// What's drawn before the sea, colour and depth, as copied.
+// What's drawn before the sea, colour and depth, as copied; then what's out of the water all
+// round.
 constexpr std::uint32_t behind_binding = 12;
 
 // Metres no crest, tide or swash stands over the level of the water it's on: higher than that, the
@@ -242,7 +243,8 @@ constexpr std::array air_descriptors{
     binding(5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER), waves_descriptor, shore_descriptor,
     fetch_descriptor, foam_descriptor, ripple_descriptor, rain_descriptor,
     binding(behind_binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-    binding(behind_binding + 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)};
+    binding(behind_binding + 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
+    binding(behind_binding + 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)};
 
 // How the swash of the waves, and of their groups' surges, turns along the ground: fixed to the
 // planet, each a way and a length, so it runs up one stretch of shore while it draws back from the
@@ -502,6 +504,13 @@ Result<CalmSea> CalmSea::create(Device& device) {
         return std::unexpected(std::move(foam).error());
     }
     calm.foam_ = std::move(foam).value();
+    constexpr std::array<std::byte, std::size_t{4} * 6> nothing{};
+    auto environment = make_filled_image(
+        device, {.format = VK_FORMAT_R8G8B8A8_UNORM, .layers = 6, .cube = true}, nothing);
+    if (!environment) {
+        return std::unexpected(std::move(environment).error());
+    }
+    calm.environment_ = std::move(environment).value();
     auto sampler = make_sampler(device, VK_FILTER_LINEAR);
     if (!sampler) {
         return std::unexpected(std::move(sampler).error());
@@ -877,6 +886,10 @@ Result<> Ocean::record(VkCommandBuffer commands, VkExtent2D extent, const OceanV
         push_sampled_image(commands, pipeline, behind_binding, view.behind->colour,
                            shore_sampler_.handle());
         push_sampled_image(commands, pipeline, behind_binding + 1, view.behind->depth,
+                           shore_sampler_.handle());
+        push_sampled_image(commands, pipeline, behind_binding + 2,
+                           view.behind->environment != VK_NULL_HANDLE ? view.behind->environment
+                                                                      : calm_.environment(),
                            shore_sampler_.handle());
     }
     if (&pipeline == &under_) {

@@ -116,12 +116,15 @@ public:
     [[nodiscard]] static Result<CalmSea> create(Device& device);
 
     [[nodiscard]] SeaBindings bindings() const;
+    // A cube holding nothing, its alpha 0, for an eye in the water with no probe taken.
+    [[nodiscard]] VkImageView environment() const noexcept { return environment_.view(); }
 
 private:
     Buffer waves_;
     Image depths_;
     Image fetches_;
     Image foam_;
+    Image environment_;
     Sampler sampler_;
 };
 
@@ -139,6 +142,9 @@ private:
 struct SeaBehind {
     VkImageView colour = VK_NULL_HANDLE;
     VkImageView depth = VK_NULL_HANDLE;
+    // What's out of the water all round, as EnvironmentProbe's cube, seen from in it; or as
+    // copied, as far as that shows it, without one.
+    VkImageView environment = VK_NULL_HANDLE;
 };
 
 // Where the sea is seen from and what it reflects.
