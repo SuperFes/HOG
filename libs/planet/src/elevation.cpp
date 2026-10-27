@@ -28,6 +28,7 @@ const log::Category landform_log{"landform"};
 
 constexpr std::uint64_t ridge_salt = 0x7269'6467'6573'0000ULL;  // "ridges"
 constexpr std::uint64_t relief_salt = 0x7265'6C69'6566'0000ULL; // "relief"
+constexpr std::uint64_t shore_salt = 0x7368'6F72'6573'0000ULL;  // "shores"
 constexpr std::uint64_t hill_salt = 0x6869'6C6C'7300'0000ULL;   // "hills"
 constexpr std::uint64_t wander_salt = 0x7761'6E64'6572'0000ULL; // "wander"
 
@@ -180,6 +181,53 @@ template <int Bits = fixed_fraction_bits>
     return std::clamp((value * fixed_unit<Bits>) / width, std::int64_t{0}, fixed_unit<Bits>);
 }
 
+// Fixed-point metres a lake's rim stands at least above it, along the edge of where it may stand.
+constexpr std::int64_t rim_height = 4 * fixed_one;
+// Of a cell in from that edge, how far the ground is lifted towards the rim, the less the further
+// in: the deeper the ground lies under the lake's level, the nearer the edge its shore comes, so
+// the shore follows the ground's detail rather than a line along the grid.
+constexpr std::int64_t rim_reach = fixed_one / 2;
+// Fixed-point metres the least the rim may stand falls a cell out from that edge, so its outer
+// side may be that steep.
+constexpr std::int64_t rim_outward = 25 * fixed_one;
+// Between its cells the landform's ground runs straight, and so would lakes' shores: about them
+// it's taken from up to this much of a cell away, by noise this many to a cell, finer by octaves,
+// so the shores bend without the lakes growing shallower or breaking up.
+constexpr double shore_reach = 0.4;
+constexpr double shore_features = 2.0;
+constexpr int shore_octaves = 3;
+// The landform's slope, fixed-point, at which shores no longer bend: on steeper ones, ground from
+// a little way off would stand far higher or lower, and a straight line along them isn't seen.
+constexpr std::int64_t shore_steepest = fixed_one * 15 / 100;
+
+// How far `shifted` lies into where a lake may stand, of a cell, with `lakeside` sampled there: 0
+// along its edge, above it in towards the lake and below it out from it.
+[[nodiscard]] std::int64_t into_lake(CellId shifted, std::int64_t lakeside,
+                                     const Landform& landform) {
+    return lakeside + landform.grid().sample(landform.submerged(), shifted) - fixed_one;
+}
+
+// The highest level of a lake whose cells or those round them `shifted` lies among, or dry.
+[[nodiscard]] std::int64_t lake_about(CellId shifted, const Landform& landform) {
+    std::int64_t level = Landform::dry;
+    for (const std::uint32_t corner : landform.grid().corners(shifted)) {
+        level = std::max(level, landform.lakes_about()[corner]);
+    }
+    return level;
+}
+
+// `ground`, by a lake at `level`, `into` its cells as into_lake has it, raised where it would let
+// the lake out: a lake stands only where its cells are blended, so the ground round the edge of
+// them stands above its level.
+[[nodiscard]] std::int64_t held_in(std::int64_t ground, std::int64_t level, std::int64_t into) {
+    if (into <= 0) {
+        return std::max(ground,
+                        level + rim_height - ((-into * rim_outward) >> fixed_fraction_bits));
+    }
+    const std::int64_t short_of = std::max<std::int64_t>(level + rim_height - ground, 0);
+    return ground + ((short_of * (fixed_one - ramp(into, rim_reach))) >> fixed_fraction_bits);
+}
+
 } // namespace
 
 Elevation::Elevation(const PlanetConfig& config)
@@ -193,7 +241,8 @@ Elevation::Elevation(const PlanetConfig& config)
       ridge_frequency_{config.radius / ridge_wavelength},
       hill_seed_{hash_combine(config.seed, hill_salt)},
       hill_frequency_{config.radius / hill_wavelength},
-      relief_seed_{hash_combine(config.seed, relief_salt)}, beds_{config.seed, config.radius},
+      relief_seed_{hash_combine(config.seed, relief_salt)},
+      shore_seed_{hash_combine(config.seed, shore_salt)}, beds_{config.seed, config.radius},
       evolving_{std::make_shared<Evolving>(config)} {}
 
 Elevation::Evolved::Evolved(Landform worn, std::span<const std::int64_t> ground,
@@ -527,14 +576,29 @@ std::int64_t Elevation::worn(CellId cell, std::int64_t generated, const Landform
         ground = std::max(generated + change, (generated + 3) / 4);
         ground = ledged(cell, shifted, ground, generated, landform);
     }
-    // Lakes fill the landform's ground under their levels, and the cells round them stand above,
-    // so the ground about them is the landform's, shading back into the finer ground beyond.
-    const std::int64_t lakeside = landform.grid().sample(landform.lakeside(), shifted);
-    if (lakeside == 0) {
+    // Lakes fill the landform's ground under their levels, as it lies a little way off, so their
+    // shores follow neither its cells nor the straight lines between them.
+    const LevelGrid& grid = landform.grid();
+    const std::int64_t lakeside = grid.sample(landform.lakeside(), shifted);
+    const std::int64_t level = lake_about(shifted, landform);
+    if (lakeside == 0 || level == Landform::dry) {
         return ground;
     }
-    const std::int64_t smooth = landform.grid().sample(landform.heights(), shifted);
-    return ground + (((smooth - ground) * lakeside) >> fixed_fraction_bits);
+    // A cell spans a quarter turn over 2^level of them.
+    const double span = std::numbers::pi / 2.0 / std::ldexp(1.0, grid.level());
+    const double reach =
+        shore_reach * span *
+        fixed_to_double(fixed_one -
+                        ramp(grid.smooth(landform.steepness(), shifted), shore_steepest));
+    const DVec3 point = cell_center(shifted);
+    const NoisePoint at = noise_point(point, shore_features / span);
+    const DVec3 off{fixed_to_double(fbm(shore_seed_, at, shore_octaves)),
+                    fixed_to_double(fbm(shore_seed_ + 1, at, shore_octaves)),
+                    fixed_to_double(fbm(shore_seed_ + 2, at, shore_octaves))};
+    const std::int64_t lake_ground =
+        grid.sample(landform.heights(), cell_at(glm::normalize(point + (off * reach))));
+    return held_in(ground + (((lake_ground - ground) * lakeside) >> fixed_fraction_bits), level,
+                   into_lake(shifted, lakeside, landform));
 }
 
 std::int64_t Elevation::ledged(CellId cell, CellId shifted, std::int64_t ground,

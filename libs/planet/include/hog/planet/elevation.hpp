@@ -191,6 +191,7 @@ private:
     std::uint64_t hill_seed_;
     double hill_frequency_;
     std::uint64_t relief_seed_;
+    std::uint64_t shore_seed_;
     Beds beds_;
     struct Evolving {
         PlanetConfig config;

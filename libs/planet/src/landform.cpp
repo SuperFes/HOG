@@ -148,6 +148,22 @@ void Landform::find_lakes() {
         }
         fill(cells);
     }
+    find_lakes_about();
+}
+
+void Landform::find_lakes_about() {
+    const std::uint32_t count = grid_.size();
+    submerged_.assign(count, 0);
+    lakes_about_ = lakes_;
+    for (std::uint32_t cell = 0; cell < count; ++cell) {
+        if (lakes_[cell] == dry) {
+            continue;
+        }
+        submerged_[cell] = fixed_one;
+        for (const std::uint32_t around : grid_.neighbors(cell)) {
+            lakes_about_[around] = std::max(lakes_about_[around], lakes_[cell]);
+        }
+    }
     // A point less than a cell from a centre is blended from that cell's neighbours and theirs.
     near_lakes_.assign(count, false);
     for (std::uint32_t cell = 0; cell < count; ++cell) {

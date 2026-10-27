@@ -1,5 +1,6 @@
 #include <hog/core/hash.hpp>
 #include <hog/planet/elevation.hpp>
+#include <hog/planet/landform.hpp>
 #include <hog/planet/neighbors.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
@@ -493,6 +494,45 @@ TEST_CASE("the ground holds lakes in, the water never standing over lower ground
     INFO("walls " << walls << " of " << shores << ", tallest " << fixed_to_double(tallest));
     CHECK(shores > 1'000);
     CHECK(walls == 0);
+}
+
+TEST_CASE("a lake's shores bend off the straight lines between the landform's cells, and most "
+          "of its bed stays wet",
+          "[planet][elevation]") {
+    // Worn as finely as a real world, where those lines would show.
+    const Elevation terrain{{.seed = 1, .ocean_fraction = 0.7, .radius = 115'000.0}};
+    const auto& landform = terrain.landform();
+    const auto& grid = landform.grid();
+    const hog::planet::Meander meander{1, grid, 115'000.0};
+    const auto lakes = landform.lakes();
+    std::vector<std::uint32_t> wet;
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        if (lakes[index] != hog::planet::Landform::dry) {
+            wet.push_back(index);
+        }
+    }
+    REQUIRE(wet.size() > 100);
+    double off = 0.0;
+    int points = 0;
+    int under = 0;
+    const std::size_t stride = std::max<std::size_t>(wet.size() / 500, 1);
+    for (std::size_t at = 0; at < wet.size(); at += stride) {
+        for (const CellId cell :
+             hog::planet::sample_tile(grid.cell(wet[at]), 3, [](CellId fine) { return fine; })) {
+            if (terrain.river(cell)) {
+                continue;
+            }
+            const std::int64_t straight = grid.sample(
+                landform.heights(), hog::planet::cell_at(meander(hog::planet::cell_center(cell))));
+            off += std::abs(fixed_to_double(terrain.elevation(cell) - straight));
+            under += terrain.lake(cell) ? 1 : 0;
+            ++points;
+        }
+    }
+    REQUIRE(points > 1'000);
+    INFO("off the landform by " << (off / points) << " m, wet " << under << " of " << points);
+    CHECK(off / points > 0.1);
+    CHECK(under * 4 > points * 3);
 }
 
 TEST_CASE("the ground never stands in sheer walls between neighbouring points",

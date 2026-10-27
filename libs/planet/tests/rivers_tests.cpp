@@ -272,8 +272,10 @@ TEST_CASE("a lake takes in all the ground under its level about it, its shores s
         REQUIRE(basin.basin(cell));
         REQUIRE(basin.heights()[cell] < lakes[cell]);
         REQUIRE(basin.lakeside()[cell] == fixed_one);
+        REQUIRE(basin.submerged()[cell] == fixed_one);
         for (const std::uint32_t around : grid.neighbors(cell)) {
             REQUIRE(basin.lakeside()[around] == fixed_one);
+            REQUIRE(basin.lakes_about()[around] >= lakes[cell]);
             if (lakes[around] == Landform::dry) {
                 // Only ground filled less than a centimetre, a flat's slope, lies under the level.
                 REQUIRE(basin.heights()[around] >= lakes[cell] - (fixed_one / 50));
@@ -286,6 +288,13 @@ TEST_CASE("a lake takes in all the ground under its level about it, its shores s
     std::int64_t lakeside = 0;
     for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
         lakeside += basin.lakeside()[cell];
+        // Off the lakes and the cells beside them, nothing.
+        if (basin.lakeside()[cell] == 0) {
+            REQUIRE(basin.lakes_about()[cell] == Landform::dry);
+        }
+        if (lakes[cell] == Landform::dry) {
+            REQUIRE(basin.submerged()[cell] == 0);
+        }
     }
     CHECK(lakeside > wet * fixed_one);
 }

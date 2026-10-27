@@ -74,11 +74,20 @@ public:
     // Fixed-point 1 at cells holding lakes and those beside them, 0 elsewhere: sampled anywhere,
     // it is 1 wherever a lake's cells are blended into the ground and fades out a cell beyond.
     [[nodiscard]] std::span<const std::int64_t> lakeside() const noexcept { return lakeside_; }
+    // Fixed-point 1 at cells holding lakes, 0 elsewhere: sampled, above 0 just where a lake's
+    // cells are among those blended, so with lakeside it tells how far into or out from them a
+    // point lies, their sum being 1 along the edge of where a lake may stand.
+    [[nodiscard]] std::span<const std::int64_t> submerged() const noexcept { return submerged_; }
+    // The fixed-point level of the highest lake over each grid cell or one beside it, or `dry`.
+    [[nodiscard]] std::span<const std::int64_t> lakes_about() const noexcept {
+        return lakes_about_;
+    }
     // Whether lakeside may be above 0 anywhere less than a grid cell from a cell's centre.
     [[nodiscard]] bool near_lake(CellId cell) const;
 
 private:
     void find_lakes();
+    void find_lakes_about();
     void find_steepness();
     // Fills a basin's cells with a lake if enough water runs in.
     void fill(std::span<const std::uint32_t> basin);
@@ -95,6 +104,8 @@ private:
     std::vector<bool> basins_;
     std::vector<std::int64_t> lakes_;
     std::vector<std::int64_t> lakeside_;
+    std::vector<std::int64_t> submerged_;
+    std::vector<std::int64_t> lakes_about_;
     std::vector<bool> near_lakes_;
 };
 
