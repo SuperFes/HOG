@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <vector>
 
 namespace hog::render {
 
@@ -61,6 +62,7 @@ struct ImageDesc {
     std::uint32_t levels = 1; // of mips, each half the size of the one before
     bool cube = false;        // viewed as a cube, its six square layers the faces
     std::uint32_t depth = 1;  // past 1, a 3D image of one layer
+    bool layer_views = false; // with a 2D view of each layer too, to draw into
 
     friend bool operator==(const ImageDesc& left, const ImageDesc& right) noexcept;
 };
@@ -78,6 +80,10 @@ public:
 
     [[nodiscard]] VkImage handle() const noexcept { return image_; }
     [[nodiscard]] VkImageView view() const noexcept { return view_; }
+    // Of an image made with layer views, the view of its layer `layer`.
+    [[nodiscard]] VkImageView layer_view(std::uint32_t layer) const {
+        return layer_views_.at(layer);
+    }
     [[nodiscard]] const ImageDesc& desc() const noexcept { return desc_; }
 
 private:
@@ -89,6 +95,7 @@ private:
     VkImage image_ = VK_NULL_HANDLE;
     VmaAllocation allocation_ = VK_NULL_HANDLE;
     VkImageView view_ = VK_NULL_HANDLE;
+    std::vector<VkImageView> layer_views_;
     ImageDesc desc_;
 };
 

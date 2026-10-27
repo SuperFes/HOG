@@ -43,6 +43,7 @@ add_library(hog_render
     src/cube_sphere.cpp
     src/device.cpp
     src/drifting_grid.cpp
+    src/environment_probe.cpp
     src/foam.cpp
     src/forest.cpp
     src/glare.cpp
@@ -111,6 +112,7 @@ hog_add_tests(hog_render
     tests/cube_sphere_tests.cpp
     tests/device_tests.cpp
     tests/drifting_grid_tests.cpp
+    tests/environment_tests.cpp
     tests/foam_tests.cpp
     tests/forest_tests.cpp
     tests/glare_tests.cpp
@@ -135,7 +137,7 @@ hog_add_tests(hog_render
     tests/tree_tests.cpp)
 if(TARGET hog_render_tests)
     target_link_libraries(hog_render_tests PRIVATE hog::flora hog::planet)
-    hog_add_shaders(hog_render_tests tests/shaders/aerial_probe.slang tests/shaders/air_probe.slang tests/shaders/bend_probe.slang tests/shaders/dispatch.slang tests/shaders/fill.slang tests/shaders/foam_probe.slang tests/shaders/grass_lattice_probe.slang tests/shaders/gusts_probe.slang tests/shaders/layer.slang tests/shaders/optics_probe.slang tests/shaders/projection_probe.slang tests/shaders/shore_probe.slang tests/shaders/volume_probe.slang tests/shaders/water_probe.slang tests/shaders/waves_probe.slang
+    hog_add_shaders(hog_render_tests tests/shaders/aerial_probe.slang tests/shaders/air_probe.slang tests/shaders/bend_probe.slang tests/shaders/cube_probe.slang tests/shaders/dispatch.slang tests/shaders/fill.slang tests/shaders/foam_probe.slang tests/shaders/grass_lattice_probe.slang tests/shaders/gusts_probe.slang tests/shaders/layer.slang tests/shaders/optics_probe.slang tests/shaders/projection_probe.slang tests/shaders/shore_probe.slang tests/shaders/volume_probe.slang tests/shaders/water_probe.slang tests/shaders/waves_probe.slang
                     tests/shaders/triangle.slang)
     target_link_libraries(hog_render_tests PRIVATE hog::render_testing)
 endif()

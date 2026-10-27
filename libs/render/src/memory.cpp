@@ -123,7 +123,8 @@ Image::Image(Image&& other) noexcept
       allocator_(std::exchange(other.allocator_, VK_NULL_HANDLE)),
       image_(std::exchange(other.image_, VK_NULL_HANDLE)),
       allocation_(std::exchange(other.allocation_, VK_NULL_HANDLE)),
-      view_(std::exchange(other.view_, VK_NULL_HANDLE)), desc_(other.desc_) {}
+      view_(std::exchange(other.view_, VK_NULL_HANDLE)),
+      layer_views_(std::exchange(other.layer_views_, {})), desc_(other.desc_) {}
 
 Image& Image::operator=(Image&& other) noexcept {
     if (this != &other) {
@@ -133,6 +134,7 @@ Image& Image::operator=(Image&& other) noexcept {
         image_ = std::exchange(other.image_, VK_NULL_HANDLE);
         allocation_ = std::exchange(other.allocation_, VK_NULL_HANDLE);
         view_ = std::exchange(other.view_, VK_NULL_HANDLE);
+        layer_views_ = std::exchange(other.layer_views_, {});
         desc_ = other.desc_;
     }
     return *this;
@@ -143,6 +145,10 @@ Image::~Image() {
 }
 
 void Image::release() noexcept {
+    for (VkImageView layer : layer_views_) {
+        vkDestroyImageView(device_, layer, nullptr);
+    }
+    layer_views_.clear();
     if (view_ != VK_NULL_HANDLE) {
         vkDestroyImageView(device_, view_, nullptr);
         view_ = VK_NULL_HANDLE;
@@ -157,7 +163,8 @@ bool operator==(const ImageDesc& left, const ImageDesc& right) noexcept {
     return left.format == right.format && left.extent.width == right.extent.width &&
            left.extent.height == right.extent.height && left.usage == right.usage &&
            left.aspect == right.aspect && left.layers == right.layers &&
-           left.levels == right.levels && left.cube == right.cube && left.depth == right.depth;
+           left.levels == right.levels && left.cube == right.cube && left.depth == right.depth &&
+           left.layer_views == right.layer_views;
 }
 
 Result<Image> make_image(const Device& device, const ImageDesc& desc) {
@@ -209,6 +216,19 @@ Result<Image> make_image(const Device& device, const ImageDesc& desc) {
     if (const VkResult made = vkCreateImageView(device.handle(), &view_info, nullptr, &image.view_);
         made != VK_SUCCESS) {
         return vulkan_error(made, "creating an image view");
+    }
+    for (std::uint32_t layer = 0; desc.layer_views && layer < desc.layers; ++layer) {
+        VkImageViewCreateInfo layer_info = view_info;
+        layer_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        layer_info.subresourceRange.levelCount = 1;
+        layer_info.subresourceRange.baseArrayLayer = layer;
+        layer_info.subresourceRange.layerCount = 1;
+        VkImageView view = VK_NULL_HANDLE;
+        if (const VkResult made = vkCreateImageView(device.handle(), &layer_info, nullptr, &view);
+            made != VK_SUCCESS) {
+            return vulkan_error(made, "creating an image layer's view");
+        }
+        image.layer_views_.push_back(view);
     }
     return image;
 }
