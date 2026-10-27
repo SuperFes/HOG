@@ -420,10 +420,11 @@ TEST_CASE("fetch runs on into the coarser layer and out to sea", "[terrain][shor
     CHECK(fine_fetch(fetches, 4, 128, 128) == static_cast<double>(hog::terrain::longest_fetch));
 }
 
-TEST_CASE("a lake's level is kept over it and the ground round it higher than it",
+TEST_CASE("a lake's level is kept over it and the ground round it, lower ground told dry",
           "[terrain][shore]") {
     // A lake at 50 m over a bed at 45, in ground at 52, with a valley at 40 two texels east of its
-    // east shore and a lower lake at 20 over a bed at 15 beyond that.
+    // east shore and a lower lake at 20 over a bed at 15 beyond that, and a ditch at 40 ten texels
+    // west of its west shore.
     const auto in_lake = [](int column, int row) {
         return column >= 100 && column < 110 && row >= 50 && row < 60;
     };
@@ -431,7 +432,7 @@ TEST_CASE("a lake's level is kept over it and the ground round it higher than it
         if (in_lake(column, row)) {
             return 45.0F;
         }
-        if (column == 111) {
+        if (column == 111 || column == 90) {
             return 40.0F;
         }
         return column >= 113 && column < 116 && row >= 50 && row < 60 ? 15.0F : 52.0F;
@@ -454,8 +455,16 @@ TEST_CASE("a lake's level is kept over it and the ground round it higher than it
     CHECK(fine_at(levels, 98, 55) == 50.0F);
     CHECK(fine_at(levels, 98, 48) == 50.0F);
     CHECK(fine_at(still, 98, 55) == -2.0F);
-    CHECK(fine_at(levels, 97, 55) == 0.0F);
-    CHECK(fine_at(still, 97, 55) == hog::terrain::shore_highest);
+    CHECK(fine_at(levels, 97, 55) == 50.0F);
+    CHECK(fine_at(still, 97, 55) == -2.0F);
+    CHECK(fine_at(levels, 100 - hog::terrain::lake_margin, 55) == 50.0F);
+    CHECK(fine_at(levels, 99 - hog::terrain::lake_margin, 55) == 0.0F);
+    CHECK(fine_at(still, 99 - hog::terrain::lake_margin, 55) == hog::terrain::shore_highest);
+    // Over lower ground with no lower lake by, kept, but told dry, and kept on past it.
+    CHECK(fine_at(levels, 90, 55) == 50.0F);
+    CHECK(fine_at(still, 90, 55) == hog::terrain::shore_highest);
+    CHECK(fine_at(levels, 89, 55) == 50.0F);
+    CHECK(fine_at(still, 89, 55) == -2.0F);
     // Never over lower ground, which the lower lake's margin reaches instead.
     CHECK(fine_at(levels, 110, 55) == 50.0F);
     CHECK(fine_at(levels, 111, 55) == 20.0F);

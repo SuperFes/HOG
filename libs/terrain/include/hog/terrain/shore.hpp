@@ -68,14 +68,15 @@ struct ShoreGround {
 // as shore_highest elsewhere: low ground the sea neither stands over nor reaches lies dry.
 std::vector<float> keep_to_sea_reach(std::span<float> depths, std::span<const std::uint8_t> sea);
 
-// A lake's level is kept over the ground round it, as far as it stands higher, out to this many
-// texels from its shore: its surface is drawn across them, under the ground, so it meets the shore
-// level all along it.
-inline constexpr int lake_margin = 2;
+// A lake's level is kept over the ground round it out to this many texels from its shore, as far
+// as the corners of the water's surface lie apart where a layer is drawn, so none of its surface
+// drawn towards them sinks below its level.
+inline constexpr int lake_margin = 24;
 
 // Of layers of ground as shore_ground has them, and of still water as keep_to_sea_reach keeps it,
 // `still`: puts each lake's water into `still`, as deep as it lies under the lake's level, and
-// keeps as deep as is kept below it, negative, over the ground lake_margin finds it kept over.
+// over the ground lake_margin finds it kept over, as deep as that ground stands above it, negative,
+// or where it's lower, as dry.
 // Returns the level of the water each texel is kept to: the lake's, or sea level.
 std::vector<float> keep_lakes(std::span<const float> elevations, std::span<const float> lakes,
                               std::span<float> still);

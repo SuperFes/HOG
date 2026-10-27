@@ -171,29 +171,53 @@ std::vector<float> keep_to_sea_reach(std::span<float> depths, std::span<const st
 
 namespace {
 
-// Of a layer's levels, `level`, over its ground, `ground`, and its lakes', `lake`: keeps over each
-// texel off the lakes the highest level about it that its ground stands over.
-void keep_lakes_out(std::span<float> level, std::span<const float> ground,
-                    std::span<const float> lake) {
+// Of a layer's levels, `level`, and how many texels out from a lake each is kept, `out`: the level
+// the texel at `column` and `row`, over `ground`, keeps from those about it `step` - 1 out: the
+// highest its ground stands over, or failing one, the lowest, so the lower of two lakes keeps the
+// ground between them that's lower than the higher. 0 if none is that near.
+float kept_from_around(std::span<const float> level, std::span<const int> out, float ground,
+                       std::size_t column, std::size_t row, int step) {
     const auto size = static_cast<std::size_t>(shore_size);
-    const std::vector<float> before(level.begin(), level.end());
+    float over = 0.0F;
+    float lowest = 0.0F;
+    for (std::size_t down = std::max(row, std::size_t{1}) - 1; down <= std::min(row + 1, size - 1);
+         ++down) {
+        for (std::size_t across = std::max(column, std::size_t{1}) - 1;
+             across <= std::min(column + 1, size - 1); ++across) {
+            const std::size_t around = (down * size) + across;
+            if (out[around] != step - 1) {
+                continue;
+            }
+            if (level[around] <= ground) {
+                over = std::max(over, level[around]);
+            }
+            lowest = lowest == 0.0F ? level[around] : std::min(lowest, level[around]);
+        }
+    }
+    return over > 0.0F ? over : lowest;
+}
+
+// Keeps each texel of a layer not yet kept, as `out` has it, the level kept_from_around finds it,
+// `step` out from a lake.
+void keep_lakes_out(std::span<float> level, std::span<const float> ground, std::span<int> out,
+                    int step) {
+    const auto size = static_cast<std::size_t>(shore_size);
+    std::vector<std::size_t> reached;
     for (std::size_t row = 0; row < size; ++row) {
         for (std::size_t column = 0; column < size; ++column) {
             const std::size_t at = (row * size) + column;
-            if (lake[at] > 0.0F) {
+            if (out[at] >= 0) {
                 continue;
             }
-            for (std::size_t down = std::max(row, std::size_t{1}) - 1;
-                 down <= std::min(row + 1, size - 1); ++down) {
-                for (std::size_t across = std::max(column, std::size_t{1}) - 1;
-                     across <= std::min(column + 1, size - 1); ++across) {
-                    const float around = before[(down * size) + across];
-                    if (around <= ground[at]) {
-                        level[at] = std::max(level[at], around);
-                    }
-                }
+            const float kept = kept_from_around(level, out, ground[at], column, row, step);
+            if (kept > 0.0F) {
+                level[at] = kept;
+                reached.push_back(at);
             }
         }
+    }
+    for (const std::size_t at : reached) {
+        out[at] = step;
     }
 }
 
@@ -208,14 +232,21 @@ std::vector<float> keep_lakes(std::span<const float> elevations, std::span<const
             std::span{levels}.subspan(layer * shore_texels, shore_texels);
         const std::span<const float> ground =
             elevations.subspan(layer * shore_texels, shore_texels);
-        // A step out from the shore at a time.
-        for (int out = 0; out < lake_margin; ++out) {
-            keep_lakes_out(level, ground, lakes.subspan(layer * shore_texels, shore_texels));
+        std::vector<int> out(shore_texels, -1);
+        for (std::size_t at = 0; at < shore_texels; ++at) {
+            out[at] = level[at] > 0.0F ? 0 : -1;
+        }
+        for (int step = 1; step <= lake_margin; ++step) {
+            keep_lakes_out(level, ground, out, step);
         }
         for (std::size_t at = 0; at < shore_texels; ++at) {
-            if (level[at] > 0.0F) {
+            // Kept out over lower ground, the level is drawn over it in the air, so that ground is
+            // told dry for the water there to be left undrawn.
+            if (out[at] == 0 || (out[at] > 0 && ground[at] >= level[at])) {
                 still[(layer * shore_texels) + at] =
                     std::max(level[at] - ground[at], shore_highest);
+            } else if (out[at] > 0) {
+                still[(layer * shore_texels) + at] = shore_highest;
             }
         }
     }
