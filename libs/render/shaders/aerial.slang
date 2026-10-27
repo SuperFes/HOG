@@ -13,6 +13,13 @@ import weather;
 // As cloud_march.slang's.
 [[vk::binding(7, 0)]] Sampler2D cloud_shadow;
 
+struct Push {
+    // Of the view the volume's laid out for, which needn't be the frame's.
+    float4x4 eye_from_clip;
+};
+
+[[vk::push_constant]] ConstantBuffer<Push> push;
+
 static const uint aerial_steps = 12;
 static const uint haze_steps = 16;
 // Drawn metres along a view to the sky the haze is held over.
@@ -97,7 +104,7 @@ void aerial_main(uint3 id: SV_DispatchThreadID) {
         return;
     }
     const float2 clip = (((float2(id.xy) + 0.5) / aerial_size) * 2.0) - 1.0;
-    const float4 far = mul(lighting.eye_from_clip, float4(clip, 1.0, 1.0));
+    const float4 far = mul(push.eye_from_clip, float4(clip, 1.0, 1.0));
     const float3 view = normalize(far.xyz / far.w);
     Haze haze;
     haze.view = view;

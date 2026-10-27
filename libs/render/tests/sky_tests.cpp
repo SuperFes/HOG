@@ -24,6 +24,7 @@
 #include <cstring>
 #include <functional>
 #include <numbers>
+#include <optional>
 #include <span>
 #include <utility>
 #include <vector>
@@ -132,12 +133,16 @@ const std::array<float, 4>& at(const Picture& picture, std::uint32_t x, std::uin
 }
 
 // What the aerial-perspective volume made for `view` holds at each of `asked`: xy where on the
-// picture, z the air's metres away, w the volume's reach.
+// picture, z the air's metres away, w the volume's reach. Or, with `other`, the volume made for
+// that camera's view from the same eye, the frame's tables made for `view`.
 std::vector<std::array<float, 4>> probe(hog::render::Device& device, const Atmosphere& atmosphere,
                                         const SkyView& view,
-                                        const std::vector<std::array<float, 4>>& asked) {
+                                        const std::vector<std::array<float, 4>>& asked,
+                                        const std::optional<hog::render::Camera>& other = {}) {
     auto sky = Sky::create(device, colour_format, depth_format);
     REQUIRE(sky);
+    auto volume = hog::render::make_aerial_volume(device);
+    REQUIRE(volume);
     constexpr auto binding = [](std::uint32_t at, VkDescriptorType type) {
         return VkDescriptorSetLayoutBinding{.binding = at,
                                             .descriptorType = type,
@@ -161,8 +166,21 @@ std::vector<std::array<float, 4>> probe(hog::render::Device& device, const Atmos
     const hog::render::AirBindings air = sky->bindings(0, atmosphere);
     const auto run = device.submit_now([&](VkCommandBuffer commands) {
         CHECK(sky->record_frame(commands, extent, 0, atmosphere, view));
+        VkImageView held = air.aerial;
+        if (other) {
+            namespace use = hog::render::image_use;
+            SkyView turned = view;
+            turned.camera = *other;
+            hog::render::transition(commands, volume->handle(), VK_IMAGE_ASPECT_COLOR_BIT,
+                                    use::discard, use::storage);
+            sky->record_aerial(commands, 0, atmosphere, turned,
+                               static_cast<double>(extent.width) / extent.height, volume->view());
+            hog::render::transition(commands, volume->handle(), VK_IMAGE_ASPECT_COLOR_BIT,
+                                    use::storage, use::sampled);
+            held = volume->view();
+        }
         vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, probe->handle());
-        hog::render::push_sampled_image(commands, *probe, 0, air.aerial, air.sampler);
+        hog::render::push_sampled_image(commands, *probe, 0, held, air.sampler);
         hog::render::push_storage_buffer(commands, *probe, 1, questions->handle());
         hog::render::push_storage_buffer(commands, *probe, 2, answers->handle());
         vkCmdDispatch(commands, 1, 1, 1);
@@ -320,6 +338,16 @@ TEST_CASE("the aerial perspective held matches the CPU model's", "[render][gpu][
     view.camera.forward = towards(-5.0);
     view.camera.up = towards(85.0);
     const double scale = hog::render::air_scale(atmosphere->air(), view.bend);
+    // Made for the frame's own view, or for another from the same eye, turned away from the sun
+    // and looking further down.
+    const bool turned = GENERATE(false, true);
+    CAPTURE(turned);
+    std::optional<hog::render::Camera> other;
+    if (turned) {
+        other = view.camera;
+        other->forward = towards(-20.0, 200.0);
+        other->up = towards(70.0, 200.0);
+    }
 
     // At texel centres across, and at the ends of slices out from the eye and between them.
     std::vector<std::array<float, 4>> asked;
@@ -333,12 +361,16 @@ TEST_CASE("the aerial perspective held matches the CPU model's", "[render][gpu][
             }
         }
     }
-    const std::vector<std::array<float, 4>> found = probe(*device, *atmosphere, view, asked);
+    const std::vector<std::array<float, 4>> found = probe(*device, *atmosphere, view, asked, other);
 
+    SkyView looked = view;
+    if (other) {
+        looked.camera = *other;
+    }
     for (std::size_t at = 0; at < asked.size(); ++at) {
         const std::array<float, 4>& question = asked[at];
         const DVec3 direction = through(
-            view, hog::DVec2{static_cast<double>(question[0]), static_cast<double>(question[1])});
+            looked, hog::DVec2{static_cast<double>(question[0]), static_cast<double>(question[1])});
         const hog::atmosphere::Scattered expected =
             model.march(height * scale, direction, view.sun, static_cast<double>(question[2]));
         const double passed =

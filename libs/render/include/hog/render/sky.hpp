@@ -88,6 +88,9 @@ inline constexpr double aerial_reach = 160'000.0;
 // this are metres in the air's tables.
 [[nodiscard]] double air_scale(const atmosphere::Air& air, const terrain::Bend& bend) noexcept;
 
+// An aerial-perspective volume, as Sky makes for each frame, for Sky::record_aerial() to fill.
+[[nodiscard]] Result<Image> make_aerial_volume(const Device& device);
+
 // The sky from Hillaire's sky-view table and the sun's disc, and the aerial perspective for what's
 // drawn through the air and any mist, both made afresh for each frame.
 class Sky {
@@ -104,6 +107,11 @@ public:
     // as they're written.
     Result<> record_tables(VkCommandBuffer commands, VkExtent2D extent, std::uint32_t frame,
                            const Atmosphere& atmosphere, const SkyView& view) const;
+    // Records making an aerial volume, a storage image as make_aerial_volume() makes, for
+    // another view than the frame's: of `view`'s camera, of `aspect`, from the eye `frame`'s
+    // tables were made for. They must have been recorded first.
+    void record_aerial(VkCommandBuffer commands, std::uint32_t frame, const Atmosphere& atmosphere,
+                       const SkyView& view, double aspect, VkImageView volume) const;
     [[nodiscard]] const Image& table(std::uint32_t frame) const { return tables_.at(frame); }
     [[nodiscard]] const Image& aerial_volume(std::uint32_t frame) const {
         return aerial_volumes_.at(frame);
@@ -114,9 +122,10 @@ public:
                                        VkImageView cloud_shadow = VK_NULL_HANDLE) const noexcept;
 
     // Records drawing the sky over the whole of the colour image being rendered to, of `extent`,
-    // behind anything drawn after it.
+    // behind anything drawn after it; through `aerial` made for the view, if not the frame's own.
     void draw(VkCommandBuffer commands, VkExtent2D extent, std::uint32_t frame,
-              const Atmosphere& atmosphere, const SkyView& view) const;
+              const Atmosphere& atmosphere, const SkyView& view,
+              VkImageView aerial = VK_NULL_HANDLE) const;
 
 private:
     Sky() = default;

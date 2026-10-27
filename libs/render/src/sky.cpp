@@ -55,6 +55,10 @@ struct TablePush {
     glm::vec2 height_sun;
 };
 
+struct AerialPush {
+    Mat4 eye_from_clip;
+};
+
 struct DrawPush {
     Mat4 eye_from_clip;
     glm::vec4 up_height;
@@ -135,8 +139,10 @@ Result<Sky> Sky::create(Device& device, VkFormat colour_format, VkFormat depth_f
         return std::unexpected(std::move(table).error());
     }
     sky.table_ = std::move(table).value();
-    auto aerial = make_compute_pipeline(
-        device, {.spirv = shaders::aerial, .entry = "aerial_main", .descriptors = aerial_bindings});
+    auto aerial = make_compute_pipeline(device, {.spirv = shaders::aerial,
+                                                 .entry = "aerial_main",
+                                                 .push_constant_bytes = sizeof(AerialPush),
+                                                 .descriptors = aerial_bindings});
     if (!aerial) {
         return std::unexpected(std::move(aerial).error());
     }
@@ -160,11 +166,7 @@ Result<Sky> Sky::create(Device& device, VkFormat colour_format, VkFormat depth_f
             return std::unexpected(std::move(image).error());
         }
         sky.tables_.push_back(std::move(image).value());
-        auto volume =
-            make_image(device, {.format = table_format,
-                                .extent = {.width = aerial_size, .height = aerial_size},
-                                .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-                                .layers = aerial_layers});
+        auto volume = make_aerial_volume(device);
         if (!volume) {
             return std::unexpected(std::move(volume).error());
         }
@@ -251,10 +253,20 @@ Result<> Sky::record_tables(VkCommandBuffer commands, VkExtent2D extent, std::ui
                        &push);
     vkCmdDispatch(commands, (table_width + 7) / 8, (table_height + 7) / 8, 1);
 
+    record_aerial(commands, frame, atmosphere, view, aspect, aerial_volumes_.at(frame).view());
+    return {};
+}
+
+void Sky::record_aerial(VkCommandBuffer commands, std::uint32_t frame, const Atmosphere& atmosphere,
+                        const SkyView& view, double aspect, VkImageView volume) const {
+    const AerialPush push{.eye_from_clip =
+                              Mat4{glm::inverse(glm::dmat4{view_projection(view.camera, aspect)})}};
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, aerial_.handle());
     push_tables(commands, aerial_, atmosphere);
-    push_uniform_buffer(commands, aerial_, 3, buffer.handle());
-    push_storage_image(commands, aerial_, 4, aerial_volumes_.at(frame).view());
+    push_uniform_buffer(commands, aerial_, 3, lighting_.at(frame).handle());
+    push_storage_image(commands, aerial_, 4, volume);
+    vkCmdPushConstants(commands, aerial_.layout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push),
+                       &push);
     const WeatherBindings weather =
         view.weather.sky_before != VK_NULL_HANDLE ? view.weather : clear_bindings_;
     push_sampled_image(commands, aerial_, 5, weather.sky_before, weather.sampler);
@@ -263,7 +275,13 @@ Result<> Sky::record_tables(VkCommandBuffer commands, VkExtent2D extent, std::ui
                        view.cloud_shadow != VK_NULL_HANDLE ? view.cloud_shadow : unshadowed_.view(),
                        atmosphere.sampler());
     vkCmdDispatch(commands, aerial_size / 8, aerial_size / 8, aerial_layers);
-    return {};
+}
+
+Result<Image> make_aerial_volume(const Device& device) {
+    return make_image(device, {.format = table_format,
+                               .extent = {.width = aerial_size, .height = aerial_size},
+                               .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                               .layers = aerial_layers});
 }
 
 AirBindings Sky::bindings(std::uint32_t frame, const Atmosphere& atmosphere,
@@ -278,7 +296,7 @@ AirBindings Sky::bindings(std::uint32_t frame, const Atmosphere& atmosphere,
 }
 
 void Sky::draw(VkCommandBuffer commands, VkExtent2D extent, std::uint32_t frame,
-               const Atmosphere& atmosphere, const SkyView& view) const {
+               const Atmosphere& atmosphere, const SkyView& view, VkImageView aerial) const {
     if (extent.width == 0 || extent.height == 0) {
         return;
     }
@@ -292,7 +310,9 @@ void Sky::draw(VkCommandBuffer commands, VkExtent2D extent, std::uint32_t frame,
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, sky_.handle());
     push_tables(commands, sky_, atmosphere);
     push_sampled_image(commands, sky_, 3, tables_.at(frame).view(), atmosphere.sampler());
-    push_sampled_image(commands, sky_, 4, aerial_volumes_.at(frame).view(), atmosphere.sampler());
+    push_sampled_image(commands, sky_, 4,
+                       aerial != VK_NULL_HANDLE ? aerial : aerial_volumes_.at(frame).view(),
+                       atmosphere.sampler());
     vkCmdPushConstants(commands, sky_.layout(),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push),
                        &push);
