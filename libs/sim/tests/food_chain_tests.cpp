@@ -234,7 +234,7 @@ TEST_CASE("the development species make a food chain", "[sim][wildlife][food-cha
         using Kind = hog::sim::EcologyEvent::Kind;
         return event.kind == Kind::Collapse || event.kind == Kind::Overpopulation;
     });
-    CHECK(strays < 100);
+    CHECK(strays < run_years * 8);
     CHECK(
         std::ranges::all_of(years.events, [](const auto& event) { return event.hunters.empty(); }));
 
