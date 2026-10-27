@@ -409,6 +409,26 @@ TEST_CASE("a scene in fog is grey, hiding the ground", "[client][scene][gpu]") {
     CHECK(device->validation_errors() == 0);
 }
 
+TEST_CASE("a still from under the sea takes a probe of what's out of it, and one over it doesn't",
+          "[client][scene][gpu]") {
+    const auto device = test_device();
+    hog::jobs::JobSystem jobs{2};
+    auto scene = Scene::create(*device, world(), jobs, calendar(), hog::client::still_format, 1);
+    REQUIRE(scene);
+    // Each straight after the other, so the last frame of one found the eye where the other's
+    // first frame doesn't have it.
+    for (const auto& [altitude, under] :
+         {std::pair{-3.0, true}, std::pair{6.0, false}, std::pair{-3.0, true}}) {
+        INFO("at " << altitude);
+        const auto still = hog::client::draw_still(
+            *device, *scene, off_the_coast(120.0, altitude, true, 0.7), extent);
+        REQUIRE(still);
+        CHECK(scene->settled());
+        CHECK(scene->probing() == under);
+    }
+    CHECK(device->validation_errors() == 0);
+}
+
 TEST_CASE("a scene drawn as a still settles, with the sky above and the ground below",
           "[client][scene][gpu]") {
     const auto device = test_device();

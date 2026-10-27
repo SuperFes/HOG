@@ -18,6 +18,7 @@
 #include <hog/render/camera.hpp>
 #include <hog/render/capsules.hpp>
 #include <hog/render/clouds.hpp>
+#include <hog/render/environment_probe.hpp>
 #include <hog/render/forest.hpp>
 #include <hog/render/glare.hpp>
 #include <hog/render/gpu_timer.hpp>
@@ -122,8 +123,11 @@ public:
     // changed are grown again, drawn as they were until then.
     void fare(const protocol::Woodlands& told);
 
-    // The last frame recorded wanted nothing more baked, and all it wanted had arrived.
-    [[nodiscard]] bool settled() const noexcept { return settled_; }
+    // The last frame recorded wanted nothing more baked, and all it wanted had arrived; and,
+    // once it's finished, it took a probe just as the eye turned out under the water.
+    [[nodiscard]] bool settled() const;
+    // Whether the last frame recorded took what's out of the water all round, the eye under it.
+    [[nodiscard]] bool probing() const noexcept { return probing_; }
     // How long the GPU took over the passes of the last frame recorded in the slot before, as
     // read when the last frame was recorded; empty where the GPU can't time.
     [[nodiscard]] std::span<const render::GpuSpan> timings() const noexcept { return timings_; }
@@ -164,6 +168,12 @@ private:
     [[nodiscard]] bool grow_grass(render::RenderGraph& graph, const render::Frame& frame,
                                   const Shot& shot, std::span<const terrain::StreamedPatch> patches,
                                   const render::AirBindings& air, DVec3 wind);
+    // From under the water, as the sea last found the eye in `frame`'s slot, adds the pass
+    // taking what's out of it all round, seen as `sky` has it; whether it did.
+    [[nodiscard]] bool take_probe(render::RenderGraph& graph, const render::Frame& frame,
+                                  const Shot& shot, const render::SkyView& sky,
+                                  std::span<const render::GraphUse> through_air,
+                                  const render::AirBindings& air);
     // Adds the grass pass, if `lawn` was grown, and the bush and tree passes, blown by `wind`.
     void grow_vegetation(render::RenderGraph& graph, const render::Frame& frame, const Shot& shot,
                          bool lawn, std::span<const render::GraphUse> through_air,
@@ -177,6 +187,11 @@ private:
     terrain::PatchStream stream_;
     std::vector<terrain::SelectedPatch> selected_;
     terrain::Viewpoint selected_from_;
+    // What's out of the water all round the eye, for its surface seen from under it: a probe for
+    // each frame in flight, and the ground selected for them, as coarse as they're small.
+    std::vector<render::EnvironmentProbe> probes_;
+    std::vector<terrain::SelectedPatch> probe_selected_;
+    std::optional<WorldPosition> probe_from_;
     render::Terrain terrain_;
     render::Ocean ocean_;
     terrain::ShoreStream shore_;
@@ -219,6 +234,9 @@ private:
     render::Gusts gusts_;
     bool grass_on_ = true;
     bool settled_ = false;
+    // Whether the last frame recorded took a probe, and in which slot.
+    bool probing_ = false;
+    std::uint32_t last_slot_ = 0;
 };
 
 // The shot drawn into a picture of `extent` once the scene has settled: frame after frame, with the

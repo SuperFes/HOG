@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <format>
+#include <numbers>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -52,6 +53,11 @@ terrain::SelectionSettings ground_selection(const GrassBudget& budget) {
             .only_in_view = false,
             .seabed_unseen = seabed_unseen};
 }
+
+// Metres over the water's surface a probe is taken from, so all it draws is out of the water.
+constexpr double probe_over_water = 0.5;
+// Metres the eye moves before the ground's selected for the probe again.
+constexpr double probe_reselect = 16.0;
 
 std::unexpected<Error> failed(std::string_view doing, const Error& error) {
     return std::unexpected(
@@ -203,30 +209,40 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
     if (!timer) {
         return failed("time the GPU", timer.error());
     }
-    return Scene{device,
-                 world,
-                 jobs,
-                 calendar,
-                 std::move(terrain).value(),
-                 std::move(ocean).value(),
-                 std::move(grass).value(),
-                 std::move(bushes).value(),
-                 std::move(trees).value(),
-                 std::move(forest).value(),
-                 std::move(pool).value(),
-                 std::move(anchors).value(),
-                 std::move(bush_pool).value(),
-                 std::move(atmosphere).value(),
-                 std::move(sky).value(),
-                 std::move(others).value(),
-                 std::move(weather).value(),
-                 std::move(clouds).value(),
-                 std::move(precipitation).value(),
-                 std::move(glare).value(),
-                 std::move(timer).value(),
-                 std::move(companion),
-                 frames,
-                 budget};
+    std::vector<render::EnvironmentProbe> probes;
+    for (std::uint32_t slot = 0; slot < frames; ++slot) {
+        auto probe = render::EnvironmentProbe::create(device, colour_format, depth_format);
+        if (!probe) {
+            return failed("make the environment probe", probe.error());
+        }
+        probes.push_back(std::move(probe).value());
+    }
+    Scene scene{device,
+                world,
+                jobs,
+                calendar,
+                std::move(terrain).value(),
+                std::move(ocean).value(),
+                std::move(grass).value(),
+                std::move(bushes).value(),
+                std::move(trees).value(),
+                std::move(forest).value(),
+                std::move(pool).value(),
+                std::move(anchors).value(),
+                std::move(bush_pool).value(),
+                std::move(atmosphere).value(),
+                std::move(sky).value(),
+                std::move(others).value(),
+                std::move(weather).value(),
+                std::move(clouds).value(),
+                std::move(precipitation).value(),
+                std::move(glare).value(),
+                std::move(timer).value(),
+                std::move(companion),
+                frames,
+                budget};
+    scene.probes_ = std::move(probes);
+    return scene;
 }
 
 Scene::Scene(const render::Device& device, const planet::World& world, jobs::JobSystem& jobs,
@@ -448,15 +464,66 @@ Result<> draw_deep(const render::Ocean& ocean, VkCommandBuffer commands, const r
 }
 
 std::optional<render::SeaBehind> seen_behind(const render::RenderGraph& graph,
-                                             const std::optional<SeaCopies>& copies) {
+                                             const std::optional<SeaCopies>& copies,
+                                             VkImageView environment) {
     if (!copies) {
         return std::nullopt;
     }
     return render::SeaBehind{.colour = graph.view(copies->colour),
-                             .depth = graph.view(copies->depth)};
+                             .depth = graph.view(copies->depth),
+                             .environment = environment};
 }
 
 } // namespace
+
+bool Scene::settled() const {
+    // Where the eye was against the water is only known once a frame's finished, so the frame
+    // after the eye goes in or out of it is the first drawn as it should be.
+    const std::optional<double> above = sky_.eye_above_water(last_slot_);
+    return settled_ && probing_ == (above && *above < 0.0);
+}
+
+bool Scene::take_probe(render::RenderGraph& graph, const render::Frame& frame, const Shot& shot,
+                       const render::SkyView& sky, std::span<const render::GraphUse> through_air,
+                       const render::AirBindings& air) {
+    const std::optional<double> above = sky_.eye_above_water(frame.slot);
+    if (!above || *above >= 0.0) {
+        return false;
+    }
+    const double raised = probe_over_water - *above;
+    render::SkyView high = sky;
+    high.camera.eye += shot.bend.up * raised;
+    high.bend.eye_height += raised;
+    if (!probe_from_ ||
+        glm::distance(probe_from_->metres(), high.camera.eye.metres()) > probe_reselect) {
+        const terrain::Viewpoint from{.eye = high.camera.eye,
+                                      .forward = high.camera.forward,
+                                      .up = high.camera.up,
+                                      .vertical_fov = std::numbers::pi / 2.0,
+                                      .aspect = 1.0,
+                                      .viewport_height = render::EnvironmentProbe::default_size,
+                                      .bend = high.bend};
+        probe_selected_ = terrain::select_patches(from, from.bend.radius, {.only_in_view = false},
+                                                  stream_.known_ground(), jobs_);
+        probe_from_ = high.camera.eye;
+    }
+    graph.add({.name = "probe",
+               .uses = {through_air.begin(), through_air.end()},
+               .targets = std::nullopt},
+              [this, slot = frame.slot, high, air,
+               ground = slots_.draws(stream_.drawn_all_round(probe_selected_))](
+                  VkCommandBuffer commands) {
+                  probes_.at(slot).record(commands, slot, atmosphere_, sky_, terrain_, pool_,
+                                          {.sky = high,
+                                           .terrain = {.camera = high.camera,
+                                                       .sun = high.sun,
+                                                       .bend = high.bend,
+                                                       .air = air,
+                                                       .sea = ocean_.bindings(slot)},
+                                           .ground = ground});
+              });
+    return true;
+}
 
 terrain::StreamFrame Scene::stream_ground(const terrain::Viewpoint& seen) {
     for (terrain::Patch& patch : baker_.collect()) {
@@ -677,13 +744,17 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                 companion_->draw(commands, frame.extent, shot.camera, *shot.companion, shot.bend);
             });
     }
-    // Over all that stands in the sea, each seen through the water to its surface, as copied.
+    // Over all that stands in the sea, each seen through the water to its surface, as copied;
+    // and from under it, what's out of it all round.
+    probing_ = take_probe(graph, frame, shot, sky, through_air, through);
+    last_slot_ = frame.slot;
+    VkImageView environment = probing_ ? probes_.at(frame.slot).cube().view() : VK_NULL_HANDLE;
     std::vector<render::GraphUse> sea_uses = through_air;
     const std::optional<SeaCopies> behind = copy_behind_sea(graph, target, depth, frame, sea_uses);
     graph.add({.name = "sea", .uses = sea_uses, .targets = drawn},
-              [&, behind](VkCommandBuffer commands) {
+              [&, behind, environment](VkCommandBuffer commands) {
                   render::OceanView looking = sea;
-                  looking.behind = seen_behind(graph, behind);
+                  looking.behind = seen_behind(graph, behind, environment);
                   return ocean_.draw(commands, frame.extent, looking, frame.slot);
               });
     if (render::precipitation_count(falling, static_cast<double>(here.snow)) > 0) {
