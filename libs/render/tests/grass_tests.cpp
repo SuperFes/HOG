@@ -9,11 +9,13 @@
 #include <hog/render/grass.hpp>
 #include <hog/render/grass_lattice.hpp>
 #include <hog/render/memory.hpp>
+#include <hog/render/ocean.hpp>
 #include <hog/render/readback.hpp>
 #include <hog/render/rendering.hpp>
 #include <hog/render/sky.hpp>
 #include <hog/terrain/bend.hpp>
 #include <hog/terrain/patch.hpp>
+#include <hog/terrain/shore.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <glm/geometric.hpp>
@@ -25,6 +27,7 @@
 #include <cstdint>
 #include <cstring>
 #include <numbers>
+#include <optional>
 #include <span>
 #include <utility>
 #include <vector>
@@ -92,6 +95,8 @@ struct Field {
     std::uint8_t blend = 0;
     VkExtent2D size = extent;
     bool looking_away = false; // west, with the field behind the eye
+    // The level of a lake kept round the eye, metres above sea level.
+    std::optional<double> lake = std::nullopt;
 };
 
 // The field's grass alone over black, seen from standing height looking slightly down, east;
@@ -131,11 +136,30 @@ Pixels draw(hog::render::Device& device, const Field& grown, std::uint32_t* coun
                                               .along = east,
                                               .wave = -grown.seconds}};
     const GrassDraw lawn{.slot = slot, .origin = origin, .spacing = spacing, .cell = field_cell};
+    std::optional<hog::render::Ocean> ocean;
+    if (grown.lake) {
+        auto made = hog::render::Ocean::create(device, colour_format, depth_format);
+        REQUIRE(made);
+        ocean.emplace(std::move(made).value());
+        const std::size_t texels = hog::terrain::shore_spacing.size() * hog::terrain::shore_size *
+                                   hog::terrain::shore_size;
+        REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
+            REQUIRE(ocean->update_shore(
+                commands, 0,
+                {.frame = hog::terrain::shore_frame(bend.up, radius),
+                 .depths = std::vector<float>(texels, hog::terrain::shore_highest),
+                 .still =
+                     std::vector<float>(texels, static_cast<float>(*grown.lake - grown.ground)),
+                 .levels = std::vector<float>(texels, static_cast<float>(*grown.lake)),
+                 .fetches = std::vector<float>(texels * hog::terrain::fetch_headings, 0.0F)}));
+        }));
+    }
     const GrassView view{.camera = camera,
                          .bend = bend,
                          .air = sky->bindings(0, *atmosphere),
                          .wind = grown.wind,
-                         .seconds = grown.seconds};
+                         .seconds = grown.seconds,
+                         .sea = ocean ? ocean->bindings() : hog::render::SeaBindings{}};
 
     auto colour = hog::render::make_image(
         device, {.format = colour_format,
@@ -164,6 +188,10 @@ Pixels draw(hog::render::Device& device, const Field& grown, std::uint32_t* coun
                                      VkClearColorValue{.float32 = {0.0F, 0.0F, 0.0F, 1.0F}},
                                      {.view = depth->view(), .clear = 0.0F});
         grass->draw(commands, frame, view);
+        // Drawn only so the waves it's seen with are written, which the blades read as they grow.
+        if (ocean) {
+            CHECK(ocean->draw(commands, frame, {.camera = camera, .bend = bend}));
+        }
         vkCmdEndRendering(commands);
         hog::render::memory_barrier(commands, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
                                     VK_ACCESS_2_NONE, VK_PIPELINE_STAGE_2_COPY_BIT,
@@ -335,6 +363,27 @@ TEST_CASE("reeds fringe the waterline and leave higher ground alone", "[render]"
     CHECK(brown > 10);
     // Above the band, a lake's ground grows nothing at all.
     CHECK(lit_pixels(draw(*device, {.biome = hog::planet::Biome::Lake, .ground = 2.0})) == 0);
+}
+
+TEST_CASE("grass keeps off a lake's water as off the sea's, and reeds fringe its waterline",
+          "[render]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    const auto grown = [&](const Field& field) {
+        std::uint32_t blades = 0;
+        draw(*device, field, &blades);
+        return blades;
+    };
+    constexpr double level = 100.0;
+    // Just over a lake's level, the lawn keeps off as it would just over the sea's.
+    CHECK(grown({.ground = level + 0.05, .lake = level}) == 0);
+    CHECK(grown({.ground = level + 0.05}) > 100);
+    CHECK(grown({.ground = level + 1.0, .lake = level}) > 100);
+    // Reeds stand in the band over the lake's level, not the sea's.
+    CHECK(grown({.biome = hog::planet::Biome::Lake, .ground = level + 0.4, .lake = level}) > 10);
+    CHECK(grown({.biome = hog::planet::Biome::Lake, .ground = level + 0.4}) == 0);
 }
 
 TEST_CASE("tall grass reaches further than short, and none beyond the reach", "[render]") {

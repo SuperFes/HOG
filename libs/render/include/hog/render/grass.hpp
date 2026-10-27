@@ -7,6 +7,7 @@
 #include <hog/render/camera.hpp>
 #include <hog/render/grass_lattice.hpp>
 #include <hog/render/memory.hpp>
+#include <hog/render/ocean.hpp>
 #include <hog/render/pipeline.hpp>
 #include <hog/render/sky.hpp>
 #include <hog/render/terrain.hpp>
@@ -96,6 +97,9 @@ struct GrassView {
     AirBindings air = {};
     DVec3 wind{0.0};      // near the ground, m/s, in the planet's frame
     double seconds = 0.0; // of sway so far
+    // The sea, whose lakes' levels keep blades off their water; a calm one if none.
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    SeaBindings sea = {};
 };
 
 // Grass grown on the ground's own patches, straight from the pool's vertices: each blade on its
@@ -134,6 +138,7 @@ private:
     Buffer blades_;
     Buffer grown_draw_;
     Buffer patches_;
+    CalmSea calm_;
     GrassTier tier_;
     GrassLattice lattice_;
 };

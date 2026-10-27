@@ -6,6 +6,7 @@ import lush;
 import shadow;
 import tone;
 import water;
+import waves;
 
 // Blades grown on the ground's own patches: each one on its own spot of the world's lattice, so
 // every machine grows the same field whichever patches draw it, swaying with the weather's wind.
@@ -51,13 +52,16 @@ struct Settings {
 [[vk::binding(5, 0)]] Sampler2DArray aerial_volume;
 // As cloud_march.slang's.
 [[vk::binding(6, 0)]] Sampler2D cloud_shadow;
+// As terrain.slang's: the lakes' levels round the eye.
+[[vk::binding(11, 0)]] ConstantBuffer<Waves> sea;
+[[vk::binding(12, 0)]] Sampler2DArray shore_depths;
 
 static const uint patch_cells = 32;
 static const uint patch_side = 33;
 static const uint patch_depth = 5; // levels from a patch's cell to its grid cells
 static const uint vertex_stride = 40; // bytes, as terrain::PatchVertex lies
 
-// Blades keep off ground this close to sea level, so the surf stays clear.
+// Blades keep off ground this close to the sea's level or a lake's, so the surf stays clear.
 static const float shore = 0.15;
 static const float pioneers = 0.9; // of the open ground the grass takes where trees are gone
 // Of the reach, the last share over which blades end, as terrain.slang's grass_fraying.
@@ -319,7 +323,9 @@ bool grow(uint instance, out Grown grown) {
         return false;
     }
 
-    const float above = height_above_sea(root, push.bend_up, push.bend_radii.x);
+    const float2 lake = still_water_at(sea, shore_depths, root);
+    const float above = height_above_sea(root, push.bend_up, push.bend_radii.x) -
+                        (lake_over(lake) ? lake.x : 0.0);
     // At the waterline a reed may stand; elsewhere the lawn grows, keeping off the surf.
     const bool reed = spread.w > 0.0 && above >= reed_low && above <= reed_high &&
                       unit(hash + 9u) < spread.w;

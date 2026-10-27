@@ -59,7 +59,9 @@ constexpr std::array growing_descriptors{
     binding(3, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT),
     binding(7, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT),
     binding(8, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT),
-    binding(10, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT)};
+    binding(10, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT),
+    binding(11, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT),
+    binding(12, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT)};
 
 // Six vertices, the blades grown, then neither first vertex nor first instance.
 constexpr std::array<std::uint32_t, 4> no_blades{6, 0, 0, 0};
@@ -226,6 +228,11 @@ Result<Grass> Grass::create(Device& device, VkFormat colour_format, VkFormat dep
         return std::unexpected(std::move(growing).error());
     }
     grass.growing_ = std::move(growing).value();
+    auto calm = CalmSea::create(device);
+    if (!calm) {
+        return std::unexpected(std::move(calm).error());
+    }
+    grass.calm_ = std::move(calm).value();
     auto blades = make_buffer(device, VkDeviceSize{grown_blade_bytes} * most_grown_blades,
                               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                               Memory::Gpu);
@@ -315,6 +322,9 @@ void Grass::grow(VkCommandBuffer commands, VkExtent2D extent, const TerrainPool&
         push_storage_buffer(commands, growing_, 7, blades_.handle());
         push_storage_buffer(commands, growing_, 8, grown_draw_.handle());
         push_storage_buffer(commands, growing_, 10, patches_.handle());
+        const SeaBindings sea = view.sea.waves != VK_NULL_HANDLE ? view.sea : calm_.bindings();
+        push_uniform_buffer(commands, growing_, 11, sea.waves);
+        push_sampled_image(commands, growing_, 12, sea.shore, sea.sampler);
         vkCmdPushConstants(commands, growing_.layout(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
                            offsetof(Push, wind), &push);
         for (std::uint32_t index = 0; index < sown.size(); ++index) {

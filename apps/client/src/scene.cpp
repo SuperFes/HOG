@@ -313,7 +313,8 @@ bool Scene::grow_grass(render::RenderGraph& graph, const render::Frame& frame, c
                                .bend = shot.bend,
                                .air = air,
                                .wind = wind,
-                               .seconds = swaying_for_});
+                               .seconds = swaying_for_,
+                               .sea = ocean_.bindings(frame.slot)});
               });
     return true;
 }
