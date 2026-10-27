@@ -30,6 +30,9 @@ BiomePalette biome_palette() {
     constexpr float wet = 0.7F;
     palette.at(static_cast<std::size_t>(planet::Biome::Ocean)) =
         palette.at(static_cast<std::size_t>(planet::Biome::Beach)) * wet;
+    // Dark organic mud, which is what makes a lake look dark from above; the map's colour is the
+    // lake's water.
+    palette.at(static_cast<std::size_t>(planet::Biome::Lake)) = Vec3{0.09F, 0.075F, 0.05F};
     return palette;
 }
 
@@ -50,7 +53,7 @@ std::array<terrain::Look, planet::biome_count> biome_looks() {
     };
     using planet::Biome;
     constexpr std::array variations{
-        // Sand seen through clear shallows, where any patches would show the tiling.
+        // Sand and mud seen through clear shallows, where any patches would show the tiling.
         vary(Biome::Ocean, {1.0, 1.0, 1.0}, 0.0, 0.25, 0.15),
         vary(Biome::Beach, {1.2, 1.2, 1.15}, 0.3, 0.3, 0.1),
         vary(Biome::Ice, {0.85, 0.95, 1.05}, 0.3, 0.06, 0.08),
@@ -71,7 +74,7 @@ std::array<terrain::Look, planet::biome_count> biome_looks() {
         vary(Biome::Alpine, {1.2, 1.2, 1.25}, 0.35, 0.45, 0.35),
         // Standing water.
         vary(Biome::Wetland, {0.6, 0.7, 0.8}, 0.35, 0.3, 0.25),
-        vary(Biome::Lake, {0.7, 0.7, 0.7}, 0.3, 0.25, 0.2)};
+        vary(Biome::Lake, {1.0, 1.0, 1.0}, 0.0, 0.25, 0.15)};
     static_assert(variations.size() == planet::biome_count);
 
     const BiomePalette palette = biome_palette();

@@ -189,6 +189,12 @@ TEST_CASE("each biome is coloured as it looks from above", "[client][ground]") {
     // Sand under the sea, darker for being wet.
     CHECK(of(hog::planet::Biome::Ocean).r > of(hog::planet::Biome::Ocean).b);
     CHECK(glm::all(glm::lessThan(of(hog::planet::Biome::Ocean), of(hog::planet::Biome::Beach))));
+    // Mud under a lake, not its water, which is drawn over it by depth.
+    CHECK(of(hog::planet::Biome::Lake).r > of(hog::planet::Biome::Lake).b);
+    CHECK(glm::all(glm::lessThan(of(hog::planet::Biome::Lake), of(hog::planet::Biome::Ocean))));
+    CHECK(hog::client::biome_looks()
+              .at(static_cast<std::size_t>(hog::planet::Biome::Lake))
+              .accent_share == 0.0);
     CHECK(of(hog::planet::Biome::Grassland).g > of(hog::planet::Biome::Grassland).b);
     CHECK(of(hog::planet::Biome::Ice) != of(hog::planet::Biome::Desert));
 }
