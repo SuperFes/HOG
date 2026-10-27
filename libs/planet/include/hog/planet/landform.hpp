@@ -4,6 +4,7 @@
 #include <hog/planet/cell_id.hpp>
 #include <hog/planet/drainage.hpp>
 #include <hog/planet/erosion.hpp>
+#include <hog/planet/glaciers.hpp>
 #include <hog/planet/hillslope.hpp>
 #include <hog/planet/level_grid.hpp>
 
@@ -25,14 +26,17 @@ public:
     static constexpr std::int64_t dry = std::numeric_limits<std::int64_t>::min();
 
     // Evolves `heights`, fixed point and one per grid cell, through `steps` steps of `erosion`
-    // and of `hillslope`, if it has fields, calling `stepped` with how many are done after each.
+    // and of `hillslope`, if it has fields, calling `stepped` with how many are done after each,
+    // then cuts it with the glaciers of `glaciation`, if it has a balance.
     Landform(LevelGrid grid, std::vector<std::int64_t> heights, const Erosion& erosion,
-             const Hillslope& hillslope, int steps, const std::function<void(int)>& stepped = {});
-    // One evolved before, as its heights, change, drained, soil and risen left it, by erosion
-    // with `wander`.
+             const Hillslope& hillslope, int steps, const std::function<void(int)>& stepped = {},
+             const Glaciation& glaciation = {});
+    // One evolved before, as its heights, change, drained, soil, risen and carved left it, by
+    // erosion with `wander`.
     Landform(LevelGrid grid, std::vector<std::int64_t> heights, std::vector<std::int64_t> change,
              std::vector<std::int64_t> drained, std::vector<std::int64_t> soil,
-             std::vector<std::int64_t> risen, std::uint64_t wander);
+             std::vector<std::int64_t> risen, std::vector<std::int64_t> carved,
+             std::uint64_t wander);
 
     [[nodiscard]] const LevelGrid& grid() const noexcept { return grid_; }
     // Fixed-point metres per grid cell, after evolving.
@@ -43,7 +47,7 @@ public:
     // by its runoff.
     [[nodiscard]] std::span<const std::int64_t> drained() const noexcept { return drained_; }
 
-    // Fixed-point metres the ground moved, per grid cell.
+    // Fixed-point metres the ground moved, per grid cell, but for what glaciers' troughs took in.
     [[nodiscard]] std::span<const std::int64_t> change() const noexcept { return change_; }
     // The same at any cell's centre, smoothly, so the worn ground shows no creases along the
     // grid cells' edges.
@@ -54,6 +58,10 @@ public:
     // Fixed-point metres each grid cell was lifted while it stood above the sea: the ground less
     // this is the height the rock lay at before, where its beds are found.
     [[nodiscard]] std::span<const std::int64_t> risen() const noexcept { return risen_; }
+    // Fixed-point metres glaciers' troughs stand below the ground, per grid cell, taking in the
+    // change of the ground they were cut from: each cell's height is where it started plus its
+    // change less this.
+    [[nodiscard]] std::span<const std::int64_t> carved() const noexcept { return carved_; }
     // Fixed point: the steepest slope from each grid cell down or up to a neighbour, rise over
     // run.
     [[nodiscard]] std::span<const std::int64_t> steepness() const noexcept { return steepness_; }
@@ -80,6 +88,7 @@ private:
     std::vector<std::int64_t> change_;
     std::vector<std::int64_t> soil_;
     std::vector<std::int64_t> risen_;
+    std::vector<std::int64_t> carved_;
     std::vector<std::int64_t> steepness_;
     Drainage drainage_;
     std::vector<std::int64_t> drained_;

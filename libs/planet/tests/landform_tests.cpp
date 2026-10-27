@@ -197,7 +197,7 @@ TEST_CASE("a landform's steepness is its steepest slope to a neighbouring cell",
         std::views::iota(std::size_t{0}, around.size()) |
         std::views::transform([&](std::size_t k) { return grid.distance(raised, k); }));
     const std::vector<std::int64_t> zeros(grid.size(), 0);
-    const Landform landform{std::move(grid), heights, zeros, zeros, zeros, zeros, 0};
+    const Landform landform{std::move(grid), heights, zeros, zeros, zeros, zeros, zeros, 0};
     const auto steepness = landform.steepness();
     CHECK(hog::planet::fixed_to_double(steepness[raised]) ==
           Catch::Approx(100.0 / hog::planet::fixed_to_double(nearest)).epsilon(1e-3));
@@ -208,4 +208,56 @@ TEST_CASE("a landform's steepness is its steepest slope to a neighbouring cell",
             REQUIRE(steepness[cell] > 0);
         }
     }
+}
+
+TEST_CASE("glaciers cut the worn landform last, scouring its soil, and the sea fills their troughs",
+          "[planet][landform]") {
+    // Cells some 250 m across, under an ice cap on mountains at the north pole.
+    const LevelGrid grid{6, 10'000.0};
+    std::vector<std::int64_t> heights;
+    std::vector<std::int64_t> balance;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const hog::DVec3 at = hog::planet::cell_center(grid.cell(cell));
+        const double metres =
+            at.z > 0.0 ? 20.0 + (2'000.0 * at.z) + (250.0 * at.z * std::sin(7.0 * at.x)) : -60.0;
+        heights.push_back(std::llround(metres * static_cast<double>(fixed_one)));
+        balance.push_back(std::llround((metres - 300.0) * 0.005 * static_cast<double>(fixed_one)));
+    }
+    const std::vector<std::int64_t> uplift(grid.size(), 0);
+    const std::vector<std::int64_t> erodibility(grid.size(), fixed_one / 20);
+    const std::vector<std::int64_t> runoff(grid.size(), fixed_one / 2);
+    const std::vector<std::int64_t> creep(grid.size(), 400 * fixed_one);
+    const std::vector<std::int64_t> weathering(grid.size(), 5 * fixed_one);
+    const auto worn = [&](const hog::planet::Glaciation& glaciation) {
+        return Landform{grid,
+                        heights,
+                        {.uplift = uplift, .erodibility = erodibility, .runoff = runoff},
+                        {.creep = creep,
+                         .weathering = weathering,
+                         .rock =
+                             [](std::uint32_t, std::int64_t) {
+                                 return hog::planet::Weathering{.rate = fixed_one,
+                                                                .steepest = fixed_one};
+                             }},
+                        3,
+                        {},
+                        glaciation};
+    };
+    const Landform bare = worn({});
+    const Landform cut =
+        worn({.balance = [&](std::uint32_t cell, std::int64_t) { return balance[cell]; }});
+    CHECK(std::ranges::all_of(bare.carved(), [](std::int64_t depth) { return depth == 0; }));
+    int drowned = 0;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        REQUIRE(cut.heights()[cell] == heights[cell] + cut.change()[cell] - cut.carved()[cell]);
+        const std::int64_t depth = bare.heights()[cell] - cut.heights()[cell];
+        REQUIRE(depth >= 0);
+        // Deep troughs take in the change of the ground they were cut from.
+        if (depth > 20 * fixed_one) {
+            REQUIRE(cut.change()[cell] == 0);
+        }
+        REQUIRE(cut.soil()[cell] == std::max<std::int64_t>(bare.soil()[cell] - depth, 0));
+        drowned += bare.heights()[cell] > 0 && cut.drainage().surface[cell] == 0 ? 1 : 0;
+    }
+    CHECK(drowned > 0);
 }

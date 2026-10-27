@@ -9,6 +9,7 @@ add_library(hog_planet
     src/drainage.cpp
     src/elevation.cpp
     src/erosion.cpp
+    src/glaciers.cpp
     src/geology.cpp
     src/hillslope.cpp
     src/hotspots.cpp
@@ -57,6 +58,7 @@ hog_add_tests(hog_planet
     tests/drainage_tests.cpp
     tests/elevation_tests.cpp
     tests/erosion_tests.cpp
+    tests/glaciers_tests.cpp
     tests/geology_tests.cpp
     tests/hillslope_tests.cpp
     tests/hotspots_tests.cpp

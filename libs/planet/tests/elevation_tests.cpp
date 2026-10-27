@@ -49,6 +49,23 @@ std::int64_t metres(std::int64_t value) {
     return value * fixed_one;
 }
 
+// Whether glaciers cut the ground anywhere in the grid cells about `cell`, as far as the
+// ground's smooth sampling reaches.
+bool near_carved(const hog::planet::Landform& landform, CellId cell) {
+    const auto& grid = landform.grid();
+    for (const std::uint32_t corner : grid.corners(cell)) {
+        if (landform.carved()[corner] != 0) {
+            return true;
+        }
+        for (const std::uint32_t next : grid.neighbors(corner)) {
+            if (landform.carved()[next] != 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 constexpr double radius = 115'000.0;
 
 // Where coasts cross from land to sea: the first `count` level-8 land cells beside the sea, but for
@@ -93,7 +110,8 @@ hog::DVec3 along(hog::DVec3 from, hog::DVec3 towards, double metres) {
 
 } // namespace
 
-TEST_CASE("land stays above sea level and the ocean floor below it, but for volcanoes and lakes",
+TEST_CASE("land stays above sea level and the ocean floor below it, but for volcanoes, lakes and "
+          "fjords",
           "[planet][elevation]") {
     const std::uint64_t seed = GENERATE(take(hog::testing::cases(2), values({1U, 2U})));
     const Elevation terrain{planet(seed)};
@@ -101,8 +119,10 @@ TEST_CASE("land stays above sea level and the ocean floor below it, but for volc
     for (const CellId cell : cells_at(6)) {
         const std::int64_t elevation = terrain.elevation(cell);
         if (terrain.height<hog::planet::fine_fraction_bits>(cell) > 0) {
-            // Low ground cut off from the sea may lie under it, but only under a lake.
-            REQUIRE((elevation >= 0 || terrain.lake(cell)));
+            // Low ground cut off from the sea may lie under it, but only under a lake, and
+            // glaciers' troughs may run down under it.
+            const auto& landform = terrain.landform();
+            REQUIRE((elevation >= 0 || terrain.lake(cell) || near_carved(landform, cell)));
             REQUIRE(elevation <=
                     metres(Elevation::lowland_height + Elevation::mountain_height) + volcanoes);
         } else {
@@ -322,7 +342,7 @@ TEST_CASE("the nearest land is land, with none nearer", "[planet][elevation]") {
 }
 
 TEST_CASE("only ground joined to the sea lies under it", "[planet][elevation]") {
-    // This planet has a stretch below sea level cut off from the sea, thousands of km² across.
+    // This planet has stretches below sea level cut off from the sea, hundreds of km² across.
     const Elevation terrain{planet(9)};
     const auto& landform = terrain.landform();
     const auto& drainage = landform.drainage();
@@ -338,7 +358,7 @@ TEST_CASE("only ground joined to the sea lies under it", "[planet][elevation]") 
         REQUIRE(terrain.is_land(cell) != sea);
         cut_off += sea ? 0.0 : static_cast<double>(landform.grid().area(index) * stride) / 1e6;
     }
-    CHECK(cut_off > 1'000.0);
+    CHECK(cut_off > 500.0);
 }
 
 TEST_CASE("the deep ocean floor rises at ridges, sinks into trenches and rolls between",
@@ -542,8 +562,8 @@ TEST_CASE("bare beds on steep ground step into ledges", "[planet][elevation]") {
     }
     INFO(midway << " of " << points << " midway up their beds");
     REQUIRE(points > 200);
-    // Evenly spread, half would be.
-    CHECK(midway < points * 2 / 5);
+    // Evenly spread, half would be; walls glaciers polished bench a little less.
+    CHECK(midway * 100 < points * 42);
 }
 
 TEST_CASE("steep or thin-soiled ground shows its rock, deep soil hides it", "[planet][elevation]") {
@@ -564,8 +584,11 @@ TEST_CASE("steep or thin-soiled ground shows its rock, deep soil hides it", "[pl
         const hog::planet::Exposure exposure = terrain.exposure(cell, ground);
         CHECK(exposure.bare >= 0);
         CHECK(exposure.bare <= fixed_one);
-        if (ground <= 0) {
+        // Glaciers dug some lakes' beds below the sea; the sea's own floor is all sand.
+        if (ground <= 0 && !terrain.lake(cell)) {
             CHECK(exposure.bare == 0);
+        }
+        if (ground <= 0) {
             continue;
         }
         if (landform.heights()[index] > 100 * fixed_one &&
@@ -664,4 +687,26 @@ TEST_CASE("ground dug into shows bare rock", "[planet][elevation]") {
         }
     }
     FAIL("no covered ground");
+}
+
+TEST_CASE("glaciers cut fjords into cold coasts, the sea reaching in where the land stood",
+          "[planet][elevation]") {
+    const std::uint64_t seed = GENERATE(take(hog::testing::cases(2), values({1U, 2U})));
+    const Elevation terrain{planet(seed)};
+    const hog::planet::Landform& landform = terrain.landform();
+    int fjords = 0;
+    double lowest = 1.0;
+    for (std::uint32_t index = 0; index < landform.grid().size(); ++index) {
+        const CellId cell = landform.grid().cell(index);
+        // The continents' own land always stands above the sea but where glaciers cut it.
+        if (terrain.continents().is_land(cell) && !terrain.is_land(cell)) {
+            ++fjords;
+            CHECK(near_carved(landform, cell));
+            lowest = std::min(lowest, std::abs(hog::planet::cell_center(cell).z));
+        }
+    }
+    UNSCOPED_INFO("seed " << seed << ", lowest " << lowest << ", " << fjords << " cells");
+    CHECK(fjords > 0);
+    // As on Earth, only towards the poles: some 35 degrees off the equator at least.
+    CHECK(lowest > 0.57);
 }

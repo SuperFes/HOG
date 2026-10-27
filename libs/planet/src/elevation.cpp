@@ -123,6 +123,15 @@ constexpr double frost_weathering = 0.5;
 constexpr double equator_warmth = 28.0;
 constexpr double polar_chill = 45.0;
 constexpr double lapse_per_metre = 0.0065;
+// °C colder in the ice age that cuts the glaciers' troughs.
+constexpr double ice_age_chill = 6.0;
+// Metres of ice a year: snow on the wettest ground, all of it snow below the first °C and none
+// above the second; and the melt for each °C of the year's mean warmth above the third.
+constexpr double most_snow = 2.0;
+constexpr double all_snow_below = -4.0;
+constexpr double no_snow_above = 2.0;
+constexpr double melt_per_degree = 1.0;
+constexpr double melt_above = -7.0;
 // °C between which the ground freezes and thaws through the year.
 constexpr double frost_coldest = -12.0;
 constexpr double frost_warmest = 2.0;
@@ -255,7 +264,8 @@ std::shared_ptr<const Elevation::Evolved> Elevation::evolve(const PlanetConfig& 
         std::vector<std::int64_t> ground(landform.grid().size());
         for (std::uint32_t index = 0; index < landform.grid().size(); ++index) {
             const CellId cell = landform.grid().cell(index);
-            ground[index] = worn(cell, generated(cell), landform, meander);
+            ground[index] =
+                worn(cell, raised(cell) - carved(cell, landform, meander), landform, meander);
         }
         if (!bakes.empty()) {
             std::ignore =
@@ -266,7 +276,8 @@ std::shared_ptr<const Elevation::Evolved> Elevation::evolve(const PlanetConfig& 
                             .drained = {landform.drained().begin(), landform.drained().end()},
                             .ground = ground,
                             .soil = {landform.soil().begin(), landform.soil().end()},
-                            .risen = {landform.risen().begin(), landform.risen().end()}});
+                            .risen = {landform.risen().begin(), landform.risen().end()},
+                            .carved = {landform.carved().begin(), landform.carved().end()}});
         }
         shared = std::make_shared<const Evolved>(std::move(landform), ground, config);
         log::info(landform_log, "evolved the landform in {:.0f} s", seconds());
@@ -287,7 +298,7 @@ std::shared_ptr<const Elevation::Evolved> Elevation::unbake(std::optional<Landfo
     return std::make_shared<const Evolved>(
         Landform{std::move(grid), std::move(bake->heights), std::move(bake->change),
                  std::move(bake->drained), std::move(bake->soil), std::move(bake->risen),
-                 hash_combine(config.seed, wander_salt)},
+                 std::move(bake->carved), hash_combine(config.seed, wander_salt)},
         bake->ground, config);
 }
 
@@ -304,10 +315,11 @@ Landform Elevation::wear(LevelGrid grid, std::uint64_t seed,
     std::vector<BedColumn> columns(grid.size());
     std::vector<std::int64_t> creeping(grid.size());
     std::vector<std::int64_t> weathered(grid.size());
+    std::vector<double> ice_age_warmth(grid.size());
     for (std::uint32_t index = 0; index < grid.size(); ++index) {
         const CellId cell = grid.cell(index);
         const std::int64_t mountains = mountain_strength(cell);
-        heights[index] = generated(cell);
+        heights[index] = raised(cell);
         // Only continents rise; volcanoes stand on ocean floor that doesn't.
         const bool continental = continents_.height(cell) > 0;
         const double rising = continental ? background_uplift : 0.0;
@@ -318,6 +330,7 @@ Landform Elevation::wear(LevelGrid grid, std::uint64_t seed,
         // A rough climate, before there is one: warm low and near the equator, wet as the
         // circulation bands have it.
         const double sine = cell_center(cell).z;
+        ice_age_warmth[index] = equator_warmth - (polar_chill * sine * sine) - ice_age_chill;
         const double warmth = equator_warmth - (polar_chill * sine * sine) -
                               (lapse_per_metre * fixed_to_double(heights[index]));
         const double wet = fixed_to_double(runoff[index]);
@@ -344,7 +357,15 @@ Landform Elevation::wear(LevelGrid grid, std::uint64_t seed,
                                       return weathering(beds_.rock_at(columns[index], height));
                                   }},
                     landform_steps,
-                    stepped};
+                    stepped,
+                    Glaciation{.balance = [&](std::uint32_t index, std::int64_t height) {
+                        const double warmth =
+                            ice_age_warmth[index] - (lapse_per_metre * fixed_to_double(height));
+                        const double snow = std::clamp(
+                            (no_snow_above - warmth) / (no_snow_above - all_snow_below), 0.0, 1.0);
+                        const double melt = melt_per_degree * std::max(warmth - melt_above, 0.0);
+                        return fixed((fixed_to_double(runoff[index]) * most_snow * snow) - melt);
+                    }}};
 }
 
 std::int64_t Elevation::mountain_strength(CellId cell) const {
@@ -610,14 +631,24 @@ std::int64_t Elevation::ridge(std::uint64_t seed, double frequency, int octaves,
     return total / weights;
 }
 
-std::int64_t Elevation::generated(CellId cell) const {
+std::int64_t Elevation::raised(CellId cell) const {
     // Generated finer than it's kept, so the noise's steps stay well below a centimetre.
     constexpr int finer = fine_fraction_bits - fixed_fraction_bits;
-    return (generated<fine_fraction_bits>(cell) + (std::int64_t{1} << (finer - 1))) >> finer;
+    return (raised<fine_fraction_bits>(cell) + (std::int64_t{1} << (finer - 1))) >> finer;
+}
+
+std::int64_t Elevation::carved(CellId cell) const {
+    const Evolved& evolved = this->evolved();
+    return carved(cell, evolved.landform, evolved.meander);
+}
+
+std::int64_t Elevation::carved(CellId cell, const Landform& landform, const Meander& meander) {
+    // Sampled as the change is, so the two add up to the trough the ice cut.
+    return landform.grid().smooth(landform.carved(), cell_at(meander(cell_center(cell))));
 }
 
 template <int Bits>
-std::int64_t Elevation::generated(CellId cell) const {
+std::int64_t Elevation::raised(CellId cell) const {
     constexpr std::int64_t one = fixed_unit<Bits>;
     const auto crust = continents_.crust<Bits>(cell);
     const std::int64_t continent = crust.height;

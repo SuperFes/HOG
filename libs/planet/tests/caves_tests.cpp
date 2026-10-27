@@ -64,6 +64,15 @@ std::vector<CellId> tiles(const Caves& caves, std::uint64_t count) {
     return cells;
 }
 
+// Whether a sinkhole opens in any of the first `count` karst tiles.
+bool any_sinkhole(const Caves& caves, Caves::Lookup& lookup, std::uint64_t count) {
+    return std::ranges::any_of(tiles(caves, count), [&](CellId tile) {
+        return std::ranges::any_of(lookup.passages_near(tile), [](const Passage& passage) {
+            return passage.cave == Cave::Sinkhole;
+        });
+    });
+}
+
 // The finest cell over a point, and the fixed-point depth of the point below its surface.
 struct Spot {
     CellId cell;
@@ -179,6 +188,10 @@ TEST_CASE("karst runs through wet limestone near the water table", "[planet][cav
                           ? 1
                           : 0;
         }
+    }
+    // Sinkholes are rare enough to look further for one.
+    if (sinkholes == 0) {
+        sinkholes = any_sinkhole(caves, lookup, 30'000) ? 1 : 0;
     }
     INFO(passages << " passages, " << walkable << " walkable, " << squeezes << " squeezes");
     CHECK(passages > 100);

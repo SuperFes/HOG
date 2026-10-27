@@ -43,7 +43,8 @@ struct Layering {
 // floor; ridges raise mountain ranges where the plates push them up, away from the coast, and
 // volcanoes stand along the arcs above plates diving and in chains carried off plumes. Rivers
 // then wear the land over geological time while the ranges keep rising, which carves valleys and
-// drainage, and cut channels where they run.
+// drainage, and cut channels where they run. Last, the glaciers of an ice age cut U-shaped troughs
+// down the valleys of cold mountains, and the sea fills those they cut below it: fjords.
 class Elevation {
 public:
     // Metres.
@@ -147,11 +148,23 @@ private:
     // The same, while the landform is still being evolved; `shifted` is the cell the meanders
     // move `cell` to.
     [[nodiscard]] Layering layering(CellId cell, CellId shifted, const Landform& landform) const;
-    // The elevation as generated, before rivers wore it.
-    [[nodiscard]] std::int64_t generated(CellId cell) const;
+    // The elevation as raised, before rivers wore it or glaciers cut it.
+    [[nodiscard]] std::int64_t raised(CellId cell) const;
     // The same with `Bits` fractional bits.
     template <int Bits>
-    [[nodiscard]] std::int64_t generated(CellId cell) const;
+    [[nodiscard]] std::int64_t raised(CellId cell) const;
+    // Fixed-point metres the glaciers cut the ground down by.
+    [[nodiscard]] std::int64_t carved(CellId cell) const;
+    // The same, while the landform is still being evolved.
+    [[nodiscard]] static std::int64_t carved(CellId cell, const Landform& landform,
+                                             const Meander& meander);
+    // The elevation as raised and cut by glaciers, before rivers wore it: the coastline.
+    [[nodiscard]] std::int64_t generated(CellId cell) const { return raised(cell) - carved(cell); }
+    // The same with `Bits` fractional bits.
+    template <int Bits>
+    [[nodiscard]] std::int64_t generated(CellId cell) const {
+        return raised<Bits>(cell) - (carved(cell) << (Bits - fixed_fraction_bits));
+    }
     // The elevation as rivers wore it, before they cut their channels, given the generated one;
     // about lakes, the landform's own ground, which holds them in.
     [[nodiscard]] std::int64_t worn(CellId cell, std::int64_t generated, const Landform& landform,

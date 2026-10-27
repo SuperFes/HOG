@@ -17,14 +17,15 @@ namespace hog::planet {
 struct LandformBake {
     int level = 0; // of the landform's grid
     // Per grid cell, fixed point: the ground as evolved, how far it moved, the runoff-weighted
-    // area draining through it, the ground at its centre the rivers start from, the soil on it
-    // and how far it was lifted.
+    // area draining through it, the ground at its centre the rivers start from, the soil on it,
+    // how far it was lifted and how deep glaciers cut it.
     std::vector<std::int64_t> heights;
     std::vector<std::int64_t> change;
     std::vector<std::int64_t> drained;
     std::vector<std::int64_t> ground;
     std::vector<std::int64_t> soil;
     std::vector<std::int64_t> risen;
+    std::vector<std::int64_t> carved;
 
     friend bool operator==(const LandformBake&, const LandformBake&) = default;
 };

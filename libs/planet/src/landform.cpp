@@ -1,5 +1,6 @@
 #include <hog/core/assert.hpp>
 #include <hog/core/hash.hpp>
+#include <hog/planet/glaciers.hpp>
 #include <hog/planet/landform.hpp>
 #include <hog/planet/neighbors.hpp>
 #include <hog/planet/noise.hpp>
@@ -41,12 +42,16 @@ constexpr std::int64_t filled_depth = fixed_one / 100;
 // for it, so basins in wet country hold lakes and those in deserts stay dry.
 constexpr double evaporation = 0.4;
 
+// Fixed-point metres of glacial cut over which a trough takes in the change of its ground.
+constexpr std::int64_t trough_blend = 20 * fixed_one;
+
 } // namespace
 
 Landform::Landform(LevelGrid grid, std::vector<std::int64_t> heights, const Erosion& erosion,
-                   const Hillslope& hillslope, int steps, const std::function<void(int)>& stepped)
+                   const Hillslope& hillslope, int steps, const std::function<void(int)>& stepped,
+                   const Glaciation& glaciation)
     : grid_{std::move(grid)}, heights_{std::move(heights)}, soil_(heights_.size(), 0),
-      risen_(heights_.size(), 0) {
+      risen_(heights_.size(), 0), carved_(heights_.size(), 0) {
     HOG_ASSERT(heights_.size() == grid_.size(), "one height per grid cell");
     const std::vector<std::int64_t> start = heights_;
     for (int step = 0; step < steps; ++step) {
@@ -72,16 +77,32 @@ Landform::Landform(LevelGrid grid, std::vector<std::int64_t> heights, const Eros
             stepped(step + 1);
         }
     }
+    change_.resize(heights_.size());
+    for (std::size_t cell = 0; cell < heights_.size(); ++cell) {
+        change_[cell] = heights_[cell] - start[cell];
+    }
+    if (glaciation.balance) {
+        const std::vector<std::int64_t> cut = glaciate(grid_, heights_, glaciation);
+        for (std::size_t cell = 0; cell < heights_.size(); ++cell) {
+            heights_[cell] -= cut[cell];
+            // The ice scours the soil off as it cuts.
+            soil_[cell] = std::max<std::int64_t>(soil_[cell] - cut[cell], 0);
+            // A trough takes in the change of the ground it was cut from, so its floor stands
+            // where the ice left it, wherever the coast falls in it.
+            const std::int64_t taken =
+                (change_[cell] *
+                 ((std::min(cut[cell], trough_blend) << fixed_fraction_bits) / trough_blend)) >>
+                fixed_fraction_bits;
+            change_[cell] -= taken;
+            carved_[cell] = cut[cell] - taken;
+        }
+    }
     drainage_ = drain(grid_, heights_, 0, settled(erosion.wander));
     std::vector<std::int64_t> rain(grid_.size());
     for (std::uint32_t cell = 0; cell < grid_.size(); ++cell) {
         rain[cell] = (grid_.area(cell) * erosion.runoff[cell]) >> fixed_fraction_bits;
     }
     drained_ = accumulate(drainage_, rain);
-    change_.resize(heights_.size());
-    for (std::size_t cell = 0; cell < heights_.size(); ++cell) {
-        change_[cell] = heights_[cell] - start[cell];
-    }
     find_lakes();
     find_steepness();
 }
@@ -89,13 +110,13 @@ Landform::Landform(LevelGrid grid, std::vector<std::int64_t> heights, const Eros
 Landform::Landform(LevelGrid grid, std::vector<std::int64_t> heights,
                    std::vector<std::int64_t> change, std::vector<std::int64_t> drained,
                    std::vector<std::int64_t> soil, std::vector<std::int64_t> risen,
-                   std::uint64_t wander)
+                   std::vector<std::int64_t> carved, std::uint64_t wander)
     : grid_{std::move(grid)}, heights_{std::move(heights)}, change_{std::move(change)},
-      soil_{std::move(soil)}, risen_{std::move(risen)},
+      soil_{std::move(soil)}, risen_{std::move(risen)}, carved_{std::move(carved)},
       drainage_{drain(grid_, heights_, 0, settled(wander))}, drained_{std::move(drained)} {
     HOG_ASSERT(heights_.size() == grid_.size() && change_.size() == grid_.size() &&
                    drained_.size() == grid_.size() && soil_.size() == grid_.size() &&
-                   risen_.size() == grid_.size(),
+                   risen_.size() == grid_.size() && carved_.size() == grid_.size(),
                "one value per grid cell");
     find_lakes();
     find_steepness();
