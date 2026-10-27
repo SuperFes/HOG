@@ -1745,6 +1745,60 @@ TEST_CASE("waves scatter the sun's glint over the sea", "[render][gpu]") {
     CHECK(device->validation_errors() == 0);
 }
 
+TEST_CASE("calm water mirrors the sun's own disc, and wind breaks its glint into sparkles that "
+          "turn",
+          "[render][gpu]") {
+    const auto device = test_device();
+    // Looking down with the sun overhead.
+    OceanView view = seen_from(4.0, -up, north, up);
+    const auto lit = [](const std::vector<std::uint8_t>& pixels) {
+        std::vector<int> lit;
+        for (std::uint32_t y = 0; y < extent.height; ++y) {
+            for (std::uint32_t x = 0; x < extent.width; ++x) {
+                lit.push_back(pixel_at(pixels, x, y)[0] > 10 ? 1 : 0);
+            }
+        }
+        return lit;
+    };
+    const auto count = [](const std::vector<int>& lit) {
+        return static_cast<int>(std::ranges::count(lit, 1));
+    };
+    // The sun, all but a point at this size, mirrored over a pixel or so.
+    const std::vector<int> calm = lit(draw(*device, view, std::nullopt));
+    CHECK(count(calm) > 0);
+    CHECK(count(calm) <= 9);
+
+    const std::vector<hog::waves::Train> trains = hog::waves::planet_trains(5);
+    const hog::waves::SeaState windy{
+        .systems = {hog::waves::grown_sea(east * 9.0)}, .current = {}, .wind = {}};
+    view.waves = hog::render::drawn_waves_at(trains, hog::waves::waves_at(trains, up, windy), windy,
+                                             view.camera.eye, view.bend, noon, DVec3{0.0});
+    const std::vector<int> now = lit(draw(*device, view, std::nullopt));
+    view.waves.rain.y += 1.0F;
+    const std::vector<int> later = lit(draw(*device, view, std::nullopt));
+    // Scattered over far more than the sun, partly as sparkles: many lit pixels stand alone, and
+    // many are dark a second later, where a smooth lobe would leave none.
+    int alone = 0;
+    int turned = 0;
+    for (std::uint32_t y = 1; y + 1 < extent.height; ++y) {
+        for (std::uint32_t x = 1; x + 1 < extent.width; ++x) {
+            const std::size_t at = (std::size_t{y} * extent.width) + x;
+            if (now[at] == 0) {
+                continue;
+            }
+            alone += now[at - 1] + now[at + 1] + now[at - extent.width] + now[at + extent.width] < 2
+                         ? 1
+                         : 0;
+            turned += later[at] == 0 ? 1 : 0;
+        }
+    }
+    CAPTURE(count(calm), count(now), alone, turned);
+    CHECK(count(now) > 4 * count(calm));
+    CHECK(alone * 8 > count(now));
+    CHECK(turned * 8 > count(now));
+    CHECK(device->validation_errors() == 0);
+}
+
 namespace {
 
 // What the ocean's shaders find over the plane of `frame` round an eye 5 m up at its anchor.

@@ -79,11 +79,25 @@ Surf as_surf(float4 surf) {
 static const float rings = 96.0;
 static const float spokes = 128.0;
 
-// The mean square slope of ripples shorter than any wave: the glint's least spread.
-static const float ripples = 0.001;
-// Without the air, the glint off the stillest water peaks this bright.
+// The sun's angular radius, as sky.slang draws it. The stillest water mirrors its disc, whose
+// halfway vectors spread over half that: the glint's least spread, as a mean square slope.
+static const float sun_angular_radius = 0.004675;
+static const float sun_spread = 0.25 * sun_angular_radius * sun_angular_radius;
+// The mean square slope of ripples shorter than any wave, per m/s of wind: none in a calm.
+static const float ripples_per_wind = 0.0002;
+// Without the air, the glint off water this rough, as a mean square slope, peaks this bright.
+static const float glint_reference = 0.001;
 static const float glint_brightness = 50.0;
-static const float stillest_lobe = ((2.0 / ripples) + 6.0) / (8.0 * pi);
+static const float stillest_lobe = ((2.0 / glint_reference) + 6.0) / (8.0 * pi);
+// The water's surface too fine to draw is taken as flat facets this many metres across, each
+// mirroring the sun or not: a pixel over few sparkles, one over many shows them as the lobe.
+static const float facet = 0.02;
+// Each facet curves, mirroring the sun over normals this many radians round its own.
+static const float facet_bend = 0.05;
+// Each pixel's facets turn anew about this often, seconds, as ripples pass.
+static const float sparkle_life = 0.06;
+// Pixels whose sparkles would vary by less than this share of their mean show the lobe.
+static const float sparkles_unseen = 0.05;
 // Of the light falling on foam fresh from a breaking crest, the share it scatters back; and on the
 // thinner foam it leaves.
 static const float breaking_albedo = 0.5;
@@ -156,6 +170,10 @@ struct Facing {
     float roughness;
     float white;
     float albedo;
+    // Metres of the surface a pixel spans, and the mean square slope of the halfway vectors to
+    // the ways it looks over, which spreads the glint over the pixel and no further.
+    float footprint;
+    float seen;
 };
 
 // As hog::render::ripple_size and ripple_spacing.
@@ -274,7 +292,10 @@ Facing facing_at(Surface surface, float3 looking, bool beneath = false) {
                                      (waves.ripple_north.xyz * slope.y));
     Facing facing;
     facing.normal = as_drawn(rippled, push.up_height.xyz, normalize(surface.normal));
-    facing.roughness = water.roughness + ripples + unseen + unseen_rain;
+    facing.roughness = water.roughness + sun_spread +
+                       (ripples_per_wind * waves.still_growth.z) + unseen + unseen_rain;
+    facing.footprint = footprint;
+    facing.seen = 0.25 * max(dot(ddx(looking), ddx(looking)), dot(ddy(looking), ddy(looking)));
     facing.white = 0.0;
     facing.albedo = breaking_albedo;
     const Surf surf = as_surf(surface.surf);
@@ -322,10 +343,58 @@ Facing facing_at(Surface surface, float3 looking, bool beneath = false) {
     return facing;
 }
 
-// How much of the sun's light the glint reflects towards the eye, but for the reflection: a
-// normalised Blinn-Phong lobe as wide as the surface is rough.
-float glint_at(float3 looking, Facing facing, float3 sun) {
-    return glint_lobe(looking, facing.normal, facing.roughness, sun);
+uint hashed(uint at) {
+    at ^= at >> 16;
+    at *= 0x7feb352du;
+    at ^= at >> 15;
+    at *= 0x846ca68bu;
+    at ^= at >> 16;
+    return at;
+}
+
+float unit(uint at) {
+    return (float(hashed(at) >> 8) + 0.5) / 16777216.0;
+}
+
+// Of the glint at `pixel`, spanning `footprint` metres, the share its facets catching the sun now
+// show: each facet's normal lies within the sun's disc, halfway to the eye, by the chance `lobe`
+// gives, the surface's own, so a pixel shows as many as are dealt it of those it spans.
+float sparkling(float lobe, float footprint, uint2 pixel) {
+    // Over a pixel or less of a facet, neighbouring pixels glint together, as the lobe has it.
+    const float facets = (footprint * footprint) / (facet * facet);
+    if (facets <= 1.0) {
+        return 1.0;
+    }
+    const float caught =
+        min(lobe * pi * ((sun_angular_radius * sun_angular_radius) + (facet_bend * facet_bend)), 1.0);
+    const float expected = facets * caught;
+    const float spread = expected * (1.0 - caught);
+    if (expected <= 0.0 || spread <= sparkles_unseen * sparkles_unseen * expected * expected) {
+        return 1.0;
+    }
+    // Each pixel turns at its own moments, so the sparkles don't all change together.
+    const uint seed = hashed(pixel.x ^ hashed(pixel.y + 0x9e3779b9u));
+    const uint turn = uint(floor((waves.rain.y / sparkle_life) + unit(seed)));
+    const uint dealt = hashed(seed ^ (turn * 0x85ebca6bu));
+    float shown;
+    if (expected < 1.0) {
+        shown = unit(dealt) < expected ? 1.0 / expected : 0.0;
+    } else {
+        // Box and Muller's normal deviate, as a binomial count this many tends to.
+        const float normal = sqrt(-2.0 * log(unit(dealt))) * cos(2.0 * pi * unit(dealt + 1u));
+        shown = max(round(expected + (sqrt(spread) * normal)), 0.0) / expected;
+    }
+    // Breaking up from a facet a pixel to a few.
+    return lerp(1.0, shown, saturate(0.5 * log2(facets)));
+}
+
+// How much of the sun's light the glint reflects towards the eye at `pixel`, but for the
+// reflection: a normalised Blinn-Phong lobe as wide as the surface is rough, broken into the
+// sparkles of its facets.
+float glint_at(float3 looking, Facing facing, float3 sun, uint2 pixel) {
+    const float lobe = glint_lobe(looking, facing.normal, facing.roughness, sun);
+    return glint_lobe(looking, facing.normal, facing.roughness + facing.seen, sun) *
+           sparkling(lobe, facing.footprint, pixel);
 }
 
 [shader("fragment")]
@@ -337,7 +406,8 @@ float4 fragment_main(Surface surface) : SV_Target {
     const Facing facing = facing_at(surface, looking);
     const float reflected = reflected_at(looking, facing.normal);
     const float glint =
-        glint_brightness * reflected * glint_at(looking, facing, push.sun_nearest.xyz) / stillest_lobe;
+        glint_brightness * reflected *
+        glint_at(looking, facing, push.sun_nearest.xyz, uint2(surface.position.xy)) / stillest_lobe;
     // Premultiplied: the sky by how much is reflected, and the glint over all; and over that the
     // foam, lit by the sun and as much again by the sky.
     const float3 foam =
@@ -369,7 +439,8 @@ AirLit air_lit(Surface surface, Facing facing, float3 looking) {
                            reflect(looking, normal), up, sun);
     const float3 sunlight =
         through_cloud(lit.shade, transmittance(air, transmittance_table, 0.0, dot(normal, sun)));
-    lit.glint = sunlight * lit.reflected * glint_at(looking, facing, sun);
+    lit.glint =
+        sunlight * lit.reflected * glint_at(looking, facing, sun, uint2(surface.position.xy));
     lit.on_foam = (sunlight * saturate(dot(normal, sun))) +
                   sky_under_cloud(lighting, lit.shade,
                                   transmittance(air, transmittance_table, 0.0, sun_mu) *
