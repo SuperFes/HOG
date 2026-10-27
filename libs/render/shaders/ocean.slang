@@ -538,6 +538,12 @@ float4 fragment_through(Surface surface) : SV_Target {
     if (sea_lays_water(lighting)) {
         const float4 clip = mul(push.clip_from_eye, float4(surface.from_eye, 1.0));
         if (in_water(lighting, behind_at(clip.xy / clip.w, pixel, 1.0).at)) {
+            // Bent down below the eye by the planet's drawn curve, its top lies past where the line
+            // of sight would have left the water; what's seen there is the water fragment_under
+            // draws.
+            if (dot(surface.from_eye, surface.normal) < 0.0) {
+                discard;
+            }
             return from_beneath(surface, looking);
         }
     }
