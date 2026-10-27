@@ -146,10 +146,15 @@ public:
     [[nodiscard]] static Result<Terrain> create(Device& device, VkFormat colour_format,
                                                 VkFormat depth_format, const TerrainLook& look);
 
+    // How finely patches are drawn: from all their vertices, stitched to their neighbours; or
+    // from every terrain::coarse_step'th, for views too small to show more.
+    enum class Detail : std::uint8_t { Full, Coarse };
+
     // Records drawing into the colour and depth images being rendered to, of `extent`. Their
     // slots must hold patches already uploaded.
     void draw(VkCommandBuffer commands, VkExtent2D extent, const TerrainPool& pool,
-              std::span<const TerrainDraw> draws, const TerrainView& view) const;
+              std::span<const TerrainDraw> draws, const TerrainView& view,
+              Detail detail = Detail::Full) const;
 
 private:
     struct Range {
@@ -169,6 +174,7 @@ private:
     double period_ = 0.0; // metres over which the materials' coordinates repeat
     bool air_ = false;
     std::array<Range, terrain::stitchings> stitchings_{};
+    Range coarse_{};
 };
 
 } // namespace hog::render

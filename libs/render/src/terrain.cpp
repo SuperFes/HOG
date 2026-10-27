@@ -301,6 +301,12 @@ Result<Terrain> Terrain::create(Device& device, VkFormat colour_format, VkFormat
         indices.insert(indices.end(), surface.begin(), surface.end());
         indices.insert(indices.end(), skirts.begin(), skirts.end());
     }
+    const auto coarse = terrain::coarse_patch_indices();
+    const auto coarse_skirts = terrain::coarse_skirt_indices();
+    drawn.coarse_ = {.first = static_cast<std::uint32_t>(indices.size()),
+                     .count = static_cast<std::uint32_t>(coarse.size() + coarse_skirts.size())};
+    indices.insert(indices.end(), coarse.begin(), coarse.end());
+    indices.insert(indices.end(), coarse_skirts.begin(), coarse_skirts.end());
     auto index_buffer = make_filled_buffer(device, std::as_bytes(std::span{indices}),
                                            VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
     if (!index_buffer) {
@@ -401,7 +407,8 @@ Result<Terrain> Terrain::create(Device& device, VkFormat colour_format, VkFormat
 }
 
 void Terrain::draw(VkCommandBuffer commands, VkExtent2D extent, const TerrainPool& pool,
-                   std::span<const TerrainDraw> draws, const TerrainView& view) const {
+                   std::span<const TerrainDraw> draws, const TerrainView& view,
+                   Detail detail) const {
     if (extent.width == 0 || extent.height == 0 || draws.empty()) {
         return;
     }
@@ -443,7 +450,8 @@ void Terrain::draw(VkCommandBuffer commands, VkExtent2D extent, const TerrainPoo
         push.origin = glm::vec4{relative_to(draw.origin, view.camera.eye), tiled.z};
         vkCmdPushConstants(commands, pipeline_.layout(), stages, offsetof(Push, origin),
                            sizeof(push.origin), &push.origin);
-        const Range& range = stitchings_.at(draw.coarser_edges);
+        const Range& range =
+            detail == Detail::Coarse ? coarse_ : stitchings_.at(draw.coarser_edges);
         vkCmdDrawIndexed(commands, range.count, 1, range.first,
                          static_cast<std::int32_t>(draw.slot * patch_vertex_count), 0);
     }

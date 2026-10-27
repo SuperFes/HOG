@@ -57,7 +57,28 @@ constexpr int last = patch_cells;
     return indices;
 }
 
-[[nodiscard]] std::vector<std::uint16_t> skirted(std::uint8_t coarser_edges) {
+[[nodiscard]] std::vector<std::uint16_t> coarse() {
+    std::vector<std::uint16_t> indices;
+    const auto vertex = [&](int i, int j) {
+        indices.push_back(static_cast<std::uint16_t>((j * patch_side) + i));
+    };
+    for (int j = 0; j < last; j += coarse_step) {
+        for (int i = 0; i < last; i += coarse_step) {
+            const int i_next = i + coarse_step;
+            const int j_next = j + coarse_step;
+            vertex(i, j);
+            vertex(i_next, j);
+            vertex(i_next, j_next);
+            vertex(i, j);
+            vertex(i_next, j_next);
+            vertex(i, j_next);
+        }
+    }
+    return indices;
+}
+
+// With `step` overriding the steps along every edge, if it's given.
+[[nodiscard]] std::vector<std::uint16_t> skirted_by(std::uint8_t coarser_edges, int step) {
     std::vector<std::uint16_t> indices;
     for (int edge = 0; edge < 4; ++edge) {
         // Along the edge, then down, faces out of the -u and +v edges and into the others.
@@ -72,13 +93,18 @@ constexpr int last = patch_cells;
             return (point.j * patch_side) + point.i;
         };
         const auto bottom = [&](int along) { return skirt_vertex(edge, along); };
-        const int step = ((coarser_edges >> edge) & 1U) != 0 ? 2 : 1;
-        for (int along = 0; along < last; along += step) {
-            triangle(top(along), top(along + step), bottom(along));
-            triangle(top(along + step), bottom(along + step), bottom(along));
+        const int edge_step = ((coarser_edges >> edge) & 1U) != 0 ? 2 : 1;
+        const int by = step != 0 ? step : edge_step;
+        for (int along = 0; along < last; along += by) {
+            triangle(top(along), top(along + by), bottom(along));
+            triangle(top(along + by), bottom(along + by), bottom(along));
         }
     }
     return indices;
+}
+
+[[nodiscard]] std::vector<std::uint16_t> skirted(std::uint8_t coarser_edges) {
+    return skirted_by(coarser_edges, 0);
 }
 
 template <auto Build>
@@ -102,6 +128,16 @@ std::span<const std::uint16_t> patch_indices(std::uint8_t coarser_edges) {
 
 std::span<const std::uint16_t> skirt_indices(std::uint8_t coarser_edges) {
     return built<skirted>(coarser_edges);
+}
+
+std::span<const std::uint16_t> coarse_patch_indices() {
+    static const std::vector<std::uint16_t> indices = coarse();
+    return indices;
+}
+
+std::span<const std::uint16_t> coarse_skirt_indices() {
+    static const std::vector<std::uint16_t> indices = skirted_by(0, coarse_step);
+    return indices;
 }
 
 } // namespace hog::terrain

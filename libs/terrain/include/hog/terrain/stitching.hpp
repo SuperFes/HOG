@@ -21,4 +21,15 @@ inline constexpr int stitchings = 16;
 // same edges.
 [[nodiscard]] std::span<const std::uint16_t> skirt_indices(std::uint8_t coarser_edges);
 
+// Vertices a step apart along each side of a patch drawn coarse.
+inline constexpr int coarse_step = 4;
+
+// Triangles over every coarse_step'th vertex of a patch, wound as patch_indices, for views so
+// small its cells would be finer than their pixels. Its edges aren't stitched: its skirts cover
+// the cracks to its neighbours.
+[[nodiscard]] std::span<const std::uint16_t> coarse_patch_indices();
+
+// Triangles over a coarse patch's skirts, as skirt_indices, hung from its outline.
+[[nodiscard]] std::span<const std::uint16_t> coarse_skirt_indices();
+
 } // namespace hog::terrain

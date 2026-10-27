@@ -128,12 +128,13 @@ hog::render::TerrainView looking_down(DVec3 below, double height, DVec3 sun = {0
             .night_light = 0.5};
 }
 
-// Uploads what's staged, records `before` if given, then draws over a black background and reads
-// it back.
-std::vector<std::uint8_t> draw(hog::render::Device& device, const hog::render::Terrain& terrain,
-                               hog::render::TerrainPool& pool, std::span<const TerrainDraw> draws,
-                               const hog::render::TerrainView& view,
-                               const std::function<void(VkCommandBuffer)>& before = {}) {
+// Uploads what's staged, records `before` if given, then draws over a black background, in as
+// much `detail`, and reads it back.
+std::vector<std::uint8_t>
+draw(hog::render::Device& device, const hog::render::Terrain& terrain,
+     hog::render::TerrainPool& pool, std::span<const TerrainDraw> draws,
+     const hog::render::TerrainView& view, const std::function<void(VkCommandBuffer)>& before = {},
+     hog::render::Terrain::Detail detail = hog::render::Terrain::Detail::Full) {
     auto target = hog::render::make_image(
         device, {.format = VK_FORMAT_R8G8B8A8_UNORM,
                  .extent = extent,
@@ -158,7 +159,7 @@ std::vector<std::uint8_t> draw(hog::render::Device& device, const hog::render::T
         hog::render::begin_rendering(commands, target->view(), extent,
                                      VkClearColorValue{.float32 = {0.0F, 0.0F, 0.0F, 1.0F}},
                                      {.view = depth->view()});
-        terrain.draw(commands, extent, pool, draws, view);
+        terrain.draw(commands, extent, pool, draws, view, detail);
         vkCmdEndRendering(commands);
     }));
     auto pixels = hog::render::read_pixels(device, *target, hog::render::image_use::colour_target);
@@ -483,6 +484,39 @@ TEST_CASE("patches meet across a level boundary without cracks", "[render][gpu]"
     };
     CHECK(background_pixels(seam(hog::terrain::edge_minus_u)) == 0);
     CHECK(background_pixels(seam(0)) > 0);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("drawn coarse, patches leave out the vertices that would crack a level boundary",
+          "[render][gpu]") {
+    const auto device = test_device();
+    const auto terrain = make_terrain(*device);
+    auto pool = make_pool(*device, {.patches = 3, .uploads = 3});
+    for (int slot = 0; slot < 3; ++slot) {
+        REQUIRE(pool.acquire());
+    }
+    // As across a level boundary, the finer side's odd vertices along the seam off it, and none
+    // stitched to the coarse side.
+    constexpr float fine = 1.0F;
+    constexpr double half = patch_cells / 2.0;
+    REQUIRE(pool.stage(0, 0, flat_patch(2.0F * fine)));
+    REQUIRE(pool.stage(0, 1, flat_patch(fine, {fine / 2.0F, 0.0F, 0.0F})));
+    REQUIRE(pool.stage(0, 2, flat_patch(fine, {fine / 2.0F, 0.0F, 0.0F})));
+    const std::array draws{
+        TerrainDraw{.slot = 0, .origin = WorldPosition{DVec3{-2.0 * half, 0.0, 0.0}}},
+        TerrainDraw{.slot = 1, .origin = WorldPosition{DVec3{half, -half, 0.0}}},
+        TerrainDraw{.slot = 2, .origin = WorldPosition{DVec3{half, half, 0.0}}}};
+    const auto seam = [&](hog::render::Terrain::Detail detail) {
+        return draw(*device, terrain, pool, draws, looking_down({}, 14.6), {}, detail);
+    };
+    const auto full = seam(hog::render::Terrain::Detail::Full);
+    const auto coarse = seam(hog::render::Terrain::Detail::Coarse);
+    CHECK(background_pixels(full) > 0);
+    CHECK(background_pixels(coarse) == 0);
+    // Away from the seam, as the ground drawn in full is.
+    for (const std::uint32_t x : {8U, 16U, 48U, 56U}) {
+        CHECK(near(pixel_at(coarse, x, 32), pixel_at(full, x, 32)));
+    }
     CHECK(device->validation_errors() == 0);
 }
 

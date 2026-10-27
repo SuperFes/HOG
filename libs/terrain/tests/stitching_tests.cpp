@@ -17,6 +17,7 @@
 #include <optional>
 #include <random>
 #include <set>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -67,9 +68,8 @@ struct BorderSegment {
     std::uint16_t b;
 };
 
-// The segments of a stitching's outline: those only one of its triangles has.
-std::vector<BorderSegment> outline(std::uint8_t edges) {
-    const auto indices = patch_indices(edges);
+// The segments of a patch's outline: those only one of its triangles has.
+std::vector<BorderSegment> outline(std::span<const std::uint16_t> indices) {
     std::map<std::pair<std::uint16_t, std::uint16_t>, int> uses;
     for (std::size_t first = 0; first < indices.size(); first += 3) {
         for (std::size_t k = 0; k < 3; ++k) {
@@ -85,6 +85,58 @@ std::vector<BorderSegment> outline(std::uint8_t edges) {
         }
     }
     return segments;
+}
+
+std::vector<BorderSegment> outline(std::uint8_t edges) {
+    return outline(patch_indices(edges));
+}
+
+// Each of `skirts`' triangles has two corners on `surface`'s outline and one under them, or one
+// on it and two under, and a quad of them hangs from each outline segment, and from nothing else.
+void check_skirts(std::span<const std::uint16_t> skirts, std::span<const std::uint16_t> surface) {
+    // The edge and place along it of the vertex a skirt vertex hangs under.
+    const auto above = [](std::uint16_t vertex) {
+        const int skirt = vertex - hog::terrain::patch_grid_vertices;
+        const int edge = skirt / patch_side;
+        const auto point = hog::terrain::on_edge(edge, skirt % patch_side);
+        return std::pair{edge, static_cast<std::uint16_t>((point.j * patch_side) + point.i)};
+    };
+    REQUIRE(skirts.size() % 3 == 0);
+    std::multiset<std::pair<std::uint16_t, std::uint16_t>> hung;
+    std::multiset<std::pair<std::uint16_t, std::uint16_t>> under;
+    for (std::size_t first = 0; first < skirts.size(); first += 3) {
+        std::vector<std::uint16_t> tops;
+        std::vector<std::uint16_t> bottoms;
+        for (std::size_t k = 0; k < 3; ++k) {
+            const std::uint16_t vertex = skirts[first + k];
+            REQUIRE(vertex < hog::terrain::patch_vertices);
+            (vertex < hog::terrain::patch_grid_vertices ? tops : bottoms).push_back(vertex);
+        }
+        REQUIRE((tops.size() == 1 || tops.size() == 2));
+        auto& ends = tops.size() == 2 ? hung : under;
+        const auto& pair = tops.size() == 2 ? tops : bottoms;
+        const std::uint16_t lone = tops.size() == 2 ? bottoms[0] : tops[0];
+        const auto [a, b] = std::minmax(pair[0], pair[1]);
+        if (tops.size() == 2) {
+            ends.insert({a, b});
+            // The bottom corner hangs under one of the top two, on their edge.
+            const auto [edge, over] = above(lone);
+            CHECK((over == a || over == b));
+            CHECK(edge_along(a, b) == edge);
+        } else {
+            const auto [edge_a, over_a] = above(a);
+            const auto [edge_b, over_b] = above(b);
+            CHECK(edge_a == edge_b);
+            ends.insert(std::minmax(over_a, over_b));
+            CHECK((lone == over_a || lone == over_b));
+        }
+    }
+    std::multiset<std::pair<std::uint16_t, std::uint16_t>> segments;
+    for (const BorderSegment& segment : outline(surface)) {
+        segments.insert({segment.a, segment.b});
+    }
+    CHECK(hung == segments);
+    CHECK(under == segments);
 }
 
 Corner corner_of(CellId cell, std::uint16_t vertex) {
@@ -265,53 +317,51 @@ TEST_CASE("selected patches meet without cracks", "[terrain][stitching]") {
 }
 
 TEST_CASE("every stitching's skirts hang from its outline", "[terrain][stitching]") {
-    // The edge and place along it of the vertex a skirt vertex hangs under.
-    const auto above = [](std::uint16_t vertex) {
-        const int skirt = vertex - hog::terrain::patch_grid_vertices;
-        const int edge = skirt / patch_side;
-        const auto point = hog::terrain::on_edge(edge, skirt % patch_side);
-        return std::pair{edge, static_cast<std::uint16_t>((point.j * patch_side) + point.i)};
-    };
     for (int edges = 0; edges < hog::terrain::stitchings; ++edges) {
-        const auto indices = hog::terrain::skirt_indices(static_cast<std::uint8_t>(edges));
-        REQUIRE(indices.size() % 3 == 0);
-        std::multiset<std::pair<std::uint16_t, std::uint16_t>> hung;
-        std::multiset<std::pair<std::uint16_t, std::uint16_t>> under;
-        for (std::size_t first = 0; first < indices.size(); first += 3) {
-            std::vector<std::uint16_t> tops;
-            std::vector<std::uint16_t> bottoms;
-            for (std::size_t k = 0; k < 3; ++k) {
-                const std::uint16_t vertex = indices[first + k];
-                REQUIRE(vertex < hog::terrain::patch_vertices);
-                (vertex < hog::terrain::patch_grid_vertices ? tops : bottoms).push_back(vertex);
-            }
-            REQUIRE((tops.size() == 1 || tops.size() == 2));
-            auto& ends = tops.size() == 2 ? hung : under;
-            const auto& pair = tops.size() == 2 ? tops : bottoms;
-            const std::uint16_t lone = tops.size() == 2 ? bottoms[0] : tops[0];
-            const auto [a, b] = std::minmax(pair[0], pair[1]);
-            if (tops.size() == 2) {
-                ends.insert({a, b});
-                // The bottom corner hangs under one of the top two, on their edge.
-                const auto [edge, over] = above(lone);
-                CHECK((over == a || over == b));
-                CHECK(edge_along(a, b) == edge);
-            } else {
-                const auto [edge_a, over_a] = above(a);
-                const auto [edge_b, over_b] = above(b);
-                CHECK(edge_a == edge_b);
-                ends.insert(std::minmax(over_a, over_b));
-                CHECK((lone == over_a || lone == over_b));
-            }
-        }
-        // A quad hangs from each outline segment, and from nothing else.
-        std::multiset<std::pair<std::uint16_t, std::uint16_t>> segments;
-        for (const BorderSegment& segment : outline(static_cast<std::uint8_t>(edges))) {
-            segments.insert({segment.a, segment.b});
-        }
-        CHECK(hung == segments);
-        CHECK(under == segments);
+        INFO("edges " << edges);
+        const auto edge_bits = static_cast<std::uint8_t>(edges);
+        check_skirts(hog::terrain::skirt_indices(edge_bits), patch_indices(edge_bits));
     }
+}
+
+TEST_CASE("a coarse patch covers it once, wound alike, from every coarse step's vertex",
+          "[terrain][stitching]") {
+    constexpr int step = hog::terrain::coarse_step;
+    static_assert(last % step == 0);
+    const auto indices = hog::terrain::coarse_patch_indices();
+    REQUIRE(indices.size() % 3 == 0);
+    CHECK(std::ssize(indices) / 3 == 2 * (last / step) * (last / step));
+    int twice_area = 0;
+    std::set<std::pair<std::uint16_t, std::uint16_t>> directed;
+    std::set<std::uint16_t> used;
+    for (std::size_t first = 0; first < indices.size(); first += 3) {
+        const GridPoint a = grid_point(indices[first]);
+        const GridPoint b = grid_point(indices[first + 1]);
+        const GridPoint c = grid_point(indices[first + 2]);
+        const int turn = ((b.i - a.i) * (c.j - a.j)) - ((b.j - a.j) * (c.i - a.i));
+        CHECK(turn > 0);
+        twice_area += turn;
+        for (std::size_t k = 0; k < 3; ++k) {
+            used.insert(indices[first + k]);
+            CHECK(directed.insert({indices[first + k], indices[first + ((k + 1) % 3)]}).second);
+        }
+    }
+    CHECK(twice_area == 2 * last * last);
+    for (const auto& [from, to] : directed) {
+        if (!directed.contains({to, from})) {
+            CHECK(edge_along(from, to).has_value());
+        }
+    }
+    CHECK(std::ssize(used) == ((last / step) + 1) * ((last / step) + 1));
+    for (const std::uint16_t vertex : used) {
+        const GridPoint point = grid_point(vertex);
+        CHECK(point.i % step == 0);
+        CHECK(point.j % step == 0);
+    }
+}
+
+TEST_CASE("a coarse patch's skirts hang from its outline", "[terrain][stitching]") {
+    check_skirts(hog::terrain::coarse_skirt_indices(), hog::terrain::coarse_patch_indices());
 }
 
 TEST_CASE("a stitching beyond four edges is refused", "[terrain][stitching]") {

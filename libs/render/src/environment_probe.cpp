@@ -124,7 +124,7 @@ void EnvironmentProbe::record(VkCommandBuffer commands, std::uint32_t frame,
                 TerrainView ground = view.terrain;
                 ground.camera = skies.at(face).camera;
                 ground.air.aerial = aerial;
-                terrain.draw(commands, extent, pool, view.ground, ground);
+                terrain.draw(commands, extent, pool, view.ground, ground, Terrain::Detail::Coarse);
             }
         }
         vkCmdEndRendering(commands);
