@@ -169,11 +169,14 @@ TEST_CASE("the seabed shows through the sea least at a glance, and the deeper it
     CHECK(at(30.0, 20'000.0) < 1e-4);
 }
 
-TEST_CASE("ground not under the sea, or not seen from above it, shows whole", "[terrain][sea]") {
+TEST_CASE("ground not under the sea, or not seen from clear above it, shows whole",
+          "[terrain][sea]") {
     const Optics water = optics(open_sea);
     CHECK(seabed_showing(earth + 400.0, earth, earth - 50.0, earth + 1.0, 0.01, 0.02, water) ==
           1.0);
     CHECK(seabed_showing(earth - 5.0, earth, earth - 50.0, earth - 40.0, 0.01, 0.02, water) == 1.0);
+    // Over the sea's mean but under a wave's crest.
+    CHECK(seabed_showing(earth + 0.5, earth, earth - 50.0, earth - 40.0, 0.01, 0.02, water) == 1.0);
 }
 
 TEST_CASE("no part of the seabed shows more than its bound says", "[terrain][sea]") {

@@ -1,5 +1,6 @@
 #include <hog/core/assert.hpp>
 #include <hog/terrain/sea.hpp>
+#include <hog/terrain/shore.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -76,7 +77,8 @@ DVec3 sea_from_eye(const Bend& bend, double along, DVec3 towards) {
 
 double seabed_showing(double eye, double sea, double deepest, double shallowest, double nearest,
                       double farthest, const Optics& water) {
-    if (eye <= sea || shallowest >= sea) {
+    // An eye the waves may still rise over can be looking from under them.
+    if (eye <= sea + static_cast<double>(shore_reach) || shallowest >= sea) {
         return 1.0;
     }
     // A line of sight meets every sphere round the centre the more steeply the nearer it passes

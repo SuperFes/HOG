@@ -53,7 +53,7 @@ inline constexpr double water_least_facing = 0.1;
 // up, of whichever colour gets through `water` best. Seen from `eye` metres from the centre of a
 // sea `sea` metres in radius, of ground between `deepest` and `shallowest` metres from the centre,
 // `nearest` to `farthest` radians round from under the eye. 1 for ground that isn't under the sea,
-// or an eye that isn't above it.
+// or an eye no higher than the sea rises, shore_reach, which may be under its waves.
 [[nodiscard]] double seabed_showing(double eye, double sea, double deepest, double shallowest,
                                     double nearest, double farthest, const Optics& water);
 
