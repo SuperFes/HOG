@@ -347,6 +347,9 @@ public struct Lighting {
     public float4 downwind;
     // What the water at the eye carries, as water.slang's optics takes it.
     public float4 carried;
+    // xyz the metres the cloud's drifted along the ground at the eye since the weather's maps were
+    // taken, in the planet's frame.
+    public float4 drifted;
 };
 
 // The gusts' field as `lighting` lays it.

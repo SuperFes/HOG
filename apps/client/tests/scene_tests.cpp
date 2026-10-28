@@ -279,7 +279,7 @@ Shot looking_north(hog::DVec3 under, double altitude, double pitch) {
 
 // The same weather everywhere, shown at once.
 hog::client::Forecast everywhere(hog::protocol::CellWeather cell) {
-    hog::client::Forecast forecast;
+    hog::client::Forecast forecast{world().geology().planet_radius()};
     forecast.receive(
         {.level = 2,
          .fade = 0ms,

@@ -826,7 +826,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
     MonotonicClock::time_point last = started;
     ShaderReloader shaders{options.reload_shaders};
     std::optional<client::Player> player;
-    client::Forecast forecast;
+    client::Forecast forecast{radius};
     ChatBox chat;
     bool routed_to_chat = false;
     render::Camera camera = client::flight_camera(flight, client::vertical_fov);

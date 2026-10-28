@@ -136,7 +136,7 @@ bool WeatherMaps::ready() const noexcept {
            sky_after_.ready();
 }
 
-WeatherBindings WeatherMaps::bindings(double faded) const noexcept {
+WeatherBindings WeatherMaps::bindings(double faded, DVec3 drifted) const noexcept {
     if (!ready()) {
         return {.weather_before = clear_.view(),
                 .weather_after = clear_.view(),
@@ -148,7 +148,8 @@ WeatherBindings WeatherMaps::bindings(double faded) const noexcept {
                 .fog_top = 0.0,
                 .lowest_base = 0.0,
                 .highest_base = 0.0,
-                .highest_top = 0.0};
+                .highest_top = 0.0,
+                .drifted = drifted};
     }
     return {.weather_before = weather_before_.image().view(),
             .weather_after = weather_after_.image().view(),
@@ -160,7 +161,8 @@ WeatherBindings WeatherMaps::bindings(double faded) const noexcept {
             .fog_top = fog_top_,
             .lowest_base = lowest_base_,
             .highest_base = highest_base_,
-            .highest_top = highest_top_};
+            .highest_top = highest_top_,
+            .drifted = drifted};
 }
 
 } // namespace hog::render

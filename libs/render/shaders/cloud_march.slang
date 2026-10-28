@@ -138,10 +138,12 @@ struct Cell {
 };
 
 Cell cell_at(float3 direction) {
-    const float4 weather = lerp(weather_before.SampleLevel(direction, 0.0),
-                                weather_after.SampleLevel(direction, 0.0), push.radii.z);
-    const SkyCell sky = sky_cell(lerp(sky_before.SampleLevel(direction, 0.0),
-                                      sky_after.SampleLevel(direction, 0.0), push.radii.z));
+    // Where the cloud over it now lay when the maps were taken.
+    const float3 from = normalize((direction * lighting.weather.x) - lighting.drifted.xyz);
+    const float4 weather = lerp(weather_before.SampleLevel(from, 0.0),
+                                weather_after.SampleLevel(from, 0.0), push.radii.z);
+    const SkyCell sky = sky_cell(lerp(sky_before.SampleLevel(from, 0.0),
+                                      sky_after.SampleLevel(from, 0.0), push.radii.z));
     Cell cell;
     cell.cover = weather.r;
     cell.mm = weather.g * weather.g * 16.0;

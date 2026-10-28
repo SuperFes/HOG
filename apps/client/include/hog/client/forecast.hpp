@@ -37,11 +37,15 @@ inline constexpr double height_texel_step = 64.0;
 // The weather as a line for people to read.
 [[nodiscard]] std::string describe(const protocol::CellWeather& weather);
 
-// The weather the server last sent, faded to from what was shown when it came.
+// The weather the server last sent, faded to from what was shown when it came, and its cloud
+// drifted on with the weather since, until the next comes.
 class Forecast {
 public:
-    // Fades from what's shown at `now` to `weather` over its fade. The first weather, or weather at
-    // another level from what's shown, is shown at once.
+    // On a planet whose sea level lies `radius` metres from its centre.
+    explicit Forecast(double radius) noexcept : radius_(radius) {}
+
+    // Fades from what's shown at `now`, where it's drifted to, to `weather` over its fade. The
+    // first weather, or weather at another level from what's shown, is shown at once.
     void receive(const protocol::Weather& weather, MonotonicClock::time_point now);
 
     [[nodiscard]] bool known() const noexcept { return grid_.has_value(); }
@@ -49,6 +53,9 @@ public:
     [[nodiscard]] double faded(MonotonicClock::time_point now) const noexcept;
     // The weather at a unit direction as shown at `now`; a clear sky while none is known.
     [[nodiscard]] protocol::CellWeather at(DVec3 direction, MonotonicClock::time_point now) const;
+    // Metres the cloud shown at a unit direction at `now` has drifted along the ground since the
+    // weather came, in the planet's frame.
+    [[nodiscard]] DVec3 drifted(DVec3 direction, MonotonicClock::time_point now) const;
     // The sea at a unit direction as shown at `now`, in the planet's frame: the wave systems of
     // the cells around it, each as much as that cell counts there, so the waves change smoothly
     // from cell to cell. A calm sea while none is known.
@@ -65,6 +72,12 @@ public:
     [[nodiscard]] std::uint64_t received() const noexcept { return received_; }
 
 private:
+    // Of the cells faded from and to, as shown at `now` at a unit direction, the cloud as it lay
+    // where it's drifted from.
+    [[nodiscard]] protocol::CellWeather shown(const protocol::CellWeather& here, DVec3 direction,
+                                              MonotonicClock::time_point now) const;
+
+    double radius_;
     std::optional<sim::CellGrid> grid_;
     std::vector<protocol::CellWeather> from_;
     std::vector<protocol::CellWeather> to_;

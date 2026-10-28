@@ -1,4 +1,5 @@
 #include <hog/client/forecast.hpp>
+#include <hog/planet/tangent_frame.hpp>
 #include <hog/sim/weather.hpp>
 
 #include <glm/glm.hpp>
@@ -161,9 +162,12 @@ void Forecast::receive(const protocol::Weather& weather, MonotonicClock::time_po
         fade_ = {};
     } else {
         const auto by = static_cast<float>(faded(now));
+        Cells was(from_.size());
         for (std::size_t index = 0; index < from_.size(); ++index) {
-            from_[index] = mixed(from_[index], to_[index], by);
+            was[index] = shown(mixed(from_[index], to_[index], by),
+                               grid_->frame(static_cast<std::uint32_t>(index)).up, now);
         }
+        from_ = std::move(was);
         to_ = weather.cells;
         fade_ = weather.fade;
         if (fade_ <= MonotonicClock::duration::zero()) {
@@ -192,8 +196,42 @@ protocol::CellWeather Forecast::at(DVec3 direction, MonotonicClock::time_point n
     if (!grid_) {
         return {};
     }
-    return mixed(interpolated(*grid_, from_, direction), interpolated(*grid_, to_, direction),
-                 static_cast<float>(faded(now)));
+    return shown(mixed(interpolated(*grid_, from_, direction), interpolated(*grid_, to_, direction),
+                       static_cast<float>(faded(now))),
+                 direction, now);
+}
+
+DVec3 Forecast::drifted(DVec3 direction, MonotonicClock::time_point now) const {
+    if (!grid_) {
+        return DVec3{0.0};
+    }
+    const protocol::CellWeather here =
+        mixed(interpolated(*grid_, from_, direction), interpolated(*grid_, to_, direction),
+              static_cast<float>(faded(now)));
+    const double seconds = std::max(std::chrono::duration<double>(now - since_).count(), 0.0);
+    return planet::tangent_frame(direction).to_world(
+               {static_cast<double>(here.drift.x), static_cast<double>(here.drift.y), 0.0}) *
+           seconds;
+}
+
+protocol::CellWeather Forecast::shown(const protocol::CellWeather& here, DVec3 direction,
+                                      MonotonicClock::time_point now) const {
+    if (!grid_) {
+        return here;
+    }
+    const DVec3 from = glm::normalize((direction * radius_) - drifted(direction, now));
+    const protocol::CellWeather there =
+        mixed(interpolated(*grid_, from_, from), interpolated(*grid_, to_, from),
+              static_cast<float>(faded(now)));
+    protocol::CellWeather found = here;
+    found.cloud = there.cloud;
+    found.falling = there.falling;
+    found.snow = there.snow;
+    found.humidity = there.humidity;
+    found.fog_top = there.fog_top;
+    found.base = there.base;
+    found.top = there.top;
+    return found;
 }
 
 waves::SeaState Forecast::sea_at(DVec3 direction, MonotonicClock::time_point now) const {

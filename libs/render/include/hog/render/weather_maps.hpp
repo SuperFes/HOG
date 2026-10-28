@@ -1,5 +1,6 @@
 #pragma once
 
+#include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
 #include <hog/render/memory.hpp>
 #include <hog/render/sampler.hpp>
@@ -30,6 +31,9 @@ struct WeatherBindings {
     double lowest_base = 0.0;
     double highest_base = 0.0;
     double highest_top = 0.0;
+    // Metres the cloud has drifted along the ground at the eye since the maps were taken, in the
+    // planet's frame: each is read where the cloud drifted from.
+    DVec3 drifted{0.0};
 };
 
 // Per metre, how much of the light along a view the mist takes at `height` metres above sea level,
@@ -58,7 +62,7 @@ public:
                     std::span<const std::byte> sky_after);
     [[nodiscard]] bool ready() const noexcept;
 
-    [[nodiscard]] WeatherBindings bindings(double faded) const noexcept;
+    [[nodiscard]] WeatherBindings bindings(double faded, DVec3 drifted = DVec3{0.0}) const noexcept;
 
 private:
     WeatherMaps() = default;

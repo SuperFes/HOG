@@ -85,6 +85,18 @@ waves::SeaState sea_at_eye(const Shot& shot) {
     return shot.forecast->sea_at(shot.bend.up, shot.now);
 }
 
+namespace {
+
+// Metres the cloud over the eye has drifted since the weather the shot has came.
+DVec3 weather_drifted(const Shot& shot) {
+    if (shot.forecast == nullptr || !shot.forecast->known()) {
+        return DVec3{0.0};
+    }
+    return shot.forecast->drifted(shot.bend.up, shot.now);
+}
+
+} // namespace
+
 DVec3 drift_at(DVec3 up, const protocol::CellWeather& weather) {
     return planet::tangent_frame(up).to_world(
         {static_cast<double>(weather.drift.x), static_cast<double>(weather.drift.y), 0.0});
@@ -586,7 +598,8 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     const double faded = cloudy ? shot.forecast->faded(shot.now) : 1.0;
     // Taken as the passes are recorded, after the uploads: until the maps are first taken, a clear
     // sky.
-    const auto weather = [&] { return weather_.bindings(faded); };
+    const DVec3 drifted = weather_drifted(shot);
+    const auto weather = [&] { return weather_.bindings(faded, drifted); };
     render::SkyView sky = sky_view(shot, shade);
     sky.gusts = gusts_.seen();
     sky.mist =

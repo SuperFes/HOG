@@ -100,6 +100,8 @@ struct Scene {
     double faded = 1.0;
     std::vector<std::byte> sky = everywhere(layer);
     DVec3 moved{0.0};
+    // How far the weather's drifted since its maps were taken.
+    DVec3 drifted{0.0};
     // Drawn nearest of all.
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     std::optional<VkRect2D> covered = {};
@@ -151,7 +153,7 @@ std::vector<Pixels> draw_frames(hog::render::Device& device, const std::vector<S
             CHECK(maps->update(commands, 0, scene.before, scene.after.value_or(scene.before),
                                scene.sky, scene.sky));
         }));
-        const hog::render::WeatherBindings weather = maps->bindings(scene.faded);
+        const hog::render::WeatherBindings weather = maps->bindings(scene.faded, scene.drifted);
 
         const WorldPosition eye{up * (radius + scene.eye_height)};
         const hog::terrain::Bend bend = hog::terrain::bend_from(eye, radius, 0.0);
@@ -947,6 +949,24 @@ TEST_CASE("broken cloud drifts downwind, its shadow with it", "[render][gpu][atm
     CAPTURE(best);
     CHECK(best >= 15);
     CHECK(best <= 17);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("cloud is drawn where the weather's drifted it since its maps were taken",
+          "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    const auto shadow_of = [&](DVec3 drifted) {
+        Shadow shadow;
+        static_cast<void>(
+            draw_frames(*device, {{.before = map_of(northern), .drifted = drifted}}, &shadow));
+        return shadow;
+    };
+    // Over the north, from about 11 km north of the eye; and then from 20 km further north.
+    const glm::vec4 still = mean_between(shadow_of(DVec3{0.0}), 22'000.0, 28'000.0);
+    const glm::vec4 drifted = mean_between(shadow_of(north * 20'000.0), 22'000.0, 28'000.0);
+    INFO("still " << still.r << ", drifted " << drifted.r);
+    CHECK(still.r < 0.1F);
+    CHECK(drifted.r > 0.9F);
     CHECK(device->validation_errors() == 0);
 }
 

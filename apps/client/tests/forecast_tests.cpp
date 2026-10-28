@@ -29,6 +29,7 @@ using hog::protocol::Weather;
 namespace {
 
 constexpr MonotonicClock::time_point start{};
+constexpr double radius = 115'000.0;
 
 Weather everywhere(CellWeather cell, std::chrono::milliseconds fade = 10s, std::uint8_t level = 2) {
     return {.level = level,
@@ -105,7 +106,7 @@ TEST_CASE("the weather reads as a line", "[client][forecast]") {
 }
 
 TEST_CASE("with no weather the sky is clear", "[client][forecast]") {
-    const Forecast forecast;
+    const Forecast forecast{radius};
     CHECK_FALSE(forecast.known());
     CHECK(forecast.at(DVec3{0.0, 0.0, 1.0}, start) == CellWeather{});
     CHECK(forecast.before().empty());
@@ -113,7 +114,7 @@ TEST_CASE("with no weather the sky is clear", "[client][forecast]") {
 }
 
 TEST_CASE("the first weather is shown at once", "[client][forecast]") {
-    Forecast forecast;
+    Forecast forecast{radius};
     const CellWeather rainy{.cloud = 2.0F,
                             .falling = 4.0F,
                             .snow = 0.25F,
@@ -153,7 +154,7 @@ TEST_CASE("the first weather is shown at once", "[client][forecast]") {
 }
 
 TEST_CASE("new weather fades in over its fade", "[client][forecast]") {
-    Forecast forecast;
+    Forecast forecast{radius};
     forecast.receive(everywhere({}), start);
     forecast.receive(everywhere({.cloud = 4.0F}), start + 1s);
     CHECK(forecast.received() == 2);
@@ -166,7 +167,7 @@ TEST_CASE("new weather fades in over its fade", "[client][forecast]") {
 }
 
 TEST_CASE("weather coming mid-fade fades on from what's shown", "[client][forecast]") {
-    Forecast forecast;
+    Forecast forecast{radius};
     forecast.receive(everywhere({}), start);
     forecast.receive(everywhere({.cloud = 4.0F}), start);
     forecast.receive(everywhere({.cloud = 0.0F}), start + 5s);
@@ -176,7 +177,7 @@ TEST_CASE("weather coming mid-fade fades on from what's shown", "[client][foreca
 }
 
 TEST_CASE("weather with no fade, or at another level, is shown at once", "[client][forecast]") {
-    Forecast forecast;
+    Forecast forecast{radius};
     forecast.receive(everywhere({}), start);
     forecast.receive(everywhere({.cloud = 4.0F}, 0ms), start);
     CHECK_THAT(cloud_at(forecast, start), WithinAbs(4.0, 1e-5));
@@ -201,7 +202,7 @@ TEST_CASE("the sea goes on from where it stood when the next weather comes", "[c
     const DVec3 at = glm::normalize(DVec3{1.0, 2.0, 0.5});
     const hog::planet::TangentFrame frame = hog::planet::tangent_frame(at);
     const auto stood = [&](MonotonicClock::time_point when, double expected, double current) {
-        Forecast forecast;
+        Forecast forecast{radius};
         forecast.receive(everywhere({}, 10s, hog::protocol::most_weather_level), start);
         forecast.receive(everywhere(wavy, 10s, hog::protocol::most_weather_level), start);
         const hog::waves::SeaState before = forecast.sea_at(at, when);
@@ -230,7 +231,7 @@ TEST_CASE("the sea is the waves of the cells around, each as much as it counts t
         }
         return sum;
     };
-    Forecast forecast;
+    Forecast forecast{radius};
     CHECK(forecast.sea_at(DVec3{0.0, 0.0, 1.0}, start).systems.empty());
     forecast.receive(everywhere({}, 10s, hog::protocol::most_weather_level), start);
     CHECK(forecast.sea_at(DVec3{0.0, 0.0, 1.0}, start).systems.empty());
@@ -269,7 +270,7 @@ TEST_CASE("the weather's map holds what's at each texel's direction", "[client][
         weather.cells[index].base = static_cast<float>(2'000.0 + (1'000.0 * up.z));
         weather.cells[index].fog_top = up.x > 0.0 ? static_cast<float>(400.0 * up.x) : 0.0F;
     }
-    Forecast forecast;
+    Forecast forecast{radius};
     forecast.receive(weather, start);
     for (std::uint32_t face = 0; face < 6; ++face) {
         for (std::uint32_t y = 0; y < weather_map_size; y += 7) {
@@ -288,4 +289,61 @@ TEST_CASE("the weather's map holds what's at each texel's direction", "[client][
             }
         }
     }
+}
+
+namespace {
+
+// Cloud thickening eastwards over the planet, as the weather blows it east at 20 m/s.
+Weather drifting_east() {
+    Weather weather = everywhere({});
+    const hog::sim::CellGrid grid{weather.level};
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        weather.cells[index].cloud = static_cast<float>(8.0 + (8.0 * grid.frame(index).up.x));
+        weather.cells[index].drift = {20.0F, 0.0F};
+    }
+    return weather;
+}
+
+// The direction of the eye in these tests, where east the ground runs along +x.
+DVec3 eye() {
+    return glm::normalize(DVec3{0.1, -1.0, 0.2});
+}
+
+// The unit direction `metres` west of the eye.
+DVec3 west_of_eye(double metres) {
+    return glm::normalize((eye() * radius) - (hog::planet::tangent_frame(eye()).east * metres));
+}
+
+} // namespace
+
+TEST_CASE("cloud drifts on with the weather until the next comes", "[client][forecast]") {
+    Forecast forecast{radius};
+    forecast.receive(drifting_east(), start);
+    const MonotonicClock::time_point later = start + 100s;
+    const DVec3 drifted = forecast.drifted(eye(), later);
+    CHECK_THAT(glm::dot(drifted, hog::planet::tangent_frame(eye()).east), WithinAbs(2'000.0, 1.0));
+    // What lay 2 km upwind lies over the eye now.
+    const auto cloud = [&](DVec3 direction, MonotonicClock::time_point now) {
+        return static_cast<double>(forecast.at(direction, now).cloud);
+    };
+    CHECK_THAT(cloud(eye(), later), WithinAbs(cloud(west_of_eye(2'000.0), start), 1e-3));
+    CHECK(cloud(eye(), later) < cloud(eye(), start) - 0.05);
+}
+
+TEST_CASE("weather coming in fades on from where the cloud had drifted to", "[client][forecast]") {
+    Forecast forecast{radius};
+    forecast.receive(drifting_east(), start);
+    const MonotonicClock::time_point came = start + 300s;
+    const double shown = static_cast<double>(forecast.at(eye(), came).cloud);
+    // The same weather again: what's shown doesn't jump back to where it lay when it last came.
+    forecast.receive(drifting_east(), came);
+    CHECK_THAT(static_cast<double>(forecast.at(eye(), came).cloud), WithinAbs(shown, 0.02));
+    // Faded to what's come, drifted on as long as the fade.
+    const Forecast fresh = [] {
+        Forecast found{radius};
+        found.receive(drifting_east(), start);
+        return found;
+    }();
+    CHECK_THAT(static_cast<double>(forecast.at(eye(), came + 10s).cloud),
+               WithinAbs(static_cast<double>(fresh.at(west_of_eye(200.0), start).cloud), 0.02));
 }
