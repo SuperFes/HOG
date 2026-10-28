@@ -908,6 +908,48 @@ TEST_CASE("the cloud's shadow lies beneath it, and over the ground it leaves cle
     }
 }
 
+TEST_CASE("broken cloud drifts downwind, its shadow with it", "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    // The map's rows run east, as mean_between lays it out; each texel 125 m across.
+    const auto shadow_of = [&](DVec3 moved) {
+        Shadow shadow;
+        static_cast<void>(
+            draw_frames(*device, {{.before = everywhere(broken), .moved = moved}}, &shadow));
+        return shadow;
+    };
+    const Shadow still = shadow_of(DVec3{0.0});
+    const Shadow drifted = shadow_of(east * 2'000.0);
+    const auto size = static_cast<int>(std::lround(std::sqrt(still.size())));
+    // How far east, in rows, the drifted shadow best matches the still one.
+    int best = 0;
+    double least = std::numeric_limits<double>::infinity();
+    for (int shift = -32; shift <= 32; ++shift) {
+        double sum = 0.0;
+        for (int y = 64; y < size - 64; ++y) {
+            for (int x = 64; x < size - 64; ++x) {
+                const float apart =
+                    drifted
+                        .at((static_cast<std::size_t>(y + shift) * static_cast<std::size_t>(size)) +
+                            static_cast<std::size_t>(x))
+                        .r -
+                    still
+                        .at((static_cast<std::size_t>(y) * static_cast<std::size_t>(size)) +
+                            static_cast<std::size_t>(x))
+                        .r;
+                sum += static_cast<double>(apart * apart);
+            }
+        }
+        if (sum < least) {
+            least = sum;
+            best = shift;
+        }
+    }
+    CAPTURE(best);
+    CHECK(best >= 15);
+    CHECK(best <= 17);
+    CHECK(device->validation_errors() == 0);
+}
+
 TEST_CASE("the lower the clouds' quality, the coarser they're marched and their shadow mapped",
           "[render]") {
     constexpr VkExtent2D picture{.width = 1'601, .height = 900};

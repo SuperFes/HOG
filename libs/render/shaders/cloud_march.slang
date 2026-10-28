@@ -156,7 +156,7 @@ Cell cell_at(float3 direction) {
 // The weather at `direction` on a planet of `radius`, its edges wandering and its base uneven.
 Cell wandering_cell_at(float3 direction, float radius) {
     const float3 ground = direction * radius;
-    const float4 broad = shape_noise.SampleLevel((ground + push.moved.xyz) / wander_tile, 1.0);
+    const float4 broad = shape_noise.SampleLevel((ground - push.moved.xyz) / wander_tile, 1.0);
     Cell cell = cell_at(normalize(ground + ((broad.gba - 0.5) * wander)));
     cell.base += (broad.r - 0.5) * lift * (cell.top - cell.base);
     return cell;
@@ -180,7 +180,7 @@ float cloud_at(float3 at, float height, Cell cell, float footprint, bool worn, o
     const float rounding = lerp(0.1, 0.6, saturate((thickness - 500.0) / 2500.0));
     const float profile = saturate(up / 0.08) * saturate((1.0 - up) / rounding);
 
-    const float3 drifted = at + push.moved.xyz;
+    const float3 drifted = at - push.moved.xyz;
     const float4 shape = shape_noise.SampleLevel(
         drifted / shape_tile, max(log2(footprint * shape_texels / shape_tile), 0.0));
     billows = shape.r;
@@ -215,7 +215,7 @@ float fog_at(float3 at, float height, Cell cell, float footprint) {
     if (deep <= 0.0) {
         return 0.0;
     }
-    const float3 drifted = at + push.moved.xyz;
+    const float3 drifted = at - push.moved.xyz;
     const float bank =
         shape_noise
             .SampleLevel(drifted / bank_tile, max(log2(footprint * shape_texels / bank_tile), 0.0))
@@ -291,7 +291,7 @@ float2 cloud_shade(Cell cell) {
 
 // How heavily it falls in its streaks at `height` over `direction`, about 1 on the whole.
 float streaks_at(float3 direction, float height, float footprint) {
-    const float3 at = (direction * (push.radii.x + (height / streak_stretch))) + push.moved.xyz;
+    const float3 at = (direction * (push.radii.x + (height / streak_stretch))) - push.moved.xyz;
     const float detail = detail_noise
                              .SampleLevel(at / streak_tile,
                                           max(log2(footprint * detail_texels / streak_tile), 0.0))
