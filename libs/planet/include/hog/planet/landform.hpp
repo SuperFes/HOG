@@ -122,6 +122,8 @@ public:
     // fixed_one of how far it reaches.
     [[nodiscard]] DVec3 unshifted(DVec3 shifted) const;
 
+    [[nodiscard]] std::uint64_t seed() const noexcept { return seed_; }
+
 private:
     std::uint64_t seed_;
     double reach_;     // unit-sphere distance

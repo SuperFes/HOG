@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <numbers>
 #include <optional>
 #include <vector>
 
@@ -18,12 +19,16 @@ namespace {
 constexpr std::array<float, 5> across_water{-1.0F, -1.0F, 0.0F, 1.0F, 1.0F};
 constexpr auto corners = static_cast<std::uint32_t>(across_water.size());
 
+// Pieces to a meander, enough to follow its bends.
+constexpr double pieces_per_turn = 8.0 / (2.0 * std::numbers::pi);
+
 // A piece's end across a reach's course: where its middle truly lies, which way across it the
-// channel is found from there, and the level of its water, if it runs over land, not into a lake
-// or the sea.
+// channel is found from there and how far its meanders swing it, and the level of its water, if it
+// runs over land, not into a lake or the sea.
 struct Section {
     DVec3 course;
     DVec3 side;
+    planet::Swing swing;
     DVec3 middle;
     std::optional<double> level;
 };
@@ -32,9 +37,13 @@ Section section_at(const planet::Elevation& terrain, const planet::Reach& reach,
     const DVec3 course = planet::course_at(reach, t);
     const DVec3 ahead = planet::course_at(reach, std::min(t + 0.01, 1.0)) -
                         planet::course_at(reach, std::max(t - 0.01, 0.0));
+    const DVec3 side = glm::normalize(glm::cross(course, ahead));
+    const planet::Swing swing = planet::swing_at(reach, t);
     Section section{.course = course,
-                    .side = glm::normalize(glm::cross(course, ahead)),
-                    .middle = terrain.rivers().meander().unshifted(course),
+                    .side = side,
+                    .swing = swing,
+                    .middle = terrain.rivers().meander().unshifted(
+                        glm::normalize(course + (side * swing.offset))),
                     .level = std::nullopt};
     const planet::CellId cell = planet::cell_at(section.middle);
     if (terrain.is_land(cell) && !terrain.lake(cell)) {
@@ -59,8 +68,11 @@ void lay_reach(const planet::Elevation& terrain, const planet::Reach& reach, DVe
     const double over = std::max(river_overlap, half);
     const double speed = river_speed(reach);
     const auto rough = static_cast<float>(river_rough(reach, radius));
+    const double turned = std::abs(reach.turn_from + reach.turn_to) / 2.0;
     const int pieces =
-        std::clamp(static_cast<int>(std::ceil(length / std::max(reach.width, river_piece))), 2, 64);
+        std::clamp(static_cast<int>(std::ceil(std::max(length / std::max(reach.width, river_piece),
+                                                       turned * pieces_per_turn))),
+                   2, 128);
     std::vector<Section> sections;
     sections.reserve(static_cast<std::size_t>(pieces) + 1);
     for (int piece = 0; piece <= pieces; ++piece) {
@@ -79,10 +91,14 @@ void lay_reach(const planet::Elevation& terrain, const planet::Reach& reach, DVe
             const bool edge = corner == 0 || corner + 1 == across_water.size();
             const double out =
                 static_cast<double>(across_water.at(corner)) * (half + (edge ? over : 0.0));
+            // Across the swung river, so it keeps its width where it swings steeply.
+            const double swung =
+                section.swing.offset +
+                (out / radius * std::sqrt(1.0 + (section.swing.slope * section.swing.slope)));
             const DVec3 point =
-                corner == 2 ? section.middle
-                            : meander.unshifted(
-                                  glm::normalize(section.course + (section.side * (out / radius))));
+                corner == 2
+                    ? section.middle
+                    : meander.unshifted(glm::normalize(section.course + (section.side * swung)));
             water.vertices.push_back(
                 {.position = Vec3{(point * (radius + level)) - origin.metres()},
                  .beyond = static_cast<float>(std::abs(out) - half),

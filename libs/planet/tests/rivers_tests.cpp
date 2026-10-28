@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <numbers>
 #include <optional>
 #include <tuple>
 #include <vector>
@@ -202,6 +203,73 @@ TEST_CASE("a river bends through each cell rather than turning a corner there",
         ++joined;
     }
     CHECK(joined > 10);
+}
+
+TEST_CASE("a river meanders about its course, by a width or two", "[planet][rivers]") {
+    int swinging = 0;
+    for (const Reach& reach : rivers().reaches()) {
+        const double run = glm::length(reach.to - reach.from);
+        CHECK(reach.swing_from * radius <= Rivers::swing_widths * reach.width * (1.0 + 1e-9));
+        CHECK(reach.swing_from <= 0.2 * run * (1.0 + 1e-9));
+        CHECK(reach.swing_to <= 0.2 * run * (1.0 + 1e-9));
+        CHECK(reach.turn_from > 0.0);
+        swinging += reach.swing_from * radius > reach.width ? 1 : 0;
+        // Most of a meander or more, the shortest are a few widths across.
+        const double meanders = (reach.turn_from + reach.turn_to) / 2.0 / (2.0 * std::numbers::pi);
+        CHECK(meanders * Rivers::meander_widths * reach.width > 0.5 * run * radius);
+    }
+    CHECK(swinging > 10);
+}
+
+TEST_CASE("a river's meanders carry on through each cell, and tributaries settle onto the river",
+          "[planet][rivers]") {
+    const auto reaches = rivers().reaches();
+    int carried = 0;
+    int settled = 0;
+    for (const Reach& reach : reaches) {
+        const auto next = std::ranges::find_if(
+            reaches, [&](const Reach& other) { return other.from == reach.to; });
+        if (next == reaches.end()) {
+            CHECK(reach.settling == 0.0);
+            continue;
+        }
+        const hog::planet::Swing end = hog::planet::swing_at(reach, 1.0);
+        const hog::planet::Swing start = hog::planet::swing_at(*next, 0.0);
+        CHECK(std::abs(end.offset - start.offset) * radius < 1e-6);
+        if (reach.settling == 0.0) {
+            CHECK(std::abs(end.slope - start.slope) < 1e-6);
+            ++carried;
+        } else {
+            CHECK(reach.settling <= 1.0);
+            ++settled;
+        }
+    }
+    CHECK(carried > 10);
+    CHECK(settled > 0);
+}
+
+TEST_CASE("a river's channel swings with its meanders", "[planet][rivers]") {
+    const hog::planet::Meander& meander = rivers().meander();
+    int swung = 0;
+    for (const Reach& reach : looked_across()) {
+        for (const double t : {0.25, 0.4, 0.55, 0.7}) {
+            const hog::DVec3 course = hog::planet::course_at(reach, t);
+            const hog::DVec3 heading =
+                hog::planet::course_at(reach, t + 0.01) - hog::planet::course_at(reach, t - 0.01);
+            const hog::DVec3 side = glm::normalize(glm::cross(course, heading));
+            const double offset = hog::planet::swing_at(reach, t).offset;
+            const auto at = [&](double off) {
+                return hog::planet::cell_at(
+                    meander.unshifted(glm::normalize(course + (side * off))), 22);
+            };
+            REQUIRE(rivers().in_channel(at(offset)));
+            if (std::abs(offset) * radius > reach.width) {
+                CHECK_FALSE(rivers().in_channel(at(0.0)));
+                ++swung;
+            }
+        }
+    }
+    CHECK(swung > 10);
 }
 
 TEST_CASE("a river tells how much it carries", "[planet][rivers]") {

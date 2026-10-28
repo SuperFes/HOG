@@ -47,10 +47,29 @@ struct Reach {
     DVec3 arriving{};
     // Cubic metres a second of water it carries.
     double flow = 0.0;
+    // Its meanders swing it to the left of its course by `swing` times the sine of their phase,
+    // which turns by `turn` radians per share along it; both are given at either end and carry on
+    // into the reach downstream. A tributary's meanders settle over the last `settling` share of
+    // it onto the river it joins, `joining` to the left. Distances are over the unit sphere.
+    double phase = 0.0;
+    double turn_from = 0.0;
+    double turn_to = 0.0;
+    double swing_from = 0.0;
+    double swing_to = 0.0;
+    double joining = 0.0;
+    double settling = 0.0;
 };
 
 // The unit direction to a reach's course a share `t` of the way from its start to its end.
 [[nodiscard]] DVec3 course_at(const Reach& reach, double t);
+
+// How far a reach's meanders swing it to the left of its course a share `t` along, over the unit
+// sphere, and how fast that changes along the course.
+struct Swing {
+    double offset = 0.0;
+    double slope = 0.0;
+};
+[[nodiscard]] Swing swing_at(const Reach& reach, double t);
 
 // Rivers from every landform cell that drains enough ground, each running to the cell it drains
 // into along a smooth course through their centres, and meandering about it. Channels widen and
@@ -65,6 +84,11 @@ public:
     static constexpr double bank_slope = 0.5;
     // Straight pieces a reach's course is found along.
     static constexpr int course_pieces = 8;
+
+    // Widths of a river from one meander to the next, and that it swings either side of its
+    // course, at most; steeper rivers swing less, and none over falls.
+    static constexpr double meander_widths = 11.0;
+    static constexpr double swing_widths = 1.8;
 
     // Rise over run of a reach's water from which it falls rather than runs.
     static constexpr double falls_gradient = 0.1;
