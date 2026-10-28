@@ -35,19 +35,21 @@ constexpr DVec3 up{0.0, 0.0, 1.0};
 constexpr DVec3 east{1.0, 0.0, 0.0};
 constexpr DVec3 north{0.0, 1.0, 0.0};
 
-// A river four metres wide flowing east at sea level, from five metres east of the point under
-// the eye to fifty, laid out over its banks either side.
-hog::terrain::RiverWater river() {
+// A river `half` metres wide either side of its middle flowing east at sea level, from five
+// metres east of the point under the eye to fifty, laid out over its banks either side as far.
+hog::terrain::RiverWater river(float half = 2.0F) {
     hog::terrain::RiverWater water{
         .origin = WorldPosition{up * earth}, .vertices = {}, .indices = {}};
     for (const double along : {5.0, 50.0}) {
         for (const float across : {-2.0F, -1.0F, 0.0F, 1.0F, 2.0F}) {
             water.vertices.push_back(
                 {.position =
-                     hog::Vec3{(east * along) + (north * (2.0 * static_cast<double>(across)))},
-                 .beyond = 2.0F * (std::abs(across) - 1.0F),
+                     hog::Vec3{(east * along) + (north * static_cast<double>(half * across))},
+                 .beyond = half * (std::abs(across) - 1.0F),
                  .flow = hog::Vec3{east},
-                 .rough = 0.0F});
+                 .rough = 0.0F,
+                 .outward = hog::Vec3{north * static_cast<double>(glm::sign(across))},
+                 .half = half});
         }
     }
     for (std::uint32_t corner = 0; corner < 4; ++corner) {
@@ -121,9 +123,10 @@ Beneath beneath(hog::render::Device& device, std::array<float, 4> colour, float 
     return {.colour = std::move(colours).value(), .depth = std::move(depths).value()};
 }
 
-// As looking() sees it at noon, over a black background, seeing through to what's beneath, as
-// copied.
-std::vector<std::uint8_t> drawn(hog::render::Device& device, const Beneath& under) {
+// As looking() sees `water` at noon, over a black background, seeing through to what's
+// beneath, as copied.
+std::vector<std::uint8_t> drawn(hog::render::Device& device, const Beneath& under,
+                                const hog::terrain::RiverWater& water = river()) {
     auto atmosphere = hog::render::Atmosphere::create(device);
     REQUIRE(atmosphere);
     auto sky = hog::render::Sky::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
@@ -131,7 +134,7 @@ std::vector<std::uint8_t> drawn(hog::render::Device& device, const Beneath& unde
     auto rivers =
         hog::render::RiverSurface::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
     REQUIRE(rivers);
-    rivers->show(std::make_shared<const hog::terrain::RiverWater>(river()));
+    rivers->show(std::make_shared<const hog::terrain::RiverWater>(water));
     const DVec3 sun = glm::normalize(up + (north * 0.3));
     const Camera camera = looking();
     const hog::terrain::Bend bend = hog::terrain::bend_from(camera.eye, earth, 0.0);
@@ -207,4 +210,14 @@ TEST_CASE("rivers' water is seen through to what's beneath it", "[render][gpu]")
         pixel_at(drawn(*device, beneath(*device, {0.0F, 1.0F, 0.0F, 1.0F}, bed)), 32, 32);
     CHECK(red[0] > green[0]);
     CHECK(green[1] > red[1]);
+}
+
+TEST_CASE("rivers' water too narrow to span a pixel is still drawn, faintly", "[render][gpu]") {
+    const auto device = test_device();
+    const Beneath black = beneath(*device, {0.0F, 0.0F, 0.0F, 1.0F}, 0.0F);
+    const int wide = brightness(pixel_at(drawn(*device, black), 32, 32));
+    // A hand wide, under half a pixel where it's seen.
+    const int narrow = brightness(pixel_at(drawn(*device, black, river(0.05F)), 32, 32));
+    CHECK(narrow > 0);
+    CHECK(narrow < wide);
 }

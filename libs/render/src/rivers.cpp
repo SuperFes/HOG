@@ -68,7 +68,15 @@ constexpr std::array vertex_attributes{
     VkVertexInputAttributeDescription{.location = 3,
                                       .binding = 0,
                                       .format = VK_FORMAT_R32_SFLOAT,
-                                      .offset = offsetof(terrain::RiverVertex, rough)}};
+                                      .offset = offsetof(terrain::RiverVertex, rough)},
+    VkVertexInputAttributeDescription{.location = 4,
+                                      .binding = 0,
+                                      .format = VK_FORMAT_R32G32B32_SFLOAT,
+                                      .offset = offsetof(terrain::RiverVertex, outward)},
+    VkVertexInputAttributeDescription{.location = 5,
+                                      .binding = 0,
+                                      .format = VK_FORMAT_R32_SFLOAT,
+                                      .offset = offsetof(terrain::RiverVertex, half)}};
 
 // Upload memory for `bytes`, kept if `kept` holds as many already.
 Result<> hold(const Device& device, Buffer& kept, std::span<const std::byte> bytes,

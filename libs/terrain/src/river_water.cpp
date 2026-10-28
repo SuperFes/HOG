@@ -105,7 +105,9 @@ void lay_reach(const planet::Elevation& terrain, const planet::Reach& reach, DVe
                 {.position = Vec3{(point * (radius + level)) - origin.metres()},
                  .beyond = static_cast<float>(std::abs(out) - half),
                  .flow = Vec3{downstream * speed},
-                 .rough = rough});
+                 .rough = rough,
+                 .outward = corner == 2 ? Vec3{0.0F} : Vec3{glm::normalize(point - section.middle)},
+                 .half = static_cast<float>(half)});
         }
     }
     for (int piece = 0; piece < pieces; ++piece) {

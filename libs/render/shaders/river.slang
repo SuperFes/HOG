@@ -36,6 +36,8 @@ struct Vertex {
     [[vk::location(1)]] float beyond;
     [[vk::location(2)]] float3 flow;
     [[vk::location(3)]] float rough;
+    [[vk::location(4)]] float3 outward;
+    [[vk::location(5)]] float half;
 };
 
 struct Surface {
@@ -50,6 +52,8 @@ struct Surface {
     // Metres past the water's nearer edge, and the metres a pixel spans there.
     float beyond;
     float pixel;
+    // How much of the width it's drawn the water truly covers.
+    float coverage;
 };
 
 // What rivers carry, as hog::terrain::river_carried has it: the dark of peaty water and a little
@@ -76,12 +80,22 @@ static const float nearer_pixels = 3.0;
 // may leave the channel too narrow to show the water drawn nearer.
 static const float shown_over = 0.1;
 static const float shown_pixels = 0.75;
+// Half as many pixels wide as it's drawn at least, so a river too far to span them stays a line
+// unbroken from pixel to pixel, showing what's behind it through what it doesn't cover.
+static const float least_pixels = 0.75;
 
 [shader("vertex")]
 Surface vertex_main(Vertex vertex) {
     Surface surface;
-    surface.from_eye = vertex.position + push.origin_seconds.xyz;
-    surface.placed = vertex.position;
+    const float3 from_eye = vertex.position + push.origin_seconds.xyz;
+    const float pixel =
+        length(bent(from_eye, push.up_height, float2(push.sun_radius.w, push.faked.x))) *
+        push.faked.y;
+    const float shown = max(vertex.half, least_pixels * pixel);
+    const float3 widened = vertex.outward * (shown - vertex.half);
+    surface.coverage = vertex.half / max(shown, 1e-6);
+    surface.from_eye = from_eye + widened;
+    surface.placed = vertex.position + widened;
     surface.up = normalize(surface.from_eye +
                            (push.up_height.xyz * (push.sun_radius.w + push.up_height.w)));
     surface.flow = vertex.flow;
@@ -260,5 +274,6 @@ float4 fragment_through(Surface surface) : SV_Target {
                                           (on_water * pi)) *
                           between.a / pi) +
                          between.rgb;
-    return float4(tone_mapped(lerp(radiance, white, facing.white), exposure), 1.0);
+    const float3 seen = tone_mapped(lerp(radiance, white, facing.white), exposure);
+    return float4(lerp(behind_colour.Load(pixel).rgb, seen, surface.coverage), 1.0);
 }

@@ -122,6 +122,24 @@ TEST_CASE("rivers' water reaches out to their banks and over them", "[terrain][r
     }
 }
 
+TEST_CASE("rivers' water tells drawing which way across it widens", "[terrain][rivers]") {
+    for (std::size_t at = 0; at < water().vertices.size(); ++at) {
+        const RiverVertex& vertex = water().vertices[at];
+        CHECK(vertex.half > 0.0F);
+        const std::size_t middle = at - corner_of(at) + 2;
+        CHECK(vertex.half == water().vertices[middle].half);
+        if (corner_of(at) == 2) {
+            CHECK(vertex.outward == hog::Vec3{0.0F});
+            continue;
+        }
+        CHECK_THAT(glm::length(vertex.outward), WithinAbs(1.0, 1e-5));
+        // Out from the middle, level over the ground.
+        const DVec3 out = placed(vertex) - placed(water().vertices[middle]);
+        CHECK(glm::dot(DVec3{vertex.outward}, glm::normalize(out)) > 0.99);
+        CHECK(std::abs(glm::dot(DVec3{vertex.outward}, glm::normalize(placed(vertex)))) < 0.01);
+    }
+}
+
 TEST_CASE("rivers' water is laid out from a point of a lattice its pattern repeats over",
           "[terrain][rivers]") {
     const DVec3 origin = water().origin.metres() / hog::terrain::river_pattern;

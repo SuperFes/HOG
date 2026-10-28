@@ -33,11 +33,15 @@ struct RiverVertex {
     Vec3 flow{0.0F}; // m/s, in the planet's frame
     // From 0 where the water runs smoothly to 1 where it runs as steeply as it falls.
     float rough = 0.0F;
+    // Which way across the river it lies from the middle, in the planet's frame, none in the
+    // middle; and how many metres wide half the river runs there, so drawing can widen it.
+    Vec3 outward{0.0F};
+    float half = 0.0F;
 
     friend bool operator==(const RiverVertex&, const RiverVertex&) = default;
 };
 
-static_assert(sizeof(RiverVertex) == 32);
+static_assert(sizeof(RiverVertex) == 48);
 
 // The surface of the rivers round a point, in strips of triangles, each three indices.
 struct RiverWater {
