@@ -268,34 +268,36 @@ TEST_CASE("weather drifts east in the westerlies and west in the trades", "[sim]
     CHECK(trades < -1.0);
 }
 
-TEST_CASE("carried round the planet's own sphere, the weather blows over its ground with the wind",
+TEST_CASE("carried round the planet's own sphere, cloud blows over its ground with the wind, and "
+          "the air's warmth keeps Earth's pace",
           "[sim][weather]") {
     JobSystem jobs{1};
     const WeatherConfig earth{.level = 4};
     WeatherConfig own = earth;
     own.carry_radius = own.planet_radius;
     const std::vector<Ground> ground(hog::sim::CellGrid{earth.level}.size(), sea);
-    // Degrees east a warm patch in the westerlies' upper air has moved in ten minutes.
-    const auto drift = [&](const WeatherConfig& config) {
+    // Degrees east a patch added to a layer in the westerlies has moved in ten minutes.
+    const auto drift = [&](const WeatherConfig& config, std::vector<float> WeatherFields::* layer,
+                           float added) {
         Weather calm{config, ground, march_equinox};
-        Weather warm{config, ground, march_equinox};
-        auto fields = warm.fields();
-        const std::uint32_t cell = warm.grid().index(hog::planet::cell_at(
+        Weather patched{config, ground, march_equinox};
+        auto fields = patched.fields();
+        const std::uint32_t cell = patched.grid().index(hog::planet::cell_at(
             DVec3{std::cos(45.0 * degree), 0.0, std::sin(45.0 * degree)}, config.level));
-        const DVec3 up = warm.grid().frame(cell).up;
-        fields.upper_temperature[cell] += 0.5F;
-        warm.set_fields(fields);
+        const DVec3 up = patched.grid().frame(cell).up;
+        (fields.*layer)[cell] += added;
+        patched.set_fields(fields);
         calm.advance_to(march_equinox + minutes{10}, jobs);
-        warm.advance_to(march_equinox + minutes{10}, jobs);
+        patched.advance_to(march_equinox + minutes{10}, jobs);
         double weight = 0.0;
         double longitude = 0.0;
-        for (std::uint32_t index = 0; index < warm.grid().size(); ++index) {
+        for (std::uint32_t index = 0; index < patched.grid().size(); ++index) {
             const double difference =
-                std::max(static_cast<double>(warm.fields().upper_temperature[index] -
-                                             calm.fields().upper_temperature[index]),
+                std::max(static_cast<double>((patched.fields().*layer)[index] -
+                                             (calm.fields().*layer)[index]),
                          0.0);
-            const DVec3 at = warm.grid().frame(index).up;
-            if (glm::dot(at, up) < std::cos(90.0 * degree)) {
+            const DVec3 at = patched.grid().frame(index).up;
+            if (glm::dot(at, up) < 0.0) {
                 continue;
             }
             weight += difference;
@@ -303,12 +305,21 @@ TEST_CASE("carried round the planet's own sphere, the weather blows over its gro
         }
         return (longitude / weight) - (std::atan2(up.y, up.x) / degree);
     };
-    const double at_earth_pace = drift(earth);
-    const double with_the_wind = drift(own);
-    INFO("Earth's pace " << at_earth_pace << "°, with the wind " << with_the_wind << "°");
-    CHECK(at_earth_pace > 0.0);
+    // Too little cloud to rain.
+    const double cloud_at_earth_pace = drift(earth, &WeatherFields::cloud, 0.3F);
+    const double cloud_with_the_wind = drift(own, &WeatherFields::cloud, 0.3F);
+    INFO("cloud at Earth's pace " << cloud_at_earth_pace << "°, with the wind "
+                                  << cloud_with_the_wind << "°");
+    CHECK(cloud_at_earth_pace > 0.0);
     // About as many times further as Earth is bigger than the planet, less what spreads it out.
-    CHECK(with_the_wind > at_earth_pace * 40.0);
+    CHECK(cloud_with_the_wind > cloud_at_earth_pace * 40.0);
+
+    const double warmth_at_earth_pace = drift(earth, &WeatherFields::upper_temperature, 0.5F);
+    const double warmth_with_the_wind = drift(own, &WeatherFields::upper_temperature, 0.5F);
+    INFO("warmth at Earth's pace " << warmth_at_earth_pace << "°, with the wind "
+                                   << warmth_with_the_wind << "°");
+    CHECK(warmth_at_earth_pace > 0.0);
+    CHECK(std::abs(warmth_with_the_wind - warmth_at_earth_pace) < 0.01);
 }
 
 TEST_CASE(

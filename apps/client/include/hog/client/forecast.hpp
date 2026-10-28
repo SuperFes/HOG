@@ -73,7 +73,7 @@ public:
 
 private:
     // Of the cells faded from and to, as shown at `now` at a unit direction, the cloud as it lay
-    // where it's drifted from.
+    // where it's drifted from, under the air here.
     [[nodiscard]] protocol::CellWeather shown(const protocol::CellWeather& here, DVec3 direction,
                                               MonotonicClock::time_point now) const;
 

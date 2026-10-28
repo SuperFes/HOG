@@ -347,3 +347,30 @@ TEST_CASE("weather coming in fades on from where the cloud had drifted to", "[cl
     CHECK_THAT(static_cast<double>(forecast.at(eye(), came + 10s).cloud),
                WithinAbs(static_cast<double>(fresh.at(west_of_eye(200.0), start).cloud), 0.02));
 }
+
+TEST_CASE("the air's damp and fog stay put as the cloud drifts on through it",
+          "[client][forecast]") {
+    Weather weather = drifting_east();
+    const hog::sim::CellGrid grid{weather.level};
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        const auto east = static_cast<float>(grid.frame(index).up.x);
+        hog::protocol::CellWeather& cell = weather.cells[index];
+        cell.humidity = 0.5F + (0.4F * east);
+        cell.fog_top = 100.0F + (100.0F * east);
+        cell.base = 1'000.0F + (500.0F * east);
+        cell.top = cell.base + 1'000.0F + (1'000.0F * east);
+    }
+    Forecast forecast{radius};
+    forecast.receive(weather, start);
+    const MonotonicClock::time_point later = start + 100s;
+    const hog::protocol::CellWeather was = forecast.at(eye(), start);
+    const hog::protocol::CellWeather is = forecast.at(eye(), later);
+    CHECK(is.humidity == was.humidity);
+    CHECK(is.fog_top == was.fog_top);
+    CHECK(is.base == was.base);
+    // As deep as the cloud blown here from 2 km upwind was.
+    const hog::protocol::CellWeather upwind = forecast.at(west_of_eye(2'000.0), start);
+    CHECK_THAT(static_cast<double>(is.top - is.base),
+               WithinAbs(static_cast<double>(upwind.top - upwind.base), 0.5));
+    CHECK(is.top - is.base < was.top - was.base - 5.0F);
+}

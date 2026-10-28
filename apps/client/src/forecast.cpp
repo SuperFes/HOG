@@ -223,14 +223,13 @@ protocol::CellWeather Forecast::shown(const protocol::CellWeather& here, DVec3 d
     const protocol::CellWeather there =
         mixed(interpolated(*grid_, from_, from), interpolated(*grid_, to_, from),
               static_cast<float>(faded(now)));
+    // The cloud blows on with the wind, but the air's damp, and so its fog and where cloud forms,
+    // keep to the slower pace of the air.
     protocol::CellWeather found = here;
     found.cloud = there.cloud;
     found.falling = there.falling;
     found.snow = there.snow;
-    found.humidity = there.humidity;
-    found.fog_top = there.fog_top;
-    found.base = there.base;
-    found.top = there.top;
+    found.top = here.base + std::max(there.top - there.base, 0.0F);
     return found;
 }
 

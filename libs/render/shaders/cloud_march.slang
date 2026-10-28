@@ -138,17 +138,20 @@ struct Cell {
 };
 
 Cell cell_at(float3 direction) {
-    // Where the cloud over it now lay when the maps were taken.
+    // Where the cloud over it now lay when the maps were taken. The cloud blows on with the wind;
+    // the air's damp, and so its fog and where cloud forms, keep to the air's slower pace.
     const float3 from = normalize((direction * lighting.weather.x) - lighting.drifted.xyz);
     const float4 weather = lerp(weather_before.SampleLevel(from, 0.0),
                                 weather_after.SampleLevel(from, 0.0), push.radii.z);
-    const SkyCell sky = sky_cell(lerp(sky_before.SampleLevel(from, 0.0),
-                                      sky_after.SampleLevel(from, 0.0), push.radii.z));
+    const SkyCell blown = sky_cell(lerp(sky_before.SampleLevel(from, 0.0),
+                                        sky_after.SampleLevel(from, 0.0), push.radii.z));
+    const SkyCell sky = sky_cell(lerp(sky_before.SampleLevel(direction, 0.0),
+                                      sky_after.SampleLevel(direction, 0.0), push.radii.z));
     Cell cell;
     cell.cover = weather.r;
     cell.mm = weather.g * weather.g * 16.0;
     cell.base = sky.base;
-    cell.top = sky.top;
+    cell.top = sky.base + max(blown.top - blown.base, 0.0);
     cell.fog_top = sky.fog_top;
     cell.falling = weather.b * weather.b * 256.0;
     cell.snow = weather.a;

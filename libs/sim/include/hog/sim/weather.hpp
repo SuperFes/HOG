@@ -34,8 +34,9 @@ struct WeatherConfig {
     GameDuration day = std::chrono::hours{24};
     double axial_tilt = 23.44;        // degrees
     double planet_radius = 115'000.0; // metres, for how steep the ground is
-    // Metres from the centre of the sphere air and storms are carried round at the wind's speed:
-    // Earth's keeps Earth's pace round a smaller planet, its own carries them as fast as the wind.
+    // Metres from the centre of the sphere cloud and storms are carried round at the wind's speed:
+    // Earth's keeps Earth's pace round a smaller planet, its own blows them over it as fast as the
+    // wind. The air's warmth and damp keep Earth's pace either way, and with it Earth's climate.
     double carry_radius = weather_radius;
     std::uint64_t seed = 0; // where and when storm systems form
     WeatherTuning tuning{};
