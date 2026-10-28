@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -52,7 +53,61 @@ Standing find_standing(const Landform& landform) {
     return found;
 }
 
+// Per cell a river flows from, the Hermite tangent every reach through it shares: from the
+// largest river flowing in, or from the cell itself at a source, on to the cell it drains into.
+template <typename Flows>
+std::vector<DVec3> course_tangents(const LevelGrid& grid, const Drainage& drainage,
+                                   std::span<const std::int64_t> drained, Flows flows) {
+    constexpr std::uint32_t none = ~std::uint32_t{0};
+    const std::uint32_t count = grid.size();
+    std::vector<std::uint32_t> upstream(count, none);
+    for (std::uint32_t cell = 0; cell < count; ++cell) {
+        const std::uint32_t receiver = drainage.receiver[cell];
+        const std::uint32_t largest = upstream[receiver];
+        if (flows(cell) && (largest == none || drained[cell] > drained[largest] ||
+                            (drained[cell] == drained[largest] && cell < largest))) {
+            upstream[receiver] = cell;
+        }
+    }
+    std::vector<DVec3> tangents(count, DVec3{0.0});
+    for (std::uint32_t cell = 0; cell < count; ++cell) {
+        if (!flows(cell)) {
+            continue;
+        }
+        const DVec3 after = cell_center(grid.cell(drainage.receiver[cell]));
+        tangents[cell] = upstream[cell] == none
+                             ? after - cell_center(grid.cell(cell))
+                             : (after - cell_center(grid.cell(upstream[cell]))) * 0.5;
+    }
+    return tangents;
+}
+
+// A reach's course a share `t` of the way along, off the sphere by a hair, and how fast and which
+// way it heads and turns there by the share.
+struct Bend {
+    DVec3 point;
+    DVec3 heading;
+    DVec3 turning;
+};
+
+Bend hermite(const Reach& reach, double t) {
+    const double t2 = t * t;
+    const double t3 = t2 * t;
+    return {.point = (reach.from * ((2.0 * t3) - (3.0 * t2) + 1.0)) +
+                     (reach.leaving * (t3 - (2.0 * t2) + t)) +
+                     (reach.to * ((3.0 * t2) - (2.0 * t3))) + (reach.arriving * (t3 - t2)),
+            .heading = ((reach.from - reach.to) * ((6.0 * t2) - (6.0 * t))) +
+                       (reach.leaving * ((3.0 * t2) - (4.0 * t) + 1.0)) +
+                       (reach.arriving * ((3.0 * t2) - (2.0 * t))),
+            .turning = ((reach.from - reach.to) * ((12.0 * t) - 6.0)) +
+                       (reach.leaving * ((6.0 * t) - 4.0)) + (reach.arriving * ((6.0 * t) - 2.0))};
+}
+
 } // namespace
+
+DVec3 course_at(const Reach& reach, double t) {
+    return glm::normalize(hermite(reach, t).point);
+}
 
 double Rivers::width(double area) {
     return 2.5 * std::sqrt(flow(area));
@@ -107,6 +162,8 @@ Rivers::Rivers(const Landform& landform, std::span<const std::int64_t> ground, M
         }
     }
 
+    const std::vector<DVec3> tangents = course_tangents(grid, drainage, drained, flows);
+
     std::vector<std::pair<std::uint32_t, std::uint32_t>> near;
     for (std::uint32_t cell = 0; cell < count; ++cell) {
         if (!flows(cell)) {
@@ -126,7 +183,10 @@ Rivers::Rivers(const Landform& landform, std::span<const std::int64_t> ground, M
                             .to_surface = levels_[receiver],
                             .width = scale * width(area),
                             .depth = fixed(scale * depth(area)),
-                            .fall = falls ? drop : 0});
+                            .fall = falls ? drop : 0,
+                            .leaving = tangents[cell],
+                            // Each river runs straight on into the water it ends in.
+                            .arriving = flows(receiver) ? tangents[receiver] : to - from});
         for (const std::uint32_t end : {cell, receiver}) {
             near.emplace_back(end, reach);
             for (const std::uint32_t next : grid.neighbors(end)) {
@@ -148,55 +208,86 @@ Rivers::Rivers(const Landform& landform, std::span<const std::int64_t> ground, M
     }
 }
 
-template <typename Visit>
-void Rivers::each_reach(CellId cell, Visit visit) const {
+template <typename Reaching, typename Visit>
+void Rivers::each_reach(CellId cell, Reaching reaching, Visit visit) const {
     // The reaches are found from the shifted point, which lies on the river's line.
     const DVec3 point = meander_(cell_center(cell));
     const std::uint32_t here = grid_->index(cell_at(point, grid_->level()));
     for (std::uint32_t k = first_[here]; k < first_[here + 1]; ++k) {
         const Reach& reach = reaches_[nearby_[k]];
-        const DVec3 along = reach.to - reach.from;
-        const double t =
-            std::clamp(glm::dot(point - reach.from, along) / glm::dot(along, along), 0.0, 1.0);
-        // From the great circle through the ends, not the chord, which dips below the ground.
-        double away = 0.0;
-        if (t <= 0.0) {
-            away = glm::length(point - reach.from);
-        } else if (t >= 1.0) {
-            away = glm::length(point - reach.to);
-        } else {
-            away = std::abs(glm::dot(point, glm::normalize(glm::cross(reach.from, reach.to))));
+        // A course keeps within the hull of its ends and the points a third of its tangents on.
+        const DVec3 middle = (reach.from + reach.to) * 0.5;
+        const double bound = std::max({glm::length(reach.from - middle),
+                                       glm::length(reach.from + (reach.leaving / 3.0) - middle),
+                                       glm::length(reach.to - (reach.arriving / 3.0) - middle)});
+        if (glm::length(point - middle) - bound > reaching(reach) / radius_) {
+            continue;
         }
+        // Nearest the pieces of the course, then the course itself nearer that.
+        double nearest = std::numeric_limits<double>::infinity();
+        double t = 0.0;
+        DVec3 start = reach.from;
+        for (int piece = 0; piece < course_pieces; ++piece) {
+            const DVec3 end =
+                piece + 1 == course_pieces
+                    ? reach.to
+                    : course_at(reach, static_cast<double>(piece + 1) / course_pieces);
+            const DVec3 along = end - start;
+            const double share =
+                std::clamp(glm::dot(point - start, along) / glm::dot(along, along), 0.0, 1.0);
+            const double away = glm::length(point - (start + (along * share)));
+            if (away < nearest) {
+                nearest = away;
+                t = (piece + share) / course_pieces;
+            }
+            start = end;
+        }
+        for (int step = 0; step < 2; ++step) {
+            const Bend bend = hermite(reach, t);
+            const DVec3 off = bend.point - point;
+            const double slope = glm::dot(bend.heading, bend.heading) + glm::dot(off, bend.turning);
+            if (slope <= 0.0) {
+                break;
+            }
+            t = std::clamp(t - (glm::dot(off, bend.heading) / slope), 0.0, 1.0);
+        }
+        nearest = std::min(nearest, glm::length(course_at(reach, t) - point));
         const std::int64_t level =
             reach.from_surface +
             std::llround(static_cast<double>(reach.to_surface - reach.from_surface) * t);
-        visit(reach, level, away * radius_);
+        visit(reach, level, nearest * radius_);
     }
 }
 
-std::int64_t Rivers::sunk(const Reach& reach, std::int64_t level, std::int64_t ground) const {
+double Rivers::banks(const Reach& reach) const {
     // Reaches are only found from the cells about their ends, so the banks must climb back to
-    // the ground well within them; where the ground stands higher, so does the river in it.
-    const double half = reach.width / 2.0;
-    const double banks =
-        std::max(std::min(bank_fade * reach.width,
-                          bank_reach * glm::length(reach.to - reach.from) * radius_) -
-                     half,
-                 0.0);
-    const std::int64_t deepest = std::llround(banks * bank_slope * static_cast<double>(fixed_one));
+    // the ground well within them.
+    return std::max(std::min(bank_fade * reach.width,
+                             bank_reach * glm::length(reach.to - reach.from) * radius_) -
+                        (reach.width / 2.0),
+                    0.0);
+}
+
+std::int64_t Rivers::sunk(const Reach& reach, std::int64_t level, std::int64_t ground) const {
+    // Where the ground stands higher than the banks can climb, so does the river in it.
+    const std::int64_t deepest =
+        std::llround(banks(reach) * bank_slope * static_cast<double>(fixed_one));
     // Where the ground dips below the river's line, the water follows it down.
     return std::max(std::min(level, ground), ground - deepest);
 }
 
 std::int64_t Rivers::cut(CellId cell, std::int64_t ground) const {
     std::int64_t lowest = ground;
-    each_reach(cell, [&](const Reach& reach, std::int64_t level, double away) {
+    // Beyond its banks, a river's cut climbs above the ground.
+    const auto reaching = [&](const Reach& reach) { return (reach.width / 2.0) + banks(reach); };
+    each_reach(cell, reaching, [&](const Reach& reach, std::int64_t level, double away) {
         const std::int64_t surface = sunk(reach, level, ground);
         const double half = reach.width / 2.0;
         std::int64_t bed = 0;
         if (away < half) {
             const double share = 1.0 - ((away / half) * (away / half));
-            bed = surface - std::llround(static_cast<double>(reach.depth) * share);
+            bed = surface -
+                  std::max<std::int64_t>(std::llround(static_cast<double>(reach.depth) * share), 1);
         } else {
             bed =
                 surface + std::llround((away - half) * bank_slope * static_cast<double>(fixed_one));
@@ -208,7 +299,8 @@ std::int64_t Rivers::cut(CellId cell, std::int64_t ground) const {
 
 std::optional<Channel> Rivers::channel(CellId cell, std::int64_t ground) const {
     std::optional<std::int64_t> surface;
-    each_reach(cell, [&](const Reach& reach, std::int64_t level, double away) {
+    const auto reaching = [](const Reach& reach) { return reach.width / 2.0; };
+    each_reach(cell, reaching, [&](const Reach& reach, std::int64_t level, double away) {
         if (away < reach.width / 2.0) {
             const std::int64_t water = sunk(reach, level, ground);
             surface = std::min(surface.value_or(water), water);
@@ -263,7 +355,8 @@ std::optional<std::int64_t> Rivers::lake(CellId cell, std::int64_t ground) const
 
 const Reach* Rivers::near(CellId cell, double margin) const {
     const Reach* widest = nullptr;
-    each_reach(cell, [&](const Reach& reach, std::int64_t /*level*/, double away) {
+    const auto reaching = [&](const Reach& reach) { return (reach.width / 2.0) + margin; };
+    each_reach(cell, reaching, [&](const Reach& reach, std::int64_t /*level*/, double away) {
         if (away < (reach.width / 2.0) + margin &&
             (widest == nullptr || reach.width > widest->width)) {
             widest = &reach;

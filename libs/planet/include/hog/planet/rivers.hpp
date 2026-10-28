@@ -40,19 +40,29 @@ struct Reach {
     // How far its water falls where it runs steeply enough to tumble over falls or rapids, with a
     // pool scoured at their foot; 0 elsewhere.
     std::int64_t fall = 0;
+    // Hermite tangents over the unit sphere where it leaves `from` and reaches `to`, shared with
+    // every reach meeting it there, so rivers bend through cells rather than turning corners and
+    // tributaries join along the river they run into.
+    DVec3 leaving{};
+    DVec3 arriving{};
 };
 
+// The unit direction to a reach's course a share `t` of the way from its start to its end.
+[[nodiscard]] DVec3 course_at(const Reach& reach, double t);
+
 // Rivers from every landform cell that drains enough ground, each running to the cell it drains
-// into and meandering about the line between their centres. Channels widen and deepen with the
-// water they carry. A river's water only falls downstream, so it cuts through rises in the ground
-// rather than pooling behind them, between banks sloping up to meet the ground. Basins in the
-// landform hold lakes where enough water runs in to make up for what evaporates, and stay dry
-// where it doesn't; rivers end at their shores and leave from their outlets. Only the landform's
-// sea holds the sea: low ground cut off from it is a basin like any other.
+// into along a smooth course through their centres, and meandering about it. Channels widen and
+// deepen with the water they carry. A river's water only falls downstream, so it cuts through rises
+// in the ground rather than pooling behind them, between banks sloping up to meet the ground.
+// Basins in the landform hold lakes where enough water runs in to make up for what evaporates, and
+// stay dry where it doesn't; rivers end at their shores and leave from their outlets. Only the
+// landform's sea holds the sea: low ground cut off from it is a basin like any other.
 class Rivers {
 public:
     // Banks rise from the water at this slope until they meet the ground.
     static constexpr double bank_slope = 0.5;
+    // Straight pieces a reach's course is found along.
+    static constexpr int course_pieces = 8;
 
     // Rise over run of a reach's water from which it falls rather than runs.
     static constexpr double falls_gradient = 0.1;
@@ -97,9 +107,12 @@ public:
 
 private:
     // Calls `visit(reach, level, away)` for each reach near the cell, with the fixed-point level
-    // of its water there and the metres from its line.
-    template <typename Visit>
-    void each_reach(CellId cell, Visit visit) const;
+    // of its water there and the metres from its course, where that may be within
+    // `reaching(reach)` metres.
+    template <typename Reaching, typename Visit>
+    void each_reach(CellId cell, Reaching reaching, Visit visit) const;
+    // Metres from a reach's water to where its banks may meet the ground, at most.
+    [[nodiscard]] double banks(const Reach& reach) const;
     // The fixed-point level of a reach's water where its line is at `level` and the ground at
     // `ground`: no higher than the ground, nor deeper in it than its banks can climb.
     [[nodiscard]] std::int64_t sunk(const Reach& reach, std::int64_t level,

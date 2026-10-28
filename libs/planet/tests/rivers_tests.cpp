@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <tuple>
 #include <vector>
 
 using hog::planet::CellId;
@@ -80,12 +81,15 @@ std::int64_t plain(hog::DVec3 at) {
     return std::llround((2000.0 + (100.0 * at.z)) * static_cast<double>(fixed_one));
 }
 
-// Cells on a line across a reach's middle from bank to bank, wide enough to take in the meanders,
-// close enough together not to step over the narrowest channel.
-std::vector<CellId> across(const Reach& reach) {
-    const hog::DVec3 middle = glm::normalize((reach.from + reach.to) * 0.5);
-    const hog::DVec3 side = glm::normalize(glm::cross(middle, reach.to - reach.from));
-    const double span = glm::length(reach.to - reach.from) * 0.5;
+// Cells on a line across a reach's course a share `t` of the way along, from bank to bank, wide
+// enough to take in the meanders, close enough together not to step over the narrowest channel.
+// The line reaches `wide` of the reach's length either side.
+std::vector<CellId> across(const Reach& reach, double t = 0.5, double wide = 0.5) {
+    const hog::DVec3 middle = hog::planet::course_at(reach, t);
+    const hog::DVec3 heading = hog::planet::course_at(reach, std::min(t + 0.01, 1.0)) -
+                               hog::planet::course_at(reach, std::max(t - 0.01, 0.0));
+    const hog::DVec3 side = glm::normalize(glm::cross(middle, heading));
+    const double span = glm::length(reach.to - reach.from) * wide;
     const double step = reach.width / 4.0 / radius;
     const auto steps = static_cast<int>(2.0 * span / step);
     std::vector<CellId> cells;
@@ -141,6 +145,62 @@ TEST_CASE("a river cuts its channel below the ground, under water", "[planet][ri
         }
         REQUIRE(found);
     }
+}
+
+TEST_CASE("a river's channel runs unbroken along its course", "[planet][rivers]") {
+    const auto order = [](hog::DVec3 a, hog::DVec3 b) {
+        return std::tie(a.x, a.y, a.z) < std::tie(b.x, b.y, b.z);
+    };
+    std::vector<hog::DVec3> starts;
+    std::vector<hog::DVec3> ends;
+    for (const Reach& reach : rivers().reaches()) {
+        starts.push_back(reach.from);
+        ends.push_back(reach.to);
+    }
+    std::ranges::sort(starts, order);
+    std::ranges::sort(ends, order);
+    for (const Reach& reach : looked_across()) {
+        // Between rivers running in and on, where the meanders' shift can't take the line across
+        // beyond either end.
+        if (!std::ranges::binary_search(ends, reach.from, order) ||
+            !std::ranges::binary_search(starts, reach.to, order)) {
+            continue;
+        }
+        // Where it meets the reaches either side, which straight courses turned corners at.
+        for (const double t : {0.02, 0.5, 0.98}) {
+            // As far as the meanders shift it.
+            const auto cells = across(reach, t, 0.875);
+            REQUIRE(std::ranges::any_of(cells, [&](CellId cell) {
+                return rivers().channel(cell, plain(hog::planet::cell_center(cell))).has_value();
+            }));
+        }
+    }
+}
+
+TEST_CASE("a river bends through each cell rather than turning a corner there",
+          "[planet][rivers]") {
+    const auto reaches = rivers().reaches();
+    // Of a reach's course, which way it heads a share `t` of the way along.
+    const auto heading = [](const Reach& reach, double t) {
+        constexpr double step = 1e-4;
+        return glm::normalize(hog::planet::course_at(reach, std::min(t + step, 1.0)) -
+                              hog::planet::course_at(reach, std::max(t - step, 0.0)));
+    };
+    int joined = 0;
+    for (const Reach& reach : reaches) {
+        CHECK(glm::length(hog::planet::course_at(reach, 0.0) - reach.from) < 1e-12);
+        CHECK(glm::length(hog::planet::course_at(reach, 1.0) - reach.to) < 1e-12);
+        const auto next = std::ranges::find_if(
+            reaches, [&](const Reach& other) { return other.from == reach.to; });
+        if (next == reaches.end()) {
+            continue;
+        }
+        REQUIRE(reach.arriving == next->leaving);
+        // The grid's own turns are an eighth of a circle or more.
+        CHECK(glm::dot(heading(reach, 1.0), heading(*next, 0.0)) > std::cos(0.01));
+        ++joined;
+    }
+    CHECK(joined > 10);
 }
 
 TEST_CASE("a river follows dips in the ground rather than standing above it", "[planet][rivers]") {
