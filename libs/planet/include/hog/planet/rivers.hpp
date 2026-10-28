@@ -101,6 +101,10 @@ public:
     // along a reach than its ends make it, as shares of its width.
     static constexpr double bend_widening = 0.3;
     static constexpr double wobble_widening = 0.25;
+    // How much a bend skews a river's bed towards its outer bank, by how sharply it bends a width
+    // along, and how much steeper that bank and the bed under it run, at most.
+    static constexpr double bend_scouring = 1.5;
+    static constexpr double bank_scour = 0.8;
 
     // Rise over run of a reach's water from which it falls rather than runs.
     static constexpr double falls_gradient = 0.1;
@@ -149,9 +153,8 @@ public:
     [[nodiscard]] static double depth(double area);
 
 private:
-    // Calls `visit(reach, level, away, width)` for each reach near the cell, with the fixed-point
-    // level of its water there, the metres from its river and how many wide it runs there, where
-    // that may be within `reaching(reach)` metres.
+    // Calls `visit(reach, spot)` for each reach near the cell, with where its river lies from
+    // there, where that may be within `reaching(reach)` metres.
     template <typename Reaching, typename Visit>
     void each_reach(CellId cell, Reaching reaching, Visit visit) const;
     // Metres from a reach's water to where its banks may meet the ground, at most.

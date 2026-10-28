@@ -312,6 +312,49 @@ TEST_CASE("a river's channel swings with its meanders", "[planet][rivers]") {
     CHECK(swung > 10);
 }
 
+TEST_CASE("round a bend a river scours under its outer bank and leaves a bar on the inner",
+          "[planet][rivers]") {
+    const hog::planet::Meander& meander = rivers().meander();
+    const auto swung = [](const Reach& reach, double t) {
+        const hog::DVec3 course = hog::planet::course_at(reach, t);
+        const hog::DVec3 heading =
+            hog::planet::course_at(reach, t + 0.01) - hog::planet::course_at(reach, t - 0.01);
+        const hog::DVec3 side = glm::normalize(glm::cross(course, heading));
+        return glm::normalize(course + (side * hog::planet::swing_at(reach, t).offset));
+    };
+    int bends = 0;
+    for (const Reach& reach : looked_across()) {
+        for (int step = 6; step <= 14; ++step) {
+            const double t = step / 20.0;
+            const hog::DVec3 middle = swung(reach, t);
+            const hog::DVec3 before = swung(reach, t - 0.002);
+            const hog::DVec3 after = swung(reach, t + 0.002);
+            const hog::DVec3 left = glm::normalize(glm::cross(middle, after - before));
+            const double run = glm::length(after - before) / 2.0;
+            // How sharply it bends left, per metre.
+            const double bending =
+                glm::dot(after - (2.0 * middle) + before, left) / (run * run) / radius;
+            const double width = hog::planet::width_at(reach, t);
+            if (std::abs(bending) * width < 0.3) {
+                continue;
+            }
+            const double outward = bending > 0.0 ? -1.0 : 1.0;
+            const std::int64_t ground = reach.from_surface + (20 * fixed_one);
+            const auto height = [&](double metres) {
+                return rivers().cut(
+                    hog::planet::cell_at(
+                        meander.unshifted(glm::normalize(middle + (left * (metres / radius)))), 22),
+                    ground);
+            };
+            const double half = width / 2.0;
+            CHECK(height(outward * 0.5 * half) < height(-outward * 0.5 * half));
+            CHECK(height(outward * 1.5 * half) > height(-outward * 1.5 * half));
+            ++bends;
+        }
+    }
+    CHECK(bends > 10);
+}
+
 TEST_CASE("a river tells how much it carries", "[planet][rivers]") {
     const auto reaches = rivers().reaches();
     int joined = 0;
@@ -344,10 +387,11 @@ TEST_CASE("banks slope up from the water rather than standing as walls", "[plane
     for (const Reach& reach : looked_across()) {
         // Shifting points to make meanders can bunch them up to about twice as close.
         const double step = reach.width / 4.0;
-        // Its bed is steepest where it runs narrowest.
+        // Its bed is steepest where it runs narrowest, and under the outer bank of a bend.
         const double half = reach.width / 2.0 * (1.0 - Rivers::wobble_widening);
         const double steepest =
-            2.0 * step * std::max(0.5, 2.0 * hog::planet::fixed_to_double(reach.depth) / half);
+            2.0 * step * std::max(0.5, 2.0 * hog::planet::fixed_to_double(reach.depth) / half) *
+            (1.0 + Rivers::bank_scour);
         const auto cells = across(reach);
         for (std::size_t k = 1; k < cells.size(); ++k) {
             const auto height = [&](CellId cell) {
