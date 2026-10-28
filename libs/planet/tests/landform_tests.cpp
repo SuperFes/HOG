@@ -265,8 +265,8 @@ TEST_CASE("glaciers cut the worn landform last, scouring its soil, and the sea f
 TEST_CASE("meanders find again the point they shifted", "[planet][landform]") {
     constexpr double radius = 115'000.0;
     // Fine enough for the bends to keep to 500 m cells, and coarse.
-    for (const int level : {6, 10}) {
-        const LevelGrid grid{level, radius};
+    for (const int fineness : {6, 10}) {
+        const LevelGrid grid{fineness, radius};
         const hog::planet::Meander meander{7, grid, radius};
         // The shift steps by a part in fixed_one of how far it reaches, most of a cell, as near as
         // it can tell points apart.
