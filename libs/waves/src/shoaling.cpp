@@ -91,6 +91,22 @@ double orbit_stretch(double deep, double depth) noexcept {
     return kappa >= deep_enough ? 1.0 : depth_wavenumber(kappa) / kappa;
 }
 
+double profile_depth(double out) noexcept {
+    const double from = std::max(out, 0.0);
+    return std::max(dean_scale * std::cbrt(from * from), from / shelf_run);
+}
+
+double profile_slope(double out) noexcept {
+    // Where the shoreface gives way to the shelf, as deep as shelf_depth.
+    constexpr double turn = shelf_depth * shelf_run;
+    if (out >= turn) {
+        return 1.0 / shelf_run;
+    }
+    // At the waterline, as steep as where it's the shallowest water taken.
+    const double from = std::max(out, std::pow(shallowest / dean_scale, 1.5));
+    return 2.0 / 3.0 * dean_scale / std::cbrt(from);
+}
+
 double phase_lag(double deep, double depth) noexcept {
     return lag_at(deep, deep * std::max(depth, shallowest)).value;
 }

@@ -261,7 +261,16 @@ Surface surface_at(std::span<const Train> trains, std::span<const Wave> waves, D
     const bool shallow = std::isfinite(floor.depth);
     const DVec3 deepening = floor.deepening - (up * glm::dot(up, floor.deepening));
     const double steepness = glm::length(deepening);
-    const DVec3 offshore = steepness > 0.0 ? deepening / steepness : DVec3{0.0};
+    // Over a shore's profile as far out as it lies, the crests lie as far apart as the profile
+    // keeps them however steeply the floor itself falls.
+    const bool from_shore = std::isfinite(floor.out);
+    const DVec3 seaward = floor.seaward - (up * glm::dot(up, floor.seaward));
+    const double lag_depth = from_shore ? profile_depth(floor.out) : floor.depth;
+    const DVec3 lag_deepening = from_shore ? seaward * profile_slope(floor.out) : deepening;
+    DVec3 offshore = steepness > 0.0 ? deepening / steepness : DVec3{0.0};
+    if (from_shore && glm::length(seaward) > 0.0) {
+        offshore = glm::normalize(seaward);
+    }
     // Each wave as it shows here, along the ground: how high and its wavenumber in deep water.
     const auto shown_at = [&](const Wave& wave) {
         const Train& train = trains[wave.train];
@@ -299,6 +308,8 @@ Surface surface_at(std::span<const Train> trains, std::span<const Wave> waves, D
     // beneath at rest.
     DVec3 slope{0.0};
     glm::dmat3 bunching{0.0};
+    double rising = 0.0;
+    DVec3 carried{0.0};
     for (const Wave& wave : waves) {
         const Train& train = trains[wave.train];
         auto [amplitude, wavenumber] = shown_at(wave);
@@ -308,14 +319,16 @@ Surface surface_at(std::span<const Train> trains, std::span<const Wave> waves, D
         DVec3 heading = heading_of(train);
         double phase = phase_at(train, rest, time);
         double stretch = 1.0;
+        const double deep = wavenumber;
         if (shallow) {
-            const double deep = wavenumber;
             amplitude *= arriving(heading, deep) * kept;
             stretch = orbit_stretch(deep, floor.depth);
-            phase += phase_lag(deep, floor.depth);
+        }
+        if (shallow || from_shore) {
+            phase += phase_lag(deep, lag_depth);
             // The lag's gradient turns and shortens it.
             const DVec3 turned =
-                (heading * deep) + (deepening * phase_lag_slope(deep, floor.depth));
+                (heading * deep) + (lag_deepening * phase_lag_slope(deep, lag_depth));
             wavenumber = glm::length(turned);
             if (wavenumber <= 0.0) {
                 continue;
@@ -325,11 +338,24 @@ Surface surface_at(std::span<const Train> trains, std::span<const Wave> waves, D
         const double c = std::cos(phase);
         const double s = std::sin(phase);
         const double swing = choppiness * amplitude * stretch;
-        surface.moved += (up * (amplitude * c)) - (heading * (swing * s));
+        rising += amplitude * c;
+        carried -= heading * (swing * s);
         slope += heading * (amplitude * wavenumber * s);
         bunching += glm::outerProduct(heading, heading) * (swing * wavenumber * c);
     }
     const auto [first, second] = across(up);
+    // The most the water bunches any way along the ground: the larger root of its 2x2 matrix.
+    const double xx = glm::dot(first, bunching * first);
+    const double xy = glm::dot(first, bunching * second);
+    const double yy = glm::dot(second, bunching * second);
+    const double most =
+        ((xx + yy) / 2.0) + std::sqrt((((xx - yy) / 2.0) * ((xx - yy) / 2.0)) + (xy * xy));
+    if (most > most_bunching) {
+        const double unfolded = most_bunching / most;
+        carried *= unfolded;
+        bunching *= unfolded;
+    }
+    surface.moved = (up * rising) + carried;
     const DVec3 one = first - (up * glm::dot(slope, first)) - (bunching * first);
     const DVec3 two = second - (up * glm::dot(slope, second)) - (bunching * second);
     surface.normal = glm::normalize(glm::cross(one, two));

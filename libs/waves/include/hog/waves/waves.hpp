@@ -29,6 +29,10 @@ inline constexpr double last_showing = 0.35;
 // How much of its orbit's width the water moves along a wave as well as up and down: all of it, as
 // water truly moves. As shaders/waves.slang has it.
 inline constexpr double choppiness = 1.0;
+// The most the water may bunch along the ground, of how far it would to fold the surface over:
+// where the waves would bunch it more, they swing it along the ground that much less. As
+// shaders/waves.slang has it.
+inline constexpr double most_bunching = 0.8;
 
 // One of the planet's wave trains: a plane wave through its whole volume, which shows on the
 // surface where it runs nearly along it. The planet has the same trains for all time; the sea
@@ -124,11 +128,14 @@ struct Surface {
 };
 
 // The sea's floor under a point: how deep the water over it is at rest, and which way, along the
-// ground, and how fast it deepens, metres per metre. Taken as lying on a sandy shore's profile, as
-// waves/shoaling.hpp has it.
+// ground, and how fast it deepens, metres per metre; and how far out from the waterline it lies,
+// and which way out, unit along the ground. The waves' phases lag as over a sandy shore's profile,
+// as waves/shoaling.hpp has it, as far out as the point lies, or, where that's unknown, as deep.
 struct Floor {
     double depth = std::numeric_limits<double>::infinity();
     DVec3 deepening{0.0};
+    double out = std::numeric_limits<double>::infinity();
+    DVec3 seaward{0.0};
 };
 
 // At `rest`, a point of sea level in the planet's frame, over `floor`: in shallow water the waves

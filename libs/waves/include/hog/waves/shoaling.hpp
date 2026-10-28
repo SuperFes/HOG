@@ -13,6 +13,11 @@ inline constexpr double shelf_run = 100.0;
 // Where the shelf overtakes the shoreface: metres deep.
 inline constexpr double shelf_depth = shelf_run * shelf_run * dean_scale * dean_scale * dean_scale;
 
+// Metres deep the shore's profile lies `out` metres from its waterline, and how steeply it deepens
+// there, metres per metre.
+[[nodiscard]] double profile_depth(double out) noexcept;
+[[nodiscard]] double profile_slope(double out) noexcept;
+
 // Past this many radians of a wave's deep-water wavenumber times the depth, it's taken not to feel
 // the floor at all: there its length is within 1% of deep water's.
 inline constexpr double deep_enough = std::numbers::pi;

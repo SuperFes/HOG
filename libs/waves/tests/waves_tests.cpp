@@ -1,6 +1,7 @@
 #include <hog/waves/shoaling.hpp>
 #include <hog/waves/waves.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -449,9 +450,14 @@ hog::waves::Floor shore_floor(double out) {
     const double shoreface = hog::waves::dean_scale * std::cbrt(out * out);
     if (shoreface > out / hog::waves::shelf_run) {
         return {.depth = shoreface,
-                .deepening = east * (2.0 / 3.0 * hog::waves::dean_scale / std::cbrt(out))};
+                .deepening = east * (2.0 / 3.0 * hog::waves::dean_scale / std::cbrt(out)),
+                .out = out,
+                .seaward = east};
     }
-    return {.depth = out / hog::waves::shelf_run, .deepening = east / hog::waves::shelf_run};
+    return {.depth = out / hog::waves::shelf_run,
+            .deepening = east / hog::waves::shelf_run,
+            .out = out,
+            .seaward = east};
 }
 
 // The train running most nearly along `heading` over the top of the planet.
@@ -584,6 +590,115 @@ TEST_CASE("in the shallows waves break down to what the depth holds", "[waves][s
         CHECK(rms < hog::waves::breaking_depth * floor.depth * 1.1);
         CHECK(rms > hog::waves::breaking_depth * floor.depth * 0.9);
     }
+}
+
+TEST_CASE("in the shallows a swell's crests steepen but don't fold over", "[waves][shoaling]") {
+    const std::vector<Train> trains = hog::waves::planet_trains(seed);
+    // A long, high swell running in at the shore, and a breeze's sea across it.
+    SeaState sea = windy(north * 7.0);
+    sea.systems.push_back({.heading = glm::normalize(-east + (north * 0.2)),
+                           .height = 1.6,
+                           .peak = 0.11,
+                           .peakedness = hog::waves::swell_peakedness,
+                           .spread = hog::waves::swell_spread});
+    const std::vector<Wave> waves = hog::waves::waves_at(trains, up, sea);
+    std::mt19937_64 random{23};
+    std::uniform_real_distribution<double> spot{-200.0, 200.0};
+    std::uniform_real_distribution<double> when{0.0, 600.0};
+    constexpr double step = 0.01;
+    double least = 1.0;
+    const double slope = GENERATE(0.0, 0.02, 0.05, 0.1, 0.2);
+    const auto beach = [&](double out_by) {
+        return slope > 0.0 ? hog::waves::Floor{.depth = out_by * slope,
+                                               .deepening = east * slope,
+                                               .out = out_by,
+                                               .seaward = east}
+                           : shore_floor(out_by);
+    };
+    for (const double out : {8.0, 25.0, 60.0, 150.0}) {
+        for (int sample = 0; sample < 1500; ++sample) {
+            const double along = spot(random);
+            const GameTime time = later(when(random));
+            const auto moved = [&](double east_of, double north_of) {
+                const DVec3 on = glm::normalize((up * radius) + (east * east_of) +
+                                                (north * (along + north_of))) *
+                                 radius;
+                return on +
+                       hog::waves::surface_at(trains, waves, on, time, beach(out + east_of)).moved;
+            };
+            const DVec3 one = moved(step, 0.0) - moved(-step, 0.0);
+            const DVec3 two = moved(0.0, step) - moved(0.0, -step);
+            // What a patch of water at rest is squeezed to along the ground.
+            const double area = ((glm::dot(one, east) * glm::dot(two, north)) -
+                                 (glm::dot(one, north) * glm::dot(two, east))) /
+                                (4.0 * step * step);
+            least = std::min(least, area);
+        }
+    }
+    CAPTURE(slope, least);
+    CHECK(least > 0.1);
+}
+
+TEST_CASE("over a steep floor the crests keep as far apart as over the shore's profile",
+          "[waves][shoaling]") {
+    const std::vector<Train> trains = hog::waves::planet_trains(seed);
+    // A swell of about 9 s running straight in, tiny so it doesn't break.
+    const std::uint32_t chosen = train_along(trains, -east, 3);
+    const std::vector<Wave> waves{{.train = chosen, .amplitude = 0.001}};
+    constexpr double out = 40.0;
+    // Over a floor falling as `steep` from the waterline, the slope of the heights round a point
+    // over their height, steepest: the wavenumber there.
+    const auto wavenumber = [&](double steep, bool known) {
+        const auto floor = [&](double out_by) {
+            hog::waves::Floor found{.depth = out_by * steep, .deepening = east * steep};
+            if (known) {
+                found.out = out_by;
+                found.seaward = east;
+            }
+            return found;
+        };
+        constexpr double step = 0.01;
+        const auto height = [&](double east_of, GameTime time) {
+            const DVec3 on = glm::normalize((up * radius) + (east * east_of)) * radius;
+            return glm::dot(
+                up, hog::waves::surface_at(trains, waves, on, time, floor(out + east_of)).moved);
+        };
+        double steepest = 0.0;
+        double highest = 0.0;
+        for (int tick = 0; tick < 80; ++tick) {
+            const GameTime time = later(tick * 0.125);
+            steepest = std::max(steepest,
+                                std::abs(height(step, time) - height(-step, time)) / (2.0 * step));
+            highest = std::max(highest, std::abs(height(0.0, time)));
+        }
+        return steepest / highest;
+    };
+    const double deep = trains[chosen].wavenumber;
+    const double profiled = hog::waves::shallow_wavenumber(deep, hog::waves::profile_depth(out));
+    // Read as deep as it is, a floor ten times steeper than the profile crowds the crests.
+    CHECK(wavenumber(0.1, false) > profiled * 2.0);
+    CHECK(wavenumber(0.1, true) == Catch::Approx(profiled).epsilon(0.1));
+    CHECK(wavenumber(0.005, true) == Catch::Approx(profiled).epsilon(0.1));
+}
+
+TEST_CASE("the shore's profile deepens as its depth says, the shelf taking over unbroken",
+          "[waves][shoaling]") {
+    using hog::waves::profile_depth;
+    using hog::waves::profile_slope;
+    constexpr double turn = hog::waves::shelf_depth * hog::waves::shelf_run;
+    CHECK(profile_depth(0.0) == 0.0);
+    CHECK(profile_depth(-5.0) == 0.0);
+    CHECK(profile_depth(turn) == Catch::Approx(hog::waves::shelf_depth));
+    CHECK(profile_depth(turn - 1e-6) == Catch::Approx(profile_depth(turn + 1e-6)));
+    CHECK(profile_depth(8'000.0) == Catch::Approx(80.0));
+    for (const double out : {0.5, 3.0, 40.0, 900.0, turn - 50.0, turn + 50.0, 4'000.0}) {
+        constexpr double step = 0.001;
+        CAPTURE(out);
+        CHECK(profile_slope(out) ==
+              Catch::Approx((profile_depth(out + step) - profile_depth(out - step)) / (2.0 * step))
+                  .epsilon(1e-4));
+    }
+    CHECK(std::isfinite(profile_slope(0.0)));
 }
 
 TEST_CASE("a wind over a short fetch raises lower, shorter waves", "[waves]") {
