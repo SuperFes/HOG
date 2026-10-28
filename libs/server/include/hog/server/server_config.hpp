@@ -32,6 +32,9 @@ struct WeatherSettings {
     GameDuration step = std::chrono::minutes{10};
     // The day the weather follows, which needn't be the sun's.
     GameDuration day = std::chrono::hours{24};
+    // Air and storms keep Earth's pace round the planet rather than blowing over it as fast as the
+    // wind.
+    bool earth_pace = false;
 };
 
 struct WildlifeSettings {

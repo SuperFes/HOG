@@ -23,6 +23,9 @@ class JobSystem;
 
 namespace hog::sim {
 
+// Earth's radius: the weather's winds are worked out as if over Earth, whatever the planet's size.
+inline constexpr double weather_radius = 6'371'000.0;
+
 struct WeatherConfig {
     int level = 5;
     // Steps fall on whole multiples of this since the epoch, whatever the tick rate.
@@ -31,7 +34,10 @@ struct WeatherConfig {
     GameDuration day = std::chrono::hours{24};
     double axial_tilt = 23.44;        // degrees
     double planet_radius = 115'000.0; // metres, for how steep the ground is
-    std::uint64_t seed = 0;           // where and when storm systems form
+    // Metres from the centre of the sphere air and storms are carried round at the wind's speed:
+    // Earth's keeps Earth's pace round a smaller planet, its own carries them as fast as the wind.
+    double carry_radius = weather_radius;
+    std::uint64_t seed = 0; // where and when storm systems form
     WeatherTuning tuning{};
 };
 

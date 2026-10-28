@@ -20,6 +20,9 @@ interval_seconds = 10
 cell_km = 6
 step_minutes = 10
 day_hours = 24
+# Air and storms keep Earth's pace round the planet, all but still over its ground, rather than
+# blowing over it as fast as the wind.
+earth_pace = false
 
 [wildlife]
 ecology = "ecology.toml"

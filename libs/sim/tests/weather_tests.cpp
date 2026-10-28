@@ -268,6 +268,87 @@ TEST_CASE("weather drifts east in the westerlies and west in the trades", "[sim]
     CHECK(trades < -1.0);
 }
 
+TEST_CASE("carried round the planet's own sphere, the weather blows over its ground with the wind",
+          "[sim][weather]") {
+    JobSystem jobs{1};
+    const WeatherConfig earth{.level = 4};
+    WeatherConfig own = earth;
+    own.carry_radius = own.planet_radius;
+    const std::vector<Ground> ground(hog::sim::CellGrid{earth.level}.size(), sea);
+    // Degrees east a warm patch in the westerlies' upper air has moved in ten minutes.
+    const auto drift = [&](const WeatherConfig& config) {
+        Weather calm{config, ground, march_equinox};
+        Weather warm{config, ground, march_equinox};
+        auto fields = warm.fields();
+        const std::uint32_t cell = warm.grid().index(hog::planet::cell_at(
+            DVec3{std::cos(45.0 * degree), 0.0, std::sin(45.0 * degree)}, config.level));
+        const DVec3 up = warm.grid().frame(cell).up;
+        fields.upper_temperature[cell] += 0.5F;
+        warm.set_fields(fields);
+        calm.advance_to(march_equinox + minutes{10}, jobs);
+        warm.advance_to(march_equinox + minutes{10}, jobs);
+        double weight = 0.0;
+        double longitude = 0.0;
+        for (std::uint32_t index = 0; index < warm.grid().size(); ++index) {
+            const double difference =
+                std::max(static_cast<double>(warm.fields().upper_temperature[index] -
+                                             calm.fields().upper_temperature[index]),
+                         0.0);
+            const DVec3 at = warm.grid().frame(index).up;
+            if (glm::dot(at, up) < std::cos(90.0 * degree)) {
+                continue;
+            }
+            weight += difference;
+            longitude += difference * std::atan2(at.y, at.x) / degree;
+        }
+        return (longitude / weight) - (std::atan2(up.y, up.x) / degree);
+    };
+    const double at_earth_pace = drift(earth);
+    const double with_the_wind = drift(own);
+    INFO("Earth's pace " << at_earth_pace << "°, with the wind " << with_the_wind << "°");
+    CHECK(at_earth_pace > 0.0);
+    // About as many times further as Earth is bigger than the planet, less what spreads it out.
+    CHECK(with_the_wind > at_earth_pace * 40.0);
+}
+
+TEST_CASE(
+    "carried round the planet's own sphere, storm systems cross it as fast as they're steered",
+    "[sim][weather]") {
+    JobSystem jobs{1};
+    const WeatherConfig earth{.level = 4, .seed = 7};
+    Weather at_earth_pace{earth, zonal_sea(earth.level), march_equinox};
+    at_earth_pace.advance_to(march_equinox + hours{144}, jobs);
+    WeatherConfig own = earth;
+    own.carry_radius = own.planet_radius;
+    Weather with_the_wind{own, zonal_sea(own.level), march_equinox};
+    REQUIRE(with_the_wind.load(Weather::save_version, at_earth_pace.save()));
+    const auto before = at_earth_pace.systems();
+    REQUIRE_FALSE(before.empty());
+
+    // One step on from the same weather, each system moves as much further round as the sphere
+    // it's carried round is smaller.
+    const GameTime next = march_equinox + hours{144} + minutes{10};
+    at_earth_pace.advance_to(next, jobs);
+    with_the_wind.advance_to(next, jobs);
+    const auto moved = [&](const Weather& weather, const hog::sim::StormSystem& was) {
+        for (const hog::sim::StormSystem& is : weather.systems()) {
+            if (is.id == was.id) {
+                return std::acos(std::clamp(glm::dot(is.centre, was.centre), -1.0, 1.0));
+            }
+        }
+        return -1.0;
+    };
+    for (const hog::sim::StormSystem& was : before) {
+        CAPTURE(was.id);
+        const double slow = moved(at_earth_pace, was);
+        const double fast = moved(with_the_wind, was);
+        REQUIRE(slow > 0.0);
+        const double faster = hog::sim::weather_radius / own.planet_radius;
+        CHECK(fast / slow > faster * 0.98);
+        CHECK(fast / slow < faster * 1.02);
+    }
+}
+
 TEST_CASE("air rises where the trades meet and sinks under the subtropical highs",
           "[sim][weather]") {
     const WeatherConfig fine{.level = 4};

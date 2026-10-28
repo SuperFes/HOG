@@ -51,6 +51,7 @@ TEST_CASE("a minimal server config takes the defaults", "[server][config]") {
     CHECK(config->weather.cell_size == 6'000.0);
     CHECK(config->weather.step == 10min);
     CHECK(config->weather.day == 24h);
+    CHECK_FALSE(config->weather.earth_pace);
     CHECK_FALSE(config->wildlife.ecology);
     CHECK(config->wildlife.step == 24h);
     CHECK_FALSE(config->forest.vegetation);
@@ -91,6 +92,7 @@ interval_seconds = 0
 cell_km = 2.5
 step_minutes = 5
 day_hours = 4
+earth_pace = true
 
 [wildlife]
 ecology = "ecology.toml"
@@ -135,6 +137,7 @@ start = 2030-06-01T12:00:00+02:00
     CHECK(config->weather.cell_size == 2'500.0);
     CHECK(config->weather.step == 5min);
     CHECK(config->weather.day == 4h);
+    CHECK(config->weather.earth_pace);
     CHECK(config->wildlife.ecology == base() / "ecology.toml");
     CHECK(config->wildlife.step == 6h);
     CHECK(config->forest.vegetation == base() / "forest.toml");

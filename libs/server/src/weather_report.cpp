@@ -47,6 +47,9 @@ protocol::Weather weather_report(const sim::CellGrid& grid, const sim::WeatherFi
     const double hours =
         std::chrono::duration<double, std::chrono::hours::period>(config.step).count();
     const double steering = config.tuning.motion.jet_steering;
+    // Weather carried round a bigger sphere than the planet crosses its ground slower than the
+    // wind.
+    const double carried = config.planet_radius / config.carry_radius;
 
     std::vector<Sums> sums(protocol::weather_cells(level));
     // Each cell sent's swell, band by band and heading by heading, by area.
@@ -64,7 +67,7 @@ protocol::Weather weather_report(const sim::CellGrid& grid, const sim::WeatherFi
             static_cast<double>(fields.rain[index] + fields.snow[index] + fields.hail[index]) /
             hours;
         sum.snowing += area * static_cast<double>(fields.snow[index]) / hours;
-        sum.drift += area * (wind + ((jet - wind) * steering));
+        sum.drift += area * carried * (wind + ((jet - wind) * steering));
         sum.wind += area * wind;
         const sim::Sky sky = sim::sky_over(fields, ground[index], config.tuning, index);
         sum.humidity += area * static_cast<double>(sky.humidity);

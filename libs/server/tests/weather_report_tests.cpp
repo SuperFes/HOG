@@ -21,11 +21,12 @@ using hog::sim::WeatherFields;
 
 namespace {
 
-// Ten-minute steps, drifting with the wind 0.4 of the way to the jet's.
+// Ten-minute steps, drifting over the ground with the wind 0.4 of the way to the jet's.
 WeatherConfig config() {
     WeatherConfig out;
     out.step = 10min;
     out.tuning.motion.jet_steering = 0.4;
+    out.carry_radius = out.planet_radius;
     return out;
 }
 
@@ -88,6 +89,25 @@ TEST_CASE("weather as coarse as may be sent goes cell for cell", "[server][weath
         CHECK(cell.fog_top == sky.fog_top);
         CHECK(cell.base == sky.base);
         CHECK(cell.top == sky.top);
+    }
+}
+
+TEST_CASE("weather keeping Earth's pace drifts over a small planet's ground slower than the wind",
+          "[server][weather]") {
+    const CellGrid grid{0};
+    WeatherFields fields{grid.size()};
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        fields.wind[index] = {100.0F, 0.0F};
+        fields.jet[index] = {100.0F, 0.0F};
+    }
+    WeatherConfig earth = config();
+    earth.carry_radius = hog::sim::weather_radius;
+    const auto weather = weather_report(grid, fields, ground(grid), Still{grid}.sea,
+                                        Still{grid}.current, earth, 0ms);
+    for (const auto& cell : weather.cells) {
+        CHECK_THAT(static_cast<double>(cell.drift.x),
+                   WithinAbs(100.0 * earth.planet_radius / hog::sim::weather_radius, 0.5));
+        CHECK(cell.wind == Vec2{100.0F, 0.0F});
     }
 }
 

@@ -146,7 +146,7 @@ Arriving carried_in(const CellGrid& grid, const std::vector<bool>& wet, const Se
         arriving.peak = g / (2.0 * fast);
         arriving.heading = along / fast;
     }
-    const DVec3 from = detail::departure(frame, Vec2{along}, seconds);
+    const DVec3 from = detail::departure(frame, Vec2{along}, seconds, earth_radius);
     arriving.variance = grid.interpolate(from, [&](std::uint32_t cell) {
         return wet[cell] ? static_cast<double>(before.wind_sea[cell]) : 0.0;
     });

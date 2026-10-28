@@ -280,7 +280,7 @@ private:
 }
 
 [[nodiscard]] Result<void> parse_weather(const Table& weather, WeatherSettings& config) {
-    if (auto known = weather.only({"cell_km", "step_minutes", "day_hours"}); !known) {
+    if (auto known = weather.only({"cell_km", "step_minutes", "day_hours", "earth_pace"}); !known) {
         return known;
     }
     const auto cell = weather.number("cell_km");
@@ -307,6 +307,11 @@ private:
     }
     config.step = step->value_or(config.step);
     config.day = day->value_or(config.day);
+    const auto earth_pace = weather.boolean("earth_pace");
+    if (!earth_pace) {
+        return std::unexpected(earth_pace.error());
+    }
+    config.earth_pace = earth_pace->value_or(config.earth_pace);
     return {};
 }
 

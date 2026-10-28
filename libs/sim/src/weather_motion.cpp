@@ -14,12 +14,12 @@ double at(std::span<const float> field, std::uint32_t index) {
 
 } // namespace
 
-DVec3 departure(const planet::TangentFrame& frame, Vec2 velocity, double seconds) {
+DVec3 departure(const planet::TangentFrame& frame, Vec2 velocity, double seconds, double radius) {
     const double speed = glm::length(DVec2{velocity});
     if (speed == 0.0) {
         return frame.up;
     }
-    const double angle = speed * seconds / earth_radius;
+    const double angle = speed * seconds / radius;
     const DVec3 heading = ((frame.east * static_cast<double>(velocity.x)) +
                            (frame.north * static_cast<double>(velocity.y))) /
                           speed;
@@ -35,7 +35,8 @@ void move(const StepContext& step, const WeatherFields& before, WeatherFields& f
     const Vec2 jet = before.jet[index];
     const Vec2 steering = wind + ((jet - wind) * static_cast<float>(tuning.jet_steering));
 
-    const DVec3 low = departure(frame, steering, step.seconds);
+    const double radius = step.config->carry_radius;
+    const DVec3 low = departure(frame, steering, step.seconds, radius);
     // Air keeps its warmth brought to sea level, so crossing mountains doesn't heat or chill it.
     const double surface = grid.interpolate(low, [&](std::uint32_t cell) {
         return sea_level(at(before.temperature, cell), step.ground[cell]);
@@ -46,7 +47,7 @@ void move(const StepContext& step, const WeatherFields& before, WeatherFields& f
     fields.cloud[index] = static_cast<float>(
         grid.interpolate(low, [&](std::uint32_t cell) { return at(before.cloud, cell); }));
 
-    const DVec3 high = departure(frame, jet, step.seconds);
+    const DVec3 high = departure(frame, jet, step.seconds, radius);
     fields.upper_temperature[index] = static_cast<float>(grid.interpolate(
         high, [&](std::uint32_t cell) { return at(before.upper_temperature, cell); }));
 }

@@ -240,6 +240,7 @@ Result<void> Server::start_simulation(const planet::PlanetConfig& shape, GameTim
         .day = config_.weather.day,
         .axial_tilt = shape.axial_tilt,
         .planet_radius = shape.radius,
+        .carry_radius = config_.weather.earth_pace ? sim::weather_radius : shape.radius,
         .seed = shape.seed,
     };
     weather_ = std::make_unique<sim::Weather>(

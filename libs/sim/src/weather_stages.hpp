@@ -16,7 +16,7 @@ namespace hog::sim::detail {
 
 inline constexpr double degree = std::numbers::pi / 180.0;
 // Distances are taken as if over Earth, so the weather keeps Earth's pace on a small planet.
-inline constexpr double earth_radius = 6'371'000.0;
+inline constexpr double earth_radius = weather_radius;
 inline constexpr double lapse_rate = 0.0065; // °C per metre
 
 // The sun's declination, as sines: now, and as the slower sea feels it.
@@ -82,7 +82,8 @@ struct Targets {
 
 // Where what is over `frame` now was `seconds` ago, moving at `velocity` (east, north) m/s along a
 // great circle.
-[[nodiscard]] DVec3 departure(const planet::TangentFrame& frame, Vec2 velocity, double seconds);
+[[nodiscard]] DVec3 departure(const planet::TangentFrame& frame, Vec2 velocity, double seconds,
+                              double radius);
 
 // Carries each layer's warmth, water and cloud with the wind, reading the step's start from
 // `before`. Moving alone doesn't keep water exactly; conserve_water() puts it right.

@@ -48,7 +48,7 @@ void travel(const StepContext& step, const WeatherFields& fields, StormSystem& s
     const DVec2 velocity = (DVec2{fields.jet[cell]} * tuning.steering) + DVec2{0.0, poleward};
     const double speed = glm::length(velocity);
     if (speed > 0.0) {
-        const double angle = speed * step.seconds / earth_radius;
+        const double angle = speed * step.seconds / step.config->carry_radius;
         const DVec3 heading = ((frame.east * velocity.x) + (frame.north * velocity.y)) / speed;
         system.centre =
             glm::normalize((system.centre * std::cos(angle)) + (heading * std::sin(angle)));

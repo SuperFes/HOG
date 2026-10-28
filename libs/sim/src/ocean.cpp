@@ -227,7 +227,8 @@ void Ocean::warm(const CellGrid& grid, double sin_declination, double seconds,
             fields_.temperature[index] = static_cast<float>(season);
             return;
         }
-        const DVec3 from = detail::departure(grid.frame(index), fields_.current[index], seconds);
+        const DVec3 from =
+            detail::departure(grid.frame(index), fields_.current[index], seconds, earth_radius);
         double warmth = grid.interpolate(from, [&](std::uint32_t cell) {
             return static_cast<double>(wet_[cell] ? carried_[cell] : carried_[index]);
         });
