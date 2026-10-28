@@ -261,6 +261,7 @@ Patch bake_patch(const planet::World& world, planet::CellId cell, const flora::F
     std::vector<double> grid_heights(woods.size());
     HeightRange heights{.lowest = std::numeric_limits<double>::infinity(),
                         .highest = -std::numeric_limits<double>::infinity()};
+    const planet::Rivers& rivers = world.geology().terrain().rivers();
     for (int j = -reach; j < patch_side + reach; ++j) {
         for (int i = -reach; i < patch_side + reach; ++i) {
             const Corner corner = on_one_face(at.face, first_i + i, first_j + j, level);
@@ -275,6 +276,10 @@ Patch bake_patch(const planet::World& world, planet::CellId cell, const flora::F
             if (inside(i) && inside(j)) {
                 const flora::Fate fate = fate_at(canonical(corner), fates);
                 exposures[index(i, j)] = world.exposure(sampled, state);
+                // Nothing grows in a river's channel.
+                if (rivers.in_channel(sampled)) {
+                    exposures[index(i, j)].bare = planet::fixed_one;
+                }
                 woods[index(i, j)] = woods_at(
                     canonical(corner), points[bordered_index(i, j)], state.biome,
                     flora::fared(flora::habitat_of(state, exposures[index(i, j)].bare), fate));

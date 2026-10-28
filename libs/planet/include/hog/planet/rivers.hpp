@@ -92,6 +92,8 @@ public:
 
     // The channel through a cell's centre, or nothing out of the water.
     [[nodiscard]] std::optional<Channel> channel(CellId cell, std::int64_t ground) const;
+    // Whether a channel runs through a cell's centre, as channel() finds it, whatever the ground.
+    [[nodiscard]] bool in_channel(CellId cell) const;
 
     // The water standing over a cell's centre, where `ground` is the height there, or nothing out
     // of the water.

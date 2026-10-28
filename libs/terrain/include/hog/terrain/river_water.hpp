@@ -17,8 +17,8 @@ namespace hog::terrain {
 inline constexpr double river_reach = 4'000.0; // metres
 inline constexpr double river_relay = 1'000.0; // metres
 // The water is laid out over its banks either side by the larger of this and half its width,
-// where the ground hides it, so it meets the banks however coarsely they're drawn.
-inline constexpr double river_overlap = 2.0; // metres
+// for drawing to show as much of it as ground drawn coarsely needs.
+inline constexpr double river_overlap = 4.0; // metres
 // Pieces along a river are about as long as it's wide, but no shorter than this.
 inline constexpr double river_piece = 4.0; // metres
 // The water's origin lies on a lattice this many metres apart along each axis, so a pattern drawn
@@ -28,8 +28,8 @@ inline constexpr double river_pattern = 256.0; // metres
 // A point of a river's surface.
 struct RiverVertex {
     Vec3 position{0.0F}; // metres from the water's origin
-    // From -1 to 1 between the water's edges, and beyond over its banks.
-    float across = 0.0F;
+    // Metres out past the water's nearer edge, over its bank; negative within it.
+    float beyond = 0.0F;
     Vec3 flow{0.0F}; // m/s, in the planet's frame
     // From 0 where the water runs smoothly to 1 where it runs as steeply as it falls.
     float rough = 0.0F;

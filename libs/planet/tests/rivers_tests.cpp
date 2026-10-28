@@ -138,6 +138,7 @@ TEST_CASE("a river cuts its channel below the ground, under water", "[planet][ri
             if (const auto channel =
                     rivers().channel(cell, plain(hog::planet::cell_center(cell)))) {
                 found = channel;
+                REQUIRE(rivers().in_channel(cell));
                 // The ground is far above the river's planned water, so the channel holds it.
                 REQUIRE(channel->bed < channel->surface);
                 REQUIRE(channel->surface <= plain(hog::planet::cell_center(cell)));

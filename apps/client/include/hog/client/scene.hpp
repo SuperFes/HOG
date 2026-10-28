@@ -29,6 +29,7 @@
 #include <hog/render/precipitation.hpp>
 #include <hog/render/presenter.hpp>
 #include <hog/render/render_graph.hpp>
+#include <hog/render/rivers.hpp>
 #include <hog/render/sky.hpp>
 #include <hog/render/terrain.hpp>
 #include <hog/render/trees.hpp>
@@ -37,6 +38,7 @@
 #include <hog/sim/calendar.hpp>
 #include <hog/terrain/baker.hpp>
 #include <hog/terrain/bend.hpp>
+#include <hog/terrain/river_water.hpp>
 #include <hog/terrain/shore.hpp>
 #include <hog/terrain/stream.hpp>
 #include <hog/waves/waves.hpp>
@@ -197,6 +199,9 @@ private:
     terrain::ShoreStream shore_;
     // Worked out, and yet to be given to the ocean.
     std::optional<terrain::ShoreDepths> shore_depths_;
+    // Rivers' water round the eye, laid out in the background.
+    terrain::RiverStream river_stream_;
+    std::optional<render::RiverSurface> rivers_;
     std::vector<waves::Train> wave_trains_;
     render::Grass grass_;
     render::Bushes bushes_;

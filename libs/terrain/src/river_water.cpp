@@ -13,8 +13,8 @@ namespace hog::terrain {
 
 namespace {
 
-// Across a reach from bank to bank, as RiverVertex::across has it, with the edges out over the
-// banks filled in for each piece.
+// Across a reach from bank to bank, a share of half its width, with the edges out over the banks
+// filled in for each piece.
 constexpr std::array<float, 5> across_water{-1.0F, -1.0F, 0.0F, 1.0F, 1.0F};
 constexpr auto corners = static_cast<std::uint32_t>(across_water.size());
 
@@ -85,7 +85,7 @@ void lay_reach(const planet::Elevation& terrain, const planet::Reach& reach, DVe
                                   glm::normalize(section.course + (section.side * (out / radius))));
             water.vertices.push_back(
                 {.position = Vec3{(point * (radius + level)) - origin.metres()},
-                 .across = static_cast<float>(out / half),
+                 .beyond = static_cast<float>(std::abs(out) - half),
                  .flow = Vec3{downstream * speed},
                  .rough = rough});
         }

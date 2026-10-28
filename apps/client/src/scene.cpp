@@ -254,6 +254,11 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
                 frames,
                 budget};
     scene.probes_ = std::move(probes);
+    auto rivers = render::RiverSurface::create(device, colour_format, depth_format, frames);
+    if (!rivers) {
+        return failed("draw rivers", rivers.error());
+    }
+    scene.rivers_ = std::move(rivers).value();
     return scene;
 }
 
@@ -268,6 +273,7 @@ Scene::Scene(const render::Device& device, const planet::World& world, jobs::Job
              const GrassBudget& budget)
     : world_{&world}, jobs_{&jobs}, baker_{world, jobs}, terrain_{std::move(terrain)},
       ocean_{std::move(ocean)}, shore_{world, world.geology().planet_radius(), jobs},
+      river_stream_{world, world.geology().planet_radius(), jobs},
       wave_trains_{waves::planet_trains(hash_combine(world.geology().seed(), waves_salt))},
       grass_{std::move(grass)}, bushes_{std::move(bushes)}, trees_{std::move(trees)},
       forest_{std::move(forest)}, pool_{std::move(pool)}, anchor_pool_{std::move(anchors)},
@@ -282,6 +288,7 @@ Scene::Scene(const render::Device& device, const planet::World& world, jobs::Job
 Scene::~Scene() {
     (void)baker_.finish();
     (void)shore_.finish();
+    (void)river_stream_.finish();
 }
 
 void Scene::finish_bakes() {
@@ -292,6 +299,9 @@ void Scene::finish_bakes() {
     }
     if (auto depths = shore_.finish()) {
         shore_depths_ = std::move(depths);
+    }
+    if (auto water = river_stream_.finish(); water && rivers_) {
+        rivers_->show(std::make_shared<const terrain::RiverWater>(std::move(water).value()));
     }
 }
 
@@ -418,6 +428,10 @@ void Scene::follow_shore(const Shot& shot) {
     shore_.follow(glm::normalize(shot.camera.eye.metres()));
     if (auto depths = shore_.collect()) {
         shore_depths_ = std::move(depths);
+    }
+    river_stream_.follow(glm::normalize(shot.camera.eye.metres()));
+    if (auto water = river_stream_.collect(); water && rivers_) {
+        rivers_->show(std::make_shared<const terrain::RiverWater>(std::move(water).value()));
     }
 }
 
@@ -579,7 +593,7 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     follow_shore(shot);
     settled_ = streamed.bakes.empty() && streamed.arrived.empty() && streamed.evicted.empty() &&
                baker_.in_flight() == 0 && anchors_.settled() && bush_anchors_.settled() &&
-               !shore_.in_flight() && !shore_depths_;
+               !shore_.in_flight() && !shore_depths_ && !river_stream_.in_flight();
     const protocol::CellWeather here = weather_at_eye(shot);
     const DVec3 sun = calendar_.sun_direction(shot.time);
     const double sun_mu = glm::dot(sun, shot.bend.up);
@@ -771,6 +785,18 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                   render::OceanView looking = sea;
                   looking.behind = seen_behind(graph, behind, environment);
                   return ocean_.draw(commands, frame.extent, looking, frame.slot);
+              });
+    graph.add({.name = "rivers", .uses = sea_uses, .targets = drawn},
+              [&, behind](VkCommandBuffer commands) {
+                  return rivers_->draw(
+                      commands, frame.extent,
+                      {.camera = shot.camera,
+                       .sun = sky.sun,
+                       .bend = shot.bend,
+                       .air = through,
+                       .behind = seen_behind(graph, behind, VK_NULL_HANDLE),
+                       .time = std::chrono::duration<double>(shot.time.time_since_epoch()).count()},
+                      frame.slot);
               });
     if (render::precipitation_count(falling, static_cast<double>(here.snow)) > 0) {
         graph.add({.name = "rain", .uses = through_air, .targets = drawn},

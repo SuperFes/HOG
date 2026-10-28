@@ -525,7 +525,7 @@ TEST_CASE("a scene times its passes on the GPU", "[client][scene][gpu]") {
     // From this high no tree is near enough to grow, so the forest pass isn't added at all.
     CHECK(names == std::vector<std::string_view>{"uploads", "sky tables", "sky", "foam", "ripples",
                                                  "sea laid", "ground", "trees", "behind sea",
-                                                 "behind sea depth", "sea", "glare"});
+                                                 "behind sea depth", "sea", "rivers", "glare"});
     // Over the woods, the stamps draw trees; from this high, none are grown.
     CHECK(scene->tree_counts().tiles > 0);
     CHECK(scene->tree_counts().stamped > 0);

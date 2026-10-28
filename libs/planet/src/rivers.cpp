@@ -313,6 +313,15 @@ std::optional<Channel> Rivers::channel(CellId cell, std::int64_t ground) const {
     return Channel{.bed = cut(cell, ground), .surface = *surface};
 }
 
+bool Rivers::in_channel(CellId cell) const {
+    bool found = false;
+    const auto reaching = [](const Reach& reach) { return reach.width / 2.0; };
+    each_reach(cell, reaching, [&](const Reach& reach, std::int64_t /*level*/, double away) {
+        found = found || away < reach.width / 2.0;
+    });
+    return found;
+}
+
 std::optional<StandingWater> Rivers::standing(CellId cell, std::int64_t ground) const {
     // Found about the shifted point, so shores follow the ground, not the grid.
     const CellId shifted = cell_at(meander_(cell_center(cell)));

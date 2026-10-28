@@ -60,6 +60,12 @@ DVec3 placed(const RiverVertex& vertex) {
     return water().origin.metres() + DVec3{vertex.position};
 }
 
+// Which corner across its piece's end a vertex is, from the bank on the left over the water's
+// edges to the bank on the right, the middle third.
+std::size_t corner_of(std::size_t at) {
+    return at % 5;
+}
+
 // The vertices of the triangles drawn, each once.
 std::vector<std::size_t> drawn() {
     std::vector<std::size_t> used(water().indices.begin(), water().indices.end());
@@ -77,14 +83,16 @@ TEST_CASE("rivers' water lies along their channels at the level of their water",
     int middles = 0;
     for (const std::size_t at : drawn()) {
         const RiverVertex& vertex = water().vertices[at];
-        if (vertex.across != 0.0F) {
+        if (corner_of(at) != 2) {
             continue;
         }
+        CHECK(vertex.beyond < 0.0F);
         const DVec3 point = placed(vertex);
         const auto channel = terrain().river(hog::planet::cell_at(glm::normalize(point)));
-        REQUIRE(channel);
+        REQUIRE(channel.has_value());
+        const auto surface = channel.value_or(hog::planet::Channel{}).surface;
         CHECK_THAT(glm::length(point) - radius(),
-                   WithinAbs(hog::planet::fixed_to_double(channel->surface), 0.01));
+                   WithinAbs(hog::planet::fixed_to_double(surface), 0.01));
         ++middles;
     }
     CHECK(middles > 20);
@@ -94,22 +102,22 @@ TEST_CASE("rivers' water reaches out to their banks and over them", "[terrain][r
     int edges = 0;
     for (const std::size_t at : drawn()) {
         const RiverVertex& vertex = water().vertices[at];
-        if (std::abs(vertex.across) != 1.0F) {
+        if (corner_of(at) != 1 && corner_of(at) != 3) {
             continue;
         }
+        CHECK(vertex.beyond == 0.0F);
         // Just inside the edge, from the middle of the same piece, next to it.
-        const std::size_t middle = vertex.across < 0.0F ? at + 1 : at - 1;
-        REQUIRE(water().vertices[middle].across == 0.0F);
+        const std::size_t middle = corner_of(at) == 1 ? at + 1 : at - 1;
         const DVec3 inside =
             glm::normalize(glm::mix(placed(water().vertices[middle]), placed(vertex), 0.8));
         CHECK(terrain().river(hog::planet::cell_at(inside)));
         ++edges;
     }
     CHECK(edges > 20);
-    // Over them by at least half the water's width.
-    for (const RiverVertex& vertex : water().vertices) {
-        if (std::abs(vertex.across) > 1.0F) {
-            CHECK(std::abs(vertex.across) >= 1.999F);
+    // Over them by at least as far as the water's laid over them.
+    for (std::size_t at = 0; at < water().vertices.size(); ++at) {
+        if (corner_of(at) == 0 || corner_of(at) == 4) {
+            CHECK(static_cast<double>(water().vertices[at].beyond) >= hog::terrain::river_overlap);
         }
     }
 }
@@ -130,7 +138,7 @@ TEST_CASE("rivers' water flows downstream", "[terrain][rivers]") {
     for (std::size_t at = 0; at + 1 < indices.size(); at += 6) {
         const RiverVertex& here = vertices[indices[at]];
         const RiverVertex& next = vertices[indices[at + 1]];
-        if (here.across != 0.0F) {
+        if (corner_of(indices[at]) != 2) {
             continue;
         }
         const DVec3 down = placed(next) - placed(here);
@@ -149,9 +157,10 @@ TEST_CASE("rivers' water is laid out anew round the eye as it goes", "[terrain][
     hog::terrain::RiverStream stream{shared_world(), radius(), jobs};
     const DVec3 eye = glm::normalize(a_river().from + a_river().to);
     stream.follow(eye);
-    const auto first = stream.finish();
-    REQUIRE(first);
-    CHECK(first->vertices == water().vertices);
+    const auto finished = stream.finish();
+    REQUIRE(finished.has_value());
+    const hog::terrain::RiverWater first = finished.value_or(hog::terrain::RiverWater{});
+    CHECK(first.vertices == water().vertices);
     // A short way off, it stays as it is.
     const hog::planet::TangentFrame frame = hog::planet::tangent_frame(eye);
     stream.follow(glm::normalize(eye + (frame.east * (100.0 / radius()))));
@@ -160,6 +169,6 @@ TEST_CASE("rivers' water is laid out anew round the eye as it goes", "[terrain][
         glm::normalize(eye + (frame.east * (2.0 * hog::terrain::river_relay / radius()))));
     CHECK(stream.in_flight());
     const auto next = stream.finish();
-    REQUIRE(next);
-    CHECK(next->origin.metres() != first->origin.metres());
+    REQUIRE(next.has_value());
+    CHECK(next.value_or(hog::terrain::RiverWater{}).origin.metres() != first.origin.metres());
 }
