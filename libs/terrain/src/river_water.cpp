@@ -23,12 +23,13 @@ constexpr auto corners = static_cast<std::uint32_t>(across_water.size());
 constexpr double pieces_per_turn = 8.0 / (2.0 * std::numbers::pi);
 
 // A piece's end across a reach's course: where its middle truly lies, which way across it the
-// channel is found from there and how far its meanders swing it, and the level of its water, if it
-// runs over land, not into a lake or the sea.
+// channel is found from there, how far its meanders swing it, how wide it runs and the level of its
+// water, if it runs over land, not into a lake or the sea.
 struct Section {
     DVec3 course;
     DVec3 side;
     planet::Swing swing;
+    double half;
     DVec3 middle;
     std::optional<double> level;
 };
@@ -42,6 +43,7 @@ Section section_at(const planet::Elevation& terrain, const planet::Reach& reach,
     Section section{.course = course,
                     .side = side,
                     .swing = swing,
+                    .half = planet::width_at(reach, t) / 2.0,
                     .middle = terrain.rivers().meander().unshifted(
                         glm::normalize(course + (side * swing.offset))),
                     .level = std::nullopt};
@@ -64,8 +66,7 @@ void lay_reach(const planet::Elevation& terrain, const planet::Reach& reach, DVe
         return;
     }
     const planet::Meander& meander = terrain.rivers().meander();
-    const double half = reach.width / 2.0;
-    const double over = std::max(river_overlap, half);
+    const double over = std::max(river_overlap, reach.width / 2.0);
     const double speed = river_speed(reach);
     const auto rough = static_cast<float>(river_rough(reach, radius));
     const double turned = std::abs(reach.turn_from + reach.turn_to) / 2.0;
@@ -87,6 +88,7 @@ void lay_reach(const planet::Elevation& terrain, const planet::Reach& reach, DVe
             glm::normalize(sections[std::min(at + 1, sections.size() - 1)].middle -
                            sections[at == 0 ? 0 : at - 1].middle);
         const double level = section.level.value_or(0.0);
+        const double half = section.half;
         for (std::size_t corner = 0; corner < across_water.size(); ++corner) {
             const bool edge = corner == 0 || corner + 1 == across_water.size();
             const double out =

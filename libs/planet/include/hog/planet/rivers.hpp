@@ -35,7 +35,11 @@ struct Reach {
     DVec3 to{};
     std::int64_t from_surface = 0;
     std::int64_t to_surface = 0;
-    double width = 0.0; // metres
+    double width = 0.0; // metres, where it leaves `from`
+    // Metres wide where it reaches `to`, and how much wider it runs midway, as a share; narrower
+    // below 0.
+    double width_to = 0.0;
+    double wobble = 0.0;
     std::int64_t depth = 0;
     // How far its water falls where it runs steeply enough to tumble over falls or rapids, with a
     // pool scoured at their foot; 0 elsewhere.
@@ -71,6 +75,10 @@ struct Swing {
 };
 [[nodiscard]] Swing swing_at(const Reach& reach, double t);
 
+// Metres wide a reach runs a share `t` along its course: easing from one end's width to the
+// other's, wider round its bends.
+[[nodiscard]] double width_at(const Reach& reach, double t);
+
 // Rivers from every landform cell that drains enough ground, each running to the cell it drains
 // into along a smooth course through their centres, and meandering about it. Channels widen and
 // deepen with the water they carry. A river's water only falls downstream, so it cuts through rises
@@ -89,6 +97,10 @@ public:
     // course, at most; steeper rivers swing less, and none over falls.
     static constexpr double meander_widths = 11.0;
     static constexpr double swing_widths = 1.8;
+    // How much wider a river runs round the apex of a bend, and at most wider or narrower midway
+    // along a reach than its ends make it, as shares of its width.
+    static constexpr double bend_widening = 0.3;
+    static constexpr double wobble_widening = 0.25;
 
     // Rise over run of a reach's water from which it falls rather than runs.
     static constexpr double falls_gradient = 0.1;
@@ -137,9 +149,9 @@ public:
     [[nodiscard]] static double depth(double area);
 
 private:
-    // Calls `visit(reach, level, away)` for each reach near the cell, with the fixed-point level
-    // of its water there and the metres from its course, where that may be within
-    // `reaching(reach)` metres.
+    // Calls `visit(reach, level, away, width)` for each reach near the cell, with the fixed-point
+    // level of its water there, the metres from its river and how many wide it runs there, where
+    // that may be within `reaching(reach)` metres.
     template <typename Reaching, typename Visit>
     void each_reach(CellId cell, Reaching reaching, Visit visit) const;
     // Metres from a reach's water to where its banks may meet the ground, at most.

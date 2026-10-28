@@ -152,9 +152,19 @@ struct Meandering {
     double bend;
 };
 
+// The phase of a reach's meanders a share `t` along it.
+double phase_at(const Reach& reach, double t) {
+    return reach.phase + (reach.turn_from * t) + ((reach.turn_to - reach.turn_from) * t * t / 2.0);
+}
+
+// Metres wide a reach runs at most.
+double broadest(const Reach& reach) {
+    return std::max(reach.width, reach.width_to) * (1.0 + Rivers::bend_widening) *
+           (1.0 + std::abs(reach.wobble));
+}
+
 Meandering meandering(const Reach& reach, double t) {
-    const double phase =
-        reach.phase + (reach.turn_from * t) + ((reach.turn_to - reach.turn_from) * t * t / 2.0);
+    const double phase = phase_at(reach, t);
     const double turning = reach.turn_from + ((reach.turn_to - reach.turn_from) * t);
     const double sine = std::sin(phase);
     const double cosine = std::cos(phase);
@@ -301,6 +311,8 @@ struct Course {
     double swing_to = 0.0;
     double joining = 0.0;
     double settling = 0.0;
+    double width_to = 0.0;
+    double wobble = 0.0;
 };
 
 template <typename Flows>
@@ -330,6 +342,10 @@ std::vector<Course> lay_courses(const Landform& landform, std::span<const std::i
             waves.wavenumber[carries_on ? receiver : cell] * glm::length(course.arriving);
         course.swing_from = waves.swing[cell];
         course.swing_to = carries_on ? waves.swing[receiver] : waves.swing[cell];
+        course.width_to =
+            scale *
+            Rivers::width(static_cast<double>(landform.drained()[carries_on ? receiver : cell]));
+        course.wobble = Rivers::wobble_widening * ((2.0 * chance(seed, cell, 3)) - 1.0);
     }
     // Phases run on downstream from each source.
     for (auto cell = drainage.order.rbegin(); cell != drainage.order.rend(); ++cell) {
@@ -367,6 +383,13 @@ std::vector<Course> lay_courses(const Landform& landform, std::span<const std::i
 
 DVec3 course_at(const Reach& reach, double t) {
     return glm::normalize(hermite(reach, t).point);
+}
+
+double width_at(const Reach& reach, double t) {
+    const double sine = std::sin(phase_at(reach, t));
+    return (reach.width + ((reach.width_to - reach.width) * ease(t).value)) *
+           (1.0 + (Rivers::bend_widening * sine * sine)) *
+           (1.0 + (reach.wobble * std::sin(std::numbers::pi * t)));
 }
 
 Swing swing_at(const Reach& reach, double t) {
@@ -450,6 +473,8 @@ Rivers::Rivers(const Landform& landform, std::span<const std::int64_t> ground, M
                             .from_surface = levels_[cell],
                             .to_surface = levels_[receiver],
                             .width = scale * width(area),
+                            .width_to = course.width_to,
+                            .wobble = course.wobble,
                             .depth = fixed(scale * depth(area)),
                             .fall = falls ? drop : 0,
                             .leaving = course.leaving,
@@ -532,7 +557,7 @@ void Rivers::each_reach(CellId cell, Reaching reaching, Visit visit) const {
         const std::int64_t level =
             reach.from_surface +
             std::llround(static_cast<double>(reach.to_surface - reach.from_surface) * t);
-        visit(reach, level, nearest * radius_);
+        visit(reach, level, nearest * radius_, width_at(reach, t));
     }
 }
 
@@ -556,33 +581,37 @@ std::int64_t Rivers::sunk(const Reach& reach, std::int64_t level, std::int64_t g
 std::int64_t Rivers::cut(CellId cell, std::int64_t ground) const {
     std::int64_t lowest = ground;
     // Beyond its banks, a river's cut climbs above the ground.
-    const auto reaching = [&](const Reach& reach) { return (reach.width / 2.0) + banks(reach); };
-    each_reach(cell, reaching, [&](const Reach& reach, std::int64_t level, double away) {
-        const std::int64_t surface = sunk(reach, level, ground);
-        const double half = reach.width / 2.0;
-        std::int64_t bed = 0;
-        if (away < half) {
-            const double share = 1.0 - ((away / half) * (away / half));
-            bed = surface -
-                  std::max<std::int64_t>(std::llround(static_cast<double>(reach.depth) * share), 1);
-        } else {
-            bed =
-                surface + std::llround((away - half) * bank_slope * static_cast<double>(fixed_one));
-        }
-        lowest = std::min(lowest, bed);
-    });
+    const auto reaching = [&](const Reach& reach) {
+        return (broadest(reach) / 2.0) + banks(reach);
+    };
+    each_reach(
+        cell, reaching, [&](const Reach& reach, std::int64_t level, double away, double width) {
+            const std::int64_t surface = sunk(reach, level, ground);
+            const double half = width / 2.0;
+            std::int64_t bed = 0;
+            if (away < half) {
+                const double share = 1.0 - ((away / half) * (away / half));
+                bed = surface - std::max<std::int64_t>(
+                                    std::llround(static_cast<double>(reach.depth) * share), 1);
+            } else {
+                bed = surface +
+                      std::llround((away - half) * bank_slope * static_cast<double>(fixed_one));
+            }
+            lowest = std::min(lowest, bed);
+        });
     return lowest;
 }
 
 std::optional<Channel> Rivers::channel(CellId cell, std::int64_t ground) const {
     std::optional<std::int64_t> surface;
-    const auto reaching = [](const Reach& reach) { return reach.width / 2.0; };
-    each_reach(cell, reaching, [&](const Reach& reach, std::int64_t level, double away) {
-        if (away < reach.width / 2.0) {
-            const std::int64_t water = sunk(reach, level, ground);
-            surface = std::min(surface.value_or(water), water);
-        }
-    });
+    const auto reaching = [](const Reach& reach) { return broadest(reach) / 2.0; };
+    each_reach(cell, reaching,
+               [&](const Reach& reach, std::int64_t level, double away, double width) {
+                   if (away < width / 2.0) {
+                       const std::int64_t water = sunk(reach, level, ground);
+                       surface = std::min(surface.value_or(water), water);
+                   }
+               });
     if (!surface) {
         return std::nullopt;
     }
@@ -591,10 +620,11 @@ std::optional<Channel> Rivers::channel(CellId cell, std::int64_t ground) const {
 
 bool Rivers::in_channel(CellId cell) const {
     bool found = false;
-    const auto reaching = [](const Reach& reach) { return reach.width / 2.0; };
-    each_reach(cell, reaching, [&](const Reach& reach, std::int64_t /*level*/, double away) {
-        found = found || away < reach.width / 2.0;
-    });
+    const auto reaching = [](const Reach& reach) { return broadest(reach) / 2.0; };
+    each_reach(cell, reaching,
+               [&](const Reach& /*reach*/, std::int64_t /*level*/, double away, double width) {
+                   found = found || away < width / 2.0;
+               });
     return found;
 }
 
@@ -641,13 +671,14 @@ std::optional<std::int64_t> Rivers::lake(CellId cell, std::int64_t ground) const
 
 const Reach* Rivers::near(CellId cell, double margin) const {
     const Reach* widest = nullptr;
-    const auto reaching = [&](const Reach& reach) { return (reach.width / 2.0) + margin; };
-    each_reach(cell, reaching, [&](const Reach& reach, std::int64_t /*level*/, double away) {
-        if (away < (reach.width / 2.0) + margin &&
-            (widest == nullptr || reach.width > widest->width)) {
-            widest = &reach;
-        }
-    });
+    const auto reaching = [&](const Reach& reach) { return (broadest(reach) / 2.0) + margin; };
+    each_reach(cell, reaching,
+               [&](const Reach& reach, std::int64_t /*level*/, double away, double width) {
+                   if (away < (width / 2.0) + margin &&
+                       (widest == nullptr || reach.width > widest->width)) {
+                       widest = &reach;
+                   }
+               });
     return widest;
 }
 
