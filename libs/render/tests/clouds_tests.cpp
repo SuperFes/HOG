@@ -78,6 +78,24 @@ std::vector<std::byte> everywhere(Texel texel) {
     return map_of([&](DVec3) { return texel; });
 }
 
+// The drift's map, as client::DriftTexel holds it, of the m/s `drift` gives at each direction.
+std::vector<std::byte> drift_of(const std::function<DVec3(DVec3)>& drift) {
+    std::vector<std::byte> bytes;
+    for (std::uint32_t face = 0; face < 6; ++face) {
+        for (std::uint32_t y = 0; y < map_size; ++y) {
+            for (std::uint32_t x = 0; x < map_size; ++x) {
+                const DVec3 here = drift(cube_direction(face, x, y));
+                for (const double part : {here.x, here.y, here.z, 0.0}) {
+                    const std::uint16_t half = glm::packHalf1x16(static_cast<float>(part));
+                    bytes.push_back(static_cast<std::byte>(half & 0xFFU));
+                    bytes.push_back(static_cast<std::byte>(half >> 8U));
+                }
+            }
+        }
+    }
+    return bytes;
+}
+
 const Texel clear{0, 0, 0, 0};
 // Fully covered by 1 mm of cloud.
 const Texel overcast{255, 64, 0, 0};
@@ -100,8 +118,9 @@ struct Scene {
     double faded = 1.0;
     std::vector<std::byte> sky = everywhere(layer);
     DVec3 moved{0.0};
-    // How far the weather's drifted since its maps were taken.
-    DVec3 drifted{0.0};
+    // How the weather drifts, and how long since its maps were taken.
+    std::vector<std::byte> drift = drift_of([](DVec3) { return DVec3{0.0}; });
+    double age = 0.0;
     // Drawn nearest of all.
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     std::optional<VkRect2D> covered = {};
@@ -151,9 +170,9 @@ std::vector<Pixels> draw_frames(hog::render::Device& device, const std::vector<S
         CHECK(maps->map_bytes() == scene.before.size());
         REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
             CHECK(maps->update(commands, 0, scene.before, scene.after.value_or(scene.before),
-                               scene.sky, scene.sky));
+                               scene.sky, scene.sky, scene.drift, scene.drift));
         }));
-        const hog::render::WeatherBindings weather = maps->bindings(scene.faded, scene.drifted);
+        const hog::render::WeatherBindings weather = maps->bindings(scene.faded, scene.age);
 
         const WorldPosition eye{up * (radius + scene.eye_height)};
         const hog::terrain::Bend bend = hog::terrain::bend_from(eye, radius, 0.0);
@@ -952,18 +971,21 @@ TEST_CASE("broken cloud drifts downwind, its shadow with it", "[render][gpu][atm
     CHECK(device->validation_errors() == 0);
 }
 
-TEST_CASE("cloud is drawn where the weather's drifted it since its maps were taken",
+TEST_CASE("cloud is drawn where its own drift's taken it since the maps were, wherever the eye",
           "[render][gpu][atmosphere]") {
     const auto device = test_device();
-    const auto shadow_of = [&](DVec3 drifted) {
+    // Drifting north at 20 m/s from about 11 km north of the eye, and still over it.
+    const std::vector<std::byte> drift =
+        drift_of([](DVec3 direction) { return direction.y > 0.1 ? north * 20.0 : DVec3{0.0}; });
+    const auto shadow_of = [&](double age) {
         Shadow shadow;
-        static_cast<void>(
-            draw_frames(*device, {{.before = map_of(northern), .drifted = drifted}}, &shadow));
+        static_cast<void>(draw_frames(
+            *device, {{.before = map_of(northern), .drift = drift, .age = age}}, &shadow));
         return shadow;
     };
-    // Over the north, from about 11 km north of the eye; and then from 20 km further north.
-    const glm::vec4 still = mean_between(shadow_of(DVec3{0.0}), 22'000.0, 28'000.0);
-    const glm::vec4 drifted = mean_between(shadow_of(north * 20'000.0), 22'000.0, 28'000.0);
+    // Over the north, from about 11 km north of the eye; and then from 20 km further south.
+    const glm::vec4 still = mean_between(shadow_of(0.0), 22'000.0, 28'000.0);
+    const glm::vec4 drifted = mean_between(shadow_of(1'000.0), 22'000.0, 28'000.0);
     INFO("still " << still.r << ", drifted " << drifted.r);
     CHECK(still.r < 0.1F);
     CHECK(drifted.r > 0.9F);

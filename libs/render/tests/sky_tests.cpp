@@ -399,12 +399,13 @@ hog::render::WeatherMaps sky_everywhere(hog::render::Device& device,
     auto maps = hog::render::WeatherMaps::create(device, map_size);
     REQUIRE(maps);
     const std::vector<std::byte> clear(maps->map_bytes(), std::byte{0});
+    const std::vector<std::byte> still(maps->drift_bytes(), std::byte{0});
     std::vector<std::byte> texels(maps->map_bytes());
     for (std::size_t at = 0; at < texels.size(); ++at) {
         texels[at] = std::byte{sky.at(at % 4)};
     }
     REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
-        CHECK(maps->update(commands, 0, clear, clear, texels, texels));
+        CHECK(maps->update(commands, 0, clear, clear, texels, texels, still, still));
     }));
     return std::move(maps).value();
 }

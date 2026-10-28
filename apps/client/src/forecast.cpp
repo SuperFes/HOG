@@ -3,6 +3,7 @@
 #include <hog/sim/weather.hpp>
 
 #include <glm/glm.hpp>
+#include <glm/gtc/packing.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -83,6 +84,7 @@ std::uint8_t to_byte(double share) noexcept {
 struct Maps {
     std::vector<WeatherTexel> weather;
     std::vector<SkyTexel> sky;
+    std::vector<DriftTexel> drift;
 };
 
 Maps maps_of(const sim::CellGrid& grid, const Cells& cells) {
@@ -90,11 +92,16 @@ Maps maps_of(const sim::CellGrid& grid, const Cells& cells) {
     Maps maps;
     maps.weather.reserve(std::size_t{6} * size * size);
     maps.sky.reserve(std::size_t{6} * size * size);
+    maps.drift.reserve(std::size_t{6} * size * size);
     for (std::uint32_t face = 0; face < 6; ++face) {
         for (std::uint32_t y = 0; y < size; ++y) {
             for (std::uint32_t x = 0; x < size; ++x) {
-                const protocol::CellWeather cell =
-                    interpolated(grid, cells, cube_direction(face, x, y, size));
+                const DVec3 direction = cube_direction(face, x, y, size);
+                const protocol::CellWeather cell = interpolated(grid, cells, direction);
+                const Vec3 drift{planet::tangent_frame(direction).to_world(
+                    {static_cast<double>(cell.drift.x), static_cast<double>(cell.drift.y), 0.0})};
+                maps.drift.push_back({glm::packHalf1x16(drift.x), glm::packHalf1x16(drift.y),
+                                      glm::packHalf1x16(drift.z), 0});
                 maps.weather.push_back(
                     {to_byte(static_cast<double>(sim::cloud_cover(cell.cloud))),
                      to_byte(std::sqrt(std::max(static_cast<double>(cell.cloud), 0.0) / 16.0)),
@@ -179,8 +186,10 @@ void Forecast::receive(const protocol::Weather& weather, MonotonicClock::time_po
     Maps after = fade_ > MonotonicClock::duration::zero() ? maps_of(*grid_, to_) : before;
     before_ = std::move(before.weather);
     sky_before_ = std::move(before.sky);
+    drift_before_ = std::move(before.drift);
     after_ = std::move(after.weather);
     sky_after_ = std::move(after.sky);
+    drift_after_ = std::move(after.drift);
 }
 
 double Forecast::faded(MonotonicClock::time_point now) const noexcept {
@@ -208,10 +217,13 @@ DVec3 Forecast::drifted(DVec3 direction, MonotonicClock::time_point now) const {
     const protocol::CellWeather here =
         mixed(interpolated(*grid_, from_, direction), interpolated(*grid_, to_, direction),
               static_cast<float>(faded(now)));
-    const double seconds = std::max(std::chrono::duration<double>(now - since_).count(), 0.0);
     return planet::tangent_frame(direction).to_world(
                {static_cast<double>(here.drift.x), static_cast<double>(here.drift.y), 0.0}) *
-           seconds;
+           age(now);
+}
+
+double Forecast::age(MonotonicClock::time_point now) const noexcept {
+    return std::max(std::chrono::duration<double>(now - since_).count(), 0.0);
 }
 
 protocol::CellWeather Forecast::shown(const protocol::CellWeather& here, DVec3 direction,

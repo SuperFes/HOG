@@ -7,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <glm/glm.hpp>
+#include <glm/gtc/packing.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -269,9 +270,12 @@ TEST_CASE("the weather's map holds what's at each texel's direction", "[client][
         weather.cells[index].falling = up.y > 0.5 ? 20.0F : 0.0F;
         weather.cells[index].base = static_cast<float>(2'000.0 + (1'000.0 * up.z));
         weather.cells[index].fog_top = up.x > 0.0 ? static_cast<float>(400.0 * up.x) : 0.0F;
+        weather.cells[index].drift = {static_cast<float>(10.0 * up.x),
+                                      static_cast<float>(5.0 + (5.0 * up.z))};
     }
     Forecast forecast{radius};
     forecast.receive(weather, start);
+    REQUIRE(forecast.drift_before().size() == forecast.before().size());
     for (std::uint32_t face = 0; face < 6; ++face) {
         for (std::uint32_t y = 0; y < weather_map_size; y += 7) {
             for (std::uint32_t x = 0; x < weather_map_size; x += 7) {
@@ -286,6 +290,18 @@ TEST_CASE("the weather's map holds what's at each texel's direction", "[client][
                     forecast.sky_before()[(((face * weather_map_size) + y) * weather_map_size) + x];
                 CHECK(std::abs(sky[1] - (here.fog_top / 32.0F)) <= 0.51F);
                 CHECK(std::abs(sky[2] - (here.base / 64.0F)) <= 0.51F);
+                // The drift over the ground there, in the planet's frame.
+                const auto& drift =
+                    forecast
+                        .drift_before()[(((face * weather_map_size) + y) * weather_map_size) + x];
+                const DVec3 expected =
+                    hog::planet::tangent_frame(cube_direction(face, x, y, weather_map_size))
+                        .to_world({static_cast<double>(here.drift.x),
+                                   static_cast<double>(here.drift.y), 0.0});
+                for (std::size_t part = 0; part < 3; ++part) {
+                    CHECK_THAT(static_cast<double>(glm::unpackHalf1x16(drift.at(part))),
+                               WithinAbs(expected[static_cast<glm::length_t>(part)], 0.01));
+                }
             }
         }
     }

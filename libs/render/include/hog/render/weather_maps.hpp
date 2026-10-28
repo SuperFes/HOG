@@ -16,12 +16,15 @@ namespace hog::render {
 class Device;
 
 // What's drawn under the weather reads it from these cube maps, faded from those before to those
-// after: the weather's, each texel as client::WeatherTexel, and the sky's, as client::SkyTexel.
+// after: the weather's, each texel as client::WeatherTexel, the sky's, as client::SkyTexel, and the
+// drift's, as client::DriftTexel.
 struct WeatherBindings {
     VkImageView weather_before = VK_NULL_HANDLE;
     VkImageView weather_after = VK_NULL_HANDLE;
     VkImageView sky_before = VK_NULL_HANDLE;
     VkImageView sky_after = VK_NULL_HANDLE;
+    VkImageView drift_before = VK_NULL_HANDLE;
+    VkImageView drift_after = VK_NULL_HANDLE;
     VkSampler sampler = VK_NULL_HANDLE; // linear
     double faded = 1.0;                 // from the maps before, at 0, to those after, at 1
     bool falling = false;               // whether anything falls anywhere
@@ -31,9 +34,9 @@ struct WeatherBindings {
     double lowest_base = 0.0;
     double highest_base = 0.0;
     double highest_top = 0.0;
-    // Metres the cloud has drifted along the ground at the eye since the maps were taken, in the
-    // planet's frame: each is read where the cloud drifted from.
-    DVec3 drifted{0.0};
+    // Seconds since the maps were taken: each place's cloud is read where its drift brought it
+    // from.
+    double age = 0.0;
 };
 
 // Per metre, how much of the light along a view the mist takes at `height` metres above sea level,
@@ -52,17 +55,19 @@ public:
     [[nodiscard]] static Result<WeatherMaps> create(Device& device, std::uint32_t map_size,
                                                     std::uint32_t frames = 1);
 
-    // Of each map.
+    // Of each of the weather's and the sky's maps, and of each of the drift's.
     [[nodiscard]] std::size_t map_bytes() const noexcept;
+    [[nodiscard]] std::size_t drift_bytes() const noexcept;
     // Records copying in the maps faded from and to, faces in Vulkan's order, for `frame`, whose
     // last submit must have finished.
     Result<> update(VkCommandBuffer commands, std::uint32_t frame,
                     std::span<const std::byte> weather_before,
                     std::span<const std::byte> weather_after, std::span<const std::byte> sky_before,
-                    std::span<const std::byte> sky_after);
+                    std::span<const std::byte> sky_after, std::span<const std::byte> drift_before,
+                    std::span<const std::byte> drift_after);
     [[nodiscard]] bool ready() const noexcept;
 
-    [[nodiscard]] WeatherBindings bindings(double faded, DVec3 drifted = DVec3{0.0}) const noexcept;
+    [[nodiscard]] WeatherBindings bindings(double faded, double age = 0.0) const noexcept;
 
 private:
     WeatherMaps() = default;
@@ -72,6 +77,8 @@ private:
     StreamedImage weather_after_;
     StreamedImage sky_before_;
     StreamedImage sky_after_;
+    StreamedImage drift_before_;
+    StreamedImage drift_after_;
     Image clear_;
     std::uint32_t map_size_ = 0;
     bool falling_ = false;

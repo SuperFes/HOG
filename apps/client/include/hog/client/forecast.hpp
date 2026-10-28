@@ -29,6 +29,10 @@ using SkyTexel = std::array<std::uint8_t, 4>;
 inline constexpr double fog_texel_step = 32.0;
 inline constexpr double height_texel_step = 64.0;
 
+// A texel of the drift's cube maps: the m/s the cloud drifts over the ground, in the planet's
+// frame, as half floats x, y and z, and a fourth unused.
+using DriftTexel = std::array<std::uint16_t, 4>;
+
 // The unit direction through the middle of texel (x, y), counted from the top left, of `face` of a
 // cube map `size` texels a side, as Vulkan samples it; faces go +x, -x, +y, -y, +z, -z.
 [[nodiscard]] DVec3 cube_direction(std::uint32_t face, std::uint32_t x, std::uint32_t y,
@@ -56,6 +60,8 @@ public:
     // Metres the cloud shown at a unit direction at `now` has drifted along the ground since the
     // weather came, in the planet's frame.
     [[nodiscard]] DVec3 drifted(DVec3 direction, MonotonicClock::time_point now) const;
+    // Seconds at `now` since the weather came.
+    [[nodiscard]] double age(MonotonicClock::time_point now) const noexcept;
     // The sea at a unit direction as shown at `now`, in the planet's frame: the wave systems of
     // the cells around it, each as much as that cell counts there, so the waves change smoothly
     // from cell to cell. A calm sea while none is known.
@@ -68,6 +74,13 @@ public:
     // As before() and after(), of the sky.
     [[nodiscard]] const std::vector<SkyTexel>& sky_before() const noexcept { return sky_before_; }
     [[nodiscard]] const std::vector<SkyTexel>& sky_after() const noexcept { return sky_after_; }
+    // As before() and after(), of the drift.
+    [[nodiscard]] const std::vector<DriftTexel>& drift_before() const noexcept {
+        return drift_before_;
+    }
+    [[nodiscard]] const std::vector<DriftTexel>& drift_after() const noexcept {
+        return drift_after_;
+    }
     // How many times weather has come, so the maps need only be taken when it changes.
     [[nodiscard]] std::uint64_t received() const noexcept { return received_; }
 
@@ -85,6 +98,8 @@ private:
     std::vector<WeatherTexel> after_;
     std::vector<SkyTexel> sky_before_;
     std::vector<SkyTexel> sky_after_;
+    std::vector<DriftTexel> drift_before_;
+    std::vector<DriftTexel> drift_after_;
     MonotonicClock::time_point since_{};
     MonotonicClock::duration fade_{};
     std::uint64_t received_ = 0;

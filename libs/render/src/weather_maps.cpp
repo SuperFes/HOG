@@ -11,6 +11,8 @@ namespace hog::render {
 namespace {
 
 constexpr VkFormat map_format = VK_FORMAT_R8G8B8A8_UNORM;
+// Half floats filter on every device; whole floats needn't.
+constexpr VkFormat drift_format = VK_FORMAT_R16G16B16A16_SFLOAT;
 // A weather texel's channel holding the root of a 256th of mm falling an hour.
 constexpr std::size_t falling_channel = 2;
 // A sky texel's channels holding the fog's top, in steps of `fog_step` metres, and the cloud's
@@ -73,7 +75,14 @@ Result<WeatherMaps> WeatherMaps::create(Device& device, std::uint32_t map_size,
         }
         *map = std::move(made).value();
     }
-    // No cloud, nothing falling, dry air and no fog.
+    for (StreamedImage* map : {&maps.drift_before_, &maps.drift_after_}) {
+        auto made = make_streamed_image(device, drift_format, extent, frames, 6, true);
+        if (!made) {
+            return std::unexpected(std::move(made).error());
+        }
+        *map = std::move(made).value();
+    }
+    // No cloud, nothing falling, dry air and no fog; and, read as the drift, none.
     constexpr std::array<std::byte, std::size_t{6} * 4> clear{};
     auto filled = make_filled_image(device, {.format = map_format, .layers = 6, .cube = true},
                                     std::span{clear});
@@ -89,14 +98,21 @@ std::size_t WeatherMaps::map_bytes() const noexcept {
     return std::size_t{6} * 4 * map_size_ * map_size_;
 }
 
+std::size_t WeatherMaps::drift_bytes() const noexcept {
+    return std::size_t{6} * 8 * map_size_ * map_size_;
+}
+
 Result<> WeatherMaps::update(VkCommandBuffer commands, std::uint32_t frame,
                              std::span<const std::byte> weather_before,
                              std::span<const std::byte> weather_after,
                              std::span<const std::byte> sky_before,
-                             std::span<const std::byte> sky_after) {
+                             std::span<const std::byte> sky_after,
+                             std::span<const std::byte> drift_before,
+                             std::span<const std::byte> drift_after) {
     const std::array updates{
         std::pair{&weather_before_, weather_before}, std::pair{&weather_after_, weather_after},
-        std::pair{&sky_before_, sky_before}, std::pair{&sky_after_, sky_after}};
+        std::pair{&sky_before_, sky_before},         std::pair{&sky_after_, sky_after},
+        std::pair{&drift_before_, drift_before},     std::pair{&drift_after_, drift_after}};
     for (const auto& [map, texels] : updates) {
         if (auto updated = map->update(commands, frame, texels); !updated) {
             return updated;
@@ -133,15 +149,17 @@ Result<> WeatherMaps::update(VkCommandBuffer commands, std::uint32_t frame,
 
 bool WeatherMaps::ready() const noexcept {
     return weather_before_.ready() && weather_after_.ready() && sky_before_.ready() &&
-           sky_after_.ready();
+           sky_after_.ready() && drift_before_.ready() && drift_after_.ready();
 }
 
-WeatherBindings WeatherMaps::bindings(double faded, DVec3 drifted) const noexcept {
+WeatherBindings WeatherMaps::bindings(double faded, double age) const noexcept {
     if (!ready()) {
         return {.weather_before = clear_.view(),
                 .weather_after = clear_.view(),
                 .sky_before = clear_.view(),
                 .sky_after = clear_.view(),
+                .drift_before = clear_.view(),
+                .drift_after = clear_.view(),
                 .sampler = linear_.handle(),
                 .faded = faded,
                 .falling = false,
@@ -149,12 +167,14 @@ WeatherBindings WeatherMaps::bindings(double faded, DVec3 drifted) const noexcep
                 .lowest_base = 0.0,
                 .highest_base = 0.0,
                 .highest_top = 0.0,
-                .drifted = drifted};
+                .age = age};
     }
     return {.weather_before = weather_before_.image().view(),
             .weather_after = weather_after_.image().view(),
             .sky_before = sky_before_.image().view(),
             .sky_after = sky_after_.image().view(),
+            .drift_before = drift_before_.image().view(),
+            .drift_after = drift_after_.image().view(),
             .sampler = linear_.handle(),
             .faded = faded,
             .falling = falling_,
@@ -162,7 +182,7 @@ WeatherBindings WeatherMaps::bindings(double faded, DVec3 drifted) const noexcep
             .lowest_base = lowest_base_,
             .highest_base = highest_base_,
             .highest_top = highest_top_,
-            .drifted = drifted};
+            .age = age};
 }
 
 } // namespace hog::render
