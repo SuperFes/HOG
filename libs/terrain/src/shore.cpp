@@ -345,6 +345,190 @@ std::vector<float> shore_fetches(std::span<const float> depths, std::span<const 
     return fetches;
 }
 
+namespace {
+
+// Squared texels from each texel of a layer to the nearest that `seeds` marks, or none past any
+// distance there: Felzenszwalb and Huttenlocher's transform, by rows and then by columns.
+constexpr double no_seed = 1e30;
+
+std::vector<double> squared_distances(const std::vector<std::uint8_t>& seeds) {
+    const auto size = static_cast<std::size_t>(shore_size);
+    std::vector<double> found(shore_texels);
+    for (std::size_t at = 0; at < shore_texels; ++at) {
+        found[at] = seeds[at] != 0 ? 0.0 : no_seed;
+    }
+    std::vector<double> line(size);
+    std::vector<std::size_t> parabolas(size);
+    std::vector<double> starts(size + 1);
+    // The lower envelope of the parabolas rooted at each texel of `line` that has a seed in reach.
+    const auto along = [&](const auto& texel) {
+        for (std::size_t q = 0; q < size; ++q) {
+            line[q] = found[texel(q)];
+        }
+        std::size_t k = 0;
+        bool any = false;
+        const auto meet = [&](std::size_t q, std::size_t v) {
+            const auto qd = static_cast<double>(q);
+            const auto vd = static_cast<double>(v);
+            return ((line[q] + (qd * qd)) - (line[v] + (vd * vd))) / (2.0 * (qd - vd));
+        };
+        for (std::size_t q = 0; q < size; ++q) {
+            if (line[q] >= no_seed) {
+                continue;
+            }
+            if (!any) {
+                any = true;
+                parabolas[0] = q;
+                starts[0] = -std::numeric_limits<double>::infinity();
+                starts[1] = std::numeric_limits<double>::infinity();
+                continue;
+            }
+            double s = meet(q, parabolas[k]);
+            while (s <= starts[k]) {
+                --k;
+                s = meet(q, parabolas[k]);
+            }
+            ++k;
+            parabolas[k] = q;
+            starts[k] = s;
+            starts[k + 1] = std::numeric_limits<double>::infinity();
+        }
+        if (!any) {
+            return;
+        }
+        k = 0;
+        for (std::size_t q = 0; q < size; ++q) {
+            while (starts[k + 1] < static_cast<double>(q)) {
+                ++k;
+            }
+            const double off = static_cast<double>(q) - static_cast<double>(parabolas[k]);
+            found[texel(q)] = (off * off) + line[parabolas[k]];
+        }
+    };
+    for (std::size_t row = 0; row < size; ++row) {
+        along([&](std::size_t column) { return (row * size) + column; });
+    }
+    for (std::size_t column = 0; column < size; ++column) {
+        along([&](std::size_t row) { return (row * size) + column; });
+    }
+    return found;
+}
+
+// Of a layer's plane, `plane`, its value at the centre of a texel of the next finer layer, blended
+// from the four texels round it.
+float finer_centre(std::span<const float> plane, std::size_t layer_finer, int column, int row) {
+    const double ratio = shore_spacing.at(layer_finer) / shore_spacing.at(layer_finer + 1);
+    const auto coordinate = [&](int texel) {
+        return std::clamp(((static_cast<double>(texel) + 0.5 - (shore_size / 2.0)) * ratio) +
+                              (shore_size / 2.0) - 0.5,
+                          0.0, static_cast<double>(shore_size - 1));
+    };
+    const double x = coordinate(column);
+    const double y = coordinate(row);
+    const auto x0 = static_cast<std::size_t>(std::min(static_cast<int>(x), shore_size - 2));
+    const auto y0 = static_cast<std::size_t>(std::min(static_cast<int>(y), shore_size - 2));
+    const double fx = x - static_cast<double>(x0);
+    const double fy = y - static_cast<double>(y0);
+    const auto size = static_cast<std::size_t>(shore_size);
+    const auto at = [&](std::size_t r, std::size_t c) {
+        return static_cast<double>(plane[(r * size) + c]);
+    };
+    const double low = std::lerp(at(y0, x0), at(y0, x0 + 1), fx);
+    const double high = std::lerp(at(y0 + 1, x0), at(y0 + 1, x0 + 1), fx);
+    return static_cast<float>(std::lerp(low, high, fy));
+}
+
+} // namespace
+
+namespace {
+
+// Of a layer's texels, `wet` where there's water, how far each lies offshore into `metres`,
+// negative inland, as shore_offshore has it; from `coarser`, the next coarser layer's, if any,
+// where the nearest waterline may lie beyond it.
+void offshore_layer(std::size_t layer, const std::vector<std::uint8_t>& wet,
+                    std::span<float> metres, std::span<const float> coarser) {
+    std::vector<std::uint8_t> dry(shore_texels);
+    for (std::size_t at = 0; at < shore_texels; ++at) {
+        dry[at] = wet[at] != 0 ? 0 : 1;
+    }
+    const std::vector<double> to_dry = squared_distances(dry);
+    const std::vector<double> to_wet = squared_distances(wet);
+    const double spacing = shore_spacing.at(layer);
+    for (int row = 0; row < shore_size; ++row) {
+        for (int column = 0; column < shore_size; ++column) {
+            const std::size_t at =
+                (static_cast<std::size_t>(row) * static_cast<std::size_t>(shore_size)) +
+                static_cast<std::size_t>(column);
+            const bool in_water = wet[at] != 0;
+            const double squared = in_water ? to_dry[at] : to_wet[at];
+            // The waterline lies halfway between the texels either side of it.
+            const double found = squared < no_seed ? (std::sqrt(squared) - 0.5) * spacing
+                                                   : std::numeric_limits<double>::infinity();
+            // Any waterline beyond the layer lies at least as far as its edge.
+            const double edge =
+                (std::min({column, row, shore_size - 1 - column, shore_size - 1 - row}) + 0.5) *
+                spacing;
+            double far = found;
+            if (found > edge && !coarser.empty()) {
+                const auto coarse = static_cast<double>(finer_centre(coarser, layer, column, row));
+                far = std::clamp(in_water ? coarse : -coarse, edge, found);
+            }
+            far = std::min(far, static_cast<double>(farthest_offshore));
+            metres[at] = static_cast<float>(in_water ? far : -far);
+        }
+    }
+}
+
+// How fast a layer's `metres` grow east and north, per metre, into `east` and `north`.
+void offshore_slopes(std::size_t layer, std::span<const float> metres, std::span<float> east,
+                     std::span<float> north) {
+    const double spacing = shore_spacing.at(layer);
+    const auto value = [&](int row, int column) {
+        return static_cast<double>(
+            metres[(static_cast<std::size_t>(row) * static_cast<std::size_t>(shore_size)) +
+                   static_cast<std::size_t>(column)]);
+    };
+    for (int row = 0; row < shore_size; ++row) {
+        for (int column = 0; column < shore_size; ++column) {
+            const std::size_t at =
+                (static_cast<std::size_t>(row) * static_cast<std::size_t>(shore_size)) +
+                static_cast<std::size_t>(column);
+            const int left = std::max(column - 1, 0);
+            const int right = std::min(column + 1, shore_size - 1);
+            const int below = std::max(row - 1, 0);
+            const int above = std::min(row + 1, shore_size - 1);
+            east[at] = static_cast<float>((value(row, right) - value(row, left)) /
+                                          (static_cast<double>(right - left) * spacing));
+            north[at] = static_cast<float>((value(above, column) - value(below, column)) /
+                                           (static_cast<double>(above - below) * spacing));
+        }
+    }
+}
+
+} // namespace
+
+std::vector<float> shore_offshore(std::span<const float> depths, std::span<const float> still) {
+    const std::size_t layers = depths.size() / shore_texels;
+    std::vector<float> offshore(layers * offshore_planes * shore_texels, 0.0F);
+    const std::span<float> all{offshore};
+    const auto plane = [&](std::size_t layer, int which) {
+        return all.subspan(((layer * offshore_planes) + static_cast<std::size_t>(which)) *
+                               shore_texels,
+                           shore_texels);
+    };
+    for (std::size_t layer = layers; layer-- > 0;) {
+        std::vector<std::uint8_t> wet(shore_texels);
+        for (std::size_t at = 0; at < shore_texels; ++at) {
+            const std::size_t in_layer = (layer * shore_texels) + at;
+            wet[at] = depths[in_layer] > 0.0F || still[in_layer] > 0.0F ? 1 : 0;
+        }
+        offshore_layer(layer, wet, plane(layer, 0),
+                       layer + 1 < layers ? plane(layer + 1, 0) : std::span<float>{});
+        offshore_slopes(layer, plane(layer, 0), plane(layer, 1), plane(layer, 2));
+    }
+    return offshore;
+}
+
 void ShoreStream::follow(DVec3 eye) {
     wanted_ = shore_frame(eye, radius_);
     if (!working_ && wanted_ != started_) {
@@ -373,7 +557,8 @@ double water_below(std::span<const float> levels, double height) {
 }
 
 ShoreDepths work_out_shore(const planet::World& world, const ShoreFrame& frame, double radius) {
-    ShoreDepths found{.frame = frame, .depths = {}, .still = {}, .levels = {}, .fetches = {}};
+    ShoreDepths found{
+        .frame = frame, .depths = {}, .still = {}, .levels = {}, .fetches = {}, .offshore = {}};
     std::vector<float> elevations;
     std::vector<float> lakes;
     std::vector<std::uint8_t> sea;
@@ -389,6 +574,7 @@ ShoreDepths work_out_shore(const planet::World& world, const ShoreFrame& frame, 
     found.levels = keep_lakes(elevations, lakes, found.still);
     keep_dry(elevations, found.depths, found.still, found.levels);
     found.fetches = shore_fetches(found.depths, found.still);
+    found.offshore = shore_offshore(found.depths, found.still);
     return found;
 }
 

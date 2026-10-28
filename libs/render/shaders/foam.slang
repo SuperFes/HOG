@@ -51,15 +51,15 @@ float3 breaking_at(float3 rest) {
     const float ago = push.timing.y;
     // Back then, the water here lay further back along its drift.
     const float3 then = rest - (push.drift.xyz * ago);
-    float fetch;
-    const float4 floor = floor_at(waves, shore_depths, shore_fetches, then, fetch, ago);
-    const bool still = fetch > 0.0;
+    float4 reach;
+    const float4 floor = floor_at(waves, shore_depths, shore_fetches, then, reach, ago);
+    const bool still = reach.x > 0.0;
     const bool deep = floor.x >= waves.count_left_radius.w;
     const float dry = floor.x <= 0.0 ? 1.0 : 0.0;
     if (floor.x < -dry_enough || (deep && !still && waves.foam.z <= 0.0)) {
         return float3(0.0, foam_lasting, dry);
     }
-    const WaveSurface water = wave_surface(waves, then, foam_spacing, floor.xyz, fetch, ago);
+    const WaveSurface water = wave_surface(waves, then, foam_spacing, floor.xyz, reach, ago);
     // As ocean.slang has it, still water's surface kept out under the ground breaks on nothing.
     const bool kept_under = still && floor.x <= 0.0;
     const Surf surf = surf_at(waves, water, kept_under ? deep_floor() : floor.xyz);

@@ -452,7 +452,8 @@ TEST_CASE("ripples stop at the shore", "[render][gpu]") {
             .depths = std::vector<float>(shore_texels, depth),
             .still = std::vector<float>(shore_texels, hog::terrain::shore_highest),
             .levels = std::vector<float>(shore_texels, 0.0F),
-            .fetches = std::vector<float>(shore_texels * hog::terrain::fetch_headings, 0.0F)};
+            .fetches = std::vector<float>(shore_texels * hog::terrain::fetch_headings, 0.0F),
+            .offshore = {}};
     };
     hog::GameTime time{std::chrono::seconds{1'792'000'000}};
     const std::vector<DVec2> laid = mound(0.05, 2.0);
@@ -587,7 +588,8 @@ TEST_CASE("a body pushes the sea where it crosses the surface, not where it's wh
         .depths = std::vector<float>(shore_texels, 4.0F),
         .still = std::vector<float>(shore_texels, hog::terrain::shore_highest),
         .levels = std::vector<float>(shore_texels, 0.0F),
-        .fetches = std::vector<float>(shore_texels * hog::terrain::fetch_headings, 0.0F)};
+        .fetches = std::vector<float>(shore_texels * hog::terrain::fetch_headings, 0.0F),
+        .offshore = {}};
     const hog::planet::TangentFrame ground = hog::planet::tangent_frame(up);
     const DVec3 at = glm::normalize((up * radius) + (ground.east * 2.0) + (ground.north * 1.0));
     hog::GameTime time{std::chrono::seconds{1'792'000'000}};

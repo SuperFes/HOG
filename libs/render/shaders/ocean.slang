@@ -63,8 +63,9 @@ struct Surface {
     float4 foam;
     // The sea's floor there, as wave_surface takes it; w how high the sea stands over its mean.
     float4 floor;
-    // Over still water, metres of it upwind; none over the sea.
-    float fetch;
+    // As floor_at finds the water reaching there: over still water, x metres of it upwind, none
+    // over the sea; and how far offshore and which way out.
+    float4 reach;
     // The surf there, as Surf's breaking, trailing, lace and white.
     float4 surf;
 };
@@ -148,13 +149,13 @@ Surface vertex_main(Vertex vertex) {
     // The corners lie apart by the larger of the rings' spacing and the spokes'.
     const float between =
         max(nearest * log(spread) * pow(spread, vertex.out) / rings, along * 2.0 * pi / spokes);
-    surface.floor = floor_at(waves, shore_depths, shore_fetches, surface.rest, surface.fetch);
+    surface.floor = floor_at(waves, shore_depths, shore_fetches, surface.rest, surface.reach);
     const WaveSurface water =
-        wave_surface(waves, surface.rest, between, surface.floor.xyz, surface.fetch);
+        wave_surface(waves, surface.rest, between, surface.floor.xyz, surface.reach);
     surface.from_eye += as_drawn(water.moved + (up * surface.floor.w), up, surface.normal);
     // Still water's surface kept out under the ground round it breaks on nothing, as over the deep;
     // left to break there, it would whiten the water it's drawn across to.
-    const bool kept_under = surface.fetch > 0.0 && surface.floor.x <= 0.0;
+    const bool kept_under = surface.reach.x > 0.0 && surface.floor.x <= 0.0;
     const Surf surf = surf_at(waves, water, kept_under ? deep_floor() : surface.floor.xyz);
     surface.surf = float4(surf.breaking, surf.trailing, surf.lace, surf.white);
     surface.foam = float4(0.0);
@@ -278,7 +279,7 @@ float swashing() {
 // waves lift it up the shore between the disc's corners far off. Told at each pixel. The ground's
 // shading tints ground under the lake as far as its own height tells it, so no water is lost.
 bool over_dry(Surface surface) {
-    return surface.fetch > 0.0 && surface.floor.w > 0.0 &&
+    return surface.reach.x > 0.0 && surface.floor.w > 0.0 &&
            still_water_at(waves, shore_depths, surface.rest).y <= 0.0;
 }
 
@@ -286,7 +287,7 @@ bool over_dry(Surface surface) {
 Facing facing_at(Surface surface, float3 looking, bool beneath = false) {
     const float footprint = max(length(ddx(surface.rest)), length(ddy(surface.rest)));
     const WaveSurface water =
-        wave_surface(waves, surface.rest, footprint, surface.floor.xyz, surface.fetch);
+        wave_surface(waves, surface.rest, footprint, surface.floor.xyz, surface.reach);
     float unseen;
     float unseen_rain;
     const float2 slope = ripple_slope_at(surface.rest, footprint, unseen) +
@@ -325,7 +326,7 @@ Facing facing_at(Surface surface, float3 looking, bool beneath = false) {
                  saturate(0.5 + foam.over + (0.35 * pattern.fine)), seen);
         // The swash's edge runs foaming up the shore, ragged with the pattern's lace, as much as
         // the waves running up it are high. Still water has no swash.
-        const float edge = (surface.fetch > 0.0 ? 0.0 : 1.0) * swashing() *
+        const float edge = (surface.reach.x > 0.0 ? 0.0 : 1.0) * swashing() *
                            (1.0 - smoothstep(0.0, swash_foam, sea_depth_at(surface.rest))) *
                            saturate(2.0 * (pattern.fine + pattern.across + 0.3));
         const float breaking = max(foam.breaking * thickness, edge * breaking_thickness);

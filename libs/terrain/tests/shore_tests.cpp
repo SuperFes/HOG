@@ -420,6 +420,78 @@ TEST_CASE("fetch runs on into the coarser layer and out to sea", "[terrain][shor
     CHECK(fine_fetch(fetches, 4, 128, 128) == static_cast<double>(hog::terrain::longest_fetch));
 }
 
+namespace {
+
+// Of planes of `offshore` as shore_offshore lays them, plane `which` of the fine layer at a texel.
+double fine_offshore(const std::vector<float>& offshore, int which, int column, int row) {
+    return static_cast<double>(offshore.at((static_cast<std::size_t>(which) * layer_texels) +
+                                           (static_cast<std::size_t>(row) * shore_size) +
+                                           static_cast<std::size_t>(column)));
+}
+
+} // namespace
+
+TEST_CASE("water lies as far offshore as its nearest waterline, and land as far inland",
+          "[terrain][shore]") {
+    // The sea east of a straight shore, and a pond inland.
+    const auto pond = [](int column, int row) {
+        return column >= 40 && column < 50 && row >= 40 && row < 50;
+    };
+    const std::vector<float> depths =
+        layered([](int column, int) { return column >= 100 ? 5.0F : -3.0F; },
+                [](int column, int) { return column >= 128 ? 30.0F : -3.0F; });
+    const std::vector<float> still =
+        layered([&](int column, int row) { return pond(column, row) ? 2.0F : -10.0F; },
+                [](int, int) { return -10.0F; });
+    const std::vector<float> offshore = hog::terrain::shore_offshore(depths, still);
+    REQUIRE(offshore.size() == std::size_t{2} * hog::terrain::offshore_planes * layer_texels);
+    const double spacing = shore_spacing.front();
+    // The waterline lies halfway between the texels either side of it.
+    CHECK_THAT(fine_offshore(offshore, 0, 100, 128), WithinAbs(spacing / 2.0, 1e-3));
+    CHECK_THAT(fine_offshore(offshore, 0, 120, 128), WithinAbs(spacing * 20.5, 1e-3));
+    CHECK_THAT(fine_offshore(offshore, 0, 99, 128), WithinAbs(-spacing / 2.0, 1e-3));
+    CHECK_THAT(fine_offshore(offshore, 0, 70, 128), WithinAbs(-spacing * 29.5, 1e-3));
+    // Diagonally to the nearest corner of land.
+    CHECK_THAT(fine_offshore(offshore, 0, 44, 44), WithinAbs(spacing * 4.5, 1e-3));
+    CHECK_THAT(fine_offshore(offshore, 0, 53, 53),
+               WithinAbs(-spacing * (std::sqrt(32.0) - 0.5), 1e-3));
+    // Growing a metre a metre out from the shore, straight out.
+    CHECK_THAT(fine_offshore(offshore, 1, 120, 128), WithinAbs(1.0, 1e-3));
+    CHECK_THAT(fine_offshore(offshore, 2, 120, 128), WithinAbs(0.0, 1e-3));
+    CHECK_THAT(fine_offshore(offshore, 1, 70, 128), WithinAbs(1.0, 1e-3));
+}
+
+TEST_CASE("a waterline beyond a finer layer is found in the coarser one", "[terrain][shore]") {
+    // The open sea everywhere fine, and east of land coarse.
+    const std::vector<float> depths =
+        layered([](int, int) { return 30.0F; },
+                [](int column, int) { return column >= 100 ? 30.0F : -3.0F; });
+    const std::vector<float> still =
+        layered([](int, int) { return -10.0F; }, [](int, int) { return -10.0F; });
+    const std::vector<float> offshore = hog::terrain::shore_offshore(depths, still);
+    const double fine = shore_spacing.front();
+    const double coarse = shore_spacing.at(1);
+    // The coarse layer's waterline lies 28 of its texels west of the anchor.
+    const double waterline = -28.0 * coarse;
+    for (const int column : {0, 64, 128, 255}) {
+        const double centre = (column + 0.5 - (shore_size / 2.0)) * fine;
+        CAPTURE(column);
+        CHECK_THAT(fine_offshore(offshore, 0, column, 128), WithinRel(centre - waterline, 1e-4));
+        CHECK_THAT(fine_offshore(offshore, 1, column, 128), WithinAbs(1.0, 1e-3));
+    }
+}
+
+TEST_CASE("open sea with no land in reach lies as far offshore as is kept", "[terrain][shore]") {
+    const std::vector<float> depths =
+        layered([](int, int) { return 30.0F; }, [](int, int) { return 30.0F; });
+    const std::vector<float> still =
+        layered([](int, int) { return -10.0F; }, [](int, int) { return -10.0F; });
+    const std::vector<float> offshore = hog::terrain::shore_offshore(depths, still);
+    CHECK(fine_offshore(offshore, 0, 128, 128) ==
+          static_cast<double>(hog::terrain::farthest_offshore));
+    CHECK(fine_offshore(offshore, 1, 128, 128) == 0.0);
+}
+
 TEST_CASE("a lake's level is kept over it and the ground round it, lower ground told dry",
           "[terrain][shore]") {
     // A lake at 50 m over a bed at 45, in ground at 52, with a valley at 40 two texels east of its

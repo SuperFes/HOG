@@ -26,9 +26,9 @@ static const float footprint = 0.01;
 void laid_main() {
     const float3 up = waves.up_height.xyz;
     const float3 under = -up * waves.up_height.w;
-    float fetch;
-    const float4 floor = floor_at(waves, shore_depths, shore_fetches, under, fetch);
-    const WaveSurface water = water_over(waves, under, footprint, floor, fetch);
+    float4 reach;
+    const float4 floor = floor_at(waves, shore_depths, shore_fetches, under, reach);
+    const WaveSurface water = water_over(waves, under, footprint, floor, reach);
     const float3 normal = normalize(water.normal);
     const float above = -dot(under + (up * (dot(water.moved, up) + floor.w)), normal);
     lighting.Store(push.laying.x, asuint(push.laying.y != 0 ? 1.0 : 0.0));

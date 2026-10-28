@@ -19,8 +19,12 @@ public float sea_reached(float depth) {
 }
 
 // As hog::terrain's fetch_headings: fetch is kept for winds blowing towards so many headings, east
-// first and on anticlockwise, four to a layer of `fetches`, two of those to each layer of depths.
+// first and on anticlockwise, four to a layer of `fetches`, two of those to each layer of depths;
+// then, as hog::render::reach_layers has it, a layer of how far offshore.
 static const int fetch_headings = 8;
+static const int reach_layers = 3;
+// As hog::terrain::farthest_offshore: no water lies further offshore.
+public static const float farthest_offshore = 60000.0;
 static const float whole_turn = 6.28318530718;
 
 // Where `rest`, a point of sea level from the eye on a planet of `radius`, lies on layers of
@@ -81,7 +85,8 @@ public float shore_depth(Sampler2DArray depths, float4 anchor, float4 east, floa
 
 // Of a layer of `fetches`, its fetch at `uv` towards the heading `heading`.
 float fetch_towards(Sampler2DArray fetches, float2 uv, int layer, int heading) {
-    const float4 four = fetches.SampleLevel(float3(uv, float((layer * 2) + (heading / 4))), 0.0);
+    const float4 four =
+        fetches.SampleLevel(float3(uv, float((layer * reach_layers) + (heading / 4))), 0.0);
     return four[heading % 4];
 }
 
@@ -106,4 +111,21 @@ public float shore_fetch(Sampler2DArray fetches, float4 anchor, float4 east, flo
         }
     }
     return fetch;
+}
+
+// How far `rest`, laid as shore_at has it, lies offshore, x metres, and how fast that grows east
+// and north along the anchor's plane, yz, from `fetches` as hog::terrain::shore_offshore works them
+// out; as far as is kept where no layer lies.
+public float3 shore_offshore(Sampler2DArray fetches, float4 anchor, float4 east, float4 north,
+                             float radius, float3 rest) {
+    const ShoreAt at = shore_at(anchor, east, north, radius, rest);
+    float3 offshore = float3(farthest_offshore, 0.0, 0.0);
+    for (int layer = shore_layers - 1; layer >= 0; --layer) {
+        if (at.inside[layer] > 0.0) {
+            const float3 uv = float3(at.centred[layer] + 0.5,
+                                     float((layer * reach_layers) + reach_layers - 1));
+            offshore = lerp(offshore, fetches.SampleLevel(uv, 0.0).xyz, at.inside[layer]);
+        }
+    }
+    return offshore;
 }

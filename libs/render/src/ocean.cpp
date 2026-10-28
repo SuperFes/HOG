@@ -194,8 +194,6 @@ constexpr VkDescriptorSetLayoutBinding shore_descriptor =
             VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
 
 constexpr std::uint32_t fetch_binding = 8;
-// Layers of fetches to each of the depths', four headings to each.
-constexpr std::uint32_t fetch_layers = terrain::fetch_headings / 4;
 constexpr VkDescriptorSetLayoutBinding fetch_descriptor =
     binding(fetch_binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_VERTEX_BIT);
 
@@ -489,9 +487,14 @@ Result<CalmSea> CalmSea::create(Device& device) {
         return std::unexpected(std::move(depths).error());
     }
     calm.depths_ = std::move(depths).value();
-    const std::vector<std::uint16_t> no_fetch(std::size_t{4} * layers * fetch_layers, 0);
+    // No fetch, and as far offshore as is kept.
+    std::vector<std::uint16_t> no_fetch(std::size_t{4} * layers * reach_layers, 0);
+    for (std::size_t layer = 0; layer < layers; ++layer) {
+        no_fetch[((layer * reach_layers) + reach_layers - 1) * 4] =
+            static_cast<std::uint16_t>(glm::packHalf1x16(terrain::farthest_offshore));
+    }
     auto fetches = make_filled_image(
-        device, {.format = VK_FORMAT_R16G16B16A16_SFLOAT, .layers = layers * fetch_layers},
+        device, {.format = VK_FORMAT_R16G16B16A16_SFLOAT, .layers = layers * reach_layers},
         std::as_bytes(std::span{no_fetch}));
     if (!fetches) {
         return std::unexpected(std::move(fetches).error());
@@ -567,7 +570,7 @@ Result<Ocean> Ocean::create(Device& device, VkFormat colour_format, VkFormat dep
     }
     ocean.shore_depths_ = std::move(shore).value();
     auto fetches = make_streamed_image(device, VK_FORMAT_R16G16B16A16_SFLOAT, shore_extent, frames,
-                                       layers * fetch_layers);
+                                       layers * reach_layers);
     if (!fetches) {
         return std::unexpected(std::move(fetches).error());
     }
@@ -673,17 +676,36 @@ std::vector<std::uint16_t> shore_texels(std::span<const float> depths, std::span
     return halves;
 }
 
-std::vector<std::uint16_t> fetch_texels(std::span<const float> fetches) {
+std::vector<std::uint16_t> reach_texels(std::span<const float> fetches,
+                                        std::span<const float> offshore) {
     constexpr auto texels = static_cast<std::size_t>(terrain::shore_size) * terrain::shore_size;
     constexpr auto headings = static_cast<std::size_t>(terrain::fetch_headings);
-    std::vector<std::uint16_t> halves(fetches.size());
+    constexpr auto layers = terrain::shore_spacing.size();
+    std::vector<std::uint16_t> halves(layers * reach_layers * texels * 4, 0);
     // Each layer's planes of a heading each become texels of four headings each.
     for (std::size_t plane = 0; plane < fetches.size() / texels; ++plane) {
         const std::size_t heading = plane % headings;
-        const std::size_t into = ((plane / headings) * (headings / 4)) + (heading / 4);
+        const std::size_t into = ((plane / headings) * reach_layers) + (heading / 4);
         for (std::size_t at = 0; at < texels; ++at) {
             halves[(((into * texels) + at) * 4) + (heading % 4)] =
                 static_cast<std::uint16_t>(glm::packHalf1x16(fetches[(plane * texels) + at]));
+        }
+    }
+    const auto planes = static_cast<std::size_t>(terrain::offshore_planes);
+    for (std::size_t layer = 0; layer < layers; ++layer) {
+        const std::size_t into = (layer * reach_layers) + reach_layers - 1;
+        for (std::size_t at = 0; at < texels; ++at) {
+            for (std::size_t which = 0; which < planes; ++which) {
+                const std::size_t from = (((layer * planes) + which) * texels) + at;
+                float value = 0.0F;
+                if (from < offshore.size()) {
+                    value = offshore[from];
+                } else if (which == 0) {
+                    value = terrain::farthest_offshore;
+                }
+                halves[(((into * texels) + at) * 4) + which] =
+                    static_cast<std::uint16_t>(glm::packHalf1x16(value));
+            }
         }
     }
     return halves;
@@ -696,7 +718,7 @@ Result<> Ocean::update_shore(VkCommandBuffer commands, std::uint32_t frame,
         !updated) {
         return updated;
     }
-    const std::vector<std::uint16_t> fetches = fetch_texels(shore.fetches);
+    const std::vector<std::uint16_t> fetches = reach_texels(shore.fetches, shore.offshore);
     if (auto updated = shore_fetches_.update(commands, frame, std::as_bytes(std::span{fetches}));
         !updated) {
         return updated;

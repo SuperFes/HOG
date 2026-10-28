@@ -101,15 +101,29 @@ inline constexpr float longest_fetch = 50'000.0F; // metres
 [[nodiscard]] std::vector<float> shore_fetches(std::span<const float> depths,
                                                std::span<const float> still);
 
+// Water lies no further offshore than this, metres, however far it is to land.
+inline constexpr float farthest_offshore = 60'000.0F;
+// Planes of each layer shore_offshore has: metres out, then how fast that grows east and north.
+inline constexpr int offshore_planes = 3;
+
+// Of layers of depths of the open sea, `depths`, and of still water, `still`, as ShoreDepths has
+// them: how far each texel lies out from the nearest waterline of either kind of water, negative
+// inland, as far as farthest_offshore. Layer by layer, offshore_planes planes each. Where the
+// nearest waterline may lie beyond a finer layer, the next coarser one's tells how far it is.
+[[nodiscard]] std::vector<float> shore_offshore(std::span<const float> depths,
+                                                std::span<const float> still);
+
 // The depths round an anchor, each layer in turn, finest first: of the sea where the open sea
 // reaches, of still water where it doesn't, the level still water is kept to, as keep_lakes and
-// keep_dry have it, and the fetch over all of it, as shore_fetches has it.
+// keep_dry have it, the fetch over all of it, as shore_fetches has it, and how far offshore it
+// lies, as shore_offshore has it.
 struct ShoreDepths {
     ShoreFrame frame;
     std::vector<float> depths;
     std::vector<float> still;
     std::vector<float> levels;
     std::vector<float> fetches;
+    std::vector<float> offshore;
 };
 
 // The levels of the lakes in the finest layer of `shore`, lowest first, each once.

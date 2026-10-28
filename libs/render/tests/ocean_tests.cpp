@@ -198,7 +198,8 @@ std::vector<std::uint8_t> draw_patch(hog::render::Device& device, OceanView view
                  .depths = std::vector<float>(texels, tide->depth),
                  .still = std::vector<float>(texels, tide->still),
                  .levels = std::vector<float>(texels, tide->level),
-                 .fetches = std::vector<float>(texels * hog::terrain::fetch_headings, 0.0F)}));
+                 .fetches = std::vector<float>(texels * hog::terrain::fetch_headings, 0.0F),
+                 .offshore = {}}));
         }
         hog::render::transition(commands, target->handle(), VK_IMAGE_ASPECT_COLOR_BIT, use::discard,
                                 use::colour_target);
@@ -1109,7 +1110,8 @@ struct Probed {
 std::vector<Probed> probe_waves(hog::render::Device& device, const hog::render::DrawnWaves& drawn,
                                 std::span<const DVec3> rest, double footprint,
                                 std::span<const hog::Vec3> floors = {},
-                                std::span<const float> fetches = {}) {
+                                std::span<const float> fetches = {},
+                                std::span<const hog::Vec3> offshore = {}) {
     std::vector<std::array<float, 4>> asked;
     for (std::size_t i = 0; i < rest.size(); ++i) {
         const DVec3& point = rest[i];
@@ -1117,6 +1119,9 @@ std::vector<Probed> probe_waves(hog::render::Device& device, const hog::render::
                          static_cast<float>(point.z), static_cast<float>(footprint)});
         const hog::Vec3 floor = floors.empty() ? hog::Vec3{1.0e6F, 0.0F, 0.0F} : floors[i];
         asked.push_back({floor.x, floor.y, floor.z, fetches.empty() ? 0.0F : fetches[i]});
+        const hog::Vec3 out =
+            offshore.empty() ? hog::Vec3{hog::terrain::farthest_offshore, 0.0F, 0.0F} : offshore[i];
+        asked.push_back({0.0F, out.x, out.y, out.z});
     }
     constexpr auto binding = [](std::uint32_t at, VkDescriptorType type) {
         return VkDescriptorSetLayoutBinding{.binding = at,
@@ -1452,6 +1457,7 @@ TEST_CASE("over a shore the sea's drawn waves shoal as hog::waves has them", "[r
     // floats keep there is what's tested.
     std::vector<DVec3> rest;
     std::vector<hog::Vec3> floors;
+    std::vector<hog::Vec3> offshore;
     std::vector<hog::waves::Floor> cpu_floors;
     for (const double west : {295.0, 280.0, 240.0, 150.0, 0.0, -1'500.0}) {
         for (const double across : {-20.0, 35.0}) {
@@ -1463,10 +1469,13 @@ TEST_CASE("over a shore the sea's drawn waves shoal as hog::waves has them", "[r
                                          : 1.0 / hog::waves::shelf_run;
             rest.push_back(sea.rest((first * west) + (north * across)));
             floors.emplace_back(static_cast<float>(depth), static_cast<float>(-deepening), 0.0F);
-            cpu_floors.push_back({.depth = depth, .deepening = -first * deepening});
+            offshore.emplace_back(static_cast<float>(out), -1.0F, 0.0F);
+            cpu_floors.push_back(
+                {.depth = depth, .deepening = -first * deepening, .out = out, .seaward = -first});
         }
     }
-    const std::vector<Probed> probed = probe_waves(*device, sea.drawn, rest, 1e-3, floors);
+    const std::vector<Probed> probed =
+        probe_waves(*device, sea.drawn, rest, 1e-3, floors, {}, offshore);
     for (std::size_t i = 0; i < rest.size(); ++i) {
         const hog::waves::Surface surface = hog::waves::surface_at(
             sea.trains, kept, sea.eye.metres() + rest[i], noon, cpu_floors[i]);
@@ -1894,10 +1903,10 @@ std::vector<ShoreFound> probe_shore(hog::render::Device& device,
     REQUIRE(image);
     auto fetch_image = hog::render::make_streamed_image(device, VK_FORMAT_R16G16B16A16_SFLOAT,
                                                         {.width = shore_size, .height = shore_size},
-                                                        1, layers * fetch_headings / 4);
+                                                        1, layers * hog::render::reach_layers);
     REQUIRE(fetch_image);
     const std::vector<std::uint16_t> texels = hog::render::shore_texels(depths, still, levels);
-    const std::vector<std::uint16_t> fetch_texels = hog::render::fetch_texels(fetches);
+    const std::vector<std::uint16_t> fetch_texels = hog::render::reach_texels(fetches, {});
     REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
         REQUIRE(image->update(commands, 0, std::as_bytes(std::span{texels})));
         REQUIRE(fetch_image->update(commands, 0, std::as_bytes(std::span{fetch_texels})));

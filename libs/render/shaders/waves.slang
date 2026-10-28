@@ -24,6 +24,9 @@ static const float deep_enough = 3.14159265358979;
 static const float dean_scale = 0.12;
 static const float shelf_run = 100.0;
 static const float shelf_depth = shelf_run * shelf_run * dean_scale * dean_scale * dean_scale;
+// As hog::waves::most_bunching: where the waves would bunch the water along the ground more than
+// this, of how far it would to fold the surface over, they swing it that much less.
+static const float most_bunching = 0.8;
 static const float shallowest = 0.01;
 static const float full_turn = 6.283185307;
 static const float breaking_depth = 0.42;
@@ -143,6 +146,21 @@ static const float shelf_lag[9] = { 1.2347241954,  -3.5420030563, 3.0825815818,
 static const float shoreface_lag[9] = { 0.5626467669,  0.0,           -3.1638013226,
                                         3.9954707819,  -2.2227549352, 3.3481431461,
                                         -4.2511585803, 1.9068094313,  -0.1753552881 };
+
+// As hog::waves::profile_depth and profile_slope: metres deep the shore's profile lies
+// `offshore` metres from its waterline, and how steeply it deepens there.
+float profile_depth(float offshore) {
+    const float from = max(offshore, 0.0);
+    return max(dean_scale * pow(from, 2.0 / 3.0), from / shelf_run);
+}
+
+float profile_slope(float offshore) {
+    if (offshore >= shelf_depth * shelf_run) {
+        return 1.0 / shelf_run;
+    }
+    const float from = max(offshore, pow(shallowest / dean_scale, 1.5));
+    return 2.0 / 3.0 * dean_scale / pow(from, 1.0 / 3.0);
+}
 
 // A wave's phase lag at κ and its slope against κ, from its lag terms as hog::waves::lag_terms
 // has them: x the turn, y the scale and z the offset.
@@ -449,12 +467,16 @@ float exceeded(float share) {
     return cube_root((-q / 2.0) + root) + cube_root((-q / 2.0) - root);
 }
 
-// At `rest`, a point of sea level from the eye, seen over `footprint` metres, over `floor`: as
-// hog::waves::surface_at, but for the waves shorter than the footprint, which only roughen it.
-// Over still water with `fetch` metres of it upwind, its own waves, as far as the wind has grown
-// them over it; over the sea where there's none. As they stood `ago` seconds before now.
+// At `rest`, a point of sea level from the eye, seen over `footprint` metres, over `floor`, where
+// the water reaches as `reach` has it: as hog::waves::surface_at, but for the waves shorter than the
+// footprint, which only roughen it. Over still water with x of `reach` metres of it upwind, its own
+// waves, as far as the wind has grown them over it; over the sea where there's none. Their phases
+// lag as over the shore's profile y of `reach` metres offshore, out along zw. As they stood `ago`
+// seconds before now.
 public WaveSurface wave_surface(Waves waves, float3 rest, float footprint, float3 floor,
-                                float fetch = 0.0, float ago = 0.0) {
+                                float4 reach = float4(0.0, farthest_offshore, 0.0, 0.0),
+                                float ago = 0.0) {
+    const float fetch = reach.x;
     const float3 up = waves.up_height.xyz;
     const float3 first = waves.first.xyz;
     const float3 second = waves.second.xyz;
@@ -483,7 +505,14 @@ public WaveSurface wave_surface(Waves waves, float3 rest, float footprint, float
     const bool shallow = depth < waves.count_left_radius.w;
     const float2 deepening = floor.yz;
     const float steepness = length(deepening);
-    const float2 offshore = steepness > 0.0 ? deepening / steepness : float2(0.0);
+    const float outward = length(reach.zw);
+    const float2 offshore =
+        outward > 0.0 ? reach.zw / outward : (steepness > 0.0 ? deepening / steepness : float2(0.0));
+    // As over the shore's profile as far out as it lies.
+    const float lag_depth = profile_depth(reach.y);
+    const bool lagging = lag_depth < waves.count_left_radius.w;
+    const float2 lag_deepening =
+        lag_depth > shallowest ? reach.zw * profile_slope(reach.y) : float2(0.0);
     // Of the waves drawn, the mean square slope and breaking bunching of what's not seen.
     float drawn_roughness = 0.0;
     float drawn_breaking = 0.0;
@@ -520,9 +549,12 @@ public WaveSurface wave_surface(Waves waves, float3 rest, float footprint, float
             const float sheltered = towards * towards * (3.0 - (2.0 * towards));
             full *= sqrt(1.0 / (2.0 * group * thinned)) * lerp(sheltered, 1.0, thinned);
             stretch = 1.0 / thinned;
-            const float2 lag = lag_at(waves.waves[i].breaking.yzw, kappa);
+        }
+        const float kappa_lag = deep * max(lag_depth, shallowest);
+        if (lagging && kappa_lag < deep_enough) {
+            const float2 lag = lag_at(waves.waves[i].breaking.yzw, kappa_lag);
             phase += lag.x;
-            const float2 turned = (ahead * deep) + (deepening * (deep * lag.y));
+            const float2 turned = (ahead * deep) + (lag_deepening * (deep * lag.y));
             wavenumber = length(turned);
             ahead = wavenumber > 0.0 ? turned / wavenumber : ahead;
         }
@@ -576,6 +608,15 @@ public WaveSurface wave_surface(Waves waves, float3 rest, float footprint, float
     slope *= held;
     bunching *= held;
     surface.breaking *= held;
+    // The most the water bunches any way along the ground, the larger root of its matrix.
+    const float spread = (bunching.x - bunching.z) / 2.0;
+    const float most =
+        ((bunching.x + bunching.z) / 2.0) + sqrt((spread * spread) + (bunching.y * bunching.y));
+    if (most > most_bunching) {
+        const float unfolded = most_bunching / most;
+        carried *= unfolded;
+        bunching *= unfolded;
+    }
     surface.roughness += drawn_roughness * held_squared;
     surface.breaking_left += drawn_breaking * held_squared;
     surface.heave = all_heave * held_squared;
@@ -949,15 +990,18 @@ static const float shallowest_fetch = 0.01;
 // to: a lake's is kept out over the ground round it, so its surface runs on level under the
 // ground, which hides it.
 public float4 floor_at(Waves waves, Sampler2DArray depths, Sampler2DArray fetches, float3 rest,
-                       out float fetch, float ago = 0.0) {
-    fetch = 0.0;
+                       out float4 reach, float ago = 0.0) {
+    const float3 offshore = shore_offshore(fetches, waves.shore_anchor, waves.shore_east,
+                                           waves.shore_north, waves.count_left_radius.z, rest);
+    const float3 seaward = (waves.shore_east.xyz * offshore.y) + (waves.shore_north.xyz * offshore.z);
+    reach = float4(0.0, offshore.x, dot(seaward, waves.first.xyz), dot(seaward, waves.second.xyz));
     const float3 floor = shore_floor(waves, depths, rest);
     if (sea_reached(floor.x) <= 0.0) {
         const float level = still_water_at(waves, depths, rest).x;
         const float3 still = still_floor(waves, depths, rest);
         // Low ground nothing covers has its level kept under it, a lake's above the sea.
         if (still.x > 0.0 || level != 0.0) {
-            fetch = max(still_fetch_at(waves, fetches, rest), shallowest_fetch);
+            reach.x = max(still_fetch_at(waves, fetches, rest), shallowest_fetch);
             return float4(still.x >= waves.count_left_radius.w ? deep_floor() : still, level);
         }
     }
@@ -976,21 +1020,21 @@ static const int height_steps = 6;
 // finds them under it, taken as the same under the water the waves carry over it. As
 // hog::waves::height_at does, that water is found by stepping back along how far they carry it.
 public WaveSurface water_over(Waves waves, float3 over, float footprint, float4 floor,
-                              float fetch) {
+                              float4 reach) {
     const float3 up = waves.up_height.xyz;
     float3 rest = over;
-    WaveSurface water = wave_surface(waves, rest, footprint, floor.xyz, fetch);
+    WaveSurface water = wave_surface(waves, rest, footprint, floor.xyz, reach);
     for (int step = 0; step < height_steps; ++step) {
         const float3 missed = over - (rest + water.moved);
         rest += missed - (up * dot(up, missed));
-        water = wave_surface(waves, rest, footprint, floor.xyz, fetch);
+        water = wave_surface(waves, rest, footprint, floor.xyz, reach);
     }
     return water;
 }
 
 // Metres the water's surface stands over sea level at `over`, as water_over finds it.
 public float water_height_over(Waves waves, float3 over, float footprint, float4 floor,
-                               float fetch) {
-    return dot(water_over(waves, over, footprint, floor, fetch).moved, waves.up_height.xyz) +
+                               float4 reach) {
+    return dot(water_over(waves, over, footprint, floor, reach).moved, waves.up_height.xyz) +
            floor.w;
 }

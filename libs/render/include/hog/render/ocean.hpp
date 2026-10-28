@@ -134,9 +134,14 @@ private:
 [[nodiscard]] std::vector<std::uint16_t> shore_texels(std::span<const float> depths,
                                                       std::span<const float> still,
                                                       std::span<const float> levels);
-// Fetches as terrain::shore_fetches works them out, as the ocean's shaders sample them: four
-// headings to a texel of half floats, two layers of them to each of the depths'.
-[[nodiscard]] std::vector<std::uint16_t> fetch_texels(std::span<const float> fetches);
+// Layers of the reach each layer of depths has: the fetch's, four headings to each, then one of
+// how far offshore it lies, metres and how fast that grows east and north.
+inline constexpr std::uint32_t reach_layers = (terrain::fetch_headings / 4) + 1;
+// Fetches and how far offshore as terrain::shore_fetches and shore_offshore work them out, as the
+// ocean's shaders sample them: half floats, reach_layers of them to each of the depths'. Without
+// `offshore`, all of it lies as far offshore as is kept.
+[[nodiscard]] std::vector<std::uint16_t> reach_texels(std::span<const float> fetches,
+                                                      std::span<const float> offshore);
 
 // Copies of what's drawn before the sea, colour and depth, as it's seen through.
 struct SeaBehind {

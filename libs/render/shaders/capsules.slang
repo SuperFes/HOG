@@ -90,13 +90,13 @@ float water_at_feet() {
     const float3 up = normalize(push.tall_night.xyz);
     const float feet = push.sun.w;
     const float3 over = push.feet_radius.xyz - (up * feet);
-    float fetch;
-    const float4 floor = floor_at(sea, shore_depths, shore_fetches, over, fetch);
-    const WaveSurface water = wave_surface(sea, over, wading_footprint, floor.xyz, fetch);
+    float4 reach;
+    const float4 floor = floor_at(sea, shore_depths, shore_fetches, over, reach);
+    const WaveSurface water = wave_surface(sea, over, wading_footprint, floor.xyz, reach);
     if (feet > floor.w + (highest_rise * sqrt(water.heave))) {
         return no_water;
     }
-    return water_height_over(sea, over, wading_footprint, floor, fetch);
+    return water_height_over(sea, over, wading_footprint, floor, reach);
 }
 
 // As vertex_main, with the water at the feet.

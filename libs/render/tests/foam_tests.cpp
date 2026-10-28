@@ -327,7 +327,8 @@ TEST_CASE("foam the water draws back from is stranded on the ground, and stays w
             .depths = std::vector<float>(texels, depth),
             .still = std::vector<float>(texels, hog::terrain::shore_highest),
             .levels = std::vector<float>(texels, 0.0F),
-            .fetches = std::vector<float>(texels * hog::terrain::fetch_headings, 0.0F)};
+            .fetches = std::vector<float>(texels * hog::terrain::fetch_headings, 0.0F),
+            .offshore = {}};
     };
     hog::GameTime time{std::chrono::seconds{1'792'000'000}};
     const auto stepped = [&](std::optional<float> depth, DVec3 drift) {

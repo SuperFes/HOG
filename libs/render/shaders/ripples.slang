@@ -139,9 +139,9 @@ float waterline_at(float2 texel) {
     }
     const float3 rest =
         grid_rest(waves, waves.ripple_anchor, waves.ripple_east, waves.ripple_north, texel);
-    float fetch;
-    const float4 floor = floor_at(waves, shore_depths, shore_fetches, rest, fetch);
-    return water_height_over(waves, rest, body_footprint, floor, fetch);
+    float4 reach;
+    const float4 floor = floor_at(waves, shore_depths, shore_fetches, rest, reach);
+    return water_height_over(waves, rest, body_footprint, floor, reach);
 }
 
 // How far the bodies crossing the surface push the water down at `texel`, metres: as far as
@@ -236,8 +236,8 @@ float kept_at(int2 texel) {
     if (waves.ripple_anchor.w > 0.0) {
         const float3 rest = grid_rest(waves, waves.ripple_anchor, waves.ripple_east,
                                       waves.ripple_north, float2(texel) + 0.5);
-        float fetch;
-        const float4 floor = floor_at(waves, shore_depths, shore_fetches, rest, fetch);
+        float4 reach;
+        const float4 floor = floor_at(waves, shore_depths, shore_fetches, rest, reach);
         kept *= saturate(floor.x / ripple_shallowest);
     }
     return kept;
