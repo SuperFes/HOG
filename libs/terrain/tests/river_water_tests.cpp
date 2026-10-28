@@ -140,6 +140,19 @@ TEST_CASE("rivers' water tells drawing which way across it widens", "[terrain][r
     }
 }
 
+TEST_CASE("rivers' water far off is laid in fewer, longer pieces", "[terrain][rivers]") {
+    const hog::planet::Reach& reach = a_river();
+    const double length = glm::length(reach.to - reach.from) * radius();
+    const int near = hog::terrain::river_pieces(reach, radius(), 0.0);
+    const int far = hog::terrain::river_pieces(reach, radius(), 20'000.0);
+    CHECK(far < near);
+    CHECK(far >= 2);
+    // No piece shorter than the share of how far it lies, but for the two any reach takes.
+    CHECK(
+        (far == 2 || length / (far - 1) >= (20'000.0 - length) * hog::terrain::river_piece_angle));
+    CHECK(hog::terrain::river_pieces(reach, radius(), 1'000.0) <= near);
+}
+
 TEST_CASE("rivers' water is laid out from a point of a lattice its pattern repeats over",
           "[terrain][rivers]") {
     const DVec3 origin = water().origin.metres() / hog::terrain::river_pattern;

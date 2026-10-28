@@ -69,11 +69,7 @@ void lay_reach(const planet::Elevation& terrain, const planet::Reach& reach, DVe
     const double over = std::max(river_overlap, reach.width / 2.0);
     const double speed = river_speed(reach);
     const auto rough = static_cast<float>(river_rough(reach, radius));
-    const double turned = std::abs(reach.turn_from + reach.turn_to) / 2.0;
-    const int pieces =
-        std::clamp(static_cast<int>(std::ceil(std::max(length / std::max(reach.width, river_piece),
-                                                       turned * pieces_per_turn))),
-                   2, 128);
+    const int pieces = river_pieces(reach, radius, away);
     std::vector<Section> sections;
     sections.reserve(static_cast<std::size_t>(pieces) + 1);
     for (int piece = 0; piece <= pieces; ++piece) {
@@ -126,6 +122,16 @@ void lay_reach(const planet::Elevation& terrain, const planet::Reach& reach, DVe
 }
 
 } // namespace
+
+int river_pieces(const planet::Reach& reach, double radius, double away) {
+    const double length = glm::length(reach.to - reach.from) * radius;
+    const double turned = std::abs(reach.turn_from + reach.turn_to) / 2.0;
+    const double finest = std::max(river_piece, (away - length) * river_piece_angle);
+    return std::clamp(
+        static_cast<int>(std::ceil(std::max(length / std::max(reach.width, finest),
+                                            std::min(turned * pieces_per_turn, length / finest)))),
+        2, 128);
+}
 
 double river_speed(const planet::Reach& reach) {
     const double depth = planet::fixed_to_double(reach.depth);

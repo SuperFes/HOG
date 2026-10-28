@@ -14,13 +14,15 @@ namespace hog::terrain {
 
 // Rivers' water is laid out this far round the eye, and anew once the eye has gone this far from
 // where it last was.
-inline constexpr double river_reach = 4'000.0; // metres
-inline constexpr double river_relay = 1'000.0; // metres
+inline constexpr double river_reach = 30'000.0; // metres
+inline constexpr double river_relay = 1'000.0;  // metres
 // The water is laid out over its banks either side by the larger of this and half its width,
 // for drawing to show as much of it as ground drawn coarsely needs.
 inline constexpr double river_overlap = 4.0; // metres
-// Pieces along a river are about as long as it's wide, but no shorter than this.
-inline constexpr double river_piece = 4.0; // metres
+// Pieces along a river are about as long as it's wide, but no shorter than this, nor than this
+// share of how far they lie from where the water's laid round, so far rivers take few.
+inline constexpr double river_piece = 4.0;         // metres
+inline constexpr double river_piece_angle = 0.004; // radians
 // The water's origin lies on a lattice this many metres apart along each axis, so a pattern drawn
 // from it that repeats as often stays put however the water's laid out anew.
 inline constexpr double river_pattern = 256.0; // metres
@@ -54,6 +56,10 @@ struct RiverWater {
 [[nodiscard]] double river_speed(const planet::Reach& reach);
 // How rough a reach's water runs on a planet of `radius`, as RiverVertex::rough has it.
 [[nodiscard]] double river_rough(const planet::Reach& reach, double radius);
+
+// How many pieces a reach's water is laid in along it on a planet of `radius`, its middle `away`
+// metres from where the water's laid round.
+[[nodiscard]] int river_pieces(const planet::Reach& reach, double radius, double away);
 
 // The rivers' surface within river_reach of the unit direction `around` on a planet of `radius`,
 // where it lies over land, as the world's terrain has it: each reach's course, shifted as the
