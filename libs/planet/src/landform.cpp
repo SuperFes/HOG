@@ -240,4 +240,36 @@ DVec3 Meander::operator()(DVec3 point) const {
     return glm::normalize(point + (shift * reach_));
 }
 
+DVec3 Meander::unshifted(DVec3 shifted) const {
+    // Newton's steps over the plane touching each guess, the shift's slopes found far enough
+    // apart for its fixed point's steps to hardly tell; it never folds the shifted grid over
+    // itself, so they close in from the shifted point itself.
+    constexpr int most_steps = 8;
+    const double close = reach_ / static_cast<double>(fixed_one);
+    const double apart = 1'000.0 * close;
+    DVec3 point = shifted;
+    for (int step = 0; step < most_steps; ++step) {
+        const DVec3 at = (*this)(point);
+        const DVec3 miss = shifted - at;
+        if (glm::length(miss) < close) {
+            break;
+        }
+        const DVec3 first = glm::normalize(glm::cross(
+            point, std::abs(point.z) < 0.9 ? DVec3{0.0, 0.0, 1.0} : DVec3{1.0, 0.0, 0.0}));
+        const DVec3 second = glm::cross(point, first);
+        const DVec3 along_first = ((*this)(glm::normalize(point + (first * apart))) - at) / apart;
+        const DVec3 along_second = ((*this)(glm::normalize(point + (second * apart))) - at) / apart;
+        // Least squares over the two slopes.
+        const double ff = glm::dot(along_first, along_first);
+        const double fs = glm::dot(along_first, along_second);
+        const double ss = glm::dot(along_second, along_second);
+        const double fm = glm::dot(along_first, miss);
+        const double sm = glm::dot(along_second, miss);
+        const double determinant = (ff * ss) - (fs * fs);
+        point = glm::normalize(point + (first * (((fm * ss) - (sm * fs)) / determinant)) +
+                               (second * (((ff * sm) - (fs * fm)) / determinant)));
+    }
+    return point;
+}
+
 } // namespace hog::planet

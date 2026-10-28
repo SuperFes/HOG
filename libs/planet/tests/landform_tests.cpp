@@ -261,3 +261,26 @@ TEST_CASE("glaciers cut the worn landform last, scouring its soil, and the sea f
     }
     CHECK(drowned > 0);
 }
+
+TEST_CASE("meanders find again the point they shifted", "[planet][landform]") {
+    constexpr double radius = 115'000.0;
+    // Fine enough for the bends to keep to 500 m cells, and coarse.
+    for (const int level : {6, 10}) {
+        const LevelGrid grid{level, radius};
+        const hog::planet::Meander meander{7, grid, radius};
+        // The shift steps by a part in fixed_one of how far it reaches, most of a cell, as near as
+        // it can tell points apart.
+        const double spacing = std::max(hog::planet::fixed_to_double(grid.distance(0, 0)), 500.0);
+        const double step = spacing / static_cast<double>(fixed_one);
+        std::mt19937_64 random{11};
+        std::normal_distribution<double> normal;
+        for (int at = 0; at < 2'000; ++at) {
+            const hog::DVec3 point =
+                glm::normalize(hog::DVec3{normal(random), normal(random), normal(random)});
+            const hog::DVec3 shifted = meander(point);
+            const hog::DVec3 found = meander.unshifted(shifted);
+            REQUIRE(glm::length(meander(found) - shifted) * radius < 4.0 * step);
+            REQUIRE(glm::length(found - point) * radius < 8.0 * step);
+        }
+    }
+}

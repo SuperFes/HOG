@@ -45,6 +45,8 @@ struct Reach {
     // tributaries join along the river they run into.
     DVec3 leaving{};
     DVec3 arriving{};
+    // Cubic metres a second of water it carries.
+    double flow = 0.0;
 };
 
 // The unit direction to a reach's course a share `t` of the way from its start to its end.
@@ -76,6 +78,9 @@ public:
            double radius, double scale = 1.0);
 
     [[nodiscard]] std::span<const Reach> reaches() const noexcept { return reaches_; }
+
+    // What shifts points to find where they lie along the rivers' courses.
+    [[nodiscard]] const Meander& meander() const noexcept { return meander_; }
 
     // Per landform cell, the fixed-point level of the water it drains into first: its own river
     // or lake, the one downstream, or the sea.

@@ -5,6 +5,7 @@ add_library(hog_terrain
     src/sea.cpp
     src/water.cpp
     src/patch.cpp
+    src/river_water.cpp
     src/selection.cpp
     src/shore.cpp
     src/stitching.cpp
@@ -22,6 +23,7 @@ hog_add_tests(hog_terrain
     tests/sea_tests.cpp
     tests/water_tests.cpp
     tests/patch_tests.cpp
+    tests/river_water_tests.cpp
     tests/selection_tests.cpp
     tests/shore_tests.cpp
     tests/stitching_tests.cpp

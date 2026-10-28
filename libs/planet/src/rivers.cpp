@@ -186,7 +186,8 @@ Rivers::Rivers(const Landform& landform, std::span<const std::int64_t> ground, M
                             .fall = falls ? drop : 0,
                             .leaving = tangents[cell],
                             // Each river runs straight on into the water it ends in.
-                            .arriving = flows(receiver) ? tangents[receiver] : to - from});
+                            .arriving = flows(receiver) ? tangents[receiver] : to - from,
+                            .flow = flow(area)});
         for (const std::uint32_t end : {cell, receiver}) {
             near.emplace_back(end, reach);
             for (const std::uint32_t next : grid.neighbors(end)) {

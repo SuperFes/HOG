@@ -118,6 +118,9 @@ public:
     Meander(std::uint64_t seed, const LevelGrid& grid, double radius);
 
     [[nodiscard]] DVec3 operator()(DVec3 point) const;
+    // The point this shifts to `shifted`, as near as the shift's fixed point tells: a part in
+    // fixed_one of how far it reaches.
+    [[nodiscard]] DVec3 unshifted(DVec3 shifted) const;
 
 private:
     std::uint64_t seed_;

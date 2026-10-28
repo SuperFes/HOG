@@ -203,6 +203,22 @@ TEST_CASE("a river bends through each cell rather than turning a corner there",
     CHECK(joined > 10);
 }
 
+TEST_CASE("a river tells how much it carries", "[planet][rivers]") {
+    const auto reaches = rivers().reaches();
+    int joined = 0;
+    for (const Reach& reach : reaches) {
+        REQUIRE(reach.flow > 0.0);
+        const auto next = std::ranges::find_if(
+            reaches, [&](const Reach& other) { return other.from == reach.to; });
+        if (next == reaches.end()) {
+            continue;
+        }
+        REQUIRE(next->flow >= reach.flow);
+        ++joined;
+    }
+    CHECK(joined > 10);
+}
+
 TEST_CASE("a river follows dips in the ground rather than standing above it", "[planet][rivers]") {
     for (const Reach& reach : looked_across()) {
         const std::int64_t low = std::min(reach.from_surface, reach.to_surface) - (50 * fixed_one);
