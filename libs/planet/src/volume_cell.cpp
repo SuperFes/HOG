@@ -1,7 +1,12 @@
+#include <hog/planet/neighbors.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/volume_cell.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 
 namespace hog::planet {
 
@@ -38,6 +43,33 @@ VolumeCell volume_cell_at(WorldPosition position, double radius, int level, int 
     const auto shell =
         static_cast<std::uint32_t>(std::floor(from_bottom / shell_size(shell_level)));
     return VolumeCell::from(cell_at(position, level), shell_level, shell);
+}
+
+std::array<VolumeCell, side_count> face_neighbors(VolumeCell cell) {
+    HOG_ASSERT(cell.is_valid(), "invalid cell");
+    const int level = cell.shell_level();
+    const std::uint32_t shell = cell.shell();
+    std::array<VolumeCell, side_count> around{};
+    const auto across = edge_neighbors(cell.column());
+    for (std::size_t side = 0; side < across.size(); ++side) {
+        around[side] = VolumeCell::from(across[side], level, shell);
+    }
+    if (shell > 0) {
+        around[static_cast<std::size_t>(Side::Down)] =
+            VolumeCell::from(cell.column(), level, shell - 1);
+    }
+    if (shell + 1 < (1U << level)) {
+        around[static_cast<std::size_t>(Side::Up)] =
+            VolumeCell::from(cell.column(), level, shell + 1);
+    }
+    return around;
+}
+
+Side side_toward(VolumeCell neighbor, VolumeCell cell) {
+    const auto around = face_neighbors(neighbor);
+    const auto side = std::ranges::distance(around.begin(), std::ranges::find(around, cell));
+    HOG_ASSERT(side < side_count, "not face neighbours of the same size");
+    return static_cast<Side>(side);
 }
 
 } // namespace hog::planet

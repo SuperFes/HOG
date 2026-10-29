@@ -4,6 +4,7 @@
 #include <hog/core/math.hpp>
 #include <hog/planet/cell_id.hpp>
 
+#include <array>
 #include <bit>
 #include <cstdint>
 
@@ -102,5 +103,18 @@ struct ShellBounds {
 // The cell of the given levels holding a position, or an invalid cell if it's outside the volume.
 [[nodiscard]] VolumeCell volume_cell_at(WorldPosition position, double radius, int level,
                                         int shell_level);
+
+// A cell's sides: across its column as edge_neighbors orders them, then down and up.
+enum class Side : std::uint8_t { MinusU, PlusU, MinusV, PlusV, Down, Up };
+inline constexpr int side_count = 6;
+
+// The cells of the same size across each side, in Side order; an invalid one below the volume's
+// bottom or above its top.
+[[nodiscard]] std::array<VolumeCell, side_count> face_neighbors(VolumeCell cell);
+
+// Which of `neighbor`'s sides touches `cell`. Across a cube face's edge u and v turn, so it isn't
+// always the opposite of the side `neighbor` lies on.
+// Precondition: they're face neighbours of the same size.
+[[nodiscard]] Side side_toward(VolumeCell neighbor, VolumeCell cell);
 
 } // namespace hog::planet

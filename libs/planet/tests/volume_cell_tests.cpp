@@ -3,6 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <random>
 
@@ -134,4 +135,46 @@ TEST_CASE("nothing outside the volume has a cell", "[planet][volume]") {
     REQUIRE(lowest.is_valid());
     CHECK(lowest.shell() == 0);
     CHECK(lowest.column() == hog::planet::cell_at(up, 5));
+}
+
+TEST_CASE("face neighbours lead back to the cell", "[planet][volume]") {
+    using hog::planet::Side;
+    bool turned = false;
+    for (int face = 0; face < hog::planet::face_count; ++face) {
+        for (std::uint32_t i = 0; i < 4; ++i) {
+            for (std::uint32_t j = 0; j < 4; ++j) {
+                for (std::uint32_t shell = 0; shell < 4; ++shell) {
+                    const VolumeCell cell =
+                        VolumeCell::from(CellId::from_face_ij(face, i, j, 2), 2, shell);
+                    const auto around = hog::planet::face_neighbors(cell);
+                    for (std::size_t side = 0; side < around.size(); ++side) {
+                        const VolumeCell neighbor = around[side];
+                        if (!neighbor.is_valid()) {
+                            continue;
+                        }
+                        const Side back = hog::planet::side_toward(neighbor, cell);
+                        REQUIRE(hog::planet::face_neighbors(
+                                    neighbor)[static_cast<std::size_t>(back)] == cell);
+                        const auto opposite = static_cast<Side>(side ^ 1U);
+                        turned = turned || back != opposite;
+                    }
+                }
+            }
+        }
+    }
+    CHECK(turned);
+}
+
+TEST_CASE("the volume has nothing below its bottom or above its top", "[planet][volume]") {
+    using hog::planet::Side;
+    const CellId column = CellId::from_face_ij(0, 1, 1, 1);
+    const auto bottom = hog::planet::face_neighbors(VolumeCell::from(column, 3, 0));
+    const auto top = hog::planet::face_neighbors(VolumeCell::from(column, 3, 7));
+    CHECK_FALSE(bottom[static_cast<std::size_t>(Side::Down)].is_valid());
+    CHECK(bottom[static_cast<std::size_t>(Side::Up)] == VolumeCell::from(column, 3, 1));
+    CHECK_FALSE(top[static_cast<std::size_t>(Side::Up)].is_valid());
+    CHECK(top[static_cast<std::size_t>(Side::Down)] == VolumeCell::from(column, 3, 6));
+    const auto whole = hog::planet::face_neighbors(VolumeCell::from(column));
+    CHECK_FALSE(whole[static_cast<std::size_t>(Side::Down)].is_valid());
+    CHECK_FALSE(whole[static_cast<std::size_t>(Side::Up)].is_valid());
 }
