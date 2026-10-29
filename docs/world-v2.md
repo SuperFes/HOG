@@ -237,7 +237,7 @@ Today's implicit stream-power and hillslope loop, kept and fed properly:
 - **Deposition** (Yuan et al. 2019 sediment flux): alluvial plains, fans, deltas, filled basins.
 - **Weathering** by climate and rock sets what's loose to move.
 - **Landslides, rockfall and creep** where slopes are steeper than their rock and soil can hold.
-- **Glaciers** from stage 3's ice ages over several cycles (Cordonnier et al. 2023), with troughs, hanging valleys, cirques, fjords and moraines.
+- **Glaciers** from stage 3's ice ages over several cycles (Cordonnier et al. 2023), with troughs, hanging valleys, cirques, fjords and moraines. The last stretch spans at least 400,000 years in steps of no more than about 10,000, so it passes through the cycles' cold lows rather than averaging them away. On Earth's settings that brings at least one ice age, and the run ends in the warm spell after it, as Earth's present does; a warmer world may get none, and that's left to its climate.
 - **Sea level** falls as ice locks water up and rises as it melts, so coasts move, valleys drown into rias and fjords, and terraces are left behind; waves cut soft coasts back into cliffs, caves, arches and stacks and leave hard headlands, and drift along the shore builds spits, barriers and lagoons.
 - **Wind** builds dunes where sand is loose and plants are few, and drops dust as loess downwind.
 - **Cold ground:** permafrost, frost heave and patterned ground near the ice.

@@ -83,6 +83,34 @@ struct Air {
     bool operator==(const Air&) const = default;
 };
 
+// One slow cycle of the orbit or the axis over deep time.
+struct Cycle {
+    double size = 0.0;   // half the swing, from the middle to either end
+    double period = 0.0; // years
+    double phase = 0.0;  // degrees through it at J2000
+
+    bool operator==(const Cycle&) const = default;
+};
+
+// How the orbit and the axis wander over deep time, which brings ice ages. They're set rather
+// than worked out from the other bodies' pull, as gravity is, and each is held to the planet's
+// own values today.
+struct Cycles {
+    // Earth's three largest, after Berger (1978).
+    std::vector<Cycle> tilt{{.size = 0.683'95, .period = 41'000.0, .phase = 71.9025},
+                            {.size = 0.238'15, .period = 39'730.0, .phase = 100.8325},
+                            {.size = 0.174'81, .period = 53'615.0, .phase = 128.3057}};
+    // Earth's, rounded, with today near the low of each.
+    std::vector<Cycle> eccentricity{{.size = 0.0108, .period = 405'000.0, .phase = 180.0},
+                                    {.size = 0.0080, .period = 95'000.0, .phase = 180.0},
+                                    {.size = 0.0060, .period = 124'000.0, .phase = 180.0}};
+    // Years for the nearest point to come round against the equinoxes, as the axis wobbles one
+    // way and the orbit turns the other; below 0 it comes round backwards, and at 0 it holds.
+    double precession = 21'000.0;
+
+    bool operator==(const Cycles&) const = default;
+};
+
 // Earth's naked-eye planets, as they stood at J2000.
 [[nodiscard]] std::vector<Wanderer> earths_planets();
 
@@ -96,6 +124,7 @@ struct System {
                 .periapsis = 102.937'68,
                 .longitude = 100.464'57,
                 .period = 365.242'19 / 365.25};
+    Cycles cycles{};
     std::vector<Moon> moons{Moon{}};
     std::optional<Rings> rings;
     std::vector<Wanderer> planets = earths_planets();

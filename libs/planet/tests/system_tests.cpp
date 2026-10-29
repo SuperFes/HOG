@@ -126,6 +126,21 @@ TEST_CASE("a planet may have no moons", "[planet][system]") {
     CHECK(parsed("moons = []\n").system.moons.empty());
 }
 
+TEST_CASE("a config sets how the orbit and axis wander", "[planet][system]") {
+    const hog::planet::Cycles cycles = parsed(R"(
+        [planet.cycles]
+        tilt = [{ size = 5, period_years = 100_000, phase = 90 }]
+        eccentricity = []
+        precession_years = -30_000
+    )")
+                                           .system.cycles;
+    REQUIRE(cycles.tilt.size() == 1);
+    CHECK(cycles.tilt.front() ==
+          hog::planet::Cycle{.size = 5.0, .period = 100'000.0, .phase = 90.0});
+    CHECK(cycles.eccentricity.empty());
+    CHECK(cycles.precession == -30'000.0);
+}
+
 TEST_CASE("bad system settings are rejected with a reason", "[planet][system]") {
     const auto [rest, reason] = GENERATE(table<std::string, std::string>({
         {"gravity = 0\n", "planet.gravity"},
@@ -145,6 +160,12 @@ TEST_CASE("bad system settings are rejected with a reason", "[planet][system]") 
         {"[planet.rings]\ninner = 0.5\n", "planet.rings.inner"},
         {"[planet.air]\noxygen = 0.9\ncarbon_dioxide_ppm = 200_000\n", "more than the air"},
         {"air = 1\n", "planet.air must be a table"},
+        {"[planet.cycles]\ntilt = [{ size = 1 }]\n", "planet.cycles.tilt[0] needs period_years"},
+        {"[planet.cycles]\ntilt = [{ size = 91, period_years = 1000 }]\n",
+         "planet.cycles.tilt[0].size"},
+        {"[planet.cycles]\neccentricity = [{ size = 0.6, period_years = 1000 }]\n",
+         "planet.cycles.eccentricity[0].size"},
+        {"[planet.cycles]\nwobble = 1\n", "unknown key planet.cycles.wobble"},
     }));
     CAPTURE(rest);
     const auto config = parse_planet_config("[planet]\nseed = 1\nradius_km = 115\n" + rest);

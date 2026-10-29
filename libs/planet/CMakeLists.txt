@@ -24,6 +24,7 @@ add_library(hog_planet
     src/projection.cpp
     src/system.cpp
     src/rivers.cpp
+    src/seasons.cpp
     src/tangent_frame.cpp
     src/isostasy.cpp
     src/tectonics.cpp
@@ -81,6 +82,7 @@ hog_add_tests(hog_planet
     tests/projection_tests.cpp
     tests/system_tests.cpp
     tests/rivers_tests.cpp
+    tests/seasons_tests.cpp
     tests/tangent_frame_tests.cpp
     tests/isostasy_tests.cpp
     tests/tectonics_tests.cpp

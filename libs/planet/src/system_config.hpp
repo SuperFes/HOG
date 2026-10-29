@@ -30,6 +30,11 @@ namespace hog::planet::detail {
 //     longitude = 100.46
 //     period_years = 1.0
 //
+//     [planet.cycles]            # each list replaces Earth's
+//     tilt = [{ size = 0.68, period_years = 41_000, phase = 72 }]      # degrees
+//     eccentricity = [{ size = 0.011, period_years = 405_000, phase = 180 }]
+//     precession_years = 21_000
+//
 //     [[planet.stars]]           # replaces the Sun; each orbit as the planet's
 //     luminosity = 1.0
 //     temperature = 5_772

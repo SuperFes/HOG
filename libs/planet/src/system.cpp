@@ -20,7 +20,7 @@ namespace {
 
 using namespace std::string_view_literals;
 
-constexpr std::array system_keys{"gravity"sv, "water_depth"sv, "air"sv,   "orbit"sv,
+constexpr std::array system_keys{"gravity"sv, "water_depth"sv, "air"sv,   "orbit"sv,  "cycles"sv,
                                  "stars"sv,   "moons"sv,       "rings"sv, "planets"sv};
 
 constexpr double above_zero = std::numeric_limits<double>::min();
@@ -28,6 +28,7 @@ constexpr double most_degrees = 360.0;
 constexpr double most_au = 1.0e5;
 constexpr double most_km = 1.0e9;
 constexpr double most_period = 1.0e6;
+constexpr double most_cycle = 1.0e9;
 
 // Stars and planets are placed in astronomical units and Earth's years, moons in kilometres and
 // the planet's days.
@@ -213,6 +214,25 @@ void read_rings(Reader& rings, std::optional<Rings>& into) {
     into = read;
 }
 
+void read_cycle(Reader& swing, Cycle& into, double most) {
+    swing.only({"size", "period_years", "phase"});
+    swing.number("size", 0.0, most, into.size);
+    swing.number("period_years", 1.0, most_cycle, into.period);
+    swing.number("phase", -most_degrees, most_degrees, into.phase);
+    if (into.period <= 0.0) {
+        swing.fail(std::format("{} needs period_years", swing.name()));
+    }
+}
+
+void read_cycles(Reader& cycles, Cycles& into) {
+    cycles.only({"tilt", "eccentricity", "precession_years"});
+    cycles.list("tilt", into.tilt,
+                [](Reader& swing, Cycle& read) { read_cycle(swing, read, 90.0); });
+    cycles.list("eccentricity", into.eccentricity,
+                [](Reader& swing, Cycle& read) { read_cycle(swing, read, 0.5); });
+    cycles.number("precession_years", -most_cycle, most_cycle, into.precession);
+}
+
 void add(std::uint64_t& id, double value) {
     id = hash_combine(id, std::bit_cast<std::uint64_t>(value));
 }
@@ -307,6 +327,15 @@ std::uint64_t system_id(const System& system) noexcept {
                                system.air.carbon_dioxide, system.water_depth}) {
         add(id, value);
     }
+    id = hash_values(id, system.cycles.tilt.size(), system.cycles.eccentricity.size());
+    for (const auto* swings : {&system.cycles.tilt, &system.cycles.eccentricity}) {
+        for (const Cycle& swing : *swings) {
+            add(id, swing.size);
+            add(id, swing.period);
+            add(id, swing.phase);
+        }
+    }
+    add(id, system.cycles.precession);
     return id;
 }
 
@@ -331,6 +360,8 @@ Result<void> parse_system(const toml::table& planet, System& system) {
     }
     Reader rings = top.child("rings");
     read_rings(rings, system.rings);
+    Reader cycles = top.child("cycles");
+    read_cycles(cycles, system.cycles);
 
     top.list("stars", system.stars, read_star);
     top.list("moons", system.moons, read_moon);
