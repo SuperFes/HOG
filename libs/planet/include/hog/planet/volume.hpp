@@ -1,5 +1,6 @@
 #pragma once
 
+#include <hog/core/math.hpp>
 #include <hog/planet/volume_cell.hpp>
 
 #include <cmath>
@@ -27,11 +28,22 @@ enum class Material : std::uint8_t {
     Magma,
 };
 
+// Where a surface crosses a leaf, as one plane through it: the leaf's material lies on the side the
+// normal points to and `under` on the other. Sharper shapes than a plane split the leaf.
+struct Surface {
+    Material under = Material::Air;
+    Vec3 normal{0.0F, 0.0F, 1.0F}; // unit, planet-centred
+    float offset = 0.0F;           // metres from the cell's centre along the normal to the plane
+
+    friend bool operator==(const Surface&, const Surface&) = default;
+};
+
 struct Contents {
     Material material = Material::Air;
     float temperature = 288.0F; // kelvin
+    std::optional<Surface> surface;
 
-    friend constexpr bool operator==(const Contents&, const Contents&) = default;
+    friend bool operator==(const Contents&, const Contents&) = default;
 };
 
 // The world as one sparse tree of cells over the six cube faces. Every cell is either a leaf,
@@ -126,13 +138,29 @@ private:
 [[nodiscard]] std::optional<Volume::Leaf> leaf_at(const Volume& volume, double radius,
                                                   WorldPosition position);
 
+// The material at a position in a leaf, by which side of its surface it's on.
+[[nodiscard]] Material material_at(const Volume::Leaf& leaf, double radius, WorldPosition position);
+
+// What a ray passes through in a leaf, from a point in it on to where it leaves: the material there
+// and, if the ray crosses the leaf's surface first, the material past it and how far along.
+struct LeafCrossing {
+    Material first = Material::Air;
+    std::optional<Material> then;
+    double surface = 0.0;
+    double exit = 0.0;
+};
+[[nodiscard]] LeafCrossing cross_leaf(const Volume::Leaf& leaf, double radius, WorldPosition from,
+                                      DVec3 direction);
+
 struct RayHit {
     Volume::Leaf leaf;
-    double distance = 0.0; // metres from the ray's start to where it enters the leaf
+    Material material = Material::Air;
+    double distance = 0.0; // metres from the ray's start to where it meets the material
 };
 
-// The first leaf a ray reaches, within `reach` metres, whose contents `stops` the ray. A ray
-// starting above the volume starts where it enters it; one leaving it stops nowhere.
+// The first material a ray reaches, within `reach` metres, that `stops` it, whether at a leaf's
+// side or its surface. A ray starting above the volume starts where it enters it; one leaving it
+// stops nowhere.
 // Precondition: `direction` is unit length.
 template <typename Stops>
 [[nodiscard]] std::optional<RayHit> cast_ray(const Volume& volume, double radius,
@@ -158,10 +186,18 @@ template <typename Stops>
             return std::nullopt;
         }
         const Volume::Leaf here = leaf.value_or(Volume::Leaf{});
-        if (stops(here.contents)) {
-            return RayHit{.leaf = here, .distance = travelled};
+        const LeafCrossing crossing = cross_leaf(here, radius, at, direction);
+        if (stops(crossing.first)) {
+            return RayHit{.leaf = here, .material = crossing.first, .distance = travelled};
         }
-        travelled += exit_distance(here.cell, radius, at, direction) + nudge;
+        if (crossing.then.has_value()) {
+            const Material then = crossing.then.value_or(Material::Air);
+            if (stops(then) && travelled + crossing.surface <= reach) {
+                return RayHit{
+                    .leaf = here, .material = then, .distance = travelled + crossing.surface};
+            }
+        }
+        travelled += crossing.exit + nudge;
     }
     return std::nullopt;
 }

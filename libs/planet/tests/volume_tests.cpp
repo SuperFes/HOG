@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <random>
 #include <vector>
 
@@ -19,9 +20,9 @@ using hog::planet::VolumeCell;
 
 namespace {
 
-constexpr Contents air{.material = Material::Air, .temperature = 250.0F};
-constexpr Contents rock{.material = Material::Granite, .temperature = 400.0F};
-constexpr Contents water{.material = Material::Water, .temperature = 280.0F};
+const Contents air{.material = Material::Air, .temperature = 250.0F, .surface = std::nullopt};
+const Contents rock{.material = Material::Granite, .temperature = 400.0F, .surface = std::nullopt};
+const Contents water{.material = Material::Water, .temperature = 280.0F, .surface = std::nullopt};
 
 [[nodiscard]] VolumeCell random_cell(std::mt19937_64& random, int levels, int shell_levels) {
     std::uniform_int_distribution<int> face(0, hog::planet::face_count - 1);
@@ -40,7 +41,8 @@ constexpr Contents water{.material = Material::Water, .temperature = 280.0F};
 
 // Of the one leaf holding `cell`; an invalid material if none does.
 [[nodiscard]] Contents contents_of(const Volume& volume, VolumeCell cell) {
-    constexpr Contents none{.material = static_cast<Material>(255), .temperature = 0.0F};
+    const Contents none{
+        .material = static_cast<Material>(255), .temperature = 0.0F, .surface = std::nullopt};
     return volume.leaf_holding(cell).value_or(Volume::Leaf{.cell = {}, .contents = none}).contents;
 }
 
@@ -188,8 +190,8 @@ namespace {
 
 constexpr double radius = 1'000'000.0;
 
-[[nodiscard]] bool solid(const Contents& contents) {
-    return contents.material != Material::Air;
+[[nodiscard]] bool solid(Material material) {
+    return material != Material::Air;
 }
 
 // Rock everywhere below the planet's radius.
@@ -259,7 +261,9 @@ TEST_CASE("rays stop where small steps would first find something", "[planet][vo
         double stepped = 0.0;
         while (stepped <= reach) {
             const auto leaf = hog::planet::leaf_at(volume, radius, from + (direction * stepped));
-            if (leaf.has_value() && solid(leaf.value_or(Volume::Leaf{}).contents)) {
+            if (leaf.has_value() &&
+                solid(hog::planet::material_at(leaf.value_or(Volume::Leaf{}), radius,
+                                               from + (direction * stepped)))) {
                 break;
             }
             stepped += step;
@@ -273,4 +277,94 @@ TEST_CASE("rays stop where small steps would first find something", "[planet][vo
         }
     }
     CHECK(found > 20);
+}
+
+namespace {
+
+// A leaf a few hundred metres across and tall around the planet's radius under the pole, with
+// ground under a plane `offset` metres over its centre, tilted toward +x by `tilt`.
+struct Slope {
+    Volume volume{air};
+    Volume::Leaf leaf;
+};
+
+[[nodiscard]] Slope slope(float offset, float tilt) {
+    Slope made;
+    const CellId column = hog::planet::cell_at(hog::DVec3{0.0, 0.0, 1.0}, 14);
+    const VolumeCell cell = VolumeCell::from(column, 10, 512);
+    const hog::Vec3 normal = glm::normalize(hog::Vec3{tilt, 0.0F, 1.0F});
+    Contents contents = air;
+    contents.surface =
+        hog::planet::Surface{.under = Material::Granite, .normal = normal, .offset = offset};
+    made.volume.set(cell, contents);
+    made.leaf = Volume::Leaf{.cell = cell, .contents = contents};
+    return made;
+}
+
+} // namespace
+
+TEST_CASE("a leaf's surface parts what's under it from what's over it", "[planet][volume]") {
+    const Slope made = slope(10.0F, 0.0F);
+    const hog::DVec3 middle = hog::planet::volume_center(made.leaf.cell, radius).metres();
+    const auto at = [&](double height) {
+        return hog::planet::material_at(made.leaf, radius,
+                                        hog::WorldPosition{middle + hog::DVec3{0.0, 0.0, height}});
+    };
+    CHECK(at(9.0) == Material::Granite);
+    CHECK(at(11.0) == Material::Air);
+}
+
+TEST_CASE("a ray stops on a leaf's surface, not its side", "[planet][volume]") {
+    const Slope made = slope(-20.0F, 0.0F);
+    const hog::DVec3 middle = hog::planet::volume_center(made.leaf.cell, radius).metres();
+    const hog::WorldPosition from{middle + hog::DVec3{0.0, 0.0, 100.0}};
+    const auto hit =
+        hog::planet::cast_ray(made.volume, radius, from, hog::DVec3{0.0, 0.0, -1.0}, 1000.0, solid);
+    REQUIRE(hit.has_value());
+    const hog::planet::RayHit found = hit.value_or(hog::planet::RayHit{});
+    CHECK(found.material == Material::Granite);
+    CHECK(found.leaf.cell == made.leaf.cell);
+    CHECK(std::abs(found.distance - 120.0) < 0.01);
+}
+
+TEST_CASE("a ray from under a surface stops where it comes out", "[planet][volume]") {
+    const Slope made = slope(0.0F, 0.5F);
+    const hog::DVec3 middle = hog::planet::volume_center(made.leaf.cell, radius).metres();
+    const hog::WorldPosition from{middle + hog::DVec3{0.0, 0.0, -30.0}};
+    const auto open = [](Material material) { return material == Material::Air; };
+    const auto hit =
+        hog::planet::cast_ray(made.volume, radius, from, hog::DVec3{0.0, 0.0, 1.0}, 1000.0, open);
+    REQUIRE(hit.has_value());
+    const hog::planet::RayHit found = hit.value_or(hog::planet::RayHit{});
+    CHECK(found.material == Material::Air);
+    // The plane through the centre meets the vertical there.
+    CHECK(std::abs(found.distance - 30.0) < 0.01);
+}
+
+TEST_CASE("a ray along a surface never crosses it", "[planet][volume]") {
+    const Slope made = slope(-20.0F, 0.0F);
+    const hog::DVec3 middle = hog::planet::volume_center(made.leaf.cell, radius).metres();
+    const hog::WorldPosition from{middle + hog::DVec3{0.0, 0.0, 10.0}};
+    const auto crossing =
+        hog::planet::cross_leaf(made.leaf, radius, from, hog::DVec3{1.0, 0.0, 0.0});
+    CHECK(crossing.first == Material::Air);
+    CHECK_FALSE(crossing.then.has_value());
+}
+
+TEST_CASE("leaves with different surfaces don't merge", "[planet][volume]") {
+    Volume volume{air};
+    const VolumeCell cell = VolumeCell::from(CellId::from_face_ij(0, 3, 3, 3), 6, 32);
+    Contents low = air;
+    low.surface = hog::planet::Surface{
+        .under = Material::Granite, .normal = hog::Vec3{0.0F, 0.0F, 1.0F}, .offset = -1.0F};
+    Contents high = low;
+    high.surface = hog::planet::Surface{
+        .under = Material::Granite, .normal = hog::Vec3{0.0F, 0.0F, 1.0F}, .offset = 1.0F};
+    volume.set(cell.shell_child(0), low);
+    volume.set(cell.shell_child(1), high);
+    volume.settle();
+    CHECK(volume.leaf_holding(cell.shell_child(0)).value_or(Volume::Leaf{}).contents == low);
+    CHECK_FALSE(volume.merge(cell));
+    volume.set(cell.shell_child(1), low);
+    CHECK(volume.merge(cell));
 }

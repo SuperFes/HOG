@@ -1,4 +1,5 @@
 #include <hog/core/assert.hpp>
+#include <hog/core/math.hpp>
 #include <hog/planet/volume.hpp>
 
 #include <cstddef>
@@ -197,6 +198,49 @@ std::optional<Volume::Leaf> leaf_at(const Volume& volume, double radius, WorldPo
         return std::nullopt;
     }
     return volume.leaf_holding(finest);
+}
+
+namespace {
+
+// How far over a leaf's surface a position is; below zero, it's under it.
+[[nodiscard]] double over(const Volume::Leaf& leaf, const Surface& surface, double radius,
+                          WorldPosition position) {
+    const DVec3 from_center = position - volume_center(leaf.cell, radius);
+    return glm::dot(from_center, DVec3{surface.normal}) - static_cast<double>(surface.offset);
+}
+
+} // namespace
+
+Material material_at(const Volume::Leaf& leaf, double radius, WorldPosition position) {
+    if (!leaf.contents.surface.has_value()) {
+        return leaf.contents.material;
+    }
+    const Surface surface = leaf.contents.surface.value_or(Surface{});
+    return over(leaf, surface, radius, position) >= 0.0 ? leaf.contents.material : surface.under;
+}
+
+LeafCrossing cross_leaf(const Volume::Leaf& leaf, double radius, WorldPosition from,
+                        DVec3 direction) {
+    LeafCrossing crossing{.first = material_at(leaf, radius, from),
+                          .then = std::nullopt,
+                          .surface = 0.0,
+                          .exit = exit_distance(leaf.cell, radius, from, direction)};
+    if (!leaf.contents.surface.has_value()) {
+        return crossing;
+    }
+    const Surface surface = leaf.contents.surface.value_or(Surface{});
+    const double toward = glm::dot(direction, DVec3{surface.normal});
+    const double height = over(leaf, surface, radius, from);
+    // Only heading toward the plane from either side does the ray reach it.
+    if (toward == 0.0 || (height >= 0.0) == (toward > 0.0)) {
+        return crossing;
+    }
+    const double along = -height / toward;
+    if (along < crossing.exit) {
+        crossing.then = height >= 0.0 ? surface.under : leaf.contents.material;
+        crossing.surface = along;
+    }
+    return crossing;
 }
 
 } // namespace hog::planet
