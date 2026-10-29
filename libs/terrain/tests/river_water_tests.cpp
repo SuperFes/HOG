@@ -75,7 +75,98 @@ std::vector<std::size_t> drawn() {
     return used;
 }
 
+// Water laid round a river's mouth on the sea.
+const RiverWater& mouth_water() {
+    static const RiverWater laid = [] {
+        const hog::planet::Reach* found = nullptr;
+        for (const auto& reach : terrain().rivers().reaches()) {
+            if (reach.mouth && reach.to_surface == 0 && reach.width > 4.0) {
+                found = &reach;
+                break;
+            }
+        }
+        REQUIRE(found != nullptr);
+        return hog::terrain::river_water(shared_world(), found->to, radius());
+    }();
+    return laid;
+}
+
+// Metres the ground stands above the sea under a vertex.
+double ground_at(const RiverWater& laid, std::size_t at) {
+    const DVec3 point = laid.origin.metres() + DVec3{laid.vertices[at].position};
+    return hog::planet::fixed_to_double(
+        terrain().elevation(hog::planet::cell_at(glm::normalize(point))));
+}
+
 } // namespace
+
+TEST_CASE("rivers' water runs on past the shore at the level of the water it runs into",
+          "[terrain][rivers]") {
+    const RiverWater& laid = mouth_water();
+    std::vector<bool> used(laid.vertices.size(), false);
+    for (const std::uint32_t at : laid.indices) {
+        used[at] = true;
+    }
+    int out = 0;
+    for (std::size_t at = 0; at < laid.vertices.size(); ++at) {
+        const RiverVertex& vertex = laid.vertices[at];
+        CHECK(vertex.mixed >= 0.0F);
+        CHECK(vertex.mixed <= 1.0F);
+        if (!used[at] || corner_of(at) != 2 || vertex.mixed == 0.0F) {
+            continue;
+        }
+        const DVec3 point = laid.origin.metres() + DVec3{vertex.position};
+        const hog::planet::CellId cell = hog::planet::cell_at(glm::normalize(point));
+        const auto lake = terrain().lake(cell);
+        const double level = lake ? hog::planet::fixed_to_double(lake->surface) : 0.0;
+        CHECK_THAT(glm::length(point) - radius(), WithinAbs(level, 0.01));
+        // Out over the water, or between banks it covers.
+        CHECK((!terrain().is_land(cell) || lake ||
+               (ground_at(laid, at - 2) < level && ground_at(laid, at + 2) < level)));
+        ++out;
+    }
+    CHECK(out > 0);
+}
+
+TEST_CASE("rivers' water keeps to its channel while a bank stands over the water it runs into",
+          "[terrain][rivers]") {
+    const RiverWater& laid = mouth_water();
+    int shores = 0;
+    for (std::size_t at = 2; at + 5 < laid.vertices.size(); at += 5) {
+        if (laid.vertices[at].mixed != 0.0F || laid.vertices[at + 5].mixed == 0.0F) {
+            continue;
+        }
+        const double level =
+            glm::length(laid.origin.metres() + DVec3{laid.vertices[at + 5].position}) - radius();
+        CHECK((ground_at(laid, at - 2) >= level || ground_at(laid, at + 2) >= level));
+        ++shores;
+    }
+    CHECK(shores > 0);
+}
+
+TEST_CASE("rivers' mouths fan out as they mix in", "[terrain][rivers]") {
+    const RiverWater& laid = mouth_water();
+    int mouths = 0;
+    int mixed_in = 0;
+    for (std::size_t at = 2; at + 5 < laid.vertices.size(); at += 5) {
+        if (laid.vertices[at].mixed != 0.0F || laid.vertices[at + 5].mixed == 0.0F) {
+            continue;
+        }
+        std::size_t end = at + 5;
+        while (end + 5 < laid.vertices.size() &&
+               laid.vertices[end + 5].mixed > laid.vertices[end].mixed) {
+            end += 5;
+        }
+        const float mixed = laid.vertices[end].mixed;
+        CHECK(laid.vertices[end].half >
+              laid.vertices[at].half *
+                  (1.0F + (0.5F * static_cast<float>(hog::terrain::river_fan) * mixed)));
+        mixed_in += mixed == 1.0F ? 1 : 0;
+        ++mouths;
+    }
+    CHECK(mouths > 0);
+    CHECK(mixed_in > 0);
+}
 
 TEST_CASE("rivers' water lies along their channels at the level of their water",
           "[terrain][rivers]") {
@@ -83,7 +174,7 @@ TEST_CASE("rivers' water lies along their channels at the level of their water",
     int middles = 0;
     for (const std::size_t at : drawn()) {
         const RiverVertex& vertex = water().vertices[at];
-        if (corner_of(at) != 2) {
+        if (corner_of(at) != 2 || vertex.mixed > 0.0F) {
             continue;
         }
         CHECK(vertex.beyond < 0.0F);
@@ -102,7 +193,7 @@ TEST_CASE("rivers' water reaches out to their banks and over them", "[terrain][r
     int edges = 0;
     for (const std::size_t at : drawn()) {
         const RiverVertex& vertex = water().vertices[at];
-        if (corner_of(at) != 1 && corner_of(at) != 3) {
+        if ((corner_of(at) != 1 && corner_of(at) != 3) || vertex.mixed > 0.0F) {
             continue;
         }
         CHECK(vertex.beyond == 0.0F);

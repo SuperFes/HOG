@@ -76,7 +76,11 @@ constexpr std::array vertex_attributes{
     VkVertexInputAttributeDescription{.location = 5,
                                       .binding = 0,
                                       .format = VK_FORMAT_R32_SFLOAT,
-                                      .offset = offsetof(terrain::RiverVertex, half)}};
+                                      .offset = offsetof(terrain::RiverVertex, half)},
+    VkVertexInputAttributeDescription{.location = 6,
+                                      .binding = 0,
+                                      .format = VK_FORMAT_R32_SFLOAT,
+                                      .offset = offsetof(terrain::RiverVertex, mixed)}};
 
 // Upload memory for `bytes`, kept if `kept` holds as many already.
 Result<> hold(const Device& device, Buffer& kept, std::span<const std::byte> bytes,
@@ -106,6 +110,7 @@ Result<RiverSurface> RiverSurface::create(Device& device, VkFormat colour_format
                                            .attributes = vertex_attributes,
                                            .colour_format = colour_format,
                                            .depth_format = depth_format,
+                                           .blend = Blend::Alpha,
                                            .push_constant_bytes = sizeof(Push),
                                            .descriptors = descriptors});
     if (!pipeline) {

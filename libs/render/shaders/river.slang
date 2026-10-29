@@ -38,6 +38,7 @@ struct Vertex {
     [[vk::location(3)]] float rough;
     [[vk::location(4)]] float3 outward;
     [[vk::location(5)]] float half;
+    [[vk::location(6)]] float mixed;
 };
 
 struct Surface {
@@ -52,7 +53,8 @@ struct Surface {
     // Metres past the water's nearer edge, and the metres a pixel spans there.
     float beyond;
     float pixel;
-    // How much of the width it's drawn the water truly covers.
+    // How much of the width it's drawn the water truly covers, less as it mixes into the sea or a
+    // lake: blended over what's drawn, as the sea it mixes into isn't in the copy behind it.
     float coverage;
 };
 
@@ -93,7 +95,7 @@ Surface vertex_main(Vertex vertex) {
         push.faked.y;
     const float shown = max(vertex.half, least_pixels * pixel);
     const float3 widened = vertex.outward * (shown - vertex.half);
-    surface.coverage = vertex.half / max(shown, 1e-6);
+    surface.coverage = (vertex.half / max(shown, 1e-6)) * (1.0 - vertex.mixed);
     surface.from_eye = from_eye + widened;
     surface.placed = vertex.position + widened;
     surface.up = normalize(surface.from_eye +
@@ -275,5 +277,5 @@ float4 fragment_through(Surface surface) : SV_Target {
                           between.a / pi) +
                          between.rgb;
     const float3 seen = tone_mapped(lerp(radiance, white, facing.white), exposure);
-    return float4(lerp(behind_colour.Load(pixel).rgb, seen, surface.coverage), 1.0);
+    return float4(seen, surface.coverage);
 }

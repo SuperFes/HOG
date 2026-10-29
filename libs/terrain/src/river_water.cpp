@@ -24,7 +24,7 @@ constexpr double pieces_per_turn = 8.0 / (2.0 * std::numbers::pi);
 
 // A piece's end across a reach's course: where its middle truly lies, which way across it the
 // channel is found from there, how far its meanders swing it, how wide it runs and the level of its
-// water, if it runs over land, not into a lake or the sea.
+// water, if it runs in its channel or out over the water at its mouth, and how far mixed into that.
 struct Section {
     DVec3 course;
     DVec3 side;
@@ -32,9 +32,32 @@ struct Section {
     double half;
     DVec3 middle;
     std::optional<double> level;
+    bool standing = false;
+    double mixed = 0.0;
 };
 
-Section section_at(const planet::Elevation& terrain, const planet::Reach& reach, double t) {
+// Where a point `out` metres across a section from its middle truly lies.
+DVec3 across_at(const planet::Meander& meander, const Section& section, double out, double radius) {
+    // Across the swung river, so it keeps its width where it swings steeply.
+    const double swung =
+        section.swing.offset +
+        (out / radius * std::sqrt(1.0 + (section.swing.slope * section.swing.slope)));
+    return meander.unshifted(glm::normalize(section.course + (section.side * swung)));
+}
+
+// Whether the ground either side of a section, as far out as its water's drawn, lies under the
+// water its reach runs into: coarse cells may hold land the sea or a lake covers.
+bool out_in(const planet::Elevation& terrain, const planet::Reach& reach, const Section& section,
+            double radius, double over) {
+    const planet::Meander& meander = terrain.rivers().meander();
+    return std::ranges::all_of(std::array{-1.0, 1.0}, [&](double way) {
+        const DVec3 bank = across_at(meander, section, way * (section.half + over), radius);
+        return terrain.elevation(planet::cell_at(bank)) < reach.to_surface;
+    });
+}
+
+Section section_at(const planet::Elevation& terrain, const planet::Reach& reach, double t,
+                   double radius, double over) {
     const DVec3 course = planet::course_at(reach, t);
     const DVec3 ahead = planet::course_at(reach, std::min(t + 0.01, 1.0)) -
                         planet::course_at(reach, std::max(t - 0.01, 0.0));
@@ -48,12 +71,34 @@ Section section_at(const planet::Elevation& terrain, const planet::Reach& reach,
                         glm::normalize(course + (side * swing.offset))),
                     .level = std::nullopt};
     const planet::CellId cell = planet::cell_at(section.middle);
-    if (terrain.is_land(cell) && !terrain.lake(cell)) {
+    const bool land = terrain.is_land(cell) && !terrain.lake(cell);
+    if (reach.mouth && (!land || out_in(terrain, reach, section, radius, over))) {
+        section.level = planet::fixed_to_double(reach.to_surface);
+        section.standing = true;
+    } else if (land) {
         if (const auto channel = terrain.river(cell)) {
             section.level = planet::fixed_to_double(channel->surface);
         }
     }
     return section;
+}
+
+// Past the shore a mouth's water mixes in, fanning out as it goes.
+void mix_in(std::vector<Section>& sections, double width, double radius) {
+    double past = 0.0;
+    for (std::size_t at = 0; at < sections.size(); ++at) {
+        Section& section = sections[at];
+        if (!section.standing) {
+            past = 0.0;
+            continue;
+        }
+        const std::size_t before = at == 0 ? 1 : at - 1;
+        past +=
+            glm::length(section.middle - sections[std::min(before, sections.size() - 1)].middle) *
+            radius;
+        section.mixed = std::min(past / (river_mixing * width), 1.0);
+        section.half *= 1.0 + (river_fan * section.mixed);
+    }
 }
 
 // Lays out one reach's surface, if it runs within reach of `around`.
@@ -73,8 +118,10 @@ void lay_reach(const planet::Elevation& terrain, const planet::Reach& reach, DVe
     std::vector<Section> sections;
     sections.reserve(static_cast<std::size_t>(pieces) + 1);
     for (int piece = 0; piece <= pieces; ++piece) {
-        sections.push_back(section_at(terrain, reach, static_cast<double>(piece) / pieces));
+        sections.push_back(
+            section_at(terrain, reach, static_cast<double>(piece) / pieces, radius, over));
     }
+    mix_in(sections, reach.width, radius);
     const auto first = static_cast<std::uint32_t>(water.vertices.size());
     for (int piece = 0; piece <= pieces; ++piece) {
         const auto at = static_cast<std::size_t>(piece);
@@ -89,21 +136,16 @@ void lay_reach(const planet::Elevation& terrain, const planet::Reach& reach, DVe
             const bool edge = corner == 0 || corner + 1 == across_water.size();
             const double out =
                 static_cast<double>(across_water.at(corner)) * (half + (edge ? over : 0.0));
-            // Across the swung river, so it keeps its width where it swings steeply.
-            const double swung =
-                section.swing.offset +
-                (out / radius * std::sqrt(1.0 + (section.swing.slope * section.swing.slope)));
             const DVec3 point =
-                corner == 2
-                    ? section.middle
-                    : meander.unshifted(glm::normalize(section.course + (section.side * swung)));
+                corner == 2 ? section.middle : across_at(meander, section, out, radius);
             water.vertices.push_back(
                 {.position = Vec3{(point * (radius + level)) - origin.metres()},
                  .beyond = static_cast<float>(std::abs(out) - half),
                  .flow = Vec3{downstream * speed},
                  .rough = rough,
                  .outward = corner == 2 ? Vec3{0.0F} : Vec3{glm::normalize(point - section.middle)},
-                 .half = static_cast<float>(half)});
+                 .half = static_cast<float>(half),
+                 .mixed = static_cast<float>(section.mixed)});
         }
     }
     for (int piece = 0; piece < pieces; ++piece) {

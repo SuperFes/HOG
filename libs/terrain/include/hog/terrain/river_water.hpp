@@ -39,11 +39,18 @@ struct RiverVertex {
     // middle; and how many metres wide half the river runs there, so drawing can widen it.
     Vec3 outward{0.0F};
     float half = 0.0F;
+    // From 0 in its channel to 1 where it's mixed into the sea or lake it runs into.
+    float mixed = 0.0F;
 
     friend bool operator==(const RiverVertex&, const RiverVertex&) = default;
 };
 
-static_assert(sizeof(RiverVertex) == 48);
+static_assert(sizeof(RiverVertex) == 52);
+
+// Past the shore, a river's water mixes into the sea or lake it runs into over so many of its
+// widths, fanning out by so many times its width more as it does.
+constexpr double river_mixing = 4.0;
+constexpr double river_fan = 1.0;
 
 // The surface of the rivers round a point, in strips of triangles, each three indices.
 struct RiverWater {
