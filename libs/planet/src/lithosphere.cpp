@@ -206,6 +206,26 @@ std::vector<std::uint32_t> others_around(const LevelGrid& grid,
 
 // From a place toward the places around it with `other` on top, along the surface, and the
 // crust on the first of them; none if there are none.
+// How a field over the grid's places rises along the surface at a place, per radian: the
+// least-squares fit to how it differs at each neighbour.
+DVec3 gradient(const LevelGrid& grid, std::span<const float> field, std::uint32_t place) {
+    const DVec3 at = cell_center(grid.cell(place));
+    // Up holds the fit solvable, where no neighbour lies.
+    glm::dmat3 fit = glm::outerProduct(at, at);
+    DVec3 rise{0.0};
+    for (const std::uint32_t next : grid.neighbors(place)) {
+        const auto differs = static_cast<double>(field[next] - field[place]);
+        DVec3 offset = cell_center(grid.cell(next)) - at;
+        offset -= glm::dot(offset, at) * at;
+        fit += glm::outerProduct(offset, offset);
+        rise += differs * offset;
+    }
+    if (rise == DVec3{0.0}) {
+        return rise;
+    }
+    return glm::inverse(fit) * rise;
+}
+
 struct Facing {
     DVec3 toward;
     Crust crust;
@@ -499,9 +519,8 @@ void Lithosphere::collide(double years, Ranges ranges) {
     }
 }
 
-void Lithosphere::drive(Forces forces) {
-    // Each force along the surface at a place turns its plate about the planet's middle.
-    std::vector<DVec3> torques(plates_.size(), DVec3{0.0});
+std::vector<std::vector<Lithosphere::Push>> Lithosphere::pushes(const Forces& forces) const {
+    std::vector<std::vector<Push>> found(plates_.size());
     for (const Boundary& edge : boundaries()) {
         const DVec3 at = cell_center(grid_.cell(edge.place));
         const double relative = glm::length(velocity(edge.plate, at) - velocity(edge.other, at));
@@ -521,7 +540,37 @@ void Lithosphere::drive(Forces forces) {
                 static_cast<double>(settled_continent);
             push = -forces.ridge * std::max((raised * raised) - 1.0, 0.0);
         }
-        torques[edge.plate] += glm::cross(at, push * across * edge.length * edge.normal);
+        found[edge.plate].push_back({.at = at, .force = push * across * edge.length * edge.normal});
+    }
+    // Downhill off the dome, by how steep it is over the place's area, so a dome's whole rim
+    // pushes as far as it rises over it.
+    double sphere = 0.0;
+    for (std::uint32_t place = 0; place < grid_.size(); ++place) {
+        sphere += static_cast<double>(grid_.area(place));
+    }
+    for (std::uint32_t place = 0; place < grid_.size(); ++place) {
+        const DVec3 steep = gradient(grid_, heat_, place);
+        if (steep == DVec3{0.0}) {
+            continue;
+        }
+        const DVec3 at = cell_center(grid_.cell(place));
+        if (const std::optional<Found> over = top(at)) {
+            const double area =
+                4.0 * std::numbers::pi * static_cast<double>(grid_.area(place)) / sphere;
+            found[over->plate].push_back({.at = at, .force = -forces.dome * area * steep});
+        }
+    }
+    return found;
+}
+
+void Lithosphere::drive(Forces forces) {
+    // Each force along the surface at a place turns its plate about the planet's middle.
+    const std::vector<std::vector<Push>> found = pushes(forces);
+    std::vector<DVec3> torques(plates_.size(), DVec3{0.0});
+    for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
+        for (const Push& push : found[plate]) {
+            torques[plate] += glm::cross(push.at, push.force);
+        }
     }
     // The drag on a plate turning at w is -D w, D summing (I - r r^T) over its crust by its share
     // of the sphere; the same sum without keels gives how fast its crust moves on the whole.

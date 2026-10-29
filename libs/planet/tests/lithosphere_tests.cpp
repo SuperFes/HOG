@@ -724,6 +724,31 @@ TEST_CASE("the mantle drags harder on plates carrying continent", "[planet][lith
     CHECK_THAT(without(), WithinRel(lead(false), 1e-6));
 }
 
+TEST_CASE("plates slide off the dome a warm mantle lifts", "[planet][lithosphere]") {
+    // The halves slide past each other about z, so their edges neither pull nor push, with a
+    // continent across their edge around -y warming the mantle under it.
+    const Lithosphere ocean = halves();
+    std::vector<Lithosphere::Plate> plates{ocean.plates().begin(), ocean.plates().end()};
+    const auto& grid = ocean.grid();
+    for (std::uint32_t plate = 0; plate < 2; ++plate) {
+        plates[plate].pole = DVec3{0.0, 0.0, 1.0};
+        plates[plate].rate = plate == 0 ? 0.01 : -0.01;
+        for (std::size_t index = 0; index < plates[plate].cells.size(); ++index) {
+            const DVec3 at = ocean.to_planet(
+                plate, hog::planet::cell_center(grid.cell(plates[plate].cells[index])));
+            if (at.y < -0.8) {
+                plates[plate].crust[index] = continent;
+            }
+        }
+    }
+    Lithosphere lithosphere{grid, plates};
+    lithosphere.warm(1000.0);
+    lithosphere.drive();
+    // The north slides off it northward and the south southward, so they part over it.
+    CHECK(glm::dot(glm::normalize(turn_of(lithosphere, 0)), DVec3{-1.0, 0.0, 0.0}) > 0.9);
+    CHECK(glm::dot(glm::normalize(turn_of(lithosphere, 1)), DVec3{1.0, 0.0, 0.0}) > 0.9);
+}
+
 TEST_CASE("plates keep the pace they were first driven at", "[planet][lithosphere]") {
     Lithosphere lithosphere =
         settled(hog::planet::lithosphere_from(start(), step_years), step_years);

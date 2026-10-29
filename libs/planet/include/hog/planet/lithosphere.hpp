@@ -81,7 +81,8 @@ struct Boundary {
 // continents collide, the range between them pushes both back as a ridge does, by the square of
 // its thickness over a settled continent's less one, as a raised column's weight grows: twice as
 // thick, three times a ridge's push, about what Tibet's is. Pulls and pushes act across an edge
-// as far as the plates close or part across it, not slide past.
+// as far as the plates close or part across it, not slide past. Where the mantle is warm it
+// lifts the plates over it into a broad dome they slide off, as off a ridge but over all of it.
 struct Forces {
     // Of an old slab's pull on each length of trench, the push on each length of ridge.
     double ridge = 0.3;
@@ -89,6 +90,10 @@ struct Forces {
     double mature = 100.0;
     // How much harder the mantle drags on continent than on ocean floor.
     double keel = 3.0;
+    // Of an old slab's pull on each length of trench, the push off a fully warm mantle's dome on
+    // each length of its rim: it lifts the crust about a kilometre, a third of what a ridge
+    // stands over old floor, so a third of a ridge's push.
+    double dome = 0.1;
 };
 
 // The crust as rigid plates on the sphere, each keeping its crust on a grid in its own frame and
@@ -169,6 +174,14 @@ public:
     [[nodiscard]] std::vector<Boundary> boundaries() const;
 
 private:
+    // A force along the surface at a unit direction, in an old slab's pull on a radian of trench.
+    struct Push {
+        DVec3 at{0.0};
+        DVec3 force{0.0};
+    };
+
+    // Every force on each plate: across its edges, and off the mantle's dome under it.
+    [[nodiscard]] std::vector<std::vector<Push>> pushes(const Forces& forces) const;
     // Where in a plate's cells is the crust it carries over a unit direction, if it has any.
     [[nodiscard]] std::optional<std::size_t> held(std::uint32_t plate, DVec3 at) const;
     // Of each two plates where they meet, whether the first's crust stays over the second's of
