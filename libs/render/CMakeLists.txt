@@ -36,6 +36,7 @@ add_library(hog_render
     src/atmosphere.cpp
     src/barrier.cpp
     src/billboard.cpp
+    src/blocks.cpp
     src/camera.cpp
     src/capsules.cpp
     src/cloud_noise.cpp
@@ -88,7 +89,7 @@ target_link_libraries(hog_render
     PUBLIC hog::atmosphere hog::core hog::flora hog::terrain hog::waves volk::volk
     PRIVATE hog::planet vk-bootstrap::vk-bootstrap)
 hog_target_defaults(hog_render)
-hog_add_shaders(hog_render CATALOGUE shaders/aerial.slang shaders/air_tables.slang shaders/billboard.slang shaders/bushes.slang shaders/capsules.slang shaders/cloud_march.slang shaders/cloud_resolve.slang shaders/clouds.slang shaders/foam.slang shaders/forest.slang shaders/glare.slang shaders/globe.slang shaders/grass.slang shaders/ocean.slang shaders/precipitation.slang shaders/rain_rings.slang shaders/ripples.slang shaders/river.slang shaders/sea_laid.slang shaders/sky.slang shaders/sky_view.slang
+hog_add_shaders(hog_render CATALOGUE shaders/aerial.slang shaders/air_tables.slang shaders/billboard.slang shaders/blocks.slang shaders/bushes.slang shaders/capsules.slang shaders/cloud_march.slang shaders/cloud_resolve.slang shaders/clouds.slang shaders/foam.slang shaders/forest.slang shaders/glare.slang shaders/globe.slang shaders/grass.slang shaders/ocean.slang shaders/precipitation.slang shaders/rain_rings.slang shaders/ripples.slang shaders/river.slang shaders/sea_laid.slang shaders/sky.slang shaders/sky_view.slang
                 shaders/terrain.slang shaders/trees.slang)
 
 # A test device, for tests here and elsewhere that draw.
@@ -106,6 +107,7 @@ hog_add_tests(hog_render
     tests/atmosphere_tests.cpp
     tests/barrier_tests.cpp
     tests/billboard_tests.cpp
+    tests/blocks_tests.cpp
     tests/camera_tests.cpp
     tests/capsules_tests.cpp
     tests/cloud_noise_tests.cpp
