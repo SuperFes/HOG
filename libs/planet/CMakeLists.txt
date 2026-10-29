@@ -16,6 +16,7 @@ add_library(hog_planet
     src/hotspots.cpp
     src/landform.cpp
     src/level_grid.cpp
+    src/lithosphere.cpp
     src/moisture.cpp
     src/neighbors.cpp
     src/planet_config.cpp
@@ -74,6 +75,7 @@ hog_add_tests(hog_planet
     tests/landform_tests.cpp
     tests/materials_tests.cpp
     tests/level_grid_tests.cpp
+    tests/lithosphere_tests.cpp
     tests/neighbors_tests.cpp
     tests/noise_tests.cpp
     tests/planet_config_tests.cpp
