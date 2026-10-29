@@ -313,7 +313,10 @@ void fill_between(Volume& volume, double radius, CellId column, double low, doub
         return static_cast<std::uint64_t>(
             std::clamp(std::round((reach - bottom) / size), 0.0, shells));
     };
-    std::uint64_t from = to_shell(low);
+    // A small planet's volume reaches down past its centre, where nothing lies.
+    const auto holding_centre =
+        static_cast<std::uint64_t>(std::clamp(std::floor(-bottom / size), 0.0, shells));
+    std::uint64_t from = std::max(to_shell(low), holding_centre);
     const std::uint64_t to = to_shell(high);
     // The largest aligned run of shells starting at each point that fits.
     while (from < to) {

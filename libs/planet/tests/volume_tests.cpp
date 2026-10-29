@@ -632,6 +632,28 @@ TEST_CASE("filling between two heights takes few cells and fills just them", "[p
     CHECK(material(radius) == Material::Water);
 }
 
+TEST_CASE("nothing is filled past the planet's centre", "[planet][volume]") {
+    // Smaller than the volume reaches down, so its bottom shells lie past the centre.
+    constexpr double small = 100'000.0;
+    const CellId column = hog::planet::cell_at(hog::DVec3{0.0, 1.0, 0.0}, 8);
+    constexpr int shell_level = 6;
+    const double size = std::ldexp(hog::planet::volume_span, -shell_level);
+    const double bottom = small - (hog::planet::volume_span / 2.0);
+    REQUIRE(bottom < -size);
+    Volume volume{air, region_level};
+    hog::planet::fill_between(volume, small, column, bottom, small, shell_level, rock);
+    // The shell holding the centre is the lowest filled.
+    const auto holding_centre = static_cast<std::uint32_t>(std::floor(-bottom / size));
+    const auto contents = [&](std::uint32_t shell) {
+        return volume.leaf_holding(VolumeCell::from(column, shell_level, shell))
+            .value_or(Volume::Leaf{})
+            .contents;
+    };
+    CHECK(contents(holding_centre - 1) == air);
+    CHECK(contents(holding_centre) == rock);
+    CHECK(contents(holding_centre + 1) == rock);
+}
+
 TEST_CASE("filling nothing changes nothing", "[planet][volume]") {
     Volume volume{air, region_level};
     const CellId column = CellId::from_face_ij(0, 1, 1, 4);

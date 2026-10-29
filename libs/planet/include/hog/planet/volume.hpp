@@ -206,7 +206,8 @@ struct Budget {
 [[nodiscard]] Budget budget(const Volume& volume, double radius, CellId region);
 
 // Fills a column from `low` to `high` metres from the planet's centre, each rounded to the nearest
-// side of a shell of `shell_level`, with as few cells as cover it; clipped to the volume.
+// side of a shell of `shell_level`, with as few cells as cover it; clipped to the volume, and to
+// the shell holding the planet's centre.
 void fill_between(Volume& volume, double radius, CellId column, double low, double high,
                   int shell_level, const Contents& contents);
 
