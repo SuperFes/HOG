@@ -2,6 +2,7 @@
 
 #include <hog/planet/volume_cell.hpp>
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -120,5 +121,49 @@ private:
     std::vector<std::uint32_t> free_pairs_;
     std::size_t leaves_ = face_count;
 };
+
+// The leaf at a position, unless it's outside the volume.
+[[nodiscard]] std::optional<Volume::Leaf> leaf_at(const Volume& volume, double radius,
+                                                  WorldPosition position);
+
+struct RayHit {
+    Volume::Leaf leaf;
+    double distance = 0.0; // metres from the ray's start to where it enters the leaf
+};
+
+// The first leaf a ray reaches, within `reach` metres, whose contents `stops` the ray. A ray
+// starting above the volume starts where it enters it; one leaving it stops nowhere.
+// Precondition: `direction` is unit length.
+template <typename Stops>
+[[nodiscard]] std::optional<RayHit> cast_ray(const Volume& volume, double radius,
+                                             WorldPosition from, DVec3 direction, double reach,
+                                             Stops stops) {
+    // Past a side by enough to land in the next cell, but under the finest shell's thickness.
+    constexpr double nudge = 1.0e-4;
+    double travelled = 0.0;
+    const double top = radius + (volume_span / 2.0);
+    const double b = glm::dot(from.metres(), direction);
+    const double above = glm::dot(from.metres(), from.metres()) - (top * top);
+    if (above >= 0.0) {
+        const double meets = (b * b) - above;
+        if (b >= 0.0 || meets < 0.0) {
+            return std::nullopt;
+        }
+        travelled = (-b) - std::sqrt(meets) + nudge;
+    }
+    while (travelled <= reach) {
+        const WorldPosition at = from + (direction * travelled);
+        const auto leaf = leaf_at(volume, radius, at);
+        if (!leaf.has_value()) {
+            return std::nullopt;
+        }
+        const Volume::Leaf here = leaf.value_or(Volume::Leaf{});
+        if (stops(here.contents)) {
+            return RayHit{.leaf = here, .distance = travelled};
+        }
+        travelled += exit_distance(here.cell, radius, at, direction) + nudge;
+    }
+    return std::nullopt;
+}
 
 } // namespace hog::planet

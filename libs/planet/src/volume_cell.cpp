@@ -45,6 +45,30 @@ VolumeCell volume_cell_at(WorldPosition position, double radius, int level, int 
     return VolumeCell::from(cell_at(position, level), shell_level, shell);
 }
 
+double exit_distance(VolumeCell cell, double radius, WorldPosition from, DVec3 direction) {
+    const DVec3 at = from.metres();
+    const ShellBounds bounds = shell_bounds(cell, radius);
+    // Along the ray, |at + t direction|^2 = t^2 + 2 b t + c - r^2.
+    const double b = glm::dot(at, direction);
+    const double c = glm::dot(at, at);
+    double exit = (-b) + std::sqrt(std::max((b * b) - c + (bounds.outer * bounds.outer), 0.0));
+    const double inner = (b * b) - c + (bounds.inner * bounds.inner);
+    if (b < 0.0 && inner >= 0.0) {
+        exit = std::min(exit, (-b) - std::sqrt(inner));
+    }
+    const auto corners = cell_vertices(cell.column());
+    const DVec3 middle = cell_center(cell.column());
+    for (std::size_t index = 0; index < corners.size(); ++index) {
+        DVec3 side = glm::cross(corners[index], corners[(index + 1) % corners.size()]);
+        side = glm::dot(side, middle) < 0.0 ? -side : side;
+        const double toward = glm::dot(side, direction);
+        if (toward < 0.0) {
+            exit = std::min(exit, -glm::dot(side, at) / toward);
+        }
+    }
+    return std::max(exit, 0.0);
+}
+
 std::array<VolumeCell, side_count> face_neighbors(VolumeCell cell) {
     HOG_ASSERT(cell.is_valid(), "invalid cell");
     const int level = cell.shell_level();

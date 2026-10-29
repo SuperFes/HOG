@@ -104,6 +104,12 @@ struct ShellBounds {
 [[nodiscard]] VolumeCell volume_cell_at(WorldPosition position, double radius, int level,
                                         int shell_level);
 
+// How far a ray goes from a point inside a cell, along a unit direction, before it leaves the cell
+// through any side: a column's sides are planes through the planet's centre and a shell's are
+// spheres about it.
+[[nodiscard]] double exit_distance(VolumeCell cell, double radius, WorldPosition from,
+                                   DVec3 direction);
+
 // A cell's sides: across its column as edge_neighbors orders them, then down and up.
 enum class Side : std::uint8_t { MinusU, PlusU, MinusV, PlusV, Down, Up };
 inline constexpr int side_count = 6;

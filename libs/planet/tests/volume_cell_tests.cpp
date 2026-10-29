@@ -1,3 +1,4 @@
+#include <hog/core/math.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/volume_cell.hpp>
 
@@ -177,4 +178,26 @@ TEST_CASE("the volume has nothing below its bottom or above its top", "[planet][
     const auto whole = hog::planet::face_neighbors(VolumeCell::from(column));
     CHECK_FALSE(whole[static_cast<std::size_t>(Side::Down)].is_valid());
     CHECK_FALSE(whole[static_cast<std::size_t>(Side::Up)].is_valid());
+}
+
+TEST_CASE("a ray leaves a cell where the cell ends", "[planet][volume]") {
+    std::mt19937_64 random{31};
+    std::normal_distribution<double> normal;
+    constexpr double step = 1.0e-5;
+    for (int n = 0; n < 2000; ++n) {
+        const CellId column = hog::planet::cell_at(
+            hog::DVec3{normal(random), normal(random), normal(random)}, 6 + (n % 10));
+        const VolumeCell cell = VolumeCell::from(column, 8 + (n % 10), 1U << (7 + (n % 10)));
+        const hog::WorldPosition from = hog::planet::volume_center(cell, radius);
+        const hog::DVec3 direction =
+            glm::normalize(hog::DVec3{normal(random), normal(random), normal(random)});
+        const double exit = hog::planet::exit_distance(cell, radius, from, direction);
+        REQUIRE(exit > 0.0);
+        const auto at = [&](double distance) {
+            return hog::planet::volume_cell_at(from + (direction * distance), radius,
+                                               column.level(), cell.shell_level());
+        };
+        REQUIRE(at(exit - step) == cell);
+        REQUIRE(at(exit + step) != cell);
+    }
 }

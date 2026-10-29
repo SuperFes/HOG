@@ -191,4 +191,12 @@ void Volume::settle() {
     }
 }
 
+std::optional<Volume::Leaf> leaf_at(const Volume& volume, double radius, WorldPosition position) {
+    const VolumeCell finest = volume_cell_at(position, radius, max_level, max_shell_level);
+    if (!finest.is_valid()) {
+        return std::nullopt;
+    }
+    return volume.leaf_holding(finest);
+}
+
 } // namespace hog::planet

@@ -1,3 +1,5 @@
+#include <hog/core/math.hpp>
+#include <hog/planet/projection.hpp>
 #include <hog/planet/volume.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -180,4 +182,95 @@ TEST_CASE("nothing settled can merge further", "[planet][volume]") {
             REQUIRE_FALSE(volume.merge(leaf.shell_parent()));
         }
     }
+}
+
+namespace {
+
+constexpr double radius = 1'000'000.0;
+
+[[nodiscard]] bool solid(const Contents& contents) {
+    return contents.material != Material::Air;
+}
+
+// Rock everywhere below the planet's radius.
+[[nodiscard]] Volume ground() {
+    Volume volume{air};
+    for (int face = 0; face < hog::planet::face_count; ++face) {
+        volume.set(VolumeCell::from(CellId::from_face(face), 1, 0), rock);
+    }
+    return volume;
+}
+
+} // namespace
+
+TEST_CASE("a ray straight down stops on the ground", "[planet][volume]") {
+    const Volume volume = ground();
+    const hog::WorldPosition from{0.0, 0.0, radius + 1000.0};
+    const auto hit =
+        hog::planet::cast_ray(volume, radius, from, hog::DVec3{0.0, 0.0, -1.0}, 5000.0, solid);
+    REQUIRE(hit.has_value());
+    const hog::planet::RayHit found = hit.value_or(hog::planet::RayHit{});
+    CHECK(found.leaf.contents == rock);
+    CHECK(std::abs(found.distance - 1000.0) < 0.01);
+}
+
+TEST_CASE("a ray from space starts where it enters the volume", "[planet][volume]") {
+    const Volume volume = ground();
+    const hog::WorldPosition from{3.0 * radius, 0.0, 0.0};
+    const auto hit = hog::planet::cast_ray(volume, radius, from, hog::DVec3{-1.0, 0.0, 0.0},
+                                           4.0 * radius, solid);
+    REQUIRE(hit.has_value());
+    CHECK(std::abs(hit.value_or(hog::planet::RayHit{}).distance - (2.0 * radius)) < 0.01);
+}
+
+TEST_CASE("a ray with nothing in its way stops nowhere", "[planet][volume]") {
+    const Volume volume = ground();
+    const hog::WorldPosition from{0.0, radius + 1000.0, 0.0};
+    CHECK_FALSE(hog::planet::cast_ray(volume, radius, from, hog::DVec3{0.0, 1.0, 0.0}, 1.0e6, solid)
+                    .has_value());
+    CHECK_FALSE(
+        hog::planet::cast_ray(volume, radius, from, hog::DVec3{0.0, -1.0, 0.0}, 500.0, solid)
+            .has_value());
+    CHECK_FALSE(hog::planet::cast_ray(volume, radius, hog::WorldPosition{0.0, 3.0 * radius, 0.0},
+                                      hog::DVec3{1.0, 0.0, 0.0}, 1.0e7, solid)
+                    .has_value());
+}
+
+TEST_CASE("rays stop where small steps would first find something", "[planet][volume]") {
+    std::mt19937_64 random{37};
+    const CellId middle = hog::planet::cell_at(hog::DVec3{0.0, 0.0, 1.0}, 10);
+    Volume volume{air};
+    std::uniform_int_distribution<std::uint32_t> nearby(0, 6);
+    const auto [face, i, j, level] = middle.to_face_ij();
+    for (int n = 0; n < 60; ++n) {
+        const CellId column =
+            CellId::from_face_ij(face, i - 3 + nearby(random), j - 3 + nearby(random), level);
+        volume.set(VolumeCell::from(column, 14, 8189 + nearby(random)), rock);
+    }
+    std::uniform_real_distribution<double> lateral(-2000.0, 2000.0);
+    std::uniform_real_distribution<double> slope(-1.0, 1.0);
+    constexpr double step = 0.5;
+    constexpr double reach = 4000.0;
+    int found = 0;
+    for (int n = 0; n < 200; ++n) {
+        const hog::WorldPosition from{lateral(random), lateral(random), radius + 60.0};
+        const hog::DVec3 direction = glm::normalize(hog::DVec3{slope(random), slope(random), -0.3});
+        const auto hit = hog::planet::cast_ray(volume, radius, from, direction, reach, solid);
+        double stepped = 0.0;
+        while (stepped <= reach) {
+            const auto leaf = hog::planet::leaf_at(volume, radius, from + (direction * stepped));
+            if (leaf.has_value() && solid(leaf.value_or(Volume::Leaf{}).contents)) {
+                break;
+            }
+            stepped += step;
+        }
+        if (stepped <= reach) {
+            ++found;
+            REQUIRE(hit.has_value());
+            const double distance = hit.value_or(hog::planet::RayHit{}).distance;
+            REQUIRE(distance <= stepped);
+            REQUIRE(stepped - distance < step + 0.01);
+        }
+    }
+    CHECK(found > 20);
 }
