@@ -1,5 +1,7 @@
 #include <hog/jobs/job_system.hpp>
 #include <hog/mapgen/tectonics_render.hpp>
+#include <hog/planet/isostasy.hpp>
+#include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -67,7 +69,38 @@ TEST_CASE("a tectonics map shows the crust with the plates' edges darkened", "[m
     CHECK(edges > 0);
 }
 
-TEST_CASE("tectonics maps are named by view and step", "[mapgen]") {
-    CHECK(hog::mapgen::tectonics_file_name(hog::mapgen::PlanetView{}, 40) ==
+TEST_CASE("the sea is drawn darker the deeper, the land paler the higher", "[mapgen]") {
+    using hog::mapgen::relief_colour;
+    CHECK(brightness(relief_colour(-100.0)) > brightness(relief_colour(-4'000.0)));
+    CHECK(relief_colour(-100.0)[2] > relief_colour(-100.0)[0]);
+    CHECK(relief_colour(100.0)[1] > relief_colour(100.0)[2]);
+    CHECK(brightness(relief_colour(5'000.0)) > brightness(relief_colour(100.0)));
+}
+
+TEST_CASE("a relief map shows land above the sea and sea below it", "[mapgen]") {
+    const Tectonics tectonics{1, radius, {.level = 4, .plates = 6}};
+    const auto heights = hog::planet::crust_heights(tectonics);
+    hog::jobs::JobSystem jobs{2};
+    const auto image =
+        hog::mapgen::render_relief(tectonics, heights, 1'000 * hog::planet::fixed_one, radius,
+                                   hog::mapgen::PlanetView{}, 128, jobs);
+    REQUIRE(image.pixels.size() == std::size_t{3} * 128 * 64);
+    int land = 0;
+    int sea = 0;
+    for (int y = 0; y < image.height; ++y) {
+        for (int x = 0; x < image.width; ++x) {
+            const auto colour = image.at(x, y);
+            land += colour[1] > colour[2] ? 1 : 0;
+            sea += colour[2] > colour[1] ? 1 : 0;
+        }
+    }
+    CHECK(land > 0);
+    CHECK(sea > land);
+}
+
+TEST_CASE("evolution maps are named by view, kind and step", "[mapgen]") {
+    CHECK(hog::mapgen::evolution_file_name(hog::mapgen::PlanetView{}, "tectonics", 40) ==
           "planet-tectonics-0040.png");
+    CHECK(hog::mapgen::evolution_file_name(hog::mapgen::PlanetView{}, "relief", 5) ==
+          "planet-relief-0005.png");
 }

@@ -6,6 +6,7 @@
 #include <hog/mapgen/weather_render.hpp>
 #include <hog/mapgen/wildlife_render.hpp>
 #include <hog/planet/geology.hpp>
+#include <hog/planet/isostasy.hpp>
 #include <hog/planet/planet_config.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tectonics.hpp>
@@ -203,29 +204,53 @@ int render_seasons(const hog::mapgen::Options& options, const hog::planet::Plane
     return EXIT_SUCCESS;
 }
 
-// Moves a v2 world's plates, writing its crust every few steps and a sheet of them all.
+// Moves a v2 world's plates, writing its crust and its relief against the sea every few steps,
+// and a sheet of each.
 int render_tectonics(const hog::mapgen::Options& options, const hog::planet::PlanetConfig& config,
                      hog::jobs::JobSystem& jobs) {
-    hog::planet::Tectonics tectonics{config.seed, config.radius, {.plates = config.plates}};
-    std::vector<hog::mapgen::Image> frames;
+    hog::planet::Tectonics tectonics{
+        config.seed,
+        config.radius,
+        {.plates = config.plates,
+         .continental = hog::planet::continental_share(config.ocean_fraction)}};
+    const auto& grid = tectonics.grid();
+    const auto start = hog::planet::crust_heights(tectonics);
+    const double water = hog::planet::water_below(
+        grid, start, hog::planet::level_covering(grid, start, config.ocean_fraction));
+    std::vector<hog::mapgen::Image> crust;
+    std::vector<hog::mapgen::Image> relief;
+    const auto keep = [&](std::vector<hog::mapgen::Image>& frames, std::string_view kind, int step,
+                          hog::mapgen::Image image) {
+        const int written = write(
+            options.output / hog::mapgen::evolution_file_name(options.view, kind, step), image);
+        frames.push_back(std::move(image));
+        return written;
+    };
     for (int step = 0; step <= options.tectonics.steps; ++step) {
         if (step % options.tectonics.every == 0 || step == options.tectonics.steps) {
-            auto image = hog::mapgen::render_tectonics(tectonics, config.radius, options.view,
-                                                       options.size, jobs);
-            if (write(options.output / hog::mapgen::tectonics_file_name(options.view, step),
-                      image) != EXIT_SUCCESS) {
+            const auto heights = hog::planet::crust_heights(tectonics);
+            if (keep(crust, "tectonics", step,
+                     hog::mapgen::render_tectonics(tectonics, config.radius, options.view,
+                                                   options.size, jobs)) != EXIT_SUCCESS ||
+                keep(relief, "relief", step,
+                     hog::mapgen::render_relief(
+                         tectonics, heights, hog::planet::sea_level(grid, heights, water),
+                         config.radius, options.view, options.size, jobs)) != EXIT_SUCCESS) {
                 return EXIT_FAILURE;
             }
-            frames.push_back(std::move(image));
         }
         if (step < options.tectonics.steps) {
             tectonics.step();
         }
     }
     constexpr int columns = 4;
-    const std::string sheet = hog::mapgen::tectonics_file_name(options.view, 0);
-    return write(options.output / (sheet.substr(0, sheet.rfind('-')) + ".png"),
-                 hog::mapgen::contact_sheet(frames, columns));
+    const auto sheet = [&](std::string_view kind) {
+        const std::string first = hog::mapgen::evolution_file_name(options.view, kind, 0);
+        return options.output / (first.substr(0, first.rfind('-')) + ".png");
+    };
+    return write(sheet("tectonics"), hog::mapgen::contact_sheet(crust, columns)) == EXIT_SUCCESS
+               ? write(sheet("relief"), hog::mapgen::contact_sheet(relief, columns))
+               : EXIT_FAILURE;
 }
 
 int run(std::span<const std::string_view> arguments) {

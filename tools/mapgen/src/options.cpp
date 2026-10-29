@@ -350,8 +350,8 @@ Writes PNG maps of a generated planet, one per layer, named <view>-<layer>.png.
                        by the sun as it stands then, rather than from the north-west
   --cell-km KM         weather and wildlife grid cells at most KM across (default 6)
   --tectonics STEPS    instead of the layers, moves a v2 world's plates for STEPS steps
-                       and writes its crust every few, named <view>-tectonics-<step>.png,
-                       and a sheet of them all, <view>-tectonics.png
+                       and writes its crust and relief every few, named <view>-tectonics-<step>.png
+                       and <view>-relief-<step>.png, and a sheet of each
   --every-steps STEPS  steps between tectonics maps (default 5)
   --help               shows this
 )";

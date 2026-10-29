@@ -20,14 +20,21 @@ constexpr std::uint64_t supercontinent_salt = 0x7375'7065'7200'0000ULL; // "supe
 constexpr std::uint64_t coast_salt = 0x636F'6173'7400'0000ULL;          // "coast"
 constexpr std::uint64_t floor_salt = 0x666C'6F6F'7200'0000ULL;          // "floor"
 constexpr std::uint64_t pole_salt = 0x706F'6C65'0000'0000ULL;           // "pole"
+constexpr std::uint64_t craton_salt = 0x6372'6174'6F6E'0000ULL;         // "craton"
 // The supercontinent's coast wanders by so much of its reach either way, over features so many
 // to the planet's width.
 constexpr double coast_wander = 0.35;
 constexpr double coast_frequency = 3.0;
-// The ocean floor at the start is up to so many steps old.
-constexpr float oldest_floor = 30.0F;
+// The ocean floor at the start is up to so many steps old: about as old on the whole as it stays
+// once the plates have been moving a while, so the sea doesn't start out shallow.
+constexpr float oldest_floor = 60.0F;
 // Continents at the start are older than any step.
 constexpr float craton_age = 1'000.0F;
+// Continental crust thins toward the coast to so many kilometres, over so much of the
+// supercontinent's reach, and varies inland by so many either way.
+constexpr double margin_thickness = 24.0;
+constexpr double margin_width = 0.3;
+constexpr double craton_relief = 2.0;
 
 // A uniform double in [0, 1) from the hash's high bits.
 [[nodiscard]] double unit(std::uint64_t hash) {
@@ -104,17 +111,25 @@ Tectonics::Tectonics(std::uint64_t seed, double radius, Settings settings)
         const DVec3 at = cell_center(grid_.cell(cell));
         const double wander = fixed_to_double(
             fbm(hash_values(seed, coast_salt), noise_point(at, coast_frequency), 4));
-        const bool continental =
-            glm::dot(at, middle) >= reach + (wander * coast_wander * (1.0 - std::abs(reach)));
+        const double inland =
+            glm::dot(at, middle) - reach - (wander * coast_wander * (1.0 - std::abs(reach)));
+        const bool continental = inland >= 0.0;
+        const double settled =
+            static_cast<double>(continental_thickness) +
+            (craton_relief * fixed_to_double(fbm(hash_values(seed, craton_salt),
+                                                 noise_point(at, coast_frequency), 3)));
+        const double rise = std::min(inland / (margin_width * (1.0 - reach)), 1.0);
+        const double thickness =
+            margin_thickness + ((settled - margin_thickness) * rise * rise * (3.0 - (2.0 * rise)));
         const double floor =
             0.5 + (0.5 * fixed_to_double(fbm(hash_values(seed, floor_salt),
                                              noise_point(at, coast_frequency), 3)));
-        columns_[cell] = {.plate = start.plate()[cell],
-                          .crust = continental ? Crust::Continental : Crust::Oceanic,
-                          .thickness = continental ? continental_thickness : oceanic_thickness,
-                          .age =
-                              continental ? craton_age : static_cast<float>(floor) * oldest_floor,
-                          .raised = continental ? craton_age : 0.0F};
+        columns_[cell] = {
+            .plate = start.plate()[cell],
+            .crust = continental ? Crust::Continental : Crust::Oceanic,
+            .thickness = continental ? static_cast<float>(thickness) : oceanic_thickness,
+            .age = continental ? craton_age : static_cast<float>(floor) * oldest_floor,
+            .raised = continental ? craton_age : 0.0F};
     }
 }
 
@@ -249,8 +264,12 @@ void Tectonics::raise_arcs(const std::vector<bool>& diving) {
 }
 
 void Tectonics::spread_and_wear() {
-    // Thick crust spreads into its continental neighbours, volume for volume, so a range piled
-    // up along a single line of cells widens into a belt.
+    // Crust piled up over what it settles to spreads into its continental neighbours, volume for
+    // volume, so a range piled up along a single line of cells widens into a belt. Crust thinned
+    // under that, along a margin, holds its shape.
+    const auto piled = [&](std::uint32_t cell) {
+        return std::max(columns_[cell].thickness - continental_thickness, 0.0F);
+    };
     std::vector<float> thickness(columns_.size());
     for (std::uint32_t cell = 0; cell < grid_.size(); ++cell) {
         thickness[cell] = columns_[cell].thickness;
@@ -267,8 +286,7 @@ void Tectonics::spread_and_wear() {
             }
             const auto here = static_cast<float>(grid_.area(cell));
             const auto there = static_cast<float>(grid_.area(next));
-            const float moved = share * (columns_[cell].thickness - columns_[next].thickness) *
-                                std::min(here, there);
+            const float moved = share * (piled(cell) - piled(next)) * std::min(here, there);
             thickness[cell] -= moved / here;
             thickness[next] += moved / there;
         }

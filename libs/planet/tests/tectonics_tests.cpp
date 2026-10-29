@@ -89,6 +89,30 @@ TEST_CASE("the crust starts as one supercontinent amid ocean floor", "[planet][t
     }
 }
 
+TEST_CASE("the supercontinent thins toward its coast", "[planet][tectonics]") {
+    const Tectonics& tectonics = start();
+    const auto& grid = tectonics.grid();
+    float coast = 0.0F;
+    float inland = 0.0F;
+    int coasts = 0;
+    int inlands = 0;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const Tectonics::Column& column = tectonics.columns()[cell];
+        if (column.crust != Tectonics::Crust::Continental) {
+            continue;
+        }
+        const bool shore = std::ranges::any_of(grid.neighbors(cell), [&](std::uint32_t next) {
+            return tectonics.columns()[next].crust == Tectonics::Crust::Oceanic;
+        });
+        (shore ? coast : inland) += column.thickness;
+        ++(shore ? coasts : inlands);
+    }
+    REQUIRE(coasts > 0);
+    REQUIRE(inlands > 0);
+    CHECK(coast / static_cast<float>(coasts) < 28.0F);
+    CHECK(inland / static_cast<float>(inlands) > 30.0F);
+}
+
 TEST_CASE("plates carry their crust round their poles", "[planet][tectonics]") {
     Tectonics tectonics = start();
     // The plate carrying the most continent.
