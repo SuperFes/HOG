@@ -37,6 +37,11 @@ public:
     // Watts a square metre the star sends at the top of the air, on ground facing it.
     [[nodiscard]] double irradiance(std::size_t index, GameTime time) const;
 
+    // Metres each raises the sea where it raises it most: its set tide at its usual distance,
+    // stronger by the cube of how much nearer it stands.
+    [[nodiscard]] double star_tide(std::size_t index, GameTime time) const;
+    [[nodiscard]] double moon_tide(std::size_t index, GameTime time) const;
+
 private:
     [[nodiscard]] DVec3 planet_around_centre(GameTime time) const noexcept;
     [[nodiscard]] DVec3 turned(DVec3 ecliptic, GameTime time) const noexcept;

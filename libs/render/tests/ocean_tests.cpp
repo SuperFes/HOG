@@ -1498,17 +1498,20 @@ TEST_CASE("the sea's drawn waves carry the tide round the eye", "[render]") {
     const WorldPosition eye{glm::normalize(DVec3{0.6, 0.5, 0.4}) * (radius + 8.0)};
     const hog::terrain::Bend bend = hog::terrain::bend_from(eye, radius, 0.0);
     const hog::waves::SeaState calm{};
-    constexpr hog::GameDuration day = std::chrono::hours{4};
     for (int hour = 0; hour < 8; ++hour) {
-        const hog::GameTime time = noon + std::chrono::minutes{17 * hour};
+        const double turn = 0.3 * hour;
+        const std::array pulls{
+            hog::waves::Pull{.toward = {std::cos(turn), std::sin(turn), 0.3}, .height = 0.6},
+            hog::waves::Pull{.toward = {std::cos(1.1 * turn), -std::sin(1.1 * turn), -0.2},
+                             .height = 0.28}};
         const hog::render::DrawnWaves drawn =
-            hog::render::drawn_waves_at(trains, {}, calm, eye, bend, time, DVec3{0.0}, day);
+            hog::render::drawn_waves_at(trains, {}, calm, eye, bend, noon, DVec3{0.0}, pulls);
         CHECK_THAT(static_cast<double>(drawn.tide.w),
-                   WithinAbs(hog::waves::tide_at(bend.up, time, day), 1e-6));
+                   WithinAbs(hog::waves::tide_at(bend.up, pulls), 1e-6));
         // As it rises a kilometre off along the ground.
         const DVec3 off = glm::normalize(north - (bend.up * glm::dot(north, bend.up)));
         const double there =
-            hog::waves::tide_at(glm::normalize(bend.up + (off * (1'000.0 / radius))), time, day);
+            hog::waves::tide_at(glm::normalize(bend.up + (off * (1'000.0 / radius))), pulls);
         CHECK_THAT(static_cast<double>(drawn.tide.w) +
                        (1'000.0 * glm::dot(DVec3{hog::Vec3{drawn.tide}}, off)),
                    WithinAbs(there, 1e-3));

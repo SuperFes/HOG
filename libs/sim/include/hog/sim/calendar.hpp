@@ -20,6 +20,7 @@ public:
     Calendar(GameDuration day_length, double axial_tilt);
 
     [[nodiscard]] GameDuration day_length() const noexcept { return day_length_; }
+    [[nodiscard]] double axial_tilt() const noexcept { return axial_tilt_; } // degrees
 
     // Whole days since the Unix epoch.
     [[nodiscard]] std::int64_t day(GameTime time) const noexcept;
@@ -48,6 +49,7 @@ public:
 
 private:
     GameDuration day_length_;
+    double axial_tilt_;
     double sin_tilt_;
 };
 

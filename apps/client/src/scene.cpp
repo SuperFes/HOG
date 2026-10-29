@@ -1,6 +1,7 @@
 #include <hog/client/daylight.hpp>
 #include <hog/client/flight.hpp>
 #include <hog/client/scene.hpp>
+#include <hog/client/tides.hpp>
 #include <hog/core/hash.hpp>
 #include <hog/core/profile.hpp>
 #include <hog/planet/noise.hpp>
@@ -288,7 +289,8 @@ Scene::Scene(const render::Device& device, const planet::World& world, jobs::Job
       others_{std::move(others)}, companion_{std::move(companion)},
       atmosphere_{std::move(atmosphere)}, sky_{std::move(sky)}, weather_{std::move(weather)},
       clouds_{std::move(clouds)}, precipitation_{std::move(precipitation)},
-      glare_{std::move(glare)}, timer_{std::move(timer)}, calendar_{calendar}, budget_{budget},
+      glare_{std::move(glare)}, timer_{std::move(timer)}, calendar_{calendar},
+      ephemeris_{planet::System{}, calendar.day_length(), calendar.axial_tilt()}, budget_{budget},
       selection_{ground_selection(budget)} {}
 
 Scene::~Scene() {
@@ -790,7 +792,7 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     const std::vector<waves::Wave> waves = waves::waves_at(wave_trains_, shot.bend.up, sea_state);
     render::DrawnWaves drawn_waves =
         render::drawn_waves_at(wave_trains_, waves, sea_state, shot.camera.eye, shot.bend,
-                               shot.time, foam_drifted_, calendar_.day_length());
+                               shot.time, foam_drifted_, tide_pulls(ephemeris_, shot.time));
     drawn_waves.rain = {
         static_cast<float>(render::rain_ring_chance(falling, static_cast<double>(here.snow))),
         static_cast<float>(render::rain_ring_seconds(shot.time)), 0.0F, 0.0F};

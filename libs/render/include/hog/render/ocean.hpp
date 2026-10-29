@@ -15,6 +15,7 @@
 #include <hog/terrain/bend.hpp>
 #include <hog/terrain/shore.hpp>
 #include <hog/waves/shoaling.hpp>
+#include <hog/waves/tide.hpp>
 #include <hog/waves/waves.hpp>
 
 #include <array>
@@ -91,13 +92,13 @@ struct DrawnWaves {
 // The strongest of the waves round an eye at `eye`, bent by `bend`, at `time`, as
 // waves::strongest picks them, each as it runs under the eye; where `sea`, which raised them, is
 // white with foam, carried with the water at its surface, which has drifted `drifted` metres
-// since the epoch; and the tide round the eye on a planet whose day lasts `day`, none if none.
+// since the epoch; and the tide round the eye under `pulls`, none if none.
 // Picked with them, the waves the sea's wind raises on still water, as far as it has grown there.
 [[nodiscard]] DrawnWaves drawn_waves_at(std::span<const waves::Train> trains,
                                         std::span<const waves::Wave> waves,
                                         const waves::SeaState& sea, WorldPosition eye,
                                         const terrain::Bend& bend, GameTime time, DVec3 drifted,
-                                        GameDuration day = {});
+                                        std::span<const waves::Pull> pulls = {});
 
 // What draws over the ground at sea level read of the sea: as shaders/waves.slang's Waves and the
 // depths and fetches shaders/shore.slang reads, and the foam a FoamMap keeps.

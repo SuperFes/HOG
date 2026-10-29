@@ -10,6 +10,7 @@ add_library(hog_client
     src/bushes.cpp
     src/chat.cpp
     src/daylight.cpp
+    src/tides.cpp
     src/flight.cpp
     src/forecast.cpp
     src/frame_times.cpp
@@ -37,6 +38,7 @@ hog_target_defaults(hog_client)
 hog_add_tests(hog_client
     tests/chat_tests.cpp
     tests/daylight_tests.cpp
+    tests/tides_tests.cpp
     tests/flight_tests.cpp
     tests/forecast_tests.cpp
     tests/anchors_tests.cpp

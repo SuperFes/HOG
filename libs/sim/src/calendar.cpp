@@ -40,7 +40,7 @@ double hours_lit(double sin_latitude, double sin_declination) noexcept {
 } // namespace
 
 Calendar::Calendar(GameDuration day_length, double axial_tilt)
-    : day_length_(day_length), sin_tilt_(std::sin(axial_tilt * degree)) {
+    : day_length_(day_length), axial_tilt_(axial_tilt), sin_tilt_(std::sin(axial_tilt * degree)) {
     HOG_ASSERT(day_length.count() > 0, "a day must have a length");
     HOG_ASSERT(axial_tilt >= 0.0 && axial_tilt <= 90.0, "axial tilt out of range");
 }

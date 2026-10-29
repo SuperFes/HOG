@@ -989,6 +989,7 @@ int show(const client::Options& options, const client::GraphicsConfig& graphics,
         return EXIT_FAILURE;
     }
     scene->set_grass(options.grass);
+    scene->set_system(planet.system);
     const Result<void> flown =
         fly(*scene, clock, world, flight, *connection, options, device, presenter, window);
     // The GPU may still be drawing with the scene.

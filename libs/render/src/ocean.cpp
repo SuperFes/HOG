@@ -303,7 +303,7 @@ glm::vec4 swash_at(const Swash& swash, double turning, WorldPosition eye, GameTi
 
 DrawnWaves drawn_waves_at(std::span<const waves::Train> trains, std::span<const waves::Wave> waves,
                           const waves::SeaState& sea, WorldPosition eye, const terrain::Bend& bend,
-                          GameTime time, DVec3 drifted, GameDuration day) {
+                          GameTime time, DVec3 drifted, std::span<const waves::Pull> pulls) {
     const double wind = glm::length(sea.wind);
     const auto breaking_slope = [&](const waves::Wave& wave) {
         const waves::Train& train = trains[wave.train];
@@ -444,13 +444,13 @@ DrawnWaves drawn_waves_at(std::span<const waves::Train> trains, std::span<const 
     // Over the few kilometres seen, the tide rises evenly enough along the ground.
     constexpr double tide_step = 1'000.0;
     const auto tide_towards = [&](const DVec3& way) {
-        return (waves::tide_at(bend.up + (way * (tide_step / bend.radius)), time, day) -
-                waves::tide_at(bend.up - (way * (tide_step / bend.radius)), time, day)) /
+        return (waves::tide_at(bend.up + (way * (tide_step / bend.radius)), pulls) -
+                waves::tide_at(bend.up - (way * (tide_step / bend.radius)), pulls)) /
                (2.0 * tide_step);
     };
     drawn.tide = {
         Vec3{(frame.east * tide_towards(frame.east)) + (frame.north * tide_towards(frame.north))},
-        static_cast<float>(waves::tide_at(bend.up, time, day))};
+        static_cast<float>(waves::tide_at(bend.up, pulls))};
     drawn.run_up = run_up_at(trains, shown);
     drawn.swash_incident = swash_at(swash_incident, static_cast<double>(drawn.run_up.z), eye, time);
     drawn.swash_surging = swash_at(swash_surging, static_cast<double>(drawn.run_up.w), eye, time);

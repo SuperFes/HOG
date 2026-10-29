@@ -1,6 +1,7 @@
 #include <hog/core/assert.hpp>
 #include <hog/planet/ephemeris.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <numbers>
@@ -133,6 +134,19 @@ DVec3 Ephemeris::planet(std::size_t index, GameTime time) const {
     const DVec3 around =
         orbit_position(orbit, seconds_since_j2000(time) / year_seconds / orbit.period);
     return turned(around - planet_around_centre(time), time);
+}
+
+double Ephemeris::star_tide(std::size_t index, GameTime time) const {
+    // A star the planet orbits is usually as far as the planet's orbit; one farther out, as far
+    // as its own.
+    const Star& star = system_.stars[index];
+    const double usual = std::max(star.orbit.distance, system_.orbit.distance);
+    return star.tide * std::pow(usual / glm::length(this->star(index, time)), 3.0);
+}
+
+double Ephemeris::moon_tide(std::size_t index, GameTime time) const {
+    const Moon& moon = system_.moons[index];
+    return moon.tide * std::pow(moon.orbit.distance / glm::length(this->moon(index, time)), 3.0);
 }
 
 double Ephemeris::irradiance(std::size_t index, GameTime time) const {

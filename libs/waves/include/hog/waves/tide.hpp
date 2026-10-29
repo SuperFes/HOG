@@ -1,24 +1,25 @@
 #pragma once
 
 #include <hog/core/math.hpp>
-#include <hog/core/time.hpp>
+
+#include <span>
 
 namespace hog::waves {
 
-// The tide: the sea rising and falling twice a day as a moon and the sun draw it, on the planet's
-// own day. With the moon's tide and the sun's in step it runs high, springs; out of step, low,
-// neaps.
+// The tide: the sea drawn up under each moon and star and on the far side from it, so it rises
+// and falls twice a day; with the pulls in step it runs high, springs, and out of step low,
+// neaps. A body north or south of the equator draws one of the day's two tides higher than the
+// other.
 
-// A moon's day lasts this many of the planet's, as Earth's moon's does of Earth's: the moon falls
-// behind the sun a little each day, and springs come round about every fifteen.
-inline constexpr double lunar_day = 1.0351;
-// Metres the moon's tide and the sun's each rise above the sea's mean where they rise highest.
-inline constexpr double lunar_tide = 0.6;
-inline constexpr double solar_tide = 0.28;
+// A body raising the tide: its direction from the planet's centre, and the metres it raises the
+// sea now where it raises it most.
+struct Pull {
+    DVec3 toward{};
+    double height = 0.0;
+};
 
-// How high the tide stands above the sea's mean at `up`, a direction from the planet's centre, at
-// `time`, on a planet whose day lasts `day`. Directions are as sim::Calendar's: north is +Z and
-// longitude 0 lies along +X.
-[[nodiscard]] double tide_at(DVec3 up, GameTime time, GameDuration day) noexcept;
+// How high the tide stands above the sea's mean at `up`, a direction from the planet's centre,
+// under `pulls`. Directions are as sim::Calendar's: north is +Z and longitude 0 lies along +X.
+[[nodiscard]] double tide_at(DVec3 up, std::span<const Pull> pulls) noexcept;
 
 } // namespace hog::waves

@@ -11,6 +11,7 @@
 #include <hog/core/result.hpp>
 #include <hog/core/time.hpp>
 #include <hog/jobs/job_system.hpp>
+#include <hog/planet/ephemeris.hpp>
 #include <hog/planet/world.hpp>
 #include <hog/render/atmosphere.hpp>
 #include <hog/render/billboard.hpp>
@@ -48,6 +49,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace hog::client {
@@ -155,6 +157,12 @@ public:
     [[nodiscard]] const atmosphere::Model& air() const noexcept { return model_; }
     [[nodiscard]] const sim::Calendar& calendar() const noexcept { return calendar_; }
 
+    // The stars and moons that draw the tide, Earth's unless set.
+    void set_system(planet::System system) {
+        ephemeris_ =
+            planet::Ephemeris{std::move(system), calendar_.day_length(), calendar_.axial_tilt()};
+    }
+
 private:
     Scene(const render::Device& device, const planet::World& world, jobs::JobSystem& jobs,
           const sim::Calendar& calendar, render::Terrain terrain, render::Ocean ocean,
@@ -250,6 +258,7 @@ private:
     render::GpuTimer timer_;
     std::vector<render::GpuSpan> timings_;
     sim::Calendar calendar_;
+    planet::Ephemeris ephemeris_;
     GrassBudget budget_;
     terrain::SelectionSettings selection_;
     std::optional<double> exposure_;

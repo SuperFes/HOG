@@ -164,3 +164,22 @@ TEST_CASE("a star's colour follows how hot it is, the Sun's white", "[planet][ep
     CHECK(blue.b > blue.g);
     CHECK(blue.g > blue.r);
 }
+
+TEST_CASE("a body raises the tide more the nearer it stands", "[planet][ephemeris]") {
+    const Ephemeris ephemeris = earths();
+    double weakest = 1.0;
+    double strongest = 0.0;
+    for (int day = 0; day < 60; ++day) {
+        const double moon = ephemeris.moon_tide(0, at(2026y / March / 1) + (day * four_hours));
+        weakest = std::min(weakest, moon);
+        strongest = std::max(strongest, moon);
+    }
+    // The Moon comes 11 per cent nearer at perigee than at apogee, so its tide a third stronger.
+    CHECK_THAT(weakest, WithinRel(0.6 / std::pow(1.0549, 3.0), 0.01));
+    CHECK_THAT(strongest, WithinRel(0.6 / std::pow(0.9451, 3.0), 0.01));
+
+    // The Sun is nearest in January.
+    CHECK(ephemeris.star_tide(0, at(2026y / January / 3)) >
+          ephemeris.star_tide(0, at(2026y / July / 6)));
+    CHECK_THAT(ephemeris.star_tide(0, at(2026y / April / 4)), WithinRel(0.28, 0.01));
+}
