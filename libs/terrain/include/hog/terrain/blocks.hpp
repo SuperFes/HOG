@@ -63,16 +63,22 @@ inline constexpr double overview_shell = 250.0; // metres
 // The same for the whole planet, as seen from far off, from its centre.
 [[nodiscard]] BlockMesh planet_blocks(const planet::World& world, double radius);
 
+// From this high over the planet's radius, the ground round the eye is too small to see, so the
+// whole planet is shown instead.
+inline constexpr double overview_height = 10.0 * block_reach; // metres
+
 // Fills the ground in as blocks round the eye in the background on the pool, anew whenever the eye
-// has gone block_relay from where it was last filled round, for the thread that made it. One is in
+// has gone block_relay from where it was last filled round, or the whole planet once the eye is
+// overview_height up, for the thread that made it. One is in
 // flight at a time; the world must outlive it, unchanged while one is.
 class BlockStream {
 public:
     BlockStream(const planet::World& world, double radius, jobs::JobSystem& jobs) noexcept
         : world_(&world), jobs_(&jobs), radius_(radius) {}
 
-    // Wants the blocks round the unit direction `eye`.
-    void follow(DVec3 eye);
+    // Wants the blocks round the unit direction `eye`, seen from `height` metres over the planet's
+    // radius.
+    void follow(DVec3 eye, double height);
     [[nodiscard]] bool in_flight() const noexcept { return working_ != nullptr; }
     // The blocks filled in since the last call, if any.
     [[nodiscard]] std::optional<BlockMesh> collect();
@@ -80,13 +86,20 @@ public:
     [[nodiscard]] std::optional<BlockMesh> finish();
 
 private:
-    void start(DVec3 around);
+    struct Wanted {
+        DVec3 around;
+        bool whole = false;
+
+        friend bool operator==(const Wanted&, const Wanted&) = default;
+    };
+
+    void start(Wanted wanted);
 
     const planet::World* world_;
     jobs::JobSystem* jobs_;
     double radius_;
-    std::optional<DVec3> wanted_;
-    std::optional<DVec3> started_;
+    std::optional<Wanted> wanted_;
+    std::optional<Wanted> started_;
     std::unique_ptr<jobs::Async<BlockMesh>> working_;
 };
 

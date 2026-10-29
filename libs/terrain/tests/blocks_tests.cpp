@@ -267,13 +267,31 @@ TEST_CASE("blocks follow the eye in the background", "[terrain][blocks]") {
     hog::jobs::JobSystem jobs{2};
     hog::terrain::BlockStream stream{hog::terrain::testing::shared_world(),
                                      hog::terrain::testing::planet.radius, jobs};
-    stream.follow(on_land());
+    stream.follow(on_land(), 2.0);
     CHECK(stream.in_flight());
     const auto finished = stream.finish();
     REQUIRE(finished.has_value());
     CHECK_FALSE(finished.value_or(BlockMesh{}).indices.empty());
     CHECK_FALSE(stream.in_flight());
     // Not far enough to fill in anew.
-    stream.follow(on_land());
+    stream.follow(on_land(), 2.0);
     CHECK_FALSE(stream.in_flight());
+}
+
+TEST_CASE("blocks show the whole planet once the eye is high enough", "[terrain][blocks]") {
+    hog::jobs::JobSystem jobs{2};
+    const double planet_radius = hog::terrain::testing::planet.radius;
+    hog::terrain::BlockStream stream{hog::terrain::testing::shared_world(), planet_radius, jobs};
+    stream.follow(on_land(), hog::terrain::overview_height);
+    const auto whole = stream.finish();
+    REQUIRE(whole.has_value());
+    CHECK(whole.value_or(BlockMesh{}).origin.metres() == hog::DVec3{0.0});
+    // Wherever the eye goes up there, the planet is the same.
+    stream.follow(-on_land(), 2.0 * hog::terrain::overview_height);
+    CHECK_FALSE(stream.in_flight());
+    // Back down, the ground round the eye.
+    stream.follow(on_land(), hog::terrain::overview_height / 2.0);
+    const auto near = stream.finish();
+    REQUIRE(near.has_value());
+    CHECK(near.value_or(BlockMesh{}).origin.metres() != hog::DVec3{0.0});
 }

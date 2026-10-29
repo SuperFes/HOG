@@ -273,20 +273,23 @@ BlockMesh planet_blocks(const planet::World& world, double radius) {
                        shell_level_for(overview_shell), 4.0 * radius, WorldPosition{});
 }
 
-void BlockStream::follow(DVec3 eye) {
-    if (!wanted_ || glm::length(eye - *wanted_) * radius_ > block_relay) {
-        wanted_ = eye;
+void BlockStream::follow(DVec3 eye, double height) {
+    const bool whole = height >= overview_height;
+    if (!wanted_ || wanted_->whole != whole ||
+        (!whole && glm::length(eye - wanted_->around) * radius_ > block_relay)) {
+        wanted_ = Wanted{.around = eye, .whole = whole};
     }
     if (!working_ && wanted_ != started_) {
         start(*wanted_);
     }
 }
 
-void BlockStream::start(DVec3 around) {
-    started_ = around;
+void BlockStream::start(Wanted wanted) {
+    started_ = wanted;
     working_ = std::make_unique<jobs::Async<BlockMesh>>(
-        *jobs_, [world = world_, around, radius = radius_] {
-            return ground_blocks(*world, around, radius);
+        *jobs_, [world = world_, wanted, radius = radius_] {
+            return wanted.whole ? planet_blocks(*world, radius)
+                                : ground_blocks(*world, wanted.around, radius);
         });
 }
 

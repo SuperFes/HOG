@@ -444,7 +444,9 @@ void Scene::follow_shore(const Shot& shot) {
         rivers_->show(std::make_shared<const terrain::RiverWater>(std::move(water).value()));
     }
     if (blocks_on_) {
-        block_stream_.follow(glm::normalize(shot.camera.eye.metres()));
+        block_stream_.follow(glm::normalize(shot.camera.eye.metres()),
+                             glm::length(shot.camera.eye.metres()) -
+                                 world_->geology().planet_radius());
     }
     if (auto mesh = block_stream_.collect(); mesh && blocks_) {
         blocks_->show(std::make_shared<const terrain::BlockMesh>(std::move(mesh).value()));
