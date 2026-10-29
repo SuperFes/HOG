@@ -68,71 +68,100 @@ void remove_crust(Lithosphere::Plate& plate, std::vector<std::size_t> held) {
     plate.crust.resize(kept);
 }
 
-// The cells next to the plate's crust at `index` on its own grid that carry continent thinner
-// than it, as indices into its cells; says how many.
-std::size_t thinner_continent(const Lithosphere::Plate& plate, const LevelGrid& grid,
-                              std::size_t index, std::array<std::size_t, 8>& lower) {
-    std::size_t count = 0;
-    for (const std::uint32_t next : grid.neighbors(plate.cells[index])) {
-        const auto found = std::ranges::lower_bound(plate.cells, next);
-        if (found == plate.cells.end() || *found != next || count == lower.size()) {
-            continue;
-        }
-        const auto at = static_cast<std::size_t>(std::distance(plate.cells.begin(), found));
-        if (plate.crust[at].type == CrustType::Continental &&
-            plate.crust[at].thickness < plate.crust[index].thickness) {
-            lower.at(count++) = at;
+// Each cell of continent next to the plate's crust at `cells` on its own grid not yet marked
+// `mark`, as indices into its cells, now marked.
+std::vector<std::size_t> continent_around(const Lithosphere::Plate& plate, const LevelGrid& grid,
+                                          std::span<const std::size_t> cells,
+                                          std::vector<std::size_t>& marks, std::size_t mark) {
+    std::vector<std::size_t> around;
+    for (const std::size_t index : cells) {
+        for (const std::uint32_t next : grid.neighbors(plate.cells[index])) {
+            const auto found = std::ranges::lower_bound(plate.cells, next);
+            if (found == plate.cells.end() || *found != next) {
+                continue;
+            }
+            const auto at = static_cast<std::size_t>(std::distance(plate.cells.begin(), found));
+            if (marks[at] != mark && plate.crust[at].type == CrustType::Continental) {
+                marks[at] = mark;
+                around.push_back(at);
+            }
         }
     }
-    return count;
+    return around;
+}
+
+// Raises the plate's continent at `ring` toward `strongest` kilometres, all by the same share of
+// its room, with up to `excess` kilometres deep over square metres; says how much it took.
+double fill(Lithosphere::Plate& plate, const LevelGrid& grid, std::span<const std::size_t> ring,
+            double excess, float strongest) {
+    const auto most = static_cast<double>(strongest);
+    double space = 0.0;
+    for (const std::size_t index : ring) {
+        space += (most - static_cast<double>(plate.crust[index].thickness)) *
+                 static_cast<double>(grid.area(plate.cells[index]));
+    }
+    const double filled = space > excess ? excess / space : 1.0;
+    for (const std::size_t index : ring) {
+        Crust& crust = plate.crust[index];
+        crust.thickness +=
+            static_cast<float>(filled * (most - static_cast<double>(crust.thickness)));
+    }
+    return std::min(space, excess);
 }
 
 // Continental crust over `strongest` kilometres sheds what it can't hold up into the plate's
-// thinner continent around it, volume for volume, and that passes on what then overloads it.
-void collapse(Lithosphere::Plate& plate, const LevelGrid& grid, float strongest) {
-    constexpr int most_passes = 256;
+// nearest continent with room for it, volume for volume, filling that up to `strongest` a ring of
+// cells at a time out from it. What finds no room, as along an arc between ocean floor, founders
+// into the mantle; says how much, in kilometres deep over square metres.
+double collapse(Lithosphere::Plate& plate, const LevelGrid& grid, float strongest) {
     const auto over = [&](std::size_t index) {
         return plate.crust[index].type == CrustType::Continental &&
                plate.crust[index].thickness > strongest;
     };
-    std::vector<std::size_t> loaded;
-    for (std::size_t index = 0; index < plate.crust.size(); ++index) {
-        if (over(index)) {
-            loaded.push_back(index);
+    const auto area = [&](std::size_t index) {
+        return static_cast<double>(grid.area(plate.cells[index]));
+    };
+    const auto most = static_cast<double>(strongest);
+    // Each cell marked with the overloaded crust it was last reached from, plus one.
+    std::vector<std::size_t> marks(plate.crust.size(), 0);
+    std::vector<bool> held(plate.crust.size(), false);
+    double foundered = 0.0;
+    for (std::size_t first = 0; first < plate.crust.size(); ++first) {
+        if (held[first] || !over(first)) {
+            continue;
         }
+        const std::size_t mark = first + 1;
+        marks[first] = mark;
+        // All the overloaded crust joined to it, held up to `strongest`, and what it held over.
+        double excess = 0.0;
+        std::vector<std::size_t> ring{first};
+        std::vector<std::size_t> room;
+        while (!ring.empty()) {
+            for (const std::size_t index : ring) {
+                Crust& crust = plate.crust[index];
+                excess += (static_cast<double>(crust.thickness) - most) * area(index);
+                crust.thickness = strongest;
+                held[index] = true;
+            }
+            const std::vector<std::size_t> around =
+                continent_around(plate, grid, ring, marks, mark);
+            ring.clear();
+            for (const std::size_t index : around) {
+                (over(index) ? ring : room).push_back(index);
+            }
+        }
+        // Overloaded crust further out sheds on its own.
+        const auto with_room = [&](std::vector<std::size_t> cells) {
+            std::erase_if(cells, over);
+            return cells;
+        };
+        for (ring = std::move(room); excess > 0.0 && !ring.empty();
+             ring = with_room(continent_around(plate, grid, ring, marks, mark))) {
+            excess -= fill(plate, grid, ring, excess, strongest);
+        }
+        foundered += excess;
     }
-    std::vector<float> flowed(plate.crust.size(), 0.0F);
-    for (int pass = 0; pass < most_passes && !loaded.empty(); ++pass) {
-        std::vector<std::size_t> reached;
-        for (const std::size_t index : loaded) {
-            std::array<std::size_t, 8> lower{};
-            const std::size_t count = thinner_continent(plate, grid, index, lower);
-            if (count == 0) {
-                continue;
-            }
-            const auto here = static_cast<float>(grid.area(plate.cells[index]));
-            const float excess = plate.crust[index].thickness - strongest;
-            flowed[index] -= excess;
-            reached.push_back(index);
-            const float each = excess * here / static_cast<float>(count);
-            for (std::size_t next = 0; next < count; ++next) {
-                const std::size_t to = lower.at(next);
-                flowed[to] += each / static_cast<float>(grid.area(plate.cells[to]));
-                reached.push_back(to);
-            }
-        }
-        std::ranges::sort(reached);
-        const auto [last, end] = std::ranges::unique(reached);
-        reached.erase(last, end);
-        loaded.clear();
-        for (const std::size_t index : reached) {
-            plate.crust[index].thickness += flowed[index];
-            flowed[index] = 0.0F;
-            if (over(index)) {
-                loaded.push_back(index);
-            }
-        }
-    }
+    return foundered;
 }
 
 // Moves what continental crust has piled over `settled` kilometres into the plate's continent
@@ -548,7 +577,7 @@ void Lithosphere::collide(double years, Ranges ranges) {
     }
     for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
         remove_crust(plates_[plate], std::move(scraped[plate]));
-        collapse(plates_[plate], grid_, ranges.strongest);
+        foundered_ += collapse(plates_[plate], grid_, ranges.strongest) * 1e-6;
         flow(plates_[plate], grid_, settled_continent,
              std::min(static_cast<float>(years) * ranges.flow, 1.0F));
     }

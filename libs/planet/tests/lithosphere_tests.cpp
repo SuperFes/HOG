@@ -519,6 +519,26 @@ TEST_CASE("crust piled too thick flows out into the thinner continent around it"
     CHECK(thickest(lithosphere) > continent.thickness);
 }
 
+TEST_CASE("crust too thick with nowhere thinner to flow founders into the mantle",
+          "[planet][lithosphere]") {
+    // A thick arc of continent around the pole, with only ocean floor around it.
+    const LevelGrid grid{4, radius};
+    Lithosphere::Plate plate = everywhere(grid, Crust{}, DVec3{0.0, 0.0, 1.0}, 0.0);
+    for (std::size_t index = 0; index < plate.cells.size(); ++index) {
+        if (hog::planet::cell_center(grid.cell(plate.cells[index])).z > 0.95) {
+            plate.crust[index] = continent;
+            plate.crust[index].thickness = 90.0F;
+        }
+    }
+    Lithosphere lithosphere{grid, {plate}};
+    const double volume = continental_volume(lithosphere);
+    const hog::planet::Ranges ranges;
+    lithosphere.collide(10.0, ranges);
+    CHECK(thickest(lithosphere) == ranges.strongest);
+    CHECK_THAT(lithosphere.foundered(),
+               WithinRel(volume * (90.0 - static_cast<double>(ranges.strongest)) / 90.0, 1e-6));
+}
+
 TEST_CASE("a range spreads into the continent around it", "[planet][lithosphere]") {
     const LevelGrid grid{4, radius};
     Lithosphere::Plate plate = everywhere(grid, continent, DVec3{0.0, 0.0, 1.0}, 0.0);
@@ -555,7 +575,8 @@ TEST_CASE("ocean floor never piles up", "[planet][lithosphere]") {
     }
 }
 
-TEST_CASE("no continent is lost as plates part and meet", "[planet][lithosphere]") {
+TEST_CASE("no continent is lost as plates part and meet but what founders",
+          "[planet][lithosphere]") {
     Lithosphere lithosphere = hog::planet::lithosphere_from(start(), step_years);
     const double volume = continental_volume(lithosphere);
     for (int step = 0; step < 10; ++step) {
@@ -565,7 +586,7 @@ TEST_CASE("no continent is lost as plates part and meet", "[planet][lithosphere]
         lithosphere.collide(step_years);
         lithosphere.spread();
     }
-    CHECK_THAT(continental_volume(lithosphere), WithinRel(volume, 0.01));
+    CHECK_THAT(continental_volume(lithosphere) + lithosphere.foundered(), WithinRel(volume, 0.01));
 }
 
 TEST_CASE("a plate carries each place round its pole", "[planet][lithosphere]") {

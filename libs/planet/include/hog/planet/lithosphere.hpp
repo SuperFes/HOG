@@ -39,9 +39,10 @@ struct Arcs {
 };
 
 // How continental crust piled up into ranges bears its own weight: past `strongest` kilometres
-// it flows out at once into the thinner continent around it, and short of that, what's piled over
-// a continent's settled thickness spreads into it by `flow` of the difference every million
-// years, so a range piled up along a line widens into a belt.
+// it flows out at once into the thinner continent around it, or where there's none, as along an
+// arc, its dense root founders into the mantle; short of that, what's piled over a continent's
+// settled thickness spreads into it by `flow` of the difference every million years, so a range
+// piled up along a line widens into a belt.
 struct Ranges {
     float strongest = 65.0F;
     float flow = 0.02F;
@@ -173,6 +174,8 @@ public:
     // How warm the mantle is under each place of the grid, from nought, as under ocean floor, to
     // one, as under a continent that has lain there for good.
     [[nodiscard]] std::span<const float> heat() const noexcept { return heat_; }
+    // Cubic kilometres of continental crust foundered into the mantle so far.
+    [[nodiscard]] double foundered() const noexcept { return foundered_; }
 
     // A unit direction in a plate's own frame as it lies now in the planet's, and back.
     [[nodiscard]] DVec3 to_planet(std::uint32_t plate, DVec3 own) const;
@@ -223,6 +226,7 @@ private:
     // Of the turn the forces give a plate against unit drag, the share it takes; none until the
     // plates are first driven.
     double pace_ = 0.0;
+    double foundered_ = 0.0;
 };
 
 // The plates and crust of `tectonics` as they stand, each plate's frame the planet's, with one of
