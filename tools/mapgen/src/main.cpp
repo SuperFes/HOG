@@ -270,6 +270,7 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
             timer.time("tectonics", [&] { tectonics.step(); });
             timer.time("plates", [&] {
                 lithosphere.advance(step_years);
+                lithosphere.subduct(step_years);
                 lithosphere.spread();
             });
         }

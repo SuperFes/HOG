@@ -3,6 +3,7 @@
 #include <hog/core/math.hpp>
 #include <hog/planet/level_grid.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -29,6 +30,13 @@ struct Crust {
 // Of two crusts over one place, whether `one` stays on top of `other`: continents float over ocean
 // floor, young warm floor over old cold floor, and the thicker of two continents over the thinner.
 [[nodiscard]] bool stays_over(const Crust& one, const Crust& other) noexcept;
+
+// How ocean floor diving under a plate thickens it: out from the trench across the plate over
+// it, over so many places of the grid, by so many kilometres every million years.
+struct Arcs {
+    int reach = 3;
+    float growth = 0.06F;
+};
 
 // The crust as rigid plates on the sphere, each keeping its crust on a grid in its own frame and
 // turning about its own pole. Crust is never carried from cell to cell, so a plate stays whole
@@ -60,6 +68,12 @@ public:
     // Fills every place the plates have parted with new ocean floor, joined to the plate whose
     // crust is nearest across the gap, so the ridge runs down the gap's middle.
     void spread();
+    // Ocean floor lying under another plate's crust dives into the mantle and is gone, and the
+    // plate over it thickens into an arc behind the trench.
+    void subduct(double years, Arcs arcs = {});
+
+    // Ocean floor an arc thickens this far floats as continent.
+    static constexpr float arc_continent = 20.0F;
 
     [[nodiscard]] const LevelGrid& grid() const noexcept { return grid_; }
     [[nodiscard]] std::span<const Plate> plates() const noexcept { return plates_; }
@@ -77,6 +91,17 @@ public:
     [[nodiscard]] std::optional<Found> top(DVec3 at) const;
 
 private:
+    // Where in a plate's cells is the crust it carries over a unit direction, if it has any.
+    [[nodiscard]] std::optional<std::size_t> held(std::uint32_t plate, DVec3 at) const;
+    // Of each two plates' ocean floor where they meet, whether the first's stays on top, one
+    // flag to each pair in a row per plate.
+    [[nodiscard]] std::vector<bool> overriding() const;
+    // Whether another plate's crust lies over a plate's ocean floor at a unit direction.
+    [[nodiscard]] bool beneath(std::uint32_t plate, DVec3 at,
+                               const std::vector<bool>& overrides) const;
+    // Thickens the plate on top out from each of the `trenches`, places of the grid.
+    void raise_arcs(std::span<const std::uint32_t> trenches, double years, Arcs arcs);
+
     LevelGrid grid_;
     std::vector<Plate> plates_;
     double time_ = 0.0;

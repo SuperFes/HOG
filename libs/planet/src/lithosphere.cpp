@@ -9,6 +9,7 @@
 #include <iterator>
 #include <limits>
 #include <optional>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -42,6 +43,24 @@ void add_crust(Lithosphere::Plate& plate, std::vector<std::uint32_t> cells, Crus
                    plate.crust.end());
     plate.cells = std::move(merged);
     plate.crust = std::move(carried);
+}
+
+// Drops the crust at each of `held`, indices into the plate's cells.
+void remove_crust(Lithosphere::Plate& plate, std::vector<std::size_t> held) {
+    std::ranges::sort(held);
+    std::size_t kept = 0;
+    std::size_t next = 0;
+    for (std::size_t index = 0; index < plate.cells.size(); ++index) {
+        if (next < held.size() && held[next] == index) {
+            ++next;
+            continue;
+        }
+        plate.cells[kept] = plate.cells[index];
+        plate.crust[kept] = plate.crust[index];
+        ++kept;
+    }
+    plate.cells.resize(kept);
+    plate.crust.resize(kept);
 }
 
 } // namespace
@@ -124,14 +143,136 @@ DVec3 Lithosphere::to_plate(std::uint32_t plate, DVec3 at) const {
     return glm::conjugate(plates_[plate].frame) * at;
 }
 
-std::optional<Crust> Lithosphere::crust_of(std::uint32_t plate, DVec3 at) const {
+std::optional<std::size_t> Lithosphere::held(std::uint32_t plate, DVec3 at) const {
     const Plate& carrier = plates_[plate];
     const std::uint32_t cell = grid_.index(cell_at(to_plate(plate, at), grid_.level()));
     const auto found = std::ranges::lower_bound(carrier.cells, cell);
     if (found == carrier.cells.end() || *found != cell) {
         return std::nullopt;
     }
-    return carrier.crust[static_cast<std::size_t>(std::distance(carrier.cells.begin(), found))];
+    return static_cast<std::size_t>(std::distance(carrier.cells.begin(), found));
+}
+
+std::optional<Crust> Lithosphere::crust_of(std::uint32_t plate, DVec3 at) const {
+    const std::optional<std::size_t> index = held(plate, at);
+    if (!index) {
+        return std::nullopt;
+    }
+    return plates_[plate].crust[*index];
+}
+
+std::vector<bool> Lithosphere::overriding() const {
+    // Where two plates' floor meets, the older and colder of it dives all along the edge, not
+    // place by place, so ages varying across a plate don't hole both. Each place they overlap
+    // votes; ties go to the lower plate.
+    const std::size_t count = plates_.size();
+    std::vector<int> votes(count * count, 0);
+    std::vector<std::pair<std::uint32_t, Crust>> here;
+    for (std::uint32_t place = 0; place < grid_.size(); ++place) {
+        const DVec3 at = cell_center(grid_.cell(place));
+        here.clear();
+        for (std::uint32_t plate = 0; plate < count; ++plate) {
+            const std::optional<Crust> crust = crust_of(plate, at);
+            if (crust && crust->type == CrustType::Oceanic) {
+                here.emplace_back(plate, *crust);
+            }
+        }
+        for (std::size_t one = 0; one < here.size(); ++one) {
+            for (std::size_t other = one + 1; other < here.size(); ++other) {
+                const auto& [lower, lower_crust] = here[one];
+                const auto& [upper, upper_crust] = here[other];
+                votes[(lower * count) + upper] += stays_over(upper_crust, lower_crust) ? -1 : 1;
+            }
+        }
+    }
+    std::vector<bool> overrides(count * count, false);
+    for (std::size_t lower = 0; lower < count; ++lower) {
+        for (std::size_t upper = lower + 1; upper < count; ++upper) {
+            const bool lower_stays = votes[(lower * count) + upper] >= 0;
+            overrides[(lower * count) + upper] = lower_stays;
+            overrides[(upper * count) + lower] = !lower_stays;
+        }
+    }
+    return overrides;
+}
+
+bool Lithosphere::beneath(std::uint32_t plate, DVec3 at, const std::vector<bool>& overrides) const {
+    for (std::uint32_t other = 0; other < plates_.size(); ++other) {
+        if (other == plate) {
+            continue;
+        }
+        const std::optional<Crust> over = crust_of(other, at);
+        if (over && (over->type == CrustType::Continental ||
+                     overrides[(static_cast<std::size_t>(other) * plates_.size()) + plate])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void Lithosphere::subduct(double years, Arcs arcs) {
+    // A cell of ocean floor dives once its middle lies under another plate; the rest of it, if
+    // any, leaves a sliver for new floor to fill.
+    const std::vector<bool> overrides = overriding();
+    std::vector<std::vector<std::size_t>> diving(plates_.size());
+    std::vector<std::uint32_t> trenches;
+    for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
+        const Plate& carrier = plates_[plate];
+        for (std::size_t index = 0; index < carrier.cells.size(); ++index) {
+            const Crust& crust = carrier.crust[index];
+            const DVec3 at = to_planet(plate, cell_center(grid_.cell(carrier.cells[index])));
+            if (crust.type == CrustType::Oceanic && beneath(plate, at, overrides)) {
+                diving[plate].push_back(index);
+                trenches.push_back(grid_.index(cell_at(at, grid_.level())));
+            }
+        }
+    }
+    for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
+        remove_crust(plates_[plate], std::move(diving[plate]));
+    }
+    raise_arcs(trenches, years, arcs);
+}
+
+void Lithosphere::raise_arcs(std::span<const std::uint32_t> trenches, double years, Arcs arcs) {
+    // Out from each trench, a ring of places at a time, while the same plate stays on top.
+    std::vector<std::uint32_t> over(grid_.size(), parted);
+    std::vector<std::uint32_t> frontier;
+    for (const std::uint32_t place : trenches) {
+        const std::optional<Found> found = top(cell_center(grid_.cell(place)));
+        if (found && over[place] == parted) {
+            over[place] = found->plate;
+            frontier.push_back(place);
+        }
+    }
+    std::vector<std::pair<std::uint32_t, std::size_t>> raised;
+    for (int out = 1; out <= arcs.reach && !frontier.empty(); ++out) {
+        std::vector<std::uint32_t> further;
+        for (const std::uint32_t place : frontier) {
+            for (const std::uint32_t next : grid_.neighbors(place)) {
+                const DVec3 at = cell_center(grid_.cell(next));
+                const std::optional<Found> found = top(at);
+                if (over[next] != parted || !found || found->plate != over[place]) {
+                    continue;
+                }
+                over[next] = over[place];
+                raised.emplace_back(over[place], held(over[place], at).value_or(0));
+                further.push_back(next);
+            }
+        }
+        frontier = std::move(further);
+    }
+    std::ranges::sort(raised);
+    const auto [last, end] = std::ranges::unique(raised);
+    raised.erase(last, end);
+    const auto thicker = static_cast<float>(years) * arcs.growth;
+    for (const auto& [plate, index] : raised) {
+        Crust& crust = plates_[plate].crust[index];
+        crust.thickness += thicker;
+        crust.raised = 0.0F;
+        if (crust.type == CrustType::Oceanic && crust.thickness >= arc_continent) {
+            crust.type = CrustType::Continental;
+        }
+    }
 }
 
 std::optional<Lithosphere::Found> Lithosphere::top(DVec3 at) const {

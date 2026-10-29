@@ -275,6 +275,164 @@ TEST_CASE("spreading leaves no place of the grid without crust", "[planet][litho
 
 namespace {
 
+// Places of the grid where more than one plate carries crust.
+int overlapping(const Lithosphere& lithosphere) {
+    const auto& grid = lithosphere.grid();
+    int places = 0;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const DVec3 at = hog::planet::cell_center(grid.cell(cell));
+        int carrying = 0;
+        for (std::uint32_t plate = 0; plate < lithosphere.plates().size(); ++plate) {
+            carrying += lithosphere.crust_of(plate, at) ? 1 : 0;
+        }
+        places += carrying > 1 ? 1 : 0;
+    }
+    return places;
+}
+
+} // namespace
+
+TEST_CASE("ocean floor under another plate dives and the plate over it rises into an arc",
+          "[planet][lithosphere]") {
+    Lithosphere lithosphere = halves();
+    constexpr double years = 20.0;
+    lithosphere.advance(years);
+    const Lithosphere moved = lithosphere;
+    const int met = overlapping(moved);
+    REQUIRE(met > 0);
+    lithosphere.subduct(years);
+
+    // Floor of the same age on both: the lower plate stays on top, and the other's dives.
+    const auto& grid = lithosphere.grid();
+    const DVec3 meeting =
+        hog::planet::cell_center(hog::planet::cell_at(DVec3{0.0, -1.0, 0.0}, grid.level()));
+    CHECK(lithosphere.crust_of(0, meeting).has_value());
+    CHECK_FALSE(lithosphere.crust_of(1, meeting).has_value());
+    CHECK(overlapping(lithosphere) < met / 5);
+    CHECK(lithosphere.plates()[1].cells.size() < moved.plates()[1].cells.size());
+    CHECK(lithosphere.plates()[0].cells.size() == moved.plates()[0].cells.size());
+
+    // Behind the trench, and only there, the plate on top is thicker by the arc's growth.
+    const hog::planet::Arcs arcs{};
+    std::vector<DVec3> dove;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const DVec3 at = hog::planet::cell_center(grid.cell(cell));
+        if (moved.crust_of(1, at) && !lithosphere.crust_of(1, at)) {
+            dove.push_back(at);
+        }
+    }
+    const double place_angle = std::sqrt(4.0 * std::numbers::pi / static_cast<double>(grid.size()));
+    // Rings of places taken by their corners reach up to a diagonal's length out.
+    const auto near_trench = [&](DVec3 at) {
+        return std::ranges::any_of(dove, [&](DVec3 trench) {
+            return std::acos(std::min(glm::dot(at, trench), 1.0)) <
+                   (arcs.reach + 1) * place_angle * std::numbers::sqrt2;
+        });
+    };
+    int raised = 0;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const DVec3 at = hog::planet::cell_center(grid.cell(cell));
+        const auto found = lithosphere.top(at);
+        if (!found) {
+            continue;
+        }
+        const Crust crust = found.value_or(Lithosphere::Found{}).crust;
+        if (crust.thickness == Crust{}.thickness) {
+            continue;
+        }
+        ++raised;
+        CHECK(found.value_or(Lithosphere::Found{}).plate == 0);
+        CHECK(near_trench(at));
+        CHECK_THAT(crust.thickness, WithinAbs(static_cast<double>(Crust{}.thickness) +
+                                                  (years * static_cast<double>(arcs.growth)),
+                                              1e-4));
+        CHECK(crust.raised == 0.0F);
+        CHECK(crust.type == CrustType::Oceanic);
+    }
+    CHECK(raised > 0);
+}
+
+TEST_CASE("the older plate's floor dives all along where they meet, however its age varies",
+          "[planet][lithosphere]") {
+    Lithosphere lithosphere = halves();
+    std::vector<Lithosphere::Plate> plates{lithosphere.plates().begin(),
+                                           lithosphere.plates().end()};
+    for (Crust& crust : plates[0].crust) {
+        crust.age = 50.0F;
+    }
+    // Older on the whole, but younger than the other at one place in four.
+    for (std::size_t index = 0; index < plates[1].crust.size(); ++index) {
+        plates[1].crust[index].age = index % 4 == 0 ? 40.0F : 70.0F;
+    }
+    lithosphere = Lithosphere{lithosphere.grid(), plates};
+    constexpr double years = 20.0;
+    lithosphere.advance(years);
+    const Lithosphere moved = lithosphere;
+    lithosphere.subduct(years);
+    CHECK(lithosphere.plates()[0].cells.size() == moved.plates()[0].cells.size());
+    CHECK(lithosphere.plates()[1].cells.size() < moved.plates()[1].cells.size());
+}
+
+TEST_CASE("ocean floor an arc thickens enough floats as continent", "[planet][lithosphere]") {
+    Lithosphere lithosphere = halves();
+    constexpr double years = 20.0;
+    lithosphere.advance(years);
+    lithosphere.subduct(years, {.reach = 2, .growth = 1.0F});
+    const auto& grid = lithosphere.grid();
+    int continental = 0;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const Crust crust = lithosphere.top(hog::planet::cell_center(grid.cell(cell)))
+                                .value_or(Lithosphere::Found{})
+                                .crust;
+        if (crust.thickness >= Lithosphere::arc_continent) {
+            ++continental;
+            CHECK(crust.type == CrustType::Continental);
+        }
+    }
+    CHECK(continental > 0);
+}
+
+TEST_CASE("plates that part and meet keep ocean floor only on top", "[planet][lithosphere]") {
+    Lithosphere lithosphere = hog::planet::lithosphere_from(start(), step_years);
+    const auto& grid = lithosphere.grid();
+    // Places of the grid with no crust, and with ocean floor under another plate's crust.
+    struct Count {
+        int bare = 0;
+        int under = 0;
+    };
+    const auto count = [&] {
+        Count counted;
+        for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+            const DVec3 at = hog::planet::cell_center(grid.cell(cell));
+            const auto found = lithosphere.top(at);
+            counted.bare += found ? 0 : 1;
+            for (std::uint32_t plate = 0; plate < lithosphere.plates().size(); ++plate) {
+                const auto crust = lithosphere.crust_of(plate, at);
+                if (found && plate != found->plate && crust && crust->type == CrustType::Oceanic) {
+                    ++counted.under;
+                    break;
+                }
+            }
+        }
+        return counted;
+    };
+    for (int step = 0; step < 10; ++step) {
+        lithosphere.advance(step_years);
+        const Count moved = count();
+        lithosphere.subduct(step_years);
+        lithosphere.spread();
+        const Count settled = count();
+        CAPTURE(step, moved.under, settled.under);
+        CHECK(settled.bare == 0);
+        // Left only along edges, by cells whose middles aren't under yet, and by new floor
+        // reaching over a gap's edge; never piling up.
+        CHECK(settled.under < moved.under / 2);
+        CHECK(settled.under < static_cast<int>(grid.size() / 25));
+    }
+}
+
+namespace {
+
 // Shells a kilometre thick.
 constexpr int shell_level = 8;
 
