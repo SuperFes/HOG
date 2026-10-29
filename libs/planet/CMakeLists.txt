@@ -23,6 +23,7 @@ add_library(hog_planet
     src/projection.cpp
     src/rivers.cpp
     src/tangent_frame.cpp
+    src/tectonics.cpp
     src/tile.cpp
     src/volcanoes.cpp
     src/world.cpp)
@@ -73,6 +74,7 @@ hog_add_tests(hog_planet
     tests/projection_tests.cpp
     tests/rivers_tests.cpp
     tests/tangent_frame_tests.cpp
+    tests/tectonics_tests.cpp
     tests/tile_tests.cpp
     tests/volcanoes_tests.cpp
     tests/world_tests.cpp)
