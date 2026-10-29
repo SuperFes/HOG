@@ -750,3 +750,63 @@ TEST_CASE("glaciers cut fjords into cold coasts, the sea reaching in where the l
     // As on Earth, only towards the poles: some 35 degrees off the equator at least.
     CHECK(lowest > 0.57);
 }
+
+TEST_CASE("an evolved world stands its land where its crust settled dry, ranges highest",
+          "[planet][elevation]") {
+    auto config = planet(1);
+    config.generator = hog::planet::Generator::Evolved;
+    const Elevation terrain{config};
+    double land = 0.0;
+    double area = 0.0;
+    double ranges = 0.0;
+    double plains = 0.0;
+    int range_count = 0;
+    int plain_count = 0;
+    for (const CellId cell : cells_at(6)) {
+        const auto crust = terrain.continents().crust(cell);
+        const double metres = fixed_to_double(terrain.elevation(cell));
+        const double cell_area = hog::planet::cell_area(cell);
+        area += cell_area;
+        land += terrain.is_land(cell) ? cell_area : 0.0;
+        // Well off the coast, the ground keeps to its side of it, but where volcanoes rise out of
+        // the sea, lakes' rims hold them in and glaciers cut fjords.
+        const std::int64_t shore = fixed_one / 20;
+        if (terrain.volcanoes().lift(cell) > 0 || terrain.hotspots().surface(cell) ||
+            terrain.landform().near_lake(cell)) {
+            continue;
+        }
+        if (crust.height > shore && !near_carved(terrain.landform(), cell)) {
+            REQUIRE(metres > 0.0);
+        } else if (crust.height < -shore && !near_carved(terrain.landform(), cell)) {
+            REQUIRE(metres < 0.0);
+        }
+        if (crust.height <= 0) {
+            continue;
+        }
+        if (crust.mountains > fixed_one * 8 / 10) {
+            ranges += metres;
+            ++range_count;
+        } else if (crust.mountains < fixed_one / 10) {
+            plains += metres;
+            ++plain_count;
+        }
+    }
+    // At least as much sea as asked for, topped up if need be; but land enough to stand on.
+    CHECK(land / area < 0.31);
+    CHECK(land / area > 0.15);
+    REQUIRE(range_count > 0);
+    REQUIRE(plain_count > 0);
+    UNSCOPED_INFO("ranges " << ranges / range_count << " m, plains " << plains / plain_count
+                            << " m");
+    CHECK(ranges / range_count > 2'500.0);
+    CHECK(plains / plain_count < 1'500.0);
+}
+
+TEST_CASE("worlds evolved by different generators keep their own landforms",
+          "[planet][elevation]") {
+    auto config = planet(1);
+    const Elevation stamped{config};
+    config.generator = hog::planet::Generator::Evolved;
+    const Elevation evolved{config};
+    CHECK(&stamped.landform() != &evolved.landform());
+}

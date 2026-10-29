@@ -2,6 +2,7 @@
 #include <hog/core/log.hpp>
 #include <hog/planet/bake.hpp>
 #include <hog/planet/elevation.hpp>
+#include <hog/planet/isostasy.hpp>
 #include <hog/planet/moisture.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
@@ -55,6 +56,8 @@ constexpr double hill_wavelength = 4'000.0; // metres
 constexpr int hill_octaves = 3;
 template <int Bits>
 constexpr std::int64_t erosion = 2 * fixed_unit<Bits>;
+// Settled ranges are this rugged from their valleys to their crests.
+constexpr std::int64_t rugged_height = 2'000;
 
 // Rivers wear the land for 5 million years in steps of 100,000, told every few steps.
 constexpr int landform_steps = 50;
@@ -228,13 +231,25 @@ constexpr std::int64_t shore_steepest = fixed_one * 15 / 100;
     return ground + ((short_of * (fixed_one - ramp(into, rim_reach))) >> fixed_fraction_bits);
 }
 
+[[nodiscard]] Continents continents_of(const PlanetConfig& config) {
+    auto plates = std::make_shared<const Plates>(
+        config.seed, LevelGrid{Plates::level, config.radius}, config.radius, config.plates);
+    if (config.generator == Generator::Stamped) {
+        return Continents{config.seed, config.ocean_fraction, std::move(plates)};
+    }
+    return Continents{config.seed,
+                      settle(config.seed, config.radius,
+                             {.level = Plates::level,
+                              .plates = config.plates,
+                              .continental = continental_share(config.ocean_fraction)},
+                             config.ocean_fraction),
+                      std::move(plates)};
+}
+
 } // namespace
 
 Elevation::Elevation(const PlanetConfig& config)
-    : continents_{config.seed, config.ocean_fraction,
-                  std::make_shared<const Plates>(config.seed,
-                                                 LevelGrid{Plates::level, config.radius},
-                                                 config.radius, config.plates)},
+    : continents_{continents_of(config)}, settled_{config.generator != Generator::Stamped},
       volcanoes_{config.seed, config.radius, continents_},
       hotspots_{config.seed, config.radius, continents_},
       ridge_seed_{hash_combine(config.seed, ridge_salt)},
@@ -257,8 +272,8 @@ const Elevation::Evolved& Elevation::evolved() const {
 
 std::shared_ptr<const Elevation::Evolved> Elevation::evolve(const PlanetConfig& config) const {
     // Evolving takes a while, so it's shared while any Elevation of the same planet lives.
-    using Key =
-        std::tuple<std::uint64_t, std::uint64_t, std::uint64_t, std::uint64_t, int, std::uint64_t>;
+    using Key = std::tuple<std::uint64_t, std::uint64_t, std::uint64_t, std::uint64_t, int,
+                           std::uint64_t, Generator>;
     static std::mutex mutex;
     static std::map<Key, std::weak_ptr<const Evolved>> evolved;
     const Key key{config.seed,
@@ -266,7 +281,8 @@ std::shared_ptr<const Elevation::Evolved> Elevation::evolve(const PlanetConfig& 
                   std::bit_cast<std::uint64_t>(config.ocean_fraction),
                   std::bit_cast<std::uint64_t>(config.river_scale),
                   config.plates,
-                  std::bit_cast<std::uint64_t>(config.erosion_cell)};
+                  std::bit_cast<std::uint64_t>(config.erosion_cell),
+                  config.generator};
     const std::scoped_lock lock{mutex};
     if (auto shared = evolved[key].lock()) {
         return shared;
@@ -367,7 +383,8 @@ Landform Elevation::wear(LevelGrid grid, std::uint64_t seed,
     std::vector<double> ice_age_warmth(grid.size());
     for (std::uint32_t index = 0; index < grid.size(); ++index) {
         const CellId cell = grid.cell(index);
-        const std::int64_t mountains = mountain_strength(cell);
+        const std::int64_t mountains =
+            (mountain_strength(cell) * continents_.crust(cell).rising) >> fixed_fraction_bits;
         heights[index] = raised(cell);
         // Only continents rise; volcanoes stand on ocean floor that doesn't.
         const bool continental = continents_.height(cell) > 0;
@@ -722,6 +739,9 @@ std::int64_t Elevation::raised(CellId cell) const {
     const auto built = [&](std::int64_t ground) {
         return shields ? std::max(ground, *shields) : ground;
     };
+    if (settled_) {
+        return built(floated<Bits>(cell, crust) + volcanoes);
+    }
     if (continent <= 0) {
         const std::int64_t hills =
             (abyssal_hill_height *
@@ -745,6 +765,30 @@ std::int64_t Elevation::raised(CellId cell) const {
     const std::int64_t ridge =
         Elevation::ridge<Bits>(ridge_seed_, ridge_frequency_, ridge_octaves, cell, crust.grain);
     return built(lowland + (mountain_height * ((strength * ridge) >> Bits)) + volcanoes);
+}
+
+template <int Bits>
+std::int64_t Elevation::floated(CellId cell, const Continents::Crust& crust) const {
+    constexpr std::int64_t one = fixed_unit<Bits>;
+    const std::int64_t ground = crust.height * Continents::field_metres;
+    // Roughness fades in from the shore, never taking more than half the height off, so the coast
+    // stays where the sea filled the crust to.
+    if (ground <= 0) {
+        const std::int64_t hills =
+            abyssal_hill_height *
+            (ridge<Bits>(hill_seed_, hill_frequency_, hill_octaves, cell, crust.grain) - (one / 2));
+        return ground + ((hills * ramp<Bits>(-ground, 2 * abyssal_hill_height * one)) >> Bits);
+    }
+    const std::int64_t relief =
+        relief_height *
+        fbm(relief_seed_, noise_point<Bits>(cell_center(cell), relief_frequency), relief_octaves);
+    const std::int64_t rugged =
+        rugged_height * ((crust.mountains * (ridge<Bits>(ridge_seed_, ridge_frequency_,
+                                                         ridge_octaves, cell, crust.grain) -
+                                             (one / 2))) >>
+                         Bits);
+    return ground + ((relief * ramp<Bits>(ground, 4 * relief_height * one)) >> Bits) +
+           ((rugged * ramp<Bits>(ground, 2 * rugged_height * one)) >> Bits);
 }
 
 } // namespace hog::planet

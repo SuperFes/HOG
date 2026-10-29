@@ -153,6 +153,10 @@ private:
     // The same with `Bits` fractional bits.
     template <int Bits>
     [[nodiscard]] std::int64_t raised(CellId cell) const;
+    // Where the crust settled, its height above the sea with the land's and floor's roughness,
+    // in fixed point with `Bits` fractional bits.
+    template <int Bits>
+    [[nodiscard]] std::int64_t floated(CellId cell, const Continents::Crust& crust) const;
     // Fixed-point metres the glaciers cut the ground down by.
     [[nodiscard]] std::int64_t carved(CellId cell) const;
     // The same, while the landform is still being evolved.
@@ -184,6 +188,7 @@ private:
     unbake(std::optional<LandformBake> bake, int level, const PlanetConfig& config);
 
     Continents continents_;
+    bool settled_;
     Volcanoes volcanoes_;
     Hotspots hotspots_;
     std::uint64_t ridge_seed_;
