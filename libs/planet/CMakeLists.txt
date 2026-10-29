@@ -68,6 +68,7 @@ hog_add_tests(hog_planet
     tests/hotspots_tests.cpp
     tests/golden_tests.cpp
     tests/landform_tests.cpp
+    tests/materials_tests.cpp
     tests/level_grid_tests.cpp
     tests/neighbors_tests.cpp
     tests/noise_tests.cpp

@@ -1,4 +1,5 @@
 #include <hog/core/math.hpp>
+#include <hog/planet/materials.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/volume.hpp>
 
@@ -8,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <numbers>
 #include <optional>
 #include <random>
 #include <vector>
@@ -494,4 +496,69 @@ TEST_CASE("damaged bytes change nothing", "[planet][volume]") {
 
     Volume coarser{air, region_level - 1};
     CHECK_FALSE(coarser.load(bytes).has_value());
+}
+
+namespace {
+
+[[nodiscard]] double shell_volume(double inner, double outer) {
+    return 4.0 / 3.0 * std::numbers::pi * ((outer * outer * outer) - (inner * inner * inner));
+}
+
+[[nodiscard]] bool near(double found, double expected, double share) {
+    return std::abs(found - expected) <= share * std::abs(expected);
+}
+
+} // namespace
+
+TEST_CASE("a budget measures the whole volume", "[planet][volume]") {
+    const double bottom = radius - (hog::planet::volume_span / 2.0);
+    const double top = radius + (hog::planet::volume_span / 2.0);
+    const auto all_air = hog::planet::budget(Volume{air}, radius);
+    CHECK(near(all_air.of(Material::Air), shell_volume(bottom, top), 1.0e-9));
+
+    const auto grounded = hog::planet::budget(ground(), radius);
+    CHECK(near(grounded.of(Material::Granite), shell_volume(bottom, radius), 1.0e-9));
+    CHECK(near(grounded.of(Material::Air), shell_volume(radius, top), 1.0e-9));
+    CHECK(grounded.of(Material::Water) == 0.0);
+}
+
+TEST_CASE("a budget counts the heat each material holds", "[planet][volume]") {
+    const auto counted = hog::planet::budget(Volume{rock}, radius);
+    const auto held = hog::planet::properties(Material::Granite);
+    const double expected = counted.of(Material::Granite) * static_cast<double>(held.density) *
+                            static_cast<double>(held.specific_heat) *
+                            static_cast<double>(rock.temperature);
+    CHECK(near(counted.heat[static_cast<std::size_t>(Material::Granite)], expected, 1.0e-12));
+}
+
+TEST_CASE("the regions' budgets add up to the volume's", "[planet][volume]") {
+    std::mt19937_64 random{67};
+    Volume volume{air, region_level};
+    for (int n = 0; n < 300; ++n) {
+        volume.set(random_cell(random, 5, 8), n % 2 == 0 ? rock : water);
+    }
+    hog::planet::Budget regions;
+    for (int face = 0; face < hog::planet::face_count; ++face) {
+        for (const CellId region : regions_of_face(face)) {
+            const auto counted = hog::planet::budget(volume, radius, region);
+            for (std::size_t material = 0; material < hog::planet::material_count; ++material) {
+                regions.volume[material] += counted.volume[material];
+            }
+        }
+    }
+    const auto whole = hog::planet::budget(volume, radius);
+    for (std::size_t material = 0; material < hog::planet::material_count; ++material) {
+        CHECK(near(regions.volume[material], whole.volume[material], 1.0e-9));
+    }
+}
+
+TEST_CASE("a leaf a surface halves is shared half and half", "[planet][volume]") {
+    for (const float tilt : {0.0F, 0.5F, -1.5F}) {
+        const Slope made = slope(0.0F, tilt);
+        Volume solid_leaf{air};
+        solid_leaf.set(made.leaf.cell, rock);
+        const double whole = hog::planet::budget(solid_leaf, radius).of(Material::Granite);
+        const double under = hog::planet::budget(made.volume, radius).of(Material::Granite);
+        CHECK(near(under, whole / 2.0, 0.03));
+    }
 }

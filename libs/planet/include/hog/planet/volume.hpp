@@ -2,8 +2,10 @@
 
 #include <hog/core/bytes.hpp>
 #include <hog/core/math.hpp>
+#include <hog/planet/materials.hpp>
 #include <hog/planet/volume_cell.hpp>
 
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -12,23 +14,6 @@
 #include <vector>
 
 namespace hog::planet {
-
-// Stored by value, so new materials go on the end.
-enum class Material : std::uint8_t {
-    Air,
-    Water,
-    Snow,
-    Ice,
-    Soil,
-    Sediment,
-    Sandstone,
-    Mudstone,
-    Limestone,
-    Granite,
-    Basalt,
-    Metamorphic,
-    Magma,
-};
 
 // Where a surface crosses a leaf, as one plane through it: the leaf's material lies on the side the
 // normal points to and `under` on the other. Sharper shapes than a plane split the leaf.
@@ -165,6 +150,22 @@ private:
     std::size_t leaves_ = face_count;
     int region_level_ = 0;
 };
+
+// How much of each material there is, and the heat it holds.
+struct Budget {
+    std::array<double, material_count> volume{}; // cubic metres
+    std::array<double, material_count> heat{};   // joules over absolute zero
+
+    [[nodiscard]] double of(Material material) const {
+        return volume[static_cast<std::size_t>(material)];
+    }
+};
+
+// Of the whole volume, or of one region of it. Leaves a surface crosses are shared between the
+// materials either side by sampling, to within a few percent of the leaf.
+[[nodiscard]] Budget budget(const Volume& volume, double radius);
+// Precondition: `region` is a column at the volume's region level.
+[[nodiscard]] Budget budget(const Volume& volume, double radius, CellId region);
 
 // The leaf at a position, unless it's outside the volume.
 [[nodiscard]] std::optional<Volume::Leaf> leaf_at(const Volume& volume, double radius,

@@ -2,11 +2,14 @@
 #include <hog/core/bytes.hpp>
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
+#include <hog/planet/materials.hpp>
+#include <hog/planet/projection.hpp>
 #include <hog/planet/volume.hpp>
 
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -201,6 +204,93 @@ void Volume::settle() {
     }
 }
 
+namespace {
+
+// Cubic metres between a column's sides and two spheres.
+[[nodiscard]] double cell_volume(VolumeCell cell, double radius) {
+    const ShellBounds bounds = shell_bounds(cell, radius);
+    const double thick = bounds.outer - bounds.inner;
+    const double spread = (bounds.outer * bounds.outer) + (bounds.outer * bounds.inner) +
+                          (bounds.inner * bounds.inner);
+    return cell_area(cell.column()) * thick * spread / 3.0;
+}
+
+void add(Budget& budget, std::size_t material, double volume, float temperature) {
+    const MaterialProperties held = properties(static_cast<Material>(material));
+    budget.volume[material] += volume;
+    budget.heat[material] += volume * static_cast<double>(held.density) *
+                             static_cast<double>(held.specific_heat) *
+                             static_cast<double>(temperature);
+}
+
+// Adds what of `leaf` lies in `cell`, which it holds.
+void add(Budget& budget, const Volume::Leaf& leaf, VolumeCell cell, double radius) {
+    const double volume = cell_volume(cell, radius);
+    const float temperature = leaf.contents.temperature;
+    if (!leaf.contents.surface.has_value()) {
+        add(budget, static_cast<std::size_t>(leaf.contents.material), volume, temperature);
+        return;
+    }
+    // Points spread evenly through the cell, each weighted by the volume about it.
+    constexpr int samples = 4;
+    const FaceIJ at = cell.column().to_face_ij();
+    const double side = std::ldexp(1.0, -at.level);
+    const ShellBounds bounds = shell_bounds(cell, radius);
+    std::array<double, material_count> weights{};
+    double total = 0.0;
+    for (int a = 0; a < samples; ++a) {
+        for (int b = 0; b < samples; ++b) {
+            // Even in u and v, where a patch of the cube stands for 1 / |cube|^3 of the sphere.
+            const auto along = [&](std::uint32_t index, int step) {
+                const double low = st_to_uv(static_cast<double>(index) * side);
+                const double high = st_to_uv(static_cast<double>(index + 1) * side);
+                return low + ((high - low) * ((step + 0.5) / samples));
+            };
+            const DVec3 cube = face_uv_to_xyz(at.face, along(at.i, a), along(at.j, b));
+            const DVec3 direction = glm::normalize(cube);
+            const double patch = 1.0 / std::pow(glm::length(cube), 3.0);
+            for (int c = 0; c < samples; ++c) {
+                const double reach =
+                    bounds.inner + ((bounds.outer - bounds.inner) * ((c + 0.5) / samples));
+                const double weight = patch * reach * reach;
+                const Material material =
+                    material_at(leaf, radius, WorldPosition{direction * reach});
+                weights[static_cast<std::size_t>(material)] += weight;
+                total += weight;
+            }
+        }
+    }
+    for (std::size_t material = 0; material < material_count; ++material) {
+        if (weights[material] > 0.0) {
+            add(budget, material, volume * weights[material] / total, temperature);
+        }
+    }
+}
+
+} // namespace
+
+Budget budget(const Volume& volume, double radius) {
+    Budget counted;
+    volume.for_each_leaf([&](VolumeCell cell, const Contents& contents) {
+        add(counted, Volume::Leaf{.cell = cell, .contents = contents}, cell, radius);
+    });
+    return counted;
+}
+
+Budget budget(const Volume& volume, double radius, CellId region) {
+    HOG_ASSERT(region.level() == volume.region_level(), "a region is a column at the region level");
+    Budget counted;
+    volume.for_each_leaf([&](VolumeCell cell, const Contents& contents) {
+        const Volume::Leaf leaf{.cell = cell, .contents = contents};
+        if (region.contains(cell.column())) {
+            add(counted, leaf, cell, radius);
+        } else if (cell.column().contains(region)) {
+            add(counted, leaf, VolumeCell::from(region), radius);
+        }
+    });
+    return counted;
+}
+
 std::optional<Volume::Leaf> leaf_at(const Volume& volume, double radius, WorldPosition position) {
     const VolumeCell finest = volume_cell_at(position, radius, max_level, max_shell_level);
     if (!finest.is_valid()) {
@@ -214,8 +304,6 @@ namespace {
 constexpr std::array<std::byte, 8> region_magic{std::byte{'H'}, std::byte{'O'}, std::byte{'G'},
                                                 std::byte{'V'}, std::byte{'O'}, std::byte{'L'},
                                                 std::byte{'0'}, std::byte{'1'}};
-
-constexpr auto material_count = static_cast<std::uint8_t>(Material::Magma) + 1;
 
 void write_contents(ByteWriter& out, const Contents& contents) {
     out.write(static_cast<std::uint8_t>(contents.material));
