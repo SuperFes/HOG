@@ -82,8 +82,8 @@ struct SeasonFrames {
     friend bool operator==(const SeasonFrames&, const SeasonFrames&) = default;
 };
 
-// Tectonics maps: the crust of a v2 world every so many steps as its plates move, and a sheet of
-// them all.
+// Tectonics maps: the crust of a v2 world every so many steps as its plates move, as v1 keeps it
+// and as the plates carry it in their own frames, and a sheet of each.
 struct TectonicsFrames {
     int steps = 0; // how many to move the plates; none when 0
     int every = 5; // steps between maps

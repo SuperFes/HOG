@@ -4,6 +4,7 @@
 #include <hog/mapgen/colour.hpp>
 #include <hog/mapgen/options.hpp>
 #include <hog/mapgen/render.hpp>
+#include <hog/planet/lithosphere.hpp>
 #include <hog/planet/tectonics.hpp>
 
 #include <cstdint>
@@ -28,6 +29,20 @@ namespace hog::mapgen {
                                   std::span<const std::int64_t> heights, std::int64_t sea_level,
                                   double planet_radius, const View& view, int width,
                                   jobs::JobSystem& jobs);
+
+// The mantle, showing where plates have parted.
+inline constexpr Rgb mantle_colour{70, 80, 50};
+// Where plates overlap, the crust on top is drawn this far towards red.
+inline constexpr Rgb overlap_colour{220, 40, 40};
+inline constexpr double overlap_tint = 0.5;
+
+// Ocean floor blue, paler the younger by millions of years; continents as crust_colour draws them.
+[[nodiscard]] Rgb plate_crust_colour(const planet::Crust& crust) noexcept;
+
+// The crust on top as the plates carry it in their own frames: the mantle where they've parted,
+// tinted red where they overlap, with the edges between plates darkened.
+[[nodiscard]] Image render_plates(const planet::Lithosphere& lithosphere, double planet_radius,
+                                  const View& view, int width, jobs::JobSystem& jobs);
 
 // The file name for a view, kind of map and step, such as planet-tectonics-0040.png.
 [[nodiscard]] std::string evolution_file_name(const View& view, std::string_view kind, int step);

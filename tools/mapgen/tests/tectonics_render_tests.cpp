@@ -98,6 +98,45 @@ TEST_CASE("a relief map shows land above the sea and sea below it", "[mapgen]") 
     CHECK(sea > land);
 }
 
+TEST_CASE("plates' ocean floor is drawn paler the younger", "[mapgen]") {
+    using hog::mapgen::plate_crust_colour;
+    const hog::planet::Crust young{.type = hog::planet::CrustType::Oceanic, .age = 0.0F};
+    const hog::planet::Crust old{.type = hog::planet::CrustType::Oceanic, .age = 150.0F};
+    CHECK(brightness(plate_crust_colour(young)) > brightness(plate_crust_colour(old)));
+}
+
+TEST_CASE("a plates map shows the mantle where they part and red where they overlap", "[mapgen]") {
+    const Tectonics tectonics{1, radius, {.level = 4, .plates = 6}};
+    hog::planet::Lithosphere lithosphere = hog::planet::lithosphere_from(tectonics, 10.0);
+    hog::jobs::JobSystem jobs{2};
+    struct Counts {
+        int mantle = 0;
+        int overlap = 0;
+    };
+    const auto count = [&] {
+        const auto image =
+            hog::mapgen::render_plates(lithosphere, radius, hog::mapgen::PlanetView{}, 128, jobs);
+        REQUIRE(image.pixels.size() == std::size_t{3} * 128 * 64);
+        Counts counts;
+        for (int y = 0; y < image.height; ++y) {
+            for (int x = 0; x < image.width; ++x) {
+                const auto colour = image.at(x, y);
+                counts.mantle += colour == hog::mapgen::mantle_colour ? 1 : 0;
+                counts.overlap += colour[0] > colour[1] && colour[0] > colour[2] ? 1 : 0;
+            }
+        }
+        return counts;
+    };
+    const Counts start = count();
+    CHECK(start.mantle == 0);
+    CHECK(start.overlap == 0);
+
+    lithosphere.advance(100.0);
+    const Counts moved = count();
+    CHECK(moved.mantle > 0);
+    CHECK(moved.overlap > 0);
+}
+
 TEST_CASE("evolution maps are named by view, kind and step", "[mapgen]") {
     CHECK(hog::mapgen::evolution_file_name(hog::mapgen::PlanetView{}, "tectonics", 40) ==
           "planet-tectonics-0040.png");

@@ -8,6 +8,7 @@
 #include <hog/mapgen/wildlife_render.hpp>
 #include <hog/planet/geology.hpp>
 #include <hog/planet/isostasy.hpp>
+#include <hog/planet/lithosphere.hpp>
 #include <hog/planet/planet_config.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tectonics.hpp>
@@ -223,10 +224,14 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
             {.plates = config.plates,
              .continental = hog::planet::continental_share(config.ocean_fraction)}};
     });
+    // The same start carried in the plates' own frames, so where they part and overlap shows.
+    constexpr double step_years = 10.0;
+    hog::planet::Lithosphere lithosphere = hog::planet::lithosphere_from(tectonics, step_years);
     const auto& grid = tectonics.grid();
     double water = hog::planet::starting_water(grid);
     std::vector<hog::mapgen::Image> crust;
     std::vector<hog::mapgen::Image> relief;
+    std::vector<hog::mapgen::Image> plates;
     const auto keep = [&](std::vector<hog::mapgen::Image>& frames, std::string_view kind, int step,
                           hog::mapgen::Image image) {
         const int written = write(
@@ -252,7 +257,10 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
                        keep(relief, "relief", step,
                             hog::mapgen::render_relief(tectonics, heights, sea, config.radius,
                                                        options.view, options.size, jobs)) ==
-                           EXIT_SUCCESS;
+                           EXIT_SUCCESS &&
+                       keep(plates, "plates", step,
+                            hog::mapgen::render_plates(lithosphere, config.radius, options.view,
+                                                       options.size, jobs)) == EXIT_SUCCESS;
             });
             if (!written) {
                 return report(EXIT_FAILURE);
@@ -260,6 +268,7 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
         }
         if (step < options.tectonics.steps) {
             timer.time("tectonics", [&] { tectonics.step(); });
+            timer.time("plates", [&] { lithosphere.advance(step_years); });
         }
     }
     constexpr int columns = 4;
@@ -268,8 +277,11 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
         return options.output / (first.substr(0, first.rfind('-')) + ".png");
     };
     return report(timer.time("sheets", [&] {
-        return write(sheet("tectonics"), hog::mapgen::contact_sheet(crust, columns)) == EXIT_SUCCESS
-                   ? write(sheet("relief"), hog::mapgen::contact_sheet(relief, columns))
+        return write(sheet("tectonics"), hog::mapgen::contact_sheet(crust, columns)) ==
+                           EXIT_SUCCESS &&
+                       write(sheet("relief"), hog::mapgen::contact_sheet(relief, columns)) ==
+                           EXIT_SUCCESS
+                   ? write(sheet("plates"), hog::mapgen::contact_sheet(plates, columns))
                    : EXIT_FAILURE;
     }));
 }
