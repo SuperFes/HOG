@@ -27,6 +27,7 @@ add_library(hog_planet
     src/tectonics.cpp
     src/tile.cpp
     src/volcanoes.cpp
+    src/volume.cpp
     src/volume_cell.cpp
     src/world.cpp)
 add_library(hog::planet ALIAS hog_planet)
@@ -81,6 +82,7 @@ hog_add_tests(hog_planet
     tests/tile_tests.cpp
     tests/volcanoes_tests.cpp
     tests/volume_cell_tests.cpp
+    tests/volume_tests.cpp
     tests/world_tests.cpp)
 hog_add_benchmarks(hog_planet
     bench/noise_bench.cpp)
