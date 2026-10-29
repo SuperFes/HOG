@@ -1076,8 +1076,8 @@ TEST_CASE("each plate's crust is found wherever it lies, through splits and weld
         const auto& cells = lithosphere.plates()[plate].cells;
         for (std::uint32_t place = 0; place < grid.size(); ++place) {
             const DVec3 at = hog::planet::cell_center(grid.cell(place));
-            const std::uint32_t own = grid.index(
-                hog::planet::cell_at(lithosphere.to_plate(plate, at), grid.level()));
+            const std::uint32_t own =
+                grid.index(hog::planet::cell_at(lithosphere.to_plate(plate, at), grid.level()));
             const bool held = std::ranges::binary_search(cells, own);
             REQUIRE(lithosphere.crust_of(plate, at).has_value() == held);
         }

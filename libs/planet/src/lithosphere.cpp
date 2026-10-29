@@ -319,6 +319,35 @@ std::optional<Facing> facing(const LevelGrid& grid,
     return found;
 }
 
+// Of each two plates, a row per plate, whether they move as one: slower than `slowest` against
+// each other everywhere they meet, as `speeds` says at each of the `edges`, or everywhere their
+// continents meet where a range lies along that.
+std::vector<bool> as_one(std::span<const Boundary> edges, std::span<const double> speeds,
+                         std::size_t count, double slowest) {
+    std::vector<double> anywhere(count * count, -1.0);
+    std::vector<double> fastest(count * count, -1.0);
+    std::vector<bool> sutured(count * count, false);
+    for (std::size_t index = 0; index < edges.size(); ++index) {
+        const Boundary& edge = edges[index];
+        const std::size_t pair =
+            (std::min(edge.plate, edge.other) * count) + std::max(edge.plate, edge.other);
+        anywhere[pair] = std::max(anywhere[pair], speeds[index]);
+        if (edge.own.type != CrustType::Continental || edge.facing.type != CrustType::Continental) {
+            continue;
+        }
+        fastest[pair] = std::max(fastest[pair], speeds[index]);
+        if (std::max(edge.own.thickness, edge.facing.thickness) > Lithosphere::settled_continent) {
+            sutured[pair] = true;
+        }
+    }
+    std::vector<bool> joined(count * count, false);
+    for (std::size_t pair = 0; pair < joined.size(); ++pair) {
+        joined[pair] = (anywhere[pair] >= 0.0 && anywhere[pair] < slowest) ||
+                       (sutured[pair] && fastest[pair] < slowest);
+    }
+    return joined;
+}
+
 } // namespace
 
 bool stays_over(const Crust& one, const Crust& other) noexcept {
@@ -363,8 +392,7 @@ void Lithosphere::bound(std::uint32_t plate) {
     // A place in a cell lies no further from its middle than twice the cells' mean spacing.
     const double spacing = std::sqrt(4.0 * std::numbers::pi / grid_.size());
     const double angle = std::acos(std::clamp(nearest, -1.0, 1.0)) + (2.0 * spacing);
-    bounds_[plate] = {.middle = middle,
-                      .reach = angle < std::numbers::pi ? std::cos(angle) : -2.0};
+    bounds_[plate] = {.middle = middle, .reach = angle < std::numbers::pi ? std::cos(angle) : -2.0};
 }
 
 void Lithosphere::advance(double years) {
@@ -822,26 +850,16 @@ std::optional<DVec3> Lithosphere::weakest(std::uint32_t plate, std::span<const P
 }
 
 void Lithosphere::weld(double years) {
-    // How fast each two plates move against each other at most anywhere they meet, and where
-    // their continents meet, and whether a range lies anywhere along that.
     const std::size_t count = plates_.size();
-    std::vector<double> anywhere(count * count, -1.0);
-    std::vector<double> fastest(count * count, -1.0);
-    std::vector<bool> sutured(count * count, false);
-    for (const Boundary& edge : boundaries()) {
+    const std::vector<Boundary> edges = boundaries();
+    std::vector<double> speeds;
+    speeds.reserve(edges.size());
+    for (const Boundary& edge : edges) {
         const DVec3 at = cell_center(grid_.cell(edge.place));
-        const double moving = glm::length(velocity(edge.plate, at) - velocity(edge.other, at));
-        const std::size_t pair =
-            (std::min(edge.plate, edge.other) * count) + std::max(edge.plate, edge.other);
-        anywhere[pair] = std::max(anywhere[pair], moving);
-        if (edge.own.type != CrustType::Continental || edge.facing.type != CrustType::Continental) {
-            continue;
-        }
-        fastest[pair] = std::max(fastest[pair], moving);
-        if (std::max(edge.own.thickness, edge.facing.thickness) > settled_continent) {
-            sutured[pair] = true;
-        }
+        speeds.push_back(glm::length(velocity(edge.plate, at) - velocity(edge.other, at)));
     }
+    const double half_place = 0.5 * std::sqrt(4.0 * std::numbers::pi / grid_.size());
+    const std::vector<bool> joined = as_one(edges, speeds, count, half_place / years);
     // Plates welded together, each by the one its crust goes to: the one with most cells.
     std::vector<std::uint32_t> into(count);
     for (std::uint32_t plate = 0; plate < count; ++plate) {
@@ -853,15 +871,11 @@ void Lithosphere::weld(double years) {
         }
         return plate;
     };
-    const double half_place = 0.5 * std::sqrt(4.0 * std::numbers::pi / grid_.size());
     for (std::uint32_t lower = 0; lower < count; ++lower) {
         for (std::uint32_t upper = lower + 1; upper < count; ++upper) {
-            const std::size_t pair = (lower * count) + upper;
-            const bool captured = anywhere[pair] >= 0.0 && anywhere[pair] * years < half_place;
-            const bool collided = sutured[pair] && fastest[pair] * years < half_place;
             const std::uint32_t one = root(lower);
             const std::uint32_t other = root(upper);
-            if ((!captured && !collided) || one == other) {
+            if (!joined[(lower * count) + upper] || one == other) {
                 continue;
             }
             const bool bigger = plates_[one].cells.size() >= plates_[other].cells.size();
