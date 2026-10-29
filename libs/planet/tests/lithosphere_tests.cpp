@@ -1057,6 +1057,33 @@ TEST_CASE("a plate that holds over today's mantle splits over a young hotter one
     CHECK(young.plates().size() == 2);
 }
 
+TEST_CASE("each plate's crust is found wherever it lies, through splits and welds",
+          "[planet][lithosphere]") {
+    Lithosphere lithosphere =
+        settled(hog::planet::lithosphere_from(start(), step_years), step_years);
+    lithosphere.drive();
+    const std::size_t before = lithosphere.plates().size();
+    for (int step = 0; step < 4; ++step) {
+        lithosphere = settled(lithosphere, step_years);
+        lithosphere.weld(step_years);
+        lithosphere.warm(step_years);
+        lithosphere.rift({}, weak);
+        lithosphere.drive();
+    }
+    REQUIRE(lithosphere.plates().size() > before);
+    const auto& grid = lithosphere.grid();
+    for (std::uint32_t plate = 0; plate < lithosphere.plates().size(); ++plate) {
+        const auto& cells = lithosphere.plates()[plate].cells;
+        for (std::uint32_t place = 0; place < grid.size(); ++place) {
+            const DVec3 at = hog::planet::cell_center(grid.cell(place));
+            const std::uint32_t own = grid.index(
+                hog::planet::cell_at(lithosphere.to_plate(plate, at), grid.level()));
+            const bool held = std::ranges::binary_search(cells, own);
+            REQUIRE(lithosphere.crust_of(plate, at).has_value() == held);
+        }
+    }
+}
+
 TEST_CASE("the volume's rock is the crust on top over the mantle", "[planet][lithosphere]") {
     Lithosphere lithosphere = hog::planet::lithosphere_from(start(), step_years);
     lithosphere.advance(3.0 * step_years);

@@ -332,12 +332,39 @@ bool stays_over(const Crust& one, const Crust& other) noexcept {
 }
 
 Lithosphere::Lithosphere(LevelGrid grid, std::vector<Plate> plates)
-    : grid_{std::move(grid)}, plates_{std::move(plates)}, heat_(grid_.size(), 0.0F) {
-    for (const Plate& plate : plates_) {
-        HOG_ASSERT(plate.cells.size() == plate.crust.size(), "one crust to each cell");
-        HOG_ASSERT(std::ranges::is_sorted(plate.cells), "cells ascending");
-        HOG_ASSERT(plate.cells.empty() || plate.cells.back() < grid_.size(), "cells of the grid");
+    : grid_{std::move(grid)}, plates_{std::move(plates)}, bounds_(plates_.size()),
+      heat_(grid_.size(), 0.0F) {
+    for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
+        const Plate& carrier = plates_[plate];
+        HOG_ASSERT(carrier.cells.size() == carrier.crust.size(), "one crust to each cell");
+        HOG_ASSERT(std::ranges::is_sorted(carrier.cells), "cells ascending");
+        HOG_ASSERT(carrier.cells.empty() || carrier.cells.back() < grid_.size(),
+                   "cells of the grid");
+        bound(plate);
     }
+}
+
+void Lithosphere::bound(std::uint32_t plate) {
+    const Plate& carrier = plates_[plate];
+    if (carrier.cells.empty()) {
+        bounds_[plate] = Bound{};
+        return;
+    }
+    DVec3 sum{0.0};
+    for (const std::uint32_t cell : carrier.cells) {
+        sum += cell_center(grid_.cell(cell));
+    }
+    const double length = glm::length(sum);
+    const DVec3 middle = length > 0.0 ? sum / length : DVec3{0.0, 0.0, 1.0};
+    double nearest = 1.0;
+    for (const std::uint32_t cell : carrier.cells) {
+        nearest = std::min(nearest, glm::dot(cell_center(grid_.cell(cell)), middle));
+    }
+    // A place in a cell lies no further from its middle than twice the cells' mean spacing.
+    const double spacing = std::sqrt(4.0 * std::numbers::pi / grid_.size());
+    const double angle = std::acos(std::clamp(nearest, -1.0, 1.0)) + (2.0 * spacing);
+    bounds_[plate] = {.middle = middle,
+                      .reach = angle < std::numbers::pi ? std::cos(angle) : -2.0};
 }
 
 void Lithosphere::advance(double years) {
@@ -388,6 +415,7 @@ void Lithosphere::spread() {
     }
     for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
         add_crust(plates_[plate], std::move(fresh[plate]));
+        bound(plate);
     }
 }
 
@@ -443,7 +471,11 @@ std::vector<Boundary> Lithosphere::boundaries() const {
 
 std::optional<std::size_t> Lithosphere::held(std::uint32_t plate, DVec3 at) const {
     const Plate& carrier = plates_[plate];
-    const std::uint32_t cell = grid_.index(cell_at(to_plate(plate, at), grid_.level()));
+    const DVec3 own = to_plate(plate, at);
+    if (glm::dot(own, bounds_[plate].middle) < bounds_[plate].reach) {
+        return std::nullopt;
+    }
+    const std::uint32_t cell = grid_.index(cell_at(own, grid_.level()));
     const auto found = std::ranges::lower_bound(carrier.cells, cell);
     if (found == carrier.cells.end() || *found != cell) {
         return std::nullopt;
@@ -535,6 +567,7 @@ void Lithosphere::subduct(double years, Arcs arcs) {
     }
     for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
         remove_crust(plates_[plate], std::move(diving[plate]));
+        bound(plate);
     }
     raise_arcs(trenches, years, arcs);
 }
@@ -715,6 +748,9 @@ void Lithosphere::rift(const Forces& forces, Strength strength) {
         }
         plates_[plate] = std::move(kept);
         plates_.push_back(std::move(parted_off));
+        bounds_.emplace_back();
+        bound(plate);
+        bound(static_cast<std::uint32_t>(plates_.size() - 1));
     }
 }
 
@@ -853,9 +889,11 @@ void Lithosphere::take_in(std::uint32_t plate, std::uint32_t from) {
         }
     }
     add_crust(plates_[plate], std::move(added));
+    bound(plate);
     plates_[from].cells.clear();
     plates_[from].crust.clear();
     plates_[from].rate = 0.0;
+    bound(from);
 }
 
 void Lithosphere::raise_arcs(std::span<const std::uint32_t> trenches, double years, Arcs arcs) {

@@ -207,6 +207,13 @@ public:
     [[nodiscard]] std::vector<Boundary> boundaries() const;
 
 private:
+    // Where a plate's crust lies in its own frame: nowhere further from `middle` than the angle
+    // whose cosine is `reach`, so a place further out needs no lookup.
+    struct Bound {
+        DVec3 middle{0.0, 0.0, 1.0};
+        double reach = 2.0;
+    };
+
     // A force along the surface at a unit direction, in an old slab's pull on a radian of trench.
     struct Push {
         DVec3 at{0.0};
@@ -229,6 +236,8 @@ private:
     [[nodiscard]] std::optional<std::uint32_t> overlying(std::uint32_t plate, CrustType type,
                                                          DVec3 at,
                                                          const std::vector<bool>& overrides) const;
+    // Bounds a plate's crust as it lies now. Crust it has lost since may still lie inside.
+    void bound(std::uint32_t plate);
     // Takes all the crust of plate `from` into `plate`'s frame, leaving `from` with none.
     void take_in(std::uint32_t plate, std::uint32_t from);
     // Thickens the plate on top out from each of the `trenches`, places of the grid.
@@ -236,6 +245,7 @@ private:
 
     LevelGrid grid_;
     std::vector<Plate> plates_;
+    std::vector<Bound> bounds_;
     double time_ = 0.0;
     std::vector<float> heat_;
     // Of the turn the forces give a plate against unit drag, the share it takes; none until the
