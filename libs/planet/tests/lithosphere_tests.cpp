@@ -637,6 +637,119 @@ TEST_CASE("continents closing on each other collide", "[planet][lithosphere]") {
 
 namespace {
 
+DVec3 turn_of(const Lithosphere& lithosphere, std::uint32_t plate) {
+    const auto& carrier = lithosphere.plates()[plate];
+    return carrier.rate * carrier.pole;
+}
+
+// How fast the crust moves on the whole: the root of its mean square speed over the sphere.
+double pace(const Lithosphere& lithosphere) {
+    const auto& grid = lithosphere.grid();
+    double sum = 0.0;
+    double sphere = 0.0;
+    for (std::uint32_t plate = 0; plate < lithosphere.plates().size(); ++plate) {
+        const auto& carrier = lithosphere.plates()[plate];
+        for (const std::uint32_t cell : carrier.cells) {
+            const DVec3 at =
+                lithosphere.to_planet(plate, hog::planet::cell_center(grid.cell(cell)));
+            const double speed = glm::length(lithosphere.velocity(plate, at));
+            sum += static_cast<double>(grid.area(cell)) * speed * speed;
+        }
+    }
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        sphere += static_cast<double>(grid.area(cell));
+    }
+    return std::sqrt(sum / sphere);
+}
+
+// The halves, settled, with the southern one's floor aged to `age` and, if `keel`, continent
+// around its pole, far from either edge.
+Lithosphere aged_halves(float age, bool keel) {
+    const Lithosphere moved = settled(halves(), 20.0);
+    std::vector<Lithosphere::Plate> plates{moved.plates().begin(), moved.plates().end()};
+    const auto& grid = moved.grid();
+    for (std::size_t index = 0; index < plates[1].cells.size(); ++index) {
+        Crust& crust = plates[1].crust[index];
+        crust.age = age;
+        const DVec3 at =
+            moved.to_planet(1, hog::planet::cell_center(grid.cell(plates[1].cells[index])));
+        if (keel && at.z < -0.6) {
+            crust = continent;
+        }
+    }
+    return Lithosphere{grid, plates};
+}
+
+} // namespace
+
+TEST_CASE("slabs pull plates toward their trenches and ridges push them apart",
+          "[planet][lithosphere]") {
+    Lithosphere lithosphere = aged_halves(100.0F, false);
+    const double before = pace(lithosphere);
+    lithosphere.drive();
+    // Both still turn about +x as the halves part and close, the south pulled by its slab too.
+    const DVec3 north = turn_of(lithosphere, 0);
+    const DVec3 south = turn_of(lithosphere, 1);
+    CHECK(glm::dot(glm::normalize(north), DVec3{1.0, 0.0, 0.0}) > 0.9);
+    CHECK(glm::dot(glm::normalize(south), DVec3{-1.0, 0.0, 0.0}) > 0.9);
+    CHECK(glm::length(south) > glm::length(north));
+    // At the pace they had.
+    CHECK_THAT(pace(lithosphere), WithinRel(before, 1e-6));
+}
+
+TEST_CASE("older slabs pull harder", "[planet][lithosphere]") {
+    const auto lead = [](float age) {
+        Lithosphere lithosphere = aged_halves(age, false);
+        lithosphere.drive();
+        return glm::length(turn_of(lithosphere, 1)) / glm::length(turn_of(lithosphere, 0));
+    };
+    CHECK(lead(10.0F) < lead(50.0F));
+    // No harder once the floor is done cooling.
+    CHECK_THAT(lead(100.0F), WithinRel(lead(200.0F), 1e-9));
+}
+
+TEST_CASE("the mantle drags harder on plates carrying continent", "[planet][lithosphere]") {
+    const auto lead = [](bool keel) {
+        Lithosphere lithosphere = aged_halves(100.0F, keel);
+        lithosphere.drive();
+        return glm::length(turn_of(lithosphere, 1)) / glm::length(turn_of(lithosphere, 0));
+    };
+    CHECK(lead(true) < lead(false));
+    const auto without = [] {
+        Lithosphere lithosphere = aged_halves(100.0F, true);
+        lithosphere.drive({.keel = 1.0});
+        return glm::length(turn_of(lithosphere, 1)) / glm::length(turn_of(lithosphere, 0));
+    };
+    CHECK_THAT(without(), WithinRel(lead(false), 1e-6));
+}
+
+TEST_CASE("plates keep the pace they were first driven at", "[planet][lithosphere]") {
+    Lithosphere lithosphere =
+        settled(hog::planet::lithosphere_from(start(), step_years), step_years);
+    const double before = pace(lithosphere);
+    lithosphere.drive();
+    CHECK_THAT(pace(lithosphere), WithinRel(before, 1e-6));
+    // Twice the pace stays twice once driven, whatever the forces then do.
+    std::vector<Lithosphere::Plate> plates{lithosphere.plates().begin(),
+                                           lithosphere.plates().end()};
+    Lithosphere twice{lithosphere.grid(), plates};
+    for (auto& plate : plates) {
+        plate.rate *= 2.0;
+    }
+    Lithosphere doubled{lithosphere.grid(), plates};
+    twice.drive();
+    doubled.drive();
+    for (int step = 0; step < 3; ++step) {
+        twice = settled(twice, step_years);
+        twice.drive();
+        doubled = settled(doubled, step_years);
+        doubled.drive();
+    }
+    CHECK(pace(doubled) > pace(twice) * 1.5);
+}
+
+namespace {
+
 // Shells a kilometre thick.
 constexpr int shell_level = 8;
 

@@ -495,6 +495,67 @@ void Lithosphere::collide(double years, Ranges ranges) {
     }
 }
 
+void Lithosphere::drive(Forces forces) {
+    // Each force along the surface at a place turns its plate about the planet's middle.
+    std::vector<DVec3> torques(plates_.size(), DVec3{0.0});
+    for (const Boundary& edge : boundaries()) {
+        const DVec3 at = cell_center(grid_.cell(edge.place));
+        const double relative = glm::length(velocity(edge.plate, at) - velocity(edge.other, at));
+        if (relative == 0.0) {
+            continue;
+        }
+        const double across = std::abs(edge.closing) / relative;
+        double push = 0.0;
+        if (edge.kind == Boundary::Kind::Trench) {
+            const double age = static_cast<double>(crust_of(edge.plate, at).value_or(Crust{}).age);
+            push = std::sqrt(std::min(age, forces.mature) / forces.mature);
+        } else if (edge.kind == Boundary::Kind::Ridge) {
+            push = -forces.ridge;
+        }
+        torques[edge.plate] += glm::cross(at, push * across * edge.length * edge.normal);
+    }
+    // The drag on a plate turning at w is -D w, D summing (I - r r^T) over its crust by its share
+    // of the sphere; the same sum without keels gives how fast its crust moves on the whole.
+    double sphere = 0.0;
+    for (std::uint32_t cell = 0; cell < grid_.size(); ++cell) {
+        sphere += static_cast<double>(grid_.area(cell));
+    }
+    std::vector<DVec3> turns(plates_.size(), DVec3{0.0});
+    double before = 0.0;
+    double after = 0.0;
+    for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
+        const Plate& carrier = plates_[plate];
+        glm::dmat3 drag{0.0};
+        glm::dmat3 spread{0.0};
+        for (std::size_t index = 0; index < carrier.cells.size(); ++index) {
+            const DVec3 at = to_planet(plate, cell_center(grid_.cell(carrier.cells[index])));
+            const glm::dmat3 across =
+                (static_cast<double>(grid_.area(carrier.cells[index])) / sphere) *
+                (glm::dmat3{1.0} - glm::outerProduct(at, at));
+            spread += across;
+            drag +=
+                (carrier.crust[index].type == CrustType::Continental ? forces.keel : 1.0) * across;
+        }
+        if (glm::determinant(drag) != 0.0) {
+            turns[plate] = glm::inverse(drag) * torques[plate];
+        }
+        const DVec3 now = carrier.rate * carrier.pole;
+        before += glm::dot(now, spread * now);
+        after += glm::dot(turns[plate], spread * turns[plate]);
+    }
+    if (pace_ == 0.0 && after > 0.0) {
+        pace_ = std::sqrt(before / after);
+    }
+    for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
+        const DVec3 turn = pace_ * turns[plate];
+        const double rate = glm::length(turn);
+        if (rate > 0.0) {
+            plates_[plate].pole = turn / rate;
+        }
+        plates_[plate].rate = rate;
+    }
+}
+
 void Lithosphere::raise_arcs(std::span<const std::uint32_t> trenches, double years, Arcs arcs) {
     // Out from each trench, a ring of places at a time, while the same plate stays on top.
     std::vector<std::uint32_t> over(grid_.size(), parted);

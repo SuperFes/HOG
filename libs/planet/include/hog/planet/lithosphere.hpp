@@ -66,6 +66,18 @@ struct Boundary {
     double closing = 0.0;
 };
 
+// What moves the plates. Old, cold floor diving at a plate's trenches pulls it hardest, ridges
+// push it a little, and the mantle drags on it, more under the deep keels of continents. Pulls
+// and pushes act across an edge as far as the plates close or part across it, not slide past.
+struct Forces {
+    // Of an old slab's pull on each length of trench, the push on each length of ridge.
+    double ridge = 0.3;
+    // Million years over which floor cools and thickens, so its slab pulls harder; no more after.
+    double mature = 100.0;
+    // How much harder the mantle drags on continent than on ocean floor.
+    double keel = 3.0;
+};
+
 // The crust as rigid plates on the sphere, each keeping its crust on a grid in its own frame and
 // turning about its own pole. Crust is never carried from cell to cell, so a plate stays whole
 // however far it turns: where two plates' crust lies over one place they've met, and where none
@@ -103,6 +115,10 @@ public:
     // the crust over it, piling that up into a range, which then settles over `years` as
     // `ranges` says.
     void collide(double years, Ranges ranges = {});
+    // Turns every plate as the forces on it now move it against the mantle's drag, at once, as
+    // nothing so slow carries momentum. The first time, the drag is set so the plates keep the
+    // pace they had, and it stays so after.
+    void drive(Forces forces = {});
 
     // Ocean floor an arc thickens this far floats as continent.
     static constexpr float arc_continent = 20.0F;
@@ -145,6 +161,9 @@ private:
     LevelGrid grid_;
     std::vector<Plate> plates_;
     double time_ = 0.0;
+    // Of the turn the forces give a plate against unit drag, the share it takes; none until the
+    // plates are first driven.
+    double pace_ = 0.0;
 };
 
 // The plates and crust of `tectonics` as they stand, each plate's frame the planet's, with one of
