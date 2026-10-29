@@ -166,11 +166,12 @@ public:
     // pull harder than that. The part across the line becomes a new plate, turning as the other
     // until the plates are next driven.
     void rift(const Forces& forces = {}, Strength strength = {});
-    // Plates whose continents have collided, piling up a range where they meet, and that turn so
-    // alike that over `years` they'd move less than half a place against each other anywhere
-    // along it weld into one along the suture, the plate with less crust taken into the other's
-    // frame. It's left with none, so plates keep their numbers. Continents that only touch, as
-    // where one has just split, stay apart.
+    // Plates that turn so alike that over `years` they'd move less than half a place against each
+    // other anywhere along their edge are one plate but in name, as a microplate is captured once
+    // what drove it dies, and weld into one. So do plates whose continents have collided, piling
+    // up a range where they meet, that move so alike along it. The plate with less crust is taken
+    // into the other's frame. It's left with none, so plates keep their numbers. Continents that
+    // only touch, as where one has just split, stay apart while their plates still move.
     void weld(double years);
 
     // Ocean floor an arc thickens this far floats as continent.

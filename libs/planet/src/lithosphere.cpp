@@ -786,19 +786,21 @@ std::optional<DVec3> Lithosphere::weakest(std::uint32_t plate, std::span<const P
 }
 
 void Lithosphere::weld(double years) {
-    // How fast each two plates move against each other at most where their continents meet, and
-    // whether a range lies anywhere along it.
+    // How fast each two plates move against each other at most anywhere they meet, and where
+    // their continents meet, and whether a range lies anywhere along that.
     const std::size_t count = plates_.size();
+    std::vector<double> anywhere(count * count, -1.0);
     std::vector<double> fastest(count * count, -1.0);
     std::vector<bool> sutured(count * count, false);
     for (const Boundary& edge : boundaries()) {
-        if (edge.own.type != CrustType::Continental || edge.facing.type != CrustType::Continental) {
-            continue;
-        }
         const DVec3 at = cell_center(grid_.cell(edge.place));
         const double moving = glm::length(velocity(edge.plate, at) - velocity(edge.other, at));
         const std::size_t pair =
             (std::min(edge.plate, edge.other) * count) + std::max(edge.plate, edge.other);
+        anywhere[pair] = std::max(anywhere[pair], moving);
+        if (edge.own.type != CrustType::Continental || edge.facing.type != CrustType::Continental) {
+            continue;
+        }
         fastest[pair] = std::max(fastest[pair], moving);
         if (std::max(edge.own.thickness, edge.facing.thickness) > settled_continent) {
             sutured[pair] = true;
@@ -819,10 +821,11 @@ void Lithosphere::weld(double years) {
     for (std::uint32_t lower = 0; lower < count; ++lower) {
         for (std::uint32_t upper = lower + 1; upper < count; ++upper) {
             const std::size_t pair = (lower * count) + upper;
-            const double moving = fastest[pair];
+            const bool captured = anywhere[pair] >= 0.0 && anywhere[pair] * years < half_place;
+            const bool collided = sutured[pair] && fastest[pair] * years < half_place;
             const std::uint32_t one = root(lower);
             const std::uint32_t other = root(upper);
-            if (!sutured[pair] || moving * years >= half_place || one == other) {
+            if ((!captured && !collided) || one == other) {
                 continue;
             }
             const bool bigger = plates_[one].cells.size() >= plates_[other].cells.size();

@@ -874,18 +874,42 @@ TEST_CASE("continents that have collided and move as one weld into one plate",
     }
 }
 
-TEST_CASE("plates still moving, meeting only at sea or never collided stay apart",
+TEST_CASE("plates moving as one weld into one plate whatever crust they meet with",
           "[planet][lithosphere]") {
     Lithosphere ocean = together(halves());
     ocean.advance(20.0);
     ocean.weld(10.0);
-    CHECK_FALSE(ocean.plates()[1].cells.empty());
+    CHECK(ocean.plates()[1].cells.empty());
+    Lithosphere touching = together(continental_halves());
+    touching.advance(20.0);
+    touching.weld(10.0);
+    CHECK(touching.plates()[1].cells.empty());
+}
 
+TEST_CASE("plates still moving, at sea or where their continents never collided, stay apart",
+          "[planet][lithosphere]") {
+    Lithosphere ocean = settled(halves(), 20.0);
+    ocean.weld(10.0);
+    CHECK_FALSE(ocean.plates()[1].cells.empty());
     Lithosphere closing = settled(continental_halves(), 20.0);
     closing.weld(10.0);
     CHECK_FALSE(closing.plates()[1].cells.empty());
-    Lithosphere touching = together(continental_halves());
-    touching.advance(20.0);
+
+    // Continents touching about the pole the halves turn on, where they barely move against each
+    // other, while the floor further along their edge parts and closes.
+    const Lithosphere slow = halves();
+    std::vector<Lithosphere::Plate> plates{slow.plates().begin(), slow.plates().end()};
+    const auto& grid = slow.grid();
+    for (std::uint32_t plate = 0; plate < 2; ++plate) {
+        for (std::size_t index = 0; index < plates[plate].cells.size(); ++index) {
+            const DVec3 at = slow.to_planet(
+                plate, hog::planet::cell_center(grid.cell(plates[plate].cells[index])));
+            if (at.x > 0.98) {
+                plates[plate].crust[index] = continent;
+            }
+        }
+    }
+    Lithosphere touching{grid, plates};
     touching.weld(10.0);
     CHECK_FALSE(touching.plates()[1].cells.empty());
 }
