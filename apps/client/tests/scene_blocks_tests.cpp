@@ -123,7 +123,8 @@ TEST_CASE("a scene draws the ground as blocks while asked, and as before after",
 }
 
 // Not a check: stills of the ground as blocks over the woods from near and far, and of the coast
-// nearest the start from over the sea, to look at. Saved where HOG_LOOK names.
+// nearest the start from over the sea, and of the whole planet from far off, to look at. Saved
+// where HOG_LOOK names.
 TEST_CASE("the ground as blocks, to look at", "[.look]") {
     // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
     const char* where = std::getenv("HOG_LOOK");
@@ -141,7 +142,9 @@ TEST_CASE("the ground as blocks, to look at", "[.look]") {
          {std::pair{"woods_low", looking(woods(), hog::planet::north_pole, 20.0, -0.1)},
           std::pair{"woods_mid", looking(woods(), hog::planet::north_pole, 300.0, -0.4)},
           std::pair{"woods_high", looking(woods(), hog::planet::north_pole, 1'500.0, -0.7)},
-          std::pair{"coast", looking(offshore, land, 150.0, -0.25)}}) {
+          std::pair{"coast", looking(offshore, land, 150.0, -0.25)},
+          std::pair{"planet", looking(woods(), hog::planet::north_pole,
+                                      2.5 * world().geology().planet_radius(), -1.5)}}) {
         const auto still =
             hog::client::draw_still(*device, *scene, shot, {.width = 960, .height = 540});
         REQUIRE(still);
