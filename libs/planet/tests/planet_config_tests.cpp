@@ -210,6 +210,15 @@ TEST_CASE("a world's id follows what shapes its ground", "[planet][config]") {
     other = base;
     other.generator = hog::planet::Generator::Evolved;
     CHECK(hog::planet::world_id(other) != id);
+    other = base;
+    other.system.gravity = 5.0;
+    CHECK(hog::planet::world_id(other) != id);
+    other = base;
+    other.system.rings = hog::planet::Rings{};
+    CHECK(hog::planet::world_id(other) != id);
+    other = base;
+    other.system.moons.push_back(hog::planet::Moon{});
+    CHECK(hog::planet::world_id(other) != id);
 
     other = base;
     other.day_length = std::chrono::hours{24};

@@ -2,6 +2,7 @@
 
 #include <hog/core/result.hpp>
 #include <hog/core/time.hpp>
+#include <hog/planet/system.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -40,6 +41,7 @@ struct PlanetConfig {
     GameDuration day_length = std::chrono::hours{4};
     double axial_tilt = 23.44; // degrees
     Generator generator = Generator::Stamped;
+    System system{};
     // Where the world's landform is kept once evolved, so it evolves once rather than whenever
     // the world is built; HOG_BAKES names one where this is empty, and with neither it's never
     // kept. Not part of the world, so never read from its config.
@@ -48,8 +50,8 @@ struct PlanetConfig {
 
 // Identifies a world by what shapes its ground, so state saved for one is never loaded into
 // another. Day length and tilt only move the sun, so they can change under a running world. A
-// river scale of 1, ten plates, 150 m erosion cells and the v1 generator leave the id as it was
-// before those could be set.
+// river scale of 1, ten plates, 150 m erosion cells, the v1 generator and Earth's system leave the
+// id as it was before those could be set.
 [[nodiscard]] std::uint64_t world_id(const PlanetConfig& config) noexcept;
 
 // Reads a [planet] table:
@@ -67,6 +69,7 @@ struct PlanetConfig {
 //     day_hours = 4.0           # optional
 //     axial_tilt = 23.44        # optional, degrees
 //
+// with the stars, moons, rings, neighbours, gravity, air and water as in src/system_config.hpp.
 // Unknown keys are errors, so typos don't silently fall back to defaults.
 [[nodiscard]] Result<PlanetConfig> parse_planet_config(std::string_view text);
 [[nodiscard]] Result<PlanetConfig> load_planet_config(const std::filesystem::path& path);

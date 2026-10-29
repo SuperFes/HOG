@@ -21,6 +21,7 @@ add_library(hog_planet
     src/places.cpp
     src/plates.cpp
     src/projection.cpp
+    src/system.cpp
     src/rivers.cpp
     src/tangent_frame.cpp
     src/isostasy.cpp
@@ -76,6 +77,7 @@ hog_add_tests(hog_planet
     tests/places_tests.cpp
     tests/plates_tests.cpp
     tests/projection_tests.cpp
+    tests/system_tests.cpp
     tests/rivers_tests.cpp
     tests/tangent_frame_tests.cpp
     tests/isostasy_tests.cpp

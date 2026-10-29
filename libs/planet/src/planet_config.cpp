@@ -1,3 +1,5 @@
+#include "system_config.hpp"
+
 #include <hog/core/assert.hpp>
 #include <hog/core/hash.hpp>
 #include <hog/core/text_file.hpp>
@@ -70,6 +72,22 @@ constexpr double max_erosion_cell = 5'000.0;
 
 [[nodiscard]] bool in_range(double value, double low, double high) {
     return value >= low && value <= high;
+}
+
+[[nodiscard]] Result<void> parse_ocean(const toml::table& planet, PlanetConfig& config) {
+    const auto ocean = optional_number(planet, "ocean_fraction");
+    if (!ocean) {
+        return std::unexpected(ocean.error());
+    }
+    config.ocean_fraction = ocean->value_or(config.ocean_fraction);
+    if (!valid_ocean_fraction(config.ocean_fraction)) {
+        return invalid("planet.ocean_fraction must be at least 0 and below 1");
+    }
+    return {};
+}
+
+[[nodiscard]] Result<void> parse_system(const toml::table& planet, PlanetConfig& config) {
+    return detail::parse_system(planet, config.system);
 }
 
 [[nodiscard]] Result<void> parse_rivers(const toml::table& planet, PlanetConfig& config) {
@@ -176,7 +194,8 @@ Result<PlanetConfig> parse_planet_config(std::string_view text) {
         return invalid("missing [planet] table");
     }
     for (const auto& [key, value] : *planet) {
-        if (std::ranges::find(known_keys, key.str()) == known_keys.end()) {
+        if (std::ranges::find(known_keys, key.str()) == known_keys.end() &&
+            !detail::system_key(key.str())) {
             return invalid(std::format("unknown key planet.{}", key.str()));
         }
     }
@@ -189,29 +208,12 @@ Result<PlanetConfig> parse_planet_config(std::string_view text) {
     }
     config.seed = static_cast<std::uint64_t>(seed->get());
 
-    const auto ocean = optional_number(*planet, "ocean_fraction");
-    if (!ocean) {
-        return std::unexpected(ocean.error());
-    }
-    config.ocean_fraction = ocean->value_or(config.ocean_fraction);
-    if (!valid_ocean_fraction(config.ocean_fraction)) {
-        return invalid("planet.ocean_fraction must be at least 0 and below 1");
-    }
-
-    if (auto rivers = parse_rivers(*planet, config); !rivers) {
-        return std::unexpected(rivers.error());
-    }
-    if (auto plates = parse_plates(*planet, config); !plates) {
-        return std::unexpected(plates.error());
-    }
-    if (auto erosion = parse_erosion(*planet, config); !erosion) {
-        return std::unexpected(erosion.error());
-    }
-    if (auto calendar = parse_calendar(*planet, config); !calendar) {
-        return std::unexpected(calendar.error());
-    }
-    if (auto generator = parse_generator(*planet, config); !generator) {
-        return std::unexpected(generator.error());
+    using Parse = Result<void> (*)(const toml::table&, PlanetConfig&);
+    for (const Parse parse : {parse_ocean, parse_rivers, parse_plates, parse_erosion,
+                              parse_calendar, parse_generator, parse_system}) {
+        if (auto read = parse(*planet, config); !read) {
+            return std::unexpected(read.error());
+        }
     }
 
     const auto population = optional_number(*planet, "population");
@@ -276,9 +278,12 @@ std::uint64_t world_id(const PlanetConfig& config) noexcept {
         config.erosion_cell == PlanetConfig{}.erosion_cell
             ? plates
             : hash_combine(plates, std::bit_cast<std::uint64_t>(config.erosion_cell));
-    return config.generator == Generator::Stamped
-               ? erosion
-               : hash_combine(erosion, static_cast<std::uint64_t>(config.generator));
+    const std::uint64_t generator =
+        config.generator == Generator::Stamped
+            ? erosion
+            : hash_combine(erosion, static_cast<std::uint64_t>(config.generator));
+    return config.system == System{} ? generator
+                                     : hash_combine(generator, system_id(config.system));
 }
 
 } // namespace hog::planet
