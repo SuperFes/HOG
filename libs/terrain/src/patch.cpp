@@ -276,8 +276,9 @@ Patch bake_patch(const planet::World& world, planet::CellId cell, const flora::F
             if (inside(i) && inside(j)) {
                 const flora::Fate fate = fate_at(canonical(corner), fates);
                 exposures[index(i, j)] = world.exposure(sampled, state);
-                // Nothing grows in a river's channel.
-                if (rivers.in_channel(sampled)) {
+                // Nothing grows in a river's channel, though past its mouth it's the bed of the
+                // sea or lake it runs into.
+                if (rivers.in_channel(sampled) && !rivers.standing(sampled, state.elevation)) {
                     exposures[index(i, j)].bare = planet::fixed_one;
                 }
                 woods[index(i, j)] = woods_at(

@@ -581,6 +581,42 @@ TEST_CASE("a patch carries the rock its ground shows about each of its vertices"
     }
 }
 
+TEST_CASE("a river's channel bares the ground only above the water it runs into",
+          "[terrain][patch]") {
+    const World& world = shared_world();
+    const auto& rivers = world.geology().terrain().rivers();
+    int under = 0;
+    for (const auto& reach : rivers.reaches()) {
+        if (!reach.mouth || reach.to_surface != 0 || under > 0) {
+            continue;
+        }
+        for (const double t : {0.8, 0.9, 1.0}) {
+            const DVec3 at = rivers.meander().unshifted(hog::planet::course_at(reach, t));
+            const CellId cell = hog::planet::cell_at(at, hog::terrain::max_patch_level - 2);
+            const Patch patch = bake_patch(world, cell);
+            const hog::planet::FaceIJ face = cell.to_face_ij();
+            for (int j = 0; j < patch_side; ++j) {
+                for (int i = 0; i < patch_side; ++i) {
+                    const Corner corner{.face = face.face,
+                                        .i = (std::int64_t{face.i} << patch_depth) + i,
+                                        .j = (std::int64_t{face.j} << patch_depth) + j,
+                                        .level = face.level + patch_depth};
+                    const CellId sampled = hog::terrain::sample_cell(corner);
+                    const auto state = world.state(sampled);
+                    if (!rivers.in_channel(sampled) || !rivers.standing(sampled, state.elevation)) {
+                        continue;
+                    }
+                    INFO("vertex " << i << ", " << j);
+                    CHECK(patch.vertices.at(vertex_index(i, j)).bare ==
+                          hog::terrain::packed_bare(world.exposure(sampled, state).bare));
+                    ++under;
+                }
+            }
+        }
+    }
+    CHECK(under > 0);
+}
+
 TEST_CASE("a patch's woods thin where they died, and grow back younger", "[terrain][patch]") {
     const World& world = shared_world();
     const CellId cell = land_patch();
