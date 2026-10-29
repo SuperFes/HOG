@@ -192,7 +192,9 @@ Every process, where it runs and how. **Resolved** means the cells hold it; **be
 
 ### 0 · Planet
 
-Radius from population (as now) or `radius_km`; bigger is fine if it makes room for big drainage. The orbit's tilt, eccentricity and precession wander in slow cycles, which is what brings ice ages; a moon (or more) raises tides and lights the night; the air's makeup sets how much heat it holds. The sea comes from a water inventory, not a land fraction. The world starts with enough water to stand in an even layer about as deep as Earth's would, and the coast falls wherever that water actually sits. Once the world has settled, if the sea covers less than `ocean_fraction`, it's topped up with as much more as it takes, as if it came from space. Nothing is tested against the target before generation is done.
+Radius from population (as now) or `radius_km`; bigger is fine if it makes room for big drainage. Gravity is set, Earth's by default, not worked out from the size: the planet is small for the game's sake, and everything on it behaves as on Earth.
+
+The planet belongs to a small system, Earth's by default: one or more stars (a binary is two, either both orbited or one far off), the planet's own orbit, any number of moons, optional rings in the equator's plane, and other planets seen as lights. Sunlight is the sum over the stars, and tides the sum over moons and stars, so another moon or a second sun is a matter of settings. The orbit's tilt, eccentricity and precession wander in slow cycles, which is what brings ice ages; a moon (or more) raises tides and lights the night; the air's makeup sets how much heat it holds. The sea comes from a water inventory, not a land fraction. The world starts with enough water to stand in an even layer about as deep as Earth's would, and the coast falls wherever that water actually sits. Once the world has settled, if the sea covers less than `ocean_fraction`, it's topped up with as much more as it takes, as if it came from space. Nothing is tested against the target before generation is done.
 
 ### 1 · Tectonics
 
@@ -285,7 +287,11 @@ Small steps, each one a commit or a few, each landing with unit tests, stills wh
 12. Debug views coloured by state: temperature, age, strength, water.
 
 **C · Planet and plates**
-13. The planet: radius, gravity, day, tilt, orbit and its cycles, moons, air, water inventory.
+13. The planet and its system:
+    - 13a. The record and its settings, Earth's by default: radius, gravity, day, tilt; stars, orbit, moons, rings, other planets; air; water inventory.
+    - 13b. Where each body is at a time, by its orbit, and the light each star sends.
+    - 13c. The orbit's slow cycles over deep time: tilt, eccentricity, precession.
+    - 13d. Tides from every moon and star.
 14. Plates as frames carrying their own crust; the volume's crust read from them.
 15. Boundaries from overlaps and gaps: spreading, subduction, collision.
 16. Plates moved by their forces: slab pull, ridge push, drag.
@@ -388,6 +394,7 @@ Small steps, each one a commit or a few, each landing with unit tests, stills wh
 93. Detail synthesised below the cells (stage 8).
 94. The smooth display: dual contouring, seams between sizes, distance levels.
 95. Texturing by material and state; water and vegetation on the smooth surface; dark caves and light through water.
+96. The system in the sky: each sun, moons in their phases, rings and the shadows they cast and catch, other planets.
 
 ## What carries over
 
