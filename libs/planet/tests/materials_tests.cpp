@@ -20,6 +20,8 @@ TEST_CASE("materials float and sink as they should", "[planet][materials]") {
     CHECK(properties(Material::Snow).density < properties(Material::Ice).density);
     // Continents ride high on denser ocean floor.
     CHECK(properties(Material::Granite).density < properties(Material::Basalt).density);
+    // All crust floats on the mantle.
+    CHECK(properties(Material::Basalt).density < properties(Material::Mantle).density);
     // Melt rises through the rock it came from.
     CHECK(properties(Material::Magma).density < properties(Material::Basalt).density);
 }

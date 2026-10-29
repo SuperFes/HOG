@@ -2,6 +2,7 @@
 #include <hog/planet/lithosphere.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tectonics.hpp>
+#include <hog/planet/volume.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -94,6 +95,38 @@ Lithosphere lithosphere_from(const Tectonics& tectonics, double step_years) {
                                .raised = column.raised * step});
     }
     return Lithosphere{tectonics.grid(), std::move(plates)};
+}
+
+void fill_lithosphere(Volume& volume, const Lithosphere& lithosphere, double radius, int level,
+                      int shell_level) {
+    const auto filled = [](Material material) {
+        Contents contents;
+        contents.material = material;
+        return contents;
+    };
+    const double bottom = radius - (volume_span / 2.0);
+    const std::uint32_t across = 1U << static_cast<unsigned>(level);
+    for (int face = 0; face < face_count; ++face) {
+        for (std::uint32_t i = 0; i < across; ++i) {
+            for (std::uint32_t j = 0; j < across; ++j) {
+                const CellId column = CellId::from_face_ij(face, i, j, level);
+                const std::optional<Lithosphere::Found> found =
+                    lithosphere.top(cell_center(column));
+                if (!found) {
+                    fill_between(volume, radius, column, bottom, radius, shell_level,
+                                 filled(Material::Mantle));
+                    continue;
+                }
+                const Crust& crust = found->crust;
+                const double base = radius - (static_cast<double>(crust.thickness) * 1'000.0);
+                fill_between(volume, radius, column, bottom, base, shell_level,
+                             filled(Material::Mantle));
+                fill_between(volume, radius, column, base, radius, shell_level,
+                             filled(crust.type == CrustType::Continental ? Material::Granite
+                                                                         : Material::Basalt));
+            }
+        }
+    }
 }
 
 } // namespace hog::planet

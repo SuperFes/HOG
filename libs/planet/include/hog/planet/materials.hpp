@@ -20,16 +20,18 @@ enum class Material : std::uint8_t {
     Basalt,
     Metamorphic,
     Magma,
+    Mantle,
 };
 
-inline constexpr std::size_t material_count = static_cast<std::size_t>(Material::Magma) + 1;
+inline constexpr std::size_t material_count = static_cast<std::size_t>(Material::Mantle) + 1;
 
 struct MaterialProperties {
     float density = 0.0F;       // kilograms per cubic metre
     float specific_heat = 0.0F; // joules per kilogram per kelvin
 };
 
-// Typical values near the surface; air at sea level, fresh snow, and melt for magma.
+// Typical values near the surface; air at sea level, fresh snow, melt for magma, and the mantle
+// just under the crust.
 [[nodiscard]] constexpr MaterialProperties properties(Material material) {
     switch (material) {
     case Material::Air:
@@ -58,6 +60,8 @@ struct MaterialProperties {
         return {.density = 2800.0F, .specific_heat = 850.0F};
     case Material::Magma:
         return {.density = 2700.0F, .specific_heat = 1200.0F};
+    case Material::Mantle:
+        return {.density = 3300.0F, .specific_heat = 1250.0F};
     }
     return {};
 }

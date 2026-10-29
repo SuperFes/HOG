@@ -11,6 +11,7 @@
 namespace hog::planet {
 
 class Tectonics;
+class Volume;
 
 enum class CrustType : std::uint8_t { Oceanic, Continental };
 
@@ -79,5 +80,12 @@ private:
 // The plates and crust of `tectonics` as they stand, each plate's frame the planet's, with one of
 // its steps taken as `step_years` million years.
 [[nodiscard]] Lithosphere lithosphere_from(const Tectonics& tectonics, double step_years);
+
+// Fills every column of `level` from the volume's bottom to the planet's radius with the crust on
+// top there, basalt for ocean floor and granite for continents, and the mantle under it, in shells
+// of `shell_level`. Where the plates have parted the mantle reaches the top. All crust tops out at
+// the radius, since how high it floats depends on more than the crust alone.
+void fill_lithosphere(Volume& volume, const Lithosphere& lithosphere, double radius, int level,
+                      int shell_level);
 
 } // namespace hog::planet

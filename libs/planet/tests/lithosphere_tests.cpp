@@ -1,10 +1,12 @@
 #include <hog/planet/lithosphere.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tectonics.hpp>
+#include <hog/planet/volume.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <numbers>
@@ -18,7 +20,9 @@ using hog::planet::Crust;
 using hog::planet::CrustType;
 using hog::planet::LevelGrid;
 using hog::planet::Lithosphere;
+using hog::planet::Material;
 using hog::planet::Tectonics;
+using hog::planet::Volume;
 
 namespace {
 
@@ -189,4 +193,75 @@ TEST_CASE("plates turning apart leave places with no crust", "[planet][lithosphe
     CHECK_FALSE(lithosphere.top(on_equator));
     CHECK(top_plate(lithosphere, DVec3{0.0, 0.0, 1.0}) == 0);
     CHECK(top_plate(lithosphere, DVec3{0.0, 0.0, -1.0}) == 1);
+}
+
+namespace {
+
+// Shells a kilometre thick.
+constexpr int shell_level = 8;
+
+Volume filled(const Lithosphere& lithosphere) {
+    Volume volume{hog::planet::Contents{}, 2};
+    hog::planet::fill_lithosphere(volume, lithosphere, radius, lithosphere.grid().level(),
+                                  shell_level);
+    volume.settle();
+    return volume;
+}
+
+Material material_at(const Volume& volume, DVec3 direction, double height) {
+    const hog::WorldPosition position{direction * (radius + height)};
+    const auto leaf = hog::planet::leaf_at(volume, radius, position);
+    REQUIRE(leaf.has_value());
+    return hog::planet::material_at(leaf.value_or(Volume::Leaf{}), radius, position);
+}
+
+} // namespace
+
+TEST_CASE("the volume's rock is the crust on top over the mantle", "[planet][lithosphere]") {
+    Lithosphere lithosphere = hog::planet::lithosphere_from(start(), step_years);
+    lithosphere.advance(3.0 * step_years);
+    const Volume volume = filled(lithosphere);
+    const auto& grid = lithosphere.grid();
+    int parted = 0;
+    for (std::uint32_t cell = 0; cell < grid.size(); cell += 5) {
+        const DVec3 at = hog::planet::cell_center(grid.cell(cell));
+        CHECK(material_at(volume, at, 300.0) == Material::Air);
+        const auto found = lithosphere.top(at);
+        if (!found) {
+            ++parted;
+            CHECK(material_at(volume, at, -300.0) == Material::Mantle);
+            continue;
+        }
+        const Crust crust = found.value_or(Lithosphere::Found{}).crust;
+        CHECK(material_at(volume, at, -300.0) ==
+              (crust.type == CrustType::Continental ? Material::Granite : Material::Basalt));
+        const double base = static_cast<double>(crust.thickness) * 1'000.0;
+        CHECK(material_at(volume, at, -base - 2'000.0) == Material::Mantle);
+    }
+    // Plates turning apart without new floor between them leave gaps.
+    CHECK(parted > 0);
+}
+
+TEST_CASE("the volume holds as much crust as the plates carry", "[planet][lithosphere]") {
+    const Lithosphere lithosphere = hog::planet::lithosphere_from(start(), step_years);
+    const auto counted = hog::planet::budget(filled(lithosphere), radius);
+    const auto& grid = lithosphere.grid();
+    double granite = 0.0;
+    double basalt = 0.0;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const Crust crust = lithosphere.top(hog::planet::cell_center(grid.cell(cell)))
+                                .value_or(Lithosphere::Found{})
+                                .crust;
+        // The column's share of the sphere, times its shell from the base of the crust up.
+        const double share = static_cast<double>(grid.area(cell)) / (radius * radius);
+        const double base = radius - (static_cast<double>(crust.thickness) * 1'000.0);
+        const double rock = share * (std::pow(radius, 3.0) - std::pow(base, 3.0)) / 3.0;
+        (crust.type == CrustType::Continental ? granite : basalt) += rock;
+    }
+    CHECK_THAT(counted.of(Material::Granite), WithinRel(granite, 0.03));
+    CHECK_THAT(counted.of(Material::Basalt), WithinRel(basalt, 0.03));
+    const double ball = 4.0 / 3.0 * std::numbers::pi * std::pow(radius, 3.0);
+    CHECK_THAT(counted.of(Material::Granite) + counted.of(Material::Basalt) +
+                   counted.of(Material::Mantle),
+               WithinRel(ball, 0.02));
 }

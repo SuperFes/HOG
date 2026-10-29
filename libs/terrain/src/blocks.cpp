@@ -187,6 +187,8 @@ Vec3 block_colour(Material material) {
         return {0.45F, 0.42F, 0.5F};
     case Material::Magma:
         return {1.0F, 0.35F, 0.05F};
+    case Material::Mantle:
+        return {0.3F, 0.36F, 0.22F};
     }
     return {1.0F, 0.0F, 1.0F};
 }
