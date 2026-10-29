@@ -31,6 +31,7 @@ A cell splits only where its contents differ: at the ground, a rock contact, a s
 
 - **Material:** rock by province (basalt, granite, sandstone, limestone, metamorphic), sediment, soil, ice, water, air, magma.
 - **State by material:** temperature; strength and porosity for rock; water content for soil and sediment; flow, temperature and salinity for water; wind, moisture and cloud water for air; temperature and gas for magma.
+- **What a material is for:** only the properties that change how the land forms — strength and how fast it wears, density for how high it floats, porosity and how it dissolves for springs and caves, where it melts. Nothing is mixed or tracked by makeup; below the crust, the mantle is only where heat and the plates' forces come from.
 - **Where a surface crosses it:** a signed distance and normal, so the smooth display can find sharp cliffs and soft hills from the same data.
 
 ### Water
