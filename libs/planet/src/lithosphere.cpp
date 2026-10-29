@@ -6,9 +6,11 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <iterator>
 #include <limits>
+#include <numbers>
 #include <optional>
 #include <span>
 #include <utility>
@@ -169,6 +171,68 @@ void flow(Lithosphere::Plate& plate, const LevelGrid& grid, float settled, float
     }
 }
 
+// What a boundary is, by the crust either side, whether this side wins ties, and how fast they
+// close across it.
+Boundary::Kind kind_of(const Crust& own, const Crust& facing, bool lower, double closing) {
+    if (closing <= 0.0) {
+        return Boundary::Kind::Ridge;
+    }
+    if (own.type == CrustType::Continental && facing.type == CrustType::Continental) {
+        return Boundary::Kind::Collision;
+    }
+    const bool over = stays_over(own, facing) || (!stays_over(facing, own) && lower);
+    return over ? Boundary::Kind::Arc : Boundary::Kind::Trench;
+}
+
+// Of a place on a plate's edge, the plates on top of the places around it other than its own,
+// each once.
+std::vector<std::uint32_t> others_around(const LevelGrid& grid,
+                                         std::span<const std::optional<Lithosphere::Found>> tops,
+                                         std::uint32_t place, std::uint32_t own) {
+    std::vector<std::uint32_t> others;
+    for (const std::uint32_t next : grid.neighbors(place)) {
+        const std::optional<Lithosphere::Found>& there = tops[next];
+        if (there && there->plate != own) {
+            others.push_back(there->plate);
+        }
+    }
+    std::ranges::sort(others);
+    const auto [last, end] = std::ranges::unique(others);
+    others.erase(last, end);
+    return others;
+}
+
+// From a place toward the places around it with `other` on top, along the surface, and the
+// crust on the first of them; none if there are none.
+struct Facing {
+    DVec3 toward;
+    Crust crust;
+};
+std::optional<Facing> facing(const LevelGrid& grid,
+                             std::span<const std::optional<Lithosphere::Found>> tops,
+                             std::uint32_t place, std::uint32_t other) {
+    const DVec3 at = cell_center(grid.cell(place));
+    std::optional<Facing> found;
+    for (const std::uint32_t next : grid.neighbors(place)) {
+        const std::optional<Lithosphere::Found>& there = tops[next];
+        if (!there || there->plate != other) {
+            continue;
+        }
+        const DVec3 offset = cell_center(grid.cell(next)) - at;
+        const DVec3 along = offset - (glm::dot(offset, at) * at);
+        if (found) {
+            found->toward += along;
+        } else {
+            found = Facing{.toward = along, .crust = there->crust};
+        }
+    }
+    if (!found || glm::length(found->toward) == 0.0) {
+        return std::nullopt;
+    }
+    found->toward = glm::normalize(found->toward);
+    return found;
+}
+
 } // namespace
 
 bool stays_over(const Crust& one, const Crust& other) noexcept {
@@ -247,6 +311,46 @@ DVec3 Lithosphere::to_planet(std::uint32_t plate, DVec3 own) const {
 
 DVec3 Lithosphere::to_plate(std::uint32_t plate, DVec3 at) const {
     return glm::conjugate(plates_[plate].frame) * at;
+}
+
+DVec3 Lithosphere::velocity(std::uint32_t plate, DVec3 at) const {
+    return plates_[plate].rate * glm::cross(plates_[plate].pole, at);
+}
+
+std::vector<Boundary> Lithosphere::boundaries() const {
+    std::vector<std::optional<Found>> tops(grid_.size());
+    double sphere = 0.0;
+    for (std::uint32_t place = 0; place < grid_.size(); ++place) {
+        tops[place] = top(cell_center(grid_.cell(place)));
+        sphere += static_cast<double>(grid_.area(place));
+    }
+    std::vector<Boundary> found;
+    for (std::uint32_t place = 0; place < grid_.size(); ++place) {
+        const std::optional<Found>& mine = tops[place];
+        if (!mine) {
+            continue;
+        }
+        const Found& here = *mine;
+        const DVec3 at = cell_center(grid_.cell(place));
+        for (const std::uint32_t other : others_around(grid_, tops, place, here.plate)) {
+            const std::optional<Facing> across = facing(grid_, tops, place, other);
+            if (!across) {
+                continue;
+            }
+            Boundary boundary{.place = place,
+                              .plate = here.plate,
+                              .other = other,
+                              .normal = across->toward,
+                              .length = std::sqrt(4.0 * std::numbers::pi *
+                                                  static_cast<double>(grid_.area(place)) / sphere)};
+            boundary.closing =
+                glm::dot(velocity(here.plate, at) - velocity(other, at), boundary.normal);
+            boundary.kind =
+                kind_of(here.crust, across->crust, here.plate < other, boundary.closing);
+            found.push_back(boundary);
+        }
+    }
+    return found;
 }
 
 std::optional<std::size_t> Lithosphere::held(std::uint32_t plate, DVec3 at) const {

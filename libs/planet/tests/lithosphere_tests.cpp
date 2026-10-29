@@ -566,6 +566,75 @@ TEST_CASE("no continent is lost as plates part and meet", "[planet][lithosphere]
     CHECK_THAT(continental_volume(lithosphere), WithinRel(volume, 0.01));
 }
 
+TEST_CASE("a plate carries each place round its pole", "[planet][lithosphere]") {
+    const Lithosphere lithosphere = halves();
+    // The northern half turns about +x at 0.01 a million years, so the +y axis heads north.
+    const DVec3 moving = lithosphere.velocity(0, DVec3{0.0, 1.0, 0.0});
+    CHECK_THAT(glm::length(moving - DVec3{0.0, 0.0, 0.01}), WithinAbs(0.0, 1e-12));
+    CHECK_THAT(glm::length(lithosphere.velocity(0, DVec3{1.0, 0.0, 0.0})), WithinAbs(0.0, 1e-12));
+}
+
+namespace {
+
+using Kind = hog::planet::Boundary::Kind;
+
+// Plates moved on and settled: the overlaps between them gone and the gaps filled.
+Lithosphere settled(Lithosphere lithosphere, double years) {
+    lithosphere.advance(years);
+    lithosphere.subduct(years);
+    lithosphere.collide(years);
+    lithosphere.spread();
+    return lithosphere;
+}
+
+} // namespace
+
+TEST_CASE("plates part at ridges and close at trenches, either side of their edge",
+          "[planet][lithosphere]") {
+    const Lithosphere lithosphere = settled(halves(), 20.0);
+    const auto& grid = lithosphere.grid();
+    const std::vector<hog::planet::Boundary> found = lithosphere.boundaries();
+    REQUIRE_FALSE(found.empty());
+    // Both halves turn at 0.01 a million years, so they part and close at up to twice that.
+    constexpr double most = 0.02;
+    for (const auto& boundary : found) {
+        const DVec3 at = hog::planet::cell_center(grid.cell(boundary.place));
+        CHECK(boundary.other == 1 - boundary.plate);
+        CHECK_THAT(glm::dot(boundary.normal, at), WithinAbs(0.0, 1e-9));
+        CHECK_THAT(glm::length(boundary.normal), WithinAbs(1.0, 1e-9));
+        // From the north toward the south, and back, as far as the edge's steps let it.
+        CHECK(glm::dot(boundary.normal, DVec3{0.0, 0.0, boundary.plate == 0 ? -1.0 : 1.0}) > 0.0);
+        CHECK(boundary.length > 0.0);
+        CHECK(std::abs(boundary.closing) <= most * 1.01);
+        // Away from the poles they turn about, they part around +y and close around -y.
+        if (std::abs(at.x) > 0.5) {
+            continue;
+        }
+        if (at.y > 0.0) {
+            CHECK(boundary.kind == Kind::Ridge);
+            CHECK(boundary.closing < -most * 0.5);
+        } else {
+            CHECK(boundary.closing > most * 0.5);
+            // Floor as old either side: the lower plate's stays on top, and the other's dives.
+            CHECK(boundary.kind == (boundary.plate == 0 ? Kind::Arc : Kind::Trench));
+        }
+    }
+}
+
+TEST_CASE("continents closing on each other collide", "[planet][lithosphere]") {
+    const Lithosphere lithosphere = settled(continental_halves(), 20.0);
+    int collisions = 0;
+    for (const auto& boundary : lithosphere.boundaries()) {
+        // Away from the poles they turn about, where new floor parts them.
+        const DVec3 at = hog::planet::cell_center(lithosphere.grid().cell(boundary.place));
+        if (boundary.closing > 0.0 && std::abs(at.x) < 0.5) {
+            CHECK(boundary.kind == Kind::Collision);
+            ++collisions;
+        }
+    }
+    CHECK(collisions > 0);
+}
+
 namespace {
 
 // Shells a kilometre thick.

@@ -47,6 +47,25 @@ struct Ranges {
     float flow = 0.02F;
 };
 
+// A stretch of one plate's edge, a place of the grid long, where it meets another plate.
+struct Boundary {
+    enum class Kind : std::uint8_t {
+        Ridge,     // they part, and new floor wells up between them
+        Trench,    // they close, and this plate's floor dives under the other
+        Arc,       // they close, and the other's floor dives under this plate
+        Collision, // they close, continent against continent
+    };
+
+    Kind kind = Kind::Ridge;
+    std::uint32_t place = 0; // of the grid, on this plate's edge
+    std::uint32_t plate = 0;
+    std::uint32_t other = 0;
+    DVec3 normal{0.0};   // unit, along the surface from this plate toward the other
+    double length = 0.0; // radians of the planet's circumference
+    // Radians per million years the plates close at across it; under nought where they part.
+    double closing = 0.0;
+};
+
 // The crust as rigid plates on the sphere, each keeping its crust on a grid in its own frame and
 // turning about its own pole. Crust is never carried from cell to cell, so a plate stays whole
 // however far it turns: where two plates' crust lies over one place they've met, and where none
@@ -104,6 +123,11 @@ public:
     // The crust left on top over a unit direction, or none where the plates have parted. Ties go
     // to the lower plate, so the same plates always give the same crust.
     [[nodiscard]] std::optional<Found> top(DVec3 at) const;
+
+    // How fast a plate carries a unit direction along, in radians per million years.
+    [[nodiscard]] DVec3 velocity(std::uint32_t plate, DVec3 at) const;
+    // Every stretch of every plate's edge, by the plates on top on either side.
+    [[nodiscard]] std::vector<Boundary> boundaries() const;
 
 private:
     // Where in a plate's cells is the crust it carries over a unit direction, if it has any.
