@@ -184,8 +184,14 @@ private:
                                   const render::AirBindings& air);
     // Blocks show the bare volume, so nothing grows on them.
     [[nodiscard]] bool growing() const noexcept { return grass_on_ && !blocks_on_; }
-    // Adds the pass drawing the deep water and the ground on it, as the streamed patches or as
-    // blocks.
+    // Adds the sea and river passes over what's drawn to `target` and `depth`, seeing through to
+    // what's behind them; none over blocks, which hold their own water.
+    void add_water(render::RenderGraph& graph, const render::Frame& frame, const Shot& shot,
+                   const render::OceanView& sea, std::span<const render::GraphUse> through_air,
+                   render::GraphImage target, render::GraphImage depth,
+                   const render::GraphTargets& drawn, const render::AirBindings& air);
+    // Adds the pass drawing the deep water and the ground on it, as the streamed patches, or the
+    // blocks alone.
     void add_ground(render::RenderGraph& graph, const render::Frame& frame, const Shot& shot,
                     const render::OceanView& sea, std::span<const terrain::StreamedPatch> patches,
                     std::span<const render::GraphUse> through_air,

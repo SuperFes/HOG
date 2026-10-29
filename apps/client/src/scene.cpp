@@ -520,6 +520,36 @@ std::optional<render::SeaBehind> seen_behind(const render::RenderGraph& graph,
 
 } // namespace
 
+void Scene::add_water(render::RenderGraph& graph, const render::Frame& frame, const Shot& shot,
+                      const render::OceanView& sea, std::span<const render::GraphUse> through_air,
+                      render::GraphImage target, render::GraphImage depth,
+                      const render::GraphTargets& drawn, const render::AirBindings& air) {
+    if (blocks_on_) {
+        return;
+    }
+    VkImageView environment = probing_ ? probes_.at(frame.slot).cube().view() : VK_NULL_HANDLE;
+    std::vector<render::GraphUse> sea_uses{through_air.begin(), through_air.end()};
+    const std::optional<SeaCopies> behind = copy_behind_sea(graph, target, depth, frame, sea_uses);
+    graph.add({.name = "sea", .uses = sea_uses, .targets = drawn},
+              [&, behind, environment](VkCommandBuffer commands) {
+                  render::OceanView looking = sea;
+                  looking.behind = seen_behind(graph, behind, environment);
+                  return ocean_.draw(commands, frame.extent, looking, frame.slot);
+              });
+    graph.add({.name = "rivers", .uses = sea_uses, .targets = drawn},
+              [&, behind](VkCommandBuffer commands) {
+                  return rivers_->draw(
+                      commands, frame.extent,
+                      {.camera = shot.camera,
+                       .sun = sea.sun,
+                       .bend = shot.bend,
+                       .air = air,
+                       .behind = seen_behind(graph, behind, VK_NULL_HANDLE),
+                       .time = std::chrono::duration<double>(shot.time.time_since_epoch()).count()},
+                      frame.slot);
+              });
+}
+
 void Scene::add_ground(render::RenderGraph& graph, const render::Frame& frame, const Shot& shot,
                        const render::OceanView& sea,
                        std::span<const terrain::StreamedPatch> patches,
@@ -529,11 +559,9 @@ void Scene::add_ground(render::RenderGraph& graph, const render::Frame& frame, c
         .name = "ground", .uses = {through_air.begin(), through_air.end()}, .targets = drawn};
     if (blocks_on_) {
         graph.add(std::move(pass), [&](VkCommandBuffer commands) {
-            return draw_deep(ocean_, commands, frame, sea).and_then([&] {
-                return blocks_->draw(commands, frame.extent,
-                                     {.camera = shot.camera, .sun = sea.sun, .bend = shot.bend},
-                                     frame.slot);
-            });
+            return blocks_->draw(commands, frame.extent,
+                                 {.camera = shot.camera, .sun = sea.sun, .bend = shot.bend},
+                                 frame.slot);
         });
         return;
     }
@@ -816,27 +844,7 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     // and from under it, what's out of it all round.
     probing_ = take_probe(graph, frame, shot, sky, through_air, through);
     last_slot_ = frame.slot;
-    VkImageView environment = probing_ ? probes_.at(frame.slot).cube().view() : VK_NULL_HANDLE;
-    std::vector<render::GraphUse> sea_uses = through_air;
-    const std::optional<SeaCopies> behind = copy_behind_sea(graph, target, depth, frame, sea_uses);
-    graph.add({.name = "sea", .uses = sea_uses, .targets = drawn},
-              [&, behind, environment](VkCommandBuffer commands) {
-                  render::OceanView looking = sea;
-                  looking.behind = seen_behind(graph, behind, environment);
-                  return ocean_.draw(commands, frame.extent, looking, frame.slot);
-              });
-    graph.add({.name = "rivers", .uses = sea_uses, .targets = drawn},
-              [&, behind](VkCommandBuffer commands) {
-                  return rivers_->draw(
-                      commands, frame.extent,
-                      {.camera = shot.camera,
-                       .sun = sky.sun,
-                       .bend = shot.bend,
-                       .air = through,
-                       .behind = seen_behind(graph, behind, VK_NULL_HANDLE),
-                       .time = std::chrono::duration<double>(shot.time.time_since_epoch()).count()},
-                      frame.slot);
-              });
+    add_water(graph, frame, shot, sea, through_air, target, depth, drawn, through);
     if (render::precipitation_count(falling, static_cast<double>(here.snow)) > 0) {
         graph.add({.name = "rain", .uses = through_air, .targets = drawn},
                   [&](VkCommandBuffer commands) {
