@@ -87,6 +87,20 @@ TEST_CASE("a config breaks the crust into plates", "[planet][config]") {
     CHECK(config->plates == 24);
 }
 
+TEST_CASE("a config picks how the ground is made", "[planet][config]") {
+    const auto plain = parse_planet_config("[planet]\nseed = 0\nradius_km = 1\n");
+    REQUIRE(plain.has_value());
+    CHECK(plain->generator == hog::planet::Generator::Stamped);
+    const auto stamped =
+        parse_planet_config("[planet]\nseed = 0\nradius_km = 1\ngenerator = \"v1\"\n");
+    REQUIRE(stamped.has_value());
+    CHECK(stamped->generator == hog::planet::Generator::Stamped);
+    const auto evolved =
+        parse_planet_config("[planet]\nseed = 0\nradius_km = 1\ngenerator = \"v2\"\n");
+    REQUIRE(evolved.has_value());
+    CHECK(evolved->generator == hog::planet::Generator::Evolved);
+}
+
 TEST_CASE("the shipped development config is the 500k planet", "[planet][config]") {
     const auto config = hog::planet::load_planet_config(HOG_SOURCE_DIR "/config/planet.toml");
     REQUIRE(config.has_value());
@@ -142,7 +156,11 @@ TEST_CASE("bad configs are rejected with a reason", "[planet][config]") {
         Case{"[planet]\nseed = 1\nradius_km = 5\nplates = 65", ErrorCode::InvalidArgument,
              "plates"},
         Case{"[planet]\nseed = 1\nradius_km = 5\nplates = 2.5", ErrorCode::InvalidArgument,
-             "plates"});
+             "plates"},
+        Case{"[planet]\nseed = 1\nradius_km = 5\ngenerator = \"v3\"", ErrorCode::InvalidArgument,
+             "generator"},
+        Case{"[planet]\nseed = 1\nradius_km = 5\ngenerator = 2", ErrorCode::InvalidArgument,
+             "generator"});
 
     const auto config = parse_planet_config(bad.toml);
     INFO(bad.toml);
@@ -188,6 +206,9 @@ TEST_CASE("a world's id follows what shapes its ground", "[planet][config]") {
     CHECK(hog::planet::world_id(other) != id);
     other = base;
     other.erosion_cell = 300.0;
+    CHECK(hog::planet::world_id(other) != id);
+    other = base;
+    other.generator = hog::planet::Generator::Evolved;
     CHECK(hog::planet::world_id(other) != id);
 
     other = base;

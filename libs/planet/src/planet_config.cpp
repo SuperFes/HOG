@@ -21,10 +21,18 @@ namespace {
 
 using namespace std::string_view_literals;
 
-constexpr std::array known_keys{
-    "seed"sv,        "ocean_fraction"sv, "population"sv, "settled_density"sv, "wilderness_factor"sv,
-    "radius_km"sv,   "day_hours"sv,      "axial_tilt"sv, "river_scale"sv,     "plates"sv,
-    "erosion_cell"sv};
+constexpr std::array known_keys{"seed"sv,
+                                "ocean_fraction"sv,
+                                "population"sv,
+                                "settled_density"sv,
+                                "wilderness_factor"sv,
+                                "radius_km"sv,
+                                "day_hours"sv,
+                                "axial_tilt"sv,
+                                "river_scale"sv,
+                                "plates"sv,
+                                "erosion_cell"sv,
+                                "generator"sv};
 
 constexpr double min_day_hours = 0.01;
 constexpr double max_day_hours = 24.0 * 366.0;
@@ -99,6 +107,22 @@ constexpr double max_erosion_cell = 5'000.0;
         return invalid("planet.plates must be a whole number from 2 to 64");
     }
     config.plates = static_cast<int>(count);
+    return {};
+}
+
+[[nodiscard]] Result<void> parse_generator(const toml::table& planet, PlanetConfig& config) {
+    const auto node = planet["generator"];
+    if (!node) {
+        return {};
+    }
+    const auto* name = node.as_string();
+    if (name != nullptr && name->get() == "v1") {
+        config.generator = Generator::Stamped;
+    } else if (name != nullptr && name->get() == "v2") {
+        config.generator = Generator::Evolved;
+    } else {
+        return invalid(R"(planet.generator must be "v1" or "v2")");
+    }
     return {};
 }
 
@@ -186,6 +210,9 @@ Result<PlanetConfig> parse_planet_config(std::string_view text) {
     if (auto calendar = parse_calendar(*planet, config); !calendar) {
         return std::unexpected(calendar.error());
     }
+    if (auto generator = parse_generator(*planet, config); !generator) {
+        return std::unexpected(generator.error());
+    }
 
     const auto population = optional_number(*planet, "population");
     const auto density = optional_number(*planet, "settled_density");
@@ -245,9 +272,13 @@ std::uint64_t world_id(const PlanetConfig& config) noexcept {
         config.plates == PlanetConfig{}.plates
             ? rivers
             : hash_combine(rivers, static_cast<std::uint64_t>(config.plates));
-    return config.erosion_cell == PlanetConfig{}.erosion_cell
-               ? plates
-               : hash_combine(plates, std::bit_cast<std::uint64_t>(config.erosion_cell));
+    const std::uint64_t erosion =
+        config.erosion_cell == PlanetConfig{}.erosion_cell
+            ? plates
+            : hash_combine(plates, std::bit_cast<std::uint64_t>(config.erosion_cell));
+    return config.generator == Generator::Stamped
+               ? erosion
+               : hash_combine(erosion, static_cast<std::uint64_t>(config.generator));
 }
 
 } // namespace hog::planet

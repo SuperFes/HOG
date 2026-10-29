@@ -20,6 +20,10 @@ struct PopulationSizing {
 // Radius in metres of a planet with enough land for the population.
 [[nodiscard]] double radius_for_population(const PopulationSizing& sizing, double ocean_fraction);
 
+// How a world's ground is made: v1 stamps continents, ranges and climate from a still snapshot of
+// the plates and wears them; v2 evolves the planet stage by stage, as docs/world-v2.md lays out.
+enum class Generator : std::uint8_t { Stamped, Evolved };
+
 struct PlanetConfig {
     std::uint64_t seed = 0;
     double ocean_fraction = 0.7;
@@ -35,6 +39,7 @@ struct PlanetConfig {
     // One turn of day and night, in real time; the year is Earth's.
     GameDuration day_length = std::chrono::hours{4};
     double axial_tilt = 23.44; // degrees
+    Generator generator = Generator::Stamped;
     // Where the world's landform is kept once evolved, so it evolves once rather than whenever
     // the world is built; HOG_BAKES names one where this is empty, and with neither it's never
     // kept. Not part of the world, so never read from its config.
@@ -43,8 +48,8 @@ struct PlanetConfig {
 
 // Identifies a world by what shapes its ground, so state saved for one is never loaded into
 // another. Day length and tilt only move the sun, so they can change under a running world. A
-// river scale of 1, ten plates and 150 m erosion cells leave the id as it was before those could
-// be set.
+// river scale of 1, ten plates, 150 m erosion cells and the v1 generator leave the id as it was
+// before those could be set.
 [[nodiscard]] std::uint64_t world_id(const PlanetConfig& config) noexcept;
 
 // Reads a [planet] table:
@@ -58,6 +63,7 @@ struct PlanetConfig {
 //     river_scale = 1.0         # optional, above 0 and at most 20
 //     plates = 10               # optional, 2 to 64
 //     erosion_cell = 150.0      # optional, metres, 50 to 5000
+//     generator = "v1"          # optional, "v1" or "v2"
 //     day_hours = 4.0           # optional
 //     axial_tilt = 23.44        # optional, degrees
 //
