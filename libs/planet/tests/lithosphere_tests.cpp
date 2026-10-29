@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -77,6 +78,27 @@ Lithosphere::Plate northern(const LevelGrid& grid, Lithosphere::Plate plate) {
         }
     }
     return half;
+}
+
+// Two halves of the planet meeting along the equator, turning about the x axis in opposite ways,
+// so they part around +y and meet around -y.
+Lithosphere halves() {
+    const LevelGrid grid{4, radius};
+    const DVec3 pole{1.0, 0.0, 0.0};
+    constexpr double rate = 0.01;
+    const Lithosphere::Plate north = northern(grid, everywhere(grid, Crust{}, pole, rate));
+    Lithosphere::Plate south = northern(grid, everywhere(grid, Crust{}, pole, -rate));
+    south.frame = glm::angleAxis(std::numbers::pi, pole);
+    return Lithosphere{grid, {north, south}};
+}
+
+// On the equator where the halves part, and either side of it.
+constexpr DVec3 on_equator{0.0, 1.0, 0.0};
+DVec3 near_north() {
+    return glm::normalize(DVec3{0.0, 1.0, 0.1});
+}
+DVec3 near_south() {
+    return glm::normalize(DVec3{0.0, 1.0, -0.1});
 }
 
 constexpr auto no_plate = std::numeric_limits<std::uint32_t>::max();
@@ -174,25 +196,81 @@ TEST_CASE("where plates overlap the lighter crust stays on top", "[planet][litho
 }
 
 TEST_CASE("plates turning apart leave places with no crust", "[planet][lithosphere]") {
-    const LevelGrid grid{4, radius};
-    // Two halves of the planet meeting along the equator, each turning away from it.
-    const DVec3 pole{1.0, 0.0, 0.0};
-    const double rate = 0.01;
-    const Lithosphere::Plate north = northern(grid, everywhere(grid, Crust{}, pole, rate));
-    Lithosphere::Plate south = northern(grid, everywhere(grid, Crust{}, pole, -rate));
-    south.frame = glm::angleAxis(std::numbers::pi, pole);
-    Lithosphere lithosphere{grid, {north, south}};
-
-    const DVec3 on_equator{0.0, 1.0, 0.0};
-    const DVec3 near_north = glm::normalize(DVec3{0.0, 1.0, 0.1});
-    const DVec3 near_south = glm::normalize(DVec3{0.0, 1.0, -0.1});
-    CHECK(top_plate(lithosphere, near_north) == 0);
-    CHECK(top_plate(lithosphere, near_south) == 1);
+    Lithosphere lithosphere = halves();
+    CHECK(top_plate(lithosphere, near_north()) == 0);
+    CHECK(top_plate(lithosphere, near_south()) == 1);
 
     lithosphere.advance(20.0);
     CHECK_FALSE(lithosphere.top(on_equator));
     CHECK(top_plate(lithosphere, DVec3{0.0, 0.0, 1.0}) == 0);
     CHECK(top_plate(lithosphere, DVec3{0.0, 0.0, -1.0}) == 1);
+}
+
+TEST_CASE("new ocean floor fills where plates part, split down the middle between them",
+          "[planet][lithosphere]") {
+    Lithosphere lithosphere = halves();
+    constexpr double years = 20.0;
+    lithosphere.advance(years);
+    const Lithosphere moved = lithosphere;
+    lithosphere.spread();
+    const auto& grid = lithosphere.grid();
+    // The place of the grid over a direction, as the lithosphere is read.
+    const auto place = [&](DVec3 at) {
+        return hog::planet::cell_center(hog::planet::cell_at(at, grid.level()));
+    };
+
+    for (const DVec3 at : {on_equator, near_north(), near_south()}) {
+        const auto found = lithosphere.top(place(at));
+        REQUIRE(found.has_value());
+        const Crust crust = found.value_or(Lithosphere::Found{}).crust;
+        CHECK(crust.type == CrustType::Oceanic);
+        CHECK(crust.age == 0.0F);
+        CHECK(crust.thickness == Crust{}.thickness);
+    }
+    CHECK(top_plate(lithosphere, place(near_north())) == 0);
+    CHECK(top_plate(lithosphere, place(near_south())) == 1);
+
+    // Nothing changes where they meet, nor where crust already lay but right at the gap's edge,
+    // where a cell of new floor in a plate's own grid can reach over the place next to it.
+    const DVec3 meeting{0.0, -1.0, 0.0};
+    CHECK(lithosphere.crust_of(0, meeting) == moved.crust_of(0, meeting));
+    CHECK(lithosphere.crust_of(1, meeting) == moved.crust_of(1, meeting));
+    const auto bare = [&](std::uint32_t cell) {
+        return !moved.top(hog::planet::cell_center(grid.cell(cell)));
+    };
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const DVec3 at = hog::planet::cell_center(grid.cell(cell));
+        if (bare(cell)) {
+            CHECK(lithosphere.top(at).has_value());
+        } else if (!std::ranges::any_of(grid.neighbors(cell), bare)) {
+            CHECK(lithosphere.top(at) == moved.top(at));
+        }
+    }
+}
+
+TEST_CASE("spreading leaves no place of the grid without crust", "[planet][lithosphere]") {
+    Lithosphere lithosphere = hog::planet::lithosphere_from(start(), step_years);
+    const auto& grid = lithosphere.grid();
+    // Share of the planet bare, sampled at the grid's places or finer, between them.
+    const auto bare = [&](int level) {
+        const LevelGrid samples{level, radius};
+        double area = 0.0;
+        for (std::uint32_t sample = 0; sample < samples.size(); ++sample) {
+            if (!lithosphere.top(hog::planet::cell_center(samples.cell(sample)))) {
+                area += static_cast<double>(samples.area(sample));
+            }
+        }
+        return area / (4.0 * std::numbers::pi * radius * radius);
+    };
+    for (int step = 0; step < 10; ++step) {
+        lithosphere.advance(step_years);
+        const double parted = bare(grid.level() + 2);
+        CHECK(bare(grid.level()) > 0.0);
+        lithosphere.spread();
+        CHECK(bare(grid.level()) == 0.0);
+        // Slivers narrower than a place along every edge between plates aren't gaps.
+        CHECK(bare(grid.level() + 2) < parted / 3.0);
+    }
 }
 
 namespace {

@@ -224,7 +224,7 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
             {.plates = config.plates,
              .continental = hog::planet::continental_share(config.ocean_fraction)}};
     });
-    // The same start carried in the plates' own frames, so where they part and overlap shows.
+    // The same start carried in the plates' own frames, so their ridges and overlaps show.
     constexpr double step_years = 10.0;
     hog::planet::Lithosphere lithosphere = hog::planet::lithosphere_from(tectonics, step_years);
     const auto& grid = tectonics.grid();
@@ -268,7 +268,10 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
         }
         if (step < options.tectonics.steps) {
             timer.time("tectonics", [&] { tectonics.step(); });
-            timer.time("plates", [&] { lithosphere.advance(step_years); });
+            timer.time("plates", [&] {
+                lithosphere.advance(step_years);
+                lithosphere.spread();
+            });
         }
     }
     constexpr int columns = 4;

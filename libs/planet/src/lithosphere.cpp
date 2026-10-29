@@ -7,9 +7,44 @@
 #include <algorithm>
 #include <cstddef>
 #include <iterator>
+#include <limits>
+#include <optional>
 #include <utility>
+#include <vector>
 
 namespace hog::planet {
+
+namespace {
+
+constexpr auto parted = std::numeric_limits<std::uint32_t>::max();
+
+// Adds `crust` to the plate at each of `cells` of its own grid, none of which it has crust at yet.
+void add_crust(Lithosphere::Plate& plate, std::vector<std::uint32_t> cells, Crust crust) {
+    std::ranges::sort(cells);
+    const auto [last, end] = std::ranges::unique(cells);
+    cells.erase(last, end);
+    std::vector<std::uint32_t> merged;
+    std::vector<Crust> carried;
+    merged.reserve(plate.cells.size() + cells.size());
+    carried.reserve(merged.capacity());
+    std::size_t old = 0;
+    for (const std::uint32_t cell : cells) {
+        for (; old < plate.cells.size() && plate.cells[old] < cell; ++old) {
+            merged.push_back(plate.cells[old]);
+            carried.push_back(plate.crust[old]);
+        }
+        merged.push_back(cell);
+        carried.push_back(crust);
+    }
+    merged.insert(merged.end(), plate.cells.begin() + static_cast<std::ptrdiff_t>(old),
+                  plate.cells.end());
+    carried.insert(carried.end(), plate.crust.begin() + static_cast<std::ptrdiff_t>(old),
+                   plate.crust.end());
+    plate.cells = std::move(merged);
+    plate.crust = std::move(carried);
+}
+
+} // namespace
 
 bool stays_over(const Crust& one, const Crust& other) noexcept {
     if (one.type != other.type) {
@@ -40,6 +75,45 @@ void Lithosphere::advance(double years) {
         }
     }
     time_ += years;
+}
+
+void Lithosphere::spread() {
+    // Each parted place of the grid takes the plate of the nearest crust, out from the gap's
+    // edges a ring of cells at a time.
+    std::vector<std::uint32_t> owner(grid_.size(), parted);
+    for (std::uint32_t cell = 0; cell < grid_.size(); ++cell) {
+        if (const std::optional<Found> found = top(cell_center(grid_.cell(cell)))) {
+            owner[cell] = found->plate;
+        }
+    }
+    std::vector<std::uint32_t> frontier;
+    for (std::uint32_t cell = 0; cell < grid_.size(); ++cell) {
+        const auto around = grid_.neighbors(cell);
+        if (owner[cell] != parted && std::ranges::any_of(around, [&](std::uint32_t next) {
+                return owner[next] == parted;
+            })) {
+            frontier.push_back(cell);
+        }
+    }
+    std::vector<std::vector<std::uint32_t>> fresh(plates_.size());
+    while (!frontier.empty()) {
+        std::vector<std::uint32_t> further;
+        for (const std::uint32_t cell : frontier) {
+            for (const std::uint32_t next : grid_.neighbors(cell)) {
+                if (owner[next] != parted) {
+                    continue;
+                }
+                owner[next] = owner[cell];
+                const DVec3 own = to_plate(owner[next], cell_center(grid_.cell(next)));
+                fresh[owner[next]].push_back(grid_.index(cell_at(own, grid_.level())));
+                further.push_back(next);
+            }
+        }
+        frontier = std::move(further);
+    }
+    for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
+        add_crust(plates_[plate], std::move(fresh[plate]), Crust{});
+    }
 }
 
 DVec3 Lithosphere::to_planet(std::uint32_t plate, DVec3 own) const {

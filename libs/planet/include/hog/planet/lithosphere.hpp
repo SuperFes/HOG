@@ -48,6 +48,8 @@ public:
     struct Found {
         std::uint32_t plate = 0;
         Crust crust;
+
+        friend bool operator==(const Found&, const Found&) = default;
     };
 
     // Precondition: each plate's cells are of `grid`, ascending, with one crust to each.
@@ -55,6 +57,9 @@ public:
 
     // Turns every plate on by `years` million years, and ages its crust as much.
     void advance(double years);
+    // Fills every place the plates have parted with new ocean floor, joined to the plate whose
+    // crust is nearest across the gap, so the ridge runs down the gap's middle.
+    void spread();
 
     [[nodiscard]] const LevelGrid& grid() const noexcept { return grid_; }
     [[nodiscard]] std::span<const Plate> plates() const noexcept { return plates_; }
