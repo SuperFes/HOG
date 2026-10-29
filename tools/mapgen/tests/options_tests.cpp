@@ -85,6 +85,10 @@ TEST_CASE("mapgen reads every option", "[mapgen]") {
     CHECK(timed->seasons.time == std::chrono::minutes{(14 * 60) + 30});
     CHECK(timed->seasons.lighting.real_sun);
 
+    const auto tectonics = parse({"--tectonics", "40", "--every-steps", "10"});
+    REQUIRE(tectonics);
+    CHECK(tectonics->tectonics == hog::mapgen::TectonicsFrames{.steps = 40, .every = 10});
+
     const auto help = parse({"--help"});
     REQUIRE(help);
     CHECK(help->help);
@@ -126,6 +130,9 @@ TEST_CASE("mapgen rejects bad arguments", "[mapgen]") {
     CHECK(rejects({"--date", "2026-2-3"}));
     CHECK(rejects({"--date", "2026/02/03"}));
     CHECK(rejects({"--cell-km", "0"}));
+    CHECK(rejects({"--tectonics", "0"}));
+    CHECK(rejects({"--every-steps", "0"}));
+    CHECK(rejects({"--tectonics", "5", "--seasons"}));
     CHECK(rejects({"--cell-km", "inf"}));
 }
 

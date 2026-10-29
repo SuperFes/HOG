@@ -119,6 +119,7 @@ constexpr int max_weather_days = 366;
 constexpr int max_frame_hours = 24 * 30;
 constexpr int max_wildlife_years = 100;
 constexpr int max_frame_days = 366;
+constexpr int max_tectonic_steps = 1'000;
 
 // Options that take a value.
 using Handler = Result<void> (*)(Options&, std::string_view);
@@ -261,6 +262,26 @@ constexpr std::array flags{
              options.seasons.lighting.real_sun = true;
              return {};
          }},
+    Flag{.name = "--tectonics",
+         .handler = [](Options& options, std::string_view value) -> Result<void> {
+             const auto steps = parse_integer<int>(value);
+             if (!steps || *steps < 1 || *steps > max_tectonic_steps) {
+                 return invalid(
+                     std::format("--tectonics {} is not 1 to {} steps", value, max_tectonic_steps));
+             }
+             options.tectonics.steps = *steps;
+             return {};
+         }},
+    Flag{.name = "--every-steps",
+         .handler = [](Options& options, std::string_view value) -> Result<void> {
+             const auto steps = parse_integer<int>(value);
+             if (!steps || *steps < 1 || *steps > max_tectonic_steps) {
+                 return invalid(std::format("--every-steps {} is not 1 to {} steps", value,
+                                            max_tectonic_steps));
+             }
+             options.tectonics.every = *steps;
+             return {};
+         }},
     Flag{.name = "--cell-km",
          .handler = [](Options& options, std::string_view value) -> Result<void> {
              const auto km = parse_double(value);
@@ -328,6 +349,10 @@ Writes PNG maps of a generated planet, one per layer, named <view>-<layer>.png.
   --time HH:MM         takes the seasons at this time of day, UTC, and lights the photo
                        by the sun as it stands then, rather than from the north-west
   --cell-km KM         weather and wildlife grid cells at most KM across (default 6)
+  --tectonics STEPS    instead of the layers, moves a v2 world's plates for STEPS steps
+                       and writes its crust every few, named <view>-tectonics-<step>.png,
+                       and a sheet of them all, <view>-tectonics.png
+  --every-steps STEPS  steps between tectonics maps (default 5)
   --help               shows this
 )";
 }
@@ -365,9 +390,9 @@ Result<Options> parse_options(std::span<const std::string_view> arguments) {
         }
     }
     if (static_cast<int>(options.weather.days > 0) + static_cast<int>(options.wildlife.years > 0) +
-            static_cast<int>(options.seasons.on) >
+            static_cast<int>(options.seasons.on) + static_cast<int>(options.tectonics.steps > 0) >
         1) {
-        return invalid("only one of --weather, --wildlife and --seasons can be used");
+        return invalid("only one of --weather, --wildlife, --seasons and --tectonics can be used");
     }
     if (options.layers.empty()) {
         for (int layer = 0; layer < layer_count; ++layer) {

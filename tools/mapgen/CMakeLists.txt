@@ -12,6 +12,7 @@ add_library(hog_mapgen
     src/photo.cpp
     src/render.cpp
     src/season_render.cpp
+    src/tectonics_render.cpp
     src/weather_render.cpp
     src/wildlife_render.cpp)
 add_library(hog::mapgen ALIAS hog_mapgen)
@@ -31,5 +32,6 @@ hog_add_tests(hog_mapgen
     tests/photo_tests.cpp
     tests/render_tests.cpp
     tests/season_render_tests.cpp
+    tests/tectonics_render_tests.cpp
     tests/weather_render_tests.cpp
     tests/wildlife_render_tests.cpp)

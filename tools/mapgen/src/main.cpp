@@ -2,11 +2,13 @@
 #include <hog/mapgen/options.hpp>
 #include <hog/mapgen/render.hpp>
 #include <hog/mapgen/season_render.hpp>
+#include <hog/mapgen/tectonics_render.hpp>
 #include <hog/mapgen/weather_render.hpp>
 #include <hog/mapgen/wildlife_render.hpp>
 #include <hog/planet/geology.hpp>
 #include <hog/planet/planet_config.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/planet/tectonics.hpp>
 #include <hog/planet/world.hpp>
 #include <hog/sim/ecology.hpp>
 #include <hog/sim/forest.hpp>
@@ -24,6 +26,7 @@
 #include <fstream>
 #include <iostream>
 #include <span>
+#include <string>
 #include <string_view>
 #include <system_error>
 #include <vector>
@@ -200,6 +203,31 @@ int render_seasons(const hog::mapgen::Options& options, const hog::planet::Plane
     return EXIT_SUCCESS;
 }
 
+// Moves a v2 world's plates, writing its crust every few steps and a sheet of them all.
+int render_tectonics(const hog::mapgen::Options& options, const hog::planet::PlanetConfig& config,
+                     hog::jobs::JobSystem& jobs) {
+    hog::planet::Tectonics tectonics{config.seed, config.radius, {.plates = config.plates}};
+    std::vector<hog::mapgen::Image> frames;
+    for (int step = 0; step <= options.tectonics.steps; ++step) {
+        if (step % options.tectonics.every == 0 || step == options.tectonics.steps) {
+            auto image = hog::mapgen::render_tectonics(tectonics, config.radius, options.view,
+                                                       options.size, jobs);
+            if (write(options.output / hog::mapgen::tectonics_file_name(options.view, step),
+                      image) != EXIT_SUCCESS) {
+                return EXIT_FAILURE;
+            }
+            frames.push_back(std::move(image));
+        }
+        if (step < options.tectonics.steps) {
+            tectonics.step();
+        }
+    }
+    constexpr int columns = 4;
+    const std::string sheet = hog::mapgen::tectonics_file_name(options.view, 0);
+    return write(options.output / (sheet.substr(0, sheet.rfind('-')) + ".png"),
+                 hog::mapgen::contact_sheet(frames, columns));
+}
+
 int run(std::span<const std::string_view> arguments) {
     const auto options = hog::mapgen::parse_options(arguments);
     if (!options) {
@@ -236,6 +264,9 @@ int run(std::span<const std::string_view> arguments) {
     }
     if (options->seasons.on) {
         return render_seasons(*options, *config, jobs);
+    }
+    if (options->tectonics.steps > 0) {
+        return render_tectonics(*options, *config, jobs);
     }
     const hog::planet::Geology geology{*config};
     for (const hog::mapgen::Layer layer : options->layers) {

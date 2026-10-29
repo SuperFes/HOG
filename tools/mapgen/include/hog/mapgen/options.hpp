@@ -82,6 +82,14 @@ struct SeasonFrames {
     friend bool operator==(const SeasonFrames&, const SeasonFrames&) = default;
 };
 
+// Tectonics maps: the crust of a v2 world every so many steps as its plates move, and a sheet of
+// them all.
+struct TectonicsFrames {
+    int steps = 0; // how many to move the plates; none when 0
+    int every = 5; // steps between maps
+    friend bool operator==(const TectonicsFrames&, const TectonicsFrames&) = default;
+};
+
 struct Options {
     std::filesystem::path config = "config/planet.toml";
     std::optional<std::uint64_t> seed;
@@ -92,6 +100,7 @@ struct Options {
     WeatherFrames weather;
     WildlifeFrames wildlife;
     SeasonFrames seasons;
+    TectonicsFrames tectonics;
     bool help = false;
 };
 
