@@ -214,9 +214,7 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
         {.plates = config.plates,
          .continental = hog::planet::continental_share(config.ocean_fraction)}};
     const auto& grid = tectonics.grid();
-    const auto start = hog::planet::crust_heights(tectonics);
-    const double water = hog::planet::water_below(
-        grid, start, hog::planet::level_covering(grid, start, config.ocean_fraction));
+    double water = hog::planet::starting_water(grid);
     std::vector<hog::mapgen::Image> crust;
     std::vector<hog::mapgen::Image> relief;
     const auto keep = [&](std::vector<hog::mapgen::Image>& frames, std::string_view kind, int step,
@@ -229,6 +227,9 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
     for (int step = 0; step <= options.tectonics.steps; ++step) {
         if (step % options.tectonics.every == 0 || step == options.tectonics.steps) {
             const auto heights = hog::planet::crust_heights(tectonics);
+            if (step == options.tectonics.steps) {
+                water = hog::planet::topped_up(grid, heights, water, config.ocean_fraction);
+            }
             if (keep(crust, "tectonics", step,
                      hog::mapgen::render_tectonics(tectonics, config.radius, options.view,
                                                    options.size, jobs)) != EXIT_SUCCESS ||

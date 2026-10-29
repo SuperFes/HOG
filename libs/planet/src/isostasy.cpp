@@ -93,6 +93,16 @@ std::int64_t level_covering(const LevelGrid& grid, std::span<const std::int64_t>
     return heights[order.back()] + 1;
 }
 
+double starting_water(const LevelGrid& grid) {
+    return water_layer * planet_area(grid);
+}
+
+double topped_up(const LevelGrid& grid, std::span<const std::int64_t> heights, double water,
+                 double ocean_fraction) {
+    return std::max(water,
+                    water_below(grid, heights, level_covering(grid, heights, ocean_fraction)));
+}
+
 double continental_share(double ocean_fraction) {
     return std::clamp(1.0 - ocean_fraction + shelf_share, 0.05, 0.95);
 }

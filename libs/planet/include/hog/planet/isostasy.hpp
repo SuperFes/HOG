@@ -21,6 +21,8 @@ inline constexpr double continental_buoyancy = 0.15;
 inline constexpr double oceanic_buoyancy = 0.12;
 // Of the planet, the share of continental crust the sea floods round the land's edges.
 inline constexpr double shelf_share = 0.1;
+// Metres deep a world's water would stand spread evenly over it, as it has to begin with.
+inline constexpr double water_layer = 2'600.0;
 
 // Fixed-point metres each grid cell's crust stands above the crest of a mid-ocean ridge.
 [[nodiscard]] std::vector<std::int64_t> crust_heights(const Tectonics& tectonics);
@@ -31,6 +33,12 @@ inline constexpr double shelf_share = 0.1;
 // The level `water` cubic metres fill the lowest ground to.
 [[nodiscard]] std::int64_t sea_level(const LevelGrid& grid, std::span<const std::int64_t> heights,
                                      double water);
+// Cubic metres of water a world has to begin with.
+[[nodiscard]] double starting_water(const LevelGrid& grid);
+// `water`, or if that leaves less than `ocean_fraction` of the settled ground under the sea, as
+// much more as it takes, come from space.
+[[nodiscard]] double topped_up(const LevelGrid& grid, std::span<const std::int64_t> heights,
+                               double water, double ocean_fraction);
 // The level with `fraction` of the planet's area below it.
 // Precondition: 0 <= fraction <= 1.
 [[nodiscard]] std::int64_t level_covering(const LevelGrid& grid,

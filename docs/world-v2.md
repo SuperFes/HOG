@@ -31,15 +31,7 @@ World v2 builds the planet in the order nature does, each stage working from wha
 
 ### 0 · Planet
 
-Radius from population (as now) or `radius_km`; bigger is fine if it makes room for big drainage. The sea comes from a water inventory, not a land fraction: `ocean_fraction` becomes the target the inventory is chosen to meet on the first pass, so the coast falls wherever the water actually sits.
-
-The inventory changes over time rather than being there from the start:
-
-- **From space:** comets and wet asteroids deliver water, heavily at first and then tailing off. The same impacts leave early craters that later steps mostly erase.
-- **Outgassing:** ridges, arcs and hotspots add water in proportion to the crust they make.
-- **Into the mantle:** subducting slabs carry some water down.
-
-The sea starts shallow and fills as the steps go. `ocean_fraction` calibrates the final amount, and the history scales to match.
+Radius from population (as now) or `radius_km`; bigger is fine if it makes room for big drainage. The sea comes from a water inventory, not a land fraction. The world starts with enough water to stand in an even layer about as deep as Earth's would, and the coast falls wherever that water actually sits. Once the world has settled, if the sea covers less than `ocean_fraction`, it's topped up with as much more as it takes, as if it came from space. Nothing is tested against the target before generation is done.
 
 ### 1 · Tectonics
 

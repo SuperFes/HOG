@@ -100,15 +100,17 @@ TEST_CASE("a level can be found covering a share of the planet", "[planet][isost
     }
 }
 
-TEST_CASE("the sea floods a new world's ocean floor and the shelves round its land",
+TEST_CASE("a new world's water floods its ocean floor and the shelves round its land",
           "[planet][isostasy]") {
-    constexpr double ocean_fraction = 0.7;
     const Tectonics tectonics{
-        1, radius, {.level = 5, .continental = hog::planet::continental_share(ocean_fraction)}};
+        1, radius, {.level = 5, .continental = hog::planet::continental_share(0.7)}};
     const auto& grid = tectonics.grid();
     const auto heights = crust_heights(tectonics);
-    const std::int64_t sea = hog::planet::level_covering(grid, heights, ocean_fraction);
-    CHECK(std::abs(area_below(grid, heights, sea) - ocean_fraction) < 0.01);
+    const std::int64_t sea =
+        hog::planet::sea_level(grid, heights, hog::planet::starting_water(grid));
+    const double covered = area_below(grid, heights, sea);
+    CHECK(covered > 0.6);
+    CHECK(covered < 0.8);
     double shelves = 0.0;
     double continents = 0.0;
     for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
@@ -122,16 +124,14 @@ TEST_CASE("the sea floods a new world's ocean floor and the shelves round its la
         continents += area;
         shelves += heights[cell] < sea ? area : 0.0;
     }
-    CHECK(shelves / continents > 0.1);
+    CHECK(shelves / continents > 0.05);
     CHECK(shelves / continents < 0.5);
 }
 
 TEST_CASE("the sea holds its water as the plates move", "[planet][isostasy]") {
     Tectonics tectonics{1, radius, {.level = 5, .continental = 0.4}};
     const auto& grid = tectonics.grid();
-    const double water =
-        hog::planet::water_below(grid, crust_heights(tectonics),
-                                 hog::planet::level_covering(grid, crust_heights(tectonics), 0.7));
+    const double water = hog::planet::starting_water(grid);
     for (int step = 0; step < 20; ++step) {
         tectonics.step();
     }
@@ -142,4 +142,20 @@ TEST_CASE("the sea holds its water as the plates move", "[planet][isostasy]") {
     const double covered = area_below(grid, heights, sea);
     CHECK(covered > 0.55);
     CHECK(covered < 0.9);
+}
+
+TEST_CASE("a world short of water once settled is topped up from space", "[planet][isostasy]") {
+    const Tectonics tectonics{1, radius, {.level = 5, .continental = 0.4}};
+    const auto& grid = tectonics.grid();
+    const auto heights = crust_heights(tectonics);
+    const double water = hog::planet::starting_water(grid);
+    const double covered = area_below(grid, heights, hog::planet::sea_level(grid, heights, water));
+    // Short: enough more to cover the share asked for.
+    const double more = covered + 0.1;
+    const double topped = hog::planet::topped_up(grid, heights, water, more);
+    CHECK(topped > water);
+    CHECK(std::abs(area_below(grid, heights, hog::planet::sea_level(grid, heights, topped)) -
+                   more) < 0.01);
+    // Enough already: left as it is, never drained.
+    CHECK(hog::planet::topped_up(grid, heights, water, covered - 0.1) == water);
 }
