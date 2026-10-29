@@ -21,6 +21,7 @@ using hog::planet::Crust;
 using hog::planet::CrustType;
 using hog::planet::LevelGrid;
 using hog::planet::Lithosphere;
+using hog::planet::Mantle;
 using hog::planet::Material;
 using hog::planet::Ranges;
 using hog::planet::Tectonics;
@@ -842,6 +843,39 @@ Material material_at(const Volume& volume, DVec3 direction, double height) {
 }
 
 } // namespace
+
+TEST_CASE("the mantle warms under continents and cools under ocean floor",
+          "[planet][lithosphere]") {
+    // The north is continent and the south ocean, both turning together half round in 100 Myr.
+    const Lithosphere ocean = halves();
+    std::vector<Lithosphere::Plate> plates{ocean.plates().begin(), ocean.plates().end()};
+    std::ranges::fill(plates[0].crust, continent);
+    for (auto& plate : plates) {
+        plate.rate = std::numbers::pi / 100.0;
+    }
+    Lithosphere lithosphere{ocean.grid(), plates};
+    const auto& grid = lithosphere.grid();
+    const auto heat_at = [&](DVec3 at) {
+        return lithosphere.heat()[grid.index(hog::planet::cell_at(at, grid.level()))];
+    };
+    const DVec3 north{0.0, 0.0, 1.0};
+    const DVec3 south{0.0, 0.0, -1.0};
+    CHECK(heat_at(north) == 0.0F);
+
+    constexpr Mantle mantle{.settling = 100.0};
+    lithosphere.warm(50.0, mantle);
+    lithosphere.warm(50.0, mantle);
+    CHECK_THAT(heat_at(north), WithinAbs(1.0 - std::exp(-1.0), 1e-5));
+    CHECK(heat_at(south) == 0.0F);
+    lithosphere.warm(1000.0, mantle);
+    CHECK_THAT(heat_at(north), WithinAbs(1.0, 1e-4));
+
+    // Once the continent has moved on, the mantle it warmed cools as fast.
+    lithosphere.advance(100.0);
+    lithosphere.warm(100.0, mantle);
+    CHECK_THAT(heat_at(north), WithinAbs(std::exp(-1.0), 1e-5));
+    CHECK_THAT(heat_at(south), WithinAbs(1.0 - std::exp(-1.0), 1e-5));
+}
 
 TEST_CASE("the volume's rock is the crust on top over the mantle", "[planet][lithosphere]") {
     Lithosphere lithosphere = hog::planet::lithosphere_from(start(), step_years);

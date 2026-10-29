@@ -248,7 +248,7 @@ bool stays_over(const Crust& one, const Crust& other) noexcept {
 }
 
 Lithosphere::Lithosphere(LevelGrid grid, std::vector<Plate> plates)
-    : grid_{std::move(grid)}, plates_{std::move(plates)} {
+    : grid_{std::move(grid)}, plates_{std::move(plates)}, heat_(grid_.size(), 0.0F) {
     for (const Plate& plate : plates_) {
         HOG_ASSERT(plate.cells.size() == plate.crust.size(), "one crust to each cell");
         HOG_ASSERT(std::ranges::is_sorted(plate.cells), "cells ascending");
@@ -562,6 +562,15 @@ void Lithosphere::drive(Forces forces) {
             plates_[plate].pole = turn / rate;
         }
         plates_[plate].rate = rate;
+    }
+}
+
+void Lithosphere::warm(double years, Mantle mantle) {
+    const auto toward = static_cast<float>(1.0 - std::exp(-years / mantle.settling));
+    for (std::uint32_t place = 0; place < grid_.size(); ++place) {
+        const std::optional<Found> found = top(cell_center(grid_.cell(place)));
+        const float warmest = found && found->crust.type == CrustType::Continental ? 1.0F : 0.0F;
+        heat_[place] += (warmest - heat_[place]) * toward;
     }
 }
 

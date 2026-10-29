@@ -47,6 +47,13 @@ struct Ranges {
     float flow = 0.02F;
 };
 
+// How the mantle warms where continents lie over it, as their thick crust holds its heat in, and
+// cools again under ocean floor, which lets it out: over `years`, each place goes the share
+// 1 - e^(-years / settling) of the way to fully warm or cool.
+struct Mantle {
+    double settling = 100.0;
+};
+
 // A stretch of one plate's edge, a place of the grid long, where it meets another plate.
 struct Boundary {
     enum class Kind : std::uint8_t {
@@ -125,6 +132,8 @@ public:
     // nothing so slow carries momentum. The first time, the drag is set so the plates keep the
     // pace they had, and it stays so after.
     void drive(Forces forces = {});
+    // Warms and cools the mantle under each place by the crust on top over `years`.
+    void warm(double years, Mantle mantle = {});
     // Plates whose continents meet and that turn so alike that over `years` they'd move less
     // than half a place against each other anywhere along it weld into one along the suture,
     // the plate with less crust taken into the other's frame. It's left with none, so plates
@@ -140,6 +149,9 @@ public:
     [[nodiscard]] std::span<const Plate> plates() const noexcept { return plates_; }
     // Millions of years advanced.
     [[nodiscard]] double time() const noexcept { return time_; }
+    // How warm the mantle is under each place of the grid, from nought, as under ocean floor, to
+    // one, as under a continent that has lain there for good.
+    [[nodiscard]] std::span<const float> heat() const noexcept { return heat_; }
 
     // A unit direction in a plate's own frame as it lies now in the planet's, and back.
     [[nodiscard]] DVec3 to_planet(std::uint32_t plate, DVec3 own) const;
@@ -174,6 +186,7 @@ private:
     LevelGrid grid_;
     std::vector<Plate> plates_;
     double time_ = 0.0;
+    std::vector<float> heat_;
     // Of the turn the forces give a plate against unit drag, the share it takes; none until the
     // plates are first driven.
     double pace_ = 0.0;

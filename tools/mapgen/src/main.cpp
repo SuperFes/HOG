@@ -274,6 +274,7 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
                 lithosphere.collide(step_years);
                 lithosphere.spread();
                 lithosphere.weld(step_years);
+                lithosphere.warm(step_years);
                 lithosphere.drive();
             });
         }
