@@ -33,6 +33,14 @@ World v2 builds the planet in the order nature does, each stage working from wha
 
 Radius from population (as now) or `radius_km`; bigger is fine if it makes room for big drainage. The sea comes from a water inventory, not a land fraction: `ocean_fraction` becomes the target the inventory is chosen to meet on the first pass, so the coast falls wherever the water actually sits.
 
+The inventory changes over time rather than being there from the start:
+
+- **From space:** comets and wet asteroids deliver water, heavily at first and then tailing off. The same impacts leave early craters that later steps mostly erase.
+- **Outgassing:** ridges, arcs and hotspots add water in proportion to the crust they make.
+- **Into the mantle:** subducting slabs carry some water down.
+
+The sea starts shallow and fills as the steps go. `ocean_fraction` calibrates the final amount, and the history scales to match.
+
 ### 1 · Tectonics
 
 Rigid plates on the sphere turning about Euler poles, after Cortial et al. 2019 ("Procedural Tectonic Planets"). Each step:
