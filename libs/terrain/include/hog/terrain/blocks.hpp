@@ -55,6 +55,14 @@ inline constexpr double block_size = 50.0; // metres
 // planet's radius. It stands in for a world made in the volume until there is one.
 [[nodiscard]] BlockMesh ground_blocks(const planet::World& world, DVec3 around, double radius);
 
+// The whole planet is shown in columns at this level, a bounded count whatever its size, and
+// shells about this many metres tall, so its mountains still step.
+inline constexpr int overview_level = 6;
+inline constexpr double overview_shell = 250.0; // metres
+
+// The same for the whole planet, as seen from far off, from its centre.
+[[nodiscard]] BlockMesh planet_blocks(const planet::World& world, double radius);
+
 // Fills the ground in as blocks round the eye in the background on the pool, anew whenever the eye
 // has gone block_relay from where it was last filled round, for the thread that made it. One is in
 // flight at a time; the world must outlive it, unchanged while one is.

@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <optional>
 #include <random>
+#include <set>
 
 using hog::planet::CellId;
 using hog::planet::Contents;
@@ -238,6 +239,28 @@ TEST_CASE("the ground round a point shows as blocks at its height", "[terrain][b
     }
     // Within a shell of its height, and the slope across a column.
     CHECK(nearest < hog::terrain::block_size);
+}
+
+TEST_CASE("the whole planet shows as blocks, every column topped", "[terrain][blocks]") {
+    const double planet_radius = hog::terrain::testing::planet.radius;
+    const BlockMesh mesh =
+        hog::terrain::planet_blocks(hog::terrain::testing::shared_world(), planet_radius);
+    CHECK(mesh.origin.metres() == hog::DVec3{0.0});
+    std::set<CellId> topped;
+    for (std::size_t index = 0; index + 3 < mesh.vertices.size(); index += 4) {
+        hog::DVec3 middle{0.0};
+        for (std::size_t corner = 0; corner < 4; ++corner) {
+            middle += hog::DVec3{mesh.vertices[index + corner].position} / 4.0;
+        }
+        const hog::DVec3 up = glm::normalize(middle);
+        if (glm::dot(hog::DVec3{mesh.vertices[index].normal}, up) > 0.99) {
+            topped.insert(hog::planet::cell_at(up, hog::terrain::overview_level));
+            CHECK(std::abs(glm::length(middle) - planet_radius) < hog::planet::volume_span / 2.0);
+        }
+    }
+    CHECK(topped.size() == 6U << (2U * hog::terrain::overview_level));
+    CHECK(coloured(mesh, Material::Water) > 0);
+    CHECK(coloured(mesh, Material::Granite) > 0);
 }
 
 TEST_CASE("blocks follow the eye in the background", "[terrain][blocks]") {
