@@ -96,6 +96,7 @@ struct Controls {
     bool walking = false;
     bool timings = false;     // shown over the picture
     bool next_clouds = false; // asked to draw the clouds at the next quality
+    bool blocks = false;      // the ground drawn as the volume's blocks
     bool may_chat = false;    // connected to a server to chat on
     bool chatting = false;    // typing into the chat box, which takes the keys
     bool quit = false;
@@ -123,6 +124,8 @@ void press(const SDL_KeyboardEvent& key, Controls& controls) {
         controls.timings = !controls.timings;
     } else if (key.key == SDLK_F4 && !key.repeat) {
         controls.next_clouds = true;
+    } else if (key.key == SDLK_F6 && !key.repeat) {
+        controls.blocks = !controls.blocks;
     } else if (key.key == SDLK_RIGHTBRACKET) {
         ++((key.mod & SDL_KMOD_SHIFT) != 0 ? controls.faster_world : controls.faster_time);
     } else if (key.key == SDLK_LEFTBRACKET) {
@@ -820,6 +823,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
     const double radius = world.geology().planet_radius();
     Controls controls;
     controls.timings = options.timings;
+    controls.blocks = options.blocks;
     TitleCounter title;
     client::FrameTimes times;
     const MonotonicClock::time_point started = MonotonicClock::now();
@@ -844,6 +848,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
         }
         const bool chat_opened = route_keys(window, controls.chatting, routed_to_chat);
         change_clouds(controls, scene, device);
+        scene.set_blocks(controls.blocks);
         const MonotonicClock::time_point now = MonotonicClock::now();
         const double passed = std::chrono::duration<double>(now - last).count();
         const double seconds = std::min(passed, longest_frame);

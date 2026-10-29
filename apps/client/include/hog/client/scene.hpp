@@ -14,6 +14,7 @@
 #include <hog/planet/world.hpp>
 #include <hog/render/atmosphere.hpp>
 #include <hog/render/billboard.hpp>
+#include <hog/render/blocks.hpp>
 #include <hog/render/bushes.hpp>
 #include <hog/render/camera.hpp>
 #include <hog/render/capsules.hpp>
@@ -38,6 +39,7 @@
 #include <hog/sim/calendar.hpp>
 #include <hog/terrain/baker.hpp>
 #include <hog/terrain/bend.hpp>
+#include <hog/terrain/blocks.hpp>
 #include <hog/terrain/river_water.hpp>
 #include <hog/terrain/shore.hpp>
 #include <hog/terrain/stream.hpp>
@@ -140,6 +142,10 @@ public:
     void set_grass(bool grass) noexcept { grass_on_ = grass; }
     [[nodiscard]] bool grass() const noexcept { return grass_on_; }
 
+    // Whether the ground is drawn as the volume's blocks instead, with nothing growing on it.
+    void set_blocks(bool blocks) noexcept { blocks_on_ = blocks; }
+    [[nodiscard]] bool blocks() const noexcept { return blocks_on_; }
+
     [[nodiscard]] render::CloudQuality cloud_quality() const noexcept { return clouds_.quality(); }
     // The GPU must have finished with the frames recorded before.
     Result<> set_cloud_quality(render::CloudQuality quality) {
@@ -176,6 +182,14 @@ private:
                                   const Shot& shot, const render::SkyView& sky,
                                   std::span<const render::GraphUse> through_air,
                                   const render::AirBindings& air);
+    // Blocks show the bare volume, so nothing grows on them.
+    [[nodiscard]] bool growing() const noexcept { return grass_on_ && !blocks_on_; }
+    // Adds the pass drawing the deep water and the ground on it, as the streamed patches or as
+    // blocks.
+    void add_ground(render::RenderGraph& graph, const render::Frame& frame, const Shot& shot,
+                    const render::OceanView& sea, std::span<const terrain::StreamedPatch> patches,
+                    std::span<const render::GraphUse> through_air,
+                    const render::GraphTargets& drawn, const render::AirBindings& air);
     // Adds the grass pass, if `lawn` was grown, and the bush and tree passes, blown by `wind`.
     void grow_vegetation(render::RenderGraph& graph, const render::Frame& frame, const Shot& shot,
                          bool lawn, std::span<const render::GraphUse> through_air,
@@ -202,6 +216,9 @@ private:
     // Rivers' water round the eye, laid out in the background.
     terrain::RiverStream river_stream_;
     std::optional<render::RiverSurface> rivers_;
+    // The ground as blocks round the eye, filled in in the background while shown.
+    terrain::BlockStream block_stream_;
+    std::optional<render::Blocks> blocks_;
     std::vector<waves::Train> wave_trains_;
     render::Grass grass_;
     render::Bushes bushes_;
@@ -238,6 +255,7 @@ private:
     double swaying_for_ = 0.0; // seconds the grass has swayed
     render::Gusts gusts_;
     bool grass_on_ = true;
+    bool blocks_on_ = false;
     bool settled_ = false;
     // Whether the last frame recorded took a probe, and in which slot.
     bool probing_ = false;

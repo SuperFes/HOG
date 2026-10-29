@@ -49,6 +49,7 @@ hog_add_tests(hog_client
     tests/others_tests.cpp
     tests/picture_tests.cpp
     tests/player_tests.cpp
+    tests/scene_blocks_tests.cpp
     tests/scene_tests.cpp
     tests/session_tests.cpp
     tests/views_tests.cpp

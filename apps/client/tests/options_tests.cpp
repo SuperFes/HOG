@@ -131,6 +131,16 @@ TEST_CASE("a client can be told not to grow grass", "[client][options]") {
     CHECK_FALSE(options->grass);
 }
 
+TEST_CASE("a client can be told to draw the ground as blocks", "[client][options]") {
+    CHECK_FALSE(parse_options(Arguments{})->blocks);
+    const auto options = parse_options(Arguments{"--blocks"});
+    REQUIRE(options);
+    CHECK(options->blocks);
+    const auto undone = parse_options(Arguments{"--blocks", "--no-blocks"});
+    REQUIRE(undone);
+    CHECK_FALSE(undone->blocks);
+}
+
 TEST_CASE("a client can be told to draw the planet as curved as it is", "[client][options]") {
     CHECK(parse_options(Arguments{})->bend);
     const auto options = parse_options(Arguments{"--bend", "--no-bend"});

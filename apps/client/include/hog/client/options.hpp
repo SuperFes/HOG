@@ -57,6 +57,8 @@ struct Options {
     bool chat_filter = true;
     // Grass grown on the ground near the eye.
     bool grass = true;
+    // Draws the ground as the volume's blocks.
+    bool blocks = false;
     // The ground near the eye drawn curving like Earth's, not as tightly as the planet truly does.
     bool bend = true;
     render::CloudQuality clouds = render::CloudQuality::High;
