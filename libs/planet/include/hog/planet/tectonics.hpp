@@ -32,6 +32,9 @@ public:
         // the share worn away.
         float spreading = 0.2F;
         float wearing = 0.03F;
+        // Kilometres of continental crust that can hold themselves up; past it, crust flows out
+        // under its own weight, so ranges that keep piling up widen into plateaus.
+        float strongest = 65.0F;
     };
 
     enum class Crust : std::uint8_t { Oceanic, Continental };
@@ -82,6 +85,7 @@ private:
     // resampled.
     void keep_whole();
     void raise_arcs(const std::vector<bool>& diving);
+    void collapse();
     void spread_and_wear();
 
     Settings settings_;

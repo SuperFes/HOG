@@ -7,8 +7,11 @@
 #include <hog/planet/tile.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstddef>
 #include <numbers>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -71,6 +74,21 @@ constexpr double craton_relief = 2.0;
         return one.age < other.age;
     }
     return one.thickness > other.thickness;
+}
+
+// Writes the continental neighbours of `cell` thinner than it into `lower`; says how many.
+[[nodiscard]] std::size_t thinner_continent(const LevelGrid& grid,
+                                            std::span<const Tectonics::Column> columns,
+                                            std::uint32_t cell,
+                                            std::array<std::uint32_t, 8>& lower) {
+    std::size_t count = 0;
+    for (const std::uint32_t next : grid.neighbors(cell)) {
+        if (columns[next].crust == Tectonics::Crust::Continental &&
+            columns[next].thickness < columns[cell].thickness && count < lower.size()) {
+            lower.at(count++) = next;
+        }
+    }
+    return count;
 }
 
 } // namespace
@@ -144,6 +162,7 @@ void Tectonics::step() {
     const std::vector<bool> diving = move();
     keep_whole();
     raise_arcs(diving);
+    collapse();
     spread_and_wear();
     ++steps_;
 }
@@ -259,6 +278,59 @@ void Tectonics::raise_arcs(const std::vector<bool>& diving) {
         column.raised = 0.0F;
         if (column.crust == Crust::Oceanic && column.thickness >= arc_continent) {
             column.crust = Crust::Continental;
+        }
+    }
+}
+
+void Tectonics::collapse() {
+    // Too thick, crust sheds what it can't hold up into thinner continental neighbours, volume for
+    // volume, and they pass on what then overloads them.
+    constexpr int most_passes = 256;
+    const auto over = [&](std::uint32_t cell) {
+        return columns_[cell].crust == Crust::Continental &&
+               columns_[cell].thickness > settings_.strongest;
+    };
+    std::vector<std::uint32_t> loaded;
+    for (std::uint32_t cell = 0; cell < grid_.size(); ++cell) {
+        if (over(cell)) {
+            loaded.push_back(cell);
+        }
+    }
+    std::vector<float> flowed(columns_.size(), 0.0F);
+    std::vector<bool> touched(columns_.size(), false);
+    for (int pass = 0; pass < most_passes && !loaded.empty(); ++pass) {
+        std::vector<std::uint32_t> reached;
+        const auto touch = [&](std::uint32_t cell) {
+            if (!touched[cell]) {
+                touched[cell] = true;
+                reached.push_back(cell);
+            }
+        };
+        for (const std::uint32_t cell : loaded) {
+            const float thickness = columns_[cell].thickness;
+            std::array<std::uint32_t, 8> lower{};
+            const std::size_t count = thinner_continent(grid_, columns_, cell, lower);
+            if (count == 0) {
+                continue;
+            }
+            const auto here = static_cast<float>(grid_.area(cell));
+            const float excess = thickness - settings_.strongest;
+            flowed[cell] -= excess;
+            touch(cell);
+            const float each = excess * here / static_cast<float>(count);
+            for (std::size_t index = 0; index < count; ++index) {
+                flowed[lower.at(index)] += each / static_cast<float>(grid_.area(lower.at(index)));
+                touch(lower.at(index));
+            }
+        }
+        loaded.clear();
+        for (const std::uint32_t cell : reached) {
+            columns_[cell].thickness += flowed[cell];
+            flowed[cell] = 0.0F;
+            touched[cell] = false;
+            if (over(cell)) {
+                loaded.push_back(cell);
+            }
         }
     }
 }

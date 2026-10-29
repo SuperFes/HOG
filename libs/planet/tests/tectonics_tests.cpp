@@ -320,6 +320,33 @@ TEST_CASE("piled crust spreads into a belt and wears down", "[planet][tectonics]
     CHECK(wearing.columns()[peak].thickness < spreading.columns()[peak].thickness);
 }
 
+TEST_CASE("crust piled past its strength flows out into a plateau", "[planet][tectonics]") {
+    const hog::planet::LevelGrid grid{5, radius};
+    std::vector<Tectonics::Column> columns(
+        grid.size(),
+        {.crust = Tectonics::Crust::Continental, .thickness = Tectonics::continental_thickness});
+    constexpr std::uint32_t peak = 1'000;
+    columns[peak].thickness = 400.0F;
+    auto still = settings;
+    still.spreading = 0.0F;
+    still.wearing = 0.0F;
+    Tectonics tectonics{grid, {{.pole = {0.0, 0.0, 1.0}}}, columns, still};
+    const double volume = tectonics.continental_volume();
+    tectonics.step();
+    int plateau = 0;
+    for (const Tectonics::Column& column : tectonics.columns()) {
+        CHECK(column.thickness <= still.strongest + 0.01F);
+        plateau += column.thickness > still.strongest - 1.0F ? 1 : 0;
+    }
+    CHECK(plateau > 3);
+    CHECK(std::abs(tectonics.continental_volume() - volume) < 1e-4 * volume);
+    // Crust that holds itself up stays where it is.
+    columns[peak].thickness = still.strongest;
+    Tectonics strong{grid, {{.pole = {0.0, 0.0, 1.0}}}, columns, still};
+    strong.step();
+    CHECK(strong.columns()[peak].thickness == still.strongest);
+}
+
 TEST_CASE("the same seed moves the same plates", "[planet][tectonics]") {
     Tectonics one{3, radius, settings};
     Tectonics other{3, radius, settings};
