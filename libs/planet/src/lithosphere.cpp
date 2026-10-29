@@ -583,7 +583,8 @@ void Lithosphere::collide(double years, Ranges ranges) {
     }
 }
 
-std::vector<std::vector<Lithosphere::Push>> Lithosphere::pushes(const Forces& forces) const {
+std::vector<std::vector<Lithosphere::Push>> Lithosphere::pushes(const Forces& forces,
+                                                                Strength strength) const {
     std::vector<std::vector<Push>> found(plates_.size());
     for (const Boundary& edge : boundaries()) {
         const DVec3 at = cell_center(grid_.cell(edge.place));
@@ -595,7 +596,8 @@ std::vector<std::vector<Lithosphere::Push>> Lithosphere::pushes(const Forces& fo
         double push = 0.0;
         if (edge.kind == Boundary::Kind::Trench) {
             const auto age = static_cast<double>(edge.own.age);
-            push = std::sqrt(std::min(age, forces.mature) / forces.mature);
+            push = std::min(std::sqrt(std::min(age, forces.mature) / forces.mature),
+                            strength.ocean / softer_);
         } else if (edge.kind == Boundary::Kind::Ridge) {
             push = -forces.ridge;
         } else if (edge.kind == Boundary::Kind::Collision) {
@@ -627,9 +629,9 @@ std::vector<std::vector<Lithosphere::Push>> Lithosphere::pushes(const Forces& fo
     return found;
 }
 
-void Lithosphere::drive(Forces forces) {
+void Lithosphere::drive(Forces forces, Strength strength) {
     // Each force along the surface at a place turns its plate about the planet's middle.
-    const std::vector<std::vector<Push>> found = pushes(forces);
+    const std::vector<std::vector<Push>> found = pushes(forces, strength);
     std::vector<DVec3> torques(plates_.size(), DVec3{0.0});
     for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
         for (const Push& push : found[plate]) {
@@ -685,10 +687,13 @@ void Lithosphere::warm(double years, Mantle mantle) {
         const float warmest = found && found->crust.type == CrustType::Continental ? 1.0F : 0.0F;
         heat_[place] += (warmest - heat_[place]) * toward;
     }
+    constexpr double gas = 8.314;
+    const double now = mantle.potential + std::max(mantle.hotter - (mantle.cooling * time_), 0.0);
+    softer_ = std::exp(mantle.activation / gas * ((1.0 / mantle.potential) - (1.0 / now)));
 }
 
 void Lithosphere::rift(const Forces& forces, Strength strength) {
-    const std::vector<std::vector<Push>> found = pushes(forces);
+    const std::vector<std::vector<Push>> found = pushes(forces, strength);
     const std::size_t count = plates_.size();
     for (std::uint32_t plate = 0; plate < count; ++plate) {
         const std::optional<DVec3> facing = weakest(plate, found[plate], forces, strength);
@@ -734,10 +739,11 @@ std::optional<DVec3> Lithosphere::weakest(std::uint32_t plate, std::span<const P
                        (glm::dmat3{1.0} - glm::outerProduct(stretch.at, stretch.at));
         drag += stretch.drag;
         stretch.across = std::sqrt(4.0 * std::numbers::pi * share);
-        stretch.strong = strength.ocean;
+        stretch.strong = strength.ocean / softer_;
         if (continental) {
             const float heat = heat_[grid_.index(cell_at(stretch.at, grid_.level()))];
-            stretch.strong = strength.cool * std::pow(strength.warm / strength.cool, heat);
+            stretch.strong =
+                strength.cool * std::pow(strength.warm / strength.cool, heat) / softer_;
             if (!warmest || heat > most) {
                 warmest = index;
                 most = heat;

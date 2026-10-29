@@ -731,6 +731,20 @@ TEST_CASE("older slabs pull harder", "[planet][lithosphere]") {
     CHECK_THAT(lead(100.0F), WithinRel(lead(200.0F), 1e-9));
 }
 
+TEST_CASE("a slab pulls no harder than it holds before breaking off", "[planet][lithosphere]") {
+    const auto lead = [](Strength strength, double hotter) {
+        Lithosphere lithosphere = aged_halves(100.0F, false);
+        lithosphere.warm(10.0, {.hotter = hotter});
+        lithosphere.drive({}, strength);
+        return glm::length(turn_of(lithosphere, 1)) / glm::length(turn_of(lithosphere, 0));
+    };
+    // Today's old slab holds more than it pulls.
+    CHECK_THAT(lead({.ocean = 1.0}, 0.0), WithinRel(lead({}, 0.0), 1e-9));
+    CHECK(lead({.ocean = 0.5}, 0.0) < lead({}, 0.0));
+    // Over the young mantle it's softer, so it breaks off sooner.
+    CHECK(lead({}, 200.0) < lead({}, 0.0));
+}
+
 TEST_CASE("the mantle drags harder on plates carrying continent", "[planet][lithosphere]") {
     const auto lead = [](bool keel) {
         Lithosphere lithosphere = aged_halves(100.0F, keel);
@@ -916,7 +930,7 @@ TEST_CASE("the mantle warms under continents and cools under ocean floor",
     const DVec3 south{0.0, 0.0, -1.0};
     CHECK(heat_at(north) == 0.0F);
 
-    constexpr Mantle mantle{.settling = 100.0};
+    constexpr Mantle mantle{.settling = 100.0, .hotter = 0.0};
     lithosphere.warm(50.0, mantle);
     lithosphere.warm(50.0, mantle);
     CHECK_THAT(heat_at(north), WithinAbs(1.0 - std::exp(-1.0), 1e-5));
@@ -931,10 +945,28 @@ TEST_CASE("the mantle warms under continents and cools under ocean floor",
     CHECK_THAT(heat_at(south), WithinAbs(1.0 - std::exp(-1.0), 1e-5));
 }
 
+TEST_CASE("the young mantle softens the lithosphere less as it cools", "[planet][lithosphere]") {
+    Lithosphere lithosphere = halves();
+    CHECK(lithosphere.softer() == 1.0);
+    constexpr Mantle mantle{.hotter = 200.0, .cooling = 0.1};
+    lithosphere.warm(10.0, mantle);
+    // Creep with 300 kJ/mol, 200 K over 1623 K.
+    const double young = lithosphere.softer();
+    CHECK_THAT(young, WithinRel(std::exp(300e3 / 8.314 * ((1.0 / 1623.0) - (1.0 / 1823.0))), 1e-9));
+    lithosphere.advance(1000.0);
+    lithosphere.warm(10.0, mantle);
+    CHECK(lithosphere.softer() > 1.0);
+    CHECK(lithosphere.softer() < young);
+    lithosphere.advance(1000.0);
+    lithosphere.warm(10.0, mantle);
+    CHECK(lithosphere.softer() == 1.0);
+}
+
 namespace {
 
-// The northern half alone, ocean but for a continent around its pole, warmed under it for good.
-Lithosphere warm_cap() {
+// The northern half alone, ocean but for a continent around its pole, warmed under it for good
+// over a mantle `hotter` than today's.
+Lithosphere warm_cap(double hotter = 0.0) {
     const Lithosphere ocean = halves();
     std::vector<Lithosphere::Plate> plates{ocean.plates().front()};
     const auto& grid = ocean.grid();
@@ -944,7 +976,7 @@ Lithosphere warm_cap() {
         }
     }
     Lithosphere lithosphere{grid, plates};
-    lithosphere.warm(1000.0);
+    lithosphere.warm(1000.0, {.hotter = hotter});
     return lithosphere;
 }
 
@@ -988,6 +1020,17 @@ TEST_CASE("a plate splits over a warm mantle only where pulled harder than it ho
     }
     CHECK(parting > 0);
     CHECK(closing == 0);
+}
+
+TEST_CASE("a plate that holds over today's mantle splits over a young hotter one",
+          "[planet][lithosphere]") {
+    constexpr Strength middling{.cool = 0.2, .warm = 0.1, .ocean = 0.2};
+    Lithosphere today = warm_cap();
+    today.rift({}, middling);
+    CHECK(today.plates().size() == 1);
+    Lithosphere young = warm_cap(200.0);
+    young.rift({}, middling);
+    CHECK(young.plates().size() == 2);
 }
 
 TEST_CASE("the volume's rock is the crust on top over the mantle", "[planet][lithosphere]") {

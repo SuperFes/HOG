@@ -50,9 +50,17 @@ struct Ranges {
 
 // How the mantle warms where continents lie over it, as their thick crust holds its heat in, and
 // cools again under ocean floor, which lets it out: over `years`, each place goes the share
-// 1 - e^(-years / settling) of the way to fully warm or cool.
+// 1 - e^(-years / settling) of the way to fully warm or cool. The whole mantle starts `hotter`
+// kelvin over today's `potential` and loses `cooling` a million years till it's as today's, as
+// Earth's has lost about 250 K since plates began 3 billion years ago. The lithosphere over a
+// hotter mantle is thinner and its creep faster, by e^(activation / R (1/today - 1/then)) with
+// the activation energy of creep in olivine, so it's weaker by as much.
 struct Mantle {
     double settling = 100.0;
+    double hotter = 200.0;
+    double cooling = 0.08;
+    double potential = 1623.0;
+    double activation = 300e3;
 };
 
 // A stretch of one plate's edge, a place of the grid long, where it meets another plate.
@@ -100,7 +108,9 @@ struct Forces {
 // How strong the lithosphere is against being pulled apart, against an old slab's pull on the
 // same length: a continent over cool mantle, and over fully warm mantle, which thins the strong
 // lid under it, and between, the warmth's share of the way by ratio, as strength falls off
-// steeply with heat. Old ocean floor holds as a cool continent does.
+// steeply with heat. Old ocean floor holds as a cool continent does. A slab is old floor too, so
+// it pulls no harder than that holds before it breaks off, as slabs did over the hotter, softer
+// young mantle.
 struct Strength {
     double cool = 2.0;
     double warm = 0.1;
@@ -147,8 +157,9 @@ public:
     // Turns every plate as the forces on it now move it against the mantle's drag, at once, as
     // nothing so slow carries momentum. The first time, the drag is set so the plates keep the
     // pace they had, and it stays so after.
-    void drive(Forces forces = {});
-    // Warms and cools the mantle under each place by the crust on top over `years`.
+    void drive(Forces forces = {}, Strength strength = {});
+    // Warms and cools the mantle under each place by the crust on top over `years`, and sets how
+    // hot it is on the whole as of now.
     void warm(double years, Mantle mantle = {});
     // Splits each plate carrying continent along the line through the warmest mantle under its
     // continent that the forces on it pull apart hardest against how strong it is there, if they
@@ -174,6 +185,8 @@ public:
     // How warm the mantle is under each place of the grid, from nought, as under ocean floor, to
     // one, as under a continent that has lain there for good.
     [[nodiscard]] std::span<const float> heat() const noexcept { return heat_; }
+    // How many times weaker the lithosphere is than over today's mantle, as of the last warming.
+    [[nodiscard]] double softer() const noexcept { return softer_; }
     // Cubic kilometres of continental crust foundered into the mantle so far.
     [[nodiscard]] double foundered() const noexcept { return foundered_; }
 
@@ -200,7 +213,8 @@ private:
     };
 
     // Every force on each plate: across its edges, and off the mantle's dome under it.
-    [[nodiscard]] std::vector<std::vector<Push>> pushes(const Forces& forces) const;
+    [[nodiscard]] std::vector<std::vector<Push>> pushes(const Forces& forces,
+                                                        Strength strength) const;
     // The plane, by the side it faces, of the line through the warmest mantle under a plate's
     // continent that `pushes` on it pull apart hardest against how strong it is, if harder.
     [[nodiscard]] std::optional<DVec3> weakest(std::uint32_t plate, std::span<const Push> pushes,
@@ -227,6 +241,7 @@ private:
     // plates are first driven.
     double pace_ = 0.0;
     double foundered_ = 0.0;
+    double softer_ = 1.0;
 };
 
 // The plates and crust of `tectonics` as they stand, each plate's frame the planet's, with one of
