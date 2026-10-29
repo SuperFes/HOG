@@ -515,7 +515,8 @@ TEST_CASE("a basin with water enough holds a level lake, drained by a river from
     int inside = 0;
     int out_of = 0;
     for (const Reach& reach : wet.reaches()) {
-        inside += in_bowl(reach.from, 0.1) && in_bowl(reach.to, 0.1) ? 1 : 0;
+        // Only the river leaving it crosses the lake.
+        inside += !reach.outflow && in_bowl(reach.from, 0.1) && in_bowl(reach.to, 0.1) ? 1 : 0;
         out_of += in_bowl(reach.from, 0.3) && reach.from_surface <= surface ? 1 : 0;
     }
     CHECK(inside == 0);
@@ -588,6 +589,42 @@ TEST_CASE("the water of a lake meets the ground at its shore", "[planet][rivers]
         }
     }
     CHECK(shores == 6);
+}
+
+TEST_CASE("a river runs out of a lake from its shore, at its level", "[planet][rivers]") {
+    const Landform basin = bowl(fixed_one / 2);
+    const Rivers wet{basin, ground(basin), {1, basin.grid(), radius}, radius};
+    const auto lake = wet.lake(hog::planet::cell_at(bowl_center, 22),
+                               std::numeric_limits<std::int64_t>::min() / 2);
+    REQUIRE(lake);
+    int outflows = 0;
+    for (const Reach& reach : wet.reaches()) {
+        if (!reach.outflow) {
+            continue;
+        }
+        ++outflows;
+        CHECK(reach.from_surface == lake);
+        CHECK(wet.lake(hog::planet::cell_at(reach.from, 22),
+                       std::numeric_limits<std::int64_t>::min() / 2) == lake);
+        // The river on from it carries on from its level.
+        const auto next = std::ranges::find_if(
+            wet.reaches(), [&](const Reach& other) { return other.from == reach.to; });
+        if (next != wet.reaches().end()) {
+            CHECK(next->from_surface == reach.to_surface);
+        }
+        // It cuts nothing under the lake.
+        const CellId from = hog::planet::cell_at(reach.from, 22);
+        const std::int64_t bed = lake.value_or(0) - fixed_one;
+        CHECK(wet.cut(from, bed) == bed);
+    }
+    CHECK(outflows > 0);
+    // It leaves from water deep enough that no ground drawn finer stands out of it.
+    const auto& grid = basin.grid();
+    const auto deep = std::ranges::count_if(wet.reaches(), [&](const Reach& reach) {
+        const std::uint32_t from = grid.index(hog::planet::cell_at(reach.from, grid.level()));
+        return reach.outflow && lake.value_or(0) - basin.heights()[from] >= 2 * fixed_one;
+    });
+    CHECK(deep > 0);
 }
 
 TEST_CASE("a basin too dry to fill holds no lake and no rivers", "[planet][rivers]") {

@@ -55,6 +55,58 @@ Standing find_standing(const Landform& landform) {
     return found;
 }
 
+// Per landform cell, whether a river runs out of a lake from it: where the lake spills over its
+// rim onto land, and back across it as far as its cells lie shallow enough for the ground drawn
+// finer to stand out of it, so the river leaves from open water.
+std::vector<bool> lake_outflows(const Drainage& drainage, std::span<const std::int64_t> lakes,
+                                std::span<const std::int64_t> ground) {
+    constexpr std::int64_t shallow = 2 * fixed_one;
+    const auto lake = [&](std::uint32_t cell) { return lakes[cell] != Landform::dry; };
+    std::vector<bool> leaving(lakes.size(), false);
+    for (const std::uint32_t cell : drainage.order) {
+        const std::uint32_t receiver = drainage.receiver[cell];
+        const bool onto_land = !lake(receiver) && drainage.receiver[receiver] != receiver;
+        const bool back_across =
+            lake(receiver) && leaving[receiver] && lakes[receiver] - ground[receiver] < shallow;
+        leaving[cell] = lake(cell) && (onto_land || back_across);
+    }
+    return leaving;
+}
+
+// The reaches near each landform cell: those of `first[cell]` up to `first[cell + 1]` in `nearby`.
+struct Nearby {
+    std::vector<std::uint32_t> first;
+    std::vector<std::uint32_t> nearby;
+};
+
+// Of reaches running between the cells of `ends`, one pair to a reach in turn, those about each
+// cell: running from or to it, or a neighbour of it.
+Nearby index_nearby(const LevelGrid& grid,
+                    std::span<const std::pair<std::uint32_t, std::uint32_t>> ends) {
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> near;
+    for (std::uint32_t reach = 0; reach < ends.size(); ++reach) {
+        for (const std::uint32_t end : {ends[reach].first, ends[reach].second}) {
+            near.emplace_back(end, reach);
+            for (const std::uint32_t next : grid.neighbors(end)) {
+                near.emplace_back(next, reach);
+            }
+        }
+    }
+    std::ranges::sort(near);
+    const auto [last, end] = std::ranges::unique(near);
+    near.erase(last, end);
+    Nearby index{.first = std::vector<std::uint32_t>(grid.size() + 1, 0), .nearby = {}};
+    index.nearby.reserve(near.size());
+    for (const auto& [cell, reach] : near) {
+        ++index.first[cell + 1];
+        index.nearby.push_back(reach);
+    }
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        index.first[cell + 1] += index.first[cell];
+    }
+    return index;
+}
+
 constexpr std::uint32_t none = ~std::uint32_t{0};
 
 // Per landform cell, the largest river flowing into it, or `none`.
@@ -442,14 +494,19 @@ Rivers::Rivers(const Landform& landform, std::span<const std::int64_t> ground, M
     Standing standing = find_standing(landform);
     sea_ = std::move(standing.sea);
     sunken_ = std::move(standing.sunken);
+    const std::vector<bool> leaving = lake_outflows(drainage, lakes, ground);
+    const auto spills = [&](std::uint32_t cell) { return static_cast<bool>(leaving[cell]); };
     // Rivers stop at a lake's shore, and leave from its outlet; dry basins hold none.
     const auto flows = [&](std::uint32_t cell) {
-        return !outlet(cell) && !landform.basin(cell) &&
+        return !outlet(cell) && (!landform.basin(cell) || spills(cell)) &&
                static_cast<double>(drained[cell]) >= source_area;
     };
-    // A river's water stands at the ground of its cell's centre, but never above the water
-    // upstream, so it only falls towards the sea and cuts through rises on the way.
-    levels_.assign(ground.begin(), ground.end());
+    // A river's water stands at the ground of its cell's centre, or a lake's level, but never above
+    // the water upstream, so it only falls towards the sea and cuts through rises on the way.
+    levels_.resize(count);
+    std::ranges::transform(ground, lakes, levels_.begin(), [](std::int64_t at, std::int64_t lake) {
+        return lake != Landform::dry ? lake : at;
+    });
     for (auto cell = drainage.order.rbegin(); cell != drainage.order.rend(); ++cell) {
         const std::uint32_t receiver = drainage.receiver[*cell];
         if (flows(*cell) && flows(receiver)) {
@@ -475,14 +532,13 @@ Rivers::Rivers(const Landform& landform, std::span<const std::int64_t> ground, M
     const std::vector<Course> courses = lay_courses(
         landform, levels_, flows, hash_combine(meander.seed(), swing_salt), radius, scale);
 
-    std::vector<std::pair<std::uint32_t, std::uint32_t>> near;
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> ends;
     for (std::uint32_t cell = 0; cell < count; ++cell) {
         if (!flows(cell)) {
             continue;
         }
         const std::uint32_t receiver = drainage.receiver[cell];
         const auto area = static_cast<double>(drained[cell]);
-        const auto reach = static_cast<std::uint32_t>(reaches_.size());
         const DVec3 from = cell_center(grid.cell(cell));
         const DVec3 to = cell_center(grid.cell(receiver));
         const std::int64_t drop = levels_[cell] - levels_[receiver];
@@ -498,7 +554,8 @@ Rivers::Rivers(const Landform& landform, std::span<const std::int64_t> ground, M
                             .wobble = course.wobble,
                             .depth = fixed(scale * depth(area)),
                             .fall = falls ? drop : 0,
-                            .mouth = outlet(receiver) || lake(receiver),
+                            .mouth = (outlet(receiver) || lake(receiver)) && !lake(cell),
+                            .outflow = lake(cell),
                             .leaving = course.leaving,
                             .arriving = course.arriving,
                             .flow = flow(area),
@@ -509,25 +566,11 @@ Rivers::Rivers(const Landform& landform, std::span<const std::int64_t> ground, M
                             .swing_to = course.swing_to,
                             .joining = course.joining,
                             .settling = course.settling});
-        for (const std::uint32_t end : {cell, receiver}) {
-            near.emplace_back(end, reach);
-            for (const std::uint32_t next : grid.neighbors(end)) {
-                near.emplace_back(next, reach);
-            }
-        }
+        ends.emplace_back(cell, receiver);
     }
-    std::ranges::sort(near);
-    const auto [last, end] = std::ranges::unique(near);
-    near.erase(last, end);
-    first_.assign(count + 1, 0);
-    nearby_.reserve(near.size());
-    for (const auto& [cell, reach] : near) {
-        ++first_[cell + 1];
-        nearby_.push_back(reach);
-    }
-    for (std::uint32_t cell = 0; cell < count; ++cell) {
-        first_[cell + 1] += first_[cell];
-    }
+    Nearby index = index_nearby(grid, ends);
+    first_ = std::move(index.first);
+    nearby_ = std::move(index.nearby);
 }
 
 template <typename Reaching, typename Visit>
@@ -620,6 +663,13 @@ std::int64_t Rivers::cut(CellId cell, std::int64_t ground) const {
                 : 1.0;
         if (shoaling <= 0.0) {
             return;
+        }
+        // Nor under the lake it runs out of.
+        if (reach.outflow) {
+            const auto water = standing(cell, ground);
+            if (water && !water->sea && water->level == reach.from_surface) {
+                return;
+            }
         }
         const std::int64_t surface = sunk(reach, spot.level, ground);
         const double half = spot.width / 2.0;

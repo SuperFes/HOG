@@ -128,6 +128,33 @@ TEST_CASE("rivers' water runs on past the shore at the level of the water it run
     CHECK(out > 0);
 }
 
+TEST_CASE("rivers' water runs out of a lake from its level", "[terrain][rivers]") {
+    const hog::planet::Reach* found = nullptr;
+    for (const auto& reach : terrain().rivers().reaches()) {
+        if (reach.outflow && reach.width > 2.0) {
+            found = &reach;
+            break;
+        }
+    }
+    REQUIRE(found != nullptr);
+    const RiverWater laid = hog::terrain::river_water(shared_world(), found->from, radius());
+    std::vector<bool> used(laid.vertices.size(), false);
+    for (const std::uint32_t at : laid.indices) {
+        used[at] = true;
+    }
+    int on_lake = 0;
+    for (std::size_t at = 2; at < laid.vertices.size(); at += 5) {
+        const RiverVertex& vertex = laid.vertices[at];
+        if (!used[at] || vertex.mixed == 0.0F) {
+            continue;
+        }
+        const double height = glm::length(laid.origin.metres() + DVec3{vertex.position}) - radius();
+        on_lake +=
+            std::abs(height - hog::planet::fixed_to_double(found->from_surface)) < 0.01 ? 1 : 0;
+    }
+    CHECK(on_lake > 0);
+}
+
 TEST_CASE("rivers' water keeps to its channel while a bank stands over the water it runs into",
           "[terrain][rivers]") {
     const RiverWater& laid = mouth_water();
@@ -146,15 +173,23 @@ TEST_CASE("rivers' water keeps to its channel while a bank stands over the water
 
 TEST_CASE("rivers' mouths fan out as they mix in", "[terrain][rivers]") {
     const RiverWater& laid = mouth_water();
+    // Which middles are drawn on into the next piece's along the same reach.
+    std::vector<bool> joined(laid.vertices.size(), false);
+    for (std::size_t at = 0; at + 1 < laid.indices.size(); at += 6) {
+        joined[laid.indices[at]] = laid.indices[at + 1] == laid.indices[at] + 5;
+    }
+    const auto on = [&](std::size_t at) {
+        return joined[at] && laid.vertices[at + 5].mixed > laid.vertices[at].mixed;
+    };
     int mouths = 0;
     int mixed_in = 0;
     for (std::size_t at = 2; at + 5 < laid.vertices.size(); at += 5) {
-        if (laid.vertices[at].mixed != 0.0F || laid.vertices[at + 5].mixed == 0.0F) {
+        // From the shore, where it's mixed in hardly at all.
+        if (laid.vertices[at].mixed > 1e-3F || !on(at)) {
             continue;
         }
         std::size_t end = at + 5;
-        while (end + 5 < laid.vertices.size() &&
-               laid.vertices[end + 5].mixed > laid.vertices[end].mixed) {
+        while (end + 5 < laid.vertices.size() && on(end)) {
             end += 5;
         }
         const float mixed = laid.vertices[end].mixed;

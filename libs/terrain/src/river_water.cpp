@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <numbers>
 #include <optional>
 #include <vector>
@@ -45,14 +46,14 @@ DVec3 across_at(const planet::Meander& meander, const Section& section, double o
     return meander.unshifted(glm::normalize(section.course + (section.side * swung)));
 }
 
-// Whether the ground either side of a section, as far out as its water's drawn, lies under the
-// water its reach runs into: coarse cells may hold land the sea or a lake covers.
-bool out_in(const planet::Elevation& terrain, const planet::Reach& reach, const Section& section,
+// Whether the ground either side of a section, as far out as its water's drawn, lies under
+// standing water at `level`: coarse cells may hold land the sea or a lake covers.
+bool out_in(const planet::Elevation& terrain, std::int64_t level, const Section& section,
             double radius, double over) {
     const planet::Meander& meander = terrain.rivers().meander();
     return std::ranges::all_of(std::array{-1.0, 1.0}, [&](double way) {
         const DVec3 bank = across_at(meander, section, way * (section.half + over), radius);
-        return terrain.elevation(planet::cell_at(bank)) < reach.to_surface;
+        return terrain.elevation(planet::cell_at(bank)) < level;
     });
 }
 
@@ -71,9 +72,19 @@ Section section_at(const planet::Elevation& terrain, const planet::Reach& reach,
                         glm::normalize(course + (side * swing.offset))),
                     .level = std::nullopt};
     const planet::CellId cell = planet::cell_at(section.middle);
-    const bool land = terrain.is_land(cell) && !terrain.lake(cell);
-    if (reach.mouth && (!land || out_in(terrain, reach, section, radius, over))) {
-        section.level = planet::fixed_to_double(reach.to_surface);
+    const auto lake = terrain.lake(cell);
+    const bool land = terrain.is_land(cell) && !lake;
+    // Out on the sea or lake it runs into near its end, or on the lake it runs out of near its
+    // start.
+    const bool leaving = reach.outflow && (!reach.mouth || t < 0.5);
+    const std::int64_t level = leaving ? reach.from_surface : reach.to_surface;
+    // A channel cut out through a lake's rim lies below its level, though it's land: only the
+    // banks of a mouth tell where the water it runs into covers them.
+    if ((reach.mouth || reach.outflow) &&
+        (!land || (!leaving && out_in(terrain, level, section, radius, over)))) {
+        // Out over open water, at its own level: it may be another lake by the one it leaves.
+        const std::int64_t open = lake ? lake->surface : 0;
+        section.level = planet::fixed_to_double(land ? level : open);
         section.standing = true;
     } else if (land) {
         if (const auto channel = terrain.river(cell)) {
@@ -83,21 +94,34 @@ Section section_at(const planet::Elevation& terrain, const planet::Reach& reach,
     return section;
 }
 
-// Past the shore a mouth's water mixes in, fanning out as it goes.
-void mix_in(std::vector<Section>& sections, double width, double radius) {
-    double past = 0.0;
+// Out from the shore, a river's water mixes into the water standing there, fanning out as it goes:
+// past its mouth, and back from where it runs out of a lake.
+void mix_in(std::vector<Section>& sections, const planet::Reach& reach, double radius) {
+    const double mixing = river_mixing * reach.width;
+    // Metres from the shore each way along, as far as mixes it all in; from its ends, as far as
+    // the water it comes out of or runs into has it.
+    const auto from_shore = [&](const auto& first, const auto& last, bool from_water) {
+        std::vector<double> out;
+        double past = from_water ? mixing : 0.0;
+        for (auto at = first; at != last; ++at) {
+            if (!at->standing) {
+                past = 0.0;
+            } else if (at != first) {
+                past += glm::length(at->middle - std::prev(at)->middle) * radius;
+            }
+            out.push_back(past);
+        }
+        return out;
+    };
+    const std::vector<double> ahead = from_shore(sections.begin(), sections.end(), reach.outflow);
+    std::vector<double> behind = from_shore(sections.rbegin(), sections.rend(), reach.mouth);
+    std::ranges::reverse(behind);
     for (std::size_t at = 0; at < sections.size(); ++at) {
         Section& section = sections[at];
-        if (!section.standing) {
-            past = 0.0;
-            continue;
+        if (section.standing) {
+            section.mixed = std::clamp(std::min(ahead[at], behind[at]) / mixing, 1e-3, 1.0);
+            section.half *= 1.0 + (river_fan * section.mixed);
         }
-        const std::size_t before = at == 0 ? 1 : at - 1;
-        past +=
-            glm::length(section.middle - sections[std::min(before, sections.size() - 1)].middle) *
-            radius;
-        section.mixed = std::min(past / (river_mixing * width), 1.0);
-        section.half *= 1.0 + (river_fan * section.mixed);
     }
 }
 
@@ -121,7 +145,7 @@ void lay_reach(const planet::Elevation& terrain, const planet::Reach& reach, DVe
         sections.push_back(
             section_at(terrain, reach, static_cast<double>(piece) / pieces, radius, over));
     }
-    mix_in(sections, reach.width, radius);
+    mix_in(sections, reach, radius);
     const auto first = static_cast<std::uint32_t>(water.vertices.size());
     for (int piece = 0; piece <= pieces; ++piece) {
         const auto at = static_cast<std::size_t>(piece);
