@@ -24,6 +24,8 @@ struct Surface {
     float4 position : SV_Position;
     float3 normal;
     float3 colour;
+    // Up through the point, from the planet's centre.
+    float3 up;
 };
 
 [shader("vertex")]
@@ -35,12 +37,15 @@ Surface vertex_main(Vertex vertex) {
     surface.position = mul(push.clip_from_eye, float4(drawn, 1.0));
     surface.normal = vertex.normal;
     surface.colour = vertex.colour;
+    surface.up = from_eye + (push.up_height.xyz * (push.sun_radius.w + push.up_height.w));
     return surface;
 }
 
 [shader("fragment")]
 float4 fragment_main(Surface surface) : SV_Target {
     const float night = push.faked_night.y;
-    const float facing = saturate(dot(normalize(surface.normal), push.sun_radius.xyz));
+    // The planet hides the sun once it has set, whichever way a side faces.
+    const float risen = smoothstep(-0.02, 0.02, dot(normalize(surface.up), push.sun_radius.xyz));
+    const float facing = saturate(dot(normalize(surface.normal), push.sun_radius.xyz)) * risen;
     return float4(surface.colour * (night + ((1.0 - night) * facing)), 1.0);
 }

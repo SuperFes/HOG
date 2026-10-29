@@ -43,9 +43,10 @@ void add_square(BlockMesh& mesh, double away, hog::Vec3 colour) {
     }
 }
 
-// Draws over a black background, looking down -z from `eye`, and reads it back.
+// Draws over a black background, looking down -z from `eye` on a planet a thousand kilometres
+// across whose ground is `up` there, and reads it back.
 std::vector<std::uint8_t> draw(hog::render::Device& device, BlockMesh mesh, DVec3 sun,
-                               WorldPosition eye = {}) {
+                               WorldPosition eye = {}, DVec3 up = {0.0, 0.0, 1.0}) {
     auto blocks =
         hog::render::Blocks::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
     REQUIRE(blocks);
@@ -63,7 +64,8 @@ std::vector<std::uint8_t> draw(hog::render::Device& device, BlockMesh mesh, DVec
     REQUIRE(depth);
     const BlockView view{.camera =
                              Camera{.eye = eye, .forward = {0.0, 0.0, -1.0}, .up = {0.0, 1.0, 0.0}},
-                         .sun = sun};
+                         .sun = sun,
+                         .bend = {.up = up, .eye_height = 0.0, .radius = 1.0e6, .faked = 1.0e6}};
     bool drawn = false;
     REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
         namespace use = hog::render::image_use;
@@ -108,6 +110,24 @@ TEST_CASE("a side facing the sun shows in its colour", "[render][gpu]") {
     const Pixel dark = middle(draw(*device, mesh, DVec3{0.0, 0.0, -1.0}));
     CHECK(dark[0] > 50);
     CHECK(dark[0] < 80);
+}
+
+TEST_CASE("a side facing the sun once it has set is only as bright as the night", "[render][gpu]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    BlockMesh mesh{.origin = WorldPosition{}, .vertices = {}, .indices = {}};
+    add_square(mesh, 4.0, hog::Vec3{1.0F, 0.5F, 0.0F});
+    // Standing with the square's side facing the sun, a little over or under the horizon.
+    const DVec3 up{0.0, 1.0, 0.0};
+    const Pixel risen =
+        middle(draw(*device, mesh, glm::normalize(DVec3{0.0, 0.1, 1.0}), WorldPosition{}, up));
+    const Pixel set =
+        middle(draw(*device, mesh, glm::normalize(DVec3{0.0, -0.1, 1.0}), WorldPosition{}, up));
+    CHECK(risen[0] > 240);
+    CHECK(set[0] > 50);
+    CHECK(set[0] < 80);
 }
 
 TEST_CASE("nearer blocks hide farther ones, whichever comes first", "[render][gpu]") {
