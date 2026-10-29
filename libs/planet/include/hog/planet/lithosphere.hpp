@@ -38,6 +38,15 @@ struct Arcs {
     float growth = 0.06F;
 };
 
+// How continental crust piled up into ranges bears its own weight: past `strongest` kilometres
+// it flows out at once into the thinner continent around it, and short of that, what's piled over
+// a continent's settled thickness spreads into it by `flow` of the difference every million
+// years, so a range piled up along a line widens into a belt.
+struct Ranges {
+    float strongest = 65.0F;
+    float flow = 0.02F;
+};
+
 // The crust as rigid plates on the sphere, each keeping its crust on a grid in its own frame and
 // turning about its own pole. Crust is never carried from cell to cell, so a plate stays whole
 // however far it turns: where two plates' crust lies over one place they've met, and where none
@@ -72,14 +81,14 @@ public:
     // plate over it thickens into an arc behind the trench.
     void subduct(double years, Arcs arcs = {});
     // Continental crust lying under another plate's is too light to dive: it's scraped off onto
-    // the crust over it, piling that up into a range, and crust piled past `strongest`
-    // kilometres flows out under its own weight into the thinner continent around it.
-    void collide(float strongest = strongest_crust);
+    // the crust over it, piling that up into a range, which then settles over `years` as
+    // `ranges` says.
+    void collide(double years, Ranges ranges = {});
 
     // Ocean floor an arc thickens this far floats as continent.
     static constexpr float arc_continent = 20.0F;
-    // Kilometres of continental crust that can hold themselves up.
-    static constexpr float strongest_crust = 65.0F;
+    // Continents as they settle when nothing piles them up.
+    static constexpr float settled_continent = 35.0F;
 
     [[nodiscard]] const LevelGrid& grid() const noexcept { return grid_; }
     [[nodiscard]] std::span<const Plate> plates() const noexcept { return plates_; }

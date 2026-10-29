@@ -131,6 +131,44 @@ void collapse(Lithosphere::Plate& plate, const LevelGrid& grid, float strongest)
     }
 }
 
+// Moves what continental crust has piled over `settled` kilometres into the plate's continent
+// around it, by `share` of the difference with each, volume for volume.
+void flow(Lithosphere::Plate& plate, const LevelGrid& grid, float settled, float share) {
+    const auto piled = [&](std::size_t index) {
+        return std::max(plate.crust[index].thickness - settled, 0.0F);
+    };
+    std::vector<float> thickness(plate.crust.size());
+    for (std::size_t index = 0; index < plate.crust.size(); ++index) {
+        thickness[index] = plate.crust[index].thickness;
+    }
+    for (std::size_t index = 0; index < plate.crust.size(); ++index) {
+        if (plate.crust[index].type != CrustType::Continental) {
+            continue;
+        }
+        const auto around = grid.neighbors(plate.cells[index]);
+        const float each = share / static_cast<float>(around.size());
+        const auto here = static_cast<float>(grid.area(plate.cells[index]));
+        // Each pair once, from the lower cell.
+        for (const std::uint32_t next : around) {
+            const auto found = std::ranges::lower_bound(plate.cells, next);
+            if (next < plate.cells[index] || found == plate.cells.end() || *found != next) {
+                continue;
+            }
+            const auto at = static_cast<std::size_t>(std::distance(plate.cells.begin(), found));
+            if (plate.crust[at].type != CrustType::Continental) {
+                continue;
+            }
+            const auto there = static_cast<float>(grid.area(next));
+            const float moved = each * (piled(index) - piled(at)) * std::min(here, there);
+            thickness[index] -= moved / here;
+            thickness[at] += moved / there;
+        }
+    }
+    for (std::size_t index = 0; index < plate.crust.size(); ++index) {
+        plate.crust[index].thickness = thickness[index];
+    }
+}
+
 } // namespace
 
 bool stays_over(const Crust& one, const Crust& other) noexcept {
@@ -309,7 +347,7 @@ void Lithosphere::subduct(double years, Arcs arcs) {
     raise_arcs(trenches, years, arcs);
 }
 
-void Lithosphere::collide(float strongest) {
+void Lithosphere::collide(double years, Ranges ranges) {
     // A cell of continent goes under once its middle lies under another plate's, and all of it
     // is piled onto the cell over that.
     const std::vector<bool> overrides = overriding();
@@ -347,7 +385,9 @@ void Lithosphere::collide(float strongest) {
     }
     for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
         remove_crust(plates_[plate], std::move(scraped[plate]));
-        collapse(plates_[plate], grid_, strongest);
+        collapse(plates_[plate], grid_, ranges.strongest);
+        flow(plates_[plate], grid_, settled_continent,
+             std::min(static_cast<float>(years) * ranges.flow, 1.0F));
     }
 }
 
