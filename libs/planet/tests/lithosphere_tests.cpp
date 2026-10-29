@@ -433,6 +433,114 @@ TEST_CASE("plates that part and meet keep ocean floor only on top", "[planet][li
 
 namespace {
 
+constexpr Crust continent{
+    .type = CrustType::Continental, .thickness = 35.0F, .age = 900.0F, .raised = 900.0F};
+
+// The halves, both of them continent.
+Lithosphere continental_halves() {
+    const Lithosphere ocean = halves();
+    std::vector<Lithosphere::Plate> plates{ocean.plates().begin(), ocean.plates().end()};
+    for (auto& plate : plates) {
+        std::ranges::fill(plate.crust, continent);
+    }
+    return Lithosphere{ocean.grid(), plates};
+}
+
+// Cubic kilometres of continental crust the plates carry.
+double continental_volume(const Lithosphere& lithosphere) {
+    const auto& grid = lithosphere.grid();
+    double volume = 0.0;
+    for (const auto& plate : lithosphere.plates()) {
+        for (std::size_t index = 0; index < plate.cells.size(); ++index) {
+            if (plate.crust[index].type == CrustType::Continental) {
+                volume += static_cast<double>(grid.area(plate.cells[index])) * 1e-6 *
+                          static_cast<double>(plate.crust[index].thickness);
+            }
+        }
+    }
+    return volume;
+}
+
+float thickest(const Lithosphere& lithosphere) {
+    float most = 0.0F;
+    for (const auto& plate : lithosphere.plates()) {
+        for (const Crust& crust : plate.crust) {
+            most = std::max(most, crust.thickness);
+        }
+    }
+    return most;
+}
+
+} // namespace
+
+TEST_CASE("continents meeting pile up into a range on the one on top", "[planet][lithosphere]") {
+    Lithosphere lithosphere = continental_halves();
+    constexpr double years = 20.0;
+    lithosphere.advance(years);
+    const Lithosphere moved = lithosphere;
+    const double volume = continental_volume(moved);
+    // Strong enough to hold all that piles up, so it stays where it piled.
+    lithosphere.collide(1'000.0F);
+
+    const auto& grid = lithosphere.grid();
+    const DVec3 meeting =
+        hog::planet::cell_center(hog::planet::cell_at(DVec3{0.0, -1.0, 0.0}, grid.level()));
+    CHECK(lithosphere.crust_of(0, meeting).has_value());
+    CHECK_FALSE(lithosphere.crust_of(1, meeting).has_value());
+    CHECK(lithosphere.plates()[0].cells.size() == moved.plates()[0].cells.size());
+    CHECK(lithosphere.plates()[1].cells.size() < moved.plates()[1].cells.size());
+    CHECK_THAT(continental_volume(lithosphere), WithinRel(volume, 1e-5));
+
+    int piled = 0;
+    for (const Crust& crust : lithosphere.plates()[0].crust) {
+        if (crust.thickness > continent.thickness) {
+            ++piled;
+            CHECK(crust.raised == 0.0F);
+        } else {
+            CHECK(crust.thickness == continent.thickness);
+        }
+    }
+    CHECK(piled > 0);
+    CHECK(thickest(lithosphere) >= 2.0F * continent.thickness * 0.9F);
+}
+
+TEST_CASE("crust piled too thick flows out into the thinner continent around it",
+          "[planet][lithosphere]") {
+    Lithosphere lithosphere = continental_halves();
+    lithosphere.advance(20.0);
+    const double volume = continental_volume(lithosphere);
+    lithosphere.collide();
+    CHECK_THAT(continental_volume(lithosphere), WithinRel(volume, 1e-4));
+    CHECK(thickest(lithosphere) <= Lithosphere::strongest_crust + 1e-3F);
+    CHECK(thickest(lithosphere) > continent.thickness);
+}
+
+TEST_CASE("ocean floor never piles up", "[planet][lithosphere]") {
+    Lithosphere lithosphere = halves();
+    lithosphere.advance(20.0);
+    const Lithosphere moved = lithosphere;
+    lithosphere.collide();
+    for (std::uint32_t plate = 0; plate < 2; ++plate) {
+        CHECK(lithosphere.plates()[plate].cells == moved.plates()[plate].cells);
+        CHECK(lithosphere.plates()[plate].crust == moved.plates()[plate].crust);
+    }
+}
+
+TEST_CASE("no continent is lost as plates part and meet", "[planet][lithosphere]") {
+    Lithosphere lithosphere = hog::planet::lithosphere_from(start(), step_years);
+    const double volume = continental_volume(lithosphere);
+    for (int step = 0; step < 10; ++step) {
+        lithosphere.advance(step_years);
+        // Arcs make new continent; without them none is made either.
+        lithosphere.subduct(step_years, {.reach = 3, .growth = 0.0F});
+        lithosphere.collide();
+        lithosphere.spread();
+    }
+    CHECK_THAT(continental_volume(lithosphere), WithinRel(volume, 0.01));
+}
+
+namespace {
+
 // Shells a kilometre thick.
 constexpr int shell_level = 8;
 

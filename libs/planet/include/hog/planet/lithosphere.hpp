@@ -71,9 +71,15 @@ public:
     // Ocean floor lying under another plate's crust dives into the mantle and is gone, and the
     // plate over it thickens into an arc behind the trench.
     void subduct(double years, Arcs arcs = {});
+    // Continental crust lying under another plate's is too light to dive: it's scraped off onto
+    // the crust over it, piling that up into a range, and crust piled past `strongest`
+    // kilometres flows out under its own weight into the thinner continent around it.
+    void collide(float strongest = strongest_crust);
 
     // Ocean floor an arc thickens this far floats as continent.
     static constexpr float arc_continent = 20.0F;
+    // Kilometres of continental crust that can hold themselves up.
+    static constexpr float strongest_crust = 65.0F;
 
     [[nodiscard]] const LevelGrid& grid() const noexcept { return grid_; }
     [[nodiscard]] std::span<const Plate> plates() const noexcept { return plates_; }
@@ -93,12 +99,13 @@ public:
 private:
     // Where in a plate's cells is the crust it carries over a unit direction, if it has any.
     [[nodiscard]] std::optional<std::size_t> held(std::uint32_t plate, DVec3 at) const;
-    // Of each two plates' ocean floor where they meet, whether the first's stays on top, one
-    // flag to each pair in a row per plate.
+    // Of each two plates where they meet, whether the first's crust stays over the second's of
+    // the same type, one flag to each pair in a row per plate.
     [[nodiscard]] std::vector<bool> overriding() const;
-    // Whether another plate's crust lies over a plate's ocean floor at a unit direction.
-    [[nodiscard]] bool beneath(std::uint32_t plate, DVec3 at,
-                               const std::vector<bool>& overrides) const;
+    // Another plate whose crust lies over a plate's crust of `type` at a unit direction, if any.
+    [[nodiscard]] std::optional<std::uint32_t> overlying(std::uint32_t plate, CrustType type,
+                                                         DVec3 at,
+                                                         const std::vector<bool>& overrides) const;
     // Thickens the plate on top out from each of the `trenches`, places of the grid.
     void raise_arcs(std::span<const std::uint32_t> trenches, double years, Arcs arcs);
 

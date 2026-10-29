@@ -5,6 +5,7 @@
 #include <hog/planet/volume.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <iterator>
 #include <limits>
@@ -61,6 +62,73 @@ void remove_crust(Lithosphere::Plate& plate, std::vector<std::size_t> held) {
     }
     plate.cells.resize(kept);
     plate.crust.resize(kept);
+}
+
+// The cells next to the plate's crust at `index` on its own grid that carry continent thinner
+// than it, as indices into its cells; says how many.
+std::size_t thinner_continent(const Lithosphere::Plate& plate, const LevelGrid& grid,
+                              std::size_t index, std::array<std::size_t, 8>& lower) {
+    std::size_t count = 0;
+    for (const std::uint32_t next : grid.neighbors(plate.cells[index])) {
+        const auto found = std::ranges::lower_bound(plate.cells, next);
+        if (found == plate.cells.end() || *found != next || count == lower.size()) {
+            continue;
+        }
+        const auto at = static_cast<std::size_t>(std::distance(plate.cells.begin(), found));
+        if (plate.crust[at].type == CrustType::Continental &&
+            plate.crust[at].thickness < plate.crust[index].thickness) {
+            lower.at(count++) = at;
+        }
+    }
+    return count;
+}
+
+// Continental crust over `strongest` kilometres sheds what it can't hold up into the plate's
+// thinner continent around it, volume for volume, and that passes on what then overloads it.
+void collapse(Lithosphere::Plate& plate, const LevelGrid& grid, float strongest) {
+    constexpr int most_passes = 256;
+    const auto over = [&](std::size_t index) {
+        return plate.crust[index].type == CrustType::Continental &&
+               plate.crust[index].thickness > strongest;
+    };
+    std::vector<std::size_t> loaded;
+    for (std::size_t index = 0; index < plate.crust.size(); ++index) {
+        if (over(index)) {
+            loaded.push_back(index);
+        }
+    }
+    std::vector<float> flowed(plate.crust.size(), 0.0F);
+    for (int pass = 0; pass < most_passes && !loaded.empty(); ++pass) {
+        std::vector<std::size_t> reached;
+        for (const std::size_t index : loaded) {
+            std::array<std::size_t, 8> lower{};
+            const std::size_t count = thinner_continent(plate, grid, index, lower);
+            if (count == 0) {
+                continue;
+            }
+            const auto here = static_cast<float>(grid.area(plate.cells[index]));
+            const float excess = plate.crust[index].thickness - strongest;
+            flowed[index] -= excess;
+            reached.push_back(index);
+            const float each = excess * here / static_cast<float>(count);
+            for (std::size_t next = 0; next < count; ++next) {
+                const std::size_t to = lower.at(next);
+                flowed[to] += each / static_cast<float>(grid.area(plate.cells[to]));
+                reached.push_back(to);
+            }
+        }
+        std::ranges::sort(reached);
+        const auto [last, end] = std::ranges::unique(reached);
+        reached.erase(last, end);
+        loaded.clear();
+        for (const std::size_t index : reached) {
+            plate.crust[index].thickness += flowed[index];
+            flowed[index] = 0.0F;
+            if (over(index)) {
+                loaded.push_back(index);
+            }
+        }
+    }
 }
 
 } // namespace
@@ -162,9 +230,10 @@ std::optional<Crust> Lithosphere::crust_of(std::uint32_t plate, DVec3 at) const 
 }
 
 std::vector<bool> Lithosphere::overriding() const {
-    // Where two plates' floor meets, the older and colder of it dives all along the edge, not
-    // place by place, so ages varying across a plate don't hole both. Each place they overlap
-    // votes; ties go to the lower plate.
+    // Where two plates' floor meets, the older and colder of it dives all along the edge, and
+    // where their continents meet the thinner goes under, not place by place, so ages and
+    // thicknesses varying across a plate don't hole both. Each place they overlap with crust of
+    // one type votes; ties go to the lower plate.
     const std::size_t count = plates_.size();
     std::vector<int> votes(count * count, 0);
     std::vector<std::pair<std::uint32_t, Crust>> here;
@@ -173,7 +242,7 @@ std::vector<bool> Lithosphere::overriding() const {
         here.clear();
         for (std::uint32_t plate = 0; plate < count; ++plate) {
             const std::optional<Crust> crust = crust_of(plate, at);
-            if (crust && crust->type == CrustType::Oceanic) {
+            if (crust) {
                 here.emplace_back(plate, *crust);
             }
         }
@@ -181,7 +250,9 @@ std::vector<bool> Lithosphere::overriding() const {
             for (std::size_t other = one + 1; other < here.size(); ++other) {
                 const auto& [lower, lower_crust] = here[one];
                 const auto& [upper, upper_crust] = here[other];
-                votes[(lower * count) + upper] += stays_over(upper_crust, lower_crust) ? -1 : 1;
+                if (lower_crust.type == upper_crust.type) {
+                    votes[(lower * count) + upper] += stays_over(upper_crust, lower_crust) ? -1 : 1;
+                }
             }
         }
     }
@@ -196,18 +267,23 @@ std::vector<bool> Lithosphere::overriding() const {
     return overrides;
 }
 
-bool Lithosphere::beneath(std::uint32_t plate, DVec3 at, const std::vector<bool>& overrides) const {
+std::optional<std::uint32_t> Lithosphere::overlying(std::uint32_t plate, CrustType type, DVec3 at,
+                                                    const std::vector<bool>& overrides) const {
     for (std::uint32_t other = 0; other < plates_.size(); ++other) {
         if (other == plate) {
             continue;
         }
         const std::optional<Crust> over = crust_of(other, at);
-        if (over && (over->type == CrustType::Continental ||
-                     overrides[(static_cast<std::size_t>(other) * plates_.size()) + plate])) {
-            return true;
+        if (!over) {
+            continue;
+        }
+        const bool overridden =
+            overrides[(static_cast<std::size_t>(other) * plates_.size()) + plate];
+        if (over->type == type ? overridden : over->type == CrustType::Continental) {
+            return other;
         }
     }
-    return false;
+    return std::nullopt;
 }
 
 void Lithosphere::subduct(double years, Arcs arcs) {
@@ -221,7 +297,7 @@ void Lithosphere::subduct(double years, Arcs arcs) {
         for (std::size_t index = 0; index < carrier.cells.size(); ++index) {
             const Crust& crust = carrier.crust[index];
             const DVec3 at = to_planet(plate, cell_center(grid_.cell(carrier.cells[index])));
-            if (crust.type == CrustType::Oceanic && beneath(plate, at, overrides)) {
+            if (crust.type == CrustType::Oceanic && overlying(plate, crust.type, at, overrides)) {
                 diving[plate].push_back(index);
                 trenches.push_back(grid_.index(cell_at(at, grid_.level())));
             }
@@ -231,6 +307,48 @@ void Lithosphere::subduct(double years, Arcs arcs) {
         remove_crust(plates_[plate], std::move(diving[plate]));
     }
     raise_arcs(trenches, years, arcs);
+}
+
+void Lithosphere::collide(float strongest) {
+    // A cell of continent goes under once its middle lies under another plate's, and all of it
+    // is piled onto the cell over that.
+    const std::vector<bool> overrides = overriding();
+    std::vector<std::vector<std::size_t>> scraped(plates_.size());
+    struct Pile {
+        std::uint32_t plate;
+        std::size_t onto;
+        float thickness;
+    };
+    std::vector<Pile> piles;
+    for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
+        const Plate& carrier = plates_[plate];
+        for (std::size_t index = 0; index < carrier.cells.size(); ++index) {
+            const Crust& crust = carrier.crust[index];
+            const DVec3 at = to_planet(plate, cell_center(grid_.cell(carrier.cells[index])));
+            const std::optional<std::uint32_t> over =
+                crust.type == CrustType::Continental ? overlying(plate, crust.type, at, overrides)
+                                                     : std::nullopt;
+            const std::optional<std::size_t> onto = over ? held(*over, at) : std::nullopt;
+            if (!over || !onto) {
+                continue;
+            }
+            // Volume for volume, between cells of the same grid in different places.
+            const auto share =
+                static_cast<float>(static_cast<double>(grid_.area(carrier.cells[index])) /
+                                   static_cast<double>(grid_.area(plates_[*over].cells[*onto])));
+            piles.push_back({.plate = *over, .onto = *onto, .thickness = crust.thickness * share});
+            scraped[plate].push_back(index);
+        }
+    }
+    for (const Pile& pile : piles) {
+        Crust& crust = plates_[pile.plate].crust[pile.onto];
+        crust.thickness += pile.thickness;
+        crust.raised = 0.0F;
+    }
+    for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
+        remove_crust(plates_[plate], std::move(scraped[plate]));
+        collapse(plates_[plate], grid_, strongest);
+    }
 }
 
 void Lithosphere::raise_arcs(std::span<const std::uint32_t> trenches, double years, Arcs arcs) {
