@@ -1,3 +1,4 @@
+#include <hog/planet/ephemeris.hpp>
 #include <hog/sim/calendar.hpp>
 #include <hog/testing/assertion_guard.hpp>
 
@@ -5,6 +6,7 @@
 #include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <numbers>
@@ -176,5 +178,19 @@ TEST_CASE("daylight fades through twilight", "[sim][calendar]") {
     for (int quarter = -28; quarter < 4; ++quarter) {
         const double elevation = quarter * 0.25 * degree;
         CHECK(hog::sim::sunlight(elevation) <= hog::sim::sunlight(elevation + (0.25 * degree)));
+    }
+}
+
+TEST_CASE("the system's sun keeps the calendar's hours and seasons", "[sim][calendar]") {
+    const Calendar calendar{hours{4}, 23.44};
+    const hog::planet::Ephemeris ephemeris{hog::planet::System{}, hours{4}, 23.44};
+    // Apart by the equation of time at most, near 4 degrees of turn.
+    for (int step = 0; step < 400; ++step) {
+        const GameTime time = at(2026y / January / 1, minutes{step * 1'321});
+        const DVec3 sun = glm::normalize(ephemeris.star(0, time));
+        const DVec3 calendars = calendar.sun_direction(time);
+        CAPTURE(step);
+        CHECK_THAT(sun.z, WithinAbs(calendars.z, 1e-3));
+        CHECK(std::acos(std::min(glm::dot(sun, calendars), 1.0)) < 4.5 * degree);
     }
 }

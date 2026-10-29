@@ -41,7 +41,7 @@ namespace hog::planet::detail {
 //     radius_km = 1_737.4
 //     albedo = 0.12
 //     tide = 0.6
-//     orbit = { distance_km = 384_400, period_days = 27.32 }
+//     orbit = { distance_km = 384_400, period_days = 29.53 }
 //
 //     [planet.rings]             # none unless given
 //     inner = 1.5                # planet radii

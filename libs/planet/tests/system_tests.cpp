@@ -34,10 +34,10 @@ TEST_CASE("a planet left to its defaults sits in Earth's system", "[planet][syst
     CHECK(system.stars.front().luminosity == 1.0);
     CHECK(system.stars.front().orbit.distance == 0.0);
     CHECK_THAT(system.orbit.distance, WithinRel(astronomical_unit, 1e-5));
-    CHECK(system.orbit.period == 1.0);
+    CHECK_THAT(system.orbit.period, WithinRel(1.0, 1e-4));
     REQUIRE(system.moons.size() == 1);
     CHECK(system.moons.front().orbit.distance == 3.844e8);
-    CHECK(system.moons.front().orbit.period == 27.3217);
+    CHECK_THAT(system.moons.front().orbit.period, WithinRel(29.53, 1e-4));
     CHECK_FALSE(system.rings.has_value());
     CHECK(system.air.pressure == 101'325.0);
     CHECK(system.water_depth == 2'620.0);

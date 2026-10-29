@@ -20,8 +20,8 @@ struct Orbit {
     double longitude = 0.0; // mean longitude at J2000
     // Set, not worked out from masses: the planet is small for the game's sake, so its moons
     // would crawl if they kept Kepler's law to its true mass. Stars and planets count it in
-    // Earth's years, which the calendar keeps; moons in the planet's own days, which the tides
-    // and phases follow.
+    // Julian years, as the calendar's year is Earth's; moons in the planet's own days from new
+    // moon to new, so the phases and tides keep their pace whatever the day's length.
     double period = 1.0;
 
     bool operator==(const Orbit&) const = default;
@@ -49,7 +49,7 @@ struct Moon {
                 .node = 125.08,
                 .periapsis = 83.23,
                 .longitude = 218.32,
-                .period = 27.3217};
+                .period = 29.530'589};
 
     bool operator==(const Moon&) const = default;
 };
@@ -89,11 +89,13 @@ struct Air {
 // The planet's place among its stars, moons and neighbours, Earth's by default.
 struct System {
     std::vector<Star> stars{Star{}};
+    // Round in the year of the seasons rather than against the stars, so the equinoxes keep their
+    // dates while the slow cycles leave the orbit alone.
     Orbit orbit{.distance = 1.000'002'61 * astronomical_unit,
                 .eccentricity = 0.016'711'23,
                 .periapsis = 102.937'68,
                 .longitude = 100.464'57,
-                .period = 1.0};
+                .period = 365.242'19 / 365.25};
     std::vector<Moon> moons{Moon{}};
     std::optional<Rings> rings;
     std::vector<Wanderer> planets = earths_planets();

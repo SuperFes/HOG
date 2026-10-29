@@ -8,6 +8,7 @@ add_library(hog_planet
     src/continents.cpp
     src/drainage.cpp
     src/elevation.cpp
+    src/ephemeris.cpp
     src/erosion.cpp
     src/glaciers.cpp
     src/geology.cpp
@@ -67,6 +68,7 @@ hog_add_tests(hog_planet
     tests/geology_tests.cpp
     tests/hillslope_tests.cpp
     tests/hotspots_tests.cpp
+    tests/ephemeris_tests.cpp
     tests/golden_tests.cpp
     tests/landform_tests.cpp
     tests/materials_tests.cpp
