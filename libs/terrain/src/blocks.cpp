@@ -1,11 +1,18 @@
+#include <hog/planet/geology.hpp>
+#include <hog/planet/neighbors.hpp>
+#include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/volume_cell.hpp>
 #include <hog/terrain/blocks.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -51,10 +58,8 @@ using planet::VolumeCell;
 
 class Builder {
 public:
-    Builder(const planet::Volume& volume, double radius, planet::CellId region)
-        : volume_{&volume}, radius_{radius} {
-        mesh_.origin = planet::surface_position(region, radius);
-    }
+    Builder(BlockMesh& mesh, const planet::Volume& volume, double radius)
+        : mesh_{&mesh}, volume_{&volume}, radius_{radius} {}
 
     // Adds the sides that show of the part of a leaf in the region.
     void add(const planet::Volume::Leaf& leaf, VolumeCell part) {
@@ -65,8 +70,6 @@ public:
             }
         }
     }
-
-    [[nodiscard]] BlockMesh take() && { return std::move(mesh_); }
 
 private:
     // Part of a leaf's side and what lies across it.
@@ -132,20 +135,21 @@ private:
             std::swap(corners[1], corners[3]);
             normal = -normal;
         }
-        const auto first = static_cast<std::uint32_t>(mesh_.vertices.size());
+        const auto first = static_cast<std::uint32_t>(mesh_->vertices.size());
         for (const DVec3& corner : corners) {
-            mesh_.vertices.push_back({.position = relative_to(WorldPosition{corner}, mesh_.origin),
-                                      .normal = Vec3{normal},
-                                      .colour = block_colour(material)});
+            mesh_->vertices.push_back(
+                {.position = relative_to(WorldPosition{corner}, mesh_->origin),
+                 .normal = Vec3{normal},
+                 .colour = block_colour(material)});
         }
         for (const std::uint32_t corner : {0U, 1U, 2U, 0U, 2U, 3U}) {
-            mesh_.indices.push_back(first + corner);
+            mesh_->indices.push_back(first + corner);
         }
     }
 
+    BlockMesh* mesh_;
     const planet::Volume* volume_;
     double radius_;
-    BlockMesh mesh_;
 };
 
 } // namespace
@@ -182,12 +186,109 @@ Vec3 block_colour(Material material) {
     return {1.0F, 0.0F, 1.0F};
 }
 
-BlockMesh block_mesh(const planet::Volume& volume, double radius, planet::CellId region) {
-    Builder builder{volume, radius, region};
+void add_blocks(BlockMesh& mesh, const planet::Volume& volume, double radius,
+                planet::CellId region) {
+    Builder builder{mesh, volume, radius};
     volume.for_each_leaf_in(region, [&](const planet::Volume::Leaf& leaf, VolumeCell part) {
         builder.add(leaf, part);
     });
-    return std::move(builder).take();
+}
+
+BlockMesh block_mesh(const planet::Volume& volume, double radius, planet::CellId region) {
+    BlockMesh mesh{
+        .origin = planet::surface_position(region, radius), .vertices = {}, .indices = {}};
+    add_blocks(mesh, volume, radius, region);
+    return mesh;
+}
+
+BlockMesh ground_blocks(const planet::World& world, DVec3 around, double radius) {
+    const int level = planet::level_for(block_size, radius);
+    const int region_level = std::max(0, level - 4);
+    // Shells a quarter of a column across, or the nearest finer.
+    int shell_level = 0;
+    while (shell_level < planet::max_shell_level &&
+           std::ldexp(planet::volume_span, -shell_level) > block_size / 4.0) {
+        ++shell_level;
+    }
+    const planet::Contents air{
+        .material = Material::Air, .temperature = 288.0F, .surface = std::nullopt};
+    const planet::Contents rock{
+        .material = Material::Granite, .temperature = 288.0F, .surface = std::nullopt};
+    const planet::Contents water{
+        .material = Material::Water, .temperature = 288.0F, .surface = std::nullopt};
+    planet::Volume volume{air, region_level};
+    const double bottom = radius - (planet::volume_span / 2.0);
+    const auto& terrain = world.geology().terrain();
+    // Every column within reach, spreading out from the one under `around`.
+    const planet::CellId middle = planet::cell_at(around, level);
+    std::vector<planet::CellId> columns{middle};
+    std::set<planet::CellId> seen{middle};
+    std::set<planet::CellId> regions;
+    for (std::size_t next = 0; next < columns.size(); ++next) {
+        const planet::CellId column = columns[next];
+        regions.insert(column.parent(region_level));
+        const double ground =
+            static_cast<double>(terrain.elevation(column)) / static_cast<double>(planet::fixed_one);
+        planet::fill_between(volume, radius, column, bottom, radius + ground, shell_level, rock);
+        if (ground < 0.0) {
+            planet::fill_between(volume, radius, column, radius + ground, radius, shell_level,
+                                 water);
+        }
+        for (const planet::CellId beside : planet::edge_neighbors(column)) {
+            const double away = glm::length(planet::cell_center(beside) - around) * radius;
+            if (away <= block_reach && seen.insert(beside).second) {
+                columns.push_back(beside);
+            }
+        }
+    }
+    volume.settle();
+    BlockMesh mesh{
+        .origin = planet::surface_position(middle, radius), .vertices = {}, .indices = {}};
+    for (const planet::CellId region : regions) {
+        add_blocks(mesh, volume, radius, region);
+    }
+    return mesh;
+}
+
+void BlockStream::follow(DVec3 eye) {
+    if (!wanted_ || glm::length(eye - *wanted_) * radius_ > block_relay) {
+        wanted_ = eye;
+    }
+    if (!working_ && wanted_ != started_) {
+        start(*wanted_);
+    }
+}
+
+void BlockStream::start(DVec3 around) {
+    started_ = around;
+    working_ = std::make_unique<jobs::Async<BlockMesh>>(
+        *jobs_, [world = world_, around, radius = radius_] {
+            return ground_blocks(*world, around, radius);
+        });
+}
+
+std::optional<BlockMesh> BlockStream::collect() {
+    if (!working_ || !working_->done()) {
+        return std::nullopt;
+    }
+    BlockMesh found = working_->take();
+    working_.reset();
+    if (wanted_ && wanted_ != started_) {
+        start(*wanted_);
+    }
+    return found;
+}
+
+std::optional<BlockMesh> BlockStream::finish() {
+    std::optional<BlockMesh> last;
+    while (working_) {
+        last = working_->take();
+        working_.reset();
+        if (wanted_ && wanted_ != started_) {
+            start(*wanted_);
+        }
+    }
+    return last;
 }
 
 } // namespace hog::terrain

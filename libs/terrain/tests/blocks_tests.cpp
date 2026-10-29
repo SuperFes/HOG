@@ -1,12 +1,19 @@
+#include "shared_world.hpp"
+
 #include <hog/core/math.hpp>
+#include <hog/jobs/job_system.hpp>
+#include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/planet/tangent_frame.hpp>
 #include <hog/planet/volume.hpp>
 #include <hog/terrain/blocks.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <random>
 
@@ -183,4 +190,67 @@ TEST_CASE("every side between rock and air shows once", "[terrain][blocks]") {
         REQUIRE(material(0.01) == Material::Air);
         REQUIRE(material(-0.01) == Material::Granite);
     }
+}
+
+namespace {
+
+[[nodiscard]] hog::DVec3 on_land() {
+    const auto& terrain = hog::terrain::testing::shared_world().geology().terrain();
+    return terrain.nearest_land(hog::planet::start_direction, 50 * hog::planet::fixed_one);
+}
+
+} // namespace
+
+TEST_CASE("the ground round a point shows as blocks at its height", "[terrain][blocks]") {
+    const double planet_radius = hog::terrain::testing::planet.radius;
+    const hog::DVec3 around = on_land();
+    const BlockMesh mesh =
+        hog::terrain::ground_blocks(hog::terrain::testing::shared_world(), around, planet_radius);
+    REQUIRE(quads(mesh) > 100);
+    CHECK(mesh.origin.metres() ==
+          hog::planet::surface_position(
+              hog::planet::cell_at(around,
+                                   hog::planet::level_for(hog::terrain::block_size, planet_radius)),
+              planet_radius)
+              .metres());
+
+    const auto& terrain = hog::terrain::testing::shared_world().geology().terrain();
+    const double ground = static_cast<double>(terrain.elevation(hog::planet::cell_at(around, 20))) /
+                          static_cast<double>(hog::planet::fixed_one);
+    // The top of the ground over the middle, nearest its height.
+    double nearest = 1.0e9;
+    for (std::size_t index = 0; index + 3 < mesh.vertices.size(); index += 4) {
+        const hog::DVec3 normal{mesh.vertices[index].normal};
+        if (glm::dot(normal, around) < 0.99) {
+            continue;
+        }
+        for (std::size_t corner = 0; corner < 4; ++corner) {
+            const hog::WorldPosition at =
+                mesh.origin + hog::DVec3{mesh.vertices[index + corner].position};
+            REQUIRE(glm::length(glm::normalize(at.metres()) - around) * planet_radius <
+                    hog::terrain::block_reach + (2.0 * hog::terrain::block_size));
+            if (glm::length(glm::normalize(at.metres()) - around) * planet_radius <
+                hog::terrain::block_size) {
+                nearest =
+                    std::min(nearest, std::abs(glm::length(at.metres()) - planet_radius - ground));
+            }
+        }
+    }
+    // Within a shell of its height, and the slope across a column.
+    CHECK(nearest < hog::terrain::block_size);
+}
+
+TEST_CASE("blocks follow the eye in the background", "[terrain][blocks]") {
+    hog::jobs::JobSystem jobs{2};
+    hog::terrain::BlockStream stream{hog::terrain::testing::shared_world(),
+                                     hog::terrain::testing::planet.radius, jobs};
+    stream.follow(on_land());
+    CHECK(stream.in_flight());
+    const auto finished = stream.finish();
+    REQUIRE(finished.has_value());
+    CHECK_FALSE(finished.value_or(BlockMesh{}).indices.empty());
+    CHECK_FALSE(stream.in_flight());
+    // Not far enough to fill in anew.
+    stream.follow(on_land());
+    CHECK_FALSE(stream.in_flight());
 }
