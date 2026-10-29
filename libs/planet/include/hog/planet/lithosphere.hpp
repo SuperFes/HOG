@@ -139,10 +139,11 @@ public:
     void drive(Forces forces = {});
     // Warms and cools the mantle under each place by the crust on top over `years`.
     void warm(double years, Mantle mantle = {});
-    // Plates whose continents meet and that turn so alike that over `years` they'd move less
-    // than half a place against each other anywhere along it weld into one along the suture,
-    // the plate with less crust taken into the other's frame. It's left with none, so plates
-    // keep their numbers.
+    // Plates whose continents have collided, piling up a range where they meet, and that turn so
+    // alike that over `years` they'd move less than half a place against each other anywhere
+    // along it weld into one along the suture, the plate with less crust taken into the other's
+    // frame. It's left with none, so plates keep their numbers. Continents that only touch, as
+    // where one has just split, stay apart.
     void weld(double years);
 
     // Ocean floor an arc thickens this far floats as continent.

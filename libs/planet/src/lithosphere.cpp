@@ -624,9 +624,11 @@ void Lithosphere::warm(double years, Mantle mantle) {
 }
 
 void Lithosphere::weld(double years) {
-    // How fast each two plates move against each other at most where their continents meet.
+    // How fast each two plates move against each other at most where their continents meet, and
+    // whether a range lies anywhere along it.
     const std::size_t count = plates_.size();
     std::vector<double> fastest(count * count, -1.0);
+    std::vector<bool> sutured(count * count, false);
     for (const Boundary& edge : boundaries()) {
         if (edge.own.type != CrustType::Continental || edge.facing.type != CrustType::Continental) {
             continue;
@@ -636,6 +638,9 @@ void Lithosphere::weld(double years) {
         const std::size_t pair =
             (std::min(edge.plate, edge.other) * count) + std::max(edge.plate, edge.other);
         fastest[pair] = std::max(fastest[pair], moving);
+        if (std::max(edge.own.thickness, edge.facing.thickness) > settled_continent) {
+            sutured[pair] = true;
+        }
     }
     // Plates welded together, each by the one its crust goes to: the one with most cells.
     std::vector<std::uint32_t> into(count);
@@ -651,10 +656,11 @@ void Lithosphere::weld(double years) {
     const double half_place = 0.5 * std::sqrt(4.0 * std::numbers::pi / grid_.size());
     for (std::uint32_t lower = 0; lower < count; ++lower) {
         for (std::uint32_t upper = lower + 1; upper < count; ++upper) {
-            const double moving = fastest[(lower * count) + upper];
+            const std::size_t pair = (lower * count) + upper;
+            const double moving = fastest[pair];
             const std::uint32_t one = root(lower);
             const std::uint32_t other = root(upper);
-            if (moving < 0.0 || moving * years >= half_place || one == other) {
+            if (!sutured[pair] || moving * years >= half_place || one == other) {
                 continue;
             }
             const bool bigger = plates_[one].cells.size() >= plates_[other].cells.size();

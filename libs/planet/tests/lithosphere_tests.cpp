@@ -808,7 +808,7 @@ TEST_CASE("a range thick enough pushes the continents building it apart", "[plan
 
 namespace {
 
-// The continental halves turning together, as one.
+// The halves turning together, as one.
 Lithosphere together(const Lithosphere& lithosphere) {
     std::vector<Lithosphere::Plate> plates{lithosphere.plates().begin(),
                                            lithosphere.plates().end()};
@@ -819,23 +819,26 @@ Lithosphere together(const Lithosphere& lithosphere) {
 
 } // namespace
 
-TEST_CASE("continents that meet and move as one weld into one plate", "[planet][lithosphere]") {
-    Lithosphere lithosphere = together(continental_halves());
+TEST_CASE("continents that have collided and move as one weld into one plate",
+          "[planet][lithosphere]") {
+    Lithosphere lithosphere = together(settled(continental_halves(), 20.0));
     lithosphere.advance(20.0);
     const double volume = continental_volume(lithosphere);
     lithosphere.weld(10.0);
     CHECK(lithosphere.plates()[1].cells.empty());
     CHECK(lithosphere.plates()[1].rate == 0.0);
+    CHECK_THAT(continental_volume(lithosphere), WithinRel(volume, 0.03));
+    // What the frames left between them fills as any gap does.
+    lithosphere.spread();
     const auto& grid = lithosphere.grid();
     for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
         const auto found = lithosphere.top(hog::planet::cell_center(grid.cell(cell)));
         REQUIRE(found.has_value());
         CHECK(found.value_or(Lithosphere::Found{}).plate == 0);
     }
-    CHECK_THAT(continental_volume(lithosphere), WithinRel(volume, 0.03));
 }
 
-TEST_CASE("plates still moving apart, or meeting only at sea, stay apart",
+TEST_CASE("plates still moving, meeting only at sea or never collided stay apart",
           "[planet][lithosphere]") {
     Lithosphere ocean = together(halves());
     ocean.advance(20.0);
@@ -845,6 +848,10 @@ TEST_CASE("plates still moving apart, or meeting only at sea, stay apart",
     Lithosphere closing = settled(continental_halves(), 20.0);
     closing.weld(10.0);
     CHECK_FALSE(closing.plates()[1].cells.empty());
+    Lithosphere touching = together(continental_halves());
+    touching.advance(20.0);
+    touching.weld(10.0);
+    CHECK_FALSE(touching.plates()[1].cells.empty());
 }
 
 namespace {
