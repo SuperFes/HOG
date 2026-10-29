@@ -19,6 +19,7 @@ namespace {
 constexpr std::uint64_t supercontinent_salt = 0x7375'7065'7200'0000ULL; // "super"
 constexpr std::uint64_t coast_salt = 0x636F'6173'7400'0000ULL;          // "coast"
 constexpr std::uint64_t floor_salt = 0x666C'6F6F'7200'0000ULL;          // "floor"
+constexpr std::uint64_t pole_salt = 0x706F'6C65'0000'0000ULL;           // "pole"
 // The supercontinent's coast wanders by so much of its reach either way, over features so many
 // to the planet's width.
 constexpr double coast_wander = 0.35;
@@ -79,9 +80,19 @@ Tectonics::Tectonics(std::uint64_t seed, double radius, Settings settings)
     }
     mean_speed /= static_cast<double>(start.plates().size());
     const double cell_angle = std::sqrt(4.0 * std::numbers::pi / static_cast<double>(grid_.size()));
-    for (const Plates::Plate& plate : start.plates()) {
-        const double speed = glm::length(plate.spin);
-        plates_.push_back({.pole = glm::normalize(plate.spin),
+    // Each turns about a pole a quarter turn from its middle, so it slides across the planet
+    // rather than spinning on the spot.
+    std::vector<DVec3> middles(start.plates().size(), DVec3{0.0});
+    for (std::uint32_t cell = 0; cell < grid_.size(); ++cell) {
+        middles[start.plate()[cell]] += cell_center(grid_.cell(cell));
+    }
+    for (std::uint32_t plate = 0; plate < start.plates().size(); ++plate) {
+        const double speed = glm::length(start.plates()[plate].spin);
+        const DVec3 across =
+            glm::cross(middles[plate], direction(hash_values(seed, pole_salt, plate)));
+        plates_.push_back({.pole = glm::length(across) > 0.0
+                                       ? glm::normalize(across)
+                                       : glm::normalize(start.plates()[plate].spin),
                            .turn = speed / mean_speed * settings.travel * cell_angle});
     }
 

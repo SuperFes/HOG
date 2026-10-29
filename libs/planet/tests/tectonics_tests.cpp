@@ -175,6 +175,23 @@ TEST_CASE("continents meeting pile up into thicker crust", "[planet][tectonics]"
     CHECK(thickest_raised < 10.0F);
 }
 
+TEST_CASE("plates slide across the planet rather than spin on the spot", "[planet][tectonics]") {
+    const Tectonics& tectonics = start();
+    std::vector<DVec3> middles(tectonics.plates().size(), DVec3{0.0});
+    for (std::uint32_t cell = 0; cell < tectonics.grid().size(); ++cell) {
+        middles[tectonics.columns()[cell].plate] +=
+            hog::planet::cell_center(tectonics.grid().cell(cell));
+    }
+    for (std::size_t plate = 0; plate < middles.size(); ++plate) {
+        if (glm::length(middles[plate]) == 0.0) {
+            continue;
+        }
+        // Its pole at least 60 degrees from its middle.
+        CHECK(std::abs(glm::dot(glm::normalize(middles[plate]), tectonics.plates()[plate].pole)) <
+              0.5);
+    }
+}
+
 TEST_CASE("plates stay whole as they move", "[planet][tectonics]") {
     Tectonics tectonics = start();
     for (int step = 0; step < 10; ++step) {
