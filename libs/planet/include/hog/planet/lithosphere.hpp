@@ -64,11 +64,17 @@ struct Boundary {
     double length = 0.0; // radians of the planet's circumference
     // Radians per million years the plates close at across it; under nought where they part.
     double closing = 0.0;
+    // The crust on top on this side and on the other.
+    Crust own;
+    Crust facing;
 };
 
 // What moves the plates. Old, cold floor diving at a plate's trenches pulls it hardest, ridges
-// push it a little, and the mantle drags on it, more under the deep keels of continents. Pulls
-// and pushes act across an edge as far as the plates close or part across it, not slide past.
+// push it a little, and the mantle drags on it, more under the deep keels of continents. Where
+// continents collide, the range between them pushes both back as a ridge does, by the square of
+// its thickness over a settled continent's less one, as a raised column's weight grows: twice as
+// thick, three times a ridge's push, about what Tibet's is. Pulls and pushes act across an edge
+// as far as the plates close or part across it, not slide past.
 struct Forces {
     // Of an old slab's pull on each length of trench, the push on each length of ridge.
     double ridge = 0.3;
@@ -119,6 +125,11 @@ public:
     // nothing so slow carries momentum. The first time, the drag is set so the plates keep the
     // pace they had, and it stays so after.
     void drive(Forces forces = {});
+    // Plates whose continents meet and that turn so alike that over `years` they'd move less
+    // than half a place against each other anywhere along it weld into one along the suture,
+    // the plate with less crust taken into the other's frame. It's left with none, so plates
+    // keep their numbers.
+    void weld(double years);
 
     // Ocean floor an arc thickens this far floats as continent.
     static constexpr float arc_continent = 20.0F;
@@ -155,6 +166,8 @@ private:
     [[nodiscard]] std::optional<std::uint32_t> overlying(std::uint32_t plate, CrustType type,
                                                          DVec3 at,
                                                          const std::vector<bool>& overrides) const;
+    // Takes all the crust of plate `from` into `plate`'s frame, leaving `from` with none.
+    void take_in(std::uint32_t plate, std::uint32_t from);
     // Thickens the plate on top out from each of the `trenches`, places of the grid.
     void raise_arcs(std::span<const std::uint32_t> trenches, double years, Arcs arcs);
 

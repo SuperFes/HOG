@@ -748,6 +748,79 @@ TEST_CASE("plates keep the pace they were first driven at", "[planet][lithospher
     CHECK(pace(doubled) > pace(twice) * 1.5);
 }
 
+TEST_CASE("a range thick enough pushes the continents building it apart", "[planet][lithosphere]") {
+    const Lithosphere moved = settled(continental_halves(), 20.0);
+    // Where the halves close, away from the poles they turn about.
+    const auto closing = [](const Lithosphere& lithosphere) {
+        double sum = 0.0;
+        for (const auto& boundary : lithosphere.boundaries()) {
+            const DVec3 at = hog::planet::cell_center(lithosphere.grid().cell(boundary.place));
+            if (at.y < -0.5 && std::abs(at.x) < 0.5) {
+                sum += boundary.closing;
+            }
+        }
+        return sum;
+    };
+    REQUIRE(closing(moved) > 0.0);
+    const auto driven = [&](float thickness) {
+        std::vector<Lithosphere::Plate> plates{moved.plates().begin(), moved.plates().end()};
+        for (auto& plate : plates) {
+            for (Crust& crust : plate.crust) {
+                if (crust.type == CrustType::Continental) {
+                    crust.thickness = thickness;
+                }
+            }
+        }
+        Lithosphere lithosphere{moved.grid(), plates};
+        lithosphere.drive();
+        return closing(lithosphere);
+    };
+    // Settled continent pushes nothing back, so the ridges keep closing them.
+    CHECK(driven(continent.thickness) > 0.0);
+    CHECK(driven(100.0F) < 0.0);
+}
+
+namespace {
+
+// The continental halves turning together, as one.
+Lithosphere together(const Lithosphere& lithosphere) {
+    std::vector<Lithosphere::Plate> plates{lithosphere.plates().begin(),
+                                           lithosphere.plates().end()};
+    plates[1].pole = plates[0].pole;
+    plates[1].rate = plates[0].rate;
+    return Lithosphere{lithosphere.grid(), plates};
+}
+
+} // namespace
+
+TEST_CASE("continents that meet and move as one weld into one plate", "[planet][lithosphere]") {
+    Lithosphere lithosphere = together(continental_halves());
+    lithosphere.advance(20.0);
+    const double volume = continental_volume(lithosphere);
+    lithosphere.weld(10.0);
+    CHECK(lithosphere.plates()[1].cells.empty());
+    CHECK(lithosphere.plates()[1].rate == 0.0);
+    const auto& grid = lithosphere.grid();
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const auto found = lithosphere.top(hog::planet::cell_center(grid.cell(cell)));
+        REQUIRE(found.has_value());
+        CHECK(found.value_or(Lithosphere::Found{}).plate == 0);
+    }
+    CHECK_THAT(continental_volume(lithosphere), WithinRel(volume, 0.03));
+}
+
+TEST_CASE("plates still moving apart, or meeting only at sea, stay apart",
+          "[planet][lithosphere]") {
+    Lithosphere ocean = together(halves());
+    ocean.advance(20.0);
+    ocean.weld(10.0);
+    CHECK_FALSE(ocean.plates()[1].cells.empty());
+
+    Lithosphere closing = settled(continental_halves(), 20.0);
+    closing.weld(10.0);
+    CHECK_FALSE(closing.plates()[1].cells.empty());
+}
+
 namespace {
 
 // Shells a kilometre thick.

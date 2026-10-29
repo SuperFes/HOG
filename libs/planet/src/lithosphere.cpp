@@ -22,17 +22,19 @@ namespace {
 
 constexpr auto parted = std::numeric_limits<std::uint32_t>::max();
 
-// Adds `crust` to the plate at each of `cells` of its own grid, none of which it has crust at yet.
-void add_crust(Lithosphere::Plate& plate, std::vector<std::uint32_t> cells, Crust crust) {
-    std::ranges::sort(cells);
-    const auto [last, end] = std::ranges::unique(cells);
-    cells.erase(last, end);
+// Adds crust to the plate at cells of its own grid it has none at yet; of any cell given twice,
+// the first.
+void add_crust(Lithosphere::Plate& plate, std::vector<std::pair<std::uint32_t, Crust>> added) {
+    std::ranges::stable_sort(added, {}, &std::pair<std::uint32_t, Crust>::first);
+    const auto [last, end] =
+        std::ranges::unique(added, {}, &std::pair<std::uint32_t, Crust>::first);
+    added.erase(last, end);
     std::vector<std::uint32_t> merged;
     std::vector<Crust> carried;
-    merged.reserve(plate.cells.size() + cells.size());
+    merged.reserve(plate.cells.size() + added.size());
     carried.reserve(merged.capacity());
     std::size_t old = 0;
-    for (const std::uint32_t cell : cells) {
+    for (const auto& [cell, crust] : added) {
         for (; old < plate.cells.size() && plate.cells[old] < cell; ++old) {
             merged.push_back(plate.cells[old]);
             carried.push_back(plate.crust[old]);
@@ -284,7 +286,7 @@ void Lithosphere::spread() {
             frontier.push_back(cell);
         }
     }
-    std::vector<std::vector<std::uint32_t>> fresh(plates_.size());
+    std::vector<std::vector<std::pair<std::uint32_t, Crust>>> fresh(plates_.size());
     while (!frontier.empty()) {
         std::vector<std::uint32_t> further;
         for (const std::uint32_t cell : frontier) {
@@ -294,14 +296,14 @@ void Lithosphere::spread() {
                 }
                 owner[next] = owner[cell];
                 const DVec3 own = to_plate(owner[next], cell_center(grid_.cell(next)));
-                fresh[owner[next]].push_back(grid_.index(cell_at(own, grid_.level())));
+                fresh[owner[next]].emplace_back(grid_.index(cell_at(own, grid_.level())), Crust{});
                 further.push_back(next);
             }
         }
         frontier = std::move(further);
     }
     for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
-        add_crust(plates_[plate], std::move(fresh[plate]), Crust{});
+        add_crust(plates_[plate], std::move(fresh[plate]));
     }
 }
 
@@ -337,17 +339,19 @@ std::vector<Boundary> Lithosphere::boundaries() const {
             if (!across) {
                 continue;
             }
-            Boundary boundary{.place = place,
-                              .plate = here.plate,
-                              .other = other,
-                              .normal = across->toward,
-                              .length = std::sqrt(4.0 * std::numbers::pi *
-                                                  static_cast<double>(grid_.area(place)) / sphere)};
-            boundary.closing =
-                glm::dot(velocity(here.plate, at) - velocity(other, at), boundary.normal);
-            boundary.kind =
-                kind_of(here.crust, across->crust, here.plate < other, boundary.closing);
-            found.push_back(boundary);
+            const double closing =
+                glm::dot(velocity(here.plate, at) - velocity(other, at), across->toward);
+            found.push_back(
+                {.kind = kind_of(here.crust, across->crust, here.plate < other, closing),
+                 .place = place,
+                 .plate = here.plate,
+                 .other = other,
+                 .normal = across->toward,
+                 .length = std::sqrt(4.0 * std::numbers::pi *
+                                     static_cast<double>(grid_.area(place)) / sphere),
+                 .closing = closing,
+                 .own = here.crust,
+                 .facing = across->crust});
         }
     }
     return found;
@@ -507,10 +511,15 @@ void Lithosphere::drive(Forces forces) {
         const double across = std::abs(edge.closing) / relative;
         double push = 0.0;
         if (edge.kind == Boundary::Kind::Trench) {
-            const double age = static_cast<double>(crust_of(edge.plate, at).value_or(Crust{}).age);
+            const auto age = static_cast<double>(edge.own.age);
             push = std::sqrt(std::min(age, forces.mature) / forces.mature);
         } else if (edge.kind == Boundary::Kind::Ridge) {
             push = -forces.ridge;
+        } else if (edge.kind == Boundary::Kind::Collision) {
+            const double raised =
+                static_cast<double>(std::max(edge.own.thickness, edge.facing.thickness)) /
+                static_cast<double>(settled_continent);
+            push = -forces.ridge * std::max((raised * raised) - 1.0, 0.0);
         }
         torques[edge.plate] += glm::cross(at, push * across * edge.length * edge.normal);
     }
@@ -554,6 +563,70 @@ void Lithosphere::drive(Forces forces) {
         }
         plates_[plate].rate = rate;
     }
+}
+
+void Lithosphere::weld(double years) {
+    // How fast each two plates move against each other at most where their continents meet.
+    const std::size_t count = plates_.size();
+    std::vector<double> fastest(count * count, -1.0);
+    for (const Boundary& edge : boundaries()) {
+        if (edge.own.type != CrustType::Continental || edge.facing.type != CrustType::Continental) {
+            continue;
+        }
+        const DVec3 at = cell_center(grid_.cell(edge.place));
+        const double moving = glm::length(velocity(edge.plate, at) - velocity(edge.other, at));
+        const std::size_t pair =
+            (std::min(edge.plate, edge.other) * count) + std::max(edge.plate, edge.other);
+        fastest[pair] = std::max(fastest[pair], moving);
+    }
+    // Plates welded together, each by the one its crust goes to: the one with most cells.
+    std::vector<std::uint32_t> into(count);
+    for (std::uint32_t plate = 0; plate < count; ++plate) {
+        into[plate] = plate;
+    }
+    const auto root = [&](std::uint32_t plate) {
+        while (into[plate] != plate) {
+            plate = into[plate];
+        }
+        return plate;
+    };
+    const double half_place = 0.5 * std::sqrt(4.0 * std::numbers::pi / grid_.size());
+    for (std::uint32_t lower = 0; lower < count; ++lower) {
+        for (std::uint32_t upper = lower + 1; upper < count; ++upper) {
+            const double moving = fastest[(lower * count) + upper];
+            const std::uint32_t one = root(lower);
+            const std::uint32_t other = root(upper);
+            if (moving < 0.0 || moving * years >= half_place || one == other) {
+                continue;
+            }
+            const bool bigger = plates_[one].cells.size() >= plates_[other].cells.size();
+            into[bigger ? other : one] = bigger ? one : other;
+        }
+    }
+    for (std::uint32_t plate = 0; plate < count; ++plate) {
+        if (root(plate) != plate) {
+            take_in(root(plate), plate);
+        }
+    }
+}
+
+void Lithosphere::take_in(std::uint32_t plate, std::uint32_t from) {
+    // Every cell of the plate's own grid it has no crust at, whose middle lies over the other's
+    // crust, takes that crust; where both have crust, its own stays.
+    std::vector<std::pair<std::uint32_t, Crust>> added;
+    for (std::uint32_t cell = 0; cell < grid_.size(); ++cell) {
+        const DVec3 at = to_planet(plate, cell_center(grid_.cell(cell)));
+        if (crust_of(plate, at)) {
+            continue;
+        }
+        if (const std::optional<Crust> crust = crust_of(from, at)) {
+            added.emplace_back(cell, *crust);
+        }
+    }
+    add_crust(plates_[plate], std::move(added));
+    plates_[from].cells.clear();
+    plates_[from].crust.clear();
+    plates_[from].rate = 0.0;
 }
 
 void Lithosphere::raise_arcs(std::span<const std::uint32_t> trenches, double years, Arcs arcs) {
