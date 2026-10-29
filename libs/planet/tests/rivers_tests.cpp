@@ -149,6 +149,40 @@ TEST_CASE("a river cuts its channel below the ground, under water", "[planet][ri
     }
 }
 
+TEST_CASE("a river cuts nothing under the sea or lake it runs into, and shoals out to it",
+          "[planet][rivers]") {
+    int mouths = 0;
+    for (const Reach& reach : rivers().reaches()) {
+        if (!reach.mouth) {
+            continue;
+        }
+        ++mouths;
+        const std::int64_t under = reach.to_surface - fixed_one;
+        const std::int64_t above = reach.to_surface + (reach.depth / 4);
+        for (const CellId cell : across(reach, 0.95)) {
+            REQUIRE(rivers().cut(cell, under) == under);
+            // No deeper below the water it runs into than the ground stands above it, and a
+            // little more where a bend scours its bed.
+            REQUIRE(rivers().cut(cell, above) >=
+                    reach.to_surface - (2 * (above - reach.to_surface)));
+        }
+    }
+    CHECK(mouths > 0);
+    // Reaches running on into another river cut their whole depth however low the ground lies.
+    for (const Reach& reach : rivers().reaches()) {
+        if (reach.mouth) {
+            continue;
+        }
+        const std::int64_t low = reach.to_surface + (reach.depth / 4);
+        std::int64_t deepest = low;
+        for (const CellId cell : across(reach, 0.95)) {
+            deepest = std::min(deepest, rivers().cut(cell, low));
+        }
+        CHECK(deepest < low - (reach.depth / 2));
+        break;
+    }
+}
+
 TEST_CASE("a river's channel runs unbroken along its course", "[planet][rivers]") {
     const auto order = [](hog::DVec3 a, hog::DVec3 b) {
         return std::tie(a.x, a.y, a.z) < std::tie(b.x, b.y, b.z);

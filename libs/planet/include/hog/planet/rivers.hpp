@@ -44,6 +44,8 @@ struct Reach {
     // How far its water falls where it runs steeply enough to tumble over falls or rapids, with a
     // pool scoured at their foot; 0 elsewhere.
     std::int64_t fall = 0;
+    // Whether it runs into the sea or a lake at `to`, its bed shoaling out to that water's level.
+    bool mouth = false;
     // Hermite tangents over the unit sphere where it leaves `from` and reaches `to`, shared with
     // every reach meeting it there, so rivers bend through cells rather than turning corners and
     // tributaries join along the river they run into.

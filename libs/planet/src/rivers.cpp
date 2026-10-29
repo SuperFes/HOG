@@ -498,6 +498,7 @@ Rivers::Rivers(const Landform& landform, std::span<const std::int64_t> ground, M
                             .wobble = course.wobble,
                             .depth = fixed(scale * depth(area)),
                             .fall = falls ? drop : 0,
+                            .mouth = outlet(receiver) || lake(receiver),
                             .leaving = course.leaving,
                             .arriving = course.arriving,
                             .flow = flow(area),
@@ -610,6 +611,16 @@ std::int64_t Rivers::cut(CellId cell, std::int64_t ground) const {
         return (broadest(reach) / 2.0) + banks(reach);
     };
     each_reach(cell, reaching, [&](const Reach& reach, const Spot& spot) {
+        // A river cuts nothing under the water it runs into, and its bed shoals out to it.
+        const double shoaling =
+            reach.mouth
+                ? std::clamp(static_cast<double>(ground - reach.to_surface) /
+                                 static_cast<double>(std::max<std::int64_t>(reach.depth, 1)),
+                             0.0, 1.0)
+                : 1.0;
+        if (shoaling <= 0.0) {
+            return;
+        }
         const std::int64_t surface = sunk(reach, spot.level, ground);
         const double half = spot.width / 2.0;
         // Round a bend the water scours its bed deepest under the outer bank and cuts that bank
@@ -620,8 +631,9 @@ std::int64_t Rivers::cut(CellId cell, std::int64_t ground) const {
         if (spot.away < half) {
             const double share = std::clamp(spot.across / half, -1.0, 1.0);
             const double scoured = (1.0 - (share * share)) * (1.0 - (skew * share));
-            bed = surface - std::max<std::int64_t>(
-                                std::llround(static_cast<double>(reach.depth) * scoured), 1);
+            bed = surface -
+                  std::max<std::int64_t>(
+                      std::llround(static_cast<double>(reach.depth) * scoured * shoaling), 1);
         } else {
             const double off = spot.away - half;
             const bool outer = spot.across * skew < 0.0;
