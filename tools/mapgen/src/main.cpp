@@ -1,3 +1,4 @@
+#include <hog/core/stage_timer.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/mapgen/options.hpp>
 #include <hog/mapgen/render.hpp>
@@ -20,6 +21,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
@@ -208,11 +210,19 @@ int render_seasons(const hog::mapgen::Options& options, const hog::planet::Plane
 // and a sheet of each.
 int render_tectonics(const hog::mapgen::Options& options, const hog::planet::PlanetConfig& config,
                      hog::jobs::JobSystem& jobs) {
-    hog::planet::Tectonics tectonics{
-        config.seed,
-        config.radius,
-        {.plates = config.plates,
-         .continental = hog::planet::continental_share(config.ocean_fraction)}};
+    hog::StageTimer timer;
+    // Reported however the run ends.
+    const auto report = [&](int result) {
+        std::cerr << timer.report();
+        return result;
+    };
+    hog::planet::Tectonics tectonics = timer.time("plates", [&] {
+        return hog::planet::Tectonics{
+            config.seed,
+            config.radius,
+            {.plates = config.plates,
+             .continental = hog::planet::continental_share(config.ocean_fraction)}};
+    });
     const auto& grid = tectonics.grid();
     double water = hog::planet::starting_water(grid);
     std::vector<hog::mapgen::Image> crust;
@@ -226,22 +236,30 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
     };
     for (int step = 0; step <= options.tectonics.steps; ++step) {
         if (step % options.tectonics.every == 0 || step == options.tectonics.steps) {
-            const auto heights = hog::planet::flexed(grid, hog::planet::crust_heights(tectonics));
-            if (step == options.tectonics.steps) {
-                water = hog::planet::topped_up(grid, heights, water, config.ocean_fraction);
-            }
-            if (keep(crust, "tectonics", step,
-                     hog::mapgen::render_tectonics(tectonics, config.radius, options.view,
-                                                   options.size, jobs)) != EXIT_SUCCESS ||
-                keep(relief, "relief", step,
-                     hog::mapgen::render_relief(
-                         tectonics, heights, hog::planet::sea_level(grid, heights, water),
-                         config.radius, options.view, options.size, jobs)) != EXIT_SUCCESS) {
-                return EXIT_FAILURE;
+            const auto heights = timer.time("isostasy", [&] {
+                return hog::planet::flexed(grid, hog::planet::crust_heights(tectonics));
+            });
+            const std::int64_t sea = timer.time("sea", [&] {
+                if (step == options.tectonics.steps) {
+                    water = hog::planet::topped_up(grid, heights, water, config.ocean_fraction);
+                }
+                return hog::planet::sea_level(grid, heights, water);
+            });
+            const bool written = timer.time("render", [&] {
+                return keep(crust, "tectonics", step,
+                            hog::mapgen::render_tectonics(tectonics, config.radius, options.view,
+                                                          options.size, jobs)) == EXIT_SUCCESS &&
+                       keep(relief, "relief", step,
+                            hog::mapgen::render_relief(tectonics, heights, sea, config.radius,
+                                                       options.view, options.size, jobs)) ==
+                           EXIT_SUCCESS;
+            });
+            if (!written) {
+                return report(EXIT_FAILURE);
             }
         }
         if (step < options.tectonics.steps) {
-            tectonics.step();
+            timer.time("tectonics", [&] { tectonics.step(); });
         }
     }
     constexpr int columns = 4;
@@ -249,9 +267,11 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
         const std::string first = hog::mapgen::evolution_file_name(options.view, kind, 0);
         return options.output / (first.substr(0, first.rfind('-')) + ".png");
     };
-    return write(sheet("tectonics"), hog::mapgen::contact_sheet(crust, columns)) == EXIT_SUCCESS
-               ? write(sheet("relief"), hog::mapgen::contact_sheet(relief, columns))
-               : EXIT_FAILURE;
+    return report(timer.time("sheets", [&] {
+        return write(sheet("tectonics"), hog::mapgen::contact_sheet(crust, columns)) == EXIT_SUCCESS
+                   ? write(sheet("relief"), hog::mapgen::contact_sheet(relief, columns))
+                   : EXIT_FAILURE;
+    }));
 }
 
 int run(std::span<const std::string_view> arguments) {

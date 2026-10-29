@@ -8,6 +8,7 @@ add_library(hog_core
     src/line_sink.cpp
     src/log.cpp
     src/metrics.cpp
+    src/stage_timer.cpp
     src/text_file.cpp)
 add_library(hog::core ALIAS hog_core)
 
@@ -40,6 +41,7 @@ hog_add_tests(hog_core
     tests/profile_tests.cpp
     tests/result_tests.cpp
     tests/slot_map_tests.cpp
+    tests/stage_timer_tests.cpp
     tests/text_file_tests.cpp
     tests/time_tests.cpp)
 
