@@ -165,10 +165,44 @@ TEST_CASE("a settled world has moved its plates and filled its sea", "[planet][i
     const auto settled = hog::planet::settle(1, radius, settings, 0.7, 10);
     CHECK(settled.tectonics.steps() == 10);
     const auto& grid = settled.tectonics.grid();
-    CHECK(settled.heights == crust_heights(settled.tectonics));
+    CHECK(settled.heights == hog::planet::flexed(grid, crust_heights(settled.tectonics)));
     CHECK(area_below(grid, settled.heights, settled.sea_level) >= 0.69);
     // Short of nothing, nothing is added.
     const auto dry = hog::planet::settle(1, radius, settings, 0.0, 10);
-    CHECK(dry.sea_level == hog::planet::sea_level(grid, dry.heights,
-                                                  hog::planet::starting_water(grid)));
+    CHECK(dry.sea_level ==
+          hog::planet::sea_level(grid, dry.heights, hog::planet::starting_water(grid)));
+}
+
+TEST_CASE("the plates bend under a column standing alone", "[planet][isostasy]") {
+    const LevelGrid grid{5, radius};
+    std::vector<std::int64_t> heights(grid.size(), 0);
+    const std::uint32_t peak = grid.size() / 2;
+    heights[peak] = 5'000 * fixed_one;
+    const auto bent = hog::planet::flexed(grid, heights);
+    // Lowered, its load spread over its neighbours, none of it lost.
+    CHECK(bent[peak] < heights[peak] / 2);
+    CHECK(bent[peak] > 0);
+    for (const std::uint32_t neighbor : grid.neighbors(peak)) {
+        CHECK(bent[neighbor] > 0);
+        CHECK(bent[neighbor] <= bent[peak]);
+    }
+    double load = 0.0;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        load += fixed_to_double(bent[cell]);
+    }
+    CHECK(std::abs(load - 5'000.0) < 50.0);
+    // Flat ground stays flat.
+    const std::vector<std::int64_t> flat(grid.size(), 300 * fixed_one);
+    const auto still = hog::planet::flexed(grid, flat);
+    CHECK(std::ranges::all_of(
+        still, [](std::int64_t height) { return std::abs(height - (300 * fixed_one)) <= 1; }));
+}
+
+TEST_CASE("plates settle after turning as far, however fine their grid", "[planet][isostasy]") {
+    using hog::planet::settling_steps;
+    const int coarse = settling_steps({.level = 6});
+    CHECK(coarse > 20);
+    CHECK(coarse < 40);
+    CHECK(std::abs(settling_steps({.level = 7}) - (2 * coarse)) <= 1);
+    CHECK(std::abs(settling_steps({.level = 6, .travel = 3.0}) - (coarse / 2)) <= 1);
 }

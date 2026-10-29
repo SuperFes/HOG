@@ -23,11 +23,18 @@ inline constexpr double oceanic_buoyancy = 0.12;
 inline constexpr double shelf_share = 0.1;
 // Metres deep a world's water would stand spread evenly over it, as it has to begin with.
 inline constexpr double water_layer = 2'600.0;
-// Steps the plates move before the crust is taken as settled.
-inline constexpr int settling_steps = 60;
+// Metres about which the plates bend under what they carry, so no column stands kilometres
+// above its neighbour.
+inline constexpr double flexure_reach = 7'000.0;
+// Radians the plates turn on average before the crust is taken as settled.
+inline constexpr double settling_turn = 1.0;
 
 // Fixed-point metres each grid cell's crust stands above the crest of a mid-ocean ridge.
 [[nodiscard]] std::vector<std::int64_t> crust_heights(const Tectonics& tectonics);
+
+// `heights` spread over their neighbours' as the plates bend under them.
+[[nodiscard]] std::vector<std::int64_t> flexed(const LevelGrid& grid,
+                                               std::span<const std::int64_t> heights);
 
 // Cubic metres of water the ground holds below `level`, all heights fixed point.
 [[nodiscard]] double water_below(const LevelGrid& grid, std::span<const std::int64_t> heights,
@@ -49,14 +56,19 @@ inline constexpr int settling_steps = 60;
 // The crust as the plates leave it, floated, and the level its water fills the sea to.
 struct Settled {
     Tectonics tectonics;
-    // Fixed-point metres above the crest of a mid-ocean ridge, to each of its grid's cells.
+    // Fixed-point metres above the crest of a mid-ocean ridge, to each of its grid's cells, flexed.
     std::vector<std::int64_t> heights;
     std::int64_t sea_level = 0;
 };
+// Steps it takes plates moving as `settings` has them to turn `settling_turn`.
+[[nodiscard]] int settling_steps(const Tectonics::Settings& settings);
 // Moves the plates `steps` times from where `settings` starts them, starting with a natural
 // amount of water and topping it up to cover `ocean_fraction` of the planet if it falls short.
 [[nodiscard]] Settled settle(std::uint64_t seed, double radius, Tectonics::Settings settings,
-                             double ocean_fraction, int steps = settling_steps);
+                             double ocean_fraction, int steps);
+// The same, until the plates have turned `settling_turn`.
+[[nodiscard]] Settled settle(std::uint64_t seed, double radius, Tectonics::Settings settings,
+                             double ocean_fraction);
 
 // Of the crust, the share that starts continental for `ocean_fraction` of the planet to start
 // under the sea: the land, and the shelves round it.

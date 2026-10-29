@@ -1,9 +1,11 @@
 #include <hog/core/assert.hpp>
+#include <hog/planet/cell_id.hpp>
 #include <hog/planet/isostasy.hpp>
 #include <hog/planet/noise.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <vector>
 
 namespace hog::planet {
@@ -41,6 +43,32 @@ std::vector<std::int64_t> crust_heights(const Tectonics& tectonics) {
                          (thickness - static_cast<double>(Tectonics::oceanic_thickness))));
     });
     return heights;
+}
+
+std::vector<std::int64_t> flexed(const LevelGrid& grid, std::span<const std::int64_t> heights) {
+    HOG_ASSERT(heights.size() == grid.size(), "one height to each cell");
+    // Each pass spreads a height over about a cell either way, each pair of neighbours trading
+    // alike so that nothing is lost.
+    constexpr double share = 1.0 / 9.0;
+    const double spacing = std::sqrt(planet_area(grid) / static_cast<double>(grid.size()));
+    const auto passes = static_cast<int>(std::lround(std::pow(flexure_reach / spacing, 2.0)));
+    std::vector<double> spread(heights.size());
+    std::ranges::transform(heights, spread.begin(),
+                           [](std::int64_t height) { return fixed_to_double(height); });
+    std::vector<double> next(heights.size());
+    for (int pass = 0; pass < passes; ++pass) {
+        for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+            double traded = 0.0;
+            for (const std::uint32_t neighbor : grid.neighbors(cell)) {
+                traded += spread[neighbor] - spread[cell];
+            }
+            next[cell] = spread[cell] + (share * traded);
+        }
+        std::swap(spread, next);
+    }
+    std::vector<std::int64_t> bent(heights.size());
+    std::ranges::transform(spread, bent.begin(), to_fixed);
+    return bent;
 }
 
 double water_below(const LevelGrid& grid, std::span<const std::int64_t> heights,
@@ -103,6 +131,17 @@ double topped_up(const LevelGrid& grid, std::span<const std::int64_t> heights, d
                     water_below(grid, heights, level_covering(grid, heights, ocean_fraction)));
 }
 
+int settling_steps(const Tectonics::Settings& settings) {
+    const double cells = face_count * std::ldexp(1.0, 2 * settings.level);
+    const double cell_angle = std::sqrt(4.0 * std::numbers::pi / cells);
+    return static_cast<int>(std::lround(settling_turn / (settings.travel * cell_angle)));
+}
+
+Settled settle(std::uint64_t seed, double radius, Tectonics::Settings settings,
+               double ocean_fraction) {
+    return settle(seed, radius, settings, ocean_fraction, settling_steps(settings));
+}
+
 Settled settle(std::uint64_t seed, double radius, Tectonics::Settings settings,
                double ocean_fraction, int steps) {
     Settled settled{.tectonics = Tectonics{seed, radius, settings}, .heights = {}};
@@ -110,7 +149,7 @@ Settled settle(std::uint64_t seed, double radius, Tectonics::Settings settings,
         settled.tectonics.step();
     }
     const LevelGrid& grid = settled.tectonics.grid();
-    settled.heights = crust_heights(settled.tectonics);
+    settled.heights = flexed(grid, crust_heights(settled.tectonics));
     settled.sea_level =
         sea_level(grid, settled.heights,
                   topped_up(grid, settled.heights, starting_water(grid), ocean_fraction));

@@ -226,7 +226,7 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
     };
     for (int step = 0; step <= options.tectonics.steps; ++step) {
         if (step % options.tectonics.every == 0 || step == options.tectonics.steps) {
-            const auto heights = hog::planet::crust_heights(tectonics);
+            const auto heights = hog::planet::flexed(grid, hog::planet::crust_heights(tectonics));
             if (step == options.tectonics.steps) {
                 water = hog::planet::topped_up(grid, heights, water, config.ocean_fraction);
             }
