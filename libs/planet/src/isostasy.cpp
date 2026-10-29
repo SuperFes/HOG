@@ -103,6 +103,20 @@ double topped_up(const LevelGrid& grid, std::span<const std::int64_t> heights, d
                     water_below(grid, heights, level_covering(grid, heights, ocean_fraction)));
 }
 
+Settled settle(std::uint64_t seed, double radius, Tectonics::Settings settings,
+               double ocean_fraction, int steps) {
+    Settled settled{.tectonics = Tectonics{seed, radius, settings}, .heights = {}};
+    for (int step = 0; step < steps; ++step) {
+        settled.tectonics.step();
+    }
+    const LevelGrid& grid = settled.tectonics.grid();
+    settled.heights = crust_heights(settled.tectonics);
+    settled.sea_level =
+        sea_level(grid, settled.heights,
+                  topped_up(grid, settled.heights, starting_water(grid), ocean_fraction));
+    return settled;
+}
+
 double continental_share(double ocean_fraction) {
     return std::clamp(1.0 - ocean_fraction + shelf_share, 0.05, 0.95);
 }

@@ -159,3 +159,16 @@ TEST_CASE("a world short of water once settled is topped up from space", "[plane
     // Enough already: left as it is, never drained.
     CHECK(hog::planet::topped_up(grid, heights, water, covered - 0.1) == water);
 }
+
+TEST_CASE("a settled world has moved its plates and filled its sea", "[planet][isostasy]") {
+    const Tectonics::Settings settings{.level = 5, .continental = 0.4};
+    const auto settled = hog::planet::settle(1, radius, settings, 0.7, 10);
+    CHECK(settled.tectonics.steps() == 10);
+    const auto& grid = settled.tectonics.grid();
+    CHECK(settled.heights == crust_heights(settled.tectonics));
+    CHECK(area_below(grid, settled.heights, settled.sea_level) >= 0.69);
+    // Short of nothing, nothing is added.
+    const auto dry = hog::planet::settle(1, radius, settings, 0.0, 10);
+    CHECK(dry.sea_level == hog::planet::sea_level(grid, dry.heights,
+                                                  hog::planet::starting_water(grid)));
+}

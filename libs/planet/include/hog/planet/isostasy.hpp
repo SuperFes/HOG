@@ -23,6 +23,8 @@ inline constexpr double oceanic_buoyancy = 0.12;
 inline constexpr double shelf_share = 0.1;
 // Metres deep a world's water would stand spread evenly over it, as it has to begin with.
 inline constexpr double water_layer = 2'600.0;
+// Steps the plates move before the crust is taken as settled.
+inline constexpr int settling_steps = 60;
 
 // Fixed-point metres each grid cell's crust stands above the crest of a mid-ocean ridge.
 [[nodiscard]] std::vector<std::int64_t> crust_heights(const Tectonics& tectonics);
@@ -43,6 +45,18 @@ inline constexpr double water_layer = 2'600.0;
 // Precondition: 0 <= fraction <= 1.
 [[nodiscard]] std::int64_t level_covering(const LevelGrid& grid,
                                           std::span<const std::int64_t> heights, double fraction);
+
+// The crust as the plates leave it, floated, and the level its water fills the sea to.
+struct Settled {
+    Tectonics tectonics;
+    // Fixed-point metres above the crest of a mid-ocean ridge, to each of its grid's cells.
+    std::vector<std::int64_t> heights;
+    std::int64_t sea_level = 0;
+};
+// Moves the plates `steps` times from where `settings` starts them, starting with a natural
+// amount of water and topping it up to cover `ocean_fraction` of the planet if it falls short.
+[[nodiscard]] Settled settle(std::uint64_t seed, double radius, Tectonics::Settings settings,
+                             double ocean_fraction, int steps = settling_steps);
 
 // Of the crust, the share that starts continental for `ocean_fraction` of the planet to start
 // under the sea: the land, and the shelves round it.
