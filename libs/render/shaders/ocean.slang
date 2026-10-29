@@ -278,6 +278,18 @@ float swashing() {
 // ground would hide it, but where the level runs out over lower ground between their texels, or
 // waves lift it up the shore between the disc's corners far off. Told at each pixel. The ground's
 // shading tints ground under the lake as far as its own height tells it, so no water is lost.
+// A plume's front, sharpened out of the texels' blend: where eddies leave little of it, none.
+static const float2 plume_front = float2(0.08, 0.16);
+
+// What the water carries at a surface: the sea's or a lake's, with rivers' plumes mixed in off
+// their mouths.
+float4 carried_at(Surface surface) {
+    const float plume = shore_plume(shore_fetches, waves.shore_anchor, waves.shore_east,
+                                    waves.shore_north, waves.count_left_radius.z, surface.rest);
+    return lerp(lighting.carried, plume_carried,
+                saturate(plume) * smoothstep(plume_front.x, plume_front.y, plume));
+}
+
 bool over_dry(Surface surface) {
     return surface.reach.x > 0.0 && surface.floor.w > 0.0 &&
            still_water_at(waves, shore_depths, surface.rest).y <= 0.0;
@@ -583,7 +595,7 @@ float4 from_beneath(Surface surface, float3 looking) {
     const float3 normal = facing.normal;
     const Shade shade = shade_at(lighting, cloud_shadow, surface.from_eye);
     const float3 on_water = on_water_at(shade, up);
-    const Optics water = optics(lighting.carried);
+    const Optics water = optics(carried_at(surface));
     // None bends out past the window's edge, where the surface turns all of it back.
     const float3 out = refract(looking, -normal, 1.0 / into_water);
     float reflected = 1.0;
@@ -646,7 +658,8 @@ float4 fragment_through(Surface surface) : SV_Target {
     const float3 up = normalize(surface.normal);
     const float3 on_water = on_water_at(lit.shade, up);
 
-    float3 water = optics(lighting.carried).colour * on_water;
+    const float4 carried = carried_at(surface);
+    float3 water = optics(carried).colour * on_water;
     if (depth > 0.0) {
         const float4 clip = mul(push.clip_from_eye, float4(surface.from_eye, 1.0));
         const Behind straight = behind_at(clip.xy / clip.w, pixel, depth);
@@ -658,7 +671,7 @@ float4 fragment_through(Surface surface) : SV_Target {
                     max(between.a, 1e-4),
                 0.0);
         // Seen from over the surface, though the eye may stand in a trough under the sea's level.
-        water = through_water(drawn, on_water, lighting.carried, dot(surface.from_eye - behind, up),
+        water = through_water(drawn, on_water, carried, dot(surface.from_eye - behind, up),
                               max(push.up_height.w, 0.0), length(behind), dot(-looking, up));
     }
     const float3 radiance =
@@ -680,7 +693,7 @@ float3 deep_water(Surface surface) {
     const float3 sunlight = through_cloud(shade, clear);
     const float3 sky = sky_under_cloud(lighting, shade, clear * saturate(dot(up, sun)));
     const float3 on_water = (sunlight * saturate(dot(up, sun))) + sky;
-    const float3 radiance = optics(lighting.carried).colour * on_water / pi;
+    const float3 radiance = optics(carried_at(surface)).colour * on_water / pi;
 
     const float4 clip = mul(push.clip_from_eye, float4(surface.from_eye, 1.0));
     const float2 uv = ((clip.xy / clip.w) * 0.5) + 0.5;

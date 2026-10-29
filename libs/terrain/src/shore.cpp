@@ -1,4 +1,6 @@
+#include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/planet/tile.hpp>
 #include <hog/terrain/river_water.hpp>
 #include <hog/terrain/shore.hpp>
 
@@ -557,6 +559,10 @@ double water_below(std::span<const float> levels, double height) {
     return above == levels.begin() ? 0.0 : static_cast<double>(*std::prev(above));
 }
 
+double plume_front(double mixed, double stirred) {
+    return std::clamp(mixed * (0.55 + (0.6 * stirred)), 0.0, 1.0);
+}
+
 double plume_length(double flow) {
     return plume_reach * std::sqrt(std::max(flow, 0.0));
 }
@@ -621,6 +627,22 @@ std::vector<float> shore_plumes(const planet::World& world, const ShoreFrame& fr
                                    plume, {first + (column * spacing), first + (row * spacing)})));
                 }
             }
+        }
+        // Eddies fixed to the world, so the front keeps its shape as the anchor moves.
+        constexpr std::uint64_t eddies = 0x706c756d65;
+        const double frequency = radius / plume_eddies;
+        for (std::size_t at = 0; at < texels; ++at) {
+            float& mixed = found[(layer * texels) + at];
+            if (mixed <= 0.0F) {
+                continue;
+            }
+            const std::size_t row = at / shore_size;
+            const std::size_t column = at % shore_size;
+            const DVec2 along{first + (static_cast<double>(column) * spacing),
+                              first + (static_cast<double>(row) * spacing)};
+            const double stirred = planet::fixed_to_double(planet::fbm(
+                eddies, planet::noise_point(shore_direction(frame, radius, along), frequency), 3));
+            mixed = static_cast<float>(plume_front(static_cast<double>(mixed), stirred));
         }
     }
     return found;

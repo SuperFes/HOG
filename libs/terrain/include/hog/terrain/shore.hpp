@@ -140,7 +140,14 @@ struct Plume {
 // A plume carries this many metres out by the root of its river's flow in m³/s, and widens each
 // side by this many metres a metre out.
 inline constexpr double plume_reach = 50.0;
-inline constexpr double plume_spread = 0.35;
+inline constexpr double plume_spread = 0.6;
+
+// Eddies break a plume's front up over about this many metres.
+inline constexpr double plume_eddies = 60.0;
+
+// Of a plume mixed in as `mixed` where eddies stir it by `stirred`, from -1 to 1: more or less of
+// it there, from 0 to 1, so its front runs ragged.
+[[nodiscard]] double plume_front(double mixed, double stirred);
 
 // Metres out a river flowing `flow` m³/s carries its plume.
 [[nodiscard]] double plume_length(double flow);

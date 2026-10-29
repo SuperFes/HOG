@@ -152,7 +152,8 @@ Pixels draw(hog::render::Device& device, const Field& grown, std::uint32_t* coun
                      std::vector<float>(texels, static_cast<float>(*grown.lake - grown.ground)),
                  .levels = std::vector<float>(texels, static_cast<float>(*grown.lake)),
                  .fetches = std::vector<float>(texels * hog::terrain::fetch_headings, 0.0F),
-                 .offshore = {}}));
+                 .offshore = {},
+                 .plumes = {}}));
         }));
     }
     const GrassView view{.camera = camera,

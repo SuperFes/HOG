@@ -58,10 +58,6 @@ struct Surface {
     float coverage;
 };
 
-// What rivers carry, as hog::terrain::river_carried has it: the dark of peaty water and a little
-// silt.
-static const float4 river_carried = float4(0.6, 3.0, 0.5, 0.0);
-
 // As hog::terrain::river_pattern: the pattern repeats over this many metres along each axis.
 static const float pattern = 256.0;
 // Ripples carried on the flow, each over so many metres, which the pattern's repeat divides, and

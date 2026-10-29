@@ -27,6 +27,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <glm/gtc/packing.hpp>
 
 #include <algorithm>
 #include <array>
@@ -199,7 +200,8 @@ std::vector<std::uint8_t> draw_patch(hog::render::Device& device, OceanView view
                  .still = std::vector<float>(texels, tide->still),
                  .levels = std::vector<float>(texels, tide->level),
                  .fetches = std::vector<float>(texels * hog::terrain::fetch_headings, 0.0F),
-                 .offshore = {}}));
+                 .offshore = {},
+                 .plumes = {}}));
         }
         hog::render::transition(commands, target->handle(), VK_IMAGE_ASPECT_COLOR_BIT, use::discard,
                                 use::colour_target);
@@ -2104,4 +2106,28 @@ TEST_CASE("the swash's edge foams as much as the waves running up it are high, n
     CHECK(brightness(calm) < brightness(off_shore) + 100);
     CHECK(brightness(rough) > brightness(calm) + 150);
     CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("rivers' plumes ride alongside how far offshore the water lies", "[render][ocean]") {
+    constexpr auto texels = std::size_t{hog::terrain::shore_size} * hog::terrain::shore_size;
+    constexpr auto layers = hog::terrain::shore_spacing.size();
+    std::vector<float> plumes(layers * texels, 0.0F);
+    plumes[5] = 0.25F;
+    plumes[texels + 7] = 1.0F;
+    const std::vector<std::uint16_t> halves = hog::render::reach_texels({}, {}, plumes);
+    const std::vector<std::uint16_t> none = hog::render::reach_texels({}, {});
+    const auto plume_at = [&](const std::vector<std::uint16_t>& from, std::size_t layer,
+                              std::size_t at) {
+        const std::size_t into =
+            (layer * hog::render::reach_layers) + hog::render::reach_layers - 1;
+        return glm::unpackHalf1x16(from.at((((into * texels) + at) * 4) + 3));
+    };
+    CHECK(plume_at(halves, 0, 5) == 0.25F);
+    CHECK(plume_at(halves, 1, 7) == 1.0F);
+    CHECK(plume_at(halves, 0, 7) == 0.0F);
+    CHECK(plume_at(halves, 2, 5) == 0.0F);
+    // None mixed in without them.
+    for (std::size_t layer = 0; layer < layers; ++layer) {
+        CHECK(plume_at(none, layer, 5) == 0.0F);
+    }
 }

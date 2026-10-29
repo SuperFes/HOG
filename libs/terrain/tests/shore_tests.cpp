@@ -619,9 +619,17 @@ TEST_CASE("a river's plume widens as it goes out", "[terrain][shore]") {
         .origin = {0.0, 0.0}, .heading = {0.0, 1.0}, .half = 4.0, .length = 100.0};
     CHECK(hog::terrain::plume_at(plume, {20.0, 100.0}) > 0.0);
     CHECK(hog::terrain::plume_at(plume, {20.0, 10.0}) == 0.0);
-    CHECK(hog::terrain::plume_at(plume, {60.0, 100.0}) == 0.0);
+    CHECK(hog::terrain::plume_at(plume, {80.0, 100.0}) == 0.0);
     CHECK(hog::terrain::plume_at(plume, {-20.0, 100.0}) ==
           hog::terrain::plume_at(plume, {20.0, 100.0}));
+}
+
+TEST_CASE("eddies leave more or less of a plume about its front", "[terrain][shore]") {
+    CHECK(hog::terrain::plume_front(0.5, 1.0) > hog::terrain::plume_front(0.5, 0.0));
+    CHECK(hog::terrain::plume_front(0.5, 0.0) > hog::terrain::plume_front(0.5, -0.5));
+    CHECK(hog::terrain::plume_front(0.0, 1.0) == 0.0);
+    CHECK(hog::terrain::plume_front(1.0, 1.0) == 1.0);
+    CHECK(hog::terrain::plume_front(0.2, -1.0) == 0.0);
 }
 
 TEST_CASE("bigger rivers carry their plumes further", "[terrain][shore]") {
@@ -659,7 +667,7 @@ TEST_CASE("rivers' plumes lie off their mouths round the anchor", "[terrain][sho
             near = std::max(near, plumes.at((row * shore_size) + column));
         }
     }
-    CHECK(near > 0.3F);
+    CHECK(near > 0.2F);
     // Little of the water's mixed with any.
     const auto mixed = std::ranges::count_if(std::span{plumes}.first(texels),
                                              [](float plume) { return plume > 0.0F; });

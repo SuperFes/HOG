@@ -113,6 +113,22 @@ public float shore_fetch(Sampler2DArray fetches, float4 anchor, float4 east, flo
     return fetch;
 }
 
+// How much of what rivers carry is mixed into the water at `rest`, laid as shore_at has it, from
+// `fetches` as hog::terrain::shore_plumes works it out; none where no layer lies.
+public float shore_plume(Sampler2DArray fetches, float4 anchor, float4 east, float4 north,
+                         float radius, float3 rest) {
+    const ShoreAt at = shore_at(anchor, east, north, radius, rest);
+    float plume = 0.0;
+    for (int layer = shore_layers - 1; layer >= 0; --layer) {
+        if (at.inside[layer] > 0.0) {
+            const float3 uv = float3(at.centred[layer] + 0.5,
+                                     float((layer * reach_layers) + reach_layers - 1));
+            plume = lerp(plume, fetches.SampleLevel(uv, 0.0).w, at.inside[layer]);
+        }
+    }
+    return plume;
+}
+
 // How far `rest`, laid as shore_at has it, lies offshore, x metres, and how fast that grows east
 // and north along the anchor's plane, yz, from `fetches` as hog::terrain::shore_offshore works them
 // out; as far as is kept where no layer lies.

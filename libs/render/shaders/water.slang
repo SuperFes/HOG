@@ -51,6 +51,12 @@ float3 leaving(float3 backward) {
     return pi * 0.52 * under / (1.0 - (1.7 * under));
 }
 
+// What rivers carry, as optics takes it: the dark of peaty water and a little silt.
+public static const float4 river_carried = float4(0.6, 3.0, 0.5, 0.0);
+// What a river's plume carries out on the sea or a lake: its water, thinned by what it mixes into,
+// with the silt the waves stir up off its mouth.
+public static const float4 plume_carried = float4(0.3, 30.0, 0.5, 0.0);
+
 // Of water carrying `carried`: x dissolved organic matter, by what it absorbs at 440 nm, per
 // metre; y suspended sediment, grams to the cubic metre; z plankton, by its chlorophyll,
 // milligrams to the cubic metre; w the share of the sediment that's rock flour, not silt.

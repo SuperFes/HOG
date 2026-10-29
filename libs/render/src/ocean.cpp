@@ -195,7 +195,8 @@ constexpr VkDescriptorSetLayoutBinding shore_descriptor =
 
 constexpr std::uint32_t fetch_binding = 8;
 constexpr VkDescriptorSetLayoutBinding fetch_descriptor =
-    binding(fetch_binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_VERTEX_BIT);
+    binding(fetch_binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
 
 constexpr std::uint32_t foam_binding = 9;
 constexpr VkDescriptorSetLayoutBinding foam_descriptor =
@@ -677,7 +678,8 @@ std::vector<std::uint16_t> shore_texels(std::span<const float> depths, std::span
 }
 
 std::vector<std::uint16_t> reach_texels(std::span<const float> fetches,
-                                        std::span<const float> offshore) {
+                                        std::span<const float> offshore,
+                                        std::span<const float> plumes) {
     constexpr auto texels = static_cast<std::size_t>(terrain::shore_size) * terrain::shore_size;
     constexpr auto headings = static_cast<std::size_t>(terrain::fetch_headings);
     constexpr auto layers = terrain::shore_spacing.size();
@@ -692,6 +694,8 @@ std::vector<std::uint16_t> reach_texels(std::span<const float> fetches,
         }
     }
     const auto planes = static_cast<std::size_t>(terrain::offshore_planes);
+    static_assert(terrain::offshore_planes < 4,
+                  "plumes ride in the last texel of how far offshore");
     for (std::size_t layer = 0; layer < layers; ++layer) {
         const std::size_t into = (layer * reach_layers) + reach_layers - 1;
         for (std::size_t at = 0; at < texels; ++at) {
@@ -706,6 +710,9 @@ std::vector<std::uint16_t> reach_texels(std::span<const float> fetches,
                 halves[(((into * texels) + at) * 4) + which] =
                     static_cast<std::uint16_t>(glm::packHalf1x16(value));
             }
+            const std::size_t plume = (layer * texels) + at;
+            halves[(((into * texels) + at) * 4) + 3] = static_cast<std::uint16_t>(
+                glm::packHalf1x16(plume < plumes.size() ? plumes[plume] : 0.0F));
         }
     }
     return halves;
@@ -718,7 +725,8 @@ Result<> Ocean::update_shore(VkCommandBuffer commands, std::uint32_t frame,
         !updated) {
         return updated;
     }
-    const std::vector<std::uint16_t> fetches = reach_texels(shore.fetches, shore.offshore);
+    const std::vector<std::uint16_t> fetches =
+        reach_texels(shore.fetches, shore.offshore, shore.plumes);
     if (auto updated = shore_fetches_.update(commands, frame, std::as_bytes(std::span{fetches}));
         !updated) {
         return updated;
