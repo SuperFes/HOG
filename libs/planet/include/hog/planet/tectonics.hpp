@@ -20,8 +20,18 @@ public:
         int plates = 10;
         // Of the crust, how much starts continental, gathered into one supercontinent.
         double continental = 0.3;
-        // Cells the plates move each step, on average.
+        // Cells the plates move each step, on average. Crust is carried from cell to cell, so a
+        // plate turning less than half a cell a step never moves.
         double travel = 1.5;
+        // Behind where ocean floor dives under a plate, magma rising from it thickens the crust
+        // over so many cells by so many kilometres a step.
+        int arc_reach = 3;
+        float arc_growth = 0.6F;
+        // Of the difference in thickness between neighbouring continental crust, the share that
+        // spreads across each step; and of continental crust's thickness over what it settles to,
+        // the share worn away.
+        float spreading = 0.2F;
+        float wearing = 0.03F;
     };
 
     enum class Crust : std::uint8_t { Oceanic, Continental };
@@ -31,9 +41,11 @@ public:
         std::uint32_t plate = 0;
         Crust crust = Crust::Oceanic;
         float thickness = 7.0F; // kilometres
-        // Steps since it formed, and since it was last piled up into a range.
+        // Steps since it formed, and since it was last piled up into a range or raised by an arc.
         float age = 0.0F;
         float raised = 0.0F;
+        // Kilometres magma from a diving plate added to it last step.
+        float arc = 0.0F;
     };
 
     struct Plate {
@@ -44,9 +56,14 @@ public:
     // Ocean floor as it wells up, and continents as they settle when nothing piles them up.
     static constexpr float oceanic_thickness = 7.0F;
     static constexpr float continental_thickness = 35.0F;
+    // Ocean floor an arc thickens this far floats as continent.
+    static constexpr float arc_continent = 20.0F;
 
     // Precondition: 2 <= settings.plates <= Plates::max_count, and 0 < settings.continental < 1.
     Tectonics(std::uint64_t seed, double radius, Settings settings);
+    // The given plates carrying the given crust, one column to each cell of `grid`.
+    Tectonics(LevelGrid grid, std::vector<Plate> plates, std::vector<Column> columns,
+              Settings settings);
 
     // Moves the plates on by a step.
     void step();
@@ -59,6 +76,15 @@ public:
     [[nodiscard]] double continental_volume() const;
 
 private:
+    // Carries each plate's crust on by a step; says which cells ocean floor dove under.
+    [[nodiscard]] std::vector<bool> move();
+    // Hands cells left alone among another plate's to it, so plates stay whole as they're
+    // resampled.
+    void keep_whole();
+    void raise_arcs(const std::vector<bool>& diving);
+    void spread_and_wear();
+
+    Settings settings_;
     LevelGrid grid_;
     std::vector<Plate> plates_;
     std::vector<Column> columns_;

@@ -131,7 +131,7 @@ TEST_CASE("where plates part, new ocean floor wells up", "[planet][tectonics]") 
         REQUIRE(column.plate < tectonics.plates().size());
         if (column.crust == Tectonics::Crust::Oceanic) {
             REQUIRE(column.age <= oldest_floor + static_cast<float>(steps));
-            REQUIRE(column.thickness == Tectonics::oceanic_thickness);
+            REQUIRE(column.thickness >= Tectonics::oceanic_thickness);
             newest += column.age < static_cast<float>(steps) ? 1 : 0;
         }
     }
@@ -139,7 +139,11 @@ TEST_CASE("where plates part, new ocean floor wells up", "[planet][tectonics]") 
 }
 
 TEST_CASE("continental crust is neither made nor lost as the plates move", "[planet][tectonics]") {
-    Tectonics tectonics = start();
+    // Without arcs adding to it or wear taking from it.
+    auto still = settings;
+    still.arc_growth = 0.0F;
+    still.wearing = 0.0F;
+    Tectonics tectonics{1, radius, still};
     const double before = tectonics.continental_volume();
     for (int step = 0; step < 10; ++step) {
         tectonics.step();
@@ -152,15 +156,127 @@ TEST_CASE("continents meeting pile up into thicker crust", "[planet][tectonics]"
     for (int step = 0; step < 10; ++step) {
         tectonics.step();
     }
+    // Raised lately, and thicker for it: the thickest crust of all was piled up, not spread.
     int piled = 0;
+    float thickest = 0.0F;
+    float thickest_raised = 0.0F;
     for (const Tectonics::Column& column : tectonics.columns()) {
-        if (column.crust == Tectonics::Crust::Continental &&
-            column.thickness > Tectonics::continental_thickness) {
-            ++piled;
-            CHECK(column.raised < 10.0F);
+        if (column.crust != Tectonics::Crust::Continental) {
+            continue;
+        }
+        piled +=
+            column.raised < 10.0F && column.thickness > Tectonics::continental_thickness ? 1 : 0;
+        if (column.thickness > thickest) {
+            thickest = column.thickness;
+            thickest_raised = column.raised;
         }
     }
     CHECK(piled > 0);
+    CHECK(thickest_raised < 10.0F);
+}
+
+TEST_CASE("plates stay whole as they move", "[planet][tectonics]") {
+    Tectonics tectonics = start();
+    for (int step = 0; step < 10; ++step) {
+        tectonics.step();
+    }
+    const auto& grid = tectonics.grid();
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const auto plate = tectonics.columns()[cell].plate;
+        const auto around = grid.neighbors(cell);
+        REQUIRE(std::ranges::any_of(
+            around, [&](std::uint32_t next) { return tectonics.columns()[next].plate == plate; }));
+    }
+}
+
+TEST_CASE("ocean floor diving under a continent raises an arc behind its coast",
+          "[planet][tectonics]") {
+    // Ocean floor north of the equator turning south under a still continent south of it.
+    const hog::planet::LevelGrid grid{5, radius};
+    std::vector<Tectonics::Column> columns(grid.size());
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const bool north = hog::planet::cell_center(grid.cell(cell)).z > 0.0;
+        columns[cell] = {.plate = north ? 0U : 1U,
+                         .crust = north ? Tectonics::Crust::Oceanic : Tectonics::Crust::Continental,
+                         .thickness = north ? Tectonics::oceanic_thickness
+                                            : Tectonics::continental_thickness,
+                         .age = 10.0F};
+    }
+    auto still = settings;
+    still.wearing = 0.0F;
+    Tectonics tectonics{
+        grid, {{.pole = {1.0, 0.0, 0.0}, .turn = 0.07}, {.pole = {1.0, 0.0, 0.0}}}, columns, still};
+    for (int step = 0; step < 5; ++step) {
+        tectonics.step();
+    }
+    float near_coast = 0.0F;
+    float far_inland = 0.0F;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const Tectonics::Column& column = tectonics.columns()[cell];
+        const double z = hog::planet::cell_center(grid.cell(cell)).z;
+        if (column.crust != Tectonics::Crust::Continental) {
+            continue;
+        }
+        if (z < 0.0 && z > -0.15) {
+            near_coast = std::max(near_coast, column.thickness);
+        } else if (z < -0.5) {
+            far_inland = std::max(far_inland, column.thickness);
+        }
+    }
+    CHECK(near_coast > Tectonics::continental_thickness + 1.0F);
+    CHECK(far_inland < Tectonics::continental_thickness + 0.5F);
+}
+
+TEST_CASE("island arcs grow into new continents", "[planet][tectonics]") {
+    // Old ocean floor diving under young.
+    const hog::planet::LevelGrid grid{5, radius};
+    std::vector<Tectonics::Column> columns(grid.size());
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const bool north = hog::planet::cell_center(grid.cell(cell)).z > 0.0;
+        columns[cell] = {.plate = north ? 0U : 1U,
+                         .crust = Tectonics::Crust::Oceanic,
+                         .thickness = Tectonics::oceanic_thickness,
+                         .age = north ? 50.0F : 5.0F};
+    }
+    auto quick = settings;
+    quick.arc_growth = 4.0F;
+    Tectonics tectonics{
+        grid, {{.pole = {1.0, 0.0, 0.0}, .turn = 0.07}, {.pole = {1.0, 0.0, 0.0}}}, columns, quick};
+    for (int step = 0; step < 6; ++step) {
+        tectonics.step();
+    }
+    CHECK(continental_share(tectonics) > 0.0);
+}
+
+TEST_CASE("piled crust spreads into a belt and wears down", "[planet][tectonics]") {
+    const hog::planet::LevelGrid grid{5, radius};
+    std::vector<Tectonics::Column> columns(
+        grid.size(),
+        {.crust = Tectonics::Crust::Continental, .thickness = Tectonics::continental_thickness});
+    constexpr std::uint32_t peak = 1'000;
+    columns[peak].thickness = 90.0F;
+    const auto make = [&](float wearing) {
+        auto quiet = settings;
+        quiet.wearing = wearing;
+        return Tectonics{grid, {{.pole = {0.0, 0.0, 1.0}}}, columns, quiet};
+    };
+    Tectonics spreading = make(0.0F);
+    const double volume = spreading.continental_volume();
+    for (int step = 0; step < 5; ++step) {
+        spreading.step();
+    }
+    CHECK(spreading.columns()[peak].thickness < 90.0F);
+    for (const std::uint32_t next : grid.neighbors(peak)) {
+        CHECK(spreading.columns()[next].thickness > Tectonics::continental_thickness);
+    }
+    CHECK(std::abs(spreading.continental_volume() - volume) < 1e-4 * volume);
+
+    Tectonics wearing = make(0.1F);
+    for (int step = 0; step < 5; ++step) {
+        wearing.step();
+    }
+    CHECK(wearing.continental_volume() < volume);
+    CHECK(wearing.columns()[peak].thickness < spreading.columns()[peak].thickness);
 }
 
 TEST_CASE("the same seed moves the same plates", "[planet][tectonics]") {
