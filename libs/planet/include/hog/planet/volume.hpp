@@ -1,5 +1,6 @@
 #pragma once
 
+#include <hog/core/bytes.hpp>
 #include <hog/core/math.hpp>
 #include <hog/planet/volume_cell.hpp>
 
@@ -7,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace hog::planet {
@@ -50,6 +52,9 @@ struct Contents {
 // filled with one material, or split across into four or outward into two; leaves are as large as
 // their contents allow. Splitting goes across before outward, so the same changes always make the
 // same tree.
+//
+// The volume is kept and handed out in regions: the columns of one level, each with all its shells.
+// Above that level the tree only splits across, so a region is always one node or inside a leaf.
 class Volume {
 public:
     struct Leaf {
@@ -57,7 +62,10 @@ public:
         Contents contents;
     };
 
-    explicit Volume(Contents everywhere);
+    // Precondition: 0 <= region_level <= max_level.
+    explicit Volume(Contents everywhere, int region_level = 0);
+
+    [[nodiscard]] int region_level() const noexcept { return region_level_; }
 
     // The leaf holding all of `cell`, unless it spans more than one.
     [[nodiscard]] std::optional<Leaf> leaf_holding(VolumeCell cell) const;
@@ -73,6 +81,19 @@ public:
     void settle();
 
     [[nodiscard]] std::size_t leaf_count() const noexcept { return leaves_; }
+
+    // A region's cells as bytes, stamped with the code that made them; the same tree always gives
+    // the same bytes.
+    // Precondition: `region` is a column at the region level.
+    [[nodiscard]] std::vector<std::byte> bake(CellId region, std::uint64_t code) const;
+
+    struct Baked {
+        CellId region;
+        std::uint64_t code = 0;
+    };
+    // Puts a baked region in place of what's there and says which region it was and the code that
+    // made it; or, if the bytes are damaged or of another region level, changes nothing.
+    std::optional<Baked> load(std::span<const std::byte> bytes);
 
     // Leaves in the tree's order, which the same changes always give.
     template <typename Visit>
@@ -117,6 +138,16 @@ private:
     void split(std::uint32_t node, Split split);
     void prune(std::uint32_t node);
     bool join(std::uint32_t node);
+    // The node at a region, splitting the leaf it's in across until there is one.
+    [[nodiscard]] std::uint32_t reach(CellId region);
+
+    // A baked node, in the tree's order.
+    struct BakedNode {
+        Split split = Split::Leaf;
+        Contents contents;
+    };
+    // The nodes of a region's tree, read whole so damaged bytes are found before anything changes.
+    [[nodiscard]] static std::vector<BakedNode> read_tree(ValueReader& in, CellId region);
 
     [[nodiscard]] static int child_count(Split split) noexcept {
         return split == Split::Across ? 4 : 2;
@@ -132,6 +163,7 @@ private:
     std::vector<std::uint32_t> free_quads_;
     std::vector<std::uint32_t> free_pairs_;
     std::size_t leaves_ = face_count;
+    int region_level_ = 0;
 };
 
 // The leaf at a position, unless it's outside the volume.

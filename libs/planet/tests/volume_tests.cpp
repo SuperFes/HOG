@@ -368,3 +368,130 @@ TEST_CASE("leaves with different surfaces don't merge", "[planet][volume]") {
     volume.set(cell.shell_child(1), low);
     CHECK(volume.merge(cell));
 }
+
+namespace {
+
+constexpr int region_level = 2;
+
+// A volume with all sorts in it, some with surfaces.
+[[nodiscard]] Volume varied(std::uint64_t seed) {
+    std::mt19937_64 random{seed};
+    Volume volume{air, region_level};
+    for (int n = 0; n < 300; ++n) {
+        Contents contents = n % 3 == 0 ? rock : water;
+        contents.temperature = static_cast<float>(n);
+        if (n % 5 == 0) {
+            contents.surface = hog::planet::Surface{.under = Material::Basalt,
+                                                    .normal = hog::Vec3{0.6F, 0.0F, 0.8F},
+                                                    .offset = static_cast<float>(n) * 0.25F};
+        }
+        volume.set(random_cell(random, 5, 8), contents);
+    }
+    return volume;
+}
+
+[[nodiscard]] std::vector<CellId> regions_of_face(int face) {
+    std::vector<CellId> regions;
+    const std::uint32_t side = 1U << region_level;
+    for (std::uint32_t i = 0; i < side; ++i) {
+        for (std::uint32_t j = 0; j < side; ++j) {
+            regions.push_back(CellId::from_face_ij(face, i, j, region_level));
+        }
+    }
+    return regions;
+}
+
+} // namespace
+
+TEST_CASE("cells never split outward above the region level", "[planet][volume]") {
+    const Volume volume = varied(41);
+    volume.for_each_leaf([](VolumeCell cell, const Contents&) {
+        REQUIRE((cell.column().level() >= region_level || cell.shell_level() == 0));
+    });
+}
+
+TEST_CASE("a baked region loads back to the same bytes", "[planet][volume]") {
+    const Volume volume = varied(43);
+    for (int face = 0; face < hog::planet::face_count; ++face) {
+        for (const CellId region : regions_of_face(face)) {
+            const auto bytes = volume.bake(region, 99);
+            Volume loaded{rock, region_level};
+            const auto baked = loaded.load(bytes);
+            REQUIRE(baked.has_value());
+            const Volume::Baked found = baked.value_or(Volume::Baked{});
+            REQUIRE(found.region == region);
+            REQUIRE(found.code == 99);
+            REQUIRE(loaded.bake(region, 99) == bytes);
+        }
+    }
+}
+
+TEST_CASE("loading a region changes nothing outside it", "[planet][volume]") {
+    std::mt19937_64 random{47};
+    const Volume volume = varied(53);
+    const CellId region = CellId::from_face_ij(1, 2, 1, region_level);
+    Volume loaded{rock, region_level};
+    REQUIRE(loaded.load(volume.bake(region, 1)).has_value());
+    for (int n = 0; n < 3000; ++n) {
+        const VolumeCell sample = random_cell(random, 8, 10);
+        // Coarser than a region, it may span the loaded one and what's beside it.
+        if (sample.column().level() < region_level) {
+            continue;
+        }
+        const auto expected = region.contains(sample.column())
+                                  ? volume.leaf_holding(sample)
+                                  : std::optional{Volume::Leaf{.cell = {}, .contents = rock}};
+        const auto found = loaded.leaf_holding(sample);
+        REQUIRE(found.has_value() == expected.has_value());
+        if (found.has_value()) {
+            REQUIRE(found.value_or(Volume::Leaf{}).contents ==
+                    expected.value_or(Volume::Leaf{}).contents);
+        }
+    }
+}
+
+TEST_CASE("a region inside one leaf bakes as that leaf", "[planet][volume]") {
+    const Volume volume{water, region_level};
+    const CellId region = CellId::from_face_ij(4, 0, 3, region_level);
+    const auto bytes = volume.bake(region, 7);
+    Volume loaded{air, region_level};
+    REQUIRE(loaded.load(bytes).has_value());
+    const auto leaf = loaded.leaf_holding(VolumeCell::from(region));
+    REQUIRE(leaf.has_value());
+    CHECK(leaf.value_or(Volume::Leaf{}).contents == water);
+    CHECK(leaf.value_or(Volume::Leaf{}).cell == VolumeCell::from(region));
+}
+
+TEST_CASE("damaged bytes change nothing", "[planet][volume]") {
+    Volume volume = varied(59);
+    const CellId region = CellId::from_face_ij(3, 1, 1, region_level);
+    volume.set(VolumeCell::from(region.child(0), 6, 3), rock);
+    const auto bytes = volume.bake(region, 5);
+    REQUIRE(bytes.size() > 40);
+
+    Volume loaded = varied(61);
+    const auto before = loaded.bake(region, 5);
+    const auto refused = [&](std::vector<std::byte> damaged) {
+        return !loaded.load(damaged).has_value() && loaded.bake(region, 5) == before;
+    };
+
+    std::vector<std::byte> cut = bytes;
+    cut.resize(cut.size() - 3);
+    CHECK(refused(cut));
+
+    std::vector<std::byte> longer = bytes;
+    longer.push_back(std::byte{0});
+    CHECK(refused(longer));
+
+    std::vector<std::byte> unmarked = bytes;
+    unmarked[0] = std::byte{'X'};
+    CHECK(refused(unmarked));
+
+    // The first node's kind, just past the magic, code and region.
+    std::vector<std::byte> unknown = bytes;
+    unknown[24] = std::byte{9};
+    CHECK(refused(unknown));
+
+    Volume coarser{air, region_level - 1};
+    CHECK_FALSE(coarser.load(bytes).has_value());
+}

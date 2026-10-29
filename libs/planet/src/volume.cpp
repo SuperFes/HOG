@@ -1,11 +1,17 @@
 #include <hog/core/assert.hpp>
+#include <hog/core/bytes.hpp>
 #include <hog/core/math.hpp>
+#include <hog/core/result.hpp>
 #include <hog/planet/volume.hpp>
 
+#include <algorithm>
+#include <array>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <vector>
 
 namespace hog::planet {
@@ -22,8 +28,11 @@ namespace {
 
 } // namespace
 
-Volume::Volume(Contents everywhere)
-    : nodes_(face_count, Node{.split = Split::Leaf, .children = 0, .contents = everywhere}) {}
+Volume::Volume(Contents everywhere, int region_level)
+    : nodes_(face_count, Node{.split = Split::Leaf, .children = 0, .contents = everywhere}),
+      region_level_(region_level) {
+    HOG_ASSERT(region_level >= 0 && region_level <= max_level, "region level out of range");
+}
 
 VolumeCell Volume::child(VolumeCell at, Split split, int index) {
     return split == Split::Across ? at.across_child(index) : at.shell_child(index);
@@ -94,8 +103,8 @@ void Volume::fill(std::uint32_t node, VolumeCell at, VolumeCell cell, Contents c
             if (nodes_[next.node].contents == contents) {
                 continue;
             }
-            split(next.node, next.at.column().level() < cell.column().level() ? Split::Across
-                                                                              : Split::Outward);
+            const int across = std::max(cell.column().level(), region_level_);
+            split(next.node, next.at.column().level() < across ? Split::Across : Split::Outward);
         }
         const Node& here = nodes_[next.node];
         for (int index = 0; index < child_count(here.split); ++index) {
@@ -198,6 +207,157 @@ std::optional<Volume::Leaf> leaf_at(const Volume& volume, double radius, WorldPo
         return std::nullopt;
     }
     return volume.leaf_holding(finest);
+}
+
+namespace {
+
+constexpr std::array<std::byte, 8> region_magic{std::byte{'H'}, std::byte{'O'}, std::byte{'G'},
+                                                std::byte{'V'}, std::byte{'O'}, std::byte{'L'},
+                                                std::byte{'0'}, std::byte{'1'}};
+
+constexpr auto material_count = static_cast<std::uint8_t>(Material::Magma) + 1;
+
+void write_contents(ByteWriter& out, const Contents& contents) {
+    out.write(static_cast<std::uint8_t>(contents.material));
+    out.write(std::bit_cast<std::uint32_t>(contents.temperature));
+    out.write(static_cast<std::uint8_t>(contents.surface.has_value() ? 1 : 0));
+    if (contents.surface.has_value()) {
+        const Surface surface = contents.surface.value_or(Surface{});
+        out.write(static_cast<std::uint8_t>(surface.under));
+        for (glm::length_t axis = 0; axis < 3; ++axis) {
+            out.write(std::bit_cast<std::uint32_t>(surface.normal[axis]));
+        }
+        out.write(std::bit_cast<std::uint32_t>(surface.offset));
+    }
+}
+
+[[nodiscard]] Material read_material(ValueReader& in) {
+    const auto material = in.integer<std::uint8_t>();
+    if (material >= material_count) {
+        in.fail(Error{.code = ErrorCode::Parse, .message = "unknown material"});
+    }
+    return static_cast<Material>(material);
+}
+
+[[nodiscard]] Contents read_contents(ValueReader& in) {
+    Contents contents{
+        .material = read_material(in), .temperature = in.single(), .surface = std::nullopt};
+    const auto surfaced = in.integer<std::uint8_t>();
+    if (surfaced > 1) {
+        in.fail(Error{.code = ErrorCode::Parse, .message = "bad surface flag"});
+    }
+    if (surfaced == 1) {
+        Surface surface{.under = read_material(in), .normal = {}, .offset = 0.0F};
+        for (glm::length_t axis = 0; axis < 3; ++axis) {
+            surface.normal[axis] = in.single();
+        }
+        surface.offset = in.single();
+        contents.surface = surface;
+    }
+    return contents;
+}
+
+} // namespace
+
+std::uint32_t Volume::reach(CellId region) {
+    auto node = static_cast<std::uint32_t>(region.face());
+    for (int level = 1; level <= region.level(); ++level) {
+        if (nodes_[node].split == Split::Leaf) {
+            split(node, Split::Across);
+        }
+        const FaceIJ at = region.parent(level).to_face_ij();
+        node = nodes_[node].children + (((at.i & 1U) << 1U) | (at.j & 1U));
+    }
+    return node;
+}
+
+std::vector<std::byte> Volume::bake(CellId region, std::uint64_t code) const {
+    HOG_ASSERT(region.is_valid() && region.level() == region_level_,
+               "a region is a column at the region level");
+    ByteWriter out;
+    out.write_bytes(region_magic);
+    out.write(code);
+    out.write(region.raw());
+    // Down to the region, or to the leaf it's in.
+    auto node = static_cast<std::uint32_t>(region.face());
+    for (int level = 1; level <= region.level() && nodes_[node].split != Split::Leaf; ++level) {
+        const FaceIJ at = region.parent(level).to_face_ij();
+        node = nodes_[node].children + (((at.i & 1U) << 1U) | (at.j & 1U));
+    }
+    std::vector<std::uint32_t> pending{node};
+    while (!pending.empty()) {
+        const Node& here = nodes_[pending.back()];
+        pending.pop_back();
+        out.write(static_cast<std::uint8_t>(here.split));
+        if (here.split == Split::Leaf) {
+            write_contents(out, here.contents);
+            continue;
+        }
+        for (int index = child_count(here.split) - 1; index >= 0; --index) {
+            pending.push_back(here.children + static_cast<std::uint32_t>(index));
+        }
+    }
+    return std::move(out).take();
+}
+
+std::vector<Volume::BakedNode> Volume::read_tree(ValueReader& in, CellId region) {
+    std::vector<BakedNode> read;
+    std::vector<VolumeCell> pending{VolumeCell::from(region)};
+    while (!pending.empty() && in.ok()) {
+        const VolumeCell at = pending.back();
+        pending.pop_back();
+        const auto split = in.integer<std::uint8_t>();
+        const bool across =
+            split == static_cast<std::uint8_t>(Split::Across) && at.column().level() < max_level;
+        const bool outward = split == static_cast<std::uint8_t>(Split::Outward) &&
+                             at.shell_level() < max_shell_level;
+        if (split == static_cast<std::uint8_t>(Split::Leaf)) {
+            read.push_back({.split = Split::Leaf, .contents = read_contents(in)});
+        } else if (across || outward) {
+            const Split kind = across ? Split::Across : Split::Outward;
+            read.push_back({.split = kind, .contents = {}});
+            for (int index = child_count(kind) - 1; index >= 0; --index) {
+                pending.push_back(child(at, kind, index));
+            }
+        } else {
+            in.fail(Error{.code = ErrorCode::Parse, .message = "bad split"});
+        }
+    }
+    return read;
+}
+
+std::optional<Volume::Baked> Volume::load(std::span<const std::byte> bytes) {
+    ValueReader in{bytes};
+    for (const std::byte expected : region_magic) {
+        if (in.integer<std::uint8_t>() != std::to_integer<std::uint8_t>(expected)) {
+            return std::nullopt;
+        }
+    }
+    const auto code = in.integer<std::uint64_t>();
+    const CellId region = CellId::from_raw(in.integer<std::uint64_t>());
+    if (!in.ok() || !region.is_valid() || region.level() != region_level_) {
+        return std::nullopt;
+    }
+    const std::vector<BakedNode> read = read_tree(in, region);
+    if (!in.finish()) {
+        return std::nullopt;
+    }
+    const std::uint32_t root = reach(region);
+    prune(root);
+    std::vector<std::uint32_t> filling{root};
+    for (const BakedNode& next : read) {
+        const std::uint32_t node = filling.back();
+        filling.pop_back();
+        if (next.split == Split::Leaf) {
+            nodes_[node].contents = next.contents;
+            continue;
+        }
+        split(node, next.split);
+        for (int index = child_count(next.split) - 1; index >= 0; --index) {
+            filling.push_back(nodes_[node].children + static_cast<std::uint32_t>(index));
+        }
+    }
+    return Baked{.region = region, .code = code};
 }
 
 namespace {
