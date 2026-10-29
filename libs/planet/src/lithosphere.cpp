@@ -226,6 +226,41 @@ DVec3 gradient(const LevelGrid& grid, std::span<const float> field, std::uint32_
     return glm::inverse(fit) * rise;
 }
 
+// A plate's cell as a line across the plate meets it: where it lies, how the mantle drags on
+// it, how long a line across it is and how strong it is along that.
+struct Stretch {
+    DVec3 at{0.0};
+    glm::dmat3 drag{0.0};
+    double across = 0.0;
+    double strong = 0.0;
+};
+
+// How many times harder than it holds a plate turning at `turn` is pulled apart along the line
+// whose plane faces `facing`, with `pushed` the torque on the side it faces: what the other side
+// puts on that one to keep it turning with the plate, taken as a pull even along the line.
+double pulled(std::span<const Stretch> stretches, DVec3 turn, DVec3 pushed, DVec3 facing) {
+    glm::dmat3 held{0.0};
+    DVec3 chord{0.0};
+    double length = 0.0;
+    double holds = 0.0;
+    for (const Stretch& stretch : stretches) {
+        const double side = glm::dot(stretch.at, facing);
+        if (side > 0.0) {
+            held += stretch.drag;
+        }
+        if (std::abs(side) < 0.5 * stretch.across) {
+            chord += stretch.across * stretch.at;
+            length += stretch.across;
+            holds += stretch.strong * stretch.across;
+        }
+    }
+    const DVec3 apart = glm::cross(chord, facing);
+    if (holds == 0.0 || glm::dot(apart, apart) == 0.0) {
+        return 0.0;
+    }
+    return -glm::dot((held * turn) - pushed, apart) / glm::dot(apart, apart) * length / holds;
+}
+
 struct Facing {
     DVec3 toward;
     Crust crust;
@@ -621,6 +656,98 @@ void Lithosphere::warm(double years, Mantle mantle) {
         const float warmest = found && found->crust.type == CrustType::Continental ? 1.0F : 0.0F;
         heat_[place] += (warmest - heat_[place]) * toward;
     }
+}
+
+void Lithosphere::rift(const Forces& forces, Strength strength) {
+    const std::vector<std::vector<Push>> found = pushes(forces);
+    const std::size_t count = plates_.size();
+    for (std::uint32_t plate = 0; plate < count; ++plate) {
+        const std::optional<DVec3> facing = weakest(plate, found[plate], forces, strength);
+        if (!facing) {
+            continue;
+        }
+        const Plate& carrier = plates_[plate];
+        Plate kept{.frame = carrier.frame,
+                   .pole = carrier.pole,
+                   .rate = carrier.rate,
+                   .cells = {},
+                   .crust = {}};
+        Plate parted_off = kept;
+        for (std::size_t index = 0; index < carrier.cells.size(); ++index) {
+            const DVec3 at = to_planet(plate, cell_center(grid_.cell(carrier.cells[index])));
+            Plate& side = glm::dot(at, *facing) > 0.0 ? kept : parted_off;
+            side.cells.push_back(carrier.cells[index]);
+            side.crust.push_back(carrier.crust[index]);
+        }
+        plates_[plate] = std::move(kept);
+        plates_.push_back(std::move(parted_off));
+    }
+}
+
+std::optional<DVec3> Lithosphere::weakest(std::uint32_t plate, std::span<const Push> pushes,
+                                          const Forces& forces, Strength strength) const {
+    double sphere = 0.0;
+    for (std::uint32_t place = 0; place < grid_.size(); ++place) {
+        sphere += static_cast<double>(grid_.area(place));
+    }
+    const Plate& carrier = plates_[plate];
+    std::vector<Stretch> stretches(carrier.cells.size());
+    glm::dmat3 drag{0.0};
+    std::optional<std::size_t> warmest;
+    float most = 0.0F;
+    for (std::size_t index = 0; index < stretches.size(); ++index) {
+        const std::uint32_t cell = carrier.cells[index];
+        const bool continental = carrier.crust[index].type == CrustType::Continental;
+        Stretch& stretch = stretches[index];
+        stretch.at = to_planet(plate, cell_center(grid_.cell(cell)));
+        const double share = static_cast<double>(grid_.area(cell)) / sphere;
+        stretch.drag = (continental ? forces.keel : 1.0) * share *
+                       (glm::dmat3{1.0} - glm::outerProduct(stretch.at, stretch.at));
+        drag += stretch.drag;
+        stretch.across = std::sqrt(4.0 * std::numbers::pi * share);
+        stretch.strong = strength.ocean;
+        if (continental) {
+            const float heat = heat_[grid_.index(cell_at(stretch.at, grid_.level()))];
+            stretch.strong = strength.cool * std::pow(strength.warm / strength.cool, heat);
+            if (!warmest || heat > most) {
+                warmest = index;
+                most = heat;
+            }
+        }
+    }
+    if (!warmest || glm::determinant(drag) == 0.0) {
+        return std::nullopt;
+    }
+    DVec3 torque{0.0};
+    for (const Push& push : pushes) {
+        torque += glm::cross(push.at, push.force);
+    }
+    const DVec3 turn = glm::inverse(drag) * torque;
+    // Lines through the warmest mantle, so many ways round.
+    constexpr int ways = 12;
+    const DVec3 middle = stretches[*warmest].at;
+    const DVec3 east = glm::normalize(
+        glm::cross(middle, std::abs(middle.x) < 0.9 ? DVec3{1.0, 0.0, 0.0} : DVec3{0.0, 1.0, 0.0}));
+    const DVec3 north = glm::cross(middle, east);
+    // Only a line pulled harder than it holds splits.
+    double hardest = 1.0;
+    std::optional<DVec3> split;
+    for (int way = 0; way < ways; ++way) {
+        const double angle = std::numbers::pi * way / ways;
+        const DVec3 facing = (std::cos(angle) * east) + (std::sin(angle) * north);
+        DVec3 pushed{0.0};
+        for (const Push& push : pushes) {
+            if (glm::dot(push.at, facing) > 0.0) {
+                pushed += glm::cross(push.at, push.force);
+            }
+        }
+        const double pull = pulled(stretches, turn, pushed, facing);
+        if (pull > hardest) {
+            hardest = pull;
+            split = facing;
+        }
+    }
+    return split;
 }
 
 void Lithosphere::weld(double years) {

@@ -96,6 +96,16 @@ struct Forces {
     double dome = 0.1;
 };
 
+// How strong the lithosphere is against being pulled apart, against an old slab's pull on the
+// same length: a continent over cool mantle, and over fully warm mantle, which thins the strong
+// lid under it, and between, the warmth's share of the way by ratio, as strength falls off
+// steeply with heat. Old ocean floor holds as a cool continent does.
+struct Strength {
+    double cool = 2.0;
+    double warm = 0.1;
+    double ocean = 3.0;
+};
+
 // The crust as rigid plates on the sphere, each keeping its crust on a grid in its own frame and
 // turning about its own pole. Crust is never carried from cell to cell, so a plate stays whole
 // however far it turns: where two plates' crust lies over one place they've met, and where none
@@ -139,6 +149,11 @@ public:
     void drive(Forces forces = {});
     // Warms and cools the mantle under each place by the crust on top over `years`.
     void warm(double years, Mantle mantle = {});
+    // Splits each plate carrying continent along the line through the warmest mantle under its
+    // continent that the forces on it pull apart hardest against how strong it is there, if they
+    // pull harder than that. The part across the line becomes a new plate, turning as the other
+    // until the plates are next driven.
+    void rift(const Forces& forces = {}, Strength strength = {});
     // Plates whose continents have collided, piling up a range where they meet, and that turn so
     // alike that over `years` they'd move less than half a place against each other anywhere
     // along it weld into one along the suture, the plate with less crust taken into the other's
@@ -183,6 +198,10 @@ private:
 
     // Every force on each plate: across its edges, and off the mantle's dome under it.
     [[nodiscard]] std::vector<std::vector<Push>> pushes(const Forces& forces) const;
+    // The plane, by the side it faces, of the line through the warmest mantle under a plate's
+    // continent that `pushes` on it pull apart hardest against how strong it is, if harder.
+    [[nodiscard]] std::optional<DVec3> weakest(std::uint32_t plate, std::span<const Push> pushes,
+                                               const Forces& forces, Strength strength) const;
     // Where in a plate's cells is the crust it carries over a unit direction, if it has any.
     [[nodiscard]] std::optional<std::size_t> held(std::uint32_t plate, DVec3 at) const;
     // Of each two plates where they meet, whether the first's crust stays over the second's of

@@ -24,6 +24,7 @@ using hog::planet::Lithosphere;
 using hog::planet::Mantle;
 using hog::planet::Material;
 using hog::planet::Ranges;
+using hog::planet::Strength;
 using hog::planet::Tectonics;
 using hog::planet::Volume;
 
@@ -907,6 +908,65 @@ TEST_CASE("the mantle warms under continents and cools under ocean floor",
     lithosphere.warm(100.0, mantle);
     CHECK_THAT(heat_at(north), WithinAbs(std::exp(-1.0), 1e-5));
     CHECK_THAT(heat_at(south), WithinAbs(1.0 - std::exp(-1.0), 1e-5));
+}
+
+namespace {
+
+// The northern half alone, ocean but for a continent around its pole, warmed under it for good.
+Lithosphere warm_cap() {
+    const Lithosphere ocean = halves();
+    std::vector<Lithosphere::Plate> plates{ocean.plates().front()};
+    const auto& grid = ocean.grid();
+    for (std::size_t index = 0; index < plates[0].cells.size(); ++index) {
+        if (hog::planet::cell_center(grid.cell(plates[0].cells[index])).z > 0.7) {
+            plates[0].crust[index] = continent;
+        }
+    }
+    Lithosphere lithosphere{grid, plates};
+    lithosphere.warm(1000.0);
+    return lithosphere;
+}
+
+constexpr Strength weak{.cool = 0.02, .warm = 0.01, .ocean = 0.02};
+
+} // namespace
+
+TEST_CASE("a plate splits over a warm mantle only where pulled harder than it holds",
+          "[planet][lithosphere]") {
+    Lithosphere strong = warm_cap();
+    strong.rift();
+    CHECK(strong.plates().size() == 1);
+
+    // Cool, the mantle pushes nothing, however weak the plate.
+    const Lithosphere warmed = warm_cap();
+    Lithosphere cool{warmed.grid(), {warmed.plates().begin(), warmed.plates().end()}};
+    cool.rift({}, weak);
+    CHECK(cool.plates().size() == 1);
+
+    Lithosphere split = warm_cap();
+    const Lithosphere::Plate whole = split.plates().front();
+    split.rift({}, weak);
+    REQUIRE(split.plates().size() == 2);
+    // Each part keeps its crust where it was, turning as the whole did, and some continent.
+    std::vector<std::uint32_t> cells;
+    for (const auto& plate : split.plates()) {
+        CHECK(plate.frame == whole.frame);
+        CHECK(plate.pole == whole.pole);
+        CHECK(plate.rate == whole.rate);
+        CHECK(std::ranges::count(plate.crust, continent) > 0);
+        cells.insert(cells.end(), plate.cells.begin(), plate.cells.end());
+    }
+    std::ranges::sort(cells);
+    CHECK(cells == whole.cells);
+    // Off the dome, the parts part.
+    split.drive();
+    int parting = 0;
+    int closing = 0;
+    for (const auto& boundary : split.boundaries()) {
+        (boundary.closing < 0.0 ? parting : closing) += 1;
+    }
+    CHECK(parting > 0);
+    CHECK(closing == 0);
 }
 
 TEST_CASE("the volume's rock is the crust on top over the mantle", "[planet][lithosphere]") {
