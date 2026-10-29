@@ -1,4 +1,5 @@
 #include <hog/planet/continents.hpp>
+#include <hog/planet/isostasy.hpp>
 #include <hog/planet/neighbors.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
@@ -22,6 +23,7 @@
 using hog::planet::CellId;
 using hog::planet::Continents;
 using hog::planet::Plates;
+using hog::planet::Tectonics;
 
 namespace {
 
@@ -31,6 +33,19 @@ Continents on_plates(std::uint64_t seed, double ocean_fraction) {
     return Continents{seed, ocean_fraction,
                       std::make_shared<const Plates>(
                           seed, hog::planet::LevelGrid{Plates::level, radius}, radius, 10)};
+}
+
+// One settled world, shared, as settling takes a while.
+const hog::planet::Settled& settled() {
+    static const auto world = hog::planet::settle(
+        1, radius, {.level = Plates::level, .continental = 0.4}, 0.7, 20);
+    return world;
+}
+
+Continents on_settled() {
+    return Continents{1, settled(),
+                      std::make_shared<const Plates>(
+                          1, hog::planet::LevelGrid{Plates::level, radius}, radius, 10)};
 }
 
 std::vector<CellId> cells_at(int level) {
@@ -375,5 +390,96 @@ TEST_CASE("no volcanoes rise where continents collide or plates slide past",
         for (int step = -40; step <= 40; step += 4) {
             CHECK(arcs_across(found, step * 1'000.0, 1.0) < 0.1);
         }
+    }
+}
+
+TEST_CASE("settled crust's land stands where its water left it dry", "[planet][continents]") {
+    const Continents continents = on_settled();
+    const auto& grid = settled().tectonics.grid();
+    double dry = 0.0;
+    double area = 0.0;
+    double agree = 0.0;
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        const auto cell_area = static_cast<double>(grid.area(index));
+        const bool above = settled().heights[index] > settled().sea_level;
+        area += cell_area;
+        dry += above ? cell_area : 0.0;
+        agree += continents.is_land(grid.cell(index)) == above ? cell_area : 0.0;
+    }
+    // Read off a little way from where it's asked for, so coasts wander a little.
+    CHECK(agree / area > 0.95);
+    CHECK(std::abs(ocean_area_fraction(continents, Continents::survey_level) - (1.0 - dry / area)) <
+          0.02);
+}
+
+TEST_CASE("settled crust's field is its height above the sea", "[planet][continents]") {
+    const Continents continents = on_settled();
+    const auto& grid = settled().tectonics.grid();
+    std::vector<double> off;
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        const double floated =
+            hog::planet::fixed_to_double(settled().heights[index] - settled().sea_level);
+        off.push_back(std::abs((hog::planet::fixed_to_double(continents.height(grid.cell(index))) *
+                         static_cast<double>(Continents::field_metres)) -
+                        floated));
+    }
+    // Read off a little way away, it's off only where the crust rises or falls steeply.
+    const auto middle = off.begin() + static_cast<std::ptrdiff_t>(off.size() / 2);
+    std::ranges::nth_element(off, middle);
+    CHECK(*middle < 100.0);
+}
+
+TEST_CASE("settled crust's ranges stand where it piled up, rising where it did lately",
+          "[planet][continents]") {
+    const Continents continents = on_settled();
+    const auto& grid = settled().tectonics.grid();
+    const auto columns = settled().tectonics.columns();
+    double thick = 0.0;
+    double thin = 0.0;
+    int thick_count = 0;
+    int thin_count = 0;
+    int young = 0;
+    int young_rising = 0;
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        const Tectonics::Column& column = columns[index];
+        const auto crust = continents.crust(grid.cell(index));
+        CHECK(crust.rising >= 0);
+        CHECK(crust.rising <= hog::planet::fixed_one);
+        if (column.crust != Tectonics::Crust::Continental) {
+            continue;
+        }
+        const double mountains = hog::planet::fixed_to_double(crust.mountains);
+        if (column.thickness > 45.0F) {
+            thick += mountains;
+            ++thick_count;
+            young += column.raised < 2.0F ? 1 : 0;
+            young_rising += column.raised < 2.0F && crust.rising > hog::planet::fixed_one / 2;
+        } else if (column.thickness < 36.0F) {
+            thin += mountains;
+            ++thin_count;
+        }
+    }
+    REQUIRE(thick_count > 0);
+    REQUIRE(thin_count > 0);
+    CHECK(thick / thick_count > 0.6);
+    CHECK(thin / thin_count < 0.2);
+    REQUIRE(young > 0);
+    CHECK(young_rising > young * 3 / 4);
+}
+
+TEST_CASE("settled crust's grain sums to one", "[planet][continents]") {
+    const Continents continents = on_settled();
+    for (const CellId cell : cells_at(5)) {
+        const auto grain = continents.crust(cell).grain;
+        const double sum = hog::planet::fixed_to_double(grain[0] + grain[1] + grain[2]);
+        REQUIRE(std::abs(sum - 1.0) < 0.01);
+    }
+}
+
+TEST_CASE("crust that never settled rises fully wherever it has mountains",
+          "[planet][continents]") {
+    const Continents continents = on_plates(1, 0.7);
+    for (const CellId cell : cells_at(4)) {
+        REQUIRE(continents.crust(cell).rising == hog::planet::fixed_one);
     }
 }

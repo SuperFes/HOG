@@ -11,6 +11,8 @@
 
 namespace hog::planet {
 
+struct Settled;
+
 // Large-scale land and sea: the plates' crust, rising towards continent on some and sinking to
 // ocean floor on others, roughened by noise and cut at the sea level that puts the target fraction
 // of the surface under water. Where plates meet, continents colliding or overriding ocean floor
@@ -24,8 +26,14 @@ public:
     static constexpr std::int64_t trench_depth = 3'000;
     // Arcs this strong, in fixed point, raise volcanoes all along them.
     static constexpr std::int64_t full_arc = fixed_one * 45 / 100;
+    // Metres of floated crust to a unit of the field, where the crust has settled.
+    static constexpr std::int64_t field_metres = 4'000;
 
     Continents(std::uint64_t seed, double ocean_fraction, std::shared_ptr<const Plates> plates);
+    // The crust as the plates left it once settled: the field is its height above the sea, ranges
+    // stand where it piled up thick, and rise still where it piled up lately.
+    // Precondition: the crust settled on the plates' grid.
+    Continents(std::uint64_t seed, const Settled& settled, std::shared_ptr<const Plates> plates);
 
     [[nodiscard]] const Plates& plates() const noexcept { return *plates_; }
 
@@ -47,13 +55,15 @@ public:
     // point with `Bits` fractional bits; and the grain ranges follow, as how much of the way along
     // them lies along each axis, in fixed point and summing to about 1; metres the ocean floor
     // rises above the abyss, or sinks below it into a trench, in fixed point with `Bits`; and how
-    // strongly volcanoes rise above plates diving, from 0 to 1 in fixed point with `Bits`.
+    // strongly volcanoes rise above plates diving, from 0 to 1 in fixed point with `Bits`; and how
+    // fast its mountains rise, from 0 to 1 in fixed point with `Bits`.
     struct Crust {
         std::int64_t height = 0;
         std::int64_t mountains = 0;
         std::array<std::int64_t, 3> grain{};
         std::int64_t floor = 0;
         std::int64_t arcs = 0;
+        std::int64_t rising = 0;
     };
     template <int Bits = fixed_fraction_bits>
     [[nodiscard]] Crust crust(CellId cell) const;
@@ -67,6 +77,11 @@ private:
     std::uint64_t seed_;
     std::uint64_t warp_seed_;
     std::shared_ptr<const Plates> plates_;
+    // Fixed-point shares of the field from the plates' crust and from noise roughening it, and
+    // metres the crust is read off from where it's asked for.
+    std::int64_t crust_share_;
+    std::int64_t noise_share_;
+    double warp_reach_;
     // Fixed point per plate grid cell: the plate's crust, changing smoothly into its
     // neighbours' across their boundaries.
     std::vector<std::int64_t> crust_;
@@ -77,8 +92,10 @@ private:
     std::array<std::vector<std::int64_t>, 3> grain_;
     // Fixed point metres per plate grid cell.
     std::vector<std::int64_t> floor_;
-    // Fixed point per plate grid cell: how strongly volcanoes rise.
+    // Fixed point per plate grid cell: how strongly volcanoes rise, and how fast mountains do;
+    // where the crust hasn't settled, all of them rise fully.
     std::vector<std::int64_t> arcs_;
+    std::vector<std::int64_t> rising_;
     std::int64_t sea_level_ = 0;
 };
 
