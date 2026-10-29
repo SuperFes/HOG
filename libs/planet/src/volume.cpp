@@ -303,6 +303,32 @@ Budget budget(const Volume& volume, double radius, CellId region) {
     return counted;
 }
 
+void fill_between(Volume& volume, double radius, CellId column, double low, double high,
+                  int shell_level, const Contents& contents) {
+    HOG_ASSERT(shell_level >= 0 && shell_level <= max_shell_level, "shell level out of range");
+    const double size = std::ldexp(volume_span, -shell_level);
+    const double bottom = radius - (volume_span / 2.0);
+    const auto shells = static_cast<double>(std::uint64_t{1} << shell_level);
+    const auto to_shell = [&](double reach) {
+        return static_cast<std::uint64_t>(
+            std::clamp(std::round((reach - bottom) / size), 0.0, shells));
+    };
+    std::uint64_t from = to_shell(low);
+    const std::uint64_t to = to_shell(high);
+    // The largest aligned run of shells starting at each point that fits.
+    while (from < to) {
+        int up = 0;
+        while (up < shell_level && from % (std::uint64_t{2} << up) == 0 &&
+               from + (std::uint64_t{2} << up) <= to) {
+            ++up;
+        }
+        volume.set(
+            VolumeCell::from(column, shell_level - up, static_cast<std::uint32_t>(from >> up)),
+            contents);
+        from += std::uint64_t{1} << up;
+    }
+}
+
 std::optional<Volume::Leaf> leaf_at(const Volume& volume, double radius, WorldPosition position) {
     const VolumeCell finest = volume_cell_at(position, radius, max_level, max_shell_level);
     if (!finest.is_valid()) {

@@ -205,6 +205,11 @@ struct Budget {
 // Precondition: `region` is a column at the volume's region level.
 [[nodiscard]] Budget budget(const Volume& volume, double radius, CellId region);
 
+// Fills a column from `low` to `high` metres from the planet's centre, each rounded to the nearest
+// side of a shell of `shell_level`, with as few cells as cover it; clipped to the volume.
+void fill_between(Volume& volume, double radius, CellId column, double low, double high,
+                  int shell_level, const Contents& contents);
+
 // The leaf at a position, unless it's outside the volume.
 [[nodiscard]] std::optional<Volume::Leaf> leaf_at(const Volume& volume, double radius,
                                                   WorldPosition position);

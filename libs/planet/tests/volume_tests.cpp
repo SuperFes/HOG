@@ -595,3 +595,47 @@ TEST_CASE("a region inside one leaf is that leaf's part", "[planet][volume]") {
     });
     CHECK(visits == 1);
 }
+
+TEST_CASE("filling between two heights takes few cells and fills just them", "[planet][volume]") {
+    const CellId column = hog::planet::cell_at(hog::DVec3{0.0, 1.0, 0.0}, 8);
+    const double bottom = radius - (hog::planet::volume_span / 2.0);
+    Volume volume{air, region_level};
+    // From the bottom to the planet's radius is the lower half.
+    hog::planet::fill_between(volume, radius, column, bottom - 100.0, radius, 10, rock);
+    CHECK(volume.leaf_holding(VolumeCell::from(column, 1, 0)).value_or(Volume::Leaf{}).cell ==
+          VolumeCell::from(column, 1, 0));
+
+    Volume uneven{air, region_level};
+    constexpr int shell_level = 16;
+    const double low = radius - 1234.5;
+    const double high = radius + 987.6;
+    hog::planet::fill_between(uneven, radius, column, low, high, shell_level, water);
+    std::size_t filled = 0;
+    uneven.for_each_leaf([&](VolumeCell cell, const Contents& contents) {
+        filled += contents == water ? 1 : 0;
+        if (contents == water) {
+            REQUIRE(column.contains(cell.column()));
+        }
+    });
+    CHECK(filled <= 2 * shell_level);
+    const double size = std::ldexp(hog::planet::volume_span, -shell_level);
+    const hog::DVec3 up = hog::planet::cell_center(column);
+    const auto material = [&](double reach) {
+        return hog::planet::leaf_at(uneven, radius, hog::WorldPosition{up * reach})
+            .value_or(Volume::Leaf{})
+            .contents.material;
+    };
+    CHECK(material(low + size) == Material::Water);
+    CHECK(material(high - size) == Material::Water);
+    CHECK(material(low - size) == Material::Air);
+    CHECK(material(high + size) == Material::Air);
+    CHECK(material(radius) == Material::Water);
+}
+
+TEST_CASE("filling nothing changes nothing", "[planet][volume]") {
+    Volume volume{air, region_level};
+    const CellId column = CellId::from_face_ij(0, 1, 1, 4);
+    hog::planet::fill_between(volume, radius, column, radius + 10.0, radius - 10.0, 12, rock);
+    hog::planet::fill_between(volume, radius, column, radius + 3.0e5, radius + 4.0e5, 12, rock);
+    CHECK(volume.leaf_count() == 6);
+}
