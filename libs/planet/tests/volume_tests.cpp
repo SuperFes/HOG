@@ -562,3 +562,36 @@ TEST_CASE("a leaf a surface halves is shared half and half", "[planet][volume]")
         CHECK(near(under, whole / 2.0, 0.03));
     }
 }
+
+TEST_CASE("a region's leaves are the volume's leaves in it", "[planet][volume]") {
+    const Volume volume = varied(71);
+    std::size_t total = 0;
+    for (int face = 0; face < hog::planet::face_count; ++face) {
+        for (const CellId region : regions_of_face(face)) {
+            volume.for_each_leaf_in(region, [&](const Volume::Leaf& leaf, VolumeCell part) {
+                REQUIRE(leaf.cell.contains(part));
+                REQUIRE(region.contains(part.column()));
+                REQUIRE(volume.leaf_holding(part).value_or(Volume::Leaf{}).cell == leaf.cell);
+                total += part == leaf.cell ? 1 : 0;
+            });
+        }
+    }
+    std::size_t within = 0;
+    volume.for_each_leaf([&](VolumeCell cell, const Contents&) {
+        within += cell.column().level() >= region_level ? 1 : 0;
+    });
+    CHECK(total == within);
+}
+
+TEST_CASE("a region inside one leaf is that leaf's part", "[planet][volume]") {
+    const Volume volume{water, region_level};
+    const CellId region = CellId::from_face_ij(5, 3, 2, region_level);
+    int visits = 0;
+    volume.for_each_leaf_in(region, [&](const Volume::Leaf& leaf, VolumeCell part) {
+        ++visits;
+        CHECK(leaf.cell == VolumeCell::from(CellId::from_face(5)));
+        CHECK(part == VolumeCell::from(region));
+        CHECK(leaf.contents == water);
+    });
+    CHECK(visits == 1);
+}

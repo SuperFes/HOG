@@ -85,6 +85,23 @@ std::optional<Volume::Leaf> Volume::leaf_holding(VolumeCell cell) const {
     return Leaf{.cell = at, .contents = nodes_[node].contents};
 }
 
+bool Volume::splits_across(VolumeCell cell) const {
+    HOG_ASSERT(cell.is_valid(), "invalid cell");
+    auto node = static_cast<std::uint32_t>(cell.column().face());
+    VolumeCell at = VolumeCell::from(CellId::from_face(cell.column().face()));
+    while (nodes_[node].split != Split::Leaf) {
+        const Node& here = nodes_[node];
+        const auto index = child_holding(at, here.split, cell);
+        if (!index) {
+            return here.split == Split::Across;
+        }
+        node = here.children + static_cast<std::uint32_t>(*index);
+        at = child(at, here.split, *index);
+    }
+    HOG_ASSERT(false, "a leaf holds the cell");
+    return false;
+}
+
 void Volume::set(VolumeCell cell, Contents contents) {
     HOG_ASSERT(cell.is_valid(), "invalid cell");
     const int face = cell.column().face();
@@ -280,13 +297,8 @@ Budget budget(const Volume& volume, double radius) {
 Budget budget(const Volume& volume, double radius, CellId region) {
     HOG_ASSERT(region.level() == volume.region_level(), "a region is a column at the region level");
     Budget counted;
-    volume.for_each_leaf([&](VolumeCell cell, const Contents& contents) {
-        const Volume::Leaf leaf{.cell = cell, .contents = contents};
-        if (region.contains(cell.column())) {
-            add(counted, leaf, cell, radius);
-        } else if (cell.column().contains(region)) {
-            add(counted, leaf, VolumeCell::from(region), radius);
-        }
+    volume.for_each_leaf_in(region, [&](const Volume::Leaf& leaf, VolumeCell part) {
+        add(counted, leaf, part, radius);
     });
     return counted;
 }

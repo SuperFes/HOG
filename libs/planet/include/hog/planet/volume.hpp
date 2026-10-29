@@ -55,6 +55,10 @@ public:
     // The leaf holding all of `cell`, unless it spans more than one.
     [[nodiscard]] std::optional<Leaf> leaf_holding(VolumeCell cell) const;
 
+    // Where no one leaf holds all of `cell`, whether the finest cell that does is split across it,
+    // rather than outward.
+    [[nodiscard]] bool splits_across(VolumeCell cell) const;
+
     // Fills `cell` with `contents`, splitting the leaves it covers part of and dropping those it
     // covers whole.
     void set(VolumeCell cell, Contents contents);
@@ -94,6 +98,40 @@ public:
             const Node& here = nodes_[next.node];
             if (here.split == Split::Leaf) {
                 visit(next.at, here.contents);
+                continue;
+            }
+            for (int index = child_count(here.split) - 1; index >= 0; --index) {
+                pending.push_back({.node = here.children + static_cast<std::uint32_t>(index),
+                                   .at = child(next.at, here.split, index)});
+            }
+        }
+    }
+
+    // The leaves of one region with the part of each in it: the leaf itself, or the region where
+    // the region lies in a coarser leaf.
+    // Precondition: `region` is a column at the region level.
+    template <typename Visit>
+    void for_each_leaf_in(CellId region, Visit visit) const {
+        auto node = static_cast<std::uint32_t>(region.face());
+        int level = 0;
+        while (level < region.level() && nodes_[node].split != Split::Leaf) {
+            ++level;
+            const FaceIJ at = region.parent(level).to_face_ij();
+            node = nodes_[node].children + (((at.i & 1U) << 1U) | (at.j & 1U));
+        }
+        if (level < region.level()) {
+            visit(Leaf{.cell = VolumeCell::from(region.parent(level)),
+                       .contents = nodes_[node].contents},
+                  VolumeCell::from(region));
+            return;
+        }
+        std::vector<Pending> pending{{.node = node, .at = VolumeCell::from(region)}};
+        while (!pending.empty()) {
+            const Pending next = pending.back();
+            pending.pop_back();
+            const Node& here = nodes_[next.node];
+            if (here.split == Split::Leaf) {
+                visit(Leaf{.cell = next.at, .contents = here.contents}, next.at);
                 continue;
             }
             for (int index = child_count(here.split) - 1; index >= 0; --index) {
