@@ -50,35 +50,37 @@ inline constexpr double block_relay = 500.0;   // metres
 // Columns about this many metres across, and shells about a quarter of it.
 inline constexpr double block_size = 50.0; // metres
 
-// The ground and sea round the unit direction `around` on a planet of `radius`, as the world's
-// terrain has them, filled into a volume and shown as blocks from where `around` meets the
-// planet's radius. It stands in for a world made in the volume until there is one.
-[[nodiscard]] BlockMesh ground_blocks(const planet::World& world, DVec3 around, double radius);
-
-// The whole planet is shown in columns at this level, a bounded count whatever its size, and
-// shells about this many metres tall, so its mountains still step.
+// Each ring out from the eye has columns this many levels coarser than the one inside it, reaching
+// as many times farther as they are across.
+inline constexpr int ring_step = 3;
+// Under the rings lies the whole planet in columns at this level, a bounded count whatever its
+// size, in shells about this many metres tall, so its mountains still step.
 inline constexpr int overview_level = 6;
 inline constexpr double overview_shell = 250.0; // metres
 
-// The same for the whole planet, as seen from far off, from its centre.
-[[nodiscard]] BlockMesh planet_blocks(const planet::World& world, double radius);
+// The ground and sea of the whole planet on a planet of `radius`, as the world's terrain has them,
+// filled into a volume in columns at overview_level. It stands in for a world made in the volume
+// until there is one.
+[[nodiscard]] planet::Volume planet_volume(const planet::World& world, double radius);
 
-// From this high over the planet's radius, the ground round the eye is too small to see, so the
-// whole planet is shown instead.
-inline constexpr double overview_height = 10.0 * block_reach; // metres
+// `planet` with rings of ever finer columns filled in round the unit direction `around`, down to
+// block_size within block_reach, all shown as blocks from where `around` meets the planet's radius.
+[[nodiscard]] BlockMesh ground_blocks(const planet::Volume& planet, const planet::World& world,
+                                      DVec3 around, double radius);
+// The same over the whole planet filled in anew.
+[[nodiscard]] BlockMesh ground_blocks(const planet::World& world, DVec3 around, double radius);
 
 // Fills the ground in as blocks round the eye in the background on the pool, anew whenever the eye
-// has gone block_relay from where it was last filled round, or the whole planet once the eye is
-// overview_height up, for the thread that made it. One is in
-// flight at a time; the world must outlive it, unchanged while one is.
+// has gone block_relay from where it was last filled round, for the thread that made it. The whole
+// planet under the rings is filled once and kept. One is in flight at a time; the world must
+// outlive it, unchanged while one is.
 class BlockStream {
 public:
     BlockStream(const planet::World& world, double radius, jobs::JobSystem& jobs) noexcept
         : world_(&world), jobs_(&jobs), radius_(radius) {}
 
-    // Wants the blocks round the unit direction `eye`, seen from `height` metres over the planet's
-    // radius.
-    void follow(DVec3 eye, double height);
+    // Wants the blocks round the unit direction `eye`.
+    void follow(DVec3 eye);
     [[nodiscard]] bool in_flight() const noexcept { return working_ != nullptr; }
     // The blocks filled in since the last call, if any.
     [[nodiscard]] std::optional<BlockMesh> collect();
@@ -86,21 +88,21 @@ public:
     [[nodiscard]] std::optional<BlockMesh> finish();
 
 private:
-    struct Wanted {
-        DVec3 around;
-        bool whole = false;
-
-        friend bool operator==(const Wanted&, const Wanted&) = default;
+    struct Filled {
+        BlockMesh mesh;
+        std::shared_ptr<const planet::Volume> planet;
     };
 
-    void start(Wanted wanted);
+    void start(DVec3 around);
+    [[nodiscard]] BlockMesh take();
 
     const planet::World* world_;
     jobs::JobSystem* jobs_;
     double radius_;
-    std::optional<Wanted> wanted_;
-    std::optional<Wanted> started_;
-    std::unique_ptr<jobs::Async<BlockMesh>> working_;
+    std::shared_ptr<const planet::Volume> planet_;
+    std::optional<DVec3> wanted_;
+    std::optional<DVec3> started_;
+    std::unique_ptr<jobs::Async<Filled>> working_;
 };
 
 } // namespace hog::terrain

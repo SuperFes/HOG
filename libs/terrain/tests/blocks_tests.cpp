@@ -155,6 +155,21 @@ TEST_CASE("a cell finer one way shows its side to one finer the other way", "[te
     CHECK(std::abs(area(mesh) - whole) < 1.0e-3 * whole);
 }
 
+TEST_CASE("nothing shows to the planet's centre from past it", "[terrain][blocks]") {
+    // Smaller than the volume reaches down.
+    constexpr double small = 100'000.0;
+    const CellId column = hog::planet::cell_at(hog::DVec3{0.0, 0.0, 1.0}, 8);
+    Volume volume{air, region_level};
+    hog::planet::fill_between(volume, small, column, 0.0, small, 10, rock);
+    const BlockMesh mesh = block_mesh(volume, small, column.parent(region_level));
+    REQUIRE(quads(mesh) > 0);
+    // Its top and sides, though no bottom.
+    for (const hog::terrain::BlockVertex& vertex : mesh.vertices) {
+        const hog::DVec3 out = glm::normalize(mesh.origin.metres() + hog::DVec3{vertex.position});
+        CHECK(glm::dot(hog::DVec3{vertex.normal}, out) > -0.5);
+    }
+}
+
 TEST_CASE("every side between rock and air shows once", "[terrain][blocks]") {
     std::mt19937_64 random{3};
     Volume volume{air, region_level};
@@ -200,13 +215,23 @@ namespace {
     return terrain.nearest_land(hog::planet::start_direction, 50 * hog::planet::fixed_one);
 }
 
+// The blocks round some land, filled in once for every test that looks at them.
+[[nodiscard]] const BlockMesh& round_land() {
+    static const BlockMesh mesh = hog::terrain::ground_blocks(
+        hog::terrain::testing::shared_world(), on_land(), hog::terrain::testing::planet.radius);
+    return mesh;
+}
+
+[[nodiscard]] hog::WorldPosition corner_of(const BlockMesh& mesh, std::size_t vertex) {
+    return mesh.origin + hog::DVec3{mesh.vertices[vertex].position};
+}
+
 } // namespace
 
 TEST_CASE("the ground round a point shows as blocks at its height", "[terrain][blocks]") {
     const double planet_radius = hog::terrain::testing::planet.radius;
     const hog::DVec3 around = on_land();
-    const BlockMesh mesh =
-        hog::terrain::ground_blocks(hog::terrain::testing::shared_world(), around, planet_radius);
+    const BlockMesh& mesh = round_land();
     REQUIRE(quads(mesh) > 100);
     CHECK(mesh.origin.metres() ==
           hog::planet::surface_position(
@@ -226,10 +251,7 @@ TEST_CASE("the ground round a point shows as blocks at its height", "[terrain][b
             continue;
         }
         for (std::size_t corner = 0; corner < 4; ++corner) {
-            const hog::WorldPosition at =
-                mesh.origin + hog::DVec3{mesh.vertices[index + corner].position};
-            REQUIRE(glm::length(glm::normalize(at.metres()) - around) * planet_radius <
-                    hog::terrain::block_reach + (2.0 * hog::terrain::block_size));
+            const hog::WorldPosition at = corner_of(mesh, index + corner);
             if (glm::length(glm::normalize(at.metres()) - around) * planet_radius <
                 hog::terrain::block_size) {
                 nearest =
@@ -241,21 +263,17 @@ TEST_CASE("the ground round a point shows as blocks at its height", "[terrain][b
     CHECK(nearest < hog::terrain::block_size);
 }
 
-TEST_CASE("the whole planet shows as blocks, every column topped", "[terrain][blocks]") {
-    const double planet_radius = hog::terrain::testing::planet.radius;
-    const BlockMesh mesh =
-        hog::terrain::planet_blocks(hog::terrain::testing::shared_world(), planet_radius);
-    CHECK(mesh.origin.metres() == hog::DVec3{0.0});
+TEST_CASE("the whole planet lies under the rings, every column topped", "[terrain][blocks]") {
+    const BlockMesh& mesh = round_land();
     std::set<CellId> topped;
     for (std::size_t index = 0; index + 3 < mesh.vertices.size(); index += 4) {
         hog::DVec3 middle{0.0};
         for (std::size_t corner = 0; corner < 4; ++corner) {
-            middle += hog::DVec3{mesh.vertices[index + corner].position} / 4.0;
+            middle += corner_of(mesh, index + corner).metres() / 4.0;
         }
         const hog::DVec3 up = glm::normalize(middle);
         if (glm::dot(hog::DVec3{mesh.vertices[index].normal}, up) > 0.99) {
             topped.insert(hog::planet::cell_at(up, hog::terrain::overview_level));
-            CHECK(std::abs(glm::length(middle) - planet_radius) < hog::planet::volume_span / 2.0);
         }
     }
     CHECK(topped.size() == 6U << (2U * hog::terrain::overview_level));
@@ -263,35 +281,34 @@ TEST_CASE("the whole planet shows as blocks, every column topped", "[terrain][bl
     CHECK(coloured(mesh, Material::Granite) > 0);
 }
 
+TEST_CASE("the rings meet the ground under them, with no walls down into the planet",
+          "[terrain][blocks]") {
+    const double planet_radius = hog::terrain::testing::planet.radius;
+    const BlockMesh& mesh = round_land();
+    double lowest = planet_radius;
+    for (std::size_t vertex = 0; vertex < mesh.vertices.size(); ++vertex) {
+        lowest = std::min(lowest, glm::length(corner_of(mesh, vertex).metres()));
+    }
+    // No deeper than the deepest sea, where the volume reaches down a hundred kilometres more.
+    CHECK(lowest > planet_radius - 15'000.0);
+}
+
 TEST_CASE("blocks follow the eye in the background", "[terrain][blocks]") {
     hog::jobs::JobSystem jobs{2};
-    hog::terrain::BlockStream stream{hog::terrain::testing::shared_world(),
-                                     hog::terrain::testing::planet.radius, jobs};
-    stream.follow(on_land(), 2.0);
+    const double planet_radius = hog::terrain::testing::planet.radius;
+    hog::terrain::BlockStream stream{hog::terrain::testing::shared_world(), planet_radius, jobs};
+    stream.follow(on_land());
     CHECK(stream.in_flight());
     const auto finished = stream.finish();
     REQUIRE(finished.has_value());
     CHECK_FALSE(finished.value_or(BlockMesh{}).indices.empty());
     CHECK_FALSE(stream.in_flight());
     // Not far enough to fill in anew.
-    stream.follow(on_land(), 2.0);
+    stream.follow(on_land());
     CHECK_FALSE(stream.in_flight());
-}
-
-TEST_CASE("blocks show the whole planet once the eye is high enough", "[terrain][blocks]") {
-    hog::jobs::JobSystem jobs{2};
-    const double planet_radius = hog::terrain::testing::planet.radius;
-    hog::terrain::BlockStream stream{hog::terrain::testing::shared_world(), planet_radius, jobs};
-    stream.follow(on_land(), hog::terrain::overview_height);
-    const auto whole = stream.finish();
-    REQUIRE(whole.has_value());
-    CHECK(whole.value_or(BlockMesh{}).origin.metres() == hog::DVec3{0.0});
-    // Wherever the eye goes up there, the planet is the same.
-    stream.follow(-on_land(), 2.0 * hog::terrain::overview_height);
-    CHECK_FALSE(stream.in_flight());
-    // Back down, the ground round the eye.
-    stream.follow(on_land(), hog::terrain::overview_height / 2.0);
-    const auto near = stream.finish();
-    REQUIRE(near.has_value());
-    CHECK(near.value_or(BlockMesh{}).origin.metres() != hog::DVec3{0.0});
+    // Far enough, over the planet already filled in.
+    stream.follow(-on_land());
+    const auto moved = stream.finish();
+    REQUIRE(moved.has_value());
+    CHECK(glm::dot(glm::normalize(moved.value_or(BlockMesh{}).origin.metres()), -on_land()) > 0.99);
 }

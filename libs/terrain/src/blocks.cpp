@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <set>
@@ -65,8 +66,11 @@ public:
     // Adds the sides that show of the part of a leaf in the region.
     void add(const planet::Volume::Leaf& leaf, VolumeCell part) {
         const auto around = planet::face_neighbors(part);
+        // Nothing lies past the planet's centre to see a side from.
+        const bool at_centre = planet::shell_bounds(part, radius_).inner <= 0.0;
         for (std::size_t index = 0; index < around.size(); ++index) {
-            if (around[index].is_valid()) {
+            if (around[index].is_valid() &&
+                (!at_centre || static_cast<Side>(index) != Side::Down)) {
                 add_side(leaf, static_cast<Side>(index), {.here = part, .across = around[index]});
             }
         }
@@ -214,105 +218,185 @@ int shell_level_for(double height) {
     return shell_level;
 }
 
-// The ground and sea of every column at `level` within `reach` of the unit direction `around`,
-// spreading out from the one under it, filled in from the volume's bottom in shells at
-// `shell_level` and shown as blocks from `origin`.
-BlockMesh fill_ground(const planet::World& world, double radius, DVec3 around, int level,
-                      int shell_level, double reach, WorldPosition origin) {
-    const int region_level = std::max(0, level - 4);
-    const planet::Contents air{
-        .material = Material::Air, .temperature = 288.0F, .surface = std::nullopt};
-    const planet::Contents rock{
-        .material = Material::Granite, .temperature = 288.0F, .surface = std::nullopt};
-    const planet::Contents water{
-        .material = Material::Water, .temperature = 288.0F, .surface = std::nullopt};
-    planet::Volume volume{air, region_level};
-    const double bottom = radius - (planet::volume_span / 2.0);
-    const auto& terrain = world.geology().terrain();
-    const planet::CellId middle = planet::cell_at(around, level);
+double shell_height(int shell_level) {
+    return std::ldexp(planet::volume_span, -shell_level);
+}
+
+// The terrain's height over the planet's radius in the middle of `column`.
+double ground_in(const planet::World& world, planet::CellId column) {
+    return static_cast<double>(world.geology().terrain().elevation(column)) /
+           static_cast<double>(planet::fixed_one);
+}
+
+constexpr float stand_in_temperature = 288.0F; // kelvin
+
+// Fills `column` from `low` to `high` metres from the centre: rock up to `ground` metres over the
+// radius, the sea over it, and air above.
+void fill_column(planet::Volume& volume, double radius, planet::CellId column, double ground,
+                 double low, double high, int shell_level) {
+    const double surface = radius + ground;
+    const double sea = std::max(surface, radius);
+    planet::fill_between(volume, radius, column, low, surface, shell_level,
+                         {.material = Material::Granite,
+                          .temperature = stand_in_temperature,
+                          .surface = std::nullopt});
+    planet::fill_between(volume, radius, column, surface, sea, shell_level,
+                         {.material = Material::Water,
+                          .temperature = stand_in_temperature,
+                          .surface = std::nullopt});
+    planet::fill_between(
+        volume, radius, column, sea, high, shell_level,
+        {.material = Material::Air, .temperature = stand_in_temperature, .surface = std::nullopt});
+}
+
+// A ring of columns at `level` within `reach`, in shells at `shell_level`.
+struct Ring {
+    int level = 0;
+    double reach = 0.0;
+    int shell_level = 0;
+};
+
+// From the whole planet under them in, each finer and nearer.
+std::vector<Ring> rings_for(double radius) {
+    std::vector<Ring> rings{{.level = overview_level,
+                             .reach = std::numeric_limits<double>::infinity(),
+                             .shell_level = shell_level_for(overview_shell)}};
+    double size = block_size;
+    double reach = block_reach;
+    std::vector<Ring> inner;
+    for (int level = planet::level_for(block_size, radius); level > overview_level;
+         level -= ring_step) {
+        // Shells a quarter of a column across, though no coarser than the planet's.
+        inner.push_back(
+            {.level = level,
+             .reach = reach,
+             .shell_level = shell_level_for(std::min(size, 4.0 * overview_shell) / 4.0)});
+        const double across = std::ldexp(1.0, ring_step);
+        size *= across;
+        reach *= across;
+    }
+    rings.insert(rings.end(), inner.rbegin(), inner.rend());
+    return rings;
+}
+
+// Fills in `ring` round the unit direction `around` over what `coarser` filled in, between the
+// heights either has.
+void fill_ring(planet::Volume& volume, const planet::World& world, double radius, DVec3 around,
+               const Ring& ring, const Ring& coarser) {
+    const planet::CellId middle = planet::cell_at(around, ring.level);
     std::vector<planet::CellId> columns{middle};
     std::set<planet::CellId> seen{middle};
-    std::set<planet::CellId> regions;
+    // Past what either rounded its heights to.
+    const double margin = shell_height(coarser.shell_level) + shell_height(ring.shell_level);
     for (std::size_t next = 0; next < columns.size(); ++next) {
         const planet::CellId column = columns[next];
-        regions.insert(column.parent(region_level));
-        const double ground =
-            static_cast<double>(terrain.elevation(column)) / static_cast<double>(planet::fixed_one);
-        planet::fill_between(volume, radius, column, bottom, radius + ground, shell_level, rock);
-        if (ground < 0.0) {
-            planet::fill_between(volume, radius, column, radius + ground, radius, shell_level,
-                                 water);
-        }
+        const double ground = ground_in(world, column);
+        const double under = ground_in(world, column.parent(coarser.level));
+        fill_column(volume, radius, column, ground, radius + std::min(ground, under) - margin,
+                    radius + std::max({ground, under, 0.0}) + margin, ring.shell_level);
         for (const planet::CellId beside : planet::edge_neighbors(column)) {
-            const double away = glm::length(planet::cell_center(beside) - around) * radius;
-            if (away <= reach && seen.insert(beside).second) {
+            if (glm::length(planet::cell_center(beside) - around) * radius <= ring.reach &&
+                seen.insert(beside).second) {
                 columns.push_back(beside);
             }
         }
     }
-    volume.settle();
-    BlockMesh mesh{.origin = origin, .vertices = {}, .indices = {}};
-    for (const planet::CellId region : regions) {
-        add_blocks(mesh, volume, radius, region);
-    }
-    return mesh;
 }
 
 } // namespace
 
+planet::Volume planet_volume(const planet::World& world, double radius) {
+    const Ring whole = rings_for(radius).front();
+    planet::Volume volume{
+        {.material = Material::Air, .temperature = stand_in_temperature, .surface = std::nullopt},
+        overview_level - 2};
+    const double bottom = radius - (planet::volume_span / 2.0);
+    const std::uint32_t across = 1U << static_cast<unsigned>(overview_level);
+    for (int face = 0; face < 6; ++face) {
+        for (std::uint32_t i = 0; i < across; ++i) {
+            for (std::uint32_t j = 0; j < across; ++j) {
+                const planet::CellId column =
+                    planet::CellId::from_face_ij(face, i, j, overview_level);
+                const double ground = ground_in(world, column);
+                fill_column(volume, radius, column, ground, bottom, radius + std::max(ground, 0.0),
+                            whole.shell_level);
+            }
+        }
+    }
+    volume.settle();
+    return volume;
+}
+
+BlockMesh ground_blocks(const planet::Volume& planet, const planet::World& world, DVec3 around,
+                        double radius) {
+    planet::Volume volume = planet;
+    const std::vector<Ring> rings = rings_for(radius);
+    for (std::size_t ring = 1; ring < rings.size(); ++ring) {
+        fill_ring(volume, world, radius, around, rings[ring], rings[ring - 1]);
+    }
+    volume.settle();
+    BlockMesh mesh{
+        .origin = planet::surface_position(planet::cell_at(around, rings.back().level), radius),
+        .vertices = {},
+        .indices = {}};
+    const int region_level = volume.region_level();
+    const std::uint32_t across = 1U << static_cast<unsigned>(region_level);
+    for (int face = 0; face < 6; ++face) {
+        for (std::uint32_t i = 0; i < across; ++i) {
+            for (std::uint32_t j = 0; j < across; ++j) {
+                add_blocks(mesh, volume, radius,
+                           planet::CellId::from_face_ij(face, i, j, region_level));
+            }
+        }
+    }
+    return mesh;
+}
+
 BlockMesh ground_blocks(const planet::World& world, DVec3 around, double radius) {
-    const int level = planet::level_for(block_size, radius);
-    // Shells a quarter of a column across.
-    return fill_ground(world, radius, around, level, shell_level_for(block_size / 4.0), block_reach,
-                       planet::surface_position(planet::cell_at(around, level), radius));
+    return ground_blocks(planet_volume(world, radius), world, around, radius);
 }
 
-BlockMesh planet_blocks(const planet::World& world, double radius) {
-    // Reaching round the far side.
-    return fill_ground(world, radius, planet::start_direction, overview_level,
-                       shell_level_for(overview_shell), 4.0 * radius, WorldPosition{});
-}
-
-void BlockStream::follow(DVec3 eye, double height) {
-    const bool whole = height >= overview_height;
-    if (!wanted_ || wanted_->whole != whole ||
-        (!whole && glm::length(eye - wanted_->around) * radius_ > block_relay)) {
-        wanted_ = Wanted{.around = eye, .whole = whole};
+void BlockStream::follow(DVec3 eye) {
+    if (!wanted_ || glm::length(eye - *wanted_) * radius_ > block_relay) {
+        wanted_ = eye;
     }
     if (!working_ && wanted_ != started_) {
         start(*wanted_);
     }
 }
 
-void BlockStream::start(Wanted wanted) {
-    started_ = wanted;
-    working_ = std::make_unique<jobs::Async<BlockMesh>>(
-        *jobs_, [world = world_, wanted, radius = radius_] {
-            return wanted.whole ? planet_blocks(*world, radius)
-                                : ground_blocks(*world, wanted.around, radius);
-        });
+void BlockStream::start(DVec3 around) {
+    started_ = around;
+    working_ = std::make_unique<jobs::Async<Filled>>(*jobs_, [world = world_, around,
+                                                              radius = radius_, planet = planet_] {
+        std::shared_ptr<const planet::Volume> under =
+            planet ? planet : std::make_shared<const planet::Volume>(planet_volume(*world, radius));
+        BlockMesh mesh = ground_blocks(*under, *world, around, radius);
+        return Filled{.mesh = std::move(mesh), .planet = std::move(under)};
+    });
+}
+
+BlockMesh BlockStream::take() {
+    Filled filled = working_->take();
+    working_.reset();
+    planet_ = std::move(filled.planet);
+    if (wanted_ && wanted_ != started_) {
+        start(*wanted_);
+    }
+    return std::move(filled.mesh);
 }
 
 std::optional<BlockMesh> BlockStream::collect() {
     if (!working_ || !working_->done()) {
         return std::nullopt;
     }
-    BlockMesh found = working_->take();
-    working_.reset();
-    if (wanted_ && wanted_ != started_) {
-        start(*wanted_);
-    }
-    return found;
+    return take();
 }
 
 std::optional<BlockMesh> BlockStream::finish() {
     std::optional<BlockMesh> last;
     while (working_) {
-        last = working_->take();
-        working_.reset();
-        if (wanted_ && wanted_ != started_) {
-            start(*wanted_);
-        }
+        last = take();
     }
     return last;
 }
