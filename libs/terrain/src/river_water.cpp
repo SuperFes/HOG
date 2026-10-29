@@ -175,6 +175,18 @@ int river_pieces(const planet::Reach& reach, double radius, double away) {
         2, 128);
 }
 
+double river_shore(const planet::Elevation& terrain, const planet::Reach& reach, double radius) {
+    constexpr int steps = 16;
+    const double over = std::max(river_overlap, reach.width / 2.0);
+    for (int step = 0; step < steps; ++step) {
+        const double t = static_cast<double>(step) / steps;
+        if (section_at(terrain, reach, t, radius, over).standing) {
+            return t;
+        }
+    }
+    return 1.0;
+}
+
 double river_speed(const planet::Reach& reach) {
     const double depth = planet::fixed_to_double(reach.depth);
     return reach.width > 0.0 && depth > 0.0 ? reach.flow / (reach.width * depth) : 0.0;

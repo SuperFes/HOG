@@ -124,7 +124,35 @@ struct ShoreDepths {
     std::vector<float> levels;
     std::vector<float> fetches;
     std::vector<float> offshore;
+    std::vector<float> plumes;
 };
+
+// A river's plume on the water it runs into, on a shore frame's plane: where it leaves the shore,
+// metres east and north, which way it heads out, half how wide the river runs there, and the
+// metres out it carries before most of what it carries is mixed away.
+struct Plume {
+    DVec2 origin{0.0};
+    DVec2 heading{1.0, 0.0};
+    double half = 0.0;
+    double length = 0.0;
+};
+
+// A plume carries this many metres out by the root of its river's flow in m³/s, and widens each
+// side by this many metres a metre out.
+inline constexpr double plume_reach = 50.0;
+inline constexpr double plume_spread = 0.35;
+
+// Metres out a river flowing `flow` m³/s carries its plume.
+[[nodiscard]] double plume_length(double flow);
+
+// How much of what a river carries is mixed into the water at `at`, metres east and north on the
+// plane, from 0 to 1: all of it at the mouth, less out to sea and towards the plume's edges.
+[[nodiscard]] double plume_at(const Plume& plume, DVec2 at);
+
+// Of each layer round the anchor of `frame`, finest first, how much of what rivers carry is mixed
+// into the water at each texel, the most of any river's plume.
+[[nodiscard]] std::vector<float> shore_plumes(const planet::World& world, const ShoreFrame& frame,
+                                              double radius);
 
 // The levels of the lakes in the finest layer of `shore`, lowest first, each once.
 [[nodiscard]] std::vector<float> lake_levels(const ShoreDepths& shore);

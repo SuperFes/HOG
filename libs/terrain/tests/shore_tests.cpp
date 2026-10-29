@@ -3,6 +3,7 @@
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tangent_frame.hpp>
 #include <hog/planet/world.hpp>
+#include <hog/terrain/river_water.hpp>
 #include <hog/terrain/shore.hpp>
 #include <hog/testing/worlds.hpp>
 
@@ -599,6 +600,72 @@ TEST_CASE("a lake on the terrain has its level and depth round it", "[terrain][s
                WithinAbs(hog::planet::fixed_to_double(under.surface - under.bed), 1e-3));
     CHECK(shore.depths.at(middle) == hog::terrain::shore_highest);
     CHECK(level > bed);
+}
+
+TEST_CASE("a river's plume is strongest at its mouth and mixes away out to sea",
+          "[terrain][shore]") {
+    const hog::terrain::Plume plume{
+        .origin = {0.0, 0.0}, .heading = {1.0, 0.0}, .half = 4.0, .length = 100.0};
+    CHECK_THAT(hog::terrain::plume_at(plume, {0.0, 0.0}), WithinAbs(1.0, 1e-9));
+    CHECK(hog::terrain::plume_at(plume, {10.0, 0.0}) > hog::terrain::plume_at(plume, {50.0, 0.0}));
+    CHECK(hog::terrain::plume_at(plume, {300.0, 0.0}) < 0.1);
+    // Behind the shore it fills the river's mouth, and no further.
+    CHECK(hog::terrain::plume_at(plume, {-4.0, 0.0}) > 0.0);
+    CHECK(hog::terrain::plume_at(plume, {-20.0, 0.0}) == 0.0);
+}
+
+TEST_CASE("a river's plume widens as it goes out", "[terrain][shore]") {
+    const hog::terrain::Plume plume{
+        .origin = {0.0, 0.0}, .heading = {0.0, 1.0}, .half = 4.0, .length = 100.0};
+    CHECK(hog::terrain::plume_at(plume, {20.0, 100.0}) > 0.0);
+    CHECK(hog::terrain::plume_at(plume, {20.0, 10.0}) == 0.0);
+    CHECK(hog::terrain::plume_at(plume, {60.0, 100.0}) == 0.0);
+    CHECK(hog::terrain::plume_at(plume, {-20.0, 100.0}) ==
+          hog::terrain::plume_at(plume, {20.0, 100.0}));
+}
+
+TEST_CASE("bigger rivers carry their plumes further", "[terrain][shore]") {
+    CHECK(hog::terrain::plume_length(0.0) == 0.0);
+    CHECK(hog::terrain::plume_length(10.0) > hog::terrain::plume_length(1.0));
+    CHECK_THAT(hog::terrain::plume_length(4.0), WithinRel(2.0 * hog::terrain::plume_length(1.0)));
+}
+
+TEST_CASE("rivers' plumes lie off their mouths round the anchor", "[terrain][shore]") {
+    const hog::planet::Reach* mouth = nullptr;
+    for (const auto& reach : terrain().rivers().reaches()) {
+        if (reach.mouth && reach.to_surface == 0 && reach.flow > 1.0) {
+            mouth = &reach;
+            break;
+        }
+    }
+    REQUIRE(mouth != nullptr);
+    const ShoreFrame frame = shore_frame(mouth->to, radius);
+    const std::vector<float> plumes = hog::terrain::shore_plumes(world(), frame, radius);
+    constexpr auto texels = static_cast<std::size_t>(shore_size) * shore_size;
+    REQUIRE(plumes.size() == shore_spacing.size() * texels);
+    // At the shore, in the finest layer.
+    const double shore = hog::terrain::river_shore(terrain(), *mouth, radius);
+    const DVec2 along =
+        shore_along(frame, radius,
+                    terrain().rivers().meander().unshifted(hog::planet::course_at(*mouth, shore)));
+    const double spacing = shore_spacing.front();
+    const auto texel = [&](double metres) {
+        return static_cast<std::size_t>(std::floor((metres / spacing) + (shore_size / 2.0)));
+    };
+    // Texels lie further apart than narrow rivers are wide.
+    float near = 0.0F;
+    for (std::size_t row = texel(along.y) - 3; row <= texel(along.y) + 3; ++row) {
+        for (std::size_t column = texel(along.x) - 3; column <= texel(along.x) + 3; ++column) {
+            near = std::max(near, plumes.at((row * shore_size) + column));
+        }
+    }
+    CHECK(near > 0.3F);
+    // Little of the water's mixed with any.
+    const auto mixed = std::ranges::count_if(std::span{plumes}.first(texels),
+                                             [](float plume) { return plume > 0.0F; });
+    CHECK(mixed > 0);
+    CHECK(static_cast<std::size_t>(mixed) < texels / 10);
+    CHECK(std::ranges::all_of(plumes, [](float plume) { return plume >= 0.0F && plume <= 1.0F; }));
 }
 
 TEST_CASE("the water nearest below a height is the highest lake under it, or the sea",

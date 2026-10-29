@@ -453,7 +453,8 @@ TEST_CASE("ripples stop at the shore", "[render][gpu]") {
             .still = std::vector<float>(shore_texels, hog::terrain::shore_highest),
             .levels = std::vector<float>(shore_texels, 0.0F),
             .fetches = std::vector<float>(shore_texels * hog::terrain::fetch_headings, 0.0F),
-            .offshore = {}};
+            .offshore = {},
+            .plumes = {}};
     };
     hog::GameTime time{std::chrono::seconds{1'792'000'000}};
     const std::vector<DVec2> laid = mound(0.05, 2.0);
@@ -589,7 +590,8 @@ TEST_CASE("a body pushes the sea where it crosses the surface, not where it's wh
         .still = std::vector<float>(shore_texels, hog::terrain::shore_highest),
         .levels = std::vector<float>(shore_texels, 0.0F),
         .fetches = std::vector<float>(shore_texels * hog::terrain::fetch_headings, 0.0F),
-        .offshore = {}};
+        .offshore = {},
+        .plumes = {}};
     const hog::planet::TangentFrame ground = hog::planet::tangent_frame(up);
     const DVec3 at = glm::normalize((up * radius) + (ground.east * 2.0) + (ground.north * 1.0));
     hog::GameTime time{std::chrono::seconds{1'792'000'000}};

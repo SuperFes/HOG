@@ -68,6 +68,11 @@ struct RiverWater {
 // metres from where the water's laid round.
 [[nodiscard]] int river_pieces(const planet::Reach& reach, double radius, double away);
 
+// How far along a reach, from 0 at its start to 1 at its end, its water first stands out on the
+// sea or lake it runs into, as its water's laid; 1 where it doesn't before its end.
+[[nodiscard]] double river_shore(const planet::Elevation& terrain, const planet::Reach& reach,
+                                 double radius);
+
 // The rivers' surface within river_reach of the unit direction `around` on a planet of `radius`,
 // where it lies over land, as the world's terrain has it: each reach's course, shifted as the
 // meanders shift the ground, at the level of its water there.

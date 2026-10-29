@@ -1,4 +1,5 @@
 #include <hog/planet/projection.hpp>
+#include <hog/terrain/river_water.hpp>
 #include <hog/terrain/shore.hpp>
 
 #include <algorithm>
@@ -556,9 +557,83 @@ double water_below(std::span<const float> levels, double height) {
     return above == levels.begin() ? 0.0 : static_cast<double>(*std::prev(above));
 }
 
+double plume_length(double flow) {
+    return plume_reach * std::sqrt(std::max(flow, 0.0));
+}
+
+double plume_at(const Plume& plume, DVec2 at) {
+    const DVec2 from = at - plume.origin;
+    const double out = glm::dot(from, plume.heading);
+    const double across = std::abs((from.x * plume.heading.y) - (from.y * plume.heading.x));
+    const double half = plume.half + (std::max(out, 0.0) * plume_spread);
+    // It fills the mouth behind the shore, and mixes away out to sea.
+    const double along = out < 0.0 ? glm::smoothstep(-2.0 * plume.half, 0.0, out)
+                                   : std::exp(-out / std::max(plume.length, 1e-6));
+    return along * (1.0 - glm::smoothstep(0.6, 1.0, across / std::max(half, 1e-6)));
+}
+
+std::vector<float> shore_plumes(const planet::World& world, const ShoreFrame& frame,
+                                double radius) {
+    const planet::Elevation& terrain = world.geology().terrain();
+    const planet::Meander& meander = terrain.rivers().meander();
+    // Out to the coarsest layer's corners.
+    const double widest = shore_size * shore_spacing.back();
+    std::vector<Plume> plumes;
+    for (const planet::Reach& reach : terrain.rivers().reaches()) {
+        if (!reach.mouth || glm::length(reach.to - frame.anchor) * radius > widest) {
+            continue;
+        }
+        const double shore = river_shore(terrain, reach, radius);
+        const auto along = [&](double t) {
+            return shore_along(frame, radius, meander.unshifted(planet::course_at(reach, t)));
+        };
+        const DVec2 ahead = along(std::min(shore + 0.05, 1.0)) - along(std::max(shore - 0.05, 0.0));
+        if (glm::length(ahead) <= 0.0) {
+            continue;
+        }
+        plumes.push_back({.origin = along(shore),
+                          .heading = glm::normalize(ahead),
+                          .half = planet::width_at(reach, shore) / 2.0,
+                          .length = plume_length(reach.flow)});
+    }
+    constexpr auto texels = static_cast<std::size_t>(shore_size) * shore_size;
+    std::vector<float> found(shore_spacing.size() * texels, 0.0F);
+    for (std::size_t layer = 0; layer < shore_spacing.size(); ++layer) {
+        const double spacing = shore_spacing.at(layer);
+        const double first = (0.5 - (shore_size / 2.0)) * spacing;
+        const auto texel = [&](double metres) {
+            return std::clamp(static_cast<int>(std::floor((metres - first) / spacing)), 0,
+                              shore_size - 1);
+        };
+        for (const Plume& plume : plumes) {
+            // It's all but mixed away three lengths out.
+            const double out = 3.0 * plume.length;
+            const double extent = out + plume.half + (out * plume_spread);
+            for (int row = texel(plume.origin.y - extent); row <= texel(plume.origin.y + extent);
+                 ++row) {
+                for (int column = texel(plume.origin.x - extent);
+                     column <= texel(plume.origin.x + extent); ++column) {
+                    float& mixed =
+                        found[(layer * texels) + (static_cast<std::size_t>(row) * shore_size) +
+                              static_cast<std::size_t>(column)];
+                    mixed = std::max(
+                        mixed, static_cast<float>(plume_at(
+                                   plume, {first + (column * spacing), first + (row * spacing)})));
+                }
+            }
+        }
+    }
+    return found;
+}
+
 ShoreDepths work_out_shore(const planet::World& world, const ShoreFrame& frame, double radius) {
-    ShoreDepths found{
-        .frame = frame, .depths = {}, .still = {}, .levels = {}, .fetches = {}, .offshore = {}};
+    ShoreDepths found{.frame = frame,
+                      .depths = {},
+                      .still = {},
+                      .levels = {},
+                      .fetches = {},
+                      .offshore = {},
+                      .plumes = {}};
     std::vector<float> elevations;
     std::vector<float> lakes;
     std::vector<std::uint8_t> sea;
@@ -575,6 +650,7 @@ ShoreDepths work_out_shore(const planet::World& world, const ShoreFrame& frame, 
     keep_dry(elevations, found.depths, found.still, found.levels);
     found.fetches = shore_fetches(found.depths, found.still);
     found.offshore = shore_offshore(found.depths, found.still);
+    found.plumes = shore_plumes(world, frame, radius);
     return found;
 }
 
