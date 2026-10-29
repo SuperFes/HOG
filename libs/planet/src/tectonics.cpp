@@ -10,6 +10,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <numbers>
 #include <span>
 #include <utility>
@@ -89,6 +90,82 @@ constexpr double craton_relief = 2.0;
         }
     }
     return count;
+}
+
+constexpr auto unset = std::numeric_limits<std::uint32_t>::max();
+
+// The connected pieces the plates fall into: each cell's piece, and each piece's plate and size.
+struct Pieces {
+    std::vector<std::uint32_t> of;
+    std::vector<std::uint32_t> plate;
+    std::vector<std::uint32_t> size;
+};
+
+[[nodiscard]] Pieces pieces_of(const LevelGrid& grid, std::span<const Tectonics::Column> columns) {
+    Pieces pieces{.of = std::vector<std::uint32_t>(columns.size(), unset), .plate = {}, .size = {}};
+    std::vector<std::uint32_t> open;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        if (pieces.of[cell] != unset) {
+            continue;
+        }
+        const auto piece = static_cast<std::uint32_t>(pieces.plate.size());
+        const std::uint32_t plate = columns[cell].plate;
+        pieces.plate.push_back(plate);
+        pieces.size.push_back(0);
+        pieces.of[cell] = piece;
+        open.push_back(cell);
+        while (!open.empty()) {
+            const std::uint32_t at = open.back();
+            open.pop_back();
+            ++pieces.size[piece];
+            for (const std::uint32_t next : grid.neighbors(at)) {
+                if (pieces.of[next] == unset && columns[next].plate == plate) {
+                    pieces.of[next] = piece;
+                    open.push_back(next);
+                }
+            }
+        }
+    }
+    return pieces;
+}
+
+// The plate each piece belongs to once every piece but the largest of its plate is welded to the
+// plate it borders most; empty if every plate is already one piece.
+[[nodiscard]] std::vector<std::uint32_t> welded(const LevelGrid& grid,
+                                                std::span<const Tectonics::Column> columns,
+                                                const Pieces& pieces, std::size_t plates) {
+    std::vector<std::uint32_t> largest(plates, unset);
+    for (std::uint32_t piece = 0; piece < pieces.plate.size(); ++piece) {
+        std::uint32_t& best = largest[pieces.plate[piece]];
+        if (best == unset || pieces.size[piece] > pieces.size[best]) {
+            best = piece;
+        }
+    }
+    const auto cut = [&](std::uint32_t piece) { return largest[pieces.plate[piece]] != piece; };
+    std::vector<std::uint32_t> contacts(pieces.plate.size() * plates, 0);
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        if (!cut(pieces.of[cell])) {
+            continue;
+        }
+        for (const std::uint32_t next : grid.neighbors(cell)) {
+            ++contacts[(pieces.of[cell] * plates) + columns[next].plate];
+        }
+    }
+    std::vector<std::uint32_t> joins = pieces.plate;
+    bool any = false;
+    for (std::uint32_t piece = 0; piece < pieces.plate.size(); ++piece) {
+        if (!cut(piece)) {
+            continue;
+        }
+        any = true;
+        // Neighbours on its own plate are its own cells.
+        contacts[(piece * plates) + pieces.plate[piece]] = 0;
+        const auto row = std::span{contacts}.subspan(piece * plates, plates);
+        if (const auto most = std::ranges::max_element(row); *most > 0) {
+            joins[piece] = static_cast<std::uint32_t>(most - row.begin());
+        }
+    }
+    return any ? joins : std::vector<std::uint32_t>{};
 }
 
 } // namespace
@@ -219,30 +296,18 @@ std::vector<bool> Tectonics::move() {
 }
 
 void Tectonics::keep_whole() {
-    std::vector<std::uint32_t> plates(columns_.size());
-    for (std::uint32_t cell = 0; cell < grid_.size(); ++cell) {
-        plates[cell] = columns_[cell].plate;
-        const auto around = grid_.neighbors(cell);
-        if (std::ranges::any_of(around, [&](std::uint32_t next) {
-                return columns_[next].plate == columns_[cell].plate;
-            })) {
-            continue;
+    // A plate is one rigid piece; crust cut off from it as cells are resampled is welded to the
+    // plate around it, as terranes are.
+    constexpr int most_passes = 4;
+    for (int pass = 0; pass < most_passes; ++pass) {
+        const Pieces pieces = pieces_of(grid_, columns_);
+        const std::vector<std::uint32_t> joins = welded(grid_, columns_, pieces, plates_.size());
+        if (joins.empty()) {
+            return;
         }
-        // Alone: it joins whichever plate holds most of its neighbours.
-        std::uint32_t most = 0;
-        for (const std::uint32_t next : around) {
-            const auto count =
-                static_cast<std::uint32_t>(std::ranges::count_if(around, [&](std::uint32_t other) {
-                    return columns_[other].plate == columns_[next].plate;
-                }));
-            if (count > most) {
-                most = count;
-                plates[cell] = columns_[next].plate;
-            }
+        for (std::uint32_t cell = 0; cell < grid_.size(); ++cell) {
+            columns_[cell].plate = joins[pieces.of[cell]];
         }
-    }
-    for (std::uint32_t cell = 0; cell < grid_.size(); ++cell) {
-        columns_[cell].plate = plates[cell];
     }
 }
 

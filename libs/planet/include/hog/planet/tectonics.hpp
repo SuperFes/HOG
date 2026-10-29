@@ -81,8 +81,8 @@ public:
 private:
     // Carries each plate's crust on by a step; says which cells ocean floor dove under.
     [[nodiscard]] std::vector<bool> move();
-    // Hands cells left alone among another plate's to it, so plates stay whole as they're
-    // resampled.
+    // Welds crust cut off from its plate as cells are resampled to the plate around it, so each
+    // plate stays one piece.
     void keep_whole();
     void raise_arcs(const std::vector<bool>& diving);
     void collapse();

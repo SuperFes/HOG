@@ -228,6 +228,35 @@ TEST_CASE("plates stay whole as they move", "[planet][tectonics]") {
         REQUIRE(std::ranges::any_of(
             around, [&](std::uint32_t next) { return tectonics.columns()[next].plate == plate; }));
     }
+    for (int step = 0; step < 50; ++step) {
+        tectonics.step();
+    }
+    // Each plate one piece, not trailing slivers.
+    std::vector<bool> seen(grid.size(), false);
+    std::vector<int> pieces(tectonics.plates().size(), 0);
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        if (seen[cell]) {
+            continue;
+        }
+        const auto plate = tectonics.columns()[cell].plate;
+        ++pieces[plate];
+        std::queue<std::uint32_t> open;
+        open.push(cell);
+        seen[cell] = true;
+        while (!open.empty()) {
+            const std::uint32_t at = open.front();
+            open.pop();
+            for (const std::uint32_t next : grid.neighbors(at)) {
+                if (!seen[next] && tectonics.columns()[next].plate == plate) {
+                    seen[next] = true;
+                    open.push(next);
+                }
+            }
+        }
+    }
+    for (const int count : pieces) {
+        CHECK(count <= 1);
+    }
 }
 
 TEST_CASE("ocean floor diving under a continent raises an arc behind its coast",
