@@ -1050,13 +1050,14 @@ TEST_CASE("the young mantle softens the lithosphere less as it cools", "[planet]
 
 namespace {
 
-// The northern half alone, ocean but for a continent around its pole, warmed under it for good
-// over a mantle `hotter` than today's.
-Lithosphere warm_cap(double hotter = 0.0) {
+// The northern half alone, ocean floor `age` million years old but for a continent around its
+// pole, warmed under it for good over a mantle `hotter` than today's.
+Lithosphere warm_cap(double hotter = 0.0, float age = 100.0F) {
     const Lithosphere ocean = halves();
     std::vector<Lithosphere::Plate> plates{ocean.plates().front()};
     const auto& grid = ocean.grid();
     for (std::size_t index = 0; index < plates[0].cells.size(); ++index) {
+        plates[0].crust[index].age = age;
         if (hog::planet::cell_center(grid.cell(plates[0].cells[index])).z > 0.7) {
             plates[0].crust[index] = continent;
         }
@@ -1125,6 +1126,16 @@ TEST_CASE("a plate covering the planet splits only where pulled harder than it h
     Lithosphere split = covering();
     split.rift({}, weak);
     CHECK(split.plates().size() == 2);
+}
+
+TEST_CASE("young ocean floor, as thin as it is, holds less than old", "[planet][lithosphere]") {
+    constexpr Strength middling{.cool = 0.2, .warm = 0.1, .ocean = 0.2};
+    Lithosphere old_floor = warm_cap();
+    old_floor.rift({}, middling);
+    CHECK(old_floor.plates().size() == 1);
+    Lithosphere young_floor = warm_cap(0.0, 1.0F);
+    young_floor.rift({}, middling);
+    CHECK(young_floor.plates().size() == 2);
 }
 
 TEST_CASE("a plate that holds over today's mantle splits over a young hotter one",

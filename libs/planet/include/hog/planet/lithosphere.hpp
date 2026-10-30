@@ -113,9 +113,9 @@ struct Forces {
 // How strong the lithosphere is against being pulled apart, against an old slab's pull on the
 // same length: a continent over cool mantle, and over fully warm mantle, which thins the strong
 // lid under it, and between, the warmth's share of the way by ratio, as strength falls off
-// steeply with heat. Old ocean floor holds as a cool continent does. A slab is old floor too, so
-// it pulls no harder than that holds before it breaks off, as slabs did over the hotter, softer
-// young mantle.
+// steeply with heat. Old ocean floor holds as a cool continent does, and younger floor less, as
+// thin as it is, by as much as its slab would pull less. A slab is old floor too, so it pulls no
+// harder than that holds before it breaks off, as slabs did over the hotter, softer young mantle.
 struct Strength {
     double cool = 2.0;
     double warm = 0.1;

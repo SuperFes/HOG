@@ -1013,7 +1013,10 @@ std::optional<DVec3> Lithosphere::weakest(std::uint32_t plate, std::span<const P
         stretch.drag = (continental ? forces.keel : 1.0) * place_drag(stretch.at, share);
         drag += stretch.drag;
         stretch.across = std::sqrt(4.0 * std::numbers::pi * share);
-        stretch.strong = strength.ocean / softer_;
+        // Floor thickens as it cools, as its slab's pull grows.
+        const auto age = static_cast<double>(carrier.crust[index].age);
+        stretch.strong =
+            strength.ocean * std::sqrt(std::min(age, forces.mature) / forces.mature) / softer_;
         if (continental) {
             const float heat = heat_[grid_.index(cell_at(stretch.at, grid_.level()))];
             stretch.strong =
