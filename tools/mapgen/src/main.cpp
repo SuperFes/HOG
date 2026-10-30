@@ -42,6 +42,26 @@ constexpr std::chrono::days warm_up{10};
 // Long enough for the weather's running means of rain and warmth to forget where they started.
 constexpr std::chrono::days season_warm_up{60};
 
+// A line on how the plates stand: how many still carry crust, and the continent they carry and
+// that has foundered, in cubic kilometres.
+std::string census(const hog::planet::Lithosphere& lithosphere, int step) {
+    const auto& grid = lithosphere.grid();
+    std::size_t carrying = 0;
+    double continent = 0.0;
+    for (const auto& plate : lithosphere.plates()) {
+        carrying += plate.cells.empty() ? 0 : 1;
+        for (std::size_t index = 0; index < plate.cells.size(); ++index) {
+            if (plate.crust[index].type == hog::planet::CrustType::Continental) {
+                continent += static_cast<double>(grid.area(plate.cells[index])) * 1e-6 *
+                             static_cast<double>(plate.crust[index].thickness);
+            }
+        }
+    }
+    return std::format("step {}: {} plates of {}, {:.3g} km3 continent, {:.3g} km3 foundered\n",
+                       step, carrying, lithosphere.plates().size(), continent,
+                       lithosphere.foundered());
+}
+
 int write(const std::filesystem::path& path, const hog::mapgen::Image& image) {
     if (const auto written = hog::mapgen::write_png(path, image); !written) {
         std::cerr << std::format("hog-mapgen: {}\n", written.error());
@@ -246,6 +266,7 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
     };
     for (int step = 0; step <= options.tectonics.steps; ++step) {
         if (step % options.tectonics.every == 0 || step == options.tectonics.steps) {
+            std::cout << census(lithosphere, step) << std::flush;
             const auto heights = timer.time("isostasy", [&] {
                 return hog::planet::flexed(grid, hog::planet::crust_heights(tectonics));
             });
