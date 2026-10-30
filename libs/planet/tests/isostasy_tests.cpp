@@ -1,18 +1,24 @@
 #include <hog/planet/isostasy.hpp>
+#include <hog/planet/lithosphere.hpp>
 #include <hog/planet/noise.hpp>
+#include <hog/planet/projection.hpp>
 #include <hog/planet/tectonics.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <vector>
 
+using Catch::Matchers::WithinAbs;
 using hog::planet::crust_heights;
+using hog::planet::CrustType;
 using hog::planet::fixed_one;
 using hog::planet::fixed_to_double;
 using hog::planet::LevelGrid;
+using hog::planet::Lithosphere;
 using hog::planet::Tectonics;
 
 namespace {
@@ -70,6 +76,45 @@ TEST_CASE("thicker crust floats higher", "[planet][isostasy]") {
     CHECK(plateau > 4'500.0);
     CHECK(plateau < 6'000.0);
     CHECK(heights[3] > heights[2]);
+}
+
+TEST_CASE("crust the plates carry floats as thick and as old as it is", "[planet][isostasy]") {
+    const LevelGrid grid{2, radius};
+    Lithosphere::Plate plate;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        plate.cells.push_back(cell);
+        plate.crust.emplace_back();
+    }
+    plate.crust[1].age = 50.0F;
+    plate.crust[2].age = 1'000.0F;
+    plate.crust[3] = {.type = CrustType::Continental, .thickness = 35.0F, .age = 900.0F};
+    plate.crust[4] = {.type = CrustType::Continental, .thickness = 45.0F, .age = 900.0F};
+    const auto heights = crust_heights(Lithosphere{grid, {plate}});
+    REQUIRE(heights.size() == grid.size());
+    CHECK(heights[0] == 0);
+    CHECK(heights[1] < 0);
+    CHECK(heights[2] < heights[1]);
+    CHECK_THAT(fixed_to_double(heights[2]), WithinAbs(-hog::planet::cooled_depth, 1e-3));
+    CHECK_THAT(fixed_to_double(heights[3]), WithinAbs(hog::planet::continent_freeboard, 1e-3));
+    CHECK(heights[4] > heights[3]);
+}
+
+TEST_CASE("where the plates have parted, fresh floor stands at a ridge's crest",
+          "[planet][isostasy]") {
+    const LevelGrid grid{2, radius};
+    Lithosphere::Plate plate;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        if (hog::planet::cell_center(grid.cell(cell)).z > 0.0) {
+            plate.cells.push_back(cell);
+            plate.crust.push_back({.type = CrustType::Oceanic, .thickness = 7.0F, .age = 500.0F});
+        }
+    }
+    const auto heights = crust_heights(Lithosphere{grid, {plate}});
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const bool carried = hog::planet::cell_center(grid.cell(cell)).z > 0.0;
+        CHECK(heights[cell] == (carried ? heights[plate.cells.front()] : 0));
+    }
+    CHECK(heights[plate.cells.front()] < 0);
 }
 
 TEST_CASE("water fills the lowest ground first", "[planet][isostasy]") {

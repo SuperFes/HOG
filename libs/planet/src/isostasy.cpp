@@ -2,10 +2,12 @@
 #include <hog/planet/cell_id.hpp>
 #include <hog/planet/isostasy.hpp>
 #include <hog/planet/noise.hpp>
+#include <hog/planet/projection.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <numbers>
+#include <optional>
 #include <vector>
 
 namespace hog::planet {
@@ -14,6 +16,19 @@ namespace {
 
 [[nodiscard]] std::int64_t to_fixed(double metres) {
     return std::llround(metres * static_cast<double>(fixed_one));
+}
+
+// Metres a column stands above a ridge's crest, ocean floor `cooled` of the way to its full depth.
+[[nodiscard]] std::int64_t column_height(bool continental, double thickness, double cooled) {
+    constexpr double metres_per_km = 1'000.0;
+    if (continental) {
+        return to_fixed(continent_freeboard +
+                        (continental_buoyancy * metres_per_km *
+                         (thickness - static_cast<double>(Tectonics::continental_thickness))));
+    }
+    return to_fixed((-cooled_depth * std::sqrt(cooled)) +
+                    (oceanic_buoyancy * metres_per_km *
+                     (thickness - static_cast<double>(Tectonics::oceanic_thickness))));
 }
 
 [[nodiscard]] double planet_area(const LevelGrid& grid) {
@@ -27,21 +42,27 @@ namespace {
 } // namespace
 
 std::vector<std::int64_t> crust_heights(const Tectonics& tectonics) {
-    constexpr double metres_per_km = 1'000.0;
     const auto columns = tectonics.columns();
     std::vector<std::int64_t> heights(columns.size());
     std::ranges::transform(columns, heights.begin(), [](const Tectonics::Column& column) {
-        const auto thickness = static_cast<double>(column.thickness);
-        if (column.crust == Tectonics::Crust::Continental) {
-            return to_fixed(continent_freeboard +
-                            (continental_buoyancy * metres_per_km *
-                             (thickness - static_cast<double>(Tectonics::continental_thickness))));
-        }
-        const double cooled = std::min(static_cast<double>(column.age) / cooling_steps, 1.0);
-        return to_fixed((-cooled_depth * std::sqrt(cooled)) +
-                        (oceanic_buoyancy * metres_per_km *
-                         (thickness - static_cast<double>(Tectonics::oceanic_thickness))));
+        return column_height(column.crust == Tectonics::Crust::Continental,
+                             static_cast<double>(column.thickness),
+                             std::min(static_cast<double>(column.age) / cooling_steps, 1.0));
     });
+    return heights;
+}
+
+std::vector<std::int64_t> crust_heights(const Lithosphere& lithosphere) {
+    const LevelGrid& grid = lithosphere.grid();
+    std::vector<std::int64_t> heights(grid.size());
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const std::optional<Lithosphere::Found> found =
+            lithosphere.top(cell_center(grid.cell(cell)));
+        const Crust crust = found ? found->crust : Crust{};
+        heights[cell] = column_height(
+            crust.type == CrustType::Continental, static_cast<double>(crust.thickness),
+            std::min(static_cast<double>(crust.age) / cooling_years, 1.0));
+    }
     return heights;
 }
 

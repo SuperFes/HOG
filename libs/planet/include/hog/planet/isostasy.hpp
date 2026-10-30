@@ -1,6 +1,7 @@
 #pragma once
 
 #include <hog/planet/level_grid.hpp>
+#include <hog/planet/lithosphere.hpp>
 #include <hog/planet/tectonics.hpp>
 
 #include <cstdint>
@@ -13,6 +14,8 @@ namespace hog::planet {
 // age, until it's this many steps old.
 inline constexpr double cooled_depth = 3'000.0;
 inline constexpr double cooling_steps = 60.0;
+// The same in million years, as floor stops deepening some 100 million years on.
+inline constexpr double cooling_years = 100.0;
 // Metres continental crust as thick as it settles to stands above a ridge's crest.
 inline constexpr double continent_freeboard = 3'400.0;
 // Metres a column rises for each metre it thickens, by how much lighter its crust is than the
@@ -31,6 +34,8 @@ inline constexpr double settling_turn = 1.0;
 
 // Fixed-point metres each grid cell's crust stands above the crest of a mid-ocean ridge.
 [[nodiscard]] std::vector<std::int64_t> crust_heights(const Tectonics& tectonics);
+// The same of the crust left on top by the plates, fresh floor welling up where they've parted.
+[[nodiscard]] std::vector<std::int64_t> crust_heights(const Lithosphere& lithosphere);
 
 // `heights` spread over their neighbours' as the plates bend under them.
 [[nodiscard]] std::vector<std::int64_t> flexed(const LevelGrid& grid,
