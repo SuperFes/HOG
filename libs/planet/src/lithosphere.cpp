@@ -105,6 +105,13 @@ void remove_crust(Lithosphere::Plate& plate, std::vector<std::size_t> held) {
     plate.crust.resize(kept);
 }
 
+// Lays `laid` kilometres over `crust`, `soft` of them sediment on top, burying what was on top
+// before: what sediment that leaves deeper than `hardened` is baked as hard as the rest.
+void lay(Crust& crust, float laid, float soft) {
+    crust.sediment = std::min(soft, hardened) + std::clamp(hardened - laid, 0.0F, crust.sediment);
+    crust.thickness += laid;
+}
+
 // Each cell next to the plate's crust at `cells` on its own grid not yet marked `mark`, as indices
 // into its cells, now marked.
 std::vector<std::size_t> crust_around(const Lithosphere::Plate& plate, const LevelGrid& grid,
@@ -761,11 +768,24 @@ void Lithosphere::erode(std::span<const float> worn, const std::vector<bool>& dr
         }
         Crust& land = crust_at(place);
         const float off = std::min(worn[place], land.thickness);
+        land.sediment = std::max(land.sediment - off, 0.0F);
         land.thickness -= off;
-        crust_at(sea[place]).thickness +=
+        const auto laid =
             static_cast<float>(static_cast<double>(off) * static_cast<double>(grid_.area(place)) /
                                static_cast<double>(grid_.area(sea[place])));
+        lay(crust_at(sea[place]), laid, laid);
     }
+}
+
+std::vector<float> Lithosphere::cover() const {
+    const std::vector<std::optional<Found>> on_top = tops();
+    std::vector<float> sediment(grid_.size(), 0.0F);
+    for (std::uint32_t place = 0; place < grid_.size(); ++place) {
+        if (const std::optional<Found>& found = on_top[place]) {
+            sediment[place] = found->crust.sediment;
+        }
+    }
+    return sediment;
 }
 
 DVec3 Lithosphere::to_planet(std::uint32_t plate, DVec3 own) const {
@@ -955,6 +975,7 @@ void Lithosphere::collide(double years, Ranges ranges) {
         std::uint32_t plate;
         std::size_t onto;
         float thickness;
+        float sediment;
     };
     std::vector<Pile> piles;
     std::vector<std::optional<std::pair<std::uint32_t, std::size_t>>> unders;
@@ -985,13 +1006,17 @@ void Lithosphere::collide(double years, Ranges ranges) {
             const auto share =
                 static_cast<float>(static_cast<double>(grid_.area(carrier.cells[index])) /
                                    static_cast<double>(grid_.area(plates_[over].cells[onto])));
-            piles.push_back({.plate = over, .onto = onto, .thickness = crust.thickness * share});
+            piles.push_back({.plate = over,
+                             .onto = onto,
+                             .thickness = crust.thickness * share,
+                             .sediment = crust.sediment * share});
             scraped[plate].push_back(index);
         }
     }
     for (const Pile& pile : piles) {
         Crust& crust = plates_[pile.plate].crust[pile.onto];
-        crust.thickness += pile.thickness;
+        // Thrust over it, its own sediment on top.
+        lay(crust, pile.thickness, pile.sediment);
         crust.raised = 0.0F;
     }
     for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {

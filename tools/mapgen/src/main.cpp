@@ -303,8 +303,9 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
                 const auto heights =
                     hog::planet::flexed(grid, hog::planet::crust_heights(lithosphere));
                 const std::int64_t level = hog::planet::sea_level(grid, heights, water);
-                lithosphere.erode(hog::planet::worn_down(grid, heights, level, step_years),
-                                  hog::planet::drowned(heights, level));
+                lithosphere.erode(
+                    hog::planet::worn_down(grid, heights, level, step_years, lithosphere.cover()),
+                    hog::planet::drowned(heights, level));
                 lithosphere.weld(step_years);
                 lithosphere.warm(step_years, mantle);
                 lithosphere.rift(step_years);

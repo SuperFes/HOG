@@ -67,12 +67,16 @@ std::vector<std::int64_t> crust_heights(const Lithosphere& lithosphere) {
 }
 
 std::vector<float> worn_down(const LevelGrid& grid, std::span<const std::int64_t> heights,
-                             std::int64_t sea_level, double years) {
+                             std::int64_t sea_level, double years, std::span<const float> cover) {
     HOG_ASSERT(heights.size() == grid.size(), "one height to each cell");
+    HOG_ASSERT(cover.size() == grid.size(), "one cover to each cell");
     constexpr double metres_per_km = 1'000.0;
-    // Wearing off h kilometres lowers the land by buoyancy * h, so its height over the ground
-    // around falls as e^(-buoyancy * denudation * years).
-    const double share = 1.0 - std::exp(-continental_buoyancy * denudation * years);
+    constexpr double buoyancy = continental_buoyancy;
+    // Wearing off r kilometres lowers the land by buoyancy * r, so its height h over the ground
+    // around falls as e^(-buoyancy * denudation * years), the faster while it's sediment.
+    const auto wearing = [](double above, double rate, double time) {
+        return above / buoyancy * (1.0 - std::exp(-buoyancy * denudation * rate * time));
+    };
     std::vector<float> worn(heights.size());
     for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
         std::int64_t base = heights[cell];
@@ -81,7 +85,17 @@ std::vector<float> worn_down(const LevelGrid& grid, std::span<const std::int64_t
         }
         base = std::max(base, sea_level);
         const double above = std::max(fixed_to_double(heights[cell] - base), 0.0) / metres_per_km;
-        worn[cell] = static_cast<float>(above * share / continental_buoyancy);
+        const auto soft = static_cast<double>(cover[cell]);
+        if (above <= 0.0 || buoyancy * soft >= above) {
+            worn[cell] = static_cast<float>(wearing(above, softness, years));
+            continue;
+        }
+        // How long its sediment lasts, and the rock under it wears down after.
+        const double stripped =
+            -std::log(1.0 - (buoyancy * soft / above)) / (buoyancy * denudation * softness);
+        worn[cell] = static_cast<float>(
+            stripped >= years ? wearing(above, softness, years)
+                              : soft + wearing(above - (buoyancy * soft), 1.0, years - stripped));
     }
     return worn;
 }

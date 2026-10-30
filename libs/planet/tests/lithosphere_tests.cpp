@@ -608,7 +608,12 @@ TEST_CASE("what wears off a continent is laid down on the nearest crust under th
         const double z = hog::planet::cell_center(grid.cell(carrier.cells[index])).z;
         if (crust.type == CrustType::Continental) {
             CHECK(crust.thickness == continent.thickness - 1.0F);
-        } else if (z < 0.8) {
+        } else {
+            // All laid down as sediment.
+            CHECK_THAT(static_cast<double>(crust.sediment),
+                       WithinAbs(static_cast<double>(crust.thickness - Crust{}.thickness), 1e-5));
+        }
+        if (crust.type == CrustType::Oceanic && z < 0.8) {
             // Too far from the coast for any to reach.
             CHECK(crust.thickness == Crust{}.thickness);
         }
@@ -618,6 +623,48 @@ TEST_CASE("what wears off a continent is laid down on the nearest crust under th
     const Lithosphere shelved = worn_off(0.95);
     CHECK_THAT(volume(shelved, CrustType::Continental), WithinRel(land, 1e-6));
     CHECK(volume(shelved, CrustType::Oceanic) == floor);
+}
+
+TEST_CASE("a continent's sediment wears off before the rock under it", "[planet][lithosphere]") {
+    const LevelGrid grid{3, radius};
+    Lithosphere::Plate plate = everywhere(grid, Crust{}, DVec3{0.0, 0.0, 1.0}, 0.0);
+    std::vector<bool> drowned(grid.size(), true);
+    Crust covered = continent;
+    covered.sediment = 0.5F;
+    plate.crust[0] = covered;
+    drowned[0] = false;
+    Lithosphere lithosphere{grid, {plate}};
+    REQUIRE(lithosphere.cover()[0] == 0.5F);
+    lithosphere.erode(std::vector<float>(grid.size(), 0.25F), drowned);
+    CHECK(lithosphere.plates()[0].crust[0].sediment == 0.25F);
+    lithosphere.erode(std::vector<float>(grid.size(), 1.0F), drowned);
+    CHECK(lithosphere.plates()[0].crust[0].sediment == 0.0F);
+    CHECK(lithosphere.plates()[0].crust[0].thickness == continent.thickness - 1.25F);
+}
+
+TEST_CASE("sediment buried under a range is baked as hard as the rock around it",
+          "[planet][lithosphere]") {
+    const Lithosphere bare = continental_halves();
+    std::vector<Lithosphere::Plate> plates{bare.plates().begin(), bare.plates().end()};
+    for (auto& plate : plates) {
+        for (Crust& crust : plate.crust) {
+            crust.sediment = 4.0F;
+        }
+    }
+    Lithosphere lithosphere{bare.grid(), plates};
+    lithosphere.advance(20.0);
+    lithosphere.collide(20.0, {.flow = 0.0F});
+    int piled = 0;
+    for (const auto& plate : lithosphere.plates()) {
+        for (const Crust& crust : plate.crust) {
+            if (crust.thickness > continent.thickness) {
+                ++piled;
+                // Only what was thrust on top is left soft.
+                CHECK(crust.sediment < 6.0F);
+            }
+        }
+    }
+    CHECK(piled > 0);
 }
 
 TEST_CASE("a range spreads into the continent around it", "[planet][lithosphere]") {

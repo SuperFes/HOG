@@ -27,9 +27,15 @@ struct Crust {
     // Millions of years since it formed, and since it was last piled up into a range.
     float age = 0.0F;
     float raised = 0.0F;
+    // Kilometres of it on top laid down as sediment, softer than the rock under it.
+    float sediment = 0.0F;
 
     friend bool operator==(const Crust&, const Crust&) = default;
 };
+
+// Kilometres deep sediment is buried before it's baked into rock as hard as the crust under it,
+// as it's heated past some 300 degrees.
+inline constexpr float hardened = 10.0F;
 
 // Of two crusts over one place, whether `one` stays on top of `other`: continents float over ocean
 // floor, young warm floor over old cold floor, and the thicker of two continents over the thinner.
@@ -172,11 +178,13 @@ public:
     // the crust over it, piling that up into a range, which then settles over `years` as
     // `ranges` says.
     void collide(double years, Ranges ranges = {});
-    // Wears `worn` kilometres off the continent on top at each place of the grid, down to none,
-    // laying it down as sediment on the crust nearest it under the sea, `drowned`, volume for
-    // volume: on its own continent's shelf, building it out, or past that on ocean floor, which
-    // carries it off to a trench in time.
+    // Wears `worn` kilometres off the continent on top at each place of the grid, its sediment
+    // first, down to none, laying it down as sediment on the crust nearest it under the sea,
+    // `drowned`, volume for volume: on its own continent's shelf, building it out, or past that
+    // on ocean floor, which carries it off to a trench in time.
     void erode(std::span<const float> worn, const std::vector<bool>& drowned);
+    // Kilometres of sediment on top over each place of the grid.
+    [[nodiscard]] std::vector<float> cover() const;
     // Turns every plate as the forces on it now move it against the mantle's drag and each
     // other's where they close, all at once, as nothing so slow carries momentum. The first time,
     // the drag is set so the plates keep the pace they had, and it stays so after. A slab pulls

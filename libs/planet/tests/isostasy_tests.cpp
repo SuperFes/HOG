@@ -138,7 +138,8 @@ TEST_CASE("land wears down by how far it stands over the ground around it", "[pl
     const std::uint32_t coast = grid.neighbors(low).front();
     const std::uint32_t flat = grid.neighbors(peak).front();
     const std::int64_t sea = 0;
-    const auto worn = worn_down(grid, heights, sea, 0.01);
+    const std::vector<float> bare(grid.size(), 0.0F);
+    const auto worn = worn_down(grid, heights, sea, 0.01, bare);
     CHECK(worn[low] == 0.0F);
     CHECK(worn[flat] == 0.0F);
     CHECK_THAT(static_cast<double>(worn[peak]), WithinAbs(denudation * 0.01, 1e-5));
@@ -146,8 +147,37 @@ TEST_CASE("land wears down by how far it stands over the ground around it", "[pl
     CHECK_THAT(static_cast<double>(worn[coast]),
                WithinAbs(2.0 * static_cast<double>(worn[peak]), 1e-6));
     // Given long enough, as much as brings it down to the sea, and no more.
-    const auto ages = worn_down(grid, heights, sea, 1e6);
+    const auto ages = worn_down(grid, heights, sea, 1e6, bare);
     CHECK_THAT(static_cast<double>(ages[coast]), WithinAbs(2.0 / continental_buoyancy, 1e-4));
+}
+
+TEST_CASE("sediment wears faster than the rock under it, and then the rock as ever",
+          "[planet][isostasy]") {
+    using hog::planet::continental_buoyancy;
+    using hog::planet::denudation;
+    using hog::planet::softness;
+    using hog::planet::worn_down;
+    // A plateau 2 km over the sea, with one peak a kilometre higher.
+    const LevelGrid grid{2, radius};
+    std::vector<std::int64_t> heights(grid.size(), 2'000 * fixed_one);
+    constexpr std::uint32_t peak = 0;
+    heights[peak] = 3'000 * fixed_one;
+    const auto worn = [&](float sediment, double years) {
+        std::vector<float> cover(grid.size(), 0.0F);
+        cover[peak] = sediment;
+        return static_cast<double>(worn_down(grid, heights, 0, years, cover)[peak]);
+    };
+    const double rock = worn(0.0F, 0.01);
+    CHECK_THAT(worn(5.0F, 0.01), WithinAbs(softness * rock, 1e-4));
+    // A thin cover wears off quickly, and then the rock under it as it would have.
+    const double thin = worn(0.01F, 10.0);
+    CHECK(thin > worn(0.0F, 10.0));
+    CHECK(thin < worn(5.0F, 10.0));
+    CHECK_THAT(rock, WithinAbs(denudation * 0.01, 1e-5));
+    // Given long enough, as much as brings it down to the ground around, and no more.
+    for (const float sediment : {0.0F, 0.01F, 5.0F}) {
+        CHECK_THAT(worn(sediment, 1e6), WithinAbs(1.0 / continental_buoyancy, 1e-4));
+    }
 }
 
 TEST_CASE("water fills the lowest ground first", "[planet][isostasy]") {
