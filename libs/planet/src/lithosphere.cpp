@@ -1176,16 +1176,23 @@ void Lithosphere::bend(double radius) {
     each(jobs_, static_cast<std::uint32_t>(plates_.size()), 1,
          [&](std::uint32_t index, std::uint32_t /*thread*/) {
              Plate& plate = plates_[index];
+             const std::vector<double> stiff = stiffness_of(plate, radius);
+             const std::vector<double> alone = sinking_alone(grid_, plate.cells, stiff);
              std::vector<double> loads(plate.crust.size());
-             std::ranges::transform(plate.crust, loads.begin(), [](const Crust& crust) {
+             for (std::size_t cell = 0; cell < plate.crust.size(); ++cell) {
+                 Crust& crust = plate.crust[cell];
+                 const auto holding = static_cast<float>(1.0 - alone[cell]);
+                 if (holding < crust.holding) {
+                     crust.sunk *= holding / crust.holding;
+                 }
+                 crust.holding = holding;
                  const double buoyancy =
                      crust.type == CrustType::Continental ? continental_buoyancy : oceanic_buoyancy;
-                 return (1.0 - buoyancy) * metres_per_km *
-                        static_cast<double>(crust.thickness -
-                                            crust.borne.value_or(crust.thickness));
-             });
-             const std::vector<double> bent =
-                 deflected(grid_, plate.cells, loads, stiffness_of(plate, radius));
+                 loads[cell] =
+                     (1.0 - buoyancy) * metres_per_km *
+                     static_cast<double>(crust.thickness - crust.borne.value_or(crust.thickness));
+             }
+             const std::vector<double> bent = deflected(grid_, plate.cells, loads, stiff);
              for (std::size_t cell = 0; cell < plate.crust.size(); ++cell) {
                  Crust& crust = plate.crust[cell];
                  crust.sunk += static_cast<float>((bent[cell] - loads[cell]) / metres_per_km);
