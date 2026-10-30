@@ -259,7 +259,8 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
         mantle.hotter = *options.tectonics.hotter;
     }
     const auto& grid = tectonics.grid();
-    const std::vector<hog::planet::Plume> plumes = hog::planet::plumes(config.seed, config.radius);
+    const std::vector<hog::planet::Plume> plumes =
+        hog::planet::plumes(config.seed, config.radius, {.count = config.plumes});
     double water = hog::planet::starting_water(grid);
     std::vector<hog::mapgen::Image> relief;
     std::vector<hog::mapgen::Image> plates;

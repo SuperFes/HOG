@@ -23,22 +23,15 @@ namespace {
 
 using namespace std::string_view_literals;
 
-constexpr std::array known_keys{"seed"sv,
-                                "ocean_fraction"sv,
-                                "population"sv,
-                                "settled_density"sv,
-                                "wilderness_factor"sv,
-                                "radius_km"sv,
-                                "day_hours"sv,
-                                "axial_tilt"sv,
-                                "river_scale"sv,
-                                "plates"sv,
-                                "erosion_cell"sv,
-                                "generator"sv};
+constexpr std::array known_keys{
+    "seed"sv,      "ocean_fraction"sv, "population"sv, "settled_density"sv, "wilderness_factor"sv,
+    "radius_km"sv, "day_hours"sv,      "axial_tilt"sv, "river_scale"sv,     "plates"sv,
+    "plumes"sv,    "erosion_cell"sv,   "generator"sv};
 
 constexpr double min_day_hours = 0.01;
 constexpr double max_day_hours = 24.0 * 366.0;
 constexpr double max_river_scale = 20.0;
+constexpr double max_plumes = 1'000.0;
 constexpr double min_erosion_cell = 50.0;
 constexpr double max_erosion_cell = 5'000.0;
 
@@ -128,6 +121,20 @@ constexpr double max_erosion_cell = 5'000.0;
     return {};
 }
 
+[[nodiscard]] Result<void> parse_plumes(const toml::table& planet, PlanetConfig& config) {
+    const auto plumes = optional_number(planet, "plumes");
+    if (!plumes) {
+        return std::unexpected(plumes.error());
+    }
+    const double count = plumes->value_or(config.plumes);
+    // Written so NaN fails too.
+    if (count < 0.0 || count > max_plumes || count != std::floor(count)) {
+        return invalid("planet.plumes must be a whole number from 0 to 1000");
+    }
+    config.plumes = static_cast<int>(count);
+    return {};
+}
+
 [[nodiscard]] Result<void> parse_generator(const toml::table& planet, PlanetConfig& config) {
     const auto node = planet["generator"];
     if (!node) {
@@ -209,7 +216,7 @@ Result<PlanetConfig> parse_planet_config(std::string_view text) {
     config.seed = static_cast<std::uint64_t>(seed->get());
 
     using Parse = Result<void> (*)(const toml::table&, PlanetConfig&);
-    for (const Parse parse : {parse_ocean, parse_rivers, parse_plates, parse_erosion,
+    for (const Parse parse : {parse_ocean, parse_rivers, parse_plates, parse_plumes, parse_erosion,
                               parse_calendar, parse_generator, parse_system}) {
         if (auto read = parse(*planet, config); !read) {
             return std::unexpected(read.error());
@@ -274,10 +281,14 @@ std::uint64_t world_id(const PlanetConfig& config) noexcept {
         config.plates == PlanetConfig{}.plates
             ? rivers
             : hash_combine(rivers, static_cast<std::uint64_t>(config.plates));
+    const std::uint64_t plumes =
+        config.plumes == PlanetConfig{}.plumes
+            ? plates
+            : hash_combine(plates, static_cast<std::uint64_t>(config.plumes));
     const std::uint64_t erosion =
         config.erosion_cell == PlanetConfig{}.erosion_cell
-            ? plates
-            : hash_combine(plates, std::bit_cast<std::uint64_t>(config.erosion_cell));
+            ? plumes
+            : hash_combine(plumes, std::bit_cast<std::uint64_t>(config.erosion_cell));
     const std::uint64_t generator =
         config.generator == Generator::Stamped
             ? erosion

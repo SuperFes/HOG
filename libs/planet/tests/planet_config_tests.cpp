@@ -87,6 +87,15 @@ TEST_CASE("a config breaks the crust into plates", "[planet][config]") {
     CHECK(config->plates == 24);
 }
 
+TEST_CASE("a config raises plumes under the plates only when asked", "[planet][config]") {
+    const auto plain = parse_planet_config("[planet]\nseed = 0\nradius_km = 1\n");
+    REQUIRE(plain.has_value());
+    CHECK(plain->plumes == 0);
+    const auto config = parse_planet_config("[planet]\nseed = 0\nradius_km = 1\nplumes = 40\n");
+    REQUIRE(config.has_value());
+    CHECK(config->plumes == 40);
+}
+
 TEST_CASE("a config picks how the ground is made", "[planet][config]") {
     const auto plain = parse_planet_config("[planet]\nseed = 0\nradius_km = 1\n");
     REQUIRE(plain.has_value());
@@ -157,6 +166,14 @@ TEST_CASE("bad configs are rejected with a reason", "[planet][config]") {
              "plates"},
         Case{"[planet]\nseed = 1\nradius_km = 5\nplates = 2.5", ErrorCode::InvalidArgument,
              "plates"},
+        Case{"[planet]\nseed = 1\nradius_km = 5\nplumes = -1", ErrorCode::InvalidArgument,
+             "plumes"},
+        Case{"[planet]\nseed = 1\nradius_km = 5\nplumes = 1001", ErrorCode::InvalidArgument,
+             "plumes"},
+        Case{"[planet]\nseed = 1\nradius_km = 5\nplumes = 2.5", ErrorCode::InvalidArgument,
+             "plumes"},
+        Case{"[planet]\nseed = 1\nradius_km = 5\nplumes = nan", ErrorCode::InvalidArgument,
+             "plumes"},
         Case{"[planet]\nseed = 1\nradius_km = 5\ngenerator = \"v3\"", ErrorCode::InvalidArgument,
              "generator"},
         Case{"[planet]\nseed = 1\nradius_km = 5\ngenerator = 2", ErrorCode::InvalidArgument,
@@ -203,6 +220,9 @@ TEST_CASE("a world's id follows what shapes its ground", "[planet][config]") {
     CHECK(hog::planet::world_id(other) != id);
     other = base;
     other.plates = 11;
+    CHECK(hog::planet::world_id(other) != id);
+    other = base;
+    other.plumes = 40;
     CHECK(hog::planet::world_id(other) != id);
     other = base;
     other.erosion_cell = 300.0;

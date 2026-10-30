@@ -33,6 +33,8 @@ struct PlanetConfig {
     double river_scale = 1.0;
     // How many plates the crust is broken into.
     int plates = 10;
+    // How many plumes rise from deep in the mantle under the plates; Earth has some 40.
+    int plumes = 0;
     // Metres between the cells rivers wear the land on: finer wears finer valleys, and takes
     // longer and more memory to evolve. Cells are a power of two to a cube face, so this is the
     // most they're made, and never finer than a 1,024th of a face.
@@ -50,8 +52,8 @@ struct PlanetConfig {
 
 // Identifies a world by what shapes its ground, so state saved for one is never loaded into
 // another. Day length and tilt only move the sun, so they can change under a running world. A
-// river scale of 1, ten plates, 150 m erosion cells, the v1 generator and Earth's system leave the
-// id as it was before those could be set.
+// river scale of 1, ten plates, no plumes, 150 m erosion cells, the v1 generator and Earth's
+// system leave the id as it was before those could be set.
 [[nodiscard]] std::uint64_t world_id(const PlanetConfig& config) noexcept;
 
 // Reads a [planet] table:
@@ -64,6 +66,7 @@ struct PlanetConfig {
 //     wilderness_factor = 3.0   # optional, with population
 //     river_scale = 1.0         # optional, above 0 and at most 20
 //     plates = 10               # optional, 2 to 64
+//     plumes = 0                # optional, 0 to 1000
 //     erosion_cell = 150.0      # optional, metres, 50 to 5000
 //     generator = "v1"          # optional, "v1" or "v2"
 //     day_hours = 4.0           # optional
