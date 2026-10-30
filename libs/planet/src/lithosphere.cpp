@@ -1015,14 +1015,14 @@ std::vector<Plume> plumes(std::uint64_t seed, double radius, const Plumes& setti
     constexpr double earth_radius = 6.371e6;
     constexpr std::uint64_t salt = 0x706c756d65ULL;
     const double size = radius / earth_radius;
-    const auto count = static_cast<std::size_t>(std::lround(settings.count * size * size));
+    const auto count = static_cast<std::size_t>(settings.count);
     std::vector<Plume> rising(count);
     for (std::size_t index = 0; index < count; ++index) {
         const double buoyancy =
             settings.weakest * std::pow(settings.strongest / settings.weakest,
                                         unit(hash_values(seed, salt, index, 1U)));
         rising[index] = {.at = direction(hash_values(seed, salt, index, 0U)),
-                         .magma = buoyancy * settings.magma};
+                         .magma = buoyancy * settings.magma * size * size};
     }
     return rising;
 }

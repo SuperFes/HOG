@@ -404,14 +404,19 @@ TEST_CASE("an arc's lava buried deep is baked into crystalline rock", "[planet][
     CHECK(raised > 0);
 }
 
-TEST_CASE("plumes rise anywhere, more under a bigger planet, each as buoyant as its own",
+TEST_CASE("plumes rise anywhere, each as buoyant as its own, bringing more under a bigger planet",
           "[planet][lithosphere]") {
     using hog::planet::plumes;
     constexpr double earth = 6.371e6;
     const hog::planet::Plumes plumes_of;
     const auto rising = plumes(7, earth);
     CHECK(rising.size() == static_cast<std::size_t>(plumes_of.count));
-    CHECK(plumes(7, 2.0 * earth).size() == 4 * rising.size());
+    const auto bigger = plumes(7, 2.0 * earth);
+    REQUIRE(bigger.size() == rising.size());
+    for (std::size_t index = 0; index < rising.size(); ++index) {
+        CHECK(bigger[index].at == rising[index].at);
+        CHECK_THAT(bigger[index].magma, WithinRel(4.0 * rising[index].magma, 1e-12));
+    }
     CHECK(plumes(7, earth) == rising);
     CHECK(plumes(8, earth) != rising);
     double north = 0.0;

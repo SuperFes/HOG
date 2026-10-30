@@ -81,11 +81,13 @@ struct Plume {
     friend bool operator==(const Plume&, const Plume&) = default;
 };
 
-// How plumes rise: `count` under a planet of Earth's size, more under a bigger one by its area,
-// each as buoyant as from `weakest` to `strongest` megagrams a second, evenly by logarithm,
-// bringing up `magma` cubic kilometres every million years for each (Sleep 1990, Hawaii's at 0.2
-// cubic kilometres a year). `erupted` of it comes out as lava on top and the rest sets inside,
-// some two to one under ocean islands (White, Crisp & Spera 2006).
+// How plumes rise: `count` of them, each as buoyant as from `weakest` to `strongest` megagrams a
+// second, evenly by logarithm, bringing up `magma` cubic kilometres every million years for each
+// under a planet of Earth's size (Sleep 1990, Hawaii's at 0.2 cubic kilometres a year). Plates
+// turn as fast as Earth's whatever the planet's size, so a plume brings as much for its share of
+// the surface as there, and more under a bigger planet by its area. `erupted` of it comes out as
+// lava on top and the rest sets inside, some two to one under ocean islands (White, Crisp & Spera
+// 2006).
 struct Plumes {
     int count = 40;
     double weakest = 0.3;
