@@ -301,14 +301,62 @@ struct Stretch {
     double strong = 0.0;
 };
 
-// How many times harder than it holds a plate turning at `turn` is pulled apart along the line
-// whose plane faces `facing`, with `pushed` the torque on the side it faces: what the other side
-// puts on that one to keep it turning with the plate, against how strong the line is where that
-// pulls it apart. Tension t at a place p on the line puts -t (p x facing) on the side. Across a
-// plate from edge to edge it's taken as even along the line. A line on the plate all the way
-// round can't hold so, as its levers cancel, but by pulling on one side and pushing on the
-// other: the least tension that does varies along it as p x facing does.
-double pulled(std::span<const Stretch> stretches, DVec3 turn, DVec3 pushed, DVec3 facing) {
+// Each cell of a plate of `lithosphere` as a line across the plate meets it, cells of continent
+// as strong as the mantle under them is cool.
+std::vector<Stretch> stretches_of(const Lithosphere& lithosphere, std::uint32_t plate,
+                                  const Forces& forces, Strength strength) {
+    const LevelGrid& grid = lithosphere.grid();
+    double sphere = 0.0;
+    for (std::uint32_t place = 0; place < grid.size(); ++place) {
+        sphere += static_cast<double>(grid.area(place));
+    }
+    const Lithosphere::Plate& carrier = lithosphere.plates()[plate];
+    const double softer = lithosphere.softer();
+    std::vector<Stretch> stretches(carrier.cells.size());
+    for (std::size_t index = 0; index < stretches.size(); ++index) {
+        const std::uint32_t cell = carrier.cells[index];
+        const bool continental = carrier.crust[index].type == CrustType::Continental;
+        Stretch& stretch = stretches[index];
+        stretch.at = lithosphere.to_planet(plate, cell_center(grid.cell(cell)));
+        const double share = static_cast<double>(grid.area(cell)) / sphere;
+        stretch.drag = (continental ? forces.keel : 1.0) * place_drag(stretch.at, share);
+        stretch.across = std::sqrt(4.0 * std::numbers::pi * share);
+        if (continental) {
+            const float heat = lithosphere.heat()[grid.index(cell_at(stretch.at, grid.level()))];
+            stretch.strong = strength.cool * std::pow(strength.warm / strength.cool, heat) / softer;
+        } else {
+            // Floor thickens as it cools, as its slab's pull grows.
+            const auto age = static_cast<double>(carrier.crust[index].age);
+            stretch.strong =
+                strength.ocean * std::sqrt(std::min(age, forces.mature) / forces.mature) / softer;
+        }
+    }
+    return stretches;
+}
+
+// A whole plate as the forces on it turn it: the mantle's drag on it, the torque on it, and the
+// turn the one gives against the other.
+struct Load {
+    glm::dmat3 drag{0.0};
+    DVec3 torque{0.0};
+    DVec3 turn{0.0};
+};
+
+// How a line across a plate is pulled apart: how many times harder than it holds, and how fast,
+// on the whole along it, its two sides would part on their own against unit drag.
+struct Pull {
+    double ratio = 0.0;
+    double opening = 0.0;
+};
+
+// How a plate under `whole` is pulled apart along the line whose plane faces `facing`, with
+// `pushed` the torque on the side it faces: what the other side puts on that one to keep it
+// turning with the plate, against how strong the line is where that pulls it apart. Tension t at
+// a place p on the line puts -t (p x facing) on the side. Across a plate from edge to edge it's
+// taken as even along the line. A line on the plate all the way round can't hold so, as its
+// levers cancel, but by pulling on one side and pushing on the other: the least tension that
+// does varies along it as p x facing does.
+Pull pulled(std::span<const Stretch> stretches, const Load& whole, DVec3 pushed, DVec3 facing) {
     const DVec3 first = glm::normalize(
         glm::cross(facing, std::abs(facing.x) < 0.9 ? DVec3{1.0, 0.0, 0.0} : DVec3{0.0, 1.0, 0.0}));
     const DVec3 second = glm::cross(facing, first);
@@ -340,21 +388,21 @@ double pulled(std::span<const Stretch> stretches, DVec3 turn, DVec3 pushed, DVec
         }
     }
     if (round.empty()) {
-        return 0.0;
+        return {};
     }
     std::ranges::sort(round);
     double gap = round.front() + (2.0 * std::numbers::pi) - round.back();
     for (std::size_t index = 1; index < round.size(); ++index) {
         gap = std::max(gap, round[index] - round[index - 1]);
     }
-    const DVec3 needed = pushed - (held * turn);
+    const DVec3 needed = pushed - (held * whole.turn);
     // Tension at a place as c . (p x facing), plus `even` all along.
     DVec3 c{0.0};
     double even = 0.0;
     const double det = (xx * yy) - (xy * xy);
     if (gap > 2.0 * widest) {
         if (glm::dot(levers, levers) == 0.0) {
-            return 0.0;
+            return {};
         }
         even = glm::dot(needed, levers) / glm::dot(levers, levers);
     } else if (det > 0.0) {
@@ -362,10 +410,18 @@ double pulled(std::span<const Stretch> stretches, DVec3 turn, DVec3 pushed, DVec
         const double by = glm::dot(needed, second);
         c = ((((yy * bx) - (xy * by)) / det) * first) + ((((xx * by) - (xy * bx)) / det) * second);
     } else {
-        return 0.0;
+        return {};
     }
+    // Each side turning on its own as the forces on it would turn it.
+    const glm::dmat3 rest = whole.drag - held;
+    const DVec3 parting =
+        glm::determinant(held) != 0.0 && glm::determinant(rest) != 0.0
+            ? (glm::inverse(held) * pushed) - (glm::inverse(rest) * (whole.torque - pushed))
+            : DVec3{0.0};
     double pulling = 0.0;
     double holds = 0.0;
+    double opening = 0.0;
+    double length = 0.0;
     for (const Stretch& stretch : stretches) {
         if (!on_line(stretch)) {
             continue;
@@ -374,9 +430,15 @@ double pulled(std::span<const Stretch> stretches, DVec3 turn, DVec3 pushed, DVec
         if (tension > 0.0) {
             pulling += tension * stretch.across;
             holds += stretch.strong * stretch.across;
+            opening +=
+                std::max(glm::dot(glm::cross(parting, stretch.at), facing), 0.0) * stretch.across;
+            length += stretch.across;
         }
     }
-    return holds > 0.0 ? pulling / holds : 0.0;
+    if (holds == 0.0) {
+        return {};
+    }
+    return {.ratio = pulling / holds, .opening = opening / length};
 }
 
 struct Facing {
@@ -566,7 +628,7 @@ bool stays_over(const Crust& one, const Crust& other) noexcept {
 
 Lithosphere::Lithosphere(LevelGrid grid, std::vector<Plate> plates)
     : grid_{std::move(grid)}, plates_{std::move(plates)}, bounds_(plates_.size()),
-      slabs_(plates_.size()), heat_(grid_.size(), 0.0F) {
+      slabs_(plates_.size()), rifts_(plates_.size()), heat_(grid_.size(), 0.0F) {
     for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
         const Plate& carrier = plates_[plate];
         HOG_ASSERT(carrier.cells.size() == carrier.crust.size(), "one crust to each cell");
@@ -1042,20 +1104,34 @@ void Lithosphere::warm(double years, Mantle mantle) {
     softer_ = std::exp(mantle.activation / gas * ((1.0 / mantle.potential) - (1.0 / now)));
 }
 
-void Lithosphere::rift(const Forces& forces, Strength strength) {
+void Lithosphere::rift(double years, const Forces& forces, Strength strength) {
     const std::vector<Boundary> edges = boundaries();
     hang(edges);
     const std::vector<std::vector<Push>> found = pushes(edges, forces, strength);
     const auto count = static_cast<std::uint32_t>(plates_.size());
-    std::vector<std::optional<DVec3>> lines(count);
+    std::vector<std::optional<Line>> lines(count);
     each(jobs_, count, 1, [&](std::uint32_t plate, std::uint32_t /*thread*/) {
-        lines[plate] = weakest(plate, found[plate], forces, strength);
+        const std::optional<Rift>& under = rifts_[plate];
+        lines[plate] =
+            rifting(plate, found[plate], forces, strength,
+                    under ? std::optional{to_planet(plate, under->facing)} : std::nullopt);
     });
     for (std::uint32_t plate = 0; plate < count; ++plate) {
-        const std::optional<DVec3>& facing = lines[plate];
-        if (!facing) {
+        const std::optional<Line>& line = lines[plate];
+        if (!line) {
+            rifts_[plate].reset();
             continue;
         }
+        std::optional<Rift>& under = rifts_[plate];
+        if (!line->going || !under) {
+            under = Rift{.facing = to_plate(plate, line->facing), .stretch = 0.0};
+        }
+        // As fast as its sides would part, but for what the line still holds back.
+        under->stretch += pace_ * line->opening * (1.0 - (1.0 / line->pull)) * years;
+        if (under->stretch < breakup) {
+            continue;
+        }
+        rifts_[plate].reset();
         const Plate& carrier = plates_[plate];
         Plate kept{.frame = carrier.frame,
                    .pole = carrier.pole,
@@ -1065,7 +1141,7 @@ void Lithosphere::rift(const Forces& forces, Strength strength) {
         Plate parted_off = kept;
         for (std::size_t index = 0; index < carrier.cells.size(); ++index) {
             const DVec3 at = to_planet(plate, cell_center(grid_.cell(carrier.cells[index])));
-            Plate& side = glm::dot(at, *facing) > 0.0 ? kept : parted_off;
+            Plate& side = glm::dot(at, line->facing) > 0.0 ? kept : parted_off;
             side.cells.push_back(carrier.cells[index]);
             side.crust.push_back(carrier.crust[index]);
         }
@@ -1073,85 +1149,79 @@ void Lithosphere::rift(const Forces& forces, Strength strength) {
         std::vector<Slab> slabs_parted_off;
         for (const Slab& slab : slabs_[plate]) {
             const DVec3 at = to_planet(plate, cell_center(grid_.cell(slab.cell)));
-            (glm::dot(at, *facing) > 0.0 ? slabs_kept : slabs_parted_off).push_back(slab);
+            (glm::dot(at, line->facing) > 0.0 ? slabs_kept : slabs_parted_off).push_back(slab);
         }
         plates_[plate] = std::move(kept);
         plates_.push_back(std::move(parted_off));
         slabs_[plate] = std::move(slabs_kept);
         slabs_.push_back(std::move(slabs_parted_off));
+        rifts_.emplace_back();
         bounds_.emplace_back();
         bound(plate);
         bound(static_cast<std::uint32_t>(plates_.size() - 1));
     }
 }
 
-std::optional<DVec3> Lithosphere::weakest(std::uint32_t plate, std::span<const Push> pushes,
-                                          const Forces& forces, Strength strength) const {
-    double sphere = 0.0;
-    for (std::uint32_t place = 0; place < grid_.size(); ++place) {
-        sphere += static_cast<double>(grid_.area(place));
-    }
-    const Plate& carrier = plates_[plate];
-    std::vector<Stretch> stretches(carrier.cells.size());
+std::optional<Lithosphere::Line> Lithosphere::rifting(std::uint32_t plate,
+                                                      std::span<const Push> pushes,
+                                                      const Forces& forces, Strength strength,
+                                                      std::optional<DVec3> under_way) const {
+    const std::vector<Stretch> stretches = stretches_of(*this, plate, forces, strength);
     glm::dmat3 drag{0.0};
     std::optional<std::size_t> warmest;
     float most = 0.0F;
     for (std::size_t index = 0; index < stretches.size(); ++index) {
-        const std::uint32_t cell = carrier.cells[index];
-        const bool continental = carrier.crust[index].type == CrustType::Continental;
-        Stretch& stretch = stretches[index];
-        stretch.at = to_planet(plate, cell_center(grid_.cell(cell)));
-        const double share = static_cast<double>(grid_.area(cell)) / sphere;
-        stretch.drag = (continental ? forces.keel : 1.0) * place_drag(stretch.at, share);
-        drag += stretch.drag;
-        stretch.across = std::sqrt(4.0 * std::numbers::pi * share);
-        // Floor thickens as it cools, as its slab's pull grows.
-        const auto age = static_cast<double>(carrier.crust[index].age);
-        stretch.strong =
-            strength.ocean * std::sqrt(std::min(age, forces.mature) / forces.mature) / softer_;
-        if (continental) {
-            const float heat = heat_[grid_.index(cell_at(stretch.at, grid_.level()))];
-            stretch.strong =
-                strength.cool * std::pow(strength.warm / strength.cool, heat) / softer_;
-            if (!warmest || heat > most) {
-                warmest = index;
-                most = heat;
-            }
+        drag += stretches[index].drag;
+        if (plates_[plate].crust[index].type != CrustType::Continental) {
+            continue;
+        }
+        const float heat = heat_[grid_.index(cell_at(stretches[index].at, grid_.level()))];
+        if (!warmest || heat > most) {
+            warmest = index;
+            most = heat;
         }
     }
     if (!warmest || glm::determinant(drag) == 0.0) {
         return std::nullopt;
     }
-    DVec3 torque{0.0};
+    Load whole{.drag = drag, .torque = DVec3{0.0}, .turn = DVec3{0.0}};
     for (const Push& push : pushes) {
-        torque += glm::cross(push.at, push.force);
+        whole.torque += glm::cross(push.at, push.force);
     }
-    const DVec3 turn = glm::inverse(drag) * torque;
-    // Lines through the warmest mantle, so many ways round.
-    constexpr int ways = 12;
-    const DVec3 middle = stretches[*warmest].at;
-    const DVec3 east = glm::normalize(
-        glm::cross(middle, std::abs(middle.x) < 0.9 ? DVec3{1.0, 0.0, 0.0} : DVec3{0.0, 1.0, 0.0}));
-    const DVec3 north = glm::cross(middle, east);
-    // Only a line pulled harder than it holds splits.
-    double hardest = 1.0;
-    std::optional<DVec3> split;
-    for (int way = 0; way < ways; ++way) {
-        const double angle = std::numbers::pi * way / ways;
-        const DVec3 facing = (std::cos(angle) * east) + (std::sin(angle) * north);
+    whole.turn = glm::inverse(drag) * whole.torque;
+    const auto along = [&](DVec3 facing) {
         DVec3 pushed{0.0};
         for (const Push& push : pushes) {
             if (glm::dot(push.at, facing) > 0.0) {
                 pushed += glm::cross(push.at, push.force);
             }
         }
-        const double pull = pulled(stretches, turn, pushed, facing);
-        if (pull > hardest) {
-            hardest = pull;
-            split = facing;
+        return pulled(stretches, whole, pushed, facing);
+    };
+    if (under_way) {
+        if (const Pull pull = along(*under_way); pull.ratio > 1.0) {
+            return Line{
+                .facing = *under_way, .pull = pull.ratio, .opening = pull.opening, .going = true};
         }
     }
-    return split;
+    // Lines through the warmest mantle, so many ways round.
+    constexpr int ways = 12;
+    const DVec3 middle = stretches[*warmest].at;
+    const DVec3 east = glm::normalize(
+        glm::cross(middle, std::abs(middle.x) < 0.9 ? DVec3{1.0, 0.0, 0.0} : DVec3{0.0, 1.0, 0.0}));
+    const DVec3 north = glm::cross(middle, east);
+    // Only a line pulled harder than it holds rifts.
+    std::optional<Line> hardest;
+    for (int way = 0; way < ways; ++way) {
+        const double angle = std::numbers::pi * way / ways;
+        const DVec3 facing = (std::cos(angle) * east) + (std::sin(angle) * north);
+        const Pull pull = along(facing);
+        if (pull.ratio > (hardest ? hardest->pull : 1.0)) {
+            hardest =
+                Line{.facing = facing, .pull = pull.ratio, .opening = pull.opening, .going = false};
+        }
+    }
+    return hardest;
 }
 
 void Lithosphere::weld(double years) {
@@ -1206,12 +1276,14 @@ void Lithosphere::drop_bare() {
             plates_[kept] = std::move(plates_[plate]);
             bounds_[kept] = bounds_[plate];
             slabs_[kept] = std::move(slabs_[plate]);
+            rifts_[kept] = rifts_[plate];
         }
         ++kept;
     }
     plates_.resize(kept);
     bounds_.resize(kept);
     slabs_.resize(kept);
+    rifts_.resize(kept);
 }
 
 void Lithosphere::take_in(std::uint32_t plate, std::uint32_t from) {
@@ -1237,6 +1309,7 @@ void Lithosphere::take_in(std::uint32_t plate, std::uint32_t from) {
         slabs_[plate].push_back(slab);
     }
     slabs_[from].clear();
+    rifts_[from].reset();
     plates_[from].cells.clear();
     plates_[from].crust.clear();
     plates_[from].rate = 0.0;

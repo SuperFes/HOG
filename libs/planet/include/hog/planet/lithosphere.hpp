@@ -180,11 +180,13 @@ public:
     // Warms and cools the mantle under each place by the crust on top over `years`, and sets how
     // hot it is on the whole as of now.
     void warm(double years, Mantle mantle = {});
-    // Splits each plate carrying continent along the line through the warmest mantle under its
-    // continent that the forces on it pull apart hardest against how strong it is there, if they
-    // pull harder than that. The part across the line becomes a new plate, turning as the other
-    // until the plates are next driven.
-    void rift(const Forces& forces = {}, Strength strength = {});
+    // Stretches each plate carrying continent over `years` along the line through the warmest
+    // mantle under its continent that the forces on it pull apart hardest against how strong it
+    // is there, if they pull harder than that: as fast as its two sides would part, but for what
+    // the line still holds back. A rift goes on stretching along its line while pulled apart, and
+    // fails once it isn't. Stretched `breakup`, it splits the plate: the part across the line
+    // becomes a new plate, turning as the other until the plates are next driven.
+    void rift(double years, const Forces& forces = {}, Strength strength = {});
     // Plates that turn so alike that over `years` they'd move less than half a place against each
     // other anywhere along their edge are one plate but in name, as a microplate is captured once
     // what drove it dies, and weld into one, the plate with less crust taken into the other's
@@ -200,6 +202,9 @@ public:
     // Million years a slab hangs on, pulling, once floor stops going down it, before it breaks
     // off and sinks away, as one does some 10 to 20 million years after a collision stops it.
     static constexpr double breakoff = 15.0;
+    // Radians a rift opens, thinning the continent, before it breaks apart and floor wells up in
+    // it: about 150 km, as the Red Sea's did.
+    static constexpr double breakup = 0.025;
 
     [[nodiscard]] const LevelGrid& grid() const noexcept { return grid_; }
     [[nodiscard]] std::span<const Plate> plates() const noexcept { return plates_; }
@@ -261,10 +266,29 @@ private:
     // Floor going down a trench among `edges` now feeds the slab hanging there, in place of
     // whatever hung there before.
     void hang(std::span<const Boundary> edges);
-    // The plane, by the side it faces, of the line through the warmest mantle under a plate's
-    // continent that `pushes` on it pull apart hardest against how strong it is, if harder.
-    [[nodiscard]] std::optional<DVec3> weakest(std::uint32_t plate, std::span<const Push> pushes,
-                                               const Forces& forces, Strength strength) const;
+    // A rift under way across a plate: the plane of its line, by the side it faces, in the
+    // plate's own frame, and radians it has opened.
+    struct Rift {
+        DVec3 facing{0.0};
+        double stretch = 0.0;
+    };
+
+    // A line across a plate pulled apart: the plane of it by the side it faces, how many times
+    // harder than it holds, how fast its sides would part on their own against unit drag, and
+    // whether it's the rift under way.
+    struct Line {
+        DVec3 facing{0.0};
+        double pull = 0.0;
+        double opening = 0.0;
+        bool going = false;
+    };
+
+    // The line across a plate that `pushes` on it pull apart harder than it holds, if any: the
+    // rift `under_way` while they do, else the line through the warmest mantle under its
+    // continent they pull apart hardest.
+    [[nodiscard]] std::optional<Line> rifting(std::uint32_t plate, std::span<const Push> pushes,
+                                              const Forces& forces, Strength strength,
+                                              std::optional<DVec3> under_way) const;
     // Where in a plate's cells is the crust it carries over a unit direction, if it has any.
     [[nodiscard]] std::optional<std::size_t> held(std::uint32_t plate, DVec3 at) const;
     // Of each two plates where they meet, whether the first's crust stays over the second's of
@@ -287,6 +311,7 @@ private:
     std::vector<Plate> plates_;
     std::vector<Bound> bounds_;
     std::vector<std::vector<Slab>> slabs_;
+    std::vector<std::optional<Rift>> rifts_;
     double time_ = 0.0;
     std::vector<float> heat_;
     // Of the turn the forces give a plate against unit drag, the share it takes; none until the

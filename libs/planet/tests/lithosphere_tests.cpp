@@ -1107,23 +1107,33 @@ Lithosphere warm_cap(double hotter = 0.0, float age = 100.0F) {
 
 constexpr Strength weak{.cool = 0.02, .warm = 0.01, .ocean = 0.02};
 
+// Million years, long enough for any rift pulled apart to break.
+constexpr double long_enough = 1e4;
+
+// The plates driven, then rifted for as long as any rift pulled apart takes to break.
+void rifted(Lithosphere& lithosphere, Strength strength = {}) {
+    lithosphere.drive({}, strength);
+    lithosphere.rift(long_enough, {}, strength);
+}
+
 } // namespace
 
 TEST_CASE("a plate splits over a warm mantle only where pulled harder than it holds",
           "[planet][lithosphere]") {
     Lithosphere strong = warm_cap();
-    strong.rift();
+    rifted(strong);
     CHECK(strong.plates().size() == 1);
 
     // Cool, the mantle pushes nothing, however weak the plate.
     const Lithosphere warmed = warm_cap();
     Lithosphere cool{warmed.grid(), {warmed.plates().begin(), warmed.plates().end()}};
-    cool.rift({}, weak);
+    rifted(cool, weak);
     CHECK(cool.plates().size() == 1);
 
     Lithosphere split = warm_cap();
+    split.drive({}, weak);
     const Lithosphere::Plate whole = split.plates().front();
-    split.rift({}, weak);
+    split.rift(long_enough, {}, weak);
     REQUIRE(split.plates().size() == 2);
     // Each part keeps its crust where it was, turning as the whole did, and some continent.
     std::vector<std::uint32_t> cells;
@@ -1159,31 +1169,60 @@ TEST_CASE("a plate covering the planet splits only where pulled harder than it h
         return lithosphere;
     };
     Lithosphere strong = covering();
-    strong.rift();
+    strong.rift(long_enough);
     CHECK(strong.plates().size() == 1);
     Lithosphere split = covering();
-    split.rift({}, weak);
+    split.rift(long_enough, {}, weak);
     CHECK(split.plates().size() == 2);
 }
 
 TEST_CASE("young ocean floor, as thin as it is, holds less than old", "[planet][lithosphere]") {
     constexpr Strength middling{.cool = 0.2, .warm = 0.1, .ocean = 0.2};
     Lithosphere old_floor = warm_cap();
-    old_floor.rift({}, middling);
+    rifted(old_floor, middling);
     CHECK(old_floor.plates().size() == 1);
     Lithosphere young_floor = warm_cap(0.0, 1.0F);
-    young_floor.rift({}, middling);
+    rifted(young_floor, middling);
     CHECK(young_floor.plates().size() == 2);
+}
+
+TEST_CASE("a rift breaks once it has opened far enough, and fails once no longer pulled apart",
+          "[planet][lithosphere]") {
+    constexpr int never = 1'000;
+    // Steps of `years` a rift is pulled apart until it breaks, but for one holding fast after
+    // `held` of them.
+    const auto steps = [](double years, int held) {
+        Lithosphere lithosphere = warm_cap();
+        lithosphere.drive({}, weak);
+        for (int step = 1; step < never; ++step) {
+            lithosphere.rift(years, {}, step == held + 1 ? Strength{} : weak);
+            if (lithosphere.plates().size() > 1) {
+                return step;
+            }
+        }
+        return never;
+    };
+    // Steps short enough that it takes a few.
+    double years = 1.0;
+    int straight = 1;
+    while (straight < 4 && years > 1e-30) {
+        years /= 10.0;
+        straight = steps(years, never);
+    }
+    REQUIRE(straight >= 4);
+    REQUIRE(straight < never);
+    // A failed rift starts again from nothing.
+    CHECK(steps(years, straight / 2) == straight + (straight / 2) + 1);
 }
 
 TEST_CASE("a plate that holds over today's mantle splits over a young hotter one",
           "[planet][lithosphere]") {
     constexpr Strength middling{.cool = 0.2, .warm = 0.1, .ocean = 0.2};
     Lithosphere today = warm_cap();
-    today.rift({}, middling);
+    rifted(today, middling);
     CHECK(today.plates().size() == 1);
     Lithosphere young = warm_cap(200.0);
-    young.rift({}, middling);
+    rifted(young, middling);
     CHECK(young.plates().size() == 2);
 }
 
@@ -1198,7 +1237,7 @@ TEST_CASE("each plate's crust is found wherever it lies, through splits and weld
         lithosphere.weld(step_years);
         lithosphere.warm(step_years);
         const std::size_t before = lithosphere.plates().size();
-        lithosphere.rift({}, weak);
+        lithosphere.rift(long_enough, {}, weak);
         split = split || lithosphere.plates().size() > before;
         lithosphere.drive();
     }
@@ -1228,7 +1267,7 @@ TEST_CASE("plates come out the same however many threads share the work", "[plan
             lithosphere.spread();
             lithosphere.weld(step_years);
             lithosphere.warm(step_years);
-            lithosphere.rift({}, weak);
+            lithosphere.rift(long_enough, {}, weak);
             lithosphere.drive();
         }
         lithosphere.share_work(nullptr);
