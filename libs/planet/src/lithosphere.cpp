@@ -1358,9 +1358,50 @@ void Lithosphere::strike(std::span<const Impact> impacts, Craters craters) {
     }
 }
 
-void Lithosphere::collide(Ranges ranges) {
-    // A cell of continent goes under once its middle lies under another plate's, and all of it
-    // is piled onto the cell over that.
+std::vector<std::optional<std::pair<std::uint32_t, std::size_t>>>
+Lithosphere::going_under(std::uint32_t plate, const std::vector<bool>& overrides) const {
+    const Plate& carrier = plates_[plate];
+    const auto cells = static_cast<std::uint32_t>(carrier.cells.size());
+    std::vector<std::optional<std::pair<std::uint32_t, std::size_t>>> unders(cells);
+    each(jobs_, cells, places_per_job, [&](std::uint32_t index, std::uint32_t /*thread*/) {
+        const Crust& crust = carrier.crust[index];
+        if (crust.type != CrustType::Continental) {
+            return;
+        }
+        const DVec3 at = to_planet(plate, cell_center(grid_.cell(carrier.cells[index])));
+        const std::optional<std::uint32_t> over = overlying(plate, crust.type, at, overrides);
+        const std::optional<std::size_t> onto = over ? held(*over, at) : std::nullopt;
+        if (over && onto) {
+            unders[index].emplace(*over, *onto);
+        }
+    });
+    return unders;
+}
+
+std::vector<std::size_t> Lithosphere::along_fault(std::uint32_t plate, std::uint32_t over, DVec3 at,
+                                                  double reach, std::size_t onto) const {
+    const DVec3 closing = velocity(plate, at) - velocity(over, at);
+    const double length = glm::length(closing);
+    if (length <= 0.0) {
+        return {onto};
+    }
+    const DVec3 way = closing / length;
+    const double across = std::sqrt(4.0 * std::numbers::pi / static_cast<double>(grid_.size()));
+    std::vector<std::size_t> cells(
+        static_cast<std::size_t>(std::max(std::ceil(2.0 * reach / across), 1.0)));
+    for (std::size_t step = 0; step < cells.size(); ++step) {
+        const double along =
+            reach * (static_cast<double>(step) + 0.5) / static_cast<double>(cells.size());
+        cells[step] = held(over, glm::normalize((at * std::cos(along)) + (way * std::sin(along))))
+                          .value_or(onto);
+    }
+    return cells;
+}
+
+void Lithosphere::collide(Ranges ranges, LowerCrust lower) {
+    constexpr double earth_radius_km = 6'371.0;
+    constexpr double degrees = std::numbers::pi / 180.0;
+    // A cell of continent goes under once its middle lies under another plate's.
     const std::vector<bool> overrides = overriding();
     std::vector<std::vector<std::size_t>> scraped(plates_.size());
     struct Pile {
@@ -1368,51 +1409,62 @@ void Lithosphere::collide(Ranges ranges) {
         std::size_t onto;
         float thickness;
         Cover cover;
+        bool beneath = false;
     };
     std::vector<Pile> piles;
-    std::vector<std::optional<std::pair<std::uint32_t, std::size_t>>> unders;
     for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
         const Plate& carrier = plates_[plate];
-        const auto cells = static_cast<std::uint32_t>(carrier.cells.size());
-        unders.assign(cells, std::nullopt);
-        each(jobs_, cells, places_per_job, [&](std::uint32_t index, std::uint32_t /*thread*/) {
-            const Crust& crust = carrier.crust[index];
-            if (crust.type != CrustType::Continental) {
-                return;
-            }
-            const DVec3 at = to_planet(plate, cell_center(grid_.cell(carrier.cells[index])));
-            const std::optional<std::uint32_t> over = overlying(plate, crust.type, at, overrides);
-            const std::optional<std::size_t> onto = over ? held(*over, at) : std::nullopt;
-            if (over && onto) {
-                unders[index].emplace(*over, *onto);
-            }
-        });
-        for (std::uint32_t index = 0; index < cells; ++index) {
+        const auto unders = going_under(plate, overrides);
+        for (std::size_t index = 0; index < unders.size(); ++index) {
             const std::optional<std::pair<std::uint32_t, std::size_t>>& under = unders[index];
             if (!under) {
                 continue;
             }
             const Crust& crust = carrier.crust[index];
             const auto [over, onto] = *under;
+            const Plate& top = plates_[over];
+            const auto from = static_cast<double>(grid_.area(carrier.cells[index]));
             // Volume for volume, between cells of the same grid in different places.
-            const auto share =
-                static_cast<float>(static_cast<double>(grid_.area(carrier.cells[index])) /
-                                   static_cast<double>(grid_.area(plates_[over].cells[onto])));
+            const auto share = [&](std::size_t to) {
+                return static_cast<float>(from / static_cast<double>(grid_.area(top.cells[to])));
+            };
+            const float brittle = std::min(crust.thickness, static_cast<float>(lower.brittle));
             Cover cover = crust.cover;
             for (float& layer : cover) {
-                layer *= share;
+                layer *= share(onto);
             }
-            piles.push_back({.plate = over,
-                             .onto = onto,
-                             .thickness = crust.thickness * share,
-                             .cover = cover});
+            piles.push_back(
+                {.plate = over, .onto = onto, .thickness = brittle * share(onto), .cover = cover});
             scraped[plate].push_back(index);
+            const float warm = crust.thickness - brittle;
+            if (warm <= 0.0F) {
+                continue;
+            }
+            // Down to the base of the crust on top, in Earth's lengths as the crust's thickness is.
+            const double reach = static_cast<double>(top.crust[onto].thickness) /
+                                 std::tan(static_cast<double>(ranges.dip) * degrees) /
+                                 earth_radius_km;
+            const std::vector<std::size_t> fault = along_fault(
+                plate, over, to_planet(plate, cell_center(grid_.cell(carrier.cells[index]))), reach,
+                onto);
+            for (const std::size_t under_it : fault) {
+                piles.push_back(
+                    {.plate = over,
+                     .onto = under_it,
+                     .thickness = warm / static_cast<float>(fault.size()) * share(under_it),
+                     .cover = {},
+                     .beneath = true});
+            }
         }
     }
     for (const Pile& pile : piles) {
         Crust& crust = plates_[pile.plate].crust[pile.onto];
-        // Thrust over it, its own soft rock on top.
-        lay(crust, pile.thickness, pile.cover);
+        // Thrust over it, its own soft rock on top, or under it, leaving its top as it was.
+        if (pile.beneath) {
+            crust.thickness += pile.thickness;
+        } else {
+            lay(crust, pile.thickness, pile.cover);
+        }
         crust.raised = 0.0F;
     }
     for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {

@@ -693,7 +693,41 @@ TEST_CASE("continents meeting pile up into a range on the one on top", "[planet]
         }
     }
     CHECK(piled > 0);
-    CHECK(thickest(lithosphere) >= 2.0F * continent.thickness * 0.9F);
+    const auto brittle = static_cast<float>(hog::planet::LowerCrust{}.brittle);
+    CHECK(thickest(lithosphere) >= (continent.thickness + brittle) * 0.9F);
+}
+
+TEST_CASE("continent going under has its warm crust thrust on beneath the plate on top",
+          "[planet][lithosphere]") {
+    Lithosphere moved = continental_halves();
+    moved.advance(20.0);
+    const double volume = continental_volume(moved);
+    const auto& grid = moved.grid();
+    // How far into the plate on top its crust thickens, as an angle from where they meet.
+    const auto inland = [&](float dip) {
+        Lithosphere lithosphere = moved;
+        lithosphere.collide({.strongest = 1'000.0F, .dip = dip});
+        CHECK_THAT(continental_volume(lithosphere), WithinRel(volume, 1e-5));
+        const Lithosphere::Plate& top = lithosphere.plates()[0];
+        double farthest = -1.0;
+        for (std::size_t index = 0; index < top.cells.size(); ++index) {
+            const DVec3 at =
+                lithosphere.to_planet(0, hog::planet::cell_center(grid.cell(top.cells[index])));
+            if (at.y < 0.0 && top.crust[index].thickness > continent.thickness) {
+                farthest = std::max(farthest, std::asin(at.z));
+            }
+        }
+        return farthest;
+    };
+    // A fault dipping a degree reaches the base of 35 km of crust some 2,000 km in.
+    constexpr double earth_radius_km = 6'371.0;
+    const double reach = static_cast<double>(continent.thickness) /
+                         std::tan(std::numbers::pi / 180.0) / earth_radius_km;
+    const double across = std::sqrt(4.0 * std::numbers::pi / static_cast<double>(grid.size()));
+    const double steep = inland(hog::planet::Ranges{}.dip);
+    const double shallow = inland(1.0F);
+    CHECK(shallow - steep > reach - (2.0 * across));
+    CHECK(shallow - steep < reach + across);
 }
 
 TEST_CASE("crust piled too thick flows out into the thinner continent around it",

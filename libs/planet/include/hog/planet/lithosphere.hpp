@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace hog::jobs {
@@ -76,9 +77,12 @@ struct Arcs {
 // How continental crust piled up into ranges bears its own weight: past `strongest` kilometres
 // it flows out at once into the thinner crust around it, a wedge spreading out over ocean floor
 // as over continent and burying it, its dense root foundering into the mantle only where the plate
-// has no room left at all. Short of that, its lower crust creeps out under it.
+// has no room left at all. Short of that, its lower crust creeps out under it. Crust going under
+// is thrust beneath the plate on top along a fault dipping `dip` degrees, as the Main Himalayan
+// Thrust does (Nabelek et al. 2009).
 struct Ranges {
     float strongest = 65.0F;
+    float dip = 10.0F;
 };
 
 // A plume rising from deep in the mantle, fixed under the plates as they move over it, and the
@@ -291,9 +295,12 @@ public:
     // Ocean floor lying under another plate's crust dives into the mantle and is gone, and the
     // plate over it thickens into an arc behind the trench.
     void subduct(double years, Arcs arcs = {});
-    // Continental crust lying under another plate's is too light to dive: it's scraped off onto
-    // the crust over it, piling that up into a range, which bears what it can as `ranges` says.
-    void collide(Ranges ranges = {});
+    // Continental crust lying under another plate's is too light to dive: its brittle rock is
+    // scraped off onto the crust over it, piling that up into a range, and the warm crust under
+    // that, which flows rather than breaks as `lower` says, is thrust on beneath the plate on top
+    // the way the two close, laid under its crust evenly as far as the fault takes to reach its
+    // base. The range bears what it can as `ranges` says.
+    void collide(Ranges ranges = {}, LowerCrust lower = {});
     // Builds the crust on top over each of `plumes` up by the magma it brings over `years`, laid
     // along the track its plate carried over it meanwhile: a plate moving on fast leaves a chain
     // of islands behind, and one standing still a pile.
@@ -455,6 +462,16 @@ private:
                                               std::optional<DVec3> under_way) const;
     // Where in a plate's cells is the crust it carries over a unit direction, if it has any.
     [[nodiscard]] std::optional<std::size_t> held(std::uint32_t plate, DVec3 at) const;
+    // For each of a plate's cells, the plate whose crust lies over its continent, as `overrides`
+    // says, and where in that plate's cells, if any.
+    [[nodiscard]] std::vector<std::optional<std::pair<std::uint32_t, std::size_t>>>
+    going_under(std::uint32_t plate, const std::vector<bool>& overrides) const;
+    // Where in plate `over`'s cells a fault from a unit direction `at` runs under it for `reach`
+    // radians, the way plate `plate` closes on it, at even steps no more than half a cell apart:
+    // at `onto` where it runs past `over`'s crust or they don't close.
+    [[nodiscard]] std::vector<std::size_t> along_fault(std::uint32_t plate, std::uint32_t over,
+                                                       DVec3 at, double reach,
+                                                       std::size_t onto) const;
     // Of each two plates where they meet, whether the first's crust stays over the second's of
     // the same type, one flag to each pair in a row per plate.
     [[nodiscard]] std::vector<bool> overriding() const;
