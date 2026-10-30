@@ -964,7 +964,7 @@ TEST_CASE("plates moving as one weld into one plate whatever crust they meet wit
     CHECK(touching.plates().size() == 1);
 }
 
-TEST_CASE("continents piling up more than they can take jam and weld, however fast they close",
+TEST_CASE("continents piling up more than they can take founder, and their plates stay apart",
           "[planet][lithosphere]") {
     // A strip of thick continent along where the halves meet, with only ocean floor beyond.
     const Lithosphere ocean = halves();
@@ -981,9 +981,9 @@ TEST_CASE("continents piling up more than they can take jam and weld, however fa
         }
     }
     Lithosphere jammed = settled(Lithosphere{grid, plates}, 20.0);
-    REQUIRE(jammed.foundered() > 0.0);
+    CHECK(jammed.foundered() > 0.0);
     jammed.weld(10.0);
-    CHECK(jammed.plates().size() == 1);
+    CHECK(jammed.plates().size() == 2);
 }
 
 TEST_CASE("plates still moving, at sea or where their continents never collided, stay apart",

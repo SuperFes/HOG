@@ -7,7 +7,6 @@
 #include <cstdint>
 #include <optional>
 #include <span>
-#include <utility>
 #include <vector>
 
 namespace hog::jobs {
@@ -171,8 +170,6 @@ public:
     // Continental crust lying under another plate's is too light to dive: it's scraped off onto
     // the crust over it, piling that up into a range, which then settles over `years` as
     // `ranges` says.
-    // Plates whose collision piles up more than their continent can take, so it founders, have
-    // jammed, and weld when next welded.
     void collide(double years, Ranges ranges = {});
     // Turns every plate as the forces on it now move it against the mantle's drag and each
     // other's where they close, all at once, as nothing so slow carries momentum. The first time,
@@ -190,11 +187,9 @@ public:
     void rift(const Forces& forces = {}, Strength strength = {});
     // Plates that turn so alike that over `years` they'd move less than half a place against each
     // other anywhere along their edge are one plate but in name, as a microplate is captured once
-    // what drove it dies, and weld into one. So do plates whose continents have collided, piling
-    // up a range where they meet, that move so alike along it. The plate with less crust is taken
-    // into the other's frame, as is a plate whose collision with another has jammed, however they
-    // still move, as the range between them can take up no more of their closing. Continents that
-    // only touch, as where one has just split, stay apart while their plates still move. Plates
+    // what drove it dies, and weld into one, the plate with less crust taken into the other's
+    // frame. Plates still moving against each other anywhere along their edge stay apart, however
+    // their continents have collided: the range between them drags on both as they close. Plates
     // left with no crust, taken in or wholly dived, are gone, and those after them renumbered.
     void weld(double years);
 
@@ -299,8 +294,6 @@ private:
     double pace_ = 0.0;
     double foundered_ = 0.0;
     double softer_ = 1.0;
-    // Each two plates, lower first, whose collision has jammed since they were last welded.
-    std::vector<std::pair<std::uint32_t, std::uint32_t>> jammed_;
     jobs::JobSystem* jobs_ = nullptr;
 };
 

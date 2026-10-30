@@ -146,19 +146,11 @@ double fill(Lithosphere::Plate& plate, const LevelGrid& grid, std::span<const st
     return std::min(space, excess);
 }
 
-// What crust collapsing founders, in kilometres deep over square metres, and whether any of it
-// was piled up at cells of the plate's grid given, which then had nowhere to go.
-struct Collapse {
-    double foundered = 0.0;
-    bool jammed = false;
-};
-
 // Continental crust over `strongest` kilometres sheds what it can't hold up into the plate's
 // nearest continent with room for it, volume for volume, filling that up to `strongest` a ring of
 // cells at a time out from it. What finds no room, as along an arc between ocean floor, founders
-// into the mantle. `piled` are the cells of the plate's grid crust was piled onto, ascending.
-Collapse collapse(Lithosphere::Plate& plate, const LevelGrid& grid, float strongest,
-                  std::span<const std::uint32_t> piled) {
+// into the mantle; says how much, in kilometres deep over square metres.
+double collapse(Lithosphere::Plate& plate, const LevelGrid& grid, float strongest) {
     const auto over = [&](std::size_t index) {
         return plate.crust[index].type == CrustType::Continental &&
                plate.crust[index].thickness > strongest;
@@ -170,7 +162,7 @@ Collapse collapse(Lithosphere::Plate& plate, const LevelGrid& grid, float strong
     // Each cell marked with the overloaded crust it was last reached from, plus one.
     std::vector<std::size_t> marks(plate.crust.size(), 0);
     std::vector<bool> held(plate.crust.size(), false);
-    Collapse collapsed;
+    double foundered = 0.0;
     for (std::size_t first = 0; first < plate.crust.size(); ++first) {
         if (held[first] || !over(first)) {
             continue;
@@ -179,7 +171,6 @@ Collapse collapse(Lithosphere::Plate& plate, const LevelGrid& grid, float strong
         marks[first] = mark;
         // All the overloaded crust joined to it, held up to `strongest`, and what it held over.
         double excess = 0.0;
-        bool piled_up = false;
         std::vector<std::size_t> ring{first};
         std::vector<std::size_t> room;
         while (!ring.empty()) {
@@ -188,7 +179,6 @@ Collapse collapse(Lithosphere::Plate& plate, const LevelGrid& grid, float strong
                 excess += (static_cast<double>(crust.thickness) - most) * area(index);
                 crust.thickness = strongest;
                 held[index] = true;
-                piled_up = piled_up || std::ranges::binary_search(piled, plate.cells[index]);
             }
             const std::vector<std::size_t> around =
                 continent_around(plate, grid, ring, marks, mark);
@@ -206,10 +196,9 @@ Collapse collapse(Lithosphere::Plate& plate, const LevelGrid& grid, float strong
              ring = with_room(continent_around(plate, grid, ring, marks, mark))) {
             excess -= fill(plate, grid, ring, excess, strongest);
         }
-        collapsed.foundered += excess;
-        collapsed.jammed = collapsed.jammed || (piled_up && excess > 0.0);
+        foundered += excess;
     }
-    return collapsed;
+    return foundered;
 }
 
 // Moves what continental crust has piled over `settled` kilometres into the plate's continent
@@ -420,30 +409,19 @@ std::optional<Facing> facing(const LevelGrid& grid,
 }
 
 // Of each two plates, a row per plate, whether they move as one: slower than `slowest` against
-// each other everywhere they meet, as `speeds` says at each of the `edges`, or everywhere their
-// continents meet where a range lies along that.
+// each other everywhere they meet, as `speeds` says at each of the `edges`.
 std::vector<bool> as_one(std::span<const Boundary> edges, std::span<const double> speeds,
                          std::size_t count, double slowest) {
     std::vector<double> anywhere(count * count, -1.0);
-    std::vector<double> fastest(count * count, -1.0);
-    std::vector<bool> sutured(count * count, false);
     for (std::size_t index = 0; index < edges.size(); ++index) {
         const Boundary& edge = edges[index];
         const std::size_t pair =
             (std::min(edge.plate, edge.other) * count) + std::max(edge.plate, edge.other);
         anywhere[pair] = std::max(anywhere[pair], speeds[index]);
-        if (edge.own.type != CrustType::Continental || edge.facing.type != CrustType::Continental) {
-            continue;
-        }
-        fastest[pair] = std::max(fastest[pair], speeds[index]);
-        if (std::max(edge.own.thickness, edge.facing.thickness) > Lithosphere::settled_continent) {
-            sutured[pair] = true;
-        }
     }
     std::vector<bool> joined(count * count, false);
     for (std::size_t pair = 0; pair < joined.size(); ++pair) {
-        joined[pair] = (anywhere[pair] >= 0.0 && anywhere[pair] < slowest) ||
-                       (sutured[pair] && fastest[pair] < slowest);
+        joined[pair] = anywhere[pair] >= 0.0 && anywhere[pair] < slowest;
     }
     return joined;
 }
@@ -864,7 +842,6 @@ void Lithosphere::collide(double years, Ranges ranges) {
     const std::vector<bool> overrides = overriding();
     std::vector<std::vector<std::size_t>> scraped(plates_.size());
     struct Pile {
-        std::uint32_t from;
         std::uint32_t plate;
         std::size_t onto;
         float thickness;
@@ -898,31 +875,18 @@ void Lithosphere::collide(double years, Ranges ranges) {
             const auto share =
                 static_cast<float>(static_cast<double>(grid_.area(carrier.cells[index])) /
                                    static_cast<double>(grid_.area(plates_[over].cells[onto])));
-            piles.push_back(
-                {.from = plate, .plate = over, .onto = onto, .thickness = crust.thickness * share});
+            piles.push_back({.plate = over, .onto = onto, .thickness = crust.thickness * share});
             scraped[plate].push_back(index);
         }
     }
-    // Each plate's cells piled onto, and the plates that piled them.
-    std::vector<std::vector<std::uint32_t>> piled(plates_.size());
-    std::vector<std::vector<std::uint32_t>> piled_by(plates_.size());
     for (const Pile& pile : piles) {
         Crust& crust = plates_[pile.plate].crust[pile.onto];
         crust.thickness += pile.thickness;
         crust.raised = 0.0F;
-        piled[pile.plate].push_back(plates_[pile.plate].cells[pile.onto]);
-        piled_by[pile.plate].push_back(pile.from);
     }
     for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
         remove_crust(plates_[plate], std::move(scraped[plate]));
-        std::ranges::sort(piled[plate]);
-        const Collapse collapsed = collapse(plates_[plate], grid_, ranges.strongest, piled[plate]);
-        foundered_ += collapsed.foundered * 1e-6;
-        if (collapsed.jammed) {
-            for (const std::uint32_t from : piled_by[plate]) {
-                jammed_.emplace_back(std::min(from, plate), std::max(from, plate));
-            }
-        }
+        foundered_ += collapse(plates_[plate], grid_, ranges.strongest) * 1e-6;
         flow(plates_[plate], grid_, settled_continent,
              std::min(static_cast<float>(years) * ranges.flow, 1.0F));
     }
@@ -1201,11 +1165,7 @@ void Lithosphere::weld(double years) {
         speeds.push_back(glm::length(velocity(edge.plate, at) - velocity(edge.other, at)));
     }
     const double half_place = 0.5 * std::sqrt(4.0 * std::numbers::pi / grid_.size());
-    std::vector<bool> joined = as_one(edges, speeds, count, half_place / years);
-    for (const auto& [lower, upper] : jammed_) {
-        joined[(lower * count) + upper] = true;
-    }
-    jammed_.clear();
+    const std::vector<bool> joined = as_one(edges, speeds, count, half_place / years);
     // Plates welded together, each by the one its crust goes to: the one with most cells.
     std::vector<std::uint32_t> into(count);
     for (std::uint32_t plate = 0; plate < count; ++plate) {
