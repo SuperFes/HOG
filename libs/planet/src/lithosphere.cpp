@@ -806,12 +806,10 @@ void Lithosphere::drive(Forces forces, Strength strength) {
         glm::dmat3 spread{0.0};
         for (std::size_t index = 0; index < carrier.cells.size(); ++index) {
             const DVec3 at = to_planet(plate, cell_center(grid_.cell(carrier.cells[index])));
-            const glm::dmat3 across =
-                (static_cast<double>(grid_.area(carrier.cells[index])) / sphere) *
-                (glm::dmat3{1.0} - glm::outerProduct(at, at));
-            spread += across;
-            drag +=
-                (carrier.crust[index].type == CrustType::Continental ? forces.keel : 1.0) * across;
+            const double share = static_cast<double>(grid_.area(carrier.cells[index])) / sphere;
+            spread += share * (glm::dmat3{1.0} - glm::outerProduct(at, at));
+            drag += (carrier.crust[index].type == CrustType::Continental ? forces.keel : 1.0) *
+                    place_drag(at, share);
         }
         if (glm::determinant(drag) != 0.0) {
             turns[plate] = glm::inverse(drag) * torques[plate];
@@ -896,8 +894,7 @@ std::optional<DVec3> Lithosphere::weakest(std::uint32_t plate, std::span<const P
         Stretch& stretch = stretches[index];
         stretch.at = to_planet(plate, cell_center(grid_.cell(cell)));
         const double share = static_cast<double>(grid_.area(cell)) / sphere;
-        stretch.drag = (continental ? forces.keel : 1.0) * share *
-                       (glm::dmat3{1.0} - glm::outerProduct(stretch.at, stretch.at));
+        stretch.drag = (continental ? forces.keel : 1.0) * place_drag(stretch.at, share);
         drag += stretch.drag;
         stretch.across = std::sqrt(4.0 * std::numbers::pi * share);
         stretch.strong = strength.ocean / softer_;
@@ -1080,6 +1077,12 @@ std::optional<Lithosphere::Found> Lithosphere::top(DVec3 at) const {
         }
     }
     return top;
+}
+
+glm::dmat3 place_drag(DVec3 at, double share) noexcept {
+    // A disc of radius r drags as its area by r^2 / 2 spinning; its r^2 is 4 share in radians.
+    const glm::dmat3 radial = glm::outerProduct(at, at);
+    return share * ((glm::dmat3{1.0} - radial) + (2.0 * share * radial));
 }
 
 Lithosphere lithosphere_from(const Tectonics& tectonics, double step_years) {

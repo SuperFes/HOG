@@ -275,6 +275,12 @@ private:
     jobs::JobSystem* jobs_ = nullptr;
 };
 
+// How the mantle drags on a place at unit direction `at`, `share` of the sphere, against its
+// plate's turn about the planet's middle, in drag on the whole sphere moving at unit speed: as
+// it's carried along, and as it spins about its own middle, as a disc does, so even a plate of a
+// place or two can't spin unhindered.
+[[nodiscard]] glm::dmat3 place_drag(DVec3 at, double share) noexcept;
+
 // The plates and crust of `tectonics` as they stand, each plate's frame the planet's, with one of
 // its steps taken as `step_years` million years.
 [[nodiscard]] Lithosphere lithosphere_from(const Tectonics& tectonics, double step_years);

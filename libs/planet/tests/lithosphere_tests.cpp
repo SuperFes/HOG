@@ -761,6 +761,18 @@ TEST_CASE("the mantle drags harder on plates carrying continent", "[planet][lith
     CHECK_THAT(without(), WithinRel(lead(false), 1e-6));
 }
 
+TEST_CASE("the mantle drags on a place as it's carried and as it spins", "[planet][lithosphere]") {
+    const DVec3 at = glm::normalize(DVec3{1.0, 2.0, 3.0});
+    const DVec3 along = glm::normalize(glm::cross(at, DVec3{0.0, 0.0, 1.0}));
+    constexpr double share = 1e-3;
+    const glm::dmat3 drag = hog::planet::place_drag(at, share);
+    // Carried along at unit speed, as its share of the sphere.
+    CHECK_THAT(glm::dot(along, drag * along), WithinRel(share, 1e-12));
+    // Spun about its middle, as a disc of 4 share square radians, by its radius squared over two.
+    CHECK_THAT(glm::dot(at, drag * at), WithinRel(share * 2.0 * share, 1e-12));
+    CHECK(glm::determinant(drag) > 0.0);
+}
+
 TEST_CASE("plates slide off the dome a warm mantle lifts", "[planet][lithosphere]") {
     // The halves slide past each other about z, so their edges neither pull nor push, with a
     // continent across their edge around -y warming the mantle under it.
