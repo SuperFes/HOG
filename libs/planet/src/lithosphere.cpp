@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <iterator>
@@ -136,6 +137,17 @@ void bury(Crust& crust) {
             return point / length;
         }
     }
+}
+
+// Takes `off` kilometres off the top of `crust`, its cover first.
+void strip(Crust& crust, float off) {
+    float left = off;
+    for (float& layer : crust.cover) {
+        const float taken = std::min(layer, left);
+        layer -= taken;
+        left -= taken;
+    }
+    crust.thickness -= off;
 }
 
 // Lays `laid` kilometres over `crust`, `soft` of them on top, burying what was on top before:
@@ -808,13 +820,7 @@ void Lithosphere::erode(std::span<const float> worn, const std::vector<bool>& dr
         }
         Crust& land = crust_at(place);
         const float off = std::min(worn[place], land.thickness);
-        float left = off;
-        for (float& layer : land.cover) {
-            const float taken = std::min(layer, left);
-            layer -= taken;
-            left -= taken;
-        }
-        land.thickness -= off;
+        strip(land, off);
         const auto laid =
             static_cast<float>(static_cast<double>(off) * static_cast<double>(grid_.area(place)) /
                                static_cast<double>(grid_.area(sea[place])));
@@ -1055,6 +1061,78 @@ void Lithosphere::feed(std::span<const Plume> plumes, double years, const Plumes
             crust.cover[volcanic_rock] += thicker * settings.erupted;
             bury(crust);
             crust.thickness += thicker;
+        }
+    }
+}
+
+std::vector<Impact> impacts(std::uint64_t seed, double ago, double years, double smallest,
+                            const Impacts& settings) {
+    constexpr double earth_km = 6'371.0;
+    constexpr double years_per_billion = 1'000.0;
+    constexpr std::uint64_t salt = 0x696d70616374ULL;
+    // Over the years since, the heavy bombardment's share as if it were so many more years.
+    const double falling = settings.falling / years_per_billion;
+    const double heavy =
+        settings.heavy / falling * (std::exp(falling * (ago + years)) - std::exp(falling * ago));
+    const double expected = settings.rate * 4.0 * std::numbers::pi * earth_km * earth_km *
+                            (years + heavy) *
+                            std::pow(smallest * earth_km / settings.smallest, -settings.slope);
+    const std::uint64_t when = hash_values(seed, salt, std::bit_cast<std::uint64_t>(ago));
+    // As many as strike by then, waiting for each in turn.
+    std::vector<Impact> struck;
+    double waited = -std::log1p(-unit(hash_values(when, 0U, 0U)));
+    for (std::uint64_t index = 0; waited < expected; ++index) {
+        struck.push_back({.at = direction(hash_values(when, index, 1U)),
+                          .diameter = smallest * std::pow(1.0 - unit(hash_values(when, index, 2U)),
+                                                          -1.0 / settings.slope)});
+        waited -= std::log1p(-unit(hash_values(when, index + 1, 0U)));
+    }
+    return struck;
+}
+
+void Lithosphere::strike(std::span<const Impact> impacts, Craters craters) {
+    constexpr double earth_km = 6'371.0;
+    const std::vector<std::optional<Found>> on_top = tops();
+    const auto crust_at = [&](std::uint32_t place) -> Crust& {
+        const std::uint32_t plate = on_top[place]->plate;
+        return plates_[plate].crust[held(plate, cell_center(grid_.cell(place))).value_or(0)];
+    };
+    std::vector<double> apart(grid_.size());
+    for (const Impact& impact : impacts) {
+        const double transient = std::pow(
+            impact.diameter * earth_km * std::pow(craters.simple, 0.13) / 1.17, 1.0 / 1.13);
+        const double deepest = craters.excavated * transient;
+        const double rim = transient / 2.0 / earth_km;
+        double dug = 0.0;
+        double around = 0.0;
+        for (std::uint32_t place = 0; place < grid_.size(); ++place) {
+            if (!on_top[place]) {
+                continue;
+            }
+            const DVec3 at = cell_center(grid_.cell(place));
+            apart[place] =
+                std::atan2(glm::length(glm::cross(at, impact.at)), glm::dot(at, impact.at));
+            const auto area = static_cast<double>(grid_.area(place));
+            if (apart[place] < rim) {
+                const double out = apart[place] / rim;
+                Crust& crust = crust_at(place);
+                const float off =
+                    std::min(static_cast<float>(deepest * (1.0 - (out * out))), crust.thickness);
+                strip(crust, off);
+                dug += static_cast<double>(off) * area;
+            } else {
+                around += area * std::pow(rim / apart[place], 3.0);
+            }
+        }
+        if (dug <= 0.0 || around <= 0.0) {
+            continue;
+        }
+        for (std::uint32_t place = 0; place < grid_.size(); ++place) {
+            if (on_top[place] && apart[place] >= rim) {
+                const auto laid =
+                    static_cast<float>(dug * std::pow(rim / apart[place], 3.0) / around);
+                lay(crust_at(place), laid, Cover{laid});
+            }
         }
     }
 }

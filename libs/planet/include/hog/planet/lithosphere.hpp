@@ -100,6 +100,44 @@ struct Plumes {
 [[nodiscard]] std::vector<Plume> plumes(std::uint64_t seed, double radius,
                                         const Plumes& settings = {});
 
+// A body striking the planet: where, and the rim-to-rim diameter of the crater it leaves, in
+// radians of the planet's circumference.
+struct Impact {
+    DVec3 at{0.0, 0.0, 1.0}; // unit, in the planet's frame
+    double diameter = 0.0;
+
+    friend bool operator==(const Impact&, const Impact&) = default;
+};
+
+// How often bodies strike, as on Earth for its share of the surface: `rate` craters of at least
+// `smallest` kilometres across on each square kilometre every million years (Grieve & Shoemaker
+// 1994), smaller ones more often by about the square of their size, and long ago more often
+// still by 1 + heavy e^(falling T), T billions of years ago, as the Moon's craters were made
+// (Neukum, Ivanov & Hartmann 2001): the heavy bombardment, over by some 3.5 billion years ago.
+struct Impacts {
+    double rate = 5.6e-9;
+    double smallest = 20.0;
+    double slope = 2.0;
+    double heavy = 4.5e-10;
+    double falling = 6.93;
+};
+
+// The craters at least `smallest` radians across left on a world of `seed` over the `years`
+// million years up to `ago` million years before the present, striking anywhere alike.
+[[nodiscard]] std::vector<Impact> impacts(std::uint64_t seed, double ago, double years,
+                                          double smallest, const Impacts& settings = {});
+
+// How a crater is dug, sized as on a planet of Earth's size. Before its walls slump into the
+// crater left, it's a transient crater (D_tc / km)^1.13 = D (`simple` / km)^0.13 / 1.17 across, D
+// the crater's own diameter and `simple` the widest crater left a simple bowl (McKinnon & Schenk
+// 1985), some 4 km in crystalline rock. Rock is thrown out of it from `excavated` of its width
+// deep at its middle, less out to its rim as a bowl (Melosh 1989), and laid all around as loose
+// ejecta, thinning as the cube of the distance past the rim (McGetchin, Settle & Head 1973).
+struct Craters {
+    double simple = 4.0;
+    double excavated = 0.1;
+};
+
 // How the mantle warms where continents lie over it, as their thick crust holds its heat in, and
 // cools again under ocean floor, which lets it out: over `years`, each place goes the share
 // 1 - e^(-years / settling) of the way to fully warm or cool. The whole mantle starts `hotter`
@@ -223,6 +261,9 @@ public:
     // along the track its plate carried over it meanwhile: a plate moving on fast leaves a chain
     // of islands behind, and one standing still a pile.
     void feed(std::span<const Plume> plumes, double years, const Plumes& settings = {});
+    // Digs the crater of each of `impacts` into the crust on top, its cover first, and lays what's
+    // thrown out of it around it, volume for volume.
+    void strike(std::span<const Impact> impacts, Craters craters = {});
     // Wears `worn` kilometres off the continent on top at each place of the grid, its cover
     // first, down to none, laying it down as sediment on the crust nearest it under the sea,
     // `drowned`, volume for volume: on its own continent's shelf, building it out, or past that

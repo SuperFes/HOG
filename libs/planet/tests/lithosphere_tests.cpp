@@ -13,6 +13,7 @@
 #include <limits>
 #include <numbers>
 #include <optional>
+#include <span>
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
@@ -469,6 +470,90 @@ TEST_CASE("a plume builds the crust over it up along the track its plate carries
     // Standing still, all in one place; moving on, strung out behind.
     CHECK(fed(0.0) == 1);
     CHECK(fed(0.02) > 2);
+}
+
+TEST_CASE("bodies strike anywhere, smaller ones more often, and far more often long ago",
+          "[planet][lithosphere]") {
+    using hog::planet::impacts;
+    constexpr double earth_km = 6'371.0;
+    const hog::planet::Impacts rates;
+    const double twenty = 20.0 / earth_km;
+    const auto struck = impacts(7, 0.0, 100.0, twenty);
+    const double expected = rates.rate * 4.0 * std::numbers::pi * earth_km * earth_km * 100.0;
+    CHECK(std::abs(static_cast<double>(struck.size()) - expected) < 5.0 * std::sqrt(expected));
+    DVec3 middle{0.0};
+    for (const hog::planet::Impact& impact : struck) {
+        CHECK(impact.diameter >= twenty);
+        CHECK_THAT(glm::length(impact.at), WithinAbs(1.0, 1e-12));
+        middle += impact.at / static_cast<double>(struck.size());
+    }
+    CHECK(glm::length(middle) < 0.2);
+    CHECK(impacts(7, 0.0, 100.0, twenty) == struck);
+    CHECK(impacts(7, 10.0, 100.0, twenty) != struck);
+    // Twice as big, a quarter as many.
+    const double quarter = expected / 4.0;
+    CHECK(std::abs(static_cast<double>(impacts(7, 0.0, 100.0, 2.0 * twenty).size()) - quarter) <
+          5.0 * std::sqrt(quarter));
+    // Four billion years ago, ten million years brought what five billion would now.
+    const double big = 10.0 * twenty;
+    CHECK(impacts(7, 4'000.0, 10.0, big).size() > 50);
+    CHECK(impacts(7, 0.0, 10.0, big).size() < 5);
+}
+
+TEST_CASE("a body digs a crater, its cover first, and throws it all out around it",
+          "[planet][lithosphere]") {
+    constexpr double earth_km = 6'371.0;
+    const LevelGrid grid{5, radius};
+    const Crust land{.type = CrustType::Continental, .thickness = 70.0F, .cover = {1.0F}};
+    Lithosphere lithosphere{grid, {everywhere(grid, land, DVec3{0.0, 0.0, 1.0}, 0.0)}};
+    const double across = std::sqrt(4.0 * std::numbers::pi / static_cast<double>(grid.size()));
+    const hog::planet::Impact impact{.at = hog::planet::cell_center(grid.cell(0)),
+                                     .diameter = 5.0 * across};
+    const hog::planet::Craters craters;
+    lithosphere.strike(std::span{&impact, 1}, craters);
+
+    const double transient =
+        std::pow(impact.diameter * earth_km * std::pow(craters.simple, 0.13) / 1.17, 1.0 / 1.13);
+    const double rim = transient / 2.0 / earth_km;
+    const Lithosphere::Plate& plate = lithosphere.plates()[0];
+    double before = 0.0;
+    double after = 0.0;
+    std::optional<double> spread;
+    int dug = 0;
+    for (std::size_t index = 0; index < plate.cells.size(); ++index) {
+        const Crust& crust = plate.crust[index];
+        const DVec3 at = hog::planet::cell_center(grid.cell(plate.cells[index]));
+        const double apart =
+            std::atan2(glm::length(glm::cross(at, impact.at)), glm::dot(at, impact.at));
+        const auto area = static_cast<double>(grid.area(plate.cells[index]));
+        before += static_cast<double>(land.thickness) * area;
+        after += static_cast<double>(crust.thickness) * area;
+        const auto gained = static_cast<double>(crust.thickness - land.thickness);
+        if (apart < rim) {
+            ++dug;
+            CHECK(gained < 0.0);
+            continue;
+        }
+        // Laid loose, pressed into rock and baked hard as deep as ever.
+        CHECK_THAT(
+            static_cast<double>(crust.cover[loose_sediment] + crust.cover[sedimentary_rock]),
+            WithinAbs(std::min(1.0 + gained, static_cast<double>(hog::planet::hardened)), 1e-4));
+        // Thinner as the cube of the distance, where thick enough to tell.
+        if (apart < 3.0 * rim) {
+            const double scaled = gained * apart * apart * apart;
+            if (!spread) {
+                spread = scaled;
+            }
+            CHECK_THAT(scaled, WithinRel(spread.value_or(0.0), 1e-3));
+        }
+    }
+    CHECK(dug > 1);
+    CHECK_THAT(after, WithinRel(before, 1e-5));
+    const Crust& middle = plate.crust[0];
+    CHECK_THAT(
+        static_cast<double>(middle.thickness),
+        WithinAbs(static_cast<double>(land.thickness) - (craters.excavated * transient), 1e-3));
+    CHECK(middle.cover == Cover{});
 }
 
 TEST_CASE("ocean floor an arc thickens enough floats as continent", "[planet][lithosphere]") {

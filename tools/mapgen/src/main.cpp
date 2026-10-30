@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
@@ -29,6 +30,7 @@
 #include <format>
 #include <fstream>
 #include <iostream>
+#include <numbers>
 #include <span>
 #include <string>
 #include <string_view>
@@ -261,6 +263,9 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
     const auto& grid = tectonics.grid();
     const std::vector<hog::planet::Plume> plumes =
         hog::planet::plumes(config.seed, config.radius, {.count = config.plumes});
+    // Craters any smaller dig into no place of the grid.
+    const double smallest_crater =
+        std::sqrt(4.0 * std::numbers::pi / static_cast<double>(grid.size()));
     double water = hog::planet::starting_water(grid);
     std::vector<hog::mapgen::Image> relief;
     std::vector<hog::mapgen::Image> plates;
@@ -303,6 +308,9 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
                 lithosphere.collide(step_years);
                 lithosphere.spread();
                 lithosphere.feed(plumes, step_years);
+                lithosphere.strike(hog::planet::impacts(
+                    config.seed, (options.tectonics.steps - step - 1) * step_years, step_years,
+                    smallest_crater));
                 const auto heights =
                     hog::planet::flexed(grid, hog::planet::crust_heights(lithosphere));
                 const std::int64_t level = hog::planet::sea_level(grid, heights, water);
