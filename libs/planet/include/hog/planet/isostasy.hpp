@@ -4,6 +4,7 @@
 #include <hog/planet/lithosphere.hpp>
 #include <hog/planet/tectonics.hpp>
 
+#include <array>
 #include <cstdint>
 #include <span>
 #include <vector>
@@ -25,9 +26,9 @@ inline constexpr double oceanic_buoyancy = 0.12;
 // Kilometres of rock a million years wears off land for each kilometre it stands above the ground
 // its rivers cut down to, as drainage basins wear down by their relief (Ahnert 1970).
 inline constexpr double denudation = 0.15;
-// Times faster sediment wears than the crystalline rock under it, as shale and sandstone against
-// granite and gneiss (Stock & Montgomery 1999).
-inline constexpr double softness = 10.0;
+// Times faster each kind of soft rock wears than the crystalline rock under it, as shale and
+// sandstone against granite and gneiss (Stock & Montgomery 1999).
+inline constexpr std::array<double, soft_kinds> softness{10.0};
 // Of the planet, the share of continental crust the sea floods round the land's edges.
 inline constexpr double shelf_share = 0.1;
 // Metres deep a world's water would stand spread evenly over it, as it has to begin with.
@@ -44,14 +45,14 @@ inline constexpr double settling_turn = 1.0;
 [[nodiscard]] std::vector<std::int64_t> crust_heights(const Lithosphere& lithosphere);
 
 // Kilometres of crust worn off each place over `years` million years, standing at fixed-point
-// `heights` over a sea at `sea_level` with `cover` kilometres of sediment on top: land wears down
-// the faster the higher it stands over the lowest ground around it, or over the sea where that's
-// lower, and its sediment the faster still, rising again by its buoyancy as it's lightened, so
-// it nears that but never reaches it. Flat land, however high, stands.
+// `heights` over a sea at `sea_level` with `cover` on top: land wears down the faster the higher
+// it stands over the lowest ground around it, or over the sea where that's lower, through each
+// layer of soft rock by its softness, rising again by its buoyancy as it's lightened, so it nears
+// that but never reaches it. Flat land, however high, stands.
 [[nodiscard]] std::vector<float> worn_down(const LevelGrid& grid,
                                            std::span<const std::int64_t> heights,
                                            std::int64_t sea_level, double years,
-                                           std::span<const float> cover);
+                                           std::span<const Cover> cover);
 // Whether each place at fixed-point `heights` lies under a sea at `sea_level`.
 [[nodiscard]] std::vector<bool> drowned(std::span<const std::int64_t> heights,
                                         std::int64_t sea_level);

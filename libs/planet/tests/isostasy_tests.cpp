@@ -138,7 +138,7 @@ TEST_CASE("land wears down by how far it stands over the ground around it", "[pl
     const std::uint32_t coast = grid.neighbors(low).front();
     const std::uint32_t flat = grid.neighbors(peak).front();
     const std::int64_t sea = 0;
-    const std::vector<float> bare(grid.size(), 0.0F);
+    const std::vector<hog::planet::Cover> bare(grid.size(), hog::planet::Cover{});
     const auto worn = worn_down(grid, heights, sea, 0.01, bare);
     CHECK(worn[low] == 0.0F);
     CHECK(worn[flat] == 0.0F);
@@ -163,12 +163,12 @@ TEST_CASE("sediment wears faster than the rock under it, and then the rock as ev
     constexpr std::uint32_t peak = 0;
     heights[peak] = 3'000 * fixed_one;
     const auto worn = [&](float sediment, double years) {
-        std::vector<float> cover(grid.size(), 0.0F);
-        cover[peak] = sediment;
+        std::vector<hog::planet::Cover> cover(grid.size(), hog::planet::Cover{});
+        cover[peak] = {sediment};
         return static_cast<double>(worn_down(grid, heights, 0, years, cover)[peak]);
     };
     const double rock = worn(0.0F, 0.01);
-    CHECK_THAT(worn(5.0F, 0.01), WithinAbs(softness * rock, 1e-4));
+    CHECK_THAT(worn(5.0F, 0.01), WithinAbs(softness[0] * rock, 1e-4));
     // A thin cover wears off quickly, and then the rock under it as it would have.
     const double thin = worn(0.01F, 10.0);
     CHECK(thin > worn(0.0F, 10.0));

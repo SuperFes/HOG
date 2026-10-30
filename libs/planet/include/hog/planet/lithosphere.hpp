@@ -3,6 +3,7 @@
 #include <hog/core/math.hpp>
 #include <hog/planet/level_grid.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -36,6 +37,10 @@ struct Crust {
 // Kilometres deep sediment is buried before it's baked into rock as hard as the crust under it,
 // as it's heated past some 300 degrees.
 inline constexpr float hardened = 10.0F;
+// Kinds of rock softer than crystalline that can lie over a column, and kilometres of each, from
+// the top down.
+inline constexpr std::size_t soft_kinds = 1;
+using Cover = std::array<float, soft_kinds>;
 
 // Of two crusts over one place, whether `one` stays on top of `other`: continents float over ocean
 // floor, young warm floor over old cold floor, and the thicker of two continents over the thinner.
@@ -183,8 +188,8 @@ public:
     // `drowned`, volume for volume: on its own continent's shelf, building it out, or past that
     // on ocean floor, which carries it off to a trench in time.
     void erode(std::span<const float> worn, const std::vector<bool>& drowned);
-    // Kilometres of sediment on top over each place of the grid.
-    [[nodiscard]] std::vector<float> cover() const;
+    // The soft rock on top over each place of the grid.
+    [[nodiscard]] std::vector<Cover> cover() const;
     // Turns every plate as the forces on it now move it against the mantle's drag and each
     // other's where they close, all at once, as nothing so slow carries momentum. The first time,
     // the drag is set so the plates keep the pace they had, and it stays so after. A slab pulls

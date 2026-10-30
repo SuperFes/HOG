@@ -777,15 +777,15 @@ void Lithosphere::erode(std::span<const float> worn, const std::vector<bool>& dr
     }
 }
 
-std::vector<float> Lithosphere::cover() const {
+std::vector<Cover> Lithosphere::cover() const {
     const std::vector<std::optional<Found>> on_top = tops();
-    std::vector<float> sediment(grid_.size(), 0.0F);
+    std::vector<Cover> soft(grid_.size(), Cover{});
     for (std::uint32_t place = 0; place < grid_.size(); ++place) {
         if (const std::optional<Found>& found = on_top[place]) {
-            sediment[place] = found->crust.sediment;
+            soft[place] = {found->crust.sediment};
         }
     }
-    return sediment;
+    return soft;
 }
 
 DVec3 Lithosphere::to_planet(std::uint32_t plate, DVec3 own) const {
