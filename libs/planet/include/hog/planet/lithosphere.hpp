@@ -167,7 +167,8 @@ public:
     void collide(double years, Ranges ranges = {});
     // Turns every plate as the forces on it now move it against the mantle's drag, at once, as
     // nothing so slow carries momentum. The first time, the drag is set so the plates keep the
-    // pace they had, and it stays so after.
+    // pace they had, and it stays so after. A slab pulls from where it hangs whether or not its
+    // plates still close there, through welds and rifts, until it breaks off.
     void drive(Forces forces = {}, Strength strength = {});
     // Warms and cools the mantle under each place by the crust on top over `years`, and sets how
     // hot it is on the whole as of now.
@@ -191,6 +192,9 @@ public:
     static constexpr float arc_continent = 20.0F;
     // Continents as they settle when nothing piles them up.
     static constexpr float settled_continent = 35.0F;
+    // Million years a slab hangs on, pulling, once floor stops going down it, before it breaks
+    // off and sinks away, as one does some 10 to 20 million years after a collision stops it.
+    static constexpr double breakoff = 15.0;
 
     [[nodiscard]] const LevelGrid& grid() const noexcept { return grid_; }
     [[nodiscard]] std::span<const Plate> plates() const noexcept { return plates_; }
@@ -233,11 +237,25 @@ private:
         DVec3 force{0.0};
     };
 
+    // A slab hanging from a stretch of a plate's edge, in the plate's own frame: the cell of its
+    // grid it hangs at, its pull as an old slab's would be, the age of the floor that last went
+    // down it, and million years since then.
+    struct Slab {
+        std::uint32_t cell = 0;
+        DVec3 pull{0.0};
+        float age = 0.0F;
+        double idle = 0.0;
+    };
+
     // What's left on top over each place of the grid.
     [[nodiscard]] std::vector<std::optional<Found>> tops() const;
-    // Every force on each plate: across its edges, and off the mantle's dome under it.
-    [[nodiscard]] std::vector<std::vector<Push>> pushes(const Forces& forces,
-                                                        Strength strength) const;
+    // Every force on each plate: from its slabs, across the rest of its `edges`, and off the
+    // mantle's dome under it.
+    [[nodiscard]] std::vector<std::vector<Push>>
+    pushes(std::span<const Boundary> edges, const Forces& forces, Strength strength) const;
+    // Floor going down a trench among `edges` now feeds the slab hanging there, in place of
+    // whatever hung there before.
+    void hang(std::span<const Boundary> edges);
     // The plane, by the side it faces, of the line through the warmest mantle under a plate's
     // continent that `pushes` on it pull apart hardest against how strong it is, if harder.
     [[nodiscard]] std::optional<DVec3> weakest(std::uint32_t plate, std::span<const Push> pushes,
@@ -263,6 +281,7 @@ private:
     LevelGrid grid_;
     std::vector<Plate> plates_;
     std::vector<Bound> bounds_;
+    std::vector<std::vector<Slab>> slabs_;
     double time_ = 0.0;
     std::vector<float> heat_;
     // Of the turn the forces give a plate against unit drag, the share it takes; none until the

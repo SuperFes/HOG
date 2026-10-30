@@ -746,6 +746,34 @@ TEST_CASE("a slab pulls no harder than it holds before breaking off", "[planet][
     CHECK(lead({}, 200.0) < lead({}, 0.0));
 }
 
+TEST_CASE("a slab pulls as long as floor goes down it, not by all that has",
+          "[planet][lithosphere]") {
+    Lithosphere lithosphere = aged_halves(100.0F, false);
+    lithosphere.drive();
+    const double first = glm::length(turn_of(lithosphere, 1));
+    for (int step = 0; step < 3; ++step) {
+        lithosphere = settled(lithosphere, 10.0);
+        lithosphere.drive();
+    }
+    CHECK_THAT(glm::length(turn_of(lithosphere, 1)), WithinRel(first, 0.2));
+}
+
+TEST_CASE("a slab hangs on, pulling, after its plates weld, until it breaks off",
+          "[planet][lithosphere]") {
+    Lithosphere lithosphere = aged_halves(100.0F, false);
+    // So short a while that the halves move as one.
+    lithosphere.weld(1e-9);
+    REQUIRE(lithosphere.plates().size() == 1);
+    lithosphere.drive();
+    CHECK(lithosphere.plates()[0].rate > 0.0);
+    lithosphere.advance(Lithosphere::breakoff * 0.5);
+    lithosphere.drive();
+    CHECK(lithosphere.plates()[0].rate > 0.0);
+    lithosphere.advance(Lithosphere::breakoff);
+    lithosphere.drive();
+    CHECK(lithosphere.plates()[0].rate == 0.0);
+}
+
 TEST_CASE("the mantle drags harder on plates carrying continent", "[planet][lithosphere]") {
     const auto lead = [](bool keel) {
         Lithosphere lithosphere = aged_halves(100.0F, keel);

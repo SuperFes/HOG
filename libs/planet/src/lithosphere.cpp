@@ -409,7 +409,7 @@ bool stays_over(const Crust& one, const Crust& other) noexcept {
 
 Lithosphere::Lithosphere(LevelGrid grid, std::vector<Plate> plates)
     : grid_{std::move(grid)}, plates_{std::move(plates)}, bounds_(plates_.size()),
-      heat_(grid_.size(), 0.0F) {
+      slabs_(plates_.size()), heat_(grid_.size(), 0.0F) {
     for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
         const Plate& carrier = plates_[plate];
         HOG_ASSERT(carrier.cells.size() == carrier.crust.size(), "one crust to each cell");
@@ -450,6 +450,12 @@ void Lithosphere::advance(double years) {
             crust.age += aged;
             crust.raised += aged;
         }
+    }
+    for (std::vector<Slab>& slabs : slabs_) {
+        for (Slab& slab : slabs) {
+            slab.idle += years;
+        }
+        std::erase_if(slabs, [](const Slab& slab) { return slab.idle > breakoff; });
     }
     time_ += years;
 }
@@ -659,6 +665,14 @@ void Lithosphere::subduct(double years, Arcs arcs) {
         }
     }
     for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
+        // A slab hangs on from the floor left at the trench, not the floor gone down it.
+        std::vector<std::uint32_t> gone;
+        for (const std::size_t index : diving[plate]) {
+            gone.push_back(plates_[plate].cells[index]);
+        }
+        std::erase_if(slabs_[plate], [&](const Slab& slab) {
+            return std::ranges::binary_search(gone, slab.cell);
+        });
         remove_crust(plates_[plate], std::move(diving[plate]));
         bound(plate);
     }
@@ -735,10 +749,52 @@ void Lithosphere::collide(double years, Ranges ranges) {
     }
 }
 
-std::vector<std::vector<Lithosphere::Push>> Lithosphere::pushes(const Forces& forces,
+void Lithosphere::hang(std::span<const Boundary> edges) {
+    std::vector<std::vector<Slab>> fed(plates_.size());
+    for (const Boundary& edge : edges) {
+        if (edge.kind != Boundary::Kind::Trench) {
+            continue;
+        }
+        const DVec3 at = cell_center(grid_.cell(edge.place));
+        const double relative = glm::length(velocity(edge.plate, at) - velocity(edge.other, at));
+        const std::optional<std::size_t> index = held(edge.plate, at);
+        if (relative == 0.0 || !index) {
+            continue;
+        }
+        // As far as the plates close across the edge, not slide past along it.
+        const double across = edge.closing / relative;
+        fed[edge.plate].push_back({.cell = plates_[edge.plate].cells[*index],
+                                   .pull = to_plate(edge.plate, across * edge.length * edge.normal),
+                                   .age = edge.own.age,
+                                   .idle = 0.0});
+    }
+    for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
+        std::vector<std::uint32_t> cells;
+        for (const Slab& slab : fed[plate]) {
+            cells.push_back(slab.cell);
+        }
+        std::ranges::sort(cells);
+        std::erase_if(slabs_[plate], [&](const Slab& slab) {
+            return std::ranges::binary_search(cells, slab.cell);
+        });
+        slabs_[plate].insert(slabs_[plate].end(), fed[plate].begin(), fed[plate].end());
+    }
+}
+
+std::vector<std::vector<Lithosphere::Push>> Lithosphere::pushes(std::span<const Boundary> edges,
+                                                                const Forces& forces,
                                                                 Strength strength) const {
     std::vector<std::vector<Push>> found(plates_.size());
-    for (const Boundary& edge : boundaries()) {
+    for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
+        for (const Slab& slab : slabs_[plate]) {
+            const auto age = static_cast<double>(slab.age);
+            const double push = std::min(std::sqrt(std::min(age, forces.mature) / forces.mature),
+                                         strength.ocean / softer_);
+            found[plate].push_back({.at = to_planet(plate, cell_center(grid_.cell(slab.cell))),
+                                    .force = push * to_planet(plate, slab.pull)});
+        }
+    }
+    for (const Boundary& edge : edges) {
         const DVec3 at = cell_center(grid_.cell(edge.place));
         const double relative = glm::length(velocity(edge.plate, at) - velocity(edge.other, at));
         if (relative == 0.0) {
@@ -746,11 +802,7 @@ std::vector<std::vector<Lithosphere::Push>> Lithosphere::pushes(const Forces& fo
         }
         const double across = std::abs(edge.closing) / relative;
         double push = 0.0;
-        if (edge.kind == Boundary::Kind::Trench) {
-            const auto age = static_cast<double>(edge.own.age);
-            push = std::min(std::sqrt(std::min(age, forces.mature) / forces.mature),
-                            strength.ocean / softer_);
-        } else if (edge.kind == Boundary::Kind::Ridge) {
+        if (edge.kind == Boundary::Kind::Ridge) {
             push = -forces.ridge;
         } else if (edge.kind == Boundary::Kind::Collision) {
             const double raised =
@@ -784,7 +836,9 @@ std::vector<std::vector<Lithosphere::Push>> Lithosphere::pushes(const Forces& fo
 
 void Lithosphere::drive(Forces forces, Strength strength) {
     // Each force along the surface at a place turns its plate about the planet's middle.
-    const std::vector<std::vector<Push>> found = pushes(forces, strength);
+    const std::vector<Boundary> edges = boundaries();
+    hang(edges);
+    const std::vector<std::vector<Push>> found = pushes(edges, forces, strength);
     std::vector<DVec3> torques(plates_.size(), DVec3{0.0});
     for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
         for (const Push& push : found[plate]) {
@@ -845,7 +899,9 @@ void Lithosphere::warm(double years, Mantle mantle) {
 }
 
 void Lithosphere::rift(const Forces& forces, Strength strength) {
-    const std::vector<std::vector<Push>> found = pushes(forces, strength);
+    const std::vector<Boundary> edges = boundaries();
+    hang(edges);
+    const std::vector<std::vector<Push>> found = pushes(edges, forces, strength);
     const auto count = static_cast<std::uint32_t>(plates_.size());
     std::vector<std::optional<DVec3>> lines(count);
     each(jobs_, count, 1, [&](std::uint32_t plate, std::uint32_t /*thread*/) {
@@ -869,8 +925,16 @@ void Lithosphere::rift(const Forces& forces, Strength strength) {
             side.cells.push_back(carrier.cells[index]);
             side.crust.push_back(carrier.crust[index]);
         }
+        std::vector<Slab> slabs_kept;
+        std::vector<Slab> slabs_parted_off;
+        for (const Slab& slab : slabs_[plate]) {
+            const DVec3 at = to_planet(plate, cell_center(grid_.cell(slab.cell)));
+            (glm::dot(at, *facing) > 0.0 ? slabs_kept : slabs_parted_off).push_back(slab);
+        }
         plates_[plate] = std::move(kept);
         plates_.push_back(std::move(parted_off));
+        slabs_[plate] = std::move(slabs_kept);
+        slabs_.push_back(std::move(slabs_parted_off));
         bounds_.emplace_back();
         bound(plate);
         bound(static_cast<std::uint32_t>(plates_.size() - 1));
@@ -946,6 +1010,7 @@ std::optional<DVec3> Lithosphere::weakest(std::uint32_t plate, std::span<const P
 void Lithosphere::weld(double years) {
     const std::size_t count = plates_.size();
     const std::vector<Boundary> edges = boundaries();
+    hang(edges);
     std::vector<double> speeds;
     speeds.reserve(edges.size());
     for (const Boundary& edge : edges) {
@@ -997,11 +1062,13 @@ void Lithosphere::drop_bare() {
         if (kept != plate) {
             plates_[kept] = std::move(plates_[plate]);
             bounds_[kept] = bounds_[plate];
+            slabs_[kept] = std::move(slabs_[plate]);
         }
         ++kept;
     }
     plates_.resize(kept);
     bounds_.resize(kept);
+    slabs_.resize(kept);
 }
 
 void Lithosphere::take_in(std::uint32_t plate, std::uint32_t from) {
@@ -1019,6 +1086,14 @@ void Lithosphere::take_in(std::uint32_t plate, std::uint32_t from) {
     }
     add_crust(plates_[plate], std::move(added));
     bound(plate);
+    // Its slabs hang on, now from the plate it's part of.
+    for (Slab slab : slabs_[from]) {
+        const DVec3 at = to_planet(from, cell_center(grid_.cell(slab.cell)));
+        slab.cell = grid_.index(cell_at(to_plate(plate, at), grid_.level()));
+        slab.pull = to_plate(plate, to_planet(from, slab.pull));
+        slabs_[plate].push_back(slab);
+    }
+    slabs_[from].clear();
     plates_[from].cells.clear();
     plates_[from].crust.clear();
     plates_[from].rate = 0.0;
