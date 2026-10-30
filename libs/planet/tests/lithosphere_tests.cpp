@@ -18,14 +18,17 @@
 using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
 using hog::DVec3;
+using hog::planet::Cover;
 using hog::planet::Crust;
 using hog::planet::CrustType;
 using hog::planet::Forces;
 using hog::planet::LevelGrid;
 using hog::planet::Lithosphere;
+using hog::planet::loose_sediment;
 using hog::planet::Mantle;
 using hog::planet::Material;
 using hog::planet::Ranges;
+using hog::planet::sedimentary_rock;
 using hog::planet::Strength;
 using hog::planet::Tectonics;
 using hog::planet::Volume;
@@ -609,9 +612,11 @@ TEST_CASE("what wears off a continent is laid down on the nearest crust under th
         if (crust.type == CrustType::Continental) {
             CHECK(crust.thickness == continent.thickness - 1.0F);
         } else {
-            // All laid down as sediment.
-            CHECK_THAT(static_cast<double>(crust.sediment),
-                       WithinAbs(static_cast<double>(crust.thickness - Crust{}.thickness), 1e-5));
+            // All laid down as sediment, pressed into rock where it's deep.
+            CHECK_THAT(
+                static_cast<double>(crust.cover[loose_sediment] + crust.cover[sedimentary_rock]),
+                WithinAbs(static_cast<double>(crust.thickness - Crust{}.thickness), 1e-5));
+            CHECK(crust.cover[loose_sediment] <= hog::planet::lithified);
         }
         if (crust.type == CrustType::Oceanic && z < 0.8) {
             // Too far from the coast for any to reach.
@@ -625,21 +630,39 @@ TEST_CASE("what wears off a continent is laid down on the nearest crust under th
     CHECK(volume(shelved, CrustType::Oceanic) == floor);
 }
 
-TEST_CASE("a continent's sediment wears off before the rock under it", "[planet][lithosphere]") {
+TEST_CASE("a continent's soft rock wears off before the rock under it, the softest first",
+          "[planet][lithosphere]") {
     const LevelGrid grid{3, radius};
     Lithosphere::Plate plate = everywhere(grid, Crust{}, DVec3{0.0, 0.0, 1.0}, 0.0);
     std::vector<bool> drowned(grid.size(), true);
     Crust covered = continent;
-    covered.sediment = 0.5F;
+    covered.cover = {0.5F, 0.5F};
     plate.crust[0] = covered;
     drowned[0] = false;
     Lithosphere lithosphere{grid, {plate}};
-    REQUIRE(lithosphere.cover()[0] == 0.5F);
+    REQUIRE(lithosphere.cover()[0] == Cover{0.5F, 0.5F});
     lithosphere.erode(std::vector<float>(grid.size(), 0.25F), drowned);
-    CHECK(lithosphere.plates()[0].crust[0].sediment == 0.25F);
+    CHECK(lithosphere.plates()[0].crust[0].cover == Cover{0.25F, 0.5F});
+    lithosphere.erode(std::vector<float>(grid.size(), 0.5F), drowned);
+    CHECK(lithosphere.plates()[0].crust[0].cover == Cover{0.0F, 0.25F});
     lithosphere.erode(std::vector<float>(grid.size(), 1.0F), drowned);
-    CHECK(lithosphere.plates()[0].crust[0].sediment == 0.0F);
-    CHECK(lithosphere.plates()[0].crust[0].thickness == continent.thickness - 1.25F);
+    CHECK(lithosphere.plates()[0].crust[0].cover == Cover{});
+    CHECK(lithosphere.plates()[0].crust[0].thickness == continent.thickness - 1.75F);
+}
+
+TEST_CASE("sediment buried deep is pressed into rock, and deeper still baked as hard as the rest",
+          "[planet][lithosphere]") {
+    using hog::planet::hardened;
+    using hog::planet::lithified;
+    // A continent everywhere, all of it wearing down into one basin under the sea.
+    const LevelGrid grid{3, radius};
+    std::vector<bool> drowned(grid.size(), false);
+    drowned[0] = true;
+    Lithosphere lithosphere{grid, {everywhere(grid, continent, DVec3{0.0, 0.0, 1.0}, 0.0)}};
+    lithosphere.erode(std::vector<float>(grid.size(), 0.5F), drowned);
+    const Crust& basin = lithosphere.plates()[0].crust[0];
+    CHECK(basin.thickness > continent.thickness + hardened);
+    CHECK(basin.cover == Cover{lithified, hardened - lithified});
 }
 
 TEST_CASE("sediment buried under a range is baked as hard as the rock around it",
@@ -648,7 +671,7 @@ TEST_CASE("sediment buried under a range is baked as hard as the rock around it"
     std::vector<Lithosphere::Plate> plates{bare.plates().begin(), bare.plates().end()};
     for (auto& plate : plates) {
         for (Crust& crust : plate.crust) {
-            crust.sediment = 4.0F;
+            crust.cover = {1.0F, 3.0F};
         }
     }
     Lithosphere lithosphere{bare.grid(), plates};
@@ -660,7 +683,7 @@ TEST_CASE("sediment buried under a range is baked as hard as the rock around it"
             if (crust.thickness > continent.thickness) {
                 ++piled;
                 // Only what was thrust on top is left soft.
-                CHECK(crust.sediment < 6.0F);
+                CHECK(crust.cover[loose_sediment] + crust.cover[sedimentary_rock] < 6.0F);
             }
         }
     }

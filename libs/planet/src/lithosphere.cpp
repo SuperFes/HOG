@@ -12,6 +12,7 @@
 #include <iterator>
 #include <limits>
 #include <numbers>
+#include <numeric>
 #include <optional>
 #include <span>
 #include <tuple>
@@ -105,10 +106,22 @@ void remove_crust(Lithosphere::Plate& plate, std::vector<std::size_t> held) {
     plate.crust.resize(kept);
 }
 
-// Lays `laid` kilometres over `crust`, `soft` of them sediment on top, burying what was on top
-// before: what sediment that leaves deeper than `hardened` is baked as hard as the rest.
-void lay(Crust& crust, float laid, float soft) {
-    crust.sediment = std::min(soft, hardened) + std::clamp(hardened - laid, 0.0F, crust.sediment);
+// Lays `laid` kilometres over `crust`, `soft` of them on top, burying what was on top before:
+// under crystalline rock, it's as good as crystalline. Loose sediment buried past `lithified` is
+// pressed into rock, and that past `hardened` is baked as hard as crystalline.
+void lay(Crust& crust, float laid, const Cover& soft) {
+    if (laid > std::accumulate(soft.begin(), soft.end(), 0.0F)) {
+        crust.cover = soft;
+    } else {
+        for (std::size_t kind = 0; kind < soft_kinds; ++kind) {
+            crust.cover[kind] += soft[kind];
+        }
+    }
+    float& loose = crust.cover[loose_sediment];
+    float& rock = crust.cover[sedimentary_rock];
+    rock += std::max(loose - lithified, 0.0F);
+    loose = std::min(loose, lithified);
+    rock = std::min(rock, std::max(hardened - loose, 0.0F));
     crust.thickness += laid;
 }
 
@@ -768,12 +781,17 @@ void Lithosphere::erode(std::span<const float> worn, const std::vector<bool>& dr
         }
         Crust& land = crust_at(place);
         const float off = std::min(worn[place], land.thickness);
-        land.sediment = std::max(land.sediment - off, 0.0F);
+        float left = off;
+        for (float& layer : land.cover) {
+            const float taken = std::min(layer, left);
+            layer -= taken;
+            left -= taken;
+        }
         land.thickness -= off;
         const auto laid =
             static_cast<float>(static_cast<double>(off) * static_cast<double>(grid_.area(place)) /
                                static_cast<double>(grid_.area(sea[place])));
-        lay(crust_at(sea[place]), laid, laid);
+        lay(crust_at(sea[place]), laid, Cover{laid});
     }
 }
 
@@ -782,7 +800,7 @@ std::vector<Cover> Lithosphere::cover() const {
     std::vector<Cover> soft(grid_.size(), Cover{});
     for (std::uint32_t place = 0; place < grid_.size(); ++place) {
         if (const std::optional<Found>& found = on_top[place]) {
-            soft[place] = {found->crust.sediment};
+            soft[place] = found->crust.cover;
         }
     }
     return soft;
@@ -975,7 +993,7 @@ void Lithosphere::collide(double years, Ranges ranges) {
         std::uint32_t plate;
         std::size_t onto;
         float thickness;
-        float sediment;
+        Cover cover;
     };
     std::vector<Pile> piles;
     std::vector<std::optional<std::pair<std::uint32_t, std::size_t>>> unders;
@@ -1006,17 +1024,21 @@ void Lithosphere::collide(double years, Ranges ranges) {
             const auto share =
                 static_cast<float>(static_cast<double>(grid_.area(carrier.cells[index])) /
                                    static_cast<double>(grid_.area(plates_[over].cells[onto])));
+            Cover cover = crust.cover;
+            for (float& layer : cover) {
+                layer *= share;
+            }
             piles.push_back({.plate = over,
                              .onto = onto,
                              .thickness = crust.thickness * share,
-                             .sediment = crust.sediment * share});
+                             .cover = cover});
             scraped[plate].push_back(index);
         }
     }
     for (const Pile& pile : piles) {
         Crust& crust = plates_[pile.plate].crust[pile.onto];
-        // Thrust over it, its own sediment on top.
-        lay(crust, pile.thickness, pile.sediment);
+        // Thrust over it, its own soft rock on top.
+        lay(crust, pile.thickness, pile.cover);
         crust.raised = 0.0F;
     }
     for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {

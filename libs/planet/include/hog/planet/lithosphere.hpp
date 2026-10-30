@@ -21,6 +21,18 @@ class Volume;
 
 enum class CrustType : std::uint8_t { Oceanic, Continental };
 
+// Kinds of rock softer than crystalline that can lie over a column, from the top down: sediment
+// laid down loose, and the rock it's pressed into once buried.
+inline constexpr std::size_t loose_sediment = 0;
+inline constexpr std::size_t sedimentary_rock = 1;
+inline constexpr std::size_t soft_kinds = 2;
+// Kilometres of each kind of soft rock over a column.
+using Cover = std::array<float, soft_kinds>;
+// Kilometres deep loose sediment is buried before it's pressed and cemented into rock, and that
+// rock before it's baked as hard as crystalline rock, as it's heated past some 300 degrees.
+inline constexpr float lithified = 2.0F;
+inline constexpr float hardened = 10.0F;
+
 // A column of crust as its plate carries it.
 struct Crust {
     CrustType type = CrustType::Oceanic;
@@ -28,19 +40,11 @@ struct Crust {
     // Millions of years since it formed, and since it was last piled up into a range.
     float age = 0.0F;
     float raised = 0.0F;
-    // Kilometres of it on top laid down as sediment, softer than the rock under it.
-    float sediment = 0.0F;
+    // What of it on top is softer than crystalline rock.
+    Cover cover{};
 
     friend bool operator==(const Crust&, const Crust&) = default;
 };
-
-// Kilometres deep sediment is buried before it's baked into rock as hard as the crust under it,
-// as it's heated past some 300 degrees.
-inline constexpr float hardened = 10.0F;
-// Kinds of rock softer than crystalline that can lie over a column, and kilometres of each, from
-// the top down.
-inline constexpr std::size_t soft_kinds = 1;
-using Cover = std::array<float, soft_kinds>;
 
 // Of two crusts over one place, whether `one` stays on top of `other`: continents float over ocean
 // floor, young warm floor over old cold floor, and the thicker of two continents over the thinner.
@@ -183,7 +187,7 @@ public:
     // the crust over it, piling that up into a range, which then settles over `years` as
     // `ranges` says.
     void collide(double years, Ranges ranges = {});
-    // Wears `worn` kilometres off the continent on top at each place of the grid, its sediment
+    // Wears `worn` kilometres off the continent on top at each place of the grid, its soft rock
     // first, down to none, laying it down as sediment on the crust nearest it under the sea,
     // `drowned`, volume for volume: on its own continent's shelf, building it out, or past that
     // on ocean floor, which carries it off to a trench in time.
