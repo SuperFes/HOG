@@ -14,6 +14,7 @@
 #include <numbers>
 #include <optional>
 #include <span>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -445,6 +446,132 @@ std::vector<bool> as_one(std::span<const Boundary> edges, std::span<const double
                        (sutured[pair] && fastest[pair] < slowest);
     }
     return joined;
+}
+
+// Where two plates meet, how they drag on each other: on the first as -drag (w_first - w_second)
+// with each turning at w, and as much back on the second.
+struct Coupling {
+    std::uint32_t first = 0;
+    std::uint32_t second = 0;
+    glm::dmat3 drag{0.0};
+};
+
+// The turns w that the mantle's `drags` on each plate, D w, and the `couplings` between them
+// hold against the `torques` on each, by conjugate gradients, as the drags are symmetric and
+// resist every turn.
+std::vector<DVec3> turned_together(std::span<const glm::dmat3> drags,
+                                   std::span<const Coupling> couplings,
+                                   std::span<const DVec3> torques) {
+    const std::size_t count = drags.size();
+    const auto against = [&](std::span<const DVec3> turns) {
+        std::vector<DVec3> held(count);
+        for (std::size_t plate = 0; plate < count; ++plate) {
+            held[plate] = drags[plate] * turns[plate];
+        }
+        for (const Coupling& coupling : couplings) {
+            const DVec3 drag = coupling.drag * (turns[coupling.first] - turns[coupling.second]);
+            held[coupling.first] += drag;
+            held[coupling.second] -= drag;
+        }
+        return held;
+    };
+    const auto dot = [](std::span<const DVec3> one, std::span<const DVec3> other) {
+        double sum = 0.0;
+        for (std::size_t plate = 0; plate < one.size(); ++plate) {
+            sum += glm::dot(one[plate], other[plate]);
+        }
+        return sum;
+    };
+    // Each plate's drag with all it meets held still, to ease each step by.
+    std::vector<glm::dmat3> own{drags.begin(), drags.end()};
+    for (const Coupling& coupling : couplings) {
+        own[coupling.first] += coupling.drag;
+        own[coupling.second] += coupling.drag;
+    }
+    std::vector<glm::dmat3> ease(count, glm::dmat3{0.0});
+    for (std::size_t plate = 0; plate < count; ++plate) {
+        if (glm::determinant(own[plate]) != 0.0) {
+            ease[plate] = glm::inverse(own[plate]);
+        }
+    }
+    const auto eased = [&](std::span<const DVec3> left) {
+        std::vector<DVec3> out(count);
+        for (std::size_t plate = 0; plate < count; ++plate) {
+            out[plate] = ease[plate] * left[plate];
+        }
+        return out;
+    };
+    std::vector<DVec3> turns(count, DVec3{0.0});
+    std::vector<DVec3> left{torques.begin(), torques.end()};
+    std::vector<DVec3> way = eased(left);
+    double fit = dot(left, way);
+    const double close_enough = 1e-24 * dot(torques, torques);
+    for (std::size_t step = 0; step < 6 * count && dot(left, left) > close_enough; ++step) {
+        const std::vector<DVec3> held = against(way);
+        const double along = dot(way, held);
+        if (along <= 0.0) {
+            break;
+        }
+        const double length = fit / along;
+        for (std::size_t plate = 0; plate < count; ++plate) {
+            turns[plate] += length * way[plate];
+            left[plate] -= length * held[plate];
+        }
+        const std::vector<DVec3> next = eased(left);
+        const double next_fit = dot(left, next);
+        for (std::size_t plate = 0; plate < count; ++plate) {
+            way[plate] = next[plate] + ((next_fit / fit) * way[plate]);
+        }
+        fit = next_fit;
+    }
+    return turns;
+}
+
+// How hard plates drag on each other across an edge of `kind`, as so many radians across of
+// mantle dragging under a plate.
+double drag_across(Boundary::Kind kind, const Forces& forces) {
+    switch (kind) {
+    case Boundary::Kind::Ridge:
+        return 0.0;
+    case Boundary::Kind::Collision:
+        return forces.suture;
+    case Boundary::Kind::Trench:
+    case Boundary::Kind::Arc:
+        return forces.megathrust;
+    }
+    return 0.0;
+}
+
+// How each two plates meeting along `edges` of `grid` drag on each other, a pair at a time.
+std::vector<Coupling> couplings(const LevelGrid& grid, std::span<const Boundary> edges,
+                                const Forces& forces) {
+    // Each edge is found from both sides, so takes half the drag along it, as a strip of mantle
+    // so wide would.
+    std::vector<Coupling> found;
+    for (const Boundary& edge : edges) {
+        const double width = drag_across(edge.kind, forces);
+        if (width == 0.0) {
+            continue;
+        }
+        const DVec3 at = cell_center(grid.cell(edge.place));
+        found.push_back({.first = std::min(edge.plate, edge.other),
+                         .second = std::max(edge.plate, edge.other),
+                         .drag = (0.5 * width * edge.length / (4.0 * std::numbers::pi)) *
+                                 (glm::dmat3{1.0} - glm::outerProduct(at, at))});
+    }
+    std::ranges::sort(found, [](const Coupling& one, const Coupling& other) {
+        return std::tie(one.first, one.second) < std::tie(other.first, other.second);
+    });
+    std::vector<Coupling> pairs;
+    for (const Coupling& coupling : found) {
+        if (!pairs.empty() && pairs.back().first == coupling.first &&
+            pairs.back().second == coupling.second) {
+            pairs.back().drag += coupling.drag;
+        } else {
+            pairs.push_back(coupling);
+        }
+    }
+    return pairs;
 }
 
 } // namespace
@@ -903,26 +1030,27 @@ void Lithosphere::drive(Forces forces, Strength strength) {
     for (std::uint32_t cell = 0; cell < grid_.size(); ++cell) {
         sphere += static_cast<double>(grid_.area(cell));
     }
-    std::vector<DVec3> turns(plates_.size(), DVec3{0.0});
-    double before = 0.0;
-    double after = 0.0;
+    std::vector<glm::dmat3> drags(plates_.size(), glm::dmat3{0.0});
+    std::vector<glm::dmat3> spreads(plates_.size(), glm::dmat3{0.0});
     for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
         const Plate& carrier = plates_[plate];
-        glm::dmat3 drag{0.0};
-        glm::dmat3 spread{0.0};
         for (std::size_t index = 0; index < carrier.cells.size(); ++index) {
             const DVec3 at = to_planet(plate, cell_center(grid_.cell(carrier.cells[index])));
             const double share = static_cast<double>(grid_.area(carrier.cells[index])) / sphere;
-            spread += share * (glm::dmat3{1.0} - glm::outerProduct(at, at));
-            drag += (carrier.crust[index].type == CrustType::Continental ? forces.keel : 1.0) *
-                    place_drag(at, share);
+            spreads[plate] += share * (glm::dmat3{1.0} - glm::outerProduct(at, at));
+            drags[plate] +=
+                (carrier.crust[index].type == CrustType::Continental ? forces.keel : 1.0) *
+                place_drag(at, share);
         }
-        if (glm::determinant(drag) != 0.0) {
-            turns[plate] = glm::inverse(drag) * torques[plate];
-        }
-        const DVec3 now = carrier.rate * carrier.pole;
-        before += glm::dot(now, spread * now);
-        after += glm::dot(turns[plate], spread * turns[plate]);
+    }
+    const std::vector<DVec3> turns =
+        turned_together(drags, couplings(grid_, edges, forces), torques);
+    double before = 0.0;
+    double after = 0.0;
+    for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
+        const DVec3 now = plates_[plate].rate * plates_[plate].pole;
+        before += glm::dot(now, spreads[plate] * now);
+        after += glm::dot(turns[plate], spreads[plate] * turns[plate]);
     }
     if (pace_ == 0.0 && after > 0.0) {
         pace_ = std::sqrt(before / after);

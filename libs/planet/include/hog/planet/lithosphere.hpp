@@ -97,6 +97,8 @@ struct Boundary {
 // thick, three times a ridge's push, about what Tibet's is. Pulls and pushes act across an edge
 // as far as the plates close or part across it, not slide past. Where the mantle is warm it
 // lifts the plates over it into a broad dome they slide off, as off a ridge but over all of it.
+// Where plates close on each other they drag on each other too, each as hard as the other, so
+// what one puts on the other moves them against each other and not the whole lithosphere.
 struct Forces {
     // Of an old slab's pull on each length of trench, the push on each length of ridge.
     double ridge = 0.3;
@@ -108,6 +110,13 @@ struct Forces {
     // each length of its rim: it lifts the crust about a kilometre, a third of what a ridge
     // stands over old floor, so a third of a ridge's push.
     double dome = 0.1;
+    // How hard plates closing on each other drag on each length of their edge, as so many
+    // radians across of mantle dragging under a plate. At like speeds a megathrust carries some
+    // 20 MPa a hundred kilometres down the slab, against some 1 MPa under a plate, so about 2000
+    // km of it; where continents collide the range takes up about three times as much, as
+    // Tibet's does. Where plates part they hardly drag at all.
+    double megathrust = 0.3;
+    double suture = 1.0;
 };
 
 // How strong the lithosphere is against being pulled apart, against an old slab's pull on the
@@ -165,10 +174,11 @@ public:
     // Plates whose collision piles up more than their continent can take, so it founders, have
     // jammed, and weld when next welded.
     void collide(double years, Ranges ranges = {});
-    // Turns every plate as the forces on it now move it against the mantle's drag, at once, as
-    // nothing so slow carries momentum. The first time, the drag is set so the plates keep the
-    // pace they had, and it stays so after. A slab pulls from where it hangs whether or not its
-    // plates still close there, through welds and rifts, until it breaks off.
+    // Turns every plate as the forces on it now move it against the mantle's drag and each
+    // other's where they close, all at once, as nothing so slow carries momentum. The first time,
+    // the drag is set so the plates keep the pace they had, and it stays so after. A slab pulls
+    // from where it hangs whether or not its plates still close there, through welds and rifts,
+    // until it breaks off.
     void drive(Forces forces = {}, Strength strength = {});
     // Warms and cools the mantle under each place by the crust on top over `years`, and sets how
     // hot it is on the whole as of now.

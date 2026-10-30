@@ -20,6 +20,7 @@ using Catch::Matchers::WithinRel;
 using hog::DVec3;
 using hog::planet::Crust;
 using hog::planet::CrustType;
+using hog::planet::Forces;
 using hog::planet::LevelGrid;
 using hog::planet::Lithosphere;
 using hog::planet::Mantle;
@@ -772,6 +773,43 @@ TEST_CASE("a slab hangs on, pulling, after its plates weld, until it breaks off"
     lithosphere.advance(Lithosphere::breakoff);
     lithosphere.drive();
     CHECK(lithosphere.plates()[0].rate == 0.0);
+}
+
+TEST_CASE("plates closing on each other drag on each other, hardest where continents collide",
+          "[planet][lithosphere]") {
+    // How far the plates turn against each other, of how far they turn on the whole.
+    const auto apart = [](const Lithosphere& lithosphere) {
+        const DVec3 north = turn_of(lithosphere, 0);
+        const DVec3 south = turn_of(lithosphere, 1);
+        return glm::length(north - south) / (glm::length(north) + glm::length(south));
+    };
+    const auto trench = [&](Forces forces) {
+        Lithosphere lithosphere = aged_halves(100.0F, false);
+        lithosphere.drive(forces);
+        return apart(lithosphere);
+    };
+    CHECK(trench({}) < trench({.megathrust = 0.0}));
+    // A strip of thick continent along where the halves meet, closing on itself.
+    const auto collision = [&](Forces forces) {
+        const Lithosphere ocean = halves();
+        std::vector<Lithosphere::Plate> plates{ocean.plates().begin(), ocean.plates().end()};
+        const auto& grid = ocean.grid();
+        for (std::uint32_t plate = 0; plate < 2; ++plate) {
+            for (std::size_t index = 0; index < plates[plate].cells.size(); ++index) {
+                const DVec3 at = ocean.to_planet(
+                    plate, hog::planet::cell_center(grid.cell(plates[plate].cells[index])));
+                if (std::abs(at.z) < 0.15) {
+                    plates[plate].crust[index] = continent;
+                }
+            }
+        }
+        Lithosphere lithosphere = settled(Lithosphere{grid, plates}, 20.0);
+        lithosphere.drive(forces);
+        return apart(lithosphere);
+    };
+    const double unbound = collision({.megathrust = 0.0, .suture = 0.0});
+    CHECK(collision({.megathrust = 0.0}) < unbound);
+    CHECK(collision({.megathrust = 0.0, .suture = 0.3}) > collision({.megathrust = 0.0}));
 }
 
 TEST_CASE("the mantle drags harder on plates carrying continent", "[planet][lithosphere]") {
