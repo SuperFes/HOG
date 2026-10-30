@@ -153,9 +153,9 @@ double fill(Lithosphere::Plate& plate, const LevelGrid& grid, std::span<const st
 
 // Continental crust over `strongest` kilometres sheds what it can't hold up into the plate's
 // nearest crust with room for it, volume for volume, filling that up to `strongest` a ring of cells
-// at a time out from it. What finds no room on the whole plate founders into the mantle, as does
-// all over `rooted` kilometres at once; says how much, in kilometres deep over square metres.
-double collapse(Lithosphere::Plate& plate, const LevelGrid& grid, float strongest, float rooted) {
+// at a time out from it. What finds no room on the whole plate founders into the mantle; says how
+// much, in kilometres deep over square metres.
+double collapse(Lithosphere::Plate& plate, const LevelGrid& grid, float strongest) {
     const auto over = [&](std::size_t index) {
         return plate.crust[index].type == CrustType::Continental &&
                plate.crust[index].thickness > strongest;
@@ -164,7 +164,6 @@ double collapse(Lithosphere::Plate& plate, const LevelGrid& grid, float stronges
         return static_cast<double>(grid.area(plate.cells[index]));
     };
     const auto most = static_cast<double>(strongest);
-    const auto root = static_cast<double>(rooted);
     // Each cell marked with the overloaded crust it was last reached from, plus one.
     std::vector<std::size_t> marks(plate.crust.size(), 0);
     std::vector<bool> held(plate.crust.size(), false);
@@ -182,9 +181,7 @@ double collapse(Lithosphere::Plate& plate, const LevelGrid& grid, float stronges
         while (!ring.empty()) {
             for (const std::size_t index : ring) {
                 Crust& crust = plate.crust[index];
-                const auto thickness = static_cast<double>(crust.thickness);
-                foundered += std::max(thickness - root, 0.0) * area(index);
-                excess += (std::min(thickness, root) - most) * area(index);
+                excess += (static_cast<double>(crust.thickness) - most) * area(index);
                 crust.thickness = strongest;
                 held[index] = true;
             }
@@ -999,7 +996,7 @@ void Lithosphere::collide(double years, Ranges ranges) {
     }
     for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
         remove_crust(plates_[plate], std::move(scraped[plate]));
-        foundered_ += collapse(plates_[plate], grid_, ranges.strongest, ranges.rooted) * 1e-6;
+        foundered_ += collapse(plates_[plate], grid_, ranges.strongest) * 1e-6;
         flow(plates_[plate], grid_, settled_continent,
              std::min(static_cast<float>(years) * ranges.flow, 1.0F));
     }
