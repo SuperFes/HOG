@@ -3,6 +3,7 @@
 #include <hog/jobs/job_system.hpp>
 #include <hog/planet/isostasy.hpp>
 #include <hog/planet/lithosphere.hpp>
+#include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tectonics.hpp>
 #include <hog/planet/volume.hpp>
@@ -785,15 +786,64 @@ void Lithosphere::spread() {
     }
 }
 
-void Lithosphere::erode(std::span<const float> worn, const std::vector<bool>& drowned) {
+namespace {
+
+// Kilometres laid at each place of sediment `carried` into the sea there, in square metre
+// kilometres: as much as fills the water over it up to `sea_level`, the rest running on down to
+// the lowest place round it `drowned`, all of it where none lies lower.
+[[nodiscard]] std::vector<double> laid_down(const LevelGrid& grid, std::vector<double> carried,
+                                            std::span<const std::int64_t> heights,
+                                            std::int64_t sea_level,
+                                            const std::vector<bool>& drowned) {
+    constexpr double metres_per_km = 1'000.0;
+    std::vector<std::uint32_t> shallowest;
+    for (std::uint32_t place = 0; place < grid.size(); ++place) {
+        if (drowned[place]) {
+            shallowest.push_back(place);
+        }
+    }
+    // Downhill only, so what runs on from a place has yet to be laid where it runs to.
+    std::ranges::sort(shallowest, [&](std::uint32_t one, std::uint32_t other) {
+        return heights[one] != heights[other] ? heights[one] > heights[other] : one < other;
+    });
+    std::vector<double> laid(grid.size(), 0.0);
+    for (const std::uint32_t place : shallowest) {
+        if (carried[place] <= 0.0) {
+            continue;
+        }
+        std::uint32_t lowest = place;
+        for (const std::uint32_t next : grid.neighbors(place)) {
+            if (drowned[next] && heights[next] < heights[lowest]) {
+                lowest = next;
+            }
+        }
+        const auto area = static_cast<double>(grid.area(place));
+        const double room = fixed_to_double(sea_level - heights[place]) / metres_per_km * area;
+        const double kept = lowest == place ? carried[place] : std::min(carried[place], room);
+        laid[place] = kept / area;
+        if (lowest != place) {
+            carried[lowest] += carried[place] - kept;
+        }
+    }
+    return laid;
+}
+
+} // namespace
+
+void Lithosphere::erode(std::span<const float> worn, std::span<const std::int64_t> heights,
+                        std::int64_t sea_level) {
     HOG_ASSERT(worn.size() == grid_.size(), "one depth to each place");
-    HOG_ASSERT(drowned.size() == grid_.size(), "one flag to each place");
+    HOG_ASSERT(heights.size() == grid_.size(), "one height to each place");
     const std::vector<std::optional<Found>> on_top = tops();
+    std::vector<bool> drowned(grid_.size());
+    for (std::uint32_t place = 0; place < grid_.size(); ++place) {
+        drowned[place] = on_top[place] && heights[place] < sea_level;
+    }
     // Each place's nearest crust under the sea, out from the coasts a ring of places at a time.
     std::vector<std::uint32_t> sea(grid_.size(), parted);
     std::vector<std::uint32_t> frontier;
     for (std::uint32_t place = 0; place < grid_.size(); ++place) {
-        if (on_top[place] && drowned[place]) {
+        if (drowned[place]) {
             sea[place] = place;
             frontier.push_back(place);
         }
@@ -814,6 +864,7 @@ void Lithosphere::erode(std::span<const float> worn, const std::vector<bool>& dr
         const std::uint32_t plate = on_top[place]->plate;
         return plates_[plate].crust[held(plate, cell_center(grid_.cell(place))).value_or(0)];
     };
+    std::vector<double> carried(grid_.size(), 0.0);
     for (std::uint32_t place = 0; place < grid_.size(); ++place) {
         const std::optional<Found>& found = on_top[place];
         if (!found || found->crust.type != CrustType::Continental || drowned[place] ||
@@ -823,10 +874,15 @@ void Lithosphere::erode(std::span<const float> worn, const std::vector<bool>& dr
         Crust& land = crust_at(place);
         const float off = std::min(worn[place], land.thickness);
         strip(land, off);
-        const auto laid =
-            static_cast<float>(static_cast<double>(off) * static_cast<double>(grid_.area(place)) /
-                               static_cast<double>(grid_.area(sea[place])));
-        lay(crust_at(sea[place]), laid, Cover{laid});
+        carried[sea[place]] += static_cast<double>(off) * static_cast<double>(grid_.area(place));
+    }
+    const std::vector<double> laid =
+        laid_down(grid_, std::move(carried), heights, sea_level, drowned);
+    for (std::uint32_t place = 0; place < grid_.size(); ++place) {
+        if (laid[place] > 0.0) {
+            const auto thick = static_cast<float>(laid[place]);
+            lay(crust_at(place), thick, Cover{thick});
+        }
     }
 }
 
@@ -1092,47 +1148,60 @@ std::vector<Impact> impacts(std::uint64_t seed, double ago, double years, double
     return struck;
 }
 
+namespace {
+
+// How stiffly each of `plate`'s crust bends, on a planet of `radius` metres.
+[[nodiscard]] std::vector<double> stiffness_of(const Lithosphere::Plate& plate, double radius) {
+    std::vector<double> stiff(plate.crust.size());
+    std::ranges::transform(plate.crust, stiff.begin(), [&](const Crust& crust) {
+        return stiffness(elastic_thickness(crust), radius);
+    });
+    return stiff;
+}
+
+} // namespace
+
 void Lithosphere::bend(double radius) {
     constexpr double metres_per_km = 1'000.0;
-    constexpr auto unheld = std::numeric_limits<std::uint32_t>::max();
+    // Each on its own cells, so every column bends under its neighbours' loads as under its own.
+    each(jobs_, static_cast<std::uint32_t>(plates_.size()), 1,
+         [&](std::uint32_t index, std::uint32_t /*thread*/) {
+             Plate& plate = plates_[index];
+             std::vector<double> loads(plate.crust.size());
+             std::ranges::transform(plate.crust, loads.begin(), [](const Crust& crust) {
+                 const double buoyancy =
+                     crust.type == CrustType::Continental ? continental_buoyancy : oceanic_buoyancy;
+                 return (1.0 - buoyancy) * metres_per_km *
+                        static_cast<double>(crust.thickness -
+                                            crust.borne.value_or(crust.thickness));
+             });
+             const std::vector<double> bent =
+                 deflected(grid_, plate.cells, loads, stiffness_of(plate, radius));
+             for (std::size_t cell = 0; cell < plate.crust.size(); ++cell) {
+                 Crust& crust = plate.crust[cell];
+                 crust.sunk += static_cast<float>((bent[cell] - loads[cell]) / metres_per_km);
+                 crust.borne = crust.thickness;
+             }
+         });
+}
+
+std::vector<double> Lithosphere::lowering(double radius) const {
+    std::vector<std::vector<double>> alone(plates_.size());
+    for (std::size_t plate = 0; plate < plates_.size(); ++plate) {
+        alone[plate] =
+            sinking_alone(grid_, plates_[plate].cells, stiffness_of(plates_[plate], radius));
+    }
     const std::vector<std::optional<Found>> on_top = tops();
-    std::vector<double> loads(grid_.size(), 0.0);
-    std::vector<double> stiff(grid_.size(), 0.0);
-    std::vector<std::uint32_t> plate_at(grid_.size(), unheld);
-    std::vector<Crust*> crust_at(grid_.size(), nullptr);
-    std::vector<std::vector<bool>> taken(plates_.size());
-    for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
-        taken[plate].resize(plates_[plate].crust.size());
-    }
+    std::vector<double> lowers(grid_.size(), continental_buoyancy);
     for (std::uint32_t place = 0; place < grid_.size(); ++place) {
-        const std::optional<Found>& found = on_top[place];
-        const std::uint32_t plate = found.value_or(Found{}).plate;
-        const std::optional<std::size_t> index =
-            found ? held(plate, cell_center(grid_.cell(place))) : std::nullopt;
-        if (!index) {
-            continue;
-        }
-        Crust& crust = plates_[plate].crust[*index];
-        plate_at[place] = plate;
-        stiff[place] = stiffness(elastic_thickness(crust), radius);
-        // A column under two places bears its load under only one.
-        if (taken[plate][*index]) {
-            continue;
-        }
-        taken[plate][*index] = true;
-        crust_at[place] = &crust;
-        const double buoyancy =
-            crust.type == CrustType::Continental ? continental_buoyancy : oceanic_buoyancy;
-        loads[place] = (1.0 - buoyancy) * metres_per_km *
-                       static_cast<double>(crust.thickness - crust.borne.value_or(crust.thickness));
-    }
-    const std::vector<double> bent = deflected(grid_, loads, stiff, plate_at);
-    for (std::uint32_t place = 0; place < grid_.size(); ++place) {
-        if (Crust* crust = crust_at[place]) {
-            crust->sunk += static_cast<float>((bent[place] - loads[place]) / metres_per_km);
-            crust->borne = crust->thickness;
+        if (const std::optional<Found>& found = on_top[place]) {
+            const std::optional<std::size_t> index =
+                held(found->plate, cell_center(grid_.cell(place)));
+            const double share = index ? alone[found->plate][*index] : 1.0;
+            lowers[place] = 1.0 - (share * (1.0 - continental_buoyancy));
         }
     }
+    return lowers;
 }
 
 void Lithosphere::strike(std::span<const Impact> impacts, Craters craters) {

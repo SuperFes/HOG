@@ -62,12 +62,12 @@ inline constexpr double earth_gravity = 9.81;
 // Kilometres of crust worn off each place over `years` million years, standing at fixed-point
 // `heights` over a sea at `sea_level` with `cover` on top: land wears down the faster the higher
 // it stands over the lowest ground around it, or over the sea where that's lower, through each
-// layer of soft rock by its softness, rising again by its buoyancy as it's lightened, so it nears
-// that but never reaches it. Flat land, however high, stands.
-[[nodiscard]] std::vector<float> worn_down(const LevelGrid& grid,
-                                           std::span<const std::int64_t> heights,
-                                           std::int64_t sea_level, double years,
-                                           std::span<const Cover> cover);
+// layer of soft rock by its softness, its ground lowering `lowering` of each metre worn off as it
+// rises again for being lightened, so it nears that but never reaches it. Flat land, however
+// high, stands.
+[[nodiscard]] std::vector<float>
+worn_down(const LevelGrid& grid, std::span<const std::int64_t> heights, std::int64_t sea_level,
+          double years, std::span<const Cover> cover, std::span<const double> lowering);
 // Whether each place at fixed-point `heights` lies under a sea at `sea_level`.
 [[nodiscard]] std::vector<bool> drowned(std::span<const std::int64_t> heights,
                                         std::int64_t sea_level);
@@ -82,13 +82,19 @@ inline constexpr double earth_gravity = 9.81;
 // of the mantle it displaces, in metres to the fourth, on a planet of `radius` metres, whose
 // lengths along the ground are Earth's scaled to it.
 [[nodiscard]] double stiffness(double elastic, double radius);
-// Metres each place of `grid` sinks under `loads`, each the metres it would sink alone, as plates
-// as stiff as `stiffness` at each place bend under them: a broad load sinks as far as it would
-// alone, and a narrow one less, the plate around it sinking by as much in all. Each place bends
-// with its neighbours of the same of `plates` only, the plates broken at their edges.
-[[nodiscard]] std::vector<double> deflected(const LevelGrid& grid, std::span<const double> loads,
-                                            std::span<const double> stiffness,
-                                            std::span<const std::uint32_t> plates);
+// Metres each of `cells` of `grid`, ascending, of one plate, sinks under `loads`, each the metres
+// it would sink alone, as the plate, as stiff as `stiffness` at each, bends under them: a broad
+// load sinks as far as it would alone, and a narrow one less, the plate around it sinking by as
+// much in all. The plate is broken at its edges, bending with nothing beyond.
+[[nodiscard]] std::vector<double> deflected(const LevelGrid& grid,
+                                            std::span<const std::uint32_t> cells,
+                                            std::span<const double> loads,
+                                            std::span<const double> stiffness);
+// Of each of `cells`' own load, the share it sinks under alone, as the plate bends as stiff as
+// `stiffness` at each.
+[[nodiscard]] std::vector<double> sinking_alone(const LevelGrid& grid,
+                                                std::span<const std::uint32_t> cells,
+                                                std::span<const double> stiffness);
 // Cubic metres of water the ground holds below `level`, all heights fixed point.
 [[nodiscard]] double water_below(const LevelGrid& grid, std::span<const std::int64_t> heights,
                                  std::int64_t level);

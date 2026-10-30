@@ -50,6 +50,15 @@ double area_below(const LevelGrid& grid, const std::vector<std::int64_t>& height
     return below / area;
 }
 
+// Every cell of the grid, in order.
+std::vector<std::uint32_t> every_cell(const LevelGrid& grid) {
+    std::vector<std::uint32_t> cells(grid.size());
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        cells[cell] = cell;
+    }
+    return cells;
+}
+
 } // namespace
 
 TEST_CASE("continents float above the ocean floor, which sinks as it ages", "[planet][isostasy]") {
@@ -142,7 +151,8 @@ TEST_CASE("land wears down by how far it stands over the ground around it", "[pl
     const std::uint32_t flat = grid.neighbors(peak).front();
     const std::int64_t sea = 0;
     const std::vector<hog::planet::Cover> bare(grid.size(), hog::planet::Cover{});
-    const auto worn = worn_down(grid, heights, sea, 0.01, bare);
+    const std::vector<double> floating(grid.size(), continental_buoyancy);
+    const auto worn = worn_down(grid, heights, sea, 0.01, bare, floating);
     CHECK(worn[low] == 0.0F);
     CHECK(worn[flat] == 0.0F);
     CHECK_THAT(static_cast<double>(worn[peak]), WithinAbs(denudation * 0.01, 1e-5));
@@ -150,8 +160,15 @@ TEST_CASE("land wears down by how far it stands over the ground around it", "[pl
     CHECK_THAT(static_cast<double>(worn[coast]),
                WithinAbs(2.0 * static_cast<double>(worn[peak]), 1e-6));
     // Given long enough, as much as brings it down to the sea, and no more.
-    const auto ages = worn_down(grid, heights, sea, 1e6, bare);
+    const auto ages = worn_down(grid, heights, sea, 1e6, bare, floating);
     CHECK_THAT(static_cast<double>(ages[coast]), WithinAbs(2.0 / continental_buoyancy, 1e-4));
+    // Held down by a stiff plate, it lowers by all that's worn off it, so wears as fast to begin
+    // with, but no more than its height.
+    const std::vector<double> held(grid.size(), 1.0);
+    CHECK_THAT(static_cast<double>(worn_down(grid, heights, sea, 0.01, bare, held)[peak]),
+               WithinAbs(static_cast<double>(worn[peak]), 1e-5));
+    CHECK_THAT(static_cast<double>(worn_down(grid, heights, sea, 1e6, bare, held)[coast]),
+               WithinAbs(2.0, 1e-4));
 }
 
 TEST_CASE("each kind of rock wears at its own pace, and then the rock under it as ever",
@@ -169,7 +186,9 @@ TEST_CASE("each kind of rock wears at its own pace, and then the rock under it a
     const auto worn = [&](Cover soft, double years) {
         std::vector<Cover> cover(grid.size(), Cover{});
         cover[peak] = soft;
-        return static_cast<double>(worn_down(grid, heights, 0, years, cover)[peak]);
+        return static_cast<double>(
+            worn_down(grid, heights, 0, years, cover,
+                      std::vector<double>(grid.size(), continental_buoyancy))[peak]);
     };
     const double rock = worn({}, 0.01);
     CHECK_THAT(worn({5.0F, 0.0F}, 0.01), WithinAbs(softness[0] * rock, 1e-4));
@@ -329,17 +348,17 @@ TEST_CASE("a weak plate, or a load as broad as the plate, sinks as far as it wou
           "[planet][isostasy]") {
     using hog::planet::deflected;
     const LevelGrid grid{3, radius};
-    const std::vector<std::uint32_t> plates(grid.size(), 0);
+    const std::vector<std::uint32_t> cells = every_cell(grid);
     std::vector<double> loads(grid.size(), 0.0);
     loads[5] = 100.0;
     loads[40] = -30.0;
-    const auto alone = deflected(grid, loads, std::vector<double>(grid.size(), 0.0), plates);
+    const auto alone = deflected(grid, cells, loads, std::vector<double>(grid.size(), 0.0));
     for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
         CHECK_THAT(alone[cell], WithinAbs(loads[cell], 1e-9));
     }
     const auto area = static_cast<double>(grid.area(0));
-    const auto broad = deflected(grid, std::vector<double>(grid.size(), 250.0),
-                                 std::vector<double>(grid.size(), area * area), plates);
+    const auto broad = deflected(grid, cells, std::vector<double>(grid.size(), 250.0),
+                                 std::vector<double>(grid.size(), area * area));
     for (const double sunk : broad) {
         CHECK_THAT(sunk, WithinAbs(250.0, 1e-6));
     }
@@ -348,14 +367,14 @@ TEST_CASE("a weak plate, or a load as broad as the plate, sinks as far as it wou
 TEST_CASE("a stiff plate spreads a narrow load round it, sinking as much in all",
           "[planet][isostasy]") {
     const LevelGrid grid{4, radius};
-    const std::vector<std::uint32_t> plates(grid.size(), 0);
+    const std::vector<std::uint32_t> cells = every_cell(grid);
     // Mid-face, away from the cube's edges.
     constexpr std::uint32_t at = (16 * 8) + 8;
     std::vector<double> loads(grid.size(), 0.0);
     loads[at] = 1'000.0;
     const auto area = static_cast<double>(grid.area(at));
     const auto bent_by = [&](double stiff) {
-        return hog::planet::deflected(grid, loads, std::vector<double>(grid.size(), stiff), plates);
+        return hog::planet::deflected(grid, cells, loads, std::vector<double>(grid.size(), stiff));
     };
     const auto soft = bent_by(0.1 * area * area);
     const auto hard = bent_by(area * area);
@@ -373,36 +392,46 @@ TEST_CASE("a stiff plate spreads a narrow load round it, sinking as much in all"
     CHECK_THAT(sunk, WithinRel(1'000.0 * area, 1e-6));
 }
 
-TEST_CASE("plates bend apart, broken at their edges", "[planet][isostasy]") {
+TEST_CASE("a plate is broken at its edge, so a load there sinks further than one inside it",
+          "[planet][isostasy]") {
     const LevelGrid grid{4, radius};
-    std::vector<std::uint32_t> plates(grid.size());
+    // The northern half only.
+    std::vector<std::uint32_t> cells;
+    std::uint32_t inside = 0;
     for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
-        plates[cell] = hog::planet::cell_center(grid.cell(cell)).z > 0.0 ? 0 : 1;
-    }
-    // A load on the first plate right by the second.
-    std::uint32_t edge = 0;
-    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
-        const auto across = [&](std::uint32_t next) { return plates[next] == 1; };
-        if (plates[cell] == 0 && std::ranges::any_of(grid.neighbors(cell), across)) {
-            edge = cell;
-            break;
+        const double z = hog::planet::cell_center(grid.cell(cell)).z;
+        if (z > 0.0) {
+            cells.push_back(cell);
+        }
+        if (z > hog::planet::cell_center(grid.cell(inside)).z) {
+            inside = cell;
         }
     }
-    REQUIRE(plates[edge] == 0);
-    std::vector<double> loads(grid.size(), 0.0);
-    loads[edge] = 1'000.0;
-    const auto area = static_cast<double>(grid.area(edge));
-    const auto bent =
-        hog::planet::deflected(grid, loads, std::vector<double>(grid.size(), area * area), plates);
-    double sunk = 0.0;
-    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
-        if (plates[cell] == 1) {
-            CHECK(bent[cell] == 0.0);
-        }
-        sunk += bent[cell] * static_cast<double>(grid.area(cell));
+    const auto on_plate = [&](std::uint32_t cell) {
+        return std::ranges::binary_search(cells, cell);
+    };
+    std::size_t edge = 0;
+    while (std::ranges::all_of(grid.neighbors(cells[edge]), on_plate)) {
+        ++edge;
     }
-    CHECK(bent[edge] < 1'000.0);
-    CHECK_THAT(sunk, WithinRel(1'000.0 * area, 1e-6));
+    const auto node =
+        static_cast<std::size_t>(std::ranges::lower_bound(cells, inside) - cells.begin());
+    const auto sinks = [&](std::size_t at) {
+        std::vector<double> loads(cells.size(), 0.0);
+        loads[at] = 1'000.0;
+        const auto area = static_cast<double>(grid.area(cells[at]));
+        const auto bent = hog::planet::deflected(grid, cells, loads,
+                                                 std::vector<double>(cells.size(), area * area));
+        double sunk = 0.0;
+        for (std::size_t other = 0; other < cells.size(); ++other) {
+            sunk += bent[other] * static_cast<double>(grid.area(cells[other]));
+        }
+        CHECK_THAT(sunk, WithinRel(1'000.0 * area, 1e-6));
+        return bent[at];
+    };
+    const double at_edge = sinks(edge);
+    CHECK(at_edge < 1'000.0);
+    CHECK(at_edge > sinks(node));
 }
 
 TEST_CASE("plates stiffen as they cool, as deep as the plate under them allows",
@@ -490,4 +519,27 @@ TEST_CASE("a cold plate holds a crater dug into it a hollow, and young floor flo
     const auto floating = crust_heights(floor);
     floor.bend(radius);
     CHECK(crust_heights(floor) == floating);
+}
+
+TEST_CASE("worn land rises again by its buoyancy where its plate is weak, and less where stiff",
+          "[planet][isostasy]") {
+    using hog::planet::continental_buoyancy;
+    using hog::planet::Crust;
+    const auto lowered = [](Crust crust) {
+        const LevelGrid grid{6, radius};
+        Lithosphere::Plate plate;
+        for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+            plate.cells.push_back(cell);
+            plate.crust.push_back(crust);
+        }
+        return Lithosphere{grid, {plate}}.lowering(radius);
+    };
+    const auto weak = lowered(
+        Crust{.type = CrustType::Continental, .thickness = 40.0F, .age = 1'000.0F, .raised = 0.0F});
+    CHECK(std::ranges::all_of(
+        weak, [](double lowers) { return std::abs(lowers - continental_buoyancy) < 1e-12; }));
+    const auto stiff = lowered(Crust{
+        .type = CrustType::Continental, .thickness = 40.0F, .age = 1'000.0F, .raised = 1'000.0F});
+    CHECK(std::ranges::all_of(
+        stiff, [](double lowers) { return lowers > continental_buoyancy + 0.1 && lowers < 1.0; }));
 }

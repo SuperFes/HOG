@@ -295,11 +295,19 @@ public:
     // narrower than the plate bends over stands above where it would float alone, and sinks the
     // crust round it.
     void bend(double radius);
+    // Of each metre worn off the crust on top at each place alone, the metres its ground lowers,
+    // as its plate lets it rise for being lightened, on a planet of `radius` metres: by its
+    // buoyancy where the plate is weak, and by all of it where the plate holds it down.
+    [[nodiscard]] std::vector<double> lowering(double radius) const;
     // Wears `worn` kilometres off the continent on top at each place of the grid, its cover
-    // first, down to none, laying it down as sediment on the crust nearest it under the sea,
-    // `drowned`, volume for volume: on its own continent's shelf, building it out, or past that
-    // on ocean floor, which carries it off to a trench in time.
-    void erode(std::span<const float> worn, const std::vector<bool>& drowned);
+    // first, down to none, carrying it into the sea at the place under it nearest, the ground at
+    // fixed-point `heights` and the sea at `sea_level`: there it fills the water up to the sea's
+    // level, and what's left runs on down to the lowest place round it under the sea, and so on,
+    // laid all at once only where nothing round it lies lower. It's laid volume for volume, on
+    // its own continent's shelf, building it out, or past that on ocean floor, which carries it
+    // off to a trench in time.
+    void erode(std::span<const float> worn, std::span<const std::int64_t> heights,
+               std::int64_t sea_level);
     // The soft rock on top over each place of the grid.
     [[nodiscard]] std::vector<Cover> cover() const;
     // Turns every plate as the forces on it now move it against the mantle's drag and each

@@ -279,9 +279,8 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
     for (int step = 0; step <= options.tectonics.steps; ++step) {
         if (step % options.tectonics.every == 0 || step == options.tectonics.steps) {
             std::cout << census(lithosphere, step, config.radius) << std::flush;
-            const auto heights = timer.time("isostasy", [&] {
-                return hog::planet::flexed(grid, hog::planet::crust_heights(lithosphere));
-            });
+            const auto heights =
+                timer.time("isostasy", [&] { return hog::planet::crust_heights(lithosphere); });
             const std::int64_t sea = timer.time("sea", [&] {
                 if (step == options.tectonics.steps) {
                     water = hog::planet::topped_up(grid, heights, water, config.ocean_fraction);
@@ -312,13 +311,14 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
                     config.seed, (options.tectonics.steps - step - 1) * step_years, step_years,
                     smallest_crater));
             });
+            timer.time("bend", [&] { lithosphere.bend(config.radius); });
             timer.time("erode", [&] {
-                const auto heights =
-                    hog::planet::flexed(grid, hog::planet::crust_heights(lithosphere));
+                const auto heights = hog::planet::crust_heights(lithosphere);
                 const std::int64_t level = hog::planet::sea_level(grid, heights, water);
-                lithosphere.erode(
-                    hog::planet::worn_down(grid, heights, level, step_years, lithosphere.cover()),
-                    hog::planet::drowned(heights, level));
+                lithosphere.erode(hog::planet::worn_down(grid, heights, level, step_years,
+                                                         lithosphere.cover(),
+                                                         lithosphere.lowering(config.radius)),
+                                  heights, level);
             });
             timer.time("weld", [&] { lithosphere.weld(step_years); });
             timer.time("warm", [&] { lithosphere.warm(step_years, mantle); });

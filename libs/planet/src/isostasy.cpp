@@ -71,14 +71,16 @@ std::vector<std::int64_t> crust_heights(const Lithosphere& lithosphere) {
 }
 
 std::vector<float> worn_down(const LevelGrid& grid, std::span<const std::int64_t> heights,
-                             std::int64_t sea_level, double years, std::span<const Cover> cover) {
+                             std::int64_t sea_level, double years, std::span<const Cover> cover,
+                             std::span<const double> lowering) {
     HOG_ASSERT(heights.size() == grid.size(), "one height to each cell");
     HOG_ASSERT(cover.size() == grid.size(), "one cover to each cell");
+    HOG_ASSERT(lowering.size() == grid.size(), "one lowering to each cell");
     constexpr double metres_per_km = 1'000.0;
-    constexpr double buoyancy = continental_buoyancy;
+    double buoyancy = continental_buoyancy;
     // Wearing off r kilometres lowers the land by buoyancy * r, so its height h over the ground
     // around falls as e^(-buoyancy * denudation * years), the faster through soft rock.
-    const auto wearing = [](double above, double rate, double time) {
+    const auto wearing = [&](double above, double rate, double time) {
         return above / buoyancy * (1.0 - std::exp(-buoyancy * denudation * rate * time));
     };
     const auto through = [&](double above, const Cover& layers) {
@@ -110,6 +112,7 @@ std::vector<float> worn_down(const LevelGrid& grid, std::span<const std::int64_t
         }
         base = std::max(base, sea_level);
         const double above = std::max(fixed_to_double(heights[cell] - base), 0.0) / metres_per_km;
+        buoyancy = lowering[cell];
         worn[cell] = static_cast<float>(through(above, cover[cell]));
     }
     return worn;
@@ -168,69 +171,73 @@ double stiffness(double elastic, double radius) {
 
 namespace {
 
-// A plate bending as D ∇⁴w + ρg w = ρg load, as (M + K C M⁻¹ K) w = M load over the grid: M each
-// place's area, C its stiffness, and K the Laplacian's stiffness, a third between each pair of
+// A plate bending as D ∇⁴w + ρg w = ρg load, as (M + K C M⁻¹ K) w = M load over its cells: M each
+// cell's area, C its stiffness, and K the Laplacian's stiffness, a third between each pair of
 // neighbours, since eight of them round a square spread a field as h² ∇² over three.
 class Bending {
 public:
-    Bending(const LevelGrid& grid, std::span<const double> stiffness,
-            std::span<const std::uint32_t> plates)
-        : grid_{&grid}, stiffness_{stiffness}, plates_{plates}, area_(grid.size()),
-          curved_(grid.size()) {
-        for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
-            area_[cell] = static_cast<double>(grid.area(cell));
+    Bending(const LevelGrid& grid, std::span<const std::uint32_t> cells,
+            std::span<const double> stiffness)
+        : stiffness_{stiffness}, area_(cells.size()), curved_(cells.size()),
+          starts_(cells.size() + 1, 0) {
+        HOG_ASSERT(std::ranges::is_sorted(cells), "cells ascending");
+        for (std::size_t node = 0; node < cells.size(); ++node) {
+            area_[node] = static_cast<double>(grid.area(cells[node]));
+            for (const std::uint32_t next : grid.neighbors(cells[node])) {
+                const auto found = std::ranges::lower_bound(cells, next);
+                if (found != cells.end() && *found == next) {
+                    links_.push_back(static_cast<std::uint32_t>(found - cells.begin()));
+                }
+            }
+            starts_[node + 1] = links_.size();
         }
     }
 
-    [[nodiscard]] double area(std::uint32_t cell) const { return area_[cell]; }
+    [[nodiscard]] std::size_t size() const { return area_.size(); }
+    [[nodiscard]] double area(std::size_t node) const { return area_[node]; }
 
     void apply(std::span<const double> bent, std::span<double> out) {
         curve(bent, curved_);
-        for (std::uint32_t cell = 0; cell < grid_->size(); ++cell) {
-            curved_[cell] *= stiffness_[cell] / area_[cell];
+        for (std::size_t node = 0; node < size(); ++node) {
+            curved_[node] *= stiffness_[node] / area_[node];
         }
         curve(curved_, out);
-        for (std::uint32_t cell = 0; cell < grid_->size(); ++cell) {
-            out[cell] += area_[cell] * bent[cell];
+        for (std::size_t node = 0; node < size(); ++node) {
+            out[node] += area_[node] * bent[node];
         }
     }
 
     [[nodiscard]] std::vector<double> diagonal() const {
         constexpr double link = 1.0 / 3.0;
-        std::vector<double> diagonal(grid_->size());
-        for (std::uint32_t cell = 0; cell < grid_->size(); ++cell) {
-            double links = 0.0;
+        std::vector<double> diagonal(size());
+        for (std::size_t node = 0; node < size(); ++node) {
             double around = 0.0;
-            for (const std::uint32_t next : grid_->neighbors(cell)) {
-                if (plates_[next] == plates_[cell]) {
-                    links += link;
-                    around += link * link * stiffness_[next] / area_[next];
-                }
+            for (std::size_t at = starts_[node]; at < starts_[node + 1]; ++at) {
+                around += link * link * stiffness_[links_[at]] / area_[links_[at]];
             }
-            diagonal[cell] =
-                area_[cell] + (links * links * stiffness_[cell] / area_[cell]) + around;
+            const auto links = link * static_cast<double>(starts_[node + 1] - starts_[node]);
+            diagonal[node] =
+                area_[node] + (links * links * stiffness_[node] / area_[node]) + around;
         }
         return diagonal;
     }
 
 private:
     void curve(std::span<const double> field, std::span<double> out) const {
-        for (std::uint32_t cell = 0; cell < grid_->size(); ++cell) {
+        for (std::size_t node = 0; node < size(); ++node) {
             double sum = 0.0;
-            for (const std::uint32_t next : grid_->neighbors(cell)) {
-                if (plates_[next] == plates_[cell]) {
-                    sum += field[cell] - field[next];
-                }
+            for (std::size_t at = starts_[node]; at < starts_[node + 1]; ++at) {
+                sum += field[node] - field[links_[at]];
             }
-            out[cell] = sum / 3.0;
+            out[node] = sum / 3.0;
         }
     }
 
-    const LevelGrid* grid_;
     std::span<const double> stiffness_;
-    std::span<const std::uint32_t> plates_;
     std::vector<double> area_;
     std::vector<double> curved_;
+    std::vector<std::size_t> starts_;
+    std::vector<std::uint32_t> links_;
 };
 
 [[nodiscard]] double dot(std::span<const double> one, std::span<const double> other) {
@@ -243,23 +250,21 @@ private:
 
 } // namespace
 
-std::vector<double> deflected(const LevelGrid& grid, std::span<const double> loads,
-                              std::span<const double> stiffness,
-                              std::span<const std::uint32_t> plates) {
-    HOG_ASSERT(loads.size() == grid.size(), "one load to each cell");
-    HOG_ASSERT(stiffness.size() == grid.size(), "one stiffness to each cell");
-    HOG_ASSERT(plates.size() == grid.size(), "one plate to each cell");
+std::vector<double> deflected(const LevelGrid& grid, std::span<const std::uint32_t> cells,
+                              std::span<const double> loads, std::span<const double> stiffness) {
+    HOG_ASSERT(loads.size() == cells.size(), "one load to each cell");
+    HOG_ASSERT(stiffness.size() == cells.size(), "one stiffness to each cell");
     constexpr double tolerance = 1e-10;
-    const std::size_t size = grid.size();
-    Bending bending{grid, stiffness, plates};
-    // Conjugate gradients from where each place would sink alone, preconditioned by the diagonal.
+    const std::size_t size = cells.size();
+    Bending bending{grid, cells, stiffness};
+    // Conjugate gradients from where each cell would sink alone, preconditioned by the diagonal.
     std::vector<double> bent(loads.begin(), loads.end());
     std::vector<double> residual(size);
     bending.apply(bent, residual);
     double wanted = 0.0;
-    for (std::uint32_t cell = 0; cell < size; ++cell) {
-        const double load = bending.area(cell) * loads[cell];
-        residual[cell] = load - residual[cell];
+    for (std::size_t node = 0; node < size; ++node) {
+        const double load = bending.area(node) * loads[node];
+        residual[node] = load - residual[node];
         wanted += load * load;
     }
     const std::vector<double> diagonal = bending.diagonal();
@@ -272,18 +277,30 @@ std::vector<double> deflected(const LevelGrid& grid, std::span<const double> loa
          pass < size && dot(residual, residual) > tolerance * tolerance * wanted; ++pass) {
         bending.apply(step, pushed);
         const double length = along / dot(step, pushed);
-        for (std::size_t cell = 0; cell < size; ++cell) {
-            bent[cell] += length * step[cell];
-            residual[cell] -= length * pushed[cell];
+        for (std::size_t node = 0; node < size; ++node) {
+            bent[node] += length * step[node];
+            residual[node] -= length * pushed[node];
         }
         std::ranges::transform(residual, diagonal, scaled.begin(), std::divides{});
         const double next = dot(residual, scaled);
-        for (std::size_t cell = 0; cell < size; ++cell) {
-            step[cell] = scaled[cell] + (next / along * step[cell]);
+        for (std::size_t node = 0; node < size; ++node) {
+            step[node] = scaled[node] + (next / along * step[node]);
         }
         along = next;
     }
     return bent;
+}
+
+std::vector<double> sinking_alone(const LevelGrid& grid, std::span<const std::uint32_t> cells,
+                                  std::span<const double> stiffness) {
+    HOG_ASSERT(stiffness.size() == cells.size(), "one stiffness to each cell");
+    // Its neighbours held still, which they're not quite, so a little less than it does.
+    const Bending bending{grid, cells, stiffness};
+    std::vector<double> alone = bending.diagonal();
+    for (std::size_t node = 0; node < cells.size(); ++node) {
+        alone[node] = bending.area(node) / alone[node];
+    }
+    return alone;
 }
 
 double water_below(const LevelGrid& grid, std::span<const std::int64_t> heights,
