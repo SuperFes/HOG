@@ -970,6 +970,79 @@ TEST_CASE("plates part at ridges and close at trenches, either side of their edg
     }
 }
 
+TEST_CASE("plates fault the crust along their edge as they move against each other there",
+          "[planet][lithosphere]") {
+    using hog::planet::Slip;
+    Lithosphere lithosphere = settled(halves(), 20.0);
+    const auto& grid = lithosphere.grid();
+    const std::vector<hog::planet::Boundary> edges = lithosphere.boundaries();
+    lithosphere.drive();
+    int marked = 0;
+    for (const auto& edge : edges) {
+        const DVec3 at = hog::planet::cell_center(grid.cell(edge.place));
+        const std::optional<Crust> crust = lithosphere.crust_of(edge.plate, at);
+        REQUIRE(crust.has_value());
+        CHECK(crust.value_or(Crust{}).faulted == 0.0F);
+        // Away from the poles they turn about, pulled apart around +y and pushed together around
+        // -y.
+        if (std::abs(at.x) < 0.5) {
+            CHECK(crust.value_or(Crust{}).fault == (at.y > 0.0 ? Slip::Normal : Slip::Reverse));
+            ++marked;
+        }
+    }
+    CHECK(marked > 0);
+    // Nowhere near an edge, no fault.
+    CHECK(lithosphere.top(DVec3{0.0, 0.0, 1.0}).value_or(Lithosphere::Found{}).crust.fault ==
+          Slip::None);
+
+    // Turning about the axis through their middles, they slide past each other all along it.
+    const LevelGrid sliding_grid{4, radius};
+    const DVec3 up{0.0, 0.0, 1.0};
+    const Lithosphere::Plate north =
+        northern(sliding_grid, everywhere(sliding_grid, Crust{}, up, 0.01));
+    Lithosphere::Plate south = northern(sliding_grid, everywhere(sliding_grid, Crust{}, up, -0.01));
+    south.frame = glm::angleAxis(std::numbers::pi, DVec3{1.0, 0.0, 0.0});
+    Lithosphere sliding{sliding_grid, {north, south}};
+    const std::vector<hog::planet::Boundary> slid = sliding.boundaries();
+    REQUIRE_FALSE(slid.empty());
+    sliding.drive();
+    for (const auto& edge : slid) {
+        const DVec3 at = hog::planet::cell_center(sliding_grid.cell(edge.place));
+        CHECK(sliding.crust_of(edge.plate, at).value_or(Crust{}).fault == Slip::Strike);
+    }
+}
+
+TEST_CASE("faults keep how they slipped once the plates move on, each somewhere in its cycle",
+          "[planet][lithosphere]") {
+    using hog::planet::Fault;
+    using hog::planet::Slip;
+    Lithosphere lithosphere = settled(halves(), 20.0);
+    lithosphere.drive();
+    constexpr double years = 20.0;
+    lithosphere.advance(years);
+    const std::vector<Fault> found = lithosphere.faults(3);
+    REQUIRE_FALSE(found.empty());
+    CHECK(lithosphere.faults(3) == found);
+    CHECK(lithosphere.faults(4) != found);
+    int moving = 0;
+    int left = 0;
+    for (const Fault& fault : found) {
+        CHECK(fault.slip != Slip::None);
+        CHECK(fault.stress >= 0.0F);
+        CHECK(fault.stress < 1.0F);
+        if (fault.rate > 0.0) {
+            ++moving;
+            CHECK(fault.idle == 0.0F);
+        } else {
+            ++left;
+            CHECK_THAT(static_cast<double>(fault.idle), WithinAbs(years, 1e-4));
+        }
+    }
+    // Still moving along the edge, and left behind as the floor pulled apart moved off the ridge.
+    CHECK(moving > 0);
+    CHECK(left > 0);
+}
+
 TEST_CASE("continents closing on each other collide", "[planet][lithosphere]") {
     const Lithosphere lithosphere = settled(continental_halves(), 20.0);
     int collisions = 0;

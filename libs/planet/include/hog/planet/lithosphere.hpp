@@ -34,6 +34,10 @@ using Cover = std::array<float, cover_kinds>;
 inline constexpr float lithified = 2.0F;
 inline constexpr float hardened = 10.0F;
 
+// How the rock either side of a fault moves against each other: pulled apart, pushed together, or
+// sliding past.
+enum class Slip : std::uint8_t { None, Normal, Reverse, Strike };
+
 // A column of crust as its plate carries it.
 struct Crust {
     CrustType type = CrustType::Oceanic;
@@ -43,6 +47,10 @@ struct Crust {
     float raised = 0.0F;
     // What of it on top isn't crystalline rock.
     Cover cover{};
+    // How the fault through it last slipped, if a plate's edge ever ran through it, and million
+    // years since.
+    Slip fault = Slip::None;
+    float faulted = 0.0F;
 
     friend bool operator==(const Crust&, const Crust&) = default;
 };
@@ -136,6 +144,20 @@ struct Impacts {
 struct Craters {
     double simple = 4.0;
     double excavated = 0.1;
+};
+
+// A fault through the crust on top at a place of the grid: how it slips, how fast the rock either
+// side moves against each other there now, in radians a million years, or none where the plates
+// have since moved on, million years since they last did, and how near it is to slipping again,
+// from nought just after it last did to one as it does.
+struct Fault {
+    std::uint32_t place = 0;
+    Slip slip = Slip::None;
+    double rate = 0.0;
+    float idle = 0.0F;
+    float stress = 0.0F;
+
+    friend bool operator==(const Fault&, const Fault&) = default;
 };
 
 // How the mantle warms where continents lie over it, as their thick crust holds its heat in, and
@@ -275,8 +297,12 @@ public:
     // other's where they close, all at once, as nothing so slow carries momentum. The first time,
     // the drag is set so the plates keep the pace they had, and it stays so after. A slab pulls
     // from where it hangs whether or not its plates still close there, through welds and rifts,
-    // until it breaks off.
+    // until it breaks off. The crust along every plate's edge is faulted as its plates moved
+    // against each other there till now.
     void drive(Forces forces = {}, Strength strength = {});
+    // Every fault through the crust on top, on a world of `seed`. Faults slip again within years
+    // or centuries, far quicker than the plates move, so each is as likely anywhere in its cycle.
+    [[nodiscard]] std::vector<Fault> faults(std::uint64_t seed) const;
     // Warms and cools the mantle under each place by the crust on top over `years`, and sets how
     // hot it is on the whole as of now.
     void warm(double years, Mantle mantle = {});
@@ -368,6 +394,8 @@ private:
     // Floor going down a trench among `edges` now feeds the slab hanging there, in place of
     // whatever hung there before.
     void hang(std::span<const Boundary> edges);
+    // Faults the crust along each of `edges` as its plates move against each other there.
+    void fault(std::span<const Boundary> edges);
     // The mantle's drag on each plate turning at w, as -D w: D sums (I - r r^T) over its crust by
     // its share of the sphere, deeper keels dragging harder.
     [[nodiscard]] std::vector<glm::dmat3> mantle_drags(const Forces& forces) const;

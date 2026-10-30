@@ -731,6 +731,7 @@ void Lithosphere::advance(double years) {
         for (Crust& crust : plate.crust) {
             crust.age += aged;
             crust.raised += aged;
+            crust.faulted += aged;
         }
     }
     for (std::vector<Slab>& slabs : slabs_) {
@@ -1202,6 +1203,62 @@ void Lithosphere::collide(double years, Ranges ranges) {
     }
 }
 
+namespace {
+
+// How rock moving at `moving` against the rock across an edge facing `toward` slips: by whichever
+// it does more, close or part across it or slide along it.
+[[nodiscard]] Slip slip_of(DVec3 moving, DVec3 toward) {
+    const double across = glm::dot(moving, toward);
+    if (glm::length(moving - (across * toward)) > std::abs(across)) {
+        return Slip::Strike;
+    }
+    return across > 0.0 ? Slip::Reverse : Slip::Normal;
+}
+
+} // namespace
+
+void Lithosphere::fault(std::span<const Boundary> edges) {
+    for (const Boundary& edge : edges) {
+        const DVec3 at = cell_center(grid_.cell(edge.place));
+        const std::optional<std::size_t> index = held(edge.plate, at);
+        if (!index) {
+            continue;
+        }
+        Crust& crust = plates_[edge.plate].crust[*index];
+        crust.fault = slip_of(velocity(edge.plate, at) - velocity(edge.other, at), edge.normal);
+        crust.faulted = 0.0F;
+    }
+}
+
+std::vector<Fault> Lithosphere::faults(std::uint64_t seed) const {
+    constexpr std::uint64_t salt = 0x6661756c74ULL;
+    const std::vector<std::optional<Found>> on_top = tops();
+    std::vector<Fault> at_place(grid_.size());
+    for (std::uint32_t place = 0; place < grid_.size(); ++place) {
+        const Crust crust = on_top[place].value_or(Found{}).crust;
+        at_place[place] = {.place = place,
+                           .slip = crust.fault,
+                           .rate = 0.0,
+                           .idle = crust.faulted,
+                           .stress = static_cast<float>(unit(hash_values(seed, salt, place)))};
+    }
+    // Where plates still move against each other, as fast as they do now; of several, the fastest.
+    for (const Boundary& edge : boundaries()) {
+        const DVec3 at = cell_center(grid_.cell(edge.place));
+        const DVec3 moving = velocity(edge.plate, at) - velocity(edge.other, at);
+        Fault& here = at_place[edge.place];
+        if (const double rate = glm::length(moving); rate > here.rate) {
+            here.slip = slip_of(moving, edge.normal);
+            here.rate = rate;
+            here.idle = 0.0F;
+        }
+    }
+    std::vector<Fault> found;
+    std::ranges::copy_if(at_place, std::back_inserter(found),
+                         [](const Fault& fault) { return fault.slip != Slip::None; });
+    return found;
+}
+
 void Lithosphere::hang(std::span<const Boundary> edges) {
     std::vector<std::vector<Slab>> fed(plates_.size());
     for (const Boundary& edge : edges) {
@@ -1291,6 +1348,7 @@ void Lithosphere::drive(Forces forces, Strength strength) {
     // Each force along the surface at a place turns its plate about the planet's middle.
     const std::vector<Boundary> edges = boundaries();
     hang(edges);
+    fault(edges);
     const std::vector<std::vector<Push>> found = pushes(edges, forces, strength);
     std::vector<DVec3> torques(plates_.size(), DVec3{0.0});
     for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
