@@ -2,6 +2,7 @@
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -53,20 +54,19 @@ constexpr double edge_darkening = 0.6;
 
 // Each pixel of the view coloured by `colour` of the grid cell under it, plate edges darkened.
 template <typename Colour>
-Image paint(const planet::Tectonics& tectonics, double planet_radius, const View& view, int width,
-            jobs::JobSystem& jobs, const Colour& colour) {
+Image paint(const planet::LevelGrid& grid, std::span<const std::uint32_t> plates,
+            double planet_radius, const View& view, int width, jobs::JobSystem& jobs,
+            const Colour& colour) {
     const ImageSize size = image_size(view, width);
     Image image{.width = size.width,
                 .height = size.height,
                 .pixels = std::vector<std::uint8_t>(3 * static_cast<std::size_t>(size.width) *
                                                     static_cast<std::size_t>(size.height))};
-    const planet::LevelGrid& grid = tectonics.grid();
-    const auto columns = tectonics.columns();
     const auto colour_at = [&](DVec3 direction) {
         const std::uint32_t cell = grid.index(planet::cell_at(direction, grid.level()));
         const Rgb here = colour(cell);
         for (const std::uint32_t next : grid.neighbors(cell)) {
-            if (columns[next].plate != columns[cell].plate) {
+            if (plates[next] != plates[cell]) {
                 return mix(here, Rgb{0, 0, 0}, edge_darkening);
             }
         }
@@ -154,14 +154,24 @@ Rgb relief_colour(double above_sea) noexcept {
 Image render_tectonics(const planet::Tectonics& tectonics, double planet_radius, const View& view,
                        int width, jobs::JobSystem& jobs) {
     const auto columns = tectonics.columns();
-    return paint(tectonics, planet_radius, view, width, jobs,
+    std::vector<std::uint32_t> plates(columns.size());
+    std::ranges::transform(columns, plates.begin(),
+                           [](const planet::Tectonics::Column& column) { return column.plate; });
+    return paint(tectonics.grid(), plates, planet_radius, view, width, jobs,
                  [&](std::uint32_t cell) { return crust_colour(columns[cell]); });
 }
 
-Image render_relief(const planet::Tectonics& tectonics, std::span<const std::int64_t> heights,
+Image render_relief(const planet::Lithosphere& lithosphere, std::span<const std::int64_t> heights,
                     std::int64_t sea_level, double planet_radius, const View& view, int width,
                     jobs::JobSystem& jobs) {
-    return paint(tectonics, planet_radius, view, width, jobs, [&](std::uint32_t cell) {
+    const planet::LevelGrid& grid = lithosphere.grid();
+    std::vector<std::uint32_t> plates(grid.size(), parted);
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        if (const auto found = lithosphere.top(planet::cell_center(grid.cell(cell)))) {
+            plates[cell] = found->plate;
+        }
+    }
+    return paint(grid, plates, planet_radius, view, width, jobs, [&](std::uint32_t cell) {
         return relief_colour(planet::fixed_to_double(heights[cell] - sea_level));
     });
 }

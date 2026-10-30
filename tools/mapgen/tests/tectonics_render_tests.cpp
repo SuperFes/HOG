@@ -79,10 +79,11 @@ TEST_CASE("the sea is drawn darker the deeper, the land paler the higher", "[map
 
 TEST_CASE("a relief map shows land above the sea and sea below it", "[mapgen]") {
     const Tectonics tectonics{1, radius, {.level = 4, .plates = 6}};
-    const auto heights = hog::planet::crust_heights(tectonics);
+    const auto lithosphere = hog::planet::lithosphere_from(tectonics, 10.0);
+    const auto heights = hog::planet::crust_heights(lithosphere);
     hog::jobs::JobSystem jobs{2};
     const auto image =
-        hog::mapgen::render_relief(tectonics, heights, 1'000 * hog::planet::fixed_one, radius,
+        hog::mapgen::render_relief(lithosphere, heights, 1'000 * hog::planet::fixed_one, radius,
                                    hog::mapgen::PlanetView{}, 128, jobs);
     REQUIRE(image.pixels.size() == std::size_t{3} * 128 * 64);
     int land = 0;

@@ -25,7 +25,7 @@ namespace hog::mapgen {
 [[nodiscard]] Image render_tectonics(const planet::Tectonics& tectonics, double planet_radius,
                                      const View& view, int width, jobs::JobSystem& jobs);
 // The crust's fixed-point `heights` against the sea, plate edges darkened the same.
-[[nodiscard]] Image render_relief(const planet::Tectonics& tectonics,
+[[nodiscard]] Image render_relief(const planet::Lithosphere& lithosphere,
                                   std::span<const std::int64_t> heights, std::int64_t sea_level,
                                   double planet_radius, const View& view, int width,
                                   jobs::JobSystem& jobs);

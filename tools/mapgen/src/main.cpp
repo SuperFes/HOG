@@ -233,7 +233,7 @@ int render_seasons(const hog::mapgen::Options& options, const hog::planet::Plane
     return EXIT_SUCCESS;
 }
 
-// Moves a v2 world's plates, writing its crust and its relief against the sea every few steps,
+// Moves a v2 world's plates, writing their crust and its relief against the sea every few steps,
 // and a sheet of each.
 int render_tectonics(const hog::mapgen::Options& options, const hog::planet::PlanetConfig& config,
                      hog::jobs::JobSystem& jobs) {
@@ -243,7 +243,7 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
         std::cerr << timer.report();
         return result;
     };
-    hog::planet::Tectonics tectonics = timer.time("plates", [&] {
+    const hog::planet::Tectonics tectonics = timer.time("plates", [&] {
         return hog::planet::Tectonics{
             config.seed,
             config.radius,
@@ -260,7 +260,6 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
     }
     const auto& grid = tectonics.grid();
     double water = hog::planet::starting_water(grid);
-    std::vector<hog::mapgen::Image> crust;
     std::vector<hog::mapgen::Image> relief;
     std::vector<hog::mapgen::Image> plates;
     const auto keep = [&](std::vector<hog::mapgen::Image>& frames, std::string_view kind, int step,
@@ -274,7 +273,7 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
         if (step % options.tectonics.every == 0 || step == options.tectonics.steps) {
             std::cout << census(lithosphere, step, config.radius) << std::flush;
             const auto heights = timer.time("isostasy", [&] {
-                return hog::planet::flexed(grid, hog::planet::crust_heights(tectonics));
+                return hog::planet::flexed(grid, hog::planet::crust_heights(lithosphere));
             });
             const std::int64_t sea = timer.time("sea", [&] {
                 if (step == options.tectonics.steps) {
@@ -283,11 +282,8 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
                 return hog::planet::sea_level(grid, heights, water);
             });
             const bool written = timer.time("render", [&] {
-                return keep(crust, "tectonics", step,
-                            hog::mapgen::render_tectonics(tectonics, config.radius, options.view,
-                                                          options.size, jobs)) == EXIT_SUCCESS &&
-                       keep(relief, "relief", step,
-                            hog::mapgen::render_relief(tectonics, heights, sea, config.radius,
+                return keep(relief, "relief", step,
+                            hog::mapgen::render_relief(lithosphere, heights, sea, config.radius,
                                                        options.view, options.size, jobs)) ==
                            EXIT_SUCCESS &&
                        keep(plates, "plates", step,
@@ -299,7 +295,6 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
             }
         }
         if (step < options.tectonics.steps) {
-            timer.time("tectonics", [&] { tectonics.step(); });
             timer.time("plates", [&] {
                 lithosphere.advance(step_years);
                 lithosphere.subduct(step_years);
@@ -318,10 +313,7 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
         return options.output / (first.substr(0, first.rfind('-')) + ".png");
     };
     return report(timer.time("sheets", [&] {
-        return write(sheet("tectonics"), hog::mapgen::contact_sheet(crust, columns)) ==
-                           EXIT_SUCCESS &&
-                       write(sheet("relief"), hog::mapgen::contact_sheet(relief, columns)) ==
-                           EXIT_SUCCESS
+        return write(sheet("relief"), hog::mapgen::contact_sheet(relief, columns)) == EXIT_SUCCESS
                    ? write(sheet("plates"), hog::mapgen::contact_sheet(plates, columns))
                    : EXIT_FAILURE;
     }));
