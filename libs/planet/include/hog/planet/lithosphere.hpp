@@ -44,12 +44,14 @@ struct Arcs {
 
 // How continental crust piled up into ranges bears its own weight: past `strongest` kilometres
 // it flows out at once into the thinner crust around it, a wedge spreading out over ocean floor
-// as over continent and burying it, its dense root foundering into the mantle only where the plate
-// has no room left at all; short of that, what's piled over a continent's
-// settled thickness spreads into it by `flow` of the difference every million years, so a range
-// piled up along a line widens into a belt.
+// as over continent and burying it, foundering into the mantle only where the plate has no room
+// left at all. Past `rooted` kilometres its root has turned to eclogite, denser than the mantle,
+// and breaks off and founders whatever room there is, as under Tibet and the Altiplano. Short of
+// `strongest`, what's piled over a continent's settled thickness spreads into it by `flow` of the
+// difference every million years, so a range piled up along a line widens into a belt.
 struct Ranges {
     float strongest = 65.0F;
+    float rooted = 80.0F;
     float flow = 0.02F;
 };
 

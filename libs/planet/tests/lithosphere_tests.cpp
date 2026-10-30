@@ -521,30 +521,40 @@ TEST_CASE("crust piled too thick flows out into the thinner continent around it"
     CHECK(thickest(lithosphere) > continent.thickness);
 }
 
-TEST_CASE("crust too thick with only ocean floor around spreads out over it",
+TEST_CASE("crust too thick with only ocean floor around spreads out over it, but for its root",
           "[planet][lithosphere]") {
-    // A thick arc of continent around the pole, with only ocean floor around it.
-    const LevelGrid grid{4, radius};
-    Lithosphere::Plate plate = everywhere(grid, Crust{}, DVec3{0.0, 0.0, 1.0}, 0.0);
-    std::size_t arc = 0;
-    for (std::size_t index = 0; index < plate.cells.size(); ++index) {
-        if (hog::planet::cell_center(grid.cell(plate.cells[index])).z > 0.95) {
-            plate.crust[index] = continent;
-            plate.crust[index].thickness = 90.0F;
-            ++arc;
-        }
-    }
-    Lithosphere lithosphere{grid, {plate}};
-    const double volume = continental_volume(lithosphere);
     const hog::planet::Ranges ranges;
-    lithosphere.collide(10.0, ranges);
-    CHECK(thickest(lithosphere) == ranges.strongest);
-    CHECK(lithosphere.foundered() == 0.0);
-    const auto& crust = lithosphere.plates()[0].crust;
-    CHECK(std::ranges::count(crust, CrustType::Continental, &Crust::type) >
-          static_cast<std::ptrdiff_t>(arc));
+    // A thick arc of continent around the pole, with only ocean floor around it.
+    const auto arc = [&](float thickness) {
+        const LevelGrid grid{4, radius};
+        Lithosphere::Plate plate = everywhere(grid, Crust{}, DVec3{0.0, 0.0, 1.0}, 0.0);
+        for (std::size_t index = 0; index < plate.cells.size(); ++index) {
+            if (hog::planet::cell_center(grid.cell(plate.cells[index])).z > 0.95) {
+                plate.crust[index] = continent;
+                plate.crust[index].thickness = thickness;
+            }
+        }
+        return Lithosphere{grid, {plate}};
+    };
+    const auto continental = [](const Lithosphere& lithosphere) {
+        return std::ranges::count(lithosphere.plates()[0].crust, CrustType::Continental,
+                                  &Crust::type);
+    };
+    Lithosphere spread = arc(ranges.rooted);
+    const double volume = continental_volume(spread);
+    const auto cells = continental(spread);
+    spread.collide(10.0, ranges);
+    CHECK(thickest(spread) == ranges.strongest);
+    CHECK(spread.foundered() == 0.0);
+    CHECK(continental(spread) > cells);
     // The floor buried under it as well.
-    CHECK(continental_volume(lithosphere) > volume);
+    CHECK(continental_volume(spread) > volume);
+
+    Lithosphere rooted = arc(90.0F);
+    const double piled = continental_volume(rooted);
+    rooted.collide(10.0, ranges);
+    CHECK_THAT(rooted.foundered(),
+               WithinRel(piled * (90.0 - static_cast<double>(ranges.rooted)) / 90.0, 1e-6));
 }
 
 TEST_CASE("crust too thick with no room on its whole plate founders into the mantle",
@@ -1010,7 +1020,7 @@ TEST_CASE("plates moving as one weld into one plate whatever crust they meet wit
     CHECK(touching.plates().size() == 1);
 }
 
-TEST_CASE("continents piling up more than they can take spread out, and their plates stay apart",
+TEST_CASE("continents piling up past their roots founder, and their plates stay apart",
           "[planet][lithosphere]") {
     // A strip of thick continent along where the halves meet, with only ocean floor beyond.
     const Lithosphere ocean = halves();
@@ -1027,7 +1037,7 @@ TEST_CASE("continents piling up more than they can take spread out, and their pl
         }
     }
     Lithosphere jammed = settled(Lithosphere{grid, plates}, 20.0);
-    CHECK(jammed.foundered() == 0.0);
+    CHECK(jammed.foundered() > 0.0);
     jammed.weld(10.0);
     CHECK(jammed.plates().size() == 2);
 }
