@@ -870,6 +870,103 @@ TEST_CASE("sediment fills the sea up to its level by the coast, and runs on down
     CHECK(beyond > 0);
 }
 
+TEST_CASE("sediment builds out from the coast ring by ring, filling hollows on its way",
+          "[planet][lithosphere]") {
+    // A continent around the pole, the ocean floor round it deepening away from it, with a hollow
+    // in it near the coast.
+    const LevelGrid grid{4, radius};
+    Lithosphere::Plate plate = everywhere(grid, Crust{}, DVec3{0.0, 0.0, 1.0}, 0.0);
+    std::vector<std::int64_t> heights(grid.size());
+    std::vector<bool> land(grid.size());
+    std::optional<std::uint32_t> hollow;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const double z = hog::planet::cell_center(grid.cell(cell)).z;
+        land[cell] = z > 0.9;
+        if (land[cell]) {
+            plate.crust[cell] = continent;
+        }
+        heights[cell] = std::llround((land[cell] ? 1'000.0 : -20'000.0 * (0.9 - z)) *
+                                     static_cast<double>(hog::planet::fixed_one));
+    }
+    // Off the coast, but not on it.
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const auto ashore = [&](std::uint32_t next) { return land[next]; };
+        if (!land[cell] && std::ranges::none_of(grid.neighbors(cell), ashore) &&
+            (!hollow || heights[cell] > heights[hollow.value_or(0)])) {
+            hollow = cell;
+        }
+    }
+    REQUIRE(hollow.has_value());
+    const std::uint32_t pit = hollow.value_or(0);
+    std::int64_t rim = std::numeric_limits<std::int64_t>::max();
+    for (const std::uint32_t next : grid.neighbors(pit)) {
+        rim = std::min(rim, heights[next]);
+    }
+    heights[pit] = rim - (500 * hog::planet::fixed_one);
+    Lithosphere lithosphere{grid, {plate}};
+    lithosphere.erode(std::vector<float>(grid.size(), 3.0F), heights, 0);
+    const auto stands = [&](std::uint32_t cell) {
+        const auto gained =
+            static_cast<double>(lithosphere.plates()[0].crust[cell].thickness - Crust{}.thickness);
+        return hog::planet::fixed_to_double(heights[cell]) + (gained * 1'000.0);
+    };
+    int beyond = 0;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        if (!land[cell]) {
+            // No higher than the sea.
+            CHECK(stands(cell) <= 0.1);
+            beyond +=
+                cell != pit && lithosphere.plates()[0].crust[cell].thickness > Crust{}.thickness
+                    ? 1
+                    : 0;
+        }
+    }
+    CHECK(beyond > 0);
+    CHECK(lithosphere.plates()[0].crust[pit].thickness > Crust{}.thickness);
+}
+
+TEST_CASE("ground under the sea's level but cut off from the sea isn't sea",
+          "[planet][lithosphere]") {
+    // Land everywhere but the ocean round the south pole, with a hollow under the sea's level at
+    // the north pole.
+    const LevelGrid grid{3, radius};
+    Lithosphere::Plate plate = everywhere(grid, continent, DVec3{0.0, 0.0, 1.0}, 0.0);
+    std::vector<std::int64_t> heights(grid.size());
+    std::uint32_t pit = 0;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const double z = hog::planet::cell_center(grid.cell(cell)).z;
+        if (z < -0.5) {
+            plate.crust[cell] = Crust{};
+        }
+        heights[cell] = (z < -0.5 ? -4'000 : 1'000) * hog::planet::fixed_one;
+        if (z > hog::planet::cell_center(grid.cell(pit)).z) {
+            pit = cell;
+        }
+    }
+    heights[pit] = -500 * hog::planet::fixed_one;
+    std::vector<float> worn(grid.size(), 0.0F);
+    for (const std::uint32_t next : grid.neighbors(pit)) {
+        worn[next] = 1.0F;
+    }
+    Lithosphere lithosphere{grid, {plate}};
+    lithosphere.erode(worn, heights, 0);
+    // Worn round it, but none of it laid in it.
+    CHECK(lithosphere.plates()[0].crust[pit].thickness == continent.thickness);
+    double laid = 0.0;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const Crust& crust = lithosphere.plates()[0].crust[cell];
+        if (crust.type == CrustType::Oceanic) {
+            laid += static_cast<double>(grid.area(cell)) *
+                    static_cast<double>(crust.thickness - Crust{}.thickness);
+        }
+    }
+    double off = 0.0;
+    for (const std::uint32_t next : grid.neighbors(pit)) {
+        off += static_cast<double>(grid.area(next));
+    }
+    CHECK_THAT(laid, WithinRel(off, 1e-5));
+}
+
 TEST_CASE("a continent's soft rock wears off before the rock under it, the softest first",
           "[planet][lithosphere]") {
     const LevelGrid grid{3, radius};

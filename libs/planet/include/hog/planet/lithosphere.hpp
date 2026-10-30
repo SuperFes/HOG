@@ -300,10 +300,10 @@ public:
     // buoyancy where the plate is weak, and by all of it where the plate holds it down.
     [[nodiscard]] std::vector<double> lowering(double radius) const;
     // Wears `worn` kilometres off the continent on top at each place of the grid, its cover
-    // first, down to none, carrying it into the sea at the place under it nearest, the ground at
-    // fixed-point `heights` and the sea at `sea_level`: there it fills the water up to the sea's
-    // level, and what's left runs on down to the lowest place round it under the sea, and so on,
-    // laid all at once only where nothing round it lies lower. It's laid volume for volume, on
+    // first, down to none, carrying it into the open sea at the place of it nearest, the ground at
+    // fixed-point `heights` and the sea at `sea_level`, the largest body of ground under that
+    // joined together, the rest cut off from it: from there it fills the nearest water up to the
+    // sea's level first, as deltas and shelves build out. It's laid volume for volume, on
     // its own continent's shelf, building it out, or past that on ocean floor, which carries it
     // off to a trench in time.
     void erode(std::span<const float> worn, std::span<const std::int64_t> heights,

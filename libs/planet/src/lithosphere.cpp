@@ -788,42 +788,89 @@ void Lithosphere::spread() {
 
 namespace {
 
-// Kilometres laid at each place of sediment `carried` into the sea there, in square metre
-// kilometres: as much as fills the water over it up to `sea_level`, the rest running on down to
-// the lowest place round it `drowned`, all of it where none lies lower.
-[[nodiscard]] std::vector<double> laid_down(const LevelGrid& grid, std::vector<double> carried,
-                                            std::span<const std::int64_t> heights,
-                                            std::int64_t sea_level,
-                                            const std::vector<bool>& drowned) {
-    constexpr double metres_per_km = 1'000.0;
-    std::vector<std::uint32_t> shallowest;
-    for (std::uint32_t place = 0; place < grid.size(); ++place) {
-        if (drowned[place]) {
-            shallowest.push_back(place);
-        }
-    }
-    // Downhill only, so what runs on from a place has yet to be laid where it runs to.
-    std::ranges::sort(shallowest, [&](std::uint32_t one, std::uint32_t other) {
-        return heights[one] != heights[other] ? heights[one] > heights[other] : one < other;
-    });
-    std::vector<double> laid(grid.size(), 0.0);
-    for (const std::uint32_t place : shallowest) {
-        if (carried[place] <= 0.0) {
+// Of the places of the grid `under` the sea's level, those of the open sea: the largest body of
+// them joined together, the rest cut off from it.
+[[nodiscard]] std::vector<bool> open_sea(const LevelGrid& grid, const std::vector<bool>& under) {
+    constexpr auto none = std::numeric_limits<std::uint32_t>::max();
+    std::vector<std::uint32_t> body(grid.size(), none);
+    std::uint32_t largest = none;
+    double widest = 0.0;
+    std::uint32_t count = 0;
+    for (std::uint32_t first = 0; first < grid.size(); ++first) {
+        if (!under[first] || body[first] != none) {
             continue;
         }
-        std::uint32_t lowest = place;
-        for (const std::uint32_t next : grid.neighbors(place)) {
-            if (drowned[next] && heights[next] < heights[lowest]) {
-                lowest = next;
+        double area = 0.0;
+        std::vector<std::uint32_t> frontier{first};
+        body[first] = count;
+        while (!frontier.empty()) {
+            const std::uint32_t place = frontier.back();
+            frontier.pop_back();
+            area += static_cast<double>(grid.area(place));
+            for (const std::uint32_t next : grid.neighbors(place)) {
+                if (under[next] && body[next] == none) {
+                    body[next] = count;
+                    frontier.push_back(next);
+                }
             }
         }
-        const auto area = static_cast<double>(grid.area(place));
-        const double room = fixed_to_double(sea_level - heights[place]) / metres_per_km * area;
-        const double kept = lowest == place ? carried[place] : std::min(carried[place], room);
-        laid[place] = kept / area;
-        if (lowest != place) {
-            carried[lowest] += carried[place] - kept;
+        if (area > widest) {
+            widest = area;
+            largest = count;
         }
+        ++count;
+    }
+    std::vector<bool> open(grid.size(), false);
+    for (std::uint32_t place = 0; place < grid.size(); ++place) {
+        open[place] = under[place] && body[place] == largest;
+    }
+    return open;
+}
+
+// Kilometres laid at each place of sediment `carried` into the `open` sea there, in square metre
+// kilometres: from each place it comes in at, filling the nearest water up to `sea_level` first,
+// out across what's filled already, as deltas and shelves build out from the coast.
+[[nodiscard]] std::vector<double> laid_down(const LevelGrid& grid, std::span<const double> carried,
+                                            std::span<const std::int64_t> heights,
+                                            std::int64_t sea_level, const std::vector<bool>& open) {
+    constexpr double metres_per_km = 1'000.0;
+    std::vector<double> room(grid.size(), 0.0);
+    for (std::uint32_t place = 0; place < grid.size(); ++place) {
+        if (open[place]) {
+            room[place] = std::max(fixed_to_double(sea_level - heights[place]), 0.0) /
+                          metres_per_km * static_cast<double>(grid.area(place));
+        }
+    }
+    std::vector<double> laid(grid.size(), 0.0);
+    std::vector<std::uint32_t> seen(grid.size(), 0);
+    std::uint32_t search = 0;
+    std::vector<std::uint32_t> nearest;
+    for (std::uint32_t entry = 0; entry < grid.size(); ++entry) {
+        double left = carried[entry];
+        if (!open[entry] || left <= 0.0) {
+            continue;
+        }
+        ++search;
+        nearest.assign(1, entry);
+        seen[entry] = search;
+        for (std::size_t at = 0; at < nearest.size() && left > 0.0; ++at) {
+            const std::uint32_t place = nearest[at];
+            const double taken = std::min(left, room[place]);
+            room[place] -= taken;
+            laid[place] += taken;
+            left -= taken;
+            for (const std::uint32_t next : grid.neighbors(place)) {
+                if (open[next] && seen[next] != search) {
+                    seen[next] = search;
+                    nearest.push_back(next);
+                }
+            }
+        }
+        // The whole sea filled, it's laid where it came in.
+        laid[entry] += left;
+    }
+    for (std::uint32_t place = 0; place < grid.size(); ++place) {
+        laid[place] /= static_cast<double>(grid.area(place));
     }
     return laid;
 }
@@ -835,10 +882,11 @@ void Lithosphere::erode(std::span<const float> worn, std::span<const std::int64_
     HOG_ASSERT(worn.size() == grid_.size(), "one depth to each place");
     HOG_ASSERT(heights.size() == grid_.size(), "one height to each place");
     const std::vector<std::optional<Found>> on_top = tops();
-    std::vector<bool> drowned(grid_.size());
+    std::vector<bool> under(grid_.size());
     for (std::uint32_t place = 0; place < grid_.size(); ++place) {
-        drowned[place] = on_top[place] && heights[place] < sea_level;
+        under[place] = on_top[place] && heights[place] < sea_level;
     }
+    const std::vector<bool> drowned = open_sea(grid_, under);
     // Each place's nearest crust under the sea, out from the coasts a ring of places at a time.
     std::vector<std::uint32_t> sea(grid_.size(), parted);
     std::vector<std::uint32_t> frontier;
@@ -876,8 +924,7 @@ void Lithosphere::erode(std::span<const float> worn, std::span<const std::int64_
         strip(land, off);
         carried[sea[place]] += static_cast<double>(off) * static_cast<double>(grid_.area(place));
     }
-    const std::vector<double> laid =
-        laid_down(grid_, std::move(carried), heights, sea_level, drowned);
+    const std::vector<double> laid = laid_down(grid_, carried, heights, sea_level, drowned);
     for (std::uint32_t place = 0; place < grid_.size(); ++place) {
         if (laid[place] > 0.0) {
             const auto thick = static_cast<float>(laid[place]);
