@@ -164,6 +164,21 @@ struct Fault {
     friend bool operator==(const Fault&, const Fault&) = default;
 };
 
+// How the lower crust of continents creeps where it's warm, from under high ground to under low,
+// as a channel at most `channel` kilometres thick under the `brittle` kilometres of rock over it
+// that break rather than flow (Chen & Molnar 1983), of
+// `viscosity` pascal seconds at `reference` kelvin (Clark & Royden 2000), stiffer as it cools by
+// the activation energy of creep in wet quartzite, joules a mole (Hirth, Teyssier & Dunlap 2001),
+// but no runnier than partly molten crust, `runniest` pascal seconds.
+struct LowerCrust {
+    double channel = 15.0;
+    double brittle = 15.0;
+    double viscosity = 1e19;
+    double reference = 973.0;
+    double activation = 135e3;
+    double runniest = 1e18;
+};
+
 // How the mantle warms where continents lie over it, as their thick crust holds its heat in, and
 // cools again under ocean floor, which lets it out: over `years`, each place goes the share
 // 1 - e^(-years / settling) of the way to fully warm or cool. The whole mantle starts `hotter`
@@ -323,6 +338,9 @@ public:
     // Warms and cools the mantle under each place by the crust on top over `years`, and sets how
     // hot it is on the whole as of now.
     void warm(double years, Mantle mantle = {});
+    // Lets the lower crust of each plate's continent creep for `years` from under its high ground
+    // to under its low, on a planet of `radius` metres, as readily as it's warm.
+    void creep(double years, double radius, LowerCrust lower = {});
     // Stretches each plate carrying continent over `years` along the line through the warmest
     // mantle under its continent that the forces on it pull apart hardest against how strong it
     // is there, if they pull harder than that: as fast as its two sides would part, but for what

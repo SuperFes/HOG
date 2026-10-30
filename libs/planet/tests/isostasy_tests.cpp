@@ -543,3 +543,159 @@ TEST_CASE("worn land rises again by its buoyancy where its plate is weak, and le
     CHECK(std::ranges::all_of(
         stiff, [](double lowers) { return lowers > continental_buoyancy + 0.1 && lowers < 1.0; }));
 }
+
+TEST_CASE("lower crust flows from under high ground to under low, keeping its volume",
+          "[planet][isostasy]") {
+    using hog::planet::flowed;
+    const LevelGrid grid{4, radius};
+    const std::vector<std::uint32_t> cells = every_cell(grid);
+    // Mid-face, away from the cube's edges.
+    constexpr std::uint32_t at = (16 * 8) + 8;
+    std::vector<double> thickness(grid.size(), 35.0);
+    thickness[at] = 45.0;
+    const std::vector<double> level(grid.size(), 0.0);
+    const std::vector<double> floating(grid.size(), hog::planet::continental_buoyancy);
+    const auto volume = [&](const std::vector<double>& thick) {
+        double total = 0.0;
+        for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+            total += thick[cell] * static_cast<double>(grid.area(cell));
+        }
+        return total;
+    };
+    const auto area = static_cast<double>(grid.area(at));
+    const auto after = [&](double ease, double years, const std::vector<double>& sunk) {
+        return flowed(grid, cells, thickness, sunk, floating,
+                      std::vector<double>(grid.size(), ease), years);
+    };
+    CHECK(after(0.0, 10.0, level) == thickness);
+    const auto spread = after(area, 1.0, level);
+    CHECK_THAT(volume(spread), WithinRel(volume(thickness), 1e-9));
+    CHECK(spread[at] < 45.0);
+    for (const std::uint32_t next : grid.neighbors(at)) {
+        CHECK(spread[next] > 35.0);
+        CHECK(spread[next] < spread[at]);
+    }
+    // In time, flat.
+    const auto flat = after(area, 1e9, level);
+    const double mean = volume(thickness) / volume(std::vector<double>(grid.size(), 1.0));
+    for (const double thick : flat) {
+        CHECK_THAT(thick, WithinAbs(mean, 1e-3));
+    }
+    // Ground sunk lower draws it in though it's no thinner.
+    const std::vector<double> even(grid.size(), 35.0);
+    std::vector<double> sunk(grid.size(), 0.0);
+    sunk[at] = 1.0;
+    const auto drawn =
+        flowed(grid, cells, even, sunk, floating, std::vector<double>(grid.size(), area), 1.0);
+    CHECK(drawn[at] > 35.0);
+    CHECK_THAT(volume(drawn), WithinRel(volume(even), 1e-9));
+    // In time, as much as levels the ground, more where it rises less for it.
+    const auto levelled = [&](double lowers) {
+        const auto flat = flowed(grid, cells, even, sunk, std::vector<double>(grid.size(), lowers),
+                                 std::vector<double>(grid.size(), area), 1e9);
+        return flat[at] - flat[grid.neighbors(at).front()];
+    };
+    CHECK_THAT(levelled(1.0), WithinAbs(1.0, 1e-4));
+    CHECK_THAT(levelled(hog::planet::continental_buoyancy),
+               WithinAbs(1.0 / hog::planet::continental_buoyancy, 1e-3));
+}
+
+TEST_CASE("the base of the crust is hot where it was heated lately, and cold under old shields",
+          "[planet][isostasy]") {
+    using hog::planet::Crust;
+    using hog::planet::moho_temperature;
+    const auto at = [](float raised) {
+        return moho_temperature(Crust{
+            .type = CrustType::Continental, .thickness = 35.0F, .age = 3'000.0F, .raised = raised});
+    };
+    CHECK_THAT(at(0.0F), WithinAbs(273.15 + hog::planet::mantle_celsius, 1e-9));
+    CHECK(at(10.0F) < at(0.0F));
+    CHECK(at(100.0F) < at(10.0F));
+    CHECK(at(3'000.0F) < at(100.0F));
+    // A shield's Moho some 200 to 300 C (Jaupart & Mareschal 1999).
+    CHECK(at(3'000.0F) > 273.15 + 200.0);
+    CHECK(at(3'000.0F) < 273.15 + 300.0);
+}
+
+TEST_CASE("a range freshly piled spreads out under itself, and an old shield's lump stays",
+          "[planet][isostasy]") {
+    using hog::planet::Crust;
+    const LevelGrid grid{5, radius};
+    constexpr std::uint32_t at = (32 * 16) + 16;
+    const auto crept = [&](float raised) {
+        Lithosphere::Plate plate;
+        for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+            plate.cells.push_back(cell);
+            plate.crust.push_back({.type = CrustType::Continental,
+                                   .thickness = cell == at ? 50.0F : 35.0F,
+                                   .age = 3'000.0F,
+                                   .raised = raised});
+        }
+        Lithosphere lithosphere{grid, {plate}};
+        const auto volume = [&] {
+            double total = 0.0;
+            for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+                total += static_cast<double>(grid.area(cell)) *
+                         static_cast<double>(lithosphere.plates()[0].crust[cell].thickness);
+            }
+            return total;
+        };
+        const double before = volume();
+        lithosphere.creep(10.0, radius);
+        CHECK_THAT(volume(), WithinRel(before, 1e-5));
+        return static_cast<double>(lithosphere.plates()[0].crust[at].thickness);
+    };
+    CHECK(crept(0.0F) < 40.0);
+    CHECK_THAT(crept(3'000.0F), WithinAbs(50.0, 1e-3));
+}
+
+TEST_CASE("lower crust levels the ground a stiff plate shows, not the crust's thickness",
+          "[planet][isostasy]") {
+    const LevelGrid grid{5, radius};
+    constexpr std::uint32_t at = (32 * 16) + 16;
+    Lithosphere::Plate plate;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        plate.cells.push_back(cell);
+        plate.crust.push_back({.type = CrustType::Continental,
+                               .thickness = cell == at ? 50.0F : 35.0F,
+                               .age = 3'000.0F,
+                               .raised = 100.0F});
+    }
+    Lithosphere lithosphere{grid, {plate}};
+    lithosphere.bend(radius);
+    const std::uint32_t beside = grid.neighbors(at).front();
+    const auto above = [&] {
+        const auto heights = crust_heights(lithosphere);
+        return hog::planet::fixed_to_double(heights[at] - heights[beside]);
+    };
+    const double lump = above();
+    REQUIRE(lump > 0.0);
+    lithosphere.creep(1e5, radius);
+    lithosphere.bend(radius);
+    CAPTURE(lump, above(), lithosphere.plates()[0].crust[at].thickness);
+    CHECK(std::abs(above()) < 0.1 * lump);
+    // Held up by its plate, the ground's level over crust still thicker than round it.
+    CHECK(lithosphere.plates()[0].crust[at].thickness > 36.0F);
+}
+
+TEST_CASE("lower crust creeps no thinner than the brittle rock over it", "[planet][isostasy]") {
+    using hog::planet::Crust;
+    // A warm continent, a little thicker than its brittle lid, with ground held down deep in one
+    // place drawing its lower crust in from all round.
+    const LevelGrid grid{5, radius};
+    constexpr std::uint32_t at = (32 * 16) + 16;
+    Lithosphere::Plate plate;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        plate.cells.push_back(cell);
+        plate.crust.push_back({.type = CrustType::Continental, .thickness = 20.0F});
+        plate.crust.back().sunk = cell == at ? 40.0F : 0.0F;
+    }
+    Lithosphere lithosphere{grid, {plate}};
+    const hog::planet::LowerCrust lower;
+    lithosphere.creep(10.0, radius, lower);
+    const Lithosphere::Plate& crept = lithosphere.plates()[0];
+    CHECK(crept.crust[at].thickness > 20.0F);
+    for (const Crust& crust : crept.crust) {
+        CHECK(static_cast<double>(crust.thickness) >= lower.brittle - 1e-4);
+    }
+}

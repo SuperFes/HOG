@@ -53,6 +53,8 @@ inline constexpr double young_modulus = 1e11;
 inline constexpr double poisson_ratio = 0.25;
 inline constexpr double mantle_density = 3'330.0;
 inline constexpr double earth_gravity = 9.81;
+// Degrees Celsius at the base of a plate, the mantle's (Parsons & Sclater 1977).
+inline constexpr double mantle_celsius = 1'350.0;
 
 // Fixed-point metres each grid cell's crust stands above the crest of a mid-ocean ridge.
 [[nodiscard]] std::vector<std::int64_t> crust_heights(const Tectonics& tectonics);
@@ -90,6 +92,19 @@ worn_down(const LevelGrid& grid, std::span<const std::int64_t> heights, std::int
                                             std::span<const std::uint32_t> cells,
                                             std::span<const double> loads,
                                             std::span<const double> stiffness);
+// Kelvin at the base of `crust`, as hot as it's cooled since last heated, by the same cooling as
+// sets how thick the plate under it bends elastically.
+[[nodiscard]] double moho_temperature(const Crust& crust);
+// Kilometres thick each of `cells` of `grid`, ascending, of one plate's continent, is once rock
+// of `thickness` kilometres has flowed for `years` million years from under its high ground to
+// under its low, each standing at its `lowering` times its thickness less the kilometres it's
+// `sunk`, as its ground rises by `lowering` of each kilometre more under it, flowing as readily
+// as its `ease`, in square metres a million years, and between two as the harmonic mean of
+// theirs. Its volume is kept.
+[[nodiscard]] std::vector<double>
+flowed(const LevelGrid& grid, std::span<const std::uint32_t> cells,
+       std::span<const double> thickness, std::span<const double> sunk,
+       std::span<const double> lowering, std::span<const double> ease, double years);
 // Of each of `cells`' own load, the share it sinks under alone, as the plate bends as stiff as
 // `stiffness` at each.
 [[nodiscard]] std::vector<double> sinking_alone(const LevelGrid& grid,

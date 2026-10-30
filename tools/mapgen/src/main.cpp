@@ -322,6 +322,7 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
             });
             timer.time("weld", [&] { lithosphere.weld(step_years); });
             timer.time("warm", [&] { lithosphere.warm(step_years, mantle); });
+            timer.time("creep", [&] { lithosphere.creep(step_years, config.radius); });
             timer.time("rift", [&] { lithosphere.rift(step_years); });
             timer.time("drive", [&] { lithosphere.drive(); });
         }

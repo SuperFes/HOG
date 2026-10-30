@@ -1232,6 +1232,95 @@ void Lithosphere::bend(double radius) {
          });
 }
 
+namespace {
+
+// The continent of `plate` once its lower crust has crept for `years`, each kilometre of channel
+// under its brittle lid flowing `ease` over its viscosity cubed, and its ground lowering `alone`
+// of each kilometre more under it.
+void creep_plate(const LevelGrid& grid, Lithosphere::Plate& plate, std::span<const double> alone,
+                 double years, double ease, const LowerCrust& lower) {
+    constexpr double gas = 8.314;
+    constexpr double metres_per_km = 1'000.0;
+    constexpr int passes = 32;
+    constexpr double settled = 1e-4;
+    std::vector<std::uint32_t> cells;
+    std::vector<std::size_t> held_at;
+    std::vector<double> sunk;
+    std::vector<double> lowers;
+    std::vector<double> runny;
+    for (std::size_t cell = 0; cell < plate.crust.size(); ++cell) {
+        const Crust& crust = plate.crust[cell];
+        if (crust.type != CrustType::Continental) {
+            continue;
+        }
+        const double viscosity = std::max(
+            lower.viscosity * std::exp(lower.activation / gas *
+                                       ((1.0 / moho_temperature(crust)) - (1.0 / lower.reference))),
+            lower.runniest);
+        cells.push_back(plate.cells[cell]);
+        held_at.push_back(cell);
+        // Ground already borne stays held as it was bent, so only what's added since sinks alone.
+        sunk.push_back(static_cast<double>(crust.sunk) +
+                       ((1.0 - alone[cell]) * (1.0 - continental_buoyancy) *
+                        static_cast<double>(crust.borne.value_or(crust.thickness))));
+        lowers.push_back(1.0 - (alone[cell] * (1.0 - continental_buoyancy)));
+        runny.push_back(ease / viscosity);
+    }
+    if (cells.empty()) {
+        return;
+    }
+    const auto channel_of = [&](double thick) {
+        return std::clamp(thick - lower.brittle, 0.0, lower.channel);
+    };
+    std::vector<double> thickness(cells.size());
+    for (std::size_t node = 0; node < cells.size(); ++node) {
+        thickness[node] = static_cast<double>(plate.crust[held_at[node]].thickness);
+    }
+    // Its channel flows the slower the thinner it's drawn, down to not at all once drained, so each
+    // flows as it would by the end of the step, worked toward from where it starts. A channel can't
+    // then flow out more than it holds.
+    std::vector<double> ends = thickness;
+    std::vector<double> eases(cells.size());
+    for (int pass = 0; pass < passes; ++pass) {
+        for (std::size_t node = 0; node < cells.size(); ++node) {
+            const double channel = channel_of(ends[node]) * metres_per_km;
+            eases[node] = channel * channel * channel * runny[node];
+        }
+        const std::vector<double> crept =
+            flowed(grid, cells, thickness, sunk, lowers, eases, years);
+        double moved = 0.0;
+        for (std::size_t node = 0; node < cells.size(); ++node) {
+            moved = std::max(moved, std::abs(crept[node] - ends[node]));
+            ends[node] = (ends[node] + crept[node]) / 2.0;
+        }
+        if (moved < settled) {
+            break;
+        }
+    }
+    for (std::size_t node = 0; node < cells.size(); ++node) {
+        plate.crust[held_at[node]].thickness = static_cast<float>(ends[node]);
+    }
+}
+
+} // namespace
+
+void Lithosphere::creep(double years, double radius, LowerCrust lower) {
+    constexpr double earth_radius = 6'371'000.0;
+    constexpr double seconds_a_million_years = 3.15576e13;
+    constexpr double crust_density = 2'800.0;
+    // A channel's flux under a pressure gradient, h³/(12η) ∇P (Turcotte & Schubert 2002), the
+    // pressure the weight of the crust over it, its lengths along the ground Earth's scaled.
+    const double ease = crust_density * earth_gravity / 12.0 * seconds_a_million_years *
+                        std::pow(radius / earth_radius, 2.0);
+    each(jobs_, static_cast<std::uint32_t>(plates_.size()), 1,
+         [&](std::uint32_t index, std::uint32_t /*thread*/) {
+             Plate& plate = plates_[index];
+             creep_plate(grid_, plate,
+                         sinking_alone(grid_, plate.cells, stiffness_of(plate, radius)), years,
+                         ease, lower);
+         });
+}
+
 std::vector<double> Lithosphere::lowering(double radius) const {
     std::vector<std::vector<double>> alone(plates_.size());
     for (std::size_t plate = 0; plate < plates_.size(); ++plate) {

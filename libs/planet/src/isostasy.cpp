@@ -169,17 +169,29 @@ double stiffness(double elastic, double radius) {
     return rigidity / (mantle_density * earth_gravity) * std::pow(radius / earth_radius, 4.0);
 }
 
+double moho_temperature(const Crust& crust) {
+    constexpr double celsius = 273.15;
+    // The depth where it's a third as hot as the mantle, 2 erfinv(1/3) √(κt) down.
+    constexpr double third = 0.30457;
+    const double elastic = elastic_thickness(crust);
+    if (elastic <= 0.0) {
+        return celsius + mantle_celsius;
+    }
+    return celsius +
+           (mantle_celsius * std::erf(third * static_cast<double>(crust.thickness) / elastic));
+}
+
 namespace {
 
-// A plate bending as D ∇⁴w + ρg w = ρg load, as (M + K C M⁻¹ K) w = M load over its cells: M each
-// cell's area, C its stiffness, and K the Laplacian's stiffness, a third between each pair of
-// neighbours, since eight of them round a square spread a field as h² ∇² over three.
-class Bending {
+// Each of a plate's cells, ascending, with its area and its neighbours among them, and the
+// Laplacian's stiffness between them, a third between each pair of neighbours, since eight of
+// them round a square spread a field as h² ∇² over three.
+class Links {
 public:
-    Bending(const LevelGrid& grid, std::span<const std::uint32_t> cells,
-            std::span<const double> stiffness)
-        : stiffness_{stiffness}, area_(cells.size()), curved_(cells.size()),
-          starts_(cells.size() + 1, 0) {
+    static constexpr double link = 1.0 / 3.0;
+
+    Links(const LevelGrid& grid, std::span<const std::uint32_t> cells)
+        : area_(cells.size()), starts_(cells.size() + 1, 0) {
         HOG_ASSERT(std::ranges::is_sorted(cells), "cells ascending");
         for (std::size_t node = 0; node < cells.size(); ++node) {
             area_[node] = static_cast<double>(grid.area(cells[node]));
@@ -195,49 +207,114 @@ public:
 
     [[nodiscard]] std::size_t size() const { return area_.size(); }
     [[nodiscard]] double area(std::size_t node) const { return area_[node]; }
+    [[nodiscard]] std::span<const std::uint32_t> around(std::size_t node) const {
+        return std::span{links_}.subspan(starts_[node], starts_[node + 1] - starts_[node]);
+    }
+
+    // K `field`, each pair of neighbours linked as strongly as `strength` has them.
+    template <typename Strength>
+    void curve(std::span<const double> field, std::span<double> out, Strength strength) const {
+        for (std::size_t node = 0; node < size(); ++node) {
+            double sum = 0.0;
+            for (const std::uint32_t next : around(node)) {
+                sum += strength(node, next) * (field[node] - field[next]);
+            }
+            out[node] = link * sum;
+        }
+    }
+
+private:
+    std::vector<double> area_;
+    std::vector<std::size_t> starts_;
+    std::vector<std::uint32_t> links_;
+};
+
+// A plate bending as D ∇⁴w + ρg w = ρg load, as (M + K C M⁻¹ K) w = M load: M each cell's area
+// and C its stiffness.
+class Bending {
+public:
+    Bending(const Links& links, std::span<const double> stiffness)
+        : links_{&links}, stiffness_{stiffness}, curved_(links.size()) {}
 
     void apply(std::span<const double> bent, std::span<double> out) {
-        curve(bent, curved_);
-        for (std::size_t node = 0; node < size(); ++node) {
-            curved_[node] *= stiffness_[node] / area_[node];
+        const auto evenly = [](std::size_t /*node*/, std::uint32_t /*next*/) { return 1.0; };
+        links_->curve(bent, curved_, evenly);
+        for (std::size_t node = 0; node < links_->size(); ++node) {
+            curved_[node] *= stiffness_[node] / links_->area(node);
         }
-        curve(curved_, out);
-        for (std::size_t node = 0; node < size(); ++node) {
-            out[node] += area_[node] * bent[node];
+        links_->curve(curved_, out, evenly);
+        for (std::size_t node = 0; node < links_->size(); ++node) {
+            out[node] += links_->area(node) * bent[node];
         }
     }
 
     [[nodiscard]] std::vector<double> diagonal() const {
-        constexpr double link = 1.0 / 3.0;
-        std::vector<double> diagonal(size());
-        for (std::size_t node = 0; node < size(); ++node) {
+        constexpr double link = Links::link;
+        std::vector<double> diagonal(links_->size());
+        for (std::size_t node = 0; node < links_->size(); ++node) {
             double around = 0.0;
-            for (std::size_t at = starts_[node]; at < starts_[node + 1]; ++at) {
-                around += link * link * stiffness_[links_[at]] / area_[links_[at]];
+            for (const std::uint32_t next : links_->around(node)) {
+                around += link * link * stiffness_[next] / links_->area(next);
             }
-            const auto links = link * static_cast<double>(starts_[node + 1] - starts_[node]);
-            diagonal[node] =
-                area_[node] + (links * links * stiffness_[node] / area_[node]) + around;
+            const double links = link * static_cast<double>(links_->around(node).size());
+            const double area = links_->area(node);
+            diagonal[node] = area + (links * links * stiffness_[node] / area) + around;
         }
         return diagonal;
     }
 
 private:
-    void curve(std::span<const double> field, std::span<double> out) const {
-        for (std::size_t node = 0; node < size(); ++node) {
-            double sum = 0.0;
-            for (std::size_t at = starts_[node]; at < starts_[node + 1]; ++at) {
-                sum += field[node] - field[links_[at]];
-            }
-            out[node] = sum / 3.0;
+    const Links* links_;
+    std::span<const double> stiffness_;
+    std::vector<double> curved_;
+};
+
+// Rock spreading as ∂t/∂τ = ∇·(κ∇e), its surface e = lowering t - sunk, taken a step of `years` at
+// once in u = lowering t, so it stays symmetric: (M / lowering + years K_κ) u = M t₀ + years K_κ
+// sunk, each pair of neighbours linked by the harmonic mean of their `ease`, so rock that won't
+// flow stops it.
+class Spreading {
+public:
+    Spreading(const Links& links, std::span<const double> ease, std::span<const double> lowering,
+              double years)
+        : links_{&links}, ease_{ease}, lowering_{lowering}, years_{years} {}
+
+    [[nodiscard]] double between(std::size_t node, std::uint32_t next) const {
+        const double sum = ease_[node] + ease_[next];
+        return sum > 0.0 ? 2.0 * ease_[node] * ease_[next] / sum : 0.0;
+    }
+
+    void conduct(std::span<const double> field, std::span<double> out) const {
+        links_->curve(field, out,
+                      [&](std::size_t node, std::uint32_t next) { return between(node, next); });
+    }
+
+    void apply(std::span<const double> raised, std::span<double> out) const {
+        conduct(raised, out);
+        for (std::size_t node = 0; node < links_->size(); ++node) {
+            out[node] =
+                (links_->area(node) * raised[node] / lowering_[node]) + (years_ * out[node]);
         }
     }
 
-    std::span<const double> stiffness_;
-    std::vector<double> area_;
-    std::vector<double> curved_;
-    std::vector<std::size_t> starts_;
-    std::vector<std::uint32_t> links_;
+    [[nodiscard]] std::vector<double> diagonal() const {
+        std::vector<double> diagonal(links_->size());
+        for (std::size_t node = 0; node < links_->size(); ++node) {
+            double linked = 0.0;
+            for (const std::uint32_t next : links_->around(node)) {
+                linked += between(node, next);
+            }
+            diagonal[node] =
+                (links_->area(node) / lowering_[node]) + (years_ * Links::link * linked);
+        }
+        return diagonal;
+    }
+
+private:
+    const Links* links_;
+    std::span<const double> ease_;
+    std::span<const double> lowering_;
+    double years_;
 };
 
 [[nodiscard]] double dot(std::span<const double> one, std::span<const double> other) {
@@ -248,26 +325,20 @@ private:
     return sum;
 }
 
-} // namespace
-
-std::vector<double> deflected(const LevelGrid& grid, std::span<const std::uint32_t> cells,
-                              std::span<const double> loads, std::span<const double> stiffness) {
-    HOG_ASSERT(loads.size() == cells.size(), "one load to each cell");
-    HOG_ASSERT(stiffness.size() == cells.size(), "one stiffness to each cell");
+// x with A x = `right`, A as `system` applies it, by conjugate gradients from `guess`,
+// preconditioned by A's diagonal.
+template <typename System>
+[[nodiscard]] std::vector<double> solved(System& system, std::span<const double> right,
+                                         std::vector<double> guess) {
     constexpr double tolerance = 1e-10;
-    const std::size_t size = cells.size();
-    Bending bending{grid, cells, stiffness};
-    // Conjugate gradients from where each cell would sink alone, preconditioned by the diagonal.
-    std::vector<double> bent(loads.begin(), loads.end());
+    const std::size_t size = right.size();
     std::vector<double> residual(size);
-    bending.apply(bent, residual);
-    double wanted = 0.0;
+    system.apply(guess, residual);
     for (std::size_t node = 0; node < size; ++node) {
-        const double load = bending.area(node) * loads[node];
-        residual[node] = load - residual[node];
-        wanted += load * load;
+        residual[node] = right[node] - residual[node];
     }
-    const std::vector<double> diagonal = bending.diagonal();
+    const double wanted = dot(right, right);
+    const std::vector<double> diagonal = system.diagonal();
     std::vector<double> step(size);
     std::ranges::transform(residual, diagonal, step.begin(), std::divides{});
     double along = dot(residual, step);
@@ -275,10 +346,10 @@ std::vector<double> deflected(const LevelGrid& grid, std::span<const std::uint32
     std::vector<double> scaled(size);
     for (std::size_t pass = 0;
          pass < size && dot(residual, residual) > tolerance * tolerance * wanted; ++pass) {
-        bending.apply(step, pushed);
+        system.apply(step, pushed);
         const double length = along / dot(step, pushed);
         for (std::size_t node = 0; node < size; ++node) {
-            bent[node] += length * step[node];
+            guess[node] += length * step[node];
             residual[node] -= length * pushed[node];
         }
         std::ranges::transform(residual, diagonal, scaled.begin(), std::divides{});
@@ -288,19 +359,60 @@ std::vector<double> deflected(const LevelGrid& grid, std::span<const std::uint32
         }
         along = next;
     }
-    return bent;
+    return guess;
+}
+
+} // namespace
+
+std::vector<double> deflected(const LevelGrid& grid, std::span<const std::uint32_t> cells,
+                              std::span<const double> loads, std::span<const double> stiffness) {
+    HOG_ASSERT(loads.size() == cells.size(), "one load to each cell");
+    HOG_ASSERT(stiffness.size() == cells.size(), "one stiffness to each cell");
+    const Links links{grid, cells};
+    Bending bending{links, stiffness};
+    std::vector<double> right(cells.size());
+    for (std::size_t node = 0; node < cells.size(); ++node) {
+        right[node] = links.area(node) * loads[node];
+    }
+    // From where each cell would sink alone.
+    return solved(bending, right, std::vector<double>(loads.begin(), loads.end()));
 }
 
 std::vector<double> sinking_alone(const LevelGrid& grid, std::span<const std::uint32_t> cells,
                                   std::span<const double> stiffness) {
     HOG_ASSERT(stiffness.size() == cells.size(), "one stiffness to each cell");
     // Its neighbours held still, which they're not quite, so a little less than it does.
-    const Bending bending{grid, cells, stiffness};
+    const Links links{grid, cells};
+    const Bending bending{links, stiffness};
     std::vector<double> alone = bending.diagonal();
     for (std::size_t node = 0; node < cells.size(); ++node) {
-        alone[node] = bending.area(node) / alone[node];
+        alone[node] = links.area(node) / alone[node];
     }
     return alone;
+}
+
+std::vector<double> flowed(const LevelGrid& grid, std::span<const std::uint32_t> cells,
+                           std::span<const double> thickness, std::span<const double> sunk,
+                           std::span<const double> lowering, std::span<const double> ease,
+                           double years) {
+    HOG_ASSERT(thickness.size() == cells.size(), "one thickness to each cell");
+    HOG_ASSERT(sunk.size() == cells.size(), "one depth sunk to each cell");
+    HOG_ASSERT(lowering.size() == cells.size(), "one lowering to each cell");
+    HOG_ASSERT(ease.size() == cells.size(), "one ease to each cell");
+    const Links links{grid, cells};
+    const Spreading spreading{links, ease, lowering, years};
+    std::vector<double> right(cells.size());
+    spreading.conduct(sunk, right);
+    std::vector<double> raised(cells.size());
+    for (std::size_t node = 0; node < cells.size(); ++node) {
+        right[node] = (links.area(node) * thickness[node]) + (years * right[node]);
+        raised[node] = lowering[node] * thickness[node];
+    }
+    std::vector<double> crept = solved(spreading, right, std::move(raised));
+    for (std::size_t node = 0; node < cells.size(); ++node) {
+        crept[node] /= lowering[node];
+    }
+    return crept;
 }
 
 double water_below(const LevelGrid& grid, std::span<const std::int64_t> heights,
