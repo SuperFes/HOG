@@ -1050,23 +1050,20 @@ void Lithosphere::drive(Forces forces, Strength strength) {
             torques[plate] += glm::cross(push.at, push.force);
         }
     }
-    // The drag on a plate turning at w is -D w, D summing (I - r r^T) over its crust by its share
-    // of the sphere; the same sum without keels gives how fast its crust moves on the whole.
+    const std::vector<glm::dmat3> drags = mantle_drags(forces);
+    // Summing (I - r r^T) over each plate's crust by its share of the sphere, to tell how fast
+    // its crust moves on the whole.
     double sphere = 0.0;
     for (std::uint32_t cell = 0; cell < grid_.size(); ++cell) {
         sphere += static_cast<double>(grid_.area(cell));
     }
-    std::vector<glm::dmat3> drags(plates_.size(), glm::dmat3{0.0});
     std::vector<glm::dmat3> spreads(plates_.size(), glm::dmat3{0.0});
     for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
         const Plate& carrier = plates_[plate];
-        for (std::size_t index = 0; index < carrier.cells.size(); ++index) {
-            const DVec3 at = to_planet(plate, cell_center(grid_.cell(carrier.cells[index])));
-            const double share = static_cast<double>(grid_.area(carrier.cells[index])) / sphere;
-            spreads[plate] += share * (glm::dmat3{1.0} - glm::outerProduct(at, at));
-            drags[plate] +=
-                (carrier.crust[index].type == CrustType::Continental ? forces.keel : 1.0) *
-                place_drag(at, share);
+        for (const std::uint32_t cell : carrier.cells) {
+            const DVec3 at = to_planet(plate, cell_center(grid_.cell(cell)));
+            spreads[plate] += (static_cast<double>(grid_.area(cell)) / sphere) *
+                              (glm::dmat3{1.0} - glm::outerProduct(at, at));
         }
     }
     const std::vector<DVec3> turns =
@@ -1224,7 +1221,26 @@ std::optional<Lithosphere::Line> Lithosphere::rifting(std::uint32_t plate,
     return hardest;
 }
 
-void Lithosphere::weld(double years) {
+std::vector<glm::dmat3> Lithosphere::mantle_drags(const Forces& forces) const {
+    double sphere = 0.0;
+    for (std::uint32_t cell = 0; cell < grid_.size(); ++cell) {
+        sphere += static_cast<double>(grid_.area(cell));
+    }
+    std::vector<glm::dmat3> drags(plates_.size(), glm::dmat3{0.0});
+    for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
+        const Plate& carrier = plates_[plate];
+        for (std::size_t index = 0; index < carrier.cells.size(); ++index) {
+            const DVec3 at = to_planet(plate, cell_center(grid_.cell(carrier.cells[index])));
+            const double share = static_cast<double>(grid_.area(carrier.cells[index])) / sphere;
+            drags[plate] +=
+                (carrier.crust[index].type == CrustType::Continental ? forces.keel : 1.0) *
+                place_drag(at, share);
+        }
+    }
+    return drags;
+}
+
+void Lithosphere::weld(double years, const Forces& forces) {
     const std::size_t count = plates_.size();
     const std::vector<Boundary> edges = boundaries();
     hang(edges);
@@ -1235,7 +1251,17 @@ void Lithosphere::weld(double years) {
         speeds.push_back(glm::length(velocity(edge.plate, at) - velocity(edge.other, at)));
     }
     const double half_place = 0.5 * std::sqrt(4.0 * std::numbers::pi / grid_.size());
-    const std::vector<bool> joined = as_one(edges, speeds, count, half_place / years);
+    std::vector<bool> joined = as_one(edges, speeds, count, half_place / years);
+    // Terranes, by the drag across ranges alone against the mantle's on the smaller plate.
+    Forces ranges = forces;
+    ranges.megathrust = 0.0;
+    const std::vector<glm::dmat3> drags = mantle_drags(forces);
+    const auto trace = [](const glm::dmat3& drag) { return drag[0][0] + drag[1][1] + drag[2][2]; };
+    for (const Coupling& pair : couplings(grid_, edges, ranges)) {
+        if (trace(pair.drag) > std::min(trace(drags[pair.first]), trace(drags[pair.second]))) {
+            joined[(pair.first * count) + pair.second] = true;
+        }
+    }
     // Plates welded together, each by the one its crust goes to: the one with most cells.
     std::vector<std::uint32_t> into(count);
     for (std::uint32_t plate = 0; plate < count; ++plate) {

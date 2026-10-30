@@ -952,6 +952,32 @@ TEST_CASE("continents that have collided and move as one weld into one plate",
     }
 }
 
+TEST_CASE("a small continent run into a bigger one is sutured onto it as a terrane",
+          "[planet][lithosphere]") {
+    // A cap of crust around +z, of `reach` radians, turning toward -y into a plate still around it.
+    const auto cap = [](double reach, Crust crust) {
+        const LevelGrid grid{4, radius};
+        Lithosphere::Plate around = everywhere(grid, continent, DVec3{1.0, 0.0, 0.0}, 0.0);
+        Lithosphere::Plate moving = everywhere(grid, crust, DVec3{1.0, 0.0, 0.0}, 0.01);
+        moving.cells.clear();
+        moving.crust.clear();
+        around.cells.clear();
+        around.crust.clear();
+        for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+            const bool inside = hog::planet::cell_center(grid.cell(cell)).z > std::cos(reach);
+            (inside ? moving : around).cells.push_back(cell);
+            (inside ? moving.crust : around.crust).push_back(inside ? crust : continent);
+        }
+        Lithosphere lithosphere{grid, {around, moving}};
+        lithosphere.weld(step_years);
+        return lithosphere.plates().size();
+    };
+    CHECK(cap(0.3, continent) == 1);
+    // Big enough to hold its own course, or ocean floor diving under the continent around it.
+    CHECK(cap(1.2, continent) == 2);
+    CHECK(cap(0.3, Crust{}) == 2);
+}
+
 TEST_CASE("plates moving as one weld into one plate whatever crust they meet with",
           "[planet][lithosphere]") {
     Lithosphere ocean = together(halves());

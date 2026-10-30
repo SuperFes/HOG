@@ -191,9 +191,11 @@ public:
     // other anywhere along their edge are one plate but in name, as a microplate is captured once
     // what drove it dies, and weld into one, the plate with less crust taken into the other's
     // frame. Plates still moving against each other anywhere along their edge stay apart, however
-    // their continents have collided: the range between them drags on both as they close. Plates
-    // left with no crust, taken in or wholly dived, are gone, and those after them renumbered.
-    void weld(double years);
+    // their continents have collided: the range between them drags on both as they close. But a
+    // plate the range drags on harder than the mantle under it does can't hold its own course
+    // against the bigger plate it's run into, and is sutured onto that as a terrane. Plates left
+    // with no crust, taken in or wholly dived, are gone, and those after them renumbered.
+    void weld(double years, const Forces& forces = {});
 
     // Ocean floor an arc thickens this far floats as continent.
     static constexpr float arc_continent = 20.0F;
@@ -266,6 +268,9 @@ private:
     // Floor going down a trench among `edges` now feeds the slab hanging there, in place of
     // whatever hung there before.
     void hang(std::span<const Boundary> edges);
+    // The mantle's drag on each plate turning at w, as -D w: D sums (I - r r^T) over its crust by
+    // its share of the sphere, deeper keels dragging harder.
+    [[nodiscard]] std::vector<glm::dmat3> mantle_drags(const Forces& forces) const;
     // A rift under way across a plate: the plane of its line, by the side it faces, in the
     // plate's own frame, and radians it has opened.
     struct Rift {
