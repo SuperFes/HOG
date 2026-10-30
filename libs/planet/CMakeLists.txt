@@ -52,7 +52,7 @@ add_custom_command(OUTPUT "${hog_planet_source_hash}"
     VERBATIM)
 target_sources(hog_planet PRIVATE "${hog_planet_source_hash}")
 target_include_directories(hog_planet PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
-target_link_libraries(hog_planet PUBLIC hog::core PRIVATE tomlplusplus)
+target_link_libraries(hog_planet PUBLIC hog::core hog::jobs PRIVATE tomlplusplus)
 hog_target_defaults(hog_planet)
 
 hog_add_tests(hog_planet

@@ -1,4 +1,5 @@
 #include <hog/core/assert.hpp>
+#include <hog/jobs/job_system.hpp>
 #include <hog/planet/lithosphere.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tectonics.hpp>
@@ -21,6 +22,41 @@ namespace hog::planet {
 namespace {
 
 constexpr auto parted = std::numeric_limits<std::uint32_t>::max();
+
+// Calls body(index, thread) for each index below `count`, in chunks of `chunk` over the threads
+// of `jobs` if there are any, else on this one as thread nought.
+template <typename F>
+void each(jobs::JobSystem* jobs, std::uint32_t count, std::uint32_t chunk, F body) {
+    if (jobs == nullptr) {
+        for (std::uint32_t index = 0; index < count; ++index) {
+            body(index, 0U);
+        }
+        return;
+    }
+    jobs->parallel_for(count, chunk, [&](jobs::Range range, std::uint32_t thread) {
+        for (std::uint32_t index = range.begin; index < range.end; ++index) {
+            body(index, thread);
+        }
+    });
+}
+
+// Of each two plates with crust of one type `here`, at a place, by ascending plate, a vote in
+// `votes`, a row per plate, for the lower staying on top, or against.
+void tally(std::vector<int>& votes, std::size_t count,
+           std::span<const std::pair<std::uint32_t, Crust>> here) {
+    for (std::size_t one = 0; one < here.size(); ++one) {
+        for (std::size_t other = one + 1; other < here.size(); ++other) {
+            const auto& [lower, lower_crust] = here[one];
+            const auto& [upper, upper_crust] = here[other];
+            if (lower_crust.type == upper_crust.type) {
+                votes[(lower * count) + upper] += stays_over(upper_crust, lower_crust) ? -1 : 1;
+            }
+        }
+    }
+}
+
+// Places of the grid, or cells of a plate, to each share of the work.
+constexpr std::uint32_t places_per_job = 256;
 
 // Adds crust to the plate at cells of its own grid it has none at yet; of any cell given twice,
 // the first.
@@ -411,8 +447,9 @@ void Lithosphere::spread() {
     // Each parted place of the grid takes the plate of the nearest crust, out from the gap's
     // edges a ring of cells at a time.
     std::vector<std::uint32_t> owner(grid_.size(), parted);
+    const std::vector<std::optional<Found>> on_top = tops();
     for (std::uint32_t cell = 0; cell < grid_.size(); ++cell) {
-        if (const std::optional<Found> found = top(cell_center(grid_.cell(cell)))) {
+        if (const std::optional<Found>& found = on_top[cell]) {
             owner[cell] = found->plate;
         }
     }
@@ -459,23 +496,30 @@ DVec3 Lithosphere::velocity(std::uint32_t plate, DVec3 at) const {
     return plates_[plate].rate * glm::cross(plates_[plate].pole, at);
 }
 
+std::vector<std::optional<Lithosphere::Found>> Lithosphere::tops() const {
+    std::vector<std::optional<Found>> found(grid_.size());
+    each(jobs_, grid_.size(), places_per_job, [&](std::uint32_t place, std::uint32_t /*thread*/) {
+        found[place] = top(cell_center(grid_.cell(place)));
+    });
+    return found;
+}
+
 std::vector<Boundary> Lithosphere::boundaries() const {
-    std::vector<std::optional<Found>> tops(grid_.size());
+    const std::vector<std::optional<Found>> on_top = tops();
     double sphere = 0.0;
     for (std::uint32_t place = 0; place < grid_.size(); ++place) {
-        tops[place] = top(cell_center(grid_.cell(place)));
         sphere += static_cast<double>(grid_.area(place));
     }
     std::vector<Boundary> found;
     for (std::uint32_t place = 0; place < grid_.size(); ++place) {
-        const std::optional<Found>& mine = tops[place];
+        const std::optional<Found>& mine = on_top[place];
         if (!mine) {
             continue;
         }
         const Found& here = *mine;
         const DVec3 at = cell_center(grid_.cell(place));
-        for (const std::uint32_t other : others_around(grid_, tops, place, here.plate)) {
-            const std::optional<Facing> across = facing(grid_, tops, place, other);
+        for (const std::uint32_t other : others_around(grid_, on_top, place, here.plate)) {
+            const std::optional<Facing> across = facing(grid_, on_top, place, other);
             if (!across) {
                 continue;
             }
@@ -525,9 +569,12 @@ std::vector<bool> Lithosphere::overriding() const {
     // thicknesses varying across a plate don't hole both. Each place they overlap with crust of
     // one type votes; ties go to the lower plate.
     const std::size_t count = plates_.size();
-    std::vector<int> votes(count * count, 0);
-    std::vector<std::pair<std::uint32_t, Crust>> here;
-    for (std::uint32_t place = 0; place < grid_.size(); ++place) {
+    const std::uint32_t threads = jobs_ != nullptr ? jobs_->thread_count() : 1U;
+    std::vector<std::vector<int>> tallies(threads, std::vector<int>(count * count, 0));
+    std::vector<std::vector<std::pair<std::uint32_t, Crust>>> scratch(threads);
+    each(jobs_, grid_.size(), places_per_job, [&](std::uint32_t place, std::uint32_t thread) {
+        std::vector<int>& votes = tallies[thread];
+        std::vector<std::pair<std::uint32_t, Crust>>& here = scratch[thread];
         const DVec3 at = cell_center(grid_.cell(place));
         here.clear();
         for (std::uint32_t plate = 0; plate < count; ++plate) {
@@ -536,14 +583,12 @@ std::vector<bool> Lithosphere::overriding() const {
                 here.emplace_back(plate, *crust);
             }
         }
-        for (std::size_t one = 0; one < here.size(); ++one) {
-            for (std::size_t other = one + 1; other < here.size(); ++other) {
-                const auto& [lower, lower_crust] = here[one];
-                const auto& [upper, upper_crust] = here[other];
-                if (lower_crust.type == upper_crust.type) {
-                    votes[(lower * count) + upper] += stays_over(upper_crust, lower_crust) ? -1 : 1;
-                }
-            }
+        tally(votes, count, here);
+    });
+    std::vector<int> votes(count * count, 0);
+    for (const std::vector<int>& tally : tallies) {
+        for (std::size_t pair = 0; pair < tally.size(); ++pair) {
+            votes[pair] += tally[pair];
         }
     }
     std::vector<bool> overrides(count * count, false);
@@ -582,13 +627,22 @@ void Lithosphere::subduct(double years, Arcs arcs) {
     const std::vector<bool> overrides = overriding();
     std::vector<std::vector<std::size_t>> diving(plates_.size());
     std::vector<std::uint32_t> trenches;
+    std::vector<std::uint8_t> dives;
     for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
         const Plate& carrier = plates_[plate];
-        for (std::size_t index = 0; index < carrier.cells.size(); ++index) {
+        const auto cells = static_cast<std::uint32_t>(carrier.cells.size());
+        dives.assign(cells, 0);
+        each(jobs_, cells, places_per_job, [&](std::uint32_t index, std::uint32_t /*thread*/) {
             const Crust& crust = carrier.crust[index];
             const DVec3 at = to_planet(plate, cell_center(grid_.cell(carrier.cells[index])));
-            if (crust.type == CrustType::Oceanic && overlying(plate, crust.type, at, overrides)) {
+            const bool under = crust.type == CrustType::Oceanic &&
+                               overlying(plate, crust.type, at, overrides).has_value();
+            dives[index] = under ? 1 : 0;
+        });
+        for (std::uint32_t index = 0; index < cells; ++index) {
+            if (dives[index] != 0) {
                 diving[plate].push_back(index);
+                const DVec3 at = to_planet(plate, cell_center(grid_.cell(carrier.cells[index])));
                 trenches.push_back(grid_.index(cell_at(at, grid_.level())));
             }
         }
@@ -611,23 +665,35 @@ void Lithosphere::collide(double years, Ranges ranges) {
         float thickness;
     };
     std::vector<Pile> piles;
+    std::vector<std::optional<std::pair<std::uint32_t, std::size_t>>> unders;
     for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
         const Plate& carrier = plates_[plate];
-        for (std::size_t index = 0; index < carrier.cells.size(); ++index) {
+        const auto cells = static_cast<std::uint32_t>(carrier.cells.size());
+        unders.assign(cells, std::nullopt);
+        each(jobs_, cells, places_per_job, [&](std::uint32_t index, std::uint32_t /*thread*/) {
             const Crust& crust = carrier.crust[index];
+            if (crust.type != CrustType::Continental) {
+                return;
+            }
             const DVec3 at = to_planet(plate, cell_center(grid_.cell(carrier.cells[index])));
-            const std::optional<std::uint32_t> over =
-                crust.type == CrustType::Continental ? overlying(plate, crust.type, at, overrides)
-                                                     : std::nullopt;
+            const std::optional<std::uint32_t> over = overlying(plate, crust.type, at, overrides);
             const std::optional<std::size_t> onto = over ? held(*over, at) : std::nullopt;
-            if (!over || !onto) {
+            if (over && onto) {
+                unders[index].emplace(*over, *onto);
+            }
+        });
+        for (std::uint32_t index = 0; index < cells; ++index) {
+            const std::optional<std::pair<std::uint32_t, std::size_t>>& under = unders[index];
+            if (!under) {
                 continue;
             }
+            const Crust& crust = carrier.crust[index];
+            const auto [over, onto] = *under;
             // Volume for volume, between cells of the same grid in different places.
             const auto share =
                 static_cast<float>(static_cast<double>(grid_.area(carrier.cells[index])) /
-                                   static_cast<double>(grid_.area(plates_[*over].cells[*onto])));
-            piles.push_back({.plate = *over, .onto = *onto, .thickness = crust.thickness * share});
+                                   static_cast<double>(grid_.area(plates_[over].cells[onto])));
+            piles.push_back({.plate = over, .onto = onto, .thickness = crust.thickness * share});
             scraped[plate].push_back(index);
         }
     }
@@ -675,13 +741,14 @@ std::vector<std::vector<Lithosphere::Push>> Lithosphere::pushes(const Forces& fo
     for (std::uint32_t place = 0; place < grid_.size(); ++place) {
         sphere += static_cast<double>(grid_.area(place));
     }
+    const std::vector<std::optional<Found>> on_top = tops();
     for (std::uint32_t place = 0; place < grid_.size(); ++place) {
         const DVec3 steep = gradient(grid_, heat_, place);
         if (steep == DVec3{0.0}) {
             continue;
         }
         const DVec3 at = cell_center(grid_.cell(place));
-        if (const std::optional<Found> over = top(at)) {
+        if (const std::optional<Found>& over = on_top[place]) {
             const double area =
                 4.0 * std::numbers::pi * static_cast<double>(grid_.area(place)) / sphere;
             found[over->plate].push_back({.at = at, .force = -forces.dome * area * steep});
@@ -743,8 +810,9 @@ void Lithosphere::drive(Forces forces, Strength strength) {
 
 void Lithosphere::warm(double years, Mantle mantle) {
     const auto toward = static_cast<float>(1.0 - std::exp(-years / mantle.settling));
+    const std::vector<std::optional<Found>> on_top = tops();
     for (std::uint32_t place = 0; place < grid_.size(); ++place) {
-        const std::optional<Found> found = top(cell_center(grid_.cell(place)));
+        const std::optional<Found>& found = on_top[place];
         const float warmest = found && found->crust.type == CrustType::Continental ? 1.0F : 0.0F;
         heat_[place] += (warmest - heat_[place]) * toward;
     }
@@ -755,9 +823,13 @@ void Lithosphere::warm(double years, Mantle mantle) {
 
 void Lithosphere::rift(const Forces& forces, Strength strength) {
     const std::vector<std::vector<Push>> found = pushes(forces, strength);
-    const std::size_t count = plates_.size();
+    const auto count = static_cast<std::uint32_t>(plates_.size());
+    std::vector<std::optional<DVec3>> lines(count);
+    each(jobs_, count, 1, [&](std::uint32_t plate, std::uint32_t /*thread*/) {
+        lines[plate] = weakest(plate, found[plate], forces, strength);
+    });
     for (std::uint32_t plate = 0; plate < count; ++plate) {
-        const std::optional<DVec3> facing = weakest(plate, found[plate], forces, strength);
+        const std::optional<DVec3>& facing = lines[plate];
         if (!facing) {
             continue;
         }

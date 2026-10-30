@@ -227,6 +227,7 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
     // The same start carried in the plates' own frames, so their ridges and overlaps show.
     constexpr double step_years = 10.0;
     hog::planet::Lithosphere lithosphere = hog::planet::lithosphere_from(tectonics, step_years);
+    lithosphere.share_work(&jobs);
     const auto& grid = tectonics.grid();
     double water = hog::planet::starting_water(grid);
     std::vector<hog::mapgen::Image> crust;

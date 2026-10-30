@@ -9,6 +9,10 @@
 #include <span>
 #include <vector>
 
+namespace hog::jobs {
+class JobSystem;
+} // namespace hog::jobs
+
 namespace hog::planet {
 
 class Tectonics;
@@ -142,6 +146,10 @@ public:
     // Precondition: each plate's cells are of `grid`, ascending, with one crust to each.
     Lithosphere(LevelGrid grid, std::vector<Plate> plates);
 
+    // Shares its work out over the threads of `jobs` from now on, or none. It comes out the same
+    // either way. `jobs` must outlive it or be taken back first.
+    void share_work(jobs::JobSystem* jobs) noexcept { jobs_ = jobs; }
+
     // Turns every plate on by `years` million years, and ages its crust as much.
     void advance(double years);
     // Fills every place the plates have parted with new ocean floor, joined to the plate whose
@@ -220,6 +228,8 @@ private:
         DVec3 force{0.0};
     };
 
+    // What's left on top over each place of the grid.
+    [[nodiscard]] std::vector<std::optional<Found>> tops() const;
     // Every force on each plate: across its edges, and off the mantle's dome under it.
     [[nodiscard]] std::vector<std::vector<Push>> pushes(const Forces& forces,
                                                         Strength strength) const;
@@ -253,6 +263,7 @@ private:
     double pace_ = 0.0;
     double foundered_ = 0.0;
     double softer_ = 1.0;
+    jobs::JobSystem* jobs_ = nullptr;
 };
 
 // The plates and crust of `tectonics` as they stand, each plate's frame the planet's, with one of

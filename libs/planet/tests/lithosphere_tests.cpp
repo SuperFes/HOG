@@ -1,3 +1,4 @@
+#include <hog/jobs/job_system.hpp>
 #include <hog/planet/lithosphere.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tectonics.hpp>
@@ -1082,6 +1083,39 @@ TEST_CASE("each plate's crust is found wherever it lies, through splits and weld
             REQUIRE(lithosphere.crust_of(plate, at).has_value() == held);
         }
     }
+}
+
+TEST_CASE("plates come out the same however many threads share the work", "[planet][lithosphere]") {
+    hog::jobs::JobSystem jobs{4};
+    const auto run = [](hog::jobs::JobSystem* shared) {
+        Lithosphere lithosphere = hog::planet::lithosphere_from(start(), step_years);
+        lithosphere.share_work(shared);
+        for (int step = 0; step < 4; ++step) {
+            lithosphere.advance(step_years);
+            lithosphere.subduct(step_years);
+            lithosphere.collide(step_years);
+            lithosphere.spread();
+            lithosphere.weld(step_years);
+            lithosphere.warm(step_years);
+            lithosphere.rift({}, weak);
+            lithosphere.drive();
+        }
+        lithosphere.share_work(nullptr);
+        return lithosphere;
+    };
+    const Lithosphere alone = run(nullptr);
+    const Lithosphere shared = run(&jobs);
+    REQUIRE(alone.plates().size() == shared.plates().size());
+    for (std::size_t plate = 0; plate < alone.plates().size(); ++plate) {
+        const auto& one = alone.plates()[plate];
+        const auto& other = shared.plates()[plate];
+        CHECK(one.cells == other.cells);
+        CHECK(one.crust == other.crust);
+        CHECK(one.frame == other.frame);
+        CHECK(one.pole == other.pole);
+        CHECK(one.rate == other.rate);
+    }
+    CHECK(std::ranges::equal(alone.heat(), shared.heat()));
 }
 
 TEST_CASE("the volume's rock is the crust on top over the mantle", "[planet][lithosphere]") {
