@@ -887,6 +887,28 @@ TEST_CASE("plates moving as one weld into one plate whatever crust they meet wit
     CHECK(touching.plates()[1].cells.empty());
 }
 
+TEST_CASE("continents piling up more than they can take jam and weld, however fast they close",
+          "[planet][lithosphere]") {
+    // A strip of thick continent along where the halves meet, with only ocean floor beyond.
+    const Lithosphere ocean = halves();
+    std::vector<Lithosphere::Plate> plates{ocean.plates().begin(), ocean.plates().end()};
+    const auto& grid = ocean.grid();
+    for (std::uint32_t plate = 0; plate < 2; ++plate) {
+        for (std::size_t index = 0; index < plates[plate].cells.size(); ++index) {
+            const DVec3 at = ocean.to_planet(
+                plate, hog::planet::cell_center(grid.cell(plates[plate].cells[index])));
+            if (std::abs(at.z) < 0.15) {
+                plates[plate].crust[index] = continent;
+                plates[plate].crust[index].thickness = 60.0F;
+            }
+        }
+    }
+    Lithosphere jammed = settled(Lithosphere{grid, plates}, 20.0);
+    REQUIRE(jammed.foundered() > 0.0);
+    jammed.weld(10.0);
+    CHECK(jammed.plates()[1].cells.empty());
+}
+
 TEST_CASE("plates still moving, at sea or where their continents never collided, stay apart",
           "[planet][lithosphere]") {
     Lithosphere ocean = settled(halves(), 20.0);

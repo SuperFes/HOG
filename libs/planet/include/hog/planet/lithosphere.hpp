@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace hog::jobs {
@@ -161,6 +162,8 @@ public:
     // Continental crust lying under another plate's is too light to dive: it's scraped off onto
     // the crust over it, piling that up into a range, which then settles over `years` as
     // `ranges` says.
+    // Plates whose collision piles up more than their continent can take, so it founders, have
+    // jammed, and weld when next welded.
     void collide(double years, Ranges ranges = {});
     // Turns every plate as the forces on it now move it against the mantle's drag, at once, as
     // nothing so slow carries momentum. The first time, the drag is set so the plates keep the
@@ -178,8 +181,10 @@ public:
     // other anywhere along their edge are one plate but in name, as a microplate is captured once
     // what drove it dies, and weld into one. So do plates whose continents have collided, piling
     // up a range where they meet, that move so alike along it. The plate with less crust is taken
-    // into the other's frame. It's left with none, so plates keep their numbers. Continents that
-    // only touch, as where one has just split, stay apart while their plates still move.
+    // into the other's frame, as is a plate whose collision with another has jammed, however they
+    // still move, as the range between them can take up no more of their closing. It's left with
+    // none, so plates keep their numbers. Continents that only touch, as where one has just split,
+    // stay apart while their plates still move.
     void weld(double years);
 
     // Ocean floor an arc thickens this far floats as continent.
@@ -263,6 +268,8 @@ private:
     double pace_ = 0.0;
     double foundered_ = 0.0;
     double softer_ = 1.0;
+    // Each two plates, lower first, whose collision has jammed since they were last welded.
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> jammed_;
     jobs::JobSystem* jobs_ = nullptr;
 };
 
