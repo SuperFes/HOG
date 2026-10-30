@@ -29,7 +29,6 @@ using hog::planet::Lithosphere;
 using hog::planet::loose_sediment;
 using hog::planet::Mantle;
 using hog::planet::Material;
-using hog::planet::Ranges;
 using hog::planet::sedimentary_rock;
 using hog::planet::Strength;
 using hog::planet::Tectonics;
@@ -672,8 +671,8 @@ TEST_CASE("continents meeting pile up into a range on the one on top", "[planet]
     lithosphere.advance(years);
     const Lithosphere moved = lithosphere;
     const double volume = continental_volume(moved);
-    // Strong enough to hold all that piles up, and stiff, so it stays where it piled.
-    lithosphere.collide(years, {.strongest = 1'000.0F, .flow = 0.0F});
+    // Strong enough to hold all that piles up, so it stays where it piled.
+    lithosphere.collide({.strongest = 1'000.0F});
 
     const auto& grid = lithosphere.grid();
     const DVec3 meeting =
@@ -702,10 +701,10 @@ TEST_CASE("crust piled too thick flows out into the thinner continent around it"
     Lithosphere lithosphere = continental_halves();
     lithosphere.advance(20.0);
     const double volume = continental_volume(lithosphere);
-    const hog::planet::Ranges stiff{.flow = 0.0F};
-    lithosphere.collide(20.0, stiff);
+    const hog::planet::Ranges ranges;
+    lithosphere.collide(ranges);
     CHECK_THAT(continental_volume(lithosphere), WithinRel(volume, 1e-4));
-    CHECK(thickest(lithosphere) <= stiff.strongest + 1e-3F);
+    CHECK(thickest(lithosphere) <= ranges.strongest + 1e-3F);
     CHECK(thickest(lithosphere) > continent.thickness);
 }
 
@@ -725,7 +724,7 @@ TEST_CASE("crust too thick with only ocean floor around spreads out over it",
     Lithosphere lithosphere{grid, {plate}};
     const double volume = continental_volume(lithosphere);
     const hog::planet::Ranges ranges;
-    lithosphere.collide(10.0, ranges);
+    lithosphere.collide(ranges);
     CHECK(thickest(lithosphere) == ranges.strongest);
     CHECK(lithosphere.foundered() == 0.0);
     const auto& crust = lithosphere.plates()[0].crust;
@@ -743,7 +742,7 @@ TEST_CASE("crust too thick with no room on its whole plate founders into the man
     Lithosphere lithosphere{grid, {everywhere(grid, thick, DVec3{0.0, 0.0, 1.0}, 0.0)}};
     const double volume = continental_volume(lithosphere);
     const hog::planet::Ranges ranges;
-    lithosphere.collide(10.0, ranges);
+    lithosphere.collide(ranges);
     CHECK(thickest(lithosphere) == ranges.strongest);
     CHECK_THAT(lithosphere.foundered(),
                WithinRel(volume * (90.0 - static_cast<double>(ranges.strongest)) / 90.0, 1e-6));
@@ -1013,7 +1012,7 @@ TEST_CASE("sediment buried under a range is baked as hard as the rock around it"
     }
     Lithosphere lithosphere{bare.grid(), plates};
     lithosphere.advance(20.0);
-    lithosphere.collide(20.0, {.flow = 0.0F});
+    lithosphere.collide();
     int piled = 0;
     for (const auto& plate : lithosphere.plates()) {
         for (const Crust& crust : plate.crust) {
@@ -1027,36 +1026,11 @@ TEST_CASE("sediment buried under a range is baked as hard as the rock around it"
     CHECK(piled > 0);
 }
 
-TEST_CASE("a range spreads into the continent around it", "[planet][lithosphere]") {
-    const LevelGrid grid{4, radius};
-    Lithosphere::Plate plate = everywhere(grid, continent, DVec3{0.0, 0.0, 1.0}, 0.0);
-    constexpr std::size_t peak = 1'000;
-    plate.crust[peak].thickness = 55.0F;
-    const auto settle = [&](float flow) {
-        Lithosphere lithosphere{grid, {plate}};
-        const double volume = continental_volume(lithosphere);
-        lithosphere.collide(10.0, {.flow = flow});
-        CHECK_THAT(continental_volume(lithosphere), WithinRel(volume, 1e-5));
-        return lithosphere;
-    };
-    const Lithosphere stiff = settle(0.0F);
-    CHECK(stiff.plates()[0].crust == plate.crust);
-
-    const Lithosphere settled = settle(Ranges{}.flow);
-    const auto& crust = settled.plates()[0].crust;
-    CHECK(crust[peak].thickness < 55.0F);
-    CHECK(crust[peak].thickness > continent.thickness);
-    for (const std::uint32_t next : grid.neighbors(peak)) {
-        CHECK(crust[next].thickness > continent.thickness);
-        CHECK(crust[next].thickness < crust[peak].thickness);
-    }
-}
-
 TEST_CASE("ocean floor never piles up", "[planet][lithosphere]") {
     Lithosphere lithosphere = halves();
     lithosphere.advance(20.0);
     const Lithosphere moved = lithosphere;
-    lithosphere.collide(20.0);
+    lithosphere.collide();
     for (std::uint32_t plate = 0; plate < 2; ++plate) {
         CHECK(lithosphere.plates()[plate].cells == moved.plates()[plate].cells);
         CHECK(lithosphere.plates()[plate].crust == moved.plates()[plate].crust);
@@ -1071,7 +1045,7 @@ TEST_CASE("no continent is lost as plates part and meet but what founders",
         lithosphere.advance(step_years);
         // Arcs make new continent; without them none is made either.
         lithosphere.subduct(step_years, {.reach = 3, .growth = 0.0F});
-        lithosphere.collide(step_years);
+        lithosphere.collide();
         lithosphere.spread();
     }
     CHECK_THAT(continental_volume(lithosphere) + lithosphere.foundered(), WithinRel(volume, 0.01));
@@ -1093,7 +1067,7 @@ using Kind = hog::planet::Boundary::Kind;
 Lithosphere settled(Lithosphere lithosphere, double years) {
     lithosphere.advance(years);
     lithosphere.subduct(years);
-    lithosphere.collide(years);
+    lithosphere.collide();
     lithosphere.spread();
     return lithosphere;
 }
@@ -1848,7 +1822,7 @@ TEST_CASE("plates come out the same however many threads share the work", "[plan
         for (int step = 0; step < 4; ++step) {
             lithosphere.advance(step_years);
             lithosphere.subduct(step_years);
-            lithosphere.collide(step_years);
+            lithosphere.collide();
             lithosphere.spread();
             lithosphere.weld(step_years);
             lithosphere.warm(step_years);

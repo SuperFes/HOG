@@ -303,7 +303,7 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
         if (step < options.tectonics.steps) {
             timer.time("advance", [&] { lithosphere.advance(step_years); });
             timer.time("subduct", [&] { lithosphere.subduct(step_years); });
-            timer.time("collide", [&] { lithosphere.collide(step_years); });
+            timer.time("collide", [&] { lithosphere.collide(); });
             timer.time("spread", [&] { lithosphere.spread(); });
             timer.time("feed", [&] { lithosphere.feed(plumes, step_years); });
             timer.time("strike", [&] {

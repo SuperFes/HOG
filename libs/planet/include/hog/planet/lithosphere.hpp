@@ -76,12 +76,9 @@ struct Arcs {
 // How continental crust piled up into ranges bears its own weight: past `strongest` kilometres
 // it flows out at once into the thinner crust around it, a wedge spreading out over ocean floor
 // as over continent and burying it, its dense root foundering into the mantle only where the plate
-// has no room left at all; short of that, what's piled over a continent's
-// settled thickness spreads into it by `flow` of the difference every million years, so a range
-// piled up along a line widens into a belt.
+// has no room left at all. Short of that, its lower crust creeps out under it.
 struct Ranges {
     float strongest = 65.0F;
-    float flow = 0.02F;
 };
 
 // A plume rising from deep in the mantle, fixed under the plates as they move over it, and the
@@ -295,9 +292,8 @@ public:
     // plate over it thickens into an arc behind the trench.
     void subduct(double years, Arcs arcs = {});
     // Continental crust lying under another plate's is too light to dive: it's scraped off onto
-    // the crust over it, piling that up into a range, which then settles over `years` as
-    // `ranges` says.
-    void collide(double years, Ranges ranges = {});
+    // the crust over it, piling that up into a range, which bears what it can as `ranges` says.
+    void collide(Ranges ranges = {});
     // Builds the crust on top over each of `plumes` up by the magma it brings over `years`, laid
     // along the track its plate carried over it meanwhile: a plate moving on fast leaves a chain
     // of islands behind, and one standing still a pile.
