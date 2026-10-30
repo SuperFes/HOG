@@ -1,4 +1,5 @@
 #include <hog/core/assert.hpp>
+#include <hog/core/hash.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/planet/lithosphere.hpp>
 #include <hog/planet/projection.hpp>
@@ -116,6 +117,24 @@ void bury(Crust& crust) {
     for (std::size_t kind = sedimentary_rock; kind < cover_kinds; ++kind) {
         crust.cover[kind] = std::min(crust.cover[kind], std::max(hardened - depth, 0.0F));
         depth += crust.cover[kind];
+    }
+}
+
+// A uniform double in [0, 1) from the hash's high bits.
+[[nodiscard]] double unit(std::uint64_t hash) {
+    return static_cast<double>(hash >> 11U) * 0x1p-53;
+}
+
+// A unit vector uniform over the sphere, by rejection.
+[[nodiscard]] DVec3 direction(std::uint64_t seed) {
+    for (std::uint64_t attempt = 0;; ++attempt) {
+        const DVec3 point{(2.0 * unit(hash_values(seed, attempt, 0U))) - 1.0,
+                          (2.0 * unit(hash_values(seed, attempt, 1U))) - 1.0,
+                          (2.0 * unit(hash_values(seed, attempt, 2U))) - 1.0};
+        const double length = glm::length(point);
+        if (length <= 1.0 && length > 0.01) {
+            return point / length;
+        }
     }
 }
 
@@ -990,6 +1009,54 @@ void Lithosphere::subduct(double years, Arcs arcs) {
         bound(plate);
     }
     raise_arcs(trenches, years, arcs);
+}
+
+std::vector<Plume> plumes(std::uint64_t seed, double radius, const Plumes& settings) {
+    constexpr double earth_radius = 6.371e6;
+    constexpr std::uint64_t salt = 0x706c756d65ULL;
+    const double size = radius / earth_radius;
+    const auto count = static_cast<std::size_t>(std::lround(settings.count * size * size));
+    std::vector<Plume> rising(count);
+    for (std::size_t index = 0; index < count; ++index) {
+        const double buoyancy =
+            settings.weakest * std::pow(settings.strongest / settings.weakest,
+                                        unit(hash_values(seed, salt, index, 1U)));
+        rising[index] = {.at = direction(hash_values(seed, salt, index, 0U)),
+                         .magma = buoyancy * settings.magma};
+    }
+    return rising;
+}
+
+void Lithosphere::feed(std::span<const Plume> plumes, double years, const Plumes& settings) {
+    constexpr double km2_per_m2 = 1e-6;
+    const double across = std::sqrt(4.0 * std::numbers::pi / static_cast<double>(grid_.size()));
+    for (const Plume& plume : plumes) {
+        const std::optional<Found> found = top(plume.at);
+        if (!found) {
+            continue;
+        }
+        Plate& plate = plates_[found->plate];
+        // What lay over it so long ago has since been carried on by the plate's turn, so its
+        // track runs back along that turn; laid twice to each place it crosses, so none is missed.
+        const double swept =
+            std::abs(plate.rate) * years * glm::length(glm::cross(plate.pole, plume.at));
+        const int samples = static_cast<int>(std::ceil(2.0 * swept / across)) + 1;
+        const double each = plume.magma * years / samples;
+        for (int sample = 0; sample < samples; ++sample) {
+            const double ago = years * (sample + 0.5) / samples;
+            const DVec3 at = glm::angleAxis(plate.rate * ago, plate.pole) * plume.at;
+            const std::optional<std::size_t> index = held(found->plate, at);
+            if (!index) {
+                continue;
+            }
+            Crust& crust = plate.crust[*index];
+            const auto thicker = static_cast<float>(
+                each / (static_cast<double>(grid_.area(plate.cells[*index])) * km2_per_m2));
+            crust.cover[volcanic_rock] += thicker * settings.erupted;
+            bury(crust);
+            crust.thickness += thicker;
+        }
+    }
 }
 
 void Lithosphere::collide(double years, Ranges ranges) {

@@ -259,6 +259,7 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
         mantle.hotter = *options.tectonics.hotter;
     }
     const auto& grid = tectonics.grid();
+    const std::vector<hog::planet::Plume> plumes = hog::planet::plumes(config.seed, config.radius);
     double water = hog::planet::starting_water(grid);
     std::vector<hog::mapgen::Image> relief;
     std::vector<hog::mapgen::Image> plates;
@@ -300,6 +301,7 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
                 lithosphere.subduct(step_years);
                 lithosphere.collide(step_years);
                 lithosphere.spread();
+                lithosphere.feed(plumes, step_years);
                 const auto heights =
                     hog::planet::flexed(grid, hog::planet::crust_heights(lithosphere));
                 const std::int64_t level = hog::planet::sea_level(grid, heights, water);

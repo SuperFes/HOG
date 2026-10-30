@@ -72,6 +72,32 @@ struct Ranges {
     float flow = 0.02F;
 };
 
+// A plume rising from deep in the mantle, fixed under the plates as they move over it, and the
+// cubic kilometres of magma it brings up every million years.
+struct Plume {
+    DVec3 at{0.0, 0.0, 1.0}; // unit, in the planet's frame
+    double magma = 0.0;
+
+    friend bool operator==(const Plume&, const Plume&) = default;
+};
+
+// How plumes rise: `count` under a planet of Earth's size, more under a bigger one by its area,
+// each as buoyant as from `weakest` to `strongest` megagrams a second, evenly by logarithm,
+// bringing up `magma` cubic kilometres every million years for each (Sleep 1990, Hawaii's at 0.2
+// cubic kilometres a year). `erupted` of it comes out as lava on top and the rest sets inside,
+// some two to one under ocean islands (White, Crisp & Spera 2006).
+struct Plumes {
+    int count = 40;
+    double weakest = 0.3;
+    double strongest = 8.7;
+    double magma = 24'000.0;
+    float erupted = 1.0F / 3.0F;
+};
+
+// The plumes under a world of `seed` and `radius` metres, rising anywhere alike.
+[[nodiscard]] std::vector<Plume> plumes(std::uint64_t seed, double radius,
+                                        const Plumes& settings = {});
+
 // How the mantle warms where continents lie over it, as their thick crust holds its heat in, and
 // cools again under ocean floor, which lets it out: over `years`, each place goes the share
 // 1 - e^(-years / settling) of the way to fully warm or cool. The whole mantle starts `hotter`
@@ -191,6 +217,10 @@ public:
     // the crust over it, piling that up into a range, which then settles over `years` as
     // `ranges` says.
     void collide(double years, Ranges ranges = {});
+    // Builds the crust on top over each of `plumes` up by the magma it brings over `years`, laid
+    // along the track its plate carried over it meanwhile: a plate moving on fast leaves a chain
+    // of islands behind, and one standing still a pile.
+    void feed(std::span<const Plume> plumes, double years, const Plumes& settings = {});
     // Wears `worn` kilometres off the continent on top at each place of the grid, its cover
     // first, down to none, laying it down as sediment on the crust nearest it under the sea,
     // `drowned`, volume for volume: on its own continent's shelf, building it out, or past that

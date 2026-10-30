@@ -404,6 +404,68 @@ TEST_CASE("an arc's lava buried deep is baked into crystalline rock", "[planet][
     CHECK(raised > 0);
 }
 
+TEST_CASE("plumes rise anywhere, more under a bigger planet, each as buoyant as its own",
+          "[planet][lithosphere]") {
+    using hog::planet::plumes;
+    constexpr double earth = 6.371e6;
+    const hog::planet::Plumes plumes_of;
+    const auto rising = plumes(7, earth);
+    CHECK(rising.size() == static_cast<std::size_t>(plumes_of.count));
+    CHECK(plumes(7, 2.0 * earth).size() == 4 * rising.size());
+    CHECK(plumes(7, earth) == rising);
+    CHECK(plumes(8, earth) != rising);
+    double north = 0.0;
+    for (const hog::planet::Plume& plume : rising) {
+        CHECK_THAT(glm::length(plume.at), WithinAbs(1.0, 1e-12));
+        CHECK(plume.magma >= plumes_of.weakest * plumes_of.magma);
+        CHECK(plume.magma <= plumes_of.strongest * plumes_of.magma);
+        north += plume.at.z;
+    }
+    // Not all to one side.
+    CHECK(std::abs(north) < static_cast<double>(rising.size()) / 2.0);
+}
+
+TEST_CASE("a plume builds the crust over it up along the track its plate carries over it",
+          "[planet][lithosphere]") {
+    const LevelGrid grid{5, radius};
+    constexpr double years = 10.0;
+    const hog::planet::Plumes plumes_of;
+    // Enough to raise a place by half a kilometre over the years, well short of baking its lava.
+    const double place_km2 = static_cast<double>(grid.area(0)) * 1e-6;
+    const std::vector<hog::planet::Plume> rising{
+        {.at = DVec3{1.0, 0.0, 0.0}, .magma = 0.05 * place_km2}};
+    const double across = std::sqrt(4.0 * std::numbers::pi / static_cast<double>(grid.size()));
+    const auto fed = [&](double rate) {
+        Lithosphere lithosphere{grid, {everywhere(grid, Crust{}, DVec3{0.0, 0.0, 1.0}, rate)}};
+        lithosphere.feed(rising, years, plumes_of);
+        double added = 0.0;
+        int raised = 0;
+        const Lithosphere::Plate& plate = lithosphere.plates()[0];
+        for (std::size_t index = 0; index < plate.cells.size(); ++index) {
+            const Crust& crust = plate.crust[index];
+            const double thicker = static_cast<double>(crust.thickness - Crust{}.thickness);
+            if (thicker <= 0.0) {
+                continue;
+            }
+            ++raised;
+            added += thicker * static_cast<double>(grid.area(plate.cells[index])) * 1e-6;
+            CHECK_THAT(static_cast<double>(crust.cover[volcanic_rock]),
+                       WithinRel(thicker * static_cast<double>(plumes_of.erupted), 1e-3));
+            // Behind the plume, along the way the plate turns.
+            const DVec3 at = hog::planet::cell_center(grid.cell(plate.cells[index]));
+            const double longitude = std::atan2(at.y, at.x);
+            CHECK(std::abs(at.z) < across);
+            CHECK(longitude > -across);
+            CHECK(longitude < (rate * years) + across);
+        }
+        CHECK_THAT(added, WithinRel(rising[0].magma * years, 1e-4));
+        return raised;
+    };
+    // Standing still, all in one place; moving on, strung out behind.
+    CHECK(fed(0.0) == 1);
+    CHECK(fed(0.02) > 2);
+}
+
 TEST_CASE("ocean floor an arc thickens enough floats as continent", "[planet][lithosphere]") {
     Lithosphere lithosphere = halves();
     constexpr double years = 20.0;
