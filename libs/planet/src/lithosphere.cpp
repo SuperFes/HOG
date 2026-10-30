@@ -988,6 +988,23 @@ void Lithosphere::weld(double years) {
             take_in(root(plate), plate);
         }
     }
+    drop_bare();
+}
+
+void Lithosphere::drop_bare() {
+    std::size_t kept = 0;
+    for (std::size_t plate = 0; plate < plates_.size(); ++plate) {
+        if (plates_[plate].cells.empty()) {
+            continue;
+        }
+        if (kept != plate) {
+            plates_[kept] = std::move(plates_[plate]);
+            bounds_[kept] = bounds_[plate];
+        }
+        ++kept;
+    }
+    plates_.resize(kept);
+    bounds_.resize(kept);
 }
 
 void Lithosphere::take_in(std::uint32_t plate, std::uint32_t from) {

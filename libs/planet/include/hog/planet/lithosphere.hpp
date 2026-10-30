@@ -182,9 +182,9 @@ public:
     // what drove it dies, and weld into one. So do plates whose continents have collided, piling
     // up a range where they meet, that move so alike along it. The plate with less crust is taken
     // into the other's frame, as is a plate whose collision with another has jammed, however they
-    // still move, as the range between them can take up no more of their closing. It's left with
-    // none, so plates keep their numbers. Continents that only touch, as where one has just split,
-    // stay apart while their plates still move.
+    // still move, as the range between them can take up no more of their closing. Continents that
+    // only touch, as where one has just split, stay apart while their plates still move. Plates
+    // left with no crust, taken in or wholly dived, are gone, and those after them renumbered.
     void weld(double years);
 
     // Ocean floor an arc thickens this far floats as continent.
@@ -253,6 +253,8 @@ private:
                                                          const std::vector<bool>& overrides) const;
     // Bounds a plate's crust as it lies now. Crust it has lost since may still lie inside.
     void bound(std::uint32_t plate);
+    // Drops the plates with no crust, keeping the rest in order.
+    void drop_bare();
     // Takes all the crust of plate `from` into `plate`'s frame, leaving `from` with none.
     void take_in(std::uint32_t plate, std::uint32_t from);
     // Thickens the plate on top out from each of the `trenches`, places of the grid.

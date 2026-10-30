@@ -862,8 +862,7 @@ TEST_CASE("continents that have collided and move as one weld into one plate",
     lithosphere.advance(20.0);
     const double volume = continental_volume(lithosphere);
     lithosphere.weld(10.0);
-    CHECK(lithosphere.plates()[1].cells.empty());
-    CHECK(lithosphere.plates()[1].rate == 0.0);
+    CHECK(lithosphere.plates().size() == 1);
     CHECK_THAT(continental_volume(lithosphere), WithinRel(volume, 0.03));
     // What the frames left between them fills as any gap does.
     lithosphere.spread();
@@ -880,11 +879,11 @@ TEST_CASE("plates moving as one weld into one plate whatever crust they meet wit
     Lithosphere ocean = together(halves());
     ocean.advance(20.0);
     ocean.weld(10.0);
-    CHECK(ocean.plates()[1].cells.empty());
+    CHECK(ocean.plates().size() == 1);
     Lithosphere touching = together(continental_halves());
     touching.advance(20.0);
     touching.weld(10.0);
-    CHECK(touching.plates()[1].cells.empty());
+    CHECK(touching.plates().size() == 1);
 }
 
 TEST_CASE("continents piling up more than they can take jam and weld, however fast they close",
@@ -906,17 +905,17 @@ TEST_CASE("continents piling up more than they can take jam and weld, however fa
     Lithosphere jammed = settled(Lithosphere{grid, plates}, 20.0);
     REQUIRE(jammed.foundered() > 0.0);
     jammed.weld(10.0);
-    CHECK(jammed.plates()[1].cells.empty());
+    CHECK(jammed.plates().size() == 1);
 }
 
 TEST_CASE("plates still moving, at sea or where their continents never collided, stay apart",
           "[planet][lithosphere]") {
     Lithosphere ocean = settled(halves(), 20.0);
     ocean.weld(10.0);
-    CHECK_FALSE(ocean.plates()[1].cells.empty());
+    CHECK(ocean.plates().size() == 2);
     Lithosphere closing = settled(continental_halves(), 20.0);
     closing.weld(10.0);
-    CHECK_FALSE(closing.plates()[1].cells.empty());
+    CHECK(closing.plates().size() == 2);
 
     // Continents touching about the pole the halves turn on, where they barely move against each
     // other, while the floor further along their edge parts and closes.
@@ -934,7 +933,7 @@ TEST_CASE("plates still moving, at sea or where their continents never collided,
     }
     Lithosphere touching{grid, plates};
     touching.weld(10.0);
-    CHECK_FALSE(touching.plates()[1].cells.empty());
+    CHECK(touching.plates().size() == 2);
 }
 
 namespace {
@@ -1085,15 +1084,17 @@ TEST_CASE("each plate's crust is found wherever it lies, through splits and weld
     Lithosphere lithosphere =
         settled(hog::planet::lithosphere_from(start(), step_years), step_years);
     lithosphere.drive();
-    const std::size_t before = lithosphere.plates().size();
+    bool split = false;
     for (int step = 0; step < 4; ++step) {
         lithosphere = settled(lithosphere, step_years);
         lithosphere.weld(step_years);
         lithosphere.warm(step_years);
+        const std::size_t before = lithosphere.plates().size();
         lithosphere.rift({}, weak);
+        split = split || lithosphere.plates().size() > before;
         lithosphere.drive();
     }
-    REQUIRE(lithosphere.plates().size() > before);
+    REQUIRE(split);
     const auto& grid = lithosphere.grid();
     for (std::uint32_t plate = 0; plate < lithosphere.plates().size(); ++plate) {
         const auto& cells = lithosphere.plates()[plate].cells;
