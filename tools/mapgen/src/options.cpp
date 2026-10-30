@@ -282,6 +282,15 @@ constexpr std::array flags{
              options.tectonics.every = *steps;
              return {};
          }},
+    Flag{.name = "--mantle-hotter",
+         .handler = [](Options& options, std::string_view value) -> Result<void> {
+             const auto kelvin = parse_double(value);
+             if (!kelvin || !std::isfinite(*kelvin) || *kelvin < 0.0) {
+                 return invalid(std::format("--mantle-hotter {} is not kelvin from 0 up", value));
+             }
+             options.tectonics.hotter = kelvin;
+             return {};
+         }},
     Flag{.name = "--cell-km",
          .handler = [](Options& options, std::string_view value) -> Result<void> {
              const auto km = parse_double(value);
@@ -354,6 +363,8 @@ Writes PNG maps of a generated planet, one per layer, named <view>-<layer>.png.
                        <view>-tectonics-<step>.png, <view>-relief-<step>.png and
                        <view>-plates-<step>.png, and a sheet of each
   --every-steps STEPS  steps between tectonics maps (default 5)
+  --mantle-hotter K    starts the mantle K kelvin over today's, cooling as it goes
+                       (default 200, as when plates began)
   --help               shows this
 )";
 }

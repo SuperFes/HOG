@@ -228,6 +228,10 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
     constexpr double step_years = 10.0;
     hog::planet::Lithosphere lithosphere = hog::planet::lithosphere_from(tectonics, step_years);
     lithosphere.share_work(&jobs);
+    hog::planet::Mantle mantle;
+    if (options.tectonics.hotter) {
+        mantle.hotter = *options.tectonics.hotter;
+    }
     const auto& grid = tectonics.grid();
     double water = hog::planet::starting_water(grid);
     std::vector<hog::mapgen::Image> crust;
@@ -275,7 +279,7 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
                 lithosphere.collide(step_years);
                 lithosphere.spread();
                 lithosphere.weld(step_years);
-                lithosphere.warm(step_years);
+                lithosphere.warm(step_years, mantle);
                 lithosphere.rift();
                 lithosphere.drive();
             });

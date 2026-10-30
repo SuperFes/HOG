@@ -87,7 +87,11 @@ TEST_CASE("mapgen reads every option", "[mapgen]") {
 
     const auto tectonics = parse({"--tectonics", "40", "--every-steps", "10"});
     REQUIRE(tectonics);
-    CHECK(tectonics->tectonics == hog::mapgen::TectonicsFrames{.steps = 40, .every = 10});
+    CHECK(tectonics->tectonics ==
+          hog::mapgen::TectonicsFrames{.steps = 40, .every = 10, .hotter = std::nullopt});
+    const auto cooler = parse({"--tectonics", "40", "--mantle-hotter", "50"});
+    REQUIRE(cooler);
+    CHECK(cooler->tectonics.hotter == 50.0);
 
     const auto help = parse({"--help"});
     REQUIRE(help);
@@ -132,6 +136,8 @@ TEST_CASE("mapgen rejects bad arguments", "[mapgen]") {
     CHECK(rejects({"--cell-km", "0"}));
     CHECK(rejects({"--tectonics", "0"}));
     CHECK(rejects({"--every-steps", "0"}));
+    CHECK(rejects({"--mantle-hotter", "-1"}));
+    CHECK(rejects({"--mantle-hotter", "inf"}));
     CHECK(rejects({"--tectonics", "5", "--seasons"}));
     CHECK(rejects({"--cell-km", "inf"}));
 }

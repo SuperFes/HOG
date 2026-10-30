@@ -87,6 +87,8 @@ struct SeasonFrames {
 struct TectonicsFrames {
     int steps = 0; // how many to move the plates; none when 0
     int every = 5; // steps between maps
+    // Kelvin the mantle starts over today's; as the lithosphere has it when none.
+    std::optional<double> hotter;
     friend bool operator==(const TectonicsFrames&, const TectonicsFrames&) = default;
 };
 
