@@ -984,10 +984,11 @@ void Lithosphere::take_in(std::uint32_t plate, std::uint32_t from) {
 
 void Lithosphere::raise_arcs(std::span<const std::uint32_t> trenches, double years, Arcs arcs) {
     // Out from each trench, a ring of places at a time, while the same plate stays on top.
+    const std::vector<std::optional<Found>> on_top = tops();
     std::vector<std::uint32_t> over(grid_.size(), parted);
     std::vector<std::uint32_t> frontier;
     for (const std::uint32_t place : trenches) {
-        const std::optional<Found> found = top(cell_center(grid_.cell(place)));
+        const std::optional<Found>& found = on_top[place];
         if (found && over[place] == parted) {
             over[place] = found->plate;
             frontier.push_back(place);
@@ -998,13 +999,13 @@ void Lithosphere::raise_arcs(std::span<const std::uint32_t> trenches, double yea
         std::vector<std::uint32_t> further;
         for (const std::uint32_t place : frontier) {
             for (const std::uint32_t next : grid_.neighbors(place)) {
-                const DVec3 at = cell_center(grid_.cell(next));
-                const std::optional<Found> found = top(at);
+                const std::optional<Found>& found = on_top[next];
                 if (over[next] != parted || !found || found->plate != over[place]) {
                     continue;
                 }
                 over[next] = over[place];
-                raised.emplace_back(over[place], held(over[place], at).value_or(0));
+                raised.emplace_back(over[place],
+                                    held(over[place], cell_center(grid_.cell(next))).value_or(0));
                 further.push_back(next);
             }
         }
