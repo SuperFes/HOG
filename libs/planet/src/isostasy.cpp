@@ -61,9 +61,11 @@ std::vector<std::int64_t> crust_heights(const Lithosphere& lithosphere) {
         const std::optional<Lithosphere::Found> found =
             lithosphere.top(cell_center(grid.cell(cell)));
         const Crust crust = found ? found->crust : Crust{};
-        heights[cell] = column_height(
-            crust.type == CrustType::Continental, static_cast<double>(crust.thickness),
-            std::min(static_cast<double>(crust.age) / cooling_years, 1.0));
+        heights[cell] =
+            column_height(crust.type == CrustType::Continental,
+                          static_cast<double>(crust.thickness),
+                          std::min(static_cast<double>(crust.age) / cooling_years, 1.0)) -
+            to_fixed(static_cast<double>(crust.sunk) * 1'000.0);
     }
     return heights;
 }

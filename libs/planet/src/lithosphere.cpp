@@ -1,6 +1,7 @@
 #include <hog/core/assert.hpp>
 #include <hog/core/hash.hpp>
 #include <hog/jobs/job_system.hpp>
+#include <hog/planet/isostasy.hpp>
 #include <hog/planet/lithosphere.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tectonics.hpp>
@@ -1089,6 +1090,49 @@ std::vector<Impact> impacts(std::uint64_t seed, double ago, double years, double
         waited -= std::log1p(-unit(hash_values(when, index + 1, 0U)));
     }
     return struck;
+}
+
+void Lithosphere::bend(double radius) {
+    constexpr double metres_per_km = 1'000.0;
+    constexpr auto unheld = std::numeric_limits<std::uint32_t>::max();
+    const std::vector<std::optional<Found>> on_top = tops();
+    std::vector<double> loads(grid_.size(), 0.0);
+    std::vector<double> stiff(grid_.size(), 0.0);
+    std::vector<std::uint32_t> plate_at(grid_.size(), unheld);
+    std::vector<Crust*> crust_at(grid_.size(), nullptr);
+    std::vector<std::vector<bool>> taken(plates_.size());
+    for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
+        taken[plate].resize(plates_[plate].crust.size());
+    }
+    for (std::uint32_t place = 0; place < grid_.size(); ++place) {
+        const std::optional<Found>& found = on_top[place];
+        const std::uint32_t plate = found.value_or(Found{}).plate;
+        const std::optional<std::size_t> index =
+            found ? held(plate, cell_center(grid_.cell(place))) : std::nullopt;
+        if (!index) {
+            continue;
+        }
+        Crust& crust = plates_[plate].crust[*index];
+        plate_at[place] = plate;
+        stiff[place] = stiffness(elastic_thickness(crust), radius);
+        // A column under two places bears its load under only one.
+        if (taken[plate][*index]) {
+            continue;
+        }
+        taken[plate][*index] = true;
+        crust_at[place] = &crust;
+        const double buoyancy =
+            crust.type == CrustType::Continental ? continental_buoyancy : oceanic_buoyancy;
+        loads[place] = (1.0 - buoyancy) * metres_per_km *
+                       static_cast<double>(crust.thickness - crust.borne.value_or(crust.thickness));
+    }
+    const std::vector<double> bent = deflected(grid_, loads, stiff, plate_at);
+    for (std::uint32_t place = 0; place < grid_.size(); ++place) {
+        if (Crust* crust = crust_at[place]) {
+            crust->sunk += static_cast<float>((bent[place] - loads[place]) / metres_per_km);
+            crust->borne = crust->thickness;
+        }
+    }
 }
 
 void Lithosphere::strike(std::span<const Impact> impacts, Craters craters) {

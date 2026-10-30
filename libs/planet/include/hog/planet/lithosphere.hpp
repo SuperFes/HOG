@@ -51,6 +51,10 @@ struct Crust {
     // years since.
     Slip fault = Slip::None;
     float faulted = 0.0F;
+    // Kilometres it sits below where it would float on its own, held there by the plate it bends
+    // with, and how thick it was when the plate last bent under it, or none if never.
+    float sunk = 0.0F;
+    std::optional<float> borne = std::nullopt;
 
     friend bool operator==(const Crust&, const Crust&) = default;
 };
@@ -286,6 +290,11 @@ public:
     // Digs the crater of each of `impacts` into the crust on top, its cover first, and lays what's
     // thrown out of it around it, volume for volume.
     void strike(std::span<const Impact> impacts, Craters craters = {});
+    // Bends each plate under what's been laid on or taken off the crust on top since it last did,
+    // on a planet of `radius` metres, as stiff as its rock has cooled since last heated: a load
+    // narrower than the plate bends over stands above where it would float alone, and sinks the
+    // crust round it.
+    void bend(double radius);
     // Wears `worn` kilometres off the continent on top at each place of the grid, its cover
     // first, down to none, laying it down as sediment on the crust nearest it under the sea,
     // `drowned`, volume for volume: on its own continent's shelf, building it out, or past that

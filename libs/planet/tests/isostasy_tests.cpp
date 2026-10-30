@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <numbers>
+#include <span>
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
@@ -430,4 +432,62 @@ TEST_CASE("plates stiffen as they cool, as deep as the plate under them allows",
     CHECK(reach < 80e3);
     // Over as much of a smaller planet.
     CHECK_THAT(stiffness(30.0, earth / 2.0), WithinRel(stiffness(30.0, earth) / 16.0, 1e-9));
+}
+
+TEST_CASE("a cold plate holds a crater dug into it a hollow, and young floor floats as it would",
+          "[planet][isostasy]") {
+    using hog::planet::Crust;
+    const auto struck = [](const LevelGrid& grid, Crust crust, std::uint32_t at) {
+        Lithosphere::Plate plate;
+        for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+            plate.cells.push_back(cell);
+            plate.crust.push_back(crust);
+        }
+        Lithosphere lithosphere{grid, {plate}};
+        lithosphere.bend(radius);
+        const double across = std::sqrt(4.0 * std::numbers::pi / static_cast<double>(grid.size()));
+        const hog::planet::Impact impact{.at = hog::planet::cell_center(grid.cell(at)),
+                                         .diameter = 5.0 * across};
+        lithosphere.strike(std::span{&impact, 1});
+        return lithosphere;
+    };
+
+    const LevelGrid grid{6, radius};
+    const Crust shield{
+        .type = CrustType::Continental, .thickness = 35.0F, .age = 3'000.0F, .raised = 3'000.0F};
+    // Mid-face, away from the cube's edges.
+    constexpr std::uint32_t at = (64 * 32) + 32;
+    Lithosphere lithosphere = struck(grid, shield, at);
+    // Bent once already, under crust it bore all along.
+    for (const Crust& crust : lithosphere.plates()[0].crust) {
+        if (crust.thickness == shield.thickness) {
+            CHECK(crust.sunk == 0.0F);
+        }
+    }
+    const auto alone = crust_heights(lithosphere);
+    lithosphere.bend(radius);
+    const auto bent = crust_heights(lithosphere);
+    CHECK(bent[at] < alone[at]);
+    // The plate round it holds as much up as the hollow holds down.
+    double sunk = 0.0;
+    double moved = 0.0;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const auto area = static_cast<double>(grid.area(cell));
+        const auto by = static_cast<double>(lithosphere.plates()[0].crust[cell].sunk);
+        sunk += area * by;
+        moved += area * std::abs(by);
+        CHECK(lithosphere.plates()[0].crust[cell].borne ==
+              lithosphere.plates()[0].crust[cell].thickness);
+    }
+    CHECK(moved > 0.0);
+    CHECK(std::abs(sunk) < 1e-4 * moved);
+    // Bent again under nothing new, it stays as it is.
+    lithosphere.bend(radius);
+    CHECK(crust_heights(lithosphere) == bent);
+
+    const LevelGrid coarse{4, radius};
+    Lithosphere floor = struck(coarse, Crust{}, (16 * 8) + 8);
+    const auto floating = crust_heights(floor);
+    floor.bend(radius);
+    CHECK(crust_heights(floor) == floating);
 }
