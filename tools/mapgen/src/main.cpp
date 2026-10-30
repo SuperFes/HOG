@@ -302,26 +302,28 @@ int render_tectonics(const hog::mapgen::Options& options, const hog::planet::Pla
             }
         }
         if (step < options.tectonics.steps) {
-            timer.time("plates", [&] {
-                lithosphere.advance(step_years);
-                lithosphere.subduct(step_years);
-                lithosphere.collide(step_years);
-                lithosphere.spread();
-                lithosphere.feed(plumes, step_years);
+            timer.time("advance", [&] { lithosphere.advance(step_years); });
+            timer.time("subduct", [&] { lithosphere.subduct(step_years); });
+            timer.time("collide", [&] { lithosphere.collide(step_years); });
+            timer.time("spread", [&] { lithosphere.spread(); });
+            timer.time("feed", [&] { lithosphere.feed(plumes, step_years); });
+            timer.time("strike", [&] {
                 lithosphere.strike(hog::planet::impacts(
                     config.seed, (options.tectonics.steps - step - 1) * step_years, step_years,
                     smallest_crater));
+            });
+            timer.time("erode", [&] {
                 const auto heights =
                     hog::planet::flexed(grid, hog::planet::crust_heights(lithosphere));
                 const std::int64_t level = hog::planet::sea_level(grid, heights, water);
                 lithosphere.erode(
                     hog::planet::worn_down(grid, heights, level, step_years, lithosphere.cover()),
                     hog::planet::drowned(heights, level));
-                lithosphere.weld(step_years);
-                lithosphere.warm(step_years, mantle);
-                lithosphere.rift(step_years);
-                lithosphere.drive();
             });
+            timer.time("weld", [&] { lithosphere.weld(step_years); });
+            timer.time("warm", [&] { lithosphere.warm(step_years, mantle); });
+            timer.time("rift", [&] { lithosphere.rift(step_years); });
+            timer.time("drive", [&] { lithosphere.drive(); });
         }
     }
     constexpr int columns = 4;
