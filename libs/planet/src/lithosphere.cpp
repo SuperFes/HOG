@@ -1093,11 +1093,20 @@ std::vector<Impact> impacts(std::uint64_t seed, double ago, double years, double
 
 void Lithosphere::strike(std::span<const Impact> impacts, Craters craters) {
     constexpr double earth_km = 6'371.0;
+    if (impacts.empty()) {
+        return;
+    }
+    // Each place's crust on top and where it lies, found once for every impact.
     const std::vector<std::optional<Found>> on_top = tops();
-    const auto crust_at = [&](std::uint32_t place) -> Crust& {
-        const std::uint32_t plate = on_top[place]->plate;
-        return plates_[plate].crust[held(plate, cell_center(grid_.cell(place))).value_or(0)];
-    };
+    std::vector<Crust*> crust_at(grid_.size(), nullptr);
+    std::vector<DVec3> centres(grid_.size());
+    for (std::uint32_t place = 0; place < grid_.size(); ++place) {
+        centres[place] = cell_center(grid_.cell(place));
+        if (const std::optional<Found>& found = on_top[place]) {
+            const std::uint32_t plate = found->plate;
+            crust_at[place] = &plates_[plate].crust[held(plate, centres[place]).value_or(0)];
+        }
+    }
     std::vector<double> apart(grid_.size());
     for (const Impact& impact : impacts) {
         const double transient = std::pow(
@@ -1107,16 +1116,16 @@ void Lithosphere::strike(std::span<const Impact> impacts, Craters craters) {
         double dug = 0.0;
         double around = 0.0;
         for (std::uint32_t place = 0; place < grid_.size(); ++place) {
-            if (!on_top[place]) {
+            if (crust_at[place] == nullptr) {
                 continue;
             }
-            const DVec3 at = cell_center(grid_.cell(place));
+            const DVec3 at = centres[place];
             apart[place] =
                 std::atan2(glm::length(glm::cross(at, impact.at)), glm::dot(at, impact.at));
             const auto area = static_cast<double>(grid_.area(place));
             if (apart[place] < rim) {
                 const double out = apart[place] / rim;
-                Crust& crust = crust_at(place);
+                Crust& crust = *crust_at[place];
                 const float off =
                     std::min(static_cast<float>(deepest * (1.0 - (out * out))), crust.thickness);
                 strip(crust, off);
@@ -1129,10 +1138,10 @@ void Lithosphere::strike(std::span<const Impact> impacts, Craters craters) {
             continue;
         }
         for (std::uint32_t place = 0; place < grid_.size(); ++place) {
-            if (on_top[place] && apart[place] >= rim) {
+            if (crust_at[place] != nullptr && apart[place] >= rim) {
                 const auto laid =
                     static_cast<float>(dug * std::pow(rim / apart[place], 3.0) / around);
-                lay(crust_at(place), laid, Cover{laid});
+                lay(*crust_at[place], laid, Cover{laid});
             }
         }
     }
