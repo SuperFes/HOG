@@ -151,7 +151,7 @@ TEST_CASE("land wears down by how far it stands over the ground around it", "[pl
     CHECK_THAT(static_cast<double>(ages[coast]), WithinAbs(2.0 / continental_buoyancy, 1e-4));
 }
 
-TEST_CASE("soft rock wears faster than the rock under it, and then the rock as ever",
+TEST_CASE("each kind of rock wears at its own pace, and then the rock under it as ever",
           "[planet][isostasy]") {
     using hog::planet::continental_buoyancy;
     using hog::planet::denudation;
@@ -171,6 +171,8 @@ TEST_CASE("soft rock wears faster than the rock under it, and then the rock as e
     const double rock = worn({}, 0.01);
     CHECK_THAT(worn({5.0F, 0.0F}, 0.01), WithinAbs(softness[0] * rock, 1e-4));
     CHECK_THAT(worn({0.0F, 5.0F}, 0.01), WithinAbs(softness[1] * rock, 1e-4));
+    CHECK_THAT(worn({0.0F, 0.0F, 5.0F}, 0.01), WithinAbs(softness[2] * rock, 1e-5));
+    CHECK(worn({0.0F, 0.0F, 5.0F}, 0.01) < rock);
     // A thin cover wears off quickly, and then what's under it as it would have.
     const double thin = worn({0.01F, 0.0F}, 10.0);
     CHECK(thin > worn({}, 10.0));
@@ -179,7 +181,8 @@ TEST_CASE("soft rock wears faster than the rock under it, and then the rock as e
     CHECK(worn({0.01F, 5.0F}, 1.0) < worn({5.0F, 0.0F}, 1.0));
     CHECK_THAT(rock, WithinAbs(denudation * 0.01, 1e-5));
     // Given long enough, as much as brings it down to the ground around, and no more.
-    for (const Cover soft : {Cover{}, Cover{0.01F, 0.0F}, Cover{5.0F, 0.0F}, Cover{0.5F, 5.0F}}) {
+    for (const Cover soft : {Cover{}, Cover{0.01F, 0.0F}, Cover{5.0F, 0.0F}, Cover{0.5F, 5.0F},
+                             Cover{0.0F, 0.0F, 5.0F}}) {
         CHECK_THAT(worn(soft, 1e6), WithinAbs(1.0 / continental_buoyancy, 1e-4));
     }
 }

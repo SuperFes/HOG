@@ -26,10 +26,10 @@ inline constexpr double oceanic_buoyancy = 0.12;
 // Kilometres of rock a million years wears off land for each kilometre it stands above the ground
 // its rivers cut down to, as drainage basins wear down by their relief (Ahnert 1970).
 inline constexpr double denudation = 0.15;
-// Times faster each kind of soft rock wears than the crystalline rock under it: loose sediment,
-// and sedimentary rock as sandstone against granite, by their tensile strength squared (Stock &
-// Montgomery 1999; Sklar & Dietrich 2001).
-inline constexpr std::array<double, soft_kinds> softness{10.0, 4.0};
+// Times faster each kind of rock over crystalline wears than it: loose sediment, sedimentary
+// rock as sandstone against granite, and lava as basalt, slower, by their tensile strength
+// squared (Stock & Montgomery 1999; Sklar & Dietrich 2001).
+inline constexpr std::array<double, cover_kinds> softness{10.0, 4.0, 0.6};
 // Of the planet, the share of continental crust the sea floods round the land's edges.
 inline constexpr double shelf_share = 0.1;
 // Metres deep a world's water would stand spread evenly over it, as it has to begin with.

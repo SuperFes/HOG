@@ -21,15 +21,16 @@ class Volume;
 
 enum class CrustType : std::uint8_t { Oceanic, Continental };
 
-// Kinds of rock softer than crystalline that can lie over a column, from the top down: sediment
-// laid down loose, and the rock it's pressed into once buried.
+// Kinds of rock other than crystalline that can lie over a column, from the top down: sediment
+// laid down loose, the rock it's pressed into once buried, and lava an arc erupts.
 inline constexpr std::size_t loose_sediment = 0;
 inline constexpr std::size_t sedimentary_rock = 1;
-inline constexpr std::size_t soft_kinds = 2;
-// Kilometres of each kind of soft rock over a column.
-using Cover = std::array<float, soft_kinds>;
-// Kilometres deep loose sediment is buried before it's pressed and cemented into rock, and that
-// rock before it's baked as hard as crystalline rock, as it's heated past some 300 degrees.
+inline constexpr std::size_t volcanic_rock = 2;
+inline constexpr std::size_t cover_kinds = 3;
+// Kilometres of each kind of rock over a column's crystalline rock.
+using Cover = std::array<float, cover_kinds>;
+// Kilometres deep loose sediment is buried before it's pressed and cemented into rock, and other
+// rock before it's baked into crystalline rock, as it's heated past some 300 degrees.
 inline constexpr float lithified = 2.0F;
 inline constexpr float hardened = 10.0F;
 
@@ -40,7 +41,7 @@ struct Crust {
     // Millions of years since it formed, and since it was last piled up into a range.
     float age = 0.0F;
     float raised = 0.0F;
-    // What of it on top is softer than crystalline rock.
+    // What of it on top isn't crystalline rock.
     Cover cover{};
 
     friend bool operator==(const Crust&, const Crust&) = default;
@@ -51,10 +52,13 @@ struct Crust {
 [[nodiscard]] bool stays_over(const Crust& one, const Crust& other) noexcept;
 
 // How ocean floor diving under a plate thickens it: out from the trench across the plate over
-// it, over so many places of the grid, by so many kilometres every million years.
+// it, over so many places of the grid, by so many kilometres every million years, `erupted` of
+// it as lava on top and the rest set inside as plutons, some five to one (White, Crisp & Spera
+// 2006).
 struct Arcs {
     int reach = 3;
     float growth = 0.06F;
+    float erupted = 1.0F / 6.0F;
 };
 
 // How continental crust piled up into ranges bears its own weight: past `strongest` kilometres
@@ -187,7 +191,7 @@ public:
     // the crust over it, piling that up into a range, which then settles over `years` as
     // `ranges` says.
     void collide(double years, Ranges ranges = {});
-    // Wears `worn` kilometres off the continent on top at each place of the grid, its soft rock
+    // Wears `worn` kilometres off the continent on top at each place of the grid, its cover
     // first, down to none, laying it down as sediment on the crust nearest it under the sea,
     // `drowned`, volume for volume: on its own continent's shelf, building it out, or past that
     // on ocean floor, which carries it off to a trench in time.

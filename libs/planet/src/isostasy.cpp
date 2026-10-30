@@ -80,7 +80,7 @@ std::vector<float> worn_down(const LevelGrid& grid, std::span<const std::int64_t
     const auto through = [&](double above, const Cover& layers) {
         double worn = 0.0;
         double time = years;
-        for (std::size_t kind = 0; kind < soft_kinds; ++kind) {
+        for (std::size_t kind = 0; kind < cover_kinds; ++kind) {
             const auto layer = static_cast<double>(layers[kind]);
             const double rate = softness[kind];
             if (buoyancy * layer >= above) {

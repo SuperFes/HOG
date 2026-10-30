@@ -31,6 +31,7 @@ using hog::planet::Ranges;
 using hog::planet::sedimentary_rock;
 using hog::planet::Strength;
 using hog::planet::Tectonics;
+using hog::planet::volcanic_rock;
 using hog::planet::Volume;
 
 namespace {
@@ -356,6 +357,9 @@ TEST_CASE("ocean floor under another plate dives and the plate over it rises int
                                               1e-4));
         CHECK(crust.raised == 0.0F);
         CHECK(crust.type == CrustType::Oceanic);
+        // Some of it lava on top.
+        CHECK_THAT(static_cast<double>(crust.cover[volcanic_rock]),
+                   WithinAbs(years * static_cast<double>(arcs.growth * arcs.erupted), 1e-5));
     }
     CHECK(raised > 0);
 }
@@ -379,6 +383,25 @@ TEST_CASE("the older plate's floor dives all along where they meet, however its 
     lithosphere.subduct(years);
     CHECK(lithosphere.plates()[0].cells.size() == moved.plates()[0].cells.size());
     CHECK(lithosphere.plates()[1].cells.size() < moved.plates()[1].cells.size());
+}
+
+TEST_CASE("an arc's lava buried deep is baked into crystalline rock", "[planet][lithosphere]") {
+    Lithosphere lithosphere = halves();
+    constexpr double years = 20.0;
+    lithosphere.advance(years);
+    lithosphere.subduct(years, {.reach = 1, .growth = 4.0F});
+    const auto& grid = lithosphere.grid();
+    int raised = 0;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const Crust crust = lithosphere.top(hog::planet::cell_center(grid.cell(cell)))
+                                .value_or(Lithosphere::Found{})
+                                .crust;
+        if (crust.thickness > Crust{}.thickness) {
+            ++raised;
+            CHECK(crust.cover == Cover{0.0F, 0.0F, hog::planet::hardened});
+        }
+    }
+    CHECK(raised > 0);
 }
 
 TEST_CASE("ocean floor an arc thickens enough floats as continent", "[planet][lithosphere]") {

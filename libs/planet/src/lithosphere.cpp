@@ -106,22 +106,30 @@ void remove_crust(Lithosphere::Plate& plate, std::vector<std::size_t> held) {
     plate.crust.resize(kept);
 }
 
+// Presses `crust`'s loose sediment buried past `lithified` into rock, and bakes what's buried
+// past `hardened` into crystalline rock.
+void bury(Crust& crust) {
+    float& loose = crust.cover[loose_sediment];
+    crust.cover[sedimentary_rock] += std::max(loose - lithified, 0.0F);
+    loose = std::min(loose, lithified);
+    float depth = loose;
+    for (std::size_t kind = sedimentary_rock; kind < cover_kinds; ++kind) {
+        crust.cover[kind] = std::min(crust.cover[kind], std::max(hardened - depth, 0.0F));
+        depth += crust.cover[kind];
+    }
+}
+
 // Lays `laid` kilometres over `crust`, `soft` of them on top, burying what was on top before:
-// under crystalline rock, it's as good as crystalline. Loose sediment buried past `lithified` is
-// pressed into rock, and that past `hardened` is baked as hard as crystalline.
+// under crystalline rock, it's as good as crystalline.
 void lay(Crust& crust, float laid, const Cover& soft) {
     if (laid > std::accumulate(soft.begin(), soft.end(), 0.0F)) {
         crust.cover = soft;
     } else {
-        for (std::size_t kind = 0; kind < soft_kinds; ++kind) {
+        for (std::size_t kind = 0; kind < cover_kinds; ++kind) {
             crust.cover[kind] += soft[kind];
         }
     }
-    float& loose = crust.cover[loose_sediment];
-    float& rock = crust.cover[sedimentary_rock];
-    rock += std::max(loose - lithified, 0.0F);
-    loose = std::min(loose, lithified);
-    rock = std::min(rock, std::max(hardened - loose, 0.0F));
+    bury(crust);
     crust.thickness += laid;
 }
 
@@ -1472,6 +1480,9 @@ void Lithosphere::raise_arcs(std::span<const std::uint32_t> trenches, double yea
     const auto thicker = static_cast<float>(years) * arcs.growth;
     for (const auto& [plate, index] : raised) {
         Crust& crust = plates_[plate].crust[index];
+        // Its lava under what sediment there is, which mostly washed in off the arc itself.
+        crust.cover[volcanic_rock] += thicker * arcs.erupted;
+        bury(crust);
         crust.thickness += thicker;
         crust.raised = 0.0F;
         if (crust.type == CrustType::Oceanic && crust.thickness >= arc_continent) {
