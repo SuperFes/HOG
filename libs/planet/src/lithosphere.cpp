@@ -313,28 +313,80 @@ struct Stretch {
 
 // How many times harder than it holds a plate turning at `turn` is pulled apart along the line
 // whose plane faces `facing`, with `pushed` the torque on the side it faces: what the other side
-// puts on that one to keep it turning with the plate, taken as a pull even along the line.
+// puts on that one to keep it turning with the plate, against how strong the line is where that
+// pulls it apart. Tension t at a place p on the line puts -t (p x facing) on the side. Across a
+// plate from edge to edge it's taken as even along the line. A line on the plate all the way
+// round can't hold so, as its levers cancel, but by pulling on one side and pushing on the
+// other: the least tension that does varies along it as p x facing does.
 double pulled(std::span<const Stretch> stretches, DVec3 turn, DVec3 pushed, DVec3 facing) {
+    const DVec3 first = glm::normalize(
+        glm::cross(facing, std::abs(facing.x) < 0.9 ? DVec3{1.0, 0.0, 0.0} : DVec3{0.0, 1.0, 0.0}));
+    const DVec3 second = glm::cross(facing, first);
+    const auto on_line = [&](const Stretch& stretch) {
+        return std::abs(glm::dot(stretch.at, facing)) < 0.5 * stretch.across;
+    };
     glm::dmat3 held{0.0};
-    DVec3 chord{0.0};
-    double length = 0.0;
-    double holds = 0.0;
+    // Of the levers along the line in the plane's two directions, weighted by length.
+    double xx = 0.0;
+    double xy = 0.0;
+    double yy = 0.0;
+    DVec3 levers{0.0};
+    double widest = 0.0;
+    std::vector<double> round;
     for (const Stretch& stretch : stretches) {
-        const double side = glm::dot(stretch.at, facing);
-        if (side > 0.0) {
+        if (glm::dot(stretch.at, facing) > 0.0) {
             held += stretch.drag;
         }
-        if (std::abs(side) < 0.5 * stretch.across) {
-            chord += stretch.across * stretch.at;
-            length += stretch.across;
+        if (on_line(stretch)) {
+            const DVec3 lever = glm::cross(stretch.at, facing);
+            const double x = glm::dot(lever, first);
+            const double y = glm::dot(lever, second);
+            xx += stretch.across * x * x;
+            xy += stretch.across * x * y;
+            yy += stretch.across * y * y;
+            levers += stretch.across * lever;
+            widest = std::max(widest, stretch.across);
+            round.push_back(std::atan2(glm::dot(stretch.at, second), glm::dot(stretch.at, first)));
+        }
+    }
+    if (round.empty()) {
+        return 0.0;
+    }
+    std::ranges::sort(round);
+    double gap = round.front() + (2.0 * std::numbers::pi) - round.back();
+    for (std::size_t index = 1; index < round.size(); ++index) {
+        gap = std::max(gap, round[index] - round[index - 1]);
+    }
+    const DVec3 needed = pushed - (held * turn);
+    // Tension at a place as c . (p x facing), plus `even` all along.
+    DVec3 c{0.0};
+    double even = 0.0;
+    const double det = (xx * yy) - (xy * xy);
+    if (gap > 2.0 * widest) {
+        if (glm::dot(levers, levers) == 0.0) {
+            return 0.0;
+        }
+        even = glm::dot(needed, levers) / glm::dot(levers, levers);
+    } else if (det > 0.0) {
+        const double bx = glm::dot(needed, first);
+        const double by = glm::dot(needed, second);
+        c = ((((yy * bx) - (xy * by)) / det) * first) + ((((xx * by) - (xy * bx)) / det) * second);
+    } else {
+        return 0.0;
+    }
+    double pulling = 0.0;
+    double holds = 0.0;
+    for (const Stretch& stretch : stretches) {
+        if (!on_line(stretch)) {
+            continue;
+        }
+        const double tension = even + glm::dot(c, glm::cross(stretch.at, facing));
+        if (tension > 0.0) {
+            pulling += tension * stretch.across;
             holds += stretch.strong * stretch.across;
         }
     }
-    const DVec3 apart = glm::cross(chord, facing);
-    if (holds == 0.0 || glm::dot(apart, apart) == 0.0) {
-        return 0.0;
-    }
-    return -glm::dot((held * turn) - pushed, apart) / glm::dot(apart, apart) * length / holds;
+    return holds > 0.0 ? pulling / holds : 0.0;
 }
 
 struct Facing {

@@ -1108,6 +1108,25 @@ TEST_CASE("a plate splits over a warm mantle only where pulled harder than it ho
     CHECK(closing == 0);
 }
 
+TEST_CASE("a plate covering the planet splits only where pulled harder than it holds",
+          "[planet][lithosphere]") {
+    // Any line across it runs all the way round.
+    const auto covering = [] {
+        Lithosphere lithosphere = aged_halves(100.0F, true);
+        lithosphere.weld(1e-9);
+        REQUIRE(lithosphere.plates().size() == 1);
+        lithosphere.warm(1000.0);
+        lithosphere.drive();
+        return lithosphere;
+    };
+    Lithosphere strong = covering();
+    strong.rift();
+    CHECK(strong.plates().size() == 1);
+    Lithosphere split = covering();
+    split.rift({}, weak);
+    CHECK(split.plates().size() == 2);
+}
+
 TEST_CASE("a plate that holds over today's mantle splits over a young hotter one",
           "[planet][lithosphere]") {
     constexpr Strength middling{.cool = 0.2, .warm = 0.1, .ocean = 0.2};
