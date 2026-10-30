@@ -13,6 +13,7 @@
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
+using Catch::Matchers::WithinRel;
 using hog::planet::crust_heights;
 using hog::planet::CrustType;
 using hog::planet::fixed_one;
@@ -320,4 +321,113 @@ TEST_CASE("plates settle after turning as far, however fine their grid", "[plane
     CHECK(coarse < 40);
     CHECK(std::abs(settling_steps({.level = 7}) - (2 * coarse)) <= 1);
     CHECK(std::abs(settling_steps({.level = 6, .travel = 3.0}) - (coarse / 2)) <= 1);
+}
+
+TEST_CASE("a weak plate, or a load as broad as the plate, sinks as far as it would alone",
+          "[planet][isostasy]") {
+    using hog::planet::deflected;
+    const LevelGrid grid{3, radius};
+    const std::vector<std::uint32_t> plates(grid.size(), 0);
+    std::vector<double> loads(grid.size(), 0.0);
+    loads[5] = 100.0;
+    loads[40] = -30.0;
+    const auto alone = deflected(grid, loads, std::vector<double>(grid.size(), 0.0), plates);
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        CHECK_THAT(alone[cell], WithinAbs(loads[cell], 1e-9));
+    }
+    const auto area = static_cast<double>(grid.area(0));
+    const auto broad = deflected(grid, std::vector<double>(grid.size(), 250.0),
+                                 std::vector<double>(grid.size(), area * area), plates);
+    for (const double sunk : broad) {
+        CHECK_THAT(sunk, WithinAbs(250.0, 1e-6));
+    }
+}
+
+TEST_CASE("a stiff plate spreads a narrow load round it, sinking as much in all",
+          "[planet][isostasy]") {
+    const LevelGrid grid{4, radius};
+    const std::vector<std::uint32_t> plates(grid.size(), 0);
+    // Mid-face, away from the cube's edges.
+    constexpr std::uint32_t at = (16 * 8) + 8;
+    std::vector<double> loads(grid.size(), 0.0);
+    loads[at] = 1'000.0;
+    const auto area = static_cast<double>(grid.area(at));
+    const auto bent_by = [&](double stiff) {
+        return hog::planet::deflected(grid, loads, std::vector<double>(grid.size(), stiff), plates);
+    };
+    const auto soft = bent_by(0.1 * area * area);
+    const auto hard = bent_by(area * area);
+    CHECK(soft[at] < 1'000.0);
+    CHECK(hard[at] < soft[at]);
+    CHECK(hard[at] > 0.0);
+    for (const std::uint32_t next : grid.neighbors(at)) {
+        CHECK(hard[next] > 0.0);
+        CHECK(hard[next] < hard[at]);
+    }
+    double sunk = 0.0;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        sunk += hard[cell] * static_cast<double>(grid.area(cell));
+    }
+    CHECK_THAT(sunk, WithinRel(1'000.0 * area, 1e-6));
+}
+
+TEST_CASE("plates bend apart, broken at their edges", "[planet][isostasy]") {
+    const LevelGrid grid{4, radius};
+    std::vector<std::uint32_t> plates(grid.size());
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        plates[cell] = hog::planet::cell_center(grid.cell(cell)).z > 0.0 ? 0 : 1;
+    }
+    // A load on the first plate right by the second.
+    std::uint32_t edge = 0;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const auto across = [&](std::uint32_t next) { return plates[next] == 1; };
+        if (plates[cell] == 0 && std::ranges::any_of(grid.neighbors(cell), across)) {
+            edge = cell;
+            break;
+        }
+    }
+    REQUIRE(plates[edge] == 0);
+    std::vector<double> loads(grid.size(), 0.0);
+    loads[edge] = 1'000.0;
+    const auto area = static_cast<double>(grid.area(edge));
+    const auto bent =
+        hog::planet::deflected(grid, loads, std::vector<double>(grid.size(), area * area), plates);
+    double sunk = 0.0;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        if (plates[cell] == 1) {
+            CHECK(bent[cell] == 0.0);
+        }
+        sunk += bent[cell] * static_cast<double>(grid.area(cell));
+    }
+    CHECK(bent[edge] < 1'000.0);
+    CHECK_THAT(sunk, WithinRel(1'000.0 * area, 1e-6));
+}
+
+TEST_CASE("plates stiffen as they cool, as deep as the plate under them allows",
+          "[planet][isostasy]") {
+    using hog::planet::Crust;
+    using hog::planet::elastic_thickness;
+    using hog::planet::stiffness;
+    CHECK(elastic_thickness(Crust{}) == 0.0);
+    CHECK_THAT(elastic_thickness(Crust{.age = 100.0F}) / elastic_thickness(Crust{.age = 25.0F}),
+               WithinRel(2.0, 1e-6));
+    CHECK_THAT(elastic_thickness(Crust{.age = 4'000.0F}),
+               WithinRel(hog::planet::oceanic_plate / 3.0, 1e-9));
+    // Continents by how long since they were last piled up into a range.
+    CHECK(
+        elastic_thickness(Crust{
+            .type = CrustType::Continental, .thickness = 60.0F, .age = 3'000.0F, .raised = 0.0F}) ==
+        0.0);
+    CHECK_THAT(elastic_thickness(Crust{.type = CrustType::Continental,
+                                       .thickness = 35.0F,
+                                       .age = 3'000.0F,
+                                       .raised = 3'000.0F}),
+               WithinRel(hog::planet::continental_plate / 3.0, 1e-9));
+    // On Earth, a plate 30 km thick bends over some 70 to 80 km (Watts 2001).
+    constexpr double earth = 6'371'000.0;
+    const double reach = std::pow(4.0 * stiffness(30.0, earth), 0.25);
+    CHECK(reach > 70e3);
+    CHECK(reach < 80e3);
+    // Over as much of a smaller planet.
+    CHECK_THAT(stiffness(30.0, earth / 2.0), WithinRel(stiffness(30.0, earth) / 16.0, 1e-9));
 }

@@ -39,6 +39,20 @@ inline constexpr double water_layer = 2'600.0;
 inline constexpr double flexure_reach = 7'000.0;
 // Radians the plates turn on average before the crust is taken as settled.
 inline constexpr double settling_turn = 1.0;
+// Kilometres down a plate stays elastic, to the isotherm near 450 °C, deepening as it cools by the
+// square root of the million years since it was last heated, 2 erfinv(1/3) √(κ · 1 Myr) with
+// κ = 1e-6 m²/s (Watts 2001), till that isotherm lies a third of the way down a plate whose base
+// is at the mantle's 1350 °C: 125 km thick under the ocean (Parsons & Sclater 1977), and 200 km
+// under continents (Artemieva & Mooney 2001).
+inline constexpr double elastic_deepening = 3.42;
+inline constexpr double oceanic_plate = 125.0;
+inline constexpr double continental_plate = 200.0;
+// The plate's rock: Young's modulus in pascals and Poisson's ratio (Watts 2001); and the density
+// of the mantle it displaces, kilograms a cubic metre, at Earth's gravity.
+inline constexpr double young_modulus = 1e11;
+inline constexpr double poisson_ratio = 0.25;
+inline constexpr double mantle_density = 3'330.0;
+inline constexpr double earth_gravity = 9.81;
 
 // Fixed-point metres each grid cell's crust stands above the crest of a mid-ocean ridge.
 [[nodiscard]] std::vector<std::int64_t> crust_heights(const Tectonics& tectonics);
@@ -62,6 +76,19 @@ inline constexpr double settling_turn = 1.0;
 [[nodiscard]] std::vector<std::int64_t> flexed(const LevelGrid& grid,
                                                std::span<const std::int64_t> heights);
 
+// Kilometres of the plate under `crust` that bend elastically, the rest flowing.
+[[nodiscard]] double elastic_thickness(const Crust& crust);
+// How stiffly a plate `elastic` kilometres thick bends, as its flexural rigidity over the weight
+// of the mantle it displaces, in metres to the fourth, on a planet of `radius` metres, whose
+// lengths along the ground are Earth's scaled to it.
+[[nodiscard]] double stiffness(double elastic, double radius);
+// Metres each place of `grid` sinks under `loads`, each the metres it would sink alone, as plates
+// as stiff as `stiffness` at each place bend under them: a broad load sinks as far as it would
+// alone, and a narrow one less, the plate around it sinking by as much in all. Each place bends
+// with its neighbours of the same of `plates` only, the plates broken at their edges.
+[[nodiscard]] std::vector<double> deflected(const LevelGrid& grid, std::span<const double> loads,
+                                            std::span<const double> stiffness,
+                                            std::span<const std::uint32_t> plates);
 // Cubic metres of water the ground holds below `level`, all heights fixed point.
 [[nodiscard]] double water_below(const LevelGrid& grid, std::span<const std::int64_t> heights,
                                  std::int64_t level);
