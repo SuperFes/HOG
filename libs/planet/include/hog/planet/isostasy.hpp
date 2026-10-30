@@ -22,6 +22,9 @@ inline constexpr double continent_freeboard = 3'400.0;
 // mantle it floats on.
 inline constexpr double continental_buoyancy = 0.15;
 inline constexpr double oceanic_buoyancy = 0.12;
+// Kilometres of rock a million years wears off land for each kilometre it stands above the ground
+// its rivers cut down to, as drainage basins wear down by their relief (Ahnert 1970).
+inline constexpr double denudation = 0.15;
 // Of the planet, the share of continental crust the sea floods round the land's edges.
 inline constexpr double shelf_share = 0.1;
 // Metres deep a world's water would stand spread evenly over it, as it has to begin with.
@@ -36,6 +39,17 @@ inline constexpr double settling_turn = 1.0;
 [[nodiscard]] std::vector<std::int64_t> crust_heights(const Tectonics& tectonics);
 // The same of the crust left on top by the plates, fresh floor welling up where they've parted.
 [[nodiscard]] std::vector<std::int64_t> crust_heights(const Lithosphere& lithosphere);
+
+// Kilometres of crust worn off each place over `years` million years, standing at fixed-point
+// `heights` over a sea at `sea_level`: land wears down the faster the higher it stands over the
+// lowest ground around it, or over the sea where that's lower, rising again by its buoyancy as
+// it's lightened, so it nears that but never reaches it. Flat land, however high, stands.
+[[nodiscard]] std::vector<float> worn_down(const LevelGrid& grid,
+                                           std::span<const std::int64_t> heights,
+                                           std::int64_t sea_level, double years);
+// Whether each place at fixed-point `heights` lies under a sea at `sea_level`.
+[[nodiscard]] std::vector<bool> drowned(std::span<const std::int64_t> heights,
+                                        std::int64_t sea_level);
 
 // `heights` spread over their neighbours' as the plates bend under them.
 [[nodiscard]] std::vector<std::int64_t> flexed(const LevelGrid& grid,

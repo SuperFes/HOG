@@ -174,6 +174,11 @@ public:
     // the crust over it, piling that up into a range, which then settles over `years` as
     // `ranges` says.
     void collide(double years, Ranges ranges = {});
+    // Wears `worn` kilometres off the continent on top at each place of the grid, down to none,
+    // laying it down as sediment on the crust nearest it under the sea, `drowned`, volume for
+    // volume: on its own continent's shelf, building it out, or past that on ocean floor, which
+    // carries it off to a trench in time.
+    void erode(std::span<const float> worn, const std::vector<bool>& drowned);
     // Turns every plate as the forces on it now move it against the mantle's drag and each
     // other's where they close, all at once, as nothing so slow carries momentum. The first time,
     // the drag is set so the plates keep the pace they had, and it stays so after. A slab pulls

@@ -66,6 +66,34 @@ std::vector<std::int64_t> crust_heights(const Lithosphere& lithosphere) {
     return heights;
 }
 
+std::vector<float> worn_down(const LevelGrid& grid, std::span<const std::int64_t> heights,
+                             std::int64_t sea_level, double years) {
+    HOG_ASSERT(heights.size() == grid.size(), "one height to each cell");
+    constexpr double metres_per_km = 1'000.0;
+    // Wearing off h kilometres lowers the land by buoyancy * h, so its height over the ground
+    // around falls as e^(-buoyancy * denudation * years).
+    const double share = 1.0 - std::exp(-continental_buoyancy * denudation * years);
+    std::vector<float> worn(heights.size());
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        std::int64_t base = heights[cell];
+        for (const std::uint32_t next : grid.neighbors(cell)) {
+            base = std::min(base, heights[next]);
+        }
+        base = std::max(base, sea_level);
+        const double above = std::max(fixed_to_double(heights[cell] - base), 0.0) / metres_per_km;
+        worn[cell] = static_cast<float>(above * share / continental_buoyancy);
+    }
+    return worn;
+}
+
+std::vector<bool> drowned(std::span<const std::int64_t> heights, std::int64_t sea_level) {
+    std::vector<bool> under(heights.size());
+    for (std::size_t cell = 0; cell < heights.size(); ++cell) {
+        under[cell] = heights[cell] < sea_level;
+    }
+    return under;
+}
+
 std::vector<std::int64_t> flexed(const LevelGrid& grid, std::span<const std::int64_t> heights) {
     HOG_ASSERT(heights.size() == grid.size(), "one height to each cell");
     // Each pass spreads a height over about a cell either way, each pair of neighbours trading

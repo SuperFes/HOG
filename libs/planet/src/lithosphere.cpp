@@ -727,6 +727,50 @@ void Lithosphere::spread() {
     }
 }
 
+void Lithosphere::erode(std::span<const float> worn, const std::vector<bool>& drowned) {
+    HOG_ASSERT(worn.size() == grid_.size(), "one depth to each place");
+    HOG_ASSERT(drowned.size() == grid_.size(), "one flag to each place");
+    const std::vector<std::optional<Found>> on_top = tops();
+    // Each place's nearest crust under the sea, out from the coasts a ring of places at a time.
+    std::vector<std::uint32_t> sea(grid_.size(), parted);
+    std::vector<std::uint32_t> frontier;
+    for (std::uint32_t place = 0; place < grid_.size(); ++place) {
+        if (on_top[place] && drowned[place]) {
+            sea[place] = place;
+            frontier.push_back(place);
+        }
+    }
+    while (!frontier.empty()) {
+        std::vector<std::uint32_t> further;
+        for (const std::uint32_t place : frontier) {
+            for (const std::uint32_t next : grid_.neighbors(place)) {
+                if (sea[next] == parted) {
+                    sea[next] = sea[place];
+                    further.push_back(next);
+                }
+            }
+        }
+        frontier = std::move(further);
+    }
+    const auto crust_at = [&](std::uint32_t place) -> Crust& {
+        const std::uint32_t plate = on_top[place]->plate;
+        return plates_[plate].crust[held(plate, cell_center(grid_.cell(place))).value_or(0)];
+    };
+    for (std::uint32_t place = 0; place < grid_.size(); ++place) {
+        const std::optional<Found>& found = on_top[place];
+        if (!found || found->crust.type != CrustType::Continental || drowned[place] ||
+            worn[place] <= 0.0F || sea[place] == parted) {
+            continue;
+        }
+        Crust& land = crust_at(place);
+        const float off = std::min(worn[place], land.thickness);
+        land.thickness -= off;
+        crust_at(sea[place]).thickness +=
+            static_cast<float>(static_cast<double>(off) * static_cast<double>(grid_.area(place)) /
+                               static_cast<double>(grid_.area(sea[place])));
+    }
+}
+
 DVec3 Lithosphere::to_planet(std::uint32_t plate, DVec3 own) const {
     return plates_[plate].frame * own;
 }

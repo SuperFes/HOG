@@ -571,6 +571,65 @@ TEST_CASE("crust too thick with no room on its whole plate founders into the man
                WithinRel(volume * (90.0 - static_cast<double>(ranges.strongest)) / 90.0, 1e-6));
 }
 
+TEST_CASE("what wears off a continent is laid down on the nearest crust under the sea",
+          "[planet][lithosphere]") {
+    // A continent around the pole, with only ocean floor around it, and its edge from `shelf` out
+    // under the sea.
+    const LevelGrid grid{4, radius};
+    const auto worn_off = [&](double shelf) {
+        Lithosphere::Plate plate = everywhere(grid, Crust{}, DVec3{0.0, 0.0, 1.0}, 0.0);
+        std::vector<bool> drowned(grid.size(), true);
+        for (std::size_t index = 0; index < plate.cells.size(); ++index) {
+            const double z = hog::planet::cell_center(grid.cell(plate.cells[index])).z;
+            if (z > 0.9) {
+                plate.crust[index] = continent;
+                drowned[plate.cells[index]] = z < shelf;
+            }
+        }
+        Lithosphere lithosphere{grid, {plate}};
+        if (shelf > 0.0) {
+            lithosphere.erode(std::vector<float>(grid.size(), 1.0F), drowned);
+        }
+        return lithosphere;
+    };
+    const auto volume = [&](const Lithosphere& lithosphere, CrustType type) {
+        double total = 0.0;
+        const Lithosphere::Plate& carrier = lithosphere.plates()[0];
+        for (std::size_t index = 0; index < carrier.cells.size(); ++index) {
+            if (carrier.crust[index].type == type) {
+                total += static_cast<double>(grid.area(carrier.cells[index])) *
+                         static_cast<double>(carrier.crust[index].thickness);
+            }
+        }
+        return total;
+    };
+    const Lithosphere start = worn_off(0.0);
+    const double land = volume(start, CrustType::Continental);
+    const double floor = volume(start, CrustType::Oceanic);
+
+    // With no shelf, it all goes out onto the ocean floor next to the coast.
+    const Lithosphere bare = worn_off(0.9);
+    CHECK_THAT(volume(bare, CrustType::Continental) + volume(bare, CrustType::Oceanic),
+               WithinRel(land + floor, 1e-6));
+    CHECK(volume(bare, CrustType::Continental) < land);
+    const Lithosphere::Plate& carrier = bare.plates()[0];
+    for (std::size_t index = 0; index < carrier.cells.size(); ++index) {
+        const Crust& crust = carrier.crust[index];
+        const double z = hog::planet::cell_center(grid.cell(carrier.cells[index])).z;
+        if (crust.type == CrustType::Continental) {
+            CHECK(crust.thickness == continent.thickness - 1.0F);
+        } else if (z < 0.8) {
+            // Too far from the coast for any to reach.
+            CHECK(crust.thickness == Crust{}.thickness);
+        }
+    }
+
+    // With one, it stays on the continent, building the shelf, and none reaches the floor.
+    const Lithosphere shelved = worn_off(0.95);
+    CHECK_THAT(volume(shelved, CrustType::Continental), WithinRel(land, 1e-6));
+    CHECK(volume(shelved, CrustType::Oceanic) == floor);
+}
+
 TEST_CASE("a range spreads into the continent around it", "[planet][lithosphere]") {
     const LevelGrid grid{4, radius};
     Lithosphere::Plate plate = everywhere(grid, continent, DVec3{0.0, 0.0, 1.0}, 0.0);

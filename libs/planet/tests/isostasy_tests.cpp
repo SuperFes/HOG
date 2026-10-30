@@ -117,6 +117,39 @@ TEST_CASE("where the plates have parted, fresh floor stands at a ridge's crest",
     CHECK(heights[plate.cells.front()] < 0);
 }
 
+TEST_CASE("land wears down by how far it stands over the ground around it", "[planet][isostasy]") {
+    using hog::planet::continental_buoyancy;
+    using hog::planet::denudation;
+    using hog::planet::worn_down;
+    // A plateau 2 km over the sea, with one peak a kilometre higher and one place under the sea
+    // across the planet from it.
+    const LevelGrid grid{2, radius};
+    std::vector<std::int64_t> heights(grid.size(), 2'000 * fixed_one);
+    constexpr std::uint32_t peak = 0;
+    heights[peak] = 3'000 * fixed_one;
+    std::uint32_t low = 0;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        if (hog::planet::cell_center(grid.cell(cell)).z <
+            hog::planet::cell_center(grid.cell(low)).z) {
+            low = cell;
+        }
+    }
+    heights[low] = -100 * fixed_one;
+    const std::uint32_t coast = grid.neighbors(low).front();
+    const std::uint32_t flat = grid.neighbors(peak).front();
+    const std::int64_t sea = 0;
+    const auto worn = worn_down(grid, heights, sea, 0.01);
+    CHECK(worn[low] == 0.0F);
+    CHECK(worn[flat] == 0.0F);
+    CHECK_THAT(static_cast<double>(worn[peak]), WithinAbs(denudation * 0.01, 1e-5));
+    // Down to the sea, not to the ground under it.
+    CHECK_THAT(static_cast<double>(worn[coast]),
+               WithinAbs(2.0 * static_cast<double>(worn[peak]), 1e-6));
+    // Given long enough, as much as brings it down to the sea, and no more.
+    const auto ages = worn_down(grid, heights, sea, 1e6);
+    CHECK_THAT(static_cast<double>(ages[coast]), WithinAbs(2.0 / continental_buoyancy, 1e-4));
+}
+
 TEST_CASE("water fills the lowest ground first", "[planet][isostasy]") {
     const LevelGrid grid{3, radius};
     std::vector<std::int64_t> heights(grid.size());
