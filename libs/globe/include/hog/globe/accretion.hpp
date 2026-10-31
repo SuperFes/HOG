@@ -14,8 +14,11 @@ struct Accretion {
     double radius = 115'000.0; // metres, as grown
     double gravity = 9.81;     // m/s² at the surface, as grown
     int level = 5;             // the columns it's gathered in
-    // Shares by mass of what fell: chondrite's metal; the rest is rock holding its water and gas.
+    // Shares by mass of what fell: chondrite's metal; the rest is rock holding its water and gas,
+    // enough for a sea as deep as Earth's spread evenly over the planet and air as heavy.
     double iron = 0.32;
+    double sea_depth = 2'700.0;   // metres
+    double air_weight = 10'300.0; // kg over each square metre
     // What fell was as cold as the disc; its fall heats it by the share of its energy kept, more as
     // the planet grows and pulls harder, and short-lived isotopes heat everything alike.
     double disc_temperature = 250.0; // kelvin

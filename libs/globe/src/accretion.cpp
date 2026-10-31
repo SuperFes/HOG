@@ -113,6 +113,11 @@ Globe accrete(const Accretion& setup) {
         // What piled higher than it can bear slumps away round where it fell.
         settler.settle(struck);
     }
+    const double rock = globe.masses()[static_cast<std::size_t>(Material::Mantle)];
+    const double surface = 4.0 * std::numbers::pi * setup.radius * setup.radius;
+    globe.set_bound(
+        {.water = surface * setup.sea_depth * properties(Material::Water).density / rock,
+         .gas = surface * setup.air_weight / rock});
     return globe;
 }
 

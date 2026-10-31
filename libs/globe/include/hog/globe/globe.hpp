@@ -22,6 +22,14 @@ struct Hexel {
     friend bool operator==(const Hexel&, const Hexel&) = default;
 };
 
+// Water and gas, in kilograms.
+struct Volatiles {
+    double water = 0.0;
+    double gas = 0.0;
+
+    friend bool operator==(const Volatiles&, const Volatiles&) = default;
+};
+
 // Shells stacked from one radius out to another, each holding the same volume: they thin as they
 // widen, so every hexel of a level holds as much as any other, and moving hexels about keeps how
 // much there is of everything.
@@ -76,10 +84,21 @@ public:
     // Kilograms of each material.
     [[nodiscard]] std::array<double, material_count> masses() const;
 
+    // Kilograms of water and gas in a kilogram of rock that holds all it formed with.
+    [[nodiscard]] const Volatiles& bound() const noexcept { return bound_; }
+    void set_bound(const Volatiles& per_kilogram) noexcept { bound_ = per_kilogram; }
+    // What rock still holds.
+    [[nodiscard]] Volatiles held() const;
+    // What rock has let go: in the air, and once it rains, the sea.
+    [[nodiscard]] Volatiles& freed() noexcept { return freed_; }
+    [[nodiscard]] const Volatiles& freed() const noexcept { return freed_; }
+
 private:
     int level_;
     Shells shells_;
     std::vector<Hexel> hexels_;
+    Volatiles bound_;
+    Volatiles freed_;
 };
 
 } // namespace hog::globe

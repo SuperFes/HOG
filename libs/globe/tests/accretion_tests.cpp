@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <numbers>
 #include <numeric>
 #include <vector>
 
@@ -106,4 +107,12 @@ TEST_CASE("the last to fall fell hardest, so a planet grows hotter outside than 
     const double outer = sum[near_top] / count[near_top];
     CHECK(core > setup.disc_temperature + setup.decay_heat);
     CHECK(outer > core + 100.0);
+}
+
+TEST_CASE("the rock holds water for a sea and gas for an air like Earth's", "[globe][accretion]") {
+    const double surface = 4.0 * std::numbers::pi * setup.radius * setup.radius;
+    const auto held = grown().held();
+    CHECK(std::abs(held.water - (surface * setup.sea_depth * 1'000.0)) < 1e-9 * held.water);
+    CHECK(std::abs(held.gas - (surface * setup.air_weight)) < 1e-9 * held.gas);
+    CHECK(grown().freed() == hog::globe::Volatiles{});
 }

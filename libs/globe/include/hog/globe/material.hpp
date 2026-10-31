@@ -29,6 +29,7 @@ struct Properties {
     double density = 0.0;  // kg/m³
     double melts = 0.0;    // kelvin; none for air
     double strength = 0.0; // pascals it bears cold before it gives way; loose ground bears little
+    double heat_capacity = 0.0; // J/kg/K
 };
 
 [[nodiscard]] const Properties& properties(Material material);

@@ -9,18 +9,21 @@
 
 namespace hog::globe {
 
-double bearable(const Hexel& hexel, double gravity) {
+double strength_now(const Hexel& hexel) {
     const Properties& material = properties(hexel.material);
-    if (gravity <= 0.0) {
-        return std::numeric_limits<double>::infinity();
-    }
     // Held over the ages, rock keeps its strength to half its melting point, and creeps freely
     // past four fifths of it.
     const double weakened =
         material.melts > 0.0 ? ((0.8 * material.melts) - hexel.temperature) / (0.3 * material.melts)
                              : 0.0;
-    const double strength = material.strength * std::clamp(weakened, 0.0, 1.0);
-    return strength / (material.density * gravity);
+    return material.strength * std::clamp(weakened, 0.0, 1.0);
+}
+
+double bearable(const Hexel& hexel, double gravity) {
+    if (gravity <= 0.0) {
+        return std::numeric_limits<double>::infinity();
+    }
+    return strength_now(hexel) / (properties(hexel.material).density * gravity);
 }
 
 int top_of(std::span<const Hexel> column) {

@@ -63,6 +63,15 @@ double Globe::hexel_volume() const noexcept {
     return hexagon * (high - low) / (3.0 * shells_.count);
 }
 
+Volatiles Globe::held() const {
+    double rock = 0.0;
+    for (const Hexel& hexel : hexels_) {
+        rock += hexel.held / 255.0 * properties(hexel.material).density;
+    }
+    rock *= hexel_volume();
+    return {.water = rock * bound_.water, .gas = rock * bound_.gas};
+}
+
 std::array<double, material_count> Globe::masses() const {
     std::array<std::uint64_t, material_count> counted{};
     for (const Hexel& hexel : hexels_) {

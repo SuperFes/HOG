@@ -23,8 +23,10 @@ struct Gravity {
     }
 };
 
-// Metres a sheer face of the hexel's material stands under `gravity` for good, weakening as it
-// warms towards melting.
+// Pascals the hexel bears for good, its material's strength weakening as it warms towards melting.
+[[nodiscard]] double strength_now(const Hexel& hexel);
+
+// Metres a sheer face of the hexel's material stands under `gravity` for good.
 [[nodiscard]] double bearable(const Hexel& hexel, double gravity);
 
 // Lets what stands higher than it can bear come down. A column's top hexel falls to the nearest
