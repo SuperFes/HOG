@@ -1906,6 +1906,27 @@ TEST_CASE("a plate covering the planet splits only where pulled harder than it h
     CHECK(split.plates().size() == 2);
 }
 
+TEST_CASE("a line round a plate covering the planet holds however it crosses the grid",
+          "[planet][lithosphere]") {
+    Lithosphere welded = aged_halves(100.0F, true);
+    welded.weld(1e-9);
+    REQUIRE(welded.plates().size() == 1);
+    // Turned to many places, so its lines through the warm mantle under its continent pass the
+    // grid's cells anyhow, some near their corners.
+    constexpr int turns = 24;
+    for (int turn = 0; turn < turns; ++turn) {
+        std::vector<Lithosphere::Plate> plates{welded.plates().begin(), welded.plates().end()};
+        plates[0].frame = glm::angleAxis(2.0 * std::numbers::pi * turn / turns,
+                                         glm::normalize(DVec3{1.0, 2.0, 3.0})) *
+                          plates[0].frame;
+        Lithosphere turned{welded.grid(), plates};
+        turned.warm(1000.0);
+        turned.drive();
+        turned.rift(long_enough);
+        CHECK(turned.plates().size() == 1);
+    }
+}
+
 TEST_CASE("young ocean floor, as thin as it is, holds less than old", "[planet][lithosphere]") {
     constexpr Strength middling{.cool = 0.2, .warm = 0.1, .ocean = 0.2};
     Lithosphere old_floor = warm_cap();

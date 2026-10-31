@@ -427,14 +427,15 @@ struct Pull {
     double opening = 0.0;
 };
 
-// How a plate under `whole` is pulled apart along the line whose plane faces `facing`, with
-// `pushed` the torque on the side it faces: what the other side puts on that one to keep it
-// turning with the plate, against how strong the line is where that pulls it apart. Tension t at
-// a place p on the line puts -t (p x facing) on the side. Across a plate from edge to edge it's
-// taken as even along the line. A line on the plate all the way round can't hold so, as its
-// levers cancel, but by pulling on one side and pushing on the other: the least tension that
-// does varies along it as p x facing does.
-Pull pulled(std::span<const Stretch> stretches, const Load& whole, DVec3 pushed, DVec3 facing) {
+// How a plate of `lithosphere` under `whole` is pulled apart along the line whose plane faces
+// `facing`, with `pushed` the torque on the side it faces: what the other side puts on that one
+// to keep it turning with the plate, against how strong the line is where that pulls it apart.
+// Tension t at a place p on the line puts -t (p x facing) on the side. Across a plate from edge
+// to edge it's taken as even along the line. A line on the plate all the way round can't hold
+// so, as its levers cancel, but by pulling on one side and pushing on the other: the least
+// tension that does varies along it as p x facing does.
+Pull pulled(const Lithosphere& lithosphere, std::uint32_t plate, std::span<const Stretch> stretches,
+            const Load& whole, DVec3 pushed, DVec3 facing) {
     const DVec3 first = glm::normalize(
         glm::cross(facing, std::abs(facing.x) < 0.9 ? DVec3{1.0, 0.0, 0.0} : DVec3{0.0, 1.0, 0.0}));
     const DVec3 second = glm::cross(facing, first);
@@ -447,7 +448,6 @@ Pull pulled(std::span<const Stretch> stretches, const Load& whole, DVec3 pushed,
     double xy = 0.0;
     double yy = 0.0;
     DVec3 levers{0.0};
-    double widest = 0.0;
     std::vector<double> round;
     for (const Stretch& stretch : stretches) {
         if (glm::dot(stretch.at, facing) > 0.0) {
@@ -461,7 +461,6 @@ Pull pulled(std::span<const Stretch> stretches, const Load& whole, DVec3 pushed,
             xy += stretch.across * x * y;
             yy += stretch.across * y * y;
             levers += stretch.across * lever;
-            widest = std::max(widest, stretch.across);
             round.push_back(std::atan2(glm::dot(stretch.at, second), glm::dot(stretch.at, first)));
         }
     }
@@ -470,15 +469,26 @@ Pull pulled(std::span<const Stretch> stretches, const Load& whole, DVec3 pushed,
     }
     std::ranges::sort(round);
     double gap = round.front() + (2.0 * std::numbers::pi) - round.back();
+    double amid = round.back() + (0.5 * gap);
     for (std::size_t index = 1; index < round.size(); ++index) {
-        gap = std::max(gap, round[index] - round[index - 1]);
+        if (const double between = round[index] - round[index - 1]; between > gap) {
+            gap = between;
+            amid = round[index - 1] + (0.5 * between);
+        }
     }
+    // The line passes between cells it crosses near their corners, so it runs off the plate only
+    // where the plate has no crust amid its widest gap.
+    const LevelGrid& grid = lithosphere.grid();
+    const DVec3 gone = (std::cos(amid) * first) + (std::sin(amid) * second);
+    const bool edge_to_edge =
+        !index_in(lithosphere.plates()[plate],
+                  grid.index(cell_at(lithosphere.to_plate(plate, gone), grid.level())));
     const DVec3 needed = pushed - (held * whole.turn);
     // Tension at a place as c . (p x facing), plus `even` all along.
     DVec3 c{0.0};
     double even = 0.0;
     const double det = (xx * yy) - (xy * xy);
-    if (gap > 2.0 * widest) {
+    if (edge_to_edge) {
         if (glm::dot(levers, levers) == 0.0) {
             return {};
         }
@@ -1866,7 +1876,7 @@ std::optional<Lithosphere::Line> Lithosphere::rifting(std::uint32_t plate,
                 pushed += glm::cross(push.at, push.force);
             }
         }
-        return pulled(stretches, whole, pushed, facing);
+        return pulled(*this, plate, stretches, whole, pushed, facing);
     };
     if (under_way) {
         if (const Pull pull = along(*under_way); pull.ratio > 1.0) {
