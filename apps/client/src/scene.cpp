@@ -312,8 +312,15 @@ void Scene::finish_bakes() {
     if (auto water = river_stream_.finish(); water && rivers_) {
         rivers_->show(std::make_shared<const terrain::RiverWater>(std::move(water).value()));
     }
-    if (auto mesh = block_stream_.finish(); mesh && blocks_) {
+    if (auto mesh = block_stream_.finish(); mesh && blocks_ && !globe_shown_) {
         blocks_->show(std::make_shared<const terrain::BlockMesh>(std::move(mesh).value()));
+    }
+}
+
+void Scene::show_globe(terrain::BlockMesh blocks) {
+    globe_shown_ = true;
+    if (blocks_) {
+        blocks_->show(std::make_shared<const terrain::BlockMesh>(std::move(blocks)));
     }
 }
 
@@ -445,10 +452,10 @@ void Scene::follow_shore(const Shot& shot) {
     if (auto water = river_stream_.collect(); water && rivers_) {
         rivers_->show(std::make_shared<const terrain::RiverWater>(std::move(water).value()));
     }
-    if (blocks_on_) {
+    if (blocks_on_ && !globe_shown_) {
         block_stream_.follow(glm::normalize(shot.camera.eye.metres()));
     }
-    if (auto mesh = block_stream_.collect(); mesh && blocks_) {
+    if (auto mesh = block_stream_.collect(); mesh && blocks_ && !globe_shown_) {
         blocks_->show(std::make_shared<const terrain::BlockMesh>(std::move(mesh).value()));
     }
 }

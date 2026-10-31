@@ -4,6 +4,7 @@
 #include <hog/client/flight.hpp>
 #include <hog/client/forecast.hpp>
 #include <hog/client/frame_times.hpp>
+#include <hog/client/globe_view.hpp>
 #include <hog/client/graphics_config.hpp>
 #include <hog/client/options.hpp>
 #include <hog/client/others.hpp>
@@ -14,6 +15,7 @@
 #include <hog/core/log.hpp>
 #include <hog/core/profile.hpp>
 #include <hog/core/time.hpp>
+#include <hog/globe/accretion.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/login/service.hpp>
 #include <hog/mapgen/render.hpp>
@@ -502,6 +504,7 @@ private:
 const log::Category connection_log{"connection"};
 const log::Category player_log{"player"};
 const log::Category clouds_log{"clouds"};
+const log::Category globe_log{"globe"};
 
 // The connection to a server, if there's one to connect to, telling what becomes of it: after
 // logging in for a connect token, when asked to.
@@ -990,6 +993,14 @@ int show(const client::Options& options, const client::GraphicsConfig& graphics,
     }
     scene->set_grass(options.grass);
     scene->set_system(planet.system);
+    if (options.globe) {
+        const auto started = MonotonicClock::now();
+        const globe::Globe born =
+            globe::accrete({.seed = planet.seed, .radius = world.geology().planet_radius()});
+        scene->show_globe(client::globe_blocks(born));
+        log::info(globe_log, "grown in {:.2f} s",
+                  std::chrono::duration<double>(MonotonicClock::now() - started).count());
+    }
     const Result<void> flown =
         fly(*scene, clock, world, flight, *connection, options, device, presenter, window);
     // The GPU may still be drawing with the scene.

@@ -146,6 +146,9 @@ public:
 
     // Whether the ground is drawn as the volume's blocks instead, with nothing growing on it.
     void set_blocks(bool blocks) noexcept { blocks_on_ = blocks; }
+    // Shows `blocks` as the ground whenever blocks are on, in place of those filled in from the
+    // world's terrain.
+    void show_globe(terrain::BlockMesh blocks);
     [[nodiscard]] bool blocks() const noexcept { return blocks_on_; }
 
     [[nodiscard]] render::CloudQuality cloud_quality() const noexcept { return clouds_.quality(); }
@@ -271,6 +274,7 @@ private:
     render::Gusts gusts_;
     bool grass_on_ = true;
     bool blocks_on_ = false;
+    bool globe_shown_ = false;
     bool settled_ = false;
     // Whether the last frame recorded took a probe, and in which slot.
     bool probing_ = false;

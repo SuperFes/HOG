@@ -184,6 +184,12 @@ constexpr std::array flags{
     Flag{.name = "--no-grass", .set = [](Options& options) { options.grass = false; }},
     Flag{.name = "--blocks", .set = [](Options& options) { options.blocks = true; }},
     Flag{.name = "--no-blocks", .set = [](Options& options) { options.blocks = false; }},
+    Flag{.name = "--globe",
+         .set =
+             [](Options& options) {
+                 options.globe = true;
+                 options.blocks = true;
+             }},
     Flag{.name = "--bend", .set = [](Options& options) { options.bend = true; }},
     Flag{.name = "--no-bend", .set = [](Options& options) { options.bend = false; }},
     Flag{.name = "--software", .set = [](Options& options) { options.software = true; }},
@@ -276,6 +282,8 @@ options:
                          the GPU can afford (default high)
   --no-grass             don't grow grass near the eye, for what the GPU can afford
   --blocks               draw the ground as the volume's blocks, with nothing growing
+  --globe                draw a globe grown from its birth as hexels in place of the
+                         ground; F6 shows the old ground again
   --no-bend              draw the planet curving as tightly as it truly does, not
                          flattened like Earth's near the eye
   --software             draw with a software Vulkan device, such as lavapipe

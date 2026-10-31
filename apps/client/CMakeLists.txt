@@ -14,6 +14,7 @@ add_library(hog_client
     src/flight.cpp
     src/forecast.cpp
     src/frame_times.cpp
+    src/globe_view.cpp
     src/graphics_config.cpp
     src/ground.cpp
     src/likeness.cpp
@@ -30,7 +31,7 @@ add_library(hog::client ALIAS hog_client)
 
 target_include_directories(hog_client PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(hog_client
-    PUBLIC hog::atmosphere hog::core hog::flora hog::jobs hog::net hog::physics hog::planet
+    PUBLIC hog::atmosphere hog::core hog::flora hog::globe hog::jobs hog::net hog::physics hog::planet
         hog::protocol hog::render hog::replication hog::sim hog::terrain
     PRIVATE hog::mapgen stb_image tomlplusplus)
 hog_target_defaults(hog_client)

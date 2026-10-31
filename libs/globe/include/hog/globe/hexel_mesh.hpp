@@ -13,7 +13,7 @@ namespace hog::globe {
 struct HexelVertex {
     Vec3 position{0.0F}; // metres from the mesh's origin
     Vec3 normal{0.0F};   // unit, out of the face
-    Material material = Material::Air;
+    Hexel hexel;         // the hexel whose face it is
 };
 
 // Faces as triangles, anticlockwise seen from outside.

@@ -49,7 +49,7 @@ TEST_CASE("ground under air shows only its top, covering the sphere", "[globe][h
         const auto& a = mesh.vertices[mesh.indices[at]];
         const auto& b = mesh.vertices[mesh.indices[at + 1]];
         const auto& c = mesh.vertices[mesh.indices[at + 2]];
-        CHECK(a.material == Material::Granite);
+        CHECK(a.hexel.material == Material::Granite);
         // Facing straight out from the centre.
         CHECK(glm::dot(a.normal, glm::normalize(a.position)) > 0.99F);
         area += 0.5 * glm::length(glm::cross(DVec3{b.position - a.position},
@@ -71,7 +71,7 @@ TEST_CASE("water shows over the ground it covers, and the ground under the water
     std::size_t water = 0;
     std::size_t basalt = 0;
     for (const auto& vertex : mesh.vertices) {
-        (vertex.material == Material::Water ? water : basalt) += 1;
+        (vertex.hexel.material == Material::Water ? water : basalt) += 1;
     }
     CHECK(water == basalt);
     CHECK(water > 0);
