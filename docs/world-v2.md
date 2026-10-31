@@ -2,6 +2,8 @@
 
 Oct 28, 2026 · @Aaron Nixon
 
+**Superseded by [The globe](globe.md):** the world is hexagonal voxels from its birth on. What follows is kept for the processes it lists, not for its heightfield or its square cells.
+
 Today's world is stamped: a frozen plate snapshot plus noise sets the continents, sea level, mountain heights, volcanoes, ocean floor, beds, climate and biomes, and only the 5 Myr erosion loop, lake filling and live weather run as processes. The pieces are made apart and then forced to fit, which is where rivers fighting lakes, coasts frozen to a noise field and mountains counted twice come from.
 
 World v2 builds the planet in the order nature does, each stage working from what the one before it left. Nothing is placed: mountains stand where plates collide, rain falls where they lift the air, rivers run where it drains, lakes sit where drainage is blocked, deltas build where sediment comes out. We don't loop over billions of years; each stage runs only enough steps, or solves its equilibrium directly, to reach a believable end state, then the coarse result is softened and given fine detail driven by the data.
