@@ -363,6 +363,13 @@ public:
     // fails once it isn't. Stretched `breakup`, it splits the plate: the part across the line
     // becomes a new plate, turning as the other until the plates are next driven.
     void rift(double years, const Forces& forces = {}, Strength strength = {});
+    // Where a plate's ocean floor meets its own continent, floor heavier than the mantle under it
+    // pulls down on the margin by as much more than its crust floats it as its slab would pull.
+    // Where it pulls harder than the continent there holds, as a thin, hot margin can't
+    // (Nikolaeva, Gerya & Marques 2010), the floor tears away and starts to dive under it: all
+    // the floor joined to it becomes a new plate, hanging from where it tore, turning as the other
+    // until the plates are next driven.
+    void collapse_margins(const Forces& forces = {}, Strength strength = {});
     // Plates that turn so alike that over `years` they'd move less than half a place against each
     // other anywhere along their edge are one plate but in name, as a microplate is captured once
     // what drove it dies, and weld into one, the plate with less crust taken into the other's
@@ -383,6 +390,9 @@ public:
     // Radians a rift opens, thinning the continent, before it breaks apart and floor wells up in
     // it: about 150 km, as the Red Sea's did.
     static constexpr double breakup = 0.025;
+    // Million years ocean floor stays lighter than the mantle under it, its crust floating it as
+    // it cools: some 10 to 50 (Oxburgh & Parmentier 1977; Cloos 1993; Afonso et al. 2007).
+    static constexpr double buoyant_floor = 30.0;
 
     [[nodiscard]] const LevelGrid& grid() const noexcept { return grid_; }
     [[nodiscard]] std::span<const Plate> plates() const noexcept { return plates_; }
@@ -472,6 +482,19 @@ private:
     [[nodiscard]] std::optional<Line> rifting(std::uint32_t plate, std::span<const Push> pushes,
                                               const Forces& forces, Strength strength,
                                               std::optional<DVec3> under_way) const;
+    // Where a plate's ocean floor tears away from its continent: the floor's index into its cells,
+    // and the way along the surface to the continent, in the plate's own frame.
+    struct Tear {
+        std::size_t index = 0;
+        DVec3 toward{0.0};
+    };
+
+    // Where a plate's floor tears away from its continent, as `collapse_margins` says.
+    [[nodiscard]] std::vector<Tear> tears(std::uint32_t plate, const Forces& forces,
+                                          Strength strength) const;
+    // Splits off all of a plate's floor joined to where it `tears` as a new plate, its slabs
+    // hanging there.
+    void tear_off(std::uint32_t plate, std::span<const Tear> tears);
     // Where in a plate's cells is the crust it carries over a unit direction, if it has any.
     [[nodiscard]] std::optional<std::size_t> held(std::uint32_t plate, DVec3 at) const;
     // For each of a plate's cells, the plate whose crust lies over its continent, as `overrides`

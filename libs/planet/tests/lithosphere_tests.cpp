@@ -1768,15 +1768,15 @@ TEST_CASE("the young mantle softens the lithosphere less as it cools", "[planet]
 
 namespace {
 
-// The northern half alone, ocean floor `age` million years old but for a continent around its
+// The northern half alone, ocean floor `age` million years old but for a continent `around` its
 // pole, warmed under it for good over a mantle `hotter` than today's.
-Lithosphere warm_cap(double hotter = 0.0, float age = 100.0F) {
+Lithosphere warm_cap(double hotter = 0.0, float age = 100.0F, DVec3 around = {0.0, 0.0, 1.0}) {
     const Lithosphere ocean = halves();
     std::vector<Lithosphere::Plate> plates{ocean.plates().front()};
     const auto& grid = ocean.grid();
     for (std::size_t index = 0; index < plates[0].cells.size(); ++index) {
         plates[0].crust[index].age = age;
-        if (hog::planet::cell_center(grid.cell(plates[0].cells[index])).z > 0.7) {
+        if (glm::dot(hog::planet::cell_center(grid.cell(plates[0].cells[index])), around) > 0.7) {
             plates[0].crust[index] = continent;
         }
     }
@@ -1904,6 +1904,62 @@ TEST_CASE("a plate that holds over today's mantle splits over a young hotter one
     Lithosphere young = warm_cap(200.0);
     rifted(young, middling);
     CHECK(young.plates().size() == 2);
+}
+
+TEST_CASE("old floor tears away from a warm continent's margin and dives under it",
+          "[planet][lithosphere]") {
+    // On the equator, so the floor round it can close on all its margin but the very ends.
+    Lithosphere torn = warm_cap(0.0, 100.0F, on_equator);
+    const Lithosphere::Plate whole = torn.plates().front();
+    torn.collapse_margins();
+    REQUIRE(torn.plates().size() == 2);
+    // The continent keeps its plate; all the floor goes, turning as the whole did.
+    const Lithosphere::Plate& kept = torn.plates()[0];
+    const Lithosphere::Plate& off = torn.plates()[1];
+    CHECK(std::ranges::all_of(kept.crust, [](const Crust& crust) { return crust == continent; }));
+    CHECK(std::ranges::none_of(
+        off.crust, [](const Crust& crust) { return crust.type == CrustType::Continental; }));
+    for (const auto& plate : torn.plates()) {
+        CHECK(plate.frame == whole.frame);
+        CHECK(plate.pole == whole.pole);
+        CHECK(plate.rate == whole.rate);
+    }
+    std::vector<std::uint32_t> cells{kept.cells.begin(), kept.cells.end()};
+    cells.insert(cells.end(), off.cells.begin(), off.cells.end());
+    std::ranges::sort(cells);
+    CHECK(cells == whole.cells);
+    // Hanging from where it tore, the floor dives under the continent there.
+    torn.drive();
+    std::size_t diving = 0;
+    std::size_t parting = 0;
+    for (const auto& boundary : torn.boundaries()) {
+        if (boundary.plate != 1) {
+            continue;
+        }
+        if (boundary.kind == hog::planet::Boundary::Kind::Trench) {
+            ++diving;
+        } else if (boundary.closing < 0.0) {
+            ++parting;
+        }
+    }
+    CHECK(diving > 10 * parting);
+}
+
+TEST_CASE("floor its crust still floats, or a cool continent's margin, holds",
+          "[planet][lithosphere]") {
+    Lithosphere young = warm_cap(0.0, static_cast<float>(Lithosphere::buoyant_floor));
+    young.collapse_margins();
+    CHECK(young.plates().size() == 1);
+    // Hardly warmed yet, the margin holds over today's mantle but not a young hotter one.
+    const auto hardly_warmed = [](double hotter) {
+        const Lithosphere warmed = warm_cap();
+        Lithosphere lithosphere{warmed.grid(), {warmed.plates().begin(), warmed.plates().end()}};
+        lithosphere.warm(1e-6, {.hotter = hotter});
+        lithosphere.collapse_margins();
+        return lithosphere.plates().size();
+    };
+    CHECK(hardly_warmed(0.0) == 1);
+    CHECK(hardly_warmed(200.0) == 2);
 }
 
 TEST_CASE("each plate's crust is found wherever it lies, through splits and welds",

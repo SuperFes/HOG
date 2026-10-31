@@ -319,6 +319,50 @@ DVec3 gradient(const LevelGrid& grid, std::span<const float> field, std::uint32_
     return glm::inverse(fit) * rise;
 }
 
+// How strong continent is over mantle `heat` warm, `softer` times weaker than today's.
+double continent_strength(float heat, Strength strength, double softer) {
+    return strength.cool * std::pow(strength.warm / strength.cool, heat) / softer;
+}
+
+// Where in a plate's cells a cell of its own grid is, if it has crust there.
+std::optional<std::size_t> index_in(const Lithosphere::Plate& plate, std::uint32_t cell) {
+    const auto found = std::ranges::lower_bound(plate.cells, cell);
+    if (found == plate.cells.end() || *found != cell) {
+        return std::nullopt;
+    }
+    return static_cast<std::size_t>(std::distance(plate.cells.begin(), found));
+}
+
+// The way along the surface from a plate's cell at `index` to the continent around it on the
+// same plate that holds less than `weight`, if any, in the plate's own frame.
+std::optional<DVec3> weak_margin(const Lithosphere& lithosphere, std::uint32_t plate,
+                                 std::size_t index, double weight, Strength strength) {
+    const LevelGrid& grid = lithosphere.grid();
+    const Lithosphere::Plate& carrier = lithosphere.plates()[plate];
+    const DVec3 at = cell_center(grid.cell(carrier.cells[index]));
+    DVec3 toward{0.0};
+    for (const std::uint32_t next : grid.neighbors(carrier.cells[index])) {
+        const std::optional<std::size_t> there = index_in(carrier, next);
+        if (!there || carrier.crust[*there].type != CrustType::Continental) {
+            continue;
+        }
+        const DVec3 middle = cell_center(grid.cell(next));
+        const float heat =
+            lithosphere
+                .heat()[grid.index(cell_at(lithosphere.to_planet(plate, middle), grid.level()))];
+        if (continent_strength(heat, strength, lithosphere.softer()) >= weight) {
+            continue;
+        }
+        DVec3 offset = middle - at;
+        offset -= glm::dot(offset, at) * at;
+        toward += glm::normalize(offset);
+    }
+    if (toward == DVec3{0.0}) {
+        return std::nullopt;
+    }
+    return glm::normalize(toward);
+}
+
 // A plate's cell as a line across the plate meets it: where it lies, how the mantle drags on
 // it, how long a line across it is and how strong it is along that.
 struct Stretch {
@@ -350,7 +394,7 @@ std::vector<Stretch> stretches_of(const Lithosphere& lithosphere, std::uint32_t 
         stretch.across = std::sqrt(4.0 * std::numbers::pi * share);
         if (continental) {
             const float heat = lithosphere.heat()[grid.index(cell_at(stretch.at, grid.level()))];
-            stretch.strong = strength.cool * std::pow(strength.warm / strength.cool, heat) / softer;
+            stretch.strong = continent_strength(heat, strength, softer);
         } else {
             // Floor thickens as it cools, as its slab's pull grows.
             const auto age = static_cast<double>(carrier.crust[index].age);
@@ -1838,6 +1882,102 @@ std::optional<Lithosphere::Line> Lithosphere::rifting(std::uint32_t plate,
         }
     }
     return hardest;
+}
+
+void Lithosphere::collapse_margins(const Forces& forces, Strength strength) {
+    const auto count = static_cast<std::uint32_t>(plates_.size());
+    std::vector<std::vector<Tear>> found(count);
+    each(jobs_, count, 1, [&](std::uint32_t plate, std::uint32_t /*thread*/) {
+        found[plate] = tears(plate, forces, strength);
+    });
+    for (std::uint32_t plate = 0; plate < count; ++plate) {
+        if (!found[plate].empty()) {
+            tear_off(plate, found[plate]);
+        }
+    }
+}
+
+std::vector<Lithosphere::Tear> Lithosphere::tears(std::uint32_t plate, const Forces& forces,
+                                                  Strength strength) const {
+    const Plate& carrier = plates_[plate];
+    const double floated = std::sqrt(buoyant_floor / forces.mature);
+    std::vector<Tear> found;
+    for (std::size_t index = 0; index < carrier.cells.size(); ++index) {
+        const Crust& floor = carrier.crust[index];
+        if (floor.type != CrustType::Oceanic) {
+            continue;
+        }
+        const auto age = static_cast<double>(floor.age);
+        const double weight = std::sqrt(std::min(age, forces.mature) / forces.mature) - floated;
+        if (weight <= 0.0) {
+            continue;
+        }
+        if (const std::optional<DVec3> toward =
+                weak_margin(*this, plate, index, weight, strength)) {
+            found.push_back({.index = index, .toward = *toward});
+        }
+    }
+    return found;
+}
+
+void Lithosphere::tear_off(std::uint32_t plate, std::span<const Tear> tears) {
+    const Plate& carrier = plates_[plate];
+    std::vector<bool> torn(carrier.cells.size(), false);
+    std::vector<std::size_t> frontier;
+    for (const Tear& tear : tears) {
+        torn[tear.index] = true;
+        frontier.push_back(tear.index);
+    }
+    while (!frontier.empty()) {
+        const std::size_t index = frontier.back();
+        frontier.pop_back();
+        for (const std::uint32_t next : grid_.neighbors(carrier.cells[index])) {
+            const std::optional<std::size_t> there = index_in(carrier, next);
+            if (there && !torn[*there] && carrier.crust[*there].type == CrustType::Oceanic) {
+                torn[*there] = true;
+                frontier.push_back(*there);
+            }
+        }
+    }
+    Plate kept{.frame = carrier.frame,
+               .pole = carrier.pole,
+               .rate = carrier.rate,
+               .cells = {},
+               .crust = {}};
+    Plate off = kept;
+    for (std::size_t index = 0; index < carrier.cells.size(); ++index) {
+        Plate& side = torn[index] ? off : kept;
+        side.cells.push_back(carrier.cells[index]);
+        side.crust.push_back(carrier.crust[index]);
+    }
+    std::vector<Slab> slabs_kept;
+    std::vector<Slab> slabs_off;
+    for (const Slab& slab : slabs_[plate]) {
+        const std::optional<std::size_t> there = index_in(carrier, slab.cell);
+        (there && torn[*there] ? slabs_off : slabs_kept).push_back(slab);
+    }
+    double sphere = 0.0;
+    for (std::uint32_t place = 0; place < grid_.size(); ++place) {
+        sphere += static_cast<double>(grid_.area(place));
+    }
+    // It hangs from all along where it tore as a slab going straight down.
+    for (const Tear& tear : tears) {
+        const std::uint32_t cell = carrier.cells[tear.index];
+        const double length =
+            std::sqrt(4.0 * std::numbers::pi * static_cast<double>(grid_.area(cell)) / sphere);
+        slabs_off.push_back({.cell = cell,
+                             .pull = length * tear.toward,
+                             .age = carrier.crust[tear.index].age,
+                             .idle = 0.0});
+    }
+    plates_[plate] = std::move(kept);
+    plates_.push_back(std::move(off));
+    slabs_[plate] = std::move(slabs_kept);
+    slabs_.push_back(std::move(slabs_off));
+    rifts_.emplace_back();
+    bounds_.emplace_back();
+    bound(plate);
+    bound(static_cast<std::uint32_t>(plates_.size() - 1));
 }
 
 std::vector<glm::dmat3> Lithosphere::mantle_drags(const Forces& forces) const {
