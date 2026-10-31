@@ -201,7 +201,7 @@ TEST_CASE("a landform's steepness is its steepest slope to a neighbouring cell",
         std::views::iota(std::size_t{0}, around.size()) |
         std::views::transform([&](std::size_t k) { return grid.distance(raised, k); }));
     const std::vector<std::int64_t> zeros(grid.size(), 0);
-    const Landform landform{std::move(grid), heights, zeros, zeros, zeros, zeros, zeros, 0};
+    const Landform landform{std::move(grid), heights, zeros, zeros, zeros, zeros, zeros, zeros, 0};
     const auto steepness = landform.steepness();
     CHECK(hog::planet::fixed_to_double(steepness[raised]) ==
           Catch::Approx(100.0 / hog::planet::fixed_to_double(nearest)).epsilon(1e-3));
@@ -299,7 +299,7 @@ TEST_CASE("the landform's slope runs up the ground as steeply as it rises", "[pl
                                       static_cast<double>(fixed_one));
     }
     const std::vector<std::int64_t> zeros(grid.size(), 0);
-    const Landform landform{std::move(grid), heights, zeros, zeros, zeros, zeros, zeros, 0};
+    const Landform landform{std::move(grid), heights, zeros, zeros, zeros, zeros, zeros, zeros, 0};
     const double latitude = 30.0 * std::numbers::pi / 180.0;
     const hog::DVec3 at = hog::planet::direction_at(latitude, 0.4);
     const hog::DVec3 uphill = landform.uphill(hog::planet::cell_at(at, 14));
@@ -361,4 +361,49 @@ TEST_CASE("rivers cut down to a sea the ice ages drew down, and its return drown
     CHECK(high_drowned == 0);
     CHECK(low_deepest < -10 * fixed_one);
     CHECK(low_drowned > 0);
+}
+
+TEST_CASE("land floats back up as rivers wear it, standing higher, its rock risen by it too",
+          "[planet][landform]") {
+    constexpr int steps = 20;
+    LevelGrid grid{level, 115'000.0};
+    const LevelGrid bending{2, 115'000.0};
+    std::vector<std::int64_t> heights;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const hog::DVec3 at = hog::planet::cell_center(grid.cell(cell));
+        const double metres = at.z > -0.3 ? 50.0 + (2'000.0 * (at.z + 0.3)) : -1'000.0;
+        heights.push_back(std::llround(metres * static_cast<double>(fixed_one)));
+    }
+    const std::vector<std::int64_t> uplift(grid.size(), 10 * fixed_one);
+    const std::vector<std::int64_t> erodibility(grid.size(), fixed_one / 10);
+    const std::vector<std::int64_t> runoff(grid.size(), fixed_one / 2);
+    const auto evolved = [&](double rebound) {
+        return Landform{grid,
+                        heights,
+                        {.uplift = uplift,
+                         .erodibility = erodibility,
+                         .runoff = runoff,
+                         .seabed_rises = true,
+                         .rebound = rebound,
+                         .bending = &bending},
+                        hog::planet::Hillslope{},
+                        steps};
+    };
+    const Landform sunk = evolved(0.0);
+    const Landform floating = evolved(0.85);
+    double sunk_total = 0.0;
+    double floating_total = 0.0;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        CHECK(sunk.floated()[cell] == 0);
+        CHECK(floating.floated()[cell] >= 0);
+        // What tectonics lifted it by is the same either way.
+        CHECK(floating.risen()[cell] - floating.floated()[cell] ==
+              std::int64_t{steps} * 10 * fixed_one);
+        if (heights[cell] > 0) {
+            sunk_total += hog::planet::fixed_to_double(sunk.heights()[cell]);
+            floating_total += hog::planet::fixed_to_double(floating.heights()[cell]);
+        }
+    }
+    CHECK(std::ranges::max(floating.floated()) > 10 * fixed_one);
+    CHECK(floating_total > sunk_total);
 }

@@ -182,9 +182,9 @@ private:
                                       std::int64_t generated, const Landform& landform) const;
     [[nodiscard]] const Evolved& evolved() const;
     [[nodiscard]] std::shared_ptr<const Evolved> evolve(const PlanetConfig& config) const;
-    // The landform on a grid, evolved from the generated ground, calling `stepped` with how many
-    // steps are done after each.
-    [[nodiscard]] Landform wear(LevelGrid grid, std::uint64_t seed,
+    // The landform on a grid, evolved from the generated ground of a planet of `radius` metres,
+    // calling `stepped` with how many steps are done after each.
+    [[nodiscard]] Landform wear(LevelGrid grid, std::uint64_t seed, double radius,
                                 const std::function<void(int)>& stepped) const;
     // What a bake for a grid of `level` holds, or nothing where it holds none.
     [[nodiscard]] static std::shared_ptr<const Evolved>

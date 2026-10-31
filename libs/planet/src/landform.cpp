@@ -52,38 +52,14 @@ Landform::Landform(LevelGrid grid, std::vector<std::int64_t> heights, const Eros
                    const Hillslope& hillslope, int steps, const std::function<void(int)>& stepped,
                    const Glaciation& glaciation)
     : grid_{std::move(grid)}, heights_{std::move(heights)}, soil_(heights_.size(), 0),
-      risen_(heights_.size(), 0), carved_(heights_.size(), 0) {
+      risen_(heights_.size(), 0), floated_(heights_.size(), 0), carved_(heights_.size(), 0) {
     HOG_ASSERT(heights_.size() == grid_.size(), "one height per grid cell");
     HOG_ASSERT(erosion.sea_levels.empty() ||
                    erosion.sea_levels.size() >= static_cast<std::size_t>(steps),
                "a sea level for every step");
     const std::vector<std::int64_t> start = heights_;
     for (int step = 0; step < steps; ++step) {
-        Erosion now = erosion;
-        now.risen = risen_;
-        // A new way down each step, so no one path is worn in by chance alone.
-        now.wander =
-            erosion.wander == 0 ? 0 : hash_values(erosion.wander, static_cast<std::uint64_t>(step));
-        const std::vector<std::int64_t> before = heights_;
-        const std::int64_t sea =
-            erosion.sea_levels.empty() ? 0 : erosion.sea_levels[static_cast<std::size_t>(step)];
-        std::ignore = erode(grid_, heights_, now, sea);
-        if (!hillslope.creep.empty()) {
-            // Rivers carry off the soil before cutting into the rock.
-            for (std::size_t cell = 0; cell < heights_.size(); ++cell) {
-                const std::int64_t rose =
-                    before[cell] > sea || erosion.seabed_rises ? erosion.uplift[cell] : 0;
-                const std::int64_t cut = before[cell] + rose - heights_[cell];
-                soil_[cell] = std::max<std::int64_t>(soil_[cell] - cut, 0);
-            }
-            Hillslope slopes = hillslope;
-            slopes.risen = risen_;
-            wear_slopes(grid_, heights_, soil_, slopes, sea);
-        }
-        const std::vector<std::int64_t> washed = wear_coast(grid_, heights_, erosion, sea);
-        for (std::size_t cell = 0; cell < heights_.size(); ++cell) {
-            soil_[cell] = std::max<std::int64_t>(soil_[cell] - washed[cell], 0);
-        }
+        evolve(erosion, hillslope, step);
         if (stepped) {
             stepped(step + 1);
         }
@@ -118,16 +94,61 @@ Landform::Landform(LevelGrid grid, std::vector<std::int64_t> heights, const Eros
     find_steepness();
 }
 
+void Landform::evolve(const Erosion& erosion, const Hillslope& hillslope, int step) {
+    Erosion now = erosion;
+    now.risen = risen_;
+    // A new way down each step, so no one path is worn in by chance alone.
+    now.wander =
+        erosion.wander == 0 ? 0 : hash_values(erosion.wander, static_cast<std::uint64_t>(step));
+    const std::vector<std::int64_t> before = heights_;
+    const std::int64_t sea =
+        erosion.sea_levels.empty() ? 0 : erosion.sea_levels[static_cast<std::size_t>(step)];
+    std::ignore = erode(grid_, heights_, now, sea);
+    if (!hillslope.creep.empty()) {
+        // Rivers carry off the soil before cutting into the rock.
+        for (std::size_t cell = 0; cell < heights_.size(); ++cell) {
+            const std::int64_t rose =
+                before[cell] > sea || erosion.seabed_rises ? erosion.uplift[cell] : 0;
+            const std::int64_t cut = before[cell] + rose - heights_[cell];
+            soil_[cell] = std::max<std::int64_t>(soil_[cell] - cut, 0);
+        }
+        Hillslope slopes = hillslope;
+        slopes.risen = risen_;
+        wear_slopes(grid_, heights_, soil_, slopes, sea);
+    }
+    const std::vector<std::int64_t> washed = wear_coast(grid_, heights_, erosion, sea);
+    for (std::size_t cell = 0; cell < heights_.size(); ++cell) {
+        soil_[cell] = std::max<std::int64_t>(soil_[cell] - washed[cell], 0);
+    }
+    if (erosion.rebound > 0.0) {
+        std::vector<std::int64_t> unloaded(heights_.size());
+        for (std::size_t cell = 0; cell < heights_.size(); ++cell) {
+            const std::int64_t rose =
+                before[cell] > sea || erosion.seabed_rises ? erosion.uplift[cell] : 0;
+            unloaded[cell] = before[cell] + rose - heights_[cell];
+        }
+        const std::vector<std::int64_t> floated = rebound(grid_, unloaded, erosion);
+        for (std::size_t cell = 0; cell < heights_.size(); ++cell) {
+            heights_[cell] += floated[cell];
+            risen_[cell] += floated[cell];
+            floated_[cell] += floated[cell];
+        }
+    }
+}
+
 Landform::Landform(LevelGrid grid, std::vector<std::int64_t> heights,
                    std::vector<std::int64_t> change, std::vector<std::int64_t> drained,
                    std::vector<std::int64_t> soil, std::vector<std::int64_t> risen,
-                   std::vector<std::int64_t> carved, std::uint64_t wander)
+                   std::vector<std::int64_t> floated, std::vector<std::int64_t> carved,
+                   std::uint64_t wander)
     : grid_{std::move(grid)}, heights_{std::move(heights)}, change_{std::move(change)},
-      soil_{std::move(soil)}, risen_{std::move(risen)}, carved_{std::move(carved)},
-      drainage_{drain(grid_, heights_, 0, settled(wander))}, drained_{std::move(drained)} {
+      soil_{std::move(soil)}, risen_{std::move(risen)}, floated_{std::move(floated)},
+      carved_{std::move(carved)}, drainage_{drain(grid_, heights_, 0, settled(wander))},
+      drained_{std::move(drained)} {
     HOG_ASSERT(heights_.size() == grid_.size() && change_.size() == grid_.size() &&
                    drained_.size() == grid_.size() && soil_.size() == grid_.size() &&
-                   risen_.size() == grid_.size() && carved_.size() == grid_.size(),
+                   risen_.size() == grid_.size() && floated_.size() == grid_.size() &&
+                   carved_.size() == grid_.size(),
                "one value per grid cell");
     find_lakes();
     find_steepness();

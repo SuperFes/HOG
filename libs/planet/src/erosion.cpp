@@ -153,4 +153,34 @@ std::vector<std::int64_t> wear_coast(const LevelGrid& grid, std::vector<std::int
     return cut;
 }
 
+std::vector<std::int64_t> rebound(const LevelGrid& grid, std::span<const std::int64_t> unloaded,
+                                  const Erosion& erosion) {
+    const std::uint32_t count = grid.size();
+    HOG_ASSERT(unloaded.size() == count, "one load per cell");
+    std::vector<std::int64_t> risen(count, 0);
+    if (erosion.rebound <= 0.0) {
+        return risen;
+    }
+    HOG_ASSERT(erosion.bending != nullptr && erosion.bending->level() <= grid.level(),
+               "a bending grid no finer than the ground's");
+    const LevelGrid& bending = *erosion.bending;
+    std::vector<double> volume(bending.size(), 0.0);
+    std::vector<double> area(bending.size(), 0.0);
+    for (std::uint32_t cell = 0; cell < count; ++cell) {
+        const std::uint32_t under = bending.index(grid.cell(cell).parent(bending.level()));
+        const auto spread = static_cast<double>(grid.area(cell));
+        volume[under] += spread * fixed_to_double(unloaded[cell]);
+        area[under] += spread;
+    }
+    std::vector<std::int64_t> lightened(bending.size());
+    for (std::uint32_t under = 0; under < bending.size(); ++under) {
+        lightened[under] = std::llround(erosion.rebound * volume[under] / area[under] *
+                                        static_cast<double>(fixed_one));
+    }
+    for (std::uint32_t cell = 0; cell < count; ++cell) {
+        risen[cell] = bending.smooth(lightened, grid.cell(cell));
+    }
+    return risen;
+}
+
 } // namespace hog::planet

@@ -283,3 +283,39 @@ TEST_CASE("waves cut back the coast, soft rock faster than hard, and leave the i
         grid(), calm, Erosion{.uplift = none, .erodibility = none, .runoff = none});
     CHECK(calm == start);
 }
+
+TEST_CASE("the crust floats back up by a share of what's worn off it, as a range but not a valley",
+          "[planet][erosion]") {
+    const LevelGrid bending{2, 115'000.0};
+    const std::vector<std::int64_t> none(grid().size(), 0);
+    const Erosion erosion{
+        .uplift = none, .erodibility = none, .runoff = none, .rebound = 0.85, .bending = &bending};
+    // Worn down all over, it all floats back up by the share.
+    const std::vector<std::int64_t> everywhere(grid().size(), 100 * fixed_one);
+    for (const std::int64_t risen : hog::planet::rebound(grid(), everywhere, erosion)) {
+        CHECK(std::abs(risen - (85 * fixed_one)) <= 1);
+    }
+    // One cell cut alone hardly rises, the plate holding it down, and the far side not at all.
+    std::vector<std::int64_t> valley = none;
+    valley[0] = 100 * fixed_one;
+    const std::vector<std::int64_t> risen = hog::planet::rebound(grid(), valley, erosion);
+    CHECK(risen[0] > 0);
+    CHECK(risen[0] < 85 * fixed_one / 10);
+    const hog::DVec3 at = center(0);
+    for (std::uint32_t cell = 0; cell < grid().size(); ++cell) {
+        CHECK(risen[cell] >= 0);
+        if (glm::dot(center(cell), at) < 0.0) {
+            CHECK(risen[cell] == 0);
+        }
+    }
+    // Laid on, the ground sinks under it instead.
+    std::vector<std::int64_t> laid = none;
+    std::ranges::fill(laid, -10 * fixed_one);
+    for (const std::int64_t sunk : hog::planet::rebound(grid(), laid, erosion)) {
+        CHECK(std::abs(sunk + (85 * fixed_one / 10)) <= 1);
+    }
+    // Without a rebound, nothing.
+    const std::vector<std::int64_t> still = hog::planet::rebound(
+        grid(), everywhere, Erosion{.uplift = none, .erodibility = none, .runoff = none});
+    CHECK(std::ranges::all_of(still, [](std::int64_t value) { return value == 0; }));
+}

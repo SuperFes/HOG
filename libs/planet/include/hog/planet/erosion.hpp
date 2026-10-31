@@ -44,6 +44,12 @@ struct Erosion {
     std::span<const std::int64_t> sea_levels = {};
     // Metres a step waves cut back a coast of middling rock open to them; none if zero.
     double wave_retreat = 0.0;
+    // The share of each metre worn off the ground that it floats back up by, as the lightened
+    // crust rises on the mantle; none if zero.
+    double rebound = 0.0;
+    // A grid as coarse as the plates bend over, which the rebound is spread across, so a range
+    // worn down rises back but a valley cut in it doesn't alone; needed if there is a rebound.
+    const LevelGrid* bending = nullptr;
 };
 
 // One step of uplift and river erosion (stream power with n = 1 and m = 1/2, solved implicitly
@@ -63,5 +69,11 @@ Drainage erode(const LevelGrid& grid, std::vector<std::int64_t>& heights, const 
 // from each cell.
 std::vector<std::int64_t> wear_coast(const LevelGrid& grid, std::vector<std::int64_t>& heights,
                                      const Erosion& erosion, std::int64_t sea_level = 0);
+
+// Fixed-point metres each cell of `grid` floats back up by as the crust under it is lightened by
+// `unloaded`, fixed-point metres worn off each cell, or weighed down where it's negative, laid
+// on: `erosion`'s rebound share of the load, spread over the cells of its bending grid.
+std::vector<std::int64_t> rebound(const LevelGrid& grid, std::span<const std::int64_t> unloaded,
+                                  const Erosion& erosion);
 
 } // namespace hog::planet

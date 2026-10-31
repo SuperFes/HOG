@@ -807,8 +807,9 @@ TEST_CASE("an evolved world stands its land where its crust settled dry, ranges 
     REQUIRE(plain_count > 0);
     UNSCOPED_INFO("ranges " << ranges / range_count << " m, plains " << plains / plain_count
                             << " m");
-    // Rain on their windward sides wears them; they still stand well above.
-    CHECK(ranges / range_count > (plains / plain_count) + 800.0);
+    // Rain on their windward sides wears them, but they float back up as they're lightened, so
+    // they still stand well above.
+    CHECK(ranges / range_count > (plains / plain_count) + 1'000.0);
     CHECK(plains / plain_count < 1'500.0);
 }
 

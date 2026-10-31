@@ -344,7 +344,7 @@ std::shared_ptr<const Elevation::Evolved> Elevation::evolve(const PlanetConfig& 
                   "evolving the landform, {} cells {:.0f} m apart: the first time for this world "
                   "and build, which takes a while",
                   grid.size(), std::numbers::pi / 2.0 * config.radius / std::ldexp(1.0, level));
-        Landform landform = wear(std::move(grid), config.seed, [&](int step) {
+        Landform landform = wear(std::move(grid), config.seed, config.radius, [&](int step) {
             if (step % landform_progress == 0 && step < landform_steps) {
                 log::info(landform_log, "wearing the land: {} of {} steps, {:.0f} s", step,
                           landform_steps, seconds());
@@ -367,6 +367,7 @@ std::shared_ptr<const Elevation::Evolved> Elevation::evolve(const PlanetConfig& 
                             .ground = ground,
                             .soil = {landform.soil().begin(), landform.soil().end()},
                             .risen = {landform.risen().begin(), landform.risen().end()},
+                            .floated = {landform.floated().begin(), landform.floated().end()},
                             .carved = {landform.carved().begin(), landform.carved().end()}});
         }
         shared = std::make_shared<const Evolved>(std::move(landform), ground, config);
@@ -388,11 +389,12 @@ std::shared_ptr<const Elevation::Evolved> Elevation::unbake(std::optional<Landfo
     return std::make_shared<const Evolved>(
         Landform{std::move(grid), std::move(bake->heights), std::move(bake->change),
                  std::move(bake->drained), std::move(bake->soil), std::move(bake->risen),
-                 std::move(bake->carved), hash_combine(config.seed, wander_salt)},
+                 std::move(bake->floated), std::move(bake->carved),
+                 hash_combine(config.seed, wander_salt)},
         bake->ground, config);
 }
 
-Landform Elevation::wear(LevelGrid grid, std::uint64_t seed,
+Landform Elevation::wear(LevelGrid grid, std::uint64_t seed, double radius,
                          const std::function<void(int)>& stepped) const {
     const auto fixed = [](double value) {
         return std::llround(value * static_cast<double>(fixed_one));
@@ -443,6 +445,7 @@ Landform Elevation::wear(LevelGrid grid, std::uint64_t seed,
         weathered[index] = fixed(weathering_per_step * (((0.15 + (0.85 * wet)) * warm) +
                                                         (frost ? frost_weathering : 0.0)));
     }
+    const LevelGrid bending{std::min(level_for(flexure_reach, radius), grid.level()), radius};
     std::vector<std::int64_t> sea_levels;
     if (settled_) {
         sea_levels.assign(landform_steps, 0);
@@ -462,7 +465,9 @@ Landform Elevation::wear(LevelGrid grid, std::uint64_t seed,
                             .seabed_rises = settled_,
                             .fills_basins = settled_,
                             .sea_levels = sea_levels,
-                            .wave_retreat = settled_ ? wave_retreat : 0.0},
+                            .wave_retreat = settled_ ? wave_retreat : 0.0,
+                            .rebound = settled_ ? 1.0 - continental_buoyancy : 0.0,
+                            .bending = &bending},
                     Hillslope{.creep = creeping,
                               .weathering = weathered,
                               .rock =
@@ -637,8 +642,11 @@ std::int64_t Elevation::worn(CellId cell, std::int64_t generated, const Landform
     const CellId shifted = cell_at(meander(cell_center(cell)));
     std::int64_t ground = generated;
     if (settled_ && generated > untouched) {
+        // Generated as high as its crust is piled, which it rose by as it wore, and not by what
+        // it floated back up.
         ground = generated + landform.change(shifted) -
-                 landform.grid().smooth(landform.risen(), shifted);
+                 landform.grid().smooth(landform.risen(), shifted) +
+                 landform.grid().smooth(landform.floated(), shifted);
         if (generated > 0) {
             ground = ledged(cell, shifted, ground, generated, landform);
         }

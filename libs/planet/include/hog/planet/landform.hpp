@@ -31,12 +31,12 @@ public:
     Landform(LevelGrid grid, std::vector<std::int64_t> heights, const Erosion& erosion,
              const Hillslope& hillslope, int steps, const std::function<void(int)>& stepped = {},
              const Glaciation& glaciation = {});
-    // One evolved before, as its heights, change, drained, soil, risen and carved left it, by
-    // erosion with `wander`.
+    // One evolved before, as its heights, change, drained, soil, risen, floated and carved left
+    // it, by erosion with `wander`.
     Landform(LevelGrid grid, std::vector<std::int64_t> heights, std::vector<std::int64_t> change,
              std::vector<std::int64_t> drained, std::vector<std::int64_t> soil,
-             std::vector<std::int64_t> risen, std::vector<std::int64_t> carved,
-             std::uint64_t wander);
+             std::vector<std::int64_t> risen, std::vector<std::int64_t> floated,
+             std::vector<std::int64_t> carved, std::uint64_t wander);
 
     [[nodiscard]] const LevelGrid& grid() const noexcept { return grid_; }
     // Fixed-point metres per grid cell, after evolving.
@@ -58,6 +58,9 @@ public:
     // Fixed-point metres each grid cell was lifted while it stood above the sea: the ground less
     // this is the height the rock lay at before, where its beds are found.
     [[nodiscard]] std::span<const std::int64_t> risen() const noexcept { return risen_; }
+    // Of what each grid cell has risen, the fixed-point metres it floated back up as the rock
+    // worn off it lightened the crust.
+    [[nodiscard]] std::span<const std::int64_t> floated() const noexcept { return floated_; }
     // Fixed-point metres glaciers' troughs stand below the ground, per grid cell, taking in the
     // change of the ground they were cut from: each cell's height is where it started plus its
     // change less this.
@@ -89,6 +92,8 @@ public:
     [[nodiscard]] bool near_lake(CellId cell) const;
 
 private:
+    // The `step`th step of evolving by `erosion` and `hillslope`.
+    void evolve(const Erosion& erosion, const Hillslope& hillslope, int step);
     void find_lakes();
     void find_lakes_about();
     void find_steepness();
@@ -100,6 +105,7 @@ private:
     std::vector<std::int64_t> change_;
     std::vector<std::int64_t> soil_;
     std::vector<std::int64_t> risen_;
+    std::vector<std::int64_t> floated_;
     std::vector<std::int64_t> carved_;
     std::vector<std::int64_t> steepness_;
     Drainage drainage_;

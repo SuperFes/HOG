@@ -28,6 +28,7 @@ LandformBake sample() {
             .ground = {-9'000'000'000'000, 4, 5},
             .soil = {0, 1, 65'536},
             .risen = {3, 0, 1'048'576},
+            .floated = {0, 2, -4},
             .carved = {0, 12, 0}};
 }
 
