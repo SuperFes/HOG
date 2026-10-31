@@ -1111,3 +1111,27 @@ TEST_CASE("the woods' fates are read between the cells' middles, held at a face'
     CHECK(fared.dead == cells[5].dead);
     CHECK(fared.charred == 0.5F);
 }
+
+TEST_CASE("woods thicken or thin across the climate between biomes, not at the boundary",
+          "[flora]") {
+    using hog::flora::Habitat;
+    using hog::flora::trees_in;
+    using hog::flora::trees_of;
+    using hog::planet::Biome;
+    // Shrubland gives way to temperate forest at a wetness of 0.36.
+    const float boundary = 0.36F;
+    const float step = 1.0F / 65'536.0F;
+    const Habitat drier{.temperature = 12.0F, .moisture = boundary - (2.0F * step)};
+    const Habitat wetter{.temperature = 12.0F, .moisture = boundary + (2.0F * step)};
+    const auto shrubs = trees_in(Biome::Shrubland, drier);
+    const auto woods = trees_in(Biome::TemperateForest, wetter);
+    CHECK(std::abs(shrubs.edge - woods.edge) < 0.01F);
+    CHECK(std::abs(shrubs.lone - woods.lone) < 0.001F);
+    // Between the two biomes' own.
+    CHECK(woods.edge > trees_of(Biome::TemperateForest).edge);
+    CHECK(woods.edge < trees_of(Biome::Shrubland).edge);
+    // Far from any boundary, a biome's own; and a biome the climate didn't make keeps its own.
+    const Habitat deep{.temperature = 12.0F, .moisture = 0.8F};
+    CHECK(trees_in(Biome::TemperateForest, deep).edge == trees_of(Biome::TemperateForest).edge);
+    CHECK(trees_in(Biome::Wetland, wetter).edge == trees_of(Biome::Wetland).edge);
+}

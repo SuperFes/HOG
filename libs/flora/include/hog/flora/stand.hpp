@@ -118,6 +118,11 @@ struct Habitat {
 // rock in fixed point.
 [[nodiscard]] Habitat habitat_of(const planet::CellState& state, std::int64_t bare = 0) noexcept;
 
+// The trees of `biome` in `habitat`'s climate: where the climate makes that biome, mixed with the
+// trees of the one it shades into by planet::blend_biome()'s share, so the woods thicken or thin
+// across the climate between them rather than at the boundary.
+[[nodiscard]] BiomeTrees trees_in(planet::Biome biome, const Habitat& habitat) noexcept;
+
 // How wet the ground is to a tree's roots, 0 to 1: its climate's moisture, or wetter over a water
 // table within their reach.
 [[nodiscard]] float wetness(const Habitat& habitat) noexcept;

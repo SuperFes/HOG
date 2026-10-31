@@ -1,5 +1,6 @@
 #include <hog/flora/stand.hpp>
 
+#include <cmath>
 #include <cstdint>
 #include <optional>
 
@@ -173,6 +174,32 @@ Habitat habitat_of(const planet::CellState& state, std::int64_t bare) noexcept {
             .bare = saturated(real(bare))};
 }
 
+BiomeTrees trees_in(planet::Biome biome, const Habitat& habitat) noexcept {
+    const BiomeTrees own = trees_of(biome);
+    // Exact: the habitat holds the cell's fixed-point climate in floats wide enough for it.
+    const auto fixed = [](float value) {
+        return std::llround(static_cast<double>(value) * static_cast<double>(planet::fixed_one));
+    };
+    const std::int64_t temperature = fixed(habitat.temperature);
+    const std::int64_t moisture = fixed(habitat.moisture);
+    if (biome != planet::classify_biome(temperature, moisture)) {
+        return own;
+    }
+    const planet::BiomeBlend blend = planet::blend_biome(temperature, moisture);
+    if (blend.share == 0) {
+        return own;
+    }
+    const BiomeTrees other = trees_of(blend.other);
+    const auto share = static_cast<float>(planet::fixed_to_double(blend.share));
+    return {.height = mixed(own.height, other.height, share),
+            .inside = mixed(own.inside, other.inside, share),
+            .edge = mixed(own.edge, other.edge, share),
+            .lone = mixed(own.lone, other.lone, share),
+            .broadleaf = mixed(own.broadleaf, other.broadleaf, share),
+            .maple = mixed(own.maple, other.maple, share),
+            .palm = mixed(own.palm, other.palm, share)};
+}
+
 float wetness(const Habitat& habitat) noexcept {
     const float table = saturated(1.0F - (habitat.water_table / rooting));
     return habitat.moisture > table ? habitat.moisture : table;
@@ -197,7 +224,7 @@ Vec2 tree_spot(std::uint32_t lattice_i, std::uint32_t lattice_j, std::uint32_t f
 std::optional<Stood> tree_grown(std::uint32_t lattice_i, std::uint32_t lattice_j,
                                 std::uint32_t face, planet::Biome biome,
                                 const Habitat& habitat) noexcept {
-    const BiomeTrees trees = trees_of(biome);
+    const BiomeTrees trees = trees_in(biome, habitat);
     if (trees.height <= 0.0F) {
         return std::nullopt;
     }
@@ -248,7 +275,7 @@ std::optional<Stood> tree_grown(std::uint32_t lattice_i, std::uint32_t lattice_j
 
 Woodland woodland_at(Vec2 cell, std::uint32_t face, planet::Biome biome,
                      const Habitat& habitat) noexcept {
-    const BiomeTrees trees = trees_of(biome);
+    const BiomeTrees trees = trees_in(biome, habitat);
     if (trees.height <= 0.0F) {
         return {};
     }

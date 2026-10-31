@@ -1,4 +1,5 @@
 #include <hog/core/assert.hpp>
+#include <hog/planet/climate.hpp>
 #include <hog/planet/cube_face.hpp>
 #include <hog/planet/neighbors.hpp>
 #include <hog/planet/noise.hpp>
@@ -121,6 +122,23 @@ struct Blend {
     blend.share =
         byte_of(static_cast<double>(most) / static_cast<double>(std::max(mine + most, 1)));
     return blend;
+}
+
+// The biome a vertex's climate shades into, where its biome is the climate's own rather than
+// set by its height or water.
+[[nodiscard]] Blend climate_blend(const planet::CellState& state) {
+    if (state.biome != planet::classify_biome(state.temperature, state.moisture)) {
+        return {.biome = state.biome, .share = 0};
+    }
+    const planet::BiomeBlend blend = planet::blend_biome(state.temperature, state.moisture);
+    return {.biome = blend.other, .share = byte_of(planet::fixed_to_double(blend.share))};
+}
+
+// Of the blend toward the biomes about a vertex and its climate's, the one to draw: an edge in
+// the ground itself, such as one a player made, before the climate's.
+[[nodiscard]] Blend stronger(const Blend& near, const Blend& shaded) {
+    const bool other_edge = near.share > 0 && near.biome != shaded.biome;
+    return other_edge || near.share >= shaded.share ? near : shaded;
 }
 
 // How far heights on a patch's grid stray from the grid at every other vertex. Each vertex left
@@ -258,6 +276,7 @@ Patch bake_patch(const planet::World& world, planet::CellId cell, const flora::F
     std::vector<Woods> woods(std::size_t{patch_side} * patch_side);
     std::vector<Cover> covers(woods.size());
     std::vector<planet::Exposure> exposures(woods.size());
+    std::vector<Blend> shading(woods.size(), Blend{.biome = planet::Biome::Ocean, .share = 0});
     std::vector<double> grid_heights(woods.size());
     HeightRange heights{.lowest = std::numeric_limits<double>::infinity(),
                         .highest = -std::numeric_limits<double>::infinity()};
@@ -276,16 +295,18 @@ Patch bake_patch(const planet::World& world, planet::CellId cell, const flora::F
             if (inside(i) && inside(j)) {
                 const flora::Fate fate = fate_at(canonical(corner), fates);
                 exposures[index(i, j)] = world.exposure(sampled, state);
+                shading[index(i, j)] = climate_blend(state);
                 // Nothing grows in a river's channel, though past its mouth it's the bed of the
                 // sea or lake it runs into.
                 if (rivers.in_channel(sampled) && !rivers.standing(sampled, state.elevation)) {
                     exposures[index(i, j)].bare = planet::fixed_one;
                 }
-                woods[index(i, j)] = woods_at(
-                    canonical(corner), points[bordered_index(i, j)], state.biome,
-                    flora::fared(flora::habitat_of(state, exposures[index(i, j)].bare), fate));
+                const flora::Habitat habitat =
+                    flora::fared(flora::habitat_of(state, exposures[index(i, j)].bare), fate);
+                woods[index(i, j)] =
+                    woods_at(canonical(corner), points[bordered_index(i, j)], state.biome, habitat);
                 covers[index(i, j)] =
-                    packed_cover(fate, flora::trees_of(state.biome).height > 0.0F);
+                    packed_cover(fate, flora::trees_in(state.biome, habitat).height > 0.0F);
                 grid_heights[index(i, j)] = height;
                 heights.lowest = std::min(heights.lowest, height);
                 heights.highest = std::max(heights.highest, height);
@@ -305,7 +326,8 @@ Patch bake_patch(const planet::World& world, planet::CellId cell, const flora::F
                 points[bordered_index(i + 1, j)] - points[bordered_index(i - 1, j)];
             const DVec3 along_j =
                 points[bordered_index(i, j + 1)] - points[bordered_index(i, j - 1)];
-            const Blend blend = blend_at(biomes, blended, steps, i + reach, j + reach);
+            const Blend blend = stronger(blend_at(biomes, blended, steps, i + reach, j + reach),
+                                         shading[index(i, j)]);
             patch.vertices.push_back(
                 {.position = relative_to(WorldPosition{points[bordered_index(i, j)]}, patch.origin),
                  .normal = Vec3(glm::normalize(glm::cross(along_i, along_j))),
