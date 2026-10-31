@@ -24,7 +24,7 @@ Outward, each column of cells is split into shells, as the square volume did, so
 
 **Between levels.** A coarse cell's centre is a fine cell, and the six fine cells halfway to its neighbours are shared half and half with them. Moving material down a level hands it to those seven cells; moving it up sums them back, so it's conserved and centred, with no drift. Coarse levels run the planet-scale processes; fine levels run the local ones and the play.
 
-**In memory.** Fine columns are stored in chunks, square blocks of `(i, j)` within a diamond, made on demand and dropped when they hold nothing generation can't make again. Edits and anything simulated are kept.
+**In memory.** Large is stored large. Each diamond's `(i, j)` and the shells are split as a tree, across or outward, only where what they hold differs, so a block of one hexel throughout is a single node however big: a layered planet of metre hexels fits in a few kilobytes, and digging one out adds a path and a brick. Small blocks that vary are bricks held in full. Fine detail is made on demand and dropped when it holds nothing generation can't make again; edits and anything simulated are kept.
 
 ## What a hexel holds
 
