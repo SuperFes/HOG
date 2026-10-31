@@ -3,8 +3,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <numbers>
 #include <optional>
+#include <span>
 
 namespace hog::globe {
 namespace {
@@ -156,6 +158,154 @@ HexCell locate(int level, const Point& point) {
     return {};
 }
 
+double angle_between(DVec3 a, DVec3 b) {
+    return std::atan2(glm::length(glm::cross(a, b)), glm::dot(a, b));
+}
+
+// The unit direction along the sphere at `from` toward `to`.
+DVec3 toward(DVec3 from, DVec3 to) {
+    return glm::normalize(to - (from * glm::dot(from, to)));
+}
+
+std::array<DVec3, 3> corners_of(const Face& face) {
+    return {vertices()[static_cast<std::size_t>(face[0])],
+            vertices()[static_cast<std::size_t>(face[1])],
+            vertices()[static_cast<std::size_t>(face[2])]};
+}
+
+// A flat face is equilateral about the origin, its corners a unit from it, in the order the face
+// lists them.
+DVec2 flat_corner(std::size_t k) {
+    constexpr double half_root3 = 0.8660254037844386;
+    constexpr std::array<DVec2, 3> all{DVec2{0.0, 1.0}, DVec2{-half_root3, -0.5},
+                                       DVec2{half_root3, -0.5}};
+    return all[k];
+}
+
+// The equal-area projection between a flat face and its patch of sphere. Both are cut into six
+// right triangles, each from the middle to a corner and the midpoint of an edge beside it. A point
+// keeps the share of its triangle's area that the fan from the middle sweeps on the way to it from
+// the corner, and its share of that fan's area out from the middle.
+constexpr double fan_area = 4.0 * std::numbers::pi / 120.0;
+
+// The spherical triangle's sides and angle at its corner, the same on every face.
+struct Fan {
+    double half_tan; // tan of half the arc from the corner to the middle
+    double sin_corner;
+    double cos_corner;
+};
+
+const Fan& fan() {
+    static const Fan made = [] {
+        const std::array<DVec3, 3> v = corners_of(faces[0]);
+        const DVec3 middle = glm::normalize(v[0] + v[1] + v[2]);
+        const DVec3 edge = glm::normalize(v[0] + v[1]);
+        const double corner = angle_between(toward(v[0], middle), toward(v[0], edge));
+        return Fan{.half_tan = std::tan(angle_between(v[0], middle) / 2.0),
+                   .sin_corner = std::sin(corner),
+                   .cos_corner = std::cos(corner)};
+    }();
+    return made;
+}
+
+// The corner a point is nearest, and the nearer of the other two, which together pick its fan.
+std::array<std::size_t, 2> fan_of(const std::array<double, 3>& nearness) {
+    std::size_t corner = 0;
+    for (std::size_t k = 1; k < 3; ++k) {
+        if (nearness[k] > nearness[corner]) {
+            corner = k;
+        }
+    }
+    const std::size_t one = (corner + 1) % 3;
+    const std::size_t other = (corner + 2) % 3;
+    return {corner, nearness[one] >= nearness[other] ? one : other};
+}
+
+// Shares of a flat face's corners making `at`.
+std::array<double, 3> shares_at(DVec2 at) {
+    std::array<double, 3> shares{};
+    for (std::size_t k = 0; k < 3; ++k) {
+        shares[k] = (1.0 + (2.0 * glm::dot(at, flat_corner(k)))) / 3.0;
+    }
+    return shares;
+}
+
+std::array<double, 3> to_flat(const Face& face, DVec3 point) {
+    const std::array<DVec3, 3> v = corners_of(face);
+    const DVec3 middle = glm::normalize(v[0] + v[1] + v[2]);
+    const double z = angle_between(middle, point);
+    if (z == 0.0) {
+        return {1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0};
+    }
+    const auto [k, m] =
+        fan_of({glm::dot(v[0], point), glm::dot(v[1], point), glm::dot(v[2], point)});
+    const DVec3 edge = glm::normalize(v[k] + v[m]);
+    // Where the arc from the middle through the point meets the fan's edge.
+    DVec3 meet = glm::normalize(glm::cross(glm::cross(middle, point), glm::cross(v[k], edge)));
+    if (glm::dot(meet, point) < 0.0) {
+        meet = -meet;
+    }
+    const double t = std::tan(angle_between(v[k], meet) / 2.0) * fan().half_tan;
+    const double share =
+        2.0 * std::atan2(t * fan().sin_corner, 1.0 + (t * fan().cos_corner)) / fan_area;
+    const DVec2 corner = flat_corner(k);
+    const DVec2 meet_flat = corner + (share * (((corner + flat_corner(m)) * 0.5) - corner));
+    const double q = angle_between(middle, meet);
+    return shares_at(meet_flat * (std::sin(z / 2.0) / std::sin(q / 2.0)));
+}
+
+DVec3 from_flat(const Face& face, const std::array<double, 3>& shares) {
+    const std::array<DVec3, 3> v = corners_of(face);
+    const DVec3 middle = glm::normalize(v[0] + v[1] + v[2]);
+    DVec2 at{0.0};
+    for (std::size_t k = 0; k < 3; ++k) {
+        at += shares[k] * flat_corner(k);
+    }
+    const double rho = glm::length(at);
+    if (rho == 0.0) {
+        return middle;
+    }
+    const auto [k, m] = fan_of(shares);
+    const DVec2 corner = flat_corner(k);
+    const DVec2 along = ((corner + flat_corner(m)) * 0.5) - corner;
+    // Where the ray from the middle through `at` meets the fan's flat edge.
+    const double det = (along.x * at.y) - (at.x * along.y);
+    const double share = std::clamp(((at.x * corner.y) - (at.y * corner.x)) / det, 0.0, 1.0);
+    const DVec2 meet_flat = corner + (share * along);
+    // The arc from the corner that sweeps that share of the fan's area.
+    const double e = std::tan(share * fan_area / 2.0);
+    const double t = e / (fan().half_tan * (fan().sin_corner - (e * fan().cos_corner)));
+    const double x = 2.0 * std::atan(t);
+    const DVec3 edge = glm::normalize(v[k] + v[m]);
+    const DVec3 meet = (std::cos(x) * v[k]) + (std::sin(x) * toward(v[k], edge));
+    const double q = angle_between(middle, meet);
+    const double z =
+        2.0 * std::asin(std::min(1.0, rho / glm::length(meet_flat) * std::sin(q / 2.0)));
+    return (std::cos(z) * middle) + (std::sin(z) * toward(middle, meet));
+}
+
+DVec3 position_of(const Point& point, std::int64_t n) {
+    std::array<double, 3> shares{};
+    for (std::size_t k = 0; k < 3; ++k) {
+        shares[k] = static_cast<double>(point.weight[k]) / static_cast<double>(n);
+    }
+    return from_flat(point.vertex, shares);
+}
+
+// The face whose patch of sphere holds `direction`: the one whose middle is nearest it.
+const Face& face_under(DVec3 direction) {
+    const Face* nearest = faces.data();
+    double best = -2.0;
+    for (const Face& face : faces) {
+        const std::array<DVec3, 3> v = corners_of(face);
+        const double along = glm::dot(glm::normalize(v[0] + v[1] + v[2]), direction);
+        if (along > best) {
+            best = along;
+            nearest = &face;
+        }
+    }
+    return *nearest;
+}
 } // namespace
 
 std::uint64_t index_of(HexCell cell) {
@@ -185,17 +335,6 @@ HexCell cell_at_index(int level, std::uint64_t index) {
 bool is_pentagon(HexCell cell) {
     const Point point = point_of(cell);
     return std::ranges::find(point.weight, side_of(cell.level)) != point.weight.end();
-}
-
-DVec3 center(HexCell cell) {
-    HOG_ASSERT(cell.is_valid(), "invalid cell");
-    const Point point = point_of(cell);
-    DVec3 sum{0.0};
-    for (std::size_t k = 0; k < 3; ++k) {
-        sum += static_cast<double>(point.weight[k]) *
-               vertices()[static_cast<std::size_t>(point.vertex[k])];
-    }
-    return glm::normalize(sum);
 }
 
 HexNeighbors neighbors(HexCell cell) {
@@ -228,71 +367,104 @@ HexNeighbors neighbors(HexCell cell) {
     return found;
 }
 
+DVec3 center(HexCell cell) {
+    HOG_ASSERT(cell.is_valid(), "invalid cell");
+    return position_of(point_of(cell), side_of(cell.level));
+}
+
 HexCell cell_at(DVec3 direction, int level) {
     HOG_ASSERT(level >= 0 && level <= max_level, "level out of range");
-    // A face's patch of sphere is the set of directions nearer its middle than any other's.
-    const Face* nearest = faces.data();
-    double best = -2.0;
-    for (const Face& face : faces) {
-        const DVec3 middle = vertices()[static_cast<std::size_t>(face[0])] +
-                             vertices()[static_cast<std::size_t>(face[1])] +
-                             vertices()[static_cast<std::size_t>(face[2])];
-        const double along = glm::dot(glm::normalize(middle), direction);
-        if (along > best) {
-            best = along;
-            nearest = &face;
-        }
-    }
-    const Face& face = *nearest;
-    const glm::dmat3 corners{vertices()[static_cast<std::size_t>(face[0])],
-                             vertices()[static_cast<std::size_t>(face[1])],
-                             vertices()[static_cast<std::size_t>(face[2])]};
-    DVec3 share = glm::inverse(corners) * direction;
-    share /= share.x + share.y + share.z;
-
-    // The lattice point at the floor of each share, with what's left given to the largest
-    // remainders, then walked to the nearest centre on the sphere.
+    const Face& face = face_under(direction);
+    const std::array<double, 3> shares = to_flat(face, direction);
+    // The cell is the flat hexagon about the nearest lattice point, which is a corner of the
+    // little triangle holding the point. On the flat face, distance squared is 3/2 the sum of the
+    // shares' differences squared.
     const std::int64_t n = side_of(level);
-    Point start{.vertex = face, .weight = {}};
-    std::array<double, 3> left{};
-    std::int64_t given = 0;
+    std::array<double, 3> scaled{};
+    std::array<std::int64_t, 3> floor{};
     for (std::size_t k = 0; k < 3; ++k) {
-        const double scaled =
-            std::clamp(share[static_cast<glm::length_t>(k)], 0.0, 1.0) * static_cast<double>(n);
-        start.weight[k] = static_cast<std::int64_t>(std::floor(scaled));
-        left[k] = scaled - static_cast<double>(start.weight[k]);
-        given += start.weight[k];
+        scaled[k] = shares[k] * static_cast<double>(n);
+        floor[k] = static_cast<std::int64_t>(std::floor(scaled[k]));
     }
-    while (given < n) {
-        const auto most = static_cast<std::size_t>(std::ranges::max_element(left) - left.begin());
-        ++start.weight[most];
-        left[most] = -1.0;
-        ++given;
-    }
-    while (given > n) {
-        const auto most =
-            static_cast<std::size_t>(std::ranges::max_element(start.weight) - start.weight.begin());
-        --start.weight[most];
-        --given;
-    }
-
-    HexCell here = locate(level, start);
-    double nearness = glm::dot(center(here), direction);
-    for (;;) {
-        HexCell closer = here;
-        const HexNeighbors around = neighbors(here);
-        for (const HexCell next : around.all()) {
-            const double along = glm::dot(center(next), direction);
-            if (along > nearness) {
-                nearness = along;
-                closer = next;
+    Point best{.vertex = face, .weight = {}};
+    double nearest = std::numeric_limits<double>::max();
+    for (std::int64_t a = -1; a <= 1; ++a) {
+        for (std::int64_t b = -1; b <= 1; ++b) {
+            const std::array<std::int64_t, 3> weight{floor[0] + a, floor[1] + b,
+                                                     n - floor[0] - a - floor[1] - b};
+            if (std::ranges::any_of(weight, [n](std::int64_t w) { return w < 0 || w > n; })) {
+                continue;
+            }
+            double apart = 0.0;
+            for (std::size_t k = 0; k < 3; ++k) {
+                const double d = static_cast<double>(weight[k]) - scaled[k];
+                apart += d * d;
+            }
+            if (apart < nearest) {
+                nearest = apart;
+                best.weight = weight;
             }
         }
-        if (closer == here) {
-            return here;
-        }
-        here = closer;
     }
+    return locate(level, best);
+}
+
+double solid_angle(HexCell cell) {
+    const auto n = static_cast<double>(side_of(cell.level));
+    const double hexagon = 4.0 * std::numbers::pi / (10.0 * n * n);
+    return is_pentagon(cell) ? hexagon * 5.0 / 6.0 : hexagon;
+}
+
+double prism_volume(HexCell cell, double inner, double outer) {
+    return solid_angle(cell) * ((outer * outer * outer) - (inner * inner * inner)) / 3.0;
+}
+
+HexRing ring(HexCell cell) {
+    const HexNeighbors around = neighbors(cell);
+    HexRing made;
+    made.count = around.count;
+    std::ranges::copy(around.all(), made.neighbors.begin());
+    // Anticlockwise seen from outside.
+    const DVec3 up = center(cell);
+    const DVec3 first = toward(up, center(made.neighbors[0]));
+    const DVec3 second = glm::cross(up, first);
+    std::array<double, 6> turn{};
+    for (std::size_t k = 0; k < made.count; ++k) {
+        const DVec3 to = center(made.neighbors[k]);
+        turn[k] = std::atan2(glm::dot(to, second), glm::dot(to, first));
+    }
+    std::array<std::size_t, 6> order{0, 1, 2, 3, 4, 5};
+    std::ranges::sort(std::span{order}.first(made.count),
+                      [&](std::size_t a, std::size_t b) { return turn[a] < turn[b]; });
+    std::array<HexCell, 6> sorted{};
+    for (std::size_t k = 0; k < made.count; ++k) {
+        sorted[k] = made.neighbors[order[k]];
+    }
+    made.neighbors = sorted;
+
+    // Each corner is the middle of the little flat triangle of the cell and two neighbours in turn.
+    const std::int64_t n = side_of(cell.level);
+    const Point here = point_of(cell);
+    for (std::size_t k = 0; k < made.count; ++k) {
+        const Point one = point_of(made.neighbors[k]);
+        const Point two = point_of(made.neighbors[(k + 1) % made.count]);
+        for (const Face& face : faces) {
+            const auto a = weights_on(here, face);
+            const auto b = weights_on(one, face);
+            const auto c = weights_on(two, face);
+            if (!a || !b || !c) {
+                continue;
+            }
+            std::array<double, 3> shares{};
+            for (std::size_t w = 0; w < 3; ++w) {
+                shares[w] = static_cast<double>((*a)[w] + (*b)[w] + (*c)[w]) /
+                            (3.0 * static_cast<double>(n));
+            }
+            made.corners[k] = from_flat(face, shares);
+            break;
+        }
+    }
+    return made;
 }
 
 } // namespace hog::globe

@@ -14,8 +14,9 @@ namespace hog::globe {
 inline constexpr int max_level = 24;
 
 // A column of the globe: a vertex of an icosahedron whose triangles are split 2^level times along
-// each edge, projected onto the sphere. Its cell is the patch of sphere nearer it than any other
-// vertex: a hexagon, or a pentagon at the icosahedron's twelve corners.
+// each edge. Its cell is the flat hexagon about it, or pentagon at the icosahedron's twelve
+// corners, carried onto the sphere by a projection that keeps areas, so every hexagon holds as
+// much of the globe as any other.
 //
 // The icosahedron is cut into ten diamonds of two triangles, five about each pole; a cell is
 // (i, j) within one, or one of the poles, which no diamond holds.
@@ -60,7 +61,7 @@ struct HexCell {
 // The unit direction to the cell's centre.
 [[nodiscard]] DVec3 center(HexCell cell);
 
-// The cell at `level` whose centre is nearest the unit `direction`.
+// The cell at `level` holding the unit `direction`.
 [[nodiscard]] HexCell cell_at(DVec3 direction, int level);
 
 struct HexNeighbors {
@@ -74,5 +75,32 @@ struct HexNeighbors {
 
 // The cells sharing a side with `cell`, found exactly across diamonds and about the corners.
 [[nodiscard]] HexNeighbors neighbors(HexCell cell);
+
+// The cell's share of the sphere in steradians: every hexagon's is the same, a pentagon's five
+// sixths of it.
+[[nodiscard]] double solid_angle(HexCell cell);
+
+// The volume over the cell between radii `inner` and `outer`.
+[[nodiscard]] double prism_volume(HexCell cell, double inner, double outer);
+
+// A cell's neighbours anticlockwise seen from outside, and its corners as unit directions: corner
+// k lies between neighbours k and k + 1, so side k, from corner k - 1 to corner k, faces
+// neighbour k.
+struct HexRing {
+    std::array<HexCell, 6> neighbors{};
+    std::array<DVec3, 6> corners{};
+    std::uint8_t count = 0;
+
+    [[nodiscard]] std::span<const HexCell> around() const& noexcept {
+        return {neighbors.data(), count};
+    }
+    [[nodiscard]] std::span<const HexCell> around() const&& = delete;
+    [[nodiscard]] std::span<const DVec3> outline() const& noexcept {
+        return {corners.data(), count};
+    }
+    [[nodiscard]] std::span<const DVec3> outline() const&& = delete;
+};
+
+[[nodiscard]] HexRing ring(HexCell cell);
 
 } // namespace hog::globe

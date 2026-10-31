@@ -16,7 +16,7 @@ This replaces the heightfield path (`Elevation`, `Landform`, river and shore str
 
 ## Cells
 
-The sphere is tiled by an icosahedral hex grid: the vertices of an icosahedron whose triangles are split `2^level` times along each edge, projected onto the sphere. Each vertex is a cell, a hexagon of its six neighbours, apart from the icosahedron's twelve corners, which are pentagons. A level has `10 · 4^level + 2` cells. Projected straight out from the flat triangles, neighbours stand 0.81 to 1.2 steps apart, as uneven as the cube's cells; a projection that keeps areas equal evens them out.
+The sphere is tiled by an icosahedral hex grid: the vertices of an icosahedron whose triangles are split `2^level` times along each edge, projected onto the sphere. Each vertex is a cell, a hexagon of its six neighbours, apart from the icosahedron's twelve corners, which are pentagons. A level has `10 · 4^level + 2` cells. Each flat hexagon is carried onto the sphere by a projection that keeps areas, so every hexagon holds the same share of the globe and a pentagon five sixths of it. Shapes stretch a little by the icosahedron's corners instead: neighbours stand 0.94 to 1.2 steps apart.
 
 The icosahedron is split into ten diamonds of two triangles each. A cell is addressed by level, diamond and `(i, j)` within it, plus the two poles. Neighbours are found exactly, in integers, across diamond edges and around the pentagons.
 
@@ -58,7 +58,7 @@ Each step is judged by stills of the blocks and by its counts.
 **H · Hex cells**
 1. Addresses: level, diamond, `(i, j)`, poles; centre on the sphere; the cell under a direction.
 2. Neighbours: six, five at the pentagons, across diamond edges, exact.
-3. Corners, area and a prism's volume between shells; an equal-area projection.
+3. An equal-area projection; corners, area and a prism's volume between shells.
 4. Between levels: the centre and the six half-shared cells, conserved both ways.
 5. Columns of shells holding materials; chunks.
 6. Blocks: hex prisms meshed by material, drawn in the client.

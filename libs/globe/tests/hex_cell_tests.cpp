@@ -90,11 +90,12 @@ TEST_CASE("neighbours stand about one step apart all over the sphere", "[globe][
     }
     // The icosahedron's edge is a little over 63°, split 32 times.
     const double step = std::atan(2.0) / 32.0;
-    CHECK(nearest > 0.75 * step);
+    // Keeping areas equal stretches the cells a little by the icosahedron's corners.
+    CHECK(nearest > 0.9 * step);
     CHECK(farthest < 1.25 * step);
 }
 
-TEST_CASE("a direction finds the cell whose centre is nearest it", "[globe][hex_cell]") {
+TEST_CASE("a direction finds the cell about it, and a centre its own cell", "[globe][hex_cell]") {
     for (int level = 0; level <= 4; ++level) {
         for (const HexCell cell : all_cells(level)) {
             CHECK(hog::globe::cell_at(hog::globe::center(cell), level) == cell);
@@ -107,12 +108,76 @@ TEST_CASE("a direction finds the cell whose centre is nearest it", "[globe][hex_
             glm::normalize(DVec3{spread(random), spread(random), spread(random)});
         const int level = sample % 12;
         const HexCell found = hog::globe::cell_at(direction, level);
-        const double here = angle(direction, hog::globe::center(found));
-        const auto around = hog::globe::neighbors(found);
-        for (const HexCell next : around.all()) {
-            CHECK(here <= angle(direction, hog::globe::center(next)));
-        }
+        // Within a hexagon's reach of its centre, give or take the projection's stretch.
+        const double step = std::atan(2.0) / std::ldexp(1.0, level);
+        CHECK(angle(direction, hog::globe::center(found)) < 0.8 * step);
     }
+}
+
+TEST_CASE("every hexagon holds an equal share of the sphere", "[globe][hex_cell]") {
+    // Directions spread evenly over the sphere land in each cell as often as its area says.
+    constexpr int level = 2;
+    constexpr int samples = 2'000'000;
+    std::vector<int> landed(hog::globe::cell_count(level), 0);
+    std::mt19937_64 random{11};
+    std::normal_distribution<double> spread;
+    for (int sample = 0; sample < samples; ++sample) {
+        const DVec3 direction =
+            glm::normalize(DVec3{spread(random), spread(random), spread(random)});
+        ++landed[hog::globe::index_of(hog::globe::cell_at(direction, level))];
+    }
+    double total = 0.0;
+    for (const HexCell cell : all_cells(level)) {
+        const double expected = samples * hog::globe::solid_angle(cell) / (4.0 * std::numbers::pi);
+        CHECK(std::abs(landed[hog::globe::index_of(cell)] - expected) < 0.03 * expected);
+        total += hog::globe::solid_angle(cell);
+    }
+    CHECK(std::abs(total - (4.0 * std::numbers::pi)) < 1e-12);
+}
+
+TEST_CASE("a cell's corners ring it anticlockwise, each between two neighbours",
+          "[globe][hex_cell]") {
+    constexpr int level = 5;
+    double outlined = 0.0;
+    for (const HexCell cell : all_cells(level)) {
+        const auto ring = hog::globe::ring(cell);
+        REQUIRE(ring.count == hog::globe::neighbors(cell).count);
+        const DVec3 up = hog::globe::center(cell);
+        const auto corners = ring.outline();
+        const auto around = ring.around();
+        double area = 0.0;
+        for (std::size_t k = 0; k < corners.size(); ++k) {
+            const DVec3 a = corners[k];
+            const DVec3 b = corners[(k + 1) % corners.size()];
+            // Anticlockwise about the outward centre.
+            CHECK(glm::dot(glm::cross(a - up, b - up), up) > 0.0);
+            // A corner stands about as far from the cell as from the two neighbours it lies
+            // between.
+            const double here = angle(a, up);
+            CHECK(std::abs(angle(a, hog::globe::center(around[k])) - here) < 0.35 * here);
+            CHECK(std::abs(angle(a, hog::globe::center(around[(k + 1) % around.size()])) - here) <
+                  0.35 * here);
+            // The fan's triangle from the centre, by its spherical excess.
+            area += 2.0 * std::atan2(std::abs(glm::dot(up, glm::cross(a, b))),
+                                     1.0 + glm::dot(up, a) + glm::dot(a, b) + glm::dot(b, up));
+        }
+        // The corners' straight-sided outline covers the cell's area, less its curved sides.
+        CHECK(std::abs(area - hog::globe::solid_angle(cell)) <
+              0.05 * hog::globe::solid_angle(cell));
+        outlined += area;
+    }
+    CHECK(std::abs(outlined - (4.0 * std::numbers::pi)) < 1e-3);
+}
+
+TEST_CASE("prisms over every cell fill the shell between two radii", "[globe][hex_cell]") {
+    constexpr int level = 3;
+    double filled = 0.0;
+    for (const HexCell cell : all_cells(level)) {
+        filled += hog::globe::prism_volume(cell, 6'000.0, 6'100.0);
+    }
+    const double shell = 4.0 / 3.0 * std::numbers::pi *
+                         ((6'100.0 * 6'100.0 * 6'100.0) - (6'000.0 * 6'000.0 * 6'000.0));
+    CHECK(std::abs(filled - shell) < 1e-9 * shell);
 }
 
 TEST_CASE("cells reach the finest level", "[globe][hex_cell]") {
@@ -121,4 +186,11 @@ TEST_CASE("cells reach the finest level", "[globe][hex_cell]") {
     CHECK(finest.is_valid());
     // Finer than a ten-millionth of the radius.
     CHECK(angle(direction, hog::globe::center(finest)) < 1e-7);
+    std::mt19937_64 random{3};
+    std::uniform_int_distribution<std::uint64_t> pick(
+        0, hog::globe::cell_count(hog::globe::max_level) - 1);
+    for (int sample = 0; sample < 2000; ++sample) {
+        const HexCell cell = hog::globe::cell_at_index(hog::globe::max_level, pick(random));
+        CHECK(hog::globe::cell_at(hog::globe::center(cell), hog::globe::max_level) == cell);
+    }
 }
