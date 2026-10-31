@@ -130,14 +130,76 @@ TEST_CASE("The sea covers at least the share of the planet it's topped up to", "
     CHECK(under / planet_area() >= ocean_fraction - 0.01);
 }
 
-TEST_CASE("Standing crust leaves out only what boundaries pile up now", "[crust_map]") {
+TEST_CASE("The plate bends under what boundaries pile up, sinking as far in all as alone",
+          "[crust_map]") {
     const CrustMap crust = crust_of(17);
+    double alone = 0.0;
+    double bent = 0.0;
     for (std::uint32_t index = 0; index < crust.grid().size(); ++index) {
         const CrustMap::Column& column = crust.columns()[index];
-        if (column.active > 0.0) {
-            CHECK(crust.standing()[index] <= crust.heights()[index]);
-        } else if (column.active == 0.0) {
-            CHECK(crust.standing()[index] == crust.heights()[index]);
+        const auto area = static_cast<double>(crust.grid().area(index));
+        const double buoyancy = column.kind == CrustMap::Kind::Continental
+                                    ? hog::planet::continental_buoyancy
+                                    : hog::planet::oceanic_buoyancy;
+        alone += area * column.active * 1'000.0 * (1.0 - buoyancy);
+        bent += area * column.bent;
+    }
+    CHECK_THAT(bent, Catch::Matchers::WithinRel(alone, 1e-3));
+}
+
+TEST_CASE("Ground beside a range sinks into a moat", "[crust_map]") {
+    const CrustMap crust = crust_of(17);
+    int moat = 0;
+    for (std::uint32_t index = 0; index < crust.grid().size(); ++index) {
+        const CrustMap::Column& column = crust.columns()[index];
+        if (column.active == 0.0 && crust.heights()[index] < crust.standing()[index]) {
+            ++moat;
         }
     }
+    CHECK(moat > 0);
+}
+
+TEST_CASE("A plate too weak to bend floats each column alone", "[crust_map]") {
+    const CrustMap crust = crust_of(17, {.bending_reach = 1.0, .weak_reach = 1.0});
+    for (std::uint32_t index = 0; index < crust.grid().size(); ++index) {
+        const CrustMap::Column& column = crust.columns()[index];
+        const double alone =
+            crust.floated(column.kind, column.thickness, column.age) -
+            crust.floated(column.kind, column.thickness - column.active, column.age);
+        const double risen =
+            hog::planet::fixed_to_double(crust.heights()[index] - crust.standing()[index]);
+        CHECK_THAT(risen, Catch::Matchers::WithinAbs(alone, 0.5));
+    }
+}
+
+TEST_CASE("Old continent is worn down nearer the sea than young", "[crust_map]") {
+    const CrustMap crust = crust_of(23);
+    using Kind = CrustMap::Kind;
+    // Kilometres thick continent floats at the sea's level.
+    const double per_km =
+        crust.floated(Kind::Continental, 36.0, 0.0) - crust.floated(Kind::Continental, 35.0, 0.0);
+    const double base = 35.0 + ((hog::planet::fixed_to_double(crust.sea_level()) -
+                                 crust.floated(Kind::Continental, 35.0, 0.0)) /
+                                per_km);
+    double old_excess = 0.0;
+    double young_excess = 0.0;
+    int old_count = 0;
+    int young_count = 0;
+    for (const CrustMap::Column& column : crust.columns()) {
+        const double settled = column.thickness - column.active - column.worn;
+        // Margins were thinned below it, and wear none.
+        if (column.kind != Kind::Continental || settled <= base + 0.5) {
+            continue;
+        }
+        if (column.age > 1'000.0) {
+            old_excess += settled - base;
+            ++old_count;
+        } else if (column.age < 200.0) {
+            young_excess += settled - base;
+            ++young_count;
+        }
+    }
+    REQUIRE(old_count > 0);
+    REQUIRE(young_count > 0);
+    CHECK(old_excess / old_count < young_excess / young_count);
 }

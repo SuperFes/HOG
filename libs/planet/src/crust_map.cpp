@@ -329,6 +329,10 @@ CrustMap::CrustMap(std::uint64_t seed, std::shared_ptr<const Plates> plates, Set
     age_ocean();
     join_terranes();
     meet_at_boundaries();
+    bend();
+    float_crust(ocean_fraction);
+    // Worn down towards the sea it found, which then fills a little higher over the lower land.
+    wear_down();
     float_crust(ocean_fraction);
 }
 
@@ -530,6 +534,59 @@ void CrustMap::meet_at_boundaries() {
     }
 }
 
+void CrustMap::bend() {
+    const LevelGrid& grid = this->grid();
+    const auto plate = plates_->plate();
+    const double reach = settings_.bending_reach;
+    std::vector<std::vector<std::uint32_t>> cells(plates_->plates().size());
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        cells[plate[index]].push_back(index);
+    }
+    for (const std::vector<std::uint32_t>& own : cells) {
+        // Metres each column would sink alone under what's piled on it.
+        std::vector<double> loads(own.size());
+        // Flexural rigidity over the mantle's weight, by the reach the plate bends over.
+        std::vector<double> stiffness(own.size());
+        bool loaded = false;
+        for (std::size_t k = 0; k < own.size(); ++k) {
+            const Column& column = columns_[own[k]];
+            const double buoyancy =
+                column.kind == Kind::Continental ? continental_buoyancy : oceanic_buoyancy;
+            loads[k] = column.active * 1'000.0 * (1.0 - buoyancy);
+            loaded = loaded || column.active != 0.0;
+            const double hot = std::min(std::abs(column.active) / settings_.weak_at, 1.0);
+            const double bends = reach + ((settings_.weak_reach - reach) * hot);
+            stiffness[k] = bends * bends * bends * bends / 4.0;
+        }
+        if (!loaded) {
+            continue;
+        }
+        const std::vector<double> sunk = deflected(grid, own, loads, stiffness);
+        for (std::size_t k = 0; k < own.size(); ++k) {
+            columns_[own[k]].bent = sunk[k];
+        }
+    }
+}
+
+void CrustMap::wear_down() {
+    // Kilometres thick continent floats at the sea's level.
+    const double base =
+        settings_.continental_thickness +
+        ((fixed_to_double(sea_level_) - continent_freeboard) / (1'000.0 * continental_buoyancy));
+    const double halving = settings_.wearing_halving;
+    for (Column& column : columns_) {
+        if (column.kind != Kind::Continental) {
+            continue;
+        }
+        // Old sutures wear down as the land around them does.
+        const double kept = halving / (halving + column.age);
+        const double settled = column.thickness - column.active - column.worn;
+        const double above = std::max(settled - base, 0.0);
+        column.thickness -= (above * (1.0 - kept)) + (column.worn * (1.0 - kept));
+        column.worn *= kept;
+    }
+}
+
 double CrustMap::floated(Kind kind, double thickness, double age) const {
     if (kind == Kind::Continental) {
         return continent_freeboard +
@@ -550,9 +607,9 @@ void CrustMap::float_crust(double ocean_fraction) {
     for (std::uint32_t index = 0; index < grid.size(); ++index) {
         const Column& column = columns_[index];
         const double trench = column.trench * settings_.trench_depth;
-        heights_[index] = fixed(floated(column.kind, column.thickness, column.age) - trench);
-        standing_[index] =
-            fixed(floated(column.kind, column.thickness - column.active, column.age) - trench);
+        const double settled = floated(column.kind, column.thickness - column.active, column.age);
+        heights_[index] = fixed(settled + (column.active * 1'000.0) - column.bent - trench);
+        standing_[index] = fixed(settled - trench);
     }
     const double water = topped_up(grid, heights_, starting_water(grid), ocean_fraction);
     sea_level_ = planet::sea_level(grid, heights_, water);

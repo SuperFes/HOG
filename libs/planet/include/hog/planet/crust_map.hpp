@@ -43,14 +43,14 @@ public:
         double full_rate = 25'000.0;
         // Continents meeting pile up this much more crust along the boundary, this far either
         // side.
-        double collision_thickening = 20.0;
+        double collision_thickening = 12.0;
         double collision_reach = 25'000.0;
         // Ocean floor diving under a continent thickens it in a range this far inland and this
         // wide; diving under other ocean floor, it builds an island arc.
-        double cordillera_thickening = 16.0;
+        double cordillera_thickening = 10.0;
         double cordillera_inland = 15'000.0;
         double cordillera_reach = 12'000.0;
-        double arc_thickening = 22.0;
+        double arc_thickening = 10.0;
         double arc_inland = 12'000.0;
         double arc_reach = 8'000.0;
         // Where ocean floor dives, its trench sinks this many metres, this far out and this wide.
@@ -64,8 +64,21 @@ public:
         // this far either side; it wears down by half over `suture_halving` million years and
         // by three quarters over three times that.
         double suture_thickening = 25.0;
-        double suture_reach = 15'000.0;
+        double suture_reach = 8'000.0;
         double suture_halving = 120.0;
+        // Rivers wear continent down towards the sea, and it rises as it lightens, until it
+        // floats at the sea's level: half the way over this many million years since its terrane
+        // was joined, three quarters over three times that.
+        double wearing_halving = 300.0;
+        // Metres over which the plates bend under what boundaries pile up, so ranges are held
+        // up partly by the plate around them, which sinks into a moat beside them and bulges
+        // a little beyond; Earth's plates bend over some 50 to 100 km, and none at all is each
+        // column floating alone.
+        double bending_reach = 12'000.0;
+        // Crust piling up or pulled apart this many kilometres is hot enough to bend over only
+        // `weak_reach` metres, nearly floating alone; less, it stiffens towards the cold plate.
+        double weak_at = 5.0;
+        double weak_reach = 2'000.0;
         // Ocean floor's age is how far it lies from its ridge over how fast the ridge spreads,
         // as if the plates crossed this planet as slowly as Earth's cross Earth, so oceans are
         // as old and deep as Earth's on a planet of any size.
@@ -81,6 +94,8 @@ public:
         // Kilometres of it the plates' boundaries are piling up now, or taking away where
         // negative: what still rises or sinks.
         double active = 0.0;
+        // Metres the plate sinks here under what boundaries pile up, here and around.
+        double bent = 0.0;
         // Kilometres left of what old sutures piled up.
         double worn = 0.0;
         // Million years since ocean floor formed at its ridge, or since a terrane was joined.
@@ -120,6 +135,8 @@ private:
     void age_ocean();
     void join_terranes();
     void meet_at_boundaries();
+    void bend();
+    void wear_down();
     void float_crust(double ocean_fraction);
 
     Settings settings_;
