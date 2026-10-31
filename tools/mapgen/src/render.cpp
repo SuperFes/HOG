@@ -1,6 +1,7 @@
 #include <hog/core/assert.hpp>
 #include <hog/core/hash.hpp>
 #include <hog/mapgen/render.hpp>
+#include <hog/planet/isostasy.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tangent_frame.hpp>
 
@@ -126,6 +127,18 @@ constexpr std::array<Rgb, planet::rock_count> rock_colours{{
 constexpr double vivid_rate = 40'000.0;
 constexpr Rgb closing_colour{220, 40, 30};
 constexpr Rgb parting_colour{40, 90, 230};
+// The crust map's colours, and the kilometres piled up or thinned that show fully.
+constexpr Rgb young_floor_colour{90, 150, 220};
+constexpr Rgb old_floor_colour{15, 30, 80};
+constexpr Rgb arc_colour{200, 60, 200};
+constexpr Rgb trench_colour{0, 0, 0};
+constexpr Rgb young_terrane_colour{225, 205, 160};
+constexpr Rgb craton_colour{120, 95, 60};
+constexpr Rgb suture_colour{235, 140, 40};
+constexpr Rgb rift_colour{40, 190, 170};
+constexpr double craton_age = 2'500.0;
+constexpr double piled_fully = 25.0;
+constexpr double thinned_fully = 12.0;
 constexpr Rgb sliding_colour{240, 210, 40};
 
 [[nodiscard]] double radians(double angle) {
@@ -254,6 +267,28 @@ Rgb plate_colour(std::uint32_t plate, const planet::Plates::Boundary& boundary) 
     return mix(own, edge, near * std::min(rate / vivid_rate, 1.0));
 }
 
+Rgb crust_colour(const planet::CrustMap::Column& column) noexcept {
+    using planet::CrustMap;
+    Rgb colour{};
+    if (column.kind == CrustMap::Kind::Oceanic) {
+        const double old = std::sqrt(std::min(column.age / planet::cooling_years, 1.0));
+        colour = mix(young_floor_colour, old_floor_colour, old);
+        colour = mix(colour, arc_colour, std::min(column.arc, 1.0));
+        colour = mix(colour, trench_colour, std::min(column.trench, 1.0));
+    } else {
+        const double old = std::min(column.age / craton_age, 1.0);
+        colour = mix(young_terrane_colour, craton_colour, old);
+        colour = mix(colour, suture_colour, std::min(column.worn / piled_fully, 1.0));
+        colour = mix(colour, arc_colour, std::min(column.arc, 1.0));
+    }
+    if (column.active > 0.0) {
+        colour = mix(colour, closing_colour, std::min(column.active / piled_fully, 1.0));
+    } else if (column.active < 0.0) {
+        colour = mix(colour, rift_colour, std::min(-column.active / thinned_fully, 1.0));
+    }
+    return colour;
+}
+
 Image render(const planet::Geology& geology, double planet_radius, const View& view, Layer layer,
              int width, jobs::JobSystem& jobs) {
     const ImageSize size = image_size(view, width);
@@ -299,6 +334,18 @@ Image render(const planet::Geology& geology, double planet_radius, const View& v
             const planet::Plates& plates = terrain.plates();
             const auto index = plates.grid().index(cell.parent(planet::Plates::level));
             return plate_colour(plates.plate()[index], plates.boundaries()[index]);
+        }
+        case Layer::Crust: {
+            const planet::Plates& plates = terrain.plates();
+            const auto index = plates.grid().index(cell.parent(planet::Plates::level));
+            if (const planet::CrustMap* crust = terrain.continents().crust_map()) {
+                return crust_colour(crust->columns()[index]);
+            }
+            // Stamped worlds keep no crust, only which side of the coast it lies.
+            using Kind = planet::CrustMap::Kind;
+            return crust_colour(
+                {.kind = terrain.continents().is_land(cell) ? Kind::Continental : Kind::Oceanic,
+                 .age = planet::cooling_years});
         }
         }
         return {};

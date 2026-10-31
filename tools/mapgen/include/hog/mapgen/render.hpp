@@ -6,6 +6,7 @@
 #include <hog/mapgen/colour.hpp>
 #include <hog/mapgen/options.hpp>
 #include <hog/planet/caves.hpp>
+#include <hog/planet/crust_map.hpp>
 #include <hog/planet/geology.hpp>
 #include <hog/planet/plates.hpp>
 
@@ -80,6 +81,11 @@ inline constexpr double boundary_band = 4'000.0;
 // part and yellow where they slide past each other.
 [[nodiscard]] Rgb plate_colour(std::uint32_t plate,
                                const planet::Plates::Boundary& boundary) noexcept;
+
+// Today's crust: continent tan, paler the younger its terrane, ocean floor blue, darker the older;
+// red where boundaries pile it up now, orange along old sutures by what's left of them, teal
+// where it's pulled apart, magenta along arcs and black in trenches.
+[[nodiscard]] Rgb crust_colour(const planet::CrustMap::Column& column) noexcept;
 
 [[nodiscard]] Image render(const planet::Geology& geology, double planet_radius, const View& view,
                            Layer layer, int width, jobs::JobSystem& jobs);

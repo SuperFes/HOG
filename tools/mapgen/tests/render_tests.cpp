@@ -327,3 +327,22 @@ TEST_CASE("plates show in their own colours and boundaries in what they do", "[m
     CHECK(sliding[1] > sliding[2]);
     CHECK(at(0.0, 0.0) == own);
 }
+
+TEST_CASE("the crust shows ocean floor darkening with age and continent apart from it",
+          "[mapgen]") {
+    using Column = hog::planet::CrustMap::Column;
+    using Kind = hog::planet::CrustMap::Kind;
+    const auto brightness = [](hog::mapgen::Rgb colour) {
+        return colour[0] + colour[1] + colour[2];
+    };
+    const auto young = hog::mapgen::crust_colour(Column{.kind = Kind::Oceanic, .age = 5.0});
+    const auto old = hog::mapgen::crust_colour(Column{.kind = Kind::Oceanic, .age = 150.0});
+    CHECK(brightness(young) > brightness(old));
+    const auto continent =
+        hog::mapgen::crust_colour(Column{.kind = Kind::Continental, .thickness = 35.0});
+    CHECK(continent != young);
+    CHECK(continent != old);
+    const auto piling = hog::mapgen::crust_colour(
+        Column{.kind = Kind::Continental, .thickness = 55.0, .active = 20.0});
+    CHECK(piling != continent);
+}
