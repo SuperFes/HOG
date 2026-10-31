@@ -1,4 +1,5 @@
 #include <hog/planet/continents.hpp>
+#include <hog/planet/crust_map.hpp>
 #include <hog/planet/isostasy.hpp>
 #include <hog/planet/neighbors.hpp>
 #include <hog/planet/noise.hpp>
@@ -37,8 +38,8 @@ Continents on_plates(std::uint64_t seed, double ocean_fraction) {
 
 // One settled world, shared, as settling takes a while.
 const hog::planet::Settled& settled() {
-    static const auto world = hog::planet::settle(
-        1, radius, {.level = Plates::level, .continental = 0.4}, 0.7, 20);
+    static const auto world =
+        hog::planet::settle(1, radius, {.level = Plates::level, .continental = 0.4}, 0.7, 20);
     return world;
 }
 
@@ -420,8 +421,8 @@ TEST_CASE("settled crust's field is its height above the sea", "[planet][contine
         const double floated =
             hog::planet::fixed_to_double(settled().heights[index] - settled().sea_level);
         off.push_back(std::abs((hog::planet::fixed_to_double(continents.height(grid.cell(index))) *
-                         static_cast<double>(Continents::field_metres)) -
-                        floated));
+                                static_cast<double>(Continents::field_metres)) -
+                               floated));
     }
     // Read off a little way away, it's off only where the crust rises or falls steeply.
     const auto middle = off.begin() + static_cast<std::ptrdiff_t>(off.size() / 2);
@@ -482,4 +483,28 @@ TEST_CASE("crust that never settled rises fully wherever it has mountains",
     for (const CellId cell : cells_at(4)) {
         REQUIRE(continents.crust(cell).rising == hog::planet::fixed_one);
     }
+}
+
+TEST_CASE("continents from a crust map rise by what its boundaries pile up",
+          "[planet][continents]") {
+    const auto plates = std::make_shared<const Plates>(
+        3, hog::planet::LevelGrid{Plates::level, radius}, radius, 10);
+    const auto crust = std::make_shared<const hog::planet::CrustMap>(
+        3, plates, hog::planet::CrustMap::Settings{}, 0.7);
+    const Continents continents{3, crust, plates};
+    CHECK(continents.crust_map() == crust.get());
+    std::int64_t piling = 0;
+    std::int64_t thinning = 0;
+    for (std::uint32_t index = 0; index < plates->grid().size(); ++index) {
+        const CellId cell = plates->grid().cell(index);
+        const std::int64_t piled = crust->heights()[index] - crust->standing()[index];
+        if (piled > 0) {
+            piling += continents.uplift(cell);
+        } else if (piled < 0) {
+            thinning += continents.uplift(cell);
+        }
+    }
+    CHECK(piling > 0);
+    CHECK(thinning < 0);
+    CHECK(on_plates(3, 0.7).uplift(plates->grid().cell(0)) == 0);
 }

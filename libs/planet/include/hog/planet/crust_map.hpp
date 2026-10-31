@@ -34,17 +34,20 @@ public:
         double continental_thickness = 35.0;
         double oceanic_thickness = 7.0;
         double margin_thickness = 14.0;
-        double margin_reach = 12'000.0;
+        double margin_reach = 30'000.0;
+        // Each terrane settles up to this many kilometres thinner or thicker than continent does,
+        // so some stand as uplands and others lie low enough for the sea to flood.
+        double terrane_spread = 4.0;
         // Plates closing or parting this fast do all they can; slower, less, but not
         // proportionally less, as even slow ones build up over time.
         double full_rate = 25'000.0;
         // Continents meeting pile up this much more crust along the boundary, this far either
         // side.
-        double collision_thickening = 30.0;
+        double collision_thickening = 20.0;
         double collision_reach = 25'000.0;
         // Ocean floor diving under a continent thickens it in a range this far inland and this
         // wide; diving under other ocean floor, it builds an island arc.
-        double cordillera_thickening = 25.0;
+        double cordillera_thickening = 16.0;
         double cordillera_inland = 15'000.0;
         double cordillera_reach = 12'000.0;
         double arc_thickening = 22.0;

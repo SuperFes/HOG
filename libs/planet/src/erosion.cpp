@@ -15,7 +15,7 @@ Drainage erode(const LevelGrid& grid, std::vector<std::int64_t>& heights, const 
                    (erosion.risen.empty() || erosion.risen.size() == count),
                "one value per cell");
     for (std::uint32_t cell = 0; cell < count; ++cell) {
-        if (heights[cell] > sea_level) {
+        if (heights[cell] > sea_level || erosion.seabed_rises) {
             heights[cell] += erosion.uplift[cell];
             if (!erosion.risen.empty()) {
                 erosion.risen[cell] += erosion.uplift[cell];

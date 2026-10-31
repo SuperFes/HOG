@@ -33,15 +33,17 @@ struct Erosion {
     // now lies; none if empty.
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     std::span<std::int64_t> risen = {};
+    // Whether ground under the sea rises too, so it can lift out of it.
+    bool seabed_rises = false;
 };
 
 // One step of uplift and river erosion (stream power with n = 1 and m = 1/2, solved implicitly
 // downstream to upstream, after Braun and Willett 2013); returns the drainage it eroded along.
-// Ground at or below the sea's level never rises, the sea's cells stay as they are and land never
-// cuts below the water or the ground it drains into, so valleys run down to a lake's level rather
-// than its bed. Ground under a lake isn't cut, but its outlet is, so lakes drain as their rims
-// wear down. The arithmetic is integer, or
-// double using only correctly rounded operations, so the result is the same everywhere.
+// Ground at or below the sea's level rises only if `erosion` lets it, the sea's cells are never
+// worn and land never cuts below the water or the ground it drains into, so valleys run down to a
+// lake's level rather than its bed. Ground under a lake isn't cut, but its outlet is, so lakes
+// drain as their rims wear down. The arithmetic is integer, or double using only correctly rounded
+// operations, so the result is the same everywhere.
 Drainage erode(const LevelGrid& grid, std::vector<std::int64_t>& heights, const Erosion& erosion,
                std::int64_t sea_level = 0);
 

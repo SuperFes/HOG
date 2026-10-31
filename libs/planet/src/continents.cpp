@@ -1,6 +1,7 @@
 #include <hog/core/assert.hpp>
 #include <hog/core/hash.hpp>
 #include <hog/planet/continents.hpp>
+#include <hog/planet/crust_map.hpp>
 #include <hog/planet/isostasy.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
@@ -191,10 +192,10 @@ Meetings meetings(const Plates& plates) {
     smooth(plates.grid(), floor, tectonic_passes);
     smooth(plates.grid(), arcs, tectonic_passes);
     Meetings made{.rifts = to_fixed(rifts),
-                   .mountains = to_fixed(mountains),
-                   .grain = {},
-                   .floor = to_fixed(floor),
-                   .arcs = to_fixed(arcs)};
+                  .mountains = to_fixed(mountains),
+                  .grain = {},
+                  .floor = to_fixed(floor),
+                  .arcs = to_fixed(arcs)};
     for (std::size_t axis = 0; axis < 3; ++axis) {
         smooth(plates.grid(), grain.at(axis), grain_passes);
         made.grain.at(axis) = to_fixed(grain.at(axis));
@@ -303,6 +304,53 @@ Continents::Continents(std::uint64_t seed, const Settled& settled,
     }
 }
 
+Continents::Continents(std::uint64_t seed, std::shared_ptr<const CrustMap> crust,
+                       std::shared_ptr<const Plates> plates)
+    : seed_{hash_combine(seed, layer_salt)}, warp_seed_{hash_combine(seed, warp_salt)},
+      plates_{std::move(plates)}, crust_map_{std::move(crust)}, crust_share_{fixed_one},
+      noise_share_{std::llround(settled_roughness / static_cast<double>(field_metres) *
+                                static_cast<double>(fixed_one))},
+      warp_reach_{settled_warp_reach} {
+    const LevelGrid& grid = plates_->grid();
+    const CrustMap& map = *crust_map_;
+    HOG_ASSERT(map.grid().level() == grid.level() && map.columns().size() == grid.size(),
+               "crust on another grid");
+    const std::size_t size = grid.size();
+    const double piled_fully = map.settings().collision_thickening;
+    crust_.resize(size);
+    uplift_.resize(size);
+    rifts_.assign(size, 0);
+    floor_.assign(size, 0);
+    std::vector<double> mountains(size, 0.0);
+    std::vector<double> rising(size, 0.0);
+    std::vector<double> arcs(size, 0.0);
+    std::array<std::vector<double>, 3> grain;
+    std::ranges::fill(grain, std::vector<double>(size, 1.0 / 3.0));
+    for (std::uint32_t index = 0; index < size; ++index) {
+        const CrustMap::Column& column = map.columns()[index];
+        crust_[index] = (map.heights()[index] - map.sea_level()) / field_metres;
+        uplift_[index] = map.heights()[index] - map.standing()[index];
+        arcs[index] = column.arc;
+        const double piled = std::max(column.active, 0.0) + column.worn;
+        mountains[index] = std::clamp(piled / piled_fully, 0.0, 1.0);
+        rising[index] = piled > 0.0 ? std::max(column.active, 0.0) / piled : 0.0;
+        if (glm::length(column.grain) > 0.0) {
+            for (std::size_t axis = 0; axis < 3; ++axis) {
+                const double along = column.grain[static_cast<glm::length_t>(axis)];
+                grain.at(axis)[index] = along * along;
+            }
+        }
+    }
+    smooth(grid, arcs, arc_passes);
+    mountains_ = to_fixed(mountains);
+    rising_ = to_fixed(rising);
+    arcs_ = to_fixed(arcs);
+    for (std::size_t axis = 0; axis < 3; ++axis) {
+        smooth(grid, grain.at(axis), grain_passes);
+        grain_.at(axis) = to_fixed(grain.at(axis));
+    }
+}
+
 CellId Continents::warped(CellId cell) const {
     const double radius = plates_->radius();
     const DVec3 center = cell_center(cell);
@@ -327,6 +375,10 @@ std::int64_t Continents::field(CellId cell) const {
     return field<Bits>(cell, warped(cell));
 }
 
+std::int64_t Continents::uplift(CellId cell) const {
+    return uplift_.empty() ? 0 : plates_->grid().sample(uplift_, warped(cell));
+}
+
 template <int Bits>
 Continents::Crust Continents::crust(CellId cell) const {
     const CellId at = warped(cell);
@@ -335,17 +387,17 @@ Continents::Crust Continents::crust(CellId cell) const {
         std::clamp<std::int64_t>(plates_->grid().sample(arcs_, at), 0, fixed_one);
     // Built up fully wherever volcanoes rise all along the arc.
     const std::int64_t platform = (arc_rise * std::min(arcs, full_arc) * fixed_one) / full_arc;
-    Crust crust{.height = field<Bits>(cell, at) - (sea_level_ << finer),
-                .mountains =
-                    std::clamp<std::int64_t>(plates_->grid().sample(mountains_, at), 0, fixed_one)
-                    << finer,
-                .grain = {},
-                .floor = (plates_->grid().sample(floor_, at) + platform) << finer,
-                .arcs = arcs << finer,
-                .rising = rising_.empty() ? fixed_unit<Bits>
-                                          : std::clamp<std::int64_t>(
-                                                plates_->grid().sample(rising_, at), 0, fixed_one)
-                                                << finer};
+    Crust crust{
+        .height = field<Bits>(cell, at) - (sea_level_ << finer),
+        .mountains = std::clamp<std::int64_t>(plates_->grid().sample(mountains_, at), 0, fixed_one)
+                     << finer,
+        .grain = {},
+        .floor = (plates_->grid().sample(floor_, at) + platform) << finer,
+        .arcs = arcs << finer,
+        .rising = rising_.empty()
+                      ? fixed_unit<Bits>
+                      : std::clamp<std::int64_t>(plates_->grid().sample(rising_, at), 0, fixed_one)
+                            << finer};
     for (std::size_t axis = 0; axis < 3; ++axis) {
         crust.grain.at(axis) =
             std::max<std::int64_t>(plates_->grid().sample(grain_.at(axis), at), 0);

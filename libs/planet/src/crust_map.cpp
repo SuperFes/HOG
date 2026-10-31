@@ -84,9 +84,8 @@ struct Nearest {
 // Each cell's distance to the nearest of `sources`, stepping only from one cell to another that
 // `passes` allows, and which source that is.
 template <typename Passes>
-[[nodiscard]] std::vector<Nearest> nearest(const LevelGrid& grid,
-                                           std::span<const std::uint32_t> sources,
-                                           const Passes& passes) {
+[[nodiscard]] std::vector<Nearest>
+nearest(const LevelGrid& grid, std::span<const std::uint32_t> sources, const Passes& passes) {
     std::vector<Nearest> found(grid.size());
     Frontier frontier;
     for (const std::uint32_t source : sources) {
@@ -135,9 +134,9 @@ template <typename Passes>
         const auto around = grid.neighbors(index);
         for (std::size_t k = 0; k < around.size(); ++k) {
             if (terrane[around[k]] == none) {
-                frontier.emplace(cost + ((grid.distance(index, k) * rough[around[k]]) >>
-                                         fixed_fraction_bits),
-                                 around[k], which);
+                frontier.emplace(
+                    cost + ((grid.distance(index, k) * rough[around[k]]) >> fixed_fraction_bits),
+                    around[k], which);
             }
         }
     }
@@ -152,7 +151,6 @@ template <typename Passes>
     }
     return terrane;
 }
-
 
 struct Terranes {
     std::vector<double> areas;
@@ -207,8 +205,8 @@ struct Gathered {
                 count);
             double closest = 4.0;
             for (const std::uint32_t craton : cratons) {
-                closest = std::min(
-                    closest, glm::length(terranes.middles[which] - terranes.middles[craton]));
+                closest = std::min(closest,
+                                   glm::length(terranes.middles[which] - terranes.middles[craton]));
             }
             if (closest > farthest) {
                 farthest = closest;
@@ -223,9 +221,8 @@ struct Gathered {
 }
 
 // Terranes not yet joined beside those of `continent`, ascending.
-[[nodiscard]] std::vector<std::uint32_t> frontier_of(const Terranes& terranes,
-                                                     const Gathered& gathered,
-                                                     std::uint32_t continent) {
+[[nodiscard]] std::vector<std::uint32_t>
+frontier_of(const Terranes& terranes, const Gathered& gathered, std::uint32_t continent) {
     std::vector<std::uint32_t> frontier;
     for (std::uint32_t which = 0; which < gathered.continent.size(); ++which) {
         if (gathered.continent[which] != continent) {
@@ -281,7 +278,6 @@ struct Gathered {
     return gathered;
 }
 
-
 // How a column meets the nearest boundary of its plate.
 struct Meeting {
     double distance = 0.0; // metres from it
@@ -303,8 +299,7 @@ struct Meeting {
     const double strength = meeting.strength;
     const double distance = meeting.distance;
     if (meeting.closing < 0.0) {
-        const bool rifting =
-            meeting.own_continent && column.kind == CrustMap::Kind::Continental;
+        const bool rifting = meeting.own_continent && column.kind == CrustMap::Kind::Continental;
         return rifting ? -s.rift_thinning * strength * bump(distance, 0.0, s.rift_reach) : 0.0;
     }
     if (meeting.own_dives) {
@@ -360,8 +355,10 @@ void CrustMap::assemble(std::uint64_t seed) {
             continue;
         }
         const double late = static_cast<double>(order) / static_cast<double>(gathered.joined);
+        const double spread =
+            settings_.terrane_spread * ((2.0 * unit(hash_values(seed, terrane_salt, which))) - 1.0);
         columns_[index] = {.kind = Kind::Continental,
-                           .thickness = settings_.continental_thickness,
+                           .thickness = settings_.continental_thickness + spread,
                            .age = settings_.youngest + (span * (1.0 - late) * (1.0 - late)),
                            .terrane = which};
     }
@@ -384,15 +381,15 @@ void CrustMap::thin_margins() {
     const auto from_ocean = nearest(grid, shore, [&](std::uint32_t /*from*/, std::uint32_t to) {
         return columns_[to].kind == Kind::Continental;
     });
-    const double thinned = settings_.continental_thickness - settings_.margin_thickness;
     for (std::uint32_t index = 0; index < grid.size(); ++index) {
         Column& column = columns_[index];
         if (column.kind != Kind::Continental || from_ocean[index].source == none) {
             continue;
         }
-        const double in = std::min(
-            fixed_to_double(from_ocean[index].distance) / settings_.margin_reach, 1.0);
-        column.thickness -= thinned * (1.0 - in) * (1.0 - in);
+        const double in =
+            std::min(fixed_to_double(from_ocean[index].distance) / settings_.margin_reach, 1.0);
+        column.thickness -=
+            (column.thickness - settings_.margin_thickness) * (1.0 - in) * (1.0 - in);
     }
 }
 
@@ -423,8 +420,7 @@ void CrustMap::age_ocean() {
             continue;
         }
         // Each side of a ridge moves off at half the rate the plates part.
-        const double half_rate =
-            std::max(-boundaries[ridge.source].closing * 0.5 * slowing, 1e-3);
+        const double half_rate = std::max(-boundaries[ridge.source].closing * 0.5 * slowing, 1e-3);
         column.age = std::min(fixed_to_double(ridge.distance) / half_rate, oldest_ocean);
     }
 }
@@ -516,9 +512,8 @@ void CrustMap::meet_at_boundaries() {
         const Meeting meeting{
             .distance = fixed_to_double(edge.distance),
             .closing = boundary.closing,
-            .strength =
-                std::sqrt(std::min(std::abs(boundary.closing) / settings_.full_rate, 1.0)) *
-                head_on,
+            .strength = std::sqrt(std::min(std::abs(boundary.closing) / settings_.full_rate, 1.0)) *
+                        head_on,
             .own_continent = own_continent,
             .other_continent = other_continent,
             .own_dives = own_dives};

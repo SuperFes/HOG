@@ -11,6 +11,7 @@
 
 namespace hog::planet {
 
+class CrustMap;
 struct Settled;
 
 // Large-scale land and sea: the plates' crust, rising towards continent on some and sinking to
@@ -34,14 +35,24 @@ public:
     // stand where it piled up thick, and rise still where it piled up lately.
     // Precondition: the crust settled on the plates' grid.
     Continents(std::uint64_t seed, const Settled& settled, std::shared_ptr<const Plates> plates);
+    // Today's crust as `crust` has it, floated against its sea: ranges stand where it's piled up,
+    // rising where boundaries pile it up still.
+    // Precondition: `crust` lies on the plates' grid.
+    Continents(std::uint64_t seed, std::shared_ptr<const CrustMap> crust,
+               std::shared_ptr<const Plates> plates);
 
     [[nodiscard]] const Plates& plates() const noexcept { return *plates_; }
+    // The crust it was made from, if made from one.
+    [[nodiscard]] const CrustMap* crust_map() const noexcept { return crust_map_.get(); }
 
     // The raw field, in fixed point with `Bits` fractional bits, roughly within [-1, 1].
     template <int Bits = fixed_fraction_bits>
     [[nodiscard]] std::int64_t field(CellId cell) const;
 
     [[nodiscard]] std::int64_t sea_level() const noexcept { return sea_level_; }
+    // Fixed-point metres of the height that boundaries are piling up now, which the land rises by
+    // as it wears; none unless made from a crust map.
+    [[nodiscard]] std::int64_t uplift(CellId cell) const;
 
     // Fixed-point height above sea level; land is positive.
     template <int Bits = fixed_fraction_bits>
@@ -77,6 +88,7 @@ private:
     std::uint64_t seed_;
     std::uint64_t warp_seed_;
     std::shared_ptr<const Plates> plates_;
+    std::shared_ptr<const CrustMap> crust_map_;
     // Fixed-point shares of the field from the plates' crust and from noise roughening it, and
     // metres the crust is read off from where it's asked for.
     std::int64_t crust_share_;
@@ -96,6 +108,8 @@ private:
     // where the crust hasn't settled, all of them rise fully.
     std::vector<std::int64_t> arcs_;
     std::vector<std::int64_t> rising_;
+    // Fixed-point metres per plate grid cell.
+    std::vector<std::int64_t> uplift_;
     std::int64_t sea_level_ = 0;
 };
 

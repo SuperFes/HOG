@@ -183,3 +183,17 @@ TEST_CASE("the beds rise with the ground, so rock is read where it lies", "[plan
         CHECK(risen[cell] == (start[cell] > 0 ? 5 * fields.uplift[cell] : 0));
     }
 }
+
+TEST_CASE("the sea floor rises too where it's let, but is never worn", "[planet][erosion]") {
+    const Fields fields{30.0};
+    std::vector<std::int64_t> heights = land();
+    const auto start = heights;
+    Erosion erosion = fields.erosion();
+    erosion.seabed_rises = true;
+    std::ignore = hog::planet::erode(grid(), heights, erosion);
+    for (std::uint32_t cell = 0; cell < grid().size(); ++cell) {
+        if (start[cell] + fields.uplift[cell] <= 0) {
+            CHECK(heights[cell] == start[cell] + fields.uplift[cell]);
+        }
+    }
+}

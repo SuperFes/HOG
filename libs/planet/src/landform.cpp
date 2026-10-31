@@ -65,7 +65,8 @@ Landform::Landform(LevelGrid grid, std::vector<std::int64_t> heights, const Eros
         if (!hillslope.creep.empty()) {
             // Rivers carry off the soil before cutting into the rock.
             for (std::size_t cell = 0; cell < heights_.size(); ++cell) {
-                const std::int64_t rose = before[cell] > 0 ? erosion.uplift[cell] : 0;
+                const std::int64_t rose =
+                    before[cell] > 0 || erosion.seabed_rises ? erosion.uplift[cell] : 0;
                 const std::int64_t cut = before[cell] + rose - heights_[cell];
                 soil_[cell] = std::max<std::int64_t>(soil_[cell] - cut, 0);
             }

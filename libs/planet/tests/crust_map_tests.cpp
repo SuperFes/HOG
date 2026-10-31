@@ -21,10 +21,9 @@ constexpr double radius = 115'000.0;
 constexpr double ocean_fraction = 0.7;
 
 CrustMap crust_of(std::uint64_t seed, CrustMap::Settings settings = {}) {
-    return CrustMap{seed,
-                    std::make_shared<const Plates>(seed, LevelGrid{Plates::level, radius}, radius,
-                                                   10),
-                    settings, ocean_fraction};
+    return CrustMap{
+        seed, std::make_shared<const Plates>(seed, LevelGrid{Plates::level, radius}, radius, 10),
+        settings, ocean_fraction};
 }
 
 double planet_area() {
@@ -58,8 +57,7 @@ TEST_CASE("The same seed makes the same crust", "[crust_map]") {
     }
 }
 
-TEST_CASE("Thickness is the settled crust plus what was piled up and pulled apart",
-          "[crust_map]") {
+TEST_CASE("Thickness is the settled crust plus what was piled up and pulled apart", "[crust_map]") {
     const CrustMap crust = crust_of(11);
     const auto& settings = crust.settings();
     for (const CrustMap::Column& column : crust.columns()) {
@@ -71,7 +69,7 @@ TEST_CASE("Thickness is the settled crust plus what was piled up and pulled apar
         }
         const double settled = column.thickness - column.active - column.worn;
         CHECK(settled >= settings.margin_thickness - 1e-9);
-        CHECK(settled <= settings.continental_thickness + 1e-9);
+        CHECK(settled <= settings.continental_thickness + settings.terrane_spread + 1e-9);
         CHECK(column.thickness >= 2.0 - 1e-9);
     }
 }
@@ -79,10 +77,9 @@ TEST_CASE("Thickness is the settled crust plus what was piled up and pulled apar
 TEST_CASE("Crust rises and falls only near boundaries doing so", "[crust_map]") {
     const CrustMap crust = crust_of(5);
     const auto& settings = crust.settings();
-    const double widest = std::max({settings.collision_reach,
-                                    settings.cordillera_inland + settings.cordillera_reach,
-                                    settings.arc_inland + settings.arc_reach,
-                                    settings.rift_reach});
+    const double widest =
+        std::max({settings.collision_reach, settings.cordillera_inland + settings.cordillera_reach,
+                  settings.arc_inland + settings.arc_reach, settings.rift_reach});
     for (std::uint32_t index = 0; index < crust.grid().size(); ++index) {
         const CrustMap::Column& column = crust.columns()[index];
         const auto& boundary = crust.plates().boundaries()[index];
@@ -111,11 +108,11 @@ TEST_CASE("Ocean floor is young at its ridges and older away from them", "[crust
     CHECK(ridges > 0);
 }
 
-TEST_CASE("Crust floats higher the thicker it is and ocean floor sinks as it ages",
-          "[crust_map]") {
+TEST_CASE("Crust floats higher the thicker it is and ocean floor sinks as it ages", "[crust_map]") {
     const CrustMap crust = crust_of(1);
     using Kind = CrustMap::Kind;
-    CHECK(crust.floated(Kind::Continental, 50.0, 0.0) > crust.floated(Kind::Continental, 35.0, 0.0));
+    CHECK(crust.floated(Kind::Continental, 50.0, 0.0) >
+          crust.floated(Kind::Continental, 35.0, 0.0));
     CHECK(crust.floated(Kind::Oceanic, 7.0, 80.0) < crust.floated(Kind::Oceanic, 7.0, 10.0));
     CHECK(crust.floated(Kind::Oceanic, 7.0, 0.0) == 0.0);
     // Settled continent stands as high above a ridge as its freeboard has it.

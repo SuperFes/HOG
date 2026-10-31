@@ -1,6 +1,7 @@
 #include <hog/core/hash.hpp>
 #include <hog/core/log.hpp>
 #include <hog/planet/bake.hpp>
+#include <hog/planet/crust_map.hpp>
 #include <hog/planet/elevation.hpp>
 #include <hog/planet/isostasy.hpp>
 #include <hog/planet/moisture.hpp>
@@ -56,8 +57,6 @@ constexpr double hill_wavelength = 4'000.0; // metres
 constexpr int hill_octaves = 3;
 template <int Bits>
 constexpr std::int64_t erosion = 2 * fixed_unit<Bits>;
-// Settled ranges are this rugged from their valleys to their crests.
-constexpr std::int64_t rugged_height = 2'000;
 
 // Rivers wear the land for 5 million years in steps of 100,000, told every few steps.
 constexpr int landform_steps = 50;
@@ -237,13 +236,11 @@ constexpr std::int64_t shore_steepest = fixed_one * 15 / 100;
     if (config.generator == Generator::Stamped) {
         return Continents{config.seed, config.ocean_fraction, std::move(plates)};
     }
-    return Continents{config.seed,
-                      settle(config.seed, config.radius,
-                             {.level = Plates::level,
-                              .plates = config.plates,
-                              .continental = continental_share(config.ocean_fraction)},
-                             config.ocean_fraction),
-                      std::move(plates)};
+    auto crust = std::make_shared<const CrustMap>(
+        config.seed, plates,
+        CrustMap::Settings{.continental = continental_share(config.ocean_fraction)},
+        config.ocean_fraction);
+    return Continents{config.seed, std::move(crust), std::move(plates)};
 }
 
 } // namespace
@@ -383,13 +380,21 @@ Landform Elevation::wear(LevelGrid grid, std::uint64_t seed,
     std::vector<double> ice_age_warmth(grid.size());
     for (std::uint32_t index = 0; index < grid.size(); ++index) {
         const CellId cell = grid.cell(index);
-        const std::int64_t mountains =
-            (mountain_strength(cell) * continents_.crust(cell).rising) >> fixed_fraction_bits;
         heights[index] = raised(cell);
-        // Only continents rise; volcanoes stand on ocean floor that doesn't.
-        const bool continental = continents_.height(cell) > 0;
-        const double rising = continental ? background_uplift : 0.0;
-        uplift[index] = fixed(rising + (mountain_uplift * fixed_to_double(mountains)));
+        if (settled_) {
+            // The crust starts without what boundaries are piling up and rises by it as it wears,
+            // so ranges are cut while they rise rather than stamped in.
+            const std::int64_t piling = continents_.uplift(cell);
+            heights[index] -= piling;
+            uplift[index] = piling / landform_steps;
+        } else {
+            const std::int64_t mountains =
+                (mountain_strength(cell) * continents_.crust(cell).rising) >> fixed_fraction_bits;
+            // Only continents rise; volcanoes stand on ocean floor that doesn't.
+            const bool continental = continents_.height(cell) > 0;
+            const double rising = continental ? background_uplift : 0.0;
+            uplift[index] = fixed(rising + (mountain_uplift * fixed_to_double(mountains)));
+        }
         hardness[index] = fixed(erodibility);
         runoff[index] = moisture.at(cell, continents_.height(cell));
         columns[index] = beds_.column(cell, bed_setting(cell, heights[index]));
@@ -415,7 +420,8 @@ Landform Elevation::wear(LevelGrid grid, std::uint64_t seed,
                             .yielding =
                                 [&](std::uint32_t index, std::int64_t height) {
                                     return yielding(beds_.rock_at(columns[index], height));
-                                }},
+                                },
+                            .seabed_rises = settled_},
                     Hillslope{.creep = creeping,
                               .weathering = weathered,
                               .rock =
@@ -587,9 +593,13 @@ std::int64_t Elevation::worn(CellId cell, std::int64_t generated, const Landform
     std::int64_t ground = generated;
     if (generated > 0) {
         // The change fades out towards the shore, and low ground is never worn below a quarter
-        // of its height, so coasts stay where generated and meet the sea without a step.
+        // of its height, so coasts stay where generated and meet the sea without a step. Settled
+        // crust is generated as high as it's risen to, so only what wore it down is taken off.
+        const std::int64_t worn_off =
+            settled_ ? landform.change(shifted) - landform.grid().smooth(landform.risen(), shifted)
+                     : landform.change(shifted);
         const std::int64_t change =
-            (landform.change(shifted) * ramp(generated, coast_blend)) >> fixed_fraction_bits;
+            (worn_off * ramp(generated, coast_blend)) >> fixed_fraction_bits;
         ground = std::max(generated + change, (generated + 3) / 4);
         ground = ledged(cell, shifted, ground, generated, landform);
     }
@@ -779,16 +789,12 @@ std::int64_t Elevation::floated(CellId cell, const Continents::Crust& crust) con
             (ridge<Bits>(hill_seed_, hill_frequency_, hill_octaves, cell, crust.grain) - (one / 2));
         return ground + ((hills * ramp<Bits>(-ground, 2 * abyssal_hill_height * one)) >> Bits);
     }
+    // Ranges come from the land rising as it wears, so only a little roughness is added here, for
+    // the rivers to find their ways through.
     const std::int64_t relief =
         relief_height *
         fbm(relief_seed_, noise_point<Bits>(cell_center(cell), relief_frequency), relief_octaves);
-    const std::int64_t rugged =
-        rugged_height * ((crust.mountains * (ridge<Bits>(ridge_seed_, ridge_frequency_,
-                                                         ridge_octaves, cell, crust.grain) -
-                                             (one / 2))) >>
-                         Bits);
-    return ground + ((relief * ramp<Bits>(ground, 4 * relief_height * one)) >> Bits) +
-           ((rugged * ramp<Bits>(ground, 2 * rugged_height * one)) >> Bits);
+    return ground + ((relief * ramp<Bits>(ground, 4 * relief_height * one)) >> Bits);
 }
 
 } // namespace hog::planet
