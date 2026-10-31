@@ -194,10 +194,13 @@ struct LowerCrust {
 // How the mantle warms where continents lie over it, as their thick crust holds its heat in, and
 // cools again under ocean floor, which lets it out: over `years`, each place goes the share
 // 1 - e^(-years / settling) of the way to as warm as the continent around it keeps it. The whole
-// mantle starts `hotter` kelvin over today's `potential` and loses `cooling` a million years till
-// it's as today's, as Earth's has lost about 250 K since plates began 3 billion years ago. The
-// lithosphere over a hotter mantle is thinner and its creep faster, by e^(activation / R (1/today -
-// 1/then)) with the activation energy of creep in olivine, so it's weaker by as much.
+// mantle starts `hotter` kelvin over today's `potential`, and from then warms by what its rock and
+// the core heat it by and cools by what leaks out through the crust on top: young ocean floor lets
+// out the most, as thin as it is, and continents the least. So under plates that stop moving and
+// let their floor grow old it warms again. Over Earth's floor of today's ages, it loses some
+// 0.1 K a million years, as Earth's does (Jaupart et al. 2007). The lithosphere over a hotter
+// mantle is thinner and its creep faster, by e^(activation / R (1/today - 1/then)) with the
+// activation energy of creep in olivine, so it's weaker by as much.
 struct Mantle {
     double settling = 100.0;
     // Of the planet's radius, how far the mantle under a place mixes with that around it: about a
@@ -205,8 +208,20 @@ struct Mantle {
     // warms it fully (Lenardic et al. 2005; Coltice et al. 2007).
     double depth = 2890.0 / 6371.0;
     double hotter = 200.0;
-    double cooling = 0.08;
     double potential = 1623.0;
+    // Million years ago plates began, so as much hotter the mantle's own rock heated it then, as
+    // its uranium, thorium and potassium have decayed since.
+    double began = 3000.0;
+    // Terawatts the mantle's own rock heats it by today, and the core under it (Jaupart et al.
+    // 2007).
+    double radiogenic = 13.0;
+    double core = 8.0;
+    // Terawatts over a million years that warm the whole mantle a kelvin: 4.0e24 kg of rock at
+    // 1250 J/kg K.
+    double capacity = 158.0;
+    // Milliwatts a square metre of the mantle's heat that leaks out through continent, under what
+    // its own crust makes (Jaupart & Mareschal 2007).
+    double continental = 15.0;
     double activation = 300e3;
     // Kilometres more crust a ridge melts out of the mantle for each kelvin it's hotter than
     // today's, which melts some 7: some 20 out of one 200 K hotter (McKenzie & Bickle 1988).
@@ -359,9 +374,12 @@ public:
     // Every fault through the crust on top, on a world of `seed`. Faults slip again within years
     // or centuries, far quicker than the plates move, so each is as likely anywhere in its cycle.
     [[nodiscard]] std::vector<Fault> faults(std::uint64_t seed) const;
-    // Warms and cools the mantle under each place by the crust on top over `years`, and sets how
-    // hot it is on the whole as of now, and so how thick the floor its ridges make.
+    // Warms and cools the mantle under each place by the crust on top over `years`. The mantle
+    // starts as hot on the whole as `mantle` says when first warmed or cooled.
     void warm(double years, Mantle mantle = {});
+    // Warms or cools the whole mantle over `years` by what heats it and what leaks out through
+    // the crust on top, and so how thick the floor its ridges make.
+    void cool(double years, Mantle mantle = {});
     // Lets the lower crust of each plate's continent creep for `years` from under its high ground
     // to under its low, on a planet of `radius` metres, as readily as it's warm.
     void creep(double years, double radius, LowerCrust lower = {});
@@ -412,9 +430,12 @@ public:
     // How warm the mantle is under each place of the grid, from nought, as under ocean floor, to
     // one, as under a continent that has lain there for good.
     [[nodiscard]] std::span<const float> heat() const noexcept { return heat_; }
-    // How many times weaker the lithosphere is than over today's mantle, as of the last warming.
+    // Kelvin the whole mantle is over today's, as of the last warming or cooling.
+    [[nodiscard]] double hotter() const noexcept { return hotter_.value_or(0.0); }
+    // How many times weaker the lithosphere is than over today's mantle, as of the last warming
+    // or cooling.
     [[nodiscard]] double softer() const noexcept { return softer_; }
-    // Kilometres thick the ocean floor ridges make, as of the last warming.
+    // Kilometres thick the ocean floor ridges make, as of the last warming or cooling.
     [[nodiscard]] float ridge_crust() const noexcept { return ridge_crust_; }
     // Cubic kilometres of continental crust foundered into the mantle so far.
     [[nodiscard]] double foundered() const noexcept { return foundered_; }
@@ -538,6 +559,8 @@ private:
     // Scrapes what's piled on the floor at `index` of `plate` diving under plate `over` off onto
     // the crust over it, as `arcs` says.
     void scrape_off(std::uint32_t plate, std::size_t index, std::uint32_t over, const Arcs& arcs);
+    // How weak the lithosphere is and how thick ridges melt floor over the mantle as hot as it is.
+    void heated(const Mantle& mantle);
 
     LevelGrid grid_;
     std::vector<Plate> plates_;
@@ -550,6 +573,8 @@ private:
     // plates are first driven.
     double pace_ = 0.0;
     double foundered_ = 0.0;
+    // None till the mantle is first warmed or cooled.
+    std::optional<double> hotter_ = std::nullopt;
     double softer_ = 1.0;
     float ridge_crust_ = Crust{}.basalt;
     jobs::JobSystem* jobs_ = nullptr;

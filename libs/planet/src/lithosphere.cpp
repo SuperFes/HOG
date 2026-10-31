@@ -379,6 +379,39 @@ bool floats_as_continent(const Crust& crust) {
            crust.thickness - crust.basalt + Crust{}.basalt >= Lithosphere::arc_continent;
 }
 
+// What of the heat in the mantle today its uranium 238 and 235, thorium 232 and potassium 40 each
+// make, from their abundance in the bulk silicate Earth (McDonough & Sun 1995), and million years
+// till half of each has decayed.
+struct Isotope {
+    double share = 0.0;
+    double half_life = 0.0;
+};
+constexpr std::array<Isotope, 4> mantle_isotopes{{
+    {.share = 0.388, .half_life = 4468.0},
+    {.share = 0.017, .half_life = 704.0},
+    {.share = 0.427, .half_life = 14050.0},
+    {.share = 0.168, .half_life = 1250.0},
+}};
+
+// Milliwatt million years a square metre of the mantle's heat that leaks out over the last `years`
+// through ocean floor `age` million years old now, as Stein & Stein's (1992) GDH1 has it: as the
+// inverse root of its age while it thickens, and settling to 48 mW/m^2 once it's done.
+double floor_heat(double age, double years) {
+    constexpr double young = 510.0;
+    constexpr double thickened = 55.0;
+    constexpr double settled = 48.0;
+    constexpr double fading = 96.0;
+    constexpr double fade = 0.0278;
+    const auto since_ridge = [&](double then) {
+        if (then <= thickened) {
+            return 2.0 * young * std::sqrt(then);
+        }
+        return (2.0 * young * std::sqrt(thickened)) + (settled * (then - thickened)) +
+               (fading / fade * (std::exp(-fade * thickened) - std::exp(-fade * then)));
+    };
+    return since_ridge(age) - since_ridge(std::max(age - years, 0.0));
+}
+
 // How strong continent is over mantle `heat` warm, `softer` times weaker than today's.
 double continent_strength(float heat, Strength strength, double softer) {
     return strength.cool * std::pow(strength.warm / strength.cool, heat) / softer;
@@ -1829,10 +1862,49 @@ void Lithosphere::warm(double years, Mantle mantle) {
     for (std::uint32_t place = 0; place < grid_.size(); ++place) {
         heat_[place] += (static_cast<float>(warmest[place]) - heat_[place]) * toward;
     }
+    heated(mantle);
+}
+
+void Lithosphere::cool(double years, Mantle mantle) {
+    if (!hotter_) {
+        hotter_ = mantle.hotter;
+    }
+    // Heat flows out through the lithosphere as far as the mantle is hotter than the surface.
+    constexpr double surface = 273.0;
+    const double contrast = (mantle.potential + *hotter_ - surface) / (mantle.potential - surface);
+    const std::vector<std::optional<Found>> on_top = tops();
+    double sphere = 0.0;
+    double lost = 0.0;
+    for (std::uint32_t place = 0; place < grid_.size(); ++place) {
+        const auto area = static_cast<double>(grid_.area(place));
+        sphere += area;
+        if (const std::optional<Found>& found = on_top[place]) {
+            lost += area * (found->crust.type == CrustType::Continental
+                                ? mantle.continental * years
+                                : floor_heat(static_cast<double>(found->crust.age), years));
+        }
+    }
+    // Milliwatts a square metre over the planet in terawatts, as over Earth's 5.1e14 square metres.
+    constexpr double earth = 5.1e14 * 1e-15;
+    const double out = contrast * lost / sphere * earth;
+    // Its rock heated it most as of halfway through.
+    double heating = mantle.core * years;
+    const double ago = mantle.began - time_ + (0.5 * years);
+    for (const Isotope& isotope : mantle_isotopes) {
+        heating += mantle.radiogenic * isotope.share * std::exp2(ago / isotope.half_life) * years;
+    }
+    *hotter_ += (heating - out) / mantle.capacity;
+    heated(mantle);
+}
+
+void Lithosphere::heated(const Mantle& mantle) {
+    if (!hotter_) {
+        hotter_ = mantle.hotter;
+    }
     constexpr double gas = 8.314;
-    const double now = mantle.potential + std::max(mantle.hotter - (mantle.cooling * time_), 0.0);
+    const double now = mantle.potential + *hotter_;
     softer_ = std::exp(mantle.activation / gas * ((1.0 / mantle.potential) - (1.0 / now)));
-    ridge_crust_ = Crust{}.basalt + static_cast<float>(mantle.melting * (now - mantle.potential));
+    ridge_crust_ = Crust{}.basalt + static_cast<float>(mantle.melting * *hotter_);
 }
 
 void Lithosphere::rift(double years, const Forces& forces, Strength strength) {

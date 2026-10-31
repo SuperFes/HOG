@@ -1832,21 +1832,75 @@ TEST_CASE("only a continent far wider than the mantle is deep warms it fully",
     CHECK(heat_at(wide, edge) < 0.7);
 }
 
+namespace {
+
+// The whole planet one plate of ocean floor `age` million years old.
+Lithosphere aged_floor(float age) {
+    const LevelGrid grid{4, radius};
+    return Lithosphere{grid, {everywhere(grid, Crust{.age = age}, {0.0, 0.0, 1.0}, 0.0)}};
+}
+
+// Kelvin the mantle under `lithosphere` warms over ten million years from as hot as today's,
+// heated by rock as much as it was when plates began `began` million years ago.
+double warmed_by(Lithosphere lithosphere, double began = 0.0) {
+    const Mantle mantle{.hotter = 0.0, .began = began};
+    lithosphere.cool(10.0, mantle);
+    return lithosphere.hotter();
+}
+
+} // namespace
+
 TEST_CASE("the young mantle softens the lithosphere less as it cools", "[planet][lithosphere]") {
-    Lithosphere lithosphere = halves();
+    Lithosphere lithosphere = aged_floor(10.0F);
     CHECK(lithosphere.softer() == 1.0);
-    constexpr Mantle mantle{.hotter = 200.0, .cooling = 0.1};
-    lithosphere.warm(10.0, mantle);
+    lithosphere.warm(10.0, {.hotter = 200.0});
     // Creep with 300 kJ/mol, 200 K over 1623 K.
     const double young = lithosphere.softer();
     CHECK_THAT(young, WithinRel(std::exp(300e3 / 8.314 * ((1.0 / 1623.0) - (1.0 / 1823.0))), 1e-9));
-    lithosphere.advance(1000.0);
-    lithosphere.warm(10.0, mantle);
-    CHECK(lithosphere.softer() > 1.0);
+    lithosphere.cool(10.0, {.hotter = 200.0});
+    CHECK(lithosphere.hotter() < 200.0);
     CHECK(lithosphere.softer() < young);
-    lithosphere.advance(1000.0);
-    lithosphere.warm(10.0, mantle);
-    CHECK(lithosphere.softer() == 1.0);
+    CHECK_THAT(lithosphere.softer(),
+               WithinRel(std::exp(300e3 / 8.314 *
+                                  ((1.0 / 1623.0) - (1.0 / (1623.0 + lithosphere.hotter())))),
+                         1e-9));
+    CHECK_THAT(static_cast<double>(lithosphere.ridge_crust()),
+               WithinRel(7.0 + (Mantle{}.melting * lithosphere.hotter()), 1e-5));
+}
+
+TEST_CASE("the mantle loses more through young floor than it makes, and less through old",
+          "[planet][lithosphere]") {
+    // Settled floor lets out 48 mW/m^2, 24.5 TW over the Earth, against the 21 its rock and core
+    // put in, over a mantle that warms a kelvin for 158 TW a million years.
+    const Mantle mantle;
+    const double settled =
+        (mantle.radiogenic + mantle.core - (48.0 * 0.51)) * 10.0 / mantle.capacity;
+    CHECK_THAT(warmed_by(aged_floor(1000.0F)), WithinRel(settled, 1e-2));
+    // Floor ten million years old lets out some seven times as much over them.
+    CHECK(warmed_by(aged_floor(10.0F)) < 5.0 * settled);
+    // As plates began, its rock heated it some two and a third times as much as today's, so it
+    // warmed even under floor a hundred million years old, which cools it today.
+    CHECK(warmed_by(aged_floor(1000.0F), 3000.0) > 0.1);
+    CHECK(warmed_by(aged_floor(100.0F), 3000.0) > 0.0);
+    CHECK(warmed_by(aged_floor(100.0F)) < 0.0);
+}
+
+TEST_CASE("a continent lets out less of the mantle's heat than any ocean floor",
+          "[planet][lithosphere]") {
+    const LevelGrid grid{4, radius};
+    const Lithosphere covered{grid, {everywhere(grid, continent, {0.0, 0.0, 1.0}, 0.0)}};
+    CHECK(warmed_by(covered) > warmed_by(aged_floor(1000.0F)));
+}
+
+TEST_CASE("a hotter mantle loses its heat faster", "[planet][lithosphere]") {
+    const auto cooled = [](double hotter) {
+        Lithosphere lithosphere = aged_floor(1000.0F);
+        lithosphere.cool(10.0, {.hotter = hotter, .began = 0.0});
+        return lithosphere.hotter() - hotter;
+    };
+    // By how much hotter than the surface it is, 1350 K today.
+    const double lost_today = (48.0 * 0.51) * 10.0 / Mantle{}.capacity;
+    CHECK_THAT(cooled(0.0) - cooled(200.0), WithinRel(lost_today * 200.0 / 1350.0, 1e-3));
 }
 
 namespace {
