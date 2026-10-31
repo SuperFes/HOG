@@ -1249,13 +1249,13 @@ void creep_plate(const LevelGrid& grid, Lithosphere::Plate& plate, std::span<con
     // then flow out more than it holds.
     std::vector<double> ends = thickness;
     std::vector<double> eases(cells.size());
+    std::vector<double> crept = thickness;
     for (int pass = 0; pass < passes; ++pass) {
         for (std::size_t node = 0; node < cells.size(); ++node) {
             const double channel = channel_of(ends[node]) * metres_per_km;
             eases[node] = channel * channel * channel * runny[node];
         }
-        const std::vector<double> crept =
-            flowed(grid, cells, thickness, sunk, lowers, eases, years);
+        crept = flowed(grid, cells, thickness, sunk, lowers, eases, years, crept);
         double moved = 0.0;
         for (std::size_t node = 0; node < cells.size(); ++node) {
             moved = std::max(moved, std::abs(crept[node] - ends[node]));

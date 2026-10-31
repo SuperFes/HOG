@@ -394,11 +394,12 @@ std::vector<double> sinking_alone(const LevelGrid& grid, std::span<const std::ui
 std::vector<double> flowed(const LevelGrid& grid, std::span<const std::uint32_t> cells,
                            std::span<const double> thickness, std::span<const double> sunk,
                            std::span<const double> lowering, std::span<const double> ease,
-                           double years) {
+                           double years, std::span<const double> near) {
     HOG_ASSERT(thickness.size() == cells.size(), "one thickness to each cell");
     HOG_ASSERT(sunk.size() == cells.size(), "one depth sunk to each cell");
     HOG_ASSERT(lowering.size() == cells.size(), "one lowering to each cell");
     HOG_ASSERT(ease.size() == cells.size(), "one ease to each cell");
+    HOG_ASSERT(near.empty() || near.size() == cells.size(), "one guess to each cell");
     const Links links{grid, cells};
     const Spreading spreading{links, ease, lowering, years};
     std::vector<double> right(cells.size());
@@ -406,7 +407,7 @@ std::vector<double> flowed(const LevelGrid& grid, std::span<const std::uint32_t>
     std::vector<double> raised(cells.size());
     for (std::size_t node = 0; node < cells.size(); ++node) {
         right[node] = (links.area(node) * thickness[node]) + (years * right[node]);
-        raised[node] = lowering[node] * thickness[node];
+        raised[node] = lowering[node] * (near.empty() ? thickness[node] : near[node]);
     }
     std::vector<double> crept = solved(spreading, right, std::move(raised));
     for (std::size_t node = 0; node < cells.size(); ++node) {

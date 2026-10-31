@@ -631,6 +631,13 @@ TEST_CASE("lower crust flows from under high ground to under low, keeping its vo
         CHECK(spread[next] > 35.0);
         CHECK(spread[next] < spread[at]);
     }
+    // Worked out from anywhere, it ends up the same.
+    const auto guessed =
+        flowed(grid, cells, thickness, level, floating, std::vector<double>(grid.size(), area), 1.0,
+               std::vector<double>(grid.size(), 40.0));
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        CHECK_THAT(guessed[cell], WithinAbs(spread[cell], 1e-6));
+    }
     // In time, flat.
     const auto flat = after(area, 1e9, level);
     const double mean = volume(thickness) / volume(std::vector<double>(grid.size(), 1.0));

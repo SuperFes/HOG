@@ -100,11 +100,13 @@ worn_down(const LevelGrid& grid, std::span<const std::int64_t> heights, std::int
 // under its low, each standing at its `lowering` times its thickness less the kilometres it's
 // `sunk`, as its ground rises by `lowering` of each kilometre more under it, flowing as readily
 // as its `ease`, in square metres a million years, and between two as the harmonic mean of
-// theirs. Its volume is kept.
+// theirs. Its volume is kept. Worked out from `near`, kilometres thick each is thought to end up,
+// if any.
 [[nodiscard]] std::vector<double>
 flowed(const LevelGrid& grid, std::span<const std::uint32_t> cells,
        std::span<const double> thickness, std::span<const double> sunk,
-       std::span<const double> lowering, std::span<const double> ease, double years);
+       std::span<const double> lowering, std::span<const double> ease, double years,
+       std::span<const double> near = {});
 // Of each of `cells`' own load, the share it sinks under alone, as the plate bends as stiff as
 // `stiffness` at each.
 [[nodiscard]] std::vector<double> sinking_alone(const LevelGrid& grid,
