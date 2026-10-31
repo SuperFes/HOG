@@ -267,6 +267,56 @@ TEST_CASE("new ocean floor fills where plates part, split down the middle betwee
     }
 }
 
+TEST_CASE("a hotter mantle melts thicker floor at ridges", "[planet][lithosphere]") {
+    // The floor new where the halves part, over a mantle `hotter` than today's.
+    const auto fresh = [](double hotter) {
+        Lithosphere lithosphere = halves();
+        lithosphere.warm(1e-6, {.hotter = hotter});
+        lithosphere.advance(20.0);
+        lithosphere.spread();
+        const DVec3 gap =
+            hog::planet::cell_center(hog::planet::cell_at(on_equator, lithosphere.grid().level()));
+        return lithosphere.top(gap).value_or(Lithosphere::Found{}).crust;
+    };
+    const Crust today = fresh(0.0);
+    CHECK(today.thickness == Crust{}.thickness);
+    CHECK(today.basalt == Crust{}.basalt);
+    const Mantle mantle;
+    const Crust hot = fresh(200.0);
+    CHECK_THAT(static_cast<double>(hot.thickness),
+               WithinRel(static_cast<double>(Crust{}.thickness) + (mantle.melting * 200.0), 1e-5));
+    CHECK(hot.basalt == hot.thickness);
+}
+
+TEST_CASE(
+    "thick floor from a hot mantle needs an arc to thicken it as far as any to float as continent",
+    "[planet][lithosphere]") {
+    constexpr float thick = 18.0F;
+    const Lithosphere ocean = halves();
+    std::vector<Lithosphere::Plate> plates{ocean.plates().begin(), ocean.plates().end()};
+    for (auto& plate : plates) {
+        std::ranges::fill(plate.crust, Crust{.thickness = thick, .basalt = thick});
+    }
+    Lithosphere lithosphere{ocean.grid(), plates};
+    constexpr double years = 20.0;
+    lithosphere.advance(years);
+    // Some 10 km thicker: past what floats floor of today's, short of as far over its own.
+    lithosphere.subduct(years, {.reach = 2, .growth = 0.5F});
+    const auto& grid = lithosphere.grid();
+    int thickened = 0;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const Crust crust = lithosphere.top(hog::planet::cell_center(grid.cell(cell)))
+                                .value_or(Lithosphere::Found{})
+                                .crust;
+        if (crust.thickness > thick) {
+            ++thickened;
+            CHECK(crust.thickness >= Lithosphere::arc_continent);
+            CHECK(crust.type == CrustType::Oceanic);
+        }
+    }
+    CHECK(thickened > 0);
+}
+
 TEST_CASE("spreading leaves no place of the grid without crust", "[planet][lithosphere]") {
     Lithosphere lithosphere = hog::planet::lithosphere_from(start(), step_years);
     const auto& grid = lithosphere.grid();

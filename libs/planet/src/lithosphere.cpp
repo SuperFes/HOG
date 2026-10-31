@@ -319,6 +319,13 @@ DVec3 gradient(const LevelGrid& grid, std::span<const float> field, std::uint32_
     return glm::inverse(fit) * rise;
 }
 
+// Whether ocean floor has been thickened as far over the basalt it formed as as it takes to float
+// floor of today's as continent: what's added is arc rock and sediment, lighter than basalt.
+bool floats_as_continent(const Crust& crust) {
+    return crust.type == CrustType::Oceanic &&
+           crust.thickness - crust.basalt + Crust{}.basalt >= Lithosphere::arc_continent;
+}
+
 // How strong continent is over mantle `heat` warm, `softer` times weaker than today's.
 double continent_strength(float heat, Strength strength, double softer) {
     return strength.cool * std::pow(strength.warm / strength.cool, heat) / softer;
@@ -780,7 +787,9 @@ void Lithosphere::spread() {
                 }
                 owner[next] = owner[cell];
                 const DVec3 own = to_plate(owner[next], cell_center(grid_.cell(next)));
-                fresh[owner[next]].emplace_back(grid_.index(cell_at(own, grid_.level())), Crust{});
+                fresh[owner[next]].emplace_back(
+                    grid_.index(cell_at(own, grid_.level())),
+                    Crust{.thickness = ridge_crust_, .basalt = ridge_crust_});
                 further.push_back(next);
             }
         }
@@ -1141,7 +1150,7 @@ void Lithosphere::scrape_off(std::uint32_t plate, std::size_t index, std::uint32
     const std::optional<std::size_t> onto = held(over, at);
     const double closing =
         glm::length(velocity(plate, at) - velocity(over, at)) * mm_a_year_per_radian_a_million;
-    const float piled = floor.thickness - Crust{}.thickness - arcs.subducted;
+    const float piled = floor.thickness - floor.basalt - arcs.subducted;
     if (!onto || piled <= 0.0F || closing >= static_cast<double>(arcs.scraping)) {
         return;
     }
@@ -1155,7 +1164,7 @@ void Lithosphere::scrape_off(std::uint32_t plate, std::size_t index, std::uint32
         layer *= share;
     }
     lay(front, piled * share, cover);
-    if (front.type == CrustType::Oceanic && front.thickness >= arc_continent) {
+    if (floats_as_continent(front)) {
         front.type = CrustType::Continental;
         front.raised = 0.0F;
     }
@@ -1762,6 +1771,7 @@ void Lithosphere::warm(double years, Mantle mantle) {
     constexpr double gas = 8.314;
     const double now = mantle.potential + std::max(mantle.hotter - (mantle.cooling * time_), 0.0);
     softer_ = std::exp(mantle.activation / gas * ((1.0 / mantle.potential) - (1.0 / now)));
+    ridge_crust_ = Crust{}.basalt + static_cast<float>(mantle.melting * (now - mantle.potential));
 }
 
 void Lithosphere::rift(double years, const Forces& forces, Strength strength) {
@@ -2141,7 +2151,7 @@ void Lithosphere::raise_arcs(std::span<const std::uint32_t> trenches, double yea
         bury(crust);
         crust.thickness += thicker;
         crust.raised = 0.0F;
-        if (crust.type == CrustType::Oceanic && crust.thickness >= arc_continent) {
+        if (floats_as_continent(crust)) {
             crust.type = CrustType::Continental;
         }
     }

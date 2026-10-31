@@ -43,6 +43,8 @@ enum class Slip : std::uint8_t { None, Normal, Reverse, Strike };
 struct Crust {
     CrustType type = CrustType::Oceanic;
     float thickness = 7.0F; // kilometres
+    // Of ocean floor, the kilometres of it that welled up at its ridge, under all laid on it since.
+    float basalt = 7.0F;
     // Millions of years since it formed, and since it was last piled up into a range.
     float age = 0.0F;
     float raised = 0.0F;
@@ -202,6 +204,9 @@ struct Mantle {
     double cooling = 0.08;
     double potential = 1623.0;
     double activation = 300e3;
+    // Kilometres more crust a ridge melts out of the mantle for each kelvin it's hotter than
+    // today's, which melts some 7: some 20 out of one 200 K hotter (McKenzie & Bickle 1988).
+    double melting = 0.065;
 };
 
 // A stretch of one plate's edge, a place of the grid long, where it meets another plate.
@@ -351,7 +356,7 @@ public:
     // or centuries, far quicker than the plates move, so each is as likely anywhere in its cycle.
     [[nodiscard]] std::vector<Fault> faults(std::uint64_t seed) const;
     // Warms and cools the mantle under each place by the crust on top over `years`, and sets how
-    // hot it is on the whole as of now.
+    // hot it is on the whole as of now, and so how thick the floor its ridges make.
     void warm(double years, Mantle mantle = {});
     // Lets the lower crust of each plate's continent creep for `years` from under its high ground
     // to under its low, on a planet of `radius` metres, as readily as it's warm.
@@ -380,7 +385,7 @@ public:
     // with no crust, taken in or wholly dived, are gone, and those after them renumbered.
     void weld(double years, const Forces& forces = {});
 
-    // Ocean floor an arc thickens this far floats as continent.
+    // Ocean floor of today's an arc thickens this far floats as continent.
     static constexpr float arc_continent = 20.0F;
     // Continents as they settle when nothing piles them up.
     static constexpr float settled_continent = 35.0F;
@@ -403,6 +408,8 @@ public:
     [[nodiscard]] std::span<const float> heat() const noexcept { return heat_; }
     // How many times weaker the lithosphere is than over today's mantle, as of the last warming.
     [[nodiscard]] double softer() const noexcept { return softer_; }
+    // Kilometres thick the ocean floor ridges make, as of the last warming.
+    [[nodiscard]] float ridge_crust() const noexcept { return ridge_crust_; }
     // Cubic kilometres of continental crust foundered into the mantle so far.
     [[nodiscard]] double foundered() const noexcept { return foundered_; }
 
@@ -538,6 +545,7 @@ private:
     double pace_ = 0.0;
     double foundered_ = 0.0;
     double softer_ = 1.0;
+    float ridge_crust_ = Crust{}.basalt;
     jobs::JobSystem* jobs_ = nullptr;
 };
 
