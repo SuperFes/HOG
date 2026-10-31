@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <numbers>
+#include <numeric>
 #include <random>
 #include <set>
 #include <vector>
@@ -24,8 +25,9 @@ std::vector<HexCell> all_cells(int level) {
     return cells;
 }
 
+// Precise for small angles too, as acos is not.
 double angle(DVec3 a, DVec3 b) {
-    return std::acos(std::clamp(glm::dot(a, b), -1.0, 1.0));
+    return std::atan2(glm::length(glm::cross(a, b)), glm::dot(a, b));
 }
 
 } // namespace
@@ -193,4 +195,68 @@ TEST_CASE("cells reach the finest level", "[globe][hex_cell]") {
         const HexCell cell = hog::globe::cell_at_index(hog::globe::max_level, pick(random));
         CHECK(hog::globe::cell_at(hog::globe::center(cell), hog::globe::max_level) == cell);
     }
+}
+
+TEST_CASE("a coarse cell hands its centre whole and the cells halfway to its neighbours half",
+          "[globe][hex_cell]") {
+    for (int level = 0; level <= 4; ++level) {
+        std::vector<int> halves(hog::globe::cell_count(level + 1), 0);
+        for (const HexCell cell : all_cells(level)) {
+            const auto under = hog::globe::children(cell);
+            CHECK(under.count == hog::globe::neighbors(cell).count + 1);
+            // The centre stays where it was.
+            CHECK(angle(hog::globe::center(under.cells[0]), hog::globe::center(cell)) < 1e-12);
+            for (std::size_t k = 0; k < under.count; ++k) {
+                halves[hog::globe::index_of(under.cells[k])] += under.halves[k];
+                // The fine cell names the coarse one back, by as many halves.
+                const auto over = hog::globe::parents(under.cells[k]);
+                const auto back = std::ranges::find(over.all(), cell);
+                REQUIRE(back != over.all().end());
+                CHECK(over.halves[static_cast<std::size_t>(back - over.all().begin())] ==
+                      under.halves[k]);
+            }
+        }
+        // Every fine cell is shared out whole, once.
+        CHECK(std::ranges::all_of(halves, [](int each) { return each == 2; }));
+    }
+}
+
+TEST_CASE("moving amounts a level down and back up keeps every unit", "[globe][hex_cell]") {
+    constexpr int level = 3;
+    std::mt19937_64 random{5};
+    std::uniform_int_distribution<std::int64_t> amount(-1'000'003, 1'000'003);
+    std::vector<std::int64_t> coarse(hog::globe::cell_count(level));
+    for (std::int64_t& each : coarse) {
+        each = amount(random);
+    }
+    const std::int64_t total = std::accumulate(coarse.begin(), coarse.end(), std::int64_t{0});
+
+    std::vector<std::int64_t> fine(hog::globe::cell_count(level + 1), 0);
+    for (const HexCell cell : all_cells(level)) {
+        const auto under = hog::globe::children(cell);
+        const auto dealt = hog::globe::share_out(coarse[hog::globe::index_of(cell)], under);
+        for (std::size_t k = 0; k < under.count; ++k) {
+            fine[hog::globe::index_of(under.cells[k])] += dealt[k];
+        }
+    }
+    CHECK(std::accumulate(fine.begin(), fine.end(), std::int64_t{0}) == total);
+
+    std::vector<std::int64_t> back(coarse.size(), 0);
+    for (const HexCell cell : all_cells(level + 1)) {
+        const auto over = hog::globe::parents(cell);
+        const auto dealt = hog::globe::share_out(fine[hog::globe::index_of(cell)], over);
+        for (std::size_t k = 0; k < over.count; ++k) {
+            back[hog::globe::index_of(over.cells[k])] += dealt[k];
+        }
+    }
+    CHECK(std::accumulate(back.begin(), back.end(), std::int64_t{0}) == total);
+}
+
+TEST_CASE("an amount is dealt out by halves in whole units", "[globe][hex_cell]") {
+    hog::globe::HexShares shares;
+    shares.count = 3;
+    shares.halves = {2, 1, 1};
+    CHECK(hog::globe::share_out(8, shares) == std::array<std::int64_t, 7>{4, 2, 2});
+    CHECK(hog::globe::share_out(11, shares) == std::array<std::int64_t, 7>{5, 3, 3});
+    CHECK(hog::globe::share_out(-5, shares) == std::array<std::int64_t, 7>{-3, -1, -1});
 }

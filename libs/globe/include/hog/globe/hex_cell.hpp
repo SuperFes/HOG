@@ -103,4 +103,26 @@ struct HexRing {
 
 [[nodiscard]] HexRing ring(HexCell cell);
 
+// Cells sharing in another a level away, each by how many halves of itself.
+struct HexShares {
+    std::array<HexCell, 7> cells{};
+    std::array<std::uint8_t, 7> halves{};
+    std::uint8_t count = 0;
+
+    [[nodiscard]] std::span<const HexCell> all() const& noexcept { return {cells.data(), count}; }
+    [[nodiscard]] std::span<const HexCell> all() const&& = delete;
+};
+
+// The cells a level finer under `cell`: the one at its centre, whole, and the one halfway to each
+// neighbour, half, as the neighbour holds the other half.
+[[nodiscard]] HexShares children(HexCell cell);
+
+// The cells a level coarser over `cell`: one whole, or two halves where it lies halfway between
+// them.
+[[nodiscard]] HexShares parents(HexCell cell);
+
+// Whole units of `amount` dealt out over `shares` by their halves, the remainder a unit each from
+// the first, so they add back up to it exactly.
+[[nodiscard]] std::array<std::int64_t, 7> share_out(std::int64_t amount, const HexShares& shares);
+
 } // namespace hog::globe

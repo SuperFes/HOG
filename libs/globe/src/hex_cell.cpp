@@ -467,4 +467,101 @@ HexRing ring(HexCell cell) {
     return made;
 }
 
+HexShares children(HexCell cell) {
+    HOG_ASSERT(cell.level < max_level, "the finest level has no children");
+    const int finer = cell.level + 1;
+    const Point here = point_of(cell);
+    HexShares made;
+    Point middle = here;
+    for (std::int64_t& weight : middle.weight) {
+        weight *= 2;
+    }
+    made.cells[0] = locate(finer, middle);
+    made.halves[0] = 2;
+    made.count = 1;
+    // Halfway to a neighbour is their two points added on a face both lie on.
+    const HexNeighbors around = neighbors(cell);
+    for (const HexCell next : around.all()) {
+        const Point there = point_of(next);
+        for (const Face& face : faces) {
+            const auto a = weights_on(here, face);
+            const auto b = weights_on(there, face);
+            if (!a || !b) {
+                continue;
+            }
+            Point halfway{.vertex = face, .weight = {}};
+            for (std::size_t k = 0; k < 3; ++k) {
+                halfway.weight[k] = (*a)[k] + (*b)[k];
+            }
+            made.cells[made.count] = locate(finer, halfway);
+            made.halves[made.count] = 1;
+            ++made.count;
+            break;
+        }
+    }
+    return made;
+}
+
+HexShares parents(HexCell cell) {
+    HOG_ASSERT(cell.level > 0, "the coarsest level has no parents");
+    const int coarser = cell.level - 1;
+    const Point here = point_of(cell);
+    std::array<std::size_t, 3> odd{};
+    std::size_t odds = 0;
+    for (std::size_t k = 0; k < 3; ++k) {
+        if (here.weight[k] % 2 != 0) {
+            odd[odds++] = k;
+        }
+    }
+    HexShares made;
+    if (odds == 0) {
+        Point whole = here;
+        for (std::int64_t& weight : whole.weight) {
+            weight /= 2;
+        }
+        made.cells[0] = locate(coarser, whole);
+        made.halves[0] = 2;
+        made.count = 1;
+        return made;
+    }
+    // The weights add up to an even number, so two are odd: the cell lies halfway along the edge
+    // between the coarse points a unit either way along them.
+    HOG_ASSERT(odds == 2, "a point has no odd weights or two");
+    for (const std::int64_t way : {1, -1}) {
+        Point end = here;
+        end.weight[odd[0]] += way;
+        end.weight[odd[1]] -= way;
+        for (std::int64_t& weight : end.weight) {
+            weight /= 2;
+        }
+        made.cells[made.count] = locate(coarser, end);
+        made.halves[made.count] = 1;
+        ++made.count;
+    }
+    return made;
+}
+
+std::array<std::int64_t, 7> share_out(std::int64_t amount, const HexShares& shares) {
+    std::array<std::int64_t, 7> dealt{};
+    std::int64_t halves = 0;
+    for (std::size_t k = 0; k < shares.count; ++k) {
+        halves += shares.halves[k];
+    }
+    HOG_ASSERT(halves > 0, "nothing to share out over");
+    // Rounded towards minus infinity, so the remainder is never negative.
+    const auto floor_div = [](std::int64_t a, std::int64_t b) {
+        return (a / b) - ((a % b != 0) && ((a < 0) != (b < 0)) ? 1 : 0);
+    };
+    const std::int64_t each = floor_div(amount, halves);
+    std::int64_t left = amount - (each * halves);
+    for (std::size_t k = 0; k < shares.count; ++k) {
+        dealt[k] = each * shares.halves[k];
+    }
+    for (std::size_t k = 0; left > 0; k = (k + 1) % shares.count) {
+        ++dealt[k];
+        --left;
+    }
+    return dealt;
+}
+
 } // namespace hog::globe
