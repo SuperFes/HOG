@@ -395,8 +395,10 @@ public:
     // Radians a rift opens, thinning the continent, before it breaks apart and floor wells up in
     // it: about 150 km, as the Red Sea's did.
     static constexpr double breakup = 0.025;
-    // Million years ocean floor stays lighter than the mantle under it, its crust floating it as
-    // it cools: some 10 to 50 (Oxburgh & Parmentier 1977; Cloos 1993; Afonso et al. 2007).
+    // Million years ocean floor of today's stays lighter than the mantle under it, its crust
+    // floating it as it cools: some 10 to 50 (Oxburgh & Parmentier 1977; Cloos 1993; Afonso et al.
+    // 2007). The cooled mantle under it weighs as the root of its age, so floor of crust twice as
+    // thick floats four times as long, as over the hotter young mantle (Davies 1992).
     static constexpr double buoyant_floor = 30.0;
 
     [[nodiscard]] const LevelGrid& grid() const noexcept { return grid_; }

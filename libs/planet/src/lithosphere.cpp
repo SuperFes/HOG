@@ -1910,7 +1910,7 @@ void Lithosphere::collapse_margins(const Forces& forces, Strength strength) {
 std::vector<Lithosphere::Tear> Lithosphere::tears(std::uint32_t plate, const Forces& forces,
                                                   Strength strength) const {
     const Plate& carrier = plates_[plate];
-    const double floated = std::sqrt(buoyant_floor / forces.mature);
+    const double floated_today = std::sqrt(buoyant_floor / forces.mature);
     std::vector<Tear> found;
     for (std::size_t index = 0; index < carrier.cells.size(); ++index) {
         const Crust& floor = carrier.crust[index];
@@ -1918,6 +1918,8 @@ std::vector<Lithosphere::Tear> Lithosphere::tears(std::uint32_t plate, const For
             continue;
         }
         const auto age = static_cast<double>(floor.age);
+        const double floated =
+            floated_today * static_cast<double>(floor.basalt) / static_cast<double>(Crust{}.basalt);
         const double weight = std::sqrt(std::min(age, forces.mature) / forces.mature) - floated;
         if (weight <= 0.0) {
             continue;

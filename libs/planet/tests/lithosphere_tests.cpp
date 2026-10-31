@@ -2000,6 +2000,23 @@ TEST_CASE("floor its crust still floats, or a cool continent's margin, holds",
     Lithosphere young = warm_cap(0.0, static_cast<float>(Lithosphere::buoyant_floor));
     young.collapse_margins();
     CHECK(young.plates().size() == 1);
+    // Half again as thick, it floats as long again and a quarter more.
+    const auto thick = [](float age) {
+        const Lithosphere capped = warm_cap(0.0, age);
+        std::vector<Lithosphere::Plate> plates{capped.plates().begin(), capped.plates().end()};
+        for (Crust& crust : plates[0].crust) {
+            if (crust.type == CrustType::Oceanic) {
+                crust.thickness = crust.basalt = 1.5F * Crust{}.basalt;
+            }
+        }
+        Lithosphere thickened{capped.grid(), plates};
+        thickened.warm(1000.0, {.hotter = 0.0});
+        thickened.collapse_margins({}, weak);
+        return thickened.plates().size();
+    };
+    const auto crossover = static_cast<float>(1.5 * 1.5 * Lithosphere::buoyant_floor);
+    CHECK(thick(0.9F * crossover) == 1);
+    CHECK(thick(1.1F * crossover) == 2);
     // Hardly warmed yet, the margin holds over today's mantle but not a young hotter one.
     const auto hardly_warmed = [](double hotter) {
         const Lithosphere warmed = warm_cap();
