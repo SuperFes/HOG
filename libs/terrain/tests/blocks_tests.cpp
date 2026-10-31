@@ -277,8 +277,19 @@ TEST_CASE("the whole planet lies under the rings, every column topped", "[terrai
         }
     }
     CHECK(topped.size() == 6U << (2U * hog::terrain::overview_level));
+}
+
+TEST_CASE("blocks show the soil, the rock under it and the water as the terrain has them",
+          "[terrain][blocks]") {
+    const BlockMesh& mesh = round_land();
     CHECK(coloured(mesh, Material::Water) > 0);
-    CHECK(coloured(mesh, Material::Granite) > 0);
+    CHECK(coloured(mesh, Material::Soil) > 0);
+    std::size_t rocks = 0;
+    for (const Material kind : {Material::Sandstone, Material::Mudstone, Material::Limestone,
+                                Material::Granite, Material::Basalt}) {
+        rocks += coloured(mesh, kind) > 0 ? 1 : 0;
+    }
+    CHECK(rocks >= 2);
 }
 
 TEST_CASE("the rings meet the ground under them, with no walls down into the planet",

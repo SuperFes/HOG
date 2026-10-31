@@ -1,4 +1,5 @@
 #include <hog/planet/geology.hpp>
+#include <hog/planet/ground_column.hpp>
 #include <hog/planet/neighbors.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
@@ -12,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -224,31 +226,34 @@ double shell_height(int shell_level) {
     return std::ldexp(planet::volume_span, -shell_level);
 }
 
-// The terrain's height over the planet's radius in the middle of `column`.
-double ground_in(const planet::World& world, planet::CellId column) {
-    return static_cast<double>(world.geology().terrain().elevation(column)) /
-           static_cast<double>(planet::fixed_one);
+// Metres over the planet's radius.
+double metres_over(std::int64_t fixed) {
+    return static_cast<double>(fixed) / static_cast<double>(planet::fixed_one);
 }
 
 constexpr float stand_in_temperature = 288.0F; // kelvin
 
-// Fills `column` from `low` to `high` metres from the centre: rock up to `ground` metres over the
-// radius, the sea over it, and air above.
-void fill_column(planet::Volume& volume, double radius, planet::CellId column, double ground,
-                 double low, double high, int shell_level) {
-    const double surface = radius + ground;
-    const double sea = std::max(surface, radius);
-    planet::fill_between(volume, radius, column, low, surface, shell_level,
-                         {.material = Material::Granite,
-                          .temperature = stand_in_temperature,
-                          .surface = std::nullopt});
-    planet::fill_between(volume, radius, column, surface, sea, shell_level,
-                         {.material = Material::Water,
-                          .temperature = stand_in_temperature,
-                          .surface = std::nullopt});
-    planet::fill_between(
-        volume, radius, column, sea, high, shell_level,
-        {.material = Material::Air, .temperature = stand_in_temperature, .surface = std::nullopt});
+// Fills `column` from `low` to `high` metres from the centre with what the terrain has there, its
+// surface as `top`.
+void fill_column(planet::Volume& volume, const planet::Elevation& terrain, double radius,
+                 planet::CellId column, const planet::ColumnTop& top, double low, double high,
+                 int shell_level) {
+    const auto fixed = [&](double from_centre) {
+        return std::llround((from_centre - radius) * static_cast<double>(planet::fixed_one));
+    };
+    if (fixed(low) >= fixed(high)) {
+        return;
+    }
+    double under = low;
+    for (const planet::Run& run :
+         planet::ground_column(terrain, column, top, fixed(low), fixed(high))) {
+        const double end = radius + metres_over(run.top);
+        planet::fill_between(volume, radius, column, under, end, shell_level,
+                             {.material = run.material,
+                              .temperature = stand_in_temperature,
+                              .surface = std::nullopt});
+        under = end;
+    }
 }
 
 // A ring of columns at `level` within `reach`, in shells at `shell_level`.
@@ -285,17 +290,26 @@ std::vector<Ring> rings_for(double radius) {
 // heights either has.
 void fill_ring(planet::Volume& volume, const planet::World& world, double radius, DVec3 around,
                const Ring& ring, const Ring& coarser) {
+    const planet::Elevation& terrain = world.geology().terrain();
     const planet::CellId middle = planet::cell_at(around, ring.level);
     std::vector<planet::CellId> columns{middle};
     std::set<planet::CellId> seen{middle};
+    // Many columns lie in each coarser one.
+    std::map<planet::CellId, planet::ColumnTop> unders;
     // Past what either rounded its heights to.
     const double margin = shell_height(coarser.shell_level) + shell_height(ring.shell_level);
     for (std::size_t next = 0; next < columns.size(); ++next) {
         const planet::CellId column = columns[next];
-        const double ground = ground_in(world, column);
-        const double under = ground_in(world, column.parent(coarser.level));
-        fill_column(volume, radius, column, ground, radius + std::min(ground, under) - margin,
-                    radius + std::max({ground, under, 0.0}) + margin, ring.shell_level);
+        const planet::ColumnTop here = planet::column_top(terrain, column);
+        const planet::CellId parent = column.parent(coarser.level);
+        auto [under, fresh] = unders.try_emplace(parent);
+        if (fresh) {
+            under->second = planet::column_top(terrain, parent);
+        }
+        fill_column(volume, terrain, radius, column, here,
+                    radius + metres_over(std::min(here.ground, under->second.ground)) - margin,
+                    radius + metres_over(std::max(here.water, under->second.water)) + margin,
+                    ring.shell_level);
         for (const planet::CellId beside : planet::edge_neighbors(column)) {
             if (glm::length(planet::cell_center(beside) - around) * radius <= ring.reach &&
                 seen.insert(beside).second) {
@@ -312,6 +326,7 @@ planet::Volume planet_volume(const planet::World& world, double radius) {
     planet::Volume volume{
         {.material = Material::Air, .temperature = stand_in_temperature, .surface = std::nullopt},
         overview_level - 2};
+    const planet::Elevation& terrain = world.geology().terrain();
     const double bottom = radius - (planet::volume_span / 2.0);
     const std::uint32_t across = 1U << static_cast<unsigned>(overview_level);
     for (int face = 0; face < 6; ++face) {
@@ -319,9 +334,9 @@ planet::Volume planet_volume(const planet::World& world, double radius) {
             for (std::uint32_t j = 0; j < across; ++j) {
                 const planet::CellId column =
                     planet::CellId::from_face_ij(face, i, j, overview_level);
-                const double ground = ground_in(world, column);
-                fill_column(volume, radius, column, ground, bottom, radius + std::max(ground, 0.0),
-                            whole.shell_level);
+                const planet::ColumnTop top = planet::column_top(terrain, column);
+                fill_column(volume, terrain, radius, column, top, bottom,
+                            radius + metres_over(top.water), whole.shell_level);
             }
         }
     }
