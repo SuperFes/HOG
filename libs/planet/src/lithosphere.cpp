@@ -877,8 +877,7 @@ void Lithosphere::erode(std::span<const float> worn, std::span<const std::int64_
     std::vector<double> carried(grid_.size(), 0.0);
     for (std::uint32_t place = 0; place < grid_.size(); ++place) {
         const std::optional<Found>& found = on_top[place];
-        if (!found || found->crust.type != CrustType::Continental || drowned[place] ||
-            worn[place] <= 0.0F || sea[place] == parted) {
+        if (!found || drowned[place] || worn[place] <= 0.0F || sea[place] == parted) {
             continue;
         }
         Crust& land = crust_at(place);
@@ -1303,7 +1302,10 @@ std::vector<double> Lithosphere::lowering(double radius) const {
             const std::optional<std::size_t> index =
                 held(found->plate, cell_center(grid_.cell(place)));
             const double share = index ? alone[found->plate][*index] : 1.0;
-            lowers[place] = 1.0 - (share * (1.0 - continental_buoyancy));
+            const double buoyancy = found->crust.type == CrustType::Continental
+                                        ? continental_buoyancy
+                                        : oceanic_buoyancy;
+            lowers[place] = 1.0 - (share * (1.0 - buoyancy));
         }
     }
     return lowers;

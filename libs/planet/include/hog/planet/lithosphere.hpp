@@ -323,8 +323,9 @@ public:
     // as its plate lets it rise for being lightened, on a planet of `radius` metres: by its
     // buoyancy where the plate is weak, and by all of it where the plate holds it down.
     [[nodiscard]] std::vector<double> lowering(double radius) const;
-    // Wears `worn` kilometres off the continent on top at each place of the grid, its cover
-    // first, down to none, carrying it into the open sea at the place of it nearest, the ground at
+    // Wears `worn` kilometres off the crust on top at each place of the grid out of the sea, ocean
+    // floor raised out of it as well as continent, its cover first, down to none, carrying it
+    // into the open sea at the place of it nearest, the ground at
     // fixed-point `heights` and the sea at `sea_level`, the largest body of ground under that
     // joined together, the rest cut off from it: from there it fills the nearest water up to the
     // sea's level first, as deltas and shelves build out. It's laid volume for volume, on

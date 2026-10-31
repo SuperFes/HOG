@@ -848,6 +848,48 @@ TEST_CASE("what wears off a continent is laid down on the nearest crust under th
     CHECK(volume(shelved, CrustType::Oceanic) == floor);
 }
 
+TEST_CASE("ocean floor raised out of the sea wears down as land does", "[planet][lithosphere]") {
+    // Ocean floor piled with sediment around the pole, standing out of the sea.
+    const LevelGrid grid{4, radius};
+    Lithosphere::Plate plate = everywhere(grid, Crust{}, DVec3{0.0, 0.0, 1.0}, 0.0);
+    std::vector<bool> drowned(grid.size(), true);
+    const auto raised = [&](std::uint32_t cell) {
+        return hog::planet::cell_center(grid.cell(cell)).z > 0.95;
+    };
+    for (std::size_t index = 0; index < plate.cells.size(); ++index) {
+        if (raised(plate.cells[index])) {
+            plate.crust[index].thickness = 20.0F;
+            plate.crust[index].cover = {2.0F, 8.0F};
+            drowned[plate.cells[index]] = false;
+        }
+    }
+    Lithosphere lithosphere{grid, {plate}};
+    const auto volume = [&] {
+        double total = 0.0;
+        const Lithosphere::Plate& carrier = lithosphere.plates()[0];
+        for (std::size_t index = 0; index < carrier.cells.size(); ++index) {
+            total += static_cast<double>(grid.area(carrier.cells[index])) *
+                     static_cast<double>(carrier.crust[index].thickness);
+        }
+        return total;
+    };
+    const double before = volume();
+    lithosphere.erode(std::vector<float>(grid.size(), 1.0F), ground(drowned), 0);
+    CHECK_THAT(volume(), WithinRel(before, 1e-6));
+    const Lithosphere::Plate& carrier = lithosphere.plates()[0];
+    int laid = 0;
+    for (std::size_t index = 0; index < carrier.cells.size(); ++index) {
+        const Crust& crust = carrier.crust[index];
+        if (raised(carrier.cells[index])) {
+            CHECK(crust.thickness == 19.0F);
+            CHECK(crust.cover[loose_sediment] == 1.0F);
+        } else if (crust.thickness > Crust{}.thickness) {
+            ++laid;
+        }
+    }
+    CHECK(laid > 0);
+}
+
 TEST_CASE("sediment fills the sea up to its level by the coast, and runs on down the slope",
           "[planet][lithosphere]") {
     // A continent around the pole, the ocean floor round it deepening away from it.
