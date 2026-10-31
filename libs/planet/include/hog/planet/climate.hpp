@@ -5,6 +5,7 @@
 #include <hog/planet/moisture.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/planet_config.hpp>
+#include <hog/planet/temperature.hpp>
 
 #include <cstdint>
 #include <string_view>
@@ -116,7 +117,7 @@ private:
     [[nodiscard]] std::int64_t water_table(CellId cell, std::int64_t moisture) const;
 
     Elevation terrain_;
-    std::uint64_t temperature_seed_;
+    Temperature temperature_;
     Moisture moisture_;
 };
 

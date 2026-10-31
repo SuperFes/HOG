@@ -1,25 +1,9 @@
-#include <hog/core/hash.hpp>
 #include <hog/planet/climate.hpp>
 #include <hog/planet/projection.hpp>
-#include <hog/planet/tile.hpp>
-
-#include <algorithm>
-#include <cmath>
 
 namespace hog::planet {
 
 namespace {
-
-constexpr std::uint64_t temperature_salt = 0x7465'6D70'6572'6174ULL; // "temperat"
-
-constexpr std::int64_t equator_temperature = 28 * fixed_one;
-constexpr std::int64_t pole_temperature = -25 * fixed_one;
-// 6.5 °C per kilometre.
-constexpr std::int64_t lapse_numerator = 13;
-constexpr std::int64_t lapse_denominator = 2'000;
-constexpr std::int64_t temperature_variation = 4 * fixed_one;
-constexpr double temperature_frequency = 2.0;
-constexpr int temperature_octaves = 4;
 
 constexpr std::int64_t beach_temperature = 0;
 // High ground colder than this through the year keeps its snow as glaciers.
@@ -31,11 +15,6 @@ constexpr std::int64_t dry_table_share = fixed_one * 6 / 5;
 
 [[nodiscard]] std::int64_t multiply(std::int64_t a, std::int64_t b) {
     return (a * b) >> fixed_fraction_bits;
-}
-
-// |sin(latitude)| in fixed point, rounded once from the exact cell centre.
-[[nodiscard]] std::int64_t latitude_sine(DVec3 center) {
-    return std::llround(std::abs(center.z) * static_cast<double>(fixed_one));
 }
 
 } // namespace
@@ -75,28 +54,20 @@ std::string_view to_string(Biome biome) noexcept {
 }
 
 Climate::Climate(const PlanetConfig& config)
-    : terrain_{config}, temperature_seed_{hash_combine(config.seed, temperature_salt)},
-      moisture_{config.seed} {}
+    : terrain_{config}, temperature_{config.seed}, moisture_{config.seed} {}
 
 std::int64_t Climate::temperature(CellId cell) const {
     return temperature(cell, terrain_.elevation(cell));
 }
 
 std::int64_t Climate::temperature(CellId cell, std::int64_t elevation) const {
-    const DVec3 center = cell_center(cell);
-    const std::int64_t sine = latitude_sine(center);
-    const std::int64_t cube = multiply(multiply(sine, sine), sine);
-    const std::int64_t base =
-        equator_temperature - multiply(equator_temperature - pole_temperature, cube);
-    const std::int64_t lapse =
-        std::max(elevation, std::int64_t{0}) * lapse_numerator / lapse_denominator;
-    const std::int64_t noise = multiply(
-        temperature_variation,
-        fbm(temperature_seed_, noise_point(center, temperature_frequency), temperature_octaves));
-    return base - lapse + noise;
+    return temperature_.at(cell_center(cell), elevation);
 }
 
 std::int64_t Climate::moisture(CellId cell) const {
+    if (const Rainfall* rainfall = terrain_.rainfall()) {
+        return wetness(rainfall->at(cell), temperature(cell));
+    }
     return moisture_.at(cell, terrain_.continents().height(cell));
 }
 
@@ -133,7 +104,9 @@ Climate::Surface Climate::surface(CellId cell, std::int64_t elevation) const {
         surface.biome = Biome::Lake;
         return surface;
     }
-    surface.moisture = moisture_.at(cell, terrain_.continents().height(cell));
+    const Rainfall* rainfall = terrain_.rainfall();
+    surface.moisture = rainfall != nullptr ? wetness(rainfall->at(cell), surface.temperature)
+                                           : moisture_.at(cell, terrain_.continents().height(cell));
     surface.water_table = water_table(cell, surface.moisture);
     const Biome climate = classify_biome(surface.temperature, surface.moisture);
     surface.biome = climate;

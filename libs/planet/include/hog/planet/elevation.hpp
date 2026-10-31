@@ -7,6 +7,7 @@
 #include <hog/planet/hotspots.hpp>
 #include <hog/planet/landform.hpp>
 #include <hog/planet/planet_config.hpp>
+#include <hog/planet/rainfall.hpp>
 #include <hog/planet/rivers.hpp>
 #include <hog/planet/volcanoes.hpp>
 
@@ -64,6 +65,8 @@ public:
     [[nodiscard]] const Beds& beds() const noexcept { return beds_; }
     [[nodiscard]] const Volcanoes& volcanoes() const noexcept { return volcanoes_; }
     [[nodiscard]] const Hotspots& hotspots() const noexcept { return hotspots_; }
+    // The rain the winds bring over the crust as it stands, where the crust has settled.
+    [[nodiscard]] const Rainfall* rainfall() const noexcept { return rainfall_.get(); }
 
     // Fixed-point continent height; land is positive.
     template <int Bits = fixed_fraction_bits>
@@ -198,6 +201,7 @@ private:
     std::uint64_t relief_seed_;
     std::uint64_t shore_seed_;
     Beds beds_;
+    std::shared_ptr<const Rainfall> rainfall_;
     struct Evolving {
         PlanetConfig config;
         std::once_flag once;

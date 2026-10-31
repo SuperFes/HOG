@@ -24,11 +24,13 @@ add_library(hog_planet
     src/places.cpp
     src/plates.cpp
     src/projection.cpp
+    src/rainfall.cpp
     src/system.cpp
     src/rivers.cpp
     src/seasons.cpp
     src/tangent_frame.cpp
     src/isostasy.cpp
+    src/temperature.cpp
     src/tectonics.cpp
     src/tile.cpp
     src/volcanoes.cpp
@@ -84,6 +86,7 @@ hog_add_tests(hog_planet
     tests/places_tests.cpp
     tests/plates_tests.cpp
     tests/projection_tests.cpp
+    tests/rainfall_tests.cpp
     tests/system_tests.cpp
     tests/rivers_tests.cpp
     tests/seasons_tests.cpp

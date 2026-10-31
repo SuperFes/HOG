@@ -8,6 +8,7 @@
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/source_hash.hpp>
+#include <hog/planet/temperature.hpp>
 #include <hog/planet/tile.hpp>
 
 #include <algorithm>
@@ -243,6 +244,25 @@ constexpr std::int64_t shore_steepest = fixed_one * 15 / 100;
     return Continents{config.seed, std::move(crust), std::move(plates)};
 }
 
+// The rain over the crust map's ground, where there is one.
+[[nodiscard]] std::shared_ptr<const Rainfall> rainfall_of(const Continents& continents,
+                                                          const PlanetConfig& config) {
+    const CrustMap* crust = continents.crust_map();
+    if (crust == nullptr) {
+        return nullptr;
+    }
+    const Temperature temperature{config.seed};
+    const LevelGrid& grid = crust->grid();
+    std::vector<std::int64_t> ground(grid.size());
+    std::vector<std::int64_t> warmth(grid.size());
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        ground[index] = crust->heights()[index] - crust->sea_level();
+        warmth[index] = temperature.at(cell_center(grid.cell(index)), ground[index]);
+    }
+    return std::make_shared<const Rainfall>(grid, ground, warmth, config.radius,
+                                            Rainfall::Settings{});
+}
+
 } // namespace
 
 Elevation::Elevation(const PlanetConfig& config)
@@ -255,7 +275,7 @@ Elevation::Elevation(const PlanetConfig& config)
       hill_frequency_{config.radius / hill_wavelength},
       relief_seed_{hash_combine(config.seed, relief_salt)},
       shore_seed_{hash_combine(config.seed, shore_salt)}, beds_{config.seed, config.radius},
-      evolving_{std::make_shared<Evolving>(config)} {}
+      rainfall_{rainfall_of(continents_, config)}, evolving_{std::make_shared<Evolving>(config)} {}
 
 Elevation::Evolved::Evolved(Landform worn, std::span<const std::int64_t> ground,
                             const PlanetConfig& config)
@@ -370,6 +390,7 @@ Landform Elevation::wear(LevelGrid grid, std::uint64_t seed,
         return std::llround(value * static_cast<double>(fixed_one));
     };
     const Moisture moisture{seed};
+    const Temperature temperature{seed};
     std::vector<std::int64_t> heights(grid.size());
     std::vector<std::int64_t> uplift(grid.size());
     std::vector<std::int64_t> hardness(grid.size());
@@ -380,7 +401,8 @@ Landform Elevation::wear(LevelGrid grid, std::uint64_t seed,
     std::vector<double> ice_age_warmth(grid.size());
     for (std::uint32_t index = 0; index < grid.size(); ++index) {
         const CellId cell = grid.cell(index);
-        heights[index] = raised(cell);
+        const std::int64_t standing = raised(cell);
+        heights[index] = standing;
         if (settled_) {
             // The crust starts without what boundaries are piling up and rises by it as it wears,
             // so ranges are cut while they rise rather than stamped in.
@@ -396,7 +418,9 @@ Landform Elevation::wear(LevelGrid grid, std::uint64_t seed,
             uplift[index] = fixed(rising + (mountain_uplift * fixed_to_double(mountains)));
         }
         hardness[index] = fixed(erodibility);
-        runoff[index] = moisture.at(cell, continents_.height(cell));
+        runoff[index] =
+            rainfall_ ? wetness(rainfall_->at(cell), temperature.at(cell_center(cell), standing))
+                      : moisture.at(cell, continents_.height(cell));
         columns[index] = beds_.column(cell, bed_setting(cell, heights[index]));
         // A rough climate, before there is one: warm low and near the equator, wet as the
         // circulation bands have it.

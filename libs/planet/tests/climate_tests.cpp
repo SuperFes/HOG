@@ -2,6 +2,7 @@
 #include <hog/planet/climate.hpp>
 #include <hog/planet/neighbors.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/planet/rainfall.hpp>
 #include <hog/planet/tile.hpp>
 #include <hog/testing/quick.hpp>
 #include <hog/testing/worlds.hpp>
@@ -375,4 +376,17 @@ TEST_CASE("a cell's surface reads as its climate does, wet through under water",
     }
     CHECK(land > 0);
     CHECK(water > 0);
+}
+
+TEST_CASE("A settled world's ground is as wet as the winds' rain makes it", "[planet][climate]") {
+    auto config = planet(3);
+    CHECK(hog::planet::Elevation{config}.rainfall() == nullptr);
+    config.generator = hog::planet::Generator::Evolved;
+    const Climate climate{config};
+    const hog::planet::Rainfall* rainfall = climate.terrain().rainfall();
+    REQUIRE(rainfall != nullptr);
+    for (const CellId cell : cells_at(3)) {
+        const std::int64_t temperature = climate.temperature(cell);
+        CHECK(climate.moisture(cell) == hog::planet::wetness(rainfall->at(cell), temperature));
+    }
 }
