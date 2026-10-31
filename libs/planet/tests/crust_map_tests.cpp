@@ -203,3 +203,25 @@ TEST_CASE("Old continent is worn down nearer the sea than young", "[crust_map]")
     REQUIRE(young_count > 0);
     CHECK(old_excess / old_count < young_excess / young_count);
 }
+
+TEST_CASE("Margins were stretched wider in some places and narrower in others", "[crust_map]") {
+    // Never worn, so what's settled is what the margins left.
+    const CrustMap::Settings even{.margin_variation = 0.0, .wearing_halving = 1e12};
+    CrustMap::Settings varied = even;
+    varied.margin_variation = 0.6;
+    const CrustMap straight = crust_of(19, even);
+    const CrustMap wandering = crust_of(19, varied);
+    const auto settled = [](const CrustMap::Column& column) {
+        return column.thickness - column.active - column.worn;
+    };
+    int thinner = 0;
+    int thicker = 0;
+    for (std::size_t index = 0; index < straight.columns().size(); ++index) {
+        const double change =
+            settled(wandering.columns()[index]) - settled(straight.columns()[index]);
+        thinner += change < -0.5 ? 1 : 0;
+        thicker += change > 0.5 ? 1 : 0;
+    }
+    CHECK(thinner > 0);
+    CHECK(thicker > 0);
+}

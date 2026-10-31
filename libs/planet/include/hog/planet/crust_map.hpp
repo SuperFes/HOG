@@ -35,6 +35,9 @@ public:
         double oceanic_thickness = 7.0;
         double margin_thickness = 14.0;
         double margin_reach = 30'000.0;
+        // Margins were stretched in segments, each up to this share wider or narrower, so coasts
+        // don't run straight along the terranes' edges.
+        double margin_variation = 0.6;
         // Each terrane settles up to this many kilometres thinner or thicker than continent does,
         // so some stand as uplands and others lie low enough for the sea to flood.
         double terrane_spread = 4.0;
@@ -131,7 +134,7 @@ public:
 
 private:
     void assemble(std::uint64_t seed);
-    void thin_margins();
+    void thin_margins(std::uint64_t seed);
     void age_ocean();
     void join_terranes();
     void meet_at_boundaries();

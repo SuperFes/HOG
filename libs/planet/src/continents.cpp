@@ -365,8 +365,11 @@ template <int Bits>
 std::int64_t Continents::field(CellId cell, CellId warped) const {
     constexpr int finer = Bits - fixed_fraction_bits;
     const std::int64_t noise = fbm(seed_, noise_point<Bits>(cell_center(cell), frequency), octaves);
-    const std::int64_t plate = (plates_->grid().sample(crust_, warped) << finer) -
-                               (plates_->grid().sample(rifts_, warped) << finer);
+    // Crust from a map is read smoothly, so neither its coasts nor its sea floor follow the
+    // grid's cells.
+    const std::int64_t crust = crust_map_ ? plates_->grid().smooth(crust_, warped)
+                                          : plates_->grid().sample(crust_, warped);
+    const std::int64_t plate = (crust << finer) - (plates_->grid().sample(rifts_, warped) << finer);
     return ((noise * noise_share_) + (plate * crust_share_)) >> fixed_fraction_bits;
 }
 
@@ -376,7 +379,7 @@ std::int64_t Continents::field(CellId cell) const {
 }
 
 std::int64_t Continents::uplift(CellId cell) const {
-    return uplift_.empty() ? 0 : plates_->grid().sample(uplift_, warped(cell));
+    return uplift_.empty() ? 0 : plates_->grid().smooth(uplift_, warped(cell));
 }
 
 template <int Bits>

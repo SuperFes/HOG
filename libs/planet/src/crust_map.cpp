@@ -23,6 +23,11 @@ namespace {
 constexpr std::uint64_t terrane_salt = 0x7465'7272'616E'6500ULL; // "terrane"
 constexpr std::uint64_t gather_salt = 0x6761'7468'6572'0000ULL;  // "gather"
 constexpr std::uint64_t rough_salt = 0x726F'7567'6800'0001ULL;
+constexpr std::uint64_t margin_salt = 0x6D61'7267'696E'0000ULL; // "margin"
+
+// Margin segments are some 20 to 40 km long on the dev planet.
+constexpr double margin_frequency = 6.0;
+constexpr int margin_octaves = 2;
 
 // Terranes grow against ground whose resistance varies this much either way, so their edges, and
 // the coasts along them, wander instead of running straight.
@@ -325,7 +330,7 @@ CrustMap::CrustMap(std::uint64_t seed, std::shared_ptr<const Plates> plates, Set
                "continental share out of range");
     HOG_ASSERT(settings_.continents >= 1, "at least one continent");
     assemble(seed);
-    thin_margins();
+    thin_margins(seed);
     age_ocean();
     join_terranes();
     meet_at_boundaries();
@@ -368,7 +373,7 @@ void CrustMap::assemble(std::uint64_t seed) {
     }
 }
 
-void CrustMap::thin_margins() {
+void CrustMap::thin_margins(std::uint64_t seed) {
     const LevelGrid& grid = this->grid();
     std::vector<std::uint32_t> shore;
     for (std::uint32_t index = 0; index < grid.size(); ++index) {
@@ -385,13 +390,19 @@ void CrustMap::thin_margins() {
     const auto from_ocean = nearest(grid, shore, [&](std::uint32_t /*from*/, std::uint32_t to) {
         return columns_[to].kind == Kind::Continental;
     });
+    const std::uint64_t segment_seed = hash_combine(seed, margin_salt);
     for (std::uint32_t index = 0; index < grid.size(); ++index) {
         Column& column = columns_[index];
         if (column.kind != Kind::Continental || from_ocean[index].source == none) {
             continue;
         }
-        const double in =
-            std::min(fixed_to_double(from_ocean[index].distance) / settings_.margin_reach, 1.0);
+        // Read where the margin meets the ocean, so the whole width of a segment is alike.
+        const DVec3 shore_at = cell_center(grid.cell(from_ocean[index].source));
+        const double segment = fixed_to_double(
+            fbm(segment_seed, noise_point(shore_at, margin_frequency), margin_octaves));
+        const double reach =
+            settings_.margin_reach * (1.0 + (settings_.margin_variation * segment));
+        const double in = std::min(fixed_to_double(from_ocean[index].distance) / reach, 1.0);
         column.thickness -=
             (column.thickness - settings_.margin_thickness) * (1.0 - in) * (1.0 - in);
     }
