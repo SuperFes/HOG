@@ -472,10 +472,20 @@ TEST_CASE("a scene draws others where they stand", "[client][scene][gpu]") {
     const hog::DVec2 middle = drawn_at(shot, feet + (up * 1.0));
     const Rgb before = pixel(*alone, middle);
     const Rgb after = pixel(*seen, middle);
+    const hog::DVec2 overhead = drawn_at(shot, feet + (up * 2.5));
+    const Rgb above = pixel(*alone, overhead);
+    const Rgb still_above = pixel(*seen, overhead);
     INFO("before " << before.r << ", " << before.g << ", " << before.b);
     INFO("after " << after.r << ", " << after.g << ", " << after.b);
-    // Redder than the grass behind, though seen against the sun.
-    CHECK(after.r - after.g > before.r - before.g + 20);
+    // Hiding the ground behind, redder than it though seen against the sun, whatever grows
+    // there; and nothing over their head.
+    CHECK(std::abs(after.r - before.r) + std::abs(after.g - before.g) +
+              std::abs(after.b - before.b) >
+          60);
+    CHECK(after.r - after.g > before.r - before.g);
+    CHECK(still_above.r == above.r);
+    CHECK(still_above.g == above.g);
+    CHECK(still_above.b == above.b);
     CHECK(device->validation_errors() == 0);
 }
 
