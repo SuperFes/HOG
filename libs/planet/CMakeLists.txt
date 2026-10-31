@@ -6,6 +6,7 @@ add_library(hog_planet
     src/change.cpp
     src/climate.cpp
     src/continents.cpp
+    src/crust_map.cpp
     src/drainage.cpp
     src/elevation.cpp
     src/ephemeris.cpp
@@ -63,6 +64,7 @@ hog_add_tests(hog_planet
     tests/change_tests.cpp
     tests/climate_tests.cpp
     tests/continents_tests.cpp
+    tests/crust_map_tests.cpp
     tests/drainage_tests.cpp
     tests/elevation_tests.cpp
     tests/erosion_tests.cpp
