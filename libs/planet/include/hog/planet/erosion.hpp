@@ -35,6 +35,9 @@ struct Erosion {
     std::span<std::int64_t> risen = {};
     // Whether ground under the sea rises too, so it can lift out of it.
     bool seabed_rises = false;
+    // Whether the rock rivers wear off is laid in the lakes they run into, filling them from where
+    // they flow in up to their levels, so basins fill into plains; otherwise it's lost.
+    bool fills_basins = false;
 };
 
 // One step of uplift and river erosion (stream power with n = 1 and m = 1/2, solved implicitly

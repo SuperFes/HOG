@@ -421,7 +421,8 @@ Landform Elevation::wear(LevelGrid grid, std::uint64_t seed,
                                 [&](std::uint32_t index, std::int64_t height) {
                                     return yielding(beds_.rock_at(columns[index], height));
                                 },
-                            .seabed_rises = settled_},
+                            .seabed_rises = settled_,
+                            .fills_basins = settled_},
                     Hillslope{.creep = creeping,
                               .weathering = weathered,
                               .rock =

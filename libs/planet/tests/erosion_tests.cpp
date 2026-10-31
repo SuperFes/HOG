@@ -197,3 +197,47 @@ TEST_CASE("the sea floor rises too where it's let, but is never worn", "[planet]
         }
     }
 }
+
+TEST_CASE("what rivers wear off fills the basins they run into, never over their rims",
+          "[planet][erosion]") {
+    // A closed basin 300 m deep in the middle of the land.
+    const hog::DVec3 middle = glm::normalize(hog::DVec3{0.3, 0.2, 0.6});
+    std::vector<std::int64_t> start = land();
+    std::vector<bool> basin(grid().size(), false);
+    std::int64_t rim = 0;
+    for (std::uint32_t cell = 0; cell < grid().size(); ++cell) {
+        const double off = glm::length(center(cell) - middle);
+        if (off < 0.12) {
+            basin[cell] = true;
+            start[cell] -= 300 * fixed_one;
+        } else if (off < 0.16) {
+            rim = std::max(rim, start[cell]);
+        }
+    }
+    const Fields fields{0.0};
+    const auto worn = [&](bool fills) {
+        std::vector<std::int64_t> heights = start;
+        Erosion erosion = fields.erosion();
+        erosion.fills_basins = fills;
+        for (int step = 0; step < 10; ++step) {
+            std::ignore = hog::planet::erode(grid(), heights, erosion);
+        }
+        return heights;
+    };
+    const auto held = [&](const std::vector<std::int64_t>& heights) {
+        std::int64_t total = 0;
+        for (std::uint32_t cell = 0; cell < grid().size(); ++cell) {
+            if (basin[cell]) {
+                total += heights[cell] - start[cell];
+            }
+        }
+        return total;
+    };
+    const auto filled = worn(true);
+    CHECK(held(filled) > held(worn(false)));
+    for (std::uint32_t cell = 0; cell < grid().size(); ++cell) {
+        if (basin[cell]) {
+            CHECK(filled[cell] <= rim);
+        }
+    }
+}
