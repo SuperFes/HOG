@@ -71,11 +71,16 @@ struct Crust {
 // How ocean floor diving under a plate thickens it: out from the trench across the plate over
 // it, over so many places of the grid, by so many kilometres every million years, `erupted` of
 // it as lava on top and the rest set inside as plutons, some five to one (White, Crisp & Spera
-// 2006).
+// 2006). What's piled on the floor over the basalt it formed as is scraped off onto the plate over
+// the trench but for the `subducted` kilometres under the fault it slides on, where the two close
+// slower than `scraping` millimetres a year, as trenches fed over a kilometre of sediment and
+// closing slower than that build out (Clift & Vannucchi 2004); faster, it all goes down.
 struct Arcs {
     int reach = 3;
     float growth = 0.06F;
     float erupted = 1.0F / 6.0F;
+    float subducted = 1.0F;
+    float scraping = 76.0F;
 };
 
 // How continental crust piled up into ranges bears its own weight: past `strongest` kilometres
@@ -494,6 +499,9 @@ private:
     void take_in(std::uint32_t plate, std::uint32_t from);
     // Thickens the plate on top out from each of the `trenches`, places of the grid.
     void raise_arcs(std::span<const std::uint32_t> trenches, double years, Arcs arcs);
+    // Scrapes what's piled on the floor at `index` of `plate` diving under plate `over` off onto
+    // the crust over it, as `arcs` says.
+    void scrape_off(std::uint32_t plate, std::size_t index, std::uint32_t over, const Arcs& arcs);
 
     LevelGrid grid_;
     std::vector<Plate> plates_;

@@ -1048,25 +1048,30 @@ void Lithosphere::subduct(double years, Arcs arcs) {
     const std::vector<bool> overrides = overriding();
     std::vector<std::vector<std::size_t>> diving(plates_.size());
     std::vector<std::uint32_t> trenches;
-    std::vector<std::uint8_t> dives;
+    std::vector<std::optional<std::uint32_t>> overs;
+    std::vector<std::tuple<std::uint32_t, std::size_t, std::uint32_t>> scraped;
     for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
         const Plate& carrier = plates_[plate];
         const auto cells = static_cast<std::uint32_t>(carrier.cells.size());
-        dives.assign(cells, 0);
+        overs.assign(cells, std::nullopt);
         each(jobs_, cells, places_per_job, [&](std::uint32_t index, std::uint32_t /*thread*/) {
             const Crust& crust = carrier.crust[index];
-            const DVec3 at = to_planet(plate, cell_center(grid_.cell(carrier.cells[index])));
-            const bool under = crust.type == CrustType::Oceanic &&
-                               overlying(plate, crust.type, at, overrides).has_value();
-            dives[index] = under ? 1 : 0;
+            if (crust.type == CrustType::Oceanic) {
+                const DVec3 at = to_planet(plate, cell_center(grid_.cell(carrier.cells[index])));
+                overs[index] = overlying(plate, crust.type, at, overrides);
+            }
         });
         for (std::uint32_t index = 0; index < cells; ++index) {
-            if (dives[index] != 0) {
+            if (const std::optional<std::uint32_t>& over = overs[index]) {
                 diving[plate].push_back(index);
                 const DVec3 at = to_planet(plate, cell_center(grid_.cell(carrier.cells[index])));
                 trenches.push_back(grid_.index(cell_at(at, grid_.level())));
+                scraped.emplace_back(plate, index, *over);
             }
         }
+    }
+    for (const auto& [plate, index, over] : scraped) {
+        scrape_off(plate, index, over, arcs);
     }
     for (std::uint32_t plate = 0; plate < plates_.size(); ++plate) {
         // A slab hangs on from the floor left at the trench, not the floor gone down it.
@@ -1081,6 +1086,35 @@ void Lithosphere::subduct(double years, Arcs arcs) {
         bound(plate);
     }
     raise_arcs(trenches, years, arcs);
+}
+
+void Lithosphere::scrape_off(std::uint32_t plate, std::size_t index, std::uint32_t over,
+                             const Arcs& arcs) {
+    // Plates turn as fast as Earth's, so their speeds are Earth's at its size.
+    constexpr double mm_a_year_per_radian_a_million = 6'371.0;
+    const Crust& floor = plates_[plate].crust[index];
+    const DVec3 at = to_planet(plate, cell_center(grid_.cell(plates_[plate].cells[index])));
+    const std::optional<std::size_t> onto = held(over, at);
+    const double closing =
+        glm::length(velocity(plate, at) - velocity(over, at)) * mm_a_year_per_radian_a_million;
+    const float piled = floor.thickness - Crust{}.thickness - arcs.subducted;
+    if (!onto || piled <= 0.0F || closing >= static_cast<double>(arcs.scraping)) {
+        return;
+    }
+    Crust& front = plates_[over].crust[*onto];
+    // Volume for volume, between cells of the same grid in different places.
+    const auto share =
+        static_cast<float>(static_cast<double>(grid_.area(plates_[plate].cells[index])) /
+                           static_cast<double>(grid_.area(plates_[over].cells[*onto])));
+    Cover cover = floor.cover;
+    for (float& layer : cover) {
+        layer *= share;
+    }
+    lay(front, piled * share, cover);
+    if (front.type == CrustType::Oceanic && front.thickness >= arc_continent) {
+        front.type = CrustType::Continental;
+        front.raised = 0.0F;
+    }
 }
 
 std::vector<Plume> plumes(std::uint64_t seed, double radius, const Plumes& settings) {

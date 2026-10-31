@@ -414,6 +414,51 @@ TEST_CASE("an arc's lava buried deep is baked into crystalline rock", "[planet][
     CHECK(raised > 0);
 }
 
+TEST_CASE(
+    "what's piled on diving floor is scraped off onto the plate over it where they close slowly",
+    "[planet][lithosphere]") {
+    // The halves, their floor piled 5 km deep, closing at `rate` radians a million years each.
+    const LevelGrid grid{4, radius};
+    const DVec3 pole{1.0, 0.0, 0.0};
+    const Crust piled{.thickness = 12.0F, .cover = {2.0F, 3.0F}};
+    const auto meeting = [&](double rate) {
+        Lithosphere::Plate south = northern(grid, everywhere(grid, piled, pole, -rate));
+        south.frame = glm::angleAxis(std::numbers::pi, pole);
+        Lithosphere lithosphere{grid, {northern(grid, everywhere(grid, piled, pole, rate)), south}};
+        lithosphere.advance(20.0);
+        return lithosphere;
+    };
+    const auto volume = [&](const Lithosphere& lithosphere) {
+        double total = 0.0;
+        for (const auto& plate : lithosphere.plates()) {
+            for (std::size_t index = 0; index < plate.cells.size(); ++index) {
+                total += static_cast<double>(grid.area(plate.cells[index])) *
+                         static_cast<double>(plate.crust[index].thickness);
+            }
+        }
+        return total;
+    };
+    // What goes down, as it is and with nothing ever scraped off.
+    const auto lost = [&](const Lithosphere& moved, float scraping) {
+        Lithosphere lithosphere = moved;
+        lithosphere.subduct(20.0, {.growth = 0.0F, .scraping = scraping});
+        return volume(moved) - volume(lithosphere);
+    };
+    const hog::planet::Arcs arcs;
+    // Some 25 mm a year: all but the kilometre under the fault is scraped off.
+    const Lithosphere slow = meeting(0.002);
+    const double all = lost(slow, 0.0F);
+    REQUIRE(all > 0.0);
+    CHECK_THAT(
+        lost(slow, arcs.scraping),
+        WithinRel(all * static_cast<double>((Crust{}.thickness + arcs.subducted) / piled.thickness),
+                  1e-4));
+    // Some 130 mm a year: it goes down but where they turn slower, nearer their pole.
+    const Lithosphere fast = meeting(0.01);
+    CHECK(lost(fast, arcs.scraping) < lost(fast, 0.0F));
+    CHECK(lost(fast, arcs.scraping) > 0.9 * lost(fast, 0.0F));
+}
+
 TEST_CASE("plumes rise anywhere, each as buoyant as its own, bringing more under a bigger planet",
           "[planet][lithosphere]") {
     using hog::planet::plumes;
