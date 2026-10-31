@@ -54,6 +54,9 @@ Landform::Landform(LevelGrid grid, std::vector<std::int64_t> heights, const Eros
     : grid_{std::move(grid)}, heights_{std::move(heights)}, soil_(heights_.size(), 0),
       risen_(heights_.size(), 0), carved_(heights_.size(), 0) {
     HOG_ASSERT(heights_.size() == grid_.size(), "one height per grid cell");
+    HOG_ASSERT(erosion.sea_levels.empty() ||
+                   erosion.sea_levels.size() >= static_cast<std::size_t>(steps),
+               "a sea level for every step");
     const std::vector<std::int64_t> start = heights_;
     for (int step = 0; step < steps; ++step) {
         Erosion now = erosion;
@@ -62,18 +65,20 @@ Landform::Landform(LevelGrid grid, std::vector<std::int64_t> heights, const Eros
         now.wander =
             erosion.wander == 0 ? 0 : hash_values(erosion.wander, static_cast<std::uint64_t>(step));
         const std::vector<std::int64_t> before = heights_;
-        std::ignore = erode(grid_, heights_, now);
+        const std::int64_t sea =
+            erosion.sea_levels.empty() ? 0 : erosion.sea_levels[static_cast<std::size_t>(step)];
+        std::ignore = erode(grid_, heights_, now, sea);
         if (!hillslope.creep.empty()) {
             // Rivers carry off the soil before cutting into the rock.
             for (std::size_t cell = 0; cell < heights_.size(); ++cell) {
                 const std::int64_t rose =
-                    before[cell] > 0 || erosion.seabed_rises ? erosion.uplift[cell] : 0;
+                    before[cell] > sea || erosion.seabed_rises ? erosion.uplift[cell] : 0;
                 const std::int64_t cut = before[cell] + rose - heights_[cell];
                 soil_[cell] = std::max<std::int64_t>(soil_[cell] - cut, 0);
             }
             Hillslope slopes = hillslope;
             slopes.risen = risen_;
-            wear_slopes(grid_, heights_, soil_, slopes);
+            wear_slopes(grid_, heights_, soil_, slopes, sea);
         }
         if (stepped) {
             stepped(step + 1);

@@ -38,6 +38,10 @@ struct Erosion {
     // Whether the rock rivers wear off is laid in the lakes they run into, filling them from where
     // they flow in up to their levels, so basins fill into plains; otherwise it's lost.
     bool fills_basins = false;
+    // Fixed-point metres the sea stands at in each step of a landform's evolution, as ice ages
+    // draw it down; at its level throughout if empty.
+    // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+    std::span<const std::int64_t> sea_levels = {};
 };
 
 // One step of uplift and river erosion (stream power with n = 1 and m = 1/2, solved implicitly

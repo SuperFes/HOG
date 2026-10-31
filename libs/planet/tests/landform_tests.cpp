@@ -11,9 +11,12 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <numbers>
 #include <random>
 #include <ranges>
+#include <span>
+#include <utility>
 #include <vector>
 
 using hog::planet::CellId;
@@ -304,4 +307,58 @@ TEST_CASE("the landform's slope runs up the ground as steeply as it rises", "[pl
     CHECK(glm::dot(glm::normalize(uphill), north) > 0.99);
     CHECK(glm::length(uphill) ==
           Catch::Approx(2'000.0 * std::cos(latitude) / radius).epsilon(0.05));
+}
+
+TEST_CASE("rivers cut down to a sea the ice ages drew down, and its return drowns their valleys",
+          "[planet][landform]") {
+    constexpr int steps = 30;
+    LevelGrid grid{level, 115'000.0};
+    // Land sloping down to a shelf 60 m under the sea, then the deep.
+    std::vector<std::int64_t> heights;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const hog::DVec3 at = hog::planet::cell_center(grid.cell(cell));
+        double metres = -1'000.0;
+        if (at.z > -0.3) {
+            metres = 20.0 + (800.0 * (at.z + 0.3)) +
+                     (60.0 * std::sin(17.0 * at.x) * std::cos(13.0 * at.y));
+        } else if (at.z > -0.4) {
+            metres = -60.0;
+        }
+        heights.push_back(std::llround(metres * static_cast<double>(fixed_one)));
+    }
+    const std::vector<std::int64_t> uplift(grid.size(), 0);
+    const std::vector<std::int64_t> erodibility(grid.size(), fixed_one / 20);
+    const std::vector<std::int64_t> runoff(grid.size(), fixed_one / 2);
+    const auto evolved = [&](std::span<const std::int64_t> sea_levels) {
+        return Landform{grid,
+                        heights,
+                        {.uplift = uplift,
+                         .erodibility = erodibility,
+                         .runoff = runoff,
+                         .sea_levels = sea_levels},
+                        hog::planet::Hillslope{},
+                        steps};
+    };
+    std::vector<std::int64_t> ice_ages(steps, 0);
+    std::fill(ice_ages.begin() + (steps / 2), ice_ages.end(), -120 * fixed_one);
+    const Landform high = evolved({});
+    const Landform low = evolved(ice_ages);
+    // Of the ground that was land, the deepest it was cut, and how much is under the sea now.
+    const auto cut = [&](const Landform& landform) {
+        std::int64_t deepest = std::numeric_limits<std::int64_t>::max();
+        int drowned = 0;
+        for (std::uint32_t cell = 0; cell < heights.size(); ++cell) {
+            if (heights[cell] > 0) {
+                deepest = std::min(deepest, landform.heights()[cell]);
+                drowned += landform.heights()[cell] < 0 ? 1 : 0;
+            }
+        }
+        return std::pair{deepest, drowned};
+    };
+    const auto [high_deepest, high_drowned] = cut(high);
+    const auto [low_deepest, low_drowned] = cut(low);
+    CHECK(high_deepest >= 0);
+    CHECK(high_drowned == 0);
+    CHECK(low_deepest < -10 * fixed_one);
+    CHECK(low_drowned > 0);
 }

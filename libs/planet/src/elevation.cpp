@@ -61,6 +61,11 @@ constexpr std::int64_t erosion = 2 * fixed_unit<Bits>;
 
 // Rivers wear the land for 5 million years in steps of 100,000, told every few steps.
 constexpr int landform_steps = 50;
+// Through the ice ages of the last 2.6 million years the sea fell this many metres in each
+// cycle, and rivers cut down to it across the shelf; the sea has risen since too lately to fill
+// the valleys it drowned.
+constexpr int ice_age_steps = 26;
+constexpr std::int64_t ice_age_sea_drop = 120;
 constexpr int landform_progress = 5;
 // Metres per step: 0.2 mm a year in the heart of a mountain belt, and a slow rise over the
 // continents.
@@ -435,6 +440,12 @@ Landform Elevation::wear(LevelGrid grid, std::uint64_t seed,
         weathered[index] = fixed(weathering_per_step * (((0.15 + (0.85 * wet)) * warm) +
                                                         (frost ? frost_weathering : 0.0)));
     }
+    std::vector<std::int64_t> sea_levels;
+    if (settled_) {
+        sea_levels.assign(landform_steps, 0);
+        std::fill(sea_levels.end() - ice_age_steps, sea_levels.end(),
+                  -ice_age_sea_drop * fixed_one);
+    }
     return Landform{std::move(grid),
                     std::move(heights),
                     Erosion{.uplift = uplift,
@@ -446,7 +457,8 @@ Landform Elevation::wear(LevelGrid grid, std::uint64_t seed,
                                     return yielding(beds_.rock_at(columns[index], height));
                                 },
                             .seabed_rises = settled_,
-                            .fills_basins = settled_},
+                            .fills_basins = settled_,
+                            .sea_levels = sea_levels},
                     Hillslope{.creep = creeping,
                               .weathering = weathered,
                               .rock =
