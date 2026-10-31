@@ -5,8 +5,10 @@
 #include <hog/client/forecast.hpp>
 #include <hog/client/picture.hpp>
 #include <hog/client/scene.hpp>
+#include <hog/client/views.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/planet/noise.hpp>
+#include <hog/planet/places.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tangent_frame.hpp>
 #include <hog/planet/world.hpp>
@@ -14,8 +16,10 @@
 #include <hog/render/camera.hpp>
 #include <hog/render/cloud_quality.hpp>
 #include <hog/render/gpu_timer.hpp>
+#include <hog/render/readback.hpp>
 #include <hog/sim/calendar.hpp>
 #include <hog/terrain/bend.hpp>
+#include <hog/terrain/river_water.hpp>
 #include <hog/terrain/shore.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -29,6 +33,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <format>
+#include <map>
 #include <numbers>
 #include <optional>
 #include <string_view>
@@ -76,6 +81,51 @@ Shot over_the_woods(double altitude = 1'500.0, double pitch = -0.2) {
         hog::client::start_flight(woods(), radius, altitude, hog::planet::north_pole);
     flight.pitch = pitch;
     return shot_of(flight);
+}
+
+Shot on_the_island(double altitude, double pitch) {
+    const double radius = world().geology().planet_radius();
+    const hog::DVec3 middle = hog::client::testing::nearest_biome(hog::planet::Biome::Grassland);
+    const auto tall = [&](hog::DVec3 point) {
+        const auto biome = world().state(hog::planet::cell_at(glm::normalize(point))).biome;
+        return biome == hog::planet::Biome::Grassland || biome == hog::planet::Biome::Savanna ||
+               biome == hog::planet::Biome::Wetland;
+    };
+    std::map<int, int> seen;
+    {
+        const hog::planet::TangentFrame frame = hog::planet::tangent_frame(middle);
+        const hog::DVec3 outward = frame.north;
+        const hog::DVec3 aside = frame.east;
+        for (int a = -40; a <= 40; ++a) {
+            for (int b = -40; b <= 40; ++b) {
+                const hog::DVec3 there = glm::normalize(
+                    middle +
+                    (((outward * static_cast<double>(a)) + (aside * static_cast<double>(b))) *
+                     (150.0 / radius)));
+                ++seen[static_cast<int>(world().state(hog::planet::cell_at(there)).biome)];
+                bool all = tall(there);
+                for (const double off : {-150.0, 150.0}) {
+                    all = all && tall(there + (outward * (off / radius))) &&
+                          tall(there + (aside * (off / radius)));
+                }
+                if (all &&
+                    hog::client::ground_under(world(), hog::WorldPosition{there * radius}) > 3.0) {
+                    const double ground =
+                        hog::client::ground_under(world(), hog::WorldPosition{there * radius});
+                    hog::client::Flight flight = hog::client::start_flight(
+                        there, radius, ground + altitude,
+                        glm::normalize(there + (outward * (1'000.0 / radius))));
+                    flight.pitch = pitch;
+                    return shot_of(flight);
+                }
+            }
+        }
+    }
+    for (const auto& [biome, count] : seen) {
+        WARN("biome " << biome << ": " << count);
+    }
+    FAIL("no tall grass");
+    return {};
 }
 
 // `altitude` metres over the sea `out` metres off the coast nearest the start, looking back at the
@@ -588,7 +638,11 @@ TEST_CASE("a windy sea, to look at", "[.look]") {
                              Look{.name = "evening", .pitch = -0.05, .time_of_day = 0.64},
                              Look{.name = "shore", .pitch = -0.1, .time_of_day = 0.5},
                              Look{.name = "beach", .pitch = -0.08, .time_of_day = 0.45},
-                             Look{.name = "coast", .pitch = -0.25, .time_of_day = 0.45}}) {
+                             Look{.name = "coast", .pitch = -0.25, .time_of_day = 0.45},
+                             Look{.name = "t30", .pitch = -0.1, .time_of_day = 0.30},
+                             Look{.name = "t38", .pitch = -0.1, .time_of_day = 0.38},
+                             Look{.name = "t62", .pitch = -0.1, .time_of_day = 0.62},
+                             Look{.name = "t70", .pitch = -0.1, .time_of_day = 0.70}}) {
         Shot shot = at_sea(look.pitch);
         if (look.name == "shore") {
             shot = over_the_woods(20.0, look.pitch);
@@ -931,5 +985,526 @@ TEST_CASE("rain on the sea, to look at", "[.look]") {
             REQUIRE(hog::client::save_picture(
                 std::filesystem::path{where} / std::format("{}_rain_{}.png", rain, name), *still));
         }
+    }
+}
+
+TEST_CASE("a windy meadow, to look at", "[.look]") {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
+    const char* where = std::getenv("HOG_LOOK");
+    REQUIRE(where != nullptr);
+    const auto device = test_device();
+    hog::jobs::JobSystem jobs{4};
+    auto scene = Scene::create(*device, world(), jobs, calendar(), hog::client::still_format, 1);
+    REQUIRE(scene);
+    const hog::protocol::CellWaves none{};
+    const hog::client::Forecast fresh = everywhere(
+        {.drift = {16.0F, 6.0F}, .wind = {9.4F, 3.5F}, .swells = {none, none}, .current = {}});
+    for (const auto& [name, altitude, pitch] :
+         {std::tuple{"high", 120.0, -0.5}, std::tuple{"above", 60.0, -1.0},
+          std::tuple{"low", 20.0, -0.35}}) {
+        Shot shot = on_the_island(altitude, pitch);
+        shot.forecast = &fresh;
+        const auto still =
+            hog::client::draw_still(*device, *scene, shot, {.width = 1600, .height = 900});
+        REQUIRE(still);
+        REQUIRE(hog::client::save_picture(
+            std::filesystem::path{where} / std::format("meadow_{}.png", name), *still));
+    }
+}
+
+TEST_CASE("mountains, to look at", "[.look]") {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
+    const char* where = std::getenv("HOG_LOOK");
+    REQUIRE(where != nullptr);
+    const auto device = test_device();
+    hog::jobs::JobSystem jobs{4};
+    auto scene = Scene::create(*device, world(), jobs, calendar(), hog::client::still_format, 1);
+    REQUIRE(scene);
+    const auto& terrain = world().geology().terrain();
+    const double radius = world().geology().planet_radius();
+    const auto belt =
+        hog::planet::nearest_cell(hog::planet::start_direction, 9, [&](hog::planet::CellId cell) {
+            return terrain.mountain_strength(cell) > hog::planet::fixed_one * 7 / 10 &&
+                   terrain.elevation(cell) > 1'200 * hog::planet::fixed_one;
+        });
+    const auto cone =
+        hog::planet::nearest_cell(hog::planet::start_direction, 9, [&](hog::planet::CellId cell) {
+            return terrain.continents().height(cell) > 0 &&
+                   terrain.volcanoes().lift(cell) > 800 * hog::planet::fixed_one;
+        });
+    REQUIRE(belt);
+    const hog::planet::CellId ridge = belt.value_or(hog::planet::CellId{});
+    for (const auto& [name, place, altitude, pitch, toward] :
+         {std::tuple{"belt_high", ridge, 3'500.0, -0.3, hog::planet::north_pole},
+          std::tuple{"belt_low", ridge, 2'000.0, -0.1, hog::planet::north_pole},
+          std::tuple{"cone", cone.value_or(ridge), 2'500.0, -0.2, hog::planet::north_pole}}) {
+        const hog::DVec3 at = hog::planet::cell_center(place);
+        const hog::planet::TangentFrame frame = hog::planet::tangent_frame(at);
+        // Back off a few kilometres to see it whole.
+        const hog::DVec3 back = glm::normalize(at - (frame.north * (4'000.0 / radius)));
+        hog::client::Flight flight = hog::client::start_flight(back, radius, altitude, toward);
+        flight.pitch = pitch;
+        const auto still = hog::client::draw_still(*device, *scene, shot_of(flight),
+                                                   {.width = 1600, .height = 900});
+        REQUIRE(still);
+        REQUIRE(hog::client::save_picture(
+            std::filesystem::path{where} / std::format("mountains_{}.png", name), *still));
+    }
+}
+
+TEST_CASE("an evolved world, to look at", "[.look]") {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
+    const char* where = std::getenv("HOG_LOOK");
+    REQUIRE(where != nullptr);
+    auto config = hog::planet::load_planet_config(std::filesystem::path{HOG_SOURCE_DIR} / "config" /
+                                                  "planet.toml")
+                      .value();
+    config.generator = hog::planet::Generator::Evolved;
+    const hog::planet::World evolved{config};
+    const auto device = test_device();
+    hog::jobs::JobSystem jobs{4};
+    auto scene = Scene::create(*device, evolved, jobs, calendar(), hog::client::still_format, 1);
+    REQUIRE(scene);
+    const auto& terrain = evolved.geology().terrain();
+    const double radius = evolved.geology().planet_radius();
+    const auto range =
+        hog::planet::nearest_cell(hog::planet::start_direction, 9, [&](hog::planet::CellId cell) {
+            return terrain.mountain_strength(cell) > hog::planet::fixed_one / 2 &&
+                   terrain.elevation(cell) > 2'000 * hog::planet::fixed_one;
+        });
+    const auto plain =
+        hog::planet::nearest_cell(hog::planet::start_direction, 9, [&](hog::planet::CellId cell) {
+            return terrain.mountain_strength(cell) < hog::planet::fixed_one / 10 &&
+                   terrain.elevation(cell) > 100 * hog::planet::fixed_one &&
+                   terrain.elevation(cell) < 800 * hog::planet::fixed_one;
+        });
+    const auto coast =
+        hog::planet::nearest_cell(hog::planet::start_direction, 9, [&](hog::planet::CellId cell) {
+            return terrain.is_land(cell) && terrain.elevation(cell) < 30 * hog::planet::fixed_one;
+        });
+    REQUIRE(range);
+    REQUIRE(plain);
+    REQUIRE(coast);
+    const hog::planet::CellId high = range.value_or(hog::planet::CellId{});
+    for (const auto& [name, place, back_by, altitude, pitch] :
+         {std::tuple{"range_high", high, 12'000.0, 6'000.0, -0.3},
+          std::tuple{"range_low", high, 6'000.0, 3'000.0, -0.1},
+          std::tuple{"plain", plain.value_or(hog::planet::CellId{}), 3'000.0, 600.0, -0.15},
+          std::tuple{"coast", coast.value_or(hog::planet::CellId{}), 4'000.0, 800.0, -0.2},
+          std::tuple{"overview", high, 40'000.0, 25'000.0, -0.5}}) {
+        const hog::DVec3 at = hog::planet::cell_center(place);
+        const hog::planet::TangentFrame frame = hog::planet::tangent_frame(at);
+        const hog::DVec3 back = glm::normalize(at - (frame.north * (back_by / radius)));
+        const double under =
+            std::max({hog::client::ground_under(evolved, hog::WorldPosition{back * radius}),
+                      hog::planet::fixed_to_double(terrain.elevation(place)), 0.0});
+        hog::client::Flight flight = hog::client::start_flight(back, radius, under + altitude, at);
+        flight.pitch = pitch;
+        const auto still = hog::client::draw_still(*device, *scene, shot_of(flight),
+                                                   {.width = 1600, .height = 900});
+        REQUIRE(still);
+        REQUIRE(hog::client::save_picture(
+            std::filesystem::path{where} / std::format("evolved_{}.png", name), *still));
+    }
+}
+
+TEST_CASE("fjords, to look at", "[.look]") {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
+    const char* where = std::getenv("HOG_LOOK");
+    REQUIRE(where != nullptr);
+    const auto config = hog::planet::load_planet_config(std::filesystem::path{HOG_SOURCE_DIR} /
+                                                        "config" / "planet.toml")
+                            .value();
+    const hog::planet::World fine{config};
+    const auto device = test_device();
+    hog::jobs::JobSystem jobs{4};
+    auto scene = Scene::create(*device, fine, jobs, calendar(), hog::client::still_format, 1);
+    REQUIRE(scene);
+    const auto& terrain = fine.geology().terrain();
+    const double radius = fine.geology().planet_radius();
+    const auto fjord =
+        hog::planet::nearest_cell(hog::planet::start_direction, 9, [&](hog::planet::CellId cell) {
+            return terrain.continents().height(cell) > hog::planet::fixed_one / 20 &&
+                   !terrain.is_land(cell);
+        });
+    REQUIRE(fjord);
+    const hog::DVec3 at = hog::planet::cell_center(fjord.value_or(hog::planet::CellId{}));
+    // The deepest trough the ice left inland, high above the sea.
+    const auto& landform = terrain.landform();
+    std::uint32_t inland = 0;
+    for (std::uint32_t index = 0; index < landform.grid().size(); ++index) {
+        if (landform.heights()[index] > 300 * hog::planet::fixed_one &&
+            landform.carved()[index] > landform.carved()[inland]) {
+            inland = index;
+        }
+    }
+    {
+        const hog::DVec3 valley = hog::planet::cell_center(landform.grid().cell(inland));
+        const hog::planet::TangentFrame across = hog::planet::tangent_frame(valley);
+        int view = 0;
+        for (const auto& [away, altitude, pitch] :
+             {std::tuple{across.north, 3'000.0, -0.35}, std::tuple{across.east, 3'000.0, -0.35},
+              std::tuple{-across.north, 3'000.0, -0.35}}) {
+            const hog::DVec3 back = glm::normalize(valley + (away * (6'000.0 / radius)));
+            hog::client::Flight flight = hog::client::start_flight(
+                back, radius, hog::planet::fixed_to_double(landform.heights()[inland]) + altitude,
+                valley);
+            flight.pitch = pitch;
+            const auto still = hog::client::draw_still(*device, *scene, shot_of(flight),
+                                                       {.width = 1600, .height = 900});
+            REQUIRE(still);
+            REQUIRE(hog::client::save_picture(
+                std::filesystem::path{where} / std::format("inland_{}.png", view++), *still));
+        }
+    }
+    const hog::planet::TangentFrame frame = hog::planet::tangent_frame(at);
+    int shot = 0;
+    for (const auto& [away, altitude, pitch] :
+         {std::tuple{frame.north, 1'800.0, -0.3}, std::tuple{frame.east, 1'800.0, -0.3},
+          std::tuple{-frame.north, 1'800.0, -0.3}, std::tuple{-frame.east, 1'800.0, -0.3},
+          std::tuple{frame.north, 6'000.0, -0.7}, std::tuple{-frame.east, 300.0, -0.05}}) {
+        const hog::DVec3 back = glm::normalize(at + (away * (5'000.0 / radius)));
+        hog::client::Flight flight = hog::client::start_flight(back, radius, altitude, at);
+        flight.pitch = pitch;
+        const auto still = hog::client::draw_still(*device, *scene, shot_of(flight),
+                                                   {.width = 1600, .height = 900});
+        REQUIRE(still);
+        REQUIRE(hog::client::save_picture(
+            std::filesystem::path{where} / std::format("fjord_{}.png", shot++), *still));
+    }
+}
+
+TEST_CASE("rivers, to look at", "[.look]") {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
+    const char* where = std::getenv("HOG_LOOK");
+    REQUIRE(where != nullptr);
+    const auto config = hog::planet::load_planet_config(std::filesystem::path{HOG_SOURCE_DIR} /
+                                                        "config" / "planet.toml")
+                            .value();
+    const hog::planet::World fine{config};
+    const auto device = test_device();
+    hog::jobs::JobSystem jobs{4};
+    auto scene = Scene::create(*device, fine, jobs, calendar(), hog::client::still_format, 1);
+    REQUIRE(scene);
+    const auto& terrain = fine.geology().terrain();
+    const double radius = fine.geology().planet_radius();
+    const auto reaches = terrain.rivers().reaches();
+    REQUIRE(!reaches.empty());
+    // The widest river near the start, and a stream.
+    const auto pick = [&](double narrowest, double widest) {
+        const hog::planet::Reach* best = nullptr;
+        double nearest = 1e9;
+        for (const auto& reach : reaches) {
+            const double away = glm::length(reach.from - hog::planet::start_direction) * radius;
+            if (reach.width >= narrowest && reach.width <= widest && reach.fall == 0 &&
+                reach.to_surface > 40 * hog::planet::fixed_one && away < nearest) {
+                nearest = away;
+                best = &reach;
+            }
+        }
+        return best;
+    };
+    for (const auto& [kind, narrowest, widest] :
+         {std::tuple{"river", 15.0, 1e9}, std::tuple{"stream", 4.0, 10.0}}) {
+        const hog::planet::Reach* reach = pick(narrowest, widest);
+        if (reach == nullptr) {
+            continue;
+        }
+        const hog::DVec3 at =
+            terrain.rivers().meander().unshifted(hog::planet::course_at(*reach, 0.5));
+        const double ground = hog::planet::fixed_to_double(
+            terrain.elevation(hog::planet::cell_at(at, hog::planet::max_level)));
+        const hog::DVec3 along = glm::normalize(
+            terrain.rivers().meander().unshifted(hog::planet::course_at(*reach, 0.6)) -
+            terrain.rivers().meander().unshifted(hog::planet::course_at(*reach, 0.4)));
+        const hog::DVec3 side = glm::normalize(glm::cross(at, along));
+        int shot = 0;
+        for (const auto& [away, back, altitude, pitch] :
+             {std::tuple{side, 25.0, 3.0, -0.2}, std::tuple{side, 250.0, 25.0, -0.15},
+              std::tuple{-along, 400.0, 60.0, -0.2}, std::tuple{side, 1'500.0, 500.0, -0.35},
+              std::tuple{-along, 3'000.0, 1'500.0, -0.45}, std::tuple{side, 10.0, 1'200.0, -1.5},
+              std::tuple{-side, 7'000.0, 1'500.0, -0.22},
+              std::tuple{-side, 14'000.0, 3'000.0, -0.22}}) {
+            const hog::DVec3 from = glm::normalize(at + (away * (back / radius)));
+            hog::client::Flight flight =
+                hog::client::start_flight(from, radius, ground + altitude, at);
+            flight.pitch = pitch;
+            const auto still = hog::client::draw_still(*device, *scene, shot_of(flight),
+                                                       {.width = 1600, .height = 900});
+            REQUIRE(still);
+            REQUIRE(hog::client::save_picture(
+                std::filesystem::path{where} / std::format("{}_{}.png", kind, shot++), *still));
+        }
+    }
+}
+
+TEST_CASE("river mouths, to look at", "[.look]") {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
+    const char* where = std::getenv("HOG_LOOK");
+    REQUIRE(where != nullptr);
+    const auto config = hog::planet::load_planet_config(std::filesystem::path{HOG_SOURCE_DIR} /
+                                                        "config" / "planet.toml")
+                            .value();
+    const hog::planet::World fine{config};
+    const auto device = test_device();
+    hog::jobs::JobSystem jobs{4};
+    auto scene = Scene::create(*device, fine, jobs, calendar(), hog::client::still_format, 1);
+    REQUIRE(scene);
+    const auto& terrain = fine.geology().terrain();
+    const double radius = fine.geology().planet_radius();
+    const auto reaches = terrain.rivers().reaches();
+    int shot = 0;
+    for (const int kind : {0, 1, 2}) {
+        const bool sea = kind == 0;
+        const hog::planet::Reach* best = nullptr;
+        double nearest = 1e9;
+        for (const auto& reach : reaches) {
+            const double away = glm::length(reach.from - hog::planet::start_direction) * radius;
+            const bool wanted =
+                kind == 2 ? reach.outflow : reach.mouth && (reach.to_surface == 0) == sea;
+            if (wanted && reach.width >= 8.0 && away < nearest) {
+                nearest = away;
+                best = &reach;
+            }
+        }
+        if (best == nullptr) {
+            continue;
+        }
+        const auto& meander = terrain.rivers().meander();
+        const hog::DVec3 at =
+            meander.unshifted(hog::planet::course_at(*best, kind == 2 ? 0.3 : 0.7));
+        const double level =
+            hog::planet::fixed_to_double(kind == 2 ? best->from_surface : best->to_surface);
+        const hog::DVec3 along =
+            glm::normalize(meander.unshifted(hog::planet::course_at(*best, 0.9)) -
+                           meander.unshifted(hog::planet::course_at(*best, 0.5)));
+        const hog::DVec3 side = glm::normalize(glm::cross(at, along));
+        for (const auto& [away, back, altitude, pitch] :
+             {std::tuple{side, 120.0, 25.0, -0.2}, std::tuple{-along, 300.0, 60.0, -0.2},
+              std::tuple{side, 600.0, 250.0, -0.45}, std::tuple{-along, 40.0, 400.0, -1.4}}) {
+            const hog::DVec3 from = glm::normalize(at + (away * (back / radius)));
+            hog::client::Flight flight =
+                hog::client::start_flight(from, radius, level + altitude, at);
+            flight.pitch = pitch;
+            const auto still = hog::client::draw_still(*device, *scene, shot_of(flight),
+                                                       {.width = 1600, .height = 900});
+            REQUIRE(still);
+            REQUIRE(hog::client::save_picture(
+                std::filesystem::path{where} / std::format("mouth_{}.png", shot++), *still));
+        }
+    }
+}
+
+// Not a check: stills of the spots lakes looked wrong at, from the world as the client has it.
+// Saved where HOG_LOOK names.
+TEST_CASE("lakes at reported spots, to look at", "[.look]") {
+    using namespace hog;
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
+    const char* where = std::getenv("HOG_LOOK");
+    REQUIRE(where != nullptr);
+    const planet::World full{
+        planet::load_planet_config(std::filesystem::path{HOG_SOURCE_DIR} / "config" / "planet.toml")
+            .value()};
+    const auto device = test_device();
+    jobs::JobSystem jobs{4};
+    auto scene = Scene::create(*device, full, jobs, calendar(), client::still_format, 1);
+    REQUIRE(scene);
+    const auto spot = [](std::string_view name, double latitude, double longitude, double altitude,
+                         double heading, double pitch) {
+        return client::FixedView{
+            .name = name,
+            .place = {.latitude = latitude, .longitude = longitude, .altitude = altitude},
+            .heading = heading,
+            .pitch = pitch};
+    };
+    for (const client::FixedView& view : {
+             spot("edge", -24.785802, 63.217964, 99.0, 55.4, -15.6),
+             spot("edge_se", -24.785802, 63.249, 99.0, 116.6, -15.6),
+             spot("edge_nw", -24.785802, 63.249, 99.0, 296.6, -15.6),
+             spot("edge_bank", -24.785802, 63.2553, 99.7, 116.6, -15.6),
+             spot("square_n", -50.727280, 41.779543, 358.0, 0.0, -25.0),
+             spot("square_e", -50.727280, 41.779543, 358.0, 90.0, -25.0),
+             spot("square_s", -50.727280, 41.779543, 358.0, 180.0, -25.0),
+             spot("square_w", -50.727280, 41.779543, 358.0, 270.0, -25.0),
+             spot("seam_n", -49.582354, 42.014867, 373.0, 0.0, -20.0),
+             spot("seam_e", -49.582354, 42.014867, 373.0, 90.0, -20.0),
+             spot("seam_s", -49.582354, 42.014867, 373.0, 180.0, -20.0),
+             spot("seam_w", -49.582354, 42.014867, 373.0, 270.0, -20.0),
+             spot("box_under", -68.190071, 179.063260, 1665.0, -133.6, 10.0),
+             spot("box_over", -68.190071, 179.063260, 1740.0, -133.6, -15.0),
+             spot("lines", -68.467951, -178.644561, 1673.0, 157.0, 62.5),
+             spot("walls_n", -67.471556, 177.539819, 1760.0, 0.0, -12.0),
+             spot("walls_s", -67.471556, 177.539819, 1760.0, 180.0, -12.0),
+             spot("block", -50.727280, 41.779543, 358.0, 120.0, -45.0),
+             spot("block_s", -50.727280, 41.779543, 358.0, 180.0, -45.0),
+             spot("block_grid36", -42.568842, 40.193497, 2231.0, 112.1, -28.3),
+             spot("block_cast", -42.866120, 42.857210, 415.0, 113.1, -23.6),
+             spot("block_cast2", -42.746470, 42.477666, 682.0, 113.4, -23.6),
+             spot("block_corners37", -43.771076, 39.591338, 290.0, 87.7, -59.6),
+             spot("block_high", -42.568842, 40.193497, 3500.0, 112.1, -6.0),
+             spot("under37", -43.771076, 39.591338, 238.4, 87.7, 45.0),
+             spot("under37_w", -43.771076, 39.591338, 238.4, 267.7, 45.0),
+             spot("under37b", -43.771076, 39.594, 238.4, 87.7, 45.0),
+             spot("under37b_w", -43.771076, 39.594, 238.4, 267.7, 45.0),
+             spot("over37b", -43.771076, 39.594, 250.0, 87.7, -30.0),
+             spot("block_high2", -42.568842, 40.193497, 3500.0, 292.1, -6.0),
+             spot("shoal", -28.107171, -44.351725, 21.0, -24.0, -29.9),
+             spot("shoal_low", -28.107171, -44.351725, 4.0, -24.0, -8.0),
+         }) {
+        // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
+        if (const char* only = std::getenv("HOG_LOOK_ONLY");
+            only != nullptr && !view.name.starts_with(only)) {
+            continue;
+        }
+        const hog::protocol::CellWaves swell{
+            .height = 1.4F, .peak = 0.12F, .heading = {0.25F, -0.97F}};
+        const hog::client::Forecast fresh =
+            everywhere({.drift = {16.0F, 6.0F},
+                        .wind = {6.0F, 2.0F},
+                        .wind_sea = {.height = 0.8F, .peak = 0.4F, .heading = {0.94F, 0.35F}},
+                        .swells = {swell, hog::protocol::CellWaves{}},
+                        .current = {}});
+        Shot shot = client::shot_of(view, full, calendar());
+        if (view.name.starts_with("shoal")) {
+            shot.forecast = &fresh;
+        }
+        const int moments = view.name.starts_with("shoal") ? 3 : 1;
+        for (int moment = 0; moment < moments; ++moment) {
+            const auto still = client::draw_still(
+                *device, *scene, shot,
+                (view.name.starts_with("block") || view.name.starts_with("shoal"))
+                    ? VkExtent2D{.width = 1280, .height = 720}
+                    : VkExtent2D{.width = 640, .height = 360});
+            REQUIRE(still);
+            REQUIRE(client::save_picture(std::filesystem::path{where} /
+                                             (moment == 0
+                                                  ? std::format("{}.png", view.name)
+                                                  : std::format("{}_{}.png", view.name, moment)),
+                                         *still));
+            shot.time = shot.time + std::chrono::seconds{2};
+        }
+    }
+}
+
+TEST_CASE("broken cloud from near and far, to look at", "[.look]") {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
+    const char* where = std::getenv("HOG_LOOK");
+    REQUIRE(where != nullptr);
+    const auto device = test_device();
+    hog::jobs::JobSystem jobs{4};
+    const hog::client::Forecast broken =
+        everywhere({.cloud = 0.1F, .humidity = 0.6F, .base = 1'500.0F, .top = 3'500.0F});
+    const hog::DVec3 under = glm::normalize(hog::DVec3{0.3, -0.9, 0.3});
+    for (const auto& [name, altitude, pitch] :
+         {std::tuple{"down9k", 9'000.0, -1.55}, std::tuple{"down5k", 5'000.0, -1.55},
+          std::tuple{"down9k_again", 9'000.0, -1.55}, std::tuple{"side4k", 4'000.0, -0.3},
+          std::tuple{"side9k", 9'000.0, -0.3}}) {
+        auto scene =
+            Scene::create(*device, world(), jobs, calendar(), hog::client::still_format, 1);
+        REQUIRE(scene);
+        Shot shot = looking_north(under, altitude, pitch);
+        shot.forecast = &broken;
+        const auto still =
+            hog::client::draw_still(*device, *scene, shot, {.width = 1200, .height = 800});
+        REQUIRE(still);
+        REQUIRE(hog::client::save_picture(
+            std::filesystem::path{where} / std::format("clouds_{}.png", name), *still));
+    }
+}
+
+TEST_CASE("broken cloud while descending, to look at", "[.look]") {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
+    const char* where = std::getenv("HOG_LOOK");
+    REQUIRE(where != nullptr);
+    const auto device = test_device();
+    hog::jobs::JobSystem jobs{4};
+    const hog::client::Forecast broken =
+        everywhere({.cloud = 0.1F, .humidity = 0.6F, .base = 1'500.0F, .top = 3'500.0F});
+    const hog::DVec3 under = glm::normalize(hog::DVec3{0.3, -0.9, 0.3});
+    constexpr VkExtent2D large{.width = 1200, .height = 800};
+    auto scene = Scene::create(*device, world(), jobs, calendar(), hog::client::still_format, 1);
+    REQUIRE(scene);
+    const auto shot_at = [&](double altitude) {
+        Shot shot = looking_north(under, altitude, -0.3);
+        shot.forecast = &broken;
+        shot.seconds = 0.05;
+        return shot;
+    };
+    REQUIRE(hog::client::draw_still(*device, *scene, shot_at(9'000.0), large));
+    auto target = hog::render::make_image(
+        *device, {.format = hog::client::still_format,
+                  .extent = large,
+                  .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT});
+    REQUIRE(target);
+    const auto save = [&](const std::string& name) {
+        auto pixels =
+            hog::render::read_pixels(*device, *target, hog::render::image_use::colour_target);
+        REQUIRE(pixels);
+        const auto bytes = std::as_bytes(std::span{*pixels});
+        REQUIRE(hog::client::save_picture(
+            std::filesystem::path{where} / std::format("descend_{}.png", name),
+            hog::client::Picture{.width = large.width,
+                                 .height = large.height,
+                                 .texels = {bytes.begin(), bytes.end()}}));
+    };
+    double altitude = 9'000.0;
+    for (int at = 0; at <= 120; ++at) {
+        const Shot shot = shot_at(altitude);
+        hog::Result<> recorded;
+        REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
+            hog::render::Frame frame{.commands = commands,
+                                     .target = {target->handle(), VK_IMAGE_ASPECT_COLOR_BIT},
+                                     .view = target->view(),
+                                     .format = hog::client::still_format,
+                                     .extent = large,
+                                     .slot = 0,
+                                     .image = 0,
+                                     .copyable = true};
+            recorded = scene->record(frame, shot);
+        }));
+        REQUIRE(recorded);
+        scene->finish_bakes();
+        if (at % 40 == 0) {
+            save(std::format("moving_{}", static_cast<int>(altitude)));
+        }
+        altitude -= 50.0;
+    }
+    scene = std::unexpected(hog::Error{});
+    for (const double settled : {9'000.0, 7'000.0, 5'000.0, 3'000.0}) {
+        auto fresh =
+            Scene::create(*device, world(), jobs, calendar(), hog::client::still_format, 1);
+        REQUIRE(fresh);
+        const auto still = hog::client::draw_still(*device, *fresh, shot_at(settled), large);
+        REQUIRE(still);
+        REQUIRE(hog::client::save_picture(
+            std::filesystem::path{where} /
+                std::format("descend_still_{}.png", static_cast<int>(settled)),
+            *still));
+    }
+}
+
+TEST_CASE("profile rivers' water laid out", "[.profile]") {
+    const auto config = hog::planet::load_planet_config(std::filesystem::path{HOG_SOURCE_DIR} /
+                                                        "config" / "planet.toml")
+                            .value();
+    const hog::planet::World fine{config};
+    const double radius = fine.geology().planet_radius();
+    hog::DVec3 around = hog::planet::start_direction;
+    double nearest = 1e9;
+    for (const auto& reach : fine.geology().terrain().rivers().reaches()) {
+        const double away = glm::length(reach.from - hog::planet::start_direction);
+        if (reach.width >= 15.0 && reach.to_surface > 40 * hog::planet::fixed_one &&
+            away < nearest) {
+            nearest = away;
+            around = reach.from;
+        }
+    }
+    for (int run = 0; run < 3; ++run) {
+        const auto began = std::chrono::steady_clock::now();
+        const auto water = hog::terrain::river_water(fine, around, radius);
+        const std::chrono::duration<double, std::milli> took =
+            std::chrono::steady_clock::now() - began;
+        WARN(std::format("river water: {} vertices, {} triangles, {:.1f} ms", water.vertices.size(),
+                         water.indices.size() / 3, took.count()));
     }
 }
