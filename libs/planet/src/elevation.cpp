@@ -66,6 +66,9 @@ constexpr int landform_steps = 50;
 // the valleys it drowned.
 constexpr int ice_age_steps = 26;
 constexpr std::int64_t ice_age_sea_drop = 120;
+// Metres a step waves cut back a cliff of middling rock open to them: centimetres a year at the
+// sea's foot of it, for the share of the time the sea stands there.
+constexpr double wave_retreat = 300.0;
 constexpr int landform_progress = 5;
 // Metres per step: 0.2 mm a year in the heart of a mountain belt, and a slow rise over the
 // continents.
@@ -458,7 +461,8 @@ Landform Elevation::wear(LevelGrid grid, std::uint64_t seed,
                                 },
                             .seabed_rises = settled_,
                             .fills_basins = settled_,
-                            .sea_levels = sea_levels},
+                            .sea_levels = sea_levels,
+                            .wave_retreat = settled_ ? wave_retreat : 0.0},
                     Hillslope{.creep = creeping,
                               .weathering = weathered,
                               .rock =
@@ -569,8 +573,9 @@ std::optional<Channel> Elevation::river(CellId cell) const {
 }
 
 bool Elevation::is_land(CellId cell) const {
-    // Told by the fine elevation, so ground right at sea level is the sea's.
-    if (generated<fine_fraction_bits>(cell) > 0) {
+    // Told by the fine elevation, so ground right at sea level is the sea's; settled crust's coast
+    // is the worn ground's.
+    if (!settled_ && generated<fine_fraction_bits>(cell) > 0) {
         return true;
     }
     // Lakes build their rims up out of low ground.
@@ -622,21 +627,27 @@ std::int64_t Elevation::above_water(CellId cell) const {
 
 std::int64_t Elevation::worn(CellId cell, std::int64_t generated, const Landform& landform,
                              const Meander& meander) const {
-    if (generated <= 0 && !landform.near_lake(cell)) {
+    // Settled crust's coast is wherever the worn ground meets the sea, so what rivers, waves and
+    // the ice ages' low seas cut or built about it counts down to the deepest of them.
+    const std::int64_t untouched = settled_ ? -(ice_age_sea_drop + 10) * fixed_one : 0;
+    if (generated <= untouched && !landform.near_lake(cell)) {
         return generated;
     }
     // Sampled where the meanders shift the cell to, so valleys bend with the rivers in them.
     const CellId shifted = cell_at(meander(cell_center(cell)));
     std::int64_t ground = generated;
-    if (generated > 0) {
+    if (settled_ && generated > untouched) {
+        ground = generated + landform.change(shifted) -
+                 landform.grid().smooth(landform.risen(), shifted);
+        if (generated > 0) {
+            ground = ledged(cell, shifted, ground, generated, landform);
+        }
+    } else if (generated > 0) {
         // The change fades out towards the shore, and low ground is never worn below a quarter
         // of its height, so coasts stay where generated and meet the sea without a step. Settled
         // crust is generated as high as it's risen to, so only what wore it down is taken off.
-        const std::int64_t worn_off =
-            settled_ ? landform.change(shifted) - landform.grid().smooth(landform.risen(), shifted)
-                     : landform.change(shifted);
         const std::int64_t change =
-            (worn_off * ramp(generated, coast_blend)) >> fixed_fraction_bits;
+            (landform.change(shifted) * ramp(generated, coast_blend)) >> fixed_fraction_bits;
         ground = std::max(generated + change, (generated + 3) / 4);
         ground = ledged(cell, shifted, ground, generated, landform);
     }

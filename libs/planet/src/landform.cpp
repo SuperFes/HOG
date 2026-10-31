@@ -80,6 +80,10 @@ Landform::Landform(LevelGrid grid, std::vector<std::int64_t> heights, const Eros
             slopes.risen = risen_;
             wear_slopes(grid_, heights_, soil_, slopes, sea);
         }
+        const std::vector<std::int64_t> washed = wear_coast(grid_, heights_, erosion, sea);
+        for (std::size_t cell = 0; cell < heights_.size(); ++cell) {
+            soil_[cell] = std::max<std::int64_t>(soil_[cell] - washed[cell], 0);
+        }
         if (stepped) {
             stepped(step + 1);
         }

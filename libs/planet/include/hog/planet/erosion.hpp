@@ -42,6 +42,8 @@ struct Erosion {
     // draw it down; at its level throughout if empty.
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     std::span<const std::int64_t> sea_levels = {};
+    // Metres a step waves cut back a coast of middling rock open to them; none if zero.
+    double wave_retreat = 0.0;
 };
 
 // One step of uplift and river erosion (stream power with n = 1 and m = 1/2, solved implicitly
@@ -53,5 +55,13 @@ struct Erosion {
 // operations, so the result is the same everywhere.
 Drainage erode(const LevelGrid& grid, std::vector<std::int64_t>& heights, const Erosion& erosion,
                std::int64_t sea_level = 0);
+
+// One step of waves wearing the coast: each cell standing above the sea beside it is cut back,
+// as its cliff retreats across it, towards a platform a little under the sea's level. Cliffs
+// open to more of the sea, over deeper water, and of softer rock as `erosion` yields it retreat
+// faster; waves crossing a platform they cut arrive spent. Returns the fixed-point metres cut
+// from each cell.
+std::vector<std::int64_t> wear_coast(const LevelGrid& grid, std::vector<std::int64_t>& heights,
+                                     const Erosion& erosion, std::int64_t sea_level = 0);
 
 } // namespace hog::planet

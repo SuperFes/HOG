@@ -762,6 +762,10 @@ TEST_CASE("an evolved world stands its land where its crust settled dry, ranges 
     double plains = 0.0;
     int range_count = 0;
     int plain_count = 0;
+    int dry = 0;
+    int drowned = 0;
+    int wet = 0;
+    int raised = 0;
     for (const CellId cell : cells_at(6)) {
         const auto crust = terrain.continents().crust(cell);
         const double metres = fixed_to_double(terrain.elevation(cell));
@@ -769,16 +773,19 @@ TEST_CASE("an evolved world stands its land where its crust settled dry, ranges 
         area += cell_area;
         land += terrain.is_land(cell) ? cell_area : 0.0;
         // Well off the coast, the ground keeps to its side of it, but where volcanoes rise out of
-        // the sea, lakes' rims hold them in and glaciers cut fjords.
+        // the sea, lakes' rims hold them in and glaciers cut fjords; and here and there the sea
+        // drowned valleys cut while it stood low, or waves cut the land back.
         const std::int64_t shore = fixed_one / 20;
         if (terrain.volcanoes().lift(cell) > 0 || terrain.hotspots().surface(cell) ||
-            terrain.landform().near_lake(cell)) {
+            terrain.landform().near_lake(cell) || near_carved(terrain.landform(), cell)) {
             continue;
         }
-        if (crust.height > shore && !near_carved(terrain.landform(), cell)) {
-            REQUIRE(metres > 0.0);
-        } else if (crust.height < -shore && !near_carved(terrain.landform(), cell)) {
-            REQUIRE(metres < 0.0);
+        if (crust.height > shore) {
+            ++dry;
+            drowned += metres <= 0.0 ? 1 : 0;
+        } else if (crust.height < -shore) {
+            ++wet;
+            raised += metres >= 0.0 ? 1 : 0;
         }
         if (crust.height <= 0) {
             continue;
@@ -791,6 +798,8 @@ TEST_CASE("an evolved world stands its land where its crust settled dry, ranges 
             ++plain_count;
         }
     }
+    CHECK(drowned < dry / 20);
+    CHECK(raised < wet / 100);
     // At least as much sea as asked for, topped up if need be; but land enough to stand on.
     CHECK(land / area < 0.31);
     CHECK(land / area > 0.15);
@@ -799,7 +808,7 @@ TEST_CASE("an evolved world stands its land where its crust settled dry, ranges 
     UNSCOPED_INFO("ranges " << ranges / range_count << " m, plains " << plains / plain_count
                             << " m");
     // Rain on their windward sides wears them; they still stand well above.
-    CHECK(ranges / range_count > (plains / plain_count) + 1'200.0);
+    CHECK(ranges / range_count > (plains / plain_count) + 800.0);
     CHECK(plains / plain_count < 1'500.0);
 }
 

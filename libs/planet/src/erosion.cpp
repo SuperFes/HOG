@@ -109,4 +109,48 @@ Drainage erode(const LevelGrid& grid, std::vector<std::int64_t>& heights, const 
     return drainage;
 }
 
+std::vector<std::int64_t> wear_coast(const LevelGrid& grid, std::vector<std::int64_t>& heights,
+                                     const Erosion& erosion, std::int64_t sea_level) {
+    // Waves cut their platform this far under the sea, and reach a cliff unspent only over water
+    // this deep.
+    constexpr std::int64_t wave_base = 5 * fixed_one;
+    constexpr std::int64_t open_water = 20 * fixed_one;
+    const std::uint32_t count = grid.size();
+    HOG_ASSERT(heights.size() == count, "one height per cell");
+    std::vector<std::int64_t> cut(count, 0);
+    if (erosion.wave_retreat <= 0.0) {
+        return cut;
+    }
+    const std::int64_t platform = sea_level - wave_base;
+    for (std::uint32_t cell = 0; cell < count; ++cell) {
+        if (heights[cell] <= sea_level) {
+            continue;
+        }
+        const auto around = grid.neighbors(cell);
+        double open = 0.0;
+        double across = 0.0;
+        for (std::size_t k = 0; k < around.size(); ++k) {
+            across += fixed_to_double(grid.distance(cell, k));
+            const std::int64_t depth = sea_level - heights[around[k]];
+            if (depth > 0) {
+                open += fixed_to_double(std::min(depth, open_water)) / fixed_to_double(open_water);
+            }
+        }
+        if (open <= 0.0) {
+            continue;
+        }
+        const auto neighbors = static_cast<double>(around.size());
+        const double softness =
+            erosion.yielding ? fixed_to_double(erosion.yielding(cell, sea_level)) : 1.0;
+        const double retreat = erosion.wave_retreat * (open / neighbors) * softness;
+        const double through = std::min(1.0, retreat / (across / neighbors));
+        cut[cell] = std::llround(static_cast<double>(heights[cell] - platform) * through);
+    }
+    // Cut after all are read, so no cliff sees another's retreat in the same step.
+    for (std::uint32_t cell = 0; cell < count; ++cell) {
+        heights[cell] -= cut[cell];
+    }
+    return cut;
+}
+
 } // namespace hog::planet

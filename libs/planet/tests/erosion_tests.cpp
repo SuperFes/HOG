@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <tuple>
 #include <vector>
 
 using hog::planet::Erosion;
@@ -240,4 +241,45 @@ TEST_CASE("what rivers wear off fills the basins they run into, never over their
             CHECK(filled[cell] <= rim);
         }
     }
+}
+
+TEST_CASE("waves cut back the coast, soft rock faster than hard, and leave the inland alone",
+          "[planet][erosion]") {
+    const std::vector<std::int64_t> start = land();
+    const std::vector<std::int64_t> none(grid().size(), 0);
+    // Rock in the east yields four times as readily as in the west.
+    const auto yielding = [](std::uint32_t cell, std::int64_t) {
+        return center(cell).y > 0.0 ? 2 * fixed_one : fixed_one / 2;
+    };
+    const Erosion waves{.uplift = none,
+                        .erodibility = none,
+                        .runoff = none,
+                        .yielding = yielding,
+                        .wave_retreat = 2'000.0};
+    std::vector<std::int64_t> heights = start;
+    const std::vector<std::int64_t> cut = hog::planet::wear_coast(grid(), heights, waves);
+    double soft = 0.0;
+    double hard = 0.0;
+    for (std::uint32_t cell = 0; cell < grid().size(); ++cell) {
+        CHECK(heights[cell] == start[cell] - cut[cell]);
+        CHECK(cut[cell] >= 0);
+        const bool coast =
+            start[cell] > 0 && std::ranges::any_of(grid().neighbors(cell), [&](std::uint32_t next) {
+                return start[next] <= 0;
+            });
+        if (!coast) {
+            CHECK(cut[cell] == 0);
+            continue;
+        }
+        // Never below the platform the waves cut.
+        CHECK(heights[cell] >= -5 * fixed_one);
+        (center(cell).y > 0.0 ? soft : hard) += hog::planet::fixed_to_double(cut[cell]);
+    }
+    CHECK(soft > 2.0 * hard);
+    CHECK(hard > 0.0);
+    // Without waves, nothing.
+    std::vector<std::int64_t> calm = start;
+    std::ignore = hog::planet::wear_coast(
+        grid(), calm, Erosion{.uplift = none, .erodibility = none, .runoff = none});
+    CHECK(calm == start);
 }
