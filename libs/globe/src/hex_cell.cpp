@@ -3,10 +3,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <limits>
 #include <numbers>
 #include <optional>
 #include <span>
+#include <unordered_set>
 
 namespace hog::globe {
 namespace {
@@ -562,6 +564,26 @@ std::array<std::int64_t, 7> share_out(std::int64_t amount, const HexShares& shar
         --left;
     }
     return dealt;
+}
+
+std::vector<HexCell> disc(HexCell centre, int rings) {
+    HOG_ASSERT(rings >= 0, "a disc reaches out, not in");
+    std::vector<HexCell> cells{centre};
+    std::unordered_set<std::uint64_t> seen{index_of(centre)};
+    std::size_t ring_begin = 0;
+    for (int ring = 0; ring < rings; ++ring) {
+        const std::size_t ring_end = cells.size();
+        for (std::size_t k = ring_begin; k < ring_end; ++k) {
+            const HexNeighbors around = neighbors(cells[k]);
+            for (const HexCell next : around.all()) {
+                if (seen.insert(index_of(next)).second) {
+                    cells.push_back(next);
+                }
+            }
+        }
+        ring_begin = ring_end;
+    }
+    return cells;
 }
 
 } // namespace hog::globe

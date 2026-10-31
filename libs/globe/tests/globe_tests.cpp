@@ -1,4 +1,5 @@
 #include <hog/globe/globe.hpp>
+#include <hog/globe/hex_grid.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -113,4 +114,38 @@ TEST_CASE("a globe a level finer has eight hexels for each of its own", "[globe]
         }
     }
     CHECK(got == want);
+}
+
+TEST_CASE("a window holds some columns through a run of shells", "[globe]") {
+    const hog::globe::Shells whole{.inner = 0.0, .outer = 2'000.0, .count = 20};
+    const hog::globe::Shells part = whole.part(12, 18);
+    CHECK(part.count == 6);
+    for (int shell = 0; shell <= part.count; ++shell) {
+        CHECK(std::abs(part.floor(shell) - whole.floor(12 + shell)) < 1e-9 * whole.outer);
+    }
+    const HexCell middle = hog::globe::cell_at_index(5, 4'321);
+    const auto cells = hog::globe::disc(middle, 2);
+    CHECK(cells.size() == 19);
+    CHECK(cells.front() == middle);
+    Globe near{5, part, cells, 12};
+    CHECK(!near.is_whole());
+    CHECK(near.size() == 19);
+    CHECK(near.holds(middle));
+    CHECK(!near.holds(hog::globe::cell_at_index(5, 1)));
+    CHECK(near.index_of(middle) == 0);
+    near.at(cells[7], 5) = {.material = Material::Basalt, .temperature = 900};
+    CHECK(near.column_at(7)[5].material == Material::Basalt);
+    CHECK(near.column(middle).size() == 6);
+
+    // Its grid knows only the neighbours it holds.
+    const hog::globe::HexGrid grid{near};
+    CHECK(grid.size() == 19);
+    CHECK(grid.neighbors(0).size() == 6);
+    std::size_t sides = 0;
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        sides += grid.neighbors(index).size();
+    }
+    // Inside, every pair counts twice: the 6 spokes, 6 round the first ring, 18 to the second
+    // and 12 round it.
+    CHECK(sides == 2 * (6 + 6 + 18 + 12));
 }

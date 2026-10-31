@@ -98,3 +98,21 @@ TEST_CASE("a lone hexel shows all its sides, its top and its floor", "[globe][he
         }
     }
 }
+
+TEST_CASE("a window shows its cut where its columns end", "[globe][hexel_mesh]") {
+    const HexCell middle = hog::globe::cell_at_index(5, 4'321);
+    Globe near{
+        5, {.inner = 9'000.0, .outer = 9'100.0, .count = 1}, hog::globe::disc(middle, 1), 40};
+    for (std::uint64_t index = 0; index < near.size(); ++index) {
+        near.column_at(index)[0].material = Material::Granite;
+    }
+    const auto mesh = hog::globe::mesh_hexels(near, DVec3{0.0});
+    check_faces(mesh);
+    std::size_t sides = 0;
+    for (std::size_t at = 0; at < mesh.indices.size(); at += 3) {
+        const auto& a = mesh.vertices[mesh.indices[at]];
+        sides += std::abs(glm::dot(a.normal, glm::normalize(a.position))) < 0.1F ? 1 : 0;
+    }
+    // The six round the middle each show three sides out, two triangles a side.
+    CHECK(sides == 6 * 3 * 2);
+}

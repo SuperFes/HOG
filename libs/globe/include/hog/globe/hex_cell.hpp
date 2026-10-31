@@ -6,6 +6,7 @@
 #include <compare>
 #include <cstdint>
 #include <span>
+#include <vector>
 
 namespace hog::globe {
 
@@ -102,6 +103,9 @@ struct HexRing {
 };
 
 [[nodiscard]] HexRing ring(HexCell cell);
+
+// The cells within `rings` steps of `centre`, it first, nearer before farther.
+[[nodiscard]] std::vector<HexCell> disc(HexCell centre, int rings);
 
 // Cells sharing in another a level away, each by how many halves of itself.
 struct HexShares {

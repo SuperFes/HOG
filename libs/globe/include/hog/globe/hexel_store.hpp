@@ -14,10 +14,10 @@ namespace hog::globe {
 // throughout is held once however large it is. Blocks small enough are held in full as bricks.
 class HexelStore {
 public:
-    HexelStore(int level, int shells, Hexel fill = {});
+    HexelStore(int level, Shells shells, Hexel fill = {});
 
     [[nodiscard]] int level() const noexcept { return level_; }
-    [[nodiscard]] int shells() const noexcept { return shells_; }
+    [[nodiscard]] const Shells& shells() const noexcept { return shells_; }
 
     [[nodiscard]] Hexel at(HexCell cell, int shell) const;
     void set(HexCell cell, int shell, Hexel hexel);
@@ -61,12 +61,18 @@ private:
                                  std::vector<Hexel>& bricks) const;
 
     int level_;
-    int shells_;
+    Shells shells_;
     std::vector<Node> nodes_;
     std::vector<Hexel> bricks_;
 };
 
+// A whole globe into a store and back.
 [[nodiscard]] HexelStore pack(const Globe& globe);
 void unpack(const HexelStore& store, Globe& globe);
+
+// A window onto the store's `cells` from shell `from` up to but not including `to`, to work on.
+[[nodiscard]] Globe window(const HexelStore& store, std::vector<HexCell> cells, int from, int to);
+// Writes a window's hexels back where they came from.
+void put_back(const Globe& window, HexelStore& store);
 
 } // namespace hog::globe

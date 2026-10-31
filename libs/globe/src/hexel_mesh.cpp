@@ -72,7 +72,9 @@ void add_hexel(HexelMesh& mesh, const Globe& globe, const HexRing& ring, DVec3 u
     }
     // Side k, from corner k - 1 to corner k, faces neighbour k.
     for (std::size_t k = 0; k < outline.size(); ++k) {
-        if (clarity(globe.at(ring.neighbors[k], at).material) >= here) {
+        // A window's edge shows its cut.
+        const HexCell next = ring.neighbors[k];
+        if (globe.holds(next) && clarity(globe.at(next, at).material) >= here) {
             continue;
         }
         const DVec3 from = outline[(k + outline.size() - 1) % outline.size()];
@@ -86,8 +88,8 @@ void add_hexel(HexelMesh& mesh, const Globe& globe, const HexRing& ring, DVec3 u
 
 HexelMesh mesh_hexels(const Globe& globe, DVec3 origin) {
     HexelMesh mesh{.origin = origin, .vertices = {}, .indices = {}};
-    for (std::uint64_t index = 0; index < cell_count(globe.level()); ++index) {
-        const HexCell cell = cell_at_index(globe.level(), index);
+    for (std::uint64_t index = 0; index < globe.size(); ++index) {
+        const HexCell cell = globe.cell(index);
         const auto column = globe.column(cell);
         const HexRing ring = globe::ring(cell);
         const DVec3 up = center(cell);

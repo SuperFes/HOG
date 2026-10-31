@@ -1,5 +1,6 @@
 #pragma once
 
+#include <hog/globe/globe.hpp>
 #include <hog/globe/hex_cell.hpp>
 
 #include <array>
@@ -14,6 +15,8 @@ namespace hog::globe {
 class HexGrid {
 public:
     explicit HexGrid(int level);
+    // A globe's columns by its own indices, and of their neighbours only those it holds.
+    explicit HexGrid(const Globe& globe);
 
     [[nodiscard]] int level() const noexcept { return level_; }
     [[nodiscard]] std::uint32_t size() const noexcept {

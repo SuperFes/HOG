@@ -77,7 +77,7 @@ struct Sorter {
 // Molten rock lets go of all the water and gas it holds.
 void degas(Globe& globe) {
     const double volume = globe.hexel_volume();
-    for (std::uint64_t index = 0; index < cell_count(globe.level()); ++index) {
+    for (std::uint64_t index = 0; index < globe.size(); ++index) {
         for (Hexel& hexel : globe.column_at(index)) {
             const Properties& material = properties(hexel.material);
             if (hexel.held == 0 || hexel.temperature < material.melts) {
@@ -94,7 +94,7 @@ void degas(Globe& globe) {
 } // namespace
 
 std::uint64_t differentiate(Globe& globe, const Gravity& gravity) {
-    const HexGrid grid{globe.level()};
+    const HexGrid grid{globe};
     const Sorter sorter{
         .globe = &globe, .grid = &grid, .gravity = gravity, .volume = globe.hexel_volume()};
     std::uint64_t sunk = 0;
@@ -107,7 +107,7 @@ std::uint64_t differentiate(Globe& globe, const Gravity& gravity) {
     std::vector<HexCell> every;
     every.reserve(grid.size());
     for (std::uint32_t index = 0; index < grid.size(); ++index) {
-        every.push_back(cell_at_index(globe.level(), index));
+        every.push_back(globe.cell(index));
     }
     Settler{globe, grid, gravity}.settle(every);
     return sunk;

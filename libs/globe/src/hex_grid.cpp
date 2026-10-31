@@ -18,4 +18,22 @@ HexGrid::HexGrid(int level) : level_(level) {
     }
 }
 
+HexGrid::HexGrid(const Globe& globe) : level_(globe.level()) {
+    if (globe.is_whole()) {
+        *this = HexGrid{globe.level()};
+        return;
+    }
+    const auto count = static_cast<std::size_t>(globe.size());
+    around_.resize(count);
+    sides_.resize(count, 0);
+    for (std::size_t index = 0; index < count; ++index) {
+        const HexNeighbors found = globe::neighbors(globe.cell(index));
+        for (const HexCell next : found.all()) {
+            if (globe.holds(next)) {
+                around_[index][sides_[index]++] = static_cast<std::uint32_t>(globe.index_of(next));
+            }
+        }
+    }
+}
+
 } // namespace hog::globe

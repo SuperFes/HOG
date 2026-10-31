@@ -18,16 +18,16 @@ constexpr int roots = 12;
 
 } // namespace
 
-HexelStore::HexelStore(int level, int shells, Hexel fill) : level_(level), shells_(shells) {
+HexelStore::HexelStore(int level, Shells shells, Hexel fill) : level_(level), shells_(shells) {
     HOG_ASSERT(level >= 0 && level <= max_level, "level out of range");
-    HOG_ASSERT(shells > 0, "a store needs shells");
+    HOG_ASSERT(shells.count > 0, "a store needs shells");
     nodes_.assign(roots, Node{.hexel = fill});
 }
 
 HexelStore::Box HexelStore::root(int diamond) const noexcept {
     const bool pole = std::cmp_greater_equal(diamond, HexCell::north_pole);
     return {.side = pole ? 1U : std::uint32_t{1} << level_,
-            .span = static_cast<int>(std::bit_ceil(static_cast<unsigned>(shells_)))};
+            .span = static_cast<int>(std::bit_ceil(static_cast<unsigned>(shells_.count)))};
 }
 
 namespace {
@@ -70,7 +70,7 @@ std::size_t brick_size(const Box& box) {
 
 Hexel HexelStore::at(HexCell cell, int shell) const {
     HOG_ASSERT(std::cmp_equal(cell.level, level_) && cell.is_valid(), "cell not at this level");
-    HOG_ASSERT(shell >= 0 && shell < shells_, "shell out of range");
+    HOG_ASSERT(shell >= 0 && shell < shells_.count, "shell out of range");
     Box box = root(cell.diamond);
     std::uint32_t at = cell.diamond;
     for (;;) {
@@ -93,7 +93,7 @@ Hexel HexelStore::at(HexCell cell, int shell) const {
 
 void HexelStore::set(HexCell cell, int shell, Hexel hexel) {
     HOG_ASSERT(std::cmp_equal(cell.level, level_) && cell.is_valid(), "cell not at this level");
-    HOG_ASSERT(shell >= 0 && shell < shells_, "shell out of range");
+    HOG_ASSERT(shell >= 0 && shell < shells_.count, "shell out of range");
     paint(cell.diamond, root(cell.diamond),
           {.i0 = cell.i,
            .i1 = cell.i + 1,
@@ -105,12 +105,12 @@ void HexelStore::set(HexCell cell, int shell, Hexel hexel) {
 }
 
 void HexelStore::fill(int from, int to, Hexel hexel) {
-    HOG_ASSERT(from >= 0 && from <= to && to <= shells_, "shells out of range");
+    HOG_ASSERT(from >= 0 && from <= to && to <= shells_.count, "shells out of range");
     // The padding above the top shell goes with it, so the top can be whole.
     const Region region{.i1 = std::numeric_limits<std::uint32_t>::max(),
                         .j1 = std::numeric_limits<std::uint32_t>::max(),
                         .shell0 = from,
-                        .shell1 = to == shells_ ? std::numeric_limits<int>::max() : to};
+                        .shell1 = to == shells_.count ? std::numeric_limits<int>::max() : to};
     for (int diamond = 0; diamond < roots; ++diamond) {
         paint(static_cast<std::uint32_t>(diamond), root(diamond), region, hexel);
     }
@@ -205,7 +205,7 @@ HexelStore::Node HexelStore::compacted(std::uint32_t node, const Box& box, std::
         // Only shells below the top count; the padding above may hold anything.
         const auto in_range = static_cast<std::ptrdiff_t>(
             static_cast<std::size_t>(box.side) * box.side *
-            static_cast<std::size_t>(std::clamp(shells_ - box.shell, 1, box.span)));
+            static_cast<std::size_t>(std::clamp(shells_.count - box.shell, 1, box.span)));
         if (std::all_of(begin, std::next(begin, in_range),
                         [&](const Hexel& hexel) { return hexel == *begin; })) {
             return {.hexel = *begin};
@@ -224,7 +224,7 @@ HexelStore::Node HexelStore::compacted(std::uint32_t node, const Box& box, std::
         const Box child = half(box, across, k);
         const Node made = compacted(here.at + static_cast<std::uint32_t>(k), child, into, bricks);
         into[first + static_cast<std::size_t>(k)] = made;
-        if (child.shell < shells_) {
+        if (child.shell < shells_.count) {
             one = one && made.kind == Kind::Whole && made.hexel == into[first].hexel;
         }
     }
@@ -242,7 +242,8 @@ std::size_t HexelStore::bytes() const noexcept {
 }
 
 HexelStore pack(const Globe& globe) {
-    HexelStore store{globe.level(), globe.shells().count};
+    HOG_ASSERT(globe.is_whole(), "only a whole globe packs");
+    HexelStore store{globe.level(), globe.shells()};
     for (std::uint64_t index = 0; index < cell_count(globe.level()); ++index) {
         const HexCell cell = cell_at_index(globe.level(), index);
         const auto column = globe.column_at(index);
@@ -257,7 +258,8 @@ HexelStore pack(const Globe& globe) {
 }
 
 void unpack(const HexelStore& store, Globe& globe) {
-    HOG_ASSERT(store.level() == globe.level() && store.shells() == globe.shells().count,
+    HOG_ASSERT(globe.is_whole() && store.level() == globe.level() &&
+                   store.shells().count == globe.shells().count,
                "store and globe differ in shape");
     for (std::uint64_t index = 0; index < cell_count(globe.level()); ++index) {
         const HexCell cell = cell_at_index(globe.level(), index);
@@ -266,6 +268,33 @@ void unpack(const HexelStore& store, Globe& globe) {
             column[shell] = store.at(cell, static_cast<int>(shell));
         }
     }
+}
+
+Globe window(const HexelStore& store, std::vector<HexCell> cells, int from, int to) {
+    HOG_ASSERT(0 <= from && from < to && to <= store.shells().count, "shells out of range");
+    Globe globe{store.level(), store.shells().part(from, to), std::move(cells), from};
+    for (std::uint64_t index = 0; index < globe.size(); ++index) {
+        const HexCell cell = globe.cell(index);
+        const auto column = globe.column_at(index);
+        for (std::size_t shell = 0; shell < column.size(); ++shell) {
+            column[shell] = store.at(cell, from + static_cast<int>(shell));
+        }
+    }
+    return globe;
+}
+
+void put_back(const Globe& window, HexelStore& store) {
+    HOG_ASSERT(window.level() == store.level() &&
+                   window.first_shell() + window.shells().count <= store.shells().count,
+               "the window is not onto this store");
+    for (std::uint64_t index = 0; index < window.size(); ++index) {
+        const HexCell cell = window.cell(index);
+        const auto column = window.column_at(index);
+        for (std::size_t shell = 0; shell < column.size(); ++shell) {
+            store.set(cell, window.first_shell() + static_cast<int>(shell), column[shell]);
+        }
+    }
+    store.compact();
 }
 
 } // namespace hog::globe

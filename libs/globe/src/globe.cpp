@@ -24,16 +24,50 @@ Globe::Globe(int level, Shells shells) : level_(level), shells_(shells) {
     hexels_.resize(cell_count(level) * static_cast<std::size_t>(shells.count));
 }
 
-std::span<Hexel> Globe::column(HexCell cell) {
+Globe::Globe(int level, Shells shells, std::vector<HexCell> cells, int first_shell)
+    : level_(level), shells_(shells), cells_(std::move(cells)), first_shell_(first_shell) {
+    HOG_ASSERT(level >= 0 && level <= max_level, "level out of range");
+    HOG_ASSERT(shells.count > 0 && shells.outer > shells.inner && shells.inner >= 0.0,
+               "shells must stand outward");
+    HOG_ASSERT(!cells_.empty() && first_shell >= 0, "a window needs columns");
+    local_.reserve(cells_.size());
+    for (std::size_t local = 0; local < cells_.size(); ++local) {
+        HOG_ASSERT(std::cmp_equal(cells_[local].level, level), "cell is not at the globe's level");
+        const bool added = local_.emplace(globe::index_of(cells_[local]), local).second;
+        HOG_ASSERT(added, "a window holds a column once");
+    }
+    hexels_.resize(cells_.size() * static_cast<std::size_t>(shells.count));
+}
+
+std::uint64_t Globe::size() const noexcept {
+    return is_whole() ? cell_count(level_) : cells_.size();
+}
+
+HexCell Globe::cell(std::uint64_t index) const {
+    return is_whole() ? cell_at_index(level_, index) : cells_[index];
+}
+
+bool Globe::holds(HexCell cell) const {
+    return std::cmp_equal(cell.level, level_) &&
+           (is_whole() || local_.contains(globe::index_of(cell)));
+}
+
+std::uint64_t Globe::index_of(HexCell cell) const {
     HOG_ASSERT(std::cmp_equal(cell.level, level_), "cell is not at the globe's level");
-    const auto count = static_cast<std::size_t>(shells_.count);
-    return std::span{hexels_}.subspan(index_of(cell) * count, count);
+    if (is_whole()) {
+        return globe::index_of(cell);
+    }
+    const auto found = local_.find(globe::index_of(cell));
+    HOG_ASSERT(found != local_.end(), "cell is outside the window");
+    return found->second;
+}
+
+std::span<Hexel> Globe::column(HexCell cell) {
+    return column_at(index_of(cell));
 }
 
 std::span<const Hexel> Globe::column(HexCell cell) const {
-    HOG_ASSERT(std::cmp_equal(cell.level, level_), "cell is not at the globe's level");
-    const auto count = static_cast<std::size_t>(shells_.count);
-    return std::span{hexels_}.subspan(index_of(cell) * count, count);
+    return column_at(index_of(cell));
 }
 
 std::span<Hexel> Globe::column_at(std::uint64_t index) {
@@ -86,6 +120,7 @@ std::array<double, material_count> Globe::masses() const {
 }
 
 Globe refined(const Globe& coarse) {
+    HOG_ASSERT(coarse.is_whole(), "only a whole globe refines");
     Globe fine{coarse.level() + 1, coarse.shells().finer(1)};
     fine.set_bound(coarse.bound());
     fine.freed() = coarse.freed();

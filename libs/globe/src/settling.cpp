@@ -38,7 +38,8 @@ int top_of(std::span<const Hexel> column) {
 Settler::Settler(Globe& globe, const HexGrid& grid, Gravity gravity)
     : globe_(&globe), grid_(&grid), gravity_(gravity), tops_(grid.size(), 0), seen_(grid.size(), 0),
       queued_(grid.size(), false), step_(std::atan(2.0) / std::ldexp(1.0, globe.level())) {
-    HOG_ASSERT(grid.level() == globe.level(), "the grid is not the globe's level");
+    HOG_ASSERT(grid.level() == globe.level() && grid.size() == globe.size(),
+               "the grid is not the globe's");
     for (std::uint32_t column = 0; column < grid.size(); ++column) {
         tops_[column] = top_of(globe.column_at(column));
     }
@@ -98,9 +99,16 @@ void Settler::queue(std::uint32_t column) {
 
 std::uint64_t Settler::settle(std::span<const HexCell> unsettled) {
     for (const HexCell cell : unsettled) {
-        const auto column = static_cast<std::uint32_t>(index_of(cell));
+        const auto column = static_cast<std::uint32_t>(globe_->index_of(cell));
         tops_[column] = top_of(globe_->column_at(column));
+    }
+    // What changed may fall, and so may what stood against it.
+    for (const HexCell cell : unsettled) {
+        const auto column = static_cast<std::uint32_t>(globe_->index_of(cell));
         queue(column);
+        for (const std::uint32_t next : grid_->neighbors(column)) {
+            queue(next);
+        }
     }
     std::uint64_t moved = 0;
     while (!pending_.empty()) {
@@ -130,7 +138,7 @@ std::uint64_t Settler::settle(std::span<const HexCell> unsettled) {
 }
 
 std::uint64_t settle(Globe& globe, std::span<const HexCell> unsettled, const Gravity& gravity) {
-    const HexGrid grid{globe.level()};
+    const HexGrid grid{globe};
     return Settler{globe, grid, gravity}.settle(unsettled);
 }
 
