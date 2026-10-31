@@ -1,4 +1,5 @@
 #include <hog/globe/accretion.hpp>
+#include <hog/globe/birth.hpp>
 #include <hog/globe/differentiation.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -107,4 +108,11 @@ TEST_CASE("molten rock lets its water and gas go, and none is lost", "[globe][di
     const double gas = grown.held().gas + grown.freed().gas;
     CHECK(std::abs(water - young.held().water) < 1e-9 * water);
     CHECK(std::abs(gas - young.held().gas) < 1e-9 * gas);
+}
+
+TEST_CASE("a planet is born gathered and sorted", "[globe][birth]") {
+    const Globe born = hog::globe::birth(setup);
+    CHECK(born.masses() == sorted().sorted.masses());
+    CHECK(iron_by_shell(born)[0] > 0.7);
+    CHECK(born.freed() == sorted().sorted.freed());
 }

@@ -7,7 +7,7 @@
 #include <hog/client/picture.hpp>
 #include <hog/client/scene.hpp>
 #include <hog/client/views.hpp>
-#include <hog/globe/accretion.hpp>
+#include <hog/globe/birth.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/places.hpp>
@@ -1167,7 +1167,7 @@ TEST_CASE("a young globe as hexels, to look at", "[.look]") {
                             .value();
     const hog::planet::World world{config};
     const double radius = world.geology().planet_radius();
-    const hog::globe::Globe born = hog::globe::accrete({.seed = config.seed, .radius = radius});
+    const hog::globe::Globe born = hog::globe::birth({.seed = config.seed, .radius = radius});
     const auto device = test_device();
     hog::jobs::JobSystem jobs{4};
     auto scene = Scene::create(*device, world, jobs, calendar(), hog::client::still_format, 1);

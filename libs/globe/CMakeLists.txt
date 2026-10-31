@@ -1,5 +1,6 @@
 add_library(hog_globe
     src/accretion.cpp
+    src/birth.cpp
     src/differentiation.cpp
     src/globe.cpp
     src/hex_cell.cpp

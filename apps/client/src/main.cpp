@@ -15,7 +15,7 @@
 #include <hog/core/log.hpp>
 #include <hog/core/profile.hpp>
 #include <hog/core/time.hpp>
-#include <hog/globe/accretion.hpp>
+#include <hog/globe/birth.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/login/service.hpp>
 #include <hog/mapgen/render.hpp>
@@ -996,7 +996,7 @@ int show(const client::Options& options, const client::GraphicsConfig& graphics,
     if (options.globe) {
         const auto started = MonotonicClock::now();
         const globe::Globe born =
-            globe::accrete({.seed = planet.seed, .radius = world.geology().planet_radius()});
+            globe::birth({.seed = planet.seed, .radius = world.geology().planet_radius()});
         scene->show_globe(client::globe_blocks(born));
         log::info(globe_log, "grown in {:.2f} s",
                   std::chrono::duration<double>(MonotonicClock::now() - started).count());
