@@ -56,7 +56,9 @@ struct Crust {
     // with, and how thick it was when the plate last bent under it, or none if never.
     float sunk = 0.0F;
     std::optional<float> borne = std::nullopt;
-    // Of a load laid on it alone, the share its plate held up when it last bent.
+    // Kilometres of it its plate bends under rather than letting float, and of a load laid on it
+    // alone, the share its plate held up when it last bent.
+    float held = 0.0F;
     float holding = 0.0F;
 
     friend bool operator==(const Crust&, const Crust&) = default;
@@ -314,7 +316,8 @@ public:
     // on a planet of `radius` metres, as stiff as its rock has cooled since last heated: a load
     // narrower than the plate bends over stands above where it would float alone, and sinks the
     // crust round it. A plate heated again since holds up as much less of what it held as it's
-    // weaker, its hot rock no longer bearing it (Watts 2001); cooled, it holds what it held.
+    // weaker, its hot rock no longer bearing it (Watts 2001); cooled, it holds what it held. Crust
+    // gone from the plate takes what it bent with it.
     void bend(double radius);
     // Of each metre worn off the crust on top at each place alone, the metres its ground lowers,
     // as its plate lets it rise for being lightened, on a planet of `radius` metres: by its

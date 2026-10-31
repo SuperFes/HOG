@@ -521,7 +521,7 @@ TEST_CASE("a cold plate holds a crater dug into it a hollow, and young floor flo
     CHECK(crust_heights(floor) == floating);
 }
 
-TEST_CASE("a plate lets what it held up float once heated through, or once it's taken off again",
+TEST_CASE("a plate lets what it held up float once heated through, taken off, or gone",
           "[planet][isostasy]") {
     using hog::planet::Crust;
     const LevelGrid grid{5, radius};
@@ -560,18 +560,21 @@ TEST_CASE("a plate lets what it held up float once heated through, or once it's 
     CHECK(floating(heated));
     CHECK(floating(bent(heated, [](Crust& crust) { crust.raised = 3'000.0F; })));
 
-    // Taken off again once the plate's weaker, but not too hot to hold anything, the ground's
-    // nearly as it was: held up as firmly as when laid, it'd be left standing.
+    // Taken off again once the plate's weaker, but not too hot to hold anything, the ground's as
+    // it was.
     const Lithosphere worn = bent(loaded, [](Crust& crust) {
         crust.raised = 100.0F;
         crust.thickness = 35.0F;
     });
-    float most = 0.0F;
-    for (const Crust& crust : worn.plates()[0].crust) {
-        most = std::max(most, std::abs(crust.sunk));
-    }
-    CAPTURE(most, loaded.plates()[0].crust[at].sunk);
-    CHECK(most < 0.1F * std::abs(loaded.plates()[0].crust[at].sunk));
+    CHECK(floating(worn));
+
+    // Gone from the plate, it takes what it bent with it.
+    std::vector<Lithosphere::Plate> parted(loaded.plates().begin(), loaded.plates().end());
+    parted[0].cells.erase(parted[0].cells.begin() + at);
+    parted[0].crust.erase(parted[0].crust.begin() + at);
+    Lithosphere left{grid, std::move(parted)};
+    left.bend(radius);
+    CHECK(floating(left));
 }
 
 TEST_CASE("worn land rises again by its buoyancy where its plate is weak, and less where stiff",
