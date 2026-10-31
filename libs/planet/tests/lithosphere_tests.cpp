@@ -1788,7 +1788,8 @@ TEST_CASE("the mantle warms under continents and cools under ocean floor",
     lithosphere.warm(50.0, mantle);
     lithosphere.warm(50.0, mantle);
     CHECK_THAT(heat_at(north), WithinAbs(1.0 - std::exp(-1.0), 1e-5));
-    CHECK(heat_at(south) == 0.0F);
+    // As good as none of the warmth mixes half the planet round.
+    CHECK_THAT(heat_at(south), WithinAbs(0.0, 1e-5));
     lithosphere.warm(1000.0, mantle);
     CHECK_THAT(heat_at(north), WithinAbs(1.0, 1e-4));
 
@@ -1797,6 +1798,38 @@ TEST_CASE("the mantle warms under continents and cools under ocean floor",
     lithosphere.warm(100.0, mantle);
     CHECK_THAT(heat_at(north), WithinAbs(std::exp(-1.0), 1e-5));
     CHECK_THAT(heat_at(south), WithinAbs(1.0 - std::exp(-1.0), 1e-5));
+}
+
+TEST_CASE("only a continent far wider than the mantle is deep warms it fully",
+          "[planet][lithosphere]") {
+    // Warmed for good under a continent `wide` radians across from its middle round to its edge.
+    const auto warmed = [](double wide) {
+        const Lithosphere ocean = halves();
+        std::vector<Lithosphere::Plate> plates{ocean.plates().front()};
+        const auto& grid = ocean.grid();
+        for (std::size_t index = 0; index < plates[0].cells.size(); ++index) {
+            if (hog::planet::cell_center(grid.cell(plates[0].cells[index])).z > std::cos(wide)) {
+                plates[0].crust[index] = continent;
+            }
+        }
+        Lithosphere lithosphere{grid, plates};
+        lithosphere.warm(1000.0);
+        return lithosphere;
+    };
+    const auto heat_at = [](const Lithosphere& lithosphere, DVec3 at) {
+        const auto& grid = lithosphere.grid();
+        return static_cast<double>(
+            lithosphere.heat()[grid.index(hog::planet::cell_at(at, grid.level()))]);
+    };
+    const DVec3 middle{0.0, 0.0, 1.0};
+    const double deep = Mantle{}.depth;
+    CHECK(heat_at(warmed(3.0 * deep), middle) > 0.99);
+    CHECK(heat_at(warmed(0.5 * deep), middle) < 0.5);
+    // At the edge of a wide one, the mantle mixes with that under the ocean beside it.
+    const Lithosphere wide = warmed(3.0 * deep);
+    const DVec3 edge{std::sin(3.0 * deep), 0.0, std::cos(3.0 * deep)};
+    CHECK(heat_at(wide, edge) > 0.3);
+    CHECK(heat_at(wide, edge) < 0.7);
 }
 
 TEST_CASE("the young mantle softens the lithosphere less as it cools", "[planet][lithosphere]") {

@@ -319,6 +319,59 @@ DVec3 gradient(const LevelGrid& grid, std::span<const float> field, std::uint32_
     return glm::inverse(fit) * rise;
 }
 
+// Of each place of `grid`, how much of the mantle under it continent `on_top` holds the heat in,
+// as it mixes with the mantle around it out to some `depth` of the planet's radius, the nearer
+// the more. Summed on the coarsest grid whose cells are still small beside that, as it mixes
+// over nothing finer.
+std::vector<double> insulated(const LevelGrid& grid,
+                              std::span<const std::optional<Lithosphere::Found>> on_top,
+                              double depth, jobs::JobSystem* jobs) {
+    // A cube face spans a quarter turn, halved at each level.
+    int level = 0;
+    while (level < grid.level() && std::numbers::pi / 2.0 / std::exp2(level) > depth / 4.0) {
+        ++level;
+    }
+    double sphere = 0.0;
+    for (std::uint32_t place = 0; place < grid.size(); ++place) {
+        sphere += static_cast<double>(grid.area(place));
+    }
+    const LevelGrid coarse{level, std::sqrt(sphere / (4.0 * std::numbers::pi))};
+    std::vector<double> covered(coarse.size(), 0.0);
+    std::vector<double> under(coarse.size(), 0.0);
+    for (std::uint32_t place = 0; place < grid.size(); ++place) {
+        const std::uint32_t at = coarse.index(cell_at(cell_center(grid.cell(place)), level));
+        const auto area = static_cast<double>(grid.area(place));
+        under[at] += area;
+        if (const std::optional<Lithosphere::Found>& found = on_top[place];
+            found && found->crust.type == CrustType::Continental) {
+            covered[at] += area;
+        }
+    }
+    std::vector<DVec3> centres(coarse.size());
+    for (std::uint32_t at = 0; at < coarse.size(); ++at) {
+        centres[at] = cell_center(coarse.cell(at));
+    }
+    constexpr auto unit = static_cast<double>(fixed_unit<fine_fraction_bits>);
+    std::vector<std::int64_t> share(coarse.size(), 0);
+    each(jobs, coarse.size(), 16, [&](std::uint32_t here, std::uint32_t /*thread*/) {
+        double warm = 0.0;
+        double all = 0.0;
+        for (std::uint32_t there = 0; there < coarse.size(); ++there) {
+            const double apart =
+                std::acos(std::clamp(glm::dot(centres[here], centres[there]), -1.0, 1.0)) / depth;
+            const double near = std::exp(-apart * apart);
+            warm += near * covered[there];
+            all += near * under[there];
+        }
+        share[here] = std::llround(warm / all * unit);
+    });
+    std::vector<double> found(grid.size());
+    for (std::uint32_t place = 0; place < grid.size(); ++place) {
+        found[place] = fixed_to_double<fine_fraction_bits>(coarse.smooth(share, grid.cell(place)));
+    }
+    return found;
+}
+
 // Whether ocean floor has been thickened as far over the basalt it formed as as it takes to float
 // floor of today's as continent: what's added is arc rock and sediment, lighter than basalt.
 bool floats_as_continent(const Crust& crust) {
@@ -1772,11 +1825,9 @@ void Lithosphere::drive(Forces forces, Strength strength) {
 
 void Lithosphere::warm(double years, Mantle mantle) {
     const auto toward = static_cast<float>(1.0 - std::exp(-years / mantle.settling));
-    const std::vector<std::optional<Found>> on_top = tops();
+    const std::vector<double> warmest = insulated(grid_, tops(), mantle.depth, jobs_);
     for (std::uint32_t place = 0; place < grid_.size(); ++place) {
-        const std::optional<Found>& found = on_top[place];
-        const float warmest = found && found->crust.type == CrustType::Continental ? 1.0F : 0.0F;
-        heat_[place] += (warmest - heat_[place]) * toward;
+        heat_[place] += (static_cast<float>(warmest[place]) - heat_[place]) * toward;
     }
     constexpr double gas = 8.314;
     const double now = mantle.potential + std::max(mantle.hotter - (mantle.cooling * time_), 0.0);

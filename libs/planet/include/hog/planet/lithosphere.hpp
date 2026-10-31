@@ -193,13 +193,17 @@ struct LowerCrust {
 
 // How the mantle warms where continents lie over it, as their thick crust holds its heat in, and
 // cools again under ocean floor, which lets it out: over `years`, each place goes the share
-// 1 - e^(-years / settling) of the way to fully warm or cool. The whole mantle starts `hotter`
-// kelvin over today's `potential` and loses `cooling` a million years till it's as today's, as
-// Earth's has lost about 250 K since plates began 3 billion years ago. The lithosphere over a
-// hotter mantle is thinner and its creep faster, by e^(activation / R (1/today - 1/then)) with
-// the activation energy of creep in olivine, so it's weaker by as much.
+// 1 - e^(-years / settling) of the way to as warm as the continent around it keeps it. The whole
+// mantle starts `hotter` kelvin over today's `potential` and loses `cooling` a million years till
+// it's as today's, as Earth's has lost about 250 K since plates began 3 billion years ago. The
+// lithosphere over a hotter mantle is thinner and its creep faster, by e^(activation / R (1/today -
+// 1/then)) with the activation energy of creep in olivine, so it's weaker by as much.
 struct Mantle {
     double settling = 100.0;
+    // Of the planet's radius, how far the mantle under a place mixes with that around it: about a
+    // convection cell, as wide as the mantle is deep, so only a continent far wider than that
+    // warms it fully (Lenardic et al. 2005; Coltice et al. 2007).
+    double depth = 2890.0 / 6371.0;
     double hotter = 200.0;
     double cooling = 0.08;
     double potential = 1623.0;
