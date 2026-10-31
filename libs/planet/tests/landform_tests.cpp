@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <numbers>
 #include <random>
 #include <ranges>
 #include <vector>
@@ -283,4 +284,24 @@ TEST_CASE("meanders find again the point they shifted", "[planet][landform]") {
             REQUIRE(glm::length(found - point) * radius < 8.0 * step);
         }
     }
+}
+
+TEST_CASE("the landform's slope runs up the ground as steeply as it rises", "[planet][landform]") {
+    constexpr double radius = 115'000.0;
+    LevelGrid grid{5, radius};
+    // Rising 2 km from the equator to the north pole.
+    std::vector<std::int64_t> heights(grid.size());
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        heights[index] = std::llround(2'000.0 * hog::planet::cell_center(grid.cell(index)).z *
+                                      static_cast<double>(fixed_one));
+    }
+    const std::vector<std::int64_t> zeros(grid.size(), 0);
+    const Landform landform{std::move(grid), heights, zeros, zeros, zeros, zeros, zeros, 0};
+    const double latitude = 30.0 * std::numbers::pi / 180.0;
+    const hog::DVec3 at = hog::planet::direction_at(latitude, 0.4);
+    const hog::DVec3 uphill = landform.uphill(hog::planet::cell_at(at, 14));
+    const hog::DVec3 north = glm::normalize(hog::DVec3{0.0, 0.0, 1.0} - (at * at.z));
+    CHECK(glm::dot(glm::normalize(uphill), north) > 0.99);
+    CHECK(glm::length(uphill) ==
+          Catch::Approx(2'000.0 * std::cos(latitude) / radius).epsilon(0.05));
 }

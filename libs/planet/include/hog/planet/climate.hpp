@@ -72,6 +72,29 @@ inline constexpr int biome_count = static_cast<int>(Biome::Lake) + 1;
     return moisture < savanna_moisture ? Biome::Savanna : Biome::TropicalRainforest;
 }
 
+// A land biome and the one its climate shades into across the nearest boundary between them,
+// with that one's share in fixed point: half on the boundary, falling to none a few degrees or a
+// few hundredths of wetness from it, as species' tolerances spread about the climate they suit.
+struct BiomeBlend {
+    Biome biome = Biome::Ocean;
+    Biome other = Biome::Ocean;
+    std::int64_t share = 0;
+};
+
+// For fixed-point °C and wetness, as classify_biome() takes them.
+[[nodiscard]] BiomeBlend blend_biome(std::int64_t temperature, std::int64_t moisture) noexcept;
+
+// The year's noon sun on ground at the unit direction `at` sloping up `uphill`, as Landform has
+// it, against on level ground there: under 1 on slopes facing the nearer pole, over on those
+// facing the equator.
+[[nodiscard]] double sunlit(DVec3 at, DVec3 uphill);
+
+// Fixed point from 0 (arid) to 1: how wet plants find ground given fixed-point millimetres of
+// rain a year and °C, `sunlit` as above and fixed-point metres `above_water`. Sunlit slopes
+// evaporate more and shaded ones less, and roots reaching the water table never go dry.
+[[nodiscard]] std::int64_t plant_wetness(std::int64_t rain, std::int64_t temperature, double sunlit,
+                                         std::int64_t above_water);
+
 // Climate from latitude and terrain: temperature falls towards the poles and with height;
 // moisture follows Earth-like circulation bands and dries out deep inland. High ground cold enough
 // holds glaciers, wet ground where the water table reaches the surface turns to wetland, and
@@ -93,11 +116,12 @@ public:
     [[nodiscard]] std::int64_t temperature(CellId cell, std::int64_t elevation) const;
 
     // Fixed-point wetness from 0 (arid) to 1 (saturated). Only continents dry out inland; islands
-    // are too small to.
+    // are too small to. Where the winds bring the rain, as plants find it on the ground.
     [[nodiscard]] std::int64_t moisture(CellId cell) const;
 
     // Fixed-point metres from the ground down to the water table: zero at sea, shallow near water
-    // and in wet climates, deep under high, dry ground.
+    // and in wet climates, deep under high, dry ground. The climate's wetness sets it, whatever
+    // the slope.
     [[nodiscard]] std::int64_t water_table(CellId cell) const;
 
     [[nodiscard]] Biome biome(CellId cell) const;
@@ -115,6 +139,11 @@ public:
 
 private:
     [[nodiscard]] std::int64_t water_table(CellId cell, std::int64_t moisture) const;
+    // The climate's wetness at a cell this many fixed-point °C warm, before the ground has a say.
+    [[nodiscard]] std::int64_t climatic(CellId cell, std::int64_t temperature) const;
+    // As moisture(), given the cell's temperature and its wetness by the climate.
+    [[nodiscard]] std::int64_t moisture(CellId cell, std::int64_t temperature,
+                                        std::int64_t climatic) const;
 
     Elevation terrain_;
     Temperature temperature_;

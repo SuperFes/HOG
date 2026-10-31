@@ -65,6 +65,9 @@ public:
     // Fixed point: the steepest slope from each grid cell down or up to a neighbour, rise over
     // run.
     [[nodiscard]] std::span<const std::int64_t> steepness() const noexcept { return steepness_; }
+    // The evolved ground's slope at any cell's centre, smoothly: along the ground the way up,
+    // as long as its rise over run.
+    [[nodiscard]] DVec3 uphill(CellId cell) const;
 
     // Whether a grid cell lies in a basin, holding a lake or dry.
     [[nodiscard]] bool basin(std::uint32_t index) const { return basins_[index]; }

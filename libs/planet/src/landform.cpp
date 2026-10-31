@@ -8,6 +8,7 @@
 #include <hog/planet/tile.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <utility>
 #include <vector>
@@ -218,6 +219,26 @@ bool Landform::near_lake(CellId cell) const {
     const int level = grid_.level();
     return near_lakes_[grid_.index(cell.level() >= level ? cell.parent(level)
                                                          : cell_at(cell_center(cell), level))];
+}
+
+DVec3 Landform::uphill(CellId cell) const {
+    const DVec3 at = cell_center(cell);
+    // Heights a grid cell either side, across two ways along the ground.
+    const std::uint32_t here = grid_.index(cell_at(at, grid_.level()));
+    const double metres = fixed_to_double(grid_.distance(here, 0));
+    const double step = glm::length(cell_center(grid_.cell(grid_.neighbors(here)[0])) -
+                                    cell_center(grid_.cell(here)));
+    const DVec3 axis = std::abs(at.z) < 0.9 ? DVec3{0.0, 0.0, 1.0} : DVec3{1.0, 0.0, 0.0};
+    const DVec3 first = glm::normalize(glm::cross(axis, at));
+    const DVec3 second = glm::cross(at, first);
+    const auto rise = [&](DVec3 way) {
+        const auto height = [&](double side) {
+            return fixed_to_double(
+                grid_.smooth(heights_, cell_at(glm::normalize(at + (way * side * step)))));
+        };
+        return (height(1.0) - height(-1.0)) / (2.0 * metres);
+    };
+    return (first * rise(first)) + (second * rise(second));
 }
 
 std::int64_t Landform::change(CellId cell) const {

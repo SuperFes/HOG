@@ -7,6 +7,7 @@
 #include <hog/testing/quick.hpp>
 #include <hog/testing/worlds.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <catch2/generators/catch_generators_adapters.hpp>
@@ -16,6 +17,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <numbers>
 #include <set>
 #include <string_view>
 #include <vector>
@@ -387,6 +389,75 @@ TEST_CASE("A settled world's ground is as wet as the winds' rain makes it", "[pl
     REQUIRE(rainfall != nullptr);
     for (const CellId cell : cells_at(3)) {
         const std::int64_t temperature = climate.temperature(cell);
-        CHECK(climate.moisture(cell) == hog::planet::wetness(rainfall->at(cell), temperature));
+        const double sun = hog::planet::sunlit(hog::planet::cell_center(cell),
+                                               climate.terrain().landform().uphill(cell));
+        CHECK(climate.moisture(cell) ==
+              hog::planet::plant_wetness(rainfall->at(cell), temperature, sun,
+                                         climate.terrain().above_water(cell)));
     }
+}
+
+TEST_CASE("Slopes facing the equator see more of the sun than level ground, facing the pole less",
+          "[planet][climate]") {
+    const auto at = [](double latitude) {
+        return hog::planet::direction_at(latitude * std::numbers::pi / 180.0, 1.0);
+    };
+    const auto north_of = [](hog::DVec3 here) {
+        return glm::normalize(hog::DVec3{0.0, 0.0, 1.0} - (here * here.z));
+    };
+    const hog::DVec3 north = at(45.0);
+    CHECK(hog::planet::sunlit(north, hog::DVec3{0.0}) == Catch::Approx(1.0));
+    // Rising to the north, a slope faces the equator.
+    CHECK(hog::planet::sunlit(north, north_of(north) * 0.4) > 1.2);
+    CHECK(hog::planet::sunlit(north, north_of(north) * -0.4) < 0.8);
+    // South of the equator the other way about.
+    const hog::DVec3 south = at(-45.0);
+    CHECK(hog::planet::sunlit(south, north_of(south) * -0.4) > 1.2);
+    // At the equator the sun stands overhead, so slopes facing either way see as little more.
+    const hog::DVec3 equator = at(0.0);
+    CHECK(hog::planet::sunlit(equator, north_of(equator) * 0.4) ==
+          hog::planet::sunlit(equator, north_of(equator) * -0.4));
+    CHECK(hog::planet::sunlit(equator, north_of(equator) * 0.4) < 1.0);
+}
+
+TEST_CASE("Plants find ground wetter in the shade and where their roots reach water",
+          "[planet][climate]") {
+    using hog::planet::plant_wetness;
+    const std::int64_t rain = 400 * fixed_one;
+    const std::int64_t warm = celsius(15);
+    const std::int64_t dry = 50 * fixed_one;
+    CHECK(plant_wetness(rain, warm, 1.0, dry) == hog::planet::wetness(rain, warm));
+    CHECK(plant_wetness(rain, warm, 0.6, dry) > plant_wetness(rain, warm, 1.0, dry));
+    CHECK(plant_wetness(rain, warm, 1.5, dry) < plant_wetness(rain, warm, 1.0, dry));
+    // However dry the climate.
+    CHECK(plant_wetness(0, warm, 1.0, 0) == fixed_one);
+    CHECK(plant_wetness(0, warm, 1.0, 3 * fixed_one) > fixed_one / 4);
+    CHECK(plant_wetness(rain, warm, 1.0, 5 * fixed_one) > plant_wetness(rain, warm, 1.0, dry));
+}
+
+TEST_CASE("Biomes shade into their neighbours near the climates between them",
+          "[planet][climate]") {
+    using hog::planet::blend_biome;
+    const std::int64_t mild = celsius(12);
+    // Far from any boundary, only its own.
+    CHECK(blend_biome(mild, fixed_one * 8 / 10).share == 0);
+    // Shrubland gives way to temperate forest at 0.36: either side of it, half and half.
+    const std::int64_t boundary = fixed_one * 9 / 25;
+    const auto below = blend_biome(mild, boundary - 1);
+    const auto above = blend_biome(mild, boundary);
+    CHECK(below.biome == Biome::Shrubland);
+    CHECK(below.other == Biome::TemperateForest);
+    CHECK(above.biome == Biome::TemperateForest);
+    CHECK(above.other == Biome::Shrubland);
+    CHECK(std::abs(below.share - (fixed_one / 2)) < fixed_one / 100);
+    CHECK(std::abs(above.share - (fixed_one / 2)) < fixed_one / 100);
+    // Fading as the climate moves off it.
+    std::int64_t last = above.share;
+    for (std::int64_t wetter = fixed_one / 200; wetter <= fixed_one / 10;
+         wetter += fixed_one / 200) {
+        const auto blend = blend_biome(mild, boundary + wetter);
+        CHECK(blend.share <= last);
+        last = blend.share;
+    }
+    CHECK(last == 0);
 }
