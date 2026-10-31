@@ -38,8 +38,10 @@ void check_faces(const hog::globe::HexelMesh& mesh) {
 
 TEST_CASE("ground under air shows only its top, covering the sphere", "[globe][hexel_mesh]") {
     constexpr double radius = 10'000.0;
-    Globe globe{3, {.inner = 0.0, .thickness = radius / 4.0, .count = 6}};
-    fill(globe, 4, Material::Granite);
+    Globe globe{3, {.inner = 0.0, .outer = 1.5 * radius, .count = 8}};
+    // Up to the radius, about where the ground stands.
+    fill(globe, 3, Material::Granite);
+    const double top = globe.shells().ceiling(2);
     const auto mesh = hog::globe::mesh_hexels(globe, DVec3{0.0});
     check_faces(mesh);
     double area = 0.0;
@@ -54,14 +56,14 @@ TEST_CASE("ground under air shows only its top, covering the sphere", "[globe][h
                                              DVec3{c.position - a.position}));
     }
     // Flat polygons cut a little inside the round surface.
-    const double sphere = 4.0 * std::numbers::pi * radius * radius;
+    const double sphere = 4.0 * std::numbers::pi * top * top;
     CHECK(area < sphere);
     CHECK(area > 0.99 * sphere);
 }
 
 TEST_CASE("water shows over the ground it covers, and the ground under the water",
           "[globe][hexel_mesh]") {
-    Globe globe{2, {.inner = 0.0, .thickness = 1'000.0, .count = 6}};
+    Globe globe{2, {.inner = 0.0, .outer = 6'000.0, .count = 6}};
     fill(globe, 4, Material::Water);
     fill(globe, 3, Material::Basalt);
     const auto mesh = hog::globe::mesh_hexels(globe, DVec3{0.0});
@@ -76,7 +78,7 @@ TEST_CASE("water shows over the ground it covers, and the ground under the water
 }
 
 TEST_CASE("a lone hexel shows all its sides, its top and its floor", "[globe][hexel_mesh]") {
-    Globe globe{2, {.inner = 1'000.0, .thickness = 100.0, .count = 4}};
+    Globe globe{2, {.inner = 1'000.0, .outer = 1'400.0, .count = 4}};
     for (const std::uint64_t index : {std::uint64_t{0}, std::uint64_t{77}}) {
         Globe lone = globe;
         const HexCell cell = hog::globe::cell_at_index(2, index);

@@ -1,4 +1,5 @@
 #include <hog/globe/hex_cell.hpp>
+#include <hog/globe/hex_grid.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -259,4 +260,16 @@ TEST_CASE("an amount is dealt out by halves in whole units", "[globe][hex_cell]"
     CHECK(hog::globe::share_out(8, shares) == std::array<std::int64_t, 7>{4, 2, 2});
     CHECK(hog::globe::share_out(11, shares) == std::array<std::int64_t, 7>{5, 3, 3});
     CHECK(hog::globe::share_out(-5, shares) == std::array<std::int64_t, 7>{-3, -1, -1});
+}
+
+TEST_CASE("a grid holds every cell's neighbours by index", "[globe][hex_grid]") {
+    const hog::globe::HexGrid grid{3};
+    REQUIRE(grid.size() == hog::globe::cell_count(3));
+    for (std::uint32_t index = 0; index < grid.size(); ++index) {
+        const auto around = hog::globe::neighbors(hog::globe::cell_at_index(3, index));
+        REQUIRE(grid.neighbors(index).size() == around.count);
+        for (std::size_t k = 0; k < around.count; ++k) {
+            CHECK(grid.neighbors(index)[k] == hog::globe::index_of(around.cells[k]));
+        }
+    }
 }
