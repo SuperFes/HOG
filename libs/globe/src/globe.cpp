@@ -85,4 +85,24 @@ std::array<double, material_count> Globe::masses() const {
     return mass;
 }
 
+Globe refined(const Globe& coarse) {
+    Globe fine{coarse.level() + 1, coarse.shells().finer(1)};
+    fine.set_bound(coarse.bound());
+    fine.freed() = coarse.freed();
+    for (std::uint64_t index = 0; index < cell_count(fine.level()); ++index) {
+        const HexShares over = parents(cell_at_index(fine.level(), index));
+        const auto column = fine.column_at(index);
+        for (int shell = 0; shell < coarse.shells().count; ++shell) {
+            Hexel lower = coarse.at(over.cells[0], shell);
+            Hexel upper = over.count == 1 ? lower : coarse.at(over.cells[1], shell);
+            if (properties(upper.material).density > properties(lower.material).density) {
+                std::swap(lower, upper);
+            }
+            column[2 * static_cast<std::size_t>(shell)] = lower;
+            column[(2 * static_cast<std::size_t>(shell)) + 1] = upper;
+        }
+    }
+    return fine;
+}
+
 } // namespace hog::globe

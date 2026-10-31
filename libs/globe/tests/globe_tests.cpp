@@ -2,8 +2,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <numbers>
 
 using hog::globe::Globe;
@@ -57,4 +59,58 @@ TEST_CASE("a globe weighs its materials by the space they fill", "[globe]") {
     CHECK(std::abs(masses[static_cast<std::size_t>(Material::Mantle)] - (ball * (1.0 + over))) <
           1e-9 * ball);
     CHECK(masses[static_cast<std::size_t>(Material::Air)] == 0.0);
+}
+
+TEST_CASE("finer shells split each shell in two, their floors landing on its", "[globe]") {
+    const hog::globe::Shells coarse{.inner = 0.0, .outer = 143'750.0, .count = 19};
+    const hog::globe::Shells fine = coarse.finer(12);
+    CHECK(fine.count == 19 << 12);
+    for (int shell = 0; shell <= coarse.count; ++shell) {
+        CHECK(fine.floor(shell << 12) == coarse.floor(shell));
+    }
+}
+
+TEST_CASE("a globe a level finer has eight hexels for each of its own", "[globe]") {
+    constexpr int level = 3;
+    Globe coarse{level, {.inner = 0.0, .outer = 2'000.0, .count = 6}};
+    std::array<std::int64_t, hog::globe::material_count> want{};
+    for (std::uint64_t index = 0; index < hog::globe::cell_count(level); ++index) {
+        const bool pentagon = hog::globe::is_pentagon(hog::globe::cell_at_index(level, index));
+        const auto column = coarse.column_at(index);
+        for (std::size_t shell = 0; shell < column.size(); ++shell) {
+            const std::size_t pick = ((index * 7) + (shell * 3)) % 4;
+            const std::array materials{Material::Air, Material::Water, Material::Granite,
+                                       Material::Iron};
+            column[shell] = {.material = materials.at(pick),
+                             .held = static_cast<std::uint8_t>(index % 200),
+                             .temperature = static_cast<std::uint16_t>(300 + shell)};
+            want.at(static_cast<std::size_t>(column[shell].material)) += pentagon ? 7 : 8;
+        }
+    }
+    const Globe fine = hog::globe::refined(coarse);
+    CHECK(fine.level() == level + 1);
+    CHECK(fine.shells().count == 12);
+    CHECK(std::abs(fine.hexel_volume() - (coarse.hexel_volume() / 8.0)) <
+          1e-12 * coarse.hexel_volume());
+    std::array<std::int64_t, hog::globe::material_count> got{};
+    for (std::uint64_t index = 0; index < hog::globe::cell_count(level + 1); ++index) {
+        const HexCell cell = hog::globe::cell_at_index(level + 1, index);
+        const auto over = hog::globe::parents(cell);
+        const auto column = fine.column(cell);
+        for (std::size_t shell = 0; shell < column.size(); ++shell) {
+            ++got.at(static_cast<std::size_t>(column[shell].material));
+            // Every fine hexel is one of its parents' in the shell it was split from.
+            const int from = static_cast<int>(shell / 2);
+            bool found = false;
+            for (const HexCell parent : over.all()) {
+                found = found || coarse.at(parent, from) == column[shell];
+            }
+            CHECK(found);
+            if (shell % 2 == 1) {
+                CHECK(hog::globe::properties(column[shell - 1].material).density >=
+                      hog::globe::properties(column[shell].material).density);
+            }
+        }
+    }
+    CHECK(got == want);
 }

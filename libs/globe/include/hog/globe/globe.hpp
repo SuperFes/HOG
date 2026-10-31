@@ -53,6 +53,10 @@ struct Shells {
     [[nodiscard]] double thickness(int shell) const noexcept {
         return ceiling(shell) - floor(shell);
     }
+    // The shells `levels` finer, each split in two per level so their floors land on these.
+    [[nodiscard]] Shells finer(int levels) const noexcept {
+        return {.inner = inner, .outer = outer, .count = count << levels};
+    }
 };
 
 // Shells from `inner` to `outer` about `thickness` thick where they pass `radius`.
@@ -100,5 +104,10 @@ private:
     Volatiles bound_;
     Volatiles freed_;
 };
+
+// The globe a level finer. Each coarse hexel becomes eight: two shells of its centre child, and a
+// hexel in each of the two shells of every child it shares with a neighbour, the denser lower.
+// Pentagons have five such children, so theirs become seven.
+[[nodiscard]] Globe refined(const Globe& coarse);
 
 } // namespace hog::globe
