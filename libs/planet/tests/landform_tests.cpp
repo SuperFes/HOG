@@ -407,3 +407,55 @@ TEST_CASE("land floats back up as rivers wear it, standing higher, its rock rise
     CHECK(std::ranges::max(floating.floated()) > 10 * fixed_one);
     CHECK(floating_total > sunk_total);
 }
+
+TEST_CASE("land floats back up under the troughs the ice cut, by a share of what it carried off",
+          "[planet][landform]") {
+    // An ice cap on mountains at the north pole, as glaciers cut them above.
+    const LevelGrid grid{6, 10'000.0};
+    const LevelGrid bending{3, 10'000.0};
+    std::vector<std::int64_t> heights;
+    std::vector<std::int64_t> balance;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const hog::DVec3 at = hog::planet::cell_center(grid.cell(cell));
+        const double metres =
+            at.z > 0.0 ? 20.0 + (2'000.0 * at.z) + (250.0 * at.z * std::sin(7.0 * at.x)) : -60.0;
+        heights.push_back(std::llround(metres * static_cast<double>(fixed_one)));
+        balance.push_back(std::llround((metres - 300.0) * 0.005 * static_cast<double>(fixed_one)));
+    }
+    const std::vector<std::int64_t> uplift(grid.size(), 0);
+    const std::vector<std::int64_t> erodibility(grid.size(), fixed_one / 20);
+    const std::vector<std::int64_t> runoff(grid.size(), fixed_one / 2);
+    const auto worn = [&](const hog::planet::Glaciation& glaciation) {
+        return Landform{grid,
+                        heights,
+                        {.uplift = uplift,
+                         .erodibility = erodibility,
+                         .runoff = runoff,
+                         .rebound = 0.85,
+                         .bending = &bending},
+                        hog::planet::Hillslope{},
+                        3,
+                        {},
+                        glaciation};
+    };
+    const Landform bare = worn({});
+    const Landform cut =
+        worn({.balance = [&](std::uint32_t cell, std::int64_t) { return balance[cell]; }});
+    double carried = 0.0;
+    double floated = 0.0;
+    for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
+        const std::int64_t rose = cut.floated()[cell] - bare.floated()[cell];
+        REQUIRE(rose >= 0);
+        // It stands as the ice left it and floated, its rock risen by as much.
+        REQUIRE(cut.heights()[cell] == heights[cell] + cut.change()[cell] - cut.carved()[cell]);
+        REQUIRE(cut.risen()[cell] - bare.risen()[cell] == rose);
+        const auto area = static_cast<double>(grid.area(cell));
+        carried +=
+            area * hog::planet::fixed_to_double(bare.heights()[cell] - cut.heights()[cell] + rose);
+        floated += area * hog::planet::fixed_to_double(rose);
+    }
+    REQUIRE(carried > 0.0);
+    CHECK(std::ranges::max(cut.floated()) > std::ranges::max(bare.floated()));
+    // The crust floats back up by the share of what the ice carried off, spread around.
+    CHECK(floated / carried == Catch::Approx(0.85).margin(0.05));
+}

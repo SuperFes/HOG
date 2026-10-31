@@ -83,6 +83,15 @@ Landform::Landform(LevelGrid grid, std::vector<std::int64_t> heights, const Eros
             change_[cell] -= taken;
             carved_[cell] = cut[cell] - taken;
         }
+        // The rock the ice carried off lightens the crust, which floats back up as it does under
+        // what rivers wear off.
+        const std::vector<std::int64_t> floated = rebound(grid_, cut, erosion);
+        for (std::size_t cell = 0; cell < heights_.size(); ++cell) {
+            heights_[cell] += floated[cell];
+            change_[cell] += floated[cell];
+            risen_[cell] += floated[cell];
+            floated_[cell] += floated[cell];
+        }
     }
     drainage_ = drain(grid_, heights_, 0, settled(erosion.wander));
     std::vector<std::int64_t> rain(grid_.size());
