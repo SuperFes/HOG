@@ -27,6 +27,8 @@ struct Layers {
 
     // Cubic metres in the voxel of `cell` in `layer`.
     [[nodiscard]] double volume(Cell cell, int layer) const;
+
+    friend constexpr bool operator==(const Layers&, const Layers&) noexcept = default;
 };
 
 // Layers from `depth` below `radius` to `height` above it, as near `thickness` thick as fit, on

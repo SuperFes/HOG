@@ -6,8 +6,13 @@
 #include <hog/globe/planet.hpp>
 
 #include <optional>
+#include <vector>
 
 namespace hog::globe {
+
+namespace terms {
+struct Column;
+} // namespace terms
 
 // What the world holds at a point before anything has changed it.
 struct Sample {
@@ -69,6 +74,12 @@ public:
 
     [[nodiscard]] Column column(DVec3 direction, double lod) const noexcept;
 
+    // The columns through the middles of a square of cells `side` across from `corner`, on its
+    // level, along i then j. Each takes the ground's slope from the cells beside it, so they
+    // share the work: cheaper than column() each, and a cell's column comes out the same in any
+    // square. Voxels are filled from these.
+    [[nodiscard]] std::vector<Column> columns(Cell corner, int side, double lod) const;
+
     // Planet-wide constants found once from the knobs; what each means is the generator's own.
     struct Shape {
         double province_threshold = 0.0;
@@ -80,6 +91,9 @@ public:
     };
 
 private:
+    [[nodiscard]] Column finish(DVec3 down, double lod, const terms::Column& found,
+                                double slope) const noexcept;
+
     Planet planet_;
     Derived derived_;
     Shape shape_;

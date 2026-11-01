@@ -64,8 +64,15 @@ struct Voxel {
     return temperature / 8.0;
 }
 
-// The voxel a generated sample makes. All the generated ground is shaped matter; it turns loose
-// only once something disturbs it.
-[[nodiscard]] Voxel voxel_from(const Sample& sample) noexcept;
+// How far either side of a surface voxels keep its distance, in metres: beyond, only which side
+// they're on, which is all that's drawn there. So a brick all dug out or all rock is one voxel
+// throughout.
+[[nodiscard]] constexpr double distance_band(const Layers& layers) noexcept {
+    return 4.0 * layers.thickness;
+}
+
+// The voxel a generated sample makes, its distance kept within `band`. All the generated ground
+// is shaped matter; it turns loose only once something disturbs it.
+[[nodiscard]] Voxel voxel_from(const Sample& sample, double band) noexcept;
 
 } // namespace hog::globe

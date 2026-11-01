@@ -31,7 +31,8 @@ TEST_CASE("voxels hold distance, amounts and temperature in fixed steps", "[glob
 
 TEST_CASE("a generated sample makes shaped ground, open water or air", "[globe][voxel]") {
     const Voxel rock = hog::globe::voxel_from(
-        {.distance = -0.75, .material = Material::Granite, .water = 0.0, .temperature = 290.0});
+        {.distance = -0.75, .material = Material::Granite, .water = 0.0, .temperature = 290.0},
+        2.0);
     CHECK(rock.distance == -750);
     CHECK(rock.solid == Material::Granite);
     CHECK(rock.condition == Voxel::sound);
@@ -39,14 +40,15 @@ TEST_CASE("a generated sample makes shaped ground, open water or air", "[globe][
     CHECK(rock.temperature == 2'320);
 
     const Voxel sea = hog::globe::voxel_from(
-        {.distance = 3.0, .material = Material::Water, .water = 1.0, .temperature = 280.0});
+        {.distance = 3.0, .material = Material::Water, .water = 1.0, .temperature = 280.0}, 2.0);
     CHECK(sea.solid == Material::Air);
     CHECK(sea.liquid == Material::Water);
     CHECK(sea.liquid_amount == Voxel::full);
 
     const Voxel air = hog::globe::voxel_from(
-        {.distance = 50.0, .material = Material::Air, .water = 0.0, .temperature = 250.0});
-    CHECK(air == Voxel{.temperature = 2'000});
+        {.distance = 50.0, .material = Material::Air, .water = 0.0, .temperature = 250.0}, 2.0);
+    CHECK(air == Voxel{.distance = 2'000, .temperature = 2'000});
+    CHECK(sea.distance == 2'000);
 }
 
 TEST_CASE("a voxel's value is taken halfway up its layer, mid-column", "[globe][voxel]") {

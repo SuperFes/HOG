@@ -24,9 +24,9 @@ std::uint16_t temperature_in_eighths(double kelvin) noexcept {
     return static_cast<std::uint16_t>(std::lround(std::clamp(kelvin * 8.0, 0.0, 65'535.0)));
 }
 
-Voxel voxel_from(const Sample& sample) noexcept {
+Voxel voxel_from(const Sample& sample, double band) noexcept {
     Voxel voxel;
-    voxel.distance = distance_in_mm(sample.distance);
+    voxel.distance = distance_in_mm(std::clamp(sample.distance, -band, band));
     voxel.temperature = temperature_in_eighths(sample.temperature);
     if (sample.distance < 0.0) {
         voxel.solid = sample.material;

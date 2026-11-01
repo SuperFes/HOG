@@ -1,5 +1,6 @@
 #include "terms.hpp"
 
+#include <hog/core/assert.hpp>
 #include <hog/core/hash.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/generator.hpp>
@@ -9,6 +10,7 @@
 #include <cmath>
 #include <cstdint>
 #include <numbers>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -153,13 +155,88 @@ std::optional<double> Generator::sea_level() const noexcept {
 Generator::Column Generator::column(DVec3 direction, double lod) const noexcept {
     const terms::Context context{.planet = &planet_, .derived = &derived_, .shape = &shape_};
     const DVec3 down = glm::normalize(direction);
-    const terms::Column found = terms::column(context, down, lod);
+    return finish(down, lod, terms::column(context, down, lod), ground_slope(context, down, lod));
+}
+
+std::vector<Generator::Column> Generator::columns(Cell corner, int side, double lod) const {
+    HOG_ASSERT(side > 0 && corner.is_valid() &&
+                   std::cmp_less_equal(corner.i + static_cast<std::uint32_t>(side),
+                                       std::uint32_t{1} << corner.level) &&
+                   std::cmp_less_equal(corner.j + static_cast<std::uint32_t>(side),
+                                       std::uint32_t{1} << corner.level),
+               "the square must lie on one face");
+    const terms::Context context{.planet = &planet_, .derived = &derived_, .shape = &shape_};
+    const auto count = static_cast<std::size_t>(side) * static_cast<std::size_t>(side);
+    std::vector<Cell> cells;
+    cells.reserve(count);
+    for (int j = 0; j < side; ++j) {
+        for (int i = 0; i < side; ++i) {
+            cells.push_back({.level = corner.level,
+                             .face = corner.face,
+                             .i = corner.i + static_cast<std::uint32_t>(i),
+                             .j = corner.j + static_cast<std::uint32_t>(j)});
+        }
+    }
+    std::vector<terms::Column> found;
+    found.reserve(count);
+    std::unordered_map<std::uint64_t, double> heights;
+    for (const Cell cell : cells) {
+        found.push_back(terms::column(context, center(cell), lod));
+        heights.emplace(index_of(cell), found.back().height.value);
+    }
+    const auto height_at = [&](Cell cell) {
+        const auto [at, added] = heights.try_emplace(index_of(cell), 0.0);
+        if (added) {
+            at->second = terms::column(context, center(cell), lod).height.value;
+        }
+        return at->second;
+    };
+
+    std::vector<Column> made;
+    made.reserve(count);
+    for (std::size_t k = 0; k < count; ++k) {
+        const DVec3 down = center(cells[k]);
+        const DVec3 axis = std::abs(down.z) < 0.9 ? DVec3{0.0, 0.0, 1.0} : DVec3{1.0, 0.0, 0.0};
+        const DVec3 east = glm::normalize(glm::cross(axis, down));
+        const DVec3 north = glm::cross(down, east);
+        // The plane through the four heights beside it, by least squares; across a cube's edge
+        // the cells beside it needn't line up.
+        double xx = 0.0;
+        double xy = 0.0;
+        double yy = 0.0;
+        double xh = 0.0;
+        double yh = 0.0;
+        const CellNeighbors beside = sides(cells[k]);
+        for (const Cell cell : beside.all()) {
+            const DVec3 offset = (center(cell) - down) * planet_.radius;
+            const double x = glm::dot(offset, east);
+            const double y = glm::dot(offset, north);
+            const double rise = height_at(cell) - found[k].height.value;
+            xx += x * x;
+            xy += x * y;
+            yy += y * y;
+            xh += x * rise;
+            yh += y * rise;
+        }
+        const double determinant = (xx * yy) - (xy * xy);
+        const double across_east = ((yy * xh) - (xy * yh)) / determinant;
+        const double across_north = ((xx * yh) - (xy * xh)) / determinant;
+        made.push_back(
+            finish(down, lod, found[k],
+                   std::sqrt((across_east * across_east) + (across_north * across_north))));
+    }
+    return made;
+}
+
+Generator::Column Generator::finish(DVec3 down, double lod, const terms::Column& found,
+                                    double slope) const noexcept {
+    const terms::Context context{.planet = &planet_, .derived = &derived_, .shape = &shape_};
     Column column;
     column.generator_ = this;
     column.direction_ = down;
     column.lod_ = lod;
     column.ground_ = planet_.radius + found.height.value - shape_.datum;
-    column.slope_ = ground_slope(context, down, lod);
+    column.slope_ = slope;
     const double latitude = maths::atan2(down.z, std::sqrt((down.x * down.x) + (down.y * down.y)));
     column.surface_temperature_ = temperature_at(planet_, latitude);
     const double height = column.ground_ - planet_.radius;

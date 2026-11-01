@@ -23,7 +23,8 @@ add_library(hog_globe
     src/settling.cpp
     src/strata.cpp
     src/voxel.cpp
-    src/voxel_store.cpp)
+    src/voxel_store.cpp
+    src/world.cpp)
 add_library(hog::globe ALIAS hog_globe)
 
 target_include_directories(hog_globe PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -49,4 +50,5 @@ hog_add_tests(hog_globe
     tests/settling_tests.cpp
     tests/strata_tests.cpp
     tests/voxel_store_tests.cpp
-    tests/voxel_tests.cpp)
+    tests/voxel_tests.cpp
+    tests/world_tests.cpp)
