@@ -66,7 +66,14 @@ What v1 holds:
 ## The simulation
 
 The simulation runs on the server, only in chunks near players or events:
-- **Water and lava** move by pipes between stacked sections in each column, weighted so they spread evenly in every direction.
+- **Water and lava** move between the sections of open voxels up each column and the four columns beside it, by the difference in their heads, the same every way: the columns are square and so is the flow. Liquid pushed into a full section presses in beyond full and the head that gives pushes on, so it finds its level through a tunnel. Shaped matter is the only blocker, so a dam, a sluice, a dug channel or a built aqueduct all work by being built or dug; nothing is a special case.
+
+The flow is a game system that stands in for many things, so it is designed against the list of them rather than any one. Each is a source, a sink, a blocker, a reading of the state or a rule at a contact, and nothing else; a new use must fit one of those or the model is wrong:
+- *Shaping:* diverting a river with a dug channel, damming a valley, draining a marsh or a mine, flooding a quarry, a canal, a well into the groundwater, a moat.
+- *Sources and sinks:* the sea beyond the edge at its level, with tides later; rain and snowmelt; springs and artesian heads where pressed-in liquid finds a way out; evaporation; pumps and drains built by players.
+- *Readings:* the surface level and the current in any column for boats, swimmers, wheels and mills; wetness of the ground for crops and for plants and animals that need standing water; the flux across a face for erosion and for carrying soil, sand and silt.
+- *Contacts:* water meeting lava makes rock and steam; lava cools and stiffens; water freezes over and thaws; soil soaked through softens and gives way; a flooded build wears.
+- *Reach:* flow in the open, through caves, through the pores of soil and sandstone, and in built pipes alike, so that every one of these is the same code with a different voxel under it.
 - **Sand and rubble** slide when steeper than their angle of repose, measured in true distances.
 - **Collapse** checks connectivity in a bounded region, plus a load rule that lets arches stand. It's partial and local: what's overloaded sags and cracks first, then the failed part falls as rubble.
 - **Wear** lowers condition by each material's own process: weather, water, rot, rust, frost and load. Worn parts get weaker, so neglect ends in collapse. Wear is what makes maintenance jobs: repair, drainage, clearing rubble, roads.
