@@ -193,3 +193,16 @@ TEST_CASE("a planet file refuses what it doesn't know or can't be", "[globe][pla
     CHECK(hog::globe::parse_planet("[globe\n").error().code == hog::ErrorCode::Parse);
     CHECK_FALSE(hog::globe::load_planet("no/such/planet.toml").has_value());
 }
+
+TEST_CASE("a world's id tells its knobs apart", "[globe][planet]") {
+    const hog::globe::Planet earth;
+    hog::globe::Planet other = earth;
+    other.seed = 2;
+    hog::globe::Planet larger = earth;
+    larger.radius = 120'000.0;
+    CHECK(hog::globe::world_id(earth) == hog::globe::world_id(hog::globe::Planet{}));
+    CHECK(hog::globe::world_id(earth) != hog::globe::world_id(other));
+    CHECK(hog::globe::world_id(earth) != hog::globe::world_id(larger));
+    CHECK(hog::globe::world_id(earth) !=
+          hog::globe::world_id(hog::globe::preset("moon").value_or(hog::globe::Planet{})));
+}

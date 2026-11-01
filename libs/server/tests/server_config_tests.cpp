@@ -48,21 +48,11 @@ TEST_CASE("a minimal server config takes the defaults", "[server][config]") {
     CHECK(config->log.categories.empty());
     CHECK_FALSE(config->log.file);
     CHECK(config->metrics_interval == 10s);
-    CHECK(config->weather.cell_size == 6'000.0);
-    CHECK(config->weather.step == 10min);
-    CHECK(config->weather.day == 24h);
-    CHECK_FALSE(config->weather.earth_pace);
-    CHECK_FALSE(config->wildlife.ecology);
-    CHECK(config->wildlife.step == 24h);
-    CHECK_FALSE(config->forest.vegetation);
-    CHECK(config->forest.step == 1h);
-    CHECK_FALSE(config->forest.burned_years_ago);
     CHECK_FALSE(config->net.port);
     CHECK_FALSE(config->net.login_key);
     CHECK(config->net.simulate.off());
     CHECK(config->net.view.radius == 500.0);
     CHECK(config->net.view.budget == 1'200);
-    CHECK_FALSE(config->debug.port);
     CHECK_FALSE(config->debug.time_control);
     CHECK_FALSE(config->debug.start);
 }
@@ -88,21 +78,6 @@ categories = { save = "trace", net = "off" }
 [metrics]
 interval_seconds = 0
 
-[weather]
-cell_km = 2.5
-step_minutes = 5
-day_hours = 4
-earth_pace = true
-
-[wildlife]
-ecology = "ecology.toml"
-step_hours = 6
-
-[forest]
-vegetation = "forest.toml"
-step_hours = 0.5
-burned_years_ago = 8
-
 [net]
 port = 27100
 login_key = "../var/login.pub"
@@ -111,7 +86,6 @@ view_m = 250.5
 snapshot_bytes = 900
 
 [debug]
-port = 7777
 time_control = true
 start = 2030-06-01T12:00:00+02:00
 )",
@@ -134,21 +108,11 @@ start = 2030-06-01T12:00:00+02:00
     CHECK(has(Override{"net", hog::log::Level::Off}));
     CHECK(config->log.file == std::filesystem::path{"/srv/hog/var/logs/server.jsonl"});
     CHECK(config->metrics_interval == 0s);
-    CHECK(config->weather.cell_size == 2'500.0);
-    CHECK(config->weather.step == 5min);
-    CHECK(config->weather.day == 4h);
-    CHECK(config->weather.earth_pace);
-    CHECK(config->wildlife.ecology == base() / "ecology.toml");
-    CHECK(config->wildlife.step == 6h);
-    CHECK(config->forest.vegetation == base() / "forest.toml");
-    CHECK(config->forest.step == 30min);
-    CHECK(config->forest.burned_years_ago == 8.0);
     CHECK(config->net.port == 27100);
     CHECK(config->net.login_key == (base() / "../var/login.pub").lexically_normal());
     CHECK(config->net.simulate == hog::net::Simulation{.lag = 75ms, .loss = 2});
     CHECK(config->net.view.radius == 250.5);
     CHECK(config->net.view.budget == 900);
-    CHECK(config->debug.port == 7777);
     CHECK(config->debug.time_control);
     CHECK(config->debug.start ==
           hog::to_game_time(std::chrono::sys_days{std::chrono::year{2030} / 6 / 1} + 10h));
@@ -254,8 +218,5 @@ TEST_CASE("the development server config loads", "[server][config]") {
     REQUIRE(config);
     CHECK(config->planet.filename() == "planet.toml");
     CHECK(std::filesystem::exists(config->planet));
-    CHECK(std::filesystem::exists(config->wildlife.ecology.value_or("")));
-    CHECK(std::filesystem::exists(config->forest.vegetation.value_or("")));
     CHECK(config->net.port);
-    CHECK(config->debug.port);
 }

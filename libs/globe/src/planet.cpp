@@ -1,8 +1,10 @@
+#include <hog/core/hash.hpp>
 #include <hog/globe/maths.hpp>
 #include <hog/globe/planet.hpp>
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <format>
 #include <limits>
@@ -232,6 +234,20 @@ Result<void> validate(const Planet& planet) {
         }
     }
     return {};
+}
+
+std::uint64_t world_id(const Planet& planet) noexcept {
+    const auto bits = [](double value) { return std::bit_cast<std::uint64_t>(value); };
+    return hash_values(
+        planet.seed, bits(planet.radius), bits(planet.gravity), bits(planet.day), bits(planet.tilt),
+        bits(planet.lateral_scale), bits(planet.voxel), bits(planet.floor_depth),
+        bits(planet.sky_height), static_cast<int>(planet.regime),
+        static_cast<int>(planet.high.rock), bits(planet.high.thickness),
+        static_cast<int>(planet.low.rock), bits(planet.low.thickness), bits(planet.high_fraction),
+        static_cast<int>(planet.layout), bits(planet.mantle_density), bits(planet.heat_flow),
+        bits(planet.surface_age), bits(planet.impact_flux), bits(planet.pressure),
+        bits(planet.equator_temperature), bits(planet.pole_temperature),
+        static_cast<int>(planet.volatiles), bits(planet.sea_fraction));
 }
 
 } // namespace hog::globe

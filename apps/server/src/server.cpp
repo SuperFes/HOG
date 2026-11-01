@@ -4,16 +4,10 @@
 #include <hog/globe/brick_archive.hpp>
 #include <hog/globe/material.hpp>
 #include <hog/net/simulation.hpp>
-#include <hog/planet/bake.hpp>
-#include <hog/planet/cell_id.hpp>
-#include <hog/planet/geology.hpp>
+#include <hog/planet/planet_config.hpp>
 #include <hog/planet/projection.hpp>
-#include <hog/planet/tangent_frame.hpp>
 #include <hog/save/snapshot_store.hpp>
 #include <hog/server/spatial_tracking.hpp>
-#include <hog/server/survey.hpp>
-#include <hog/server/weather_report.hpp>
-#include <hog/server/woodlands_report.hpp>
 
 #include <algorithm>
 #include <array>
@@ -34,10 +28,6 @@ namespace {
 constexpr std::array tick_bounds{0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005,
                                  0.01,   0.025,   0.05,   0.1,   0.25,   1.0};
 
-constexpr save::SectionId weather_section = save::section_id("WTHR");
-constexpr save::SectionId wildlife_section = save::section_id("WILD");
-constexpr save::SectionId forest_section = save::section_id("FRST");
-
 [[nodiscard]] std::string format_time(GameTime time) {
     return std::format("{:%FT%T}Z",
                        std::chrono::sys_seconds{
@@ -48,25 +38,6 @@ constexpr save::SectionId forest_section = save::section_id("FRST");
     return make_error(error.code, std::format("{}: {}", what, error.message));
 }
 
-// A part of the simulation whose section can't be read starts over, unless a newer build wrote
-// it.
-template <typename Part>
-[[nodiscard]] Result<void> restore_part(Part& part, const save::Snapshot& snapshot,
-                                        save::SectionId id, std::string_view what) {
-    const save::Section* section = snapshot.find(id);
-    if (section == nullptr) {
-        return {};
-    }
-    auto restored = part.load(section->version, section->bytes);
-    if (!restored && restored.error().code == ErrorCode::Unsupported) {
-        return context(what, restored.error());
-    }
-    if (!restored) {
-        log::warn(save_log, "{} starts over: {}", what, restored.error().message);
-    }
-    return {};
-}
-
 void mirror(metrics::Counter& counter, std::uint64_t total, std::uint64_t& mirrored) {
     counter.add(total - mirrored);
     mirrored = total;
@@ -74,17 +45,15 @@ void mirror(metrics::Counter& counter, std::uint64_t total, std::uint64_t& mirro
 
 } // namespace
 
-Server::Server(Opened /*unused*/, const server::ServerConfig& config,
-               const planet::PlanetConfig& planet, const globe::Planet& globe,
-               store::SqliteSnapshotStore snapshots, store::SqliteChangeStore changes,
-               store::SqlitePlayerStore places, store::SqliteBrickArchive bricks)
-    : config_(config), world_id_(planet::world_id(planet)), planet_(planet), generator_(globe),
+Server::Server(Opened /*unused*/, const server::ServerConfig& config, const globe::Planet& globe,
+               store::SqliteSnapshotStore snapshots, store::SqlitePlayerStore places,
+               store::SqliteBrickArchive bricks)
+    : config_(config), world_id_(globe::world_id(globe)), generator_(globe),
       voxels_(generator_.layers()), globe_(generator_, voxels_), bricks_(std::move(bricks)),
-      bricks_shared_(voxels_), changes_(std::move(changes)), snapshots_(std::move(snapshots)),
-      places_(std::move(places)), writer_(snapshots_, config.keep_snapshots),
-      nearby_(
-          std::min(planet::level_for(config.net.view.radius, planet.radius), planet::max_level)),
-      persistence_(entities_), joined_(entities_, planet.radius, config.net.view),
+      bricks_shared_(voxels_), snapshots_(std::move(snapshots)), places_(std::move(places)),
+      writer_(snapshots_, config.keep_snapshots),
+      nearby_(std::min(planet::level_for(config.net.view.radius, globe.radius), planet::max_level)),
+      persistence_(entities_), joined_(entities_, globe.radius, config.net.view),
       ground_(space_, globe_), ticks_(registry_.counter("hog_ticks_total", "Live ticks run.")),
       tick_seconds_(registry_.histogram("hog_tick_seconds", "Real time each live tick took.",
                                         {tick_bounds.begin(), tick_bounds.end()})),
@@ -100,37 +69,6 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config,
           registry_.counter("hog_snapshots_failed_total", "Snapshots that failed to write.")),
       snapshots_skipped_(registry_.counter("hog_snapshots_skipped_total",
                                            "Damaged snapshots passed over when loading.")),
-      weather_steps_(registry_.counter("hog_weather_steps_total", "Weather steps taken.")),
-      weather_step_seconds_(registry_.histogram("hog_weather_step_seconds",
-                                                "Real time each weather step took.",
-                                                {tick_bounds.begin(), tick_bounds.end()})),
-      wildlife_steps_(registry_.counter("hog_wildlife_steps_total", "Wildlife steps taken.")),
-      wildlife_step_seconds_(registry_.histogram("hog_wildlife_step_seconds",
-                                                 "Real time each wildlife step took.",
-                                                 {tick_bounds.begin(), tick_bounds.end()})),
-      extinct_species_(registry_.gauge("hog_wildlife_extinct_species",
-                                       "Species gone from everywhere, waiting to come back.")),
-      ecology_events_{
-          &registry_.counter("hog_wildlife_collapses_total",
-                             "Regions where a species fell far below its baseline."),
-          &registry_.counter("hog_wildlife_overpopulations_total",
-                             "Regions where a species rose far above its baseline."),
-          &registry_.counter("hog_wildlife_local_extinctions_total",
-                             "Regions a species died out of."),
-          &registry_.counter("hog_wildlife_returns_total",
-                             "Species back where they had died out, or anywhere after extinction."),
-          &registry_.counter("hog_wildlife_extinctions_total", "Species that died out everywhere."),
-      },
-      forest_steps_(registry_.counter("hog_forest_steps_total", "Forest steps taken.")),
-      forest_step_seconds_(registry_.histogram("hog_forest_step_seconds",
-                                               "Real time each forest step took.",
-                                               {tick_bounds.begin(), tick_bounds.end()})),
-      fires_started_(registry_.counter("hog_forest_fires_started_total",
-                                       "Fires started by lightning or by hand.")),
-      alight_km2_(registry_.counter("hog_forest_alight_km2_total",
-                                    "Area of cells that caught fire, however they caught it.")),
-      burning_cells_(registry_.gauge("hog_forest_burning_cells", "Forest cells alight.")),
-      biomass_tonnes_(registry_.gauge("hog_forest_biomass_tonnes", "Living plants on the planet.")),
       connections_(registry_.gauge("hog_connections", "Players' connections open.")),
       shared_snapshots_(registry_.counter("hog_player_snapshots_total",
                                           "Snapshots sent to players of those near them.")),
@@ -155,10 +93,6 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
     if (!planet) {
         return std::unexpected(planet.error());
     }
-    // Kept with the world, unless the environment names somewhere, as tests do.
-    if (planet::named_bakes().empty()) {
-        planet->bakes = config.world.parent_path() / "bakes";
-    }
     if (config.world.has_parent_path()) {
         std::error_code error;
         std::filesystem::create_directories(config.world.parent_path(), error);
@@ -172,10 +106,6 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
     auto snapshots = store::SqliteSnapshotStore::open(config.world);
     if (!snapshots) {
         return context(world_file, snapshots.error());
-    }
-    auto changes = store::SqliteChangeStore::open(config.world);
-    if (!changes) {
-        return context(world_file, changes.error());
     }
     auto places = store::SqlitePlayerStore::open(config.world);
     if (!places) {
@@ -192,21 +122,13 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
     if (auto valid = globe::validate(globe); !valid) {
         return std::unexpected(std::move(valid).error());
     }
-    auto loaded = save::load_newest(*snapshots, planet::world_id(*planet));
+    auto loaded = save::load_newest(*snapshots, globe::world_id(globe));
     if (!loaded) {
         return context(world_file, loaded.error());
     }
-    const auto stored_changes = changes->load();
-    if (!stored_changes) {
-        return context(world_file, stored_changes.error());
-    }
 
-    auto server =
-        std::make_unique<Server>(Opened{}, config, *planet, globe, std::move(*snapshots),
-                                 std::move(*changes), std::move(*places), std::move(*bricks));
-    if (auto replayed = server->planet_.replay(*stored_changes); !replayed) {
-        return context("planet changes", replayed.error());
-    }
+    auto server = std::make_unique<Server>(Opened{}, config, globe, std::move(*snapshots),
+                                           std::move(*places), std::move(*bricks));
     auto voxels = globe::load(server->generator_.layers(), server->bricks_);
     if (!voxels) {
         return context("voxels", voxels.error());
@@ -214,16 +136,10 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
     server->voxels_ = std::move(*voxels);
     // Loaded bricks are told to players as they join, not as changes.
     server->bricks_shared_ = server::BrickSharing{server->voxels_};
-    log::info(server_log, "world {:016x} in {}: {} planet changes, {} bricks changed",
-              server->world_id_, world_file, stored_changes->size(), server->voxels_.size());
+    log::info(server_log, "world {:016x} in {}: {} bricks changed", server->world_id_, world_file,
+              server->voxels_.size());
 
     const GameTime first = config.debug.start.value_or(now);
-    if (auto started =
-            server->start_simulation(*planet, loaded->snapshot ? loaded->snapshot->time : first);
-        !started) {
-        return std::unexpected(started.error());
-    }
-
     for (const Error& skipped : loaded->skipped) {
         log::warn(save_log, "skipped damaged {}", skipped.message);
     }
@@ -233,9 +149,6 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
         if (!restored) {
             return context("snapshot", restored.error());
         }
-        if (auto simulation = server->restore_simulation(*snapshot); !simulation) {
-            return std::unexpected(simulation.error());
-        }
         server->time_ = snapshot->time;
         server->tick_ = snapshot->tick;
         log::info(save_log, "restored {} entities at tick {}, {}", *restored,
@@ -243,256 +156,14 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
     } else {
         server->time_ = first;
         log::info(save_log, "no snapshot; starting a new world at {}", format_time(first));
-        server->burn_history();
     }
-    if (server->wildlife_) {
-        server->report_wildlife();
-        server->recall_extinctions();
-    }
-    if (server->forest_) {
-        server->report_forest();
-    }
-    server->open_probe();
     server->open_players();
     return server;
 }
 
-Result<void> Server::start_simulation(const planet::PlanetConfig& shape, GameTime at) {
-    const sim::WeatherConfig weather{
-        .level = std::min(planet::level_for(config_.weather.cell_size, shape.radius),
-                          sim::CellGrid::max_level),
-        .step = config_.weather.step,
-        .day = config_.weather.day,
-        .axial_tilt = shape.axial_tilt,
-        .planet_radius = shape.radius,
-        .carry_radius = config_.weather.earth_pace ? sim::weather_radius : shape.radius,
-        .seed = shape.seed,
-    };
-    weather_ = std::make_unique<sim::Weather>(
-        weather, sim::ground_for(sim::CellGrid{weather.level}, planet_), at);
-    log::info(server_log, "weather grid at level {}: {} cells", weather.level,
-              weather_->grid().size());
-    if (const auto& path = config_.wildlife.ecology) {
-        auto ecology = sim::load_ecology(*path);
-        if (!ecology) {
-            return context(path->string(), ecology.error());
-        }
-        sim::WildlifeConfig wildlife{
-            .level = weather.level,
-            .step = config_.wildlife.step,
-            .planet_radius = shape.radius,
-            .seed = shape.seed,
-            .ecology = std::move(*ecology),
-        };
-        const std::size_t species = wildlife.ecology.species.size();
-        wildlife_ = std::make_unique<sim::Wildlife>(
-            std::move(wildlife), sim::habitat_for(weather_->grid(), planet_), at);
-        log::info(server_log, "wildlife: {} species", species);
-    }
-    if (const auto& path = config_.forest.vegetation) {
-        auto vegetation = sim::load_vegetation(*path);
-        if (!vegetation) {
-            return context(path->string(), vegetation.error());
-        }
-        const sim::ForestConfig forest{
-            .level = weather.level,
-            .step = config_.forest.step,
-            .planet_radius = shape.radius,
-            .seed = shape.seed,
-            .vegetation = *vegetation,
-        };
-        forest_ =
-            std::make_unique<sim::Forest>(forest, sim::soil_for(weather_->grid(), planet_), at);
-        log::info(server_log, "forest: {:.0f} Mt of plants", forest_->total() / 1e9);
-    }
-    return {};
-}
-
-void Server::burn_history() {
-    const std::optional<double> years = config_.forest.burned_years_ago;
-    if (!forest_ || !years) {
-        return;
-    }
-    // The wooded cell nearest the start, which may be out at sea.
-    const DVec3 middle = planet::start_direction;
-    const sim::CellGrid& grid = forest_->grid();
-    std::optional<std::uint32_t> nearest;
-    double closest = std::numeric_limits<double>::infinity();
-    for (std::uint32_t index = 0; index < grid.size(); ++index) {
-        const double away = glm::distance(planet::cell_center(grid.cell(index)), middle);
-        if (forest_->capacity(index) > 0.0 && away < closest) {
-            nearest = index;
-            closest = away;
-        }
-    }
-    if (!nearest) {
-        return;
-    }
-    const std::uint32_t cell = *nearest;
-    const planet::CellState state = planet_.state(grid.cell(cell));
-    constexpr auto one = static_cast<double>(planet::fixed_one);
-    forest_->burned_ago(cell, *years, static_cast<double>(state.temperature) / one,
-                        1.0 - (static_cast<double>(state.moisture) / one));
-    log::info(server_log, "forest: the woods by the start burned {} years ago", *years);
-}
-
-void Server::simulate(GameTime from, GameDuration step) {
+void Server::simulate(GameTime /*from*/, GameDuration step) {
     HOG_ZONE("simulate");
     entities_.progress(std::chrono::duration<float>(step).count());
-    const GameTime to = from + step;
-    // Wildlife and forest steps see the weather as it was when they fell due.
-    for (auto due = next_due(); due && *due <= to; due = next_due()) {
-        advance_weather(*due);
-        if (wildlife_ && wildlife_->next_step() == *due) {
-            step_wildlife(*due);
-        }
-        if (forest_ && forest_->next_step() == *due) {
-            step_forest(*due);
-        }
-    }
-    advance_weather(to);
-}
-
-Result<void> Server::restore_simulation(const save::Snapshot& snapshot) {
-    if (auto weather = restore_part(*weather_, snapshot, weather_section, "weather"); !weather) {
-        return weather;
-    }
-    if (wildlife_) {
-        if (auto wildlife = restore_part(*wildlife_, snapshot, wildlife_section, "wildlife");
-            !wildlife) {
-            return wildlife;
-        }
-    }
-    if (forest_) {
-        return restore_part(*forest_, snapshot, forest_section, "forest");
-    }
-    return {};
-}
-
-std::optional<GameTime> Server::next_due() const {
-    std::optional<GameTime> due;
-    if (wildlife_) {
-        due = wildlife_->next_step();
-    }
-    if (forest_) {
-        due = due ? std::min(*due, forest_->next_step()) : forest_->next_step();
-    }
-    return due;
-}
-
-void Server::step_wildlife(GameTime at) {
-    HOG_ZONE("wildlife");
-    const MonotonicClock::time_point started = MonotonicClock::now();
-    wildlife_->advance_to(at, sim::conditions_of(*weather_), jobs_);
-    wildlife_steps_.add(1);
-    wildlife_step_seconds_.observe(
-        std::chrono::duration<double>(MonotonicClock::now() - started).count());
-    report_wildlife();
-}
-
-void Server::step_forest(GameTime at) {
-    HOG_ZONE("forest");
-    const MonotonicClock::time_point started = MonotonicClock::now();
-    forest_->advance_to(at, sim::forest_conditions_of(*weather_), jobs_);
-    forest_steps_.add(1);
-    forest_step_seconds_.observe(
-        std::chrono::duration<double>(MonotonicClock::now() - started).count());
-    report_forest();
-}
-
-void Server::report_forest() {
-    const sim::FireReport fires = forest_->drain_fires();
-    fires_started_.add(fires.started);
-    alight_left_ += fires.alight;
-    const double whole = std::floor(alight_left_);
-    alight_km2_.add(static_cast<std::uint64_t>(whole));
-    alight_left_ -= whole;
-    burning_cells_.set(static_cast<double>(forest_->burning()));
-    biomass_tonnes_.set(forest_->total() / 1e3);
-}
-
-namespace {
-
-std::string describe(const sim::EcologyEvent& event, const sim::Species& species) {
-    using Kind = sim::EcologyEvent::Kind;
-    const std::string where = event.region == sim::EcologyEvent::everywhere
-                                  ? "everywhere"
-                                  : std::format("in region {}", event.region);
-    std::string hunted;
-    for (const sim::Contributor& one : event.hunters) {
-        hunted += std::format("{} {} ({:.0f})", hunted.empty() ? ", hunted by" : ",", one.hunter,
-                              one.kills);
-    }
-    switch (event.kind) {
-    case Kind::Collapse:
-        return std::format("{} collapsed {} to {:.0f}, from a usual {:.0f}{}", species.name, where,
-                           event.count, event.baseline, hunted);
-    case Kind::Overpopulation:
-        return std::format("{} overran {} with {:.0f}, from a usual {:.0f}{}", species.name, where,
-                           event.count, event.baseline, hunted);
-    case Kind::LocalExtinction:
-        return std::format("{} died out {}{}", species.name, where, hunted);
-    case Kind::Return:
-        return std::format("{} is back {}", species.name, where);
-    case Kind::Extinction:
-        return std::format("{} died out everywhere{}{}", species.name,
-                           species.recovery.after_extinction == sim::Recovery::After::Admin
-                               ? " and waits to be reintroduced"
-                               : "",
-                           hunted);
-    }
-    return {};
-}
-
-} // namespace
-
-void Server::report_wildlife() {
-    using Kind = sim::EcologyEvent::Kind;
-    const auto& species = wildlife_->config().ecology.species;
-    for (const sim::EcologyEvent& event : wildlife_->drain_events()) {
-        ecology_events_.at(static_cast<std::size_t>(event.kind))->add();
-        const std::string message = describe(event, species[event.species]);
-        if (event.kind == Kind::Return || event.kind == Kind::Overpopulation) {
-            log::info(wildlife_log, "{}", message);
-        } else {
-            log::warn(wildlife_log, "{}", message);
-        }
-    }
-    std::size_t extinct = 0;
-    for (std::uint32_t kind = 0; kind < species.size(); ++kind) {
-        extinct += wildlife_->presence(kind).extinct ? 1U : 0U;
-    }
-    extinct_species_.set(static_cast<double>(extinct));
-}
-
-void Server::recall_extinctions() const {
-    const auto& species = wildlife_->config().ecology.species;
-    for (std::uint32_t kind = 0; kind < species.size(); ++kind) {
-        if (wildlife_->presence(kind).extinct) {
-            log::warn(wildlife_log, "{} is extinct{}", species[kind].name,
-                      species[kind].recovery.after_extinction == sim::Recovery::After::Admin
-                          ? " and waits to be reintroduced"
-                          : "");
-        }
-    }
-}
-
-void Server::advance_weather(GameTime to) {
-    HOG_ZONE("weather");
-    const MonotonicClock::time_point started = MonotonicClock::now();
-    if (const std::uint64_t steps = weather_->advance_to(to, jobs_); steps > 0) {
-        weather_steps_.add(steps);
-        weather_step_seconds_.observe(
-            std::chrono::duration<double>(MonotonicClock::now() - started).count() /
-            static_cast<double>(steps));
-    }
-}
-
-LayerSources Server::layer_sources() const {
-    return LayerSources{.planet = planet_,
-                        .weather = *weather_,
-                        .wildlife = wildlife_.get(),
-                        .forest = forest_.get()};
 }
 
 void Server::open_players() {
@@ -601,8 +272,6 @@ void Server::answer(net::ConnectionId connection, const protocol::Answer& answer
             send_placed(connection, player->account);
         }
         handshakes_.erase(shaking);
-        send_weather(connection);
-        send_woodlands(connection);
         send_bricks(connection, bricks_shared_.all());
         // A world at real time goes without saying.
         if (clock_scale_ != 1) {
@@ -794,56 +463,6 @@ void Server::share() {
         });
 }
 
-void Server::tell_weather(std::int64_t scale) {
-    if (!players_ || weather_told_at_ == weather_->time()) {
-        return;
-    }
-    weather_told_at_ = weather_->time();
-    weather_told_ = protocol::encode(server::weather_report(
-        weather_->grid(), weather_->fields(), weather_->ground(), weather_->sea().fields(),
-        weather_->ocean().current, weather_->config(),
-        std::chrono::duration_cast<std::chrono::milliseconds>(weather_->config().step) / scale));
-    for (const net::ConnectionId connection : joined_.connections()) {
-        send_weather(connection);
-    }
-}
-
-void Server::send_weather(net::ConnectionId connection) {
-    // Players joining before the weather is first told are sent it with everyone else.
-    if (!players_ || weather_told_.empty()) {
-        return;
-    }
-    if (auto sent = players_->send(connection, net::Delivery::Reliable, weather_told_); !sent) {
-        log::debug(server_log, "couldn't send connection {} the weather: {}",
-                   std::to_underlying(connection), sent.error());
-    }
-}
-
-void Server::tell_woodlands() {
-    if (!players_ || !forest_ || woodlands_told_at_ == forest_->time()) {
-        return;
-    }
-    woodlands_told_at_ = forest_->time();
-    std::vector<std::byte> told = protocol::encode(server::woodlands_report(*forest_));
-    if (told == woodlands_told_) {
-        return;
-    }
-    woodlands_told_ = std::move(told);
-    for (const net::ConnectionId connection : joined_.connections()) {
-        send_woodlands(connection);
-    }
-}
-
-void Server::send_woodlands(net::ConnectionId connection) {
-    if (!players_ || woodlands_told_.empty()) {
-        return;
-    }
-    if (auto sent = players_->send(connection, net::Delivery::Reliable, woodlands_told_); !sent) {
-        log::debug(server_log, "couldn't send connection {} the woodlands: {}",
-                   std::to_underlying(connection), sent.error());
-    }
-}
-
 void Server::tell_clock() {
     for (const net::ConnectionId connection : joined_.connections()) {
         send_clock(connection);
@@ -862,48 +481,9 @@ void Server::send_clock(net::ConnectionId connection) {
     }
 }
 
-void Server::open_probe() {
-    const std::optional<std::uint16_t> port = config_.debug.port;
-    if (!port) {
-        return;
-    }
-    probe::Welcome welcome{.version = probe::protocol_version,
-                           .world_id = world_id_,
-                           .level = static_cast<std::uint8_t>(weather_->config().level),
-                           .planet_radius = weather_->config().planet_radius,
-                           .layers = layer_catalogue(layer_sources()),
-                           .controllable = config_.debug.time_control,
-                           .day_length = weather_->config().day,
-                           .axial_tilt = weather_->config().axial_tilt};
-    const std::size_t layers = welcome.layers.size();
-    const auto survey = [&caves = planet_.caves(), radius = welcome.planet_radius](
-                            const probe::Survey& asked, jobs::JobSystem& jobs) {
-        return server::survey_ground(caves, radius, asked, jobs);
-    };
-    auto started = server::ProbeService::start(*port, std::move(welcome), survey);
-    if (!started) {
-        log::warn(server_log, "no debug port: {}", started.error());
-        return;
-    }
-    probe_ = std::move(*started);
-    log::info(server_log, "debug tools on 127.0.0.1:{}, {} layers{}", probe_->port(), layers,
-              config_.debug.time_control ? ", time control on" : "");
-}
-
 void Server::submit() {
     save::Snapshot snapshot{.world = world_id_, .time = time_, .tick = tick_, .sections = {}};
     persistence_.store(snapshot);
-    snapshot.add(save::Section{
-        .id = weather_section, .version = sim::Weather::save_version, .bytes = weather_->save()});
-    if (wildlife_) {
-        snapshot.add(save::Section{.id = wildlife_section,
-                                   .version = sim::Wildlife::save_version,
-                                   .bytes = wildlife_->save()});
-    }
-    if (forest_) {
-        snapshot.add(save::Section{
-            .id = forest_section, .version = sim::Forest::save_version, .bytes = forest_->save()});
-    }
     writer_.submit(std::move(snapshot));
 }
 

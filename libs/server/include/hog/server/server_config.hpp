@@ -27,30 +27,6 @@ struct LogConfig {
     std::optional<std::filesystem::path> file;
 };
 
-struct WeatherSettings {
-    double cell_size = 6'000.0; // at most this many metres across a grid cell on the planet
-    GameDuration step = std::chrono::minutes{10};
-    // The day the weather follows, which needn't be the sun's.
-    GameDuration day = std::chrono::hours{24};
-    // Cloud and storms keep Earth's pace round the planet rather than blowing over it as fast as
-    // the wind.
-    bool earth_pace = false;
-};
-
-struct WildlifeSettings {
-    // Species and forage; without one, no wildlife lives on the planet.
-    std::optional<std::filesystem::path> ecology;
-    GameDuration step = std::chrono::hours{24};
-};
-
-struct ForestSettings {
-    // How plants grow and burn; without one, nothing grows on the planet.
-    std::optional<std::filesystem::path> vegetation;
-    GameDuration step = std::chrono::hours{1};
-    // The woods by a new world's start burned this many years before it begins, if any.
-    std::optional<double> burned_years_ago;
-};
-
 struct NetSettings {
     // Where players connect, on every address; without one, they can't.
     std::optional<std::uint16_t> port;
@@ -64,9 +40,7 @@ struct NetSettings {
 };
 
 struct DebugSettings {
-    // Where debug tools connect, on the loopback address only; without one, they can't.
-    std::optional<std::uint16_t> port;
-    // Whether debug tools may pause, step and speed up the clock, taking the world off real time.
+    // Whether players may speed up the clock, taking the world off real time.
     bool time_control = false;
     // When a new world's clock starts, instead of now.
     std::optional<GameTime> start;
@@ -84,9 +58,6 @@ struct ServerConfig {
     LogConfig log;
     // Real time between metrics records; zero turns them off.
     std::chrono::seconds metrics_interval{10};
-    WeatherSettings weather;
-    WildlifeSettings wildlife;
-    ForestSettings forest;
     NetSettings net;
     DebugSettings debug;
 };

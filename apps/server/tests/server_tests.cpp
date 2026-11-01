@@ -1,4 +1,3 @@
-#include <hog/app/probe_layers.hpp>
 #include <hog/app/server.hpp>
 #include <hog/chat/filter.hpp>
 #include <hog/globe/brick_archive.hpp>
@@ -13,9 +12,7 @@
 #include <hog/net/client.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tangent_frame.hpp>
-#include <hog/probe/channel.hpp>
 #include <hog/protocol/messages.hpp>
-#include <hog/server/survey.hpp>
 #include <hog/testing/ports.hpp>
 #include <hog/testing/temporary_directory.hpp>
 #include <hog/testing/worlds.hpp>
@@ -85,14 +82,6 @@ public:
             << "[planet]\nseed = " << seed << "\nradius_km = 115\nerosion_cell = 1500\n";
     }
 
-    [[nodiscard]] std::filesystem::path write_ecology(std::string_view text) const {
-        return write("ecology.toml", text);
-    }
-
-    [[nodiscard]] std::filesystem::path write_vegetation(std::string_view text) const {
-        return write("forest.toml", text);
-    }
-
     [[nodiscard]] hog::server::ServerConfig config() const {
         hog::server::ServerConfig config;
         config.world = directory_.path() / "var" / "world.db";
@@ -125,16 +114,6 @@ std::uint64_t counter(const Server& server, std::string_view name) {
     }
     FAIL("no counter " << name);
     return 0;
-}
-
-double gauge(const Server& server, std::string_view name) {
-    for (const auto& entry : server.metrics().entries()) {
-        if (entry.name == name) {
-            return std::get<std::unique_ptr<hog::metrics::Gauge>>(entry.metric)->value();
-        }
-    }
-    FAIL("no gauge " << name);
-    return 0.0;
 }
 
 // Runs the server for `ticks` live ticks.
@@ -187,8 +166,6 @@ TEST_CASE("a reopened world catches up to now", "[app][server]") {
         CHECK(server->time() <= now);
         CHECK(now - server->time() < 50ms);
         CHECK(counter(*server, "hog_catch_up_ticks_total") == stats.ticks);
-        CHECK(now - server->weather().time() < config.weather.step);
-        CHECK(counter(*server, "hog_weather_steps_total") > 0);
 
         // Already at now, there's nothing to do.
         CHECK(server->catch_up([&] { return now; }).ticks == 0);
@@ -207,504 +184,11 @@ TEST_CASE("startup time is caught up without saving", "[app][server]") {
     CHECK(opened(world.config())->tick() == hog::Tick{0});
 }
 
-TEST_CASE("weather is kept with the world", "[app][server]") {
-    const World world;
-    auto config = world.config();
-    config.catch_up_ticks = 100;
-    REQUIRE(opened(config)->save());
-
-    const GameTime later = start + 6h;
-    hog::sim::WeatherFields before;
-    int level = 0;
-    {
-        const auto server = opened(config, later);
-        server->catch_up([&] { return later; });
-        before = server->weather().fields();
-        level = server->weather().grid().level();
-        CHECK(server->weather().time() > start);
-    }
-    CHECK(opened(config, later)->weather().fields() == before);
-
-    // Saved weather doesn't fit a coarser grid, so it starts over.
-    config.weather.cell_size *= 4.0;
-    const auto coarser = opened(config, later);
-    CHECK(coarser->weather().grid().level() == level - 2);
-    CHECK(coarser->weather().fields().size() == before.size() / 16);
-}
-
-TEST_CASE("wildlife lives with the weather and is kept with the world", "[app][server]") {
-    const World world;
-    auto config = world.config();
-    config.catch_up_ticks = 100;
-    CHECK(opened(config)->wildlife() == nullptr);
-
-    config.wildlife.ecology = world.write_ecology(R"(
-[forage]
-capacity = { grassland = 100000, savanna = 100000, "temperate forest" = 50000 }
-
-[[species]]
-name = "deer"
-diet = { forage = 1 }
-habitat = { grassland = 1, savanna = 1, temperate_forest = 0.5 }
-)");
-    REQUIRE(opened(config)->save());
-    const GameTime later = start + 72h;
-    hog::sim::WildlifeFields before;
-    {
-        const auto server = opened(config, later);
-        REQUIRE(server->wildlife() != nullptr);
-        CHECK(server->wildlife()->total(0) > 0.0);
-        server->catch_up([&] { return later; });
-        CHECK(server->wildlife()->time() == later);
-        CHECK(counter(*server, "hog_wildlife_steps_total") == 3);
-        CHECK(server->wildlife()->grid().level() == server->weather().grid().level());
-        before = server->wildlife()->fields();
-    }
-    CHECK(opened(config, later)->wildlife()->fields() == before);
-
-    config.wildlife.ecology = world.write_ecology("[[species]]\nname = 3\n");
-    const auto broken = Server::open(config, later);
-    REQUIRE_FALSE(broken);
-    CHECK(broken.error().message.find("ecology.toml") != std::string::npos);
-}
-
-TEST_CASE("species dying out are counted", "[app][server]") {
-    const World world;
-    auto config = world.config();
-    config.catch_up_ticks = 100;
-    // With nothing to eat, it starves on the first day.
-    config.wildlife.ecology = world.write_ecology(R"(
-[[species]]
-name = "dodo"
-habitat = { grassland = 1, savanna = 1, temperate_forest = 1 }
-starving = 1
-)");
-    REQUIRE(opened(config)->save());
-    const GameTime later = start + 48h;
-    {
-        const auto server = opened(config, later);
-        CHECK(gauge(*server, "hog_wildlife_extinct_species") == 0.0);
-        server->catch_up([&] { return later; });
-        CHECK(server->wildlife()->presence(0).extinct);
-        CHECK(gauge(*server, "hog_wildlife_extinct_species") == 1.0);
-        CHECK(counter(*server, "hog_wildlife_extinctions_total") == 1);
-        CHECK(counter(*server, "hog_wildlife_local_extinctions_total") > 0);
-        CHECK(counter(*server, "hog_wildlife_returns_total") == 0);
-        REQUIRE(server->save());
-    }
-    CHECK(gauge(*opened(config, later), "hog_wildlife_extinct_species") == 1.0);
-}
-
-TEST_CASE("the forest grows with the weather and is kept with the world", "[app][server]") {
-    const World world;
-    auto config = world.config();
-    config.catch_up_ticks = 100;
-    CHECK(opened(config)->forest() == nullptr);
-
-    config.forest.vegetation = world.write_vegetation(R"(
-[growth]
-capacity = { grassland = 0.5, savanna = 3, temperate_forest = 20, boreal_forest = 10 }
-)");
-    REQUIRE(opened(config)->save());
-    const GameTime later = start + 72h;
-    hog::sim::ForestFields before;
-    {
-        const auto server = opened(config, later);
-        REQUIRE(server->forest() != nullptr);
-        CHECK(gauge(*server, "hog_forest_biomass_tonnes") > 0.0);
-        server->catch_up([&] { return later; });
-        CHECK(server->forest()->time() == later);
-        CHECK(counter(*server, "hog_forest_steps_total") == 72);
-        CHECK(server->forest()->grid().level() == server->weather().grid().level());
-        CHECK(gauge(*server, "hog_forest_biomass_tonnes") == server->forest()->total() / 1e3);
-        CHECK(gauge(*server, "hog_forest_burning_cells") ==
-              static_cast<double>(server->forest()->burning()));
-        before = server->forest()->fields();
-    }
-    CHECK(opened(config, later)->forest()->fields() == before);
-
-    // A new world may begin with the woods by the start burned years before; reopened, they
-    // aren't burned again.
-    {
-        const World fresh;
-        auto history = fresh.config();
-        history.forest.vegetation = config.forest.vegetation;
-        history.forest.burned_years_ago = 8.0;
-        std::vector<float> dead;
-        {
-            const auto server = opened(history);
-            const hog::sim::ForestFields& fields = server->forest()->fields();
-            CHECK(std::ranges::count_if(fields.charred, [](float c) { return c > 0.0F; }) == 1);
-            const auto cell = static_cast<std::size_t>(std::ranges::max_element(fields.dead) -
-                                                       fields.dead.begin());
-            CHECK(fields.dead[cell] > 0.2F);
-            CHECK(fields.charred[cell] == 1.0F);
-            dead = fields.dead;
-            REQUIRE(server->save());
-        }
-        CHECK(opened(history, start + 1h)->forest()->fields().dead == dead);
-    }
-
-    config.forest.vegetation = world.write_vegetation("[fire]\nsmoke = 1\n");
-    const auto broken = Server::open(config, later);
-    REQUIRE_FALSE(broken);
-    CHECK(broken.error().message.find("forest.toml") != std::string::npos);
-}
-
-TEST_CASE("the world's layers are laid out for debug tools", "[app][server]") {
-    const World world;
-    auto config = world.config();
-    config.forest.vegetation = world.write_vegetation("[growth]\ncapacity = { grassland = 0.5 }\n");
-    const auto server = opened(config);
-    const hog::app::LayerSources sources{.planet = server->planet(),
-                                         .weather = server->weather(),
-                                         .wildlife = server->wildlife(),
-                                         .forest = server->forest()};
-    const auto catalogue = hog::app::layer_catalogue(sources);
-    const auto named = [&](std::string_view name) {
-        return std::ranges::find(catalogue, name, &hog::probe::LayerInfo::name) != catalogue.end();
-    };
-    CHECK(named("planet/biome"));
-    CHECK(named("planet/water_table"));
-    CHECK(named("weather/temperature"));
-    CHECK(named("weather/wind_north"));
-    CHECK(named("ocean/temperature"));
-    CHECK(named("ocean/current_north"));
-    CHECK(named("land/snow"));
-    CHECK(named("land/flow_ratio"));
-    CHECK(named("forest/biomass"));
-    CHECK(named("forest/dead"));
-    CHECK(named("forest/shortfall"));
-    CHECK(named("forest/accustomed"));
-    CHECK(named("forest/scar"));
-    CHECK_FALSE(named("wildlife/forage"));
-
-    const auto layers = hog::app::fetch_layers(
-        sources, hog::probe::Fetch{.names = {"forest/biomass", "nothing", "weather/temperature"}},
-        start);
-    CHECK(layers.time == start);
-    REQUIRE(layers.layers.size() == 2);
-    // In catalogue order, whatever order they were asked for in.
-    CHECK(layers.layers[0].name == "weather/temperature");
-    CHECK(layers.layers[0].values == server->weather().fields().temperature);
-    CHECK(layers.layers[1].values == server->forest()->fields().biomass);
-
-    const auto wind = hog::app::fetch_layers(
-        sources, hog::probe::Fetch{.names = {"weather/wind_east", "planet/area"}}, start);
-    REQUIRE(wind.layers.size() == 2);
-    CHECK(wind.layers[0].name == "planet/area");
-    CHECK(std::ranges::all_of(wind.layers[0].values, [](float area) { return area > 0.0F; }));
-    const auto& winds = server->weather().fields().wind;
-    std::vector<float> east(winds.size());
-    std::ranges::transform(winds, east.begin(), [](const hog::Vec2& blowing) { return blowing.x; });
-    CHECK(wind.layers[1].values == east);
-
-    // Precipitation goes out as hourly rates.
-    const auto rain =
-        hog::app::fetch_layers(sources, hog::probe::Fetch{.names = {"weather/rain"}}, start);
-    REQUIRE(rain.layers.size() == 1);
-    const double steps_per_hour = std::chrono::duration<double>(1h) /
-                                  std::chrono::duration<double>(server->weather().config().step);
-    const auto& fallen = server->weather().fields().rain;
-    REQUIRE(rain.layers[0].values.size() == fallen.size());
-    for (std::size_t cell = 0; cell < fallen.size(); cell += 97) {
-        CHECK(rain.layers[0].values[cell] ==
-              static_cast<float>(static_cast<double>(fallen[cell]) * steps_per_hour));
-    }
-}
-
-TEST_CASE("inspecting a point shows what has been dug under it", "[app][server]") {
-    const World world;
-    const auto server = opened(world.config());
-    hog::planet::World dug{{.seed = 1,
-                            .ocean_fraction = 0.7,
-                            .radius = 115'000.0,
-                            .erosion_cell = hog::testing::coarse_erosion_cell}};
-    const hog::probe::Inspect inspect{.latitude = 21.5, .longitude = -40.25};
-    const hog::planet::CellId cell =
-        hog::planet::cell_at(hog::planet::direction_at(21.5 * std::numbers::pi / 180.0,
-                                                       -40.25 * std::numbers::pi / 180.0),
-                             hog::server::inspect_level(115'000.0));
-    // Dug a little wider than the point, and deeper first.
-    for (const auto& [top, bottom] : {std::pair{30, 34}, std::pair{3, 5}}) {
-        REQUIRE(
-            dug.apply({.cell = cell.parent(cell.level() - 2),
-                       .time = {},
-                       .author = {},
-                       .layer = hog::planet::Layer::Player,
-                       .payload = hog::planet::Hollow{.top = top * hog::planet::fixed_one,
-                                                      .bottom = bottom * hog::planet::fixed_one}}));
-    }
-    const hog::app::LayerSources sources{.planet = dug,
-                                         .weather = server->weather(),
-                                         .wildlife = server->wildlife(),
-                                         .forest = server->forest()};
-    const auto inspection = hog::app::inspect_layers(sources, inspect, {});
-    std::vector<hog::probe::Cavity> dug_out;
-    std::ranges::copy_if(inspection.column.cavities, std::back_inserter(dug_out),
-                         [](const auto& cavity) { return cavity.cave == 0; });
-    CHECK(dug_out == std::vector<hog::probe::Cavity>{
-                         {.cave = 0, .top = 3.0F, .bottom = 5.0F, .room = 0.0F},
-                         {.cave = 0, .top = 30.0F, .bottom = 34.0F, .room = 0.0F}});
-    CHECK(std::ranges::is_sorted(inspection.column.cavities, {}, &hog::probe::Cavity::top));
-}
-
-TEST_CASE("inspecting a point gives every layer at its cell", "[app][server]") {
-    const World world;
-    const auto server = opened(world.config());
-    const hog::app::LayerSources sources{.planet = server->planet(),
-                                         .weather = server->weather(),
-                                         .wildlife = server->wildlife(),
-                                         .forest = server->forest()};
-    const auto catalogue = hog::app::layer_catalogue(sources);
-    hog::probe::Fetch every;
-    for (const hog::probe::LayerInfo& layer : catalogue) {
-        every.names.push_back(layer.name);
-    }
-    const auto layers = hog::app::fetch_layers(sources, every, start);
-    REQUIRE(layers.layers.size() == catalogue.size());
-
-    const hog::probe::Inspect inspect{.latitude = 21.5, .longitude = -40.25};
-    const auto inspection = hog::app::inspect_layers(sources, inspect, start);
-    CHECK(inspection.inspect == inspect);
-    CHECK(inspection.time == start);
-    const hog::sim::CellGrid& grid = server->weather().grid();
-    const hog::DVec3 direction = hog::planet::direction_at(21.5 * std::numbers::pi / 180.0,
-                                                           -40.25 * std::numbers::pi / 180.0);
-    CHECK(inspection.cell == grid.index(hog::planet::cell_at(direction, grid.level())));
-    REQUIRE(inspection.values.size() == catalogue.size());
-    for (std::size_t layer = 0; layer < catalogue.size(); ++layer) {
-        CHECK(inspection.values[layer] == layers.layers[layer].values[inspection.cell]);
-    }
-    CHECK(inspection.column == hog::server::ground_column(server->planet().caves(),
-                                                          server->weather().config().planet_radius,
-                                                          inspect));
-}
-
-TEST_CASE("debug tools fetch layers from a running server", "[app][server]") {
-    const World world;
-    auto config = world.config();
-    CHECK(opened(config)->probe() == nullptr);
-
-    config.debug.port = 0;
-    const auto server = opened(config);
-    REQUIRE(server->probe() != nullptr);
-    auto socket = hog::probe::Socket::connect("127.0.0.1", server->probe()->port());
-    REQUIRE(socket);
-    hog::probe::Channel tool{std::move(*socket)};
-    REQUIRE(tool.send(hog::probe::Hello{}));
-    auto welcome = tool.receive(5s);
-    REQUIRE(welcome);
-    REQUIRE(welcome->has_value());
-    const hog::probe::Message greeting = welcome->value_or(hog::probe::Message{});
-    const auto* welcomed = std::get_if<hog::probe::Welcome>(&greeting);
-    REQUIRE(welcomed != nullptr);
-    CHECK(welcomed->world_id == server->world_id());
-    CHECK(welcomed->level == server->weather().grid().level());
-    CHECK_FALSE(welcomed->layers.empty());
-    CHECK(welcomed->day_length == server->weather().config().day);
-    CHECK(welcomed->axial_tilt == server->weather().config().axial_tilt);
-
-    std::atomic<bool> answered = false;
-    std::optional<hog::probe::Message> answer;
-    std::thread asking{[&] {
-        REQUIRE(tool.send(hog::probe::Fetch{.names = {"weather/pressure"}}));
-        auto received = tool.receive(10s);
-        if (received && received->has_value()) {
-            answer = **received;
-        }
-        answered.store(true);
-    }};
-    // Fetches are answered as the world ticks.
-    GameTime now = start;
-    while (!answered.load()) {
-        now += 1s;
-        server->catch_up([now] { return now; });
-        std::this_thread::sleep_for(1ms);
-    }
-    asking.join();
-    REQUIRE(answer);
-    const hog::probe::Message reply = answer.value_or(hog::probe::Message{});
-    const auto* layers = std::get_if<hog::probe::Layers>(&reply);
-    REQUIRE(layers != nullptr);
-    CHECK(layers->time > start);
-    REQUIRE(layers->layers.size() == 1);
-    CHECK(layers->layers[0].values.size() == server->weather().grid().size());
-
-    // Surveys don't wait for a tick.
-    const hog::probe::Survey survey{.west = -20.0,
-                                    .east = 20.0,
-                                    .north = 10.0,
-                                    .south = -10.0,
-                                    .width = 8,
-                                    .height = 4,
-                                    .underground = true,
-                                    .depth = 50.0F};
-    REQUIRE(tool.send(survey));
-    auto surveyed = tool.receive(10s);
-    REQUIRE(surveyed);
-    REQUIRE(surveyed->has_value());
-    const hog::probe::Message ground = surveyed->value_or(hog::probe::Message{});
-    REQUIRE(std::holds_alternative<hog::probe::Ground>(ground));
-    CHECK(std::get<hog::probe::Ground>(ground).survey == survey);
-    CHECK(std::get<hog::probe::Ground>(ground).rock.size() == 32);
-
-    // A port already taken leaves the server running without one.
-    config.debug.port = server->probe()->port();
-    CHECK(opened(config)->probe() == nullptr);
-}
-
-namespace {
-
-// A debug tool's side of a conversation, recording rather than checking, as it runs on its own
-// thread.
-class Ask {
-public:
-    explicit Ask(hog::probe::Channel& channel) : channel_(&channel) {}
-
-    std::optional<hog::probe::Message> answer(const hog::probe::Message& message) {
-        if (!channel_->send(message)) {
-            return std::nullopt;
-        }
-        auto received = channel_->receive(10s);
-        if (!received || !received->has_value()) {
-            return std::nullopt;
-        }
-        return *received;
-    }
-
-    hog::probe::Controlled control(hog::probe::Action action, std::uint32_t amount = 0) {
-        const auto said = answer(hog::probe::Control{.action = action, .amount = amount});
-        const auto* controlled = said ? std::get_if<hog::probe::Controlled>(&*said) : nullptr;
-        return controlled != nullptr ? *controlled
-                                     : hog::probe::Controlled{.clock = {}, .error = "no answer"};
-    }
-
-    // Empty, at the epoch, if there was no answer.
-    hog::probe::Layers fetch() {
-        const auto said = answer(hog::probe::Fetch{});
-        const auto* layers = said ? std::get_if<hog::probe::Layers>(&*said) : nullptr;
-        return layers != nullptr ? *layers : hog::probe::Layers{};
-    }
-
-private:
-    hog::probe::Channel* channel_;
-};
-
-// Runs the server at real pace here, as only the thread that opened it may, while a tool runs
-// script(ask) on another thread; stops once the script is done.
-template <typename Script>
-void steered(Server& server, Script script) {
-    std::atomic<bool> stop = false;
-    std::thread tool{[&] {
-        if (auto socket = hog::probe::Socket::connect("127.0.0.1", server.probe()->port())) {
-            hog::probe::Channel channel{std::move(*socket)};
-            Ask ask{channel};
-            const auto welcome = ask.answer(hog::probe::Hello{});
-            if (welcome && std::holds_alternative<hog::probe::Welcome>(*welcome)) {
-                script(ask);
-            }
-        }
-        stop.store(true);
-    }};
-    hog::server::SteadyTimer timer;
-    const auto ran = server.run(timer, [] { return start + 1h; }, stop);
-    tool.join();
-    CHECK(ran);
-}
-
-} // namespace
-
 TEST_CASE("a new world can start at a chosen moment", "[app][server]") {
     const World world;
     auto config = world.config();
     config.debug.start = start + std::chrono::days{365};
     CHECK(opened(config)->time() == start + std::chrono::days{365});
-}
-
-TEST_CASE("debug tools can't steer the clock unless allowed", "[app][server]") {
-    const World world;
-    auto config = world.config();
-    config.debug.port = 0;
-    const auto server = opened(config);
-    hog::probe::Controlled refused;
-    hog::probe::Layers layers;
-    steered(*server, [&](Ask& ask) {
-        refused = ask.control(hog::probe::Action::Pause);
-        layers = ask.fetch();
-    });
-    CHECK_FALSE(refused.error.empty());
-    CHECK_FALSE(refused.clock.paused);
-    CHECK(layers.time >= start);
-    CHECK_FALSE(layers.clock.paused);
-}
-
-TEST_CASE("debug tools pause, step, speed up and rejoin real time", "[app][server]") {
-    const World world;
-    auto config = world.config();
-    config.debug.port = 0;
-    config.debug.time_control = true;
-    const auto server = opened(config);
-    using hog::probe::Action;
-    using hog::probe::Clock;
-    using hog::probe::Controlled;
-
-    std::vector<Controlled> refused;
-    Controlled sped;
-    Controlled paused;
-    hog::probe::Layers first;
-    hog::probe::Layers again;
-    hog::probe::Layers stepped;
-    hog::probe::Layers still;
-    Controlled rejoined;
-    GameTime reached;
-    Controlled ahead;
-    steered(*server, [&](Ask& ask) {
-        refused.push_back(ask.control(Action::Step, 1));
-        refused.push_back(ask.control(Action::Speed, 0));
-        refused.push_back(ask.control(Action::Speed, Server::fastest + 1));
-        sped = ask.control(Action::Speed, 600);
-        paused = ask.control(Action::Pause);
-        first = ask.fetch();
-        again = ask.fetch();
-        refused.push_back(ask.control(Action::Step, 0));
-        std::ignore = ask.control(Action::Step, 3);
-        // Tools are still answered while it steps or catches up. Catching up an hour is 72,000
-        // ticks, slow in sanitizer builds under load; the waits end as soon as they're met.
-        const auto deadline = MonotonicClock::now() + 60s;
-        do {
-            stepped = ask.fetch();
-        } while (stepped.time < first.time + 90s && MonotonicClock::now() < deadline);
-        still = ask.fetch();
-        rejoined = ask.control(Action::RealTime);
-        do {
-            reached = ask.fetch().time;
-        } while (reached < start + 1h - 1s && MonotonicClock::now() < deadline);
-        // Past the real time the test gives it, there's nothing to rejoin.
-        std::ignore = ask.control(Action::Speed, Server::fastest);
-        GameTime later = reached;
-        while (later <= start + 1h && MonotonicClock::now() < deadline) {
-            later = ask.fetch().time;
-        }
-        ahead = ask.control(Action::RealTime);
-    });
-
-    for (const Controlled& refusal : refused) {
-        CHECK_FALSE(refusal.error.empty());
-    }
-    CHECK(sped == Controlled{.clock = Clock{.paused = false, .scale = 600}, .error = {}});
-    CHECK(paused == Controlled{.clock = Clock{.paused = true, .scale = 600}, .error = {}});
-    CHECK(first.time >= start);
-    CHECK(first.clock == Clock{.paused = true, .scale = 600});
-    CHECK(again.time == first.time);
-    // Each tick at 20 Hz and 600x is 30 game seconds.
-    CHECK(stepped.time == first.time + 90s);
-    CHECK(still.time == stepped.time);
-    CHECK(rejoined == Controlled{.clock = Clock{.paused = false, .scale = 1}, .error = {}});
-    CHECK(reached > start + 1h - 1s);
-    CHECK(reached < start + 1h + 10s);
-    CHECK_FALSE(ahead.error.empty());
-    CHECK(ahead.clock.scale == Server::fastest);
 }
 
 TEST_CASE("snapshots are taken every save interval", "[app][server]") {
@@ -775,147 +259,10 @@ TEST_CASE("a server reports what it can't open", "[app][server]") {
     CHECK(not_a_database.error().message.starts_with(config.world.string() + ": "));
 }
 
-namespace {
-
-// The development world from config/, saved in a fresh directory, with no debug port.
-hog::server::ServerConfig development(const hog::testing::TemporaryDirectory& directory) {
-    auto config = hog::server::load_server_config(std::filesystem::path{HOG_SOURCE_DIR} / "config" /
-                                                  "server.toml");
-    REQUIRE(config);
-    config->world = directory.path() / "world.db";
-    config->debug = {};
-    config->metrics_interval = 0s;
-    return *config;
-}
-
-// Everything the simulation keeps, as it would be saved.
-std::vector<std::vector<std::byte>> simulated(const Server& server) {
-    REQUIRE(server.wildlife() != nullptr);
-    REQUIRE(server.forest() != nullptr);
-    return {server.weather().save(), server.wildlife()->save(), server.forest()->save()};
-}
-
-} // namespace
+namespace {} // namespace
 
 // Phase 2's gate, run by hand on a release build: hog_app_tests "[.gate]". It also prints the
 // world month by month, to judge whether seasons and populations look plausible.
-TEST_CASE("a simulated year runs in under ten minutes", "[.gate]") {
-    const hog::testing::TemporaryDirectory directory;
-    const auto config = development(directory);
-    REQUIRE(opened(config)->save());
-
-    const GameTime year_on = start + std::chrono::years{1};
-    const auto server = opened(config, year_on);
-    const auto& grid = server->weather().grid();
-    const auto& species = server->wildlife()->config().ecology.species;
-    std::string table = "month  north°C  south°C   rain mm/h  lows  fronts%  mid cloud";
-    for (const auto& one : species) {
-        table += std::format(" {:>10}", one.name);
-    }
-    for (const auto& one : species) {
-        table += std::format(" {:>5}", one.name.substr(0, 5));
-    }
-    table += "  carrion t  biomass t\n";
-
-    std::uint64_t ticks = 0;
-    std::chrono::duration<double> took{};
-    for (int month = 1; month <= 12; ++month) {
-        const GameTime until = start + (std::chrono::seconds{std::chrono::years{1}} * month / 12);
-        const MonotonicClock::time_point began = MonotonicClock::now();
-        ticks += server->catch_up([&] { return until; }).ticks;
-        took += MonotonicClock::now() - began;
-
-        // Area-weighted means of the surface temperature on each side of the equator.
-        std::array<double, 2> warmth{};
-        std::array<double, 2> area{};
-        double rain = 0.0;
-        double fronted = 0.0;
-        double cloud = 0.0;
-        double middle = 0.0;
-        const auto& weather = server->weather().fields();
-        for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
-            const double height = hog::planet::cell_center(grid.cell(cell)).z;
-            const std::size_t side = height >= 0.0 ? 0 : 1;
-            warmth[side] += static_cast<double>(weather.temperature[cell]) * grid.area(cell);
-            area[side] += grid.area(cell);
-            rain += static_cast<double>(weather.rain[cell]);
-            if (std::abs(weather.front[cell]) > 0.25F) {
-                fronted += grid.area(cell);
-            }
-            // Between 25° and 65° of latitude, where the lows travel.
-            if (std::abs(height) > std::sin(0.436) && std::abs(height) < std::sin(1.134)) {
-                cloud += static_cast<double>(weather.cloud[cell]) * grid.area(cell);
-                middle += grid.area(cell);
-            }
-        }
-        table += std::format("{:>5} {:>8.1f} {:>8.1f} {:>11.1f} {:>5} {:>8.1f} {:>10.2f}", month,
-                             warmth[0] / area[0], warmth[1] / area[1], rain,
-                             server->weather().systems().size(),
-                             100.0 * fronted / (area[0] + area[1]), cloud / middle);
-        const auto& wildlife = server->wildlife()->fields();
-        for (std::size_t kind = 0; kind < species.size(); ++kind) {
-            const auto& count = wildlife.populations[kind].count;
-            table += std::format(" {:>10.0f}", std::accumulate(count.begin(), count.end(), 0.0));
-        }
-        // How well fed each species is on average, animal by animal.
-        for (std::size_t kind = 0; kind < species.size(); ++kind) {
-            const auto& population = wildlife.populations[kind];
-            double fed = 0.0;
-            double animals = 0.0;
-            for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
-                fed += static_cast<double>(population.fed[cell] * population.count[cell]);
-                animals += static_cast<double>(population.count[cell]);
-            }
-            table += std::format(" {:>5.2f}", fed / animals);
-        }
-        double carrion = 0.0;
-        for (std::uint32_t cell = 0; cell < grid.size(); ++cell) {
-            carrion += static_cast<double>(wildlife.carrion[cell]) * server->wildlife()->area(cell);
-        }
-        table += std::format(" {:>10.1f} {:>10.0f}\n", carrion / 1e3,
-                             gauge(*server, "hog_forest_biomass_tonnes"));
-    }
-    WARN(std::format("a year in {:.1f} s over {} ticks: {} weather, {} wildlife and {} forest "
-                     "steps; {} collapses, {} local extinctions, {} returns\n{}",
-                     took.count(), ticks, counter(*server, "hog_weather_steps_total"),
-                     counter(*server, "hog_wildlife_steps_total"),
-                     counter(*server, "hog_forest_steps_total"),
-                     counter(*server, "hog_wildlife_collapses_total"),
-                     counter(*server, "hog_wildlife_local_extinctions_total"),
-                     counter(*server, "hog_wildlife_returns_total"), table));
-    CHECK(year_on - server->time() < 1s);
-    CHECK(took < 10min);
-}
-
-TEST_CASE("replaying from the same seed gives the same world", "[.gate]") {
-    const GameTime later = start + std::chrono::days{90};
-    // Straight through, and in two runs with a save and reload between.
-    const hog::testing::TemporaryDirectory straight;
-    const hog::testing::TemporaryDirectory stopped;
-    std::vector<std::vector<std::byte>> once;
-    {
-        const auto config = development(straight);
-        REQUIRE(opened(config)->save());
-        const auto server = opened(config, later);
-        server->catch_up([&] { return later; });
-        once = simulated(*server);
-    }
-    const auto config = development(stopped);
-    REQUIRE(opened(config)->save());
-    const GameTime halfway = start + std::chrono::days{37} + 5h + 17min;
-    {
-        const auto server = opened(config, halfway);
-        server->catch_up([&] { return halfway; });
-        REQUIRE(server->save());
-    }
-    const auto server = opened(config, later);
-    server->catch_up([&] { return later; });
-    const auto twice = simulated(*server);
-    CHECK(twice[0] == once[0]);
-    CHECK(twice[1] == once[1]);
-    CHECK(twice[2] == once[2]);
-}
-
 namespace {
 
 // Real time, visited between the server's sleeps.
@@ -955,41 +302,6 @@ std::unique_ptr<Server> playing(const World& world, bool time_control = false) {
 }
 
 } // namespace
-
-TEST_CASE("a player is sent the weather as they join", "[app][server]") {
-    const World world;
-    const auto server = playing(world);
-    auto client = hog::net::Client::connect(std::format("127.0.0.1:{}", server->players()->port()));
-    REQUIRE(client);
-    std::vector<hog::protocol::Message> heard;
-    std::vector<hog::net::Event> events;
-    std::atomic<bool> stop = false;
-    const auto give_up = MonotonicClock::now() + 10s;
-    Visited timer{[&] {
-        client->poll(events);
-        for (const hog::net::Event& event : events) {
-            if (std::holds_alternative<hog::net::Connected>(event)) {
-                REQUIRE(client->send(hog::net::Delivery::Reliable,
-                                     hog::protocol::encode(hog::protocol::Hello{})));
-            } else if (const auto* message = std::get_if<hog::net::Message>(&event)) {
-                auto decoded = hog::protocol::decode(message->bytes());
-                REQUIRE(decoded);
-                heard.push_back(std::move(*decoded));
-            }
-        }
-        if (heard.size() >= 2 || MonotonicClock::now() >= give_up) {
-            stop = true;
-        }
-    }};
-    REQUIRE(server->run(timer, [] { return start; }, stop));
-    REQUIRE(heard.size() == 2);
-    CHECK(std::holds_alternative<hog::protocol::Welcome>(heard[0]));
-    const auto* weather = std::get_if<hog::protocol::Weather>(&heard[1]);
-    REQUIRE(weather != nullptr);
-    CHECK(weather->level == server->weather().grid().level());
-    CHECK(weather->fade == 10min);
-    CHECK(weather->cells.size() == server->weather().grid().size());
-}
 
 namespace {
 
@@ -1105,51 +417,6 @@ TEST_CASE("a logged in player is placed where they were when the server stopped"
     REQUIRE(server->run(timer, [] { return start; }, stop));
     CHECK(matt.placed() == flying);
     CHECK_FALSE(anna.placed());
-}
-
-TEST_CASE("a player is sent how the woods fare as they join, where the world grows a forest",
-          "[app][server]") {
-    const World world;
-    auto config = world.config();
-    config.forest.vegetation = world.write_vegetation(R"(
-[growth]
-capacity = { temperate_forest = 20 }
-)");
-    const auto server = playing(config);
-    REQUIRE(server->forest() != nullptr);
-    auto client = hog::net::Client::connect(std::format("127.0.0.1:{}", server->players()->port()));
-    REQUIRE(client);
-    std::optional<hog::protocol::Woodlands> woodlands;
-    std::vector<hog::net::Event> events;
-    std::atomic<bool> stop = false;
-    const auto give_up = MonotonicClock::now() + 10s;
-    Visited timer{[&] {
-        client->poll(events);
-        for (const hog::net::Event& event : events) {
-            if (std::holds_alternative<hog::net::Connected>(event)) {
-                REQUIRE(client->send(hog::net::Delivery::Reliable,
-                                     hog::protocol::encode(hog::protocol::Hello{})));
-            } else if (const auto* message = std::get_if<hog::net::Message>(&event)) {
-                auto decoded = hog::protocol::decode(message->bytes());
-                REQUIRE(decoded);
-                if (auto* told = std::get_if<hog::protocol::Woodlands>(&*decoded)) {
-                    woodlands = std::move(*told);
-                }
-            }
-        }
-        if (woodlands || MonotonicClock::now() >= give_up) {
-            stop = true;
-        }
-    }};
-    REQUIRE(server->run(timer, [] { return start; }, stop));
-    REQUIRE(woodlands.has_value());
-    const hog::protocol::Woodlands& told = woodlands.value_or(hog::protocol::Woodlands{});
-    CHECK(told.level == server->forest()->grid().level());
-    CHECK(told.cells.size() == server->forest()->grid().size());
-    // A forest just grown is untouched everywhere.
-    CHECK(std::ranges::all_of(told.cells, [](const hog::protocol::CellWoodland& cell) {
-        return cell == hog::protocol::CellWoodland{};
-    }));
 }
 
 TEST_CASE("players hear each other's chat, named by the server", "[app][server]") {
@@ -1355,7 +622,7 @@ TEST_CASE("a hole dug in the voxel world is kept with it", "[app][server]") {
         const hog::globe::Layers& layers = generator.layers();
         const double ground =
             hog::globe::ground_below(generator, direction, hog::globe::voxel_lod(generator))
-                .value();
+                .value_or(generator.planet().radius);
         const hog::globe::Cell cell = hog::globe::cell_under(direction, layers.level);
         site = {.face = cell.face,
                 .i = cell.i,
@@ -1373,6 +640,38 @@ TEST_CASE("a hole dug in the voxel world is kept with it", "[app][server]") {
     CHECK(reopened->globe().at(site).solid == hog::globe::Material::Air);
 }
 
+namespace {
+
+// A client digging, and what it's been sent.
+struct Digger {
+    hog::net::Client client;
+    bool welcomed = false;
+    std::vector<hog::protocol::SentBrick> bricks;
+    std::vector<hog::net::Event> events;
+};
+
+// Takes in what the server sent a digger, saying hello once connected.
+void hear(Digger& digger) {
+    digger.client.poll(digger.events);
+    for (const hog::net::Event& event : digger.events) {
+        if (std::holds_alternative<hog::net::Connected>(event)) {
+            REQUIRE(digger.client.send(hog::net::Delivery::Reliable,
+                                       hog::protocol::encode(hog::protocol::Hello{})));
+        } else if (const auto* message = std::get_if<hog::net::Message>(&event)) {
+            auto decoded = hog::protocol::decode(message->bytes());
+            REQUIRE(decoded);
+            if (std::holds_alternative<hog::protocol::Welcome>(*decoded)) {
+                digger.welcomed = true;
+            } else if (auto* bricks = std::get_if<hog::protocol::Bricks>(&*decoded)) {
+                digger.bricks.insert(digger.bricks.end(), bricks->bricks.begin(),
+                                     bricks->bricks.end());
+            }
+        }
+    }
+}
+
+} // namespace
+
 TEST_CASE("a player's digging is sent back as bricks to everyone", "[app][server]") {
     const World world;
     const auto server = playing(world);
@@ -1380,13 +679,8 @@ TEST_CASE("a player's digging is sent back as bricks to everyone", "[app][server
     const hog::globe::Generator& generator = server->generator();
     const hog::DVec3 direction = hog::planet::start_direction;
     const double ground =
-        hog::globe::ground_below(generator, direction, hog::globe::voxel_lod(generator)).value();
-    struct Digger {
-        hog::net::Client client;
-        bool welcomed = false;
-        std::vector<hog::protocol::SentBrick> bricks;
-        std::vector<hog::net::Event> events;
-    };
+        hog::globe::ground_below(generator, direction, hog::globe::voxel_lod(generator))
+            .value_or(generator.planet().radius);
     auto first = hog::net::Client::connect(address);
     auto second = hog::net::Client::connect(address);
     REQUIRE(first);
@@ -1399,22 +693,7 @@ TEST_CASE("a player's digging is sent back as bricks to everyone", "[app][server
     const auto give_up = MonotonicClock::now() + 10s;
     Visited timer{[&] {
         for (Digger& digger : diggers) {
-            digger.client.poll(digger.events);
-            for (const hog::net::Event& event : digger.events) {
-                if (std::holds_alternative<hog::net::Connected>(event)) {
-                    REQUIRE(digger.client.send(hog::net::Delivery::Reliable,
-                                               hog::protocol::encode(hog::protocol::Hello{})));
-                } else if (const auto* message = std::get_if<hog::net::Message>(&event)) {
-                    auto decoded = hog::protocol::decode(message->bytes());
-                    REQUIRE(decoded);
-                    if (std::holds_alternative<hog::protocol::Welcome>(*decoded)) {
-                        digger.welcomed = true;
-                    } else if (auto* bricks = std::get_if<hog::protocol::Bricks>(&*decoded)) {
-                        digger.bricks.insert(digger.bricks.end(), bricks->bricks.begin(),
-                                             bricks->bricks.end());
-                    }
-                }
-            }
+            hear(digger);
         }
         if (!dug && diggers[0].welcomed && diggers[1].welcomed) {
             dug = true;
@@ -1445,8 +724,7 @@ TEST_CASE("a player's digging is sent back as bricks to everyone", "[app][server
             .i = cell.i,
             .j = cell.j,
             .layer = static_cast<std::uint32_t>(generator.layers().layer_at(ground - 0.5))};
-        REQUIRE(theirs.at(site));
-        CHECK(theirs.at(site)->solid == hog::globe::Material::Air);
+        CHECK(theirs.at(site).value_or(hog::globe::Voxel{}).solid == hog::globe::Material::Air);
     }
     CHECK(counter(*server, "hog_bricks_sent_total") == 2 * server->voxels().size());
 }

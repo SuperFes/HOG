@@ -519,17 +519,12 @@ TEST_CASE("two players see each other through a bad network", "[client][session]
     const WorldPosition anna_at = standing(server->generator(), 0.0);
     WorldPosition matt_at = standing(server->generator(), 100.0);
     int stage = 0;
-    // Both are told the weather as they join; large, it may take a while to get through.
-    bool anna_told = false;
-    bool matt_told = false;
     std::atomic<bool> stop = false;
     const auto give_up = MonotonicClock::now() + 30s;
     Visited timer{[&] {
         const MonotonicClock::time_point now = MonotonicClock::now();
         anna->look(Whereabouts{.at = anna_at}, now);
         matt->look(Whereabouts{.at = matt_at}, now);
-        anna_told = anna->take_weather().has_value() || anna_told;
-        matt_told = matt->take_weather().has_value() || matt_told;
         if (stage == 0 && sees(*anna, matt_at) && sees(*matt, anna_at)) {
             stage = 1;
             matt_at = standing(server->generator(), 103.0);
@@ -544,7 +539,7 @@ TEST_CASE("two players see each other through a bad network", "[client][session]
                 stage = 3;
             }
         }
-        if ((stage == 3 && anna_told && matt_told) || now >= give_up) {
+        if (stage == 3 || now >= give_up) {
             stop = true;
         }
     }};
@@ -554,8 +549,6 @@ TEST_CASE("two players see each other through a bad network", "[client][session]
     CHECK(sees(*anna, standing(server->generator(), 103.0)));
     CHECK(anna->last_snapshot());
     CHECK(matt->stats());
-    CHECK(anna_told);
-    CHECK(matt_told);
 }
 
 TEST_CASE("a session takes the bricks sent, and asks to dig and build once welcomed",

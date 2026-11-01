@@ -1,13 +1,12 @@
 add_library(hog_app
     src/logging.cpp
     src/options.cpp
-    src/probe_layers.cpp
     src/server.cpp)
 add_library(hog::app ALIAS hog_app)
 
 target_include_directories(hog_app PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(hog_app
-    PUBLIC hog::globe hog::net hog::probe hog::protocol hog::server hog::sim hog::store
+    PUBLIC hog::globe hog::net hog::protocol hog::server hog::store
     PRIVATE hog::chat)
 hog_target_defaults(hog_app)
 

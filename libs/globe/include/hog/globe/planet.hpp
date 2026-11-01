@@ -80,6 +80,9 @@ struct Derived {
 
 [[nodiscard]] Derived derive(const Planet& planet);
 
+// A number telling worlds apart: the same for the same knobs, so saves match their world.
+[[nodiscard]] std::uint64_t world_id(const Planet& planet) noexcept;
+
 // The year's mean surface temperature at a latitude, in radians.
 [[nodiscard]] double temperature_at(const Planet& planet, double latitude);
 [[nodiscard]] double mean_temperature(const Planet& planet);

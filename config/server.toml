@@ -16,24 +16,6 @@ file = "../var/logs/server.jsonl"
 [metrics]
 interval_seconds = 10
 
-[weather]
-cell_km = 6
-step_minutes = 10
-day_hours = 24
-# Cloud and storms keep Earth's pace round the planet, all but still over its ground, rather than
-# blowing over it as fast as the wind.
-earth_pace = false
-
-[wildlife]
-ecology = "ecology.toml"
-step_hours = 24
-
-[forest]
-vegetation = "forest.toml"
-step_hours = 1
-# A new world's woods nearest the start burned this long before it begins: snags among young regrowth.
-burned_years_ago = 8
-
 [net]
 port = 7675 # PORK on a phone keypad
 # Made by hog-login on its first run, from the repository's root.
@@ -44,8 +26,7 @@ view_m = 500
 snapshot_bytes = 1200
 
 [debug]
-port = 7777
-# Lets the viewer pause, step and speed up the clock; the world then stays wherever it's left
-# rather than catching up to real time on start.
+# Lets players speed up the clock; the world then stays wherever it's left rather than catching
+# up to real time on start.
 time_control = true
 # start = 2026-01-01T00:00:00Z   # a new world's first moment, instead of now

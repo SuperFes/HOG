@@ -21,12 +21,6 @@ constexpr std::int64_t max_burst_limit = 1'000;
 constexpr std::int64_t max_keep = 1'000;
 constexpr std::int64_t max_catch_up_ticks = 1'000'000'000;
 constexpr std::int64_t max_metrics_seconds = std::int64_t{24} * 60 * 60;
-constexpr double max_cell_km = 10'000.0;
-constexpr double max_weather_minutes = 24.0 * 60.0;
-constexpr double max_weather_day_hours = 24.0 * 365.0;
-constexpr double max_wildlife_step_hours = 24.0 * 365.0;
-constexpr double max_forest_step_hours = 24.0;
-constexpr double max_burned_years = 1'000.0;
 constexpr double max_view_m = 10'000.0;
 constexpr std::int64_t least_snapshot_bytes = 64;
 constexpr std::int64_t most_snapshot_bytes = 65'536;
@@ -279,97 +273,6 @@ private:
     return {};
 }
 
-[[nodiscard]] Result<void> parse_weather(const Table& weather, WeatherSettings& config) {
-    if (auto known = weather.only({"cell_km", "step_minutes", "day_hours", "earth_pace"}); !known) {
-        return known;
-    }
-    const auto cell = weather.number("cell_km");
-    if (!cell) {
-        return std::unexpected(cell.error());
-    }
-    if (*cell) {
-        // NaN fails every comparison, so it is out of range too.
-        const bool in_range = **cell > 0.0 && **cell <= max_cell_km;
-        if (!in_range) {
-            return invalid(
-                std::format("weather.cell_km must be above 0 and at most {}", max_cell_km));
-        }
-        config.cell_size = **cell * 1'000.0;
-    }
-    const auto step =
-        weather.duration<std::ratio<60>>("step_minutes", max_weather_minutes, "a day");
-    const auto day =
-        weather.duration<std::ratio<3'600>>("day_hours", max_weather_day_hours, "a year");
-    for (const auto* field : {&step, &day}) {
-        if (!*field) {
-            return std::unexpected(field->error());
-        }
-    }
-    config.step = step->value_or(config.step);
-    config.day = day->value_or(config.day);
-    const auto earth_pace = weather.boolean("earth_pace");
-    if (!earth_pace) {
-        return std::unexpected(earth_pace.error());
-    }
-    config.earth_pace = earth_pace->value_or(config.earth_pace);
-    return {};
-}
-
-[[nodiscard]] Result<void> parse_wildlife(const Table& wildlife, const std::filesystem::path& base,
-                                          WildlifeSettings& config) {
-    if (auto known = wildlife.only({"ecology", "step_hours"}); !known) {
-        return known;
-    }
-    const auto ecology = wildlife.string("ecology");
-    if (!ecology) {
-        return std::unexpected(ecology.error());
-    }
-    if (*ecology) {
-        config.ecology = (base / **ecology).lexically_normal();
-    }
-    const auto step =
-        wildlife.duration<std::ratio<3'600>>("step_hours", max_wildlife_step_hours, "a year");
-    if (!step) {
-        return std::unexpected(step.error());
-    }
-    config.step = step->value_or(config.step);
-    return {};
-}
-
-[[nodiscard]] Result<void> parse_forest(const Table& forest, const std::filesystem::path& base,
-                                        ForestSettings& config) {
-    if (auto known = forest.only({"vegetation", "step_hours", "burned_years_ago"}); !known) {
-        return known;
-    }
-    const auto vegetation = forest.string("vegetation");
-    if (!vegetation) {
-        return std::unexpected(vegetation.error());
-    }
-    if (*vegetation) {
-        config.vegetation = (base / **vegetation).lexically_normal();
-    }
-    const auto step =
-        forest.duration<std::ratio<3'600>>("step_hours", max_forest_step_hours, "a day");
-    if (!step) {
-        return std::unexpected(step.error());
-    }
-    config.step = step->value_or(config.step);
-    const auto burned = forest.number("burned_years_ago");
-    if (!burned) {
-        return std::unexpected(burned.error());
-    }
-    if (*burned) {
-        // NaN fails every comparison, so it is out of range too.
-        const bool in_range = **burned >= 0.0 && **burned <= max_burned_years;
-        if (!in_range) {
-            return invalid(
-                std::format("forest.burned_years_ago must be from 0 to {}", max_burned_years));
-        }
-        config.burned_years_ago = *burned;
-    }
-    return {};
-}
-
 [[nodiscard]] Result<void> parse_net(const Table& net, const std::filesystem::path& base,
                                      NetSettings& config) {
     if (auto known = net.only({"port", "login_key", "simulate", "view_m", "snapshot_bytes"});
@@ -425,15 +328,8 @@ private:
 }
 
 [[nodiscard]] Result<void> parse_debug(const Table& debug, DebugSettings& config) {
-    if (auto known = debug.only({"port", "time_control", "start"}); !known) {
+    if (auto known = debug.only({"time_control", "start"}); !known) {
         return known;
-    }
-    const auto port = debug.integer("port", 1, std::numeric_limits<std::uint16_t>::max());
-    if (!port) {
-        return std::unexpected(port.error());
-    }
-    if (*port) {
-        config.port = static_cast<std::uint16_t>(**port);
     }
     const auto time_control = debug.boolean("time_control");
     if (!time_control) {
@@ -457,8 +353,8 @@ Result<ServerConfig> parse_server_config(std::string_view text, const std::files
         return make_error(ErrorCode::Parse, std::format("line {}: {}", error.source().begin.line,
                                                         error.description()));
     }
-    constexpr std::array<std::string_view, 9> names{
-        "server", "save", "log", "metrics", "weather", "wildlife", "forest", "debug", "net"};
+    constexpr std::array<std::string_view, 6> names{"server",  "save",  "log",
+                                                    "metrics", "debug", "net"};
     std::array<const toml::table*, names.size()> tables{};
     for (const auto& [key, node] : parsed.table()) {
         const auto index =
@@ -485,20 +381,10 @@ Result<ServerConfig> parse_server_config(std::string_view text, const std::files
     if (auto metrics = parse_metrics(Table{tables[3], "metrics"}, config); !metrics) {
         return std::unexpected(metrics.error());
     }
-    if (auto weather = parse_weather(Table{tables[4], "weather"}, config.weather); !weather) {
-        return std::unexpected(weather.error());
-    }
-    if (auto wildlife = parse_wildlife(Table{tables[5], "wildlife"}, base, config.wildlife);
-        !wildlife) {
-        return std::unexpected(wildlife.error());
-    }
-    if (auto forest = parse_forest(Table{tables[6], "forest"}, base, config.forest); !forest) {
-        return std::unexpected(forest.error());
-    }
-    if (auto debug = parse_debug(Table{tables[7], "debug"}, config.debug); !debug) {
+    if (auto debug = parse_debug(Table{tables[4], "debug"}, config.debug); !debug) {
         return std::unexpected(debug.error());
     }
-    if (auto net = parse_net(Table{tables[8], "net"}, base, config.net); !net) {
+    if (auto net = parse_net(Table{tables[5], "net"}, base, config.net); !net) {
         return std::unexpected(net.error());
     }
     return config;

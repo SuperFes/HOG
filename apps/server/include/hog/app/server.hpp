@@ -1,7 +1,6 @@
 #pragma once
 
 #include <hog/app/logging.hpp>
-#include <hog/app/probe_layers.hpp>
 #include <hog/core/log.hpp>
 #include <hog/core/metrics.hpp>
 #include <hog/core/result.hpp>
@@ -11,33 +10,26 @@
 #include <hog/globe/voxel_store.hpp>
 #include <hog/globe/world.hpp>
 #include <hog/jobs/job_system.hpp>
+#include <hog/login/keys.hpp>
 #include <hog/net/server.hpp>
 #include <hog/physics/ground.hpp>
 #include <hog/physics/space.hpp>
-#include <hog/planet/planet_config.hpp>
-#include <hog/planet/world.hpp>
 #include <hog/protocol/handshake.hpp>
 #include <hog/protocol/messages.hpp>
 #include <hog/server/brick_sharing.hpp>
 #include <hog/server/catch_up.hpp>
 #include <hog/server/persistence.hpp>
 #include <hog/server/players.hpp>
-#include <hog/server/probe_service.hpp>
 #include <hog/server/server_config.hpp>
 #include <hog/server/snapshot_writer.hpp>
 #include <hog/server/spatial_index.hpp>
 #include <hog/server/tick_loop.hpp>
-#include <hog/sim/forest.hpp>
-#include <hog/sim/weather.hpp>
-#include <hog/sim/wildlife.hpp>
 #include <hog/store/sqlite_brick_archive.hpp>
-#include <hog/store/sqlite_change_store.hpp>
 #include <hog/store/sqlite_player_store.hpp>
 #include <hog/store/sqlite_snapshot_store.hpp>
 
 #include <flecs.h>
 
-#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -51,7 +43,7 @@
 
 namespace hog::app {
 
-// A world and everything that keeps it: the planet with its changes, the persistent entities,
+// A world and everything that keeps it: the voxel world with its bricks, the persistent entities,
 // their snapshots, and the server's metrics.
 class Server {
     // Lets open() construct through make_unique while nothing else can.
@@ -60,16 +52,14 @@ class Server {
     };
 
 public:
-    // Opens the world database, replays the planet's changes and restores the newest snapshot.
-    // A world without one starts at `now`. Fails on a snapshot of another world or from a newer
+    // Opens the world database, loads the bricks changed and restores the newest snapshot. A
+    // world without one starts at `now`. Fails on a snapshot of another world or from a newer
     // build rather than start over.
     [[nodiscard]] static Result<std::unique_ptr<Server>> open(const server::ServerConfig& config,
                                                               GameTime now);
-
-    Server(Opened /*unused*/, const server::ServerConfig& config,
-           const planet::PlanetConfig& planet, const globe::Planet& globe,
-           store::SqliteSnapshotStore snapshots, store::SqliteChangeStore changes,
-           store::SqlitePlayerStore places, store::SqliteBrickArchive bricks);
+    Server(Opened /*unused*/, const server::ServerConfig& config, const globe::Planet& globe,
+           store::SqliteSnapshotStore snapshots, store::SqlitePlayerStore places,
+           store::SqliteBrickArchive bricks);
     Server(const Server&) = delete;
     Server(Server&&) = delete;
     Server& operator=(const Server&) = delete;
@@ -82,11 +72,11 @@ public:
         requires std::same_as<std::invoke_result_t<Now&>, GameTime>
     server::CatchUpStats catch_up(Now now);
 
-    // Fastest debug tools may run the clock, in game seconds per real second.
+    // Fastest players may run the clock, in game seconds per real second.
     static constexpr std::uint32_t fastest = 86'400;
 
     // Ticks at the configured rate, saving periodically, until `stop` is set; then saves and
-    // waits for every snapshot to be written. now() is real time, for debug tools to rejoin.
+    // waits for every snapshot to be written. now() is real time, which nothing needs yet.
     template <server::Timer T, typename Now>
         requires std::same_as<std::invoke_result_t<Now&>, GameTime>
     [[nodiscard]] Result<void> run(T& timer, Now now, const std::atomic<bool>& stop);
@@ -98,21 +88,12 @@ public:
     [[nodiscard]] GameTime time() const noexcept { return time_; }
     [[nodiscard]] Tick tick() const noexcept { return tick_; }
     [[nodiscard]] std::uint64_t world_id() const noexcept { return world_id_; }
-
     [[nodiscard]] server::Persistence& persistence() noexcept { return persistence_; }
     [[nodiscard]] const metrics::Registry& metrics() const noexcept { return registry_; }
-    [[nodiscard]] const planet::World& planet() const noexcept { return planet_; }
     // The voxel world: the generator over the bricks changed, which only the server writes.
     [[nodiscard]] globe::World globe() noexcept { return globe_; }
     [[nodiscard]] const globe::Generator& generator() const noexcept { return generator_; }
     [[nodiscard]] const globe::VoxelStore& voxels() const noexcept { return voxels_; }
-    [[nodiscard]] const sim::Weather& weather() const noexcept { return *weather_; }
-    // Null when no ecology is configured.
-    [[nodiscard]] const sim::Wildlife* wildlife() const noexcept { return wildlife_.get(); }
-    // Null when no vegetation is configured.
-    [[nodiscard]] const sim::Forest* forest() const noexcept { return forest_.get(); }
-    // Null without a debug port, or when it couldn't be opened.
-    [[nodiscard]] const server::ProbeService* probe() const noexcept { return probe_.get(); }
     // Null without a players' port, or when it couldn't be opened.
     [[nodiscard]] const net::Server* players() const noexcept {
         return players_ ? &*players_ : nullptr;
@@ -124,28 +105,7 @@ public:
 private:
     // Advances the world by one tick of game time.
     void simulate(GameTime from, GameDuration step);
-    // Builds the weather, wildlife and forest as of `at`, on the planet with its changes.
-    [[nodiscard]] Result<void> start_simulation(const planet::PlanetConfig& shape, GameTime at);
-    // Reads the weather, wildlife and forest from a snapshot; a part it can't read starts over.
-    [[nodiscard]] Result<void> restore_simulation(const save::Snapshot& snapshot);
-    void advance_weather(GameTime to);
-    // When the wildlife or the forest next steps, whichever is sooner; none without either.
-    [[nodiscard]] std::optional<GameTime> next_due() const;
-    void step_wildlife(GameTime at);
-    void step_forest(GameTime at);
-    // Counts the fires and measures the forest.
-    void report_forest();
-    // Gives a new world's forest its history: the woods nearest the start burned, if
-    // configured.
-    void burn_history();
-    // Logs and counts what has happened to wildlife since last asked.
-    void report_wildlife();
-    // Logs the species that are gone from everywhere, as the server opens.
-    void recall_extinctions() const;
     void submit();
-    [[nodiscard]] LayerSources layer_sources() const;
-    // Opens the debug port, if one is configured, logging rather than failing if it can't.
-    void open_probe();
     // Opens the players' port, if one is configured, logging rather than failing if it can't.
     void open_players();
     // Takes in what players' connections sent and what became of them, shaking hands with those
@@ -169,35 +129,20 @@ private:
     void send_bricks(net::ConnectionId connection, const std::vector<protocol::Bricks>& bricks);
     // Sends each player a snapshot of those near them.
     void share();
-    // Sends every player the weather once it has stepped, to fade to over a step at `scale`.
-    void tell_weather(std::int64_t scale);
-    void send_weather(net::ConnectionId connection);
-    // Sends every player how the woods fare once the forest has stepped, if that's changed.
-    void tell_woodlands();
-    void send_woodlands(net::ConnectionId connection);
     // Sends every player how fast the world's clock runs.
     void tell_clock();
     void send_clock(net::ConnectionId connection);
     // Runs the clock as the newest player's wish asked, if any, telling everyone how it runs now.
-    template <typename Loop, typename Now>
-    void hurry_clock(Loop& loop, Now& now);
-    // Answers debug tools waiting on the world, telling them how clock() runs and asking
-    // steer(control) to change it.
-    template <typename Clock, typename Steer>
-    void serve_probe(Clock clock, Steer steer);
-    // Changes how `loop` runs as a debug tool asked, if this world allows it.
-    template <typename Loop, typename Now>
-    [[nodiscard]] probe::Controlled steer(Loop& loop, const probe::Control& control, Now& now);
+    template <typename Loop>
+    void hurry_clock(Loop& loop);
 
     server::ServerConfig config_;
     std::uint64_t world_id_;
-    planet::World planet_;
     globe::Generator generator_;
     globe::VoxelStore voxels_;
     globe::World globe_;
     store::SqliteBrickArchive bricks_;
     server::BrickSharing bricks_shared_;
-    store::SqliteChangeStore changes_;
     store::SqliteSnapshotStore snapshots_;
     store::SqlitePlayerStore places_;
     // After the store it writes to.
@@ -207,22 +152,10 @@ private:
     flecs::world entities_;
     server::Persistence persistence_;
     jobs::JobSystem jobs_;
-    // Set once the planet's changes are in, since the weather starts from the ground.
-    std::unique_ptr<sim::Weather> weather_;
-    std::unique_ptr<sim::Wildlife> wildlife_;
-    std::unique_ptr<sim::Forest> forest_;
-    // After what it reads, so it stops first.
-    std::unique_ptr<server::ProbeService> probe_;
     std::optional<net::Server> players_;
     std::vector<net::Event> player_events_;
     // Connections still to say hello, and the players let in.
     std::map<net::ConnectionId, protocol::Handshake> handshakes_;
-    // The weather players were last sent, coded, and the step it's from.
-    std::vector<std::byte> weather_told_;
-    std::optional<GameTime> weather_told_at_;
-    // The same for the woods.
-    std::vector<std::byte> woodlands_told_;
-    std::optional<GameTime> woodlands_told_at_;
     // The newest wish to run the clock at another speed, and whose it was.
     std::optional<std::pair<net::ConnectionId, std::uint32_t>> hurry_;
     // The loop's scale as of its last turn, for players joining between them.
@@ -246,19 +179,6 @@ private:
     metrics::Counter& snapshots_replaced_;
     metrics::Counter& snapshots_failed_;
     metrics::Counter& snapshots_skipped_;
-    metrics::Counter& weather_steps_;
-    metrics::Histogram& weather_step_seconds_;
-    metrics::Counter& wildlife_steps_;
-    metrics::Histogram& wildlife_step_seconds_;
-    metrics::Gauge& extinct_species_;
-    // By ecology event kind.
-    std::array<metrics::Counter*, 5> ecology_events_;
-    metrics::Counter& forest_steps_;
-    metrics::Histogram& forest_step_seconds_;
-    metrics::Counter& fires_started_;
-    metrics::Counter& alight_km2_;
-    metrics::Gauge& burning_cells_;
-    metrics::Gauge& biomass_tonnes_;
     metrics::Gauge& connections_;
     metrics::Counter& shared_snapshots_;
     metrics::Counter& shared_bytes_;
@@ -266,8 +186,6 @@ private:
     metrics::Counter& chat_lines_;
     metrics::Counter& hateful_lines_;
     metrics::Counter& bricks_sent_;
-    // km² alight not yet counted, being under one.
-    double alight_left_ = 0.0;
     metrics::Reporter reporter_;
     // What the mirrored counters were last brought up to.
     server::SnapshotWriter::Stats mirrored_writes_;
@@ -283,11 +201,6 @@ server::CatchUpStats Server::catch_up(Now now) {
         server::catch_up(clock, config_.catch_up_ticks, now, [this](const server::TickClock& at) {
             simulate(at.now(), at.step());
             time_ = at.now() + at.step();
-            serve_probe([] { return probe::Clock{}; },
-                        [](const probe::Control& /*unused*/) {
-                            return probe::Controlled{.clock = {},
-                                                     .error = "the world is still catching up"};
-                        });
         });
     time_ = clock.now();
     tick_ = clock.tick();
@@ -305,96 +218,33 @@ server::CatchUpStats Server::catch_up(Now now) {
     return stats;
 }
 
-template <typename Clock, typename Steer>
-void Server::serve_probe(Clock clock, Steer steer) {
-    if (probe_) {
-        probe_->serve(
-            [&](const probe::Fetch& fetch) {
-                probe::Layers layers = fetch_layers(layer_sources(), fetch, time_);
-                layers.clock = clock();
-                return layers;
-            },
-            steer,
-            [&](const probe::Inspect& inspect) {
-                return inspect_layers(layer_sources(), inspect, time_);
-            });
-    }
-}
-
-namespace detail {
-
 template <typename Loop>
-probe::Clock clock_of(const Loop& loop) {
-    return probe::Clock{.paused = loop.paused(), .scale = static_cast<std::uint32_t>(loop.scale())};
-}
-
-} // namespace detail
-
-template <typename Loop, typename Now>
-probe::Controlled Server::steer(Loop& loop, const probe::Control& control, Now& now) {
-    if (!config_.debug.time_control) {
-        return {.clock = detail::clock_of(loop), .error = "time control is off for this world"};
-    }
-    switch (control.action) {
-    case probe::Action::Pause:
-        loop.pause();
-        break;
-    case probe::Action::Resume:
-        loop.resume();
-        break;
-    case probe::Action::Step:
-        if (!loop.paused() || control.amount == 0) {
-            return {.clock = detail::clock_of(loop),
-                    .error = "step at least one tick, while paused"};
-        }
-        loop.step_ticks(control.amount);
-        break;
-    case probe::Action::Speed:
-        if (control.amount == 0 || control.amount > fastest) {
-            return {.clock = detail::clock_of(loop),
-                    .error = std::format("speed must be from 1 to {}", fastest)};
-        }
-        loop.set_scale(control.amount);
-        break;
-    case probe::Action::RealTime: {
-        const GameTime target = now();
-        if (time_ > target) {
-            return {.clock = detail::clock_of(loop),
-                    .error = std::format("{} ahead of real time",
-                                         std::chrono::floor<std::chrono::seconds>(time_ - target))};
-        }
-        loop.set_scale(server::default_time_scale);
-        loop.resume();
-        loop.catch_up_to(target, config_.catch_up_ticks);
-        break;
-    }
-    }
-    return {.clock = detail::clock_of(loop), .error = {}};
-}
-
-template <typename Loop, typename Now>
-void Server::hurry_clock(Loop& loop, Now& now) {
+void Server::hurry_clock(Loop& loop) {
     clock_scale_ = static_cast<std::uint32_t>(loop.scale());
     const auto hurry = std::exchange(hurry_, std::nullopt);
     if (!hurry) {
         return;
     }
-    const probe::Controlled done =
-        steer(loop, probe::Control{.action = probe::Action::Speed, .amount = hurry->second}, now);
-    if (!done.error.empty()) {
-        log::info(server_log, "connection {} asked to run time at {}x: {}",
-                  std::to_underlying(hurry->first), hurry->second, done.error);
+    const auto [connection, scale] = *hurry;
+    if (!config_.debug.time_control) {
+        log::info(server_log, "connection {} asked to run time at {}x: time control is off",
+                  std::to_underlying(connection), scale);
         return;
     }
-    log::info(server_log, "connection {} set time to {}x", std::to_underlying(hurry->first),
-              done.clock.scale);
-    clock_scale_ = done.clock.scale;
+    if (scale == 0 || scale > fastest) {
+        log::info(server_log, "connection {} asked to run time at {}x: 1 to {} allowed",
+                  std::to_underlying(connection), scale, fastest);
+        return;
+    }
+    loop.set_scale(scale);
+    log::info(server_log, "connection {} set time to {}x", std::to_underlying(connection), scale);
+    clock_scale_ = scale;
     tell_clock();
 }
 
 template <server::Timer T, typename Now>
     requires std::same_as<std::invoke_result_t<Now&>, GameTime>
-Result<void> Server::run(T& timer, Now now, const std::atomic<bool>& stop) {
+Result<void> Server::run(T& timer, Now /*now*/, const std::atomic<bool>& stop) {
     server::TickLoop loop{timer, server::LoopConfig{.start = time_,
                                                     .first_tick = tick_,
                                                     .rate = config_.tick_rate,
@@ -407,12 +257,8 @@ Result<void> Server::run(T& timer, Now now, const std::atomic<bool>& stop) {
     MonotonicClock::time_point next_share = timer.now();
     // Between ticks, and in place of them while paused.
     const auto between = [&] {
-        serve_probe([&loop] { return detail::clock_of(loop); },
-                    [&](const probe::Control& control) { return steer(loop, control, now); });
         serve_players();
-        hurry_clock(loop, now);
-        tell_weather(loop.scale());
-        tell_woodlands();
+        hurry_clock(loop);
         if (const MonotonicClock::time_point at = timer.now(); at >= next_share) {
             share();
             next_share += protocol::snapshot_interval;
