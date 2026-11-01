@@ -5,6 +5,7 @@ add_library(hog_globe
     src/cell.cpp
     src/craters.cpp
     src/crust.cpp
+    src/detail.cpp
     src/erosion.cpp
     src/generator.cpp
     src/layers.cpp
@@ -31,6 +32,7 @@ hog_add_tests(hog_globe
     tests/caves_tests.cpp
     tests/cell_tests.cpp
     tests/craters_tests.cpp
+    tests/detail_tests.cpp
     tests/generator_tests.cpp
     tests/landform_survey_tests.cpp
     tests/layers_tests.cpp
