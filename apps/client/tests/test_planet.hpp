@@ -13,7 +13,8 @@
 
 namespace hog::client::testing {
 
-// The planet as the client flies over it, worn coarsely.
+// The planet as the client flies over it, worn coarsely, from the generator these tests' places
+// were found on whichever the config picks.
 inline const planet::PlanetConfig& planet() {
     static const planet::PlanetConfig config = [] {
         planet::PlanetConfig loaded =
@@ -21,6 +22,7 @@ inline const planet::PlanetConfig& planet() {
                                        "planet.toml")
                 .value();
         loaded.erosion_cell = ::hog::testing::coarse_erosion_cell;
+        loaded.generator = planet::Generator::Stamped;
         return loaded;
     }();
     return config;
