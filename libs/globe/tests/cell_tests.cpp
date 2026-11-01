@@ -142,3 +142,49 @@ TEST_CASE("four children tile their parent exactly", "[globe][cell]") {
         CHECK(std::abs(covered - hog::globe::solid_angle(cell)) < 1e-12);
     }
 }
+
+namespace {
+
+// A step that always lands somewhere.
+Cell straight_on(Cell cell, int di, int dj) {
+    const auto next = hog::globe::next_to(cell, di, dj);
+    REQUIRE(next);
+    return next.value_or(cell);
+}
+
+// Steps from a cell each land on a side of it, or diagonally on the corner of a square of four
+// whose others are the two straight steps, unless both steps leave its face.
+void check_steps(Cell cell) {
+    const hog::globe::CellNeighbors beside = hog::globe::sides(cell);
+    const hog::globe::CellNeighbors near = hog::globe::around(cell);
+    const std::uint32_t last = (1U << cell.level) - 1U;
+    for (const int di : {-1, 1}) {
+        for (const int dj : {-1, 1}) {
+            const Cell along_i = straight_on(cell, di, 0);
+            const Cell along_j = straight_on(cell, 0, dj);
+            CHECK(lists(beside, along_i));
+            CHECK(lists(beside, along_j));
+            const auto next = hog::globe::next_to(cell, di, dj);
+            const bool off_i = (di < 0 && cell.i == 0) || (di > 0 && cell.i == last);
+            const bool off_j = (dj < 0 && cell.j == 0) || (dj > 0 && cell.j == last);
+            REQUIRE(next.has_value() == !(off_i && off_j));
+            if (next) {
+                CHECK(lists(near, *next));
+                CHECK_FALSE(lists(beside, *next));
+                CHECK(lists(hog::globe::sides(along_i), *next));
+                CHECK(lists(hog::globe::sides(along_j), *next));
+            }
+        }
+    }
+    CHECK(hog::globe::next_to(cell, 0, 0) == cell);
+}
+
+} // namespace
+
+TEST_CASE("a step along i or j lands on a side, over the cube's edges", "[globe][cell]") {
+    for (const int level : {1, 3}) {
+        for (std::uint64_t index = 0; index < hog::globe::cells_at(level); ++index) {
+            check_steps(hog::globe::cell_at_index(level, index));
+        }
+    }
+}

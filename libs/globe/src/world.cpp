@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <map>
 #include <set>
+#include <span>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -62,6 +64,51 @@ BrickVoxels World::brick(BrickSite site) const {
         return voxels;
     }
     return generated(*generator_, site);
+}
+
+std::vector<Voxel> World::fill(std::span<const Cell> cells,
+                               std::span<const Generator::Column> columns, int bottom,
+                               int count) const {
+    const Layers& layers = generator_->layers();
+    HOG_ASSERT(cells.size() == columns.size(), "a column for each cell");
+    HOG_ASSERT(bottom >= 0 && count >= 0 && bottom + count <= layers.count, "layers out of range");
+    std::vector<Voxel> voxels(cells.size() * static_cast<std::size_t>(count));
+    std::unordered_map<std::uint64_t, BrickVoxels> held;
+    for (std::size_t k = 0; k < cells.size(); ++k) {
+        HOG_ASSERT(std::cmp_equal(cells[k].level, layers.level), "cells of the voxels' level");
+        const auto voxel_at = [&](int layer) -> Voxel& {
+            return voxels[(k * static_cast<std::size_t>(count)) +
+                          static_cast<std::size_t>(layer - bottom)];
+        };
+        for (int layer = bottom; layer < bottom + count;) {
+            const Site site{.face = cells[k].face,
+                            .i = cells[k].i,
+                            .j = cells[k].j,
+                            .layer = static_cast<std::uint32_t>(layer)};
+            const BrickSite in = brick_of(site);
+            const int end = std::min(bottom + count, static_cast<int>((in.layer + 1) * brick_side));
+            const Brick* stored = store_->brick(in);
+            if (stored == nullptr) {
+                for (; layer < end; ++layer) {
+                    voxel_at(layer) =
+                        generated_at(columns[k], layers, static_cast<std::uint32_t>(layer));
+                }
+                continue;
+            }
+            const auto [found, added] = held.try_emplace(brick_key(in));
+            if (added) {
+                stored->unpack(found->second);
+            }
+            for (; layer < end; ++layer) {
+                const Site at{.face = site.face,
+                              .i = site.i,
+                              .j = site.j,
+                              .layer = static_cast<std::uint32_t>(layer)};
+                voxel_at(layer) = found->second[static_cast<std::size_t>(index_in_brick(at))];
+            }
+        }
+    }
+    return voxels;
 }
 
 void World::write(BrickSite site, const BrickVoxels& voxels) {

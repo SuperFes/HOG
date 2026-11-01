@@ -8,8 +8,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <numbers>
+#include <span>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -165,10 +167,8 @@ std::vector<Generator::Column> Generator::columns(Cell corner, int side, double 
                    std::cmp_less_equal(corner.j + static_cast<std::uint32_t>(side),
                                        std::uint32_t{1} << corner.level),
                "the square must lie on one face");
-    const terms::Context context{.planet = &planet_, .derived = &derived_, .shape = &shape_};
-    const auto count = static_cast<std::size_t>(side) * static_cast<std::size_t>(side);
     std::vector<Cell> cells;
-    cells.reserve(count);
+    cells.reserve(static_cast<std::size_t>(side) * static_cast<std::size_t>(side));
     for (int j = 0; j < side; ++j) {
         for (int i = 0; i < side; ++i) {
             cells.push_back({.level = corner.level,
@@ -177,6 +177,16 @@ std::vector<Generator::Column> Generator::columns(Cell corner, int side, double 
                              .j = corner.j + static_cast<std::uint32_t>(j)});
         }
     }
+    return columns(cells, lod);
+}
+
+std::vector<Generator::Column> Generator::columns(std::span<const Cell> cells, double lod) const {
+    HOG_ASSERT(
+        std::ranges::all_of(
+            cells, [&](Cell cell) { return cell.is_valid() && cell.level == cells.front().level; }),
+        "the cells must be of one level");
+    const terms::Context context{.planet = &planet_, .derived = &derived_, .shape = &shape_};
+    const std::size_t count = cells.size();
     std::vector<terms::Column> found;
     found.reserve(count);
     std::unordered_map<std::uint64_t, double> heights;

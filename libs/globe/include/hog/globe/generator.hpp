@@ -6,6 +6,7 @@
 #include <hog/globe/planet.hpp>
 
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace hog::globe {
@@ -60,6 +61,8 @@ public:
     class Column {
     public:
         [[nodiscard]] Sample sample(double radius) const noexcept;
+        // Metres from the centre to the ground before caves open it; no solid stands above it.
+        [[nodiscard]] double ground() const noexcept { return ground_; }
 
     private:
         friend class Generator;
@@ -79,6 +82,8 @@ public:
     // share the work: cheaper than column() each, and a cell's column comes out the same in any
     // square. Voxels are filled from these.
     [[nodiscard]] std::vector<Column> columns(Cell corner, int side, double lod) const;
+    // The same through any cells of one level, in their order.
+    [[nodiscard]] std::vector<Column> columns(std::span<const Cell> cells, double lod) const;
 
     // Planet-wide constants found once from the knobs; what each means is the generator's own.
     struct Shape {

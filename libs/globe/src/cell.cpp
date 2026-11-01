@@ -7,6 +7,8 @@
 #include <cstddef>
 #include <cstdlib>
 #include <numbers>
+#include <optional>
+#include <utility>
 
 namespace hog::globe {
 namespace {
@@ -230,6 +232,27 @@ CellNeighbors around(Cell cell) {
         }
     }
     return found;
+}
+
+std::optional<Cell> next_to(Cell cell, int di, int dj) {
+    HOG_ASSERT(cell.is_valid() && std::abs(di) <= 1 && std::abs(dj) <= 1, "one step at most");
+    const std::int64_t n = std::int64_t{1} << cell.level;
+    const auto off = [&](std::uint32_t at, int by) {
+        return (by < 0 && at == 0) || (by > 0 && std::cmp_equal(at + 1, n));
+    };
+    if (off(cell.i, di) && off(cell.j, dj)) {
+        return std::nullopt;
+    }
+    const Frame frame = frame_of(cell.face);
+    Surface point = surface_of(cell);
+    // Along the face's own axes, which stay in the next face's plane along the edge crossed.
+    if (di != 0) {
+        point = step(point, frame.u, di, n);
+    }
+    if (dj != 0) {
+        point = step(point, frame.v, dj, n);
+    }
+    return cell_of(point, cell.level);
 }
 
 std::array<Cell, 4> children(Cell cell) {

@@ -231,6 +231,46 @@ TEST_CASE("a ball dug across a cube's edge opens on both faces", "[globe][world]
     CHECK(faces == std::set<int>{0, 1});
 }
 
+TEST_CASE("columns filled together are the world voxel by voxel, dug or not", "[globe][world]") {
+    VoxelStore store{earth().layers()};
+    World world{earth(), store};
+    const hog::globe::Layers& layers = earth().layers();
+    const DVec3 edge = glm::normalize(DVec3{1.0, 1.0, 0.3});
+    const Ground ground = ground_at(earth(), edge);
+    hog::globe::dig(world, edge * ground.radius, 2.0);
+    // A row of cells across the cube's edge, through the hole.
+    const hog::globe::Cell middle = hog::globe::cell_under(edge, layers.level);
+    std::vector<hog::globe::Cell> cells{middle};
+    for (int step = 0; step < 6; ++step) {
+        const auto next = hog::globe::next_to(cells.back(), 1, 0);
+        REQUIRE(next);
+        cells.push_back(next.value_or(middle));
+    }
+    const std::vector<Generator::Column> columns = earth().columns(cells, 0.5);
+    const int bottom = layers.layer_at(ground.radius) - 12;
+    constexpr int count = 24;
+    const std::vector<Voxel> voxels = world.fill(cells, columns, bottom, count);
+    const auto across = static_cast<std::size_t>(count);
+    REQUIRE(voxels.size() == cells.size() * across);
+    std::set<int> faces;
+    bool dug = false;
+    for (std::size_t k = 0; k < cells.size(); ++k) {
+        faces.insert(cells[k].face);
+        for (int layer = 0; layer < count; ++layer) {
+            const Site site{.face = cells[k].face,
+                            .i = cells[k].i,
+                            .j = cells[k].j,
+                            .layer = static_cast<std::uint32_t>(bottom + layer)};
+            const Voxel voxel = voxels[(k * across) + static_cast<std::size_t>(layer)];
+            CHECK(voxel == world.at(site));
+            dug = dug || (store.at(site) && voxel.distance > 0 &&
+                          glm::length(middle_of(site, layers)) < ground.radius);
+        }
+    }
+    CHECK(faces.size() == 2);
+    CHECK(dug);
+}
+
 TEST_CASE("bricks fill from the generator", "[.bench][globe][world]") {
     for (const char* name : {"earth", "mars", "venus", "moon"}) {
         const Generator generator{hog::globe::preset(name).value_or(hog::globe::Planet{})};

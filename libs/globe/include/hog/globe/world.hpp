@@ -8,6 +8,8 @@
 #include <hog/globe/voxel_store.hpp>
 
 #include <array>
+#include <span>
+#include <vector>
 
 namespace hog::globe {
 
@@ -27,6 +29,12 @@ public:
 
     [[nodiscard]] Voxel at(Site site) const;
     [[nodiscard]] BrickVoxels brick(BrickSite site) const;
+
+    // The voxels `count` layers up from `bottom` through each of `cells`, as they now are, a
+    // column after another; `columns` are the generator's through them, at the voxels' lod.
+    [[nodiscard]] std::vector<Voxel> fill(std::span<const Cell> cells,
+                                          std::span<const Generator::Column> columns, int bottom,
+                                          int count) const;
 
     // The brick's voxels as they now are; held only if they differ from what's generated.
     void write(BrickSite site, const BrickVoxels& voxels);
