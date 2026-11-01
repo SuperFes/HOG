@@ -113,7 +113,13 @@ std::vector<Message> examples() {
             Clock{.scale = 86'400},
             woodlands(0),
             woodlands(2),
-            Woodlands{.level = 0, .cells = std::vector<CellWoodland>(6)}};
+            Woodlands{.level = 0, .cells = std::vector<CellWoodland>(6)},
+            Dug{.centre = far_out, .radius = 1},
+            Dug{.centre = far_out, .radius = most_edit},
+            Built{.centre = far_out, .radius = 2'500, .material = 9},
+            Bricks{},
+            Bricks{.bricks = {{.key = 0xFFFF'FFFF'FFFF'FFF0, .bytes = bytes({1, 2, 3})},
+                              {.key = 1, .bytes = {}}}}};
 }
 
 // A snapshot at tick 10 with no baseline and nothing entering, then `rest`.
@@ -174,7 +180,7 @@ TEST_CASE("a hurry or a clock to no time at all is refused", "[protocol]") {
 }
 
 TEST_CASE("unknown kinds and refusals, and tokens too long, are refused", "[protocol]") {
-    CHECK(decode(bytes({14, 0})).error().code == ErrorCode::Unsupported);
+    CHECK(decode(bytes({17, 0})).error().code == ErrorCode::Unsupported);
     // A placing at the centre in a stance after flying.
     CHECK(decode(bytes({13, 0, 0, 0, 0, 2, 0, 0, 0, 0})).error().code == ErrorCode::Unsupported);
     CHECK(decode(bytes({3, 0, 1, 0, 0, 0, 200, 0, 0})).error().code == ErrorCode::Parse);
@@ -412,4 +418,24 @@ TEST_CASE("chat with control characters is refused", "[protocol]") {
         CHECK(decode(encode(Said{.from = "Ada", .text = text})).error().code == ErrorCode::Parse);
         CHECK(decode(encode(Said{.from = text, .text = "fine"})).error().code == ErrorCode::Parse);
     }
+}
+
+TEST_CASE("an edit of no width or too wide, and bricks too many or too big, are refused",
+          "[protocol]") {
+    auto none = encode(Dug{.centre = far_out, .radius = 1});
+    none[none.size() - 4] = std::byte{0};
+    CHECK(decode(none).error().code == ErrorCode::OutOfRange);
+    auto wide = encode(Built{.centre = far_out, .radius = most_edit, .material = 1});
+    wide[wide.size() - 5] = std::byte{static_cast<std::uint8_t>((most_edit + 1) & 0xFFU)};
+    wide[wide.size() - 4] = std::byte{static_cast<std::uint8_t>((most_edit + 1) >> 8U)};
+    CHECK(decode(wide).error().code == ErrorCode::OutOfRange);
+    // Bricks: a count over the most, then one brick claiming more bytes than allowed.
+    CHECK(decode(bytes({16, 0, static_cast<int>(most_bricks + 1), 0})).error().code ==
+          ErrorCode::OutOfRange);
+    auto big = bytes({16, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0});
+    const auto length = static_cast<std::uint16_t>(most_brick + 1);
+    big.push_back(static_cast<std::byte>(length & 0xFFU));
+    big.push_back(static_cast<std::byte>(length >> 8U));
+    big.resize(big.size() + length);
+    CHECK(decode(big).error().code == ErrorCode::OutOfRange);
 }

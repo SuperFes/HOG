@@ -18,7 +18,7 @@
 namespace hog::protocol {
 
 // Raised whenever any message changes; the two sides must speak the same one.
-inline constexpr std::uint32_t version = 12;
+inline constexpr std::uint32_t version = 13;
 // The longest connect token a client may present; more is a broken or hostile client.
 inline constexpr std::size_t most_token = 1'024;
 // The longest line of text a refusal carries.
@@ -249,6 +249,47 @@ struct Clock {
     friend bool operator==(const Clock&, const Clock&) = default;
 };
 
+// The widest ball a player may dig or build at once, in millimetres.
+inline constexpr std::uint32_t most_edit = 8'000;
+// Bytes a brick's coding may take, and bricks a message may carry: well within what's sent.
+inline constexpr std::size_t most_brick = std::size_t{12} * 1024;
+inline constexpr std::size_t most_bricks = 40;
+
+// Client to server: take shaped matter out of a ball at `centre`, millimetres from the planet's
+// centre, `radius` millimetres across, over most_edit refused. The server obliges where the
+// player may, and sends back the bricks it changed.
+struct Dug {
+    Millimetres centre{0};
+    std::uint32_t radius = 0;
+
+    friend bool operator==(const Dug&, const Dug&) = default;
+};
+
+// Client to server: build a ball of `material`, as hog::globe numbers them, the same way.
+struct Built {
+    Millimetres centre{0};
+    std::uint32_t radius = 0;
+    std::uint8_t material = 0;
+
+    friend bool operator==(const Built&, const Built&) = default;
+};
+
+// A brick of the voxel world as the store codes it, by its key.
+struct SentBrick {
+    std::uint64_t key = 0;
+    std::vector<std::byte> bytes; // at most most_brick
+
+    friend bool operator==(const SentBrick&, const SentBrick&) = default;
+};
+
+// Server to client: bricks changed from what the generator says, to hold in their place, as
+// many as fit a message at a time; sent bulk, so they never hold up moves.
+struct Bricks {
+    std::vector<SentBrick> bricks; // at most most_bricks
+
+    friend bool operator==(const Bricks&, const Bricks&) = default;
+};
+
 // How many cells the weather at `level` has.
 [[nodiscard]] constexpr std::size_t weather_cells(std::uint8_t level) noexcept {
     return std::size_t{6} << (2U * level);
@@ -260,12 +301,13 @@ struct Clock {
 [[nodiscard]] CellWoodland as_sent(const CellWoodland& cell) noexcept;
 
 using Message = std::variant<Hello, Welcome, Refused, Moved, Ack, Snapshot, Corrected, Weather,
-                             Said, Hurry, Clock, Woodlands, Placed>;
+                             Said, Hurry, Clock, Woodlands, Placed, Dug, Built, Bricks>;
 
 [[nodiscard]] std::vector<std::byte> encode(const Message& message);
 // Fails on an unknown kind, a message cut short or with bytes left over, one too long, a snapshot
 // out of order, weather or woods too fine or with too few or many cells, chat with control
-// characters, or a stance it doesn't know.
+// characters, a stance it doesn't know, an edit of no width or too wide, or bricks too many or
+// too big.
 [[nodiscard]] Result<Message> decode(std::span<const std::byte> bytes);
 
 // A refusal as a person reads it, on a client speaking `own` version.

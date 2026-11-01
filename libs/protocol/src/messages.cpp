@@ -33,6 +33,9 @@ enum class Kind : std::uint16_t {
     Clock = 11,
     Woodlands = 12,
     Placed = 13,
+    Dug = 14,
+    Built = 15,
+    Bricks = 16,
 }; // NOLINT(performance-enum-size)
 
 // Which of an entity's changes follow its id in a snapshot.
@@ -517,6 +520,53 @@ void write_snapshot(ByteWriter& out, const Snapshot& snapshot) {
     }
 }
 
+// A ball to dig or build: its centre and a radius of some width, at most most_edit.
+struct Ball {
+    Millimetres centre;
+    std::uint32_t radius;
+};
+
+[[nodiscard]] Result<Ball> read_ball(ByteReader& in, std::string_view what) {
+    const auto centre = read_position(in, what);
+    if (!centre) {
+        return std::unexpected(centre.error());
+    }
+    const auto radius = read<std::uint32_t>(in, what);
+    if (!radius) {
+        return std::unexpected(radius.error());
+    }
+    if (*radius == 0 || *radius > most_edit) {
+        return make_error(ErrorCode::OutOfRange, std::format("{} {} mm across; 1 to {} allowed",
+                                                             what, *radius, most_edit));
+    }
+    return Ball{.centre = *centre, .radius = *radius};
+}
+
+[[nodiscard]] Result<Message> read_bricks(ByteReader& in) {
+    const auto count = read<std::uint16_t>(in, "bricks");
+    if (!count) {
+        return std::unexpected(count.error());
+    }
+    if (*count > most_bricks) {
+        return make_error(ErrorCode::OutOfRange,
+                          std::format("{} bricks in a message; {} allowed", *count, most_bricks));
+    }
+    Bricks bricks;
+    bricks.bricks.reserve(*count);
+    for (std::uint16_t k = 0; k < *count; ++k) {
+        const auto key = read<std::uint64_t>(in, "a brick");
+        if (!key) {
+            return std::unexpected(key.error());
+        }
+        const auto bytes = read_sized(in, most_brick, "a brick");
+        if (!bytes) {
+            return std::unexpected(bytes.error());
+        }
+        bricks.bricks.push_back({.key = *key, .bytes = {bytes->begin(), bytes->end()}});
+    }
+    return finished(in, std::move(bricks));
+}
+
 [[nodiscard]] Result<Message> read_said(ByteReader& in) {
     const auto from = read_sized(in, most_name, "chat's speaker");
     if (!from) {
@@ -665,6 +715,24 @@ std::vector<std::byte> encode(const Message& message) {
                 out.write(static_cast<std::uint16_t>(Kind::Placed));
                 write_position(out, body.at);
                 write_stance(out, body.stance, body.facing);
+            } else if constexpr (std::is_same_v<Body, Dug>) {
+                out.write(static_cast<std::uint16_t>(Kind::Dug));
+                write_position(out, body.centre);
+                out.write(body.radius);
+            } else if constexpr (std::is_same_v<Body, Built>) {
+                out.write(static_cast<std::uint16_t>(Kind::Built));
+                write_position(out, body.centre);
+                out.write(body.radius);
+                out.write(body.material);
+            } else if constexpr (std::is_same_v<Body, Bricks>) {
+                HOG_ASSERT(body.bricks.size() <= most_bricks, "too many bricks to send at once");
+                out.write(static_cast<std::uint16_t>(Kind::Bricks));
+                out.write(static_cast<std::uint16_t>(body.bricks.size()));
+                for (const SentBrick& brick : body.bricks) {
+                    HOG_ASSERT(brick.bytes.size() <= most_brick, "a brick too big to send");
+                    out.write(brick.key);
+                    write_sized(out, brick.bytes);
+                }
             } else if constexpr (std::is_same_v<Body, Ack>) {
                 out.write(static_cast<std::uint16_t>(Kind::Ack));
                 out.write(body.tick);
@@ -773,6 +841,27 @@ Result<Message> decode(std::span<const std::byte> bytes) {
         return read_weather(in);
     case Kind::Woodlands:
         return read_woodlands(in);
+    case Kind::Dug: {
+        const auto ball = read_ball(in, "a digging");
+        if (!ball) {
+            return std::unexpected(ball.error());
+        }
+        return finished(in, Dug{.centre = ball->centre, .radius = ball->radius});
+    }
+    case Kind::Built: {
+        const auto ball = read_ball(in, "a building");
+        if (!ball) {
+            return std::unexpected(ball.error());
+        }
+        const auto material = read<std::uint8_t>(in, "a building");
+        if (!material) {
+            return std::unexpected(material.error());
+        }
+        return finished(
+            in, Built{.centre = ball->centre, .radius = ball->radius, .material = *material});
+    }
+    case Kind::Bricks:
+        return read_bricks(in);
     case Kind::Said:
         return read_said(in);
     case Kind::Hurry: {
