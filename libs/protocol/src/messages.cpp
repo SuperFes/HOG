@@ -542,6 +542,27 @@ struct Ball {
     return Ball{.centre = *centre, .radius = *radius};
 }
 
+[[nodiscard]] Result<Message> read_dug(ByteReader& in) {
+    const auto ball = read_ball(in, "a digging");
+    if (!ball) {
+        return std::unexpected(ball.error());
+    }
+    return finished(in, Dug{.centre = ball->centre, .radius = ball->radius});
+}
+
+[[nodiscard]] Result<Message> read_built(ByteReader& in) {
+    const auto ball = read_ball(in, "a building");
+    if (!ball) {
+        return std::unexpected(ball.error());
+    }
+    const auto material = read<std::uint8_t>(in, "a building");
+    if (!material) {
+        return std::unexpected(material.error());
+    }
+    return finished(in,
+                    Built{.centre = ball->centre, .radius = ball->radius, .material = *material});
+}
+
 [[nodiscard]] Result<Message> read_bricks(ByteReader& in) {
     const auto count = read<std::uint16_t>(in, "bricks");
     if (!count) {
@@ -841,25 +862,10 @@ Result<Message> decode(std::span<const std::byte> bytes) {
         return read_weather(in);
     case Kind::Woodlands:
         return read_woodlands(in);
-    case Kind::Dug: {
-        const auto ball = read_ball(in, "a digging");
-        if (!ball) {
-            return std::unexpected(ball.error());
-        }
-        return finished(in, Dug{.centre = ball->centre, .radius = ball->radius});
-    }
-    case Kind::Built: {
-        const auto ball = read_ball(in, "a building");
-        if (!ball) {
-            return std::unexpected(ball.error());
-        }
-        const auto material = read<std::uint8_t>(in, "a building");
-        if (!material) {
-            return std::unexpected(material.error());
-        }
-        return finished(
-            in, Built{.centre = ball->centre, .radius = ball->radius, .material = *material});
-    }
+    case Kind::Dug:
+        return read_dug(in);
+    case Kind::Built:
+        return read_built(in);
     case Kind::Bricks:
         return read_bricks(in);
     case Kind::Said:
