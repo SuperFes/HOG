@@ -20,9 +20,10 @@ enum class Material : std::uint8_t {
     Basalt,
     Mantle, // peridotite
     Iron,
+    Anorthosite, // the Moon's pale highland rock
 };
 
-inline constexpr int material_count = 13;
+inline constexpr int material_count = 14;
 
 // Only what changes how the world forms, at the surface's pressure.
 struct Properties {

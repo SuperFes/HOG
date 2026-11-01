@@ -22,6 +22,10 @@ const Properties& properties(Material material) {
         {.density = 3000.0, .melts = 1450.0, .strength = 1.5e8, .heat_capacity = 840.0}, // basalt
         {.density = 3300.0, .melts = 1400.0, .strength = 1e8, .heat_capacity = 1000.0},  // mantle
         {.density = 7870.0, .melts = 1811.0, .strength = 2e8, .heat_capacity = 450.0},   // iron
+        {.density = 2800.0,
+         .melts = 1700.0,
+         .strength = 1.3e8,
+         .heat_capacity = 800.0}, // anorthosite
     }};
     return all[static_cast<std::size_t>(material)];
 }
