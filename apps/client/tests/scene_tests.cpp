@@ -1227,7 +1227,19 @@ TEST_CASE("the globe at reported spots, to look at", "[.look]") {
                                   .longitude = 164.090755,
                                   .altitude = 805.0,
                                   .heading = -149.1,
-                                  .pitch = -9.7}}) {
+                                  .pitch = -9.7},
+                             Spot{.name = "trench",
+                                  .latitude = -29.298708,
+                                  .longitude = -172.731839,
+                                  .altitude = 1515.0,
+                                  .heading = 47.9,
+                                  .pitch = -7.9},
+                             Spot{.name = "beds",
+                                  .latitude = -29.243655,
+                                  .longitude = -172.852987,
+                                  .altitude = 1526.0,
+                                  .heading = 14.4,
+                                  .pitch = -9.9}}) {
         const hog::DVec3 up =
             hog::planet::direction_at(spot.latitude * degree, spot.longitude * degree);
         const hog::client::Flight flight = hog::client::turned_to(

@@ -184,6 +184,12 @@ struct Ground {
         return inside(box, a) != inside(box, b);
     }
     static double value(const Box& box, Place place) { return metres(box.at(place).distance); }
+    // The surface's normal where it crosses from `a` to `b`, `t` of the way: as the voxel nearer
+    // it holds it, so at a crease each crossing keeps its own side's; none if neither holds one.
+    static DVec3 normal(const Box& box, Place a, Place b, double t) {
+        const DVec3 near = unpacked_normal(box.at(t < 0.5 ? a : b).normal);
+        return glm::length(near) > 0.0 ? near : unpacked_normal(box.at(t < 0.5 ? b : a).normal);
+    }
     // The solid nearest the surface.
     static Material material(const Box& box, std::span<const Place> corners) {
         const Voxel* nearest = nullptr;
@@ -213,6 +219,10 @@ struct Liquid {
                                  ? 1.0
                                  : voxel.liquid_amount / double{Voxel::full};
         return 0.5 - std::min(share, 1.0);
+    }
+    // Not held: the field's own gradient serves.
+    static DVec3 normal(const Box& /*box*/, Place /*a*/, Place /*b*/, double /*t*/) {
+        return DVec3{0.0};
     }
     static Material material(const Box& box, std::span<const Place> corners) {
         for (const Place corner : corners) {
@@ -281,22 +291,23 @@ private:
         return std::abs(glm::determinant(edges)) > 0.0 ? glm::inverse(edges) * rise : DVec3{0.0};
     }
 
-    // The cube's vertex, if the surface passes through it and it's whole. It's placed by dual
-    // contouring: where the planes tangent to the surface at its crossings of the cube's edges
-    // meet, so creases and corners keep their edge; it faces as the field's gradient does there.
-    void vertex(Place at) {
-        std::array<Place, 8> corners{};
-        std::array<double, 8> values{};
-        for (std::size_t k = 0; k < 8; ++k) {
-            corners.at(k) = corner_of(at, k);
-            if (!box_->holds(corners.at(k))) {
-                return;
-            }
-            values.at(k) = Surface::value(*box_, corners.at(k));
-        }
+    // Where the surface crosses a cube's edges, in the cube's terms, and its normals there.
+    struct Crossings {
         std::array<DVec3, 12> points{};
         std::array<DVec3, 12> normals{};
-        std::size_t crossings = 0;
+        DVec3 held{0.0}; // the normals held at them, summed; none if none are
+        std::size_t count = 0;
+    };
+
+    [[nodiscard]] Crossings crossings_of(const std::array<Place, 8>& corners,
+                                         const std::array<double, 8>& values) const {
+        // The cube's edges from its first corner, to take normals into the cube's terms.
+        std::array<DVec3, 3> edges{};
+        for (std::size_t axis = 0; axis < 3; ++axis) {
+            edges.at(axis) =
+                box_->point(corners.at(std::size_t{1} << axis)) - box_->point(corners.at(0));
+        }
+        Crossings found;
         for (std::size_t axis = 0; axis < 3; ++axis) {
             const std::size_t step = std::size_t{1} << axis;
             for (std::size_t k = 0; k < 8; ++k) {
@@ -310,26 +321,56 @@ private:
                 const double t = va != vb ? std::clamp(va / (va - vb), 0.0, 1.0) : 0.5;
                 DVec3 local = within(k);
                 local[static_cast<glm::length_t>(axis)] = t;
-                points.at(crossings) = local;
-                // The cube's own field, so neighbouring chunks find the same vertex.
-                const DVec3 slope = slope_at(values, local);
-                normals.at(crossings) =
+                found.points.at(found.count) = local;
+                // The normal held where it crosses, else the cube's own field's; either way from
+                // the cube alone, so neighbouring chunks find the same vertex.
+                const DVec3 normal = Surface::normal(*box_, corners.at(k), corners.at(k | step), t);
+                found.held += normal;
+                DVec3 slope = slope_at(values, local);
+                if (glm::length(normal) > 0.0) {
+                    for (std::size_t e = 0; e < 3; ++e) {
+                        slope[static_cast<glm::length_t>(e)] = glm::dot(normal, edges.at(e));
+                    }
+                }
+                found.normals.at(found.count) =
                     glm::length(slope) > 0.0 ? glm::normalize(slope) : DVec3{0.0};
-                ++crossings;
+                ++found.count;
             }
         }
-        if (crossings == 0) {
+        return found;
+    }
+
+    // The cube's vertex, if the surface passes through it and it's whole. It's placed by dual
+    // contouring: where the planes tangent to the surface at its crossings of the cube's edges
+    // meet, so creases and corners keep their edge.
+    void vertex(Place at) {
+        std::array<Place, 8> corners{};
+        std::array<double, 8> values{};
+        for (std::size_t k = 0; k < 8; ++k) {
+            corners.at(k) = corner_of(at, k);
+            if (!box_->holds(corners.at(k))) {
+                return;
+            }
+            values.at(k) = Surface::value(*box_, corners.at(k));
+        }
+        const Crossings found = crossings_of(corners, values);
+        if (found.count == 0) {
             return;
         }
-        const DVec3 local = glm::clamp(nearest_to_planes(std::span{points}.first(crossings),
-                                                         std::span{normals}.first(crossings)),
-                                       DVec3{0.0}, DVec3{1.0});
+        const DVec3 local =
+            glm::clamp(nearest_to_planes(std::span{found.points}.first(found.count),
+                                         std::span{found.normals}.first(found.count)),
+                       DVec3{0.0}, DVec3{1.0});
         DVec3 position{0.0};
         DVec3 normal{0.0};
         for (std::size_t k = 0; k < 8; ++k) {
             const double weight = weight_of(k, local);
             position += weight * box_->point(corners.at(k));
             normal += weight * gradient(corners.at(k));
+        }
+        // Shaded by the normals held, where they are.
+        if (glm::length(found.held) > 0.0) {
+            normal = found.held;
         }
         if (!(glm::length(normal) > 0.0)) {
             normal = position + mesh_->origin;

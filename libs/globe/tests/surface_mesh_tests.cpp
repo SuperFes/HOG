@@ -230,6 +230,43 @@ TEST_CASE("a ball dug in the ground shows as a hollow", "[globe][surface]") {
     CHECK(deepest() < ground - 2.5);
 }
 
+TEST_CASE("a hollow dug in the ground keeps a sharp lip", "[globe][surface]") {
+    VoxelStore store{earth().layers()};
+    World world{earth(), store};
+    const DVec3 up = ground_between(earth(), 50.0, 400.0);
+    const double lod = hog::globe::voxel_lod(earth());
+    const DVec3 centre = up * hog::globe::ground_below(earth(), up, lod).value_or(0.0);
+    constexpr double radius = 3.0;
+    hog::globe::dig(world, centre, radius);
+    const SurfaceMesh mesh =
+        mesh_of(world, block_round(hog::globe::chunk_under(up, earth().layers())));
+    // How far each vertex lies off the ground with the ball taken out of it, near where the two
+    // meet: a crease all the way round.
+    double worst = 0.0;
+    double total = 0.0;
+    int near_lip = 0;
+    for (std::uint32_t v = 0; v < mesh.vertices.size(); ++v) {
+        const DVec3 point = world_point(mesh, v);
+        const DVec3 out = point - centre;
+        const double height = glm::dot(out, up);
+        const double across = glm::length(out - (height * up));
+        if (std::hypot(across - radius, height) > 0.75) {
+            continue;
+        }
+        const double ground =
+            glm::length(point) -
+            hog::globe::ground_below(earth(), glm::normalize(point), lod).value_or(0.0);
+        const double off = std::abs(std::max(ground, radius - glm::length(out)));
+        worst = std::max(worst, off);
+        total += off;
+        ++near_lip;
+    }
+    REQUIRE(near_lip > 50);
+    // Surface nets round it off by 16 cm; with normals estimated from distances, 13 cm.
+    CHECK(worst < 0.1);
+    CHECK(total / near_lip < 0.04);
+}
+
 TEST_CASE("the sea shows as a level surface over the seabed", "[globe][surface]") {
     VoxelStore store{earth().layers()};
     const World world{earth(), store};
