@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <limits>
 #include <numbers>
 
 using hog::globe::Planet;
@@ -129,4 +130,69 @@ TEST_CASE("the shell, the crust's heat and widths follow from the knobs", "[glob
     Planet wide = earth;
     wide.lateral_scale = 3.0;
     CHECK(std::abs(hog::globe::derive(wide).lateral - (3.0 * derived.lateral)) < 1e-12);
+}
+
+TEST_CASE("every preset is a planet that can be", "[globe][planet]") {
+    for (const char* name : {"earth", "mars", "venus", "moon"}) {
+        CHECK(hog::globe::validate(named(name)).has_value());
+    }
+    Planet sunk = named("earth");
+    sunk.high.rock = hog::globe::Material::Iron;
+    CHECK_FALSE(hog::globe::validate(sunk).has_value());
+    Planet hollow = named("earth");
+    hollow.floor_depth = hollow.radius;
+    CHECK_FALSE(hog::globe::validate(hollow).has_value());
+    Planet unknown = named("earth");
+    unknown.gravity = std::numeric_limits<double>::quiet_NaN();
+    CHECK_FALSE(hog::globe::validate(unknown).has_value());
+}
+
+TEST_CASE("a planet file starts from a preset and changes knobs by name", "[globe][planet]") {
+    const auto mars = hog::globe::parse_planet(R"(
+[globe]
+preset = "mars"
+seed = 7
+gravity = 4
+sea_fraction = 0.2
+volatiles = "methane"
+regime = "plates"
+
+[globe.high]
+thickness = 60_000
+)");
+    REQUIRE(mars.has_value());
+    const Planet& planet = mars.value();
+    CHECK(planet.seed == 7);
+    CHECK(planet.gravity == 4.0);
+    CHECK(planet.sea_fraction == 0.2);
+    CHECK(planet.volatiles == Volatile::Methane);
+    CHECK(planet.regime == hog::globe::Regime::Plates);
+    CHECK(planet.high.thickness == 60'000.0);
+    CHECK(planet.high.rock == named("mars").high.rock);
+    CHECK(planet.pressure == named("mars").pressure);
+
+    const auto earth = hog::globe::parse_planet("[globe]\n");
+    REQUIRE(earth.has_value());
+    CHECK(earth.value().pressure == Planet{}.pressure);
+}
+
+TEST_CASE("a planet file refuses what it doesn't know or can't be", "[globe][planet]") {
+    for (const char* text : {
+             "",
+             "[globe]\npreset = \"pluto\"\n",
+             "[globe]\ngravty = 3\n",
+             "[globe]\ngravity = \"high\"\n",
+             "[globe]\ngravity = -1\n",
+             "[globe]\nseed = -1\n",
+             "[globe]\nregime = \"wobbly\"\n",
+             "[globe.high]\nrock = \"iron\"\n",
+             "[globe.low]\ndepth = 3\n",
+             "[globe]\nhigh = 3\n",
+             "[globe\n",
+         }) {
+        CAPTURE(text);
+        CHECK_FALSE(hog::globe::parse_planet(text).has_value());
+    }
+    CHECK(hog::globe::parse_planet("[globe\n").error().code == hog::ErrorCode::Parse);
+    CHECK_FALSE(hog::globe::load_planet("no/such/planet.toml").has_value());
 }

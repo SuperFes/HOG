@@ -1,8 +1,12 @@
 #include <hog/globe/planet.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <format>
+#include <limits>
 #include <numbers>
+#include <utility>
 
 namespace hog::globe {
 namespace {
@@ -46,6 +50,19 @@ std::optional<Phase> phase_of(Volatile volatiles) {
                      .latent_heat = 8'500.0};
     }
     return std::nullopt;
+}
+
+std::unexpected<Error> invalid(std::string_view message) {
+    return make_error(ErrorCode::InvalidArgument, std::string{message});
+}
+
+// NaN fails every comparison, so these reject it too.
+bool positive(double value) {
+    return value > 0.0 && std::isfinite(value);
+}
+
+bool within(double value, double low, double high) {
+    return value >= low && value <= high;
 }
 
 Planet mars() {
@@ -176,6 +193,46 @@ std::optional<Planet> preset(std::string_view name) {
         return moon();
     }
     return std::nullopt;
+}
+
+Result<void> validate(const Planet& planet) {
+    const auto floats = [&](const Crust& crust) {
+        return crust.thickness >= 0.0 && std::isfinite(crust.thickness) &&
+               properties(crust.rock).density < planet.mantle_density;
+    };
+    const double shell = planet.floor_depth + planet.sky_height;
+    const auto checks = std::to_array<std::pair<bool, std::string_view>>({
+        {positive(planet.radius), "radius must be positive"},
+        {positive(planet.gravity), "gravity must be positive"},
+        {positive(planet.day), "day must be positive"},
+        {within(planet.tilt, 0.0, 180.0), "tilt must be 0 to 180 degrees"},
+        {positive(planet.lateral_scale), "lateral_scale must be positive"},
+        {positive(planet.voxel), "voxel must be positive"},
+        {positive(planet.floor_depth) && planet.floor_depth < planet.radius,
+         "floor_depth must be positive and less than the radius"},
+        {positive(planet.sky_height), "sky_height must be positive"},
+        {planet.voxel <= std::min(planet.floor_depth, planet.sky_height) &&
+             shell / planet.voxel < std::numeric_limits<int>::max(),
+         "voxel must fit the shell, and the shell not hold too many layers"},
+        {positive(planet.mantle_density), "mantle_density must be positive"},
+        {floats(planet.high) && floats(planet.low),
+         "crusts must have a thickness and be lighter than the mantle"},
+        {within(planet.high_fraction, 0.0, 1.0), "high_fraction must be 0 to 1"},
+        {within(planet.heat_flow, 0.0, 1e3), "heat_flow must be 0 to 1000 W/m²"},
+        {within(planet.surface_age, 0.0, 4.6), "surface_age must be 0 to 4.6 Gyr"},
+        {within(planet.impact_flux, 0.0, 1e3), "impact_flux must be 0 to 1000"},
+        {within(planet.pressure, 0.0, 1e9), "pressure must be 0 to 1e9 Pa"},
+        {positive(planet.equator_temperature) && positive(planet.pole_temperature),
+         "temperatures must be positive kelvin"},
+        {planet.sea_fraction >= 0.0 && planet.sea_fraction < 1.0,
+         "sea_fraction must be at least 0 and below 1"},
+    });
+    for (const auto& [holds, message] : checks) {
+        if (!holds) {
+            return invalid(std::format("globe.{}", message));
+        }
+    }
+    return {};
 }
 
 } // namespace hog::globe

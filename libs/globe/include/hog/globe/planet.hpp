@@ -1,9 +1,11 @@
 #pragma once
 
+#include <hog/core/result.hpp>
 #include <hog/globe/layers.hpp>
 #include <hog/globe/material.hpp>
 
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <string_view>
 
@@ -89,5 +91,13 @@ struct Derived {
 
 // "earth", "mars", "venus" or "moon".
 [[nodiscard]] std::optional<Planet> preset(std::string_view name);
+
+// Whether every knob is one a planet can have.
+[[nodiscard]] Result<void> validate(const Planet& planet);
+
+// A `[globe]` table: an optional `preset`, then any knobs by name to change from it, the crusts as
+// `[globe.high]` and `[globe.low]`.
+[[nodiscard]] Result<Planet> parse_planet(std::string_view text);
+[[nodiscard]] Result<Planet> load_planet(const std::filesystem::path& path);
 
 } // namespace hog::globe
