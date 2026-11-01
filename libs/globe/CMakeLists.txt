@@ -32,6 +32,7 @@ hog_add_tests(hog_globe
     tests/cell_tests.cpp
     tests/craters_tests.cpp
     tests/generator_tests.cpp
+    tests/landform_survey_tests.cpp
     tests/layers_tests.cpp
     tests/maths_tests.cpp
     tests/noise_tests.cpp

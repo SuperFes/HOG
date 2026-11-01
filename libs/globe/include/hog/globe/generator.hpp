@@ -98,6 +98,7 @@ public:
         double lowest = 0.0; // the lowest ground surveyed, metres over the radius
         bool sea = false;
     };
+    [[nodiscard]] const Shape& shape() const noexcept { return shape_; }
 
 private:
     // `slope` is `tilt`'s length, as found along with it.
