@@ -82,8 +82,10 @@ Detail falls off with distance without cracks, and materials blend by triplanar 
 
 What v1 draws:
 - **Chunks** of 32 columns square, each meshed by surface nets from its own voxels and one more all round, taken over the cube's edges from the next face. Each edge between voxels is drawn by one chunk: the one holding its lower end, or across the cube's edges, the lower face. So chunks meet without gaps, but for a column-wide one at each of the cube's 8 corners, where three columns meet.
-- **Two surfaces:** shaped matter against open space, and liquid against air. Shaped matter counts as full of liquid, so the sea's surface runs into the ground instead of wrapping it. A voxel's material says which side it's on, as a distance under half a millimetre rounds to none.
-- **Where:** from 16 m under a chunk's lowest ground to over its highest, around the sea's level apart from that, and through held changes next to either.
+- **Two surfaces:** shaped matter against open space, and liquid against air. A voxel's material says which side it's on, as a distance under half a millimetre rounds to none. The liquid's surface runs on two columns under the shore, so the ground, not a voxel's step, draws the waterline.
+- **Vertices** start at the mean of where the surface crosses a cube's edges and are drawn onto the surface between its corners' values; normals blend the field's gradient at the corners, so shading runs smooth across cubes and chunks.
+- **Detail:** voxels are generated with nothing finer than two of them across, as finer detail would alias into steps a voxel apart.
+- **Where:** from 16 m under a chunk's lowest ground to over its highest, around the sea's level apart from that, and through held changes next to either. Caves still open at the foot are followed down, as far as 64 m under the lowest ground.
 - **The client:** `--globe`, or `--globe-planet` with a preset or a planet file, meshes the chunks within 160 m of the eye on the job pool, nearest first, coloured by material and drawn as blocks. Flight keeps above the generated ground.
 - **Cost:** 36–76 ms a chunk on one thread, Venus to the Moon. Most of it is the generator's columns: each also takes the ground's slope at 16 m for its soils, nearly another column's work.
 

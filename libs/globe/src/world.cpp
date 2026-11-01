@@ -15,16 +15,15 @@
 namespace hog::globe {
 namespace {
 
-// Generated as finely as the voxels hold.
-double voxel_lod(const Generator& generator) {
-    return generator.planet().voxel;
-}
-
 Voxel generated_at(const Generator::Column& column, const Layers& layers, std::uint32_t layer) {
     return voxel_from(column.sample(layers.middle(static_cast<int>(layer))), distance_band(layers));
 }
 
 } // namespace
+
+double voxel_lod(const Generator& generator) {
+    return 2.0 * generator.planet().voxel;
+}
 
 BrickVoxels generated(const Generator& generator, BrickSite site) {
     const Layers& layers = generator.layers();

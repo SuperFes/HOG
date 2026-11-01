@@ -30,7 +30,7 @@ Result<globe::Planet> globe_planet(std::optional<std::string_view> named, std::u
 
 double globe_ground(const globe::Generator& generator, DVec3 at) {
     const globe::Planet& planet = generator.planet();
-    return globe::ground_below(generator, glm::normalize(at), planet.voxel)
+    return globe::ground_below(generator, glm::normalize(at), globe::voxel_lod(generator))
                .value_or(generator.layers().floor) -
            planet.radius;
 }

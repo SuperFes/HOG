@@ -246,7 +246,8 @@ TEST_CASE("columns filled together are the world voxel by voxel, dug or not", "[
         REQUIRE(next);
         cells.push_back(next.value_or(middle));
     }
-    const std::vector<Generator::Column> columns = earth().columns(cells, 0.5);
+    const std::vector<Generator::Column> columns =
+        earth().columns(cells, hog::globe::voxel_lod(earth()));
     const int bottom = layers.layer_at(ground.radius) - 12;
     constexpr int count = 24;
     const std::vector<Voxel> voxels = world.fill(cells, columns, bottom, count);
@@ -293,7 +294,8 @@ TEST_CASE("bricks fill from the generator", "[.bench][globe][world]") {
             for (int k = 0; k < hog::globe::brick_side * hog::globe::brick_side; ++k) {
                 const Site site = hog::globe::site_in(brick, k);
                 const Generator::Column column = generator.column(
-                    hog::globe::center(hog::globe::column_of(site, generator.layers())), 0.5);
+                    hog::globe::center(hog::globe::column_of(site, generator.layers())),
+                    hog::globe::voxel_lod(generator));
                 const double distance =
                     column.sample(generator.layers().middle(static_cast<int>(site.layer))).distance;
                 inside += distance < 0.0 ? 1U : 0U;

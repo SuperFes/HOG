@@ -15,8 +15,10 @@ namespace hog::globe {
 inline constexpr int chunk_levels = 5;
 inline constexpr int chunk_side = 1 << chunk_levels;
 
-// Under the lowest ground in a chunk, caves are drawn this far down.
+// Under the lowest ground in a chunk, caves are drawn this far down, and further while they run
+// on open, as far as cave_depth.
 inline constexpr double surface_depth = 16.0; // metres
+inline constexpr double cave_depth = 64.0;    // metres
 
 struct SurfaceVertex {
     Vec3 position{0.0F}; // metres from the mesh's origin
@@ -46,7 +48,7 @@ struct SurfaceMesh {
 // it crosses. Each edge is the chunk's that holds its lower end, or, across the cube's edges, the
 // lower face's, so chunks meet without gaps or overlaps. The surface is sought from surface_depth
 // under the chunk's lowest ground to over its highest and around the sea's level, and through
-// changes held next to those.
+// changes held next to those; caves are followed further down.
 void add_chunk(SurfaceMesh& mesh, const World& world, Cell chunk);
 
 } // namespace hog::globe

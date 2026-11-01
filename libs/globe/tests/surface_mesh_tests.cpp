@@ -139,7 +139,8 @@ TEST_CASE("a chunk's surface lies on the ground, facing out of it", "[globe][sur
         CHECK_FALSE(liquid(mesh.vertices[v].material));
         CHECK(mesh.vertices[v].material != Material::Air);
         const DVec3 point = world_point(mesh, v);
-        const double distance = std::abs(earth().sample(point, 0.5).distance);
+        const double distance =
+            std::abs(earth().sample(point, hog::globe::voxel_lod(earth())).distance);
         off += distance;
         worst = std::max(worst, distance);
         facing += glm::dot(DVec3{mesh.vertices[v].normal}, glm::normalize(point)) > 0.3 ? 1U : 0U;

@@ -15,6 +15,10 @@ namespace hog::globe {
 
 using BrickVoxels = std::array<Voxel, brick_voxels>;
 
+// The finest detail generated into voxels: two of them across, as finer would alias into steps a
+// voxel apart.
+[[nodiscard]] double voxel_lod(const Generator& generator);
+
 // A brick's voxels as generated, its columns taken together.
 [[nodiscard]] BrickVoxels generated(const Generator& generator, BrickSite site);
 

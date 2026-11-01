@@ -50,6 +50,17 @@ namespace {
 // Two of a place's three axes: i, j and up its column.
 constexpr std::array<std::array<int, 2>, 3> others{{{1, 2}, {2, 0}, {0, 1}}};
 
+// Voxels up a band of layers through a chunk's columns, a column after another.
+struct Band {
+    int bottom = 0;
+    int up = 0;
+    std::vector<Voxel> voxels;
+};
+
+// A place in a chunk's box: i and j from the corner of its columns and one more all round, and
+// layers up its band.
+using Place = std::array<int, 3>;
+
 // The voxels a chunk's surfaces are drawn from, in a band of layers: its columns and one more all
 // round, so each cube of eight voxels at its edges is whole.
 class Box {
@@ -57,51 +68,99 @@ public:
     static constexpr int across = chunk_side + 2;
 
     // `column_of` gives each place's index in `cells`, or -1 past the cube's corner.
-    Box(const World& world, std::span<const Cell> cells, std::span<const Generator::Column> columns,
-        std::span<const int> column_of, int bottom, int up, DVec3 origin)
-        : up_{up}, face_{cells[static_cast<std::size_t>(column_of[across + 1])].face},
-          column_of_{column_of.begin(), column_of.end()},
-          voxels_{world.fill(cells, columns, bottom, up)}, origin_{origin} {
-        const Layers& layers = world.generator().layers();
+    Box(const Layers& layers, std::span<const Cell> cells, std::span<const int> column_of,
+        Band band, DVec3 origin)
+        : up_{band.up}, face_{cells[static_cast<std::size_t>(column_of[across + 1])].face},
+          column_of_{column_of.begin(), column_of.end()}, voxels_{std::move(band.voxels)},
+          origin_{origin} {
         directions_.reserve(cells.size());
         faces_.reserve(cells.size());
         for (const Cell cell : cells) {
             directions_.push_back(center(cell));
             faces_.push_back(cell.face);
         }
-        radii_.reserve(static_cast<std::size_t>(up));
-        for (int layer = bottom; layer < bottom + up; ++layer) {
+        radii_.reserve(static_cast<std::size_t>(up_));
+        for (int layer = band.bottom; layer < band.bottom + up_; ++layer) {
             radii_.push_back(layers.middle(layer));
         }
+        soak();
     }
 
     [[nodiscard]] int up() const noexcept { return up_; }
     // The chunk's own face.
     [[nodiscard]] std::uint8_t face() const noexcept { return face_; }
 
-    // The voxel at a place in the box, none past the cube's corner.
-    [[nodiscard]] const Voxel* at(std::array<int, 3> place) const {
-        const int column = column_at(place);
-        if (column < 0) {
-            return nullptr;
-        }
-        return &voxels_[(static_cast<std::size_t>(column) * static_cast<std::size_t>(up_)) +
-                        static_cast<std::size_t>(place[2])];
+    // Whether the place is in the box, and not past the cube's corner.
+    [[nodiscard]] bool holds(Place place) const {
+        return place[0] >= 0 && place[0] < across && place[1] >= 0 && place[1] < across &&
+               place[2] >= 0 && place[2] < up_ && column_at(place) >= 0;
     }
 
-    [[nodiscard]] DVec3 point(std::array<int, 3> place) const {
+    [[nodiscard]] const Voxel& at(Place place) const { return voxels_[index(place)]; }
+
+    [[nodiscard]] DVec3 point(Place place) const {
         const auto column = static_cast<std::size_t>(column_at(place));
         return (directions_[column] * radii_[static_cast<std::size_t>(place[2])]) - origin_;
     }
 
-    [[nodiscard]] std::uint8_t face(std::array<int, 3> place) const {
+    [[nodiscard]] std::uint8_t face(Place place) const {
         return faces_[static_cast<std::size_t>(column_at(place))];
     }
 
+    // The liquid a place counts as full of, if any: its own, or beside some, under the ground at
+    // the shore, so the liquid's surface runs on under the ground rather than stopping a voxel
+    // short of it in steps.
+    [[nodiscard]] Material soaked(Place place) const { return soaked_[index(place)]; }
+
 private:
-    [[nodiscard]] int column_at(std::array<int, 3> place) const {
+    // Columns of shaped matter the liquid's surface runs on under.
+    static constexpr int shore_reach = 2;
+
+    [[nodiscard]] int column_at(Place place) const {
         return column_of_[static_cast<std::size_t>(place[0]) +
                           (static_cast<std::size_t>(place[1]) * across)];
+    }
+
+    [[nodiscard]] std::size_t index(Place place) const {
+        return (static_cast<std::size_t>(column_at(place)) * static_cast<std::size_t>(up_)) +
+               static_cast<std::size_t>(place[2]);
+    }
+
+    // The liquid soaking a place beside this one along i or j, if any.
+    [[nodiscard]] Material soaked_beside(Place place) const {
+        const auto [a, b, c] = place;
+        for (const Place beside :
+             {Place{a - 1, b, c}, Place{a + 1, b, c}, Place{a, b - 1, c}, Place{a, b + 1, c}}) {
+            if (holds(beside) && soaked(beside) != Material::Air) {
+                return soaked(beside);
+            }
+        }
+        return Material::Air;
+    }
+
+    void soak() {
+        soaked_.resize(voxels_.size(), Material::Air);
+        for (std::size_t k = 0; k < voxels_.size(); ++k) {
+            const Voxel& voxel = voxels_[k];
+            if (voxel.solid == Material::Air && voxel.liquid_amount >= Voxel::full / 2) {
+                soaked_[k] = voxel.liquid;
+            }
+        }
+        for (int step = 0; step < shore_reach; ++step) {
+            std::vector<Material> next = soaked_;
+            for (int c = 0; c < up_; ++c) {
+                for (int b = 0; b < across; ++b) {
+                    for (int a = 0; a < across; ++a) {
+                        const Place place{a, b, c};
+                        if (holds(place) && at(place).solid != Material::Air &&
+                            soaked(place) == Material::Air) {
+                            next[index(place)] = soaked_beside(place);
+                        }
+                    }
+                }
+            }
+            soaked_ = std::move(next);
+        }
     }
 
     int up_;
@@ -112,54 +171,51 @@ private:
     std::vector<DVec3> directions_;
     std::vector<std::uint8_t> faces_;
     std::vector<double> radii_;
+    std::vector<Material> soaked_;
 };
 
 // Where shaped matter meets open space: the distance's zero, increasing outward. What it's made
 // of says which side a voxel is on, as a distance under half a millimetre rounds to none.
 struct Ground {
-    static bool inside(const Voxel& voxel) { return voxel.solid != Material::Air; }
-    static bool crosses(const Voxel& a, const Voxel& b) { return inside(a) != inside(b); }
-    static double value(const Voxel& voxel) { return metres(voxel.distance); }
-    static bool may_cross(std::span<const Voxel* const> corners) {
-        return std::ranges::any_of(corners, [](const Voxel* voxel) { return inside(*voxel); }) &&
-               std::ranges::any_of(corners, [](const Voxel* voxel) { return !inside(*voxel); });
+    static bool inside(const Box& box, Place place) { return box.at(place).solid != Material::Air; }
+    static bool crosses(const Box& box, Place a, Place b) {
+        return inside(box, a) != inside(box, b);
     }
+    static double value(const Box& box, Place place) { return metres(box.at(place).distance); }
     // The solid nearest the surface.
-    static Material material(std::span<const Voxel* const> corners) {
+    static Material material(const Box& box, std::span<const Place> corners) {
         const Voxel* nearest = nullptr;
-        for (const Voxel* voxel : corners) {
-            if (inside(*voxel) && (nearest == nullptr || voxel->distance > nearest->distance)) {
-                nearest = voxel;
+        for (const Place corner : corners) {
+            const Voxel& voxel = box.at(corner);
+            if (voxel.solid != Material::Air &&
+                (nearest == nullptr || voxel.distance > nearest->distance)) {
+                nearest = &voxel;
             }
         }
         return nearest != nullptr ? nearest->solid : Material::Air;
     }
 };
 
-// Where liquid filling more than half its voxel meets air. Shaped matter counts as full, so the
-// liquid's surface runs into the ground rather than round it.
+// Where liquid filling more than half its voxel meets air.
 struct Liquid {
-    static bool wet(const Voxel& voxel) {
-        return !Ground::inside(voxel) && voxel.liquid_amount >= Voxel::full / 2;
+    static bool wet(const Box& box, Place place) { return box.soaked(place) != Material::Air; }
+    static bool dry(const Box& box, Place place) {
+        return !wet(box, place) && box.at(place).solid == Material::Air;
     }
-    static bool crosses(const Voxel& a, const Voxel& b) {
-        return Ground::inside(a) == Ground::inside(b) && wet(a) != wet(b);
+    static bool crosses(const Box& box, Place a, Place b) {
+        return (wet(box, a) && dry(box, b)) || (dry(box, a) && wet(box, b));
     }
-    static bool may_cross(std::span<const Voxel* const> corners) {
-        return std::ranges::any_of(corners, [](const Voxel* voxel) { return wet(*voxel); }) &&
-               std::ranges::any_of(corners, [](const Voxel* voxel) {
-                   return !wet(*voxel) && !Ground::inside(*voxel);
-               });
-    }
-    static double value(const Voxel& voxel) {
-        const double share =
-            Ground::inside(voxel) ? 1.0 : voxel.liquid_amount / double{Voxel::full};
+    static double value(const Box& box, Place place) {
+        const Voxel& voxel = box.at(place);
+        const double share = wet(box, place) || voxel.solid != Material::Air
+                                 ? 1.0
+                                 : voxel.liquid_amount / double{Voxel::full};
         return 0.5 - std::min(share, 1.0);
     }
-    static Material material(std::span<const Voxel* const> corners) {
-        for (const Voxel* voxel : corners) {
-            if (wet(*voxel)) {
-                return voxel->liquid;
+    static Material material(const Box& box, std::span<const Place> corners) {
+        for (const Place corner : corners) {
+            if (wet(box, corner)) {
+                return box.soaked(corner);
             }
         }
         return Material::Air;
@@ -198,73 +254,131 @@ public:
 private:
     static constexpr int cubes_across = Box::across - 1;
 
-    [[nodiscard]] std::uint32_t& cube(std::array<int, 3> at) {
+    [[nodiscard]] std::uint32_t& cube(Place at) {
         const auto row = static_cast<std::size_t>(at[1]) +
                          (std::size_t{cubes_across} * static_cast<std::size_t>(at[2]));
         return cubes_[static_cast<std::size_t>(at[0]) + (std::size_t{cubes_across} * row)];
     }
 
-    // The cube's vertex, if the surface passes through it and it's whole.
-    void vertex(std::array<int, 3> at) {
-        std::array<const Voxel*, 8> corners{};
-        for (std::size_t k = 0; k < 8; ++k) {
-            corners.at(k) = box_->at(corner_of(at, k));
-            if (corners.at(k) == nullptr) {
-                return;
-            }
-        }
-        if (!Surface::may_cross(corners)) {
-            return;
-        }
-        DVec3 sum{0.0};
-        int crossings = 0;
+    // The field's gradient at a place, by central differences where it has places either side.
+    [[nodiscard]] DVec3 gradient(Place place) const {
         std::array<DVec3, 3> along{};
         DVec3 rise{0.0};
         for (std::size_t axis = 0; axis < 3; ++axis) {
+            Place low = place;
+            Place high = place;
+            --low.at(axis);
+            ++high.at(axis);
+            low = box_->holds(low) ? low : place;
+            high = box_->holds(high) ? high : place;
+            along.at(axis) = box_->point(high) - box_->point(low);
+            rise[static_cast<glm::length_t>(axis)] =
+                Surface::value(*box_, high) - Surface::value(*box_, low);
+        }
+        const glm::dmat3 edges = glm::transpose(glm::dmat3{along[0], along[1], along[2]});
+        return std::abs(glm::determinant(edges)) > 0.0 ? glm::inverse(edges) * rise : DVec3{0.0};
+    }
+
+    // The cube's vertex, if the surface passes through it and it's whole. It starts at the mean
+    // of where the surface crosses the cube's edges and is drawn onto the surface between its
+    // corners' values, so gentle slopes don't terrace; it faces as the field's gradient does there.
+    void vertex(Place at) {
+        std::array<Place, 8> corners{};
+        std::array<double, 8> values{};
+        for (std::size_t k = 0; k < 8; ++k) {
+            corners.at(k) = corner_of(at, k);
+            if (!box_->holds(corners.at(k))) {
+                return;
+            }
+            values.at(k) = Surface::value(*box_, corners.at(k));
+        }
+        DVec3 mean{0.0};
+        int crossings = 0;
+        for (std::size_t axis = 0; axis < 3; ++axis) {
             const std::size_t step = std::size_t{1} << axis;
             for (std::size_t k = 0; k < 8; ++k) {
-                if ((k & step) != 0) {
+                if ((k & step) != 0 ||
+                    !Surface::crosses(*box_, corners.at(k), corners.at(k | step))) {
                     continue;
                 }
-                const Voxel& a = *corners.at(k);
-                const Voxel& b = *corners.at(k | step);
-                const DVec3 from = box_->point(corner_of(at, k));
-                const DVec3 to = box_->point(corner_of(at, k | step));
-                const double va = Surface::value(a);
-                const double vb = Surface::value(b);
-                along.at(axis) += to - from;
-                rise[static_cast<glm::length_t>(axis)] += vb - va;
-                if (Surface::crosses(a, b)) {
-                    sum += glm::mix(from, to, std::clamp(va / (va - vb), 0.0, 1.0));
-                    ++crossings;
-                }
+                const double va = values.at(k);
+                const double vb = values.at(k | step);
+                DVec3 local = within(k);
+                local[static_cast<glm::length_t>(axis)] = std::clamp(va / (va - vb), 0.0, 1.0);
+                mean += local;
+                ++crossings;
             }
         }
         if (crossings == 0) {
             return;
         }
-        const DVec3 position = sum / static_cast<double>(crossings);
-        // The field's gradient, from its rise along each of the cube's three edge directions.
-        const glm::dmat3 edges = glm::transpose(glm::dmat3{along[0], along[1], along[2]});
-        DVec3 normal =
-            std::abs(glm::determinant(edges)) > 0.0 ? glm::inverse(edges) * rise : DVec3{0.0};
+        const DVec3 local = onto_surface(values, mean / static_cast<double>(crossings));
+        DVec3 position{0.0};
+        DVec3 normal{0.0};
+        for (std::size_t k = 0; k < 8; ++k) {
+            const double weight = weight_of(k, local);
+            position += weight * box_->point(corners.at(k));
+            normal += weight * gradient(corners.at(k));
+        }
         if (!(glm::length(normal) > 0.0)) {
             normal = position + mesh_->origin;
         }
         cube(at) = static_cast<std::uint32_t>(mesh_->vertices.size());
         mesh_->vertices.push_back({.position = Vec3{position},
                                    .normal = Vec3{glm::normalize(normal)},
-                                   .material = Surface::material(corners)});
+                                   .material = Surface::material(*box_, corners)});
     }
 
-    [[nodiscard]] static std::array<int, 3> corner_of(std::array<int, 3> at, std::size_t k) {
+    // A corner's place in its cube, each axis 0 or 1.
+    [[nodiscard]] static DVec3 within(std::size_t k) {
+        return {static_cast<double>(k & 1U), static_cast<double>((k >> 1U) & 1U),
+                static_cast<double>((k >> 2U) & 1U)};
+    }
+
+    // A corner's share of a point in the cube, by trilinear interpolation.
+    [[nodiscard]] static double weight_of(std::size_t k, DVec3 local) {
+        const DVec3 corner = within(k);
+        double weight = 1.0;
+        for (glm::length_t axis = 0; axis < 3; ++axis) {
+            weight *= corner[axis] > 0.5 ? local[axis] : 1.0 - local[axis];
+        }
+        return weight;
+    }
+
+    // A point in the cube moved along the corners' trilinear field to its zero, kept in the cube.
+    [[nodiscard]] static DVec3 onto_surface(const std::array<double, 8>& values, DVec3 local) {
+        constexpr int steps = 3;
+        for (int step = 0; step < steps; ++step) {
+            double value = 0.0;
+            DVec3 slope{0.0};
+            for (std::size_t k = 0; k < 8; ++k) {
+                const DVec3 corner = within(k);
+                value += weight_of(k, local) * values.at(k);
+                for (glm::length_t axis = 0; axis < 3; ++axis) {
+                    // The weight's rate along this axis: the others' shares, signed by the side.
+                    DVec3 across = local;
+                    across[axis] = corner[axis];
+                    const double rest = weight_of(k, across);
+                    slope[axis] += (corner[axis] > 0.5 ? rest : -rest) * values.at(k);
+                }
+            }
+            const double steepness = glm::dot(slope, slope);
+            if (!(steepness > 0.0)) {
+                break;
+            }
+            local = glm::clamp(local - ((value / steepness) * slope), DVec3{0.0}, DVec3{1.0});
+        }
+        return local;
+    }
+
+    [[nodiscard]] static Place corner_of(Place at, std::size_t k) {
         return {at[0] + static_cast<int>(k & 1U), at[1] + static_cast<int>((k >> 1U) & 1U),
                 at[2] + static_cast<int>((k >> 2U) & 1U)};
     }
 
     // Whether the chunk draws the edge from `at` along `axis`: its lower end is in the chunk's
     // own columns, or it crosses from the chunk's face onto a higher one.
-    [[nodiscard]] bool owns(std::array<int, 3> at, std::array<int, 3> to, int axis) const {
+    [[nodiscard]] bool owns(Place at, Place to, int axis) const {
         const auto own = [](int place) { return place >= 1 && place <= chunk_side; };
         if (axis == 2) {
             return own(at[0]) && own(at[1]);
@@ -280,23 +394,19 @@ private:
         return own(at[static_cast<std::size_t>(axis)]);
     }
 
-    void quad(std::array<int, 3> at, int axis) {
-        std::array<int, 3> to = at;
+    void quad(Place at, int axis) {
+        Place to = at;
         ++to.at(static_cast<std::size_t>(axis));
         const auto [p, q] = others.at(static_cast<std::size_t>(axis));
-        if (to[0] >= Box::across || to[1] >= Box::across || to[2] >= box_->up() ||
-            at.at(static_cast<std::size_t>(p)) == 0 || at.at(static_cast<std::size_t>(q)) == 0) {
-            return;
-        }
-        const Voxel* a = box_->at(at);
-        const Voxel* b = box_->at(to);
-        if (a == nullptr || b == nullptr || !Surface::crosses(*a, *b) || !owns(at, to, axis)) {
+        if (at.at(static_cast<std::size_t>(p)) == 0 || at.at(static_cast<std::size_t>(q)) == 0 ||
+            !box_->holds(at) || !box_->holds(to) || !Surface::crosses(*box_, at, to) ||
+            !owns(at, to, axis)) {
             return;
         }
         // The four cubes round the edge, anticlockwise about it.
         std::array<std::uint32_t, 4> corners{};
         for (std::size_t k = 0; k < 4; ++k) {
-            std::array<int, 3> cube_at = at;
+            Place cube_at = at;
             cube_at.at(static_cast<std::size_t>(p)) -= (k == 0 || k == 3) ? 1 : 0;
             cube_at.at(static_cast<std::size_t>(q)) -= (k == 0 || k == 1) ? 1 : 0;
             if (cube_at[2] + 1 >= box_->up()) {
@@ -308,7 +418,7 @@ private:
             }
         }
         // So far it faces along the axis; the outside is where the value is higher.
-        if (Surface::value(*a) > Surface::value(*b)) {
+        if (Surface::value(*box_, at) > Surface::value(*box_, to)) {
             std::swap(corners[1], corners[3]);
         }
         const auto apart = [&](std::uint32_t from, std::uint32_t into) {
@@ -407,6 +517,38 @@ std::vector<std::pair<int, int>> bands_of(const World& world, Cell chunk,
     return merged;
 }
 
+// Whether a cave runs open out of the band's foot, under some column's ground.
+bool open_under_ground(const Band& band, std::span<const Generator::Column> columns,
+                       const Layers& layers) {
+    const double radius = layers.middle(band.bottom);
+    for (std::size_t k = 0; k < columns.size(); ++k) {
+        const Voxel& foot = band.voxels[k * static_cast<std::size_t>(band.up)];
+        if (foot.solid == Material::Air && radius < columns[k].ground()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The band reaching down to `bottom`.
+Band deepened(const World& world, std::span<const Cell> cells,
+              std::span<const Generator::Column> columns, const Band& band, int bottom) {
+    const int more = band.bottom - bottom;
+    const std::vector<Voxel> under = world.fill(cells, columns, bottom, more);
+    Band deeper{.bottom = bottom, .up = band.up + more, .voxels = {}};
+    deeper.voxels.reserve(cells.size() * static_cast<std::size_t>(deeper.up));
+    for (std::size_t k = 0; k < cells.size(); ++k) {
+        const auto from = [](const std::vector<Voxel>& voxels, std::size_t column, int up) {
+            return voxels.begin() +
+                   static_cast<std::ptrdiff_t>(column * static_cast<std::size_t>(up));
+        };
+        deeper.voxels.insert(deeper.voxels.end(), from(under, k, more), from(under, k + 1, more));
+        deeper.voxels.insert(deeper.voxels.end(), from(band.voxels, k, band.up),
+                             from(band.voxels, k + 1, band.up));
+    }
+    return deeper;
+}
+
 } // namespace
 
 void add_chunk(SurfaceMesh& mesh, const World& world, Cell chunk) {
@@ -424,9 +566,21 @@ void add_chunk(SurfaceMesh& mesh, const World& world, Cell chunk) {
         }
     }
     const std::vector<Generator::Column> columns =
-        world.generator().columns(cells, world.generator().planet().voxel);
+        world.generator().columns(cells, voxel_lod(world.generator()));
+    const double lowest =
+        std::ranges::min(columns, {}, &Generator::Column::ground).ground() - cave_depth;
     for (const auto& [bottom, top] : bands_of(world, chunk, columns)) {
-        const Box box{world, cells, columns, column_of, bottom, top - bottom, mesh.origin};
+        Band band{.bottom = bottom,
+                  .up = top - bottom,
+                  .voxels = world.fill(cells, columns, bottom, top - bottom)};
+        // Caves are followed down while they're open at the band's foot.
+        while (band.bottom > 0 && layers.middle(band.bottom) > lowest &&
+               open_under_ground(band, columns, layers)) {
+            const int deeper =
+                std::max(0, layers.layer_at(layers.bottom(band.bottom) - surface_depth));
+            band = deepened(world, cells, columns, band, deeper);
+        }
+        const Box box{layers, cells, column_of, std::move(band), mesh.origin};
         Net<Ground>{box, mesh}.add();
         Net<Liquid>{box, mesh}.add();
     }
