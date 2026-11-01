@@ -150,6 +150,10 @@ public:
     // Draws the globe's surfaces round the eye whenever blocks are on, in place of those filled
     // in from the world's terrain. The globe must outlive the scene, unchanged.
     void follow_globe(const globe::World& globe);
+    // Waits for the globe's chunks in flight, so the world may be changed; then, once it has,
+    // meshes again the chunks the changed bricks touch.
+    void finish_globe();
+    void change_globe(std::span<const globe::BrickSite> bricks);
     [[nodiscard]] bool blocks() const noexcept { return blocks_on_; }
 
     [[nodiscard]] render::CloudQuality cloud_quality() const noexcept { return clouds_.quality(); }

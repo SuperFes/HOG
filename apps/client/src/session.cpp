@@ -4,7 +4,10 @@
 #include <glm/geometric.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <format>
+#include <iterator>
+#include <optional>
 #include <string_view>
 #include <utility>
 #include <variant>
@@ -123,6 +126,9 @@ void Session::heard(std::span<const std::byte> bytes, MonotonicClock::time_point
         woodlands_ = std::move(*woodlands);
     } else if (auto* said = std::get_if<protocol::Said>(&*message)) {
         chat_.push_back({.from = std::move(said->from), .text = std::move(said->text)});
+    } else if (auto* bricks = std::get_if<protocol::Bricks>(&*message)) {
+        bricks_.insert(bricks_.end(), std::make_move_iterator(bricks->bricks.begin()),
+                       std::make_move_iterator(bricks->bricks.end()));
     } else if (const auto* clock = std::get_if<protocol::Clock>(&*message)) {
         if (clock->scale != world_rate_) {
             log::info(session_log, "{} runs the world at {}x", address_, clock->scale);
@@ -166,6 +172,39 @@ void Session::hurry(std::uint32_t scale) {
         return;
     }
     send(protocol::Hurry{.scale = scale}, net::Delivery::Reliable);
+}
+
+namespace {
+
+// A ball's radius as sent, in whole millimetres; none if it couldn't be.
+std::optional<std::uint32_t> sendable(double radius) {
+    const double millimetres = std::round(radius * 1'000.0);
+    if (!(millimetres >= 1.0) || millimetres > protocol::most_edit) {
+        return std::nullopt;
+    }
+    return static_cast<std::uint32_t>(millimetres);
+}
+
+} // namespace
+
+void Session::dig(WorldPosition centre, double radius) {
+    const std::optional<std::uint32_t> width = sendable(radius);
+    if (state_ != State::Welcomed || !width) {
+        return;
+    }
+    send(protocol::Dug{.centre = protocol::to_millimetres(centre), .radius = *width},
+         net::Delivery::Reliable);
+}
+
+void Session::build(WorldPosition centre, double radius, std::uint8_t material) {
+    const std::optional<std::uint32_t> width = sendable(radius);
+    if (state_ != State::Welcomed || !width) {
+        return;
+    }
+    send(protocol::Built{.centre = protocol::to_millimetres(centre),
+                         .radius = *width,
+                         .material = material},
+         net::Delivery::Reliable);
 }
 
 void Session::send(const protocol::Message& message, net::Delivery delivery) {

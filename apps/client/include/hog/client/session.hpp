@@ -85,6 +85,17 @@ public:
     // The chat heard since last asked, oldest first.
     [[nodiscard]] std::vector<ChatLine> take_chat() noexcept { return std::exchange(chat_, {}); }
 
+    // Bricks of the voxel world the server sent since last asked, oldest first, to hold in
+    // place of the generator's.
+    [[nodiscard]] std::vector<protocol::SentBrick> take_bricks() noexcept {
+        return std::exchange(bricks_, {});
+    }
+
+    // Asks the server to dig out, or build up of `material`, a ball `radius` metres across at
+    // `centre`; nothing before being welcomed, or of a ball of no width or wider than it allows.
+    void dig(WorldPosition centre, double radius);
+    void build(WorldPosition centre, double radius, std::uint8_t material);
+
     [[nodiscard]] State state() const noexcept { return state_; }
     [[nodiscard]] const std::string& address() const noexcept { return address_; }
     // Why the server refused or closed the connection.
@@ -124,6 +135,7 @@ private:
     std::optional<protocol::Weather> weather_;
     std::optional<protocol::Woodlands> woodlands_;
     std::vector<ChatLine> chat_;
+    std::vector<protocol::SentBrick> bricks_;
     std::uint32_t world_rate_ = 1;
     std::optional<MonotonicClock::time_point> last_snapshot_;
     MonotonicClock::time_point counting_since_;

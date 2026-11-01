@@ -234,6 +234,46 @@ void GlobeStream::follow(DVec3 eye) {
     let_go();
 }
 
+void GlobeStream::changed(globe::BrickSite brick) {
+    HOG_ASSERT(working_.empty(), "the world changed under chunks being meshed");
+    const globe::Layers& layers = world_->generator().layers();
+    // A chunk's grid reaches a margin of coarse boxes into the chunks beside it.
+    const auto touches = [&](globe::Cell chunk) {
+        if (chunk.face != brick.face) {
+            return false;
+        }
+        const int detail = globe::detail_of(chunk, layers);
+        const std::int64_t across = std::int64_t{globe::chunk_side} << detail;
+        const std::int64_t margin = std::int64_t{10} << detail;
+        const std::int64_t i0 = (std::int64_t{chunk.i} * across) - margin;
+        const std::int64_t j0 = (std::int64_t{chunk.j} * across) - margin;
+        const std::int64_t bi = std::int64_t{brick.i} * globe::brick_side;
+        const std::int64_t bj = std::int64_t{brick.j} * globe::brick_side;
+        return bi + globe::brick_side > i0 && bi < i0 + across + (2 * margin) &&
+               bj + globe::brick_side > j0 && bj < j0 + across + (2 * margin);
+    };
+    std::set<globe::Cell> again;
+    for (const auto& [chunk, beside] : wanted_) {
+        if (!touches(chunk)) {
+            continue;
+        }
+        again.insert(chunk);
+        // Over a cube's edge, the chunks on the next face reach back into this one.
+        const globe::CellNeighbors near = globe::around(chunk);
+        for (const globe::Cell next : near.all()) {
+            if (next.face != chunk.face && wanted_.contains(next)) {
+                again.insert(next);
+            }
+        }
+    }
+    for (const globe::Cell chunk : again) {
+        if (std::ranges::find(queue_, chunk) == queue_.end()) {
+            queue_.push_back(chunk);
+        }
+    }
+    start_more();
+}
+
 bool GlobeStream::in_flight() const noexcept {
     return !queue_.empty() || !working_.empty() || !changes_.empty() ||
            std::ranges::any_of(shown_,

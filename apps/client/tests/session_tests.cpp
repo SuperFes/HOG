@@ -554,3 +554,43 @@ TEST_CASE("two players see each other through a bad network", "[client][session]
     CHECK(anna_told);
     CHECK(matt_told);
 }
+
+TEST_CASE("a session takes the bricks sent, and asks to dig and build once welcomed",
+          "[client][session]") {
+    Stand stand;
+    Session session = connected(stand.server);
+    const WorldPosition centre{hog::DVec3{115'000.0, 1.0, 2.0}};
+    // Nothing is asked before being welcomed.
+    session.dig(centre, 1.5);
+    welcome(session, stand);
+    CHECK(stand.count<protocol::Dug>() == 0);
+    stand.send(protocol::Bricks{.bricks = {{.key = 7, .bytes = {std::byte{1}, std::byte{2}}}}});
+    stand.send(protocol::Bricks{.bricks = {{.key = 8, .bytes = {}}}});
+    std::vector<protocol::SentBrick> taken;
+    look_until(session, stand, [&] {
+        for (protocol::SentBrick& brick : session.take_bricks()) {
+            taken.push_back(std::move(brick));
+        }
+        return taken.size() == 2;
+    });
+    CHECK(taken[0].key == 7);
+    CHECK(taken[0].bytes.size() == 2);
+    CHECK(taken[1].key == 8);
+    CHECK(session.take_bricks().empty());
+    session.dig(centre, 1.5);
+    session.dig(centre, 0.0);
+    session.build(centre, 100.0, 9);
+    session.build(centre, 2.0, 9);
+    look_until(session, stand, [&] {
+        return stand.count<protocol::Dug>() == 1 && stand.count<protocol::Built>() == 1;
+    });
+    for (const protocol::Message& message : stand.heard) {
+        if (const auto* dug = std::get_if<protocol::Dug>(&message)) {
+            CHECK(dug->radius == 1'500);
+            CHECK(dug->centre == protocol::to_millimetres(centre));
+        } else if (const auto* built = std::get_if<protocol::Built>(&message)) {
+            CHECK(built->radius == 2'000);
+            CHECK(built->material == 9);
+        }
+    }
+}

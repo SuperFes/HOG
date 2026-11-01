@@ -199,3 +199,35 @@ TEST_CASE("every chunk round the client's start meshes", "[.gate][client][globe]
         hog::globe::add_chunk(mesh, globe.world, chunk, drawn);
     }
 }
+
+TEST_CASE("a brick changed has the chunks drawn from it meshed again, and no others",
+          "[client][globe]") {
+    hog::client::GlobeWorld globe{hog::globe::Planet{}};
+    hog::jobs::JobSystem jobs{3};
+    hog::client::GlobeStream stream{globe.world, jobs, {.ratio = 1.5, .least = 120.0}};
+    const double radius = globe.generator.planet().radius;
+    const DVec3 up = hog::globe::center(hog::globe::cell_at_index(7, 4'321));
+    const double ground = hog::client::globe_ground(globe.generator, up);
+    stream.follow(up * (radius + ground + 2.0));
+    std::set<std::uint64_t> shown;
+    apply(shown, stream.finish());
+    const std::size_t drawn = shown.size();
+    REQUIRE(drawn > 4);
+    // Dug under the eye, the chunk there is meshed again, and the few beside it.
+    const std::uint64_t before = globe.store.revision();
+    hog::globe::dig(globe.world, up * (radius + ground), 1.5);
+    const std::vector<hog::globe::BrickSite> changed = globe.store.changed_since(before);
+    REQUIRE_FALSE(changed.empty());
+    for (const hog::globe::BrickSite brick : changed) {
+        stream.changed(brick);
+    }
+    CHECK(stream.in_flight());
+    const hog::client::GlobeStream::Changes again = stream.finish();
+    CHECK(again.gone.empty());
+    REQUIRE_FALSE(again.shown.empty());
+    CHECK(again.shown.size() < drawn);
+    const hog::globe::Cell under = hog::globe::chunk_under(up, globe.generator.layers(), 0);
+    CHECK(std::ranges::any_of(again.shown, [&](const auto& change) {
+        return change.first == hog::client::globe_key(under);
+    }));
+}

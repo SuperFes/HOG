@@ -337,6 +337,21 @@ void Scene::follow_globe(const globe::World& globe) {
     globe_.emplace(globe, *jobs_);
 }
 
+void Scene::finish_globe() {
+    if (globe_) {
+        show_globe(globe_->finish());
+    }
+}
+
+void Scene::change_globe(std::span<const globe::BrickSite> bricks) {
+    if (!globe_) {
+        return;
+    }
+    for (const globe::BrickSite brick : bricks) {
+        globe_->changed(brick);
+    }
+}
+
 void Scene::fare(const protocol::Woodlands& told) {
     const std::vector<planet::CellId> changed = woodlands_.receive(told);
     if (changed.empty()) {

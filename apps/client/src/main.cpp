@@ -15,6 +15,9 @@
 #include <hog/core/log.hpp>
 #include <hog/core/profile.hpp>
 #include <hog/core/time.hpp>
+#include <hog/globe/brick_archive.hpp>
+#include <hog/globe/material.hpp>
+#include <hog/globe/world.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/login/service.hpp>
 #include <hog/mapgen/render.hpp>
@@ -103,6 +106,8 @@ struct Controls {
     bool may_chat = false;    // connected to a server to chat on
     bool chatting = false;    // typing into the chat box, which takes the keys
     bool quit = false;
+    bool dig = false;   // asked to dig a ball out of the ground ahead
+    bool build = false; // asked to build one up
     // Doublings of the planet's time asked for, halvings if negative.
     int faster_time = 0;
     // The same for the server's whole world, where it allows time control.
@@ -129,6 +134,10 @@ void press(const SDL_KeyboardEvent& key, Controls& controls) {
         controls.next_clouds = true;
     } else if (key.key == SDLK_F6 && !key.repeat) {
         controls.blocks = !controls.blocks;
+    } else if (key.key == SDLK_X && !key.repeat) {
+        controls.dig = true;
+    } else if (key.key == SDLK_V && !key.repeat) {
+        controls.build = true;
     } else if (key.key == SDLK_RIGHTBRACKET) {
         ++((key.mod & SDL_KMOD_SHIFT) != 0 ? controls.faster_world : controls.faster_time);
     } else if (key.key == SDLK_LEFTBRACKET) {
@@ -589,6 +598,26 @@ public:
         return session_ ? session_->take_chat() : std::vector<client::ChatLine>{};
     }
 
+    // Bricks of the voxel world the server sent since last asked.
+    [[nodiscard]] std::vector<protocol::SentBrick> take_bricks() {
+        return session_ ? session_->take_bricks() : std::vector<protocol::SentBrick>{};
+    }
+
+    // Whether edits go to the server: once welcomed by one.
+    [[nodiscard]] bool editing_through_server() const noexcept {
+        return session_ && session_->state() == client::Session::State::Welcomed;
+    }
+    void dig(WorldPosition centre, double radius) {
+        if (session_) {
+            session_->dig(centre, radius);
+        }
+    }
+    void build(WorldPosition centre, double radius, std::uint8_t material) {
+        if (session_) {
+            session_->build(centre, radius, material);
+        }
+    }
+
     // None until connecting to the server.
     [[nodiscard]] const client::Session* session() const noexcept {
         return session_ ? &*session_ : nullptr;
@@ -696,6 +725,53 @@ void report(Connection& connection, std::optional<client::Player>& player,
         chat.log.add(hog::chat::shown_name(line.from, filter),
                      hog::chat::shown_chat(line.text, filter), now);
     }
+}
+
+// A ball this far ahead of the eye, this wide, is dug or built on the keys.
+constexpr double edit_ahead = 3.0;  // metres
+constexpr double edit_radius = 1.5; // metres
+constexpr auto edit_material = static_cast<std::uint8_t>(globe::Material::Granite);
+
+// Digs or builds as the keys ask: through the server when on one, which sends the bricks back,
+// or straight into the world when alone. Then holds the bricks the server sent, and has the
+// chunks they touch drawn again. The world is changed only with no chunk in flight.
+void edit_globe(Controls& controls, Connection& connection, client::GlobeWorld* globe,
+                client::Scene& scene, const render::Camera& camera) {
+    const bool dig = std::exchange(controls.dig, false);
+    const bool asked = dig || std::exchange(controls.build, false);
+    if (globe == nullptr) {
+        return;
+    }
+    const WorldPosition centre{camera.eye.metres() + (camera.forward * edit_ahead)};
+    if (asked && connection.editing_through_server()) {
+        if (dig) {
+            connection.dig(centre, edit_radius);
+        } else {
+            connection.build(centre, edit_radius, edit_material);
+        }
+    }
+    const std::vector<protocol::SentBrick> sent = connection.take_bricks();
+    const bool alone = asked && !connection.editing_through_server();
+    if (sent.empty() && !alone) {
+        return;
+    }
+    scene.finish_globe();
+    const std::uint64_t before = globe->store.revision();
+    if (alone) {
+        if (dig) {
+            globe::dig(globe->world, centre.metres(), edit_radius);
+        } else {
+            globe::build(globe->world, centre.metres(), edit_radius,
+                         static_cast<globe::Material>(edit_material));
+        }
+    }
+    for (const protocol::SentBrick& brick : sent) {
+        if (auto taken = globe::take_brick(globe->store, {.key = brick.key, .bytes = brick.bytes});
+            !taken) {
+            log::warn(connection_log, "a brick the server sent doesn't fit: {}", taken.error());
+        }
+    }
+    scene.change_globe(globe->store.changed_since(before));
 }
 
 // Puts the player back where the server says they were when they last left.
@@ -840,7 +916,7 @@ void change_clouds(Controls& controls, client::Scene& scene, const render::Devic
 
 // Flies or walks over the world until the window closes or it's time to quit.
 Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet::World& world,
-                 const client::GlobeWorld* globe, client::Flight flight, Connection& connection,
+                 client::GlobeWorld* globe, client::Flight flight, Connection& connection,
                  const client::Options& options, const render::Device& device,
                  render::Presenter& presenter, SDL_Window* window) {
     const double radius = world.geology().planet_radius();
@@ -885,6 +961,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
             scene.fare(*woodlands);
         }
         camera = move(controls, player, flight, world, globe, seconds);
+        edit_globe(controls, connection, globe, scene, camera);
         const double ground_height = drawn_ground(world, globe, camera.eye);
         change_pace(controls, clock);
         hurry_world(controls, connection);
