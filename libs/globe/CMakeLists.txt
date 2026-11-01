@@ -12,6 +12,7 @@ add_library(hog_globe
     src/noise.cpp
     src/planet.cpp
     src/planet_file.cpp
+    src/qef.cpp
     src/relief.cpp
     src/strata.cpp
     src/surface_mesh.cpp
@@ -35,6 +36,7 @@ hog_add_tests(hog_globe
     tests/maths_tests.cpp
     tests/noise_tests.cpp
     tests/planet_tests.cpp
+    tests/qef_tests.cpp
     tests/strata_tests.cpp
     tests/surface_mesh_tests.cpp
     tests/voxel_store_tests.cpp

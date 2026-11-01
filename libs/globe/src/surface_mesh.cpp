@@ -1,4 +1,5 @@
 #include <hog/core/assert.hpp>
+#include <hog/globe/qef.hpp>
 #include <hog/globe/surface_mesh.hpp>
 
 #include <algorithm>
@@ -9,6 +10,7 @@
 #include <limits>
 #include <optional>
 #include <set>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -279,9 +281,9 @@ private:
         return std::abs(glm::determinant(edges)) > 0.0 ? glm::inverse(edges) * rise : DVec3{0.0};
     }
 
-    // The cube's vertex, if the surface passes through it and it's whole. It starts at the mean
-    // of where the surface crosses the cube's edges and is drawn onto the surface between its
-    // corners' values, so gentle slopes don't terrace; it faces as the field's gradient does there.
+    // The cube's vertex, if the surface passes through it and it's whole. It's placed by dual
+    // contouring: where the planes tangent to the surface at its crossings of the cube's edges
+    // meet, so creases and corners keep their edge; it faces as the field's gradient does there.
     void vertex(Place at) {
         std::array<Place, 8> corners{};
         std::array<double, 8> values{};
@@ -292,8 +294,9 @@ private:
             }
             values.at(k) = Surface::value(*box_, corners.at(k));
         }
-        DVec3 mean{0.0};
-        int crossings = 0;
+        std::array<DVec3, 12> points{};
+        std::array<DVec3, 12> normals{};
+        std::size_t crossings = 0;
         for (std::size_t axis = 0; axis < 3; ++axis) {
             const std::size_t step = std::size_t{1} << axis;
             for (std::size_t k = 0; k < 8; ++k) {
@@ -303,16 +306,24 @@ private:
                 }
                 const double va = values.at(k);
                 const double vb = values.at(k | step);
+                // Values alike either side, as when both round to none, cross halfway.
+                const double t = va != vb ? std::clamp(va / (va - vb), 0.0, 1.0) : 0.5;
                 DVec3 local = within(k);
-                local[static_cast<glm::length_t>(axis)] = std::clamp(va / (va - vb), 0.0, 1.0);
-                mean += local;
+                local[static_cast<glm::length_t>(axis)] = t;
+                points.at(crossings) = local;
+                // The cube's own field, so neighbouring chunks find the same vertex.
+                const DVec3 slope = slope_at(values, local);
+                normals.at(crossings) =
+                    glm::length(slope) > 0.0 ? glm::normalize(slope) : DVec3{0.0};
                 ++crossings;
             }
         }
         if (crossings == 0) {
             return;
         }
-        const DVec3 local = onto_surface(values, mean / static_cast<double>(crossings));
+        const DVec3 local = glm::clamp(nearest_to_planes(std::span{points}.first(crossings),
+                                                         std::span{normals}.first(crossings)),
+                                       DVec3{0.0}, DVec3{1.0});
         DVec3 position{0.0};
         DVec3 normal{0.0};
         for (std::size_t k = 0; k < 8; ++k) {
@@ -345,30 +356,20 @@ private:
         return weight;
     }
 
-    // A point in the cube moved along the corners' trilinear field to its zero, kept in the cube.
-    [[nodiscard]] static DVec3 onto_surface(const std::array<double, 8>& values, DVec3 local) {
-        constexpr int steps = 3;
-        for (int step = 0; step < steps; ++step) {
-            double value = 0.0;
-            DVec3 slope{0.0};
-            for (std::size_t k = 0; k < 8; ++k) {
-                const DVec3 corner = within(k);
-                value += weight_of(k, local) * values.at(k);
-                for (glm::length_t axis = 0; axis < 3; ++axis) {
-                    // The weight's rate along this axis: the others' shares, signed by the side.
-                    DVec3 across = local;
-                    across[axis] = corner[axis];
-                    const double rest = weight_of(k, across);
-                    slope[axis] += (corner[axis] > 0.5 ? rest : -rest) * values.at(k);
-                }
+    // The gradient of the corners' trilinear field at a point in the cube, in the cube's terms.
+    [[nodiscard]] static DVec3 slope_at(const std::array<double, 8>& values, DVec3 local) {
+        DVec3 slope{0.0};
+        for (std::size_t k = 0; k < 8; ++k) {
+            const DVec3 corner = within(k);
+            for (glm::length_t axis = 0; axis < 3; ++axis) {
+                // The weight's rate along this axis: the others' shares, signed by the side.
+                DVec3 across = local;
+                across[axis] = corner[axis];
+                const double rest = weight_of(k, across);
+                slope[axis] += (corner[axis] > 0.5 ? rest : -rest) * values.at(k);
             }
-            const double steepness = glm::dot(slope, slope);
-            if (!(steepness > 0.0)) {
-                break;
-            }
-            local = glm::clamp(local - ((value / steepness) * slope), DVec3{0.0}, DVec3{1.0});
         }
-        return local;
+        return slope;
     }
 
     [[nodiscard]] static Place corner_of(Place at, std::size_t k) {
