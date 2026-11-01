@@ -169,7 +169,7 @@ TEST_CASE("the same planet is generated the same, bit for bit", "[globe][generat
         }
     }
     // If this moves, unchanged ground no longer matches what was there before, or elsewhere.
-    CHECK(digest == 0x01f8'efe6'0e62'2a97ULL);
+    CHECK(digest == 0x32b5'4efd'c82e'68feULL);
 }
 
 TEST_CASE("generator throughput", "[.bench]") {

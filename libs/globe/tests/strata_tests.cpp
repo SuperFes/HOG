@@ -1,5 +1,6 @@
 #include <hog/globe/cell.hpp>
 #include <hog/globe/generator.hpp>
+#include <hog/globe/material.hpp>
 #include <hog/globe/planet.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -155,4 +156,31 @@ TEST_CASE("loose cover creeps the ground smooth over the rough rock under it", "
         // A coarser detail's ground stands where the fine ground does, on average.
         CHECK(std::abs(relief.ground_mean) < 0.5);
     }
+}
+
+TEST_CASE("the ground under the sea is soaked to its pores, and dry above it", "[globe][strata]") {
+    const Generator earth = generator_for("earth");
+    const std::optional<double> level = earth.sea_level();
+    REQUIRE(level);
+    const double sea = level.value_or(0.0);
+    int soaked = 0;
+    int dry = 0;
+    for (std::uint64_t k = 0; k < 300; ++k) {
+        const DVec3 down = direction(k);
+        const double ground = hog::globe::ground_below(earth, down, 1.0).value_or(0.0);
+        const hog::globe::Sample under = earth.sample(down * (ground - 1.0), 1.0);
+        REQUIRE(under.distance < 0.0);
+        if (ground < sea) {
+            CHECK(under.liquid == Material::Water);
+            CHECK(under.water == hog::globe::properties(under.material).porosity);
+            CHECK(under.water > 0.0);
+            ++soaked;
+        } else if (ground > sea + 50.0) {
+            CHECK(under.water == 0.0);
+            CHECK(under.liquid == Material::Air);
+            ++dry;
+        }
+    }
+    CHECK(soaked > 50);
+    CHECK(dry > 50);
 }

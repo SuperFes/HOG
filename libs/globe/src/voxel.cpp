@@ -76,8 +76,9 @@ Voxel voxel_from(const Sample& sample, double band) noexcept {
     voxel.temperature = temperature_in_eighths(sample.temperature);
     if (sample.distance < 0.0) {
         voxel.solid = sample.material;
-    } else if (sample.water > 0.0) {
-        voxel.liquid = sample.material;
+    }
+    if (sample.water > 0.0) {
+        voxel.liquid = sample.liquid;
         voxel.liquid_amount = amount_of(sample.water);
     }
     return voxel;

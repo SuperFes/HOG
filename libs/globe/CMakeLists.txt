@@ -38,6 +38,7 @@ hog_add_tests(hog_globe
     tests/landform_survey_tests.cpp
     tests/layers_tests.cpp
     tests/mantle_tests.cpp
+    tests/material_tests.cpp
     tests/maths_tests.cpp
     tests/noise_tests.cpp
     tests/planet_tests.cpp

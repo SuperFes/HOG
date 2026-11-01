@@ -67,11 +67,27 @@ TEST_CASE("a generated sample makes shaped ground, open water or air", "[globe][
     CHECK(rock.liquid_amount == 0);
     CHECK(rock.temperature == 2'320);
 
-    const Voxel sea = hog::globe::voxel_from(
-        {.distance = 3.0, .material = Material::Water, .water = 1.0, .temperature = 280.0}, 2.0);
+    const Voxel sea = hog::globe::voxel_from({.distance = 3.0,
+                                              .material = Material::Water,
+                                              .water = 1.0,
+                                              .liquid = Material::Water,
+                                              .temperature = 280.0},
+                                             2.0);
     CHECK(sea.solid == Material::Air);
     CHECK(sea.liquid == Material::Water);
     CHECK(sea.liquid_amount == Voxel::full);
+
+    // Ground soaked through holds water in its pores, and is still ground.
+    const Voxel seabed = hog::globe::voxel_from({.distance = -0.5,
+                                                 .material = Material::Sediment,
+                                                 .water = 0.5,
+                                                 .liquid = Material::Water,
+                                                 .normal = up,
+                                                 .temperature = 280.0},
+                                                2.0);
+    CHECK(seabed.solid == Material::Sediment);
+    CHECK(seabed.liquid == Material::Water);
+    CHECK(seabed.liquid_amount == Voxel::full / 2);
 
     // Out of the band, only which side it's on is kept.
     const Voxel air = hog::globe::voxel_from({.distance = 50.0,

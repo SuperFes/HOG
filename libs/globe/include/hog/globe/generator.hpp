@@ -21,7 +21,10 @@ struct Sample {
     // to within the slope's curvature.
     double distance = 0.0;
     Material material = Material::Air; // the solid's, or what fills the open space
-    double water = 0.0;                // share of open space that is standing liquid
+    // Share of the point's volume that is liquid: all of open water, and a solid's pores where
+    // the ground is soaked through, under the sea.
+    double water = 0.0;
+    Material liquid = Material::Air; // what that liquid is
     // Unit, the way the distance grows fastest: out of the solid, near its surface; none where
     // the distance doesn't change.
     DVec3 normal{0.0};

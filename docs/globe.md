@@ -36,6 +36,8 @@ A cell is addressed by level, face and `(i, j)`. A level has `6 · 4^level` cell
 
 Terms blend by smooth union and subtraction, weighted by physical fields, not by hand.
 
+Each material counts only through its properties: density, melting point, strength and heat capacity, and for water its porosity, hydraulic conductivity, the slopes a loose heap of it holds dry and soaked, the drag a flow needs to carry it and how fast it goes once carried. Under the sea the ground is soaked to its pores; above, the generator leaves it dry for rain and seepage to wet.
+
 What v1 builds, all from the knobs:
 - **Reference level:** a province field split at the high crust's share, the provinces floating apart by the isostatic step across margins as wide as that step's slope allows. The radius stands at the sea, filling its share, or at the mean ground on dry worlds. The shell's floor lies `floor_depth` under the lowest ground surveyed.
 - **Relief:** mountain belts on long sinuous lines, set by the regime; peaks within them; rolling hills everywhere; ridges down plate worlds' ocean floors. Where water runs, gullies are cut from coarse to fine. Each width runs down the ground coarser than itself, so valleys branch as drainage does, without a simulation.
@@ -49,7 +51,7 @@ A column's terms depend on direction alone, so `Generator::column` computes them
 
 The store is one sparse tree per face over `(i, j, shell)`. Empty means "ask the generator", a uniform block of edits is a single tile, and edited blocks are palette-coded 8³ bricks. Matter comes in two kinds:
 - **Shaped matter,** such as rock, earth and buildings, carries a distance, its makeup and its condition: how worn, cracked or rotten it is.
-- **Loose matter,** such as water, sand, rubble, snow and lava, carries amounts.
+- **Loose matter,** such as water, sand, rubble, snow and lava, carries amounts. A solid voxel carries its pore water as a liquid amount too, up to its material's porosity.
 
 Only the server writes the store.
 
@@ -104,7 +106,7 @@ What the mesher draws:
 7. **Detail by distance,** crack-free across chunks and faces.
 8. **Materials and texturing.**
 9. **Server authority and streaming.**
-10. **Water and soil:** the loose cover crept smooth in the generator (done), then the materials' porosity, conductivity and erodibility, pore water, column sections with pipes between them, soil that softens when saturated and gives way, suspended load carried and dropped, the client's inland water, and the settle test: the simulation run on generated ground, which should move almost nothing. Lakes and rivers planet-wide wait for the drainage solve.
+10. **Water and soil:** the loose cover crept smooth in the generator (done); the materials' porosity, conductivity, repose dry and soaked, critical shear and erodibility, and the ground soaked to its pores under the sea (done); then column sections with pipes between them, soil that softens when saturated and gives way, suspended load carried and dropped, the client's inland water, and the settle test: the simulation run on generated ground, which should move almost nothing. Lakes and rivers planet-wide wait for the drainage solve.
 11. **Sand and rubble:** slumping to their angle of repose.
 12. **Collapse and wear.**
 13. **Lava and magma.**

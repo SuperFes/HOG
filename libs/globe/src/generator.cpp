@@ -321,9 +321,16 @@ Sample Generator::Column::sample(double radius) const noexcept {
         // apart.
         const double shown = std::max(0.0, depth - (lod_ / 2.0));
         sample.material = terms::material_at(context, strata_, shown, ground_ - shown);
-    } else if (generator_->shape_.sea && radius < planet.radius) {
-        sample.material = planet.volatiles == Volatile::Water ? Material::Water : Material::Air;
-        sample.water = 1.0;
+    }
+    // The sea fills the open space under its level, and the ground's pores below it.
+    if (generator_->shape_.sea && radius < planet.radius) {
+        sample.liquid = planet.volatiles == Volatile::Water ? Material::Water : Material::Air;
+        if (sample.distance < 0.0) {
+            sample.water = properties(sample.material).porosity;
+        } else {
+            sample.material = sample.liquid;
+            sample.water = 1.0;
+        }
     }
 
     const double lapse = lapse_rate(planet);

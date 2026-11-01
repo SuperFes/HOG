@@ -47,7 +47,7 @@ struct Voxel {
     std::uint8_t condition = sound;   // how whole it is; nothing is left of it at 0
     Material grain = Material::Air;   // sand, rubble or snow
     std::uint16_t grain_amount = 0;   // of `full`
-    Material liquid = Material::Air;  // water or lava
+    Material liquid = Material::Air;  // water or lava, filling open space or a solid's pores
     std::uint16_t liquid_amount = 0;
     std::uint16_t temperature = 0; // eighths of a kelvin
 
