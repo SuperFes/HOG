@@ -189,6 +189,11 @@ TEST_CASE("digging opens a ball in the ground and building fills one", "[globe][
     CHECK(world.at(site_at(ground.radius)).solid == Material::Air);
     CHECK(world.at(site_at(ground.radius - 2.5)).distance > 0);
     CHECK(world.at(site_at(ground.radius - 3.5)).distance < 0);
+    // Near its wall it faces in, to the middle; far from its wall it faces nowhere.
+    const DVec3 floor_normal =
+        hog::globe::unpacked_normal(world.at(site_at(ground.radius - 2.75)).normal);
+    CHECK(glm::dot(floor_normal, direction) > 0.99);
+    CHECK(world.at(site_at(ground.radius)).normal == Voxel::no_normal);
     const std::size_t dug = store.size();
     // Two bricks or more each way, and some more above and below it.
     CHECK(dug >= 4);
@@ -198,6 +203,10 @@ TEST_CASE("digging opens a ball in the ground and building fills one", "[globe][
     CHECK(world.at(site_at(ground.radius)).distance < 0);
     CHECK(world.at(site_at(ground.radius)).solid == Material::Granite);
     CHECK(world.at(site_at(ground.radius - 2.6)).distance > 0);
+    const Site built_side = site_at(ground.radius - 1.75);
+    const DVec3 built_normal = hog::globe::unpacked_normal(world.at(built_side).normal);
+    CHECK(glm::dot(built_normal,
+                   glm::normalize(hog::globe::middle_of(built_side, layers) - centre)) > 0.9998);
 
     // A ball dug out of the open sky changes nothing.
     VoxelStore untouched{layers};

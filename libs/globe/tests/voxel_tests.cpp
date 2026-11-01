@@ -4,7 +4,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <numbers>
 
 using hog::globe::Material;
 using hog::globe::Voxel;
@@ -29,11 +32,36 @@ TEST_CASE("voxels hold distance, amounts and temperature in fixed steps", "[glob
     CHECK(hog::globe::temperature_in_eighths(1e6) == 65'535);
 }
 
+TEST_CASE("a normal packs to within a degree, and none stays none", "[globe][voxel]") {
+    CHECK(glm::length(hog::globe::unpacked_normal(Voxel::no_normal)) == 0.0);
+    CHECK(hog::globe::packed_normal(hog::DVec3{0.0}) == Voxel::no_normal);
+    double worst = 0.0;
+    for (int a = 0; a <= 72; ++a) {
+        for (int b = 0; b <= 36; ++b) {
+            const double around = a * std::numbers::pi / 36.0;
+            const double down = b * std::numbers::pi / 36.0;
+            const hog::DVec3 unit{std::sin(down) * std::cos(around),
+                                  std::sin(down) * std::sin(around), std::cos(down)};
+            const std::uint16_t packed = hog::globe::packed_normal(unit);
+            CHECK(packed != Voxel::no_normal);
+            const hog::DVec3 back = hog::globe::unpacked_normal(packed);
+            CHECK(std::abs(glm::length(back) - 1.0) < 1e-12);
+            worst = std::max(worst, std::acos(std::min(glm::dot(unit, back), 1.0)));
+        }
+    }
+    CHECK(worst < std::numbers::pi / 180.0);
+}
+
 TEST_CASE("a generated sample makes shaped ground, open water or air", "[globe][voxel]") {
-    const Voxel rock = hog::globe::voxel_from(
-        {.distance = -0.75, .material = Material::Granite, .water = 0.0, .temperature = 290.0},
-        2.0);
+    const hog::DVec3 up{0.0, 0.0, 1.0};
+    const Voxel rock = hog::globe::voxel_from({.distance = -0.75,
+                                               .material = Material::Granite,
+                                               .water = 0.0,
+                                               .normal = up,
+                                               .temperature = 290.0},
+                                              2.0);
     CHECK(rock.distance == -750);
+    CHECK(rock.normal == hog::globe::packed_normal(up));
     CHECK(rock.solid == Material::Granite);
     CHECK(rock.condition == Voxel::sound);
     CHECK(rock.liquid_amount == 0);
@@ -45,8 +73,13 @@ TEST_CASE("a generated sample makes shaped ground, open water or air", "[globe][
     CHECK(sea.liquid == Material::Water);
     CHECK(sea.liquid_amount == Voxel::full);
 
-    const Voxel air = hog::globe::voxel_from(
-        {.distance = 50.0, .material = Material::Air, .water = 0.0, .temperature = 250.0}, 2.0);
+    // Out of the band, only which side it's on is kept.
+    const Voxel air = hog::globe::voxel_from({.distance = 50.0,
+                                              .material = Material::Air,
+                                              .water = 0.0,
+                                              .normal = up,
+                                              .temperature = 250.0},
+                                             2.0);
     CHECK(air == Voxel{.distance = 2'000, .temperature = 2'000});
     CHECK(sea.distance == 2'000);
 }

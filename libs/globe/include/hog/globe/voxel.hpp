@@ -39,13 +39,15 @@ struct Voxel {
     static constexpr std::int16_t far = 32'767; // millimetres, as far as distance is told
     static constexpr std::uint8_t sound = 255;
     static constexpr std::uint16_t full = 1U << 15U; // with room over it for matter pressed in
+    static constexpr std::uint16_t no_normal = 0;    // away from any surface
 
-    std::int16_t distance = far;     // millimetres to the shaped surface, negative inside
-    Material solid = Material::Air;  // what the shaped matter is made of
-    std::uint8_t condition = sound;  // how whole it is; nothing is left of it at 0
-    Material grain = Material::Air;  // sand, rubble or snow
-    std::uint16_t grain_amount = 0;  // of `full`
-    Material liquid = Material::Air; // water or lava
+    std::int16_t distance = far;      // millimetres to the shaped surface, negative inside
+    std::uint16_t normal = no_normal; // the surface's, out of the matter; packed_normal's
+    Material solid = Material::Air;   // what the shaped matter is made of
+    std::uint8_t condition = sound;   // how whole it is; nothing is left of it at 0
+    Material grain = Material::Air;   // sand, rubble or snow
+    std::uint16_t grain_amount = 0;   // of `full`
+    Material liquid = Material::Air;  // water or lava
     std::uint16_t liquid_amount = 0;
     std::uint16_t temperature = 0; // eighths of a kelvin
 
@@ -56,6 +58,11 @@ struct Voxel {
 [[nodiscard]] std::int16_t distance_in_mm(double metres) noexcept;
 [[nodiscard]] std::uint16_t amount_of(double share) noexcept;
 [[nodiscard]] std::uint16_t temperature_in_eighths(double kelvin) noexcept;
+// A unit direction to a degree or so, folded onto an octahedron and kept in a byte a side; never
+// Voxel::no_normal.
+[[nodiscard]] std::uint16_t packed_normal(DVec3 unit) noexcept;
+// Unit, or none for Voxel::no_normal.
+[[nodiscard]] DVec3 unpacked_normal(std::uint16_t packed) noexcept;
 
 [[nodiscard]] constexpr double metres(std::int16_t distance) noexcept {
     return distance / 1'000.0;
@@ -71,8 +78,9 @@ struct Voxel {
     return 4.0 * layers.thickness;
 }
 
-// The voxel a generated sample makes, its distance kept within `band`. All the generated ground
-// is shaped matter; it turns loose only once something disturbs it.
+// The voxel a generated sample makes, its distance kept within `band` and its normal only within
+// it, so voxels deep in matter or open space are alike. All the generated ground is shaped
+// matter; it turns loose only once something disturbs it.
 [[nodiscard]] Voxel voxel_from(const Sample& sample, double band) noexcept;
 
 } // namespace hog::globe

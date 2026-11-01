@@ -38,6 +38,8 @@ Voxels surface() {
             voxel.liquid_amount = Voxel::full;
         }
         voxel.temperature = static_cast<std::uint16_t>(2'300 + site.layer);
+        voxel.normal =
+            hog::globe::packed_normal(glm::normalize(hog::DVec3{0.1 * site.i, 0.05 * site.j, 1.0}));
     }
     return voxels;
 }
@@ -126,8 +128,8 @@ TEST_CASE("a damaged brick fails to read rather than read wrong", "[globe][brick
     Voxels voxels{};
     voxels.fill({.solid = Material::Granite});
     std::vector<std::byte> no_material = written(Brick::pack(voxels));
-    // The kind, then the distance's two bytes, then the solid's.
-    no_material[3] = std::byte{200};
+    // The kind, the distance's two bytes and the normal's two, then the solid's.
+    no_material[5] = std::byte{200};
     hog::ByteReader material{no_material};
     CHECK_FALSE(Brick::read(material));
 }

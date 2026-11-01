@@ -24,9 +24,55 @@ std::uint16_t temperature_in_eighths(double kelvin) noexcept {
     return static_cast<std::uint16_t>(std::lround(std::clamp(kelvin * 8.0, 0.0, 65'535.0)));
 }
 
+namespace {
+
+// Steps across the octahedron's unfolded square, either way from its middle.
+constexpr double normal_steps = 127.0;
+
+std::uint16_t normal_byte(double at) noexcept {
+    return static_cast<std::uint16_t>(
+        std::lround((std::clamp(at, -1.0, 1.0) * normal_steps) + 128.0));
+}
+
+} // namespace
+
+std::uint16_t packed_normal(DVec3 unit) noexcept {
+    const double across = std::abs(unit.x) + std::abs(unit.y) + std::abs(unit.z);
+    if (!(across > 0.0)) {
+        return Voxel::no_normal;
+    }
+    double u = unit.x / across;
+    double v = unit.y / across;
+    // The lower half folds out over the corners.
+    if (unit.z < 0.0) {
+        const double fold_u = (1.0 - std::abs(v)) * std::copysign(1.0, u);
+        v = (1.0 - std::abs(u)) * std::copysign(1.0, v);
+        u = fold_u;
+    }
+    // Each byte from 1 to 255, so none is never made.
+    return static_cast<std::uint16_t>((normal_byte(u) << 8U) | normal_byte(v));
+}
+
+DVec3 unpacked_normal(std::uint16_t packed) noexcept {
+    if (packed == Voxel::no_normal) {
+        return DVec3{0.0};
+    }
+    const double u = (static_cast<double>(packed >> 8U) - 128.0) / normal_steps;
+    const double v = (static_cast<double>(packed & 0xFFU) - 128.0) / normal_steps;
+    DVec3 unit{u, v, 1.0 - std::abs(u) - std::abs(v)};
+    if (unit.z < 0.0) {
+        unit.x = (1.0 - std::abs(v)) * std::copysign(1.0, u);
+        unit.y = (1.0 - std::abs(u)) * std::copysign(1.0, v);
+    }
+    return glm::normalize(unit);
+}
+
 Voxel voxel_from(const Sample& sample, double band) noexcept {
     Voxel voxel;
     voxel.distance = distance_in_mm(std::clamp(sample.distance, -band, band));
+    if (std::abs(sample.distance) < band) {
+        voxel.normal = packed_normal(sample.normal);
+    }
     voxel.temperature = temperature_in_eighths(sample.temperature);
     if (sample.distance < 0.0) {
         voxel.solid = sample.material;

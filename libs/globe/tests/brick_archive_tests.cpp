@@ -155,7 +155,7 @@ TEST_CASE("bricks saved for other layers or damaged fail to load", "[globe][arch
     }
     SECTION("a newer format") {
         MemoryBrickArchive newer;
-        const std::array header{std::byte{2}, std::byte{0}};
+        const std::array header{std::byte{hog::globe::brick_format + 1}, std::byte{0}};
         REQUIRE(newer.write(header, {}, {}));
         const auto loaded = hog::globe::load(layers, newer);
         REQUIRE_FALSE(loaded);

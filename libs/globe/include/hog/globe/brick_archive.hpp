@@ -64,7 +64,7 @@ private:
 };
 
 // The format bricks are saved in; it changes only when old saves still read.
-inline constexpr std::uint16_t brick_format = 1;
+inline constexpr std::uint16_t brick_format = 2;
 
 // Writes the bricks changed in the store since it was last saved; returns how many.
 [[nodiscard]] Result<std::size_t> save(VoxelStore& store, BrickArchive& archive);

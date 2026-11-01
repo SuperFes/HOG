@@ -160,17 +160,19 @@ std::map<BrickSite, std::vector<int>> sites_near(const VoxelStore& store, DVec3 
 }
 
 // Each voxel in the ball or within the band of its surface, given its distance to that surface
-// in the band.
+// in the band and, near it, the way out of the ball.
 void reshape(World& world, DVec3 centre, double radius, const auto& change) {
     const Layers& layers = world.store().layers();
     const double band = distance_band(layers);
     for (const auto& [brick, indices] : sites_near(world.store(), centre, radius + band)) {
         BrickVoxels voxels = world.brick(brick);
         for (const int index : indices) {
-            const double to_ball =
-                glm::length(middle_of(site_in(brick, index), layers) - centre) - radius;
+            const DVec3 out = middle_of(site_in(brick, index), layers) - centre;
+            const double to_ball = glm::length(out) - radius;
             if (to_ball <= band) {
-                change(voxels[static_cast<std::size_t>(index)], std::max(to_ball, -band));
+                const bool near = std::abs(to_ball) < band && glm::length(out) > 0.0;
+                change(voxels[static_cast<std::size_t>(index)], std::max(to_ball, -band),
+                       near ? glm::normalize(out) : DVec3{0.0});
             }
         }
         world.write(brick, voxels);
@@ -180,10 +182,11 @@ void reshape(World& world, DVec3 centre, double radius, const auto& change) {
 } // namespace
 
 void dig(World& world, DVec3 centre, double radius) {
-    reshape(world, centre, radius, [](Voxel& voxel, double to_ball) {
+    reshape(world, centre, radius, [](Voxel& voxel, double to_ball, DVec3 outward) {
         const std::int16_t out = distance_in_mm(-to_ball);
         if (out > voxel.distance) {
             voxel.distance = out;
+            voxel.normal = packed_normal(-outward);
             if (out > 0) {
                 voxel.solid = Material::Air;
             }
@@ -192,10 +195,11 @@ void dig(World& world, DVec3 centre, double radius) {
 }
 
 void build(World& world, DVec3 centre, double radius, Material material) {
-    reshape(world, centre, radius, [&](Voxel& voxel, double to_ball) {
+    reshape(world, centre, radius, [&](Voxel& voxel, double to_ball, DVec3 outward) {
         const std::int16_t in = distance_in_mm(to_ball);
         if (in < voxel.distance) {
             voxel.distance = in;
+            voxel.normal = packed_normal(outward);
             if (in < 0) {
                 voxel.solid = material;
                 voxel.condition = Voxel::sound;

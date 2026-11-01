@@ -122,6 +122,7 @@ public:
 private:
     struct Parts {
         Packed<std::int16_t> distance;
+        Packed<std::uint16_t> normal;
         Packed<Material> solid;
         Packed<std::uint8_t> condition;
         Packed<Material> grain;
