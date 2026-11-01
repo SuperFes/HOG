@@ -2,6 +2,7 @@ add_library(hog_globe
     src/accretion.cpp
     src/birth.cpp
     src/brick.cpp
+    src/brick_archive.cpp
     src/caves.cpp
     src/cell.cpp
     src/craters.cpp
@@ -33,6 +34,7 @@ hog_target_defaults(hog_globe)
 
 hog_add_tests(hog_globe
     tests/accretion_tests.cpp
+    tests/brick_archive_tests.cpp
     tests/brick_tests.cpp
     tests/caves_tests.cpp
     tests/cell_tests.cpp

@@ -79,14 +79,33 @@ TEST_CASE("the store tells which bricks changed, in order, once", "[globe][store
         store.put(site, dug_out());
     }
     CHECK(store.sites() == sites);
-    CHECK(store.take_changed() == sites);
-    CHECK(store.take_changed().empty());
+    CHECK(store.changed() == sites);
+    store.clear_changed();
+    CHECK(store.changed().empty());
 
     store.erase(sites[2]);
     store.erase({.face = 1, .i = 7, .j = 7, .layer = 7}); // never held: no change
     store.put(sites[0], half_filled());
-    CHECK(store.take_changed() == std::vector<BrickSite>{sites[0], sites[2]});
+    CHECK(store.changed() == std::vector<BrickSite>{sites[0], sites[2]});
     CHECK(store.sites() == std::vector<BrickSite>{sites[0], sites[1], sites[3]});
+}
+
+TEST_CASE("a brick's key orders and gives back its site", "[globe][store]") {
+    const std::vector<BrickSite> sites{
+        {.face = 0, .i = 0, .j = 0, .layer = 1},
+        {.face = 0, .i = 0, .j = 1, .layer = 0},
+        {.face = 0, .i = 1, .j = 0, .layer = 0},
+        {.face = 5,
+         .i = (1U << 21U) - 1,
+         .j = (1U << 21U) - 1,
+         .layer = hog::globe::most_bricks_up - 1},
+    };
+    for (std::size_t k = 0; k < sites.size(); ++k) {
+        CHECK(hog::globe::brick_at_key(hog::globe::brick_key(sites[k])) == sites[k]);
+        if (k > 0) {
+            CHECK(hog::globe::brick_key(sites[k - 1]) < hog::globe::brick_key(sites[k]));
+        }
+    }
 }
 
 TEST_CASE("a dug-out brick costs little to hold", "[globe][store]") {

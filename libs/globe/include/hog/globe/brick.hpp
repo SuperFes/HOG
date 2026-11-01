@@ -35,6 +35,23 @@ struct BrickSite {
             .layer = site.layer / brick_side};
 }
 
+// A brick's site as one number, ordered by face, then i, then j, then layer: the face in 3 bits,
+// i and j in 21 each, the layer in 19.
+inline constexpr std::uint32_t most_bricks_up = std::uint32_t{1} << 19U;
+
+[[nodiscard]] constexpr std::uint64_t brick_key(BrickSite site) noexcept {
+    return (std::uint64_t{site.face} << 61U) | (std::uint64_t{site.i} << 40U) |
+           (std::uint64_t{site.j} << 19U) | site.layer;
+}
+
+[[nodiscard]] constexpr BrickSite brick_at_key(std::uint64_t key) noexcept {
+    constexpr std::uint64_t across = (std::uint64_t{1} << 21U) - 1;
+    return {.face = static_cast<std::uint8_t>(key >> 61U),
+            .i = static_cast<std::uint32_t>((key >> 40U) & across),
+            .j = static_cast<std::uint32_t>((key >> 19U) & across),
+            .layer = static_cast<std::uint32_t>(key & (most_bricks_up - 1))};
+}
+
 // The brick's voxel at `index`, which runs along i, then j, then up.
 [[nodiscard]] constexpr Site site_in(BrickSite brick, int index) noexcept {
     const auto at = static_cast<std::uint32_t>(index);

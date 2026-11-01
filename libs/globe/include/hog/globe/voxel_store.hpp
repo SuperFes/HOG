@@ -43,13 +43,11 @@ public:
     // Every brick held, in order.
     [[nodiscard]] std::vector<BrickSite> sites() const;
 
-    // The bricks put or let go since this was last called, in order.
-    [[nodiscard]] std::vector<BrickSite> take_changed();
+    // The bricks put or let go since changes were last cleared, in order.
+    [[nodiscard]] std::vector<BrickSite> changed() const;
+    void clear_changed() noexcept { changed_.clear(); }
 
 private:
-    [[nodiscard]] static std::uint64_t key_of(BrickSite site) noexcept;
-    [[nodiscard]] static BrickSite site_of(std::uint64_t key) noexcept;
-
     Layers layers_;
     std::unordered_map<std::uint64_t, Brick> bricks_;
     std::unordered_set<std::uint64_t> changed_;
