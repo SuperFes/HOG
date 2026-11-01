@@ -2,6 +2,7 @@
 
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
+#include <hog/globe/detail.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
 #include <hog/globe/surface_mesh.hpp>
@@ -49,47 +50,76 @@ struct GlobeWorld {
 // How a material shows until the globe is textured.
 [[nodiscard]] Vec3 surface_colour(globe::Material material);
 
-// Chunks' surfaces as one mesh of blocks laid from `origin`, in metres from the planet's centre.
-[[nodiscard]] terrain::BlockMesh globe_blocks(std::span<const globe::SurfaceMesh* const> meshes,
-                                              DVec3 origin);
+// A chunk's surfaces as blocks, laid from the chunk's own origin.
+[[nodiscard]] terrain::BlockMesh globe_blocks(const globe::SurfaceMesh& mesh);
 
-// The globe's surfaces are drawn this far round the eye, and sought anew once it has gone this
-// far, a chunk's width.
-inline constexpr double globe_reach = 160.0; // metres
-inline constexpr double globe_relay = 16.0;  // metres
+// How the globe's detail falls off: each chunk as coarse as keeps it `ratio` of its widths from
+// the eye, out to the horizon and no less than `least` round it.
+struct GlobeDetail {
+    double ratio = 3.0;
+    double least = 1'000.0; // metres
+};
 
-// The globe's surfaces round the eye, meshed a chunk at a time in the background on the pool,
-// nearest first, and those out of reach let go. For the thread that made it; the world must
-// outlive it, unchanged while chunks are in flight.
+// The chunks are sought anew once the eye has gone this far, or a twentieth of its height.
+inline constexpr double globe_relay = 16.0; // metres
+
+// The key a chunk's mesh is shown under.
+[[nodiscard]] std::uint64_t globe_key(globe::Cell chunk);
+
+// The globe's surfaces round the eye, coarser further off, meshed a chunk at a time in the
+// background on the pool, nearest first. A chunk is meshed again when the detail of those beside
+// it changes, and one no longer wanted is let go only once those drawn in its place are there, so
+// the ground doesn't open. For the thread that made it; the world must outlive it, unchanged
+// while chunks are in flight.
 class GlobeStream {
 public:
-    GlobeStream(const globe::World& world, jobs::JobSystem& jobs, double reach = globe_reach);
+    GlobeStream(const globe::World& world, jobs::JobSystem& jobs, GlobeDetail detail = {});
 
-    // Wants the surfaces round the unit direction `eye`.
+    // Wants the surfaces round the eye, in metres from the planet's centre.
     void follow(DVec3 eye);
-    // Chunks still to mesh, or meshed and not yet handed over.
+    // Chunks still to mesh or let go, or changes not yet handed over.
     [[nodiscard]] bool in_flight() const noexcept;
-    // The surfaces as they now stand, if chunks have come or gone since the last; handed over as
-    // they arrive in growing batches, so the mesh isn't remade for every chunk.
-    [[nodiscard]] std::optional<terrain::BlockMesh> collect();
-    // Waits for every chunk wanted, and hands the surfaces over if they changed.
-    [[nodiscard]] std::optional<terrain::BlockMesh> finish();
 
-    [[nodiscard]] std::size_t chunks() const noexcept { return meshed_.size(); }
+    // What's changed since the last: chunks' meshes to show, each under its key, in place of any
+    // there, and the keys of those to take away.
+    struct Changes {
+        std::vector<std::pair<std::uint64_t, std::shared_ptr<const terrain::BlockMesh>>> shown;
+        std::vector<std::uint64_t> gone;
+
+        [[nodiscard]] bool empty() const noexcept { return shown.empty() && gone.empty(); }
+    };
+    [[nodiscard]] Changes collect();
+    // Waits for every chunk wanted first.
+    [[nodiscard]] Changes finish();
+
+    // Chunks shown, and those wanted round the eye, nearest first.
+    [[nodiscard]] std::size_t chunks() const noexcept { return shown_.size(); }
+    [[nodiscard]] std::span<const globe::Cell> wanted() const noexcept { return order_; }
 
 private:
+    // A chunk being meshed, against how those beside it were drawn when it started.
+    struct Working {
+        globe::Cell chunk;
+        std::uint32_t beside = 0;
+        std::unique_ptr<jobs::Async<globe::SurfaceMesh>> mesh;
+    };
+
     void start_more();
     void take(std::size_t working);
-    [[nodiscard]] terrain::BlockMesh mesh() const;
+    // Lets go of chunks no longer wanted whose ground those wanted now cover.
+    void let_go();
 
     const globe::World* world_;
     jobs::JobSystem* jobs_;
-    double reach_;
+    GlobeDetail detail_;
     std::optional<DVec3> around_;
-    std::vector<globe::Cell> wanted_; // farthest first
-    std::vector<std::pair<globe::Cell, std::unique_ptr<jobs::Async<globe::SurfaceMesh>>>> working_;
-    std::map<globe::Cell, globe::SurfaceMesh> meshed_;
-    std::size_t fresh_ = 0; // chunks meshed or let go since the surfaces were last handed over
+    std::shared_ptr<const globe::Drawn> drawn_;
+    std::vector<globe::Cell> order_;              // wanted, nearest first
+    std::map<globe::Cell, std::uint32_t> wanted_; // and how those beside each are drawn
+    std::vector<globe::Cell> queue_;              // to mesh, farthest first
+    std::vector<Working> working_;
+    std::map<globe::Cell, std::uint32_t> shown_; // as they were meshed against
+    Changes changes_;
 };
 
 } // namespace hog::client

@@ -8,6 +8,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <set>
+#include <span>
+#include <vector>
 
 using hog::DVec3;
 using hog::Vec3;
@@ -38,56 +40,81 @@ TEST_CASE("every material has a colour of its own", "[client][globe]") {
     CHECK(colours.size() == static_cast<std::size_t>(hog::globe::material_count));
 }
 
-TEST_CASE("chunks' surfaces become one mesh, each where it lies", "[client][globe]") {
-    SurfaceMesh first;
-    first.origin = DVec3{100.0, 0.0, 0.0};
-    first.vertices = {{.position = Vec3{1.0F, 0.0F, 0.0F},
-                       .normal = Vec3{1.0F, 0.0F, 0.0F},
-                       .material = Material::Granite},
-                      {.position = Vec3{0.0F, 1.0F, 0.0F},
-                       .normal = Vec3{1.0F, 0.0F, 0.0F},
-                       .material = Material::Granite},
-                      {.position = Vec3{0.0F, 0.0F, 1.0F},
-                       .normal = Vec3{1.0F, 0.0F, 0.0F},
-                       .material = Material::Water}};
-    first.indices = {0, 1, 2};
-    SurfaceMesh second = first;
-    second.origin = DVec3{100.0, 20.0, 0.0};
-    second.indices = {2, 1, 0};
-    const std::array meshes{&first, &second};
-    const hog::terrain::BlockMesh blocks =
-        hog::client::globe_blocks(meshes, DVec3{100.0, 10.0, 0.0});
-    REQUIRE(blocks.vertices.size() == 6);
-    CHECK(blocks.indices == std::vector<std::uint32_t>{0, 1, 2, 5, 4, 3});
-    CHECK(blocks.vertices[0].position == Vec3{1.0F, -10.0F, 0.0F});
-    CHECK(blocks.vertices[3].position == Vec3{1.0F, 10.0F, 0.0F});
+TEST_CASE("a chunk's surface becomes blocks where it lies", "[client][globe]") {
+    SurfaceMesh mesh;
+    mesh.origin = DVec3{100.0, 20.0, 0.0};
+    mesh.vertices = {{.position = Vec3{1.0F, 0.0F, 0.0F},
+                      .normal = Vec3{1.0F, 0.0F, 0.0F},
+                      .material = Material::Granite},
+                     {.position = Vec3{0.0F, 1.0F, 0.0F},
+                      .normal = Vec3{1.0F, 0.0F, 0.0F},
+                      .material = Material::Granite},
+                     {.position = Vec3{0.0F, 0.0F, 1.0F},
+                      .normal = Vec3{1.0F, 0.0F, 0.0F},
+                      .material = Material::Water}};
+    mesh.indices = {2, 1, 0};
+    const hog::terrain::BlockMesh blocks = hog::client::globe_blocks(mesh);
+    REQUIRE(blocks.vertices.size() == 3);
+    CHECK(blocks.origin.metres() == mesh.origin);
+    CHECK(blocks.indices == mesh.indices);
+    CHECK(blocks.vertices[0].position == Vec3{1.0F, 0.0F, 0.0F});
     CHECK(blocks.vertices[2].colour == hog::client::surface_colour(Material::Water));
 }
 
-TEST_CASE("the globe's surfaces follow the eye a chunk at a time", "[client][globe]") {
+namespace {
+
+// Keys shown, as changes come in.
+void apply(std::set<std::uint64_t>& shown, const hog::client::GlobeStream::Changes& changes) {
+    for (const auto& [key, mesh] : changes.shown) {
+        CHECK_FALSE(mesh->indices.empty());
+        shown.insert(key);
+    }
+    for (const std::uint64_t key : changes.gone) {
+        CHECK(shown.erase(key) == 1);
+    }
+}
+
+std::set<std::uint64_t> keys_of(std::span<const hog::globe::Cell> chunks) {
+    std::set<std::uint64_t> keys;
+    for (const hog::globe::Cell chunk : chunks) {
+        keys.insert(hog::client::globe_key(chunk));
+    }
+    return keys;
+}
+
+} // namespace
+
+TEST_CASE("the globe's surfaces follow the eye, coarser further off", "[client][globe]") {
     const hog::client::GlobeWorld globe{hog::globe::Planet{}};
     hog::jobs::JobSystem jobs{3};
-    constexpr double reach = 25.0;
-    hog::client::GlobeStream stream{globe.world, jobs, reach};
-    const DVec3 here = hog::globe::center(hog::globe::cell_at_index(7, 4'321));
-    stream.follow(here);
+    hog::client::GlobeStream stream{globe.world, jobs, {.ratio = 1.5, .least = 120.0}};
+    const double radius = globe.generator.planet().radius;
+    const DVec3 up = hog::globe::center(hog::globe::cell_at_index(7, 4'321));
+    const auto eye_over = [&](DVec3 at, double height) {
+        return at * (radius + hog::client::globe_ground(globe.generator, at) + height);
+    };
+    std::set<std::uint64_t> shown;
+    stream.follow(eye_over(up, 0.0));
     CHECK(stream.in_flight());
-    const hog::terrain::BlockMesh shown = stream.finish().value_or(hog::terrain::BlockMesh{});
+    apply(shown, stream.finish());
     CHECK_FALSE(stream.in_flight());
-    CHECK(shown.vertices.size() > 1'000);
-    CHECK(shown.indices.size() % 3 == 0);
-    const std::size_t near = stream.chunks();
-    CHECK(near == hog::globe::chunks_near(globe.world, here, reach).size());
+    // Every chunk wanted is shown, at more than one detail.
+    CHECK(shown == keys_of(stream.wanted()));
+    std::set<int> details;
+    for (const hog::globe::Cell chunk : stream.wanted()) {
+        details.insert(hog::globe::detail_of(chunk, globe.generator.layers()));
+    }
+    CHECK(details.size() > 1);
 
     // Going nowhere much changes nothing.
-    const double radius = globe.generator.planet().radius;
-    stream.follow(glm::normalize(here + DVec3{0.0, 0.0, 2.0 / radius}));
+    stream.follow(eye_over(glm::normalize(up + DVec3{0.0, 0.0, 2.0 / radius}), 0.0));
     CHECK_FALSE(stream.in_flight());
-    CHECK_FALSE(stream.collect());
+    CHECK(stream.collect().empty());
 
-    // Far off, the chunks left behind are let go.
-    const DVec3 there = glm::normalize(here + DVec3{0.0, 0.0, 400.0 / radius});
-    stream.follow(there);
-    REQUIRE(stream.finish());
-    CHECK(stream.chunks() == hog::globe::chunks_near(globe.world, there, reach).size());
+    // Far off, the chunks left behind are let go, and those beside the new meshed again.
+    const DVec3 there = glm::normalize(up + DVec3{0.0, 0.0, 200.0 / radius});
+    stream.follow(eye_over(there, 0.0));
+    apply(shown, stream.finish());
+    CHECK(shown == keys_of(stream.wanted()));
+    CHECK(stream.chunks() == shown.size());
 }

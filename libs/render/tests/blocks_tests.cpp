@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -43,14 +44,10 @@ void add_square(BlockMesh& mesh, double away, hog::Vec3 colour) {
     }
 }
 
-// Draws over a black background, looking down -z from `eye` on a planet a thousand kilometres
-// across whose ground is `up` there, and reads it back.
-std::vector<std::uint8_t> draw(hog::render::Device& device, BlockMesh mesh, DVec3 sun,
-                               WorldPosition eye = {}, DVec3 up = {0.0, 0.0, 1.0}) {
-    auto blocks =
-        hog::render::Blocks::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
-    REQUIRE(blocks);
-    blocks->show(std::make_shared<const BlockMesh>(std::move(mesh)));
+// Draws the blocks over a black background, looking down -z from `eye` on a planet a thousand
+// kilometres across whose ground is `up` there, and reads it back.
+std::vector<std::uint8_t> render(hog::render::Device& device, hog::render::Blocks& blocks,
+                                 DVec3 sun, WorldPosition eye = {}, DVec3 up = {0.0, 0.0, 1.0}) {
     auto target = hog::render::make_image(
         device, {.format = VK_FORMAT_R8G8B8A8_UNORM,
                  .extent = extent,
@@ -76,13 +73,22 @@ std::vector<std::uint8_t> draw(hog::render::Device& device, BlockMesh mesh, DVec
         hog::render::begin_rendering(commands, target->view(), extent,
                                      VkClearColorValue{.float32 = {0.0F, 0.0F, 0.0F, 1.0F}},
                                      {.view = depth->view()});
-        drawn = blocks->draw(commands, extent, view, 0).has_value();
+        drawn = blocks.draw(commands, extent, view, 0).has_value();
         vkCmdEndRendering(commands);
     }));
     REQUIRE(drawn);
     auto pixels = hog::render::read_pixels(device, *target, hog::render::image_use::colour_target);
     REQUIRE(pixels);
     return std::move(pixels).value();
+}
+
+std::vector<std::uint8_t> draw(hog::render::Device& device, BlockMesh mesh, DVec3 sun,
+                               WorldPosition eye = {}, DVec3 up = {0.0, 0.0, 1.0}) {
+    auto blocks =
+        hog::render::Blocks::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
+    REQUIRE(blocks);
+    blocks->show(std::make_shared<const BlockMesh>(std::move(mesh)));
+    return render(device, *blocks, sun, eye, up);
 }
 
 Pixel middle(const std::vector<std::uint8_t>& pixels) {
@@ -183,4 +189,38 @@ TEST_CASE("blocks are drawn from their origin, wherever the eye is", "[render][g
     CHECK(middle(draw(*device, mesh, DVec3{0.0, 0.0, 1.0}, far))[0] > 240);
     // Seen from elsewhere, it's not there.
     CHECK(middle(draw(*device, mesh, DVec3{0.0, 0.0, 1.0}))[0] == 0);
+}
+
+TEST_CASE("meshes placed apart are drawn each from its own origin, until taken away",
+          "[render][gpu]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    auto blocks =
+        hog::render::Blocks::create(*device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
+    REQUIRE(blocks);
+    // Two squares a planet's radius apart, each where its own origin is.
+    const WorldPosition here{6.4e6, 0.0, 0.0};
+    const WorldPosition there{0.0, 6.4e6, 0.0};
+    for (const auto& [key, at, colour] : {std::tuple{1U, here, hog::Vec3{1.0F, 0.0F, 0.0F}},
+                                          std::tuple{2U, there, hog::Vec3{0.0F, 1.0F, 0.0F}}}) {
+        BlockMesh mesh{.origin = at, .vertices = {}, .indices = {}};
+        add_square(mesh, 4.0, colour);
+        blocks->place(key, std::make_shared<const BlockMesh>(std::move(mesh)));
+    }
+    CHECK(blocks->placed() == 2);
+    CHECK(middle(render(*device, *blocks, DVec3{0.0, 0.0, 1.0}, here))[0] > 240);
+    CHECK(middle(render(*device, *blocks, DVec3{0.0, 0.0, 1.0}, there))[1] > 240);
+    // Placed again, it's replaced; taken away, it's gone.
+    BlockMesh blue{.origin = here, .vertices = {}, .indices = {}};
+    add_square(blue, 4.0, hog::Vec3{0.0F, 0.0F, 1.0F});
+    blocks->place(1, std::make_shared<const BlockMesh>(std::move(blue)));
+    CHECK(blocks->placed() == 2);
+    const Pixel replaced = middle(render(*device, *blocks, DVec3{0.0, 0.0, 1.0}, here));
+    CHECK(replaced[0] < 10);
+    CHECK(replaced[2] > 240);
+    blocks->remove(1);
+    CHECK(blocks->placed() == 1);
+    CHECK(middle(render(*device, *blocks, DVec3{0.0, 0.0, 1.0}, here))[2] == 0);
 }

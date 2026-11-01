@@ -182,6 +182,8 @@ private:
     terrain::StreamFrame stream_ground(const terrain::Viewpoint& seen);
     // Wants the depths round the eye, and takes any worked out; or gives the ocean those taken.
     void follow_shore(const Shot& shot);
+    // Shows the globe's chunks that have come, and takes away those gone.
+    void show_globe(GlobeStream::Changes changes);
     Result<> give_shore(VkCommandBuffer commands, std::uint32_t slot);
     // Adds the pass growing the grass on the drawn patches, blown by `wind`, ready to draw; false
     // where none grows.

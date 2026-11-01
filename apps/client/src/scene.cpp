@@ -315,8 +315,20 @@ void Scene::finish_bakes() {
     if (auto mesh = block_stream_.finish(); mesh && blocks_ && !globe_) {
         blocks_->show(std::make_shared<const terrain::BlockMesh>(std::move(mesh).value()));
     }
-    if (auto mesh = globe_ ? globe_->finish() : std::nullopt; mesh && blocks_) {
-        blocks_->show(std::make_shared<const terrain::BlockMesh>(std::move(mesh).value()));
+    if (globe_) {
+        show_globe(globe_->finish());
+    }
+}
+
+void Scene::show_globe(GlobeStream::Changes changes) {
+    if (!blocks_) {
+        return;
+    }
+    for (auto& [key, mesh] : changes.shown) {
+        blocks_->place(key, std::move(mesh));
+    }
+    for (const std::uint64_t key : changes.gone) {
+        blocks_->remove(key);
     }
 }
 
@@ -459,10 +471,8 @@ void Scene::follow_shore(const Shot& shot) {
         blocks_->show(std::make_shared<const terrain::BlockMesh>(std::move(mesh).value()));
     }
     if (globe_) {
-        globe_->follow(glm::normalize(shot.camera.eye.metres()));
-        if (auto mesh = globe_->collect(); mesh && blocks_) {
-            blocks_->show(std::make_shared<const terrain::BlockMesh>(std::move(mesh).value()));
-        }
+        globe_->follow(shot.camera.eye.metres());
+        show_globe(globe_->collect());
     }
 }
 

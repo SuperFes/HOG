@@ -2,8 +2,11 @@
 #include <hog/core/assert.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
-#include <iterator>
+#include <cstdint>
+#include <optional>
+#include <ranges>
 #include <set>
 #include <string>
 #include <utility>
@@ -72,121 +75,173 @@ Vec3 surface_colour(globe::Material material) {
     return {1.0F, 0.0F, 1.0F};
 }
 
-terrain::BlockMesh globe_blocks(std::span<const globe::SurfaceMesh* const> meshes, DVec3 origin) {
-    terrain::BlockMesh blocks{.origin = WorldPosition{origin}, .vertices = {}, .indices = {}};
-    std::size_t vertices = 0;
-    std::size_t indices = 0;
-    for (const globe::SurfaceMesh* mesh : meshes) {
-        vertices += mesh->vertices.size();
-        indices += mesh->indices.size();
+terrain::BlockMesh globe_blocks(const globe::SurfaceMesh& mesh) {
+    terrain::BlockMesh blocks{.origin = WorldPosition{mesh.origin}, .vertices = {}, .indices = {}};
+    blocks.vertices.reserve(mesh.vertices.size());
+    for (const globe::SurfaceVertex& vertex : mesh.vertices) {
+        blocks.vertices.push_back({.position = vertex.position,
+                                   .normal = vertex.normal,
+                                   .colour = surface_colour(vertex.material)});
     }
-    blocks.vertices.reserve(vertices);
-    blocks.indices.reserve(indices);
-    for (const globe::SurfaceMesh* mesh : meshes) {
-        const auto first = static_cast<std::uint32_t>(blocks.vertices.size());
-        const Vec3 offset{mesh->origin - origin};
-        for (const globe::SurfaceVertex& vertex : mesh->vertices) {
-            blocks.vertices.push_back({.position = offset + vertex.position,
-                                       .normal = vertex.normal,
-                                       .colour = surface_colour(vertex.material)});
-        }
-        std::ranges::transform(mesh->indices, std::back_inserter(blocks.indices),
-                               [&](std::uint32_t index) { return first + index; });
-    }
+    blocks.indices = mesh.indices;
     return blocks;
 }
 
-GlobeStream::GlobeStream(const globe::World& world, jobs::JobSystem& jobs, double reach)
-    : world_{&world}, jobs_{&jobs}, reach_{reach} {}
+std::uint64_t globe_key(globe::Cell chunk) {
+    return (std::uint64_t{chunk.level} << 56U) | globe::index_of(chunk);
+}
+
+namespace {
+
+// How the chunks beside one are drawn, by each: at its detail, coarser, finer, or not at all.
+std::uint32_t drawn_beside(const globe::Drawn& drawn, globe::Cell chunk) {
+    std::uint32_t found = 0;
+    const globe::CellNeighbors near = globe::around(chunk);
+    for (const globe::Cell beside : near.all()) {
+        std::uint32_t how = 3;
+        if (const std::optional<globe::Cell> over = drawn.over(beside)) {
+            how = *over == beside ? 0 : 1;
+        } else if (std::ranges::any_of(globe::children(beside),
+                                       [&](globe::Cell finer) { return drawn.contains(finer); })) {
+            how = 2;
+        }
+        found = (found << 2U) | how;
+    }
+    return found;
+}
+
+// Metres to the horizon from `height` over a sphere of `radius`.
+double horizon(double radius, double height) {
+    return std::sqrt((2.0 * radius * height) + (height * height));
+}
+
+} // namespace
+
+GlobeStream::GlobeStream(const globe::World& world, jobs::JobSystem& jobs, GlobeDetail detail)
+    : world_{&world}, jobs_{&jobs}, detail_{detail} {}
 
 void GlobeStream::follow(DVec3 eye) {
-    const double radius = world_->generator().planet().radius;
-    if (around_ && glm::length(eye - *around_) * radius <= globe_relay) {
+    const globe::Generator& generator = world_->generator();
+    const double radius = generator.planet().radius;
+    const DVec3 up = glm::normalize(eye);
+    const double height = std::max(0.0, glm::length(eye) - radius - globe_ground(generator, eye));
+    if (around_ && glm::length(eye - *around_) <= std::max(globe_relay, height / 20.0)) {
         return;
     }
     around_ = eye;
-    // Let go only past the relay, so chunks at the edge don't come and go as the eye wanders.
-    fresh_ += std::erase_if(meshed_, [&](const auto& meshed) {
-        return glm::length(globe::center(meshed.first) - eye) * radius > reach_ + globe_relay;
-    });
-    std::set<globe::Cell> started;
-    for (const auto& [chunk, async] : working_) {
-        started.insert(chunk);
-    }
+    const double reach = std::max(detail_.least, horizon(radius, height));
+    order_ = globe::chunks_around(generator, {.up = up, .height = height}, reach, detail_.ratio);
+    drawn_ = std::make_shared<const globe::Drawn>(order_);
     wanted_.clear();
-    for (const globe::Cell chunk : globe::chunks_near(*world_, eye, reach_)) {
-        if (!meshed_.contains(chunk) && !started.contains(chunk)) {
-            wanted_.push_back(chunk);
+    for (const globe::Cell chunk : order_) {
+        wanted_.emplace(chunk, drawn_beside(*drawn_, chunk));
+    }
+    queue_.clear();
+    for (const globe::Cell chunk : order_ | std::views::reverse) {
+        const std::uint32_t beside = wanted_.at(chunk);
+        const auto shown = shown_.find(chunk);
+        const bool meshing = std::ranges::any_of(working_, [&](const Working& work) {
+            return work.chunk == chunk && work.beside == beside;
+        });
+        if ((shown == shown_.end() || shown->second != beside) && !meshing) {
+            queue_.push_back(chunk);
         }
     }
-    std::ranges::reverse(wanted_);
     start_more();
+    let_go();
 }
 
 bool GlobeStream::in_flight() const noexcept {
-    return !wanted_.empty() || !working_.empty() || fresh_ > 0;
+    return !queue_.empty() || !working_.empty() || !changes_.empty() ||
+           std::ranges::any_of(shown_,
+                               [&](const auto& shown) { return !wanted_.contains(shown.first); });
 }
 
 void GlobeStream::start_more() {
     // Leaves a thread for drawing.
     const std::size_t most = std::max<std::size_t>(1, jobs_->thread_count() - 1);
     const double radius = world_->generator().planet().radius;
-    while (working_.size() < most && !wanted_.empty()) {
-        const globe::Cell chunk = wanted_.back();
-        wanted_.pop_back();
-        working_.emplace_back(chunk, std::make_unique<jobs::Async<globe::SurfaceMesh>>(
-                                         *jobs_, [world = world_, chunk, radius] {
-                                             globe::SurfaceMesh mesh;
-                                             mesh.origin = globe::center(chunk) * radius;
-                                             globe::add_chunk(mesh, *world, chunk);
-                                             return mesh;
-                                         }));
+    while (working_.size() < most && !queue_.empty()) {
+        const globe::Cell chunk = queue_.back();
+        queue_.pop_back();
+        working_.push_back({.chunk = chunk,
+                            .beside = wanted_.at(chunk),
+                            .mesh = std::make_unique<jobs::Async<globe::SurfaceMesh>>(
+                                *jobs_, [world = world_, drawn = drawn_, chunk, radius] {
+                                    globe::SurfaceMesh mesh;
+                                    mesh.origin = globe::center(chunk) * radius;
+                                    globe::add_chunk(mesh, *world, chunk, *drawn);
+                                    return mesh;
+                                })});
     }
 }
 
 void GlobeStream::take(std::size_t working) {
-    auto& [chunk, async] = working_[working];
-    meshed_.insert_or_assign(chunk, async->take());
+    Working work = std::move(working_[working]);
     working_.erase(working_.begin() + static_cast<std::ptrdiff_t>(working));
-    ++fresh_;
+    const globe::SurfaceMesh mesh = work.mesh->take();
+    // Meshed against neighbours since drawn otherwise, it's been sought again.
+    if (const auto wanted = wanted_.find(work.chunk);
+        wanted == wanted_.end() || wanted->second != work.beside) {
+        return;
+    }
+    shown_.insert_or_assign(work.chunk, work.beside);
+    changes_.shown.emplace_back(globe_key(work.chunk),
+                                std::make_shared<const terrain::BlockMesh>(globe_blocks(mesh)));
 }
 
-std::optional<terrain::BlockMesh> GlobeStream::collect() {
+void GlobeStream::let_go() {
+    // Chunks wanted and not yet shown, and every one over them.
+    std::set<globe::Cell> pending;
+    std::set<globe::Cell> under_pending;
+    for (const auto& [chunk, beside] : wanted_) {
+        if (shown_.contains(chunk)) {
+            continue;
+        }
+        pending.insert(chunk);
+        for (globe::Cell over = chunk; over.level > 0;) {
+            over = globe::parent(over);
+            under_pending.insert(over);
+        }
+    }
+    std::erase_if(shown_, [&](const auto& shown) {
+        const globe::Cell chunk = shown.first;
+        if (wanted_.contains(chunk) || under_pending.contains(chunk)) {
+            return false;
+        }
+        for (globe::Cell over = chunk;; over = globe::parent(over)) {
+            if (pending.contains(over)) {
+                return false;
+            }
+            if (over.level == 0) {
+                break;
+            }
+        }
+        changes_.gone.push_back(globe_key(chunk));
+        return true;
+    });
+}
+
+GlobeStream::Changes GlobeStream::collect() {
     for (std::size_t working = working_.size(); working-- > 0;) {
-        if (working_[working].second->done()) {
+        if (working_[working].mesh->done()) {
             take(working);
         }
     }
     start_more();
-    // In batches of a quarter of what's shown, so it's remade a few times over as it fills.
-    const bool all = wanted_.empty() && working_.empty();
-    if (fresh_ == 0 || (!all && fresh_ * 4 < std::max<std::size_t>(meshed_.size(), 4))) {
-        return std::nullopt;
-    }
-    fresh_ = 0;
-    return mesh();
+    let_go();
+    return std::exchange(changes_, {});
 }
 
-std::optional<terrain::BlockMesh> GlobeStream::finish() {
+GlobeStream::Changes GlobeStream::finish() {
+    start_more();
     while (!working_.empty()) {
-        take(working_.size() - 1);
+        // The oldest, as it's furthest along.
+        take(0);
         start_more();
     }
-    if (fresh_ == 0) {
-        return std::nullopt;
-    }
-    fresh_ = 0;
-    return mesh();
-}
-
-terrain::BlockMesh GlobeStream::mesh() const {
-    HOG_ASSERT(around_.has_value(), "surfaces are meshed round where the eye was");
-    std::vector<const globe::SurfaceMesh*> meshes;
-    meshes.reserve(meshed_.size());
-    for (const auto& [chunk, meshed] : meshed_) {
-        meshes.push_back(&meshed);
-    }
-    return globe_blocks(meshes, *around_ * world_->generator().planet().radius);
+    let_go();
+    return std::exchange(changes_, {});
 }
 
 } // namespace hog::client

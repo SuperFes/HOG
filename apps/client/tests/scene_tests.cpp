@@ -1179,7 +1179,9 @@ TEST_CASE("the globe's voxels, to look at", "[.look]") {
         const hog::DVec3 at = glm::normalize(noon + hog::DVec3{0.0, 0.0, 0.3});
         const double ground = hog::client::globe_ground(globe.generator, noon);
         for (const auto& [shot, height, pitch] :
-             {std::tuple{"high", 60.0, -0.6}, std::tuple{"low", 6.0, -0.12}}) {
+             {std::tuple{"high", 60.0, -0.6}, std::tuple{"low", 6.0, -0.12},
+              std::tuple{"1km", 1'000.0, -0.25}, std::tuple{"15km", 15'000.0, -0.45},
+              std::tuple{"orbit", 400'000.0, -1.5}}) {
             hog::client::Flight flight =
                 hog::client::start_flight(noon, radius, ground + height, at);
             flight.pitch = pitch;
