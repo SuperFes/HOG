@@ -81,24 +81,30 @@ void add(Noise& sum, const Noise& more) {
 
 } // namespace
 
-Noise relief(const Context& context, DVec3 direction, const Province& crust, double lod) noexcept {
+Noise built_up(const Context& context, DVec3 direction, const Province& crust) noexcept {
+    const Planet& planet = *context.planet;
+    const Derived& derived = *context.derived;
+    const Building build = building(planet.regime);
+    const double spacing =
+        std::max(belt_spacing * derived.lateral, belt_spacing_per_height * derived.tallest);
+    const Noise belt_field = fbm(direction * planet.radius,
+                                 {.wavelength = spacing, .gain = 0.5, .finest = spacing / 4.0}, 0.0,
+                                 context.seed(Term::Belts));
+    const Noise building_here{.value = build.on_low + ((build.on_high - build.on_low) * crust.high),
+                              .gradient = (build.on_high - build.on_low) * crust.gradient};
+    return product(line(belt_field, belt_width), building_here);
+}
+
+Noise relief(const Context& context, DVec3 direction, const Province& crust, const Noise& built,
+             double lod) noexcept {
     const Planet& planet = *context.planet;
     const Derived& derived = *context.derived;
     const DVec3 at = direction * planet.radius;
     const double tallest = derived.tallest;
     Noise height;
 
-    // Where mountains are built, and how much.
-    const Building build = building(planet.regime);
-    const double spacing =
-        std::max(belt_spacing * derived.lateral, belt_spacing_per_height * tallest);
-    const Noise belt_field = fbm(at, {.wavelength = spacing, .gain = 0.5, .finest = spacing / 4.0},
-                                 0.0, context.seed(Term::Belts));
-    const Noise building_here{.value = build.on_low + ((build.on_high - build.on_low) * crust.high),
-                              .gradient = (build.on_high - build.on_low) * crust.gradient};
     // Half the mountains' reach stands as the belt's bulk, the peaks' octaves rise and fall on it.
-    const Noise mountains =
-        scaled(product(line(belt_field, belt_width), building_here), 0.5 * tallest / octave_reach);
+    const Noise mountains = scaled(built, 0.5 * tallest / octave_reach);
     add(height, mountains);
     const Noise hill_scale{.value = hill_height * (1.0 + crust.high),
                            .gradient = hill_height * crust.gradient};

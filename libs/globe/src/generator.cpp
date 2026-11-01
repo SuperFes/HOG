@@ -21,6 +21,13 @@ constexpr int survey_level = 6;
 // Air cools as it rises by g/cp; Earth's moist air at 6.5 K/km, scaled by gravity.
 constexpr double earth_lapse = 0.0065;
 
+// The detail soil and snow follow, in metres.
+constexpr double broad_slope_scale = 16.0;
+
+double lapse_rate(const Planet& planet) {
+    return planet.pressure > 0.0 ? earth_lapse * planet.gravity / 9.81 : 0.0;
+}
+
 struct Surveyed {
     double value;
     double area;
@@ -140,9 +147,16 @@ Generator::Column Generator::column(DVec3 direction, double lod) const noexcept 
     column.generator_ = this;
     column.ground_ = planet_.radius + found.height.value - shape_.datum;
     column.slope_ = ground_slope(context, down, lod);
-    column.rock_ = found.high >= 0.5 ? planet_.high.rock : planet_.low.rock;
     const double latitude = maths::atan2(down.z, std::sqrt((down.x * down.x) + (down.y * down.y)));
     column.surface_temperature_ = temperature_at(planet_, latitude);
+    const double height = column.ground_ - planet_.radius;
+    // Soil and snow lie by the slope over tens of metres, not the ground's grain.
+    const double broad = std::max(lod, broad_slope_scale);
+    const DVec3 tilt =
+        broad == lod ? found.height.gradient : terms::column(context, down, broad).height.gradient;
+    column.strata_ = terms::layering(context, down, found, height, glm::length(tilt),
+                                     column.surface_temperature_ -
+                                         (lapse_rate(planet_) * std::max(0.0, height)));
     return column;
 }
 
@@ -154,13 +168,16 @@ Sample Generator::Column::sample(double radius) const noexcept {
     sample.distance = (radius - ground_) / std::sqrt(1.0 + (slope * slope));
 
     if (sample.distance < 0.0) {
-        sample.material = rock_;
+        const terms::Context context{.planet = &generator_->planet_,
+                                     .derived = &generator_->derived_,
+                                     .shape = &generator_->shape_};
+        sample.material = terms::material_at(context, strata_, ground_ - radius, radius);
     } else if (generator_->shape_.sea && radius < planet.radius) {
         sample.material = planet.volatiles == Volatile::Water ? Material::Water : Material::Air;
         sample.water = 1.0;
     }
 
-    const double lapse = planet.pressure > 0.0 ? earth_lapse * planet.gravity / 9.81 : 0.0;
+    const double lapse = lapse_rate(planet);
     const double surface = surface_temperature_ - (lapse * std::max(0.0, ground_ - planet.radius));
     if (sample.distance < 0.0) {
         sample.temperature = surface + (generator_->derived_.geotherm * (ground_ - radius));
@@ -213,11 +230,13 @@ namespace terms {
 Column column(const Context& context, DVec3 direction, double lod) noexcept {
     const Province crust = province(context, direction);
     const double step = context.derived->isostatic_step;
-    const Noise shaped = relief(context, direction, crust, lod);
+    const Noise built = built_up(context, direction, crust);
+    const Noise shaped = relief(context, direction, crust, built, lod);
     const Noise struck = craters(context, direction, lod);
     return {.height = {.value = (step * crust.high) + shaped.value + struck.value,
                        .gradient = (step * crust.gradient) + shaped.gradient + struck.gradient},
-            .high = crust.high};
+            .high = crust.high,
+            .built = built.value};
 }
 
 } // namespace terms

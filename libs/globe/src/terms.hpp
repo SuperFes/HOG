@@ -19,6 +19,9 @@ enum class Term : std::uint8_t {
     Ridges,
     Gullies,
     Craters,
+    Strata,
+    Basins,
+    Folds,
 };
 
 struct Context {
@@ -48,9 +51,13 @@ struct Province {
 
 [[nodiscard]] Province province(const Context& context, DVec3 direction) noexcept;
 
+// How much mountain building has gone on here, from 0 to 1: the belts, by the regime.
+[[nodiscard]] Noise built_up(const Context& context, DVec3 direction,
+                             const Province& crust) noexcept;
+
 // Mountains, hills and ocean ridges, by the regime and the erosion at work.
 [[nodiscard]] Noise relief(const Context& context, DVec3 direction, const Province& crust,
-                           double lod) noexcept;
+                           const Noise& built, double lod) noexcept;
 
 // One width of gullies, cut straight down `slope` (the ground's, coarser than them), as deep as
 // `share` of the fall across their width, faded in by `weight`.
@@ -75,9 +82,20 @@ struct CraterProfile {
 // The ground's raw height along a direction, the sum of every column term.
 struct Column {
     Noise height;
-    double high = 0.0; // share of high crust
+    double high = 0.0;  // share of high crust
+    double built = 0.0; // share of mountain building
 };
 
 [[nodiscard]] Column column(const Context& context, DVec3 direction, double lod) noexcept;
+
+using Layering = Strata;
+
+// From the ground's height over the radius, its slope and its year-mean temperature.
+[[nodiscard]] Layering layering(const Context& context, DVec3 direction, const Column& column,
+                                double height, double slope, double temperature) noexcept;
+
+// What's `depth` metres under the ground at `radius`.
+[[nodiscard]] Material material_at(const Context& context, const Layering& layers, double depth,
+                                   double radius) noexcept;
 
 } // namespace hog::globe::terms

@@ -26,6 +26,7 @@ const Properties& properties(Material material) {
          .melts = 1700.0,
          .strength = 1.3e8,
          .heat_capacity = 800.0}, // anorthosite
+        {.density = 1500.0, .melts = 1400.0, .strength = 1e4, .heat_capacity = 750.0}, // regolith
     }};
     return all[static_cast<std::size_t>(material)];
 }

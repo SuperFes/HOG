@@ -51,6 +51,9 @@ Vec3 hexel_colour(const globe::Hexel& hexel) {
     case Material::Anorthosite:
         colour = {0.7F, 0.7F, 0.68F};
         break;
+    case Material::Regolith:
+        colour = {0.52F, 0.5F, 0.48F};
+        break;
     }
     const double melts = globe::properties(hexel.material).melts;
     if (melts <= 0.0 || hexel.material == Material::Water || hexel.temperature < melts) {

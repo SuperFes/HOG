@@ -48,7 +48,8 @@ Census census(const Generator& generator, int count) {
         found.highest = std::max(found.highest, height);
         found.figure += down * (height / count);
         found.sea += height < 0.0 && generator.sea_level() ? 1.0 / count : 0.0;
-        if (generator.sample(down * (ground - 1.0), 1.0).material == planet.high.rock &&
+        // Under the soil and the beds, the crust's own rock.
+        if (generator.sample(down * (ground - 2'500.0), 1.0).material == planet.high.rock &&
             planet.high.rock != planet.low.rock) {
             found.high += 1.0 / count;
             found.high_centre += down / static_cast<double>(count);
@@ -167,5 +168,5 @@ TEST_CASE("the same planet is generated the same, bit for bit", "[globe][generat
         }
     }
     // If this moves, unchanged ground no longer matches what was there before, or elsewhere.
-    CHECK(digest == 0xe83a'ad9f'7304'4224ULL);
+    CHECK(digest == 0x9669'3448'e3dc'9f9fULL);
 }

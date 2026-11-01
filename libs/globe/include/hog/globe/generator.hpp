@@ -19,6 +19,18 @@ struct Sample {
     double temperature = 0.0;          // kelvin
 };
 
+// What lies under the ground in one column, top down: snow, loose cover, sedimentary beds, then
+// the crust's own rock.
+struct Strata {
+    double snow = 0.0;            // metres
+    Material top = Material::Air; // sand, soil, mud or regolith, under the snow
+    double top_depth = 0.0;       // metres
+    double sediment_depth = 0.0;  // loose sediment's base, metres below the snow
+    double cover = 0.0;           // sedimentary rock's base, metres below the ground
+    double fold = 0.0;            // metres the beds are lifted here
+    Material basement = Material::Basalt;
+};
+
 // The world as maths: a pure function of the planet's description and a point, the same bits on
 // every platform. The planet's centre is the origin and its spin axis +z.
 class Generator {
@@ -50,7 +62,7 @@ public:
         double ground_ = 0.0;              // metres from the centre
         double slope_ = 0.0;               // across the ground, at the radius
         double surface_temperature_ = 0.0; // at the reference level
-        Material rock_ = Material::Air;
+        Strata strata_;
     };
 
     [[nodiscard]] Column column(DVec3 direction, double lod) const noexcept;

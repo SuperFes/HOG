@@ -22,7 +22,8 @@ constexpr std::string_view usage =
     "usage: hog-stills [--preset earth|mars|venus|moon | --planet FILE] [--seed N] [--out DIR]\n"
     "                  [--width N] [--threads N] [--at LAT,LON[,HEADING]] [--span M]\n"
     "                  [--bottom M] [--top M]\n"
-    "Writes map.png, and with --at, relief.png and section.png there.\n";
+    "Writes map.png, and with --at, relief.png and section.png there; the section runs from\n"
+    "--bottom to --top metres off the ground under its middle.\n";
 
 struct Options {
     hog::globe::Planet planet;
@@ -31,8 +32,8 @@ struct Options {
     int threads = 4;
     std::optional<hog::stills::Place> at;
     double span = 20'000.0;
-    double bottom = -3'000.0;
-    double top = 3'000.0;
+    double bottom = -500.0; // metres from the ground under --at
+    double top = 500.0;
 };
 
 // strtod rather than from_chars, which some standard libraries lack for floating point.
@@ -144,9 +145,14 @@ int run(std::span<const std::string_view> arguments) {
                                                      options.width, options.threads))) {
         return failed;
     }
+    // The section's window is taken from the ground under its middle.
+    const double ground =
+        hog::globe::ground_below(generator, options.at->direction(), options.span / options.width)
+            .value_or(options.planet.radius) -
+        options.planet.radius;
     return write(options.out / "section.png",
-                 hog::stills::section(generator, *options.at, options.span, options.bottom,
-                                      options.top, options.width, options.threads));
+                 hog::stills::section(generator, *options.at, options.span, ground + options.bottom,
+                                      ground + options.top, options.width, options.threads));
 }
 
 } // namespace

@@ -100,6 +100,8 @@ Rgb material_colour(Material material) {
         return {120, 120, 132};
     case Material::Anorthosite:
         return {200, 200, 194};
+    case Material::Regolith:
+        return {150, 146, 140};
     }
     return {255, 0, 255};
 }
