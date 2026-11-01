@@ -15,17 +15,19 @@ target_link_libraries(sqlite3 PUBLIC Threads::Threads)
 
 add_library(hog_store
     src/database.cpp
+    src/sqlite_brick_archive.cpp
     src/sqlite_change_store.cpp
     src/sqlite_player_store.cpp
     src/sqlite_snapshot_store.cpp)
 add_library(hog::store ALIAS hog_store)
 
 target_include_directories(hog_store PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(hog_store PUBLIC hog::planet hog::save PRIVATE sqlite3)
+target_link_libraries(hog_store PUBLIC hog::globe hog::planet hog::save PRIVATE sqlite3)
 hog_target_defaults(hog_store)
 
 hog_add_tests(hog_store
     tests/database_tests.cpp
+    tests/sqlite_brick_archive_tests.cpp
     tests/sqlite_change_store_tests.cpp
     tests/sqlite_player_store_tests.cpp
     tests/sqlite_snapshot_store_tests.cpp)
