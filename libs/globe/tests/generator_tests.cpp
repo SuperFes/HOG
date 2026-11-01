@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <string_view>
@@ -169,4 +170,34 @@ TEST_CASE("the same planet is generated the same, bit for bit", "[globe][generat
     }
     // If this moves, unchanged ground no longer matches what was there before, or elsewhere.
     CHECK(digest == 0xda8d'ca87'ccdf'e0afULL);
+}
+
+TEST_CASE("generator throughput", "[.bench]") {
+    // Lone samples pay for their column each time; a chunk shares one column across its
+    // layers, as meshing will.
+    for (const std::string_view name : {"earth", "mars", "venus", "moon"}) {
+        const Generator world = generator_for(name);
+        const double radius = world.planet().radius;
+        constexpr std::uint64_t columns = 2'000;
+        constexpr int layers = 64;
+        const auto started = std::chrono::steady_clock::now();
+        double sink = 0.0;
+        for (std::uint64_t k = 0; k < columns; ++k) {
+            sink += world.sample(direction(k) * radius, 0.5).distance;
+        }
+        const auto lone = std::chrono::steady_clock::now();
+        for (std::uint64_t k = 0; k < columns; ++k) {
+            const Generator::Column column = world.column(direction(k), 0.5);
+            for (int layer = 0; layer < layers; ++layer) {
+                sink += column.sample(radius - 16.0 + (layer * 0.5)).distance;
+            }
+        }
+        const auto chunked = std::chrono::steady_clock::now();
+        const auto seconds = [](auto from, auto to) {
+            return std::chrono::duration<double>(to - from).count();
+        };
+        WARN(name << ": " << columns / seconds(started, lone) << " lone samples/s, "
+                  << (columns * layers) / seconds(lone, chunked)
+                  << " samples/s a column at a time (" << sink << ")");
+    }
 }

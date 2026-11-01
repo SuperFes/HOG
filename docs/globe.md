@@ -36,6 +36,15 @@ A cell is addressed by level, face and `(i, j)`. A level has `6 · 4^level` cell
 
 Terms blend by smooth union and subtraction, weighted by physical fields, not by hand.
 
+What v1 builds, all from the knobs:
+- **Reference level:** a province field split at the high crust's share, the provinces floating apart by the isostatic step across margins as wide as that step's slope allows. The radius stands at the sea, filling its share, or at the mean ground on dry worlds. The shell's floor lies `floor_depth` under the lowest ground surveyed.
+- **Relief:** mountain belts on long sinuous lines, set by the regime; peaks within them; rolling hills everywhere; ridges down plate worlds' ocean floors. Where water runs, gullies are cut from coarse to fine. Each width runs down the ground coarser than itself, so valleys branch as drainage does, without a simulation.
+- **Craters:** counts from Neukum's lunar chronology by age and impact flux, capped at equilibrium. Thick air filters out the small ones. Bowls sit below the gravity-set transition, flat floors and central peaks above it, and creep wears each crater by its age.
+- **Strata and soils:** sedimentary beds where a volatile has run, folded where mountains rose and stripped from them; soil, mud, beach sand and snow where water cycles; regolith that thickens with age where it doesn't.
+- **Caves:** passages along limestone beds and chambers in them, and lava tubes under basalt flows, carved out of the rock.
+
+A column's terms depend on direction alone, so `Generator::column` computes them once and samples any radius along it. Chunks fill a column at a time. The ground's slope, which the distance needs, is measured by central differences for now, four extra columns each; chunks will take it from neighbouring columns instead. Stills come from `hog-stills`: a map, a relief square, a section and a plan slice, all drawn by sampling the 3D field.
+
 ## The store
 
 The store is one sparse tree per face over `(i, j, shell)`. Empty means "ask the generator", a uniform block of edits is a single tile, and edited blocks are palette-coded 8³ bricks. Matter comes in two kinds:
