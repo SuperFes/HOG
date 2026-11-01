@@ -15,7 +15,6 @@
 #include <hog/core/log.hpp>
 #include <hog/core/profile.hpp>
 #include <hog/core/time.hpp>
-#include <hog/globe/birth.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/login/service.hpp>
 #include <hog/mapgen/render.hpp>
@@ -71,9 +70,11 @@ using namespace hog;
 
 constexpr double start_altitude = 1'500.0; // metres over the start
 constexpr double start_pitch = -0.2;       // radians
-constexpr double fast = 5.0;               // times as fast with Shift held
-constexpr double speed_step = 1.25;        // per notch of the mouse wheel
-constexpr double slowest_speed = 0.01;     // heights a second
+// Over the globe's ground, which is drawn only near the eye.
+constexpr double globe_start_height = 30.0; // metres
+constexpr double fast = 5.0;                // times as fast with Shift held
+constexpr double speed_step = 1.25;         // per notch of the mouse wheel
+constexpr double slowest_speed = 0.01;      // heights a second
 constexpr double fastest_speed = 10.0;
 // A frame's movement is held to this many seconds, so a stall doesn't fling the eye away.
 constexpr double longest_frame = 0.1;
@@ -185,7 +186,8 @@ DVec3 movement(const Controls& controls) {
             axis(SDL_SCANCODE_W, SDL_SCANCODE_S)};
 }
 
-client::Flight start(const client::Options& options, const planet::World& world) {
+client::Flight start(const client::Options& options, const planet::World& world,
+                     const client::GlobeWorld* globe) {
     const double radius = world.geology().planet_radius();
     client::Flight flight;
     if (options.start) {
@@ -193,6 +195,10 @@ client::Flight start(const client::Options& options, const planet::World& world)
         flight = client::start_flight(planet::direction_at(options.start->latitude * degree,
                                                            options.start->longitude * degree),
                                       radius, options.start->altitude, planet::north_pole);
+    } else if (globe != nullptr) {
+        const double ground = client::globe_ground(globe->generator, planet::start_direction);
+        flight = client::start_flight(planet::start_direction, radius, ground + globe_start_height,
+                                      planet::north_pole);
     } else {
         flight = client::start_flight(planet::start_direction, radius, start_altitude,
                                       planet::north_pole);
@@ -504,7 +510,6 @@ private:
 const log::Category connection_log{"connection"};
 const log::Category player_log{"player"};
 const log::Category clouds_log{"clouds"};
-const log::Category globe_log{"globe"};
 
 // The connection to a server, if there's one to connect to, telling what becomes of it: after
 // logging in for a connect token, when asked to.
@@ -749,14 +754,21 @@ void take_part(Controls& controls, std::optional<client::Player>& player, client
 }
 
 // Plays the character or flies a frame on, as the controls ask; what the camera then sees.
+// Metres the ground drawn stands over the radius under a point.
+double drawn_ground(const planet::World& world, const client::GlobeWorld* globe, WorldPosition at) {
+    return globe != nullptr ? client::globe_ground(globe->generator, at.metres())
+                            : client::ground_under(world, at);
+}
+
 render::Camera move(const Controls& controls, std::optional<client::Player>& player,
-                    client::Flight& flight, const planet::World& world, double seconds) {
+                    client::Flight& flight, const planet::World& world,
+                    const client::GlobeWorld* globe, double seconds) {
     HOG_ZONE("move");
     const bool faster = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
     if (!player) {
         flight = client::fly(
             flight, {.move = movement(controls), .look = controls.look, .seconds = seconds},
-            world.geology().planet_radius(), client::ground_under(world, flight.eye),
+            world.geology().planet_radius(), drawn_ground(world, globe, flight.eye),
             {.speed = controls.speed * (faster ? fast : 1.0)});
         return client::flight_camera(flight, client::vertical_fov);
     }
@@ -821,8 +833,9 @@ void change_clouds(Controls& controls, client::Scene& scene, const render::Devic
 
 // Flies or walks over the world until the window closes or it's time to quit.
 Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet::World& world,
-                 client::Flight flight, Connection& connection, const client::Options& options,
-                 const render::Device& device, render::Presenter& presenter, SDL_Window* window) {
+                 const client::GlobeWorld* globe, client::Flight flight, Connection& connection,
+                 const client::Options& options, const render::Device& device,
+                 render::Presenter& presenter, SDL_Window* window) {
     const double radius = world.geology().planet_radius();
     Controls controls;
     controls.timings = options.timings;
@@ -864,8 +877,8 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
         if (const auto woodlands = connection.take_woodlands()) {
             scene.fare(*woodlands);
         }
-        camera = move(controls, player, flight, world, seconds);
-        const double ground_height = client::ground_under(world, camera.eye);
+        camera = move(controls, player, flight, world, globe, seconds);
+        const double ground_height = drawn_ground(world, globe, camera.eye);
         change_pace(controls, clock);
         hurry_world(controls, connection);
         clock.advance(seconds);
@@ -880,7 +893,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
         }
         const DVec3 companion_up = client::companion_direction(flight, companion_ahead);
         const double ground_ahead =
-            client::ground_under(world, WorldPosition{companion_up * radius});
+            drawn_ground(world, globe, WorldPosition{companion_up * radius});
         const render::Standing companion{
             .feet = player ? WorldPosition{companion_up * (radius + ground_ahead)}
                            : client::companion_feet(flight, companion_ahead, companion_below,
@@ -964,7 +977,18 @@ int show(const client::Options& options, const client::GraphicsConfig& graphics,
         std::cerr << std::format("hog-client: {}\n", connection.error());
         return EXIT_FAILURE;
     }
-    const client::Flight flight = start(options, world);
+    // Before the scene, which draws it.
+    std::unique_ptr<client::GlobeWorld> globe;
+    if (options.globe) {
+        auto described = client::globe_planet(options.globe_planet, planet.seed,
+                                              world.geology().planet_radius());
+        if (!described) {
+            std::cerr << std::format("hog-client: {}\n", described.error());
+            return EXIT_FAILURE;
+        }
+        globe = std::make_unique<client::GlobeWorld>(*described);
+    }
+    const client::Flight flight = start(options, world, globe.get());
     const sim::Calendar calendar{planet.day_length, planet.axial_tilt};
     client::PlanetClock clock{client::start_time(calendar, to_game_time(WallClock::now()),
                                                  glm::normalize(flight.eye.metres()),
@@ -993,16 +1017,11 @@ int show(const client::Options& options, const client::GraphicsConfig& graphics,
     }
     scene->set_grass(options.grass);
     scene->set_system(planet.system);
-    if (options.globe) {
-        const auto started = MonotonicClock::now();
-        const globe::Globe born =
-            globe::birth({.seed = planet.seed, .radius = world.geology().planet_radius()});
-        scene->show_globe(client::globe_blocks(born));
-        log::info(globe_log, "grown in {:.2f} s",
-                  std::chrono::duration<double>(MonotonicClock::now() - started).count());
+    if (globe) {
+        scene->follow_globe(globe->world);
     }
-    const Result<void> flown =
-        fly(*scene, clock, world, flight, *connection, options, device, presenter, window);
+    const Result<void> flown = fly(*scene, clock, world, globe.get(), flight, *connection, options,
+                                   device, presenter, window);
     // The GPU may still be drawing with the scene.
     vkDeviceWaitIdle(device.handle());
     if (!flown) {

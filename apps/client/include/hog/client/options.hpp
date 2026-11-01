@@ -59,8 +59,9 @@ struct Options {
     bool grass = true;
     // Draws the ground as the volume's blocks.
     bool blocks = false;
-    // Draws a globe grown from its birth as hexels in place of the ground.
+    // Draws the voxel world in place of the ground, as blocks, of a preset or a planet file.
     bool globe = false;
+    std::optional<std::string> globe_planet;
     // The ground near the eye drawn curving like Earth's, not as tightly as the planet truly does.
     bool bend = true;
     render::CloudQuality clouds = render::CloudQuality::High;

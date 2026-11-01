@@ -4,6 +4,7 @@
 #include <hog/client/anchors.hpp>
 #include <hog/client/bushes.hpp>
 #include <hog/client/forecast.hpp>
+#include <hog/client/globe_view.hpp>
 #include <hog/client/ground.hpp>
 #include <hog/client/picture.hpp>
 #include <hog/client/woodlands.hpp>
@@ -146,9 +147,9 @@ public:
 
     // Whether the ground is drawn as the volume's blocks instead, with nothing growing on it.
     void set_blocks(bool blocks) noexcept { blocks_on_ = blocks; }
-    // Shows `blocks` as the ground whenever blocks are on, in place of those filled in from the
-    // world's terrain.
-    void show_globe(terrain::BlockMesh blocks);
+    // Draws the globe's surfaces round the eye whenever blocks are on, in place of those filled
+    // in from the world's terrain. The globe must outlive the scene, unchanged.
+    void follow_globe(const globe::World& globe);
     [[nodiscard]] bool blocks() const noexcept { return blocks_on_; }
 
     [[nodiscard]] render::CloudQuality cloud_quality() const noexcept { return clouds_.quality(); }
@@ -236,6 +237,8 @@ private:
     // The ground as blocks round the eye, filled in in the background while shown.
     terrain::BlockStream block_stream_;
     std::optional<render::Blocks> blocks_;
+    // The globe's surfaces round the eye, drawn as the blocks once followed.
+    std::optional<GlobeStream> globe_;
     std::vector<waves::Train> wave_trains_;
     render::Grass grass_;
     render::Bushes bushes_;
@@ -274,7 +277,6 @@ private:
     render::Gusts gusts_;
     bool grass_on_ = true;
     bool blocks_on_ = false;
-    bool globe_shown_ = false;
     bool settled_ = false;
     // Whether the last frame recorded took a probe, and in which slot.
     bool probing_ = false;

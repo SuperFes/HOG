@@ -45,6 +45,7 @@ hog_add_tests(hog_client
     tests/anchors_tests.cpp
     tests/bushes_tests.cpp
     tests/frame_times_tests.cpp
+    tests/globe_view_tests.cpp
     tests/graphics_config_tests.cpp
     tests/ground_tests.cpp
     tests/likeness_tests.cpp

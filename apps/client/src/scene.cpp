@@ -312,16 +312,16 @@ void Scene::finish_bakes() {
     if (auto water = river_stream_.finish(); water && rivers_) {
         rivers_->show(std::make_shared<const terrain::RiverWater>(std::move(water).value()));
     }
-    if (auto mesh = block_stream_.finish(); mesh && blocks_ && !globe_shown_) {
+    if (auto mesh = block_stream_.finish(); mesh && blocks_ && !globe_) {
+        blocks_->show(std::make_shared<const terrain::BlockMesh>(std::move(mesh).value()));
+    }
+    if (auto mesh = globe_ ? globe_->finish() : std::nullopt; mesh && blocks_) {
         blocks_->show(std::make_shared<const terrain::BlockMesh>(std::move(mesh).value()));
     }
 }
 
-void Scene::show_globe(terrain::BlockMesh blocks) {
-    globe_shown_ = true;
-    if (blocks_) {
-        blocks_->show(std::make_shared<const terrain::BlockMesh>(std::move(blocks)));
-    }
+void Scene::follow_globe(const globe::World& globe) {
+    globe_.emplace(globe, *jobs_);
 }
 
 void Scene::fare(const protocol::Woodlands& told) {
@@ -452,11 +452,17 @@ void Scene::follow_shore(const Shot& shot) {
     if (auto water = river_stream_.collect(); water && rivers_) {
         rivers_->show(std::make_shared<const terrain::RiverWater>(std::move(water).value()));
     }
-    if (blocks_on_ && !globe_shown_) {
+    if (blocks_on_ && !globe_) {
         block_stream_.follow(glm::normalize(shot.camera.eye.metres()));
     }
-    if (auto mesh = block_stream_.collect(); mesh && blocks_ && !globe_shown_) {
+    if (auto mesh = block_stream_.collect(); mesh && blocks_ && !globe_) {
         blocks_->show(std::make_shared<const terrain::BlockMesh>(std::move(mesh).value()));
+    }
+    if (globe_) {
+        globe_->follow(glm::normalize(shot.camera.eye.metres()));
+        if (auto mesh = globe_->collect(); mesh && blocks_) {
+            blocks_->show(std::make_shared<const terrain::BlockMesh>(std::move(mesh).value()));
+        }
     }
 }
 
@@ -676,7 +682,7 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     settled_ = streamed.bakes.empty() && streamed.arrived.empty() && streamed.evicted.empty() &&
                baker_.in_flight() == 0 && anchors_.settled() && bush_anchors_.settled() &&
                !shore_.in_flight() && !shore_depths_ && !river_stream_.in_flight() &&
-               !block_stream_.in_flight();
+               !block_stream_.in_flight() && !(globe_ && globe_->in_flight());
     const protocol::CellWeather here = weather_at_eye(shot);
     const DVec3 sun = calendar_.sun_direction(shot.time);
     const double sun_mu = glm::dot(sun, shot.bend.up);

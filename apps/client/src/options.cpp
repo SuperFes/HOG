@@ -108,6 +108,13 @@ constexpr std::array kept{
          .keep = [](Options& options, std::string_view value) { options.companion = value; }},
     Kept{.name = "--capture",
          .keep = [](Options& options, std::string_view value) { options.capture = value; }},
+    Kept{.name = "--globe-planet",
+         .keep =
+             [](Options& options, std::string_view value) {
+                 options.globe_planet = value;
+                 options.globe = true;
+                 options.blocks = true;
+             }},
 };
 
 const Kept* kept_named(std::string_view option) {
@@ -282,8 +289,10 @@ options:
                          the GPU can afford (default high)
   --no-grass             don't grow grass near the eye, for what the GPU can afford
   --blocks               draw the ground as the volume's blocks, with nothing growing
-  --globe                draw a globe grown from its birth as hexels in place of the
-                         ground; F6 shows the old ground again
+  --globe                draw the voxel world in place of the ground, starting over
+                         it unless --at says otherwise; F6 shows the old ground again
+  --globe-planet NAME    the same, of the earth, mars, venus or moon preset or a
+                         planet file
   --no-bend              draw the planet curving as tightly as it truly does, not
                          flattened like Earth's near the eye
   --software             draw with a software Vulkan device, such as lavapipe

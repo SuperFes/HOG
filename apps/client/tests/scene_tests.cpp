@@ -7,7 +7,6 @@
 #include <hog/client/picture.hpp>
 #include <hog/client/scene.hpp>
 #include <hog/client/views.hpp>
-#include <hog/globe/birth.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/planet/noise.hpp>
 #include <hog/planet/places.hpp>
@@ -1158,7 +1157,7 @@ TEST_CASE("an evolved world as blocks, to look at", "[.look]") {
     }
 }
 
-TEST_CASE("a young globe as hexels, to look at", "[.look]") {
+TEST_CASE("the globe's voxels, to look at", "[.look]") {
     // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
     const char* where = std::getenv("HOG_LOOK");
     REQUIRE(where != nullptr);
@@ -1167,26 +1166,29 @@ TEST_CASE("a young globe as hexels, to look at", "[.look]") {
                             .value();
     const hog::planet::World world{config};
     const double radius = world.geology().planet_radius();
-    const hog::globe::Globe born = hog::globe::birth({.seed = config.seed, .radius = radius});
     const auto device = test_device();
     hog::jobs::JobSystem jobs{4};
-    auto scene = Scene::create(*device, world, jobs, calendar(), hog::client::still_format, 1);
-    REQUIRE(scene);
-    scene->set_blocks(true);
-    scene->show_globe(hog::client::globe_blocks(born));
-    const hog::DVec3 noon = glm::normalize(hog::DVec3{1.0, 0.2, 0.3});
-    for (const auto& [name, altitude, ahead, pitch] :
-         {std::tuple{"whole", 3.0 * radius, 0.0, -1.5}, std::tuple{"near", 40'000.0, 0.3, -0.5},
-          std::tuple{"low", 6'000.0, 0.15, -0.15}}) {
-        const hog::DVec3 at =
-            glm::normalize(noon + (hog::DVec3{0.0, 0.0, 1.0} * static_cast<double>(ahead)));
-        hog::client::Flight flight = hog::client::start_flight(noon, radius, altitude, at);
-        flight.pitch = pitch;
-        const auto still = hog::client::draw_still(*device, *scene, shot_of(flight),
-                                                   {.width = 1600, .height = 900});
-        REQUIRE(still);
-        REQUIRE(hog::client::save_picture(
-            std::filesystem::path{where} / std::format("globe_{}.png", name), *still));
+    for (const char* name : {"earth", "moon"}) {
+        const hog::client::GlobeWorld globe{
+            hog::client::globe_planet(name, config.seed, radius).value()};
+        auto scene = Scene::create(*device, world, jobs, calendar(), hog::client::still_format, 1);
+        REQUIRE(scene);
+        scene->set_blocks(true);
+        scene->follow_globe(globe.world);
+        const hog::DVec3 noon = glm::normalize(hog::DVec3{1.0, 0.2, 0.3});
+        const hog::DVec3 at = glm::normalize(noon + hog::DVec3{0.0, 0.0, 0.3});
+        const double ground = hog::client::globe_ground(globe.generator, noon);
+        for (const auto& [shot, height, pitch] :
+             {std::tuple{"high", 60.0, -0.6}, std::tuple{"low", 6.0, -0.12}}) {
+            hog::client::Flight flight =
+                hog::client::start_flight(noon, radius, ground + height, at);
+            flight.pitch = pitch;
+            const auto still = hog::client::draw_still(*device, *scene, shot_of(flight),
+                                                       {.width = 1600, .height = 900});
+            REQUIRE(still);
+            REQUIRE(hog::client::save_picture(
+                std::filesystem::path{where} / std::format("globe_{}_{}.png", name, shot), *still));
+        }
     }
 }
 
