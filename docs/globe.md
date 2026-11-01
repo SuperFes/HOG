@@ -14,6 +14,7 @@ The research behind this is in `reports/Editable voxel planet architecture.md`, 
 - **Amounts, counted.** Voxels hold how much of each thing they contain. Water, rock, sand and heat are counted, and every step keeps the counts, in tests.
 - **Many worlds.** A planet is a description made of physical knobs. Earth, Mars, Venus and the Moon are the first presets, and alien worlds are other settings.
 - **Every landform has a home.** Each feature class gets a term in the generator, the store or the simulation, judged by stills of a fixed suite of spots, one per class.
+- **Things fall apart when they ought.** Unlike Enshrouded, builds need support and wear out, so keeping a city standing is real, ongoing work for players, bots and NPCs. Building must not become a chore: sensible builds stand with room to spare, failure shows warning signs first, and repair is easy.
 - **Libraries only when excellent.** We use one only if it's clearly excellent and has an MIT-compatible licence. Otherwise we build it ourselves.
 
 ## Layout
@@ -37,7 +38,7 @@ Terms blend by smooth union and subtraction, weighted by physical fields, not by
 ## The store
 
 The store is one sparse tree per face over `(i, j, shell)`. Empty means "ask the generator", a uniform block of edits is a single tile, and edited blocks are palette-coded 8³ bricks. Matter comes in two kinds:
-- **Shaped matter,** such as rock, earth and buildings, carries a distance and its makeup.
+- **Shaped matter,** such as rock, earth and buildings, carries a distance, its makeup and its condition: how worn, cracked or rotten it is.
 - **Loose matter,** such as water, sand, rubble, snow and lava, carries amounts.
 
 Only the server writes the store.
@@ -47,7 +48,8 @@ Only the server writes the store.
 The simulation runs on the server, only in chunks near players or events:
 - **Water and lava** move by pipes between stacked sections in each column, weighted so they spread evenly in every direction.
 - **Sand and rubble** slide when steeper than their angle of repose, measured in true distances.
-- **Collapse** checks connectivity in a bounded region, plus a load rule that lets arches stand.
+- **Collapse** checks connectivity in a bounded region, plus a load rule that lets arches stand. It's partial and local: what's overloaded sags and cracks first, then the failed part falls as rubble.
+- **Wear** lowers condition by each material's own process: weather, water, rot, rust, frost and load. Worn parts get weaker, so neglect ends in collapse. Wear is what makes maintenance jobs: repair, drainage, clearing rubble, roads.
 - **Lava** stiffens and freezes as it cools.
 
 Updates are integer, ordered by a hash and repeatable. Clients receive changed bricks within their interest radius and interpolate between updates.
@@ -73,7 +75,7 @@ Detail falls off with distance without cracks, and materials blend by triplanar 
 9. **Server authority and streaming.**
 10. **Water.**
 11. **Sand and rubble.**
-12. **Collapse.**
+12. **Collapse and wear.**
 13. **Lava and magma.**
 14. **The drainage solve, rivers, lakes and coasts.**
 
