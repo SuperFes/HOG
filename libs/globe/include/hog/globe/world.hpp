@@ -15,10 +15,6 @@ namespace hog::globe {
 
 using BrickVoxels = std::array<Voxel, brick_voxels>;
 
-// The finest detail generated into voxels: two of them across, as finer would alias into steps a
-// voxel apart.
-[[nodiscard]] double voxel_lod(const Generator& generator);
-
 // A brick's voxels as generated, its columns taken together.
 [[nodiscard]] BrickVoxels generated(const Generator& generator, BrickSite site);
 
@@ -34,11 +30,13 @@ public:
     [[nodiscard]] Voxel at(Site site) const;
     [[nodiscard]] BrickVoxels brick(BrickSite site) const;
 
-    // The voxels `count` layers up from `bottom` through each of `cells`, as they now are, a
-    // column after another; `columns` are the generator's through them, at the voxels' lod.
+    // The voxels `count` layers up from `bottom` through each of `cells`, every `apart` layers,
+    // as they now are, a column after another; `columns` are the generator's through them, at the
+    // voxels' lod `apart` times coarser. Where generated, they keep their distance and normal
+    // within a band `apart` times as wide, as coarser detail is drawn from voxels further apart.
     [[nodiscard]] std::vector<Voxel> fill(std::span<const Cell> cells,
                                           std::span<const Generator::Column> columns, int bottom,
-                                          int count) const;
+                                          int count, int apart = 1) const;
 
     // The brick's voxels as they now are; held only if they differ from what's generated.
     void write(BrickSite site, const BrickVoxels& voxels);

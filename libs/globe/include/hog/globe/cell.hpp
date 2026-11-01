@@ -62,14 +62,16 @@ struct CellNeighbors {
     [[nodiscard]] std::span<const Cell> all() const&& = delete;
 };
 
-// The four cells across its sides, the next face's where it lies on the cube's edge.
-[[nodiscard]] CellNeighbors sides(Cell cell);
+// The four cells across its sides, the next face's where it lies on the cube's edge; or those
+// `apart` cells on, straight on over the cube's edges, less than a face across.
+[[nodiscard]] CellNeighbors sides(Cell cell, int apart = 1);
 // Those, and the cells it meets only at a corner: eight in all, or seven at the cube's corners,
 // where three cells meet instead of four.
 [[nodiscard]] CellNeighbors around(Cell cell);
 
-// The cell `di` along i and `dj` along j from it, each -1, 0 or 1, over onto the next face where
-// it steps off this one; none where both steps leave the face, past the cube's corner.
+// The cell `di` along i and `dj` along j from it, each less than a face across, straight on over
+// onto the next face where it steps off this one; none where both steps leave the face, past the
+// cube's corner.
 [[nodiscard]] std::optional<Cell> next_to(Cell cell, int di, int dj);
 
 // The four cells a level finer that tile it exactly, and the one a level coarser it lies in.

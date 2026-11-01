@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <optional>
 #include <set>
+#include <span>
 #include <vector>
 
 using hog::DVec3;
@@ -56,7 +57,8 @@ DVec3 somewhere(std::uint64_t k) {
 
 // The true distance from a point over a column to the ground, by the nearest of the ground's
 // points around it.
-double true_distance(const Generator& generator, DVec3 direction, double radius, double around) {
+double true_distance(const Generator& generator, DVec3 direction, double radius, double around,
+                     double lod = 0.5) {
     const DVec3 axis = std::abs(direction.z) < 0.9 ? DVec3{0.0, 0.0, 1.0} : DVec3{1.0, 0.0, 0.0};
     const DVec3 east = glm::normalize(glm::cross(axis, direction));
     const DVec3 north = glm::cross(direction, east);
@@ -68,7 +70,7 @@ double true_distance(const Generator& generator, DVec3 direction, double radius,
             const double x = around * a / steps;
             const double y = around * b / steps;
             const DVec3 there = glm::normalize(direction + ((x * east + y * north) / radius));
-            if (const auto ground = hog::globe::ground_below(generator, there, 0.5)) {
+            if (const auto ground = hog::globe::ground_below(generator, there, lod)) {
                 nearest = std::min(nearest, glm::length(there * *ground - point));
             }
         }
@@ -238,6 +240,82 @@ TEST_CASE("a ball dug across a cube's edge opens on both faces", "[globe][world]
         faces.insert(site.face);
     }
     CHECK(faces == std::set<int>{0, 1});
+}
+
+TEST_CASE("columns far apart tell distance at their coarser detail as truly as small steps",
+          "[globe][world]") {
+    const Generator& generator = earth();
+    const hog::globe::Layers& layers = generator.layers();
+    constexpr int apart = 16;
+    const double lod = hog::globe::voxel_lod(generator) * apart;
+    double shared_error = 0.0;
+    double stepped_error = 0.0;
+    int counted = 0;
+    for (std::uint64_t k = 0; k < 16; ++k) {
+        const hog::globe::Cell cell = hog::globe::cell_under(somewhere(k), layers.level);
+        const DVec3 direction = hog::globe::center(cell);
+        const double ground = hog::globe::ground_below(generator, direction, lod).value_or(0.0);
+        const Generator::Column shared = generator.columns(std::span{&cell, 1}, lod, apart)[0];
+        const Generator::Column stepped = generator.column(direction, lod);
+        for (const double height : {8.0, 16.0, 32.0}) {
+            const double truth =
+                true_distance(generator, direction, ground + height, 2.0 * height, lod);
+            shared_error += std::abs(shared.sample(ground + height).distance - truth) / truth;
+            stepped_error += std::abs(stepped.sample(ground + height).distance - truth) / truth;
+            ++counted;
+        }
+    }
+    CHECK(shared_error <= stepped_error * 1.2);
+    CHECK(shared_error / counted < 0.08);
+}
+
+TEST_CASE("voxels filled far apart are the world's where changed, and coarser ground elsewhere",
+          "[globe][world]") {
+    VoxelStore store{earth().layers()};
+    World world{earth(), store};
+    const hog::globe::Layers& layers = earth().layers();
+    const Ground ground = ground_at(earth(), somewhere(3));
+    const DVec3 direction = glm::normalize(somewhere(3));
+    hog::globe::dig(world, direction * ground.radius, 6.0);
+    constexpr int apart = 4;
+    const hog::globe::Cell middle = hog::globe::cell_under(direction, layers.level);
+    std::vector<hog::globe::Cell> cells;
+    for (int b = -4; b <= 4; ++b) {
+        for (int a = -4; a <= 4; ++a) {
+            cells.push_back(hog::globe::next_to(middle, a * apart, b * apart).value_or(middle));
+        }
+    }
+    const double lod = hog::globe::voxel_lod(earth()) * apart;
+    const std::vector<Generator::Column> columns = earth().columns(cells, lod, apart);
+    const int bottom = layers.layer_at(ground.radius) - 40;
+    constexpr int count = 20;
+    const std::vector<Voxel> voxels = world.fill(cells, columns, bottom, count, apart);
+    int held = 0;
+    int past_band = 0;
+    for (std::size_t k = 0; k < cells.size(); ++k) {
+        for (int step = 0; step < count; ++step) {
+            const Site site{.face = cells[k].face,
+                            .i = cells[k].i,
+                            .j = cells[k].j,
+                            .layer = static_cast<std::uint32_t>(bottom + (step * apart))};
+            const Voxel voxel =
+                voxels[(k * static_cast<std::size_t>(count)) + static_cast<std::size_t>(step)];
+            if (store.brick(hog::globe::brick_of(site)) != nullptr) {
+                CHECK(voxel == world.at(site));
+                ++held;
+                continue;
+            }
+            const hog::globe::Sample sample =
+                columns[k].sample(layers.middle(static_cast<int>(site.layer)));
+            CHECK(voxel == voxel_from(sample, distance_band(layers, apart)));
+            past_band += std::abs(hog::globe::metres(voxel.distance)) > distance_band(layers) &&
+                                 voxel.distance != Voxel::far && voxel.distance != -Voxel::far
+                             ? 1
+                             : 0;
+        }
+    }
+    CHECK(held > 0);
+    CHECK(past_band > 0);
 }
 
 TEST_CASE("columns filled together are the world voxel by voxel, dug or not", "[globe][world]") {

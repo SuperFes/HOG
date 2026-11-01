@@ -77,6 +77,10 @@ struct Voxel {
 [[nodiscard]] constexpr double distance_band(const Layers& layers) noexcept {
     return 4.0 * layers.thickness;
 }
+// The same for voxels `coarser` times as far apart.
+[[nodiscard]] constexpr double distance_band(const Layers& layers, double coarser) noexcept {
+    return distance_band(layers) * coarser;
+}
 
 // The voxel a generated sample makes, its distance kept within `band` and its normal only within
 // it, so voxels deep in matter or open space are alike. All the generated ground is shaped

@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <numbers>
+#include <utility>
 
 using hog::DVec3;
 using hog::globe::Cell;
@@ -186,5 +187,76 @@ TEST_CASE("a step along i or j lands on a side, over the cube's edges", "[globe]
         for (std::uint64_t index = 0; index < hog::globe::cells_at(level); ++index) {
             check_steps(hog::globe::cell_at_index(level, index));
         }
+    }
+}
+
+namespace {
+
+// Of the cells beside `here`, the one furthest from `from`: a step straight on from it.
+Cell onward(Cell from, Cell here) {
+    const hog::globe::CellNeighbors beside = hog::globe::sides(here);
+    return *std::ranges::max_element(beside.all(), {}, [&](Cell next) {
+        return glm::length(hog::globe::center(next) - hog::globe::center(from));
+    });
+}
+
+// Steps of many cells along i or j land where single steps straight on do.
+void check_long_steps(Cell cell) {
+    const int n = 1 << cell.level;
+    for (const int sign : {-1, 1}) {
+        for (const bool along_i : {true, false}) {
+            const int di = along_i ? sign : 0;
+            const int dj = along_i ? 0 : sign;
+            Cell from = cell;
+            Cell here = straight_on(cell, di, dj);
+            for (int steps = 1; steps < n; ++steps) {
+                CHECK(hog::globe::next_to(cell, steps * di, steps * dj) == here);
+                const Cell next = onward(from, here);
+                from = here;
+                here = next;
+            }
+        }
+    }
+}
+
+void check_far_sides(Cell cell) {
+    const int n = 1 << cell.level;
+    for (int apart = 1; apart < n; ++apart) {
+        const hog::globe::CellNeighbors beside = hog::globe::sides(cell, apart);
+        CHECK(beside.count == 4);
+        for (const auto [di, dj] : {std::pair{apart, 0}, std::pair{-apart, 0}, std::pair{0, apart},
+                                    std::pair{0, -apart}}) {
+            CHECK(lists(beside, straight_on(cell, di, dj)));
+        }
+    }
+}
+
+// Off the face one way and not the other, the steps go either way round; off it both ways, past
+// the cube's corner, they go nowhere.
+void check_either_way_round(Cell cell) {
+    const int n = 1 << cell.level;
+    for (int di = 1 - n; di < n; ++di) {
+        for (const int dj : {-2, 3}) {
+            const auto j = static_cast<int>(cell.j) + dj;
+            if (j >= 0 && j < n) {
+                const Cell first_j = straight_on(cell, 0, dj);
+                CHECK(hog::globe::next_to(cell, di, dj) == hog::globe::next_to(first_j, di, 0));
+            }
+        }
+    }
+    const auto i_past = static_cast<int>(cell.i) < n / 2 ? 1 - n : n - 1;
+    const auto j_past = static_cast<int>(cell.j) < n / 2 ? 1 - n : n - 1;
+    CHECK_FALSE(hog::globe::next_to(cell, i_past, j_past).has_value());
+}
+
+} // namespace
+
+TEST_CASE("steps of many cells run straight on, over the cube's edges", "[globe][cell]") {
+    constexpr int level = 3;
+    for (std::uint64_t index = 0; index < hog::globe::cells_at(level); ++index) {
+        const Cell cell = hog::globe::cell_at_index(level, index);
+        check_long_steps(cell);
+        check_far_sides(cell);
+        check_either_way_round(cell);
     }
 }

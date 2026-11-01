@@ -88,8 +88,10 @@ public:
     // share the work: cheaper than column() each, and a cell's column comes out the same in any
     // square. Voxels are filled from these.
     [[nodiscard]] std::vector<Column> columns(Cell corner, int side, double lod) const;
-    // The same through any cells of one level, in their order.
-    [[nodiscard]] std::vector<Column> columns(std::span<const Cell> cells, double lod) const;
+    // The same through any cells of one level, in their order, each taking the slope from the
+    // cells `apart` beside it, as where every so many cells are taken for coarser detail.
+    [[nodiscard]] std::vector<Column> columns(std::span<const Cell> cells, double lod,
+                                              int apart = 1) const;
 
     // Planet-wide constants found once from the knobs; what each means is the generator's own.
     struct Shape {
@@ -112,6 +114,13 @@ private:
     Shape shape_;
     Layers layers_;
 };
+
+// The finest detail generated into voxels: two of them across, as finer would alias into steps a
+// voxel apart.
+[[nodiscard]] double voxel_lod(const Generator& generator);
+
+// How many times coarser than the voxels' `lod` is, at least once.
+[[nodiscard]] double coarser(const Generator& generator, double lod);
 
 // The highest solid surface under `direction` between the sky's ceiling and the floor, metres from
 // the centre, found by walking down the distance field; none if the column is open to the floor.

@@ -15,15 +15,16 @@
 namespace hog::globe {
 namespace {
 
+Voxel generated_at(const Generator::Column& column, const Layers& layers, std::uint32_t layer,
+                   double band) {
+    return voxel_from(column.sample(layers.middle(static_cast<int>(layer))), band);
+}
+
 Voxel generated_at(const Generator::Column& column, const Layers& layers, std::uint32_t layer) {
-    return voxel_from(column.sample(layers.middle(static_cast<int>(layer))), distance_band(layers));
+    return generated_at(column, layers, layer, distance_band(layers));
 }
 
 } // namespace
-
-double voxel_lod(const Generator& generator) {
-    return 2.0 * generator.planet().voxel;
-}
 
 BrickVoxels generated(const Generator& generator, BrickSite site) {
     const Layers& layers = generator.layers();
@@ -66,31 +67,39 @@ BrickVoxels World::brick(BrickSite site) const {
 }
 
 std::vector<Voxel> World::fill(std::span<const Cell> cells,
-                               std::span<const Generator::Column> columns, int bottom,
-                               int count) const {
+                               std::span<const Generator::Column> columns, int bottom, int count,
+                               int apart) const {
     const Layers& layers = generator_->layers();
     HOG_ASSERT(cells.size() == columns.size(), "a column for each cell");
-    HOG_ASSERT(bottom >= 0 && count >= 0 && bottom + count <= layers.count, "layers out of range");
+    HOG_ASSERT(apart > 0 && bottom >= 0 && count >= 0 &&
+                   (count == 0 || bottom + ((count - 1) * apart) < layers.count),
+               "layers out of range");
+    const double band = distance_band(layers, apart);
     std::vector<Voxel> voxels(cells.size() * static_cast<std::size_t>(count));
     std::unordered_map<std::uint64_t, BrickVoxels> held;
     for (std::size_t k = 0; k < cells.size(); ++k) {
         HOG_ASSERT(std::cmp_equal(cells[k].level, layers.level), "cells of the voxels' level");
-        const auto voxel_at = [&](int layer) -> Voxel& {
-            return voxels[(k * static_cast<std::size_t>(count)) +
-                          static_cast<std::size_t>(layer - bottom)];
+        // The voxels' run up the column, `apart` layers between each.
+        const auto voxel_at = [&](int step) -> Voxel& {
+            return voxels[(k * static_cast<std::size_t>(count)) + static_cast<std::size_t>(step)];
         };
-        for (int layer = bottom; layer < bottom + count;) {
+        const auto layer_of = [&](int step) { return bottom + (step * apart); };
+        for (int step = 0; step < count;) {
             const Site site{.face = cells[k].face,
                             .i = cells[k].i,
                             .j = cells[k].j,
-                            .layer = static_cast<std::uint32_t>(layer)};
+                            .layer = static_cast<std::uint32_t>(layer_of(step))};
             const BrickSite in = brick_of(site);
-            const int end = std::min(bottom + count, static_cast<int>((in.layer + 1) * brick_side));
+            // The steps whose layers lie in the same brick.
+            int end = step + 1;
+            while (end < count && std::cmp_less(layer_of(end), (in.layer + 1) * brick_side)) {
+                ++end;
+            }
             const Brick* stored = store_->brick(in);
             if (stored == nullptr) {
-                for (; layer < end; ++layer) {
-                    voxel_at(layer) =
-                        generated_at(columns[k], layers, static_cast<std::uint32_t>(layer));
+                for (; step < end; ++step) {
+                    voxel_at(step) = generated_at(columns[k], layers,
+                                                  static_cast<std::uint32_t>(layer_of(step)), band);
                 }
                 continue;
             }
@@ -98,12 +107,12 @@ std::vector<Voxel> World::fill(std::span<const Cell> cells,
             if (added) {
                 stored->unpack(found->second);
             }
-            for (; layer < end; ++layer) {
+            for (; step < end; ++step) {
                 const Site at{.face = site.face,
                               .i = site.i,
                               .j = site.j,
-                              .layer = static_cast<std::uint32_t>(layer)};
-                voxel_at(layer) = found->second[static_cast<std::size_t>(index_in_brick(at))];
+                              .layer = static_cast<std::uint32_t>(layer_of(step))};
+                voxel_at(step) = found->second[static_cast<std::size_t>(index_in_brick(at))];
             }
         }
     }

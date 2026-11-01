@@ -197,7 +197,8 @@ std::vector<Generator::Column> Generator::columns(Cell corner, int side, double 
     return columns(cells, lod);
 }
 
-std::vector<Generator::Column> Generator::columns(std::span<const Cell> cells, double lod) const {
+std::vector<Generator::Column> Generator::columns(std::span<const Cell> cells, double lod,
+                                                  int apart) const {
     HOG_ASSERT(
         std::ranges::all_of(
             cells, [&](Cell cell) { return cell.is_valid() && cell.level == cells.front().level; }),
@@ -226,14 +227,14 @@ std::vector<Generator::Column> Generator::columns(std::span<const Cell> cells, d
         const DVec3 axis = std::abs(down.z) < 0.9 ? DVec3{0.0, 0.0, 1.0} : DVec3{1.0, 0.0, 0.0};
         const DVec3 east = glm::normalize(glm::cross(axis, down));
         const DVec3 north = glm::cross(down, east);
-        // The plane through the four heights beside it, by least squares; across a cube's edge
-        // the cells beside it needn't line up.
+        // The plane through the four heights `apart` beside it, by least squares; across a
+        // cube's edge the cells beside it needn't line up.
         double xx = 0.0;
         double xy = 0.0;
         double yy = 0.0;
         double xh = 0.0;
         double yh = 0.0;
-        const CellNeighbors beside = sides(cells[k]);
+        const CellNeighbors beside = sides(cells[k], apart);
         for (const Cell cell : beside.all()) {
             const DVec3 offset = (center(cell) - down) * planet_.radius;
             const double x = glm::dot(offset, east);
@@ -317,7 +318,9 @@ Sample Generator::Column::sample(double radius) const noexcept {
         const double cave_share = smooth_max_share(-cave, ground, cave_blend);
         // Only near a surface, where its normal is kept; there by differences, as the cave's
         // distance is its noise over its noise's rate, whose own rate isn't to hand.
-        if (cave_share > 0.0 && std::abs(sample.distance) < distance_band(generator_->layers_)) {
+        if (cave_share > 0.0 &&
+            std::abs(sample.distance) <
+                distance_band(generator_->layers_, coarser(*generator_, lod_))) {
             const double step = lod_ / 16.0;
             DVec3 cave_rise{0.0};
             for (glm::length_t axis = 0; axis < 3; ++axis) {
@@ -353,6 +356,14 @@ Sample Generator::Column::sample(double radius) const noexcept {
 
 Sample Generator::sample(DVec3 point, double lod) const noexcept {
     return column(point, lod).sample(glm::length(point));
+}
+
+double voxel_lod(const Generator& generator) {
+    return 2.0 * generator.planet().voxel;
+}
+
+double coarser(const Generator& generator, double lod) {
+    return std::max(1.0, lod / voxel_lod(generator));
 }
 
 std::optional<double> ground_below(const Generator& generator, DVec3 direction, double lod) {

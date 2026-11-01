@@ -70,14 +70,17 @@ Cell cell_of(const Surface& point, int level) {
     return {};
 }
 
-// One cell along `axis`, over onto the next face if it runs off this one.
+// `by` cells along `axis`, straight on over onto the next face if it runs off this one; less than
+// a face across.
 Surface step(Surface point, int axis, int by, std::int64_t n) {
     std::int64_t& moved = point.at(static_cast<std::size_t>(axis));
     moved += 2 * std::int64_t{by};
     if (std::abs(moved) > n) {
+        // What's left past the edge runs on down the next face, away from it.
+        const std::int64_t past = std::abs(moved) - n;
         for (std::int64_t& other : point) {
             if (&other != &moved && std::abs(other) == n) {
-                other -= other > 0 ? 1 : -1;
+                other -= other > 0 ? past : -past;
             }
         }
         moved = moved > 0 ? n : -n;
@@ -198,13 +201,14 @@ double prism_volume(Cell cell, double inner, double outer) {
     return solid_angle(cell) * ((outer * outer * outer) - (inner * inner * inner)) / 3.0;
 }
 
-CellNeighbors sides(Cell cell) {
+CellNeighbors sides(Cell cell, int apart) {
     HOG_ASSERT(cell.is_valid(), "invalid cell");
     const std::int64_t n = std::int64_t{1} << cell.level;
+    HOG_ASSERT(apart > 0 && apart < std::max<std::int64_t>(n, 2), "less than a face across");
     const Surface middle = surface_of(cell);
     CellNeighbors found;
     for (const int axis : in_plane(middle, n)) {
-        for (const int by : {-1, 1}) {
+        for (const int by : {-apart, apart}) {
             add(found, cell_of(step(middle, axis, by, n), cell.level));
         }
     }
@@ -235,10 +239,13 @@ CellNeighbors around(Cell cell) {
 }
 
 std::optional<Cell> next_to(Cell cell, int di, int dj) {
-    HOG_ASSERT(cell.is_valid() && std::abs(di) <= 1 && std::abs(dj) <= 1, "one step at most");
     const std::int64_t n = std::int64_t{1} << cell.level;
+    HOG_ASSERT(cell.is_valid() && std::abs(di) < std::max<std::int64_t>(n, 2) &&
+                   std::abs(dj) < std::max<std::int64_t>(n, 2),
+               "less than a face across");
     const auto off = [&](std::uint32_t at, int by) {
-        return (by < 0 && at == 0) || (by > 0 && std::cmp_equal(at + 1, n));
+        const std::int64_t to = std::int64_t{at} + by;
+        return to < 0 || to >= n;
     };
     if (off(cell.i, di) && off(cell.j, dj)) {
         return std::nullopt;
