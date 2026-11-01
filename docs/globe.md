@@ -54,7 +54,7 @@ The store is one sparse tree per face over `(i, j, shell)`. Empty means "ask the
 Only the server writes the store.
 
 What v1 holds:
-- **Voxels** stand on the cells of the level whose width is nearest the layers' thickness: level 18 at the default 115 km and 0.5 m, so cells are 0.53–0.75 m wide. A voxel's value is taken at its middle. It holds fixed-point values: distance in millimetres, condition, a grain and a liquid with amounts of the voxel's volume, and temperature in eighths of a kelvin. Distances are kept within a band of four layers either side of a surface; beyond it, only the side counts.
+- **Voxels** stand on the cells of the level whose width is nearest the layers' thickness: level 18 at the default 115 km and 0.5 m, so cells are 0.53–0.75 m wide. A voxel's value is taken at its middle. It holds fixed-point values: distance in millimetres, the surface's normal folded onto an octahedron in two bytes (to a degree), condition, a grain and a liquid with amounts of the voxel's volume, and temperature in eighths of a kelvin. Distances and normals are kept within a band of four layers either side of a surface; beyond it, only the side counts. The generator gives each sample its normal: the ground's from its tilt, a cave wall's from differences of the cave's distance. Digging and building write their shape's.
 - **Bricks** of 8³ are the unit stored, saved and sent. A brick that is one voxel throughout is held as that voxel. Otherwise each quantity is packed apart, as one value, a palette of 1–16-bit indices, or in full. So a brick the surface passes through keeps its distances in full and a few bits a voxel for the rest.
 - **The store** is a hash of changed bricks keyed by face, `i`, `j` and layer. A brick changed anywhere is held whole. One written back as generated is let go. Tiles bigger than a brick, and the tree over them, wait until uniform edits that large appear.
 - **Filling:** a brick is filled through `Generator::columns`, where each column takes the ground's slope from the cells beside it. That is 2.2–2.4× cheaper than each measuring its own, and as true against the real distance (about 5% either way). A cell's column comes out the same in any square, so unchanged voxels are the same everywhere.
@@ -80,14 +80,14 @@ The client meshes changed chunks on worker threads:
 
 Detail falls off with distance without cracks, and materials blend by triplanar texturing. Positions are 64-bit on the server and camera-relative floats on the GPU, with reversed-Z depth.
 
-What v1 draws:
-- **Chunks** of 32 columns square, each meshed by surface nets from its own voxels and one more all round, taken over the cube's edges from the next face. Each edge between voxels is drawn by one chunk: the one holding its lower end, or across the cube's edges, the lower face. So chunks meet without gaps, but for a column-wide one at each of the cube's 8 corners, where three columns meet.
+What the mesher draws:
+- **Chunks** of 32 columns square, each meshed from its own voxels and one more all round, taken over the cube's edges from the next face. Each edge between voxels is drawn by one chunk: the one holding its lower end, or across the cube's edges, the lower face. So chunks meet without gaps, but for a column-wide one at each of the cube's 8 corners, where three columns meet.
 - **Two surfaces:** shaped matter against open space, and liquid against air. A voxel's material says which side it's on, as a distance under half a millimetre rounds to none. The liquid's surface runs on two columns under the shore, so the ground, not a voxel's step, draws the waterline.
-- **Vertices** start at the mean of where the surface crosses a cube's edges and are drawn onto the surface between its corners' values; normals blend the field's gradient at the corners, so shading runs smooth across cubes and chunks.
+- **Vertices** are placed by dual contouring: where the planes tangent to the surface at its crossings of a cube's edges meet, nearest the crossings' mean along directions the planes leave free. Each crossing takes the normal of the voxel nearer it, so a crease keeps both its sides; a dug hollow's lip comes within 9 cm, where surface nets round it by 16. Shading takes the crossings' normals too. The liquid holds no normals and uses its field's gradient. Crossings still come from straight lines between voxels, which miss a crease's true place by a few centimetres where an edge's ends belong to different surfaces.
 - **Detail:** voxels are generated with nothing finer than two of them across, as finer detail would alias into steps a voxel apart.
 - **Where:** from 16 m under a chunk's lowest ground to over its highest, around the sea's level apart from that, and through held changes next to either. Caves still open at the foot are followed down, as far as 64 m under the lowest ground.
 - **The client:** `--globe`, or `--globe-planet` with a preset or a planet file, meshes the chunks within 160 m of the eye on the job pool, nearest first, coloured by material and drawn as blocks. Flight keeps above the generated ground.
-- **Cost:** 38–84 ms a chunk on one thread, Venus to the Moon. Most of it is the generator's columns: each also takes the ground's slope at 16 m for its soils, nearly another column's work.
+- **Cost:** 42–86 ms a chunk on one thread, Venus to the Moon. Most of it is the generator's columns: each also takes the ground's slope at 16 m for its soils, nearly another column's work.
 
 ## Build order
 
