@@ -1,16 +1,25 @@
+#include "test_planet.hpp"
+
 #include <hog/client/globe_view.hpp>
 #include <hog/client/ground.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/planet/materials.hpp>
+#include <hog/planet/planet_config.hpp>
+#include <hog/planet/tangent_frame.hpp>
+#include <hog/planet/world.hpp>
 #include <hog/terrain/material.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <filesystem>
+#include <print>
 #include <set>
 #include <span>
 #include <vector>
@@ -160,4 +169,33 @@ TEST_CASE("the globe's surfaces follow the eye, coarser further off", "[client][
     apply(shown, stream.finish());
     CHECK(shown == keys_of(stream.wanted()));
     CHECK(stream.chunks() == shown.size());
+}
+
+// Meshes every chunk the client wants at its start, naming each first, so an assertion in the
+// mesher points at the chunk. A minute on a release build; run by hand: hog_client_tests "[.gate]".
+TEST_CASE("every chunk round the client's start meshes", "[.gate][client][globe]") {
+    // The client's own planet, not the tests' smaller one.
+    const auto config = hog::planet::load_planet_config(std::filesystem::path{HOG_SOURCE_DIR} /
+                                                        "config" / "planet.toml")
+                            .value();
+    const hog::planet::World world{config};
+    const double radius = world.geology().planet_radius();
+    const hog::client::GlobeWorld globe{
+        hog::client::globe_planet(std::nullopt, config.seed, radius).value()};
+    const hog::globe::Generator& generator = globe.generator;
+    const DVec3 up = hog::planet::start_direction;
+    const double height = 30.0;
+    const double reach = std::max(1'000.0, std::sqrt((2.0 * radius * height) + (height * height)));
+    const std::vector<hog::globe::Cell> chunks =
+        hog::globe::chunks_around(generator, {.up = up, .height = height}, reach, 3.0);
+    const hog::globe::Drawn drawn{chunks};
+    std::println("radius {}, {} chunks", radius, chunks.size());
+    for (const hog::globe::Cell chunk : chunks) {
+        std::println("chunk level {} face {} i {} j {} detail {}", chunk.level, chunk.face, chunk.i,
+                     chunk.j, hog::globe::detail_of(chunk, generator.layers()));
+        (void)std::fflush(stdout);
+        hog::globe::SurfaceMesh mesh;
+        mesh.origin = hog::globe::center(chunk) * radius;
+        hog::globe::add_chunk(mesh, globe.world, chunk, drawn);
+    }
 }

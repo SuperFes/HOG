@@ -64,4 +64,8 @@ struct SurfaceMesh {
 void add_chunk(SurfaceMesh& mesh, const World& world, Cell chunk);
 void add_chunk(SurfaceMesh& mesh, const World& world, Cell chunk, const Drawn& drawn);
 
+// Whether the boxes of `chunk` and those drawn beside it tile without overlapping, as add_chunk
+// needs them to; without generating anything, so a whole set of chunks is quick to check.
+[[nodiscard]] bool boxes_tile(const World& world, Cell chunk, const Drawn& drawn);
+
 } // namespace hog::globe

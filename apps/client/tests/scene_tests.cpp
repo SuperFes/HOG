@@ -1241,7 +1241,14 @@ TEST_CASE("the globe at reported spots, to look at", "[.look]") {
                                   .longitude = -172.852987,
                                   .altitude = 1526.0,
                                   .heading = 14.4,
-                                  .pitch = -9.9}}) {
+                                  .pitch = -9.9},
+                             // A shelf once drawn as an island from up here, bare of its sea.
+                             Spot{.name = "shelf",
+                                  .latitude = -79.993368,
+                                  .longitude = -132.811001,
+                                  .altitude = 6536.0,
+                                  .heading = -112.7,
+                                  .pitch = -25.4}}) {
         const hog::DVec3 up =
             hog::planet::direction_at(spot.latitude * degree, spot.longitude * degree);
         const hog::client::Flight flight = hog::client::turned_to(

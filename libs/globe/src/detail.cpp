@@ -52,6 +52,17 @@ std::optional<Cell> too_coarse_beside(const std::set<Cell>& leaves, Cell chunk) 
 
 } // namespace
 
+Drawn::Drawn(std::span<const Cell> chunks) : chunks_{chunks.begin(), chunks.end()} {
+    for (const Cell chunk : chunks_) {
+        for (Cell up = chunk; up.level > 0;) {
+            up = parent(up);
+            if (!over_.insert(up).second) {
+                break;
+            }
+        }
+    }
+}
+
 std::optional<Cell> Drawn::over(Cell cell) const {
     return covering(chunks_, cell);
 }
@@ -67,7 +78,8 @@ double distance_to(const Generator& generator, Eye eye, Cell chunk) {
     return std::max(0.0, glm::length(from - (middle * radius)) - (across * radius));
 }
 
-std::vector<Cell> chunks_around(const Generator& generator, Eye eye, double reach, double ratio) {
+std::vector<Cell> chunks_around(const Generator& generator, Eye eye, double reach, double ratio,
+                                const Drawn& shown) {
     HOG_ASSERT(ratio > 1.0, "a chunk is drawn further off than it's wide");
     const Layers& layers = generator.layers();
     const int finest = layers.level - chunk_levels;
@@ -84,8 +96,10 @@ std::vector<Cell> chunks_around(const Generator& generator, Eye eye, double reac
         if (!within(chunk)) {
             continue;
         }
+        const double splits_within =
+            ratio * width_of(generator, chunk) * (shown.split(chunk) ? split_kept : 1.0);
         if (std::cmp_less(chunk.level, finest) &&
-            distance_to(generator, eye, chunk) < ratio * width_of(generator, chunk)) {
+            distance_to(generator, eye, chunk) < splits_within) {
             const std::array<Cell, 4> finer = children(chunk);
             open.insert(open.end(), finer.begin(), finer.end());
         } else {

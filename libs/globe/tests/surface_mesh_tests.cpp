@@ -16,9 +16,12 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <format>
 #include <map>
 #include <optional>
+#include <random>
 #include <set>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -474,5 +477,243 @@ TEST_CASE("coarser chunks mesh from the world", "[.bench][globe][surface]") {
             std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
         WARN("detail " << detail << ": " << 1'000.0 * seconds / static_cast<double>(chunks.size())
                        << " ms a chunk, " << mesh.vertices.size() / chunks.size() << " vertices");
+    }
+}
+
+namespace {
+
+// Pairs of chunks round `eye` drawn more than a detail apart, or apart at all across a cube's
+// edge, as the mesher can't seam.
+std::size_t too_far_apart(const Generator& generator, hog::globe::Eye eye, double reach,
+                          double ratio) {
+    const std::vector<Cell> chunks = hog::globe::chunks_around(generator, eye, reach, ratio);
+    const hog::globe::Drawn drawn{chunks};
+    const hog::globe::Layers& layers = generator.layers();
+    std::size_t too_far = 0;
+    for (const Cell chunk : chunks) {
+        const hog::globe::CellNeighbors near = hog::globe::around(chunk);
+        const hog::globe::CellNeighbors side = hog::globe::sides(chunk);
+        for (const Cell beside : near.all()) {
+            const std::optional<Cell> over = drawn.over(beside);
+            if (!over) {
+                continue;
+            }
+            const bool across_edge = beside.face != chunk.face &&
+                                     std::ranges::find(side.all(), beside) != side.all().end();
+            const int most_apart = across_edge ? 0 : 1;
+            if (over->level + most_apart < chunk.level) {
+                ++too_far;
+                UNSCOPED_INFO("chunk level "
+                              << int{chunk.level} << " face " << int{chunk.face} << " i " << chunk.i
+                              << " j " << chunk.j << " beside level " << int{over->level}
+                              << " face " << int{over->face} << " i " << over->i << " j " << over->j
+                              << " detail " << hog::globe::detail_of(*over, layers) << " eye "
+                              << eye.up.x << " " << eye.up.y << " " << eye.up.z << " at "
+                              << eye.height);
+            }
+        }
+    }
+    return too_far;
+}
+
+} // namespace
+
+TEST_CASE("chunks round the client's start keep their neighbours a detail apart at most",
+          "[globe][surface]") {
+    hog::globe::Planet planet;
+    planet.seed = 1;
+    const Generator generator{planet};
+    const double radius = generator.planet().radius;
+    const double height = 30.0;
+    const double reach = std::max(1'000.0, std::sqrt((2.0 * radius * height) + (height * height)));
+    CHECK(too_far_apart(generator, {.up = DVec3{1.0, 0.0, 0.0}, .height = height}, reach, 3.0) ==
+          0);
+}
+
+namespace {
+
+// How the chunks beside one are drawn, as the client keys its meshing on: at its detail, coarser,
+// finer, or not at all, two bits each.
+std::uint32_t drawn_beside(const hog::globe::Drawn& drawn, Cell chunk) {
+    std::uint32_t found = 0;
+    const hog::globe::CellNeighbors near = hog::globe::around(chunk);
+    for (const Cell beside : near.all()) {
+        std::uint32_t how = 3;
+        if (const std::optional<Cell> over = drawn.over(beside)) {
+            how = *over == beside ? 0 : 1;
+        } else if (std::ranges::any_of(hog::globe::children(beside),
+                                       [&](Cell finer) { return drawn.contains(finer); })) {
+            how = 2;
+        }
+        found = (found << 2U) | how;
+    }
+    return found;
+}
+
+} // namespace
+
+// Flies from the start as the client does, the chunks sought anew every 16 m, checking each set:
+// neighbours a detail apart at most, and every chunk's boxes tiling with its neighbours'.
+TEST_CASE("chunks keep their neighbours a detail apart at most along a flight",
+          "[.gate][globe][surface]") {
+    hog::globe::Planet planet;
+    planet.seed = 1;
+    const Generator generator{planet};
+    VoxelStore store{generator.layers()};
+    const World world{generator, store};
+    const double radius = generator.planet().radius;
+    std::size_t overlapping = 0;
+    std::set<std::pair<Cell, std::uint32_t>> meshed;
+    for (const DVec3 heading :
+         {DVec3{0.0, 1.0, 0.0}, DVec3{0.0, 0.0, 1.0}, DVec3{0.0, -0.7, 0.7}}) {
+        for (int step = 0; step < 150; ++step) {
+            const double height = 30.0 + (step * 2.0);
+            const DVec3 up =
+                glm::normalize(DVec3{1.0, 0.0, 0.0} + (heading * (16.0 * step / radius)));
+            const double reach =
+                std::max(1'000.0, std::sqrt((2.0 * radius * height) + (height * height)));
+            const hog::globe::Eye eye{.up = up, .height = height};
+            CHECK(too_far_apart(generator, eye, reach, 3.0) == 0);
+            const std::vector<Cell> chunks = hog::globe::chunks_around(generator, eye, reach, 3.0);
+            const hog::globe::Drawn drawn{chunks};
+            for (const Cell chunk : chunks) {
+                // Only as the client would mesh it anew: with its neighbours drawn differently.
+                if (!meshed.emplace(chunk, drawn_beside(drawn, chunk)).second) {
+                    continue;
+                }
+                if (!hog::globe::boxes_tile(world, chunk, drawn)) {
+                    ++overlapping;
+                    UNSCOPED_INFO("overlap at chunk level "
+                                  << int{chunk.level} << " face " << int{chunk.face} << " i "
+                                  << chunk.i << " j " << chunk.j << " eye " << up.x << " " << up.y
+                                  << " " << up.z << " at " << height);
+                }
+            }
+        }
+    }
+    CHECK(overlapping == 0);
+}
+
+// Flies about from the start as a player might, turning and climbing at random, the chunks sought
+// anew every 16 m as the client does, and checks every chunk the client would mesh anew: each
+// time one's neighbours are drawn differently, its boxes must tile with theirs.
+TEST_CASE("chunks' boxes tile along a wandering flight from the start", "[.gate][globe][surface]") {
+    hog::globe::Planet planet;
+    planet.seed = 1;
+    const Generator generator{planet};
+    VoxelStore store{generator.layers()};
+    const World world{generator, store};
+    const double radius = generator.planet().radius;
+    std::mt19937_64 random{7};
+    std::uniform_real_distribution<double> unit{-1.0, 1.0};
+    DVec3 up{1.0, 0.0, 0.0};
+    DVec3 heading{0.0, 1.0, 0.0};
+    double height = 30.0;
+    std::set<std::pair<Cell, std::uint32_t>> meshed;
+    std::size_t overlapping = 0;
+    std::size_t too_far = 0;
+    for (int step = 0; step < 2'000; ++step) {
+        // Turns a little, climbs or dives a little, and flies on 16 to 48 m.
+        heading = glm::normalize(heading + (DVec3{unit(random), unit(random), unit(random)} * 0.3));
+        heading = glm::normalize(heading - (up * glm::dot(heading, up)));
+        height = std::clamp(height * (1.0 + (0.1 * unit(random))), 5.0, 3'000.0);
+        up = glm::normalize(up + (heading * ((32.0 + (16.0 * unit(random))) / radius)));
+        const double reach =
+            std::max(1'000.0, std::sqrt((2.0 * radius * height) + (height * height)));
+        const hog::globe::Eye eye{.up = up, .height = height};
+        too_far += too_far_apart(generator, eye, reach, 3.0);
+        const std::vector<Cell> chunks = hog::globe::chunks_around(generator, eye, reach, 3.0);
+        const hog::globe::Drawn drawn{chunks};
+        for (const Cell chunk : chunks) {
+            if (!meshed.emplace(chunk, drawn_beside(drawn, chunk)).second) {
+                continue;
+            }
+            if (!hog::globe::boxes_tile(world, chunk, drawn)) {
+                ++overlapping;
+                UNSCOPED_INFO("overlap at chunk level "
+                              << int{chunk.level} << " face " << int{chunk.face} << " i " << chunk.i
+                              << " j " << chunk.j << " step " << step << " eye " << up.x << " "
+                              << up.y << " " << up.z << " at " << height);
+            }
+        }
+    }
+    CAPTURE(meshed.size());
+    CHECK(too_far == 0);
+    CHECK(overlapping == 0);
+}
+
+// Where the client aborted, 250 km up with the whole planet in view: a level 2 chunk on a cube's
+// edge found its boxes overlapping a neighbour's.
+TEST_CASE("chunks' boxes tile from far out over a cube's edge", "[globe][surface]") {
+    hog::globe::Planet planet;
+    planet.seed = 1;
+    const Generator generator{planet};
+    VoxelStore store{generator.layers()};
+    const World world{generator, store};
+    const hog::globe::Eye eye{.up = DVec3{-0.417842442, -0.555391738, 0.718990758},
+                              .height = 251'709.3};
+    const std::vector<Cell> chunks = hog::globe::chunks_around(generator, eye, 348'330.0, 3.0);
+    const hog::globe::Drawn drawn{chunks};
+    CHECK(too_far_apart(generator, eye, 348'330.0, 3.0) == 0);
+    for (const Cell chunk : chunks) {
+        CAPTURE(int{chunk.level}, int{chunk.face}, chunk.i, chunk.j);
+        CHECK(hog::globe::boxes_tile(world, chunk, drawn));
+    }
+}
+
+namespace {
+
+// The share of a mesh's vertices on the ground within `within` that wear each material; those
+// down caves don't count, as coarser detail doesn't carve them.
+std::map<Material, double> material_shares(const SurfaceMesh& mesh, Cell within) {
+    std::map<Material, double> shares;
+    double counted = 0.0;
+    for (const auto& vertex : mesh.vertices) {
+        const DVec3 direction = glm::normalize(mesh.origin + DVec3{vertex.position});
+        if (vertex.material == Material::Water ||
+            hog::globe::cell_under(direction, within.level) != within) {
+            continue;
+        }
+        const double ground = hog::globe::ground_below(earth(), direction, 1.0).value_or(0.0);
+        if (glm::length(mesh.origin + DVec3{vertex.position}) < ground - 4.0) {
+            continue;
+        }
+        shares[vertex.material] += 1.0;
+        counted += 1.0;
+    }
+    for (auto& [material, share] : shares) {
+        share /= std::max(counted, 1.0);
+    }
+    return shares;
+}
+
+} // namespace
+
+// The ground's cover is thinner than a coarse voxel, so a coarse chunk's voxels would show the
+// rock under it where fine ones show the cover; each must show what's at its top instead.
+TEST_CASE("the ground wears the same materials however coarse it's drawn", "[globe][surface]") {
+    VoxelStore store{earth().layers()};
+    const World world{earth(), store};
+    const hog::globe::Layers& layers = earth().layers();
+    for (const std::uint64_t k : {3ULL, 11ULL, 29ULL}) {
+        const Cell fine = hog::globe::chunk_under(somewhere(k), layers, 0);
+        const Cell coarse = hog::globe::chunk_under(somewhere(k), layers, 3);
+        const std::map<Material, double> fine_shares =
+            material_shares(mesh_of(world, std::array{fine}), fine);
+        const std::map<Material, double> coarse_shares =
+            material_shares(mesh_of(world, std::array{coarse}), fine);
+        REQUIRE_FALSE(fine_shares.empty());
+        REQUIRE_FALSE(coarse_shares.empty());
+        const auto most = std::ranges::max_element(fine_shares, {},
+                                                   [](const auto& share) { return share.second; });
+        std::string listed;
+        for (const auto& [material, share] : coarse_shares) {
+            listed += std::format("{}:{:.2f} ", static_cast<int>(material), share);
+        }
+        CAPTURE(k, static_cast<int>(most->first), most->second, listed);
+        const auto coarse_most = coarse_shares.find(most->first);
+        const double coarse_share = coarse_most == coarse_shares.end() ? 0.0 : coarse_most->second;
+        CAPTURE(coarse_share);
+        CHECK(coarse_share > most->second - 0.3);
     }
 }

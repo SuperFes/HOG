@@ -151,3 +151,37 @@ TEST_CASE("the higher the eye, the coarser the ground under it", "[globe][detail
     const std::vector<Cell> far = hog::globe::chunks_around(earth(), orbit, 1e9, ratio);
     CHECK(far.size() < 200);
 }
+
+TEST_CASE("a chunk split stays split until the eye has drawn a little further off",
+          "[globe][detail]") {
+    const Eye ground{.up = glm::normalize(DVec3{0.3, -0.2, 1.0})};
+    const hog::globe::Layers& layers = earth().layers();
+    const double radius = earth().planet().radius;
+    const std::vector<Cell> near = hog::globe::chunks_around(earth(), ground, 20'000.0, ratio);
+    const hog::globe::Drawn shown{near};
+    // The chunk a detail over the ground's own under the eye, split for it.
+    const Cell parent = hog::globe::chunk_under(ground.up, layers, 1);
+    REQUIRE(shown.split(parent));
+    REQUIRE_FALSE(shown.contains(parent));
+    const std::array<DVec3, 4> corners = hog::globe::corners(parent);
+    const double width = glm::length(corners[1] - corners[0]) * radius;
+    // Climbs until the parent would no longer be split afresh, though still kept split.
+    Eye eye = ground;
+    while (hog::globe::distance_to(earth(), eye, parent) < ratio * width) {
+        eye.height += 1.0;
+    }
+    eye.height += 1.0;
+    REQUIRE(hog::globe::distance_to(earth(), eye, parent) < hog::globe::split_kept * ratio * width);
+    const std::vector<Cell> afresh = hog::globe::chunks_around(earth(), eye, 20'000.0, ratio);
+    const std::vector<Cell> kept = hog::globe::chunks_around(earth(), eye, 20'000.0, ratio, shown);
+    CHECK(std::ranges::find(afresh, parent) != afresh.end());
+    CHECK(std::ranges::find(kept, parent) == kept.end());
+    // Further off, it merges either way.
+    while (hog::globe::distance_to(earth(), eye, parent) < hog::globe::split_kept * ratio * width) {
+        eye.height += 1.0;
+    }
+    eye.height += 1.0;
+    const std::vector<Cell> merged =
+        hog::globe::chunks_around(earth(), eye, 20'000.0, ratio, shown);
+    CHECK(std::ranges::find(merged, parent) != merged.end());
+}

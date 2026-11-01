@@ -1,6 +1,7 @@
 #include <hog/client/globe_view.hpp>
 #include <hog/client/ground.hpp>
 #include <hog/core/assert.hpp>
+#include <hog/core/log.hpp>
 
 #include <algorithm>
 #include <array>
@@ -169,6 +170,8 @@ std::uint64_t globe_key(globe::Cell chunk) {
 
 namespace {
 
+const log::Category globe_log{"globe"};
+
 // How the chunks beside one are drawn, by each: at its detail, coarser, finer, or not at all.
 std::uint32_t drawn_beside(const globe::Drawn& drawn, globe::Cell chunk) {
     std::uint32_t found = 0;
@@ -206,7 +209,11 @@ void GlobeStream::follow(DVec3 eye) {
     }
     around_ = eye;
     const double reach = std::max(detail_.least, horizon(radius, height));
-    order_ = globe::chunks_around(generator, {.up = up, .height = height}, reach, detail_.ratio);
+    order_ = globe::chunks_around(generator, {.up = up, .height = height}, reach, detail_.ratio,
+                                  drawn_ ? *drawn_ : globe::Drawn{});
+    log::info(globe_log,
+              "seeking {} chunks round ({:.9f}, {:.9f}, {:.9f}) at {:.1f} m, {:.0f} m out",
+              order_.size(), up.x, up.y, up.z, height, reach);
     drawn_ = std::make_shared<const globe::Drawn>(order_);
     wanted_.clear();
     for (const globe::Cell chunk : order_) {

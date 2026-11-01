@@ -270,8 +270,9 @@ Generator::Column Generator::finish(DVec3 down, double lod, const terms::Column&
     const double latitude = maths::atan2(down.z, std::sqrt((down.x * down.x) + (down.y * down.y)));
     column.surface_temperature_ = temperature_at(planet_, latitude);
     const double height = column.ground_ - planet_.radius;
-    // Soil and snow lie by the slope over tens of metres, not the ground's grain.
-    const double broad = std::max(lod, broad_slope_scale);
+    // Soil and snow lie by the slope over tens of metres, not the ground's grain; nor by a
+    // coarser detail's smoother ground, or a hillside bare at close hand grows soil from afar.
+    const double broad = broad_slope_scale;
     const DVec3 broad_tilt =
         broad == lod ? found.height.gradient : terms::column(context, down, broad).height.gradient;
     column.strata_ = terms::layering(context, down, found, height, glm::length(broad_tilt),
@@ -336,7 +337,12 @@ Sample Generator::Column::sample(double radius) const noexcept {
     }
 
     if (sample.distance < 0.0) {
-        sample.material = terms::material_at(context, strata_, depth, radius);
+        // A voxel shows the matter at its top, nearest the surface, not at its middle: the first
+        // one under the ground shows what's at the ground however coarse the voxels, as fine
+        // ones find it, so the ground looks the same at every detail. Voxels stand half a lod
+        // apart.
+        const double shown = std::max(0.0, depth - (lod_ / 2.0));
+        sample.material = terms::material_at(context, strata_, shown, ground_ - shown);
     } else if (generator_->shape_.sea && radius < planet.radius) {
         sample.material = planet.volatiles == Volatile::Water ? Material::Water : Material::Air;
         sample.water = 1.0;

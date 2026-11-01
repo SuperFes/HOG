@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <format>
 #include <limits>
 #include <map>
 #include <optional>
@@ -242,8 +243,8 @@ class Grid {
 public:
     Grid(const World& world, Cell chunk, const Drawn& drawn, DVec3 origin)
         : world_{&world}, layers_{&world.generator().layers()}, chunk_{chunk},
-          apart_{apart_at(detail_of(chunk, *layers_))}, origin_{origin},
-          step_{finer_beside(drawn, chunk, apart_) ? apart_ / 2 : apart_},
+          sea_{world.generator().sea_level()}, apart_{apart_at(detail_of(chunk, *layers_))},
+          origin_{origin}, step_{finer_beside(drawn, chunk, apart_) ? apart_ / 2 : apart_},
           size_{chunk_side * apart_ / step_},
           // The widest box of a chunk a detail coarser, across a cube's edge, and one more.
           margin_{(2 * (2 * apart_ / step_)) + 1}, width_{size_ + (2 * margin_)} {
@@ -253,6 +254,8 @@ public:
     }
 
     [[nodiscard]] Cell chunk() const noexcept { return chunk_; }
+    // Whether boxes of chunks beside each other were found overlapping, which they never should.
+    [[nodiscard]] bool overlapped() const noexcept { return overlapped_; }
     [[nodiscard]] int apart() const noexcept { return apart_; }
     [[nodiscard]] int step() const noexcept { return step_; }
     [[nodiscard]] int size() const noexcept { return size_; }
@@ -286,6 +289,10 @@ public:
         return globe::metres(at(point).distance) * column(point).apart;
     }
     [[nodiscard]] Material soaked(Point point) const { return soaked_[index(point)]; }
+    // Metres a voxel's middle stands over the sea's level, if the world has a sea.
+    [[nodiscard]] std::optional<double> over_sea(Point point) const {
+        return sea_ ? std::optional{layers_->middle(point[2]) - *sea_} : std::nullopt;
+    }
     [[nodiscard]] DVec3 position(Point point) const {
         return (column(point).direction * layers_->middle(point[2])) - origin_;
     }
@@ -434,15 +441,34 @@ private:
                 Column& at = columns_[spot(a, b)];
                 at.exists = true;
                 at.cell = *cell;
-                // Where nothing's drawn, as if drawn at this chunk's detail.
-                Cell over = *cell;
-                while (over.level > chunk_.level) {
-                    over = parent(over);
-                }
-                at.chunk = drawn.over(*cell).value_or(over);
+                at.chunk = drawn.over(*cell).value_or(undrawn_as(drawn, *cell));
                 at.chunk_apart = apart_at(detail_of(at.chunk, *layers_));
             }
         }
+    }
+
+    // What an undrawn cell is drawn as if it were: a chunk at this chunk's detail, unless a coarser
+    // chunk faces it across the cube's edge, whose boxes straddle the edge into it at their own
+    // size, when it's one at that chunk's detail, so nothing smaller is laid under them. On one
+    // face the lattices nest, so the coarser chunk's boxes meet the finer ones' as they are.
+    [[nodiscard]] Cell undrawn_as(const Drawn& drawn, Cell cell) const {
+        Cell over = cell;
+        while (over.level > chunk_.level) {
+            over = parent(over);
+        }
+        const CellNeighbors beside = sides(over);
+        for (const Cell facing : beside.all()) {
+            if (facing.face == over.face) {
+                continue;
+            }
+            const std::optional<Cell> drawn_facing = drawn.over(facing);
+            if (drawn_facing && drawn_facing->level < over.level) {
+                while (over.level > drawn_facing->level) {
+                    over = parent(over);
+                }
+            }
+        }
+        return over;
     }
 
     [[nodiscard]] static bool on_lattice(const Column& at, int apart) {
@@ -536,8 +562,7 @@ private:
         footprints_.push_back(print);
         for (int y = print.b; y < print.b + print.along; ++y) {
             for (int x = print.a; x < print.a + print.across; ++x) {
-                HOG_ASSERT(footprint_of_[spot(x, y)] < 0,
-                           "boxes of chunks beside each other overlap");
+                overlapped_ = overlapped_ || footprint_of_[spot(x, y)] >= 0;
                 footprint_of_[spot(x, y)] = index;
             }
         }
@@ -611,15 +636,31 @@ private:
         }
     }
 
-    // The liquid each voxel counts as full of, if any: its own, or beside some, under the ground
-    // at the shore, so the liquid's surface runs on under the ground rather than stopping a
-    // voxel short of it in steps.
+    // The liquid each voxel counts as full of, if any: its own; the sea's, for the seabed under
+    // it, so the sea's surface is drawn over a shelf shallower than a voxel; or beside some,
+    // under the ground at the shore, so the liquid's surface runs on under the ground rather
+    // than stopping a voxel short of it in steps.
     void soak() {
         soaked_.assign(voxels_.size(), Material::Air);
         for (std::size_t k = 0; k < voxels_.size(); ++k) {
             const Voxel& voxel = voxels_[k];
             if (voxel.solid == Material::Air && voxel.liquid_amount >= Voxel::full / 2) {
                 soaked_[k] = voxel.liquid;
+            }
+        }
+        if (sea_) {
+            for (std::size_t k = 0; k < places_.size(); ++k) {
+                if (generated_[k].ground() >= *sea_) {
+                    continue;
+                }
+                const auto [a, b] = places_[k];
+                const Column& at = column(a, b);
+                for (int layer = bottom_; layer <= top_; layer += at.apart) {
+                    const Point point{a, b, layer};
+                    if (voxels_[index(point)].solid != Material::Air && over_sea(point) < 0.0) {
+                        soaked_[index(point)] = Material::Water;
+                    }
+                }
             }
         }
         for (int reach = 0; reach < shore_reach; ++reach) {
@@ -654,6 +695,7 @@ private:
     const World* world_;
     const Layers* layers_;
     Cell chunk_;
+    std::optional<double> sea_;
     int apart_;
     DVec3 origin_;
     int step_;
@@ -664,6 +706,7 @@ private:
     int top_ = 0;
     std::vector<Column> columns_;
     std::vector<int> footprint_of_;
+    bool overlapped_ = false;
     std::vector<Footprint> footprints_;
     std::map<int, std::vector<std::size_t>> groups_;
     std::map<int, std::vector<Generator::Column>> group_columns_;
@@ -712,6 +755,10 @@ struct Liquid {
         return (wet(grid, a) && dry(grid, b)) || (dry(grid, a) && wet(grid, b));
     }
     static double value(const Grid& grid, Point point) {
+        // The sea's surface stands at its level exactly, wherever the voxels stand.
+        if (const std::optional<double> over = grid.over_sea(point)) {
+            return *over;
+        }
         const Voxel& voxel = grid.at(point);
         const double share = wet(grid, point) || voxel.solid != Material::Air
                                  ? 1.0
@@ -1257,11 +1304,20 @@ void add_chunk(SurfaceMesh& mesh, const World& world, Cell chunk) {
     add_chunk(mesh, world, chunk, Drawn{});
 }
 
+bool boxes_tile(const World& world, Cell chunk, const Drawn& drawn) {
+    const Grid grid{world, chunk, drawn, center(chunk) * world.generator().planet().radius};
+    return !grid.overlapped();
+}
+
 void add_chunk(SurfaceMesh& mesh, const World& world, Cell chunk, const Drawn& drawn) {
     const Layers& layers = world.generator().layers();
     HOG_ASSERT(chunk.is_valid() && detail_of(chunk, layers) >= 0,
                "a chunk is a cell at least chunk_levels coarser than the voxels'");
     Grid grid{world, chunk, drawn, mesh.origin};
+    HOG_ASSERT(!grid.overlapped(),
+               std::format("boxes of chunks beside each other overlap, at chunk level {} face {} "
+                           "i {} j {}",
+                           chunk.level, chunk.face, chunk.i, chunk.j));
     const double lowest =
         std::ranges::min(grid.generated(), {}, &Generator::Column::ground).ground() - cave_depth;
     const double depth = std::max(surface_depth, distance_band(layers, grid.apart()));
