@@ -116,12 +116,9 @@ TEST_CASE("temperature falls from equator to pole, averaging the measured mean",
     CHECK(std::abs(hog::globe::mean_temperature(named("venus")) - 737.0) < 1e-9);
 }
 
-TEST_CASE("the shell, the crust's heat and widths follow from the knobs", "[globe][planet]") {
+TEST_CASE("the crust's heat and widths follow from the knobs", "[globe][planet]") {
     const Planet earth = named("earth");
     const auto derived = hog::globe::derive(earth);
-    CHECK(derived.layers.count == 28'000);
-    CHECK(derived.layers.floor == earth.radius - earth.floor_depth);
-    CHECK(std::abs(derived.layers.ceiling() - (earth.radius + earth.sky_height)) < 1e-6);
     // Continental crust warms 25 to 35 K a kilometre.
     CHECK(derived.geotherm > 0.025);
     CHECK(derived.geotherm < 0.035);

@@ -175,8 +175,6 @@ Derived derive(const Planet& planet) {
     derived.glacial = derived.ice;
     // Pluto's dunes formed under about a pascal of air.
     derived.aeolian = planet.pressure >= 1.0;
-    derived.layers =
-        layers_about(planet.radius, planet.floor_depth, planet.sky_height, planet.voxel);
     return derived;
 }
 

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <hog/core/result.hpp>
-#include <hog/globe/layers.hpp>
 #include <hog/globe/material.hpp>
 
 #include <cstdint>
@@ -41,8 +40,8 @@ struct Planet {
 
     // The voxel shell: impassable below the floor, open sky above the ceiling.
     double voxel = 0.5;           // metres
-    double floor_depth = 4'000.0; // metres below the reference level
-    double sky_height = 10'000.0; // metres above it
+    double floor_depth = 4'000.0; // metres of rock kept under the lowest ground
+    double sky_height = 10'000.0; // metres above the reference level
 
     Regime regime = Regime::Plates;
     Crust high{.rock = Material::Granite, .thickness = 35'000.0};
@@ -77,7 +76,6 @@ struct Derived {
     bool fluvial = false;
     bool glacial = false;
     bool aeolian = false;
-    Layers layers{};
 };
 
 [[nodiscard]] Derived derive(const Planet& planet);
