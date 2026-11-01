@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <iterator>
 #include <optional>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -50,6 +51,7 @@ void VoxelStore::put(BrickSite site, Brick brick) {
     const std::uint64_t key = brick_key(site);
     bricks_.insert_or_assign(key, std::move(brick));
     changed_.insert(key);
+    log_.emplace_back(++revision_, key);
 }
 
 void VoxelStore::erase(BrickSite site) {
@@ -57,6 +59,7 @@ void VoxelStore::erase(BrickSite site) {
     const std::uint64_t key = brick_key(site);
     if (bricks_.erase(key) > 0) {
         changed_.insert(key);
+        log_.emplace_back(++revision_, key);
     }
 }
 
@@ -92,6 +95,14 @@ std::vector<BrickSite> VoxelStore::sites() const {
 
 std::vector<BrickSite> VoxelStore::changed() const {
     return in_order({changed_.begin(), changed_.end()});
+}
+
+std::vector<BrickSite> VoxelStore::changed_since(std::uint64_t revision) const {
+    std::unordered_set<std::uint64_t> keys;
+    for (auto entry = log_.rbegin(); entry != log_.rend() && entry->first > revision; ++entry) {
+        keys.insert(entry->second);
+    }
+    return in_order({keys.begin(), keys.end()});
 }
 
 } // namespace hog::globe

@@ -1,10 +1,12 @@
 #include <hog/app/probe_layers.hpp>
 #include <hog/app/server.hpp>
 #include <hog/chat/filter.hpp>
+#include <hog/globe/brick_archive.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/material.hpp>
 #include <hog/globe/voxel.hpp>
+#include <hog/globe/voxel_store.hpp>
 #include <hog/globe/world.hpp>
 #include <hog/login/keys.hpp>
 #include <hog/login/token.hpp>
@@ -1369,4 +1371,82 @@ TEST_CASE("a hole dug in the voxel world is kept with it", "[app][server]") {
     auto reopened = opened(world.config());
     CHECK(reopened->voxels().size() > 0);
     CHECK(reopened->globe().at(site).solid == hog::globe::Material::Air);
+}
+
+TEST_CASE("a player's digging is sent back as bricks to everyone", "[app][server]") {
+    const World world;
+    const auto server = playing(world);
+    const std::string address = std::format("127.0.0.1:{}", server->players()->port());
+    const hog::globe::Generator& generator = server->generator();
+    const hog::DVec3 direction = hog::planet::start_direction;
+    const double ground =
+        hog::globe::ground_below(generator, direction, hog::globe::voxel_lod(generator)).value();
+    struct Digger {
+        hog::net::Client client;
+        bool welcomed = false;
+        std::vector<hog::protocol::SentBrick> bricks;
+        std::vector<hog::net::Event> events;
+    };
+    auto first = hog::net::Client::connect(address);
+    auto second = hog::net::Client::connect(address);
+    REQUIRE(first);
+    REQUIRE(second);
+    std::array<Digger, 2> diggers{
+        Digger{.client = std::move(*first), .welcomed = false, .bricks = {}, .events = {}},
+        Digger{.client = std::move(*second), .welcomed = false, .bricks = {}, .events = {}}};
+    bool dug = false;
+    std::atomic<bool> stop = false;
+    const auto give_up = MonotonicClock::now() + 10s;
+    Visited timer{[&] {
+        for (Digger& digger : diggers) {
+            digger.client.poll(digger.events);
+            for (const hog::net::Event& event : digger.events) {
+                if (std::holds_alternative<hog::net::Connected>(event)) {
+                    REQUIRE(digger.client.send(hog::net::Delivery::Reliable,
+                                               hog::protocol::encode(hog::protocol::Hello{})));
+                } else if (const auto* message = std::get_if<hog::net::Message>(&event)) {
+                    auto decoded = hog::protocol::decode(message->bytes());
+                    REQUIRE(decoded);
+                    if (std::holds_alternative<hog::protocol::Welcome>(*decoded)) {
+                        digger.welcomed = true;
+                    } else if (auto* bricks = std::get_if<hog::protocol::Bricks>(&*decoded)) {
+                        digger.bricks.insert(digger.bricks.end(), bricks->bricks.begin(),
+                                             bricks->bricks.end());
+                    }
+                }
+            }
+        }
+        if (!dug && diggers[0].welcomed && diggers[1].welcomed) {
+            dug = true;
+            REQUIRE(diggers[0].client.send(
+                hog::net::Delivery::Reliable,
+                hog::protocol::encode(hog::protocol::Dug{
+                    .centre = hog::protocol::to_millimetres(hog::WorldPosition{direction * ground}),
+                    .radius = 3'000})));
+        }
+        if ((!diggers[0].bricks.empty() && !diggers[1].bricks.empty()) ||
+            MonotonicClock::now() >= give_up) {
+            stop = true;
+        }
+    }};
+    REQUIRE(server->run(timer, [] { return start; }, stop));
+    REQUIRE(server->voxels().size() > 0);
+    // Both are sent every brick the digging changed, which hold the hole as the server does.
+    for (const Digger& digger : diggers) {
+        REQUIRE(digger.bricks.size() == server->voxels().size());
+        hog::globe::VoxelStore theirs{generator.layers()};
+        for (const hog::protocol::SentBrick& brick : digger.bricks) {
+            REQUIRE(hog::globe::take_brick(theirs, {.key = brick.key, .bytes = brick.bytes}));
+        }
+        CHECK(theirs.sites() == server->voxels().sites());
+        const hog::globe::Cell cell = hog::globe::cell_under(direction, generator.layers().level);
+        const hog::globe::Site site{
+            .face = cell.face,
+            .i = cell.i,
+            .j = cell.j,
+            .layer = static_cast<std::uint32_t>(generator.layers().layer_at(ground - 0.5))};
+        REQUIRE(theirs.at(site));
+        CHECK(theirs.at(site)->solid == hog::globe::Material::Air);
+    }
+    CHECK(counter(*server, "hog_bricks_sent_total") == 2 * server->voxels().size());
 }

@@ -72,15 +72,44 @@ Result<Layers> layers_from(std::span<const std::byte> header) {
 
 } // namespace
 
+SavedBrick coded_brick(const VoxelStore& store, BrickSite site) {
+    SavedBrick coded{.key = brick_key(site), .bytes = {}};
+    if (const Brick* brick = store.brick(site)) {
+        ByteWriter out;
+        brick->write(out);
+        coded.bytes = std::move(out).take();
+    }
+    return coded;
+}
+
+Result<void> take_brick(VoxelStore& store, const SavedBrick& coded) {
+    const BrickSite site = brick_at_key(coded.key);
+    if (brick_key(site) != coded.key || !store.holds_site(site)) {
+        return make_error(ErrorCode::Parse, std::format("no brick {:#x}", coded.key));
+    }
+    if (coded.bytes.empty()) {
+        store.erase(site);
+        return {};
+    }
+    ByteReader in{coded.bytes};
+    auto brick = Brick::read(in);
+    if (!brick) {
+        return std::unexpected(std::move(brick.error()));
+    }
+    if (auto finished = in.finish(); !finished) {
+        return std::unexpected(finished.error());
+    }
+    store.put(site, *std::move(brick));
+    return {};
+}
+
 Result<std::size_t> save(VoxelStore& store, BrickArchive& archive) {
     const std::vector<BrickSite> changed = store.changed();
     std::vector<SavedBrick> bricks;
     std::vector<std::uint64_t> erased;
     for (const BrickSite site : changed) {
-        if (const Brick* brick = store.brick(site)) {
-            ByteWriter out;
-            brick->write(out);
-            bricks.push_back({.key = brick_key(site), .bytes = std::move(out).take()});
+        if (store.brick(site) != nullptr) {
+            bricks.push_back(coded_brick(store, site));
         } else {
             erased.push_back(brick_key(site));
         }
@@ -116,19 +145,12 @@ Result<VoxelStore> load(const Layers& layers, const BrickArchive& archive) {
                                       layers.count, layers.thickness, layers.level));
     }
     for (const SavedBrick& saved : contents->bricks) {
-        const BrickSite site = brick_at_key(saved.key);
-        if (brick_key(site) != saved.key || !store.holds_site(site)) {
-            return make_error(ErrorCode::Parse, std::format("no brick {:#x}", saved.key));
+        if (saved.bytes.empty()) {
+            return make_error(ErrorCode::Parse, std::format("brick {:#x} saved empty", saved.key));
         }
-        ByteReader in{saved.bytes};
-        auto brick = Brick::read(in);
-        if (!brick) {
-            return std::unexpected(std::move(brick.error()));
+        if (auto taken = take_brick(store, saved); !taken) {
+            return std::unexpected(std::move(taken.error()));
         }
-        if (auto finished = in.finish(); !finished) {
-            return std::unexpected(finished.error());
-        }
-        store.put(site, *std::move(brick));
     }
     // What was loaded is saved already.
     store.clear_changed();

@@ -18,6 +18,7 @@
 #include <hog/planet/world.hpp>
 #include <hog/protocol/handshake.hpp>
 #include <hog/protocol/messages.hpp>
+#include <hog/server/brick_sharing.hpp>
 #include <hog/server/catch_up.hpp>
 #include <hog/server/persistence.hpp>
 #include <hog/server/players.hpp>
@@ -160,6 +161,12 @@ private:
     void send_placed(net::ConnectionId connection, std::uint64_t account);
     // Sends a player's chat to everyone, under the name the server holds for them.
     void say(net::ConnectionId connection, const protocol::Said& said);
+    // Digs or builds for a player, where the ball is one they may; the bricks changed are told
+    // to everyone with the tick's.
+    void dig(net::ConnectionId connection, const protocol::Dug& dug);
+    void build(net::ConnectionId connection, const protocol::Built& built);
+    void tell_bricks();
+    void send_bricks(net::ConnectionId connection, const std::vector<protocol::Bricks>& bricks);
     // Sends each player a snapshot of those near them.
     void share();
     // Sends every player the weather once it has stepped, to fade to over a step at `scale`.
@@ -188,6 +195,7 @@ private:
     globe::Generator generator_;
     globe::VoxelStore voxels_;
     store::SqliteBrickArchive bricks_;
+    server::BrickSharing bricks_shared_;
     store::SqliteChangeStore changes_;
     store::SqliteSnapshotStore snapshots_;
     store::SqlitePlayerStore places_;
@@ -256,6 +264,7 @@ private:
     metrics::Counter& corrected_moves_;
     metrics::Counter& chat_lines_;
     metrics::Counter& hateful_lines_;
+    metrics::Counter& bricks_sent_;
     // km² alight not yet counted, being under one.
     double alight_left_ = 0.0;
     metrics::Reporter reporter_;

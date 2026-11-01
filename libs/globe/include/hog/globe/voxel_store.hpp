@@ -9,6 +9,7 @@
 #include <optional>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace hog::globe {
@@ -47,10 +48,17 @@ public:
     [[nodiscard]] std::vector<BrickSite> changed() const;
     void clear_changed() noexcept { changed_.clear(); }
 
+    // Each put or letting go counts a revision; the bricks changed since one, in order, each
+    // once, so a second follower of changes needn't clear them from under saving.
+    [[nodiscard]] std::uint64_t revision() const noexcept { return revision_; }
+    [[nodiscard]] std::vector<BrickSite> changed_since(std::uint64_t revision) const;
+
 private:
     Layers layers_;
     std::unordered_map<std::uint64_t, Brick> bricks_;
     std::unordered_set<std::uint64_t> changed_;
+    std::uint64_t revision_ = 0;
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> log_; // revision and key, in order
 };
 
 } // namespace hog::globe

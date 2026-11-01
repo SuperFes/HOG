@@ -119,3 +119,23 @@ TEST_CASE("a dug-out brick costs little to hold", "[globe][store]") {
     }
     CHECK(store.bytes() / store.size() < 1'000);
 }
+
+TEST_CASE("the store tells which bricks changed since a revision, apart from saving",
+          "[globe][store]") {
+    VoxelStore store{layers};
+    const BrickSite a{.face = 0, .i = 1, .j = 2, .layer = 3};
+    const BrickSite b{.face = 1, .i = 0, .j = 0, .layer = 0};
+    CHECK(store.revision() == 0);
+    store.put(a, dug_out());
+    const std::uint64_t told = store.revision();
+    CHECK(told == 1);
+    store.put(b, half_filled());
+    store.put(a, half_filled());
+    store.erase(b);
+    // Saving clears its own list without touching the revisions.
+    store.clear_changed();
+    CHECK(store.changed_since(told) == std::vector<BrickSite>{a, b});
+    CHECK(store.changed_since(0) == std::vector<BrickSite>{a, b});
+    CHECK(store.changed_since(store.revision()).empty());
+    CHECK(store.changed().empty());
+}

@@ -2,6 +2,7 @@
 #include <hog/chat/filter.hpp>
 #include <hog/core/profile.hpp>
 #include <hog/globe/brick_archive.hpp>
+#include <hog/globe/material.hpp>
 #include <hog/net/simulation.hpp>
 #include <hog/planet/bake.hpp>
 #include <hog/planet/cell_id.hpp>
@@ -78,8 +79,8 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config,
                store::SqliteSnapshotStore snapshots, store::SqliteChangeStore changes,
                store::SqlitePlayerStore places, store::SqliteBrickArchive bricks)
     : config_(config), world_id_(planet::world_id(planet)), planet_(planet), generator_(globe),
-      voxels_(generator_.layers()), bricks_(std::move(bricks)), changes_(std::move(changes)),
-      snapshots_(std::move(snapshots)), places_(std::move(places)),
+      voxels_(generator_.layers()), bricks_(std::move(bricks)), bricks_shared_(voxels_),
+      changes_(std::move(changes)), snapshots_(std::move(snapshots)), places_(std::move(places)),
       writer_(snapshots_, config.keep_snapshots),
       nearby_(
           std::min(planet::level_for(config.net.view.radius, planet.radius), planet::max_level)),
@@ -140,6 +141,8 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config,
       chat_lines_(registry_.counter("hog_chat_lines_total", "Lines of chat sent to players.")),
       hateful_lines_(registry_.counter("hog_chat_hateful_lines_total",
                                        "Lines of hate speech reported, sent on as small talk.")),
+      bricks_sent_(
+          registry_.counter("hog_bricks_sent_total", "Bricks of the voxel world sent to players.")),
       reporter_(registry_) {
     persistence_.persist<server::Position>();
     server::track_positions(entities_, nearby_);
@@ -209,6 +212,8 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
         return context("voxels", voxels.error());
     }
     server->voxels_ = std::move(*voxels);
+    // Loaded bricks are told to players as they join, not as changes.
+    server->bricks_shared_ = server::BrickSharing{server->voxels_};
     log::info(server_log, "world {:016x} in {}: {} planet changes, {} bricks changed",
               server->world_id_, world_file, stored_changes->size(), server->voxels_.size());
 
@@ -598,6 +603,7 @@ void Server::answer(net::ConnectionId connection, const protocol::Answer& answer
         handshakes_.erase(shaking);
         send_weather(connection);
         send_woodlands(connection);
+        send_bricks(connection, bricks_shared_.all());
         // A world at real time goes without saying.
         if (clock_scale_ != 1) {
             send_clock(connection);
@@ -628,6 +634,10 @@ void Server::heard(net::ConnectionId connection, std::span<const std::byte> byte
         joined_.acknowledged(connection, ack->tick);
     } else if (const auto* said = std::get_if<protocol::Said>(&*message)) {
         say(connection, *said);
+    } else if (const auto* dug = std::get_if<protocol::Dug>(&*message)) {
+        dig(connection, *dug);
+    } else if (const auto* built = std::get_if<protocol::Built>(&*message)) {
+        build(connection, *built);
     } else if (const auto* hurry = std::get_if<protocol::Hurry>(&*message)) {
         if (joined_.find(connection)) {
             hurry_ = {connection, hurry->scale};
@@ -703,11 +713,65 @@ void Server::say(net::ConnectionId connection, const protocol::Said& said) {
     }
 }
 
+void Server::dig(net::ConnectionId connection, const protocol::Dug& dug) {
+    if (!joined_.find(connection)) {
+        return;
+    }
+    globe::World world = globe();
+    globe::dig(world, protocol::to_world(dug.centre).metres(), dug.radius / 1'000.0);
+}
+
+void Server::build(net::ConnectionId connection, const protocol::Built& built) {
+    if (!joined_.find(connection)) {
+        return;
+    }
+    const auto material = static_cast<globe::Material>(built.material);
+    if (built.material >= globe::material_count || material == globe::Material::Air ||
+        material == globe::Material::Water) {
+        log::debug(server_log, "connection {} would build of material {}",
+                   std::to_underlying(connection), built.material);
+        return;
+    }
+    globe::World world = globe();
+    globe::build(world, protocol::to_world(built.centre).metres(), built.radius / 1'000.0,
+                 material);
+}
+
+void Server::tell_bricks() {
+    if (!players_) {
+        return;
+    }
+    const std::vector<protocol::Bricks> changed = bricks_shared_.changed();
+    if (changed.empty()) {
+        return;
+    }
+    for (const net::ConnectionId connection : joined_.connections()) {
+        send_bricks(connection, changed);
+    }
+}
+
+void Server::send_bricks(net::ConnectionId connection,
+                         const std::vector<protocol::Bricks>& bricks) {
+    if (!players_) {
+        return;
+    }
+    for (const protocol::Bricks& message : bricks) {
+        if (auto sent = players_->send(connection, net::Delivery::Bulk, protocol::encode(message));
+            !sent) {
+            log::debug(server_log, "couldn't send connection {} bricks: {}",
+                       std::to_underlying(connection), sent.error());
+            return;
+        }
+        bricks_sent_.add(message.bricks.size());
+    }
+}
+
 void Server::share() {
     HOG_ZONE("share");
     if (!players_) {
         return;
     }
+    tell_bricks();
     if (auto kept = ground_.keep(joined_.placed()); !kept) {
         log::warn(server_log, "couldn't keep the ground near players: {}", kept.error());
     }

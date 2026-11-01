@@ -169,3 +169,25 @@ TEST_CASE("an archive never written loads an empty store", "[globe][archive]") {
     REQUIRE(loaded);
     CHECK(loaded->size() == 0);
 }
+
+TEST_CASE("a brick coded to send is taken into another store, or let go without bytes",
+          "[globe][archive]") {
+    VoxelStore ours{layers};
+    VoxelStore theirs{layers};
+    const BrickSite site{.face = 2, .i = 5, .j = 6, .layer = 7};
+    ours.put(site, pond(3));
+    const hog::globe::SavedBrick coded = hog::globe::coded_brick(ours, site);
+    CHECK(coded.key == hog::globe::brick_key(site));
+    CHECK_FALSE(coded.bytes.empty());
+    REQUIRE(hog::globe::take_brick(theirs, coded));
+    CHECK(held(theirs) == held(ours));
+    // Let go on one side, it's let go on the other.
+    ours.erase(site);
+    const hog::globe::SavedBrick gone = hog::globe::coded_brick(ours, site);
+    CHECK(gone.bytes.empty());
+    REQUIRE(hog::globe::take_brick(theirs, gone));
+    CHECK(theirs.size() == 0);
+    // A key of no brick, or bytes that aren't one, are refused.
+    CHECK_FALSE(hog::globe::take_brick(theirs, {.key = ~std::uint64_t{0}, .bytes = coded.bytes}));
+    CHECK_FALSE(hog::globe::take_brick(theirs, {.key = coded.key, .bytes = {std::byte{7}}}));
+}

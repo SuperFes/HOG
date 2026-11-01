@@ -66,6 +66,13 @@ private:
 // The format bricks are saved in; it changes only when old saves still read.
 inline constexpr std::uint16_t brick_format = 2;
 
+// A brick as the store holds it, coded to send or save; with no bytes, one the store doesn't hold.
+[[nodiscard]] SavedBrick coded_brick(const VoxelStore& store, BrickSite site);
+
+// Holds a coded brick in the store, or lets its site go if it has no bytes. Fails on a key of no
+// brick, or bytes that don't read as one.
+[[nodiscard]] Result<void> take_brick(VoxelStore& store, const SavedBrick& coded);
+
 // Writes the bricks changed in the store since it was last saved; returns how many.
 [[nodiscard]] Result<std::size_t> save(VoxelStore& store, BrickArchive& archive);
 
