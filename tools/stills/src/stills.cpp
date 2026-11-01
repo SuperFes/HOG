@@ -280,6 +280,38 @@ Image section(const Generator& generator, const Place& place, double length, dou
     return image;
 }
 
+Image plan(const Generator& generator, const Place& place, double span, double depth, int size,
+           int threads) {
+    const Frame frame = frame_at(place);
+    const double radius = generator.planet().radius;
+    const double spacing = span / size;
+    Image image{.width = size,
+                .height = size,
+                .pixels = std::vector<std::uint8_t>(3 * static_cast<std::size_t>(size) *
+                                                    static_cast<std::size_t>(size))};
+    each_row(size, threads, [&](int y) {
+        for (int x = 0; x < size; ++x) {
+            const double u = ((x + 0.5) * spacing) - (span / 2.0);
+            const double v = (span / 2.0) - ((y + 0.5) * spacing);
+            const DVec3 direction =
+                glm::normalize(frame.up + (((u * frame.east) + (v * frame.north)) / radius));
+            const double ground =
+                globe::ground_below(generator, direction, spacing).value_or(radius);
+            const globe::Sample sample =
+                generator.column(direction, spacing).sample(ground - depth);
+            Rgb colour = material_colour(sample.material);
+            if (sample.distance >= 0.0) {
+                colour = sample.water > 0.0 ? material_colour(Material::Water) : Rgb{20, 20, 24};
+            }
+            const auto offset =
+                3 * ((static_cast<std::size_t>(y) * static_cast<std::size_t>(size)) +
+                     static_cast<std::size_t>(x));
+            std::ranges::copy(colour, image.pixels.begin() + static_cast<std::ptrdiff_t>(offset));
+        }
+    });
+    return image;
+}
+
 Result<void> write_png(const std::filesystem::path& path, const Image& image) {
     std::vector<char> encoded;
     const auto append = [](void* context, void* data, int size) {

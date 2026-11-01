@@ -21,9 +21,10 @@ namespace {
 constexpr std::string_view usage =
     "usage: hog-stills [--preset earth|mars|venus|moon | --planet FILE] [--seed N] [--out DIR]\n"
     "                  [--width N] [--threads N] [--at LAT,LON[,HEADING]] [--span M]\n"
-    "                  [--bottom M] [--top M]\n"
+    "                  [--bottom M] [--top M] [--depth M]\n"
     "Writes map.png, and with --at, relief.png and section.png there; the section runs from\n"
-    "--bottom to --top metres off the ground under its middle.\n";
+    "--bottom to --top metres off the ground under its middle. --depth adds plan.png, a slice\n"
+    "that far under the ground everywhere, open space dark.\n";
 
 struct Options {
     hog::globe::Planet planet;
@@ -34,6 +35,7 @@ struct Options {
     double span = 20'000.0;
     double bottom = -500.0; // metres from the ground under --at
     double top = 500.0;
+    std::optional<double> depth; // of a plan slice under the ground
 };
 
 // strtod rather than from_chars, which some standard libraries lack for floating point.
@@ -103,6 +105,8 @@ bool apply(Options& options, std::string_view name, std::string_view value) {
         options.bottom = *given;
     } else if (name == "--top") {
         options.top = *given;
+    } else if (name == "--depth") {
+        options.depth = given;
     } else {
         return false;
     }
@@ -144,6 +148,14 @@ int run(std::span<const std::string_view> arguments) {
                                  hog::stills::relief(generator, *options.at, options.span,
                                                      options.width, options.threads))) {
         return failed;
+    }
+    if (options.depth) {
+        if (const int failed =
+                write(options.out / "plan.png",
+                      hog::stills::plan(generator, *options.at, options.span, *options.depth,
+                                        options.width, options.threads))) {
+            return failed;
+        }
     }
     // The section's window is taken from the ground under its middle.
     const double ground =

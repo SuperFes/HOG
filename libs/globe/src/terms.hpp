@@ -22,6 +22,10 @@ enum class Term : std::uint8_t {
     Strata,
     Basins,
     Folds,
+    CaveDistricts,
+    CaveA,
+    CaveB,
+    Chambers,
 };
 
 struct Context {
@@ -93,6 +97,14 @@ using Layering = Strata;
 // From the ground's height over the radius, its slope and its year-mean temperature.
 [[nodiscard]] Layering layering(const Context& context, DVec3 direction, const Column& column,
                                 double height, double slope, double temperature) noexcept;
+
+// Caves never reach a point more than this many metres from open rock.
+inline constexpr double cave_reach = 50.0;
+
+// Metres from a point in `rock`, `depth` under the ground, to the nearest cave's open space:
+// negative inside it, `cave_reach` at most.
+[[nodiscard]] double cave_distance(const Context& context, DVec3 direction, double radius,
+                                   Material rock, double depth, double lod) noexcept;
 
 // What's `depth` metres under the ground at `radius`.
 [[nodiscard]] Material material_at(const Context& context, const Layering& layers, double depth,

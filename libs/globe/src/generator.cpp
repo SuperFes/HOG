@@ -21,6 +21,17 @@ constexpr int survey_level = 6;
 // Air cools as it rises by g/cp; Earth's moist air at 6.5 K/km, scaled by gravity.
 constexpr double earth_lapse = 0.0065;
 
+// A cave can carve the ground only this near it, the widest passage's radius and some.
+constexpr double cave_surface_reach = 8.0;
+// Cave walls meet the ground in a fillet this wide rather than a sharp lip.
+constexpr double cave_blend = 1.0;
+
+// max(a, b), rounded where they meet over `width`.
+double smooth_max(double a, double b, double width) {
+    const double h = std::max(width - std::abs(a - b), 0.0);
+    return std::max(a, b) + (h * h / (4.0 * width));
+}
+
 // The detail soil and snow follow, in metres.
 constexpr double broad_slope_scale = 16.0;
 
@@ -145,6 +156,8 @@ Generator::Column Generator::column(DVec3 direction, double lod) const noexcept 
     const terms::Column found = terms::column(context, down, lod);
     Column column;
     column.generator_ = this;
+    column.direction_ = down;
+    column.lod_ = lod;
     column.ground_ = planet_.radius + found.height.value - shape_.datum;
     column.slope_ = ground_slope(context, down, lod);
     const double latitude = maths::atan2(down.z, std::sqrt((down.x * down.x) + (down.y * down.y)));
@@ -166,12 +179,22 @@ Sample Generator::Column::sample(double radius) const noexcept {
     const double slope = slope_ * planet.radius / radius;
     Sample sample;
     sample.distance = (radius - ground_) / std::sqrt(1.0 + (slope * slope));
+    const terms::Context context{.planet = &generator_->planet_,
+                                 .derived = &generator_->derived_,
+                                 .shape = &generator_->shape_};
+    const double depth = ground_ - radius;
+
+    // Caves, carved out of the rock under any loose cover, can open the ground near them.
+    if (sample.distance < cave_surface_reach) {
+        const double loose = strata_.snow + strata_.sediment_depth;
+        const Material rock =
+            terms::material_at(context, strata_, std::max(depth, loose + 0.01), radius);
+        const double cave = terms::cave_distance(context, direction_, radius, rock, depth, lod_);
+        sample.distance = smooth_max(sample.distance, -cave, cave_blend);
+    }
 
     if (sample.distance < 0.0) {
-        const terms::Context context{.planet = &generator_->planet_,
-                                     .derived = &generator_->derived_,
-                                     .shape = &generator_->shape_};
-        sample.material = terms::material_at(context, strata_, ground_ - radius, radius);
+        sample.material = terms::material_at(context, strata_, depth, radius);
     } else if (generator_->shape_.sea && radius < planet.radius) {
         sample.material = planet.volatiles == Volatile::Water ? Material::Water : Material::Air;
         sample.water = 1.0;
@@ -180,7 +203,7 @@ Sample Generator::Column::sample(double radius) const noexcept {
     const double lapse = lapse_rate(planet);
     const double surface = surface_temperature_ - (lapse * std::max(0.0, ground_ - planet.radius));
     if (sample.distance < 0.0) {
-        sample.temperature = surface + (generator_->derived_.geotherm * (ground_ - radius));
+        sample.temperature = surface + (generator_->derived_.geotherm * std::max(0.0, depth));
     } else if (sample.water > 0.0) {
         sample.temperature = surface;
     } else {

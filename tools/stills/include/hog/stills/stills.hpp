@@ -41,6 +41,11 @@ struct Place {
 [[nodiscard]] Image section(const globe::Generator& generator, const Place& place, double length,
                             double bottom, double top, int width, int threads);
 
+// A slice `depth` metres under the ground everywhere, `span` metres across, centred on `place`:
+// what each point is made of, so caves show as their passages run.
+[[nodiscard]] Image plan(const globe::Generator& generator, const Place& place, double span,
+                         double depth, int size, int threads);
+
 [[nodiscard]] Result<void> write_png(const std::filesystem::path& path, const Image& image);
 
 } // namespace hog::stills

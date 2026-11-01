@@ -59,6 +59,8 @@ public:
     private:
         friend class Generator;
         const Generator* generator_ = nullptr;
+        DVec3 direction_{0.0, 0.0, 1.0};
+        double lod_ = 0.0;
         double ground_ = 0.0;              // metres from the centre
         double slope_ = 0.0;               // across the ground, at the radius
         double surface_temperature_ = 0.0; // at the reference level
