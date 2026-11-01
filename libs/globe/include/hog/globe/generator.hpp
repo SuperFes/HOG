@@ -12,7 +12,7 @@
 namespace hog::globe {
 
 namespace terms {
-struct Column;
+struct Ground;
 } // namespace terms
 
 // What the world holds at a point before anything has changed it.
@@ -35,6 +35,7 @@ struct Strata {
     Material top = Material::Air; // sand, soil, mud or regolith, under the snow
     double top_depth = 0.0;       // metres
     double sediment_depth = 0.0;  // loose sediment's base, metres below the snow
+    double hold = 1.0;            // how much of the loose cover stays on this slope, 0 to 1
     double cover = 0.0;           // sedimentary rock's base, metres below the ground
     double fold = 0.0;            // metres the beds are lifted here
     DVec3 fold_tilt{0.0};         // how much more, per metre across
@@ -68,6 +69,8 @@ public:
         [[nodiscard]] Sample sample(double radius) const noexcept;
         // Metres from the centre to the ground before caves open it; no solid stands above it.
         [[nodiscard]] double ground() const noexcept { return ground_; }
+        // Metres of loose cover between the ground and the rock under it.
+        [[nodiscard]] double mantle() const noexcept { return mantle_; }
 
     private:
         friend class Generator;
@@ -75,6 +78,7 @@ public:
         DVec3 direction_{0.0, 0.0, 1.0};
         double lod_ = 0.0;
         double ground_ = 0.0;              // metres from the centre
+        double mantle_ = 0.0;              // metres of loose cover over the rock
         double slope_ = 0.0;               // across the ground, at the radius
         DVec3 tilt_{0.0};                  // the way the ground rises, by as much
         double surface_temperature_ = 0.0; // at the reference level
@@ -106,7 +110,7 @@ public:
 
 private:
     // `slope` is `tilt`'s length, as found along with it.
-    [[nodiscard]] Column finish(DVec3 down, double lod, const terms::Column& found, double slope,
+    [[nodiscard]] Column finish(DVec3 down, double lod, const terms::Ground& made, double slope,
                                 DVec3 tilt) const noexcept;
 
     Planet planet_;

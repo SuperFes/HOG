@@ -73,16 +73,17 @@ TEST_CASE("a player starts standing on the ground under them", "[client][player]
 }
 
 TEST_CASE("a player walks or runs the way they face", "[client][player]") {
+    // Briefly: a few metres on, the ground at the spot rises too steeply to run up.
     Player walker = standing();
     const WorldPosition start = walker.feet();
     const Flight facing = aim(walker);
-    REQUIRE(walker.play(stride(facing, {0.0, 0.0, 1.0}, false), 1.0));
+    REQUIRE(walker.play(stride(facing, {0.0, 0.0, 1.0}, false), 0.4));
     const double walked = apart(start, walker.feet());
-    CHECK(walked == Approx(1.5).margin(0.3));
+    CHECK(walked == Approx(0.6).margin(0.15));
     CHECK(glm::dot(glm::normalize(walker.feet() - start), facing.heading) > 0.9);
 
     Player runner = standing();
-    REQUIRE(runner.play(stride(facing, {0.0, 0.0, 1.0}, true), 1.0));
+    REQUIRE(runner.play(stride(facing, {0.0, 0.0, 1.0}, true), 0.4));
     CHECK(apart(start, runner.feet()) > 3.0 * walked);
 }
 

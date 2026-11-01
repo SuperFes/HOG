@@ -31,20 +31,7 @@ constexpr double cave_surface_reach = 8.0;
 // Cave walls meet the ground in a fillet this wide rather than a sharp lip.
 constexpr double cave_blend = 1.0;
 
-// max(a, b), rounded where they meet over `width`.
-double smooth_max(double a, double b, double width) {
-    const double h = std::max(width - std::abs(a - b), 0.0);
-    return std::max(a, b) + (h * h / (4.0 * width));
-}
-
-// How much of smooth_max(a, b, width)'s rate comes from a's.
-double smooth_max_share(double a, double b, double width) {
-    const double h = std::max(width - std::abs(a - b), 0.0);
-    const double blend = h / (2.0 * width);
-    return a >= b ? 1.0 - blend : blend;
-}
-
-// The detail soil and snow follow, in metres.
+// The detail soil and snow follow, in metres: the creep length loose cover is smoothed over.
 constexpr double broad_slope_scale = 16.0;
 
 double lapse_rate(const Planet& planet) {
@@ -91,8 +78,8 @@ struct Tilt {
 };
 
 // The ground's slope measured across a small step either way. Gullies turn with the slope they're
-// cut in, which their own gradients can't know without the ground's curvature.
-
+// cut in, which their own gradients can't know without the ground's curvature, and the loose
+// cover lies by the slope, which its gradient can't know either.
 Tilt ground_tilt(const terms::Context& context, DVec3 direction, double lod) {
     const double step = std::max(lod, context.planet->voxel) / 8.0;
     const DVec3 side = std::abs(direction.z) < 0.9 ? DVec3{0.0, 0.0, 1.0} : DVec3{1.0, 0.0, 0.0};
@@ -100,7 +87,7 @@ Tilt ground_tilt(const terms::Context& context, DVec3 direction, double lod) {
     const DVec3 north = glm::cross(direction, east);
     const double turn = step / context.planet->radius;
     const auto height = [&](DVec3 along, double by) {
-        return terms::column(context, glm::normalize(direction + (along * by)), lod).height.value;
+        return terms::ground(context, glm::normalize(direction + (along * by)), lod).height;
     };
     const double across_east = (height(east, turn) - height(east, -turn)) / (2.0 * step);
     const double across_north = (height(north, turn) - height(north, -turn)) / (2.0 * step);
@@ -174,7 +161,7 @@ Generator::Column Generator::column(DVec3 direction, double lod) const noexcept 
     const terms::Context context{.planet = &planet_, .derived = &derived_, .shape = &shape_};
     const DVec3 down = glm::normalize(direction);
     const Tilt tilt = ground_tilt(context, down, lod);
-    return finish(down, lod, terms::column(context, down, lod), tilt.slope, tilt.rise);
+    return finish(down, lod, terms::ground(context, down, lod), tilt.slope, tilt.rise);
 }
 
 std::vector<Generator::Column> Generator::columns(Cell corner, int side, double lod) const {
@@ -205,17 +192,17 @@ std::vector<Generator::Column> Generator::columns(std::span<const Cell> cells, d
         "the cells must be of one level");
     const terms::Context context{.planet = &planet_, .derived = &derived_, .shape = &shape_};
     const std::size_t count = cells.size();
-    std::vector<terms::Column> found;
+    std::vector<terms::Ground> found;
     found.reserve(count);
     std::unordered_map<std::uint64_t, double> heights;
     for (const Cell cell : cells) {
-        found.push_back(terms::column(context, center(cell), lod));
-        heights.emplace(index_of(cell), found.back().height.value);
+        found.push_back(terms::ground(context, center(cell), lod));
+        heights.emplace(index_of(cell), found.back().height);
     }
     const auto height_at = [&](Cell cell) {
         const auto [at, added] = heights.try_emplace(index_of(cell), 0.0);
         if (added) {
-            at->second = terms::column(context, center(cell), lod).height.value;
+            at->second = terms::ground(context, center(cell), lod).height;
         }
         return at->second;
     };
@@ -239,7 +226,7 @@ std::vector<Generator::Column> Generator::columns(std::span<const Cell> cells, d
             const DVec3 offset = (center(cell) - down) * planet_.radius;
             const double x = glm::dot(offset, east);
             const double y = glm::dot(offset, north);
-            const double rise = height_at(cell) - found[k].height.value;
+            const double rise = height_at(cell) - found[k].height;
             xx += x * x;
             xy += x * y;
             yy += y * y;
@@ -257,27 +244,18 @@ std::vector<Generator::Column> Generator::columns(std::span<const Cell> cells, d
     return made;
 }
 
-Generator::Column Generator::finish(DVec3 down, double lod, const terms::Column& found,
-                                    double slope, DVec3 tilt) const noexcept {
-    const terms::Context context{.planet = &planet_, .derived = &derived_, .shape = &shape_};
+Generator::Column Generator::finish(DVec3 down, double lod, const terms::Ground& made, double slope,
+                                    DVec3 tilt) const noexcept {
     Column column;
     column.generator_ = this;
     column.direction_ = down;
     column.lod_ = lod;
-    column.ground_ = planet_.radius + found.height.value - shape_.datum;
+    column.ground_ = planet_.radius + made.height - shape_.datum;
+    column.mantle_ = made.mantle;
     column.slope_ = slope;
     column.tilt_ = tilt;
-    const double latitude = maths::atan2(down.z, std::sqrt((down.x * down.x) + (down.y * down.y)));
-    column.surface_temperature_ = temperature_at(planet_, latitude);
-    const double height = column.ground_ - planet_.radius;
-    // Soil and snow lie by the slope over tens of metres, not the ground's grain; nor by a
-    // coarser detail's smoother ground, or a hillside bare at close hand grows soil from afar.
-    const double broad = broad_slope_scale;
-    const DVec3 broad_tilt =
-        broad == lod ? found.height.gradient : terms::column(context, down, broad).height.gradient;
-    column.strata_ = terms::layering(context, down, found, height, glm::length(broad_tilt),
-                                     column.surface_temperature_ -
-                                         (lapse_rate(planet_) * std::max(0.0, height)));
+    column.surface_temperature_ = made.surface_temperature;
+    column.strata_ = made.layers;
     return column;
 }
 
@@ -315,8 +293,8 @@ Sample Generator::Column::sample(double radius) const noexcept {
         const double cave = terms::cave_distance(context, strata_, direction_, radius, ground_,
                                                  cover_at(radius, ground_), lod_);
         const double ground = sample.distance;
-        sample.distance = smooth_max(ground, -cave, cave_blend);
-        const double cave_share = smooth_max_share(-cave, ground, cave_blend);
+        sample.distance = terms::smooth_max(ground, -cave, cave_blend);
+        const double cave_share = terms::smooth_max_share(-cave, ground, cave_blend);
         // Only near a surface, where its normal is kept; there by differences, as the cave's
         // distance is its noise over its noise's rate, whose own rate isn't to hand.
         if (cave_share > 0.0 &&
@@ -450,6 +428,32 @@ Column column(const Context& context, DVec3 direction, double lod) noexcept {
                        .gradient = (step * crust.gradient) + shaped.gradient + struck.gradient},
             .high = crust.high,
             .built = built.value};
+}
+
+Ground ground(const Context& context, DVec3 direction, double lod) noexcept {
+    const Planet& planet = *context.planet;
+    Ground made;
+    made.rock = column(context, direction, lod);
+    const double latitude = maths::atan2(
+        direction.z, std::sqrt((direction.x * direction.x) + (direction.y * direction.y)));
+    made.surface_temperature = temperature_at(planet, latitude);
+    const double height = made.rock.height.value - context.shape->datum;
+    // Soil and snow lie by the slope over tens of metres, not the ground's grain; nor by a
+    // coarser detail's smoother ground, or a hillside bare at close hand grows soil from afar.
+    const double broad = broad_slope_scale;
+    const Column smoothed = broad == lod ? made.rock : column(context, direction, broad);
+    const double slope = glm::length(tangential(smoothed.height.gradient, direction));
+    made.layers = layering(context, direction, made.rock, height, slope,
+                           made.surface_temperature - (lapse_rate(planet) * std::max(0.0, height)));
+    // The cover creeps smooth over the same tens of metres, pooling under the ground at that
+    // detail; a coarser detail's ground is already as smooth, so the cover lies on it as made.
+    const bool filtered = lod < broad;
+    made.mantle =
+        mantle(made.rock.height.value, filtered ? smoothed.height.value : made.rock.height.value,
+               loose_depth(made.layers), made.layers.hold);
+    lie_in(made.layers, made.mantle);
+    made.height = made.rock.height.value + made.mantle;
+    return made;
 }
 
 } // namespace terms

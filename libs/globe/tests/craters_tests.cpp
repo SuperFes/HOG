@@ -43,31 +43,56 @@ TEST_CASE("simple craters are bowls and complex ones have floors and peaks", "[g
     constexpr double transition = 15'000.0;
     // A bowl a fifth as deep as wide from rim to floor, its rim at one radius.
     const double diameter = 1'000.0;
-    const double floor = crater_profile(0.0, diameter, transition).height;
-    const double rim = crater_profile(1.0, diameter, transition).height;
+    const double floor = crater_profile(0.0, diameter, transition, 0.0).height;
+    const double rim = crater_profile(1.0, diameter, transition, 0.0).height;
     CHECK(std::abs((rim - floor) - (0.2 * diameter)) < 1e-9);
     CHECK(std::abs(rim - (0.036 * diameter)) < 1e-9);
-    CHECK(crater_profile(0.5, diameter, transition).height < rim);
-    CHECK(crater_profile(1.5, diameter, transition).height < rim);
-    CHECK(crater_profile(1.5, diameter, transition).height > 0.0);
-    CHECK(crater_profile(2.5, diameter, transition).height == 0.0);
-    // Slopes match the heights.
+    CHECK(crater_profile(0.5, diameter, transition, 0.0).height < rim);
+    CHECK(crater_profile(1.5, diameter, transition, 0.0).height < rim);
+    CHECK(crater_profile(1.5, diameter, transition, 0.0).height > 0.0);
+    CHECK(crater_profile(2.5, diameter, transition, 0.0).height == 0.0);
+    // Slopes match the heights, sharp-rimmed or rounded.
     for (const double size : {1'000.0, 60'000.0}) {
-        for (int step = 0; step < 34; ++step) {
-            const double x = 0.02 + (step * 0.0731);
-            const double h = 1e-6;
-            const double slope = (crater_profile(x + h, size, transition).height -
-                                  crater_profile(x - h, size, transition).height) /
-                                 (2.0 * h);
-            CHECK(std::abs(slope - crater_profile(x, size, transition).slope) < 1e-3 * size);
+        for (const double rounding : {0.0, 0.2}) {
+            for (int step = 0; step < 34; ++step) {
+                const double x = 0.02 + (step * 0.0731);
+                const double h = 1e-6;
+                const double slope = (crater_profile(x + h, size, transition, rounding).height -
+                                      crater_profile(x - h, size, transition, rounding).height) /
+                                     (2.0 * h);
+                CHECK(std::abs(slope - crater_profile(x, size, transition, rounding).slope) <
+                      1e-3 * size);
+            }
         }
     }
     // A complex crater is shallower for its size, with a flat floor and a peak in the middle.
     const double big = 60'000.0;
-    const double big_floor = crater_profile(0.3, big, transition).height;
-    CHECK(crater_profile(1.0, big, transition).height - big_floor < 0.1 * big);
-    CHECK(crater_profile(0.25, big, transition).height == big_floor);
-    CHECK(crater_profile(0.0, big, transition).height > big_floor + 1'000.0);
+    const double big_floor = crater_profile(0.3, big, transition, 0.0).height;
+    CHECK(crater_profile(1.0, big, transition, 0.0).height - big_floor < 0.1 * big);
+    CHECK(crater_profile(0.25, big, transition, 0.0).height == big_floor);
+    CHECK(crater_profile(0.0, big, transition, 0.0).height > big_floor + 1'000.0);
+}
+
+TEST_CASE("a worn crater's crest is rounded, its slope turning smoothly", "[globe][craters]") {
+    using hog::globe::terms::crater_profile;
+    constexpr double transition = 15'000.0;
+    constexpr double diameter = 1'000.0;
+    // Sharp, the slope jumps at the rim; rounded, it turns over the rounding's width.
+    const double sharp_jump = crater_profile(1.0 - 1e-6, diameter, transition, 0.0).slope -
+                              crater_profile(1.0 + 1e-6, diameter, transition, 0.0).slope;
+    CHECK(sharp_jump > 100.0);
+    double last = crater_profile(0.7, diameter, transition, 0.2).slope;
+    for (int step = 1; step <= 60; ++step) {
+        const double x = 0.7 + (0.01 * step);
+        const double slope = crater_profile(x, diameter, transition, 0.2).slope;
+        CHECK(std::abs(slope - last) < 0.1 * sharp_jump);
+        last = slope;
+    }
+    // The crest still stands at the rim's height, and no wider than half a radius is rounded.
+    CHECK(std::abs(crater_profile(1.0, diameter, transition, 0.2).height - (0.036 * diameter)) <
+          1e-9);
+    CHECK(crater_profile(0.49, diameter, transition, 3.0).height ==
+          crater_profile(0.49, diameter, transition, 0.5).height);
 }
 
 TEST_CASE("old airless surfaces keep the most craters", "[globe][craters]") {

@@ -6,6 +6,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <optional>
 #include <set>
 #include <string_view>
 
@@ -93,4 +94,65 @@ TEST_CASE("regolith thickens with the surface's age", "[globe][strata]") {
         deeper += old_loose && !new_loose ? 1 : 0;
     }
     CHECK(deeper > count / 2);
+}
+
+namespace {
+
+// The ground's fine relief against its own at the detail the cover is smoothed over, for the
+// ground and for the rock under its cover: root mean square over gentle land, and the mean.
+struct Relief {
+    double ground = 0.0;
+    double rock = 0.0;
+    double ground_mean = 0.0;
+    double cover_mean = 0.0;
+    int count = 0;
+};
+
+Relief fine_relief(const Generator& world, std::uint64_t count) {
+    const std::optional<double> sea = world.sea_level();
+    double ground = 0.0;
+    double rock = 0.0;
+    double ground_sum = 0.0;
+    double cover_sum = 0.0;
+    int taken = 0;
+    for (std::uint64_t k = 0; k < count; ++k) {
+        const DVec3 down = direction(k);
+        const Generator::Column coarse = world.column(down, 16.0);
+        if (sea && coarse.ground() < *sea + 20.0) {
+            continue;
+        }
+        // Only where the cover lies in full: gentle ground, by the coarse column's own cover.
+        if (coarse.mantle() < 1.0) {
+            continue;
+        }
+        const Generator::Column fine = world.column(down, 0.5);
+        const double ground_rise = fine.ground() - coarse.ground();
+        const double rock_rise =
+            (fine.ground() - fine.mantle()) - (coarse.ground() - coarse.mantle());
+        ground += ground_rise * ground_rise;
+        rock += rock_rise * rock_rise;
+        ground_sum += ground_rise;
+        cover_sum += fine.mantle();
+        ++taken;
+    }
+    return {.ground = std::sqrt(ground / taken),
+            .rock = std::sqrt(rock / taken),
+            .ground_mean = ground_sum / taken,
+            .cover_mean = cover_sum / taken,
+            .count = taken};
+}
+
+} // namespace
+
+TEST_CASE("loose cover creeps the ground smooth over the rough rock under it", "[globe][strata]") {
+    for (const std::string_view name : {"earth", "moon"}) {
+        CAPTURE(name);
+        const Relief relief = fine_relief(generator_for(name), 600);
+        REQUIRE(relief.count > 50);
+        CAPTURE(relief.ground, relief.rock, relief.ground_mean, relief.cover_mean);
+        CHECK(relief.ground < 0.5 * relief.rock);
+        CHECK(relief.cover_mean > 1.0);
+        // A coarser detail's ground stands where the fine ground does, on average.
+        CHECK(std::abs(relief.ground_mean) < 0.5);
+    }
 }

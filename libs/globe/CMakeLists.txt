@@ -9,6 +9,7 @@ add_library(hog_globe
     src/erosion.cpp
     src/generator.cpp
     src/layers.cpp
+    src/mantle.cpp
     src/material.cpp
     src/noise.cpp
     src/planet.cpp
@@ -36,6 +37,7 @@ hog_add_tests(hog_globe
     tests/generator_tests.cpp
     tests/landform_survey_tests.cpp
     tests/layers_tests.cpp
+    tests/mantle_tests.cpp
     tests/maths_tests.cpp
     tests/noise_tests.cpp
     tests/planet_tests.cpp

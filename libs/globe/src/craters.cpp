@@ -55,23 +55,22 @@ double unit(std::uint64_t value) {
 
 } // namespace
 
-CraterProfile crater_profile(double x, double diameter, double transition) noexcept {
-    const double size = diameter / transition;
-    // Pike's fits to fresh lunar craters, joined at the transition: bowls a fifth as deep as
-    // wide, then shallower as D^0.3; rims 3.6% of the width, then rising as D^0.4.
-    const double depth = 0.2 * (size < 1.0 ? diameter : transition * maths::pow(size, 0.3));
-    const double rim = 0.036 * (size < 1.0 ? diameter : transition * maths::pow(size, 0.4));
+namespace {
+
+// Ejecta, thinning from the rim and eased to nothing at the reach.
+CraterProfile ejecta(double x, double rim) {
     if (x >= reach) {
         return {};
     }
-    if (x >= 1.0) {
-        // Ejecta, eased to nothing at the reach.
-        const double fade = 1.0 - smoothstep((x - 1.8) / (reach - 1.8));
-        const double fade_slope = -smoothstep_slope((x - 1.8) / (reach - 1.8)) / (reach - 1.8);
-        const double thin = 1.0 / (x * x * x);
-        return {.height = rim * thin * fade,
-                .slope = rim * ((-3.0 * thin / x * fade) + (thin * fade_slope))};
-    }
+    const double fade = 1.0 - smoothstep((x - 1.8) / (reach - 1.8));
+    const double fade_slope = -smoothstep_slope((x - 1.8) / (reach - 1.8)) / (reach - 1.8);
+    const double thin = 1.0 / (x * x * x);
+    return {.height = rim * thin * fade,
+            .slope = rim * ((-3.0 * thin / x * fade) + (thin * fade_slope))};
+}
+
+// The bowl, carried on past the rim as the same curve.
+CraterProfile bowl(double x, double size, double depth, double rim) {
     // Complex craters' floors flatten out from the middle as they grow.
     const double floor = size < 1.0 ? 0.0 : 0.2 + (0.3 * smoothstep((size - 1.0) / 4.0));
     CraterProfile shape{.height = rim - depth, .slope = 0.0};
@@ -91,6 +90,33 @@ CraterProfile crater_profile(double x, double diameter, double transition) noexc
         }
     }
     return shape;
+}
+
+} // namespace
+
+CraterProfile crater_profile(double x, double diameter, double transition,
+                             double rounding) noexcept {
+    const double size = diameter / transition;
+    // Pike's fits to fresh lunar craters, joined at the transition: bowls a fifth as deep as
+    // wide, then shallower as D^0.3; rims 3.6% of the width, then rising as D^0.4.
+    const double depth = 0.2 * (size < 1.0 ? diameter : transition * maths::pow(size, 0.3));
+    const double rim = 0.036 * (size < 1.0 ? diameter : transition * maths::pow(size, 0.4));
+    const double width = std::clamp(rounding, 0.0, 0.5);
+    if (x >= 1.0 + width) {
+        return ejecta(x, rim);
+    }
+    if (x <= 1.0 - width) {
+        return bowl(x, size, depth, rim);
+    }
+    // Across the crest, the wall gives way to the ejecta smoothly; both stand at the rim's height
+    // there, so only the slope turns.
+    const CraterProfile inner = bowl(x, size, depth, rim);
+    const CraterProfile outer = ejecta(x, rim);
+    const double s = smoothstep((x - (1.0 - width)) / (2.0 * width));
+    const double s_slope = smoothstep_slope((x - (1.0 - width)) / (2.0 * width)) / (2.0 * width);
+    return {.height = inner.height + ((outer.height - inner.height) * s),
+            .slope = inner.slope + ((outer.slope - inner.slope) * s) +
+                     ((outer.height - inner.height) * s_slope)};
 }
 
 double craters_over(const Planet& planet, double diameter) noexcept {
@@ -160,14 +186,17 @@ void add_cell(Noise& sum, const Sampled& at, const Bin& bin, Cell cell) {
         }
         // Worn by creep over its age: features narrower than the creep's reach fade.
         const double age = unit(hash_values(own, 4)) * planet.surface_age * 1'000.0;
-        const double creep = std::sqrt(kappa * age) / (0.3 * crater_radius);
+        const double crept = std::sqrt(kappa * age);
+        const double creep = crept / (0.3 * crater_radius);
         // And faded in as the detail asked for reaches them.
         const double shown = smoothstep((size / (2.0 * at.lod)) - 1.0) / (1.0 + (creep * creep));
         if (shown < 0.01) {
             continue;
         }
+        // The crest is rounded as far as creep has worn it, and no sharper than the detail.
         const CraterProfile shape =
-            crater_profile(apart / crater_radius, size, at.context->derived->crater_transition);
+            crater_profile(apart / crater_radius, size, at.context->derived->crater_transition,
+                           std::max(crept, at.lod) / crater_radius);
         sum.value += shown * shape.height;
         const DVec3 outward = tangential(at.direction - centre, at.direction);
         const double out_length = glm::length(outward);
