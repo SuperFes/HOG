@@ -15,7 +15,7 @@ namespace {
 
 void fill(Globe& globe, int below, Material material) {
     for (std::uint64_t index = 0; index < hog::globe::cell_count(globe.level()); ++index) {
-        const auto column = globe.column(hog::globe::cell_at_index(globe.level(), index));
+        const auto column = globe.column(hog::globe::hex_cell_at_index(globe.level(), index));
         for (int shell = 0; shell < below; ++shell) {
             column[static_cast<std::size_t>(shell)].material = material;
         }
@@ -81,7 +81,7 @@ TEST_CASE("a lone hexel shows all its sides, its top and its floor", "[globe][he
     Globe globe{2, {.inner = 1'000.0, .outer = 1'400.0, .count = 4}};
     for (const std::uint64_t index : {std::uint64_t{0}, std::uint64_t{77}}) {
         Globe lone = globe;
-        const HexCell cell = hog::globe::cell_at_index(2, index);
+        const HexCell cell = hog::globe::hex_cell_at_index(2, index);
         lone.at(cell, 2).material = Material::Limestone;
         const auto mesh = hog::globe::mesh_hexels(lone, hog::globe::center(cell) * 1'200.0);
         check_faces(mesh);
@@ -100,7 +100,7 @@ TEST_CASE("a lone hexel shows all its sides, its top and its floor", "[globe][he
 }
 
 TEST_CASE("a window shows its cut where its columns end", "[globe][hexel_mesh]") {
-    const HexCell middle = hog::globe::cell_at_index(5, 4'321);
+    const HexCell middle = hog::globe::hex_cell_at_index(5, 4'321);
     Globe near{
         5, {.inner = 9'000.0, .outer = 9'100.0, .count = 1}, hog::globe::disc(middle, 1), 40};
     for (std::uint64_t index = 0; index < near.size(); ++index) {

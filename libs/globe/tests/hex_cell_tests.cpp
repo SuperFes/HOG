@@ -21,7 +21,7 @@ std::vector<HexCell> all_cells(int level) {
     std::vector<HexCell> cells;
     cells.reserve(hog::globe::cell_count(level));
     for (std::uint64_t index = 0; index < hog::globe::cell_count(level); ++index) {
-        cells.push_back(hog::globe::cell_at_index(level, index));
+        cells.push_back(hog::globe::hex_cell_at_index(level, index));
     }
     return cells;
 }
@@ -193,7 +193,7 @@ TEST_CASE("cells reach the finest level", "[globe][hex_cell]") {
     std::uniform_int_distribution<std::uint64_t> pick(
         0, hog::globe::cell_count(hog::globe::max_level) - 1);
     for (int sample = 0; sample < 2000; ++sample) {
-        const HexCell cell = hog::globe::cell_at_index(hog::globe::max_level, pick(random));
+        const HexCell cell = hog::globe::hex_cell_at_index(hog::globe::max_level, pick(random));
         CHECK(hog::globe::cell_at(hog::globe::center(cell), hog::globe::max_level) == cell);
     }
 }
@@ -266,7 +266,7 @@ TEST_CASE("a grid holds every cell's neighbours by index", "[globe][hex_grid]") 
     const hog::globe::HexGrid grid{3};
     REQUIRE(grid.size() == hog::globe::cell_count(3));
     for (std::uint32_t index = 0; index < grid.size(); ++index) {
-        const auto around = hog::globe::neighbors(hog::globe::cell_at_index(3, index));
+        const auto around = hog::globe::neighbors(hog::globe::hex_cell_at_index(3, index));
         REQUIRE(grid.neighbors(index).size() == around.count);
         for (std::size_t k = 0; k < around.count; ++k) {
             CHECK(grid.neighbors(index)[k] == hog::globe::index_of(around.cells[k]));

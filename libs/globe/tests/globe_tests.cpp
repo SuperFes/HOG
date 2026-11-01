@@ -27,8 +27,8 @@ TEST_CASE("every material is denser than air, and iron the densest", "[globe][ma
 
 TEST_CASE("a globe keeps each column's hexels apart, the lowest shell first", "[globe]") {
     Globe globe{2, {.inner = 1'000.0, .outer = 1'040.0, .count = 4}};
-    const HexCell one = hog::globe::cell_at_index(2, 5);
-    const HexCell two = hog::globe::cell_at_index(2, 6);
+    const HexCell one = hog::globe::hex_cell_at_index(2, 5);
+    const HexCell two = hog::globe::hex_cell_at_index(2, 6);
     globe.at(one, 0) = {.material = Material::Granite, .temperature = 300};
     globe.at(one, 3) = {.material = Material::Water, .temperature = 280};
     CHECK(globe.column(one).size() == 4);
@@ -48,7 +48,7 @@ TEST_CASE("a globe weighs its materials by the space they fill", "[globe]") {
     constexpr double radius = 2'000.0;
     Globe globe{3, {.inner = 0.0, .outer = radius, .count = 8}};
     for (std::uint64_t index = 0; index < hog::globe::cell_count(3); ++index) {
-        for (Hexel& hexel : globe.column(hog::globe::cell_at_index(3, index))) {
+        for (Hexel& hexel : globe.column(hog::globe::hex_cell_at_index(3, index))) {
             hexel.material = Material::Mantle;
         }
     }
@@ -76,7 +76,7 @@ TEST_CASE("a globe a level finer has eight hexels for each of its own", "[globe]
     Globe coarse{level, {.inner = 0.0, .outer = 2'000.0, .count = 6}};
     std::array<std::int64_t, hog::globe::material_count> want{};
     for (std::uint64_t index = 0; index < hog::globe::cell_count(level); ++index) {
-        const bool pentagon = hog::globe::is_pentagon(hog::globe::cell_at_index(level, index));
+        const bool pentagon = hog::globe::is_pentagon(hog::globe::hex_cell_at_index(level, index));
         const auto column = coarse.column_at(index);
         for (std::size_t shell = 0; shell < column.size(); ++shell) {
             const std::size_t pick = ((index * 7) + (shell * 3)) % 4;
@@ -95,7 +95,7 @@ TEST_CASE("a globe a level finer has eight hexels for each of its own", "[globe]
           1e-12 * coarse.hexel_volume());
     std::array<std::int64_t, hog::globe::material_count> got{};
     for (std::uint64_t index = 0; index < hog::globe::cell_count(level + 1); ++index) {
-        const HexCell cell = hog::globe::cell_at_index(level + 1, index);
+        const HexCell cell = hog::globe::hex_cell_at_index(level + 1, index);
         const auto over = hog::globe::parents(cell);
         const auto column = fine.column(cell);
         for (std::size_t shell = 0; shell < column.size(); ++shell) {
@@ -123,7 +123,7 @@ TEST_CASE("a window holds some columns through a run of shells", "[globe]") {
     for (int shell = 0; shell <= part.count; ++shell) {
         CHECK(std::abs(part.floor(shell) - whole.floor(12 + shell)) < 1e-9 * whole.outer);
     }
-    const HexCell middle = hog::globe::cell_at_index(5, 4'321);
+    const HexCell middle = hog::globe::hex_cell_at_index(5, 4'321);
     const auto cells = hog::globe::disc(middle, 2);
     CHECK(cells.size() == 19);
     CHECK(cells.front() == middle);
@@ -131,7 +131,7 @@ TEST_CASE("a window holds some columns through a run of shells", "[globe]") {
     CHECK(!near.is_whole());
     CHECK(near.size() == 19);
     CHECK(near.holds(middle));
-    CHECK(!near.holds(hog::globe::cell_at_index(5, 1)));
+    CHECK(!near.holds(hog::globe::hex_cell_at_index(5, 1)));
     CHECK(near.index_of(middle) == 0);
     near.at(cells[7], 5) = {.material = Material::Basalt, .temperature = 900};
     CHECK(near.column_at(7)[5].material == Material::Basalt);

@@ -319,7 +319,7 @@ std::uint64_t index_of(HexCell cell) {
     return (cell.diamond * n * n) + (std::uint64_t{cell.j} * n) + cell.i;
 }
 
-HexCell cell_at_index(int level, std::uint64_t index) {
+HexCell hex_cell_at_index(int level, std::uint64_t index) {
     HOG_ASSERT(level >= 0 && level <= max_level, "level out of range");
     HOG_ASSERT(index < cell_count(level), "index out of range for the level");
     const auto n = static_cast<std::uint64_t>(side_of(level));

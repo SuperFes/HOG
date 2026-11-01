@@ -1,6 +1,7 @@
 add_library(hog_globe
     src/accretion.cpp
     src/birth.cpp
+    src/cell.cpp
     src/differentiation.cpp
     src/globe.cpp
     src/hex_cell.cpp
@@ -17,6 +18,7 @@ hog_target_defaults(hog_globe)
 
 hog_add_tests(hog_globe
     tests/accretion_tests.cpp
+    tests/cell_tests.cpp
     tests/differentiation_tests.cpp
     tests/globe_tests.cpp
     tests/hex_cell_tests.cpp

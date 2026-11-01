@@ -27,7 +27,7 @@ const Globe& grown() {
 template <typename Each>
 void for_each_column(const Globe& globe, Each each) {
     for (std::uint64_t index = 0; index < hog::globe::cell_count(globe.level()); ++index) {
-        each(globe.column(hog::globe::cell_at_index(globe.level(), index)));
+        each(globe.column(hog::globe::hex_cell_at_index(globe.level(), index)));
     }
 }
 
@@ -37,7 +37,7 @@ TEST_CASE("a planet grows the same from the same seed", "[globe][accretion]") {
     const Globe again = hog::globe::accrete(setup);
     bool same = true;
     for (std::uint64_t index = 0; index < hog::globe::cell_count(setup.level); ++index) {
-        const HexCell cell = hog::globe::cell_at_index(setup.level, index);
+        const HexCell cell = hog::globe::hex_cell_at_index(setup.level, index);
         same = same && std::ranges::equal(again.column(cell), grown().column(cell));
     }
     CHECK(same);

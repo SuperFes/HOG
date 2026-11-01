@@ -245,7 +245,7 @@ HexelStore pack(const Globe& globe) {
     HOG_ASSERT(globe.is_whole(), "only a whole globe packs");
     HexelStore store{globe.level(), globe.shells()};
     for (std::uint64_t index = 0; index < cell_count(globe.level()); ++index) {
-        const HexCell cell = cell_at_index(globe.level(), index);
+        const HexCell cell = hex_cell_at_index(globe.level(), index);
         const auto column = globe.column_at(index);
         for (std::size_t shell = 0; shell < column.size(); ++shell) {
             if (column[shell] != Hexel{}) {
@@ -262,7 +262,7 @@ void unpack(const HexelStore& store, Globe& globe) {
                    store.shells().count == globe.shells().count,
                "store and globe differ in shape");
     for (std::uint64_t index = 0; index < cell_count(globe.level()); ++index) {
-        const HexCell cell = cell_at_index(globe.level(), index);
+        const HexCell cell = hex_cell_at_index(globe.level(), index);
         const auto column = globe.column_at(index);
         for (std::size_t shell = 0; shell < column.size(); ++shell) {
             column[shell] = store.at(cell, static_cast<int>(shell));

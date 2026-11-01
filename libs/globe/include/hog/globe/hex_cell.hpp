@@ -54,7 +54,7 @@ struct HexCell {
 
 // A cell's place in its level, from 0 to cell_count(level), and back.
 [[nodiscard]] std::uint64_t index_of(HexCell cell);
-[[nodiscard]] HexCell cell_at_index(int level, std::uint64_t index);
+[[nodiscard]] HexCell hex_cell_at_index(int level, std::uint64_t index);
 
 // Five sides at the icosahedron's corners, six everywhere else.
 [[nodiscard]] bool is_pentagon(HexCell cell);

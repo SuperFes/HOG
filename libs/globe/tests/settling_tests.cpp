@@ -25,7 +25,7 @@ Globe flat(double thickness, std::uint16_t temperature) {
     Globe globe{level, shells};
     for (std::uint64_t index = 0; index < hog::globe::cell_count(level); ++index) {
         for (int shell = 0; shell < shells.count && shells.ceiling(shell) <= radius; ++shell) {
-            globe.at(hog::globe::cell_at_index(level, index),
+            globe.at(hog::globe::hex_cell_at_index(level, index),
                      shell) = {.material = Material::Mantle, .temperature = temperature};
         }
     }
@@ -43,7 +43,7 @@ void raise(Globe& globe, HexCell cell, int shells, Hexel hexel) {
 std::uint64_t solid(const Globe& globe) {
     std::uint64_t count = 0;
     for (std::uint64_t index = 0; index < hog::globe::cell_count(level); ++index) {
-        for (const Hexel& hexel : globe.column(hog::globe::cell_at_index(level, index))) {
+        for (const Hexel& hexel : globe.column(hog::globe::hex_cell_at_index(level, index))) {
             count += hexel.material == Material::Air ? 0 : 1;
         }
     }
@@ -70,7 +70,7 @@ TEST_CASE("rock bears a face as tall as its strength holds against its weight",
 TEST_CASE("a pillar of hot rock slumps out across the ground, keeping every hexel",
           "[globe][settling]") {
     Globe globe = flat(2'000.0, 1'300);
-    const HexCell middle = hog::globe::cell_at_index(level, 400);
+    const HexCell middle = hog::globe::hex_cell_at_index(level, 400);
     raise(globe, middle, 12, {.material = Material::Mantle, .temperature = 1'300});
     const std::uint64_t before = solid(globe);
     const auto masses = globe.masses();
@@ -80,7 +80,7 @@ TEST_CASE("a pillar of hot rock slumps out across the ground, keeping every hexe
     CHECK(globe.masses() == masses);
     // No column now stands two or more shells over a neighbour.
     for (std::uint64_t index = 0; index < hog::globe::cell_count(level); ++index) {
-        const HexCell cell = hog::globe::cell_at_index(level, index);
+        const HexCell cell = hog::globe::hex_cell_at_index(level, index);
         const int top = hog::globe::top_of(globe.column(cell));
         const auto around = hog::globe::neighbors(cell);
         for (const HexCell next : around.all()) {
@@ -91,7 +91,7 @@ TEST_CASE("a pillar of hot rock slumps out across the ground, keeping every hexe
 
 TEST_CASE("a cold crag stands where loose sand of its height pours away", "[globe][settling]") {
     Globe globe = flat(100.0, 280);
-    const HexCell crag = hog::globe::cell_at_index(level, 400);
+    const HexCell crag = hog::globe::hex_cell_at_index(level, 400);
     raise(globe, crag, 10, {.material = Material::Granite, .temperature = 280});
     const std::vector<HexCell> start{crag};
     CHECK(hog::globe::settle(globe, start, pull) == 0);

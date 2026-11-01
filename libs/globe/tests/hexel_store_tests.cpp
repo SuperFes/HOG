@@ -32,7 +32,7 @@ HexelStore layered() {
 }
 
 HexCell somewhere(std::uint64_t k) {
-    return hog::globe::cell_at_index(fine,
+    return hog::globe::hex_cell_at_index(fine,
                                      (k * 0x9E37'79B9'7F4AULL) % hog::globe::cell_count(fine));
 }
 
@@ -41,7 +41,7 @@ HexCell somewhere(std::uint64_t k) {
 TEST_CASE("a store of one hexel throughout is a node a diamond, at any level", "[globe][store]") {
     const HexelStore store{24, {.inner = 0.0, .outer = 1e5, .count = 1'000'000}, rock};
     CHECK(store.nodes() == 12);
-    CHECK(store.at(hog::globe::cell_at_index(24, 123'456'789), 999'999) == rock);
+    CHECK(store.at(hog::globe::hex_cell_at_index(24, 123'456'789), 999'999) == rock);
     CHECK(store.at(HexCell::pole(24, false), 0) == rock);
 }
 
@@ -79,13 +79,13 @@ TEST_CASE("digging a hexel out costs a path and a brick, and filling it back giv
 TEST_CASE("painting over a block and compacting lets the old one go", "[globe][store]") {
     HexelStore store{6, {.inner = 0.0, .outer = 1e5, .count = 64}};
     for (std::uint64_t index = 0; index < hog::globe::cell_count(6); index += 3) {
-        store.set(hog::globe::cell_at_index(6, index), 5, rock);
+        store.set(hog::globe::hex_cell_at_index(6, index), 5, rock);
     }
     CHECK(store.nodes() > 12);
     store.fill(0, 64, sky);
     store.compact();
     CHECK(store.nodes() == 12);
-    CHECK(store.at(hog::globe::cell_at_index(6, 3), 5) == sky);
+    CHECK(store.at(hog::globe::hex_cell_at_index(6, 3), 5) == sky);
 }
 
 TEST_CASE("a born planet packs and unpacks to the same hexels", "[globe][store]") {

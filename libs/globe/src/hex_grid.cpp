@@ -10,7 +10,7 @@ HexGrid::HexGrid(int level) : level_(level) {
     around_.resize(count);
     sides_.resize(count);
     for (std::size_t index = 0; index < count; ++index) {
-        const HexNeighbors found = globe::neighbors(cell_at_index(level, index));
+        const HexNeighbors found = globe::neighbors(hex_cell_at_index(level, index));
         sides_[index] = found.count;
         for (std::size_t k = 0; k < found.count; ++k) {
             around_[index][k] = static_cast<std::uint32_t>(index_of(found.cells[k]));
