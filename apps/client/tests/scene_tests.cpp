@@ -1192,6 +1192,55 @@ TEST_CASE("the globe's voxels, to look at", "[.look]") {
     }
 }
 
+TEST_CASE("the globe at reported spots, to look at", "[.look]") {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
+    const char* where = std::getenv("HOG_LOOK");
+    REQUIRE(where != nullptr);
+    const double radius = world().geology().planet_radius();
+    const hog::client::GlobeWorld globe{
+        hog::client::globe_planet(std::nullopt, hog::client::testing::planet().seed, radius)
+            .value()};
+    const auto device = test_device();
+    hog::jobs::JobSystem jobs{4};
+    auto scene = Scene::create(*device, world(), jobs, calendar(), hog::client::still_format, 1);
+    REQUIRE(scene);
+    scene->set_blocks(true);
+    scene->follow_globe(globe.world);
+    constexpr double degree = std::numbers::pi / 180.0;
+    // As --at has them: latitude, longitude, metres over the radius, heading and pitch.
+    struct Spot {
+        const char* name;
+        double latitude;
+        double longitude;
+        double altitude;
+        double heading;
+        double pitch;
+    };
+    for (const Spot& spot : {Spot{.name = "coast",
+                                  .latitude = -31.335428,
+                                  .longitude = 176.264827,
+                                  .altitude = 2.0,
+                                  .heading = -33.5,
+                                  .pitch = -22.7},
+                             Spot{.name = "cave",
+                                  .latitude = -26.035949,
+                                  .longitude = 164.090755,
+                                  .altitude = 805.0,
+                                  .heading = -149.1,
+                                  .pitch = -9.7}}) {
+        const hog::DVec3 up =
+            hog::planet::direction_at(spot.latitude * degree, spot.longitude * degree);
+        const hog::client::Flight flight = hog::client::turned_to(
+            hog::client::start_flight(up, radius, spot.altitude, hog::planet::north_pole),
+            spot.heading * degree, spot.pitch * degree);
+        const auto still = hog::client::draw_still(*device, *scene, shot_of(flight),
+                                                   {.width = 1600, .height = 900});
+        REQUIRE(still);
+        REQUIRE(hog::client::save_picture(
+            std::filesystem::path{where} / std::format("globe_at_{}.png", spot.name), *still));
+    }
+}
+
 TEST_CASE("fjords, to look at", "[.look]") {
     // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
     const char* where = std::getenv("HOG_LOOK");
