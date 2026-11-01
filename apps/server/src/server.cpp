@@ -1,6 +1,7 @@
 #include <hog/app/server.hpp>
 #include <hog/chat/filter.hpp>
 #include <hog/core/profile.hpp>
+#include <hog/globe/brick_archive.hpp>
 #include <hog/net/simulation.hpp>
 #include <hog/planet/bake.hpp>
 #include <hog/planet/cell_id.hpp>
@@ -73,10 +74,12 @@ void mirror(metrics::Counter& counter, std::uint64_t total, std::uint64_t& mirro
 } // namespace
 
 Server::Server(Opened /*unused*/, const server::ServerConfig& config,
-               const planet::PlanetConfig& planet, store::SqliteSnapshotStore snapshots,
-               store::SqliteChangeStore changes, store::SqlitePlayerStore places)
-    : config_(config), world_id_(planet::world_id(planet)), planet_(planet),
-      changes_(std::move(changes)), snapshots_(std::move(snapshots)), places_(std::move(places)),
+               const planet::PlanetConfig& planet, const globe::Planet& globe,
+               store::SqliteSnapshotStore snapshots, store::SqliteChangeStore changes,
+               store::SqlitePlayerStore places, store::SqliteBrickArchive bricks)
+    : config_(config), world_id_(planet::world_id(planet)), planet_(planet), generator_(globe),
+      voxels_(generator_.layers()), bricks_(std::move(bricks)), changes_(std::move(changes)),
+      snapshots_(std::move(snapshots)), places_(std::move(places)),
       writer_(snapshots_, config.keep_snapshots),
       nearby_(
           std::min(planet::level_for(config.net.view.radius, planet.radius), planet::max_level)),
@@ -175,6 +178,17 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
     if (!places) {
         return context(world_file, places.error());
     }
+    auto bricks = store::SqliteBrickArchive::open(config.world);
+    if (!bricks) {
+        return context(world_file, bricks.error());
+    }
+    // The voxel world is Earth-like at the planet's seed and size, as the client's is by default.
+    globe::Planet globe;
+    globe.seed = planet->seed;
+    globe.radius = planet->radius;
+    if (auto valid = globe::validate(globe); !valid) {
+        return std::unexpected(std::move(valid).error());
+    }
     auto loaded = save::load_newest(*snapshots, planet::world_id(*planet));
     if (!loaded) {
         return context(world_file, loaded.error());
@@ -184,13 +198,19 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
         return context(world_file, stored_changes.error());
     }
 
-    auto server = std::make_unique<Server>(Opened{}, config, *planet, std::move(*snapshots),
-                                           std::move(*changes), std::move(*places));
+    auto server =
+        std::make_unique<Server>(Opened{}, config, *planet, globe, std::move(*snapshots),
+                                 std::move(*changes), std::move(*places), std::move(*bricks));
     if (auto replayed = server->planet_.replay(*stored_changes); !replayed) {
         return context("planet changes", replayed.error());
     }
-    log::info(server_log, "world {:016x} in {}: {} planet changes", server->world_id_, world_file,
-              stored_changes->size());
+    auto voxels = globe::load(server->generator_.layers(), server->bricks_);
+    if (!voxels) {
+        return context("voxels", voxels.error());
+    }
+    server->voxels_ = std::move(*voxels);
+    log::info(server_log, "world {:016x} in {}: {} planet changes, {} bricks changed",
+              server->world_id_, world_file, stored_changes->size(), server->voxels_.size());
 
     const GameTime first = config.debug.start.value_or(now);
     if (auto started =
@@ -826,8 +846,17 @@ Result<void> Server::save() {
     auto flushed = writer_.flush();
     if (!flushed) {
         log::error(save_log, "saving failed: {}", flushed.error().message);
+        return flushed;
     }
-    return flushed;
+    auto bricks = globe::save(voxels_, bricks_);
+    if (!bricks) {
+        log::error(save_log, "saving bricks failed: {}", bricks.error().message);
+        return std::unexpected(std::move(bricks).error());
+    }
+    if (*bricks > 0) {
+        log::info(save_log, "saved {} bricks", *bricks);
+    }
+    return {};
 }
 
 void Server::report(std::uint64_t slipped) {

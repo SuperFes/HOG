@@ -6,6 +6,10 @@
 #include <hog/core/metrics.hpp>
 #include <hog/core/result.hpp>
 #include <hog/core/time.hpp>
+#include <hog/globe/generator.hpp>
+#include <hog/globe/planet.hpp>
+#include <hog/globe/voxel_store.hpp>
+#include <hog/globe/world.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/net/server.hpp>
 #include <hog/physics/ground.hpp>
@@ -25,6 +29,7 @@
 #include <hog/sim/forest.hpp>
 #include <hog/sim/weather.hpp>
 #include <hog/sim/wildlife.hpp>
+#include <hog/store/sqlite_brick_archive.hpp>
 #include <hog/store/sqlite_change_store.hpp>
 #include <hog/store/sqlite_player_store.hpp>
 #include <hog/store/sqlite_snapshot_store.hpp>
@@ -61,8 +66,9 @@ public:
                                                               GameTime now);
 
     Server(Opened /*unused*/, const server::ServerConfig& config,
-           const planet::PlanetConfig& planet, store::SqliteSnapshotStore snapshots,
-           store::SqliteChangeStore changes, store::SqlitePlayerStore places);
+           const planet::PlanetConfig& planet, const globe::Planet& globe,
+           store::SqliteSnapshotStore snapshots, store::SqliteChangeStore changes,
+           store::SqlitePlayerStore places, store::SqliteBrickArchive bricks);
     Server(const Server&) = delete;
     Server(Server&&) = delete;
     Server& operator=(const Server&) = delete;
@@ -95,6 +101,10 @@ public:
     [[nodiscard]] server::Persistence& persistence() noexcept { return persistence_; }
     [[nodiscard]] const metrics::Registry& metrics() const noexcept { return registry_; }
     [[nodiscard]] const planet::World& planet() const noexcept { return planet_; }
+    // The voxel world: the generator over the bricks changed, which only the server writes.
+    [[nodiscard]] globe::World globe() noexcept { return {generator_, voxels_}; }
+    [[nodiscard]] const globe::Generator& generator() const noexcept { return generator_; }
+    [[nodiscard]] const globe::VoxelStore& voxels() const noexcept { return voxels_; }
     [[nodiscard]] const sim::Weather& weather() const noexcept { return *weather_; }
     // Null when no ecology is configured.
     [[nodiscard]] const sim::Wildlife* wildlife() const noexcept { return wildlife_.get(); }
@@ -175,6 +185,9 @@ private:
     server::ServerConfig config_;
     std::uint64_t world_id_;
     planet::World planet_;
+    globe::Generator generator_;
+    globe::VoxelStore voxels_;
+    store::SqliteBrickArchive bricks_;
     store::SqliteChangeStore changes_;
     store::SqliteSnapshotStore snapshots_;
     store::SqlitePlayerStore places_;

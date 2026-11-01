@@ -1,10 +1,16 @@
 #include <hog/app/probe_layers.hpp>
 #include <hog/app/server.hpp>
 #include <hog/chat/filter.hpp>
+#include <hog/globe/cell.hpp>
+#include <hog/globe/generator.hpp>
+#include <hog/globe/material.hpp>
+#include <hog/globe/voxel.hpp>
+#include <hog/globe/world.hpp>
 #include <hog/login/keys.hpp>
 #include <hog/login/token.hpp>
 #include <hog/net/client.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/planet/tangent_frame.hpp>
 #include <hog/probe/channel.hpp>
 #include <hog/protocol/messages.hpp>
 #include <hog/server/survey.hpp>
@@ -1335,4 +1341,32 @@ TEST_CASE("a world without time control stays at real time", "[app][server]") {
     REQUIRE(echoed);
     CHECK_FALSE(clock_told);
     CHECK(server->time() - start < 1min);
+}
+
+TEST_CASE("a hole dug in the voxel world is kept with it", "[app][server]") {
+    const World world;
+    const hog::DVec3 direction = hog::planet::start_direction;
+    hog::globe::Site site;
+    {
+        auto server = opened(world.config());
+        const hog::globe::Generator& generator = server->generator();
+        const hog::globe::Layers& layers = generator.layers();
+        const double ground =
+            hog::globe::ground_below(generator, direction, hog::globe::voxel_lod(generator))
+                .value();
+        const hog::globe::Cell cell = hog::globe::cell_under(direction, layers.level);
+        site = {.face = cell.face,
+                .i = cell.i,
+                .j = cell.j,
+                .layer = static_cast<std::uint32_t>(layers.layer_at(ground - 0.5))};
+        hog::globe::World globe = server->globe();
+        CHECK(globe.at(site).solid != hog::globe::Material::Air);
+        hog::globe::dig(globe, direction * ground, 3.0);
+        CHECK(server->voxels().size() > 0);
+        CHECK(globe.at(site).solid == hog::globe::Material::Air);
+        REQUIRE(server->save());
+    }
+    auto reopened = opened(world.config());
+    CHECK(reopened->voxels().size() > 0);
+    CHECK(reopened->globe().at(site).solid == hog::globe::Material::Air);
 }

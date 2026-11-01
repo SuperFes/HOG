@@ -7,7 +7,7 @@ add_library(hog::app ALIAS hog_app)
 
 target_include_directories(hog_app PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(hog_app
-    PUBLIC hog::net hog::probe hog::protocol hog::server hog::sim hog::store
+    PUBLIC hog::globe hog::net hog::probe hog::protocol hog::server hog::sim hog::store
     PRIVATE hog::chat)
 hog_target_defaults(hog_app)
 
