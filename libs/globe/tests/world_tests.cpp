@@ -243,7 +243,7 @@ TEST_CASE("bricks fill from the generator", "[.bench][globe][world]") {
         std::size_t inside = 0;
         for (const BrickSite& brick : bricks) {
             for (const Voxel& voxel : hog::globe::generated(generator, brick)) {
-                inside += voxel.distance < 0 ? 1 : 0;
+                inside += voxel.distance < 0 ? 1U : 0U;
             }
         }
         const std::chrono::duration<double> took = std::chrono::steady_clock::now() - start;
@@ -254,10 +254,9 @@ TEST_CASE("bricks fill from the generator", "[.bench][globe][world]") {
                 const Site site = hog::globe::site_in(brick, k);
                 const Generator::Column column = generator.column(
                     hog::globe::center(hog::globe::column_of(site, generator.layers())), 0.5);
-                inside += column.sample(generator.layers().middle(static_cast<int>(site.layer)))
-                                      .distance < 0.0
-                              ? 1
-                              : 0;
+                const double distance =
+                    column.sample(generator.layers().middle(static_cast<int>(site.layer))).distance;
+                inside += distance < 0.0 ? 1U : 0U;
             }
         }
         const std::chrono::duration<double> alone = std::chrono::steady_clock::now() - alone_start;
