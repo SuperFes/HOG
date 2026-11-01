@@ -20,7 +20,8 @@ add_library(hog_globe
     src/planet_file.cpp
     src/relief.cpp
     src/settling.cpp
-    src/strata.cpp)
+    src/strata.cpp
+    src/voxel.cpp)
 add_library(hog::globe ALIAS hog_globe)
 
 target_include_directories(hog_globe PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -43,4 +44,5 @@ hog_add_tests(hog_globe
     tests/noise_tests.cpp
     tests/planet_tests.cpp
     tests/settling_tests.cpp
-    tests/strata_tests.cpp)
+    tests/strata_tests.cpp
+    tests/voxel_tests.cpp)

@@ -36,3 +36,14 @@ TEST_CASE("a layer's voxels fill its spherical shell exactly", "[globe][layers]"
         CHECK(std::abs(total - shell) < 1e-9 * shell);
     }
 }
+
+TEST_CASE("columns stand on the level whose cells are about a layer wide", "[globe][layers]") {
+    CHECK(hog::globe::layers_about(115'000.0, 3'000.0, 2'000.0, 0.5).level == 18);
+    for (const double thickness : {0.25, 0.5, 1.0, 3.0}) {
+        const Layers layers = hog::globe::layers_about(115'000.0, 3'000.0, 2'000.0, thickness);
+        const double width =
+            std::sqrt(4.0 * std::numbers::pi / 6.0) * 115'000.0 / std::ldexp(1.0, layers.level);
+        CHECK(width <= layers.thickness * std::numbers::sqrt2);
+        CHECK(width > layers.thickness / std::numbers::sqrt2);
+    }
+}

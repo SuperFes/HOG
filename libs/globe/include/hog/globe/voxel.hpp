@@ -1,0 +1,71 @@
+#pragma once
+
+#include <hog/core/math.hpp>
+#include <hog/globe/cell.hpp>
+#include <hog/globe/generator.hpp>
+#include <hog/globe/layers.hpp>
+#include <hog/globe/material.hpp>
+
+#include <compare>
+#include <cstdint>
+
+namespace hog::globe {
+
+// A voxel's place: a column of the layers' level and a layer up it.
+struct Site {
+    std::uint8_t face = 0;
+    std::uint32_t i = 0;
+    std::uint32_t j = 0;
+    std::uint32_t layer = 0;
+
+    friend constexpr auto operator<=>(const Site&, const Site&) noexcept = default;
+};
+
+[[nodiscard]] constexpr Cell column_of(Site site, const Layers& layers) noexcept {
+    return {.level = static_cast<std::uint8_t>(layers.level),
+            .face = site.face,
+            .i = site.i,
+            .j = site.j};
+}
+
+// Where its value is taken: the middle of its column, halfway up its layer.
+[[nodiscard]] DVec3 middle_of(Site site, const Layers& layers);
+
+// What a voxel holds, in fixed point, so it's held, saved and sent the same everywhere. Shaped
+// matter keeps its form: rock, earth and whatever is built, by its distance to the shaped
+// surface. Loose matter is counted: grains that slide and liquids that flow, as amounts of the
+// voxel's own volume.
+struct Voxel {
+    static constexpr std::int16_t far = 32'767; // millimetres, as far as distance is told
+    static constexpr std::uint8_t sound = 255;
+    static constexpr std::uint16_t full = 1U << 15U; // with room over it for matter pressed in
+
+    std::int16_t distance = far;     // millimetres to the shaped surface, negative inside
+    Material solid = Material::Air;  // what the shaped matter is made of
+    std::uint8_t condition = sound;  // how whole it is; nothing is left of it at 0
+    Material grain = Material::Air;  // sand, rubble or snow
+    std::uint16_t grain_amount = 0;  // of `full`
+    Material liquid = Material::Air; // water or lava
+    std::uint16_t liquid_amount = 0;
+    std::uint16_t temperature = 0; // eighths of a kelvin
+
+    friend constexpr bool operator==(const Voxel&, const Voxel&) noexcept = default;
+};
+
+// Rounded to the nearest step, clamped to what fits.
+[[nodiscard]] std::int16_t distance_in_mm(double metres) noexcept;
+[[nodiscard]] std::uint16_t amount_of(double share) noexcept;
+[[nodiscard]] std::uint16_t temperature_in_eighths(double kelvin) noexcept;
+
+[[nodiscard]] constexpr double metres(std::int16_t distance) noexcept {
+    return distance / 1'000.0;
+}
+[[nodiscard]] constexpr double kelvin(std::uint16_t temperature) noexcept {
+    return temperature / 8.0;
+}
+
+// The voxel a generated sample makes. All the generated ground is shaped matter; it turns loose
+// only once something disturbs it.
+[[nodiscard]] Voxel voxel_from(const Sample& sample) noexcept;
+
+} // namespace hog::globe
