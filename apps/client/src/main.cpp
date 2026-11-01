@@ -776,12 +776,18 @@ void edit_globe(Controls& controls, Connection& connection, client::GlobeWorld* 
 
 // Puts the player back where the server says they were when they last left.
 void return_to(Connection& connection, Controls& controls, std::optional<client::Player>& player,
-               client::Flight& flight, const planet::World& world) {
+               client::Flight& flight, const client::GlobeWorld* globe) {
     const auto placed = connection.take_placed();
     if (!placed) {
         return;
     }
-    auto placing = client::placing(world, *placed);
+    if (globe == nullptr) {
+        flight = client::faced({.eye = protocol::to_world(placed->at)}, placed->facing);
+        player.reset();
+        controls.walking = false;
+        return;
+    }
+    auto placing = client::placing(globe->world, *placed);
     if (!placing) {
         log::warn(player_log, "can't go back to where the player was: {}", placing.error());
         return;
@@ -817,15 +823,8 @@ double drawn_ground(const planet::World& world, const client::GlobeWorld* globe,
 }
 
 void take_part(Controls& controls, std::optional<client::Player>& player, client::Flight& flight,
-               const render::Camera& camera, const planet::World& world,
-               const client::GlobeWorld* globe) {
+               const render::Camera& camera, const client::GlobeWorld* globe) {
     if (controls.walking == player.has_value()) {
-        return;
-    }
-    // The character stands on the old world's ground, which the globe hides.
-    if (globe != nullptr) {
-        log::warn(player_log, "can't walk on the globe yet; flying on");
-        controls.walking = false;
         return;
     }
     if (player) {
@@ -833,7 +832,12 @@ void take_part(Controls& controls, std::optional<client::Player>& player, client
         flight.eye = camera.eye;
         return;
     }
-    auto made = client::Player::create(world, glm::normalize(flight.eye.metres()));
+    if (globe == nullptr) {
+        log::warn(player_log, "can't walk without the globe; flying on");
+        controls.walking = false;
+        return;
+    }
+    auto made = client::Player::create(globe->world, glm::normalize(flight.eye.metres()));
     if (!made) {
         log::warn(player_log, "can't walk here: {}", made.error());
         controls.walking = false;
@@ -954,9 +958,9 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
         last = now;
         times.add(passed, scene.timings());
         shaders.look(device, now);
-        take_part(controls, player, flight, camera, world, globe);
+        take_part(controls, player, flight, camera, globe);
         report(connection, player, flight, forecast, chat, options.chat_filter, now);
-        return_to(connection, controls, player, flight, world);
+        return_to(connection, controls, player, flight, globe);
         if (const auto woodlands = connection.take_woodlands()) {
             scene.fare(*woodlands);
         }

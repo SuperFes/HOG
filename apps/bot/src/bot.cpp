@@ -13,9 +13,8 @@ const log::Category bot_log{"bot"};
 
 } // namespace
 
-Result<Bot> Bot::start(const planet::World& world, std::string address,
-                       std::vector<std::byte> token, DVec3 direction, std::uint64_t seed,
-                       const WanderSettings& settings) {
+Result<Bot> Bot::start(const globe::World& world, std::string address, std::vector<std::byte> token,
+                       DVec3 direction, std::uint64_t seed, const WanderSettings& settings) {
     auto player = client::Player::create(world, direction);
     if (!player) {
         return std::unexpected(player.error());
@@ -24,7 +23,7 @@ Result<Bot> Bot::start(const planet::World& world, std::string address,
     if (!session) {
         return std::unexpected(session.error());
     }
-    return Bot{std::move(*player), std::move(*session), world.geology().planet_radius(), seed,
+    return Bot{std::move(*player), std::move(*session), world.generator().planet().radius, seed,
                settings};
 }
 

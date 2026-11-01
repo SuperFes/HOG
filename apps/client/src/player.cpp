@@ -1,5 +1,6 @@
 #include <hog/client/player.hpp>
 #include <hog/client/scene.hpp>
+#include <hog/globe/generator.hpp>
 
 #include <glm/glm.hpp>
 
@@ -19,12 +20,13 @@ constexpr double closest = 0.3; // metres
 
 } // namespace
 
-Result<Player> Player::create(const planet::World& world, DVec3 direction,
+Result<Player> Player::create(const globe::World& world, DVec3 direction,
                               const PlaySettings& settings) {
     const DVec3 up = glm::normalize(direction);
-    const double radius = world.geology().planet_radius();
-    const WorldPosition over{up *
-                             (radius + ground_under(world, WorldPosition{up * radius}) + drop)};
+    const globe::Generator& generator = world.generator();
+    const double under = globe::ground_below(generator, up, globe::voxel_lod(generator))
+                              .value_or(generator.planet().radius);
+    const WorldPosition over{up * (under + drop)};
     auto space = std::make_unique<physics::Space>();
     physics::Ground ground{*space, world};
     if (auto kept = ground.keep(std::array{over}); !kept) {
@@ -67,7 +69,7 @@ double Player::room(WorldPosition from, DVec3 back, double wanted) const {
     return std::max(glm::length(hit->at - from) - settings_.clearance, closest);
 }
 
-Result<Placing> placing(const planet::World& world, const protocol::Placed& placed,
+Result<Placing> placing(const globe::World& world, const protocol::Placed& placed,
                         const PlaySettings& settings) {
     Placing placing{.flight = faced({.eye = protocol::to_world(placed.at)}, placed.facing),
                     .player = std::nullopt};

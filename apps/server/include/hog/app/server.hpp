@@ -103,7 +103,7 @@ public:
     [[nodiscard]] const metrics::Registry& metrics() const noexcept { return registry_; }
     [[nodiscard]] const planet::World& planet() const noexcept { return planet_; }
     // The voxel world: the generator over the bricks changed, which only the server writes.
-    [[nodiscard]] globe::World globe() noexcept { return {generator_, voxels_}; }
+    [[nodiscard]] globe::World globe() noexcept { return globe_; }
     [[nodiscard]] const globe::Generator& generator() const noexcept { return generator_; }
     [[nodiscard]] const globe::VoxelStore& voxels() const noexcept { return voxels_; }
     [[nodiscard]] const sim::Weather& weather() const noexcept { return *weather_; }
@@ -194,6 +194,7 @@ private:
     planet::World planet_;
     globe::Generator generator_;
     globe::VoxelStore voxels_;
+    globe::World globe_;
     store::SqliteBrickArchive bricks_;
     server::BrickSharing bricks_shared_;
     store::SqliteChangeStore changes_;

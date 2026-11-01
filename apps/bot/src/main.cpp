@@ -1,13 +1,14 @@
 #include <hog/bot/bot.hpp>
 #include <hog/bot/options.hpp>
+#include <hog/client/globe_view.hpp>
 #include <hog/client/options.hpp>
 #include <hog/core/log.hpp>
 #include <hog/core/time.hpp>
+#include <hog/globe/generator.hpp>
 #include <hog/login/service.hpp>
 #include <hog/net/client.hpp>
 #include <hog/planet/planet_config.hpp>
 #include <hog/planet/tangent_frame.hpp>
-#include <hog/planet/world.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -90,8 +91,19 @@ int run(std::span<const std::string_view> arguments) {
         std::cerr << std::format("hog-bot: {}\n", planet.error());
         return EXIT_FAILURE;
     }
-    const planet::World world{*planet};
-    const DVec3 start = world.geology().terrain().nearest_land(planet::start_direction);
+    // The voxel world, as the server and the client have it by default.
+    auto described = client::globe_planet(std::nullopt, planet->seed, planet->radius);
+    if (!described) {
+        std::cerr << std::format("hog-bot: {}\n", described.error());
+        return EXIT_FAILURE;
+    }
+    const client::GlobeWorld globe{*described};
+    const std::optional<DVec3> land = globe::land_near(globe.generator, planet::start_direction);
+    if (!land) {
+        std::cerr << "hog-bot: no land near the start\n";
+        return EXIT_FAILURE;
+    }
+    const DVec3 start = *land;
 
     std::vector<bot::Bot> bots;
     std::mt19937_64 scatter{options->seed};
@@ -107,9 +119,9 @@ int run(std::span<const std::string_view> arguments) {
             token = std::move(*granted);
         }
         // Scattered around the land nearest the start, so they don't stand in one spot.
-        const bot::Wander spot = bot::pick(start, world.geology().planet_radius(), scatter,
-                                           {.furthest = 500.0, .nearest = 10.0});
-        auto started = bot::Bot::start(world, options->connect, std::move(token), spot.target,
+        const bot::Wander spot =
+            bot::pick(start, planet->radius, scatter, {.furthest = 500.0, .nearest = 10.0});
+        auto started = bot::Bot::start(globe.world, options->connect, std::move(token), spot.target,
                                        options->seed + which);
         if (!started) {
             std::cerr << std::format("hog-bot: {} can't start: {}\n", name, started.error());

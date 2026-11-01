@@ -3,6 +3,7 @@
 #include <hog/client/flight.hpp>
 #include <hog/client/player.hpp>
 #include <hog/client/scene.hpp>
+#include <hog/globe/generator.hpp>
 #include <hog/planet/tangent_frame.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -17,14 +18,19 @@ using namespace hog::client;
 
 namespace {
 
-// The land nearest the start, where there's ground to walk on.
 DVec3 on_land() {
-    return client::testing::world().geology().terrain().nearest_land(planet::start_direction,
-                                                                     50 * planet::fixed_one);
+    return client::testing::on_land();
 }
 
 double radius() {
-    return client::testing::world().geology().planet_radius();
+    return client::testing::globe().generator.planet().radius;
+}
+
+// Metres the ground stands over the radius at a direction.
+double ground_at(DVec3 direction) {
+    const globe::Generator& generator = client::testing::globe().generator;
+    return globe::ground_below(generator, direction, globe::voxel_lod(generator)).value_or(0.0) -
+           radius();
 }
 
 double height_of(WorldPosition at) {
@@ -32,7 +38,7 @@ double height_of(WorldPosition at) {
 }
 
 Player standing() {
-    auto player = Player::create(client::testing::world(), on_land());
+    auto player = Player::create(client::testing::globe().world, on_land());
     REQUIRE(player);
     REQUIRE(player->play({}, 1.0));
     return std::move(player).value();
@@ -53,14 +59,13 @@ double apart(WorldPosition a, WorldPosition b) {
 } // namespace
 
 TEST_CASE("a player starts standing on the ground under them", "[client][player]") {
-    const double ground =
-        ground_under(client::testing::world(), WorldPosition{on_land() * radius()});
-    REQUIRE(ground > 1.0);
+    const double ground = ground_at(on_land());
+    REQUIRE(ground > 0.0);
     Player player = standing();
     CHECK(player.standing());
     CHECK(height_of(player.feet()) == Approx(ground).margin(2.0));
-    // Settling on the volcano's flank, though hardly moving.
-    CHECK(apart(player.feet(), WorldPosition{on_land() * radius()}) < 0.05);
+    // Settling where it stands, though hardly moving.
+    CHECK(apart(player.feet(), WorldPosition{on_land() * radius()}) < 0.5);
 
     const WorldPosition before = player.feet();
     REQUIRE(player.play({}, 1.0));
@@ -109,9 +114,10 @@ TEST_CASE("the camera keeps off the ground behind the player", "[client][player]
     // A little aslant, as rays straight down a vertex of the ground can slip between its
     // triangles.
     const DVec3 down = glm::normalize(aim(player).heading - (up * 5.0));
+    // Were the ground level; it dips or rises a little behind.
     const double to_ground = PlaySettings{}.shoulder / -glm::dot(down, up);
     CHECK(player.room(shoulder, down, 4.0) ==
-          Approx(to_ground - PlaySettings{}.clearance).margin(0.15));
+          Approx(to_ground - PlaySettings{}.clearance).margin(0.5));
 }
 
 TEST_CASE("the keys stride the way the aim faces, jumping with up", "[client][player]") {
@@ -129,12 +135,11 @@ TEST_CASE("the keys stride the way the aim faces, jumping with up", "[client][pl
 
 TEST_CASE("a player placed by the server flies there, or stands on the ground under it",
           "[client][player]") {
-    const double ground =
-        ground_under(client::testing::world(), WorldPosition{on_land() * radius()});
+    const double ground = ground_at(on_land());
     const protocol::Facing facing{.heading = 40'000, .pitch = -1'000};
     const auto placed_at = [&](double height, protocol::Stance stance) {
         auto placed =
-            placing(client::testing::world(),
+            placing(client::testing::globe().world,
                     {.at = protocol::to_millimetres(WorldPosition{on_land() * (radius() + height)}),
                      .stance = stance,
                      .facing = facing});

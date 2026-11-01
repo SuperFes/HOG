@@ -3,10 +3,10 @@
 #include <hog/client/flight.hpp>
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
+#include <hog/globe/world.hpp>
 #include <hog/physics/character.hpp>
 #include <hog/physics/ground.hpp>
 #include <hog/physics/space.hpp>
-#include <hog/planet/world.hpp>
 #include <hog/protocol/messages.hpp>
 
 #include <memory>
@@ -24,7 +24,7 @@ struct PlaySettings {
 class Player {
 public:
     // Stood on the ground under a unit `direction`.
-    [[nodiscard]] static Result<Player> create(const planet::World& world, DVec3 direction,
+    [[nodiscard]] static Result<Player> create(const globe::World& world, DVec3 direction,
                                                const PlaySettings& settings = {});
 
     // Moves on by `seconds`, with the ground kept round wherever it gets to.
@@ -58,7 +58,7 @@ struct Placing {
     Flight flight;
     std::optional<Player> player;
 };
-[[nodiscard]] Result<Placing> placing(const planet::World& world, const protocol::Placed& placed,
+[[nodiscard]] Result<Placing> placing(const globe::World& world, const protocol::Placed& placed,
                                       const PlaySettings& settings = {});
 
 // What the keys held ask of the character: `move` is right, up and forwards, each from -1 to 1,

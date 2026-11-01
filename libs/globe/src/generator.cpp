@@ -372,6 +372,40 @@ double coarser(const Generator& generator, double lod) {
     return std::max(1.0, lod / voxel_lod(generator));
 }
 
+std::optional<DVec3> land_near(const Generator& generator, DVec3 direction, double within) {
+    const std::optional<double> sea = generator.sea_level();
+    const DVec3 up = glm::normalize(direction);
+    if (!sea) {
+        return up;
+    }
+    const double radius = generator.planet().radius;
+    // Coarsely, as land a kilometre across is sought, not an islet.
+    const double lod = voxel_lod(generator) * 16.0;
+    const auto land = [&](DVec3 at) {
+        return ground_below(generator, at, lod).value_or(0.0) > *sea;
+    };
+    if (land(up)) {
+        return up;
+    }
+    const DVec3 pole = std::abs(up.z) < 0.9 ? DVec3{0.0, 0.0, 1.0} : DVec3{1.0, 0.0, 0.0};
+    const DVec3 east = glm::normalize(glm::cross(pole, up));
+    const DVec3 north = glm::cross(up, east);
+    constexpr double ring = 1'000.0;
+    for (int k = 1; k * ring <= within; ++k) {
+        const double out = (k * ring) / radius;
+        const int points = 8 * k;
+        for (int n = 0; n < points; ++n) {
+            const double turn = 2.0 * std::numbers::pi * n / points;
+            const DVec3 at = glm::normalize(up + (east * (out * std::cos(turn))) +
+                                            (north * (out * std::sin(turn))));
+            if (land(at)) {
+                return at;
+            }
+        }
+    }
+    return std::nullopt;
+}
+
 std::optional<double> ground_below(const Generator& generator, DVec3 direction, double lod) {
     const Planet& planet = generator.planet();
     const Generator::Column column = generator.column(direction, lod);

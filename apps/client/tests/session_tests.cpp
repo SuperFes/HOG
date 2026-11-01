@@ -1,6 +1,7 @@
 #include <hog/app/server.hpp>
 #include <hog/client/scene.hpp>
 #include <hog/client/session.hpp>
+#include <hog/globe/generator.hpp>
 #include <hog/net/server.hpp>
 #include <hog/net/simulation.hpp>
 #include <hog/testing/ports.hpp>
@@ -494,9 +495,11 @@ bool sees(const Session& session, WorldPosition at) {
 }
 
 // Just over the ground, or the sea, `metres` along the surface from the first player's place.
-WorldPosition standing(const hog::planet::World& world, double metres) {
+WorldPosition standing(const hog::globe::Generator& generator, double metres) {
     const DVec3 up = glm::normalize(along(metres).metres());
-    const double ground = hog::client::ground_under(world, WorldPosition{up * radius});
+    const double ground =
+        hog::globe::ground_below(generator, up, hog::globe::voxel_lod(generator)).value_or(0.0) -
+        radius;
     return WorldPosition{up * (radius + std::max(ground, 0.0) + 0.1)};
 }
 
@@ -513,8 +516,8 @@ TEST_CASE("two players see each other through a bad network", "[client][session]
     REQUIRE(anna);
     REQUIRE(matt);
 
-    const WorldPosition anna_at = standing(server->planet(), 0.0);
-    WorldPosition matt_at = standing(server->planet(), 100.0);
+    const WorldPosition anna_at = standing(server->generator(), 0.0);
+    WorldPosition matt_at = standing(server->generator(), 100.0);
     int stage = 0;
     // Both are told the weather as they join; large, it may take a while to get through.
     bool anna_told = false;
@@ -529,15 +532,15 @@ TEST_CASE("two players see each other through a bad network", "[client][session]
         matt_told = matt->take_weather().has_value() || matt_told;
         if (stage == 0 && sees(*anna, matt_at) && sees(*matt, anna_at)) {
             stage = 1;
-            matt_at = standing(server->planet(), 103.0);
+            matt_at = standing(server->generator(), 103.0);
         } else if (stage == 1 && sees(*anna, matt_at)) {
             // Too far to have got to by now: the server sends him back.
             stage = 2;
-            matt_at = standing(server->planet(), 400.0);
+            matt_at = standing(server->generator(), 400.0);
         } else if (stage == 2) {
             if (const auto back = matt->take_correction()) {
                 CHECK(protocol::to_millimetres(*back) ==
-                      protocol::to_millimetres(standing(server->planet(), 103.0)));
+                      protocol::to_millimetres(standing(server->generator(), 103.0)));
                 stage = 3;
             }
         }
@@ -548,7 +551,7 @@ TEST_CASE("two players see each other through a bad network", "[client][session]
     REQUIRE(server->run(timer, [] { return start; }, stop));
     CHECK(stage == 3);
     CHECK(anna->state() == Session::State::Welcomed);
-    CHECK(sees(*anna, standing(server->planet(), 103.0)));
+    CHECK(sees(*anna, standing(server->generator(), 103.0)));
     CHECK(anna->last_snapshot());
     CHECK(matt->stats());
     CHECK(anna_told);

@@ -273,3 +273,22 @@ TEST_CASE("a cave wall's normal is the way its distance grows", "[globe][generat
     CHECK(on_walls > 100);
     CHECK(agreeing > on_walls * 95 / 100);
 }
+
+TEST_CASE("land is found near a direction, over the sea, and anywhere on a dry world",
+          "[globe][generator]") {
+    const Generator earth = generator_for("earth");
+    const DVec3 start{1.0, 0.0, 0.0};
+    const DVec3 land = hog::globe::land_near(earth, start).value_or(DVec3{0.0});
+    REQUIRE(land != DVec3{0.0});
+    CHECK(hog::globe::ground_below(earth, land, hog::globe::voxel_lod(earth)).value_or(0.0) >
+          earth.sea_level().value_or(0.0));
+    // Nearer than a few rings, or it would have been found sooner.
+    CHECK(glm::length(land - start) * earth.planet().radius < 100'000.0);
+    // Within nothing, only the direction itself can be it.
+    const bool start_is_land =
+        hog::globe::ground_below(earth, start, hog::globe::voxel_lod(earth) * 16.0).value_or(0.0) >
+        earth.sea_level().value_or(0.0);
+    CHECK(hog::globe::land_near(earth, start, 0.0).has_value() == start_is_land);
+    const Generator moon = generator_for("moon");
+    CHECK(hog::globe::land_near(moon, start) == glm::normalize(start));
+}

@@ -6,7 +6,7 @@
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
 #include <hog/core/time.hpp>
-#include <hog/planet/world.hpp>
+#include <hog/globe/world.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -22,7 +22,7 @@ class Bot {
 public:
     // Stood on the ground under a unit `direction`, connecting to `address` with `token` from
     // the login service, or none. The world must outlive the bot.
-    [[nodiscard]] static Result<Bot> start(const planet::World& world, std::string address,
+    [[nodiscard]] static Result<Bot> start(const globe::World& world, std::string address,
                                            std::vector<std::byte> token, DVec3 direction,
                                            std::uint64_t seed, const WanderSettings& settings = {});
 

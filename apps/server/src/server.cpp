@@ -79,13 +79,13 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config,
                store::SqliteSnapshotStore snapshots, store::SqliteChangeStore changes,
                store::SqlitePlayerStore places, store::SqliteBrickArchive bricks)
     : config_(config), world_id_(planet::world_id(planet)), planet_(planet), generator_(globe),
-      voxels_(generator_.layers()), bricks_(std::move(bricks)), bricks_shared_(voxels_),
-      changes_(std::move(changes)), snapshots_(std::move(snapshots)), places_(std::move(places)),
-      writer_(snapshots_, config.keep_snapshots),
+      voxels_(generator_.layers()), globe_(generator_, voxels_), bricks_(std::move(bricks)),
+      bricks_shared_(voxels_), changes_(std::move(changes)), snapshots_(std::move(snapshots)),
+      places_(std::move(places)), writer_(snapshots_, config.keep_snapshots),
       nearby_(
           std::min(planet::level_for(config.net.view.radius, planet.radius), planet::max_level)),
       persistence_(entities_), joined_(entities_, planet.radius, config.net.view),
-      ground_(space_, planet_), ticks_(registry_.counter("hog_ticks_total", "Live ticks run.")),
+      ground_(space_, globe_), ticks_(registry_.counter("hog_ticks_total", "Live ticks run.")),
       tick_seconds_(registry_.histogram("hog_tick_seconds", "Real time each live tick took.",
                                         {tick_bounds.begin(), tick_bounds.end()})),
       slipped_(registry_.counter("hog_ticks_slipped_total",
@@ -717,8 +717,11 @@ void Server::dig(net::ConnectionId connection, const protocol::Dug& dug) {
     if (!joined_.find(connection)) {
         return;
     }
-    globe::World world = globe();
-    globe::dig(world, protocol::to_world(dug.centre).metres(), dug.radius / 1'000.0);
+    const std::uint64_t before = voxels_.revision();
+    globe::dig(globe_, protocol::to_world(dug.centre).metres(), dug.radius / 1'000.0);
+    for (const globe::BrickSite brick : voxels_.changed_since(before)) {
+        ground_.changed(brick);
+    }
 }
 
 void Server::build(net::ConnectionId connection, const protocol::Built& built) {
@@ -732,9 +735,12 @@ void Server::build(net::ConnectionId connection, const protocol::Built& built) {
                    std::to_underlying(connection), built.material);
         return;
     }
-    globe::World world = globe();
-    globe::build(world, protocol::to_world(built.centre).metres(), built.radius / 1'000.0,
+    const std::uint64_t before = voxels_.revision();
+    globe::build(globe_, protocol::to_world(built.centre).metres(), built.radius / 1'000.0,
                  material);
+    for (const globe::BrickSite brick : voxels_.changed_since(before)) {
+        ground_.changed(brick);
+    }
 }
 
 void Server::tell_bricks() {

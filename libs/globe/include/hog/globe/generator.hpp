@@ -127,4 +127,10 @@ private:
 [[nodiscard]] std::optional<double> ground_below(const Generator& generator, DVec3 direction,
                                                  double lod);
 
+// The direction nearest `direction` whose ground stands over the sea, sought on rings a
+// kilometre apart out to `within` metres; `direction` itself on a world without a sea; none if
+// there's no land that near.
+[[nodiscard]] std::optional<DVec3> land_near(const Generator& generator, DVec3 direction,
+                                             double within = 100'000.0);
+
 } // namespace hog::globe
