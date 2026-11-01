@@ -78,7 +78,7 @@ target_compile_definitions(hog_render PUBLIC
     VMA_DYNAMIC_VULKAN_FUNCTIONS=0)
 set_source_files_properties(src/vma.cpp PROPERTIES COMPILE_DEFINITIONS VMA_IMPLEMENTATION)
 target_link_libraries(hog_render
-    PUBLIC hog::atmosphere hog::core hog::flora hog::terrain hog::waves volk::volk
+    PUBLIC hog::atmosphere hog::core hog::flora hog::jobs hog::terrain hog::waves volk::volk
     PRIVATE hog::planet vk-bootstrap::vk-bootstrap)
 hog_target_defaults(hog_render)
 hog_add_shaders(hog_render CATALOGUE shaders/aerial.slang shaders/air_tables.slang shaders/billboard.slang shaders/blocks.slang shaders/capsules.slang shaders/cloud_march.slang shaders/cloud_resolve.slang shaders/clouds.slang shaders/foam.slang shaders/glare.slang shaders/globe.slang shaders/grass.slang shaders/ocean.slang shaders/precipitation.slang shaders/rain_rings.slang shaders/ripples.slang shaders/sea_laid.slang shaders/sky.slang shaders/sky_view.slang)

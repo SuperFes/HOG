@@ -6,7 +6,6 @@
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tangent_frame.hpp>
 #include <hog/sim/calendar.hpp>
-#include <hog/testing/worlds.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -14,18 +13,11 @@
 
 namespace hog::client::testing {
 
-// The planet as the client flies over it, worn coarsely, from the generator these tests' places
-// were found on whichever the config picks.
+// The development planet the client flies over.
 inline const planet::PlanetConfig& planet() {
-    static const planet::PlanetConfig config = [] {
-        planet::PlanetConfig loaded =
-            planet::load_planet_config(std::filesystem::path{HOG_SOURCE_DIR} / "config" /
-                                       "planet.toml")
-                .value();
-        loaded.erosion_cell = ::hog::testing::coarse_erosion_cell;
-        loaded.generator = planet::Generator::Stamped;
-        return loaded;
-    }();
+    static const planet::PlanetConfig config =
+        planet::load_planet_config(std::filesystem::path{HOG_SOURCE_DIR} / "config" / "planet.toml")
+            .value();
     return config;
 }
 

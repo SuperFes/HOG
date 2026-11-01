@@ -5,5 +5,3 @@ ocean_fraction = 0.7
 population = 500_000
 day_hours = 4
 axial_tilt = 23.44
-river_scale = 2
-erosion_cell = 1500

@@ -1,10 +1,7 @@
 #include "temporary_database.hpp"
 
 #include <hog/core/time.hpp>
-#include <hog/planet/cell_id.hpp>
-#include <hog/planet/change.hpp>
 #include <hog/store/database.hpp>
-#include <hog/store/sqlite_change_store.hpp>
 #include <hog/store/sqlite_snapshot_store.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -14,7 +11,6 @@
 
 using hog::store::open_database;
 using hog::store::schema_version;
-using hog::store::SqliteChangeStore;
 using hog::store::SqliteSnapshotStore;
 using hog::store::testing::query;
 using hog::store::testing::tamper;
@@ -52,18 +48,11 @@ INSERT INTO changes (cell, time, author, layer, kind, payload)
 PRAGMA user_version = 1;
 )sql");
 
-    auto changes = SqliteChangeStore::open(file.path());
-    REQUIRE(changes);
-    CHECK(query(file.path(), "PRAGMA user_version") == schema_version());
-    const auto loaded = changes->load();
-    REQUIRE(loaded);
-    REQUIRE(loaded->size() == 1);
-    CHECK(loaded->front().cell.raw() == 2305843009213693952ULL);
-    CHECK(loaded->front().payload ==
-          hog::planet::ChangePayload{hog::planet::SetBiome{.biome = hog::planet::Biome::Tundra}});
-
     auto snapshots = SqliteSnapshotStore::open(file.path());
     REQUIRE(snapshots);
+    CHECK(query(file.path(), "PRAGMA user_version") == schema_version());
+    // The old changes are kept as they were, for a world that may still read them.
+    CHECK(query(file.path(), "SELECT count(*) FROM changes") == 1);
     CHECK(snapshots->write(hog::GameTime{}, std::vector{std::byte{1}}));
 }
 
@@ -79,18 +68,10 @@ TEST_CASE("a newer schema is refused", "[store][database]") {
 
 TEST_CASE("stores share one file through their own connections", "[store][database]") {
     const TemporaryFile file;
-    auto changes = SqliteChangeStore::open(file.path());
     auto snapshots = SqliteSnapshotStore::open(file.path());
-    REQUIRE(changes);
+    auto again = SqliteSnapshotStore::open(file.path());
     REQUIRE(snapshots);
-    const hog::planet::Change change{.cell = hog::planet::CellId::from_face(2),
-                                     .time = hog::GameTime{},
-                                     .author = hog::planet::AuthorId{1},
-                                     .layer = hog::planet::Layer::Player,
-                                     .payload = hog::planet::Excavate{.depth = 3}};
-    REQUIRE(changes->append(std::vector{change}));
+    REQUIRE(again);
     REQUIRE(snapshots->write(hog::GameTime{}, std::vector{std::byte{9}}));
-    REQUIRE(changes->append(std::vector{change}));
-    CHECK(changes->load()->size() == 2);
-    CHECK(snapshots->list()->size() == 1);
+    CHECK(again->list()->size() == 1);
 }

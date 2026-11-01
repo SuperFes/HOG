@@ -69,21 +69,6 @@ Weather weather(std::uint8_t level) {
     return out;
 }
 
-// Each cell different, with values a byte holds exactly.
-Woodlands woodlands(std::uint8_t level) {
-    Woodlands out{.level = level, .cells = {}};
-    for (std::size_t index = 0; index < weather_cells(level); ++index) {
-        const auto step = static_cast<float>(index % 5);
-        out.cells.push_back({.living = (255.0F - step) / 255.0F,
-                             .established = (255.0F - (2.0F * step)) / 255.0F,
-                             .failing = step / 255.0F,
-                             .dead = (3.0F * step) / 255.0F,
-                             .charred = index % 2 == 0 ? 1.0F : 0.0F,
-                             .scar = (4.0F * step) / 255.0F});
-    }
-    return out;
-}
-
 std::vector<Message> examples() {
     return {Hello{},
             Hello{.version = version, .token = bytes({1, 2, 3, 250})},
@@ -111,9 +96,6 @@ std::vector<Message> examples() {
             Hurry{.scale = 16'384},
             Clock{.scale = 1},
             Clock{.scale = 86'400},
-            woodlands(0),
-            woodlands(2),
-            Woodlands{.level = 0, .cells = std::vector<CellWoodland>(6)},
             Dug{.centre = far_out, .radius = 1},
             Dug{.centre = far_out, .radius = most_edit},
             Built{.centre = far_out, .radius = 2'500, .material = 9},
@@ -357,40 +339,6 @@ TEST_CASE("weather too fine is refused", "[protocol]") {
     CHECK(decode(finer).error().code == hog::ErrorCode::OutOfRange);
     // Level 1's cells, said to be level 0's.
     auto coarser = encode(weather(1));
-    coarser[2] = std::byte{0};
-    CHECK(decode(coarser).error().code == hog::ErrorCode::Parse);
-}
-
-TEST_CASE("woodlands are sent to a 255th of a share, clamped to a byte", "[protocol]") {
-    const CellWoodland sent = as_sent({.living = 0.6F,
-                                       .established = 0.123F,
-                                       .failing = 0.05F,
-                                       .dead = 0.33F,
-                                       .charred = 0.9F,
-                                       .scar = 0.71F});
-    for (const auto& [given, back] : {std::pair{0.6F, sent.living},
-                                      {0.123F, sent.established},
-                                      {0.05F, sent.failing},
-                                      {0.33F, sent.dead},
-                                      {0.9F, sent.charred},
-                                      {0.71F, sent.scar}}) {
-        CHECK_THAT(back, Catch::Matchers::WithinAbs(static_cast<double>(given), 0.51 / 255.0));
-    }
-    const float nan = std::numeric_limits<float>::quiet_NaN();
-    CHECK(as_sent({.living = 2.0F,
-                   .established = nan,
-                   .failing = -1.0F,
-                   .dead = 0.0F,
-                   .charred = 0.0F}) ==
-          CellWoodland{.living = 1.0F, .established = 0.0F, .failing = 0.0F});
-    // Untouched woods read back untouched.
-    CHECK(as_sent(CellWoodland{}) == CellWoodland{});
-    // Six bytes a cell over the planet.
-    CHECK(encode(woodlands(most_weather_level)).size() == 2 + 1 + (6 * 6'144));
-    auto finer = encode(woodlands(1));
-    finer[2] = std::byte{most_weather_level + 1};
-    CHECK(decode(finer).error().code == hog::ErrorCode::OutOfRange);
-    auto coarser = encode(woodlands(1));
     coarser[2] = std::byte{0};
     CHECK(decode(coarser).error().code == hog::ErrorCode::Parse);
 }

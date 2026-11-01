@@ -15,7 +15,6 @@
 #include <hog/protocol/messages.hpp>
 #include <hog/testing/ports.hpp>
 #include <hog/testing/temporary_directory.hpp>
-#include <hog/testing/worlds.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -78,8 +77,8 @@ public:
     World() { write_planet(1); }
 
     void write_planet(std::uint64_t seed) const {
-        std::ofstream{directory_.path() / "planet.toml"}
-            << "[planet]\nseed = " << seed << "\nradius_km = 115\nerosion_cell = 1500\n";
+        std::ofstream{directory_.path() / "planet.toml"} << "[planet]\nseed = " << seed
+                                                         << "\nradius_km = 115\n";
     }
 
     [[nodiscard]] hog::server::ServerConfig config() const {

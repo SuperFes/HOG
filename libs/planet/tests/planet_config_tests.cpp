@@ -59,57 +59,6 @@ TEST_CASE("a config sets the day and the tilt", "[planet][config]") {
     CHECK(config->axial_tilt == 0.0);
 }
 
-TEST_CASE("a config scales the rivers", "[planet][config]") {
-    const auto plain = parse_planet_config("[planet]\nseed = 0\nradius_km = 1\n");
-    REQUIRE(plain.has_value());
-    CHECK(plain->river_scale == 1.0);
-    const auto config = parse_planet_config("[planet]\nseed = 0\nradius_km = 1\nriver_scale = 3\n");
-    REQUIRE(config.has_value());
-    CHECK(config->river_scale == 3.0);
-}
-
-TEST_CASE("a config sets how fine rivers wear the land", "[planet][config]") {
-    const auto plain = parse_planet_config("[planet]\nseed = 0\nradius_km = 1\n");
-    REQUIRE(plain.has_value());
-    CHECK(plain->erosion_cell == 150.0);
-    const auto config =
-        parse_planet_config("[planet]\nseed = 0\nradius_km = 1\nerosion_cell = 400\n");
-    REQUIRE(config.has_value());
-    CHECK(config->erosion_cell == 400.0);
-}
-
-TEST_CASE("a config breaks the crust into plates", "[planet][config]") {
-    const auto plain = parse_planet_config("[planet]\nseed = 0\nradius_km = 1\n");
-    REQUIRE(plain.has_value());
-    CHECK(plain->plates == 10);
-    const auto config = parse_planet_config("[planet]\nseed = 0\nradius_km = 1\nplates = 24\n");
-    REQUIRE(config.has_value());
-    CHECK(config->plates == 24);
-}
-
-TEST_CASE("a config raises plumes under the plates only when asked", "[planet][config]") {
-    const auto plain = parse_planet_config("[planet]\nseed = 0\nradius_km = 1\n");
-    REQUIRE(plain.has_value());
-    CHECK(plain->plumes == 0);
-    const auto config = parse_planet_config("[planet]\nseed = 0\nradius_km = 1\nplumes = 40\n");
-    REQUIRE(config.has_value());
-    CHECK(config->plumes == 40);
-}
-
-TEST_CASE("a config picks how the ground is made", "[planet][config]") {
-    const auto plain = parse_planet_config("[planet]\nseed = 0\nradius_km = 1\n");
-    REQUIRE(plain.has_value());
-    CHECK(plain->generator == hog::planet::Generator::Stamped);
-    const auto stamped =
-        parse_planet_config("[planet]\nseed = 0\nradius_km = 1\ngenerator = \"v1\"\n");
-    REQUIRE(stamped.has_value());
-    CHECK(stamped->generator == hog::planet::Generator::Stamped);
-    const auto evolved =
-        parse_planet_config("[planet]\nseed = 0\nradius_km = 1\ngenerator = \"v2\"\n");
-    REQUIRE(evolved.has_value());
-    CHECK(evolved->generator == hog::planet::Generator::Evolved);
-}
-
 TEST_CASE("the shipped development config is the 500k planet", "[planet][config]") {
     const auto config = hog::planet::load_planet_config(HOG_SOURCE_DIR "/config/planet.toml");
     REQUIRE(config.has_value());
@@ -150,34 +99,7 @@ TEST_CASE("bad configs are rejected with a reason", "[planet][config]") {
         Case{"[planet]\nseed = 1\nradius_km = 5\naxial_tilt = 91", ErrorCode::InvalidArgument,
              "axial_tilt"},
         Case{"[planet]\nseed = 1\nradius_km = 5\naxial_tilt = -1", ErrorCode::InvalidArgument,
-             "axial_tilt"},
-        Case{"[planet]\nseed = 1\nradius_km = 5\nriver_scale = 0", ErrorCode::InvalidArgument,
-             "river_scale"},
-        Case{"[planet]\nseed = 1\nradius_km = 5\nerosion_cell = 40", ErrorCode::InvalidArgument,
-             "erosion_cell"},
-        Case{"[planet]\nseed = 1\nradius_km = 5\nerosion_cell = 5001", ErrorCode::InvalidArgument,
-             "erosion_cell"},
-        Case{"[planet]\nseed = 1\nradius_km = 5\nriver_scale = 21", ErrorCode::InvalidArgument,
-             "river_scale"},
-        Case{"[planet]\nseed = 1\nradius_km = 5\nriver_scale = nan", ErrorCode::InvalidArgument,
-             "river_scale"},
-        Case{"[planet]\nseed = 1\nradius_km = 5\nplates = 1", ErrorCode::InvalidArgument, "plates"},
-        Case{"[planet]\nseed = 1\nradius_km = 5\nplates = 65", ErrorCode::InvalidArgument,
-             "plates"},
-        Case{"[planet]\nseed = 1\nradius_km = 5\nplates = 2.5", ErrorCode::InvalidArgument,
-             "plates"},
-        Case{"[planet]\nseed = 1\nradius_km = 5\nplumes = -1", ErrorCode::InvalidArgument,
-             "plumes"},
-        Case{"[planet]\nseed = 1\nradius_km = 5\nplumes = 1001", ErrorCode::InvalidArgument,
-             "plumes"},
-        Case{"[planet]\nseed = 1\nradius_km = 5\nplumes = 2.5", ErrorCode::InvalidArgument,
-             "plumes"},
-        Case{"[planet]\nseed = 1\nradius_km = 5\nplumes = nan", ErrorCode::InvalidArgument,
-             "plumes"},
-        Case{"[planet]\nseed = 1\nradius_km = 5\ngenerator = \"v3\"", ErrorCode::InvalidArgument,
-             "generator"},
-        Case{"[planet]\nseed = 1\nradius_km = 5\ngenerator = 2", ErrorCode::InvalidArgument,
-             "generator"});
+             "axial_tilt"});
 
     const auto config = parse_planet_config(bad.toml);
     INFO(bad.toml);
@@ -198,50 +120,4 @@ TEST_CASE("population sizing checks its inputs", "[planet][config]") {
     using hog::testing::AssertionFailed;
     CHECK_THROWS_AS(hog::planet::radius_for_population({.population = 0.0}, 0.7), AssertionFailed);
     CHECK_THROWS_AS(hog::planet::radius_for_population({.population = 1.0}, 1.0), AssertionFailed);
-}
-
-TEST_CASE("a world's id follows what shapes its ground", "[planet][config]") {
-    const hog::planet::PlanetConfig base{.seed = 1, .ocean_fraction = 0.7, .radius = 115'000.0};
-    const std::uint64_t id = hog::planet::world_id(base);
-    // Saved worlds are keyed by this, so it must not change between builds.
-    CHECK(id == 0xB87E7E64C83CED74ULL);
-
-    auto other = base;
-    other.seed = 2;
-    CHECK(hog::planet::world_id(other) != id);
-    other = base;
-    other.radius = 115'001.0;
-    CHECK(hog::planet::world_id(other) != id);
-    other = base;
-    other.ocean_fraction = 0.6;
-    CHECK(hog::planet::world_id(other) != id);
-    other = base;
-    other.river_scale = 2.0;
-    CHECK(hog::planet::world_id(other) != id);
-    other = base;
-    other.plates = 11;
-    CHECK(hog::planet::world_id(other) != id);
-    other = base;
-    other.plumes = 40;
-    CHECK(hog::planet::world_id(other) != id);
-    other = base;
-    other.erosion_cell = 300.0;
-    CHECK(hog::planet::world_id(other) != id);
-    other = base;
-    other.generator = hog::planet::Generator::Evolved;
-    CHECK(hog::planet::world_id(other) != id);
-    other = base;
-    other.system.gravity = 5.0;
-    CHECK(hog::planet::world_id(other) != id);
-    other = base;
-    other.system.rings = hog::planet::Rings{};
-    CHECK(hog::planet::world_id(other) != id);
-    other = base;
-    other.system.moons.push_back(hog::planet::Moon{});
-    CHECK(hog::planet::world_id(other) != id);
-
-    other = base;
-    other.day_length = std::chrono::hours{24};
-    other.axial_tilt = 0.0;
-    CHECK(hog::planet::world_id(other) == id);
 }

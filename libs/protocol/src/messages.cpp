@@ -31,7 +31,6 @@ enum class Kind : std::uint16_t {
     Said = 9,
     Hurry = 10,
     Clock = 11,
-    Woodlands = 12,
     Placed = 13,
     Dug = 14,
     Built = 15,
@@ -85,26 +84,6 @@ constexpr std::size_t weather_cell_bytes = 22;
 
 [[nodiscard]] float speed_of(std::uint8_t byte) noexcept {
     return static_cast<float>(static_cast<std::int8_t>(byte));
-}
-
-constexpr std::size_t woodland_cell_bytes = 6;
-constexpr float share_steps = 255.0F;
-
-using CodedWoodland = std::array<std::uint8_t, woodland_cell_bytes>;
-
-[[nodiscard]] CodedWoodland coded(const CellWoodland& cell) noexcept {
-    return {to_byte(cell.living * share_steps),  to_byte(cell.established * share_steps),
-            to_byte(cell.failing * share_steps), to_byte(cell.dead * share_steps),
-            to_byte(cell.charred * share_steps), to_byte(cell.scar * share_steps)};
-}
-
-[[nodiscard]] CellWoodland decoded(const CodedWoodland& bytes) noexcept {
-    return {.living = static_cast<float>(bytes[0]) / share_steps,
-            .established = static_cast<float>(bytes[1]) / share_steps,
-            .failing = static_cast<float>(bytes[2]) / share_steps,
-            .dead = static_cast<float>(bytes[3]) / share_steps,
-            .charred = static_cast<float>(bytes[4]) / share_steps,
-            .scar = static_cast<float>(bytes[5]) / share_steps};
 }
 
 using CodedCell = std::array<std::uint8_t, weather_cell_bytes>;
@@ -654,52 +633,9 @@ void write_weather(ByteWriter& out, const Weather& weather) {
     }
 }
 
-[[nodiscard]] Result<Message> read_woodlands(ByteReader& in) {
-    const auto level = read<std::uint8_t>(in, "woodlands");
-    if (!level) {
-        return make_error(ErrorCode::Parse, "woodlands cut short");
-    }
-    if (*level > most_weather_level) {
-        return make_error(ErrorCode::OutOfRange,
-                          std::format("woodlands at level {} are finer than the {} allowed", *level,
-                                      most_weather_level));
-    }
-    const std::size_t count = weather_cells(*level);
-    const auto bytes = in.read_bytes(count * woodland_cell_bytes);
-    if (!bytes) {
-        return make_error(ErrorCode::Parse, "woodlands' cells cut short");
-    }
-    Woodlands woodlands{.level = *level, .cells = {}};
-    woodlands.cells.reserve(count);
-    for (std::size_t first = 0; first < bytes->size(); first += woodland_cell_bytes) {
-        CodedWoodland cell{};
-        std::ranges::transform(bytes->subspan(first, woodland_cell_bytes), cell.begin(),
-                               [](std::byte byte) { return std::to_integer<std::uint8_t>(byte); });
-        woodlands.cells.push_back(decoded(cell));
-    }
-    return finished(in, std::move(woodlands));
-}
-
-void write_woodlands(ByteWriter& out, const Woodlands& woodlands) {
-    HOG_ASSERT(woodlands.level <= most_weather_level, "woodlands too fine to send");
-    HOG_ASSERT(woodlands.cells.size() == weather_cells(woodlands.level),
-               "woodlands need a cell for each at their level");
-    out.write(static_cast<std::uint16_t>(Kind::Woodlands));
-    out.write(woodlands.level);
-    for (const CellWoodland& cell : woodlands.cells) {
-        for (const std::uint8_t byte : coded(cell)) {
-            out.write(byte);
-        }
-    }
-}
-
 } // namespace
 
 CellWeather as_sent(const CellWeather& cell) noexcept {
-    return decoded(coded(cell));
-}
-
-CellWoodland as_sent(const CellWoodland& cell) noexcept {
     return decoded(coded(cell));
 }
 
@@ -761,8 +697,6 @@ std::vector<std::byte> encode(const Message& message) {
                 write_snapshot(out, body);
             } else if constexpr (std::is_same_v<Body, Weather>) {
                 write_weather(out, body);
-            } else if constexpr (std::is_same_v<Body, Woodlands>) {
-                write_woodlands(out, body);
             } else if constexpr (std::is_same_v<Body, Corrected>) {
                 out.write(static_cast<std::uint16_t>(Kind::Corrected));
                 out.write(body.count);
@@ -860,8 +794,6 @@ Result<Message> decode(std::span<const std::byte> bytes) {
         return read_snapshot(in);
     case Kind::Weather:
         return read_weather(in);
-    case Kind::Woodlands:
-        return read_woodlands(in);
     case Kind::Dug:
         return read_dug(in);
     case Kind::Built:

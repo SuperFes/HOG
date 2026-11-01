@@ -21,40 +21,15 @@ struct PopulationSizing {
 // Radius in metres of a planet with enough land for the population.
 [[nodiscard]] double radius_for_population(const PopulationSizing& sizing, double ocean_fraction);
 
-// How a world's ground is made: v1 stamps continents, ranges and climate from a still snapshot of
-// the plates and wears them; v2 evolves the planet stage by stage, as docs/world-v2.md lays out.
-enum class Generator : std::uint8_t { Stamped, Evolved };
-
 struct PlanetConfig {
     std::uint64_t seed = 0;
     double ocean_fraction = 0.7;
     double radius = 0.0; // metres
-    // Multiplies the width and depth rivers would have on Earth for the water they carry.
-    double river_scale = 1.0;
-    // How many plates the crust is broken into.
-    int plates = 10;
-    // How many plumes rise from deep in the mantle under the plates; Earth has some 40.
-    int plumes = 0;
-    // Metres between the cells rivers wear the land on: finer wears finer valleys, and takes
-    // longer and more memory to evolve. Cells are a power of two to a cube face, so this is the
-    // most they're made, and never finer than a 1,024th of a face.
-    double erosion_cell = 150.0;
     // One turn of day and night, in real time; the year is Earth's.
     GameDuration day_length = std::chrono::hours{4};
     double axial_tilt = 23.44; // degrees
-    Generator generator = Generator::Stamped;
     System system{};
-    // Where the world's landform is kept once evolved, so it evolves once rather than whenever
-    // the world is built; HOG_BAKES names one where this is empty, and with neither it's never
-    // kept. Not part of the world, so never read from its config.
-    std::filesystem::path bakes{};
 };
-
-// Identifies a world by what shapes its ground, so state saved for one is never loaded into
-// another. Day length and tilt only move the sun, so they can change under a running world. A
-// river scale of 1, ten plates, no plumes, 150 m erosion cells, the v1 generator and Earth's
-// system leave the id as it was before those could be set.
-[[nodiscard]] std::uint64_t world_id(const PlanetConfig& config) noexcept;
 
 // Reads a [planet] table:
 //
@@ -64,11 +39,6 @@ struct PlanetConfig {
 //     population = 500_000      # or radius_km = 115.0, not both
 //     settled_density = 30.0    # optional, with population
 //     wilderness_factor = 3.0   # optional, with population
-//     river_scale = 1.0         # optional, above 0 and at most 20
-//     plates = 10               # optional, 2 to 64
-//     plumes = 0                # optional, 0 to 1000
-//     erosion_cell = 150.0      # optional, metres, 50 to 5000
-//     generator = "v1"          # optional, "v1" or "v2"
 //     day_hours = 4.0           # optional
 //     axial_tilt = 23.44        # optional, degrees
 //

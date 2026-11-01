@@ -1,10 +1,8 @@
 #include "system_config.hpp"
 
 #include <hog/core/assert.hpp>
-#include <hog/core/hash.hpp>
 #include <hog/core/text_file.hpp>
 #include <hog/planet/planet_config.hpp>
-#include <hog/planet/plates.hpp>
 
 #include <toml++/toml.hpp>
 
@@ -25,15 +23,10 @@ using namespace std::string_view_literals;
 
 constexpr std::array known_keys{
     "seed"sv,      "ocean_fraction"sv, "population"sv, "settled_density"sv, "wilderness_factor"sv,
-    "radius_km"sv, "day_hours"sv,      "axial_tilt"sv, "river_scale"sv,     "plates"sv,
-    "plumes"sv,    "erosion_cell"sv,   "generator"sv};
+    "radius_km"sv, "day_hours"sv,      "axial_tilt"sv};
 
 constexpr double min_day_hours = 0.01;
 constexpr double max_day_hours = 24.0 * 366.0;
-constexpr double max_river_scale = 20.0;
-constexpr double max_plumes = 1'000.0;
-constexpr double min_erosion_cell = 50.0;
-constexpr double max_erosion_cell = 5'000.0;
 
 [[nodiscard]] std::unexpected<Error> invalid(std::string message) {
     return make_error(ErrorCode::InvalidArgument, std::move(message));
@@ -81,74 +74,6 @@ constexpr double max_erosion_cell = 5'000.0;
 
 [[nodiscard]] Result<void> parse_system(const toml::table& planet, PlanetConfig& config) {
     return detail::parse_system(planet, config.system);
-}
-
-[[nodiscard]] Result<void> parse_rivers(const toml::table& planet, PlanetConfig& config) {
-    const auto rivers = optional_number(planet, "river_scale");
-    if (!rivers) {
-        return std::unexpected(rivers.error());
-    }
-    config.river_scale = rivers->value_or(config.river_scale);
-    if (!positive(config.river_scale) || config.river_scale > max_river_scale) {
-        return invalid("planet.river_scale must be above 0 and at most 20");
-    }
-    return {};
-}
-
-[[nodiscard]] Result<void> parse_erosion(const toml::table& planet, PlanetConfig& config) {
-    const auto cell = optional_number(planet, "erosion_cell");
-    if (!cell) {
-        return std::unexpected(cell.error());
-    }
-    config.erosion_cell = cell->value_or(config.erosion_cell);
-    if (!in_range(config.erosion_cell, min_erosion_cell, max_erosion_cell)) {
-        return invalid("planet.erosion_cell must be 50 to 5000 metres");
-    }
-    return {};
-}
-
-[[nodiscard]] Result<void> parse_plates(const toml::table& planet, PlanetConfig& config) {
-    const auto plates = optional_number(planet, "plates");
-    if (!plates) {
-        return std::unexpected(plates.error());
-    }
-    const double count = plates->value_or(config.plates);
-    // Written so NaN fails too.
-    if (count < 2.0 || count > Plates::max_count || count != std::floor(count)) {
-        return invalid("planet.plates must be a whole number from 2 to 64");
-    }
-    config.plates = static_cast<int>(count);
-    return {};
-}
-
-[[nodiscard]] Result<void> parse_plumes(const toml::table& planet, PlanetConfig& config) {
-    const auto plumes = optional_number(planet, "plumes");
-    if (!plumes) {
-        return std::unexpected(plumes.error());
-    }
-    const double count = plumes->value_or(config.plumes);
-    // Written so NaN fails too.
-    if (count < 0.0 || count > max_plumes || count != std::floor(count)) {
-        return invalid("planet.plumes must be a whole number from 0 to 1000");
-    }
-    config.plumes = static_cast<int>(count);
-    return {};
-}
-
-[[nodiscard]] Result<void> parse_generator(const toml::table& planet, PlanetConfig& config) {
-    const auto node = planet["generator"];
-    if (!node) {
-        return {};
-    }
-    const auto* name = node.as_string();
-    if (name != nullptr && name->get() == "v1") {
-        config.generator = Generator::Stamped;
-    } else if (name != nullptr && name->get() == "v2") {
-        config.generator = Generator::Evolved;
-    } else {
-        return invalid(R"(planet.generator must be "v1" or "v2")");
-    }
-    return {};
 }
 
 [[nodiscard]] Result<void> parse_calendar(const toml::table& planet, PlanetConfig& config) {
@@ -216,8 +141,7 @@ Result<PlanetConfig> parse_planet_config(std::string_view text) {
     config.seed = static_cast<std::uint64_t>(seed->get());
 
     using Parse = Result<void> (*)(const toml::table&, PlanetConfig&);
-    for (const Parse parse : {parse_ocean, parse_rivers, parse_plates, parse_plumes, parse_erosion,
-                              parse_calendar, parse_generator, parse_system}) {
+    for (const Parse parse : {parse_ocean, parse_calendar, parse_system}) {
         if (auto read = parse(*planet, config); !read) {
             return std::unexpected(read.error());
         }
@@ -268,33 +192,6 @@ Result<PlanetConfig> load_planet_config(const std::filesystem::path& path) {
         config.error().message = std::format("{}: {}", path.string(), config.error().message);
     }
     return config;
-}
-
-std::uint64_t world_id(const PlanetConfig& config) noexcept {
-    const std::uint64_t id = hash_values(config.seed, std::bit_cast<std::uint64_t>(config.radius),
-                                         std::bit_cast<std::uint64_t>(config.ocean_fraction));
-    const std::uint64_t rivers =
-        config.river_scale == 1.0
-            ? id
-            : hash_combine(id, std::bit_cast<std::uint64_t>(config.river_scale));
-    const std::uint64_t plates =
-        config.plates == PlanetConfig{}.plates
-            ? rivers
-            : hash_combine(rivers, static_cast<std::uint64_t>(config.plates));
-    const std::uint64_t plumes =
-        config.plumes == PlanetConfig{}.plumes
-            ? plates
-            : hash_combine(plates, static_cast<std::uint64_t>(config.plumes));
-    const std::uint64_t erosion =
-        config.erosion_cell == PlanetConfig{}.erosion_cell
-            ? plumes
-            : hash_combine(plumes, std::bit_cast<std::uint64_t>(config.erosion_cell));
-    const std::uint64_t generator =
-        config.generator == Generator::Stamped
-            ? erosion
-            : hash_combine(erosion, static_cast<std::uint64_t>(config.generator));
-    return config.system == System{} ? generator
-                                     : hash_combine(generator, system_id(config.system));
 }
 
 } // namespace hog::planet

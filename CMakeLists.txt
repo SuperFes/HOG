@@ -170,9 +170,7 @@ function(hog_add_tests lib)
     add_executable(${lib}_tests ${ARGN})
     target_link_libraries(${lib}_tests PRIVATE ${lib} hog::testing Catch2::Catch2WithMain)
     hog_target_defaults(${lib}_tests)
-    # Worlds' landforms are baked once and shared by every test, rather than evolved in each.
-    catch_discover_tests(${lib}_tests DISCOVERY_MODE PRE_TEST
-        PROPERTIES ENVIRONMENT "HOG_BAKES=${CMAKE_BINARY_DIR}/bakes")
+    catch_discover_tests(${lib}_tests DISCOVERY_MODE PRE_TEST)
 endfunction()
 
 # Benchmarks are separate executables so ctest (and sanitizer runs) never pay for them.

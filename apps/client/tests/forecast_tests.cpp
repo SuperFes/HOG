@@ -2,7 +2,6 @@
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tangent_frame.hpp>
 #include <hog/sim/cell_grid.hpp>
-#include <hog/sim/weather.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -137,7 +136,7 @@ TEST_CASE("the first weather is shown at once", "[client][forecast]") {
     REQUIRE(forecast.before().size() == std::size_t{6} * weather_map_size * weather_map_size);
     CHECK(forecast.after() == forecast.before());
     const auto cover =
-        static_cast<int>(std::lround(static_cast<double>(hog::sim::cloud_cover(2.0F)) * 255.0));
+        static_cast<int>(std::lround(static_cast<double>(hog::client::cloud_cover(2.0F)) * 255.0));
     // The roots of 2/16 and of 4/256, and a quarter.
     const hog::client::WeatherTexel expected{static_cast<std::uint8_t>(cover), 90, 32, 64};
     CHECK(std::ranges::all_of(forecast.before(),
@@ -284,7 +283,8 @@ TEST_CASE("the weather's map holds what's at each texel's direction", "[client][
                     forecast.before()[(((face * weather_map_size) + y) * weather_map_size) + x];
                 const CellWeather here =
                     forecast.at(cube_direction(face, x, y, weather_map_size), start);
-                CHECK(std::abs(texel[0] - (hog::sim::cloud_cover(here.cloud) * 255.0F)) <= 0.51F);
+                CHECK(std::abs(texel[0] - (hog::client::cloud_cover(here.cloud) * 255.0F)) <=
+                      0.51F);
                 CHECK(std::abs(texel[2] - (std::sqrt(here.falling / 256.0F) * 255.0F)) <= 0.51F);
                 const auto& sky =
                     forecast.sky_before()[(((face * weather_map_size) + y) * weather_map_size) + x];

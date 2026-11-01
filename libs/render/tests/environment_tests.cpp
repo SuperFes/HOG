@@ -1,6 +1,5 @@
 #include "test_device.hpp"
 
-#include <hog/planet/climate.hpp>
 #include <hog/render/atmosphere.hpp>
 #include <hog/render/device.hpp>
 #include <hog/render/environment_probe.hpp>

@@ -1,6 +1,5 @@
 #include <hog/client/forecast.hpp>
 #include <hog/planet/tangent_frame.hpp>
-#include <hog/sim/weather.hpp>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/packing.hpp>
