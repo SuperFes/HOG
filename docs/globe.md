@@ -15,6 +15,7 @@ The research behind this is in `reports/Editable voxel planet architecture.md`, 
 - **Many worlds.** A planet is a description made of physical knobs. Earth, Mars, Venus and the Moon are the first presets, and alien worlds are other settings.
 - **Every landform has a home.** Each feature class gets a term in the generator, the store or the simulation, judged by stills of a fixed suite of spots, one per class.
 - **Things fall apart when they ought.** Unlike Enshrouded, builds need support and wear out, so keeping a city standing is real, ongoing work for players, bots and NPCs. Building must not become a chore: sensible builds stand with room to spare, failure shows warning signs first, and repair is easy.
+- **Beauty from life.** Enshrouded's beauty is placed by hand; ours grows. Plants spread and die back, animals graze and wear trails, and people build, farm and neglect, all by simulated rules, so the world is shaped by what lives in it rather than by a designer.
 - **Libraries only when excellent.** We use one only if it's clearly excellent and has an MIT-compatible licence. Otherwise we build it ourselves.
 
 ## Layout
@@ -78,5 +79,6 @@ Detail falls off with distance without cracks, and materials blend by triplanar 
 12. **Collapse and wear.**
 13. **Lava and magma.**
 14. **The drainage solve, rivers, lakes and coasts.**
+15. **Life:** plants, animals and people shaping the ground they live on.
 
 Each stage ends in tests and stills. The report's build order says how each one is judged.
