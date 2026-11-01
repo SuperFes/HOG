@@ -44,8 +44,13 @@ Surface vertex_main(Vertex vertex) {
 [shader("fragment")]
 float4 fragment_main(Surface surface) : SV_Target {
     const float night = push.faked_night.y;
+    const float3 up = normalize(surface.up);
+    const float3 normal = normalize(surface.normal);
+    // The sky's light, more on sides that look up at more of it, and some off the ground below,
+    // so shapes still show with the sun away.
+    const float sky = night * (0.6 + (0.4 * dot(normal, up)));
     // The planet hides the sun once it has set, whichever way a side faces.
-    const float risen = smoothstep(-0.02, 0.02, dot(normalize(surface.up), push.sun_radius.xyz));
-    const float facing = saturate(dot(normalize(surface.normal), push.sun_radius.xyz)) * risen;
-    return float4(surface.colour * (night + ((1.0 - night) * facing)), 1.0);
+    const float risen = smoothstep(-0.02, 0.02, dot(up, push.sun_radius.xyz));
+    const float facing = saturate(dot(normal, push.sun_radius.xyz)) * risen;
+    return float4(surface.colour * (sky + ((1.0 - night) * facing)), 1.0);
 }

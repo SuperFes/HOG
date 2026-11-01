@@ -112,7 +112,7 @@ TEST_CASE("a side facing the sun shows in its colour", "[render][gpu]") {
     CHECK(dark[0] < 80);
 }
 
-TEST_CASE("a side facing the sun once it has set is only as bright as the night", "[render][gpu]") {
+TEST_CASE("a side facing the sun once it has set is lit by the sky alone", "[render][gpu]") {
     auto device = test_device();
     if (!device) {
         SKIP("no Vulkan device");
@@ -125,9 +125,32 @@ TEST_CASE("a side facing the sun once it has set is only as bright as the night"
         middle(draw(*device, mesh, glm::normalize(DVec3{0.0, 0.1, 1.0}), WorldPosition{}, up));
     const Pixel set =
         middle(draw(*device, mesh, glm::normalize(DVec3{0.0, -0.1, 1.0}), WorldPosition{}, up));
-    CHECK(risen[0] > 240);
-    CHECK(set[0] > 50);
-    CHECK(set[0] < 80);
+    // Side on to the sky, it takes less of the sky's light than looking up, sun or none.
+    CHECK(risen[0] > 220);
+    // Side on to the sky, it sees less of it than looking up.
+    CHECK(set[0] > 30);
+    CHECK(set[0] < 45);
+}
+
+TEST_CASE("with the sun down, sides show by how much of the sky they see", "[render][gpu]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    BlockMesh mesh{.origin = WorldPosition{}, .vertices = {}, .indices = {}};
+    add_square(mesh, 4.0, hog::Vec3{1.0F, 1.0F, 1.0F});
+    // The sun straight under foot, wherever up is.
+    const auto seen_with_up = [&](DVec3 up) {
+        return middle(draw(*device, mesh, -up, WorldPosition{}, up))[0];
+    };
+    const std::uint8_t looking_up = seen_with_up({0.0, 0.0, 1.0});
+    const std::uint8_t tilted = seen_with_up(glm::normalize(DVec3{0.0, 1.0, 1.0}));
+    const std::uint8_t side_on = seen_with_up({0.0, 1.0, 0.0});
+    const std::uint8_t looking_down = seen_with_up({0.0, 0.0, -1.0});
+    CHECK(looking_up > tilted);
+    CHECK(tilted > side_on);
+    CHECK(side_on > looking_down);
+    CHECK(looking_down > 5);
 }
 
 TEST_CASE("nearer blocks hide farther ones, whichever comes first", "[render][gpu]") {

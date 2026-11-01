@@ -23,12 +23,13 @@ struct BlockView {
     DVec3 sun{1.0, 0.0, 0.0}; // unit, towards the sun
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     terrain::Bend bend = {};
-    // How bright sides facing away from the sun stay.
+    // How bright the sky leaves sides facing away from the sun: all of it looking up, 0.6 of it
+    // side on, 0.2 looking down.
     double night = 0.25;
 };
 
 // The volume as blocks, as terrain::BlockStream fills them in: each side flat, in its material's
-// colour, lit by the sun alone.
+// colour, lit by the sun and the sky.
 class Blocks {
 public:
     // `frames` in flight, each with its own copy of the blocks.
