@@ -132,48 +132,57 @@ std::optional<double> Generator::sea_level() const noexcept {
     return planet_.radius;
 }
 
-Sample Generator::sample(DVec3 point, double lod) const noexcept {
+Generator::Column Generator::column(DVec3 direction, double lod) const noexcept {
     const terms::Context context{.planet = &planet_, .derived = &derived_, .shape = &shape_};
-    const double radius = glm::length(point);
-    const DVec3 direction = point / radius;
-    const terms::Column column = terms::column(context, direction, lod);
+    const DVec3 down = glm::normalize(direction);
+    const terms::Column found = terms::column(context, down, lod);
+    Column column;
+    column.generator_ = this;
+    column.ground_ = planet_.radius + found.height.value - shape_.datum;
+    column.slope_ = ground_slope(context, down, lod);
+    column.rock_ = found.high >= 0.5 ? planet_.high.rock : planet_.low.rock;
+    const double latitude = maths::atan2(down.z, std::sqrt((down.x * down.x) + (down.y * down.y)));
+    column.surface_temperature_ = temperature_at(planet_, latitude);
+    return column;
+}
 
-    const double ground = planet_.radius + column.height.value - shape_.datum;
+Sample Generator::Column::sample(double radius) const noexcept {
+    const Planet& planet = generator_->planet_;
     // Slope per metre across the ground at this radius, not at the raw radius it was taken at.
-    const double slope = ground_slope(context, direction, lod) * planet_.radius / radius;
+    const double slope = slope_ * planet.radius / radius;
     Sample sample;
-    sample.distance = (radius - ground) / std::sqrt(1.0 + (slope * slope));
+    sample.distance = (radius - ground_) / std::sqrt(1.0 + (slope * slope));
 
     if (sample.distance < 0.0) {
-        sample.material = column.high >= 0.5 ? planet_.high.rock : planet_.low.rock;
-    } else if (shape_.sea && radius < planet_.radius) {
-        sample.material = planet_.volatiles == Volatile::Water ? Material::Water : Material::Air;
+        sample.material = rock_;
+    } else if (generator_->shape_.sea && radius < planet.radius) {
+        sample.material = planet.volatiles == Volatile::Water ? Material::Water : Material::Air;
         sample.water = 1.0;
     }
 
-    const double latitude = maths::atan2(
-        direction.z, std::sqrt((direction.x * direction.x) + (direction.y * direction.y)));
-    const double lapse = planet_.pressure > 0.0 ? earth_lapse * planet_.gravity / 9.81 : 0.0;
-    const double surface =
-        temperature_at(planet_, latitude) - (lapse * std::max(0.0, ground - planet_.radius));
+    const double lapse = planet.pressure > 0.0 ? earth_lapse * planet.gravity / 9.81 : 0.0;
+    const double surface = surface_temperature_ - (lapse * std::max(0.0, ground_ - planet.radius));
     if (sample.distance < 0.0) {
-        sample.temperature = surface + (derived_.geotherm * (ground - radius));
+        sample.temperature = surface + (generator_->derived_.geotherm * (ground_ - radius));
     } else if (sample.water > 0.0) {
         sample.temperature = surface;
     } else {
-        sample.temperature =
-            temperature_at(planet_, latitude) - (lapse * std::max(0.0, radius - planet_.radius));
+        sample.temperature = surface_temperature_ - (lapse * std::max(0.0, radius - planet.radius));
     }
     return sample;
 }
 
+Sample Generator::sample(DVec3 point, double lod) const noexcept {
+    return column(point, lod).sample(glm::length(point));
+}
+
 std::optional<double> ground_below(const Generator& generator, DVec3 direction, double lod) {
     const Planet& planet = generator.planet();
-    const DVec3 down = glm::normalize(direction);
+    const Generator::Column column = generator.column(direction, lod);
     const double floor = generator.layers().floor;
     const double least = std::max(lod, planet.voxel) / 4.0;
     double above = generator.layers().ceiling();
-    double distance = generator.sample(down * above, lod).distance;
+    double distance = column.sample(above).distance;
     if (distance <= 0.0) {
         return above;
     }
@@ -184,7 +193,7 @@ std::optional<double> ground_below(const Generator& generator, DVec3 direction, 
         if (below <= floor) {
             return std::nullopt;
         }
-        const double next = generator.sample(down * below, lod).distance;
+        const double next = column.sample(below).distance;
         if (next <= 0.0) {
             break;
         }
@@ -194,7 +203,7 @@ std::optional<double> ground_below(const Generator& generator, DVec3 direction, 
     // Then halve the step to the crossing, to a millimetre.
     while (above - below > 1e-3) {
         const double middle = 0.5 * (above + below);
-        (generator.sample(down * middle, lod).distance > 0.0 ? above : below) = middle;
+        (column.sample(middle).distance > 0.0 ? above : below) = middle;
     }
     return 0.5 * (above + below);
 }
@@ -205,8 +214,9 @@ Column column(const Context& context, DVec3 direction, double lod) noexcept {
     const Province crust = province(context, direction);
     const double step = context.derived->isostatic_step;
     const Noise shaped = relief(context, direction, crust, lod);
-    return {.height = {.value = (step * crust.high) + shaped.value,
-                       .gradient = (step * crust.gradient) + shaped.gradient},
+    const Noise struck = craters(context, direction, lod);
+    return {.height = {.value = (step * crust.high) + shaped.value + struck.value,
+                       .gradient = (step * crust.gradient) + shaped.gradient + struck.gradient},
             .high = crust.high};
 }
 

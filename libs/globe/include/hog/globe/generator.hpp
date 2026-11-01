@@ -38,6 +38,23 @@ public:
     // coarse sample is a smoothed fine one.
     [[nodiscard]] Sample sample(DVec3 point, double lod) const noexcept;
 
+    // Samples along one direction, sharing all that depends on the direction alone; the same
+    // bits as sample() at each point. Chunks are filled a column at a time through this.
+    class Column {
+    public:
+        [[nodiscard]] Sample sample(double radius) const noexcept;
+
+    private:
+        friend class Generator;
+        const Generator* generator_ = nullptr;
+        double ground_ = 0.0;              // metres from the centre
+        double slope_ = 0.0;               // across the ground, at the radius
+        double surface_temperature_ = 0.0; // at the reference level
+        Material rock_ = Material::Air;
+    };
+
+    [[nodiscard]] Column column(DVec3 direction, double lod) const noexcept;
+
     // Planet-wide constants found once from the knobs; what each means is the generator's own.
     struct Shape {
         double province_threshold = 0.0;

@@ -73,8 +73,10 @@ TEST_CASE("the crust and the sea cover their shares of the surface", "[globe][ge
     CHECK(earth.layers().ceiling() - earth.planet().radius == earth.planet().sky_height);
     CHECK(earth.layers().count > 28'000);
     UNSCOPED_INFO("earth ground " << found.lowest << " to " << found.highest);
+    // The floor is placed under the ground surveyed at kilometre scale; finer detail cuts a
+    // little deeper, never most of the way.
     CHECK(found.lowest - earth.layers().floor + earth.planet().radius >
-          earth.planet().floor_depth - 300.0);
+          0.75 * earth.planet().floor_depth);
     CHECK(found.highest < earth.planet().sky_height);
 }
 
@@ -89,7 +91,7 @@ TEST_CASE("dry worlds stand at their mean ground, Mars's highlands to one side",
         CHECK(std::abs(found.mean) < 300.0);
         CHECK(found.sea == 0.0);
         CHECK(found.lowest - world.layers().floor + world.planet().radius >
-              world.planet().floor_depth - 300.0);
+              0.75 * world.planet().floor_depth);
         CHECK(found.highest < world.planet().sky_height);
         // Mars's figure stands kilometres off its centre, toward the southern highlands.
         const double offset = glm::length(found.figure);
@@ -131,7 +133,8 @@ TEST_CASE("distance is a true distance near the ground", "[globe][generator]") {
         UNSCOPED_INFO(name << " distance slope off by " << total << " on average, " << worst
                            << " at worst");
         CHECK(total < 0.01);
-        CHECK(worst < 0.06);
+        // Sharp crater rims are the worst: the estimate is a slope's, and a rim has two.
+        CHECK(worst < 0.08);
     }
 }
 
@@ -164,5 +167,5 @@ TEST_CASE("the same planet is generated the same, bit for bit", "[globe][generat
         }
     }
     // If this moves, unchanged ground no longer matches what was there before, or elsewhere.
-    CHECK(digest == 0x946a'e1d0'3e4a'1d31ULL);
+    CHECK(digest == 0xe83a'ad9f'7304'4224ULL);
 }

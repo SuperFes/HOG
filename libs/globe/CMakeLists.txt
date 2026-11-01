@@ -2,6 +2,7 @@ add_library(hog_globe
     src/accretion.cpp
     src/birth.cpp
     src/cell.cpp
+    src/craters.cpp
     src/crust.cpp
     src/erosion.cpp
     src/differentiation.cpp
@@ -27,6 +28,7 @@ hog_target_defaults(hog_globe)
 hog_add_tests(hog_globe
     tests/accretion_tests.cpp
     tests/cell_tests.cpp
+    tests/craters_tests.cpp
     tests/differentiation_tests.cpp
     tests/generator_tests.cpp
     tests/globe_tests.cpp
