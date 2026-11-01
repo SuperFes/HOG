@@ -22,6 +22,9 @@ namespace hog::client {
 
 using BiomePalette = std::array<Vec3, planet::biome_count>;
 
+// Texels across a material's tile: about 1.5 cm each over the four metres a material spans.
+inline constexpr int material_size = 256;
+
 // Each biome as it looks from above in daylight, the seabed as it would without the sea over it.
 [[nodiscard]] BiomePalette biome_palette();
 

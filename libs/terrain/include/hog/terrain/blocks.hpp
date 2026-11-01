@@ -7,6 +7,7 @@
 #include <hog/planet/volume.hpp>
 #include <hog/planet/world.hpp>
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -14,23 +15,30 @@
 
 namespace hog::terrain {
 
-// A corner of a leaf's side, flat-lit by the side's normal.
+// A corner of a surface, textured by the tiles of the triangle it's drawn in.
 struct BlockVertex {
     Vec3 position{0.0F}; // metres from the mesh's origin
     Vec3 normal{0.0F};   // unit, planet-centred, out of the side
-    Vec3 colour{0.0F};   // linear
+    // The tiles at the triangle's three corners, and which of them this corner is. A vertex shared
+    // between triangles names its own tile three times, so whichever triangle draws it finds it.
+    std::array<std::uint8_t, 3> tiles{};
+    std::uint8_t corner = 0;
 
     friend bool operator==(const BlockVertex&, const BlockVertex&) = default;
 };
 
-// Sides of the volume's leaves as quads, two triangles of three indices each.
+// Triangles of three indices each, anticlockwise seen from outside.
 struct BlockMesh {
     WorldPosition origin;
     std::vector<BlockVertex> vertices;
     std::vector<std::uint32_t> indices;
 };
 
-// How a material shows when drawn as blocks.
+// Gives each triangle whose corners wear different tiles three corners of its own, naming all
+// three tiles, so they blend across it. Every vertex must name one tile three times.
+void mix_corners(BlockMesh& mesh);
+
+// How a material shows when drawn as blocks; its tile is its material's number.
 [[nodiscard]] Vec3 block_colour(planet::Material material);
 
 // Adds to `mesh` the sides showing in one region of the volume: each leaf's sides that face

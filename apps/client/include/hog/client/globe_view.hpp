@@ -9,8 +9,11 @@
 #include <hog/globe/voxel_store.hpp>
 #include <hog/globe/world.hpp>
 #include <hog/jobs/job_system.hpp>
+#include <hog/planet/materials.hpp>
 #include <hog/terrain/blocks.hpp>
+#include <hog/terrain/material.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -47,10 +50,19 @@ struct GlobeWorld {
 // Metres the generated ground stands over the planet's radius under a point.
 [[nodiscard]] double globe_ground(const globe::Generator& generator, DVec3 at);
 
-// How a material shows until the globe is textured.
+// What a material averages to, seen from afar.
 [[nodiscard]] Vec3 surface_colour(globe::Material material);
 
-// A chunk's surfaces as blocks, laid from the chunk's own origin.
+// How each material looks up close, in Material's order, averaging to its surface_colour.
+[[nodiscard]] std::array<terrain::Look, globe::material_count> globe_looks();
+
+// The tiles block meshes name: the volume's materials by number, then the globe's from
+// globe_first_tile.
+[[nodiscard]] std::vector<terrain::MaterialImage> block_tiles();
+inline constexpr std::uint8_t globe_first_tile = planet::material_count;
+
+// A chunk's surfaces as blocks, laid from the chunk's own origin, each triangle wearing its
+// corners' materials.
 [[nodiscard]] terrain::BlockMesh globe_blocks(const globe::SurfaceMesh& mesh);
 
 // How the globe's detail falls off: each chunk as coarse as keeps it `ratio` of its widths from

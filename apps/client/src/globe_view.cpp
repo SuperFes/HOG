@@ -1,7 +1,9 @@
 #include <hog/client/globe_view.hpp>
+#include <hog/client/ground.hpp>
 #include <hog/core/assert.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -10,6 +12,7 @@
 #include <set>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace hog::client {
 
@@ -75,15 +78,88 @@ Vec3 surface_colour(globe::Material material) {
     return {1.0F, 0.0F, 1.0F};
 }
 
+std::array<terrain::Look, globe::material_count> globe_looks() {
+    using globe::Material;
+    struct Variation {
+        Material material;
+        DVec3 accent; // relative to the colour
+        double share;
+        double grain;
+        double mottle;
+    };
+    constexpr auto vary = [](Material material, DVec3 accent, double share, double grain,
+                             double mottle) {
+        return Variation{.material = material,
+                         .accent = accent,
+                         .share = share,
+                         .grain = grain,
+                         .mottle = mottle};
+    };
+    constexpr std::array variations{vary(Material::Air, {1.0, 1.0, 1.0}, 0.0, 0.0, 0.0),
+                                    vary(Material::Water, {1.0, 1.0, 1.0}, 0.0, 0.05, 0.1),
+                                    // Blue in the hollows, grey where it's old.
+                                    vary(Material::Snow, {0.9, 0.95, 1.05}, 0.3, 0.08, 0.08),
+                                    // Drier, paler patches.
+                                    vary(Material::Soil, {1.3, 1.15, 0.9}, 0.3, 0.35, 0.25),
+                                    vary(Material::Sand, {1.1, 1.05, 0.95}, 0.3, 0.2, 0.12),
+                                    // Greyer where it's wet.
+                                    vary(Material::Sediment, {0.8, 0.8, 0.85}, 0.3, 0.3, 0.2),
+                                    // Buff, with rusty patches.
+                                    vary(Material::Sandstone, {0.85, 0.7, 0.6}, 0.3, 0.3, 0.2),
+                                    // Dark grey, browner where it weathers.
+                                    vary(Material::Shale, {1.15, 1.0, 0.85}, 0.3, 0.35, 0.15),
+                                    // Pale, with darker lichen.
+                                    vary(Material::Limestone, {0.75, 0.75, 0.72}, 0.3, 0.25, 0.3),
+                                    // Speckled, bluer where the feldspar shows.
+                                    vary(Material::Granite, {1.0, 1.2, 1.4}, 0.3, 0.5, 0.15),
+                                    // Near black, rusting.
+                                    vary(Material::Basalt, {1.4, 1.1, 0.9}, 0.2, 0.35, 0.25),
+                                    vary(Material::Mantle, {0.8, 0.9, 0.7}, 0.3, 0.3, 0.2),
+                                    vary(Material::Iron, {1.3, 1.1, 0.9}, 0.3, 0.3, 0.2),
+                                    vary(Material::Anorthosite, {0.9, 0.9, 0.92}, 0.3, 0.3, 0.2),
+                                    vary(Material::Regolith, {0.85, 0.85, 0.85}, 0.35, 0.3, 0.25)};
+    static_assert(variations.size() == globe::material_count);
+
+    std::array<terrain::Look, globe::material_count> looks{};
+    for (const Variation& variation : variations) {
+        const auto material = static_cast<std::size_t>(variation.material);
+        const DVec3 colour{surface_colour(variation.material)};
+        looks.at(material) = {.colour = colour,
+                              .accent = glm::min(colour * variation.accent, DVec3{1.0}),
+                              .accent_share = variation.share,
+                              .grain = variation.grain,
+                              .mottle = variation.mottle,
+                              .seed = 0x1000 + material};
+    }
+    return looks;
+}
+
+std::vector<terrain::MaterialImage> block_tiles() {
+    std::vector<terrain::MaterialImage> tiles;
+    tiles.reserve(globe_first_tile + globe::material_count);
+    for (std::size_t material = 0; material < planet::material_count; ++material) {
+        const DVec3 colour{terrain::block_colour(static_cast<planet::Material>(material))};
+        tiles.push_back(terrain::material_image({.colour = colour}, material_size));
+    }
+    for (const terrain::Look& look : globe_looks()) {
+        tiles.push_back(terrain::material_image(look, material_size));
+    }
+    return tiles;
+}
+
 terrain::BlockMesh globe_blocks(const globe::SurfaceMesh& mesh) {
     terrain::BlockMesh blocks{.origin = WorldPosition{mesh.origin}, .vertices = {}, .indices = {}};
     blocks.vertices.reserve(mesh.vertices.size());
     for (const globe::SurfaceVertex& vertex : mesh.vertices) {
+        const auto tile = static_cast<std::uint8_t>(globe_first_tile +
+                                                    static_cast<std::uint8_t>(vertex.material));
         blocks.vertices.push_back({.position = vertex.position,
                                    .normal = vertex.normal,
-                                   .colour = surface_colour(vertex.material)});
+                                   .tiles = {tile, tile, tile},
+                                   .corner = 0});
     }
     blocks.indices = mesh.indices;
+    terrain::mix_corners(blocks);
     return blocks;
 }
 

@@ -1,3 +1,4 @@
+#include <hog/core/assert.hpp>
 #include <hog/planet/geology.hpp>
 #include <hog/planet/ground_column.hpp>
 #include <hog/planet/neighbors.hpp>
@@ -143,11 +144,13 @@ private:
             normal = -normal;
         }
         const auto first = static_cast<std::uint32_t>(mesh_->vertices.size());
+        const auto tile = static_cast<std::uint8_t>(material);
         for (const DVec3& corner : corners) {
             mesh_->vertices.push_back(
                 {.position = relative_to(WorldPosition{corner}, mesh_->origin),
                  .normal = Vec3{normal},
-                 .colour = block_colour(material)});
+                 .tiles = {tile, tile, tile},
+                 .corner = 0});
         }
         for (const std::uint32_t corner : {0U, 1U, 2U, 0U, 2U, 3U}) {
             mesh_->indices.push_back(first + corner);
@@ -160,6 +163,26 @@ private:
 };
 
 } // namespace
+
+void mix_corners(BlockMesh& mesh) {
+    HOG_ASSERT(mesh.indices.size() % 3 == 0, "blocks are triangles");
+    for (std::size_t first = 0; first < mesh.indices.size(); first += 3) {
+        const std::array<std::uint8_t, 3> tiles{mesh.vertices[mesh.indices[first]].tiles[0],
+                                                mesh.vertices[mesh.indices[first + 1]].tiles[0],
+                                                mesh.vertices[mesh.indices[first + 2]].tiles[0]};
+        if (tiles[0] == tiles[1] && tiles[1] == tiles[2]) {
+            continue;
+        }
+        for (std::uint8_t corner = 0; corner < 3; ++corner) {
+            std::uint32_t& index = mesh.indices[first + corner];
+            BlockVertex own = mesh.vertices[index];
+            own.tiles = tiles;
+            own.corner = corner;
+            index = static_cast<std::uint32_t>(mesh.vertices.size());
+            mesh.vertices.push_back(own);
+        }
+    }
+}
 
 Vec3 block_colour(Material material) {
     switch (material) {

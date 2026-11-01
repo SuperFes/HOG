@@ -5,13 +5,16 @@
 #include <hog/render/camera.hpp>
 #include <hog/render/memory.hpp>
 #include <hog/render/pipeline.hpp>
+#include <hog/render/sampler.hpp>
 #include <hog/render/vulkan.hpp>
 #include <hog/terrain/bend.hpp>
 #include <hog/terrain/blocks.hpp>
+#include <hog/terrain/material.hpp>
 
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <span>
 #include <vector>
 
 namespace hog::render {
@@ -29,13 +32,20 @@ struct BlockView {
     double night = 0.25;
 };
 
-// The volume as blocks, as terrain::BlockStream fills them in: each side flat, in its material's
-// colour, lit by the sun and the sky.
+// Metres a tile repeats over, and the far one laid over it, to break the near one's repetition.
+inline constexpr double block_tile = 4.0;
+inline constexpr double block_far_tile = 32.0;
+
+// Surfaces as block meshes have them, lit by the sun and the sky, each triangle textured by the
+// tiles its corners name: projected along the planet's axes by its normal, at two scales.
 class Blocks {
 public:
-    // `frames` in flight, each with its own copy of the blocks.
+    // `tiles` in the order vertices name them, all of one size; `frames` in flight, each with its
+    // own copy of the blocks shown.
     [[nodiscard]] static Result<Blocks> create(Device& device, VkFormat colour_format,
-                                               VkFormat depth_format, std::uint32_t frames = 1);
+                                               VkFormat depth_format,
+                                               std::span<const terrain::MaterialImage> tiles,
+                                               std::uint32_t frames = 1);
 
     // The blocks drawn from now on; each frame copies them as it's next drawn.
     void show(std::shared_ptr<const terrain::BlockMesh> mesh);
@@ -84,6 +94,8 @@ private:
 
     const Device* device_ = nullptr;
     Pipeline pipeline_;
+    Image tiles_;
+    Sampler sampler_;
     std::vector<Copy> copies_;
     std::shared_ptr<const terrain::BlockMesh> mesh_;
     std::uint64_t shown_ = 0;

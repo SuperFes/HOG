@@ -1,13 +1,16 @@
 #include <hog/render/blocks.hpp>
 #include <hog/render/device.hpp>
+#include <hog/render/streamed_image.hpp>
 #include <hog/shaders/blocks.hpp>
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <format>
 #include <span>
 #include <utility>
+#include <vector>
 
 namespace hog::render {
 
@@ -15,14 +18,26 @@ namespace {
 
 struct Push {
     Mat4 clip_from_eye;
-    glm::vec4 origin;
+    glm::vec4 origin; // w: where the tiles' coordinates start, x
     glm::vec4 up_height;
     glm::vec4 sun_radius;
-    glm::vec4 faked_night;
+    glm::vec4 faked_night; // zw: where the tiles' coordinates start, y and z
 };
 
 // Within what every device can push.
 static_assert(sizeof(Push) <= 128);
+
+// Far tiles the tiles' coordinates run over before they repeat: near enough to keep their
+// precision in floats, far enough that the repetition is never seen.
+constexpr double far_tiles_held = 64.0;
+constexpr double period = block_far_tile * far_tiles_held;
+
+constexpr std::array descriptors{
+    VkDescriptorSetLayoutBinding{.binding = 0,
+                                 .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                 .descriptorCount = 1,
+                                 .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+                                 .pImmutableSamplers = nullptr}};
 
 constexpr std::array vertex_bindings{
     VkVertexInputBindingDescription{.binding = 0,
@@ -40,8 +55,34 @@ constexpr std::array vertex_attributes{
                                       .offset = offsetof(terrain::BlockVertex, normal)},
     VkVertexInputAttributeDescription{.location = 2,
                                       .binding = 0,
-                                      .format = VK_FORMAT_R32G32B32_SFLOAT,
-                                      .offset = offsetof(terrain::BlockVertex, colour)}};
+                                      .format = VK_FORMAT_R8G8B8A8_UINT,
+                                      .offset = offsetof(terrain::BlockVertex, tiles)}};
+
+static_assert(offsetof(terrain::BlockVertex, corner) == offsetof(terrain::BlockVertex, tiles) + 3,
+              "the corner rides in the tiles' fourth byte");
+
+// Each mip of every tile in turn, the tiles one after another.
+Result<std::vector<std::byte>> tile_texels(std::span<const terrain::MaterialImage> tiles) {
+    if (tiles.empty() || tiles.size() > 256) {
+        return make_error(ErrorCode::InvalidArgument,
+                          std::format("{} tiles; a vertex names one of up to 256", tiles.size()));
+    }
+    const terrain::MaterialImage& first = tiles.front();
+    for (const terrain::MaterialImage& tile : tiles) {
+        if (tile.size != first.size || tile.levels.size() != first.levels.size() ||
+            first.levels.empty()) {
+            return make_error(ErrorCode::InvalidArgument, "tiles of different sizes");
+        }
+    }
+    std::vector<std::byte> texels;
+    for (std::size_t level = 0; level < first.levels.size(); ++level) {
+        for (const terrain::MaterialImage& tile : tiles) {
+            const auto bytes = std::as_bytes(std::span{tile.levels[level]});
+            texels.insert(texels.end(), bytes.begin(), bytes.end());
+        }
+    }
+    return texels;
+}
 
 // Upload memory for `bytes`, kept if `kept` holds as many already.
 Result<> hold(const Device& device, Buffer& kept, std::span<const std::byte> bytes,
@@ -60,7 +101,7 @@ Result<> hold(const Device& device, Buffer& kept, std::span<const std::byte> byt
 } // namespace
 
 Result<Blocks> Blocks::create(Device& device, VkFormat colour_format, VkFormat depth_format,
-                              std::uint32_t frames) {
+                              std::span<const terrain::MaterialImage> tiles, std::uint32_t frames) {
     Blocks blocks;
     blocks.device_ = &device;
     blocks.copies_.resize(frames);
@@ -69,11 +110,33 @@ Result<Blocks> Blocks::create(Device& device, VkFormat colour_format, VkFormat d
                                            .attributes = vertex_attributes,
                                            .colour_format = colour_format,
                                            .depth_format = depth_format,
-                                           .push_constant_bytes = sizeof(Push)});
+                                           .push_constant_bytes = sizeof(Push),
+                                           .descriptors = descriptors});
     if (!pipeline) {
         return std::unexpected(std::move(pipeline).error());
     }
     blocks.pipeline_ = std::move(pipeline).value();
+    auto texels = tile_texels(tiles);
+    if (!texels) {
+        return std::unexpected(std::move(texels).error());
+    }
+    const terrain::MaterialImage& first = tiles.front();
+    auto image = make_filled_image(device,
+                                   {.format = VK_FORMAT_R8G8B8A8_SRGB,
+                                    .extent = {.width = static_cast<std::uint32_t>(first.size),
+                                               .height = static_cast<std::uint32_t>(first.size)},
+                                    .layers = static_cast<std::uint32_t>(tiles.size()),
+                                    .levels = static_cast<std::uint32_t>(first.levels.size())},
+                                   *texels);
+    if (!image) {
+        return std::unexpected(std::move(image).error());
+    }
+    blocks.tiles_ = std::move(image).value();
+    auto sampler = make_tiling_sampler(device);
+    if (!sampler) {
+        return std::unexpected(std::move(sampler).error());
+    }
+    blocks.sampler_ = std::move(sampler).value();
     return blocks;
 }
 
@@ -146,13 +209,16 @@ void Blocks::retire(Placed placed) {
 void Blocks::draw_one(VkCommandBuffer commands, const Buffer& vertices, const Buffer& indices,
                       std::uint32_t count, WorldPosition origin, const BlockView& view,
                       double aspect) const {
+    // The tiles' coordinates are the world's, wrapped where they repeat, so a mesh placed
+    // anywhere wears them as its neighbours do.
+    const Vec3 tiled{glm::mod(origin.metres(), DVec3{period})};
     const Push push{.clip_from_eye = Mat4{view_projection(view.camera, aspect)},
-                    .origin = glm::vec4{Vec3{origin - view.camera.eye}, 0.0F},
+                    .origin = glm::vec4{Vec3{origin - view.camera.eye}, tiled.x},
                     .up_height =
                         glm::vec4{Vec3{view.bend.up}, static_cast<float>(view.bend.eye_height)},
                     .sun_radius = glm::vec4{Vec3{view.sun}, static_cast<float>(view.bend.radius)},
                     .faked_night = glm::vec4{static_cast<float>(view.bend.faked),
-                                             static_cast<float>(view.night), 0.0F, 0.0F}};
+                                             static_cast<float>(view.night), tiled.y, tiled.z}};
     const std::array buffers{vertices.handle()};
     const VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(commands, 0, 1, buffers.data(), &offset);
@@ -187,6 +253,7 @@ Result<> Blocks::draw(VkCommandBuffer commands, VkExtent2D extent, const BlockVi
     }
     const double aspect = static_cast<double>(extent.width) / static_cast<double>(extent.height);
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.handle());
+    push_sampled_image(commands, pipeline_, 0, tiles_.view(), sampler_.handle());
     if (kept.count > 0) {
         draw_one(commands, kept.vertices, kept.indices, kept.count, kept.origin, view, aspect);
     }

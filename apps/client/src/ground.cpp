@@ -14,13 +14,6 @@
 
 namespace hog::client {
 
-namespace {
-
-// A texel about 1.5 cm across over the four metres a material spans.
-constexpr int material_size = 256;
-
-} // namespace
-
 BiomePalette biome_palette() {
     BiomePalette palette{};
     for (std::size_t biome = 0; biome < palette.size(); ++biome) {

@@ -260,7 +260,8 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
         return failed("draw rivers", rivers.error());
     }
     scene.rivers_ = std::move(rivers).value();
-    auto blocks = render::Blocks::create(device, colour_format, depth_format, frames);
+    auto blocks =
+        render::Blocks::create(device, colour_format, depth_format, block_tiles(), frames);
     if (!blocks) {
         return failed("draw blocks", blocks.error());
     }

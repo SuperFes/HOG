@@ -6,9 +6,11 @@
 #include <hog/render/readback.hpp>
 #include <hog/render/rendering.hpp>
 #include <hog/terrain/blocks.hpp>
+#include <hog/terrain/material.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -30,18 +32,44 @@ using Pixel = std::array<std::uint8_t, 4>;
 
 constexpr VkExtent2D extent{.width = 64, .height = 64};
 
-// A square two metres across facing +z, `away` metres down -z from the eye, in `colour`.
-void add_square(BlockMesh& mesh, double away, hog::Vec3 colour) {
+// The tiles vertices may name: plain orange, white, red, green and blue, then a grey one grained.
+enum class Tile : std::uint8_t { Orange, White, Red, Green, Blue, Grained };
+
+const std::vector<hog::terrain::MaterialImage>& tiles() {
+    static const std::vector<hog::terrain::MaterialImage> made = [] {
+        std::vector<hog::terrain::MaterialImage> images;
+        for (const hog::DVec3 colour :
+             {hog::DVec3{1.0, 0.5, 0.0}, hog::DVec3{1.0}, hog::DVec3{1.0, 0.0, 0.0},
+              hog::DVec3{0.0, 1.0, 0.0}, hog::DVec3{0.0, 0.0, 1.0}}) {
+            images.push_back(hog::terrain::material_image({.colour = colour}, 64));
+        }
+        images.push_back(
+            hog::terrain::material_image({.colour = hog::DVec3{0.5}, .grain = 0.6, .seed = 3}, 64));
+        return images;
+    }();
+    return made;
+}
+
+// A square two metres across facing +z, `away` metres down -z from the eye, wearing `tile`; or
+// `left` on its left and `right` on its right, blending across its middle.
+void add_square(BlockMesh& mesh, double away, Tile left, Tile right) {
     const auto first = static_cast<std::uint32_t>(mesh.vertices.size());
     for (const hog::Vec2 corner : {hog::Vec2{-1.0F, -1.0F}, hog::Vec2{1.0F, -1.0F},
                                    hog::Vec2{1.0F, 1.0F}, hog::Vec2{-1.0F, 1.0F}}) {
+        const auto tile = static_cast<std::uint8_t>(corner.x < 0.0F ? left : right);
         mesh.vertices.push_back({.position = hog::Vec3{corner, static_cast<float>(-away)},
                                  .normal = hog::Vec3{0.0F, 0.0F, 1.0F},
-                                 .colour = colour});
+                                 .tiles = {tile, tile, tile},
+                                 .corner = 0});
     }
     for (const std::uint32_t corner : {0U, 1U, 2U, 0U, 2U, 3U}) {
         mesh.indices.push_back(first + corner);
     }
+    hog::terrain::mix_corners(mesh);
+}
+
+void add_square(BlockMesh& mesh, double away, Tile tile) {
+    add_square(mesh, away, tile, tile);
 }
 
 // Draws the blocks over a black background, looking down -z from `eye` on a planet a thousand
@@ -84,17 +112,35 @@ std::vector<std::uint8_t> render(hog::render::Device& device, hog::render::Block
 
 std::vector<std::uint8_t> draw(hog::render::Device& device, BlockMesh mesh, DVec3 sun,
                                WorldPosition eye = {}, DVec3 up = {0.0, 0.0, 1.0}) {
-    auto blocks =
-        hog::render::Blocks::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
+    auto blocks = hog::render::Blocks::create(device, VK_FORMAT_R8G8B8A8_UNORM,
+                                              VK_FORMAT_D32_SFLOAT, tiles());
     REQUIRE(blocks);
     blocks->show(std::make_shared<const BlockMesh>(std::move(mesh)));
     return render(device, *blocks, sun, eye, up);
 }
 
-Pixel middle(const std::vector<std::uint8_t>& pixels) {
-    const std::size_t first =
-        4 * (((std::size_t{extent.height} / 2) * extent.width) + (extent.width / 2));
+Pixel at(const std::vector<std::uint8_t>& pixels, std::size_t x, std::size_t y) {
+    const std::size_t first = 4 * ((y * extent.width) + x);
     return {pixels.at(first), pixels.at(first + 1), pixels.at(first + 2), pixels.at(first + 3)};
+}
+
+Pixel middle(const std::vector<std::uint8_t>& pixels) {
+    return at(pixels, extent.width / 2, extent.height / 2);
+}
+
+// The columns along the middle row where something is drawn over the black background.
+std::pair<std::size_t, std::size_t> drawn_columns(const std::vector<std::uint8_t>& pixels) {
+    std::size_t first = extent.width;
+    std::size_t last = 0;
+    for (std::size_t x = 0; x < extent.width; ++x) {
+        const Pixel pixel = at(pixels, x, extent.height / 2);
+        if (pixel[0] > 0 || pixel[1] > 0 || pixel[2] > 0) {
+            first = std::min(first, x);
+            last = std::max(last, x);
+        }
+    }
+    REQUIRE(first + 16 < last);
+    return {first, last};
 }
 
 } // namespace
@@ -105,7 +151,7 @@ TEST_CASE("a side facing the sun shows in its colour", "[render][gpu]") {
         SKIP("no Vulkan device");
     }
     BlockMesh mesh{.origin = WorldPosition{}, .vertices = {}, .indices = {}};
-    add_square(mesh, 4.0, hog::Vec3{1.0F, 0.5F, 0.0F});
+    add_square(mesh, 4.0, Tile::Orange);
     const Pixel lit = middle(draw(*device, mesh, DVec3{0.0, 0.0, 1.0}));
     CHECK(lit[0] > 240);
     CHECK(lit[1] > 110);
@@ -124,7 +170,7 @@ TEST_CASE("a side facing the sun once it has set is lit by the sky alone", "[ren
         SKIP("no Vulkan device");
     }
     BlockMesh mesh{.origin = WorldPosition{}, .vertices = {}, .indices = {}};
-    add_square(mesh, 4.0, hog::Vec3{1.0F, 0.5F, 0.0F});
+    add_square(mesh, 4.0, Tile::Orange);
     // Standing with the square's side facing the sun, a little over or under the horizon.
     const DVec3 up{0.0, 1.0, 0.0};
     const Pixel risen =
@@ -144,7 +190,7 @@ TEST_CASE("with the sun down, sides show by how much of the sky they see", "[ren
         SKIP("no Vulkan device");
     }
     BlockMesh mesh{.origin = WorldPosition{}, .vertices = {}, .indices = {}};
-    add_square(mesh, 4.0, hog::Vec3{1.0F, 1.0F, 1.0F});
+    add_square(mesh, 4.0, Tile::White);
     // The sun straight under foot, wherever up is.
     const auto seen_with_up = [&](DVec3 up) {
         return middle(draw(*device, mesh, -up, WorldPosition{}, up))[0];
@@ -164,12 +210,10 @@ TEST_CASE("nearer blocks hide farther ones, whichever comes first", "[render][gp
     if (!device) {
         SKIP("no Vulkan device");
     }
-    const hog::Vec3 red{1.0F, 0.0F, 0.0F};
-    const hog::Vec3 green{0.0F, 1.0F, 0.0F};
     for (const bool near_first : {true, false}) {
         BlockMesh mesh{.origin = WorldPosition{}, .vertices = {}, .indices = {}};
-        add_square(mesh, near_first ? 3.0 : 6.0, near_first ? red : green);
-        add_square(mesh, near_first ? 6.0 : 3.0, near_first ? green : red);
+        add_square(mesh, near_first ? 3.0 : 6.0, near_first ? Tile::Red : Tile::Green);
+        add_square(mesh, near_first ? 6.0 : 3.0, near_first ? Tile::Green : Tile::Red);
         const Pixel seen = middle(draw(*device, mesh, DVec3{0.0, 0.0, 1.0}));
         CHECK(seen[0] > 240);
         CHECK(seen[1] < 10);
@@ -185,7 +229,7 @@ TEST_CASE("blocks are drawn from their origin, wherever the eye is", "[render][g
     // away.
     const WorldPosition far{6.4e6, 0.0, 0.0};
     BlockMesh mesh{.origin = far, .vertices = {}, .indices = {}};
-    add_square(mesh, 4.0, hog::Vec3{1.0F});
+    add_square(mesh, 4.0, Tile::White);
     CHECK(middle(draw(*device, mesh, DVec3{0.0, 0.0, 1.0}, far))[0] > 240);
     // Seen from elsewhere, it's not there.
     CHECK(middle(draw(*device, mesh, DVec3{0.0, 0.0, 1.0}))[0] == 0);
@@ -197,16 +241,16 @@ TEST_CASE("meshes placed apart are drawn each from its own origin, until taken a
     if (!device) {
         SKIP("no Vulkan device");
     }
-    auto blocks =
-        hog::render::Blocks::create(*device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
+    auto blocks = hog::render::Blocks::create(*device, VK_FORMAT_R8G8B8A8_UNORM,
+                                              VK_FORMAT_D32_SFLOAT, tiles());
     REQUIRE(blocks);
     // Two squares a planet's radius apart, each where its own origin is.
     const WorldPosition here{6.4e6, 0.0, 0.0};
     const WorldPosition there{0.0, 6.4e6, 0.0};
-    for (const auto& [key, at, colour] : {std::tuple{1U, here, hog::Vec3{1.0F, 0.0F, 0.0F}},
-                                          std::tuple{2U, there, hog::Vec3{0.0F, 1.0F, 0.0F}}}) {
-        BlockMesh mesh{.origin = at, .vertices = {}, .indices = {}};
-        add_square(mesh, 4.0, colour);
+    for (const auto& [key, origin, tile] :
+         {std::tuple{1U, here, Tile::Red}, std::tuple{2U, there, Tile::Green}}) {
+        BlockMesh mesh{.origin = origin, .vertices = {}, .indices = {}};
+        add_square(mesh, 4.0, tile);
         blocks->place(key, std::make_shared<const BlockMesh>(std::move(mesh)));
     }
     CHECK(blocks->placed() == 2);
@@ -214,7 +258,7 @@ TEST_CASE("meshes placed apart are drawn each from its own origin, until taken a
     CHECK(middle(render(*device, *blocks, DVec3{0.0, 0.0, 1.0}, there))[1] > 240);
     // Placed again, it's replaced; taken away, it's gone.
     BlockMesh blue{.origin = here, .vertices = {}, .indices = {}};
-    add_square(blue, 4.0, hog::Vec3{0.0F, 0.0F, 1.0F});
+    add_square(blue, 4.0, Tile::Blue);
     blocks->place(1, std::make_shared<const BlockMesh>(std::move(blue)));
     CHECK(blocks->placed() == 2);
     const Pixel replaced = middle(render(*device, *blocks, DVec3{0.0, 0.0, 1.0}, here));
@@ -223,4 +267,51 @@ TEST_CASE("meshes placed apart are drawn each from its own origin, until taken a
     blocks->remove(1);
     CHECK(blocks->placed() == 1);
     CHECK(middle(render(*device, *blocks, DVec3{0.0, 0.0, 1.0}, here))[2] == 0);
+}
+
+TEST_CASE("a triangle wearing two tiles blends from one to the other", "[render][gpu]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    BlockMesh mesh{.origin = WorldPosition{}, .vertices = {}, .indices = {}};
+    add_square(mesh, 4.0, Tile::Red, Tile::Green);
+    const std::vector<std::uint8_t> pixels = draw(*device, mesh, DVec3{0.0, 0.0, 1.0});
+    const std::size_t row = extent.height / 2;
+    const auto [first, last] = drawn_columns(pixels);
+    // Tile::Red at the left edge, green at the right, and both part way across.
+    const Pixel left = at(pixels, first + 1, row);
+    const Pixel mixed = middle(pixels);
+    const Pixel right = at(pixels, last - 1, row);
+    CHECK(left[0] > 200);
+    CHECK(left[1] < 60);
+    CHECK(mixed[0] > 60);
+    CHECK(mixed[0] < 200);
+    CHECK(mixed[1] > 60);
+    CHECK(mixed[1] < 200);
+    CHECK(right[0] < 60);
+    CHECK(right[1] > 200);
+}
+
+TEST_CASE("a grained tile shows its grain, a plain one none", "[render][gpu]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    const auto spread = [&](Tile tile) {
+        BlockMesh mesh{.origin = WorldPosition{}, .vertices = {}, .indices = {}};
+        add_square(mesh, 2.5, tile);
+        const std::vector<std::uint8_t> pixels = draw(*device, mesh, DVec3{0.0, 0.0, 1.0});
+        const auto [first, last] = drawn_columns(pixels);
+        std::uint8_t least = 255;
+        std::uint8_t most = 0;
+        for (std::size_t x = first + 1; x < last; ++x) {
+            const std::uint8_t red = at(pixels, x, extent.height / 2)[0];
+            least = std::min(least, red);
+            most = std::max(most, red);
+        }
+        return most - least;
+    };
+    CHECK(spread(Tile::White) <= 2);
+    CHECK(spread(Tile::Grained) > 15);
 }
