@@ -43,7 +43,7 @@ What v1 builds, all from the knobs:
 - **Strata and soils:** sedimentary beds where a volatile has run, folded where mountains rose and stripped from them; soil, mud, beach sand and snow where water cycles; regolith that thickens with age where it doesn't.
 - **Caves:** passages along limestone beds and chambers in them, and lava tubes under basalt flows, carved out of the rock.
 
-A column's terms depend on direction alone, so `Generator::column` computes them once and samples any radius along it. Chunks fill a column at a time. The ground's slope, which the distance needs, is measured by central differences for now, four extra columns each; chunks will take it from neighbouring columns instead. Stills come from `hog-stills`: a map, a relief square, a section and a plan slice, all drawn by sampling the 3D field.
+A column's terms depend on direction alone, so `Generator::column` computes them once and samples any radius along it. The ground's slope, which the distance needs, is measured by central differences, four extra columns each. Voxels are filled a square of columns at a time through `Generator::columns`, which takes the slope from neighbouring cells instead. Stills come from `hog-stills`: a map, a relief square, a section and a plan slice, all drawn by sampling the 3D field.
 
 ## The store
 
@@ -52,6 +52,14 @@ The store is one sparse tree per face over `(i, j, shell)`. Empty means "ask the
 - **Loose matter,** such as water, sand, rubble, snow and lava, carries amounts.
 
 Only the server writes the store.
+
+What v1 holds:
+- **Voxels** stand on the cells of the level whose width is nearest the layers' thickness: level 18 at the default 115 km and 0.5 m, so cells are 0.53–0.75 m wide. A voxel's value is taken at its middle. It holds fixed-point values: distance in millimetres, condition, a grain and a liquid with amounts of the voxel's volume, and temperature in eighths of a kelvin. Distances are kept within a band of four layers either side of a surface; beyond it, only the side counts.
+- **Bricks** of 8³ are the unit stored, saved and sent. A brick that is one voxel throughout is held as that voxel. Otherwise each quantity is packed apart, as one value, a palette of 1–16-bit indices, or in full. So a brick the surface passes through keeps its distances in full and a few bits a voxel for the rest.
+- **The store** is a hash of changed bricks keyed by face, `i`, `j` and layer. A brick changed anywhere is held whole. One written back as generated is let go. Tiles bigger than a brick, and the tree over them, wait until uniform edits that large appear.
+- **Filling:** a brick is filled through `Generator::columns`, where each column takes the ground's slope from the cells beside it. That is 2.2–2.4× cheaper than each measuring its own, and as true against the real distance (about 5% either way). A cell's column comes out the same in any square, so unchanged voxels are the same everywhere.
+- **Saving** writes only the bricks changed since the last save, as rows of the world's SQLite file under a header of the layers they stand on. Loading refuses bricks saved on other layers.
+- **Edits** so far are balls dug and built. All the generated ground is shaped matter; sand and snow turn loose when the simulation disturbs them.
 
 ## The simulation
 
