@@ -87,7 +87,7 @@ What v1 draws:
 - **Detail:** voxels are generated with nothing finer than two of them across, as finer detail would alias into steps a voxel apart.
 - **Where:** from 16 m under a chunk's lowest ground to over its highest, around the sea's level apart from that, and through held changes next to either. Caves still open at the foot are followed down, as far as 64 m under the lowest ground.
 - **The client:** `--globe`, or `--globe-planet` with a preset or a planet file, meshes the chunks within 160 m of the eye on the job pool, nearest first, coloured by material and drawn as blocks. Flight keeps above the generated ground.
-- **Cost:** 36–76 ms a chunk on one thread, Venus to the Moon. Most of it is the generator's columns: each also takes the ground's slope at 16 m for its soils, nearly another column's work.
+- **Cost:** 38–84 ms a chunk on one thread, Venus to the Moon. Most of it is the generator's columns: each also takes the ground's slope at 16 m for its soils, nearly another column's work.
 
 ## Build order
 
@@ -101,7 +101,7 @@ What v1 draws:
 8. **Materials and texturing.**
 9. **Server authority and streaming.**
 10. **Water.**
-11. **Sand and rubble.**
+11. **Sand and rubble:** slumping to their angle of repose, and loose cover crept smooth in the generator, evening the small relief under soil and sand while bare rock stays rough.
 12. **Collapse and wear.**
 13. **Lava and magma.**
 14. **The drainage solve, rivers, lakes and coasts.**
