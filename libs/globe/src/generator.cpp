@@ -5,6 +5,7 @@
 #include <hog/globe/cell.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/maths.hpp>
+#include <hog/globe/voxel.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -34,6 +35,13 @@ constexpr double cave_blend = 1.0;
 double smooth_max(double a, double b, double width) {
     const double h = std::max(width - std::abs(a - b), 0.0);
     return std::max(a, b) + (h * h / (4.0 * width));
+}
+
+// How much of smooth_max(a, b, width)'s rate comes from a's.
+double smooth_max_share(double a, double b, double width) {
+    const double h = std::max(width - std::abs(a - b), 0.0);
+    const double blend = h / (2.0 * width);
+    return a >= b ? 1.0 - blend : blend;
 }
 
 // The detail soil and snow follow, in metres.
@@ -76,9 +84,16 @@ DVec3 direction_from(std::uint64_t seed) {
     return {ring * maths::cos(turn), ring * maths::sin(turn), z};
 }
 
+// The way the ground rises, in metres per metre, and how steeply.
+struct Tilt {
+    double slope = 0.0;
+    DVec3 rise{0.0};
+};
+
 // The ground's slope measured across a small step either way. Gullies turn with the slope they're
 // cut in, which their own gradients can't know without the ground's curvature.
-double ground_slope(const terms::Context& context, DVec3 direction, double lod) {
+
+Tilt ground_tilt(const terms::Context& context, DVec3 direction, double lod) {
     const double step = std::max(lod, context.planet->voxel) / 8.0;
     const DVec3 side = std::abs(direction.z) < 0.9 ? DVec3{0.0, 0.0, 1.0} : DVec3{1.0, 0.0, 0.0};
     const DVec3 east = glm::normalize(glm::cross(side, direction));
@@ -89,7 +104,8 @@ double ground_slope(const terms::Context& context, DVec3 direction, double lod) 
     };
     const double across_east = (height(east, turn) - height(east, -turn)) / (2.0 * step);
     const double across_north = (height(north, turn) - height(north, -turn)) / (2.0 * step);
-    return std::sqrt((across_east * across_east) + (across_north * across_north));
+    return {.slope = std::sqrt((across_east * across_east) + (across_north * across_north)),
+            .rise = (across_east * east) + (across_north * north)};
 }
 
 std::vector<Surveyed> survey(const auto& measure) {
@@ -157,7 +173,8 @@ std::optional<double> Generator::sea_level() const noexcept {
 Generator::Column Generator::column(DVec3 direction, double lod) const noexcept {
     const terms::Context context{.planet = &planet_, .derived = &derived_, .shape = &shape_};
     const DVec3 down = glm::normalize(direction);
-    return finish(down, lod, terms::column(context, down, lod), ground_slope(context, down, lod));
+    const Tilt tilt = ground_tilt(context, down, lod);
+    return finish(down, lod, terms::column(context, down, lod), tilt.slope, tilt.rise);
 }
 
 std::vector<Generator::Column> Generator::columns(Cell corner, int side, double lod) const {
@@ -233,13 +250,14 @@ std::vector<Generator::Column> Generator::columns(std::span<const Cell> cells, d
         const double across_north = ((xx * yh) - (xy * xh)) / determinant;
         made.push_back(
             finish(down, lod, found[k],
-                   std::sqrt((across_east * across_east) + (across_north * across_north))));
+                   std::sqrt((across_east * across_east) + (across_north * across_north)),
+                   (across_east * east) + (across_north * north)));
     }
     return made;
 }
 
 Generator::Column Generator::finish(DVec3 down, double lod, const terms::Column& found,
-                                    double slope) const noexcept {
+                                    double slope, DVec3 tilt) const noexcept {
     const terms::Context context{.planet = &planet_, .derived = &derived_, .shape = &shape_};
     Column column;
     column.generator_ = this;
@@ -247,14 +265,15 @@ Generator::Column Generator::finish(DVec3 down, double lod, const terms::Column&
     column.lod_ = lod;
     column.ground_ = planet_.radius + found.height.value - shape_.datum;
     column.slope_ = slope;
+    column.tilt_ = tilt;
     const double latitude = maths::atan2(down.z, std::sqrt((down.x * down.x) + (down.y * down.y)));
     column.surface_temperature_ = temperature_at(planet_, latitude);
     const double height = column.ground_ - planet_.radius;
     // Soil and snow lie by the slope over tens of metres, not the ground's grain.
     const double broad = std::max(lod, broad_slope_scale);
-    const DVec3 tilt =
+    const DVec3 broad_tilt =
         broad == lod ? found.height.gradient : terms::column(context, down, broad).height.gradient;
-    column.strata_ = terms::layering(context, down, found, height, glm::length(tilt),
+    column.strata_ = terms::layering(context, down, found, height, glm::length(broad_tilt),
                                      column.surface_temperature_ -
                                          (lapse_rate(planet_) * std::max(0.0, height)));
     return column;
@@ -266,6 +285,7 @@ Sample Generator::Column::sample(double radius) const noexcept {
     const double slope = slope_ * planet.radius / radius;
     Sample sample;
     sample.distance = (radius - ground_) / std::sqrt(1.0 + (slope * slope));
+    DVec3 rise = direction_ - (tilt_ * (planet.radius / radius));
     const terms::Context context{.planet = &generator_->planet_,
                                  .derived = &generator_->derived_,
                                  .shape = &generator_->shape_};
@@ -277,7 +297,30 @@ Sample Generator::Column::sample(double radius) const noexcept {
         const Material rock =
             terms::material_at(context, strata_, std::max(depth, loose + 0.01), radius);
         const double cave = terms::cave_distance(context, direction_, radius, rock, depth, lod_);
-        sample.distance = smooth_max(sample.distance, -cave, cave_blend);
+        const double ground = sample.distance;
+        sample.distance = smooth_max(ground, -cave, cave_blend);
+        const double cave_share = smooth_max_share(-cave, ground, cave_blend);
+        // Only near a surface, where its normal is kept; there by differences, as the cave's
+        // distance is its noise over its noise's rate, whose own rate isn't to hand.
+        if (cave_share > 0.0 && std::abs(sample.distance) < distance_band(generator_->layers_)) {
+            const double step = lod_ / 16.0;
+            DVec3 cave_rise{0.0};
+            for (glm::length_t axis = 0; axis < 3; ++axis) {
+                DVec3 along{0.0};
+                along[axis] = step;
+                const auto cave_at = [&](DVec3 point) {
+                    const double out = glm::length(point);
+                    return terms::cave_distance(context, point / out, out, rock, ground_ - out,
+                                                lod_);
+                };
+                const DVec3 point = direction_ * radius;
+                cave_rise[axis] = (cave_at(point + along) - cave_at(point - along)) / (2.0 * step);
+            }
+            rise = ((1.0 - cave_share) * glm::normalize(rise)) - (cave_share * cave_rise);
+        }
+    }
+    if (glm::length(rise) > 0.0) {
+        sample.normal = glm::normalize(rise);
     }
 
     if (sample.distance < 0.0) {

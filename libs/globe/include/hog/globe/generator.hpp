@@ -22,7 +22,10 @@ struct Sample {
     double distance = 0.0;
     Material material = Material::Air; // the solid's, or what fills the open space
     double water = 0.0;                // share of open space that is standing liquid
-    double temperature = 0.0;          // kelvin
+    // Unit, the way the distance grows fastest: out of the solid, near its surface; none where
+    // the distance doesn't change.
+    DVec3 normal{0.0};
+    double temperature = 0.0; // kelvin
 };
 
 // What lies under the ground in one column, top down: snow, loose cover, sedimentary beds, then
@@ -71,6 +74,7 @@ public:
         double lod_ = 0.0;
         double ground_ = 0.0;              // metres from the centre
         double slope_ = 0.0;               // across the ground, at the radius
+        DVec3 tilt_{0.0};                  // the way the ground rises, by as much
         double surface_temperature_ = 0.0; // at the reference level
         Strata strata_;
     };
@@ -96,8 +100,9 @@ public:
     };
 
 private:
-    [[nodiscard]] Column finish(DVec3 down, double lod, const terms::Column& found,
-                                double slope) const noexcept;
+    // `slope` is `tilt`'s length, as found along with it.
+    [[nodiscard]] Column finish(DVec3 down, double lod, const terms::Column& found, double slope,
+                                DVec3 tilt) const noexcept;
 
     Planet planet_;
     Derived derived_;
