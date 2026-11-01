@@ -5,7 +5,7 @@
 #include <hog/render/memory.hpp>
 #include <hog/render/readback.hpp>
 #include <hog/render/rendering.hpp>
-#include <hog/terrain/blocks.hpp>
+#include <hog/terrain/block_mesh.hpp>
 #include <hog/terrain/material.hpp>
 
 #include <catch2/catch_test_macros.hpp>

@@ -1,7 +1,6 @@
 #include <hog/planet/noise.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tile.hpp>
-#include <hog/terrain/river_water.hpp>
 #include <hog/terrain/shore.hpp>
 
 #include <algorithm>
@@ -34,31 +33,6 @@ DVec3 shore_direction(const ShoreFrame& frame, double radius, DVec2 along) {
 DVec2 shore_along(const ShoreFrame& frame, double radius, DVec3 direction) {
     const double scale = radius / glm::dot(direction, frame.anchor);
     return DVec2{glm::dot(direction, frame.east), glm::dot(direction, frame.north)} * scale;
-}
-
-ShoreGround shore_ground(const planet::World& world, const ShoreFrame& frame, double radius,
-                         double spacing) {
-    const planet::Elevation& terrain = world.geology().terrain();
-    ShoreGround ground;
-    ground.elevations.reserve(static_cast<std::size_t>(shore_size) * shore_size);
-    ground.lakes.reserve(ground.elevations.capacity());
-    ground.sea.reserve(ground.elevations.capacity());
-    const double first = (0.5 - (shore_size / 2.0)) * spacing;
-    for (int row = 0; row < shore_size; ++row) {
-        for (int column = 0; column < shore_size; ++column) {
-            const planet::CellId cell = planet::cell_at(shore_direction(
-                frame, radius, {first + (column * spacing), first + (row * spacing)}));
-            const std::int64_t generated = terrain.elevation(cell);
-            const auto water = terrain.rivers().standing(cell, generated);
-            const bool lake = water && !water->sea;
-            ground.elevations.push_back(
-                static_cast<float>(planet::fixed_to_double(world.elevation(cell, generated))));
-            ground.lakes.push_back(lake ? static_cast<float>(planet::fixed_to_double(water->level))
-                                        : 0.0F);
-            ground.sea.push_back(water && water->sea ? 1 : 0);
-        }
-    }
-    return ground;
 }
 
 std::vector<float> shore_depths(const ShoreGround& ground) {
@@ -532,13 +506,6 @@ std::vector<float> shore_offshore(std::span<const float> depths, std::span<const
     return offshore;
 }
 
-void ShoreStream::follow(DVec3 eye) {
-    wanted_ = shore_frame(eye, radius_);
-    if (!working_ && wanted_ != started_) {
-        start(*wanted_);
-    }
-}
-
 std::vector<float> lake_levels(const ShoreDepths& shore) {
     std::vector<float> levels;
     const std::size_t texels = std::min(shore.levels.size(), shore_texels);
@@ -576,136 +543,6 @@ double plume_at(const Plume& plume, DVec2 at) {
     const double along = out < 0.0 ? glm::smoothstep(-2.0 * plume.half, 0.0, out)
                                    : std::exp(-out / std::max(plume.length, 1e-6));
     return along * (1.0 - glm::smoothstep(0.6, 1.0, across / std::max(half, 1e-6)));
-}
-
-std::vector<float> shore_plumes(const planet::World& world, const ShoreFrame& frame,
-                                double radius) {
-    const planet::Elevation& terrain = world.geology().terrain();
-    const planet::Meander& meander = terrain.rivers().meander();
-    // Out to the coarsest layer's corners.
-    const double widest = shore_size * shore_spacing.back();
-    std::vector<Plume> plumes;
-    for (const planet::Reach& reach : terrain.rivers().reaches()) {
-        if (!reach.mouth || glm::length(reach.to - frame.anchor) * radius > widest) {
-            continue;
-        }
-        const double shore = river_shore(terrain, reach, radius);
-        const auto along = [&](double t) {
-            return shore_along(frame, radius, meander.unshifted(planet::course_at(reach, t)));
-        };
-        const DVec2 ahead = along(std::min(shore + 0.05, 1.0)) - along(std::max(shore - 0.05, 0.0));
-        if (glm::length(ahead) <= 0.0) {
-            continue;
-        }
-        plumes.push_back({.origin = along(shore),
-                          .heading = glm::normalize(ahead),
-                          .half = planet::width_at(reach, shore) / 2.0,
-                          .length = plume_length(reach.flow)});
-    }
-    constexpr auto texels = static_cast<std::size_t>(shore_size) * shore_size;
-    std::vector<float> found(shore_spacing.size() * texels, 0.0F);
-    for (std::size_t layer = 0; layer < shore_spacing.size(); ++layer) {
-        const double spacing = shore_spacing.at(layer);
-        const double first = (0.5 - (shore_size / 2.0)) * spacing;
-        const auto texel = [&](double metres) {
-            return std::clamp(static_cast<int>(std::floor((metres - first) / spacing)), 0,
-                              shore_size - 1);
-        };
-        for (const Plume& plume : plumes) {
-            // It's all but mixed away three lengths out.
-            const double out = 3.0 * plume.length;
-            const double extent = out + plume.half + (out * plume_spread);
-            for (int row = texel(plume.origin.y - extent); row <= texel(plume.origin.y + extent);
-                 ++row) {
-                for (int column = texel(plume.origin.x - extent);
-                     column <= texel(plume.origin.x + extent); ++column) {
-                    float& mixed =
-                        found[(layer * texels) + (static_cast<std::size_t>(row) * shore_size) +
-                              static_cast<std::size_t>(column)];
-                    mixed = std::max(
-                        mixed, static_cast<float>(plume_at(
-                                   plume, {first + (column * spacing), first + (row * spacing)})));
-                }
-            }
-        }
-        // Eddies fixed to the world, so the front keeps its shape as the anchor moves.
-        constexpr std::uint64_t eddies = 0x706c756d65;
-        const double frequency = radius / plume_eddies;
-        for (std::size_t at = 0; at < texels; ++at) {
-            float& mixed = found[(layer * texels) + at];
-            if (mixed <= 0.0F) {
-                continue;
-            }
-            const std::size_t row = at / shore_size;
-            const std::size_t column = at % shore_size;
-            const DVec2 along{first + (static_cast<double>(column) * spacing),
-                              first + (static_cast<double>(row) * spacing)};
-            const double stirred = planet::fixed_to_double(planet::fbm(
-                eddies, planet::noise_point(shore_direction(frame, radius, along), frequency), 3));
-            mixed = static_cast<float>(plume_front(static_cast<double>(mixed), stirred));
-        }
-    }
-    return found;
-}
-
-ShoreDepths work_out_shore(const planet::World& world, const ShoreFrame& frame, double radius) {
-    ShoreDepths found{.frame = frame,
-                      .depths = {},
-                      .still = {},
-                      .levels = {},
-                      .fetches = {},
-                      .offshore = {},
-                      .plumes = {}};
-    std::vector<float> elevations;
-    std::vector<float> lakes;
-    std::vector<std::uint8_t> sea;
-    for (const double spacing : shore_spacing) {
-        const ShoreGround ground = shore_ground(world, frame, radius, spacing);
-        const std::vector<float> layer = shore_depths(ground);
-        found.depths.insert(found.depths.end(), layer.begin(), layer.end());
-        elevations.insert(elevations.end(), ground.elevations.begin(), ground.elevations.end());
-        lakes.insert(lakes.end(), ground.lakes.begin(), ground.lakes.end());
-        sea.insert(sea.end(), ground.sea.begin(), ground.sea.end());
-    }
-    found.still = keep_to_sea_reach(found.depths, sea);
-    found.levels = keep_lakes(elevations, lakes, found.still);
-    keep_dry(elevations, found.depths, found.still, found.levels);
-    found.fetches = shore_fetches(found.depths, found.still);
-    found.offshore = shore_offshore(found.depths, found.still);
-    found.plumes = shore_plumes(world, frame, radius);
-    return found;
-}
-
-void ShoreStream::start(const ShoreFrame& frame) {
-    started_ = frame;
-    working_ = std::make_unique<jobs::Async<ShoreDepths>>(
-        *jobs_, [world = world_, frame, radius = radius_] {
-            return work_out_shore(*world, frame, radius);
-        });
-}
-
-std::optional<ShoreDepths> ShoreStream::collect() {
-    if (!working_ || !working_->done()) {
-        return std::nullopt;
-    }
-    ShoreDepths found = working_->take();
-    working_.reset();
-    if (wanted_ && wanted_ != started_) {
-        start(*wanted_);
-    }
-    return found;
-}
-
-std::optional<ShoreDepths> ShoreStream::finish() {
-    std::optional<ShoreDepths> last;
-    while (working_) {
-        last = working_->take();
-        working_.reset();
-        if (wanted_ && wanted_ != started_) {
-            start(*wanted_);
-        }
-    }
-    return last;
 }
 
 } // namespace hog::terrain

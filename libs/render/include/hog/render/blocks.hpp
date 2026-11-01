@@ -8,7 +8,7 @@
 #include <hog/render/sampler.hpp>
 #include <hog/render/vulkan.hpp>
 #include <hog/terrain/bend.hpp>
-#include <hog/terrain/blocks.hpp>
+#include <hog/terrain/block_mesh.hpp>
 #include <hog/terrain/material.hpp>
 
 #include <cstdint>

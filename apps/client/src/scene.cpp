@@ -4,18 +4,12 @@
 #include <hog/client/tides.hpp>
 #include <hog/core/hash.hpp>
 #include <hog/core/profile.hpp>
-#include <hog/planet/noise.hpp>
-#include <hog/planet/projection.hpp>
 #include <hog/planet/tangent_frame.hpp>
 #include <hog/render/barrier.hpp>
 #include <hog/render/device.hpp>
-#include <hog/render/grass_lattice.hpp>
 #include <hog/render/gusts.hpp>
 #include <hog/render/readback.hpp>
 #include <hog/render/render_graph.hpp>
-#include <hog/sim/weather.hpp>
-#include <hog/terrain/patch.hpp>
-#include <hog/terrain/selection.hpp>
 #include <hog/waves/foam.hpp>
 #include <hog/waves/waves.hpp>
 
@@ -23,7 +17,6 @@
 
 #include <algorithm>
 #include <format>
-#include <numbers>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -39,26 +32,8 @@ constexpr VkClearColorValue cleared{.float32 = {0.0F, 0.0F, 0.0F, 1.0F}};
 // Mixed into the planet's seed for its waves, so they don't follow its ground.
 constexpr std::uint64_t waves_salt = 0x5741564553ULL;
 
-// Seabed showing through the sea no more than this is left undrawn: about half a step of 8-bit
-// colour.
-constexpr double seabed_unseen = 0.002;
-
-// How the ground is selected all round the eye, so it's baked before it's turned to: as finely as
-// its own roughness shows, as the grass needs near the eye, and coarse enough elsewhere to keep
-// the triangles a few pixels across.
-terrain::SelectionSettings ground_selection(const GrassBudget& budget) {
-    return {.max_spacing = 32.0,
-            .max_error = 1.0,
-            .fine_within = {{.within = budget.fine, .spacing = budget.finest},
-                            {.within = budget.reach, .spacing = budget.coarsest}},
-            .only_in_view = false,
-            .seabed_unseen = seabed_unseen};
-}
-
 // Metres over the water's surface a probe is taken from, so all it draws is out of the water.
 constexpr double probe_over_water = 0.5;
-// Metres the eye moves before the ground's selected for the probe again.
-constexpr double probe_reselect = 16.0;
 
 std::unexpected<Error> failed(std::string_view doing, const Error& error) {
     return std::unexpected(
@@ -66,11 +41,6 @@ std::unexpected<Error> failed(std::string_view doing, const Error& error) {
 }
 
 } // namespace
-
-double ground_under(const planet::World& world, WorldPosition at) {
-    return static_cast<double>(world.state(planet::cell_at(at)).elevation) /
-           static_cast<double>(planet::fixed_one);
-}
 
 protocol::CellWeather weather_at_eye(const Shot& shot) {
     if (shot.forecast == nullptr || !shot.forecast->known()) {
@@ -118,77 +88,22 @@ render::CloudShade shade_at_eye(const terrain::Bend& bend, const protocol::CellW
     // Within the cloud, only what's over the eye shades it.
     const double over =
         top > base ? std::clamp((top - bend.eye_height) / (top - base), 0.0, 1.0) : 1.0;
-    return render::cloud_shade(static_cast<double>(sim::cloud_cover(weather.cloud)),
+    return render::cloud_shade(static_cast<double>(cloud_cover(weather.cloud)),
                                static_cast<double>(weather.cloud) * over);
 }
 
-Result<Scene> Scene::create(render::Device& device, const planet::World& world,
+Result<Scene> Scene::create(render::Device& device, const globe::Planet& planet,
                             jobs::JobSystem& jobs, const sim::Calendar& calendar,
                             VkFormat colour_format, std::uint32_t frames,
-                            std::optional<render::Billboard> companion, const GrassBudget& budget) {
-    const terrain::StreamSettings settings;
-    const std::vector<terrain::MaterialImage> materials = biome_materials();
-    const std::vector<terrain::MaterialImage> rocks = rock_materials();
-    const BiomePalette palette = biome_palette();
-    auto terrain = render::Terrain::create(device, colour_format, depth_format,
-                                           {.materials = materials,
-                                            .rocks = rocks,
-                                            .sea = true,
-                                            .air = true,
-                                            .canopy = budget.tree_far,
-                                            .grass = budget.reach});
-    if (!terrain) {
-        return failed("draw the ground", terrain.error());
-    }
+                            std::optional<render::Billboard> companion) {
     auto ocean = render::Ocean::create(device, colour_format, depth_format, true, frames);
     if (!ocean) {
         return failed("draw the sea", ocean.error());
     }
-    auto grass = render::Grass::create(
-        device, colour_format, depth_format, palette,
-        render::grass_lattice(world.geology().planet_radius(), world.geology().seed()),
-        budget.grass());
-    if (!grass) {
-        return failed("grow the grass", grass.error());
-    }
-    auto bushes = render::Bushes::create(device, colour_format, depth_format, budget.bush_far);
-    if (!bushes) {
-        return failed("grow the bushes", bushes.error());
-    }
-    auto trees = render::Trees::create(device, colour_format, depth_format, budget.forest_far,
-                                       budget.tree_far);
-    if (!trees) {
-        return failed("grow the trees", trees.error());
-    }
-    auto forest = render::Forest::create(device, colour_format, depth_format, budget.forest_full,
-                                         budget.forest_mid, budget.forest_far);
-    if (!forest) {
-        return failed("grow the forest", forest.error());
-    }
-    auto pool = render::TerrainPool::create(
-        device, {.patches = settings.capacity, .frames = frames, .uploads = settings.uploads});
-    if (!pool) {
-        return failed("hold the ground", pool.error());
-    }
-    // Enough tiles for the plants' whole reach round the eye, within reason on a small planet.
-    const auto tiles_for = [&](int level, double reach) {
-        const double tile_span = (std::numbers::pi / 2.0) * world.geology().planet_radius() /
-                                 static_cast<double>(std::uint32_t{1} << level);
-        const double rings = (reach / tile_span) + 3.0;
-        return static_cast<std::uint32_t>(
-            std::clamp(std::numbers::pi * rings * rings, 64.0, 1024.0));
-    };
-    auto anchors = render::AnchorPool::create(
-        device,
-        {.tiles = tiles_for(anchor_tile_level, budget.tree_far), .frames = frames, .uploads = 4});
-    if (!anchors) {
-        return failed("hold the trees", anchors.error());
-    }
-    auto bush_pool = render::AnchorPool::create(
-        device,
-        {.tiles = tiles_for(bush_tile_level, budget.bush_far), .frames = frames, .uploads = 4});
-    if (!bush_pool) {
-        return failed("hold the bushes", bush_pool.error());
+    auto blocks =
+        render::Blocks::create(device, colour_format, depth_format, block_tiles(), frames);
+    if (!blocks) {
+        return failed("draw the ground", blocks.error());
     }
     auto atmosphere = render::Atmosphere::create(device);
     if (!atmosphere) {
@@ -231,18 +146,11 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
         probes.push_back(std::move(probe).value());
     }
     Scene scene{device,
-                world,
+                planet,
                 jobs,
                 calendar,
-                std::move(terrain).value(),
                 std::move(ocean).value(),
-                std::move(grass).value(),
-                std::move(bushes).value(),
-                std::move(trees).value(),
-                std::move(forest).value(),
-                std::move(pool).value(),
-                std::move(anchors).value(),
-                std::move(bush_pool).value(),
+                std::move(blocks).value(),
                 std::move(atmosphere).value(),
                 std::move(sky).value(),
                 std::move(others).value(),
@@ -252,84 +160,41 @@ Result<Scene> Scene::create(render::Device& device, const planet::World& world,
                 std::move(glare).value(),
                 std::move(timer).value(),
                 std::move(companion),
-                frames,
-                budget};
+                frames};
     scene.probes_ = std::move(probes);
-    auto rivers = render::RiverSurface::create(device, colour_format, depth_format, frames);
-    if (!rivers) {
-        return failed("draw rivers", rivers.error());
-    }
-    scene.rivers_ = std::move(rivers).value();
-    auto blocks =
-        render::Blocks::create(device, colour_format, depth_format, block_tiles(), frames);
-    if (!blocks) {
-        return failed("draw blocks", blocks.error());
-    }
-    scene.blocks_ = std::move(blocks).value();
     return scene;
 }
 
-Scene::Scene(const render::Device& device, const planet::World& world, jobs::JobSystem& jobs,
-             const sim::Calendar& calendar, render::Terrain terrain, render::Ocean ocean,
-             render::Grass grass, render::Bushes bushes, render::Trees trees, render::Forest forest,
-             render::TerrainPool pool, render::AnchorPool anchors, render::AnchorPool bush_pool,
+Scene::Scene(const render::Device& device, const globe::Planet& planet, jobs::JobSystem& jobs,
+             const sim::Calendar& calendar, render::Ocean ocean, render::Blocks blocks,
              render::Atmosphere atmosphere, render::Sky sky, render::Capsules others,
              render::WeatherMaps weather, render::Clouds clouds,
              render::Precipitation precipitation, render::Glare glare, render::GpuTimer timer,
-             std::optional<render::Billboard> companion, std::uint32_t frames,
-             const GrassBudget& budget)
-    : world_{&world}, jobs_{&jobs}, baker_{world, jobs}, terrain_{std::move(terrain)},
-      ocean_{std::move(ocean)}, shore_{world, world.geology().planet_radius(), jobs},
-      river_stream_{world, world.geology().planet_radius(), jobs},
-      block_stream_{world, world.geology().planet_radius(), jobs},
-      wave_trains_{waves::planet_trains(hash_combine(world.geology().seed(), waves_salt))},
-      grass_{std::move(grass)}, bushes_{std::move(bushes)}, trees_{std::move(trees)},
-      forest_{std::move(forest)}, pool_{std::move(pool)}, anchor_pool_{std::move(anchors)},
-      anchors_{biome_palette(), &jobs}, bush_pool_{std::move(bush_pool)},
-      bush_anchors_{biome_palette(), &jobs}, transients_{device, frames},
-      others_{std::move(others)}, companion_{std::move(companion)},
+             std::optional<render::Billboard> companion, std::uint32_t frames)
+    : jobs_{&jobs}, ocean_{std::move(ocean)}, blocks_{std::move(blocks)},
+      wave_trains_{waves::planet_trains(hash_combine(planet.seed, waves_salt))},
+      transients_{device, frames}, others_{std::move(others)}, companion_{std::move(companion)},
       atmosphere_{std::move(atmosphere)}, sky_{std::move(sky)}, weather_{std::move(weather)},
       clouds_{std::move(clouds)}, precipitation_{std::move(precipitation)},
       glare_{std::move(glare)}, timer_{std::move(timer)}, calendar_{calendar},
-      ephemeris_{planet::System{}, calendar.day_length(), calendar.axial_tilt()}, budget_{budget},
-      selection_{ground_selection(budget)} {}
+      ephemeris_{planet::System{}, calendar.day_length(), calendar.axial_tilt()} {}
 
 Scene::~Scene() {
-    (void)baker_.finish();
-    (void)shore_.finish();
-    (void)river_stream_.finish();
-    (void)block_stream_.finish();
+    if (globe_) {
+        (void)globe_->finish();
+    }
 }
 
 void Scene::finish_bakes() {
-    anchors_.finish();
-    bush_anchors_.finish();
-    for (terrain::Patch& patch : baker_.finish()) {
-        stream_.baked(std::move(patch));
-    }
-    if (auto depths = shore_.finish()) {
-        shore_depths_ = std::move(depths);
-    }
-    if (auto water = river_stream_.finish(); water && rivers_) {
-        rivers_->show(std::make_shared<const terrain::RiverWater>(std::move(water).value()));
-    }
-    if (auto mesh = block_stream_.finish(); mesh && blocks_ && !globe_) {
-        blocks_->show(std::make_shared<const terrain::BlockMesh>(std::move(mesh).value()));
-    }
-    if (globe_) {
-        show_globe(globe_->finish());
-    }
+    finish_globe();
 }
 
 void Scene::show_globe(GlobeStream::Changes changes) {
-    if (!blocks_) {
-        return;
-    }
     for (auto& [key, mesh] : changes.shown) {
-        blocks_->place(key, std::move(mesh));
+        blocks_.place(key, std::move(mesh));
     }
     for (const std::uint64_t key : changes.gone) {
-        blocks_->remove(key);
+        blocks_.remove(key);
     }
 }
 
@@ -352,20 +217,6 @@ void Scene::change_globe(std::span<const globe::BrickSite> bricks) {
     }
 }
 
-void Scene::fare(const protocol::Woodlands& told) {
-    const std::vector<planet::CellId> changed = woodlands_.receive(told);
-    if (changed.empty()) {
-        return;
-    }
-    anchors_.fare(woodlands_.fates(), changed);
-    bush_anchors_.fare(woodlands_.fates(), changed);
-    // Bakes in flight read the fates they started with, and are dropped as stale on arrival.
-    baker_.fates(woodlands_.fates());
-    for (const planet::CellId cell : changed) {
-        stream_.changed(cell);
-    }
-}
-
 render::SkyView Scene::sky_view(const Shot& shot, render::CloudShade shade) {
     const DVec3 sun = calendar_.sun_direction(shot.time);
     const EyeLight light =
@@ -382,126 +233,12 @@ render::SkyView Scene::sky_view(const Shot& shot, render::CloudShade shade) {
             .daylight = daylight_at(calendar_, shot.time, shot.bend.up)};
 }
 
-bool Scene::grow_grass(render::RenderGraph& graph, const render::Frame& frame, const Shot& shot,
-                       std::span<const terrain::StreamedPatch> patches,
-                       const render::AirBindings& air, DVec3 wind) {
-    HOG_ZONE("grass");
-    const std::vector<render::GrassDraw> lawn =
-        grass_draws(slots_, patches, shot.camera.eye, shot.bend.radius, budget_);
-    if (lawn.empty()) {
-        return false;
-    }
-    graph.add({.name = "grass grown", .uses = {}, .targets = std::nullopt},
-              [&, lawn, wind](VkCommandBuffer commands) {
-                  grass_.grow(commands, frame.extent, pool_, lawn,
-                              {.camera = shot.camera,
-                               .bend = shot.bend,
-                               .air = air,
-                               .wind = wind,
-                               .seconds = swaying_for_,
-                               .sea = ocean_.bindings(frame.slot)});
-              });
-    return true;
-}
-
-void Scene::grow_vegetation(render::RenderGraph& graph, const render::Frame& frame,
-                            const Shot& shot, bool lawn,
-                            std::span<const render::GraphUse> through_air,
-                            const render::GraphTargets& drawn, const render::AirBindings& air,
-                            DVec3 wind) {
-    HOG_ZONE("vegetation");
-    if (lawn) {
-        graph.add(
-            {.name = "grass", .uses = {through_air.begin(), through_air.end()}, .targets = drawn},
-            [&, wind](VkCommandBuffer commands) {
-                grass_.draw(commands, frame.extent,
-                            {.camera = shot.camera,
-                             .bend = shot.bend,
-                             .air = air,
-                             .wind = wind,
-                             .seconds = swaying_for_});
-            });
-    }
-    const Sight sight =
-        sight_of(shot.camera, static_cast<double>(frame.extent.width) /
-                                  static_cast<double>(std::max(frame.extent.height, 1U)));
-    const std::vector<render::StandDraw> shrubs = bush_anchors_.draws(sight, budget_.bush_far);
-    if (!shrubs.empty()) {
-        graph.add(
-            {.name = "bushes", .uses = {through_air.begin(), through_air.end()}, .targets = drawn},
-            [&, shrubs, wind](VkCommandBuffer commands) {
-                bushes_.draw(commands, frame.extent, bush_pool_, shrubs,
-                             {.camera = shot.camera,
-                              .bend = shot.bend,
-                              .air = air,
-                              .wind = wind,
-                              .seconds = swaying_for_});
-            });
-    }
-    // Both tree tiers draw from the same anchored stands: the stamps over whole tiles, holding off
-    // where the grown forest covers, and the grown trees over the near blocks alone.
-    const std::vector<render::StandDraw> stands = anchors_.draws(sight);
-    if (!stands.empty()) {
-        graph.add(
-            {.name = "trees", .uses = {through_air.begin(), through_air.end()}, .targets = drawn},
-            [&, stands, wind](VkCommandBuffer commands) {
-                trees_.draw(commands, frame.extent, anchor_pool_, stands,
-                            {.camera = shot.camera,
-                             .bend = shot.bend,
-                             .air = air,
-                             .wind = wind,
-                             .seconds = swaying_for_});
-            });
-    }
-    const std::vector<render::StandDraw> woods = anchors_.forest_draws(sight, budget_);
-    tree_counts_ = {
-        .tiles = anchors_.size(), .stamped = anchors_in(stands), .grown = anchors_in(woods)};
-    if (!woods.empty()) {
-        graph.add(
-            {.name = "forest", .uses = {through_air.begin(), through_air.end()}, .targets = drawn},
-            [&, woods, wind](VkCommandBuffer commands) {
-                forest_.draw(commands, frame.extent, anchor_pool_, woods,
-                             {.camera = shot.camera,
-                              .bend = shot.bend,
-                              .air = air,
-                              .wind = wind,
-                              .seconds = swaying_for_});
-            });
-    }
-}
-
-void Scene::follow_shore(const Shot& shot) {
-    HOG_ZONE("shore");
-    shore_.follow(glm::normalize(shot.camera.eye.metres()));
-    if (auto depths = shore_.collect()) {
-        shore_depths_ = std::move(depths);
-    }
-    river_stream_.follow(glm::normalize(shot.camera.eye.metres()));
-    if (auto water = river_stream_.collect(); water && rivers_) {
-        rivers_->show(std::make_shared<const terrain::RiverWater>(std::move(water).value()));
-    }
-    if (blocks_on_ && !globe_) {
-        block_stream_.follow(glm::normalize(shot.camera.eye.metres()));
-    }
-    if (auto mesh = block_stream_.collect(); mesh && blocks_ && !globe_) {
-        blocks_->show(std::make_shared<const terrain::BlockMesh>(std::move(mesh).value()));
-    }
+void Scene::follow_ground(const Shot& shot) {
+    HOG_ZONE("ground");
     if (globe_) {
         globe_->follow(shot.camera.eye.metres());
         show_globe(globe_->collect());
     }
-}
-
-Result<> Scene::give_shore(VkCommandBuffer commands, std::uint32_t slot) {
-    if (!shore_depths_) {
-        return {};
-    }
-    const terrain::ShoreDepths& depths = shore_depths_.value();
-    if (auto updated = ocean_.update_shore(commands, slot, depths); !updated) {
-        return updated;
-    }
-    shore_depths_.reset();
-    return {};
 }
 
 namespace {
@@ -559,13 +296,10 @@ std::optional<render::SeaBehind> seen_behind(const render::RenderGraph& graph,
 
 } // namespace
 
-void Scene::add_water(render::RenderGraph& graph, const render::Frame& frame, const Shot& shot,
+void Scene::add_water(render::RenderGraph& graph, const render::Frame& frame,
                       const render::OceanView& sea, std::span<const render::GraphUse> through_air,
                       render::GraphImage target, render::GraphImage depth,
-                      const render::GraphTargets& drawn, const render::AirBindings& air) {
-    if (blocks_on_) {
-        return;
-    }
+                      const render::GraphTargets& drawn) {
     VkImageView environment = probing_ ? probes_.at(frame.slot).cube().view() : VK_NULL_HANDLE;
     std::vector<render::GraphUse> sea_uses{through_air.begin(), through_air.end()};
     const std::optional<SeaCopies> behind = copy_behind_sea(graph, target, depth, frame, sea_uses);
@@ -575,45 +309,22 @@ void Scene::add_water(render::RenderGraph& graph, const render::Frame& frame, co
                   looking.behind = seen_behind(graph, behind, environment);
                   return ocean_.draw(commands, frame.extent, looking, frame.slot);
               });
-    graph.add({.name = "rivers", .uses = sea_uses, .targets = drawn},
-              [&, behind](VkCommandBuffer commands) {
-                  return rivers_->draw(
-                      commands, frame.extent,
-                      {.camera = shot.camera,
-                       .sun = sea.sun,
-                       .bend = shot.bend,
-                       .air = air,
-                       .behind = seen_behind(graph, behind, VK_NULL_HANDLE),
-                       .time = std::chrono::duration<double>(shot.time.time_since_epoch()).count()},
-                      frame.slot);
-              });
 }
 
 void Scene::add_ground(render::RenderGraph& graph, const render::Frame& frame, const Shot& shot,
-                       const render::OceanView& sea,
-                       std::span<const terrain::StreamedPatch> patches,
-                       std::span<const render::GraphUse> through_air,
-                       const render::GraphTargets& drawn, const render::AirBindings& air) {
-    render::GraphPass pass{
-        .name = "ground", .uses = {through_air.begin(), through_air.end()}, .targets = drawn};
-    if (blocks_on_) {
-        graph.add(std::move(pass), [&](VkCommandBuffer commands) {
-            return blocks_->draw(commands, frame.extent,
-                                 {.camera = shot.camera, .sun = sea.sun, .bend = shot.bend},
-                                 frame.slot);
+                       const render::OceanView& sea, std::span<const render::GraphUse> through_air,
+                       const render::GraphTargets& drawn) {
+    graph.add(
+        {.name = "ground", .uses = {through_air.begin(), through_air.end()}, .targets = drawn},
+        [&](VkCommandBuffer commands) {
+            Result<> deep = draw_deep(ocean_, commands, frame, sea);
+            if (!deep) {
+                return deep;
+            }
+            return blocks_.draw(commands, frame.extent,
+                                {.camera = shot.camera, .sun = sea.sun, .bend = shot.bend},
+                                frame.slot);
         });
-        return;
-    }
-    graph.add(std::move(pass), [&, patches](VkCommandBuffer commands) {
-        Result<> deep = draw_deep(ocean_, commands, frame, sea);
-        terrain_.draw(commands, frame.extent, pool_, slots_.draws(patches),
-                      {.camera = shot.camera,
-                       .sun = sea.sun,
-                       .bend = shot.bend,
-                       .air = air,
-                       .sea = ocean_.bindings(frame.slot)});
-        return deep;
-    });
 }
 
 bool Scene::settled() const {
@@ -624,8 +335,7 @@ bool Scene::settled() const {
 }
 
 bool Scene::take_probe(render::RenderGraph& graph, const render::Frame& frame, const Shot& shot,
-                       const render::SkyView& sky, std::span<const render::GraphUse> through_air,
-                       const render::AirBindings& air) {
+                       const render::SkyView& sky, std::span<const render::GraphUse> through_air) {
     const std::optional<double> above = sky_.eye_above_water(frame.slot);
     if (!above || *above >= 0.0) {
         return false;
@@ -634,81 +344,22 @@ bool Scene::take_probe(render::RenderGraph& graph, const render::Frame& frame, c
     render::SkyView high = sky;
     high.camera.eye += shot.bend.up * raised;
     high.bend.eye_height += raised;
-    if (!probe_from_ ||
-        glm::distance(probe_from_->metres(), high.camera.eye.metres()) > probe_reselect) {
-        const terrain::Viewpoint from{.eye = high.camera.eye,
-                                      .forward = high.camera.forward,
-                                      .up = high.camera.up,
-                                      .vertical_fov = std::numbers::pi / 2.0,
-                                      .aspect = 1.0,
-                                      .viewport_height = render::EnvironmentProbe::default_size,
-                                      .bend = high.bend};
-        probe_selected_ = terrain::select_patches(from, from.bend.radius, {.only_in_view = false},
-                                                  stream_.known_ground(), jobs_);
-        probe_from_ = high.camera.eye;
-    }
     graph.add({.name = "probe",
                .uses = {through_air.begin(), through_air.end()},
                .targets = std::nullopt},
-              [this, slot = frame.slot, high, air,
-               ground = slots_.draws(stream_.drawn_all_round(probe_selected_))](
-                  VkCommandBuffer commands) {
-                  probes_.at(slot).record(commands, slot, atmosphere_, sky_, terrain_, pool_,
-                                          {.sky = high,
-                                           .terrain = {.camera = high.camera,
-                                                       .sun = high.sun,
-                                                       .bend = high.bend,
-                                                       .air = air,
-                                                       .sea = ocean_.bindings(slot)},
-                                           .ground = ground});
+              [this, slot = frame.slot, high](VkCommandBuffer commands) {
+                  probes_.at(slot).record(commands, slot, atmosphere_, sky_, {.sky = high});
               });
     return true;
-}
-
-terrain::StreamFrame Scene::stream_ground(const terrain::Viewpoint& seen) {
-    for (terrain::Patch& patch : baker_.collect()) {
-        stream_.baked(std::move(patch));
-    }
-    // All round the eye, so the ground is baked before it's turned to. Settled, the same view
-    // selects the same again.
-    if (!stream_.settled() || seen != selected_from_) {
-        selected_ = terrain::select_patches(seen, seen.bend.radius, selection_,
-                                            stream_.known_ground(), jobs_);
-        selected_from_ = seen;
-    }
-    terrain::StreamFrame streamed = stream_.update(selected_);
-    for (const planet::CellId cell : streamed.bakes) {
-        baker_.start(cell);
-    }
-    return streamed;
 }
 
 Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     HOG_ZONE("scene");
     const std::span<const render::GpuSpan> timed = timer_.read(frame.commands, frame.slot);
     timings_.assign(timed.begin(), timed.end());
-    terrain::Viewpoint seen = viewpoint(shot.camera, frame.extent);
-    seen.bend = shot.bend;
-    const terrain::StreamFrame streamed = stream_ground(seen);
-    // The ground into its slots, and the anchored trees and bushes round the eye, a few tiles a
-    // frame.
-    if (auto taken = slots_.take(pool_, frame.slot, streamed)
-                         .and_then([&] {
-                             return anchors_.update(anchor_pool_, frame.slot, *world_,
-                                                    shot.camera.eye, budget_.tree_far);
-                         })
-                         .and_then([&] {
-                             return bush_anchors_.update(bush_pool_, frame.slot, *world_,
-                                                         shot.camera.eye, budget_.bush_far);
-                         });
-        !taken) {
-        return taken;
-    }
-    follow_shore(shot);
-    settled_ = streamed.bakes.empty() && streamed.arrived.empty() && streamed.evicted.empty() &&
-               baker_.in_flight() == 0 && anchors_.settled() && bush_anchors_.settled() &&
-               !shore_.in_flight() && !shore_depths_ && !river_stream_.in_flight() &&
-               !block_stream_.in_flight() && !(globe_ && globe_->in_flight());
+    follow_ground(shot);
+    settled_ = !(globe_ && globe_->in_flight());
+
     const protocol::CellWeather here = weather_at_eye(shot);
     const DVec3 sun = calendar_.sun_direction(shot.time);
     const double sun_mu = glm::dot(sun, shot.bend.up);
@@ -720,7 +371,6 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     drifted_ = render::within_period(drifted_ + (drift * shot.seconds));
     gusts_.blow(shot.camera.eye, drift * surface_wind, shot.bend.up, shot.seconds);
     falling_for_ += shot.seconds;
-    swaying_for_ += shot.seconds;
     const bool new_weather = shot.forecast != nullptr && shot.forecast->known() &&
                              weather_taken_ != shot.forecast->received();
     const bool cloudy = shot.forecast != nullptr && shot.forecast->known();
@@ -784,22 +434,15 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     graph.add({.name = "uploads", .uses = {}, .targets = std::nullopt},
               [&](VkCommandBuffer commands) -> Result<> {
                   if (new_weather) {
-                      if (auto updated = weather_.update(
-                              commands, frame.slot,
-                              std::as_bytes(std::span{shot.forecast->before()}),
-                              std::as_bytes(std::span{shot.forecast->after()}),
-                              std::as_bytes(std::span{shot.forecast->sky_before()}),
-                              std::as_bytes(std::span{shot.forecast->sky_after()}),
-                              std::as_bytes(std::span{shot.forecast->drift_before()}),
-                              std::as_bytes(std::span{shot.forecast->drift_after()}));
-                          !updated) {
-                          return updated;
-                      }
+                      return weather_.update(
+                          commands, frame.slot, std::as_bytes(std::span{shot.forecast->before()}),
+                          std::as_bytes(std::span{shot.forecast->after()}),
+                          std::as_bytes(std::span{shot.forecast->sky_before()}),
+                          std::as_bytes(std::span{shot.forecast->sky_after()}),
+                          std::as_bytes(std::span{shot.forecast->drift_before()}),
+                          std::as_bytes(std::span{shot.forecast->drift_after()}));
                   }
-                  return give_shore(commands, frame.slot)
-                      .and_then([&] { return pool_.record_uploads(commands, frame.slot); })
-                      .and_then([&] { return anchor_pool_.record_uploads(commands, frame.slot); })
-                      .and_then([&] { return bush_pool_.record_uploads(commands, frame.slot); });
+                  return {};
               });
     if (shadow) {
         graph.add({.name = "cloud shadow",
@@ -826,6 +469,7 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
               [&](VkCommandBuffer commands) {
                   sky_.draw(commands, frame.extent, frame.slot, atmosphere_, sky);
               });
+
     const waves::SeaState sea_state = sea_at_eye(shot);
     foam_drifted_ += waves::foam_drift(sea_state) * shot.seconds;
     const std::vector<waves::Wave> waves = waves::waves_at(wave_trains_, shot.bend.up, sea_state);
@@ -853,14 +497,8 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
               [&](VkCommandBuffer commands) {
                   return ocean_.lay_water(commands, sea, frame.slot, frame.copyable);
               });
-    const bool growing = this->growing();
-    const bool lawn =
-        growing && grow_grass(graph, frame, shot, streamed.drawn, through, drift * surface_wind);
-    add_ground(graph, frame, shot, sea, streamed.drawn, through_air, drawn, through);
-    if (growing) {
-        grow_vegetation(graph, frame, shot, lawn, through_air, drawn, through,
-                        drift * surface_wind);
-    }
+
+    add_ground(graph, frame, shot, sea, through_air, drawn);
     if (!shot.others.empty()) {
         graph.add({.name = "others", .uses = through_air, .targets = drawn},
                   [&](VkCommandBuffer commands) {
@@ -881,9 +519,9 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     }
     // Over all that stands in the sea, each seen through the water to its surface, as copied;
     // and from under it, what's out of it all round.
-    probing_ = take_probe(graph, frame, shot, sky, through_air, through);
+    probing_ = take_probe(graph, frame, shot, sky, through_air);
     last_slot_ = frame.slot;
-    add_water(graph, frame, shot, sea, through_air, target, depth, drawn, through);
+    add_water(graph, frame, sea, through_air, target, depth, drawn);
     if (render::precipitation_count(falling, static_cast<double>(here.snow)) > 0) {
         graph.add({.name = "rain", .uses = through_air, .targets = drawn},
                   [&](VkCommandBuffer commands) {

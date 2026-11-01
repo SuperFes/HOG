@@ -22,7 +22,6 @@ TEST_CASE("client options default to the development planet", "[client][options]
     const auto options = parse_options({});
     REQUIRE(options);
     CHECK(options->planet == "config/planet.toml");
-    CHECK_FALSE(options->graphics);
     CHECK_FALSE(options->start);
     CHECK_FALSE(options->time_of_day);
     CHECK(options->threads == 0);
@@ -34,7 +33,6 @@ TEST_CASE("client options default to the development planet", "[client][options]
     CHECK_FALSE(options->capture);
     CHECK_FALSE(options->timings);
     CHECK(options->chat_filter);
-    CHECK(options->grass);
     CHECK(options->clouds == hog::render::CloudQuality::High);
     CHECK_FALSE(options->software);
     CHECK(options->validate == hog::debug_build);
@@ -117,28 +115,6 @@ TEST_CASE("a client can be told to show chat as it was said", "[client][options]
     const auto options = parse_options(Arguments{"--chat-filter", "--no-chat-filter"});
     REQUIRE(options);
     CHECK_FALSE(options->chat_filter);
-}
-
-TEST_CASE("a client can be given what to draw", "[client][options]") {
-    const auto options = parse_options(Arguments{"--graphics", "fast.toml"});
-    REQUIRE(options);
-    CHECK(options->graphics == "fast.toml");
-}
-
-TEST_CASE("a client can be told not to grow grass", "[client][options]") {
-    const auto options = parse_options(Arguments{"--grass", "--no-grass"});
-    REQUIRE(options);
-    CHECK_FALSE(options->grass);
-}
-
-TEST_CASE("a client can be told to draw the ground as blocks", "[client][options]") {
-    CHECK_FALSE(parse_options(Arguments{})->blocks);
-    const auto options = parse_options(Arguments{"--blocks"});
-    REQUIRE(options);
-    CHECK(options->blocks);
-    const auto undone = parse_options(Arguments{"--blocks", "--no-blocks"});
-    REQUIRE(undone);
-    CHECK_FALSE(undone->blocks);
 }
 
 TEST_CASE("a client can be told to draw the planet as curved as it is", "[client][options]") {

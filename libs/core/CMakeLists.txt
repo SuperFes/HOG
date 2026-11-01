@@ -1,10 +1,19 @@
 configure_file(version.hpp.in "${CMAKE_CURRENT_BINARY_DIR}/include/hog/core/version.hpp" @ONLY)
 
+# The PNG encoder's implementation, compiled once in C without HOG's warnings; public domain.
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/stb_image_write.c"
+    "#define STB_IMAGE_WRITE_IMPLEMENTATION\n#include <stb_image_write.h>\n")
+add_library(stb_image_write STATIC "${CMAKE_CURRENT_BINARY_DIR}/stb_image_write.c")
+target_include_directories(stb_image_write SYSTEM PUBLIC "${stb_SOURCE_DIR}")
+# Writes through callbacks only, so stdio's file functions are never needed.
+target_compile_definitions(stb_image_write PUBLIC STBI_WRITE_NO_STDIO)
+
 add_library(hog_core
     src/assert.cpp
     src/build_info.cpp
     src/bytes.cpp
     src/hash.cpp
+    src/image.cpp
     src/line_sink.cpp
     src/log.cpp
     src/metrics.cpp
@@ -17,6 +26,7 @@ target_include_directories(hog_core PUBLIC
     "${CMAKE_CURRENT_BINARY_DIR}/include")
 target_compile_definitions(hog_core PRIVATE HOG_BUILD_CONFIG="$<IF:$<CONFIG:>,unspecified,$<CONFIG>>")
 target_include_directories(hog_core SYSTEM PRIVATE "${xxHash_SOURCE_DIR}")
+target_link_libraries(hog_core PRIVATE stb_image_write)
 target_include_directories(hog_core SYSTEM PUBLIC "${glm_SOURCE_DIR}")
 target_compile_definitions(hog_core PUBLIC
     GLM_FORCE_DEPTH_ZERO_TO_ONE

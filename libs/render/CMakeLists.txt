@@ -32,7 +32,6 @@ CPMAddPackage(
 include(HogShaders)
 
 add_library(hog_render
-    src/anchors.cpp
     src/atmosphere.cpp
     src/barrier.cpp
     src/billboard.cpp
@@ -46,13 +45,9 @@ add_library(hog_render
     src/drifting_grid.cpp
     src/environment_probe.cpp
     src/foam.cpp
-    src/forest.cpp
     src/glare.cpp
     src/gusts.cpp
     src/gpu_timer.cpp
-    src/bushes.cpp
-    src/grass.cpp
-    src/grass_lattice.cpp
     src/globe.cpp
     src/memory.cpp
     src/ocean.cpp
@@ -64,14 +59,11 @@ add_library(hog_render
     src/render_graph.cpp
     src/rendering.cpp
     src/ripples.cpp
-    src/rivers.cpp
     src/sampler.cpp
     src/shader_watch.cpp
     src/sky.cpp
     src/streamed_image.cpp
     src/swapchain.cpp
-    src/terrain.cpp
-    src/trees.cpp
     src/vma.cpp
     src/vulkan.cpp
     src/weather_maps.cpp)
@@ -89,8 +81,7 @@ target_link_libraries(hog_render
     PUBLIC hog::atmosphere hog::core hog::flora hog::terrain hog::waves volk::volk
     PRIVATE hog::planet vk-bootstrap::vk-bootstrap)
 hog_target_defaults(hog_render)
-hog_add_shaders(hog_render CATALOGUE shaders/aerial.slang shaders/air_tables.slang shaders/billboard.slang shaders/blocks.slang shaders/bushes.slang shaders/capsules.slang shaders/cloud_march.slang shaders/cloud_resolve.slang shaders/clouds.slang shaders/foam.slang shaders/forest.slang shaders/glare.slang shaders/globe.slang shaders/grass.slang shaders/ocean.slang shaders/precipitation.slang shaders/rain_rings.slang shaders/ripples.slang shaders/river.slang shaders/sea_laid.slang shaders/sky.slang shaders/sky_view.slang
-                shaders/terrain.slang shaders/trees.slang)
+hog_add_shaders(hog_render CATALOGUE shaders/aerial.slang shaders/air_tables.slang shaders/billboard.slang shaders/blocks.slang shaders/capsules.slang shaders/cloud_march.slang shaders/cloud_resolve.slang shaders/clouds.slang shaders/foam.slang shaders/glare.slang shaders/globe.slang shaders/grass.slang shaders/ocean.slang shaders/precipitation.slang shaders/rain_rings.slang shaders/ripples.slang shaders/sea_laid.slang shaders/sky.slang shaders/sky_view.slang)
 
 # A test device, for tests here and elsewhere that draw.
 add_library(hog_render_testing INTERFACE)
@@ -117,13 +108,9 @@ hog_add_tests(hog_render
     tests/drifting_grid_tests.cpp
     tests/environment_tests.cpp
     tests/foam_tests.cpp
-    tests/forest_tests.cpp
     tests/glare_tests.cpp
     tests/gpu_timer_tests.cpp
     tests/gusts_tests.cpp
-    tests/bush_tests.cpp
-    tests/grass_tests.cpp
-    tests/grass_lattice_tests.cpp
     tests/globe_tests.cpp
     tests/ocean_tests.cpp
     tests/orbit_tests.cpp
@@ -132,16 +119,13 @@ hog_add_tests(hog_render
     tests/presenter_tests.cpp
     tests/render_graph_tests.cpp
     tests/ripples_tests.cpp
-    tests/rivers_tests.cpp
     tests/shader_watch_tests.cpp
     tests/sky_tests.cpp
     tests/streamed_image_tests.cpp
-    tests/swapchain_tests.cpp
-    tests/terrain_tests.cpp
-    tests/tree_tests.cpp)
+    tests/swapchain_tests.cpp)
 if(TARGET hog_render_tests)
     target_link_libraries(hog_render_tests PRIVATE hog::flora hog::planet)
-    hog_add_shaders(hog_render_tests tests/shaders/aerial_probe.slang tests/shaders/air_probe.slang tests/shaders/bend_probe.slang tests/shaders/cube_probe.slang tests/shaders/dispatch.slang tests/shaders/fill.slang tests/shaders/foam_probe.slang tests/shaders/grass_lattice_probe.slang tests/shaders/gusts_probe.slang tests/shaders/layer.slang tests/shaders/optics_probe.slang tests/shaders/projection_probe.slang tests/shaders/shore_probe.slang tests/shaders/volume_probe.slang tests/shaders/water_probe.slang tests/shaders/waves_probe.slang
+    hog_add_shaders(hog_render_tests tests/shaders/aerial_probe.slang tests/shaders/air_probe.slang tests/shaders/bend_probe.slang tests/shaders/cube_probe.slang tests/shaders/dispatch.slang tests/shaders/fill.slang tests/shaders/foam_probe.slang tests/shaders/gusts_probe.slang tests/shaders/layer.slang tests/shaders/optics_probe.slang tests/shaders/projection_probe.slang tests/shaders/shore_probe.slang tests/shaders/volume_probe.slang tests/shaders/water_probe.slang tests/shaders/waves_probe.slang
                     tests/shaders/triangle.slang)
     target_link_libraries(hog_render_tests PRIVATE hog::render_testing)
 endif()

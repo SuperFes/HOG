@@ -1,5 +1,4 @@
 #include <hog/flora/season.hpp>
-#include <hog/flora/stand.hpp>
 
 #include <algorithm>
 
@@ -22,6 +21,24 @@ Leaves autumn(const Leafing& leafing, float own, float hours) noexcept {
     return {.turned = saturated(dark / (colouring * leafing.fall)),
             .held =
                 1.0F - saturated((dark - (dropping * leafing.fall)) / (colouring * leafing.fall))};
+}
+
+} // namespace
+
+namespace {
+
+// The dice a hash rolls, the same from every machine.
+std::uint32_t hashed(std::uint32_t at) noexcept {
+    at ^= at >> 16U;
+    at *= 0x7feb352dU;
+    at ^= at >> 15U;
+    at *= 0x846ca68bU;
+    at ^= at >> 16U;
+    return at;
+}
+
+float unit(std::uint32_t at) noexcept {
+    return static_cast<float>(hashed(at) & 0xffffU) / 65536.0F;
 }
 
 } // namespace

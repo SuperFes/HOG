@@ -1,5 +1,4 @@
 #include <hog/client/globe_view.hpp>
-#include <hog/client/ground.hpp>
 #include <hog/core/assert.hpp>
 #include <hog/core/log.hpp>
 
@@ -11,6 +10,7 @@
 #include <optional>
 #include <ranges>
 #include <set>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -137,11 +137,7 @@ std::array<terrain::Look, globe::material_count> globe_looks() {
 
 std::vector<terrain::MaterialImage> block_tiles() {
     std::vector<terrain::MaterialImage> tiles;
-    tiles.reserve(globe_first_tile + globe::material_count);
-    for (std::size_t material = 0; material < planet::material_count; ++material) {
-        const DVec3 colour{terrain::block_colour(static_cast<planet::Material>(material))};
-        tiles.push_back(terrain::material_image({.colour = colour}, material_size));
-    }
+    tiles.reserve(globe::material_count);
     for (const terrain::Look& look : globe_looks()) {
         tiles.push_back(terrain::material_image(look, material_size));
     }
@@ -152,14 +148,24 @@ terrain::BlockMesh globe_blocks(const globe::SurfaceMesh& mesh) {
     terrain::BlockMesh blocks{.origin = WorldPosition{mesh.origin}, .vertices = {}, .indices = {}};
     blocks.vertices.reserve(mesh.vertices.size());
     for (const globe::SurfaceVertex& vertex : mesh.vertices) {
-        const auto tile = static_cast<std::uint8_t>(globe_first_tile +
-                                                    static_cast<std::uint8_t>(vertex.material));
+        const auto tile = static_cast<std::uint8_t>(vertex.material);
         blocks.vertices.push_back({.position = vertex.position,
                                    .normal = vertex.normal,
                                    .tiles = {tile, tile, tile},
                                    .corner = 0});
     }
-    blocks.indices = mesh.indices;
+    blocks.indices.reserve(mesh.indices.size());
+    for (std::size_t corner = 0; corner + 2 < mesh.indices.size(); corner += 3) {
+        const bool liquid = std::ranges::all_of(
+            std::span{mesh.indices}.subspan(corner, 3), [&](std::uint32_t index) {
+                return mesh.vertices[index].material == globe::Material::Water;
+            });
+        if (!liquid) {
+            blocks.indices.insert(blocks.indices.end(),
+                                  mesh.indices.begin() + static_cast<std::ptrdiff_t>(corner),
+                                  mesh.indices.begin() + static_cast<std::ptrdiff_t>(corner + 3));
+        }
+    }
     terrain::mix_corners(blocks);
     return blocks;
 }
@@ -266,12 +272,12 @@ void GlobeStream::changed(globe::BrickSite brick) {
             }
         }
     }
+    // Left for the next collect() to start, so the bricks of one change can all be told first.
     for (const globe::Cell chunk : again) {
         if (std::ranges::find(queue_, chunk) == queue_.end()) {
             queue_.push_back(chunk);
         }
     }
-    start_more();
 }
 
 bool GlobeStream::in_flight() const noexcept {

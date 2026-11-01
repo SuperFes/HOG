@@ -30,13 +30,11 @@ struct Place {
 
 struct Options {
     std::filesystem::path planet = "config/planet.toml";
-    // What this machine draws; config/graphics.toml without one, or the defaults if there's none.
-    std::optional<std::filesystem::path> graphics;
     // Over latitude 0, longitude 0 without one.
     std::optional<Place> start;
     // The local time of day to start at, from 0 at midnight to 1; the planet's own without one.
     std::optional<double> time_of_day;
-    std::uint32_t threads = 0; // baking the ground, 0 for one per hardware thread
+    std::uint32_t threads = 0; // meshing the ground, 0 for one per hardware thread
     // A server's IP address and port to connect to; alone without one.
     std::optional<std::string> connect;
     // A login service's IP address and port, and the name to log in with, for a connect token
@@ -55,12 +53,8 @@ struct Options {
     // Cussing in chat shown as grawlix; each player chooses for their own screen. Hate speech
     // reads as small talk whatever this says.
     bool chat_filter = true;
-    // Grass grown on the ground near the eye.
-    bool grass = true;
-    // Draws the ground as the volume's blocks.
-    bool blocks = false;
-    // Draws the voxel world in place of the ground, as blocks, of a preset or a planet file.
-    bool globe = false;
+    // The voxel world drawn, of a preset or a planet file; Earth-like at the planet's seed and
+    // size without one, as the server has it.
     std::optional<std::string> globe_planet;
     // The ground near the eye drawn curving like Earth's, not as tightly as the planet truly does.
     bool bend = true;

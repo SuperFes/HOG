@@ -136,14 +136,4 @@ WorldPosition companion_feet(const Flight& flight, double ahead, double below, d
     return WorldPosition{companion_direction(flight, ahead) * (planet_radius + height)};
 }
 
-terrain::Viewpoint viewpoint(const render::Camera& camera, VkExtent2D extent) {
-    const auto height = static_cast<double>(std::max(extent.height, 1U));
-    return {.eye = camera.eye,
-            .forward = camera.forward,
-            .up = camera.up,
-            .vertical_fov = camera.vertical_fov,
-            .aspect = static_cast<double>(extent.width) / height,
-            .viewport_height = height};
-}
-
 } // namespace hog::client

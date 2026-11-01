@@ -2,7 +2,7 @@ add_library(hog_stills src/stills.cpp)
 add_library(hog::stills ALIAS hog_stills)
 
 target_include_directories(hog_stills PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-# stb_image_write comes from tools/mapgen, added first.
+# stb_image_write comes from libs/core, added first.
 target_link_libraries(hog_stills PUBLIC hog::globe PRIVATE stb_image_write)
 hog_target_defaults(hog_stills)
 

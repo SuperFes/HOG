@@ -1,13 +1,10 @@
 #include "test_planet.hpp"
 
 #include <hog/client/globe_view.hpp>
-#include <hog/client/ground.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/jobs/job_system.hpp>
-#include <hog/planet/materials.hpp>
 #include <hog/planet/planet_config.hpp>
 #include <hog/planet/tangent_frame.hpp>
-#include <hog/planet/world.hpp>
 #include <hog/terrain/material.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -69,10 +66,8 @@ TEST_CASE("a chunk's surface becomes blocks where it lies", "[client][globe]") {
     const hog::terrain::BlockMesh blocks = hog::client::globe_blocks(mesh);
     CHECK(blocks.origin.metres() == mesh.origin);
     CHECK(blocks.vertices[0].position == Vec3{1.0F, 0.0F, 0.0F});
-    const auto granite = static_cast<std::uint8_t>(hog::client::globe_first_tile +
-                                                   static_cast<std::uint8_t>(Material::Granite));
-    const auto water = static_cast<std::uint8_t>(hog::client::globe_first_tile +
-                                                 static_cast<std::uint8_t>(Material::Water));
+    const auto granite = static_cast<std::uint8_t>(Material::Granite);
+    const auto water = static_cast<std::uint8_t>(Material::Water);
     CHECK(blocks.vertices[2].tiles == std::array<std::uint8_t, 3>{water, water, water});
     // Wearing two materials, the triangle gets corners of its own naming both.
     REQUIRE(blocks.vertices.size() == 6);
@@ -81,22 +76,31 @@ TEST_CASE("a chunk's surface becomes blocks where it lies", "[client][globe]") {
     CHECK(blocks.vertices[5].corner == 2);
 }
 
-TEST_CASE("the blocks' tiles are the volume's materials, then the globe's, each averaging to its "
-          "colour",
+TEST_CASE("the liquid's surface is left out of a chunk's blocks", "[client][globe]") {
+    SurfaceMesh mesh;
+    for (const Vec3 position :
+         {Vec3{1.0F, 0.0F, 0.0F}, Vec3{0.0F, 1.0F, 0.0F}, Vec3{0.0F, 0.0F, 1.0F}}) {
+        mesh.vertices.push_back(
+            {.position = position, .normal = Vec3{0.0F, 0.0F, 1.0F}, .material = Material::Water});
+    }
+    mesh.indices = {0, 1, 2};
+    const hog::terrain::BlockMesh blocks = hog::client::globe_blocks(mesh);
+    CHECK(blocks.indices.empty());
+}
+
+TEST_CASE("the blocks' tiles are the globe's materials, each averaging to its colour",
           "[client][globe]") {
     const std::vector<hog::terrain::MaterialImage> tiles = hog::client::block_tiles();
-    REQUIRE(tiles.size() == hog::client::globe_first_tile + hog::globe::material_count);
-    CHECK(hog::client::globe_first_tile == hog::planet::material_count);
+    REQUIRE(tiles.size() == static_cast<std::size_t>(hog::globe::material_count));
     for (const hog::terrain::MaterialImage& tile : tiles) {
         CHECK(tile.size == hog::client::material_size);
     }
     for (int material = 0; material < hog::globe::material_count; ++material) {
         const Vec3 colour = hog::client::surface_colour(static_cast<Material>(material));
-        const DVec3 mean = hog::terrain::material_mean(
-            tiles[hog::client::globe_first_tile + static_cast<std::size_t>(material)]);
+        const DVec3 mean = hog::terrain::material_mean(tiles[static_cast<std::size_t>(material)]);
         CHECK(glm::length(Vec3{mean} - colour) < 0.02F);
     }
-    // The globe's rock varies up close, the volume's plain blocks don't.
+    // The rock varies up close.
     const auto spread = [](const hog::terrain::MaterialImage& tile) {
         // The red channel of each texel.
         std::uint8_t least = 255;
@@ -107,10 +111,7 @@ TEST_CASE("the blocks' tiles are the volume's materials, then the globe's, each 
         }
         return most - least;
     };
-    CHECK(
-        spread(tiles[hog::client::globe_first_tile + static_cast<std::size_t>(Material::Granite)]) >
-        40);
-    CHECK(spread(tiles[static_cast<std::size_t>(hog::planet::Material::Granite)]) <= 1);
+    CHECK(spread(tiles[static_cast<std::size_t>(Material::Granite)]) > 40);
 }
 
 namespace {
@@ -178,8 +179,7 @@ TEST_CASE("every chunk round the client's start meshes", "[.gate][client][globe]
     const auto config = hog::planet::load_planet_config(std::filesystem::path{HOG_SOURCE_DIR} /
                                                         "config" / "planet.toml")
                             .value();
-    const hog::planet::World world{config};
-    const double radius = world.geology().planet_radius();
+    const double radius = config.radius;
     const hog::client::GlobeWorld globe{
         hog::client::globe_planet(std::nullopt, config.seed, radius).value()};
     const hog::globe::Generator& generator = globe.generator;

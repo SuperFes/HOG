@@ -96,8 +96,6 @@ struct Kept {
 constexpr std::array kept{
     Kept{.name = "--planet",
          .keep = [](Options& options, std::string_view value) { options.planet = value; }},
-    Kept{.name = "--graphics",
-         .keep = [](Options& options, std::string_view value) { options.graphics = value; }},
     Kept{.name = "--connect",
          .keep = [](Options& options, std::string_view value) { options.connect = value; }},
     Kept{.name = "--login",
@@ -109,12 +107,7 @@ constexpr std::array kept{
     Kept{.name = "--capture",
          .keep = [](Options& options, std::string_view value) { options.capture = value; }},
     Kept{.name = "--globe-planet",
-         .keep =
-             [](Options& options, std::string_view value) {
-                 options.globe_planet = value;
-                 options.globe = true;
-                 options.blocks = true;
-             }},
+         .keep = [](Options& options, std::string_view value) { options.globe_planet = value; }},
 };
 
 const Kept* kept_named(std::string_view option) {
@@ -187,16 +180,6 @@ constexpr std::array flags{
     Flag{.name = "--timings", .set = [](Options& options) { options.timings = true; }},
     Flag{.name = "--chat-filter", .set = [](Options& options) { options.chat_filter = true; }},
     Flag{.name = "--no-chat-filter", .set = [](Options& options) { options.chat_filter = false; }},
-    Flag{.name = "--grass", .set = [](Options& options) { options.grass = true; }},
-    Flag{.name = "--no-grass", .set = [](Options& options) { options.grass = false; }},
-    Flag{.name = "--blocks", .set = [](Options& options) { options.blocks = true; }},
-    Flag{.name = "--no-blocks", .set = [](Options& options) { options.blocks = false; }},
-    Flag{.name = "--globe",
-         .set =
-             [](Options& options) {
-                 options.globe = true;
-                 options.blocks = true;
-             }},
     Flag{.name = "--bend", .set = [](Options& options) { options.bend = true; }},
     Flag{.name = "--no-bend", .set = [](Options& options) { options.bend = false; }},
     Flag{.name = "--software", .set = [](Options& options) { options.software = true; }},
@@ -259,16 +242,13 @@ Flies or walks over the planet.
 
 options:
   --planet PATH          the planet's config (default config/planet.toml)
-  --graphics PATH        what to draw, for what the GPU can afford (default
-                         config/graphics.toml if there is one, as
-                         config/graphics.example.toml shows)
   --at LAT,LON,ALT[,HEADING,PITCH]
                          start at degrees of latitude and longitude, metres above
                          sea level (default over latitude 0, longitude 0), facing
                          degrees clockwise from north and above the horizon, as the
                          window's title shows
   --time HH:MM           start at this local time of day (default the planet's own)
-  --threads N            baking the ground (default one per hardware thread)
+  --threads N            meshing the ground (default one per hardware thread)
   --connect ADDRESS      connect to a server at an IP address and port, such as
                          127.0.0.1:7675
   --login ADDRESS        log in there first, such as 127.0.0.1:4647, with --name
@@ -287,11 +267,7 @@ options:
                          talk about the weather either way
   --clouds QUALITY       draw the clouds at low, medium or high quality, for what
                          the GPU can afford (default high)
-  --no-grass             don't grow grass near the eye, for what the GPU can afford
-  --blocks               draw the ground as the volume's blocks, with nothing growing
-  --globe                draw the voxel world in place of the ground, starting over
-                         it unless --at says otherwise; F6 shows the old ground again
-  --globe-planet NAME    the same, of the earth, mars, venus or moon preset or a
+  --globe-planet NAME    the voxel world of the earth, mars, venus or moon preset or a
                          planet file
   --no-bend              draw the planet curving as tightly as it truly does, not
                          flattened like Earth's near the eye
@@ -328,7 +304,6 @@ time:
 
   F3                     show or hide how long frames take
   F4                     draw the clouds at the next quality
-  F6                     draw the ground as the volume's blocks, or not
 )";
 }
 

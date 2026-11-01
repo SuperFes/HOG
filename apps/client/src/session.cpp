@@ -122,8 +122,6 @@ void Session::heard(std::span<const std::byte> bytes, MonotonicClock::time_point
         placed_ = *placed;
     } else if (auto* weather = std::get_if<protocol::Weather>(&*message)) {
         weather_ = std::move(*weather);
-    } else if (auto* woodlands = std::get_if<protocol::Woodlands>(&*message)) {
-        woodlands_ = std::move(*woodlands);
     } else if (auto* said = std::get_if<protocol::Said>(&*message)) {
         chat_.push_back({.from = std::move(said->from), .text = std::move(said->text)});
     } else if (auto* bricks = std::get_if<protocol::Bricks>(&*message)) {

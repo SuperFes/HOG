@@ -1,8 +1,6 @@
 #pragma once
 
 #include <hog/core/math.hpp>
-#include <hog/jobs/job_system.hpp>
-#include <hog/planet/world.hpp>
 
 #include <array>
 #include <cstdint>
@@ -52,9 +50,6 @@ struct ShoreGround {
     std::vector<float> lakes;
     std::vector<std::uint8_t> sea;
 };
-
-[[nodiscard]] ShoreGround shore_ground(const planet::World& world, const ShoreFrame& frame,
-                                       double radius, double spacing);
 
 // Metres of sea at each texel of `ground`: positive under the sea, as high as shore_highest over
 // land and lakes' beds, which the sea never floods.
@@ -156,48 +151,11 @@ inline constexpr double plume_eddies = 60.0;
 // plane, from 0 to 1: all of it at the mouth, less out to sea and towards the plume's edges.
 [[nodiscard]] double plume_at(const Plume& plume, DVec2 at);
 
-// Of each layer round the anchor of `frame`, finest first, how much of what rivers carry is mixed
-// into the water at each texel, the most of any river's plume.
-[[nodiscard]] std::vector<float> shore_plumes(const planet::World& world, const ShoreFrame& frame,
-                                              double radius);
-
 // The levels of the lakes in the finest layer of `shore`, lowest first, each once.
 [[nodiscard]] std::vector<float> lake_levels(const ShoreDepths& shore);
 
 // Of `levels` as lake_levels has them, the highest no higher than `height` metres above sea level;
 // or sea level, if none is.
 [[nodiscard]] double water_below(std::span<const float> levels, double height);
-
-// Works out the depths round the anchor of `frame`.
-[[nodiscard]] ShoreDepths work_out_shore(const planet::World& world, const ShoreFrame& frame,
-                                         double radius);
-
-// Works out the depths round the eye in the background on the pool, anew whenever the eye comes
-// nearer another anchor, for the thread that made it. One set at a time is in flight; the world
-// must outlive it, unchanged while one is.
-class ShoreStream {
-public:
-    ShoreStream(const planet::World& world, double radius, jobs::JobSystem& jobs) noexcept
-        : world_(&world), jobs_(&jobs), radius_(radius) {}
-
-    // Wants the depths round the unit direction `eye`.
-    void follow(DVec3 eye);
-    [[nodiscard]] bool in_flight() const noexcept { return working_ != nullptr; }
-    // The depths worked out since the last call, if any.
-    [[nodiscard]] std::optional<ShoreDepths> collect();
-    // Waits for those in flight, and for those wanted after them, and hands over the last.
-    [[nodiscard]] std::optional<ShoreDepths> finish();
-
-private:
-    void start(const ShoreFrame& frame);
-
-    const planet::World* world_;
-    jobs::JobSystem* jobs_;
-    double radius_;
-    std::optional<ShoreFrame> wanted_;
-    // What's in flight was started for, or what was last handed over.
-    std::optional<ShoreFrame> started_;
-    std::unique_ptr<jobs::Async<ShoreDepths>> working_;
-};
 
 } // namespace hog::terrain

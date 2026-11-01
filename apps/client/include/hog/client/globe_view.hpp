@@ -10,8 +10,7 @@
 #include <hog/globe/voxel_store.hpp>
 #include <hog/globe/world.hpp>
 #include <hog/jobs/job_system.hpp>
-#include <hog/planet/materials.hpp>
-#include <hog/terrain/blocks.hpp>
+#include <hog/terrain/block_mesh.hpp>
 #include <hog/terrain/material.hpp>
 
 #include <array>
@@ -57,13 +56,14 @@ struct GlobeWorld {
 // How each material looks up close, in Material's order, averaging to its surface_colour.
 [[nodiscard]] std::array<terrain::Look, globe::material_count> globe_looks();
 
-// The tiles block meshes name: the volume's materials by number, then the globe's from
-// globe_first_tile.
-[[nodiscard]] std::vector<terrain::MaterialImage> block_tiles();
-inline constexpr std::uint8_t globe_first_tile = planet::material_count;
+// Texels across a material's tile: about 1.5 cm each over the four metres a tile spans.
+inline constexpr int material_size = 256;
 
-// A chunk's surfaces as blocks, laid from the chunk's own origin, each triangle wearing its
-// corners' materials.
+// The tiles block meshes name: the globe's materials by number.
+[[nodiscard]] std::vector<terrain::MaterialImage> block_tiles();
+
+// A chunk's shaped surfaces as blocks, laid from the chunk's own origin, each triangle wearing
+// its corners' materials; the liquid's surface is left out, as the sea is drawn over the ground.
 [[nodiscard]] terrain::BlockMesh globe_blocks(const globe::SurfaceMesh& mesh);
 
 // How the globe's detail falls off: each chunk as coarse as keeps it `ratio` of its widths from
@@ -90,8 +90,8 @@ public:
 
     // Wants the surfaces round the eye, in metres from the planet's centre.
     void follow(DVec3 eye);
-    // A brick of the world has changed: the chunks drawn from it are meshed again. Nothing must
-    // be in flight while the world is changed; finish() first.
+    // A brick of the world has changed: the chunks drawn from it are meshed again from the next
+    // collect(). Nothing must be in flight while the world is changed; finish() first.
     void changed(globe::BrickSite brick);
     // Chunks still to mesh or let go, or changes not yet handed over.
     [[nodiscard]] bool in_flight() const noexcept;

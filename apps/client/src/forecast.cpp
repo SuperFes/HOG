@@ -17,6 +17,17 @@ namespace hog::client {
 
 namespace {
 
+// Millimetres of cloud water over which the sky closes over.
+constexpr float cloud_cover_depth = 0.2F; // mm of cloud that covers most of the sky
+
+} // namespace
+
+float cloud_cover(float cloud) noexcept {
+    return 1.0F - std::exp(-cloud / cloud_cover_depth);
+}
+
+namespace {
+
 using Cells = std::vector<protocol::CellWeather>;
 
 template <typename T>
@@ -103,7 +114,7 @@ Maps maps_of(const sim::CellGrid& grid, const Cells& cells) {
                 maps.drift.push_back({glm::packHalf1x16(drift.x), glm::packHalf1x16(drift.y),
                                       glm::packHalf1x16(drift.z), 0});
                 maps.weather.push_back(
-                    {to_byte(static_cast<double>(sim::cloud_cover(cell.cloud))),
+                    {to_byte(static_cast<double>(cloud_cover(cell.cloud))),
                      to_byte(std::sqrt(std::max(static_cast<double>(cell.cloud), 0.0) / 16.0)),
                      to_byte(std::sqrt(std::max(static_cast<double>(cell.falling), 0.0) / 256.0)),
                      to_byte(static_cast<double>(cell.snow))});
@@ -121,7 +132,7 @@ Maps maps_of(const sim::CellGrid& grid, const Cells& cells) {
 } // namespace
 
 std::string describe(const protocol::CellWeather& weather) {
-    const double cover = 100.0 * static_cast<double>(sim::cloud_cover(weather.cloud));
+    const double cover = 100.0 * static_cast<double>(cloud_cover(weather.cloud));
     std::string line = std::format("{:.0f}% cloud", cover);
     if (cover >= 0.5) {
         line += std::format(" at {:.0f}-{:.0f} m", static_cast<double>(weather.base),

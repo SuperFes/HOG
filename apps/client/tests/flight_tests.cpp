@@ -118,19 +118,6 @@ TEST_CASE("flying round the planet keeps the horizon level, over the poles too",
     CHECK(std::abs(up_at(flight).y) < 1e-6);
 }
 
-TEST_CASE("a viewpoint sees what the camera does, through the viewport", "[client][flight]") {
-    const hog::render::Camera camera =
-        flight_camera(start_flight({0.0, 0.0, -1.0}, radius, 10.0, {1.0, 0.0, 0.0}), 0.8);
-    const hog::terrain::Viewpoint view =
-        hog::client::viewpoint(camera, {.width = 1'600, .height = 800});
-    CHECK(view.eye == camera.eye);
-    CHECK(view.forward == camera.forward);
-    CHECK(view.up == camera.up);
-    CHECK(view.vertical_fov == 0.8);
-    CHECK(view.aspect == 2.0);
-    CHECK(view.viewport_height == 800.0);
-}
-
 TEST_CASE("a companion flies along ahead of the eye, landing where the eye is low",
           "[client][flight]") {
     const Flight flight = start_flight({1.0, 0.0, 0.0}, radius, 500.0, {0.0, 1.0, 0.0});

@@ -4,7 +4,6 @@
 #include <hog/protocol/messages.hpp>
 #include <hog/render/camera.hpp>
 #include <hog/render/vulkan.hpp>
-#include <hog/terrain/selection.hpp>
 
 namespace hog::client {
 
@@ -77,8 +76,5 @@ struct FlySettings {
 // `ground` metres above sea level.
 [[nodiscard]] WorldPosition companion_feet(const Flight& flight, double ahead, double below,
                                            double planet_radius, double ground);
-
-// What the camera sees through a viewport of `extent`, for picking the patches to draw.
-[[nodiscard]] terrain::Viewpoint viewpoint(const render::Camera& camera, VkExtent2D extent);
 
 } // namespace hog::client

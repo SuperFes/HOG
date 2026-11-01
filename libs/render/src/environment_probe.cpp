@@ -84,8 +84,8 @@ Result<EnvironmentProbe> EnvironmentProbe::create(const Device& device, VkFormat
 }
 
 void EnvironmentProbe::record(VkCommandBuffer commands, std::uint32_t frame,
-                              const Atmosphere& atmosphere, const Sky& sky, const Terrain& terrain,
-                              const TerrainPool& pool, const ProbeView& view) const {
+                              const Atmosphere& atmosphere, const Sky& sky,
+                              const ProbeView& view) const {
     const VkExtent2D extent{.width = size_, .height = size_};
     const DVec3 up = view.sky.bend.up;
     const DVec3 east = planet::tangent_frame(up).east;
@@ -120,12 +120,6 @@ void EnvironmentProbe::record(VkCommandBuffer commands, std::uint32_t frame,
         if (face != probe_down) {
             VkImageView aerial = aerial_.at(face).view();
             sky.draw(commands, extent, frame, atmosphere, skies.at(face), aerial);
-            if (!view.ground.empty()) {
-                TerrainView ground = view.terrain;
-                ground.camera = skies.at(face).camera;
-                ground.air.aerial = aerial;
-                terrain.draw(commands, extent, pool, view.ground, ground, Terrain::Detail::Coarse);
-            }
         }
         vkCmdEndRendering(commands);
     }
