@@ -8,6 +8,7 @@ add_library(hog_globe
     src/hex_grid.cpp
     src/hexel_mesh.cpp
     src/hexel_store.cpp
+    src/layers.cpp
     src/material.cpp
     src/settling.cpp)
 add_library(hog::globe ALIAS hog_globe)
@@ -24,4 +25,5 @@ hog_add_tests(hog_globe
     tests/hex_cell_tests.cpp
     tests/hexel_mesh_tests.cpp
     tests/hexel_store_tests.cpp
+    tests/layers_tests.cpp
     tests/settling_tests.cpp)
