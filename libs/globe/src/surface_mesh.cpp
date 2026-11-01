@@ -215,6 +215,14 @@ struct Footprint {
     int across = 0;
     int along = 0;
     int apart = 1;
+    // At the cube's corners, where three columns stand round a box rather than four, the one
+    // that's missing: 1 if it's across, 2 if along, 3 if both.
+    std::optional<int> missing;
+
+    // A corner column, 1 across and 2 along.
+    [[nodiscard]] std::pair<int, int> corner(int k) const {
+        return {(k & 1) != 0 ? a + across : a, (k & 2) != 0 ? b + along : b};
+    }
 };
 
 // A box: its footprint and how many of its own heights up from the floor.
@@ -442,11 +450,11 @@ private:
         return at.exists && at.cell.i % step == 0 && at.cell.j % step == 0;
     }
 
-    // Steps from a column to the next of a lattice along an axis; none off the grid.
-    [[nodiscard]] std::optional<int> to_next(int a, int b, int axis, int apart) const {
+    // Steps from a column to the next of a lattice one way along an axis; none off the grid.
+    [[nodiscard]] std::optional<int> to_next(int a, int b, int axis, int apart, int by = 1) const {
         for (int steps = 1;; ++steps) {
-            const int to_a = axis == 0 ? a + steps : a;
-            const int to_b = axis == 1 ? b + steps : b;
+            const int to_a = axis == 0 ? a + (by * steps) : a;
+            const int to_b = axis == 1 ? b + (by * steps) : b;
             if (!in_grid(to_a, to_b) || !column(to_a, to_b).exists) {
                 return std::nullopt;
             }
@@ -470,24 +478,76 @@ private:
                     !column(a + *across, b + *along).exists) {
                     continue;
                 }
-                const auto index = static_cast<int>(footprints_.size());
-                footprints_.push_back(
-                    {.a = a, .b = b, .across = *across, .along = *along, .apart = at.chunk_apart});
-                for (int y = b; y < b + *along; ++y) {
-                    for (int x = a; x < a + *across; ++x) {
-                        HOG_ASSERT(footprint_of_[spot(x, y)] < 0,
-                                   "boxes of chunks beside each other overlap");
-                        footprint_of_[spot(x, y)] = index;
-                    }
-                }
-                for (const auto& [x, y] :
-                     {std::pair{a, b}, std::pair{a + *across, b}, std::pair{a, b + *along},
-                      std::pair{a + *across, b + *along}}) {
-                    Column& corner = columns_[spot(x, y)];
-                    corner.apart =
-                        corner.apart == 0 ? at.chunk_apart : std::min(corner.apart, at.chunk_apart);
+                paint({.a = a,
+                       .b = b,
+                       .across = *across,
+                       .along = *along,
+                       .apart = at.chunk_apart,
+                       .missing = std::nullopt});
+            }
+        }
+        lay_corner_footprints();
+    }
+
+    // The box at the cube's corner, with three columns round it, by the chunk's high or low
+    // sides there; none if the chunk doesn't meet it.
+    [[nodiscard]] std::optional<Footprint> corner_footprint(bool high_a, bool high_b) const {
+        const std::uint32_t last = (std::uint32_t{1} << chunk_.level) - 1;
+        if (chunk_.i != (high_a ? last : 0) || chunk_.j != (high_b ? last : 0)) {
+            return std::nullopt;
+        }
+        // From the face's own corner column, to the next faces' first of the lattice.
+        const int across = apart_ / step_;
+        const int a = high_a ? size_ - across : 0;
+        const int b = high_b ? size_ - across : 0;
+        const std::optional<int> over_a = to_next(a, b, 0, apart_, high_a ? 1 : -1);
+        const std::optional<int> over_b = to_next(a, b, 1, apart_, high_b ? 1 : -1);
+        if (!over_a || !over_b) {
+            return std::nullopt;
+        }
+        const Footprint print{.a = high_a ? a : a - *over_a,
+                              .b = high_b ? b : b - *over_b,
+                              .across = *over_a,
+                              .along = *over_b,
+                              .apart = apart_,
+                              .missing = (high_a ? 1 : 0) | (high_b ? 2 : 0)};
+        for (int k = 0; k < 4; ++k) {
+            const auto [x, y] = print.corner(k);
+            if (!in_grid(x, y) || (k == print.missing) == column(x, y).exists) {
+                return std::nullopt;
+            }
+        }
+        return print;
+    }
+
+    void lay_corner_footprints() {
+        for (const bool high_a : {false, true}) {
+            for (const bool high_b : {false, true}) {
+                if (const std::optional<Footprint> print = corner_footprint(high_a, high_b)) {
+                    paint(*print);
                 }
             }
+        }
+    }
+
+    // Holds a footprint, laid over its units of the grid.
+    void paint(const Footprint& print) {
+        const auto index = static_cast<int>(footprints_.size());
+        footprints_.push_back(print);
+        for (int y = print.b; y < print.b + print.along; ++y) {
+            for (int x = print.a; x < print.a + print.across; ++x) {
+                HOG_ASSERT(footprint_of_[spot(x, y)] < 0,
+                           "boxes of chunks beside each other overlap");
+                footprint_of_[spot(x, y)] = index;
+            }
+        }
+        for (int k = 0; k < 4; ++k) {
+            if (k == print.missing) {
+                continue;
+            }
+            const auto [x, y] = print.corner(k);
+            Column& corner = columns_[spot(x, y)];
+            corner.apart = corner.apart == 0 ? print.apart : std::min(corner.apart, print.apart);
         }
     }
 
@@ -970,7 +1030,118 @@ private:
         return crossing;
     }
 
+    // A box at the cube's corner: its three columns' voxels at its foot and top, by column.
+    [[nodiscard]] std::optional<std::vector<Point>> corner_box(const Footprint& print, int low,
+                                                               int high) const {
+        std::vector<Point> corners;
+        for (int k = 0; k < 4; ++k) {
+            const auto [a, b] = print.corner(k);
+            for (const int layer : {low, high}) {
+                if (k == print.missing) {
+                    continue;
+                }
+                if (!grid_->holds({a, b, layer})) {
+                    return std::nullopt;
+                }
+                corners.push_back({a, b, layer});
+            }
+        }
+        return corners;
+    }
+
+    // Its edges: up each column, and between each two at the foot and the top.
+    [[nodiscard]] std::optional<std::vector<std::pair<Point, Point>>>
+    corner_edges(const std::vector<Point>& corners, int high) const {
+        std::vector<std::pair<Point, Point>> edges;
+        for (std::size_t k = 0; k < corners.size(); k += 2) {
+            for (Point at = corners[k]; at[2] < high;) {
+                const std::optional<Point> up = grid_->next(at, 2, 1);
+                if (!up) {
+                    return std::nullopt;
+                }
+                edges.emplace_back(at, *up);
+                at = *up;
+            }
+        }
+        for (std::size_t k = 0; k < corners.size(); ++k) {
+            for (std::size_t l = k + 2; l < corners.size(); l += 2) {
+                edges.emplace_back(corners[k], corners[l]);
+            }
+        }
+        return edges;
+    }
+
+    // The vertex of a box at the cube's corner, with three columns round it: placed in the
+    // world's terms, as such a box has no axes of its own to take.
+    std::uint32_t make_corner_vertex(Leaf leaf) {
+        const Footprint& print = grid_->footprint(leaf.footprint);
+        const int low = leaf.up * print.apart;
+        const int high = low + print.apart;
+        const std::optional<std::vector<Point>> corners = corner_box(print, low, high);
+        if (!corners) {
+            return no_vertex;
+        }
+        const std::optional<std::vector<std::pair<Point, Point>>> edges =
+            corner_edges(*corners, high);
+        if (!edges) {
+            return no_vertex;
+        }
+        std::vector<Crossing> found;
+        for (const auto& [from, to] : *edges) {
+            if (!Surface::crosses(*grid_, from, to)) {
+                continue;
+            }
+            const bool forward = grid_->key(from) < grid_->key(to);
+            const Point a = forward ? from : to;
+            const Point b = forward ? to : from;
+            const double va = Surface::value(*grid_, a);
+            const double vb = Surface::value(*grid_, b);
+            const double t = va != vb ? std::clamp(va / (va - vb), 0.0, 1.0) : 0.5;
+            const DVec3 normal = Surface::normal(*grid_, a, b, t);
+            found.push_back(
+                {.from_key = grid_->key(a),
+                 .to_key = grid_->key(b),
+                 .point = grid_->position(a) + (t * (grid_->position(b) - grid_->position(a))),
+                 .normal = normal,
+                 .held = normal});
+        }
+        if (found.empty()) {
+            return no_vertex;
+        }
+        std::ranges::sort(found, {},
+                          [](const Crossing& c) { return std::pair{c.from_key, c.to_key}; });
+        std::vector<DVec3> points;
+        std::vector<DVec3> normals;
+        DVec3 held{0.0};
+        DVec3 mean{0.0};
+        for (const Crossing& crossing : found) {
+            points.push_back(crossing.point);
+            normals.push_back(crossing.normal);
+            held += crossing.held;
+            mean += crossing.point;
+        }
+        mean /= static_cast<double>(found.size());
+        // Without normals, at the crossings' mean.
+        DVec3 position = glm::length(held) > 0.0 ? nearest_to_planes(points, normals) : mean;
+        DVec3 lowest{std::numeric_limits<double>::max()};
+        DVec3 highest{std::numeric_limits<double>::lowest()};
+        for (const Point corner : *corners) {
+            lowest = glm::min(lowest, grid_->position(corner));
+            highest = glm::max(highest, grid_->position(corner));
+        }
+        position = glm::clamp(position, lowest, highest);
+        const DVec3 normal = glm::length(held) > 0.0 ? held : position + mesh_->origin;
+        const auto index = static_cast<std::uint32_t>(mesh_->vertices.size());
+        mesh_->vertices.push_back({.position = Vec3{position},
+                                   .normal = Vec3{glm::normalize(normal)},
+                                   .material = Surface::material(*grid_, *corners)});
+        return index;
+    }
+
     std::uint32_t make_vertex(Leaf leaf) {
+        if (grid_->footprint(leaf.footprint).missing) {
+            return make_corner_vertex(leaf);
+        }
         const std::optional<Frame> frame = frame_of(leaf);
         if (!frame) {
             return no_vertex;

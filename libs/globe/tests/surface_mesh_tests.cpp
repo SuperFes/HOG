@@ -210,7 +210,8 @@ TEST_CASE("chunks at other details meet without gaps, on a face and across the c
     const hog::globe::Layers& layers = venus().layers();
     for (const DVec3 up :
          {somewhere(11), glm::normalize(DVec3{1.0, 1.0, 0.2}),
-          glm::normalize(DVec3{-0.3, 1.0, -1.0}), glm::normalize(DVec3{-1.0, -1.0, 0.3})}) {
+          glm::normalize(DVec3{-0.3, 1.0, -1.0}), glm::normalize(DVec3{-1.0, -1.0, 0.3}),
+          glm::normalize(DVec3{1.0, 1.0, 1.0})}) {
         // Close round the eye, so the details change within a few chunks of it.
         const std::vector<Cell> chunks = hog::globe::chunks_around(venus(), {.up = up}, 100.0, 1.1);
         const hog::globe::Drawn drawn{chunks};
@@ -224,7 +225,8 @@ TEST_CASE("chunks at other details meet without gaps, on a face and across the c
             faces.insert(chunk.face);
         }
         CAPTURE(up.x, up.y, up.z, chunks.size(), details.size(), faces.size());
-        REQUIRE(details.size() >= 3);
+        // At the cube's corner, three faces' chunks at one detail leave room for fewer.
+        REQUIRE(details.size() >= (faces.size() == 3 ? 2U : 3U));
         // Open sides only round the drawn chunks' rim, and under where caves stop being drawn.
         std::size_t open = 0;
         for (const DVec3 side : open_sides(mesh)) {
@@ -297,25 +299,18 @@ TEST_CASE("coarser chunks lie on their coarser ground, as near for their size",
     }
 }
 
-TEST_CASE("only the cube's corners leave a gap, a column wide", "[globe][surface]") {
+TEST_CASE("chunks meet without gaps at the cube's corners, where three columns meet",
+          "[globe][surface]") {
     VoxelStore store{moon().layers()};
     const World world{moon(), store};
     const hog::globe::Layers& layers = moon().layers();
-    const DVec3 corner = glm::normalize(DVec3{1.0, 1.0, 1.0});
-    const Cell chunk = hog::globe::chunk_under(corner, layers);
-    const SurfaceMesh mesh = mesh_of(world, block_round(chunk));
-    REQUIRE(block_round(chunk).size() == 8);
-    const double radius = moon().planet().radius;
-    for (const DVec3 side : open_sides(mesh)) {
-        const DVec3 up = glm::normalize(side);
-        if (hog::globe::chunk_under(up, layers) != chunk) {
-            continue;
-        }
-        const double ground = hog::globe::ground_below(moon(), up, 0.5).value_or(0.0);
-        if (glm::length(side) < ground - hog::globe::surface_depth + 2.0) {
-            continue;
-        }
-        CHECK(glm::length(up - corner) * radius < 3.0);
+    for (const DVec3 corner : {DVec3{1.0, 1.0, 1.0}, DVec3{-1.0, -1.0, -1.0}, DVec3{1.0, -1.0, 1.0},
+                               DVec3{-1.0, 1.0, -1.0}}) {
+        const Cell chunk = hog::globe::chunk_under(glm::normalize(corner), layers);
+        CAPTURE(corner.x, corner.y, corner.z);
+        REQUIRE(block_round(chunk).size() == 8);
+        const SurfaceMesh mesh = mesh_of(world, block_round(chunk));
+        CHECK(open_in(world, mesh, chunk) == 0);
     }
 }
 
