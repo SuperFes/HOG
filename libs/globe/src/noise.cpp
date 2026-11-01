@@ -97,7 +97,7 @@ Noise gradient_noise(DVec3 point, std::uint64_t seed) noexcept {
     return {.value = reach * value, .gradient = reach * (blended + (du * ramp))};
 }
 
-Noise fbm(DVec3 point, const Octaves& octaves, double lod, std::uint64_t seed) noexcept {
+Noise fbm(DVec3 point, const Octaves& octaves, double lod, std::uint64_t seed, Band band) noexcept {
     // Octaves whose wavelength is at least twice the detail asked for, and the next faded.
     const double shortest = std::max({2.0 * lod, octaves.finest, 1e-9});
     const double count = (maths::log(octaves.wavelength / shortest) / std::numbers::ln2) + 1.0;
@@ -107,13 +107,18 @@ Noise fbm(DVec3 point, const Octaves& octaves, double lod, std::uint64_t seed) n
     glm::dmat3 frame{1.0};
     double wavelength = octaves.wavelength;
     double amplitude = 1.0;
-    for (int octave = 0; octave < 64 && static_cast<double>(octave) < count; ++octave) {
-        const double weight = std::min(1.0, count - static_cast<double>(octave));
-        const Noise layer = gradient_noise(frame * point / wavelength, hash_values(seed, octave));
-        sum.value += amplitude * weight * layer.value;
-        // Back from the turned, scaled lattice to the point's own frame.
-        sum.gradient +=
-            (amplitude * weight / wavelength) * (glm::transpose(frame) * layer.gradient);
+    for (int octave = 0;
+         octave < 64 && static_cast<double>(octave) < count && wavelength > band.shorter_than;
+         ++octave) {
+        if (wavelength <= band.longest) {
+            const double weight = std::min(1.0, count - static_cast<double>(octave));
+            const Noise layer =
+                gradient_noise(frame * point / wavelength, hash_values(seed, octave));
+            sum.value += amplitude * weight * layer.value;
+            // Back from the turned, scaled lattice to the point's own frame.
+            sum.gradient +=
+                (amplitude * weight / wavelength) * (glm::transpose(frame) * layer.gradient);
+        }
         frame = turn * frame;
         wavelength *= 0.5;
         amplitude *= octaves.gain;

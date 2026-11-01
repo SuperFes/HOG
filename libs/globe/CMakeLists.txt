@@ -3,6 +3,7 @@ add_library(hog_globe
     src/birth.cpp
     src/cell.cpp
     src/crust.cpp
+    src/erosion.cpp
     src/differentiation.cpp
     src/generator.cpp
     src/globe.cpp
@@ -15,6 +16,7 @@ add_library(hog_globe
     src/noise.cpp
     src/planet.cpp
     src/planet_file.cpp
+    src/relief.cpp
     src/settling.cpp)
 add_library(hog::globe ALIAS hog_globe)
 

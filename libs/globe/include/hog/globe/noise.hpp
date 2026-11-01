@@ -27,7 +27,14 @@ struct Octaves {
     double finest = 0.0; // the shortest wavelength ever summed
 };
 
-[[nodiscard]] Noise fbm(DVec3 point, const Octaves& octaves, double lod,
-                        std::uint64_t seed) noexcept;
+// Which octaves to sum: those no longer than `longest` and longer than `shorter_than`, so a sum
+// can be taken a band at a time, coarse to fine, and come to the same.
+struct Band {
+    double longest = 1e300;
+    double shorter_than = 0.0;
+};
+
+[[nodiscard]] Noise fbm(DVec3 point, const Octaves& octaves, double lod, std::uint64_t seed,
+                        Band band = {}) noexcept;
 
 } // namespace hog::globe

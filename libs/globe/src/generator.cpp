@@ -54,6 +54,22 @@ DVec3 direction_from(std::uint64_t seed) {
     return {ring * maths::cos(turn), ring * maths::sin(turn), z};
 }
 
+// The ground's slope measured across a small step either way. Gullies turn with the slope they're
+// cut in, which their own gradients can't know without the ground's curvature.
+double ground_slope(const terms::Context& context, DVec3 direction, double lod) {
+    const double step = std::max(lod, context.planet->voxel) / 8.0;
+    const DVec3 side = std::abs(direction.z) < 0.9 ? DVec3{0.0, 0.0, 1.0} : DVec3{1.0, 0.0, 0.0};
+    const DVec3 east = glm::normalize(glm::cross(side, direction));
+    const DVec3 north = glm::cross(direction, east);
+    const double turn = step / context.planet->radius;
+    const auto height = [&](DVec3 along, double by) {
+        return terms::column(context, glm::normalize(direction + (along * by)), lod).height.value;
+    };
+    const double across_east = (height(east, turn) - height(east, -turn)) / (2.0 * step);
+    const double across_north = (height(north, turn) - height(north, -turn)) / (2.0 * step);
+    return std::sqrt((across_east * across_east) + (across_north * across_north));
+}
+
 std::vector<Surveyed> survey(const auto& measure) {
     std::vector<Surveyed> values;
     values.reserve(cells_at(survey_level));
@@ -124,7 +140,7 @@ Sample Generator::sample(DVec3 point, double lod) const noexcept {
 
     const double ground = planet_.radius + column.height.value - shape_.datum;
     // Slope per metre across the ground at this radius, not at the raw radius it was taken at.
-    const double slope = glm::length(column.height.gradient) * planet_.radius / radius;
+    const double slope = ground_slope(context, direction, lod) * planet_.radius / radius;
     Sample sample;
     sample.distance = (radius - ground) / std::sqrt(1.0 + (slope * slope));
 
@@ -185,10 +201,12 @@ std::optional<double> ground_below(const Generator& generator, DVec3 direction, 
 
 namespace terms {
 
-Column column(const Context& context, DVec3 direction, double /*lod*/) noexcept {
+Column column(const Context& context, DVec3 direction, double lod) noexcept {
     const Province crust = province(context, direction);
     const double step = context.derived->isostatic_step;
-    return {.height = {.value = step * crust.high, .gradient = step * crust.gradient},
+    const Noise shaped = relief(context, direction, crust, lod);
+    return {.height = {.value = (step * crust.high) + shaped.value,
+                       .gradient = (step * crust.gradient) + shaped.gradient},
             .high = crust.high};
 }
 

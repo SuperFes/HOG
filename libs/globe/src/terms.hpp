@@ -13,6 +13,11 @@ namespace hog::globe::terms {
 enum class Term : std::uint8_t {
     Province = 1,
     OneSide,
+    Belts,
+    Peaks,
+    Hills,
+    Ridges,
+    Gullies,
 };
 
 struct Context {
@@ -41,6 +46,15 @@ struct Province {
 };
 
 [[nodiscard]] Province province(const Context& context, DVec3 direction) noexcept;
+
+// Mountains, hills and ocean ridges, by the regime and the erosion at work.
+[[nodiscard]] Noise relief(const Context& context, DVec3 direction, const Province& crust,
+                           double lod) noexcept;
+
+// One width of gullies, cut straight down `slope` (the ground's, coarser than them), as deep as
+// `share` of the fall across their width, faded in by `weight`.
+[[nodiscard]] Noise gullies(const Context& context, DVec3 direction, DVec3 slope, double wavelength,
+                            int octave, double share, double weight) noexcept;
 
 // The ground's raw height along a direction, the sum of every column term.
 struct Column {

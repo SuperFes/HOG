@@ -96,28 +96,42 @@ TEST_CASE("dry worlds stand at their mean ground, Mars's highlands to one side",
         if (name == "mars") {
             CHECK(offset > 0.15 * world.derived().isostatic_step);
         } else if (name == "venus") {
-            CHECK(offset < 1.0);
+            CHECK(offset < 0.02 * world.derived().tallest);
         }
     }
 }
 
 TEST_CASE("distance is a true distance near the ground", "[globe][generator]") {
-    const Generator earth = generator_for("earth");
-    constexpr double h = 0.5;
-    for (std::uint64_t k = 0; k < 200; ++k) {
-        const DVec3 down = direction(k);
-        const double ground = hog::globe::ground_below(earth, down, 1.0).value_or(0.0);
-        const DVec3 near = down * (ground + 3.0);
-        CHECK(std::abs(earth.sample(down * ground, 1.0).distance) < 1e-3);
-        DVec3 slope{0.0};
-        for (glm::length_t axis = 0; axis < 3; ++axis) {
-            DVec3 step{0.0};
-            step[axis] = h;
-            slope[axis] = (earth.sample(near + step, 1.0).distance -
-                           earth.sample(near - step, 1.0).distance) /
-                          (2.0 * h);
+    // Taken where the ground's finest detail is still wide against the offset and the step, so
+    // what's measured is the estimate, not the ground curving under it.
+    constexpr double lod = 16.0;
+    constexpr double h = 0.25;
+    for (const std::string_view name : {"earth", "mars", "venus", "moon"}) {
+        const Generator world = generator_for(name);
+        double worst = 0.0;
+        double total = 0.0;
+        constexpr int count = 300;
+        for (std::uint64_t k = 0; k < count; ++k) {
+            const DVec3 down = direction(k);
+            const double ground = hog::globe::ground_below(world, down, lod).value_or(0.0);
+            const DVec3 near = down * (ground + 2.0);
+            CHECK(std::abs(world.sample(down * ground, lod).distance) < 1e-3);
+            DVec3 slope{0.0};
+            for (glm::length_t axis = 0; axis < 3; ++axis) {
+                DVec3 step{0.0};
+                step[axis] = h;
+                slope[axis] = (world.sample(near + step, lod).distance -
+                               world.sample(near - step, lod).distance) /
+                              (2.0 * h);
+            }
+            const double error = std::abs(glm::length(slope) - 1.0);
+            worst = std::max(worst, error);
+            total += error / count;
         }
-        CHECK(std::abs(glm::length(slope) - 1.0) < 0.05);
+        UNSCOPED_INFO(name << " distance slope off by " << total << " on average, " << worst
+                           << " at worst");
+        CHECK(total < 0.01);
+        CHECK(worst < 0.06);
     }
 }
 
@@ -150,5 +164,5 @@ TEST_CASE("the same planet is generated the same, bit for bit", "[globe][generat
         }
     }
     // If this moves, unchanged ground no longer matches what was there before, or elsewhere.
-    CHECK(digest == 0xa78c'b253'3fc7'd89bULL);
+    CHECK(digest == 0x946a'e1d0'3e4a'1d31ULL);
 }
