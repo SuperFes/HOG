@@ -1,78 +1,80 @@
-# The globe: a planet made of hexels
+# The globe: a voxel planet of maths and changes
 
 Oct 31, 2026
 
-The world is hexels: hexagonal prisms standing on radial lines, each holding a real material and its state. The planet is born in them, shaped in them, played in them and dug into. There is no heightfield anywhere. Ground height, coasts, rivers and cliffs are whatever the hexels hold, never a function sampled over the sphere.
+The world is voxels on a sphere, modelled on Enshrouded's voxel world and stretched into a planet. A generator, written fresh, says what is at any point and at any resolution. A sparse store holds only what has changed: digging, building, water, slides, lava. What players see is a surface drawn from the voxels, so the world looks like a clean modern game, not blocks.
 
-This replaces the heightfield path (`Elevation`, `Landform`, river and shore strips) and the square-celled volume of `docs/world-v2.md`. Those stay playable until the globe overtakes them. Nothing new is built on them, and the globe never reads them.
+The research behind this is in `reports/Editable voxel planet architecture.md`, with notes in `research_notes/`. It replaces the hexel plan, which was tried first. That plan's sparse tree, windows and conservation tests carry over. The old `hog::planet` generator and its heightfield are never used or read.
 
 ## Rules
 
-- **Hexels are the world.** Every stage reads and writes hexels. A stage that wants a height asks the column where its solid ends.
-- **No heightfields, no stamps.** No process places a landform. Cliffs, caves, coasts and volcanoes come from materials, heat, gravity and water acting on hexels.
-- **Conserved.** Rock, water and heat are counted, and every step keeps the counts, in tests.
-- **Blocks first.** The hexels are drawn as hex prisms coloured by material. The final look comes at the very end.
-- **Its own library.** `libs/globe` links `hog::core` and nothing from `hog::planet`, so the old path can't leak in.
+- **Maths plus changes.** The generator is a pure, deterministic function of the planet's description and a point. The store holds only what differs from it. Nothing generated is saved.
+- **Bit-identical everywhere.** The server and every client get the same bits from the generator, on every platform, checked in CI.
+- **No stored heights.** A planet-scale reference level may exist only as physics computed inside the generator: crust, isostasy, basins. It is never saved, it never defines the surface on its own, and nothing outside the generator reads it.
+- **Amounts, counted.** Voxels hold how much of each thing they contain. Water, rock, sand and heat are counted, and every step keeps the counts, in tests.
+- **Many worlds.** A planet is a description made of physical knobs. Earth, Mars, Venus and the Moon are the first presets, and alien worlds are other settings.
+- **Every landform has a home.** Each feature class gets a term in the generator, the store or the simulation, judged by stills of a fixed suite of spots, one per class.
+- **Libraries only when excellent.** We use one only if it's clearly excellent and has an MIT-compatible licence. Otherwise we build it ourselves.
 
-## Cells
+## Layout
 
-The sphere is tiled by an icosahedral hex grid: the vertices of an icosahedron whose triangles are split `2^level` times along each edge, projected onto the sphere. Each vertex is a cell, a hexagon of its six neighbours, apart from the icosahedron's twelve corners, which are pentagons. A level has `10 · 4^level + 2` cells. Each flat hexagon is carried onto the sphere by a projection that keeps areas, so every hexagon holds the same share of the globe and a pentagon five sixths of it. Shapes stretch a little by the icosahedron's corners instead: neighbours stand 0.94 to 1.2 steps apart.
+The planet is a cube inflated into a sphere. Each of the six faces is a square grid of columns, warped onto its sixth of the sphere by the tangent mapping, so a cell's area varies by at most 1.414 from face centre to corner. Every column points at the planet's centre, so down is always straight down a column. Across the cube's 12 edges grids meet at an angle, and at its 8 corners three cells meet instead of four. One neighbour function handles both and is tested at every edge and corner.
 
-The icosahedron is split into ten diamonds of two triangles each. A cell is addressed by level, diamond and `(i, j)` within it, plus the two poles. Neighbours are found exactly, in integers, across diamond edges and around the pentagons.
+A cell is addressed by level, face and `(i, j)`. A level has `6 · 4^level` cells, and each splits into exactly four at the next level, so levels nest and sums carry exactly.
 
-Outward, each column of cells is split into shells, as the square volume did, so a cell is a hex prism. Gravity points to the centre, straight through every cell's floor.
+**A shell, not a ball.** Voxels run from an impassable floor a few kilometres down up to a sky ceiling, both preset knobs. Below the floor and above the ceiling there are no voxels, only calculation: core, mantle, gravity, heat flow, the air above. Magma enters through the floor as a computed source. Over a few kilometres of depth, cells barely change size.
 
-**Between levels.** A coarse cell's centre is a fine cell, and the six fine cells halfway to its neighbours are shared half and half with them. Moving material down a level hands it to those seven cells; moving it up sums them back, so it's conserved and centred, with no drift. Coarse levels run the planet-scale processes; fine levels run the local ones and the play.
+## The generator
 
-**In memory.** Large is stored large. Each diamond's `(i, j)` and the shells are split as a tree, across or outward, only where what they hold differs, so a block of one hexel throughout is a single node however big: a layered planet of metre hexels fits in a few kilobytes, and digging one out adds a path and a brick. Small blocks that vary are bricks held in full. Fine detail is made on demand and dropped when it holds nothing generation can't make again; edits and anything simulated are kept.
+`sample(point, lod)` returns the distance to the nearest solid surface, the material makeup, any loose amounts and the temperature. It is built from the planet's knobs:
 
-## What a hexel holds
+- **Planet-scale fields,** computed on demand per column and never saved: crustal provinces, the reference level from isostasy, climate, and dichotomies like Mars's.
+- **3D terms:** strata, eroded relief, karst and caves in depth bands, arches and overhangs, craters by size and age, volcanoes and magma bodies, dunes, glacial forms, soils and regolith.
+- **One coarse drainage solve per seed:** stream-power erosion to steady state over the whole planet, because a river depends on everything upstream. It sets where rivers, lakes and deltas lie. Detail is added on top.
 
-- **Material:** iron, mantle rock, basalt, granite, sandstone, limestone, shale, sediment, soil, sand, snow, water, air. Whether it's solid, molten or a gas comes from its temperature: magma is molten rock, ice is cold water.
-- **State:** temperature; for rock, strength and fractures; for water, flow; for magma, how far it has cooled.
-- A material counts only through properties that change how the world forms: density, strength, how fast it wears, where it melts, how it flows.
+Terms blend by smooth union and subtraction, weighted by physical fields, not by hand.
 
-## Birth
+## The store
 
-The planet forms in the hexels at coarse levels, each step a process acting on what the last one left:
+The store is one sparse tree per face over `(i, j, shell)`. Empty means "ask the generator", a uniform block of edits is a single tile, and edited blocks are palette-coded 8³ bricks. Matter comes in two kinds:
+- **Shaped matter,** such as rock, earth and buildings, carries a distance and its makeup.
+- **Loose matter,** such as water, sand, rubble, snow and lava, carries amounts.
 
-1. **Accretion:** a hot ball of mixed metal, rock, water and gas, its heat from impacts and decay.
-2. **Melting and differentiation:** where it's molten, dense metal sinks and light rock rises, so a core, a mantle and a crust sort themselves out.
-3. **Cooling:** heat conducts out and radiates from the surface; the magma ocean freezes from the surface down into the first crust.
-4. **Outgassing and the first oceans:** gas leaves the rock as an atmosphere; as it cools, water rains out and fills the low ground.
-5. **A moving mantle:** heat drives the mantle to overturn; the crust over it cracks, sinks where it's cold and dense, and thickens where it's pushed together. This is where the plate model failed before. Here it's tried as material moving between hexels, not as plates carried in their own frames.
-6. **Weathering and water:** rain wears rock to sediment, water carries it downhill and drops it, ice grinds it. Rivers are water hexels flowing in channels they cut.
+Only the server writes the store.
 
-Each step is judged by stills of the blocks and by its counts.
+## The simulation
 
-## The live world
+The simulation runs on the server, only in chunks near players or events:
+- **Water and lava** move by pipes between stacked sections in each column, weighted so they spread evenly in every direction.
+- **Sand and rubble** slide when steeper than their angle of repose, measured in true distances.
+- **Collapse** checks connectivity in a bounded region, plus a load rule that lets arches stand.
+- **Lava** stiffens and freezes as it cools.
 
-- **Digging and building:** edits remove or place hexels, as server operations every client applies alike.
-- **Fractures and rockslides:** rock holds by its strength. Cut away its support, or let water, frost or a quake crack it, and what breaks off falls, tumbles and settles as rubble.
-- **Magma:** heat under the crust melts pockets that rise through cracks, flow out as lava, cool and become new rock.
-- **Water:** flows, pools and erodes wherever it is, and settles to rest when nothing moves it.
-- **At rest costs nothing:** only what moves is simulated, near players, and baked back once it settles.
+Updates are integer, ordered by a hash and repeatable. Clients receive changed bricks within their interest radius and interpolate between updates.
+
+## The client
+
+The client meshes changed chunks on worker threads:
+- **Shaped matter** is meshed by dual contouring, so crisp and smooth forms come out of one surface.
+- **Loose matter** is meshed by surface nets.
+
+Detail falls off with distance without cracks, and materials blend by triplanar texturing. Positions are 64-bit on the server and camera-relative floats on the GPU, with reversed-Z depth.
 
 ## Build order
 
-**H · Hex cells**
-1. Addresses: level, diamond, `(i, j)`, poles; centre on the sphere; the cell under a direction.
-2. Neighbours: six, five at the pentagons, across diamond edges, exact.
-3. An equal-area projection; corners, area and a prism's volume between shells.
-4. Between levels: the centre and the six half-shared cells, conserved both ways.
-5. A level's columns of shells, holding materials and heat; chunks of finer columns where they're needed.
-6. Blocks: hex prisms meshed by material, drawn in the client.
+1. **Cells:** cube-sphere addresses, the tangent mapping and its inverse, exact neighbours across edges and corners, cell areas and volumes, levels; the sparse tree and windows ported from diamonds to faces.
+2. **The planet's description:** physical knobs, derived values and the four presets.
+3. **Generator v1:** reference level, strata, eroded relief, caves, craters, soils; golden hashes on every platform.
+4. **Store:** face trees, tiles, bricks, both kinds of matter, saving and loading.
+5. **Mesher v1:** surface nets; the client's `--globe` draws the new world, and the hexel code is removed.
+6. **Mesher v2:** dual contouring.
+7. **Detail by distance,** crack-free across chunks and faces.
+8. **Materials and texturing.**
+9. **Server authority and streaming.**
+10. **Water.**
+11. **Sand and rubble.**
+12. **Collapse.**
+13. **Lava and magma.**
+14. **The drainage solve, rivers, lakes and coasts.**
 
-**P · Birth**
-7. Accretion.
-8. Heat, melting and differentiation.
-9. Cooling and the first crust.
-10. Outgassing, rain and oceans.
-11. The mantle overturning, the crust cracking and sinking.
-12. Weathering, rivers, sediment and ice.
-
-**L · Live**
-13. Digging and building.
-14. Strength, fractures and falling rock.
-15. Magma and eruptions.
-16. Water flowing near players.
+Each stage ends in tests and stills. The report's build order says how each one is judged.
