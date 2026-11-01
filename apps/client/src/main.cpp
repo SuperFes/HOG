@@ -734,9 +734,22 @@ void return_to(Connection& connection, Controls& controls, std::optional<client:
 
 // Starts or stops playing the character as asked: stood on the ground under the eye, or flying
 // on from where the camera was.
+// Metres the ground drawn stands over the radius under a point.
+double drawn_ground(const planet::World& world, const client::GlobeWorld* globe, WorldPosition at) {
+    return globe != nullptr ? client::globe_ground(globe->generator, at.metres())
+                            : client::ground_under(world, at);
+}
+
 void take_part(Controls& controls, std::optional<client::Player>& player, client::Flight& flight,
-               const render::Camera& camera, const planet::World& world) {
+               const render::Camera& camera, const planet::World& world,
+               const client::GlobeWorld* globe) {
     if (controls.walking == player.has_value()) {
+        return;
+    }
+    // The character stands on the old world's ground, which the globe hides.
+    if (globe != nullptr) {
+        log::warn(player_log, "can't walk on the globe yet; flying on");
+        controls.walking = false;
         return;
     }
     if (player) {
@@ -754,12 +767,6 @@ void take_part(Controls& controls, std::optional<client::Player>& player, client
 }
 
 // Plays the character or flies a frame on, as the controls ask; what the camera then sees.
-// Metres the ground drawn stands over the radius under a point.
-double drawn_ground(const planet::World& world, const client::GlobeWorld* globe, WorldPosition at) {
-    return globe != nullptr ? client::globe_ground(globe->generator, at.metres())
-                            : client::ground_under(world, at);
-}
-
 render::Camera move(const Controls& controls, std::optional<client::Player>& player,
                     client::Flight& flight, const planet::World& world,
                     const client::GlobeWorld* globe, double seconds) {
@@ -871,7 +878,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, const planet:
         last = now;
         times.add(passed, scene.timings());
         shaders.look(device, now);
-        take_part(controls, player, flight, camera, world);
+        take_part(controls, player, flight, camera, world, globe);
         report(connection, player, flight, forecast, chat, options.chat_filter, now);
         return_to(connection, controls, player, flight, world);
         if (const auto woodlands = connection.take_woodlands()) {
