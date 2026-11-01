@@ -19,6 +19,12 @@ double width_of(const Generator& generator, Cell chunk) {
     return glm::length(corner[1] - corner[0]) * generator.planet().radius;
 }
 
+// Whether `beside` lies across a side of `cell`, not only at a corner.
+bool sides_on(Cell cell, Cell beside) {
+    const CellNeighbors near = sides(cell);
+    return std::ranges::find(near.all(), beside) != near.all().end();
+}
+
 // The chunk held in `leaves` that covers `cell`: it or the nearest coarser one over it.
 std::optional<Cell> covering(const std::set<Cell>& leaves, Cell cell) {
     for (Cell over = cell;; over = parent(over)) {
@@ -31,7 +37,24 @@ std::optional<Cell> covering(const std::set<Cell>& leaves, Cell cell) {
     }
 }
 
+// A chunk beside this one more than a detail coarser, or across the cube's edge, coarser at all.
+std::optional<Cell> too_coarse_beside(const std::set<Cell>& leaves, Cell chunk) {
+    const CellNeighbors near = around(chunk);
+    for (const Cell beside : near.all()) {
+        const std::optional<Cell> coarse = covering(leaves, beside);
+        const int most_apart = beside.face != chunk.face && sides_on(chunk, beside) ? 0 : 1;
+        if (coarse && coarse->level + most_apart < chunk.level) {
+            return coarse;
+        }
+    }
+    return std::nullopt;
+}
+
 } // namespace
+
+std::optional<Cell> Drawn::over(Cell cell) const {
+    return covering(chunks_, cell);
+}
 
 double distance_to(const Generator& generator, Eye eye, Cell chunk) {
     const double radius = generator.planet().radius;
@@ -69,7 +92,7 @@ std::vector<Cell> chunks_around(const Generator& generator, Eye eye, double reac
             leaves.insert(chunk);
         }
     }
-    // Where a neighbour is two or more coarser, it's split, until none is.
+    // Where a neighbour is too coarse, it's split, until none is.
     std::vector<Cell> unchecked{leaves.begin(), leaves.end()};
     while (!unchecked.empty()) {
         const Cell chunk = unchecked.back();
@@ -77,23 +100,19 @@ std::vector<Cell> chunks_around(const Generator& generator, Eye eye, double reac
         if (!leaves.contains(chunk)) {
             continue;
         }
-        const CellNeighbors near = around(chunk);
-        for (const Cell beside : near.all()) {
-            const std::optional<Cell> coarse = covering(leaves, beside);
-            if (!coarse || coarse->level + 1 >= chunk.level) {
-                continue;
-            }
-            leaves.erase(*coarse);
-            for (const Cell finer : children(*coarse)) {
-                if (within(finer)) {
-                    leaves.insert(finer);
-                    unchecked.push_back(finer);
-                }
-            }
-            // Split one, it may need splitting again; and this one checked again.
-            unchecked.push_back(chunk);
-            break;
+        const std::optional<Cell> coarse = too_coarse_beside(leaves, chunk);
+        if (!coarse) {
+            continue;
         }
+        leaves.erase(*coarse);
+        for (const Cell finer : children(*coarse)) {
+            if (within(finer)) {
+                leaves.insert(finer);
+                unchecked.push_back(finer);
+            }
+        }
+        // Split one, it may need splitting again; and this one checked again.
+        unchecked.push_back(chunk);
     }
     std::vector<Cell> found{leaves.begin(), leaves.end()};
     std::ranges::sort(found, {}, [&](Cell chunk) { return distance_to(generator, eye, chunk); });

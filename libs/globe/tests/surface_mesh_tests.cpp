@@ -1,4 +1,5 @@
 #include <hog/globe/cell.hpp>
+#include <hog/globe/detail.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
 #include <hog/globe/surface_mesh.hpp>
@@ -33,6 +34,11 @@ namespace {
 
 const Generator& earth() {
     static const Generator generator{hog::globe::Planet{}};
+    return generator;
+}
+
+const Generator& venus() {
+    static const Generator generator{hog::globe::preset("venus").value_or(hog::globe::Planet{})};
     return generator;
 }
 
@@ -194,6 +200,58 @@ TEST_CASE("chunks of a detail meet without gaps, on a face and across the cube's
         }
         CHECK(faces.size() ==
               ((chunk.i == 0 || chunk.i == last || chunk.j == 0 || chunk.j == last) ? 2U : 1U));
+    }
+}
+
+TEST_CASE("chunks at other details meet without gaps, on a face and across the cube's edges",
+          "[globe][surface]") {
+    VoxelStore store{venus().layers()};
+    const World world{venus(), store};
+    const hog::globe::Layers& layers = venus().layers();
+    for (const DVec3 up :
+         {somewhere(11), glm::normalize(DVec3{1.0, 1.0, 0.2}),
+          glm::normalize(DVec3{-0.3, 1.0, -1.0}), glm::normalize(DVec3{-1.0, -1.0, 0.3})}) {
+        // Close round the eye, so the details change within a few chunks of it.
+        const std::vector<Cell> chunks = hog::globe::chunks_around(venus(), {.up = up}, 100.0, 1.1);
+        const hog::globe::Drawn drawn{chunks};
+        SurfaceMesh mesh;
+        mesh.origin = up * venus().planet().radius;
+        std::set<int> details;
+        std::set<int> faces;
+        for (const Cell chunk : chunks) {
+            hog::globe::add_chunk(mesh, world, chunk, drawn);
+            details.insert(hog::globe::detail_of(chunk, layers));
+            faces.insert(chunk.face);
+        }
+        CAPTURE(up.x, up.y, up.z, chunks.size(), details.size(), faces.size());
+        REQUIRE(details.size() >= 3);
+        // Open sides only round the drawn chunks' rim, and under where caves stop being drawn.
+        std::size_t open = 0;
+        for (const DVec3 side : open_sides(mesh)) {
+            const DVec3 dir = glm::normalize(side);
+            const std::optional<Cell> chunk =
+                drawn.over(hog::globe::cell_under(dir, layers.level - hog::globe::chunk_levels));
+            if (!chunk) {
+                continue;
+            }
+            const hog::globe::CellNeighbors near = hog::globe::around(*chunk);
+            const bool rim = std::ranges::any_of(near.all(), [&](Cell beside) {
+                return !drawn.over(beside).has_value() &&
+                       !std::ranges::any_of(hog::globe::children(beside),
+                                            [&](Cell finer) { return drawn.contains(finer); });
+            });
+            const int apart = hog::globe::apart_at(hog::globe::detail_of(*chunk, layers));
+            const double depth = std::max(hog::globe::surface_depth, distance_band(layers, apart)) -
+                                 (4.0 * apart * layers.thickness);
+            const double ground = hog::globe::ground_below(venus(), dir, 0.5).value_or(0.0);
+            if (!rim && glm::length(side) > ground - depth) {
+                ++open;
+                UNSCOPED_INFO("open at detail " << hog::globe::detail_of(*chunk, layers) << " face "
+                                                << int{chunk->face} << " "
+                                                << glm::length(side) - ground << " m over");
+            }
+        }
+        CHECK(open == 0);
     }
 }
 

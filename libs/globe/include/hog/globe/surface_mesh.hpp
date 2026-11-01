@@ -2,6 +2,7 @@
 
 #include <hog/core/math.hpp>
 #include <hog/globe/cell.hpp>
+#include <hog/globe/detail.hpp>
 #include <hog/globe/material.hpp>
 #include <hog/globe/world.hpp>
 
@@ -57,6 +58,10 @@ struct SurfaceMesh {
 // surface is sought from surface_depth under the chunk's lowest ground to over its highest and
 // around the sea's level, and through changes held next to those; caves are followed further
 // down. Coarser chunks are generated as much coarser.
+// Where the chunks beside it are drawn at other details, its surfaces meet theirs: the boxes of
+// voxels either side meet, and the vertex of a coarser box takes in where the surface crosses
+// the finer boxes' edges on its faces.
 void add_chunk(SurfaceMesh& mesh, const World& world, Cell chunk);
+void add_chunk(SurfaceMesh& mesh, const World& world, Cell chunk, const Drawn& drawn);
 
 } // namespace hog::globe

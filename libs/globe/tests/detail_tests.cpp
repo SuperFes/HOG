@@ -46,6 +46,24 @@ double width_of(Cell chunk) {
     return glm::length(corner[1] - corner[0]) * earth().planet().radius;
 }
 
+// None overlaps another, and those beside it are at most one detail apart; across the cube's
+// edges, those facing it are at its detail.
+void check_beside(const std::set<Cell>& chunks, Cell chunk) {
+    const hog::globe::CellNeighbors near = hog::globe::around(chunk);
+    for (const Cell beside : near.all()) {
+        if (const std::optional<Cell> coarse = over(chunks, beside)) {
+            CHECK(coarse->level + 1 >= chunk.level);
+        }
+    }
+    const hog::globe::CellNeighbors facing = hog::globe::sides(chunk);
+    for (const Cell beside : facing.all()) {
+        const std::optional<Cell> coarse = over(chunks, beside);
+        if (beside.face != chunk.face && coarse) {
+            CHECK(coarse->level == chunk.level);
+        }
+    }
+}
+
 void check_around(Eye eye, double reach) {
     const hog::globe::Layers& layers = earth().layers();
     const std::vector<Cell> found = hog::globe::chunks_around(earth(), eye, reach, ratio);
@@ -68,14 +86,8 @@ void check_around(Eye eye, double reach) {
         if (hog::globe::detail_of(chunk, layers) > 0) {
             CHECK(distance >= ratio * width_of(chunk));
         }
-        // None overlaps another, and those beside it are at most one detail apart.
         CHECK(over(chunks, chunk) == chunk);
-        const hog::globe::CellNeighbors near = hog::globe::around(chunk);
-        for (const Cell beside : near.all()) {
-            if (const std::optional<Cell> coarse = over(chunks, beside)) {
-                CHECK(coarse->level + 1 >= chunk.level);
-            }
-        }
+        check_beside(chunks, chunk);
     }
     // Full-detail chunks within reach, short of its edge, are each covered by one.
     const Cell under = hog::globe::chunk_under(eye.up, layers);
