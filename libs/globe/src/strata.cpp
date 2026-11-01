@@ -9,9 +9,6 @@
 namespace hog::globe::terms {
 namespace {
 
-// Sedimentary beds run a few metres thick; a cliff shows dozens.
-constexpr double bed_thickness = 8.0;
-
 // Platforms of sedimentary rock lie up to a kilometre and a half deep over continental basement
 // where basins sag, in basins some 400 km across on Earth; the ocean floor gathers a few hundred
 // metres. Mountains strip it, and high ground loses half its height of it.
@@ -75,11 +72,16 @@ Layering layering(const Context& context, DVec3 direction, const Column& column,
         const double on_floor = planet.regime == Regime::Plates ? ocean_cover : on_land;
         const double cover = (column.high * on_land) + ((1.0 - column.high) * on_floor);
         layers.cover = std::max(0.0, cover * (1.0 - column.built));
-        layers.fold =
+        // High ground loses cover as it rises; the basins' sag changes too slowly to count.
+        if (layers.cover > 0.0 && height > 0.0) {
+            layers.cover_tilt = -0.5 * column.high * (1.0 - column.built) * column.height.gradient;
+        }
+        const double folding = plain_fold + (belt_fold * column.built);
+        const Noise folds =
             fbm(at, {.wavelength = fold_wavelength, .gain = 0.5, .finest = fold_wavelength / 16.0},
-                0.0, context.seed(Term::Folds))
-                .value *
-            (plain_fold + (belt_fold * column.built));
+                0.0, context.seed(Term::Folds));
+        layers.fold = folds.value * folding;
+        layers.fold_tilt = tangential(folds.gradient, direction) * folding;
     }
 
     const bool sea = context.shape->sea;
@@ -121,9 +123,20 @@ Material material_at(const Context& context, const Layering& layers, double dept
     if (depth >= layers.cover) {
         return layers.basement;
     }
-    // Each bed's rock drawn once for the planet, so a bed is the same rock wherever it shows.
+    return bed_rock(context, bed_at(context, layers, radius));
+}
+
+std::int64_t bed_at(const Context& context, const Layering& layers, double radius) noexcept {
     const double lifted = radius - context.planet->radius + layers.fold;
-    const auto bed = static_cast<std::int64_t>(std::floor(lifted / bed_thickness));
+    return static_cast<std::int64_t>(std::floor(lifted / bed_thickness));
+}
+
+double bed_bottom(const Context& context, const Layering& layers, std::int64_t bed) noexcept {
+    return context.planet->radius - layers.fold + (static_cast<double>(bed) * bed_thickness);
+}
+
+Material bed_rock(const Context& context, std::int64_t bed) noexcept {
+    // Each bed's rock drawn once for the planet, so a bed is the same rock wherever it shows.
     const double draw = unit(hash_values(context.seed(Term::Strata), bed));
     // Limestone is laid down only in seas.
     if (context.shape->sea && draw < 0.3) {

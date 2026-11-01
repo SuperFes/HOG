@@ -37,6 +37,8 @@ struct Strata {
     double sediment_depth = 0.0;  // loose sediment's base, metres below the snow
     double cover = 0.0;           // sedimentary rock's base, metres below the ground
     double fold = 0.0;            // metres the beds are lifted here
+    DVec3 fold_tilt{0.0};         // how much more, per metre across
+    DVec3 cover_tilt{0.0};        // how much more `cover`, per metre across
     Material basement = Material::Basalt;
 };
 

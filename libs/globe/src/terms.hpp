@@ -101,13 +101,26 @@ using Layering = Strata;
 // Caves never reach a point more than this many metres from open rock.
 inline constexpr double cave_reach = 50.0;
 
-// Metres from a point in `rock`, `depth` under the ground, to the nearest cave's open space:
-// negative inside it, `cave_reach` at most.
-[[nodiscard]] double cave_distance(const Context& context, DVec3 direction, double radius,
-                                   Material rock, double depth, double lod) noexcept;
+// Metres from a point to the nearest cave's open space: negative inside it, `cave_reach` at most.
+// Each cave keeps to the rock it was dissolved or flowed in, a bed or the basement, as the shape
+// both share. `ground` is the column's, metres from the centre, before caves open it; `cover` is
+// how much rock lies between the point and open air.
+[[nodiscard]] double cave_distance(const Context& context, const Layering& layers, DVec3 direction,
+                                   double radius, double ground, double cover, double lod) noexcept;
 
 // What's `depth` metres under the ground at `radius`.
 [[nodiscard]] Material material_at(const Context& context, const Layering& layers, double depth,
                                    double radius) noexcept;
+
+// Sedimentary beds run a few metres thick; a cliff shows dozens.
+inline constexpr double bed_thickness = 8.0;
+
+// The bed at `radius`, counted up from the one at the planet's radius where unfolded, its bottom
+// in metres from the centre, and its rock; beds lie only within the layers' cover.
+[[nodiscard]] std::int64_t bed_at(const Context& context, const Layering& layers,
+                                  double radius) noexcept;
+[[nodiscard]] double bed_bottom(const Context& context, const Layering& layers,
+                                std::int64_t bed) noexcept;
+[[nodiscard]] Material bed_rock(const Context& context, std::int64_t bed) noexcept;
 
 } // namespace hog::globe::terms

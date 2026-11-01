@@ -293,10 +293,25 @@ Sample Generator::Column::sample(double radius) const noexcept {
 
     // Caves, carved out of the rock under any loose cover, can open the ground near them.
     if (sample.distance < cave_surface_reach) {
-        const double loose = strata_.snow + strata_.sediment_depth;
-        const Material rock =
-            terms::material_at(context, strata_, std::max(depth, loose + 0.01), radius);
-        const double cave = terms::cave_distance(context, direction_, radius, rock, depth, lod_);
+        // The rock between a point and the open air over the ground.
+        const auto cover_at = [&](double at, double ground) {
+            return std::max(0.0, (ground - at) / std::sqrt(1.0 + (slope * slope)));
+        };
+        const DVec3 here = direction_ * radius;
+        const DVec3 tilt = tilt_ * (planet.radius / radius);
+        // Nearby, the ground stands as its tilt has it, and the beds and cover follow it.
+        const auto cave_at = [&](DVec3 point) {
+            const double out = glm::length(point);
+            const DVec3 offset = point - here;
+            const double ground = ground_ + glm::dot(tilt, offset);
+            terms::Layering beds = strata_;
+            beds.fold += glm::dot(strata_.fold_tilt, offset);
+            beds.cover += glm::dot(strata_.cover_tilt, offset);
+            return terms::cave_distance(context, beds, point / out, out, ground,
+                                        cover_at(out, ground), lod_);
+        };
+        const double cave = terms::cave_distance(context, strata_, direction_, radius, ground_,
+                                                 cover_at(radius, ground_), lod_);
         const double ground = sample.distance;
         sample.distance = smooth_max(ground, -cave, cave_blend);
         const double cave_share = smooth_max_share(-cave, ground, cave_blend);
@@ -308,13 +323,7 @@ Sample Generator::Column::sample(double radius) const noexcept {
             for (glm::length_t axis = 0; axis < 3; ++axis) {
                 DVec3 along{0.0};
                 along[axis] = step;
-                const auto cave_at = [&](DVec3 point) {
-                    const double out = glm::length(point);
-                    return terms::cave_distance(context, point / out, out, rock, ground_ - out,
-                                                lod_);
-                };
-                const DVec3 point = direction_ * radius;
-                cave_rise[axis] = (cave_at(point + along) - cave_at(point - along)) / (2.0 * step);
+                cave_rise[axis] = (cave_at(here + along) - cave_at(here - along)) / (2.0 * step);
             }
             rise = ((1.0 - cave_share) * glm::normalize(rise)) - (cave_share * cave_rise);
         }
