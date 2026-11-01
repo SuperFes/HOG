@@ -4,7 +4,7 @@
 
 namespace hog::globe {
 
-// What a hexel is made of. Whether it's solid, molten or a gas comes from its temperature, so a
+// What matter is made of. Whether it's solid, molten or a gas comes from its temperature, so a
 // melted mantle is still mantle and steam is still water.
 enum class Material : std::uint8_t {
     Air,

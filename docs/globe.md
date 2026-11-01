@@ -4,7 +4,7 @@ Oct 31, 2026
 
 The world is voxels on a sphere, modelled on Enshrouded's voxel world and stretched into a planet. A generator, written fresh, says what is at any point and at any resolution. A sparse store holds only what has changed: digging, building, water, slides, lava. What players see is a surface drawn from the voxels, so the world looks like a clean modern game, not blocks.
 
-The research behind this is in `reports/Editable voxel planet architecture.md`, with notes in `research_notes/`. It replaces the hexel plan, which was tried first. That plan's sparse tree, windows and conservation tests carry over. The old `hog::planet` generator and its heightfield are never used or read.
+The research behind this is in `reports/Editable voxel planet architecture.md`, with notes in `research_notes/`. It replaces the hexel plan, which was tried first and has since been removed; its sparse tree and windows are in the history for when the store needs them. The old `hog::planet` generator and its heightfield are never used or read.
 
 ## Rules
 
