@@ -1,3 +1,4 @@
+#include <hog/globe/maths.hpp>
 #include <hog/globe/planet.hpp>
 
 #include <algorithm>
@@ -128,7 +129,7 @@ Planet moon() {
 
 double temperature_at(const Planet& planet, double latitude) {
     return planet.pole_temperature +
-           ((planet.equator_temperature - planet.pole_temperature) * std::cos(latitude));
+           ((planet.equator_temperature - planet.pole_temperature) * maths::cos(latitude));
 }
 
 double mean_temperature(const Planet& planet) {
@@ -145,7 +146,7 @@ std::optional<double> boiling_point(Volatile volatiles, double pressure) {
     // Clausius–Clapeyron from the triple point.
     const double inverse =
         (1.0 / phase->triple_temperature) -
-        (gas_constant / phase->latent_heat * std::log(pressure / phase->triple_pressure));
+        (gas_constant / phase->latent_heat * maths::log(pressure / phase->triple_pressure));
     return std::min(1.0 / inverse, phase->critical_temperature);
 }
 

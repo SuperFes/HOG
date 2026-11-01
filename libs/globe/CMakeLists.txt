@@ -28,5 +28,6 @@ hog_add_tests(hog_globe
     tests/hexel_mesh_tests.cpp
     tests/hexel_store_tests.cpp
     tests/layers_tests.cpp
+    tests/maths_tests.cpp
     tests/planet_tests.cpp
     tests/settling_tests.cpp)

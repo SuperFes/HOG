@@ -1,5 +1,6 @@
 #include <hog/core/assert.hpp>
 #include <hog/globe/cell.hpp>
+#include <hog/globe/maths.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -95,11 +96,11 @@ std::array<int, 2> in_plane(const Surface& point, std::int64_t n) {
 
 // The tangent mapping: even steps on the cube's face are even turns of angle out from its middle.
 double warped(double linear) {
-    return std::tan(std::numbers::pi / 4.0 * linear);
+    return maths::tan(std::numbers::pi / 4.0 * linear);
 }
 
 double unwarped(double tangent) {
-    return std::atan(tangent) * 4.0 / std::numbers::pi;
+    return maths::atan(tangent) * 4.0 / std::numbers::pi;
 }
 
 DVec3 direction_at(const Frame& frame, double u, double v) {
@@ -120,7 +121,7 @@ void add(CellNeighbors& found, Cell cell) {
 double triangle_angle(const DVec3& a, const DVec3& b, const DVec3& c) {
     const double over = std::abs(glm::dot(a, glm::cross(b, c)));
     const double under = 1.0 + glm::dot(a, b) + glm::dot(b, c) + glm::dot(c, a);
-    return 2.0 * std::atan2(over, under);
+    return 2.0 * maths::atan2(over, under);
 }
 
 } // namespace
