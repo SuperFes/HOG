@@ -10,6 +10,7 @@ add_library(hog_globe
     src/hexel_store.cpp
     src/layers.cpp
     src/material.cpp
+    src/noise.cpp
     src/planet.cpp
     src/planet_file.cpp
     src/settling.cpp)
@@ -29,5 +30,6 @@ hog_add_tests(hog_globe
     tests/hexel_store_tests.cpp
     tests/layers_tests.cpp
     tests/maths_tests.cpp
+    tests/noise_tests.cpp
     tests/planet_tests.cpp
     tests/settling_tests.cpp)
