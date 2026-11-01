@@ -32,8 +32,9 @@ public:
 
     // The voxels `count` layers up from `bottom` through each of `cells`, every `apart` layers,
     // as they now are, a column after another; `columns` are the generator's through them, at the
-    // voxels' lod `apart` times coarser. Where generated, they keep their distance and normal
-    // within a band `apart` times as wide, as coarser detail is drawn from voxels further apart.
+    // voxels' lod `apart` times coarser. Their distances are told in `apart` millimetres, so
+    // where generated they're kept within a band `apart` times as wide, as coarser detail is
+    // drawn from voxels further apart.
     [[nodiscard]] std::vector<Voxel> fill(std::span<const Cell> cells,
                                           std::span<const Generator::Column> columns, int bottom,
                                           int count, int apart = 1) const;

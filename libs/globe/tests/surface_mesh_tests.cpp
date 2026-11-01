@@ -2,10 +2,12 @@
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
 #include <hog/globe/surface_mesh.hpp>
+#include <hog/globe/voxel.hpp>
 #include <hog/globe/voxel_store.hpp>
 #include <hog/globe/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <array>
@@ -110,12 +112,16 @@ std::vector<Cell> block_round(Cell chunk) {
 // Open sides that lie in the chunk, above where caves stop being drawn.
 std::size_t open_in(const World& world, const SurfaceMesh& mesh, Cell chunk) {
     const hog::globe::Layers& layers = world.generator().layers();
+    const int detail = hog::globe::detail_of(chunk, layers);
+    const int apart = hog::globe::apart_at(detail);
+    const double depth = std::max(hog::globe::surface_depth, distance_band(layers, apart)) -
+                         (4.0 * apart * layers.thickness);
     std::size_t count = 0;
     for (const DVec3 side : open_sides(mesh)) {
         const DVec3 up = glm::normalize(side);
         const double ground = hog::globe::ground_below(world.generator(), up, 0.5).value_or(0.0);
-        if (hog::globe::chunk_under(up, layers) == chunk &&
-            glm::length(side) > ground - hog::globe::surface_depth + 2.0) {
+        if (hog::globe::chunk_under(up, layers, detail) == chunk &&
+            glm::length(side) > ground - depth) {
             ++count;
         }
     }
@@ -163,16 +169,21 @@ TEST_CASE("a chunk's surface lies on the ground, facing out of it", "[globe][sur
     CHECK(backwards * 1'000 < mesh.indices.size() / 3);
 }
 
-TEST_CASE("chunks meet without gaps, on a face and across the cube's edges", "[globe][surface]") {
+TEST_CASE("chunks of a detail meet without gaps, on a face and across the cube's edges",
+          "[globe][surface]") {
     VoxelStore store{moon().layers()};
     const World world{moon(), store};
     const hog::globe::Layers& layers = moon().layers();
-    const int level = layers.level - hog::globe::chunk_levels;
+    const int detail = GENERATE(0, 1, 3);
+    const int level = layers.level - hog::globe::chunk_levels - detail;
     const auto last = (std::uint32_t{1} << level) - 1;
-    for (const DVec3 up : {somewhere(11), glm::normalize(DVec3{1.0, 1.0, 0.2}),
-                           glm::normalize(DVec3{-0.3, 1.0, -1.0})}) {
-        const Cell chunk = hog::globe::chunk_under(up, layers);
-        CAPTURE(chunk.face, chunk.i, chunk.j);
+    // In a face's middle, and across edges whose faces' cells run up to them from both sides,
+    // down to them from both, and up to one and down to the other.
+    for (const DVec3 up :
+         {somewhere(11), glm::normalize(DVec3{1.0, 1.0, 0.2}),
+          glm::normalize(DVec3{-0.3, 1.0, -1.0}), glm::normalize(DVec3{-1.0, -1.0, 0.3})}) {
+        const Cell chunk = hog::globe::chunk_under(up, layers, detail);
+        CAPTURE(detail, chunk.face, chunk.i, chunk.j);
         const std::vector<Cell> block = block_round(chunk);
         const SurfaceMesh mesh = mesh_of(world, block);
         REQUIRE(mesh.vertices.size() > 1'000);
@@ -183,6 +194,48 @@ TEST_CASE("chunks meet without gaps, on a face and across the cube's edges", "[g
         }
         CHECK(faces.size() ==
               ((chunk.i == 0 || chunk.i == last || chunk.j == 0 || chunk.j == last) ? 2U : 1U));
+    }
+}
+
+TEST_CASE("coarser chunks lie on their coarser ground, as near for their size",
+          "[globe][surface]") {
+    VoxelStore store{earth().layers()};
+    const World world{earth(), store};
+    const hog::globe::Layers& layers = earth().layers();
+    const DVec3 up = ground_between(earth(), 50.0, 400.0);
+    for (const int detail : {1, 3, 5}) {
+        const int apart = hog::globe::apart_at(detail);
+        const double lod = hog::globe::voxel_lod(earth()) * apart;
+        const SurfaceMesh mesh =
+            mesh_of(world, std::array{hog::globe::chunk_under(up, layers, detail)});
+        REQUIRE(mesh.vertices.size() > 500);
+        double off = 0.0;
+        double worst = 0.0;
+        double off_fine = 0.0;
+        // Of those on the ground, rather than in caves under it.
+        std::size_t on_ground = 0;
+        std::size_t facing = 0;
+        for (std::uint32_t v = 0; v < mesh.vertices.size(); ++v) {
+            const DVec3 point = world_point(mesh, v);
+            const double distance = std::abs(earth().sample(point, lod).distance);
+            off += distance;
+            worst = std::max(worst, distance);
+            off_fine += std::abs(earth().sample(point, hog::globe::voxel_lod(earth())).distance);
+            const DVec3 up_there = glm::normalize(point);
+            const double ground = hog::globe::ground_below(earth(), up_there, lod).value_or(0.0);
+            if (std::abs(glm::length(point) - ground) < 2.0 * apart * layers.thickness) {
+                ++on_ground;
+                facing += glm::dot(DVec3{mesh.vertices[v].normal}, up_there) > 0.3 ? 1U : 0U;
+            }
+        }
+        const auto count = static_cast<double>(mesh.vertices.size());
+        CAPTURE(detail, off / count, worst, off_fine / count, on_ground, facing);
+        CHECK(off / count < 0.05 * apart);
+        CHECK(worst < 0.3 * apart);
+        // Off the finest ground by about what's smoothed away.
+        CHECK(off_fine / count < 0.5 * apart);
+        CHECK(on_ground > mesh.vertices.size() / 2);
+        CHECK(facing > on_ground * 99 / 100);
     }
 }
 
@@ -334,5 +387,23 @@ TEST_CASE("chunks mesh from the world", "[.bench][globe][surface]") {
             std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
         WARN(name << ": " << 1'000.0 * seconds / static_cast<double>(chunks.size())
                   << " ms a chunk, " << mesh.vertices.size() / chunks.size() << " vertices");
+    }
+}
+
+TEST_CASE("coarser chunks mesh from the world", "[.bench][globe][surface]") {
+    VoxelStore store{earth().layers()};
+    const World world{earth(), store};
+    for (int detail = 0; detail <= 8; ++detail) {
+        std::vector<Cell> chunks;
+        chunks.reserve(4);
+        for (std::uint64_t k = 0; k < 4; ++k) {
+            chunks.push_back(hog::globe::chunk_under(somewhere(k * 97), earth().layers(), detail));
+        }
+        const auto started = std::chrono::steady_clock::now();
+        const SurfaceMesh mesh = mesh_of(world, chunks);
+        const double seconds =
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+        WARN("detail " << detail << ": " << 1'000.0 * seconds / static_cast<double>(chunks.size())
+                       << " ms a chunk, " << mesh.vertices.size() / chunks.size() << " vertices");
     }
 }

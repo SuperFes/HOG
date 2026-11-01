@@ -16,8 +16,12 @@
 
 namespace hog::globe {
 
-Cell chunk_under(DVec3 direction, const Layers& layers) {
-    return cell_under(direction, layers.level - chunk_levels);
+int detail_of(Cell chunk, const Layers& layers) {
+    return layers.level - chunk_levels - chunk.level;
+}
+
+Cell chunk_under(DVec3 direction, const Layers& layers, int detail) {
+    return cell_under(direction, layers.level - chunk_levels - detail);
 }
 
 std::vector<Cell> chunks_near(const World& world, DVec3 around, double reach) {
@@ -52,11 +56,15 @@ namespace {
 // Two of a place's three axes: i, j and up its column.
 constexpr std::array<std::array<int, 2>, 3> others{{{1, 2}, {2, 0}, {0, 1}}};
 
-// Voxels up a band of layers through a chunk's columns, a column after another.
+// Voxels up a band of layers through a chunk's columns, every `apart` layers from `bottom`, a
+// column after another.
 struct Band {
     int bottom = 0;
     int up = 0;
+    int apart = 1;
     std::vector<Voxel> voxels;
+
+    [[nodiscard]] int top() const noexcept { return bottom + (up * apart); }
 };
 
 // A place in a chunk's box: i and j from the corner of its columns and one more all round, and
@@ -72,18 +80,21 @@ public:
     // `column_of` gives each place's index in `cells`, or -1 past the cube's corner.
     Box(const Layers& layers, std::span<const Cell> cells, std::span<const int> column_of,
         Band band, DVec3 origin)
-        : up_{band.up}, face_{cells[static_cast<std::size_t>(column_of[across + 1])].face},
+        : up_{band.up}, bottom_{band.bottom}, apart_{band.apart},
+          face_{cells[static_cast<std::size_t>(column_of[across + 1])].face},
           column_of_{column_of.begin(), column_of.end()}, voxels_{std::move(band.voxels)},
           origin_{origin} {
         directions_.reserve(cells.size());
         faces_.reserve(cells.size());
+        indices_.reserve(cells.size());
         for (const Cell cell : cells) {
             directions_.push_back(center(cell));
             faces_.push_back(cell.face);
+            indices_.push_back(index_of(cell));
         }
         radii_.reserve(static_cast<std::size_t>(up_));
-        for (int layer = band.bottom; layer < band.bottom + up_; ++layer) {
-            radii_.push_back(layers.middle(layer));
+        for (int step = 0; step < up_; ++step) {
+            radii_.push_back(layers.middle(band.bottom + (step * band.apart)));
         }
         soak();
     }
@@ -107,6 +118,12 @@ public:
 
     [[nodiscard]] std::uint8_t face(Place place) const {
         return faces_[static_cast<std::size_t>(column_at(place))];
+    }
+
+    // Which voxel of the world a place is, the same from any chunk.
+    [[nodiscard]] std::pair<std::uint64_t, int> key(Place place) const {
+        return {indices_[static_cast<std::size_t>(column_at(place))],
+                bottom_ + (place[2] * apart_)};
     }
 
     // The liquid a place counts as full of, if any: its own, or beside some, under the ground at
@@ -166,18 +183,22 @@ private:
     }
 
     int up_;
+    int bottom_;
+    int apart_;
     std::uint8_t face_;
     std::vector<int> column_of_;
     std::vector<Voxel> voxels_;
     DVec3 origin_;
     std::vector<DVec3> directions_;
     std::vector<std::uint8_t> faces_;
+    std::vector<std::uint64_t> indices_;
     std::vector<double> radii_;
     std::vector<Material> soaked_;
 };
 
-// Where shaped matter meets open space: the distance's zero, increasing outward. What it's made
-// of says which side a voxel is on, as a distance under half a millimetre rounds to none.
+// Where shaped matter meets open space: the distance's zero, increasing outward, in whatever
+// units the voxels tell it. What it's made of says which side a voxel is on, as a distance under
+// half a unit rounds to none.
 struct Ground {
     static bool inside(const Box& box, Place place) { return box.at(place).solid != Material::Air; }
     static bool crosses(const Box& box, Place a, Place b) {
@@ -344,13 +365,16 @@ private:
     // contouring: where the planes tangent to the surface at its crossings of the cube's edges
     // meet, so creases and corners keep their edge.
     void vertex(Place at) {
-        std::array<Place, 8> corners{};
-        std::array<double, 8> values{};
+        std::array<Place, 8> in_box{};
         for (std::size_t k = 0; k < 8; ++k) {
-            corners.at(k) = corner_of(at, k);
-            if (!box_->holds(corners.at(k))) {
+            in_box.at(k) = corner_of(at, k);
+            if (!box_->holds(in_box.at(k))) {
                 return;
             }
+        }
+        const std::array<Place, 8> corners = in_order(in_box);
+        std::array<double, 8> values{};
+        for (std::size_t k = 0; k < 8; ++k) {
             values.at(k) = Surface::value(*box_, corners.at(k));
         }
         const Crossings found = crossings_of(corners, values);
@@ -379,6 +403,28 @@ private:
         mesh_->vertices.push_back({.position = Vec3{position},
                                    .normal = Vec3{glm::normalize(normal)},
                                    .material = Surface::material(*box_, corners)});
+    }
+
+    // A cube's corners from its first by the world's voxels, not the box's axes: so chunks whose
+    // axes run other ways, across the cube's edges, take them in the same order and find the same
+    // vertex to the last bit.
+    [[nodiscard]] std::array<Place, 8> in_order(const std::array<Place, 8>& in_box) const {
+        const auto key = [&](std::size_t k) { return box_->key(in_box.at(k)); };
+        std::size_t first = 0;
+        for (std::size_t k = 1; k < 8; ++k) {
+            first = key(k) < key(first) ? k : first;
+        }
+        std::array<std::size_t, 3> axes{0, 1, 2};
+        std::ranges::sort(axes, {}, [&](std::size_t axis) { return key(first ^ (1U << axis)); });
+        std::array<Place, 8> ordered{};
+        for (std::size_t k = 0; k < 8; ++k) {
+            std::size_t from = first;
+            for (std::size_t axis = 0; axis < 3; ++axis) {
+                from ^= ((k >> axis) & 1U) << axes.at(axis);
+            }
+            ordered.at(k) = in_box.at(from);
+        }
+        return ordered;
     }
 
     // A corner's place in its cube, each axis 0 or 1.
@@ -481,12 +527,52 @@ private:
     std::vector<std::uint32_t> cubes_;
 };
 
+// The voxels' cell one along i or j, or both, from `cell` on a lattice of every `apart` cells;
+// none past the cube's corner. Over the cube's edge it's the next face's nearest on its own
+// lattice, so the chunks either side share the cubes between them.
+std::optional<Cell> lattice_step(Cell cell, int di, int dj, int apart) {
+    const std::int64_t n = std::int64_t{1} << cell.level;
+    const auto stays = [&](std::uint32_t at, int by) {
+        const std::int64_t to = std::int64_t{at} + (std::int64_t{by} * apart);
+        return to >= 0 && to < n;
+    };
+    const bool stays_i = stays(cell.i, di);
+    const bool stays_j = stays(cell.j, dj);
+    if (!stays_i && !stays_j) {
+        return std::nullopt;
+    }
+    Cell at = cell;
+    const auto moved = [&](std::uint32_t from, int by, bool within) {
+        return static_cast<std::uint32_t>(std::int64_t{from} +
+                                          (within ? std::int64_t{by} * apart : 0));
+    };
+    at.i = moved(at.i, di, stays_i);
+    at.j = moved(at.j, dj, stays_j);
+    if (stays_i && stays_j) {
+        return at;
+    }
+    // To the face's edge, and one more onto the next face.
+    const auto onto = [&](std::uint32_t from, int by) {
+        return by > 0 ? static_cast<int>(n - from) : -static_cast<int>(from) - 1;
+    };
+    const std::optional<Cell> over =
+        stays_i ? next_to(at, 0, onto(at.j, dj)) : next_to(at, onto(at.i, di), 0);
+    HOG_ASSERT(over.has_value(), "one edge crossed");
+    Cell landed = over.value_or(at);
+    const auto step = static_cast<std::uint32_t>(apart);
+    landed.i -= landed.i % step;
+    landed.j -= landed.j % step;
+    return landed;
+}
+
 // The chunk's columns and one more all round, row by row; none past the cube's corners.
 std::vector<std::optional<Cell>> places_of(Cell chunk, const Layers& layers) {
+    const int apart = apart_at(detail_of(chunk, layers));
+    const auto step = static_cast<std::uint32_t>(apart);
     const Cell corner{.level = static_cast<std::uint8_t>(layers.level),
                       .face = chunk.face,
-                      .i = chunk.i * chunk_side,
-                      .j = chunk.j * chunk_side};
+                      .i = chunk.i * chunk_side * step,
+                      .j = chunk.j * chunk_side * step};
     std::vector<std::optional<Cell>> places;
     places.reserve(std::size_t{Box::across} * Box::across);
     for (int b = 0; b < Box::across; ++b) {
@@ -495,48 +581,72 @@ std::vector<std::optional<Cell>> places_of(Cell chunk, const Layers& layers) {
             const int j = std::clamp(b - 1, 0, chunk_side - 1);
             const Cell inside{.level = corner.level,
                               .face = corner.face,
-                              .i = corner.i + static_cast<std::uint32_t>(i),
-                              .j = corner.j + static_cast<std::uint32_t>(j)};
-            places.push_back(next_to(inside, (a - 1) - i, (b - 1) - j));
+                              .i = corner.i + (static_cast<std::uint32_t>(i) * step),
+                              .j = corner.j + (static_cast<std::uint32_t>(j) * step)};
+            places.push_back(lattice_step(inside, (a - 1) - i, (b - 1) - j, apart));
         }
     }
     return places;
 }
 
-// Layer bands the surfaces lie in, lowest first, apart from each other.
+// The layers of bricks held under a chunk's columns.
+std::set<int> held_layers(const VoxelStore& store, Cell chunk, int apart) {
+    const auto bricks_across =
+        static_cast<std::uint32_t>(chunk_side / brick_side) * static_cast<std::uint32_t>(apart);
+    const std::uint32_t first_i = chunk.i * bricks_across;
+    const std::uint32_t first_j = chunk.j * bricks_across;
+    const auto under = [&](const BrickSite& site) {
+        return site.face == chunk.face && site.i - first_i < bricks_across &&
+               site.j - first_j < bricks_across;
+    };
+    std::set<int> layers;
+    // By what's held, where that's fewer than the chunk's bricks a layer.
+    if (store.size() < std::size_t{bricks_across} * bricks_across) {
+        for (const BrickSite& site : store.sites()) {
+            if (under(site)) {
+                layers.insert(static_cast<int>(site.layer));
+            }
+        }
+        return layers;
+    }
+    for (std::uint32_t layer = 0; layer < store.bricks_up(); ++layer) {
+        for (std::uint32_t j = 0; j < bricks_across; ++j) {
+            for (std::uint32_t i = 0; i < bricks_across; ++i) {
+                if (store.brick(
+                        {.face = chunk.face, .i = first_i + i, .j = first_j + j, .layer = layer}) !=
+                    nullptr) {
+                    layers.insert(static_cast<int>(layer));
+                }
+            }
+        }
+    }
+    return layers;
+}
+
+// Layer bands the surfaces lie in, lowest first, apart from each other, each from and to a layer
+// of the chunk's lattice.
 std::vector<std::pair<int, int>> bands_of(const World& world, Cell chunk,
                                           std::span<const Generator::Column> columns) {
     const Generator& generator = world.generator();
     const Layers& layers = generator.layers();
+    const int apart = apart_at(detail_of(chunk, layers));
     double lowest = std::numeric_limits<double>::max();
     double highest = std::numeric_limits<double>::lowest();
     for (const Generator::Column& column : columns) {
         lowest = std::min(lowest, column.ground());
         highest = std::max(highest, column.ground());
     }
-    const double band = distance_band(layers) + layers.thickness;
-    std::vector<std::pair<int, int>> bands{
-        {layers.layer_at(lowest - surface_depth), layers.layer_at(highest + band) + 1}};
+    const double band = distance_band(layers, apart) + (layers.thickness * apart);
+    std::vector<std::pair<int, int>> bands{{layers.layer_at(lowest - std::max(surface_depth, band)),
+                                            layers.layer_at(highest + band) + 1}};
     if (const auto sea = generator.sea_level(); sea && *sea > lowest) {
         bands.emplace_back(layers.layer_at(*sea - band), layers.layer_at(*sea + band) + 1);
     }
     // Changes held next to a band widen it, a brick at a time.
-    const VoxelStore& store = world.store();
-    constexpr auto bricks_across = static_cast<std::uint32_t>(chunk_side / brick_side);
-    const auto held_in = [&](int brick_layer) {
-        for (std::uint32_t j = 0; j < bricks_across; ++j) {
-            for (std::uint32_t i = 0; i < bricks_across; ++i) {
-                const BrickSite site{.face = chunk.face,
-                                     .i = (chunk.i * bricks_across) + i,
-                                     .j = (chunk.j * bricks_across) + j,
-                                     .layer = static_cast<std::uint32_t>(brick_layer)};
-                if (store.brick(site) != nullptr) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    };
+    const std::set<int> held = held_layers(world.store(), chunk, apart);
+    const auto held_in = [&](int brick_layer) { return held.contains(brick_layer); };
+    // Past the last layer of the lattice under the ceiling.
+    const int ceiling = (((layers.count - 1) / apart) + 1) * apart;
     for (auto& [bottom, top] : bands) {
         bottom = std::clamp(bottom, 0, layers.count);
         top = std::clamp(top, 0, layers.count);
@@ -546,13 +656,15 @@ std::vector<std::pair<int, int>> bands_of(const World& world, Cell chunk,
         while (top < layers.count && held_in(top / brick_side)) {
             top = std::min(layers.count, ((top / brick_side) + 1) * brick_side);
         }
+        bottom -= bottom % apart;
+        top = std::min(ceiling, ((top + apart - 1) / apart) * apart);
     }
     std::ranges::sort(bands);
     std::vector<std::pair<int, int>> merged;
     for (const auto& [bottom, top] : bands) {
         if (!merged.empty() && bottom <= merged.back().second) {
             merged.back().second = std::max(merged.back().second, top);
-        } else if (top - bottom >= 2) {
+        } else if (top - bottom >= 2 * apart) {
             merged.emplace_back(bottom, top);
         }
     }
@@ -572,12 +684,12 @@ bool open_under_ground(const Band& band, std::span<const Generator::Column> colu
     return false;
 }
 
-// The band reaching down to `bottom`.
+// The band reaching down to `bottom`, a layer of its lattice.
 Band deepened(const World& world, std::span<const Cell> cells,
               std::span<const Generator::Column> columns, const Band& band, int bottom) {
-    const int more = band.bottom - bottom;
-    const std::vector<Voxel> under = world.fill(cells, columns, bottom, more);
-    Band deeper{.bottom = bottom, .up = band.up + more, .voxels = {}};
+    const int more = (band.bottom - bottom) / band.apart;
+    const std::vector<Voxel> under = world.fill(cells, columns, bottom, more, band.apart);
+    Band deeper{.bottom = bottom, .up = band.up + more, .apart = band.apart, .voxels = {}};
     deeper.voxels.reserve(cells.size() * static_cast<std::size_t>(deeper.up));
     for (std::size_t k = 0; k < cells.size(); ++k) {
         const auto from = [](const std::vector<Voxel>& voxels, std::size_t column, int up) {
@@ -595,8 +707,9 @@ Band deepened(const World& world, std::span<const Cell> cells,
 
 void add_chunk(SurfaceMesh& mesh, const World& world, Cell chunk) {
     const Layers& layers = world.generator().layers();
-    HOG_ASSERT(chunk.is_valid() && chunk.level == layers.level - chunk_levels,
-               "a chunk is a cell chunk_levels coarser than the voxels'");
+    HOG_ASSERT(chunk.is_valid() && detail_of(chunk, layers) >= 0,
+               "a chunk is a cell at least chunk_levels coarser than the voxels'");
+    const int apart = apart_at(detail_of(chunk, layers));
     const std::vector<std::optional<Cell>> places = places_of(chunk, layers);
     std::vector<Cell> cells;
     std::vector<int> column_of;
@@ -608,18 +721,21 @@ void add_chunk(SurfaceMesh& mesh, const World& world, Cell chunk) {
         }
     }
     const std::vector<Generator::Column> columns =
-        world.generator().columns(cells, voxel_lod(world.generator()));
+        world.generator().columns(cells, voxel_lod(world.generator()) * apart, apart);
     const double lowest =
         std::ranges::min(columns, {}, &Generator::Column::ground).ground() - cave_depth;
+    const double depth = std::max(surface_depth, distance_band(layers, apart));
     for (const auto& [bottom, top] : bands_of(world, chunk, columns)) {
+        const int up = (top - bottom) / apart;
         Band band{.bottom = bottom,
-                  .up = top - bottom,
-                  .voxels = world.fill(cells, columns, bottom, top - bottom)};
+                  .up = up,
+                  .apart = apart,
+                  .voxels = world.fill(cells, columns, bottom, up, apart)};
         // Caves are followed down while they're open at the band's foot.
         while (band.bottom > 0 && layers.middle(band.bottom) > lowest &&
                open_under_ground(band, columns, layers)) {
-            const int deeper =
-                std::max(0, layers.layer_at(layers.bottom(band.bottom) - surface_depth));
+            int deeper = std::max(0, layers.layer_at(layers.bottom(band.bottom) - depth));
+            deeper -= deeper % apart;
             band = deepened(world, cells, columns, band, deeper);
         }
         const Box box{layers, cells, column_of, std::move(band), mesh.origin};

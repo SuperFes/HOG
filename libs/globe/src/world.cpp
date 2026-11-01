@@ -15,13 +15,12 @@
 namespace hog::globe {
 namespace {
 
+// Its distance in `apart` millimetres.
 Voxel generated_at(const Generator::Column& column, const Layers& layers, std::uint32_t layer,
-                   double band) {
-    return voxel_from(column.sample(layers.middle(static_cast<int>(layer))), band);
-}
-
-Voxel generated_at(const Generator::Column& column, const Layers& layers, std::uint32_t layer) {
-    return generated_at(column, layers, layer, distance_band(layers));
+                   int apart = 1) {
+    Sample sample = column.sample(layers.middle(static_cast<int>(layer)));
+    sample.distance /= apart;
+    return voxel_from(sample, distance_band(layers));
 }
 
 } // namespace
@@ -74,7 +73,6 @@ std::vector<Voxel> World::fill(std::span<const Cell> cells,
     HOG_ASSERT(apart > 0 && bottom >= 0 && count >= 0 &&
                    (count == 0 || bottom + ((count - 1) * apart) < layers.count),
                "layers out of range");
-    const double band = distance_band(layers, apart);
     std::vector<Voxel> voxels(cells.size() * static_cast<std::size_t>(count));
     std::unordered_map<std::uint64_t, BrickVoxels> held;
     for (std::size_t k = 0; k < cells.size(); ++k) {
@@ -98,8 +96,8 @@ std::vector<Voxel> World::fill(std::span<const Cell> cells,
             const Brick* stored = store_->brick(in);
             if (stored == nullptr) {
                 for (; step < end; ++step) {
-                    voxel_at(step) = generated_at(columns[k], layers,
-                                                  static_cast<std::uint32_t>(layer_of(step)), band);
+                    voxel_at(step) = generated_at(
+                        columns[k], layers, static_cast<std::uint32_t>(layer_of(step)), apart);
                 }
                 continue;
             }
@@ -112,7 +110,9 @@ std::vector<Voxel> World::fill(std::span<const Cell> cells,
                               .i = site.i,
                               .j = site.j,
                               .layer = static_cast<std::uint32_t>(layer_of(step))};
-                voxel_at(step) = found->second[static_cast<std::size_t>(index_in_brick(at))];
+                Voxel& voxel = voxel_at(step);
+                voxel = found->second[static_cast<std::size_t>(index_in_brick(at))];
+                voxel.distance = distance_in_mm(metres(voxel.distance) / apart);
             }
         }
     }

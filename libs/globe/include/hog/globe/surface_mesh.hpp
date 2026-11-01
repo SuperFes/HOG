@@ -36,19 +36,27 @@ struct SurfaceMesh {
     std::vector<std::uint32_t> indices;
 };
 
-// The chunk a direction passes through: a cell chunk_levels coarser than the voxels'.
-[[nodiscard]] Cell chunk_under(DVec3 direction, const Layers& layers);
+// A chunk at detail n is a cell chunk_levels + n coarser than the voxels', drawn from every 2^n-th
+// voxel along each axis, so still 32 across; each level's voxels are among the next finer's.
+[[nodiscard]] int detail_of(Cell chunk, const Layers& layers);
+[[nodiscard]] constexpr int apart_at(int detail) noexcept {
+    return 1 << detail;
+}
+
+// The chunk a direction passes through, at a detail.
+[[nodiscard]] Cell chunk_under(DVec3 direction, const Layers& layers, int detail = 0);
 
 // Chunks whose middles lie within `reach` metres of the unit direction `around`, along the
 // planet's radius, nearest first.
 [[nodiscard]] std::vector<Cell> chunks_near(const World& world, DVec3 around, double reach);
 
-// Adds a chunk's surfaces by surface nets: a vertex in each cube of eight voxels the surface
-// passes through, at the mean of where it crosses the cube's edges, and a quad across each edge
-// it crosses. Each edge is the chunk's that holds its lower end, or, across the cube's edges, the
-// lower face's, so chunks meet without gaps or overlaps. The surface is sought from surface_depth
-// under the chunk's lowest ground to over its highest and around the sea's level, and through
-// changes held next to those; caves are followed further down.
+// Adds a chunk's surfaces by dual contouring: a vertex in each cube of eight voxels the surface
+// passes through, where the planes tangent to it at its crossings of the cube's edges meet, and a
+// quad across each edge it crosses. Each edge is the chunk's that holds its lower end, or, across
+// the cube's edges, the lower face's, so chunks of a detail meet without gaps or overlaps. The
+// surface is sought from surface_depth under the chunk's lowest ground to over its highest and
+// around the sea's level, and through changes held next to those; caves are followed further
+// down. Coarser chunks are generated as much coarser.
 void add_chunk(SurfaceMesh& mesh, const World& world, Cell chunk);
 
 } // namespace hog::globe

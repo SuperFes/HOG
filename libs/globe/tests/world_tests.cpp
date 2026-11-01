@@ -301,15 +301,20 @@ TEST_CASE("voxels filled far apart are the world's where changed, and coarser gr
             const Voxel voxel =
                 voxels[(k * static_cast<std::size_t>(count)) + static_cast<std::size_t>(step)];
             if (store.brick(hog::globe::brick_of(site)) != nullptr) {
-                CHECK(voxel == world.at(site));
+                Voxel changed = world.at(site);
+                changed.distance =
+                    hog::globe::distance_in_mm(hog::globe::metres(changed.distance) / apart);
+                CHECK(voxel == changed);
                 ++held;
                 continue;
             }
-            const hog::globe::Sample sample =
+            hog::globe::Sample sample =
                 columns[k].sample(layers.middle(static_cast<int>(site.layer)));
-            CHECK(voxel == voxel_from(sample, distance_band(layers, apart)));
-            past_band += std::abs(hog::globe::metres(voxel.distance)) > distance_band(layers) &&
-                                 voxel.distance != Voxel::far && voxel.distance != -Voxel::far
+            sample.distance /= apart;
+            CHECK(voxel == voxel_from(sample, distance_band(layers)));
+            past_band += std::abs(hog::globe::metres(voxel.distance) * apart) >
+                                     distance_band(layers) + 1.0 &&
+                                 voxel.normal != Voxel::no_normal
                              ? 1
                              : 0;
         }
