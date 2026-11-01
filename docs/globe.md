@@ -43,7 +43,7 @@ What v1 builds, all from the knobs:
 - **Strata and soils:** sedimentary beds where a volatile has run, folded where mountains rose and stripped from them; soil, mud, beach sand and snow where water cycles; regolith that thickens with age where it doesn't.
 - **Caves:** passages along limestone beds and chambers in them, and lava tubes under basalt flows, carved out of the rock.
 
-A column's terms depend on direction alone, so `Generator::column` computes them once and samples any radius along it. The ground's slope, which the distance needs, is measured by central differences, four extra columns each. Voxels are filled a square of columns at a time through `Generator::columns`, which takes the slope from neighbouring cells instead. Stills come from `hog-stills`: a map, a relief square, a section and a plan slice, all drawn by sampling the 3D field.
+A column's terms depend on direction alone, so `Generator::column` computes them once and samples any radius along it. The ground's slope, which the distance needs, is measured by central differences, four extra columns each. Voxels are filled through `Generator::columns`, for any cells of one level, which takes the slope from neighbouring cells instead. Stills come from `hog-stills`: a map, a relief square, a section and a plan slice, all drawn by sampling the 3D field.
 
 ## The store
 
@@ -79,6 +79,13 @@ The client meshes changed chunks on worker threads:
 - **Loose matter** is meshed by surface nets.
 
 Detail falls off with distance without cracks, and materials blend by triplanar texturing. Positions are 64-bit on the server and camera-relative floats on the GPU, with reversed-Z depth.
+
+What v1 draws:
+- **Chunks** of 32 columns square, each meshed by surface nets from its own voxels and one more all round, taken over the cube's edges from the next face. Each edge between voxels is drawn by one chunk: the one holding its lower end, or across the cube's edges, the lower face. So chunks meet without gaps, but for a column-wide one at each of the cube's 8 corners, where three columns meet.
+- **Two surfaces:** shaped matter against open space, and liquid against air. Shaped matter counts as full of liquid, so the sea's surface runs into the ground instead of wrapping it. A voxel's material says which side it's on, as a distance under half a millimetre rounds to none.
+- **Where:** from 16 m under a chunk's lowest ground to over its highest, around the sea's level apart from that, and through held changes next to either.
+- **The client:** `--globe`, or `--globe-planet` with a preset or a planet file, meshes the chunks within 160 m of the eye on the job pool, nearest first, coloured by material and drawn as blocks. Flight keeps above the generated ground.
+- **Cost:** 36–76 ms a chunk on one thread, Venus to the Moon. Most of it is the generator's columns: each also takes the ground's slope at 16 m for its soils, nearly another column's work.
 
 ## Build order
 
