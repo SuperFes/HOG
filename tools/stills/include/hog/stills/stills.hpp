@@ -3,6 +3,7 @@
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
 #include <hog/globe/generator.hpp>
+#include <hog/globe/world.hpp>
 
 #include <cstdint>
 #include <filesystem>
@@ -40,6 +41,11 @@ struct Place {
 // from `bottom` to `top` metres over the radius: what each point is made of.
 [[nodiscard]] Image section(const globe::Generator& generator, const Place& place, double length,
                             double bottom, double top, int width, int threads);
+
+// The same cut through the world as it now is, voxel by voxel: each pixel shows the voxel it
+// falls in, the store's where it holds one.
+[[nodiscard]] Image voxel_section(const globe::World& world, const Place& place, double length,
+                                  double bottom, double top, int width);
 
 // A slice `depth` metres under the ground everywhere, `span` metres across, centred on `place`:
 // what each point is made of, so caves show as their passages run.

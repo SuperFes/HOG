@@ -1,5 +1,7 @@
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
+#include <hog/globe/voxel_store.hpp>
+#include <hog/globe/world.hpp>
 #include <hog/stills/stills.hpp>
 
 #include <cmath>
@@ -21,10 +23,11 @@ namespace {
 constexpr std::string_view usage =
     "usage: hog-stills [--preset earth|mars|venus|moon | --planet FILE] [--seed N] [--out DIR]\n"
     "                  [--width N] [--threads N] [--at LAT,LON[,HEADING]] [--span M]\n"
-    "                  [--bottom M] [--top M] [--depth M]\n"
+    "                  [--bottom M] [--top M] [--depth M] [--dig M]\n"
     "Writes map.png, and with --at, relief.png and section.png there; the section runs from\n"
     "--bottom to --top metres off the ground under its middle. --depth adds plan.png, a slice\n"
-    "that far under the ground everywhere, open space dark.\n";
+    "that far under the ground everywhere, open space dark. --dig digs a ball that wide in the\n"
+    "ground under --at and adds voxels.png, the section's window drawn from the voxels.\n";
 
 struct Options {
     hog::globe::Planet planet;
@@ -36,6 +39,7 @@ struct Options {
     double bottom = -500.0; // metres from the ground under --at
     double top = 500.0;
     std::optional<double> depth; // of a plan slice under the ground
+    std::optional<double> dig;   // a ball's radius, dug at the ground under --at
 };
 
 // strtod rather than from_chars, which some standard libraries lack for floating point.
@@ -107,6 +111,8 @@ bool apply(Options& options, std::string_view name, std::string_view value) {
         options.top = *given;
     } else if (name == "--depth") {
         options.depth = given;
+    } else if (name == "--dig") {
+        options.dig = given;
     } else {
         return false;
     }
@@ -162,9 +168,23 @@ int run(std::span<const std::string_view> arguments) {
         hog::globe::ground_below(generator, options.at->direction(), options.span / options.width)
             .value_or(options.planet.radius) -
         options.planet.radius;
-    return write(options.out / "section.png",
-                 hog::stills::section(generator, *options.at, options.span, ground + options.bottom,
-                                      ground + options.top, options.width, options.threads));
+    if (const int failed = write(options.out / "section.png",
+                                 hog::stills::section(generator, *options.at, options.span,
+                                                      ground + options.bottom, ground + options.top,
+                                                      options.width, options.threads))) {
+        return failed;
+    }
+    if (!options.dig) {
+        return 0;
+    }
+    hog::globe::VoxelStore store{generator.layers()};
+    hog::globe::World world{generator, store};
+    const double radius = options.planet.radius;
+    hog::globe::dig(world, options.at->direction() * (radius + ground), *options.dig);
+    return write(options.out / "voxels.png",
+                 hog::stills::voxel_section(world, *options.at, options.span,
+                                            ground + options.bottom, ground + options.top,
+                                            options.width));
 }
 
 } // namespace

@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <format>
 #include <fstream>
+#include <map>
 #include <numbers>
 #include <span>
 #include <thread>
@@ -277,6 +278,54 @@ Image section(const Generator& generator, const Place& place, double length, dou
             std::ranges::copy(colour, image.pixels.begin() + static_cast<std::ptrdiff_t>(offset));
         }
     });
+    return image;
+}
+
+Image voxel_section(const globe::World& world, const Place& place, double length, double bottom,
+                    double top, int width) {
+    const Frame frame = frame_at(place);
+    const globe::Layers& layers = world.store().layers();
+    const double radius = world.generator().planet().radius;
+    const double spacing = length / width;
+    const int height = std::max(static_cast<int>(std::lround((top - bottom) / spacing)), 1);
+    Image image{.width = width,
+                .height = height,
+                .pixels = std::vector<std::uint8_t>(3 * static_cast<std::size_t>(width) *
+                                                    static_cast<std::size_t>(height))};
+    // Bricks are filled whole, so each is filled once.
+    std::map<globe::BrickSite, globe::BrickVoxels> bricks;
+    for (int y = 0; y < height; ++y) {
+        const int layer = layers.layer_at(radius + top - ((y + 0.5) * spacing));
+        for (int x = 0; x < width; ++x) {
+            const double angle = (((x + 0.5) * spacing) - (length / 2.0)) / radius;
+            const DVec3 direction =
+                (frame.up * globe::maths::cos(angle)) + (frame.forward * globe::maths::sin(angle));
+            Rgb colour = material_colour(Material::Air);
+            if (layer >= 0 && layer < layers.count) {
+                const globe::Cell cell = globe::cell_under(direction, layers.level);
+                const globe::Site site{.face = cell.face,
+                                       .i = cell.i,
+                                       .j = cell.j,
+                                       .layer = static_cast<std::uint32_t>(layer)};
+                const globe::BrickSite brick = globe::brick_of(site);
+                auto found = bricks.find(brick);
+                if (found == bricks.end()) {
+                    found = bricks.emplace(brick, world.brick(brick)).first;
+                }
+                const globe::Voxel& voxel =
+                    found->second[static_cast<std::size_t>(globe::index_in_brick(site))];
+                if (voxel.distance < 0) {
+                    colour = material_colour(voxel.solid);
+                } else if (voxel.liquid_amount > globe::Voxel::full / 2) {
+                    colour = material_colour(voxel.liquid);
+                }
+            }
+            const auto offset =
+                3 * ((static_cast<std::size_t>(y) * static_cast<std::size_t>(width)) +
+                     static_cast<std::size_t>(x));
+            std::ranges::copy(colour, image.pixels.begin() + static_cast<std::ptrdiff_t>(offset));
+        }
+    }
     return image;
 }
 
