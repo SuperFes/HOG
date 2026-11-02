@@ -257,7 +257,10 @@ void GlobeStream::follow(DVec3 eye) {
         return;
     }
     around_ = eye;
-    const double reach = std::max(detail_.least, horizon(radius, height));
+    // Land stands over the horizon: the highest of it is seen from as far again.
+    const double reach =
+        std::max(detail_.least, horizon(radius, height) +
+                                    horizon(radius, std::max(0.0, generator.shape().highest)));
     order_ = globe::chunks_around(generator, {.up = up, .height = height}, reach, detail_.ratio,
                                   drawn_ ? *drawn_ : globe::Drawn{});
     log::info(globe_log,

@@ -292,3 +292,14 @@ TEST_CASE("land is found near a direction, over the sea, and anywhere on a dry w
     const Generator moon = generator_for("moon");
     CHECK(hog::globe::land_near(moon, start) == glm::normalize(start));
 }
+
+TEST_CASE("the highest ground surveyed bounds the ground", "[globe][generator]") {
+    const Generator world = generator_for("earth");
+    CHECK(world.shape().highest > 100.0);
+    CHECK(world.shape().highest > world.shape().lowest);
+    for (std::uint64_t k = 0; k < 300; ++k) {
+        const double ground = hog::globe::ground_below(world, direction(k), 0.5).value_or(0.0) -
+                              world.planet().radius;
+        CHECK(ground < (world.shape().highest * 1.25) + 50.0);
+    }
+}

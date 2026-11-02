@@ -147,6 +147,7 @@ Generator::Generator(const Planet& planet) : planet_{planet}, derived_{derive(pl
         shape_.datum = total / area;
     }
     shape_.lowest = std::ranges::min(heights, {}, &Surveyed::value).value - shape_.datum;
+    shape_.highest = std::ranges::max(heights, {}, &Surveyed::value).value - shape_.datum;
     layers_ = layers_about(planet_.radius, planet_.floor_depth + std::max(0.0, -shape_.lowest),
                            planet_.sky_height, planet_.voxel);
 }

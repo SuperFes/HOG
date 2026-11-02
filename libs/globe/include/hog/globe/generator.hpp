@@ -113,8 +113,9 @@ public:
         double province_threshold = 0.0;
         double province_band = 1.0; // of the province field, across the margin
         DVec3 one_side{0.0, 0.0, 1.0};
-        double datum = 0.0;  // raw height of the radius: the sea's level, or the mean ground's
-        double lowest = 0.0; // the lowest ground surveyed, metres over the radius
+        double datum = 0.0;   // raw height of the radius: the sea's level, or the mean ground's
+        double lowest = 0.0;  // the lowest ground surveyed, metres over the radius
+        double highest = 0.0; // and the highest
         bool sea = false;
     };
     [[nodiscard]] const Shape& shape() const noexcept { return shape_; }
