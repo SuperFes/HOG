@@ -170,11 +170,9 @@ void Region::slump(Stepped& stepped) {
                                                                     around[s].first),
                                                .j = keys[n].j + static_cast<std::uint32_t>(
                                                                     around[s].second)});
-            // A neighbour beside the face's edge or past what's held is no column to slide to;
-            // one on another surface level isn't either.
-            if (next != columns.end() && next->second != Slump::none &&
-                std::llabs(profiles[static_cast<std::size_t>(next->second)].ground -
-                           profiles[n].ground) < 8 * full) {
+            // A neighbour beside the face's edge or past what's held is no column to slide to.
+            // Any drop is one, however deep: grain pours into pits and over cliffs.
+            if (next != columns.end() && next->second != Slump::none) {
                 node.next[s] = next->second;
             }
         }
