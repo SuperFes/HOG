@@ -274,8 +274,9 @@ TEST_CASE("rain in dry air evaporates before it lands, cooling the air", "[weath
         precipitate(world.field, world.planet, 30.0);
         reached += static_cast<double>(world.field.precipitation[column]) * 30.0 / 3'600.0;
     }
-    // Of the 0.0005 kg/kg over a cell, about 0.3 mm of water.
-    CHECK(reached < 0.06);
+    // The cell holds about 0.0005 kg/kg of air a kilogram a cubic metre or less over its depth, and
+    // most of it is gone before the ground.
+    CHECK(reached < 0.15 * 0.0005 * world.field.grid.depth_of(6));
     CHECK(world.field.at(column, 3).temperature < before);
 }
 
@@ -364,7 +365,7 @@ TEST_CASE("heat the air takes from the ground, the ground loses", "[weather][moi
         const double mass =
             air_density(static_cast<double>(field.at(column, layer).temperature),
                         pressure_at(planet, static_cast<double>(field.surface[column]), height)) *
-            field.grid.thickness;
+            field.grid.depth_of(layer);
         taken += mass * air_heat_capacity() *
                  static_cast<double>(field.at(column, layer).temperature -
                                      before.at(column, layer).temperature);

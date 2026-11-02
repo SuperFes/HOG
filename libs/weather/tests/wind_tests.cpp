@@ -292,7 +292,7 @@ TEST_CASE("carrying keeps the water and the warmth it carries, however unevenly 
         return air_density(air_temperature(world.planet, surface, height),
                            pressure_at(world.planet, surface, height)) *
                hog::globe::solid_angle(hog::globe::cell_at_index(level, column)) * radius * radius *
-               field.grid.thickness;
+               field.grid.depth_of(layer);
     };
     struct Totals {
         double vapour = 0.0;

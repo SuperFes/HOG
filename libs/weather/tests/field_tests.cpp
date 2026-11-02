@@ -44,10 +44,10 @@ std::size_t column_at(double latitude) {
 TEST_CASE("still air cools with height at the lapse rate", "[weather][field]") {
     const Field& field = earth_field();
     const auto column = column_at(0.0);
-    const double step = field.grid.thickness;
+    const double rise = field.grid.radius_of(layers - 1) - field.grid.radius_of(0);
     const double cooling = static_cast<double>(field.at(column, 0).temperature) -
                            static_cast<double>(field.at(column, layers - 1).temperature);
-    CHECK(cooling == Approx(hog::weather::lapse_rate(earth()) * step * (layers - 1)).epsilon(0.01));
+    CHECK(cooling == Approx(hog::weather::lapse_rate(earth()) * rise).epsilon(0.01));
     // About Earth's 6.5 K a kilometre.
     CHECK(hog::weather::lapse_rate(earth()) * 1'000.0 > 5.5);
     CHECK(hog::weather::lapse_rate(earth()) * 1'000.0 < 7.0);
