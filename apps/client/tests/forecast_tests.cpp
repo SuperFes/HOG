@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <random>
 #include <vector>
 
 using namespace std::chrono_literals;
@@ -364,7 +365,7 @@ TEST_CASE("weather coming in fades on from where the cloud had drifted to", "[cl
                WithinAbs(static_cast<double>(fresh.at(west_of_eye(200.0), start).cloud), 0.02));
 }
 
-TEST_CASE("the air's damp and fog stay put as the cloud drifts on through it",
+TEST_CASE("the air's damp and fog stay put as the cloud drifts on through it, with its heights",
           "[client][forecast]") {
     Weather weather = drifting_east();
     const hog::sim::CellGrid grid{weather.level};
@@ -383,10 +384,38 @@ TEST_CASE("the air's damp and fog stay put as the cloud drifts on through it",
     const hog::protocol::CellWeather is = forecast.at(eye(), later);
     CHECK(is.humidity == was.humidity);
     CHECK(is.fog_top == was.fog_top);
-    CHECK(is.base == was.base);
-    // As deep as the cloud blown here from 2 km upwind was.
+    // The cloud blown here from 2 km upwind, at the heights it had there.
     const hog::protocol::CellWeather upwind = forecast.at(west_of_eye(2'000.0), start);
-    CHECK_THAT(static_cast<double>(is.top - is.base),
-               WithinAbs(static_cast<double>(upwind.top - upwind.base), 0.5));
+    CHECK_THAT(static_cast<double>(is.base), WithinAbs(static_cast<double>(upwind.base), 0.5));
+    CHECK_THAT(static_cast<double>(is.top), WithinAbs(static_cast<double>(upwind.top), 0.5));
     CHECK(is.top - is.base < was.top - was.base - 5.0F);
+}
+
+TEST_CASE("a cloud's edge keeps its heights instead of sloping down to the ground",
+          "[client][forecast]") {
+    Weather weather = everywhere({}, 0ms);
+    // Cloud 6 to 8 km up over a third of the cells, none over the rest.
+    for (std::size_t index = 0; index < weather.cells.size(); index += 3) {
+        weather.cells[index].cloud = 2.0F;
+        weather.cells[index].base = 6'000.0F;
+        weather.cells[index].top = 8'000.0F;
+    }
+    Forecast forecast{radius};
+    forecast.receive(weather, start);
+    std::mt19937_64 random{11};
+    std::normal_distribution<double> normal;
+    for (int sample = 0; sample < 2'000; ++sample) {
+        const DVec3 direction =
+            glm::normalize(DVec3{normal(random), normal(random), normal(random)});
+        const CellWeather here = forecast.at(direction, start);
+        CHECK_THAT(static_cast<double>(here.base), WithinAbs(6'000.0, 1.0));
+        CHECK_THAT(static_cast<double>(here.top), WithinAbs(8'000.0, 1.0));
+    }
+    // The sky's map holds them at every texel too: a byte is 64 metres.
+    for (const auto& texel : forecast.sky_after()) {
+        CHECK_THAT(static_cast<double>(texel[2]) * hog::client::height_texel_step,
+                   WithinAbs(6'000.0, hog::client::height_texel_step));
+        CHECK_THAT(static_cast<double>(texel[3]) * hog::client::height_texel_step,
+                   WithinAbs(8'000.0, hog::client::height_texel_step));
+    }
 }

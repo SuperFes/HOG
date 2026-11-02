@@ -87,6 +87,32 @@ protocol::CellWeather interpolated(const sim::CellGrid& grid, const Cells& cells
             .top = field([](const auto& cell) { return static_cast<double>(cell.top); })};
 }
 
+// Cells with no cloud aloft have no base or top, which blending a cloud's edge with them would
+// pull to the ground as a tent: they take the heights the cloud keeps over the planet, as
+// much as each cell has of it, so what lies between is cloud at those heights, only thinner.
+void fill_heights(Cells& cells) {
+    double base = 0.0;
+    double top = 0.0;
+    double weight = 0.0;
+    for (const protocol::CellWeather& cell : cells) {
+        if (cell.top > cell.base && cell.cloud > 0.0F) {
+            const auto mass = static_cast<double>(cell.cloud);
+            base += mass * static_cast<double>(cell.base);
+            top += mass * static_cast<double>(cell.top);
+            weight += mass;
+        }
+    }
+    if (weight <= 0.0) {
+        return;
+    }
+    for (protocol::CellWeather& cell : cells) {
+        if (!(cell.top > cell.base) || !(cell.cloud > 0.0F)) {
+            cell.base = static_cast<float>(base / weight);
+            cell.top = static_cast<float>(top / weight);
+        }
+    }
+}
+
 std::uint8_t to_byte(double share) noexcept {
     return static_cast<std::uint8_t>(std::lround(std::clamp(share, 0.0, 1.0) * 255.0));
 }
@@ -175,6 +201,7 @@ void Forecast::receive(const protocol::Weather& weather, MonotonicClock::time_po
     if (!grid_ || grid_->level() != weather.level) {
         grid_.emplace(weather.level);
         to_ = weather.cells;
+        fill_heights(to_);
         from_ = to_;
         fade_ = {};
     } else {
@@ -186,6 +213,7 @@ void Forecast::receive(const protocol::Weather& weather, MonotonicClock::time_po
         }
         from_ = std::move(was);
         to_ = weather.cells;
+        fill_heights(to_);
         fade_ = weather.fade;
         if (fade_ <= MonotonicClock::duration::zero()) {
             from_ = to_;
@@ -245,13 +273,14 @@ protocol::CellWeather Forecast::shown(const protocol::CellWeather& here, DVec3 d
     const protocol::CellWeather there =
         mixed(interpolated(*grid_, from_, from), interpolated(*grid_, to_, from),
               static_cast<float>(faded(now)));
-    // The cloud blows on with the wind, but the air's damp, and so its fog and where cloud forms,
+    // The cloud blows on with the wind, with the heights it has; the air's damp, and so its fog,
     // keep to the slower pace of the air.
     protocol::CellWeather found = here;
     found.cloud = there.cloud;
     found.falling = there.falling;
     found.snow = there.snow;
-    found.top = here.base + std::max(there.top - there.base, 0.0F);
+    found.base = there.base;
+    found.top = there.top;
     return found;
 }
 

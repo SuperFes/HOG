@@ -142,8 +142,8 @@ struct Cell {
 
 Cell cell_at(float3 direction) {
     // Where the cloud over it now lay when the maps were taken, by the drift here, so wherever
-    // it's seen from it's the same cloud. The cloud blows on with the wind; the air's damp, and so
-    // its fog and where cloud forms, keep to the air's slower pace.
+    // it's seen from it's the same cloud, at the heights it has. The cloud blows on with the wind;
+    // the air's damp, and so its fog, keeps to the air's slower pace.
     const float3 drift = lerp(drift_before.SampleLevel(direction, 0.0).xyz,
                               drift_after.SampleLevel(direction, 0.0).xyz, push.radii.z);
     const float3 from =
@@ -157,8 +157,8 @@ Cell cell_at(float3 direction) {
     Cell cell;
     cell.cover = weather.r;
     cell.mm = weather.g * weather.g * 16.0;
-    cell.base = sky.base;
-    cell.top = sky.base + max(blown.top - blown.base, 0.0);
+    cell.base = blown.base;
+    cell.top = max(blown.top, blown.base);
     cell.fog_top = sky.fog_top;
     cell.falling = weather.b * weather.b * 256.0;
     cell.snow = weather.a;
