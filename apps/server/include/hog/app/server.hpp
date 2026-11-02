@@ -5,6 +5,7 @@
 #include <hog/core/metrics.hpp>
 #include <hog/core/result.hpp>
 #include <hog/core/time.hpp>
+#include <hog/flow/simulation.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
 #include <hog/globe/voxel_store.hpp>
@@ -141,6 +142,7 @@ private:
     globe::Generator generator_;
     globe::VoxelStore voxels_;
     globe::World globe_;
+    flow::Simulation flow_;
     store::SqliteBrickArchive bricks_;
     server::BrickSharing bricks_shared_;
     store::SqliteSnapshotStore snapshots_;

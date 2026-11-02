@@ -37,6 +37,8 @@ public:
 
     // Reads the brick as the world now has it, unless held already.
     void load(globe::BrickSite site);
+    // Lets the brick go; what it held unflushed is lost.
+    void unload(globe::BrickSite site);
     [[nodiscard]] bool holds(globe::BrickSite site) const;
     [[nodiscard]] std::size_t size() const noexcept { return held_.size(); }
 
@@ -70,6 +72,7 @@ private:
         int top = 0;
         std::int64_t amount = 0;
         globe::Material liquid = globe::Material::Air;
+        bool moving = false; // liquid ran in or out of it this step
     };
     struct Column {
         std::uint8_t face = 0;

@@ -113,7 +113,7 @@ What the mesher draws:
 7. **Detail by distance,** crack-free across chunks and faces.
 8. **Materials and texturing.**
 9. **Server authority and streaming.**
-10. **Water and soil:** the loose cover crept smooth in the generator (done); the materials' porosity, conductivity, repose dry and soaked, critical shear and erodibility, and the ground soaked to its pores under the sea (done); then column sections with pipes between them, soil that softens when saturated and gives way, suspended load carried and dropped, the client's inland water, and the settle test: the simulation run on generated ground, which should move almost nothing. Lakes and rivers planet-wide wait for the drainage solve.
+10. **Water and soil:** the loose cover crept smooth in the generator (done); the materials' porosity, conductivity, repose dry and soaked, critical shear and erodibility, and the ground soaked to its pores under the sea (done); the flow between column sections over square cells, which the server runs where the world is touched and lets sleep once still (done); soil that softens when saturated and gives way, suspended load carried and dropped, the client's inland water, and the settle test: the simulation run on generated ground, which should move almost nothing. Lakes and rivers planet-wide wait for the drainage solve.
 11. **Sand and rubble:** slumping to their angle of repose.
 12. **Collapse and wear.**
 13. **Lava and magma.**

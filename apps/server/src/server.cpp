@@ -49,9 +49,9 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config, const glob
                store::SqliteSnapshotStore snapshots, store::SqlitePlayerStore places,
                store::SqliteBrickArchive bricks)
     : config_(config), world_id_(globe::world_id(globe)), generator_(globe),
-      voxels_(generator_.layers()), globe_(generator_, voxels_), bricks_(std::move(bricks)),
-      bricks_shared_(voxels_), snapshots_(std::move(snapshots)), places_(std::move(places)),
-      writer_(snapshots_, config.keep_snapshots),
+      voxels_(generator_.layers()), globe_(generator_, voxels_), flow_(globe_),
+      bricks_(std::move(bricks)), bricks_shared_(voxels_), snapshots_(std::move(snapshots)),
+      places_(std::move(places)), writer_(snapshots_, config.keep_snapshots),
       nearby_(std::min(planet::level_for(config.net.view.radius, globe.radius), planet::max_level)),
       persistence_(entities_), joined_(entities_, globe.radius, config.net.view),
       ground_(space_, globe_), ticks_(registry_.counter("hog_ticks_total", "Live ticks run.")),
@@ -164,6 +164,7 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
 void Server::simulate(GameTime /*from*/, GameDuration step) {
     HOG_ZONE("simulate");
     entities_.progress(std::chrono::duration<float>(step).count());
+    flow_.step();
 }
 
 void Server::open_players() {
@@ -390,6 +391,7 @@ void Server::dig(net::ConnectionId connection, const protocol::Dug& dug) {
     globe::dig(globe_, protocol::to_world(dug.centre).metres(), dug.radius / 1'000.0);
     for (const globe::BrickSite brick : voxels_.changed_since(before)) {
         ground_.changed(brick);
+        flow_.touched(brick);
     }
 }
 
@@ -409,6 +411,7 @@ void Server::build(net::ConnectionId connection, const protocol::Built& built) {
                  material);
     for (const globe::BrickSite brick : voxels_.changed_since(before)) {
         ground_.changed(brick);
+        flow_.touched(brick);
     }
 }
 

@@ -63,6 +63,17 @@ void Region::load(BrickSite site) {
     stack.insert(std::ranges::lower_bound(stack, site.layer), site.layer);
 }
 
+void Region::unload(BrickSite site) {
+    if (held_.erase(globe::brick_key(site)) == 0) {
+        return;
+    }
+    const auto stack = stacks_.find(stack_key(site));
+    std::erase(stack->second, site.layer);
+    if (stack->second.empty()) {
+        stacks_.erase(stack);
+    }
+}
+
 bool Region::holds(BrickSite site) const {
     return held_.contains(globe::brick_key(site));
 }
@@ -193,10 +204,12 @@ bool Region::open_to_sea(Site site) const {
 }
 
 bool Region::at_edge(Site site) {
-    return std::ranges::any_of(sides, [&](const auto& step) {
-        const std::optional<Site> next = beside(site, step.first, step.second);
-        return !next || voxel(*next) == nullptr;
-    });
+    // Beside, or over it: under the sea's level the sea stands above what's held too.
+    const Site above{.face = site.face, .i = site.i, .j = site.j, .layer = site.layer + 1};
+    return voxel(above) == nullptr || std::ranges::any_of(sides, [&](const auto& step) {
+               const std::optional<Site> next = beside(site, step.first, step.second);
+               return !next || voxel(*next) == nullptr;
+           });
 }
 
 void Region::hold_sea(const std::vector<Column>& columns, Stepped& stepped) {
@@ -427,13 +440,15 @@ void Region::settle(const std::vector<Column>& columns, Stepped& stepped) {
                         std::clamp(section.amount - (k * full), std::int64_t{0}, full);
                     const Material liquid = amount > 0 ? section.liquid : Material::Air;
                     const auto held_amount = static_cast<std::uint16_t>(amount);
-                    stepped.changed += std::abs(amount - voxel->liquid_amount);
+                    const std::int64_t before = voxel->liquid_amount;
+                    stepped.changed += std::abs(amount - before);
                     if (voxel->liquid_amount != held_amount || voxel->liquid != liquid) {
                         voxel->liquid_amount = held_amount;
                         voxel->liquid = liquid;
                         brick->dirty = true;
                     }
-                    if (amount > 0) {
+                    // Only liquid on the move would run on; what stands still needs nothing.
+                    if (amount > 0 && (section.moving || amount != before)) {
                         want_around(site, wanted);
                     }
                 }
@@ -458,6 +473,8 @@ Stepped Region::step() {
         Section& to = sections_[transfer.to];
         from.amount -= transfer.amount;
         to.amount += transfer.amount;
+        from.moving = true;
+        to.moving = true;
         if (to.liquid == Material::Air) {
             to.liquid = from.liquid;
         }
@@ -467,6 +484,8 @@ Stepped Region::step() {
             transfer.outward ? transfer.amount : -transfer.amount;
     }
     settle(all, stepped);
+    // What settling took from the edge, the sea gives back before anyone sees it short.
+    hold_sea(all, stepped);
     return stepped;
 }
 

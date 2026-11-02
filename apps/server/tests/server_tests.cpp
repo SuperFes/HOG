@@ -709,9 +709,10 @@ TEST_CASE("a player's digging is sent back as bricks to everyone", "[app][server
     }};
     REQUIRE(server->run(timer, [] { return start; }, stop));
     REQUIRE(server->voxels().size() > 0);
-    // Both are sent every brick the digging changed, which hold the hole as the server does.
+    // Both are sent every brick the digging changed, which hold the hole as the server does;
+    // the water filling the hole may have sent some again.
     for (const Digger& digger : diggers) {
-        REQUIRE(digger.bricks.size() == server->voxels().size());
+        REQUIRE(digger.bricks.size() >= server->voxels().size());
         hog::globe::VoxelStore theirs{generator.layers()};
         for (const hog::protocol::SentBrick& brick : digger.bricks) {
             REQUIRE(hog::globe::take_brick(theirs, {.key = brick.key, .bytes = brick.bytes}));
@@ -725,5 +726,5 @@ TEST_CASE("a player's digging is sent back as bricks to everyone", "[app][server
             .layer = static_cast<std::uint32_t>(generator.layers().layer_at(ground - 0.5))};
         CHECK(theirs.at(site).value_or(hog::globe::Voxel{}).solid == hog::globe::Material::Air);
     }
-    CHECK(counter(*server, "hog_bricks_sent_total") == 2 * server->voxels().size());
+    CHECK(counter(*server, "hog_bricks_sent_total") >= 2 * server->voxels().size());
 }
