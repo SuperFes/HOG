@@ -51,6 +51,7 @@ Column Atmosphere::column(std::size_t column) const {
     const auto surface = static_cast<double>(field_.surface[column]);
 
     Column shown;
+    shown.sea = field_.over_sea[column] != 0;
     double carried = 0.0;
     Vec3 push{0.0F};
     bool lowest = true;

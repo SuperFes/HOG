@@ -3,6 +3,7 @@
 #include <hog/planet/projection.hpp>
 #include <hog/server/weather_keeper.hpp>
 #include <hog/sim/cell_grid.hpp>
+#include <hog/waves/waves.hpp>
 #include <hog/weather/state.hpp>
 
 #include <algorithm>
@@ -11,8 +12,23 @@
 namespace hog::server {
 namespace {
 
+// What the protocol can carry of a wave height, metres.
+constexpr float most_sea_height = 20.0F;
+
 [[nodiscard]] double seconds(GameDuration duration) {
     return std::chrono::duration<double>(duration).count();
+}
+
+// The sea a wind raises over open water: grown full, until fetch and duration are modelled.
+[[nodiscard]] protocol::CellWaves wind_sea(const weather::Column& column) {
+    const auto speed = static_cast<double>(glm::length(column.wind));
+    if (!column.sea || speed <= 0.0) {
+        return {};
+    }
+    const waves::System grown = waves::grown_sea({column.wind.x, column.wind.y, 0.0});
+    return {.height = std::min(static_cast<float>(grown.height), most_sea_height),
+            .peak = static_cast<float>(grown.peak),
+            .heading = column.wind / static_cast<float>(speed)};
 }
 
 [[nodiscard]] protocol::CellWeather shown(const weather::Column& column) {
@@ -24,7 +40,8 @@ namespace {
             .humidity = column.humidity,
             .fog_top = column.fog_top,
             .base = column.base,
-            .top = column.top};
+            .top = column.top,
+            .wind_sea = wind_sea(column)};
 }
 
 } // namespace

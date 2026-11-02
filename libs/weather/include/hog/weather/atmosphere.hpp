@@ -21,6 +21,7 @@ struct Column {
     Vec2 drift{0.0F};      // (east, north) m/s the cloud is carried at
     Vec2 wind{0.0F};       // (east, north) m/s in the lowest open air
     float humidity = 0.0F; // of the lowest open air, 0 to 1
+    bool sea = false;      // whether the sea lies under the air
     float fog_top = 0.0F;  // top of cloud touching the ground; 0 where there is none
     float base = 0.0F;     // lowest and highest cloud aloft; 0 where there is none
     float top = 0.0F;

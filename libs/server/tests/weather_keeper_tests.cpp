@@ -5,7 +5,9 @@
 #include <hog/server/weather_keeper.hpp>
 #include <hog/sim/cell_grid.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <glm/geometric.hpp>
 
 #include <chrono>
 #include <cmath>
@@ -91,6 +93,31 @@ TEST_CASE("the weather it makes has a cell for each of the level's, in the grid'
     CHECK(tropic / tropics < 0.5);
 }
 
+TEST_CASE("the wind raises waves on the sea and none on land", "[server][weather]") {
+    const globe::Generator generator{small_earth()};
+    server::WeatherKeeper keeper{generator, 4h, 23.44, start, quick()};
+    REQUIRE_FALSE(keeper.poll(start + 2min, 500ms));
+    const auto found = next(keeper, start + 2min);
+    REQUIRE(found);
+    const protocol::Weather made = found.value_or(protocol::Weather{});
+    int seas = 0;
+    for (const protocol::CellWeather& cell : made.cells) {
+        const bool windy = glm::length(cell.wind) > 1.0F;
+        if (cell.wind_sea.height > 0.0F) {
+            ++seas;
+            CHECK(cell.wind_sea.peak > 0.0F);
+            CHECK(glm::length(cell.wind_sea.heading) == Catch::Approx(1.0).margin(1e-3));
+            // A stronger wind raises higher waves than any under it could: not above Pierson and
+            // Moskowitz's 0.0214 U² metres, and not nothing.
+            CHECK(cell.wind_sea.height <= 0.03F * glm::dot(cell.wind, cell.wind));
+        } else if (!windy) {
+            CHECK(cell.wind_sea.peak == 0.0F);
+        }
+    }
+    CHECK(seas > 0);
+    CHECK(seas < static_cast<int>(made.cells.size()));
+}
+
 TEST_CASE("a keeper far behind the clock shows nothing until it has caught up",
           "[server][weather]") {
     const globe::Generator generator{small_earth()};
@@ -157,6 +184,7 @@ TEST_CASE("the weather after a spin-up, to look at", "[.look]") {
     }
     const auto bytes = protocol::encode(protocol::Message{found.value_or(protocol::Weather{})});
     std::ofstream out{where, std::ios::binary};
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): the stream takes chars
     out.write(reinterpret_cast<const char*>(bytes.data()),
               static_cast<std::streamsize>(bytes.size()));
     REQUIRE(out.good());

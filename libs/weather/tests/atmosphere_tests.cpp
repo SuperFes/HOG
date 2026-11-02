@@ -113,3 +113,16 @@ TEST_CASE("cloud touching the ground is fog and cloud above it has a base and to
     CHECK(shown.top == shown.base + (2.0F * layer));
     CHECK(shown.cloud > 0.0F);
 }
+
+TEST_CASE("a column says whether the sea lies under it", "[weather][atmosphere]") {
+    const hog::globe::Generator generator{small_earth()};
+    const Atmosphere air{generator, 14'400.0, 2, 8};
+    std::size_t seas = 0;
+    for (std::size_t column = 0; column < air.field().grid.columns(); ++column) {
+        const bool sea = air.column(column).sea;
+        CHECK(sea == (air.field().over_sea[column] != 0));
+        seas += sea ? 1 : 0;
+    }
+    CHECK(seas > 0);
+    CHECK(seas < air.field().grid.columns());
+}
