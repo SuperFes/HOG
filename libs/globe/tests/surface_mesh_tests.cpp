@@ -1,3 +1,4 @@
+#include <hog/globe/brick.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/detail.hpp>
 #include <hog/globe/generator.hpp>
@@ -108,6 +109,68 @@ std::vector<DVec3> open_sides(const SurfaceMesh& mesh) {
         }
     }
     return open;
+}
+
+// Changes each open voxel within `radius` of `centre`, given it and the radius its bottom
+// stands at.
+void fill_hollow(World& world, DVec3 centre, double radius, const auto& change) {
+    const hog::globe::Layers& layers = world.generator().layers();
+    const Cell middle = hog::globe::cell_under(glm::normalize(centre), layers.level);
+    const int layer = layers.layer_at(glm::length(centre));
+    const int reach = static_cast<int>(std::ceil(radius / layers.thickness)) + 1;
+    std::map<hog::globe::BrickSite, hog::globe::BrickVoxels> bricks;
+    for (int dl = -reach; dl <= reach; ++dl) {
+        for (int dj = -reach; dj <= reach; ++dj) {
+            for (int di = -reach; di <= reach; ++di) {
+                const std::optional<Cell> cell = hog::globe::next_to(middle, di, dj);
+                if (!cell) {
+                    continue;
+                }
+                const hog::globe::Site site{.face = cell->face,
+                                            .i = cell->i,
+                                            .j = cell->j,
+                                            .layer = static_cast<std::uint32_t>(layer + dl)};
+                if (glm::length(hog::globe::middle_of(site, layers) - centre) > radius) {
+                    continue;
+                }
+                const hog::globe::BrickSite brick = hog::globe::brick_of(site);
+                auto held = bricks.find(brick);
+                if (held == bricks.end()) {
+                    held = bricks.emplace(brick, world.brick(brick)).first;
+                }
+                hog::globe::Voxel& voxel =
+                    held->second[static_cast<std::size_t>(hog::globe::index_in_brick(site))];
+                if (voxel.solid == Material::Air) {
+                    change(voxel, layers.bottom(static_cast<int>(site.layer)));
+                }
+            }
+        }
+    }
+    for (const auto& [brick, voxels] : bricks) {
+        world.write(brick, voxels);
+    }
+}
+
+// A hollow dug in the ground, and its centre.
+DVec3 dig_hollow(World& world, DVec3 up, double radius) {
+    const double ground = hog::globe::ground_below(earth(), up, 0.5).value_or(0.0);
+    hog::globe::dig(world, up * ground, radius);
+    return up * ground;
+}
+
+// Vertices of `material` within `across` metres of `centre` sideways.
+std::vector<std::uint32_t> vertices_near(const SurfaceMesh& mesh, DVec3 centre, double across,
+                                         Material material) {
+    const DVec3 up = glm::normalize(centre);
+    std::vector<std::uint32_t> found;
+    for (std::uint32_t v = 0; v < mesh.vertices.size(); ++v) {
+        const DVec3 out = world_point(mesh, v) - centre;
+        if (mesh.vertices[v].material == material &&
+            glm::length(out - (glm::dot(out, up) * up)) <= across) {
+            found.push_back(v);
+        }
+    }
+    return found;
 }
 
 // The chunk and the eight round it, or seven at the cube's corners.
@@ -414,6 +477,88 @@ TEST_CASE("the sea shows as a level surface over the seabed", "[globe][surface]"
     CHECK(water > 1'000);
     CHECK(bed > 1'000);
     CHECK(open_in(world, mesh, chunk) == 0);
+}
+
+TEST_CASE("water standing in a hollow shows level at its surface, however full its top voxel",
+          "[globe][surface]") {
+    VoxelStore store{earth().layers()};
+    World world{earth(), store};
+    const DVec3 up = ground_between(earth(), 50.0, 400.0);
+    const DVec3 centre = dig_hollow(world, up, 3.0);
+    const double thickness = earth().layers().thickness;
+    const double level = glm::length(centre) - 1.0;
+    fill_hollow(world, centre, 3.0, [&](hog::globe::Voxel& voxel, double bottom) {
+        if (bottom < level) {
+            voxel.liquid = Material::Water;
+            voxel.liquid_amount =
+                hog::globe::amount_of(std::min(1.0, (level - bottom) / thickness));
+        }
+    });
+    const SurfaceMesh mesh =
+        mesh_of(world, block_round(hog::globe::chunk_under(up, earth().layers())));
+    const std::vector<std::uint32_t> water = vertices_near(mesh, centre, 1.5, Material::Water);
+    CHECK(water.size() > 20);
+    for (const std::uint32_t v : water) {
+        CHECK(std::abs(glm::length(world_point(mesh, v)) - level) < 0.03);
+        CHECK(glm::dot(DVec3{mesh.vertices[v].normal}, up) > 0.99);
+    }
+}
+
+TEST_CASE("a film of water shallower than half a voxel still shows on the ground",
+          "[globe][surface]") {
+    VoxelStore store{earth().layers()};
+    World world{earth(), store};
+    const DVec3 up = ground_between(earth(), 50.0, 400.0);
+    const DVec3 centre = dig_hollow(world, up, 3.0);
+    const double thickness = earth().layers().thickness;
+    const double level = glm::length(centre) - 3.0 + 0.4;
+    fill_hollow(world, centre, 3.0, [&](hog::globe::Voxel& voxel, double bottom) {
+        if (bottom < level) {
+            voxel.liquid = Material::Water;
+            voxel.liquid_amount =
+                hog::globe::amount_of(std::min(1.0, (level - bottom) / thickness));
+        }
+    });
+    const SurfaceMesh mesh =
+        mesh_of(world, block_round(hog::globe::chunk_under(up, earth().layers())));
+    const std::vector<std::uint32_t> water = vertices_near(mesh, centre, 2.0, Material::Water);
+    CHECK(water.size() > 5);
+    for (const std::uint32_t v : water) {
+        CHECK(std::abs(glm::length(world_point(mesh, v)) - level) < 0.03);
+    }
+}
+
+TEST_CASE("grain piled in a hollow shows as ground of its own, as high as it fills",
+          "[globe][surface]") {
+    VoxelStore store{earth().layers()};
+    World world{earth(), store};
+    const DVec3 up = ground_between(earth(), 50.0, 400.0);
+    const DVec3 centre = dig_hollow(world, up, 3.0);
+    const double thickness = earth().layers().thickness;
+    const double level = glm::length(centre) - 1.5;
+    fill_hollow(world, centre, 3.0, [&](hog::globe::Voxel& voxel, double bottom) {
+        if (bottom < level) {
+            voxel.grain = Material::Sand;
+            voxel.grain_amount = hog::globe::amount_of(std::min(1.0, (level - bottom) / thickness));
+        }
+    });
+    const SurfaceMesh mesh =
+        mesh_of(world, block_round(hog::globe::chunk_under(up, earth().layers())));
+    const std::vector<std::uint32_t> sand = vertices_near(mesh, centre, 1.0, Material::Sand);
+    CHECK(sand.size() > 10);
+    for (const std::uint32_t v : sand) {
+        CHECK(std::abs(glm::length(world_point(mesh, v)) - level) < 0.05);
+        CHECK(glm::dot(DVec3{mesh.vertices[v].normal}, up) > 0.99);
+    }
+    // Nothing but the sand's top is drawn over the pile.
+    for (std::uint32_t v = 0; v < mesh.vertices.size(); ++v) {
+        const DVec3 out = world_point(mesh, v) - centre;
+        const double height = glm::dot(out, up);
+        if (glm::length(out - (height * up)) <= 1.0 && height < 0.0) {
+            CHECK(mesh.vertices[v].material == Material::Sand);
+            CHECK(glm::length(world_point(mesh, v)) > level - 0.05);
+        }
+    }
 }
 
 TEST_CASE("chunks near a place are all those within reach, nearest first", "[globe][surface]") {

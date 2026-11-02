@@ -63,6 +63,15 @@ constexpr std::array<std::array<int, 2>, 3> others{{{1, 2}, {2, 0}, {0, 1}}};
 
 constexpr std::uint32_t no_vertex = std::numeric_limits<std::uint32_t>::max();
 
+// Whether a voxel's middle lies in ground: shaped matter, or grain piled past it.
+bool in_ground(const Voxel& voxel) noexcept {
+    return voxel.solid != Material::Air || voxel.grain_amount >= Voxel::full / 2;
+}
+
+double share_of(std::uint16_t amount) noexcept {
+    return amount / double{Voxel::full};
+}
+
 // A point of a chunk's grid: steps across and along from the chunk's corner, and a layer.
 using Point = std::array<int, 3>;
 
@@ -288,10 +297,28 @@ public:
     [[nodiscard]] double metres(Point point) const {
         return globe::metres(at(point).distance) * column(point).apart;
     }
+    // A voxel's height, as it's drawn: the layers it stands for.
+    [[nodiscard]] double height(Point point) const {
+        return layers_->thickness * column(point).apart;
+    }
+    // The liquid whose surface stands in, over or beside the voxel, if any; and metres its
+    // middle stands over that surface, negative under it.
     [[nodiscard]] Material soaked(Point point) const { return soaked_[index(point)]; }
-    // Metres a voxel's middle stands over the sea's level, if the world has a sea.
-    [[nodiscard]] std::optional<double> over_sea(Point point) const {
-        return sea_ ? std::optional{layers_->middle(point[2]) - *sea_} : std::nullopt;
+    [[nodiscard]] double level(Point point) const { return level_[index(point)]; }
+    // Metres from the voxel's middle to the top of grain piled in it or in the voxel under or
+    // over it, negative inside the pile; none where there's no pile so near.
+    [[nodiscard]] std::optional<double> grain_metres(Point point) const {
+        std::optional<double> nearest;
+        for (const int by : {-1, 0, 1}) {
+            const std::optional<Point> there = by == 0 ? std::optional{point} : next(point, 2, by);
+            if (!there || at(*there).solid != Material::Air || at(*there).grain_amount == 0) {
+                continue;
+            }
+            const Voxel& pile = at(*there);
+            const double to_top = (0.5 - share_of(pile.grain_amount) - by) * height(point);
+            nearest = std::min(nearest.value_or(to_top), to_top);
+        }
+        return nearest;
     }
     [[nodiscard]] DVec3 position(Point point) const {
         return (column(point).direction * layers_->middle(point[2])) - origin_;
@@ -385,7 +412,7 @@ public:
             if (at.chunk != chunk_) {
                 continue;
             }
-            if (voxels_[at.first].solid == Material::Air && radius < generated_[k].ground()) {
+            if (!in_ground(voxels_[at.first]) && radius < generated_[k].ground()) {
                 return true;
             }
         }
@@ -636,60 +663,117 @@ private:
         }
     }
 
-    // The liquid each voxel counts as full of, if any: its own; the sea's, for the seabed under
-    // it, so the sea's surface is drawn over a shelf shallower than a voxel; or beside some,
-    // under the ground at the shore, so the liquid's surface runs on under the ground rather
-    // than stopping a voxel short of it in steps.
+    // The liquid whose surface each voxel stands under or over, and where: liquid in the open,
+    // the seabed, and the shore beside the liquid.
     void soak() {
         soaked_.assign(voxels_.size(), Material::Air);
-        for (std::size_t k = 0; k < voxels_.size(); ++k) {
-            const Voxel& voxel = voxels_[k];
-            if (voxel.solid == Material::Air && voxel.liquid_amount >= Voxel::full / 2) {
-                soaked_[k] = voxel.liquid;
-            }
-        }
-        if (sea_) {
-            for (std::size_t k = 0; k < places_.size(); ++k) {
-                if (generated_[k].ground() >= *sea_) {
-                    continue;
+        level_.assign(voxels_.size(), 0.0);
+        soak_runs();
+        soak_seabed();
+        soak_shore();
+    }
+
+    // Up each run of open voxels, the liquid stands as high as the fill of the highest voxel
+    // holding any, on the grain under it; the run takes that level, and so does the ground under
+    // it, so a film shallower than half a voxel still shows. Liquid standing within a voxel of
+    // the sea's level is the sea, and stands at its level exactly.
+    void soak_runs() {
+        std::vector<std::pair<std::size_t, int>> run;
+        for (const auto& [a, b] : places_) {
+            const Column& here = column(a, b);
+            const double height = layers_->thickness * here.apart;
+            std::optional<double> surface;
+            Material liquid = Material::Air;
+            const auto flood = [&] {
+                if (surface && sea_ && std::abs(*surface - *sea_) <= height) {
+                    surface = sea_;
                 }
-                const auto [a, b] = places_[k];
-                const Column& at = column(a, b);
-                for (int layer = bottom_; layer <= top_; layer += at.apart) {
-                    const Point point{a, b, layer};
-                    if (voxels_[index(point)].solid != Material::Air && over_sea(point) < 0.0) {
-                        soaked_[index(point)] = Material::Water;
+                for (const auto& [k, layer] : run) {
+                    if (surface) {
+                        soaked_[k] = liquid;
+                        level_[k] = layers_->middle(layer) - *surface;
                     }
                 }
-            }
-        }
-        for (int reach = 0; reach < shore_reach; ++reach) {
-            std::vector<Material> next = soaked_;
-            for (const auto& [a, b] : places_) {
-                const Column& at = column(a, b);
-                for (int layer = bottom_; layer <= top_; layer += at.apart) {
-                    const Point point{a, b, layer};
-                    const std::size_t k = index(point);
-                    if (voxels_[k].solid != Material::Air && soaked_[k] == Material::Air) {
-                        next[k] = soaked_beside(point);
-                    }
+                run.clear();
+                surface.reset();
+            };
+            for (int layer = bottom_; layer <= top_; layer += here.apart) {
+                const std::size_t k = index({a, b, layer});
+                const Voxel& voxel = voxels_[k];
+                if (in_ground(voxel)) {
+                    flood();
+                } else if (voxel.liquid_amount > 0) {
+                    surface =
+                        layers_->middle(layer) - (0.5 * height) +
+                        ((share_of(voxel.grain_amount) + share_of(voxel.liquid_amount)) * height);
+                    liquid = voxel.liquid;
                 }
+                run.emplace_back(k, layer);
             }
-            soaked_ = std::move(next);
+            flood();
         }
     }
 
-    [[nodiscard]] Material soaked_beside(Point point) const {
-        for (const int axis : {0, 1}) {
-            for (const int by : {-1, 1}) {
-                if (const std::optional<Point> beside = next(point, axis, by)) {
-                    if (const Material wet = soaked(*beside); wet != Material::Air) {
-                        return wet;
-                    }
+    // The seabed stands under the sea's level, so the sea's surface is drawn over a shelf
+    // shallower than a voxel.
+    void soak_seabed() {
+        if (!sea_) {
+            return;
+        }
+        for (std::size_t k = 0; k < places_.size(); ++k) {
+            if (generated_[k].ground() >= *sea_) {
+                continue;
+            }
+            const auto [a, b] = places_[k];
+            for (int layer = bottom_; layer <= top_; layer += column(a, b).apart) {
+                const Point point{a, b, layer};
+                const double over = layers_->middle(layer) - *sea_;
+                if (in_ground(at(point)) && over < 0.0) {
+                    soaked_[index(point)] = Material::Water;
+                    level_[index(point)] = over;
                 }
             }
         }
-        return Material::Air;
+    }
+
+    // Ground beside the liquid at the shore takes its level, so the surface runs on under the
+    // ground rather than stopping a voxel short of it in steps: from liquid in the open and the
+    // ground it's reached, never from the ground under it, which would spread a film out over
+    // a floor.
+    void soak_shore() {
+        std::vector<bool> shore(voxels_.size(), false);
+        for (int reach = 0; reach < shore_reach; ++reach) {
+            std::vector<bool> reached = shore;
+            for (const auto& [a, b] : places_) {
+                for (int layer = bottom_; layer <= top_; layer += column(a, b).apart) {
+                    const Point point{a, b, layer};
+                    const std::size_t k = index(point);
+                    if (!in_ground(voxels_[k]) || soaked_[k] != Material::Air) {
+                        continue;
+                    }
+                    if (const std::optional<Point> from = shore_beside(point, shore)) {
+                        soaked_[k] = soaked(*from);
+                        level_[k] = level(*from);
+                        reached[k] = true;
+                    }
+                }
+            }
+            shore = std::move(reached);
+        }
+    }
+
+    [[nodiscard]] std::optional<Point> shore_beside(Point point,
+                                                    const std::vector<bool>& shore) const {
+        for (const int axis : {0, 1}) {
+            for (const int by : {-1, 1}) {
+                const std::optional<Point> beside = next(point, axis, by);
+                if (beside && soaked(*beside) != Material::Air && level(*beside) < 0.0 &&
+                    (!in_ground(at(*beside)) || shore[index(*beside)])) {
+                    return beside;
+                }
+            }
+        }
+        return std::nullopt;
     }
 
     const World* world_;
@@ -715,55 +799,70 @@ private:
     std::vector<std::pair<int, int>> places_;
     std::vector<Voxel> voxels_;
     std::vector<Material> soaked_;
+    std::vector<double> level_;
 };
 
-// Where shaped matter meets open space: the distance's zero, increasing outward. What it's made
-// of says which side a voxel is on, as a distance under half a unit rounds to none.
+// Where ground meets open space: shaped matter, as the distance's zero, increasing outward, and
+// grain piled on it, as high as it fills its voxel; whichever is nearer. What a voxel holds says
+// which side it's on, as a distance under half a unit rounds to none.
 struct Ground {
-    static bool inside(const Grid& grid, Point point) {
-        return grid.at(point).solid != Material::Air;
-    }
+    static bool inside(const Grid& grid, Point point) { return in_ground(grid.at(point)); }
     static bool crosses(const Grid& grid, Point a, Point b) {
         return inside(grid, a) != inside(grid, b);
     }
-    static double value(const Grid& grid, Point point) { return grid.metres(point); }
+    static double value(const Grid& grid, Point point) {
+        const double shaped = grid.metres(point);
+        return std::min(shaped, grid.grain_metres(point).value_or(shaped));
+    }
+    // Whether the surface nearest the voxel is a pile's top.
+    static bool piled(const Grid& grid, Point point) {
+        const std::optional<double> pile = grid.grain_metres(point);
+        return pile && *pile < grid.metres(point);
+    }
     // The surface's normal where it crosses from `a` to `b`, `t` of the way: as the voxel nearer
-    // it holds it, so at a crease each crossing keeps its own side's; none if neither holds one.
+    // it holds it, so at a crease each crossing keeps its own side's; none if neither holds one,
+    // or where a pile's top is crossed, which lies as the field has it.
     static DVec3 normal(const Grid& grid, Point a, Point b, double t) {
+        if (piled(grid, t < 0.5 ? a : b)) {
+            return DVec3{0.0};
+        }
         const DVec3 near = unpacked_normal(grid.at(t < 0.5 ? a : b).normal);
         return glm::length(near) > 0.0 ? near : unpacked_normal(grid.at(t < 0.5 ? b : a).normal);
     }
-    // The solid nearest the surface.
+    // The ground nearest the surface.
     static Material material(const Grid& grid, std::span<const Point> corners) {
         std::optional<Point> nearest;
         for (const Point corner : corners) {
-            if (inside(grid, corner) && (!nearest || grid.metres(corner) > grid.metres(*nearest))) {
+            if (inside(grid, corner) && (!nearest || value(grid, corner) > value(grid, *nearest))) {
                 nearest = corner;
             }
         }
-        return nearest ? grid.at(*nearest).solid : Material::Air;
+        if (!nearest) {
+            return Material::Air;
+        }
+        const Voxel& voxel = grid.at(*nearest);
+        return voxel.solid != Material::Air && !piled(grid, *nearest) ? voxel.solid : voxel.grain;
     }
 };
 
-// Where liquid filling more than half its voxel meets air.
+// Where liquid standing in the open meets air: its level, as the grid soaks it, against the
+// voxels over it and the ground under it.
 struct Liquid {
-    static bool wet(const Grid& grid, Point point) { return grid.soaked(point) != Material::Air; }
+    static bool wet(const Grid& grid, Point point) {
+        return grid.soaked(point) != Material::Air && grid.level(point) < 0.0;
+    }
     static bool dry(const Grid& grid, Point point) {
-        return !wet(grid, point) && grid.at(point).solid == Material::Air;
+        return !wet(grid, point) && !in_ground(grid.at(point));
     }
     static bool crosses(const Grid& grid, Point a, Point b) {
         return (wet(grid, a) && dry(grid, b)) || (dry(grid, a) && wet(grid, b));
     }
     static double value(const Grid& grid, Point point) {
-        // The sea's surface stands at its level exactly, wherever the voxels stand.
-        if (const std::optional<double> over = grid.over_sea(point)) {
-            return *over;
+        if (grid.soaked(point) != Material::Air) {
+            return grid.level(point);
         }
-        const Voxel& voxel = grid.at(point);
-        const double share = wet(grid, point) || voxel.solid != Material::Air
-                                 ? 1.0
-                                 : voxel.liquid_amount / double{Voxel::full};
-        return 0.5 - std::min(share, 1.0);
+        // Ground not soaked counts as under the surface, so the field slopes up out of it.
+        return (in_ground(grid.at(point)) ? -0.5 : 0.5) * grid.height(point);
     }
     // Not held: the field's own gradient serves.
     static DVec3 normal(const Grid& /*grid*/, Point /*a*/, Point /*b*/, double /*t*/) {
