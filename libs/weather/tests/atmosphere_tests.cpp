@@ -109,10 +109,13 @@ TEST_CASE("cloud touching the ground is fog and cloud above it has a base and to
     field.at(column, 3).cloud = 1e-3F;
     field.at(column, 4).cloud = 1e-3F;
     const Column shown = air.column(column);
-    const auto layer = static_cast<float>(field.grid.thickness);
+    const Grid& grid = field.grid;
+    const auto depth = [&](int from, int to) {
+        return static_cast<float>(grid.floor_of(to) - grid.floor_of(from));
+    };
     CHECK(shown.fog_top > 0.0F);
-    CHECK(shown.base == shown.fog_top + (2.0F * layer));
-    CHECK(shown.top == shown.base + (2.0F * layer));
+    CHECK(shown.base == Catch::Approx(shown.fog_top + depth(1, 3)));
+    CHECK(shown.top == Catch::Approx(shown.base + depth(3, 5)));
     CHECK(shown.cloud > 0.0F);
 }
 
@@ -153,13 +156,14 @@ TEST_CASE("a cloud's base and top lie where its layers' cloud puts them, not on 
                          static_cast<double>(shown.top) - (grid.floor_of(layer) - sea)};
     };
     // Full, a layer's cloud runs from its floor to its ceiling.
+    const double depth = grid.depth_of(layer);
     const auto [full_base, full_top] = heights(1e-4F);
     CHECK_THAT(full_base, Catch::Matchers::WithinAbs(0.0, 1.0));
-    CHECK_THAT(full_top, Catch::Matchers::WithinAbs(grid.thickness, 1.0));
+    CHECK_THAT(full_top, Catch::Matchers::WithinAbs(depth, 1.0));
     // Thinner, it closes in on the layer's middle.
     const auto [thin_base, thin_top] = heights(0.8e-4F);
-    CHECK_THAT(thin_base, Catch::Matchers::WithinAbs(0.125 * grid.thickness, 1.0));
-    CHECK_THAT(thin_top, Catch::Matchers::WithinAbs(0.875 * grid.thickness, 1.0));
+    CHECK_THAT(thin_base, Catch::Matchers::WithinAbs(0.125 * depth, 1.0));
+    CHECK_THAT(thin_top, Catch::Matchers::WithinAbs(0.875 * depth, 1.0));
     // And a layer with too little to show has no cloud at all.
     for (int i = 0; i < grid.layers; ++i) {
         air.field().at(open, i).cloud = i == layer ? 0.4e-4F : 0.0F;

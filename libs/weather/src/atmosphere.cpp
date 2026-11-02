@@ -48,8 +48,14 @@ double filling(const Field& field, std::size_t column, int layer) {
 // layers' edges.
 double edge_between(const Grid& grid, int inside, int outside, double inner, double outer) {
     const double across = inner > outer ? (inner - 0.5) / (inner - outer) : 0.5;
-    return grid.radius_of(inside) + (static_cast<double>(outside - inside) * across *
-                                     grid.between(std::min(inside, outside)));
+    // Half way across is the shared edge whatever the layers' depths, so each half of the span is
+    // scaled by its own layer's.
+    const double sign = static_cast<double>(outside - inside);
+    const double inner_half = 0.5 * grid.depth_of(inside);
+    const double outer_half = 0.5 * grid.depth_of(outside);
+    const double reach = across <= 0.5 ? 2.0 * across * inner_half
+                                       : inner_half + (2.0 * (across - 0.5) * outer_half);
+    return grid.radius_of(inside) + (sign * reach);
 }
 
 double edge_above(const Field& field, std::size_t column, int layer) {
