@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <optional>
 #include <print>
 #include <set>
 #include <span>
@@ -88,6 +89,39 @@ TEST_CASE("the liquid's surface is left out of a chunk's blocks", "[client][glob
     CHECK(blocks.indices.empty());
 }
 
+TEST_CASE("liquid standing clear of the sea's level is still water for the sea to draw",
+          "[client][globe]") {
+    constexpr double sea = 115'000.0;
+    SurfaceMesh mesh;
+    mesh.origin = DVec3{0.0, 0.0, sea};
+    // One triangle at the sea's level, one a hundred metres up, one of ground beside it.
+    for (const float height : {0.0F, 100.0F}) {
+        for (const Vec3 across :
+             {Vec3{1.0F, 0.0F, 0.0F}, Vec3{0.0F, 1.0F, 0.0F}, Vec3{-1.0F, 0.0F, 0.0F}}) {
+            mesh.vertices.push_back({.position = across + Vec3{0.0F, 0.0F, height},
+                                     .normal = Vec3{0.0F, 0.0F, 1.0F},
+                                     .material = Material::Water});
+        }
+    }
+    for (const Vec3 across :
+         {Vec3{3.0F, 0.0F, 0.0F}, Vec3{2.0F, 1.0F, 0.0F}, Vec3{1.0F, 0.0F, 0.0F}}) {
+        mesh.vertices.push_back({.position = across + Vec3{0.0F, 0.0F, 100.0F},
+                                 .normal = Vec3{0.0F, 0.0F, 1.0F},
+                                 .material = Material::Soil});
+    }
+    mesh.indices = {0, 1, 2, 3, 4, 5, 6, 7, 8};
+    const hog::terrain::BlockMesh still = hog::client::globe_still_water(mesh, sea, 0.5);
+    REQUIRE(still.indices == std::vector<std::uint32_t>{0, 1, 2});
+    REQUIRE(still.vertices.size() == 3);
+    CHECK(still.vertices[0].position == Vec3{1.0F, 0.0F, 100.0F});
+    CHECK(still.origin.metres() == mesh.origin);
+    const auto water = static_cast<std::uint8_t>(Material::Water);
+    CHECK(still.vertices[1].tiles == std::array<std::uint8_t, 3>{water, water, water});
+    // Without a sea, all liquid is still.
+    CHECK(hog::client::globe_still_water(mesh, std::nullopt, 0.5).indices.size() == 6);
+    CHECK(hog::client::globe_blocks(mesh).indices.size() == 3);
+}
+
 TEST_CASE("the blocks' tiles are the globe's materials, each averaging to its colour",
           "[client][globe]") {
     const std::vector<hog::terrain::MaterialImage> tiles = hog::client::block_tiles();
@@ -118,8 +152,8 @@ namespace {
 
 // Keys shown, as changes come in.
 void apply(std::set<std::uint64_t>& shown, const hog::client::GlobeStream::Changes& changes) {
-    for (const auto& [key, mesh] : changes.shown) {
-        CHECK_FALSE(mesh->indices.empty());
+    for (const auto& [key, ground, water] : changes.shown) {
+        CHECK_FALSE(ground->indices.empty());
         shown.insert(key);
     }
     for (const std::uint64_t key : changes.gone) {
@@ -228,6 +262,6 @@ TEST_CASE("a brick changed has the chunks drawn from it meshed again, and no oth
     CHECK(again.shown.size() < drawn);
     const hog::globe::Cell under = hog::globe::chunk_under(up, globe.generator.layers(), 0);
     CHECK(std::ranges::any_of(again.shown, [&](const auto& change) {
-        return change.first == hog::client::globe_key(under);
+        return change.key == hog::client::globe_key(under);
     }));
 }

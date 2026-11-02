@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <ranges>
 #include <set>
@@ -170,6 +171,38 @@ terrain::BlockMesh globe_blocks(const globe::SurfaceMesh& mesh) {
     return blocks;
 }
 
+terrain::BlockMesh globe_still_water(const globe::SurfaceMesh& mesh,
+                                     std::optional<double> sea_level, double thickness) {
+    constexpr std::uint32_t none = std::numeric_limits<std::uint32_t>::max();
+    terrain::BlockMesh water{.origin = WorldPosition{mesh.origin}, .vertices = {}, .indices = {}};
+    std::vector<std::uint32_t> made(mesh.vertices.size(), none);
+    const auto tile = static_cast<std::uint8_t>(globe::Material::Water);
+    for (std::size_t corner = 0; corner + 2 < mesh.indices.size(); corner += 3) {
+        const auto corners = std::span{mesh.indices}.subspan(corner, 3);
+        bool liquid = true;
+        double stands = 0.0;
+        for (const std::uint32_t index : corners) {
+            const globe::SurfaceVertex& vertex = mesh.vertices[index];
+            liquid = liquid && vertex.material == globe::Material::Water;
+            stands += glm::length(mesh.origin + DVec3{vertex.position}) / 3.0;
+        }
+        if (!liquid || (sea_level && std::abs(stands - *sea_level) <= thickness)) {
+            continue;
+        }
+        for (const std::uint32_t index : corners) {
+            if (made[index] == none) {
+                made[index] = static_cast<std::uint32_t>(water.vertices.size());
+                water.vertices.push_back({.position = mesh.vertices[index].position,
+                                          .normal = mesh.vertices[index].normal,
+                                          .tiles = {tile, tile, tile},
+                                          .corner = 0});
+            }
+            water.indices.push_back(made[index]);
+        }
+    }
+    return water;
+}
+
 std::uint64_t globe_key(globe::Cell chunk) {
     return (std::uint64_t{chunk.level} << 56U) | globe::index_of(chunk);
 }
@@ -315,8 +348,12 @@ void GlobeStream::take(std::size_t working) {
         return;
     }
     shown_.insert_or_assign(work.chunk, work.beside);
-    changes_.shown.emplace_back(globe_key(work.chunk),
-                                std::make_shared<const terrain::BlockMesh>(globe_blocks(mesh)));
+    const globe::Generator& generator = world_->generator();
+    changes_.shown.push_back(
+        {.key = globe_key(work.chunk),
+         .ground = std::make_shared<const terrain::BlockMesh>(globe_blocks(mesh)),
+         .water = std::make_shared<const terrain::BlockMesh>(
+             globe_still_water(mesh, generator.sea_level(), generator.layers().thickness))});
 }
 
 void GlobeStream::let_go() {

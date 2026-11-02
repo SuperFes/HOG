@@ -167,6 +167,47 @@ Surface vertex_main(Vertex vertex) {
     return surface;
 }
 
+// Still water drawn from a mesh: a lake or a pool standing level where the ground holds it,
+// as hog::terrain::BlockVertex lays it out, each mesh from its own origin, given from the eye
+// once for the mesh as the instance's.
+struct StillVertex {
+    [[vk::location(0)]] float3 position;
+    [[vk::location(1)]] float3 normal;
+    [[vk::location(2)]] uint4 tiles;
+    [[vk::location(3)]] float4 origin;
+};
+
+// Metres of wind still water's waves are taken to have grown over, with no fetch of its own.
+static const float still_fetch = 300.0;
+// Metres apart a still mesh's vertices are taken to lie, for the waves drawn between them.
+static const float still_between = 1.0;
+
+[shader("vertex")]
+Surface vertex_still(StillVertex vertex) {
+    const float3 up = push.up_height.xyz;
+    const float radius = waves.count_left_radius.z;
+    const float faked = push.east_faked.w;
+    Surface surface;
+    surface.rest = vertex.position + vertex.origin.xyz;
+    surface.from_eye = bent(surface.rest, push.up_height, float2(radius, faked));
+    surface.normal = normalize(surface.from_eye + (up * (faked + push.up_height.w)));
+    // Too deep for any wave to feel its floor, and held at its own level, not the sea's.
+    surface.floor = float4(deep_floor(), 0.0);
+    surface.reach = float4(still_fetch, 0.0, 0.0, 0.0);
+    const WaveSurface water =
+        wave_surface(waves, surface.rest, still_between, surface.floor.xyz, surface.reach);
+    surface.from_eye += as_drawn(water.moved, up, surface.normal);
+    const Surf surf = surf_at(waves, water, surface.floor.xyz);
+    surface.surf = float4(surf.breaking, surf.trailing, surf.lace, surf.white);
+    surface.foam = float4(0.0);
+    if (water.white.z > 0.0 || surf.white > 0.0) {
+        const FoamPattern coarse = coarse_foam_at(waves, surface.rest, still_between);
+        surface.foam = float4(coarse.coarse, coarse.across, coarse.coarse_seen, coarse.coarse_slope);
+    }
+    surface.position = mul(push.clip_from_eye, float4(surface.from_eye, 1.0));
+    return surface;
+}
+
 // How the water's surface faces at a pixel, the mean square slope of what's too small to draw
 // there, and how much of it is white with foam, and how bright that is.
 struct Facing {

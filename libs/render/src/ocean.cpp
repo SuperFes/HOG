@@ -7,6 +7,7 @@
 #include <hog/render/ocean.hpp>
 #include <hog/shaders/ocean.hpp>
 #include <hog/shaders/sea_laid.hpp>
+#include <hog/terrain/block_mesh.hpp>
 #include <hog/terrain/sea.hpp>
 #include <hog/terrain/shore.hpp>
 #include <hog/waves/foam.hpp>
@@ -24,6 +25,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <numbers>
 #include <span>
 #include <type_traits>
@@ -244,6 +246,44 @@ constexpr std::array air_descriptors{
     binding(behind_binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
     binding(behind_binding + 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
     binding(behind_binding + 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)};
+
+// As ocean.slang's StillVertex takes it: a block vertex, and the mesh's origin from the eye once
+// an instance, so each mesh is drawn from where it lies.
+constexpr std::array still_bindings{
+    VkVertexInputBindingDescription{.binding = 0,
+                                    .stride = sizeof(terrain::BlockVertex),
+                                    .inputRate = VK_VERTEX_INPUT_RATE_VERTEX},
+    VkVertexInputBindingDescription{
+        .binding = 1, .stride = sizeof(glm::vec4), .inputRate = VK_VERTEX_INPUT_RATE_INSTANCE}};
+constexpr std::array still_attributes{
+    VkVertexInputAttributeDescription{.location = 0,
+                                      .binding = 0,
+                                      .format = VK_FORMAT_R32G32B32_SFLOAT,
+                                      .offset = offsetof(terrain::BlockVertex, position)},
+    VkVertexInputAttributeDescription{.location = 1,
+                                      .binding = 0,
+                                      .format = VK_FORMAT_R32G32B32_SFLOAT,
+                                      .offset = offsetof(terrain::BlockVertex, normal)},
+    VkVertexInputAttributeDescription{.location = 2,
+                                      .binding = 0,
+                                      .format = VK_FORMAT_R8G8B8A8_UINT,
+                                      .offset = offsetof(terrain::BlockVertex, tiles)},
+    VkVertexInputAttributeDescription{
+        .location = 3, .binding = 1, .format = VK_FORMAT_R32G32B32A32_SFLOAT, .offset = 0}};
+
+// Upload memory for `bytes`, kept if `kept` holds as many already.
+Result<> hold(const Device& device, Buffer& kept, std::span<const std::byte> bytes,
+              VkBufferUsageFlags usage) {
+    if (kept.size() < bytes.size()) {
+        auto made = make_buffer(device, bytes.size(), usage, Memory::Upload);
+        if (!made) {
+            return std::unexpected(std::move(made).error());
+        }
+        kept = std::move(made).value();
+    }
+    std::memcpy(kept.mapped().data(), bytes.data(), bytes.size());
+    return kept.flush();
+}
 
 // How the swash of the waves, and of their groups' surges, turns along the ground: fixed to the
 // planet, each a way and a length, so it runs up one stretch of shore while it draws back from the
@@ -619,42 +659,28 @@ Result<Ocean> Ocean::create(Device& device, VkFormat colour_format, VkFormat dep
         return std::unexpected(std::move(pipeline).error());
     }
     ocean.pipeline_ = std::move(pipeline).value();
+    auto still = make_pipeline(
+        device, {.spirv = shaders::ocean,
+                 .vertex_entry = "vertex_still",
+                 .fragment_entry = air ? "fragment_air" : "fragment_main",
+                 .bindings = still_bindings,
+                 .attributes = still_attributes,
+                 .colour_format = colour_format,
+                 .depth_format = depth_format,
+                 .blend = Blend::Premultiplied,
+                 .push_constant_bytes = sizeof(Push),
+                 .descriptors = air ? std::span<const VkDescriptorSetLayoutBinding>{air_descriptors}
+                                    : std::span<const VkDescriptorSetLayoutBinding>{descriptors}});
+    if (!still) {
+        return std::unexpected(std::move(still).error());
+    }
+    ocean.still_plain_ = std::move(still).value();
+    ocean.device_ = &device;
+    ocean.still_origins_.resize(frames);
     if (air) {
-        const PipelineDesc drawn{.spirv = shaders::ocean,
-                                 .bindings = vertex_bindings,
-                                 .attributes = vertex_attributes,
-                                 .colour_format = colour_format,
-                                 .depth_format = depth_format,
-                                 .push_constant_bytes = sizeof(Push),
-                                 .descriptors = air_descriptors};
-        PipelineDesc deep = drawn;
-        deep.fragment_entry = "fragment_deep";
-        deep.depth_write = false;
-        PipelineDesc through = drawn;
-        through.fragment_entry = "fragment_through";
-        PipelineDesc under = drawn;
-        under.vertex_entry = "vertex_screen";
-        under.fragment_entry = "fragment_under";
-        under.bindings = {};
-        under.attributes = {};
-        under.depth_write = false;
-        for (const auto& [made, desc] :
-             {std::pair{&ocean.deep_, &deep}, std::pair{&ocean.through_, &through},
-              std::pair{&ocean.under_, &under}}) {
-            auto drawing = make_pipeline(device, *desc);
-            if (!drawing) {
-                return std::unexpected(std::move(drawing).error());
-            }
-            *made = std::move(drawing).value();
+        if (auto lit = make_lit_pipelines(device, colour_format, depth_format, ocean); !lit) {
+            return std::unexpected(std::move(lit).error());
         }
-        auto laid = make_compute_pipeline(device, {.spirv = shaders::sea_laid,
-                                                   .entry = "laid_main",
-                                                   .push_constant_bytes = sizeof(LaidPush),
-                                                   .descriptors = laid_descriptors});
-        if (!laid) {
-            return std::unexpected(std::move(laid).error());
-        }
-        ocean.laid_ = std::move(laid).value();
     }
     return ocean;
 }
@@ -749,9 +775,12 @@ SeaBindings Ocean::bindings(std::uint32_t frame) const {
 }
 
 Result<> Ocean::draw(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view,
-                     std::uint32_t frame) const {
+                     std::uint32_t frame) {
     if (!air_ || !view.behind) {
-        return record(commands, extent, view, frame, pipeline_);
+        if (auto sea = record(commands, extent, view, frame, pipeline_); !sea) {
+            return sea;
+        }
+        return draw_still(commands, extent, view, frame, still_plain_);
     }
     float highest = 0.0F;
     for (const float level : lake_levels_) {
@@ -762,7 +791,94 @@ Result<> Ocean::draw(VkCommandBuffer commands, VkExtent2D extent, const OceanVie
             return under;
         }
     }
-    return record(commands, extent, view, frame, through_);
+    if (auto sea = record(commands, extent, view, frame, through_); !sea) {
+        return sea;
+    }
+    return draw_still(commands, extent, view, frame, still_through_);
+}
+
+void Ocean::place_still(std::uint64_t key, std::shared_ptr<const terrain::BlockMesh> mesh) {
+    remove_still(key);
+    if (mesh && !mesh->indices.empty()) {
+        Still still;
+        still.mesh = std::move(mesh);
+        still_.emplace(key, std::move(still));
+    }
+}
+
+void Ocean::remove_still(std::uint64_t key) {
+    if (const auto held = still_.find(key); held != still_.end()) {
+        retire(std::move(held->second));
+        still_.erase(held);
+    }
+}
+
+Result<> Ocean::upload(Still& still) const {
+    const terrain::BlockMesh& mesh = *still.mesh;
+    auto vertices = make_filled_buffer(*device_, std::as_bytes(std::span{mesh.vertices}),
+                                       VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+    if (!vertices) {
+        return std::unexpected(std::move(vertices).error());
+    }
+    auto indices = make_filled_buffer(*device_, std::as_bytes(std::span{mesh.indices}),
+                                      VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+    if (!indices) {
+        return std::unexpected(std::move(indices).error());
+    }
+    still.vertices = std::move(vertices).value();
+    still.indices = std::move(indices).value();
+    still.count = static_cast<std::uint32_t>(mesh.indices.size());
+    still.origin = mesh.origin;
+    still.mesh.reset();
+    return {};
+}
+
+void Ocean::retire(Still still) {
+    retiring_.emplace_back(draws_, std::move(still));
+}
+
+Result<> Ocean::draw_still(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view,
+                           std::uint32_t frame, const Pipeline& pipeline) {
+    ++draws_;
+    // Each frame in flight has been drawn again since: none can still be reading them.
+    std::erase_if(retiring_, [&](const auto& retired) {
+        return draws_ - retired.first > still_origins_.size();
+    });
+    for (auto& [key, still] : still_) {
+        if (still.mesh) {
+            if (auto uploaded = upload(still); !uploaded) {
+                return uploaded;
+            }
+        }
+    }
+    if (still_.empty() || extent.width == 0 || extent.height == 0) {
+        return {};
+    }
+    // Each mesh's origin from the eye, in the order they're drawn.
+    std::vector<glm::vec4> origins;
+    origins.reserve(still_.size());
+    for (const auto& [key, still] : still_) {
+        origins.emplace_back(Vec3{still.origin - view.camera.eye}, 0.0F);
+    }
+    Buffer& kept = still_origins_.at(frame);
+    if (auto held = hold(*device_, kept, std::as_bytes(std::span{origins}),
+                         VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+        !held) {
+        return held;
+    }
+    if (auto bound = bind(commands, extent, view, frame, pipeline); !bound) {
+        return bound;
+    }
+    VkDeviceSize origin = 0;
+    for (const auto& [key, still] : still_) {
+        const std::array vertices{still.vertices.handle(), kept.handle()};
+        const std::array offsets{VkDeviceSize{0}, origin};
+        vkCmdBindVertexBuffers(commands, 0, 2, vertices.data(), offsets.data());
+        vkCmdBindIndexBuffer(commands, still.indices.handle(), 0, VK_INDEX_TYPE_UINT32);
+        vkCmdDrawIndexed(commands, still.count, 1, 0, 0, 0);
+        origin += sizeof(glm::vec4);
+    }
+    return {};
 }
 
 Result<> Ocean::draw_deep(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view,
@@ -874,11 +990,52 @@ Result<> Ocean::step_ripples(VkCommandBuffer commands, const OceanView& view, st
     return ripples_.step(commands, step, bindings(frame), frame, laid);
 }
 
-Result<> Ocean::record(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view,
-                       std::uint32_t frame, const Pipeline& pipeline) const {
-    if (extent.width == 0 || extent.height == 0) {
-        return {};
+Result<> Ocean::make_lit_pipelines(Device& device, VkFormat colour_format, VkFormat depth_format,
+                                   Ocean& ocean) {
+    const PipelineDesc drawn{.spirv = shaders::ocean,
+                             .bindings = vertex_bindings,
+                             .attributes = vertex_attributes,
+                             .colour_format = colour_format,
+                             .depth_format = depth_format,
+                             .push_constant_bytes = sizeof(Push),
+                             .descriptors = air_descriptors};
+    PipelineDesc deep = drawn;
+    deep.fragment_entry = "fragment_deep";
+    deep.depth_write = false;
+    PipelineDesc through = drawn;
+    through.fragment_entry = "fragment_through";
+    PipelineDesc under = drawn;
+    under.vertex_entry = "vertex_screen";
+    under.fragment_entry = "fragment_under";
+    under.bindings = {};
+    under.attributes = {};
+    under.depth_write = false;
+    PipelineDesc still_through = through;
+    still_through.vertex_entry = "vertex_still";
+    still_through.bindings = still_bindings;
+    still_through.attributes = still_attributes;
+    for (const auto& [made, desc] :
+         {std::pair{&ocean.deep_, &deep}, std::pair{&ocean.through_, &through},
+          std::pair{&ocean.under_, &under}, std::pair{&ocean.still_through_, &still_through}}) {
+        auto drawing = make_pipeline(device, *desc);
+        if (!drawing) {
+            return std::unexpected(std::move(drawing).error());
+        }
+        *made = std::move(drawing).value();
     }
+    auto laid = make_compute_pipeline(device, {.spirv = shaders::sea_laid,
+                                               .entry = "laid_main",
+                                               .push_constant_bytes = sizeof(LaidPush),
+                                               .descriptors = laid_descriptors});
+    if (!laid) {
+        return std::unexpected(std::move(laid).error());
+    }
+    ocean.laid_ = std::move(laid).value();
+    return {};
+}
+
+Result<> Ocean::bind(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view,
+                     std::uint32_t frame, const Pipeline& pipeline) const {
     if (auto written = write_waves(view, frame); !written) {
         return written;
     }
@@ -916,7 +1073,9 @@ Result<> Ocean::record(VkCommandBuffer commands, VkExtent2D extent, const OceanV
     push_sampled_image(commands, pipeline, ripple_binding, ripples_.kept().view(),
                        ripples_.sampler());
     push_sampled_image(commands, pipeline, rain_binding, rain_.kept().view(), rain_.sampler());
-    if (view.behind && (&pipeline == &through_ || &pipeline == &under_)) {
+    const bool through =
+        &pipeline == &through_ || &pipeline == &under_ || &pipeline == &still_through_;
+    if (view.behind && through) {
         push_sampled_image(commands, pipeline, behind_binding, view.behind->colour,
                            shore_sampler_.handle());
         push_sampled_image(commands, pipeline, behind_binding + 1, view.behind->depth,
@@ -926,10 +1085,21 @@ Result<> Ocean::record(VkCommandBuffer commands, VkExtent2D extent, const OceanV
                                                                       : calm_.environment(),
                            shore_sampler_.handle());
     }
+    vkCmdPushConstants(commands, pipeline.layout(),
+                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(Push),
+                       &push);
+    return {};
+}
+
+Result<> Ocean::record(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view,
+                       std::uint32_t frame, const Pipeline& pipeline) const {
+    if (extent.width == 0 || extent.height == 0) {
+        return {};
+    }
+    if (auto bound = bind(commands, extent, view, frame, pipeline); !bound) {
+        return bound;
+    }
     if (&pipeline == &under_) {
-        vkCmdPushConstants(commands, pipeline.layout(),
-                           VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                           sizeof(Push), &push);
         vkCmdDraw(commands, 3, 1, 0, 0);
         return {};
     }
@@ -937,9 +1107,6 @@ Result<> Ocean::record(VkCommandBuffer commands, VkExtent2D extent, const OceanV
     const VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(commands, 0, 1, vertices.data(), &offset);
     vkCmdBindIndexBuffer(commands, indices_.handle(), 0, VK_INDEX_TYPE_UINT16);
-    vkCmdPushConstants(commands, pipeline.layout(),
-                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(Push),
-                       &push);
     vkCmdDrawIndexed(commands, index_count_, 1, 0, 0, 0);
     return {};
 }

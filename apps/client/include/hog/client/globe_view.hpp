@@ -62,9 +62,15 @@ inline constexpr int material_size = 256;
 // The tiles block meshes name: the globe's materials by number.
 [[nodiscard]] std::vector<terrain::MaterialImage> block_tiles();
 
-// A chunk's shaped surfaces as blocks, laid from the chunk's own origin, each triangle wearing
-// its corners' materials; the liquid's surface is left out, as the sea is drawn over the ground.
+// A chunk's ground as blocks, laid from the chunk's own origin, each triangle wearing its
+// corners' materials; the liquid's surfaces are left out, as the sea is drawn over the ground
+// and still water as globe_still_water has it.
 [[nodiscard]] terrain::BlockMesh globe_blocks(const globe::SurfaceMesh& mesh);
+// A chunk's liquid surfaces standing clear of the sea's level, for the sea to draw as still
+// water; those within a voxel of its level are the sea's own, drawn over the ground.
+[[nodiscard]] terrain::BlockMesh globe_still_water(const globe::SurfaceMesh& mesh,
+                                                   std::optional<double> sea_level,
+                                                   double thickness);
 
 // How the globe's detail falls off: each chunk as coarse as keeps it `ratio` of its widths from
 // the eye, out to the horizon and no less than `least` round it.
@@ -96,10 +102,15 @@ public:
     // Chunks still to mesh or let go, or changes not yet handed over.
     [[nodiscard]] bool in_flight() const noexcept;
 
-    // What's changed since the last: chunks' meshes to show, each under its key, in place of any
-    // there, and the keys of those to take away.
+    // What's changed since the last: chunks' meshes to show, the ground's and the still water's,
+    // each under its key, in place of any there, and the keys of those to take away.
+    struct Shown {
+        std::uint64_t key = 0;
+        std::shared_ptr<const terrain::BlockMesh> ground;
+        std::shared_ptr<const terrain::BlockMesh> water;
+    };
     struct Changes {
-        std::vector<std::pair<std::uint64_t, std::shared_ptr<const terrain::BlockMesh>>> shown;
+        std::vector<Shown> shown;
         std::vector<std::uint64_t> gone;
 
         [[nodiscard]] bool empty() const noexcept { return shown.empty() && gone.empty(); }

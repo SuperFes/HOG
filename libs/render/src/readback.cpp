@@ -36,7 +36,7 @@ void record_readback(VkCommandBuffer commands, TrackedImage& image, VkExtent2D e
         .bufferOffset = 0,
         .bufferRowLength = 0,
         .bufferImageHeight = 0,
-        .imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .imageSubresource = {.aspectMask = image.aspect(),
                              .mipLevel = 0,
                              .baseArrayLayer = 0,
                              .layerCount = 1},

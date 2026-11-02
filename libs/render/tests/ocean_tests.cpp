@@ -35,6 +35,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
+#include <memory>
 #include <numbers>
 #include <optional>
 #include <random>
@@ -68,8 +70,11 @@ Pixel pixel_at(const std::vector<std::uint8_t>& pixels, std::uint32_t x, std::ui
 constexpr double earth = 6'371'000.0;
 
 // From walking height over open sea on an Earth-sized planet, looking level towards +X, the sky
-// and the sea lit through the air.
-std::vector<std::uint8_t> through_air(hog::render::Device& device, double sun_elevation) {
+// and the sea lit through the air; `place` has the sea first, to place still water on it, and
+// `depths` what was drawn how near, as the depth image has it.
+std::vector<std::uint8_t> through_air(hog::render::Device& device, double sun_elevation,
+                                      const std::function<void(hog::render::Ocean&)>& place = {},
+                                      std::vector<float>* depths = nullptr) {
     auto atmosphere = hog::render::Atmosphere::create(device);
     REQUIRE(atmosphere);
     auto sky = hog::render::Sky::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT);
@@ -77,6 +82,9 @@ std::vector<std::uint8_t> through_air(hog::render::Device& device, double sun_el
     auto ocean =
         hog::render::Ocean::create(device, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT, true);
     REQUIRE(ocean);
+    if (place) {
+        place(*ocean);
+    }
     const WorldPosition eye{up * (earth + 2.0)};
     const double elevation = sun_elevation * std::numbers::pi / 180.0;
     const DVec3 sun = (east * std::cos(elevation)) + (up * std::sin(elevation));
@@ -94,7 +102,8 @@ std::vector<std::uint8_t> through_air(hog::render::Device& device, double sun_el
     auto depth =
         hog::render::make_image(device, {.format = VK_FORMAT_D32_SFLOAT,
                                          .extent = extent,
-                                         .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+                                         .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+                                                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
                                          .aspect = VK_IMAGE_ASPECT_DEPTH_BIT});
     REQUIRE(depth);
     REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
@@ -111,9 +120,19 @@ std::vector<std::uint8_t> through_air(hog::render::Device& device, double sun_el
         CHECK(ocean->draw(commands, extent, view));
         vkCmdEndRendering(commands);
     }));
+    if (depths != nullptr) {
+        auto read = hog::render::read_pixels(device, *depth, hog::render::image_use::depth_target);
+        REQUIRE(read);
+        depths->resize(read->size() / sizeof(float));
+        std::memcpy(depths->data(), read->data(), read->size());
+    }
     auto pixels = hog::render::read_pixels(device, *target, hog::render::image_use::colour_target);
     REQUIRE(pixels);
     return std::move(pixels).value();
+}
+
+float depth_at(const std::vector<float>& depths, std::uint32_t x, std::uint32_t y) {
+    return depths.at((std::size_t{y} * extent.width) + x);
 }
 
 int brightness(Pixel pixel) {
@@ -144,6 +163,64 @@ TEST_CASE("through the air, the sea meets the sky at the horizon without a seam"
     CHECK(below[2] > below[0]);
     // At night, it's dark.
     CHECK(brightness(pixel_at(pixels, middle, horizon + 1)) < 15);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("still water placed as a mesh is drawn where it stands, with the sea",
+          "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    std::vector<float> without_depths;
+    const auto without = through_air(*device, 160.0, {}, &without_depths);
+    // Two sheets of still water running out east: one a metre over the sea, under the eye, and
+    // one five metres over the eye. The first is seen as the sea is, nearer; the second from
+    // under, where the sky was, and a surface seen from its back mirrors what's behind it.
+    const auto sheet = [](double height) {
+        auto made = std::make_shared<hog::terrain::BlockMesh>();
+        made->origin = WorldPosition{up * (earth + height)};
+        for (const hog::Vec3 corner :
+             {hog::Vec3{3.0F, -300.0F, 0.0F}, hog::Vec3{300.0F, -300.0F, 0.0F},
+              hog::Vec3{300.0F, 300.0F, 0.0F}, hog::Vec3{3.0F, 300.0F, 0.0F}}) {
+            made->vertices.push_back({.position = corner,
+                                      .normal = hog::Vec3{0.0F, 0.0F, 1.0F},
+                                      .tiles = {},
+                                      .corner = 0});
+        }
+        made->indices = {0, 1, 2, 0, 2, 3};
+        return made;
+    };
+    std::vector<float> with_depths;
+    const auto with = through_air(
+        *device, 160.0,
+        [&](hog::render::Ocean& ocean) {
+            ocean.place_still(7, sheet(1.0));
+            ocean.place_still(8, sheet(7.0));
+            ocean.place_still(9, sheet(7.0));
+            ocean.remove_still(9);
+            ocean.place_still(10, std::make_shared<hog::terrain::BlockMesh>());
+            CHECK(ocean.still_placed() == 2);
+        },
+        &with_depths);
+    const std::uint32_t middle = extent.width / 2;
+    const std::uint32_t horizon = extent.height / 2;
+    // Nearer is deeper, and the sky is as far as can be.
+    CHECK(depth_at(without_depths, middle, horizon - 6) == 0.0F);
+    CHECK(depth_at(with_depths, middle, horizon - 6) > 0.0F);
+    CHECK(depth_at(with_depths, middle, horizon + 6) >
+          depth_at(without_depths, middle, horizon + 6));
+    CHECK(depth_at(without_depths, middle, horizon + 6) > 0.0F);
+    // Flat, the still water mirrors more of the sky at a glancing view than the sea's waves do,
+    // in the same hue.
+    const Pixel sea = pixel_at(without, middle, horizon + 6);
+    const Pixel still = pixel_at(with, middle, horizon + 6);
+    INFO("sea " << int{sea[0]} << ", " << int{sea[1]} << ", " << int{sea[2]} << "; still "
+                << int{still[0]} << ", " << int{still[1]} << ", " << int{still[2]});
+    CHECK(brightness(still) >= brightness(sea));
+    CHECK(still[2] > still[0]);
+    const double brighter = static_cast<double>(brightness(still)) / brightness(sea);
+    for (std::size_t channel = 0; channel < 3; ++channel) {
+        CHECK_THAT(static_cast<double>(still.at(channel)) / sea.at(channel),
+                   WithinAbs(brighter, 0.1));
+    }
     CHECK(device->validation_errors() == 0);
 }
 

@@ -190,11 +190,13 @@ void Scene::finish_bakes() {
 }
 
 void Scene::show_globe(GlobeStream::Changes changes) {
-    for (auto& [key, mesh] : changes.shown) {
-        blocks_.place(key, std::move(mesh));
+    for (GlobeStream::Shown& shown : changes.shown) {
+        blocks_.place(shown.key, std::move(shown.ground));
+        ocean_.place_still(shown.key, std::move(shown.water));
     }
     for (const std::uint64_t key : changes.gone) {
         blocks_.remove(key);
+        ocean_.remove_still(key);
     }
 }
 

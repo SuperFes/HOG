@@ -13,6 +13,7 @@
 #include <hog/render/streamed_image.hpp>
 #include <hog/render/vulkan.hpp>
 #include <hog/terrain/bend.hpp>
+#include <hog/terrain/block_mesh.hpp>
 #include <hog/terrain/shore.hpp>
 #include <hog/waves/shoaling.hpp>
 #include <hog/waves/tide.hpp>
@@ -21,8 +22,11 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <map>
+#include <memory>
 #include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace hog::render {
@@ -189,10 +193,19 @@ public:
 
     // Records drawing into the colour and depth images being rendered to, of `extent`, over what's
     // already drawn there. Seeing through what's drawn beneath it, as copied, where the eye is in
-    // the water it lays the water over all it sees from there too. The frame's last submit must
-    // have finished.
+    // the water it lays the water over all it sees from there too. Still water placed is drawn
+    // after the sea, the same way. The frame's last submit must have finished.
     Result<> draw(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view,
-                  std::uint32_t frame = 0) const;
+                  std::uint32_t frame = 0);
+
+    // Still water besides the sea: lakes and pools standing level where the ground holds them,
+    // as block meshes of their surfaces, each kept apart by its key and uploaded once as it's
+    // next drawn, as the ground's chunks are; placing one under a key already held replaces it,
+    // and an empty one takes it away. Drawn as the sea is, lit and seen through the same, with
+    // the waves the wind grows on still water.
+    void place_still(std::uint64_t key, std::shared_ptr<const terrain::BlockMesh> mesh);
+    void remove_still(std::uint64_t key);
+    [[nodiscard]] std::size_t still_placed() const noexcept { return still_.size(); }
     // Lit through the air and seen from above the sea, records the water beneath the surface as
     // the ground's shading has it where it lies too deep to show, behind all else: drawn before the
     // ground, so ground under the sea left undrawn looks as it would. A sea seeing through what's
@@ -237,13 +250,38 @@ public:
 private:
     Ocean() = default;
 
+    // The pipelines a sea lit through the air draws with besides the first.
+    [[nodiscard]] static Result<> make_lit_pipelines(Device& device, VkFormat colour_format,
+                                                     VkFormat depth_format, Ocean& ocean);
     // Of the frame `frame`, writes its waves as the sea's seen.
     [[nodiscard]] Result<> write_waves(const OceanView& view, std::uint32_t frame) const;
 
+    // Binds the pipeline, all the sea's shaders read, and what they're pushed.
+    [[nodiscard]] Result<> bind(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view,
+                                std::uint32_t frame, const Pipeline& pipeline) const;
     Result<> record(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view,
                     std::uint32_t frame, const Pipeline& pipeline) const;
 
+    // A still mesh placed, on the GPU once uploaded.
+    struct Still {
+        std::shared_ptr<const terrain::BlockMesh> mesh;
+        Buffer vertices;
+        Buffer indices;
+        std::uint32_t count = 0;
+        // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
+        WorldPosition origin = {};
+    };
+    [[nodiscard]] Result<> upload(Still& still) const;
+    // Lets a mesh go once no frame in flight can still be drawing it.
+    void retire(Still still);
+    Result<> draw_still(VkCommandBuffer commands, VkExtent2D extent, const OceanView& view,
+                        std::uint32_t frame, const Pipeline& pipeline);
+
+    const Device* device_ = nullptr;
     Pipeline pipeline_;
+    // Still water, drawn as the sea is by each.
+    Pipeline still_plain_;
+    Pipeline still_through_;
     Pipeline deep_;
     // Laying the water over what's drawn beneath, as copied, and whether to.
     Pipeline through_;
@@ -270,6 +308,10 @@ private:
     std::optional<GameTime> ripple_time_;
     std::uint32_t index_count_ = 0;
     bool air_ = false;
+    std::map<std::uint64_t, Still> still_;
+    std::vector<std::pair<std::uint64_t, Still>> retiring_; // each with the draw it left at
+    std::vector<Buffer> still_origins_;                     // each frame's, from the eye
+    std::uint64_t draws_ = 0;
 };
 
 } // namespace hog::render
