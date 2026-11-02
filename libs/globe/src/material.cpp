@@ -32,7 +32,7 @@ const Properties& properties(Material material) {
          .critical_shear = 0.1,
          .erodibility = 1e-5,
          .settling = 1e-2,
-         .cohesion = 500.0,
+         .cohesion = 200.0,
          .bed_friction = 25.0 * degree}, // snow
         {.density = 1500.0,
          .melts = 1400.0,
@@ -171,6 +171,15 @@ const Properties& properties(Material material) {
          .bed_friction = 33.0 * degree}, // regolith
     }};
     return all[static_cast<std::size_t>(material)];
+}
+
+double footing(Material material, double wetness) {
+    const Properties& ground = properties(material);
+    const double wet = std::clamp(wetness, 0.0, 1.0);
+    if (ground.repose > 0.0) {
+        return ground.repose + (wet * (ground.saturated_repose - ground.repose));
+    }
+    return ground.friction + (wet * (ground.wet_friction - ground.friction));
 }
 
 double holding_slope(Material grain, Material bed, double wetness, double depth, double gravity) {
