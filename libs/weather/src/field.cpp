@@ -96,40 +96,16 @@ void set_air(Field& field, const globe::Planet& planet, std::size_t column) {
     }
 }
 
-namespace {
-
-constexpr double lowest_share = 0.2;
-
-// Layers from `bottom` filling `depth` metres, the lowest a fifth of an even layer and each above
-// the same ratio thicker, found by bisection as the total grows with the ratio.
-Grid stretched_grid(int level, int layers, double bottom, double depth) {
-    const double first = depth / layers * lowest_share;
-    const auto total = [&](double ratio) {
-        return ratio == 1.0 ? first * layers
-                            : first * (std::pow(ratio, layers) - 1.0) / (ratio - 1.0);
-    };
-    double low = 1.0;
-    double high = 2.0;
-    for (int step = 0; step < 60; ++step) {
-        const double middle = 0.5 * (low + high);
-        (total(middle) < depth ? low : high) = middle;
-    }
-    return {.level = level,
-            .layers = layers,
-            .bottom = bottom,
-            .thickness = first,
-            .ratio = 0.5 * (low + high)};
-}
-
-} // namespace
-
 Field start_field(const globe::Generator& generator, int level, int layers) {
     const globe::Planet& planet = generator.planet();
     const auto sea = generator.sea_level();
     const double bottom = sea.value_or(planet.radius + generator.shape().lowest);
 
     Field field;
-    field.grid = stretched_grid(level, layers, bottom, planet.radius + planet.sky_height - bottom);
+    field.grid = {.level = level,
+                  .layers = layers,
+                  .bottom = bottom,
+                  .thickness = (planet.radius + planet.sky_height - bottom) / layers};
     const Grid& grid = field.grid;
     field.air.resize(grid.size());
     field.ground.resize(grid.columns());
