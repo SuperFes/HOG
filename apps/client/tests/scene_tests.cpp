@@ -315,7 +315,7 @@ TEST_CASE("a swell on the coast, to look at", "[.look]") {
         hog::protocol::CellWeather cell;
         cell.wind = {east_run * 8.0F, north_run * 8.0F};
         cell.swells[0] = {.height = 2.4F, .peak = 0.7F, .heading = {east_run, north_run}};
-        auto forecast = everywhere(cell);
+        const auto forecast = everywhere(cell);
         Shot shot = shot_of(flight, globe.generator);
         shot.forecast = &forecast;
         shot.now = hog::MonotonicClock::time_point{};
