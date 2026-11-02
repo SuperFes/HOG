@@ -48,8 +48,8 @@ double filling(const Field& field, std::size_t column, int layer) {
 // layers' edges.
 double edge_between(const Grid& grid, int inside, int outside, double inner, double outer) {
     const double across = inner > outer ? (inner - 0.5) / (inner - outer) : 0.5;
-    return grid.radius_of(inside) +
-           (static_cast<double>(outside - inside) * across * grid.thickness);
+    return grid.radius_of(inside) + (static_cast<double>(outside - inside) * across *
+                                     grid.between(std::min(inside, outside)));
 }
 
 double edge_above(const Field& field, std::size_t column, int layer) {
@@ -103,7 +103,7 @@ Column Atmosphere::column(std::size_t column) const {
         const double height = grid.radius_of(layer) - planet_.radius;
         const double pressure = pressure_at(planet_, surface, height);
         const auto temperature = static_cast<double>(air.temperature);
-        const double mass = air_density(temperature, pressure) * grid.thickness;
+        const double mass = air_density(temperature, pressure) * grid.depth_of(layer);
         const auto cloud = static_cast<double>(air.cloud);
 
         if (lowest) {

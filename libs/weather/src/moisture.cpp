@@ -103,14 +103,14 @@ void evaporate(Field& field, const globe::Planet& planet, double seconds) {
             saturation(planet.volatiles, air_temperature(planet, surface, height), pressure);
         const double wind = std::max(least_wind, static_cast<double>(glm::length(air.wind)));
         const double rate = transfer * wind * (field.over_sea[column] != 0 ? 1.0 : land_wetness) /
-                            field.grid.thickness;
+                            field.grid.depth_of(layer);
         const auto vapour = static_cast<double>(air.vapour);
         if (held > vapour) {
             const double gained = (held - vapour) * (1.0 - std::exp(-rate * seconds));
             air.vapour = static_cast<float>(vapour + gained);
             // The water took its latent heat from the surface it left.
-            const double mass =
-                air_density(static_cast<double>(air.temperature), pressure) * field.grid.thickness;
+            const double mass = air_density(static_cast<double>(air.temperature), pressure) *
+                                field.grid.depth_of(layer);
             field.surface[column] -=
                 static_cast<float>(gained * mass * *latent / surface_heat(field, column));
         }
@@ -131,14 +131,14 @@ void exchange_heat(Field& field, const globe::Planet& planet, double seconds) {
         const auto surface = static_cast<double>(field.surface[column]);
         const double target = air_temperature(planet, surface, height);
         const double wind = std::max(least_wind, static_cast<double>(glm::length(air.wind)));
-        const double rate = transfer * wind / field.grid.thickness;
+        const double rate = transfer * wind / field.grid.depth_of(layer);
         const double change =
             (target - static_cast<double>(air.temperature)) * (1.0 - std::exp(-rate * seconds));
         air.temperature = static_cast<float>(static_cast<double>(air.temperature) + change);
         // Joules per square metre the air took in, which the surface lost.
         const double pressure = pressure_at(planet, surface, height);
-        const double mass =
-            air_density(static_cast<double>(air.temperature), pressure) * field.grid.thickness;
+        const double mass = air_density(static_cast<double>(air.temperature), pressure) *
+                            field.grid.depth_of(layer);
         field.surface[column] -=
             static_cast<float>(change * mass * air_heat_capacity() / surface_heat(field, column));
     }
@@ -186,7 +186,7 @@ void precipitate(Field& field, const globe::Planet& planet, double seconds) {
 
             const double density = pressure / (gas_constant / air_molar_mass * temperature);
             const double speed = fall_speed * std::pow(rain / fall_reference, 0.136);
-            const double share = std::min(1.0, speed * seconds / field.grid.thickness);
+            const double share = std::min(1.0, speed * seconds / field.grid.depth_of(layer));
             const double falling = rain * share;
             rain -= falling;
             air.cloud = static_cast<float>(cloud);
@@ -194,14 +194,16 @@ void precipitate(Field& field, const globe::Planet& planet, double seconds) {
             if (layer == 0 || field.blocked[cell - 1] != 0) {
                 // Metres of water, then mm over the hour.
                 field.precipitation[column] += static_cast<float>(
-                    falling * density * field.grid.thickness / seconds * 3'600.0);
+                    falling * density * field.grid.depth_of(layer) / seconds * 3'600.0);
             } else {
                 // What it carries to the cell below is the same mass of water in that cell's air.
                 Air& below = field.air[cell - 1];
-                const double under = pressure_at(planet, surface, height - field.grid.thickness);
+                const double under =
+                    pressure_at(planet, surface, height - field.grid.between(layer - 1));
                 const double thick = under / (gas_constant / air_molar_mass *
                                               static_cast<double>(below.temperature));
-                below.rain += static_cast<float>(falling * density / thick);
+                below.rain += static_cast<float>(falling * density * field.grid.depth_of(layer) /
+                                                 (thick * field.grid.depth_of(layer - 1)));
             }
         }
     }

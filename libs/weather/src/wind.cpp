@@ -150,7 +150,8 @@ std::vector<double> masses(const Field& field, const globe::Planet& planet) {
         const double radius = field.grid.radius_of(static_cast<int>(cell % layers));
         found[cell] *= field.blocked[cell] != 0
                            ? 0.0
-                           : angles[cell / layers] * radius * radius * field.grid.thickness;
+                           : angles[cell / layers] * radius * radius *
+                                 field.grid.depth_of(static_cast<int>(cell % layers));
     }
     return found;
 }

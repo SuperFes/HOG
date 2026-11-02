@@ -75,12 +75,12 @@ Stencil::Stencil(const Grid& grid) : grid_{grid} {
             }
             if (layer + 1 < grid.layers) {
                 links[4] = {.cell = static_cast<std::uint32_t>(grid.index(column, layer + 1)),
-                            .distance = static_cast<float>(grid.thickness),
+                            .distance = static_cast<float>(grid.between(layer)),
                             .direction = Vec3{up}};
             }
             if (layer > 0) {
                 links[5] = {.cell = static_cast<std::uint32_t>(grid.index(column, layer - 1)),
-                            .distance = static_cast<float>(grid.thickness),
+                            .distance = static_cast<float>(grid.between(layer - 1)),
                             .direction = Vec3{-up}};
             }
         }
