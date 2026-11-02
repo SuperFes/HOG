@@ -87,7 +87,11 @@ void Character::move(const Stride& stride, double seconds) {
         if (on_ground && stride.jumping) {
             velocity += up * settings.jumping;
         }
-        velocity += (along * speed) - (up * settings.gravity * step_seconds);
+        velocity += along * speed;
+        // On walkable ground the floor holds it; pulling down there would push it along a slope.
+        if (!on_ground) {
+            velocity -= up * settings.gravity * step_seconds;
+        }
         body.SetLinearVelocity(to_jolt(velocity));
 
         JPH::CharacterVirtual::ExtendedUpdateSettings update;

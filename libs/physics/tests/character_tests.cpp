@@ -193,3 +193,19 @@ TEST_CASE("a character put somewhere is there at rest", "[physics][character]") 
     CHECK(character.feet() == there);
     CHECK(glm::length(character.velocity()) == 0.0);
 }
+
+TEST_CASE("a character standing still on a walkable slope stays where it is", "[physics][character]") {
+    for (const double degrees : {10.0, 25.0, 40.0}) {
+        const double tilt = std::tan(glm::radians(degrees));
+        Stage stage{Scenery{}.quad({-20.0, -20.0, -20.0 * tilt}, {20.0, -20.0, 20.0 * tilt},
+                                   {20.0, 20.0, 20.0 * tilt}, {-20.0, 20.0, -20.0 * tilt})};
+        Character character{stage.space, stage.scenery.at({0.0, 0.0, 0.0})};
+        character.move(still, 0.5);
+        const DVec3 settled = stage.scenery.local(character.feet());
+        character.move(still, 5.0);
+        const DVec3 later = stage.scenery.local(character.feet());
+        INFO(degrees);
+        CHECK(glm::length(later - settled) < 0.02);
+        CHECK(character.standing());
+    }
+}
