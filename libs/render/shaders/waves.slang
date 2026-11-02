@@ -30,6 +30,18 @@ static const float most_bunching = 0.8;
 static const float shallowest = 0.01;
 static const float full_turn = 6.283185307;
 static const float breaking_depth = 0.42;
+// As hog::waves' breaker.hpp: how far over waves curl, the stage they're at and which beaches
+// plunge them.
+static const float curl_draw_back = 1.7;
+static const float curl_from = -0.3;
+static const float curl_to = 0.5;
+static const float curl_drop = 0.6;
+static const float curl_drop_centre = 0.55;
+static const float curl_drop_width = 0.45;
+static const float curl_fully_over = 0.6;
+static const float plunges_from = 0.5;
+static const float surges_from = 3.3;
+static const float iribarren_edge = 0.15;
 // As hog::waves' gravity, fetch_peak_power and bands of frequency.
 public static const float gravity = 9.81;
 static const float fetch_peak_power = 0.33;
@@ -52,7 +64,8 @@ public struct Wave {
     // takes part in breaking white; yzw its lag terms, as hog::waves::lag_terms has them.
     public float4 breaking;
     // As it runs on still water in a sea grown full under the wind: x metres high, and of it and
-    // every shorter wave y the mean square slope and z the mean square of how high they rise.
+    // every shorter wave y the mean square slope and z the mean square of how high they rise; w its
+    // share of the waves' summed height, for breaking to curl them over together.
     public float4 still;
 };
 
@@ -423,6 +436,50 @@ public float3 deep_floor() {
     return float3(1.0e6, 0.0, 0.0);
 }
 
+// As hog::waves::Curl: x the water's extra push along the wave's way, y up, and z and w their
+// rates over the phase.
+struct Curl {
+    float along;
+    float up;
+    float along_rate;
+    float up_rate;
+};
+
+// As hog::waves::curl_at, at stage 1.
+Curl curl_at(float turned, float amplitude, float wavenumber) {
+    // Within a turn of the crest, as the curl is shaped.
+    const float phase = turned - (full_turn * round(turned / full_turn));
+    const float t = saturate((phase - curl_from) / (curl_to - curl_from));
+    const float fade = t * t * (3.0 - (2.0 * t));
+    const float fade_rate = t > 0.0 && t < 1.0 ? 6.0 * t * (1.0 - t) / (curl_to - curl_from) : 0.0;
+    const float scale = curl_draw_back / wavenumber;
+    const float down = (phase - curl_drop_centre) / curl_drop_width;
+    const float dip = exp(-down * down);
+    const float drop_scale = curl_drop * amplitude;
+    Curl curl;
+    curl.along = -scale * sin(phase) * fade;
+    curl.up = -drop_scale * dip;
+    curl.along_rate = -scale * ((cos(phase) * fade) + (sin(phase) * fade_rate));
+    curl.up_rate = drop_scale * dip * (2.0 * down / curl_drop_width);
+    return curl;
+}
+
+float smooth_between(float from, float to, float x) {
+    const float t = saturate((x - from) / (to - from));
+    return t * t * (3.0 - (2.0 * t));
+}
+
+// As hog::waves::plunging.
+float plunging(float slope, float steepness) {
+    if (!(slope > 0.0) || !(steepness > 0.0)) {
+        return 0.0;
+    }
+    const float iribarren = slope / sqrt(steepness);
+    return smooth_between(plunges_from - iribarren_edge, plunges_from + iribarren_edge, iribarren) *
+           (1.0 - smooth_between(surges_from - iribarren_edge, surges_from + iribarren_edge,
+                                 iribarren));
+}
+
 // Of the water at a point of sea level, where the waves move it, how its surface faces there, and
 // how rough with waves too short to draw it is: their mean square slope. Taken in the frame under
 // the eye. And of the waves that break, how much they bunch the water there, and the mean square of
@@ -493,6 +550,12 @@ public WaveSurface wave_surface(Waves waves, float3 rest, float footprint, float
     float2 slope = float2(0.0);
     // Symmetric: xx, xy and yy.
     float3 bunching = float3(0.0);
+    // What the curl of the waves breaking adds, at stage 1: the along terms, and the up terms
+    // which scale with how high the waves are held.
+    float2 curl_carried = float2(0.0);
+    float3 curl_bunching = float3(0.0);
+    float curl_rising = 0.0;
+    float2 curl_slope = float2(0.0);
     surface.breaking = 0.0;
     surface.breaking_left = still ? left.y : waves.foam.y;
     surface.heave = 0.0;
@@ -586,6 +649,18 @@ public WaveSurface wave_surface(Waves waves, float3 rest, float footprint, float
         const float steep = steep_full * kept;
         surface.heave += amplitude * amplitude / 2.0;
         surface.rise_slope += steep * steep / 2.0;
+        if (shallow && !still) {
+            const float weight = waves.waves[i].still.w * plunging(steepness, base * deep / 3.14159265);
+            if (weight > 0.0) {
+                const Curl curl = curl_at(phase, amplitude, wavenumber);
+                curl_carried += ahead * (curl.along * weight);
+                curl_bunching -=
+                    float3(ahead.x * ahead.x, ahead.x * ahead.y, ahead.y * ahead.y) *
+                    (wavenumber * curl.along_rate * weight);
+                curl_rising += curl.up * weight;
+                curl_slope -= ahead * (wavenumber * curl.up_rate * weight);
+            }
+        }
         float s;
         float c;
         sincos(phase, s, c);
@@ -632,9 +707,21 @@ public WaveSurface wave_surface(Waves waves, float3 rest, float footprint, float
         surface.white = white[0];
         surface.white_left = white[1];
     }
-    surface.moved = (up * rising) + (first * carried.x) + (second * carried.y);
-    const float3 one = (first * (1.0 - bunching.x)) - (second * bunching.y) - (up * slope.x);
-    const float3 two = (second * (1.0 - bunching.z)) - (first * bunching.y) - (up * slope.y);
+    // The waves too high for the depth curl over as far as they're past it.
+    const float stage =
+        shallow && all_heave > 0.0
+            ? saturate(((sqrt(8.0 * all_heave) / (breaking_depth * depth)) - 1.0) / curl_fully_over)
+            : 0.0;
+    const float curl_up = stage * held;
+    const float2 moved_carried = carried + (curl_carried * stage);
+    const float3 moved_bunching = bunching + (curl_bunching * stage);
+    const float moved_rising = rising + (curl_rising * curl_up);
+    const float2 moved_slope = slope + (curl_slope * curl_up);
+    surface.moved = (up * moved_rising) + (first * moved_carried.x) + (second * moved_carried.y);
+    const float3 one = (first * (1.0 - moved_bunching.x)) - (second * moved_bunching.y) -
+                       (up * moved_slope.x);
+    const float3 two = (second * (1.0 - moved_bunching.z)) - (first * moved_bunching.y) -
+                       (up * moved_slope.y);
     surface.normal = normalize(cross(one, two));
     return surface;
 }

@@ -653,6 +653,61 @@ TEST_CASE("over a shore the sea's drawn waves shoal as hog::waves has them", "[r
     CHECK(device->validation_errors() == 0);
 }
 
+TEST_CASE("a swell breaking on a beach curls over in the drawn waves as hog::waves has it",
+          "[render][gpu]") {
+    const auto device = test_device();
+    // A big swell and no wind, running in at a shore lying east of the eye.
+    WavySea sea{0.0};
+    const DVec3 first{hog::Vec3{sea.drawn.first}};
+    sea.sea.systems.push_back({.heading = -first,
+                               .height = 2.4,
+                               .peak = 0.7,
+                               .peakedness = hog::waves::swell_peakedness,
+                               .spread = hog::waves::swell_spread});
+    sea.waves = hog::waves::waves_at(sea.trains, sea.bend.up, sea.sea);
+    sea.drawn = hog::render::drawn_waves_at(sea.trains, sea.waves, sea.sea, sea.eye, sea.bend, noon,
+                                            DVec3{0.0});
+    std::vector<hog::waves::Wave> shown;
+    for (const hog::waves::Wave& wave : sea.waves) {
+        const double showing =
+            std::sqrt(hog::waves::showing(glm::dot(sea.bend.up, sea.trains[wave.train].heading)));
+        if (showing > 0.0) {
+            shown.push_back({.train = wave.train, .amplitude = wave.amplitude * showing});
+        }
+    }
+    std::vector<hog::waves::Wave> kept =
+        hog::waves::strongest(sea.trains, shown, hog::render::drawn_waves).waves;
+    for (hog::waves::Wave& wave : kept) {
+        wave.amplitude /=
+            std::sqrt(hog::waves::showing(glm::dot(sea.bend.up, sea.trains[wave.train].heading)));
+    }
+    // A 1:10 beach, sampled every half metre over fifty metres a few metres deep.
+    constexpr double slope = 0.1;
+    std::vector<DVec3> rest;
+    std::vector<hog::Vec3> floors;
+    std::vector<hog::Vec3> offshore;
+    std::vector<hog::waves::Floor> cpu_floors;
+    for (int i = 0; i < 100; ++i) {
+        const double west = 25.0 - (0.5 * i);
+        const double out = 30.0 - west;
+        rest.push_back(sea.rest(first * west));
+        floors.emplace_back(static_cast<float>(out * slope), static_cast<float>(-slope), 0.0F);
+        offshore.emplace_back(static_cast<float>(out), -1.0F, 0.0F);
+        cpu_floors.push_back(
+            {.depth = out * slope, .deepening = -first * slope, .out = out, .seaward = -first});
+    }
+    const std::vector<Probed> probed =
+        probe_waves(*device, sea.drawn, rest, 1e-3, floors, {}, offshore);
+    for (std::size_t i = 0; i < rest.size(); ++i) {
+        const hog::waves::Surface surface = hog::waves::surface_at(
+            sea.trains, kept, sea.eye.metres() + rest[i], noon, cpu_floors[i]);
+        CAPTURE(i, cpu_floors[i].depth);
+        CHECK(glm::length(probed[i].moved - surface.moved) <
+              0.02 + (0.01 * glm::length(surface.moved)));
+    }
+    CHECK(device->validation_errors() == 0);
+}
+
 TEST_CASE("the sea's drawn waves carry the tide round the eye", "[render]") {
     // Eight metres over a calm sea at middling latitudes, where the tide runs high.
     const std::vector<hog::waves::Train> trains = hog::waves::planet_trains(5);

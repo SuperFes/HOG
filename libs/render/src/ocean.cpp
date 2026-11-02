@@ -410,6 +410,12 @@ DrawnWaves drawn_waves_at(std::span<const waves::Train> trains, std::span<const 
                      .up_height = {Vec3{bend.up}, static_cast<float>(bend.eye_height)},
                      .first = {Vec3{frame.east}, 0.0F},
                      .second = {Vec3{frame.north}, 0.0F}};
+    // How much of the height the drawn waves add up to each carries, for those breaking to curl
+    // over together.
+    double open_sum = 0.0;
+    for (const waves::Wave& wave : strongest.waves) {
+        open_sum += open.at(wave.train);
+    }
     double shorter = 0.0;
     double heave = 0.0;
     double breaking_shorter = 0.0;
@@ -445,7 +451,8 @@ DrawnWaves drawn_waves_at(std::span<const waves::Train> trains, std::span<const 
             .breaking = {static_cast<float>(breaking_shorter), static_cast<float>(lag.turn),
                          static_cast<float>(lag.scale), static_cast<float>(lag.offset)},
             .still = {static_cast<float>(calm), static_cast<float>(still_shorter),
-                      static_cast<float>(still_heave), 0.0F}};
+                      static_cast<float>(still_heave),
+                      static_cast<float>(open_sum > 0.0 ? wave.amplitude / open_sum : 0.0)}};
     }
     if (wind > 0.0) {
         // As waves::fetched has it: a sea's height grows by the root of its fetch, and its peak

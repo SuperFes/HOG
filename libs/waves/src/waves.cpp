@@ -1,4 +1,5 @@
 #include <hog/core/hash.hpp>
+#include <hog/waves/breaker.hpp>
 #include <hog/waves/shoaling.hpp>
 #include <hog/waves/waves.hpp>
 
@@ -14,6 +15,27 @@ namespace hog::waves {
 namespace {
 
 constexpr double tau = 2.0 * std::numbers::pi;
+
+// What the waves breaking add to the water's motion, summed.
+struct Curled {
+    DVec3 carried{0.0};
+    DVec3 slope{0.0};
+    glm::dmat3 bunching{0.0};
+    double rising = 0.0;
+
+    // Adds one wave's curl, running `heading` with `wavenumber`, at `phase`.
+    void add(const Curl& curl, const DVec3& heading, double wavenumber) {
+        carried += heading * curl.along;
+        rising += curl.up;
+        bunching -= glm::outerProduct(heading, heading) * (wavenumber * curl.along_rate);
+        slope -= heading * (wavenumber * curl.up_rate);
+    }
+};
+
+// Of a wave `amplitude` high and `wavenumber` rad/m, its height over its length.
+[[nodiscard]] double wave_steepness(double amplitude_wavenumber) noexcept {
+    return amplitude_wavenumber / std::numbers::pi;
+}
 
 // Pierson and Moskowitz's, for the wind 19.5 m up, which blows a little faster than at 10.
 constexpr double pm_alpha = 8.1e-3;
@@ -292,16 +314,22 @@ Surface surface_at(std::span<const Train> trains, std::span<const Wave> waves, D
     };
     // Those too high for the depth break, as many as it takes to bring them down to it.
     double kept = 1.0;
+    // How far over they curl: breaking waves plunge on beaches steep enough, and spill on the rest.
+    double stage = 0.0;
+    // The height the waves add up to, as they run in deep water.
+    double deep_sum = 0.0;
     if (shallow) {
         double squares = 0.0;
         for (const Wave& wave : waves) {
             const auto [amplitude, deep] = shown_at(wave);
+            deep_sum += amplitude;
             if (amplitude > 0.0) {
                 const double arrived = amplitude * arriving(heading_of(trains[wave.train]), deep);
                 squares += arrived * arrived;
             }
         }
         kept = depth_limited(2.0 * std::sqrt(squares), floor.depth);
+        stage = breaking_stage(2.0 * std::sqrt(squares), floor.depth);
     }
     Surface surface;
     // How the surface slopes, and how its water bunches along the ground, against the ground
@@ -310,6 +338,9 @@ Surface surface_at(std::span<const Train> trains, std::span<const Wave> waves, D
     glm::dmat3 bunching{0.0};
     double rising = 0.0;
     DVec3 carried{0.0};
+    // What the curl adds, which the water bunching isn't held back from.
+    Curled curled;
+    const double beach_slope = steepness;
     for (const Wave& wave : waves) {
         const Train& train = trains[wave.train];
         auto [amplitude, wavenumber] = shown_at(wave);
@@ -335,6 +366,16 @@ Surface surface_at(std::span<const Train> trains, std::span<const Wave> waves, D
             }
             heading = turned / wavenumber;
         }
+        if (stage > 0.0) {
+            // Deep water's steepness, height over length, for how the beach takes it. Waves that
+            // crest together curl together: each carries the breaking as far as it adds to their
+            // height, so the curls of those in step add up to a whole one, and the rest cancel.
+            const double deep_amplitude = shown_at(wave).first;
+            const double weight = stage *
+                                  plunging(beach_slope, wave_steepness(deep_amplitude * deep)) *
+                                  deep_amplitude / deep_sum;
+            curled.add(curl_at(phase, weight, amplitude, wavenumber), heading, wavenumber);
+        }
         const double c = std::cos(phase);
         const double s = std::sin(phase);
         const double swing = choppiness * amplitude * stretch;
@@ -355,6 +396,10 @@ Surface surface_at(std::span<const Train> trains, std::span<const Wave> waves, D
         carried *= unfolded;
         bunching *= unfolded;
     }
+    rising += curled.rising;
+    carried += curled.carried;
+    slope += curled.slope;
+    bunching += curled.bunching;
     surface.moved = (up * rising) + carried;
     const DVec3 one = first - (up * glm::dot(slope, first)) - (bunching * first);
     const DVec3 two = second - (up * glm::dot(slope, second)) - (bunching * second);

@@ -592,7 +592,7 @@ TEST_CASE("in the shallows waves break down to what the depth holds", "[waves][s
     }
 }
 
-TEST_CASE("in the shallows a swell's crests steepen but don't fold over", "[waves][shoaling]") {
+TEST_CASE("over a shelf a swell's crests steepen but don't fold over", "[waves][shoaling]") {
     const std::vector<Train> trains = hog::waves::planet_trains(seed);
     // A long, high swell running in at the shore, and a breeze's sea across it.
     SeaState sea = windy(north * 7.0);
@@ -607,7 +607,8 @@ TEST_CASE("in the shallows a swell's crests steepen but don't fold over", "[wave
     std::uniform_real_distribution<double> when{0.0, 600.0};
     constexpr double step = 0.01;
     double least = 1.0;
-    const double slope = GENERATE(0.0, 0.02, 0.05, 0.1, 0.2);
+    // Beaches steeper than these plunge their waves, which curl over.
+    const double slope = GENERATE(0.003, 0.006, 0.01);
     const auto beach = [&](double out_by) {
         return slope > 0.0 ? hog::waves::Floor{.depth = out_by * slope,
                                                .deepening = east * slope,
@@ -744,4 +745,77 @@ TEST_CASE("a wind over a short fetch raises lower, shorter waves", "[waves]") {
         CHECK_THAT(fetched(frequency, 1e6, speed), WithinAbs(1.0, 1e-12));
         CHECK(fetched(frequency, 0.0, speed) == 0.0);
     }
+}
+
+TEST_CASE("a swell breaking on a moderate beach curls over, and on a shelf it doesn't",
+          "[waves][breaker]") {
+    const std::vector<Train> trains = hog::waves::planet_trains(seed);
+    // A 7 s swell of a metre running straight in.
+    const std::uint32_t chosen = train_along(trains, -east, 3);
+    const std::vector<Wave> waves{{.train = chosen, .amplitude = 1.0}};
+    // How far back the water's position along the beach falls as the rest position climbs: the
+    // least slope of where the water is against where it rests, over a stretch of beach.
+    const auto least_squeeze = [&](double slope, double out) {
+        constexpr double step = 0.02;
+        double least = 1.0;
+        for (int tick = 0; tick < 40; ++tick) {
+            const GameTime time = later(tick * 0.25);
+            const auto where = [&](double east_of) {
+                const DVec3 on = glm::normalize((up * radius) + (east * east_of)) * radius;
+                const hog::waves::Floor floor{.depth = (out + east_of) * slope,
+                                              .deepening = east * slope,
+                                              .out = out + east_of,
+                                              .seaward = east};
+                return east_of +
+                       glm::dot(east, hog::waves::surface_at(trains, waves, on, time, floor).moved);
+            };
+            for (int step_at = -60; step_at < 60; ++step_at) {
+                const double at = 0.5 * step_at;
+                least = std::min(least, (where(at + step) - where(at - step)) / (2.0 * step));
+            }
+        }
+        return least;
+    };
+    // 2.5 m deep is too shallow for a metre of swell to hold.
+    CHECK(least_squeeze(0.1, 25.0) < 0.0);
+    CHECK(least_squeeze(0.005, 500.0) > 0.0);
+}
+
+TEST_CASE(
+    "a directional swell breaking on a moderate beach curls over where its waves crest together",
+    "[waves][breaker]") {
+    const std::vector<Train> trains = hog::waves::planet_trains(seed);
+    SeaState sea{};
+    sea.systems.push_back({.heading = -east,
+                           .height = 2.4,
+                           .peak = 0.7,
+                           .peakedness = hog::waves::swell_peakedness,
+                           .spread = hog::waves::swell_spread});
+    const std::vector<Wave> waves = hog::waves::waves_at(trains, up, sea);
+    const std::vector<Wave> kept = hog::waves::strongest(trains, waves, 48).waves;
+    constexpr double slope = 0.1;
+    const auto least_squeeze = [&](double beach_slope) {
+        double least = 1.0;
+        for (int tick = 0; tick < 60; ++tick) {
+            const GameTime time = later(tick * 0.5);
+            const auto where = [&](double west) {
+                const DVec3 on = glm::normalize((up * radius) + (east * west)) * radius;
+                const double out = 30.0 - west;
+                const hog::waves::Floor floor{.depth = out * beach_slope,
+                                              .deepening = -east * beach_slope,
+                                              .out = out,
+                                              .seaward = -east};
+                return west +
+                       glm::dot(east, hog::waves::surface_at(trains, kept, on, time, floor).moved);
+            };
+            for (int step_west = -100; step_west < 80; ++step_west) {
+                const double west = 0.25 * step_west;
+                least = std::min(least, (where(west + 0.125) - where(west - 0.125)) / 0.25);
+            }
+        }
+        return least;
+    };
+    CHECK(least_squeeze(slope) < 0.0);
+    // The same swell over a shelf too gentle to plunge it only spills.
+    CHECK(least_squeeze(0.005) > 0.0);
 }
