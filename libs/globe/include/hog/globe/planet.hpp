@@ -87,6 +87,13 @@ struct Derived {
 [[nodiscard]] double temperature_at(const Planet& planet, double latitude);
 [[nodiscard]] double mean_temperature(const Planet& planet);
 
+// The pressure its vapour holds in balance with the liquid at a temperature; none for no volatile
+// or above its critical point.
+[[nodiscard]] std::optional<double> saturation_pressure(Volatile volatiles, double temperature);
+// J/kg to turn the liquid to vapour, and kg/mol of its vapour.
+[[nodiscard]] std::optional<double> latent_heat(Volatile volatiles);
+[[nodiscard]] std::optional<double> molar_mass(Volatile volatiles);
+
 // Where the volatile boils at a pressure, in kelvin; none below its triple point's pressure.
 [[nodiscard]] std::optional<double> boiling_point(Volatile volatiles, double pressure);
 

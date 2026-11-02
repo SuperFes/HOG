@@ -35,6 +35,7 @@ struct Phase {
     double triple_pressure;    // pascals
     double critical_temperature;
     double latent_heat; // J/mol to boil, its mean over the liquid's range
+    double molar_mass;  // kg/mol
 };
 
 std::optional<Phase> phase_of(Volatile volatiles) {
@@ -45,12 +46,14 @@ std::optional<Phase> phase_of(Volatile volatiles) {
         return Phase{.triple_temperature = 273.16,
                      .triple_pressure = 611.657,
                      .critical_temperature = 647.096,
-                     .latent_heat = 42'850.0};
+                     .latent_heat = 42'850.0,
+                     .molar_mass = 0.018'015};
     case Volatile::Methane:
         return Phase{.triple_temperature = 90.694,
                      .triple_pressure = 11'696.0,
                      .critical_temperature = 190.564,
-                     .latent_heat = 8'500.0};
+                     .latent_heat = 8'500.0,
+                     .molar_mass = 0.016'043};
     }
     return std::nullopt;
 }
@@ -138,6 +141,26 @@ double mean_temperature(const Planet& planet) {
     // cos(latitude) averages π/4 over a sphere's area.
     return planet.pole_temperature +
            ((planet.equator_temperature - planet.pole_temperature) * std::numbers::pi / 4.0);
+}
+
+std::optional<double> saturation_pressure(Volatile volatiles, double temperature) {
+    const auto phase = phase_of(volatiles);
+    if (!phase || temperature <= 0.0 || temperature > phase->critical_temperature) {
+        return std::nullopt;
+    }
+    return phase->triple_pressure *
+           maths::exp(-phase->latent_heat / gas_constant *
+                      ((1.0 / temperature) - (1.0 / phase->triple_temperature)));
+}
+
+std::optional<double> latent_heat(Volatile volatiles) {
+    const auto phase = phase_of(volatiles);
+    return phase ? std::optional{phase->latent_heat / phase->molar_mass} : std::nullopt;
+}
+
+std::optional<double> molar_mass(Volatile volatiles) {
+    const auto phase = phase_of(volatiles);
+    return phase ? std::optional{phase->molar_mass} : std::nullopt;
 }
 
 std::optional<double> boiling_point(Volatile volatiles, double pressure) {

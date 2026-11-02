@@ -71,6 +71,19 @@ TEST_CASE("a volatile boils as Clausius and Clapeyron say", "[globe][planet]") {
     CHECK(hog::globe::boiling_point(Volatile::Water, 1e9).value_or(0.0) == 647.096);
 }
 
+TEST_CASE("a volatile's vapour is in balance with it as the boiling point says",
+          "[globe][planet]") {
+    // It boils where its vapour holds the pressure above it.
+    const auto held = hog::globe::saturation_pressure(Volatile::Water, 373.15);
+    CHECK(std::abs(held.value_or(0.0) - 101'325.0) < 6'000.0);
+    CHECK(hog::globe::saturation_pressure(Volatile::Water, 288.0).value_or(0.0) <
+          hog::globe::saturation_pressure(Volatile::Water, 300.0).value_or(0.0));
+    CHECK_FALSE(hog::globe::saturation_pressure(Volatile::Water, 700.0));
+    CHECK_FALSE(hog::globe::saturation_pressure(Volatile::None, 288.0));
+    CHECK(hog::globe::latent_heat(Volatile::Water).value_or(0.0) > 2.2e6);
+    CHECK(hog::globe::latent_heat(Volatile::Water).value_or(0.0) < 2.6e6);
+}
+
 TEST_CASE("what wears a surface down follows from its air and warmth", "[globe][planet]") {
     const auto earth = hog::globe::derive(named("earth"));
     CHECK(earth.fluvial);
