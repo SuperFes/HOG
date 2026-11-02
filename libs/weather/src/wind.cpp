@@ -1,3 +1,4 @@
+#include <hog/core/profile.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/weather/moisture.hpp>
 #include <hog/weather/wind.hpp>
@@ -508,13 +509,26 @@ void advect(Field& field, const Stencil& stencil, const globe::Planet& planet, d
 }
 
 void step(Field& field, const Stencil& stencil, const globe::Planet& planet, double seconds) {
-    accelerate(field, stencil, planet, seconds);
-    project(field, stencil, planet);
-    advect(field, stencil, planet, seconds);
-    evaporate(field, planet, seconds);
-    exchange_heat(field, planet, seconds);
-    condense(field, planet);
-    precipitate(field, planet, seconds);
+    HOG_ZONE("air step");
+    {
+        HOG_ZONE("accelerate");
+        accelerate(field, stencil, planet, seconds);
+    }
+    {
+        HOG_ZONE("project");
+        project(field, stencil, planet);
+    }
+    {
+        HOG_ZONE("advect");
+        advect(field, stencil, planet, seconds);
+    }
+    {
+        HOG_ZONE("moisture");
+        evaporate(field, planet, seconds);
+        exchange_heat(field, planet, seconds);
+        condense(field, planet);
+        precipitate(field, planet, seconds);
+    }
 }
 
 } // namespace hog::weather
