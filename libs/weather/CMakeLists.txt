@@ -1,6 +1,7 @@
 add_library(hog_weather
     src/field.cpp
     src/grid.cpp
+    src/moisture.cpp
     src/stencil.cpp
     src/wind.cpp)
 add_library(hog::weather ALIAS hog_weather)
@@ -12,6 +13,7 @@ hog_target_defaults(hog_weather)
 hog_add_tests(hog_weather
     tests/field_tests.cpp
     tests/grid_tests.cpp
+    tests/moisture_tests.cpp
     tests/stencil_tests.cpp
     tests/surface_tests.cpp
     tests/wind_tests.cpp)

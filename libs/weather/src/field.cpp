@@ -35,6 +35,10 @@ double latitude_of(DVec3 up) {
 
 } // namespace
 
+double air_heat_capacity() {
+    return heat_capacity;
+}
+
 double dry_lapse_rate(const globe::Planet& planet) {
     return planet.gravity / heat_capacity;
 }

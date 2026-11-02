@@ -38,6 +38,9 @@ struct Field {
     }
 };
 
+// Joules to warm a kilogram of dry air a kelvin.
+[[nodiscard]] double air_heat_capacity();
+
 // How fast a parcel of air cools as it rises, K/m: g/cₚ. Air that cools slower than this is stable.
 [[nodiscard]] double dry_lapse_rate(const globe::Planet& planet);
 

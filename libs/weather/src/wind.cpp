@@ -1,4 +1,5 @@
 #include <hog/globe/cell.hpp>
+#include <hog/weather/moisture.hpp>
 #include <hog/weather/wind.hpp>
 
 #include <glm/common.hpp>
@@ -375,6 +376,8 @@ void step(Field& field, const Stencil& stencil, const globe::Planet& planet, dou
     accelerate(field, stencil, planet, seconds);
     project(field, stencil);
     advect(field, stencil, planet, seconds);
+    evaporate(field, planet, seconds);
+    condense(field, planet);
 }
 
 } // namespace hog::weather
