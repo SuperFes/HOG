@@ -1,9 +1,11 @@
 #include <hog/core/assert.hpp>
+#include <hog/core/hash.hpp>
 #include <hog/flow/region.hpp>
 #include <hog/globe/planet.hpp>
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdlib>
 #include <optional>
 #include <set>
@@ -44,6 +46,16 @@ std::int64_t head(int bottom, std::int64_t amount) noexcept {
 
 std::int64_t capacity(int bottom, int top) noexcept {
     return std::int64_t{top - bottom} * full;
+}
+
+// What a ground's pores can hold, and what they keep against gravity: half of it, as soil
+// drains to about half its porosity and holds the rest.
+std::int64_t pores(const Voxel& voxel) noexcept {
+    return globe::amount_of(globe::properties(voxel.solid).porosity);
+}
+
+std::int64_t kept(const Voxel& voxel) noexcept {
+    return pores(voxel) / 2;
 }
 
 } // namespace
@@ -126,9 +138,7 @@ std::int64_t Region::liquid() const {
     std::int64_t total = 0;
     for (const auto& [key, brick] : held_) {
         for (const Voxel& voxel : brick.voxels) {
-            if (open(voxel)) {
-                total += voxel.liquid_amount;
-            }
+            total += voxel.liquid_amount;
         }
     }
     return total;
@@ -196,6 +206,34 @@ void Region::walk(const Column& column, const Each& each, const Gap& gap) {
         }
     }
     gap();
+}
+
+template <typename Each>
+void Region::walk_all(const Column& column, const Each& each) {
+    const auto stack = stacks_.find(
+        column_key(column.face, column.i / globe::brick_side, column.j / globe::brick_side));
+    HOG_ASSERT(stack != stacks_.end(), "a column of no brick");
+    std::uint32_t last = 0;
+    bool first = true;
+    for (const std::uint32_t brick_layer : stack->second) {
+        bool joined = !first && brick_layer == last + 1;
+        first = false;
+        last = brick_layer;
+        Held& brick = *held({.face = column.face,
+                             .i = column.i / globe::brick_side,
+                             .j = column.j / globe::brick_side,
+                             .layer = brick_layer});
+        for (int k = 0; k < globe::brick_side; ++k) {
+            const Site site{.face = column.face,
+                            .i = column.i,
+                            .j = column.j,
+                            .layer =
+                                (brick_layer * globe::brick_side) + static_cast<std::uint32_t>(k)};
+            each(site, brick, brick.voxels[static_cast<std::size_t>(globe::index_in_brick(site))],
+                 joined);
+            joined = true;
+        }
+    }
 }
 
 bool Region::open_to_sea(Site site) const {
@@ -455,6 +493,7 @@ void Region::settle(const std::vector<Column>& columns, Stepped& stepped) {
                 run.clear();
             });
         HOG_ASSERT(next == column.first + column.count, "the column's sections don't match");
+        report_wet(column, stepped);
     }
     stepped.wanted.reserve(wanted.size());
     for (const std::uint64_t key : wanted) {
@@ -462,8 +501,71 @@ void Region::settle(const std::vector<Column>& columns, Stepped& stepped) {
     }
 }
 
-Stepped Region::step() {
+void Region::report_wet(const Column& column, Stepped& stepped) const {
+    std::int64_t standing = 0;
+    for (std::size_t s = column.first; s < column.first + column.count; ++s) {
+        standing += sections_[s].amount;
+    }
+    if (standing > 0) {
+        stepped.wet.push_back(
+            {.face = column.face, .i = column.i, .j = column.j, .standing = standing});
+    }
+}
+
+std::int64_t Region::seeped(double rate, double seconds, Site site) const {
+    const double units = rate * seconds / world_->store().layers().thickness * full;
+    const double whole = std::floor(units);
+    const std::uint64_t draw = hash_values(steps_, std::uint64_t{site.face}, std::uint64_t{site.i},
+                                           std::uint64_t{site.j}, std::uint64_t{site.layer});
+    const double unit = static_cast<double>(draw >> 11U) * 0x1.0p-53;
+    return static_cast<std::int64_t>(whole) + (unit < units - whole ? 1 : 0);
+}
+
+// Liquid moves `seconds` of seepage from `over` into `under`: down into the ground at what it
+// lets through; out of the ground only what it doesn't keep, dripping where it's open underneath.
+std::int64_t Region::seep_down(Site site, Voxel& over, Voxel& under, double seconds) const {
+    if (open(over) && open(under)) {
+        return 0;
+    }
+    const double over_rate = open(over) ? 1.0 : globe::properties(over.solid).conductivity;
+    const double under_rate = open(under) ? 1.0 : globe::properties(under.solid).conductivity;
+    const std::int64_t give = open(over) ? over.liquid_amount : over.liquid_amount - kept(over);
+    const std::int64_t room = (open(under) ? full : pores(under)) - under.liquid_amount;
+    const std::int64_t moved =
+        std::min({give, room, seeped(std::min(over_rate, under_rate), seconds, site)});
+    if (moved <= 0) {
+        return 0;
+    }
+    over.liquid_amount = static_cast<std::uint16_t>(over.liquid_amount - moved);
+    under.liquid_amount = static_cast<std::uint16_t>(under.liquid_amount + moved);
+    under.liquid = over.liquid;
+    if (over.liquid_amount == 0) {
+        over.liquid = Material::Air;
+    }
+    return moved;
+}
+
+void Region::seep(const std::vector<Column>& columns, double seconds, Stepped& stepped) {
+    for (const Column& column : columns) {
+        Held* under_brick = nullptr;
+        Voxel* under = nullptr;
+        walk_all(column, [&](Site site, Held& brick, Voxel& over, bool joined) {
+            if (joined && under != nullptr) {
+                if (const std::int64_t moved = seep_down(site, over, *under, seconds); moved > 0) {
+                    stepped.changed += moved;
+                    brick.dirty = true;
+                    under_brick->dirty = true;
+                }
+            }
+            under_brick = &brick;
+            under = &over;
+        });
+    }
+}
+
+Stepped Region::step(double seconds) {
     Stepped stepped;
+    ++steps_;
     std::vector<Column> all = columns();
     hold_sea(all, stepped);
     gather(all);
@@ -484,7 +586,9 @@ Stepped Region::step() {
             transfer.outward ? transfer.amount : -transfer.amount;
     }
     settle(all, stepped);
-    // What settling took from the edge, the sea gives back before anyone sees it short.
+    seep(all, seconds, stepped);
+    // What settling and seeping took from the edge, the sea gives back before anyone sees it
+    // short.
     hold_sea(all, stepped);
     return stepped;
 }

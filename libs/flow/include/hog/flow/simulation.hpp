@@ -31,9 +31,19 @@ public:
         std::size_t held = 0;
         std::vector<globe::BrickSite> written;
     };
-    Progress step();
+    // Runs the liquid `seconds` on.
+    Progress step(double seconds);
 
     [[nodiscard]] const Region& region() const noexcept { return region_; }
+
+    // What the flow has left of itself in a column: how much water has stood there, in metres
+    // of depth times seconds, and how much has run through, in voxels' worth. Vegetation reads
+    // these to grow thick by water and thin away from it.
+    struct Moisture {
+        double stood = 0.0;
+        double ran = 0.0;
+    };
+    [[nodiscard]] Moisture moisture(std::uint8_t face, std::uint32_t i, std::uint32_t j) const;
 
 private:
     void take(globe::BrickSite site);
@@ -41,6 +51,7 @@ private:
     globe::World* world_;
     Region region_;
     std::unordered_map<std::uint64_t, int> still_; // steps each brick held has gone unchanged
+    std::unordered_map<std::uint64_t, Moisture> moisture_;
 };
 
 } // namespace hog::flow

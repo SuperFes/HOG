@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <utility>
 
 namespace hog::flow {
@@ -36,13 +37,36 @@ void Simulation::touched(BrickSite site) {
     }
 }
 
-Simulation::Progress Simulation::step() {
+namespace {
+
+std::uint64_t column_key(std::uint8_t face, std::uint32_t i, std::uint32_t j) noexcept {
+    return (std::uint64_t{face} << 42U) | (std::uint64_t{i} << 21U) | j;
+}
+
+} // namespace
+
+Simulation::Moisture Simulation::moisture(std::uint8_t face, std::uint32_t i,
+                                          std::uint32_t j) const {
+    const auto found = moisture_.find(column_key(face, i, j));
+    return found == moisture_.end() ? Moisture{} : found->second;
+}
+
+Simulation::Progress Simulation::step(double seconds) {
     Progress progress;
     if (region_.size() == 0) {
         return progress;
     }
-    const Stepped stepped = region_.step();
+    const Stepped stepped = region_.step(seconds);
     progress.changed = stepped.changed;
+    const double thickness = world_->store().layers().thickness;
+    for (const Stepped::Wet& wet : stepped.wet) {
+        Moisture& moisture = moisture_[column_key(wet.face, wet.i, wet.j)];
+        moisture.stood +=
+            static_cast<double>(wet.standing) / globe::Voxel::full * thickness * seconds;
+        const Region::Flux flux = region_.flux(wet.face, wet.i, wet.j);
+        moisture.ran += static_cast<double>(std::abs(flux.along_i) + std::abs(flux.along_j)) /
+                        globe::Voxel::full;
+    }
     for (std::size_t k = 0; k < std::min(stepped.wanted.size(), most_taken); ++k) {
         take(stepped.wanted[k]);
     }

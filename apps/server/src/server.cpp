@@ -164,7 +164,7 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
 void Server::simulate(GameTime /*from*/, GameDuration step) {
     HOG_ZONE("simulate");
     entities_.progress(std::chrono::duration<float>(step).count());
-    flow_.step();
+    flow_.step(std::chrono::duration<double>(step).count());
 }
 
 void Server::open_players() {

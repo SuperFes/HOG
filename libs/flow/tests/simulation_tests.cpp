@@ -18,6 +18,7 @@ using hog::flow::testing::Block;
 using hog::flow::testing::earth;
 using hog::flow::testing::floor_above_sea;
 using hog::flow::testing::full;
+using hog::flow::testing::tick;
 using hog::globe::VoxelStore;
 using hog::globe::World;
 
@@ -33,7 +34,7 @@ struct Ran {
 Ran run(Simulation& simulation, int most) {
     Ran ran;
     for (; ran.steps < most; ++ran.steps) {
-        const Simulation::Progress progress = simulation.step();
+        const Simulation::Progress progress = simulation.step(tick);
         ran.most_held = std::max(ran.most_held, progress.held);
         if (progress.held == 0) {
             ++ran.steps;
@@ -56,7 +57,7 @@ TEST_CASE("an edit wakes the flow about it, which sleeps again once at rest",
     block.pour(12, 12, 5, full);
     block.region().flush();
     Simulation simulation{block.world()};
-    CHECK(simulation.step().held == 0);
+    CHECK(simulation.step(tick).held == 0);
     simulation.touched(hog::globe::brick_of(block.at(12, 12, 5)));
     const Ran ran = run(simulation, 10 * Simulation::rest);
     CHECK(ran.steps < 10 * Simulation::rest);
@@ -87,7 +88,15 @@ TEST_CASE("liquid takes up the bricks it reaches and leaves them once still",
             total += amount;
         }
     }
-    CHECK(total == 10 * full);
+    // All but the few units that soaked into the rock.
+    CHECK(total >= (10 * full) - 16);
+    CHECK(total <= 10 * full);
+    // The water left its mark where it stood and ran, and none where it never came.
+    const hog::globe::Site middle = block.at(12, 12, 0);
+    const hog::globe::Site rim = block.at(0, 0, 0);
+    CHECK(simulation.moisture(middle.face, middle.i, middle.j).stood > 0.0);
+    CHECK(simulation.moisture(middle.face, middle.i, middle.j).ran > 0.0);
+    CHECK(simulation.moisture(rim.face, rim.i, rim.j).stood == 0.0);
 }
 
 TEST_CASE("the world as generated is left as it is", "[flow][simulation]") {

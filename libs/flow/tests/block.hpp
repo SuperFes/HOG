@@ -29,6 +29,8 @@ using globe::VoxelStore;
 using globe::World;
 
 constexpr std::int64_t full = Voxel::full;
+// A server tick's worth of game time.
+constexpr double tick = 0.05;
 
 inline const Generator& earth() {
     static const Generator generator{hog::globe::Planet{}};
@@ -36,14 +38,15 @@ inline const Generator& earth() {
 }
 
 // Columns 24 across and 24 along in the middle of face 0, with a floor: all shaped rock up to
-// layer `floor`, then open air to the top of the third brick up, or as `shape(i, j, layer)` says
-// where given, over the floor. Cell numbers run from the block's own corner.
+// layer `floor` of `ground`, then open air to the top of the third brick up, or as `shape(i, j,
+// layer)` says where given, over the floor. Cell numbers run from the block's own corner.
 class Block {
 public:
     static constexpr std::uint32_t side = 3 * hog::globe::brick_side;
 
     explicit Block(int floor, bool hold_sea = false,
-                   const std::function<bool(std::uint32_t, std::uint32_t, int)>& shape = {})
+                   const std::function<bool(std::uint32_t, std::uint32_t, int)>& shape = {},
+                   Material ground = Material::Basalt)
         : store_{earth().layers()}, world_{earth(), store_}, floor_{floor},
           corner_i_{(store_.bricks_across() / 2) * hog::globe::brick_side}, corner_j_{corner_i_} {
         const auto first = (static_cast<std::uint32_t>(floor) - 1) / hog::globe::brick_side;
@@ -62,8 +65,7 @@ public:
                             layer >= floor && (!shape || shape(site.i - corner_i_,
                                                                site.j - corner_j_, layer - floor));
                         voxels[static_cast<std::size_t>(k)] =
-                            open ? Voxel{}
-                                 : Voxel{.distance = -Voxel::far, .solid = Material::Basalt};
+                            open ? Voxel{} : Voxel{.distance = -Voxel::far, .solid = ground};
                     }
                     store_.put(brick, hog::globe::Brick::pack(voxels));
                     bricks_.push_back(brick);
@@ -103,11 +105,11 @@ public:
         region_->pour(at(i, j, layer), static_cast<std::uint16_t>(amount));
     }
 
-    // Steps while anything changes, up to `most` times; how many it took.
-    int settle(int most) {
+    // Steps `seconds` at a time while anything changes, up to `most` times; how many it took.
+    int settle(int most, double seconds = tick) {
         for (int step = 1; step <= most; ++step) {
             const std::int64_t before = region_->liquid();
-            const Stepped stepped = region_->step();
+            const Stepped stepped = region_->step(seconds);
             if (region_->liquid() != before + stepped.from_sea) {
                 FAIL("liquid lost or made: " << before << " -> " << region_->liquid());
             }

@@ -20,6 +20,14 @@ struct Stepped {
     std::int64_t changed = 0;
     std::int64_t from_sea = 0;
     std::vector<globe::BrickSite> wanted;
+    // Each column with liquid standing in the open, and how much.
+    struct Wet {
+        std::uint8_t face = 0;
+        std::uint32_t i = 0;
+        std::uint32_t j = 0;
+        std::int64_t standing = 0;
+    };
+    std::vector<Wet> wet;
 };
 
 // Liquid moving through a world's voxels, over as many of its bricks as are held here. Each
@@ -28,7 +36,8 @@ struct Stepped {
 // runs across into the other by the difference in their heads. Liquid pushed into a section
 // already full presses in beyond full, and the head that gives pushes on in turn, so liquid finds
 // its level through a tunnel too. The columns are square and so is the flow: across the four
-// sides alike. Liquid in the pores of shaped matter is left where it is.
+// sides alike. Standing liquid seeps into the ground under it as fast as the ground lets it,
+// and water in the ground drains down through it, keeping back what the ground holds.
 class Region {
 public:
     // With `hold_sea`, open voxels under the sea's level at the edge of what is held are kept
@@ -46,10 +55,11 @@ public:
     [[nodiscard]] globe::Voxel at(globe::Site site) const;
     // Sets the voxel's liquid to `amount` of the world's own.
     void pour(globe::Site site, std::uint16_t amount);
-    // All the liquid in the open voxels held.
+    // All the liquid held, in the open and in the ground's pores.
     [[nodiscard]] std::int64_t liquid() const;
 
-    Stepped step();
+    // Runs the liquid `seconds` on.
+    Stepped step(double seconds);
     // Writes the bricks changed since they were loaded or last flushed, and says which.
     std::vector<globe::BrickSite> flush();
 
@@ -112,6 +122,10 @@ private:
     // where a run ends.
     template <typename Each, typename Gap>
     void walk(const Column& column, const Each& each, const Gap& gap);
+    // Calls `each(site, brick, voxel, joined)` up the column for every voxel held, `joined` when
+    // the one under it was held too.
+    template <typename Each>
+    void walk_all(const Column& column, const Each& each);
     void hold_sea(const std::vector<Column>& columns, Stepped& stepped);
     void gather(std::vector<Column>& columns);
     [[nodiscard]] std::vector<Meeting> meetings(const std::vector<Column>& columns) const;
@@ -128,6 +142,14 @@ private:
     static void scale(std::vector<Transfer>& transfers, std::size_t Transfer::* end,
                       const std::vector<std::int64_t>& asked, const auto& limit);
     void settle(const std::vector<Column>& columns, Stepped& stepped);
+    void report_wet(const Column& column, Stepped& stepped) const;
+    void seep(const std::vector<Column>& columns, double seconds, Stepped& stepped);
+    // Seeps from a voxel into the one under it; how much moved.
+    [[nodiscard]] std::int64_t seep_down(globe::Site site, globe::Voxel& over, globe::Voxel& under,
+                                         double seconds) const;
+    // Units of liquid a seepage of `rate` metres a second moves in `seconds`, the fraction of a
+    // unit rounded by a hash of the site and step so slow seepage still adds up.
+    [[nodiscard]] std::int64_t seeped(double rate, double seconds, globe::Site site) const;
 
     globe::World* world_;
     bool hold_sea_;
@@ -138,6 +160,7 @@ private:
     std::vector<Section> sections_;
     std::unordered_map<std::uint64_t, std::size_t> column_at_; // into columns(), by its key
     std::unordered_map<std::uint64_t, Flux> flux_;             // the last step's, by column
+    std::uint64_t steps_ = 0;
 };
 
 } // namespace hog::flow

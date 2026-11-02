@@ -24,6 +24,7 @@ using hog::flow::testing::Block;
 using hog::flow::testing::earth;
 using hog::flow::testing::floor_above_sea;
 using hog::flow::testing::full;
+using hog::flow::testing::tick;
 using hog::globe::BrickSite;
 using hog::globe::BrickVoxels;
 using hog::globe::Generator;
@@ -37,7 +38,7 @@ TEST_CASE("liquid poured into the air falls to the floor, and nothing is lost", 
     }
     const std::int64_t before = block.region().liquid();
     CHECK(before == 3 * full);
-    const Stepped stepped = block.region().step();
+    const Stepped stepped = block.region().step(tick);
     CHECK(stepped.changed > 0);
     CHECK(block.region().liquid() == before);
     // Three full on the floor of a column of one; it spread sideways as it fell.
@@ -54,7 +55,7 @@ TEST_CASE("a column of liquid spreads the same way along each side and lies flat
         block.pour(12, 12, layer, full);
     }
     for (int step = 0; step < 4; ++step) {
-        block.region().step();
+        block.region().step(tick);
     }
     for (std::uint32_t k = 1; k <= 4; ++k) {
         const std::int64_t east = block.amount(12 + k, 12, 0);
@@ -84,14 +85,14 @@ TEST_CASE("liquid on the move against the edge of what's held wants the bricks b
           "[flow][region]") {
     Block block{floor_above_sea(100.0)};
     block.pour(0, 0, 3, full);
-    const Stepped stepped = block.region().step();
+    const Stepped stepped = block.region().step(tick);
     CHECK(!stepped.wanted.empty());
     for (const BrickSite brick : stepped.wanted) {
         CHECK(!block.region().holds(brick));
         CHECK(brick.layer == block.bricks()[9].layer);
     }
     REQUIRE(block.settle(4'000) < 4'000);
-    CHECK(block.region().step().wanted.empty());
+    CHECK(block.region().step(tick).wanted.empty());
 }
 
 TEST_CASE("liquid finds its level through a tunnel", "[flow][region]") {
@@ -161,7 +162,7 @@ TEST_CASE("the sea beyond the edge fills a hollow to its level and no higher", "
             }
         }
     }
-    const Stepped stepped = block.region().step();
+    const Stepped stepped = block.region().step(tick);
     CHECK(stepped.changed == 0);
     CHECK(stepped.from_sea == 0);
     CHECK(stepped.wanted.empty());
@@ -196,9 +197,61 @@ TEST_CASE("the world as generated is at rest: a step moves nothing and writes no
             }
         }
     }
-    const Stepped stepped = region.step();
+    const Stepped stepped = region.step(tick);
     CHECK(stepped.changed == 0);
     CHECK(stepped.from_sea == 0);
     CHECK(region.flush().empty());
     CHECK(store.size() == 0);
+}
+
+TEST_CASE("a puddle soaks into the ground as fast as the ground lets it: sand within the hour, "
+          "soil in a day, mud hardly at all",
+          "[flow][region]") {
+    // One column open, walled all round.
+    const auto shaft = [](std::uint32_t i, std::uint32_t j, int /*layer*/) {
+        return i == 12 && j == 12;
+    };
+    constexpr double hours = 6.0 * 3'600.0;
+    const auto puddle_left = [&](hog::globe::Material ground) {
+        Block block{floor_above_sea(100.0), false, shaft, ground};
+        block.pour(12, 12, 0, full / 2);
+        for (int step = 0; step < 6; ++step) {
+            const std::int64_t before = block.region().liquid();
+            block.region().step(hours / 6.0);
+            REQUIRE(block.region().liquid() == before);
+        }
+        // What's gone from the puddle is in the ground under it.
+        const std::int64_t left = block.amount(12, 12, 0);
+        std::int64_t in_ground = 0;
+        for (int layer = -1; layer >= -8; --layer) {
+            in_ground += block.amount(12, 12, layer);
+        }
+        CHECK(in_ground == (full / 2) - left);
+        const double seeped = hog::globe::properties(ground).conductivity * hours /
+                              earth().layers().thickness * static_cast<double>(full);
+        const auto expected = static_cast<std::int64_t>(std::max(0.0, (full / 2.0) - seeped));
+        CHECK(std::abs(left - expected) <= 64);
+        return left;
+    };
+    CHECK(puddle_left(hog::globe::Material::Sand) == 0);
+    CHECK(puddle_left(hog::globe::Material::Soil) > 0);
+    CHECK(puddle_left(hog::globe::Material::Sediment) > (full / 2) - 400);
+}
+
+TEST_CASE("water in the ground drains down to what the ground keeps, and no further",
+          "[flow][region]") {
+    const auto shaft = [](std::uint32_t i, std::uint32_t j, int /*layer*/) {
+        return i == 12 && j == 12;
+    };
+    Block block{floor_above_sea(100.0), false, shaft, hog::globe::Material::Sand};
+    const std::int64_t pores =
+        hog::globe::amount_of(hog::globe::properties(hog::globe::Material::Sand).porosity);
+    block.pour(12, 12, -1, pores);
+    for (int step = 0; step < 48; ++step) {
+        block.region().step(3'600.0);
+    }
+    CHECK(block.amount(12, 12, -1) == pores / 2);
+    CHECK(block.amount(12, 12, -2) == pores / 2);
+    CHECK(block.amount(12, 12, -1) + block.amount(12, 12, -2) + block.amount(12, 12, -3) == pores);
+    CHECK(block.amount(12, 12, 0) == 0);
 }
