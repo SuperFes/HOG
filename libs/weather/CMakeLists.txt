@@ -1,4 +1,5 @@
 add_library(hog_weather
+    src/atmosphere.cpp
     src/field.cpp
     src/grid.cpp
     src/moisture.cpp
@@ -11,6 +12,7 @@ target_link_libraries(hog_weather PUBLIC hog::core hog::globe)
 hog_target_defaults(hog_weather)
 
 hog_add_tests(hog_weather
+    tests/atmosphere_tests.cpp
     tests/field_tests.cpp
     tests/grid_tests.cpp
     tests/moisture_tests.cpp

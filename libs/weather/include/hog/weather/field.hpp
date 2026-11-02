@@ -26,7 +26,7 @@ struct Field {
     std::vector<double> ground; // per column: metres from the centre, the sea's level over sea
     std::vector<std::uint8_t> over_sea; // per column: whether the sea lies under the air
     std::vector<std::uint8_t> blocked;  // per cell: whether the ground fills it
-    std::vector<float> surface; // per column: its temperature reduced to the reference level
+    std::vector<float> surface;       // per column: its temperature reduced to the reference level
     std::vector<float> precipitation; // per column: water reaching the ground, mm/h
 
     [[nodiscard]] Air& at(std::size_t column, int layer) { return air[grid.index(column, layer)]; }
@@ -57,6 +57,9 @@ struct Field {
 // rate from `surface_temperature` there.
 [[nodiscard]] double pressure_at(const globe::Planet& planet, double surface_temperature,
                                  double height);
+
+// Kilograms a cubic metre of dry air weighs at a temperature and pressure.
+[[nodiscard]] double air_density(double temperature, double pressure);
 
 // Metres over which still air at a temperature thins by e: RT/g.
 [[nodiscard]] double scale_height(const globe::Planet& planet, double temperature);

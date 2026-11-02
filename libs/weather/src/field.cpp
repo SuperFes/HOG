@@ -72,6 +72,10 @@ double pressure_at(const globe::Planet& planet, double surface_temperature, doub
            std::pow(temperature / surface_temperature, planet.gravity / (lapse * specific));
 }
 
+double air_density(double temperature, double pressure) {
+    return pressure * air_molar_mass / (gas_constant * temperature);
+}
+
 void set_air(Field& field, const globe::Planet& planet, std::size_t column) {
     const Grid& grid = field.grid;
     const auto surface = static_cast<double>(field.surface[column]);
