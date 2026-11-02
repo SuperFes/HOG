@@ -372,3 +372,30 @@ TEST_CASE("a tall heap of sand on level ground slumps wider, losing none, and th
     CHECK(reach(1, 1) == Catch::Approx(reach(1, 0)).margin(2.0));
     CHECK(reach(1, 0) >= 2.0);
 }
+
+TEST_CASE("sand at the lip of a drop deeper than eight voxels runs down it, losing none",
+          "[flow][region][slump]") {
+    using hog::globe::Material;
+    // Rock 15 high up to column 11, open ground below it beyond.
+    const auto shape = [](std::uint32_t i, std::uint32_t, int layer) {
+        return i >= 12 || layer >= 15;
+    };
+    Block block{floor_above_sea(100.0), false, shape};
+    block.pile(11, 12, 15, Material::Sand, full);
+    const std::int64_t before = block.region().grain();
+
+    std::int64_t last = 1;
+    for (int step = 0; step < 4000 && last > 0; ++step) {
+        last = block.region().step(tick).slumped;
+    }
+
+    CHECK(last == 0);
+    CHECK(block.region().grain() == before);
+    std::int64_t below = 0;
+    for (std::uint32_t i = 12; i < Block::side; ++i) {
+        for (std::uint32_t j = 0; j < Block::side; ++j) {
+            below += block.grain(i, j, 0);
+        }
+    }
+    CHECK(below > 0);
+}

@@ -67,8 +67,17 @@ public:
                             layer >= floor && (!shape || shape(site.i - corner_i_,
                                                                site.j - corner_j_, layer - floor));
                         // The floor's distance within the band, as generated ground has it.
+                        // Measured from the highest rock below in the column.
+                        int rock = floor - 1;
+                        if (shape) {
+                            for (int below = floor; below < layer; ++below) {
+                                if (!shape(site.i - corner_i_, site.j - corner_j_, below - floor)) {
+                                    rock = below;
+                                }
+                            }
+                        }
                         const double to_floor = std::clamp(
-                            (layer - floor + 0.5) * store_.layers().thickness, -band, band);
+                            (layer - rock - 0.5) * store_.layers().thickness, -band, band);
                         Voxel& voxel = voxels[static_cast<std::size_t>(k)];
                         voxel.distance = hog::globe::distance_in_mm(to_floor);
                         if (!open) {
