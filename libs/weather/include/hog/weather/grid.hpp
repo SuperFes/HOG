@@ -3,18 +3,22 @@
 #include <hog/core/math.hpp>
 #include <hog/globe/cell.hpp>
 
+#include <cmath>
 #include <cstddef>
 #include <optional>
 
 namespace hog::weather {
 
 // The air as layers over the globe's cube-sphere columns: each column of `level` holds `layers`
-// cells of equal thickness, from `bottom` metres from the planet's centre upward.
+// cells from `bottom` metres from the planet's centre upward. The lowest is `thickness` deep and
+// each above is `ratio` times the one below, so a ratio over one spreads the layers thin near the
+// ground and thick aloft.
 struct Grid {
     int level = 6;
     int layers = 20;
     double bottom = 0.0;
     double thickness = 0.0;
+    double ratio = 1.0;
 
     [[nodiscard]] std::size_t columns() const noexcept {
         return static_cast<std::size_t>(globe::cells_at(level));
@@ -30,10 +34,16 @@ struct Grid {
 
     // Metres from the centre to a layer's middle, and its floor.
     [[nodiscard]] double radius_of(int layer) const noexcept {
-        return bottom + ((static_cast<double>(layer) + 0.5) * thickness);
+        return floor_of(layer) + (0.5 * depth_of(layer));
     }
-    [[nodiscard]] double floor_of(int layer) const noexcept {
-        return bottom + (static_cast<double>(layer) * thickness);
+    [[nodiscard]] double floor_of(int layer) const noexcept;
+
+    // A layer's depth, and the distance between its middle and the next layer's.
+    [[nodiscard]] double depth_of(int layer) const noexcept {
+        return thickness * std::pow(ratio, static_cast<double>(layer));
+    }
+    [[nodiscard]] double between(int layer) const noexcept {
+        return 0.5 * (depth_of(layer) + depth_of(layer + 1));
     }
     [[nodiscard]] double top() const noexcept { return floor_of(layers); }
 
