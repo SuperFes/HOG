@@ -288,3 +288,41 @@ TEST_CASE("the server's weather over the globe, to look at", "[.look]") {
             std::filesystem::path{where} / std::format("weather_{}.png", name), *still));
     }
 }
+
+// A swell running in at the coast from each side in turn, drawn from the coast spot.
+TEST_CASE("a swell on the coast, to look at", "[.look]") {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
+    const char* where = std::getenv("HOG_LOOK");
+    REQUIRE(where != nullptr);
+    const double radius = hog::client::testing::planet().radius;
+    const hog::client::GlobeWorld globe{
+        hog::client::globe_planet(std::nullopt, hog::client::testing::planet().seed, radius)
+            .value()};
+    const auto device = test_device();
+    hog::jobs::JobSystem jobs{4};
+    auto scene = Scene::create(*device, globe.generator.planet(), jobs, calendar(),
+                               hog::client::still_format, 1);
+    REQUIRE(scene);
+    scene->follow_globe(globe.world);
+    constexpr double degree = std::numbers::pi / 180.0;
+    const hog::DVec3 up = hog::planet::direction_at(-31.335428 * degree, 176.264827 * degree);
+    const hog::client::Flight flight =
+        hog::client::turned_to(hog::client::start_flight(up, radius, 6.0, hog::planet::north_pole),
+                               -33.5 * degree, -10.0 * degree);
+    for (const auto& [name, east_run, north_run] :
+         {std::tuple{"east", 1.0F, 0.0F}, std::tuple{"west", -1.0F, 0.0F},
+          std::tuple{"north", 0.0F, 1.0F}, std::tuple{"south", 0.0F, -1.0F}}) {
+        hog::protocol::CellWeather cell;
+        cell.wind = {east_run * 8.0F, north_run * 8.0F};
+        cell.swells[0] = {.height = 2.4F, .peak = 0.7F, .heading = {east_run, north_run}};
+        auto forecast = everywhere(cell);
+        Shot shot = shot_of(flight, globe.generator);
+        shot.forecast = &forecast;
+        shot.now = hog::MonotonicClock::time_point{};
+        const auto still =
+            hog::client::draw_still(*device, *scene, shot, {.width = 1600, .height = 900});
+        REQUIRE(still);
+        REQUIRE(hog::client::save_picture(
+            std::filesystem::path{where} / std::format("swell_{}.png", name), *still));
+    }
+}
