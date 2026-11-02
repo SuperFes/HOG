@@ -24,9 +24,14 @@
 #include <cstdlib>
 #include <filesystem>
 #include <format>
+#include <fstream>
+#include <iterator>
 #include <numbers>
 #include <optional>
+#include <span>
 #include <tuple>
+#include <variant>
+#include <vector>
 
 using namespace std::chrono_literals;
 using Catch::Matchers::WithinAbs;
@@ -128,7 +133,7 @@ TEST_CASE("the globe's voxels, to look at", "[.look]") {
         const hog::DVec3 at = glm::normalize(noon + hog::DVec3{0.0, 0.0, 0.3});
         const double ground = hog::client::globe_ground(globe.generator, noon);
         for (const auto& [shot, height, pitch] :
-             {std::tuple{"high", 60.0, -0.6}, std::tuple{"low", 6.0, -0.12},
+             {std::tuple{"high", 60.0, -0.6}, std::tuple{"low", 60.0, 0.2},
               std::tuple{"1km", 1'000.0, -0.25}, std::tuple{"15km", 15'000.0, -0.45},
               std::tuple{"orbit", 400'000.0, -1.5}}) {
             hog::client::Flight flight =
@@ -234,5 +239,52 @@ TEST_CASE("the globe at reported spots, to look at", "[.look]") {
         REQUIRE(still);
         REQUIRE(hog::client::save_picture(
             std::filesystem::path{where} / std::format("globe_at_{}.png", spot.name), *still));
+    }
+}
+
+// Draws the weather a server made (the keeper's [.look] test writes it) over the globe.
+TEST_CASE("the server's weather over the globe, to look at", "[.look]") {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
+    const char* where = std::getenv("HOG_LOOK");
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
+    const char* made = std::getenv("HOG_WEATHER");
+    REQUIRE(where != nullptr);
+    REQUIRE(made != nullptr);
+    std::ifstream in{made, std::ios::binary};
+    const std::vector<char> raw{std::istreambuf_iterator<char>{in}, {}};
+    const auto message = hog::protocol::decode(std::as_bytes(std::span{raw.data(), raw.size()}));
+    REQUIRE(message);
+    const auto* weather = std::get_if<hog::protocol::Weather>(&*message);
+    REQUIRE(weather != nullptr);
+
+    const double radius = 115'000.0;
+    const hog::client::GlobeWorld globe{
+        hog::client::globe_planet("earth", hog::client::testing::planet().seed, radius).value()};
+    hog::client::Forecast forecast{radius};
+    forecast.receive(*weather, hog::MonotonicClock::time_point{});
+    const auto device = test_device();
+    hog::jobs::JobSystem jobs{4};
+    auto scene = Scene::create(*device, globe.generator.planet(), jobs, calendar(),
+                               hog::client::still_format, 1);
+    REQUIRE(scene);
+    scene->follow_globe(globe.world);
+    for (const auto& [name, up, height, pitch] :
+         {std::tuple{"ground", glm::normalize(hog::DVec3{0.6, 0.3, 0.7}), 60.0, 0.2},
+          std::tuple{"tropic", glm::normalize(hog::DVec3{0.9, -0.4, 0.1}), 1'500.0, 0.15},
+          std::tuple{"mid", glm::normalize(hog::DVec3{0.6, 0.3, 0.7}), 1'500.0, -0.1},
+          std::tuple{"high", glm::normalize(hog::DVec3{1.0, 0.2, 0.3}), 12'000.0, -0.4},
+          std::tuple{"orbit", glm::normalize(hog::DVec3{1.0, 0.2, 0.3}), 400'000.0, -1.5}}) {
+        const double ground = hog::client::globe_ground(globe.generator, up * radius);
+        hog::client::Flight flight = hog::client::start_flight(
+            up, radius, ground + height, glm::normalize(up + hog::DVec3{0.0, 0.0, 0.3}));
+        flight.pitch = pitch;
+        Shot shot = shot_of(flight, globe.generator);
+        shot.forecast = &forecast;
+        shot.now = hog::MonotonicClock::time_point{};
+        const auto still =
+            hog::client::draw_still(*device, *scene, shot, {.width = 1600, .height = 900});
+        REQUIRE(still);
+        REQUIRE(hog::client::save_picture(
+            std::filesystem::path{where} / std::format("weather_{}.png", name), *still));
     }
 }

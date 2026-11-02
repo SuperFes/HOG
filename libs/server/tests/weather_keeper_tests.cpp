@@ -1,6 +1,7 @@
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
 #include <hog/planet/projection.hpp>
+#include <hog/protocol/messages.hpp>
 #include <hog/server/weather_keeper.hpp>
 #include <hog/sim/cell_grid.hpp>
 
@@ -8,6 +9,8 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
+#include <fstream>
 #include <thread>
 
 using namespace hog;
@@ -133,4 +136,28 @@ TEST_CASE("a save of another grid is refused", "[server][weather]") {
     server::WeatherKeeper second{generator, 4h, 23.44, start, other};
     CHECK_FALSE(second.restore(first.saved(), start + 2min));
     CHECK_FALSE(second.latest());
+}
+
+// Spins the real planet's air up and writes the weather it makes where HOG_WEATHER says, for the
+// client's stills to be drawn under.
+TEST_CASE("the weather after a spin-up, to look at", "[.look]") {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
+    const char* where = std::getenv("HOG_WEATHER");
+    REQUIRE(where != nullptr);
+    globe::Planet planet = globe::preset("earth").value_or(globe::Planet{});
+    planet.radius = 115'000.0;
+    const globe::Generator generator{planet};
+    server::WeatherSettings settings{};
+    settings.spin_up = 48h;
+    server::WeatherKeeper keeper{generator, 4h, 23.44, start, settings};
+    std::optional<protocol::Weather> found;
+    while (!found) {
+        found = keeper.poll(start, 500ms);
+        std::this_thread::sleep_for(100ms);
+    }
+    const auto bytes = protocol::encode(protocol::Message{found.value_or(protocol::Weather{})});
+    std::ofstream out{where, std::ios::binary};
+    out.write(reinterpret_cast<const char*>(bytes.data()),
+              static_cast<std::streamsize>(bytes.size()));
+    REQUIRE(out.good());
 }
