@@ -35,8 +35,12 @@ double latitude_of(DVec3 up) {
 
 } // namespace
 
+double dry_lapse_rate(const globe::Planet& planet) {
+    return planet.gravity / heat_capacity;
+}
+
 double lapse_rate(const globe::Planet& planet) {
-    return moist_share * planet.gravity / heat_capacity;
+    return moist_share * dry_lapse_rate(planet);
 }
 
 double saturation_ratio(globe::Volatile volatiles, double temperature, double pressure) {
@@ -46,6 +50,14 @@ double saturation_ratio(globe::Volatile volatiles, double temperature, double pr
         return 0.0;
     }
     return *mass / air_molar_mass * *held / (pressure - *held);
+}
+
+double scale_height(const globe::Planet& planet, double temperature) {
+    return gas_constant / air_molar_mass * temperature / planet.gravity;
+}
+
+double air_temperature(const globe::Planet& planet, double surface, double height) {
+    return std::max(surface - (lapse_rate(planet) * height), 1.0);
 }
 
 double pressure_at(const globe::Planet& planet, double surface_temperature, double height) {
@@ -62,7 +74,7 @@ void set_air(Field& field, const globe::Planet& planet, std::size_t column) {
     const double humidity = field.over_sea[column] != 0 ? sea_humidity : land_humidity;
     for (int layer = 0; layer < grid.layers; ++layer) {
         const double height = grid.radius_of(layer) - planet.radius;
-        const double temperature = std::max(surface - (lapse_rate(planet) * height), 1.0);
+        const double temperature = air_temperature(planet, surface, height);
         const double pressure = pressure_at(planet, surface, height);
         Air& air = field.at(column, layer);
         air.temperature = static_cast<float>(temperature);
@@ -85,6 +97,7 @@ Field start_field(const globe::Generator& generator, int level, int layers) {
     field.air.resize(grid.size());
     field.ground.resize(grid.columns());
     field.over_sea.resize(grid.columns());
+    field.blocked.resize(grid.size());
     field.surface.resize(grid.columns());
 
     // About a cell across, for the ground to be smoothed to.
@@ -95,6 +108,10 @@ Field start_field(const globe::Generator& generator, int level, int layers) {
         const bool wet = sea && ground < *sea;
         field.ground[column] = wet ? *sea : ground;
         field.over_sea[column] = wet ? 1 : 0;
+        for (int layer = 0; layer < grid.layers; ++layer) {
+            field.blocked[grid.index(column, layer)] =
+                grid.radius_of(layer) < field.ground[column] ? 1 : 0;
+        }
         field.surface[column] = static_cast<float>(globe::temperature_at(planet, latitude_of(up)));
         set_air(field, planet, column);
     }
