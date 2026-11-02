@@ -35,3 +35,35 @@ TEST_CASE("a triangle wearing two tiles gets corners of its own naming both", "[
     hog::terrain::mix_corners(mesh);
     CHECK(mesh.vertices.size() == 7);
 }
+
+TEST_CASE("a corner's byte keeps which corner it is and how wet, through mixing",
+          "[terrain][blocks]") {
+    using hog::terrain::corner_of;
+    using hog::terrain::packed_corner;
+    using hog::terrain::wetness_of;
+    CHECK(packed_corner(0, 0.0) == 0);
+    CHECK(packed_corner(2, 0.0) == 2);
+    CHECK(packed_corner(1, 1.0) == 253);
+    CHECK(packed_corner(1, 2.0) == 253);
+    CHECK(corner_of(packed_corner(2, 0.5)) == 2);
+    CHECK(wetness_of(packed_corner(2, 0.5)) > 0.49);
+    CHECK(wetness_of(packed_corner(2, 0.5)) < 0.51);
+    CHECK(wetness_of(packed_corner(0, 1.0)) == 1.0);
+    const auto vertex = [](float x, std::uint8_t tile, double wet) {
+        return BlockVertex{.position = {x, 0.0F, 0.0F},
+                           .normal = {0.0F, 0.0F, 1.0F},
+                           .tiles = {tile, tile, tile},
+                           .corner = packed_corner(0, wet)};
+    };
+    BlockMesh mesh{.origin = {},
+                   .vertices = {vertex(0.0F, 9, 1.0), vertex(1.0F, 9, 0.0), vertex(2.0F, 1, 0.5)},
+                   .indices = {0, 1, 2}};
+    hog::terrain::mix_corners(mesh);
+    REQUIRE(mesh.vertices.size() == 6);
+    CHECK(wetness_of(mesh.vertices[3].corner) == 1.0);
+    CHECK(wetness_of(mesh.vertices[4].corner) == 0.0);
+    CHECK(wetness_of(mesh.vertices[5].corner) > 0.49);
+    for (std::uint8_t corner = 0; corner < 3; ++corner) {
+        CHECK(corner_of(mesh.vertices[3 + corner].corner) == corner);
+    }
+}

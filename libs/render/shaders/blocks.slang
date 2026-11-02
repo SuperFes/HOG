@@ -30,9 +30,14 @@ static const float least_share = 0.02;
 struct Vertex {
     [[vk::location(0)]] float3 position;
     [[vk::location(1)]] float3 normal;
-    // The tiles at the triangle's three corners, and which of them this corner is.
+    // The tiles at the triangle's three corners, and which of them this corner is in the low two
+    // bits of the fourth, with how wet the ground is there in the six over them, as
+    // hog::terrain::packed_corner has it.
     [[vk::location(2)]] uint4 tiles;
 };
+
+// Soaked, the ground is this much darker: light gets further into it before it comes back.
+static const float wet_darkening = 0.45;
 
 struct Surface {
     float4 position : SV_Position;
@@ -40,6 +45,7 @@ struct Surface {
     // The triangle's tiles, the same at each of its corners, and how much of each tile is here.
     nointerpolation uint3 tiles;
     float3 weights;
+    float wet;
     // Where the tiles' coordinates lie.
     float3 tiled;
     // Up through the point, from the planet's centre.
@@ -55,8 +61,9 @@ Surface vertex_main(Vertex vertex) {
     surface.position = mul(push.clip_from_eye, float4(drawn, 1.0));
     surface.normal = vertex.normal;
     surface.tiles = vertex.tiles.xyz;
-    surface.weights = float3(vertex.tiles.w == 0 ? 1.0 : 0.0, vertex.tiles.w == 1 ? 1.0 : 0.0,
-                             vertex.tiles.w == 2 ? 1.0 : 0.0);
+    const uint corner = vertex.tiles.w & 3u;
+    surface.weights = float3(corner == 0 ? 1.0 : 0.0, corner == 1 ? 1.0 : 0.0, corner == 2 ? 1.0 : 0.0);
+    surface.wet = float(vertex.tiles.w >> 2u) / 63.0;
     surface.tiled = vertex.position + float3(push.origin.w, push.faked_night.zw);
     surface.up = from_eye + (push.up_height.xyz * (push.sun_radius.w + push.up_height.w));
     return surface;
@@ -161,6 +168,7 @@ float4 fragment_main(Surface surface) : SV_Target {
             }
         }
     }
+    colour *= 1.0 - (wet_darkening * surface.wet);
     // The sky's light, more on sides that look up at more of it, and some off the ground below,
     // so shapes still show with the sun away.
     const float sky = night * (0.6 + (0.4 * dot(normal, up)));

@@ -293,6 +293,33 @@ TEST_CASE("a triangle wearing two tiles blends from one to the other", "[render]
     CHECK(right[1] > 200);
 }
 
+TEST_CASE("wet ground is drawn darker than dry, in its own hue", "[render][gpu]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no Vulkan device");
+    }
+    const auto shade = [&](double wet) {
+        BlockMesh mesh{.origin = WorldPosition{}, .vertices = {}, .indices = {}};
+        add_square(mesh, 2.5, Tile::Orange);
+        for (hog::terrain::BlockVertex& vertex : mesh.vertices) {
+            vertex.corner =
+                hog::terrain::packed_corner(hog::terrain::corner_of(vertex.corner), wet);
+        }
+        return middle(draw(*device, mesh, DVec3{0.0, 0.0, 1.0}));
+    };
+    const Pixel dry = shade(0.0);
+    const Pixel wet = shade(1.0);
+    INFO("dry " << int{dry[0]} << ", " << int{dry[1]} << ", " << int{dry[2]} << "; wet "
+                << int{wet[0]} << ", " << int{wet[1]} << ", " << int{wet[2]});
+    REQUIRE(dry[0] > 100);
+    CHECK(wet[0] < 0.65 * dry[0]);
+    CHECK(wet[0] > 0.4 * dry[0]);
+    const double darker = static_cast<double>(wet[0]) / dry[0];
+    CHECK(wet[1] > (darker - 0.1) * dry[1]);
+    CHECK(wet[1] < (darker + 0.1) * dry[1]);
+    CHECK(device->validation_errors() == 0);
+}
+
 TEST_CASE("a grained tile shows its grain, a plain one none", "[render][gpu]") {
     auto device = test_device();
     if (!device) {

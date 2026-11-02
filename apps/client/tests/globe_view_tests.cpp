@@ -56,7 +56,8 @@ TEST_CASE("a chunk's surface becomes blocks where it lies", "[client][globe]") {
     mesh.origin = DVec3{100.0, 20.0, 0.0};
     mesh.vertices = {{.position = Vec3{1.0F, 0.0F, 0.0F},
                       .normal = Vec3{1.0F, 0.0F, 0.0F},
-                      .material = Material::Granite},
+                      .material = Material::Granite,
+                      .wet = 1.0F},
                      {.position = Vec3{0.0F, 1.0F, 0.0F},
                       .normal = Vec3{1.0F, 0.0F, 0.0F},
                       .material = Material::Granite},
@@ -70,11 +71,15 @@ TEST_CASE("a chunk's surface becomes blocks where it lies", "[client][globe]") {
     const auto granite = static_cast<std::uint8_t>(Material::Granite);
     const auto water = static_cast<std::uint8_t>(Material::Water);
     CHECK(blocks.vertices[2].tiles == std::array<std::uint8_t, 3>{water, water, water});
-    // Wearing two materials, the triangle gets corners of its own naming both.
+    CHECK(hog::terrain::wetness_of(blocks.vertices[0].corner) == 1.0);
+    CHECK(hog::terrain::wetness_of(blocks.vertices[1].corner) == 0.0);
+    // Wearing two materials, the triangle gets corners of its own naming both, each as wet as
+    // the vertex it stands for.
     REQUIRE(blocks.vertices.size() == 6);
     CHECK(blocks.indices == std::vector<std::uint32_t>{3, 4, 5});
     CHECK(blocks.vertices[3].tiles == std::array<std::uint8_t, 3>{water, granite, granite});
-    CHECK(blocks.vertices[5].corner == 2);
+    CHECK(hog::terrain::corner_of(blocks.vertices[5].corner) == 2);
+    CHECK(hog::terrain::wetness_of(blocks.vertices[5].corner) == 1.0);
 }
 
 TEST_CASE("the liquid's surface is left out of a chunk's blocks", "[client][globe]") {

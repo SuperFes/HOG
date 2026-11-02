@@ -829,19 +829,38 @@ struct Ground {
         const DVec3 near = unpacked_normal(grid.at(t < 0.5 ? a : b).normal);
         return glm::length(near) > 0.0 ? near : unpacked_normal(grid.at(t < 0.5 ? b : a).normal);
     }
-    // The ground nearest the surface.
-    static Material material(const Grid& grid, std::span<const Point> corners) {
-        std::optional<Point> nearest;
+    // The corner in the ground nearest the surface, if any is.
+    static std::optional<Point> nearest(const Grid& grid, std::span<const Point> corners) {
+        std::optional<Point> found;
         for (const Point corner : corners) {
-            if (inside(grid, corner) && (!nearest || value(grid, corner) > value(grid, *nearest))) {
-                nearest = corner;
+            if (inside(grid, corner) && (!found || value(grid, corner) > value(grid, *found))) {
+                found = corner;
             }
         }
-        if (!nearest) {
+        return found;
+    }
+    // The ground nearest the surface.
+    static Material material(const Grid& grid, std::span<const Point> corners) {
+        const std::optional<Point> near = nearest(grid, corners);
+        if (!near) {
             return Material::Air;
         }
-        const Voxel& voxel = grid.at(*nearest);
-        return voxel.solid != Material::Air && !piled(grid, *nearest) ? voxel.solid : voxel.grain;
+        const Voxel& voxel = grid.at(*near);
+        return voxel.solid != Material::Air && !piled(grid, *near) ? voxel.solid : voxel.grain;
+    }
+    // Of the pores of the ground nearest the surface, the share holding liquid; a pile is wet
+    // with any.
+    static float wetness(const Grid& grid, std::span<const Point> corners) {
+        const std::optional<Point> near = nearest(grid, corners);
+        if (!near) {
+            return 0.0F;
+        }
+        const Voxel& voxel = grid.at(*near);
+        if (voxel.solid == Material::Air || piled(grid, *near)) {
+            return voxel.liquid_amount > 0 ? 1.0F : 0.0F;
+        }
+        const double pores = properties(voxel.solid).porosity * Voxel::full;
+        return pores > 0.0 ? static_cast<float>(std::min(1.0, voxel.liquid_amount / pores)) : 0.0F;
     }
 };
 
@@ -876,6 +895,7 @@ struct Liquid {
         }
         return Material::Air;
     }
+    static float wetness(const Grid& /*grid*/, std::span<const Point> /*corners*/) { return 0.0F; }
 };
 
 // A box's corners and how its own axes run: from its corner first among the world's voxels, so
@@ -1280,7 +1300,8 @@ private:
         const auto index = static_cast<std::uint32_t>(mesh_->vertices.size());
         mesh_->vertices.push_back({.position = Vec3{position},
                                    .normal = Vec3{glm::normalize(normal)},
-                                   .material = Surface::material(*grid_, *corners)});
+                                   .material = Surface::material(*grid_, *corners),
+                                   .wet = Surface::wetness(*grid_, *corners)});
         return index;
     }
 
@@ -1340,7 +1361,8 @@ private:
         const auto index = static_cast<std::uint32_t>(mesh_->vertices.size());
         mesh_->vertices.push_back({.position = Vec3{position},
                                    .normal = Vec3{glm::normalize(normal)},
-                                   .material = Surface::material(*grid_, frame->corners)});
+                                   .material = Surface::material(*grid_, frame->corners),
+                                   .wet = Surface::wetness(*grid_, frame->corners)});
         return index;
     }
 

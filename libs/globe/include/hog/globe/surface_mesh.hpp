@@ -25,6 +25,7 @@ struct SurfaceVertex {
     Vec3 position{0.0F}; // metres from the mesh's origin
     Vec3 normal{0.0F};   // unit, out of the solid or the liquid
     Material material = Material::Air;
+    float wet = 0.0F; // of the ground's pores there, the share holding liquid
 
     friend bool operator==(const SurfaceVertex&, const SurfaceVertex&) = default;
 };

@@ -111,9 +111,10 @@ std::vector<DVec3> open_sides(const SurfaceMesh& mesh) {
     return open;
 }
 
-// Changes each open voxel within `radius` of `centre`, given it and the radius its bottom
-// stands at.
-void fill_hollow(World& world, DVec3 centre, double radius, const auto& change) {
+// Changes each open voxel within `radius` of `centre`, or every voxel there with `ground` too,
+// given it and the radius its bottom stands at.
+void fill_hollow(World& world, DVec3 centre, double radius, const auto& change,
+                 bool ground = false) {
     const hog::globe::Layers& layers = world.generator().layers();
     const Cell middle = hog::globe::cell_under(glm::normalize(centre), layers.level);
     const int layer = layers.layer_at(glm::length(centre));
@@ -140,7 +141,7 @@ void fill_hollow(World& world, DVec3 centre, double radius, const auto& change) 
                 }
                 hog::globe::Voxel& voxel =
                     held->second[static_cast<std::size_t>(hog::globe::index_in_brick(site))];
-                if (voxel.solid == Material::Air) {
+                if (ground || voxel.solid == Material::Air) {
                     change(voxel, layers.bottom(static_cast<int>(site.layer)));
                 }
             }
@@ -559,6 +560,65 @@ TEST_CASE("grain piled in a hollow shows as ground of its own, as high as it fil
             CHECK(glm::length(world_point(mesh, v)) > level - 0.05);
         }
     }
+}
+
+TEST_CASE("the seabed is drawn soaked and the land dry", "[globe][surface]") {
+    VoxelStore store{earth().layers()};
+    const World world{earth(), store};
+    const auto wetness = [&](double low, double high) {
+        const DVec3 up = ground_between(earth(), low, high);
+        const SurfaceMesh mesh =
+            mesh_of(world, std::array{hog::globe::chunk_under(up, earth().layers())});
+        double total = 0.0;
+        std::size_t ground = 0;
+        for (const hog::globe::SurfaceVertex& vertex : mesh.vertices) {
+            if (!liquid(vertex.material)) {
+                total += double{vertex.wet};
+                ++ground;
+            }
+        }
+        REQUIRE(ground > 1'000);
+        return total / static_cast<double>(ground);
+    };
+    CHECK(wetness(-300.0, -20.0) > 0.9);
+    CHECK(wetness(50.0, 400.0) == 0.0);
+}
+
+TEST_CASE("ground soaked to its pores shows wet at its surface", "[globe][surface]") {
+    VoxelStore store{earth().layers()};
+    World world{earth(), store};
+    const DVec3 up = ground_between(earth(), 50.0, 400.0);
+    const DVec3 centre = dig_hollow(world, up, 3.0);
+    fill_hollow(
+        world, centre, 4.0,
+        [&](hog::globe::Voxel& voxel, double /*bottom*/) {
+            if (voxel.solid != Material::Air) {
+                voxel.liquid = Material::Water;
+                voxel.liquid_amount =
+                    hog::globe::amount_of(hog::globe::properties(voxel.solid).porosity);
+            }
+        },
+        true);
+    const SurfaceMesh mesh =
+        mesh_of(world, block_round(hog::globe::chunk_under(up, earth().layers())));
+    std::size_t near = 0;
+    std::size_t far = 0;
+    for (std::uint32_t v = 0; v < mesh.vertices.size(); ++v) {
+        const hog::globe::SurfaceVertex& vertex = mesh.vertices[v];
+        const double apart = glm::length(world_point(mesh, v) - centre);
+        if (liquid(vertex.material) || (apart > 3.3 && apart < 12.0)) {
+            continue;
+        }
+        if (apart <= 3.3) {
+            CHECK(vertex.wet > 0.99F);
+            ++near;
+        } else {
+            CHECK(vertex.wet == 0.0F);
+            ++far;
+        }
+    }
+    CHECK(near > 50);
+    CHECK(far > 1'000);
 }
 
 TEST_CASE("chunks near a place are all those within reach, nearest first", "[globe][surface]") {
