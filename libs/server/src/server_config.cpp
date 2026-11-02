@@ -1,4 +1,5 @@
 #include <hog/core/text_file.hpp>
+#include <hog/protocol/messages.hpp>
 #include <hog/server/server_config.hpp>
 
 #include <toml++/toml.hpp>
@@ -273,6 +274,29 @@ private:
     return {};
 }
 
+[[nodiscard]] Result<void> parse_weather(const Table& weather, WeatherConfig& config) {
+    if (auto known = weather.only({"on", "level", "layers", "spin_up_hours"}); !known) {
+        return known;
+    }
+    const auto on = weather.boolean("on");
+    const auto level = weather.integer("level", 1, protocol::most_weather_level);
+    const auto layers = weather.integer("layers", 8, 64);
+    const auto spin_up = weather.integer("spin_up_hours", 0, 240);
+    for (const Error* error :
+         {on ? nullptr : &on.error(), level ? nullptr : &level.error(),
+          layers ? nullptr : &layers.error(), spin_up ? nullptr : &spin_up.error()}) {
+        if (error != nullptr) {
+            return std::unexpected(*error);
+        }
+    }
+    config.on = on->value_or(config.on);
+    config.level = static_cast<int>(level->value_or(config.level));
+    config.layers = static_cast<int>(layers->value_or(config.layers));
+    config.spin_up = std::chrono::hours{
+        spin_up->value_or(std::chrono::duration_cast<std::chrono::hours>(config.spin_up).count())};
+    return {};
+}
+
 [[nodiscard]] Result<void> parse_net(const Table& net, const std::filesystem::path& base,
                                      NetSettings& config) {
     if (auto known = net.only({"port", "login_key", "simulate", "view_m", "snapshot_bytes"});
@@ -353,8 +377,8 @@ Result<ServerConfig> parse_server_config(std::string_view text, const std::files
         return make_error(ErrorCode::Parse, std::format("line {}: {}", error.source().begin.line,
                                                         error.description()));
     }
-    constexpr std::array<std::string_view, 6> names{"server",  "save",  "log",
-                                                    "metrics", "debug", "net"};
+    constexpr std::array<std::string_view, 7> names{"server", "save", "log",    "metrics",
+                                                    "debug",  "net",  "weather"};
     std::array<const toml::table*, names.size()> tables{};
     for (const auto& [key, node] : parsed.table()) {
         const auto index =
@@ -386,6 +410,9 @@ Result<ServerConfig> parse_server_config(std::string_view text, const std::files
     }
     if (auto net = parse_net(Table{tables[5], "net"}, base, config.net); !net) {
         return std::unexpected(net.error());
+    }
+    if (auto weather = parse_weather(Table{tables[6], "weather"}, config.weather); !weather) {
+        return std::unexpected(weather.error());
     }
     return config;
 }

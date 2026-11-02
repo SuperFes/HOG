@@ -46,6 +46,15 @@ struct DebugSettings {
     std::optional<GameTime> start;
 };
 
+// The planet's air: how finely it is held, and how long a new world's still air is run on before
+// the winds are shown.
+struct WeatherConfig {
+    bool on = true;
+    int level = 4;
+    int layers = 24;
+    GameDuration spin_up = std::chrono::hours{48};
+};
+
 struct ServerConfig {
     std::filesystem::path world; // the world database
     std::filesystem::path planet;
@@ -60,6 +69,7 @@ struct ServerConfig {
     std::chrono::seconds metrics_interval{10};
     NetSettings net;
     DebugSettings debug;
+    WeatherConfig weather;
 };
 
 // Reads a server config. Relative paths are resolved against `base`, normally the directory of
@@ -85,9 +95,10 @@ struct ServerConfig {
 //     interval_seconds = 10      # 0 turns metrics off
 //
 //     [weather]                  # optional
-//     cell_km = 6.0
-//     step_minutes = 10.0        # game time
-//     day_hours = 24.0
+//     on = true
+//     level = 4                  # 1 to 5: the cube-sphere level of the air's columns
+//     layers = 24                # 8 to 64
+//     spin_up_hours = 48         # game time a new world's air is run on first
 //
 //     [wildlife]                 # optional
 //     ecology = "ecology.toml"

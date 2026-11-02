@@ -85,6 +85,12 @@ simulate = "lag=75,loss=2"
 view_m = 250.5
 snapshot_bytes = 900
 
+[weather]
+on = false
+level = 3
+layers = 16
+spin_up_hours = 12
+
 [debug]
 time_control = true
 start = 2030-06-01T12:00:00+02:00
@@ -108,6 +114,10 @@ start = 2030-06-01T12:00:00+02:00
     CHECK(has(Override{"net", hog::log::Level::Off}));
     CHECK(config->log.file == std::filesystem::path{"/srv/hog/var/logs/server.jsonl"});
     CHECK(config->metrics_interval == 0s);
+    CHECK_FALSE(config->weather.on);
+    CHECK(config->weather.level == 3);
+    CHECK(config->weather.layers == 16);
+    CHECK(config->weather.spin_up == std::chrono::hours{12});
     CHECK(config->net.port == 27100);
     CHECK(config->net.login_key == (base() / "../var/login.pub").lexically_normal());
     CHECK(config->net.simulate == hog::net::Simulation{.lag = 75ms, .loss = 2});
@@ -147,12 +157,11 @@ TEST_CASE("bad server configs are rejected", "[server][config]") {
         {with("[log]\ncategories = \"save\"\n"), ErrorCode::InvalidArgument},
         {with("[metrics]\ninterval_seconds = -1\n"), ErrorCode::InvalidArgument},
         {with("[metrics]\ninterval_seconds = 1.5\n"), ErrorCode::InvalidArgument},
-        {with("[weather]\ncell_km = 0\n"), ErrorCode::InvalidArgument},
-        {with("[weather]\ncell_km = nan\n"), ErrorCode::InvalidArgument},
-        {with("[weather]\nstep_minutes = 0\n"), ErrorCode::InvalidArgument},
-        {with("[weather]\nstep_minutes = 1441\n"), ErrorCode::InvalidArgument},
-        {with("[weather]\nday_hours = -4\n"), ErrorCode::InvalidArgument},
-        {with("[weather]\nday_hours = inf\n"), ErrorCode::InvalidArgument},
+        {with("[weather]\nlevel = 0\n"), ErrorCode::InvalidArgument},
+        {with("[weather]\nlevel = 6\n"), ErrorCode::InvalidArgument},
+        {with("[weather]\nlayers = 4\n"), ErrorCode::InvalidArgument},
+        {with("[weather]\nspin_up_hours = -1\n"), ErrorCode::InvalidArgument},
+        {with("[weather]\non = 1\n"), ErrorCode::InvalidArgument},
         {with("[weather]\nwind = 3\n"), ErrorCode::InvalidArgument},
         {with("[wildlife]\necology = 3\n"), ErrorCode::InvalidArgument},
         {with("[wildlife]\nstep_hours = 0\n"), ErrorCode::InvalidArgument},

@@ -25,6 +25,7 @@
 #include <hog/server/snapshot_writer.hpp>
 #include <hog/server/spatial_index.hpp>
 #include <hog/server/tick_loop.hpp>
+#include <hog/server/weather_keeper.hpp>
 #include <hog/store/sqlite_brick_archive.hpp>
 #include <hog/store/sqlite_player_store.hpp>
 #include <hog/store/sqlite_snapshot_store.hpp>
@@ -100,12 +101,20 @@ public:
         return players_ ? &*players_ : nullptr;
     }
 
+    // Null when the world has no weather.
+    [[nodiscard]] const server::WeatherKeeper* weather() const noexcept {
+        return weather_ ? &*weather_ : nullptr;
+    }
+
     // Logs the metrics, bringing those mirrored from elsewhere up to date first.
     void report(std::uint64_t slipped);
 
 private:
     // Advances the world by one tick of game time.
     void simulate(GameTime from, GameDuration step);
+    // Sends everyone the weather just made, and a player who's just come in the newest.
+    void tell_weather(const protocol::Weather& weather);
+    void send_weather(net::ConnectionId connection, const protocol::Weather& weather);
     void submit();
     // Opens the players' port, if one is configured, logging rather than failing if it can't.
     void open_players();
@@ -163,6 +172,8 @@ private:
     // The loop's scale as of its last turn, for players joining between them.
     std::uint32_t clock_scale_ = 1;
     server::Players joined_;
+    // Made once the world's time is known.
+    std::optional<server::WeatherKeeper> weather_;
     // The ground near players, to check their moves against.
     physics::Space space_;
     physics::Ground ground_;

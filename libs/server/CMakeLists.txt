@@ -8,13 +8,14 @@ add_library(hog_server
     src/snapshot_writer.cpp
     src/spatial_index.cpp
     src/spatial_tracking.cpp
-    src/tick_clock.cpp)
+    src/tick_clock.cpp
+    src/weather_keeper.cpp)
 add_library(hog::server ALIAS hog_server)
 
 target_include_directories(hog_server PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(hog_server
     PUBLIC hog::core hog::globe hog::jobs hog::net hog::physics hog::planet hog::protocol
-        hog::replication hog::save flecs::flecs_static
+        hog::replication hog::save hog::sim hog::weather flecs::flecs_static
     PRIVATE tomlplusplus)
 hog_target_defaults(hog_server)
 
@@ -30,7 +31,8 @@ hog_add_tests(hog_server
     tests/spatial_index_tests.cpp
     tests/spatial_tracking_tests.cpp
     tests/tick_clock_tests.cpp
-    tests/tick_loop_tests.cpp)
+    tests/tick_loop_tests.cpp
+    tests/weather_keeper_tests.cpp)
 
 if(TARGET hog_server_tests)
     target_compile_definitions(hog_server_tests PRIVATE HOG_SOURCE_DIR="${PROJECT_SOURCE_DIR}")

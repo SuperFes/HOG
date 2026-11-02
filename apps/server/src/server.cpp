@@ -157,14 +157,48 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
         server->time_ = first;
         log::info(save_log, "no snapshot; starting a new world at {}", format_time(first));
     }
+    if (config.weather.on) {
+        server->weather_.emplace(server->generator_, planet->day_length, planet->axial_tilt,
+                                 server->time_,
+                                 server::WeatherSettings{.level = config.weather.level,
+                                                         .layers = config.weather.layers,
+                                                         .spin_up = config.weather.spin_up});
+    }
     server->open_players();
     return server;
 }
 
-void Server::simulate(GameTime /*from*/, GameDuration step) {
+void Server::simulate(GameTime from, GameDuration step) {
     HOG_ZONE("simulate");
     entities_.progress(std::chrono::duration<float>(step).count());
     flow_.step(std::chrono::duration<double>(step).count());
+    if (weather_) {
+        // A new weather is as old as the air's interval of game time, which the clock may hurry.
+        const auto fade = std::max(
+            std::chrono::milliseconds{500},
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                server::WeatherSettings{}.interval / std::max<std::uint32_t>(clock_scale_, 1)));
+        if (const auto made = weather_->poll(from + step, fade)) {
+            tell_weather(*made);
+        }
+    }
+}
+
+void Server::tell_weather(const protocol::Weather& weather) {
+    for (const net::ConnectionId connection : joined_.connections()) {
+        send_weather(connection, weather);
+    }
+}
+
+void Server::send_weather(net::ConnectionId connection, const protocol::Weather& weather) {
+    if (!players_) {
+        return;
+    }
+    if (auto sent = players_->send(connection, net::Delivery::Bulk, protocol::encode(weather));
+        !sent) {
+        log::debug(server_log, "couldn't send connection {} the weather: {}",
+                   std::to_underlying(connection), sent.error());
+    }
 }
 
 void Server::open_players() {
@@ -274,6 +308,9 @@ void Server::answer(net::ConnectionId connection, const protocol::Answer& answer
         }
         handshakes_.erase(shaking);
         send_bricks(connection, bricks_shared_.all());
+        if (weather_ && weather_->latest()) {
+            send_weather(connection, *weather_->latest());
+        }
         // A world at real time goes without saying.
         if (clock_scale_ != 1) {
             send_clock(connection);

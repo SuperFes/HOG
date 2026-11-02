@@ -86,6 +86,8 @@ public:
         config.world = directory_.path() / "var" / "world.db";
         config.planet = directory_.path() / "planet.toml";
         config.metrics_interval = 0s;
+        // The air is a world of its own to run; tests that want it turn it on.
+        config.weather.on = false;
         return config;
     }
 
@@ -171,6 +173,27 @@ TEST_CASE("a reopened world catches up to now", "[app][server]") {
     }
     // Catching up saved where it got to.
     CHECK(now - opened(config, now)->time() < 50ms);
+}
+
+TEST_CASE("a world with weather makes it as the clock runs", "[app][server]") {
+    const World world;
+    auto config = world.config();
+    config.weather = {.on = true, .level = 1, .layers = 8, .spin_up = 0h};
+    const auto server = opened(config);
+    REQUIRE(server->weather());
+    // Four game minutes outrun the keeper's interval of two; its job is taken in on a later tick.
+    GameTime now = start + 4min;
+    for (int tries = 0; tries < 10'000 && !server->weather()->latest(); ++tries) {
+        server->catch_up([&] { return now; });
+        now += 100ms;
+        std::this_thread::sleep_for(1ms);
+    }
+    CHECK(server->weather()->latest());
+}
+
+TEST_CASE("a world without weather has none", "[app][server]") {
+    const World world;
+    CHECK(opened(world.config())->weather() == nullptr);
 }
 
 TEST_CASE("startup time is caught up without saving", "[app][server]") {
