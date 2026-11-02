@@ -21,6 +21,8 @@ struct Stepped {
     std::int64_t changed = 0;
     std::int64_t from_sea = 0;
     std::int64_t eroded = 0;
+    // Grain that slid down a heap too steep to hold, summed over the step's passes.
+    std::int64_t slumped = 0;
     std::vector<globe::BrickSite> wanted;
     // Each column with liquid standing in the open, and how much.
     struct Wet {
@@ -206,6 +208,9 @@ private:
     // it tell that surface's distance.
     void scour(globe::Site bed, int mm);
     void keep_loads(const std::vector<Column>& columns);
+    // Grain on the topmost ground slides to lower columns beside it where it lies steeper than
+    // its repose; see Slump. Only the top surface of a column slumps, not floors inside caves.
+    void slump(Stepped& stepped);
 
     globe::World* world_;
     bool hold_sea_;

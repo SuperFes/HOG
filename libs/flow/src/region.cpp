@@ -722,6 +722,7 @@ Stepped Region::step(double seconds) {
     seep(all, seconds, stepped);
     carry(all, seconds, stepped);
     keep_loads(all);
+    slump(stepped);
     // What settling and seeping took from the edge, the sea gives back before anyone sees it
     // short.
     hold_sea(all, stepped);

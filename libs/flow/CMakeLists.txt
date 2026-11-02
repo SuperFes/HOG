@@ -1,5 +1,6 @@
 add_library(hog_flow
     src/region.cpp
+    src/region_slump.cpp
     src/slump.cpp
     src/simulation.cpp)
 add_library(hog::flow ALIAS hog_flow)

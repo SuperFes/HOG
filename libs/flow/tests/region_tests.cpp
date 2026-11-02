@@ -9,6 +9,7 @@
 #include <hog/globe/voxel_store.hpp>
 #include <hog/globe/world.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -338,4 +339,36 @@ TEST_CASE("grain piled on the bed takes room from the liquid and stands under it
     CHECK(block.grain(11, 12, 0) == full / 2);
     const std::int64_t over_pile = (full / 2) + block.column(11, 12);
     CHECK(std::abs(over_pile - block.column(12, 12)) <= 7);
+}
+
+TEST_CASE("a tall heap of sand on level ground slumps wider, losing none, and then sleeps",
+          "[flow][region][slump]") {
+    using hog::globe::Material;
+    Block block{floor_above_sea(100.0)};
+    for (int layer = 0; layer < 12; ++layer) {
+        block.pile(12, 12, layer, Material::Sand, full);
+    }
+    const std::int64_t before = block.region().grain();
+
+    std::int64_t last = 1;
+    for (int step = 0; step < 4000 && last > 0; ++step) {
+        last = block.region().step(tick).slumped;
+    }
+
+    CHECK(last == 0);
+    CHECK(block.region().grain() == before);
+    CHECK(block.grain(12, 12, 11) == 0);
+    CHECK(block.grain(13, 12, 0) > 0);
+    CHECK(block.grain(13, 13, 0) > 0);
+    // Spread the same way along an axis and across a diagonal, to a voxel or two.
+    auto reach = [&](int di, int dj) {
+        int steps = 0;
+        while (block.grain(static_cast<std::uint32_t>(12 + ((steps + 1) * di)),
+                           static_cast<std::uint32_t>(12 + ((steps + 1) * dj)), 0) > 0) {
+            ++steps;
+        }
+        return steps * std::hypot(di, dj);
+    };
+    CHECK(reach(1, 1) == Catch::Approx(reach(1, 0)).margin(2.0));
+    CHECK(reach(1, 0) >= 2.0);
 }

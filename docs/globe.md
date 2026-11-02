@@ -123,7 +123,7 @@ Seasons and weather emerge from the computation; nothing is scripted.
 8. **Materials and texturing.**
 9. **Server authority and streaming.**
 10. **Water and soil:** the loose cover crept smooth in the generator (done); the materials' porosity, conductivity, repose dry and soaked, critical shear and erodibility, and the ground soaked to its pores under the sea (done); the flow between column sections over square cells, which the server runs where the world is touched and lets sleep once still (done); the current's drag wearing its bed and carrying what it wears off as grain that settles out again by its speed (done); the client's inland water, grain and wet ground (done); the settle test: the simulation touched on generated seabed, shore, lowland and mountain moves nothing, wears nothing, writes nothing and sleeps (done). Lakes and rivers planet-wide wait for the drainage solve.
-11. **Sand and rubble:** slumping to their angle of repose.
+11. **Sand and rubble:** slumping to their angle of repose (the rule over linked columns, and the region's grain on the top ground slumping each step, are done; rock grain holds 40°; sub-voxel ground comes from the shaped distance; floors inside caves, other faces' edges, bodies that roll and temporary imprints are not).
 12. **Collapse and wear.**
 13. **Lava and magma.**
 14. **The drainage solve, rivers, lakes and coasts.**
