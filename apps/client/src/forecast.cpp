@@ -19,6 +19,11 @@ namespace {
 // Millimetres of cloud water over which the sky closes over.
 constexpr float cloud_cover_depth = 0.2F; // mm of cloud that covers most of the sky
 
+// A fade takes at least this share of the time since the last weather, if that was a believable
+// gap.
+constexpr double fade_share = 0.95;
+constexpr auto max_apart = std::chrono::hours{1};
+
 } // namespace
 
 float cloud_cover(float cloud) noexcept {
@@ -197,29 +202,55 @@ DVec3 cube_direction(std::uint32_t face, std::uint32_t x, std::uint32_t y,
 }
 
 void Forecast::receive(const protocol::Weather& weather, MonotonicClock::time_point now) {
-    ++received_;
     if (!grid_ || grid_->level() != weather.level) {
         grid_.emplace(weather.level);
         to_ = weather.cells;
         fill_heights(to_);
         from_ = to_;
         fade_ = {};
-    } else {
-        const auto by = static_cast<float>(faded(now));
-        Cells was(from_.size());
-        for (std::size_t index = 0; index < from_.size(); ++index) {
-            was[index] = shown(mixed(from_[index], to_[index], by),
-                               grid_->frame(static_cast<std::uint32_t>(index)).up, now);
-        }
-        from_ = std::move(was);
-        to_ = weather.cells;
-        fill_heights(to_);
-        fade_ = weather.fade;
-        if (fade_ <= MonotonicClock::duration::zero()) {
-            from_ = to_;
-        }
+        waiting_.reset();
+        since_ = now;
+        from_since_ = now;
+        began_ = now;
+        last_came_ = now;
+        take_maps();
+        return;
     }
-    since_ = now;
+    // The fade spans the time between weathers when they come slower than the server told, so the
+    // cloud keeps changing at one pace the whole way and is never caught short.
+    auto fade = std::chrono::duration_cast<MonotonicClock::duration>(weather.fade);
+    const auto apart = now - last_came_;
+    if (fade > MonotonicClock::duration::zero() && apart <= max_apart) {
+        fade = std::max(fade,
+                        std::chrono::duration_cast<MonotonicClock::duration>(apart * fade_share));
+    }
+    last_came_ = now;
+    waiting_ = Waiting{.cells = weather.cells, .came = now, .fade = fade};
+    fill_heights(waiting_->cells);
+    update(now);
+}
+
+void Forecast::update(MonotonicClock::time_point now) {
+    if (!waiting_ || faded(now) < 1.0) {
+        return;
+    }
+    // What's faded to is whole now, so it goes on as the weather faded from, drifting as it was.
+    from_ = std::move(to_);
+    from_since_ = since_;
+    to_ = std::move(waiting_->cells);
+    since_ = waiting_->came;
+    fade_ = waiting_->fade;
+    began_ = now;
+    waiting_.reset();
+    if (fade_ <= MonotonicClock::duration::zero()) {
+        from_ = to_;
+        from_since_ = since_;
+    }
+    take_maps();
+}
+
+void Forecast::take_maps() {
+    ++received_;
     Maps before = maps_of(*grid_, from_);
     Maps after = fade_ > MonotonicClock::duration::zero() ? maps_of(*grid_, to_) : before;
     before_ = std::move(before.weather);
@@ -234,7 +265,7 @@ double Forecast::faded(MonotonicClock::time_point now) const noexcept {
     if (fade_ <= MonotonicClock::duration::zero()) {
         return 1.0;
     }
-    return std::clamp(std::chrono::duration<double>(now - since_) /
+    return std::clamp(std::chrono::duration<double>(now - began_) /
                           std::chrono::duration<double>(fade_),
                       0.0, 1.0);
 }
@@ -252,16 +283,21 @@ DVec3 Forecast::drifted(DVec3 direction, MonotonicClock::time_point now) const {
     if (!grid_) {
         return DVec3{0.0};
     }
-    const protocol::CellWeather here =
-        mixed(interpolated(*grid_, from_, direction), interpolated(*grid_, to_, direction),
-              static_cast<float>(faded(now)));
-    return planet::tangent_frame(direction).to_world(
-               {static_cast<double>(here.drift.x), static_cast<double>(here.drift.y), 0.0}) *
-           age(now);
+    const auto blown = [&](const Cells& cells, double age) {
+        const protocol::CellWeather here = interpolated(*grid_, cells, direction);
+        return planet::tangent_frame(direction).to_world(
+                   {static_cast<double>(here.drift.x), static_cast<double>(here.drift.y), 0.0}) *
+               age;
+    };
+    return glm::mix(blown(from_, age_before(now)), blown(to_, age(now)), faded(now));
 }
 
 double Forecast::age(MonotonicClock::time_point now) const noexcept {
     return std::max(std::chrono::duration<double>(now - since_).count(), 0.0);
+}
+
+double Forecast::age_before(MonotonicClock::time_point now) const noexcept {
+    return std::max(std::chrono::duration<double>(now - from_since_).count(), 0.0);
 }
 
 protocol::CellWeather Forecast::shown(const protocol::CellWeather& here, DVec3 direction,
@@ -269,10 +305,15 @@ protocol::CellWeather Forecast::shown(const protocol::CellWeather& here, DVec3 d
     if (!grid_) {
         return here;
     }
-    const DVec3 from = glm::normalize((direction * radius_) - drifted(direction, now));
+    // Each weather's cloud is read where its own drift brought it from.
+    const auto read = [&](const Cells& cells, double age) {
+        const protocol::CellWeather here = interpolated(*grid_, cells, direction);
+        const DVec3 blown = planet::tangent_frame(direction).to_world(
+            {static_cast<double>(here.drift.x), static_cast<double>(here.drift.y), 0.0});
+        return interpolated(*grid_, cells, glm::normalize((direction * radius_) - (blown * age)));
+    };
     const protocol::CellWeather there =
-        mixed(interpolated(*grid_, from_, from), interpolated(*grid_, to_, from),
-              static_cast<float>(faded(now)));
+        mixed(read(from_, age_before(now)), read(to_, age(now)), static_cast<float>(faded(now)));
     // The cloud blows on with the wind, with the heights it has; the air's damp, and so its fog,
     // keep to the slower pace of the air.
     protocol::CellWeather found = here;

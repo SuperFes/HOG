@@ -58,12 +58,17 @@ waves::SeaState sea_at_eye(const Shot& shot) {
 
 namespace {
 
-// Seconds since the weather the shot has came.
-double weather_age(const Shot& shot) {
+// Seconds since the weather the shot fades to came, and the one it fades from.
+struct WeatherAges {
+    double before = 0.0;
+    double after = 0.0;
+};
+
+WeatherAges weather_ages(const Shot& shot) {
     if (shot.forecast == nullptr || !shot.forecast->known()) {
-        return 0.0;
+        return {};
     }
-    return shot.forecast->age(shot.now);
+    return {.before = shot.forecast->age_before(shot.now), .after = shot.forecast->age(shot.now)};
 }
 
 } // namespace
@@ -379,8 +384,8 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     const double faded = cloudy ? shot.forecast->faded(shot.now) : 1.0;
     // Taken as the passes are recorded, after the uploads: until the maps are first taken, a clear
     // sky.
-    const double age = weather_age(shot);
-    const auto weather = [&] { return weather_.bindings(faded, age); };
+    const WeatherAges ages = weather_ages(shot);
+    const auto weather = [&] { return weather_.bindings(faded, ages.after, ages.before); };
     render::SkyView sky = sky_view(shot, shade);
     sky.gusts = gusts_.seen();
     sky.mist =

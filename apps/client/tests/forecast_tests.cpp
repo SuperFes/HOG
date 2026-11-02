@@ -167,14 +167,32 @@ TEST_CASE("new weather fades in over its fade", "[client][forecast]") {
     CHECK(forecast.after().front()[0] > 200);
 }
 
-TEST_CASE("weather coming mid-fade fades on from what's shown", "[client][forecast]") {
+TEST_CASE("weather coming mid-fade waits for the fade to end, so nothing jumps",
+          "[client][forecast]") {
     Forecast forecast{radius};
     forecast.receive(everywhere({}), start);
     forecast.receive(everywhere({.cloud = 4.0F}), start);
     forecast.receive(everywhere({.cloud = 0.0F}), start + 5s);
+    forecast.update(start + 5s);
     CHECK_THAT(cloud_at(forecast, start + 5s), WithinAbs(2.0, 1e-5));
-    CHECK_THAT(cloud_at(forecast, start + 10s), WithinAbs(1.0, 1e-5));
-    CHECK_THAT(cloud_at(forecast, start + 15s), WithinAbs(0.0, 1e-5));
+    // The fade goes on to what it was heading for, and only then turns to the weather that came.
+    CHECK_THAT(cloud_at(forecast, start + 9s), WithinAbs(3.6, 1e-5));
+    forecast.update(start + 9s);
+    forecast.update(start + 10s);
+    CHECK_THAT(cloud_at(forecast, start + 10s), WithinAbs(4.0, 1e-5));
+    CHECK_THAT(cloud_at(forecast, start + 15s), WithinAbs(2.0, 1e-5));
+    CHECK_THAT(cloud_at(forecast, start + 20s), WithinAbs(0.0, 1e-5));
+}
+
+TEST_CASE("only the newest weather waits", "[client][forecast]") {
+    Forecast forecast{radius};
+    forecast.receive(everywhere({}), start);
+    forecast.receive(everywhere({.cloud = 4.0F}), start);
+    forecast.receive(everywhere({.cloud = 100.0F}), start + 2s);
+    forecast.receive(everywhere({.cloud = 8.0F}), start + 4s);
+    forecast.update(start + 10s);
+    CHECK_THAT(cloud_at(forecast, start + 10s), WithinAbs(4.0, 1e-5));
+    CHECK_THAT(cloud_at(forecast, start + 20s), WithinAbs(8.0, 1e-5));
 }
 
 TEST_CASE("weather with no fade, or at another level, is shown at once", "[client][forecast]") {
@@ -355,14 +373,14 @@ TEST_CASE("weather coming in fades on from where the cloud had drifted to", "[cl
     // The same weather again: what's shown doesn't jump back to where it lay when it last came.
     forecast.receive(drifting_east(), came);
     CHECK_THAT(static_cast<double>(forecast.at(eye(), came).cloud), WithinAbs(shown, 0.02));
-    // Faded to what's come, drifted on as long as the fade.
+    // Faded to what's come over the wait, drifted on for as long as it has been here.
     const Forecast fresh = [] {
         Forecast found{radius};
         found.receive(drifting_east(), start);
         return found;
     }();
-    CHECK_THAT(static_cast<double>(forecast.at(eye(), came + 10s).cloud),
-               WithinAbs(static_cast<double>(fresh.at(west_of_eye(200.0), start).cloud), 0.02));
+    CHECK_THAT(static_cast<double>(forecast.at(eye(), came + 285s).cloud),
+               WithinAbs(static_cast<double>(fresh.at(west_of_eye(5'700.0), start).cloud), 0.02));
 }
 
 TEST_CASE("the air's damp and fog stay put as the cloud drifts on through it, with its heights",
@@ -418,4 +436,35 @@ TEST_CASE("a cloud's edge keeps its heights instead of sloping down to the groun
         CHECK_THAT(static_cast<double>(texel[3]) * hog::client::height_texel_step,
                    WithinAbs(8'000.0, hog::client::height_texel_step));
     }
+}
+
+TEST_CASE("weather coming once the last has faded in moves nothing shown", "[client][forecast]") {
+    Forecast forecast{radius};
+    forecast.receive(drifting_east(), start);
+    forecast.receive(drifting_east(), start + 1s);
+    const MonotonicClock::time_point came = start + 100s;
+    const double before = static_cast<double>(forecast.at(eye(), came).cloud);
+    const DVec3 at = forecast.drifted(eye(), came);
+    // Fresh weather that differs everywhere but the cloud's drift, all over the sky.
+    auto next = drifting_east();
+    for (auto& cell : next.cells) {
+        cell.cloud += 3.0F;
+    }
+    forecast.receive(next, came);
+    CHECK_THAT(static_cast<double>(forecast.at(eye(), came).cloud), WithinAbs(before, 1e-4));
+    CHECK(glm::length(forecast.drifted(eye(), came) - at) < 1e-6);
+    // The weather it fades from goes on drifting, the new from where it came.
+    CHECK_THAT(forecast.age_before(came + 5s), WithinAbs(104.0, 1e-6));
+    CHECK_THAT(forecast.age(came + 5s), WithinAbs(5.0, 1e-6));
+}
+
+TEST_CASE("weather coming slower than told fades over the whole wait", "[client][forecast]") {
+    Forecast forecast{radius};
+    forecast.receive(everywhere({}, 10s), start);
+    forecast.receive(everywhere({.cloud = 4.0F}, 10s), start);
+    forecast.receive(everywhere({.cloud = 8.0F}, 10s), start + 100s);
+    // Held at 4 when it came; now faded on to 8 over 95 s, not the 10 s it was told.
+    CHECK_THAT(cloud_at(forecast, start + 100s), WithinAbs(4.0, 1e-5));
+    CHECK_THAT(cloud_at(forecast, start + 100s + 47500ms), WithinAbs(6.0, 1e-4));
+    CHECK_THAT(cloud_at(forecast, start + 100s + 95s), WithinAbs(8.0, 1e-5));
 }

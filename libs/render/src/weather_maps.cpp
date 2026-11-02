@@ -152,7 +152,7 @@ bool WeatherMaps::ready() const noexcept {
            sky_after_.ready() && drift_before_.ready() && drift_after_.ready();
 }
 
-WeatherBindings WeatherMaps::bindings(double faded, double age) const noexcept {
+WeatherBindings WeatherMaps::bindings(double faded, double age, double age_before) const noexcept {
     if (!ready()) {
         return {.weather_before = clear_.view(),
                 .weather_after = clear_.view(),
@@ -167,6 +167,7 @@ WeatherBindings WeatherMaps::bindings(double faded, double age) const noexcept {
                 .lowest_base = 0.0,
                 .highest_base = 0.0,
                 .highest_top = 0.0,
+                .age_before = age_before,
                 .age = age};
     }
     return {.weather_before = weather_before_.image().view(),
