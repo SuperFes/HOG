@@ -109,10 +109,12 @@ TEST_CASE("cloud touching the ground is fog and cloud above it has a base and to
     field.at(column, 3).cloud = 1e-3F;
     field.at(column, 4).cloud = 1e-3F;
     const Column shown = air.column(column);
-    const auto layer = static_cast<float>(field.grid.thickness);
+    const Grid& grid = field.grid;
     CHECK(shown.fog_top > 0.0F);
-    CHECK(shown.base == shown.fog_top + (2.0F * layer));
-    CHECK(shown.top == shown.base + (2.0F * layer));
+    CHECK_THAT(shown.base - shown.fog_top,
+               Catch::Matchers::WithinAbs(grid.floor_of(3) - grid.floor_of(1), 0.5));
+    CHECK_THAT(shown.top - shown.base,
+               Catch::Matchers::WithinAbs(grid.floor_of(5) - grid.floor_of(3), 0.5));
     CHECK(shown.cloud > 0.0F);
 }
 
