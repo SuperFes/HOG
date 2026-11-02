@@ -1,6 +1,8 @@
 #include <hog/globe/material.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <numbers>
 
@@ -29,7 +31,9 @@ const Properties& properties(Material material) {
          .saturated_repose = 15.0 * degree,
          .critical_shear = 0.1,
          .erodibility = 1e-5,
-         .settling = 1e-2}, // snow
+         .settling = 1e-2,
+         .cohesion = 500.0,
+         .bed_friction = 25.0 * degree}, // snow
         {.density = 1500.0,
          .melts = 1400.0,
          .strength = 1e4,
@@ -40,7 +44,9 @@ const Properties& properties(Material material) {
          .saturated_repose = 14.0 * degree,
          .critical_shear = 2.0,
          .erodibility = 1e-6,
-         .settling = 1e-3}, // soil
+         .settling = 1e-3,
+         .cohesion = 3000.0,
+         .bed_friction = 30.0 * degree}, // soil
         {.density = 1600.0,
          .melts = 1900.0,
          .strength = 0.0,
@@ -51,7 +57,8 @@ const Properties& properties(Material material) {
          .saturated_repose = 25.0 * degree,
          .critical_shear = 0.25,
          .erodibility = 1e-5,
-         .settling = 3e-2}, // sand
+         .settling = 3e-2,
+         .bed_friction = 28.0 * degree}, // sand
         {.density = 1800.0,
          .melts = 1400.0,
          .strength = 1e5,
@@ -62,7 +69,9 @@ const Properties& properties(Material material) {
          .saturated_repose = 10.0 * degree,
          .critical_shear = 0.5,
          .erodibility = 2e-6,
-         .settling = 1e-4}, // sediment
+         .settling = 1e-4,
+         .cohesion = 2000.0,
+         .bed_friction = 24.0 * degree}, // sediment
         {.density = 2300.0,
          .melts = 1900.0,
          .strength = 5e7,
@@ -71,7 +80,9 @@ const Properties& properties(Material material) {
          .conductivity = 1e-6,
          .critical_shear = 1e3,
          .erodibility = 3e-13,
-         .settling = 3e-1}, // sandstone
+         .settling = 3e-1,
+         .friction = 45.0 * degree,
+         .wet_friction = 35.0 * degree}, // sandstone
         {.density = 2500.0,
          .melts = 1500.0,
          .strength = 3e7,
@@ -80,7 +91,9 @@ const Properties& properties(Material material) {
          .conductivity = 1e-10,
          .critical_shear = 5e2,
          .erodibility = 5e-13,
-         .settling = 3e-1}, // shale
+         .settling = 3e-1,
+         .friction = 35.0 * degree,
+         .wet_friction = 22.0 * degree}, // shale
         {.density = 2700.0,
          .melts = 1600.0,
          .strength = 6e7,
@@ -89,7 +102,9 @@ const Properties& properties(Material material) {
          .conductivity = 1e-6,
          .critical_shear = 1e3,
          .erodibility = 3e-13,
-         .settling = 3e-1}, // limestone
+         .settling = 3e-1,
+         .friction = 42.0 * degree,
+         .wet_friction = 30.0 * degree}, // limestone
         {.density = 2700.0,
          .melts = 1500.0,
          .strength = 1.3e8,
@@ -98,7 +113,9 @@ const Properties& properties(Material material) {
          .conductivity = 1e-9,
          .critical_shear = 3e3,
          .erodibility = 1e-13,
-         .settling = 3e-1}, // granite
+         .settling = 3e-1,
+         .friction = 45.0 * degree,
+         .wet_friction = 38.0 * degree}, // granite
         {.density = 3000.0,
          .melts = 1450.0,
          .strength = 1.5e8,
@@ -107,21 +124,27 @@ const Properties& properties(Material material) {
          .conductivity = 1e-9,
          .critical_shear = 3e3,
          .erodibility = 1e-13,
-         .settling = 3e-1}, // basalt
+         .settling = 3e-1,
+         .friction = 45.0 * degree,
+         .wet_friction = 38.0 * degree}, // basalt
         {.density = 3300.0,
          .melts = 1400.0,
          .strength = 1e8,
          .heat_capacity = 1000.0,
          .critical_shear = 3e3,
          .erodibility = 1e-13,
-         .settling = 3e-1}, // mantle
+         .settling = 3e-1,
+         .friction = 45.0 * degree,
+         .wet_friction = 35.0 * degree}, // mantle
         {.density = 7870.0,
          .melts = 1811.0,
          .strength = 2e8,
          .heat_capacity = 450.0,
          .critical_shear = 1e4,
          .erodibility = 1e-14,
-         .settling = 5e-1}, // iron
+         .settling = 5e-1,
+         .friction = 25.0 * degree,
+         .wet_friction = 15.0 * degree}, // iron
         {.density = 2800.0,
          .melts = 1700.0,
          .strength = 1.3e8,
@@ -130,7 +153,9 @@ const Properties& properties(Material material) {
          .conductivity = 1e-9,
          .critical_shear = 3e3,
          .erodibility = 1e-13,
-         .settling = 3e-1}, // anorthosite
+         .settling = 3e-1,
+         .friction = 45.0 * degree,
+         .wet_friction = 38.0 * degree}, // anorthosite
         {.density = 1500.0,
          .melts = 1400.0,
          .strength = 1e4,
@@ -141,9 +166,47 @@ const Properties& properties(Material material) {
          .saturated_repose = 20.0 * degree,
          .critical_shear = 0.3,
          .erodibility = 1e-5,
-         .settling = 3e-2}, // regolith
+         .settling = 3e-2,
+         .cohesion = 1000.0,
+         .bed_friction = 33.0 * degree}, // regolith
     }};
     return all[static_cast<std::size_t>(material)];
+}
+
+double holding_slope(Material grain, Material bed, double wetness, double depth, double gravity) {
+    // Broken rock has no repose of its own; a heap of it holds about this.
+    constexpr double rubble = 40.0 * std::numbers::pi / 180.0;
+    // Depth of grain over which its grip on the bed gives way to its own friction.
+    constexpr double coating = 0.1;
+    // A dusting still has some weight to hold it.
+    constexpr double thinnest = 0.01;
+    const Properties& loose = properties(grain);
+    const Properties& under = properties(bed);
+
+    const double wet = std::clamp(wetness, 0.0, 1.0);
+    const auto between = [&](double dry, double soaked) { return dry + (wet * (soaked - dry)); };
+    double inside = between(loose.repose, loose.saturated_repose);
+    if (loose.repose <= 0.0) {
+        inside = rubble;
+    }
+    double gripped = inside;
+    if (under.repose > 0.0) {
+        gripped = std::min(gripped, between(under.repose, under.saturated_repose));
+    } else if (under.friction > 0.0) {
+        gripped = std::min(gripped, between(under.friction, under.wet_friction));
+        if (loose.bed_friction > 0.0) {
+            gripped = std::min(gripped, loose.bed_friction);
+        }
+    }
+    const double held = std::tan(inside);
+    const double share = coating / (coating + std::max(depth, 0.0));
+    const double slope = held - (share * (held - std::tan(gripped)));
+    if (loose.cohesion <= 0.0) {
+        return slope;
+    }
+    // Cohesion over the layer's weight, resolved across the slope.
+    return slope + (loose.cohesion * (1.0 + (slope * slope)) /
+                    (loose.density * gravity * std::max(depth, thinnest)));
 }
 
 } // namespace hog::globe

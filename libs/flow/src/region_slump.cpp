@@ -20,8 +20,6 @@ constexpr std::int64_t full = Voxel::full;
 // Passes of the rule a step makes, and the most voxels up a column grain is given room in.
 constexpr int passes = 4;
 constexpr std::uint32_t tallest = 64;
-// Broken rock has no repose of its own in the materials; a heap of it holds about this.
-constexpr double rubble_repose = 0.6981317; // 40 degrees
 constexpr std::array<std::pair<int, int>, Slump::sides> around{
     {{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}}};
 
@@ -40,6 +38,7 @@ struct Profile {
     std::int64_t room = 0;
     std::int64_t rise = 0;
     Material material = Material::Air;
+    Material bed = Material::Basalt; // the ground under it
     std::uint32_t voxels = 0; // how many up from `first` hold room
 };
 
@@ -48,6 +47,7 @@ struct Profile {
 void Region::slump(Stepped& stepped) {
     const globe::Layers& layers = world_->store().layers();
     const double thickness = layers.thickness;
+    const double gravity = world_->generator().planet().gravity;
 
     // The columns with grain in the open.
     std::map<Key, int> columns;
@@ -94,6 +94,7 @@ void Region::slump(Stepped& stepped) {
         // Down from the top brick, through bricks held without a gap, to the highest shaped
         // matter with open voxel over it.
         std::optional<std::uint32_t> found;
+        Material bed = Material::Basalt;
         std::uint32_t above = (stack->second.back() + 1) * globe::brick_side;
         for (auto b = stack->second.rbegin(); b != stack->second.rend() && !found; ++b) {
             if (*b + 1 != above / globe::brick_side) {
@@ -103,6 +104,7 @@ void Region::slump(Stepped& stepped) {
                 const Voxel* here = voxel({key.face, key.i, key.j, layer});
                 if (here->solid != Material::Air) {
                     found = layer;
+                    bed = here->solid;
                     break;
                 }
             }
@@ -115,7 +117,7 @@ void Region::slump(Stepped& stepped) {
             continue;
         }
 
-        Profile profile{.first = first};
+        Profile profile{.first = first, .bed = bed};
         const Site base{.face = key.face, .i = key.i, .j = key.j, .layer = first};
         // The shaped surface lies below the voxel's middle by its distance, along the normal.
         double offset = 0.0;
@@ -140,17 +142,17 @@ void Region::slump(Stepped& stepped) {
         }
         profile.room = std::int64_t{profile.voxels} * full;
         if (profile.material != Material::Air) {
-            const globe::Properties& properties = globe::properties(profile.material);
-            const bool soaked = bottom->liquid_amount > full / 2;
-            double repose = soaked ? properties.saturated_repose : properties.repose;
-            if (repose <= 0.0) {
-                repose = rubble_repose;
-            }
+            const double soaked = std::min(
+                1.0, static_cast<double>(bottom->liquid_amount) / static_cast<double>(full));
+            const double depth = static_cast<double>(profile.grain) / static_cast<double>(full) *
+                                 thickness;
+            const double slope =
+                globe::holding_slope(profile.material, profile.bed, soaked, depth, gravity);
             const double width = std::sqrt(layers.volume(globe::column_of(base, layers),
                                                          static_cast<int>(first)) /
                                            thickness);
             profile.rise = static_cast<std::int64_t>(
-                std::llround(std::tan(repose) * width / thickness * static_cast<double>(full)));
+                std::llround(slope * width / thickness * static_cast<double>(full)));
         }
         node = static_cast<int>(keys.size());
         keys.push_back(key);
