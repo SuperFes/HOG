@@ -1,45 +1,50 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 namespace hog::flow {
 
-// Loose grain settling in a patch of square columns, each column's ground and grain told as
-// heights in units where `Voxel::full` is one voxel's height. Grain runs from a column to any of
-// the eight about it that lies lower than the heap can hold, by what the true distance across
-// (diagonals longer by root two) allows at the angle of repose; so a heap comes to a cone, not a
-// pyramid. Whole units only, in an order that doesn't matter, so the result repeats.
+// Loose grain settling over a set of columns, each one's ground and grain told as heights in
+// units where `Voxel::full` is one voxel's height. Grain runs from a column to any of the eight
+// about it that lies lower than the heap can hold, by what the true distance across (diagonals
+// longer by root two) allows at the angle of repose, so a heap comes to a cone, not a pyramid.
+// Whole units only, and every column reads the state the pass began with, so the result doesn't
+// depend on order and repeats.
 class Slump {
 public:
-    Slump(int width, int depth);
+    // The sides of a column, axes first, then diagonals; `Node::next` is indexed by them.
+    static constexpr std::size_t sides = 8;
+    static constexpr int none = -1;
 
-    [[nodiscard]] int width() const noexcept { return width_; }
-    [[nodiscard]] int depth() const noexcept { return depth_; }
+    struct Node {
+        std::int64_t ground = 0;
+        std::int64_t grain = 0;
+        // Height a side lets the heap fall across an axis step, by the grain's repose there.
+        std::int64_t rise = 0;
+        // The most grain it can take; a closed ceiling over it, or no column at all.
+        std::int64_t room = std::numeric_limits<std::int64_t>::max();
+        std::array<int, sides> next = {none, none, none, none, none, none, none, none};
+    };
 
-    [[nodiscard]] std::int64_t& ground(int i, int j) { return ground_[index(i, j)]; }
-    [[nodiscard]] std::int64_t& grain(int i, int j) { return grain_[index(i, j)]; }
-    [[nodiscard]] std::int64_t ground(int i, int j) const { return ground_[index(i, j)]; }
-    [[nodiscard]] std::int64_t grain(int i, int j) const { return grain_[index(i, j)]; }
-    [[nodiscard]] std::int64_t surface(int i, int j) const { return ground(i, j) + grain(i, j); }
+    explicit Slump(std::size_t count) : nodes_(count) {}
+
+    [[nodiscard]] std::size_t size() const noexcept { return nodes_.size(); }
+    [[nodiscard]] Node& operator[](std::size_t node) { return nodes_[node]; }
+    [[nodiscard]] const Node& operator[](std::size_t node) const { return nodes_[node]; }
+    [[nodiscard]] std::int64_t surface(std::size_t node) const {
+        return nodes_[node].ground + nodes_[node].grain;
+    }
     [[nodiscard]] std::int64_t total() const;
 
-    // One pass at `rise` height units of fall per column width the heap holds (the tangent of
-    // the angle of repose times a column's width over a voxel's height, times `Voxel::full`).
-    // Returns the units that moved; none means it is at rest.
-    std::int64_t step(std::int64_t rise);
+    // One pass. Returns the units that moved; none means it is at rest.
+    std::int64_t step();
 
 private:
-    [[nodiscard]] std::size_t index(int i, int j) const {
-        return (static_cast<std::size_t>(j) * static_cast<std::size_t>(width_)) +
-               static_cast<std::size_t>(i);
-    }
-
-    int width_;
-    int depth_;
-    std::vector<std::int64_t> ground_;
-    std::vector<std::int64_t> grain_;
+    std::vector<Node> nodes_;
 };
 
 } // namespace hog::flow
