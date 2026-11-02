@@ -51,6 +51,10 @@ struct Properties {
 
 [[nodiscard]] const Properties& properties(Material material);
 
+// The steepest slope, in radians from level, something stands on bare `material` at, `wetness`
+// from 0 dry to 1 soaked: a heap's repose if loose, else the rock's grip.
+[[nodiscard]] double footing(Material material, double wetness);
+
 // The tangent of the steepest slope a layer of `grain`, `depth` metres deep, holds on a bed of
 // `bed` under `gravity`, `wetness` from 0 dry to 1 soaked. A thick layer is held by its own friction; a thin one by its grip on the
 // bed, which loose ground gives as much as it holds itself and hard ground as its surface does;

@@ -1,5 +1,6 @@
 #include <hog/flow/region.hpp>
 #include <hog/flow/slump.hpp>
+#include <hog/globe/surface.hpp>
 
 #include <glm/geometric.hpp>
 
@@ -38,7 +39,6 @@ struct Profile {
     std::int64_t room = 0;
     std::int64_t rise = 0;
     Material material = Material::Air;
-    Material bed = Material::Basalt; // the ground under it
     std::uint32_t voxels = 0; // how many up from `first` hold room
 };
 
@@ -93,66 +93,40 @@ void Region::slump(Stepped& stepped) {
         }
         // Down from the top brick, through bricks held without a gap, to the highest shaped
         // matter with open voxel over it.
-        std::optional<std::uint32_t> found;
-        Material bed = Material::Basalt;
-        std::uint32_t above = (stack->second.back() + 1) * globe::brick_side;
-        for (auto b = stack->second.rbegin(); b != stack->second.rend() && !found; ++b) {
-            if (*b + 1 != above / globe::brick_side) {
-                break;
-            }
-            for (std::uint32_t layer = above; layer-- > *b * globe::brick_side;) {
-                const Voxel* here = voxel({key.face, key.i, key.j, layer});
-                if (here->solid != Material::Air) {
-                    found = layer;
-                    bed = here->solid;
-                    break;
-                }
-            }
-            above = *b * globe::brick_side;
-        }
-        const std::uint32_t first = found ? *found + 1 : 0;
-        const Voxel* bottom = found ? voxel({key.face, key.i, key.j, first}) : nullptr;
-        if (bottom == nullptr || bottom->solid != Material::Air) {
+        const auto lookup = [&](std::uint32_t layer) {
+            return voxel({key.face, key.i, key.j, layer});
+        };
+        const std::optional<globe::Surface> surface = globe::surface_below(
+            ((stack->second.back() + 1) * globe::brick_side) - 1, globe::any_depth, tallest,
+            lookup);
+        if (!surface) {
             node = Slump::none;
             continue;
         }
 
-        Profile profile{.first = first, .bed = bed};
-        const Site base{.face = key.face, .i = key.i, .j = key.j, .layer = first};
+        Profile profile{.first = surface->first,
+                        .grain = surface->grain_amount,
+                        .room = std::int64_t{surface->open} * full,
+                        .material = surface->grain,
+                        .voxels = surface->open};
+        const Site base{.face = key.face, .i = key.i, .j = key.j, .layer = surface->first};
         // The shaped surface lies below the voxel's middle by its distance, along the normal.
         double offset = 0.0;
-        if (bottom->distance != Voxel::far) {
-            const DVec3 normal = globe::unpacked_normal(bottom->normal);
+        if (surface->bottom.distance != Voxel::far) {
+            const DVec3 normal = globe::unpacked_normal(surface->bottom.normal);
             const DVec3 up = glm::normalize(globe::middle_of(base, layers));
             const double lean = std::max(glm::dot(normal, up), 0.3);
-            offset = globe::metres(bottom->distance) / thickness / lean;
+            offset = globe::metres(surface->bottom.distance) / thickness / lean;
         }
-        profile.ground = static_cast<std::int64_t>(
-            std::llround((static_cast<double>(first) + 0.5 - offset) * static_cast<double>(full)));
-        for (std::uint32_t up = 0; up < tallest; ++up) {
-            const Voxel* here = voxel({key.face, key.i, key.j, first + up});
-            if (here == nullptr || here->solid != Material::Air) {
-                break;
-            }
-            profile.voxels = up + 1;
-            profile.grain += here->grain_amount;
-            if (profile.material == Material::Air && here->grain_amount > 0) {
-                profile.material = here->grain;
-            }
-        }
-        profile.room = std::int64_t{profile.voxels} * full;
-        if (profile.material != Material::Air) {
-            const double soaked = std::min(
-                1.0, static_cast<double>(bottom->liquid_amount) / static_cast<double>(full));
-            const double depth = static_cast<double>(profile.grain) / static_cast<double>(full) *
-                                 thickness;
-            const double slope =
-                globe::holding_slope(profile.material, profile.bed, soaked, depth, gravity);
+        profile.ground = static_cast<std::int64_t>(std::llround(
+            (static_cast<double>(surface->first) + 0.5 - offset) * static_cast<double>(full)));
+        if (surface->grain != Material::Air) {
             const double width = std::sqrt(layers.volume(globe::column_of(base, layers),
-                                                         static_cast<int>(first)) /
+                                                         static_cast<int>(surface->first)) /
                                            thickness);
             profile.rise = static_cast<std::int64_t>(
-                std::llround(slope * width / thickness * static_cast<double>(full)));
+                std::llround(surface->holds(thickness, gravity) * width / thickness *
+                             static_cast<double>(full)));
         }
         node = static_cast<int>(keys.size());
         keys.push_back(key);

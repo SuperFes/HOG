@@ -1,6 +1,7 @@
 #include <hog/client/player.hpp>
 #include <hog/client/scene.hpp>
 #include <hog/globe/generator.hpp>
+#include <hog/globe/grip.hpp>
 
 #include <glm/glm.hpp>
 
@@ -17,6 +18,33 @@ namespace {
 constexpr double drop = 50.0; // metres
 // Nearer than this, the camera would be inside the character's head.
 constexpr double closest = 0.3; // metres
+// The ground's grip is looked up again after this far, or this many steps, whichever is first.
+constexpr double regrip_distance = 0.5; // metres
+constexpr int regrip_steps = 30;
+
+// How steep a slope holds where the character stands, from the world's ground and what lies on
+// it; `steepest` where the ground isn't known, and never more than it.
+class Footing {
+public:
+    Footing(globe::World world, double steepest) : world_(world), steepest_(steepest) {}
+
+    double operator()(WorldPosition feet) {
+        const DVec3 here = feet.metres();
+        if (steps_++ >= regrip_steps || glm::distance(here, looked_) > regrip_distance) {
+            steps_ = 0;
+            looked_ = here;
+            held_ = std::min(steepest_, globe::grip_at(world_, here).value_or(steepest_));
+        }
+        return held_;
+    }
+
+private:
+    globe::World world_;
+    double steepest_;
+    DVec3 looked_{0.0};
+    double held_ = 0.0;
+    int steps_ = regrip_steps;
+};
 
 } // namespace
 
@@ -35,6 +63,7 @@ Result<Player> Player::create(const globe::World& world, DVec3 direction,
     const std::optional<physics::Hit> hit = space->cast_ray(over, up * (-2.0 * drop));
     const WorldPosition feet = hit ? hit->at : over - (up * drop);
     physics::Character character{*space, feet, settings.character};
+    character.set_grip(Footing{world, settings.character.steepest});
     return Player{std::move(space), std::move(ground), std::move(character), settings};
 }
 

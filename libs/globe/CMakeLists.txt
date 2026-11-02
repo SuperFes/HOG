@@ -8,6 +8,7 @@ add_library(hog_globe
     src/detail.cpp
     src/erosion.cpp
     src/generator.cpp
+    src/grip.cpp
     src/layers.cpp
     src/mantle.cpp
     src/material.cpp
@@ -17,6 +18,7 @@ add_library(hog_globe
     src/qef.cpp
     src/relief.cpp
     src/strata.cpp
+    src/surface.cpp
     src/surface_mesh.cpp
     src/voxel.cpp
     src/voxel_store.cpp
@@ -35,6 +37,7 @@ hog_add_tests(hog_globe
     tests/craters_tests.cpp
     tests/detail_tests.cpp
     tests/generator_tests.cpp
+    tests/grip_tests.cpp
     tests/landform_survey_tests.cpp
     tests/layers_tests.cpp
     tests/mantle_tests.cpp
