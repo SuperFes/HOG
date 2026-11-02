@@ -58,6 +58,7 @@ Simulation::Progress Simulation::step(double seconds) {
     }
     const Stepped stepped = region_.step(seconds);
     progress.changed = stepped.changed;
+    progress.eroded = stepped.eroded;
     const double thickness = world_->store().layers().thickness;
     for (const Stepped::Wet& wet : stepped.wet) {
         Moisture& moisture = moisture_[column_key(wet.face, wet.i, wet.j)];

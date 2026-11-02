@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 
 using hog::flow::Simulation;
 using hog::flow::testing::Block;
@@ -47,6 +48,32 @@ Ran run(Simulation& simulation, int most) {
 // Open within a rim of rock a column wide, so what's poured stays on the block.
 bool rimmed(std::uint32_t i, std::uint32_t j, int /*layer*/) {
     return i > 0 && i + 1 < Block::side && j > 0 && j + 1 < Block::side;
+}
+
+// The brick at the ground under a direction.
+hog::globe::BrickSite ground_brick(const hog::globe::Generator& generator, hog::DVec3 direction) {
+    const double ground = hog::globe::ground_below(generator, direction, 0.5).value_or(0.0);
+    const hog::globe::Cell column = hog::globe::cell_under(direction, generator.layers().level);
+    return hog::globe::brick_of(
+        {.face = column.face,
+         .i = column.i,
+         .j = column.j,
+         .layer = static_cast<std::uint32_t>(generator.layers().layer_at(ground))});
+}
+
+// A direction whose ground stands between two heights over the sea's level, the `nth` found.
+hog::DVec3 ground_between(const hog::globe::Generator& generator, double low, double high,
+                          int nth = 0) {
+    const double sea = generator.sea_level().value_or(generator.planet().radius);
+    for (std::uint64_t k = 0;; ++k) {
+        const hog::DVec3 direction =
+            hog::globe::center(hog::globe::cell_at_index(7, (k * 2'654'435'761ULL) % 98'304));
+        const double ground =
+            hog::globe::ground_below(generator, direction, 0.5).value_or(0.0) - sea;
+        if (ground > low && ground < high && nth-- == 0) {
+            return direction;
+        }
+    }
 }
 
 } // namespace
@@ -97,6 +124,51 @@ TEST_CASE("liquid takes up the bricks it reaches and leaves them once still",
     CHECK(simulation.moisture(middle.face, middle.i, middle.j).stood > 0.0);
     CHECK(simulation.moisture(middle.face, middle.i, middle.j).ran > 0.0);
     CHECK(simulation.moisture(rim.face, rim.i, rim.j).stood == 0.0);
+}
+
+TEST_CASE("the world as generated is at rest wherever it's touched: seabed, shore, lowland and "
+          "mountain",
+          "[flow][simulation]") {
+    const hog::globe::Generator& generator = earth();
+    struct Landform {
+        const char* name;
+        double low;
+        double high;
+    };
+    for (const Landform& landform :
+         {Landform{.name = "seabed", .low = -300.0, .high = -20.0},
+          Landform{.name = "shore", .low = -3.0, .high = 3.0},
+          Landform{.name = "lowland", .low = 20.0, .high = 300.0},
+          Landform{.name = "mountain", .low = 1'500.0, .high = 9'000.0}}) {
+        for (int nth = 0; nth < 2; ++nth) {
+            INFO(landform.name << " " << nth);
+            VoxelStore store{generator.layers()};
+            World world{generator, store};
+            Simulation simulation{world};
+            simulation.touched(ground_brick(
+                generator, ground_between(generator, landform.low, landform.high, nth)));
+            std::int64_t moved = 0;
+            std::int64_t eroded = 0;
+            std::size_t most_held = 0;
+            int steps = 0;
+            for (; steps < 3 * Simulation::rest; ++steps) {
+                const Simulation::Progress progress = simulation.step(tick);
+                moved += std::abs(progress.changed);
+                eroded += progress.eroded;
+                most_held = std::max(most_held, progress.held);
+                if (progress.held == 0) {
+                    break;
+                }
+            }
+            // Nothing moves, nothing wears, nothing is written, and the flow neither spreads
+            // along the sea nor stays awake.
+            CHECK(moved == 0);
+            CHECK(eroded == 0);
+            CHECK(store.size() == 0);
+            CHECK(most_held <= 7);
+            CHECK(steps == Simulation::rest);
+        }
+    }
 }
 
 TEST_CASE("the world as generated is left as it is", "[flow][simulation]") {
