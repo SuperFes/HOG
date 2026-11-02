@@ -240,7 +240,8 @@ Result<> Sky::record_tables(VkCommandBuffer commands, VkExtent2D extent, std::ui
                     static_cast<float>(view.carried.sediment),
                     static_cast<float>(view.carried.plankton),
                     static_cast<float>(view.carried.flour)},
-        .weather_age = {static_cast<float>(view.weather.age), 0.0F, 0.0F, 0.0F}};
+        .weather_age = {static_cast<float>(view.weather.age_before),
+                        static_cast<float>(view.weather.age), 0.0F, 0.0F}};
     const Buffer& buffer = lighting_.at(frame);
     std::memcpy(buffer.mapped().data(), &lighting, sizeof(lighting));
     if (auto flushed = buffer.flush(); !flushed) {

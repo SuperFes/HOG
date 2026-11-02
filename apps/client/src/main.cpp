@@ -702,6 +702,7 @@ void report(Connection& connection, std::optional<client::Player>& player,
     if (const auto weather = connection.take_weather()) {
         forecast.receive(*weather, now);
     }
+    forecast.update(now);
     for (const client::ChatLine& line : connection.take_chat()) {
         chat.log.add(hog::chat::shown_name(line.from, filter),
                      hog::chat::shown_chat(line.text, filter), now);

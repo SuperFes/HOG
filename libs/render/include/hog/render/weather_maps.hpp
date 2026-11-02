@@ -34,8 +34,9 @@ struct WeatherBindings {
     double lowest_base = 0.0;
     double highest_base = 0.0;
     double highest_top = 0.0;
-    // Seconds since the maps were taken: each place's cloud is read where its drift brought it
-    // from.
+    // Seconds since the maps faded from and to were taken: each place's cloud is read where its
+    // drift brought it from.
+    double age_before = 0.0;
     double age = 0.0;
 };
 
@@ -67,7 +68,8 @@ public:
                     std::span<const std::byte> drift_after);
     [[nodiscard]] bool ready() const noexcept;
 
-    [[nodiscard]] WeatherBindings bindings(double faded, double age = 0.0) const noexcept;
+    [[nodiscard]] WeatherBindings bindings(double faded, double age = 0.0,
+                                           double age_before = 0.0) const noexcept;
 
 private:
     WeatherMaps() = default;

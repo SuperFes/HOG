@@ -144,14 +144,17 @@ Cell cell_at(float3 direction) {
     // Where the cloud over it now lay when the maps were taken, by the drift here, so wherever
     // it's seen from it's the same cloud, at the heights it has. The cloud blows on with the wind;
     // the air's damp, and so its fog, keeps to the air's slower pace.
-    const float3 drift = lerp(drift_before.SampleLevel(direction, 0.0).xyz,
-                              drift_after.SampleLevel(direction, 0.0).xyz, push.radii.z);
-    const float3 from =
-        normalize((direction * lighting.weather.x) - (drift * lighting.weather_age.x));
-    const float4 weather = lerp(weather_before.SampleLevel(from, 0.0),
-                                weather_after.SampleLevel(from, 0.0), push.radii.z);
-    const SkyCell blown = sky_cell(lerp(sky_before.SampleLevel(from, 0.0),
-                                        sky_after.SampleLevel(from, 0.0), push.radii.z));
+    // Each weather drifts on from when it came, so a new one's coming moves nothing.
+    const float3 from_before = normalize((direction * lighting.weather.x) -
+                                         (drift_before.SampleLevel(direction, 0.0).xyz *
+                                          lighting.weather_age.x));
+    const float3 from_after = normalize((direction * lighting.weather.x) -
+                                        (drift_after.SampleLevel(direction, 0.0).xyz *
+                                         lighting.weather_age.y));
+    const float4 weather = lerp(weather_before.SampleLevel(from_before, 0.0),
+                                weather_after.SampleLevel(from_after, 0.0), push.radii.z);
+    const SkyCell blown = sky_cell(lerp(sky_before.SampleLevel(from_before, 0.0),
+                                        sky_after.SampleLevel(from_after, 0.0), push.radii.z));
     const SkyCell sky = sky_cell(lerp(sky_before.SampleLevel(direction, 0.0),
                                       sky_after.SampleLevel(direction, 0.0), push.radii.z));
     Cell cell;

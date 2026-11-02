@@ -51,9 +51,12 @@ public:
     // On a planet whose sea level lies `radius` metres from its centre.
     explicit Forecast(double radius) noexcept : radius_(radius) {}
 
-    // Fades from what's shown at `now`, where it's drifted to, to `weather` over its fade. The
-    // first weather, or weather at another level from what's shown, is shown at once.
+    // Takes `weather` to fade to once the fade under way is done, so what's shown never jumps: at
+    // most one waits, the newest. Each weather's cloud drifts on from when it came, wherever it's
+    // shown. The first weather, or weather at another level from what's shown, is shown at once.
     void receive(const protocol::Weather& weather, MonotonicClock::time_point now);
+    // Starts the fade to the weather waiting when the one under way is done; called as time goes.
+    void update(MonotonicClock::time_point now);
 
     [[nodiscard]] bool known() const noexcept { return grid_.has_value(); }
     // How far what's shown at `now` has faded from before() to after(), from 0 to 1.
@@ -63,8 +66,10 @@ public:
     // Metres the cloud shown at a unit direction at `now` has drifted along the ground since the
     // weather came, in the planet's frame.
     [[nodiscard]] DVec3 drifted(DVec3 direction, MonotonicClock::time_point now) const;
-    // Seconds at `now` since the weather came.
+    // Seconds at `now` since the weather faded to came, and since the weather faded from did. Each
+    // drifts on from its own coming, so a new weather's coming moves nothing shown.
     [[nodiscard]] double age(MonotonicClock::time_point now) const noexcept;
+    [[nodiscard]] double age_before(MonotonicClock::time_point now) const noexcept;
     // The sea at a unit direction as shown at `now`, in the planet's frame: the wave systems of
     // the cells around it, each as much as that cell counts there, so the waves change smoothly
     // from cell to cell. A calm sea while none is known.
@@ -103,7 +108,20 @@ private:
     std::vector<SkyTexel> sky_after_;
     std::vector<DriftTexel> drift_before_;
     std::vector<DriftTexel> drift_after_;
-    MonotonicClock::time_point since_{};
+    // Weather that came while a fade was under way, to be faded to next.
+    struct Waiting {
+        std::vector<protocol::CellWeather> cells;
+        MonotonicClock::time_point came{};
+        MonotonicClock::duration fade{};
+    };
+    // Builds the cube maps of the weathers faded from and to.
+    void take_maps();
+
+    std::optional<Waiting> waiting_;
+    MonotonicClock::time_point since_{};      // when the weather faded to came
+    MonotonicClock::time_point from_since_{}; // when the weather faded from did
+    MonotonicClock::time_point began_{};      // when the fade began
+    MonotonicClock::time_point last_came_{};  // when weather last came
     MonotonicClock::duration fade_{};
     std::uint64_t received_ = 0;
 };
