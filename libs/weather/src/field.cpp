@@ -19,6 +19,9 @@ constexpr double moist_share = 0.65;
 // Relative humidity of the air a column starts with: over the sea it's fed, over land it isn't.
 constexpr double sea_humidity = 0.8;
 constexpr double land_humidity = 0.5;
+// Metres over which the water vapour a column holds thins by e: it comes from the surface and is
+// mixed upward only so far, so it thins faster than the air does.
+constexpr double vapour_scale_height = 2'000.0;
 
 constexpr double stefan_boltzmann = 5.670'374e-8; // W/m²/K⁴
 // Heat a square metre of surface holds per kelvin: the sea's mixed layer, about 50 m of water, and
@@ -80,14 +83,16 @@ void set_air(Field& field, const globe::Planet& planet, std::size_t column) {
     const Grid& grid = field.grid;
     const auto surface = static_cast<double>(field.surface[column]);
     const double humidity = field.over_sea[column] != 0 ? sea_humidity : land_humidity;
+    const double held_below = saturation_ratio(planet.volatiles, surface, planet.pressure);
     for (int layer = 0; layer < grid.layers; ++layer) {
         const double height = grid.radius_of(layer) - planet.radius;
         const double temperature = air_temperature(planet, surface, height);
         const double pressure = pressure_at(planet, surface, height);
         Air& air = field.at(column, layer);
         air.temperature = static_cast<float>(temperature);
-        air.vapour = static_cast<float>(humidity *
-                                        saturation_ratio(planet.volatiles, temperature, pressure));
+        air.vapour = static_cast<float>(
+            std::min(humidity * saturation_ratio(planet.volatiles, temperature, pressure),
+                     humidity * held_below * std::exp(-height / vapour_scale_height)));
     }
 }
 
@@ -127,11 +132,24 @@ Field start_field(const globe::Generator& generator, int level, int layers) {
     return field;
 }
 
+double surface_heat(const Field& field, std::size_t column) {
+    return field.over_sea[column] != 0 ? sea_heat : land_heat;
+}
+
 void warm_surface(Field& field, const globe::Planet& planet, DVec3 sun, double seconds) {
-    // Averaged over the sphere the sun lights a quarter of the area facing it, so what the
-    // planet's mean temperature radiates is a quarter of what the sun brings.
-    const double mean = globe::mean_temperature(planet);
-    const double absorbed = 4.0 * stefan_boltzmann * mean * mean * mean * mean;
+    // Averaged over the sphere the sun lights a quarter of the area facing it, so what the climate
+    // radiates, taken over the sphere, is a quarter of what the sun brings: the sun is as strong
+    // as keeps the planet in the balance its climate says, greenhouse and all.
+    double radiated = 0.0;
+    double area = 0.0;
+    for (std::size_t column = 0; column < field.grid.columns(); ++column) {
+        const DVec3 up = globe::center(globe::cell_at_index(field.grid.level, column));
+        const double weight = globe::solid_angle(globe::cell_at_index(field.grid.level, column));
+        const double climate = globe::temperature_at(planet, latitude_of(up));
+        radiated += weight * stefan_boltzmann * std::pow(climate, 4.0);
+        area += weight;
+    }
+    const double absorbed = 4.0 * radiated / area;
     for (std::size_t column = 0; column < field.grid.columns(); ++column) {
         const DVec3 up = globe::center(globe::cell_at_index(field.grid.level, column));
         const double climate = globe::temperature_at(planet, latitude_of(up));

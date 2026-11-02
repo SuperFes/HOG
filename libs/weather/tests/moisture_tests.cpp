@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 using Catch::Approx;
 using hog::globe::Planet;
@@ -318,4 +319,58 @@ TEST_CASE("a heated, moist column makes a storm that rains where a dry one barel
     const double wet = rained(true);
     CHECK(wet > 0.0);
     CHECK(wet > 3.0 * rained(false));
+}
+
+TEST_CASE("the sea gives up the heat of the water it evaporates", "[weather][moisture]") {
+    Planet planet = hog::globe::preset("earth").value_or(Planet{});
+    planet.radius = 20'000.0;
+    const hog::globe::Generator generator{planet};
+    Field field = start_field(generator, 3, 6);
+    for (auto& air : field.air) {
+        air.vapour = 0.0F;
+    }
+    const std::vector<float> before = field.surface;
+    evaporate(field, planet, 6.0 * 3'600.0);
+    int cooled = 0;
+    for (std::size_t column = 0; column < field.grid.columns(); ++column) {
+        CHECK(field.surface[column] <= before[column]);
+        cooled += field.surface[column] < before[column] ? 1 : 0;
+    }
+    CHECK(cooled > 0);
+}
+
+TEST_CASE("heat the air takes from the ground, the ground loses", "[weather][moisture]") {
+    Planet planet = hog::globe::preset("earth").value_or(Planet{});
+    planet.radius = 20'000.0;
+    const hog::globe::Generator generator{planet};
+    Field field = start_field(generator, 3, 6);
+    // Air a good deal colder than the ground under it.
+    for (auto& air : field.air) {
+        air.temperature -= 15.0F;
+    }
+    const Field before = field;
+    exchange_heat(field, planet, 600.0);
+    double taken = 0.0;
+    double lost = 0.0;
+    for (std::size_t column = 0; column < field.grid.columns(); ++column) {
+        int layer = 0;
+        while (layer < field.grid.layers && field.solid(column, layer)) {
+            ++layer;
+        }
+        if (layer == field.grid.layers) {
+            continue;
+        }
+        const double height = field.grid.radius_of(layer) - planet.radius;
+        const double mass =
+            air_density(static_cast<double>(field.at(column, layer).temperature),
+                        pressure_at(planet, static_cast<double>(field.surface[column]), height)) *
+            field.grid.thickness;
+        taken += mass * air_heat_capacity() *
+                 static_cast<double>(field.at(column, layer).temperature -
+                                     before.at(column, layer).temperature);
+        lost += surface_heat(field, column) *
+                static_cast<double>(before.surface[column] - field.surface[column]);
+    }
+    CHECK(taken > 0.0);
+    CHECK(lost == Approx(taken).epsilon(1e-2));
 }

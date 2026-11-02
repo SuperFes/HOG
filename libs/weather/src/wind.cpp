@@ -97,18 +97,75 @@ void adjoint(const Field& field, const Stencil& stencil, const std::vector<DVec3
     }
 }
 
-std::vector<DVec3> winds_of(const Field& field) {
+// Kilograms a cubic metre of each cell's air weighs in the reference state its column holds, which
+// only depends on height: the flow is balanced against that, and what it carries is counted by it,
+// so warming a cell never makes it a heavier or lighter thing to conserve.
+std::vector<double> densities(const Field& field, const globe::Planet& planet) {
+    std::vector<double> found(field.air.size(), 1.0);
+    const auto layers = static_cast<std::size_t>(field.grid.layers);
+    for (std::size_t cell = 0; cell < found.size(); ++cell) {
+        const std::size_t column = cell / layers;
+        const double height = field.grid.radius_of(static_cast<int>(cell % layers)) - planet.radius;
+        const auto surface = static_cast<double>(field.surface[column]);
+        found[cell] = air_density(air_temperature(planet, surface, height),
+                                  pressure_at(planet, surface, height));
+    }
+    return found;
+}
+
+// Kilograms of dry air each cell holds, which water is counted per kilogram of.
+std::vector<double> masses(const Field& field, const globe::Planet& planet) {
+    std::vector<double> found = densities(field, planet);
+    const auto layers = static_cast<std::size_t>(field.grid.layers);
+    std::vector<double> angles(field.grid.columns());
+    for (std::size_t column = 0; column < angles.size(); ++column) {
+        angles[column] = globe::solid_angle(globe::cell_at_index(field.grid.level, column));
+    }
+    for (std::size_t cell = 0; cell < found.size(); ++cell) {
+        const double radius = field.grid.radius_of(static_cast<int>(cell % layers));
+        found[cell] *= field.blocked[cell] != 0
+                           ? 0.0
+                           : angles[cell / layers] * radius * radius * field.grid.thickness;
+    }
+    return found;
+}
+
+// Scales what the carrying gave `next` of one species so its total is what `field` held: tracing
+// back along the wind gives and takes a little water at every step, which would sum to storms
+// out of nothing.
+template <typename Member>
+void keep_total(const Field& field, std::vector<Air>& next, const std::vector<double>& mass,
+                Member member) {
+    double before = 0.0;
+    double after = 0.0;
+    for (std::size_t cell = 0; cell < mass.size(); ++cell) {
+        before += static_cast<double>(field.air[cell].*member) * mass[cell];
+        after += static_cast<double>(next[cell].*member) * mass[cell];
+    }
+    if (after <= 0.0) {
+        return;
+    }
+    const auto scale = static_cast<float>(before / after);
+    for (Air& air : next) {
+        air.*member *= scale;
+    }
+}
+
+// The mass flux of each open cell's air: its wind times its density.
+std::vector<DVec3> flux_of(const Field& field, const std::vector<double>& density) {
     std::vector<DVec3> found(field.air.size());
     for (std::size_t cell = 0; cell < found.size(); ++cell) {
-        found[cell] = field.blocked[cell] != 0 ? DVec3{0.0} : DVec3{field.air[cell].wind};
+        found[cell] =
+            field.blocked[cell] != 0 ? DVec3{0.0} : DVec3{field.air[cell].wind} * density[cell];
     }
     return found;
 }
 
 // Per cell, the divergence of the wind.
-std::vector<double> divergence_of(const Field& field, const Stencil& stencil) {
+std::vector<double> divergence_of(const Field& field, const Stencil& stencil,
+                                  const globe::Planet& planet) {
     std::vector<double> found(field.air.size());
-    adjoint(field, stencil, winds_of(field), found);
+    adjoint(field, stencil, flux_of(field, densities(field, planet)), found);
     for (double& value : found) {
         value = -value;
     }
@@ -275,8 +332,8 @@ void accelerate(Field& field, const Stencil& stencil, const globe::Planet& plane
     }
 }
 
-double divergence(const Field& field, const Stencil& stencil) {
-    const std::vector<double> found = divergence_of(field, stencil);
+double divergence(const Field& field, const Stencil& stencil, const globe::Planet& planet) {
+    const std::vector<double> found = divergence_of(field, stencil, planet);
     double total = 0.0;
     double count = 0.0;
     for (std::size_t cell = 0; cell < found.size(); ++cell) {
@@ -288,11 +345,13 @@ double divergence(const Field& field, const Stencil& stencil) {
     return count > 0.0 ? std::sqrt(total / count) : 0.0;
 }
 
-int project(Field& field, const Stencil& stencil, double tolerance, int iterations) {
+int project(Field& field, const Stencil& stencil, const globe::Planet& planet, double tolerance,
+            int iterations) {
     const std::size_t n = field.grid.size();
-    // Gᵀ G φ = Gᵀ u: the pressure whose slope is the wind's divergent part.
+    const std::vector<double> density = densities(field, planet);
+    // Gᵀ G φ = Gᵀ m: the pressure whose slope is the mass flux's divergent part.
     std::vector<double> residual(n);
-    adjoint(field, stencil, winds_of(field), residual);
+    adjoint(field, stencil, flux_of(field, density), residual);
 
     std::vector<double> inverse(n, 0.0);
     for (std::size_t cell = 0; cell < n; ++cell) {
@@ -345,7 +404,7 @@ int project(Field& field, const Stencil& stencil, double tolerance, int iteratio
     gradient(field, stencil, pressure, slope);
     for (std::size_t cell = 0; cell < n; ++cell) {
         if (field.blocked[cell] == 0) {
-            field.air[cell].wind -= Vec3{slope[cell]};
+            field.air[cell].wind -= Vec3{slope[cell] / density[cell]};
         }
     }
     return done;
@@ -382,14 +441,43 @@ void advect(Field& field, const Stencil& stencil, const globe::Planet& planet, d
                                             [&](std::size_t i) { return field.air[i].wind; });
         air.wind = carry(wind, from.up, stencil.up(cell / layers));
     }
+    const std::vector<double> mass = masses(field, planet);
+    keep_total(field, next, mass, &Air::vapour);
+    keep_total(field, next, mass, &Air::cloud);
+    keep_total(field, next, mass, &Air::rain);
+    // The same for the warmth the air carries: its potential temperature, which rising doesn't
+    // change.
+    double warmth_before = 0.0;
+    double warmth_after = 0.0;
+    double total = 0.0;
+    for (std::size_t cell = 0; cell < mass.size(); ++cell) {
+        if (field.blocked[cell] != 0) {
+            continue;
+        }
+        warmth_before += potential(field, planet, cell) * mass[cell];
+        const double height = field.grid.radius_of(static_cast<int>(cell % layers)) - planet.radius;
+        warmth_after +=
+            (static_cast<double>(next[cell].temperature) + (dry_lapse_rate(planet) * height)) *
+            mass[cell];
+        total += mass[cell];
+    }
+    if (total > 0.0) {
+        const auto shift = static_cast<float>((warmth_before - warmth_after) / total);
+        for (std::size_t cell = 0; cell < next.size(); ++cell) {
+            if (field.blocked[cell] == 0) {
+                next[cell].temperature += shift;
+            }
+        }
+    }
     field.air = std::move(next);
 }
 
 void step(Field& field, const Stencil& stencil, const globe::Planet& planet, double seconds) {
     accelerate(field, stencil, planet, seconds);
-    project(field, stencil);
+    project(field, stencil, planet);
     advect(field, stencil, planet, seconds);
     evaporate(field, planet, seconds);
+    exchange_heat(field, planet, seconds);
     condense(field, planet);
     precipitate(field, planet, seconds);
 }

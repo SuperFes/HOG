@@ -82,6 +82,10 @@ void condense(Field& field, const globe::Planet& planet) {
 }
 
 void evaporate(Field& field, const globe::Planet& planet, double seconds) {
+    const auto latent = globe::latent_heat(planet.volatiles);
+    if (!latent) {
+        return;
+    }
     for (std::size_t column = 0; column < field.grid.columns(); ++column) {
         int layer = 0;
         while (layer < field.grid.layers && field.solid(column, layer)) {
@@ -102,9 +106,41 @@ void evaporate(Field& field, const globe::Planet& planet, double seconds) {
                             field.grid.thickness;
         const auto vapour = static_cast<double>(air.vapour);
         if (held > vapour) {
-            air.vapour =
-                static_cast<float>(vapour + ((held - vapour) * (1.0 - std::exp(-rate * seconds))));
+            const double gained = (held - vapour) * (1.0 - std::exp(-rate * seconds));
+            air.vapour = static_cast<float>(vapour + gained);
+            // The water took its latent heat from the surface it left.
+            const double mass =
+                air_density(static_cast<double>(air.temperature), pressure) * field.grid.thickness;
+            field.surface[column] -=
+                static_cast<float>(gained * mass * *latent / surface_heat(field, column));
         }
+    }
+}
+
+void exchange_heat(Field& field, const globe::Planet& planet, double seconds) {
+    for (std::size_t column = 0; column < field.grid.columns(); ++column) {
+        int layer = 0;
+        while (layer < field.grid.layers && field.solid(column, layer)) {
+            ++layer;
+        }
+        if (layer == field.grid.layers) {
+            continue;
+        }
+        Air& air = field.at(column, layer);
+        const double height = field.grid.radius_of(layer) - planet.radius;
+        const auto surface = static_cast<double>(field.surface[column]);
+        const double target = air_temperature(planet, surface, height);
+        const double wind = std::max(least_wind, static_cast<double>(glm::length(air.wind)));
+        const double rate = transfer * wind / field.grid.thickness;
+        const double change =
+            (target - static_cast<double>(air.temperature)) * (1.0 - std::exp(-rate * seconds));
+        air.temperature = static_cast<float>(static_cast<double>(air.temperature) + change);
+        // Joules per square metre the air took in, which the surface lost.
+        const double pressure = pressure_at(planet, surface, height);
+        const double mass =
+            air_density(static_cast<double>(air.temperature), pressure) * field.grid.thickness;
+        field.surface[column] -=
+            static_cast<float>(change * mass * air_heat_capacity() / surface_heat(field, column));
     }
 }
 

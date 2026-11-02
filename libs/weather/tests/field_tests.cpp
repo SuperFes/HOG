@@ -81,7 +81,8 @@ TEST_CASE("warm air can hold much more water", "[weather][field]") {
     CHECK(hog::weather::saturation_ratio(Volatile::Water, 400.0, 101'325.0) == 0.0);
 }
 
-TEST_CASE("the start holds less water than saturates, more over the sea than land",
+TEST_CASE("the start holds less water than saturates, and none that the sea's humidity "
+          "doesn't allow",
           "[weather][field]") {
     const Field& field = earth_field();
     const Planet planet = earth();
@@ -101,13 +102,29 @@ TEST_CASE("the start holds less water than saturates, more over the sea than lan
             REQUIRE(air.cloud == 0.0F);
             REQUIRE(air.rain == 0.0F);
             const bool over_sea = field.over_sea[column] != 0;
-            REQUIRE(static_cast<double>(air.vapour) ==
-                    Approx((over_sea ? 0.8 : 0.5) * saturated).epsilon(1e-4));
+            // Never wetter than the column's humidity of what the air could hold there, and
+            // thinner than that aloft, where the sea's water hasn't been mixed up to.
+            REQUIRE(static_cast<double>(air.vapour) <=
+                    ((over_sea ? 0.8 : 0.5) * saturated) * (1.0 + 1e-4));
             (over_sea ? sea : land) = true;
         }
     }
     CHECK(sea);
     CHECK(land);
+}
+
+TEST_CASE("the start's water thins with height faster than the air does", "[weather][field]") {
+    const Field& field = earth_field();
+    for (std::size_t column = 0; column < field.grid.columns(); ++column) {
+        if (field.solid(column, 0) || field.at(column, 0).vapour <= 0.0F) {
+            continue;
+        }
+        const auto bottom = static_cast<double>(field.at(column, 0).vapour);
+        const auto top = static_cast<double>(field.at(column, layers - 1).vapour);
+        REQUIRE(top < bottom);
+        return;
+    }
+    FAIL("no column to look at");
 }
 
 TEST_CASE("the sea is a flat floor to the air and the land is where the ground is",

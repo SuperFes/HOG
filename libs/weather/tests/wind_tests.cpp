@@ -153,11 +153,11 @@ TEST_CASE("the pressure takes the divergence out of a wind", "[weather][wind]") 
             world.field.air[cell].wind = world.stencil.up(column) * 5.0F;
         }
     }
-    const double before = divergence(world.field, world.stencil);
+    const double before = divergence(world.field, world.stencil, world.planet);
     REQUIRE(before > 0.0);
-    const int iterations = project(world.field, world.stencil);
+    const int iterations = project(world.field, world.stencil, world.planet);
     CHECK(iterations > 0);
-    CHECK(divergence(world.field, world.stencil) < 0.01 * before);
+    CHECK(divergence(world.field, world.stencil, world.planet) < 0.01 * before);
 }
 
 TEST_CASE("the ground stops air crossing it", "[weather][wind]") {
@@ -169,7 +169,7 @@ TEST_CASE("the ground stops air crossing it", "[weather][wind]") {
     const std::size_t cell = world.field.grid.index(column, low);
     world.field.air[cell].wind = -world.stencil.up(column) * 10.0F;
     const float before = glm::dot(world.field.air[cell].wind, world.stencil.up(column));
-    project(world.field, world.stencil);
+    project(world.field, world.stencil, world.planet);
     CHECK(glm::dot(world.field.air[cell].wind, world.stencil.up(column)) > 0.5F * before);
     for (std::size_t other = 0; other < world.field.air.size(); ++other) {
         if (world.field.blocked[other] != 0) {
@@ -260,4 +260,72 @@ TEST_CASE("ground warmed by the sun draws air in and lifts it", "[weather][wind]
         }
     }
     CHECK(inflow > 0.0F);
+}
+
+TEST_CASE("carrying keeps the water and the warmth it carries, however unevenly spread",
+          "[weather][wind]") {
+    World world;
+    Field& field = world.field;
+    const auto layer_count = static_cast<std::size_t>(layers);
+    // Lumpy water and warmth, turned about the axis at a speed that moves it several cells.
+    for (std::size_t cell = 0; cell < field.air.size(); ++cell) {
+        if (field.blocked[cell] != 0) {
+            continue;
+        }
+        const std::size_t column = cell / layer_count;
+        const Vec3 up = world.stencil.up(column);
+        Air& air = field.air[cell];
+        air.wind = Vec3{-up.y, up.x, 0.0F} * 120.0F;
+        const auto lump = static_cast<float>((cell * 2654435761U) % 1000U) / 1000.0F;
+        air.vapour = 0.001F + (0.004F * lump);
+        air.cloud = lump > 0.8F ? 0.0005F : 0.0F;
+        air.rain = lump < 0.1F ? 0.0002F : 0.0F;
+        air.temperature += 6.0F * lump;
+    }
+    // What a cell weighs in the state the column is balanced against.
+    const auto weight = [&](std::size_t cell) {
+        const std::size_t column = cell / layer_count;
+        const int layer = static_cast<int>(cell % layer_count);
+        const double radius = field.grid.radius_of(layer);
+        const double height = radius - world.planet.radius;
+        const auto surface = static_cast<double>(field.surface[column]);
+        return air_density(air_temperature(world.planet, surface, height),
+                           pressure_at(world.planet, surface, height)) *
+               hog::globe::solid_angle(hog::globe::cell_at_index(level, column)) * radius * radius *
+               field.grid.thickness;
+    };
+    struct Totals {
+        double vapour = 0.0;
+        double cloud = 0.0;
+        double rain = 0.0;
+        double warmth = 0.0;
+    };
+    const auto total = [&] {
+        Totals sum;
+        for (std::size_t cell = 0; cell < field.air.size(); ++cell) {
+            if (field.blocked[cell] != 0) {
+                continue;
+            }
+            const double mass = weight(cell);
+            const Air& air = field.air[cell];
+            const double height =
+                field.grid.radius_of(static_cast<int>(cell % layer_count)) - world.planet.radius;
+            sum.vapour += static_cast<double>(air.vapour) * mass;
+            sum.cloud += static_cast<double>(air.cloud) * mass;
+            sum.rain += static_cast<double>(air.rain) * mass;
+            sum.warmth +=
+                (static_cast<double>(air.temperature) + (dry_lapse_rate(world.planet) * height)) *
+                mass;
+        }
+        return sum;
+    };
+    const Totals before = total();
+    for (int i = 0; i < 10; ++i) {
+        advect(field, world.stencil, world.planet, 120.0);
+    }
+    const Totals after = total();
+    CHECK(after.vapour == Approx(before.vapour).epsilon(1e-4));
+    CHECK(after.cloud == Approx(before.cloud).epsilon(1e-4));
+    CHECK(after.rain == Approx(before.rain).epsilon(1e-4));
+    CHECK(after.warmth == Approx(before.warmth).epsilon(1e-6));
 }

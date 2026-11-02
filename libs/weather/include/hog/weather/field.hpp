@@ -76,6 +76,10 @@ void set_air(Field& field, const globe::Planet& planet, std::size_t column);
 // more over the sea than the land. The weather is what it settles into.
 [[nodiscard]] Field start_field(const globe::Generator& generator, int level, int layers);
 
+// Joules a square metre of a column's surface holds per kelvin: the sea's mixed layer is deep, the
+// land's skin shallow.
+[[nodiscard]] double surface_heat(const Field& field, std::size_t column);
+
 // Heats and cools each column's surface over `seconds` with the sun towards the unit vector `sun`:
 // it absorbs the sunlight that reaches it and radiates as a black body, holding heat by what it
 // is, the sea deep and the land shallow. The sunlight is what keeps the planet's mean climate in

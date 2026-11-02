@@ -25,6 +25,11 @@ void condense(Field& field, const globe::Planet& planet);
 // land gives a share of that.
 void evaporate(Field& field, const globe::Planet& planet, double seconds);
 
+// The surface and the air against it trade heat as wind stirs them, as they trade vapour: the air
+// draws towards the temperature the surface gives it there, and the surface gives up or takes in
+// what that was worth.
+void exchange_heat(Field& field, const globe::Planet& planet, double seconds);
+
 // Cloud thick enough grows drops that fall: they take cloud with them, sink at their speed, and
 // evaporate into dry air, cooling it, until what's left reaches the ground, which records the
 // rate in `precipitation`.
