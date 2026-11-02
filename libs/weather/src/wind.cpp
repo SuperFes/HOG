@@ -29,6 +29,14 @@ double potential(const Field& field, const globe::Planet& planet, std::size_t ce
            (dry_lapse_rate(planet) * (field.grid.radius_of(layer) - planet.radius));
 }
 
+// How much lighter than dry air at its temperature the air is: vapour is lighter, drops and cloud
+// weigh it down.
+double lightness(const Air& air) {
+    constexpr double vapour_excess = 0.608;
+    return (vapour_excess * static_cast<double>(air.vapour)) - static_cast<double>(air.cloud) -
+           static_cast<double>(air.rain);
+}
+
 bool open(const Field& field, const Link& link) {
     return link.cell != Link::none && field.blocked[link.cell] == 0;
 }
@@ -213,17 +221,20 @@ void accelerate(Field& field, const Stencil& stencil, const globe::Planet& plane
     const auto layers = static_cast<std::size_t>(grid.layers);
     std::vector<double> mean(layers, 0.0);
     std::vector<double> warmth(layers, 0.0);
+    std::vector<double> light(layers, 0.0);
     std::vector<double> count(layers, 0.0);
     for (std::size_t cell = 0; cell < grid.size(); ++cell) {
         if (field.blocked[cell] == 0) {
             mean[cell % layers] += potential(field, planet, cell);
             warmth[cell % layers] += static_cast<double>(field.air[cell].temperature);
+            light[cell % layers] += lightness(field.air[cell]);
             count[cell % layers] += 1.0;
         }
     }
     for (std::size_t layer = 0; layer < layers; ++layer) {
         mean[layer] = count[layer] > 0.0 ? mean[layer] / count[layer] : 1.0;
         warmth[layer] = count[layer] > 0.0 ? warmth[layer] / count[layer] : 1.0;
+        light[layer] = count[layer] > 0.0 ? light[layer] / count[layer] : 0.0;
     }
 
     const double spin = 2.0 * std::numbers::pi / planet.day;
@@ -239,7 +250,9 @@ void accelerate(Field& field, const Stencil& stencil, const globe::Planet& plane
 
         const double reference = mean[cell % layers];
         const double buoyancy =
-            planet.gravity * (potential(field, planet, cell) - reference) / warmth[cell % layers];
+            planet.gravity *
+            (((potential(field, planet, cell) - reference) / warmth[cell % layers]) +
+             (lightness(air) - light[cell % layers]));
         air.wind += stencil.up(column) * static_cast<float>(buoyancy * seconds);
         // The planet turns under moving air: the wind turns about its axis at twice its spin.
         air.wind = rotate_about_z(air.wind, -2.0 * spin * seconds);
@@ -378,6 +391,7 @@ void step(Field& field, const Stencil& stencil, const globe::Planet& planet, dou
     advect(field, stencil, planet, seconds);
     evaporate(field, planet, seconds);
     condense(field, planet);
+    precipitate(field, planet, seconds);
 }
 
 } // namespace hog::weather

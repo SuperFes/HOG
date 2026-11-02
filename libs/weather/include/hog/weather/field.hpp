@@ -27,6 +27,7 @@ struct Field {
     std::vector<std::uint8_t> over_sea; // per column: whether the sea lies under the air
     std::vector<std::uint8_t> blocked;  // per cell: whether the ground fills it
     std::vector<float> surface; // per column: its temperature reduced to the reference level
+    std::vector<float> precipitation; // per column: water reaching the ground, mm/h
 
     [[nodiscard]] Air& at(std::size_t column, int layer) { return air[grid.index(column, layer)]; }
     [[nodiscard]] const Air& at(std::size_t column, int layer) const {

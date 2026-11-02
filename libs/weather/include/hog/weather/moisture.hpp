@@ -25,4 +25,9 @@ void condense(Field& field, const globe::Planet& planet);
 // land gives a share of that.
 void evaporate(Field& field, const globe::Planet& planet, double seconds);
 
+// Cloud thick enough grows drops that fall: they take cloud with them, sink at their speed, and
+// evaporate into dry air, cooling it, until what's left reaches the ground, which records the
+// rate in `precipitation`.
+void precipitate(Field& field, const globe::Planet& planet, double seconds);
+
 } // namespace hog::weather

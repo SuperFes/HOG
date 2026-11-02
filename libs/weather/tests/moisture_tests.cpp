@@ -190,3 +190,132 @@ TEST_CASE("moist air rises further than dry, as condensing warms it: a storm",
     CHECK(dry > 0.0F);
     CHECK(wet > 1.2F * dry);
 }
+
+namespace {
+
+struct Small {
+    Planet planet = [] {
+        Planet p = hog::globe::preset("earth").value_or(Planet{});
+        p.radius = 20'000.0;
+        return p;
+    }();
+    hog::globe::Generator generator{planet};
+    Field field = start_field(generator, 3, 8);
+    Stencil stencil{field.grid};
+
+    // A sea column away from the poles.
+    [[nodiscard]] std::size_t sea_column() const {
+        std::size_t column = 0;
+        while (field.over_sea[column] == 0 || std::abs(stencil.up(column).z) > 0.4F) {
+            ++column;
+        }
+        return column;
+    }
+    [[nodiscard]] double total_water(std::size_t column) const {
+        double total = 0.0;
+        for (int layer = 0; layer < field.grid.layers; ++layer) {
+            const Air& air = field.at(column, layer);
+            total += static_cast<double>(air.cloud) + static_cast<double>(air.rain);
+        }
+        return total;
+    }
+};
+
+} // namespace
+
+TEST_CASE("cloud thicker than a limit grows drops, and thin cloud doesn't", "[weather][rain]") {
+    Small world;
+    const std::size_t column = world.sea_column();
+    Air& air = world.field.at(column, 3);
+    air.cloud = 0.0005F;
+    precipitate(world.field, world.planet, 600.0);
+    CHECK(world.field.at(column, 3).rain == 0.0F);
+
+    world.field.at(column, 3).cloud = 0.004F;
+    precipitate(world.field, world.planet, 600.0);
+    const Air& thick = world.field.at(column, 3);
+    CHECK(thick.rain + world.field.at(column, 2).rain > 0.0F);
+    CHECK(thick.cloud < 0.004F);
+}
+
+TEST_CASE("rain falls to the ground and is recorded, and no water is lost on the way",
+          "[weather][rain]") {
+    Small world;
+    const std::size_t column = world.sea_column();
+    // Saturated air, so none evaporates on the way.
+    for (int layer = 0; layer < world.field.grid.layers; ++layer) {
+        Air& air = world.field.at(column, layer);
+        air.vapour = static_cast<float>(saturation_ratio(
+            world.planet.volatiles, static_cast<double>(air.temperature),
+            pressure_at(world.planet, static_cast<double>(world.field.surface[column]),
+                        world.field.grid.radius_of(layer) - world.planet.radius)));
+    }
+    world.field.at(column, 6).rain = 0.002F;
+    double reached = 0.0;
+    for (int i = 0; i < 60; ++i) {
+        precipitate(world.field, world.planet, 30.0);
+        reached += static_cast<double>(world.field.precipitation[column]) * 30.0 / 3'600.0;
+    }
+    CHECK(reached > 0.0);
+    CHECK(world.total_water(column) < 0.002);
+}
+
+TEST_CASE("rain in dry air evaporates before it lands, cooling the air", "[weather][rain]") {
+    Small world;
+    const std::size_t column = world.sea_column();
+    for (int layer = 0; layer < world.field.grid.layers; ++layer) {
+        world.field.at(column, layer).vapour = 0.0F;
+    }
+    const float before = world.field.at(column, 3).temperature;
+    world.field.at(column, 6).rain = 0.0005F;
+    double reached = 0.0;
+    for (int i = 0; i < 60; ++i) {
+        precipitate(world.field, world.planet, 30.0);
+        reached += static_cast<double>(world.field.precipitation[column]) * 30.0 / 3'600.0;
+    }
+    // Of the 0.0005 kg/kg over a cell, about 0.3 mm of water.
+    CHECK(reached < 0.06);
+    CHECK(world.field.at(column, 3).temperature < before);
+}
+
+TEST_CASE("air heavy with rain sinks", "[weather][rain]") {
+    Small world;
+    const std::size_t column = world.sea_column();
+    Field clear = world.field;
+    world.field.at(column, 4).rain = 0.005F;
+    accelerate(world.field, world.stencil, world.planet, 60.0);
+    accelerate(clear, world.stencil, world.planet, 60.0);
+    const auto rise = [&](const Field& field) {
+        return glm::dot(field.at(column, 4).wind, world.stencil.up(column));
+    };
+    CHECK(rise(world.field) < rise(clear) - 1.0F);
+}
+
+TEST_CASE("a heated, moist column makes a storm that rains where a dry one barely does",
+          "[weather][rain]") {
+    Small world;
+    const std::size_t column = world.sea_column();
+    const Field start = world.field;
+    const auto rained = [&](bool moist) {
+        Field field = start;
+        for (int layer = 0; layer < 3; ++layer) {
+            Air& air = field.at(column, layer);
+            air.temperature += 6.0F;
+            air.vapour =
+                moist ? static_cast<float>(saturation_ratio(
+                            world.planet.volatiles, static_cast<double>(air.temperature),
+                            pressure_at(world.planet, static_cast<double>(field.surface[column]),
+                                        field.grid.radius_of(layer) - world.planet.radius)))
+                      : 0.0F;
+        }
+        double total = 0.0;
+        for (int i = 0; i < 90; ++i) {
+            step(field, world.stencil, world.planet, 60.0);
+            total += static_cast<double>(field.precipitation[column]) * 60.0 / 3'600.0;
+        }
+        return total;
+    };
+    const double wet = rained(true);
+    CHECK(wet > 0.0);
+    CHECK(wet > 3.0 * rained(false));
+}

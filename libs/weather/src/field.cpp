@@ -103,6 +103,7 @@ Field start_field(const globe::Generator& generator, int level, int layers) {
     field.over_sea.resize(grid.columns());
     field.blocked.resize(grid.size());
     field.surface.resize(grid.columns());
+    field.precipitation.assign(grid.columns(), 0.0F);
 
     // About a cell across, for the ground to be smoothed to.
     const double width = std::numbers::pi * 0.5 * planet.radius / static_cast<double>(1 << level);
