@@ -133,6 +133,12 @@ struct Ground {
 
 // Caves never reach a point more than this many metres from open rock.
 inline constexpr double cave_reach = 50.0;
+// How far under the ground the deepest cave on this planet can open: the stress round a passage
+// overcomes any rock's strength below it, more slowly where gravity is weaker.
+[[nodiscard]] double cave_floor(const Context& context) noexcept;
+
+// Where caves gather, from 0 where none open to 1.
+[[nodiscard]] double cave_district(const Context& context, DVec3 direction) noexcept;
 
 // Metres from a point to the nearest cave's open space: negative inside it, `cave_reach` at most.
 // Each cave keeps to the rock it was dissolved or flowed in, a bed or the basement, as the shape
@@ -140,6 +146,11 @@ inline constexpr double cave_reach = 50.0;
 // how much rock lies between the point and open air.
 [[nodiscard]] double cave_distance(const Context& context, const Layering& layers, DVec3 direction,
                                    double radius, double ground, double cover, double lod) noexcept;
+// As cave_distance, but never more than the true distance: the noise's steepest slope stands in
+// for its slope at the point, so no cave lies nearer than this in any direction, and a cast
+// can step that far.
+[[nodiscard]] double cave_bound(const Context& context, const Layering& layers, DVec3 direction,
+                                double radius, double ground, double cover, double lod) noexcept;
 
 // What's `depth` metres under the ground at `radius`.
 [[nodiscard]] Material material_at(const Context& context, const Layering& layers, double depth,

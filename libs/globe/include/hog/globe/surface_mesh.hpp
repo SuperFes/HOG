@@ -7,6 +7,7 @@
 #include <hog/globe/world.hpp>
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace hog::globe {
@@ -16,10 +17,8 @@ namespace hog::globe {
 inline constexpr int chunk_levels = 5;
 inline constexpr int chunk_side = 1 << chunk_levels;
 
-// Under the lowest ground in a chunk, caves are drawn this far down, and further while they run
-// on open, as far as cave_depth.
+// The ground is drawn from this far under the lowest in a chunk.
 inline constexpr double surface_depth = 16.0; // metres
-inline constexpr double cave_depth = 64.0;    // metres
 
 struct SurfaceVertex {
     Vec3 position{0.0F}; // metres from the mesh's origin
@@ -56,14 +55,31 @@ struct SurfaceMesh {
 // passes through, where the planes tangent to it at its crossings of the cube's edges meet, and a
 // quad across each edge it crosses. Each edge is the chunk's that holds its lower end, or, across
 // the cube's edges, the lower face's, so chunks of a detail meet without gaps or overlaps. The
-// surface is sought from surface_depth under the chunk's lowest ground to over its highest and
-// around the sea's level, and through changes held next to those; caves are followed further
-// down. Coarser chunks are generated as much coarser.
+// surface is sought from surface_depth under the chunk's lowest ground to over its highest,
+// around the sea's level, round every cave under the chunk, found by casting down its columns,
+// and through changes held next to those. Coarser chunks are generated as much coarser.
 // Where the chunks beside it are drawn at other details, its surfaces meet theirs: the boxes of
 // voxels either side meet, and the vertex of a coarser box takes in where the surface crosses
 // the finer boxes' edges on its faces.
+// What lies under the ground can be seen only from inside it: with a `sight`, caves are cast for
+// only between its radii, so far more of the chunk isn't generated than is. Without, all are.
+struct Sight {
+    double lowest = 0.0;
+    double highest = 0.0;
+};
+// A sight is kept while the eye stays within a band of radii this tall, round which it reaches
+// `sight_reach` over and under, so a chunk is meshed again only as the eye leaves its band.
+inline constexpr double sight_step = 32.0;  // metres
+inline constexpr double sight_reach = 64.0; // metres
+// The band of radii a point lies in, numbered from 1; 0 is no sight at all.
+[[nodiscard]] std::uint64_t sight_band(double radius) noexcept;
+[[nodiscard]] Sight sight_of(std::uint64_t band) noexcept;
+// Whether a sight made for `band` still reaches as far as it should round a point at `radius`.
+[[nodiscard]] bool sight_holds(std::uint64_t band, double radius) noexcept;
+
 void add_chunk(SurfaceMesh& mesh, const World& world, Cell chunk);
-void add_chunk(SurfaceMesh& mesh, const World& world, Cell chunk, const Drawn& drawn);
+void add_chunk(SurfaceMesh& mesh, const World& world, Cell chunk, const Drawn& drawn,
+               std::optional<Sight> sight = std::nullopt);
 
 // Whether the boxes of `chunk` and those drawn beside it tile without overlapping, as add_chunk
 // needs them to; without generating anything, so a whole set of chunks is quick to check.

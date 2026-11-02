@@ -3,15 +3,20 @@
 #include <hog/core/hash.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/generator.hpp>
+#include <hog/globe/noise.hpp>
 #include <hog/globe/planet.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <print>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 using hog::DVec3;
@@ -53,7 +58,79 @@ double open_share(const Planet& planet, Material rock, double depth) {
     return static_cast<double>(open) / count;
 }
 
+double floor_of(const Planet& planet) {
+    const hog::globe::Derived derived = hog::globe::derive(planet);
+    const Generator::Shape shape;
+    return hog::globe::terms::cave_floor({.planet = &planet, .derived = &derived, .shape = &shape});
+}
+
 } // namespace
+
+TEST_CASE("a column's caves are found by casting down it, wherever its samples are open",
+          "[globe][caves]") {
+    const Generator generator{named("earth")};
+    const double lod = hog::globe::voxel_lod(generator);
+    constexpr double reach = 300.0;
+    int with = 0;
+    for (std::uint64_t k = 0; k < 600 && with < 12; ++k) {
+        const Generator::Column column = generator.column(direction(k), lod);
+        const double lowest = column.ground() - reach;
+        const std::vector<std::pair<double, double>> caves =
+            column.caves(lowest, column.ground(), 0.0);
+        INFO("column " << k << " with " << caves.size() << " caves");
+        for (int step = 1; static_cast<double>(step) * 0.5 < reach; ++step) {
+            const double radius = column.ground() - (static_cast<double>(step) * 0.5);
+            if (column.sample(radius).distance <= 0.0) {
+                continue;
+            }
+            // Open under the ground: in a cave found, which holds it.
+            bool found = false;
+            double nearest = 1e9;
+            for (const auto& [bottom, top] : caves) {
+                found = found || (radius >= bottom && radius <= top);
+                nearest = std::min({nearest, std::abs(radius - bottom), std::abs(radius - top)});
+            }
+            INFO(column.ground() - radius << " m down, open by " << column.sample(radius).distance
+                                          << ", nearest cave edge " << nearest << " m off");
+            CHECK(found);
+        }
+        for (std::size_t c = 0; c < caves.size(); ++c) {
+            CHECK(caves[c].first < caves[c].second);
+            if (c > 0) {
+                CHECK(caves[c - 1].second < caves[c].first);
+            }
+        }
+        with += caves.empty() ? 0 : 1;
+    }
+    CHECK(with >= 6);
+}
+
+TEST_CASE("the cost of the caves' distance, and how steep the noise gets",
+          "[.bench][globe][caves]") {
+    const Planet earth = named("earth");
+    const hog::globe::Derived derived = hog::globe::derive(earth);
+    const Generator::Shape shape;
+    const hog::globe::terms::Context context{
+        .planet = &earth, .derived = &derived, .shape = &shape};
+    constexpr int count = 50'000;
+    double sum = 0.0;
+    const auto started = std::chrono::steady_clock::now();
+    for (std::uint64_t k = 0; k < count; ++k) {
+        const double below = 10.0 + static_cast<double>(k % 500);
+        sum += hog::globe::terms::cave_distance(context, all_of(Material::Limestone), direction(k),
+                                                earth.radius - below, earth.radius, below, 0.5);
+    }
+    const auto took = std::chrono::steady_clock::now() - started;
+    std::println("cave_distance: {} us a call ({})",
+                 std::chrono::duration<double, std::micro>(took).count() / count, sum);
+    double steepest = 0.0;
+    for (std::uint64_t k = 0; k < 2'000'000; ++k) {
+        const DVec3 point = direction(k) * (1'000.0 + (static_cast<double>(k % 977) / 7.0));
+        steepest =
+            std::max(steepest, glm::length(hog::globe::gradient_noise(point, k % 13).gradient));
+    }
+    std::println("gradient noise steepest: {} a unit", steepest);
+}
 
 TEST_CASE("caves open in limestone far more than in other rock", "[globe][caves]") {
     const Planet earth = named("earth");
@@ -152,4 +229,38 @@ TEST_CASE("chambers shrink away under thin rock, their roofs fallen in", "[globe
     UNSCOPED_INFO("open under 500 m: " << deep << ", under 4 m: " << shallow);
     CHECK(deep > 0);
     CHECK(shallow < deep / 10);
+}
+
+TEST_CASE("passages close where the stress round them overcomes the rock, deeper in weaker gravity",
+          "[globe][caves]") {
+    const double earth = floor_of(named("earth"));
+    const double moon = floor_of(named("moon"));
+    // Hundreds of metres on Earth, kilometres under the Moon's sixth of the gravity.
+    CHECK(earth > 200.0);
+    CHECK(earth < 1'500.0);
+    CHECK(moon > 3.0 * earth);
+    Planet heavy = named("earth");
+    heavy.gravity *= 2.0;
+    CHECK(floor_of(heavy) == Catch::Approx(earth / 2.0).margin(60.0));
+    // Nothing is open at the floor, and a cast down a column never reaches below it.
+    const Generator generator{named("earth")};
+    for (std::uint64_t k = 0; k < 200; ++k) {
+        const Generator::Column column = generator.column(direction(k), 0.5);
+        for (const auto& [bottom, top] : column.caves(0.0, 1e9, 0.0)) {
+            CHECK(bottom >= column.ground() - earth - 1.0);
+        }
+    }
+}
+
+TEST_CASE("a cast flags little where the rock holds only fine fractures", "[globe][caves]") {
+    // The Moon's crystalline rock opens fissures narrower than a voxel, which aren't drawn.
+    const Generator generator{named("moon")};
+    double flagged = 0.0;
+    for (std::uint64_t k = 0; k < 300; ++k) {
+        for (const auto& [bottom, top] :
+             generator.column(direction(k), 0.5).caves(0.0, 1e9, 10.0)) {
+            flagged += top - bottom;
+        }
+    }
+    CHECK(flagged / 300.0 < 60.0);
 }

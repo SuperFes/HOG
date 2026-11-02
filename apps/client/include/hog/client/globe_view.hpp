@@ -82,6 +82,10 @@ struct GlobeDetail {
 // The chunks are sought anew once the eye has gone this far, or a twentieth of its height.
 inline constexpr double globe_relay = 16.0; // metres
 
+// What lies under the ground is meshed only for chunks this near the eye, and only as far down and
+// up as the eye can see there: past that, rock hides it.
+inline constexpr double globe_sight = 96.0; // metres
+
 // The key a chunk's mesh is shown under.
 [[nodiscard]] std::uint64_t globe_key(globe::Cell chunk);
 
@@ -124,10 +128,11 @@ public:
     [[nodiscard]] std::span<const globe::Cell> wanted() const noexcept { return order_; }
 
 private:
-    // A chunk being meshed, against how those beside it were drawn when it started.
+    // A chunk being meshed, against how those beside it were drawn and the band of radii its
+    // sight was made for, when it started.
     struct Working {
         globe::Cell chunk;
-        std::uint32_t beside = 0;
+        std::uint64_t against = 0;
         std::unique_ptr<jobs::Async<globe::SurfaceMesh>> mesh;
     };
 
@@ -142,10 +147,10 @@ private:
     std::optional<DVec3> around_;
     std::shared_ptr<const globe::Drawn> drawn_;
     std::vector<globe::Cell> order_;              // wanted, nearest first
-    std::map<globe::Cell, std::uint32_t> wanted_; // and how those beside each are drawn
+    std::map<globe::Cell, std::uint64_t> wanted_; // and what each is meshed against
     std::vector<globe::Cell> queue_;              // to mesh, farthest first
     std::vector<Working> working_;
-    std::map<globe::Cell, std::uint32_t> shown_; // as they were meshed against
+    std::map<globe::Cell, std::uint64_t> shown_; // as they were meshed against
     Changes changes_;
 };
 

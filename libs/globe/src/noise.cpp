@@ -45,6 +45,9 @@ double fade_slope(double t) {
 
 // Unit-gradient lattice noise peaks just under 1 in 3D; this brings it near ±1.
 constexpr double reach = 1.4;
+// The steepest the noise gets, per lattice unit: measured at 3.16 over two million points, and
+// some over that.
+constexpr double steepest = 3.6;
 
 } // namespace
 
@@ -120,6 +123,21 @@ Noise fbm(DVec3 point, const Octaves& octaves, double lod, std::uint64_t seed, B
                 (amplitude * weight / wavelength) * (glm::transpose(frame) * layer.gradient);
         }
         frame = turn * frame;
+        wavelength *= 0.5;
+        amplitude *= octaves.gain;
+    }
+    return sum;
+}
+
+double fbm_steepest(const Octaves& octaves) noexcept {
+    // Every octave that's ever summed, at full weight: more than at any lod.
+    const double shortest = std::max(octaves.finest, 1e-9);
+    const double count = (maths::log(octaves.wavelength / shortest) / std::numbers::ln2) + 1.0;
+    double sum = 0.0;
+    double wavelength = octaves.wavelength;
+    double amplitude = 1.0;
+    for (int octave = 0; octave < 64 && static_cast<double>(octave) < count; ++octave) {
+        sum += amplitude * steepest / wavelength;
         wavelength *= 0.5;
         amplitude *= octaves.gain;
     }

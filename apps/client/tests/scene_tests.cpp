@@ -197,7 +197,33 @@ TEST_CASE("the globe at reported spots, to look at", "[.look]") {
                                   .longitude = -132.811001,
                                   .altitude = 6536.0,
                                   .heading = -112.7,
-                                  .pitch = -25.4}}) {
+                                  .pitch = -25.4},
+                             // Tunnels reported 2026-11-01: the ground missing over a cave, a
+                             // mouth cut off at a chunk, a stepped floor, a slab in a tunnel.
+                             Spot{.name = "cave_over",
+                                  .latitude = -6.942166,
+                                  .longitude = 138.638398,
+                                  .altitude = 834.0,
+                                  .heading = -44.5,
+                                  .pitch = -11.0},
+                             Spot{.name = "cave_mouth",
+                                  .latitude = -6.931845,
+                                  .longitude = 138.631663,
+                                  .altitude = 832.0,
+                                  .heading = -178.9,
+                                  .pitch = -13.2},
+                             Spot{.name = "cave_floor",
+                                  .latitude = -6.923761,
+                                  .longitude = 138.614797,
+                                  .altitude = 852.0,
+                                  .heading = 7.2,
+                                  .pitch = -58.6},
+                             Spot{.name = "cave_slab",
+                                  .latitude = -6.892869,
+                                  .longitude = 138.528261,
+                                  .altitude = 830.0,
+                                  .heading = -54.5,
+                                  .pitch = 4.9}}) {
         const hog::DVec3 up =
             hog::planet::direction_at(spot.latitude * degree, spot.longitude * degree);
         const hog::client::Flight flight = hog::client::turned_to(

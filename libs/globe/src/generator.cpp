@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <numbers>
+#include <optional>
 #include <span>
 #include <unordered_map>
 #include <utility>
@@ -257,6 +258,54 @@ Generator::Column Generator::finish(DVec3 down, double lod, const terms::Ground&
     column.surface_temperature_ = made.surface_temperature;
     column.strata_ = made.layers;
     return column;
+}
+
+std::vector<std::pair<double, double>> Generator::Column::caves(double lowest, double highest,
+                                                                double within) const {
+    std::vector<std::pair<double, double>> found;
+    const terms::Context context{.planet = &generator_->planet_,
+                                 .derived = &generator_->derived_,
+                                 .shape = &generator_->shape_};
+    const double deepest = std::max(lowest, ground_ - terms::cave_floor(context));
+    const double top_most = std::min(highest, ground_);
+    if (deepest >= top_most || terms::cave_district(context, direction_) <= 0.0) {
+        return found;
+    }
+    const Planet& planet = generator_->planet_;
+    const auto cover_at = [&](double at) {
+        const double slope = slope_ * planet.radius / at;
+        return std::max(0.0, (ground_ - at) / std::sqrt(1.0 + (slope * slope)));
+    };
+    // Down by as far as no cave can lie within `within`, a metre at least.
+    constexpr double least = 1.0;
+    std::optional<double> top;
+    double above = top_most;
+    for (double radius = top_most; radius > deepest;) {
+        const double away = terms::cave_bound(context, strata_, direction_, radius, ground_,
+                                              cover_at(radius), lod_) -
+                            within;
+        if (away < 0.0) {
+            if (!top) {
+                // Back within reach at the next sample: the same stretch.
+                if (!found.empty() && found.back().first == above) {
+                    top = found.back().second;
+                    found.pop_back();
+                } else {
+                    top = above;
+                }
+            }
+        } else if (top) {
+            found.emplace_back(radius, *top);
+            top.reset();
+        }
+        above = radius;
+        radius -= std::max(away, least);
+    }
+    if (top) {
+        found.emplace_back(deepest, *top);
+    }
+    std::ranges::reverse(found);
+    return found;
 }
 
 Sample Generator::Column::sample(double radius) const noexcept {

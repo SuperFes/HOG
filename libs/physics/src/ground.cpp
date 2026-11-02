@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <set>
 #include <utility>
 #include <vector>
@@ -15,11 +16,12 @@ namespace hog::physics {
 
 namespace {
 
-// A chunk's ground as drawn, the liquid's surface left out: it isn't walked on.
-std::optional<Mesh> mesh_of(const globe::World& world, globe::Cell chunk) {
+// A chunk's ground as drawn, seeing as far under it as `band` reaches, the liquid's surface left
+// out: it isn't walked on.
+std::optional<Mesh> mesh_of(const globe::World& world, globe::Cell chunk, std::uint64_t band) {
     globe::SurfaceMesh drawn;
     drawn.origin = globe::center(chunk) * world.generator().planet().radius;
-    globe::add_chunk(drawn, world, chunk);
+    globe::add_chunk(drawn, world, chunk, globe::Drawn{}, globe::sight_of(band));
     Mesh mesh{.origin = WorldPosition{drawn.origin}, .vertices = {}, .triangles = {}};
     mesh.vertices.reserve(drawn.vertices.size());
     for (const globe::SurfaceVertex& vertex : drawn.vertices) {
@@ -72,8 +74,8 @@ void Ground::clear() noexcept {
     if (space_ == nullptr) {
         return;
     }
-    for (const auto& [chunk, body] : chunks_) {
-        space_->remove(body);
+    for (const auto& [chunk, held] : chunks_) {
+        space_->remove(held.body);
     }
     chunks_.clear();
 }
@@ -101,14 +103,24 @@ Result<> Ground::keep(std::span<const WorldPosition> around) {
             ++held;
             continue;
         }
-        space_->remove(held->second);
+        space_->remove(held->second.body);
         held = chunks_.erase(held);
     }
     for (const globe::Cell chunk : wanted) {
-        if (chunks_.contains(chunk)) {
-            continue;
+        // Seeing under the ground as far as the point nearest it does.
+        const DVec3 middle = globe::center(chunk) * radius;
+        const WorldPosition nearest = *std::ranges::min_element(
+            around, {}, [&](WorldPosition point) { return glm::length(point.metres() - middle); });
+        const double at = glm::length(nearest.metres());
+        if (const auto held = chunks_.find(chunk); held != chunks_.end()) {
+            if (globe::sight_holds(held->second.band, at)) {
+                continue;
+            }
+            space_->remove(held->second.body);
+            chunks_.erase(held);
         }
-        const std::optional<Mesh> mesh = mesh_of(world_, chunk);
+        const std::uint64_t band = globe::sight_band(at);
+        const std::optional<Mesh> mesh = mesh_of(world_, chunk, band);
         if (!mesh) {
             continue;
         }
@@ -116,7 +128,7 @@ Result<> Ground::keep(std::span<const WorldPosition> around) {
         if (!body) {
             return std::unexpected(body.error());
         }
-        chunks_.emplace(chunk, *body);
+        chunks_.emplace(chunk, Held{.body = *body, .band = band});
     }
     return {};
 }
@@ -136,7 +148,7 @@ void Ground::changed(globe::BrickSite brick) {
                bj + globe::brick_side > j0 && bj < j0 + globe::chunk_side + (2 * margin);
     };
     std::set<globe::Cell> gone;
-    for (const auto& [chunk, body] : chunks_) {
+    for (const auto& [chunk, held] : chunks_) {
         if (!touches(chunk)) {
             continue;
         }
@@ -149,7 +161,7 @@ void Ground::changed(globe::BrickSite brick) {
         }
     }
     for (const globe::Cell chunk : gone) {
-        space_->remove(chunks_.at(chunk));
+        space_->remove(chunks_.at(chunk).body);
         chunks_.erase(chunk);
     }
 }

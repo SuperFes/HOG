@@ -21,13 +21,28 @@ constexpr double stretch = 2.0;
 constexpr double chamber_wavelength = 160.0;
 constexpr double chamber_threshold = 0.6;
 
+constexpr Octaves winding{
+    .wavelength = tunnel_wavelength, .gain = 0.3, .finest = tunnel_wavelength / 8.0};
+constexpr Octaves pooling{
+    .wavelength = chamber_wavelength, .gain = 0.5, .finest = chamber_wavelength / 8.0};
+
 // Caves gather in districts a couple of kilometres across, where water found its way in.
 constexpr double district_wavelength = 2'000.0;
 
-// Dissolution needs water moving: it fades a kilometre down. Lava tubes lie within tens of
-// metres of the flows' tops.
-constexpr double karst_depth = 1'000.0;
+// Lava tubes lie within tens of metres of the flows' tops.
 constexpr double tube_depth = 30.0;
+// What a tunnel's wall bears against the rock's strength: about two and a half times the weight
+// of the rock over it, and the rock mass holds a fifth of what intact rock does, being jointed.
+constexpr double wall_stress = 2.5;
+constexpr double mass_strength = 0.2;
+
+// The depth passages in `rock` are held open to, and none are by twice it: where the stress
+// round them overcomes the rock.
+double closure_depth(const Planet& planet, Material rock) {
+    const Properties& properties = hog::globe::properties(rock);
+    return mass_strength * properties.strength /
+           (wall_stress * properties.density * planet.gravity);
+}
 
 // How readily each rock holds open passages.
 double openness(Material rock, double depth, bool watered) {
@@ -62,43 +77,44 @@ public:
           // Stretched across the radius, so passages run more along than up.
           lifted_{context.planet->radius + (stretch * (radius - context.planet->radius))} {}
 
-    // Where caves gather, from 0 to 1.
     double district() {
         if (!district_) {
-            const Noise field = fbm(direction_ * context_->planet->radius,
-                                    {.wavelength = district_wavelength,
-                                     .gain = 0.5,
-                                     .finest = district_wavelength / 2.0},
-                                    0.0, context_->seed(Term::CaveDistricts));
-            district_ = smoothstep((field.value + 0.1) / 0.4);
+            district_ = cave_district(*context_, direction_);
         }
         return *district_;
     }
 
-    // Metres out from where both passage fields are zero, near enough.
-    double across() {
-        if (!across_) {
-            const Octaves winding{
-                .wavelength = tunnel_wavelength, .gain = 0.3, .finest = tunnel_wavelength / 8.0};
+    // Metres out from where both passage fields are zero, near enough; or, `bound`, no more
+    // than it truly is, by the fields' steepest slope rather than their slope here.
+    double across(bool bound) {
+        std::optional<double>& kept = bound ? across_bound_ : across_;
+        if (!kept) {
             const auto metres = [&](Term term) {
                 const Noise field = fbm(at(), winding, lod_, context_->seed(term));
-                return field.value / std::max(glm::length(unstretched(field.gradient)), 1e-9);
+                const double slope =
+                    bound ? steepest(winding) : glm::length(unstretched(field.gradient));
+                return field.value / std::max(slope, 1e-9);
             };
             const double a = metres(Term::CaveA);
             const double b = metres(Term::CaveB);
-            across_ = std::sqrt((a * a) + (b * b));
+            kept = std::sqrt((a * a) + (b * b));
         }
-        return *across_;
+        return *kept;
     }
 
-    // The chamber field, and its rate per metre.
-    Noise pool() {
+    // The steepest a field of `octaves` gets here, per metre of the point itself.
+    [[nodiscard]] double steepest(const Octaves& octaves) const {
+        return fbm_steepest(octaves) * std::max(stretch, lifted_ / radius_);
+    }
+
+    // The chamber field, and its rate per metre; or, `bound`, the steepest it gets.
+    Noise pool(bool bound) {
         if (!pool_) {
-            const Noise field = fbm(
-                at(),
-                {.wavelength = chamber_wavelength, .gain = 0.5, .finest = chamber_wavelength / 8.0},
-                lod_, context_->seed(Term::Chambers));
+            const Noise field = fbm(at(), pooling, lod_, context_->seed(Term::Chambers));
             pool_ = Noise{.value = field.value, .gradient = unstretched(field.gradient)};
+        }
+        if (bound) {
+            return Noise{.value = pool_->value, .gradient = DVec3{steepest(pooling), 0.0, 0.0}};
         }
         return *pool_;
     }
@@ -116,6 +132,7 @@ private:
     double lifted_;
     std::optional<double> district_;
     std::optional<double> across_;
+    std::optional<double> across_bound_;
     std::optional<Noise> pool_;
 };
 
@@ -129,12 +146,12 @@ double widest_span(const Planet& planet, Material rock) {
 
 // Metres to the open space of the caves in `rock` as `open` as it is there, were it all that rock.
 double cave_in(Fields& fields, Material rock, double open, bool watered, double cover, double lod,
-               const Planet& planet) {
+               const Planet& planet, bool bound) {
     const double presence = open * fields.district();
     const double size = tunnel_radius * presence;
     // Passages too narrow for the detail asked for close up smoothly.
     const double shown = size * smoothstep((size / lod) - 1.0);
-    double distance = shown > 0.0 ? fields.across() - shown : cave_reach;
+    double distance = shown > 0.0 ? fields.across(bound) - shown : cave_reach;
     if (rock == Material::Limestone && watered) {
         // Fewer where passages are fewer: none where there are none.
         const double threshold = chamber_threshold + ((1.0 - presence) * 0.6);
@@ -142,22 +159,53 @@ double cave_in(Fields& fields, Material rock, double open, bool watered, double 
         // in, so chambers shrink to nothing toward open air.
         const double held = smoothstep(cover / widest_span(planet, rock));
         const double needed = 1.0 - ((1.0 - threshold) * held);
-        const Noise pool = fields.pool();
-        distance =
-            std::min(distance, (needed - pool.value) / std::max(glm::length(pool.gradient), 1e-9));
+        const Noise pool = fields.pool(bound);
+        // Bounded, a chamber is wherever the field exceeds the threshold, which `needed` never
+        // falls under, so none lies nearer than that.
+        const double over = bound ? threshold : needed;
+        if (!bound || threshold < 1.0) {
+            distance = std::min(distance,
+                                (over - pool.value) / std::max(glm::length(pool.gradient), 1e-9));
+        }
     }
     return distance;
 }
 
 } // namespace
 
-double cave_distance(const Context& context, const Layering& layers, DVec3 direction, double radius,
-                     double ground, double cover, double lod) noexcept {
+double cave_floor(const Context& context) noexcept {
+    const Planet& planet = *context.planet;
+    // Lava tubes, and those the rocks that can hold passages hold, as far as they do.
+    double floor = 2.0 * tube_depth;
+    for (const Material rock : {Material::Granite, Material::Anorthosite}) {
+        floor = std::max(floor, 2.0 * closure_depth(planet, rock));
+    }
+    if (planet.volatiles != Volatile::None) {
+        for (const Material rock : {Material::Limestone, Material::Shale, Material::Sandstone}) {
+            floor = std::max(floor, 2.0 * closure_depth(planet, rock));
+        }
+    }
+    return floor;
+}
+
+double cave_district(const Context& context, DVec3 direction) noexcept {
+    const Noise field =
+        fbm(direction * context.planet->radius,
+            {.wavelength = district_wavelength, .gain = 0.5, .finest = district_wavelength / 2.0},
+            0.0, context.seed(Term::CaveDistricts));
+    return smoothstep((field.value + 0.1) / 0.4);
+}
+
+namespace {
+
+double cave_nearest(const Context& context, const Layering& layers, DVec3 direction, double radius,
+                    double ground, double cover, double lod, bool bound) noexcept {
     const Planet& planet = *context.planet;
     const bool watered = planet.volatiles != Volatile::None;
+    // Bounded, as open as the rock is a reach higher: it only closes with depth.
     const double depth = ground - radius;
-    const double fade = 1.0 - smoothstep((depth - karst_depth) / karst_depth);
-    if (fade <= 0.0) {
+    const double opening = bound ? std::max(0.0, depth - cave_reach) : depth;
+    if (depth >= cave_floor(context)) {
         return cave_reach;
     }
 
@@ -166,15 +214,19 @@ double cave_distance(const Context& context, const Layering& layers, DVec3 direc
         Material rock = Material::Air;
         double outside = 0.0;
     };
-    std::array<Unit, 4> units{};
+    // Bounded, every bed within reach, as a cave in any of them could be the nearest.
+    const std::int64_t beds_about =
+        bound ? static_cast<std::int64_t>(cave_reach / bed_thickness) + 1 : 1;
+    std::array<Unit, 16> units{};
     std::size_t count = 0;
     const double base = ground - layers.cover; // beds lie over it, the basement under it
+    double nearest = cave_reach;
     if (layers.cover > 0.0) {
         const std::int64_t bed = bed_at(context, layers, radius);
-        for (std::int64_t near = bed - 1; near <= bed + 1; ++near) {
+        for (std::int64_t near = bed - beds_about; near <= bed + beds_about; ++near) {
             const double bottom = bed_bottom(context, layers, near);
             const double top = bottom + bed_thickness;
-            if (top > base) {
+            if (top > base && bottom < ground && count < units.size()) {
                 units.at(count++) = {.rock = bed_rock(context, near),
                                      .outside =
                                          std::max({bottom - radius, radius - top, base - radius})};
@@ -183,17 +235,30 @@ double cave_distance(const Context& context, const Layering& layers, DVec3 direc
     }
     units.at(count++) = {.rock = layers.basement, .outside = radius - base};
 
-    double nearest = cave_reach;
     Fields fields{context, direction, radius, lod};
     for (const Unit& unit : std::span{units}.first(count)) {
-        const double open = openness(unit.rock, depth, watered) * fade;
+        const double closure = closure_depth(planet, unit.rock);
+        const double open = openness(unit.rock, opening, watered) *
+                            (1.0 - smoothstep((opening - closure) / closure));
         if (open <= 0.0 || unit.outside >= nearest) {
             continue;
         }
-        const double inside = cave_in(fields, unit.rock, open, watered, cover, lod, planet);
+        const double inside = cave_in(fields, unit.rock, open, watered, cover, lod, planet, bound);
         nearest = std::min(nearest, std::max(inside, unit.outside));
     }
     return nearest;
+}
+
+} // namespace
+
+double cave_distance(const Context& context, const Layering& layers, DVec3 direction, double radius,
+                     double ground, double cover, double lod) noexcept {
+    return cave_nearest(context, layers, direction, radius, ground, cover, lod, false);
+}
+
+double cave_bound(const Context& context, const Layering& layers, DVec3 direction, double radius,
+                  double ground, double cover, double lod) noexcept {
+    return cave_nearest(context, layers, direction, radius, ground, cover, lod, true);
 }
 
 } // namespace hog::globe::terms

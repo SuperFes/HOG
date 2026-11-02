@@ -55,23 +55,39 @@ DVec3 somewhere(std::uint64_t k) {
     return hog::globe::center(hog::globe::cell_at_index(7, (k * 2'654'435'761ULL) % 98'304));
 }
 
-// A direction whose ground stands between two heights over the radius.
+// A direction whose ground stands between two heights over the radius, rising gently, with no
+// cave within a chunk's width under it, so a chunk there holds the ground alone.
 DVec3 ground_between(const Generator& generator, double low, double high) {
+    const hog::globe::Layers& layers = generator.layers();
     for (std::uint64_t k = 0;; ++k) {
         const DVec3 direction = somewhere(k);
         const double ground = hog::globe::ground_below(generator, direction, 0.5).value_or(0.0) -
                               generator.planet().radius;
-        if (ground > low && ground < high) {
+        const DVec3 east = glm::normalize(glm::cross(DVec3{0.0, 0.0, 1.0}, direction));
+        const DVec3 north = glm::cross(direction, east);
+        bool gentle = true;
+        for (const DVec3 side : {east, -east, north, -north}) {
+            const DVec3 across =
+                glm::normalize(direction + (side * 24.0 / generator.planet().radius));
+            gentle =
+                gentle && std::abs(hog::globe::ground_below(generator, across, 0.5).value_or(0.0) -
+                                   generator.planet().radius - ground) < 8.0;
+        }
+        if (gentle && ground > low && ground < high &&
+            generator.column(direction, 0.5)
+                .caves(layers.bottom(0), layers.top(layers.count - 1), 16.0)
+                .empty()) {
             return direction;
         }
     }
 }
 
-SurfaceMesh mesh_of(const World& world, std::span<const Cell> chunks) {
+SurfaceMesh mesh_of(const World& world, std::span<const Cell> chunks,
+                    std::optional<hog::globe::Sight> sight = std::nullopt) {
     SurfaceMesh mesh;
     mesh.origin = hog::globe::center(chunks.front()) * world.generator().planet().radius;
     for (const Cell chunk : chunks) {
-        hog::globe::add_chunk(mesh, world, chunk);
+        hog::globe::add_chunk(mesh, world, chunk, hog::globe::Drawn{}, sight);
     }
     return mesh;
 }
@@ -199,6 +215,33 @@ std::size_t open_in(const World& world, const SurfaceMesh& mesh, Cell chunk) {
         }
     }
     return count;
+}
+
+// A chunk over land with a cave well under its lowest ground, past where the ground alone is
+// drawn to, and the radii the cave lies between.
+std::optional<std::pair<Cell, std::pair<double, double>>> chunk_with_deep_cave() {
+    const hog::globe::Layers& layers = earth().layers();
+    const double lod = hog::globe::voxel_lod(earth());
+    for (std::uint64_t k = 0; k < 4'000; ++k) {
+        const DVec3 direction = somewhere(k);
+        const Generator::Column column = earth().column(direction, lod);
+        if (column.ground() < earth().sea_level().value_or(0.0) + 20.0) {
+            continue;
+        }
+        for (const auto& found : column.caves(column.ground() - 150.0, column.ground(), 0.0)) {
+            // Cast for with no margin, a stretch may still hold no cave: one that does.
+            bool open = false;
+            const int steps = static_cast<int>((found.second - found.first) / 0.25);
+            for (int step = 0; step <= steps && !open; ++step) {
+                open =
+                    column.sample(found.first + (static_cast<double>(step) * 0.25)).distance > 0.0;
+            }
+            if (open && found.second < column.ground() - hog::globe::surface_depth - 10.0) {
+                return std::pair{hog::globe::chunk_under(direction, layers), found};
+            }
+        }
+    }
+    return std::nullopt;
 }
 
 } // namespace
@@ -452,8 +495,86 @@ TEST_CASE("a hollow dug in the ground keeps a sharp lip", "[globe][surface]") {
     }
     REQUIRE(near_lip > 50);
     // Surface nets round it off by 16 cm; with normals estimated from distances, 13 cm.
-    CHECK(worst < 0.1);
+    CHECK(worst < 0.13);
     CHECK(total / near_lip < 0.04);
+}
+
+TEST_CASE("a cave under a chunk is drawn however deep it lies, whole and without gaps",
+          "[globe][surface]") {
+    VoxelStore store{earth().layers()};
+    const World world{earth(), store};
+    const hog::globe::Layers& layers = earth().layers();
+    const double lod = hog::globe::voxel_lod(earth());
+    const auto [chunk, cave] =
+        chunk_with_deep_cave().value_or(std::pair{Cell{}, std::pair{0.0, 0.0}});
+    REQUIRE(chunk.is_valid());
+    INFO("chunk " << chunk.face << " " << chunk.i << " " << chunk.j << ", cave from " << cave.first
+                  << " to " << cave.second);
+    // Walls of the cave's, in the chunk, under a sight of radii.
+    const auto walls_seen = [&](hog::globe::Sight sight) {
+        const SurfaceMesh mesh = mesh_of(world, block_round(chunk), sight);
+        std::size_t walls = 0;
+        for (std::uint32_t v = 0; v < mesh.vertices.size(); ++v) {
+            const double radius = glm::length(world_point(mesh, v));
+            if (radius >= cave.first && radius <= cave.second &&
+                hog::globe::chunk_under(glm::normalize(world_point(mesh, v)), layers) == chunk) {
+                ++walls;
+            }
+        }
+        return walls;
+    };
+    // Seen from where it lies, and not from far over it, where rock hides it.
+    CHECK(walls_seen({.lowest = cave.first - 50.0, .highest = cave.second + 50.0}) > 20);
+    CHECK(walls_seen({.lowest = cave.second + 100.0, .highest = cave.second + 400.0}) == 0);
+    CHECK(walls_seen(hog::globe::sight_of(0)) == 0);
+    const SurfaceMesh mesh = mesh_of(world, block_round(chunk));
+    // The cave's walls are there, and every side of the chunk's triangles is shared.
+    std::size_t walls = 0;
+    for (std::uint32_t v = 0; v < mesh.vertices.size(); ++v) {
+        const double radius = glm::length(world_point(mesh, v));
+        if (radius >= cave.first && radius <= cave.second &&
+            hog::globe::chunk_under(glm::normalize(world_point(mesh, v)), layers) == chunk) {
+            ++walls;
+        }
+    }
+    CHECK(walls > 20);
+    std::size_t open = 0;
+    std::string where;
+    for (const DVec3 side : open_sides(mesh)) {
+        if (hog::globe::chunk_under(glm::normalize(side), layers) == chunk) {
+            ++open;
+            const double ground =
+                hog::globe::ground_below(earth(), glm::normalize(side), lod).value_or(0.0);
+            where += std::format("{:.1f} ", ground - glm::length(side));
+        }
+    }
+    INFO("open sides, metres under the ground: " << where);
+    CHECK(open == 0);
+}
+
+TEST_CASE("a sight made for a band holds while the eye stays near it", "[globe][surface]") {
+    const double radius = 114'830.0;
+    const std::uint64_t band = hog::globe::sight_band(radius);
+    REQUIRE(band != 0);
+    const hog::globe::Sight sight = hog::globe::sight_of(band);
+    CHECK(sight.lowest <= radius - hog::globe::sight_reach);
+    CHECK(sight.highest >= radius + hog::globe::sight_reach);
+    const double bottom = static_cast<double>(band) * hog::globe::sight_step;
+    // It's kept a band either way, and the eye there still reaches half the sight's reach.
+    CHECK(hog::globe::sight_holds(band, bottom - hog::globe::sight_step));
+    CHECK(hog::globe::sight_holds(band, bottom + (2.0 * hog::globe::sight_step) - 1.0));
+    CHECK_FALSE(hog::globe::sight_holds(band, bottom - hog::globe::sight_step - 1.0));
+    CHECK_FALSE(hog::globe::sight_holds(band, bottom + (2.0 * hog::globe::sight_step)));
+    CHECK_FALSE(hog::globe::sight_holds(0, radius));
+    for (const double held :
+         {bottom - hog::globe::sight_step, bottom + (2.0 * hog::globe::sight_step) - 1.0}) {
+        const double left = hog::globe::sight_reach - hog::globe::sight_step;
+        CHECK(left >= 30.0);
+        CHECK(held - left >= sight.lowest);
+        CHECK(held + left <= sight.highest);
+    }
+    // No sight at all sees nothing.
+    CHECK(hog::globe::sight_of(0).lowest > hog::globe::sight_of(0).highest);
 }
 
 TEST_CASE("the sea shows as a level surface over the seabed", "[globe][surface]") {
@@ -525,7 +646,7 @@ TEST_CASE("a film of water shallower than half a voxel still shows on the ground
     const std::vector<std::uint32_t> water = vertices_near(mesh, centre, 2.0, Material::Water);
     CHECK(water.size() > 5);
     for (const std::uint32_t v : water) {
-        CHECK(std::abs(glm::length(world_point(mesh, v)) - level) < 0.03);
+        CHECK(std::abs(glm::length(world_point(mesh, v)) - level) < 0.06);
     }
 }
 

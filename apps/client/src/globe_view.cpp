@@ -228,6 +228,16 @@ std::uint32_t drawn_beside(const globe::Drawn& drawn, globe::Cell chunk) {
     return found;
 }
 
+// What a chunk is meshed against: the band its sight was made for, 0 for none, over how the
+// chunks beside it are drawn.
+std::uint64_t against_key(std::uint64_t band, std::uint32_t beside) {
+    return (band << 32U) | beside;
+}
+
+std::uint64_t band_of(std::uint64_t key) {
+    return key >> 32U;
+}
+
 // Metres to the horizon from `height` over a sphere of `radius`.
 double horizon(double radius, double height) {
     return std::sqrt((2.0 * radius * height) + (height * height));
@@ -254,18 +264,32 @@ void GlobeStream::follow(DVec3 eye) {
               "seeking {} chunks round ({:.9f}, {:.9f}, {:.9f}) at {:.1f} m, {:.0f} m out",
               order_.size(), up.x, up.y, up.z, height, reach);
     drawn_ = std::make_shared<const globe::Drawn>(order_);
+    // A chunk near the eye sees under its ground as far as the eye does, kept as it was made
+    // while the eye stays within its band.
+    const double eye_radius = glm::length(eye);
+    const auto sight_for = [&](globe::Cell chunk) -> std::uint64_t {
+        const std::array<DVec3, 4> corners = globe::corners(chunk);
+        const double across = glm::length(corners[1] - corners[0]) * radius;
+        if (glm::length((globe::center(chunk) * radius) - (up * radius)) > globe_sight + across) {
+            return 0;
+        }
+        const auto shown = shown_.find(chunk);
+        return shown != shown_.end() && globe::sight_holds(band_of(shown->second), eye_radius)
+                   ? band_of(shown->second)
+                   : globe::sight_band(eye_radius);
+    };
     wanted_.clear();
     for (const globe::Cell chunk : order_) {
-        wanted_.emplace(chunk, drawn_beside(*drawn_, chunk));
+        wanted_.emplace(chunk, against_key(sight_for(chunk), drawn_beside(*drawn_, chunk)));
     }
     queue_.clear();
     for (const globe::Cell chunk : order_ | std::views::reverse) {
-        const std::uint32_t beside = wanted_.at(chunk);
+        const std::uint64_t against = wanted_.at(chunk);
         const auto shown = shown_.find(chunk);
         const bool meshing = std::ranges::any_of(working_, [&](const Working& work) {
-            return work.chunk == chunk && work.beside == beside;
+            return work.chunk == chunk && work.against == against;
         });
-        if ((shown == shown_.end() || shown->second != beside) && !meshing) {
+        if ((shown == shown_.end() || shown->second != against) && !meshing) {
             queue_.push_back(chunk);
         }
     }
@@ -326,13 +350,15 @@ void GlobeStream::start_more() {
     while (working_.size() < most && !queue_.empty()) {
         const globe::Cell chunk = queue_.back();
         queue_.pop_back();
+        const std::uint64_t against = wanted_.at(chunk);
         working_.push_back({.chunk = chunk,
-                            .beside = wanted_.at(chunk),
+                            .against = against,
                             .mesh = std::make_unique<jobs::Async<globe::SurfaceMesh>>(
-                                *jobs_, [world = world_, drawn = drawn_, chunk, radius] {
+                                *jobs_, [world = world_, drawn = drawn_, chunk, radius, against] {
                                     globe::SurfaceMesh mesh;
                                     mesh.origin = globe::center(chunk) * radius;
-                                    globe::add_chunk(mesh, *world, chunk, *drawn);
+                                    globe::add_chunk(mesh, *world, chunk, *drawn,
+                                                     globe::sight_of(band_of(against)));
                                     return mesh;
                                 })});
     }
@@ -344,10 +370,10 @@ void GlobeStream::take(std::size_t working) {
     const globe::SurfaceMesh mesh = work.mesh->take();
     // Meshed against neighbours since drawn otherwise, it's been sought again.
     if (const auto wanted = wanted_.find(work.chunk);
-        wanted == wanted_.end() || wanted->second != work.beside) {
+        wanted == wanted_.end() || wanted->second != work.against) {
         return;
     }
-    shown_.insert_or_assign(work.chunk, work.beside);
+    shown_.insert_or_assign(work.chunk, work.against);
     const globe::Generator& generator = world_->generator();
     changes_.shown.push_back(
         {.key = globe_key(work.chunk),

@@ -7,6 +7,7 @@
 
 #include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace hog::globe {
@@ -74,6 +75,13 @@ public:
         [[nodiscard]] double ground() const noexcept { return ground_; }
         // Metres of loose cover between the ground and the rock under it.
         [[nodiscard]] double mantle() const noexcept { return mantle_; }
+        // Where a cave may lie within `within` metres of the column under its ground, between
+        // `lowest` and `highest` metres from the centre: each stretch as the radii of its bottom
+        // and top, lowest first, apart from each other; nowhere outside them is any cave that
+        // near. Found by casting down the column by the caves' bounded distance, so a column
+        // with none near is cheap.
+        [[nodiscard]] std::vector<std::pair<double, double>> caves(double lowest, double highest,
+                                                                   double within) const;
 
     private:
         friend class Generator;

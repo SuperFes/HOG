@@ -11,6 +11,7 @@
 #include <format>
 #include <limits>
 #include <map>
+#include <numbers>
 #include <optional>
 #include <set>
 #include <span>
@@ -156,10 +157,12 @@ std::set<int> held_layers(const VoxelStore& store, Cell chunk, int apart) {
 }
 
 // Bands of layers the surfaces lie in, lowest first, apart from each other, each from and to
-// (inclusive) a layer of a lattice of every `coarsest` layers. `apart` is the chunk's own.
+// (inclusive) a layer of a lattice of every `coarsest` layers. `apart` is the chunk's own;
+// `places` are the columns' places on the grid, in their order.
 std::vector<std::pair<int, int>> bands_of(const World& world, Cell chunk,
-                                          std::span<const Generator::Column> columns, int apart,
-                                          int coarsest) {
+                                          std::span<const Generator::Column> columns,
+                                          std::span<const std::pair<int, int>> places, int apart,
+                                          int coarsest, std::optional<Sight> sight) {
     const Generator& generator = world.generator();
     const Layers& layers = generator.layers();
     double lowest = std::numeric_limits<double>::max();
@@ -173,6 +176,25 @@ std::vector<std::pair<int, int>> bands_of(const World& world, Cell chunk,
                                             layers.layer_at(highest + band) + 1}};
     if (const auto sea = generator.sea_level(); sea && *sea > lowest) {
         bands.emplace_back(layers.layer_at(*sea - band), layers.layer_at(*sea + band) + 1);
+    }
+    // Every cave under the chunk, cast for down the middle column of each square of four by
+    // four: a stretch of the cast where a cave may lie within the square, and the walls' band
+    // about it.
+    constexpr int stride = 4;
+    const Sight sought =
+        sight.value_or(Sight{.lowest = layers.bottom(0), .highest = layers.top(layers.count - 1)});
+    const std::array<DVec3, 4> corner = corners(chunk);
+    const double cell =
+        glm::length(corner[1] - corner[0]) * generator.planet().radius / chunk_side * apart;
+    const double within = (2.0 * std::numbers::sqrt2 * cell) + band;
+    for (std::size_t k = 0; k < columns.size(); ++k) {
+        const auto [a, b] = places[k];
+        if (((a % stride) + stride) % stride != 2 || ((b % stride) + stride) % stride != 2) {
+            continue;
+        }
+        for (const auto& [bottom, top] : columns[k].caves(sought.lowest, sought.highest, within)) {
+            bands.emplace_back(layers.layer_at(bottom - band), layers.layer_at(top + band) + 1);
+        }
     }
     // Changes held next to a band widen it, a brick at a time.
     const std::set<int> held = held_layers(world.store(), chunk, apart);
@@ -375,49 +397,7 @@ public:
         soak();
     }
 
-    // Fills more voxels under those filled, down to `bottom`.
-    void deepen(int bottom) {
-        const std::vector<Voxel> before = std::move(voxels_);
-        voxels_.clear();
-        for (auto& [apart, group] : groups_) {
-            const int more = (bottom_ - bottom) / apart;
-            const std::vector<Voxel> under = fill_group(group, bottom, bottom_ - apart, apart);
-            std::vector<Voxel> joined;
-            const int up = ((top_ - bottom_) / apart) + 1;
-            joined.reserve(group.size() * static_cast<std::size_t>(more + up));
-            for (std::size_t k = 0; k < group.size(); ++k) {
-                const Column& at = columns_[group[k]];
-                const auto run = [](const std::vector<Voxel>& from, std::size_t start, int count) {
-                    return std::span{from}.subspan(start, static_cast<std::size_t>(count));
-                };
-                const auto lower = run(under, k * static_cast<std::size_t>(more), more);
-                const auto upper = run(before, at.first, up);
-                joined.insert(joined.end(), lower.begin(), lower.end());
-                joined.insert(joined.end(), upper.begin(), upper.end());
-            }
-            place(group, joined, more + up);
-        }
-        bottom_ = bottom;
-        soak();
-    }
-
     [[nodiscard]] int bottom() const noexcept { return bottom_; }
-
-    // Whether a cave runs open out of the filled voxels' foot, under some of the chunk's own
-    // columns' ground.
-    [[nodiscard]] bool open_at_foot() const {
-        const double radius = layers_->middle(bottom_);
-        for (std::size_t k = 0; k < filled_.size(); ++k) {
-            const Column& at = columns_[filled_[k]];
-            if (at.chunk != chunk_) {
-                continue;
-            }
-            if (!in_ground(voxels_[at.first]) && radius < generated_[k].ground()) {
-                return true;
-            }
-        }
-        return false;
-    }
 
     // Filled columns, as places across and along.
     [[nodiscard]] std::span<const std::pair<int, int>> places() const noexcept { return places_; }
@@ -1421,8 +1401,25 @@ private:
 
 } // namespace
 
+std::uint64_t sight_band(double radius) noexcept {
+    return static_cast<std::uint64_t>(std::max(1.0, std::floor(radius / sight_step)));
+}
+
+Sight sight_of(std::uint64_t band) noexcept {
+    if (band == 0) {
+        return {.lowest = 1.0, .highest = 0.0};
+    }
+    const double bottom = static_cast<double>(band) * sight_step;
+    return {.lowest = bottom - sight_reach, .highest = bottom + sight_step + sight_reach};
+}
+
+bool sight_holds(std::uint64_t band, double radius) noexcept {
+    const double bottom = static_cast<double>(band) * sight_step;
+    return band != 0 && radius >= bottom - sight_step && radius < bottom + (2.0 * sight_step);
+}
+
 void add_chunk(SurfaceMesh& mesh, const World& world, Cell chunk) {
-    add_chunk(mesh, world, chunk, Drawn{});
+    add_chunk(mesh, world, chunk, Drawn{}, std::nullopt);
 }
 
 bool boxes_tile(const World& world, Cell chunk, const Drawn& drawn) {
@@ -1430,7 +1427,8 @@ bool boxes_tile(const World& world, Cell chunk, const Drawn& drawn) {
     return !grid.overlapped();
 }
 
-void add_chunk(SurfaceMesh& mesh, const World& world, Cell chunk, const Drawn& drawn) {
+void add_chunk(SurfaceMesh& mesh, const World& world, Cell chunk, const Drawn& drawn,
+               std::optional<Sight> sight) {
     const Layers& layers = world.generator().layers();
     HOG_ASSERT(chunk.is_valid() && detail_of(chunk, layers) >= 0,
                "a chunk is a cell at least chunk_levels coarser than the voxels'");
@@ -1439,19 +1437,9 @@ void add_chunk(SurfaceMesh& mesh, const World& world, Cell chunk, const Drawn& d
                std::format("boxes of chunks beside each other overlap, at chunk level {} face {} "
                            "i {} j {}",
                            chunk.level, chunk.face, chunk.i, chunk.j));
-    const double lowest =
-        std::ranges::min(grid.generated(), {}, &Generator::Column::ground).ground() - cave_depth;
-    const double depth = std::max(surface_depth, distance_band(layers, grid.apart()));
-    const int coarsest = grid.coarsest();
-    for (const auto& [bottom, top] :
-         bands_of(world, chunk, grid.generated(), grid.apart(), coarsest)) {
+    for (const auto& [bottom, top] : bands_of(world, chunk, grid.generated(), grid.places(),
+                                              grid.apart(), grid.coarsest(), sight)) {
         grid.fill(bottom, top);
-        // Caves are followed down while they're open at the foot.
-        while (grid.bottom() > 0 && layers.middle(grid.bottom()) > lowest && grid.open_at_foot()) {
-            int deeper = std::max(0, layers.layer_at(layers.bottom(grid.bottom()) - depth));
-            deeper -= deeper % coarsest;
-            grid.deepen(deeper);
-        }
         Net<Ground>{grid, mesh}.add();
         Net<Liquid>{grid, mesh}.add();
     }
