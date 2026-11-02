@@ -9,4 +9,6 @@ hog_target_defaults(hog_weather)
 
 hog_add_tests(hog_weather
     tests/field_tests.cpp
-    tests/grid_tests.cpp)
+    tests/grid_tests.cpp
+    tests/surface_tests.cpp)
+target_link_libraries(hog_weather_tests PRIVATE hog::sim)

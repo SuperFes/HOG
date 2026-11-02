@@ -25,6 +25,7 @@ struct Field {
     std::vector<Air> air;
     std::vector<double> ground; // per column: metres from the centre, the sea's level over sea
     std::vector<std::uint8_t> over_sea; // per column: whether the sea lies under the air
+    std::vector<float> surface; // per column: its temperature reduced to the reference level
 
     [[nodiscard]] Air& at(std::size_t column, int layer) { return air[grid.index(column, layer)]; }
     [[nodiscard]] const Air& at(std::size_t column, int layer) const {
@@ -49,8 +50,19 @@ struct Field {
 [[nodiscard]] double pressure_at(const globe::Planet& planet, double surface_temperature,
                                  double height);
 
-// Still air, cooling with height from the climate's temperature at each latitude, holding a share
-// of the vapour it could: more over the sea than the land. The weather is what it settles into.
+// Sets a column's air still, cooling with height from its surface's temperature, with the share
+// of the vapour it could hold that its ground leaves it.
+void set_air(Field& field, const globe::Planet& planet, std::size_t column);
+
+// Still air over a surface at the climate's temperature, holding a share of the vapour it could:
+// more over the sea than the land. The weather is what it settles into.
 [[nodiscard]] Field start_field(const globe::Generator& generator, int level, int layers);
+
+// Heats and cools each column's surface over `seconds` with the sun towards the unit vector `sun`:
+// it absorbs the sunlight that reaches it and radiates as a black body, holding heat by what it
+// is, the sea deep and the land shallow. The sunlight is what keeps the planet's mean climate in
+// balance. Heat that air and sea carry between latitudes is stood in for by a pull towards the
+// climate, until winds carry it.
+void warm_surface(Field& field, const globe::Planet& planet, DVec3 sun, double seconds);
 
 } // namespace hog::weather
