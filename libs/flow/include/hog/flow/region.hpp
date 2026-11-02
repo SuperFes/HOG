@@ -15,10 +15,12 @@
 namespace hog::flow {
 
 // What a step did: the voxels' amounts' changes summed, how much the sea beyond the edge gave,
-// and the bricks not held yet that liquid stands against and would move into.
+// how much shaped ground the current wore loose, and the bricks not held yet that liquid stands
+// against and would move into.
 struct Stepped {
     std::int64_t changed = 0;
     std::int64_t from_sea = 0;
+    std::int64_t eroded = 0;
     std::vector<globe::BrickSite> wanted;
     // Each column with liquid standing in the open, and how much.
     struct Wet {
@@ -38,6 +40,13 @@ struct Stepped {
 // its level through a tunnel too. The columns are square and so is the flow: across the four
 // sides alike. Standing liquid seeps into the ground under it as fast as the ground lets it,
 // and water in the ground drains down through it, keeping back what the ground holds.
+//
+// A current drags on its bed; where the drag exceeds what the bed withstands it wears the bed
+// away, grain piled on it first, then the shaped ground under it, whose surface it pushes in
+// and which comes open when its middle is reached. What it wears off it carries along with the
+// liquid it moves, and the carried load sinks back out at its settling speed onto the bed below,
+// as grain piled in the bottom voxel, which takes room from the liquid and is ground to the
+// flow once it fills its voxel. The load is the region's: it is lost with a brick let go.
 class Region {
 public:
     // With `hold_sea`, open voxels under the sea's level at the edge of what is held are kept
@@ -55,8 +64,21 @@ public:
     [[nodiscard]] globe::Voxel at(globe::Site site) const;
     // Sets the voxel's liquid to `amount` of the world's own.
     void pour(globe::Site site, std::uint16_t amount);
+    // Sets the voxel's grain, piled on whatever is under it.
+    void pile(globe::Site site, globe::Material material, std::uint16_t amount);
+    // Adds `amount` of `material` to what the liquid at the site carries.
+    void suspend(globe::Site site, globe::Material material, std::int64_t amount);
     // All the liquid held, in the open and in the ground's pores.
     [[nodiscard]] std::int64_t liquid() const;
+    // All the loose matter held: grain piled in voxels and carried by the liquid.
+    [[nodiscard]] std::int64_t grain() const;
+
+    // What the liquid up a column carries.
+    struct Carried {
+        globe::Material material = globe::Material::Air;
+        std::int64_t amount = 0;
+    };
+    [[nodiscard]] Carried carried(std::uint8_t face, std::uint32_t i, std::uint32_t j) const;
 
     // Runs the liquid `seconds` on.
     Stepped step(double seconds);
@@ -76,13 +98,24 @@ private:
         globe::BrickVoxels voxels{};
         bool dirty = false;
     };
-    // A run of open voxels up a column, `bottom` up to but not `top`, and the liquid in it.
+    // A run of open voxels up a column, `bottom` up to but not `top`, the liquid in it, the
+    // grain piled on its bed and the load the liquid carries.
     struct Section {
         int bottom = 0;
         int top = 0;
         std::int64_t amount = 0;
         globe::Material liquid = globe::Material::Air;
         bool moving = false; // liquid ran in or out of it this step
+        std::int64_t bed = 0;
+        std::int64_t load = 0;
+        globe::Material carried = globe::Material::Air;
+        std::int64_t fall = 0; // the steepest head difference liquid ran across this step
+    };
+    // What a column's liquid carries, kept between steps by the layer it was carried at.
+    struct Load {
+        std::int64_t amount = 0;
+        globe::Material material = globe::Material::Air;
+        std::uint32_t layer = 0;
     };
     struct Column {
         std::uint8_t face = 0;
@@ -103,6 +136,7 @@ private:
         std::size_t from = 0;
         std::size_t to = 0;
         std::int64_t amount = 0;
+        std::int64_t fall = 0;  // the head difference driving it
         std::size_t column = 0; // whose +i or +j side it crosses
         bool along_i = true;
         bool outward = true; // out of `column`
@@ -147,9 +181,31 @@ private:
     // Seeps from a voxel into the one under it; how much moved.
     [[nodiscard]] std::int64_t seep_down(globe::Site site, globe::Voxel& over, globe::Voxel& under,
                                          double seconds) const;
-    // Units of liquid a seepage of `rate` metres a second moves in `seconds`, the fraction of a
-    // unit rounded by a hash of the site and step so slow seepage still adds up.
+    // `value` rounded to whole units, the fraction by a hash of the site, the step and `salt`,
+    // so what moves slowly still adds up.
+    [[nodiscard]] std::int64_t dithered(double value, globe::Site site, std::uint64_t salt) const;
+    // Units of liquid a seepage of `rate` metres a second moves in `seconds`.
     [[nodiscard]] std::int64_t seeped(double rate, double seconds, globe::Site site) const;
+
+    // Gives each section the load its column carried, dropping a load whose liquid is gone.
+    void take_up_loads(const std::vector<Column>& columns);
+    // Each section's current wears its bed and carries what it wears off, and its load settles
+    // out onto the bed.
+    void carry(const std::vector<Column>& columns, double seconds, Stepped& stepped);
+    // The bottom voxel of a section, the one under it if held, and the brick each is in.
+    struct Bed {
+        globe::Site site;
+        Held* brick = nullptr;
+        globe::Voxel* bottom = nullptr;
+        globe::Voxel* under = nullptr;
+        Held* under_brick = nullptr;
+    };
+    void wear(Section& section, const Bed& bed, double shear, double seconds, Stepped& stepped);
+    void drop(Section& section, const Bed& bed, double depth, double seconds, Stepped& stepped);
+    // Pushes the shaped surface under the bed voxel `mm` further in, so far as the voxels about
+    // it tell that surface's distance.
+    void scour(globe::Site bed, int mm);
+    void keep_loads(const std::vector<Column>& columns);
 
     globe::World* world_;
     bool hold_sea_;
@@ -160,6 +216,7 @@ private:
     std::vector<Section> sections_;
     std::unordered_map<std::uint64_t, std::size_t> column_at_; // into columns(), by its key
     std::unordered_map<std::uint64_t, Flux> flux_;             // the last step's, by column
+    std::unordered_map<std::uint64_t, Load> loads_;            // by column
     std::uint64_t steps_ = 0;
 };
 

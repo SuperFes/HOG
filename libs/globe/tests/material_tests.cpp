@@ -51,4 +51,9 @@ TEST_CASE("a flow carries sand before soil, and rock only over ages", "[globe][m
         CAPTURE(loose);
         CHECK(properties(loose).erodibility > 1e-7);
     }
+    // Carried, rubble drops first, sand next, mud last.
+    CHECK(properties(Material::Granite).settling > properties(Material::Sand).settling);
+    CHECK(properties(Material::Sand).settling > properties(Material::Soil).settling);
+    CHECK(properties(Material::Soil).settling > properties(Material::Sediment).settling);
+    CHECK(properties(Material::Sediment).settling > 0.0);
 }

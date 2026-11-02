@@ -11,6 +11,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -58,14 +59,24 @@ public:
                                           .j = (corner_j_ / hog::globe::brick_side) + bj,
                                           .layer = bl};
                     BrickVoxels voxels{};
+                    const double band = hog::globe::distance_band(store_.layers());
                     for (int k = 0; k < hog::globe::brick_voxels; ++k) {
                         const Site site = hog::globe::site_in(brick, k);
                         const auto layer = static_cast<int>(site.layer);
                         const bool open =
                             layer >= floor && (!shape || shape(site.i - corner_i_,
                                                                site.j - corner_j_, layer - floor));
-                        voxels[static_cast<std::size_t>(k)] =
-                            open ? Voxel{} : Voxel{.distance = -Voxel::far, .solid = ground};
+                        // The floor's distance within the band, as generated ground has it.
+                        const double to_floor = std::clamp(
+                            (layer - floor + 0.5) * store_.layers().thickness, -band, band);
+                        Voxel& voxel = voxels[static_cast<std::size_t>(k)];
+                        voxel.distance = hog::globe::distance_in_mm(to_floor);
+                        if (!open) {
+                            voxel.solid = ground;
+                            if (layer >= floor) {
+                                voxel.distance = -Voxel::far; // a wall the shape raised
+                            }
+                        }
                     }
                     store_.put(brick, hog::globe::Brick::pack(voxels));
                     bricks_.push_back(brick);
@@ -93,6 +104,15 @@ public:
     [[nodiscard]] std::int64_t amount(std::uint32_t i, std::uint32_t j, int layer) {
         return region_->at(at(i, j, layer)).liquid_amount;
     }
+    [[nodiscard]] std::int64_t grain(std::uint32_t i, std::uint32_t j, int layer) {
+        return region_->at(at(i, j, layer)).grain_amount;
+    }
+    [[nodiscard]] int distance(std::uint32_t i, std::uint32_t j, int layer) {
+        return region_->at(at(i, j, layer)).distance;
+    }
+    [[nodiscard]] std::int64_t carried(std::uint32_t i, std::uint32_t j) {
+        return region_->carried(0, corner_i_ + i, corner_j_ + j).amount;
+    }
     // All the liquid up a column.
     [[nodiscard]] std::int64_t column(std::uint32_t i, std::uint32_t j) {
         std::int64_t total = 0;
@@ -104,14 +124,25 @@ public:
     void pour(std::uint32_t i, std::uint32_t j, int layer, std::int64_t amount) {
         region_->pour(at(i, j, layer), static_cast<std::uint16_t>(amount));
     }
+    void pile(std::uint32_t i, std::uint32_t j, int layer, Material material, std::int64_t amount) {
+        region_->pile(at(i, j, layer), material, static_cast<std::uint16_t>(amount));
+    }
+    void suspend(std::uint32_t i, std::uint32_t j, int layer, Material material,
+                 std::int64_t amount) {
+        region_->suspend(at(i, j, layer), material, amount);
+    }
 
     // Steps `seconds` at a time while anything changes, up to `most` times; how many it took.
     int settle(int most, double seconds = tick) {
         for (int step = 1; step <= most; ++step) {
             const std::int64_t before = region_->liquid();
+            const std::int64_t grain_before = region_->grain();
             const Stepped stepped = region_->step(seconds);
             if (region_->liquid() != before + stepped.from_sea) {
                 FAIL("liquid lost or made: " << before << " -> " << region_->liquid());
+            }
+            if (region_->grain() != grain_before + stepped.eroded) {
+                FAIL("grain lost or made: " << grain_before << " -> " << region_->grain());
             }
             if (stepped.changed == 0) {
                 return step;

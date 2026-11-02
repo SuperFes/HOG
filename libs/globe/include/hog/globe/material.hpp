@@ -39,6 +39,7 @@ struct Properties {
     double saturated_repose = 0.0; // and soaked through, when soil slumps as mud
     double critical_shear = 0.0;   // pascals of a flow's drag it withstands before it's carried
     double erodibility = 0.0;      // m/s of it carried off per pascal over that
+    double settling = 0.0;         // m/s it sinks through still water once carried
 };
 
 [[nodiscard]] const Properties& properties(Material material);

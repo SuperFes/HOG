@@ -710,14 +710,15 @@ TEST_CASE("a player's digging is sent back as bricks to everyone", "[app][server
     REQUIRE(server->run(timer, [] { return start; }, stop));
     REQUIRE(server->voxels().size() > 0);
     // Both are sent every brick the digging changed, which hold the hole as the server does;
-    // the water filling the hole may have sent some again.
+    // the water filling the hole may have sent some again, and may have sent bricks it then
+    // let go again that aren't heard yet.
     for (const Digger& digger : diggers) {
         REQUIRE(digger.bricks.size() >= server->voxels().size());
         hog::globe::VoxelStore theirs{generator.layers()};
         for (const hog::protocol::SentBrick& brick : digger.bricks) {
             REQUIRE(hog::globe::take_brick(theirs, {.key = brick.key, .bytes = brick.bytes}));
         }
-        CHECK(theirs.sites() == server->voxels().sites());
+        CHECK(std::ranges::includes(theirs.sites(), server->voxels().sites()));
         const hog::globe::Cell cell = hog::globe::cell_under(direction, generator.layers().level);
         const hog::globe::Site site{
             .face = cell.face,

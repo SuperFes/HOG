@@ -255,3 +255,87 @@ TEST_CASE("water in the ground drains down to what the ground keeps, and no furt
     CHECK(block.amount(12, 12, -1) + block.amount(12, 12, -2) + block.amount(12, 12, -3) == pores);
     CHECK(block.amount(12, 12, 0) == 0);
 }
+
+TEST_CASE("a current scours a soft bed and carries it off; what it carries settles out once the "
+          "water stands",
+          "[flow][region]") {
+    using hog::globe::Material;
+    const auto trench = [](std::uint32_t /*i*/, std::uint32_t j, int /*layer*/) { return j == 12; };
+    Block block{floor_above_sea(100.0), false, trench, Material::Soil};
+    const int bed_before = block.distance(1, 12, -1);
+    for (int layer = 0; layer < 8; ++layer) {
+        block.pour(1, 12, layer, full);
+    }
+    block.settle(200);
+    // The head running off the source scoured the bed there, and the soil is on the move.
+    CHECK(block.distance(1, 12, -1) > bed_before);
+    CHECK(block.region().grain() > 0);
+    // Once the water lies level, what it carried lies down again as soil on the trench's floor.
+    block.settle(3'000);
+    block.settle(60, 60.0);
+    std::int64_t carried = 0;
+    std::int64_t piled = 0;
+    for (std::uint32_t i = 0; i < Block::side; ++i) {
+        carried += block.carried(i, 12);
+        piled += block.grain(i, 12, 0);
+    }
+    CHECK(carried == 0);
+    CHECK(piled == block.region().grain());
+    CHECK(piled > 0);
+}
+
+TEST_CASE("still water wears nothing off its bed", "[flow][region]") {
+    using hog::globe::Material;
+    const auto shaft = [](std::uint32_t i, std::uint32_t j, int /*layer*/) {
+        return i == 12 && j == 12;
+    };
+    Block block{floor_above_sea(100.0), false, shaft, Material::Sand};
+    const int bed_before = block.distance(12, 12, -1);
+    for (int layer = 0; layer < 8; ++layer) {
+        block.pour(12, 12, layer, full);
+    }
+    block.settle(200);
+    CHECK(block.distance(12, 12, -1) == bed_before);
+    CHECK(block.region().grain() == 0);
+}
+
+TEST_CASE("carried sand settles out at once, carried mud over hours", "[flow][region]") {
+    using hog::globe::Material;
+    const auto shaft = [](std::uint32_t i, std::uint32_t j, int /*layer*/) {
+        return i == 12 && j == 12;
+    };
+    Block sandy{floor_above_sea(100.0), false, shaft};
+    sandy.pour(12, 12, 0, full);
+    sandy.suspend(12, 12, 0, Material::Sand, 1000);
+    sandy.settle(1, 60.0);
+    CHECK(sandy.carried(12, 12) == 0);
+    CHECK(sandy.grain(12, 12, 0) == 1000);
+    CHECK(sandy.region().at(sandy.at(12, 12, 0)).grain == Material::Sand);
+
+    Block muddy{floor_above_sea(100.0), false, shaft};
+    muddy.pour(12, 12, 0, full);
+    muddy.suspend(12, 12, 0, Material::Sediment, 1000);
+    muddy.settle(1, 60.0);
+    CHECK(muddy.carried(12, 12) > 900);
+    for (int hour = 0; hour < 24; ++hour) {
+        muddy.settle(1, 3'600.0);
+    }
+    CHECK(muddy.carried(12, 12) == 0);
+    CHECK(muddy.grain(12, 12, 0) == 1000);
+}
+
+TEST_CASE("grain piled on the bed takes room from the liquid and stands under its level",
+          "[flow][region]") {
+    using hog::globe::Material;
+    const auto pair = [](std::uint32_t i, std::uint32_t j, int /*layer*/) {
+        return (i == 11 || i == 12) && j == 12;
+    };
+    Block block{floor_above_sea(100.0), false, pair};
+    block.pile(11, 12, 0, Material::Basalt, full / 2);
+    block.pour(12, 12, 1, full);
+    block.settle(200);
+    CHECK(block.amount(11, 12, 0) <= full / 2);
+    CHECK(block.grain(11, 12, 0) == full / 2);
+    const std::int64_t over_pile = (full / 2) + block.column(11, 12);
+    CHECK(std::abs(over_pile - block.column(12, 12)) <= 7);
+}

@@ -36,8 +36,14 @@ std::uint64_t stack_key(BrickSite site) noexcept {
     return column_key(site.face, site.i, site.j);
 }
 
+// Open to liquid: not shaped matter, nor a voxel grain fills.
 bool open(const Voxel& voxel) noexcept {
-    return voxel.solid == Material::Air;
+    return voxel.solid == Material::Air && voxel.grain_amount < full;
+}
+
+// What ground a closed voxel is: its shaped matter, or the grain filling it.
+Material ground_of(const Voxel& voxel) noexcept {
+    return voxel.solid != Material::Air ? voxel.solid : voxel.grain;
 }
 
 std::int64_t head(int bottom, std::int64_t amount) noexcept {
@@ -51,11 +57,19 @@ std::int64_t capacity(int bottom, int top) noexcept {
 // What a ground's pores can hold, and what they keep against gravity: half of it, as soil
 // drains to about half its porosity and holds the rest.
 std::int64_t pores(const Voxel& voxel) noexcept {
-    return globe::amount_of(globe::properties(voxel.solid).porosity);
+    return globe::amount_of(globe::properties(ground_of(voxel)).porosity);
 }
 
 std::int64_t kept(const Voxel& voxel) noexcept {
     return pores(voxel) / 2;
+}
+
+// The grain left in a voxel: what it holds, or none of any kind.
+void set_grain(Voxel& voxel, std::int64_t amount) noexcept {
+    voxel.grain_amount = static_cast<std::uint16_t>(amount);
+    if (amount == 0) {
+        voxel.grain = Material::Air;
+    }
 }
 
 } // namespace
@@ -78,6 +92,15 @@ void Region::load(BrickSite site) {
 void Region::unload(BrickSite site) {
     if (held_.erase(globe::brick_key(site)) == 0) {
         return;
+    }
+    for (std::uint32_t b = 0; b < globe::brick_side; ++b) {
+        for (std::uint32_t a = 0; a < globe::brick_side; ++a) {
+            const auto found = loads_.find(column_key(site.face, (site.i * globe::brick_side) + a,
+                                                      (site.j * globe::brick_side) + b));
+            if (found != loads_.end() && found->second.layer / globe::brick_side == site.layer) {
+                loads_.erase(found);
+            }
+        }
     }
     const auto stack = stacks_.find(stack_key(site));
     std::erase(stack->second, site.layer);
@@ -134,6 +157,23 @@ void Region::pour(Site site, std::uint16_t amount) {
     held(globe::brick_of(site))->dirty = true;
 }
 
+void Region::pile(Site site, Material material, std::uint16_t amount) {
+    Voxel* at = voxel(site);
+    HOG_ASSERT(at != nullptr, "the voxel's brick isn't held");
+    at->grain = material;
+    set_grain(*at, amount);
+    held(globe::brick_of(site))->dirty = true;
+}
+
+void Region::suspend(Site site, Material material, std::int64_t amount) {
+    Load& load = loads_[column_key(site.face, site.i, site.j)];
+    if (amount > load.amount) {
+        load.material = material;
+    }
+    load.amount += amount;
+    load.layer = site.layer;
+}
+
 std::int64_t Region::liquid() const {
     std::int64_t total = 0;
     for (const auto& [key, brick] : held_) {
@@ -142,6 +182,26 @@ std::int64_t Region::liquid() const {
         }
     }
     return total;
+}
+
+std::int64_t Region::grain() const {
+    std::int64_t total = 0;
+    for (const auto& [key, brick] : held_) {
+        for (const Voxel& voxel : brick.voxels) {
+            total += voxel.grain_amount;
+        }
+    }
+    for (const auto& [key, load] : loads_) {
+        total += load.amount;
+    }
+    return total;
+}
+
+Region::Carried Region::carried(std::uint8_t face, std::uint32_t i, std::uint32_t j) const {
+    const auto found = loads_.find(column_key(face, i, j));
+    return found == loads_.end()
+               ? Carried{}
+               : Carried{.material = found->second.material, .amount = found->second.amount};
 }
 
 Region::Flux Region::flux(std::uint8_t face, std::uint32_t i, std::uint32_t j) const {
@@ -259,12 +319,14 @@ void Region::hold_sea(const std::vector<Column>& columns, Stepped& stepped) {
             column,
             [&](Site site, Held& brick, Voxel& here) {
                 // At the edge of what's held, the sea beyond stands at its level.
-                if (here.liquid_amount >= full || !open_to_sea(site) || !at_edge(site)) {
+                const std::int64_t room = full - here.grain_amount;
+                if (std::int64_t{here.liquid_amount} >= room || !open_to_sea(site) ||
+                    !at_edge(site)) {
                     return;
                 }
-                stepped.from_sea += full - here.liquid_amount;
+                stepped.from_sea += room - here.liquid_amount;
                 here.liquid = liquid_;
-                here.liquid_amount = static_cast<std::uint16_t>(full);
+                here.liquid_amount = static_cast<std::uint16_t>(room);
                 brick.dirty = true;
             },
             [] {});
@@ -287,6 +349,7 @@ void Region::gather(std::vector<Column>& columns) {
                 }
                 run->top = layer + 1;
                 run->amount += voxel.liquid_amount;
+                run->bed += voxel.grain_amount;
                 if (voxel.liquid_amount > 0 && run->liquid == Material::Air) {
                     run->liquid = voxel.liquid;
                 }
@@ -299,6 +362,56 @@ void Region::gather(std::vector<Column>& columns) {
             });
         column.count = sections_.size() - column.first;
         column_at_[column_key(column.face, column.i, column.j)] = c;
+    }
+    take_up_loads(columns);
+}
+
+void Region::take_up_loads(const std::vector<Column>& columns) {
+    for (const Column& column : columns) {
+        const auto found = loads_.find(column_key(column.face, column.i, column.j));
+        if (found == loads_.end()) {
+            continue;
+        }
+        // The section it was carried in, else the lowest with liquid, else the lowest, where
+        // it lies down dry.
+        std::optional<std::size_t> into;
+        for (std::size_t s = column.first; s < column.first + column.count; ++s) {
+            const Section& section = sections_[s];
+            if (std::cmp_less_equal(section.bottom, found->second.layer) &&
+                std::cmp_less(found->second.layer, section.top)) {
+                into = s;
+                break;
+            }
+            if (!into || (section.amount > 0 && sections_[*into].amount == 0)) {
+                into = s;
+            }
+        }
+        if (!into) {
+            continue;
+        }
+        Section& section = sections_[*into];
+        if (found->second.amount > section.load) {
+            section.carried = found->second.material;
+        }
+        section.load += found->second.amount;
+        loads_.erase(found);
+    }
+}
+
+void Region::keep_loads(const std::vector<Column>& columns) {
+    for (const Column& column : columns) {
+        for (std::size_t s = column.first; s < column.first + column.count; ++s) {
+            const Section& section = sections_[s];
+            if (section.load <= 0) {
+                continue;
+            }
+            Load& load = loads_[column_key(column.face, column.i, column.j)];
+            if (section.load > load.amount) {
+                load.material = section.carried;
+                load.layer = static_cast<std::uint32_t>(section.bottom);
+            }
+            load.amount += section.load;
+        }
     }
 }
 
@@ -341,8 +454,8 @@ std::vector<std::int64_t> Region::heads(const std::vector<Meeting>& meetings) co
     std::vector<bool> is_full(sections_.size());
     for (std::size_t k = 0; k < sections_.size(); ++k) {
         const Section& section = sections_[k];
-        heads[k] = head(section.bottom, section.amount);
-        is_full[k] = section.amount >= capacity(section.bottom, section.top);
+        heads[k] = head(section.bottom, section.bed + section.amount);
+        is_full[k] = section.amount >= capacity(section.bottom, section.top) - section.bed;
     }
     // A full section's head is the highest surface pushing on it, through other full sections:
     // so a head passes along a tunnel while the tunnel holds only what fills it.
@@ -381,13 +494,15 @@ std::vector<Region::Transfer> Region::transfers(const std::vector<Column>& colum
         }
         // Only liquid standing up to the opening can run out through it.
         const std::int64_t above_sill =
-            head(sections_[from].bottom, sections_[from].amount) - head(meeting.window, 0);
-        const std::int64_t amount =
-            std::min(std::abs(here_head - there_head) / closing, above_sill);
+            head(sections_[from].bottom, sections_[from].bed + sections_[from].amount) -
+            head(meeting.window, 0);
+        const std::int64_t fall = std::abs(here_head - there_head);
+        const std::int64_t amount = std::min(fall / closing, above_sill);
         if (amount > 0) {
             transfers.push_back({.from = from,
                                  .to = to,
                                  .amount = amount,
+                                 .fall = fall,
                                  .column = meeting.column,
                                  .along_i = meeting.along_i,
                                  .outward = outward});
@@ -405,7 +520,8 @@ std::vector<Region::Transfer> Region::transfers(const std::vector<Column>& colum
         in[transfer.to] += transfer.amount;
     }
     scale(transfers, &Transfer::to, in, [&](std::size_t k) {
-        return capacity(sections_[k].bottom, sections_[k].top) - sections_[k].amount;
+        return capacity(sections_[k].bottom, sections_[k].top) - sections_[k].bed -
+               sections_[k].amount;
     });
     std::erase_if(transfers, [](const Transfer& transfer) { return transfer.amount <= 0; });
     return transfers;
@@ -470,12 +586,16 @@ void Region::settle(const std::vector<Column>& columns, Stepped& stepped) {
                 }
                 const Section& section = sections_[next++];
                 const auto count = static_cast<std::int64_t>(run.size());
-                HOG_ASSERT(section.amount <= count * full, "a section holding more than fills it");
-                // Full from the bottom up, the rest in the voxel over them.
+                HOG_ASSERT(section.amount <= (count * full) - section.bed,
+                           "a section holding more than fills it");
+                // Full from the bottom up, over the grain piled there, the rest in the voxel
+                // over them.
+                std::int64_t left = section.amount;
                 for (std::int64_t k = 0; k < count; ++k) {
                     auto [site, brick, voxel] = run[static_cast<std::size_t>(k)];
                     const std::int64_t amount =
-                        std::clamp(section.amount - (k * full), std::int64_t{0}, full);
+                        std::clamp(left, std::int64_t{0}, full - voxel->grain_amount);
+                    left -= amount;
                     const Material liquid = amount > 0 ? section.liquid : Material::Air;
                     const auto held_amount = static_cast<std::uint16_t>(amount);
                     const std::int64_t before = voxel->liquid_amount;
@@ -512,13 +632,17 @@ void Region::report_wet(const Column& column, Stepped& stepped) const {
     }
 }
 
-std::int64_t Region::seeped(double rate, double seconds, Site site) const {
-    const double units = rate * seconds / world_->store().layers().thickness * full;
-    const double whole = std::floor(units);
-    const std::uint64_t draw = hash_values(steps_, std::uint64_t{site.face}, std::uint64_t{site.i},
-                                           std::uint64_t{site.j}, std::uint64_t{site.layer});
+std::int64_t Region::dithered(double value, Site site, std::uint64_t salt) const {
+    const double whole = std::floor(value);
+    const std::uint64_t draw =
+        hash_values(steps_, salt, std::uint64_t{site.face}, std::uint64_t{site.i},
+                    std::uint64_t{site.j}, std::uint64_t{site.layer});
     const double unit = static_cast<double>(draw >> 11U) * 0x1.0p-53;
-    return static_cast<std::int64_t>(whole) + (unit < units - whole ? 1 : 0);
+    return static_cast<std::int64_t>(whole) + (unit < value - whole ? 1 : 0);
+}
+
+std::int64_t Region::seeped(double rate, double seconds, Site site) const {
+    return dithered(rate * seconds / world_->store().layers().thickness * full, site, 0);
 }
 
 // Liquid moves `seconds` of seepage from `over` into `under`: down into the ground at what it
@@ -527,8 +651,8 @@ std::int64_t Region::seep_down(Site site, Voxel& over, Voxel& under, double seco
     if (open(over) && open(under)) {
         return 0;
     }
-    const double over_rate = open(over) ? 1.0 : globe::properties(over.solid).conductivity;
-    const double under_rate = open(under) ? 1.0 : globe::properties(under.solid).conductivity;
+    const double over_rate = open(over) ? 1.0 : globe::properties(ground_of(over)).conductivity;
+    const double under_rate = open(under) ? 1.0 : globe::properties(ground_of(under)).conductivity;
     const std::int64_t give = open(over) ? over.liquid_amount : over.liquid_amount - kept(over);
     const std::int64_t room = (open(under) ? full : pores(under)) - under.liquid_amount;
     const std::int64_t moved =
@@ -573,10 +697,19 @@ Stepped Region::step(double seconds) {
     for (const Transfer& transfer : transfers(all)) {
         Section& from = sections_[transfer.from];
         Section& to = sections_[transfer.to];
+        // The load goes with the liquid, as thick as it's carried.
+        const std::int64_t load = from.load * transfer.amount / from.amount;
+        if (load > to.load) {
+            to.carried = from.carried;
+        }
+        from.load -= load;
+        to.load += load;
         from.amount -= transfer.amount;
         to.amount += transfer.amount;
         from.moving = true;
         to.moving = true;
+        from.fall = std::max(from.fall, transfer.fall);
+        to.fall = std::max(to.fall, transfer.fall);
         if (to.liquid == Material::Air) {
             to.liquid = from.liquid;
         }
@@ -587,10 +720,174 @@ Stepped Region::step(double seconds) {
     }
     settle(all, stepped);
     seep(all, seconds, stepped);
+    carry(all, seconds, stepped);
+    keep_loads(all);
     // What settling and seeping took from the edge, the sea gives back before anyone sees it
     // short.
     hold_sea(all, stepped);
     return stepped;
+}
+
+void Region::carry(const std::vector<Column>& columns, double seconds, Stepped& stepped) {
+    const double thickness = world_->store().layers().thickness;
+    const double gravity = world_->generator().planet().gravity;
+    for (const Column& column : columns) {
+        std::size_t next = column.first;
+        std::optional<Bed> bed;
+        walk(
+            column,
+            [&](Site site, Held& brick, Voxel& here) {
+                if (!bed) {
+                    bed = Bed{.site = site, .brick = &brick, .bottom = &here};
+                    if (site.layer > 0) {
+                        const Site below{
+                            .face = site.face, .i = site.i, .j = site.j, .layer = site.layer - 1};
+                        bed->under = voxel(below);
+                        bed->under_brick = held(globe::brick_of(below));
+                    }
+                }
+            },
+            [&] {
+                if (!bed) {
+                    return;
+                }
+                Section& section = sections_[next++];
+                const double depth = static_cast<double>(section.amount) / full * thickness;
+                if (section.fall > 0 && section.liquid != Material::Air) {
+                    // Drag on the bed under uniform flow: the liquid's weight down the slope of
+                    // its surface, the columns taken as wide as the voxels are thick.
+                    const double slope = static_cast<double>(section.fall) / full;
+                    const double shear =
+                        globe::properties(section.liquid).density * gravity * depth * slope;
+                    wear(section, *bed, shear, seconds, stepped);
+                }
+                drop(section, *bed, depth, seconds, stepped);
+                bed.reset();
+            });
+    }
+}
+
+void Region::wear(Section& section, const Bed& bed, double shear, double seconds,
+                  Stepped& stepped) {
+    // Grain on the bed goes first, then a voxel full of grain under it, then the shaped ground.
+    Voxel* loose = nullptr;
+    Held* loose_brick = nullptr;
+    if (bed.bottom->grain_amount > 0) {
+        loose = bed.bottom;
+        loose_brick = bed.brick;
+    } else if (bed.under != nullptr && bed.under->solid == Material::Air &&
+               bed.under->grain_amount > 0) {
+        loose = bed.under;
+        loose_brick = bed.under_brick;
+    } else if (bed.under == nullptr || open(*bed.under)) {
+        return;
+    }
+    const Material material = loose != nullptr ? loose->grain : bed.under->solid;
+    const globe::Properties& properties = globe::properties(material);
+    if (shear <= properties.critical_shear) {
+        return;
+    }
+    const double rate = properties.erodibility * (shear - properties.critical_shear);
+    // A flow carries no more than its own bulk.
+    const std::int64_t room = section.amount - section.load;
+    if (room <= 0) {
+        return;
+    }
+    const double thickness = world_->store().layers().thickness;
+    std::int64_t units = 0;
+    if (loose != nullptr) {
+        units = std::min({dithered(rate * seconds / thickness * full, bed.site, 1),
+                          std::int64_t{loose->grain_amount}, room});
+        if (units <= 0) {
+            return;
+        }
+        set_grain(*loose, loose->grain_amount - units);
+        if (loose == bed.bottom) {
+            section.bed -= units;
+        }
+        loose_brick->dirty = true;
+    } else {
+        const double thickness_mm = thickness * 1000.0;
+        const std::int64_t mm =
+            std::min({dithered(rate * seconds * 1000.0, bed.site, 1),
+                      static_cast<std::int64_t>(static_cast<double>(room) * thickness_mm / full),
+                      static_cast<std::int64_t>(thickness_mm)});
+        if (mm <= 0) {
+            return;
+        }
+        units = std::llround(static_cast<double>(mm) * full / thickness_mm);
+        scour(bed.site, static_cast<int>(mm));
+        stepped.eroded += units;
+    }
+    if (units > section.load) {
+        section.carried = material;
+    }
+    section.load += units;
+    stepped.changed += units;
+}
+
+void Region::drop(Section& section, const Bed& bed, double depth, double seconds,
+                  Stepped& stepped) {
+    if (section.load <= 0) {
+        return;
+    }
+    const double sunk = globe::properties(section.carried).settling * seconds;
+    // What settles out: the share of the depth the load sinks through, all of it if dry.
+    std::int64_t dropped =
+        depth <= 0.0 || sunk >= depth
+            ? section.load
+            : dithered(static_cast<double>(section.load) * sunk / depth, bed.site, 2);
+    dropped = std::min({dropped, full - bed.bottom->grain_amount,
+                        capacity(section.bottom, section.top) - section.bed - section.amount});
+    if (dropped <= 0) {
+        return;
+    }
+    if (dropped > std::int64_t{bed.bottom->grain_amount}) {
+        bed.bottom->grain = section.carried;
+    }
+    set_grain(*bed.bottom, bed.bottom->grain_amount + dropped);
+    bed.brick->dirty = true;
+    section.bed += dropped;
+    section.load -= dropped;
+    if (section.load == 0) {
+        section.carried = Material::Air;
+    }
+    stepped.changed += dropped;
+}
+
+void Region::scour(Site bed, int mm) {
+    const auto band =
+        static_cast<int>(globe::distance_in_mm(globe::distance_band(world_->store().layers())));
+    const auto push = [&](Voxel& voxel) {
+        voxel.distance = static_cast<std::int16_t>(std::min(band, voxel.distance + mm));
+        if (voxel.distance > 0) {
+            voxel.solid = Material::Air;
+        }
+    };
+    // Up through the open voxels, which stand further from the bed, and down through the
+    // ground, which lies deeper under it, as far as each tells this surface's distance: to
+    // the band's edge, or where another surface's distance takes over.
+    int last = -band - 1;
+    for (Site site = bed;; ++site.layer) {
+        Voxel* here = voxel(site);
+        if (here == nullptr || !open(*here) || here->distance >= band || here->distance <= last) {
+            break;
+        }
+        last = here->distance;
+        push(*here);
+        held(globe::brick_of(site))->dirty = true;
+    }
+    last = band + 1;
+    for (Site site = bed; site.layer > 0;) {
+        --site.layer;
+        Voxel* here = voxel(site);
+        if (here == nullptr || here->distance <= -band || here->distance >= last) {
+            break;
+        }
+        last = here->distance;
+        push(*here);
+        held(globe::brick_of(site))->dirty = true;
+    }
 }
 
 std::vector<BrickSite> Region::flush() {
