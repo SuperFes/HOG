@@ -3,6 +3,7 @@
 #include <hog/core/math.hpp>
 #include <hog/physics/space.hpp>
 
+#include <functional>
 #include <memory>
 
 namespace hog::physics {
@@ -41,6 +42,11 @@ public:
     // Moves on through whole steps of `seconds` and what was left over from before, so the same
     // strides give the same moves at any frame rate.
     void move(const Stride& stride, double seconds);
+
+    // Says how steep a slope, in radians from level, holds someone standing at a place; without it
+    // `steepest` does everywhere. Asked once a step, so sand, ice and wet clay can differ.
+    using Grip = std::function<double(WorldPosition feet)>;
+    void set_grip(Grip grip);
 
     // Puts the character's feet somewhere, at rest.
     void place(WorldPosition feet);

@@ -7,6 +7,7 @@
 #include <glm/geometric.hpp>
 
 #include <algorithm>
+#include <utility>
 
 namespace hog::physics {
 
@@ -14,6 +15,7 @@ struct Character::Impl {
     Space::Impl* space = nullptr;
     CharacterSettings settings;
     JPH::Ref<JPH::CharacterVirtual> body;
+    Character::Grip grip;
     double banked = 0.0; // seconds not yet stepped through
     // How it actually moved over the last step; Jolt's own velocity still holds the step's pull
     // into the ground.
@@ -71,6 +73,9 @@ void Character::move(const Stride& stride, double seconds) {
         const DVec3 up = up_at(body.GetPosition());
         body.SetUp(to_jolt(up));
         body.SetRotation(upright(up));
+        if (impl_->grip) {
+            body.SetMaxSlopeAngle(static_cast<float>(impl_->grip(from_jolt(body.GetPosition()))));
+        }
 
         DVec3 along = stride.along - (up * glm::dot(stride.along, up));
         if (const double length = glm::length(along); length > 1.0) {
@@ -104,6 +109,13 @@ void Character::move(const Stride& stride, double seconds) {
                             impl_->space->scratch);
         impl_->moving = from_jolt(body.GetPosition()) - from_jolt(from);
         impl_->moving /= step_seconds;
+    }
+}
+
+void Character::set_grip(Grip grip) {
+    impl_->grip = std::move(grip);
+    if (!impl_->grip) {
+        impl_->body->SetMaxSlopeAngle(static_cast<float>(impl_->settings.steepest));
     }
 }
 

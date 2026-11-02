@@ -209,3 +209,26 @@ TEST_CASE("a character standing still on a walkable slope stays where it is", "[
         CHECK(character.standing());
     }
 }
+
+TEST_CASE("a character slides down a slope its footing can't hold, and stays on one it can",
+          "[physics][character]") {
+    constexpr double degrees = 30.0;
+    const double tilt = std::tan(glm::radians(degrees));
+    for (const double holds : {20.0, 45.0}) {
+        Stage stage{Scenery{}.quad({-20.0, -20.0, -20.0 * tilt}, {20.0, -20.0, 20.0 * tilt},
+                                   {20.0, 20.0, 20.0 * tilt}, {-20.0, 20.0, -20.0 * tilt})};
+        Character character{stage.space, stage.scenery.at({0.0, 0.0, 0.0})};
+        character.move(still, 0.5);
+        character.set_grip([holds](WorldPosition) { return glm::radians(holds); });
+        const DVec3 settled = stage.scenery.local(character.feet());
+        character.move(still, 2.0);
+        const double moved = glm::length(stage.scenery.local(character.feet()) - settled);
+        INFO(holds);
+        if (holds < degrees) {
+            CHECK(moved > 1.0);
+            CHECK(stage.scenery.local(character.feet()).x < settled.x);
+        } else {
+            CHECK(moved < 0.02);
+        }
+    }
+}
