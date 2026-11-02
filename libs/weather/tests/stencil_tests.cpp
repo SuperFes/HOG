@@ -2,7 +2,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <glm/geometric.hpp>
+#include <glm/matrix.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <numbers>
 
@@ -77,4 +80,49 @@ TEST_CASE("a cell's neighbours are about a cell's width away, level with the gro
         CHECK(links[4].direction == stencil().up(column));
         CHECK(links[5].direction == -stencil().up(column));
     }
+}
+
+TEST_CASE("the links' fitted gradient takes a linear field exactly at any cell, skewed or not",
+          "[weather][stencil]") {
+    const Grid grid{.level = 4, .layers = 3, .bottom = 100'000.0, .thickness = 1000.0};
+    const Stencil stencil{grid};
+    const hog::DVec3 slope{0.3, -0.7, 0.2};
+    double worst = 0.0;
+    double square_worst = 0.0;
+    for (std::size_t column = 0; column < grid.columns(); ++column) {
+        for (int layer = 0; layer < grid.layers; ++layer) {
+            const std::size_t cell = grid.index(column, layer);
+            const auto& links = stencil.links(cell);
+            // Tangent offsets, as a parcel's departure point lies, and a little up.
+            const hog::Vec3 up = stencil.up(column);
+            const hog::Vec3 across = glm::normalize(glm::cross(up, hog::Vec3{0.3F, 0.5F, 0.8F}));
+            const hog::Vec3 offset =
+                (across * 40.0F) + (glm::cross(up, across) * 25.0F) + (up * 3.0F);
+            const hog::Vec3 w = gradient_weights(links, 0, offset);
+            // A field linear in position: each neighbour differs by the slope along its way.
+            double change = 0.0;
+            double square = 0.0;
+            for (const Link& link : links) {
+                if (link.cell != Link::none) {
+                    const double along = static_cast<double>(link.distance) *
+                                         glm::dot(slope, hog::DVec3{link.direction});
+                    change += along / static_cast<double>(link.distance) *
+                              static_cast<double>(glm::dot(link.direction, w));
+                    // As if the neighbours lay square about the cell.
+                    square += along / static_cast<double>(link.distance) * 0.5 *
+                              static_cast<double>(glm::dot(link.direction, offset));
+                }
+            }
+            const double exact = glm::dot(slope, hog::DVec3{offset});
+            // The edge layers lack a neighbour up or down, so only what's tangent is exact there.
+            if (layer > 0 && layer + 1 < grid.layers) {
+                worst = std::max(worst, std::abs(change - exact) / (1.0 + std::abs(exact)));
+                square_worst =
+                    std::max(square_worst, std::abs(square - exact) / (1.0 + std::abs(exact)));
+            }
+        }
+    }
+    CHECK(worst < 1e-2);
+    // Where the cells are skewed, taking the neighbours as square is far out.
+    CHECK(square_worst > 0.1);
 }

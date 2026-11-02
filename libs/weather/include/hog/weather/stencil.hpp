@@ -22,6 +22,20 @@ struct Link {
 
 inline constexpr int links_per_cell = 6;
 
+// The matrix that takes a sum of the open links' directions each times a value's difference over
+// the link's distance to the value's gradient: the inverse of the sum of the directions' squares.
+[[nodiscard]] Mat3 gradient_matrix(const std::array<Link, links_per_cell>& links,
+                                   std::uint8_t closed);
+
+// The vector `w` that gives the change in a value from a cell's middle to a point `offset` from it
+// as the sum, over the links not in `closed` (a bit to a link), of the neighbour's difference over
+// its distance times the link's direction dotted with `w`: the least-squares gradient's. Where the
+// neighbours lie square about the cell that's half the offset along each link, but the cube
+// sphere's cells are skewed towards its edges and corners, where fitting keeps the gradient the
+// same whichever way it points. A direction with no neighbour open on either side is left out.
+[[nodiscard]] Vec3 gradient_weights(const std::array<Link, links_per_cell>& links,
+                                    std::uint8_t closed, Vec3 offset);
+
 // Who lies beside whom, found once for a grid: what the solver steps across. Links 0 to 3 are
 // the sides of the cell's column, 4 the layer above, 5 below.
 class Stencil {

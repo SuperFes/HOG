@@ -2,6 +2,7 @@
 #include <hog/weather/stencil.hpp>
 
 #include <glm/geometric.hpp>
+#include <glm/matrix.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -28,6 +29,26 @@ void pair_back(std::vector<std::array<Link, links_per_cell>>& all) {
 }
 
 } // namespace
+
+Mat3 gradient_matrix(const std::array<Link, links_per_cell>& links, std::uint8_t closed) {
+    Mat3 sum{0.0F};
+    for (std::size_t i = 0; i < links.size(); ++i) {
+        if (links[i].cell != Link::none && ((closed >> i) & 1U) == 0U) {
+            sum += glm::outerProduct(links[i].direction, links[i].direction);
+        }
+    }
+    // Left to nothing, a direction with no neighbour stays at rest rather than blowing up.
+    constexpr float least = 1e-3F;
+    sum[0][0] += least;
+    sum[1][1] += least;
+    sum[2][2] += least;
+    return glm::inverse(sum);
+}
+
+Vec3 gradient_weights(const std::array<Link, links_per_cell>& links, std::uint8_t closed,
+                      Vec3 offset) {
+    return gradient_matrix(links, closed) * offset;
+}
 
 Stencil::Stencil(const Grid& grid) : grid_{grid} {
     const std::size_t columns = grid.columns();

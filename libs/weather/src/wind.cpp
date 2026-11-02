@@ -6,6 +6,7 @@
 #include <glm/geometric.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <numbers>
 #include <optional>
@@ -47,16 +48,43 @@ Vec3 rotate_about_z(Vec3 v, double angle) {
     return {(v.x * c) - (v.y * s), (v.x * s) + (v.y * c), v.z};
 }
 
-// How much of a face's slope a cell takes: across an axis the mean of its two faces', and against
-// the ground the one open face's alone, as there the pressure is level across the other.
-double share(const Field& field, const Stencil& stencil, std::size_t cell, std::size_t link) {
-    return open(field, stencil.links(cell)[link ^ 1]) ? 0.5 : 1.0;
+// The bit of each of a cell's links that is closed to it.
+std::uint8_t closed_links(const Field& field, const Stencil& stencil, std::size_t cell) {
+    std::uint8_t closed = 0;
+    const auto& links = stencil.links(cell);
+    for (std::size_t i = 0; i < links.size(); ++i) {
+        closed |= static_cast<std::uint8_t>(open(field, links[i]) ? 0U : 1U << i);
+    }
+    return closed;
+}
+
+// Per open cell, for each link, the direction a pressure's difference along that link pushes the
+// cell: the link's direction through the least-squares gradient's matrix, so that the slope they
+// sum to is the pressure's true one however the neighbours lie, and the gradient's transpose, the
+// divergence, has the same weights. Across an axis with a neighbour either side that's half the
+// direction, and against the ground with one, the whole.
+using Pushes = std::vector<std::array<Vec3, links_per_cell>>;
+
+Pushes pushes_of(const Field& field, const Stencil& stencil) {
+    Pushes found(field.air.size());
+    for (std::size_t cell = 0; cell < found.size(); ++cell) {
+        if (field.blocked[cell] != 0) {
+            continue;
+        }
+        const auto& links = stencil.links(cell);
+        const std::uint8_t closed = closed_links(field, stencil, cell);
+        const Mat3 matrix = gradient_matrix(links, closed);
+        for (std::size_t i = 0; i < links.size(); ++i) {
+            found[cell][i] = matrix * links[i].direction;
+        }
+    }
+    return found;
 }
 
 // The slope of a pressure at each open cell: the differences to its open neighbours along the
 // directions between them.
-void gradient(const Field& field, const Stencil& stencil, const std::vector<double>& pressure,
-              std::vector<DVec3>& out) {
+void gradient(const Field& field, const Stencil& stencil, const Pushes& pushes,
+              const std::vector<double>& pressure, std::vector<DVec3>& out) {
     for (std::size_t cell = 0; cell < out.size(); ++cell) {
         out[cell] = DVec3{0.0};
         if (field.blocked[cell] != 0) {
@@ -65,10 +93,8 @@ void gradient(const Field& field, const Stencil& stencil, const std::vector<doub
         const auto& links = stencil.links(cell);
         for (std::size_t i = 0; i < links.size(); ++i) {
             if (open(field, links[i])) {
-                out[cell] +=
-                    DVec3{links[i].direction} *
-                    (share(field, stencil, cell, i) * (pressure[links[i].cell] - pressure[cell]) /
-                     static_cast<double>(links[i].distance));
+                out[cell] += DVec3{pushes[cell][i]} * ((pressure[links[i].cell] - pressure[cell]) /
+                                                       static_cast<double>(links[i].distance));
             }
         }
     }
@@ -76,8 +102,8 @@ void gradient(const Field& field, const Stencil& stencil, const std::vector<doub
 
 // The gradient's transpose: minus the divergence, so that pressure and wind pair off exactly and
 // a pressure solved for removes all of the divergence it was solved against.
-void adjoint(const Field& field, const Stencil& stencil, const std::vector<DVec3>& wind,
-             std::vector<double>& out) {
+void adjoint(const Field& field, const Stencil& stencil, const Pushes& pushes,
+             const std::vector<DVec3>& wind, std::vector<double>& out) {
     std::ranges::fill(out, 0.0);
     for (std::size_t cell = 0; cell < out.size(); ++cell) {
         if (field.blocked[cell] != 0) {
@@ -88,11 +114,10 @@ void adjoint(const Field& field, const Stencil& stencil, const std::vector<DVec3
             if (!open(field, links[i])) {
                 continue;
             }
-            const double weight =
-                share(field, stencil, cell, i) / static_cast<double>(links[i].distance);
-            const DVec3 direction{links[i].direction};
-            out[cell] -= weight * glm::dot(wind[cell], direction);
-            out[links[i].cell] += weight * glm::dot(wind[cell], direction);
+            const double along = glm::dot(wind[cell], DVec3{pushes[cell][i]}) /
+                                 static_cast<double>(links[i].distance);
+            out[cell] -= along;
+            out[links[i].cell] += along;
         }
     }
 }
@@ -165,7 +190,8 @@ std::vector<DVec3> flux_of(const Field& field, const std::vector<double>& densit
 std::vector<double> divergence_of(const Field& field, const Stencil& stencil,
                                   const globe::Planet& planet) {
     std::vector<double> found(field.air.size());
-    adjoint(field, stencil, flux_of(field, densities(field, planet)), found);
+    adjoint(field, stencil, pushes_of(field, stencil), flux_of(field, densities(field, planet)),
+            found);
     for (double& value : found) {
         value = -value;
     }
@@ -173,10 +199,11 @@ std::vector<double> divergence_of(const Field& field, const Stencil& stencil,
 }
 
 // The operator the pressure solves: the gradient's transpose of the gradient.
-void apply_laplacian(const Field& field, const Stencil& stencil, const std::vector<double>& in,
-                     std::vector<double>& out, std::vector<DVec3>& slope) {
-    gradient(field, stencil, in, slope);
-    adjoint(field, stencil, slope, out);
+void apply_laplacian(const Field& field, const Stencil& stencil, const Pushes& pushes,
+                     const std::vector<double>& in, std::vector<double>& out,
+                     std::vector<DVec3>& slope) {
+    gradient(field, stencil, pushes, in, slope);
+    adjoint(field, stencil, pushes, slope, out);
 }
 
 double dot(const std::vector<double>& a, const std::vector<double>& b) {
@@ -223,14 +250,20 @@ Value reconstruct(const Field& field, const Stencil& stencil, std::size_t cell, 
     Value low = centre;
     Value high = centre;
     Value change{};
-    for (const Link& link : stencil.links(cell)) {
+    const auto& links = stencil.links(cell);
+    std::uint8_t closed = 0;
+    for (std::size_t i = 0; i < links.size(); ++i) {
+        closed |= static_cast<std::uint8_t>(open(field, links[i]) ? 0U : 1U << i);
+    }
+    const Vec3 along = gradient_weights(links, closed, offset);
+    for (const Link& link : links) {
         if (!open(field, link)) {
             continue;
         }
         const Value other = get(link.cell);
         low = glm::min(low, other);
         high = glm::max(high, other);
-        change += (other - centre) * (0.5F * glm::dot(link.direction, offset) / link.distance);
+        change += (other - centre) * (glm::dot(link.direction, along) / link.distance);
     }
     return glm::clamp(centre + change, low, high);
 }
@@ -351,7 +384,8 @@ int project(Field& field, const Stencil& stencil, const globe::Planet& planet, d
     const std::vector<double> density = densities(field, planet);
     // Gᵀ G φ = Gᵀ m: the pressure whose slope is the mass flux's divergent part.
     std::vector<double> residual(n);
-    adjoint(field, stencil, flux_of(field, density), residual);
+    const Pushes pushes = pushes_of(field, stencil);
+    adjoint(field, stencil, pushes, flux_of(field, density), residual);
 
     std::vector<double> inverse(n, 0.0);
     for (std::size_t cell = 0; cell < n; ++cell) {
@@ -381,7 +415,7 @@ int project(Field& field, const Stencil& stencil, const globe::Planet& planet, d
     int done = 0;
     while (done < iterations && start > 0.0 &&
            std::sqrt(dot(residual, residual)) > tolerance * start) {
-        apply_laplacian(field, stencil, direction, product, slope);
+        apply_laplacian(field, stencil, pushes, direction, product, slope);
         const double curvature = dot(direction, product);
         if (curvature <= 0.0) {
             break;
@@ -401,7 +435,7 @@ int project(Field& field, const Stencil& stencil, const globe::Planet& planet, d
         ++done;
     }
 
-    gradient(field, stencil, pressure, slope);
+    gradient(field, stencil, pushes, pressure, slope);
     for (std::size_t cell = 0; cell < n; ++cell) {
         if (field.blocked[cell] == 0) {
             field.air[cell].wind -= Vec3{slope[cell] / density[cell]};
