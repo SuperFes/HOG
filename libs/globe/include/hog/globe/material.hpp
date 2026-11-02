@@ -40,8 +40,22 @@ struct Properties {
     double critical_shear = 0.0;   // pascals of a flow's drag it withstands before it's carried
     double erodibility = 0.0;      // m/s of it carried off per pascal over that
     double settling = 0.0;         // m/s it sinks through still water once carried
+    // What holds a thing on it. A loose material sticks together by `cohesion` (pascals) and
+    // slides on a hard bed at `bed_friction`; hard ground grips what lies on it or walks on it at
+    // `friction`, dry, and `wet_friction` when a film of water or melt is on it. Radians from level.
+    double cohesion = 0.0;
+    double bed_friction = 0.0;
+    double friction = 0.0;
+    double wet_friction = 0.0;
 };
 
 [[nodiscard]] const Properties& properties(Material material);
+
+// The tangent of the steepest slope a layer of `grain`, `depth` metres deep, holds on a bed of
+// `bed` under `gravity`, `wetness` from 0 dry to 1 soaked. A thick layer is held by its own friction; a thin one by its grip on the
+// bed, which loose ground gives as much as it holds itself and hard ground as its surface does;
+// and cohesion holds a dusting of snow or clay where dry sand would run.
+[[nodiscard]] double holding_slope(Material grain, Material bed, double wetness, double depth,
+                                   double gravity);
 
 } // namespace hog::globe
