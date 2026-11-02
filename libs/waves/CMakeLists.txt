@@ -1,4 +1,5 @@
 add_library(hog_waves
+    src/breaker.cpp
     src/foam.cpp
     src/run_up.cpp
     src/shoaling.cpp
@@ -11,6 +12,7 @@ target_link_libraries(hog_waves PUBLIC hog::core)
 hog_target_defaults(hog_waves)
 
 hog_add_tests(hog_waves
+    tests/breaker_tests.cpp
     tests/foam_tests.cpp
     tests/run_up_tests.cpp
     tests/shoaling_tests.cpp
