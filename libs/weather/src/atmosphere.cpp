@@ -7,8 +7,10 @@
 namespace hog::weather {
 namespace {
 
-// Condensate that makes air visibly cloud, per kilogram of dry air.
+// Condensate that makes air visibly cloud, per kilogram of dry air; a layer holding twice that is
+// cloud through and through.
 constexpr double visible = 5e-5;
+constexpr double full = 2.0 * visible;
 // Kelvin over and under freezing between all rain and all snow.
 constexpr double freezing = 273.15;
 constexpr double sleet_span = 4.0;
@@ -29,6 +31,43 @@ Vec2 along(const Frame& frame, Vec3 wind) {
     const DVec3 w{wind};
     return {static_cast<float>(glm::dot(w, frame.east)),
             static_cast<float>(glm::dot(w, frame.north))};
+}
+
+// How much of a layer is cloud, from 0 to 1, taking it as filling the layer evenly once it holds
+// `full`; none in the ground.
+double filling(const Field& field, std::size_t column, int layer) {
+    if (layer < 0 || layer >= field.grid.layers || field.solid(column, layer)) {
+        return 0.0;
+    }
+    return std::clamp(static_cast<double>(field.at(column, layer).cloud) / full, 0.0, 1.0);
+}
+
+// Where a cloud's edge lies, metres from the centre, between the middles of a layer that's cloud
+// (half filled or more) and one beside it that isn't, as a straight line between how filled they
+// are crosses a half: a thin cloud's edges close in on its middle, and a thick one's fall at the
+// layers' edges.
+double edge_between(const Grid& grid, int inside, int outside, double inner, double outer) {
+    const double across = inner > outer ? (inner - 0.5) / (inner - outer) : 0.5;
+    return grid.radius_of(inside) +
+           (static_cast<double>(outside - inside) * across * grid.thickness);
+}
+
+double edge_above(const Field& field, std::size_t column, int layer) {
+    const Grid& grid = field.grid;
+    if (layer + 1 >= grid.layers) {
+        return grid.top();
+    }
+    return edge_between(grid, layer, layer + 1, filling(field, column, layer),
+                        filling(field, column, layer + 1));
+}
+
+double edge_below(const Field& field, std::size_t column, int layer) {
+    const Grid& grid = field.grid;
+    if (layer == 0 || field.solid(column, layer - 1)) {
+        return grid.floor_of(layer);
+    }
+    return edge_between(grid, layer, layer - 1, filling(field, column, layer),
+                        filling(field, column, layer - 1));
 }
 
 } // namespace
@@ -76,15 +115,15 @@ Column Atmosphere::column(std::size_t column) const {
         }
         const bool misty = cloud > visible;
         if (misty && grounded) {
-            shown.fog_top = static_cast<float>(grid.floor_of(layer + 1) - planet_.radius);
+            shown.fog_top = static_cast<float>(edge_above(field_, column, layer) - planet_.radius);
         } else {
             grounded = false;
             if (misty) {
-                const auto floor = static_cast<float>(grid.floor_of(layer) - planet_.radius);
                 if (shown.top == 0.0F) {
-                    shown.base = floor;
+                    shown.base =
+                        static_cast<float>(edge_below(field_, column, layer) - planet_.radius);
                 }
-                shown.top = static_cast<float>(grid.floor_of(layer + 1) - planet_.radius);
+                shown.top = static_cast<float>(edge_above(field_, column, layer) - planet_.radius);
             }
         }
         lowest = false;
