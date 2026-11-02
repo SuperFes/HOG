@@ -1,7 +1,9 @@
+#include <hog/core/bytes.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/server/weather_keeper.hpp>
 #include <hog/sim/cell_grid.hpp>
+#include <hog/weather/state.hpp>
 
 #include <algorithm>
 #include <utility>
@@ -54,6 +56,7 @@ std::optional<protocol::Weather> WeatherKeeper::poll(GameTime now, std::chrono::
             return made;
         }
         job_.get();
+        keep();
         // While the air is still catching up with the clock there is nothing true to show.
         if (now - reached_ < settings_.interval) {
             made = sum(fade);
@@ -73,6 +76,33 @@ std::optional<protocol::Weather> WeatherKeeper::poll(GameTime now, std::chrono::
         });
     });
     return made;
+}
+
+void WeatherKeeper::keep() {
+    ByteWriter out;
+    out.write(static_cast<std::uint64_t>(reached_.time_since_epoch().count()));
+    out.write_bytes(weather::encode_state(air_.field()));
+    saved_ = std::move(out).take();
+}
+
+Result<void> WeatherKeeper::restore(std::span<const std::byte> bytes, GameTime now) {
+    ByteReader in{bytes};
+    const auto micros = in.read<std::uint64_t>();
+    if (!micros) {
+        return std::unexpected(micros.error());
+    }
+    auto air = weather::decode_state(air_.field(), bytes.subspan(sizeof(std::uint64_t)));
+    if (!air) {
+        return air;
+    }
+    const GameTime reached{GameDuration{static_cast<std::int64_t>(*micros)}};
+    // Air saved too long ago has lost what it knew; air saved ahead of the clock waits for it.
+    reached_ = std::clamp(reached, now - settings_.spin_up, now);
+    keep();
+    if (now - reached_ < settings_.interval) {
+        latest_ = sum(std::chrono::milliseconds{0});
+    }
+    return {};
 }
 
 protocol::Weather WeatherKeeper::sum(std::chrono::milliseconds fade) const {

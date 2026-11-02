@@ -105,3 +105,32 @@ TEST_CASE("a keeper far behind the clock shows nothing until it has caught up",
     }
     CHECK(made == 1);
 }
+
+TEST_CASE("a keeper given a save carries on from the air in it", "[server][weather]") {
+    const globe::Generator generator{small_earth()};
+    server::WeatherKeeper first{generator, 4h, 23.44, start, quick()};
+    REQUIRE_FALSE(first.poll(start + 2min, 500ms));
+    const auto made = next(first, start + 2min);
+    REQUIRE(made);
+    REQUIRE_FALSE(first.saved().empty());
+
+    server::WeatherKeeper second{generator, 4h, 23.44, start + 2min, quick()};
+    REQUIRE(second.restore(first.saved(), start + 2min));
+    // Level with the clock, so the weather is there to be told to a joiner at once.
+    const auto kept = second.latest().value_or(protocol::Weather{});
+    const auto original = made.value_or(protocol::Weather{});
+    REQUIRE(second.latest());
+    REQUIRE(kept.cells.size() == original.cells.size());
+    CHECK(kept.cells.front().cloud == original.cells.front().cloud);
+}
+
+TEST_CASE("a save of another grid is refused", "[server][weather]") {
+    const globe::Generator generator{small_earth()};
+    server::WeatherKeeper first{generator, 4h, 23.44, start, quick()};
+    REQUIRE(next(first, start + 2min));
+    auto other = quick();
+    other.layers = 4;
+    server::WeatherKeeper second{generator, 4h, 23.44, start, other};
+    CHECK_FALSE(second.restore(first.saved(), start + 2min));
+    CHECK_FALSE(second.latest());
+}

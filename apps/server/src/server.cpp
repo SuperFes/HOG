@@ -163,6 +163,15 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
                                  server::WeatherSettings{.level = config.weather.level,
                                                          .layers = config.weather.layers,
                                                          .spin_up = config.weather.spin_up});
+        const save::Section* kept =
+            loaded->snapshot ? loaded->snapshot->find(server::WeatherKeeper::section) : nullptr;
+        if (kept != nullptr && kept->version == server::WeatherKeeper::section_version) {
+            if (auto resumed = server->weather_->restore(kept->bytes, server->time_); !resumed) {
+                log::warn(save_log, "starting the air afresh: {}", resumed.error().message);
+            } else {
+                log::info(save_log, "restored the air");
+            }
+        }
     }
     server->open_players();
     return server;
@@ -524,6 +533,11 @@ void Server::send_clock(net::ConnectionId connection) {
 void Server::submit() {
     save::Snapshot snapshot{.world = world_id_, .time = time_, .tick = tick_, .sections = {}};
     persistence_.store(snapshot);
+    if (weather_ && !weather_->saved().empty()) {
+        snapshot.add({.id = server::WeatherKeeper::section,
+                      .version = server::WeatherKeeper::section_version,
+                      .bytes = weather_->saved()});
+    }
     writer_.submit(std::move(snapshot));
 }
 
