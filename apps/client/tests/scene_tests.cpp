@@ -242,6 +242,46 @@ TEST_CASE("the globe at reported spots, to look at", "[.look]") {
     }
 }
 
+TEST_CASE("worlds at coarser and finer cell sizes, to look at", "[.look]") {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
+    const char* where = std::getenv("HOG_LOOK");
+    REQUIRE(where != nullptr);
+    const auto config = hog::planet::load_planet_config(std::filesystem::path{HOG_SOURCE_DIR} /
+                                                        "config" / "planet.toml")
+                            .value();
+    const double radius = config.radius;
+    const auto device = test_device();
+    hog::jobs::JobSystem jobs{4};
+    const hog::DVec3 noon = glm::normalize(hog::DVec3{1.0, 0.2, 0.3});
+    const hog::DVec3 at = glm::normalize(noon + hog::DVec3{0.0, 0.0, 0.3});
+    for (const char* name : {"earth", "mars", "moon"}) {
+        for (const double voxel : {1.0, 0.5, 0.25, 0.1, 0.05}) {
+            hog::globe::Planet planet = hog::client::globe_planet(name, config.seed, radius).value();
+            planet.voxel = voxel;
+            const hog::client::GlobeWorld globe{planet};
+            auto scene = Scene::create(*device, globe.generator.planet(), jobs, calendar(),
+                                       hog::client::still_format, 1);
+            REQUIRE(scene);
+            scene->follow_globe(globe.world);
+            const double ground = hog::client::globe_ground(globe.generator, noon);
+            for (const auto& [shot, height, pitch] :
+                 {std::tuple{"walk", 1.7, -0.12}, std::tuple{"low", 60.0, -0.25},
+                  std::tuple{"mid", 600.0, -0.3}}) {
+                hog::client::Flight flight =
+                    hog::client::start_flight(noon, radius, ground + height, at);
+                flight.pitch = pitch;
+                const auto still = hog::client::draw_still(
+                    *device, *scene, shot_of(flight, globe.generator), {.width = 1600, .height = 900});
+                REQUIRE(still);
+                REQUIRE(hog::client::save_picture(
+                    std::filesystem::path{where} /
+                        std::format("cell_{}_{}_{}.png", name, shot, std::lround(voxel * 100.0)),
+                    *still));
+            }
+        }
+    }
+}
+
 // Draws the weather a server made (the keeper's [.look] test writes it) over the globe.
 TEST_CASE("the server's weather over the globe, to look at", "[.look]") {
     // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts

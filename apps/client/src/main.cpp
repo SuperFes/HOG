@@ -1033,6 +1033,13 @@ int show(const client::Options& options, const planet::PlanetConfig& planet, ren
         std::cerr << std::format("hog-client: {}\n", described.error());
         return EXIT_FAILURE;
     }
+    if (options.voxel) {
+        described->voxel = *options.voxel;
+        if (auto valid = globe::validate(*described); !valid) {
+            std::cerr << std::format("hog-client: --voxel {}: {}\n", *options.voxel, valid.error());
+            return EXIT_FAILURE;
+        }
+    }
     client::GlobeWorld globe{*described};
     const client::Flight flight = start(options, globe);
     const sim::Calendar calendar{planet.day_length, planet.axial_tilt};
