@@ -89,7 +89,8 @@ std::optional<protocol::Weather> WeatherKeeper::poll(GameTime now, std::chrono::
             if (last_made_ != std::chrono::steady_clock::time_point{}) {
                 const std::chrono::duration<double> since = real - last_made_;
                 const auto apart = std::chrono::duration_cast<std::chrono::milliseconds>(since);
-                fade = std::clamp(std::max(fade, apart), fade, most_fade);
+                // Never less than the fade asked for, nor more than the most unless that is more.
+                fade = std::min(std::max(fade, apart), std::max(fade, most_fade));
                 pace = static_cast<float>(seconds(running_) / std::max(since.count(), 0.5));
             }
             last_made_ = real;
