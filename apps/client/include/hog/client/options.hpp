@@ -56,6 +56,9 @@ struct Options {
     // The voxel world drawn, of a preset or a planet file; Earth-like at the planet's seed and
     // size without one, as the server has it.
     std::optional<std::string> globe_planet;
+    // The voxel world's cell size in metres, in place of the planet's own; for looking at a world
+    // finer or coarser, flying alone.
+    std::optional<double> voxel;
     // The ground near the eye drawn curving like Earth's, not as tightly as the planet truly does.
     bool bend = true;
     render::CloudQuality clouds = render::CloudQuality::High;

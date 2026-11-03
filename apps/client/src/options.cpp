@@ -152,6 +152,12 @@ Result<void> read_option(Options& options, std::string_view option, std::string_
                 std::format("--threads must be from 0 to {}, not {}", most_threads, value));
         }
         options.threads = static_cast<std::uint32_t>(*threads);
+    } else if (option == "--voxel") {
+        options.voxel = real(value);
+        if (!options.voxel || !(*options.voxel > 0.0)) {
+            return make_error(ErrorCode::InvalidArgument,
+                              std::format("--voxel takes a size in metres over zero, not {}", value));
+        }
     } else if (option == "--clouds") {
         return read_clouds(options, value);
     } else if (option == "--quit-after") {
@@ -209,6 +215,10 @@ Result<void> check_together(const Options& options) {
     }
     if (options.name && !options.login) {
         return make_error(ErrorCode::InvalidArgument, "--name is for --login");
+    }
+    if (options.voxel && options.connect) {
+        return make_error(ErrorCode::InvalidArgument,
+                          "--voxel is for flying alone: a server's world has its own cell size");
     }
     if (!options.simulate.off() && !options.connect) {
         return make_error(ErrorCode::InvalidArgument, "--simulate is for --connect");
@@ -269,6 +279,8 @@ options:
                          the GPU can afford (default high)
   --globe-planet NAME    the voxel world of the earth, mars, venus or moon preset or a
                          planet file
+  --voxel METRES         the voxel world's cell size, finer or coarser than the planet's
+                         own (0.5 by default); for looking, flying alone
   --no-bend              draw the planet curving as tightly as it truly does, not
                          flattened like Earth's near the eye
   --software             draw with a software Vulkan device, such as lavapipe

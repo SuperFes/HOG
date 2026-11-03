@@ -18,6 +18,13 @@ using hog::client::parse_options;
 using hog::client::Place;
 using Arguments = std::vector<std::string_view>;
 
+TEST_CASE("the voxel size to look at the world in is read in metres", "[client][options]") {
+    const auto options = parse_options(Arguments{"--voxel", "0.25"});
+    REQUIRE(options);
+    CHECK(options->voxel == 0.25);
+    CHECK_FALSE(parse_options(Arguments{})->voxel);
+}
+
 TEST_CASE("client options default to the development planet", "[client][options]") {
     const auto options = parse_options({});
     REQUIRE(options);
@@ -92,6 +99,10 @@ TEST_CASE("bad client options are rejected", "[client][options]") {
     CHECK_FALSE(parse_options(Arguments{"--connect", "127.0.0.1:7675", "--simulate", "lag=x"}));
     CHECK_FALSE(parse_options(Arguments{"--simulate", "lag=75"}));
     CHECK_FALSE(parse_options(Arguments{"--clouds", "ultra"}));
+    CHECK_FALSE(parse_options(Arguments{"--voxel", "0"}));
+    CHECK_FALSE(parse_options(Arguments{"--voxel", "-1"}));
+    CHECK_FALSE(parse_options(Arguments{"--voxel", "fine"}));
+    CHECK_FALSE(parse_options(Arguments{"--voxel", "0.1", "--connect", "127.0.0.1:7675"}));
     CHECK_FALSE(hog::client::usage().empty());
 }
 
