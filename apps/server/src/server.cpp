@@ -190,8 +190,8 @@ void Server::simulate(GameTime from, GameDuration step) {
     // someone is digging.
     swept_ += step;
     if (swept_ >= std::chrono::seconds{1}) {
+        flow_.sweep(1, std::chrono::duration<double>(swept_).count());
         swept_ = {};
-        flow_.sweep(1);
     }
     wet_ground(step);
     if (weather_) {
