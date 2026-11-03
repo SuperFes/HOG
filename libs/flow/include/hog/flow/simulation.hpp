@@ -30,6 +30,8 @@ public:
         std::int64_t changed = 0;
         std::int64_t eroded = 0;
         std::int64_t slumped = 0;
+        std::size_t flying = 0;
+        std::int64_t scattered = 0;
         std::size_t held = 0;
         std::vector<globe::BrickSite> written;
     };

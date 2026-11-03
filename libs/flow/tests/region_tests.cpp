@@ -352,7 +352,9 @@ TEST_CASE("a tall heap of sand on level ground slumps wider, losing none, and th
 
     std::int64_t last = 1;
     for (int step = 0; step < 4000 && last > 0; ++step) {
-        last = block.region().step(tick).slumped;
+        const hog::flow::Stepped stepped = block.region().step(tick);
+        // Grain still in the air isn't at rest.
+        last = stepped.slumped + static_cast<std::int64_t>(stepped.flying);
     }
 
     CHECK(last == 0);
@@ -384,18 +386,33 @@ TEST_CASE("sand at the lip of a drop deeper than eight voxels runs down it, losi
     block.pile(11, 12, 15, Material::Sand, full);
     const std::int64_t before = block.region().grain();
 
-    std::int64_t last = 1;
-    for (int step = 0; step < 4000 && last > 0; ++step) {
-        last = block.region().step(tick).slumped;
-    }
+    const auto below = [&] {
+        std::int64_t sum = 0;
+        for (std::uint32_t i = 12; i < Block::side; ++i) {
+            for (std::uint32_t j = 0; j < Block::side; ++j) {
+                sum += block.grain(i, j, 0);
+            }
+        }
+        return sum;
+    };
 
-    CHECK(last == 0);
-    CHECK(block.region().grain() == before);
-    std::int64_t below = 0;
-    for (std::uint32_t i = 12; i < Block::side; ++i) {
-        for (std::uint32_t j = 0; j < Block::side; ++j) {
-            below += block.grain(i, j, 0);
+    // It goes over the lip as grain in flight, which takes time to arrive: seconds, not a step.
+    double airborne = 0.0;
+    bool resting = false;
+    for (int step = 0; step < 4000 && !resting; ++step) {
+        const hog::flow::Stepped stepped = block.region().step(tick);
+        if (stepped.flying > 0) {
+            airborne += tick;
+            CHECK(block.region().grain() == before);
+        }
+        resting = stepped.slumped == 0 && stepped.flying == 0;
+        if (airborne > 0.0 && airborne < 1.0) {
+            CHECK(below() == 0);
         }
     }
-    CHECK(below > 0);
+
+    CHECK(resting);
+    CHECK(airborne > 1.0);
+    CHECK(block.region().grain() == before);
+    CHECK(below() > 0);
 }

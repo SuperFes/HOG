@@ -13,7 +13,9 @@ constexpr std::int64_t share = 16;
 struct Ask {
     std::size_t from;
     std::size_t to;
+    std::size_t side;
     std::int64_t amount;
+    bool falls;
 };
 
 } // namespace
@@ -47,7 +49,11 @@ std::int64_t Slump::step() {
             const std::int64_t excess = surface(n) - surface(to) - held;
             const std::int64_t ask = excess > 0 ? excess / (diagonal ? 2 * share : share) : 0;
             if (ask > 0) {
-                asks.push_back({.from = n, .to = to, .amount = ask});
+                asks.push_back({.from = n,
+                                .to = to,
+                                .side = s,
+                                .amount = ask,
+                                .falls = surface(n) - surface(to) > node.reach});
                 asked += ask;
             }
         }
@@ -62,11 +68,19 @@ std::int64_t Slump::step() {
     // And never more than a column has room for: its inflows share what's left.
     std::vector<std::int64_t> coming(nodes_.size(), 0);
     for (const Ask& ask : asks) {
-        coming[ask.to] += ask.amount;
+        if (!ask.falls) {
+            coming[ask.to] += ask.amount;
+        }
     }
     std::int64_t moved = 0;
     std::vector<std::int64_t> change(nodes_.size(), 0);
     for (const Ask& ask : asks) {
+        if (ask.falls) {
+            change[ask.from] -= ask.amount;
+            falls_.push_back({.from = ask.from, .side = ask.side, .amount = ask.amount});
+            moved += ask.amount;
+            continue;
+        }
         const Node& to = nodes_[ask.to];
         const std::int64_t left = std::max<std::int64_t>(to.room - to.grain, 0);
         const std::int64_t amount =

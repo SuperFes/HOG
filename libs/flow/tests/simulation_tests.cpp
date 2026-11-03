@@ -94,6 +94,50 @@ TEST_CASE("an edit wakes the flow about it, which sleeps again once at rest",
     CHECK(block.world().at(block.at(13, 12, 0)).liquid_amount > 0);
 }
 
+TEST_CASE("grain thrown over a cliff keeps the bricks awake while it flies, then lands and sleeps",
+          "[flow][simulation]") {
+    using hog::globe::Material;
+    const auto shape = [](std::uint32_t i, std::uint32_t, int layer) {
+        return i >= 12 || layer >= 15;
+    };
+    Block block{floor_above_sea(100.0), false, shape};
+    block.pile(11, 12, 15, Material::Sand, full);
+    block.region().flush();
+    const auto total = [&] {
+        std::int64_t sum = 0;
+        for (std::uint32_t i = 0; i < Block::side; ++i) {
+            for (std::uint32_t j = 0; j < Block::side; ++j) {
+                for (int layer = 0; layer < 40; ++layer) {
+                    sum += block.world().at(block.at(i, j, layer)).grain_amount;
+                }
+            }
+        }
+        return sum;
+    };
+    const std::int64_t before = total();
+    REQUIRE(before == full);
+
+    Simulation simulation{block.world()};
+    simulation.touched(hog::globe::brick_of(block.at(11, 12, 15)));
+    int flew = 0;
+    int steps = 0;
+    for (; steps < 4000; ++steps) {
+        const Simulation::Progress progress = simulation.step(tick);
+        if (progress.flying > 0) {
+            ++flew;
+            // Nothing is let go while grain may still land in it.
+            CHECK(progress.held > 0);
+        }
+        if (progress.held == 0) {
+            break;
+        }
+    }
+    CHECK(steps < 4000);
+    CHECK(flew > 20);
+    CHECK(simulation.region().parcels().empty());
+    CHECK(total() == before);
+}
+
 TEST_CASE("liquid takes up the bricks it reaches and leaves them once still",
           "[flow][simulation]") {
     Block block{floor_above_sea(100.0), false, rimmed};

@@ -194,6 +194,9 @@ std::int64_t Region::grain() const {
     for (const auto& [key, load] : loads_) {
         total += load.amount;
     }
+    for (const Parcel& parcel : parcels_) {
+        total += parcel.amount;
+    }
     return total;
 }
 
@@ -723,6 +726,14 @@ Stepped Region::step(double seconds) {
     carry(all, seconds, stepped);
     keep_loads(all);
     slump(stepped);
+    fly(seconds, stepped);
+    std::ranges::sort(stepped.wanted, {}, [](const globe::BrickSite& site) {
+        return globe::brick_key(site);
+    });
+    const auto same = std::ranges::unique(stepped.wanted, {}, [](const globe::BrickSite& site) {
+        return globe::brick_key(site);
+    });
+    stepped.wanted.erase(same.begin(), same.end());
     // What settling and seeping took from the edge, the sea gives back before anyone sees it
     // short.
     hold_sea(all, stepped);
