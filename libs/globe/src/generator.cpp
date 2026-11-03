@@ -166,6 +166,23 @@ Generator::Column Generator::column(DVec3 direction, double lod) const noexcept 
     return finish(down, lod, terms::ground(context, down, lod), tilt.slope, tilt.rise);
 }
 
+std::vector<Rock> Generator::rocks_near(DVec3 point, double lod) const {
+    const terms::Context context{.planet = &planet_, .derived = &derived_, .shape = &shape_};
+    const Cell cell = cell_under(glm::normalize(point), terms::rock_level(planet_));
+    std::vector<Rock> found;
+    const auto add = [&](Cell at) {
+        if (const std::optional<Rock> rock = terms::rock_in(context, at, lod)) {
+            found.push_back(*rock);
+        }
+    };
+    add(cell);
+    const CellNeighbors near = around(cell);
+    for (const Cell beside : near.all()) {
+        add(beside);
+    }
+    return found;
+}
+
 std::vector<Generator::Column> Generator::columns(Cell corner, int side, double lod) const {
     HOG_ASSERT(side > 0 && corner.is_valid() &&
                    std::cmp_less_equal(corner.i + static_cast<std::uint32_t>(side),

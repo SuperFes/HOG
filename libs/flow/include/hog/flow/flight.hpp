@@ -21,6 +21,8 @@ struct Parcel {
     globe::Material material = globe::Material::Air;
     std::int64_t amount = 0; // of Voxel::full, as grain is counted
     double age = 0.0;        // seconds in motion
+    // Metres across a boulder, the rock of a single block rolling on; none for loose grain.
+    double radius = 0.0;
 };
 
 // The surface under a parcel.

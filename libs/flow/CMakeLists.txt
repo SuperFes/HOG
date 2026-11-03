@@ -1,5 +1,6 @@
 add_library(hog_flow
     src/region.cpp
+    src/region_rocks.cpp
     src/region_slump.cpp
     src/slump.cpp
     src/simulation.cpp)
@@ -12,6 +13,7 @@ hog_target_defaults(hog_flow)
 hog_add_tests(hog_flow
     tests/flight_tests.cpp
     tests/region_tests.cpp
+    tests/rock_tests.cpp
     tests/slump_tests.cpp
     tests/wetting_tests.cpp
     tests/simulation_tests.cpp)

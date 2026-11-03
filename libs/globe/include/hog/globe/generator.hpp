@@ -119,6 +119,10 @@ public:
 
     [[nodiscard]] Column column(DVec3 direction, double lod) const noexcept;
 
+    // The fallen rocks, as generated at `lod`, whose cells lie within about a cell of `point`;
+    // those reaching further than that from it are among them too.
+    [[nodiscard]] std::vector<Rock> rocks_near(DVec3 point, double lod) const;
+
     // The columns through the middles of a square of cells `side` across from `corner`, on its
     // level, along i then j. Each takes the ground's slope from the cells beside it, so they
     // share the work: cheaper than column() each, and a cell's column comes out the same in any

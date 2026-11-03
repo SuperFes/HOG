@@ -403,11 +403,19 @@ std::optional<globe::BrickSite> Region::unheld_below(DVec3 at) {
 void Region::fly(double seconds, Stepped& stepped) {
     const globe::Layers& layers = world_->store().layers();
     const double gravity = world_->generator().planet().gravity;
-    const auto ground = [&](DVec3 at) { return ground_under(at); };
     std::vector<Parcel> flying;
     flying.reserve(parcels_.size());
     for (Parcel& parcel : parcels_) {
         const Parcel before = parcel;
+        // A boulder's middle stays its radius above the ground, and it rolls on gentler slopes.
+        const auto ground = [&](DVec3 at) {
+            std::optional<Ground> found = ground_under(at);
+            if (found && parcel.radius > 0.0) {
+                found->radius += parcel.radius;
+                found->holds = std::min(found->holds, rolls_down);
+            }
+            return found;
+        };
         if (Flight::advance(parcel, seconds, gravity, 0.5 * layers.thickness, ground) ==
             Flight::Fate::Flying) {
             flying.push_back(parcel);
@@ -420,6 +428,17 @@ void Region::fly(double seconds, Stepped& stepped) {
             flying.push_back(before);
             flying.back().age += seconds;
             flying.back().velocity = {};
+            continue;
+        }
+        if (parcel.radius > 0.0) {
+            // A block comes to rest as ground, if its surroundings are held to build it in.
+            if (const auto absent = settle_boulder(parcel);
+                absent && before.age + seconds < Flight::longest) {
+                stepped.wanted.push_back(*absent);
+                flying.push_back(before);
+                flying.back().age += seconds;
+                flying.back().velocity = {};
+            }
             continue;
         }
         if (!land(parcel, stepped)) {

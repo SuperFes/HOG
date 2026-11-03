@@ -88,6 +88,16 @@ public:
     // Sends a lump of grain flying from `at` with `velocity`.
     void throw_grain(DVec3 at, DVec3 velocity, globe::Material material, std::int64_t amount);
 
+    // How steep a slope a rolling boulder runs down, as a rise per run: gentler than what holds
+    // a heap, as a block rolls more freely than grain slides.
+    static constexpr double rolls_down = 0.2;
+    // Takes a fallen rock out of the ground and sends it rolling from where it lay, as a
+    // boulder among the parcels. Precondition: the bricks it stands in are held.
+    void loosen(const globe::Rock& rock);
+    // Frees each rock generated about `point` that is still there and has nothing under it. The
+    // number it couldn't judge for want of bricks held.
+    std::size_t loosen_unsupported(DVec3 point, std::size_t& unjudged);
+
     // What the liquid up a column carries.
     struct Carried {
         globe::Material material = globe::Material::Air;
@@ -251,6 +261,22 @@ private:
     void fly(double seconds, Stepped& stepped);
     // Piles a parcel into the column under it; whether it found a place.
     [[nodiscard]] bool land(const Parcel& parcel, Stepped& stepped);
+    // Builds a boulder at rest into the ground as shaped rock; the first brick it needs that
+    // isn't held, if any, and then nothing is built.
+    [[nodiscard]] std::optional<globe::BrickSite> settle_boulder(const Parcel& parcel);
+    // Whether the voxel at `point` is shaped matter; none where its brick isn't held.
+    [[nodiscard]] std::optional<bool> solid_at(DVec3 point);
+    // Applies `change(voxel, distance, outward)` to each held voxel within the shape's band, and
+    // the first brick it covers that isn't held, if any.
+    template <typename Distance, typename Change>
+    std::optional<globe::BrickSite> reshape(DVec3 centre, double reach, const Distance& distance,
+                                            const Change& change);
+    // Bricks newly held, whose fallen rocks are looked at once their surroundings are held too.
+    struct Fresh {
+        globe::BrickSite site;
+        int tries = 0;
+    };
+    void loosen_fresh();
 
     globe::World* world_;
     bool hold_sea_;
@@ -263,6 +289,7 @@ private:
     std::unordered_map<std::uint64_t, Flux> flux_;             // the last step's, by column
     std::unordered_map<std::uint64_t, Load> loads_;            // by column
     std::vector<Parcel> parcels_;
+    std::vector<Fresh> fresh_;
     std::uint32_t parcel_ids_ = 0;
     std::uint64_t steps_ = 0;
 };

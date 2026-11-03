@@ -8,6 +8,7 @@
 #include <hog/globe/voxel_store.hpp>
 
 #include <array>
+#include <map>
 #include <span>
 #include <vector>
 
@@ -51,5 +52,14 @@ private:
 // the planet's centre. Loose matter is left where it is.
 void dig(World& world, DVec3 centre, double radius);
 void build(World& world, DVec3 centre, double radius, Material material);
+
+// The voxels of every column within `reach` of a point, across faces where they span them, by
+// brick: the indices in each.
+[[nodiscard]] std::map<BrickSite, std::vector<int>> sites_near(const Layers& layers, DVec3 centre,
+                                                               double reach);
+// One voxel taken out of a shape or built into one, given its signed distance to the shape's
+// surface (negative inside, within the band) and the way out of the shape there, or none.
+void dig_voxel(Voxel& voxel, double to_shape, DVec3 outward);
+void build_voxel(Voxel& voxel, double to_shape, DVec3 outward, Material material);
 
 } // namespace hog::globe
