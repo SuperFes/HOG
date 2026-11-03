@@ -54,6 +54,12 @@ struct Properties {
 
 [[nodiscard]] const Properties& properties(Material material);
 
+// How wet a ground looks and grips, 0 dry to 1 soaked, with `liquid_amount` of a voxel `thickness`
+// metres deep in its pores. Rain soaks in to a few centimetres and no more, so a voxel's water
+// lies in that skin, and a little of it wets the surface; so does the same depth of water lying
+// in the open, given as `liquid_amount` of an open voxel (`solid` Air).
+[[nodiscard]] double dampness(Material solid, std::uint16_t liquid_amount, double thickness);
+
 // The steepest slope, in radians from level, something stands on bare `material` at, `wetness`
 // from 0 dry to 1 soaked: a heap's repose if loose, else the rock's grip.
 [[nodiscard]] double footing(Material material, double wetness);

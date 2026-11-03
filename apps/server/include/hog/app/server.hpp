@@ -113,6 +113,8 @@ public:
 private:
     // Advances the world by one tick of game time.
     void simulate(GameTime from, GameDuration step);
+    // Rains on and dries the ground around the players once enough game time has gone by.
+    void wet_ground(GameDuration step);
     // Sends everyone the weather just made, and a player who's just come in the newest.
     void tell_weather(const protocol::Weather& weather);
     void send_weather(net::ConnectionId connection, const protocol::Weather& weather);
@@ -155,6 +157,8 @@ private:
     globe::VoxelStore voxels_;
     globe::World globe_;
     flow::Simulation flow_;
+    // Game time gone by since the ground was last wetted.
+    GameDuration unwetted_{};
     store::SqliteBrickArchive bricks_;
     server::BrickSharing bricks_shared_;
     // Players last sent some grain in flight, who need telling when there's none.

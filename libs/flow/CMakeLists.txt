@@ -13,4 +13,5 @@ hog_add_tests(hog_flow
     tests/flight_tests.cpp
     tests/region_tests.cpp
     tests/slump_tests.cpp
+    tests/wetting_tests.cpp
     tests/simulation_tests.cpp)

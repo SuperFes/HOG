@@ -6,6 +6,7 @@
 #include <hog/protocol/messages.hpp>
 #include <hog/save/snapshot.hpp>
 #include <hog/sim/calendar.hpp>
+#include <hog/sim/cell_grid.hpp>
 #include <hog/weather/atmosphere.hpp>
 
 #include <chrono>
@@ -60,6 +61,10 @@ public:
     // Call before the first poll.
     [[nodiscard]] Result<void> restore(std::span<const std::byte> bytes, GameTime now);
 
+    // The weather over the planet's point in the direction `up` (unit, from the centre) as of
+    // the newest made; none until some has been.
+    [[nodiscard]] std::optional<protocol::CellWeather> at(DVec3 up) const;
+
     // The newest weather made, for those joining.
     [[nodiscard]] const std::optional<protocol::Weather>& latest() const noexcept {
         return latest_;
@@ -71,6 +76,7 @@ private:
 
     WeatherSettings settings_;
     sim::Calendar calendar_;
+    sim::CellGrid grid_;
     weather::Atmosphere air_;
     // Where each air column's cell is in the message, and the other way round.
     std::vector<std::uint32_t> placed_;

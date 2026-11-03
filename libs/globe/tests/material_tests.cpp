@@ -1,4 +1,5 @@
 #include <hog/globe/material.hpp>
+#include <hog/globe/voxel.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -94,4 +95,25 @@ TEST_CASE("a layer of loose ground holds a steeper slope thin than deep, and sli
     // Rubble has no repose of its own and still holds a heap.
     CHECK(holding_slope(Material::Basalt, Material::Basalt, 0.0, 5.0, gravity) ==
           Catch::Approx(deg(40.0)).epsilon(0.01));
+}
+
+TEST_CASE("a little water in the ground wets its surface, and the same depth in the open does too",
+          "[globe][material]") {
+    using hog::globe::Voxel;
+    const double thickness = 1.0;
+    const auto soil = Material::Soil;
+    const auto holding = [&](double metres) {
+        return static_cast<std::uint16_t>(metres * Voxel::full);
+    };
+    // Dry stays dry; a few millimetres only dampen; a few centimetres soak the surface.
+    CHECK(hog::globe::dampness(soil, 0, thickness) == 0.0);
+    const double dew = hog::globe::dampness(soil, holding(0.004), thickness);
+    CHECK(dew > 0.0);
+    CHECK(dew < 0.5);
+    CHECK(hog::globe::dampness(soil, holding(0.04), thickness) == 1.0);
+    // Open water as deep as the skin is soaked, a film thinner than that less so.
+    CHECK(hog::globe::dampness(Material::Air, holding(0.06), thickness) == 1.0);
+    CHECK(hog::globe::dampness(Material::Air, holding(0.01), thickness) < 0.5);
+    // A coarser voxel spreads the same share over more depth, so wets more.
+    CHECK(hog::globe::dampness(soil, holding(0.004), 4.0) > dew);
 }

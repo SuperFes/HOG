@@ -234,7 +234,7 @@ std::optional<Region::Scan> Region::scan(std::uint8_t face, std::uint32_t i, std
                                          std::uint32_t start, std::uint32_t reach) {
     const globe::Layers& layers = world_->store().layers();
     const auto lookup = [&](std::uint32_t layer) { return voxel({face, i, j, layer}); };
-    std::optional<globe::Surface> surface = globe::surface_below(start, reach, tallest, lookup);
+    std::optional<globe::Surface> surface = globe::surface_below(start, reach, tallest, layers.thickness, lookup);
     if (!surface) {
         return std::nullopt;
     }

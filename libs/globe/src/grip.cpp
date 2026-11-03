@@ -35,7 +35,7 @@ std::optional<double> grip_at(const World& world, DVec3 feet) {
         return &slot;
     };
     const std::optional<Surface> surface =
-        surface_below(static_cast<std::uint32_t>(start), reach, tallest, lookup);
+        surface_below(static_cast<std::uint32_t>(start), reach, tallest, layers.thickness, lookup);
     if (!surface) {
         return std::nullopt;
     }

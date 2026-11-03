@@ -26,20 +26,13 @@ struct Surface {
     [[nodiscard]] double holds(double thickness, double gravity) const;
 };
 
-namespace detail {
-constexpr double share_of(const Voxel& voxel) noexcept {
-    return voxel.liquid == Material::Water ? static_cast<double>(voxel.liquid_amount) /
-                                                 static_cast<double>(Voxel::full)
-                                           : 0.0;
-}
-} // namespace detail
-
 // Down a column from layer `start` to the first shaped matter with open voxel over it, going at
 // most `reach` layers, then up through the open voxels over it, at most `tallest`. `lookup(layer)`
 // gives the voxel there, or null where it isn't known, which ends the search.
 template <typename Lookup>
 [[nodiscard]] std::optional<Surface> surface_below(std::uint32_t start, std::uint32_t reach,
-                                                   std::uint32_t tallest, const Lookup& lookup) {
+                                                   std::uint32_t tallest, double thickness,
+                                                   const Lookup& lookup) {
     Surface surface;
     double wet = 0.0;
     std::uint32_t layer = start;
@@ -50,7 +43,9 @@ template <typename Lookup>
         }
         if (here->solid != Material::Air) {
             surface.bed = here->solid;
-            wet = detail::share_of(*here);
+            wet = here->liquid == Material::Water
+                      ? dampness(here->solid, here->liquid_amount, thickness)
+                      : 0.0;
             break;
         }
         if (layer == 0 || steps >= reach) {
@@ -64,7 +59,9 @@ template <typename Lookup>
         return std::nullopt;
     }
     surface.bottom = *bottom;
-    wet = std::max(wet, detail::share_of(*bottom));
+    if (bottom->liquid == Material::Water) {
+        wet = std::max(wet, dampness(Material::Air, bottom->liquid_amount, thickness));
+    }
     for (std::uint32_t up = 0; up < tallest; ++up) {
         const Voxel* here = lookup(surface.first + up);
         if (here == nullptr || here->solid != Material::Air) {

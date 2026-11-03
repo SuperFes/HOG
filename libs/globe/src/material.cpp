@@ -178,6 +178,23 @@ const Properties& properties(Material material) {
     return all[static_cast<std::size_t>(material)];
 }
 
+namespace {
+
+// How deep water soaks into ground, or lies over it, before it all looks wet: metres.
+constexpr double skin = 0.05;
+
+} // namespace
+
+double dampness(Material solid, std::uint16_t liquid_amount, double thickness) {
+    // Water in the pores, as metres of depth over the voxel; in the open, its depth outright.
+    const double share = static_cast<double>(liquid_amount) / static_cast<double>(1U << 15U);
+    const double room = solid == Material::Air ? 1.0 : properties(solid).porosity;
+    if (room <= 0.0) {
+        return 0.0;
+    }
+    return std::min(1.0, share / room * thickness / skin);
+}
+
 double footing(Material material, double wetness) {
     const Properties& ground = properties(material);
     const double wet = std::clamp(wetness, 0.0, 1.0);

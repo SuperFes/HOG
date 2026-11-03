@@ -323,6 +323,8 @@ public:
     [[nodiscard]] double height(Point point) const {
         return layers_->thickness * column(point).apart;
     }
+    // A fine voxel's height, which is what its liquid is told against however coarse it's drawn.
+    [[nodiscard]] double thickness() const { return layers_->thickness; }
     // The liquid whose surface stands in, over or beside the voxel, if any; and metres its
     // middle stands over that surface, negative under it.
     [[nodiscard]] Material soaked(Point point) const { return soaked_[index(point)]; }
@@ -828,8 +830,7 @@ struct Ground {
         const Voxel& voxel = grid.at(*near);
         return voxel.solid != Material::Air && !piled(grid, *near) ? voxel.solid : voxel.grain;
     }
-    // Of the pores of the ground nearest the surface, the share holding liquid; a pile is wet
-    // with any.
+    // How wet the ground nearest the surface is, as dampness has it; a pile is wet with any.
     static float wetness(const Grid& grid, std::span<const Point> corners) {
         const std::optional<Point> near = nearest(grid, corners);
         if (!near) {
@@ -839,8 +840,7 @@ struct Ground {
         if (voxel.solid == Material::Air || piled(grid, *near)) {
             return voxel.liquid_amount > 0 ? 1.0F : 0.0F;
         }
-        const double pores = properties(voxel.solid).porosity * Voxel::full;
-        return pores > 0.0 ? static_cast<float>(std::min(1.0, voxel.liquid_amount / pores)) : 0.0F;
+        return static_cast<float>(dampness(voxel.solid, voxel.liquid_amount, grid.thickness()));
     }
 };
 
