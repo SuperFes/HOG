@@ -206,13 +206,15 @@ void Server::wake_vents() {
             // A volcano's cycle is about a day and a half, mostly asleep, shifted by its key; a pool seeps
             // all the while.
             const double unit = static_cast<double>(site.key >> 11U) * 0x1.0p-53;
+            // Eruptions differ in strength, some barely more than a seep.
+            const double strength = static_cast<double>(site.key & 0xFFFFU) / 65'536.0;
             flow_.add_vent({.site = {.face = column.face,
                                      .i = column.i,
                                      .j = column.j,
                                      .layer = static_cast<std::uint32_t>(
                                          layers.layer_at(site.ground + 1.0))},
                             .active_rate = site.pool ? pool_rate : 0.02,
-                            .erupting_rate = site.pool ? 0.0 : 2.0,
+                            .erupting_rate = site.pool ? 0.0 : 2.0 * (0.2 + (1.3 * strength)),
                             .period = site.pool ? 0.0 : 129'600.0,
                             .eruption = site.pool ? 0.0 : 300.0,
                             .active = site.pool ? 0.0 : 7'200.0,
