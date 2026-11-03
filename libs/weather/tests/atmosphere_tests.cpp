@@ -171,3 +171,46 @@ TEST_CASE("a cloud's base and top lie where its layers' cloud puts them, not on 
     CHECK(air.column(open).top == 0.0F);
     CHECK(air.column(open).base == 0.0F);
 }
+
+TEST_CASE("cover is how much of the sky cloud closes over, by what the air could hold",
+          "[weather][atmosphere]") {
+    const hog::globe::Generator generator{small_earth()};
+    Atmosphere air{generator, 14'400.0, 2, 12};
+    Field& field = air.field();
+    std::size_t column = 0;
+    while (column < field.grid.columns() &&
+           (field.over_sea[column] == 0 || field.solid(column, 8))) {
+        ++column;
+    }
+    REQUIRE(column < field.grid.columns());
+    const auto clear = [&] {
+        for (int layer = 0; layer < field.grid.layers; ++layer) {
+            field.at(column, layer).cloud = 0.0F;
+        }
+    };
+    const auto cover = [&] { return air.column(column).cover; };
+    clear();
+    CHECK(cover() == 0.0F);
+
+    // The same cloud closes over more of cold air's sky than of warm air's.
+    field.at(column, 6).cloud = 1e-4F;
+    field.at(column, 6).temperature = 290.0F;
+    const float warm = cover();
+    field.at(column, 6).temperature = 235.0F;
+    const float cold = cover();
+    CHECK(warm > 0.0F);
+    CHECK(cold > warm);
+    CHECK(cold <= 1.0F);
+
+    // Layers touching overlap fully; ones with clear air between add as chance has it.
+    clear();
+    field.at(column, 6).temperature = 290.0F;
+    field.at(column, 7).temperature = 290.0F;
+    field.at(column, 9).temperature = 290.0F;
+    field.at(column, 6).cloud = 1e-4F;
+    const float one = cover();
+    field.at(column, 7).cloud = 1e-4F;
+    CHECK(cover() == one);
+    field.at(column, 9).cloud = 1e-4F;
+    CHECK(cover() > one);
+}

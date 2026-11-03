@@ -93,7 +93,7 @@ render::CloudShade shade_at_eye(const terrain::Bend& bend, const protocol::CellW
     // Within the cloud, only what's over the eye shades it.
     const double over =
         top > base ? std::clamp((top - bend.eye_height) / (top - base), 0.0, 1.0) : 1.0;
-    return render::cloud_shade(static_cast<double>(cloud_cover(weather.cloud)),
+    return render::cloud_shade(static_cast<double>(weather.cover),
                                static_cast<double>(weather.cloud) * over);
 }
 

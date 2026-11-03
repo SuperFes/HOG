@@ -11,6 +11,9 @@ namespace {
 // cloud through and through.
 constexpr double visible = 5e-5;
 constexpr double full = 2.0 * visible;
+// Cloud water, as a share of what the air could hold as vapour, at which most of a layer's sky
+// is covered: warm air holds far more, so it needs far more cloud to close over than cold.
+constexpr double cover_spread = 0.03;
 // Kelvin over and under freezing between all rain and all snow.
 constexpr double freezing = 273.15;
 constexpr double sleet_span = 4.0;
@@ -97,6 +100,10 @@ Column Atmosphere::column(std::size_t column) const {
 
     Column shown;
     shown.sea = field_.over_sea[column] != 0;
+    // Layers of cloud touching overlap as much as they can; those with clear air between, as
+    // chance has it.
+    double clear = 1.0;
+    double run = 0.0;
     double carried = 0.0;
     Vec3 push{0.0F};
     bool lowest = true;
@@ -111,6 +118,16 @@ Column Atmosphere::column(std::size_t column) const {
         const auto temperature = static_cast<double>(air.temperature);
         const double mass = air_density(temperature, pressure) * grid.depth_of(layer);
         const auto cloud = static_cast<double>(air.cloud);
+        const double held_here = saturation_ratio(planet_.volatiles, temperature, pressure);
+        const double covered =
+            cloud > 0.0 && held_here > 0.0 ? 1.0 - std::exp(-cloud / (cover_spread * held_here))
+                                           : 0.0;
+        if (covered > 0.0) {
+            run = std::max(run, covered);
+        } else if (run > 0.0) {
+            clear *= 1.0 - run;
+            run = 0.0;
+        }
 
         if (lowest) {
             shown.wind = along(frame, air.wind);
@@ -137,6 +154,7 @@ Column Atmosphere::column(std::size_t column) const {
         carried += cloud * mass;
         push += Vec3{static_cast<float>(cloud * mass)} * air.wind;
     }
+    shown.cover = static_cast<float>(1.0 - (clear * (1.0 - run)));
     if (carried > 0.0) {
         shown.drift = along(frame, push / static_cast<float>(carried));
     } else {

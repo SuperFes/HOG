@@ -43,6 +43,7 @@ constexpr std::uint8_t changed_position = 1U;
 constexpr std::uint8_t known_changes = changed_position;
 
 // Cloud and falling are sent as square roots, so thin cloud and drizzle keep their detail.
+constexpr float cover_steps = 255.0F;
 constexpr float cloud_steps = 64.0F;   // a byte's steps to the root of a millimetre
 constexpr float falling_steps = 16.0F; // to the root of a millimetre an hour
 constexpr float snow_steps = 255.0F;
@@ -55,7 +56,7 @@ constexpr float period_steps = 10.0F;   // to the second
 constexpr float heading_steps = 256.0F; // to the turn
 constexpr float current_steps = 32.0F;  // to the metre a second
 constexpr float wind_steps = 2.0F;
-constexpr std::size_t weather_cell_bytes = 22;
+constexpr std::size_t weather_cell_bytes = 23;
 
 [[nodiscard]] std::uint8_t to_byte(float value) noexcept {
     // Also NaN to 0.
@@ -139,11 +140,13 @@ constexpr float turn = 2.0F * std::numbers::pi_v<float>;
             second[1],
             second[2],
             finer(cell.current.x, current_steps),
-            finer(cell.current.y, current_steps)};
+            finer(cell.current.y, current_steps),
+            to_byte(cell.cover * cover_steps)};
 }
 
 [[nodiscard]] CellWeather decoded(const CodedCell& bytes) noexcept {
     return {.cloud = squared(bytes[0], cloud_steps),
+            .cover = static_cast<float>(bytes[22]) / cover_steps,
             .falling = squared(bytes[1], falling_steps),
             .snow = static_cast<float>(bytes[2]) / snow_steps,
             .drift = {speed_of(bytes[3]), speed_of(bytes[4])},

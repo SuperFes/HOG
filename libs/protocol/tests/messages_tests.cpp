@@ -58,6 +58,7 @@ Weather weather(std::uint8_t level) {
     for (std::size_t index = 0; index < weather_cells(level); ++index) {
         const auto step = static_cast<float>(index % 4);
         out.cells.push_back({.cloud = step * step / 16.0F,
+                             .cover = step / 3.0F,
                              .falling = step * step,
                              .snow = step == 0.0F ? 1.0F : 0.0F,
                              .drift = {-step, static_cast<float>(index) - 12.0F},
@@ -308,6 +309,8 @@ TEST_CASE("weather past what a byte holds is clamped", "[protocol]") {
                                       .swells = {},
                                       .current = {9.0F, -9.0F}});
     CHECK(over.cloud < 16.0F);
+    CHECK(std::abs(as_sent({.cover = 0.5F}).cover - 0.5F) < 1.0F / 255.0F);
+    CHECK(as_sent({.cover = 3.0F}).cover == 1.0F);
     CHECK(over.cloud > 15.8F);
     CHECK(over.falling < 255.0F);
     CHECK(over.falling > 253.0F);
@@ -338,7 +341,7 @@ TEST_CASE("weather past what a byte holds is clamped", "[protocol]") {
 
 TEST_CASE("the planet's weather takes twenty-two bytes a cell", "[protocol]") {
     CHECK(weather_cells(most_weather_level) == 6'144);
-    CHECK(encode(weather(most_weather_level)).size() == 2 + 1 + 4 + (22 * 6'144));
+    CHECK(encode(weather(most_weather_level)).size() == 2 + 1 + 4 + (23 * 6'144));
 }
 
 TEST_CASE("weather too fine is refused", "[protocol]") {

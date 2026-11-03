@@ -16,19 +16,12 @@ namespace hog::client {
 
 namespace {
 
-// Millimetres of cloud water over which the sky closes over.
-constexpr float cloud_cover_depth = 0.2F; // mm of cloud that covers most of the sky
-
 // A fade takes at least this share of the time since the last weather, if that was a believable
 // gap.
 constexpr double fade_share = 0.95;
 constexpr auto max_apart = std::chrono::hours{1};
 
 } // namespace
-
-float cloud_cover(float cloud) noexcept {
-    return 1.0F - std::exp(-cloud / cloud_cover_depth);
-}
 
 namespace {
 
@@ -60,6 +53,7 @@ protocol::CellWaves mixed(const protocol::CellWaves& from, const protocol::CellW
 protocol::CellWeather mixed(const protocol::CellWeather& from, const protocol::CellWeather& to,
                             float by) noexcept {
     return {.cloud = blend(from.cloud, to.cloud, by),
+            .cover = blend(from.cover, to.cover, by),
             .falling = blend(from.falling, to.falling, by),
             .snow = blend(from.snow, to.snow, by),
             .drift = blend(from.drift, to.drift, by),
@@ -80,6 +74,7 @@ protocol::CellWeather interpolated(const sim::CellGrid& grid, const Cells& cells
             grid.interpolate(direction, [&](std::uint32_t index) { return part(cells[index]); }));
     };
     return {.cloud = field([](const auto& cell) { return static_cast<double>(cell.cloud); }),
+            .cover = field([](const auto& cell) { return static_cast<double>(cell.cover); }),
             .falling = field([](const auto& cell) { return static_cast<double>(cell.falling); }),
             .snow = field([](const auto& cell) { return static_cast<double>(cell.snow); }),
             .drift = {field([](const auto& cell) { return static_cast<double>(cell.drift.x); }),
@@ -144,7 +139,7 @@ Maps maps_of(const sim::CellGrid& grid, const Cells& cells) {
                 maps.drift.push_back({glm::packHalf1x16(drift.x), glm::packHalf1x16(drift.y),
                                       glm::packHalf1x16(drift.z), 0});
                 maps.weather.push_back(
-                    {to_byte(static_cast<double>(cloud_cover(cell.cloud))),
+                    {to_byte(static_cast<double>(cell.cover)),
                      to_byte(std::sqrt(std::max(static_cast<double>(cell.cloud), 0.0) / 16.0)),
                      to_byte(std::sqrt(std::max(static_cast<double>(cell.falling), 0.0) / 256.0)),
                      to_byte(static_cast<double>(cell.snow))});
@@ -162,7 +157,7 @@ Maps maps_of(const sim::CellGrid& grid, const Cells& cells) {
 } // namespace
 
 std::string describe(const protocol::CellWeather& weather) {
-    const double cover = 100.0 * static_cast<double>(cloud_cover(weather.cloud));
+    const double cover = 100.0 * static_cast<double>(weather.cover);
     std::string line = std::format("{:.0f}% cloud", cover);
     if (cover >= 0.5) {
         line += std::format(" at {:.0f}-{:.0f} m", static_cast<double>(weather.base),
@@ -318,6 +313,7 @@ protocol::CellWeather Forecast::shown(const protocol::CellWeather& here, DVec3 d
     // keep to the slower pace of the air.
     protocol::CellWeather found = here;
     found.cloud = there.cloud;
+    found.cover = there.cover;
     found.falling = there.falling;
     found.snow = there.snow;
     found.base = there.base;

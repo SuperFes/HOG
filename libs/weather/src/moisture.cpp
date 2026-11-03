@@ -19,6 +19,11 @@ constexpr double land_wetness = 0.2;
 constexpr double step_kelvin = 0.05;
 // Cloud water a kilogram of air holds before drops begin to grow, and how fast they do (Kessler).
 constexpr double cloud_limit = 1e-3;
+// Where ice grows at the drops' cost, cloud rains out at a fraction of that limit: from freezing
+// down to this temperature it eases to `ice_limit` of it (Bergeron).
+constexpr double freezing_point = 273.15;
+constexpr double all_ice = 250.0;
+constexpr double ice_limit = 0.25;
 constexpr double conversion = 1e-3; // per second
 constexpr double collection = 2.2;  // drops sweep up cloud as they fall
 // How fast drops of a given water content fall, m/s: about 5 for light rain, 9 for heavy.
@@ -167,7 +172,9 @@ void precipitate(Field& field, const globe::Planet& planet, double seconds) {
             auto cloud = static_cast<double>(air.cloud);
             auto rain = static_cast<double>(air.rain);
 
-            const double grown = std::max(0.0, cloud - cloud_limit) * conversion * seconds;
+            const double iced = std::clamp((freezing_point - temperature) / (freezing_point - all_ice), 0.0, 1.0);
+            const double limit = cloud_limit * (1.0 - ((1.0 - ice_limit) * iced));
+            const double grown = std::max(0.0, cloud - limit) * conversion * seconds;
             const double swept = collection * cloud * std::pow(rain, 0.875) * seconds;
             const double made = std::min(cloud, grown + swept);
             cloud -= made;
