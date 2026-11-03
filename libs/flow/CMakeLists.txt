@@ -1,5 +1,6 @@
 add_library(hog_flow
     src/region.cpp
+    src/region_lava.cpp
     src/region_rocks.cpp
     src/region_slump.cpp
     src/region_support.cpp

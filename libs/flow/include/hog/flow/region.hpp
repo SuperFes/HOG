@@ -36,6 +36,8 @@ struct Stepped {
     std::int64_t collapsed = 0;
     // Voxels of lava that cooled and set into rock this step.
     std::int64_t frozen = 0;
+    // Units of water boiled off by lava it touched.
+    std::int64_t steamed = 0;
     std::vector<globe::BrickSite> wanted;
     // Each column with liquid standing in the open, and how much.
     struct Wet {
@@ -221,6 +223,9 @@ private:
     static void scale(std::vector<Transfer>& transfers, std::size_t Transfer::* end,
                       const std::vector<std::int64_t>& asked, const auto& limit);
     void settle(const std::vector<Column>& columns, double seconds, Stepped& stepped);
+    // Where water touches lava the lava chills and the water boils away: lava that has water
+    // enough sets into rock, else it cools by what there is.
+    void quench(Stepped& stepped);
     // Sets a voxel of cooled lava into rock, bringing the open voxels about it up to its surface.
     void freeze(globe::Site site, Held& brick);
     void report_wet(const Column& column, Stepped& stepped) const;
