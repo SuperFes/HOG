@@ -1,5 +1,6 @@
 #include <hog/core/assert.hpp>
 #include <hog/core/hash.hpp>
+#include <hog/flow/lava.hpp>
 #include <hog/flow/region.hpp>
 #include <hog/globe/planet.hpp>
 
@@ -25,6 +26,14 @@ constexpr std::int64_t full = Voxel::full;
 // with all four sides lower gives no more than half its excess at once. Differences under it
 // stay: a few units a column, a tenth of a millimetre.
 constexpr std::int64_t closing = 8;
+
+// Air the lava gives its heat to, kelvin.
+constexpr double ambient = 288.0;
+
+// Rock that flows: any liquid that isn't water.
+bool molten(Material liquid) noexcept {
+    return liquid != Material::Air && liquid != Material::Water;
+}
 
 constexpr std::array<std::pair<int, int>, 4> sides{{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}};
 
@@ -155,6 +164,15 @@ void Region::pour(Site site, std::uint16_t amount) {
     HOG_ASSERT(at != nullptr, "the voxel's brick isn't held");
     at->liquid = amount > 0 ? liquid_ : Material::Air;
     at->liquid_amount = amount;
+    held(globe::brick_of(site))->dirty = true;
+}
+
+void Region::pour_lava(Site site, Material rock, std::uint16_t amount, double kelvin) {
+    Voxel* at = voxel(site);
+    HOG_ASSERT(at != nullptr, "the voxel's brick isn't held");
+    at->liquid = amount > 0 ? rock : Material::Air;
+    at->liquid_amount = amount;
+    at->temperature = globe::temperature_in_eighths(kelvin);
     held(globe::brick_of(site))->dirty = true;
 }
 
@@ -357,6 +375,9 @@ void Region::gather(std::vector<Column>& columns) {
                 if (voxel.liquid_amount > 0 && run->liquid == Material::Air) {
                     run->liquid = voxel.liquid;
                 }
+                if (molten(voxel.liquid)) {
+                    run->heat += std::int64_t{voxel.liquid_amount} * voxel.temperature;
+                }
             },
             [&] {
                 if (run) {
@@ -501,7 +522,14 @@ std::vector<Region::Transfer> Region::transfers(const std::vector<Column>& colum
             head(sections_[from].bottom, sections_[from].bed + sections_[from].amount) -
             head(meeting.window, 0);
         const std::int64_t fall = std::abs(here_head - there_head);
-        const std::int64_t amount = std::min(fall / closing, above_sill);
+        std::int64_t amount = std::min(fall / closing, above_sill);
+        // Lava thickens as it cools and runs the slower for it.
+        if (molten(sections_[from].liquid) && sections_[from].amount > 0) {
+            const double kelvin = globe::kelvin(static_cast<std::uint16_t>(
+                sections_[from].heat / sections_[from].amount));
+            amount = static_cast<std::int64_t>(
+                static_cast<double>(amount) * lava_mobility(sections_[from].liquid, kelvin));
+        }
         if (amount > 0) {
             transfers.push_back({.from = from,
                                  .to = to,
@@ -576,8 +604,10 @@ void Region::want_around(Site site, std::set<std::uint64_t>& wanted) {
     }
 }
 
-void Region::settle(const std::vector<Column>& columns, Stepped& stepped) {
+void Region::settle(const std::vector<Column>& columns, double seconds, Stepped& stepped) {
+    const double thickness = world_->store().layers().thickness;
     std::set<std::uint64_t> wanted;
+    std::vector<std::pair<Site, Held*>> setting;
     for (const Column& column : columns) {
         std::size_t next = column.first;
         std::vector<std::tuple<Site, Held*, Voxel*>> run;
@@ -595,6 +625,20 @@ void Region::settle(const std::vector<Column>& columns, Stepped& stepped) {
                 // Full from the bottom up, over the grain piled there, the rest in the voxel
                 // over them.
                 std::int64_t left = section.amount;
+                // Lava is the one temperature through its depth, cooling from its top while
+                // there's air over it, and sets once it has stiffened.
+                std::uint16_t temperature = 0;
+                bool sets = false;
+                if (molten(section.liquid) && section.amount > 0) {
+                    const bool exposed = section.amount + section.bed < count * full;
+                    const double depth = static_cast<double>(section.amount) / full * thickness;
+                    const double kelvin = cooled(
+                        section.liquid,
+                        globe::kelvin(static_cast<std::uint16_t>(section.heat / section.amount)),
+                        ambient, exposed ? 1.0 : 0.0, depth, seconds);
+                    temperature = globe::temperature_in_eighths(kelvin);
+                    sets = lava_mobility(section.liquid, kelvin) == 0.0;
+                }
                 for (std::int64_t k = 0; k < count; ++k) {
                     auto [site, brick, voxel] = run[static_cast<std::size_t>(k)];
                     const std::int64_t amount =
@@ -604,6 +648,14 @@ void Region::settle(const std::vector<Column>& columns, Stepped& stepped) {
                     const auto held_amount = static_cast<std::uint16_t>(amount);
                     const std::int64_t before = voxel->liquid_amount;
                     stepped.changed += std::abs(amount - before);
+                    if (amount > 0 && molten(liquid)) {
+                        if (sets) {
+                            setting.emplace_back(site, brick);
+                        } else if (voxel->temperature != temperature) {
+                            voxel->temperature = temperature;
+                            brick->dirty = true;
+                        }
+                    }
                     if (voxel->liquid_amount != held_amount || voxel->liquid != liquid) {
                         voxel->liquid_amount = held_amount;
                         voxel->liquid = liquid;
@@ -619,16 +671,55 @@ void Region::settle(const std::vector<Column>& columns, Stepped& stepped) {
         HOG_ASSERT(next == column.first + column.count, "the column's sections don't match");
         report_wet(column, stepped);
     }
+    for (const auto& [site, brick] : setting) {
+        freeze(site, *brick);
+        ++stepped.frozen;
+    }
     stepped.wanted.reserve(wanted.size());
     for (const std::uint64_t key : wanted) {
         stepped.wanted.push_back(globe::brick_at_key(key));
     }
 }
 
+void Region::freeze(Site site, Held& brick) {
+    const double thickness = world_->store().layers().thickness;
+    const auto half = static_cast<std::int16_t>(std::llround(thickness * 500.0));
+    Voxel& here = brick.voxels[static_cast<std::size_t>(globe::index_in_brick(site))];
+    here.solid = here.liquid;
+    here.liquid = Material::Air;
+    here.liquid_amount = 0;
+    here.grain = Material::Air;
+    here.grain_amount = 0;
+    here.condition = Voxel::sound;
+    here.distance = static_cast<std::int16_t>(-half);
+    here.normal = globe::packed_normal(glm::normalize(globe::middle_of(site, world_->store().layers())));
+    brick.dirty = true;
+    // The open voxels about it now lie just off the new surface.
+    std::vector<Site> around;
+    around.push_back({.face = site.face, .i = site.i, .j = site.j, .layer = site.layer + 1});
+    if (site.layer > 0) {
+        around.push_back({.face = site.face, .i = site.i, .j = site.j, .layer = site.layer - 1});
+    }
+    for (const auto& step : sides) {
+        if (const std::optional<Site> next = beside(site, step.first, step.second)) {
+            around.push_back(*next);
+        }
+    }
+    for (const Site next : around) {
+        Voxel* there = voxel(next);
+        if (there != nullptr && there->solid == Material::Air && there->distance > half) {
+            there->distance = half;
+            held(globe::brick_of(next))->dirty = true;
+        }
+    }
+}
+
 void Region::report_wet(const Column& column, Stepped& stepped) const {
     std::int64_t standing = 0;
     for (std::size_t s = column.first; s < column.first + column.count; ++s) {
-        standing += sections_[s].amount;
+        if (!molten(sections_[s].liquid)) {
+            standing += sections_[s].amount;
+        }
     }
     if (standing > 0) {
         stepped.wet.push_back(
@@ -652,7 +743,7 @@ std::int64_t Region::seeped(double rate, double seconds, Site site) const {
 // Liquid moves `seconds` of seepage from `over` into `under`: down into the ground at what it
 // lets through; out of the ground only what it doesn't keep, dripping where it's open underneath.
 std::int64_t Region::seep_down(Site site, Voxel& over, Voxel& under, double seconds) const {
-    if (open(over) && open(under)) {
+    if ((open(over) && open(under)) || molten(over.liquid)) {
         return 0;
     }
     const double over_rate = open(over) ? 1.0 : globe::properties(ground_of(over)).conductivity;
@@ -710,6 +801,9 @@ Stepped Region::step(double seconds) {
         }
         from.load -= load;
         to.load += load;
+        const std::int64_t heat = from.heat * transfer.amount / from.amount;
+        from.heat -= heat;
+        to.heat += heat;
         from.amount -= transfer.amount;
         to.amount += transfer.amount;
         from.moving = true;
@@ -724,7 +818,7 @@ Stepped Region::step(double seconds) {
         (transfer.along_i ? flux.along_i : flux.along_j) +=
             transfer.outward ? transfer.amount : -transfer.amount;
     }
-    settle(all, stepped);
+    settle(all, seconds, stepped);
     seep(all, seconds, stepped);
     carry(all, seconds, stepped);
     keep_loads(all);
@@ -768,7 +862,8 @@ void Region::carry(const std::vector<Column>& columns, double seconds, Stepped& 
                 }
                 Section& section = sections_[next++];
                 const double depth = static_cast<double>(section.amount) / full * thickness;
-                if (section.fall > 0 && section.liquid != Material::Air) {
+                if (section.fall > 0 && section.liquid != Material::Air &&
+                    !molten(section.liquid)) {
                     // Drag on the bed under uniform flow: the liquid's weight down the slope of
                     // its surface, the columns taken as wide as the voxels are thick.
                     const double slope = static_cast<double>(section.fall) / full;

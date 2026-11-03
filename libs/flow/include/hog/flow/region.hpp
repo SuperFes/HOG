@@ -34,6 +34,8 @@ struct Stepped {
     std::int64_t scattered = 0;
     // Voxels of shaped matter that lost their hold and fell this step.
     std::int64_t collapsed = 0;
+    // Voxels of lava that cooled and set into rock this step.
+    std::int64_t frozen = 0;
     std::vector<globe::BrickSite> wanted;
     // Each column with liquid standing in the open, and how much.
     struct Wet {
@@ -75,6 +77,8 @@ public:
 
     // Precondition: its brick is held.
     [[nodiscard]] globe::Voxel at(globe::Site site) const;
+    // Sets the voxel to `amount` of `rock` molten at `kelvin`.
+    void pour_lava(globe::Site site, globe::Material rock, std::uint16_t amount, double kelvin);
     // Sets the voxel's liquid to `amount` of the world's own.
     void pour(globe::Site site, std::uint16_t amount);
     // Sets the voxel's grain, piled on whatever is under it.
@@ -145,6 +149,7 @@ private:
         int top = 0;
         std::int64_t amount = 0;
         globe::Material liquid = globe::Material::Air;
+        std::int64_t heat = 0; // of a molten liquid: its amount times its temperature, in eighths
         bool moving = false; // liquid ran in or out of it this step
         std::int64_t bed = 0;
         std::int64_t load = 0;
@@ -215,7 +220,9 @@ private:
     // exceeds that.
     static void scale(std::vector<Transfer>& transfers, std::size_t Transfer::* end,
                       const std::vector<std::int64_t>& asked, const auto& limit);
-    void settle(const std::vector<Column>& columns, Stepped& stepped);
+    void settle(const std::vector<Column>& columns, double seconds, Stepped& stepped);
+    // Sets a voxel of cooled lava into rock, bringing the open voxels about it up to its surface.
+    void freeze(globe::Site site, Held& brick);
     void report_wet(const Column& column, Stepped& stepped) const;
     void seep(const std::vector<Column>& columns, double seconds, Stepped& stepped);
     // Seeps from a voxel into the one under it; how much moved.
