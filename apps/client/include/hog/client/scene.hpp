@@ -124,6 +124,10 @@ public:
     // Draws the globe's surfaces round the eye. The globe must outlive the scene, unchanged
     // while chunks are in flight.
     void follow_globe(const globe::World& globe);
+    // The globe's stream of surfaces, once it's followed.
+    [[nodiscard]] const GlobeStream* globe_stream() const noexcept {
+        return globe_ ? &*globe_ : nullptr;
+    }
     // Waits for the globe's chunks in flight, so the world may be changed; then, once it has,
     // meshes again the chunks the changed bricks touch.
     void finish_globe();

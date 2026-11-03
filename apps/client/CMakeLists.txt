@@ -17,6 +17,7 @@ add_library(hog_client
     src/options.cpp
     src/others.cpp
     src/picture.cpp
+    src/storage_estimate.cpp
     src/player.cpp
     src/scene.cpp
     src/session.cpp
@@ -45,6 +46,7 @@ hog_add_tests(hog_client
     tests/player_tests.cpp
     tests/scene_tests.cpp
     tests/session_tests.cpp
+    tests/storage_estimate_tests.cpp
     tests/tides_tests.cpp)
 if(TARGET hog_client_tests)
     # The server, for players to meet through.

@@ -378,6 +378,9 @@ void GlobeStream::take(std::size_t working) {
     }
     shown_.insert_or_assign(work.chunk, work.against);
     const globe::Generator& generator = world_->generator();
+    if (globe::detail_of(work.chunk, generator.layers()) == 0) {
+        finest_.insert(work.chunk);
+    }
     changes_.shown.push_back(
         {.key = globe_key(work.chunk),
          .ground = std::make_shared<const terrain::BlockMesh>(globe_blocks(mesh)),

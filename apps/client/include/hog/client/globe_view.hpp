@@ -19,6 +19,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -126,6 +127,9 @@ public:
     // Chunks shown, and those wanted round the eye, nearest first.
     [[nodiscard]] std::size_t chunks() const noexcept { return shown_.size(); }
     [[nodiscard]] std::span<const globe::Cell> wanted() const noexcept { return order_; }
+    // The chunks drawn at full detail at any time since the start, which is the ground near where
+    // the eye has been.
+    [[nodiscard]] const std::set<globe::Cell>& finest() const noexcept { return finest_; }
 
 private:
     // A chunk being meshed, against how those beside it were drawn and the band of radii its
@@ -151,6 +155,7 @@ private:
     std::vector<globe::Cell> queue_;              // to mesh, farthest first
     std::vector<Working> working_;
     std::map<globe::Cell, std::uint64_t> shown_; // as they were meshed against
+    std::set<globe::Cell> finest_;               // ever drawn at full detail
     Changes changes_;
 };
 
