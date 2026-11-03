@@ -12,6 +12,8 @@ constexpr double stiff_below = 200.0;
 // Watts a square metre of a glowing surface loses for each kelvin over the air's, radiation
 // and the air's own movement together.
 constexpr double surface_loss = 120.0;
+// Watts a metre of rock conducts heat through for each kelvin.
+constexpr double conductivity = 1.5;
 
 } // namespace
 
@@ -39,6 +41,18 @@ double cooled(globe::Material rock, double kelvin, double ambient, double open, 
     }
     const double settle = properties.density * properties.heat_capacity * thickness / loss;
     return ambient + (kelvin - ambient) * std::exp(-seconds / settle);
+}
+
+void conduct(globe::Material rock, double& below, double& above, double thickness,
+             double seconds) {
+    const globe::Properties& properties = globe::properties(rock);
+    // The two meet halfway, as fast as the heat crosses a voxel's depth.
+    const double settle =
+        properties.density * properties.heat_capacity * thickness * thickness / conductivity;
+    const double share = 0.5 * (1.0 - std::exp(-seconds / settle));
+    const double moved = (below - above) * share;
+    below -= moved;
+    above += moved;
 }
 
 } // namespace hog::flow

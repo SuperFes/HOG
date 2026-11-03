@@ -20,4 +20,8 @@ namespace hog::flow {
 [[nodiscard]] double cooled(globe::Material rock, double kelvin, double ambient, double open,
                             double thickness, double seconds);
 
+// Heat conducted between two neighbouring voxels of `rock`, each `thickness` metres deep, over
+// `seconds`: the hotter gives to the cooler, none lost.
+void conduct(globe::Material rock, double& below, double& above, double thickness, double seconds);
+
 } // namespace hog::flow
