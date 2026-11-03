@@ -4,6 +4,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
+#include <cmath>
+#include <optional>
 #include <utility>
 
 using namespace hog;
@@ -110,4 +112,46 @@ TEST_CASE("standing under an overhang is fine", "[server][moves]") {
     REQUIRE(ground.space.add(square(3.0, false)));
     MoveCheck check{at(0.0), start};
     CHECK(check.judge(at(0.0, 1.0), start + 1s, ground.space) == Verdict::Taken);
+}
+
+TEST_CASE("climbing past what the slope holds is refused once a jump's worth is spent",
+          "[server][moves]") {
+    const Ground ground;
+    const MoveRules rules;
+    const Grip gentle = [](WorldPosition) { return std::optional<double>{0.3}; };
+    MoveCheck check{at(0.0), start, rules};
+    // A rise that the slope allows costs nothing, however often.
+    auto now = start;
+    double east = 0.0;
+    double up = 0.0;
+    for (int step = 0; step < 40; ++step) {
+        now += 50ms;
+        east += 0.3;
+        up += 0.3 * std::tan(0.29);
+        REQUIRE(check.judge(at(up, east), now, ground.space, gentle) == Verdict::Taken);
+    }
+    // A jump's rise is taken once, but a wall climbed at the same pace is not.
+    now += 50ms;
+    CHECK(check.judge(at(up + 1.0, east), now, ground.space, gentle) == Verdict::Taken);
+    Verdict last = Verdict::Taken;
+    for (int step = 0; step < 100 && last == Verdict::Taken; ++step) {
+        now += 50ms;
+        up += 1.0;
+        last = check.judge(at(up + 1.0, east), now, ground.space, gentle);
+    }
+    CHECK(last == Verdict::TooSteep);
+}
+
+TEST_CASE("a steeper grip lets a steeper climb through", "[server][moves]") {
+    const Ground ground;
+    const Grip steep = [](WorldPosition) { return std::optional<double>{0.87}; };
+    const Grip flat = [](WorldPosition) { return std::optional<double>{0.1}; };
+    MoveCheck on_steep{at(0.0), start};
+    MoveCheck on_flat{at(0.0), start};
+    const auto now = start + 1s;
+    // 2 m up for 1 m along is beyond either's allowance at once; 1 m up for 1 m along is not.
+    CHECK(on_steep.judge(at(1.0, 1.0), now, ground.space, steep) == Verdict::Taken);
+    CHECK(on_steep.judge(at(2.0, 2.0), now, ground.space, steep) == Verdict::Taken);
+    CHECK(on_flat.judge(at(1.4, 1.0), now, ground.space, flat) == Verdict::Taken);
+    CHECK(on_flat.judge(at(2.8, 2.0), now, ground.space, flat) == Verdict::TooSteep);
 }

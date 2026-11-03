@@ -22,6 +22,8 @@ std::string_view describe(Ruling ruling) noexcept {
         return "too fast";
     case Ruling::UnderGround:
         return "under the ground";
+    case Ruling::TooSteep:
+        return "too steep";
     }
     return "?";
 }
@@ -46,7 +48,8 @@ flecs::entity Players::join(net::ConnectionId connection, std::string name,
 }
 
 MoveResult Players::move(net::ConnectionId connection, const protocol::Moved& moved,
-                         MonotonicClock::time_point now, const physics::Space& space) {
+                         MonotonicClock::time_point now, const physics::Space& space,
+                         const Grip& grip) {
     const auto found = joined_.find(connection);
     if (found == joined_.end()) {
         return {.ruling = Ruling::NotJoined, .correction = std::nullopt};
@@ -81,7 +84,7 @@ MoveResult Players::move(net::ConnectionId connection, const protocol::Moved& mo
     }
     Ruling ruling = Ruling::OutOfBounds;
     if (inside) {
-        switch (joined.check->judge(to, now, space)) {
+        switch (joined.check->judge(to, now, space, grip)) {
         case Verdict::Taken:
             return take();
         case Verdict::TooFast:
@@ -89,6 +92,9 @@ MoveResult Players::move(net::ConnectionId connection, const protocol::Moved& mo
             break;
         case Verdict::UnderGround:
             ruling = Ruling::UnderGround;
+            break;
+        case Verdict::TooSteep:
+            ruling = Ruling::TooSteep;
             break;
         }
     }
