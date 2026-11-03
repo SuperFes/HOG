@@ -74,7 +74,7 @@ TEST_CASE("a brick of one voxel throughout is held as that voxel", "[globe][bric
     CHECK(brick.is_uniform());
     CHECK(brick.bytes() == sizeof(Brick));
     CHECK(unpacked(brick) == voxels);
-    CHECK(written(brick).size() < 16);
+    CHECK(written(brick).size() < 20);
 }
 
 TEST_CASE("a brick packs each quantity apart and gives back every voxel", "[globe][brick]") {

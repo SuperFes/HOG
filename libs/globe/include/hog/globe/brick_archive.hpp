@@ -63,8 +63,9 @@ private:
     std::map<std::uint64_t, std::vector<std::byte>> bricks_;
 };
 
-// The format bricks are saved in; it changes only when old saves still read.
-inline constexpr std::uint16_t brick_format = 2;
+// The format bricks are saved and sent in; it changes with the coding, and bricks in another
+// format are refused.
+inline constexpr std::uint16_t brick_format = 3;
 
 // A brick as the store holds it, coded to send or save; with no bytes, one the store doesn't hold.
 [[nodiscard]] SavedBrick coded_brick(const VoxelStore& store, BrickSite site);

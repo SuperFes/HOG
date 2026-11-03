@@ -130,6 +130,7 @@ private:
         Packed<Material> liquid;
         Packed<std::uint16_t> liquid_amount;
         Packed<std::uint16_t> temperature;
+        Packed<std::uint16_t> solid_amount;
 
         friend bool operator==(const Parts&, const Parts&) = default;
     };

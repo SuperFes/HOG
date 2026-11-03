@@ -108,3 +108,27 @@ TEST_CASE("a voxel's value is taken halfway up its layer, mid-column", "[globe][
     CHECK(hog::globe::cell_under(glm::normalize(at), layers.level) ==
           hog::globe::column_of(site, layers));
 }
+
+TEST_CASE("a voxel's solid amount is how much of it lies inside the surface", "[globe][voxel]") {
+    const hog::globe::Layers layers{.level = 10, .floor = 1'000.0, .thickness = 0.5, .count = 100};
+    const double band = hog::globe::distance_band(layers);
+    const auto amount = [&](double distance) {
+        hog::globe::Sample sample;
+        sample.distance = distance;
+        return hog::globe::voxel_from(sample, band).solid_amount;
+    };
+    // Deep in the ground, all of it; high in the air, none; half where the surface passes through
+    // the middle.
+    CHECK(amount(-10.0) == Voxel::full);
+    CHECK(amount(10.0) == 0);
+    CHECK(amount(0.0) == Voxel::full / 2);
+    // A voxel's thickness takes it from all to none, so a quarter of one under the surface is
+    // three quarters full, and the amount falls as the distance grows.
+    CHECK(amount(-0.125) > amount(0.0));
+    CHECK(amount(0.125) < amount(0.0));
+    CHECK(amount(-0.25) == Voxel::full - amount(0.25));
+    // Solid at the centre exactly where more than half of it is inside.
+    for (const double distance : {-0.4, -0.1, 0.1, 0.4}) {
+        CHECK((amount(distance) > Voxel::full / 2) == (distance < 0.0));
+    }
+}

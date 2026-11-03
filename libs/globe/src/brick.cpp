@@ -250,6 +250,7 @@ Brick Brick::pack(std::span<const Voxel, brick_voxels> voxels) {
         .liquid = channel(&Voxel::liquid),
         .liquid_amount = channel(&Voxel::liquid_amount),
         .temperature = channel(&Voxel::temperature),
+        .solid_amount = channel(&Voxel::solid_amount),
     });
     return brick;
 }
@@ -278,7 +279,8 @@ Voxel Brick::at(int index) const noexcept {
             .grain_amount = parts_->grain_amount.at(index),
             .liquid = parts_->liquid.at(index),
             .liquid_amount = parts_->liquid_amount.at(index),
-            .temperature = parts_->temperature.at(index)};
+            .temperature = parts_->temperature.at(index),
+            .solid_amount = parts_->solid_amount.at(index)};
 }
 
 void Brick::unpack(std::span<Voxel, brick_voxels> into) const noexcept {
@@ -294,7 +296,7 @@ std::size_t Brick::bytes() const noexcept {
     return sizeof(Brick) + sizeof(Parts) + parts_->distance.bytes() + parts_->normal.bytes() +
            parts_->solid.bytes() + parts_->condition.bytes() + parts_->grain.bytes() +
            parts_->grain_amount.bytes() + parts_->liquid.bytes() + parts_->liquid_amount.bytes() +
-           parts_->temperature.bytes();
+           parts_->temperature.bytes() + parts_->solid_amount.bytes();
 }
 
 namespace {
@@ -316,6 +318,7 @@ void Brick::write(ByteWriter& out) const {
         write_value(out, whole_.liquid);
         write_value(out, whole_.liquid_amount);
         write_value(out, whole_.temperature);
+        write_value(out, whole_.solid_amount);
         return;
     }
     out.write(parted_brick);
@@ -328,6 +331,7 @@ void Brick::write(ByteWriter& out) const {
     parts_->liquid.write(out);
     parts_->liquid_amount.write(out);
     parts_->temperature.write(out);
+    parts_->solid_amount.write(out);
 }
 
 namespace {
@@ -380,7 +384,8 @@ Result<Brick> Brick::read(ByteReader& in) {
                           .grain_amount = field.value<std::uint16_t>(),
                           .liquid = field.value<Material>(),
                           .liquid_amount = field.value<std::uint16_t>(),
-                          .temperature = field.value<std::uint16_t>()};
+                          .temperature = field.value<std::uint16_t>(),
+                          .solid_amount = field.value<std::uint16_t>()};
         if (field.error()) {
             return std::unexpected(*field.error());
         }
@@ -397,7 +402,8 @@ Result<Brick> Brick::read(ByteReader& in) {
                 .grain_amount = field.packed<std::uint16_t>(),
                 .liquid = field.packed<Material>(),
                 .liquid_amount = field.packed<std::uint16_t>(),
-                .temperature = field.packed<std::uint16_t>()};
+                .temperature = field.packed<std::uint16_t>(),
+                .solid_amount = field.packed<std::uint16_t>()};
     if (field.error()) {
         return std::unexpected(*field.error());
     }
@@ -409,7 +415,8 @@ Result<Brick> Brick::read(ByteReader& in) {
                        brick.parts_->solid.is_uniform(), brick.parts_->condition.is_uniform(),
                        brick.parts_->grain.is_uniform(), brick.parts_->grain_amount.is_uniform(),
                        brick.parts_->liquid.is_uniform(), brick.parts_->liquid_amount.is_uniform(),
-                       brick.parts_->temperature.is_uniform()},
+                       brick.parts_->temperature.is_uniform(),
+                       brick.parts_->solid_amount.is_uniform()},
             std::identity{})) {
         return Brick{brick.at(0)};
     }
