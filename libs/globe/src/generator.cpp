@@ -512,8 +512,9 @@ Column column(const Context& context, DVec3 direction, double lod) noexcept {
     const Noise built = built_up(context, direction, crust);
     const Noise shaped = relief(context, direction, crust, built, lod);
     const Noise struck = craters(context, direction, lod);
-    return {.height = {.value = (step * crust.high) + shaped.value + struck.value,
-                       .gradient = (step * crust.gradient) + shaped.gradient + struck.gradient},
+    const Noise erupted = volcanoes(context, direction, lod);
+    return {.height = {.value = (step * crust.high) + shaped.value + struck.value + erupted.value,
+                       .gradient = (step * crust.gradient) + shaped.gradient + struck.gradient + erupted.gradient},
             .high = crust.high,
             .built = built.value};
 }

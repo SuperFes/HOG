@@ -22,6 +22,7 @@ add_library(hog_globe
     src/surface.cpp
     src/surface_mesh.cpp
     src/vents.cpp
+    src/volcanoes.cpp
     src/voxel.cpp
     src/voxel_store.cpp
     src/world.cpp)
@@ -52,6 +53,7 @@ hog_add_tests(hog_globe
     tests/strata_tests.cpp
     tests/surface_mesh_tests.cpp
     tests/vents_tests.cpp
+    tests/volcanoes_tests.cpp
     tests/voxel_store_tests.cpp
     tests/voxel_tests.cpp
     tests/world_tests.cpp)
