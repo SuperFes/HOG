@@ -246,6 +246,7 @@ All in the planet library's fixed point, so the ground stays the same for everyo
 - [ ] Landforms from what the planet already knows: scree below cliffs, fans where streams leave the mountains, U-shaped valleys and cirques under the glaciers, dunes shaped by the wind, sinkholes over karst, cones and calderas over magma chambers, river terraces
 - [ ] Events in the world's past, scattered by the seed, each leaving its mark on the ground about it: meteor craters (rim, bowl, a central peak on the big ones; the old worn down and holding lakes), earthquakes' fault scarps (a step along a plate's grain, rivers jogging across it), landslides
 - [ ] Hot ground by the volcanoes and hotspots: hot springs and their terraces, mud pots, fumaroles, geysers erupting on their own clocks, lava flows and the tubes under them; maars and cinder fields; each a place the server and client can find
+- [ ] Boulders moving as the game needs them: freed by a lump's hit or a player's step and not only by ground dug away, spinning with momentum, resting in the shape they were (not a sphere), and temporary imprints where they and feet press the ground
 - [ ] More to work in, easiest first: salt flats and playas, tufa towers, hoodoos, eskers and drumlins under the old ice, collapsed sinkholes over caves
 
 **Tests**
