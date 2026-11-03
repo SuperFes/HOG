@@ -197,11 +197,18 @@ std::int64_t Region::add_lava(Site site, Material rock, std::int64_t units, doub
     return added;
 }
 
+bool Region::red_hot(const Voxel& voxel) const {
+    // Not where the whole planet is hotter than that: its rock has no cooling to do.
+    return voxel.solid != Material::Air &&
+           globe::kelvin(voxel.temperature) > red_hot_kelvin &&
+           world_->generator().planet().equator_temperature < red_hot_kelvin - 100.0;
+}
+
 bool Region::hot(BrickSite site) const {
     const Held* brick = held(site);
     return brick != nullptr &&
-           std::ranges::any_of(brick->voxels, [](const Voxel& voxel) {
-               return voxel.liquid_amount > 0 && molten(voxel.liquid);
+           std::ranges::any_of(brick->voxels, [this](const Voxel& voxel) {
+               return (voxel.liquid_amount > 0 && molten(voxel.liquid)) || red_hot(voxel);
            });
 }
 
@@ -840,6 +847,7 @@ Stepped Region::step(double seconds) {
     inspect_support(seconds, stepped);
     std::vector<Column> all = columns();
     quench(stepped);
+    cool_rock(seconds);
     hold_sea(all, stepped);
     gather(all);
     flux_.clear();

@@ -4,6 +4,9 @@
 
 namespace hog::flow {
 
+// Rock hotter than this shines and is still cooling; below it, it is taken to have cooled off.
+inline constexpr double red_hot_kelvin = 600.0;
+
 // Molten rock is the rock's own material above its melting point; these tell how it behaves
 // while it is hot and cooling.
 

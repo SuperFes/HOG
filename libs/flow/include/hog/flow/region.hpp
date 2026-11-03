@@ -231,6 +231,10 @@ private:
     // Where water touches lava the lava chills and the water boils away: lava that has water
     // enough sets into rock, else it cools by what there is.
     void quench(Stepped& stepped);
+    // Hot rock that has set, or lies beside lava, loses its heat to the air, a little each stretch
+    // of seconds so the change isn't lost to the stored temperature's steps.
+    void cool_rock(double seconds);
+    [[nodiscard]] bool red_hot(const globe::Voxel& voxel) const;
     // Sets a voxel of cooled lava into rock, bringing the open voxels about it up to its surface.
     void freeze(globe::Site site, Held& brick);
     void report_wet(const Column& column, Stepped& stepped) const;
@@ -325,6 +329,7 @@ private:
     bool hold_sea_;
     // Voxels of lava that cooled through this step, to be set into rock at its end.
     std::vector<std::pair<globe::Site, Held*>> setting_;
+    double cooling_ = 0.0; // seconds of rock's cooling not yet taken
     globe::Material liquid_;
     std::unordered_map<std::uint64_t, Held> held_;
     // The brick layers held up each column of bricks, in order.
