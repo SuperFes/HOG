@@ -88,51 +88,49 @@ void Region::slump(Stepped& stepped) {
         }
     }
 
-    // Each column's ground and grain, where it has a top surface to lie on.
+    // Each column's floors, each a run of open voxels over shaped matter with the grain lying on
+    // it: the top ground, and the floors of caves under their roofs.
     std::vector<Key> keys;
     std::vector<Profile> profiles;
-    for (auto& [key, node] : columns) {
+    std::map<Key, std::vector<std::size_t>> floors_of;
+    for (const auto& [key, unused] : columns) {
         const auto stack = stacks_.find(
             (std::uint64_t{key.face} << 42U) | (std::uint64_t{key.i / globe::brick_side} << 21U) |
             (key.j / globe::brick_side));
         if (stack == stacks_.end()) {
-            node = Slump::none;
             continue;
         }
-        // Down from the top brick, through bricks held without a gap, to the highest shaped
-        // matter with open voxel over it.
-        const std::optional<Scan> found =
-            scan(key.face, key.i, key.j, ((stack->second.back() + 1) * globe::brick_side) - 1,
-                 globe::any_depth);
-        if (!found) {
-            // Grain beside ground that isn't held yet has nowhere known to go: take it up.
-            const std::uint32_t top = ((stack->second.back() + 1) * globe::brick_side) - 1;
+        const std::uint32_t low = stack->second.front() * globe::brick_side;
+        const std::uint32_t high = ((stack->second.back() + 1) * globe::brick_side) - 1;
+        // Open to the bottom of what's held: the ground under it isn't, so take it up.
+        const Voxel* bottom = voxel({key.face, key.i, key.j, low});
+        if (bottom != nullptr && bottom->solid == Material::Air) {
             if (const auto missing = unheld_below(
-                    globe::middle_of({key.face, key.i, key.j, top}, layers))) {
+                    globe::middle_of({key.face, key.i, key.j, low}, layers))) {
                 stepped.wanted.push_back(*missing);
             }
-            node = Slump::none;
-            continue;
         }
-        const globe::Surface& surface = found->surface;
-        Profile profile{.first = surface.first,
-                        .ground = found->ground,
-                        .grain = surface.grain_amount,
-                        .room = std::int64_t{surface.open} * full,
-                        .material = surface.grain,
-                        .voxels = surface.open};
-        if (surface.grain != Material::Air) {
-            const Site base{.face = key.face, .i = key.i, .j = key.j, .layer = surface.first};
-            const double width = std::sqrt(layers.volume(globe::column_of(base, layers),
-                                                         static_cast<int>(surface.first)) /
-                                           thickness);
-            profile.rise = static_cast<std::int64_t>(
-                std::llround(surface.holds(thickness, gravity) * width / thickness *
-                             static_cast<double>(full)));
+        for (const Scan& found : floors(key.face, key.i, key.j, low, high)) {
+            const globe::Surface& surface = found.surface;
+            Profile profile{.first = surface.first,
+                            .ground = found.ground,
+                            .grain = surface.grain_amount,
+                            .room = std::int64_t{surface.open} * full,
+                            .material = surface.grain,
+                            .voxels = surface.open};
+            if (surface.grain != Material::Air) {
+                const Site base{.face = key.face, .i = key.i, .j = key.j, .layer = surface.first};
+                const double width = std::sqrt(layers.volume(globe::column_of(base, layers),
+                                                             static_cast<int>(surface.first)) /
+                                               thickness);
+                profile.rise = static_cast<std::int64_t>(
+                    std::llround(surface.holds(thickness, gravity) * width / thickness *
+                                 static_cast<double>(full)));
+            }
+            floors_of[key].push_back(keys.size());
+            keys.push_back(key);
+            profiles.push_back(profile);
         }
-        node = static_cast<int>(keys.size());
-        keys.push_back(key);
-        profiles.push_back(profile);
     }
 
     Slump rule{keys.size()};
@@ -145,16 +143,26 @@ void Region::slump(Stepped& stepped) {
         if (parcels_.size() < most_parcels) {
             node.reach = cliff;
         }
+        // The layer the heap's surface is in.
+        const std::int64_t top = std::max<std::int64_t>(
+            (profiles[n].ground + profiles[n].grain) / full, profiles[n].first);
         for (std::size_t s = 0; s < Slump::sides; ++s) {
-            const auto next = columns.find(Key{.face = keys[n].face,
-                                               .i = keys[n].i + static_cast<std::uint32_t>(
-                                                                    around[s].first),
-                                               .j = keys[n].j + static_cast<std::uint32_t>(
-                                                                    around[s].second)});
+            const auto beside_it = floors_of.find(Key{
+                .face = keys[n].face,
+                .i = keys[n].i + static_cast<std::uint32_t>(around[s].first),
+                .j = keys[n].j + static_cast<std::uint32_t>(around[s].second)});
             // A neighbour beside the face's edge or past what's held is no column to slide to.
-            // Any drop is one, however deep: grain pours into pits and over cliffs.
-            if (next != columns.end() && next->second != Slump::none) {
-                node.next[s] = next->second;
+            // Any drop is one, however deep: grain pours into pits and over cliffs. It goes to
+            // the floor beside it open at the heap's surface, not one through a wall or roof.
+            if (beside_it == floors_of.end()) {
+                continue;
+            }
+            for (const std::size_t m : beside_it->second) {
+                const std::int64_t first = profiles[m].first;
+                if (first <= top && (top < first + profiles[m].voxels || profiles[m].voxels >= tallest)) {
+                    node.next[s] = static_cast<int>(m);
+                    break;
+                }
             }
         }
     }
@@ -374,6 +382,49 @@ void Region::fly(double seconds, Stepped& stepped) {
     }
     parcels_ = std::move(flying);
     stepped.flying = parcels_.size();
+}
+
+bool Region::drop_hanging(std::uint8_t face, std::uint32_t i, std::uint32_t j,
+                          const Scan& floor) {
+    const globe::Layers& layers = world_->store().layers();
+    bool dropped = false;
+    bool gap = false;
+    for (std::uint32_t up = 0; up < floor.surface.open; ++up) {
+        const Site site{.face = face, .i = i, .j = j, .layer = floor.surface.first + up};
+        Voxel* here = voxel(site);
+        const std::int64_t amount = here->grain_amount;
+        // Grain over a voxel that isn't full has nothing under it to lie on.
+        if (gap && amount > 0) {
+            throw_grain(globe::middle_of(site, layers), {}, here->grain, amount);
+            here->grain = Material::Air;
+            here->grain_amount = 0;
+            held(globe::brick_of(site))->dirty = true;
+            dropped = true;
+        }
+        gap = gap || amount < full;
+    }
+    return dropped;
+}
+
+std::vector<Region::Scan> Region::floors(std::uint8_t face, std::uint32_t i, std::uint32_t j,
+                                         std::uint32_t low, std::uint32_t high) {
+    std::vector<Scan> found;
+    for (std::uint32_t layer = low; layer < high; ++layer) {
+        const Voxel* bed = voxel({face, i, j, layer});
+        const Voxel* over = voxel({face, i, j, layer + 1});
+        if (bed == nullptr || bed->solid == Material::Air || over == nullptr ||
+            over->solid != Material::Air) {
+            continue;
+        }
+        std::optional<Scan> floor = scan(face, i, j, layer + 1, 1);
+        if (floor && parcels_.size() < most_parcels && drop_hanging(face, i, j, *floor)) {
+            floor = scan(face, i, j, layer + 1, 1);
+        }
+        if (floor) {
+            found.push_back(*floor);
+        }
+    }
+    return found;
 }
 
 } // namespace hog::flow
