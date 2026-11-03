@@ -50,6 +50,14 @@ struct Profile {
     std::uint32_t voxels = 0; // how many up from `first` hold room
 };
 
+// The column `di` along i and `dj` along j, over the cube's edges onto the next face.
+std::optional<Key> across(int level, const Key& key, int di, int dj) {
+    const std::optional<globe::Cell> next = globe::next_to(
+        {.level = static_cast<std::uint8_t>(level), .face = key.face, .i = key.i, .j = key.j}, di,
+        dj);
+    return next ? std::optional<Key>{Key{next->face, next->i, next->j}} : std::nullopt;
+}
+
 } // namespace
 
 void Region::slump(Stepped& stepped) {
@@ -82,8 +90,8 @@ void Region::slump(Stepped& stepped) {
     }();
     for (const Key& key : grained) {
         for (const auto& [di, dj] : around) {
-            if (const auto next = beside({key.face, key.i, key.j, 0}, di, dj)) {
-                columns.try_emplace(Key{next->face, next->i, next->j}, 0);
+            if (const auto next = across(layers.level, key, di, dj)) {
+                columns.try_emplace(*next, 0);
             }
         }
     }
@@ -94,9 +102,9 @@ void Region::slump(Stepped& stepped) {
     std::vector<Profile> profiles;
     std::map<Key, std::vector<std::size_t>> floors_of;
     for (const auto& [key, unused] : columns) {
-        const auto stack = stacks_.find(
-            (std::uint64_t{key.face} << 42U) | (std::uint64_t{key.i / globe::brick_side} << 21U) |
-            (key.j / globe::brick_side));
+        const auto stack = stacks_.find((std::uint64_t{key.face} << 42U) |
+                                        (std::uint64_t{key.i / globe::brick_side} << 21U) |
+                                        (key.j / globe::brick_side));
         if (stack == stacks_.end()) {
             continue;
         }
@@ -105,8 +113,8 @@ void Region::slump(Stepped& stepped) {
         // Open to the bottom of what's held: the ground under it isn't, so take it up.
         const Voxel* bottom = voxel({key.face, key.i, key.j, low});
         if (bottom != nullptr && bottom->solid == Material::Air) {
-            if (const auto missing = unheld_below(
-                    globe::middle_of({key.face, key.i, key.j, low}, layers))) {
+            if (const auto missing =
+                    unheld_below(globe::middle_of({key.face, key.i, key.j, low}, layers))) {
                 stepped.wanted.push_back(*missing);
             }
         }
@@ -120,9 +128,9 @@ void Region::slump(Stepped& stepped) {
                             .voxels = surface.open};
             if (surface.grain != Material::Air) {
                 const Site base{.face = key.face, .i = key.i, .j = key.j, .layer = surface.first};
-                const double width = std::sqrt(layers.volume(globe::column_of(base, layers),
-                                                             static_cast<int>(surface.first)) /
-                                               thickness);
+                const double width = std::sqrt(
+                    layers.volume(globe::column_of(base, layers), static_cast<int>(surface.first)) /
+                    thickness);
                 profile.rise = static_cast<std::int64_t>(
                     std::llround(surface.holds(thickness, gravity) * width / thickness *
                                  static_cast<double>(full)));
@@ -147,11 +155,9 @@ void Region::slump(Stepped& stepped) {
         const std::int64_t top = std::max<std::int64_t>(
             (profiles[n].ground + profiles[n].grain) / full, profiles[n].first);
         for (std::size_t s = 0; s < Slump::sides; ++s) {
-            const auto beside_it = floors_of.find(Key{
-                .face = keys[n].face,
-                .i = keys[n].i + static_cast<std::uint32_t>(around[s].first),
-                .j = keys[n].j + static_cast<std::uint32_t>(around[s].second)});
-            // A neighbour beside the face's edge or past what's held is no column to slide to.
+            const auto over = across(layers.level, keys[n], around[s].first, around[s].second);
+            const auto beside_it = over ? floors_of.find(*over) : floors_of.end();
+            // A neighbour past the cube's corner or what's held is no column to slide to.
             // Any drop is one, however deep: grain pours into pits and over cliffs. It goes to
             // the floor beside it open at the heap's surface, not one through a wall or roof.
             if (beside_it == floors_of.end()) {
@@ -159,7 +165,8 @@ void Region::slump(Stepped& stepped) {
             }
             for (const std::size_t m : beside_it->second) {
                 const std::int64_t first = profiles[m].first;
-                if (first <= top && (top < first + profiles[m].voxels || profiles[m].voxels >= tallest)) {
+                if (first <= top &&
+                    (top < first + profiles[m].voxels || profiles[m].voxels >= tallest)) {
                     node.next[s] = static_cast<int>(m);
                     break;
                 }
@@ -208,8 +215,8 @@ void Region::slump(Stepped& stepped) {
         const Site there{keys[to].face, keys[to].i, keys[to].j, profiles[n].first};
         const DVec3 from_middle = globe::middle_of(here, layers);
         const DVec3 to_middle = globe::middle_of(there, layers);
-        const double top = layers.floor +
-                           (static_cast<double>(profiles[n].ground + profiles[n].grain) /
+        const double top =
+            layers.floor + (static_cast<double>(profiles[n].ground + profiles[n].grain) /
                             static_cast<double>(full) * thickness);
         const DVec3 lip =
             glm::normalize(from_middle + ((to_middle - from_middle) * 0.5)) * (top + 0.05);
@@ -225,8 +232,9 @@ void Region::slump(Stepped& stepped) {
             continue;
         }
         const Material material = material_of(n);
-        fill_grain({.face = keys[n].face, .i = keys[n].i, .j = keys[n].j, .layer = profiles[n].first},
-                   profiles[n].voxels, depth, material);
+        fill_grain(
+            {.face = keys[n].face, .i = keys[n].i, .j = keys[n].j, .layer = profiles[n].first},
+            profiles[n].voxels, depth, material);
     }
 }
 
@@ -234,7 +242,8 @@ std::optional<Region::Scan> Region::scan(std::uint8_t face, std::uint32_t i, std
                                          std::uint32_t start, std::uint32_t reach) {
     const globe::Layers& layers = world_->store().layers();
     const auto lookup = [&](std::uint32_t layer) { return voxel({face, i, j, layer}); };
-    std::optional<globe::Surface> surface = globe::surface_below(start, reach, tallest, layers.thickness, lookup);
+    std::optional<globe::Surface> surface =
+        globe::surface_below(start, reach, tallest, layers.thickness, lookup);
     if (!surface) {
         return std::nullopt;
     }
@@ -247,18 +256,16 @@ std::optional<Region::Scan> Region::scan(std::uint8_t face, std::uint32_t i, std
         const double lean = std::max(glm::dot(normal, up), 0.3);
         offset = globe::metres(surface->bottom.distance) / layers.thickness / lean;
     }
-    const std::int64_t ground = std::llround(
-        (static_cast<double>(surface->first) + 0.5 - offset) * static_cast<double>(full));
+    const std::int64_t ground = std::llround((static_cast<double>(surface->first) + 0.5 - offset) *
+                                             static_cast<double>(full));
     return Scan{.surface = *surface, .ground = ground};
 }
 
 void Region::fill_grain(Site column, std::uint32_t voxels, std::int64_t depth, Material material) {
     std::int64_t left = depth;
     for (std::uint32_t up = 0; up < voxels; ++up) {
-        const Site site{.face = column.face,
-                        .i = column.i,
-                        .j = column.j,
-                        .layer = column.layer + up};
+        const Site site{
+            .face = column.face, .i = column.i, .j = column.j, .layer = column.layer + up};
         Voxel* here = voxel(site);
         const std::int64_t amount = std::min(left, full);
         left -= amount;
@@ -288,15 +295,16 @@ DVec3 Region::heap_normal(const globe::Cell& column, std::uint32_t layer, DVec3 
     if (column.i == 0 || column.j == 0 || column.i + 1 >= across || column.j + 1 >= across) {
         return fallback;
     }
-    const std::uint32_t start = std::min<std::uint32_t>(layer + 2, static_cast<std::uint32_t>(layers.count) - 1);
+    const std::uint32_t start =
+        std::min<std::uint32_t>(layer + 2, static_cast<std::uint32_t>(layers.count) - 1);
     const auto top = [&](std::uint32_t i, std::uint32_t j) -> std::optional<DVec3> {
         const std::optional<Scan> found = scan(column.face, i, j, start, deepest);
         if (!found) {
             return std::nullopt;
         }
-        const double height = layers.floor + (static_cast<double>(found->ground +
-                                                                  found->surface.grain_amount) /
-                                              static_cast<double>(full) * layers.thickness);
+        const double height =
+            layers.floor + (static_cast<double>(found->ground + found->surface.grain_amount) /
+                            static_cast<double>(full) * layers.thickness);
         const DVec3 middle = globe::middle_of({column.face, i, j, start}, layers);
         return glm::normalize(middle) * height;
     };
@@ -332,12 +340,12 @@ std::optional<Ground> Region::ground_under(DVec3 at) {
     DVec3 normal = at / radius;
     if (surface.grain_amount > 0) {
         normal = heap_normal(column, static_cast<std::uint32_t>(layer), normal);
-    } else if (surface.bottom.distance != Voxel::far &&
-               surface.bottom.normal != Voxel::no_normal) {
+    } else if (surface.bottom.distance != Voxel::far && surface.bottom.normal != Voxel::no_normal) {
         normal = globe::unpacked_normal(surface.bottom.normal);
     }
-    return Ground{.radius = layers.floor + (static_cast<double>(found->ground + surface.grain_amount) /
-                                            static_cast<double>(full) * layers.thickness),
+    return Ground{.radius =
+                      layers.floor + (static_cast<double>(found->ground + surface.grain_amount) /
+                                      static_cast<double>(full) * layers.thickness),
                   .normal = normal,
                   .holds = surface.holds(layers.thickness, world_->generator().planet().gravity)};
 }
@@ -422,8 +430,7 @@ void Region::fly(double seconds, Stepped& stepped) {
     stepped.flying = parcels_.size();
 }
 
-bool Region::drop_hanging(std::uint8_t face, std::uint32_t i, std::uint32_t j,
-                          const Scan& floor) {
+bool Region::drop_hanging(std::uint8_t face, std::uint32_t i, std::uint32_t j, const Scan& floor) {
     const globe::Layers& layers = world_->store().layers();
     bool dropped = false;
     bool gap = false;

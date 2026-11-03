@@ -11,12 +11,11 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
-
 #include <glm/geometric.hpp>
 
 #include <algorithm>
-#include <cstdint>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <functional>
 #include <memory>
@@ -558,4 +557,35 @@ TEST_CASE("a lump thrown onto a heap's flank rolls off down it instead of droppi
         std::acos(std::min(1.0, glm::dot(glm::normalize(*start), glm::normalize(last)))) *
         glm::length(last);
     CHECK(along > 0.1);
+}
+
+TEST_CASE("sand heaped at a cube edge slumps over it onto the next face, losing none",
+          "[flow][region][slump]") {
+    using hog::globe::Material;
+    const int level = hog::flow::testing::earth().layers().level;
+    const std::uint32_t last = (std::uint32_t{1} << level) - 1;
+    const std::uint32_t j = last / 2;
+    Block block{floor_above_sea(100.0), Block::Edge{}, j};
+    const auto layer = static_cast<std::uint32_t>(block.floor());
+    for (std::uint32_t up = 0; up < 12; ++up) {
+        block.region().pile({.face = 0, .i = last, .j = j, .layer = layer + up}, Material::Sand,
+                            static_cast<std::uint16_t>(full));
+    }
+    const std::int64_t before = block.region().grain();
+
+    bool resting = false;
+    for (int step = 0; step < 4000 && !resting; ++step) {
+        const hog::flow::Stepped stepped = block.region().step(tick);
+        resting = stepped.slumped == 0 && stepped.flying == 0;
+    }
+
+    REQUIRE(resting);
+    CHECK(block.region().grain() == before);
+    const auto over = hog::globe::next_to(
+        {.level = static_cast<std::uint8_t>(level), .face = 0, .i = last, .j = j}, 1, 0);
+    REQUIRE(over);
+    CHECK(over->face != 0);
+    CHECK(block.region().at({.face = over->face, .i = over->i, .j = over->j, .layer = layer})
+              .grain_amount > 0);
+    CHECK(block.region().at({.face = 0, .i = last - 1, .j = j, .layer = layer}).grain_amount > 0);
 }

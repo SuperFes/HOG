@@ -2,6 +2,7 @@
 
 #include <hog/flow/region.hpp>
 #include <hog/globe/brick.hpp>
+#include <hog/globe/cell.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/layers.hpp>
 #include <hog/globe/planet.hpp>
@@ -16,6 +17,8 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <set>
+#include <tuple>
 #include <vector>
 
 namespace hog::flow::testing {
@@ -54,51 +57,46 @@ public:
         for (std::uint32_t bl = first; bl < first + 3; ++bl) {
             for (std::uint32_t bj = 0; bj < 3; ++bj) {
                 for (std::uint32_t bi = 0; bi < 3; ++bi) {
-                    const BrickSite brick{.face = 0,
-                                          .i = (corner_i_ / hog::globe::brick_side) + bi,
-                                          .j = (corner_j_ / hog::globe::brick_side) + bj,
-                                          .layer = bl};
-                    BrickVoxels voxels{};
-                    const double band = hog::globe::distance_band(store_.layers());
-                    for (int k = 0; k < hog::globe::brick_voxels; ++k) {
-                        const Site site = hog::globe::site_in(brick, k);
-                        const auto layer = static_cast<int>(site.layer);
-                        const bool open =
-                            layer >= floor && (!shape || shape(site.i - corner_i_,
-                                                               site.j - corner_j_, layer - floor));
-                        // The floor's distance within the band, as generated ground has it.
-                        // Measured from the highest rock below in the column.
-                        int rock = floor - 1;
-                        if (shape) {
-                            for (int below = floor; below < layer; ++below) {
-                                if (!shape(site.i - corner_i_, site.j - corner_j_, below - floor)) {
-                                    rock = below;
-                                }
-                            }
-                        }
-                        const double to_floor = std::clamp(
-                            (layer - rock - 0.5) * store_.layers().thickness, -band, band);
-                        Voxel& voxel = voxels[static_cast<std::size_t>(k)];
-                        voxel.distance = hog::globe::distance_in_mm(to_floor);
-                        if (!open) {
-                            voxel.solid = ground;
-                            if (layer >= floor) {
-                                voxel.distance = -Voxel::far; // a wall the shape raised
-                            }
-                        }
-                    }
-                    store_.put(brick, hog::globe::Brick::pack(voxels));
-                    bricks_.push_back(brick);
+                    bricks_.push_back({.face = 0,
+                                       .i = (corner_i_ / hog::globe::brick_side) + bi,
+                                       .j = (corner_j_ / hog::globe::brick_side) + bj,
+                                       .layer = bl});
                 }
             }
         }
-        region_ = std::make_unique<Region>(world_, hold_sea);
-        for (const BrickSite brick : bricks_) {
-            region_->load(brick);
-        }
+        start(shape, ground, hold_sea);
     }
 
+    // A block over a cube edge: the bricks of every column within a brick of the edge column `j`
+    // of face 0's last row, on both faces, for the three bricks up from the floor.
+    struct Edge {};
+    Block(int floor, Edge, std::uint32_t j)
+        : store_{earth().layers()}, world_{earth(), store_}, floor_{floor} {
+        const int level = store_.layers().level;
+        const std::uint32_t last = (std::uint32_t{1} << level) - 1;
+        const auto first = (static_cast<std::uint32_t>(floor) - 1) / hog::globe::brick_side;
+        std::set<std::tuple<int, std::uint32_t, std::uint32_t>> columns;
+        for (int di = -hog::globe::brick_side; di <= hog::globe::brick_side; di += 1) {
+            for (int dj = -hog::globe::brick_side; dj <= hog::globe::brick_side; dj += 1) {
+                const auto next = hog::globe::next_to(
+                    {.level = static_cast<std::uint8_t>(level), .face = 0, .i = last, .j = j}, di,
+                    dj);
+                if (next) {
+                    columns.emplace(next->face, next->i / hog::globe::brick_side,
+                                    next->j / hog::globe::brick_side);
+                }
+            }
+        }
+        for (const auto& [face, bi, bj] : columns) {
+            for (std::uint32_t bl = first; bl < first + 3; ++bl) {
+                bricks_.push_back(
+                    {.face = static_cast<std::uint8_t>(face), .i = bi, .j = bj, .layer = bl});
+            }
+        }
+        start({}, Material::Basalt, false);
+    }
     [[nodiscard]] Region& region() { return *region_; }
+    [[nodiscard]] int floor() const { return floor_; }
     [[nodiscard]] World& world() { return world_; }
     [[nodiscard]] const VoxelStore& store() const { return store_; }
     [[nodiscard]] const std::vector<BrickSite>& bricks() const { return bricks_; }
@@ -161,6 +159,46 @@ public:
     }
 
 private:
+    void start(const std::function<bool(std::uint32_t, std::uint32_t, int)>& shape, Material ground,
+               bool hold_sea) {
+        for (const BrickSite brick : bricks_) {
+            BrickVoxels voxels{};
+            const double band = hog::globe::distance_band(store_.layers());
+            for (int k = 0; k < hog::globe::brick_voxels; ++k) {
+                const Site site = hog::globe::site_in(brick, k);
+                const auto layer = static_cast<int>(site.layer);
+                const bool open =
+                    layer >= floor_ &&
+                    (!shape || shape(site.i - corner_i_, site.j - corner_j_, layer - floor_));
+                // The floor's distance within the band, as generated ground has it.
+                // Measured from the highest rock below in the column.
+                int rock = floor_ - 1;
+                if (shape) {
+                    for (int below = floor_; below < layer; ++below) {
+                        if (!shape(site.i - corner_i_, site.j - corner_j_, below - floor_)) {
+                            rock = below;
+                        }
+                    }
+                }
+                const double to_floor =
+                    std::clamp((layer - rock - 0.5) * store_.layers().thickness, -band, band);
+                Voxel& voxel = voxels[static_cast<std::size_t>(k)];
+                voxel.distance = hog::globe::distance_in_mm(to_floor);
+                if (!open) {
+                    voxel.solid = ground;
+                    if (layer >= floor_) {
+                        voxel.distance = -Voxel::far; // a wall the shape raised
+                    }
+                }
+            }
+            store_.put(brick, hog::globe::Brick::pack(voxels));
+        }
+        region_ = std::make_unique<Region>(world_, hold_sea);
+        for (const BrickSite brick : bricks_) {
+            region_->load(brick);
+        }
+    }
+
     VoxelStore store_;
     World world_;
     int floor_;
