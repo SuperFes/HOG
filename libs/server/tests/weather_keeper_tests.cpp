@@ -189,3 +189,28 @@ TEST_CASE("the weather after a spin-up, to look at", "[.look]") {
               static_cast<std::streamsize>(bytes.size()));
     REQUIRE(out.good());
 }
+
+TEST_CASE("a keeper the clock outruns still shows each job's weather, and skips ahead past its lag",
+          "[server][weather]") {
+    const globe::Generator generator{small_earth()};
+    auto settings = quick();
+    settings.lag = 1h;
+    server::WeatherKeeper keeper{generator, 4h, 23.44, start, settings};
+    // The clock is a day ahead of the air, which is never to catch up.
+    GameTime now = start + 24h;
+    int made = 0;
+    float pace = 0.0F;
+    for (int tries = 0; tries < 100'000 && made < 3; ++tries) {
+        if (const auto weather = keeper.poll(now, 500ms)) {
+            ++made;
+            pace = weather->pace;
+            // Each job's worth is shown though the air is hours behind the clock.
+            CHECK(weather->cells.size() == protocol::weather_cells(level));
+        }
+        std::this_thread::sleep_for(1ms);
+        now += 30min;
+    }
+    CHECK(made == 3);
+    // After the first, the pace is game seconds per real second: far over a real-time one.
+    CHECK(pace > 10.0F);
+}

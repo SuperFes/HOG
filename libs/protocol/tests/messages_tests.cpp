@@ -54,7 +54,7 @@ Snapshot delta() {
 
 // Each cell different, with values a byte holds exactly.
 Weather weather(std::uint8_t level) {
-    Weather out{.level = level, .fade = std::chrono::minutes{10}, .cells = {}};
+    Weather out{.level = level, .fade = std::chrono::minutes{10}, .pace = 850.5F, .cells = {}};
     for (std::size_t index = 0; index < weather_cells(level); ++index) {
         const auto step = static_cast<float>(index % 4);
         out.cells.push_back({.cloud = step * step / 16.0F,
@@ -341,7 +341,7 @@ TEST_CASE("weather past what a byte holds is clamped", "[protocol]") {
 
 TEST_CASE("the planet's weather takes twenty-two bytes a cell", "[protocol]") {
     CHECK(weather_cells(most_weather_level) == 6'144);
-    CHECK(encode(weather(most_weather_level)).size() == 2 + 1 + 4 + (23 * 6'144));
+    CHECK(encode(weather(most_weather_level)).size() == 2 + 1 + 4 + 4 + (23 * 6'144));
 }
 
 TEST_CASE("weather too fine is refused", "[protocol]") {

@@ -197,6 +197,9 @@ struct CellWeather {
 struct Weather {
     std::uint8_t level = 0; // at most most_weather_level
     std::chrono::milliseconds fade{0};
+    // Game seconds the weather ran for each real second since the last, to a thousandth: how much
+    // faster than the wind's own speed the cloud is carried, as the clock is hurried.
+    float pace = 1.0F;
     std::vector<CellWeather> cells; // 6 × 4^level of them
 
     friend bool operator==(const Weather&, const Weather&) = default;

@@ -12,6 +12,9 @@
 namespace hog::server {
 namespace {
 
+// The longest a weather is faded to over, so a slow job doesn't smear the cloud.
+constexpr std::chrono::milliseconds most_fade{60'000};
+
 // What the protocol can carry of a wave height, metres.
 constexpr float most_sea_height = 20.0F;
 
@@ -74,11 +77,29 @@ std::optional<protocol::Weather> WeatherKeeper::poll(GameTime now, std::chrono::
         }
         job_.get();
         keep();
-        // While the air is still catching up with the clock there is nothing true to show.
-        if (now - reached_ < settings_.interval) {
-            made = sum(fade);
+        ran_ += running_;
+        // Until the air has caught up with the clock, or run its spin-up, there is nothing true
+        // to show; after, it's shown from every job, however far behind the clock it runs.
+        live_ = live_ || now - reached_ < settings_.interval || ran_ >= settings_.spin_up;
+        if (live_) {
+            const auto real = std::chrono::steady_clock::now();
+            // The weather is as old as the real time since the last, and carried at the game time
+            // it ran per real second.
+            float pace = 1.0F;
+            if (last_made_ != std::chrono::steady_clock::time_point{}) {
+                const std::chrono::duration<double> since = real - last_made_;
+                const auto apart = std::chrono::duration_cast<std::chrono::milliseconds>(since);
+                fade = std::clamp(std::max(fade, apart), fade, most_fade);
+                pace = static_cast<float>(seconds(running_) / std::max(since.count(), 0.5));
+            }
+            last_made_ = real;
+            made = sum(fade, pace);
             latest_ = made;
         }
+    }
+    // Hurried past what the air can be stepped at, it skips ahead rather than fall further behind.
+    if (live_ && now - reached_ > settings_.lag) {
+        reached_ = now - settings_.lag;
     }
     if (now - reached_ < settings_.interval) {
         return made;
@@ -86,6 +107,7 @@ std::optional<protocol::Weather> WeatherKeeper::poll(GameTime now, std::chrono::
     const GameDuration run = std::min(now - reached_, settings_.longest);
     const GameTime from = reached_;
     reached_ += run;
+    running_ = run;
     job_ = std::async(std::launch::async, [this, from, run] {
         air_.advance(seconds(run), [&](double elapsed) {
             return calendar_.sun_direction(from + std::chrono::duration_cast<GameDuration>(
@@ -116,8 +138,10 @@ Result<void> WeatherKeeper::restore(std::span<const std::byte> bytes, GameTime n
     // Air saved too long ago has lost what it knew; air saved ahead of the clock waits for it.
     reached_ = std::clamp(reached, now - settings_.spin_up, now);
     keep();
-    if (now - reached_ < settings_.interval) {
-        latest_ = sum(std::chrono::milliseconds{0});
+    // Air that kept its winds is shown as it is; air that lost them has its spin-up to run.
+    live_ = reached >= now - settings_.spin_up;
+    if (live_) {
+        latest_ = sum(std::chrono::milliseconds{0}, 1.0F);
     }
     return {};
 }
@@ -129,9 +153,10 @@ std::optional<protocol::CellWeather> WeatherKeeper::at(DVec3 up) const {
     return latest_->cells[grid_.index(planet::cell_at(up, settings_.level))];
 }
 
-protocol::Weather WeatherKeeper::sum(std::chrono::milliseconds fade) const {
+protocol::Weather WeatherKeeper::sum(std::chrono::milliseconds fade, float pace) const {
     protocol::Weather weather{.level = static_cast<std::uint8_t>(settings_.level),
                               .fade = fade,
+                              .pace = pace,
                               .cells = std::vector<protocol::CellWeather>(placed_.size())};
     for (std::size_t column = 0; column < placed_.size(); ++column) {
         weather.cells[placed_[column]] = shown(air_.column(column));
