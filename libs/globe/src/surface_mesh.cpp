@@ -169,7 +169,7 @@ std::vector<std::pair<int, int>> bands_of(const World& world, Cell chunk,
     double highest = std::numeric_limits<double>::lowest();
     for (const Generator::Column& column : columns) {
         lowest = std::min(lowest, column.ground());
-        highest = std::max(highest, column.ground());
+        highest = std::max(highest, column.top());
     }
     const double band = distance_band(layers, apart) + (layers.thickness * apart);
     std::vector<std::pair<int, int>> bands{{layers.layer_at(lowest - std::max(surface_depth, band)),
