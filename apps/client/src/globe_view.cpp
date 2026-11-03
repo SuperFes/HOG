@@ -153,7 +153,7 @@ terrain::BlockMesh globe_blocks(const globe::SurfaceMesh& mesh) {
         blocks.vertices.push_back({.position = vertex.position,
                                    .normal = vertex.normal,
                                    .tiles = {tile, tile, tile},
-                                   .corner = terrain::packed_corner(0, double{vertex.wet})});
+                                   .corner = terrain::packed_corner(0, double{vertex.wet}, double{vertex.glow})});
     }
     blocks.indices.reserve(mesh.indices.size());
     for (std::size_t corner = 0; corner + 2 < mesh.indices.size(); corner += 3) {

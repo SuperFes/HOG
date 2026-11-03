@@ -25,6 +25,7 @@ struct SurfaceVertex {
     Vec3 normal{0.0F};   // unit, out of the solid or the liquid
     Material material = Material::Air;
     float wet = 0.0F; // of the ground's pores there, the share holding liquid
+    float glow = 0.0F; // from 0 to 1, how hot it shines: molten or red-hot rock
 
     friend bool operator==(const SurfaceVertex&, const SurfaceVertex&) = default;
 };

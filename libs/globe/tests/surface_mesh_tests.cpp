@@ -626,6 +626,40 @@ TEST_CASE("water standing in a hollow shows level at its surface, however full i
     }
 }
 
+TEST_CASE("lava standing in a hollow shines by its heat, and cold rock does not",
+          "[globe][surface]") {
+    VoxelStore store{earth().layers()};
+    World world{earth(), store};
+    const DVec3 up = ground_between(earth(), 50.0, 400.0);
+    const DVec3 centre = dig_hollow(world, up, 3.0);
+    const double thickness = earth().layers().thickness;
+    const double level = glm::length(centre) - 1.0;
+    fill_hollow(world, centre, 3.0, [&](hog::globe::Voxel& voxel, double bottom) {
+        if (bottom < level) {
+            voxel.liquid = Material::Basalt;
+            voxel.liquid_amount =
+                hog::globe::amount_of(std::min(1.0, (level - bottom) / thickness));
+            voxel.temperature = hog::globe::temperature_in_eighths(1'600.0);
+        }
+    });
+    const SurfaceMesh mesh =
+        mesh_of(world, block_round(hog::globe::chunk_under(up, earth().layers())));
+    const std::vector<std::uint32_t> lava = vertices_near(mesh, centre, 1.5, Material::Basalt);
+    REQUIRE(lava.size() > 20);
+    bool shines = false;
+    for (const std::uint32_t v : lava) {
+        shines = shines || mesh.vertices[v].glow > 0.9F;
+    }
+    CHECK(shines);
+    // Ground away from it is cold.
+    for (const hog::globe::SurfaceVertex& vertex : mesh.vertices) {
+        if (glm::length(world_point(mesh, static_cast<std::uint32_t>(&vertex - mesh.vertices.data())) -
+                        centre) > 30.0) {
+            CHECK(vertex.glow == 0.0F);
+        }
+    }
+}
+
 TEST_CASE("a film of water shallower than half a voxel still shows on the ground",
           "[globe][surface]") {
     VoxelStore store{earth().layers()};
