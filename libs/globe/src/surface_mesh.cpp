@@ -402,7 +402,15 @@ public:
         top_ = top;
         voxels_.clear();
         for (auto& [apart, group] : groups_) {
-            const std::vector<Voxel> filled = fill_group(group, bottom, top, apart);
+            std::vector<Voxel> filled = fill_group(group, bottom, top, apart);
+            if (world_->draws_from_amounts()) {
+                // The surface from what each voxel holds alone: where it crosses between the
+                // voxels, and the way it faces, from how their amounts change.
+                for (Voxel& voxel : filled) {
+                    voxel.distance = distance_of_amount(voxel.solid_amount, layers_->thickness);
+                    voxel.normal = Voxel::no_normal;
+                }
+            }
             place(group, filled, ((top - bottom) / apart) + 1);
         }
         soak();

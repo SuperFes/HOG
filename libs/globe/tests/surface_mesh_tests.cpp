@@ -15,6 +15,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstddef>
 #include <cstdint>
 #include <format>
@@ -283,6 +284,36 @@ TEST_CASE("a chunk's surface lies on the ground, facing out of it", "[globe][sur
         backwards += glm::dot(glm::cross(b - a, c - a), normal) < 0.0 ? 1U : 0U;
     }
     CHECK(backwards * 1'000 < mesh.indices.size() / 3);
+}
+
+TEST_CASE("a surface drawn from solid amounts alone lies near the ground and faces out of it",
+          "[globe][surface][amounts]") {
+    VoxelStore store{earth().layers()};
+    World world{earth(), store};
+    world.draw_from_amounts(true);
+    const DVec3 up = ground_between(earth(), 50.0, 400.0);
+    const Cell chunk = hog::globe::chunk_under(up, earth().layers());
+    const SurfaceMesh mesh = mesh_of(world, std::array{chunk});
+    REQUIRE(mesh.vertices.size() > 500);
+    double off = 0.0;
+    double worst = 0.0;
+    std::size_t facing = 0;
+    for (std::uint32_t v = 0; v < mesh.vertices.size(); ++v) {
+        const DVec3 point = world_point(mesh, v);
+        const double distance =
+            std::abs(earth().sample(point, hog::globe::voxel_lod(earth())).distance);
+        off += distance;
+        worst = std::max(worst, distance);
+        facing += glm::dot(DVec3{mesh.vertices[v].normal}, glm::normalize(point)) > 0.3 ? 1U : 0U;
+    }
+    std::printf("amounts: mean %.4f m off, worst %.4f m, %zu of %zu facing out\n",
+                off / static_cast<double>(mesh.vertices.size()), worst, facing,
+                mesh.vertices.size());
+    // Within a fraction of a voxel's thickness, which is all a voxel's amount can tell.
+    const double thickness = earth().layers().thickness;
+    CHECK(off / static_cast<double>(mesh.vertices.size()) < 0.15 * thickness);
+    CHECK(worst < 0.5 * thickness);
+    CHECK(facing > mesh.vertices.size() * 95 / 100);
 }
 
 TEST_CASE("chunks of a detail meet without gaps, on a face and across the cube's edges",

@@ -399,3 +399,30 @@ TEST_CASE("bricks fill from the generator", "[.bench][globe][world]") {
                   << " ms with slopes of their own (" << inside << " inside)");
     }
 }
+
+TEST_CASE("a voxel's solid amount keeps to its distance through digging and building",
+          "[globe][world][amounts]") {
+    VoxelStore store{earth().layers()};
+    World world{earth(), store};
+    const DVec3 direction = somewhere(11);
+    const Ground ground = ground_at(earth(), direction);
+    const double thickness = earth().layers().thickness;
+    hog::globe::dig(world, direction * ground.radius, 3.0);
+    hog::globe::build(world, direction * (ground.radius - 1.0), 1.5, Material::Granite);
+    std::size_t checked = 0;
+    for (const BrickSite site : store.changed_since(0)) {
+        const hog::globe::Brick* brick = store.brick(site);
+        REQUIRE(brick != nullptr);
+        BrickVoxels voxels{};
+        brick->unpack(voxels);
+        for (const Voxel& voxel : voxels) {
+            const std::uint16_t expected =
+                hog::globe::amount_of(0.5 - (hog::globe::metres(voxel.distance) / thickness));
+            // Within what millimetres of distance can tell of an amount.
+            const int apart = std::abs(int{voxel.solid_amount} - int{expected});
+            CHECK(apart <= 40);
+            ++checked;
+        }
+    }
+    CHECK(checked > 1'000);
+}
