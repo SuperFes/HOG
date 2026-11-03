@@ -32,6 +32,8 @@ namespace {
 // Ground edited within this many metres of a player is worn and checked every few seconds.
 constexpr double near_wear_reach = 48.0;
 constexpr double near_wear_gap = 5.0;
+// How near a player a vent is taken up by the flow, metres.
+constexpr double vent_reach = 4'000.0;
 
 // Seconds; a 20 Hz tick has 50 ms to spare.
 constexpr std::array tick_bounds{0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005,
@@ -59,6 +61,7 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config, const glob
                store::SqliteBrickArchive bricks)
     : config_(config), world_id_(globe::world_id(globe)), generator_(globe),
       voxels_(generator_.layers()), globe_(generator_, voxels_), flow_(globe_),
+      vent_sites_(globe::vent_sites(generator_)), vented_(vent_sites_.size(), false),
       bricks_(std::move(bricks)), bricks_shared_(voxels_), snapshots_(std::move(snapshots)),
       places_(std::move(places)), writer_(snapshots_, config.keep_snapshots),
       nearby_(std::min(planet::level_for(config.net.view.radius, globe.radius), planet::max_level)),
@@ -186,6 +189,35 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
     return server;
 }
 
+void Server::wake_vents() {
+    const globe::Layers& layers = generator_.layers();
+    for (const WorldPosition& at : joined_.placed()) {
+        const DVec3 here = at.metres();
+        for (std::size_t k = 0; k < vent_sites_.size(); ++k) {
+            const globe::VentSite& site = vent_sites_[k];
+            if (vented_[k] ||
+                glm::distance(here, site.direction * site.ground) > vent_reach) {
+                continue;
+            }
+            vented_[k] = true;
+            const globe::Cell column = globe::cell_under(site.direction, layers.level);
+            // A cycle of about a day and a half, mostly asleep, each vent shifted by its key.
+            const double unit = static_cast<double>(site.key >> 11U) * 0x1.0p-53;
+            flow_.add_vent({.site = {.face = column.face,
+                                     .i = column.i,
+                                     .j = column.j,
+                                     .layer = static_cast<std::uint32_t>(
+                                         layers.layer_at(site.ground))},
+                            .active_rate = 0.02,
+                            .erupting_rate = 2.0,
+                            .period = 129'600.0,
+                            .eruption = 300.0,
+                            .active = 7'200.0,
+                            .phase = unit * 129'600.0});
+        }
+    }
+}
+
 void Server::simulate(GameTime from, GameDuration step) {
     HOG_ZONE("simulate");
     entities_.progress(std::chrono::duration<float>(step).count());
@@ -200,6 +232,7 @@ void Server::simulate(GameTime from, GameDuration step) {
             flow_.attend(at.metres(), near_wear_reach, near_wear_gap);
         }
         swept_ = {};
+        wake_vents();
     }
     wet_ground(step);
     if (weather_) {

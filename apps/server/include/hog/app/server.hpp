@@ -9,6 +9,7 @@
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
 #include <hog/globe/voxel_store.hpp>
+#include <hog/globe/vents.hpp>
 #include <hog/globe/world.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/login/keys.hpp>
@@ -150,6 +151,8 @@ private:
     // Runs the clock as the newest player's wish asked, if any, telling everyone how it runs now.
     template <typename Loop>
     void hurry_clock(Loop& loop);
+    // Gives the flow the vents near players that it hasn't got yet.
+    void wake_vents();
 
     server::ServerConfig config_;
     std::uint64_t world_id_;
@@ -157,6 +160,9 @@ private:
     globe::VoxelStore voxels_;
     globe::World globe_;
     flow::Simulation flow_;
+    // The planet's vents, and which the flow has been given: those near someone are.
+    std::vector<globe::VentSite> vent_sites_;
+    std::vector<bool> vented_;
     // Game time gone by since the ground was last wetted.
     GameDuration unwetted_{};
     GameDuration swept_{};
