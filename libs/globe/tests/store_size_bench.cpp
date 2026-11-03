@@ -67,6 +67,7 @@ struct Streams {
     // Where the bytes go: each field of every voxel in the window as its own plane, and the
     // distance again predicted from its neighbours.
     std::vector<std::byte> p_dist, p_pred, p_norm, p_rest, p_height, p_height_raw;
+    std::vector<std::byte> q10, q20, q50; // bricks with the distance rounded to 1, 2, 5 cm, normals left out
     std::vector<std::vector<std::byte>> heights; // the ground at other precisions and spacings
     std::size_t leaves_d = 0, leaves_e = 0, uniform_leaves_d = 0, uniform_leaves_e = 0;
     std::size_t bricks = 0;
@@ -171,7 +172,7 @@ Streams build_shard(const Generator& generator, const Baseline& base, int face, 
     const Layers& layers = generator.layers();
     const double lod = voxel_lod(generator);
     const double band = distance_band(layers);
-    hog::ByteWriter a, b, c;
+    hog::ByteWriter a, b, c, q10, q20, q50;
     Streams streams;
     constexpr int side = shard_bricks * brick_side;
     std::vector<std::int32_t> ground_mm(static_cast<std::size_t>(side * side), 0);
@@ -208,7 +209,8 @@ Streams build_shard(const Generator& generator, const Baseline& base, int face, 
             if (heights_only) {
                 continue;
             }
-            Runs run_a, run_b, run_c;
+            Runs run_a, run_b, run_c, run_q10, run_q20, run_q50;
+            std::size_t same_q = 0, uniform_q = 0;
             kept[static_cast<std::size_t>((bj * shard_bricks) + bi)].first = first;
             kept[static_cast<std::size_t>((bj * shard_bricks) + bi)].last = last;
             a.write(static_cast<std::uint16_t>(first));
@@ -276,10 +278,25 @@ Streams build_shard(const Generator& generator, const Baseline& base, int face, 
                 run_a.add(a, Brick::pack(va), streams.same_a, streams.uniform_a);
                 run_b.add(b, pb, streams.same_b, streams.uniform_b);
                 run_c.add(c, pc, streams.same_c, streams.uniform_c);
+                const auto rounded = [&](int step) {
+                    auto vq = vb;
+                    for (Voxel& voxel : vq) {
+                        voxel.distance = static_cast<std::int16_t>(
+                            static_cast<int>(std::lround(static_cast<double>(voxel.distance) / step)) * step);
+                        voxel.normal = Voxel::no_normal;
+                    }
+                    return Brick::pack(vq);
+                };
+                run_q10.add(q10, rounded(10), same_q, uniform_q);
+                run_q20.add(q20, rounded(20), same_q, uniform_q);
+                run_q50.add(q50, rounded(50), same_q, uniform_q);
                 kept[static_cast<std::size_t>((bj * shard_bricks) + bi)].b.push_back(std::move(pb));
                 kept[static_cast<std::size_t>((bj * shard_bricks) + bi)].c.push_back(std::move(pc));
             }
             run_a.flush(a);
+            run_q10.flush(q10);
+            run_q20.flush(q20);
+            run_q50.flush(q50);
             run_b.flush(b);
             run_c.flush(c);
         }
@@ -328,6 +345,9 @@ Streams build_shard(const Generator& generator, const Baseline& base, int face, 
     if (heights_only) {
         return streams;
     }
+    streams.q10 = std::move(q10).take();
+    streams.q20 = std::move(q20).take();
+    streams.q50 = std::move(q50).take();
     streams.a = std::move(a).take();
     streams.b = std::move(b).take();
     streams.c = std::move(c).take();
@@ -401,7 +421,7 @@ TEST_CASE("how big the stored world is, on a random sample of shards", "[.store-
                 level, generator.layers().thickness, shards_across,
                 static_cast<unsigned long long>(total), static_cast<unsigned long long>(sample));
     const bool only_heights = env("HOG_BENCH_HEIGHTS", "") == "1";
-    for (const char* name : {"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "h0", "h1", "h2", "h3", "h4", "h5"}) {
+    for (const char* name : {"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "h0", "h1", "h2", "h3", "h4", "h5", "q10", "q20", "q50"}) {
         std::filesystem::create_directories(dir / name);
     }
     struct Job { int face, si, sj; };
@@ -437,6 +457,9 @@ TEST_CASE("how big the stored world is, on a random sample of shards", "[.store-
                     continue;
                 }
                 put(dir / "a" / name, made.a);
+                put(dir / "q10" / name, made.q10);
+                put(dir / "q20" / name, made.q20);
+                put(dir / "q50" / name, made.q50);
                 put(dir / "b" / name, made.b);
                 put(dir / "c" / name, made.c);
                 put(dir / "d" / name, made.d);
