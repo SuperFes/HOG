@@ -200,3 +200,25 @@ TEST_CASE("lava is added to a voxel as it fits, and mixes", "[flow][lava]") {
     CHECK(block.region().add_lava(block.at(12, 12, 0), Material::Basalt, 10, 1'400.0) == 0);
     CHECK(block.region().hot(hog::globe::brick_of(block.at(12, 12, 0))));
 }
+
+TEST_CASE("rock that has set from lava is still hot, and cools off in time", "[flow][lava]") {
+    Block block{floor_above_sea(100.0)};
+    const double melts = hog::globe::properties(Material::Basalt).melts;
+    block.pour_lava(12, 12, 0, full, melts + 100.0);
+    for (int hour = 0; hour < 12 && block.voxel(12, 12, 0).liquid != Material::Air; ++hour) {
+        block.region().step(3'600.0);
+    }
+    REQUIRE(block.voxel(12, 12, 0).solid == Material::Basalt);
+    // Set at about its stiffening point: well over red heat, and the brick is kept held for it.
+    CHECK(kelvin(block.voxel(12, 12, 0).temperature) > hog::flow::red_hot_kelvin);
+    CHECK(block.region().hot(hog::globe::brick_of(block.at(12, 12, 0))));
+    int hours = 0;
+    for (; hours < 100 && kelvin(block.voxel(12, 12, 0).temperature) > hog::flow::red_hot_kelvin;
+         ++hours) {
+        block.region().step(3'600.0);
+    }
+    CHECK(hours > 0);
+    CHECK(hours < 100);
+    CHECK(kelvin(block.voxel(12, 12, 0).temperature) < 400.0);
+    CHECK_FALSE(block.region().hot(hog::globe::brick_of(block.at(12, 12, 0))));
+}

@@ -105,4 +105,46 @@ void Region::quench(Stepped& stepped) {
     }
 }
 
+void Region::cool_rock(double seconds) {
+    constexpr double stretch = 10.0;
+    cooling_ += seconds;
+    if (cooling_ < stretch) {
+        return;
+    }
+    const double elapsed = cooling_;
+    cooling_ = 0.0;
+    const double thickness = world_->store().layers().thickness;
+    for (auto& [key, brick] : held_) {
+        for (int k = 0; k < globe::brick_voxels; ++k) {
+            Voxel& voxel = brick.voxels[static_cast<std::size_t>(k)];
+            if (!red_hot(voxel) || (voxel.liquid_amount > 0 && molten(voxel.liquid))) {
+                continue;
+            }
+            const Site site = globe::site_in(globe::brick_at_key(key), k);
+            // The share of its faces on open ground, which is all it can lose heat through.
+            int open = 0;
+            const auto side = [&](const Voxel* there) {
+                open += (there != nullptr && there->solid == Material::Air) ? 1 : 0;
+            };
+            side(this->voxel({.face = site.face, .i = site.i, .j = site.j, .layer = site.layer + 1}));
+            if (site.layer > 0) {
+                side(this->voxel(
+                    {.face = site.face, .i = site.i, .j = site.j, .layer = site.layer - 1}));
+            }
+            for (const auto& step :
+                 std::array<std::pair<int, int>, 4>{{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}}) {
+                if (const std::optional<Site> next = beside(site, step.first, step.second)) {
+                    side(this->voxel(*next));
+                }
+            }
+            const double kelvin = globe::kelvin(voxel.temperature);
+            const double next = cooled(voxel.solid, kelvin, air_kelvin, open / 6.0, thickness, elapsed);
+            voxel.temperature = next < red_hot_kelvin
+                                    ? globe::temperature_in_eighths(air_kelvin)
+                                    : static_cast<std::uint16_t>(dithered(next * 8.0, site, 3));
+            brick.dirty = true;
+        }
+    }
+}
+
 } // namespace hog::flow
