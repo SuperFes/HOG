@@ -158,6 +158,12 @@ Result<void> read_option(Options& options, std::string_view option, std::string_
             return make_error(ErrorCode::InvalidArgument,
                               std::format("--voxel takes a size in metres over zero, not {}", value));
         }
+    } else if (option == "--surface") {
+        if (value != "distance" && value != "amounts") {
+            return make_error(ErrorCode::InvalidArgument,
+                              std::format("--surface takes distance or amounts, not {}", value));
+        }
+        options.surface_from_amounts = value == "amounts";
     } else if (option == "--clouds") {
         return read_clouds(options, value);
     } else if (option == "--quit-after") {
@@ -215,6 +221,10 @@ Result<void> check_together(const Options& options) {
     }
     if (options.name && !options.login) {
         return make_error(ErrorCode::InvalidArgument, "--name is for --login");
+    }
+    if (options.surface_from_amounts && options.connect) {
+        return make_error(ErrorCode::InvalidArgument,
+                          "--surface amounts is for flying alone: a server draws its own ground");
     }
     if (options.voxel && options.connect) {
         return make_error(ErrorCode::InvalidArgument,
@@ -281,6 +291,8 @@ options:
                          planet file
   --voxel METRES         the voxel world's cell size, finer or coarser than the planet's
                          own (0.5 by default); for looking, flying alone
+  --surface SOURCE       draw the ground from the voxels' stored distances (default) or
+                         from their solid amounts alone: amounts or distance
   --no-bend              draw the planet curving as tightly as it truly does, not
                          flattened like Earth's near the eye
   --software             draw with a software Vulkan device, such as lavapipe

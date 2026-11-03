@@ -200,8 +200,9 @@ void reshape(World& world, DVec3 centre, double radius, const auto& change) {
             const double to_ball = glm::length(out) - radius;
             if (to_ball <= band) {
                 const bool near = std::abs(to_ball) < band && glm::length(out) > 0.0;
-                change(voxels[static_cast<std::size_t>(index)], std::max(to_ball, -band),
-                       near ? glm::normalize(out) : DVec3{0.0});
+                Voxel& voxel = voxels[static_cast<std::size_t>(index)];
+                change(voxel, std::max(to_ball, -band), near ? glm::normalize(out) : DVec3{0.0});
+                sync_solid_amount(voxel, layers.thickness);
             }
         }
         world.write(brick, voxels);

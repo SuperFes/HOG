@@ -28,6 +28,11 @@ public:
     [[nodiscard]] const Generator& generator() const noexcept { return *generator_; }
     [[nodiscard]] const VoxelStore& store() const noexcept { return *store_; }
 
+    // Whether surfaces are drawn from the voxels' solid amounts alone, not their stored distances
+    // and normals. Copies of the world keep the choice.
+    void draw_from_amounts(bool on) noexcept { from_amounts_ = on; }
+    [[nodiscard]] bool draws_from_amounts() const noexcept { return from_amounts_; }
+
     [[nodiscard]] Voxel at(Site site) const;
     [[nodiscard]] BrickVoxels brick(BrickSite site) const;
 
@@ -46,6 +51,7 @@ public:
 private:
     const Generator* generator_;
     VoxelStore* store_;
+    bool from_amounts_ = false;
 };
 
 // Shaped matter taken out of a ball, or built up in one of `material`; `centre` in metres from

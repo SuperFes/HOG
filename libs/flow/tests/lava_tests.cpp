@@ -95,6 +95,9 @@ TEST_CASE("lava cools in the open and sets into rock, reshaping the ground about
     CHECK(set.liquid_amount == 0);
     CHECK(set.solid == Material::Basalt);
     CHECK(set.distance < 0);
+    // The amount of rock in it follows its distance, full, and the air over it is nearly empty.
+    CHECK(set.solid_amount == hog::globe::Voxel::full);
+    CHECK(block.voxel(12, 12, 1).solid_amount < hog::globe::Voxel::full / 2);
     // The air over it is now a half-voxel off the new surface.
     CHECK(block.voxel(12, 12, 1).distance <= static_cast<int>(thickness * 500.0));
     CHECK(block.region().liquid() == 0);

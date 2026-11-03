@@ -67,6 +67,14 @@ DVec3 unpacked_normal(std::uint16_t packed) noexcept {
     return glm::normalize(unit);
 }
 
+void sync_solid_amount(Voxel& voxel, double thickness) noexcept {
+    voxel.solid_amount = amount_of(0.5 - (metres(voxel.distance) / thickness));
+}
+
+std::int16_t distance_of_amount(std::uint16_t amount, double thickness) noexcept {
+    return distance_in_mm((0.5 - (static_cast<double>(amount) / Voxel::full)) * thickness);
+}
+
 Voxel voxel_from(const Sample& sample, double band) noexcept {
     Voxel voxel;
     voxel.distance = distance_in_mm(std::clamp(sample.distance, -band, band));

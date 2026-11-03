@@ -91,5 +91,10 @@ inline constexpr double band_voxels = 4.0;
 // it, so voxels deep in matter or open space are alike. All the generated ground is shaped
 // matter; it turns loose only once something disturbs it.
 [[nodiscard]] Voxel voxel_from(const Sample& sample, double band) noexcept;
+// Sets the solid amount to what the voxel's distance says, for a voxel `thickness` metres thick;
+// to be called wherever a distance is written, so the two keep to one surface.
+void sync_solid_amount(Voxel& voxel, double thickness) noexcept;
+// The distance in millimetres a solid amount stands for, in a voxel `thickness` metres thick.
+[[nodiscard]] std::int16_t distance_of_amount(std::uint16_t amount, double thickness) noexcept;
 
 } // namespace hog::globe

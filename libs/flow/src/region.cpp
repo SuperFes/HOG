@@ -750,6 +750,7 @@ void Region::freeze(Site site, Held& brick) {
     here.grain_amount = 0;
     here.condition = Voxel::sound;
     here.distance = static_cast<std::int16_t>(-half);
+    globe::sync_solid_amount(here, thickness);
     here.normal = globe::packed_normal(glm::normalize(globe::middle_of(site, world_->store().layers())));
     brick.dirty = true;
     // The open voxels about it now lie just off the new surface.
@@ -767,6 +768,7 @@ void Region::freeze(Site site, Held& brick) {
         Voxel* there = voxel(next);
         if (there != nullptr && there->solid == Material::Air && there->distance > half) {
             there->distance = half;
+            globe::sync_solid_amount(*there, world_->store().layers().thickness);
             held(globe::brick_of(next))->dirty = true;
         }
     }
@@ -1036,6 +1038,7 @@ void Region::scour(Site bed, int mm) {
         static_cast<int>(globe::distance_in_mm(globe::distance_band(world_->store().layers())));
     const auto push = [&](Voxel& voxel) {
         voxel.distance = static_cast<std::int16_t>(std::min(band, voxel.distance + mm));
+        globe::sync_solid_amount(voxel, world_->store().layers().thickness);
         if (voxel.distance > 0) {
             voxel.solid = Material::Air;
         }
