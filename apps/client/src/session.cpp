@@ -127,6 +127,8 @@ void Session::heard(std::span<const std::byte> bytes, MonotonicClock::time_point
     } else if (auto* bricks = std::get_if<protocol::Bricks>(&*message)) {
         bricks_.insert(bricks_.end(), std::make_move_iterator(bricks->bricks.begin()),
                        std::make_move_iterator(bricks->bricks.end()));
+    } else if (const auto* grains = std::get_if<protocol::Grains>(&*message)) {
+        grains_.receive(*grains, now);
     } else if (const auto* clock = std::get_if<protocol::Clock>(&*message)) {
         if (clock->scale != world_rate_) {
             log::info(session_log, "{} runs the world at {}x", address_, clock->scale);
