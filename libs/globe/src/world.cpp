@@ -127,13 +127,8 @@ void World::write(BrickSite site, const BrickVoxels& voxels) {
     }
 }
 
-namespace {
-
-// The voxels of every column within `reach` of the ball's middle, across faces where it spans
-// them, by brick.
-std::map<BrickSite, std::vector<int>> sites_near(const VoxelStore& store, DVec3 centre,
+std::map<BrickSite, std::vector<int>> sites_near(const Layers& layers, DVec3 centre,
                                                  double reach) {
-    const Layers& layers = store.layers();
     const double from = glm::length(centre);
     const int lowest = std::max(0, layers.layer_at(from - reach));
     const int highest = std::min(layers.count - 1, layers.layer_at(from + reach));
@@ -168,12 +163,37 @@ std::map<BrickSite, std::vector<int>> sites_near(const VoxelStore& store, DVec3 
     return near;
 }
 
+void dig_voxel(Voxel& voxel, double to_shape, DVec3 outward) {
+    const std::int16_t out = distance_in_mm(-to_shape);
+    if (out > voxel.distance) {
+        voxel.distance = out;
+        voxel.normal = packed_normal(-outward);
+        if (out > 0) {
+            voxel.solid = Material::Air;
+        }
+    }
+}
+
+void build_voxel(Voxel& voxel, double to_shape, DVec3 outward, Material material) {
+    const std::int16_t in = distance_in_mm(to_shape);
+    if (in < voxel.distance) {
+        voxel.distance = in;
+        voxel.normal = packed_normal(outward);
+        if (in < 0) {
+            voxel.solid = material;
+            voxel.condition = Voxel::sound;
+        }
+    }
+}
+
+namespace {
+
 // Each voxel in the ball or within the band of its surface, given its distance to that surface
 // in the band and, near it, the way out of the ball.
 void reshape(World& world, DVec3 centre, double radius, const auto& change) {
     const Layers& layers = world.store().layers();
     const double band = distance_band(layers);
-    for (const auto& [brick, indices] : sites_near(world.store(), centre, radius + band)) {
+    for (const auto& [brick, indices] : sites_near(layers, centre, radius + band)) {
         BrickVoxels voxels = world.brick(brick);
         for (const int index : indices) {
             const DVec3 out = middle_of(site_in(brick, index), layers) - centre;
@@ -192,28 +212,13 @@ void reshape(World& world, DVec3 centre, double radius, const auto& change) {
 
 void dig(World& world, DVec3 centre, double radius) {
     reshape(world, centre, radius, [](Voxel& voxel, double to_ball, DVec3 outward) {
-        const std::int16_t out = distance_in_mm(-to_ball);
-        if (out > voxel.distance) {
-            voxel.distance = out;
-            voxel.normal = packed_normal(-outward);
-            if (out > 0) {
-                voxel.solid = Material::Air;
-            }
-        }
+        dig_voxel(voxel, to_ball, outward);
     });
 }
 
 void build(World& world, DVec3 centre, double radius, Material material) {
     reshape(world, centre, radius, [&](Voxel& voxel, double to_ball, DVec3 outward) {
-        const std::int16_t in = distance_in_mm(to_ball);
-        if (in < voxel.distance) {
-            voxel.distance = in;
-            voxel.normal = packed_normal(outward);
-            if (in < 0) {
-                voxel.solid = material;
-                voxel.condition = Voxel::sound;
-            }
-        }
+        build_voxel(voxel, to_ball, outward, material);
     });
 }
 

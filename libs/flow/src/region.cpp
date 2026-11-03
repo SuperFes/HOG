@@ -85,6 +85,7 @@ void Region::load(BrickSite site) {
         return;
     }
     found->second.voxels = world_->brick(site);
+    fresh_.push_back({.site = site});
     std::vector<std::uint32_t>& stack = stacks_[stack_key(site)];
     stack.insert(std::ranges::lower_bound(stack, site.layer), site.layer);
 }
@@ -693,6 +694,7 @@ void Region::seep(const std::vector<Column>& columns, double seconds, Stepped& s
 Stepped Region::step(double seconds) {
     Stepped stepped;
     ++steps_;
+    loosen_fresh();
     std::vector<Column> all = columns();
     hold_sea(all, stepped);
     gather(all);
