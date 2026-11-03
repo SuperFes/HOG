@@ -214,3 +214,20 @@ TEST_CASE("a keeper the clock outruns still shows each job's weather, and skips 
     // After the first, the pace is game seconds per real second: far over a real-time one.
     CHECK(pace > 10.0F);
 }
+
+TEST_CASE("a fade longer than the most a weather is faded over is kept as asked",
+          "[server][weather]") {
+    const globe::Generator generator{small_earth()};
+    server::WeatherKeeper keeper{generator, 4h, 23.44, start, quick()};
+    GameTime now = start + 2min;
+    int made = 0;
+    for (int tries = 0; tries < 100'000 && made < 2; ++tries) {
+        if (const auto weather = keeper.poll(now, 5min)) {
+            ++made;
+            CHECK(weather->fade >= 5min);
+        }
+        std::this_thread::sleep_for(1ms);
+        now += 2min;
+    }
+    CHECK(made == 2);
+}
