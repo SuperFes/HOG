@@ -13,6 +13,8 @@
 #include <glm/geometric.hpp>
 
 #include <array>
+#include <chrono>
+#include <cstdio>
 #include <cstddef>
 #include <optional>
 #include <set>
@@ -177,4 +179,50 @@ TEST_CASE("a brick dug lets go of the ground over it, which comes back with the 
     REQUIRE(ground.keep(around));
     CHECK(ground.holds(chunk_under(standing)));
     CHECK(drop() > before + 1.5);
+}
+
+TEST_CASE("there is ground under and round a walker, whatever the cell size", "[physics][ground]") {
+    // Chunks wider than the reach: the walker's own chunk can have its middle farther than that.
+    for (const double voxel : {5.0, 2.5, 1.0}) {
+        globe::Planet planet;
+        planet.seed = 1;
+        planet.voxel = voxel;
+        const globe::Generator generator{planet};
+        const double fine = globe::voxel_lod(generator);
+        int tried = 0;
+        int missed = 0;
+        for (const DVec3 from : {DVec3{1.0, 0.0, 0.0}, DVec3{0.0, 1.0, 0.2}, DVec3{-0.6, 0.5, 0.6},
+                                 DVec3{0.3, -0.9, -0.3}, DVec3{-0.2, -0.2, 0.9}}) {
+            const DVec3 up =
+                globe::land_near(generator, glm::normalize(from)).value_or(glm::normalize(from));
+            globe::VoxelStore store{generator.layers()};
+            const globe::World world{generator, store};
+            Space space;
+            Ground ground{space, world};
+            const double top = globe::ground_below(generator, up, fine).value_or(0.0);
+            const std::array around{WorldPosition{up * (top + 1.7)}};
+            REQUIRE(ground.keep(around));
+            const DVec3 east = glm::normalize(glm::cross(DVec3{0.0, 0.0, 1.0}, up));
+            const DVec3 north = glm::cross(up, east);
+            // Rays down at points within 50 m of the walker, a little inside the 60 m reach.
+            for (double a = -50.0; a <= 50.0; a += 5.0) {
+                for (double b = -50.0; b <= 50.0; b += 5.0) {
+                    if ((a * a) + (b * b) > 2'500.0) {
+                        continue;
+                    }
+                    const DVec3 at =
+                        glm::normalize(up + (((east * a) + (north * b)) / planet.radius));
+                    const double surface = globe::ground_below(generator, at, fine).value_or(0.0);
+                    ++tried;
+                    missed += space.cast_ray(WorldPosition{at * (surface + 20.0)}, at * -60.0,
+                                             Faces::Both)
+                                  ? 0
+                                  : 1;
+                }
+            }
+        }
+        INFO("cells of " << voxel << " m");
+        CHECK(tried > 0);
+        CHECK(missed == 0);
+    }
 }
