@@ -13,7 +13,7 @@ TEST_CASE("vents are scattered over dry land, the same each time", "[globe][vent
     const Generator generator{Planet{}};
     const auto vents = hog::globe::vent_sites(generator);
     CHECK(!vents.empty());
-    CHECK(vents.size() < 120);
+    CHECK(vents.size() < 400);
     const double sea = generator.sea_level().value_or(0.0);
     for (const auto& vent : vents) {
         CHECK(vent.ground > sea);
@@ -22,6 +22,24 @@ TEST_CASE("vents are scattered over dry land, the same each time", "[globe][vent
     const auto again = hog::globe::vent_sites(generator);
     REQUIRE(again.size() == vents.size());
     CHECK(again.front().key == vents.front().key);
+}
+
+TEST_CASE("some vents are pools on cave floors under the ground", "[globe][vents]") {
+    const Generator generator{Planet{}};
+    int pools = 0;
+    for (const auto& vent : hog::globe::vent_sites(generator)) {
+        if (!vent.pool) {
+            continue;
+        }
+        ++pools;
+        const auto ground = hog::globe::ground_below(generator, vent.direction, 0.5);
+        CHECK(vent.ground < generator.column(vent.direction, 0.5).ground());
+        // Open just over the floor, solid just under.
+        CHECK(generator.column(vent.direction, 0.5).sample(vent.ground + 1.0).distance > 0.0);
+        CHECK(generator.column(vent.direction, 0.5).sample(vent.ground - 0.5).distance < 0.0);
+        (void)ground;
+    }
+    CHECK(pools > 0);
 }
 
 TEST_CASE("a planet that loses less heat has fewer vents", "[globe][vents]") {
