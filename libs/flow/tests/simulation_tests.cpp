@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <array>
 
 using hog::flow::Simulation;
 using hog::flow::testing::Block;
@@ -234,4 +235,35 @@ TEST_CASE("the world as generated is left as it is", "[flow][simulation]") {
     CHECK(ran.steps == Simulation::rest + 1);
     CHECK(ran.most_held == 7);
     CHECK(store.size() == 0);
+}
+
+TEST_CASE("rain wets ground the flow does not hold, and a film on it wakes the brick",
+          "[flow][simulation][wetting]") {
+    const int floor = floor_above_sea(300.0);
+    Block block{floor, false, {}, hog::globe::Material::Soil};
+    Simulation simulation{block.world()};
+    const auto wetted = [&](double rain) {
+        const hog::globe::Site at = block.at(12, 12, 0);
+        return Simulation::Wetted{.column = {.face = at.face, .i = at.i, .j = at.j, .layer = at.layer + 2},
+                                  .sky = {.rain = rain}};
+    };
+    const hog::globe::Site bed = block.at(12, 12, -1);
+
+    // A light shower soaks in: the world's bed voxel holds water, and nothing wakes.
+    std::size_t written = 0;
+    for (int k = 0; k < 360; ++k) {
+        const std::array columns{wetted(5.0)};
+        written += simulation.wet(columns, 10.0).size();
+    }
+    CHECK(written > 0);
+    CHECK(block.world().at(bed).liquid_amount > 100);
+    CHECK(simulation.region().size() == 0);
+
+    // A downpour outruns the ground and lies on it, which the flow takes up.
+    const std::array columns{wetted(500.0)};
+    for (int k = 0; k < 6; ++k) {
+        (void)simulation.wet(columns, 10.0);
+    }
+    CHECK(block.world().at(block.at(12, 12, 0)).liquid_amount > 0);
+    CHECK(simulation.region().size() > 0);
 }

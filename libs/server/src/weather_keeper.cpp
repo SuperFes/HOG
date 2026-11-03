@@ -48,15 +48,14 @@ constexpr float most_sea_height = 20.0F;
 
 WeatherKeeper::WeatherKeeper(const globe::Generator& generator, GameDuration day, double tilt,
                              GameTime start, WeatherSettings settings)
-    : settings_(settings), calendar_(day, tilt),
+    : settings_(settings), calendar_(day, tilt), grid_(settings.level),
       air_(generator, seconds(day), settings.level, settings.layers),
       reached_(start - settings.spin_up) {
-    const sim::CellGrid grid{settings.level};
     placed_.resize(air_.field().grid.columns());
     for (std::size_t column = 0; column < placed_.size(); ++column) {
         const DVec3 up =
             globe::center(globe::cell_at_index(settings.level, static_cast<std::uint64_t>(column)));
-        placed_[column] = grid.index(planet::cell_at(up, settings.level));
+        placed_[column] = grid_.index(planet::cell_at(up, settings.level));
     }
 }
 
@@ -120,6 +119,13 @@ Result<void> WeatherKeeper::restore(std::span<const std::byte> bytes, GameTime n
         latest_ = sum(std::chrono::milliseconds{0});
     }
     return {};
+}
+
+std::optional<protocol::CellWeather> WeatherKeeper::at(DVec3 up) const {
+    if (!latest_) {
+        return std::nullopt;
+    }
+    return latest_->cells[grid_.index(planet::cell_at(up, settings_.level))];
 }
 
 protocol::Weather WeatherKeeper::sum(std::chrono::milliseconds fade) const {

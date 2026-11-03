@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdlib>
+#include <optional>
 #include <utility>
 
 namespace hog::flow {
@@ -49,6 +50,68 @@ Simulation::Moisture Simulation::moisture(std::uint8_t face, std::uint32_t i,
                                           std::uint32_t j) const {
     const auto found = moisture_.find(column_key(face, i, j));
     return found == moisture_.end() ? Moisture{} : found->second;
+}
+
+std::vector<BrickSite> Simulation::wet(std::span<const Wetted> columns, double seconds) {
+    const double thickness = world_->store().layers().thickness;
+    // Bricks the flow doesn't hold, as the world has them (generated, where unedited), and which
+    // of them were changed.
+    struct Copy {
+        globe::BrickVoxels voxels;
+        bool changed = false;
+    };
+    std::unordered_map<std::uint64_t, Copy> copies;
+    const auto copy = [&](BrickSite brick) -> Copy& {
+        const auto [found, fresh] = copies.try_emplace(globe::brick_key(brick));
+        if (fresh) {
+            found->second.voxels = world_->brick(brick);
+        }
+        return found->second;
+    };
+    std::vector<BrickSite> woken;
+    ++wettings_;
+    for (const Wetted& wetted : columns) {
+        const globe::Site column = wetted.column;
+        const auto read = [&](std::uint32_t layer) -> std::optional<globe::Voxel> {
+            if (layer >= static_cast<std::uint32_t>(world_->store().layers().count)) {
+                return std::nullopt;
+            }
+            const globe::Site site{.face = column.face, .i = column.i, .j = column.j, .layer = layer};
+            const BrickSite brick = globe::brick_of(site);
+            if (region_.holds(brick)) {
+                return region_.at(site);
+            }
+            return copy(brick).voxels[static_cast<std::size_t>(globe::index_in_brick(site))];
+        };
+        for (const Soaking& change : Wetting::column(read, column, column.layer, thickness,
+                                                      wetted.sky, seconds, wettings_)) {
+            const BrickSite brick = globe::brick_of(change.site);
+            if (region_.holds(brick)) {
+                region_.pour(change.site, change.amount);
+                continue;
+            }
+            globe::Voxel& voxel =
+                copy(brick).voxels[static_cast<std::size_t>(globe::index_in_brick(change.site))];
+            voxel.liquid = change.liquid;
+            voxel.liquid_amount = change.amount;
+            copy(brick).changed = true;
+            // A film over the ground has somewhere to go.
+            if (change.amount > 0 && voxel.solid == globe::Material::Air) {
+                woken.push_back(brick);
+            }
+        }
+    }
+    std::vector<BrickSite> written;
+    for (auto& [key, held] : copies) {
+        if (held.changed) {
+            written.push_back(globe::brick_at_key(key));
+            world_->write(written.back(), held.voxels);
+        }
+    }
+    for (const BrickSite brick : woken) {
+        touched(brick);
+    }
+    return written;
 }
 
 Simulation::Progress Simulation::step(double seconds) {

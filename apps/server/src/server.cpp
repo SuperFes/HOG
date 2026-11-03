@@ -8,7 +8,10 @@
 #include <hog/planet/projection.hpp>
 #include <hog/save/snapshot_store.hpp>
 #include <hog/server/grain_sharing.hpp>
+#include <hog/server/ground_wetting.hpp>
 #include <hog/server/spatial_tracking.hpp>
+
+#include <glm/geometric.hpp>
 
 #include <algorithm>
 #include <array>
@@ -182,6 +185,7 @@ void Server::simulate(GameTime from, GameDuration step) {
     HOG_ZONE("simulate");
     entities_.progress(std::chrono::duration<float>(step).count());
     flow_.step(std::chrono::duration<double>(step).count());
+    wet_ground(step);
     if (weather_) {
         // A new weather is as old as the air's interval of game time, which the clock may hurry.
         const auto fade = std::max(
@@ -192,6 +196,28 @@ void Server::simulate(GameTime from, GameDuration step) {
             tell_weather(*made);
         }
     }
+}
+
+void Server::wet_ground(GameDuration step) {
+    // Game seconds between wettings: wetting costs a pass over the ground and rewrites its
+    // bricks, and ground does not change enough in a minute to show.
+    constexpr GameDuration interval = std::chrono::minutes{1};
+    unwetted_ += step;
+    if (!weather_ || unwetted_ < interval) {
+        return;
+    }
+    std::vector<server::GroundWetting::Place> places;
+    for (const auto& located : joined_.located()) {
+        const DVec3 up = glm::normalize(located.second.metres());
+        if (const auto here = weather_->at(up)) {
+            places.push_back({.up = up, .sky = server::GroundWetting::sky_of(*here)});
+        }
+    }
+    const double seconds = std::chrono::duration<double>(unwetted_).count();
+    unwetted_ = {};
+    const std::vector<flow::Simulation::Wetted> columns =
+        server::GroundWetting::around(generator_, places);
+    flow_.wet(columns, seconds);
 }
 
 void Server::tell_weather(const protocol::Weather& weather) {

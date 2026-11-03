@@ -1,11 +1,13 @@
 #pragma once
 
 #include <hog/flow/region.hpp>
+#include <hog/flow/wetting.hpp>
 #include <hog/globe/brick.hpp>
 #include <hog/globe/world.hpp>
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <unordered_map>
 #include <vector>
 
@@ -38,6 +40,18 @@ public:
     // Runs the liquid `seconds` on.
     Progress step(double seconds);
 
+    // A column to rain on or dry: its place, with `layer` the height to look for the ground
+    // down from, and the sky over it.
+    struct Wetted {
+        globe::Site column;
+        Sky sky;
+    };
+    // Rains on and dries the ground of `columns` for `seconds`, in the voxels' own liquid, so
+    // whoever reads the world reads it wet. Bricks the flow holds are changed there; the rest are
+    // written to the world, and a film of water on them wakes them to run off. Returns the bricks
+    // written to the world.
+    std::vector<globe::BrickSite> wet(std::span<const Wetted> columns, double seconds);
+
     [[nodiscard]] const Region& region() const noexcept { return region_; }
 
     // What the flow has left of itself in a column: how much water has stood there, in metres
@@ -56,6 +70,7 @@ private:
     Region region_;
     std::unordered_map<std::uint64_t, int> still_; // steps each brick held has gone unchanged
     std::unordered_map<std::uint64_t, Moisture> moisture_;
+    std::uint64_t wettings_ = 0; // varies how a fraction of a unit rounds from one to the next
 };
 
 } // namespace hog::flow
