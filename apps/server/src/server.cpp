@@ -7,6 +7,7 @@
 #include <hog/planet/planet_config.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/save/snapshot_store.hpp>
+#include <hog/server/grain_sharing.hpp>
 #include <hog/server/spatial_tracking.hpp>
 
 #include <algorithm>
@@ -474,6 +475,32 @@ void Server::tell_bricks() {
     }
 }
 
+void Server::tell_grains() {
+    const std::vector<flow::Parcel>& parcels = flow_.region().parcels();
+    if (parcels.empty() && grains_told_.empty()) {
+        return;
+    }
+    for (const auto& [connection, at] : joined_.located()) {
+        const protocol::Grains grains =
+            server::GrainSharing::near(parcels, at, static_cast<std::uint32_t>(tick_.value()));
+        if (grains.flying.empty() && !grains_told_.contains(connection)) {
+            continue;
+        }
+        if (auto sent =
+                players_->send(connection, net::Delivery::Unreliable, protocol::encode(grains));
+            !sent) {
+            log::debug(server_log, "couldn't send connection {} grain: {}",
+                       std::to_underlying(connection), sent.error());
+            continue;
+        }
+        if (grains.flying.empty()) {
+            grains_told_.erase(connection);
+        } else {
+            grains_told_.insert(connection);
+        }
+    }
+}
+
 void Server::send_bricks(net::ConnectionId connection,
                          const std::vector<protocol::Bricks>& bricks) {
     if (!players_) {
@@ -496,6 +523,7 @@ void Server::share() {
         return;
     }
     tell_bricks();
+    tell_grains();
     if (auto kept = ground_.keep(joined_.placed()); !kept) {
         log::warn(server_log, "couldn't keep the ground near players: {}", kept.error());
     }

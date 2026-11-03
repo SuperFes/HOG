@@ -41,6 +41,7 @@
 #include <optional>
 #include <span>
 #include <utility>
+#include <set>
 #include <vector>
 
 namespace hog::app {
@@ -136,6 +137,8 @@ private:
     void dig(net::ConnectionId connection, const protocol::Dug& dug);
     void build(net::ConnectionId connection, const protocol::Built& built);
     void tell_bricks();
+    // Tells each player the grain in flight near them, and once more when there's none.
+    void tell_grains();
     void send_bricks(net::ConnectionId connection, const std::vector<protocol::Bricks>& bricks);
     // Sends each player a snapshot of those near them.
     void share();
@@ -154,6 +157,8 @@ private:
     flow::Simulation flow_;
     store::SqliteBrickArchive bricks_;
     server::BrickSharing bricks_shared_;
+    // Players last sent some grain in flight, who need telling when there's none.
+    std::set<net::ConnectionId> grains_told_;
     store::SqliteSnapshotStore snapshots_;
     store::SqlitePlayerStore places_;
     // After the store it writes to.

@@ -138,6 +138,16 @@ std::vector<WorldPosition> Players::placed() const {
     return places;
 }
 
+std::vector<std::pair<net::ConnectionId, WorldPosition>> Players::located() const {
+    std::vector<std::pair<net::ConnectionId, WorldPosition>> places;
+    for (const auto& [connection, joined] : joined_) {
+        if (joined.check) {
+            places.emplace_back(connection, joined.check->at());
+        }
+    }
+    return places;
+}
+
 std::vector<net::ConnectionId> Players::connections() const {
     std::vector<net::ConnectionId> found;
     found.reserve(joined_.size());

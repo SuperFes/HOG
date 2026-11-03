@@ -18,7 +18,7 @@
 namespace hog::protocol {
 
 // Raised whenever any message changes; the two sides must speak the same one.
-inline constexpr std::uint32_t version = 14;
+inline constexpr std::uint32_t version = 15;
 // The longest connect token a client may present; more is a broken or hostile client.
 inline constexpr std::size_t most_token = 1'024;
 // The longest line of text a refusal carries.
@@ -268,6 +268,30 @@ struct Bricks {
     friend bool operator==(const Bricks&, const Bricks&) = default;
 };
 
+// Grain in flight at most in a message; a client is told of the nearest to it.
+inline constexpr std::size_t most_grains = 256;
+
+// A lump of loose grain falling, bouncing or rolling, as the server's flow has it.
+struct Flying {
+    NetId id{};
+    Millimetres at{0};
+    std::array<std::int16_t, 3> velocity{}; // centimetres a second
+    std::uint8_t material = 0;              // as hog::globe numbers them
+    std::uint32_t amount = 0;               // of a voxel's own volume, in 32768ths
+
+    friend bool operator==(const Flying&, const Flying&) = default;
+};
+
+// Server to client, unreliable: all the grain in flight near the client at the server's tick, in
+// order of id. What a client held that isn't listed has landed, and is in the bricks sent. Between
+// two of these it carries each on under gravity, so grain is seen to travel, not jump.
+struct Grains {
+    std::uint32_t tick = 0;
+    std::vector<Flying> flying; // at most most_grains
+
+    friend bool operator==(const Grains&, const Grains&) = default;
+};
+
 // How many cells the weather at `level` has.
 [[nodiscard]] constexpr std::size_t weather_cells(std::uint8_t level) noexcept {
     return std::size_t{6} << (2U * level);
@@ -277,7 +301,7 @@ struct Bricks {
 [[nodiscard]] CellWeather as_sent(const CellWeather& cell) noexcept;
 
 using Message = std::variant<Hello, Welcome, Refused, Moved, Ack, Snapshot, Corrected, Weather,
-                             Said, Hurry, Clock, Placed, Dug, Built, Bricks>;
+                             Said, Hurry, Clock, Placed, Dug, Built, Bricks, Grains>;
 
 [[nodiscard]] std::vector<std::byte> encode(const Message& message);
 // Fails on an unknown kind, a message cut short or with bytes left over, one too long, a snapshot
