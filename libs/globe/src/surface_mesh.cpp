@@ -59,6 +59,15 @@ std::vector<Cell> chunks_near(const World& world, DVec3 around, double reach) {
 
 namespace {
 
+// Rock begins to shine dull red near 700 K and is white-hot by 1500 K.
+float glow_of(const Voxel& voxel) {
+    constexpr double dull = 700.0;
+    constexpr double white = 1'500.0;
+    const double kelvin = voxel.temperature / 8.0;
+    const double t = std::clamp((kelvin - dull) / (white - dull), 0.0, 1.0);
+    return static_cast<float>(t * t * (3.0 - (2.0 * t)));
+}
+
 // Two of a point's three axes: across a chunk's grid, along it, and up the layers.
 constexpr std::array<std::array<int, 2>, 3> others{{{1, 2}, {2, 0}, {0, 1}}};
 
@@ -830,6 +839,11 @@ struct Ground {
         const Voxel& voxel = grid.at(*near);
         return voxel.solid != Material::Air && !piled(grid, *near) ? voxel.solid : voxel.grain;
     }
+    // How hot the ground nearest the surface shines.
+    static float glow(const Grid& grid, std::span<const Point> corners) {
+        const std::optional<Point> near = nearest(grid, corners);
+        return near ? glow_of(grid.at(*near)) : 0.0F;
+    }
     // How wet the ground nearest the surface is, as dampness has it; a pile is wet with any.
     static float wetness(const Grid& grid, std::span<const Point> corners) {
         const std::optional<Point> near = nearest(grid, corners);
@@ -876,6 +890,15 @@ struct Liquid {
         return Material::Air;
     }
     static float wetness(const Grid& /*grid*/, std::span<const Point> /*corners*/) { return 0.0F; }
+    static float glow(const Grid& grid, std::span<const Point> corners) {
+        float shines = 0.0F;
+        for (const Point corner : corners) {
+            if (wet(grid, corner)) {
+                shines = std::max(shines, glow_of(grid.at(corner)));
+            }
+        }
+        return shines;
+    }
 };
 
 // A box's corners and how its own axes run: from its corner first among the world's voxels, so
@@ -1281,7 +1304,8 @@ private:
         mesh_->vertices.push_back({.position = Vec3{position},
                                    .normal = Vec3{glm::normalize(normal)},
                                    .material = Surface::material(*grid_, *corners),
-                                   .wet = Surface::wetness(*grid_, *corners)});
+                                   .wet = Surface::wetness(*grid_, *corners),
+                                   .glow = Surface::glow(*grid_, *corners)});
         return index;
     }
 
@@ -1342,7 +1366,8 @@ private:
         mesh_->vertices.push_back({.position = Vec3{position},
                                    .normal = Vec3{glm::normalize(normal)},
                                    .material = Surface::material(*grid_, frame->corners),
-                                   .wet = Surface::wetness(*grid_, frame->corners)});
+                                   .wet = Surface::wetness(*grid_, frame->corners),
+                                   .glow = Surface::glow(*grid_, frame->corners)});
         return index;
     }
 

@@ -32,7 +32,7 @@ struct Vertex {
     [[vk::location(1)]] float3 normal;
     // The tiles at the triangle's three corners, and which of them this corner is in the low two
     // bits of the fourth, with how wet the ground is there in the six over them, as
-    // hog::terrain::packed_corner has it.
+    // hog::terrain::packed_corner has it; over 47 it is how hot it shines instead.
     [[vk::location(2)]] uint4 tiles;
 };
 
@@ -46,6 +46,8 @@ struct Surface {
     nointerpolation uint3 tiles;
     float3 weights;
     float wet;
+    // How hot it shines, from 0 to 1.
+    float glow;
     // Where the tiles' coordinates lie.
     float3 tiled;
     // Up through the point, from the planet's centre.
@@ -63,7 +65,10 @@ Surface vertex_main(Vertex vertex) {
     surface.tiles = vertex.tiles.xyz;
     const uint corner = vertex.tiles.w & 3u;
     surface.weights = float3(corner == 0 ? 1.0 : 0.0, corner == 1 ? 1.0 : 0.0, corner == 2 ? 1.0 : 0.0);
-    surface.wet = float(vertex.tiles.w >> 2u) / 63.0;
+    // Over 47 the level is how hot it shines instead of how wet it is.
+    const uint level = vertex.tiles.w >> 2u;
+    surface.wet = level <= 47u ? float(level) / 47.0 : 0.0;
+    surface.glow = level > 48u ? float(level - 48u) / 15.0 : 0.0;
     surface.tiled = vertex.position + float3(push.origin.w, push.faked_night.zw);
     surface.up = from_eye + (push.up_height.xyz * (push.sun_radius.w + push.up_height.w));
     return surface;
@@ -175,5 +180,11 @@ float4 fragment_main(Surface surface) : SV_Target {
     // The planet hides the sun once it has set, whichever way a side faces.
     const float risen = smoothstep(-0.02, 0.02, dot(up, push.sun_radius.xyz));
     const float facing = saturate(dot(normal, push.sun_radius.xyz)) * risen;
-    return float4(colour * (sky + ((1.0 - night) * facing)), 1.0);
+    float3 lit = colour * (sky + ((1.0 - night) * facing));
+    // Hot rock gives its own light, dull red to yellow-white, whatever the sun does; the ground's
+    // tile still mottles it so a pool isn't flat.
+    const float3 shine = lerp(float3(0.45, 0.04, 0.0), float3(1.0, 0.6, 0.2), surface.glow) *
+                         (1.0 + (3.0 * surface.glow * surface.glow));
+    lit = lerp(lit, shine * (0.6 + dot(colour, float3(1.0)) * 0.8), saturate(surface.glow * 1.5));
+    return float4(lit, 1.0);
 }

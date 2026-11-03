@@ -20,7 +20,7 @@ void mix_corners(BlockMesh& mesh) {
             std::uint32_t& index = mesh.indices[first + corner];
             BlockVertex own = mesh.vertices[index];
             own.tiles = tiles;
-            own.corner = packed_corner(corner, wetness_of(own.corner));
+            own.corner = at_corner(own.corner, corner);
             index = static_cast<std::uint32_t>(mesh.vertices.size());
             mesh.vertices.push_back(own);
         }
