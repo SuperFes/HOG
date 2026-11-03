@@ -111,3 +111,28 @@ TEST_CASE("buried lava keeps its heat, and lava is not standing water", "[flow][
     CHECK(kelvin(block.voxel(12, 12, 0).temperature) == Catch::Approx(melts + 100.0).margin(0.2));
     CHECK(stepped.wet.empty());
 }
+
+TEST_CASE("heat passes between voxels without being lost, and slowly", "[flow][lava]") {
+    double below = 1'600.0;
+    double above = 400.0;
+    hog::flow::conduct(Material::Basalt, below, above, 0.5, 3'600.0);
+    CHECK(below < 1'600.0);
+    CHECK(above > 400.0);
+    CHECK(below + above == Catch::Approx(2'000.0));
+    CHECK(below > above); // an hour doesn't even them
+}
+
+TEST_CASE("a deep pool of lava crusts over while it stays molten beneath", "[flow][lava]") {
+    Block block{floor_above_sea(100.0), false, [](std::uint32_t i, std::uint32_t j, int) {
+                    return i == 12 && j == 12; // a shaft
+                }};
+    const double melts = hog::globe::properties(Material::Basalt).melts;
+    for (int layer = 0; layer < 4; ++layer) {
+        block.pour_lava(12, 12, layer, full, melts + 150.0);
+    }
+    for (int hour = 0; hour < 8; ++hour) {
+        block.region().step(3'600.0);
+    }
+    CHECK(block.voxel(12, 12, 3).solid == Material::Basalt);
+    CHECK(block.voxel(12, 12, 0).liquid == Material::Basalt);
+}

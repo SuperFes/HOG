@@ -313,6 +313,8 @@ private:
 
     globe::World* world_;
     bool hold_sea_;
+    // Voxels of lava that cooled through this step, to be set into rock at its end.
+    std::vector<std::pair<globe::Site, Held*>> setting_;
     globe::Material liquid_;
     std::unordered_map<std::uint64_t, Held> held_;
     // The brick layers held up each column of bricks, in order.
