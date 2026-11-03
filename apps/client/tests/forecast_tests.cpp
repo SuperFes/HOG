@@ -94,7 +94,7 @@ TEST_CASE("a cube map's texels look the way Vulkan samples them", "[client][fore
 
 TEST_CASE("the weather reads as a line", "[client][forecast]") {
     CHECK(hog::client::describe({}) == "0% cloud, 0% humid, drifting 0 m/s");
-    CHECK(hog::client::describe({.cloud = 16.0F,
+    CHECK(hog::client::describe({.cloud = 16.0F, .cover = 1.0F,
                                  .falling = 2.5F,
                                  .drift = {3.0F, -4.0F},
                                  .humidity = 0.92F,
@@ -102,7 +102,7 @@ TEST_CASE("the weather reads as a line", "[client][forecast]") {
                                  .base = 800.0F,
                                  .top = 2'100.0F}) ==
           "100% cloud at 800-2100 m, rain 2.5 mm/h, 92% humid, fog to 300 m, drifting 5 m/s");
-    CHECK(hog::client::describe({.cloud = 16.0F, .falling = 1.0F, .snow = 0.75F}) ==
+    CHECK(hog::client::describe({.cloud = 16.0F, .cover = 1.0F, .falling = 1.0F, .snow = 0.75F}) ==
           "100% cloud at 0-0 m, snow 1.0 mm/h, 0% humid, drifting 0 m/s");
 }
 
@@ -117,6 +117,7 @@ TEST_CASE("with no weather the sky is clear", "[client][forecast]") {
 TEST_CASE("the first weather is shown at once", "[client][forecast]") {
     Forecast forecast{radius};
     const CellWeather rainy{.cloud = 2.0F,
+                            .cover = 0.6F,
                             .falling = 4.0F,
                             .snow = 0.25F,
                             .drift = {3.0F, -1.0F},
@@ -136,10 +137,8 @@ TEST_CASE("the first weather is shown at once", "[client][forecast]") {
     CHECK_THAT(static_cast<double>(here.drift.y), WithinAbs(-1.0, 1e-5));
     REQUIRE(forecast.before().size() == std::size_t{6} * weather_map_size * weather_map_size);
     CHECK(forecast.after() == forecast.before());
-    const auto cover =
-        static_cast<int>(std::lround(static_cast<double>(hog::client::cloud_cover(2.0F)) * 255.0));
-    // The roots of 2/16 and of 4/256, and a quarter.
-    const hog::client::WeatherTexel expected{static_cast<std::uint8_t>(cover), 90, 32, 64};
+    // A cover of 0.6, the roots of 2/16 and of 4/256, and a quarter.
+    const hog::client::WeatherTexel expected{153, 90, 32, 64};
     CHECK(std::ranges::all_of(forecast.before(),
                               [&](const auto& texel) { return texel == expected; }));
     CHECK_THAT(static_cast<double>(here.humidity), WithinAbs(0.6, 1e-6));
@@ -157,7 +156,7 @@ TEST_CASE("the first weather is shown at once", "[client][forecast]") {
 TEST_CASE("new weather fades in over its fade", "[client][forecast]") {
     Forecast forecast{radius};
     forecast.receive(everywhere({}), start);
-    forecast.receive(everywhere({.cloud = 4.0F}), start + 1s);
+    forecast.receive(everywhere({.cloud = 4.0F, .cover = 1.0F}), start + 1s);
     CHECK(forecast.received() == 2);
     CHECK(cloud_at(forecast, start + 1s) == 0.0);
     CHECK_THAT(cloud_at(forecast, start + 6s), WithinAbs(2.0, 1e-5));
@@ -171,8 +170,8 @@ TEST_CASE("weather coming mid-fade waits for the fade to end, so nothing jumps",
           "[client][forecast]") {
     Forecast forecast{radius};
     forecast.receive(everywhere({}), start);
-    forecast.receive(everywhere({.cloud = 4.0F}), start);
-    forecast.receive(everywhere({.cloud = 0.0F}), start + 5s);
+    forecast.receive(everywhere({.cloud = 4.0F, .cover = 1.0F}), start);
+    forecast.receive(everywhere({.cloud = 0.0F, .cover = 0.0F}), start + 5s);
     forecast.update(start + 5s);
     CHECK_THAT(cloud_at(forecast, start + 5s), WithinAbs(2.0, 1e-5));
     // The fade goes on to what it was heading for, and only then turns to the weather that came.
@@ -187,9 +186,9 @@ TEST_CASE("weather coming mid-fade waits for the fade to end, so nothing jumps",
 TEST_CASE("only the newest weather waits", "[client][forecast]") {
     Forecast forecast{radius};
     forecast.receive(everywhere({}), start);
-    forecast.receive(everywhere({.cloud = 4.0F}), start);
-    forecast.receive(everywhere({.cloud = 100.0F}), start + 2s);
-    forecast.receive(everywhere({.cloud = 8.0F}), start + 4s);
+    forecast.receive(everywhere({.cloud = 4.0F, .cover = 1.0F}), start);
+    forecast.receive(everywhere({.cloud = 100.0F, .cover = 1.0F}), start + 2s);
+    forecast.receive(everywhere({.cloud = 8.0F, .cover = 1.0F}), start + 4s);
     forecast.update(start + 10s);
     CHECK_THAT(cloud_at(forecast, start + 10s), WithinAbs(4.0, 1e-5));
     CHECK_THAT(cloud_at(forecast, start + 20s), WithinAbs(8.0, 1e-5));
@@ -198,10 +197,10 @@ TEST_CASE("only the newest weather waits", "[client][forecast]") {
 TEST_CASE("weather with no fade, or at another level, is shown at once", "[client][forecast]") {
     Forecast forecast{radius};
     forecast.receive(everywhere({}), start);
-    forecast.receive(everywhere({.cloud = 4.0F}, 0ms), start);
+    forecast.receive(everywhere({.cloud = 4.0F, .cover = 1.0F}, 0ms), start);
     CHECK_THAT(cloud_at(forecast, start), WithinAbs(4.0, 1e-5));
     CHECK(forecast.after() == forecast.before());
-    forecast.receive(everywhere({.cloud = 1.0F}, 10s, 3), start);
+    forecast.receive(everywhere({.cloud = 1.0F, .cover = 1.0F}, 10s, 3), start);
     CHECK_THAT(cloud_at(forecast, start), WithinAbs(1.0, 1e-5));
 }
 
@@ -285,6 +284,7 @@ TEST_CASE("the weather's map holds what's at each texel's direction", "[client][
     for (std::uint32_t index = 0; index < grid.size(); ++index) {
         const DVec3 up = grid.frame(index).up;
         weather.cells[index].cloud = static_cast<float>(1.5 + up.x + (0.5 * up.z));
+        weather.cells[index].cover = static_cast<float>(0.5 + (0.4 * up.x));
         weather.cells[index].falling = up.y > 0.5 ? 20.0F : 0.0F;
         weather.cells[index].base = static_cast<float>(2'000.0 + (1'000.0 * up.z));
         weather.cells[index].fog_top = up.x > 0.0 ? static_cast<float>(400.0 * up.x) : 0.0F;
@@ -302,7 +302,7 @@ TEST_CASE("the weather's map holds what's at each texel's direction", "[client][
                     forecast.before()[(((face * weather_map_size) + y) * weather_map_size) + x];
                 const CellWeather here =
                     forecast.at(cube_direction(face, x, y, weather_map_size), start);
-                CHECK(std::abs(texel[0] - (hog::client::cloud_cover(here.cloud) * 255.0F)) <=
+                CHECK(std::abs(texel[0] - (here.cover * 255.0F)) <=
                       0.51F);
                 CHECK(std::abs(texel[2] - (std::sqrt(here.falling / 256.0F) * 255.0F)) <= 0.51F);
                 const auto& sky =
@@ -461,8 +461,8 @@ TEST_CASE("weather coming once the last has faded in moves nothing shown", "[cli
 TEST_CASE("weather coming slower than told fades over the whole wait", "[client][forecast]") {
     Forecast forecast{radius};
     forecast.receive(everywhere({}, 10s), start);
-    forecast.receive(everywhere({.cloud = 4.0F}, 10s), start);
-    forecast.receive(everywhere({.cloud = 8.0F}, 10s), start + 100s);
+    forecast.receive(everywhere({.cloud = 4.0F, .cover = 1.0F}, 10s), start);
+    forecast.receive(everywhere({.cloud = 8.0F, .cover = 1.0F}, 10s), start + 100s);
     // Held at 4 when it came; now faded on to 8 over 95 s, not the 10 s it was told.
     CHECK_THAT(cloud_at(forecast, start + 100s), WithinAbs(4.0, 1e-5));
     CHECK_THAT(cloud_at(forecast, start + 100s + 47500ms), WithinAbs(6.0, 1e-4));

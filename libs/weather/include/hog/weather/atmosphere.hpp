@@ -16,6 +16,7 @@ namespace hog::weather {
 // reference level.
 struct Column {
     float cloud = 0.0F;    // mm of condensed water above
+    float cover = 0.0F;    // share of the sky it covers, 0 to 1
     float falling = 0.0F;  // mm an hour reaching the ground
     float snow = 0.0F;     // share of it that is snow
     Vec2 drift{0.0F};      // (east, north) m/s the cloud is carried at

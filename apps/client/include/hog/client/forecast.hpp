@@ -17,9 +17,6 @@ namespace hog::client {
 // Texels along a side of each face of the weather's cube maps: twice the finest weather sent.
 inline constexpr std::uint32_t weather_map_size = 64;
 
-// How much of the sky cloud of `cloud` mm of water covers, from 0 to 1.
-[[nodiscard]] float cloud_cover(float cloud) noexcept;
-
 // A texel of the weather's cube maps, each part from 0 to 255 for 0 to 1: the share of the sky
 // clouded, the cloud's water as the square root of a sixteenth of its millimetres, what falls as
 // the square root of a 256th of its millimetres an hour, and the share of that falling as snow.

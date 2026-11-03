@@ -33,6 +33,7 @@ constexpr float most_sea_height = 20.0F;
 
 [[nodiscard]] protocol::CellWeather shown(const weather::Column& column) {
     return {.cloud = column.cloud,
+            .cover = column.cover,
             .falling = column.falling,
             .snow = column.snow,
             .drift = column.drift,

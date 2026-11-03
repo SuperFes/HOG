@@ -18,7 +18,7 @@
 namespace hog::protocol {
 
 // Raised whenever any message changes; the two sides must speak the same one.
-inline constexpr std::uint32_t version = 15;
+inline constexpr std::uint32_t version = 16;
 // The longest connect token a client may present; more is a broken or hostile client.
 inline constexpr std::size_t most_token = 1'024;
 // The longest line of text a refusal carries.
@@ -173,6 +173,7 @@ struct CellWaves {
 // 32nd of a metre a second; each clamped to its byte.
 struct CellWeather {
     float cloud = 0.0F;    // mm of condensed water, under 16
+    float cover = 0.0F;    // share of the sky the cloud covers, 0 to 1, to a 255th
     float falling = 0.0F;  // rain and snow, mm an hour, under 255
     float snow = 0.0F;     // share of what falls that's snow, 0 to 1
     Vec2 drift{0.0F};      // (east, north) m/s the weather moves over the ground, within ±127
