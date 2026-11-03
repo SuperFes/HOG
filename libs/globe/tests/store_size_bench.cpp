@@ -67,6 +67,7 @@ struct Streams {
     // Where the bytes go: each field of every voxel in the window as its own plane, and the
     // distance again predicted from its neighbours.
     std::vector<std::byte> p_dist, p_pred, p_norm, p_rest, p_height, p_height_raw;
+    std::vector<std::byte> r20, r50, rn20, q20n; // narrow band: only within 1.5 voxels of the surface // the shard as one block: distance rounded, predicted from its neighbours, differences only
     std::vector<std::byte> q10, q20, q50; // bricks with the distance rounded to 1, 2, 5 cm, normals left out
     std::vector<std::vector<std::byte>> heights; // the ground at other precisions and spacings
     std::size_t leaves_d = 0, leaves_e = 0, uniform_leaves_d = 0, uniform_leaves_e = 0;
@@ -172,12 +173,12 @@ Streams build_shard(const Generator& generator, const Baseline& base, int face, 
     const Layers& layers = generator.layers();
     const double lod = voxel_lod(generator);
     const double band = distance_band(layers);
-    hog::ByteWriter a, b, c, q10, q20, q50;
+    hog::ByteWriter a, b, c, q10, q20, q50, q20n;
     Streams streams;
     constexpr int side = shard_bricks * brick_side;
     std::vector<std::int32_t> ground_mm(static_cast<std::size_t>(side * side), 0);
     // The bricks of the exact and coarse baselines by column and layer, for grouping.
-    struct Column { int first = 0; int last = 0; std::vector<Brick> b, c; };
+    struct Column { int first = 0; int last = 0; std::vector<Brick> b, c; std::vector<std::int16_t> d20, d50, n20; };
     std::vector<Column> kept(static_cast<std::size_t>(shard_bricks * shard_bricks));
     for (int bj = 0; bj < shard_bricks; ++bj) {
         for (int bi = 0; bi < shard_bricks; ++bi) {
@@ -209,7 +210,7 @@ Streams build_shard(const Generator& generator, const Baseline& base, int face, 
             if (heights_only) {
                 continue;
             }
-            Runs run_a, run_b, run_c, run_q10, run_q20, run_q50;
+            Runs run_a, run_b, run_c, run_q10, run_q20, run_q50, run_q20n;
             std::size_t same_q = 0, uniform_q = 0;
             kept[static_cast<std::size_t>((bj * shard_bricks) + bi)].first = first;
             kept[static_cast<std::size_t>((bj * shard_bricks) + bi)].last = last;
@@ -287,6 +288,26 @@ Streams build_shard(const Generator& generator, const Baseline& base, int face, 
                     }
                     return Brick::pack(vq);
                 };
+                for (const int step : {20, 50}) {
+                    auto& store = step == 20 ? kept[static_cast<std::size_t>((bj * shard_bricks) + bi)].d20
+                                             : kept[static_cast<std::size_t>((bj * shard_bricks) + bi)].d50;
+                    for (const Voxel& voxel : vb) {
+                        store.push_back(static_cast<std::int16_t>(
+                            static_cast<int>(std::lround(static_cast<double>(voxel.distance) / step)) * step / step));
+                    }
+                }
+                {
+                    auto vn = vb;
+                    for (Voxel& voxel : vn) {
+                        const int clamped = std::clamp(int{voxel.distance}, -750, 750);
+                        voxel.distance = static_cast<std::int16_t>(
+                            static_cast<int>(std::lround(clamped / 20.0)) * 20);
+                        voxel.normal = Voxel::no_normal;
+                        kept[static_cast<std::size_t>((bj * shard_bricks) + bi)].n20.push_back(
+                            static_cast<std::int16_t>(voxel.distance / 20));
+                    }
+                    run_q20n.add(q20n, Brick::pack(vn), same_q, uniform_q);
+                }
                 run_q10.add(q10, rounded(10), same_q, uniform_q);
                 run_q20.add(q20, rounded(20), same_q, uniform_q);
                 run_q50.add(q50, rounded(50), same_q, uniform_q);
@@ -297,6 +318,7 @@ Streams build_shard(const Generator& generator, const Baseline& base, int face, 
             run_q10.flush(q10);
             run_q20.flush(q20);
             run_q50.flush(q50);
+            run_q20n.flush(q20n);
             run_b.flush(b);
             run_c.flush(c);
         }
@@ -348,6 +370,7 @@ Streams build_shard(const Generator& generator, const Baseline& base, int face, 
     streams.q10 = std::move(q10).take();
     streams.q20 = std::move(q20).take();
     streams.q50 = std::move(q50).take();
+    streams.q20n = std::move(q20n).take();
     streams.a = std::move(a).take();
     streams.b = std::move(b).take();
     streams.c = std::move(c).take();
@@ -384,6 +407,58 @@ Streams build_shard(const Generator& generator, const Baseline& base, int face, 
         write_tree(out, grid, {0, shard_bricks, 0, shard_bricks, 0, grid.height}, leaves, solid);
         into = std::move(out).take();
     };
+    // The shard as one block of rounded distances over the full height, each column held at its
+    // end values above and below its own window; predicted from the neighbours in all three
+    // directions, and only the differences kept.
+    const auto block = [&](int mode, std::vector<std::byte>& into) {
+        const int height = (hi - lo + 1) * brick_side;
+        const int side_v = shard_bricks * brick_side;
+        std::vector<std::int16_t> field(static_cast<std::size_t>(side_v * side_v * height), 0);
+        const auto index = [&](int x, int y, int z) {
+            return (static_cast<std::size_t>(z) * static_cast<std::size_t>(side_v * side_v)) +
+                   (static_cast<std::size_t>(y) * static_cast<std::size_t>(side_v)) + static_cast<std::size_t>(x);
+        };
+        for (int bj = 0; bj < shard_bricks; ++bj) {
+            for (int bi = 0; bi < shard_bricks; ++bi) {
+                const Column& column = kept[static_cast<std::size_t>((bj * shard_bricks) + bi)];
+                const auto& d = mode == 2 ? column.n20 : (mode == 1 ? column.d50 : column.d20);
+                const int count = column.last - column.first + 1;
+                for (int cy = 0; cy < brick_side; ++cy) {
+                    for (int cx = 0; cx < brick_side; ++cx) {
+                        for (int z = 0; z < height; ++z) {
+                            const int layer = lo * brick_side + z;
+                            const int inside = std::clamp(layer - (column.first * brick_side), 0, (count * brick_side) - 1);
+                            const int brick = inside / brick_side;
+                            const int within = inside % brick_side;
+                            const std::size_t at = (static_cast<std::size_t>(brick) * brick_voxels) +
+                                                   (static_cast<std::size_t>(within) * brick_side * brick_side) +
+                                                   (static_cast<std::size_t>(cy) * brick_side) + static_cast<std::size_t>(cx);
+                            field[index((bi * brick_side) + cx, (bj * brick_side) + cy, z)] = d[at];
+                        }
+                    }
+                }
+            }
+        }
+        const auto at = [&](int x, int y, int z) -> int {
+            return (x < 0 || y < 0 || z < 0) ? 0 : int{field[index(x, y, z)]};
+        };
+        std::vector<std::byte> out;
+        for (int z = 0; z < height; ++z) {
+            for (int y = 0; y < side_v; ++y) {
+                for (int x = 0; x < side_v; ++x) {
+                    const int pred = at(x - 1, y, z) + at(x, y - 1, z) + at(x, y, z - 1) - at(x - 1, y - 1, z) -
+                                     at(x - 1, y, z - 1) - at(x, y - 1, z - 1) + at(x - 1, y - 1, z - 1);
+                    const auto residual = static_cast<std::uint16_t>(at(x, y, z) - pred);
+                    out.push_back(static_cast<std::byte>(residual & 0xFFU));
+                    out.push_back(static_cast<std::byte>(residual >> 8U));
+                }
+            }
+        }
+        into = std::move(out);
+    };
+    block(0, streams.r20);
+    block(1, streams.r50);
+    block(2, streams.rn20);
     grouped(false, streams.d, streams.leaves_d, streams.uniform_leaves_d);
     grouped(true, streams.e, streams.leaves_e, streams.uniform_leaves_e);
     return streams;
@@ -394,9 +469,21 @@ std::string env(const char* name, const char* fallback) {
     return value != nullptr ? value : fallback;
 }
 
+// Writes a variant's bytes, or stops the run: a full disk would otherwise cut the files short and
+// the sizes would quietly read low. Only the variants in HOG_BENCH_ONLY (comma separated), if set.
 void put(const std::filesystem::path& path, const std::vector<std::byte>& bytes) {
+    static const std::string only = env("HOG_BENCH_ONLY", "");
+    const std::string variant = path.parent_path().filename().string();
+    if (!only.empty() && ("," + only + ",").find("," + variant + ",") == std::string::npos) {
+        return;
+    }
     std::ofstream out(path, std::ios::binary);
     out.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    out.flush();
+    if (!out) {
+        std::fprintf(stderr, "writing %s failed: is the disk full?\n", path.c_str());
+        std::abort();
+    }
 }
 
 } // namespace
@@ -421,7 +508,7 @@ TEST_CASE("how big the stored world is, on a random sample of shards", "[.store-
                 level, generator.layers().thickness, shards_across,
                 static_cast<unsigned long long>(total), static_cast<unsigned long long>(sample));
     const bool only_heights = env("HOG_BENCH_HEIGHTS", "") == "1";
-    for (const char* name : {"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "h0", "h1", "h2", "h3", "h4", "h5", "q10", "q20", "q50"}) {
+    for (const char* name : {"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "h0", "h1", "h2", "h3", "h4", "h5", "q10", "q20", "q50", "r20", "r50", "rn20", "q20n"}) {
         std::filesystem::create_directories(dir / name);
     }
     struct Job { int face, si, sj; };
@@ -458,6 +545,10 @@ TEST_CASE("how big the stored world is, on a random sample of shards", "[.store-
                 }
                 put(dir / "a" / name, made.a);
                 put(dir / "q10" / name, made.q10);
+                put(dir / "r20" / name, made.r20);
+                put(dir / "rn20" / name, made.rn20);
+                put(dir / "q20n" / name, made.q20n);
+                put(dir / "r50" / name, made.r50);
                 put(dir / "q20" / name, made.q20);
                 put(dir / "q50" / name, made.q50);
                 put(dir / "b" / name, made.b);
