@@ -954,6 +954,11 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, client::Globe
         const std::vector<replication::Shown> others =
             session != nullptr ? session->others(now) : std::vector<replication::Shown>{};
         std::vector<render::Capsule> avatars = client::avatars(others);
+        if (session != nullptr) {
+            const std::vector<render::Capsule> grains = session->grains().capsules(
+                now, globe.generator.layers().thickness, globe.generator.planet().gravity);
+            avatars.insert(avatars.end(), grains.begin(), grains.end());
+        }
         if (player) {
             // The server doesn't say who the player is, so they take the colour of no one.
             avatars.push_back(client::avatar(player->feet(), client::colour_of(protocol::NetId{})));

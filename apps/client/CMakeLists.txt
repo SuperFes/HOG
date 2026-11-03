@@ -12,6 +12,7 @@ add_library(hog_client
     src/forecast.cpp
     src/frame_times.cpp
     src/globe_view.cpp
+    src/grains.cpp
     src/likeness.cpp
     src/options.cpp
     src/others.cpp
@@ -36,6 +37,7 @@ hog_add_tests(hog_client
     tests/forecast_tests.cpp
     tests/frame_times_tests.cpp
     tests/globe_view_tests.cpp
+    tests/grains_tests.cpp
     tests/likeness_tests.cpp
     tests/options_tests.cpp
     tests/others_tests.cpp

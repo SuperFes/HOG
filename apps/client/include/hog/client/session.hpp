@@ -6,6 +6,7 @@
 #include <hog/net/client.hpp>
 #include <hog/net/events.hpp>
 #include <hog/net/stats.hpp>
+#include <hog/client/grains.hpp>
 #include <hog/protocol/messages.hpp>
 #include <hog/replication/replica.hpp>
 #include <hog/replication/timeline.hpp>
@@ -86,6 +87,9 @@ public:
         return std::exchange(bricks_, {});
     }
 
+    // The grain the server has in flight near the player.
+    [[nodiscard]] const GrainField& grains() const noexcept { return grains_; }
+
     // Asks the server to dig out, or build up of `material`, a ball `radius` metres across at
     // `centre`; nothing before being welcomed, or of a ball of no width or wider than it allows.
     void dig(WorldPosition centre, double radius);
@@ -130,6 +134,7 @@ private:
     std::optional<protocol::Weather> weather_;
     std::vector<ChatLine> chat_;
     std::vector<protocol::SentBrick> bricks_;
+    GrainField grains_;
     std::uint32_t world_rate_ = 1;
     std::optional<MonotonicClock::time_point> last_snapshot_;
     MonotonicClock::time_point counting_since_;
