@@ -131,6 +131,13 @@ public:
     void pour(std::uint32_t i, std::uint32_t j, int layer, std::int64_t amount) {
         region_->pour(at(i, j, layer), static_cast<std::uint16_t>(amount));
     }
+    void pour_lava(std::uint32_t i, std::uint32_t j, int layer, std::int64_t amount, double kelvin) {
+        region_->pour_lava(at(i, j, layer), Material::Basalt, static_cast<std::uint16_t>(amount),
+                           kelvin);
+    }
+    [[nodiscard]] Voxel voxel(std::uint32_t i, std::uint32_t j, int layer) {
+        return region_->at(at(i, j, layer));
+    }
     void pile(std::uint32_t i, std::uint32_t j, int layer, Material material, std::int64_t amount) {
         region_->pile(at(i, j, layer), material, static_cast<std::uint16_t>(amount));
     }
