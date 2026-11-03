@@ -52,6 +52,7 @@ hog_add_tests(hog_globe
     tests/rockfall_tests.cpp
     tests/strata_tests.cpp
     tests/surface_mesh_tests.cpp
+    tests/store_size_bench.cpp
     tests/vents_tests.cpp
     tests/volcanoes_tests.cpp
     tests/voxel_store_tests.cpp
