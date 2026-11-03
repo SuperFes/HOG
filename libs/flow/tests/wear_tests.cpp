@@ -95,7 +95,7 @@ TEST_CASE("iron left out long enough rusts through", "[flow][wear]") {
     CHECK(block.region().at(block.at(11, 11, 0)).solid == Material::Iron);
 }
 
-TEST_CASE("the sweep wears the ground it goes round, each brick by the time a round takes",
+TEST_CASE("the sweep wears the ground it goes round by the time since it was last worn",
           "[flow][wear]") {
     const auto raised = [](std::uint32_t, std::uint32_t, int layer) { return layer >= 4; };
     Block block{floor_above_sea(100.0), false, raised, Material::Sandstone};
@@ -103,7 +103,8 @@ TEST_CASE("the sweep wears the ground it goes round, each brick by the time a ro
     // A whole round, with a round's time spread over its calls.
     const auto bricks = block.bricks().size();
     for (std::size_t call = 0; call < bricks; ++call) {
-        simulation.sweep(1, 1e10);
+        simulation.sweep(1);
+        simulation.pass(1e10);
         simulation.step(hog::flow::testing::tick);
     }
     int worn_voxels = 0;

@@ -43,18 +43,35 @@ void Simulation::disturbed(BrickSite site, double weathered) {
     region_.disturb(site, weathered);
 }
 
-void Simulation::sweep(std::size_t count, double seconds) {
+void Simulation::wear(BrickSite site, double gap) {
+    double& at = worn_at_[globe::brick_key(site)];
+    const double since = clock_ - at;
+    if (since < gap) {
+        return;
+    }
+    at = clock_;
+    disturbed(site, since);
+}
+
+void Simulation::sweep(std::size_t count) {
     for (std::size_t k = 0; k < count; ++k) {
         if (sweeping_.empty()) {
             sweeping_ = world_->store().changed_since(0);
             if (sweeping_.empty()) {
                 return;
             }
-            round_size_ = static_cast<double>(sweeping_.size());
         }
-        // A brick is looked at once a round, so it stands for all the time the round takes.
-        disturbed(sweeping_.back(), seconds * round_size_ / static_cast<double>(count));
+        wear(sweeping_.back(), 0.0);
         sweeping_.pop_back();
+    }
+}
+
+void Simulation::attend(DVec3 centre, double reach, double gap) {
+    const globe::VoxelStore& store = world_->store();
+    for (const auto& entry : globe::sites_near(store.layers(), centre, reach)) {
+        if (store.brick(entry.first) != nullptr) {
+            wear(entry.first, gap);
+        }
     }
 }
 
@@ -136,6 +153,7 @@ std::vector<BrickSite> Simulation::wet(std::span<const Wetted> columns, double s
 
 Simulation::Progress Simulation::step(double seconds) {
     Progress progress;
+    pass(seconds);
     if (region_.size() == 0) {
         return progress;
     }

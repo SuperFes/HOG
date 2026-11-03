@@ -33,9 +33,14 @@ public:
     void disturbed(globe::BrickSite site, double weathered = 0.0);
     // Looks at the next `count` bricks changed from the generated ground for support, going
     // round them all in turn, so ground left hanging where no one is is brought down in time.
-    // Each brick is worn too, by the game time a round takes: `seconds` since the last call,
-    // for each call of a round.
-    void sweep(std::size_t count, double seconds = 0.0);
+    // Lets time go by for wear alone, as when the world is far ahead of the flow.
+    void pass(double seconds) noexcept { clock_ += seconds; }
+    // Each brick is worn too, by the time since it was last worn.
+    void sweep(std::size_t count);
+    // Looks after the bricks held within `reach` metres of `centre` (from the planet's centre),
+    // where someone is: those not worn for `gap` seconds are worn by the time since, and checked
+    // for support. Far quicker than the sweep comes round.
+    void attend(DVec3 centre, double reach, double gap);
 
     struct Progress {
         std::int64_t changed = 0;
@@ -75,10 +80,13 @@ public:
 
 private:
     void take(globe::BrickSite site);
+    // Wears the brick by the time since it last was, if that is at least `gap`.
+    void wear(globe::BrickSite site, double gap);
 
     globe::World* world_;
     Region region_;
-    double round_size_ = 0.0;
+    double clock_ = 0.0; // seconds the flow has run
+    std::unordered_map<std::uint64_t, double> worn_at_; // clock_ when each brick was last worn
     std::vector<globe::BrickSite> sweeping_; // bricks yet to be looked at this round
     std::unordered_map<std::uint64_t, int> still_; // steps each brick held has gone unchanged
     std::unordered_map<std::uint64_t, Moisture> moisture_;
