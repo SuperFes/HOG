@@ -60,6 +60,8 @@ Simulation::Progress Simulation::step(double seconds) {
     progress.changed = stepped.changed;
     progress.eroded = stepped.eroded;
     progress.slumped = stepped.slumped;
+    progress.flying = stepped.flying;
+    progress.scattered = stepped.scattered;
     const double thickness = world_->store().layers().thickness;
     for (const Stepped::Wet& wet : stepped.wet) {
         Moisture& moisture = moisture_[column_key(wet.face, wet.i, wet.j)];
@@ -78,6 +80,10 @@ Simulation::Progress Simulation::step(double seconds) {
     }
     std::vector<BrickSite> let_go;
     for (auto& [key, steps] : still_) {
+        // Grain in flight may land anywhere held, so nothing is let go while any is.
+        if (stepped.flying > 0) {
+            steps = 0;
+        }
         if (++steps > rest) {
             let_go.push_back(globe::brick_at_key(key));
         }

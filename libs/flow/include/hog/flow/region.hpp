@@ -1,7 +1,10 @@
 #pragma once
 
+#include <hog/flow/flight.hpp>
+#include <hog/flow/slump.hpp>
 #include <hog/globe/brick.hpp>
 #include <hog/globe/material.hpp>
+#include <hog/globe/surface.hpp>
 #include <hog/globe/voxel.hpp>
 #include <hog/globe/world.hpp>
 
@@ -23,6 +26,10 @@ struct Stepped {
     std::int64_t eroded = 0;
     // Grain that slid down a heap too steep to hold, summed over the step's passes.
     std::int64_t slumped = 0;
+    // Lumps of grain in motion at the end of the step, and the grain that found no ground to
+    // land on and was lost.
+    std::size_t flying = 0;
+    std::int64_t scattered = 0;
     std::vector<globe::BrickSite> wanted;
     // Each column with liquid standing in the open, and how much.
     struct Wet {
@@ -72,8 +79,13 @@ public:
     void suspend(globe::Site site, globe::Material material, std::int64_t amount);
     // All the liquid held, in the open and in the ground's pores.
     [[nodiscard]] std::int64_t liquid() const;
-    // All the loose matter held: grain piled in voxels and carried by the liquid.
+    // All the loose matter held: grain piled in voxels, in flight and carried by the liquid.
     [[nodiscard]] std::int64_t grain() const;
+    // The grain in motion, which is the region's until it lands. It falls over a drop and bounces
+    // or rolls on, a step at a time, so whoever shows it can show it travelling.
+    [[nodiscard]] const std::vector<Parcel>& parcels() const noexcept { return parcels_; }
+    // Sends a lump of grain flying from `at` with `velocity`.
+    void throw_grain(DVec3 at, DVec3 velocity, globe::Material material, std::int64_t amount);
 
     // What the liquid up a column carries.
     struct Carried {
@@ -211,6 +223,27 @@ private:
     // Grain on the topmost ground slides to lower columns beside it where it lies steeper than
     // its repose; see Slump. Only the top surface of a column slumps, not floors inside caves.
     void slump(Stepped& stepped);
+    // A column's top ground, the grain on it, and the ground's height in units where
+    // Voxel::full is a voxel's height, above the floor. Looks down from layer `start`.
+    struct Scan {
+        globe::Surface surface;
+        std::int64_t ground = 0;
+    };
+    [[nodiscard]] std::optional<Scan> scan(std::uint8_t face, std::uint32_t i, std::uint32_t j,
+                                           std::uint32_t start, std::uint32_t reach);
+    // Sets the grain over a column's ground to `depth`, filling its voxels from `column`'s layer
+    // up, `voxels` of them.
+    void fill_grain(globe::Site column, std::uint32_t voxels, std::int64_t depth,
+                    globe::Material material);
+    // The surface a parcel at `at` would meet, or none where nothing here is held to land on.
+    [[nodiscard]] std::optional<Ground> ground_under(DVec3 at);
+    // The brick of the first voxel down from `at` that isn't held, if the ground is beyond it.
+    [[nodiscard]] std::optional<globe::BrickSite> unheld_below(DVec3 at);
+    // Moves each parcel on `seconds`, and lets the grain of those that came to rest settle into
+    // the column under them.
+    void fly(double seconds, Stepped& stepped);
+    // Piles a parcel into the column under it; whether it found a place.
+    [[nodiscard]] bool land(const Parcel& parcel, Stepped& stepped);
 
     globe::World* world_;
     bool hold_sea_;
@@ -222,6 +255,8 @@ private:
     std::unordered_map<std::uint64_t, std::size_t> column_at_; // into columns(), by its key
     std::unordered_map<std::uint64_t, Flux> flux_;             // the last step's, by column
     std::unordered_map<std::uint64_t, Load> loads_;            // by column
+    std::vector<Parcel> parcels_;
+    std::uint32_t parcel_ids_ = 0;
     std::uint64_t steps_ = 0;
 };
 

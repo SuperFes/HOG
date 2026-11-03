@@ -27,6 +27,9 @@ public:
         std::int64_t rise = 0;
         // The most grain it can take; a closed ceiling over it, or no column at all.
         std::int64_t room = std::numeric_limits<std::int64_t>::max();
+        // The most surface a side may drop and still be slid to. Grain asked over a longer drop
+        // leaves the column as a fall, to land where it will, not at the neighbour now.
+        std::int64_t reach = std::numeric_limits<std::int64_t>::max();
         std::array<int, sides> next = {none, none, none, none, none, none, none, none};
     };
 
@@ -40,11 +43,20 @@ public:
     }
     [[nodiscard]] std::int64_t total() const;
 
-    // One pass. Returns the units that moved; none means it is at rest.
+    // Grain that went over a drop longer than its column's reach, and has not arrived anywhere.
+    struct Fall {
+        std::size_t from = 0;
+        std::size_t side = 0;
+        std::int64_t amount = 0;
+    };
+    [[nodiscard]] const std::vector<Fall>& falls() const noexcept { return falls_; }
+
+    // One pass. Returns the units that moved or fell; none means it is at rest.
     std::int64_t step();
 
 private:
     std::vector<Node> nodes_;
+    std::vector<Fall> falls_;
 };
 
 } // namespace hog::flow

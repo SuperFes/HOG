@@ -47,6 +47,9 @@ struct Properties {
     double bed_friction = 0.0;
     double friction = 0.0;
     double wet_friction = 0.0;
+    // Share of its speed against a surface a falling lump of it keeps on rebounding; rubble of
+    // rock by default, loose ground dead.
+    double bounce = 0.3;
 };
 
 [[nodiscard]] const Properties& properties(Material material);

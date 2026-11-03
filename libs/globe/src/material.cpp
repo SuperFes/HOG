@@ -33,7 +33,8 @@ const Properties& properties(Material material) {
          .erodibility = 1e-5,
          .settling = 1e-2,
          .cohesion = 200.0,
-         .bed_friction = 25.0 * degree}, // snow
+         .bed_friction = 25.0 * degree,
+         .bounce = 0.0}, // snow
         {.density = 1500.0,
          .melts = 1400.0,
          .strength = 1e4,
@@ -46,7 +47,8 @@ const Properties& properties(Material material) {
          .erodibility = 1e-6,
          .settling = 1e-3,
          .cohesion = 3000.0,
-         .bed_friction = 30.0 * degree}, // soil
+         .bed_friction = 30.0 * degree,
+         .bounce = 0.1}, // soil
         {.density = 1600.0,
          .melts = 1900.0,
          .strength = 0.0,
@@ -58,7 +60,8 @@ const Properties& properties(Material material) {
          .critical_shear = 0.25,
          .erodibility = 1e-5,
          .settling = 3e-2,
-         .bed_friction = 28.0 * degree}, // sand
+         .bed_friction = 28.0 * degree,
+         .bounce = 0.1}, // sand
         {.density = 1800.0,
          .melts = 1400.0,
          .strength = 1e5,
@@ -71,7 +74,8 @@ const Properties& properties(Material material) {
          .erodibility = 2e-6,
          .settling = 1e-4,
          .cohesion = 2000.0,
-         .bed_friction = 24.0 * degree}, // sediment
+         .bed_friction = 24.0 * degree,
+         .bounce = 0.1}, // sediment
         {.density = 2300.0,
          .melts = 1900.0,
          .strength = 5e7,
@@ -168,7 +172,8 @@ const Properties& properties(Material material) {
          .erodibility = 1e-5,
          .settling = 3e-2,
          .cohesion = 1000.0,
-         .bed_friction = 33.0 * degree}, // regolith
+         .bed_friction = 33.0 * degree,
+         .bounce = 0.1}, // regolith
     }};
     return all[static_cast<std::size_t>(material)];
 }
