@@ -176,6 +176,35 @@ void Region::pour_lava(Site site, Material rock, std::uint16_t amount, double ke
     held(globe::brick_of(site))->dirty = true;
 }
 
+std::int64_t Region::add_lava(Site site, Material rock, std::int64_t units, double kelvin) {
+    Voxel* at = voxel(site);
+    HOG_ASSERT(at != nullptr, "the voxel's brick isn't held");
+    if (!open(*at) || (at->liquid_amount > 0 && at->liquid != rock)) {
+        return 0;
+    }
+    const std::int64_t room = full - at->grain_amount - at->liquid_amount;
+    const std::int64_t added = std::clamp(units, std::int64_t{0}, room);
+    if (added == 0) {
+        return 0;
+    }
+    // Mixed by the heat each part brings.
+    const double heat = (globe::kelvin(at->temperature) * at->liquid_amount) +
+                        (kelvin * static_cast<double>(added));
+    at->liquid = rock;
+    at->liquid_amount = static_cast<std::uint16_t>(at->liquid_amount + added);
+    at->temperature = globe::temperature_in_eighths(heat / at->liquid_amount);
+    held(globe::brick_of(site))->dirty = true;
+    return added;
+}
+
+bool Region::hot(BrickSite site) const {
+    const Held* brick = held(site);
+    return brick != nullptr &&
+           std::ranges::any_of(brick->voxels, [](const Voxel& voxel) {
+               return voxel.liquid_amount > 0 && molten(voxel.liquid);
+           });
+}
+
 void Region::pile(Site site, Material material, std::uint16_t amount) {
     Voxel* at = voxel(site);
     HOG_ASSERT(at != nullptr, "the voxel's brick isn't held");
@@ -682,8 +711,10 @@ void Region::settle(const std::vector<Column>& columns, double seconds, Stepped&
                             setting_.emplace_back(each.site, each.brick);
                             continue;
                         }
-                        const std::uint16_t temperature =
-                            globe::temperature_in_eighths(each.kelvin);
+                        // Rounded by chance, since a step's cooling is far under a step of the
+                        // stored temperature.
+                        const auto temperature = static_cast<std::uint16_t>(
+                            dithered(each.kelvin * 8.0, each.site, 2));
                         if (each.voxel->temperature != temperature) {
                             each.voxel->temperature = temperature;
                             each.brick->dirty = true;

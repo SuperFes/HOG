@@ -81,6 +81,11 @@ public:
     [[nodiscard]] globe::Voxel at(globe::Site site) const;
     // Sets the voxel to `amount` of `rock` molten at `kelvin`.
     void pour_lava(globe::Site site, globe::Material rock, std::uint16_t amount, double kelvin);
+    // Adds up to `units` of `rock` molten at `kelvin` to the voxel, as much as fits; how much
+    // went in.
+    std::int64_t add_lava(globe::Site site, globe::Material rock, std::int64_t units, double kelvin);
+    // Whether the brick has lava in it, which keeps cooling for as long as it does.
+    [[nodiscard]] bool hot(globe::BrickSite site) const;
     // Sets the voxel's liquid to `amount` of the world's own.
     void pour(globe::Site site, std::uint16_t amount);
     // Sets the voxel's grain, piled on whatever is under it.

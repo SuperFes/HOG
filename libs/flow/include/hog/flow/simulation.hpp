@@ -1,6 +1,7 @@
 #pragma once
 
 #include <hog/flow/region.hpp>
+#include <hog/flow/vent.hpp>
 #include <hog/flow/wetting.hpp>
 #include <hog/globe/brick.hpp>
 #include <hog/globe/world.hpp>
@@ -42,6 +43,10 @@ public:
     // for support. Far quicker than the sweep comes round.
     void attend(DVec3 centre, double reach, double gap);
 
+    // Sets a vent giving lava from the flow's clock on. Its brick is kept held while it gives any.
+    void add_vent(const Vent& vent);
+    [[nodiscard]] std::size_t vents() const noexcept { return vents_.size(); }
+
     struct Progress {
         std::int64_t changed = 0;
         std::int64_t eroded = 0;
@@ -80,12 +85,19 @@ public:
 
 private:
     void take(globe::BrickSite site);
+    // Pours what the vents give over `seconds`.
+    void vent(double seconds);
     // Wears the brick by the time since it last was, if that is at least `gap`.
     void wear(globe::BrickSite site, double gap);
 
     globe::World* world_;
     Region region_;
     double clock_ = 0.0; // seconds the flow has run
+    struct Venting {
+        Vent vent;
+        double owed = 0.0; // units of lava given and not yet poured
+    };
+    std::vector<Venting> vents_;
     std::unordered_map<std::uint64_t, double> worn_at_; // clock_ when each brick was last worn
     std::vector<globe::BrickSite> sweeping_; // bricks yet to be looked at this round
     std::unordered_map<std::uint64_t, int> still_; // steps each brick held has gone unchanged

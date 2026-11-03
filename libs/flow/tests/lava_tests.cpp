@@ -177,3 +177,26 @@ TEST_CASE("water poured onto lava from above chills the top of it", "[flow][lava
     CHECK(block.voxel(12, 12, 1).solid == Material::Basalt);
     CHECK(block.voxel(12, 12, 0).liquid == Material::Basalt);
 }
+
+TEST_CASE("slow cooling still cools, a step's worth being far under what a voxel can store",
+          "[flow][lava]") {
+    Block block{floor_above_sea(100.0)};
+    const double melts = hog::globe::properties(Material::Basalt).melts;
+    block.pour_lava(12, 12, 0, full, melts + 100.0);
+    for (int step = 0; step < 2'000; ++step) {
+        block.region().step(tick);
+    }
+    CHECK(kelvin(block.voxel(12, 12, 0).temperature) < melts + 100.0 - 1.0);
+}
+
+TEST_CASE("lava is added to a voxel as it fits, and mixes", "[flow][lava]") {
+    Block block{floor_above_sea(100.0)};
+    CHECK(block.region().add_lava(block.at(12, 12, 0), Material::Basalt, full / 2, 1'600.0) ==
+          full / 2);
+    CHECK(block.region().add_lava(block.at(12, 12, 0), Material::Basalt, full, 1'400.0) ==
+          full / 2);
+    CHECK(block.amount(12, 12, 0) == full);
+    CHECK(kelvin(block.voxel(12, 12, 0).temperature) == Catch::Approx(1'500.0).margin(0.5));
+    CHECK(block.region().add_lava(block.at(12, 12, 0), Material::Basalt, 10, 1'400.0) == 0);
+    CHECK(block.region().hot(hog::globe::brick_of(block.at(12, 12, 0))));
+}
