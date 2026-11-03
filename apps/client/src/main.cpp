@@ -10,6 +10,7 @@
 #include <hog/client/picture.hpp>
 #include <hog/client/player.hpp>
 #include <hog/client/scene.hpp>
+#include <hog/client/storage_estimate.hpp>
 #include <hog/client/session.hpp>
 #include <hog/core/image.hpp>
 #include <hog/core/log.hpp>
@@ -1020,6 +1021,24 @@ std::optional<render::Billboard> companion(const client::Options& options, rende
     return std::move(billboard).value();
 }
 
+// What storing the ground drawn at full detail, and the whole planet, would cost at this cell size.
+void print_storage_estimate(const client::Scene& scene, const client::GlobeWorld& globe) {
+    const client::GlobeStream* stream = scene.globe_stream();
+    if (stream == nullptr) {
+        return;
+    }
+    const globe::Layers& layers = globe.generator.layers();
+    const double radius = globe.generator.planet().radius;
+    const double planet_columns = static_cast<double>(globe::cells_at(layers.level));
+    const double cell_area = 4.0 * std::numbers::pi * radius * radius / planet_columns;
+    double area = 0.0;
+    for (const globe::Cell chunk : stream->finest()) {
+        area += globe::solid_angle(chunk) * radius * radius;
+    }
+    std::cout << client::describe_storage(area / cell_area, planet_columns, std::sqrt(cell_area),
+                                          area);
+}
+
 int show(const client::Options& options, const planet::PlanetConfig& planet, render::Device& device,
          render::Presenter& presenter, SDL_Window* window) {
     auto connection = Connection::open(options);
@@ -1083,6 +1102,7 @@ int show(const client::Options& options, const planet::PlanetConfig& planet, ren
                                  device.validation_errors());
         return EXIT_FAILURE;
     }
+    print_storage_estimate(*scene, globe);
     return EXIT_SUCCESS;
 }
 
