@@ -5,6 +5,7 @@ add_library(hog_flow
     src/region_support.cpp
     src/slump.cpp
     src/support.cpp
+    src/lava.cpp
     src/wear.cpp
     src/simulation.cpp)
 add_library(hog::flow ALIAS hog_flow)
@@ -16,6 +17,7 @@ hog_target_defaults(hog_flow)
 hog_add_tests(hog_flow
     tests/collapse_tests.cpp
     tests/flight_tests.cpp
+    tests/lava_tests.cpp
     tests/region_tests.cpp
     tests/rock_tests.cpp
     tests/slump_tests.cpp
