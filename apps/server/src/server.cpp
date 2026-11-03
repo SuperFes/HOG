@@ -8,6 +8,7 @@
 #include <hog/planet/projection.hpp>
 #include <hog/save/snapshot_store.hpp>
 #include <hog/server/grain_sharing.hpp>
+#include <hog/globe/grip.hpp>
 #include <hog/server/ground_wetting.hpp>
 #include <hog/server/spatial_tracking.hpp>
 
@@ -360,8 +361,11 @@ void Server::heard(net::ConnectionId connection, std::span<const std::byte> byte
         log::debug(server_log, "connection {} sent something unreadable: {}",
                    std::to_underlying(connection), message.error());
     } else if (const auto* moved = std::get_if<protocol::Moved>(&*message)) {
+        const server::Grip grip = [this](WorldPosition feet) {
+            return globe::grip_at(globe_, feet.metres());
+        };
         const server::MoveResult result =
-            joined_.move(connection, *moved, MonotonicClock::now(), space_);
+            joined_.move(connection, *moved, MonotonicClock::now(), space_, grip);
         if (result.correction && players_) {
             log::debug(server_log, "connection {} moved {}; sent back",
                        std::to_underlying(connection), server::describe(result.ruling));

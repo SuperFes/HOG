@@ -29,7 +29,7 @@ struct Replicated {
     std::string name;
 };
 
-enum class Ruling : std::uint8_t { Taken, Stale, NotJoined, OutOfBounds, TooFast, UnderGround };
+enum class Ruling : std::uint8_t { Taken, Stale, NotJoined, OutOfBounds, TooFast, UnderGround, TooSteep };
 
 // How a ruling reads in a log: "too fast", say.
 [[nodiscard]] std::string_view describe(Ruling ruling) noexcept;
@@ -66,7 +66,8 @@ public:
     // were, to be sent back there. Moves older than the newest seen, or made before the client
     // took the newest correction, are left out.
     MoveResult move(net::ConnectionId connection, const protocol::Moved& moved,
-                    MonotonicClock::time_point now, const physics::Space& space);
+                    MonotonicClock::time_point now, const physics::Space& space,
+                    const Grip& grip = {});
 
     // Removes the player's entity, and says where they were if they have an account and a
     // place; nothing for a connection that hasn't joined.
