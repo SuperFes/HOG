@@ -375,6 +375,56 @@ TEST_CASE("a tall heap of sand on level ground slumps wider, losing none, and th
     CHECK(reach(1, 0) >= 2.0);
 }
 
+TEST_CASE("sand piled on a cave's floor under a roof slumps there, losing none, and sleeps",
+          "[flow][region][slump]") {
+    using hog::globe::Material;
+    // A cave six voxels high under solid rock.
+    const auto shape = [](std::uint32_t, std::uint32_t, int layer) { return layer < 6; };
+    Block block{floor_above_sea(100.0), false, shape};
+    for (int layer = 0; layer < 5; ++layer) {
+        block.pile(12, 12, layer, Material::Sand, full);
+    }
+    const std::int64_t before = block.region().grain();
+
+    bool resting = false;
+    for (int step = 0; step < 4000 && !resting; ++step) {
+        const hog::flow::Stepped stepped = block.region().step(tick);
+        resting = stepped.slumped == 0 && stepped.flying == 0;
+    }
+
+    CHECK(resting);
+    CHECK(block.region().grain() == before);
+    CHECK(block.grain(12, 12, 4) == 0);
+    CHECK(block.grain(13, 12, 0) > 0);
+    CHECK(block.grain(12, 13, 0) > 0);
+}
+
+TEST_CASE("grain with nothing under it falls, over seconds, and lands on the floor",
+          "[flow][region][slump]") {
+    using hog::globe::Material;
+    Block block{floor_above_sea(100.0)};
+    // One full voxel of sand hanging eight voxels up in the open.
+    block.pile(12, 12, 8, Material::Sand, full);
+    const std::int64_t before = block.region().grain();
+
+    double airborne = 0.0;
+    bool resting = false;
+    for (int step = 0; step < 4000 && !resting; ++step) {
+        const hog::flow::Stepped stepped = block.region().step(tick);
+        if (stepped.flying > 0) {
+            airborne += tick;
+            CHECK(block.grain(12, 12, 0) == 0);
+        }
+        resting = stepped.slumped == 0 && stepped.flying == 0;
+    }
+
+    CHECK(resting);
+    CHECK(airborne > 0.5);
+    CHECK(block.region().grain() == before);
+    CHECK(block.grain(12, 12, 8) == 0);
+    CHECK(block.grain(12, 12, 0) > 0);
+}
+
 TEST_CASE("sand at the lip of a drop deeper than eight voxels runs down it, losing none",
           "[flow][region][slump]") {
     using hog::globe::Material;

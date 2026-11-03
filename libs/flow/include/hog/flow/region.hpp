@@ -231,6 +231,11 @@ private:
     };
     [[nodiscard]] std::optional<Scan> scan(std::uint8_t face, std::uint32_t i, std::uint32_t j,
                                            std::uint32_t start, std::uint32_t reach);
+    // The floors up a column from layer `low` to `high`: each run of open voxels over shaped
+    // matter. Grain with open space under it in one is let fall, as lumps in flight.
+    [[nodiscard]] std::vector<Scan> floors(std::uint8_t face, std::uint32_t i, std::uint32_t j,
+                                           std::uint32_t low, std::uint32_t high);
+    bool drop_hanging(std::uint8_t face, std::uint32_t i, std::uint32_t j, const Scan& floor);
     // Sets the grain over a column's ground to `depth`, filling its voxels from `column`'s layer
     // up, `voxels` of them.
     void fill_grain(globe::Site column, std::uint32_t voxels, std::int64_t depth,
