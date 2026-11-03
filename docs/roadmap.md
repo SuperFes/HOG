@@ -301,27 +301,56 @@ This phase covers the planet in procedurally generated plant life, grown from pe
 
 **Species rules**
 
-- [x] Plant grammar: a species is a rule set (trunk habit, branch angles and counts per level, crown shape, leaf, needle or frond) that grows an individual deterministically from a seed (libs/flora: whorled levels, gnarl and rise, foliage as solid crossed fronds, meshed as low-poly tubes at baked detail levels)
-- [x] First tree set, each with its own rules: a pine analogue (done: grown whole near the eye, stamped far off, one anchor set keying both; foliage is solid tapered fronds, thick at the trunk and thinning to the tip, needle-streaked in the shader), an oak analogue (done: a short trunk forking into gnarled limbs meshed as wood, a broad crown of full leaf fronds, gathered in groves among the pines by a share per biome, drawn in its own runs so each genus pays only its own vertex count; stamped far off as a lumpy round head), a maple analogue (done: a straight trunk under steep limbs, a denser oval crown that turns orange to scarlet before the oaks and is bare sooner, in smaller stands within the broadleaf groves, most of all in wetlands), a palm analogue (done: a bare stem leaning from its foot and curving back up, a crown of long arching fronds combed into leaflets, coconuts hung beneath once it bears; stamped far off as a starburst on a stem, in palm groves of its own); growth stages per species are species parameters scaled by age, for the server-run forest (environment-aware growth like space colonisation can slot in at flora::grow per species later)
-- [x] Ground cover: tall and short grasses with far swaths, cattail reeds at waterlines, bushes in four silhouettes (floofy blobs, spiky rosettes, twiggy skeletons, low mats) mixed by biome
-- [x] Age from the same seed: seedlings, saplings, mature and ancient trees from one rule set (each anchor carries an age, young at the woods' edges; flora::aged scales a species from sapling to old, exact in its prime; the forest bakes four stages and the stamps mirror them)
+- [ ] Plant grammar: a species is a rule set (trunk habit, branch angles and counts per level, crown shape, leaf, 
+needle or frond) that grows an individual deterministically from a seed (libs/flora: whorled levels, gnarl and rise, 
+foliage as solid crossed fronds, meshed as low-poly tubes at baked detail levels)
+- [ ] First tree set, each with its own rules: a pine analogue (done: grown whole near the eye, stamped far off, one 
+anchor set keying both; foliage is solid tapered fronds, thick at the trunk and thinning to the tip, needle-streaked in 
+the shader), an oak analogue (done: a short trunk forking into gnarled limbs meshed as wood, a broad crown of full leaf 
+fronds, gathered in groves among the pines by a share per biome, drawn in its own runs so each genus pays only its own 
+vertex count; stamped far off as a lumpy round head), a maple analogue (done: a straight trunk under steep limbs, a 
+denser oval crown that turns orange to scarlet before the oaks and is bare sooner, in smaller stands within the 
+broadleaf groves, most of all in wetlands), a palm analogue (done: a bare stem leaning from its foot and curving back 
+up, a crown of long arching fronds combed into leaflets, coconuts hung beneath once it bears; stamped far off as a 
+starburst on a stem, in palm groves of its own); growth stages per species are species parameters scaled by age, for the 
+server-run forest (environment-aware growth like space colonisation can slot in at flora::grow per species later)
+- [ ] Ground cover: tall and short grasses with far swaths, cattail reeds at waterlines, bushes in four silhouettes 
+(floofy blobs, spiky rosettes, twiggy skeletons, low mats) mixed by biome
+- [ ] Age from the same seed: seedlings, saplings, mature and ancient trees from one rule set (each anchor carries an 
+age, young at the woods' edges; flora::aged scales a species from sapling to old, exact in its prime; the forest bakes 
+four stages and the stamps mirror them)
 - [ ] Condition states: dead standing wood, half-fallen and felled trunks, fire-scorched survivors, insect- and animal-worn damage simulated without the animals (sound, failing, scorched, dead and charred done: each tree takes its condition from its own dice against its woods' shares, failing crowns thin and brown, the dead stand bare and snapped, weathered grey or burned black, survivors' trunks blackened; half-fallen, felled and worn still to come)
 - [ ] Golden tests: the same seed grows the same plant, bit for bit, on every platform (hash baked, clang and gcc agree under -ffp-contract=off and libm-free trig; macOS unproven)
 
 **Placement**
 
-- [x] Placement from the sim: biome, forest biomass, moisture and the water table decide what grows where and how densely (each kind's niche in warmth and the ground's wetness, the water table wetting dry ground within the roots' reach; the forest sim's living, regrown, failing and standing dead shares per cell sent to players as woodlands and read between cells by every tree and the far woods, rebuilt in place as they change)
-- [x] Deterministic per-cell scatter, so every client grows the same world with nothing sent over the network (grass by patch seed; trees and bushes as anchors sampled from the world itself on the CPU — one placement in libs/flora, bound to the ground at every terrain level, ready for the server to own as it owns the clouds)
-- [ ] Placement reads the change store over the seed, so planted and cleared ground diverges — the hook farming (Phase 7) builds on (the tree anchors already rebuild their tiles on a changed cell)
-- [x] Succession on burned or emptied cells from the forest sim's history: pioneer grass, then shrubs, then young forest among the burned trunks (the fire's black fades over a year or two; grass takes the ground where the trees are gone, shrubs where the dead have fallen, and the regrowth stands as many small stems, taking generations to be old growth)
-- [ ] Seeds carried by birds and animals: burns heal inward from their living edges, faster where seed-eaters are plentiful, the light-seeded pioneers (birch, pine, berry shrubs) back first and the oaks last
-- [x] A burned-in-the-past, regrowing forest somewhere on the starting islands to prove it (the dev server's new worlds begin with the first island burned eight years before)
+- [x  Placement from the sim: biome, forest biomass, moisture and the water table decide what grows where and how 
+densely (each kind's niche in warmth and the ground's wetness, the water table wetting dry ground within the roots' 
+reach; the forest sim's living, regrown, failing and standing dead shares per cell sent to players as woodlands and read 
+between cells by every tree and the far woods, rebuilt in place as they change)
+- [ ] Deterministic per-cell scatter, so every client grows the same world with nothing sent over the network (grass by 
+patch seed; trees and bushes as anchors sampled from the world itself on the CPU — one placement in libs/flora, bound to 
+the ground at every terrain level, ready for the server to own as it owns the clouds)
+- [ ] Placement reads the change store over the seed, so planted and cleared ground diverges — the hook farming (Phase 
+7) builds on (the tree anchors already rebuild their tiles on a changed cell)
+- [ ] Succession on burned or emptied cells from the forest sim's history: pioneer grass, then shrubs, then young 
+forest among the burned trunks (the fire's black fades over a year or two; grass takes the ground where the trees are 
+gone, shrubs where the dead have fallen, and the regrowth stands as many small stems, taking generations to be old 
+growth)
+- [ ] Seeds carried by birds and animals: burns heal inward from their living edges, faster where seed-eaters are 
+plentiful, the light-seeded pioneers (birch, pine, berry shrubs) back first and the oaks last
+- [ ] A burned-in-the-past, regrowing forest somewhere on the starting islands to prove it (the dev server's new worlds 
+begin with the first island burned eight years before)
 
 **Life cycle and spread**
 
 Borrowed from real species to make forests feel grown rather than scattered. A menu, not a contract: each mechanic is cheap once placement reads the sim, and we take the ones that earn their keep.
 
-- [x] Climate niche per species: a temperature and moisture envelope decides each range — palm analogues frost-limited to warm coasts, pines climbing to a cold treeline, nothing growing where it shouldn't (each genus a range of mean annual temperature, thinning at its edges: palms on warm shores and in the tropics, pines to a cold treeline, giving way to broadleaves in the heat; and a range of the ground's wetness, the climate's moisture or a water table within the roots' reach: maples on wet ground, oaks off waterlogged ground, pines on the driest)
+- [ ] Climate niche per species: a temperature and moisture envelope decides each range — palm analogues frost-limited 
+to warm coasts, pines climbing to a cold treeline, nothing growing where it shouldn't (each genus a range of mean 
+annual temperature, thinning at its edges: palms on warm shores and in the tropics, pines to a cold treeline, giving way 
+to broadleaves in the heat; and a range of the ground's wetness, the climate's moisture or a water table within the 
+roots' reach: maples on wet ground, oaks off waterlogged ground, pines on the driest)
 - [ ] Dispersal, pretended like the insect damage: winged seeds drift downwind of parents, bird-cached seeds jump gaps and march uphill (how oak and stone-pine analogues spread), water-borne seeds follow shores and rivers
 - [ ] Allelopathy: a walnut-analogue poisons the soil around it and stands in a clearing of its own making; grass-suppressing crowns keep bare ground beneath them
 - [ ] Serotiny: fire-sealed cones that open only in a burn, so burned ground reseeds first in the fire-pine analogue
@@ -344,14 +373,19 @@ The sea is part of the same world, not a backdrop: its life is placed, grows and
 
 **Rendering**
 
-- [x] Instanced rendering with LOD tiers: full geometry near (three baked details to 240 m), billboard impostors mid-range (crossed-quad stamps to 900 m), density and colour folded into the terrain far away (baked into the patches' vertices)
+- [ ] Instanced rendering with LOD tiers: full geometry near (three baked details to 240 m), billboard impostors 
+mid-range (crossed-quad stamps to 900 m), density and colour folded into the terrain far away (baked into the patches' 
+vertices)
 - [x] Grass as instanced blades and patches near the eye, fading into the ground material
-- [x] Per-tier budgets checked on the minimum-spec iGPU, with counts in the frame overlay (Radeon 860M at 1600×900, deep woods: grown forest ~0.7 ms, stamps ~0.2 ms, after per-block 3D-distance and view-cone culling)
+- [ ] Per-tier budgets checked on the minimum-spec iGPU, with counts in the frame overlay (Radeon 860M at 1600×900, 
+deep woods: grown forest ~0.7 ms, stamps ~0.2 ms, after per-block 3D-distance and view-cone culling)
 
 **Wind and weather**
 
-- [x] Plants react to the weather grid's wind in the shader: still air sits still, light wind sways gently, storms hold plants bent in the wind's direction (grass bends, reeds stand stiff, bushes rustle, pine tops rock and hold over in storms)
-- [x] Gusts travel as visible waves across grass fields
+- [ ] Plants react to the weather grid's wind in the shader: still air sits still, light wind sways gently, storms hold 
+plants bent in the wind's direction (grass bends, reeds stand stiff, bushes rustle, pine tops rock and hold over in 
+storms)
+- [ ] Gusts travel as visible waves across grass fields
 - [ ] High wind breaks branches and fells weak trees as sim events, so everyone sees the same deadfall
 
 ## Phase 6 — Areas and scale

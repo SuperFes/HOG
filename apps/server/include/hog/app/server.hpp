@@ -159,6 +159,7 @@ private:
     flow::Simulation flow_;
     // Game time gone by since the ground was last wetted.
     GameDuration unwetted_{};
+    GameDuration swept_{};
     store::SqliteBrickArchive bricks_;
     server::BrickSharing bricks_shared_;
     // Players last sent some grain in flight, who need telling when there's none.

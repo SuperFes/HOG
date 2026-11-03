@@ -186,6 +186,13 @@ void Server::simulate(GameTime from, GameDuration step) {
     HOG_ZONE("simulate");
     entities_.progress(std::chrono::duration<float>(step).count());
     flow_.step(std::chrono::duration<double>(step).count());
+    // Ground changed anywhere is looked at for support in time, a brick a second, not only where
+    // someone is digging.
+    swept_ += step;
+    if (swept_ >= std::chrono::seconds{1}) {
+        swept_ = {};
+        flow_.sweep(1);
+    }
     wet_ground(step);
     if (weather_) {
         // A new weather is as old as the air's interval of game time, which the clock may hurry.
@@ -469,6 +476,7 @@ void Server::dig(net::ConnectionId connection, const protocol::Dug& dug) {
     for (const globe::BrickSite brick : voxels_.changed_since(before)) {
         ground_.changed(brick);
         flow_.touched(brick);
+        flow_.disturbed(brick);
     }
 }
 
@@ -489,6 +497,7 @@ void Server::build(net::ConnectionId connection, const protocol::Built& built) {
     for (const globe::BrickSite brick : voxels_.changed_since(before)) {
         ground_.changed(brick);
         flow_.touched(brick);
+        flow_.disturbed(brick);
     }
 }
 

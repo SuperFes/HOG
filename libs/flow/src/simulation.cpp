@@ -38,6 +38,24 @@ void Simulation::touched(BrickSite site) {
     }
 }
 
+void Simulation::disturbed(BrickSite site) {
+    take(site);
+    region_.disturb(site);
+}
+
+void Simulation::sweep(std::size_t count) {
+    for (std::size_t k = 0; k < count; ++k) {
+        if (sweeping_.empty()) {
+            sweeping_ = world_->store().changed_since(0);
+            if (sweeping_.empty()) {
+                return;
+            }
+        }
+        disturbed(sweeping_.back());
+        sweeping_.pop_back();
+    }
+}
+
 namespace {
 
 std::uint64_t column_key(std::uint8_t face, std::uint32_t i, std::uint32_t j) noexcept {
@@ -125,6 +143,7 @@ Simulation::Progress Simulation::step(double seconds) {
     progress.slumped = stepped.slumped;
     progress.flying = stepped.flying;
     progress.scattered = stepped.scattered;
+    progress.collapsed = stepped.collapsed;
     const double thickness = world_->store().layers().thickness;
     for (const Stepped::Wet& wet : stepped.wet) {
         Moisture& moisture = moisture_[column_key(wet.face, wet.i, wet.j)];
@@ -144,7 +163,7 @@ Simulation::Progress Simulation::step(double seconds) {
     std::vector<BrickSite> let_go;
     for (auto& [key, steps] : still_) {
         // Grain in flight may land anywhere held, so nothing is let go while any is.
-        if (stepped.flying > 0) {
+        if (stepped.flying > 0 || region_.inspecting() > 0) {
             steps = 0;
         }
         if (++steps > rest) {

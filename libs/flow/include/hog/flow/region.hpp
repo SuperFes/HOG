@@ -11,6 +11,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <set>
 #include <unordered_map>
@@ -31,6 +32,8 @@ struct Stepped {
     // land on and was lost.
     std::size_t flying = 0;
     std::int64_t scattered = 0;
+    // Voxels of shaped matter that lost their hold and fell this step.
+    std::int64_t collapsed = 0;
     std::vector<globe::BrickSite> wanted;
     // Each column with liquid standing in the open, and how much.
     struct Wet {
@@ -97,6 +100,16 @@ public:
     // Frees each rock generated about `point` that is still there and has nothing under it. The
     // number it couldn't judge for want of bricks held.
     std::size_t loosen_unsupported(DVec3 point, std::size_t& unjudged);
+
+    // Seconds a matter that has lost its hold takes to crack through, from whole to falling.
+    static constexpr double cracks_in = 3.0;
+    // Bricks looked at for support in one step, at most.
+    static constexpr std::size_t most_inspected = 4;
+    // Queues the brick, and the matter about it, to be looked at for support: it is cracked and
+    // let fall where it hangs from nothing. Wanted bricks about it are asked for.
+    void disturb(globe::BrickSite site);
+    // Bricks waiting to be looked at or cracking.
+    [[nodiscard]] std::size_t inspecting() const noexcept { return inspect_.size(); }
 
     // What the liquid up a column carries.
     struct Carried {
@@ -268,7 +281,8 @@ private:
     [[nodiscard]] std::optional<bool> solid_at(DVec3 point);
     // Applies `change(voxel, distance, outward)` to each held voxel within the shape's band, and
     // the first brick it covers that isn't held, if any.
-    template <typename Distance, typename Change>
+    using Distance = std::function<double(DVec3, DVec3&)>;
+    using Change = std::function<void(globe::Voxel&, double, DVec3)>;
     std::optional<globe::BrickSite> reshape(DVec3 centre, double reach, const Distance& distance,
                                             const Change& change);
     // Bricks newly held, whose fallen rocks are looked at once their surroundings are held too.
@@ -277,6 +291,12 @@ private:
         int tries = 0;
     };
     void loosen_fresh();
+    // Looks at the bricks queued for support; those still cracking stay queued.
+    void inspect_support(double seconds, Stepped& stepped);
+    // Looks at the box of bricks about one; whether any matter in it is cracking.
+    [[nodiscard]] bool check_support(globe::BrickSite site, double seconds, Stepped& stepped);
+    // Takes the voxels out of the ground and sends them down as boulders and rubble.
+    void fall(const std::vector<globe::Site>& sites, Stepped& stepped);
 
     globe::World* world_;
     bool hold_sea_;
@@ -290,6 +310,7 @@ private:
     std::unordered_map<std::uint64_t, Load> loads_;            // by column
     std::vector<Parcel> parcels_;
     std::vector<Fresh> fresh_;
+    std::vector<Fresh> inspect_;
     std::uint32_t parcel_ids_ = 0;
     std::uint64_t steps_ = 0;
 };

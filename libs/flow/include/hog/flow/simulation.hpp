@@ -27,6 +27,12 @@ public:
 
     // Wakes the brick and the six about it.
     void touched(globe::BrickSite site);
+    // Wakes the brick, and has the matter about it looked at to see it still holds itself up: an
+    // edit that took the ground from under something.
+    void disturbed(globe::BrickSite site);
+    // Looks at the next `count` bricks changed from the generated ground for support, going
+    // round them all in turn, so ground left hanging where no one is is brought down in time.
+    void sweep(std::size_t count);
 
     struct Progress {
         std::int64_t changed = 0;
@@ -34,6 +40,7 @@ public:
         std::int64_t slumped = 0;
         std::size_t flying = 0;
         std::int64_t scattered = 0;
+        std::int64_t collapsed = 0;
         std::size_t held = 0;
         std::vector<globe::BrickSite> written;
     };
@@ -68,6 +75,7 @@ private:
 
     globe::World* world_;
     Region region_;
+    std::vector<globe::BrickSite> sweeping_; // bricks yet to be looked at this round
     std::unordered_map<std::uint64_t, int> still_; // steps each brick held has gone unchanged
     std::unordered_map<std::uint64_t, Moisture> moisture_;
     std::uint64_t wettings_ = 0; // varies how a fraction of a unit rounds from one to the next
