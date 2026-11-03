@@ -808,6 +808,7 @@ Stepped Region::step(double seconds) {
     loosen_fresh();
     inspect_support(seconds, stepped);
     std::vector<Column> all = columns();
+    quench(stepped);
     hold_sea(all, stepped);
     gather(all);
     flux_.clear();

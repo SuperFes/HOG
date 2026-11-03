@@ -136,3 +136,44 @@ TEST_CASE("a deep pool of lava crusts over while it stays molten beneath", "[flo
     CHECK(block.voxel(12, 12, 3).solid == Material::Basalt);
     CHECK(block.voxel(12, 12, 0).liquid == Material::Basalt);
 }
+
+TEST_CASE("water touching lava sets it into rock and boils away", "[flow][lava]") {
+    Block block{floor_above_sea(100.0)};
+    const double melts = hog::globe::properties(Material::Basalt).melts;
+    block.pour_lava(12, 12, 0, full, melts + 100.0);
+    block.pour(13, 12, 0, full);
+    const Stepped stepped = block.region().step(tick);
+    CHECK(block.voxel(12, 12, 0).solid == Material::Basalt);
+    CHECK(block.voxel(12, 12, 0).liquid == Material::Air);
+    CHECK(stepped.frozen == 1);
+    CHECK(stepped.steamed > 0);
+    // A lava voxel takes a fraction of a voxel of water to set.
+    CHECK(block.amount(13, 12, 0) > 0);
+    CHECK(block.amount(13, 12, 0) < full);
+}
+
+TEST_CASE("too little water only cools the lava it touches", "[flow][lava]") {
+    Block block{floor_above_sea(100.0)};
+    const double melts = hog::globe::properties(Material::Basalt).melts;
+    block.pour_lava(12, 12, 0, full, melts + 100.0);
+    block.pour(13, 12, 0, 50);
+    const Stepped stepped = block.region().step(tick);
+    const hog::globe::Voxel lava = block.voxel(12, 12, 0);
+    CHECK(lava.liquid == Material::Basalt);
+    CHECK(kelvin(lava.temperature) < melts + 100.0);
+    CHECK(stepped.steamed == 50);
+    CHECK(block.voxel(13, 12, 0).liquid != Material::Water);
+}
+
+TEST_CASE("water poured onto lava from above chills the top of it", "[flow][lava]") {
+    Block block{floor_above_sea(100.0), false, [](std::uint32_t i, std::uint32_t j, int) {
+                    return i == 12 && j == 12;
+                }};
+    const double melts = hog::globe::properties(Material::Basalt).melts;
+    block.pour_lava(12, 12, 0, full, melts + 100.0);
+    block.pour_lava(12, 12, 1, full, melts + 100.0);
+    block.pour(12, 12, 2, full);
+    block.region().step(tick);
+    CHECK(block.voxel(12, 12, 1).solid == Material::Basalt);
+    CHECK(block.voxel(12, 12, 0).liquid == Material::Basalt);
+}
