@@ -74,6 +74,9 @@ Voxel voxel_from(const Sample& sample, double band) noexcept {
         voxel.normal = packed_normal(sample.normal);
     }
     voxel.temperature = temperature_in_eighths(sample.temperature);
+    // The share of the voxel inside the surface: half where the surface passes through its middle,
+    // as a plane across it, a voxel's thickness for the distance it takes to go from all to none.
+    voxel.solid_amount = amount_of(0.5 - (sample.distance / (band / band_voxels)));
     if (sample.distance < 0.0) {
         voxel.solid = sample.material;
     }

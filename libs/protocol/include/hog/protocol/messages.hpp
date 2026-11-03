@@ -18,7 +18,7 @@
 namespace hog::protocol {
 
 // Raised whenever any message changes; the two sides must speak the same one.
-inline constexpr std::uint32_t version = 16;
+inline constexpr std::uint32_t version = 17;
 // The longest connect token a client may present; more is a broken or hostile client.
 inline constexpr std::size_t most_token = 1'024;
 // The longest line of text a refusal carries.

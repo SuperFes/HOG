@@ -50,6 +50,9 @@ struct Voxel {
     Material liquid = Material::Air;  // water or lava, filling open space or a solid's pores
     std::uint16_t liquid_amount = 0;
     std::uint16_t temperature = 0; // eighths of a kelvin
+    // How much of the voxel's volume is shaped matter, of `full`: all of it deep in the ground,
+    // none in open air, between across the surface. The surface lies where it is half.
+    std::uint16_t solid_amount = 0;
 
     friend constexpr bool operator==(const Voxel&, const Voxel&) noexcept = default;
 };
@@ -74,8 +77,10 @@ struct Voxel {
 // How far either side of a surface voxels keep its distance, in metres: beyond, only which side
 // they're on, which is all that's drawn there. So a brick all dug out or all rock is one voxel
 // throughout.
+// Voxels either side of a surface that keep their distance.
+inline constexpr double band_voxels = 4.0;
 [[nodiscard]] constexpr double distance_band(const Layers& layers) noexcept {
-    return 4.0 * layers.thickness;
+    return band_voxels * layers.thickness;
 }
 // The same for voxels `coarser` times as far apart.
 [[nodiscard]] constexpr double distance_band(const Layers& layers, double coarser) noexcept {
