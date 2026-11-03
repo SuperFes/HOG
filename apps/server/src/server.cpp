@@ -34,6 +34,8 @@ constexpr double near_wear_reach = 48.0;
 constexpr double near_wear_gap = 5.0;
 // How near a player a vent is taken up by the flow, metres.
 constexpr double vent_reach = 4'000.0;
+// A cavern pool's steady seep, cubic metres a second.
+constexpr double pool_rate = 0.05;
 
 // Seconds; a 20 Hz tick has 50 ms to spare.
 constexpr std::array tick_bounds{0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005,
@@ -201,19 +203,20 @@ void Server::wake_vents() {
             }
             vented_[k] = true;
             const globe::Cell column = globe::cell_under(site.direction, layers.level);
-            // A cycle of about a day and a half, mostly asleep, each vent shifted by its key.
+            // A volcano's cycle is about a day and a half, mostly asleep, shifted by its key; a pool seeps
+            // all the while.
             const double unit = static_cast<double>(site.key >> 11U) * 0x1.0p-53;
             flow_.add_vent({.site = {.face = column.face,
                                      .i = column.i,
                                      .j = column.j,
                                      .layer = static_cast<std::uint32_t>(
-                                         layers.layer_at(site.ground))},
-                            .active_rate = 0.02,
-                            .erupting_rate = 2.0,
-                            .period = 129'600.0,
-                            .eruption = 300.0,
-                            .active = 7'200.0,
-                            .phase = unit * 129'600.0});
+                                         layers.layer_at(site.ground + 1.0))},
+                            .active_rate = site.pool ? pool_rate : 0.02,
+                            .erupting_rate = site.pool ? 0.0 : 2.0,
+                            .period = site.pool ? 0.0 : 129'600.0,
+                            .eruption = site.pool ? 0.0 : 300.0,
+                            .active = site.pool ? 0.0 : 7'200.0,
+                            .phase = site.pool ? 0.0 : unit * 129'600.0});
         }
     }
 }
