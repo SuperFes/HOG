@@ -21,6 +21,9 @@ struct VentSite {
     std::uint64_t key = 0;
 };
 
+// Share of volcanoes that are dead.
+inline constexpr double extinct_share = 0.4;
+
 // Vents per square kilometre of land on a planet losing heat as Earth does; hotter planets have
 // more, in proportion to the heat flow squared.
 inline constexpr double vents_per_km2 = 1.0 / 3'000.0;
@@ -35,6 +38,8 @@ struct Volcano {
     // The outline's warp: radius times 1 + sum of amplitude * cos(k * bearing + phase), k = 2, 3, 5.
     std::array<double, 3> amplitude{};
     std::array<double, 3> phase{};
+    // Dead volcanoes keep their cone and crater but give nothing.
+    bool extinct = false;
     std::uint64_t key = 0;
 };
 

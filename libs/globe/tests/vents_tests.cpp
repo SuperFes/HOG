@@ -42,6 +42,20 @@ TEST_CASE("some vents are pools on cave floors under the ground", "[globe][vents
     CHECK(pools > 0);
 }
 
+TEST_CASE("some volcanoes are dead, which have no vent", "[globe][vents]") {
+    const Planet planet;
+    int dead = 0;
+    int alive = 0;
+    for (std::uint64_t index = 0; index < 6ULL << 12; ++index) {
+        if (const auto volcano =
+                hog::globe::volcano_in(planet, hog::globe::cell_at_index(6, index))) {
+            (volcano->extinct ? dead : alive)++;
+        }
+    }
+    CHECK(dead > 0);
+    CHECK(alive > 0);
+}
+
 TEST_CASE("a planet that loses less heat has fewer vents", "[globe][vents]") {
     Planet cold;
     cold.heat_flow = 0.03;

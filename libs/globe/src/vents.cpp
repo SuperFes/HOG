@@ -50,6 +50,7 @@ std::optional<Volcano> volcano_in(const Planet& planet, Cell cell) {
     const DVec3 north = glm::cross(middle, east);
     Volcano volcano;
     volcano.key = key;
+    volcano.extinct = unit(hash_values(key, 14)) < extinct_share;
     volcano.centre = glm::normalize(
         middle + ((((unit(hash_values(key, 1)) - 0.5) * east) +
                    ((unit(hash_values(key, 2)) - 0.5) * north)) *
@@ -74,7 +75,7 @@ std::vector<VentSite> vent_sites(const Generator& generator) {
     std::vector<VentSite> sites;
     for (std::uint64_t index = 0; index < cells; ++index) {
         const auto volcano = volcano_in(planet, cell_at_index(scatter_level, index));
-        if (!volcano) {
+        if (!volcano || volcano->extinct) {
             continue;
         }
         const auto ground = ground_below(generator, volcano->centre, 0.5);
