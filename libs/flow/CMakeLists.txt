@@ -7,6 +7,7 @@ add_library(hog_flow
     src/slump.cpp
     src/support.cpp
     src/lava.cpp
+    src/vent.cpp
     src/wear.cpp
     src/simulation.cpp)
 add_library(hog::flow ALIAS hog_flow)
@@ -23,6 +24,7 @@ hog_add_tests(hog_flow
     tests/rock_tests.cpp
     tests/slump_tests.cpp
     tests/support_tests.cpp
+    tests/vent_tests.cpp
     tests/wear_tests.cpp
     tests/wetting_tests.cpp
     tests/simulation_tests.cpp)

@@ -21,6 +21,40 @@ void Simulation::take(BrickSite site) {
     still_[globe::brick_key(site)] = 0;
 }
 
+void Simulation::add_vent(const Vent& vent) {
+    vents_.push_back({.vent = vent});
+}
+
+void Simulation::vent(double seconds) {
+    constexpr int pressure = 6; // layers over its mouth a vent can fill before it backs up
+    const double thickness = world_->store().layers().thickness;
+    const double units = globe::Voxel::full / (thickness * thickness * thickness);
+    for (Venting& venting : vents_) {
+        const double rate = rate_at(venting.vent, clock_);
+        if (rate <= 0.0 && venting.owed <= 0.0) {
+            continue;
+        }
+        const BrickSite brick = globe::brick_of(venting.vent.site);
+        take(brick);
+        if (!region_.holds(brick)) {
+            continue;
+        }
+        venting.owed += rate * seconds * units;
+        for (int up = 0; up < pressure && venting.owed >= 1.0; ++up) {
+            globe::Site site = venting.vent.site;
+            site.layer += static_cast<std::uint32_t>(up);
+            if (!region_.holds(globe::brick_of(site))) {
+                break;
+            }
+            venting.owed -= static_cast<double>(region_.add_lava(
+                site, venting.vent.rock, static_cast<std::int64_t>(venting.owed),
+                venting.vent.kelvin));
+        }
+        // A vent stopped up holds back no more than it can push.
+        venting.owed = std::min(venting.owed, pressure * static_cast<double>(globe::Voxel::full));
+    }
+}
+
 void Simulation::touched(BrickSite site) {
     take(site);
     constexpr std::array<std::array<int, 3>, 6> about{
@@ -153,6 +187,7 @@ std::vector<BrickSite> Simulation::wet(std::span<const Wetted> columns, double s
 
 Simulation::Progress Simulation::step(double seconds) {
     Progress progress;
+    vent(seconds);
     pass(seconds);
     if (region_.size() == 0) {
         return progress;
@@ -183,7 +218,9 @@ Simulation::Progress Simulation::step(double seconds) {
     std::vector<BrickSite> let_go;
     for (auto& [key, steps] : still_) {
         // Grain in flight may land anywhere held, so nothing is let go while any is.
-        if (stepped.flying > 0 || region_.inspecting() > 0) {
+        // Nor is any brick with lava in it, which is still cooling.
+        if (stepped.flying > 0 || region_.inspecting() > 0 ||
+            (steps >= rest && region_.hot(globe::brick_at_key(key)))) {
             steps = 0;
         }
         if (++steps > rest) {

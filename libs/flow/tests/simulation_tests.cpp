@@ -267,3 +267,29 @@ TEST_CASE("rain wets ground the flow does not hold, and a film on it wakes the b
     CHECK(block.world().at(block.at(12, 12, 0)).liquid_amount > 0);
     CHECK(simulation.region().size() > 0);
 }
+
+TEST_CASE("a vent gives lava while it erupts and the flow holds its bricks", "[flow][simulation][vent]") {
+    Block block{floor_above_sea(100.0), false, rimmed};
+    Simulation simulation{block.world()};
+    simulation.add_vent({.site = block.at(12, 12, 0),
+                         .active_rate = 0.0,
+                         .erupting_rate = 1.0,
+                         .period = 1'000.0,
+                         .eruption = 20.0,
+                         .active = 0.0});
+    REQUIRE(simulation.vents() == 1);
+    for (int step = 0; step < 400; ++step) {
+        simulation.step(tick);
+    }
+    // 20 s at a cubic metre a second is 160 voxels' worth, less what backed up.
+    CHECK(simulation.region().size() > 0);
+    CHECK(simulation.region().liquid() > 20 * full);
+    CHECK(simulation.region().liquid() <= 160 * full);
+    // Dormant for the rest of the cycle: nothing more comes.
+    const std::int64_t before = simulation.region().liquid();
+    simulation.pass(10.0);
+    for (int step = 0; step < 100; ++step) {
+        simulation.step(tick);
+    }
+    CHECK(simulation.region().liquid() == before);
+}
