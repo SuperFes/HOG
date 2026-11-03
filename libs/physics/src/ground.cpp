@@ -84,8 +84,14 @@ Result<> Ground::keep(std::span<const WorldPosition> around) {
     const double radius = world_.generator().planet().radius;
     std::set<globe::Cell> wanted;
     for (const WorldPosition point : around) {
+        const DVec3 direction = glm::normalize(point.metres());
+        // Any chunk that lies within reach, not only one whose middle does: where a chunk is
+        // wider than the reach, the one under the feet may have its middle farther than that.
+        const globe::Cell under = globe::chunk_under(direction, world_.generator().layers());
+        const double half_across =
+            glm::length(globe::corners(under)[0] - globe::center(under)) * radius;
         for (const globe::Cell chunk :
-             globe::chunks_near(world_, glm::normalize(point.metres()), settings_.reach)) {
+             globe::chunks_near(world_, direction, settings_.reach + half_across)) {
             wanted.insert(chunk);
         }
     }
