@@ -67,6 +67,7 @@ struct Streams {
     // Where the bytes go: each field of every voxel in the window as its own plane, and the
     // distance again predicted from its neighbours.
     std::vector<std::byte> p_dist, p_pred, p_norm, p_rest, p_height, p_height_raw;
+    std::vector<std::vector<std::byte>> heights; // the ground at other precisions and spacings
     std::size_t leaves_d = 0, leaves_e = 0, uniform_leaves_d = 0, uniform_leaves_e = 0;
     std::size_t bricks = 0;
     std::size_t same_a = 0, same_b = 0, same_c = 0;     // bricks folded into the one before
@@ -165,7 +166,8 @@ void write_tree(hog::ByteWriter& out, Grid& grid, const Box& box, std::size_t& l
     write_tree(out, grid, high, leaves, solid_leaves);
 }
 
-Streams build_shard(const Generator& generator, const Baseline& base, int face, int si, int sj) {
+Streams build_shard(const Generator& generator, const Baseline& base, int face, int si, int sj,
+                    bool heights_only) {
     const Layers& layers = generator.layers();
     const double lod = voxel_lod(generator);
     const double band = distance_band(layers);
@@ -202,6 +204,9 @@ Streams build_shard(const Generator& generator, const Baseline& base, int face, 
                                 .i = corner.i + static_cast<std::uint32_t>(k % brick_side),
                                 .j = corner.j + static_cast<std::uint32_t>(k / brick_side)};
                 surface[k] = temperature_at(*base.planet, std::asin(center(cell).z));
+            }
+            if (heights_only) {
+                continue;
             }
             Runs run_a, run_b, run_c;
             kept[static_cast<std::size_t>((bj * shard_bricks) + bi)].first = first;
@@ -296,6 +301,33 @@ Streams build_shard(const Generator& generator, const Baseline& base, int face, 
             }
         }
     }
+    // The ground at coarser precision and spacing: millimetres per step, columns between samples.
+    constexpr std::array<std::array<int, 2>, 6> kinds{{{1, 1}, {10, 1}, {20, 1}, {10, 2}, {20, 2}, {50, 4}}};
+    for (const auto& kind : kinds) {
+        std::vector<std::byte> out;
+        const int step = kind[0];
+        const int spacing = kind[1];
+        const int n = side / spacing;
+        const auto q = [&](int x, int y) -> std::int32_t {
+            if (x < 0 || y < 0) {
+                return 0;
+            }
+            const std::int32_t mm = ground_mm[static_cast<std::size_t>((y * spacing * side) + (x * spacing))];
+            return static_cast<std::int32_t>(std::lround(static_cast<double>(mm) / step));
+        };
+        for (int y = 0; y < n; ++y) {
+            for (int x = 0; x < n; ++x) {
+                const std::int32_t residual = q(x, y) - (q(x - 1, y) + q(x, y - 1) - q(x - 1, y - 1));
+                for (int byte = 0; byte < 4; ++byte) {
+                    out.push_back(static_cast<std::byte>((static_cast<std::uint32_t>(residual) >> (8 * byte)) & 0xFFU));
+                }
+            }
+        }
+        streams.heights.push_back(std::move(out));
+    }
+    if (heights_only) {
+        return streams;
+    }
     streams.a = std::move(a).take();
     streams.b = std::move(b).take();
     streams.c = std::move(c).take();
@@ -368,7 +400,8 @@ TEST_CASE("how big the stored world is, on a random sample of shards", "[.store-
     std::printf("level %d, voxel %.3f m thick, %d shards a side, %llu shards, sampling 1 in %llu\n",
                 level, generator.layers().thickness, shards_across,
                 static_cast<unsigned long long>(total), static_cast<unsigned long long>(sample));
-    for (const char* name : {"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"}) {
+    const bool only_heights = env("HOG_BENCH_HEIGHTS", "") == "1";
+    for (const char* name : {"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "h0", "h1", "h2", "h3", "h4", "h5"}) {
         std::filesystem::create_directories(dir / name);
     }
     struct Job { int face, si, sj; };
@@ -392,9 +425,17 @@ TEST_CASE("how big the stored world is, on a random sample of shards", "[.store-
         pool.emplace_back([&] {
             for (std::size_t k = next++; k < jobs.size(); k = next++) {
                 const Job job = jobs[k];
-                const Streams made = build_shard(generator, base, job.face, job.si, job.sj);
+                const Streams made = build_shard(generator, base, job.face, job.si, job.sj, only_heights);
                 const std::string name = std::to_string(job.face) + "_" + std::to_string(job.si) +
                                          "_" + std::to_string(job.sj) + ".shard";
+                if (only_heights) {
+                    for (std::size_t h = 0; h < made.heights.size(); ++h) {
+                        put(dir / ("h" + std::to_string(h)) / name, made.heights[h]);
+                    }
+                    const std::lock_guard lock{mutex};
+                    ++done;
+                    continue;
+                }
                 put(dir / "a" / name, made.a);
                 put(dir / "b" / name, made.b);
                 put(dir / "c" / name, made.c);
