@@ -196,10 +196,22 @@ DVec3 cube_direction(std::uint32_t face, std::uint32_t x, std::uint32_t y,
     }
 }
 
+namespace {
+
+// The cloud is carried as fast as the weather ran, in game time, for each real second.
+void carry_at_pace(std::vector<protocol::CellWeather>& cells, float pace) {
+    for (protocol::CellWeather& cell : cells) {
+        cell.drift *= pace;
+    }
+}
+
+} // namespace
+
 void Forecast::receive(const protocol::Weather& weather, MonotonicClock::time_point now) {
     if (!grid_ || grid_->level() != weather.level) {
         grid_.emplace(weather.level);
         to_ = weather.cells;
+        carry_at_pace(to_, weather.pace);
         fill_heights(to_);
         from_ = to_;
         fade_ = {};
@@ -221,6 +233,7 @@ void Forecast::receive(const protocol::Weather& weather, MonotonicClock::time_po
     }
     last_came_ = now;
     waiting_ = Waiting{.cells = weather.cells, .came = now, .fade = fade};
+    carry_at_pace(waiting_->cells, weather.pace);
     fill_heights(waiting_->cells);
     update(now);
 }

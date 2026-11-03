@@ -106,6 +106,16 @@ TEST_CASE("the weather reads as a line", "[client][forecast]") {
           "100% cloud at 0-0 m, snow 1.0 mm/h, 0% humid, drifting 0 m/s");
 }
 
+TEST_CASE("cloud is carried as fast as the weather ran", "[client][forecast]") {
+    Forecast forecast{radius};
+    Weather weather = everywhere({.cloud = 1.0F, .cover = 1.0F, .drift = {3.0F, -1.0F}});
+    weather.pace = 100.0F;
+    forecast.receive(weather, start);
+    const CellWeather here = forecast.at(glm::normalize(DVec3{-1.0, 0.5, 0.2}), start);
+    CHECK_THAT(static_cast<double>(here.drift.x), WithinAbs(300.0, 1e-3));
+    CHECK_THAT(static_cast<double>(here.drift.y), WithinAbs(-100.0, 1e-3));
+}
+
 TEST_CASE("with no weather the sky is clear", "[client][forecast]") {
     const Forecast forecast{radius};
     CHECK_FALSE(forecast.known());

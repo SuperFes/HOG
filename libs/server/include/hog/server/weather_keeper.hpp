@@ -29,6 +29,9 @@ struct WeatherSettings {
     GameDuration longest = std::chrono::hours{1};
     // Game time a new world's still air is run on before it is shown, for its winds to build.
     GameDuration spin_up = std::chrono::hours{48};
+    // Game time the air may fall behind the clock once it is shown; when the clock runs faster
+    // than the air can be stepped, the air skips ahead rather than fall further.
+    GameDuration lag = std::chrono::hours{6};
 };
 
 // Steps the planet's air in the background as game time passes and sums it for the players.
@@ -48,7 +51,9 @@ public:
 
     // Takes in what a finished job did and starts the next if the game time reached has outrun
     // the air by an interval. Returns the weather it just made, if it made any; the client fades to
-    // it over `fade`.
+    // it over `fade`, or over the real time since the last if that was longer. Shown from the
+    // moment the air has caught up with the clock or run its spin-up, then after every job, however
+    // far behind the clock the air runs.
     [[nodiscard]] std::optional<protocol::Weather> poll(GameTime now,
                                                         std::chrono::milliseconds fade);
 
@@ -71,7 +76,7 @@ public:
     }
 
 private:
-    [[nodiscard]] protocol::Weather sum(std::chrono::milliseconds fade) const;
+    [[nodiscard]] protocol::Weather sum(std::chrono::milliseconds fade, float pace) const;
     void keep();
 
     WeatherSettings settings_;
@@ -83,6 +88,10 @@ private:
     // How far game time the air has run.
     GameTime reached_;
     std::future<void> job_;
+    GameDuration running_{};         // game time the job in flight runs on
+    GameDuration ran_{};             // game time the air has run since it started or was restored
+    bool live_ = false;              // whether the air is shown
+    std::chrono::steady_clock::time_point last_made_{}; // real time of the last weather made
     std::optional<protocol::Weather> latest_;
     std::vector<std::byte> saved_;
 };

@@ -44,6 +44,7 @@ constexpr std::uint8_t known_changes = changed_position;
 
 // Cloud and falling are sent as square roots, so thin cloud and drizzle keep their detail.
 constexpr float cover_steps = 255.0F;
+constexpr float pace_steps = 1'000.0F;
 constexpr float cloud_steps = 64.0F;   // a byte's steps to the root of a millimetre
 constexpr float falling_steps = 16.0F; // to the root of a millimetre an hour
 constexpr float snow_steps = 255.0F;
@@ -641,7 +642,8 @@ struct Ball {
 [[nodiscard]] Result<Message> read_weather(ByteReader& in) {
     const auto level = read<std::uint8_t>(in, "weather");
     const auto fade = read<std::uint32_t>(in, "weather");
-    if (!level || !fade) {
+    const auto pace = read<std::uint32_t>(in, "weather");
+    if (!level || !fade || !pace) {
         return make_error(ErrorCode::Parse, "weather cut short");
     }
     if (*level > most_weather_level) {
@@ -649,7 +651,10 @@ struct Ball {
                           std::format("weather at level {} is finer than the {} allowed", *level,
                                       most_weather_level));
     }
-    Weather weather{.level = *level, .fade = std::chrono::milliseconds{*fade}, .cells = {}};
+    Weather weather{.level = *level,
+                    .fade = std::chrono::milliseconds{*fade},
+                    .pace = static_cast<float>(*pace) / pace_steps,
+                    .cells = {}};
     const std::size_t count = weather_cells(*level);
     const auto bytes = in.read_bytes(count * weather_cell_bytes);
     if (!bytes) {
@@ -673,6 +678,8 @@ void write_weather(ByteWriter& out, const Weather& weather) {
     out.write(weather.level);
     out.write(static_cast<std::uint32_t>(std::clamp<std::chrono::milliseconds::rep>(
         weather.fade.count(), 0, std::numeric_limits<std::uint32_t>::max())));
+    out.write(static_cast<std::uint32_t>(
+        std::clamp(std::lround(weather.pace * pace_steps), 0L, long{std::numeric_limits<std::int32_t>::max()})));
     for (const CellWeather& cell : weather.cells) {
         for (const std::uint8_t byte : coded(cell)) {
             out.write(byte);
