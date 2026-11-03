@@ -20,6 +20,7 @@ hog_add_tests(hog_flow
     tests/collapse_tests.cpp
     tests/flight_tests.cpp
     tests/lava_tests.cpp
+    tests/network_cost_bench.cpp
     tests/region_tests.cpp
     tests/rock_tests.cpp
     tests/slump_tests.cpp

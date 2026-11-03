@@ -27,6 +27,7 @@ hog_add_tests(hog_server
     tests/grain_sharing_tests.cpp
     tests/ground_wetting_tests.cpp
     tests/move_check_tests.cpp
+    tests/network_cost_bench.cpp
     tests/pacer_tests.cpp
     tests/persistence_tests.cpp
     tests/players_tests.cpp
