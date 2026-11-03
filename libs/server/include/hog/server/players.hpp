@@ -18,6 +18,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace hog::server {
@@ -93,6 +94,8 @@ public:
 
     // Where each player on foot is.
     [[nodiscard]] std::vector<WorldPosition> placed() const;
+    // The same by connection.
+    [[nodiscard]] std::vector<std::pair<net::ConnectionId, WorldPosition>> located() const;
     // Every player's connection, placed or not.
     [[nodiscard]] std::vector<net::ConnectionId> connections() const;
 

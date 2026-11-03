@@ -101,7 +101,15 @@ std::vector<Message> examples() {
             Built{.centre = far_out, .radius = 2'500, .material = 9},
             Bricks{},
             Bricks{.bricks = {{.key = 0xFFFF'FFFF'FFFF'FFF0, .bytes = bytes({1, 2, 3})},
-                              {.key = 1, .bytes = {}}}}};
+                              {.key = 1, .bytes = {}}}},
+            Grains{},
+            Grains{.tick = 7,
+                   .flying = {{.id = NetId{1},
+                               .at = far_out,
+                               .velocity = {-32'768, 0, 32'767},
+                               .material = 4,
+                               .amount = 70'000},
+                              {.id = NetId{9}, .at = Millimetres{0, -5, 6}, .velocity = {}}}}};
 }
 
 // A snapshot at tick 10 with no baseline and nothing entering, then `rest`.
@@ -162,7 +170,7 @@ TEST_CASE("a hurry or a clock to no time at all is refused", "[protocol]") {
 }
 
 TEST_CASE("unknown kinds and refusals, and tokens too long, are refused", "[protocol]") {
-    CHECK(decode(bytes({17, 0})).error().code == ErrorCode::Unsupported);
+    CHECK(decode(bytes({18, 0})).error().code == ErrorCode::Unsupported);
     // A placing at the centre in a stance after flying.
     CHECK(decode(bytes({13, 0, 0, 0, 0, 2, 0, 0, 0, 0})).error().code == ErrorCode::Unsupported);
     CHECK(decode(bytes({3, 0, 1, 0, 0, 0, 200, 0, 0})).error().code == ErrorCode::Parse);
@@ -386,4 +394,13 @@ TEST_CASE("an edit of no width or too wide, and bricks too many or too big, are 
     big.push_back(static_cast<std::byte>(length >> 8U));
     big.resize(big.size() + length);
     CHECK(decode(big).error().code == ErrorCode::OutOfRange);
+    // Grains: a count over the most, ids not going up, and one cut short.
+    CHECK(decode(bytes({17, 0, 0, 0, 0, 0, static_cast<int>(most_grains + 1), 1})).error().code ==
+          ErrorCode::OutOfRange);
+    auto twice = encode(Grains{.tick = 1, .flying = {{.id = NetId{2}}, {.id = NetId{3}}}});
+    twice[twice.size() - 18] = std::byte{1}; // the second's id, over the first's
+    CHECK(!decode(twice));
+    auto cut = encode(Grains{.tick = 1, .flying = {{.id = NetId{2}}}});
+    cut.pop_back();
+    CHECK(!decode(cut));
 }

@@ -35,6 +35,7 @@ enum class Kind : std::uint16_t {
     Dug = 14,
     Built = 15,
     Bricks = 16,
+    Grains = 17,
 }; // NOLINT(performance-enum-size)
 
 // Which of an entity's changes follow its id in a snapshot.
@@ -567,6 +568,49 @@ struct Ball {
     return finished(in, std::move(bricks));
 }
 
+[[nodiscard]] Result<Message> read_grains(ByteReader& in) {
+    const auto tick = read<std::uint32_t>(in, "grains");
+    const auto count = read<std::uint16_t>(in, "grains");
+    if (!tick || !count) {
+        return make_error(ErrorCode::Parse, "grains cut short");
+    }
+    if (*count > most_grains) {
+        return make_error(ErrorCode::OutOfRange,
+                          std::format("{} grains in a message; {} allowed", *count, most_grains));
+    }
+    Grains grains{.tick = *tick, .flying = {}};
+    grains.flying.reserve(*count);
+    std::uint32_t last = 0;
+    for (std::uint16_t k = 0; k < *count; ++k) {
+        const auto id = read<std::uint32_t>(in, "a grain");
+        const auto at = read_position(in, "a grain");
+        if (!id || !at) {
+            return make_error(ErrorCode::Parse, "a grain cut short");
+        }
+        if (*id == 0 || (k > 0 && *id <= last)) {
+            return make_error(ErrorCode::Parse, "grains out of order");
+        }
+        last = *id;
+        Flying one{.id = NetId{*id}, .at = *at};
+        for (std::int16_t& axis : one.velocity) {
+            const auto value = read<std::uint16_t>(in, "a grain");
+            if (!value) {
+                return std::unexpected(value.error());
+            }
+            axis = static_cast<std::int16_t>(*value);
+        }
+        const auto material = read<std::uint8_t>(in, "a grain");
+        const auto amount = read<std::uint32_t>(in, "a grain");
+        if (!material || !amount) {
+            return make_error(ErrorCode::Parse, "a grain cut short");
+        }
+        one.material = *material;
+        one.amount = *amount;
+        grains.flying.push_back(one);
+    }
+    return finished(in, std::move(grains));
+}
+
 [[nodiscard]] Result<Message> read_said(ByteReader& in) {
     const auto from = read_sized(in, most_name, "chat's speaker");
     if (!from) {
@@ -690,6 +734,20 @@ std::vector<std::byte> encode(const Message& message) {
                     out.write(brick.key);
                     write_sized(out, brick.bytes);
                 }
+            } else if constexpr (std::is_same_v<Body, Grains>) {
+                HOG_ASSERT(body.flying.size() <= most_grains, "too much grain to send at once");
+                out.write(static_cast<std::uint16_t>(Kind::Grains));
+                out.write(body.tick);
+                out.write(static_cast<std::uint16_t>(body.flying.size()));
+                for (const Flying& one : body.flying) {
+                    out.write(std::to_underlying(one.id));
+                    write_position(out, one.at);
+                    for (const std::int16_t axis : one.velocity) {
+                        out.write(static_cast<std::uint16_t>(axis));
+                    }
+                    out.write(one.material);
+                    out.write(one.amount);
+                }
             } else if constexpr (std::is_same_v<Body, Ack>) {
                 out.write(static_cast<std::uint16_t>(Kind::Ack));
                 out.write(body.tick);
@@ -800,6 +858,8 @@ Result<Message> decode(std::span<const std::byte> bytes) {
         return read_built(in);
     case Kind::Bricks:
         return read_bricks(in);
+    case Kind::Grains:
+        return read_grains(in);
     case Kind::Said:
         return read_said(in);
     case Kind::Hurry: {
