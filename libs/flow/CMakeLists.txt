@@ -3,6 +3,7 @@ add_library(hog_flow
     src/region_rocks.cpp
     src/region_slump.cpp
     src/slump.cpp
+    src/support.cpp
     src/simulation.cpp)
 add_library(hog::flow ALIAS hog_flow)
 
@@ -15,5 +16,6 @@ hog_add_tests(hog_flow
     tests/region_tests.cpp
     tests/rock_tests.cpp
     tests/slump_tests.cpp
+    tests/support_tests.cpp
     tests/wetting_tests.cpp
     tests/simulation_tests.cpp)
