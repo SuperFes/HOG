@@ -1,9 +1,11 @@
 #pragma once
 
+#include <hog/globe/cell.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/noise.hpp>
 
 #include <cstdint>
+#include <optional>
 
 // The generator's terms, one file each. Heights are metres over the planet's raw radius, as
 // functions of direction, their gradients taken against the point on the sphere at that radius.
@@ -26,6 +28,7 @@ enum class Term : std::uint8_t {
     CaveA,
     CaveB,
     Chambers,
+    Rockfall,
 };
 
 struct Context {
@@ -151,6 +154,21 @@ inline constexpr double cave_reach = 50.0;
 // can step that far.
 [[nodiscard]] double cave_bound(const Context& context, const Layering& layers, DVec3 direction,
                                 double radius, double ground, double cover, double lod) noexcept;
+
+// The block of rock lying on the ground a column stands on, fallen from the cliffs above: one
+// at most to a cell about `rock_cell` metres across, kept wholly inside it, where the ground
+// round about is steep enough to shed rock. Blocks too small for `lod` to resolve are left out.
+inline constexpr double rock_cell = 32.0;
+// Rise per run over a stretch about `rock_cell` wide below which the ground sheds no rock.
+inline constexpr double sheds_from = 0.3;
+// The level of the cells that each keep a rock.
+[[nodiscard]] int rock_level(const Planet& planet) noexcept;
+// How steep the ground climbs about `direction` over the stretch that sheds rock, a rise per run.
+[[nodiscard]] double steepness(const Context& context, DVec3 direction) noexcept;
+// The rock in one cell, wherever its columns stand.
+[[nodiscard]] std::optional<Rock> rock_in(const Context& context, Cell cell, double lod) noexcept;
+[[nodiscard]] std::optional<Rock> rockfall(const Context& context, DVec3 direction,
+                                           double lod) noexcept;
 
 // What's `depth` metres under the ground at `radius`.
 [[nodiscard]] Material material_at(const Context& context, const Layering& layers, double depth,

@@ -258,6 +258,8 @@ Generator::Column Generator::finish(DVec3 down, double lod, const terms::Ground&
     column.tilt_ = tilt;
     column.surface_temperature_ = made.surface_temperature;
     column.strata_ = made.layers;
+    const terms::Context context{.planet = &planet_, .derived = &derived_, .shape = &shape_};
+    column.rock_ = terms::rockfall(context, down, lod);
     return column;
 }
 
@@ -360,6 +362,17 @@ Sample Generator::Column::sample(double radius) const noexcept {
             rise = ((1.0 - cave_share) * glm::normalize(rise)) - (cave_share * cave_rise);
         }
     }
+    // A fallen rock stands out of the ground, or fills a hollow, where it is nearer than the ground.
+    bool on_rock = false;
+    if (rock_) {
+        DVec3 out{0.0};
+        const double near = rock_->distance(direction_ * radius, out);
+        if (near < sample.distance) {
+            sample.distance = near;
+            rise = out;
+            on_rock = true;
+        }
+    }
     if (glm::length(rise) > 0.0) {
         sample.normal = glm::normalize(rise);
     }
@@ -370,7 +383,8 @@ Sample Generator::Column::sample(double radius) const noexcept {
         // ones find it, so the ground looks the same at every detail. Voxels stand half a lod
         // apart.
         const double shown = std::max(0.0, depth - (lod_ / 2.0));
-        sample.material = terms::material_at(context, strata_, shown, ground_ - shown);
+        sample.material = on_rock ? rock_->material
+                                  : terms::material_at(context, strata_, shown, ground_ - shown);
     }
     // The sea fills the open space under its level, and the ground's pores below it.
     if (generator_->shape_.sea && radius < planet.radius) {

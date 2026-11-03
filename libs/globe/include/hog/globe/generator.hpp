@@ -5,6 +5,7 @@
 #include <hog/globe/material.hpp>
 #include <hog/globe/planet.hpp>
 
+#include <algorithm>
 #include <optional>
 #include <span>
 #include <utility>
@@ -47,6 +48,21 @@ struct Strata {
     Material basement = Material::Basalt;
 };
 
+// A block of rock fallen from a cliff and lying on the ground below it, as an ellipsoid sunk
+// part way in.
+struct Rock {
+    DVec3 middle{0.0}; // metres from the planet's centre
+    DVec3 up{0.0};     // unit, out of the ground
+    DVec3 across{0.0}; // unit, along the long axis, level
+    DVec3 axes{0.0};   // half-lengths in metres along `across`, level across that, and `up`
+    Material material = Material::Air;
+
+    // Metres from `point` to the rock's surface, negative inside; `normal` takes the way out.
+    [[nodiscard]] double distance(DVec3 point, DVec3& normal) const noexcept;
+    // The highest point's metres from the planet's centre.
+    [[nodiscard]] double top() const noexcept;
+};
+
 // The world as maths: a pure function of the planet's description and a point, the same bits on
 // every platform. The planet's centre is the origin and its spin axis +z.
 class Generator {
@@ -75,6 +91,10 @@ public:
         [[nodiscard]] double ground() const noexcept { return ground_; }
         // Metres of loose cover between the ground and the rock under it.
         [[nodiscard]] double mantle() const noexcept { return mantle_; }
+        // Metres from the centre to the highest solid, which a fallen rock lifts above the ground.
+        [[nodiscard]] double top() const noexcept {
+            return rock_ ? std::max(ground_, rock_->top()) : ground_;
+        }
         // Where a cave may lie within `within` metres of the column under its ground, between
         // `lowest` and `highest` metres from the centre: each stretch as the radii of its bottom
         // and top, lowest first, apart from each other; nowhere outside them is any cave that
@@ -94,6 +114,7 @@ public:
         DVec3 tilt_{0.0};                  // the way the ground rises, by as much
         double surface_temperature_ = 0.0; // at the reference level
         Strata strata_;
+        std::optional<Rock> rock_; // lying on this column, if one does
     };
 
     [[nodiscard]] Column column(DVec3 direction, double lod) const noexcept;
