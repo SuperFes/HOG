@@ -107,7 +107,9 @@ public:
     static constexpr std::size_t most_inspected = 4;
     // Queues the brick, and the matter about it, to be looked at for support: it is cracked and
     // let fall where it hangs from nothing. Wanted bricks about it are asked for.
-    void disturb(globe::BrickSite site);
+    // `weathered` is game seconds of weather and rust and the like to wear the brick by when it is
+    // looked at, which is what the slow sweep brings on its rounds.
+    void disturb(globe::BrickSite site, double weathered = 0.0);
     // Bricks waiting to be looked at or cracking.
     [[nodiscard]] std::size_t inspecting() const noexcept { return inspect_.size(); }
 
@@ -289,10 +291,14 @@ private:
     struct Fresh {
         globe::BrickSite site;
         int tries = 0;
+        double weathered = 0.0;
     };
     void loosen_fresh();
     // Looks at the bricks queued for support; those still cracking stay queued.
     void inspect_support(double seconds, Stepped& stepped);
+    // Wears the voxels of a brick by `seconds` of weather; those worn to nothing are returned
+    // as falling.
+    [[nodiscard]] std::vector<globe::Site> weather(globe::BrickSite site, double seconds);
     // Looks at the box of bricks about one; whether any matter in it is cracking.
     [[nodiscard]] bool check_support(globe::BrickSite site, double seconds, Stepped& stepped);
     // Takes the voxels out of the ground and sends them down as boulders and rubble.
@@ -311,6 +317,7 @@ private:
     std::vector<Parcel> parcels_;
     std::vector<Fresh> fresh_;
     std::vector<Fresh> inspect_;
+    std::uint64_t weathering_ = 0; // counts the brick weathered, to tell its chances apart
     std::uint32_t parcel_ids_ = 0;
     std::uint64_t steps_ = 0;
 };

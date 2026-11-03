@@ -29,10 +29,13 @@ public:
     void touched(globe::BrickSite site);
     // Wakes the brick, and has the matter about it looked at to see it still holds itself up: an
     // edit that took the ground from under something.
-    void disturbed(globe::BrickSite site);
+    // `weathered` seconds of weather, rust and the like are put on it first.
+    void disturbed(globe::BrickSite site, double weathered = 0.0);
     // Looks at the next `count` bricks changed from the generated ground for support, going
     // round them all in turn, so ground left hanging where no one is is brought down in time.
-    void sweep(std::size_t count);
+    // Each brick is worn too, by the game time a round takes: `seconds` since the last call,
+    // for each call of a round.
+    void sweep(std::size_t count, double seconds = 0.0);
 
     struct Progress {
         std::int64_t changed = 0;
@@ -75,6 +78,7 @@ private:
 
     globe::World* world_;
     Region region_;
+    double round_size_ = 0.0;
     std::vector<globe::BrickSite> sweeping_; // bricks yet to be looked at this round
     std::unordered_map<std::uint64_t, int> still_; // steps each brick held has gone unchanged
     std::unordered_map<std::uint64_t, Moisture> moisture_;

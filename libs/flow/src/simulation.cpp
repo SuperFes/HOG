@@ -38,20 +38,22 @@ void Simulation::touched(BrickSite site) {
     }
 }
 
-void Simulation::disturbed(BrickSite site) {
+void Simulation::disturbed(BrickSite site, double weathered) {
     take(site);
-    region_.disturb(site);
+    region_.disturb(site, weathered);
 }
 
-void Simulation::sweep(std::size_t count) {
+void Simulation::sweep(std::size_t count, double seconds) {
     for (std::size_t k = 0; k < count; ++k) {
         if (sweeping_.empty()) {
             sweeping_ = world_->store().changed_since(0);
             if (sweeping_.empty()) {
                 return;
             }
+            round_size_ = static_cast<double>(sweeping_.size());
         }
-        disturbed(sweeping_.back());
+        // A brick is looked at once a round, so it stands for all the time the round takes.
+        disturbed(sweeping_.back(), seconds * round_size_ / static_cast<double>(count));
         sweeping_.pop_back();
     }
 }

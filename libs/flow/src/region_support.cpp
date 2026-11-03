@@ -1,5 +1,6 @@
 #include <hog/flow/region.hpp>
 #include <hog/flow/support.hpp>
+#include <hog/flow/wear.hpp>
 
 #include <glm/geometric.hpp>
 
@@ -26,13 +27,76 @@ constexpr double carve_ball = 0.75;
 
 } // namespace
 
-void Region::disturb(globe::BrickSite site) {
-    const bool queued = std::ranges::any_of(inspect_, [&](const Fresh& waiting) {
+void Region::disturb(globe::BrickSite site, double weathered) {
+    const auto queued = std::ranges::find_if(inspect_, [&](const Fresh& waiting) {
         return globe::brick_key(waiting.site) == globe::brick_key(site);
     });
-    if (!queued) {
-        inspect_.push_back({.site = site});
+    if (queued == inspect_.end()) {
+        inspect_.push_back({.site = site, .weathered = weathered});
+    } else {
+        queued->weathered += weathered;
     }
+}
+
+std::vector<globe::Site> Region::weather(globe::BrickSite site, double seconds) {
+    const double thickness = world_->store().layers().thickness;
+    std::vector<globe::Site> gone;
+    const std::uint64_t round = ++weathering_;
+    for (std::uint32_t l = 0; l < globe::brick_side; ++l) {
+        for (std::uint32_t j = 0; j < globe::brick_side; ++j) {
+            for (std::uint32_t i = 0; i < globe::brick_side; ++i) {
+                const globe::Site where{.face = site.face,
+                                        .i = site.i * globe::brick_side + i,
+                                        .j = site.j * globe::brick_side + j,
+                                        .layer = site.layer * globe::brick_side + l};
+                globe::Voxel* here = voxel(where);
+                if (here == nullptr || here->solid == globe::Material::Air ||
+                    here->condition == 0) {
+                    continue;
+                }
+                Exposure exposure;
+                exposure.damp = globe::dampness(here->solid, here->liquid_amount, thickness);
+                int open = 0;
+                for (const auto& [di, dj, dl] :
+                     {std::tuple{1, 0, 0}, std::tuple{-1, 0, 0}, std::tuple{0, 1, 0},
+                      std::tuple{0, -1, 0}, std::tuple{0, 0, 1}, std::tuple{0, 0, -1}}) {
+                    const globe::Voxel* next = voxel({.face = where.face,
+                                                      .i = where.i + static_cast<std::uint32_t>(di),
+                                                      .j = where.j + static_cast<std::uint32_t>(dj),
+                                                      .layer = where.layer + static_cast<std::uint32_t>(dl)});
+                    if (next != nullptr && next->solid == globe::Material::Air) {
+                        ++open;
+                        exposure.damp = std::max(
+                            exposure.damp,
+                            globe::dampness(globe::Material::Air, next->liquid_amount, thickness));
+                    }
+                }
+                exposure.open = open / 6.0;
+                // Thaw and frost alternate within a few degrees of freezing.
+                exposure.freeze =
+                    std::max(0.0, 1.0 - std::abs(globe::kelvin(here->temperature) - 273.15) / 8.0);
+                const double rate = wearing_rate(here->solid, exposure);
+                if (rate <= 0.0) {
+                    continue;
+                }
+                const std::uint64_t key = (std::uint64_t{where.face} << 60U) ^
+                                          (std::uint64_t{where.i} * 73'856'093U) ^
+                                          (std::uint64_t{where.j} * 19'349'663U) ^
+                                          (std::uint64_t{where.layer} * 83'492'791U);
+                const double chance =
+                    softness(key ^ (round * 0x9E3779B97F4A7C15ULL)) / 2.6;
+                const std::uint8_t after = worn(here->condition, rate * softness(key), seconds, chance);
+                if (after != here->condition) {
+                    here->condition = after;
+                    held(site)->dirty = true;
+                    if (after == 0) {
+                        gone.push_back(where);
+                    }
+                }
+            }
+        }
+    }
+    return gone;
 }
 
 void Region::inspect_support(double seconds, Stepped& stepped) {
@@ -71,6 +135,13 @@ void Region::inspect_support(double seconds, Stepped& stepped) {
             continue;
         }
         ++looked;
+        if (queued.weathered > 0.0) {
+            const std::vector<globe::Site> gone = weather(at, queued.weathered);
+            queued.weathered = 0.0;
+            if (!gone.empty()) {
+                fall(gone, stepped);
+            }
+        }
         if (check_support(at, seconds, stepped)) {
             waiting.push_back(queued);
         }
