@@ -29,6 +29,10 @@ namespace hog::app {
 
 namespace {
 
+// Ground edited within this many metres of a player is worn and checked every few seconds.
+constexpr double near_wear_reach = 48.0;
+constexpr double near_wear_gap = 5.0;
+
 // Seconds; a 20 Hz tick has 50 ms to spare.
 constexpr std::array tick_bounds{0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005,
                                  0.01,   0.025,   0.05,   0.1,   0.25,   1.0};
@@ -190,7 +194,11 @@ void Server::simulate(GameTime from, GameDuration step) {
     // someone is digging.
     swept_ += step;
     if (swept_ >= std::chrono::seconds{1}) {
-        flow_.sweep(1, std::chrono::duration<double>(swept_).count());
+        flow_.sweep(1);
+        // Ground edited near players is worn and checked far oftener than the sweep comes round.
+        for (const WorldPosition& at : joined_.placed()) {
+            flow_.attend(at.metres(), near_wear_reach, near_wear_gap);
+        }
         swept_ = {};
     }
     wet_ground(step);
