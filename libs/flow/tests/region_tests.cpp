@@ -12,11 +12,15 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <glm/geometric.hpp>
+
 #include <algorithm>
 #include <cstdint>
+#include <cmath>
 #include <cstdlib>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <vector>
 
 using hog::flow::Region;
@@ -508,4 +512,50 @@ TEST_CASE("a dusting of snow clings to a steep slope that a deep drift slides do
     // It ran down onto rock below the drift's foot.
     CHECK(deep.grain(2, 12, 2) > 0);
     CHECK(deep.region().grain() == drift);
+}
+
+TEST_CASE("a lump thrown onto a heap's flank rolls off down it instead of dropping in",
+          "[flow][region][slump]") {
+    using hog::globe::Material;
+    Block block{floor_above_sea(100.0)};
+    // Rubble stepping down a voxel every second column along i: well under what it holds.
+    for (std::uint32_t i = 0; i < Block::side; ++i) {
+        for (std::uint32_t j = 0; j < Block::side; ++j) {
+            for (int up = 0; up < std::max(0, (17 - static_cast<int>(i)) / 2); ++up) {
+                block.pile(i, j, up, Material::Granite, full);
+            }
+        }
+    }
+    // Let the heap sleep first, so the only grain in motion is the lump.
+    bool resting = false;
+    for (int step = 0; step < 4000 && !resting; ++step) {
+        const hog::flow::Stepped stepped = block.region().step(tick);
+        resting = stepped.slumped == 0 && stepped.flying == 0;
+    }
+    REQUIRE(resting);
+    const std::int64_t before = block.region().grain();
+    const auto& layers = block.store().layers();
+    block.region().throw_grain(hog::globe::middle_of(block.at(12, 12, 5), layers), {},
+                               Material::Granite, full);
+
+    std::optional<hog::DVec3> start;
+    hog::DVec3 last{};
+    bool landed = false;
+    for (int step = 0; step < 2000 && !landed; ++step) {
+        for (const auto& parcel : block.region().parcels()) {
+            last = parcel.at;
+            start = start.value_or(parcel.at);
+        }
+        const hog::flow::Stepped stepped = block.region().step(tick);
+        landed = stepped.flying == 0;
+    }
+
+    REQUIRE(landed);
+    REQUIRE(start);
+    CHECK(block.region().grain() == before + full);
+    // It went on along the flank, not straight down where it hit.
+    const double along =
+        std::acos(std::min(1.0, glm::dot(glm::normalize(*start), glm::normalize(last)))) *
+        glm::length(last);
+    CHECK(along > 0.1);
 }

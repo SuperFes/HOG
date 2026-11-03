@@ -3,6 +3,7 @@
 #include <hog/flow/flight.hpp>
 #include <hog/flow/slump.hpp>
 #include <hog/globe/brick.hpp>
+#include <hog/globe/cell.hpp>
 #include <hog/globe/material.hpp>
 #include <hog/globe/surface.hpp>
 #include <hog/globe/voxel.hpp>
@@ -242,6 +243,7 @@ private:
                     globe::Material material);
     // The surface a parcel at `at` would meet, or none where nothing here is held to land on.
     [[nodiscard]] std::optional<Ground> ground_under(DVec3 at);
+    [[nodiscard]] DVec3 heap_normal(const globe::Cell& column, std::uint32_t layer, DVec3 fallback);
     // The brick of the first voxel down from `at` that isn't held, if the ground is beyond it.
     [[nodiscard]] std::optional<globe::BrickSite> unheld_below(DVec3 at);
     // Moves each parcel on `seconds`, and lets the grain of those that came to rest settle into

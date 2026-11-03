@@ -280,6 +280,41 @@ void Region::throw_grain(DVec3 at, DVec3 velocity, Material material, std::int64
     }
 }
 
+// The lean of the grain's own surface at a column, from the heights of the columns about it, for
+// where it has no neighbours to read it from, `fallback`.
+DVec3 Region::heap_normal(const globe::Cell& column, std::uint32_t layer, DVec3 fallback) {
+    const globe::Layers& layers = world_->store().layers();
+    const std::uint32_t across = world_->store().bricks_across() * globe::brick_side;
+    if (column.i == 0 || column.j == 0 || column.i + 1 >= across || column.j + 1 >= across) {
+        return fallback;
+    }
+    const std::uint32_t start = std::min<std::uint32_t>(layer + 2, static_cast<std::uint32_t>(layers.count) - 1);
+    const auto top = [&](std::uint32_t i, std::uint32_t j) -> std::optional<DVec3> {
+        const std::optional<Scan> found = scan(column.face, i, j, start, deepest);
+        if (!found) {
+            return std::nullopt;
+        }
+        const double height = layers.floor + (static_cast<double>(found->ground +
+                                                                  found->surface.grain_amount) /
+                                              static_cast<double>(full) * layers.thickness);
+        const DVec3 middle = globe::middle_of({column.face, i, j, start}, layers);
+        return glm::normalize(middle) * height;
+    };
+    const auto ahead = top(column.i + 1, column.j);
+    const auto behind = top(column.i - 1, column.j);
+    const auto right = top(column.i, column.j + 1);
+    const auto left = top(column.i, column.j - 1);
+    if (!ahead || !behind || !right || !left) {
+        return fallback;
+    }
+    DVec3 normal = glm::cross(*ahead - *behind, *right - *left);
+    if (glm::dot(normal, fallback) < 0.0) {
+        normal = -normal;
+    }
+    const double length = glm::length(normal);
+    return length > 0.0 ? normal / length : fallback;
+}
+
 std::optional<Ground> Region::ground_under(DVec3 at) {
     const globe::Layers& layers = world_->store().layers();
     const double radius = glm::length(at);
@@ -295,7 +330,10 @@ std::optional<Ground> Region::ground_under(DVec3 at) {
     }
     const globe::Surface& surface = found->surface;
     DVec3 normal = at / radius;
-    if (surface.bottom.distance != Voxel::far && surface.bottom.normal != Voxel::no_normal) {
+    if (surface.grain_amount > 0) {
+        normal = heap_normal(column, static_cast<std::uint32_t>(layer), normal);
+    } else if (surface.bottom.distance != Voxel::far &&
+               surface.bottom.normal != Voxel::no_normal) {
         normal = globe::unpacked_normal(surface.bottom.normal);
     }
     return Ground{.radius = layers.floor + (static_cast<double>(found->ground + surface.grain_amount) /
