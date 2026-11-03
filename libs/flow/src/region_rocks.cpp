@@ -24,7 +24,6 @@ double rolling_radius(const globe::Rock& rock) {
 
 } // namespace
 
-template <typename Distance, typename Change>
 std::optional<globe::BrickSite> Region::reshape(DVec3 centre, double reach,
                                                 const Distance& distance, const Change& change) {
     const globe::Layers& layers = world_->store().layers();

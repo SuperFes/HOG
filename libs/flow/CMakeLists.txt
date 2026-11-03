@@ -2,6 +2,7 @@ add_library(hog_flow
     src/region.cpp
     src/region_rocks.cpp
     src/region_slump.cpp
+    src/region_support.cpp
     src/slump.cpp
     src/support.cpp
     src/simulation.cpp)
@@ -12,6 +13,7 @@ target_link_libraries(hog_flow PUBLIC hog::core hog::globe)
 hog_target_defaults(hog_flow)
 
 hog_add_tests(hog_flow
+    tests/collapse_tests.cpp
     tests/flight_tests.cpp
     tests/region_tests.cpp
     tests/rock_tests.cpp

@@ -695,6 +695,7 @@ Stepped Region::step(double seconds) {
     Stepped stepped;
     ++steps_;
     loosen_fresh();
+    inspect_support(seconds, stepped);
     std::vector<Column> all = columns();
     hold_sea(all, stepped);
     gather(all);
