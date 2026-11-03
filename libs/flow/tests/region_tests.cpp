@@ -466,3 +466,46 @@ TEST_CASE("sand at the lip of a drop deeper than eight voxels runs down it, losi
     CHECK(block.region().grain() == before);
     CHECK(below() > 0);
 }
+
+TEST_CASE("a dusting of snow clings to a steep slope that a deep drift slides down",
+          "[flow][region][slump]") {
+    using hog::globe::Material;
+    // Rock rising a voxel for each column along i: a slope of one in one.
+    const auto ramp = [](std::uint32_t i, std::uint32_t, int layer) {
+        return layer >= static_cast<int>(std::min<std::uint32_t>(i, 16));
+    };
+    const auto lay = [&](Block& block, std::int64_t amount, int depth) {
+        for (std::uint32_t i = 4; i < 13; ++i) {
+            for (std::uint32_t j = 8; j < 17; ++j) {
+                for (int up = 0; up < depth; ++up) {
+                    block.pile(i, j, static_cast<int>(i) + up, Material::Snow, amount);
+                }
+            }
+        }
+    };
+
+    Block thin{floor_above_sea(100.0), false, ramp};
+    lay(thin, full / 8, 1);
+    const std::int64_t dusting = thin.region().grain();
+    REQUIRE(dusting > 0);
+    std::int64_t thin_moved = 0;
+    for (int step = 0; step < 400; ++step) {
+        const hog::flow::Stepped stepped = thin.region().step(tick);
+        thin_moved += stepped.slumped + static_cast<std::int64_t>(stepped.flying);
+    }
+    CHECK(thin_moved == 0);
+    CHECK(thin.region().grain() == dusting);
+
+    Block deep{floor_above_sea(100.0), false, ramp};
+    lay(deep, full, 4);
+    const std::int64_t drift = deep.region().grain();
+    std::int64_t deep_moved = 0;
+    for (int step = 0; step < 400; ++step) {
+        const hog::flow::Stepped stepped = deep.region().step(tick);
+        deep_moved += stepped.slumped;
+    }
+    CHECK(deep_moved > 0);
+    // It ran down onto rock below the drift's foot.
+    CHECK(deep.grain(2, 12, 2) > 0);
+    CHECK(deep.region().grain() == drift);
+}
