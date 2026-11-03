@@ -92,6 +92,9 @@ struct CraterProfile {
 // Every crater's shape over the ground, worn by its age.
 [[nodiscard]] Noise craters(const Context& context, DVec3 direction, double lod) noexcept;
 
+// The cones and craters of the planet's volcanoes, outlines warped.
+[[nodiscard]] Noise volcanoes(const Context& context, DVec3 direction, double lod) noexcept;
+
 // The ground's raw height along a direction, the sum of every column term.
 struct Column {
     Noise height;
