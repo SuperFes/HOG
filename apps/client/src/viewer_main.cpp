@@ -98,6 +98,7 @@ struct Controls {
     double behind = ::behind; // metres, while walking
     bool walking = false;
     bool through = false;     // flying through the ground
+    double cutaway = 8.0;     // metres of ground round the eye left undrawn there
     bool timings = false;     // shown over the picture
     bool next_clouds = false; // asked to draw the clouds at the next quality
     bool may_chat = false;    // connected to a server to chat on
@@ -167,6 +168,12 @@ void handle(const SDL_Event& event, SDL_Window* window, Controls& controls) {
             controls.behind = std::clamp(
                 controls.behind / std::pow(speed_step, static_cast<double>(event.wheel.y)),
                 nearest_behind, furthest_behind);
+            break;
+        }
+        if (controls.through) {
+            controls.cutaway = std::clamp(
+                controls.cutaway * std::pow(speed_step, static_cast<double>(event.wheel.y)), 1.0,
+                render::block_cutaway_most);
             break;
         }
         controls.speed =
@@ -895,6 +902,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, client::Globe
     const double radius = globe.generator.planet().radius;
     Controls controls;
     controls.timings = options.timings;
+    controls.through = options.through;
     TitleCounter title;
     client::FrameTimes times;
     const MonotonicClock::time_point started = MonotonicClock::now();
@@ -971,6 +979,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, client::Globe
                                 .bend = bend,
                                 .time = clock.time(),
                                 .seconds = seconds,
+                                .cutaway = controls.through && !player ? controls.cutaway : 0.0,
                                 .companion = companion,
                                 .others = std::move(avatars),
                                 .forecast = &forecast,

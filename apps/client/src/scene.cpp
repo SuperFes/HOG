@@ -328,9 +328,10 @@ void Scene::add_ground(render::RenderGraph& graph, const render::Frame& frame, c
             if (!deep) {
                 return deep;
             }
-            return blocks_.draw(commands, frame.extent,
-                                {.camera = shot.camera, .sun = sea.sun, .bend = shot.bend},
-                                frame.slot);
+            return blocks_.draw(
+                commands, frame.extent,
+                {.camera = shot.camera, .sun = sea.sun, .bend = shot.bend, .cutaway = shot.cutaway},
+                frame.slot);
         });
 }
 
