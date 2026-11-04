@@ -9,6 +9,8 @@
 #include <optional>
 #include <span>
 #include <utility>
+#include <unordered_map>
+#include <array>
 #include <vector>
 
 namespace hog::globe {
@@ -130,6 +132,9 @@ public:
         double catchment = 0.0;
     };
     [[nodiscard]] Gathering gathered(DVec3 direction) const;
+    // Where a lake's water stands over the ground under `direction`, as metres from the centre,
+    // if it's flooded there.
+    [[nodiscard]] std::optional<double> pond_at(DVec3 direction) const;
 
     // The fallen rocks, as generated at `lod`, whose cells lie within about a cell of `point`;
     // those reaching further than that from it are among them too.
@@ -163,6 +168,13 @@ public:
         static constexpr float no_lake = -1e30F;
         std::vector<float> lake{};
         std::vector<float> catchment{};
+        // The lakes' water over the fine ground: for each cell of `cut_level` a lake floods
+        // into, the level it stands at there and which of the cell's 64 by 64 columns hold it.
+        struct Pond {
+            float level = 0.0F;
+            std::array<std::uint64_t, 64> rows{};
+        };
+        std::unordered_map<std::uint64_t, Pond> ponds{};
     };
     [[nodiscard]] const Shape& shape() const noexcept { return shape_; }
 

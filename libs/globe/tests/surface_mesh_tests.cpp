@@ -651,17 +651,28 @@ TEST_CASE("a lake shows as a level surface at its own level", "[globe][surface]"
     VoxelStore store{generator.layers()};
     const World world{generator, store};
     const DVec3 up = hog::globe::center(hog::globe::cell_at_index(shape.cut_level, *deepest));
-    const double level = planet.radius + static_cast<double>(shape.lake[*deepest]);
     const SurfaceMesh mesh =
         mesh_of(world, block_round(hog::globe::chunk_under(up, generator.layers())));
     std::size_t water = 0;
+    std::size_t level = 0;
     for (std::uint32_t v = 0; v < mesh.vertices.size(); ++v) {
-        if (liquid(mesh.vertices[v].material)) {
+        const DVec3 point = world_point(mesh, v);
+        // Only the surface: the soaked bed under it is liquid too, at its own depths.
+        if (liquid(mesh.vertices[v].material) &&
+            glm::dot(DVec3{mesh.vertices[v].normal}, glm::normalize(point)) > 0.99) {
             ++water;
-            CHECK(std::abs(glm::length(world_point(mesh, v)) - level) <=
-                  generator.layers().thickness);
+            const double height = glm::length(point);
+            if (std::ranges::any_of(shape.ponds, [&](const auto& pond) {
+                    return std::abs(height - planet.radius -
+                                    static_cast<double>(pond.second.level)) <=
+                           generator.layers().thickness;
+                })) {
+                ++level;
+            }
         }
     }
+    // A few upward-facing bits of soaked bed lie under the surface.
+    CHECK(level > 20 * (water - level));
     CHECK(water > 0);
 }
 

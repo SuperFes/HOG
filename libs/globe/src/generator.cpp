@@ -104,6 +104,10 @@ constexpr double wear_cell = 180.0;
 // Standing water this deep over the worn ground is a lake rather than a wet hollow.
 constexpr double lake_depth = 0.1;
 
+// Levels finer than the drainage's that the lakes are flooded at: 64 columns across a cell.
+constexpr int pond_depth = 6;
+constexpr std::uint32_t pond_side = 1U << pond_depth;
+
 int wear_level_for(double radius) {
     const double cells = radius * std::numbers::pi / 2.0 / wear_cell;
     return std::clamp(static_cast<int>(std::lround(std::log2(cells))), 3, 10);
@@ -133,6 +137,8 @@ double cut_under(const Generator::Shape& shape, DVec3 direction) {
     }
     return total / weights;
 }
+
+void flood_ponds(const Planet& planet, const terms::Context& context, Generator::Shape& shape);
 
 // The ground's cuts by the running water, found by wearing the generated ground on the drainage.
 void wear_ground(const Planet& planet, const terms::Context& context, Generator::Shape& shape) {
@@ -171,6 +177,124 @@ void wear_ground(const Planet& planet, const terms::Context& context, Generator:
         shape.cut[cell] = ground[cell] - worn[cell];
     }
     shape.cut_level = level;
+    flood_ponds(planet, context, shape);
+}
+
+// Floods each lake over the fine ground: a column is wet if it's below its lake's level and
+// joins the lake's cells through wet columns, so the water takes the ground's own shore.
+void flood_ponds(const Planet& planet, const terms::Context& context, Generator::Shape& shape) {
+    const int fine = shape.cut_level + pond_depth;
+    const double lod = planet.radius * std::numbers::pi / 2.0 / static_cast<double>(1ULL << fine);
+    const auto coarse_of = [&](Cell cell) {
+        return Cell{.level = static_cast<std::uint8_t>(shape.cut_level),
+                    .face = cell.face,
+                    .i = cell.i >> pond_depth,
+                    .j = cell.j >> pond_depth};
+    };
+    std::vector<bool> seen(shape.lake.size(), false);
+    for (std::size_t first = 0; first < shape.lake.size(); ++first) {
+        if (seen[first] || shape.lake[first] <= Generator::Shape::no_lake) {
+            continue;
+        }
+        // The lake's cells, and the ring round them that its water may reach.
+        std::vector<std::uint64_t> lakes{first};
+        seen[first] = true;
+        for (std::size_t at = 0; at < lakes.size(); ++at) {
+            const CellNeighbors beside = around(cell_at_index(shape.cut_level, lakes[at]));
+            for (const Cell cell : beside.all()) {
+                const std::uint64_t index = index_of(cell);
+                if (!seen[index] && shape.lake[index] > Generator::Shape::no_lake) {
+                    seen[index] = true;
+                    lakes.push_back(index);
+                }
+            }
+        }
+        std::unordered_map<std::uint64_t, std::size_t> slot;
+        std::vector<std::uint64_t> region;
+        const auto admit = [&](std::uint64_t index) {
+            if (slot.try_emplace(index, region.size()).second) {
+                region.push_back(index);
+            }
+        };
+        for (const std::uint64_t index : lakes) {
+            admit(index);
+            const CellNeighbors beside = around(cell_at_index(shape.cut_level, index));
+            for (const Cell cell : beside.all()) {
+                admit(index_of(cell));
+            }
+        }
+        const std::size_t columns = static_cast<std::size_t>(pond_side) * pond_side;
+        std::vector<float> ground(region.size() * columns);
+        const unsigned workers =
+            region.size() < 8 ? 1U : std::max(1U, std::thread::hardware_concurrency());
+        {
+            std::vector<std::jthread> threads;
+            for (unsigned worker = 0; worker < workers; ++worker) {
+                threads.emplace_back([&, worker] {
+                    for (std::size_t at = worker; at < region.size(); at += workers) {
+                        const Cell home = cell_at_index(shape.cut_level, region[at]);
+                        for (std::uint32_t a = 0; a < pond_side; ++a) {
+                            for (std::uint32_t b = 0; b < pond_side; ++b) {
+                                const Cell column{.level = static_cast<std::uint8_t>(fine),
+                                                  .face = home.face,
+                                                  .i = (home.i << pond_depth) + a,
+                                                  .j = (home.j << pond_depth) + b};
+                                ground[(at * columns) + (a * pond_side) + b] = static_cast<float>(
+                                    terms::ground(context, center(column), lod).height -
+                                    shape.datum);
+                            }
+                        }
+                    }
+                });
+            }
+        }
+        const auto place = [&](Cell column) -> std::optional<std::size_t> {
+            const auto found = slot.find(index_of(coarse_of(column)));
+            if (found == slot.end()) {
+                return std::nullopt;
+            }
+            return (found->second * columns) + ((column.i & (pond_side - 1)) * pond_side) +
+                   (column.j & (pond_side - 1));
+        };
+        std::vector<bool> wet(ground.size(), false);
+        std::vector<std::pair<Cell, float>> reached;
+        for (const std::uint64_t index : lakes) {
+            const Cell home = cell_at_index(shape.cut_level, index);
+            const float level = shape.lake[index];
+            for (std::uint32_t a = 0; a < pond_side; ++a) {
+                for (std::uint32_t b = 0; b < pond_side; ++b) {
+                    const Cell column{.level = static_cast<std::uint8_t>(fine),
+                                      .face = home.face,
+                                      .i = (home.i << pond_depth) + a,
+                                      .j = (home.j << pond_depth) + b};
+                    const std::size_t at = *place(column);
+                    if (ground[at] < level) {
+                        wet[at] = true;
+                        reached.emplace_back(column, level);
+                    }
+                }
+            }
+        }
+        for (std::size_t next = 0; next < reached.size(); ++next) {
+            const auto [column, level] = reached[next];
+            for (int di = -1; di <= 1; ++di) {
+                for (int dj = -1; dj <= 1; ++dj) {
+                    const auto beside = (di != 0 || dj != 0) ? next_to(column, di, dj) : std::nullopt;
+                    const auto at = beside ? place(*beside) : std::nullopt;
+                    if (at && !wet[*at] && ground[*at] < level) {
+                        wet[*at] = true;
+                        reached.emplace_back(*beside, level);
+                    }
+                }
+            }
+        }
+        for (const auto& [column, level] : reached) {
+            const Cell home = coarse_of(column);
+            auto& pond = shape.ponds[index_of(home)];
+            pond.level = level;
+            pond.rows[column.i & (pond_side - 1)] |= 1ULL << (column.j & (pond_side - 1));
+        }
+    }
 }
 
 std::vector<Surveyed> survey(const auto& measure) {
@@ -249,6 +373,24 @@ Generator::Gathering Generator::gathered(DVec3 direction) const {
         found.lake = planet_.radius + static_cast<double>(level);
     }
     return found;
+}
+
+std::optional<double> Generator::pond_at(DVec3 down) const {
+    if (shape_.ponds.empty()) {
+        return std::nullopt;
+    }
+    const Cell column = cell_under(down, shape_.cut_level + pond_depth);
+    const Cell home{.level = static_cast<std::uint8_t>(shape_.cut_level),
+                    .face = column.face,
+                    .i = column.i >> pond_depth,
+                    .j = column.j >> pond_depth};
+    const auto found = shape_.ponds.find(index_of(home));
+    if (found == shape_.ponds.end() ||
+        ((found->second.rows[column.i & (pond_side - 1)] >> (column.j & (pond_side - 1))) & 1U) ==
+            0U) {
+        return std::nullopt;
+    }
+    return planet_.radius + static_cast<double>(found->second.level);
 }
 
 std::optional<double> Generator::sea_level() const noexcept {
@@ -374,7 +516,7 @@ Generator::Column Generator::finish(DVec3 down, double lod, const terms::Ground&
         column.water_ = planet_.radius;
     }
     if (derived_.liquid) {
-        if (const auto lake = gathered(down).lake) {
+        if (const auto lake = pond_at(down)) {
             column.water_ = std::max(column.water_, *lake);
         }
     }
