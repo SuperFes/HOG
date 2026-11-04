@@ -59,10 +59,10 @@ TEST_CASE("a config sets the day and the tilt", "[planet][config]") {
     CHECK(config->axial_tilt == 0.0);
 }
 
-TEST_CASE("the shipped development config is the 500k planet", "[planet][config]") {
+TEST_CASE("the shipped development config is the 30 km working world", "[planet][config]") {
     const auto config = hog::planet::load_planet_config(HOG_SOURCE_DIR "/config/planet.toml");
     REQUIRE(config.has_value());
-    CHECK_THAT(config->radius, WithinRel(115'000.0, 0.01));
+    CHECK_THAT(config->radius, WithinRel(30'000.0, 0.01));
 }
 
 TEST_CASE("bad configs are rejected with a reason", "[planet][config]") {
@@ -134,4 +134,12 @@ wear = 0.03
 )");
     REQUIRE(config);
     CHECK(config->seed == 7);
+}
+
+TEST_CASE("a planet file with no size of its own takes its [globe] radius", "[planet][config]") {
+    const auto config = parse_planet_config("[planet]\nseed = 1\n\n[globe]\nradius = 12000.0\n");
+    REQUIRE(config);
+    CHECK(config->radius == 12'000.0);
+    CHECK_FALSE(parse_planet_config("[planet]\nseed = 1\n\n[globe]\nradius = -1.0\n"));
+    CHECK_FALSE(parse_planet_config("[planet]\nseed = 1\n"));
 }
