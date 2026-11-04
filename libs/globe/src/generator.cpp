@@ -310,6 +310,15 @@ private:
     std::vector<float> ground_;
 };
 
+// The layer of a cell's pond that holds water at `level`, made if there is none.
+Generator::Shape::Pond::Layer& layer_at(Generator::Shape::Pond& pond, float level) {
+    auto held = std::ranges::find(pond.layers, level, &Generator::Shape::Pond::Layer::level);
+    if (held == pond.layers.end()) {
+        held = pond.layers.insert(pond.layers.end(), {.level = level, .rows = {}, .rim = {}});
+    }
+    return *held;
+}
+
 // Lake cells that touch stand at one lake's level, within this many metres; a lake spilling into
 // a lower one differs by more.
 constexpr float same_lake = 0.5F;
@@ -360,12 +369,26 @@ void flood_ponds(const Planet& planet, const terms::Context& context, Generator:
             if (taken) {
                 continue;
             }
-            auto held =
-                std::ranges::find(pond.layers, level, &Generator::Shape::Pond::Layer::level);
-            if (held == pond.layers.end()) {
-                held = pond.layers.insert(pond.layers.end(), {.level = level, .rows = {}});
+            layer_at(pond, level).rows[row] |= bit;
+        }
+        // The ring round them, for the voxels' narrower columns whose ground the wider ones miss.
+        for (const Cell column : columns) {
+            for (int di = -1; di <= 1; ++di) {
+                for (int dj = -1; dj <= 1; ++dj) {
+                    const auto beside =
+                        (di != 0 || dj != 0) ? next_to(column, di, dj) : std::nullopt;
+                    if (!beside) {
+                        continue;
+                    }
+                    auto& pond =
+                        shape.ponds[index_of({.level = static_cast<std::uint8_t>(shape.cut_level),
+                                              .face = beside->face,
+                                              .i = beside->i >> pond_depth,
+                                              .j = beside->j >> pond_depth})];
+                    layer_at(pond, level).rim[beside->i & (pond_side - 1)] |=
+                        1ULL << (beside->j & (pond_side - 1));
+                }
             }
-            held->rows[row] |= bit;
         }
     }
 }
@@ -504,8 +527,14 @@ std::optional<double> Generator::pond_at(DVec3 direction) const {
     }
     const std::size_t row = column.i & (pond_side - 1);
     const std::uint64_t bit = 1ULL << (column.j & (pond_side - 1));
+    // What a lake floods is its own; a rim only where no lake has flooded.
     for (const Shape::Pond::Layer& layer : found->second.layers) {
         if ((layer.rows[row] & bit) != 0U) {
+            return planet_.radius + static_cast<double>(layer.level);
+        }
+    }
+    for (const Shape::Pond::Layer& layer : found->second.layers) {
+        if ((layer.rim[row] & bit) != 0U) {
             return planet_.radius + static_cast<double>(layer.level);
         }
     }
@@ -635,7 +664,9 @@ Generator::Column Generator::finish(DVec3 down, double lod, const terms::Ground&
         column.water_ = planet_.radius;
     }
     if (derived_.liquid) {
-        if (const auto lake = pond_at(down)) {
+        // The pond's columns are wider than this one, which holds water only where its own ground
+        // lies under the level.
+        if (const auto lake = pond_at(down); lake && column.ground_ < *lake) {
             column.water_ = std::max(column.water_, *lake);
         }
     }

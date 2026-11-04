@@ -442,8 +442,8 @@ public:
     [[nodiscard]] std::span<const std::pair<int, int>> places() const noexcept { return places_; }
 
 private:
-    // Columns of shaped matter the liquid's surface runs on under.
-    static constexpr int shore_reach = 2;
+    // Most columns of shaped matter the liquid's surface runs on under.
+    static constexpr int shore_reach = 8;
 
     [[nodiscard]] std::size_t spot(int a, int b) const {
         return static_cast<std::size_t>(a + margin_) +
@@ -767,7 +767,9 @@ private:
     // Ground beside the liquid at the shore takes its level, so the surface runs on under the
     // ground rather than stopping a voxel short of it in steps: from liquid in the open and the
     // ground it's reached, never from the ground under it, which would spread a film out over
-    // a floor.
+    // a floor. That includes the ground a voxel over the surface, which the surface crosses
+    // into: without it the surface ends where the voxels' steps of ground end, up to a voxel
+    // short of the smooth ground it should run under.
     void soak_shore() {
         std::vector<bool> shore(voxels_.size(), false);
         for (int reach = 0; reach < shore_reach; ++reach) {
@@ -776,13 +778,21 @@ private:
                 for (int layer = bottom_; layer <= top_; layer += column(a, b).apart) {
                     const Point point{a, b, layer};
                     const std::size_t k = index(point);
-                    if (!in_ground(voxels_[k]) || soaked_[k] != Material::Air) {
+                    if (!in_ground(voxels_[k]) || shore[k]) {
                         continue;
                     }
+                    // Ground already soaked as the floor of its own column's liquid still takes
+                    // the shore's level on from the liquid beside it, or the surface would end
+                    // at it, a voxel short of the ground it runs under.
                     if (const std::optional<Point> from = shore_beside(point, shore)) {
-                        soaked_[k] = soaked(*from);
-                        level_[k] = level(*from);
-                        reached[k] = true;
+                        if (soaked_[k] == Material::Air) {
+                            soaked_[k] = soaked(*from);
+                            level_[k] = level(*from);
+                        }
+                        // The ground takes it on until its surface stands over the liquid's: then
+                        // the surface is under the ground and ends. Over the surface, as far as
+                        // the ground under it goes.
+                        reached[k] = level_[k] >= 0.0 || metres(point) >= level_[k];
                     }
                 }
             }
@@ -795,7 +805,7 @@ private:
         for (const int axis : {0, 1}) {
             for (const int by : {-1, 1}) {
                 const std::optional<Point> beside = next(point, axis, by);
-                if (beside && soaked(*beside) != Material::Air && level(*beside) < 0.0 &&
+                if (beside && soaked(*beside) != Material::Air && level(*beside) < height(point) &&
                     (!in_ground(at(*beside)) || shore[index(*beside)])) {
                     return beside;
                 }
@@ -901,7 +911,10 @@ struct Liquid {
         return grid.soaked(point) != Material::Air && grid.level(point) < 0.0;
     }
     static bool dry(const Grid& grid, Point point) {
-        return !wet(grid, point) && !in_ground(grid.at(point));
+        // Ground the shore's soaking has reached counts as dry above the surface, so the surface
+        // runs into it.
+        return !wet(grid, point) &&
+               (!in_ground(grid.at(point)) || grid.soaked(point) != Material::Air);
     }
     static bool crosses(const Grid& grid, Point a, Point b) {
         return (wet(grid, a) && dry(grid, b)) || (dry(grid, a) && wet(grid, b));
