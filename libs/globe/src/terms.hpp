@@ -29,6 +29,7 @@ enum class Term : std::uint8_t {
     CaveB,
     Chambers,
     Rockfall,
+    Meander,
 };
 
 struct Context {
@@ -145,6 +146,15 @@ inline constexpr double cave_reach = 50.0;
 
 // Where caves gather, from 0 where none open to 1.
 [[nodiscard]] double cave_district(const Context& context, DVec3 direction) noexcept;
+
+// Metres from a point to the nearest passage water dissolved in soluble rock, negative inside it,
+// `cave_reach` at most. Water sinking into the rock runs on under the cells the drainage runs
+// through, down to the table it leaves by, and opens a passage as wide as the flow it carried; the
+// passage lies at the table's height as it stood part way through the water's cutting down. The
+// ground's own height doesn't enter, so the passage is open to the air only where the ground has
+// been worn down to it. Bounded, never more than the true distance.
+[[nodiscard]] double karst_distance(const Context& context, DVec3 direction, double radius,
+                                    double lod, bool bound) noexcept;
 
 // Metres from a point to the nearest cave's open space: negative inside it, `cave_reach` at most.
 // Each cave keeps to the rock it was dissolved or flowed in, a bed or the basement, as the shape

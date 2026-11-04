@@ -171,7 +171,7 @@ TEST_CASE("the same planet is generated the same, bit for bit", "[globe][generat
         }
     }
     // If this moves, unchanged ground no longer matches what was there before, or elsewhere.
-    CHECK(digest == 0x6b80'fd76'610e'8a6aULL);
+    CHECK(digest == 0x5442'ffcf'3e41'726fULL);
 }
 
 TEST_CASE("generator throughput", "[.bench]") {
@@ -259,11 +259,19 @@ TEST_CASE("a cave wall's normal is the way its distance grows", "[globe][generat
             }
             const DVec3 point = down * (column.ground() - depth);
             DVec3 rise{0.0};
+            DVec3 coarse{0.0};
             for (glm::length_t axis = 0; axis < 3; ++axis) {
                 DVec3 along{0.0};
                 along[axis] = step;
                 rise[axis] =
                     (distance_at(point + along) - distance_at(point - along)) / (2.0 * step);
+                coarse[axis] =
+                    (distance_at(point + (5.0 * along)) - distance_at(point - (5.0 * along))) /
+                    (10.0 * step);
+            }
+            // A crease, where two walls meet, has no one normal: the differences disagree.
+            if (glm::dot(glm::normalize(rise), glm::normalize(coarse)) < std::cos(0.05)) {
+                continue;
             }
             ++on_walls;
             agreeing +=

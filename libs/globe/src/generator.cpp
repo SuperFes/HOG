@@ -426,6 +426,8 @@ void wear_ground(const Planet& planet, const terms::Context& context, Generator:
         }
         shape.catchment[cell] = static_cast<float>(drained.catchment[cell]);
     }
+    shape.receiver = drained.receiver;
+    shape.table = drained.filled;
     shape.cut.resize(count);
     for (std::size_t cell = 0; cell < count; ++cell) {
         shape.cut[cell] = ground[cell] - worn[cell];
@@ -687,7 +689,9 @@ std::vector<std::pair<double, double>> Generator::Column::caves(double lowest, d
                                  .shape = &generator_->shape_};
     const double deepest = std::max(lowest, ground_ - terms::cave_floor(context));
     const double top_most = std::min(highest, ground_);
-    if (deepest >= top_most || terms::cave_district(context, direction_) <= 0.0) {
+    // Passages dissolved by the drainage lie outside the districts the chance caves gather in.
+    const bool drained = !generator_->shape_.receiver.empty();
+    if (deepest >= top_most || (!drained && terms::cave_district(context, direction_) <= 0.0)) {
         return found;
     }
     const Planet& planet = generator_->planet_;
@@ -695,14 +699,15 @@ std::vector<std::pair<double, double>> Generator::Column::caves(double lowest, d
         const double slope = slope_ * planet.radius / at;
         return std::max(0.0, (ground_ - at) / std::sqrt(1.0 + (slope * slope)));
     };
-    // Down by as far as no cave can lie within `within`, a metre at least.
+    // Down by as far as no cave can lie within `within`, nor the blend that opens the ground to it
+    // a little beyond it, a metre at least.
     constexpr double least = 1.0;
     std::optional<double> top;
     double above = top_most;
     for (double radius = top_most; radius > deepest;) {
         const double away = terms::cave_bound(context, strata_, direction_, radius, ground_,
                                               cover_at(radius), lod_) -
-                            within;
+                            within - cave_blend;
         if (away < 0.0) {
             if (!top) {
                 // Back within reach at the next sample: the same stretch.

@@ -613,7 +613,8 @@ TEST_CASE("a film of water shallower than half a voxel still shows on the ground
     const std::vector<std::uint32_t> water = vertices_near(mesh, centre, 2.0, Material::Water);
     CHECK(water.size() > 5);
     for (const std::uint32_t v : water) {
-        CHECK(std::abs(glm::length(world_point(mesh, v)) - level) < 0.06);
+        // Within the contouring's precision, a sixth of a voxel.
+        CHECK(std::abs(glm::length(world_point(mesh, v)) - level) < thickness / 6.0);
     }
 }
 

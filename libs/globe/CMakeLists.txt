@@ -37,6 +37,7 @@ hog_add_tests(hog_globe
     tests/brick_archive_tests.cpp
     tests/brick_tests.cpp
     tests/caves_tests.cpp
+    tests/cave_bed_tests.cpp
     tests/cell_tests.cpp
     tests/craters_tests.cpp
     tests/detail_tests.cpp
