@@ -747,7 +747,8 @@ TEST_CASE("a player's digging is sent back as bricks to everyone", "[app][server
                     .centre = hog::protocol::to_millimetres(hog::WorldPosition{direction * ground}),
                     .radius = 3'000})));
         }
-        if ((!diggers[0].bricks.empty() && !diggers[1].bricks.empty()) ||
+        const std::size_t held = server->voxels().size();
+        if ((held > 0 && diggers[0].bricks.size() >= held && diggers[1].bricks.size() >= held) ||
             MonotonicClock::now() >= give_up) {
             stop = true;
         }

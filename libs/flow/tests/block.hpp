@@ -37,7 +37,11 @@ constexpr std::int64_t full = Voxel::full;
 constexpr double tick = 0.05;
 
 inline const Generator& earth() {
-    static const Generator generator{hog::globe::Planet{}};
+    static const Generator generator{[] {
+        hog::globe::Planet planet;
+        planet.voxel = 0.5; // the flow's rates were tuned on voxels this fine
+        return planet;
+    }()};
     return generator;
 }
 
@@ -131,7 +135,8 @@ public:
     void pour(std::uint32_t i, std::uint32_t j, int layer, std::int64_t amount) {
         region_->pour(at(i, j, layer), static_cast<std::uint16_t>(amount));
     }
-    void pour_lava(std::uint32_t i, std::uint32_t j, int layer, std::int64_t amount, double kelvin) {
+    void pour_lava(std::uint32_t i, std::uint32_t j, int layer, std::int64_t amount,
+                   double kelvin) {
         region_->pour_lava(at(i, j, layer), Material::Basalt, static_cast<std::uint16_t>(amount),
                            kelvin);
     }

@@ -100,7 +100,8 @@ TEST_CASE("rain falls round the eye only under the cloud", "[client][scene]") {
 }
 
 TEST_CASE("cloud shades the eye from above, less from within it", "[client][scene]") {
-    const hog::protocol::CellWeather overcast{.cloud = 2.0F, .base = 1'500.0F, .top = 3'000.0F};
+    const hog::protocol::CellWeather overcast{
+        .cloud = 2.0F, .cover = 1.0F, .base = 1'500.0F, .top = 3'000.0F};
     hog::terrain::Bend bend{.eye_height = 1'400.0};
     CHECK(hog::client::shade_at_eye(bend, overcast).direct < 0.01);
     CHECK(hog::client::shade_at_eye(bend, {}).direct == 1.0);
@@ -256,7 +257,8 @@ TEST_CASE("worlds at coarser and finer cell sizes, to look at", "[.look]") {
     const hog::DVec3 at = glm::normalize(noon + hog::DVec3{0.0, 0.0, 0.3});
     for (const char* name : {"earth", "mars", "moon"}) {
         for (const double voxel : {1.0, 0.5, 0.25, 0.1, 0.05}) {
-            hog::globe::Planet planet = hog::client::globe_planet(name, config.seed, radius).value();
+            hog::globe::Planet planet =
+                hog::client::globe_planet(name, config.seed, radius).value();
             planet.voxel = voxel;
             const hog::client::GlobeWorld globe{planet};
             auto scene = Scene::create(*device, globe.generator.planet(), jobs, calendar(),
@@ -270,8 +272,9 @@ TEST_CASE("worlds at coarser and finer cell sizes, to look at", "[.look]") {
                 hog::client::Flight flight =
                     hog::client::start_flight(noon, radius, ground + height, at);
                 flight.pitch = pitch;
-                const auto still = hog::client::draw_still(
-                    *device, *scene, shot_of(flight, globe.generator), {.width = 1600, .height = 900});
+                const auto still =
+                    hog::client::draw_still(*device, *scene, shot_of(flight, globe.generator),
+                                            {.width = 1600, .height = 900});
                 REQUIRE(still);
                 REQUIRE(hog::client::save_picture(
                     std::filesystem::path{where} /
