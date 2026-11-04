@@ -53,9 +53,6 @@ struct Options {
     // Cussing in chat shown as grawlix; each player chooses for their own screen. Hate speech
     // reads as small talk whatever this says.
     bool chat_filter = true;
-    // The voxel world drawn, of a preset or a planet file; Earth-like at the planet's seed and
-    // size without one, as the server has it.
-    std::optional<std::string> globe_planet;
     // The voxel world's cell size in metres, in place of the planet's own; for looking at a world
     // finer or coarser, flying alone.
     std::optional<double> voxel;

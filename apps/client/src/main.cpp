@@ -1047,7 +1047,7 @@ int show(const client::Options& options, const planet::PlanetConfig& planet, ren
         return EXIT_FAILURE;
     }
     // Before the scene, which draws it.
-    auto described = client::globe_planet(options.globe_planet, planet.seed, planet.radius);
+    auto described = client::globe_planet_in(options.planet, planet.seed, planet.radius);
     if (!described) {
         std::cerr << std::format("hog-client: {}\n", described.error());
         return EXIT_FAILURE;

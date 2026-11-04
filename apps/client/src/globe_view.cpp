@@ -1,6 +1,7 @@
 #include <hog/client/globe_view.hpp>
 #include <hog/core/assert.hpp>
 #include <hog/core/log.hpp>
+#include <hog/core/text_file.hpp>
 
 #include <algorithm>
 #include <array>
@@ -39,6 +40,19 @@ Result<globe::Planet> globe_planet(std::optional<std::string_view> named, std::u
         return std::unexpected(std::move(valid).error());
     }
     return planet;
+}
+
+Result<globe::Planet> globe_planet_in(const std::filesystem::path& file, std::uint64_t seed,
+                                      double radius) {
+    const auto text = read_text_file(file);
+    if (!text || !text->contains("[globe]")) {
+        return globe_planet(std::nullopt, seed, radius);
+    }
+    auto described = globe::parse_planet(*text);
+    if (described) {
+        described->seed = seed;
+    }
+    return described;
 }
 
 double globe_ground(const globe::Generator& generator, DVec3 at) {
