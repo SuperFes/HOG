@@ -1,3 +1,5 @@
+#include "fine_planet.hpp"
+
 #include <hog/globe/brick.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/generator.hpp>
@@ -30,7 +32,7 @@ using hog::globe::World;
 namespace {
 
 const Generator& earth() {
-    static const Generator generator{hog::globe::Planet{}};
+    static const Generator generator{fine(hog::globe::Planet{})};
     return generator;
 }
 

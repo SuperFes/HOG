@@ -39,7 +39,7 @@ struct Planet {
     double lateral_scale = 1.0;
 
     // The voxel shell: impassable below the floor, open sky above the ceiling.
-    double voxel = 0.5;           // metres
+    double voxel = 2.5;           // metres
     double floor_depth = 4'000.0; // metres of rock kept under the lowest ground
     double sky_height = 10'000.0; // metres above the reference level
 
