@@ -307,6 +307,7 @@ flying:
   right mouse button     hold to look around
   mouse wheel            speed up or slow down
   F                      walk
+  G                      fly through the ground, or back above it
 
 walking:
   W A S D                forwards, left, back, right

@@ -62,7 +62,7 @@ Flight fly(const Flight& flight, const FlyInput& input, double planet_radius, do
                  (forward_of(next) * input.move.z)) *
                 (speed * input.seconds);
 
-    if (glm::length(next.eye.metres()) < floor) {
+    if (!settings.through && glm::length(next.eye.metres()) < floor) {
         next.eye = WorldPosition{glm::normalize(next.eye.metres()) * floor};
     }
     return carried(next);
