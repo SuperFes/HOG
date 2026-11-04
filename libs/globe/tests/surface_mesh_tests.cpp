@@ -632,6 +632,39 @@ TEST_CASE("the sea shows as a level surface over the seabed", "[globe][surface]"
     CHECK(open_in(world, mesh, chunk) == 0);
 }
 
+TEST_CASE("a lake shows as a level surface at its own level", "[globe][surface]") {
+    auto planet = *hog::globe::preset("earth");
+    planet.radius = 4'000.0;
+    planet.floor_depth = 100.0;
+    planet.sky_height = 500.0;
+    planet.wear = 0.03;
+    const Generator generator{planet};
+    const auto& shape = generator.shape();
+    std::optional<std::size_t> deepest;
+    for (std::size_t cell = 0; cell < shape.lake.size(); ++cell) {
+        if (shape.lake[cell] > Generator::Shape::no_lake) {
+            deepest = cell;
+            break;
+        }
+    }
+    REQUIRE(deepest);
+    VoxelStore store{generator.layers()};
+    const World world{generator, store};
+    const DVec3 up = hog::globe::center(hog::globe::cell_at_index(shape.cut_level, *deepest));
+    const double level = planet.radius + static_cast<double>(shape.lake[*deepest]);
+    const SurfaceMesh mesh =
+        mesh_of(world, block_round(hog::globe::chunk_under(up, generator.layers())));
+    std::size_t water = 0;
+    for (std::uint32_t v = 0; v < mesh.vertices.size(); ++v) {
+        if (liquid(mesh.vertices[v].material)) {
+            ++water;
+            CHECK(std::abs(glm::length(world_point(mesh, v)) - level) <=
+                  generator.layers().thickness);
+        }
+    }
+    CHECK(water > 0);
+}
+
 TEST_CASE("water standing in a hollow shows level at its surface, however full its top voxel",
           "[globe][surface]") {
     VoxelStore store{earth().layers()};

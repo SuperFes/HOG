@@ -186,6 +186,19 @@ std::vector<std::pair<int, int>> bands_of(const World& world, Cell chunk,
     if (const auto sea = generator.sea_level(); sea && *sea > lowest) {
         bands.emplace_back(layers.layer_at(*sea - band), layers.layer_at(*sea + band) + 1);
     }
+    // Lakes stand at their own levels, apart from the sea's.
+    double lake_low = std::numeric_limits<double>::max();
+    double lake_high = std::numeric_limits<double>::lowest();
+    for (const Generator::Column& column : columns) {
+        const double water = column.water();
+        if (water > column.ground() && (!generator.sea_level() || water != *generator.sea_level())) {
+            lake_low = std::min(lake_low, water);
+            lake_high = std::max(lake_high, water);
+        }
+    }
+    if (lake_low <= lake_high) {
+        bands.emplace_back(layers.layer_at(lake_low - band), layers.layer_at(lake_high + band) + 1);
+    }
     // Every cave under the chunk, cast for down the middle column of each square of four by
     // four: a stretch of the cast where a cave may lie within the square, and the walls' band
     // about it.
@@ -283,7 +296,7 @@ class Grid {
 public:
     Grid(const World& world, Cell chunk, const Drawn& drawn, DVec3 origin)
         : world_{&world}, layers_{&world.generator().layers()}, chunk_{chunk},
-          sea_{world.generator().sea_level()}, apart_{apart_at(detail_of(chunk, *layers_))},
+          apart_{apart_at(detail_of(chunk, *layers_))},
           origin_{origin}, step_{finer_beside(drawn, chunk, apart_) ? apart_ / 2 : apart_},
           size_{chunk_side * apart_ / step_},
           // The widest box of a chunk a detail coarser, across a cube's edge, and one more.
@@ -678,14 +691,16 @@ private:
     // the sea's level is the sea, and stands at its level exactly.
     void soak_runs() {
         std::vector<std::pair<std::size_t, int>> run;
-        for (const auto& [a, b] : places_) {
+        for (std::size_t place = 0; place < places_.size(); ++place) {
+            const auto [a, b] = places_[place];
             const Column& here = column(a, b);
             const double height = layers_->thickness * here.apart;
+            const std::optional<double> standing = standing_at(place);
             std::optional<double> surface;
             Material liquid = Material::Air;
             const auto flood = [&] {
-                if (surface && sea_ && std::abs(*surface - *sea_) <= height) {
-                    surface = sea_;
+                if (surface && standing && std::abs(*surface - *standing) <= height) {
+                    surface = standing;
                 }
                 for (const auto& [k, layer] : run) {
                     if (surface) {
@@ -713,20 +728,27 @@ private:
         }
     }
 
+    // Where open water stands over a place, the sea's or a lake's.
+    [[nodiscard]] std::optional<double> standing_at(std::size_t place) const {
+        const double water = generated_[place].water();
+        if (water > 0.0) {
+            return water;
+        }
+        return std::nullopt;
+    }
+
     // The seabed stands under the sea's level, so the sea's surface is drawn over a shelf
     // shallower than a voxel.
     void soak_seabed() {
-        if (!sea_) {
-            return;
-        }
         for (std::size_t k = 0; k < places_.size(); ++k) {
-            if (generated_[k].ground() >= *sea_) {
+            const std::optional<double> standing = standing_at(k);
+            if (!standing || generated_[k].ground() >= *standing) {
                 continue;
             }
             const auto [a, b] = places_[k];
             for (int layer = bottom_; layer <= top_; layer += column(a, b).apart) {
                 const Point point{a, b, layer};
-                const double over = layers_->middle(layer) - *sea_;
+                const double over = layers_->middle(layer) - *standing;
                 if (in_ground(at(point)) && over < 0.0) {
                     soaked_[index(point)] = Material::Water;
                     level_[index(point)] = over;
@@ -778,7 +800,6 @@ private:
     const World* world_;
     const Layers* layers_;
     Cell chunk_;
-    std::optional<double> sea_;
     int apart_;
     DVec3 origin_;
     int step_;
