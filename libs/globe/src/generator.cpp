@@ -115,12 +115,10 @@ int wear_level_for(double radius) {
     return std::clamp(static_cast<int>(std::lround(std::log2(cells))), 3, 10);
 }
 
-// Metres the water has cut from the ground under `direction`: the cuts of the cell it lies in and
-// those around it, weighted by nearness, so the cut changes smoothly from cell to cell.
-double cut_under(const Generator::Shape& shape, DVec3 direction) {
-    if (shape.cut.empty()) {
-        return 0.0;
-    }
+// What a map of the drainage's cells holds under `direction`: that of the cell it lies in and
+// those around it, weighted by nearness, so it changes smoothly from cell to cell.
+double smoothed_under(const Generator::Shape& shape, const std::vector<float>& map,
+                      DVec3 direction) {
     const double spacing = std::numbers::pi / 2.0 / static_cast<double>(1 << shape.cut_level);
     const Cell home = cell_under(direction, shape.cut_level);
     double total = 0.0;
@@ -128,7 +126,7 @@ double cut_under(const Generator::Shape& shape, DVec3 direction) {
     const auto add = [&](Cell cell) {
         const double near = 1.0 - (glm::length(center(cell) - direction) / (1.5 * spacing));
         if (near > 0.0) {
-            total += near * static_cast<double>(shape.cut[index_of(cell)]);
+            total += near * static_cast<double>(map[index_of(cell)]);
             weights += near;
         }
     };
@@ -138,6 +136,11 @@ double cut_under(const Generator::Shape& shape, DVec3 direction) {
         add(cell);
     }
     return total / weights;
+}
+
+// Metres the water has cut from the ground under `direction`.
+double cut_under(const Generator::Shape& shape, DVec3 direction) {
+    return shape.cut.empty() ? 0.0 : smoothed_under(shape, shape.cut, direction);
 }
 
 // A column of a basin's region, waiting to be reached at the height of the rim it's reached over.
@@ -686,6 +689,9 @@ Generator::Column Generator::finish(DVec3 down, double lod, const terms::Ground&
             column.water_ = std::max(column.water_, *lake);
         }
     }
+    if (!shape_.table.empty()) {
+        column.table_ = planet_.radius + smoothed_under(shape_, shape_.table, down);
+    }
     column.slope_ = slope;
     column.tilt_ = tilt;
     column.surface_temperature_ = made.surface_temperature;
@@ -824,12 +830,15 @@ Sample Generator::Column::sample(double radius) const noexcept {
     }
     // The sea fills the open space under its level, and the ground's pores below it. The voxel the
     // surface crosses holds only as much as lies under it, so water shallower than a voxel shows.
+    // Open space under the ground is flooded as far up as the water table.
+    const double water =
+        sample.distance > 0.0 && radius < ground_ ? std::max(water_, table_) : water_;
     const double thickness = lod_ / 2.0;
-    const double filled = std::clamp(((water_ - radius) / thickness) + 0.5, 0.0, 1.0);
-    if (water_ > 0.0 && filled > 0.0) {
+    const double filled = std::clamp(((water - radius) / thickness) + 0.5, 0.0, 1.0);
+    if (water > 0.0 && filled > 0.0) {
         sample.liquid = planet.volatiles == Volatile::Water ? Material::Water : Material::Air;
         if (sample.distance < 0.0) {
-            if (radius < water_) {
+            if (radius < water) {
                 sample.water = properties(sample.material).porosity;
             }
         } else if (sample.liquid != Material::Air) {
