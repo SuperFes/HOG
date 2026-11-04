@@ -1,6 +1,5 @@
-#include "fine_planet.hpp"
-
 #include "../src/terms.hpp"
+#include "fine_planet.hpp"
 
 #include <hog/core/hash.hpp>
 #include <hog/globe/cell.hpp>
@@ -141,7 +140,8 @@ TEST_CASE("caves open in limestone far more than in other rock", "[globe][caves]
     const double granite = open_share(earth, Material::Granite, 50.0);
     UNSCOPED_INFO("open: limestone " << limestone << ", shale " << shale << ", granite "
                                      << granite);
-    CHECK(limestone > 0.01);
+    // On a shape with no drainage, only the chambers open; passages follow the drainage.
+    CHECK(limestone > 0.001);
     CHECK(limestone > 3.0 * shale);
     CHECK(shale > granite);
     CHECK(open_share(earth, Material::Soil, 50.0) == 0.0);

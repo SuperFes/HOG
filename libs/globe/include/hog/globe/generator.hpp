@@ -168,6 +168,10 @@ public:
         static constexpr float no_lake = -1e30F;
         std::vector<float> lake{};      // NOLINT(readability-redundant-member-init)
         std::vector<float> catchment{}; // NOLINT(readability-redundant-member-init)
+        // And the drainage's network: the cell the water leaves each by (itself at the sea), and
+        // the height the water table stands at under it, the worn ground with its hollows filled.
+        std::vector<std::uint32_t> receiver{}; // NOLINT(readability-redundant-member-init)
+        std::vector<float> table{};            // NOLINT(readability-redundant-member-init)
         // The lakes' water over the fine ground: for each cell of `cut_level` a lake floods
         // into, a layer for each level its water stands at there, and which of the cell's 64 by 64
         // columns hold it. The columns are wider than the voxels', so `rim` also marks the ring of

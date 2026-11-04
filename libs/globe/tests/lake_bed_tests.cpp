@@ -26,6 +26,9 @@ namespace {
 // Voxel sizes a world may be run at, in metres: what a rule has to hold at.
 constexpr std::array sizes{0.5, 1.0, 2.5, 5.0};
 
+// How near a voxel's size the contoured surface lies to the field it was taken from.
+constexpr double precision = 1.0 / 6.0;
+
 // The planet at a voxel size, kept so each is made once.
 const Generator& working(double voxel) {
     static std::map<double, std::unique_ptr<Generator>> made;
@@ -133,7 +136,8 @@ TEST_CASE("a lake filling its bowl meshes level, with a closed shore", "[globe][
     CHECK(surface > 20);
     CHECK(off_level * 20 < surface);
     // The sheet of water ends under the ground at the shore, not short of it: every edge it ends
-    // in lies under the ground the mesh draws, or on it.
+    // in lies under the ground the mesh draws, or on it, to within the contouring's own precision,
+    // a sixth of a voxel; a sheet stopping short is off by about a voxel.
     std::size_t open = 0;
     double worst = 0.0;
     for (const auto& [p, q] : open_ends(mesh)) {
@@ -144,7 +148,7 @@ TEST_CASE("a lake filling its bowl meshes level, with a closed shore", "[globe][
         }
         const double over = clearance(mesh, mid);
         worst = std::max(worst, over);
-        open += over > 0.02 * thickness ? 1U : 0U;
+        open += over > precision * thickness ? 1U : 0U;
     }
     CAPTURE(worst);
     // The measure itself: over the old ground is open air, and far under it is rock.
