@@ -3,6 +3,7 @@
 #include <hog/globe/drainage.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <limits>
 #include <queue>
@@ -85,7 +86,32 @@ Drainage drain(std::span<const float> ground, int level, double radius, double s
             drained.catchment[drained.receiver[cell]] += drained.catchment[cell];
         }
     }
+    drained.order = std::move(order);
     return drained;
+}
+
+std::vector<float> erode(std::span<const float> ground, int level, double radius, double sea,
+                         const Erosion& erosion) {
+    std::vector<float> now{ground.begin(), ground.end()};
+    for (int step = 0; step < erosion.steps; ++step) {
+        const Drainage drained = drain(now, level, radius, sea);
+        // Downstream first, so each cell is cut toward a receiver that has already been.
+        for (const std::uint32_t cell : drained.order) {
+            const std::uint32_t receiver = drained.receiver[cell];
+            if (receiver == cell || drained.depth(cell) > 0.0) {
+                continue;
+            }
+            const double apart = radius * glm::length(center(cell_at_index(level, cell)) -
+                                                      center(cell_at_index(level, receiver)));
+            // A receiver holding water is cut toward by its surface, not its bed.
+            const double target = drained.depth(receiver) > 0.0 ? static_cast<double>(drained.filled[receiver])
+                                                                : static_cast<double>(now[receiver]);
+            const double power = erosion.rate * std::pow(drained.catchment[cell], erosion.area_power) / apart;
+            const double lowered = (static_cast<double>(now[cell]) + (power * target)) / (1.0 + power);
+            now[cell] = static_cast<float>(std::min(static_cast<double>(now[cell]), lowered));
+        }
+    }
+    return now;
 }
 
 } // namespace hog::globe

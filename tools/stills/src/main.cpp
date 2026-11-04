@@ -24,6 +24,7 @@ constexpr std::string_view usage =
     "usage: hog-stills [--preset earth|mars|venus|moon | --planet FILE] [--seed N] [--out DIR]\n"
     "                  [--width N] [--threads N] [--at LAT,LON[,HEADING]] [--span M]\n"
     "                  [--bottom M] [--top M] [--depth M] [--dig M] [--drainage LEVEL]\n"
+    "                  [--erode STEPS] [--rate K]\n"
     "Writes map.png, and with --at, relief.png and section.png there; the section runs from\n"
     "--bottom to --top metres off the ground under its middle. --depth adds plan.png, a slice\n"
     "that far under the ground everywhere, open space dark. --dig digs a ball that wide in the\n"
@@ -40,6 +41,8 @@ struct Options {
     double top = 500.0;
     std::optional<double> depth; // of a plan slice under the ground
     std::optional<double> dig;   // a ball's radius, dug at the ground under --at
+    int erode = 0;               // steps of running water wearing the ground first
+    double rate = 1.0e-4;        // how hard each step cuts
     std::optional<int> drainage; // the cell level to work out where rain runs on, for drainage.png
 };
 
@@ -114,6 +117,10 @@ bool apply(Options& options, std::string_view name, std::string_view value) {
         options.depth = given;
     } else if (name == "--dig") {
         options.dig = given;
+    } else if (name == "--erode") {
+        options.erode = static_cast<int>(*given);
+    } else if (name == "--rate") {
+        options.rate = *given;
     } else if (name == "--drainage") {
         options.drainage = static_cast<int>(*given);
     } else {
@@ -153,7 +160,8 @@ int run(std::span<const std::string_view> arguments) {
     if (options.drainage) {
         if (const int failed = write(options.out / "drainage.png",
                                      hog::stills::drainage(generator, options.width,
-                                                           *options.drainage, options.threads))) {
+                                                           *options.drainage, options.threads,
+                                                           {.rate = options.rate, .steps = options.erode}))) {
             return failed;
         }
     }
