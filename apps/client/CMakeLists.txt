@@ -21,6 +21,7 @@ add_library(hog_client
     src/storage_estimate.cpp
     src/player.cpp
     src/scene.cpp
+    src/sonar.cpp
     src/session.cpp
     src/tides.cpp)
 add_library(hog::client ALIAS hog_client)
@@ -47,6 +48,7 @@ hog_add_tests(hog_client
     tests/picture_tests.cpp
     tests/player_tests.cpp
     tests/scene_tests.cpp
+    tests/sonar_tests.cpp
     tests/session_tests.cpp
     tests/storage_estimate_tests.cpp
     tests/tides_tests.cpp)

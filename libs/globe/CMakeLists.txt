@@ -16,6 +16,7 @@ add_library(hog_globe
     src/noise.cpp
     src/planet.cpp
     src/planet_file.cpp
+    src/pockets.cpp
     src/qef.cpp
     src/relief.cpp
     src/rockfall.cpp
@@ -52,6 +53,7 @@ hog_add_tests(hog_globe
     tests/maths_tests.cpp
     tests/noise_tests.cpp
     tests/planet_tests.cpp
+    tests/pockets_tests.cpp
     tests/qef_tests.cpp
     tests/rockfall_tests.cpp
     tests/strata_tests.cpp

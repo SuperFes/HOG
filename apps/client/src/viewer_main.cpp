@@ -12,6 +12,7 @@
 #include <hog/client/player.hpp>
 #include <hog/client/scene.hpp>
 #include <hog/client/session.hpp>
+#include <hog/client/sonar.hpp>
 #include <hog/client/storage_estimate.hpp>
 #include <hog/core/image.hpp>
 #include <hog/core/log.hpp>
@@ -98,6 +99,7 @@ struct Controls {
     double speed = client::FlySettings{}.speed;
     double behind = ::behind; // metres, while walking
     bool walking = false;
+    bool ping = false;        // asked to look for air pockets under the ground about the eye
     bool through = false;     // flying through the ground
     double cutaway = 8.0;     // metres of ground round the eye left undrawn there
     bool timings = false;     // shown over the picture
@@ -128,6 +130,8 @@ void press(const SDL_KeyboardEvent& key, Controls& controls) {
     } else if (key.key == SDLK_F && !key.repeat) {
         // Nowhere to stand but the surface, so a ghost leaves that to G.
         controls.walking = !controls.walking && !controls.through;
+    } else if (key.key == SDLK_P && !key.repeat) {
+        controls.ping = true;
     } else if (key.key == SDLK_G && !key.repeat) {
         controls.through = !controls.through;
         controls.walking = controls.walking && !controls.through;
@@ -401,6 +405,27 @@ void show_tags(std::span<const client::Tag> tags) {
     }
 }
 
+// The pockets a ping found, marked over the picture in cyan.
+void show_blips(std::span<const client::Blip> blips) {
+    constexpr ImU32 shadow = IM_COL32(0, 0, 0, 180);
+    constexpr ImU32 cyan = IM_COL32(90, 230, 255, 255);
+    ImDrawList& drawn = *ImGui::GetBackgroundDrawList();
+    for (const client::Blip& blip : blips) {
+        const char* begin = blip.text.c_str();
+        const char* end = begin + blip.text.size();
+        const ImVec2 text = ImGui::CalcTextSize(begin, end);
+        const ImVec2 corner{static_cast<float>(blip.at.x) - (text.x / 2.0F),
+                            static_cast<float>(blip.at.y) - (text.y / 2.0F)};
+        if (blip.on_screen) {
+            drawn.AddCircle({static_cast<float>(blip.at.x), static_cast<float>(blip.at.y)}, 10.0F,
+                            cyan, 0, 2.0F);
+        }
+        drawn.AddText({corner.x + 1.0F, corner.y + 1.0F + (blip.on_screen ? 16.0F : 0.0F)}, shadow,
+                      begin, end);
+        drawn.AddText({corner.x, corner.y + (blip.on_screen ? 16.0F : 0.0F)}, cyan, begin, end);
+    }
+}
+
 // What's drawn over the picture.
 struct Overlay {
     const client::FrameTimes* times = nullptr;
@@ -411,6 +436,8 @@ struct Overlay {
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     std::span<const replication::Shown> others = {};
     WorldPosition eye;
+    // What the last ping found, if one's been made.
+    std::span<const globe::Pocket> pockets = {};
     MonotonicClock::time_point now;
     std::string weather; // over the eye, once known
     // None when not connecting to a server.
@@ -443,6 +470,7 @@ Result<bool> draw(client::Scene& scene, const client::Shot& shot, const render::
         ImGui::NewFrame();
         const ImVec2 size = ImGui::GetIO().DisplaySize;
         show_tags(client::tags(overlay.others, shot.camera, shot.bend, {size.x, size.y}));
+        show_blips(client::blips(overlay.pockets, shot.camera, shot.bend, {size.x, size.y}, 40.0));
         if (overlay.chat != nullptr) {
             show_chat(*overlay.chat, *overlay.chatting, overlay.chat_opened, overlay.now);
         }
@@ -948,6 +976,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, client::Globe
     client::Forecast forecast{radius};
     ChatBox chat;
     Cutaway cut;
+    std::vector<globe::Pocket> pockets; // the last ping's
     bool routed_to_chat = false;
     render::Camera camera = client::flight_camera(flight, client::vertical_fov);
     while (!controls.quit) {
@@ -1014,6 +1043,15 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, client::Globe
         }
         const double cutaway = controls.through && !player ? controls.cutaway : 0.0;
         update_cutaway(cut, cutaway, camera, globe, scene);
+        if (std::exchange(controls.ping, false)) {
+            const auto pinged = MonotonicClock::now();
+            pockets = globe::find_pockets(globe.generator, camera.eye.metres(), client::ping_range,
+                                          client::ping_spacing);
+            std::cout << std::format(
+                "hog-viewer: ping: {} air pockets within {:.0f} m, found in {:.2f} s\n",
+                pockets.size(), client::ping_range,
+                std::chrono::duration<double>(MonotonicClock::now() - pinged).count());
+        }
         const client::Shot shot{.camera = camera,
                                 .bend = bend,
                                 .time = clock.time(),
@@ -1029,6 +1067,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, client::Globe
                               .session = session,
                               .others = others,
                               .eye = camera.eye,
+                              .pockets = pockets,
                               .now = now,
                               .weather = controls.timings && forecast.known()
                                              ? client::describe(client::weather_at_eye(shot))
