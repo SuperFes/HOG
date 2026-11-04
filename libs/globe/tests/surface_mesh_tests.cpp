@@ -637,7 +637,7 @@ TEST_CASE("the sea shows as a level surface over the seabed", "[globe][surface]"
 }
 
 TEST_CASE("a lake shows as a level surface at its own level", "[globe][surface]") {
-    auto planet = *hog::globe::preset("earth");
+    auto planet = hog::globe::preset("earth").value_or(hog::globe::Planet{});
     planet.radius = 4'000.0;
     planet.floor_depth = 100.0;
     planet.sky_height = 500.0;
@@ -654,7 +654,8 @@ TEST_CASE("a lake shows as a level surface at its own level", "[globe][surface]"
     REQUIRE(deepest);
     VoxelStore store{generator.layers()};
     const World world{generator, store};
-    const DVec3 up = hog::globe::center(hog::globe::cell_at_index(shape.cut_level, *deepest));
+    const DVec3 up =
+        hog::globe::center(hog::globe::cell_at_index(shape.cut_level, deepest.value_or(0)));
     const SurfaceMesh mesh =
         mesh_of(world, block_round(hog::globe::chunk_under(up, generator.layers())));
     std::size_t water = 0;

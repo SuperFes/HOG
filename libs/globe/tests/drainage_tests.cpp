@@ -43,8 +43,7 @@ TEST_CASE("every cell's water reaches the sea, and all the ground drains through
             sea_catchment += drained.catchment[cell];
         }
     }
-    CHECK(sea_catchment ==
-          Catch::Approx(4.0 * std::numbers::pi * radius * radius).epsilon(1e-6));
+    CHECK(sea_catchment == Catch::Approx(4.0 * std::numbers::pi * radius * radius).epsilon(1e-6));
 }
 
 TEST_CASE("a hollow in high ground fills to its rim and spills", "[globe][drainage]") {
@@ -53,7 +52,7 @@ TEST_CASE("a hollow in high ground fills to its rim and spills", "[globe][draina
         ++pit;
     }
     const auto ground = slope([&](hog::DVec3 up, std::size_t cell) {
-        return up.z > 0.2 ? 100.0 + (cell == pit ? -20.0 : 0.0) : 100.0 * up.z - 20.0;
+        return up.z > 0.2 ? 100.0 + (cell == pit ? -20.0 : 0.0) : (100.0 * up.z) - 20.0;
     });
     REQUIRE(ground[pit] < 100.0F);
     const hog::globe::Drainage drained = hog::globe::drain(ground, level, radius, 0.0);
@@ -65,12 +64,11 @@ TEST_CASE("a hollow in high ground fills to its rim and spills", "[globe][draina
 
 TEST_CASE("running water only lowers ground, most where most drains, and leaves the sea",
           "[globe][drainage]") {
-    const auto ground = slope([](hog::DVec3 up, std::size_t) {
-        return 100.0 * up.z + (5.0 * std::sin(40.0 * up.x));
-    });
+    const auto ground = slope(
+        [](hog::DVec3 up, std::size_t) { return (100.0 * up.z) + (5.0 * std::sin(40.0 * up.x)); });
     const hog::globe::Drainage before = hog::globe::drain(ground, level, radius, 0.0);
-    const std::vector<float> after = hog::globe::erode(ground, level, radius, 0.0,
-                                                      {.rate = 1.0e-3, .steps = 5});
+    const std::vector<float> after =
+        hog::globe::erode(ground, level, radius, 0.0, {.rate = 1.0e-3, .steps = 5});
     double cut_most = 0.0;
     double drains_most = 0.0;
     for (std::size_t cell = 0; cell < ground.size(); ++cell) {

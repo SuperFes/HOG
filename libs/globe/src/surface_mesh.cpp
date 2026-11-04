@@ -165,6 +165,22 @@ std::set<int> held_layers(const VoxelStore& store, Cell chunk, int apart) {
     return layers;
 }
 
+// The lowest and highest levels lakes stand at over the columns, apart from the sea's, if any do.
+std::optional<std::pair<double, double>> lake_levels(const Generator& generator,
+                                                     std::span<const Generator::Column> columns) {
+    std::optional<std::pair<double, double>> found;
+    const std::optional<double> sea = generator.sea_level();
+    for (const Generator::Column& column : columns) {
+        const double water = column.water();
+        if (water <= column.ground() || (sea && water == *sea)) {
+            continue;
+        }
+        found = found ? std::pair{std::min(found->first, water), std::max(found->second, water)}
+                      : std::pair{water, water};
+    }
+    return found;
+}
+
 // Bands of layers the surfaces lie in, lowest first, apart from each other, each from and to
 // (inclusive) a layer of a lattice of every `coarsest` layers. `apart` is the chunk's own;
 // `places` are the columns' places on the grid, in their order.
@@ -186,18 +202,9 @@ std::vector<std::pair<int, int>> bands_of(const World& world, Cell chunk,
     if (const auto sea = generator.sea_level(); sea && *sea > lowest) {
         bands.emplace_back(layers.layer_at(*sea - band), layers.layer_at(*sea + band) + 1);
     }
-    // Lakes stand at their own levels, apart from the sea's.
-    double lake_low = std::numeric_limits<double>::max();
-    double lake_high = std::numeric_limits<double>::lowest();
-    for (const Generator::Column& column : columns) {
-        const double water = column.water();
-        if (water > column.ground() && (!generator.sea_level() || water != *generator.sea_level())) {
-            lake_low = std::min(lake_low, water);
-            lake_high = std::max(lake_high, water);
-        }
-    }
-    if (lake_low <= lake_high) {
-        bands.emplace_back(layers.layer_at(lake_low - band), layers.layer_at(lake_high + band) + 1);
+    if (const auto lakes = lake_levels(generator, columns)) {
+        bands.emplace_back(layers.layer_at(lakes->first - band),
+                           layers.layer_at(lakes->second + band) + 1);
     }
     // Every cave under the chunk, cast for down the middle column of each square of four by
     // four: a stretch of the cast where a cave may lie within the square, and the walls' band
@@ -296,8 +303,8 @@ class Grid {
 public:
     Grid(const World& world, Cell chunk, const Drawn& drawn, DVec3 origin)
         : world_{&world}, layers_{&world.generator().layers()}, chunk_{chunk},
-          apart_{apart_at(detail_of(chunk, *layers_))},
-          origin_{origin}, step_{finer_beside(drawn, chunk, apart_) ? apart_ / 2 : apart_},
+          apart_{apart_at(detail_of(chunk, *layers_))}, origin_{origin},
+          step_{finer_beside(drawn, chunk, apart_) ? apart_ / 2 : apart_},
           size_{chunk_side * apart_ / step_},
           // The widest box of a chunk a detail coarser, across a cube's edge, and one more.
           margin_{(2 * (2 * apart_ / step_)) + 1}, width_{size_ + (2 * margin_)} {

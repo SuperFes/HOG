@@ -308,7 +308,7 @@ TEST_CASE("the highest ground surveyed bounds the ground", "[globe][generator]")
 
 TEST_CASE("running water wears the land and leaves the sea and the world's size",
           "[globe][generator]") {
-    auto planet = *hog::globe::preset("earth");
+    auto planet = hog::globe::preset("earth").value_or(hog::globe::Planet{});
     planet.radius = 4'000.0;
     planet.floor_depth = 100.0;
     planet.sky_height = 500.0;
@@ -334,7 +334,7 @@ TEST_CASE("running water wears the land and leaves the sea and the world's size"
 
 TEST_CASE("a hollow the worn ground leaves holds a lake standing level over its ground",
           "[globe][generator]") {
-    auto planet = *hog::globe::preset("earth");
+    auto planet = hog::globe::preset("earth").value_or(hog::globe::Planet{});
     planet.radius = 4'000.0;
     planet.floor_depth = 100.0;
     planet.sky_height = 500.0;
@@ -350,13 +350,14 @@ TEST_CASE("a hollow the worn ground leaves holds a lake standing level over its 
         const DVec3 up = hog::globe::center(hog::globe::cell_at_index(shape.cut_level, cell));
         const auto found = world.gathered(up);
         REQUIRE(found.lake);
-        CHECK(*found.lake >= planet.radius + static_cast<double>(shape.lake[cell]) - 1e-6);
+        const double lake = found.lake.value_or(0.0);
+        CHECK(lake >= planet.radius + static_cast<double>(shape.lake[cell]) - 1e-6);
         CHECK(found.catchment > 0.0);
         const auto column = world.column(up, 100.0);
-        if (column.ground() < *found.lake - 1.0) {
-            const auto sample = column.sample(*found.lake - 0.5);
+        if (column.ground() < lake - 1.0) {
+            const auto sample = column.sample(lake - 0.5);
             CHECK(sample.water > 0.0);
-            CHECK(column.sample(*found.lake + 5.0).water == 0.0);
+            CHECK(column.sample(lake + 5.0).water == 0.0);
         }
     }
     CHECK(world.gathered(DVec3{0.0, 0.0, 1.0}).catchment > 0.0);
