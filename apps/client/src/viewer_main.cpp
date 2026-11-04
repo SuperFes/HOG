@@ -1051,8 +1051,16 @@ void print_storage_estimate(const client::Scene& scene, const client::GlobeWorld
                                           area);
 }
 
+// Says what startup is at, and how many seconds in it is, as it starts each long stage.
+void startup(std::string_view stage) {
+    static const MonotonicClock::time_point started = MonotonicClock::now();
+    const std::chrono::duration<double> since = MonotonicClock::now() - started;
+    std::cout << std::format("hog-viewer: {:7.1f} s  {}\n", since.count(), stage) << std::flush;
+}
+
 int show(const client::Options& options, const planet::PlanetConfig& planet, render::Device& device,
          render::Presenter& presenter, SDL_Window* window) {
+    startup("starting");
     auto connection = Connection::open(options);
     if (!connection) {
         std::cerr << std::format("hog-viewer: {}\n", connection.error());
@@ -1071,7 +1079,9 @@ int show(const client::Options& options, const planet::PlanetConfig& planet, ren
             return EXIT_FAILURE;
         }
     }
-    client::GlobeWorld globe{*described};
+    startup("making the planet");
+    client::GlobeWorld globe{*described, [](std::string_view stage) { startup(stage); }};
+    startup("planet made");
     globe.world.draw_from_amounts(options.surface_from_amounts);
     const client::Flight flight = start(options, globe);
     const sim::Calendar calendar{planet.day_length, planet.axial_tilt};
@@ -1087,6 +1097,7 @@ int show(const client::Options& options, const planet::PlanetConfig& planet, ren
     // chat box is open.
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NoMouse | ImGuiConfigFlags_NoMouseCursorChange |
                                   ImGuiConfigFlags_NoKeyboard;
+    startup("starting the renderer");
     // Before the scene, whose bakes run on it.
     jobs::JobSystem jobs{options.threads};
     auto scene = client::Scene::create(device, globe.generator.planet(), jobs, calendar,
@@ -1102,6 +1113,7 @@ int show(const client::Options& options, const planet::PlanetConfig& planet, ren
     }
     scene->set_system(planet.system);
     scene->follow_globe(globe.world);
+    startup("ready");
     const Result<void> flown =
         fly(*scene, clock, globe, flight, *connection, options, device, presenter, window);
     // The GPU may still be drawing with the scene.

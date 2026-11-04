@@ -394,10 +394,12 @@ void flood_ponds(const Planet& planet, const terms::Context& context, Generator:
 }
 
 // The ground's cuts by the running water, found by wearing the generated ground on the drainage.
-void wear_ground(const Planet& planet, const terms::Context& context, Generator::Shape& shape) {
+void wear_ground(const Planet& planet, const terms::Context& context, Generator::Shape& shape,
+                 const Generator::Progress& say) {
     const int level = wear_level_for(planet.radius);
     const auto count = static_cast<std::size_t>(cells_at(level));
     const double lod = planet.radius * std::numbers::pi / 2.0 / static_cast<double>(1 << level);
+    say("sampling the ground for the water to wear");
     std::vector<float> ground(count);
     const unsigned workers = std::max(1U, std::thread::hardware_concurrency());
     {
@@ -414,8 +416,10 @@ void wear_ground(const Planet& planet, const terms::Context& context, Generator:
         }
     }
     const double sea = shape.sea ? 0.0 : -1e30;
+    say("wearing the ground away with running water");
     const std::vector<float> worn =
         erode(ground, level, planet.radius, sea, {.rate = planet.wear, .steps = wear_steps});
+    say("working out where the water drains");
     const Drainage drained = drain(worn, level, planet.radius, sea);
     shape.lake.assign(count, Generator::Shape::no_lake);
     shape.catchment.resize(count);
@@ -433,6 +437,7 @@ void wear_ground(const Planet& planet, const terms::Context& context, Generator:
         shape.cut[cell] = ground[cell] - worn[cell];
     }
     shape.cut_level = level;
+    say("filling the lakes");
     flood_ponds(planet, context, shape);
 }
 
@@ -448,7 +453,14 @@ std::vector<Surveyed> survey(const auto& measure) {
 
 } // namespace
 
-Generator::Generator(const Planet& planet) : planet_{planet}, derived_{derive(planet)} {
+Generator::Generator(const Planet& planet, const Progress& progress)
+    : planet_{planet}, derived_{derive(planet)} {
+    const auto say = [&](std::string_view stage) {
+        if (progress) {
+            progress(stage);
+        }
+    };
+    say("surveying the provinces");
     const terms::Context context{.planet = &planet_, .derived = &derived_, .shape = &shape_};
     shape_.one_side = direction_from(context.seed(terms::Term::OneSide));
 
@@ -470,6 +482,7 @@ Generator::Generator(const Planet& planet) : planet_{planet}, derived_{derive(pl
         shape_.province_threshold = quantile(fields, 1.0 - planet_.high_fraction);
     }
 
+    say("surveying the heights");
     // The radius stands at the sea, filling its share of the surface, or at the mean ground.
     const double lod = planet_.radius * std::numbers::pi / 2.0 / (1 << survey_level);
     const std::vector<Surveyed> heights = survey(
@@ -489,10 +502,11 @@ Generator::Generator(const Planet& planet) : planet_{planet}, derived_{derive(pl
     shape_.lowest = std::ranges::min(heights, {}, &Surveyed::value).value - shape_.datum;
     shape_.highest = std::ranges::max(heights, {}, &Surveyed::value).value - shape_.datum;
     if (planet_.wear > 0.0) {
-        wear_ground(planet_, context, shape_);
+        wear_ground(planet_, context, shape_, say);
         const float cut = *std::ranges::max_element(shape_.cut);
         shape_.lowest -= static_cast<double>(cut);
     }
+    say("laying out the voxel layers");
     layers_ = layers_about(planet_.radius, planet_.floor_depth + std::max(0.0, -shape_.lowest),
                            planet_.sky_height, planet_.voxel);
 }

@@ -16,9 +16,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <map>
 #include <memory>
-#include <filesystem>
 #include <optional>
 #include <set>
 #include <span>
@@ -41,8 +41,9 @@ namespace hog::client {
 
 // The voxel world drawn in place of the ground, nothing yet changed in it.
 struct GlobeWorld {
-    explicit GlobeWorld(const globe::Planet& planet)
-        : generator{planet}, store{generator.layers()}, world{generator, store} {}
+    explicit GlobeWorld(const globe::Planet& planet,
+                        const globe::Generator::Progress& progress = {})
+        : generator{planet, progress}, store{generator.layers()}, world{generator, store} {}
     GlobeWorld(const GlobeWorld&) = delete;
     GlobeWorld& operator=(const GlobeWorld&) = delete;
     GlobeWorld(GlobeWorld&&) = delete;
