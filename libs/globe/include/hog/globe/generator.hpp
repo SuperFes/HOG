@@ -169,10 +169,14 @@ public:
         std::vector<float> lake{};      // NOLINT(readability-redundant-member-init)
         std::vector<float> catchment{}; // NOLINT(readability-redundant-member-init)
         // The lakes' water over the fine ground: for each cell of `cut_level` a lake floods
-        // into, the level it stands at there and which of the cell's 64 by 64 columns hold it.
+        // into, a layer for each level its water stands at there, and which of the cell's 64 by 64
+        // columns hold it.
         struct Pond {
-            float level = 0.0F;
-            std::array<std::uint64_t, 64> rows{};
+            struct Layer {
+                float level = 0.0F;
+                std::array<std::uint64_t, 64> rows{};
+            };
+            std::vector<Layer> layers{}; // NOLINT(readability-redundant-member-init)
         };
         std::unordered_map<std::uint64_t, Pond>
             ponds{}; // NOLINT(readability-redundant-member-init)

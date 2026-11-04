@@ -44,6 +44,7 @@ hog_add_tests(hog_globe
     tests/generator_tests.cpp
     tests/grip_tests.cpp
     tests/landform_survey_tests.cpp
+    tests/lake_bed_tests.cpp
     tests/layers_tests.cpp
     tests/mantle_tests.cpp
     tests/material_tests.cpp
