@@ -157,6 +157,18 @@ Result<PlanetConfig> parse_planet_config(std::string_view text) {
         }
     }
 
+    // A file with a [globe] table can leave the size to it.
+    if (!population->has_value() && !radius_km->has_value()) {
+        if (const toml::table* globe = parsed.table()["globe"].as_table()) {
+            if (const auto radius = (*globe)["radius"].value<double>()) {
+                if (!positive(*radius)) {
+                    return invalid("globe.radius must be positive");
+                }
+                config.radius = *radius;
+                return config;
+            }
+        }
+    }
     if (population->has_value() == radius_km->has_value()) {
         return invalid("planet needs exactly one of population or radius_km");
     }
