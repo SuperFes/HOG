@@ -171,7 +171,7 @@ TEST_CASE("the same planet is generated the same, bit for bit", "[globe][generat
         }
     }
     // If this moves, unchanged ground no longer matches what was there before, or elsewhere.
-    CHECK(digest == 0x866b'b163'877d'8e86ULL);
+    CHECK(digest == 0x6b80'fd76'610e'8a6aULL);
 }
 
 TEST_CASE("generator throughput", "[.bench]") {
@@ -353,11 +353,15 @@ TEST_CASE("a hollow the worn ground leaves holds a lake standing level over its 
         const double lake = found.lake.value_or(0.0);
         CHECK(lake >= planet.radius + static_cast<double>(shape.lake[cell]) - 1e-6);
         CHECK(found.catchment > 0.0);
-        const auto column = world.column(up, 100.0);
+        const auto column = world.column(up, 5.0);
         if (column.ground() < lake - 1.0) {
             const auto sample = column.sample(lake - 0.5);
             CHECK(sample.water > 0.0);
             CHECK(column.sample(lake + 5.0).water == 0.0);
+            // The voxel the surface crosses holds only what lies under it.
+            const double crossing = column.sample(lake + 1.0).water;
+            CHECK(crossing > 0.0);
+            CHECK(crossing < 0.5);
         }
     }
     CHECK(world.gathered(DVec3{0.0, 0.0, 1.0}).catchment > 0.0);
