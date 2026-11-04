@@ -117,6 +117,97 @@ inline std::vector<DVec3> open_sides(const SurfaceMesh& mesh) {
     return open;
 }
 
+// The same, as the pair of ends of each.
+inline std::vector<std::pair<DVec3, DVec3>> open_ends(const SurfaceMesh& mesh) {
+    std::map<std::array<long long, 3>, std::uint32_t> welded;
+    std::vector<std::uint32_t> same(mesh.vertices.size());
+    for (std::uint32_t v = 0; v < mesh.vertices.size(); ++v) {
+        const DVec3 at = DVec3{mesh.vertices[v].position} * 1e4;
+        const std::array key{std::llround(at.x), std::llround(at.y), std::llround(at.z)};
+        same[v] = welded.try_emplace(key, v).first->second;
+    }
+    std::map<std::pair<std::uint32_t, std::uint32_t>, int> uses;
+    for (std::size_t t = 0; t + 2 < mesh.indices.size(); t += 3) {
+        for (std::size_t k = 0; k < 3; ++k) {
+            const std::uint32_t a = same[mesh.indices[t + k]];
+            const std::uint32_t b = same[mesh.indices[t + ((k + 1) % 3)]];
+            ++uses[std::minmax(a, b)];
+        }
+    }
+    std::vector<std::pair<DVec3, DVec3>> open;
+    for (const auto& [side, count] : uses) {
+        if (count == 1) {
+            open.emplace_back(world_point(mesh, side.first), world_point(mesh, side.second));
+        }
+    }
+    return open;
+}
+
+// The closest point to `p` on the triangle `a b c` (Ericson's).
+inline DVec3 closest_on_triangle(DVec3 p, DVec3 a, DVec3 b, DVec3 c) {
+    const DVec3 ab = b - a;
+    const DVec3 ac = c - a;
+    const DVec3 ap = p - a;
+    const double d1 = glm::dot(ab, ap);
+    const double d2 = glm::dot(ac, ap);
+    if (d1 <= 0.0 && d2 <= 0.0) {
+        return a;
+    }
+    const DVec3 bp = p - b;
+    const double d3 = glm::dot(ab, bp);
+    const double d4 = glm::dot(ac, bp);
+    if (d3 >= 0.0 && d4 <= d3) {
+        return b;
+    }
+    const double vc = (d1 * d4) - (d3 * d2);
+    if (vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0) {
+        return a + (ab * (d1 / (d1 - d3)));
+    }
+    const DVec3 cp = p - c;
+    const double d5 = glm::dot(ab, cp);
+    const double d6 = glm::dot(ac, cp);
+    if (d6 >= 0.0 && d5 <= d6) {
+        return c;
+    }
+    const double vb = (d5 * d2) - (d1 * d6);
+    if (vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0) {
+        return a + (ac * (d2 / (d2 - d6)));
+    }
+    const double va = (d3 * d6) - (d5 * d4);
+    if (va <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0) {
+        return b + ((c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6))));
+    }
+    const double denom = 1.0 / (va + vb + vc);
+    return a + (ab * (vb * denom)) + (ac * (vc * denom));
+}
+
+// How far `point` stands over the ground the mesh draws, negative under it: to the nearest of the
+// triangles that aren't water, over their side that faces out.
+inline double clearance(const SurfaceMesh& mesh, DVec3 point) {
+    double best = 1e30;
+    double signed_best = 1e30;
+    for (std::size_t t = 0; t + 2 < mesh.indices.size(); t += 3) {
+        const auto& va = mesh.vertices[mesh.indices[t]];
+        const auto& vb = mesh.vertices[mesh.indices[t + 1]];
+        const auto& vc = mesh.vertices[mesh.indices[t + 2]];
+        if (va.material == Material::Water && vb.material == Material::Water &&
+            vc.material == Material::Water) {
+            continue;
+        }
+        const DVec3 a = mesh.origin + DVec3{va.position};
+        const DVec3 b = mesh.origin + DVec3{vb.position};
+        const DVec3 c = mesh.origin + DVec3{vc.position};
+        const DVec3 near = closest_on_triangle(point, a, b, c);
+        const double apart = glm::length(point - near);
+        if (apart < best) {
+            best = apart;
+            const DVec3 normal = glm::normalize(glm::cross(b - a, c - a));
+            signed_best = glm::dot(point - near, normal) >= 0.0 ? apart : -apart;
+        }
+    }
+    return signed_best;
+}
+
 // Changes each open voxel within `radius` of `centre`, or every voxel there with `ground` too,
 // given it and the radius its bottom stands at.
 inline void fill_hollow(World& world, DVec3 centre, double radius, const auto& change,

@@ -170,11 +170,14 @@ public:
         std::vector<float> catchment{}; // NOLINT(readability-redundant-member-init)
         // The lakes' water over the fine ground: for each cell of `cut_level` a lake floods
         // into, a layer for each level its water stands at there, and which of the cell's 64 by 64
-        // columns hold it.
+        // columns hold it. The columns are wider than the voxels', so `rim` also marks the ring of
+        // columns round the flooded ones, where the voxels' own ground may lie under the level
+        // too.
         struct Pond {
             struct Layer {
                 float level = 0.0F;
                 std::array<std::uint64_t, 64> rows{};
+                std::array<std::uint64_t, 64> rim{};
             };
             std::vector<Layer> layers{}; // NOLINT(readability-redundant-member-init)
         };
