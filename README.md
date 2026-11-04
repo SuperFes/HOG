@@ -8,7 +8,8 @@ The world is generated deterministically and grown the same on every machine: te
 
 | Target | What it is |
 | --- | --- |
-| `apps/client/hog-client` | The game client: flies over the planet (Vulkan, SDL3) |
+| `apps/client/hog-client` | The game client: draws the world its server sends (Vulkan, SDL3) |
+| `apps/client/hog-viewer` | Builds a planet itself and flies over it, alone or beside a server: for looking and testing |
 | `apps/server/hog-server` | The world server: weather, plants, wildlife, saves under `var/` |
 | `apps/login/hog-login` | The login service issuing connect tokens |
 | `apps/bot/hog-bot` | A headless client for load and soak testing |
@@ -59,7 +60,7 @@ From the repository root:
 
 - `build/debug/apps/server/hog-server` — reads `config/server.toml`, keeps the world under `var/`, saves on Ctrl-C.
 - `build/debug/tools/viewer/hog-viewer` — watches the server's debug port and draws weather, plants and wildlife on a planet map.
-- `build/debug/apps/client/hog-client` — builds the world from `config/planet.toml` and starts flying over the starting islands: WASD to fly, Space and C for up and down, hold the right mouse button to look, wheel for speed.
+- `build/debug/apps/client/hog-viewer` — builds the world from `config/planet.toml` and starts flying over the starting islands: WASD to fly, Space and C for up and down, hold the right mouse button to look, wheel for speed.
 
 Each takes `--help`. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full developer workflow, code rules and golden-hash discipline.
 
