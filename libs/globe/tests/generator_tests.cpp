@@ -304,7 +304,8 @@ TEST_CASE("the highest ground surveyed bounds the ground", "[globe][generator]")
     }
 }
 
-TEST_CASE("running water wears the land and leaves the sea and the world's size", "[globe][generator]") {
+TEST_CASE("running water wears the land and leaves the sea and the world's size",
+          "[globe][generator]") {
     auto planet = *hog::globe::preset("earth");
     planet.radius = 4'000.0;
     planet.floor_depth = 100.0;
@@ -327,4 +328,42 @@ TEST_CASE("running water wears the land and leaves the sea and the world's size"
     }
     CHECK(lowered < -1.0);
     CHECK(raised < 1e-6);
+}
+
+TEST_CASE("a hollow the worn ground leaves holds a lake standing level over its ground",
+          "[globe][generator]") {
+    auto planet = *hog::globe::preset("earth");
+    planet.radius = 4'000.0;
+    planet.floor_depth = 100.0;
+    planet.sky_height = 500.0;
+    planet.wear = 0.03;
+    const Generator world{planet};
+    const auto& shape = world.shape();
+    std::size_t lakes = 0;
+    for (std::size_t cell = 0; cell < shape.lake.size(); ++cell) {
+        if (shape.lake[cell] <= Generator::Shape::no_lake) {
+            continue;
+        }
+        ++lakes;
+        const DVec3 up = hog::globe::center(hog::globe::cell_at_index(shape.cut_level, cell));
+        const auto found = world.gathered(up);
+        REQUIRE(found.lake);
+        CHECK(*found.lake >= planet.radius + static_cast<double>(shape.lake[cell]) - 1e-6);
+        CHECK(found.catchment > 0.0);
+        const auto column = world.column(up, 100.0);
+        if (column.ground() < *found.lake - 1.0) {
+            const auto sample = column.sample(*found.lake - 0.5);
+            CHECK(sample.water > 0.0);
+            CHECK(column.sample(*found.lake + 5.0).water == 0.0);
+        }
+    }
+    CHECK(world.gathered(DVec3{0.0, 0.0, 1.0}).catchment > 0.0);
+    CHECK(Generator{[&] {
+              auto dry = planet;
+              dry.wear = 0.0;
+              return dry;
+          }()}
+              .gathered(DVec3{1.0, 0.0, 0.0})
+              .catchment == 0.0);
+    CHECK(lakes > 0);
 }

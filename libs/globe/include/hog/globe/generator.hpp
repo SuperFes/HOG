@@ -108,16 +108,26 @@ public:
         const Generator* generator_ = nullptr;
         DVec3 direction_{0.0, 0.0, 1.0};
         double lod_ = 0.0;
-        double ground_ = 0.0;              // metres from the centre
-        double mantle_ = 0.0;              // metres of loose cover over the rock
-        double slope_ = 0.0;               // across the ground, at the radius
-        DVec3 tilt_{0.0};                  // the way the ground rises, by as much
+        double ground_ = 0.0; // metres from the centre
+        double water_ = 0.0;  // metres from the centre to where open water stands; 0 none
+        double mantle_ = 0.0; // metres of loose cover over the rock
+        double slope_ = 0.0;  // across the ground, at the radius
+        DVec3 tilt_{0.0};     // the way the ground rises, by as much
         double surface_temperature_ = 0.0; // at the reference level
         Strata strata_;
         std::optional<Rock> rock_; // lying on this column, if one does
     };
 
     [[nodiscard]] Column column(DVec3 direction, double lod) const noexcept;
+
+    // Where rain on the ground under `direction` has gathered, as the worn ground drains: the lake
+    // standing there, as metres from the centre to its surface, if one does, and the square metres
+    // draining through the place. Nothing on a world without wear.
+    struct Gathering {
+        std::optional<double> lake;
+        double catchment = 0.0;
+    };
+    [[nodiscard]] Gathering gathered(DVec3 direction) const;
 
     // The fallen rocks, as generated at `lod`, whose cells lie within about a cell of `point`;
     // those reaching further than that from it are among them too.
@@ -146,6 +156,11 @@ public:
         // erosion of the generated ground; empty on a world without wear.
         int cut_level = 0;
         std::vector<float> cut{};
+        // At those cells too: where a hollow in the worn ground holds a lake, the height its
+        // water stands at over the radius, else `no_lake`; and the area draining through it.
+        static constexpr float no_lake = -1e30F;
+        std::vector<float> lake{};
+        std::vector<float> catchment{};
     };
     [[nodiscard]] const Shape& shape() const noexcept { return shape_; }
 
