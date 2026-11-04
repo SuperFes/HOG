@@ -229,3 +229,16 @@ TEST_CASE("the development server config loads", "[server][config]") {
     CHECK(std::filesystem::exists(config->planet));
     CHECK(config->net.port);
 }
+
+TEST_CASE("a server config names its voxel world's planet by preset or by file",
+          "[server][config]") {
+    const auto none = parse_server_config(minimal, base());
+    REQUIRE(none);
+    CHECK(none->globe.empty());
+    const auto preset = parse_server_config(with("globe = \"mars\"\n"), base());
+    REQUIRE(preset);
+    CHECK(preset->globe == "mars");
+    const auto file = parse_server_config(with("globe = \"planets/little.toml\"\n"), base());
+    REQUIRE(file);
+    CHECK(file->globe == (base() / "planets/little.toml").string());
+}
