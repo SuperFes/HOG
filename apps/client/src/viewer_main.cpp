@@ -459,7 +459,7 @@ Result<bool> draw(client::Scene& scene, const client::Shot& shot, const render::
                                        ? save_capture(device, captured->value(), frame, *capture)
                                        : std::unexpected(captured->error());
         if (!saved) {
-            std::cerr << std::format("hog-client: can't capture the window: {}\n", saved.error());
+            std::cerr << std::format("hog-viewer: can't capture the window: {}\n", saved.error());
         }
     }
     return true;
@@ -1007,7 +1007,7 @@ std::optional<render::Billboard> companion(const client::Options& options, rende
     }
     auto picture = client::load_picture(*options.companion);
     if (!picture) {
-        std::cerr << std::format("hog-client: flying alone: {}\n", picture.error());
+        std::cerr << std::format("hog-viewer: flying alone: {}\n", picture.error());
         return std::nullopt;
     }
     client::lift_ink(*picture);
@@ -1015,7 +1015,7 @@ std::optional<render::Billboard> companion(const client::Options& options, rende
                                                {.width = picture->width, .height = picture->height},
                                                picture->texels);
     if (!billboard) {
-        std::cerr << std::format("hog-client: flying alone: {}\n", billboard.error());
+        std::cerr << std::format("hog-viewer: flying alone: {}\n", billboard.error());
         return std::nullopt;
     }
     return std::move(billboard).value();
@@ -1043,19 +1043,19 @@ int show(const client::Options& options, const planet::PlanetConfig& planet, ren
          render::Presenter& presenter, SDL_Window* window) {
     auto connection = Connection::open(options);
     if (!connection) {
-        std::cerr << std::format("hog-client: {}\n", connection.error());
+        std::cerr << std::format("hog-viewer: {}\n", connection.error());
         return EXIT_FAILURE;
     }
     // Before the scene, which draws it.
     auto described = client::globe_planet_in(options.planet, planet.seed, planet.radius);
     if (!described) {
-        std::cerr << std::format("hog-client: {}\n", described.error());
+        std::cerr << std::format("hog-viewer: {}\n", described.error());
         return EXIT_FAILURE;
     }
     if (options.voxel) {
         described->voxel = *options.voxel;
         if (auto valid = globe::validate(*described); !valid) {
-            std::cerr << std::format("hog-client: --voxel {}: {}\n", *options.voxel, valid.error());
+            std::cerr << std::format("hog-viewer: --voxel {}: {}\n", *options.voxel, valid.error());
             return EXIT_FAILURE;
         }
     }
@@ -1068,7 +1068,7 @@ int show(const client::Options& options, const planet::PlanetConfig& planet, ren
                                                  options.time_of_day)};
     const window::Ui ui{window, device, presenter.swapchain().format()};
     if (!ui.started()) {
-        std::cerr << "hog-client: can't draw the timings over the picture\n";
+        std::cerr << "hog-viewer: can't draw the timings over the picture\n";
         return EXIT_FAILURE;
     }
     // Only shown, so it leaves the mouse and keys to flying; the keys come back to it while the
@@ -1081,11 +1081,11 @@ int show(const client::Options& options, const planet::PlanetConfig& planet, ren
                                        presenter.swapchain().format(), render::frames_in_flight,
                                        companion(options, device, presenter.swapchain().format()));
     if (!scene) {
-        std::cerr << std::format("hog-client: {}\n", scene.error());
+        std::cerr << std::format("hog-viewer: {}\n", scene.error());
         return EXIT_FAILURE;
     }
     if (auto set = scene->set_cloud_quality(options.clouds); !set) {
-        std::cerr << std::format("hog-client: {}\n", set.error());
+        std::cerr << std::format("hog-viewer: {}\n", set.error());
         return EXIT_FAILURE;
     }
     scene->set_system(planet.system);
@@ -1095,11 +1095,11 @@ int show(const client::Options& options, const planet::PlanetConfig& planet, ren
     // The GPU may still be drawing with the scene.
     vkDeviceWaitIdle(device.handle());
     if (!flown) {
-        std::cerr << std::format("hog-client: {}\n", flown.error());
+        std::cerr << std::format("hog-viewer: {}\n", flown.error());
         return EXIT_FAILURE;
     }
     if (options.validate && device.validation_errors() != 0) {
-        std::cerr << std::format("hog-client: {} Vulkan validation errors\n",
+        std::cerr << std::format("hog-viewer: {} Vulkan validation errors\n",
                                  device.validation_errors());
         return EXIT_FAILURE;
     }
@@ -1110,7 +1110,7 @@ int show(const client::Options& options, const planet::PlanetConfig& planet, ren
 int run(std::span<const std::string_view> arguments) {
     auto options = client::parse_options(arguments);
     if (!options) {
-        std::cerr << std::format("hog-client: {}\n\n{}", options.error().message, client::usage());
+        std::cerr << std::format("hog-viewer: {}\n\n{}", options.error().message, client::usage());
         return EXIT_FAILURE;
     }
     if (options->help) {
@@ -1126,42 +1126,42 @@ int run(std::span<const std::string_view> arguments) {
     }
     auto planet = planet::load_planet_config(options->planet);
     if (!planet) {
-        std::cerr << std::format("hog-client: {}\n", planet.error());
+        std::cerr << std::format("hog-viewer: {}\n", planet.error());
         return EXIT_FAILURE;
     }
 
     // Declared in the order they're made, so each goes before what it was made with.
     const window::Sdl sdl;
     if (!sdl.started()) {
-        std::cerr << std::format("hog-client: can't start SDL: {}\n", SDL_GetError());
+        std::cerr << std::format("hog-viewer: can't start SDL: {}\n", SDL_GetError());
         return EXIT_FAILURE;
     }
     if (!sdl.vulkan()) {
-        std::cerr << std::format("hog-client: can't load Vulkan: {}\n", SDL_GetError());
+        std::cerr << std::format("hog-viewer: can't load Vulkan: {}\n", SDL_GetError());
         return window::no_vulkan;
     }
     const window::Window window{
         SDL_CreateWindow("HOG", 1'600, 900,
                          SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY)};
     if (window == nullptr) {
-        std::cerr << std::format("hog-client: can't open a window: {}\n", SDL_GetError());
+        std::cerr << std::format("hog-viewer: can't open a window: {}\n", SDL_GetError());
         return EXIT_FAILURE;
     }
     const auto wanted = window::device_options(
         window.get(),
         {.app_name = "HOG", .validation = options->validate, .prefer_software = options->software});
     if (!wanted) {
-        std::cerr << std::format("hog-client: {}\n", wanted.error());
+        std::cerr << std::format("hog-viewer: {}\n", wanted.error());
         return window::no_vulkan;
     }
     const auto device = render::Device::create(*wanted);
     if (!device) {
-        std::cerr << std::format("hog-client: can't draw: {}\n", device.error());
+        std::cerr << std::format("hog-viewer: can't draw: {}\n", device.error());
         return device.error().code == ErrorCode::Unsupported ? window::no_vulkan : EXIT_FAILURE;
     }
     const auto presenter = render::Presenter::create(**device, window::drawable(window.get()));
     if (!presenter) {
-        std::cerr << std::format("hog-client: can't show frames: {}\n", presenter.error());
+        std::cerr << std::format("hog-viewer: can't show frames: {}\n", presenter.error());
         return EXIT_FAILURE;
     }
     return show(*options, *planet, **device, **presenter, window.get());
@@ -1175,7 +1175,7 @@ int main(int argc, char** argv) {
         const std::vector<std::string_view> arguments(given.begin() + 1, given.end());
         return run(arguments);
     } catch (const std::exception& error) {
-        std::cerr << "hog-client: " << error.what() << '\n';
+        std::cerr << "hog-viewer: " << error.what() << '\n';
         return EXIT_FAILURE;
     }
 }

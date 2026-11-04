@@ -63,22 +63,29 @@ if(NOT HOG_BUILD_CLIENT)
     return()
 endif()
 
+# The game client, which draws what its server sends.
 add_executable(hog_client_cli src/main.cpp)
 set_target_properties(hog_client_cli PROPERTIES OUTPUT_NAME hog-client)
-target_link_libraries(hog_client_cli PRIVATE hog::chat hog::client hog::jobs hog::login hog::net
-    hog::planet hog::protocol hog::window)
+target_link_libraries(hog_client_cli PRIVATE hog::client)
 hog_target_defaults(hog_client_cli)
+
+# Draws a planet it builds itself, alone or beside a server: for looking and testing.
+add_executable(hog_viewer_cli src/viewer_main.cpp)
+set_target_properties(hog_viewer_cli PROPERTIES OUTPUT_NAME hog-viewer)
+target_link_libraries(hog_viewer_cli PRIVATE hog::chat hog::client hog::jobs hog::login hog::net
+    hog::planet hog::protocol hog::window)
+hog_target_defaults(hog_viewer_cli)
 
 # GPU drivers are opaque to sanitizers, so those runs leave the smoke test out.
 if(HOG_BUILD_TESTS AND NOT HOG_SANITIZE)
     # Flies for a moment without a window, on a software device with validation and the timings
     # shown, saving what it drew. Skipped where there's no Vulkan.
-    add_test(NAME hog_client_smoke
-        COMMAND hog_client_cli --planet "${CMAKE_CURRENT_SOURCE_DIR}/tests/smoke_planet.toml"
+    add_test(NAME hog_viewer_smoke
+        COMMAND hog_viewer_cli --planet "${CMAKE_CURRENT_SOURCE_DIR}/tests/smoke_planet.toml"
                 --companion "${PROJECT_SOURCE_DIR}/res/Matt.png"
                 --quit-after 1 --threads 2 --timings --software --validate
                 --capture "${CMAKE_CURRENT_BINARY_DIR}/smoke.png")
-    set_tests_properties(hog_client_smoke PROPERTIES
+    set_tests_properties(hog_viewer_smoke PROPERTIES
         ENVIRONMENT "SDL_VIDEO_DRIVER=offscreen"
         SKIP_RETURN_CODE 77
         TIMEOUT 120)
