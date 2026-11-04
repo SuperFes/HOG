@@ -9,8 +9,9 @@ struct Push {
     float4 up_height;
     // xyz towards the sun; w the planet's radius.
     float4 sun_radius;
-    // x the radius the ground is drawn curving like; y how bright sides away from the sun stay;
-    // zw where the tiles' coordinates start, y and z.
+    // x the radius the ground is drawn curving like; y how bright sides away from the sun stay
+    // under one, and over it the whole metres round the eye where ground isn't drawn; zw where the
+    // tiles' coordinates start, y and z.
     float4 faked_night;
 };
 
@@ -36,6 +37,10 @@ struct Vertex {
     [[vk::location(2)]] uint4 tiles;
 };
 
+// How bright the lamp at the eye shines, and how far it reaches in cutaways.
+static const float lamp = 2.0;
+static const float lamp_reach = 6.0;
+
 // Soaked, the ground is this much darker: light gets further into it before it comes back.
 static const float wet_darkening = 0.45;
 
@@ -52,6 +57,8 @@ struct Surface {
     float3 tiled;
     // Up through the point, from the planet's centre.
     float3 up;
+    // From the eye.
+    float3 from_eye;
 };
 
 [shader("vertex")]
@@ -70,6 +77,7 @@ Surface vertex_main(Vertex vertex) {
     surface.wet = level <= 47u ? float(level) / 47.0 : 0.0;
     surface.glow = level > 48u ? float(level - 48u) / 15.0 : 0.0;
     surface.tiled = vertex.position + float3(push.origin.w, push.faked_night.zw);
+    surface.from_eye = from_eye;
     surface.up = from_eye + (push.up_height.xyz * (push.sun_radius.w + push.up_height.w));
     return surface;
 }
@@ -158,7 +166,12 @@ float3 tile_at(Tiling tiling, uint tile) {
 
 [shader("fragment")]
 float4 fragment_main(Surface surface) : SV_Target {
-    const float night = push.faked_night.y;
+    const float cutaway = floor(push.faked_night.y);
+    const float night = push.faked_night.y - cutaway;
+    const float away = length(surface.from_eye);
+    if (away < cutaway) {
+        discard;
+    }
     const float3 up = normalize(surface.up);
     const float3 normal = normalize(surface.normal);
     const Tiling tiling = tiling_at(surface.tiled, normal);
@@ -186,5 +199,12 @@ float4 fragment_main(Surface surface) : SV_Target {
     const float3 shine = lerp(float3(0.45, 0.04, 0.0), float3(1.0, 0.6, 0.2), surface.glow) *
                          (1.0 + (3.0 * surface.glow * surface.glow));
     lit = lerp(lit, shine * (0.6 + dot(colour, float3(1.0)) * 0.8), saturate(surface.glow * 1.5));
+    // Under the ground, a lamp at the eye, as far as a few cutaways reach, on what faces it.
+    if (cutaway > 0.0) {
+        const float reach = lamp_reach * cutaway;
+        const float falloff = saturate(1.0 - (away / reach));
+        const float aimed = saturate(dot(normal, -surface.from_eye / away));
+        lit += colour * lamp * aimed * falloff * falloff;
+    }
     return float4(lit, 1.0);
 }

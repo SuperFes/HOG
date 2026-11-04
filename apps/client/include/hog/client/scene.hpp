@@ -61,6 +61,8 @@ struct Shot {
     terrain::Bend bend = {};
     GameTime time;
     double seconds = 0.0; // since the frame before, for the eye to adapt to the light over
+    // Metres round the eye where ground isn't drawn, for looking round inside it; none to draw it.
+    double cutaway = 0.0;
     // Whoever flies along, where there's someone to draw.
     std::optional<render::Standing> companion;
     // Other players.

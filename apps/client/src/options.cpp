@@ -153,8 +153,9 @@ Result<void> read_option(Options& options, std::string_view option, std::string_
     } else if (option == "--voxel") {
         options.voxel = real(value);
         if (!options.voxel || !(*options.voxel > 0.0)) {
-            return make_error(ErrorCode::InvalidArgument,
-                              std::format("--voxel takes a size in metres over zero, not {}", value));
+            return make_error(
+                ErrorCode::InvalidArgument,
+                std::format("--voxel takes a size in metres over zero, not {}", value));
         }
     } else if (option == "--surface") {
         if (value != "distance" && value != "amounts") {
@@ -187,6 +188,7 @@ constexpr std::array flags{
     Flag{.name = "-h", .set = [](Options& options) { options.help = true; }},
     Flag{.name = "--help", .set = [](Options& options) { options.help = true; }},
     Flag{.name = "--alone", .set = [](Options& options) { options.companion.reset(); }},
+    Flag{.name = "--through", .set = [](Options& options) { options.through = true; }},
     Flag{.name = "--timings", .set = [](Options& options) { options.timings = true; }},
     Flag{.name = "--chat-filter", .set = [](Options& options) { options.chat_filter = true; }},
     Flag{.name = "--no-chat-filter", .set = [](Options& options) { options.chat_filter = false; }},
@@ -280,6 +282,7 @@ options:
   --quit-after S         quit after this many seconds
   --capture PATH         save the last frame drawn as a PNG, on quitting
   --timings              show how long frames take from the start
+  --through              start flying through the ground (G toggles it)
   --chat-filter          cussing in chat as comic-book grawlix; on by default
   --no-chat-filter       cussing as it was said; hate speech reads as small
                          talk about the weather either way
@@ -307,7 +310,8 @@ flying:
   right mouse button     hold to look around
   mouse wheel            speed up or slow down
   F                      walk
-  G                      fly through the ground, or back above it
+  G                      fly through the ground, or back above it; the mouse wheel then
+                         sizes the bubble round the eye where ground isn't drawn
 
 walking:
   W A S D                forwards, left, back, right

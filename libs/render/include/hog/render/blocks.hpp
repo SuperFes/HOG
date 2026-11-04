@@ -30,7 +30,13 @@ struct BlockView {
     // How bright the sky leaves sides facing away from the sun: all of it looking up, 0.6 of it
     // side on, 0.2 looking down.
     double night = 0.25;
+    // Whole metres round the eye where ground isn't drawn, so what lies past it shows from inside
+    // the ground, lit there by a lamp at the eye; none draws the ground as it is.
+    double cutaway = 0.0;
 };
+
+// The most a cutaway can be, in metres.
+inline constexpr double block_cutaway_most = 200.0;
 
 // Metres a tile repeats over, and the far one laid over it, to break the near one's repetition.
 inline constexpr double block_tile = 4.0;

@@ -3,7 +3,9 @@
 #include <hog/render/streamed_image.hpp>
 #include <hog/shaders/blocks.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -23,6 +25,13 @@ struct Push {
     glm::vec4 sun_radius;
     glm::vec4 faked_night; // zw: where the tiles' coordinates start, y and z
 };
+
+// The night's light, under one, and the cutaway's whole metres over it, in the one float the push
+// has room for.
+float night_and_cutaway(double night, double cutaway) {
+    const double metres = std::floor(std::clamp(cutaway, 0.0, block_cutaway_most));
+    return static_cast<float>(metres + std::clamp(night, 0.0, 0.999));
+}
 
 // Within what every device can push.
 static_assert(sizeof(Push) <= 128);
@@ -212,13 +221,13 @@ void Blocks::draw_one(VkCommandBuffer commands, const Buffer& vertices, const Bu
     // The tiles' coordinates are the world's, wrapped where they repeat, so a mesh placed
     // anywhere wears them as its neighbours do.
     const Vec3 tiled{glm::mod(origin.metres(), DVec3{period})};
-    const Push push{.clip_from_eye = Mat4{view_projection(view.camera, aspect)},
-                    .origin = glm::vec4{Vec3{origin - view.camera.eye}, tiled.x},
-                    .up_height =
-                        glm::vec4{Vec3{view.bend.up}, static_cast<float>(view.bend.eye_height)},
-                    .sun_radius = glm::vec4{Vec3{view.sun}, static_cast<float>(view.bend.radius)},
-                    .faked_night = glm::vec4{static_cast<float>(view.bend.faked),
-                                             static_cast<float>(view.night), tiled.y, tiled.z}};
+    const Push push{
+        .clip_from_eye = Mat4{view_projection(view.camera, aspect)},
+        .origin = glm::vec4{Vec3{origin - view.camera.eye}, tiled.x},
+        .up_height = glm::vec4{Vec3{view.bend.up}, static_cast<float>(view.bend.eye_height)},
+        .sun_radius = glm::vec4{Vec3{view.sun}, static_cast<float>(view.bend.radius)},
+        .faked_night = glm::vec4{static_cast<float>(view.bend.faked),
+                                 night_and_cutaway(view.night, view.cutaway), tiled.y, tiled.z}};
     const std::array buffers{vertices.handle()};
     const VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(commands, 0, 1, buffers.data(), &offset);

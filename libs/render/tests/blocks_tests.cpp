@@ -75,7 +75,8 @@ void add_square(BlockMesh& mesh, double away, Tile tile) {
 // Draws the blocks over a black background, looking down -z from `eye` on a planet a thousand
 // kilometres across whose ground is `up` there, and reads it back.
 std::vector<std::uint8_t> render(hog::render::Device& device, hog::render::Blocks& blocks,
-                                 DVec3 sun, WorldPosition eye = {}, DVec3 up = {0.0, 0.0, 1.0}) {
+                                 DVec3 sun, WorldPosition eye = {}, DVec3 up = {0.0, 0.0, 1.0},
+                                 double cutaway = 0.0) {
     auto target = hog::render::make_image(
         device, {.format = VK_FORMAT_R8G8B8A8_UNORM,
                  .extent = extent,
@@ -90,7 +91,8 @@ std::vector<std::uint8_t> render(hog::render::Device& device, hog::render::Block
     const BlockView view{.camera =
                              Camera{.eye = eye, .forward = {0.0, 0.0, -1.0}, .up = {0.0, 1.0, 0.0}},
                          .sun = sun,
-                         .bend = {.up = up, .eye_height = 0.0, .radius = 1.0e6, .faked = 1.0e6}};
+                         .bend = {.up = up, .eye_height = 0.0, .radius = 1.0e6, .faked = 1.0e6},
+                         .cutaway = cutaway};
     bool drawn = false;
     REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
         namespace use = hog::render::image_use;
@@ -111,12 +113,13 @@ std::vector<std::uint8_t> render(hog::render::Device& device, hog::render::Block
 }
 
 std::vector<std::uint8_t> draw(hog::render::Device& device, BlockMesh mesh, DVec3 sun,
-                               WorldPosition eye = {}, DVec3 up = {0.0, 0.0, 1.0}) {
+                               WorldPosition eye = {}, DVec3 up = {0.0, 0.0, 1.0},
+                               double cutaway = 0.0) {
     auto blocks = hog::render::Blocks::create(device, VK_FORMAT_R8G8B8A8_UNORM,
                                               VK_FORMAT_D32_SFLOAT, tiles());
     REQUIRE(blocks);
     blocks->show(std::make_shared<const BlockMesh>(std::move(mesh)));
-    return render(device, *blocks, sun, eye, up);
+    return render(device, *blocks, sun, eye, up, cutaway);
 }
 
 Pixel at(const std::vector<std::uint8_t>& pixels, std::size_t x, std::size_t y) {
@@ -341,4 +344,27 @@ TEST_CASE("a grained tile shows its grain, a plain one none", "[render][gpu]") {
     };
     CHECK(spread(Tile::White) <= 2);
     CHECK(spread(Tile::Grained) > 15);
+}
+
+TEST_CASE("ground inside the cutaway isn't drawn, and a lamp lights what's left",
+          "[render][blocks]") {
+    auto device = test_device();
+    if (!device) {
+        SKIP("no device to draw with");
+    }
+    const auto square = [] {
+        BlockMesh mesh;
+        add_square(mesh, 5.0, Tile::White);
+        return mesh;
+    };
+    // The sun on the far side of the square, so only the sky and the lamp light it.
+    const DVec3 sun{0.0, 0.0, -1.0};
+    const Pixel plain = middle(draw(*device, square(), sun));
+    CHECK(plain[0] > 0);
+    // Past the cutaway it's drawn, and brighter for the lamp.
+    const Pixel lit = middle(draw(*device, square(), sun, {}, {0.0, 0.0, 1.0}, 3.0));
+    CHECK(lit[0] > plain[0]);
+    // Within it, gone: the background shows.
+    const Pixel gone = middle(draw(*device, square(), sun, {}, {0.0, 0.0, 1.0}, 6.0));
+    CHECK(gone == Pixel{0, 0, 0, 255});
 }
