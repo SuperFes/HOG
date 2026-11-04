@@ -687,14 +687,19 @@ Sample Generator::Column::sample(double radius) const noexcept {
         sample.material = on_rock ? rock_->material
                                   : terms::material_at(context, strata_, shown, ground_ - shown);
     }
-    // The sea fills the open space under its level, and the ground's pores below it.
-    if (radius < water_) {
+    // The sea fills the open space under its level, and the ground's pores below it. The voxel the
+    // surface crosses holds only as much as lies under it, so water shallower than a voxel shows.
+    const double thickness = lod_ / 2.0;
+    const double filled = std::clamp(((water_ - radius) / thickness) + 0.5, 0.0, 1.0);
+    if (water_ > 0.0 && filled > 0.0) {
         sample.liquid = planet.volatiles == Volatile::Water ? Material::Water : Material::Air;
         if (sample.distance < 0.0) {
-            sample.water = properties(sample.material).porosity;
-        } else {
+            if (radius < water_) {
+                sample.water = properties(sample.material).porosity;
+            }
+        } else if (sample.liquid != Material::Air) {
             sample.material = sample.liquid;
-            sample.water = 1.0;
+            sample.water = filled;
         }
     }
 
