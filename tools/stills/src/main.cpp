@@ -23,7 +23,7 @@ namespace {
 constexpr std::string_view usage =
     "usage: hog-stills [--preset earth|mars|venus|moon | --planet FILE] [--seed N] [--out DIR]\n"
     "                  [--width N] [--threads N] [--at LAT,LON[,HEADING]] [--span M]\n"
-    "                  [--bottom M] [--top M] [--depth M] [--dig M]\n"
+    "                  [--bottom M] [--top M] [--depth M] [--dig M] [--drainage LEVEL]\n"
     "Writes map.png, and with --at, relief.png and section.png there; the section runs from\n"
     "--bottom to --top metres off the ground under its middle. --depth adds plan.png, a slice\n"
     "that far under the ground everywhere, open space dark. --dig digs a ball that wide in the\n"
@@ -40,6 +40,7 @@ struct Options {
     double top = 500.0;
     std::optional<double> depth; // of a plan slice under the ground
     std::optional<double> dig;   // a ball's radius, dug at the ground under --at
+    std::optional<int> drainage; // the cell level to work out where rain runs on, for drainage.png
 };
 
 // strtod rather than from_chars, which some standard libraries lack for floating point.
@@ -113,6 +114,8 @@ bool apply(Options& options, std::string_view name, std::string_view value) {
         options.depth = given;
     } else if (name == "--dig") {
         options.dig = given;
+    } else if (name == "--drainage") {
+        options.drainage = static_cast<int>(*given);
     } else {
         return false;
     }
@@ -146,6 +149,13 @@ int run(std::span<const std::string_view> arguments) {
     if (const int failed = write(options.out / "map.png",
                                  hog::stills::map(generator, options.width, options.threads))) {
         return failed;
+    }
+    if (options.drainage) {
+        if (const int failed = write(options.out / "drainage.png",
+                                     hog::stills::drainage(generator, options.width,
+                                                           *options.drainage, options.threads))) {
+            return failed;
+        }
     }
     if (!options.at) {
         return EXIT_SUCCESS;

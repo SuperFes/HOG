@@ -1,3 +1,5 @@
+#include <hog/globe/cell.hpp>
+#include <hog/globe/drainage.hpp>
 #include <hog/globe/maths.hpp>
 #include <hog/stills/stills.hpp>
 
@@ -236,6 +238,63 @@ Image map(const Generator& generator, int width, int threads) {
         return std::max(globe::maths::cos((90.0 - ((y + 0.5) * 180.0 / height)) * degrees), 0.05);
     };
     return shade(generator, grid, spacing, shrink, spacing, true);
+}
+
+Image drainage(const Generator& generator, int width, int level, int threads) {
+    const double radius = generator.planet().radius;
+    const std::uint64_t count = globe::cells_at(level);
+    const double lod = radius * std::numbers::pi / 2.0 / static_cast<double>(1 << level);
+    std::vector<float> ground(static_cast<std::size_t>(count));
+    constexpr std::uint64_t block = 4'096;
+    each_row(static_cast<int>((count + block - 1) / block), threads, [&](int row) {
+        const std::uint64_t first = static_cast<std::uint64_t>(row) * block;
+        for (std::uint64_t cell = first; cell < std::min(first + block, count); ++cell) {
+            const DVec3 up = globe::center(globe::cell_at_index(level, cell));
+            ground[static_cast<std::size_t>(cell)] =
+                static_cast<float>(generator.column(up, lod).ground() - radius);
+        }
+    });
+    const double sea = generator.sea_level() ? 0.0 : -1e30;
+    const globe::Drainage drained = globe::drain(ground, level, radius, sea);
+
+    const int height = std::max(width / 2, 1);
+    Image image{.width = width,
+                .height = height,
+                .pixels = std::vector<std::uint8_t>(3 * static_cast<std::size_t>(width) *
+                                                    static_cast<std::size_t>(height))};
+    const double tallest = std::max(generator.derived().tallest, 1.0);
+    each_row(height, threads, [&](int y) {
+        for (int x = 0; x < width; ++x) {
+            const DVec3 up = Place{.latitude = 90.0 - ((y + 0.5) * 180.0 / height),
+                                   .longitude = -180.0 + ((x + 0.5) * 360.0 / width)}
+                                 .direction();
+            const auto cell = static_cast<std::size_t>(
+                globe::index_of(globe::cell_under(up, level)));
+            const double over = static_cast<double>(drained.ground[cell]);
+            Rgb colour{};
+            if (over <= sea) {
+                colour = mixed({95, 165, 215}, {10, 30, 90}, -over / (0.5 * tallest));
+            } else if (drained.depth(static_cast<std::uint32_t>(cell)) > 0.5) {
+                // A hollow that holds water: deeper is darker.
+                colour = mixed({70, 120, 220}, {20, 40, 140},
+                               drained.depth(static_cast<std::uint32_t>(cell)) / 30.0);
+            } else {
+                colour = mixed({96, 110, 80}, {200, 190, 170}, over / tallest);
+                // Rivers by what drains through: from a stream, 0.1 km², to the largest.
+                const double drains = drained.catchment[cell];
+                if (drains > 1.0e5) {
+                    const double strength = std::log10(drains / 1.0e5) / 4.0;
+                    colour = mixed(colour, {40, 150, 255}, 0.4 + (0.6 * std::min(strength, 1.0)));
+                }
+            }
+            const std::size_t at = 3 * ((static_cast<std::size_t>(y) * static_cast<std::size_t>(width)) +
+                                        static_cast<std::size_t>(x));
+            for (std::size_t k = 0; k < 3; ++k) {
+                image.pixels[at + k] = colour.at(k);
+            }
+        }
+    });
+    return image;
 }
 
 Image relief(const Generator& generator, const Place& place, double span, int size, int threads) {

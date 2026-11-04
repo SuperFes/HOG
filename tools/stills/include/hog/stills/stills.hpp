@@ -33,6 +33,11 @@ struct Place {
 // shaded by its slope, the sea by its depth.
 [[nodiscard]] Image map(const globe::Generator& generator, int width, int threads);
 
+// The whole planet as `map` is, with where rain would run: hollows that fill to a lake before they
+// spill, and the ground's rivers by how much drains through them, from cells of `level`.
+[[nodiscard]] Image drainage(const globe::Generator& generator, int width, int level,
+                             int threads);
+
 // A square of ground `span` metres across, centred on `place`, seen from straight above.
 [[nodiscard]] Image relief(const globe::Generator& generator, const Place& place, double span,
                            int size, int threads);
