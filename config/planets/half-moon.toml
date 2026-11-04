@@ -1,0 +1,5 @@
+# Half the Moon's size (radius 868.5 km of its 1737 km), of the same density, so half its gravity.
+[globe]
+preset = "moon"
+radius = 868500.0
+gravity = 0.81
