@@ -207,6 +207,16 @@ TEST_CASE("a planet file refuses what it doesn't know or can't be", "[globe][pla
     CHECK_FALSE(hog::globe::load_planet("no/such/planet.toml").has_value());
 }
 
+TEST_CASE("a moon preset can be set to another size", "[globe][planet]") {
+    const auto planet = hog::globe::parse_planet(
+        "[globe]\npreset = \"moon\"\nradius = 868500.0\ngravity = 0.81\n");
+    REQUIRE(planet.has_value());
+    CHECK(planet->radius == 868'500.0);
+    CHECK(planet->gravity == 0.81);
+    CHECK(planet->pressure == 0.0);
+    CHECK(hog::globe::validate(*planet).has_value());
+}
+
 TEST_CASE("a world's id tells its knobs apart", "[globe][planet]") {
     const hog::globe::Planet earth;
     hog::globe::Planet other = earth;
