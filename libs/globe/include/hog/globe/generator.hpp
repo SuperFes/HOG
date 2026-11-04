@@ -7,8 +7,10 @@
 
 #include <algorithm>
 #include <array>
+#include <functional>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -69,7 +71,9 @@ struct Rock {
 // every platform. The planet's centre is the origin and its spin axis +z.
 class Generator {
 public:
-    explicit Generator(const Planet& planet);
+    // Told what it's at as each long stage of making the planet starts, if it's given a way to.
+    using Progress = std::function<void(std::string_view)>;
+    explicit Generator(const Planet& planet, const Progress& progress = {});
 
     [[nodiscard]] const Planet& planet() const noexcept { return planet_; }
     [[nodiscard]] const Derived& derived() const noexcept { return derived_; }
