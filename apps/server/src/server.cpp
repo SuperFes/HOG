@@ -1,6 +1,7 @@
 #include <hog/app/server.hpp>
 #include <hog/chat/filter.hpp>
 #include <hog/core/profile.hpp>
+#include <hog/core/text_file.hpp>
 #include <hog/globe/brick_archive.hpp>
 #include <hog/globe/material.hpp>
 #include <hog/net/simulation.hpp>
@@ -133,6 +134,17 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
     globe::Planet globe;
     globe.seed = planet->seed;
     globe.radius = planet->radius;
+    // A [globe] table in the planet's own file sets the rest of the voxel world's knobs, as a
+    // client's planet file does; its radius, if it gives one, is the world's.
+    const auto text = read_text_file(config.planet);
+    if (text && text->contains("[globe]")) {
+        auto described = globe::parse_planet(*text);
+        if (!described) {
+            return context(config.planet.string(), described.error());
+        }
+        described->seed = planet->seed;
+        globe = *described;
+    }
     if (auto valid = globe::validate(globe); !valid) {
         return std::unexpected(std::move(valid).error());
     }

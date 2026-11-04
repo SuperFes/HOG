@@ -121,3 +121,17 @@ TEST_CASE("population sizing checks its inputs", "[planet][config]") {
     CHECK_THROWS_AS(hog::planet::radius_for_population({.population = 0.0}, 0.7), AssertionFailed);
     CHECK_THROWS_AS(hog::planet::radius_for_population({.population = 1.0}, 1.0), AssertionFailed);
 }
+
+TEST_CASE("a planet file may carry the voxel world's own [globe] table", "[planet][config]") {
+    const auto config = parse_planet_config(R"(
+[planet]
+seed = 7
+radius_km = 30
+
+[globe]
+preset = "earth"
+wear = 0.03
+)");
+    REQUIRE(config);
+    CHECK(config->seed == 7);
+}
