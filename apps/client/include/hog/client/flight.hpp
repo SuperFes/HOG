@@ -35,6 +35,8 @@ struct FlySettings {
     double speed = 0.5;
     double slowest = 3.0; // metres a second
     double lowest = 2.0;  // metres above the ground the eye keeps
+    // Through the ground, as a ghost: nothing holds the eye above it, to look round under it.
+    bool through = false;
 };
 
 // Over a unit `direction`, `altitude` metres above sea level, facing along the ground towards

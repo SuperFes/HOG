@@ -10,8 +10,8 @@
 #include <hog/client/picture.hpp>
 #include <hog/client/player.hpp>
 #include <hog/client/scene.hpp>
-#include <hog/client/storage_estimate.hpp>
 #include <hog/client/session.hpp>
+#include <hog/client/storage_estimate.hpp>
 #include <hog/core/image.hpp>
 #include <hog/core/log.hpp>
 #include <hog/core/profile.hpp>
@@ -97,6 +97,7 @@ struct Controls {
     double speed = client::FlySettings{}.speed;
     double behind = ::behind; // metres, while walking
     bool walking = false;
+    bool through = false;     // flying through the ground
     bool timings = false;     // shown over the picture
     bool next_clouds = false; // asked to draw the clouds at the next quality
     bool may_chat = false;    // connected to a server to chat on
@@ -124,6 +125,8 @@ void press(const SDL_KeyboardEvent& key, Controls& controls) {
         controls.chatting = true;
     } else if (key.key == SDLK_F && !key.repeat) {
         controls.walking = !controls.walking;
+    } else if (key.key == SDLK_G && !key.repeat) {
+        controls.through = !controls.through;
     } else if (key.key == SDLK_F3 && !key.repeat) {
         controls.timings = !controls.timings;
     } else if (key.key == SDLK_F4 && !key.repeat) {
@@ -823,7 +826,7 @@ render::Camera move(const Controls& controls, std::optional<client::Player>& pla
         flight = client::fly(
             flight, {.move = movement(controls), .look = controls.look, .seconds = seconds},
             globe.generator.planet().radius, drawn_ground(globe, flight.eye),
-            {.speed = controls.speed * (faster ? fast : 1.0)});
+            {.speed = controls.speed * (faster ? fast : 1.0), .through = controls.through});
         return client::flight_camera(flight, client::vertical_fov);
     }
     flight = client::looked(flight, controls.look);

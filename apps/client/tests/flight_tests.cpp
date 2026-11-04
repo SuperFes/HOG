@@ -93,6 +93,20 @@ TEST_CASE("the eye keeps above the ground", "[client][flight]") {
     CHECK(up_at(dived).y == Approx(1.0));
 }
 
+TEST_CASE("a ghost flies down through the ground, at the slowest speed under it",
+          "[client][flight]") {
+    const hog::client::FlySettings settings{.through = true};
+    const Flight start = start_flight({0.0, 1.0, 0.0}, radius, 300.0, {0.0, 0.0, 1.0});
+    const Flight dived =
+        fly(start, {.move = {0.0, -1.0, 0.0}, .seconds = 100.0}, radius, 250.0, settings);
+    CHECK(height_of(dived) < 0.0);
+    // Under the ground the speed is the slowest, not the height's.
+    const Flight under =
+        fly(dived, {.move = {0.0, -1.0, 0.0}, .seconds = 2.0}, radius, 250.0, settings);
+    CHECK(height_of(dived) - height_of(under) == Approx(2.0 * settings.slowest));
+    CHECK(up_at(under).y == Approx(1.0));
+}
+
 TEST_CASE("flying round the planet keeps the horizon level, over the poles too",
           "[client][flight]") {
     // From the equator due north, over the pole and down the far side.
