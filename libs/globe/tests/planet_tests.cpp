@@ -1,3 +1,5 @@
+#include <hog/globe/cell.hpp>
+#include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -228,4 +230,32 @@ TEST_CASE("a world's id tells its knobs apart", "[globe][planet]") {
     CHECK(hog::globe::world_id(earth) != hog::globe::world_id(larger));
     CHECK(hog::globe::world_id(earth) !=
           hog::globe::world_id(hog::globe::preset("moon").value_or(hog::globe::Planet{})));
+}
+
+TEST_CASE("heights keep their proportion to the radius", "[globe][planet]") {
+    const Planet full;
+    Planet small;
+    small.radius = full.radius / 8.0;
+    const auto wide = hog::globe::derive(full);
+    const auto narrow = hog::globe::derive(small);
+    CHECK(wide.vertical == 1.0);
+    CHECK(std::abs(narrow.vertical - 0.125) < 1e-12);
+    CHECK(std::abs(narrow.tallest - (0.125 * wide.tallest)) < 1e-6);
+    CHECK(std::abs(narrow.crater_transition - (0.125 * wide.crater_transition)) < 1e-6);
+    CHECK(std::abs(narrow.isostatic_step - (0.125 * wide.isostatic_step)) < 1e-6);
+}
+
+TEST_CASE("a small world's ground stays inside its shell", "[globe][planet]") {
+    Planet small;
+    small.radius = 15'000.0;
+    small.floor_depth = 500.0;
+    small.sky_height = 3'000.0;
+    const hog::globe::Generator generator{small};
+    for (std::uint64_t k = 0; k < 98'304; k += 997) {
+        const auto ground = hog::globe::ground_below(
+            generator, hog::globe::center(hog::globe::cell_at_index(7, k)), 20.0);
+        REQUIRE(ground.has_value());
+        CHECK(*ground - small.radius < small.sky_height);
+        CHECK(*ground - small.radius > -small.floor_depth - 1'000.0);
+    }
 }
