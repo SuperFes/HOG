@@ -1,5 +1,6 @@
 #include <hog/chat/filter.hpp>
 #include <hog/client/chat.hpp>
+#include <hog/client/cutaway.hpp>
 #include <hog/client/daylight.hpp>
 #include <hog/client/flight.hpp>
 #include <hog/client/forecast.hpp>
@@ -125,9 +126,11 @@ void press(const SDL_KeyboardEvent& key, Controls& controls) {
     } else if (key.key == SDLK_RETURN && !key.repeat && controls.may_chat) {
         controls.chatting = true;
     } else if (key.key == SDLK_F && !key.repeat) {
-        controls.walking = !controls.walking;
+        // Nowhere to stand but the surface, so a ghost leaves that to G.
+        controls.walking = !controls.walking && !controls.through;
     } else if (key.key == SDLK_G && !key.repeat) {
         controls.through = !controls.through;
+        controls.walking = controls.walking && !controls.through;
     } else if (key.key == SDLK_F3 && !key.repeat) {
         controls.timings = !controls.timings;
     } else if (key.key == SDLK_F4 && !key.repeat) {
@@ -833,7 +836,9 @@ render::Camera move(const Controls& controls, std::optional<client::Player>& pla
         flight = client::fly(
             flight, {.move = movement(controls), .look = controls.look, .seconds = seconds},
             globe.generator.planet().radius, drawn_ground(globe, flight.eye),
-            {.speed = controls.speed * (faster ? fast : 1.0), .through = controls.through});
+            {.speed = controls.speed * (faster ? fast : 1.0),
+             .through = controls.through,
+             .underground = client::FlySettings{}.underground * (faster ? fast : 1.0)});
         return client::flight_camera(flight, client::vertical_fov);
     }
     flight = client::looked(flight, controls.look);
@@ -845,6 +850,37 @@ render::Camera move(const Controls& controls, std::optional<client::Player>& pla
     const DVec3 back = -client::flight_camera(flight, client::vertical_fov).forward;
     return client::third_person(flight, player->room(flight.eye, back, controls.behind),
                                 client::vertical_fov);
+}
+
+// The ground's inside as drawn round the eye, made again once the eye has moved off its middle
+// by this share of its radius: well under what the bare part of the cutaway leaves.
+constexpr double cutaway_remake = 0.1;
+
+// What's drawn of the ground's inside, and where it was made.
+struct Cutaway {
+    WorldPosition at;
+    double radius = 0.0;
+    bool shown = false;
+};
+
+// Draws the ground's inside as a shell round the eye while flying through the ground, made again
+// as the eye moves off its middle or the bubble changes size, and takes it away otherwise.
+void update_cutaway(Cutaway& drawn, double wanted, const render::Camera& camera,
+                    const client::GlobeWorld& globe, client::Scene& scene) {
+    const double radius = std::floor(wanted);
+    if (radius < 1.0) {
+        if (std::exchange(drawn.shown, false)) {
+            scene.show_cutaway(nullptr);
+        }
+        return;
+    }
+    if (drawn.shown && drawn.radius == radius &&
+        glm::length(camera.eye.metres() - drawn.at.metres()) <= cutaway_remake * radius) {
+        return;
+    }
+    drawn = {.at = camera.eye, .radius = radius, .shown = true};
+    scene.show_cutaway(std::make_shared<const terrain::BlockMesh>(
+        client::cutaway_shell(globe.generator, camera.eye, radius)));
 }
 
 // Sends what the chat box finished, if anything; an empty line says nothing.
@@ -911,6 +947,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, client::Globe
     std::optional<client::Player> player;
     client::Forecast forecast{radius};
     ChatBox chat;
+    Cutaway cut;
     bool routed_to_chat = false;
     render::Camera camera = client::flight_camera(flight, client::vertical_fov);
     while (!controls.quit) {
@@ -975,11 +1012,13 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, client::Globe
             // The server doesn't say who the player is, so they take the colour of no one.
             avatars.push_back(client::avatar(player->feet(), client::colour_of(protocol::NetId{})));
         }
+        const double cutaway = controls.through && !player ? controls.cutaway : 0.0;
+        update_cutaway(cut, cutaway, camera, globe, scene);
         const client::Shot shot{.camera = camera,
                                 .bend = bend,
                                 .time = clock.time(),
                                 .seconds = seconds,
-                                .cutaway = controls.through && !player ? controls.cutaway : 0.0,
+                                .cutaway = std::floor(cutaway),
                                 .companion = companion,
                                 .others = std::move(avatars),
                                 .forecast = &forecast,

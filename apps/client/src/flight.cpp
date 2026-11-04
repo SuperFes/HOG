@@ -57,7 +57,9 @@ Flight fly(const Flight& flight, const FlyInput& input, double planet_radius, do
 
     const double floor = planet_radius + ground + settings.lowest;
     const double height = std::max(glm::length(flight.eye.metres()) - floor, 0.0);
-    const double speed = std::max(settings.slowest, height * settings.speed);
+    const double least =
+        settings.through && height <= 0.0 ? settings.underground : settings.slowest;
+    const double speed = std::max(least, height * settings.speed);
     next.eye += ((right_of(next) * input.move.x) + (up * input.move.y) +
                  (forward_of(next) * input.move.z)) *
                 (speed * input.seconds);

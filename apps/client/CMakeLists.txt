@@ -7,6 +7,7 @@ target_compile_definitions(stb_image PUBLIC STBI_ONLY_PNG)
 
 add_library(hog_client
     src/chat.cpp
+    src/cutaway.cpp
     src/daylight.cpp
     src/flight.cpp
     src/forecast.cpp
@@ -34,6 +35,7 @@ hog_target_defaults(hog_client)
 hog_add_tests(hog_client
     tests/chat_tests.cpp
     tests/daylight_tests.cpp
+    tests/cutaway_tests.cpp
     tests/flight_tests.cpp
     tests/forecast_tests.cpp
     tests/frame_times_tests.cpp

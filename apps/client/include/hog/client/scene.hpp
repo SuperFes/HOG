@@ -134,6 +134,8 @@ public:
     // meshes again the chunks the changed bricks touch.
     void finish_globe();
     void change_globe(std::span<const globe::BrickSite> bricks);
+    // The ground's inside drawn round the eye, in place of any shown before; none takes it away.
+    void show_cutaway(std::shared_ptr<const terrain::BlockMesh> shell);
 
     [[nodiscard]] render::CloudQuality cloud_quality() const noexcept { return clouds_.quality(); }
     // The GPU must have finished with the frames recorded before.

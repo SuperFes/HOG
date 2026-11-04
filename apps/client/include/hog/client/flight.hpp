@@ -37,6 +37,8 @@ struct FlySettings {
     double lowest = 2.0;  // metres above the ground the eye keeps
     // Through the ground, as a ghost: nothing holds the eye above it, to look round under it.
     bool through = false;
+    // The speed a ghost flies at under the ground, where no height above it sets one.
+    double underground = 12.0; // metres a second
 };
 
 // Over a unit `direction`, `altitude` metres above sea level, facing along the ground towards

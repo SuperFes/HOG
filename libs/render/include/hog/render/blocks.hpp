@@ -37,6 +37,9 @@ struct BlockView {
 
 // The most a cutaway can be, in metres.
 inline constexpr double block_cutaway_most = 200.0;
+// The share of it, from the eye, where ground isn't drawn; the rest is left for what's drawn at
+// its edge.
+inline constexpr double block_cutaway_inside = 0.8;
 
 // Metres a tile repeats over, and the far one laid over it, to break the near one's repetition.
 inline constexpr double block_tile = 4.0;
