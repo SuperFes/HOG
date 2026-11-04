@@ -131,8 +131,21 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
     }
     // The voxel world is Earth-like at the planet's seed and size, as the client's is by default.
     globe::Planet globe;
-    globe.seed = planet->seed;
-    globe.radius = planet->radius;
+    if (!config.globe.empty()) {
+        if (const auto preset = globe::preset(config.globe)) {
+            globe = *preset;
+        } else {
+            auto described = globe::load_planet(config.globe);
+            if (!described) {
+                return std::unexpected(std::move(described).error());
+            }
+            globe = *described;
+        }
+        globe.seed = planet->seed;
+    } else {
+        globe.seed = planet->seed;
+        globe.radius = planet->radius;
+    }
     if (auto valid = globe::validate(globe); !valid) {
         return std::unexpected(std::move(valid).error());
     }

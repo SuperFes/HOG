@@ -1,4 +1,5 @@
 #include <hog/core/text_file.hpp>
+#include <hog/globe/planet.hpp>
 #include <hog/protocol/messages.hpp>
 #include <hog/server/server_config.hpp>
 
@@ -177,7 +178,7 @@ private:
 
 [[nodiscard]] Result<void> parse_server(const Table& server, const std::filesystem::path& base,
                                         ServerConfig& config) {
-    if (auto known = server.only({"world", "planet", "tick_rate", "max_burst"}); !known) {
+    if (auto known = server.only({"world", "planet", "globe", "tick_rate", "max_burst"}); !known) {
         return known;
     }
     for (auto [key, path] : {std::pair{"world", &config.world}, {"planet", &config.planet}}) {
@@ -189,6 +190,15 @@ private:
             return invalid(std::format("server.{} is required", key));
         }
         *path = (base / **value).lexically_normal();
+    }
+    const auto globe = server.string("globe");
+    if (!globe) {
+        return std::unexpected(globe.error());
+    }
+    if (*globe) {
+        // A preset is named; anything else is a file beside the config.
+        config.globe = globe::preset(**globe) ? std::string{**globe}
+                                              : (base / **globe).lexically_normal().string();
     }
     const auto rate = server.integer("tick_rate", 1, max_rate);
     const auto burst = server.integer("max_burst", 1, max_burst_limit);
