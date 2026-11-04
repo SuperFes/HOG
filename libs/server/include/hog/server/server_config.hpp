@@ -58,9 +58,6 @@ struct WeatherConfig {
 struct ServerConfig {
     std::filesystem::path world; // the world database
     std::filesystem::path planet;
-    // The voxel world's planet: a preset's name or a planet file, whose knobs the world takes, with
-    // the seed of `planet`; none is the default planet at `planet`'s radius.
-    std::string globe;
     std::uint32_t tick_rate = idle_rate;
     std::uint32_t max_burst = 5;
     GameDuration save_interval = std::chrono::minutes{5};
@@ -81,7 +78,6 @@ struct ServerConfig {
 //     [server]
 //     world = "../var/world.db"
 //     planet = "planet.toml"
-//     globe = "little-earth.toml"  # optional, a preset or a planet file
 //     tick_rate = 20             # optional, hertz
 //     max_burst = 5              # optional
 //
