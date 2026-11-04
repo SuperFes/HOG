@@ -59,6 +59,9 @@ struct Planet {
     double pole_temperature = 245.0;
     Volatile volatiles = Volatile::Water;
     double sea_fraction = 0.7; // of the surface, where liquid can stand
+    // How hard running water has worn the land before the world begins, as the drainage's erosion
+    // rate; none at 0.
+    double wear = 0.0;
 };
 
 // What follows from the knobs by known physics.

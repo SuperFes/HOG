@@ -303,3 +303,28 @@ TEST_CASE("the highest ground surveyed bounds the ground", "[globe][generator]")
         CHECK(ground < (world.shape().highest * 1.25) + 50.0);
     }
 }
+
+TEST_CASE("running water wears the land and leaves the sea and the world's size", "[globe][generator]") {
+    auto planet = *hog::globe::preset("earth");
+    planet.radius = 4'000.0;
+    planet.floor_depth = 100.0;
+    planet.sky_height = 500.0;
+    const Generator dry{planet};
+    planet.wear = 0.03;
+    const Generator worn{planet};
+    REQUIRE(!worn.shape().cut.empty());
+    CHECK(dry.shape().cut.empty());
+    const auto [least, most] = std::ranges::minmax(worn.shape().cut);
+    CHECK(least >= 0.0F);
+    CHECK(most > 1.0F);
+    double lowered = 0.0;
+    double raised = 0.0;
+    for (std::uint64_t k = 0; k < 400; ++k) {
+        const DVec3 up = hog::globe::center(hog::globe::cell_at_index(5, k * 13));
+        const double change = worn.column(up, 200.0).ground() - dry.column(up, 200.0).ground();
+        lowered = std::min(lowered, change);
+        raised = std::max(raised, change);
+    }
+    CHECK(lowered < -1.0);
+    CHECK(raised < 1e-6);
+}

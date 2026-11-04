@@ -36,6 +36,7 @@ constexpr std::array numbers{
     std::pair{"equator_temperature"sv, &Planet::equator_temperature},
     std::pair{"pole_temperature"sv, &Planet::pole_temperature},
     std::pair{"sea_fraction"sv, &Planet::sea_fraction},
+    std::pair{"wear"sv, &Planet::wear},
 };
 
 constexpr std::array regimes{std::pair{"plates"sv, Regime::Plates},

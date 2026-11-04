@@ -3,6 +3,7 @@
 #include <hog/core/assert.hpp>
 #include <hog/core/hash.hpp>
 #include <hog/globe/cell.hpp>
+#include <hog/globe/drainage.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/maths.hpp>
 #include <hog/globe/voxel.hpp>
@@ -14,6 +15,7 @@
 #include <numbers>
 #include <optional>
 #include <span>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -96,6 +98,70 @@ Tilt ground_tilt(const terms::Context& context, DVec3 direction, double lod) {
             .rise = (across_east * east) + (across_north * north)};
 }
 
+// The steps the running water wears over, and the cell width its drainage is worked on.
+constexpr int wear_steps = 20;
+constexpr double wear_cell = 180.0;
+
+int wear_level_for(double radius) {
+    const double cells = radius * std::numbers::pi / 2.0 / wear_cell;
+    return std::clamp(static_cast<int>(std::lround(std::log2(cells))), 3, 10);
+}
+
+// Metres the water has cut from the ground under `direction`: the cuts of the cell it lies in and
+// those around it, weighted by nearness, so the cut changes smoothly from cell to cell.
+double cut_under(const Generator::Shape& shape, DVec3 direction) {
+    if (shape.cut.empty()) {
+        return 0.0;
+    }
+    const double spacing = std::numbers::pi / 2.0 / static_cast<double>(1 << shape.cut_level);
+    const Cell home = cell_under(direction, shape.cut_level);
+    double total = 0.0;
+    double weights = 0.0;
+    const auto add = [&](Cell cell) {
+        const double near = 1.0 - (glm::length(center(cell) - direction) / (1.5 * spacing));
+        if (near > 0.0) {
+            total += near * static_cast<double>(shape.cut[index_of(cell)]);
+            weights += near;
+        }
+    };
+    add(home);
+    const CellNeighbors beside = around(home);
+    for (const Cell cell : beside.all()) {
+        add(cell);
+    }
+    return total / weights;
+}
+
+// The ground's cuts by the running water, found by wearing the generated ground on the drainage.
+void wear_ground(const Planet& planet, const terms::Context& context, Generator::Shape& shape) {
+    const int level = wear_level_for(planet.radius);
+    const std::size_t count = static_cast<std::size_t>(cells_at(level));
+    const double lod = planet.radius * std::numbers::pi / 2.0 / static_cast<double>(1 << level);
+    std::vector<float> ground(count);
+    const unsigned workers = std::max(1U, std::thread::hardware_concurrency());
+    {
+        std::vector<std::jthread> threads;
+        for (unsigned worker = 0; worker < workers; ++worker) {
+            threads.emplace_back([&, worker] {
+                for (std::size_t cell = worker; cell < count; cell += workers) {
+                    const DVec3 up = center(cell_at_index(level, cell));
+                    ground[cell] = static_cast<float>(
+                        terms::ground(context, up, lod).height - shape.datum);
+                }
+            });
+        }
+    }
+    const double sea = shape.sea ? 0.0 : -1e30;
+    const std::vector<float> worn =
+        erode(ground, level, planet.radius, sea,
+              {.rate = planet.wear, .steps = wear_steps});
+    shape.cut.resize(count);
+    for (std::size_t cell = 0; cell < count; ++cell) {
+        shape.cut[cell] = ground[cell] - worn[cell];
+    }
+    shape.cut_level = level;
+}
+
 std::vector<Surveyed> survey(const auto& measure) {
     std::vector<Surveyed> values;
     values.reserve(cells_at(survey_level));
@@ -148,6 +214,11 @@ Generator::Generator(const Planet& planet) : planet_{planet}, derived_{derive(pl
     }
     shape_.lowest = std::ranges::min(heights, {}, &Surveyed::value).value - shape_.datum;
     shape_.highest = std::ranges::max(heights, {}, &Surveyed::value).value - shape_.datum;
+    if (planet_.wear > 0.0) {
+        wear_ground(planet_, context, shape_);
+        const float cut = *std::ranges::max_element(shape_.cut);
+        shape_.lowest -= static_cast<double>(cut);
+    }
     layers_ = layers_about(planet_.radius, planet_.floor_depth + std::max(0.0, -shape_.lowest),
                            planet_.sky_height, planet_.voxel);
 }
@@ -523,6 +594,7 @@ Ground ground(const Context& context, DVec3 direction, double lod) noexcept {
     const Planet& planet = *context.planet;
     Ground made;
     made.rock = column(context, direction, lod);
+    made.rock.height.value -= cut_under(*context.shape, direction);
     const double latitude = maths::atan2(
         direction.z, std::sqrt((direction.x * direction.x) + (direction.y * direction.y)));
     made.surface_temperature = temperature_at(planet, latitude);
