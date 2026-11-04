@@ -106,8 +106,6 @@ constexpr std::array kept{
          .keep = [](Options& options, std::string_view value) { options.companion = value; }},
     Kept{.name = "--capture",
          .keep = [](Options& options, std::string_view value) { options.capture = value; }},
-    Kept{.name = "--globe-planet",
-         .keep = [](Options& options, std::string_view value) { options.globe_planet = value; }},
 };
 
 const Kept* kept_named(std::string_view option) {
@@ -287,8 +285,6 @@ options:
                          talk about the weather either way
   --clouds QUALITY       draw the clouds at low, medium or high quality, for what
                          the GPU can afford (default high)
-  --globe-planet NAME    the voxel world of the earth, mars, venus or moon preset or a
-                         planet file
   --voxel METRES         the voxel world's cell size, finer or coarser than the planet's
                          own (0.5 by default); for looking, flying alone
   --surface SOURCE       draw the ground from the voxels' stored distances (default) or

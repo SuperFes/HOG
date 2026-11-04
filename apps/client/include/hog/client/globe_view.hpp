@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <filesystem>
 #include <optional>
 #include <set>
 #include <span>
@@ -32,6 +33,11 @@ namespace hog::client {
 // fits it.
 [[nodiscard]] Result<globe::Planet> globe_planet(std::optional<std::string_view> named,
                                                  std::uint64_t seed, double radius);
+
+// The voxel world a planet file describes: its [globe] table, with the world's seed, or Earth's
+// knobs at the seed and radius given if it has none.
+[[nodiscard]] Result<globe::Planet> globe_planet_in(const std::filesystem::path& file,
+                                                    std::uint64_t seed, double radius);
 
 // The voxel world drawn in place of the ground, nothing yet changed in it.
 struct GlobeWorld {

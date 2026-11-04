@@ -286,3 +286,20 @@ TEST_CASE("a planet file keeps its own size and takes the config's seed", "[glob
     REQUIRE(preset.has_value());
     CHECK(preset->radius == 115'000.0);
 }
+
+TEST_CASE("a planet file's [globe] table is the voxel world drawn, at the world's seed",
+          "[client][globe]") {
+    const auto path = std::filesystem::temp_directory_path() / "hog_globe_view_in_planet.toml";
+    std::ofstream{path} << "[planet]\nseed = 1\n\n[globe]\npreset = \"earth\"\nradius = 12000.0\n"
+                           "floor_depth = 200.0\nsky_height = 800.0\nvoxel = 1.5\nwear = 0.02\n";
+    const auto planet = hog::client::globe_planet_in(path, 9, 115'000.0);
+    std::filesystem::remove(path);
+    REQUIRE(planet);
+    CHECK(planet->seed == 9);
+    CHECK(planet->radius == 12'000.0);
+    CHECK(planet->voxel == 1.5);
+    CHECK(planet->wear == 0.02);
+    const auto none = hog::client::globe_planet_in(path, 9, 90'000.0);
+    REQUIRE(none);
+    CHECK(none->radius == 90'000.0);
+}
