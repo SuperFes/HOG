@@ -1,15 +1,7 @@
-# The working world: Earth's air, water and plates on a 15 km radius, with the crusts and shell
-# shrunk so the relief stays inside the planet.
+# The working world: Earth's air, water and plates on a 15 km radius. Heights follow the radius,
+# so the relief is proportionate to it; only the shell is set here.
 [globe]
 preset = "earth"
 radius = 15000.0
-floor_depth = 300.0
-sky_height = 4000.0
-
-[globe.high]
-rock = "granite"
-thickness = 1500.0
-
-[globe.low]
-rock = "basalt"
-thickness = 300.0
+floor_depth = 500.0
+sky_height = 3000.0

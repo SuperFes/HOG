@@ -177,12 +177,17 @@ std::optional<double> boiling_point(Volatile volatiles, double pressure) {
 
 Derived derive(const Planet& planet) {
     Derived derived;
+    // Heights are tuned at the game's size and keep their proportion to the planet's width at
+    // any other: a smaller world has proportionately lower mountains, thinner crust and smaller
+    // craters, not Earth's relief on a few kilometres of radius.
+    derived.vertical = planet.lateral_scale * planet.radius / Planet{}.radius;
     derived.strength_height = strength_height(planet.high, planet.gravity);
     const double earth = strength_height({.rock = Material::Granite}, earth_gravity);
-    derived.crater_transition = earth_transition * derived.strength_height / earth;
-    derived.tallest = earth_tallest * derived.strength_height / earth;
+    derived.crater_transition = earth_transition * derived.strength_height / earth * derived.vertical;
+    derived.tallest = earth_tallest * derived.strength_height / earth * derived.vertical;
     const auto floats = [&](const Crust& crust) {
-        return crust.thickness * (1.0 - (properties(crust.rock).density / planet.mantle_density));
+        return crust.thickness * derived.vertical *
+               (1.0 - (properties(crust.rock).density / planet.mantle_density));
     };
     derived.isostatic_step = floats(planet.high) - floats(planet.low);
     derived.geotherm = planet.heat_flow / conductivity;

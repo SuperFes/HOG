@@ -71,6 +71,7 @@ struct Derived {
     double geotherm = 0.0;          // K/m down through the crust
     double floor_temperature = 0.0; // kelvin
     double lateral = 0.0;           // feature widths as a share of Earth's
+    double vertical = 0.0;          // heights as a share of those at the default radius
     bool liquid = false;            // the volatile is liquid somewhere on the surface
     bool ice = false;               // and frozen somewhere
     bool fluvial = false;
