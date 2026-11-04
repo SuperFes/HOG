@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <format>
 #include <fstream>
+#include <iostream>
 #include <map>
 #include <numbers>
 #include <span>
@@ -240,7 +241,8 @@ Image map(const Generator& generator, int width, int threads) {
     return shade(generator, grid, spacing, shrink, spacing, true);
 }
 
-Image drainage(const Generator& generator, int width, int level, int threads) {
+Image drainage(const Generator& generator, int width, int level, int threads,
+               const globe::Erosion& erosion) {
     const double radius = generator.planet().radius;
     const std::uint64_t count = globe::cells_at(level);
     const double lod = radius * std::numbers::pi / 2.0 / static_cast<double>(1 << level);
@@ -255,6 +257,27 @@ Image drainage(const Generator& generator, int width, int level, int threads) {
         }
     });
     const double sea = generator.sea_level() ? 0.0 : -1e30;
+    const auto lakes = [&](const std::vector<float>& heights) {
+        const globe::Drainage found = globe::drain(heights, level, radius, sea);
+        std::size_t held = 0;
+        for (std::uint32_t cell = 0; cell < heights.size(); ++cell) {
+            held += heights[cell] > sea && found.depth(cell) > 0.5 ? 1 : 0;
+        }
+        return held;
+    };
+    if (erosion.steps > 0) {
+        const std::size_t before = lakes(ground);
+        const std::vector<float> worn = globe::erode(ground, level, radius, sea, erosion);
+        double most = 0.0;
+        double total = 0.0;
+        for (std::size_t cell = 0; cell < worn.size(); ++cell) {
+            most = std::max(most, static_cast<double>(ground[cell] - worn[cell]));
+            total += ground[cell] - worn[cell];
+        }
+        std::cerr << std::format("lake cells {} -> {}, cut at most {:.1f} m, on average {:.3f} m\n",
+                                 before, lakes(worn), most, total / static_cast<double>(worn.size()));
+        ground = worn;
+    }
     const globe::Drainage drained = globe::drain(ground, level, radius, sea);
 
     const int height = std::max(width / 2, 1);

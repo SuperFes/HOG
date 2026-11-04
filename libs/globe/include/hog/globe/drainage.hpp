@@ -17,6 +17,8 @@ struct Drainage {
     // sea is its own.
     std::vector<std::uint32_t> receiver;
     std::vector<double> catchment; // square metres draining through the cell, its own included
+    // Every cell, each after the cell it runs on to: downstream first.
+    std::vector<std::uint32_t> order;
 
     // How deep the water stands over a cell's ground once its hollow is full.
     [[nodiscard]] double depth(std::uint32_t cell) const noexcept {
@@ -29,5 +31,20 @@ struct Drainage {
 // height over the radius in metres, in the level's cell order; cells at or under `sea` are where
 // water leaves. Without any, the lowest cell is. `radius` is the planet's, for the cells' areas.
 [[nodiscard]] Drainage drain(std::span<const float> ground, int level, double radius, double sea);
+
+// How hard running water wears the ground: each step, a cell is cut by the stream power law, a
+// rate of K·A^m·slope, for `step` seconds-worth of K.
+struct Erosion {
+    double rate = 1.0e-4; // K times the step: metres of fall per unit of area^m
+    double area_power = 0.5;
+    int steps = 20;
+};
+
+// The ground after running water has cut it: each step the drainage is worked out again, and each
+// cell lowered toward the one it runs on to by how much drains through it, solved so no step
+// overshoots whatever its size. Hollows holding water aren't cut, and cells at the sea are left;
+// ground is only ever lowered, and the rock cut away isn't put back anywhere.
+[[nodiscard]] std::vector<float> erode(std::span<const float> ground, int level, double radius,
+                                       double sea, const Erosion& erosion);
 
 } // namespace hog::globe

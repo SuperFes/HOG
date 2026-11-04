@@ -62,3 +62,29 @@ TEST_CASE("a hollow in high ground fills to its rim and spills", "[globe][draina
         CHECK(drained.filled[cell] >= ground[cell]);
     }
 }
+
+TEST_CASE("running water only lowers ground, most where most drains, and leaves the sea",
+          "[globe][drainage]") {
+    const auto ground = slope([](hog::DVec3 up, std::size_t) {
+        return 100.0 * up.z + (5.0 * std::sin(40.0 * up.x));
+    });
+    const hog::globe::Drainage before = hog::globe::drain(ground, level, radius, 0.0);
+    const std::vector<float> after = hog::globe::erode(ground, level, radius, 0.0,
+                                                      {.rate = 1.0e-3, .steps = 5});
+    double cut_most = 0.0;
+    double drains_most = 0.0;
+    for (std::size_t cell = 0; cell < ground.size(); ++cell) {
+        CHECK(after[cell] <= ground[cell]);
+        if (ground[cell] <= 0.0F) {
+            CHECK(after[cell] == ground[cell]);
+        }
+        if (ground[cell] - after[cell] > cut_most) {
+            cut_most = ground[cell] - after[cell];
+            drains_most = before.catchment[cell];
+        }
+    }
+    CHECK(cut_most > 0.0);
+    // The deepest cut is under well more than an average cell's share.
+    CHECK(drains_most > 10.0 * before.catchment[0] / 4.0);
+    CHECK(hog::globe::erode(ground, level, radius, 0.0, {.rate = 1.0e-3, .steps = 5}) == after);
+}
