@@ -224,6 +224,16 @@ void Scene::change_globe(std::span<const globe::BrickSite> bricks) {
     }
 }
 
+void Scene::show_cutaway(std::shared_ptr<const terrain::BlockMesh> shell) {
+    // Past every chunk's key.
+    constexpr std::uint64_t key = ~std::uint64_t{0};
+    if (shell) {
+        blocks_.place(key, std::move(shell));
+    } else {
+        blocks_.remove(key);
+    }
+}
+
 render::SkyView Scene::sky_view(const Shot& shot, render::CloudShade shade) {
     const DVec3 sun = calendar_.sun_direction(shot.time);
     const EyeLight light =

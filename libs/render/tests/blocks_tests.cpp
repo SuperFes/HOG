@@ -364,7 +364,7 @@ TEST_CASE("ground inside the cutaway isn't drawn, and a lamp lights what's left"
     // Past the cutaway it's drawn, and brighter for the lamp.
     const Pixel lit = middle(draw(*device, square(), sun, {}, {0.0, 0.0, 1.0}, 3.0));
     CHECK(lit[0] > plain[0]);
-    // Within it, gone: the background shows.
-    const Pixel gone = middle(draw(*device, square(), sun, {}, {0.0, 0.0, 1.0}, 6.0));
+    // Within most of it, gone: the background shows.
+    const Pixel gone = middle(draw(*device, square(), sun, {}, {0.0, 0.0, 1.0}, 7.0));
     CHECK(gone == Pixel{0, 0, 0, 255});
 }

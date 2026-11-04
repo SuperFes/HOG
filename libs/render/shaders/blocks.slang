@@ -37,8 +37,12 @@ struct Vertex {
     [[vk::location(2)]] uint4 tiles;
 };
 
+// Ground is left undrawn only within this share of the cutaway, so a shell standing about it,
+// as the eye moves off its middle, is never in the bare part: render::block_cutaway_inside.
+static const float cutaway_inside = 0.8;
+
 // How bright the lamp at the eye shines, and how far it reaches in cutaways.
-static const float lamp = 2.0;
+static const float lamp = 0.5;
 static const float lamp_reach = 6.0;
 
 // Soaked, the ground is this much darker: light gets further into it before it comes back.
@@ -169,7 +173,7 @@ float4 fragment_main(Surface surface) : SV_Target {
     const float cutaway = floor(push.faked_night.y);
     const float night = push.faked_night.y - cutaway;
     const float away = length(surface.from_eye);
-    if (away < cutaway) {
+    if (away < cutaway * cutaway_inside) {
         discard;
     }
     const float3 up = normalize(surface.up);

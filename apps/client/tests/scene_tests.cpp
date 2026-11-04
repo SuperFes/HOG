@@ -1,5 +1,6 @@
 #include "test_planet.hpp"
 
+#include <hog/client/cutaway.hpp>
 #include <hog/client/daylight.hpp>
 #include <hog/client/flight.hpp>
 #include <hog/client/forecast.hpp>
@@ -26,6 +27,7 @@
 #include <format>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <numbers>
 #include <optional>
 #include <span>
@@ -367,5 +369,52 @@ TEST_CASE("a swell on the coast, to look at", "[.look]") {
         REQUIRE(still);
         REQUIRE(hog::client::save_picture(
             std::filesystem::path{where} / std::format("swell_{}.png", name), *still));
+    }
+}
+
+TEST_CASE("under the ground in the cutaway, to look at", "[.look]") {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts
+    const char* where = std::getenv("HOG_LOOK");
+    REQUIRE(where != nullptr);
+    const auto device = test_device();
+    hog::jobs::JobSystem jobs{4};
+    // A small worn planet, made in seconds.
+    auto planet = hog::globe::preset("earth").value_or(hog::globe::Planet{});
+    planet.radius = 4'000.0;
+    planet.floor_depth = 100.0;
+    planet.sky_height = 500.0;
+    planet.wear = 0.03;
+    planet.voxel = 2.5;
+    const hog::client::GlobeWorld globe{planet};
+    auto scene = Scene::create(*device, globe.generator.planet(), jobs, calendar(),
+                               hog::client::still_format, 1);
+    REQUIRE(scene);
+    scene->follow_globe(globe.world);
+    const hog::DVec3 noon =
+        hog::globe::land_near(globe.generator, glm::normalize(hog::DVec3{1.0, 0.2, 0.3}), 3'000.0)
+            .value();
+    const hog::DVec3 at = glm::normalize(noon + hog::DVec3{0.0, 0.0, 0.3});
+    const double ground = hog::client::globe_ground(globe.generator, noon);
+    REQUIRE(ground > 20.0);
+    for (const double depth : {6.0, 20.0, 50.0}) {
+        for (const double bubble : {8.0, 24.0}) {
+            for (const double pitch : {-0.5, 0.0, 0.5}) {
+                hog::client::Flight flight =
+                    hog::client::start_flight(noon, planet.radius, ground - depth, at);
+                flight.pitch = pitch;
+                Shot shot = shot_of(flight, globe.generator);
+                shot.cutaway = bubble;
+                scene->show_cutaway(std::make_shared<const hog::terrain::BlockMesh>(
+                    hog::client::cutaway_shell(globe.generator, flight.eye, bubble)));
+                const auto still =
+                    hog::client::draw_still(*device, *scene, shot, {.width = 1600, .height = 900});
+                REQUIRE(still);
+                REQUIRE(hog::client::save_picture(
+                    std::filesystem::path{where} /
+                        std::format("cutaway_d{}_b{}_p{}.png", std::lround(depth),
+                                    std::lround(bubble), std::lround(pitch * 10.0)),
+                    *still));
+            }
+        }
     }
 }
