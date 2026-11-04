@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <optional>
 #include <print>
 #include <set>
@@ -269,4 +270,19 @@ TEST_CASE("a brick changed has the chunks drawn from it meshed again, and no oth
     CHECK(std::ranges::any_of(again.shown, [&](const auto& change) {
         return change.key == hog::client::globe_key(under);
     }));
+}
+
+TEST_CASE("a planet file keeps its own size and takes the config's seed", "[globe_view]") {
+    const auto path = std::filesystem::temp_directory_path() / "hog_globe_view_planet.toml";
+    {
+        std::ofstream{path} << "[globe]\npreset = \"moon\"\nradius = 868500.0\n";
+    }
+    const auto planet = hog::client::globe_planet(path.string(), 7, 115'000.0);
+    std::filesystem::remove(path);
+    REQUIRE(planet.has_value());
+    CHECK(planet->radius == 868'500.0);
+    CHECK(planet->seed == 7);
+    const auto preset = hog::client::globe_planet("moon", 7, 115'000.0);
+    REQUIRE(preset.has_value());
+    CHECK(preset->radius == 115'000.0);
 }

@@ -25,7 +25,12 @@ Result<globe::Planet> globe_planet(std::optional<std::string_view> named, std::u
         if (const auto preset = globe::preset(*named)) {
             planet = *preset;
         } else {
-            return globe::load_planet(std::string{*named});
+            // A planet file sets its own size.
+            auto loaded = globe::load_planet(std::string{*named});
+            if (loaded) {
+                loaded->seed = seed;
+            }
+            return loaded;
         }
     }
     planet.seed = seed;
