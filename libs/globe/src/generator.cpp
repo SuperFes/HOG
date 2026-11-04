@@ -102,7 +102,7 @@ Tilt ground_tilt(const terms::Context& context, DVec3 direction, double lod) {
 constexpr int wear_steps = 20;
 constexpr double wear_cell = 180.0;
 // Standing water this deep over the worn ground is a lake rather than a wet hollow.
-constexpr double lake_depth = 0.5;
+constexpr double lake_depth = 0.1;
 
 int wear_level_for(double radius) {
     const double cells = radius * std::numbers::pi / 2.0 / wear_cell;
