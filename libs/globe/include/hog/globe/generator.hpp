@@ -142,6 +142,10 @@ public:
         double lowest = 0.0;  // the lowest ground surveyed, metres over the radius
         double highest = 0.0; // and the highest
         bool sea = false;
+        // Metres the running water has cut from the ground at each cell of `cut_level`, from the
+        // erosion of the generated ground; empty on a world without wear.
+        int cut_level = 0;
+        std::vector<float> cut{};
     };
     [[nodiscard]] const Shape& shape() const noexcept { return shape_; }
 

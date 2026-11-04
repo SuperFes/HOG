@@ -5,3 +5,4 @@ preset = "earth"
 radius = 30000.0
 floor_depth = 500.0
 sky_height = 3000.0
+wear = 0.03

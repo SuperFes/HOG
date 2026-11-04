@@ -253,6 +253,7 @@ Result<void> validate(const Planet& planet) {
         {within(planet.pressure, 0.0, 1e9), "pressure must be 0 to 1e9 Pa"},
         {positive(planet.equator_temperature) && positive(planet.pole_temperature),
          "temperatures must be positive kelvin"},
+        {planet.wear >= 0.0 && planet.wear <= 1.0, "wear must be 0 to 1"},
         {planet.sea_fraction >= 0.0 && planet.sea_fraction < 1.0,
          "sea_fraction must be at least 0 and below 1"},
     });
@@ -275,7 +276,7 @@ std::uint64_t world_id(const Planet& planet) noexcept {
         static_cast<int>(planet.layout), bits(planet.mantle_density), bits(planet.heat_flow),
         bits(planet.surface_age), bits(planet.impact_flux), bits(planet.pressure),
         bits(planet.equator_temperature), bits(planet.pole_temperature),
-        static_cast<int>(planet.volatiles), bits(planet.sea_fraction));
+        static_cast<int>(planet.volatiles), bits(planet.sea_fraction), bits(planet.wear));
 }
 
 } // namespace hog::globe
