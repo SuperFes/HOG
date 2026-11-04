@@ -89,6 +89,8 @@ public:
         [[nodiscard]] Sample sample(double radius) const noexcept;
         // Metres from the centre to the ground before caves open it; no solid stands above it.
         [[nodiscard]] double ground() const noexcept { return ground_; }
+        // Metres from the centre to where open water stands over this column, sea or lake; 0 none.
+        [[nodiscard]] double water() const noexcept { return water_; }
         // Metres of loose cover between the ground and the rock under it.
         [[nodiscard]] double mantle() const noexcept { return mantle_; }
         // Metres from the centre to the highest solid, which a fallen rock lifts above the ground.

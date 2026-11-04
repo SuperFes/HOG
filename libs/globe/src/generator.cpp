@@ -240,13 +240,9 @@ Generator::Gathering Generator::gathered(DVec3 direction) const {
     }
     const DVec3 down = glm::normalize(direction);
     const Cell home = cell_under(down, shape_.cut_level);
-    // A lake's cells share one level, so the highest near holds the lake the ground is by.
-    float level = Shape::no_lake;
-    level = std::max(level, shape_.lake[index_of(home)]);
-    const CellNeighbors beside = around(home);
-    for (const Cell cell : beside.all()) {
-        level = std::max(level, shape_.lake[index_of(cell)]);
-    }
+    // Only a lake's own cells hold its water: beside one, ground below the level is downstream
+    // of its rim, and flooding it would stand the lake up as a wall.
+    const float level = shape_.lake[index_of(home)];
     Gathering found{.lake = std::nullopt,
                     .catchment = static_cast<double>(shape_.catchment[index_of(home)])};
     if (level > Shape::no_lake) {
