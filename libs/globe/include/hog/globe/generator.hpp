@@ -97,6 +97,9 @@ public:
         [[nodiscard]] double ground() const noexcept { return ground_; }
         // Metres from the centre to where open water stands over this column, sea or lake; 0 none.
         [[nodiscard]] double water() const noexcept { return water_; }
+        // Metres from the centre to the water table, under which the open space in the ground is
+        // flooded; 0 where the planet has no drainage.
+        [[nodiscard]] double table() const noexcept { return table_; }
         // Metres of loose cover between the ground and the rock under it.
         [[nodiscard]] double mantle() const noexcept { return mantle_; }
         // Metres from the centre to the highest solid, which a fallen rock lifts above the ground.
@@ -118,6 +121,7 @@ public:
         double lod_ = 0.0;
         double ground_ = 0.0; // metres from the centre
         double water_ = 0.0;  // metres from the centre to where open water stands; 0 none
+        double table_ = 0.0;  // metres from the centre to the water table; 0 none
         double mantle_ = 0.0; // metres of loose cover over the rock
         double slope_ = 0.0;  // across the ground, at the radius
         DVec3 tilt_{0.0};     // the way the ground rises, by as much
