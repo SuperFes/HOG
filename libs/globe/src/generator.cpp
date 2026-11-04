@@ -101,6 +101,8 @@ Tilt ground_tilt(const terms::Context& context, DVec3 direction, double lod) {
 // The steps the running water wears over, and the cell width its drainage is worked on.
 constexpr int wear_steps = 20;
 constexpr double wear_cell = 180.0;
+// Standing water this deep over the worn ground is a lake rather than a wet hollow.
+constexpr double lake_depth = 0.5;
 
 int wear_level_for(double radius) {
     const double cells = radius * std::numbers::pi / 2.0 / wear_cell;
@@ -145,16 +147,25 @@ void wear_ground(const Planet& planet, const terms::Context& context, Generator:
             threads.emplace_back([&, worker] {
                 for (std::size_t cell = worker; cell < count; cell += workers) {
                     const DVec3 up = center(cell_at_index(level, cell));
-                    ground[cell] = static_cast<float>(
-                        terms::ground(context, up, lod).height - shape.datum);
+                    ground[cell] =
+                        static_cast<float>(terms::ground(context, up, lod).height - shape.datum);
                 }
             });
         }
     }
     const double sea = shape.sea ? 0.0 : -1e30;
     const std::vector<float> worn =
-        erode(ground, level, planet.radius, sea,
-              {.rate = planet.wear, .steps = wear_steps});
+        erode(ground, level, planet.radius, sea, {.rate = planet.wear, .steps = wear_steps});
+    const Drainage drained = drain(worn, level, planet.radius, sea);
+    shape.lake.assign(count, Generator::Shape::no_lake);
+    shape.catchment.resize(count);
+    for (std::size_t cell = 0; cell < count; ++cell) {
+        const auto at = static_cast<std::uint32_t>(cell);
+        if (static_cast<double>(worn[cell]) > sea && drained.depth(at) > lake_depth) {
+            shape.lake[cell] = drained.filled[cell];
+        }
+        shape.catchment[cell] = static_cast<float>(drained.catchment[cell]);
+    }
     shape.cut.resize(count);
     for (std::size_t cell = 0; cell < count; ++cell) {
         shape.cut[cell] = ground[cell] - worn[cell];
@@ -221,6 +232,27 @@ Generator::Generator(const Planet& planet) : planet_{planet}, derived_{derive(pl
     }
     layers_ = layers_about(planet_.radius, planet_.floor_depth + std::max(0.0, -shape_.lowest),
                            planet_.sky_height, planet_.voxel);
+}
+
+Generator::Gathering Generator::gathered(DVec3 direction) const {
+    if (shape_.lake.empty()) {
+        return {};
+    }
+    const DVec3 down = glm::normalize(direction);
+    const Cell home = cell_under(down, shape_.cut_level);
+    // A lake's cells share one level, so the highest near holds the lake the ground is by.
+    float level = Shape::no_lake;
+    level = std::max(level, shape_.lake[index_of(home)]);
+    const CellNeighbors beside = around(home);
+    for (const Cell cell : beside.all()) {
+        level = std::max(level, shape_.lake[index_of(cell)]);
+    }
+    Gathering found{.lake = std::nullopt,
+                    .catchment = static_cast<double>(shape_.catchment[index_of(home)])};
+    if (level > Shape::no_lake) {
+        found.lake = planet_.radius + static_cast<double>(level);
+    }
+    return found;
 }
 
 std::optional<double> Generator::sea_level() const noexcept {
@@ -342,6 +374,14 @@ Generator::Column Generator::finish(DVec3 down, double lod, const terms::Ground&
     column.lod_ = lod;
     column.ground_ = planet_.radius + made.height - shape_.datum;
     column.mantle_ = made.mantle;
+    if (shape_.sea) {
+        column.water_ = planet_.radius;
+    }
+    if (derived_.liquid) {
+        if (const auto lake = gathered(down).lake) {
+            column.water_ = std::max(column.water_, *lake);
+        }
+    }
     column.slope_ = slope;
     column.tilt_ = tilt;
     column.surface_temperature_ = made.surface_temperature;
@@ -450,7 +490,8 @@ Sample Generator::Column::sample(double radius) const noexcept {
             rise = ((1.0 - cave_share) * glm::normalize(rise)) - (cave_share * cave_rise);
         }
     }
-    // A fallen rock stands out of the ground, or fills a hollow, where it is nearer than the ground.
+    // A fallen rock stands out of the ground, or fills a hollow, where it is nearer than the
+    // ground.
     bool on_rock = false;
     if (rock_) {
         DVec3 out{0.0};
@@ -475,7 +516,7 @@ Sample Generator::Column::sample(double radius) const noexcept {
                                   : terms::material_at(context, strata_, shown, ground_ - shown);
     }
     // The sea fills the open space under its level, and the ground's pores below it.
-    if (generator_->shape_.sea && radius < planet.radius) {
+    if (radius < water_) {
         sample.liquid = planet.volatiles == Volatile::Water ? Material::Water : Material::Air;
         if (sample.distance < 0.0) {
             sample.water = properties(sample.material).porosity;
@@ -585,7 +626,8 @@ Column column(const Context& context, DVec3 direction, double lod) noexcept {
     const Noise struck = craters(context, direction, lod);
     const Noise erupted = volcanoes(context, direction, lod);
     return {.height = {.value = (step * crust.high) + shaped.value + struck.value + erupted.value,
-                       .gradient = (step * crust.gradient) + shaped.gradient + struck.gradient + erupted.gradient},
+                       .gradient = (step * crust.gradient) + shaped.gradient + struck.gradient +
+                                   erupted.gradient},
             .high = crust.high,
             .built = built.value};
 }
