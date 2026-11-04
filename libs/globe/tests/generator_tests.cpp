@@ -342,6 +342,7 @@ TEST_CASE("a hollow the worn ground leaves holds a lake standing level over its 
     const Generator world{planet};
     const auto& shape = world.shape();
     std::size_t lakes = 0;
+    std::size_t wet = 0;
     for (std::size_t cell = 0; cell < shape.lake.size(); ++cell) {
         if (shape.lake[cell] <= Generator::Shape::no_lake) {
             continue;
@@ -350,16 +351,18 @@ TEST_CASE("a hollow the worn ground leaves holds a lake standing level over its 
         const DVec3 up = hog::globe::center(hog::globe::cell_at_index(shape.cut_level, cell));
         const auto found = world.gathered(up);
         REQUIRE(found.lake);
-        const double lake = found.lake.value_or(0.0);
-        CHECK(lake >= planet.radius + static_cast<double>(shape.lake[cell]) - 1e-6);
         CHECK(found.catchment > 0.0);
         const auto column = world.column(up, 5.0);
-        if (column.ground() < lake - 1.0) {
-            const auto sample = column.sample(lake - 0.5);
-            CHECK(sample.water > 0.0);
-            CHECK(column.sample(lake + 5.0).water == 0.0);
+        // Water stands as high as the drainage says, or lower where the fine ground lets it out
+        // sooner, never higher.
+        const double stands = column.water();
+        CHECK(stands <= found.lake.value_or(0.0) + 1e-6);
+        if (stands > planet.radius && column.ground() < stands - 1.0) {
+            ++wet;
+            CHECK(column.sample(stands - 0.5).water > 0.0);
+            CHECK(column.sample(stands + 5.0).water == 0.0);
             // The voxel the surface crosses holds only what lies under it.
-            const double crossing = column.sample(lake + 1.0).water;
+            const double crossing = column.sample(stands + 1.0).water;
             CHECK(crossing > 0.0);
             CHECK(crossing < 0.5);
         }
@@ -373,4 +376,5 @@ TEST_CASE("a hollow the worn ground leaves holds a lake standing level over its 
               .gathered(DVec3{1.0, 0.0, 0.0})
               .catchment == 0.0);
     CHECK(lakes > 0);
+    CHECK(wet > 0);
 }
