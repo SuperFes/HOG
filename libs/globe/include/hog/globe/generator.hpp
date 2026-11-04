@@ -6,11 +6,11 @@
 #include <hog/globe/planet.hpp>
 
 #include <algorithm>
+#include <array>
 #include <optional>
 #include <span>
-#include <utility>
 #include <unordered_map>
-#include <array>
+#include <utility>
 #include <vector>
 
 namespace hog::globe {
@@ -162,19 +162,20 @@ public:
         // Metres the running water has cut from the ground at each cell of `cut_level`, from the
         // erosion of the generated ground; empty on a world without wear.
         int cut_level = 0;
-        std::vector<float> cut{};
+        std::vector<float> cut{}; // NOLINT(readability-redundant-member-init)
         // At those cells too: where a hollow in the worn ground holds a lake, the height its
         // water stands at over the radius, else `no_lake`; and the area draining through it.
         static constexpr float no_lake = -1e30F;
-        std::vector<float> lake{};
-        std::vector<float> catchment{};
+        std::vector<float> lake{};      // NOLINT(readability-redundant-member-init)
+        std::vector<float> catchment{}; // NOLINT(readability-redundant-member-init)
         // The lakes' water over the fine ground: for each cell of `cut_level` a lake floods
         // into, the level it stands at there and which of the cell's 64 by 64 columns hold it.
         struct Pond {
             float level = 0.0F;
             std::array<std::uint64_t, 64> rows{};
         };
-        std::unordered_map<std::uint64_t, Pond> ponds{};
+        std::unordered_map<std::uint64_t, Pond>
+            ponds{}; // NOLINT(readability-redundant-member-init)
     };
     [[nodiscard]] const Shape& shape() const noexcept { return shape_; }
 
