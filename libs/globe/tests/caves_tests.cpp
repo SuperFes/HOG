@@ -1,3 +1,5 @@
+#include "fine_planet.hpp"
+
 #include "../src/terms.hpp"
 
 #include <hog/core/hash.hpp>
@@ -27,7 +29,7 @@ using hog::globe::Planet;
 namespace {
 
 Planet named(std::string_view name) {
-    return hog::globe::preset(name).value_or(Planet{});
+    return fine(hog::globe::preset(name).value_or(Planet{}));
 }
 
 DVec3 direction(std::uint64_t k) {

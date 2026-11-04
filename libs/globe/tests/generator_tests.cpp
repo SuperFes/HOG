@@ -1,3 +1,5 @@
+#include "fine_planet.hpp"
+
 #include <hog/core/hash.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/generator.hpp>
@@ -19,7 +21,7 @@ using hog::globe::Material;
 namespace {
 
 Generator generator_for(std::string_view name) {
-    return Generator{hog::globe::preset(name).value_or(hog::globe::Planet{})};
+    return Generator{fine(hog::globe::preset(name).value_or(hog::globe::Planet{}))};
 }
 
 // Directions spread over the sphere, apart from the generator's own survey.

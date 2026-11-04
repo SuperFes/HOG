@@ -1,3 +1,5 @@
+#include "fine_planet.hpp"
+
 #include <hog/globe/brick.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/detail.hpp>
@@ -15,9 +17,9 @@
 #include <array>
 #include <chrono>
 #include <cmath>
-#include <cstdio>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <format>
 #include <map>
 #include <optional>
@@ -38,17 +40,19 @@ using hog::globe::World;
 namespace {
 
 const Generator& earth() {
-    static const Generator generator{hog::globe::Planet{}};
+    static const Generator generator{fine(hog::globe::Planet{})};
     return generator;
 }
 
 const Generator& venus() {
-    static const Generator generator{hog::globe::preset("venus").value_or(hog::globe::Planet{})};
+    static const Generator generator{
+        fine(hog::globe::preset("venus").value_or(hog::globe::Planet{}))};
     return generator;
 }
 
 const Generator& moon() {
-    static const Generator generator{hog::globe::preset("moon").value_or(hog::globe::Planet{})};
+    static const Generator generator{
+        fine(hog::globe::preset("moon").value_or(hog::globe::Planet{}))};
     return generator;
 }
 
@@ -728,8 +732,9 @@ TEST_CASE("lava standing in a hollow shines by its heat, and cold rock does not"
     CHECK(shines);
     // Ground away from it is cold.
     for (const hog::globe::SurfaceVertex& vertex : mesh.vertices) {
-        if (glm::length(world_point(mesh, static_cast<std::uint32_t>(&vertex - mesh.vertices.data())) -
-                        centre) > 30.0) {
+        if (glm::length(
+                world_point(mesh, static_cast<std::uint32_t>(&vertex - mesh.vertices.data())) -
+                centre) > 30.0) {
             CHECK(vertex.glow == 0.0F);
         }
     }
@@ -956,6 +961,7 @@ std::size_t too_far_apart(const Generator& generator, hog::globe::Eye eye, doubl
 TEST_CASE("chunks round the client's start keep their neighbours a detail apart at most",
           "[globe][surface]") {
     hog::globe::Planet planet;
+    planet.voxel = 0.5;
     planet.seed = 1;
     const Generator generator{planet};
     const double radius = generator.planet().radius;
@@ -992,6 +998,7 @@ std::uint32_t drawn_beside(const hog::globe::Drawn& drawn, Cell chunk) {
 TEST_CASE("chunks keep their neighbours a detail apart at most along a flight",
           "[.gate][globe][surface]") {
     hog::globe::Planet planet;
+    planet.voxel = 0.5;
     planet.seed = 1;
     const Generator generator{planet};
     VoxelStore store{generator.layers()};
@@ -1034,6 +1041,7 @@ TEST_CASE("chunks keep their neighbours a detail apart at most along a flight",
 // time one's neighbours are drawn differently, its boxes must tile with theirs.
 TEST_CASE("chunks' boxes tile along a wandering flight from the start", "[.gate][globe][surface]") {
     hog::globe::Planet planet;
+    planet.voxel = 0.5;
     planet.seed = 1;
     const Generator generator{planet};
     VoxelStore store{generator.layers()};
@@ -1081,6 +1089,7 @@ TEST_CASE("chunks' boxes tile along a wandering flight from the start", "[.gate]
 // edge found its boxes overlapping a neighbour's.
 TEST_CASE("chunks' boxes tile from far out over a cube's edge", "[globe][surface]") {
     hog::globe::Planet planet;
+    planet.voxel = 0.5;
     planet.seed = 1;
     const Generator generator{planet};
     VoxelStore store{generator.layers()};
