@@ -310,6 +310,7 @@ flying:
   right mouse button     hold to look around
   mouse wheel            speed up or slow down
   F                      walk
+  P                      ping: mark the air pockets (caves) within 300 m of the eye
   G                      fly through the ground, or back above it; the mouse wheel then
                          sizes the bubble round the eye where ground isn't drawn
 
