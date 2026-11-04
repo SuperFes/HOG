@@ -1,0 +1,15 @@
+# A small livable world: Earth's air, water and plates on a 30 km radius, with the crusts and
+# shell shrunk so the relief stays inside the planet.
+[globe]
+preset = "earth"
+radius = 30000.0
+floor_depth = 500.0
+sky_height = 6000.0
+
+[globe.high]
+rock = "granite"
+thickness = 3000.0
+
+[globe.low]
+rock = "basalt"
+thickness = 600.0
