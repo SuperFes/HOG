@@ -9,12 +9,16 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <map>
 #include <memory>
 #include <numbers>
+#include <print>
+#include <string>
+#include <string_view>
 #include <utility>
 
 using namespace hog::globe::bed;
@@ -265,4 +269,31 @@ TEST_CASE("a lake's water reaches every shore column under its level, at the vox
     CHECK(spots > 5);
     CHECK(shore > 20);
     CHECK(dry == 0);
+}
+
+// How long each stage of making a worn planet takes as the planet grows, for the stages' costs to
+// be read against its size.
+TEST_CASE("making a planet, stage by stage, over its size", "[.bench][globe]") {
+    for (const double radius : {4'000.0, 16'000.0, 64'000.0}) {
+        auto planet = hog::globe::preset("earth").value_or(hog::globe::Planet{});
+        planet.radius = radius;
+        planet.floor_depth = 100.0;
+        planet.sky_height = 500.0;
+        planet.wear = 0.03;
+        planet.voxel = 2.5;
+        auto last = std::chrono::steady_clock::now();
+        std::string stage = "start";
+        const auto took = [&] {
+            const auto now = std::chrono::steady_clock::now();
+            std::println("  radius {:8.0f}  {:7.2f} s  {}", radius,
+                         std::chrono::duration<double>(now - last).count(), stage);
+            last = now;
+        };
+        const Generator generator{planet, [&](std::string_view next) {
+                                      took();
+                                      stage = next;
+                                  }};
+        took();
+        std::println("  radius {:8.0f}  lakes {}", radius, generator.shape().ponds.size());
+    }
 }
