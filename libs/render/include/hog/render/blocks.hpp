@@ -69,6 +69,12 @@ public:
     // frame's last submit must have finished.
     [[nodiscard]] Result<> draw(VkCommandBuffer commands, VkExtent2D extent, const BlockView& view,
                                 std::uint32_t frame);
+    // The same in two halves, for drawing a frame's blocks more than once, as into a probe's
+    // faces: readies the frame's copy and what's placed, once a frame, then draws them as often
+    // as asked.
+    [[nodiscard]] Result<> prepare(std::uint32_t frame);
+    void draw_prepared(VkCommandBuffer commands, VkExtent2D extent, const BlockView& view,
+                       std::uint32_t frame) const;
 
 private:
     Blocks() = default;
@@ -83,7 +89,7 @@ private:
         std::uint64_t shown = 0;
     };
 
-    // A mesh placed, on the GPU once uploaded.
+    // A mesh placed, on the GPU once uploaded, and a ball about it from its origin.
     struct Placed {
         std::shared_ptr<const terrain::BlockMesh> mesh;
         Buffer vertices;
@@ -91,9 +97,13 @@ private:
         std::uint32_t count = 0;
         // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
         WorldPosition origin = {};
+        DVec3 middle{0.0};
+        double radius = 0.0;
     };
 
     [[nodiscard]] Result<> copy(Copy& copy) const;
+    // Whether any of the mesh can be in the camera's view.
+    [[nodiscard]] static bool seen(const Camera& camera, double aspect, const Placed& placed);
     [[nodiscard]] Result<> upload(Placed& placed) const;
     // Lets a mesh go once no frame in flight can still be drawing it.
     void retire(Placed placed);

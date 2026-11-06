@@ -83,9 +83,9 @@ Result<EnvironmentProbe> EnvironmentProbe::create(const Device& device, VkFormat
     return probe;
 }
 
-void EnvironmentProbe::record(VkCommandBuffer commands, std::uint32_t frame,
-                              const Atmosphere& atmosphere, const Sky& sky,
-                              const ProbeView& view) const {
+Result<> EnvironmentProbe::record(VkCommandBuffer commands, std::uint32_t frame,
+                                  const Atmosphere& atmosphere, const Sky& sky,
+                                  const ProbeView& view) const {
     const VkExtent2D extent{.width = size_, .height = size_};
     const DVec3 up = view.sky.bend.up;
     const DVec3 east = planet::tangent_frame(up).east;
@@ -120,11 +120,19 @@ void EnvironmentProbe::record(VkCommandBuffer commands, std::uint32_t frame,
         if (face != probe_down) {
             VkImageView aerial = aerial_.at(face).view();
             sky.draw(commands, extent, frame, atmosphere, skies.at(face), aerial);
+            if (view.around) {
+                if (Result<> drawn = view.around(commands, skies.at(face).camera, extent);
+                    !drawn) {
+                    vkCmdEndRendering(commands);
+                    return drawn;
+                }
+            }
         }
         vkCmdEndRendering(commands);
     }
     transition(commands, colour_.handle(), VK_IMAGE_ASPECT_COLOR_BIT, image_use::colour_target,
                image_use::sampled);
+    return {};
 }
 
 } // namespace hog::render

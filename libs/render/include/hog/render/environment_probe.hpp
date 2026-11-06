@@ -8,6 +8,7 @@
 #include <hog/render/vulkan.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <span>
 #include <vector>
 
@@ -16,11 +17,12 @@ namespace hog::render {
 class Atmosphere;
 class Device;
 
-// What a probe takes in: the sky as the frame's view has it, seen from its camera's eye. Only
-// the camera's eye is taken; each face turns its own way. The ground round the eye isn't drawn
-// into it yet.
+// What a probe takes in: the sky as the frame's view has it, seen from its camera's eye, and
+// whatever else stands round it, which `around` draws over the sky into each face as seen by
+// that face's camera. Only the camera's eye is taken; each face turns its own way.
 struct ProbeView {
     SkyView sky;
+    std::function<Result<>(VkCommandBuffer, const Camera&, VkExtent2D)> around;
 };
 
 // The cube's faces, as Vulkan orders them, laid out by the ground's frame at the eye: x east,
@@ -35,8 +37,8 @@ inline constexpr std::uint32_t probe_down = 3;
 // Where a cube laid out by the ground's frame of `up` and `east` holds `direction`.
 [[nodiscard]] DVec3 probe_direction(DVec3 direction, DVec3 up, DVec3 east);
 
-// What's out of the water all round a point, drawn into a small cube: the sky. What it shows is
-// seen from under the water through the bent light of its surface, which blurs it anyway.
+// What's round a point, drawn into a small cube: the sky and what stands under it, for water to
+// mirror and to be seen out of from under it; both blur it anyway.
 class EnvironmentProbe {
 public:
     static constexpr std::uint32_t default_size = 128;
@@ -48,9 +50,11 @@ public:
                                                          std::uint32_t size = default_size);
 
     // Records drawing every face but the one looking down: the sky through the air as seen that
-    // way. `frame`'s sky tables must have been recorded. Leaves the cube to be sampled.
-    void record(VkCommandBuffer commands, std::uint32_t frame, const Atmosphere& atmosphere,
-                const Sky& sky, const ProbeView& view) const;
+    // way, and what stands round the eye. `frame`'s sky tables must have been recorded. Leaves
+    // the cube to be sampled.
+    [[nodiscard]] Result<> record(VkCommandBuffer commands, std::uint32_t frame,
+                                  const Atmosphere& atmosphere, const Sky& sky,
+                                  const ProbeView& view) const;
 
     // A cube, laid out as probe_direction() has it.
     [[nodiscard]] const Image& cube() const noexcept { return colour_; }

@@ -367,7 +367,17 @@ bool Scene::take_probe(render::RenderGraph& graph, const render::Frame& frame, c
                .uses = {through_air.begin(), through_air.end()},
                .targets = std::nullopt},
               [this, slot = frame.slot, high](VkCommandBuffer commands) {
-                  probes_.at(slot).record(commands, slot, atmosphere_, sky_, {.sky = high});
+                  // The ground the ground pass readied for this frame, seen from the probe.
+                  const auto ground = [this, slot, &high](VkCommandBuffer drawing,
+                                                          const render::Camera& camera,
+                                                          VkExtent2D extent) -> Result<> {
+                      blocks_.draw_prepared(drawing, extent,
+                                            {.camera = camera, .sun = high.sun, .bend = high.bend},
+                                            slot);
+                      return {};
+                  };
+                  return probes_.at(slot).record(commands, slot, atmosphere_, sky_,
+                                                 {.sky = high, .around = ground});
               });
     return true;
 }

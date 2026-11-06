@@ -1,6 +1,7 @@
 #include "test_device.hpp"
 
 #include <hog/render/atmosphere.hpp>
+#include <hog/render/blocks.hpp>
 #include <hog/render/device.hpp>
 #include <hog/render/environment_probe.hpp>
 #include <hog/render/memory.hpp>
@@ -8,6 +9,7 @@
 #include <hog/render/sampler.hpp>
 #include <hog/render/sky.hpp>
 #include <hog/shaders/cube_probe.hpp>
+#include <hog/terrain/block_mesh.hpp>
 #include <hog/terrain/material.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -17,8 +19,10 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <numbers>
 #include <span>
+#include <utility>
 #include <vector>
 
 using hog::DVec3;
@@ -142,7 +146,7 @@ TEST_CASE("a probe's cube holds the sky each way round the eye, laid out by the 
         .exposure = 1.0};
     REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
         CHECK(sky->record_frame(commands, {.width = 64, .height = 64}, 0, *atmosphere, view));
-        probe->record(commands, 0, *atmosphere, *sky, {.sky = view});
+        CHECK(probe->record(commands, 0, *atmosphere, *sky, {.sky = view, .around = {}}));
     }));
 
     const std::vector<DVec3> ways{
@@ -169,5 +173,67 @@ TEST_CASE("a probe's cube holds the sky each way round the eye, laid out by the 
     // The sky overhead is drawn into its face, and towards the sun brighter.
     CHECK(brightness(found[4]) > 0.0);
     CHECK(brightness(found[5]) > brightness(found[4]));
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("a probe's cube holds what stands round the eye over the sky", "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    auto atmosphere = hog::render::Atmosphere::create(*device);
+    REQUIRE(atmosphere);
+    auto sky = hog::render::Sky::create(*device, colour_format, depth_format);
+    REQUIRE(sky);
+    auto probe = hog::render::EnvironmentProbe::create(*device, colour_format, depth_format, 64);
+    REQUIRE(probe);
+    // Two alike, as the blocks' tiles are always an array of them.
+    const hog::terrain::MaterialImage tile =
+        hog::terrain::material_image({.colour = DVec3{0.0, 1.0, 0.0}}, 64);
+    const std::vector<hog::terrain::MaterialImage> green{tile, tile};
+    auto blocks = hog::render::Blocks::create(*device, colour_format, depth_format, green);
+    REQUIRE(blocks);
+
+    // At the pole, a wall forty metres high and wide twenty metres east of the eye, facing it.
+    const DVec3 up{0.0, 0.0, 1.0};
+    const DVec3 east{1.0, 0.0, 0.0};
+    const DVec3 north{0.0, 1.0, 0.0};
+    const hog::WorldPosition eye{up * (earth + 10.0)};
+    const auto wall = std::make_shared<hog::terrain::BlockMesh>();
+    wall->origin = eye;
+    for (const auto& [across, high] : std::array<std::pair<double, double>, 4>{
+             {{-20.0, -20.0}, {20.0, -20.0}, {20.0, 20.0}, {-20.0, 20.0}}}) {
+        wall->vertices.push_back(
+            {.position = hog::Vec3{(east * 20.0) + (north * across) + (up * high)},
+             .normal = hog::Vec3{-east},
+             .tiles = {0, 0, 0},
+             .corner = 0});
+    }
+    wall->indices = {0, 2, 1, 0, 3, 2};
+    hog::terrain::mix_corners(*wall);
+    blocks->show(wall);
+
+    const hog::render::SkyView view{
+        .camera = {.eye = eye, .forward = east, .up = up},
+        .sun = glm::normalize(DVec3{0.0, 1.0, 1.0}),
+        .bend = {.up = up, .eye_height = 10.0, .radius = earth, .faked = earth},
+        .exposure = 1.0};
+    REQUIRE(device->submit_now([&](VkCommandBuffer commands) {
+        CHECK(sky->record_frame(commands, {.width = 64, .height = 64}, 0, *atmosphere, view));
+        CHECK(blocks->prepare(0));
+        const auto around = [&](VkCommandBuffer drawing, const hog::render::Camera& camera,
+                                VkExtent2D extent) -> hog::Result<> {
+            blocks->draw_prepared(drawing, extent,
+                                  {.camera = camera, .sun = view.sun, .bend = view.bend}, 0);
+            return {};
+        };
+        CHECK(probe->record(commands, 0, *atmosphere, *sky, {.sky = view, .around = around}));
+    }));
+    const std::vector<std::array<float, 4>> found =
+        sampled(*device, *probe,
+                std::vector<DVec3>{hog::render::probe_direction(east, up, east),
+                                   hog::render::probe_direction(-east, up, east)});
+    CAPTURE(found[0][0], found[0][1], found[0][2], found[1][0], found[1][1], found[1][2]);
+    // The wall to the east is green; the sky to the west is bluer than green.
+    CHECK(found[0][1] > 2.0F * found[0][0]);
+    CHECK(found[0][1] > 2.0F * found[0][2]);
+    CHECK(found[1][2] > found[1][1]);
     CHECK(device->validation_errors() == 0);
 }
