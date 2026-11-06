@@ -41,6 +41,8 @@ public:
     // The highest brick layer held in the stack of bricks at `site`'s place, whatever its layer;
     // none where none is.
     [[nodiscard]] std::optional<std::uint32_t> highest_held(BrickSite site) const;
+    // Every brick layer held in that stack, lowest first.
+    [[nodiscard]] std::vector<std::uint32_t> layers_held(BrickSite site) const;
 
     [[nodiscard]] std::size_t size() const noexcept { return bricks_.size(); }
     // Held, by the bricks and the table of them.

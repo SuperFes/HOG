@@ -106,6 +106,21 @@ public:
     // and come smooth. Runs over every held column, with no liquid, grain or rock stepped.
     Stepped age_cover(double years);
 
+    // What the sky gives the ground held: metres of rain a year on a column, by the way up it
+    // stands, and cubic metres a year running in at a column on the edge of what's held, from the
+    // ground beyond; and metres a year open water gives back to the air.
+    struct Rainfall {
+        std::function<double(DVec3)> rain;
+        std::function<double(DVec3)> inflow;
+        double evaporation = 1.0;
+    };
+    // Lets rain run off all the ground held until it rests, as Runoff has it, and lays what
+    // stands as water in the open voxels over each column's top ground: lakes and puddles to
+    // their level, channels as deep as they run, in place of what water stood there. Water
+    // leaves at the edge of what's held and wherever the ground is under the sea, whose water is
+    // left as it is.
+    Stepped settle_water(const Rainfall& rainfall);
+
     // Reads the brick as the world now has it, unless held already.
     void load(globe::BrickSite site);
     // Lets the brick go; what it held unflushed is lost.
@@ -310,6 +325,20 @@ private:
     // a column flows, and caves under it do not.
     void glaciate(Stepped& stepped, double years);
     void creep(Stepped& stepped, double years);
+    // A column's top ground with its grain, metres from the centre, and the open voxels over it.
+    struct Top {
+        std::uint8_t face = 0;
+        std::uint32_t i = 0;
+        std::uint32_t j = 0;
+        std::uint32_t first = 0;
+        std::uint32_t open = 0;
+        double ground = 0.0;
+    };
+    // Every column held that has a top ground.
+    [[nodiscard]] std::vector<Top> tops();
+    // Fills the open voxels over each top to `surface(n)`, less the room ground and grain take.
+    void lay_water(const std::vector<Top>& tops, const std::function<double(std::size_t)>& surface,
+                   Stepped& stepped);
     // A column's top ground, the grain on it, and the ground's height in units where
     // Voxel::full is a voxel's height, above the floor. Looks down from layer `start`.
     struct Scan {

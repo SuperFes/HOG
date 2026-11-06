@@ -64,6 +64,26 @@ std::vector<BrickSite> Simulation::age_cover(std::span<const BrickSite> bricks, 
     return written;
 }
 
+void Simulation::reload(BrickSite site) {
+    if (region_.holds(site)) {
+        region_.unload(site);
+        region_.load(site);
+    }
+}
+
+std::vector<BrickSite> Simulation::settle_water(std::span<const BrickSite> bricks,
+                                               const Region::Rainfall& rainfall) {
+    for (const BrickSite brick : bricks) {
+        take(brick);
+    }
+    region_.settle_water(rainfall);
+    std::vector<BrickSite> written = region_.flush();
+    for (const BrickSite brick : written) {
+        still_[globe::brick_key(brick)] = 0;
+    }
+    return written;
+}
+
 std::vector<BrickSite> Simulation::lay_ice(std::span<const Laid> columns) {
     const globe::Layers& layers = world_->store().layers();
     const globe::Generator& generator = world_->generator();

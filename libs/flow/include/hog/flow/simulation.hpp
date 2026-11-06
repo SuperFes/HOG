@@ -53,6 +53,11 @@ public:
     // As age_ice, for the loose cover on the ground creeping downhill and weathering anew.
     std::vector<globe::BrickSite> age_cover(std::span<const globe::BrickSite> bricks, double years);
 
+    // As age_ice, for rain running off the ground until it rests in lakes, puddles and channels;
+    // see Region::settle_water.
+    std::vector<globe::BrickSite> settle_water(std::span<const globe::BrickSite> bricks,
+                                               const Region::Rainfall& rainfall);
+
     // Ice to lie over a column's top ground.
     struct Laid {
         std::uint8_t face = 0;
@@ -63,6 +68,10 @@ public:
     // Lays each column's ice, taking up the ground it needs and letting it go again, and returns
     // the bricks written to the world.
     std::vector<globe::BrickSite> lay_ice(std::span<const Laid> columns);
+
+    // Reads the brick again as the world now has it, where the flow holds it: for a brick the
+    // world was given from elsewhere. What the flow had of it unwritten is lost.
+    void reload(globe::BrickSite site);
 
     // Sets a vent giving lava from the flow's clock on. Its brick is kept held while it gives any.
     void add_vent(const Vent& vent);
