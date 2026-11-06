@@ -98,7 +98,7 @@ struct Derived {
 [[nodiscard]] double temperature_at(const Planet& planet, double latitude);
 
 // How fast still air cools with height, K/m; none where there's no air.
-[[nodiscard]] double lapse_rate(const Planet& planet);
+[[nodiscard]] double climate_lapse_rate(const Planet& planet);
 
 // What a point is in, for its temperature.
 enum class Surroundings : std::uint8_t {

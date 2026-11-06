@@ -138,7 +138,7 @@ double temperature_at(const Planet& planet, double latitude) {
            ((planet.equator_temperature - planet.pole_temperature) * maths::cos(latitude));
 }
 
-double lapse_rate(const Planet& planet) {
+double climate_lapse_rate(const Planet& planet) {
     // Earth's moist air at 6.5 K/km, scaled by gravity, as air cools by g/cp as it rises.
     constexpr double earth_lapse = 0.0065;
     return planet.pressure > 0.0 ? earth_lapse * planet.gravity / 9.81 : 0.0;
@@ -146,7 +146,7 @@ double lapse_rate(const Planet& planet) {
 
 double baseline_temperature(const Planet& planet, const Derived& derived, double at_sea_level,
                             double radius, double ground, Surroundings surroundings) {
-    const double lapse = lapse_rate(planet);
+    const double lapse = climate_lapse_rate(planet);
     const double surface = at_sea_level - (lapse * std::max(0.0, ground - planet.radius));
     switch (surroundings) {
     case Surroundings::Inside:

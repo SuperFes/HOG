@@ -960,7 +960,7 @@ Ground ground(const Context& context, DVec3 direction, double lod) noexcept {
     const Column smoothed = broad == lod ? made.rock : column(context, direction, broad);
     const double slope = glm::length(tangential(smoothed.height.gradient, direction));
     made.layers = layering(context, direction, made.rock, height, slope,
-                           made.surface_temperature - (lapse_rate(planet) * std::max(0.0, height)));
+                           made.surface_temperature - (climate_lapse_rate(planet) * std::max(0.0, height)));
     // The cover creeps smooth over the same tens of metres, pooling under the ground at that
     // detail; a coarser detail's ground is already as smooth, so the cover lies on it as made.
     const bool filtered = lod < broad;
