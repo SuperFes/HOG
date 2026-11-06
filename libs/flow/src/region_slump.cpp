@@ -71,7 +71,8 @@ void Region::slump(Stepped& stepped) {
         const BrickSite at = globe::brick_at_key(brick_key);
         for (int k = 0; k < globe::brick_voxels; ++k) {
             const Voxel& voxel = brick.voxels[static_cast<std::size_t>(k)];
-            if (voxel.grain_amount > 0 && voxel.solid == Material::Air) {
+            if (voxel.grain_amount > 0 && voxel.solid == Material::Air &&
+                voxel.grain != Material::Ice) {
                 const Site site = globe::site_in(at, k);
                 columns.try_emplace(Key{site.face, site.i, site.j}, 0);
             }

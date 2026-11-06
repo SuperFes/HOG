@@ -44,6 +44,15 @@ public:
     }
     [[nodiscard]] double total() const noexcept;
 
+    // Where ice ends at a drop: a column holding ice beside a bare one its surface stands at
+    // least `least` metres over. Icicles may hang there.
+    struct Hang {
+        std::size_t node = 0;
+        std::size_t side = 0;
+        double drop = 0.0;
+    };
+    [[nodiscard]] std::vector<Hang> hangs(double least) const;
+
     // Moves the ice for up to `years`; returns the years stepped, shorter when it needs finer
     // steps to stay stable. Never makes ice, loses it, or leaves a column under none.
     double step(double years);

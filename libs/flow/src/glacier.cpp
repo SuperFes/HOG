@@ -13,6 +13,26 @@ double Glacier::total() const noexcept {
     return sum;
 }
 
+std::vector<Glacier::Hang> Glacier::hangs(double least) const {
+    std::vector<Hang> found;
+    for (std::size_t n = 0; n < nodes_.size(); ++n) {
+        if (nodes_[n].ice <= 0.0) {
+            continue;
+        }
+        for (std::size_t side = 0; side < sides; ++side) {
+            const int other = nodes_[n].next[side];
+            if (other == none || nodes_[static_cast<std::size_t>(other)].ice > 0.0) {
+                continue;
+            }
+            const double drop = surface(n) - surface(static_cast<std::size_t>(other));
+            if (drop >= least) {
+                found.push_back({.node = n, .side = side, .drop = drop});
+            }
+        }
+    }
+    return found;
+}
+
 double Glacier::step(double years) {
     constexpr std::size_t faces = 2;
     const std::size_t count = nodes_.size();
