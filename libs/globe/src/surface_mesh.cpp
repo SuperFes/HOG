@@ -437,6 +437,8 @@ public:
     }
 
     [[nodiscard]] int bottom() const noexcept { return bottom_; }
+    [[nodiscard]] int top() const noexcept { return top_; }
+    [[nodiscard]] const Layers& layers() const noexcept { return *layers_; }
 
     // Filled columns, as places across and along.
     [[nodiscard]] std::span<const std::pair<int, int>> places() const noexcept { return places_; }
@@ -1473,6 +1475,150 @@ private:
     std::unordered_map<std::uint64_t, std::uint32_t> made_;
 };
 
+// The voxels of a grid drawn as they are: each solid or liquid voxel a box of the world's own
+// shape, its faces drawn where it stands against open space or, for a liquid, nothing else.
+class VoxelFaces {
+public:
+    VoxelFaces(const Grid& grid, SurfaceMesh& mesh) : grid_{&grid}, mesh_{&mesh} {}
+
+    void add() {
+        const int size = grid_->size();
+        for (int b = 0; b < size; ++b) {
+            for (int a = 0; a < size; ++a) {
+                const Column& at = grid_->column(a, b);
+                if (!at.exists || at.apart <= 0) {
+                    continue;
+                }
+                for (int layer = grid_->bottom(); layer <= grid_top(); layer += at.apart) {
+                    face_voxel({a, b, layer});
+                }
+            }
+        }
+    }
+
+private:
+    [[nodiscard]] int grid_top() const { return grid_->top(); }
+
+    // What the voxel is as drawn: its shaped matter, else grain that fills it, else a liquid that
+    // does; open space where none does.
+    struct Kind {
+        Material material = Material::Air;
+        bool liquid = false;
+    };
+    [[nodiscard]] static Kind kind_of(const Voxel& voxel) {
+        const auto half = static_cast<std::uint16_t>(Voxel::full / 2);
+        if (voxel.solid != Material::Air && voxel.solid_amount >= half) {
+            return {.material = voxel.solid};
+        }
+        if (voxel.grain != Material::Air && voxel.grain_amount >= half) {
+            return {.material = voxel.grain};
+        }
+        if (voxel.liquid != Material::Air && voxel.liquid_amount >= half) {
+            return {.material = voxel.liquid, .liquid = true};
+        }
+        return {};
+    }
+
+    [[nodiscard]] Kind kind_at(Point point) const {
+        return grid_->holds(point) ? kind_of(grid_->at(point)) : Kind{};
+    }
+
+    // The box's corners: the column's four, at the voxel's bottom (0 to 3) and top (4 to 7).
+    [[nodiscard]] std::array<DVec3, 8> box(Point point) const {
+        const Column& at = grid_->column(point);
+        Cell cell = at.cell;
+        for (int apart = at.apart; apart > 1; apart /= 2) {
+            cell = parent(cell);
+        }
+        const std::array<DVec3, 4> sides = corners(cell);
+        const double low = grid_->layers().bottom(point[2]);
+        const double high = grid_->layers().bottom(point[2] + at.apart);
+        std::array<DVec3, 8> out{};
+        // The cell's corners run round it; the box's by bits: 1 across, 2 along.
+        constexpr std::array<std::size_t, 4> round{0, 1, 3, 2};
+        for (std::size_t k = 0; k < 4; ++k) {
+            out.at(k) = sides.at(round.at(k)) * low;
+            out.at(k + 4) = sides.at(round.at(k)) * high;
+        }
+        return out;
+    }
+
+    void face_voxel(Point point) {
+        const Kind here = kind_at(point);
+        if (here.material == Material::Air) {
+            return;
+        }
+        // Each side: its axis, which way, and the four box corners it is.
+        struct Side {
+            int axis;
+            int by;
+            std::array<std::size_t, 4> corners;
+        };
+        static constexpr std::array<Side, 6> sides{{{0, -1, {0, 2, 6, 4}},
+                                                    {0, 1, {1, 5, 7, 3}},
+                                                    {1, -1, {0, 4, 5, 1}},
+                                                    {1, 1, {2, 3, 7, 6}},
+                                                    {2, -1, {0, 1, 3, 2}},
+                                                    {2, 1, {4, 6, 7, 5}}}};
+        std::optional<std::array<DVec3, 8>> corners;
+        for (const Side& side : sides) {
+            const std::optional<Point> there = grid_->next(point, side.axis, side.by);
+            const Kind beside = there ? kind_at(*there) : Kind{};
+            // Solid shows against anything not solid; a liquid only against open space.
+            const bool open = here.liquid ? beside.material == Material::Air
+                                          : beside.material == Material::Air || beside.liquid;
+            if (!open) {
+                continue;
+            }
+            if (!corners) {
+                corners = box(point);
+            }
+            quad(*corners, side.corners, here, static_cast<DVec3>(centre_of(*corners)));
+        }
+    }
+
+    [[nodiscard]] static DVec3 centre_of(const std::array<DVec3, 8>& box) {
+        DVec3 sum{0.0};
+        for (const DVec3& corner : box) {
+            sum += corner;
+        }
+        return sum / 8.0;
+    }
+
+    void quad(const std::array<DVec3, 8>& box, const std::array<std::size_t, 4>& at, Kind kind,
+              DVec3 middle) {
+        std::array<DVec3, 4> points{};
+        DVec3 face{0.0};
+        for (std::size_t k = 0; k < 4; ++k) {
+            points.at(k) = box.at(at.at(k));
+            face += points.at(k);
+        }
+        face /= 4.0;
+        DVec3 normal = glm::cross(points[1] - points[0], points[2] - points[0]);
+        const bool flip = glm::dot(normal, face - middle) < 0.0;
+        if (flip) {
+            normal = -normal;
+        }
+        const double length = glm::length(normal);
+        const Vec3 unit = length > 0.0 ? Vec3{normal / length} : Vec3{0.0F, 0.0F, 1.0F};
+        const auto first = static_cast<std::uint32_t>(mesh_->vertices.size());
+        for (const DVec3& point : points) {
+            mesh_->vertices.push_back({.position = Vec3{point - mesh_->origin},
+                                       .normal = unit,
+                                       .material = kind.material,
+                                       .wet = 0.0F,
+                                       .glow = 0.0F});
+        }
+        for (const std::uint32_t corner : flip ? std::array<std::uint32_t, 6>{0, 2, 1, 0, 3, 2}
+                                               : std::array<std::uint32_t, 6>{0, 1, 2, 0, 2, 3}) {
+            mesh_->indices.push_back(first + corner);
+        }
+    }
+
+    const Grid* grid_;
+    SurfaceMesh* mesh_;
+};
+
 } // namespace
 
 std::uint64_t sight_band(double radius) noexcept {
@@ -1494,6 +1640,19 @@ bool sight_holds(std::uint64_t band, double radius) noexcept {
 
 void add_chunk(SurfaceMesh& mesh, const World& world, Cell chunk) {
     add_chunk(mesh, world, chunk, Drawn{}, std::nullopt);
+}
+
+void add_chunk_voxels(SurfaceMesh& mesh, const World& world, Cell chunk, const Drawn& drawn,
+                      std::optional<Sight> sight) {
+    const Layers& layers = world.generator().layers();
+    HOG_ASSERT(chunk.is_valid() && detail_of(chunk, layers) >= 0,
+               "a chunk is a cell at least chunk_levels coarser than the voxels'");
+    Grid grid{world, chunk, drawn, mesh.origin};
+    for (const auto& [bottom, top] : bands_of(world, chunk, grid.generated(), grid.places(),
+                                              grid.apart(), grid.coarsest(), sight)) {
+        grid.fill(bottom, top);
+        VoxelFaces{grid, mesh}.add();
+    }
 }
 
 bool boxes_tile(const World& world, Cell chunk, const Drawn& drawn) {

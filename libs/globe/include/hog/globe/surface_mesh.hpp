@@ -81,6 +81,10 @@ inline constexpr double sight_reach = 64.0; // metres
 void add_chunk(SurfaceMesh& mesh, const World& world, Cell chunk);
 void add_chunk(SurfaceMesh& mesh, const World& world, Cell chunk, const Drawn& drawn,
                std::optional<Sight> sight = std::nullopt);
+// As add_chunk, but each voxel is drawn as the box it is: the faces of solid and liquid voxels
+// that stand against open space, nothing smoothed or shaped from their distances.
+void add_chunk_voxels(SurfaceMesh& mesh, const World& world, Cell chunk, const Drawn& drawn,
+               std::optional<Sight> sight = std::nullopt);
 
 // Whether the boxes of `chunk` and those drawn beside it tile without overlapping, as add_chunk
 // needs them to; without generating anything, so a whole set of chunks is quick to check.
