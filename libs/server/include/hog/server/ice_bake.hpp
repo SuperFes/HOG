@@ -1,5 +1,6 @@
 #pragma once
 
+#include <hog/flow/simulation.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/server/ice_climate.hpp>
@@ -29,5 +30,8 @@ struct IceMap {
 [[nodiscard]] IceMap bake_ice_map(const globe::Generator& generator, globe::Cell corner,
                                   std::uint32_t side, std::uint32_t stride,
                                   const ClimateAt& climate, int years);
+
+// The voxel columns the map has at least `least` metres of ice over, with their ice.
+[[nodiscard]] std::vector<flow::Simulation::Laid> laid_from(const IceMap& map, double least = 0.25);
 
 } // namespace hog::server

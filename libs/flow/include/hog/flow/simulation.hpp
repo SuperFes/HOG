@@ -50,6 +50,17 @@ public:
     // world.
     std::vector<globe::BrickSite> age_ice(std::span<const globe::BrickSite> bricks, double years);
 
+    // Ice to lie over a column's top ground.
+    struct Laid {
+        std::uint8_t face = 0;
+        std::uint32_t i = 0;
+        std::uint32_t j = 0;
+        double metres = 0.0;
+    };
+    // Lays each column's ice, taking up the ground it needs and letting it go again, and returns
+    // the bricks written to the world.
+    std::vector<globe::BrickSite> lay_ice(std::span<const Laid> columns);
+
     // Sets a vent giving lava from the flow's clock on. Its brick is kept held while it gives any.
     void add_vent(const Vent& vent);
     [[nodiscard]] std::size_t vents() const noexcept { return vents_.size(); }

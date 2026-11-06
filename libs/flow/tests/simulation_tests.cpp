@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cmath>
 #include <cstdlib>
 #include <array>
 
@@ -304,4 +305,43 @@ TEST_CASE("aging a world's ice grows it in the bricks written to the world", "[f
     CHECK_FALSE(written.empty());
     CHECK(block.world().at(block.at(12, 12, 0)).grain == hog::globe::Material::Ice);
     CHECK(block.world().at(block.at(12, 12, 0)).grain_amount > 0);
+}
+
+TEST_CASE("ice laid over a column lies on its ground and is written to the world",
+          "[flow][simulation][glacier]") {
+    using hog::globe::Material;
+    const auto& generator = earth();
+    // The highest ground over a coarse sweep of the sphere: land, whatever the seed.
+    hog::DVec3 up{0.0, 0.0, 1.0};
+    double top = 0.0;
+    for (int k = 0; k < 4000; ++k) {
+        const double z = 1.0 - ((2.0 * k + 1.0) / 4000.0);
+        const double r = std::sqrt(1.0 - (z * z));
+        const hog::DVec3 d{r * std::cos(2.399963 * k), r * std::sin(2.399963 * k), z};
+        if (const double ground = generator.column(d, 200.0).ground(); ground > top) {
+            top = ground;
+            up = d;
+        }
+    }
+    VoxelStore store{generator.layers()};
+    World world{generator, store};
+    Simulation simulation{world};
+    const hog::globe::Cell cell = hog::globe::cell_under(up, generator.layers().level);
+    const std::vector<Simulation::Laid> laid{
+        {.face = cell.face, .i = cell.i, .j = cell.j, .metres = 6.0}};
+    const auto written = simulation.lay_ice(laid);
+    CHECK_FALSE(written.empty());
+    const auto ground = generator.column(hog::globe::center(cell), generator.layers().thickness).ground();
+    const auto layer = static_cast<std::uint32_t>(generator.layers().layer_at(ground));
+    double ice = 0.0;
+    for (std::uint32_t up_by = 0; up_by < 12; ++up_by) {
+        const auto voxel = world.at({cell.face, cell.i, cell.j, layer + up_by});
+        if (voxel.grain == Material::Ice) {
+            ice += static_cast<double>(voxel.grain_amount) / static_cast<double>(full) *
+                   generator.layers().thickness;
+        }
+    }
+    CHECK(ice > 4.0);
+    CHECK(ice <= 6.5);
+    CHECK(simulation.region().size() == 0);
 }

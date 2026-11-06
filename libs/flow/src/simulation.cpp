@@ -43,6 +43,41 @@ std::vector<BrickSite> Simulation::age_ice(std::span<const BrickSite> bricks, do
     return written;
 }
 
+std::vector<BrickSite> Simulation::lay_ice(std::span<const Laid> columns) {
+    const globe::Layers& layers = world_->store().layers();
+    const globe::Generator& generator = world_->generator();
+    std::vector<BrickSite> taken;
+    const auto hold = [&](BrickSite site) {
+        if (!region_.holds(site)) {
+            take(site);
+            taken.push_back(site);
+        }
+    };
+    // Each column's bricks from its ground to the top of its ice.
+    for (const Laid& laid : columns) {
+        const globe::Cell cell{.level = static_cast<std::uint8_t>(layers.level),
+                               .face = laid.face,
+                               .i = laid.i,
+                               .j = laid.j};
+        const double ground = generator.column(globe::center(cell), layers.thickness).ground();
+        const int low = std::max(layers.layer_at(ground) - 1, 0);
+        const int high = std::min(layers.layer_at(ground + laid.metres) + 1, layers.count - 1);
+        for (int layer = low; layer <= high + globe::brick_side - 1; layer += globe::brick_side) {
+            hold(globe::brick_of({laid.face, laid.i, laid.j,
+                                  static_cast<std::uint32_t>(std::min(layer, layers.count - 1))}));
+        }
+    }
+    for (const Laid& laid : columns) {
+        region_.lay_ice(laid.face, laid.i, laid.j, laid.metres);
+    }
+    std::vector<BrickSite> written = region_.flush();
+    for (const BrickSite site : taken) {
+        region_.unload(site);
+        still_.erase(globe::brick_key(site));
+    }
+    return written;
+}
+
 void Simulation::add_vent(const Vent& vent) {
     vents_.push_back({.vent = vent});
 }
