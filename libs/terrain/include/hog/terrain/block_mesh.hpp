@@ -52,7 +52,8 @@ inline constexpr unsigned glow_levels = 15;
     return level <= soaked_level ? level / static_cast<double>(soaked_level) : 0.0;
 }
 [[nodiscard]] constexpr bool standing_of(std::uint8_t packed) noexcept {
-    return static_cast<unsigned>(packed >> 2U) == standing_level;
+    const unsigned level = packed >> 2U;
+    return level == standing_level;
 }
 [[nodiscard]] constexpr double glow_of(std::uint8_t packed) noexcept {
     const unsigned level = packed >> 2U;

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -200,6 +201,16 @@ Result<> Blocks::upload(Placed& placed) const {
     placed.indices = std::move(indices).value();
     placed.count = static_cast<std::uint32_t>(mesh.indices.size());
     placed.origin = mesh.origin;
+    DVec3 lowest{std::numeric_limits<double>::max()};
+    DVec3 highest{std::numeric_limits<double>::lowest()};
+    for (const terrain::BlockVertex& vertex : mesh.vertices) {
+        lowest = glm::min(lowest, DVec3{vertex.position});
+        highest = glm::max(highest, DVec3{vertex.position});
+    }
+    if (!mesh.vertices.empty()) {
+        placed.middle = 0.5 * (lowest + highest);
+        placed.radius = 0.5 * glm::length(highest - lowest);
+    }
     placed.mesh.reset();
     return {};
 }
@@ -240,6 +251,14 @@ void Blocks::draw_one(VkCommandBuffer commands, const Buffer& vertices, const Bu
 
 Result<> Blocks::draw(VkCommandBuffer commands, VkExtent2D extent, const BlockView& view,
                       std::uint32_t frame) {
+    if (Result<> prepared = prepare(frame); !prepared) {
+        return prepared;
+    }
+    draw_prepared(commands, extent, view, frame);
+    return {};
+}
+
+Result<> Blocks::prepare(std::uint32_t frame) {
     ++draws_;
     // Each frame in flight has been drawn again since: none can still be reading them.
     std::erase_if(retiring_,
@@ -257,8 +276,14 @@ Result<> Blocks::draw(VkCommandBuffer commands, VkExtent2D extent, const BlockVi
             }
         }
     }
+    return {};
+}
+
+void Blocks::draw_prepared(VkCommandBuffer commands, VkExtent2D extent, const BlockView& view,
+                           std::uint32_t frame) const {
+    const Copy& kept = copies_.at(frame);
     if (extent.width == 0 || extent.height == 0 || (kept.count == 0 && placed_.empty())) {
-        return {};
+        return;
     }
     const double aspect = static_cast<double>(extent.width) / static_cast<double>(extent.height);
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.handle());
@@ -267,10 +292,35 @@ Result<> Blocks::draw(VkCommandBuffer commands, VkExtent2D extent, const BlockVi
         draw_one(commands, kept.vertices, kept.indices, kept.count, kept.origin, view, aspect);
     }
     for (const auto& [key, placed] : placed_) {
-        draw_one(commands, placed.vertices, placed.indices, placed.count, placed.origin, view,
-                 aspect);
+        if (seen(view.camera, aspect, placed)) {
+            draw_one(commands, placed.vertices, placed.indices, placed.count, placed.origin,
+                     view, aspect);
+        }
     }
-    return {};
+}
+
+bool Blocks::seen(const Camera& camera, double aspect, const Placed& placed) {
+    // The ball about the mesh against the view's four sides and what's behind it; generously, as
+    // the bend draws far ground lower than it lies.
+    const DVec3 to = (placed.origin.metres() + placed.middle) - camera.eye.metres();
+    const double away = glm::length(to);
+    const double radius = placed.radius + (0.1 * away);
+    const DVec3 forward = glm::normalize(camera.forward);
+    const DVec3 right = glm::normalize(glm::cross(forward, camera.up));
+    const DVec3 up = glm::cross(right, forward);
+    const double half_high = std::tan(camera.vertical_fov / 2.0);
+    const double half_wide = half_high * aspect;
+    const double ahead = glm::dot(to, forward);
+    if (ahead < -radius) {
+        return false;
+    }
+    // Each side's plane through the eye, its normal pointing out of the view.
+    const auto outside = [&](DVec3 across, double half) {
+        const DVec3 normal = glm::normalize(across - (forward * half));
+        return glm::dot(to, normal) > radius;
+    };
+    return !outside(right, half_wide) && !outside(-right, half_wide) && !outside(up, half_high) &&
+           !outside(-up, half_high);
 }
 
 } // namespace hog::render
