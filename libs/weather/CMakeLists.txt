@@ -3,6 +3,7 @@ add_library(hog_weather
     src/field.cpp
     src/grid.cpp
     src/moisture.cpp
+    src/snowpack.cpp
     src/state.cpp
     src/stencil.cpp
     src/wind.cpp)
@@ -17,6 +18,7 @@ hog_add_tests(hog_weather
     tests/field_tests.cpp
     tests/grid_tests.cpp
     tests/moisture_tests.cpp
+    tests/snowpack_tests.cpp
     tests/state_tests.cpp
     tests/stencil_tests.cpp
     tests/surface_tests.cpp
