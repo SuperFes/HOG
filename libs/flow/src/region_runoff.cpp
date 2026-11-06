@@ -24,6 +24,28 @@ struct Key {
     friend constexpr auto operator<=>(const Key&, const Key&) noexcept = default;
 };
 
+// The lowest column with no neighbour held across `side`.
+std::optional<std::size_t> lowest_on_edge(const Runoff& runoff, std::size_t side) {
+    std::optional<std::size_t> lowest;
+    for (std::size_t n = 0; n < runoff.size(); ++n) {
+        if (runoff[n].next.at(side) == Runoff::none &&
+            (!lowest || runoff[n].ground < runoff[*lowest].ground)) {
+            lowest = n;
+        }
+    }
+    return lowest;
+}
+
+void add_springs(Runoff& runoff, const std::map<Key, std::size_t>& index,
+                 const std::vector<Region::Spring>& springs) {
+    for (const Region::Spring& spring : springs) {
+        if (const auto found = index.find(Key{.face = spring.face, .i = spring.i, .j = spring.j});
+            found != index.end()) {
+            runoff[found->second].inflow += spring.discharge;
+        }
+    }
+}
+
 } // namespace
 
 std::vector<Region::Top> Region::tops() {
@@ -111,18 +133,25 @@ Stepped Region::settle_water(const Rainfall& rainfall) {
     const double width = std::sqrt(
         layers.volume(cell_of(first), static_cast<int>(first.first)) / layers.thickness);
     Runoff runoff{held_tops.size(), {.cell = width, .evaporation = rainfall.evaporation}};
+    // Water leaves over the held ground's edge, but not back up the side a river comes in by.
+    const std::size_t closed = rainfall.river ? rainfall.river->side : Runoff::sides;
     for (std::size_t n = 0; n < held_tops.size(); ++n) {
         Runoff::Node& node = runoff[n];
-        const DVec3 up = globe::center(cell_of(held_tops[n]));
         node.ground = held_tops[n].ground;
-        node.rain = rainfall.rain ? rainfall.rain(up) : 0.0;
+        node.rain = rainfall.rain ? rainfall.rain(globe::center(cell_of(held_tops[n]))) : 0.0;
+        bool edge = false;
         for (std::size_t side = 0; side < Runoff::sides; ++side) {
             node.next.at(side) = index_beside(held_tops[n], side);
+            edge = edge || (node.next.at(side) == Runoff::none && side != closed);
         }
-        const bool edge = std::ranges::find(node.next, Runoff::none) != node.next.end();
-        node.inflow = edge && rainfall.inflow ? rainfall.inflow(up) : 0.0;
         node.outlet = edge || (sea && node.ground < *sea);
     }
+    if (rainfall.river) {
+        if (const auto entry = lowest_on_edge(runoff, closed)) {
+            runoff[*entry].inflow += rainfall.river->discharge;
+        }
+    }
+    add_springs(runoff, index, rainfall.springs);
     runoff.settle();
     // The sea's own water is left as it is.
     lay_water(held_tops,
