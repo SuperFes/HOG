@@ -871,6 +871,22 @@ struct Ground {
         }
         return static_cast<float>(dampness(voxel.solid, voxel.liquid_amount, grid.thickness()));
     }
+    // Whether water stands on the ground nearest the surface: a film in the open voxel over it
+    // a few millimetres deep or more, more than the ground soaks up.
+    static bool standing(const Grid& grid, std::span<const Point> corners) {
+        constexpr double film = 0.003; // metres
+        const std::optional<Point> near = nearest(grid, corners);
+        if (!near) {
+            return false;
+        }
+        const std::optional<Point> over = grid.next(*near, 2, 1);
+        if (!over) {
+            return false;
+        }
+        const Voxel& open = grid.at(*over);
+        return open.solid == Material::Air &&
+               share_of(open.liquid_amount) * grid.thickness() >= film;
+    }
 };
 
 // Where liquid standing in the open meets air: its level, as the grid soaks it, against the
@@ -904,6 +920,9 @@ struct Liquid {
         return Material::Air;
     }
     static float wetness(const Grid& /*grid*/, std::span<const Point> /*corners*/) { return 0.0F; }
+    static bool standing(const Grid& /*grid*/, std::span<const Point> /*corners*/) {
+        return false;
+    }
     static float glow(const Grid& grid, std::span<const Point> corners) {
         float shines = 0.0F;
         for (const Point corner : corners) {
@@ -1304,6 +1323,7 @@ private:
                                    .normal = Vec3{glm::normalize(normal)},
                                    .material = Surface::material(*grid_, *corners),
                                    .wet = Surface::wetness(*grid_, *corners),
+                                   .standing = Surface::standing(*grid_, *corners),
                                    .glow = Surface::glow(*grid_, *corners)});
         return index;
     }
@@ -1355,6 +1375,7 @@ private:
                                    .normal = Vec3{glm::normalize(normal)},
                                    .material = Surface::material(*grid_, frame->corners),
                                    .wet = Surface::wetness(*grid_, frame->corners),
+                                   .standing = Surface::standing(*grid_, frame->corners),
                                    .glow = Surface::glow(*grid_, frame->corners)});
         return index;
     }

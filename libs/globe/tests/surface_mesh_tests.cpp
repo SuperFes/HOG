@@ -702,6 +702,8 @@ TEST_CASE("ground soaked to its pores shows wet at its surface", "[globe][surfac
         }
         if (apart <= 3.3) {
             CHECK(vertex.wet > 0.99F);
+            // Soaked, but nothing stands on it.
+            CHECK_FALSE(vertex.standing);
             ++near;
         } else {
             CHECK(vertex.wet == 0.0F);
@@ -709,6 +711,40 @@ TEST_CASE("ground soaked to its pores shows wet at its surface", "[globe][surfac
         }
     }
     CHECK(near > 50);
+    CHECK(far > 1'000);
+}
+
+TEST_CASE("a film of water over the ground is drawn as standing on it", "[globe][surface]") {
+    VoxelStore store{earth().layers()};
+    World world{earth(), store};
+    const DVec3 up = ground_between(earth(), 50.0, 400.0);
+    const DVec3 centre = dig_hollow(world, up, 3.0);
+    // A centimetre over the hollow's floor, in its open voxels.
+    fill_hollow(world, centre, 3.6, [&](hog::globe::Voxel& voxel, double /*bottom*/) {
+        if (voxel.solid == Material::Air) {
+            voxel.liquid = Material::Water;
+            voxel.liquid_amount =
+                hog::globe::amount_of(0.01 / earth().layers().thickness);
+        }
+    });
+    const SurfaceMesh mesh =
+        mesh_of(world, block_round(hog::globe::chunk_under(up, earth().layers())));
+    std::size_t standing = 0;
+    std::size_t far = 0;
+    for (std::uint32_t v = 0; v < mesh.vertices.size(); ++v) {
+        const hog::globe::SurfaceVertex& vertex = mesh.vertices[v];
+        if (liquid(vertex.material)) {
+            continue;
+        }
+        const double apart = glm::length(world_point(mesh, v) - centre);
+        if (apart > 12.0) {
+            CHECK_FALSE(vertex.standing);
+            ++far;
+        } else if (apart <= 3.3) {
+            standing += vertex.standing ? 1U : 0U;
+        }
+    }
+    CHECK(standing > 20);
     CHECK(far > 1'000);
 }
 

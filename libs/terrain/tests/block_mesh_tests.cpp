@@ -48,6 +48,11 @@ TEST_CASE("a corner's byte keeps which corner it is and how wet, through mixing"
     CHECK(corner_of(packed_corner(2, 0.5)) == 2);
     CHECK(wetness_of(packed_corner(2, 0.5)) > 0.48);
     CHECK(wetness_of(packed_corner(2, 0.5)) < 0.52);
+    // Water standing on ground is soaked ground, told apart.
+    CHECK(hog::terrain::standing_of(packed_corner(1, 0.3, 0.0, true)));
+    CHECK(wetness_of(packed_corner(1, 0.3, 0.0, true)) == 1.0);
+    CHECK_FALSE(hog::terrain::standing_of(packed_corner(1, 1.0)));
+    CHECK(hog::terrain::glow_of(packed_corner(1, 0.3, 0.0, true)) == 0.0);
     // Hot ground is dry, and any glow at all shows.
     CHECK(hog::terrain::glow_of(packed_corner(1, 0.0, 0.01)) > 0.0);
     CHECK(hog::terrain::glow_of(packed_corner(1, 0.0, 1.0)) == 1.0);

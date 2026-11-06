@@ -48,6 +48,13 @@ static const float lamp_reach = 6.0;
 // Soaked, the ground is this much darker: light gets further into it before it comes back.
 static const float wet_darkening = 0.45;
 
+// Water standing on ground about this level lies as a puddle, fading out as it tilts; on a slope
+// the ground only shows wet. What a puddle mirrors of the sky, and how bright the sun's glint in it.
+static const float puddle_level = 0.996;
+static const float puddle_tilted = 0.985;
+static const float3 puddle_sky = float3(0.55, 0.65, 0.8);
+static const float puddle_glint = 6.0;
+
 struct Surface {
     float4 position : SV_Position;
     float3 normal;
@@ -55,6 +62,8 @@ struct Surface {
     nointerpolation uint3 tiles;
     float3 weights;
     float wet;
+    // From 0 to 1, how much of the ground is under water standing on it.
+    float standing;
     // How hot it shines, from 0 to 1.
     float glow;
     // Where the tiles' coordinates lie.
@@ -76,9 +85,10 @@ Surface vertex_main(Vertex vertex) {
     surface.tiles = vertex.tiles.xyz;
     const uint corner = vertex.tiles.w & 3u;
     surface.weights = float3(corner == 0 ? 1.0 : 0.0, corner == 1 ? 1.0 : 0.0, corner == 2 ? 1.0 : 0.0);
-    // Over 47 the level is how hot it shines instead of how wet it is.
+    // Over 48 the level is how hot it shines instead of how wet it is; at 48 water stands on it.
     const uint level = vertex.tiles.w >> 2u;
-    surface.wet = level <= 47u ? float(level) / 47.0 : 0.0;
+    surface.wet = level <= 47u ? float(level) / 47.0 : (level == 48u ? 1.0 : 0.0);
+    surface.standing = level == 48u ? 1.0 : 0.0;
     surface.glow = level > 48u ? float(level - 48u) / 15.0 : 0.0;
     surface.tiled = vertex.position + float3(push.origin.w, push.faked_night.zw);
     surface.from_eye = from_eye;
@@ -203,6 +213,21 @@ float4 fragment_main(Surface surface) : SV_Target {
     const float3 shine = lerp(float3(0.45, 0.04, 0.0), float3(1.0, 0.6, 0.2), surface.glow) *
                          (1.0 + (3.0 * surface.glow * surface.glow));
     lit = lerp(lit, shine * (0.6 + dot(colour, float3(1.0)) * 0.8), saturate(surface.glow * 1.5));
+    // A puddle mirrors the sky by Schlick's Fresnel, more as it's looked across, over the soaked
+    // ground seen through it, and glints where the sun's reflection meets the eye.
+    const float pooled =
+        smoothstep(0.5, 1.0, surface.standing) * smoothstep(puddle_tilted, puddle_level, dot(normal, up));
+    if (pooled > 0.0) {
+        const float3 view = surface.from_eye / max(away, 1e-3);
+        const float facing_up = saturate(dot(up, -view));
+        const float fresnel = 0.02 + (0.98 * pow(1.0 - facing_up, 5.0));
+        const float daylight = (1.0 - night) * risen;
+        const float3 mirrored = puddle_sky * (night + daylight);
+        const float glint =
+            pow(saturate(dot(reflect(view, up), push.sun_radius.xyz)), 600.0) * puddle_glint *
+            daylight;
+        lit = lerp(lit, lerp(lit * 0.7, mirrored, fresnel) + glint, pooled);
+    }
     // Under the ground, a lamp at the eye, as far as a few cutaways reach, on what faces it.
     if (cutaway > 0.0) {
         const float reach = lamp_reach * cutaway;

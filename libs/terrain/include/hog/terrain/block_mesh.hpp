@@ -23,14 +23,18 @@ struct BlockVertex {
 };
 
 // A vertex's corner byte: which corner of its triangle it is, in the low two bits, and in the six
-// over them either how wet the ground is there, from dry at 0 to soaked at 47, or, from 49 to 63,
-// how hot it shines; hot ground is dry, so the one field serves both.
+// over them either how wet the ground is there, from dry at 0 to soaked at 47, 48 where water
+// stands on it, or, from 49 to 63, how hot it shines; hot ground is dry, so the one field serves
+// all.
 inline constexpr unsigned soaked_level = 47;
+inline constexpr unsigned standing_level = 48;
 inline constexpr unsigned glow_base = 48;
 inline constexpr unsigned glow_levels = 15;
 [[nodiscard]] constexpr std::uint8_t packed_corner(std::uint8_t which, double wet,
-                                                   double glow = 0.0) noexcept {
-    unsigned level = static_cast<unsigned>(std::clamp(wet, 0.0, 1.0) * soaked_level);
+                                                   double glow = 0.0,
+                                                   bool standing = false) noexcept {
+    unsigned level = standing ? standing_level
+                              : static_cast<unsigned>(std::clamp(wet, 0.0, 1.0) * soaked_level);
     if (glow > 0.0) {
         level = glow_base + std::max(1U, static_cast<unsigned>(std::clamp(glow, 0.0, 1.0) *
                                                                glow_levels));
@@ -42,7 +46,13 @@ inline constexpr unsigned glow_levels = 15;
 }
 [[nodiscard]] constexpr double wetness_of(std::uint8_t packed) noexcept {
     const unsigned level = packed >> 2U;
+    if (level == standing_level) {
+        return 1.0;
+    }
     return level <= soaked_level ? level / static_cast<double>(soaked_level) : 0.0;
+}
+[[nodiscard]] constexpr bool standing_of(std::uint8_t packed) noexcept {
+    return static_cast<unsigned>(packed >> 2U) == standing_level;
 }
 [[nodiscard]] constexpr double glow_of(std::uint8_t packed) noexcept {
     const unsigned level = packed >> 2U;

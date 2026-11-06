@@ -1,6 +1,7 @@
 #pragma once
 
 #include <hog/core/hash.hpp>
+#include <hog/globe/brick.hpp>
 #include <hog/globe/material.hpp>
 #include <hog/globe/surface.hpp>
 #include <hog/globe/voxel.hpp>
@@ -35,8 +36,9 @@ class Wetting {
 public:
     // Millimetres an hour the air takes from wet ground at 20 °C in air as dry as it gets.
     static constexpr double drying_peak = 0.3;
-    // Layers looked down for the ground, and kelvin of warmth that doubles as much as 20.
-    static constexpr std::uint32_t reach = 4;
+    // Layers looked down for the ground: the top of a brick held over it, and some. And kelvin of
+    // warmth that doubles as much as 20.
+    static constexpr std::uint32_t reach = 2 * globe::brick_side;
     static constexpr double drying_kelvin = 20.0;
 
     // The changes `sky` makes to the ground below layer `start` of a column over `seconds`, at
