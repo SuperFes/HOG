@@ -1037,38 +1037,31 @@ void Region::drop(Section& section, const Bed& bed, double depth, double seconds
 }
 
 void Region::scour(Site bed, int mm) {
-    const auto band =
-        static_cast<int>(globe::distance_in_mm(globe::distance_band(world_->store().layers())));
-    const auto push = [&](Voxel& voxel) {
-        voxel.distance = static_cast<std::int16_t>(std::min(band, voxel.distance + mm));
-        globe::sync_solid_amount(voxel, world_->store().layers().thickness);
-        if (voxel.distance > 0) {
-            voxel.solid = Material::Air;
-        }
-    };
-    // Up through the open voxels, which stand further from the bed, and down through the
-    // ground, which lies deeper under it, as far as each tells this surface's distance: to
-    // the band's edge, or where another surface's distance takes over.
-    int last = -band - 1;
-    for (Site site = bed;; ++site.layer) {
+    const double thickness = world_->store().layers().thickness;
+    std::int64_t units = std::llround(static_cast<double>(mm) / (thickness * 1000.0) *
+                                      static_cast<double>(full));
+    const auto half = static_cast<std::uint16_t>(full / 2);
+    // Down from the lowest open voxel, which holds the top of the shaped matter, taking what each
+    // holds of it until the depth is taken; a voxel left less than half full is open.
+    for (Site site = bed; units > 0;) {
         Voxel* here = voxel(site);
-        if (here == nullptr || !open(*here) || here->distance >= band || here->distance <= last) {
+        if (here == nullptr) {
             break;
         }
-        last = here->distance;
-        push(*here);
-        held(globe::brick_of(site))->dirty = true;
-    }
-    last = band + 1;
-    for (Site site = bed; site.layer > 0;) {
+        const std::int64_t take = std::min<std::int64_t>(here->solid_amount, units);
+        if (take > 0) {
+            here->solid_amount = static_cast<std::uint16_t>(here->solid_amount - take);
+            if (here->solid_amount < half) {
+                here->solid = Material::Air;
+            }
+            here->distance = globe::distance_of_amount(here->solid_amount, thickness);
+            held(globe::brick_of(site))->dirty = true;
+            units -= take;
+        }
+        if (site.layer == 0) {
+            break;
+        }
         --site.layer;
-        Voxel* here = voxel(site);
-        if (here == nullptr || here->distance <= -band || here->distance >= last) {
-            break;
-        }
-        last = here->distance;
-        push(*here);
-        held(globe::brick_of(site))->dirty = true;
     }
 }
 

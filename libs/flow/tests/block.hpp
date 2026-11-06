@@ -202,6 +202,7 @@ private:
                         voxel.distance = -Voxel::far; // a wall the shape raised
                     }
                 }
+                hog::globe::sync_solid_amount(voxel, store_.layers().thickness);
             }
             store_.put(brick, hog::globe::Brick::pack(voxels));
         }

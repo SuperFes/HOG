@@ -49,8 +49,10 @@ TEST_CASE("a lump of ground hanging from nothing cracks through and falls", "[fl
     CHECK(block.region().inspecting() == 1);
 
     CHECK(rest(block, 1'200) < 1'200);
-    // It came down off where it hung, and was built into the floor as a boulder.
-    CHECK_FALSE(solid(block, 11, 11, 4));
+    // It came down off where it hung, and was built into the floor as a round boulder: the slab's
+    // corners and top are gone, and the floor under its middle is rock.
+    CHECK_FALSE(solid(block, 8, 8, 4));
+    CHECK_FALSE(solid(block, 11, 11, 5));
     CHECK(solid(block, 11, 11, 0));
 }
 
