@@ -106,6 +106,10 @@ Rgb material_colour(Material material) {
         return {200, 200, 194};
     case Material::Regolith:
         return {150, 146, 140};
+    case Material::Firn:
+        return {208, 220, 232};
+    case Material::Ice:
+        return {140, 190, 228};
     }
     return {255, 0, 255};
 }

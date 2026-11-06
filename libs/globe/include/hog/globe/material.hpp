@@ -22,9 +22,11 @@ enum class Material : std::uint8_t {
     Iron,
     Anorthosite, // the Moon's pale highland rock
     Regolith,    // rock shattered and gardened by impacts, where no air weathers it
+    Firn,        // snow packed and sintered over the years, still full of air
+    Ice,         // firn squeezed to a solid, the glacier's body
 };
 
-inline constexpr int material_count = 15;
+inline constexpr int material_count = 17;
 
 // Only what changes how the world forms, at the surface's pressure.
 struct Properties {

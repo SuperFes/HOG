@@ -8,6 +8,7 @@
 #include <numbers>
 
 using hog::globe::Material;
+using hog::globe::footing;
 using hog::globe::holding_slope;
 using hog::globe::properties;
 
@@ -32,6 +33,25 @@ TEST_CASE("loose ground has pores and a slope it holds, rock hardly any", "[glob
     }
     CHECK(properties(Material::Air).porosity == 0.0);
     CHECK(properties(Material::Water).porosity == 0.0);
+}
+
+TEST_CASE("firn is porous and ice is not, both lighter than water and melting with it",
+          "[globe][material]") {
+    const auto& firn = properties(Material::Firn);
+    const auto& ice = properties(Material::Ice);
+    const auto& snow = properties(Material::Snow);
+    CHECK(snow.density < firn.density);
+    CHECK(firn.density < ice.density);
+    CHECK(ice.density < properties(Material::Water).density);
+    CHECK(firn.porosity > 0.3);
+    CHECK(ice.porosity < 0.2);
+    CHECK(ice.conductivity < firn.conductivity);
+    CHECK(ice.melts == properties(Material::Water).melts);
+    CHECK(firn.melts == ice.melts);
+    // Ice is a solid, not a heap, and slips on a wet bed far more than on a dry one.
+    CHECK(ice.repose == 0.0);
+    CHECK(ice.wet_friction < ice.friction);
+    CHECK(footing(Material::Ice, 1.0) < footing(Material::Granite, 1.0));
 }
 
 TEST_CASE("water seeps through sand faster than soil, soil faster than mud", "[globe][material]") {
