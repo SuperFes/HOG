@@ -128,10 +128,11 @@ void World::write(BrickSite site, const BrickVoxels& voxels) {
 }
 
 std::map<BrickSite, std::vector<int>> sites_near(const Layers& layers, DVec3 centre,
-                                                 double reach) {
+                                                 double reach, double height) {
     const double from = glm::length(centre);
-    const int lowest = std::max(0, layers.layer_at(from - reach));
-    const int highest = std::min(layers.count - 1, layers.layer_at(from + reach));
+    const double up = height < 0.0 ? reach : height;
+    const int lowest = std::max(0, layers.layer_at(from - up));
+    const int highest = std::min(layers.count - 1, layers.layer_at(from + up));
     std::map<BrickSite, std::vector<int>> near;
     if (lowest > highest) {
         return near;
@@ -209,7 +210,49 @@ void reshape(World& world, DVec3 centre, double radius, const auto& change) {
     }
 }
 
+// The same over any shape: its way out is where its distance grows fastest.
+void reshape_shape(World& world, DVec3 centre, double reach, double height, const Shape& shape,
+                   const auto& change) {
+    const Layers& layers = world.store().layers();
+    const double band = distance_band(layers);
+    const double step = layers.thickness * 0.5;
+    const auto outward = [&](DVec3 at) {
+        const DVec3 slope{shape(at + DVec3{step, 0.0, 0.0}) - shape(at - DVec3{step, 0.0, 0.0}),
+                          shape(at + DVec3{0.0, step, 0.0}) - shape(at - DVec3{0.0, step, 0.0}),
+                          shape(at + DVec3{0.0, 0.0, step}) - shape(at - DVec3{0.0, 0.0, step})};
+        return glm::length(slope) > 0.0 ? glm::normalize(slope) : DVec3{0.0};
+    };
+    for (const auto& [brick, indices] : sites_near(layers, centre, reach + band, height + band)) {
+        BrickVoxels voxels = world.brick(brick);
+        for (const int index : indices) {
+            const DVec3 at = middle_of(site_in(brick, index), layers);
+            const double to_shape = shape(at);
+            if (to_shape <= band) {
+                Voxel& voxel = voxels[static_cast<std::size_t>(index)];
+                change(voxel, std::max(to_shape, -band),
+                       std::abs(to_shape) < band ? outward(at) : DVec3{0.0});
+                sync_solid_amount(voxel, layers.thickness);
+            }
+        }
+        world.write(brick, voxels);
+    }
+}
+
 } // namespace
+
+void dig_shape(World& world, DVec3 centre, double reach, double height, const Shape& shape) {
+    reshape_shape(world, centre, reach, height, shape, [](Voxel& voxel, double to_shape, DVec3 outward) {
+        dig_voxel(voxel, to_shape, outward);
+    });
+}
+
+void build_shape(World& world, DVec3 centre, double reach, double height, const Shape& shape,
+                 Material material) {
+    reshape_shape(world, centre, reach, height, shape,
+                  [&](Voxel& voxel, double to_shape, DVec3 outward) {
+                      build_voxel(voxel, to_shape, outward, material);
+                  });
+}
 
 void dig(World& world, DVec3 centre, double radius) {
     reshape(world, centre, radius, [](Voxel& voxel, double to_ball, DVec3 outward) {

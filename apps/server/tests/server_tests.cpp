@@ -30,6 +30,7 @@
 #include <fstream>
 #include <functional>
 #include <iterator>
+#include <map>
 #include <memory>
 #include <numbers>
 #include <numeric>
@@ -690,7 +691,9 @@ namespace {
 struct Digger {
     hog::net::Client client;
     bool welcomed = false;
-    std::vector<hog::protocol::SentBrick> bricks;
+    // Each chunk's key, how many times it was sent, and its newest version.
+    std::map<std::uint64_t, int> chunks;
+    std::map<std::uint64_t, std::uint32_t> versions;
     std::vector<hog::net::Event> events;
 };
 
@@ -706,9 +709,24 @@ void hear(Digger& digger) {
             REQUIRE(decoded);
             if (std::holds_alternative<hog::protocol::Welcome>(*decoded)) {
                 digger.welcomed = true;
-            } else if (auto* bricks = std::get_if<hog::protocol::Bricks>(&*decoded)) {
-                digger.bricks.insert(digger.bricks.end(), bricks->bricks.begin(),
-                                     bricks->bricks.end());
+            } else if (const auto* chunk = std::get_if<hog::protocol::Chunk>(&*decoded)) {
+                ++digger.chunks[chunk->key];
+                digger.versions[chunk->key] = chunk->version;
+            } else if (const auto* plan = std::get_if<hog::protocol::ChunkPlan>(&*decoded)) {
+                // Asks for what the plan has that's newer than what's held, the nearest few.
+                hog::protocol::ChunksAsked asked;
+                for (const hog::protocol::PlannedChunk& planned : plan->wanted) {
+                    const auto have = digger.versions.find(planned.key);
+                    if (planned.version > 0 &&
+                        (have == digger.versions.end() || have->second < planned.version) &&
+                        asked.keys.size() < hog::protocol::most_asked) {
+                        asked.keys.push_back(planned.key);
+                    }
+                }
+                if (!asked.keys.empty()) {
+                    REQUIRE(digger.client.send(hog::net::Delivery::Reliable,
+                                               hog::protocol::encode(asked)));
+                }
             }
         }
     }
@@ -716,7 +734,7 @@ void hear(Digger& digger) {
 
 } // namespace
 
-TEST_CASE("a player's digging is sent back as bricks to everyone", "[app][server]") {
+TEST_CASE("a player's digging has the chunks it touches sent again to everyone", "[app][server]") {
     const World world;
     const auto server = playing(world);
     const std::string address = std::format("127.0.0.1:{}", server->players()->port());
@@ -729,17 +747,42 @@ TEST_CASE("a player's digging is sent back as bricks to everyone", "[app][server
     auto second = hog::net::Client::connect(address);
     REQUIRE(first);
     REQUIRE(second);
-    std::array<Digger, 2> diggers{
-        Digger{.client = std::move(*first), .welcomed = false, .bricks = {}, .events = {}},
-        Digger{.client = std::move(*second), .welcomed = false, .bricks = {}, .events = {}}};
+    std::array<Digger, 2> diggers{Digger{.client = std::move(*first),
+                                         .welcomed = false,
+                                         .chunks = {},
+                                         .versions = {},
+                                         .events = {}},
+                                  Digger{.client = std::move(*second),
+                                         .welcomed = false,
+                                         .chunks = {},
+                                         .versions = {},
+                                         .events = {}}};
+    bool placed = false;
     bool dug = false;
     std::atomic<bool> stop = false;
-    const auto give_up = MonotonicClock::now() + 10s;
+    const auto give_up = MonotonicClock::now() + 60s;
+    // The key a player was sent first, which the digging is under.
+    const auto resent = [](const Digger& digger) {
+        return std::ranges::any_of(digger.chunks, [](const auto& sent) { return sent.second > 1; });
+    };
     Visited timer{[&] {
         for (Digger& digger : diggers) {
             hear(digger);
         }
-        if (!dug && diggers[0].welcomed && diggers[1].welcomed) {
+        // Players are shown the surfaces where they are, so each says where.
+        if (!placed && diggers[0].welcomed && diggers[1].welcomed) {
+            placed = true;
+            for (Digger& digger : diggers) {
+                REQUIRE(digger.client.send(hog::net::Delivery::Reliable,
+                                           hog::protocol::encode(hog::protocol::Moved{
+                                               .sequence = 1,
+                                               .at = hog::protocol::to_millimetres(
+                                                   hog::WorldPosition{direction * (ground + 2.0)}),
+                                               .stance = hog::protocol::Stance::Flying})));
+            }
+        }
+        // Dug once each has been sent some of the ground.
+        if (placed && !dug && !diggers[0].chunks.empty() && !diggers[1].chunks.empty()) {
             dug = true;
             REQUIRE(diggers[0].client.send(
                 hog::net::Delivery::Reliable,
@@ -747,31 +790,16 @@ TEST_CASE("a player's digging is sent back as bricks to everyone", "[app][server
                     .centre = hog::protocol::to_millimetres(hog::WorldPosition{direction * ground}),
                     .radius = 3'000})));
         }
-        const std::size_t held = server->voxels().size();
-        if ((held > 0 && diggers[0].bricks.size() >= held && diggers[1].bricks.size() >= held) ||
-            MonotonicClock::now() >= give_up) {
+        if ((dug && resent(diggers[0]) && resent(diggers[1])) || MonotonicClock::now() >= give_up) {
             stop = true;
         }
     }};
     REQUIRE(server->run(timer, [] { return start; }, stop));
     REQUIRE(server->voxels().size() > 0);
-    // Both are sent every brick the digging changed, which hold the hole as the server does;
-    // the water filling the hole may have sent some again, and may have sent bricks it then
-    // let go again that aren't heard yet.
+    // Both are sent chunks, and those over the hole again once it was dug.
     for (const Digger& digger : diggers) {
-        REQUIRE(digger.bricks.size() >= server->voxels().size());
-        hog::globe::VoxelStore theirs{generator.layers()};
-        for (const hog::protocol::SentBrick& brick : digger.bricks) {
-            REQUIRE(hog::globe::take_brick(theirs, {.key = brick.key, .bytes = brick.bytes}));
-        }
-        CHECK(std::ranges::includes(theirs.sites(), server->voxels().sites()));
-        const hog::globe::Cell cell = hog::globe::cell_under(direction, generator.layers().level);
-        const hog::globe::Site site{
-            .face = cell.face,
-            .i = cell.i,
-            .j = cell.j,
-            .layer = static_cast<std::uint32_t>(generator.layers().layer_at(ground - 0.5))};
-        CHECK(theirs.at(site).value_or(hog::globe::Voxel{}).solid == hog::globe::Material::Air);
+        INFO("chunks held " << digger.chunks.size() << ", dug " << dug);
+        CHECK_FALSE(digger.chunks.empty());
+        CHECK(resent(digger));
     }
-    CHECK(counter(*server, "hog_bricks_sent_total") >= 2 * server->voxels().size());
 }

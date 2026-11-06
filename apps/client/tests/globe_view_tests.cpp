@@ -1,5 +1,6 @@
 #include "test_planet.hpp"
 
+#include <hog/chunks/globe_stream.hpp>
 #include <hog/client/globe_view.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/jobs/job_system.hpp>
@@ -66,7 +67,7 @@ TEST_CASE("a chunk's surface becomes blocks where it lies", "[client][globe]") {
                       .normal = Vec3{1.0F, 0.0F, 0.0F},
                       .material = Material::Water}};
     mesh.indices = {2, 1, 0};
-    const hog::terrain::BlockMesh blocks = hog::client::globe_blocks(mesh);
+    const hog::terrain::BlockMesh blocks = hog::chunks::globe_blocks(mesh);
     CHECK(blocks.origin.metres() == mesh.origin);
     CHECK(blocks.vertices[0].position == Vec3{1.0F, 0.0F, 0.0F});
     const auto granite = static_cast<std::uint8_t>(Material::Granite);
@@ -91,7 +92,7 @@ TEST_CASE("the liquid's surface is left out of a chunk's blocks", "[client][glob
             {.position = position, .normal = Vec3{0.0F, 0.0F, 1.0F}, .material = Material::Water});
     }
     mesh.indices = {0, 1, 2};
-    const hog::terrain::BlockMesh blocks = hog::client::globe_blocks(mesh);
+    const hog::terrain::BlockMesh blocks = hog::chunks::globe_blocks(mesh);
     CHECK(blocks.indices.empty());
 }
 
@@ -116,7 +117,7 @@ TEST_CASE("liquid standing clear of the sea's level is still water for the sea t
                                  .material = Material::Soil});
     }
     mesh.indices = {0, 1, 2, 3, 4, 5, 6, 7, 8};
-    const hog::terrain::BlockMesh still = hog::client::globe_still_water(mesh, sea, 0.5);
+    const hog::terrain::BlockMesh still = hog::chunks::globe_still_water(mesh, sea, 0.5);
     REQUIRE(still.indices == std::vector<std::uint32_t>{0, 1, 2});
     REQUIRE(still.vertices.size() == 3);
     CHECK(still.vertices[0].position == Vec3{1.0F, 0.0F, 100.0F});
@@ -124,8 +125,8 @@ TEST_CASE("liquid standing clear of the sea's level is still water for the sea t
     const auto water = static_cast<std::uint8_t>(Material::Water);
     CHECK(still.vertices[1].tiles == std::array<std::uint8_t, 3>{water, water, water});
     // Without a sea, all liquid is still.
-    CHECK(hog::client::globe_still_water(mesh, std::nullopt, 0.5).indices.size() == 6);
-    CHECK(hog::client::globe_blocks(mesh).indices.size() == 3);
+    CHECK(hog::chunks::globe_still_water(mesh, std::nullopt, 0.5).indices.size() == 6);
+    CHECK(hog::chunks::globe_blocks(mesh).indices.size() == 3);
 }
 
 TEST_CASE("the blocks' tiles are the globe's materials, each averaging to its colour",
@@ -157,7 +158,7 @@ TEST_CASE("the blocks' tiles are the globe's materials, each averaging to its co
 namespace {
 
 // Keys shown, as changes come in.
-void apply(std::set<std::uint64_t>& shown, const hog::client::GlobeStream::Changes& changes) {
+void apply(std::set<std::uint64_t>& shown, const hog::chunks::GlobeStream::Changes& changes) {
     for (const auto& [key, ground, water] : changes.shown) {
         CHECK_FALSE(ground->indices.empty());
         shown.insert(key);
@@ -170,7 +171,7 @@ void apply(std::set<std::uint64_t>& shown, const hog::client::GlobeStream::Chang
 std::set<std::uint64_t> keys_of(std::span<const hog::globe::Cell> chunks) {
     std::set<std::uint64_t> keys;
     for (const hog::globe::Cell chunk : chunks) {
-        keys.insert(hog::client::globe_key(chunk));
+        keys.insert(hog::chunks::globe_key(chunk));
     }
     return keys;
 }
@@ -180,11 +181,11 @@ std::set<std::uint64_t> keys_of(std::span<const hog::globe::Cell> chunks) {
 TEST_CASE("the globe's surfaces follow the eye, coarser further off", "[client][globe]") {
     const hog::client::GlobeWorld globe{hog::globe::Planet{}};
     hog::jobs::JobSystem jobs{3};
-    hog::client::GlobeStream stream{globe.world, jobs, {.ratio = 1.5, .least = 120.0}};
+    hog::chunks::GlobeStream stream{globe.world, jobs, {.ratio = 1.5, .least = 120.0}};
     const double radius = globe.generator.planet().radius;
     const DVec3 up = hog::globe::center(hog::globe::cell_at_index(7, 4'321));
     const auto eye_over = [&](DVec3 at, double height) {
-        return at * (radius + hog::client::globe_ground(globe.generator, at) + height);
+        return at * (radius + hog::chunks::globe_ground(globe.generator, at) + height);
     };
     std::set<std::uint64_t> shown;
     stream.follow(eye_over(up, 0.0));
@@ -244,10 +245,10 @@ TEST_CASE("a brick changed has the chunks drawn from it meshed again, and no oth
           "[client][globe]") {
     hog::client::GlobeWorld globe{hog::globe::Planet{}};
     hog::jobs::JobSystem jobs{3};
-    hog::client::GlobeStream stream{globe.world, jobs, {.ratio = 1.5, .least = 120.0}};
+    hog::chunks::GlobeStream stream{globe.world, jobs, {.ratio = 1.5, .least = 120.0}};
     const double radius = globe.generator.planet().radius;
     const DVec3 up = hog::globe::center(hog::globe::cell_at_index(7, 4'321));
-    const double ground = hog::client::globe_ground(globe.generator, up);
+    const double ground = hog::chunks::globe_ground(globe.generator, up);
     stream.follow(up * (radius + ground + 2.0));
     std::set<std::uint64_t> shown;
     apply(shown, stream.finish());
@@ -262,13 +263,13 @@ TEST_CASE("a brick changed has the chunks drawn from it meshed again, and no oth
         stream.changed(brick);
     }
     CHECK(stream.in_flight());
-    const hog::client::GlobeStream::Changes again = stream.finish();
+    const hog::chunks::GlobeStream::Changes again = stream.finish();
     CHECK(again.gone.empty());
     REQUIRE_FALSE(again.shown.empty());
     CHECK(again.shown.size() < drawn);
     const hog::globe::Cell under = hog::globe::chunk_under(up, globe.generator.layers(), 0);
     CHECK(std::ranges::any_of(again.shown, [&](const auto& change) {
-        return change.key == hog::client::globe_key(under);
+        return change.key == hog::chunks::globe_key(under);
     }));
 }
 
@@ -302,4 +303,37 @@ TEST_CASE("a planet file's [globe] table is the voxel world drawn, at the world'
     const auto none = hog::client::globe_planet_in(path, 9, 90'000.0);
     REQUIRE(none);
     CHECK(none->radius == 90'000.0);
+}
+
+// Prints how big the chunks' meshes are by detail, to size what's sent.
+TEST_CASE("how big the chunks' meshes are, to look at", "[.look][client][globe]") {
+    const hog::client::GlobeWorld globe{hog::globe::Planet{}};
+    hog::jobs::JobSystem jobs{3};
+    hog::chunks::GlobeStream stream{globe.world, jobs, {.ratio = 3.0, .least = 1'000.0}};
+    const double radius = globe.generator.planet().radius;
+    const DVec3 up = hog::globe::center(hog::globe::cell_at_index(7, 4'321));
+    stream.follow(up * (radius + hog::chunks::globe_ground(globe.generator, up) + 2.0));
+    const auto changes = stream.finish();
+    std::map<std::uint64_t, int> detail_of;
+    for (const hog::globe::Cell chunk : stream.wanted()) {
+        detail_of[hog::chunks::globe_key(chunk)] = hog::globe::detail_of(chunk, globe.generator.layers());
+    }
+    struct Size {
+        std::size_t count = 0, vertices = 0, indices = 0, most_vertices = 0, most_indices = 0, water = 0;
+    };
+    std::map<int, Size> by;
+    for (const auto& shown : changes.shown) {
+        Size& size = by[detail_of[shown.key]];
+        ++size.count;
+        size.vertices += shown.ground->vertices.size();
+        size.indices += shown.ground->indices.size();
+        size.most_vertices = std::max(size.most_vertices, shown.ground->vertices.size());
+        size.most_indices = std::max(size.most_indices, shown.ground->indices.size());
+        size.water = std::max(size.water, shown.water->vertices.size());
+    }
+    for (const auto& [detail, size] : by) {
+        std::println("detail {:2}: {:4} chunks, mean {:6} v {:6} i, most {:6} v {:6} i, water most {}",
+                     detail, size.count, size.vertices / size.count, size.indices / size.count,
+                     size.most_vertices, size.most_indices, size.water);
+    }
 }

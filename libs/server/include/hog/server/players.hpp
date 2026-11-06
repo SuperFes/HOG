@@ -97,6 +97,12 @@ public:
     [[nodiscard]] std::vector<WorldPosition> placed() const;
     // The same by connection.
     [[nodiscard]] std::vector<std::pair<net::ConnectionId, WorldPosition>> located() const;
+    // Where each player is, on foot or flying, and the way they look, as a unit direction.
+    struct Look {
+        WorldPosition at;
+        DVec3 forward{0.0};
+    };
+    [[nodiscard]] std::vector<std::pair<net::ConnectionId, Look>> looks() const;
     // Every player's connection, placed or not.
     [[nodiscard]] std::vector<net::ConnectionId> connections() const;
 

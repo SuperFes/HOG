@@ -1,5 +1,8 @@
 #include <hog/chat/filter.hpp>
+#include <hog/chunks/globe_stream.hpp>
+#include <hog/chunks/mesh_codec.hpp>
 #include <hog/client/chat.hpp>
+#include <hog/client/chunk_cache.hpp>
 #include <hog/client/cutaway.hpp>
 #include <hog/client/daylight.hpp>
 #include <hog/client/flight.hpp>
@@ -9,6 +12,7 @@
 #include <hog/client/options.hpp>
 #include <hog/client/others.hpp>
 #include <hog/client/picture.hpp>
+#include <hog/client/play.hpp>
 #include <hog/client/player.hpp>
 #include <hog/client/scene.hpp>
 #include <hog/client/session.hpp>
@@ -37,6 +41,7 @@
 #include <hog/render/rendering.hpp>
 #include <hog/render/shader_watch.hpp>
 #include <hog/sim/calendar.hpp>
+#include <hog/skies/weather_keeper.hpp>
 #include <hog/terrain/bend.hpp>
 #include <hog/window/ui.hpp>
 #include <hog/window/window.hpp>
@@ -63,6 +68,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -84,6 +90,9 @@ constexpr double longest_frame = 0.1;
 constexpr Uint32 idle_ms = 50;
 // How often to look for edited shaders.
 constexpr std::chrono::milliseconds shader_looks{250};
+// What it says it is, in what it tells the person; and whether it's the viewer, which draws alone.
+std::string_view program = "hog-viewer";
+bool viewing = true;
 // Someone 3 m tall flying along 8 m ahead, 2 m below the eye, so they land in front of it.
 constexpr double companion_height = 3.0;
 constexpr double companion_ahead = 8.0;
@@ -215,7 +224,7 @@ client::Flight start(const client::Options& options, const client::GlobeWorld& g
                                                            options.start->longitude * degree),
                                       radius, options.start->altitude, planet::north_pole);
     } else {
-        const double ground = client::globe_ground(globe.generator, planet::start_direction);
+        const double ground = chunks::globe_ground(globe.generator, planet::start_direction);
         flight = client::start_flight(planet::start_direction, radius, ground + globe_start_height,
                                       planet::north_pole);
     }
@@ -500,7 +509,7 @@ Result<bool> draw(client::Scene& scene, const client::Shot& shot, const render::
                                        ? save_capture(device, captured->value(), frame, *capture)
                                        : std::unexpected(captured->error());
         if (!saved) {
-            std::cerr << std::format("hog-viewer: can't capture the window: {}\n", saved.error());
+            std::cerr << std::format("{}: can't capture the window: {}\n", program, saved.error());
         }
     }
     return true;
@@ -550,8 +559,10 @@ const log::Category clouds_log{"clouds"};
 // logging in for a connect token, when asked to.
 class Connection {
 public:
-    [[nodiscard]] static Result<Connection> open(const client::Options& options) {
+    [[nodiscard]] static Result<Connection> open(const client::Options& options,
+                                                 std::optional<std::uint64_t> world) {
         Connection connection;
+        connection.world_ = world;
         if (!options.connect) {
             return connection;
         }
@@ -621,9 +632,33 @@ public:
         return session_ ? session_->take_chat() : std::vector<client::ChatLine>{};
     }
 
-    // Bricks of the voxel world the server sent since last asked.
-    [[nodiscard]] std::vector<protocol::SentBrick> take_bricks() {
-        return session_ ? session_->take_bricks() : std::vector<protocol::SentBrick>{};
+    // Tells the server how fast the client wants detail to fall off with distance, once in.
+    void set_view_detail(const protocol::ViewDetail& detail) {
+        if (session_) {
+            session_->set_view_detail(detail);
+        }
+    }
+
+    // Asks the server for chunks of its plan.
+    void ask_chunks(std::span<const std::uint64_t> keys) {
+        if (session_) {
+            session_->ask_chunks(keys);
+        }
+    }
+
+    // The surfaces the server sent to show since last asked.
+    [[nodiscard]] std::vector<client::Session::ChunkEvent> take_chunks() {
+        return session_ ? session_->take_chunks() : std::vector<client::Session::ChunkEvent>{};
+    }
+
+    // Answers the server and the login service, with nothing yet to say of where the player is.
+    void pump(MonotonicClock::time_point now) {
+        if (login_) {
+            look_at_login(*login_);
+        }
+        if (session_) {
+            session_->look(std::nullopt, now);
+        }
     }
 
     // Whether edits go to the server: once welcomed by one.
@@ -648,7 +683,7 @@ public:
 
 private:
     [[nodiscard]] Result<void> connect() {
-        auto session = client::Session::connect(address_, token_);
+        auto session = client::Session::connect(address_, token_, world_);
         if (!session) {
             return std::unexpected(session.error());
         }
@@ -701,6 +736,8 @@ private:
     std::optional<client::Session> session_;
     std::string login_address_;
     std::string address_;
+    // The planet this client makes ground of, if it does.
+    std::optional<std::uint64_t> world_;
     std::string name_;
     std::vector<std::byte> token_;
     std::vector<net::Event> events_;
@@ -759,38 +796,22 @@ constexpr auto edit_material = static_cast<std::uint8_t>(globe::Material::Granit
 // Digs or builds as the keys ask: through the server when on one, which sends the bricks back,
 // or straight into the world when alone. Then holds the bricks the server sent, and has the
 // chunks they touch drawn again. The world is changed only with no chunk in flight.
-void edit_globe(Controls& controls, Connection& connection, client::GlobeWorld& globe,
-                client::Scene& scene, const render::Camera& camera) {
+// Digs or builds into the world as asked, when drawing it alone.
+void edit_globe(Controls& controls, client::GlobeWorld& globe, client::Scene& scene,
+                const render::Camera& camera) {
     const bool dig = std::exchange(controls.dig, false);
     const bool asked = dig || std::exchange(controls.build, false);
-    const WorldPosition centre{camera.eye.metres() + (camera.forward * edit_ahead)};
-    if (asked && connection.editing_through_server()) {
-        if (dig) {
-            connection.dig(centre, edit_radius);
-        } else {
-            connection.build(centre, edit_radius, edit_material);
-        }
-    }
-    const std::vector<protocol::SentBrick> sent = connection.take_bricks();
-    const bool alone = asked && !connection.editing_through_server();
-    if (sent.empty() && !alone) {
+    if (!asked) {
         return;
     }
+    const WorldPosition centre{camera.eye.metres() + (camera.forward * edit_ahead)};
     scene.finish_globe();
     const std::uint64_t before = globe.store.revision();
-    if (alone) {
-        if (dig) {
-            globe::dig(globe.world, centre.metres(), edit_radius);
-        } else {
-            globe::build(globe.world, centre.metres(), edit_radius,
-                         static_cast<globe::Material>(edit_material));
-        }
-    }
-    for (const protocol::SentBrick& brick : sent) {
-        if (auto taken = globe::take_brick(globe.store, {.key = brick.key, .bytes = brick.bytes});
-            !taken) {
-            log::warn(connection_log, "a brick the server sent doesn't fit: {}", taken.error());
-        }
+    if (dig) {
+        globe::dig(globe.world, centre.metres(), edit_radius);
+    } else {
+        globe::build(globe.world, centre.metres(), edit_radius,
+                     static_cast<globe::Material>(edit_material));
     }
     scene.change_globe(globe.store.changed_since(before));
 }
@@ -833,7 +854,7 @@ void return_to(Connection& connection, Controls& controls, std::optional<client:
 // on from where the camera was.
 // Metres the ground drawn stands over the radius under a point.
 double drawn_ground(const client::GlobeWorld& globe, WorldPosition at) {
-    return client::globe_ground(globe.generator, at.metres());
+    return chunks::globe_ground(globe.generator, at.metres());
 }
 
 void take_part(Controls& controls, std::optional<client::Player>& player, client::Flight& flight,
@@ -959,10 +980,14 @@ void change_clouds(Controls& controls, client::Scene& scene, const render::Devic
     }
 }
 
+// How long the weather fades in over when the viewer makes its own.
+constexpr std::chrono::milliseconds alone_fade{5'000};
+
 // Flies or walks over the world until the window closes or it's time to quit.
 Result<void> fly(client::Scene& scene, client::PlanetClock& clock, client::GlobeWorld& globe,
-                 client::Flight flight, Connection& connection, const client::Options& options,
-                 const render::Device& device, render::Presenter& presenter, SDL_Window* window) {
+                 client::Flight flight, Connection& connection, skies::WeatherKeeper* alone,
+                 const client::Options& options, const render::Device& device,
+                 render::Presenter& presenter, SDL_Window* window) {
     const double radius = globe.generator.planet().radius;
     Controls controls;
     controls.timings = options.timings;
@@ -1000,10 +1025,15 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, client::Globe
         times.add(passed, scene.timings());
         shaders.look(device, now);
         take_part(controls, player, flight, camera, globe);
+        if (alone != nullptr) {
+            if (const auto made = alone->poll(clock.time(), alone_fade)) {
+                forecast.receive(*made, now);
+            }
+        }
         report(connection, player, flight, forecast, chat, options.chat_filter, now);
         return_to(connection, controls, player, flight, globe);
         camera = move(controls, player, flight, globe, seconds);
-        edit_globe(controls, connection, globe, scene, camera);
+        edit_globe(controls, globe, scene, camera);
         const double ground_height = drawn_ground(globe, camera.eye);
         change_pace(controls, clock);
         hurry_world(controls, connection);
@@ -1048,7 +1078,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, client::Globe
             pockets = globe::find_pockets(globe.generator, camera.eye.metres(), client::ping_range,
                                           client::ping_spacing);
             std::cout << std::format(
-                "hog-viewer: ping: {} air pockets within {:.0f} m, found in {:.2f} s\n",
+                "{}: ping: {} air pockets within {:.0f} m, found in {:.2f} s\n", program,
                 pockets.size(), client::ping_range,
                 std::chrono::duration<double>(MonotonicClock::now() - pinged).count());
         }
@@ -1089,6 +1119,190 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, client::Globe
     return {};
 }
 
+// Takes in what the server sent of the planet's surface, asks it for what the plan needs that isn't
+// held, and has the scene draw the plan from what is.
+void show_streamed(Connection& connection, client::Scene& scene, client::ChunkCache& cache,
+                   MonotonicClock::time_point now) {
+    HOG_ZONE("chunks");
+    for (client::Session::ChunkEvent& event : connection.take_chunks()) {
+        if (auto* part = std::get_if<protocol::Chunk>(&event)) {
+            cache.receive(std::move(*part));
+        } else {
+            cache.plan(std::get<protocol::ChunkPlan>(event));
+        }
+    }
+    const std::vector<std::uint64_t> asked = cache.to_ask(now);
+    if (!asked.empty()) {
+        connection.ask_chunks(asked);
+    }
+    chunks::GlobeStream::Changes changes = cache.changes();
+    if (!changes.empty()) {
+        scene.show_chunks(std::move(changes));
+    }
+    // How long the ground takes to fill in, each time it does.
+    static MonotonicClock::time_point filling_since = now;
+    static bool filled = false;
+    if (cache.complete() != filled) {
+        filled = cache.complete();
+        if (filled) {
+            log::info(connection_log, "the ground has filled in: {} chunks in {:.1f} s",
+                      cache.planned(), std::chrono::duration<double>(now - filling_since).count());
+        } else {
+            filling_since = now;
+        }
+    }
+    // Now and then, how the ground is filling in.
+    static MonotonicClock::time_point reported = now;
+    if (now - reported >= std::chrono::seconds{5}) {
+        reported = now;
+        const client::Session* session = connection.session();
+        const std::optional<net::Stats> link = session != nullptr ? session->stats() : std::nullopt;
+        log::debug(
+            connection_log,
+            "{} chunks planned, {} held, {} drawn; in {:.0f} B/s out {:.0f} B/s, ping {} ms, "
+            "delivered here {:.2f} there {:.2f}, {} queued",
+            cache.planned(), cache.held(), cache.drawn(), link ? link->bytes_in_per_second : -1.0F,
+            link ? link->bytes_out_per_second : -1.0F, link ? link->ping.count() : -1,
+            link ? link->delivered_here : -1.0F, link ? link->delivered_there : -1.0F,
+            link ? link->queued_bytes : 0);
+    }
+}
+
+// Chunks of the planet's surface the client holds at most.
+constexpr std::size_t most_held_chunks = 2'000;
+
+// Flies over the surfaces the server streams until the window closes or it's time to quit. The
+// client holds no ground of its own: the server says how high it stands and sends what to draw.
+Result<void> fly_streamed(client::Scene& scene, client::PlanetClock& clock,
+                          const globe::Planet& planet, client::Flight flight,
+                          Connection& connection, const client::Options& options,
+                          const render::Device& device, render::Presenter& presenter,
+                          SDL_Window* window) {
+    const double radius = planet.radius;
+    Controls controls;
+    controls.timings = options.timings;
+    controls.through = options.through;
+    TitleCounter title;
+    client::FrameTimes times;
+    const MonotonicClock::time_point started = MonotonicClock::now();
+    MonotonicClock::time_point last = started;
+    ShaderReloader shaders{options.reload_shaders};
+    std::optional<client::Player> player; // never: walking waits for the server's ground
+    client::Forecast forecast{radius};
+    ChatBox chat;
+    client::ChunkCache cache{most_held_chunks};
+    connection.set_view_detail({.ratio = static_cast<float>(options.detail),
+                                .near = 1'000.0F,
+                                .slope = static_cast<float>(options.falloff)});
+    bool routed_to_chat = false;
+    render::Camera camera = client::flight_camera(flight, client::vertical_fov);
+    while (!controls.quit) {
+        controls.look = {};
+        controls.faster_time = 0;
+        controls.may_chat = connection.session() != nullptr;
+        {
+            HOG_ZONE("events");
+            SDL_Event event;
+            while (SDL_PollEvent(&event)) {
+                ImGui_ImplSDL3_ProcessEvent(&event);
+                handle(event, window, controls);
+            }
+        }
+        const bool chat_opened = route_keys(window, controls.chatting, routed_to_chat);
+        change_clouds(controls, scene, device);
+        const MonotonicClock::time_point now = MonotonicClock::now();
+        const double passed = std::chrono::duration<double>(now - last).count();
+        const double seconds = std::min(passed, longest_frame);
+        last = now;
+        times.add(passed, scene.timings());
+        shaders.look(device, now);
+        controls.walking = false;
+        report(connection, player, flight, forecast, chat, options.chat_filter, now);
+        show_streamed(connection, scene, cache, now);
+        // Where the server remembers the player, unless they said where to start.
+        if (const auto placed = connection.take_placed(); placed && !options.start) {
+            const WorldPosition at = protocol::to_world(placed->at);
+            flight = client::start_flight(glm::normalize(at.metres()), radius,
+                                          glm::length(at.metres()) - radius, planet::north_pole);
+        }
+        const client::Session* session = connection.session();
+        const double ground_height =
+            session != nullptr ? static_cast<double>(session->ground().value_or(0.0F)) : 0.0;
+        const bool faster = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
+        flight = client::fly(
+            flight, {.move = movement(controls), .look = controls.look, .seconds = seconds}, radius,
+            ground_height,
+            {.speed = controls.speed * (faster ? fast : 1.0),
+             .through = controls.through,
+             .underground = client::FlySettings{}.underground * (faster ? fast : 1.0)});
+        camera = client::flight_camera(flight, client::vertical_fov);
+        if (std::exchange(controls.dig, false)) {
+            connection.dig(WorldPosition{camera.eye.metres() + (camera.forward * edit_ahead)},
+                           edit_radius);
+        }
+        if (std::exchange(controls.build, false)) {
+            connection.build(WorldPosition{camera.eye.metres() + (camera.forward * edit_ahead)},
+                             edit_radius, edit_material);
+        }
+        change_pace(controls, clock);
+        hurry_world(controls, connection);
+        clock.advance(seconds);
+        title.count(
+            window, glm::length(camera.eye.metres()) - radius - ground_height,
+            scene.calendar().local_time_of_day(clock.time(), glm::normalize(flight.eye.metres())),
+            clock.rate(), world_rate(connection),
+            client::at_argument(seen_from(flight, camera.eye.metres(), radius)));
+        if (options.quit_after && now - started >= *options.quit_after) {
+            controls.quit = true;
+        }
+        const terrain::Bend bend = terrain::bend_from(
+            camera.eye, radius, ground_height,
+            options.bend ? terrain::BendSettings{} : terrain::BendSettings{.faked_radius = 0.0});
+        const std::vector<replication::Shown> others =
+            session != nullptr ? session->others(now) : std::vector<replication::Shown>{};
+        std::vector<render::Capsule> avatars = client::avatars(others);
+        if (session != nullptr) {
+            const std::vector<render::Capsule> grains =
+                session->grains().capsules(now, planet.voxel, planet.gravity);
+            avatars.insert(avatars.end(), grains.begin(), grains.end());
+        }
+        const client::Shot shot{.camera = camera,
+                                .bend = bend,
+                                .time = clock.time(),
+                                .seconds = seconds,
+                                .cutaway = 0.0,
+                                .companion = std::nullopt,
+                                .others = std::move(avatars),
+                                .forecast = &forecast,
+                                .now = now};
+        const Overlay overlay{.times = &times,
+                              .timings = controls.timings,
+                              .clouds = scene.cloud_quality(),
+                              .session = session,
+                              .others = others,
+                              .eye = camera.eye,
+                              .pockets = {},
+                              .now = now,
+                              .weather = controls.timings && forecast.known()
+                                             ? client::describe(client::weather_at_eye(shot))
+                                             : std::string{},
+                              .chat = &chat,
+                              .chatting = &controls.chatting,
+                              .chat_opened = chat_opened};
+        const auto drawn = draw(scene, shot, device, presenter, window, overlay,
+                                controls.quit ? options.capture : std::nullopt);
+        if (!drawn) {
+            return std::unexpected(drawn.error());
+        }
+        say_chat(chat, connection);
+        if (!*drawn) {
+            SDL_Delay(idle_ms);
+        }
+        HOG_FRAME();
+    }
+    return {};
+}
+
 // The companion as a billboard, if there's one to fly with and they can be drawn.
 std::optional<render::Billboard> companion(const client::Options& options, render::Device& device,
                                            VkFormat colour_format) {
@@ -1097,7 +1311,7 @@ std::optional<render::Billboard> companion(const client::Options& options, rende
     }
     auto picture = client::load_picture(*options.companion);
     if (!picture) {
-        std::cerr << std::format("hog-viewer: flying alone: {}\n", picture.error());
+        std::cerr << std::format("{}: flying alone: {}\n", program, picture.error());
         return std::nullopt;
     }
     client::lift_ink(*picture);
@@ -1105,7 +1319,7 @@ std::optional<render::Billboard> companion(const client::Options& options, rende
                                                {.width = picture->width, .height = picture->height},
                                                picture->texels);
     if (!billboard) {
-        std::cerr << std::format("hog-viewer: flying alone: {}\n", billboard.error());
+        std::cerr << std::format("{}: flying alone: {}\n", program, billboard.error());
         return std::nullopt;
     }
     return std::move(billboard).value();
@@ -1113,7 +1327,7 @@ std::optional<render::Billboard> companion(const client::Options& options, rende
 
 // What storing the ground drawn at full detail, and the whole planet, would cost at this cell size.
 void print_storage_estimate(const client::Scene& scene, const client::GlobeWorld& globe) {
-    const client::GlobeStream* stream = scene.globe_stream();
+    const chunks::GlobeStream* stream = scene.globe_stream();
     if (stream == nullptr) {
         return;
     }
@@ -1133,31 +1347,27 @@ void print_storage_estimate(const client::Scene& scene, const client::GlobeWorld
 void startup(std::string_view stage) {
     static const MonotonicClock::time_point started = MonotonicClock::now();
     const std::chrono::duration<double> since = MonotonicClock::now() - started;
-    std::cout << std::format("hog-viewer: {:7.1f} s  {}\n", since.count(), stage) << std::flush;
+    std::cout << std::format("{}: {:7.1f} s  {}\n", program, since.count(), stage) << std::flush;
 }
 
 int show(const client::Options& options, const planet::PlanetConfig& planet, render::Device& device,
          render::Presenter& presenter, SDL_Window* window) {
     startup("starting");
-    auto connection = Connection::open(options);
-    if (!connection) {
-        std::cerr << std::format("hog-viewer: {}\n", connection.error());
-        return EXIT_FAILURE;
-    }
     // Before the scene, which draws it.
     auto described = client::globe_planet_in(options.planet, planet.seed, planet.radius);
     if (!described) {
-        std::cerr << std::format("hog-viewer: {}\n", described.error());
+        std::cerr << std::format("{}: {}\n", program, described.error());
         return EXIT_FAILURE;
     }
     if (options.voxel) {
         described->voxel = *options.voxel;
         if (auto valid = globe::validate(*described); !valid) {
-            std::cerr << std::format("hog-viewer: --voxel {}: {}\n", *options.voxel, valid.error());
+            std::cerr << std::format("{}: --voxel {}: {}\n", program, *options.voxel,
+                                     valid.error());
             return EXIT_FAILURE;
         }
     }
-    startup("making the planet");
+    startup(std::format("making planet {:016x}", globe::world_id(*described)));
     client::GlobeWorld globe{*described, [](std::string_view stage) { startup(stage); }};
     startup("planet made");
     globe.world.draw_from_amounts(options.surface_from_amounts);
@@ -1168,7 +1378,7 @@ int show(const client::Options& options, const planet::PlanetConfig& planet, ren
                                                  options.time_of_day)};
     const window::Ui ui{window, device, presenter.swapchain().format()};
     if (!ui.started()) {
-        std::cerr << "hog-viewer: can't draw the timings over the picture\n";
+        std::cerr << program << ": can't draw the timings over the picture\n";
         return EXIT_FAILURE;
     }
     // Only shown, so it leaves the mouse and keys to flying; the keys come back to it while the
@@ -1182,26 +1392,38 @@ int show(const client::Options& options, const planet::PlanetConfig& planet, ren
                                        presenter.swapchain().format(), render::frames_in_flight,
                                        companion(options, device, presenter.swapchain().format()));
     if (!scene) {
-        std::cerr << std::format("hog-viewer: {}\n", scene.error());
+        std::cerr << std::format("{}: {}\n", program, scene.error());
         return EXIT_FAILURE;
     }
     if (auto set = scene->set_cloud_quality(options.clouds); !set) {
-        std::cerr << std::format("hog-viewer: {}\n", set.error());
+        std::cerr << std::format("{}: {}\n", program, set.error());
         return EXIT_FAILURE;
     }
     scene->set_system(planet.system);
     scene->follow_globe(globe.world);
     startup("ready");
-    const Result<void> flown =
-        fly(*scene, clock, globe, flight, *connection, options, device, presenter, window);
+    // Only now, as the loop begins to answer it: the server refuses a connection that says no hello
+    // within seconds, and the stages above take longer.
+    // Without a server the viewer keeps its own air, as a server would.
+    std::optional<skies::WeatherKeeper> alone;
+    if (viewing) {
+        alone.emplace(globe.generator, planet.day_length, planet.axial_tilt, clock.time());
+    }
+    auto connection = Connection::open(options, std::nullopt);
+    if (!connection) {
+        std::cerr << std::format("{}: {}\n", program, connection.error());
+        return EXIT_FAILURE;
+    }
+    const Result<void> flown = fly(*scene, clock, globe, flight, *connection,
+                                   alone ? &*alone : nullptr, options, device, presenter, window);
     // The GPU may still be drawing with the scene.
     vkDeviceWaitIdle(device.handle());
     if (!flown) {
-        std::cerr << std::format("hog-viewer: {}\n", flown.error());
+        std::cerr << std::format("{}: {}\n", program, flown.error());
         return EXIT_FAILURE;
     }
     if (options.validate && device.validation_errors() != 0) {
-        std::cerr << std::format("hog-viewer: {} Vulkan validation errors\n",
+        std::cerr << std::format("{}: {} Vulkan validation errors\n", program,
                                  device.validation_errors());
         return EXIT_FAILURE;
     }
@@ -1209,15 +1431,122 @@ int show(const client::Options& options, const planet::PlanetConfig& planet, ren
     return EXIT_SUCCESS;
 }
 
+// Connects and waits to be welcomed, which brings the planet the server runs; the window keeps
+// answering meanwhile.
+Result<globe::Planet> welcomed_to(Connection& connection) {
+    constexpr std::chrono::seconds patience{60};
+    const MonotonicClock::time_point began = MonotonicClock::now();
+    while (MonotonicClock::now() - began < patience) {
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_EVENT_QUIT) {
+                return make_error(ErrorCode::Unsupported, "closed before the server welcomed");
+            }
+        }
+        connection.pump(MonotonicClock::now());
+        if (const client::Session* session = connection.session()) {
+            if (session->state() == client::Session::State::Refused) {
+                return make_error(ErrorCode::Unsupported, session->reason());
+            }
+            if (session->state() == client::Session::State::Welcomed) {
+                return globe::decode_planet(session->planet());
+            }
+        }
+        SDL_Delay(5);
+    }
+    return make_error(ErrorCode::Io, "the server didn't welcome the client in time");
+}
+
+// The client: connects, is told the planet, and draws the surfaces the server streams, with none
+// of its own and nothing made of the planet here.
+int show_streamed_world(const client::Options& options, const planet::PlanetConfig& config,
+                        render::Device& device, render::Presenter& presenter, SDL_Window* window) {
+    startup("starting");
+    auto connection = Connection::open(options, std::nullopt);
+    if (!connection) {
+        std::cerr << std::format("{}: {}\n", program, connection.error());
+        return EXIT_FAILURE;
+    }
+    startup("connecting");
+    const auto planet = welcomed_to(*connection);
+    if (!planet) {
+        std::cerr << std::format("{}: {}\n", program, planet.error());
+        return EXIT_FAILURE;
+    }
+    startup(std::format("welcomed to planet {:016x}", globe::world_id(*planet)));
+    const sim::Calendar calendar{config.day_length, config.axial_tilt};
+    constexpr double start_height = 2'000.0;
+    client::Flight flight =
+        options.start
+            ? client::start_flight(
+                  planet::direction_at(options.start->latitude * (std::numbers::pi / 180.0),
+                                       options.start->longitude * (std::numbers::pi / 180.0)),
+                  planet->radius, options.start->altitude, planet::north_pole)
+            : client::start_flight(planet::start_direction, planet->radius, start_height,
+                                   planet::north_pole);
+    flight.pitch = start_pitch;
+    if (options.start && options.start->heading && options.start->pitch) {
+        constexpr double degree = std::numbers::pi / 180.0;
+        flight = client::turned_to(flight, *options.start->heading * degree,
+                                   *options.start->pitch * degree);
+    }
+    client::PlanetClock clock{client::start_time(calendar, to_game_time(WallClock::now()),
+                                                 glm::normalize(flight.eye.metres()),
+                                                 options.time_of_day)};
+    const window::Ui ui{window, device, presenter.swapchain().format()};
+    if (!ui.started()) {
+        std::cerr << program << ": can't draw the timings over the picture\n";
+        return EXIT_FAILURE;
+    }
+    ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NoMouse | ImGuiConfigFlags_NoMouseCursorChange |
+                                  ImGuiConfigFlags_NoKeyboard;
+    startup("starting the renderer");
+    jobs::JobSystem jobs{options.threads};
+    auto scene =
+        client::Scene::create(device, *planet, jobs, calendar, presenter.swapchain().format(),
+                              render::frames_in_flight, std::nullopt);
+    if (!scene) {
+        std::cerr << std::format("{}: {}\n", program, scene.error());
+        return EXIT_FAILURE;
+    }
+    if (auto set = scene->set_cloud_quality(options.clouds); !set) {
+        std::cerr << std::format("{}: {}\n", program, set.error());
+        return EXIT_FAILURE;
+    }
+    scene->set_system(config.system);
+    startup("ready");
+    const Result<void> flown = fly_streamed(*scene, clock, *planet, flight, *connection, options,
+                                            device, presenter, window);
+    vkDeviceWaitIdle(device.handle());
+    if (!flown) {
+        std::cerr << std::format("{}: {}\n", program, flown.error());
+        return EXIT_FAILURE;
+    }
+    if (options.validate && device.validation_errors() != 0) {
+        std::cerr << std::format("{}: {} Vulkan validation errors\n", program,
+                                 device.validation_errors());
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
+}
+
 int run(std::span<const std::string_view> arguments) {
     auto options = client::parse_options(arguments);
     if (!options) {
-        std::cerr << std::format("hog-viewer: {}\n\n{}", options.error().message, client::usage());
+        std::cerr << std::format("{}: {}\n\n{}", program, options.error().message, client::usage());
         return EXIT_FAILURE;
     }
     if (options->help) {
         std::cout << client::usage();
         return EXIT_SUCCESS;
+    }
+    if (viewing && (options->connect || options->login)) {
+        std::cerr << "hog-viewer draws a planet alone; hog-client connects to a server\n";
+        return EXIT_FAILURE;
+    }
+    if (!viewing && !options->connect) {
+        std::cerr << "hog-client: --connect ADDRESS is required; hog-viewer draws a planet alone\n";
+        return EXIT_FAILURE;
     }
     // Found from the program too, so it runs from any directory.
     if (const char* base = SDL_GetBasePath(); base != nullptr) {
@@ -1228,56 +1557,63 @@ int run(std::span<const std::string_view> arguments) {
     }
     auto planet = planet::load_planet_config(options->planet);
     if (!planet) {
-        std::cerr << std::format("hog-viewer: {}\n", planet.error());
+        std::cerr << std::format("{}: {}\n", program, planet.error());
         return EXIT_FAILURE;
     }
 
     // Declared in the order they're made, so each goes before what it was made with.
     const window::Sdl sdl;
     if (!sdl.started()) {
-        std::cerr << std::format("hog-viewer: can't start SDL: {}\n", SDL_GetError());
+        std::cerr << std::format("{}: can't start SDL: {}\n", program, SDL_GetError());
         return EXIT_FAILURE;
     }
     if (!sdl.vulkan()) {
-        std::cerr << std::format("hog-viewer: can't load Vulkan: {}\n", SDL_GetError());
+        std::cerr << std::format("{}: can't load Vulkan: {}\n", program, SDL_GetError());
         return window::no_vulkan;
     }
     const window::Window window{
         SDL_CreateWindow("HOG", 1'600, 900,
                          SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY)};
     if (window == nullptr) {
-        std::cerr << std::format("hog-viewer: can't open a window: {}\n", SDL_GetError());
+        std::cerr << std::format("{}: can't open a window: {}\n", program, SDL_GetError());
         return EXIT_FAILURE;
     }
     const auto wanted = window::device_options(
         window.get(),
         {.app_name = "HOG", .validation = options->validate, .prefer_software = options->software});
     if (!wanted) {
-        std::cerr << std::format("hog-viewer: {}\n", wanted.error());
+        std::cerr << std::format("{}: {}\n", program, wanted.error());
         return window::no_vulkan;
     }
     const auto device = render::Device::create(*wanted);
     if (!device) {
-        std::cerr << std::format("hog-viewer: can't draw: {}\n", device.error());
+        std::cerr << std::format("{}: can't draw: {}\n", program, device.error());
         return device.error().code == ErrorCode::Unsupported ? window::no_vulkan : EXIT_FAILURE;
     }
     const auto presenter = render::Presenter::create(**device, window::drawable(window.get()));
     if (!presenter) {
-        std::cerr << std::format("hog-viewer: can't show frames: {}\n", presenter.error());
+        std::cerr << std::format("{}: can't show frames: {}\n", program, presenter.error());
         return EXIT_FAILURE;
     }
-    return show(*options, *planet, **device, **presenter, window.get());
+    if (viewing) {
+        return show(*options, *planet, **device, **presenter, window.get());
+    }
+    return show_streamed_world(*options, *planet, **device, **presenter, window.get());
 }
 
 } // namespace
 
-int main(int argc, char** argv) {
+namespace hog::client {
+
+int play(std::span<const std::string_view> arguments, Mode mode) {
+    viewing = mode == Mode::Viewer;
+    program = viewing ? "hog-viewer" : "hog-client";
     try {
-        const std::span<char*> given{argv, static_cast<std::size_t>(argc)};
-        const std::vector<std::string_view> arguments(given.begin() + 1, given.end());
         return run(arguments);
     } catch (const std::exception& error) {
-        std::cerr << "hog-viewer: " << error.what() << '\n';
+        std::cerr << program << ": " << error.what() << '\n';
         return EXIT_FAILURE;
     }
 }
+
+} // namespace hog::client

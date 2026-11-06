@@ -259,3 +259,33 @@ TEST_CASE("a small world's ground stays inside its shell", "[globe][planet]") {
         CHECK(*ground - small.radius > -small.floor_depth - 1'000.0);
     }
 }
+
+TEST_CASE("a planet sent as bytes is the same planet, and a cut or odd one is refused",
+          "[globe][planet]") {
+    for (const char* name : {"earth", "mars", "venus", "titan"}) {
+        const Planet planet = named(name);
+        const auto bytes = hog::globe::encode_planet(planet);
+        const auto read = hog::globe::decode_planet(bytes);
+        REQUIRE(read);
+        CHECK(hog::globe::world_id(*read) == hog::globe::world_id(planet));
+        CHECK(read->seed == planet.seed);
+    }
+    Planet odd;
+    odd.seed = 0xFEED'FACE'1234ULL;
+    odd.radius = 12'345.678;
+    odd.regime = hog::globe::Regime::Episodic;
+    odd.layout = hog::globe::Layout::OneSide;
+    odd.volatiles = Volatile::Methane;
+    odd.high.rock = hog::globe::Material::Anorthosite;
+    odd.wear = 0.25;
+    const auto bytes = hog::globe::encode_planet(odd);
+    const auto read = hog::globe::decode_planet(bytes);
+    REQUIRE(read);
+    CHECK(hog::globe::world_id(*read) == hog::globe::world_id(odd));
+    for (std::size_t length = 0; length < bytes.size(); ++length) {
+        CHECK_FALSE(hog::globe::decode_planet(std::span{bytes}.first(length)));
+    }
+    auto longer = bytes;
+    longer.push_back(std::byte{0});
+    CHECK_FALSE(hog::globe::decode_planet(longer));
+}

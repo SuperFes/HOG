@@ -40,13 +40,16 @@ std::string_view name_of(Session::State state) {
 
 } // namespace
 
-Result<Session> Session::connect(std::string address, std::vector<std::byte> token) {
+Result<Session> Session::connect(std::string address, std::vector<std::byte> token,
+                                 std::optional<std::uint64_t> world) {
     auto client = net::Client::connect(address);
     if (!client) {
         return std::unexpected(client.error());
     }
     log::info(session_log, "connecting to {}", address);
-    return Session{std::move(*client), std::move(address), std::move(token)};
+    Session session{std::move(*client), std::move(address), std::move(token)};
+    session.world_ = world;
+    return session;
 }
 
 Session::Session(net::Client client, std::string address, std::vector<std::byte> token) noexcept
@@ -92,10 +95,23 @@ void Session::look(std::optional<Whereabouts> player, MonotonicClock::time_point
 
 void Session::heard(std::span<const std::byte> bytes, MonotonicClock::time_point now) {
     auto message = protocol::decode(bytes);
-    if (!message) {
+    if (!message && message.error().code == ErrorCode::Unsupported) {
+        // A kind from a newer server: skipped, as the rest still make sense.
+        log::debug(session_log, "{} sent something this client doesn't know: {}", address_,
+                   message.error());
+    } else if (!message) {
         log::warn(session_log, "{} sent something unreadable: {}", address_, message.error());
-    } else if (std::holds_alternative<protocol::Welcome>(*message)) {
+    } else if (const auto* welcome = std::get_if<protocol::Welcome>(&*message)) {
+        if (world_ && welcome->world != 0 && welcome->world != *world_) {
+            reason_ =
+                std::format("the server runs planet {:016x}, not the {:016x} this client makes",
+                            welcome->world, *world_);
+            log::warn(session_log, "{}", reason_);
+            state_ = State::Refused;
+            return;
+        }
         log::info(session_log, "welcomed by {}", address_);
+        planet_ = welcome->planet;
         state_ = State::Welcomed;
     } else if (const auto* refused = std::get_if<protocol::Refused>(&*message)) {
         reason_ = protocol::explain(*refused);
@@ -127,6 +143,12 @@ void Session::heard(std::span<const std::byte> bytes, MonotonicClock::time_point
     } else if (auto* bricks = std::get_if<protocol::Bricks>(&*message)) {
         bricks_.insert(bricks_.end(), std::make_move_iterator(bricks->bricks.begin()),
                        std::make_move_iterator(bricks->bricks.end()));
+    } else if (auto* chunk = std::get_if<protocol::Chunk>(&*message)) {
+        chunks_.emplace_back(std::move(*chunk));
+    } else if (auto* plan = std::get_if<protocol::ChunkPlan>(&*message)) {
+        chunks_.emplace_back(std::move(*plan));
+    } else if (const auto* ground = std::get_if<protocol::Ground>(&*message)) {
+        ground_ = ground->height;
     } else if (const auto* grains = std::get_if<protocol::Grains>(&*message)) {
         grains_.receive(*grains, now);
     } else if (const auto* clock = std::get_if<protocol::Clock>(&*message)) {
@@ -205,6 +227,22 @@ void Session::build(WorldPosition centre, double radius, std::uint8_t material) 
                          .radius = *width,
                          .material = material},
          net::Delivery::Reliable);
+}
+
+void Session::set_view_detail(const protocol::ViewDetail& detail) {
+    if (state_ == State::Welcomed) {
+        send(detail, net::Delivery::Reliable);
+    }
+}
+
+void Session::ask_chunks(std::span<const std::uint64_t> keys) {
+    if (state_ != State::Welcomed) {
+        return;
+    }
+    for (std::size_t from = 0; from < keys.size(); from += protocol::most_asked) {
+        const auto chunk = keys.subspan(from, std::min(protocol::most_asked, keys.size() - from));
+        send(protocol::ChunksAsked{.keys = {chunk.begin(), chunk.end()}}, net::Delivery::Reliable);
+    }
 }
 
 void Session::send(const protocol::Message& message, net::Delivery delivery) {

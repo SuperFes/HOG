@@ -10,6 +10,9 @@
 
 namespace hog::server {
 
+// `bricks` in messages of at most most_bricks and about half of what a message may carry, in order.
+[[nodiscard]] std::vector<protocol::Bricks> batch_bricks(std::vector<protocol::SentBrick> bricks);
+
 // Bricks of the voxel world told to players: every one held, as a player joins, and those
 // changed since last told to everyone, in messages of at most most_bricks and about half of what
 // a message may carry. The store must outlive it.

@@ -52,6 +52,16 @@ inline constexpr std::uint32_t most_bricks_up = std::uint32_t{1} << 19U;
             .layer = static_cast<std::uint32_t>(key & (most_bricks_up - 1))};
 }
 
+// The middle of a brick: where its middle voxel is taken.
+[[nodiscard]] inline DVec3 brick_middle(BrickSite brick, const Layers& layers) {
+    constexpr std::uint32_t half = brick_side / 2;
+    return middle_of({.face = brick.face,
+                      .i = (brick.i * brick_side) + half,
+                      .j = (brick.j * brick_side) + half,
+                      .layer = (brick.layer * brick_side) + half},
+                     layers);
+}
+
 // The brick's voxel at `index`, which runs along i, then j, then up.
 [[nodiscard]] constexpr Site site_in(BrickSite brick, int index) noexcept {
     const auto at = static_cast<std::uint32_t>(index);

@@ -1,12 +1,12 @@
 #pragma once
 
+#include <hog/client/grains.hpp>
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
 #include <hog/core/time.hpp>
 #include <hog/net/client.hpp>
 #include <hog/net/events.hpp>
 #include <hog/net/stats.hpp>
-#include <hog/client/grains.hpp>
 #include <hog/protocol/messages.hpp>
 #include <hog/replication/replica.hpp>
 #include <hog/replication/timeline.hpp>
@@ -18,6 +18,7 @@
 #include <span>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace hog::client {
@@ -48,7 +49,9 @@ public:
     static constexpr std::chrono::milliseconds move_interval{50};
 
     // Starts connecting to `address`, to say hello with the login service's token, or none.
-    [[nodiscard]] static Result<Session> connect(std::string address, std::vector<std::byte> token);
+    // Given the id of the planet the client makes ground of, it's refused a server of another.
+    [[nodiscard]] static Result<Session> connect(std::string address, std::vector<std::byte> token,
+                                                 std::optional<std::uint64_t> world = std::nullopt);
 
     // Takes in what the server sent, answering it, and once welcomed tells it where the player
     // is, when given.
@@ -95,6 +98,19 @@ public:
     void dig(WorldPosition centre, double radius);
     void build(WorldPosition centre, double radius, std::uint8_t material);
 
+    // What the server sent of the planet's surface since last asked, in the order it came: parts of
+    // chunks, and plans of those wanted.
+    using ChunkEvent = std::variant<protocol::Chunk, protocol::ChunkPlan>;
+    [[nodiscard]] std::vector<ChunkEvent> take_chunks() { return std::exchange(chunks_, {}); }
+    // Tells the server how fast the client wants detail to fall off with distance.
+    void set_view_detail(const protocol::ViewDetail& detail);
+    // Asks the server for these chunks of its plan, in messages that fit.
+    void ask_chunks(std::span<const std::uint64_t> keys);
+    // The planet the server runs, as it said when it welcomed; empty before.
+    [[nodiscard]] const std::vector<std::byte>& planet() const noexcept { return planet_; }
+    // How high the ground stands under the player, as the server last said; none before.
+    [[nodiscard]] std::optional<float> ground() const noexcept { return ground_; }
+
     [[nodiscard]] State state() const noexcept { return state_; }
     [[nodiscard]] const std::string& address() const noexcept { return address_; }
     // Why the server refused or closed the connection.
@@ -121,6 +137,10 @@ private:
     net::Client client_;
     std::string address_;
     std::vector<std::byte> token_;
+    std::optional<std::uint64_t> world_;
+    std::vector<std::byte> planet_;
+    std::optional<float> ground_;
+    std::vector<ChunkEvent> chunks_;
     State state_ = State::Connecting;
     std::string reason_;
     replication::Replica replica_;

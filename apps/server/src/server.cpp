@@ -3,13 +3,13 @@
 #include <hog/core/profile.hpp>
 #include <hog/core/text_file.hpp>
 #include <hog/globe/brick_archive.hpp>
+#include <hog/globe/grip.hpp>
 #include <hog/globe/material.hpp>
 #include <hog/net/simulation.hpp>
 #include <hog/planet/planet_config.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/save/snapshot_store.hpp>
 #include <hog/server/grain_sharing.hpp>
-#include <hog/globe/grip.hpp>
 #include <hog/server/ground_wetting.hpp>
 #include <hog/server/spatial_tracking.hpp>
 
@@ -35,6 +35,11 @@ constexpr double near_wear_reach = 48.0;
 constexpr double near_wear_gap = 5.0;
 // How near a player a vent is taken up by the flow, metres.
 constexpr double vent_reach = 4'000.0;
+// Chunks of the planet's surface a player is sent a tick.
+constexpr std::size_t chunks_per_tick = 4;
+// Bytes a connection may have queued before chunks wait; one more may go over it, and it holds far
+// more.
+constexpr std::size_t chunk_queue = 256 * 1'024;
 // A cavern pool's steady seep, cubic metres a second.
 constexpr double pool_rate = 0.05;
 
@@ -65,11 +70,12 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config, const glob
     : config_(config), world_id_(globe::world_id(globe)), generator_(globe),
       voxels_(generator_.layers()), globe_(generator_, voxels_), flow_(globe_),
       vent_sites_(globe::vent_sites(generator_)), vented_(vent_sites_.size(), false),
-      bricks_(std::move(bricks)), bricks_shared_(voxels_), snapshots_(std::move(snapshots)),
-      places_(std::move(places)), writer_(snapshots_, config.keep_snapshots),
+      bricks_(std::move(bricks)), snapshots_(std::move(snapshots)), places_(std::move(places)),
+      writer_(snapshots_, config.keep_snapshots),
       nearby_(std::min(planet::level_for(config.net.view.radius, globe.radius), planet::max_level)),
-      persistence_(entities_), joined_(entities_, globe.radius, config.net.view),
-      ground_(space_, globe_), ticks_(registry_.counter("hog_ticks_total", "Live ticks run.")),
+      persistence_(entities_), chunks_(globe_, jobs_),
+      joined_(entities_, globe.radius, config.net.view), ground_(space_, globe_),
+      ticks_(registry_.counter("hog_ticks_total", "Live ticks run.")),
       tick_seconds_(registry_.histogram("hog_tick_seconds", "Real time each live tick took.",
                                         {tick_bounds.begin(), tick_bounds.end()})),
       slipped_(registry_.counter("hog_ticks_slipped_total",
@@ -94,8 +100,8 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config, const glob
       chat_lines_(registry_.counter("hog_chat_lines_total", "Lines of chat sent to players.")),
       hateful_lines_(registry_.counter("hog_chat_hateful_lines_total",
                                        "Lines of hate speech reported, sent on as small talk.")),
-      bricks_sent_(
-          registry_.counter("hog_bricks_sent_total", "Bricks of the voxel world sent to players.")),
+      chunks_sent_(registry_.counter("hog_chunks_sent_total",
+                                     "Chunks of the planet's surface sent to players.")),
       reporter_(registry_) {
     persistence_.persist<server::Position>();
     server::track_positions(entities_, nearby_);
@@ -160,8 +166,6 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
         return context("voxels", voxels.error());
     }
     server->voxels_ = std::move(*voxels);
-    // Loaded bricks are told to players as they join, not as changes.
-    server->bricks_shared_ = server::BrickSharing{server->voxels_};
     log::info(server_log, "world {:016x} in {}: {} bricks changed", server->world_id_, world_file,
               server->voxels_.size());
 
@@ -186,12 +190,12 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
     if (config.weather.on) {
         server->weather_.emplace(server->generator_, planet->day_length, planet->axial_tilt,
                                  server->time_,
-                                 server::WeatherSettings{.level = config.weather.level,
-                                                         .layers = config.weather.layers,
-                                                         .spin_up = config.weather.spin_up});
+                                 skies::WeatherSettings{.level = config.weather.level,
+                                                        .layers = config.weather.layers,
+                                                        .spin_up = config.weather.spin_up});
         const save::Section* kept =
-            loaded->snapshot ? loaded->snapshot->find(server::WeatherKeeper::section) : nullptr;
-        if (kept != nullptr && kept->version == server::WeatherKeeper::section_version) {
+            loaded->snapshot ? loaded->snapshot->find(skies::WeatherKeeper::section) : nullptr;
+        if (kept != nullptr && kept->version == skies::WeatherKeeper::section_version) {
             if (auto resumed = server->weather_->restore(kept->bytes, server->time_); !resumed) {
                 log::warn(save_log, "starting the air afresh: {}", resumed.error().message);
             } else {
@@ -209,28 +213,27 @@ void Server::wake_vents() {
         const DVec3 here = at.metres();
         for (std::size_t k = 0; k < vent_sites_.size(); ++k) {
             const globe::VentSite& site = vent_sites_[k];
-            if (vented_[k] ||
-                glm::distance(here, site.direction * site.ground) > vent_reach) {
+            if (vented_[k] || glm::distance(here, site.direction * site.ground) > vent_reach) {
                 continue;
             }
             vented_[k] = true;
             const globe::Cell column = globe::cell_under(site.direction, layers.level);
-            // A volcano's cycle is about a day and a half, mostly asleep, shifted by its key; a pool seeps
-            // all the while.
+            // A volcano's cycle is about a day and a half, mostly asleep, shifted by its key; a
+            // pool seeps all the while.
             const double unit = static_cast<double>(site.key >> 11U) * 0x1.0p-53;
             // Eruptions differ in strength, some barely more than a seep.
             const double strength = static_cast<double>(site.key & 0xFFFFU) / 65'536.0;
-            flow_.add_vent({.site = {.face = column.face,
-                                     .i = column.i,
-                                     .j = column.j,
-                                     .layer = static_cast<std::uint32_t>(
-                                         layers.layer_at(site.ground + 1.0))},
-                            .active_rate = site.pool ? pool_rate : 0.02,
-                            .erupting_rate = site.pool ? 0.0 : 2.0 * (0.2 + (1.3 * strength)),
-                            .period = site.pool ? 0.0 : 129'600.0,
-                            .eruption = site.pool ? 0.0 : 300.0,
-                            .active = site.pool ? 0.0 : 7'200.0,
-                            .phase = site.pool ? 0.0 : unit * 129'600.0});
+            flow_.add_vent(
+                {.site = {.face = column.face,
+                          .i = column.i,
+                          .j = column.j,
+                          .layer = static_cast<std::uint32_t>(layers.layer_at(site.ground + 1.0))},
+                 .active_rate = site.pool ? pool_rate : 0.02,
+                 .erupting_rate = site.pool ? 0.0 : 2.0 * (0.2 + (1.3 * strength)),
+                 .period = site.pool ? 0.0 : 129'600.0,
+                 .eruption = site.pool ? 0.0 : 300.0,
+                 .active = site.pool ? 0.0 : 7'200.0,
+                 .phase = site.pool ? 0.0 : unit * 129'600.0});
         }
     }
 }
@@ -257,7 +260,7 @@ void Server::simulate(GameTime from, GameDuration step) {
         const auto fade = std::max(
             std::chrono::milliseconds{500},
             std::chrono::duration_cast<std::chrono::milliseconds>(
-                server::WeatherSettings{}.interval / std::max<std::uint32_t>(clock_scale_, 1)));
+                skies::WeatherSettings{}.interval / std::max<std::uint32_t>(clock_scale_, 1)));
         if (const auto made = weather_->poll(from + step, fade)) {
             tell_weather(*made);
         }
@@ -344,7 +347,8 @@ void Server::serve_players() {
             log::info(server_log, "connection {} opened",
                       std::to_underlying(connected->connection));
             handshakes_.emplace(connected->connection,
-                                protocol::Handshake{MonotonicClock::now(), login_key_});
+                                protocol::Handshake{MonotonicClock::now(), login_key_, world_id_,
+                                                    globe::encode_planet(generator_.planet())});
         } else if (const auto* message = std::get_if<net::Message>(&event)) {
             const auto shaking = handshakes_.find(message->from());
             if (shaking != handshakes_.end()) {
@@ -359,6 +363,7 @@ void Server::serve_players() {
             log::info(server_log, "connection {} closed: {}", std::to_underlying(lost->connection),
                       lost->reason);
             handshakes_.erase(lost->connection);
+            chunks_.leave(lost->connection);
             if (const auto left = joined_.leave(lost->connection)) {
                 keep(*left);
             }
@@ -409,7 +414,7 @@ void Server::answer(net::ConnectionId connection, const protocol::Answer& answer
             send_placed(connection, player->account);
         }
         handshakes_.erase(shaking);
-        send_bricks(connection, bricks_shared_.all());
+        chunks_.join(connection);
         if (weather_ && weather_->latest()) {
             send_weather(connection, *weather_->latest());
         }
@@ -450,6 +455,10 @@ void Server::heard(net::ConnectionId connection, std::span<const std::byte> byte
         dig(connection, *dug);
     } else if (const auto* built = std::get_if<protocol::Built>(&*message)) {
         build(connection, *built);
+    } else if (const auto* view = std::get_if<protocol::ViewDetail>(&*message)) {
+        chunks_.detail(connection, *view);
+    } else if (const auto* asked = std::get_if<protocol::ChunksAsked>(&*message)) {
+        chunks_.ask(connection, asked->keys);
     } else if (const auto* hurry = std::get_if<protocol::Hurry>(&*message)) {
         if (joined_.find(connection)) {
             hurry_ = {connection, hurry->scale};
@@ -529,6 +538,7 @@ void Server::dig(net::ConnectionId connection, const protocol::Dug& dug) {
     if (!joined_.find(connection)) {
         return;
     }
+    chunks_.edited();
     const std::uint64_t before = voxels_.revision();
     globe::dig(globe_, protocol::to_world(dug.centre).metres(), dug.radius / 1'000.0);
     for (const globe::BrickSite brick : voxels_.changed_since(before)) {
@@ -549,6 +559,7 @@ void Server::build(net::ConnectionId connection, const protocol::Built& built) {
                    std::to_underlying(connection), built.material);
         return;
     }
+    chunks_.edited();
     const std::uint64_t before = voxels_.revision();
     globe::build(globe_, protocol::to_world(built.centre).metres(), built.radius / 1'000.0,
                  material);
@@ -559,16 +570,46 @@ void Server::build(net::ConnectionId connection, const protocol::Built& built) {
     }
 }
 
-void Server::tell_bricks() {
-    if (!players_) {
-        return;
-    }
-    const std::vector<protocol::Bricks> changed = bricks_shared_.changed();
-    if (changed.empty()) {
-        return;
-    }
-    for (const net::ConnectionId connection : joined_.connections()) {
-        send_bricks(connection, changed);
+void Server::tell_chunks() {
+    chunks_.step();
+    for (const auto& [connection, look] : joined_.looks()) {
+        const WorldPosition at = look.at;
+        chunks_.follow(connection, at.metres(), look.forward);
+        const float ground =
+            static_cast<float>(chunks::globe_ground(generator_, glm::normalize(at.metres())));
+        if (auto sent = players_->send(connection, net::Delivery::Unreliable,
+                                       protocol::encode(protocol::Ground{.height = ground}));
+            !sent) {
+            log::debug(server_log, "couldn't send connection {} the ground: {}",
+                       std::to_underlying(connection), sent.error());
+        }
+        server::ChunkSharing::Next next = chunks_.next(connection, chunks_per_tick);
+        if (next.plan) {
+            if (auto sent =
+                    players_->send(connection, net::Delivery::Bulk, protocol::encode(*next.plan));
+                !sent) {
+                log::debug(server_log, "couldn't send connection {} the plan: {}",
+                           std::to_underlying(connection), sent.error());
+                chunks_.retry_plan(connection);
+            }
+        }
+        // Sent while the connection has room, a chunk's parts together; what waits is asked for
+        // again, and nothing is dropped.
+        const std::optional<net::Stats> stats = players_->stats(connection);
+        const std::size_t queued = stats ? stats->queued_bytes : chunk_queue;
+        std::vector<protocol::Chunk> unsent = server::send_chunks(
+            std::move(next.chunks), queued, chunk_queue, [&](const std::vector<std::byte>& bytes) {
+                if (auto sent = players_->send(connection, net::Delivery::Bulk, bytes); !sent) {
+                    log::debug(server_log, "couldn't send connection {} a chunk: {}",
+                               std::to_underlying(connection), sent.error());
+                    return false;
+                }
+                chunks_sent_.add();
+                return true;
+            });
+        for (protocol::Chunk& chunk : unsent) {
+            chunks_.retry(connection, std::move(chunk));
+        }
     }
 }
 
@@ -598,32 +639,16 @@ void Server::tell_grains() {
     }
 }
 
-void Server::send_bricks(net::ConnectionId connection,
-                         const std::vector<protocol::Bricks>& bricks) {
-    if (!players_) {
-        return;
-    }
-    for (const protocol::Bricks& message : bricks) {
-        if (auto sent = players_->send(connection, net::Delivery::Bulk, protocol::encode(message));
-            !sent) {
-            log::debug(server_log, "couldn't send connection {} bricks: {}",
-                       std::to_underlying(connection), sent.error());
-            return;
-        }
-        bricks_sent_.add(message.bricks.size());
-    }
-}
-
 void Server::share() {
     HOG_ZONE("share");
     if (!players_) {
         return;
     }
-    tell_bricks();
     tell_grains();
     if (auto kept = ground_.keep(joined_.placed()); !kept) {
         log::warn(server_log, "couldn't keep the ground near players: {}", kept.error());
     }
+    tell_chunks();
     joined_.share(
         nearby_, [this](net::ConnectionId connection, const protocol::Snapshot& snapshot) {
             const std::vector<std::byte> bytes = protocol::encode(snapshot);
@@ -659,8 +684,8 @@ void Server::submit() {
     save::Snapshot snapshot{.world = world_id_, .time = time_, .tick = tick_, .sections = {}};
     persistence_.store(snapshot);
     if (weather_ && !weather_->saved().empty()) {
-        snapshot.add({.id = server::WeatherKeeper::section,
-                      .version = server::WeatherKeeper::section_version,
+        snapshot.add({.id = skies::WeatherKeeper::section,
+                      .version = skies::WeatherKeeper::section_version,
                       .bytes = weather_->saved()});
     }
     writer_.submit(std::move(snapshot));

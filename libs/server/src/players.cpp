@@ -2,11 +2,23 @@
 #include <hog/server/players.hpp>
 #include <hog/server/spatial_tracking.hpp>
 
+#include <hog/planet/tangent_frame.hpp>
+
 #include <glm/geometric.hpp>
+
+#include <cmath>
+#include <numbers>
 
 #include <utility>
 
 namespace hog::server {
+
+namespace {
+
+// Radians in a unit of a facing's heading and pitch.
+constexpr double facing_radians = 2.0 * std::numbers::pi / 65'536.0;
+
+} // namespace
 
 std::string_view describe(Ruling ruling) noexcept {
     switch (ruling) {
@@ -152,6 +164,24 @@ std::vector<std::pair<net::ConnectionId, WorldPosition>> Players::located() cons
         }
     }
     return places;
+}
+
+std::vector<std::pair<net::ConnectionId, Players::Look>> Players::looks() const {
+    std::vector<std::pair<net::ConnectionId, Look>> found;
+    for (const auto& [connection, joined] : joined_) {
+        if (!joined.placed) {
+            continue;
+        }
+        const WorldPosition at = protocol::to_world(joined.placed->at);
+        const planet::TangentFrame frame = planet::tangent_frame(at.metres());
+        const double turn = static_cast<double>(joined.placed->facing.heading) * facing_radians;
+        const double pitch = static_cast<double>(joined.placed->facing.pitch) * facing_radians;
+        const DVec3 along = (frame.east * std::sin(turn)) + (frame.north * std::cos(turn));
+        found.emplace_back(connection, Look{.at = at,
+                                            .forward = (along * std::cos(pitch)) +
+                                                       (frame.up * std::sin(pitch))});
+    }
+    return found;
 }
 
 std::vector<net::ConnectionId> Players::connections() const {

@@ -187,3 +187,37 @@ TEST_CASE("a chunk split stays split until the eye has drawn a little further of
         hog::globe::chunks_around(earth(), eye, 20'000.0, ratio, shown);
     CHECK(std::ranges::find(merged, parent) != merged.end());
 }
+
+TEST_CASE("a steeper falloff gives fewer, coarser chunks far off, and the same ground near",
+          "[globe][detail]") {
+    const Eye eye{.up = glm::normalize(DVec3{0.3, -0.2, 1.0}), .height = 300.0};
+    const hog::globe::Layers& layers = earth().layers();
+    const std::vector<Cell> gentle = hog::globe::chunks_around(earth(), eye, 20'000.0, ratio);
+    const std::vector<Cell> steep =
+        hog::globe::chunks_around(earth(), eye, 20'000.0, ratio, {}, 2.0, 1'000.0);
+    CHECK(steep.size() < gentle.size());
+    // The coarsest is coarser.
+    const auto coarsest = [&](const std::vector<Cell>& found) {
+        int most = 0;
+        for (const Cell chunk : found) {
+            most = std::max(most, hog::globe::detail_of(chunk, layers));
+        }
+        return most;
+    };
+    CHECK(coarsest(steep) >= coarsest(gentle));
+    // The ground under the eye, the finest, is as fine as it was.
+    const auto under = [&](const std::vector<Cell>& found) {
+        const std::set<Cell> chunks{found.begin(), found.end()};
+        for (int detail = 0;; ++detail) {
+            if (chunks.contains(hog::globe::chunk_under(eye.up, layers, detail))) {
+                return detail;
+            }
+        }
+    };
+    CHECK(under(steep) == under(gentle));
+    // And they still tile, with neighbours at most a detail apart.
+    const std::set<Cell> chunks{steep.begin(), steep.end()};
+    for (const Cell chunk : steep) {
+        check_beside(chunks, chunk);
+    }
+}

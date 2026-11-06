@@ -1,4 +1,5 @@
 #include <hog/core/hash.hpp>
+#include <hog/core/bytes.hpp>
 #include <hog/globe/maths.hpp>
 #include <hog/globe/planet.hpp>
 
@@ -277,6 +278,111 @@ std::uint64_t world_id(const Planet& planet) noexcept {
         bits(planet.surface_age), bits(planet.impact_flux), bits(planet.pressure),
         bits(planet.equator_temperature), bits(planet.pole_temperature),
         static_cast<int>(planet.volatiles), bits(planet.sea_fraction), bits(planet.wear));
+}
+
+
+namespace {
+
+// The knobs' version in the bytes, so a planet from another is refused, not misread.
+constexpr std::uint8_t planet_bytes_version = 1;
+
+void write_double(ByteWriter& out, double value) {
+    out.write(std::bit_cast<std::uint64_t>(value));
+}
+
+} // namespace
+
+std::vector<std::byte> encode_planet(const Planet& planet) {
+    ByteWriter out;
+    out.write(planet_bytes_version);
+    out.write(planet.seed);
+    for (const double value :
+         {planet.radius, planet.gravity, planet.day, planet.tilt, planet.lateral_scale,
+          planet.voxel, planet.floor_depth, planet.sky_height}) {
+        write_double(out, value);
+    }
+    out.write(static_cast<std::uint8_t>(planet.regime));
+    for (const Crust& crust : {planet.high, planet.low}) {
+        out.write(static_cast<std::uint8_t>(crust.rock));
+        write_double(out, crust.thickness);
+    }
+    write_double(out, planet.high_fraction);
+    out.write(static_cast<std::uint8_t>(planet.layout));
+    for (const double value :
+         {planet.mantle_density, planet.heat_flow, planet.surface_age, planet.impact_flux,
+          planet.pressure, planet.equator_temperature, planet.pole_temperature}) {
+        write_double(out, value);
+    }
+    out.write(static_cast<std::uint8_t>(planet.volatiles));
+    write_double(out, planet.sea_fraction);
+    write_double(out, planet.wear);
+    return std::move(out).take();
+}
+
+Result<Planet> decode_planet(std::span<const std::byte> bytes) {
+    ByteReader in{bytes};
+    const auto cut = [] { return make_error(ErrorCode::Parse, "a planet's bytes cut short"); };
+    const auto version = in.read<std::uint8_t>();
+    if (!version || *version != planet_bytes_version) {
+        return make_error(ErrorCode::Unsupported, "a planet of another version");
+    }
+    Planet planet;
+    const auto seed = in.read<std::uint64_t>();
+    if (!seed) {
+        return cut();
+    }
+    planet.seed = *seed;
+    const auto read_double = [&in](double& into) {
+        const auto bits = in.read<std::uint64_t>();
+        if (!bits) {
+            return false;
+        }
+        into = std::bit_cast<double>(*bits);
+        return true;
+    };
+    const auto read_byte = [&in](std::uint8_t& into) {
+        const auto value = in.read<std::uint8_t>();
+        if (!value) {
+            return false;
+        }
+        into = *value;
+        return true;
+    };
+    std::uint8_t regime = 0;
+    std::uint8_t high_rock = 0;
+    std::uint8_t low_rock = 0;
+    std::uint8_t layout = 0;
+    std::uint8_t volatiles = 0;
+    const bool whole =
+        read_double(planet.radius) && read_double(planet.gravity) && read_double(planet.day) &&
+        read_double(planet.tilt) && read_double(planet.lateral_scale) &&
+        read_double(planet.voxel) && read_double(planet.floor_depth) &&
+        read_double(planet.sky_height) && read_byte(regime) && read_byte(high_rock) &&
+        read_double(planet.high.thickness) && read_byte(low_rock) &&
+        read_double(planet.low.thickness) && read_double(planet.high_fraction) &&
+        read_byte(layout) && read_double(planet.mantle_density) && read_double(planet.heat_flow) &&
+        read_double(planet.surface_age) && read_double(planet.impact_flux) &&
+        read_double(planet.pressure) && read_double(planet.equator_temperature) &&
+        read_double(planet.pole_temperature) && read_byte(volatiles) &&
+        read_double(planet.sea_fraction) && read_double(planet.wear);
+    if (!whole) {
+        return cut();
+    }
+    if (regime > static_cast<std::uint8_t>(Regime::Episodic) ||
+        layout > static_cast<std::uint8_t>(Layout::OneSide) ||
+        volatiles > static_cast<std::uint8_t>(Volatile::Methane) || high_rock >= material_count ||
+        low_rock >= material_count) {
+        return make_error(ErrorCode::Parse, "a planet with a kind it doesn't know");
+    }
+    planet.regime = static_cast<Regime>(regime);
+    planet.high.rock = static_cast<Material>(high_rock);
+    planet.low.rock = static_cast<Material>(low_rock);
+    planet.layout = static_cast<Layout>(layout);
+    planet.volatiles = static_cast<Volatile>(volatiles);
+    if (in.remaining() != 0) {
+        return make_error(ErrorCode::Parse, "a planet's bytes with bytes left over");
+    }
+    return planet;
 }
 
 } // namespace hog::globe
