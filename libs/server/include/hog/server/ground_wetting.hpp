@@ -3,7 +3,7 @@
 #include <hog/core/math.hpp>
 #include <hog/flow/simulation.hpp>
 #include <hog/flow/wetting.hpp>
-#include <hog/globe/generator.hpp>
+#include <hog/globe/world.hpp>
 #include <hog/protocol/messages.hpp>
 
 #include <span>
@@ -26,10 +26,11 @@ public:
         DVec3 up; // unit, from the planet's centre
         flow::Sky sky;
     };
-    // The columns within reach of each place, under its sky; where places overlap a column is
-    // taken once, by the first. Columns on the edge of a cube face are bent in to stay on it.
+    // The columns within reach of each place, under its sky, each looked down from the highest
+    // layer that may hold matter; where places overlap a column is taken once, by the first.
+    // Columns on the edge of a cube face are bent in to stay on it.
     [[nodiscard]] static std::vector<flow::Simulation::Wetted>
-    around(const globe::Generator& generator, std::span<const Place> places);
+    around(const globe::World& world, std::span<const Place> places);
 };
 
 } // namespace hog::server

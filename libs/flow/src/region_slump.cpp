@@ -330,12 +330,7 @@ std::optional<Ground> Region::ground_under(DVec3 at) {
         return std::nullopt;
     }
     const globe::Surface& surface = found->surface;
-    DVec3 normal = at / radius;
-    if (surface.grain_amount > 0) {
-        normal = heap_normal(column, static_cast<std::uint32_t>(layer), normal);
-    } else if (surface.bottom.distance != Voxel::far && surface.bottom.normal != Voxel::no_normal) {
-        normal = globe::unpacked_normal(surface.bottom.normal);
-    }
+    const DVec3 normal = heap_normal(column, static_cast<std::uint32_t>(layer), at / radius);
     return Ground{.radius =
                       layers.floor + (static_cast<double>(found->ground + surface.grain_amount) /
                                       static_cast<double>(full) * layers.thickness),

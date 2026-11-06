@@ -266,13 +266,13 @@ TEST_CASE("a current scours a soft bed and carries it off; what it carries settl
     using hog::globe::Material;
     const auto trench = [](std::uint32_t /*i*/, std::uint32_t j, int /*layer*/) { return j == 12; };
     Block block{floor_above_sea(100.0), false, trench, Material::Soil};
-    const int bed_before = block.distance(1, 12, -1);
+    const std::int64_t bed_before = block.solid(1, 12, -1);
     for (int layer = 0; layer < 8; ++layer) {
         block.pour(1, 12, layer, full);
     }
     block.settle(200);
     // The head running off the source scoured the bed there, and the soil is on the move.
-    CHECK(block.distance(1, 12, -1) > bed_before);
+    CHECK(block.solid(1, 12, -1) < bed_before);
     CHECK(block.region().grain() > 0);
     // Once the water lies level, what it carried lies down again as soil on the trench's floor.
     block.settle(3'000);
@@ -294,12 +294,12 @@ TEST_CASE("still water wears nothing off its bed", "[flow][region]") {
         return i == 12 && j == 12;
     };
     Block block{floor_above_sea(100.0), false, shaft, Material::Sand};
-    const int bed_before = block.distance(12, 12, -1);
+    const std::int64_t bed_before = block.solid(12, 12, -1);
     for (int layer = 0; layer < 8; ++layer) {
         block.pour(12, 12, layer, full);
     }
     block.settle(200);
-    CHECK(block.distance(12, 12, -1) == bed_before);
+    CHECK(block.solid(12, 12, -1) == bed_before);
     CHECK(block.region().grain() == 0);
 }
 

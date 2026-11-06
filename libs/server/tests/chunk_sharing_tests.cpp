@@ -40,7 +40,7 @@ const Earth& earth() {
 
 DVec3 eye_over(DVec3 up) {
     const auto& generator = earth().generator;
-    return up * (generator.planet().radius + hog::chunks::globe_ground(generator, up) + 2.0);
+    return up * (generator.planet().radius + hog::chunks::globe_ground(earth().world, up) + 2.0);
 }
 
 const DVec3 here = hog::globe::center(hog::globe::cell_at_index(7, 4'321));

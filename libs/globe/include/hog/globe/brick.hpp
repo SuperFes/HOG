@@ -103,7 +103,7 @@ private:
 };
 
 // A brick's voxels: one voxel throughout, as is common where a brick is all dug out or filled,
-// or each quantity packed apart, so a brick whose distances all differ still keeps a few bits a
+// or each quantity packed apart, so a brick whose amounts all differ still keeps a few bits a
 // voxel for what it's made of.
 class Brick {
 public:
@@ -131,8 +131,6 @@ public:
 
 private:
     struct Parts {
-        Packed<std::int16_t> distance;
-        Packed<std::uint16_t> normal;
         Packed<Material> solid;
         Packed<std::uint8_t> condition;
         Packed<Material> grain;

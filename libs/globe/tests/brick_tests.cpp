@@ -19,16 +19,17 @@ namespace {
 
 using Voxels = std::array<Voxel, brick_voxels>;
 
-// A brick the ground's surface runs through: every distance differs, three rocks, some water.
+// A brick the ground's surface runs through: amounts differ across it, three rocks, some water.
 Voxels surface() {
     Voxels voxels{};
     for (int index = 0; index < brick_voxels; ++index) {
         const hog::globe::Site site = hog::globe::site_in({}, index);
         Voxel& voxel = voxels[static_cast<std::size_t>(index)];
-        voxel.distance = static_cast<std::int16_t>((static_cast<int>(site.layer) * 500) -
-                                                   (static_cast<int>(site.i) * 37) -
-                                                   (static_cast<int>(site.j) * 11) - 1'500);
-        if (voxel.distance < 0) {
+        const double distance = (static_cast<double>(site.layer) * 0.5) -
+                                (static_cast<double>(site.i) * 0.037) -
+                                (static_cast<double>(site.j) * 0.011) - 1.5;
+        voxel.solid_amount = hog::globe::amount_at(distance, 2.0);
+        if (distance < 0.0) {
             voxel.solid = site.i < 4 ? Material::Soil : Material::Sand;
             if (site.layer < 2) {
                 voxel.solid = Material::Granite;
@@ -38,8 +39,6 @@ Voxels surface() {
             voxel.liquid_amount = Voxel::full;
         }
         voxel.temperature = static_cast<std::uint16_t>(2'300 + site.layer);
-        voxel.normal =
-            hog::globe::packed_normal(glm::normalize(hog::DVec3{0.1 * site.i, 0.05 * site.j, 1.0}));
     }
     return voxels;
 }
@@ -69,7 +68,7 @@ TEST_CASE("a brick finds each voxel where its site says", "[globe][brick]") {
 
 TEST_CASE("a brick of one voxel throughout is held as that voxel", "[globe][brick]") {
     Voxels voxels{};
-    voxels.fill({.distance = -Voxel::far, .solid = Material::Basalt, .temperature = 2'400});
+    voxels.fill({.solid = Material::Basalt, .temperature = 2'400, .solid_amount = Voxel::full});
     const Brick brick = Brick::pack(voxels);
     CHECK(brick.is_uniform());
     CHECK(brick.bytes() == sizeof(Brick));
@@ -128,8 +127,31 @@ TEST_CASE("a damaged brick fails to read rather than read wrong", "[globe][brick
     Voxels voxels{};
     voxels.fill({.solid = Material::Granite});
     std::vector<std::byte> no_material = written(Brick::pack(voxels));
-    // The kind, the distance's two bytes and the normal's two, then the solid's.
-    no_material[5] = std::byte{200};
+    // The kind, then the solid's.
+    no_material[1] = std::byte{200};
     hog::ByteReader material{no_material};
     CHECK_FALSE(Brick::read(material));
+}
+
+TEST_CASE("a brick written when voxels kept a distance and a normal still reads", "[globe][brick]") {
+    hog::ByteWriter out;
+    out.write(std::uint8_t{0}); // a whole brick of the old kind
+    out.write(std::uint16_t{0x8001}); // its distance
+    out.write(std::uint16_t{0x8080}); // its normal
+    out.write(static_cast<std::uint8_t>(Material::Basalt));
+    out.write(std::uint8_t{Voxel::sound});
+    out.write(static_cast<std::uint8_t>(Material::Air));
+    out.write(std::uint16_t{0});
+    out.write(static_cast<std::uint8_t>(Material::Air));
+    out.write(std::uint16_t{0});
+    out.write(std::uint16_t{2'400});
+    out.write(std::uint16_t{Voxel::full});
+    const std::vector<std::byte> bytes = std::move(out).take();
+    hog::ByteReader in{bytes};
+    const auto read = Brick::read(in);
+    REQUIRE(read);
+    CHECK(read->is_uniform());
+    CHECK(read->at(0) == Voxel{.solid = Material::Basalt,
+                               .temperature = 2'400,
+                               .solid_amount = Voxel::full});
 }

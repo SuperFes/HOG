@@ -27,7 +27,8 @@ double rolling_radius(const globe::Rock& rock) {
 std::optional<globe::BrickSite> Region::reshape(DVec3 centre, double reach,
                                                 const Distance& distance, const Change& change) {
     const globe::Layers& layers = world_->store().layers();
-    const double band = globe::distance_band(layers);
+    // A voxel's amount tells a surface only within half its thickness.
+    const double band = layers.thickness;
     std::optional<globe::BrickSite> missing;
     for (const auto& [brick, indices] : globe::sites_near(layers, centre, reach + band)) {
         Held* in = held(brick);
@@ -36,11 +37,9 @@ std::optional<globe::BrickSite> Region::reshape(DVec3 centre, double reach,
             continue;
         }
         for (const int index : indices) {
-            DVec3 outward{0.0};
-            const double to = distance(globe::middle_of(globe::site_in(brick, index), layers),
-                                       outward);
+            const double to = distance(globe::middle_of(globe::site_in(brick, index), layers));
             if (to <= band) {
-                change(in->voxels[static_cast<std::size_t>(index)], std::max(to, -band), outward);
+                change(in->voxels[static_cast<std::size_t>(index)], to);
                 in->dirty = true;
             }
         }
@@ -70,9 +69,12 @@ void Region::loosen(const globe::Rock& rock) {
     const double reach = std::max({rock.axes.x, rock.axes.y, rock.axes.z});
     const double thickness = world_->store().layers().thickness;
     reshape(rock.middle, reach,
-            [&](DVec3 at, DVec3& outward) { return rock.distance(at, outward); },
-            [thickness](globe::Voxel& voxel, double to, DVec3 outward) {
-                globe::dig_voxel(voxel, to, outward, thickness);
+            [&](DVec3 at) {
+                DVec3 outward{0.0};
+                return rock.distance(at, outward);
+            },
+            [thickness](globe::Voxel& voxel, double to) {
+                globe::dig_voxel(voxel, to, thickness);
             });
     const double volume = 4.0 / 3.0 * std::numbers::pi * rock.axes.x * rock.axes.y * rock.axes.z;
     parcels_.push_back({.id = ++parcel_ids_,
@@ -147,19 +149,15 @@ std::optional<globe::BrickSite> Region::settle_boulder(const Parcel& parcel) {
     // Held in full or not at all, so a block is never half built.
     const globe::Layers& layers = world_->store().layers();
     for (const auto& [brick, indices] :
-         globe::sites_near(layers, centre, parcel.radius + globe::distance_band(layers))) {
+         globe::sites_near(layers, centre, parcel.radius + layers.thickness)) {
         if (held(brick) == nullptr) {
             return brick;
         }
     }
     reshape(centre, parcel.radius,
-            [&](DVec3 at, DVec3& outward) {
-                const DVec3 out = at - centre;
-                outward = glm::length(out) > 0.0 ? glm::normalize(out) : up;
-                return glm::length(out) - parcel.radius;
-            },
-            [&](globe::Voxel& voxel, double to, DVec3 outward) {
-                globe::build_voxel(voxel, to, outward, parcel.material, layers.thickness);
+            [&](DVec3 at) { return glm::length(at - centre) - parcel.radius; },
+            [&](globe::Voxel& voxel, double to) {
+                globe::build_voxel(voxel, to, parcel.material, layers.thickness);
             });
     return std::nullopt;
 }

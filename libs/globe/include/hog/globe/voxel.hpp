@@ -31,18 +31,14 @@ struct Site {
 // Where its value is taken: the middle of its column, halfway up its layer.
 [[nodiscard]] DVec3 middle_of(Site site, const Layers& layers);
 
-// What a voxel holds, in fixed point, so it's held, saved and sent the same everywhere. Shaped
-// matter keeps its form: rock, earth and whatever is built, by its distance to the shaped
-// surface. Loose matter is counted: grains that slide and liquids that flow, as amounts of the
-// voxel's own volume.
+// What a voxel holds, in fixed point, so it's held, saved and sent the same everywhere: amounts of
+// its own volume. Shaped matter (rock, earth and whatever is built), grains that slide and liquids
+// that flow. Where a surface lies, and which way it faces, is told by the amounts of the voxels
+// about it, nothing else.
 struct Voxel {
-    static constexpr std::int16_t far = 32'767; // millimetres, as far as distance is told
     static constexpr std::uint8_t sound = 255;
     static constexpr std::uint16_t full = 1U << 15U; // with room over it for matter pressed in
-    static constexpr std::uint16_t no_normal = 0;    // away from any surface
 
-    std::int16_t distance = far;      // millimetres to the shaped surface, negative inside
-    std::uint16_t normal = no_normal; // the surface's, out of the matter; packed_normal's
     Material solid = Material::Air;   // what the shaped matter is made of
     std::uint8_t condition = sound;   // how whole it is; nothing is left of it at 0
     Material grain = Material::Air;   // sand, rubble or snow
@@ -58,43 +54,22 @@ struct Voxel {
 };
 
 // Rounded to the nearest step, clamped to what fits.
-[[nodiscard]] std::int16_t distance_in_mm(double metres) noexcept;
 [[nodiscard]] std::uint16_t amount_of(double share) noexcept;
 [[nodiscard]] std::uint16_t temperature_in_eighths(double kelvin) noexcept;
-// A unit direction to a degree or so, folded onto an octahedron and kept in a byte a side; never
-// Voxel::no_normal.
-[[nodiscard]] std::uint16_t packed_normal(DVec3 unit) noexcept;
-// Unit, or none for Voxel::no_normal.
-[[nodiscard]] DVec3 unpacked_normal(std::uint16_t packed) noexcept;
 
-[[nodiscard]] constexpr double metres(std::int16_t distance) noexcept {
-    return distance / 1'000.0;
-}
 [[nodiscard]] constexpr double kelvin(std::uint16_t temperature) noexcept {
     return temperature / 8.0;
 }
 
-// How far either side of a surface voxels keep its distance, in metres: beyond, only which side
-// they're on, which is all that's drawn there. So a brick all dug out or all rock is one voxel
-// throughout.
-// Voxels either side of a surface that keep their distance.
-inline constexpr double band_voxels = 4.0;
-[[nodiscard]] constexpr double distance_band(const Layers& layers) noexcept {
-    return band_voxels * layers.thickness;
-}
-// The same for voxels `coarser` times as far apart.
-[[nodiscard]] constexpr double distance_band(const Layers& layers, double coarser) noexcept {
-    return distance_band(layers) * coarser;
-}
+// The solid amount of a voxel `thickness` metres thick that a surface `distance` metres from its
+// middle puts in it, negative inside, as a plane across it: half where it passes through the
+// middle, all or none a half thickness either way.
+[[nodiscard]] std::uint16_t amount_at(double distance, double thickness) noexcept;
+// The surface's distance from the voxel's middle that its solid amount says, the other way.
+[[nodiscard]] double distance_of(std::uint16_t amount, double thickness) noexcept;
 
-// The voxel a generated sample makes, its distance kept within `band` and its normal only within
-// it, so voxels deep in matter or open space are alike. All the generated ground is shaped
-// matter; it turns loose only once something disturbs it.
-[[nodiscard]] Voxel voxel_from(const Sample& sample, double band) noexcept;
-// Sets the solid amount to what the voxel's distance says, for a voxel `thickness` metres thick;
-// to be called wherever a distance is written, so the two keep to one surface.
-void sync_solid_amount(Voxel& voxel, double thickness) noexcept;
-// The distance in millimetres a solid amount stands for, in a voxel `thickness` metres thick.
-[[nodiscard]] std::int16_t distance_of_amount(std::uint16_t amount, double thickness) noexcept;
+// The voxel a generated sample makes, for a voxel `thickness` metres thick. All the generated
+// ground is shaped matter; it turns loose only once something disturbs it.
+[[nodiscard]] Voxel voxel_from(const Sample& sample, double thickness) noexcept;
 
 } // namespace hog::globe

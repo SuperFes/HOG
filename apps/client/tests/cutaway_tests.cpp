@@ -1,6 +1,7 @@
 #include <hog/client/cutaway.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
+#include <hog/globe/world.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -38,13 +39,15 @@ TEST_CASE("the cutaway is the ground's inside seen from within, made of the voxe
     const double voxel = GENERATE(from_range(voxels));
     CAPTURE(voxel);
     const hog::globe::Generator generator = world(voxel);
+    hog::globe::VoxelStore store{generator.layers()};
+    hog::globe::World voxels_now{generator, store};
     const DVec3 up = glm::normalize(DVec3{1.0, 0.3, 0.2});
     const double ground = generator.column(up, hog::globe::voxel_lod(generator)).ground();
     constexpr double radius = 12.0;
 
     // Deep in the rock, all round is ground.
     const hog::terrain::BlockMesh inside =
-        cutaway_shell(generator, WorldPosition{up * (ground - 60.0)}, radius);
+        cutaway_shell(voxels_now, WorldPosition{up * (ground - 60.0)}, radius);
     CHECK(inside.indices.size() > 10'000);
     for (const auto& vertex : inside.vertices) {
         CHECK(glm::length(DVec3{vertex.position}) == Approx(radius).margin(1e-4));
@@ -54,12 +57,19 @@ TEST_CASE("the cutaway is the ground's inside seen from within, made of the voxe
 
     // Out in the open air, none.
     const hog::terrain::BlockMesh open =
-        cutaway_shell(generator, WorldPosition{up * (ground + 60.0)}, radius);
+        cutaway_shell(voxels_now, WorldPosition{up * (ground + 60.0)}, radius);
     CHECK(open.indices.empty());
 
     // At the ground, only the part under it: some, but far from all.
     const hog::terrain::BlockMesh half =
-        cutaway_shell(generator, WorldPosition{up * ground}, radius);
+        cutaway_shell(voxels_now, WorldPosition{up * ground}, radius);
     CHECK(half.indices.size() > inside.indices.size() / 4);
     CHECK(half.indices.size() < inside.indices.size() * 3 / 4);
+
+    // A hole dug through the shell deep in the rock is open there.
+    hog::globe::dig(voxels_now, (up * (ground - 60.0)) + (up * radius), 4.0);
+    const hog::terrain::BlockMesh dug =
+        cutaway_shell(voxels_now, WorldPosition{up * (ground - 60.0)}, radius);
+    CHECK(dug.indices.size() < inside.indices.size());
+    CHECK(dug.indices.size() > inside.indices.size() * 3 / 4);
 }

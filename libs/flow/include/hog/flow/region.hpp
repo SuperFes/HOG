@@ -271,8 +271,8 @@ private:
     // of seconds so the change isn't lost to the stored temperature's steps.
     void cool_rock(double seconds);
     [[nodiscard]] bool red_hot(const globe::Voxel& voxel) const;
-    // Sets a voxel of cooled lava into rock, bringing the open voxels about it up to its surface.
-    void freeze(globe::Site site, Held& brick);
+    // Sets a voxel of cooled lava into whole rock.
+    static void freeze(globe::Site site, Held& brick);
     void report_wet(const Column& column, Stepped& stepped) const;
     void seep(const std::vector<Column>& columns, double seconds, Stepped& stepped);
     // Seeps from a voxel into the one under it; how much moved.
@@ -342,10 +342,10 @@ private:
     [[nodiscard]] std::optional<globe::BrickSite> settle_boulder(const Parcel& parcel);
     // Whether the voxel at `point` is shaped matter; none where its brick isn't held.
     [[nodiscard]] std::optional<bool> solid_at(DVec3 point);
-    // Applies `change(voxel, distance, outward)` to each held voxel within the shape's band, and
-    // the first brick it covers that isn't held, if any.
-    using Distance = std::function<double(DVec3, DVec3&)>;
-    using Change = std::function<void(globe::Voxel&, double, DVec3)>;
+    // Applies `change(voxel, distance)` to each held voxel the shape's surface passes within reach
+    // of, and the first brick it covers that isn't held, if any.
+    using Distance = std::function<double(DVec3)>;
+    using Change = std::function<void(globe::Voxel&, double)>;
     std::optional<globe::BrickSite> reshape(DVec3 centre, double reach, const Distance& distance,
                                             const Change& change);
     // Bricks newly held, whose fallen rocks are looked at once their surroundings are held too.

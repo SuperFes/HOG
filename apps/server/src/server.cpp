@@ -285,7 +285,7 @@ void Server::wet_ground(GameDuration step) {
     const double seconds = std::chrono::duration<double>(unwetted_).count();
     unwetted_ = {};
     const std::vector<flow::Simulation::Wetted> columns =
-        server::GroundWetting::around(generator_, places);
+        server::GroundWetting::around(globe_, places);
     flow_.wet(columns, seconds);
 }
 
@@ -576,7 +576,7 @@ void Server::tell_chunks() {
         const WorldPosition at = look.at;
         chunks_.follow(connection, at.metres(), look.forward);
         const float ground =
-            static_cast<float>(chunks::globe_ground(generator_, glm::normalize(at.metres())));
+            static_cast<float>(chunks::globe_ground(globe_, glm::normalize(at.metres())));
         if (auto sent = players_->send(connection, net::Delivery::Unreliable,
                                        protocol::encode(protocol::Ground{.height = ground}));
             !sent) {

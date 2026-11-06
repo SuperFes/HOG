@@ -2,6 +2,7 @@
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
 #include <hog/globe/pockets.hpp>
+#include <hog/globe/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -26,7 +27,7 @@ namespace {
 constexpr std::array voxels{1.0, 2.5};
 
 // A small worn planet, made in seconds, at a voxel size.
-const Generator& world(double voxel, double wear = 0.03) {
+const Generator& planet_of(double voxel, double wear = 0.03) {
     static std::vector<std::tuple<double, double, Generator>> made;
     for (const auto& [size, worn, generator] : made) {
         if (size == voxel && worn == wear) {
@@ -48,8 +49,10 @@ const Generator& world(double voxel, double wear = 0.03) {
 TEST_CASE("the pockets found under the ground are open air, near to far", "[globe][pockets]") {
     const double voxel = GENERATE(from_range(voxels));
     CAPTURE(voxel);
-    const Generator& generator = world(voxel);
-    const double lod = hog::globe::voxel_lod(generator);
+    const Generator& generator = planet_of(voxel);
+    hog::globe::VoxelStore store{generator.layers()};
+    const hog::globe::World world{generator, store};
+    const hog::globe::Layers& layers = generator.layers();
     constexpr double range = 300.0;
     std::size_t found = 0;
     std::size_t open = 0;
@@ -58,7 +61,7 @@ TEST_CASE("the pockets found under the ground are open air, near to far", "[glob
             hog::globe::center(hog::globe::cell_at_index(7, (k * 2'654'435'761ULL) % 98'304)) *
             generator.planet().radius;
         const auto started = std::chrono::steady_clock::now();
-        const std::vector<Pocket> pockets = hog::globe::find_pockets(generator, eye, range, 6.0);
+        const std::vector<Pocket> pockets = hog::globe::find_pockets(world, eye, range, 6.0);
         const double took =
             std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
         CHECK(took < 5.0);
@@ -71,12 +74,18 @@ TEST_CASE("the pockets found under the ground are open air, near to far", "[glob
             CHECK(pocket.height > 0.0);
             last = away;
             ++found;
-            // Open air lies up or down the column the pocket is at, within its own height.
-            const Generator::Column column = generator.column(glm::normalize(pocket.at), lod);
+            // Open voxels lie up or down the column the pocket is at, within its own height.
+            const hog::globe::Cell cell =
+                hog::globe::cell_under(glm::normalize(pocket.at), layers.level);
             const double middle = glm::length(pocket.at);
-            for (double radius = middle - pocket.height; radius <= middle + pocket.height;
-                 radius += lod / 2.0) {
-                if (column.sample(radius).distance > 0.0 && radius < column.ground()) {
+            for (int layer = layers.layer_at(middle - pocket.height);
+                 layer <= layers.layer_at(middle + pocket.height); ++layer) {
+                const hog::globe::Voxel here =
+                    world.at({.face = cell.face,
+                              .i = cell.i,
+                              .j = cell.j,
+                              .layer = static_cast<std::uint32_t>(layer)});
+                if (here.solid == hog::globe::Material::Air) {
                     ++open;
                     break;
                 }
@@ -86,4 +95,23 @@ TEST_CASE("the pockets found under the ground are open air, near to far", "[glob
     std::println("pockets found {} of which open {}", found, open);
     CHECK(found > 0);
     CHECK(open * 10 >= found * 8);
+}
+
+TEST_CASE("a hole dug deep in the rock is a pocket", "[globe][pockets]") {
+    const Generator& generator = planet_of(2.5);
+    hog::globe::VoxelStore store{generator.layers()};
+    hog::globe::World world{generator, store};
+    const DVec3 up = hog::globe::center(hog::globe::cell_at_index(7, 4'321));
+    const double ground = hog::globe::top_of(world, up).value_or(0.0);
+    const DVec3 hole = up * (ground - 40.0);
+    const auto near_hole = [&] {
+        return std::ranges::any_of(hog::globe::find_pockets(world, up * ground, 100.0, 6.0),
+                                   [&](const Pocket& pocket) {
+                                       return glm::length(pocket.at - hole) < 6.0;
+                                   });
+    };
+    // Solid rock there before it's dug.
+    REQUIRE_FALSE(near_hole());
+    hog::globe::dig(world, hole, 6.0);
+    CHECK(near_hole());
 }

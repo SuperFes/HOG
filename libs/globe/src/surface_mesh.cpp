@@ -193,7 +193,9 @@ std::vector<std::pair<int, int>> bands_of(const World& world, Cell chunk,
         lowest = std::min(lowest, column.ground());
         highest = std::max(highest, column.top());
     }
-    const double band = distance_band(layers, apart) + (layers.thickness * apart);
+    // Room either side for the voxels whose amounts tell the surface, and the slopes between
+    // the columns.
+    const double band = 5.0 * layers.thickness * apart;
     std::vector<std::pair<int, int>> bands{{layers.layer_at(lowest - std::max(surface_depth, band)),
                                             layers.layer_at(highest + band) + 1}};
     if (const auto sea = generator.sea_level(); sea && *sea > lowest) {
@@ -326,9 +328,10 @@ public:
         return voxel_there(point) && column(point).filled;
     }
     [[nodiscard]] const Voxel& at(Point point) const { return voxels_[index(point)]; }
-    // Its distance in metres.
+    // Metres from the voxel's middle out to the surface its solid amount puts across it, as a
+    // plane: half full lies through the middle.
     [[nodiscard]] double metres(Point point) const {
-        return globe::metres(at(point).distance) * column(point).apart;
+        return (0.5 - share_of(at(point).solid_amount)) * height(point);
     }
     // A voxel's height, as it's drawn: the layers it stands for.
     [[nodiscard]] double height(Point point) const {
@@ -404,15 +407,7 @@ public:
         top_ = top;
         voxels_.clear();
         for (auto& [apart, group] : groups_) {
-            std::vector<Voxel> filled = fill_group(group, bottom, top, apart);
-            if (world_->draws_from_amounts()) {
-                // The surface from what each voxel holds alone: where it crosses between the
-                // voxels, and the way it faces, from how their amounts change.
-                for (Voxel& voxel : filled) {
-                    voxel.distance = distance_of_amount(voxel.solid_amount, layers_->thickness);
-                    voxel.normal = Voxel::no_normal;
-                }
-            }
+            const std::vector<Voxel> filled = fill_group(group, bottom, top, apart);
             place(group, filled, ((top - bottom) / apart) + 1);
         }
         soak();
@@ -840,16 +835,6 @@ struct Ground {
         const std::optional<double> pile = grid.grain_metres(point);
         return pile && *pile < grid.metres(point);
     }
-    // The surface's normal where it crosses from `a` to `b`, `t` of the way: as the voxel nearer
-    // it holds it, so at a crease each crossing keeps its own side's; none if neither holds one,
-    // or where a pile's top is crossed, which lies as the field has it.
-    static DVec3 normal(const Grid& grid, Point a, Point b, double t) {
-        if (piled(grid, t < 0.5 ? a : b)) {
-            return DVec3{0.0};
-        }
-        const DVec3 near = unpacked_normal(grid.at(t < 0.5 ? a : b).normal);
-        return glm::length(near) > 0.0 ? near : unpacked_normal(grid.at(t < 0.5 ? b : a).normal);
-    }
     // The corner in the ground nearest the surface, if any is.
     static std::optional<Point> nearest(const Grid& grid, std::span<const Point> corners) {
         std::optional<Point> found;
@@ -909,10 +894,6 @@ struct Liquid {
         }
         // Ground not soaked counts as under the surface, so the field slopes up out of it.
         return (in_ground(grid.at(point)) ? -0.5 : 0.5) * grid.height(point);
-    }
-    // Not held: the field's own gradient serves.
-    static DVec3 normal(const Grid& /*grid*/, Point /*a*/, Point /*b*/, double /*t*/) {
-        return DVec3{0.0};
     }
     static Material material(const Grid& grid, std::span<const Point> corners) {
         for (const Point corner : corners) {
@@ -1181,7 +1162,6 @@ private:
         std::pair<std::uint64_t, int> to_key;
         DVec3 point{0.0};
         DVec3 normal{0.0};
-        DVec3 held{0.0};
     };
 
     // The box's vertex, if the surface passes through it and its voxels are filled. It's placed
@@ -1201,8 +1181,7 @@ private:
     // Where the surface crosses the edge from `from` along `axis`, if it does.
     [[nodiscard]] std::optional<Crossing> crossing_at(const Frame& frame,
                                                       const std::array<double, 8>& values,
-                                                      const std::array<DVec3, 3>& edges, Point from,
-                                                      int axis) const {
+                                                      Point from, int axis) const {
         const std::optional<Point> to = grid_->next(from, axis, 1);
         if (!to || !Surface::crosses(*grid_, from, *to)) {
             return std::nullopt;
@@ -1220,14 +1199,7 @@ private:
             const double a = frame.along(low, on);
             crossing.point[static_cast<glm::length_t>(on)] = a + (t * (frame.along(high, on) - a));
         }
-        const DVec3 normal = Surface::normal(*grid_, low, high, t);
-        crossing.held = normal;
-        DVec3 slope = slope_at(values, crossing.point);
-        if (glm::length(normal) > 0.0) {
-            for (std::size_t e = 0; e < 3; ++e) {
-                slope[static_cast<glm::length_t>(e)] = glm::dot(normal, edges.at(e));
-            }
-        }
+        const DVec3 slope = slope_at(values, crossing.point);
         crossing.normal = glm::length(slope) > 0.0 ? glm::normalize(slope) : DVec3{0.0};
         return crossing;
     }
@@ -1299,32 +1271,26 @@ private:
             const double va = Surface::value(*grid_, a);
             const double vb = Surface::value(*grid_, b);
             const double t = va != vb ? std::clamp(va / (va - vb), 0.0, 1.0) : 0.5;
-            const DVec3 normal = Surface::normal(*grid_, a, b, t);
-            found.push_back(
-                {.from_key = grid_->key(a),
-                 .to_key = grid_->key(b),
-                 .point = grid_->position(a) + (t * (grid_->position(b) - grid_->position(a))),
-                 .normal = normal,
-                 .held = normal});
+            // Out of the matter along the edge: the field's way, as far as one edge tells it.
+            const DVec3 along = grid_->position(b) - grid_->position(a);
+            found.push_back({.from_key = grid_->key(a),
+                             .to_key = grid_->key(b),
+                             .point = grid_->position(a) + (t * along),
+                             .normal = glm::normalize(along) * (va < vb ? 1.0 : -1.0)});
         }
         if (found.empty()) {
             return no_vertex;
         }
         std::ranges::sort(found, {},
                           [](const Crossing& c) { return std::pair{c.from_key, c.to_key}; });
-        std::vector<DVec3> points;
-        std::vector<DVec3> normals;
-        DVec3 held{0.0};
-        DVec3 mean{0.0};
+        // At the crossings' mean, as the edges here don't make a box to find planes in.
+        DVec3 position{0.0};
+        DVec3 facing{0.0};
         for (const Crossing& crossing : found) {
-            points.push_back(crossing.point);
-            normals.push_back(crossing.normal);
-            held += crossing.held;
-            mean += crossing.point;
+            position += crossing.point;
+            facing += crossing.normal;
         }
-        mean /= static_cast<double>(found.size());
-        // Without normals, at the crossings' mean.
-        DVec3 position = glm::length(held) > 0.0 ? nearest_to_planes(points, normals) : mean;
+        position /= static_cast<double>(found.size());
         DVec3 lowest{std::numeric_limits<double>::max()};
         DVec3 highest{std::numeric_limits<double>::lowest()};
         for (const Point corner : *corners) {
@@ -1332,7 +1298,7 @@ private:
             highest = glm::max(highest, grid_->position(corner));
         }
         position = glm::clamp(position, lowest, highest);
-        const DVec3 normal = glm::length(held) > 0.0 ? held : position + mesh_->origin;
+        const DVec3 normal = glm::length(facing) > 0.0 ? facing : position + mesh_->origin;
         const auto index = static_cast<std::uint32_t>(mesh_->vertices.size());
         mesh_->vertices.push_back({.position = Vec3{position},
                                    .normal = Vec3{glm::normalize(normal)},
@@ -1356,14 +1322,9 @@ private:
             values.at(k) = Surface::value(*grid_, frame->corners.at(k));
             places.at(k) = grid_->position(frame->corners.at(k));
         }
-        // The box's own edges from its first corner, to take normals into its terms.
-        std::array<DVec3, 3> edges{};
-        for (std::size_t axis = 0; axis < 3; ++axis) {
-            edges.at(axis) = places.at(std::size_t{1} << axis) - places[0];
-        }
         std::vector<Crossing> found;
         for (const auto& [from, axis] : edges_of(*frame)) {
-            if (const auto crossing = crossing_at(*frame, values, edges, from, axis)) {
+            if (const auto crossing = crossing_at(*frame, values, from, axis)) {
                 found.push_back(*crossing);
             }
         }
@@ -1374,11 +1335,9 @@ private:
                           [](const Crossing& c) { return std::pair{c.from_key, c.to_key}; });
         std::vector<DVec3> points;
         std::vector<DVec3> normals;
-        DVec3 held{0.0};
         for (const Crossing& crossing : found) {
             points.push_back(crossing.point);
             normals.push_back(crossing.normal);
-            held += crossing.held;
         }
         const DVec3 local = glm::clamp(nearest_to_planes(points, normals), DVec3{0.0}, DVec3{1.0});
         DVec3 position{0.0};
@@ -1387,10 +1346,6 @@ private:
             const double weight = weight_of(k, local);
             position += weight * places.at(k);
             normal += weight * gradient(frame->corners.at(k));
-        }
-        // Shaded by the normals held, where they are.
-        if (glm::length(held) > 0.0) {
-            normal = held;
         }
         if (!(glm::length(normal) > 0.0)) {
             normal = position + mesh_->origin;

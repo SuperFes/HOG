@@ -1,7 +1,7 @@
 #pragma once
 
 #include <hog/core/math.hpp>
-#include <hog/globe/generator.hpp>
+#include <hog/globe/world.hpp>
 
 #include <vector>
 
@@ -14,11 +14,10 @@ struct Pocket {
     double height = 0.0; // metres, the most open space up and down in it
 };
 
-// The air pockets under the ground within `range` metres of `eye`, nearest first, found by
-// casting down columns spaced `spacing` metres apart over the ground about it: those whose open
-// space is wider than that are found. Pockets are as the voxels will have them, caves that are
-// open to the ground included.
-[[nodiscard]] std::vector<Pocket> find_pockets(const Generator& generator, DVec3 eye, double range,
+// The air pockets under matter within `range` metres of `eye`, nearest first, found by reading
+// down the voxels of columns spaced `spacing` metres apart about it: those whose open space is
+// wider than that are found. Caves open to the ground and holes dug alike.
+[[nodiscard]] std::vector<Pocket> find_pockets(const World& world, DVec3 eye, double range,
                                                double spacing);
 
 } // namespace hog::globe

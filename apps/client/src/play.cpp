@@ -224,7 +224,7 @@ client::Flight start(const client::Options& options, const client::GlobeWorld& g
                                                            options.start->longitude * degree),
                                       radius, options.start->altitude, planet::north_pole);
     } else {
-        const double ground = chunks::globe_ground(globe.generator, planet::start_direction);
+        const double ground = chunks::globe_ground(globe.world, planet::start_direction);
         flight = client::start_flight(planet::start_direction, radius, ground + globe_start_height,
                                       planet::north_pole);
     }
@@ -854,7 +854,7 @@ void return_to(Connection& connection, Controls& controls, std::optional<client:
 // on from where the camera was.
 // Metres the ground drawn stands over the radius under a point.
 double drawn_ground(const client::GlobeWorld& globe, WorldPosition at) {
-    return chunks::globe_ground(globe.generator, at.metres());
+    return chunks::globe_ground(globe.world, at.metres());
 }
 
 void take_part(Controls& controls, std::optional<client::Player>& player, client::Flight& flight,
@@ -929,7 +929,7 @@ void update_cutaway(Cutaway& drawn, double wanted, const render::Camera& camera,
     }
     drawn = {.at = camera.eye, .radius = radius, .shown = true};
     scene.show_cutaway(std::make_shared<const terrain::BlockMesh>(
-        client::cutaway_shell(globe.generator, camera.eye, radius)));
+        client::cutaway_shell(globe.world, camera.eye, radius)));
 }
 
 // Sends what the chat box finished, if anything; an empty line says nothing.
@@ -1075,7 +1075,7 @@ Result<void> fly(client::Scene& scene, client::PlanetClock& clock, client::Globe
         update_cutaway(cut, cutaway, camera, globe, scene);
         if (std::exchange(controls.ping, false)) {
             const auto pinged = MonotonicClock::now();
-            pockets = globe::find_pockets(globe.generator, camera.eye.metres(), client::ping_range,
+            pockets = globe::find_pockets(globe.world, camera.eye.metres(), client::ping_range,
                                           client::ping_spacing);
             std::cout << std::format(
                 "{}: ping: {} air pockets within {:.0f} m, found in {:.2f} s\n", program,
@@ -1370,7 +1370,6 @@ int show(const client::Options& options, const planet::PlanetConfig& planet, ren
     startup(std::format("making planet {:016x}", globe::world_id(*described)));
     client::GlobeWorld globe{*described, [](std::string_view stage) { startup(stage); }};
     startup("planet made");
-    globe.world.draw_from_amounts(options.surface_from_amounts);
     globe.world.draw_as_boxes(options.surface_boxes);
     const client::Flight flight = start(options, globe);
     const sim::Calendar calendar{planet.day_length, planet.axial_tilt};

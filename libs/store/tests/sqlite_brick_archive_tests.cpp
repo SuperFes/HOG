@@ -32,8 +32,7 @@ constexpr hog::globe::Layers layers{
 Brick wet(std::uint16_t amount) {
     std::array<Voxel, hog::globe::brick_voxels> voxels{};
     for (std::size_t index = 0; index < voxels.size(); ++index) {
-        voxels[index] = {.distance = static_cast<std::int16_t>(index),
-                         .liquid = Material::Water,
+        voxels[index] = {.liquid = Material::Water,
                          .liquid_amount = static_cast<std::uint16_t>(amount + (index % 3))};
     }
     return Brick::pack(voxels);

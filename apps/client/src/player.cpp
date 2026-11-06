@@ -51,9 +51,8 @@ private:
 Result<Player> Player::create(const globe::World& world, DVec3 direction,
                               const PlaySettings& settings) {
     const DVec3 up = glm::normalize(direction);
-    const globe::Generator& generator = world.generator();
-    const double under = globe::ground_below(generator, up, globe::voxel_lod(generator))
-                              .value_or(generator.planet().radius);
+    const double under =
+        globe::top_of(world, up).value_or(world.generator().planet().radius);
     const WorldPosition over{up * (under + drop)};
     auto space = std::make_unique<physics::Space>();
     physics::Ground ground{*space, world};
