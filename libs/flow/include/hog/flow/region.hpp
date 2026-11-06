@@ -92,6 +92,9 @@ public:
     // above the snowline as well as where ice lies already.
     using IceBalance = std::function<double(const globe::Cell& column, double radius)>;
     void set_ice_balance(IceBalance balance) { ice_balance_ = std::move(balance); }
+    // Runs only the ice on by `years`, with no liquid, grain or rock stepped: for settling glaciers
+    // to the climate in one go. Needs a balance to grow any.
+    Stepped age_ice(double years);
 
     // Reads the brick as the world now has it, unless held already.
     void load(globe::BrickSite site);
