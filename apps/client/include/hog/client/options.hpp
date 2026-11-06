@@ -63,6 +63,12 @@ struct Options {
     // The ground near the eye drawn curving like Earth's, not as tightly as the planet truly does.
     bool bend = true;
     render::CloudQuality clouds = render::CloudQuality::High;
+    // How fast the ground's detail falls off with distance, when it's a server's: each chunk as
+    // coarse as keeps it this many of its widths from the eye. Lower is coarser, and fewer.
+    double detail = 3.0;
+    // And how much faster it falls off past a kilometre: 1 carries on as it was, higher is coarser
+    // far off and sends fewer chunks.
+    double falloff = 1.0;
     // A software Vulkan device over a GPU, and the validation layer with its errors failing the
     // run, also for tests. Debug builds validate unless told not to.
     bool software = false;

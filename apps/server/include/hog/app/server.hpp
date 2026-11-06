@@ -8,8 +8,8 @@
 #include <hog/flow/simulation.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
-#include <hog/globe/voxel_store.hpp>
 #include <hog/globe/vents.hpp>
+#include <hog/globe/voxel_store.hpp>
 #include <hog/globe/world.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/login/keys.hpp>
@@ -18,15 +18,16 @@
 #include <hog/physics/space.hpp>
 #include <hog/protocol/handshake.hpp>
 #include <hog/protocol/messages.hpp>
-#include <hog/server/brick_sharing.hpp>
 #include <hog/server/catch_up.hpp>
+#include <hog/server/chunk_sending.hpp>
+#include <hog/server/chunk_sharing.hpp>
 #include <hog/server/persistence.hpp>
 #include <hog/server/players.hpp>
 #include <hog/server/server_config.hpp>
 #include <hog/server/snapshot_writer.hpp>
 #include <hog/server/spatial_index.hpp>
 #include <hog/server/tick_loop.hpp>
-#include <hog/server/weather_keeper.hpp>
+#include <hog/skies/weather_keeper.hpp>
 #include <hog/store/sqlite_brick_archive.hpp>
 #include <hog/store/sqlite_player_store.hpp>
 #include <hog/store/sqlite_snapshot_store.hpp>
@@ -40,9 +41,9 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <span>
 #include <utility>
-#include <set>
 #include <vector>
 
 namespace hog::app {
@@ -104,7 +105,7 @@ public:
     }
 
     // Null when the world has no weather.
-    [[nodiscard]] const server::WeatherKeeper* weather() const noexcept {
+    [[nodiscard]] const skies::WeatherKeeper* weather() const noexcept {
         return weather_ ? &*weather_ : nullptr;
     }
 
@@ -139,10 +140,9 @@ private:
     // to everyone with the tick's.
     void dig(net::ConnectionId connection, const protocol::Dug& dug);
     void build(net::ConnectionId connection, const protocol::Built& built);
-    void tell_bricks();
+    void tell_chunks();
     // Tells each player the grain in flight near them, and once more when there's none.
     void tell_grains();
-    void send_bricks(net::ConnectionId connection, const std::vector<protocol::Bricks>& bricks);
     // Sends each player a snapshot of those near them.
     void share();
     // Sends every player how fast the world's clock runs.
@@ -167,7 +167,6 @@ private:
     GameDuration unwetted_{};
     GameDuration swept_{};
     store::SqliteBrickArchive bricks_;
-    server::BrickSharing bricks_shared_;
     // Players last sent some grain in flight, who need telling when there's none.
     std::set<net::ConnectionId> grains_told_;
     store::SqliteSnapshotStore snapshots_;
@@ -179,6 +178,8 @@ private:
     flecs::world entities_;
     server::Persistence persistence_;
     jobs::JobSystem jobs_;
+    // The surfaces each player is shown, meshed on the jobs.
+    server::ChunkSharing chunks_;
     std::optional<net::Server> players_;
     std::vector<net::Event> player_events_;
     // Connections still to say hello, and the players let in.
@@ -189,7 +190,7 @@ private:
     std::uint32_t clock_scale_ = 1;
     server::Players joined_;
     // Made once the world's time is known.
-    std::optional<server::WeatherKeeper> weather_;
+    std::optional<skies::WeatherKeeper> weather_;
     // The ground near players, to check their moves against.
     physics::Space space_;
     physics::Ground ground_;
@@ -214,7 +215,7 @@ private:
     metrics::Counter& corrected_moves_;
     metrics::Counter& chat_lines_;
     metrics::Counter& hateful_lines_;
-    metrics::Counter& bricks_sent_;
+    metrics::Counter& chunks_sent_;
     metrics::Reporter reporter_;
     // What the mirrored counters were last brought up to.
     server::SnapshotWriter::Stats mirrored_writes_;

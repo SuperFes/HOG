@@ -172,6 +172,33 @@ TEST_CASE("writing what's generated holds nothing", "[globe][world]") {
     CHECK(store.size() == 0);
 }
 
+TEST_CASE("a ball given as a shape digs and builds as a ball does", "[globe][world]") {
+    const DVec3 direction = somewhere(29);
+    const DVec3 centre = direction * ground_at(earth(), direction).radius;
+    const hog::globe::Shape ball = [&](DVec3 at) { return glm::length(at - centre) - 3.0; };
+    VoxelStore by_ball{earth().layers()};
+    VoxelStore by_shape{earth().layers()};
+    World ball_world{earth(), by_ball};
+    World shape_world{earth(), by_shape};
+    hog::globe::dig(ball_world, centre, 3.0);
+    hog::globe::dig_shape(shape_world, centre, 3.0, 3.0, ball);
+    hog::globe::build(ball_world, centre, 2.0, Material::Granite);
+    hog::globe::build_shape(shape_world, centre, 2.0, 2.0, [&](DVec3 at) {
+        return glm::length(at - centre) - 2.0;
+    }, Material::Granite);
+    CHECK(by_shape.size() == by_ball.size());
+    const hog::globe::Cell cell = hog::globe::cell_under(direction, earth().layers().level);
+    for (int layer = -6; layer <= 6; ++layer) {
+        const Site site{.face = cell.face,
+                        .i = cell.i,
+                        .j = cell.j,
+                        .layer = static_cast<std::uint32_t>(
+                            earth().layers().layer_at(glm::length(centre)) + layer)};
+        CHECK(shape_world.at(site).solid == ball_world.at(site).solid);
+        CHECK(shape_world.at(site).distance == ball_world.at(site).distance);
+    }
+}
+
 TEST_CASE("digging opens a ball in the ground and building fills one", "[globe][world]") {
     VoxelStore store{earth().layers()};
     World world{earth(), store};

@@ -3,10 +3,13 @@
 #include <hog/core/result.hpp>
 #include <hog/globe/material.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <span>
 #include <string_view>
+#include <vector>
 
 namespace hog::globe {
 
@@ -86,6 +89,10 @@ struct Derived {
 
 // A number telling worlds apart: the same for the same knobs, so saves match their world.
 [[nodiscard]] std::uint64_t world_id(const Planet& planet) noexcept;
+
+// A planet as bytes, to send to a client that draws it, and back; the same planet, to the bit.
+[[nodiscard]] std::vector<std::byte> encode_planet(const Planet& planet);
+[[nodiscard]] Result<Planet> decode_planet(std::span<const std::byte> bytes);
 
 // The year's mean surface temperature at a latitude, in radians.
 [[nodiscard]] double temperature_at(const Planet& planet, double latitude);

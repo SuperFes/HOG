@@ -8,6 +8,7 @@
 #include <hog/globe/voxel_store.hpp>
 
 #include <array>
+#include <functional>
 #include <map>
 #include <span>
 #include <vector>
@@ -59,10 +60,19 @@ private:
 void dig(World& world, DVec3 centre, double radius);
 void build(World& world, DVec3 centre, double radius, Material material);
 
+// The same for any shape, given as its signed distance in metres (negative inside) at a point in
+// metres from the planet's centre. It lies within `reach` of `centre` along the ground and
+// `height` up or down.
+using Shape = std::function<double(DVec3)>;
+void dig_shape(World& world, DVec3 centre, double reach, double height, const Shape& shape);
+void build_shape(World& world, DVec3 centre, double reach, double height, const Shape& shape,
+                 Material material);
+
 // The voxels of every column within `reach` of a point, across faces where they span them, by
 // brick: the indices in each.
+// `height` bounds the layers separately from the columns' `reach`, for shapes wide and shallow.
 [[nodiscard]] std::map<BrickSite, std::vector<int>> sites_near(const Layers& layers, DVec3 centre,
-                                                               double reach);
+                                                               double reach, double height = -1.0);
 // One voxel taken out of a shape or built into one, given its signed distance to the shape's
 // surface (negative inside, within the band) and the way out of the shape there, or none.
 void dig_voxel(Voxel& voxel, double to_shape, DVec3 outward);

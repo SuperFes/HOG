@@ -15,6 +15,10 @@ namespace {
 
 const log::Category net_log{"net"};
 
+// Bytes a second a connection sends at, and the bytes it queues to send or receive.
+constexpr std::int32_t send_rate = 64 * 1'024 * 1'024;
+constexpr std::int32_t buffer_bytes = 16 * 1'024 * 1'024;
+
 // The library is process-wide: initialised by the first owner, shut down with the last.
 struct Registry {
     std::mutex mutex;
@@ -63,6 +67,12 @@ Result<std::unique_ptr<Owner>> Owner::create() {
         utils.SetGlobalCallback_SteamNetConnectionStatusChanged(on_status);
         // Encrypted, but no one's identity is checked here: the handshake's token does that.
         utils.SetGlobalConfigValueInt32(k_ESteamNetworkingConfig_IP_AllowWithoutAuth, 2);
+        // The library sends at 256 KiB/s by default, which the world's surfaces take minutes to
+        // cross; this is for play on one machine or a LAN, to be backed off for the internet.
+        utils.SetGlobalConfigValueInt32(k_ESteamNetworkingConfig_SendRateMin, send_rate);
+        utils.SetGlobalConfigValueInt32(k_ESteamNetworkingConfig_SendRateMax, send_rate);
+        utils.SetGlobalConfigValueInt32(k_ESteamNetworkingConfig_SendBufferSize, buffer_bytes);
+        utils.SetGlobalConfigValueInt32(k_ESteamNetworkingConfig_RecvBufferSize, buffer_bytes);
     }
     ++owners.users;
     const std::int64_t id = owners.next_id++;

@@ -53,6 +53,11 @@ TEST_CASE("a hello of this version is welcomed", "[protocol][handshake]") {
     CHECK_FALSE(handshake.waited(opened + 1h));
 }
 
+TEST_CASE("the welcome says which world the server runs", "[protocol][handshake]") {
+    Handshake handshake{opened, std::nullopt, 42};
+    CHECK(handshake.received(encode(Hello{}), now).reply == Message{Welcome{.world = 42, .planet = {}}});
+}
+
 TEST_CASE("a hello of another version is refused, saying which", "[protocol][handshake]") {
     for (const std::uint32_t other : {version - 1, version + 1}) {
         Handshake handshake{opened};

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <optional>
 #include <set>
@@ -79,8 +80,10 @@ double distance_to(const Generator& generator, Eye eye, Cell chunk) {
 }
 
 std::vector<Cell> chunks_around(const Generator& generator, Eye eye, double reach, double ratio,
-                                const Drawn& shown) {
+                                const Drawn& shown, double slope, double knee) {
     HOG_ASSERT(ratio > 1.0, "a chunk is drawn further off than it's wide");
+    HOG_ASSERT(slope >= 1.0, "detail falls off by at least a level to a doubling of distance");
+    HOG_ASSERT(knee > 0.0, "the falloff bends at a distance over zero");
     const Layers& layers = generator.layers();
     const int finest = layers.level - chunk_levels;
     const auto within = [&](Cell chunk) { return distance_to(generator, eye, chunk) <= reach; };
@@ -96,8 +99,14 @@ std::vector<Cell> chunks_around(const Generator& generator, Eye eye, double reac
         if (!within(chunk)) {
             continue;
         }
+        const double width = width_of(generator, chunk);
+        // Split within `ratio` widths, while that's within the knee. Past it, the widest a chunk
+        // may be grows as the distance to the power of `slope`, from where it was at the knee:
+        // so the distance a chunk of this width is split within is that curve turned about.
+        const double linear = ratio * width;
         const double splits_within =
-            ratio * width_of(generator, chunk) * (shown.split(chunk) ? split_kept : 1.0);
+            (linear <= knee ? linear : knee * std::pow(linear / knee, 1.0 / slope)) *
+            (shown.split(chunk) ? split_kept : 1.0);
         if (std::cmp_less(chunk.level, finest) &&
             distance_to(generator, eye, chunk) < splits_within) {
             const std::array<Cell, 4> finer = children(chunk);

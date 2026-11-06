@@ -25,24 +25,33 @@ std::vector<protocol::Bricks> BrickSharing::changed() {
     return messages;
 }
 
-std::vector<protocol::Bricks> BrickSharing::batched(std::span<const globe::BrickSite> sites) const {
+std::vector<protocol::Bricks> batch_bricks(std::vector<protocol::SentBrick> bricks) {
     std::vector<protocol::Bricks> messages;
     protocol::Bricks batch;
     std::size_t bytes = 0;
-    for (const globe::BrickSite site : sites) {
-        globe::SavedBrick coded = globe::coded_brick(*store_, site);
+    for (protocol::SentBrick& brick : bricks) {
         if (!batch.bricks.empty() && (batch.bricks.size() == protocol::most_bricks ||
-                                      bytes + coded.bytes.size() > most_batch_bytes)) {
+                                      bytes + brick.bytes.size() > most_batch_bytes)) {
             messages.push_back(std::exchange(batch, {}));
             bytes = 0;
         }
-        bytes += coded.bytes.size();
-        batch.bricks.push_back({.key = coded.key, .bytes = std::move(coded.bytes)});
+        bytes += brick.bytes.size();
+        batch.bricks.push_back(std::move(brick));
     }
     if (!batch.bricks.empty()) {
         messages.push_back(std::move(batch));
     }
     return messages;
+}
+
+std::vector<protocol::Bricks> BrickSharing::batched(std::span<const globe::BrickSite> sites) const {
+    std::vector<protocol::SentBrick> bricks;
+    bricks.reserve(sites.size());
+    for (const globe::BrickSite site : sites) {
+        globe::SavedBrick coded = globe::coded_brick(*store_, site);
+        bricks.push_back({.key = coded.key, .bytes = std::move(coded.bytes)});
+    }
+    return batch_bricks(std::move(bricks));
 }
 
 } // namespace hog::server

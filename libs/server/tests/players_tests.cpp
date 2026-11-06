@@ -3,8 +3,10 @@
 #include <hog/server/players.hpp>
 #include <hog/server/spatial_tracking.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <flecs.h>
+#include <glm/geometric.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -250,6 +252,29 @@ TEST_CASE("a player with an account is remembered where they were, and how", "[s
     CHECK_FALSE(players.leave(ConnectionId{8}));
     CHECK_FALSE(players.leave(ConnectionId{9}));
     CHECK_FALSE(players.leave(ConnectionId{7}));
+}
+
+TEST_CASE("a player's look is the way they face, along the ground or up from it",
+          "[server][players]") {
+    flecs::world world;
+    Players players{world, radius};
+    Mover mover{players};
+    players.join(ConnectionId{7}, "Matt");
+    REQUIRE(taken(mover.move(ConnectionId{7}, along(0.0), Stance::Flying, Facing{})));
+    const auto level = players.looks();
+    REQUIRE(level.size() == 1);
+    const hog::DVec3 up = glm::normalize(along(0.0).metres());
+    CHECK(glm::length(level.front().second.forward) == Catch::Approx(1.0));
+    CHECK(glm::dot(level.front().second.forward, up) == Catch::Approx(0.0).margin(1e-9));
+
+    // A quarter turn is square to where it was, and looking up is up.
+    REQUIRE(taken(mover.move(ConnectionId{7}, along(0.0), Stance::Flying,
+                             Facing{.heading = 16'384, .pitch = 0})));
+    CHECK(glm::dot(players.looks().front().second.forward, level.front().second.forward) ==
+          Catch::Approx(0.0).margin(1e-6));
+    REQUIRE(taken(mover.move(ConnectionId{7}, along(0.0), Stance::Flying,
+                             Facing{.heading = 0, .pitch = 16'384})));
+    CHECK(glm::dot(players.looks().front().second.forward, up) == Catch::Approx(1.0).margin(1e-6));
 }
 
 TEST_CASE("a player who leaves is gone, and the id isn't used again", "[server][players]") {

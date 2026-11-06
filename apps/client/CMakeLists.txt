@@ -7,6 +7,7 @@ target_compile_definitions(stb_image PUBLIC STBI_ONLY_PNG)
 
 add_library(hog_client
     src/chat.cpp
+    src/chunk_cache.cpp
     src/cutaway.cpp
     src/daylight.cpp
     src/flight.cpp
@@ -28,18 +29,20 @@ add_library(hog::client ALIAS hog_client)
 
 target_include_directories(hog_client PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(hog_client
-    PUBLIC hog::atmosphere hog::core hog::flora hog::globe hog::jobs hog::net hog::physics hog::planet
+    PUBLIC hog::atmosphere hog::chunks hog::core hog::flora hog::globe hog::jobs hog::net hog::physics hog::planet
         hog::protocol hog::render hog::replication hog::sim hog::terrain
     PRIVATE stb_image tomlplusplus)
 hog_target_defaults(hog_client)
 
 hog_add_tests(hog_client
     tests/chat_tests.cpp
+    tests/chunk_cache_tests.cpp
     tests/daylight_tests.cpp
     tests/cutaway_tests.cpp
     tests/flight_tests.cpp
     tests/forecast_tests.cpp
     tests/frame_times_tests.cpp
+    tests/glacier_lab_tests.cpp
     tests/globe_view_tests.cpp
     tests/grains_tests.cpp
     tests/likeness_tests.cpp
@@ -67,17 +70,24 @@ if(NOT HOG_BUILD_CLIENT)
     return()
 endif()
 
-# The game client, which draws what its server sends.
+# Opens the window and plays, as the client or as the viewer.
+add_library(hog_play src/play.cpp)
+add_library(hog::play ALIAS hog_play)
+target_include_directories(hog_play PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_link_libraries(hog_play PUBLIC hog::chat hog::client hog::jobs hog::login hog::net
+    hog::planet hog::protocol hog::skies hog::window)
+hog_target_defaults(hog_play)
+
+# The game client: connects to a server and draws its world.
 add_executable(hog_client_cli src/main.cpp)
 set_target_properties(hog_client_cli PROPERTIES OUTPUT_NAME hog-client)
-target_link_libraries(hog_client_cli PRIVATE hog::client)
+target_link_libraries(hog_client_cli PRIVATE hog::play)
 hog_target_defaults(hog_client_cli)
 
-# Draws a planet it builds itself, alone or beside a server: for looking and testing.
+# Draws a planet it builds itself, alone: for looking and testing.
 add_executable(hog_viewer_cli src/viewer_main.cpp)
 set_target_properties(hog_viewer_cli PROPERTIES OUTPUT_NAME hog-viewer)
-target_link_libraries(hog_viewer_cli PRIVATE hog::chat hog::client hog::jobs hog::login hog::net
-    hog::planet hog::protocol hog::window)
+target_link_libraries(hog_viewer_cli PRIVATE hog::play)
 hog_target_defaults(hog_viewer_cli)
 
 # GPU drivers are opaque to sanitizers, so those runs leave the smoke test out.

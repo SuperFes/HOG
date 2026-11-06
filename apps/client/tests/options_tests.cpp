@@ -48,6 +48,8 @@ TEST_CASE("client options default to the development planet", "[client][options]
     CHECK_FALSE(options->timings);
     CHECK(options->chat_filter);
     CHECK(options->clouds == hog::render::CloudQuality::High);
+    CHECK(options->detail == 3.0);
+    CHECK(options->falloff == 1.0);
     CHECK_FALSE(options->software);
     CHECK(options->validate == hog::debug_build);
     CHECK(options->reload_shaders == hog::debug_build);
@@ -186,4 +188,25 @@ TEST_CASE("logging in needs a name and a server to go on to", "[client][options]
     CHECK_FALSE(
         parse_options(Arguments{"--login", "127.0.0.1:4647", "--connect", "127.0.0.1:7675"}));
     CHECK_FALSE(parse_options(Arguments{"--name", "Matt", "--connect", "127.0.0.1:7675"}));
+}
+
+TEST_CASE(
+    "the --detail option takes how fast the ground's detail falls off, within what a server allows",
+    "[client][options]") {
+    const auto options = parse_options(Arguments{"--detail", "1.5"});
+    REQUIRE(options);
+    CHECK(options->detail == 1.5);
+    CHECK_FALSE(parse_options(Arguments{"--detail", "0"}));
+    CHECK_FALSE(parse_options(Arguments{"--detail", "1"}));
+    CHECK_FALSE(parse_options(Arguments{"--detail", "100"}));
+    CHECK_FALSE(parse_options(Arguments{"--detail", "coarse"}));
+}
+
+TEST_CASE("the --falloff option takes how much faster detail falls off far out",
+          "[client][options]") {
+    const auto options = parse_options(Arguments{"--falloff", "1.75"});
+    REQUIRE(options);
+    CHECK(options->falloff == 1.75);
+    CHECK_FALSE(parse_options(Arguments{"--falloff", "0.5"}));
+    CHECK_FALSE(parse_options(Arguments{"--falloff", "9"}));
 }

@@ -160,6 +160,50 @@ TEST_CASE("a session says hello and is welcomed", "[client][session]") {
     CHECK_FALSE(session->last_snapshot());
 }
 
+TEST_CASE("a session keeps the planet it's welcomed to, the ground height, and the chunks and "
+          "plans, in order",
+          "[client][session]") {
+    Stand stand;
+    auto session = Session::connect(std::format("127.0.0.1:{}", stand.server.port()), {});
+    REQUIRE(session);
+    look_until(*session, stand, [&] { return stand.count<protocol::Hello>() == 1; });
+    stand.send(protocol::Welcome{.planet = {std::byte{9}, std::byte{8}}});
+    look_until(*session, stand, [&] { return session->state() == Session::State::Welcomed; });
+    CHECK(session->planet() == std::vector{std::byte{9}, std::byte{8}});
+    CHECK_FALSE(session->ground());
+
+    stand.send(protocol::Ground{.height = 12.5F});
+    stand.send(
+        protocol::Chunk{.key = 4, .version = 1, .part = 0, .parts = 1, .ground = {}, .water = {}});
+    stand.send(protocol::ChunkPlan{.wanted = {{.key = 4, .version = 1}, {.key = 5, .version = 0}}});
+    stand.send(
+        protocol::Chunk{.key = 4, .version = 2, .part = 0, .parts = 1, .ground = {}, .water = {}});
+    look_until(*session, stand, [&] { return session->ground().has_value(); });
+    std::vector<Session::ChunkEvent> events;
+    look_until(*session, stand, [&] {
+        for (auto& event : session->take_chunks()) {
+            events.push_back(std::move(event));
+        }
+        return events.size() == 3;
+    });
+    CHECK(*session->ground() == 12.5F);
+    CHECK(std::holds_alternative<protocol::Chunk>(events[0]));
+    CHECK(std::get<protocol::ChunkPlan>(events[1]).wanted.size() == 2);
+    CHECK(std::holds_alternative<protocol::Chunk>(events[2]));
+    CHECK(session->take_chunks().empty());
+}
+
+TEST_CASE("a session that makes a planet's ground is refused a server of another",
+          "[client][session]") {
+    Stand stand;
+    auto session = Session::connect(std::format("127.0.0.1:{}", stand.server.port()), {}, 7);
+    REQUIRE(session);
+    look_until(*session, stand, [&] { return stand.count<protocol::Hello>() == 1; });
+    stand.send(protocol::Welcome{.world = 8, .planet = {}});
+    look_until(*session, stand, [&] { return session->state() == Session::State::Refused; });
+    CHECK(session->reason().find("planet") != std::string::npos);
+}
+
 namespace {
 
 // The moves the stand heard, but those made while being welcomed.

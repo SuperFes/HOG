@@ -51,7 +51,7 @@ Shot shot_of(const hog::client::Flight& flight, const hog::globe::Generator& gen
         hog::WallClock::time_point{std::chrono::sys_days{std::chrono::year{2026} / 6 / 21}});
     return {.camera = hog::client::flight_camera(flight, 1.0),
             .bend = hog::terrain::bend_from(
-                flight.eye, radius, hog::client::globe_ground(generator, flight.eye.metres())),
+                flight.eye, radius, hog::chunks::globe_ground(generator, flight.eye.metres())),
             .time = hog::client::start_time(calendar(), date, up, 0.5),
             .seconds = 0.0,
             .companion = std::nullopt};
@@ -134,7 +134,7 @@ TEST_CASE("the globe's voxels, to look at", "[.look]") {
         scene->follow_globe(globe.world);
         const hog::DVec3 noon = glm::normalize(hog::DVec3{1.0, 0.2, 0.3});
         const hog::DVec3 at = glm::normalize(noon + hog::DVec3{0.0, 0.0, 0.3});
-        const double ground = hog::client::globe_ground(globe.generator, noon);
+        const double ground = hog::chunks::globe_ground(globe.generator, noon);
         for (const auto& [shot, height, pitch] :
              {std::tuple{"high", 60.0, -0.6}, std::tuple{"low", 60.0, 0.2},
               std::tuple{"1km", 1'000.0, -0.25}, std::tuple{"15km", 15'000.0, -0.45},
@@ -267,7 +267,7 @@ TEST_CASE("worlds at coarser and finer cell sizes, to look at", "[.look]") {
                                        hog::client::still_format, 1);
             REQUIRE(scene);
             scene->follow_globe(globe.world);
-            const double ground = hog::client::globe_ground(globe.generator, noon);
+            const double ground = hog::chunks::globe_ground(globe.generator, noon);
             for (const auto& [shot, height, pitch] :
                  {std::tuple{"walk", 1.7, -0.12}, std::tuple{"low", 60.0, -0.25},
                   std::tuple{"mid", 600.0, -0.3}}) {
@@ -319,7 +319,7 @@ TEST_CASE("the server's weather over the globe, to look at", "[.look]") {
           std::tuple{"mid", glm::normalize(hog::DVec3{0.6, 0.3, 0.7}), 1'500.0, -0.1},
           std::tuple{"high", glm::normalize(hog::DVec3{1.0, 0.2, 0.3}), 12'000.0, -0.4},
           std::tuple{"orbit", glm::normalize(hog::DVec3{1.0, 0.2, 0.3}), 400'000.0, -1.5}}) {
-        const double ground = hog::client::globe_ground(globe.generator, up * radius);
+        const double ground = hog::chunks::globe_ground(globe.generator, up * radius);
         hog::client::Flight flight = hog::client::start_flight(
             up, radius, ground + height, glm::normalize(up + hog::DVec3{0.0, 0.0, 0.3}));
         flight.pitch = pitch;
@@ -394,7 +394,7 @@ TEST_CASE("under the ground in the cutaway, to look at", "[.look]") {
         hog::globe::land_near(globe.generator, glm::normalize(hog::DVec3{1.0, 0.2, 0.3}), 3'000.0)
             .value();
     const hog::DVec3 at = glm::normalize(noon + hog::DVec3{0.0, 0.0, 0.3});
-    const double ground = hog::client::globe_ground(globe.generator, noon);
+    const double ground = hog::chunks::globe_ground(globe.generator, noon);
     REQUIRE(ground > 20.0);
     for (const double depth : {6.0, 20.0, 50.0}) {
         for (const double bubble : {8.0, 24.0}) {

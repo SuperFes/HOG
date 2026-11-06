@@ -1,3 +1,4 @@
+#include <hog/chunks/globe_stream.hpp>
 #include <hog/client/daylight.hpp>
 #include <hog/client/flight.hpp>
 #include <hog/client/scene.hpp>
@@ -194,8 +195,8 @@ void Scene::finish_bakes() {
     finish_globe();
 }
 
-void Scene::show_globe(GlobeStream::Changes changes) {
-    for (GlobeStream::Shown& shown : changes.shown) {
+void Scene::show_globe(chunks::GlobeStream::Changes changes) {
+    for (chunks::GlobeStream::Shown& shown : changes.shown) {
         blocks_.place(shown.key, std::move(shown.ground));
         ocean_.place_still(shown.key, std::move(shown.water));
     }
@@ -386,7 +387,7 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                            static_cast<double>(here.fog_top), shot.bend.eye_height, sun_mu);
     const DVec3 drift = drift_at(shot.bend.up, here);
     const double falling = falling_at_eye(shot.bend, here);
-    drifted_ = render::within_period(drifted_ + (drift * shot.seconds));
+    flowed_ = std::fmod(flowed_ + shot.seconds, render::flow_period);
     gusts_.blow(shot.camera.eye, drift * surface_wind, shot.bend.up, shot.seconds);
     falling_for_ += shot.seconds;
     const bool new_weather = shot.forecast != nullptr && shot.forecast->known() &&
@@ -396,7 +397,11 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     // Taken as the passes are recorded, after the uploads: until the maps are first taken, a clear
     // sky.
     const WeatherAges ages = weather_ages(shot);
-    const auto weather = [&] { return weather_.bindings(faded, ages.after, ages.before); };
+    const auto weather = [&] {
+        render::WeatherBindings bound = weather_.bindings(faded, ages.after, ages.before);
+        bound.flow = flowed_;
+        return bound;
+    };
     render::SkyView sky = sky_view(shot, shade);
     sky.gusts = gusts_.seen();
     sky.mist =
@@ -413,8 +418,7 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
         return render::CloudsView{.camera = shot.camera,
                                   .bend = shot.bend,
                                   .air = through,
-                                  .weather = weather(),
-                                  .moved = drifted_};
+                                  .weather = weather()};
     };
 
     render::RenderGraph graph;

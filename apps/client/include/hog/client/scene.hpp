@@ -1,6 +1,7 @@
 #pragma once
 
 #include <hog/atmosphere/model.hpp>
+#include <hog/chunks/globe_stream.hpp>
 #include <hog/client/forecast.hpp>
 #include <hog/client/globe_view.hpp>
 #include <hog/client/picture.hpp>
@@ -127,13 +128,15 @@ public:
     // while chunks are in flight.
     void follow_globe(const globe::World& globe);
     // The globe's stream of surfaces, once it's followed.
-    [[nodiscard]] const GlobeStream* globe_stream() const noexcept {
+    [[nodiscard]] const chunks::GlobeStream* globe_stream() const noexcept {
         return globe_ ? &*globe_ : nullptr;
     }
     // Waits for the globe's chunks in flight, so the world may be changed; then, once it has,
     // meshes again the chunks the changed bricks touch.
     void finish_globe();
     void change_globe(std::span<const globe::BrickSite> bricks);
+    // Draws surfaces a server sent in place of any under their keys, and takes the gone away.
+    void show_chunks(chunks::GlobeStream::Changes changes) { show_globe(std::move(changes)); }
     // The ground's inside drawn round the eye, in place of any shown before; none takes it away.
     void show_cutaway(std::shared_ptr<const terrain::BlockMesh> shell);
 
@@ -162,7 +165,7 @@ private:
     // Wants the globe's chunks round the eye, and shows those that have come.
     void follow_ground(const Shot& shot);
     // Shows the globe's chunks that have come, and takes away those gone.
-    void show_globe(GlobeStream::Changes changes);
+    void show_globe(chunks::GlobeStream::Changes changes);
     // From under the water, as the sea last found the eye in `frame`'s slot, adds the pass
     // taking what's out of it all round, seen as `sky` has it; whether it did.
     [[nodiscard]] bool take_probe(render::RenderGraph& graph, const render::Frame& frame,
@@ -186,7 +189,7 @@ private:
     render::Ocean ocean_;
     render::Blocks blocks_;
     // The globe's surfaces round the eye, drawn as the blocks once followed.
-    std::optional<GlobeStream> globe_;
+    std::optional<chunks::GlobeStream> globe_;
     std::vector<waves::Train> wave_trains_;
     render::TransientImages transients_;
     render::Capsules others_;
@@ -205,7 +208,7 @@ private:
     std::optional<double> exposure_;
     // How many times weather had come when its maps were last taken.
     std::optional<std::uint64_t> weather_taken_;
-    DVec3 drifted_{0.0};       // metres the clouds have drifted
+    double flowed_ = 0.0;      // seconds the billows have flowed, within render::flow_period
     DVec3 foam_drifted_{0.0};  // and the water at the sea's surface
     double falling_for_ = 0.0; // seconds what falls has been falling
     render::Gusts gusts_;

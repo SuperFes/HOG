@@ -48,8 +48,12 @@ inline constexpr double split_kept = 1.25;
 // off. Chunks beside each other, across their sides and corners, are at most one detail apart, as
 // seams are drawn only between neighbours a detail apart; across the cube's edges, where the
 // faces' lattices meet unevenly, they're at the same detail.
-// Precondition: ratio > 1.
+// Out to `knee` metres detail falls a level to a doubling of distance, as above; past it, a `slope`
+// of 1 carries on so, and a higher slope has it fall that many levels to a doubling, so the ground
+// a long way off is coarser still while all within the knee stays as it was.
+// Precondition: ratio > 1, slope >= 1, knee > 0.
 [[nodiscard]] std::vector<Cell> chunks_around(const Generator& generator, Eye eye, double reach,
-                                              double ratio, const Drawn& shown = {});
+                                              double ratio, const Drawn& shown = {},
+                                              double slope = 1.0, double knee = 1'000.0);
 
 } // namespace hog::globe
