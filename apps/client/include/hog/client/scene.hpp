@@ -213,9 +213,8 @@ private:
     double falling_for_ = 0.0; // seconds what falls has been falling
     render::Gusts gusts_;
     bool settled_ = false;
-    // Whether the last frame recorded took a probe, and in which slot.
+    // Whether the last frame recorded took a probe.
     bool probing_ = false;
-    std::uint32_t last_slot_ = 0;
 };
 
 // The shot drawn into a picture of `extent` once the scene has settled: frame after frame, with the

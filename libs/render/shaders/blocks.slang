@@ -17,6 +17,9 @@ struct Push {
 
 [[vk::push_constant]] ConstantBuffer<Push> push;
 [[vk::binding(0, 0)]] Sampler2DArray tiles;
+// What's round the eye, as hog::render::EnvironmentProbe lays it out by the ground's frame there,
+// for water to mirror; a cube holding nothing, its alpha 0, where none's been taken.
+[[vk::binding(1, 0)]] SamplerCube environment;
 
 // Metres a tile repeats over, near and far, and the far tiles the coordinates run over before they
 // repeat: render::block_tile, block_far_tile and far_tiles_held.
@@ -222,7 +225,16 @@ float4 fragment_main(Surface surface) : SV_Target {
         const float facing_up = saturate(dot(up, -view));
         const float fresnel = 0.02 + (0.98 * pow(1.0 - facing_up, 5.0));
         const float daylight = (1.0 - night) * risen;
-        const float3 mirrored = puddle_sky * (night + daylight);
+        // As the probe took it round the eye, laid out by the ground's frame there, as
+        // hog::planet::tangent_frame has it; else a plain sky.
+        const float3 eye_up = normalize(push.up_height.xyz);
+        const float3 across = cross(float3(0.0, 0.0, 1.0), eye_up);
+        const float3 east = length(across) > 1e-6 ? normalize(across) : float3(1.0, 0.0, 0.0);
+        const float3 mirror = reflect(view, up);
+        const float4 around = environment.SampleLevel(
+            float3(dot(mirror, east), dot(mirror, eye_up), dot(mirror, cross(eye_up, east))), 0.0);
+        const float3 mirrored =
+            around.a > 0.5 ? around.rgb : puddle_sky * (night + daylight);
         const float glint =
             pow(saturate(dot(reflect(view, up), push.sun_radius.xyz)), 600.0) * puddle_glint *
             daylight;

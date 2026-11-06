@@ -33,6 +33,9 @@ struct BlockView {
     // Whole metres round the eye where ground isn't drawn, so what lies past it shows from inside
     // the ground, lit there by a lamp at the eye; none draws the ground as it is.
     double cutaway = 0.0;
+    // What water standing on the ground mirrors: a cube as EnvironmentProbe takes it round the
+    // eye, or none, which mirrors a plain sky.
+    VkImageView environment = VK_NULL_HANDLE;
 };
 
 // The most a cutaway can be, in metres.
@@ -114,6 +117,8 @@ private:
     const Device* device_ = nullptr;
     Pipeline pipeline_;
     Image tiles_;
+    Image nothing_; // a cube holding nothing, mirrored where no probe's been taken
+    Sampler mirror_sampler_;
     Sampler sampler_;
     std::vector<Copy> copies_;
     std::shared_ptr<const terrain::BlockMesh> mesh_;

@@ -5,6 +5,7 @@
 #include <hog/render/memory.hpp>
 #include <hog/render/readback.hpp>
 #include <hog/render/rendering.hpp>
+#include <hog/render/streamed_image.hpp>
 #include <hog/terrain/block_mesh.hpp>
 #include <hog/terrain/material.hpp>
 
@@ -74,9 +75,23 @@ void add_square(BlockMesh& mesh, double away, Tile tile) {
 
 // Draws the blocks over a black background, looking down -z from `eye` on a planet a thousand
 // kilometres across whose ground is `up` there, and reads it back.
+std::vector<std::uint8_t> render_view(hog::render::Device& device, hog::render::Blocks& blocks,
+                                      const BlockView& view);
+
 std::vector<std::uint8_t> render(hog::render::Device& device, hog::render::Blocks& blocks,
                                  DVec3 sun, WorldPosition eye = {}, DVec3 up = {0.0, 0.0, 1.0},
                                  double cutaway = 0.0) {
+    return render_view(
+        device, blocks,
+        {.camera = Camera{.eye = eye, .forward = {0.0, 0.0, -1.0}, .up = {0.0, 1.0, 0.0}},
+         .sun = sun,
+         .bend = {.up = up, .eye_height = 0.0, .radius = 1.0e6, .faked = 1.0e6},
+         .cutaway = cutaway});
+}
+
+// Draws the blocks as `view` sees them over a black background, and reads it back.
+std::vector<std::uint8_t> render_view(hog::render::Device& device, hog::render::Blocks& blocks,
+                                      const BlockView& view) {
     auto target = hog::render::make_image(
         device, {.format = VK_FORMAT_R8G8B8A8_UNORM,
                  .extent = extent,
@@ -88,11 +103,6 @@ std::vector<std::uint8_t> render(hog::render::Device& device, hog::render::Block
                                          .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
                                          .aspect = VK_IMAGE_ASPECT_DEPTH_BIT});
     REQUIRE(depth);
-    const BlockView view{.camera =
-                             Camera{.eye = eye, .forward = {0.0, 0.0, -1.0}, .up = {0.0, 1.0, 0.0}},
-                         .sun = sun,
-                         .bend = {.up = up, .eye_height = 0.0, .radius = 1.0e6, .faked = 1.0e6},
-                         .cutaway = cutaway};
     bool drawn = false;
     REQUIRE(device.submit_now([&](VkCommandBuffer commands) {
         namespace use = hog::render::image_use;
@@ -367,4 +377,47 @@ TEST_CASE("ground inside the cutaway isn't drawn, and a lamp lights what's left"
     // Within most of it, gone: the background shows.
     const Pixel gone = middle(draw(*device, square(), sun, {}, {0.0, 0.0, 1.0}, 7.0));
     CHECK(gone == Pixel{0, 0, 0, 255});
+}
+
+TEST_CASE("water standing on level ground mirrors what the probe took round the eye",
+          "[render][blocks][gpu]") {
+    const auto device = test_device();
+    // A wide flat floor a metre under the eye, under a film of water, looked across low.
+    BlockMesh floor;
+    for (const hog::Vec2 corner : {hog::Vec2{-40.0F, 1.0F}, hog::Vec2{40.0F, 1.0F},
+                                   hog::Vec2{40.0F, 80.0F}, hog::Vec2{-40.0F, 80.0F}}) {
+        floor.vertices.push_back({.position = hog::Vec3{corner, -1.0F},
+                                  .normal = hog::Vec3{0.0F, 0.0F, 1.0F},
+                                  .tiles = {3, 3, 3},
+                                  .corner = hog::terrain::packed_corner(0, 1.0, 0.0, true)});
+    }
+    floor.indices = {0, 1, 2, 0, 2, 3};
+    hog::terrain::mix_corners(floor);
+    auto blocks = hog::render::Blocks::create(*device, VK_FORMAT_R8G8B8A8_UNORM,
+                                              VK_FORMAT_D32_SFLOAT, tiles());
+    REQUIRE(blocks);
+    blocks->show(std::make_shared<const BlockMesh>(std::move(floor)));
+    // All round the eye, red.
+    std::array<std::byte, std::size_t{4} * 6> red{};
+    for (std::size_t face = 0; face < 6; ++face) {
+        red.at(4 * face) = std::byte{255};
+        red.at((4 * face) + 3) = std::byte{255};
+    }
+    auto around = hog::render::make_filled_image(
+        *device, {.format = VK_FORMAT_R8G8B8A8_UNORM, .layers = 6, .cube = true}, red);
+    REQUIRE(around);
+    BlockView view{
+        .camera = Camera{.eye = {}, .forward = glm::normalize(DVec3{0.0, 1.0, -0.12}),
+                         .up = {0.0, 0.0, 1.0}},
+        .sun = glm::normalize(DVec3{0.0, -1.0, 1.0}),
+        .bend = {.up = {0.0, 0.0, 1.0}, .eye_height = 1.0, .radius = 1.0e6, .faked = 1.0e6}};
+    const Pixel plain = middle(render_view(*device, *blocks, view));
+    view.environment = around->view();
+    const Pixel mirrored = middle(render_view(*device, *blocks, view));
+    CAPTURE(plain, mirrored);
+    // Without a probe it mirrors a plain sky; with one, what it holds.
+    CHECK(plain[2] > plain[0]);
+    CHECK(mirrored[0] > mirrored[2]);
+    CHECK(mirrored[0] > plain[0] + 40);
+    CHECK(device->validation_errors() == 0);
 }
