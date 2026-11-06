@@ -1,10 +1,12 @@
 #pragma once
 
+#include <hog/core/result.hpp>
 #include <hog/globe/voxel.hpp>
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <unordered_map>
 #include <vector>
 
@@ -83,6 +85,12 @@ public:
     [[nodiscard]] std::size_t nodes() const;
     [[nodiscard]] std::size_t unshared_nodes() const;
     [[nodiscard]] std::size_t leaves() const;
+
+    // The tree as bytes for storing or sending: each distinct node once, children before parents.
+    // The same voxels are always the same bytes.
+    [[nodiscard]] std::vector<std::byte> encode() const;
+    // Fails, saying why, on bytes that aren't a tree: cut short, too large or out of range.
+    [[nodiscard]] static Result<VoxelTree> decode(std::span<const std::byte> bytes);
 
     // Whether two trees hold the same voxels. Equal voxels make equal roots only within one tree
     // storage, so this reads the nodes.

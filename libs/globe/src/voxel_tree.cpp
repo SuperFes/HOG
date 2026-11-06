@@ -1,7 +1,12 @@
 #include <hog/core/assert.hpp>
+#include <hog/core/bytes.hpp>
 #include <hog/core/hash.hpp>
 #include <hog/globe/voxel_tree.hpp>
 
+#include <algorithm>
+#include <cstdint>
+#include <string>
+#include <string_view>
 #include <unordered_set>
 
 namespace hog::globe {
@@ -184,6 +189,159 @@ std::size_t VoxelTree::leaves() const {
         }
     }
     return count;
+}
+
+namespace {
+
+// Bytes that mark a node as a leaf or a cube of eight.
+constexpr std::uint8_t leaf_tag = 0;
+constexpr std::uint8_t cube_tag = 1;
+// The most nodes a tree of bytes may claim, so damaged bytes can't ask for the memory of a planet.
+constexpr std::uint64_t most_nodes = std::uint64_t{1} << 28U;
+
+} // namespace
+
+std::vector<std::byte> VoxelTree::encode() const {
+    // The reachable nodes in the order a walk down from the root, children in turn, finishes them:
+    // children before parents, and the same for the same voxels however the nodes were made.
+    std::vector<Id> order;
+    std::unordered_map<Id, std::uint64_t> dense;
+    {
+        struct Walk {
+            Id node;
+            std::size_t next;
+        };
+        std::vector<Walk> pending{{.node = root_, .next = 0}};
+        while (!pending.empty()) {
+            Walk& walk = pending.back();
+            const Node& node = nodes_[walk.node];
+            if (node.leaf || walk.next == node.child.size()) {
+                if (dense.try_emplace(walk.node, order.size()).second) {
+                    order.push_back(walk.node);
+                }
+                pending.pop_back();
+                continue;
+            }
+            const Id child = node.child[walk.next++];
+            if (!dense.contains(child)) {
+                pending.push_back({.node = child, .next = 0});
+            }
+        }
+    }
+    ByteWriter out;
+    out.write_varint(static_cast<std::uint64_t>(side_));
+    out.write_varint(order.size());
+    for (std::size_t k = 0; k < order.size(); ++k) {
+        const Node& node = nodes_[order[k]];
+        if (node.leaf) {
+            const Voxel& v = node.voxel;
+            out.write(leaf_tag);
+            out.write_signed(v.distance);
+            out.write_varint(v.normal);
+            out.write(static_cast<std::uint8_t>(v.solid));
+            out.write(v.condition);
+            out.write(static_cast<std::uint8_t>(v.grain));
+            out.write_varint(v.grain_amount);
+            out.write(static_cast<std::uint8_t>(v.liquid));
+            out.write_varint(v.liquid_amount);
+            out.write_varint(v.temperature);
+            out.write_varint(v.solid_amount);
+        } else {
+            out.write(cube_tag);
+            for (const Id child : node.child) {
+                // How far back the child is, which is small where cubes are made together.
+                out.write_varint(k - dense.at(child));
+            }
+        }
+    }
+    return std::move(out).take();
+}
+
+Result<VoxelTree> VoxelTree::decode(std::span<const std::byte> bytes) {
+    ByteReader in{bytes};
+    const auto fail = [](std::string_view why) {
+        return make_error(ErrorCode::InvalidArgument, std::string{why});
+    };
+    const auto side = in.read_varint();
+    const auto count = in.read_varint();
+    if (!side || !count) {
+        return fail("a tree's bytes are cut short");
+    }
+    if (*side == 0 || (*side & (*side - 1)) != 0 || *side > (std::uint64_t{1} << 20U)) {
+        return fail("a tree's side must be a power of two");
+    }
+    if (*count == 0 || *count > most_nodes) {
+        return fail("a tree's node count is out of range");
+    }
+    VoxelTree tree{static_cast<int>(*side)};
+    std::vector<Id> ids;
+    ids.reserve(static_cast<std::size_t>(*count));
+    const auto material = [&](Result<std::uint8_t> value) -> std::optional<Material> {
+        if (!value || *value >= material_count) {
+            return std::nullopt;
+        }
+        return static_cast<Material>(*value);
+    };
+    for (std::uint64_t k = 0; k < *count; ++k) {
+        const auto tag = in.read<std::uint8_t>();
+        if (!tag) {
+            return fail("a tree's bytes are cut short");
+        }
+        if (*tag == leaf_tag) {
+            Voxel v;
+            const auto distance = in.read_signed();
+            const auto normal = in.read_varint();
+            const auto solid = material(in.read<std::uint8_t>());
+            const auto condition = in.read<std::uint8_t>();
+            const auto grain = material(in.read<std::uint8_t>());
+            const auto grain_amount = in.read_varint();
+            const auto liquid = material(in.read<std::uint8_t>());
+            const auto liquid_amount = in.read_varint();
+            const auto temperature = in.read_varint();
+            const auto solid_amount = in.read_varint();
+            if (!distance || !normal || !solid || !condition || !grain || !grain_amount ||
+                !liquid || !liquid_amount || !temperature || !solid_amount) {
+                return fail("a leaf is cut short or has a value out of range");
+            }
+            if (*distance < INT16_MIN || *distance > INT16_MAX || *normal > UINT16_MAX ||
+                *grain_amount > UINT16_MAX || *liquid_amount > UINT16_MAX ||
+                *temperature > UINT16_MAX || *solid_amount > UINT16_MAX) {
+                return fail("a leaf has a value out of range");
+            }
+            v.distance = static_cast<std::int16_t>(*distance);
+            v.normal = static_cast<std::uint16_t>(*normal);
+            v.solid = *solid;
+            v.condition = *condition;
+            v.grain = *grain;
+            v.grain_amount = static_cast<std::uint16_t>(*grain_amount);
+            v.liquid = *liquid;
+            v.liquid_amount = static_cast<std::uint16_t>(*liquid_amount);
+            v.temperature = static_cast<std::uint16_t>(*temperature);
+            v.solid_amount = static_cast<std::uint16_t>(*solid_amount);
+            ids.push_back(tree.leaf_of(v));
+        } else if (*tag == cube_tag) {
+            std::array<Id, 8> children{};
+            for (Id& child : children) {
+                const auto back = in.read_varint();
+                if (!back || *back == 0 || *back > k) {
+                    return fail("a cube's child is not an earlier node");
+                }
+                child = ids[static_cast<std::size_t>(k - *back)];
+            }
+            // Bytes made by encode never hold eight leaves alike; refusing them keeps one form.
+            if (tree.joined(children) != tree.intern({.leaf = false, .voxel = {}, .child = children})) {
+                return fail("a cube of eight alike leaves is not in its joined form");
+            }
+            ids.push_back(tree.intern({.leaf = false, .voxel = {}, .child = children}));
+        } else {
+            return fail("a node is neither a leaf nor a cube");
+        }
+    }
+    if (const auto done = in.finish(); !done) {
+        return fail("a tree's bytes run on past its nodes");
+    }
+    tree.root_ = ids.back();
+    return tree;
 }
 
 bool VoxelTree::same_as(const VoxelTree& other) const {
