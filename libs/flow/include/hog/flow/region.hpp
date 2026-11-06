@@ -38,6 +38,19 @@ struct Stepped {
     std::int64_t frozen = 0;
     // Units of water boiled off by lava it touched.
     std::int64_t steamed = 0;
+    // Ice units that moved downhill this step.
+    std::int64_t glaciated = 0;
+    // Where ice ends at a drop, for icicles to hang from: the column, the layer its surface is in,
+    // which way it faces (+i, +j, -i, -j) and how far the drop is, metres.
+    struct Icicle {
+        std::uint8_t face = 0;
+        std::uint32_t i = 0;
+        std::uint32_t j = 0;
+        std::uint32_t layer = 0;
+        std::uint8_t side = 0;
+        double drop = 0.0;
+    };
+    std::vector<Icicle> icicles;
     std::vector<globe::BrickSite> wanted;
     // Each column with liquid standing in the open, and how much.
     struct Wet {
@@ -69,6 +82,9 @@ public:
     // With `hold_sea`, open voxels under the sea's level at the edge of what is held are kept
     // full, the sea beyond being endless.
     explicit Region(globe::World& world, bool hold_sea = true);
+
+    // Years of ice flow for each second stepped; none leaves glaciers frozen.
+    void set_ice_years_per_second(double years) noexcept { ice_years_ = years; }
 
     // Reads the brick as the world now has it, unless held already.
     void load(globe::BrickSite site);
@@ -270,6 +286,9 @@ private:
     // Grain on the topmost ground slides to lower columns beside it where it lies steeper than
     // its repose; see Slump. Only the top surface of a column slumps, not floors inside caves.
     void slump(Stepped& stepped);
+    // Ice on the topmost ground flows downhill as a glacier; see Glacier. Only the top surface of
+    // a column flows, and caves under it do not.
+    void glaciate(Stepped& stepped, double years);
     // A column's top ground, the grain on it, and the ground's height in units where
     // Voxel::full is a voxel's height, above the floor. Looks down from layer `start`.
     struct Scan {
@@ -329,6 +348,7 @@ private:
     bool hold_sea_;
     // Voxels of lava that cooled through this step, to be set into rock at its end.
     std::vector<std::pair<globe::Site, Held*>> setting_;
+    double ice_years_ = 0.0;
     double cooling_ = 0.0; // seconds of rock's cooling not yet taken
     globe::Material liquid_;
     std::unordered_map<std::uint64_t, Held> held_;

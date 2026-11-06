@@ -589,3 +589,31 @@ TEST_CASE("sand heaped at a cube edge slumps over it onto the next face, losing 
               .grain_amount > 0);
     CHECK(block.region().at({.face = 0, .i = last - 1, .j = j, .layer = layer}).grain_amount > 0);
 }
+
+TEST_CASE("a tall pile of ice stays put until the years run, then spreads without losing any",
+          "[flow][region][glacier]") {
+    using hog::globe::Material;
+    Block block{floor_above_sea(100.0)};
+    for (int layer = 0; layer < 12; ++layer) {
+        block.pile(12, 12, layer, Material::Ice, full);
+    }
+    const std::int64_t before = block.region().grain();
+
+    // Ice isn't a heap of loose grain: with no years given it holds its shape.
+    for (int step = 0; step < 20; ++step) {
+        block.region().step(tick);
+    }
+    CHECK(block.grain(12, 12, 11) == full);
+    CHECK(block.grain(13, 12, 0) == 0);
+
+    block.region().set_ice_years_per_second(0.5);
+    std::int64_t moved = 0;
+    for (int step = 0; step < 400; ++step) {
+        moved += block.region().step(tick).glaciated;
+    }
+    CHECK(moved > 0);
+    CHECK(block.grain(13, 12, 0) > 0);
+    CHECK(block.grain(12, 12, 11) < full);
+    // Whole units are written back, so a rounding or two may stray, but no more.
+    CHECK(std::abs(block.region().grain() - before) < 64);
+}

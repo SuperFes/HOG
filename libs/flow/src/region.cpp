@@ -891,6 +891,7 @@ Stepped Region::step(double seconds) {
         ++stepped.frozen;
     }
     slump(stepped);
+    glaciate(stepped, ice_years_ * seconds);
     fly(seconds, stepped);
     std::ranges::sort(stepped.wanted, {}, [](const globe::BrickSite& site) {
         return globe::brick_key(site);

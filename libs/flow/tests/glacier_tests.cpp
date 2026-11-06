@@ -74,3 +74,19 @@ TEST_CASE("ice wears the bed it moves over and carries its rock down", "[glacier
     }
     CHECK(debris == Catch::Approx(3.0).epsilon(1e-6));
 }
+
+TEST_CASE("ice that ends at a drop is marked where icicles may hang", "[glacier]") {
+    Glacier glacier = square(4);
+    glacier[1].rock = 20.0;
+    glacier[1].ice = 5.0;
+    // Beside a lower bare column, but not beside one level with it, or one holding ice.
+    const auto found = glacier.hangs(3.0);
+    REQUIRE(found.size() >= 1);
+    for (const Glacier::Hang& hang : found) {
+        CHECK(hang.node == 1);
+        CHECK(hang.drop >= 3.0);
+    }
+    CHECK(glacier.hangs(100.0).empty());
+    glacier[2].ice = 1.0;
+    CHECK(glacier.hangs(3.0).size() == found.size() - 1);
+}
