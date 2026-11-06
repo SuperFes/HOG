@@ -1091,6 +1091,13 @@ Result<> Ocean::bind(VkCommandBuffer commands, VkExtent2D extent, const OceanVie
                            view.behind->environment != VK_NULL_HANDLE ? view.behind->environment
                                                                       : calm_.environment(),
                            shore_sampler_.handle());
+    } else if (air_) {
+        // Over the water, what it mirrors.
+        push_sampled_image(commands, pipeline, behind_binding + 2,
+                           view.behind && view.behind->environment != VK_NULL_HANDLE
+                               ? view.behind->environment
+                               : calm_.environment(),
+                           shore_sampler_.handle());
     }
     vkCmdPushConstants(commands, pipeline.layout(),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(Push),

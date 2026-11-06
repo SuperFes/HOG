@@ -492,8 +492,14 @@ AirLit air_lit(Surface surface, Facing facing, float3 looking) {
     AirLit lit;
     lit.reflected = reflected_at(looking, normal);
     lit.shade = shade_at(lighting, cloud_shadow, surface.from_eye);
-    lit.sky = sky_mirrored(air, lighting, sky_view_table, transmittance_table, lit.shade,
-                           reflect(looking, normal), up, sun);
+    // What's round the eye as the probe took it, where it took it that way; else the sky.
+    const float3 mirror = reflect(looking, normal);
+    const float3 east = push.east_faked.xyz;
+    const float4 around = environment.SampleLevel(
+        float3(dot(mirror, east), dot(mirror, up), dot(mirror, cross(up, east))), 0.0);
+    lit.sky = around.a > 0.5 ? untoned(around.rgb, lighting.sun_exposure.w)
+                             : sky_mirrored(air, lighting, sky_view_table, transmittance_table,
+                                            lit.shade, mirror, up, sun);
     const float3 sunlight =
         through_cloud(lit.shade, transmittance(air, transmittance_table, 0.0, dot(normal, sun)));
     lit.glint =
