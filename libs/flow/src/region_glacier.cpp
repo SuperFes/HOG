@@ -36,9 +36,6 @@ Stepped Region::age_ice(double years) {
 }
 
 void Region::glaciate(Stepped& stepped, double years) {
-    if (years <= 0.0) {
-        return;
-    }
     const globe::Layers& layers = world_->store().layers();
     const double thickness = layers.thickness;
 
@@ -113,6 +110,14 @@ void Region::glaciate(Stepped& stepped, double years) {
         }
         const std::uint32_t low = stack->second.front() * globe::brick_side;
         const std::uint32_t high = ((stack->second.back() + 1) * globe::brick_side) - 1;
+        // Open to the bottom of what's held: the ground under it isn't, so ask for it.
+        const Voxel* bottom = voxel({key.face, key.i, key.j, low});
+        if (bottom != nullptr && bottom->solid == Material::Air) {
+            if (const auto missing =
+                    unheld_below(globe::middle_of({key.face, key.i, key.j, low}, layers))) {
+                stepped.wanted.push_back(*missing);
+            }
+        }
         const std::vector<Scan> floors_here = floors(key.face, key.i, key.j, low, high);
         if (floors_here.empty()) {
             continue;
@@ -126,7 +131,8 @@ void Region::glaciate(Stepped& stepped, double years) {
                         .ground = top.ground,
                         .ice = iced_here ? std::int64_t{top.surface.grain_amount} : 0});
     }
-    if (tops.empty()) {
+    // Aging by nothing only asks for the ground it needs.
+    if (tops.empty() || years <= 0.0) {
         return;
     }
 

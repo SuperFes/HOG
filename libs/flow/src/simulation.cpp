@@ -21,6 +21,28 @@ void Simulation::take(BrickSite site) {
     still_[globe::brick_key(site)] = 0;
 }
 
+std::vector<BrickSite> Simulation::age_ice(std::span<const BrickSite> bricks, double years) {
+    for (const BrickSite brick : bricks) {
+        take(brick);
+    }
+    // The ground under what's taken may be in bricks not held yet; ask for it before the run.
+    for (int round = 0; round < 4; ++round) {
+        const Stepped probe = region_.age_ice(0.0);
+        if (probe.wanted.empty()) {
+            break;
+        }
+        for (const BrickSite wanted : probe.wanted) {
+            take(wanted);
+        }
+    }
+    region_.age_ice(years);
+    std::vector<BrickSite> written = region_.flush();
+    for (const BrickSite brick : written) {
+        still_[globe::brick_key(brick)] = 0;
+    }
+    return written;
+}
+
 void Simulation::add_vent(const Vent& vent) {
     vents_.push_back({.vent = vent});
 }

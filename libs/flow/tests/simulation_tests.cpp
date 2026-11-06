@@ -293,3 +293,15 @@ TEST_CASE("a vent gives lava while it erupts and the flow holds its bricks", "[f
     }
     CHECK(simulation.region().liquid() == before);
 }
+
+TEST_CASE("aging a world's ice grows it in the bricks written to the world", "[flow][simulation][glacier]") {
+    Block block{floor_above_sea(100.0), false, rimmed};
+    block.region().flush();
+    Simulation simulation{block.world()};
+    simulation.set_ice_balance([](const hog::globe::Cell&, double) { return 2.0; });
+    const hog::globe::BrickSite brick = hog::globe::brick_of(block.at(12, 12, 0));
+    const std::vector<hog::globe::BrickSite> written = simulation.age_ice(std::span{&brick, 1}, 20.0);
+    CHECK_FALSE(written.empty());
+    CHECK(block.world().at(block.at(12, 12, 0)).grain == hog::globe::Material::Ice);
+    CHECK(block.world().at(block.at(12, 12, 0)).grain_amount > 0);
+}
