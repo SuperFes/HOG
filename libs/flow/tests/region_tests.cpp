@@ -656,3 +656,23 @@ TEST_CASE("ice aged in one go grows where it is cold and stops where it is warm"
     // Ice that flows across the line melts there, so the warm far side stays bare.
     CHECK(block.grain(22, 12, 0) == 0);
 }
+
+TEST_CASE("cover aged in one go creeps off a heap and weathers anew on bare ground",
+          "[flow][region][creep]") {
+    using hog::globe::Material;
+    Block block{floor_above_sea(100.0)};
+    for (int layer = 0; layer < 3; ++layer) {
+        block.pile(12, 12, layer, Material::Soil, full);
+    }
+    const std::int64_t before = block.grain(12, 12, 2);
+    CHECK(before == full);
+    std::int64_t moved = 0;
+    for (int step = 0; step < 20; ++step) {
+        moved += block.region().age_cover(100.0).crept;
+    }
+    CHECK(moved > 0);
+    CHECK(block.grain(12, 12, 2) < before);
+    CHECK(block.grain(13, 12, 0) > 0);
+    // Bare ground far from the heap has had cover weathered onto it.
+    CHECK(block.grain(3, 3, 0) > 0);
+}

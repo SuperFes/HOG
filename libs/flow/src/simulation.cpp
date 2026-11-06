@@ -43,6 +43,27 @@ std::vector<BrickSite> Simulation::age_ice(std::span<const BrickSite> bricks, do
     return written;
 }
 
+std::vector<BrickSite> Simulation::age_cover(std::span<const BrickSite> bricks, double years) {
+    for (const BrickSite brick : bricks) {
+        take(brick);
+    }
+    for (int round = 0; round < 4; ++round) {
+        const Stepped probe = region_.age_cover(0.0);
+        if (probe.wanted.empty()) {
+            break;
+        }
+        for (const BrickSite wanted : probe.wanted) {
+            take(wanted);
+        }
+    }
+    region_.age_cover(years);
+    std::vector<BrickSite> written = region_.flush();
+    for (const BrickSite brick : written) {
+        still_[globe::brick_key(brick)] = 0;
+    }
+    return written;
+}
+
 std::vector<BrickSite> Simulation::lay_ice(std::span<const Laid> columns) {
     const globe::Layers& layers = world_->store().layers();
     const globe::Generator& generator = world_->generator();

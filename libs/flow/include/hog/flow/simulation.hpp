@@ -50,6 +50,9 @@ public:
     // world.
     std::vector<globe::BrickSite> age_ice(std::span<const globe::BrickSite> bricks, double years);
 
+    // As age_ice, for the loose cover on the ground creeping downhill and weathering anew.
+    std::vector<globe::BrickSite> age_cover(std::span<const globe::BrickSite> bricks, double years);
+
     // Ice to lie over a column's top ground.
     struct Laid {
         std::uint8_t face = 0;

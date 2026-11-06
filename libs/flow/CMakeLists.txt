@@ -2,6 +2,7 @@ add_library(hog_flow
     src/creep.cpp
     src/glacier.cpp
     src/region.cpp
+    src/region_creep.cpp
     src/region_glacier.cpp
     src/region_lava.cpp
     src/region_rocks.cpp
@@ -22,6 +23,7 @@ hog_target_defaults(hog_flow)
 hog_add_tests(hog_flow
     tests/collapse_tests.cpp
     tests/flight_tests.cpp
+    tests/creep_probe_tests.cpp
     tests/creep_tests.cpp
     tests/glacier_tests.cpp
     tests/lava_tests.cpp
