@@ -30,7 +30,7 @@ TEST_CASE("how far off the ground each level of detail is, in pixels, to look at
     jobs::JobSystem jobs{3};
     const double radius = generator.planet().radius;
     const DVec3 up = globe::center(globe::cell_at_index(7, 4'321));
-    const DVec3 eye = up * (radius + chunks::globe_ground(generator, up) + 2.0);
+    const DVec3 eye = up * (radius + chunks::globe_ground(world, up) + 2.0);
     // A 1080-line picture across a 60 degree view.
     const double pixels_per_radian = 1080.0 / (2.0 * std::tan(std::numbers::pi / 6.0));
 
@@ -96,7 +96,7 @@ TEST_CASE("how long the chunks round a mountain take to mesh, to look at", "[.lo
     const DVec3 up{glm::normalize(DVec3{std::cos(27.927653 * degree) * std::cos(-2.869545 * degree),
                                         std::cos(27.927653 * degree) * std::sin(-2.869545 * degree),
                                         std::sin(27.927653 * degree)})};
-    const DVec3 eye = up * (generator.planet().radius + chunks::globe_ground(generator, up) + 3.0);
+    const DVec3 eye = up * (generator.planet().radius + chunks::globe_ground(world, up) + 3.0);
     const auto seconds = [](auto from) {
         return std::chrono::duration<double>(std::chrono::steady_clock::now() - from).count();
     };

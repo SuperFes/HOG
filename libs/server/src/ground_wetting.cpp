@@ -15,8 +15,9 @@ flow::Sky GroundWetting::sky_of(const protocol::CellWeather& weather) {
             .dryness = falling > 0.0 ? 0.0 : 1.0 - static_cast<double>(weather.humidity)};
 }
 
-std::vector<flow::Simulation::Wetted> GroundWetting::around(const globe::Generator& generator,
+std::vector<flow::Simulation::Wetted> GroundWetting::around(const globe::World& world,
                                                             std::span<const Place> places) {
+    const globe::Generator& generator = world.generator();
     const globe::Layers& layers = generator.layers();
     constexpr int side = (2 * reach) + 1;
     std::vector<flow::Simulation::Wetted> wetted;
@@ -34,7 +35,7 @@ std::vector<flow::Simulation::Wetted> GroundWetting::around(const globe::Generat
                                  .face = under.face,
                                  .i = first(under.i),
                                  .j = first(under.j)};
-        const std::vector<globe::Generator::Column> columns = generator.columns(corner, side, 1.0);
+        const std::vector<globe::Generator::Column> columns = generator.columns(corner, side, globe::voxel_lod(generator));
         for (int k = 0; k < side * side; ++k) {
             const std::uint32_t i = corner.i + static_cast<std::uint32_t>(k % side);
             const std::uint32_t j = corner.j + static_cast<std::uint32_t>(k / side);
@@ -42,14 +43,16 @@ std::vector<flow::Simulation::Wetted> GroundWetting::around(const globe::Generat
             if (!taken.insert(key).second) {
                 continue;
             }
-            const int layer = layers.layer_at(columns[static_cast<std::size_t>(k)].ground());
-            if (layer < 0 || layer + 1 >= layers.count) {
+            const globe::Cell cell{.level = corner.level, .face = corner.face, .i = i, .j = j};
+            const int layer =
+                globe::highest_layer(world, cell, columns[static_cast<std::size_t>(k)]);
+            if (layer < 0) {
                 continue;
             }
             wetted.push_back({.column = {.face = corner.face,
                                          .i = i,
                                          .j = j,
-                                         .layer = static_cast<std::uint32_t>(layer + 1)},
+                                         .layer = static_cast<std::uint32_t>(layer)},
                               .sky = place.sky});
         }
     }

@@ -204,42 +204,6 @@ TEST_CASE("generator throughput", "[.bench]") {
     }
 }
 
-TEST_CASE("a sample's normal is the way its distance grows", "[globe][generator]") {
-    for (const std::string_view name : {"earth", "mars", "venus", "moon"}) {
-        const Generator world = generator_for(name);
-        constexpr double lod = 1.0;
-        constexpr double step = 0.02;
-        int near_surface = 0;
-        int agreeing = 0;
-        for (std::uint64_t k = 0; k < 400; ++k) {
-            const DVec3 down = direction(k);
-            const double ground = hog::globe::ground_below(world, down, lod).value_or(0.0);
-            // At the surface: off it, the distance's own rate bends with the slope's curvature.
-            for (const double off : {-0.1, -0.03, 0.03, 0.1}) {
-                const DVec3 point = down * (ground + off);
-                const hog::globe::Sample sample = world.sample(point, lod);
-                DVec3 rise{0.0};
-                for (glm::length_t axis = 0; axis < 3; ++axis) {
-                    DVec3 along{0.0};
-                    along[axis] = step;
-                    rise[axis] = (world.sample(point + along, lod).distance -
-                                  world.sample(point - along, lod).distance) /
-                                 (2.0 * step);
-                }
-                if (!(glm::length(rise) > 0.0)) {
-                    continue;
-                }
-                ++near_surface;
-                CHECK(std::abs(glm::length(sample.normal) - 1.0) < 1e-9);
-                agreeing += glm::dot(sample.normal, glm::normalize(rise)) > std::cos(0.1) ? 1 : 0;
-            }
-        }
-        CAPTURE(name, near_surface, agreeing);
-        CHECK(near_surface > 1'000);
-        CHECK(agreeing > near_surface * 95 / 100);
-    }
-}
-
 TEST_CASE("land is found near a direction, over the sea, and anywhere on a dry world",
           "[globe][generator]") {
     const Generator earth = generator_for("earth");

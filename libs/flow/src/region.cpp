@@ -740,8 +740,6 @@ void Region::settle(const std::vector<Column>& columns, double seconds, Stepped&
 }
 
 void Region::freeze(Site site, Held& brick) {
-    const double thickness = world_->store().layers().thickness;
-    const auto half = static_cast<std::int16_t>(std::llround(thickness * 500.0));
     Voxel& here = brick.voxels[static_cast<std::size_t>(globe::index_in_brick(site))];
     here.solid = here.liquid;
     here.liquid = Material::Air;
@@ -749,29 +747,8 @@ void Region::freeze(Site site, Held& brick) {
     here.grain = Material::Air;
     here.grain_amount = 0;
     here.condition = Voxel::sound;
-    here.distance = static_cast<std::int16_t>(-half);
-    globe::sync_solid_amount(here, thickness);
-    here.normal = globe::packed_normal(glm::normalize(globe::middle_of(site, world_->store().layers())));
+    here.solid_amount = Voxel::full;
     brick.dirty = true;
-    // The open voxels about it now lie just off the new surface.
-    std::vector<Site> around;
-    around.push_back({.face = site.face, .i = site.i, .j = site.j, .layer = site.layer + 1});
-    if (site.layer > 0) {
-        around.push_back({.face = site.face, .i = site.i, .j = site.j, .layer = site.layer - 1});
-    }
-    for (const auto& step : sides) {
-        if (const std::optional<Site> next = beside(site, step.first, step.second)) {
-            around.push_back(*next);
-        }
-    }
-    for (const Site next : around) {
-        Voxel* there = voxel(next);
-        if (there != nullptr && there->solid == Material::Air && there->distance > half) {
-            there->distance = half;
-            globe::sync_solid_amount(*there, world_->store().layers().thickness);
-            held(globe::brick_of(next))->dirty = true;
-        }
-    }
 }
 
 void Region::report_wet(const Column& column, Stepped& stepped) const {
@@ -1054,7 +1031,6 @@ void Region::scour(Site bed, int mm) {
             if (here->solid_amount < half) {
                 here->solid = Material::Air;
             }
-            here->distance = globe::distance_of_amount(here->solid_amount, thickness);
             held(globe::brick_of(site))->dirty = true;
             units -= take;
         }

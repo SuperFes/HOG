@@ -31,9 +31,6 @@ struct Sample {
     // the ground is soaked through, under the sea.
     double water = 0.0;
     Material liquid = Material::Air; // what that liquid is
-    // Unit, the way the distance grows fastest: out of the solid, near its surface; none where
-    // the distance doesn't change.
-    DVec3 normal{0.0};
     double temperature = 0.0; // kelvin
 };
 
@@ -94,7 +91,6 @@ public:
         // Metres from the centre to the water table, under which the open space in the ground is
         // flooded; 0 where the planet has no drainage.
         [[nodiscard]] double table() const noexcept { return table_; }
-        // Metres of loose cover between the ground and the rock under it.
         // Metres from the centre to the highest solid, which a fallen rock lifts above the ground.
         [[nodiscard]] double top() const noexcept {
             return rock_ ? std::max(ground_, rock_->top()) : ground_;
@@ -109,11 +105,6 @@ public:
 
     private:
         friend class Generator;
-        // Takes the cave's open space out of the sample at `radius`, with the way out of it.
-        void carve_cave(double radius, Sample& sample, DVec3& rise) const noexcept;
-        // The way a cave's distance grows at `radius`, by differences.
-        [[nodiscard]] DVec3 cave_rise(double radius) const noexcept;
-
         const Generator* generator_ = nullptr;
         DVec3 direction_{0.0, 0.0, 1.0};
         double lod_ = 0.0;
@@ -121,7 +112,6 @@ public:
         double water_ = 0.0;  // metres from the centre to where open water stands; 0 none
         double table_ = 0.0;  // metres from the centre to the water table; 0 none
         double slope_ = 0.0;  // across the ground, at the radius
-        DVec3 tilt_{0.0};     // the way the ground rises, by as much
         double surface_temperature_ = 0.0; // at the reference level
         Strata strata_;
         std::optional<Rock> rock_; // lying on this column, if one does
@@ -196,9 +186,8 @@ public:
     [[nodiscard]] const Shape& shape() const noexcept { return shape_; }
 
 private:
-    // `slope` is `tilt`'s length, as found along with it.
-    [[nodiscard]] Column finish(DVec3 down, double lod, const terms::Ground& made, double slope,
-                                DVec3 tilt) const noexcept;
+    [[nodiscard]] Column finish(DVec3 down, double lod, const terms::Ground& made,
+                                double slope) const noexcept;
 
     Planet planet_;
     Derived derived_;

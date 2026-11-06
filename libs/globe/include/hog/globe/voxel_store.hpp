@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <set>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -37,6 +38,9 @@ public:
     void put(BrickSite site, Brick brick);
     // Lets the brick go, so the generator says again.
     void erase(BrickSite site);
+    // The highest brick layer held in the stack of bricks at `site`'s place, whatever its layer;
+    // none where none is.
+    [[nodiscard]] std::optional<std::uint32_t> highest_held(BrickSite site) const;
 
     [[nodiscard]] std::size_t size() const noexcept { return bricks_.size(); }
     // Held, by the bricks and the table of them.
@@ -56,6 +60,7 @@ public:
 private:
     Layers layers_;
     std::unordered_map<std::uint64_t, Brick> bricks_;
+    std::unordered_map<std::uint64_t, std::set<std::uint32_t>> stacks_; // layers held, by place
     std::unordered_set<std::uint64_t> changed_;
     std::uint64_t revision_ = 0;
     std::vector<std::pair<std::uint64_t, std::uint64_t>> log_; // revision and key, in order

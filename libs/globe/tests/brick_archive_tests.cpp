@@ -126,7 +126,7 @@ TEST_CASE("dug and built ground loads back as it was left", "[globe][archive]") 
         .j = cell.j,
         .layer = static_cast<std::uint32_t>(generator.layers().layer_at(ground))};
     CHECK(again.at(middle) == world.at(middle));
-    CHECK(again.at(middle).distance > 0);
+    CHECK(again.at(middle).solid_amount < Voxel::full / 2);
 }
 
 TEST_CASE("bricks saved for other layers or damaged fail to load", "[globe][archive]") {

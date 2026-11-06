@@ -16,11 +16,10 @@
 
 namespace hog::chunks {
 
-double globe_ground(const globe::Generator& generator, DVec3 at) {
-    const globe::Planet& planet = generator.planet();
-    return globe::ground_below(generator, glm::normalize(at), globe::voxel_lod(generator))
-               .value_or(generator.layers().floor) -
-           planet.radius;
+double globe_ground(const globe::World& world, DVec3 at) {
+    const globe::Generator& generator = world.generator();
+    return globe::top_of(world, glm::normalize(at)).value_or(generator.layers().floor) -
+           generator.planet().radius;
 }
 
 terrain::BlockMesh globe_blocks(const globe::SurfaceMesh& mesh) {
@@ -136,7 +135,7 @@ void GlobeStream::follow(DVec3 eye, DVec3 forward) {
     const globe::Generator& generator = world_->generator();
     const double radius = generator.planet().radius;
     const DVec3 up = glm::normalize(eye);
-    const double height = std::max(0.0, glm::length(eye) - radius - globe_ground(generator, eye));
+    const double height = std::max(0.0, glm::length(eye) - radius - globe_ground(*world_, eye));
     const bool turned = forward != looking_ && glm::dot(forward, looking_) < globe_turn_cos;
     if (around_ && !turned && glm::length(eye - *around_) <= std::max(globe_relay, height / 20.0)) {
         return;

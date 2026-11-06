@@ -236,10 +236,13 @@ void Region::fall(const std::vector<globe::Site>& sites, Stepped& stepped) {
     for (int p = 0; p < pieces; ++p) {
         std::vector<DVec3> middles;
         std::map<globe::Material, int> made_of;
+        // Worn to nothing throughout, it crumbles rather than falling whole.
+        bool crumbled = true;
         for (std::size_t k = 0; k < sites.size(); ++k) {
             if (piece[k] == p) {
                 middles.push_back(globe::middle_of(sites[k], layers));
                 ++made_of[voxel(sites[k])->solid];
+                crumbled = crumbled && voxel(sites[k])->condition == 0;
             }
         }
         DVec3 centre{0.0};
@@ -257,28 +260,20 @@ void Region::fall(const std::vector<globe::Site>& sites, Stepped& stepped) {
         // The ground they stood in is taken out, a ball about each voxel's middle.
         const double ball = carve_ball * thickness;
         reshape(centre, reach + ball,
-                [&](DVec3 at, DVec3& outward) {
+                [&](DVec3 at) {
                     double nearest = 1e30;
                     for (const DVec3& middle : middles) {
-                        const double d = glm::length(at - middle) - ball;
-                        if (d < nearest) {
-                            nearest = d;
-                            outward = glm::length(at - middle) > 0.0
-                                          ? glm::normalize(at - middle)
-                                          : glm::normalize(at);
-                        }
+                        nearest = std::min(nearest, glm::length(at - middle) - ball);
                     }
                     return nearest;
                 },
-                [&](globe::Voxel& voxel, double to, DVec3 outward) {
-                    globe::dig_voxel(voxel, to, outward, thickness);
-                });
+                [&](globe::Voxel& voxel, double to) { globe::dig_voxel(voxel, to, thickness); });
         stepped.collapsed += static_cast<std::int64_t>(middles.size());
 
         const double volume = static_cast<double>(middles.size()) * thickness * thickness * thickness;
         const std::int64_t amount =
             static_cast<std::int64_t>(static_cast<double>(middles.size()) * globe::Voxel::full);
-        if (volume >= least_boulder && volume <= most_boulder) {
+        if (!crumbled && volume >= least_boulder && volume <= most_boulder) {
             parcels_.push_back({.id = ++parcel_ids_,
                                 .at = centre,
                                 .material = material,

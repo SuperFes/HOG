@@ -66,30 +66,32 @@ Ball icosphere() {
 
 } // namespace
 
-terrain::BlockMesh cutaway_shell(const globe::Generator& generator, WorldPosition centre,
-                                 double radius) {
-    const globe::Layers& layers = generator.layers();
-    const double lod = globe::voxel_lod(generator);
+terrain::BlockMesh cutaway_shell(const globe::World& world, WorldPosition centre, double radius) {
+    const globe::Layers& layers = world.store().layers();
     const Ball ball = icosphere();
-    // Each voxel column's generated column, found once.
-    std::unordered_map<std::uint64_t, globe::Generator::Column> columns;
+    // Each brick the ball passes through, read once.
+    std::map<globe::BrickSite, globe::BrickVoxels> bricks;
     std::vector<globe::Material> material(ball.points.size(), globe::Material::Air);
     terrain::BlockMesh shell{.origin = centre, .vertices = {}, .indices = {}};
     shell.vertices.reserve(ball.points.size());
     for (std::size_t k = 0; k < ball.points.size(); ++k) {
         const DVec3 point = centre.metres() + (ball.points[k] * radius);
         const double out = glm::length(point);
-        const globe::Cell cell = globe::cell_under(point / out, layers.level);
-        auto found = columns.find(globe::index_of(cell));
-        if (found == columns.end()) {
-            found =
-                columns.emplace(globe::index_of(cell), generator.column(globe::center(cell), lod))
-                    .first;
-        }
-        // The voxel the point is in, as it is at its middle.
-        const globe::Sample sample = found->second.sample(layers.middle(layers.layer_at(out)));
-        if (sample.distance < 0.0) {
-            material[k] = sample.material;
+        const int layer = layers.layer_at(out);
+        if (layer >= 0 && layer < layers.count) {
+            const globe::Cell cell = globe::cell_under(point / out, layers.level);
+            const globe::Site site{.face = cell.face,
+                                   .i = cell.i,
+                                   .j = cell.j,
+                                   .layer = static_cast<std::uint32_t>(layer)};
+            const globe::BrickSite brick = globe::brick_of(site);
+            auto found = bricks.find(brick);
+            if (found == bricks.end()) {
+                found = bricks.emplace(brick, world.brick(brick)).first;
+            }
+            // The voxel the point is in, as it now is.
+            material[k] =
+                found->second[static_cast<std::size_t>(globe::index_in_brick(site))].solid;
         }
         const auto tile = static_cast<std::uint8_t>(material[k]);
         shell.vertices.push_back({.position = Vec3{ball.points[k] * radius},

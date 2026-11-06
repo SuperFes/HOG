@@ -57,9 +57,6 @@ struct Options {
     // The voxel world's cell size in metres, in place of the planet's own; for looking at a world
     // finer or coarser, flying alone.
     std::optional<double> voxel;
-    // Whether the ground is drawn from the voxels' stored distances or from their solid amounts
-    // alone.
-    bool surface_from_amounts = false;
     // Draw the voxels as their own boxes, not as a shaped surface.
     bool surface_boxes = false;
     // The ground near the eye drawn curving like Earth's, not as tightly as the planet truly does.

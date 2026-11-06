@@ -11,6 +11,14 @@
 #include <vector>
 
 namespace hog::globe {
+namespace {
+
+std::uint64_t stack_key(BrickSite site) noexcept {
+    site.layer = 0;
+    return brick_key(site);
+}
+
+} // namespace
 
 VoxelStore::VoxelStore(const Layers& layers) : layers_{layers} {
     HOG_ASSERT(layers.level >= 3 && layers.level <= Cell::max_level,
@@ -50,6 +58,7 @@ void VoxelStore::put(BrickSite site, Brick brick) {
     HOG_ASSERT(holds_site(site), "brick out of range");
     const std::uint64_t key = brick_key(site);
     bricks_.insert_or_assign(key, std::move(brick));
+    stacks_[stack_key(site)].insert(site.layer);
     changed_.insert(key);
     log_.emplace_back(++revision_, key);
 }
@@ -58,9 +67,22 @@ void VoxelStore::erase(BrickSite site) {
     HOG_ASSERT(holds_site(site), "brick out of range");
     const std::uint64_t key = brick_key(site);
     if (bricks_.erase(key) > 0) {
+        const auto stack = stacks_.find(stack_key(site));
+        stack->second.erase(site.layer);
+        if (stack->second.empty()) {
+            stacks_.erase(stack);
+        }
         changed_.insert(key);
         log_.emplace_back(++revision_, key);
     }
+}
+
+std::optional<std::uint32_t> VoxelStore::highest_held(BrickSite site) const {
+    const auto stack = stacks_.find(stack_key(site));
+    if (stack == stacks_.end()) {
+        return std::nullopt;
+    }
+    return *stack->second.rbegin();
 }
 
 std::size_t VoxelStore::bytes() const noexcept {

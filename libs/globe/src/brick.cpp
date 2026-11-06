@@ -241,8 +241,6 @@ Brick Brick::pack(std::span<const Voxel, brick_voxels> voxels) {
     };
     Brick brick;
     brick.parts_ = std::make_unique<Parts>(Parts{
-        .distance = channel(&Voxel::distance),
-        .normal = channel(&Voxel::normal),
         .solid = channel(&Voxel::solid),
         .condition = channel(&Voxel::condition),
         .grain = channel(&Voxel::grain),
@@ -271,9 +269,7 @@ Voxel Brick::at(int index) const noexcept {
     if (parts_ == nullptr) {
         return whole_;
     }
-    return {.distance = parts_->distance.at(index),
-            .normal = parts_->normal.at(index),
-            .solid = parts_->solid.at(index),
+    return {.solid = parts_->solid.at(index),
             .condition = parts_->condition.at(index),
             .grain = parts_->grain.at(index),
             .grain_amount = parts_->grain_amount.at(index),
@@ -293,24 +289,24 @@ std::size_t Brick::bytes() const noexcept {
     if (parts_ == nullptr) {
         return sizeof(Brick);
     }
-    return sizeof(Brick) + sizeof(Parts) + parts_->distance.bytes() + parts_->normal.bytes() +
-           parts_->solid.bytes() + parts_->condition.bytes() + parts_->grain.bytes() +
+    return sizeof(Brick) + sizeof(Parts) + parts_->solid.bytes() + parts_->condition.bytes() + parts_->grain.bytes() +
            parts_->grain_amount.bytes() + parts_->liquid.bytes() + parts_->liquid_amount.bytes() +
            parts_->temperature.bytes() + parts_->solid_amount.bytes();
 }
 
 namespace {
 
-constexpr std::uint8_t whole_brick = 0;
-constexpr std::uint8_t parted_brick = 1;
+// Bricks kept a distance and a normal for each voxel once; those are read past.
+constexpr std::uint8_t old_whole_brick = 0;
+constexpr std::uint8_t old_parted_brick = 1;
+constexpr std::uint8_t whole_brick = 2;
+constexpr std::uint8_t parted_brick = 3;
 
 } // namespace
 
 void Brick::write(ByteWriter& out) const {
     if (parts_ == nullptr) {
         out.write(whole_brick);
-        write_value(out, whole_.distance);
-        write_value(out, whole_.normal);
         write_value(out, whole_.solid);
         write_value(out, whole_.condition);
         write_value(out, whole_.grain);
@@ -322,8 +318,6 @@ void Brick::write(ByteWriter& out) const {
         return;
     }
     out.write(parted_brick);
-    parts_->distance.write(out);
-    parts_->normal.write(out);
     parts_->solid.write(out);
     parts_->condition.write(out);
     parts_->grain.write(out);
@@ -375,10 +369,15 @@ Result<Brick> Brick::read(ByteReader& in) {
         return std::unexpected(kind.error());
     }
     FieldReader field{in};
-    if (*kind == whole_brick) {
-        const Voxel voxel{.distance = field.value<std::int16_t>(),
-                          .normal = field.value<std::uint16_t>(),
-                          .solid = field.value<Material>(),
+    if (*kind == old_whole_brick) {
+        static_cast<void>(field.value<std::int16_t>());
+        static_cast<void>(field.value<std::uint16_t>());
+    } else if (*kind == old_parted_brick) {
+        static_cast<void>(field.packed<std::int16_t>());
+        static_cast<void>(field.packed<std::uint16_t>());
+    }
+    if (*kind == whole_brick || *kind == old_whole_brick) {
+        const Voxel voxel{.solid = field.value<Material>(),
                           .condition = field.value<std::uint8_t>(),
                           .grain = field.value<Material>(),
                           .grain_amount = field.value<std::uint16_t>(),
@@ -391,12 +390,10 @@ Result<Brick> Brick::read(ByteReader& in) {
         }
         return Brick{voxel};
     }
-    if (*kind != parted_brick) {
+    if (*kind != parted_brick && *kind != old_parted_brick) {
         return make_error(ErrorCode::Parse, std::format("no brick kind {}", *kind));
     }
-    Parts parts{.distance = field.packed<std::int16_t>(),
-                .normal = field.packed<std::uint16_t>(),
-                .solid = field.packed<Material>(),
+    Parts parts{.solid = field.packed<Material>(),
                 .condition = field.packed<std::uint8_t>(),
                 .grain = field.packed<Material>(),
                 .grain_amount = field.packed<std::uint16_t>(),
@@ -411,8 +408,7 @@ Result<Brick> Brick::read(ByteReader& in) {
     brick.parts_ = std::make_unique<Parts>(std::move(parts));
     // Every quantity alike throughout is one voxel throughout, held as such.
     if (std::ranges::all_of(
-            std::array{brick.parts_->distance.is_uniform(), brick.parts_->normal.is_uniform(),
-                       brick.parts_->solid.is_uniform(), brick.parts_->condition.is_uniform(),
+            std::array{brick.parts_->solid.is_uniform(), brick.parts_->condition.is_uniform(),
                        brick.parts_->grain.is_uniform(), brick.parts_->grain_amount.is_uniform(),
                        brick.parts_->liquid.is_uniform(), brick.parts_->liquid_amount.is_uniform(),
                        brick.parts_->temperature.is_uniform(),

@@ -118,8 +118,8 @@ public:
     [[nodiscard]] std::int64_t grain(std::uint32_t i, std::uint32_t j, int layer) {
         return region_->at(at(i, j, layer)).grain_amount;
     }
-    [[nodiscard]] int distance(std::uint32_t i, std::uint32_t j, int layer) {
-        return region_->at(at(i, j, layer)).distance;
+    [[nodiscard]] std::int64_t solid(std::uint32_t i, std::uint32_t j, int layer) {
+        return region_->at(at(i, j, layer)).solid_amount;
     }
     [[nodiscard]] std::int64_t carried(std::uint32_t i, std::uint32_t j) {
         return region_->carried(0, corner_i_ + i, corner_j_ + j).amount;
@@ -175,34 +175,17 @@ private:
                bool hold_sea) {
         for (const BrickSite brick : bricks_) {
             BrickVoxels voxels{};
-            const double band = hog::globe::distance_band(store_.layers());
             for (int k = 0; k < hog::globe::brick_voxels; ++k) {
                 const Site site = hog::globe::site_in(brick, k);
                 const auto layer = static_cast<int>(site.layer);
                 const bool open =
                     layer >= floor_ &&
                     (!shape || shape(site.i - corner_i_, site.j - corner_j_, layer - floor_));
-                // The floor's distance within the band, as generated ground has it.
-                // Measured from the highest rock below in the column.
-                int rock = floor_ - 1;
-                if (shape) {
-                    for (int below = floor_; below < layer; ++below) {
-                        if (!shape(site.i - corner_i_, site.j - corner_j_, below - floor_)) {
-                            rock = below;
-                        }
-                    }
-                }
-                const double to_floor =
-                    std::clamp((layer - rock - 0.5) * store_.layers().thickness, -band, band);
-                Voxel& voxel = voxels[static_cast<std::size_t>(k)];
-                voxel.distance = hog::globe::distance_in_mm(to_floor);
                 if (!open) {
+                    Voxel& voxel = voxels[static_cast<std::size_t>(k)];
                     voxel.solid = ground;
-                    if (layer >= floor_) {
-                        voxel.distance = -Voxel::far; // a wall the shape raised
-                    }
+                    voxel.solid_amount = Voxel::full;
                 }
-                hog::globe::sync_solid_amount(voxel, store_.layers().thickness);
             }
             store_.put(brick, hog::globe::Brick::pack(voxels));
         }

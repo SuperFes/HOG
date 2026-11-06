@@ -12,7 +12,7 @@ std::uint8_t level_of(std::uint16_t amount) noexcept {
     return static_cast<std::uint8_t>(std::lround(std::clamp(share, 0.0, 1.0) * Cube::levels));
 }
 
-std::uint16_t amount_at(std::uint8_t level) noexcept {
+std::uint16_t amount_of_level(std::uint8_t level) noexcept {
     const double share = static_cast<double>(level) / static_cast<double>(Cube::levels);
     return static_cast<std::uint16_t>(std::lround(share * static_cast<double>(Voxel::full)));
 }
@@ -35,17 +35,15 @@ Cube cube_of(const Voxel& voxel, double baseline) noexcept {
     return cube;
 }
 
-Voxel voxel_of(const Cube& cube, double baseline, double thickness) noexcept {
+Voxel voxel_of(const Cube& cube, double baseline) noexcept {
     Voxel voxel;
     voxel.solid = cube.solid;
-    voxel.solid_amount = amount_at(cube.solid_level);
+    voxel.solid_amount = amount_of_level(cube.solid_level);
     voxel.grain = cube.grain;
-    voxel.grain_amount = amount_at(cube.grain_level);
+    voxel.grain_amount = amount_of_level(cube.grain_level);
     voxel.liquid = cube.liquid;
-    voxel.liquid_amount = amount_at(cube.liquid_level);
+    voxel.liquid_amount = amount_of_level(cube.liquid_level);
     voxel.condition = cube.condition;
-    voxel.normal = Voxel::no_normal;
-    voxel.distance = distance_of_amount(voxel.solid_amount, thickness);
     voxel.temperature = temperature_in_eighths(baseline + (cube.heat * Cube::heat_step));
     return voxel;
 }

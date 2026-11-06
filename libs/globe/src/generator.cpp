@@ -66,15 +66,10 @@ DVec3 direction_from(std::uint64_t seed) {
 }
 
 // The way the ground rises, in metres per metre, and how steeply.
-struct Tilt {
-    double slope = 0.0;
-    DVec3 rise{0.0};
-};
-
 // The ground's slope measured across a small step either way. Gullies turn with the slope they're
 // cut in, which their own gradients can't know without the ground's curvature, and the loose
 // cover lies by the slope, which its gradient can't know either.
-Tilt ground_tilt(const terms::Context& context, DVec3 direction, double lod) {
+double ground_slope(const terms::Context& context, DVec3 direction, double lod) {
     const double step = std::max(lod, context.planet->voxel) / 8.0;
     const DVec3 side = std::abs(direction.z) < 0.9 ? DVec3{0.0, 0.0, 1.0} : DVec3{1.0, 0.0, 0.0};
     const DVec3 east = glm::normalize(glm::cross(side, direction));
@@ -85,8 +80,7 @@ Tilt ground_tilt(const terms::Context& context, DVec3 direction, double lod) {
     };
     const double across_east = (height(east, turn) - height(east, -turn)) / (2.0 * step);
     const double across_north = (height(north, turn) - height(north, -turn)) / (2.0 * step);
-    return {.slope = std::sqrt((across_east * across_east) + (across_north * across_north)),
-            .rise = (across_east * east) + (across_north * north)};
+    return std::sqrt((across_east * across_east) + (across_north * across_north));
 }
 
 // The steps the running water wears over, and the cell width its drainage is worked on.
@@ -559,8 +553,7 @@ std::optional<double> Generator::sea_level() const noexcept {
 Generator::Column Generator::column(DVec3 direction, double lod) const noexcept {
     const terms::Context context{.planet = &planet_, .derived = &derived_, .shape = &shape_};
     const DVec3 down = glm::normalize(direction);
-    const Tilt tilt = ground_tilt(context, down, lod);
-    return finish(down, lod, terms::ground(context, down, lod), tilt.slope, tilt.rise);
+    return finish(down, lod, terms::ground(context, down, lod), ground_slope(context, down, lod));
 }
 
 std::vector<Rock> Generator::rocks_near(DVec3 point, double lod) const {
@@ -652,16 +645,15 @@ std::vector<Generator::Column> Generator::columns(std::span<const Cell> cells, d
         const double determinant = (xx * yy) - (xy * xy);
         const double across_east = ((yy * xh) - (xy * yh)) / determinant;
         const double across_north = ((xx * yh) - (xy * xh)) / determinant;
-        made.push_back(
-            finish(down, lod, found[k],
-                   std::sqrt((across_east * across_east) + (across_north * across_north)),
-                   (across_east * east) + (across_north * north)));
+        made.push_back(finish(down, lod, found[k],
+                              std::sqrt((across_east * across_east) +
+                                        (across_north * across_north))));
     }
     return made;
 }
 
-Generator::Column Generator::finish(DVec3 down, double lod, const terms::Ground& made, double slope,
-                                    DVec3 tilt) const noexcept {
+Generator::Column Generator::finish(DVec3 down, double lod, const terms::Ground& made,
+                                    double slope) const noexcept {
     Column column;
     column.generator_ = this;
     column.direction_ = down;
@@ -681,7 +673,6 @@ Generator::Column Generator::finish(DVec3 down, double lod, const terms::Ground&
         column.table_ = planet_.radius + smoothed_under(shape_, shape_.table, down);
     }
     column.slope_ = slope;
-    column.tilt_ = tilt;
     column.surface_temperature_ = made.surface_temperature;
     column.strata_ = made.layers;
     const terms::Context context{.planet = &planet_, .derived = &derived_, .shape = &shape_};
@@ -739,62 +730,12 @@ std::vector<std::pair<double, double>> Generator::Column::caves(double lowest, d
     return found;
 }
 
-DVec3 Generator::Column::cave_rise(double radius) const noexcept {
-    const Planet& planet = generator_->planet_;
-    const terms::Context context{.planet = &generator_->planet_,
-                                 .derived = &generator_->derived_,
-                                 .shape = &generator_->shape_};
-    const double slope = slope_ * planet.radius / radius;
-    const DVec3 here = direction_ * radius;
-    const DVec3 tilt = tilt_ * (planet.radius / radius);
-    // Nearby, the ground stands as its tilt has it, and the beds follow it.
-    const auto cave_at = [&](DVec3 point) {
-        const double out = glm::length(point);
-        const DVec3 offset = point - here;
-        const double ground = ground_ + glm::dot(tilt, offset);
-        terms::Layering beds = strata_;
-        beds.fold += glm::dot(strata_.fold_tilt, offset);
-        beds.cover += glm::dot(strata_.cover_tilt, offset);
-        const double cover = std::max(0.0, (ground - out) / std::sqrt(1.0 + (slope * slope)));
-        return terms::cave_distance(context, beds, point / out, out, ground, cover, lod_);
-    };
-    // By differences, as the cave's distance is its noise over its noise's rate, whose own rate
-    // isn't to hand.
-    const double step = lod_ / 16.0;
-    DVec3 rise{0.0};
-    for (glm::length_t axis = 0; axis < 3; ++axis) {
-        DVec3 along{0.0};
-        along[axis] = step;
-        rise[axis] = (cave_at(here + along) - cave_at(here - along)) / (2.0 * step);
-    }
-    return rise;
-}
-
-void Generator::Column::carve_cave(double radius, Sample& sample, DVec3& rise) const noexcept {
-    const terms::Context context{.planet = &generator_->planet_,
-                                 .derived = &generator_->derived_,
-                                 .shape = &generator_->shape_};
-    // The rock between the point and the open air over the ground.
-    const double cover = std::max(0.0, -sample.distance);
-    const double cave =
-        terms::cave_distance(context, strata_, direction_, radius, ground_, cover, lod_);
-    if (-cave <= sample.distance) {
-        return;
-    }
-    sample.distance = -cave;
-    // Only near a surface, where its normal is kept.
-    if (std::abs(sample.distance) < distance_band(generator_->layers_, coarser(*generator_, lod_))) {
-        rise = -cave_rise(radius);
-    }
-}
-
 Sample Generator::Column::sample(double radius) const noexcept {
     const Planet& planet = generator_->planet_;
     // Slope per metre across the ground at this radius, not at the raw radius it was taken at.
     const double slope = slope_ * planet.radius / radius;
     Sample sample;
     sample.distance = (radius - ground_) / std::sqrt(1.0 + (slope * slope));
-    DVec3 rise = direction_ - (tilt_ * (planet.radius / radius));
     const terms::Context context{.planet = &generator_->planet_,
                                  .derived = &generator_->derived_,
                                  .shape = &generator_->shape_};
@@ -802,7 +743,11 @@ Sample Generator::Column::sample(double radius) const noexcept {
 
     // A cave takes its voxels out of the rock, and opens the ground where it reaches it.
     if (sample.distance < cave_surface_reach) {
-        carve_cave(radius, sample, rise);
+        // The rock between the point and the open air over the ground.
+        const double cover = std::max(0.0, -sample.distance);
+        sample.distance = std::max(
+            sample.distance,
+            -terms::cave_distance(context, strata_, direction_, radius, ground_, cover, lod_));
     }
     // A fallen rock stands out of the ground, or fills a hollow, where it is nearer than the
     // ground.
@@ -812,12 +757,8 @@ Sample Generator::Column::sample(double radius) const noexcept {
         const double near = rock_->distance(direction_ * radius, out);
         if (near < sample.distance) {
             sample.distance = near;
-            rise = out;
             on_rock = true;
         }
-    }
-    if (glm::length(rise) > 0.0) {
-        sample.normal = glm::normalize(rise);
     }
 
     if (sample.distance < 0.0) {

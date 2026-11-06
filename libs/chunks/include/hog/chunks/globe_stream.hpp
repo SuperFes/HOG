@@ -20,8 +20,8 @@
 
 namespace hog::chunks {
 
-// Metres the generated ground stands over the planet's radius under a point.
-[[nodiscard]] double globe_ground(const globe::Generator& generator, DVec3 at);
+// Metres the ground's voxels stand over the planet's radius under a point.
+[[nodiscard]] double globe_ground(const globe::World& world, DVec3 at);
 
 // A chunk's ground as blocks, laid from the chunk's own origin, each triangle wearing its
 // corners' materials; the liquid's surfaces are left out, as the sea is drawn over the ground

@@ -32,9 +32,7 @@ struct Cube {
 // The cube a voxel comes to, its temperature taken against `baseline` kelvin, what the place
 // gives it. A fullness too small to count as a step is none.
 [[nodiscard]] Cube cube_of(const Voxel& voxel, double baseline) noexcept;
-// The voxel a cube stands for: amounts at the middle of their steps' ends, no normal, a distance
-// from the solid amount for a voxel `thickness` metres thick, and a temperature of `baseline` and
-// its heat.
-[[nodiscard]] Voxel voxel_of(const Cube& cube, double baseline, double thickness) noexcept;
+// The voxel a cube stands for: amounts at its steps, and a temperature of `baseline` and its heat.
+[[nodiscard]] Voxel voxel_of(const Cube& cube, double baseline) noexcept;
 
 } // namespace hog::globe

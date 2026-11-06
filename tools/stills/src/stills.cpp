@@ -414,7 +414,7 @@ Image voxel_section(const globe::World& world, const Place& place, double length
                 }
                 const globe::Voxel& voxel =
                     found->second[static_cast<std::size_t>(globe::index_in_brick(site))];
-                if (voxel.distance < 0) {
+                if (voxel.solid != Material::Air) {
                     colour = material_colour(voxel.solid);
                 } else if (voxel.liquid_amount > globe::Voxel::full / 2) {
                     colour = material_colour(voxel.liquid);

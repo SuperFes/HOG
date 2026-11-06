@@ -185,7 +185,7 @@ TEST_CASE("the globe's surfaces follow the eye, coarser further off", "[client][
     const double radius = globe.generator.planet().radius;
     const DVec3 up = hog::globe::center(hog::globe::cell_at_index(7, 4'321));
     const auto eye_over = [&](DVec3 at, double height) {
-        return at * (radius + hog::chunks::globe_ground(globe.generator, at) + height);
+        return at * (radius + hog::chunks::globe_ground(globe.world, at) + height);
     };
     std::set<std::uint64_t> shown;
     stream.follow(eye_over(up, 0.0));
@@ -248,7 +248,7 @@ TEST_CASE("a brick changed has the chunks drawn from it meshed again, and no oth
     hog::chunks::GlobeStream stream{globe.world, jobs, {.ratio = 1.5, .least = 120.0}};
     const double radius = globe.generator.planet().radius;
     const DVec3 up = hog::globe::center(hog::globe::cell_at_index(7, 4'321));
-    const double ground = hog::chunks::globe_ground(globe.generator, up);
+    const double ground = hog::chunks::globe_ground(globe.world, up);
     stream.follow(up * (radius + ground + 2.0));
     std::set<std::uint64_t> shown;
     apply(shown, stream.finish());
@@ -312,7 +312,7 @@ TEST_CASE("how big the chunks' meshes are, to look at", "[.look][client][globe]"
     hog::chunks::GlobeStream stream{globe.world, jobs, {.ratio = 3.0, .least = 1'000.0}};
     const double radius = globe.generator.planet().radius;
     const DVec3 up = hog::globe::center(hog::globe::cell_at_index(7, 4'321));
-    stream.follow(up * (radius + hog::chunks::globe_ground(globe.generator, up) + 2.0));
+    stream.follow(up * (radius + hog::chunks::globe_ground(globe.world, up) + 2.0));
     const auto changes = stream.finish();
     std::map<std::uint64_t, int> detail_of;
     for (const hog::globe::Cell chunk : stream.wanted()) {

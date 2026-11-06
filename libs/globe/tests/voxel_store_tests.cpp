@@ -30,8 +30,8 @@ Brick dug_out() {
 Brick half_filled() {
     std::array<Voxel, hog::globe::brick_voxels> voxels{};
     for (std::size_t index = 0; index < voxels.size(); ++index) {
-        voxels[index] = index < 256 ? Voxel{.distance = -400, .solid = Material::Granite}
-                                    : Voxel{.distance = 600};
+        voxels[index] = index < 256 ? Voxel{.solid = Material::Granite, .solid_amount = Voxel::full}
+                                    : Voxel{.temperature = 600};
     }
     return Brick::pack(voxels);
 }
@@ -54,8 +54,8 @@ TEST_CASE("a put brick answers for its voxels until let go", "[globe][store]") {
     CHECK(store.size() == 1);
     const Site low = hog::globe::site_in(site, 3);
     const Site high = hog::globe::site_in(site, 300);
-    CHECK(store.at(low) == Voxel{.distance = -400, .solid = Material::Granite});
-    CHECK(store.at(high) == Voxel{.distance = 600});
+    CHECK(store.at(low) == Voxel{.solid = Material::Granite, .solid_amount = Voxel::full});
+    CHECK(store.at(high) == Voxel{.temperature = 600});
     // Its neighbours are still as generated.
     CHECK_FALSE(store.at({.face = 3, .i = low.i, .j = low.j, .layer = low.layer + 8}));
     CHECK_FALSE(store.at({.face = 2, .i = low.i, .j = low.j, .layer = low.layer}));

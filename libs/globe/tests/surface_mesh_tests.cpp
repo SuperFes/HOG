@@ -58,7 +58,7 @@ std::size_t open_in(const World& world, const SurfaceMesh& mesh, Cell chunk) {
     const hog::globe::Layers& layers = world.generator().layers();
     const int detail = hog::globe::detail_of(chunk, layers);
     const int apart = hog::globe::apart_at(detail);
-    const double depth = std::max(hog::globe::surface_depth, distance_band(layers, apart)) -
+    const double depth = std::max(hog::globe::surface_depth, 4.0 * apart * layers.thickness) -
                          (4.0 * apart * layers.thickness);
     std::size_t count = 0;
     for (const DVec3 side : open_sides(mesh)) {
@@ -143,8 +143,7 @@ TEST_CASE("a chunk's surface lies on the ground, facing out of it", "[globe][sur
 TEST_CASE("a surface drawn from solid amounts alone lies near the ground and faces out of it",
           "[globe][surface][amounts]") {
     VoxelStore store{earth().layers()};
-    World world{earth(), store};
-    world.draw_from_amounts(true);
+    const World world{earth(), store};
     const DVec3 up = ground_between(earth(), 50.0, 400.0);
     const Cell chunk = hog::globe::chunk_under(up, earth().layers());
     const SurfaceMesh mesh = mesh_of(world, std::array{chunk});
@@ -236,7 +235,7 @@ void check_details_meet(DVec3 up, double reach, double ratio) {
                                         [&](Cell finer) { return drawn.contains(finer); });
         });
         const int apart = hog::globe::apart_at(hog::globe::detail_of(*chunk, layers));
-        const double depth = std::max(hog::globe::surface_depth, distance_band(layers, apart)) -
+        const double depth = std::max(hog::globe::surface_depth, 4.0 * apart * layers.thickness) -
                              (4.0 * apart * layers.thickness);
         const double ground = hog::globe::ground_below(venus(), dir, 0.5).value_or(0.0);
         if (!rim && glm::length(side) > ground - depth) {
@@ -379,9 +378,10 @@ TEST_CASE("a hollow dug in the ground keeps a sharp lip", "[globe][surface]") {
         ++near_lip;
     }
     REQUIRE(near_lip > 50);
-    // Surface nets round it off by 16 cm; with normals estimated from distances, 13 cm.
-    CHECK(worst < 0.13);
-    CHECK(total / near_lip < 0.04);
+    // The voxels' amounts tell a crease only to within a fraction of a voxel.
+    const double thickness = earth().layers().thickness;
+    CHECK(worst < 0.4 * thickness);
+    CHECK(total / near_lip < 0.12 * thickness);
 }
 
 TEST_CASE("a cave in sight is drawn from its voxels however deep it lies, whole and without gaps",

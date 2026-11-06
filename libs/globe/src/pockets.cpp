@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <numeric>
 #include <optional>
+#include <span>
 #include <thread>
 #include <utility>
 
@@ -19,28 +20,36 @@ struct Run {
     double top = 0.0;
 };
 
-// The open stretches of a column's caves, found by sampling them as the voxels would.
-void open_runs(const Generator::Column& column, double lowest, double highest, double step,
-               std::vector<std::pair<double, double>>& found) {
-    for (const auto& [bottom, top] : column.caves(lowest, highest, 0.0)) {
-        std::optional<double> from;
-        double last = bottom;
-        for (double radius = bottom; radius <= top + step; radius += step) {
-            const bool open = radius <= top && column.sample(radius).distance > 0.0;
-            if (open && !from) {
-                from = radius;
+// The open stretches under matter in the column through `cell`, between the layers `lowest` and
+// `highest`, as its voxels now are.
+void open_runs(const World& world, Cell cell, const Generator::Column& column, int lowest,
+               int highest, std::vector<std::pair<double, double>>& found) {
+    const Layers& layers = world.store().layers();
+    highest = std::min(highest, highest_layer(world, cell, column));
+    if (highest < lowest) {
+        return;
+    }
+    const std::vector<Voxel> voxels =
+        world.fill(std::span{&cell, 1}, std::span{&column, 1}, lowest, highest - lowest + 1);
+    const auto in_ground = [](const Voxel& voxel) {
+        return voxel.solid != Material::Air || voxel.grain_amount >= Voxel::full / 2;
+    };
+    bool covered = false;
+    std::optional<int> top;
+    for (int layer = highest; layer >= lowest; --layer) {
+        const bool open = !in_ground(voxels[static_cast<std::size_t>(layer - lowest)]);
+        if (!open) {
+            if (top) {
+                found.emplace_back(layers.bottom(layer + 1), layers.bottom(*top + 1));
+                top.reset();
             }
-            if (open) {
-                last = radius;
-            } else if (from) {
-                // Each open sample stands for a step of the column.
-                found.emplace_back(*from, last + step);
-                from.reset();
-            }
+            covered = true;
+        } else if (covered && !top) {
+            top = layer;
         }
-        if (from) {
-            found.emplace_back(*from, last + step);
-        }
+    }
+    if (top) {
+        found.emplace_back(layers.bottom(lowest), layers.bottom(*top + 1));
     }
 }
 
@@ -54,8 +63,9 @@ std::size_t root_of(std::vector<std::size_t>& parent, std::size_t at) {
 
 } // namespace
 
-std::vector<Pocket> find_pockets(const Generator& generator, DVec3 eye, double range,
-                                 double spacing) {
+std::vector<Pocket> find_pockets(const World& world, DVec3 eye, double range, double spacing) {
+    const Generator& generator = world.generator();
+    const Layers& layers = generator.layers();
     const Planet& planet = generator.planet();
     const double lod = voxel_lod(generator);
     const DVec3 up = glm::normalize(eye);
@@ -84,10 +94,12 @@ std::vector<Pocket> find_pockets(const Generator& generator, DVec3 eye, double r
                             continue;
                         }
                         const DVec3 direction = glm::normalize((up * planet.radius) + across);
-                        const Generator::Column column = generator.column(direction, lod);
+                        const Cell cell = cell_under(direction, layers.level);
+                        const Generator::Column column =
+                            generator.columns(std::span{&cell, 1}, lod)[0];
                         found.clear();
-                        open_runs(column, std::max(floor, column.ground() - 1'000.0),
-                                  std::min(ceiling, column.ground()), lod / 2.0, found);
+                        open_runs(world, cell, column, std::max(0, layers.layer_at(floor)),
+                                  std::min(layers.count - 1, layers.layer_at(ceiling)), found);
                         for (const auto& [bottom, top] : found) {
                             // Within range of the eye, not only along the ground and up or down.
                             if (glm::length((direction * ((bottom + top) / 2.0)) - eye) > range) {
