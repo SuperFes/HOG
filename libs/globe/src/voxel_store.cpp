@@ -85,6 +85,14 @@ std::optional<std::uint32_t> VoxelStore::highest_held(BrickSite site) const {
     return *stack->second.rbegin();
 }
 
+std::vector<std::uint32_t> VoxelStore::layers_held(BrickSite site) const {
+    const auto stack = stacks_.find(stack_key(site));
+    if (stack == stacks_.end()) {
+        return {};
+    }
+    return {stack->second.begin(), stack->second.end()};
+}
+
 std::size_t VoxelStore::bytes() const noexcept {
     // Each entry of the table: its key and brick, and a node's pointer and hash.
     std::size_t total = bricks_.bucket_count() * sizeof(void*);

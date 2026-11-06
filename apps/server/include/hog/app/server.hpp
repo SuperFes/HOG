@@ -21,6 +21,7 @@
 #include <hog/server/catch_up.hpp>
 #include <hog/server/chunk_sending.hpp>
 #include <hog/server/chunk_sharing.hpp>
+#include <hog/server/ground_bake.hpp>
 #include <hog/server/persistence.hpp>
 #include <hog/server/players.hpp>
 #include <hog/server/server_config.hpp>
@@ -153,6 +154,11 @@ private:
     void hurry_clock(Loop& loop);
     // Gives the flow the vents near players that it hasn't got yet.
     void wake_vents();
+    // Lets the weather's long work settle once on each tile of ground near players, a tile at a
+    // time on the jobs: takes in a finished bake where nothing it changed was changed meanwhile,
+    // and starts the next.
+    void bake_ground();
+    void start_bake();
 
     server::ServerConfig config_;
     std::uint64_t world_id_;
@@ -191,6 +197,14 @@ private:
     server::Players joined_;
     // Made once the world's time is known.
     std::optional<skies::WeatherKeeper> weather_;
+    // The rain the weather has let fall, and the game time it was last told of.
+    server::RainRecord rain_;
+    std::optional<GameTime> rained_;
+    server::GroundBake baked_;
+    // The tile being baked on the jobs, and the store's revision it started from.
+    std::unique_ptr<jobs::Async<std::vector<server::GroundBake::Baked>>> baking_;
+    server::GroundBake::Tile baking_tile_{};
+    std::uint64_t baking_from_ = 0;
     // The ground near players, to check their moves against.
     physics::Space space_;
     physics::Ground ground_;

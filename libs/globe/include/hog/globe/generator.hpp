@@ -91,6 +91,10 @@ public:
         // Metres from the centre to the water table, under which the open space in the ground is
         // flooded; 0 where the planet has no drainage.
         [[nodiscard]] double table() const noexcept { return table_; }
+        // Kelvin, the mean the year round at the planet's reference level.
+        [[nodiscard]] double surface_temperature() const noexcept {
+            return surface_temperature_;
+        }
         // Metres from the centre to the highest solid, which a fallen rock lifts above the ground.
         [[nodiscard]] double top() const noexcept {
             return rock_ ? std::max(ground_, rock_->top()) : ground_;

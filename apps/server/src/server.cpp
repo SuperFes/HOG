@@ -74,7 +74,8 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config, const glob
       writer_(snapshots_, config.keep_snapshots),
       nearby_(std::min(planet::level_for(config.net.view.radius, globe.radius), planet::max_level)),
       persistence_(entities_), chunks_(globe_, jobs_),
-      joined_(entities_, globe.radius, config.net.view), ground_(space_, globe_),
+      joined_(entities_, globe.radius, config.net.view), rain_(config.weather.level),
+      ground_(space_, globe_),
       ticks_(registry_.counter("hog_ticks_total", "Live ticks run.")),
       tick_seconds_(registry_.histogram("hog_tick_seconds", "Real time each live tick took.",
                                         {tick_bounds.begin(), tick_bounds.end()})),
@@ -203,6 +204,15 @@ Result<std::unique_ptr<Server>> Server::open(const server::ServerConfig& config,
             }
         }
     }
+    if (const save::Section* kept =
+            loaded->snapshot ? loaded->snapshot->find(server::GroundBake::section) : nullptr;
+        kept != nullptr && kept->version == server::GroundBake::section_version) {
+        if (auto restored = server->baked_.restore(kept->bytes); !restored) {
+            log::warn(save_log, "baking the ground afresh: {}", restored.error().message);
+        } else {
+            log::info(save_log, "{} tiles of ground baked", server->baked_.size());
+        }
+    }
     server->open_players();
     return server;
 }
@@ -253,6 +263,7 @@ void Server::simulate(GameTime from, GameDuration step) {
         }
         swept_ = {};
         wake_vents();
+        bake_ground();
     }
     wet_ground(step);
     if (weather_) {
@@ -263,8 +274,74 @@ void Server::simulate(GameTime from, GameDuration step) {
                 skies::WeatherSettings{}.interval / std::max<std::uint32_t>(clock_scale_, 1)));
         if (const auto made = weather_->poll(from + step, fade)) {
             tell_weather(*made);
+            // What falls now counts for the time since the weather was last made.
+            const GameTime now = from + step;
+            const double hours =
+                rained_ ? std::chrono::duration<double, std::ratio<3'600>>(now - *rained_).count()
+                        : 1.0;
+            rain_.add([&](DVec3 up) -> std::optional<float> {
+                const auto here = weather_->at(up);
+                return here ? std::optional<float>{here->falling} : std::nullopt;
+            },
+                      hours);
+            rained_ = now;
         }
     }
+}
+
+void Server::bake_ground() {
+    HOG_ZONE("bake ground");
+    if (baking_) {
+        if (!baking_->done()) {
+            return;
+        }
+        const std::vector<server::GroundBake::Baked> written = baking_->take();
+        baking_.reset();
+        const std::vector<globe::BrickSite> since = voxels_.changed_since(baking_from_);
+        const bool clashed = std::ranges::any_of(written, [&](const auto& baked) {
+            return std::ranges::binary_search(since, baked.site);
+        });
+        // Ground changed under the bake is baked again from what it is now.
+        if (!clashed) {
+            for (const server::GroundBake::Baked& baked : written) {
+                if (baked.brick) {
+                    voxels_.put(baked.site, *baked.brick);
+                } else {
+                    voxels_.erase(baked.site);
+                }
+                flow_.reload(baked.site);
+            }
+            baked_.mark(baking_tile_);
+            log::info(server_log, "baked tile {} {} {}: {} bricks changed", baking_tile_.face,
+                      baking_tile_.i, baking_tile_.j, written.size());
+        }
+    }
+    start_bake();
+}
+
+void Server::start_bake() {
+    // A tile's own and the eight about it, so ground is settled before anyone reaches it.
+    constexpr int reach = 1;
+    std::vector<DVec3> places;
+    for (const WorldPosition& at : joined_.placed()) {
+        places.push_back(glm::normalize(at.metres()));
+    }
+    const std::vector<server::GroundBake::Tile> due = baked_.due(voxels_, places, reach);
+    if (due.empty()) {
+        return;
+    }
+    const server::GroundBake::Tile tile = due.front();
+    // Open water gives back about a metre a year where it's warm, less where it's cold.
+    const double kelvin =
+        generator_.column(places.front(), globe::voxel_lod(generator_)).surface_temperature();
+    const double evaporation = std::clamp(0.06 * (kelvin - 268.0), 0.1, 2.0);
+    baking_tile_ = tile;
+    baking_from_ = voxels_.revision();
+    baking_ = std::make_unique<jobs::Async<std::vector<server::GroundBake::Baked>>>(
+        jobs_, [generator = &generator_, held = server::GroundBake::held_in(voxels_, tile), tile,
+                rain = rain_, evaporation] {
+            return server::GroundBake::bake(*generator, held, tile, rain, evaporation);
+        });
 }
 
 void Server::wet_ground(GameDuration step) {
@@ -688,6 +765,9 @@ void Server::submit() {
                       .version = skies::WeatherKeeper::section_version,
                       .bytes = weather_->saved()});
     }
+    snapshot.add({.id = server::GroundBake::section,
+                  .version = server::GroundBake::section_version,
+                  .bytes = baked_.saved()});
     writer_.submit(std::move(snapshot));
 }
 
