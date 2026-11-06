@@ -41,6 +41,8 @@ struct Stepped {
     std::int64_t steamed = 0;
     // Ice units that moved downhill this step.
     std::int64_t glaciated = 0;
+    // Cover units that crept between columns this step.
+    std::int64_t crept = 0;
     // Where ice ends at a drop, for icicles to hang from: the column, the layer its surface is in,
     // which way it faces (+i, +j, -i, -j) and how far the drop is, metres.
     struct Icicle {
@@ -98,6 +100,11 @@ public:
     // Lays `metres` of ice over the top ground of a column, in place of what ice lay there; whether
     // the column was held to lay it on.
     bool lay_ice(std::uint8_t face, std::uint32_t i, std::uint32_t j, double metres);
+
+    // Lets the loose cover on the top ground creep downhill for `years`, and weather new cover
+    // from the ground under it: soil, sand and the like thin on steep ground, gather in hollows
+    // and come smooth. Runs over every held column, with no liquid, grain or rock stepped.
+    Stepped age_cover(double years);
 
     // Reads the brick as the world now has it, unless held already.
     void load(globe::BrickSite site);
@@ -302,6 +309,7 @@ private:
     // Ice on the topmost ground flows downhill as a glacier; see Glacier. Only the top surface of
     // a column flows, and caves under it do not.
     void glaciate(Stepped& stepped, double years);
+    void creep(Stepped& stepped, double years);
     // A column's top ground, the grain on it, and the ground's height in units where
     // Voxel::full is a voxel's height, above the floor. Looks down from layer `start`.
     struct Scan {
