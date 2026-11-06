@@ -14,7 +14,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <array>
 #include <cstdio>
+#include <string>
 #include <cstdint>
 #include <span>
 #include <vector>
@@ -282,8 +284,8 @@ TEST_CASE("generated ground as bricks and as trees, in bytes", "[.tree_size]") {
         const int ground_layer = layers.layer_at(generator.column(center(centre), 1.0).ground());
         std::size_t brick_bytes = 0;
         std::size_t tree_bytes = 0;
-        std::size_t exact_bytes = 0;
-        std::size_t eighth_bytes = 0;
+        constexpr std::array<int, 6> levels_tried{0, 64, 32, 16, 8, 4};
+        std::array<std::size_t, 6> cube_bytes{};
         std::size_t blocks = 0;
         // Every block from deep to the sky that holds anything but one kind, over the patch.
         for (int bj = 0; bj < blocks_across; ++bj) {
@@ -317,15 +319,18 @@ TEST_CASE("generated ground as bricks and as trees, in bytes", "[.tree_size]") {
                     });
                     // The same voxels as cubes: only what they are and how full, not the
                     // distance, normal or temperature the generator can say from the place.
-                    const auto cubes = [&](bool eighths) {
+                    const auto cubes = [&](int levels) {
                         return VoxelTree::build(side, [&](int x, int y, int z) {
                             Voxel v = voxels[place(x, y, z, side)];
                             v.distance = Voxel::far;
                             v.normal = Voxel::no_normal;
                             v.temperature = 0;
-                            if (eighths) {
-                                const auto cut = [](std::uint16_t amount) {
-                                    return static_cast<std::uint16_t>(amount & 0xF000U);
+                            if (levels > 0) {
+                                const auto cut = [&](std::uint16_t amount) {
+                                    const double step = static_cast<double>(Voxel::full) / levels;
+                                    return static_cast<std::uint16_t>(
+                                        std::min(std::round(amount / step) * step,
+                                                 static_cast<double>(Voxel::full)));
                                 };
                                 v.solid_amount = cut(v.solid_amount);
                                 v.grain_amount = cut(v.grain_amount);
@@ -334,8 +339,9 @@ TEST_CASE("generated ground as bricks and as trees, in bytes", "[.tree_size]") {
                             return v;
                         });
                     };
-                    exact_bytes += cubes(false).encode().size();
-                    eighth_bytes += cubes(true).encode().size();
+                    for (std::size_t k = 0; k < levels_tried.size(); ++k) {
+                        cube_bytes.at(k) += cubes(levels_tried.at(k)).encode().size();
+                    }
                     brick_bytes += packed;
                     tree_bytes += tree.encode().size();
                     ++blocks;
@@ -345,9 +351,12 @@ TEST_CASE("generated ground as bricks and as trees, in bytes", "[.tree_size]") {
         const auto times = [&](std::size_t bytes) {
             return static_cast<double>(brick_bytes) / static_cast<double>(bytes);
         };
-        std::printf("%-9s %zu blocks of %d^3: bricks %zu bytes; trees of the same voxels %zu (%.1fx), "
-                    "as cubes %zu (%.1fx), cubes in eighths %zu (%.1fx)\n",
-                    label, blocks, side, brick_bytes, tree_bytes, times(tree_bytes), exact_bytes,
-                    times(exact_bytes), eighth_bytes, times(eighth_bytes));
+        std::printf("%-9s %zu blocks of %d^3: bricks %zu bytes; trees of the same voxels %zu (%.1fx)\n",
+                    label, blocks, side, brick_bytes, tree_bytes, times(tree_bytes));
+        for (std::size_t k = 0; k < levels_tried.size(); ++k) {
+            std::printf("          cubes, %s levels of amount: %zu bytes (%.1fx)\n",
+                        levels_tried.at(k) == 0 ? "exact" : std::to_string(levels_tried.at(k)).c_str(),
+                        cube_bytes.at(k), times(cube_bytes.at(k)));
+        }
     }
 }
