@@ -638,3 +638,21 @@ TEST_CASE("snow above the snowline grows ice on bare ground, and melt takes it a
     }
     CHECK(block.region().grain() < grown / 10);
 }
+
+TEST_CASE("ice aged in one go grows where it is cold and stops where it is warm",
+          "[flow][region][glacier]") {
+    using hog::globe::Material;
+    Block block{floor_above_sea(100.0)};
+    const std::uint32_t split = block.at(12, 12, 0).i;
+    block.region().set_ice_balance([&](const hog::globe::Cell& column, double) {
+        return column.i < split ? 0.5 : -5.0;
+    });
+    std::int64_t moved = 0;
+    for (int year = 0; year < 400; ++year) {
+        moved += block.region().age_ice(1.0).glaciated;
+    }
+    CHECK(moved > 0);
+    CHECK(block.grain(3, 12, 0) > 0);
+    // Ice that flows across the line melts there, so the warm far side stays bare.
+    CHECK(block.grain(22, 12, 0) == 0);
+}

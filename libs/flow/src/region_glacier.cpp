@@ -28,6 +28,13 @@ struct Key {
 
 } // namespace
 
+Stepped Region::age_ice(double years) {
+    ++steps_;
+    Stepped stepped;
+    glaciate(stepped, years);
+    return stepped;
+}
+
 void Region::glaciate(Stepped& stepped, double years) {
     if (years <= 0.0) {
         return;

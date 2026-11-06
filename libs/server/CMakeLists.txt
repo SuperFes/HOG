@@ -1,4 +1,5 @@
 add_library(hog_server
+    src/ice_climate.cpp
     src/chunk_sharing.cpp
     src/brick_sharing.cpp
     src/grain_sharing.cpp
@@ -22,6 +23,7 @@ target_link_libraries(hog_server
 hog_target_defaults(hog_server)
 
 hog_add_tests(hog_server
+    tests/ice_climate_tests.cpp
     tests/chunk_sending_tests.cpp
     tests/chunk_sharing_tests.cpp
     tests/brick_sharing_tests.cpp
