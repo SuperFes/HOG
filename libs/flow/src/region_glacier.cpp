@@ -48,6 +48,19 @@ void Region::glaciate(Stepped& stepped, double years) {
             }
         }
     }
+    if (ice_balance_) {
+        for (const auto& [stack, layers_held] : stacks_) {
+            const auto face = static_cast<std::uint8_t>(stack >> 42U);
+            const auto bi = static_cast<std::uint32_t>((stack >> 21U) & 0x1FFFFFU);
+            const auto bj = static_cast<std::uint32_t>(stack & 0x1FFFFFU);
+            for (std::uint32_t a = 0; a < globe::brick_side; ++a) {
+                for (std::uint32_t b = 0; b < globe::brick_side; ++b) {
+                    columns.try_emplace(
+                        Key{face, (bi * globe::brick_side) + a, (bj * globe::brick_side) + b}, 0);
+                }
+            }
+        }
+    }
     if (columns.empty()) {
         return;
     }
@@ -120,7 +133,7 @@ void Region::glaciate(Stepped& stepped, double years) {
     const double width =
         std::sqrt(layers.volume(globe::column_of(base, layers), static_cast<int>(base.layer)) /
                   thickness);
-    Glacier glacier{tops.size(), {.cell = width, .wear = 0.0}};
+    Glacier glacier{tops.size(), {.cell = width}};
     for (std::size_t n = 0; n < tops.size(); ++n) {
         glacier[n].rock = metres(tops[n].ground);
         glacier[n].ice = metres(tops[n].ice);
@@ -132,23 +145,45 @@ void Region::glaciate(Stepped& stepped, double years) {
             }
         }
     }
+    if (ice_balance_) {
+        for (std::size_t n = 0; n < tops.size(); ++n) {
+            const double change = ice_balance_(
+                {.level = static_cast<std::uint8_t>(layers.level),
+                 .face = tops[n].key.face,
+                 .i = tops[n].key.i,
+                 .j = tops[n].key.j},
+                layers.floor + glacier[n].rock + glacier[n].ice);
+            glacier[n].ice = std::max(glacier[n].ice + (change * years), 0.0);
+        }
+    }
+    std::vector<double> bed(tops.size());
+    for (std::size_t n = 0; n < tops.size(); ++n) {
+        bed[n] = glacier[n].rock;
+    }
     for (double left = years; left > 1.0e-9;) {
         left -= glacier.step(left);
     }
 
     // Written back as whole units, to what each column has room for.
     for (std::size_t n = 0; n < tops.size(); ++n) {
+        const Site column{.face = tops[n].key.face,
+                           .i = tops[n].key.i,
+                           .j = tops[n].key.j,
+                           .layer = tops[n].first};
+        // The bed under ice is worn down, in millimetres dithered so slow wear still happens.
+        if (const double worn = bed[n] - glacier[n].rock; worn > 0.0) {
+            if (const std::int64_t mm = dithered(worn * 1000.0, column, 4); mm > 0) {
+                scour(column, static_cast<int>(mm));
+            }
+        }
         const auto units = std::min(
-            static_cast<std::int64_t>(std::llround(glacier[n].ice / thickness *
-                                                   static_cast<double>(full))),
+            dithered(glacier[n].ice / thickness * static_cast<double>(full), column, 3),
             std::int64_t{tops[n].voxels} * full);
         if (units == tops[n].ice) {
             continue;
         }
         stepped.glaciated += std::abs(units - tops[n].ice);
-        fill_grain({.face = tops[n].key.face, .i = tops[n].key.i, .j = tops[n].key.j,
-                    .layer = tops[n].first},
-                   tops[n].voxels, units, Material::Ice);
+        fill_grain(column, tops[n].voxels, units, Material::Ice);
     }
     for (const Glacier::Hang& hang : glacier.hangs(icicle_drop)) {
         const Top& top = tops[hang.node];

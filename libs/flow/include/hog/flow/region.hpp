@@ -15,6 +15,7 @@
 #include <optional>
 #include <set>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace hog::flow {
@@ -85,6 +86,12 @@ public:
 
     // Years of ice flow for each second stepped; none leaves glaciers frozen.
     void set_ice_years_per_second(double years) noexcept { ice_years_ = years; }
+
+    // Metres of ice a year a place gains (snow) or loses (melt), given its column and its
+    // distance from the planet's centre. With one set, ice grows and melts on every held column,
+    // above the snowline as well as where ice lies already.
+    using IceBalance = std::function<double(const globe::Cell& column, double radius)>;
+    void set_ice_balance(IceBalance balance) { ice_balance_ = std::move(balance); }
 
     // Reads the brick as the world now has it, unless held already.
     void load(globe::BrickSite site);
@@ -349,6 +356,7 @@ private:
     // Voxels of lava that cooled through this step, to be set into rock at its end.
     std::vector<std::pair<globe::Site, Held*>> setting_;
     double ice_years_ = 0.0;
+    IceBalance ice_balance_;
     double cooling_ = 0.0; // seconds of rock's cooling not yet taken
     globe::Material liquid_;
     std::unordered_map<std::uint64_t, Held> held_;
