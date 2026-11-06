@@ -222,7 +222,8 @@ inline double flow_step(Bed& bed, const Climate& climate, double years) {
             for (int x = 0; x < bed.size - dx; ++x) {
                 double& f = flux[bed.index(x, y)];
                 const double donor = bed.ice[f > 0.0 ? bed.index(x, y) : bed.index(x + dx, y + dy)];
-                const double most = 0.2 * donor * bed.cell / dt;
+                const double gap = std::abs(bed.surface(x, y) - bed.surface(x + dx, y + dy));
+                const double most = 0.2 * std::min(donor, gap) * bed.cell / dt;
                 f = std::clamp(f, -most, most);
             }
         }
