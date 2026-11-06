@@ -94,3 +94,29 @@ TEST_CASE("a chunk drawn as voxels has a box face for each solid voxel's open to
     CHECK(ups > 0);
     CHECK(drawn >= ups);
 }
+
+TEST_CASE("a world drawn as boxes has its chunks drawn as voxels, and not otherwise",
+          "[globe][voxel_faces]") {
+    const Generator generator{Planet{}};
+    const Layers& layers = generator.layers();
+    VoxelStore store{layers};
+    World world{generator, store};
+    const hog::DVec3 up = glm::normalize(hog::DVec3{0.3, 0.4, 0.86});
+    const Cell chunk = chunk_under(up, layers, 0);
+    const auto drawn = [&] {
+        SurfaceMesh mesh;
+        mesh.origin = center(chunk) * generator.planet().radius;
+        add_chunk(mesh, world, chunk, Drawn{}, std::nullopt);
+        return mesh;
+    };
+    const SurfaceMesh shaped = drawn();
+    world.draw_as_boxes(true);
+    const SurfaceMesh boxes = drawn();
+    SurfaceMesh direct;
+    direct.origin = center(chunk) * generator.planet().radius;
+    add_chunk_voxels(direct, world, chunk, Drawn{}, std::nullopt);
+    CHECK(boxes.vertices.size() == direct.vertices.size());
+    CHECK(boxes.indices == direct.indices);
+    CHECK(boxes.vertices.size() % 4 == 0);
+    CHECK(shaped.vertices.size() != boxes.vertices.size());
+}

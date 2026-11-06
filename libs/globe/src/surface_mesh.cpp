@@ -1662,6 +1662,10 @@ bool boxes_tile(const World& world, Cell chunk, const Drawn& drawn) {
 
 void add_chunk(SurfaceMesh& mesh, const World& world, Cell chunk, const Drawn& drawn,
                std::optional<Sight> sight) {
+    if (world.draws_as_boxes()) {
+        add_chunk_voxels(mesh, world, chunk, drawn, sight);
+        return;
+    }
     const Layers& layers = world.generator().layers();
     HOG_ASSERT(chunk.is_valid() && detail_of(chunk, layers) >= 0,
                "a chunk is a cell at least chunk_levels coarser than the voxels'");

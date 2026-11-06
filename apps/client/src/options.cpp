@@ -159,11 +159,13 @@ Result<void> read_option(Options& options, std::string_view option, std::string_
                 std::format("--voxel takes a size in metres over zero, not {}", value));
         }
     } else if (option == "--surface") {
-        if (value != "distance" && value != "amounts") {
-            return make_error(ErrorCode::InvalidArgument,
-                              std::format("--surface takes distance or amounts, not {}", value));
+        if (value != "distance" && value != "amounts" && value != "boxes") {
+            return make_error(
+                ErrorCode::InvalidArgument,
+                std::format("--surface takes distance, amounts or boxes, not {}", value));
         }
         options.surface_from_amounts = value == "amounts";
+        options.surface_boxes = value == "boxes";
     } else if (option == "--clouds") {
         return read_clouds(options, value);
     } else if (option == "--detail") {
@@ -243,9 +245,10 @@ Result<void> check_together(const Options& options) {
     if (options.name && !options.login) {
         return make_error(ErrorCode::InvalidArgument, "--name is for --login");
     }
-    if (options.surface_from_amounts && options.connect) {
+    if ((options.surface_from_amounts || options.surface_boxes) && options.connect) {
         return make_error(ErrorCode::InvalidArgument,
-                          "--surface amounts is for flying alone: a server draws its own ground");
+                          "--surface amounts and boxes are for flying alone: a server draws its "
+                          "own ground");
     }
     if (options.voxel && options.connect) {
         return make_error(ErrorCode::InvalidArgument,
@@ -317,8 +320,9 @@ options:
                          way off coarser and sends fewer chunks, the near ground as it was
   --voxel METRES         the voxel world's cell size, finer or coarser than the planet's
                          own (0.5 by default); for looking, flying alone
-  --surface SOURCE       draw the ground from the voxels' stored distances (default) or
-                         from their solid amounts alone: amounts or distance
+  --surface SOURCE       draw the ground from the voxels' stored distances (default),
+                         from their solid amounts alone, or as the voxels' own boxes:
+                         distance, amounts or boxes
   --no-bend              draw the planet curving as tightly as it truly does, not
                          flattened like Earth's near the eye
   --software             draw with a software Vulkan device, such as lavapipe

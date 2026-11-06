@@ -1371,6 +1371,7 @@ int show(const client::Options& options, const planet::PlanetConfig& planet, ren
     client::GlobeWorld globe{*described, [](std::string_view stage) { startup(stage); }};
     startup("planet made");
     globe.world.draw_from_amounts(options.surface_from_amounts);
+    globe.world.draw_as_boxes(options.surface_boxes);
     const client::Flight flight = start(options, globe);
     const sim::Calendar calendar{planet.day_length, planet.axial_tilt};
     client::PlanetClock clock{client::start_time(calendar, to_game_time(WallClock::now()),
