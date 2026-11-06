@@ -64,7 +64,10 @@ double Glacier::step(double years) {
                 continue;
             }
             const Node& donor = nodes_[flux[n][f] > 0.0 ? n : static_cast<std::size_t>(other)];
-            const double most = law_.share * donor.ice * law_.cell / dt;
+            // Nor more than closes a share of the gap in surface between the two, which is what
+            // keeps thick ice on a plateau from swinging from column to column.
+            const double gap = std::abs(surface(n) - surface(static_cast<std::size_t>(other)));
+            const double most = law_.share * std::min(donor.ice, gap) * law_.cell / dt;
             flux[n][f] = std::clamp(flux[n][f], -most, most);
             carried[n][f] = donor.ice > 0.0 ? flux[n][f] * donor.debris / donor.ice : 0.0;
         }
