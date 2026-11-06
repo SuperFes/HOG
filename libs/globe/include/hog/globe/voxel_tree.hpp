@@ -1,7 +1,7 @@
 #pragma once
 
 #include <hog/core/result.hpp>
-#include <hog/globe/voxel.hpp>
+#include <hog/globe/cube.hpp>
 
 #include <array>
 #include <cstddef>
@@ -12,7 +12,7 @@
 
 namespace hog::globe {
 
-// A cube of voxels, `side` across (a power of two), held as a tree of cubes: a cube whose voxels
+// A cube of voxels (each a `Cube`), `side` across (a power of two), held as a tree of cubes: a cube whose voxels
 // are all alike is one leaf, whatever its size, and any cubes alike, children and all, are one
 // node however many places they stand. Every point is still a voxel: `at` tells what is there, and
 // whether it's a lone voxel or part of a larger leaf is not for the asker to know.
@@ -25,7 +25,7 @@ public:
     using Id = std::uint32_t;
 
     // A tree of `side` across, all `fill`.
-    explicit VoxelTree(int side, const Voxel& fill = {});
+    explicit VoxelTree(int side, const Cube& fill = {});
 
     // Builds from `voxel_at(x, y, z)`, the voxels of the cube from its corner.
     template <typename VoxelAt>
@@ -73,9 +73,9 @@ public:
     }
 
     [[nodiscard]] int side() const noexcept { return side_; }
-    [[nodiscard]] Voxel at(int x, int y, int z) const;
+    [[nodiscard]] Cube at(int x, int y, int z) const;
     // Sets one voxel, splitting any larger cube it's in, and joining cubes back that come alike.
-    void set(int x, int y, int z, const Voxel& voxel);
+    void set(int x, int y, int z, const Cube& voxel);
 
     // The size of the leaf holding a point, in voxels across.
     [[nodiscard]] int leaf_side(int x, int y, int z) const;
@@ -99,7 +99,7 @@ public:
 private:
     struct Node {
         bool leaf = true;
-        Voxel voxel;
+        Cube voxel;
         std::array<Id, 8> child{};
     };
     struct Hash {
@@ -111,8 +111,8 @@ private:
 
     // The id of a node alike to this one, made if there's none.
     Id intern(const Node& node);
-    [[nodiscard]] Id leaf_of(const Voxel& voxel);
-    [[nodiscard]] Id with(Id node, int side, int x, int y, int z, const Voxel& voxel);
+    [[nodiscard]] Id leaf_of(const Cube& voxel);
+    [[nodiscard]] Id with(Id node, int side, int x, int y, int z, const Cube& voxel);
 
     // The leaf the eight children are, if they are all one; else a node of them.
     [[nodiscard]] Id joined(const std::array<Id, 8>& children);

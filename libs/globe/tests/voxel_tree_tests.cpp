@@ -22,17 +22,17 @@
 #include <vector>
 
 using hog::globe::Material;
-using hog::globe::Voxel;
+using hog::globe::Cube;
 using hog::globe::VoxelTree;
 
 namespace {
 
-Voxel rock() {
-    return {.solid = Material::Granite, .solid_amount = Voxel::full};
+Cube rock() {
+    return {.solid = Material::Granite, .solid_level = Cube::levels};
 }
 
-Voxel water() {
-    return {.liquid = Material::Water, .liquid_amount = Voxel::full};
+Cube water() {
+    return {.liquid = Material::Water, .liquid_level = Cube::levels};
 }
 
 // A cube's voxels by place, x fastest.
@@ -44,9 +44,10 @@ std::size_t place(int x, int y, int z, int side) {
 }
 
 // A voxel that differs from its neighbours, but the same each time for a place.
-Voxel scattered(int x, int y, int z) {
+Cube scattered(int x, int y, int z) {
     const std::uint64_t h = hog::hash_values(7, x, y, z);
-    return {.solid = static_cast<Material>(h % 5), .solid_amount = static_cast<std::uint16_t>(h >> 40U)};
+    return {.solid = static_cast<Material>(h % 5),
+            .solid_level = static_cast<std::uint8_t>((h >> 40U) % (Cube::levels + 1))};
 }
 
 } // namespace
@@ -77,12 +78,12 @@ TEST_CASE("ground and air join into big leaves, and the boundary stays fine", "[
         if (z < 21) {
             return rock();
         }
-        return z < 40 ? water() : Voxel{};
+        return z < 40 ? water() : Cube{};
     });
     CHECK(tree.at(5, 5, 20) == rock());
     CHECK(tree.at(5, 5, 21) == water());
     CHECK(tree.at(5, 5, 39) == water());
-    CHECK(tree.at(5, 5, 40) == Voxel{});
+    CHECK(tree.at(5, 5, 40) == Cube{});
     CHECK(tree.leaf_side(5, 5, 2) >= 16);
     CHECK(tree.leaf_side(5, 5, 60) >= 16);
     // Far fewer leaves than the 262,144 voxels, and the shared tree is smaller again.
@@ -152,7 +153,7 @@ TEST_CASE("a tree of the world's voxels tells each as the world does", "[globe][
     constexpr int side = 32;
     const Cell centre = cell_under(land, layers.level);
     const int low = std::max(layers.layer_at(top) - (side / 2), 0);
-    std::vector<Voxel> voxels(place(0, 0, side, side));
+    std::vector<Cube> voxels(place(0, 0, side, side));
     for (int y = 0; y < side; ++y) {
         for (int x = 0; x < side; ++x) {
             const Cell cell{.level = centre.level,
@@ -161,9 +162,13 @@ TEST_CASE("a tree of the world's voxels tells each as the world does", "[globe][
                             .j = centre.j + static_cast<std::uint32_t>(y)};
             const std::vector<Generator::Column> columns{
                 generator.column(center(cell), voxel_lod(generator))};
-            const std::vector<Voxel> column = world.fill(std::array{cell}, columns, low, side, 1);
+            const std::vector<hog::globe::Voxel> column =
+                world.fill(std::array{cell}, columns, low, side, 1);
             for (int z = 0; z < side; ++z) {
-                voxels[place(x, y, z, side)] = column[static_cast<std::size_t>(z)];
+                {
+                    const auto& voxel = column[static_cast<std::size_t>(z)];
+                    voxels[place(x, y, z, side)] = cube_of(voxel, hog::globe::kelvin(voxel.temperature));
+                }
             }
         }
     }
@@ -202,7 +207,7 @@ TEST_CASE("a tree's bytes read back as the same tree, and the same voxels are th
     const VoxelTree plain{64, rock()};
     CHECK(plain.encode().size() < 32);
     const VoxelTree layered = VoxelTree::build(64, [](int, int, int z) {
-        return z < 21 ? rock() : Voxel{};
+        return z < 21 ? rock() : Cube{};
     });
     CHECK(layered.encode().size() < 400);
     CHECK(VoxelTree::decode(layered.encode())->same_as(layered));
@@ -284,8 +289,6 @@ TEST_CASE("generated ground as bricks and as trees, in bytes", "[.tree_size]") {
         const int ground_layer = layers.layer_at(generator.column(center(centre), 1.0).ground());
         std::size_t brick_bytes = 0;
         std::size_t tree_bytes = 0;
-        constexpr std::array<int, 6> levels_tried{0, 64, 32, 16, 8, 4};
-        std::array<std::size_t, 6> cube_bytes{};
         std::size_t blocks = 0;
         // Every block from deep to the sky that holds anything but one kind, over the patch.
         for (int bj = 0; bj < blocks_across; ++bj) {
@@ -314,49 +317,20 @@ TEST_CASE("generated ground as bricks and as trees, in bytes", "[.tree_size]") {
                             }
                         }
                     }
+                    // As cubes: what they are and how full, not the distance, normal or temperature
+                    // the place can say.
                     const VoxelTree tree = VoxelTree::build(side, [&](int x, int y, int z) {
-                        return voxels[place(x, y, z, side)];
+                        const Voxel& v = voxels[place(x, y, z, side)];
+                        return cube_of(v, kelvin(v.temperature));
                     });
-                    // The same voxels as cubes: only what they are and how full, not the
-                    // distance, normal or temperature the generator can say from the place.
-                    const auto cubes = [&](int levels) {
-                        return VoxelTree::build(side, [&](int x, int y, int z) {
-                            Voxel v = voxels[place(x, y, z, side)];
-                            v.distance = Voxel::far;
-                            v.normal = Voxel::no_normal;
-                            v.temperature = 0;
-                            if (levels > 0) {
-                                const auto cut = [&](std::uint16_t amount) {
-                                    const double step = static_cast<double>(Voxel::full) / levels;
-                                    return static_cast<std::uint16_t>(
-                                        std::min(std::round(amount / step) * step,
-                                                 static_cast<double>(Voxel::full)));
-                                };
-                                v.solid_amount = cut(v.solid_amount);
-                                v.grain_amount = cut(v.grain_amount);
-                                v.liquid_amount = cut(v.liquid_amount);
-                            }
-                            return v;
-                        });
-                    };
-                    for (std::size_t k = 0; k < levels_tried.size(); ++k) {
-                        cube_bytes.at(k) += cubes(levels_tried.at(k)).encode().size();
-                    }
                     brick_bytes += packed;
                     tree_bytes += tree.encode().size();
                     ++blocks;
                 }
             }
         }
-        const auto times = [&](std::size_t bytes) {
-            return static_cast<double>(brick_bytes) / static_cast<double>(bytes);
-        };
-        std::printf("%-9s %zu blocks of %d^3: bricks %zu bytes; trees of the same voxels %zu (%.1fx)\n",
-                    label, blocks, side, brick_bytes, tree_bytes, times(tree_bytes));
-        for (std::size_t k = 0; k < levels_tried.size(); ++k) {
-            std::printf("          cubes, %s levels of amount: %zu bytes (%.1fx)\n",
-                        levels_tried.at(k) == 0 ? "exact" : std::to_string(levels_tried.at(k)).c_str(),
-                        cube_bytes.at(k), times(cube_bytes.at(k)));
-        }
+        std::printf("%-9s %zu blocks of %d^3: bricks %zu bytes; cube trees %zu (%.1fx)\n", label,
+                    blocks, side, brick_bytes, tree_bytes,
+                    static_cast<double>(brick_bytes) / static_cast<double>(tree_bytes));
     }
 }

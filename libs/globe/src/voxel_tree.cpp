@@ -13,10 +13,10 @@ namespace hog::globe {
 
 std::size_t VoxelTree::Hash::operator()(const Node& node) const noexcept {
     if (node.leaf) {
-        const Voxel& v = node.voxel;
-        return hash_values(1, v.distance, v.normal, static_cast<int>(v.solid), v.condition,
-                           static_cast<int>(v.grain), v.grain_amount, static_cast<int>(v.liquid),
-                           v.liquid_amount, v.temperature, v.solid_amount);
+        const Cube& v = node.voxel;
+        return hash_values(1, static_cast<int>(v.solid), v.solid_level, static_cast<int>(v.grain),
+                           v.grain_level, static_cast<int>(v.liquid), v.liquid_level, v.condition,
+                           v.heat);
     }
     return hash_values(2, node.child[0], node.child[1], node.child[2], node.child[3],
                        node.child[4], node.child[5], node.child[6], node.child[7]);
@@ -29,7 +29,7 @@ bool VoxelTree::Equal::operator()(const Node& a, const Node& b) const noexcept {
     return a.leaf ? a.voxel == b.voxel : a.child == b.child;
 }
 
-VoxelTree::VoxelTree(int side, const Voxel& fill) : side_{side} {
+VoxelTree::VoxelTree(int side, const Cube& fill) : side_{side} {
     HOG_ASSERT(side > 0 && (side & (side - 1)) == 0, "a tree's side is a power of two");
     root_ = leaf_of(fill);
 }
@@ -42,7 +42,7 @@ VoxelTree::Id VoxelTree::intern(const Node& node) {
     return found->second;
 }
 
-VoxelTree::Id VoxelTree::leaf_of(const Voxel& voxel) {
+VoxelTree::Id VoxelTree::leaf_of(const Cube& voxel) {
     return intern({.leaf = true, .voxel = voxel, .child = {}});
 }
 
@@ -58,7 +58,7 @@ VoxelTree::Id VoxelTree::joined(const std::array<Id, 8>& children) {
     return intern({.leaf = false, .voxel = {}, .child = children});
 }
 
-Voxel VoxelTree::at(int x, int y, int z) const {
+Cube VoxelTree::at(int x, int y, int z) const {
     HOG_ASSERT(x >= 0 && y >= 0 && z >= 0 && x < side_ && y < side_ && z < side_,
                "a point in the tree");
     Id node = root_;
@@ -90,7 +90,7 @@ int VoxelTree::leaf_side(int x, int y, int z) const {
     return size;
 }
 
-VoxelTree::Id VoxelTree::with(Id node, int side, int x, int y, int z, const Voxel& voxel) {
+VoxelTree::Id VoxelTree::with(Id node, int side, int x, int y, int z, const Cube& voxel) {
     // Down to the voxel's own place or the first leaf already holding it, noting each cube passed
     // and which of its eight we went into; then back up, making a node of each with its one new
     // child, and joining where they come alike.
@@ -134,7 +134,7 @@ VoxelTree::Id VoxelTree::with(Id node, int side, int x, int y, int z, const Voxe
     return replacement;
 }
 
-void VoxelTree::set(int x, int y, int z, const Voxel& voxel) {
+void VoxelTree::set(int x, int y, int z, const Cube& voxel) {
     HOG_ASSERT(x >= 0 && y >= 0 && z >= 0 && x < side_ && y < side_ && z < side_,
                "a point in the tree");
     root_ = with(root_, side_, x, y, z, voxel);
@@ -234,18 +234,16 @@ std::vector<std::byte> VoxelTree::encode() const {
     for (std::size_t k = 0; k < order.size(); ++k) {
         const Node& node = nodes_[order[k]];
         if (node.leaf) {
-            const Voxel& v = node.voxel;
+            const Cube& v = node.voxel;
             out.write(leaf_tag);
-            out.write_signed(v.distance);
-            out.write_varint(v.normal);
             out.write(static_cast<std::uint8_t>(v.solid));
-            out.write(v.condition);
+            out.write(v.solid_level);
             out.write(static_cast<std::uint8_t>(v.grain));
-            out.write_varint(v.grain_amount);
+            out.write(v.grain_level);
             out.write(static_cast<std::uint8_t>(v.liquid));
-            out.write_varint(v.liquid_amount);
-            out.write_varint(v.temperature);
-            out.write_varint(v.solid_amount);
+            out.write(v.liquid_level);
+            out.write(v.condition);
+            out.write(v.heat);
         } else {
             out.write(cube_tag);
             for (const Id child : node.child) {
@@ -288,36 +286,31 @@ Result<VoxelTree> VoxelTree::decode(std::span<const std::byte> bytes) {
             return fail("a tree's bytes are cut short");
         }
         if (*tag == leaf_tag) {
-            Voxel v;
-            const auto distance = in.read_signed();
-            const auto normal = in.read_varint();
+            Cube v;
             const auto solid = material(in.read<std::uint8_t>());
-            const auto condition = in.read<std::uint8_t>();
+            const auto solid_level = in.read<std::uint8_t>();
             const auto grain = material(in.read<std::uint8_t>());
-            const auto grain_amount = in.read_varint();
+            const auto grain_level = in.read<std::uint8_t>();
             const auto liquid = material(in.read<std::uint8_t>());
-            const auto liquid_amount = in.read_varint();
-            const auto temperature = in.read_varint();
-            const auto solid_amount = in.read_varint();
-            if (!distance || !normal || !solid || !condition || !grain || !grain_amount ||
-                !liquid || !liquid_amount || !temperature || !solid_amount) {
+            const auto liquid_level = in.read<std::uint8_t>();
+            const auto condition = in.read<std::uint8_t>();
+            const auto heat = in.read<std::uint8_t>();
+            if (!solid || !solid_level || !grain || !grain_level || !liquid || !liquid_level ||
+                !condition || !heat) {
                 return fail("a leaf is cut short or has a value out of range");
             }
-            if (*distance < INT16_MIN || *distance > INT16_MAX || *normal > UINT16_MAX ||
-                *grain_amount > UINT16_MAX || *liquid_amount > UINT16_MAX ||
-                *temperature > UINT16_MAX || *solid_amount > UINT16_MAX) {
-                return fail("a leaf has a value out of range");
+            if (*solid_level > Cube::levels || *grain_level > Cube::levels ||
+                *liquid_level > Cube::levels) {
+                return fail("a leaf has a level out of range");
             }
-            v.distance = static_cast<std::int16_t>(*distance);
-            v.normal = static_cast<std::uint16_t>(*normal);
             v.solid = *solid;
-            v.condition = *condition;
+            v.solid_level = *solid_level;
             v.grain = *grain;
-            v.grain_amount = static_cast<std::uint16_t>(*grain_amount);
+            v.grain_level = *grain_level;
             v.liquid = *liquid;
-            v.liquid_amount = static_cast<std::uint16_t>(*liquid_amount);
-            v.temperature = static_cast<std::uint16_t>(*temperature);
-            v.solid_amount = static_cast<std::uint16_t>(*solid_amount);
+            v.liquid_level = *liquid_level;
+            v.condition = *condition;
+            v.heat = *heat;
             ids.push_back(tree.leaf_of(v));
         } else if (*tag == cube_tag) {
             std::array<Id, 8> children{};
