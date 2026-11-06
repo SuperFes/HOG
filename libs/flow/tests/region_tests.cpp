@@ -431,12 +431,13 @@ TEST_CASE("grain with nothing under it falls, over seconds, and lands on the flo
 TEST_CASE("sand at the lip of a drop deeper than eight voxels runs down it, losing none",
           "[flow][region][slump]") {
     using hog::globe::Material;
-    // Rock 15 high up to column 11, open ground below it beyond.
+    // Rock 14 high up to column 11, open ground below it beyond; the sand on it stands a voxel
+    // under the block's ceiling.
     const auto shape = [](std::uint32_t i, std::uint32_t, int layer) {
-        return i >= 12 || layer >= 15;
+        return i >= 12 || layer >= 14;
     };
     Block block{floor_above_sea(100.0), false, shape};
-    block.pile(11, 12, 15, Material::Sand, full);
+    block.pile(11, 12, 14, Material::Sand, full);
     const std::int64_t before = block.region().grain();
 
     const auto below = [&] {

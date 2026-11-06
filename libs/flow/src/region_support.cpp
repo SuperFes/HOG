@@ -270,8 +270,8 @@ void Region::fall(const std::vector<globe::Site>& sites, Stepped& stepped) {
                     }
                     return nearest;
                 },
-                [](globe::Voxel& voxel, double to, DVec3 outward) {
-                    globe::dig_voxel(voxel, to, outward);
+                [&](globe::Voxel& voxel, double to, DVec3 outward) {
+                    globe::dig_voxel(voxel, to, outward, thickness);
                 });
         stepped.collapsed += static_cast<std::int64_t>(middles.size());
 

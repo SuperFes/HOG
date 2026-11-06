@@ -248,17 +248,9 @@ std::optional<Region::Scan> Region::scan(std::uint8_t face, std::uint32_t i, std
     if (!surface) {
         return std::nullopt;
     }
-    // The shaped surface lies below the voxel's middle by its distance, along the normal.
-    double offset = 0.0;
-    if (surface->bottom.distance != Voxel::far) {
-        const Site base{.face = face, .i = i, .j = j, .layer = surface->first};
-        const DVec3 normal = globe::unpacked_normal(surface->bottom.normal);
-        const DVec3 up = glm::normalize(globe::middle_of(base, layers));
-        const double lean = std::max(glm::dot(normal, up), 0.3);
-        offset = globe::metres(surface->bottom.distance) / layers.thickness / lean;
-    }
-    const std::int64_t ground = std::llround((static_cast<double>(surface->first) + 0.5 - offset) *
-                                             static_cast<double>(full));
+    // The ground stands as high in the first open voxel as the shaped matter fills it.
+    const std::int64_t ground =
+        (std::int64_t{surface->first} * full) + surface->bottom.solid_amount;
     return Scan{.surface = *surface, .ground = ground};
 }
 

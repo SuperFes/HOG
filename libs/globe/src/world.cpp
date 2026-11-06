@@ -164,7 +164,7 @@ std::map<BrickSite, std::vector<int>> sites_near(const Layers& layers, DVec3 cen
     return near;
 }
 
-void dig_voxel(Voxel& voxel, double to_shape, DVec3 outward) {
+void dig_voxel(Voxel& voxel, double to_shape, DVec3 outward, double thickness) {
     const std::int16_t out = distance_in_mm(-to_shape);
     if (out > voxel.distance) {
         voxel.distance = out;
@@ -172,10 +172,12 @@ void dig_voxel(Voxel& voxel, double to_shape, DVec3 outward) {
         if (out > 0) {
             voxel.solid = Material::Air;
         }
+        sync_solid_amount(voxel, thickness);
     }
 }
 
-void build_voxel(Voxel& voxel, double to_shape, DVec3 outward, Material material) {
+void build_voxel(Voxel& voxel, double to_shape, DVec3 outward, Material material,
+                 double thickness) {
     const std::int16_t in = distance_in_mm(to_shape);
     if (in < voxel.distance) {
         voxel.distance = in;
@@ -184,6 +186,7 @@ void build_voxel(Voxel& voxel, double to_shape, DVec3 outward, Material material
             voxel.solid = material;
             voxel.condition = Voxel::sound;
         }
+        sync_solid_amount(voxel, thickness);
     }
 }
 
@@ -241,28 +244,33 @@ void reshape_shape(World& world, DVec3 centre, double reach, double height, cons
 } // namespace
 
 void dig_shape(World& world, DVec3 centre, double reach, double height, const Shape& shape) {
-    reshape_shape(world, centre, reach, height, shape, [](Voxel& voxel, double to_shape, DVec3 outward) {
-        dig_voxel(voxel, to_shape, outward);
-    });
+    const double thickness = world.generator().layers().thickness;
+    reshape_shape(world, centre, reach, height, shape,
+                  [thickness](Voxel& voxel, double to_shape, DVec3 outward) {
+                      dig_voxel(voxel, to_shape, outward, thickness);
+                  });
 }
 
 void build_shape(World& world, DVec3 centre, double reach, double height, const Shape& shape,
                  Material material) {
+    const double thickness = world.generator().layers().thickness;
     reshape_shape(world, centre, reach, height, shape,
                   [&](Voxel& voxel, double to_shape, DVec3 outward) {
-                      build_voxel(voxel, to_shape, outward, material);
+                      build_voxel(voxel, to_shape, outward, material, thickness);
                   });
 }
 
 void dig(World& world, DVec3 centre, double radius) {
-    reshape(world, centre, radius, [](Voxel& voxel, double to_ball, DVec3 outward) {
-        dig_voxel(voxel, to_ball, outward);
+    const double thickness = world.generator().layers().thickness;
+    reshape(world, centre, radius, [thickness](Voxel& voxel, double to_ball, DVec3 outward) {
+        dig_voxel(voxel, to_ball, outward, thickness);
     });
 }
 
 void build(World& world, DVec3 centre, double radius, Material material) {
+    const double thickness = world.generator().layers().thickness;
     reshape(world, centre, radius, [&](Voxel& voxel, double to_ball, DVec3 outward) {
-        build_voxel(voxel, to_ball, outward, material);
+        build_voxel(voxel, to_ball, outward, material, thickness);
     });
 }
 

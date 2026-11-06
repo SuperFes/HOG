@@ -68,12 +68,12 @@ std::optional<bool> Region::solid_at(DVec3 point) {
 
 void Region::loosen(const globe::Rock& rock) {
     const double reach = std::max({rock.axes.x, rock.axes.y, rock.axes.z});
+    const double thickness = world_->store().layers().thickness;
     reshape(rock.middle, reach,
             [&](DVec3 at, DVec3& outward) { return rock.distance(at, outward); },
-            [](globe::Voxel& voxel, double to, DVec3 outward) {
-                globe::dig_voxel(voxel, to, outward);
+            [thickness](globe::Voxel& voxel, double to, DVec3 outward) {
+                globe::dig_voxel(voxel, to, outward, thickness);
             });
-    const double thickness = world_->store().layers().thickness;
     const double volume = 4.0 / 3.0 * std::numbers::pi * rock.axes.x * rock.axes.y * rock.axes.z;
     parcels_.push_back({.id = ++parcel_ids_,
                         .at = rock.middle,
@@ -159,7 +159,7 @@ std::optional<globe::BrickSite> Region::settle_boulder(const Parcel& parcel) {
                 return glm::length(out) - parcel.radius;
             },
             [&](globe::Voxel& voxel, double to, DVec3 outward) {
-                globe::build_voxel(voxel, to, outward, parcel.material);
+                globe::build_voxel(voxel, to, outward, parcel.material, layers.thickness);
             });
     return std::nullopt;
 }

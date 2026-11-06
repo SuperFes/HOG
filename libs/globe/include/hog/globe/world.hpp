@@ -80,7 +80,10 @@ void build_shape(World& world, DVec3 centre, double reach, double height, const 
                                                                double reach, double height = -1.0);
 // One voxel taken out of a shape or built into one, given its signed distance to the shape's
 // surface (negative inside, within the band) and the way out of the shape there, or none.
-void dig_voxel(Voxel& voxel, double to_shape, DVec3 outward);
-void build_voxel(Voxel& voxel, double to_shape, DVec3 outward, Material material);
+// Both keep the voxel's solid amount to the surface they leave, for voxels `thickness` metres
+// thick.
+void dig_voxel(Voxel& voxel, double to_shape, DVec3 outward, double thickness);
+void build_voxel(Voxel& voxel, double to_shape, DVec3 outward, Material material,
+                 double thickness);
 
 } // namespace hog::globe
