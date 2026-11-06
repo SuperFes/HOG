@@ -28,9 +28,6 @@ namespace {
 // The planet-wide constants are found from columns sampled this finely: 24,576 of them.
 constexpr int survey_level = 6;
 
-// Air cools as it rises by g/cp; Earth's moist air at 6.5 K/km, scaled by gravity.
-constexpr double earth_lapse = 0.0065;
-
 // A cave can carve the ground only this near it, the widest passage's radius and some.
 constexpr double cave_surface_reach = 8.0;
 // Cave walls meet the ground in a fillet this wide rather than a sharp lip.
@@ -38,10 +35,6 @@ constexpr double cave_blend = 1.0;
 
 // The detail soil and snow follow, in metres: the creep length loose cover is smoothed over.
 constexpr double broad_slope_scale = 16.0;
-
-double lapse_rate(const Planet& planet) {
-    return planet.pressure > 0.0 ? earth_lapse * planet.gravity / 9.81 : 0.0;
-}
 
 struct Surveyed {
     double value;
@@ -847,15 +840,14 @@ Sample Generator::Column::sample(double radius) const noexcept {
         }
     }
 
-    const double lapse = lapse_rate(planet);
-    const double surface = surface_temperature_ - (lapse * std::max(0.0, ground_ - planet.radius));
+    Surroundings surroundings = Surroundings::Open;
     if (sample.distance < 0.0) {
-        sample.temperature = surface + (generator_->derived_.geotherm * std::max(0.0, depth));
+        surroundings = Surroundings::Inside;
     } else if (sample.water > 0.0) {
-        sample.temperature = surface;
-    } else {
-        sample.temperature = surface_temperature_ - (lapse * std::max(0.0, radius - planet.radius));
+        surroundings = Surroundings::Water;
     }
+    sample.temperature = baseline_temperature(planet, generator_->derived_, surface_temperature_,
+                                              radius, ground_, surroundings);
     return sample;
 }
 

@@ -138,6 +138,27 @@ double temperature_at(const Planet& planet, double latitude) {
            ((planet.equator_temperature - planet.pole_temperature) * maths::cos(latitude));
 }
 
+double lapse_rate(const Planet& planet) {
+    // Earth's moist air at 6.5 K/km, scaled by gravity, as air cools by g/cp as it rises.
+    constexpr double earth_lapse = 0.0065;
+    return planet.pressure > 0.0 ? earth_lapse * planet.gravity / 9.81 : 0.0;
+}
+
+double baseline_temperature(const Planet& planet, const Derived& derived, double at_sea_level,
+                            double radius, double ground, Surroundings surroundings) {
+    const double lapse = lapse_rate(planet);
+    const double surface = at_sea_level - (lapse * std::max(0.0, ground - planet.radius));
+    switch (surroundings) {
+    case Surroundings::Inside:
+        return surface + (derived.geotherm * std::max(0.0, ground - radius));
+    case Surroundings::Water:
+        return surface;
+    case Surroundings::Open:
+        break;
+    }
+    return at_sea_level - (lapse * std::max(0.0, radius - planet.radius));
+}
+
 double mean_temperature(const Planet& planet) {
     // cos(latitude) averages π/4 over a sphere's area.
     return planet.pole_temperature +

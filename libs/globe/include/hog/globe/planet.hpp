@@ -96,6 +96,25 @@ struct Derived {
 
 // The year's mean surface temperature at a latitude, in radians.
 [[nodiscard]] double temperature_at(const Planet& planet, double latitude);
+
+// How fast still air cools with height, K/m; none where there's no air.
+[[nodiscard]] double lapse_rate(const Planet& planet);
+
+// What a point is in, for its temperature.
+enum class Surroundings : std::uint8_t {
+    Inside, // in the ground
+    Water,  // under standing water
+    Open,   // in the open air
+};
+
+// Kelvin at `radius` from the planet's centre, where the ground under it is `ground` from the
+// centre and the climate gives `at_sea_level` kelvin at its latitude (temperature_at), with
+// nothing but that, the height and the depth to go by: no weather, sun or local heat. Air cools
+// with height from the surface's temperature; ground warms with depth by the geotherm; water
+// takes the surface's.
+[[nodiscard]] double baseline_temperature(const Planet& planet, const Derived& derived,
+                                          double at_sea_level, double radius, double ground,
+                                          Surroundings surroundings);
 [[nodiscard]] double mean_temperature(const Planet& planet);
 
 // The pressure its vapour holds in balance with the liquid at a temperature; none for no volatile
