@@ -46,5 +46,5 @@ TEST_CASE("it is colder the higher, and warmer the deeper", "[globe][temperature
     CHECK(at(ground + 5'000.0, Surroundings::Open) < at(ground + 50.0, Surroundings::Open));
     CHECK(at(ground - 1'000.0, Surroundings::Inside) > at(ground - 10.0, Surroundings::Inside));
     CHECK(at(ground - 10.0, Surroundings::Water) == at(ground - 1.0, Surroundings::Water));
-    CHECK(lapse_rate(planet) > 0.0);
+    CHECK(climate_lapse_rate(planet) > 0.0);
 }
