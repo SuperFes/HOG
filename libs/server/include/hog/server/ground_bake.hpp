@@ -2,12 +2,14 @@
 
 #include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
+#include <hog/flow/region.hpp>
 #include <hog/globe/brick.hpp>
 #include <hog/globe/world.hpp>
 #include <hog/save/snapshot.hpp>
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <set>
 #include <span>
@@ -44,6 +46,17 @@ public:
     // highest surface to a brick over the highest layer that may hold matter.
     [[nodiscard]] static std::vector<globe::BrickSite> bricks_of(const globe::World& world,
                                                                  Tile tile);
+
+    // A drainage's river through the cells of the generator's drainage, as it crosses the tiles
+    // in one: the river each tile on its course takes in, over the edge it comes in by.
+    using Course = std::map<Tile, flow::Region::River>;
+    // The course of the river through the drainage cell the tile lies in: from its edge towards
+    // the cell upstream that gives it most, to its edge towards the cell it drains into, along
+    // the lowest of the tiles' ground; none where too little drains through to be a river.
+    [[nodiscard]] static Course course(const globe::World& world, Tile tile,
+                                       const RainRecord& rain);
+    // Springs seeded in the tile: now and then one, at a column picked by the tile.
+    [[nodiscard]] static std::vector<flow::Region::Spring> springs(Tile tile);
 
     // A brick a bake wrote, or none where it came out as generated.
     struct Baked {
