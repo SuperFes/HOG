@@ -672,7 +672,7 @@ TEST_CASE("a hole dug in the voxel world is kept with it", "[app][server]") {
         site = {.face = cell.face,
                 .i = cell.i,
                 .j = cell.j,
-                .layer = static_cast<std::uint32_t>(layers.layer_at(ground - 0.5))};
+                .layer = static_cast<std::uint32_t>(layers.layer_at(ground - 1.0))};
         hog::globe::World globe = server->globe();
         CHECK(globe.at(site).solid != hog::globe::Material::Air);
         hog::globe::dig(globe, direction * ground, 3.0);

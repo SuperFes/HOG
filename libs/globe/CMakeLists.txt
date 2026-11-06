@@ -11,7 +11,6 @@ add_library(hog_globe
     src/generator.cpp
     src/grip.cpp
     src/layers.cpp
-    src/mantle.cpp
     src/material.cpp
     src/noise.cpp
     src/planet.cpp
@@ -50,7 +49,6 @@ hog_add_tests(hog_globe
     tests/landform_survey_tests.cpp
     tests/lake_bed_tests.cpp
     tests/layers_tests.cpp
-    tests/mantle_tests.cpp
     tests/material_tests.cpp
     tests/maths_tests.cpp
     tests/noise_tests.cpp

@@ -30,11 +30,7 @@ constexpr int survey_level = 6;
 
 // A cave can carve the ground only this near it, the widest passage's radius and some.
 constexpr double cave_surface_reach = 8.0;
-// Cave walls meet the ground in a fillet this wide rather than a sharp lip.
-constexpr double cave_blend = 1.0;
 
-// The detail soil and snow follow, in metres: the creep length loose cover is smoothed over.
-constexpr double broad_slope_scale = 16.0;
 
 struct Surveyed {
     double value;
@@ -671,7 +667,6 @@ Generator::Column Generator::finish(DVec3 down, double lod, const terms::Ground&
     column.direction_ = down;
     column.lod_ = lod;
     column.ground_ = planet_.radius + made.height - shape_.datum;
-    column.mantle_ = made.mantle;
     if (shape_.sea) {
         column.water_ = planet_.radius;
     }
@@ -712,15 +707,14 @@ std::vector<std::pair<double, double>> Generator::Column::caves(double lowest, d
         const double slope = slope_ * planet.radius / at;
         return std::max(0.0, (ground_ - at) / std::sqrt(1.0 + (slope * slope)));
     };
-    // Down by as far as no cave can lie within `within`, nor the blend that opens the ground to it
-    // a little beyond it, a metre at least.
+    // Down by as far as no cave can lie within `within`, a metre at least.
     constexpr double least = 1.0;
     std::optional<double> top;
     double above = top_most;
     for (double radius = top_most; radius > deepest;) {
         const double away = terms::cave_bound(context, strata_, direction_, radius, ground_,
                                               cover_at(radius), lod_) -
-                            within - cave_blend;
+                            within;
         if (away < 0.0) {
             if (!top) {
                 // Back within reach at the next sample: the same stretch.
@@ -745,6 +739,55 @@ std::vector<std::pair<double, double>> Generator::Column::caves(double lowest, d
     return found;
 }
 
+DVec3 Generator::Column::cave_rise(double radius) const noexcept {
+    const Planet& planet = generator_->planet_;
+    const terms::Context context{.planet = &generator_->planet_,
+                                 .derived = &generator_->derived_,
+                                 .shape = &generator_->shape_};
+    const double slope = slope_ * planet.radius / radius;
+    const DVec3 here = direction_ * radius;
+    const DVec3 tilt = tilt_ * (planet.radius / radius);
+    // Nearby, the ground stands as its tilt has it, and the beds follow it.
+    const auto cave_at = [&](DVec3 point) {
+        const double out = glm::length(point);
+        const DVec3 offset = point - here;
+        const double ground = ground_ + glm::dot(tilt, offset);
+        terms::Layering beds = strata_;
+        beds.fold += glm::dot(strata_.fold_tilt, offset);
+        beds.cover += glm::dot(strata_.cover_tilt, offset);
+        const double cover = std::max(0.0, (ground - out) / std::sqrt(1.0 + (slope * slope)));
+        return terms::cave_distance(context, beds, point / out, out, ground, cover, lod_);
+    };
+    // By differences, as the cave's distance is its noise over its noise's rate, whose own rate
+    // isn't to hand.
+    const double step = lod_ / 16.0;
+    DVec3 rise{0.0};
+    for (glm::length_t axis = 0; axis < 3; ++axis) {
+        DVec3 along{0.0};
+        along[axis] = step;
+        rise[axis] = (cave_at(here + along) - cave_at(here - along)) / (2.0 * step);
+    }
+    return rise;
+}
+
+void Generator::Column::carve_cave(double radius, Sample& sample, DVec3& rise) const noexcept {
+    const terms::Context context{.planet = &generator_->planet_,
+                                 .derived = &generator_->derived_,
+                                 .shape = &generator_->shape_};
+    // The rock between the point and the open air over the ground.
+    const double cover = std::max(0.0, -sample.distance);
+    const double cave =
+        terms::cave_distance(context, strata_, direction_, radius, ground_, cover, lod_);
+    if (-cave <= sample.distance) {
+        return;
+    }
+    sample.distance = -cave;
+    // Only near a surface, where its normal is kept.
+    if (std::abs(sample.distance) < distance_band(generator_->layers_, coarser(*generator_, lod_))) {
+        rise = -cave_rise(radius);
+    }
+}
+
 Sample Generator::Column::sample(double radius) const noexcept {
     const Planet& planet = generator_->planet_;
     // Slope per metre across the ground at this radius, not at the raw radius it was taken at.
@@ -757,44 +800,9 @@ Sample Generator::Column::sample(double radius) const noexcept {
                                  .shape = &generator_->shape_};
     const double depth = ground_ - radius;
 
-    // Caves, carved out of the rock under any loose cover, can open the ground near them.
+    // A cave takes its voxels out of the rock, and opens the ground where it reaches it.
     if (sample.distance < cave_surface_reach) {
-        // The rock between a point and the open air over the ground.
-        const auto cover_at = [&](double at, double ground) {
-            return std::max(0.0, (ground - at) / std::sqrt(1.0 + (slope * slope)));
-        };
-        const DVec3 here = direction_ * radius;
-        const DVec3 tilt = tilt_ * (planet.radius / radius);
-        // Nearby, the ground stands as its tilt has it, and the beds and cover follow it.
-        const auto cave_at = [&](DVec3 point) {
-            const double out = glm::length(point);
-            const DVec3 offset = point - here;
-            const double ground = ground_ + glm::dot(tilt, offset);
-            terms::Layering beds = strata_;
-            beds.fold += glm::dot(strata_.fold_tilt, offset);
-            beds.cover += glm::dot(strata_.cover_tilt, offset);
-            return terms::cave_distance(context, beds, point / out, out, ground,
-                                        cover_at(out, ground), lod_);
-        };
-        const double cave = terms::cave_distance(context, strata_, direction_, radius, ground_,
-                                                 cover_at(radius, ground_), lod_);
-        const double ground = sample.distance;
-        sample.distance = terms::smooth_max(ground, -cave, cave_blend);
-        const double cave_share = terms::smooth_max_share(-cave, ground, cave_blend);
-        // Only near a surface, where its normal is kept; there by differences, as the cave's
-        // distance is its noise over its noise's rate, whose own rate isn't to hand.
-        if (cave_share > 0.0 &&
-            std::abs(sample.distance) <
-                distance_band(generator_->layers_, coarser(*generator_, lod_))) {
-            const double step = lod_ / 16.0;
-            DVec3 cave_rise{0.0};
-            for (glm::length_t axis = 0; axis < 3; ++axis) {
-                DVec3 along{0.0};
-                along[axis] = step;
-                cave_rise[axis] = (cave_at(here + along) - cave_at(here - along)) / (2.0 * step);
-            }
-            rise = ((1.0 - cave_share) * glm::normalize(rise)) - (cave_share * cave_rise);
-        }
+        carve_cave(radius, sample, rise);
     }
     // A fallen rock stands out of the ground, or fills a hollow, where it is nearer than the
     // ground.
@@ -954,21 +962,8 @@ Ground ground(const Context& context, DVec3 direction, double lod) noexcept {
         direction.z, std::sqrt((direction.x * direction.x) + (direction.y * direction.y)));
     made.surface_temperature = temperature_at(planet, latitude);
     const double height = made.rock.height.value - context.shape->datum;
-    // Soil and snow lie by the slope over tens of metres, not the ground's grain; nor by a
-    // coarser detail's smoother ground, or a hillside bare at close hand grows soil from afar.
-    const double broad = broad_slope_scale;
-    const Column smoothed = broad == lod ? made.rock : column(context, direction, broad);
-    const double slope = glm::length(tangential(smoothed.height.gradient, direction));
-    made.layers = layering(context, direction, made.rock, height, slope,
-                           made.surface_temperature - (climate_lapse_rate(planet) * std::max(0.0, height)));
-    // The cover creeps smooth over the same tens of metres, pooling under the ground at that
-    // detail; a coarser detail's ground is already as smooth, so the cover lies on it as made.
-    const bool filtered = lod < broad;
-    made.mantle =
-        mantle(made.rock.height.value, filtered ? smoothed.height.value : made.rock.height.value,
-               loose_depth(made.layers), made.layers.hold);
-    lie_in(made.layers, made.mantle);
-    made.height = made.rock.height.value + made.mantle;
+    made.layers = layering(context, direction, made.rock, height);
+    made.height = made.rock.height.value;
     return made;
 }
 

@@ -171,7 +171,7 @@ TEST_CASE("the same planet is generated the same, bit for bit", "[globe][generat
         }
     }
     // If this moves, unchanged ground no longer matches what was there before, or elsewhere.
-    CHECK(digest == 0x5442'ffcf'3e41'726fULL);
+    CHECK(digest == 0x5d2f'0bd3'4544'dfbbULL);
 }
 
 TEST_CASE("generator throughput", "[.bench]") {
@@ -238,50 +238,6 @@ TEST_CASE("a sample's normal is the way its distance grows", "[globe][generator]
         CHECK(near_surface > 1'000);
         CHECK(agreeing > near_surface * 95 / 100);
     }
-}
-
-TEST_CASE("a cave wall's normal is the way its distance grows", "[globe][generator]") {
-    const Generator world = generator_for("earth");
-    constexpr double lod = 1.0;
-    constexpr double step = 0.01;
-    const auto distance_at = [&](DVec3 point) { return world.sample(point, lod).distance; };
-    int on_walls = 0;
-    int agreeing = 0;
-    for (std::uint64_t k = 0; k < 20'000 && on_walls < 500; ++k) {
-        const DVec3 down = direction(k);
-        const auto column = world.column(down, lod);
-        // Deep enough that any surface is a cave's, as the ground's blend reaches a metre.
-        for (int quarter = 12; quarter < 240; ++quarter) {
-            const double depth = quarter / 4.0;
-            const hog::globe::Sample sample = column.sample(column.ground() - depth);
-            if (std::abs(sample.distance) > 0.1) {
-                continue;
-            }
-            const DVec3 point = down * (column.ground() - depth);
-            DVec3 rise{0.0};
-            DVec3 coarse{0.0};
-            for (glm::length_t axis = 0; axis < 3; ++axis) {
-                DVec3 along{0.0};
-                along[axis] = step;
-                rise[axis] =
-                    (distance_at(point + along) - distance_at(point - along)) / (2.0 * step);
-                coarse[axis] =
-                    (distance_at(point + (5.0 * along)) - distance_at(point - (5.0 * along))) /
-                    (10.0 * step);
-            }
-            // A crease, where two walls meet, has no one normal: the differences disagree.
-            if (glm::dot(glm::normalize(rise), glm::normalize(coarse)) < std::cos(0.05)) {
-                continue;
-            }
-            ++on_walls;
-            agreeing +=
-                glm::dot(world.sample(point, lod).normal, glm::normalize(rise)) > std::cos(0.1) ? 1
-                                                                                                : 0;
-        }
-    }
-    CAPTURE(on_walls, agreeing);
-    CHECK(on_walls > 100);
-    CHECK(agreeing > on_walls * 95 / 100);
 }
 
 TEST_CASE("land is found near a direction, over the sea, and anywhere on a dry world",

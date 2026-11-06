@@ -116,7 +116,8 @@ std::vector<VentSite> vent_sites(const Generator& generator) {
                  column.caves(column.ground() - pool_reach, column.ground(), 0.0)) {
                 // The stretch only may hold a cave: the floor is where it first opens from solid.
                 bool solid = false;
-                for (double at = bottom - pool_step; at <= top && !found; at += pool_step) {
+                for (double at = bottom - pool_step; at + pool_headroom < top && !found;
+                     at += pool_step) {
                     const bool open = column.sample(at).distance > 0.0;
                     if (open && solid && column.sample(at + pool_headroom).distance > 0.0) {
                         sites.push_back({.direction = direction, .ground = at, .pool = true,
