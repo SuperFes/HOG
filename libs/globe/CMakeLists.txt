@@ -62,6 +62,7 @@ hog_add_tests(hog_globe
     tests/vents_tests.cpp
     tests/volcanoes_tests.cpp
     tests/voxel_store_tests.cpp
+    tests/octree_estimate_tests.cpp
     tests/voxel_faces_tests.cpp
     tests/voxel_tests.cpp
     tests/world_tests.cpp)
