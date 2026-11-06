@@ -107,11 +107,23 @@ public:
     Stepped age_cover(double years);
 
     // What the sky gives the ground held: metres of rain a year on a column, by the way up it
-    // stands, and cubic metres a year running in at a column on the edge of what's held, from the
-    // ground beyond; and metres a year open water gives back to the air.
+    // stands; a river running in from the ground beyond, entering at the lowest column on the
+    // held ground's edge on its side; springs welling up at columns; and metres a year open water
+    // gives back to the air. Flows are cubic metres a year.
+    struct River {
+        double discharge = 0.0;
+        std::size_t side = 0; // the edge it comes in over: +i, +j, -i, -j
+    };
+    struct Spring {
+        std::uint8_t face = 0;
+        std::uint32_t i = 0;
+        std::uint32_t j = 0;
+        double discharge = 0.0;
+    };
     struct Rainfall {
         std::function<double(DVec3)> rain;
-        std::function<double(DVec3)> inflow;
+        std::optional<River> river;
+        std::vector<Spring> springs;
         double evaporation = 1.0;
     };
     // Lets rain run off all the ground held until it rests, as Runoff has it, and lays what

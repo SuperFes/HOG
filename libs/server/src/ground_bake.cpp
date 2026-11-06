@@ -137,7 +137,10 @@ std::vector<GroundBake::Baked> GroundBake::bake(const globe::Generator& generato
     flow::Simulation flow{world};
     static_cast<void>(flow.settle_water(
         bricks_of(world, tile),
-        {.rain = [&](DVec3 up) { return rain.at(up); }, .inflow = {}, .evaporation = evaporation}));
+        {.rain = [&](DVec3 up) { return rain.at(up); },
+         .river = {},
+         .springs = {},
+         .evaporation = evaporation}));
     std::vector<Baked> written;
     for (const globe::BrickSite site : store.changed()) {
         const globe::Brick* brick = store.brick(site);
