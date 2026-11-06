@@ -71,5 +71,11 @@ TEST_CASE("rain looks for the ground from over what's built on it", "[server][we
             CHECK(planet.generator.layers().bottom(static_cast<int>(one.column.layer)) >
                   ground + 13.0);
         }
+        // From where it looks, the ground is near enough to find.
+        const hog::globe::Layers& layers = planet.generator.layers();
+        const DVec3 there = hog::globe::center(hog::globe::column_of(one.column, layers));
+        const int top = layers.layer_at(hog::globe::top_of(planet.world, there).value_or(0.0));
+        CHECK(static_cast<int>(one.column.layer) - top <=
+              static_cast<int>(hog::flow::Wetting::reach));
     }
 }
