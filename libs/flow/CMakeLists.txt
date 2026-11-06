@@ -8,6 +8,7 @@ add_library(hog_flow
     src/region_rocks.cpp
     src/region_slump.cpp
     src/region_support.cpp
+    src/runoff.cpp
     src/slump.cpp
     src/support.cpp
     src/lava.cpp
@@ -30,6 +31,7 @@ hog_add_tests(hog_flow
     tests/network_cost_bench.cpp
     tests/region_tests.cpp
     tests/rock_tests.cpp
+    tests/runoff_tests.cpp
     tests/slump_tests.cpp
     tests/support_tests.cpp
     tests/vent_tests.cpp
