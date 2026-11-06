@@ -27,6 +27,8 @@ constexpr std::array<Face, probe_faces> faces{
      {.forward = {0.0, 0.0, -1.0}, .up = {0.0, 1.0, 0.0}}}};
 
 constexpr VkClearColorValue black{.float32 = {0.0F, 0.0F, 0.0F, 1.0F}};
+// The face looking down holds nothing, so what samples it falls back to its own.
+constexpr VkClearColorValue nothing{.float32 = {0.0F, 0.0F, 0.0F, 0.0F}};
 
 } // namespace
 
@@ -115,8 +117,8 @@ Result<> EnvironmentProbe::record(VkCommandBuffer commands, std::uint32_t frame,
     transition(commands, depth_.handle(), VK_IMAGE_ASPECT_DEPTH_BIT, image_use::discard,
                image_use::depth_target);
     for (std::uint32_t face = 0; face < probe_faces; ++face) {
-        begin_rendering(commands, colour_.layer_view(face), extent, black,
-                        {.view = depth_.layer_view(face)});
+        begin_rendering(commands, colour_.layer_view(face), extent,
+                        face == probe_down ? nothing : black, {.view = depth_.layer_view(face)});
         if (face != probe_down) {
             VkImageView aerial = aerial_.at(face).view();
             sky.draw(commands, extent, frame, atmosphere, skies.at(face), aerial);
