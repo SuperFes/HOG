@@ -95,6 +95,9 @@ public:
     // Runs only the ice on by `years`, with no liquid, grain or rock stepped: for settling glaciers
     // to the climate in one go. Needs a balance to grow any.
     Stepped age_ice(double years);
+    // Lays `metres` of ice over the top ground of a column, in place of what ice lay there; whether
+    // the column was held to lay it on.
+    bool lay_ice(std::uint8_t face, std::uint32_t i, std::uint32_t j, double metres);
 
     // Reads the brick as the world now has it, unless held already.
     void load(globe::BrickSite site);

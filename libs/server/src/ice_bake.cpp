@@ -105,4 +105,19 @@ IceMap bake_ice_map(const globe::Generator& generator, globe::Cell corner, std::
     return map;
 }
 
+std::vector<flow::Simulation::Laid> laid_from(const IceMap& map, double least) {
+    std::vector<flow::Simulation::Laid> laid;
+    for (std::uint32_t j = 0; j < map.columns(); ++j) {
+        for (std::uint32_t i = 0; i < map.columns(); ++i) {
+            if (const double ice = map.at(i, j); ice >= least) {
+                laid.push_back({.face = map.corner.face,
+                                .i = map.corner.i + i,
+                                .j = map.corner.j + j,
+                                .metres = ice});
+            }
+        }
+    }
+    return laid;
+}
+
 } // namespace hog::server

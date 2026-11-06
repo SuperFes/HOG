@@ -28,6 +28,29 @@ struct Key {
 
 } // namespace
 
+bool Region::lay_ice(std::uint8_t face, std::uint32_t i, std::uint32_t j, double metres) {
+    const auto stack = stacks_.find((std::uint64_t{face} << 42U) |
+                                    (std::uint64_t{i / globe::brick_side} << 21U) |
+                                    (j / globe::brick_side));
+    if (stack == stacks_.end()) {
+        return false;
+    }
+    const std::uint32_t low = stack->second.front() * globe::brick_side;
+    const std::uint32_t high = ((stack->second.back() + 1) * globe::brick_side) - 1;
+    const std::vector<Scan> found = floors(face, i, j, low, high);
+    if (found.empty()) {
+        return false;
+    }
+    const globe::Surface& top = found.back().surface;
+    const double units = std::max(metres, 0.0) / world_->store().layers().thickness *
+                         static_cast<double>(full);
+    fill_grain({.face = face, .i = i, .j = j, .layer = top.first}, top.open,
+               std::min(static_cast<std::int64_t>(std::llround(units)),
+                        std::int64_t{top.open} * full),
+               Material::Ice);
+    return true;
+}
+
 Stepped Region::age_ice(double years) {
     ++steps_;
     Stepped stepped;

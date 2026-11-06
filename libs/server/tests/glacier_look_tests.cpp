@@ -5,6 +5,7 @@
 #include <hog/globe/voxel_store.hpp>
 #include <hog/globe/world.hpp>
 #include <hog/flow/simulation.hpp>
+#include <hog/server/ice_bake.hpp>
 #include <hog/server/ice_climate.hpp>
 #include <hog/weather/field.hpp>
 
@@ -62,7 +63,7 @@ TEST_CASE("a mountain's snow settles into glaciers", "[.glacier_look]") {
     std::printf("peak %.0f m over the reference, direction %.3f %.3f %.3f\n",
                 highest - planet.radius, peak.x, peak.y, peak.z);
 
-    constexpr std::uint32_t side = 128;
+    constexpr std::uint32_t side = 320;
     const auto at = [](std::uint32_t x, std::uint32_t y) { return static_cast<std::size_t>((y * side) + x); };
     const Cell centre = cell_under(peak, layers.level);
     const std::uint32_t i0 = centre.i - (side / 2);
@@ -100,16 +101,16 @@ TEST_CASE("a mountain's snow settles into glaciers", "[.glacier_look]") {
     VoxelStore store{layers};
     World world{generator, store};
     hog::flow::Simulation simulation{world};
-    simulation.set_ice_balance(hog::server::ice_balance(planet, [&](const Cell& column) {
-        const auto here = generator.column(direction_of(column.i, column.j), 1.0);
-        return hog::weather::Climate{
-            .surface = reference_temperature(generator, here), .swing = 12.0, .precipitation = 0.15};
-    }));
-    const std::vector<BrickSite> list(bricks.begin(), bricks.end());
-    const int rounds = std::getenv("HOG_LOOK_ROUNDS") != nullptr ? std::atoi(std::getenv("HOG_LOOK_ROUNDS")) : 4;
-    for (int round = 0; round < rounds; ++round) {
-        simulation.age_ice(list, 5.0);
-    }
+    const hog::server::IceMap map = hog::server::bake_ice_map(
+        generator, {centre.level, centre.face, i0, j0}, side / 8, 8,
+        [&](const Cell& column) {
+            const auto here = generator.column(direction_of(column.i, column.j), 1.0);
+            return hog::weather::Climate{.surface = reference_temperature(generator, here),
+                                         .swing = 12.0,
+                                         .precipitation = 0.15};
+        },
+        300);
+    simulation.lay_ice(hog::server::laid_from(map));
 
     // Top-down: height shading, ice tinted blue by its depth.
     std::vector<std::uint8_t> pixels(std::size_t{side} * side * 3);
