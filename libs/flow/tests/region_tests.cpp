@@ -617,3 +617,24 @@ TEST_CASE("a tall pile of ice stays put until the years run, then spreads withou
     // Whole units are written back, so a rounding or two may stray, but no more.
     CHECK(std::abs(block.region().grain() - before) < 64);
 }
+
+TEST_CASE("snow above the snowline grows ice on bare ground, and melt takes it away",
+          "[flow][region][glacier]") {
+    using hog::globe::Material;
+    Block block{floor_above_sea(100.0)};
+    double rate = 20.0;
+    block.region().set_ice_years_per_second(1.0);
+    block.region().set_ice_balance([&](const hog::globe::Cell&, double) { return rate; });
+    for (int step = 0; step < 20; ++step) {
+        block.region().step(tick);
+    }
+    const std::int64_t grown = block.region().grain();
+    CHECK(grown > 0);
+    CHECK(block.grain(12, 12, 0) > 0);
+
+    rate = -20.0;
+    for (int step = 0; step < 200; ++step) {
+        block.region().step(tick);
+    }
+    CHECK(block.region().grain() < grown / 10);
+}
