@@ -22,6 +22,8 @@ constexpr double free_relaxation = 1.0 / (40.0 * 86'400.0);
 constexpr double ground_relaxation = 1.0 / (4.0 * 86'400.0);
 constexpr double drag = 1.0 / 86'400.0;
 constexpr double boundary_pressure = 0.7;
+// Cells across the eddies too small for the grid, whose shedding of the wind's energy is u³ over it.
+constexpr double eddy_cells = 4.0;
 
 // The temperature the air at a cell would have brought down to the reference level without
 // heat: what rising and sinking leave unchanged.
@@ -354,9 +356,9 @@ void accelerate(Field& field, const Stencil& stencil, const globe::Planet& plane
         const double near =
             std::clamp((pressure - boundary_pressure) / (1.0 - boundary_pressure), 0.0, 1.0);
         air.wind *= static_cast<float>(std::exp(-drag * near * seconds));
-        // Eddies too small for the grid shed a wind's energy at u³ over their size, about a cell.
+        // Eddies too small for the grid shed a wind's energy at u³ over their size.
         const double eddy = static_cast<double>(glm::length(air.wind)) * seconds /
-                            static_cast<double>(stencil.links(cell)[0].distance);
+                            (eddy_cells * static_cast<double>(stencil.links(cell)[0].distance));
         air.wind /= static_cast<float>(1.0 + eddy);
 
         const double target = air_temperature(planet, static_cast<double>(field.surface[column]),

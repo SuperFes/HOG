@@ -17,7 +17,7 @@
 #include <span>
 #include <vector>
 
-namespace hog::server {
+namespace hog::skies {
 
 // How fine the air is held and how often it is stepped.
 struct WeatherSettings {
@@ -96,4 +96,4 @@ private:
     std::vector<std::byte> saved_;
 };
 
-} // namespace hog::server
+} // namespace hog::skies

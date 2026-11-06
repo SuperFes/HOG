@@ -209,8 +209,13 @@ void precipitate(Field& field, const globe::Planet& planet, double seconds) {
                     pressure_at(planet, surface, height - field.grid.between(layer - 1));
                 const double thick = under / (gas_constant / air_molar_mass *
                                               static_cast<double>(below.temperature));
-                below.rain += static_cast<float>(falling * density * field.grid.depth_of(layer) /
-                                                 (thick * field.grid.depth_of(layer - 1)));
+                // Cells further from the centre are bigger, so the same water is a thicker share
+                // of the smaller cell under it.
+                const double from = field.grid.radius_of(layer);
+                const double to = field.grid.radius_of(layer - 1);
+                below.rain += static_cast<float>(falling * density * field.grid.depth_of(layer) *
+                                                 from * from /
+                                                 (thick * field.grid.depth_of(layer - 1) * to * to));
             }
         }
     }

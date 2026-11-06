@@ -22,6 +22,8 @@ class Device;
 
 // Metres over which the clouds' shapes repeat: a whole number of their noise's volumes.
 inline constexpr double cloud_period = 1'024'000.0;
+// Seconds a billow flows before it's faded for the next, so the drift's shear never winds them up.
+inline constexpr double flow_period = 240.0;
 
 [[nodiscard]] std::uint32_t march_scale(CloudQuality quality) noexcept;
 [[nodiscard]] std::uint32_t shadow_size(CloudQuality quality) noexcept;
