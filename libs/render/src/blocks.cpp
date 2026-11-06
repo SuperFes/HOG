@@ -47,6 +47,11 @@ constexpr std::array descriptors{
                                  .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                                  .descriptorCount = 1,
                                  .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+                                 .pImmutableSamplers = nullptr},
+    VkDescriptorSetLayoutBinding{.binding = 1,
+                                 .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                 .descriptorCount = 1,
+                                 .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
                                  .pImmutableSamplers = nullptr}};
 
 constexpr std::array vertex_bindings{
@@ -147,6 +152,18 @@ Result<Blocks> Blocks::create(Device& device, VkFormat colour_format, VkFormat d
         return std::unexpected(std::move(sampler).error());
     }
     blocks.sampler_ = std::move(sampler).value();
+    constexpr std::array<std::byte, std::size_t{4} * 6> nothing{};
+    auto empty = make_filled_image(
+        device, {.format = VK_FORMAT_R8G8B8A8_UNORM, .layers = 6, .cube = true}, nothing);
+    if (!empty) {
+        return std::unexpected(std::move(empty).error());
+    }
+    blocks.nothing_ = std::move(empty).value();
+    auto mirror_sampler = make_sampler(device, VK_FILTER_LINEAR);
+    if (!mirror_sampler) {
+        return std::unexpected(std::move(mirror_sampler).error());
+    }
+    blocks.mirror_sampler_ = std::move(mirror_sampler).value();
     return blocks;
 }
 
@@ -288,6 +305,9 @@ void Blocks::draw_prepared(VkCommandBuffer commands, VkExtent2D extent, const Bl
     const double aspect = static_cast<double>(extent.width) / static_cast<double>(extent.height);
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.handle());
     push_sampled_image(commands, pipeline_, 0, tiles_.view(), sampler_.handle());
+    push_sampled_image(commands, pipeline_, 1,
+                       view.environment != VK_NULL_HANDLE ? view.environment : nothing_.view(),
+                       mirror_sampler_.handle());
     if (kept.count > 0) {
         draw_one(commands, kept.vertices, kept.indices, kept.count, kept.origin, view, aspect);
     }

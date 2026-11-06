@@ -339,27 +339,30 @@ void Scene::add_ground(render::RenderGraph& graph, const render::Frame& frame, c
             if (!deep) {
                 return deep;
             }
-            return blocks_.draw(
-                commands, frame.extent,
-                {.camera = shot.camera, .sun = sea.sun, .bend = shot.bend, .cutaway = shot.cutaway},
-                frame.slot);
+            blocks_.draw_prepared(commands, frame.extent,
+                                  {.camera = shot.camera,
+                                   .sun = sea.sun,
+                                   .bend = shot.bend,
+                                   .cutaway = shot.cutaway,
+                                   .environment = probing_ ? probes_.at(frame.slot).cube().view()
+                                                           : VK_NULL_HANDLE},
+                                  frame.slot);
+            return Result<>{};
         });
 }
 
 bool Scene::settled() const {
     // Where the eye was against the water is only known once a frame's finished, so the frame
     // after the eye goes in or out of it is the first drawn as it should be.
-    const std::optional<double> above = sky_.eye_above_water(last_slot_);
-    return settled_ && probing_ == (above && *above < 0.0);
+    return settled_ && probing_;
 }
 
 bool Scene::take_probe(render::RenderGraph& graph, const render::Frame& frame, const Shot& shot,
                        const render::SkyView& sky, std::span<const render::GraphUse> through_air) {
+    // From under the water, from just over it, so all it draws is out of the water; else from
+    // the eye, for what the water round it mirrors.
     const std::optional<double> above = sky_.eye_above_water(frame.slot);
-    if (!above || *above >= 0.0) {
-        return false;
-    }
-    const double raised = probe_over_water - *above;
+    const double raised = above && *above < 0.0 ? probe_over_water - *above : 0.0;
     render::SkyView high = sky;
     high.camera.eye += shot.bend.up * raised;
     high.bend.eye_height += raised;
@@ -367,7 +370,7 @@ bool Scene::take_probe(render::RenderGraph& graph, const render::Frame& frame, c
                .uses = {through_air.begin(), through_air.end()},
                .targets = std::nullopt},
               [this, slot = frame.slot, high](VkCommandBuffer commands) {
-                  // The ground the ground pass readied for this frame, seen from the probe.
+                  // The ground readied for this frame, seen from the probe.
                   const auto ground = [this, slot, &high](VkCommandBuffer drawing,
                                                           const render::Camera& camera,
                                                           VkExtent2D extent) -> Result<> {
@@ -388,6 +391,10 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     timings_.assign(timed.begin(), timed.end());
     follow_ground(shot);
     settled_ = !(globe_ && globe_->in_flight());
+    // The ground's meshes readied once for the frame, drawn by the probe and the ground pass.
+    if (Result<> prepared = blocks_.prepare(frame.slot); !prepared) {
+        return prepared;
+    }
 
     const protocol::CellWeather here = weather_at_eye(shot);
     const DVec3 sun = calendar_.sun_direction(shot.time);
@@ -530,6 +537,9 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
                   return ocean_.lay_water(commands, sea, frame.slot, frame.copyable);
               });
 
+    // What's round the eye first, for the ground's puddles and the water to mirror, and to be
+    // seen out of the water from under it.
+    probing_ = take_probe(graph, frame, shot, sky, through_air);
     add_ground(graph, frame, shot, sea, through_air, drawn);
     if (!shot.others.empty()) {
         graph.add({.name = "others", .uses = through_air, .targets = drawn},
@@ -551,8 +561,6 @@ Result<> Scene::record(render::Frame& frame, const Shot& shot) {
     }
     // Over all that stands in the sea, each seen through the water to its surface, as copied;
     // and from under it, what's out of it all round.
-    probing_ = take_probe(graph, frame, shot, sky, through_air);
-    last_slot_ = frame.slot;
     add_water(graph, frame, sea, through_air, target, depth, drawn);
     if (render::precipitation_count(falling, static_cast<double>(here.snow)) > 0) {
         graph.add({.name = "rain", .uses = through_air, .targets = drawn},
