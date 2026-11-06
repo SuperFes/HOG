@@ -43,6 +43,13 @@ public:
     // for support. Far quicker than the sweep comes round.
     void attend(DVec3 centre, double reach, double gap);
 
+    // Sets how ice gains and loses by place; see Region::IceBalance. Ice moves only when aged.
+    void set_ice_balance(Region::IceBalance balance) { region_.set_ice_balance(std::move(balance)); }
+    // Takes up `bricks` and ages the ice on all the ground held by `years`, however long the flow
+    // itself has run: glaciers move over years, not seconds. Returns the bricks written to the
+    // world.
+    std::vector<globe::BrickSite> age_ice(std::span<const globe::BrickSite> bricks, double years);
+
     // Sets a vent giving lava from the flow's clock on. Its brick is kept held while it gives any.
     void add_vent(const Vent& vent);
     [[nodiscard]] std::size_t vents() const noexcept { return vents_.size(); }
