@@ -57,13 +57,14 @@ struct SurfaceMesh {
 // quad across each edge it crosses. Each edge is the chunk's that holds its lower end, or, across
 // the cube's edges, the lower face's, so chunks of a detail meet without gaps or overlaps. The
 // surface is sought from surface_depth under the chunk's lowest ground to over its highest,
-// around the sea's level, round every cave under the chunk, found by casting down its columns,
-// and through changes held next to those. Coarser chunks are generated as much coarser.
+// around the sea's level, through the sight's radii, and through changes held next to those.
+// Coarser chunks are generated as much coarser.
 // Where the chunks beside it are drawn at other details, its surfaces meet theirs: the boxes of
 // voxels either side meet, and the vertex of a coarser box takes in where the surface crosses
 // the finer boxes' edges on its faces.
-// What lies under the ground can be seen only from inside it: with a `sight`, caves are cast for
-// only between its radii, so far more of the chunk isn't generated than is. Without, all are.
+// What lies under the ground can be seen only from inside it: with a `sight`, every voxel between
+// its radii is read, and whatever is open among them is drawn, caves and dug holes alike.
+// Without, only the ground's surface is.
 struct Sight {
     double lowest = 0.0;
     double highest = 0.0;

@@ -119,7 +119,7 @@ std::optional<Rock> rock_in(const Context& context, Cell cell, double lod) noexc
     rock.across = (std::cos(turn) * level_east) + (std::sin(turn) * level_north);
     const double radius = planet.radius + found.height - context.shape->datum;
     rock.middle = at * (radius + ((1.0 - (2.0 * sunk)) * rock.axes.z));
-    const double depth = found.mantle + 4.0;
+    constexpr double depth = 4.0;
     rock.material = material_at(context, found.layers, depth, radius - depth);
     if (properties(rock.material).strength < 1.0e6) {
         rock.material = found.layers.basement;

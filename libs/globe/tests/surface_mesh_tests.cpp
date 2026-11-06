@@ -384,7 +384,7 @@ TEST_CASE("a hollow dug in the ground keeps a sharp lip", "[globe][surface]") {
     CHECK(total / near_lip < 0.04);
 }
 
-TEST_CASE("a cave under a chunk is drawn however deep it lies, whole and without gaps",
+TEST_CASE("a cave in sight is drawn from its voxels however deep it lies, whole and without gaps",
           "[globe][surface]") {
     VoxelStore store{earth().layers()};
     const World world{earth(), store};
@@ -412,7 +412,9 @@ TEST_CASE("a cave under a chunk is drawn however deep it lies, whole and without
     CHECK(walls_seen({.lowest = cave.first - 50.0, .highest = cave.second + 50.0}) > 20);
     CHECK(walls_seen({.lowest = cave.second + 100.0, .highest = cave.second + 400.0}) == 0);
     CHECK(walls_seen(hog::globe::sight_of(0)) == 0);
-    const SurfaceMesh mesh = mesh_of(world, block_round(chunk));
+    const SurfaceMesh mesh = mesh_of(world, block_round(chunk),
+                                     hog::globe::Sight{.lowest = cave.first - 100.0,
+                                                       .highest = cave.second + 100.0});
     // The cave's walls are there, and every side of the chunk's triangles is shared.
     std::size_t walls = 0;
     for (std::uint32_t v = 0; v < mesh.vertices.size(); ++v) {

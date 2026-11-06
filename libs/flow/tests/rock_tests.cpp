@@ -11,6 +11,9 @@
 
 #include <glm/geometric.hpp>
 
+#include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstdint>
 #include <optional>
 #include <vector>
@@ -28,6 +31,22 @@ struct Found {
     hog::globe::Generator generator{hog::globe::Planet{}};
     std::optional<Rock> rock;
 
+    // On ground that stays within a few metres of level a few rocks' lengths either side, so a rock
+    // dug under rolls only into its hollow, not off down a slope.
+    [[nodiscard]] bool gentle(const Rock& candidate) const {
+        const double lod = hog::globe::voxel_lod(generator);
+        const auto ground_at = [&](DVec3 point) {
+            return hog::globe::ground_below(generator, glm::normalize(point), lod).value_or(0.0);
+        };
+        const DVec3 side = glm::normalize(glm::cross(candidate.up, candidate.across));
+        const double here = ground_at(candidate.middle);
+        const double reach = 4.0 * candidate.axes.x;
+        const std::array<DVec3, 4> aways{candidate.across, -candidate.across, side, -side};
+        return std::ranges::all_of(aways, [&](DVec3 away) {
+            return std::abs(ground_at(candidate.middle + (away * reach)) - here) <= 0.5 * reach;
+        });
+    }
+
     Found() {
         const int level = 13;
         const std::uint64_t cells = hog::globe::cells_at(level);
@@ -36,8 +55,10 @@ struct Found {
             const std::vector<Rock> near = generator.rocks_near(
                 hog::globe::center(cell) * generator.planet().radius,
                 hog::globe::voxel_lod(generator));
-            if (!near.empty()) {
-                rock = near.front();
+            for (const Rock& candidate : near) {
+                if (!rock && candidate.axes.z > 2.5 && gentle(candidate)) {
+                    rock = candidate;
+                }
             }
         }
     }
@@ -87,9 +108,9 @@ TEST_CASE("a rock with the ground dug from under it rolls into the hollow and re
     const Rock& rock = *found.rock;
     hog::globe::VoxelStore store{found.generator.layers()};
     hog::globe::World world{found.generator, store};
-    // A ball taking the ground under the footprint, stopping short of the rock's middle.
-    const double hollow = (0.5 * rock.axes.x) + 1.0;
-    hog::globe::dig(world, rock.middle - (rock.up * (rock.axes.z + 0.9)), hollow);
+    // A ball taking the ground under the whole footprint, stopping short of the rock's middle.
+    const double hollow = (0.75 * std::max(rock.axes.x, rock.axes.y)) + 1.0;
+    hog::globe::dig(world, rock.middle - (rock.up * (rock.axes.z + 1.5)), hollow);
     hog::flow::Region region{world, false};
     hold_about(region, store.layers(), rock.middle, 14.0);
 

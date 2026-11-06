@@ -11,7 +11,6 @@
 #include <format>
 #include <limits>
 #include <map>
-#include <numbers>
 #include <optional>
 #include <set>
 #include <span>
@@ -182,11 +181,9 @@ std::optional<std::pair<double, double>> lake_levels(const Generator& generator,
 }
 
 // Bands of layers the surfaces lie in, lowest first, apart from each other, each from and to
-// (inclusive) a layer of a lattice of every `coarsest` layers. `apart` is the chunk's own;
-// `places` are the columns' places on the grid, in their order.
+// (inclusive) a layer of a lattice of every `coarsest` layers. `apart` is the chunk's own.
 std::vector<std::pair<int, int>> bands_of(const World& world, Cell chunk,
-                                          std::span<const Generator::Column> columns,
-                                          std::span<const std::pair<int, int>> places, int apart,
+                                          std::span<const Generator::Column> columns, int apart,
                                           int coarsest, std::optional<Sight> sight) {
     const Generator& generator = world.generator();
     const Layers& layers = generator.layers();
@@ -206,24 +203,9 @@ std::vector<std::pair<int, int>> bands_of(const World& world, Cell chunk,
         bands.emplace_back(layers.layer_at(lakes->first - band),
                            layers.layer_at(lakes->second + band) + 1);
     }
-    // Every cave under the chunk, cast for down the middle column of each square of four by
-    // four: a stretch of the cast where a cave may lie within the square, and the walls' band
-    // about it.
-    constexpr int stride = 4;
-    const Sight sought =
-        sight.value_or(Sight{.lowest = layers.bottom(0), .highest = layers.top(layers.count - 1)});
-    const std::array<DVec3, 4> corner = corners(chunk);
-    const double cell =
-        glm::length(corner[1] - corner[0]) * generator.planet().radius / chunk_side * apart;
-    const double within = (2.0 * std::numbers::sqrt2 * cell) + band;
-    for (std::size_t k = 0; k < columns.size(); ++k) {
-        const auto [a, b] = places[k];
-        if (((a % stride) + stride) % stride != 2 || ((b % stride) + stride) % stride != 2) {
-            continue;
-        }
-        for (const auto& [bottom, top] : columns[k].caves(sought.lowest, sought.highest, within)) {
-            bands.emplace_back(layers.layer_at(bottom - band), layers.layer_at(top + band) + 1);
-        }
+    // Under the ground, what the eye can see from inside it is read whole from the voxels.
+    if (sight && sight->lowest < sight->highest) {
+        bands.emplace_back(layers.layer_at(sight->lowest), layers.layer_at(sight->highest) + 1);
     }
     // Changes held next to a band widen it, a brick at a time.
     const std::set<int> held = held_layers(world.store(), chunk, apart);
@@ -1648,8 +1630,8 @@ void add_chunk_voxels(SurfaceMesh& mesh, const World& world, Cell chunk, const D
     HOG_ASSERT(chunk.is_valid() && detail_of(chunk, layers) >= 0,
                "a chunk is a cell at least chunk_levels coarser than the voxels'");
     Grid grid{world, chunk, drawn, mesh.origin};
-    for (const auto& [bottom, top] : bands_of(world, chunk, grid.generated(), grid.places(),
-                                              grid.apart(), grid.coarsest(), sight)) {
+    for (const auto& [bottom, top] : bands_of(world, chunk, grid.generated(), grid.apart(),
+                                              grid.coarsest(), sight)) {
         grid.fill(bottom, top);
         VoxelFaces{grid, mesh}.add();
     }
@@ -1674,8 +1656,8 @@ void add_chunk(SurfaceMesh& mesh, const World& world, Cell chunk, const Drawn& d
                std::format("boxes of chunks beside each other overlap, at chunk level {} face {} "
                            "i {} j {}",
                            chunk.level, chunk.face, chunk.i, chunk.j));
-    for (const auto& [bottom, top] : bands_of(world, chunk, grid.generated(), grid.places(),
-                                              grid.apart(), grid.coarsest(), sight)) {
+    for (const auto& [bottom, top] : bands_of(world, chunk, grid.generated(), grid.apart(),
+                                              grid.coarsest(), sight)) {
         grid.fill(bottom, top);
         Net<Ground>{grid, mesh}.add();
         Net<Liquid>{grid, mesh}.add();

@@ -37,14 +37,8 @@ struct Sample {
     double temperature = 0.0; // kelvin
 };
 
-// What lies under the ground in one column, top down: snow, loose cover, sedimentary beds, then
-// the crust's own rock.
+// What lies under the ground in one column, top down: sedimentary beds, then the crust's own rock.
 struct Strata {
-    double snow = 0.0;            // metres
-    Material top = Material::Air; // sand, soil, mud or regolith, under the snow
-    double top_depth = 0.0;       // metres
-    double sediment_depth = 0.0;  // loose sediment's base, metres below the snow
-    double hold = 1.0;            // how much of the loose cover stays on this slope, 0 to 1
     double cover = 0.0;           // sedimentary rock's base, metres below the ground
     double fold = 0.0;            // metres the beds are lifted here
     DVec3 fold_tilt{0.0};         // how much more, per metre across
@@ -101,7 +95,6 @@ public:
         // flooded; 0 where the planet has no drainage.
         [[nodiscard]] double table() const noexcept { return table_; }
         // Metres of loose cover between the ground and the rock under it.
-        [[nodiscard]] double mantle() const noexcept { return mantle_; }
         // Metres from the centre to the highest solid, which a fallen rock lifts above the ground.
         [[nodiscard]] double top() const noexcept {
             return rock_ ? std::max(ground_, rock_->top()) : ground_;
@@ -116,13 +109,17 @@ public:
 
     private:
         friend class Generator;
+        // Takes the cave's open space out of the sample at `radius`, with the way out of it.
+        void carve_cave(double radius, Sample& sample, DVec3& rise) const noexcept;
+        // The way a cave's distance grows at `radius`, by differences.
+        [[nodiscard]] DVec3 cave_rise(double radius) const noexcept;
+
         const Generator* generator_ = nullptr;
         DVec3 direction_{0.0, 0.0, 1.0};
         double lod_ = 0.0;
         double ground_ = 0.0; // metres from the centre
         double water_ = 0.0;  // metres from the centre to where open water stands; 0 none
         double table_ = 0.0;  // metres from the centre to the water table; 0 none
-        double mantle_ = 0.0; // metres of loose cover over the rock
         double slope_ = 0.0;  // across the ground, at the radius
         DVec3 tilt_{0.0};     // the way the ground rises, by as much
         double surface_temperature_ = 0.0; // at the reference level

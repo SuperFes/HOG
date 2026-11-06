@@ -45,10 +45,6 @@ struct Context {
 [[nodiscard]] double smoothstep(double x) noexcept; // 0 below 0, 1 above 1
 [[nodiscard]] double smoothstep_slope(double x) noexcept;
 
-// max(a, b), rounded where they meet over `width`, and how much of its rate is a's.
-[[nodiscard]] double smooth_max(double a, double b, double width) noexcept;
-[[nodiscard]] double smooth_max_share(double a, double b, double width) noexcept;
-
 // The crustal province field, before its threshold: the high crust stands where it's above.
 [[nodiscard]] Noise province_field(const Context& context, DVec3 direction) noexcept;
 
@@ -107,31 +103,14 @@ struct Column {
 
 using Layering = Strata;
 
-// From the ground's height over the radius, its slope and its year-mean temperature: the
-// layers as deep as they'd lie on ground that holds them all, with `hold` for how much of them
-// this slope keeps.
+// From the ground's height over the radius: the beds that lie under it.
 [[nodiscard]] Layering layering(const Context& context, DVec3 direction, const Column& column,
-                                double height, double slope, double temperature) noexcept;
+                                double height) noexcept;
 
-// Metres of loose cover the layers would lie, snow, top and sediment together.
-[[nodiscard]] double loose_depth(const Layering& layers) noexcept;
-
-// The layers as they lie where the cover is `thickness` deep: each thinned alike where there is
-// less than they'd have, the sediment deepened where there is more.
-void lie_in(Layering& layers, double thickness) noexcept;
-
-// Loose cover creeps downhill until its surface is the rock's smoothed over the creep length and
-// lifted by the depth it's made at: it fills the hollows under that surface and leaves the knobs
-// above it bare. `rock` and `smooth` are heights, `depth` metres the cover would lie on even
-// ground, `hold` how much of it the slope keeps. Metres of cover over the rock.
-[[nodiscard]] double mantle(double rock, double smooth, double depth, double hold) noexcept;
-
-// A column's ground before its slope across is known: the rock, the loose cover crept smooth on
-// it, and the layers as they lie.
+// A column's ground before its slope across is known: the bare rock and its beds.
 struct Ground {
     Column rock;
-    double height = 0.0;              // the ground's, over the raw radius: the rock's and its cover
-    double mantle = 0.0;              // metres of loose cover over the rock
+    double height = 0.0;              // the rock's, over the raw radius
     double surface_temperature = 0.0; // kelvin, at the reference level
     Layering layers;
 };
