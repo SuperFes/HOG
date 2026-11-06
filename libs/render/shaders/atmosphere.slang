@@ -347,7 +347,8 @@ public struct Lighting {
     public float4 downwind;
     // What the water at the eye carries, as water.slang's optics takes it.
     public float4 carried;
-    // x the seconds since the weather's maps were taken.
+    // x the seconds since the weather's maps before were taken, y those after, z how long the
+    // billows have flowed, within clouds.hpp's flow_period.
     public float4 weather_age;
 };
 

@@ -126,24 +126,26 @@ Result<> WeatherMaps::update(VkCommandBuffer commands, std::uint32_t frame,
         }
         return false;
     };
-    falling_ = falls(weather_before) || falls(weather_after);
-    // Of a channel of both sky maps, the least and most.
-    const auto bounds = [&](std::size_t channel) {
+    // Of a channel of a sky map, the least and most.
+    const auto bounds = [](std::span<const std::byte> map, std::size_t channel) {
         std::uint8_t least = 255;
         std::uint8_t most = 0;
-        for (const std::span<const std::byte> map : {sky_before, sky_after}) {
-            for (std::size_t at = channel; at < map.size(); at += 4) {
-                least = std::min(least, std::to_integer<std::uint8_t>(map[at]));
-                most = std::max(most, std::to_integer<std::uint8_t>(map[at]));
-            }
+        for (std::size_t at = channel; at < map.size(); at += 4) {
+            least = std::min(least, std::to_integer<std::uint8_t>(map[at]));
+            most = std::max(most, std::to_integer<std::uint8_t>(map[at]));
         }
         return std::pair{static_cast<double>(least), static_cast<double>(most)};
     };
-    fog_top_ = bounds(fog_channel).second * fog_step;
-    const auto [lowest, highest] = bounds(base_channel);
-    lowest_base_ = lowest * height_step;
-    highest_base_ = highest * height_step;
-    highest_top_ = bounds(top_channel).second * height_step;
+    const auto reach = [&](std::span<const std::byte> weather, std::span<const std::byte> sky) {
+        const auto [lowest, highest] = bounds(sky, base_channel);
+        return Reach{.falling = falls(weather),
+                     .fog_top = bounds(sky, fog_channel).second * fog_step,
+                     .lowest_base = lowest * height_step,
+                     .highest_base = highest * height_step,
+                     .highest_top = bounds(sky, top_channel).second * height_step};
+    };
+    before_ = reach(weather_before, sky_before);
+    after_ = reach(weather_after, sky_after);
     return {};
 }
 
@@ -178,11 +180,12 @@ WeatherBindings WeatherMaps::bindings(double faded, double age, double age_befor
             .drift_after = drift_after_.image().view(),
             .sampler = linear_.handle(),
             .faded = faded,
-            .falling = falling_,
-            .fog_top = fog_top_,
-            .lowest_base = lowest_base_,
-            .highest_base = highest_base_,
-            .highest_top = highest_top_,
+            .falling = (faded < 1.0 && before_.falling) || (faded > 0.0 && after_.falling),
+            .fog_top = std::lerp(before_.fog_top, after_.fog_top, faded),
+            .lowest_base = std::lerp(before_.lowest_base, after_.lowest_base, faded),
+            .highest_base = std::lerp(before_.highest_base, after_.highest_base, faded),
+            .highest_top = std::lerp(before_.highest_top, after_.highest_top, faded),
+            .age_before = age_before,
             .age = age};
 }
 

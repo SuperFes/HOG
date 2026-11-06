@@ -121,6 +121,8 @@ struct Scene {
     // How the weather drifts, and how long since its maps were taken.
     std::vector<std::byte> drift = drift_of([](DVec3) { return DVec3{0.0}; });
     double age = 0.0;
+    double age_before = 0.0;
+    double flow = 0.0; // seconds the billows have flowed
     // Drawn nearest of all.
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     std::optional<VkRect2D> covered = {};
@@ -172,7 +174,8 @@ std::vector<Pixels> draw_frames(hog::render::Device& device, const std::vector<S
             CHECK(maps->update(commands, 0, scene.before, scene.after.value_or(scene.before),
                                scene.sky, scene.sky, scene.drift, scene.drift));
         }));
-        const hog::render::WeatherBindings weather = maps->bindings(scene.faded, scene.age);
+        hog::render::WeatherBindings weather = maps->bindings(scene.faded, scene.age, scene.age_before);
+        weather.flow = scene.flow;
 
         const WorldPosition eye{up * (radius + scene.eye_height)};
         const hog::terrain::Bend bend = hog::terrain::bend_from(eye, radius, 0.0);
@@ -441,6 +444,19 @@ TEST_CASE("broken cloud billows, drifts with the wind, and repeats over its peri
     CHECK(lit_pixels(pixels, extent.height) < extent.width * extent.height);
     CHECK(draw(*device, around) == pixels);
     CHECK(draw(*device, drifted) != pixels);
+}
+
+TEST_CASE("billows flow with the drift where they are, and stand where there is none",
+          "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    const Scene still{.forward = glm::normalize(east + (2.0 * up)), .before = everywhere(broken)};
+    Scene calm = still;
+    calm.flow = 60.0;
+    Scene blowing = calm;
+    blowing.drift = drift_of([](DVec3) { return DVec3{0.0, 20.0, 0.0}; });
+    const Pixels pixels = draw(*device, still);
+    CHECK(draw(*device, calm) == pixels);
+    CHECK(draw(*device, blowing) != pixels);
 }
 
 TEST_CASE("thick cloud is dark beneath and bright on top", "[render][gpu][atmosphere]") {
@@ -984,6 +1000,30 @@ TEST_CASE("cloud is drawn where its own drift's taken it since the maps were, wh
         return shadow;
     };
     // Over the north, from about 11 km north of the eye; and then from 20 km further south.
+    const glm::vec4 still = mean_between(shadow_of(0.0), 22'000.0, 28'000.0);
+    const glm::vec4 drifted = mean_between(shadow_of(1'000.0), 22'000.0, 28'000.0);
+    INFO("still " << still.r << ", drifted " << drifted.r);
+    CHECK(still.r < 0.1F);
+    CHECK(drifted.r > 0.9F);
+    CHECK(device->validation_errors() == 0);
+}
+
+TEST_CASE("the weather faded from is drawn where its drift's taken it since its maps were",
+          "[render][gpu][atmosphere]") {
+    const auto device = test_device();
+    const std::vector<std::byte> drift =
+        drift_of([](DVec3 direction) { return direction.y > 0.1 ? north * 20.0 : DVec3{0.0}; });
+    const auto shadow_of = [&](double age_before) {
+        Shadow shadow;
+        static_cast<void>(draw_frames(*device,
+                                      {{.before = map_of(northern),
+                                        .after = map_of(northern),
+                                        .faded = 0.0,
+                                        .drift = drift,
+                                        .age_before = age_before}},
+                                      &shadow));
+        return shadow;
+    };
     const glm::vec4 still = mean_between(shadow_of(0.0), 22'000.0, 28'000.0);
     const glm::vec4 drifted = mean_between(shadow_of(1'000.0), 22'000.0, 28'000.0);
     INFO("still " << still.r << ", drifted " << drifted.r);

@@ -1,15 +1,15 @@
 #include <hog/core/bytes.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/planet/projection.hpp>
-#include <hog/server/weather_keeper.hpp>
 #include <hog/sim/cell_grid.hpp>
+#include <hog/skies/weather_keeper.hpp>
 #include <hog/waves/waves.hpp>
 #include <hog/weather/state.hpp>
 
 #include <algorithm>
 #include <utility>
 
-namespace hog::server {
+namespace hog::skies {
 namespace {
 
 // The longest a weather is faded to over, so a slow job doesn't smear the cloud.
@@ -165,4 +165,4 @@ protocol::Weather WeatherKeeper::sum(std::chrono::milliseconds fade, float pace)
     return weather;
 }
 
-} // namespace hog::server
+} // namespace hog::skies

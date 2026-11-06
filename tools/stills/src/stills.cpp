@@ -241,6 +241,37 @@ Image map(const Generator& generator, int width, int threads) {
     return shade(generator, grid, spacing, shrink, spacing, true);
 }
 
+namespace {
+
+// How many cells hold a lake: above the sea, with water standing deeper than half a metre.
+std::size_t lake_cells(const std::vector<float>& heights, int level, double radius, double sea) {
+    const globe::Drainage found = globe::drain(heights, level, radius, sea);
+    std::size_t held = 0;
+    for (std::uint32_t cell = 0; cell < heights.size(); ++cell) {
+        held += static_cast<double>(heights[cell]) > sea && found.depth(cell) > 0.5 ? 1 : 0;
+    }
+    return held;
+}
+
+// `ground` worn by `erosion`, saying on stderr what it did to the lakes and how deep it cut.
+std::vector<float> worn_by(const std::vector<float>& ground, int level, double radius, double sea,
+                           const globe::Erosion& erosion) {
+    const std::size_t before = lake_cells(ground, level, radius, sea);
+    std::vector<float> worn = globe::erode(ground, level, radius, sea, erosion);
+    double most = 0.0;
+    double total = 0.0;
+    for (std::size_t cell = 0; cell < worn.size(); ++cell) {
+        most = std::max(most, static_cast<double>(ground[cell] - worn[cell]));
+        total += static_cast<double>(ground[cell] - worn[cell]);
+    }
+    std::cerr << std::format("lake cells {} -> {}, cut at most {:.1f} m, on average {:.3f} m\n",
+                             before, lake_cells(worn, level, radius, sea), most,
+                             total / static_cast<double>(worn.size()));
+    return worn;
+}
+
+} // namespace
+
 Image drainage(const Generator& generator, int width, int level, int threads,
                const globe::Erosion& erosion) {
     const double radius = generator.planet().radius;
@@ -257,26 +288,8 @@ Image drainage(const Generator& generator, int width, int level, int threads,
         }
     });
     const double sea = generator.sea_level() ? 0.0 : -1e30;
-    const auto lakes = [&](const std::vector<float>& heights) {
-        const globe::Drainage found = globe::drain(heights, level, radius, sea);
-        std::size_t held = 0;
-        for (std::uint32_t cell = 0; cell < heights.size(); ++cell) {
-            held += heights[cell] > sea && found.depth(cell) > 0.5 ? 1 : 0;
-        }
-        return held;
-    };
     if (erosion.steps > 0) {
-        const std::size_t before = lakes(ground);
-        const std::vector<float> worn = globe::erode(ground, level, radius, sea, erosion);
-        double most = 0.0;
-        double total = 0.0;
-        for (std::size_t cell = 0; cell < worn.size(); ++cell) {
-            most = std::max(most, static_cast<double>(ground[cell] - worn[cell]));
-            total += ground[cell] - worn[cell];
-        }
-        std::cerr << std::format("lake cells {} -> {}, cut at most {:.1f} m, on average {:.3f} m\n",
-                                 before, lakes(worn), most, total / static_cast<double>(worn.size()));
-        ground = worn;
+        ground = worn_by(ground, level, radius, sea, erosion);
     }
     const globe::Drainage drained = globe::drain(ground, level, radius, sea);
 
@@ -291,9 +304,9 @@ Image drainage(const Generator& generator, int width, int level, int threads,
             const DVec3 up = Place{.latitude = 90.0 - ((y + 0.5) * 180.0 / height),
                                    .longitude = -180.0 + ((x + 0.5) * 360.0 / width)}
                                  .direction();
-            const auto cell = static_cast<std::size_t>(
-                globe::index_of(globe::cell_under(up, level)));
-            const double over = static_cast<double>(drained.ground[cell]);
+            const auto cell =
+                static_cast<std::size_t>(globe::index_of(globe::cell_under(up, level)));
+            const auto over = static_cast<double>(drained.ground[cell]);
             Rgb colour{};
             if (over <= sea) {
                 colour = mixed({95, 165, 215}, {10, 30, 90}, -over / (0.5 * tallest));
@@ -310,8 +323,9 @@ Image drainage(const Generator& generator, int width, int level, int threads,
                     colour = mixed(colour, {40, 150, 255}, 0.4 + (0.6 * std::min(strength, 1.0)));
                 }
             }
-            const std::size_t at = 3 * ((static_cast<std::size_t>(y) * static_cast<std::size_t>(width)) +
-                                        static_cast<std::size_t>(x));
+            const std::size_t at =
+                3 * ((static_cast<std::size_t>(y) * static_cast<std::size_t>(width)) +
+                     static_cast<std::size_t>(x));
             for (std::size_t k = 0; k < 3; ++k) {
                 image.pixels[at + k] = colour.at(k);
             }

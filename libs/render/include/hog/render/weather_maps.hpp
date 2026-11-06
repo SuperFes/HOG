@@ -38,6 +38,9 @@ struct WeatherBindings {
     // drift brought it from.
     double age_before = 0.0;
     double age = 0.0;
+    // Seconds the billows have flowed, within clouds.hpp's flow_period: each reads the drift where
+    // it is, whoever looks.
+    double flow = 0.0;
 };
 
 // Per metre, how much of the light along a view the mist takes at `height` metres above sea level,
@@ -83,11 +86,17 @@ private:
     StreamedImage drift_after_;
     Image clear_;
     std::uint32_t map_size_ = 0;
-    bool falling_ = false;
-    double fog_top_ = 0.0;
-    double lowest_base_ = 0.0;
-    double highest_base_ = 0.0;
-    double highest_top_ = 0.0;
+    // How far what each side's maps hold reaches: whether anything falls, and the metres above sea
+    // level of the fog's top and of the cloud's lowest and highest base and highest top.
+    struct Reach {
+        bool falling = false;
+        double fog_top = 0.0;
+        double lowest_base = 0.0;
+        double highest_base = 0.0;
+        double highest_top = 0.0;
+    };
+    Reach before_;
+    Reach after_;
 };
 
 } // namespace hog::render

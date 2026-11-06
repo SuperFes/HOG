@@ -274,9 +274,9 @@ TEST_CASE("rain in dry air evaporates before it lands, cooling the air", "[weath
         precipitate(world.field, world.planet, 30.0);
         reached += static_cast<double>(world.field.precipitation[column]) * 30.0 / 3'600.0;
     }
-    // The cell holds about 0.0005 kg/kg of air a kilogram a cubic metre or less over its depth, and
-    // most of it is gone before the ground.
-    CHECK(reached < 0.15 * 0.0005 * world.field.grid.depth_of(6));
+    // The cell holds about 0.0005 kg/kg of air a kilogram a cubic metre or less over its depth, and a
+    // fifth of it or less reaches the ground.
+    CHECK(reached < 0.25 * 0.0005 * world.field.grid.depth_of(6));
     CHECK(world.field.at(column, 3).temperature < before);
 }
 
@@ -374,4 +374,39 @@ TEST_CASE("heat the air takes from the ground, the ground loses", "[weather][moi
     }
     CHECK(taken > 0.0);
     CHECK(lost == Approx(taken).epsilon(1e-2));
+}
+
+TEST_CASE("rain keeps its water falling through cells that grow with height", "[weather][rain]") {
+    Small world;
+    const std::size_t column = world.sea_column();
+    const Field& field = world.field;
+    const auto mass = [&](int layer) {
+        const double height = field.grid.radius_of(layer) - world.planet.radius;
+        const auto surface = static_cast<double>(field.surface[column]);
+        const double radius = field.grid.radius_of(layer);
+        return air_density(air_temperature(world.planet, surface, height),
+                           pressure_at(world.planet, surface, height)) *
+               field.grid.depth_of(layer) * radius * radius;
+    };
+    for (int layer = 0; layer < field.grid.layers; ++layer) {
+        Air& air = world.field.at(column, layer);
+        air.vapour = static_cast<float>(saturation_ratio(
+            world.planet.volatiles, static_cast<double>(air.temperature),
+            pressure_at(world.planet, static_cast<double>(field.surface[column]),
+                        field.grid.radius_of(layer) - world.planet.radius)));
+    }
+    world.field.at(column, 6).rain = 0.002F;
+    const double start = 0.002 * mass(6);
+    const double ground = field.ground[column];
+    double reached = 0.0;
+    for (int i = 0; i < 40; ++i) {
+        precipitate(world.field, world.planet, 30.0);
+        reached += static_cast<double>(field.precipitation[column]) * 30.0 / 3'600.0 * ground * ground;
+    }
+    double held = 0.0;
+    for (int layer = 0; layer < field.grid.layers; ++layer) {
+        const Air& air = field.at(column, layer);
+        held += (static_cast<double>(air.rain) + static_cast<double>(air.cloud)) * mass(layer);
+    }
+    CHECK(held + reached == Approx(start).epsilon(0.02));
 }

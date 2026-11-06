@@ -36,7 +36,8 @@ struct Push {
     // x the planet's radius, y the faked radius drawing bends it onto, z how far the weather has
     // faded from the maps before to those after, w the radians across a marched texel.
     float4 radii;
-    // xyz the metres the clouds have drifted, in the planet's frame and within their period; w how
+    // xyz metres the noise is shifted by besides its drift, in the planet's frame and within the
+    // clouds' period; w how
     // many of the picture's pixels a marched texel spans, across and down.
     float4 moved;
     // Metres above sea level anywhere: x the lowest of the cloud's base, y the highest of its top,
@@ -168,10 +169,41 @@ Cell cell_at(float3 direction) {
     return cell;
 }
 
+// Seconds a billow flows before it's faded for the next: clouds.hpp's flow_period.
+static const float flow_period = 240.0;
+
+// Where the noise lies for billows at `at`: shifted by the drift there, whoever looks, in two
+// phases faded one into the other so the drift's shear never winds them up.
+struct Flow {
+    float3 first;
+    float3 second;
+    // The share of the first.
+    float share;
+};
+
+Flow flow_at(float3 at) {
+    const float3 direction = normalize(at);
+    const float3 drift = lerp(drift_before.SampleLevel(direction, 0.0).xyz,
+                              drift_after.SampleLevel(direction, 0.0).xyz, push.radii.z);
+    const float phase = lighting.weather_age.z / flow_period;
+    const float other = frac(phase + 0.5);
+    Flow flow;
+    flow.first = push.moved.xyz + (drift * ((phase - 0.5) * flow_period));
+    flow.second = push.moved.xyz + (drift * ((other - 0.5) * flow_period));
+    flow.share = 1.0 - abs((2.0 * phase) - 1.0);
+    return flow;
+}
+
+// `noise` at `at`, `tile` metres across its volume, as the billows have flowed.
+float4 flowed(Sampler3D noise, float3 at, Flow flow, float tile, float level) {
+    return lerp(noise.SampleLevel((at - flow.second) / tile, level),
+                noise.SampleLevel((at - flow.first) / tile, level), flow.share);
+}
+
 // The weather at `direction` on a planet of `radius`, its edges wandering and its base uneven.
 Cell wandering_cell_at(float3 direction, float radius) {
     const float3 ground = direction * radius;
-    const float4 broad = shape_noise.SampleLevel((ground - push.moved.xyz) / wander_tile, 1.0);
+    const float4 broad = flowed(shape_noise, ground, flow_at(ground), wander_tile, 1.0);
     Cell cell = cell_at(normalize(ground + ((broad.gba - 0.5) * wander)));
     cell.base += (broad.r - 0.5) * lift * (cell.top - cell.base);
     return cell;
@@ -195,9 +227,9 @@ float cloud_at(float3 at, float height, Cell cell, float footprint, bool worn, o
     const float rounding = lerp(0.1, 0.6, saturate((thickness - 500.0) / 2500.0));
     const float profile = saturate(up / 0.08) * saturate((1.0 - up) / rounding);
 
-    const float3 drifted = at - push.moved.xyz;
-    const float4 shape = shape_noise.SampleLevel(
-        drifted / shape_tile, max(log2(footprint * shape_texels / shape_tile), 0.0));
+    const Flow flow = flow_at(at);
+    const float4 shape = flowed(shape_noise, at, flow, shape_tile,
+                                max(log2(footprint * shape_texels / shape_tile), 0.0));
     billows = shape.r;
     // The billows are spread evenly, so about as much of the sky's covered as the cover says, and a
     // full cover leaves no gaps. Broken cloud covers less higher up, so it billows into domes.
@@ -208,10 +240,8 @@ float cloud_at(float3 at, float height, Cell cell, float footprint, bool worn, o
     const float wearing = (shape.g * 0.625) + (shape.b * 0.25) + (shape.a * 0.125);
     cloud = saturate(remap(cloud, (1.0 - wearing) * 0.25 * (1.0 - cell.cover), 1.0, 0.0, 1.0));
     if (worn && cloud > 0.0) {
-        const float detail = detail_noise
-                                 .SampleLevel(drifted / detail_tile,
-                                              max(log2(footprint * detail_texels / detail_tile),
-                                                  0.0))
+        const float detail = flowed(detail_noise, at, flow, detail_tile,
+                                    max(log2(footprint * detail_texels / detail_tile), 0.0))
                                  .a;
         // Wispy below, billowing above; less so the more of the sky's covered, so a full cover
         // keeps no gaps.
@@ -230,14 +260,12 @@ float fog_at(float3 at, float height, Cell cell, float footprint) {
     if (deep <= 0.0) {
         return 0.0;
     }
-    const float3 drifted = at - push.moved.xyz;
+    const Flow flow = flow_at(at);
     const float bank =
-        shape_noise
-            .SampleLevel(drifted / bank_tile, max(log2(footprint * shape_texels / bank_tile), 0.0))
+        flowed(shape_noise, at, flow, bank_tile, max(log2(footprint * shape_texels / bank_tile), 0.0))
             .r;
     const float wisp =
-        shape_noise
-            .SampleLevel(drifted / wisp_tile, max(log2(footprint * shape_texels / wisp_tile), 0.0))
+        flowed(shape_noise, at, flow, wisp_tile, max(log2(footprint * shape_texels / wisp_tile), 0.0))
             .r;
     // The billows are spread evenly, so both average 1.
     return fog_per_metre * deep * (1.0 + (banked * ((2.0 * bank) - 1.0))) *
@@ -306,10 +334,9 @@ float2 cloud_shade(Cell cell) {
 
 // How heavily it falls in its streaks at `height` over `direction`, about 1 on the whole.
 float streaks_at(float3 direction, float height, float footprint) {
-    const float3 at = (direction * (push.radii.x + (height / streak_stretch))) - push.moved.xyz;
-    const float detail = detail_noise
-                             .SampleLevel(at / streak_tile,
-                                          max(log2(footprint * detail_texels / streak_tile), 0.0))
+    const float3 at = direction * (push.radii.x + (height / streak_stretch));
+    const float detail = flowed(detail_noise, at, flow_at(at), streak_tile,
+                                max(log2(footprint * detail_texels / streak_tile), 0.0))
                              .a;
     return 0.25 + (1.5 * detail);
 }
