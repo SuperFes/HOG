@@ -253,8 +253,8 @@ void GlobeStream::start_more() {
                                 *jobs_, [world = world_, drawn = drawn_, chunk, radius, against] {
                                     globe::SurfaceMesh mesh;
                                     mesh.origin = globe::center(chunk) * radius;
-                                    globe::add_chunk_voxels(mesh, *world, chunk, *drawn,
-                                                            globe::sight_of(band_of(against)));
+                                    globe::add_chunk(mesh, *world, chunk, *drawn,
+                                                     globe::sight_of(band_of(against)));
                                     return mesh;
                                 })});
     }

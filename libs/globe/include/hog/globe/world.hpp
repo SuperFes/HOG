@@ -33,6 +33,10 @@ public:
     // and normals. Copies of the world keep the choice.
     void draw_from_amounts(bool on) noexcept { from_amounts_ = on; }
     [[nodiscard]] bool draws_from_amounts() const noexcept { return from_amounts_; }
+    // Whether chunks are drawn as the voxels' own boxes, nothing smoothed, in place of the shaped
+    // surface. Copies of the world keep the choice.
+    void draw_as_boxes(bool on) noexcept { as_boxes_ = on; }
+    [[nodiscard]] bool draws_as_boxes() const noexcept { return as_boxes_; }
 
     [[nodiscard]] Voxel at(Site site) const;
     [[nodiscard]] BrickVoxels brick(BrickSite site) const;
@@ -53,6 +57,7 @@ private:
     const Generator* generator_;
     VoxelStore* store_;
     bool from_amounts_ = false;
+    bool as_boxes_ = false;
 };
 
 // Shaped matter taken out of a ball, or built up in one of `material`; `centre` in metres from

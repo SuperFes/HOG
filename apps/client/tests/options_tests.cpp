@@ -25,6 +25,13 @@ TEST_CASE("the surface is drawn from stored distances unless amounts are asked f
     CHECK_FALSE(parse_options(Arguments{"--surface", "distance"})->surface_from_amounts);
 }
 
+TEST_CASE("the voxels are drawn as boxes only when asked for", "[client][options]") {
+    CHECK_FALSE(parse_options(Arguments{})->surface_boxes);
+    CHECK(parse_options(Arguments{"--surface", "boxes"})->surface_boxes);
+    CHECK_FALSE(parse_options(Arguments{"--surface", "boxes"})->surface_from_amounts);
+    CHECK_FALSE(parse_options(Arguments{"--surface", "distance"})->surface_boxes);
+}
+
 TEST_CASE("the voxel size to look at the world in is read in metres", "[client][options]") {
     const auto options = parse_options(Arguments{"--voxel", "0.25"});
     REQUIRE(options);
