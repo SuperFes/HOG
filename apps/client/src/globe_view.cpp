@@ -88,6 +88,10 @@ Vec3 surface_colour(globe::Material material) {
         return {0.7F, 0.7F, 0.68F};
     case Material::Regolith:
         return {0.52F, 0.5F, 0.48F};
+    case Material::Firn:
+        return {0.82F, 0.86F, 0.9F};
+    case Material::Ice:
+        return {0.55F, 0.75F, 0.9F};
     }
     return {1.0F, 0.0F, 1.0F};
 }
@@ -131,7 +135,11 @@ std::array<terrain::Look, globe::material_count> globe_looks() {
                                     vary(Material::Mantle, {0.8, 0.9, 0.7}, 0.3, 0.3, 0.2),
                                     vary(Material::Iron, {1.3, 1.1, 0.9}, 0.3, 0.3, 0.2),
                                     vary(Material::Anorthosite, {0.9, 0.9, 0.92}, 0.3, 0.3, 0.2),
-                                    vary(Material::Regolith, {0.85, 0.85, 0.85}, 0.35, 0.3, 0.25)};
+                                    vary(Material::Regolith, {0.85, 0.85, 0.85}, 0.35, 0.3, 0.25),
+                                    // Grey where it's old and dirty.
+                                    vary(Material::Firn, {0.85, 0.88, 0.92}, 0.3, 0.1, 0.15),
+                                    // Clear blue deep down, whiter where it's cracked.
+                                    vary(Material::Ice, {1.5, 1.25, 1.1}, 0.3, 0.05, 0.2)};
     static_assert(variations.size() == globe::material_count);
 
     std::array<terrain::Look, globe::material_count> looks{};

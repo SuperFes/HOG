@@ -174,6 +174,28 @@ const Properties& properties(Material material) {
          .cohesion = 1000.0,
          .bed_friction = 33.0 * degree,
          .bounce = 0.1}, // regolith
+        {.density = 600.0,
+         .melts = 273.15,
+         .strength = 1e6,
+         .heat_capacity = 2100.0,
+         .porosity = 0.4,
+         .conductivity = 1e-4,
+         .critical_shear = 5.0,
+         .erodibility = 1e-8,
+         .settling = 3e-1,
+         .friction = 35.0 * degree,
+         .wet_friction = 20.0 * degree}, // firn
+        {.density = 917.0,
+         .melts = 273.15,
+         .strength = 2e6,
+         .heat_capacity = 2100.0,
+         .porosity = 0.02,
+         .conductivity = 1e-10,
+         .critical_shear = 20.0,
+         .erodibility = 1e-9,
+         .settling = 3e-1,
+         .friction = 25.0 * degree,
+         .wet_friction = 5.0 * degree}, // ice
     }};
     return all[static_cast<std::size_t>(material)];
 }
