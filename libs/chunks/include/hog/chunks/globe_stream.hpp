@@ -27,8 +27,10 @@ namespace hog::chunks {
 // corners' materials; the liquid's surfaces are left out, as the sea is drawn over the ground
 // and still water as globe_still_water has it.
 [[nodiscard]] terrain::BlockMesh globe_blocks(const globe::SurfaceMesh& mesh);
-// A chunk's liquid surfaces standing clear of the sea's level, for the sea to draw as still
-// water; those within a voxel of its level are the sea's own, drawn over the ground.
+// A chunk's liquid surfaces, for the sea to draw over the ground as still water: those within a
+// voxel of the sea's level are the sea's own, marked so by globe_sea_corner, and drawn with its
+// waves as it lies there; the rest stand clear of it.
+inline constexpr std::uint8_t globe_sea_corner = 1;
 [[nodiscard]] terrain::BlockMesh globe_still_water(const globe::SurfaceMesh& mesh,
                                                    std::optional<double> sea_level,
                                                    double thickness);
@@ -110,6 +112,10 @@ public:
     // Chunks being meshed now.
     [[nodiscard]] std::size_t meshing() const noexcept { return working_.size(); }
 
+    // Metres along the ground from the point under the eye within which every chunk wanted is
+    // shown; none before the eye's followed.
+    [[nodiscard]] double covered() const;
+
     // Chunks shown, and those wanted round the eye, nearest first.
     [[nodiscard]] std::size_t chunks() const noexcept { return shown_.size(); }
     [[nodiscard]] std::span<const globe::Cell> wanted() const noexcept { return order_; }
@@ -136,6 +142,7 @@ private:
     GlobeDetail detail_;
     bool held_ = false;
     std::optional<DVec3> around_;
+    double reach_ = 0.0; // metres along the ground the chunks wanted reach
     DVec3 looking_{0.0};
     std::shared_ptr<const globe::Drawn> drawn_;
     std::vector<globe::Cell> order_;              // wanted, nearest first

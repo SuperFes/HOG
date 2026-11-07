@@ -65,16 +65,17 @@ terrain::BlockMesh globe_still_water(const globe::SurfaceMesh& mesh,
             liquid = liquid && vertex.material == globe::Material::Water;
             stands += glm::length(mesh.origin + DVec3{vertex.position}) / 3.0;
         }
-        if (!liquid || (sea_level && std::abs(stands - *sea_level) <= thickness)) {
+        if (!liquid) {
             continue;
         }
+        const bool sea = sea_level && std::abs(stands - *sea_level) <= thickness;
         for (const std::uint32_t index : corners) {
             if (made[index] == none) {
                 made[index] = static_cast<std::uint32_t>(water.vertices.size());
                 water.vertices.push_back({.position = mesh.vertices[index].position,
                                           .normal = mesh.vertices[index].normal,
                                           .tiles = {tile, tile, tile},
-                                          .corner = 0});
+                                          .corner = sea ? globe_sea_corner : std::uint8_t{0}});
             }
             water.indices.push_back(made[index]);
         }
@@ -147,6 +148,7 @@ void GlobeStream::follow(DVec3 eye, DVec3 forward) {
     const double reach =
         std::max(detail_.least, horizon(radius, height) +
                                     horizon(radius, std::max(0.0, generator.shape().highest)));
+    reach_ = reach;
     order_ = globe::chunks_around(generator, {.up = up, .height = height}, reach, detail_.ratio,
                                   drawn_ ? *drawn_ : globe::Drawn{}, detail_.slope, detail_.least);
     if (glm::dot(forward, forward) > 0.0) {
@@ -237,6 +239,24 @@ bool GlobeStream::in_flight() const noexcept {
     return !queue_.empty() || !working_.empty() || !changes_.empty() ||
            std::ranges::any_of(shown_,
                                [&](const auto& shown) { return !wanted_.contains(shown.first); });
+}
+
+double GlobeStream::covered() const {
+    if (!around_) {
+        return 0.0;
+    }
+    const double radius = world_->generator().planet().radius;
+    const DVec3 under = glm::normalize(*around_) * radius;
+    double nearest = reach_;
+    for (const globe::Cell chunk : order_) {
+        if (!shown_.contains(chunk)) {
+            const std::array<DVec3, 4> corners = globe::corners(chunk);
+            const double across = glm::length(corners[2] - corners[0]) * radius;
+            nearest = std::min(
+                nearest, glm::length((globe::center(chunk) * radius) - under) - (0.5 * across));
+        }
+    }
+    return std::max(nearest, 0.0);
 }
 
 void GlobeStream::start_more() {

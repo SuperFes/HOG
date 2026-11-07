@@ -177,6 +177,10 @@ struct OceanView {
     // lays the water itself, as lay_water works out, over what's drawn there as in air.
     // NOLINTNEXTLINE(readability-redundant-member-init): lets designated initializers omit it
     std::optional<SeaBehind> behind = {};
+    // Metres along the ground from the point under the eye within which the sea is drawn from
+    // the voxels' own surface, among still water, where it meets the ground they mesh; past it,
+    // the sea's disc. None draws only the disc.
+    double voxel_sea = 0.0;
 };
 
 // The sea's surface, moved by its waves about sea level, out to the horizon round the point under
