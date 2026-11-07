@@ -16,14 +16,6 @@ constexpr int coarser = std::countr_zero(side);
 
 } // namespace
 
-std::uint8_t ColumnSending::level_at(double metres) noexcept {
-    if (metres < finest) {
-        return 0;
-    }
-    const double doublings = std::floor(std::log2(metres / finest));
-    return static_cast<std::uint8_t>(std::min(1.0 + doublings, double{globe::coarsest_level}));
-}
-
 void ColumnSending::join(net::ConnectionId player) {
     players_.insert_or_assign(player, Player{});
 }
@@ -56,7 +48,7 @@ void ColumnSending::follow(net::ConnectionId player, DVec3 at) {
                                .i = corner.i / side,
                                .j = corner.j / side};
         const double metres = glm::length((globe::center(cell) * radius) - at);
-        const std::uint8_t level = level_at(metres);
+        const std::uint8_t level = globe::level_at(metres);
         const auto held = one.held.find(corner);
         if (held == one.held.end() || held->second != level) {
             near.push_back({.metres = metres, .due = {.corner = corner, .level = level}});
