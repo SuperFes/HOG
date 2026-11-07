@@ -72,7 +72,7 @@ Server::Server(Opened /*unused*/, const server::ServerConfig& config, const glob
       held_(volume_, volumes_, globe::origin_of(generator_)), snapshots_(std::move(snapshots)),
       places_(std::move(places)), writer_(snapshots_, config.keep_snapshots),
       nearby_(std::min(planet::level_for(config.net.view.radius, globe.radius), planet::max_level)),
-      persistence_(entities_), chunks_(globe_, jobs_),
+      persistence_(entities_), chunks_(globe_, jobs_), columns_(generator_.layers()),
       joined_(entities_, globe.radius, config.net.view), ground_(space_, globe_),
       ticks_(registry_.counter("hog_ticks_total", "Live ticks run.")),
       tick_seconds_(registry_.histogram("hog_tick_seconds", "Real time each live tick took.",
@@ -364,6 +364,7 @@ void Server::serve_players() {
                       lost->reason);
             handshakes_.erase(lost->connection);
             chunks_.leave(lost->connection);
+            columns_.leave(lost->connection);
             if (const auto left = joined_.leave(lost->connection)) {
                 keep(*left);
             }
@@ -415,6 +416,7 @@ void Server::answer(net::ConnectionId connection, const protocol::Answer& answer
         }
         handshakes_.erase(shaking);
         chunks_.join(connection);
+        columns_.join(connection);
         if (weather_ && weather_->latest()) {
             send_weather(connection, *weather_->latest());
         }
@@ -613,6 +615,39 @@ void Server::tell_chunks() {
     }
 }
 
+void Server::tell_columns() {
+    if (!players_) {
+        return;
+    }
+    if (globe_.revision() != columns_told_) {
+        const std::vector<globe::BrickSite> changed = globe_.changed_since(columns_told_);
+        columns_.changed(server::HeldGround::corners_of(changed));
+        columns_told_ = globe_.revision();
+    }
+    for (const auto& [connection, look] : joined_.looks()) {
+        columns_.follow(connection, look.at.metres());
+        const std::optional<net::Stats> stats = players_->stats(connection);
+        const std::size_t queued = stats ? stats->queued_bytes : chunk_queue;
+        if (queued >= chunk_queue || columns_.due(connection) == 0) {
+            continue;
+        }
+        auto next = columns_.next(connection, chunk_queue - queued, volume_, volumes_);
+        if (!next) {
+            log::warn(server_log, "couldn't read tile columns for connection {}: {}",
+                      std::to_underlying(connection), next.error());
+            continue;
+        }
+        if (next->columns.empty()) {
+            continue;
+        }
+        if (auto sent = players_->send(connection, net::Delivery::Bulk, protocol::encode(*next));
+            !sent) {
+            log::debug(server_log, "couldn't send connection {} tile columns: {}",
+                       std::to_underlying(connection), sent.error());
+        }
+    }
+}
+
 void Server::tell_grains() {
     const std::vector<flow::Parcel>& parcels = flow_.region().parcels();
     if (parcels.empty() && grains_told_.empty()) {
@@ -646,6 +681,7 @@ void Server::share() {
     }
     tell_grains();
     hold_ground();
+    tell_columns();
     if (auto kept = ground_.keep(joined_.placed()); !kept) {
         log::warn(server_log, "couldn't keep the ground near players: {}", kept.error());
     }

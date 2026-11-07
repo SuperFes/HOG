@@ -580,19 +580,23 @@ TEST_CASE("a session takes the bricks sent, and asks to dig and build once welco
     session.dig(centre, 1.5);
     welcome(session, stand);
     CHECK(stand.count<protocol::Dug>() == 0);
-    stand.send(protocol::Bricks{.bricks = {{.key = 7, .bytes = {std::byte{1}, std::byte{2}}}}});
-    stand.send(protocol::Bricks{.bricks = {{.key = 8, .bytes = {}}}});
-    std::vector<protocol::SentBrick> taken;
+    stand.send(protocol::Columns{
+        .columns = {
+            {.face = 1, .i = 7, .j = 2, .level = 0, .bytes = {std::byte{1}, std::byte{2}}}}});
+    stand.send(
+        protocol::Columns{.columns = {{.face = 1, .i = 8, .j = 2, .level = 3, .bytes = {}}}});
+    std::vector<protocol::SentColumn> taken;
     look_until(session, stand, [&] {
-        for (protocol::SentBrick& brick : session.take_bricks()) {
-            taken.push_back(std::move(brick));
+        for (protocol::SentColumn& column : session.take_columns()) {
+            taken.push_back(std::move(column));
         }
         return taken.size() == 2;
     });
-    CHECK(taken[0].key == 7);
+    CHECK(taken[0].i == 7);
     CHECK(taken[0].bytes.size() == 2);
-    CHECK(taken[1].key == 8);
-    CHECK(session.take_bricks().empty());
+    CHECK(taken[1].i == 8);
+    CHECK(taken[1].level == 3);
+    CHECK(session.take_columns().empty());
     session.dig(centre, 1.5);
     session.dig(centre, 0.0);
     session.build(centre, 100.0, 9);

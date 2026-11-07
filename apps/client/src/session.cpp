@@ -140,9 +140,9 @@ void Session::heard(std::span<const std::byte> bytes, MonotonicClock::time_point
         weather_ = std::move(*weather);
     } else if (auto* said = std::get_if<protocol::Said>(&*message)) {
         chat_.push_back({.from = std::move(said->from), .text = std::move(said->text)});
-    } else if (auto* bricks = std::get_if<protocol::Bricks>(&*message)) {
-        bricks_.insert(bricks_.end(), std::make_move_iterator(bricks->bricks.begin()),
-                       std::make_move_iterator(bricks->bricks.end()));
+    } else if (auto* columns = std::get_if<protocol::Columns>(&*message)) {
+        columns_.insert(columns_.end(), std::make_move_iterator(columns->columns.begin()),
+                        std::make_move_iterator(columns->columns.end()));
     } else if (auto* chunk = std::get_if<protocol::Chunk>(&*message)) {
         chunks_.emplace_back(std::move(*chunk));
     } else if (auto* plan = std::get_if<protocol::ChunkPlan>(&*message)) {

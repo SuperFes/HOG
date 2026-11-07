@@ -40,6 +40,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -714,6 +715,10 @@ struct Digger {
     // Each chunk's key, how many times it was sent, and its newest version.
     std::map<std::uint64_t, int> chunks;
     std::map<std::uint64_t, std::uint32_t> versions;
+    // Each tile column sent at its own level, how many times, and as last sent.
+    std::map<std::tuple<std::uint8_t, std::uint32_t, std::uint32_t>,
+             std::pair<int, std::vector<std::byte>>>
+        columns;
     std::vector<hog::net::Event> events;
 };
 
@@ -729,6 +734,14 @@ void hear(Digger& digger) {
             REQUIRE(decoded);
             if (std::holds_alternative<hog::protocol::Welcome>(*decoded)) {
                 digger.welcomed = true;
+            } else if (auto* sent = std::get_if<hog::protocol::Columns>(&*decoded)) {
+                for (hog::protocol::SentColumn& column : sent->columns) {
+                    if (column.level == 0) {
+                        auto& [times, bytes] = digger.columns[{column.face, column.i, column.j}];
+                        ++times;
+                        bytes = std::move(column.bytes);
+                    }
+                }
             } else if (const auto* chunk = std::get_if<hog::protocol::Chunk>(&*decoded)) {
                 ++digger.chunks[chunk->key];
                 digger.versions[chunk->key] = chunk->version;
@@ -754,7 +767,8 @@ void hear(Digger& digger) {
 
 } // namespace
 
-TEST_CASE("a player's digging has the chunks it touches sent again to everyone", "[app][server]") {
+TEST_CASE("a player's digging has the chunks and tile columns it touches sent again to everyone",
+          "[app][server]") {
     const World world;
     build_ground(world, hog::planet::start_direction);
     const auto server = playing(world);
@@ -772,12 +786,22 @@ TEST_CASE("a player's digging has the chunks it touches sent again to everyone",
                                          .welcomed = false,
                                          .chunks = {},
                                          .versions = {},
+                                         .columns = {},
                                          .events = {}},
                                   Digger{.client = std::move(*second),
                                          .welcomed = false,
                                          .chunks = {},
                                          .versions = {},
+                                         .columns = {},
                                          .events = {}}};
+    const hog::globe::Cell cell = hog::globe::cell_under(direction, generator.layers().level);
+    const auto under =
+        std::tuple{static_cast<std::uint8_t>(cell.face), cell.i / hog::globe::Volume::tile_side,
+                   cell.j / hog::globe::Volume::tile_side};
+    const auto sent_again = [&](const Digger& digger) {
+        const auto found = digger.columns.find(under);
+        return found != digger.columns.end() && found->second.first > 1;
+    };
     bool placed = false;
     bool dug = false;
     std::atomic<bool> stop = false;
@@ -811,7 +835,9 @@ TEST_CASE("a player's digging has the chunks it touches sent again to everyone",
                     .centre = hog::protocol::to_millimetres(hog::WorldPosition{direction * ground}),
                     .radius = 3'000})));
         }
-        if ((dug && resent(diggers[0]) && resent(diggers[1])) || MonotonicClock::now() >= give_up) {
+        if ((dug && resent(diggers[0]) && resent(diggers[1]) && sent_again(diggers[0]) &&
+             sent_again(diggers[1])) ||
+            MonotonicClock::now() >= give_up) {
             stop = true;
         }
     }};
@@ -822,5 +848,14 @@ TEST_CASE("a player's digging has the chunks it touches sent again to everyone",
         INFO("chunks held " << digger.chunks.size() << ", dug " << dug);
         CHECK_FALSE(digger.chunks.empty());
         CHECK(resent(digger));
+        // The column under the hole as the server holds it, dug.
+        CHECK(sent_again(digger));
+        const auto found = digger.columns.find(under);
+        REQUIRE(found != digger.columns.end());
+        CHECK(found->second.second ==
+              server->volume().encode_column(
+                  {.face = cell.face,
+                   .i = cell.i / hog::globe::Volume::tile_side * hog::globe::Volume::tile_side,
+                   .j = cell.j / hog::globe::Volume::tile_side * hog::globe::Volume::tile_side}));
     }
 }

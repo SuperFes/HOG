@@ -21,6 +21,7 @@
 #include <hog/server/catch_up.hpp>
 #include <hog/server/chunk_sending.hpp>
 #include <hog/server/chunk_sharing.hpp>
+#include <hog/server/column_sending.hpp>
 #include <hog/server/held_ground.hpp>
 #include <hog/server/persistence.hpp>
 #include <hog/server/players.hpp>
@@ -145,6 +146,9 @@ private:
     void dig(net::ConnectionId connection, const protocol::Dug& dug);
     void build(net::ConnectionId connection, const protocol::Built& built);
     void tell_chunks();
+    // Sends each player the tile columns due to them, as their connection has room, once those
+    // the world changed are due again.
+    void tell_columns();
     // Tells each player the grain in flight near them, and once more when there's none.
     void tell_grains();
     // Sends each player a snapshot of those near them.
@@ -188,6 +192,9 @@ private:
     jobs::JobSystem jobs_;
     // The surfaces each player is shown, meshed on the jobs.
     server::ChunkSharing chunks_;
+    // The tile columns each player is sent, and the world's revision they're told up to.
+    server::ColumnSending columns_;
+    std::uint64_t columns_told_ = 0;
     std::optional<net::Server> players_;
     std::vector<net::Event> player_events_;
     // Connections still to say hello, and the players let in.

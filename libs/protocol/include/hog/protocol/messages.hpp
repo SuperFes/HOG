@@ -18,7 +18,7 @@
 namespace hog::protocol {
 
 // Raised whenever any message changes; the two sides must speak the same one.
-inline constexpr std::uint32_t version = 30;
+inline constexpr std::uint32_t version = 31;
 // The longest planet a welcome carries.
 inline constexpr std::size_t most_planet = 1'024;
 // The longest connect token a client may present; more is a broken or hostile client.
@@ -240,13 +240,14 @@ struct Clock {
 
 // The widest ball a player may dig or build at once, in millimetres.
 inline constexpr std::uint32_t most_edit = 8'000;
-// Bytes a brick's coding may take, and bricks a message may carry: well within what's sent.
-inline constexpr std::size_t most_brick = std::size_t{12} * 1024;
-inline constexpr std::size_t most_bricks = 40;
+// Bytes a tile column's coding may take, and the columns a message may carry: one column at the
+// most fills a message.
+inline constexpr std::size_t most_column = std::size_t{500} * 1024;
+inline constexpr std::size_t most_columns = 256;
 
 // Client to server: take shaped matter out of a ball at `centre`, millimetres from the planet's
 // centre, `radius` millimetres across, over most_edit refused. The server obliges where the
-// player may, and sends back the bricks it changed.
+// player may, and sends again the tile columns it changed.
 struct Dug {
     Millimetres centre{0};
     std::uint32_t radius = 0;
@@ -263,20 +264,24 @@ struct Built {
     friend bool operator==(const Built&, const Built&) = default;
 };
 
-// A brick of the voxel world as the store codes it, by its key.
-struct SentBrick {
-    std::uint64_t key = 0;
-    std::vector<std::byte> bytes; // at most most_brick
+// A tile column of the voxel world at a level, as the world's file codes it (a globe::TileColumn
+// halved `level` times), by where it stands counted in tiles; no bytes where nothing is made.
+struct SentColumn {
+    std::uint8_t face = 0;
+    std::uint32_t i = 0;
+    std::uint32_t j = 0;
+    std::uint8_t level = 0;
+    std::vector<std::byte> bytes; // at most most_column
 
-    friend bool operator==(const SentBrick&, const SentBrick&) = default;
+    friend bool operator==(const SentColumn&, const SentColumn&) = default;
 };
 
-// Server to client: bricks changed from what the generator says, to hold in their place, as
-// many as fit a message at a time; sent bulk, so they never hold up moves.
-struct Bricks {
-    std::vector<SentBrick> bricks; // at most most_bricks
+// Server to client: tile columns about the player, each to hold in place of what the client held
+// of it at any level; sent bulk, so they never hold up moves.
+struct Columns {
+    std::vector<SentColumn> columns; // at most most_columns
 
-    friend bool operator==(const Bricks&, const Bricks&) = default;
+    friend bool operator==(const Columns&, const Columns&) = default;
 };
 
 // Grain in flight at most in a message; a client is told of the nearest to it.
@@ -294,7 +299,7 @@ struct Flying {
 };
 
 // Server to client, unreliable: all the grain in flight near the client at the server's tick, in
-// order of id. What a client held that isn't listed has landed, and is in the bricks sent. Between
+// order of id. What a client held that isn't listed has landed, and is in the columns sent. Between
 // two of these it carries each on under gravity, so grain is seen to travel, not jump.
 struct Grains {
     std::uint32_t tick = 0;
@@ -418,12 +423,13 @@ struct ChunksAsked {
 [[nodiscard]] CellWeather as_sent(const CellWeather& cell) noexcept;
 
 using Message = std::variant<Hello, Welcome, Refused, Moved, Ack, Snapshot, Corrected, Weather,
-                             Said, Hurry, Clock, Placed, Dug, Built, Bricks, Grains, Chunk, Ground, ChunkPlan, ChunksAsked, ViewDetail>;
+                             Said, Hurry, Clock, Placed, Dug, Built, Columns, Grains, Chunk, Ground,
+                             ChunkPlan, ChunksAsked, ViewDetail>;
 
 [[nodiscard]] std::vector<std::byte> encode(const Message& message);
 // Fails on an unknown kind, a message cut short or with bytes left over, one too long, a snapshot
 // out of order, weather or woods too fine or with too few or many cells, chat with control
-// characters, a stance it doesn't know, an edit of no width or too wide, or bricks too many or
+// characters, a stance it doesn't know, an edit of no width or too wide, or columns too many or
 // too big.
 [[nodiscard]] Result<Message> decode(std::span<const std::byte> bytes);
 
