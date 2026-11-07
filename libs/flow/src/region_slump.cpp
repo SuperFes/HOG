@@ -260,7 +260,10 @@ void Region::fill_grain(Site column, std::uint32_t voxels, std::int64_t depth, M
         const Site site{
             .face = column.face, .i = column.i, .j = column.j, .layer = column.layer + up};
         Voxel* here = voxel(site);
-        const std::int64_t amount = std::min(left, full);
+        // Grain lies over the shaped matter the voxel holds.
+        const std::int64_t room =
+            full - (here->solid == Material::Air ? std::int64_t{here->solid_amount} : full);
+        const std::int64_t amount = std::clamp<std::int64_t>(left, 0, room);
         left -= amount;
         if (here->grain_amount != amount || (amount > 0 && here->grain != material)) {
             here->grain = amount > 0 ? material : Material::Air;

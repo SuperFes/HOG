@@ -12,6 +12,7 @@ add_library(hog_globe
     src/grip.cpp
     src/layers.cpp
     src/material.cpp
+    src/weathering.cpp
     src/noise.cpp
     src/planet.cpp
     src/planet_file.cpp
@@ -67,4 +68,5 @@ hog_add_tests(hog_globe
     tests/cube_tests.cpp
     tests/voxel_tests.cpp
     tests/voxel_tree_tests.cpp
+    tests/weathering_tests.cpp
     tests/world_tests.cpp)

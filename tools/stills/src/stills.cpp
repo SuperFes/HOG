@@ -110,6 +110,10 @@ Rgb material_colour(Material material) {
         return {208, 220, 232};
     case Material::Ice:
         return {140, 190, 228};
+    case Material::Clay:
+        return {150, 102, 70};
+    case Material::Gravel:
+        return {120, 110, 98};
     }
     return {255, 0, 255};
 }

@@ -53,6 +53,15 @@ public:
     // As age_ice, for the loose cover on the ground creeping downhill and weathering anew.
     std::vector<globe::BrickSite> age_cover(std::span<const globe::BrickSite> bricks, double years);
 
+    // As age_ice, for the rock under the top ground weathering into loose ground; see
+    // Region::weather_ground.
+    std::vector<globe::BrickSite> weather_ground(std::span<const globe::BrickSite> bricks,
+                                                 const Region::ClimateAt& climate, double depth);
+
+    // As age_ice, for the rain washing the loose ground downhill for `years`; see Region::wash.
+    std::vector<globe::BrickSite> wash(std::span<const globe::BrickSite> bricks,
+                                       const Region::Rainfall& rainfall, double years);
+
     // As age_ice, for rain running off the ground until it rests in lakes, puddles and channels;
     // see Region::settle_water.
     std::vector<globe::BrickSite> settle_water(std::span<const globe::BrickSite> bricks,

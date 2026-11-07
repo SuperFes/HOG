@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <vector>
@@ -52,6 +53,18 @@ public:
     [[nodiscard]] double discharge(std::size_t node) const { return discharge_[node]; }
     // Whether the column lies under standing water, a lake or a puddle, rather than a channel.
     [[nodiscard]] bool standing(std::size_t node) const { return standing_[node]; }
+    // Whether the column lies in a hollow, which water would fill to its rim given enough.
+    [[nodiscard]] bool in_hollow(std::size_t node) const {
+        return filled_[node] > nodes_[node].ground;
+    }
+    // Cubic metres a year of the rain on a column that runs off it.
+    [[nodiscard]] double runs_off(std::size_t node) const {
+        return std::max(nodes_[node].rain, 0.0) * law_.cell * law_.cell * (1.0 - law_.soaks);
+    }
+    // The column a column's water runs on to; none where it leaves the set.
+    [[nodiscard]] int drains(std::size_t node) const { return drains_[node]; }
+    // Every column, each after the one it drains into.
+    [[nodiscard]] const std::vector<std::size_t>& order() const noexcept { return order_; }
 
 private:
     static constexpr int unreached = -2;

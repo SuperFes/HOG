@@ -1015,8 +1015,11 @@ void Region::drop(Section& section, const Bed& bed, double depth, double seconds
 
 void Region::scour(Site bed, int mm) {
     const double thickness = world_->store().layers().thickness;
-    std::int64_t units = std::llround(static_cast<double>(mm) / (thickness * 1000.0) *
-                                      static_cast<double>(full));
+    dig_units(bed, std::llround(static_cast<double>(mm) / (thickness * 1000.0) *
+                                static_cast<double>(full)));
+}
+
+void Region::dig_units(Site bed, std::int64_t units) {
     const auto half = static_cast<std::uint16_t>(full / 2);
     // Down from the lowest open voxel, which holds the top of the shaped matter, taking what each
     // holds of it until the depth is taken; a voxel left less than half full is open.

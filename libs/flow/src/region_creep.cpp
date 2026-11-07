@@ -91,15 +91,18 @@ void Region::creep(Stepped& stepped, double years) {
                     // Grain that isn't loose, like ice, is not cover to be crept.
                     continue;
                 }
-                // Down through the loose solid under the ground, to the first that isn't.
+                // Down through the loose solid under the ground, to the first that isn't. What
+                // creeps is what's on top: the grain, else the loose ground just under it.
+                bool named = loose(top.surface.grain);
                 std::int64_t layer = static_cast<std::int64_t>(top.surface.first) - 1;
                 while (layer >= low) {
                     const Voxel* below = voxel({key.face, key.i, key.j, static_cast<std::uint32_t>(layer)});
                     if (below == nullptr || !loose(below->solid)) {
                         break;
                     }
-                    if (made.material == Material::Soil || !loose(top.surface.grain)) {
+                    if (!named) {
                         made.material = below->solid;
+                        named = true;
                     }
                     --layer;
                 }

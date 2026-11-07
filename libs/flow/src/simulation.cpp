@@ -71,6 +71,32 @@ void Simulation::reload(BrickSite site) {
     }
 }
 
+std::vector<BrickSite> Simulation::weather_ground(std::span<const BrickSite> bricks,
+                                                 const Region::ClimateAt& climate, double depth) {
+    for (const BrickSite brick : bricks) {
+        take(brick);
+    }
+    region_.weather_ground(climate, depth);
+    std::vector<BrickSite> written = region_.flush();
+    for (const BrickSite brick : written) {
+        still_[globe::brick_key(brick)] = 0;
+    }
+    return written;
+}
+
+std::vector<BrickSite> Simulation::wash(std::span<const BrickSite> bricks,
+                                       const Region::Rainfall& rainfall, double years) {
+    for (const BrickSite brick : bricks) {
+        take(brick);
+    }
+    region_.wash(rainfall, years);
+    std::vector<BrickSite> written = region_.flush();
+    for (const BrickSite brick : written) {
+        still_[globe::brick_key(brick)] = 0;
+    }
+    return written;
+}
+
 std::vector<BrickSite> Simulation::settle_water(std::span<const BrickSite> bricks,
                                                const Region::Rainfall& rainfall) {
     for (const BrickSite brick : bricks) {

@@ -1,6 +1,7 @@
 #include <hog/server/ground_bake.hpp>
 
 #include <hog/globe/cell.hpp>
+#include <hog/globe/material.hpp>
 #include <hog/globe/planet.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -89,7 +90,7 @@ TEST_CASE("the rain a place gets is the mean of what the weather let fall there"
     CHECK(rain.at(up) == Approx(0.5 * 365.25 * 24.0 / 1'000.0));
 }
 
-TEST_CASE("baking a tile under rain fills a hollow dug in it with water voxels",
+TEST_CASE("baking a tile under rain fills a hollow dug in it with water voxels or silt",
           "[server][bake]") {
     Earth earth;
     const DVec3 up = on_land(earth);
@@ -111,15 +112,47 @@ TEST_CASE("baking a tile under rain fills a hollow dug in it with water voxels",
             earth.store.erase(baked.site);
         }
     }
-    // The pit's floor is under water.
     const int floor = layers.layer_at(
         hog::globe::surface_under(earth.world, middle, ground).value_or(0.0));
-    const hog::globe::Voxel over = earth.world.at({.face = cell.face,
-                                                   .i = cell.i,
-                                                   .j = cell.j,
-                                                   .layer = static_cast<std::uint32_t>(floor + 1)});
-    CHECK(over.liquid == hog::globe::Material::Water);
-    CHECK(over.liquid_amount > 0);
+    // Under water, or silted up by what the rain washed in, in the floor's voxel or over it.
+    bool filled = false;
+    for (int above = 0; above < 2; ++above) {
+        const hog::globe::Voxel over =
+            earth.world.at({.face = cell.face,
+                            .i = cell.i,
+                            .j = cell.j,
+                            .layer = static_cast<std::uint32_t>(floor + above)});
+        filled = filled || (over.liquid == hog::globe::Material::Water && over.liquid_amount > 0) ||
+                 over.grain_amount > 0;
+    }
+    CHECK(filled);
+}
+
+TEST_CASE("baking a tile weathers the rock under its ground into loose layers",
+          "[server][bake]") {
+    Earth earth;
+    const DVec3 up = on_land(earth);
+    const GroundBake::Tile tile = GroundBake::tile_at(earth.store, up);
+    const std::vector<GroundBake::Baked> written = GroundBake::bake(
+        earth.generator, GroundBake::held_in(earth.store, tile), tile, RainRecord{3, 0.8}, 0.5);
+    for (const GroundBake::Baked& baked : written) {
+        if (baked.brick) {
+            earth.store.put(baked.site, *baked.brick);
+        }
+    }
+    const hog::globe::Layers& layers = earth.generator.layers();
+    const hog::globe::Cell cell = hog::globe::cell_under(up, layers.level);
+    const double ground = hog::globe::top_of(earth.world, up).value_or(0.0);
+    const auto at = [&](std::uint32_t layer) {
+        return earth.world.at({.face = cell.face, .i = cell.i, .j = cell.j, .layer = layer}).solid;
+    };
+    // The first shaped voxel down is loose, and some way under it there's rock again.
+    auto layer = static_cast<std::uint32_t>(layers.layer_at(ground) + 1);
+    while (at(layer) == hog::globe::Material::Air) {
+        --layer;
+    }
+    CHECK(hog::globe::properties(at(layer)).repose > 0.0);
+    CHECK(hog::globe::properties(at(layer - 12)).repose == 0.0);
 }
 
 namespace {

@@ -92,6 +92,10 @@ Vec3 surface_colour(globe::Material material) {
         return {0.82F, 0.86F, 0.9F};
     case Material::Ice:
         return {0.55F, 0.75F, 0.9F};
+    case Material::Clay:
+        return {0.52F, 0.36F, 0.24F};
+    case Material::Gravel:
+        return {0.44F, 0.4F, 0.35F};
     }
     return {1.0F, 0.0F, 1.0F};
 }
@@ -139,7 +143,11 @@ std::array<terrain::Look, globe::material_count> globe_looks() {
                                     // Grey where it's old and dirty.
                                     vary(Material::Firn, {0.85, 0.88, 0.92}, 0.3, 0.1, 0.15),
                                     // Clear blue deep down, whiter where it's cracked.
-                                    vary(Material::Ice, {1.5, 1.25, 1.1}, 0.3, 0.05, 0.2)};
+                                    vary(Material::Ice, {1.5, 1.25, 1.1}, 0.3, 0.05, 0.2),
+                                    // Ochre streaks, greyer where it's gleyed.
+                                    vary(Material::Clay, {1.2, 1.05, 0.8}, 0.3, 0.15, 0.3),
+                                    // Pale stones in darker earth.
+                                    vary(Material::Gravel, {1.5, 1.45, 1.4}, 0.4, 0.6, 0.2)};
     static_assert(variations.size() == globe::material_count);
 
     std::array<terrain::Look, globe::material_count> looks{};

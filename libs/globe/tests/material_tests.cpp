@@ -14,7 +14,8 @@ using hog::globe::properties;
 
 TEST_CASE("loose ground has pores and a slope it holds, rock hardly any", "[globe][material]") {
     for (const Material loose :
-         {Material::Soil, Material::Sand, Material::Sediment, Material::Regolith, Material::Snow}) {
+         {Material::Soil, Material::Sand, Material::Sediment, Material::Regolith, Material::Snow,
+          Material::Clay}) {
         CAPTURE(loose);
         CHECK(properties(loose).porosity > 0.3);
         CHECK(properties(loose).porosity < 1.0);
@@ -52,6 +53,27 @@ TEST_CASE("firn is porous and ice is not, both lighter than water and melting wi
     CHECK(ice.repose == 0.0);
     CHECK(ice.wet_friction < ice.friction);
     CHECK(footing(Material::Ice, 1.0) < footing(Material::Granite, 1.0));
+}
+
+TEST_CASE("under topsoil, clay holds water up and rocky dirt lets it through",
+          "[globe][material]") {
+    const auto& soil = properties(Material::Soil);
+    const auto& clay = properties(Material::Clay);
+    const auto& gravel = properties(Material::Gravel);
+    CHECK(clay.conductivity < soil.conductivity / 100.0);
+    CHECK(gravel.conductivity > soil.conductivity);
+    // Clay stands steep dry but runs soaked; rocky dirt barely minds the wet.
+    CHECK(clay.repose > soil.repose);
+    CHECK(clay.saturated_repose < soil.saturated_repose);
+    CHECK(gravel.repose - gravel.saturated_repose < soil.repose - soil.saturated_repose);
+    CHECK(gravel.porosity > 0.2);
+    // Both are loose and stick, clay far more; a flow carries topsoil before either.
+    CHECK(clay.cohesion > soil.cohesion);
+    CHECK(gravel.repose > 0.0);
+    CHECK(soil.critical_shear < clay.critical_shear);
+    CHECK(clay.critical_shear < gravel.critical_shear);
+    CHECK(gravel.settling > soil.settling);
+    CHECK(clay.settling < soil.settling);
 }
 
 TEST_CASE("water seeps through sand faster than soil, soil faster than mud", "[globe][material]") {

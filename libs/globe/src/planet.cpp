@@ -276,6 +276,7 @@ Result<void> validate(const Planet& planet) {
         {positive(planet.equator_temperature) && positive(planet.pole_temperature),
          "temperatures must be positive kelvin"},
         {planet.wear >= 0.0 && planet.wear <= 1.0, "wear must be 0 to 1"},
+        {within(planet.weathering, 0.0, 100.0), "weathering must be 0 to 100 metres"},
         {planet.sea_fraction >= 0.0 && planet.sea_fraction < 1.0,
          "sea_fraction must be at least 0 and below 1"},
     });
@@ -298,14 +299,15 @@ std::uint64_t world_id(const Planet& planet) noexcept {
         static_cast<int>(planet.layout), bits(planet.mantle_density), bits(planet.heat_flow),
         bits(planet.surface_age), bits(planet.impact_flux), bits(planet.pressure),
         bits(planet.equator_temperature), bits(planet.pole_temperature),
-        static_cast<int>(planet.volatiles), bits(planet.sea_fraction), bits(planet.wear));
+        static_cast<int>(planet.volatiles), bits(planet.sea_fraction), bits(planet.wear),
+        bits(planet.weathering));
 }
 
 
 namespace {
 
 // The knobs' version in the bytes, so a planet from another is refused, not misread.
-constexpr std::uint8_t planet_bytes_version = 1;
+constexpr std::uint8_t planet_bytes_version = 2;
 
 void write_double(ByteWriter& out, double value) {
     out.write(std::bit_cast<std::uint64_t>(value));
@@ -337,6 +339,7 @@ std::vector<std::byte> encode_planet(const Planet& planet) {
     out.write(static_cast<std::uint8_t>(planet.volatiles));
     write_double(out, planet.sea_fraction);
     write_double(out, planet.wear);
+    write_double(out, planet.weathering);
     return std::move(out).take();
 }
 
@@ -385,7 +388,8 @@ Result<Planet> decode_planet(std::span<const std::byte> bytes) {
         read_double(planet.surface_age) && read_double(planet.impact_flux) &&
         read_double(planet.pressure) && read_double(planet.equator_temperature) &&
         read_double(planet.pole_temperature) && read_byte(volatiles) &&
-        read_double(planet.sea_fraction) && read_double(planet.wear);
+        read_double(planet.sea_fraction) && read_double(planet.wear) &&
+        read_double(planet.weathering);
     if (!whole) {
         return cut();
     }
