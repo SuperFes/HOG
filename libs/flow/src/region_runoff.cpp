@@ -49,7 +49,7 @@ void add_springs(Runoff& runoff, const std::map<Key, std::size_t>& index,
 } // namespace
 
 std::vector<Region::Top> Region::tops() {
-    const globe::Layers& layers = world_->store().layers();
+    const globe::Layers& layers = world_->layers();
     std::vector<Top> found;
     for (const auto& [stack, layers_held] : stacks_) {
         const auto face = static_cast<std::uint8_t>(stack >> 42U);
@@ -84,7 +84,7 @@ std::vector<Region::Top> Region::tops() {
 
 void Region::lay_water(const std::vector<Top>& tops,
                        const std::function<double(std::size_t)>& surface, Stepped& stepped) {
-    const globe::Layers& layers = world_->store().layers();
+    const globe::Layers& layers = world_->layers();
     for (std::size_t n = 0; n < tops.size(); ++n) {
         const double level = surface(n);
         for (std::uint32_t k = 0; k < tops[n].open; ++k) {
@@ -110,7 +110,7 @@ void Region::lay_water(const std::vector<Top>& tops,
 }
 
 Runoff Region::run_off(const std::vector<Top>& held_tops, const Rainfall& rainfall) {
-    const globe::Layers& layers = world_->store().layers();
+    const globe::Layers& layers = world_->layers();
     const std::optional<double> sea = world_->generator().sea_level();
     std::map<Key, std::size_t> index;
     for (std::size_t n = 0; n < held_tops.size(); ++n) {
@@ -152,7 +152,7 @@ Runoff Region::run_off(const std::vector<Top>& held_tops, const Rainfall& rainfa
 }
 
 double Region::column_width(const Top& top) const {
-    const globe::Layers& layers = world_->store().layers();
+    const globe::Layers& layers = world_->layers();
     const globe::Cell cell{
         .level = static_cast<std::uint8_t>(layers.level), .face = top.face, .i = top.i, .j = top.j};
     return std::sqrt(layers.volume(cell, static_cast<int>(top.first)) / layers.thickness);

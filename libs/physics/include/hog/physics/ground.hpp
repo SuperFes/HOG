@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <span>
 
 namespace hog::physics {
@@ -38,17 +39,20 @@ public:
     // Lets go of the chunks drawn from `brick`.
     void changed(globe::BrickSite brick);
 
+    // Whether the chunk is kept, with ground in it or none.
     [[nodiscard]] bool holds(globe::Cell chunk) const { return chunks_.contains(chunk); }
-    [[nodiscard]] std::size_t size() const noexcept { return chunks_.size(); }
+    // The chunks kept with ground in the space.
+    [[nodiscard]] std::size_t size() const noexcept;
 
 private:
-    void clear() noexcept;
-
-    // A chunk's body, and the band of radii its sight was made for.
+    // A chunk's body, none where it has no ground, and the band of radii its sight was made for.
     struct Held {
-        BodyId body{};
+        std::optional<BodyId> body;
         std::uint64_t band = 0;
     };
+
+    void drop(const Held& held) noexcept;
+    void clear() noexcept;
 
     Space* space_;
     globe::World world_;

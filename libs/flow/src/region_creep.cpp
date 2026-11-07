@@ -39,7 +39,7 @@ Stepped Region::age_cover(double years) {
 }
 
 void Region::creep(Stepped& stepped, double years) {
-    const globe::Layers& layers = world_->store().layers();
+    const globe::Layers& layers = world_->layers();
     const double thickness = layers.thickness;
     const auto metres = [&](std::int64_t units) {
         return static_cast<double>(units) / static_cast<double>(full) * thickness;

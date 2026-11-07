@@ -1,5 +1,4 @@
 #include <hog/build_world/build_world.hpp>
-#include <hog/globe/cell.hpp>
 #include <hog/globe/volume.hpp>
 #include <hog/globe/volume_build.hpp>
 
@@ -11,52 +10,16 @@
 
 namespace hog::build_world {
 
-std::uint32_t tiles_across(const globe::Generator& generator) {
-    return std::max((std::uint32_t{1} << generator.layers().level) / globe::Volume::tile_side, 1U);
-}
-
-Area around(const globe::Generator& generator, DVec3 direction, std::uint32_t across) {
-    const std::uint32_t side = tiles_across(generator);
-    across = std::clamp(across, 1U, side);
-    const globe::Cell cell = globe::cell_under(direction, generator.layers().level);
-    const auto start = [&](std::uint32_t at) {
-        const std::uint32_t tile = at / globe::Volume::tile_side;
-        return std::min(tile - std::min(tile, across / 2), side - across);
-    };
-    return {.face = cell.face, .i = start(cell.i), .j = start(cell.j), .across = across};
-}
-
 std::vector<Area> whole(const globe::Generator& generator) {
     std::vector<Area> areas;
     areas.reserve(6);
     for (std::uint8_t face = 0; face < 6; ++face) {
-        areas.push_back({.face = face, .i = 0, .j = 0, .across = tiles_across(generator)});
+        areas.push_back({.face = face, .i = 0, .j = 0, .across = globe::tiles_across(generator)});
     }
     return areas;
 }
 
 namespace {
-
-// Fails on an archive made from anything but `origin`; whether it was ever written otherwise.
-Result<bool> written_from(const globe::VolumeArchive& archive, const globe::VolumeOrigin& origin) {
-    const auto header = archive.header();
-    if (!header) {
-        return std::unexpected(header.error());
-    }
-    if (header->empty()) {
-        return false;
-    }
-    const auto saved = globe::origin_from(*header);
-    if (!saved) {
-        return std::unexpected(saved.error());
-    }
-    if (*saved != origin) {
-        return make_error(ErrorCode::InvalidArgument,
-                          std::format("the world was made from seed {}, not {}, or other layers",
-                                      saved->seed, origin.seed));
-    }
-    return true;
-}
 
 // The tile columns of `areas` the archive doesn't hold, counting those it does in `built`.
 Result<std::vector<globe::SavedColumn>> wanted_in(const globe::VolumeArchive& archive,
@@ -100,7 +63,7 @@ Result<Built> build(const globe::Generator& generator, globe::VolumeArchive& arc
                     jobs::JobSystem& jobs, const std::vector<Area>& areas, std::size_t batch,
                     const Progress& progress) {
     const globe::VolumeOrigin origin = globe::origin_of(generator);
-    const auto written = written_from(archive, origin);
+    const auto written = globe::made_from(archive, origin);
     if (!written) {
         return std::unexpected(written.error());
     }

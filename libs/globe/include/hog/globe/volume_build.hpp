@@ -1,11 +1,28 @@
 #pragma once
 
+#include <hog/core/math.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/volume.hpp>
+#include <hog/globe/world.hpp>
 
 #include <cstdint>
 
 namespace hog::globe {
+
+// A square of tile columns on one of the planet's six sides, counted in tiles.
+struct Area {
+    std::uint8_t face = 0;
+    std::uint32_t i = 0;
+    std::uint32_t j = 0;
+    std::uint32_t across = 1;
+
+    friend bool operator==(const Area&, const Area&) = default;
+};
+
+// Tile columns along a side of one of the planet's six sides.
+[[nodiscard]] std::uint32_t tiles_across(const Generator& generator);
+// `across` tile columns square about the one under `direction`, kept on its side.
+[[nodiscard]] Area around(const Generator& generator, DVec3 direction, std::uint32_t across);
 
 // How far under its lowest ground a tile column is made ahead, in layers.
 inline constexpr int made_depth = 16;
@@ -15,6 +32,35 @@ inline constexpr int made_depth = 16;
 // it. Reads nothing else, so tile columns can be made side by side and merged.
 [[nodiscard]] Volume generate_tiles(const Generator& generator, std::uint8_t face, std::uint32_t i,
                                     std::uint32_t j);
+
+// Every tile column of the area, as `generate_tiles` makes them, one after another.
+[[nodiscard]] Volume generate_area(const Generator& generator, const Area& area);
+
+// A world over the generator's tile columns, made in memory as the world build makes them, about
+// the places asked for: for tools and tests, never a running world.
+class MadeWorld {
+public:
+    explicit MadeWorld(const Generator& generator) : world_{generator, volume_} {}
+    MadeWorld(const MadeWorld&) = delete;
+    MadeWorld& operator=(const MadeWorld&) = delete;
+    MadeWorld(MadeWorld&&) = delete;
+    MadeWorld& operator=(MadeWorld&&) = delete;
+    ~MadeWorld() = default;
+
+    // Makes the area's tile columns not made yet.
+    void cover(const Area& area);
+    // Makes the tile columns `across` square about the one under `direction` not made yet.
+    void cover(DVec3 direction, std::uint32_t across = 3);
+    // The same, made down to `layer` at least, as digging toward it would.
+    void cover_down(DVec3 direction, int layer, std::uint32_t across = 3);
+
+    [[nodiscard]] World& world() noexcept { return world_; }
+    [[nodiscard]] Volume& volume() noexcept { return volume_; }
+
+private:
+    Volume volume_;
+    World world_;
+};
 
 // Makes a tile's height more under the tile column's floor and lowers the floor to it, keeping
 // all over the old floor as it is; false where the column isn't made or is made to the bottom.

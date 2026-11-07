@@ -7,7 +7,7 @@
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
 #include <hog/globe/surface_mesh.hpp>
-#include <hog/globe/voxel_store.hpp>
+#include <hog/globe/volume.hpp>
 #include <hog/globe/world.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/terrain/block_mesh.hpp>
@@ -39,11 +39,11 @@ namespace hog::client {
 [[nodiscard]] Result<globe::Planet> globe_planet_in(const std::filesystem::path& file,
                                                     std::uint64_t seed, double radius);
 
-// The voxel world drawn in place of the ground, nothing yet changed in it.
+// The voxel world drawn in place of the ground: the volume, empty until it's given its tiles.
 struct GlobeWorld {
     explicit GlobeWorld(const globe::Planet& planet,
                         const globe::Generator::Progress& progress = {})
-        : generator{planet, progress}, store{generator.layers()}, world{generator, store} {}
+        : generator{planet, progress}, world{generator, volume} {}
     GlobeWorld(const GlobeWorld&) = delete;
     GlobeWorld& operator=(const GlobeWorld&) = delete;
     GlobeWorld(GlobeWorld&&) = delete;
@@ -51,7 +51,7 @@ struct GlobeWorld {
     ~GlobeWorld() = default;
 
     globe::Generator generator;
-    globe::VoxelStore store;
+    globe::Volume volume;
     globe::World world;
 };
 

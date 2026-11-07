@@ -47,7 +47,7 @@ int drains_to(const Runoff& runoff, std::size_t n) {
 
 std::int64_t Region::weather_column(Site top, std::int64_t ground, std::uint32_t low,
                                     const globe::Climate& climate, double depth) {
-    const double thickness = world_->store().layers().thickness;
+    const double thickness = world_->layers().thickness;
     const Voxel* surface = voxel(top);
     if (surface == nullptr) {
         return 0;
@@ -83,7 +83,7 @@ std::int64_t Region::weather_column(Site top, std::int64_t ground, std::uint32_t
 Stepped Region::weather_ground(const ClimateAt& climate, double depth) {
     ++steps_;
     Stepped stepped;
-    const globe::Layers& layers = world_->store().layers();
+    const globe::Layers& layers = world_->layers();
     for (const auto& [stack, layers_held] : stacks_) {
         const auto face = static_cast<std::uint8_t>(stack >> 42U);
         const auto bi = static_cast<std::uint32_t>((stack >> 21U) & 0x1FFFFFU);
@@ -111,7 +111,7 @@ Stepped Region::weather_ground(const ClimateAt& climate, double depth) {
 }
 
 std::vector<Wash::Piece> Region::loose_under(const Top& top) {
-    const double thickness = world_->store().layers().thickness;
+    const double thickness = world_->layers().thickness;
     const auto metres = [&](std::int64_t units) {
         return static_cast<double>(units) / static_cast<double>(full) * thickness;
     };
@@ -149,7 +149,7 @@ std::vector<Wash::Piece> Region::loose_under(const Top& top) {
 
 void Region::pile_pieces(Site column, std::uint32_t voxels,
                          const std::vector<Wash::Piece>& pieces) {
-    const double thickness = world_->store().layers().thickness;
+    const double thickness = world_->layers().thickness;
     // Each piece's top, in units up from the column's ground.
     std::vector<std::int64_t> tops;
     std::int64_t total = 0;
@@ -187,7 +187,7 @@ void Region::pile_pieces(Site column, std::uint32_t voxels,
 }
 
 std::int64_t Region::relay(const Top& top, const Wash::Node& washed, double taken) {
-    const double thickness = world_->store().layers().thickness;
+    const double thickness = world_->layers().thickness;
     const Site column{.face = top.face, .i = top.i, .j = top.j, .layer = top.first};
     const std::int64_t off =
         dithered(taken / thickness * static_cast<double>(full), column, 11);

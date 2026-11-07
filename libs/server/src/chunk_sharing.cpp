@@ -17,14 +17,8 @@ const log::Category chunks_log{"chunks"};
 
 ChunkSharing::ChunkSharing(const globe::World& world, jobs::JobSystem& jobs,
                            chunks::GlobeDetail detail)
-    : source_{&world}, jobs_{&jobs}, detail_{detail}, copy_{world.generator().layers()},
-      seen_{world.generator(), copy_} {
-    // The world as the server holds it now is what's shown at first.
-    for (const globe::BrickSite site : world.store().sites()) {
-        copy_.put(site, *world.store().brick(site));
-    }
-    synced_ = world.store().revision();
-}
+    : source_{&world}, jobs_{&jobs}, detail_{detail}, copy_{world.volume()},
+      seen_{world.generator(), copy_}, synced_{world.revision()} {}
 
 void ChunkSharing::join(net::ConnectionId player) {
     players_.insert_or_assign(
@@ -56,7 +50,7 @@ void ChunkSharing::step() {
     // Only when the world has changed, and not oftener than sync_every: each sync waits for the
     // chunks being meshed to finish, which stalls meshing; an edit is carried over at once.
     if (!syncing_) {
-        if (++ticks_ >= sync_every && source_->store().revision() != synced_) {
+        if (++ticks_ >= sync_every && source_->revision() != synced_) {
             syncing_ = true;
         }
         if (!syncing_) {
@@ -72,23 +66,30 @@ void ChunkSharing::step() {
     if (meshing) {
         return;
     }
-    const globe::VoxelStore& store = source_->store();
-    for (const globe::BrickSite site : store.changed_since(synced_)) {
-        if (const globe::Brick* brick = store.brick(site)) {
-            copy_.put(site, *brick);
-        } else {
-            copy_.erase(site);
-        }
+    const globe::Volume& volume = source_->volume();
+    for (const globe::BrickSite site : source_->changed_since(synced_)) {
+        const globe::Site corner = globe::site_in(site, 0);
+        const globe::VoxelTree* tile = volume.tile_at(corner);
+        copy_.put_tile(corner,
+                       tile != nullptr ? *tile : globe::VoxelTree{globe::Volume::tile_side});
         for (auto& [id, player] : players_) {
             player->stream.changed(site);
         }
     }
-    synced_ = store.revision();
+    synced_ = source_->revision();
     for (auto& [id, player] : players_) {
         player->stream.hold(false);
     }
     syncing_ = false;
     ticks_ = 0;
+}
+
+void ChunkSharing::reload() {
+    for (auto& [id, player] : players_) {
+        player->stream.settle();
+    }
+    copy_ = source_->volume();
+    synced_ = source_->revision();
 }
 
 void ChunkSharing::edited() {

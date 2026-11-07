@@ -42,8 +42,8 @@ bool Region::lay_ice(std::uint8_t face, std::uint32_t i, std::uint32_t j, double
         return false;
     }
     const globe::Surface& top = found.back().surface;
-    const double units = std::max(metres, 0.0) / world_->store().layers().thickness *
-                         static_cast<double>(full);
+    const double units =
+        std::max(metres, 0.0) / world_->layers().thickness * static_cast<double>(full);
     fill_grain({.face = face, .i = i, .j = j, .layer = top.first}, top.open,
                std::min(static_cast<std::int64_t>(std::llround(units)),
                         std::int64_t{top.open} * full),
@@ -59,7 +59,7 @@ Stepped Region::age_ice(double years) {
 }
 
 void Region::glaciate(Stepped& stepped, double years) {
-    const globe::Layers& layers = world_->store().layers();
+    const globe::Layers& layers = world_->layers();
     const double thickness = layers.thickness;
 
     // The columns with ice lying in the open, and those beside them for it to flow into.

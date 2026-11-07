@@ -1,18 +1,20 @@
 #include <hog/app/server.hpp>
+#include <hog/build_world/build_world.hpp>
 #include <hog/chat/filter.hpp>
-#include <hog/globe/brick_archive.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/material.hpp>
+#include <hog/globe/volume_build.hpp>
 #include <hog/globe/voxel.hpp>
-#include <hog/globe/voxel_store.hpp>
 #include <hog/globe/world.hpp>
+#include <hog/jobs/job_system.hpp>
 #include <hog/login/keys.hpp>
 #include <hog/login/token.hpp>
 #include <hog/net/client.hpp>
 #include <hog/planet/projection.hpp>
 #include <hog/planet/tangent_frame.hpp>
 #include <hog/protocol/messages.hpp>
+#include <hog/store/sqlite_volume_archive.hpp>
 #include <hog/testing/ports.hpp>
 #include <hog/testing/temporary_directory.hpp>
 
@@ -106,6 +108,17 @@ std::unique_ptr<Server> opened(const hog::server::ServerConfig& config, GameTime
     auto server = Server::open(config, now);
     REQUIRE(server);
     return std::move(*server);
+}
+
+// Writes the world's ground about `direction` into its file, as hog-build-world makes it.
+void build_ground(const World& world, hog::DVec3 direction) {
+    const auto server = opened(world.config());
+    const hog::globe::Generator& generator = server->generator();
+    auto archive = hog::store::SqliteVolumeArchive::open(world.config().world);
+    REQUIRE(archive);
+    hog::jobs::JobSystem jobs{2};
+    REQUIRE(hog::build_world::build(generator, *archive, jobs,
+                                    {hog::globe::around(generator, direction, 3)}));
 }
 
 std::uint64_t counter(const Server& server, std::string_view name) {
@@ -660,6 +673,7 @@ TEST_CASE("a world without time control stays at real time", "[app][server]") {
 TEST_CASE("a hole dug in the voxel world is kept with it", "[app][server]") {
     const World world;
     const hog::DVec3 direction = hog::planet::start_direction;
+    build_ground(world, direction);
     hog::globe::Site site;
     {
         auto server = opened(world.config());
@@ -676,12 +690,12 @@ TEST_CASE("a hole dug in the voxel world is kept with it", "[app][server]") {
         hog::globe::World globe = server->globe();
         CHECK(globe.at(site).solid != hog::globe::Material::Air);
         hog::globe::dig(globe, direction * ground, 3.0);
-        CHECK(server->voxels().size() > 0);
+        CHECK_FALSE(server->volume().unsaved().empty());
         CHECK(globe.at(site).solid == hog::globe::Material::Air);
         REQUIRE(server->save());
     }
     auto reopened = opened(world.config());
-    CHECK(reopened->voxels().size() > 0);
+    CHECK(reopened->volume().unsaved().empty());
     CHECK(reopened->globe().at(site).solid == hog::globe::Material::Air);
 }
 
@@ -736,6 +750,7 @@ void hear(Digger& digger) {
 
 TEST_CASE("a player's digging has the chunks it touches sent again to everyone", "[app][server]") {
     const World world;
+    build_ground(world, hog::planet::start_direction);
     const auto server = playing(world);
     const std::string address = std::format("127.0.0.1:{}", server->players()->port());
     const hog::globe::Generator& generator = server->generator();
@@ -795,7 +810,7 @@ TEST_CASE("a player's digging has the chunks it touches sent again to everyone",
         }
     }};
     REQUIRE(server->run(timer, [] { return start; }, stop));
-    REQUIRE(server->voxels().size() > 0);
+    REQUIRE(server->globe().revision() > 0);
     // Both are sent chunks, and those over the hole again once it was dug.
     for (const Digger& digger : diggers) {
         INFO("chunks held " << digger.chunks.size() << ", dug " << dug);

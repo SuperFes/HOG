@@ -1,6 +1,7 @@
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
-#include <hog/globe/voxel_store.hpp>
+#include <hog/globe/volume.hpp>
+#include <hog/globe/volume_build.hpp>
 #include <hog/globe/world.hpp>
 #include <hog/stills/stills.hpp>
 
@@ -195,8 +196,10 @@ int run(std::span<const std::string_view> arguments) {
     if (!options.dig) {
         return 0;
     }
-    hog::globe::VoxelStore store{generator.layers()};
-    hog::globe::World world{generator, store};
+    // The tile columns about the place, made as the world build makes them.
+    hog::globe::Volume volume = hog::globe::generate_area(
+        generator, hog::globe::around(generator, options.at->direction(), 3));
+    hog::globe::World world{generator, volume};
     const double radius = options.planet.radius;
     hog::globe::dig(world, options.at->direction() * (radius + ground), *options.dig);
     return write(options.out / "voxels.png",

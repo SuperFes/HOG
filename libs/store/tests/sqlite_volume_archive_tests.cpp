@@ -5,6 +5,7 @@
 #include <hog/globe/material.hpp>
 #include <hog/globe/volume.hpp>
 #include <hog/globe/volume_archive.hpp>
+#include <hog/globe/voxel.hpp>
 #include <hog/store/sqlite_volume_archive.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -19,6 +20,7 @@ using hog::globe::Material;
 using hog::globe::SavedColumn;
 using hog::globe::Site;
 using hog::globe::Volume;
+using hog::globe::Voxel;
 using hog::store::SqliteVolumeArchive;
 using hog::store::testing::query;
 using hog::store::testing::tamper;
@@ -44,7 +46,7 @@ SavedColumn rock(std::uint8_t face, std::uint32_t i, std::uint32_t j, std::uint3
     volume.set_floor(corner, floor);
     for (std::uint32_t layer = floor; layer <= top; ++layer) {
         volume.set({.face = face, .i = corner.i + 5, .j = corner.j, .layer = layer},
-                   {.solid = Material::Basalt, .solid_level = Cube::levels});
+                   {.solid = Material::Basalt, .solid_amount = Voxel::full});
     }
     return {.face = face, .i = i, .j = j, .bytes = volume.encode_column(corner)};
 }

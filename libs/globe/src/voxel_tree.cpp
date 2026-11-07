@@ -14,8 +14,8 @@ namespace hog::globe {
 std::size_t VoxelTree::Hash::operator()(const Node& node) const noexcept {
     if (node.leaf) {
         const Cube& v = node.voxel;
-        return hash_values(1, static_cast<int>(v.solid), v.solid_level, static_cast<int>(v.grain),
-                           v.grain_level, static_cast<int>(v.liquid), v.liquid_level, v.condition,
+        return hash_values(1, static_cast<int>(v.solid), v.solid_amount, static_cast<int>(v.grain),
+                           v.grain_amount, static_cast<int>(v.liquid), v.liquid_amount, v.condition,
                            v.heat);
     }
     return hash_values(2, node.child[0], node.child[1], node.child[2], node.child[3],
@@ -237,11 +237,11 @@ std::vector<std::byte> VoxelTree::encode() const {
             const Cube& v = node.voxel;
             out.write(leaf_tag);
             out.write(static_cast<std::uint8_t>(v.solid));
-            out.write(v.solid_level);
+            out.write(v.solid_amount);
             out.write(static_cast<std::uint8_t>(v.grain));
-            out.write(v.grain_level);
+            out.write(v.grain_amount);
             out.write(static_cast<std::uint8_t>(v.liquid));
-            out.write(v.liquid_level);
+            out.write(v.liquid_amount);
             out.write(v.condition);
             out.write(v.heat);
         } else {
@@ -288,27 +288,23 @@ Result<VoxelTree> VoxelTree::decode(std::span<const std::byte> bytes) {
         if (*tag == leaf_tag) {
             Cube v;
             const auto solid = material(in.read<std::uint8_t>());
-            const auto solid_level = in.read<std::uint8_t>();
+            const auto solid_amount = in.read<std::uint16_t>();
             const auto grain = material(in.read<std::uint8_t>());
-            const auto grain_level = in.read<std::uint8_t>();
+            const auto grain_amount = in.read<std::uint16_t>();
             const auto liquid = material(in.read<std::uint8_t>());
-            const auto liquid_level = in.read<std::uint8_t>();
+            const auto liquid_amount = in.read<std::uint16_t>();
             const auto condition = in.read<std::uint8_t>();
             const auto heat = in.read<std::uint8_t>();
-            if (!solid || !solid_level || !grain || !grain_level || !liquid || !liquid_level ||
+            if (!solid || !solid_amount || !grain || !grain_amount || !liquid || !liquid_amount ||
                 !condition || !heat) {
                 return fail("a leaf is cut short or has a value out of range");
             }
-            if (*solid_level > Cube::levels || *grain_level > Cube::levels ||
-                *liquid_level > Cube::levels) {
-                return fail("a leaf has a level out of range");
-            }
             v.solid = *solid;
-            v.solid_level = *solid_level;
+            v.solid_amount = *solid_amount;
             v.grain = *grain;
-            v.grain_level = *grain_level;
+            v.grain_amount = *grain_amount;
             v.liquid = *liquid;
-            v.liquid_level = *liquid_level;
+            v.liquid_amount = *liquid_amount;
             v.condition = *condition;
             v.heat = *heat;
             ids.push_back(tree.leaf_of(v));

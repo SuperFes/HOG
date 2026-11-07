@@ -84,9 +84,11 @@ struct Lake {
     double across = 0.0;
 };
 
-Lake make_lake(World& world, double across, double fall) {
+Lake make_lake(MadeWorld& made, double across, double fall) {
+    World& world = made.world();
     const Generator& generator = world.generator();
     const DVec3 up = ground_between(generator, 50.0, 400.0);
+    made.cover(up);
     const double ground = hog::globe::ground_below(generator, up, 0.5).value_or(0.0);
     const DVec3 east = glm::normalize(glm::cross(DVec3{0.0, 0.0, 1.0}, up));
     const DVec3 north = glm::cross(up, east);
@@ -121,9 +123,9 @@ TEST_CASE("a lake filling its bowl meshes level, with a closed shore", "[globe][
     const double voxel = GENERATE(from_range(sizes));
     CAPTURE(voxel);
     const Generator& generator = working(voxel);
-    VoxelStore store{generator.layers()};
-    World world{generator, store};
-    const Lake lake = make_lake(world, 32.0 * voxel, 1.5 * voxel);
+    MadeWorld made{generator};
+    const World& world = made.world();
+    const Lake lake = make_lake(made, 32.0 * voxel, 1.5 * voxel);
     const double thickness = generator.layers().thickness;
     const SurfaceMesh mesh =
         mesh_of(world, block_round(hog::globe::chunk_under(lake.up, generator.layers())));

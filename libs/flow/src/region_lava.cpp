@@ -25,7 +25,7 @@ bool molten(Material liquid) noexcept {
 } // namespace
 
 void Region::quench(Stepped& stepped) {
-    const double thickness = world_->store().layers().thickness;
+    const double thickness = world_->layers().thickness;
     const double volume = thickness * thickness * thickness;
     const globe::Properties& water = globe::properties(Material::Water);
     const double per_kilogram = (water.heat_capacity * (boiling_kelvin - air_kelvin)) + latent_heat;
@@ -113,7 +113,7 @@ void Region::cool_rock(double seconds) {
     }
     const double elapsed = cooling_;
     cooling_ = 0.0;
-    const double thickness = world_->store().layers().thickness;
+    const double thickness = world_->layers().thickness;
     for (auto& [key, brick] : held_) {
         for (int k = 0; k < globe::brick_voxels; ++k) {
             Voxel& voxel = brick.voxels[static_cast<std::size_t>(k)];

@@ -15,7 +15,6 @@ target_link_libraries(sqlite3 PUBLIC Threads::Threads)
 
 add_library(hog_store
     src/database.cpp
-    src/sqlite_brick_archive.cpp
     src/sqlite_volume_archive.cpp
     src/sqlite_player_store.cpp
     src/sqlite_snapshot_store.cpp)
@@ -27,7 +26,6 @@ hog_target_defaults(hog_store)
 
 hog_add_tests(hog_store
     tests/database_tests.cpp
-    tests/sqlite_brick_archive_tests.cpp
     tests/sqlite_volume_archive_tests.cpp
     tests/sqlite_player_store_tests.cpp
     tests/sqlite_snapshot_store_tests.cpp)

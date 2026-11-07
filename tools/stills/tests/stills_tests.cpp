@@ -1,6 +1,6 @@
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
-#include <hog/globe/voxel_store.hpp>
+#include <hog/globe/volume_build.hpp>
 #include <hog/globe/world.hpp>
 #include <hog/stills/stills.hpp>
 
@@ -47,8 +47,9 @@ TEST_CASE("a voxel section shows a dug ball open where the ground was", "[stills
     const hog::stills::Place place{.latitude = -30.0, .longitude = 70.0};
     const double radius = moon.planet().radius;
     const double ground = hog::globe::ground_below(moon, place.direction(), 0.5).value_or(radius);
-    hog::globe::VoxelStore store{moon.layers()};
-    hog::globe::World world{moon, store};
+    hog::globe::MadeWorld made{moon};
+    hog::globe::World& world = made.world();
+    made.cover(place.direction(), 1);
     const auto cut = [&] {
         return hog::stills::voxel_section(world, place, 16.0, ground - radius - 8.0,
                                           ground - radius + 8.0, 32);

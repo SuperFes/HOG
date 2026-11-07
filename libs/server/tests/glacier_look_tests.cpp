@@ -1,26 +1,25 @@
+#include <hog/flow/simulation.hpp>
 #include <hog/globe/brick.hpp>
 #include <hog/globe/cell.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
-#include <hog/globe/voxel_store.hpp>
+#include <hog/globe/volume_build.hpp>
 #include <hog/globe/world.hpp>
-#include <hog/flow/simulation.hpp>
 #include <hog/server/ice_bake.hpp>
 #include <hog/server/ice_climate.hpp>
 #include <hog/weather/field.hpp>
 
-#include <stb_image_write.h>
-
 #include <catch2/catch_test_macros.hpp>
+#include <stb_image_write.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <cstdlib>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
-#include <string>
 #include <set>
+#include <string>
 #include <vector>
 
 namespace {
@@ -98,8 +97,9 @@ TEST_CASE("a mountain's snow settles into glaciers", "[.glacier_look]") {
                     hog::weather::ice_balance(planet, here, highest - planet.radius).net());
     }
 
-    VoxelStore store{layers};
-    World world{generator, store};
+    hog::globe::MadeWorld made{generator};
+    World& world = made.world();
+    made.cover(peak, 5);
     hog::flow::Simulation simulation{world};
     const hog::server::IceMap map = hog::server::bake_ice_map(
         generator, {centre.level, centre.face, i0, j0}, side / 8, 8,
@@ -122,7 +122,7 @@ TEST_CASE("a mountain's snow settles into glaciers", "[.glacier_look]") {
             const std::uint32_t base = static_cast<std::uint32_t>(std::max(layers.layer_at(ground[at(x, y)]) - 4, 0));
             for (std::uint32_t layer = base; layer < base + 140; ++layer) {
                 const Site site{centre.face, i0 + x, j0 + y, layer};
-                if (!store.holds_site(brick_of(site)) || store.brick(brick_of(site)) == nullptr) {
+                if (!hog::globe::in_layers(layers, brick_of(site))) {
                     continue;
                 }
                 const auto voxel = world.at(site);

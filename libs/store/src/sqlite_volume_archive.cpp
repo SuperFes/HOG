@@ -103,4 +103,24 @@ SqliteVolumeArchive::column(std::uint8_t face, std::uint32_t i, std::uint32_t j)
     return std::nullopt;
 }
 
+Result<std::vector<globe::SavedColumn>> SqliteVolumeArchive::columns() const {
+    sqlite3* database = database_.get();
+    Statement read{database, "SELECT face, i, j, data FROM volume_columns ORDER BY face, i, j"};
+    if (!read.ok()) {
+        return failure(database, "preparing the tile columns read");
+    }
+    std::vector<globe::SavedColumn> all;
+    int step = read.step();
+    for (; step == SQLITE_ROW; step = read.step()) {
+        all.push_back({.face = static_cast<std::uint8_t>(sqlite3_column_int(read.get(), 0)),
+                       .i = static_cast<std::uint32_t>(sqlite3_column_int64(read.get(), 1)),
+                       .j = static_cast<std::uint32_t>(sqlite3_column_int64(read.get(), 2)),
+                       .bytes = column_bytes(read, 3)});
+    }
+    if (step != SQLITE_DONE) {
+        return failure(database, "reading the tile columns");
+    }
+    return all;
+}
+
 } // namespace hog::store

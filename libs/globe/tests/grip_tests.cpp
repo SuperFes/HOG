@@ -22,9 +22,10 @@ constexpr double degrees = std::numbers::pi / 180.0;
 
 // A column of granite up to a brick's boundary, and over it `grain` this full, as wet as `water`.
 struct Ground {
-    Ground() : store(earth().layers()), world(earth(), store) {
+    Ground() : world(earth(), volume) {
         const Layers& layers = earth().layers();
         const Cell cell = cell_under(DVec3{1.0, 0.0, 0.0}, layers.level);
+        volume.set_floor({.face = cell.face, .i = cell.i, .j = cell.j}, 0);
         top = static_cast<std::uint32_t>(layers.count / 2 / brick_side) * brick_side;
         low = {.face = cell.face,
                .i = cell.i / brick_side,
@@ -35,6 +36,7 @@ struct Ground {
         BrickVoxels rock{};
         for (Voxel& voxel : rock) {
             voxel.solid = Material::Granite;
+            voxel.solid_amount = Voxel::full;
         }
         world.write(low, rock);
         world.write(high, BrickVoxels{});
@@ -58,7 +60,7 @@ struct Ground {
         return center(column) * (layers.bottom(static_cast<int>(top)) + 0.1);
     }
 
-    VoxelStore store;
+    Volume volume;
     World world;
     Cell column;
     BrickSite low;

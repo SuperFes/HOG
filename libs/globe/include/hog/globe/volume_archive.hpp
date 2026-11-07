@@ -3,6 +3,7 @@
 #include <hog/core/result.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/layers.hpp>
+#include <hog/globe/volume.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -40,6 +41,8 @@ public:
     // The tile column at (`face`, `i`, `j`), none where it was never written.
     [[nodiscard]] virtual Result<std::optional<SavedColumn>>
     column(std::uint8_t face, std::uint32_t i, std::uint32_t j) const = 0;
+    // Every tile column written, in order.
+    [[nodiscard]] virtual Result<std::vector<SavedColumn>> columns() const = 0;
 
 protected:
     VolumeArchive(const VolumeArchive&) = default;
@@ -56,6 +59,7 @@ public:
     [[nodiscard]] Result<std::vector<std::byte>> header() const override;
     [[nodiscard]] Result<std::optional<SavedColumn>> column(std::uint8_t face, std::uint32_t i,
                                                             std::uint32_t j) const override;
+    [[nodiscard]] Result<std::vector<SavedColumn>> columns() const override;
 
 private:
     std::vector<std::byte> header_;
@@ -63,7 +67,7 @@ private:
         columns_;
 };
 
-inline constexpr std::uint16_t volume_format = 1;
+inline constexpr std::uint16_t volume_format = 2;
 
 // What a volume is made from: the planet's seed and its layers. Other planet settings aren't told
 // apart yet.
@@ -78,5 +82,15 @@ struct VolumeOrigin {
 [[nodiscard]] std::vector<std::byte> volume_header(const VolumeOrigin& origin);
 // Fails, saying why, on a header of another format, or cut short.
 [[nodiscard]] Result<VolumeOrigin> origin_from(std::span<const std::byte> header);
+
+// Whether the archive holds a volume, false where nothing was ever written; fails where it's one
+// made from another origin.
+[[nodiscard]] Result<bool> made_from(const VolumeArchive& archive, const VolumeOrigin& origin);
+
+// Every tile column the archive holds, put back into a volume; fails on bytes that aren't one, or
+// a volume made from another origin.
+[[nodiscard]] Result<Volume> load_volume(const VolumeArchive& archive, const VolumeOrigin& origin);
+// Writes the volume's tile columns not saved, all or nothing, and counts them saved; how many.
+Result<std::size_t> save_volume(Volume& volume, VolumeArchive& archive, const VolumeOrigin& origin);
 
 } // namespace hog::globe

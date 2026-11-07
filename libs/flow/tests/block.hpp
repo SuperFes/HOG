@@ -6,8 +6,8 @@
 #include <hog/globe/generator.hpp>
 #include <hog/globe/layers.hpp>
 #include <hog/globe/planet.hpp>
+#include <hog/globe/volume.hpp>
 #include <hog/globe/voxel.hpp>
-#include <hog/globe/voxel_store.hpp>
 #include <hog/globe/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -28,8 +28,8 @@ using globe::BrickVoxels;
 using globe::Generator;
 using globe::Material;
 using globe::Site;
+using globe::Volume;
 using globe::Voxel;
-using globe::VoxelStore;
 using globe::World;
 
 constexpr std::int64_t full = Voxel::full;
@@ -55,8 +55,9 @@ public:
     explicit Block(int floor, bool hold_sea = false,
                    const std::function<bool(std::uint32_t, std::uint32_t, int)>& shape = {},
                    Material ground = Material::Basalt)
-        : store_{earth().layers()}, world_{earth(), store_}, floor_{floor},
-          corner_i_{(store_.bricks_across() / 2) * hog::globe::brick_side}, corner_j_{corner_i_} {
+        : world_{earth(), volume_}, floor_{floor},
+          corner_i_{(hog::globe::bricks_across(earth().layers()) / 2) * hog::globe::brick_side},
+          corner_j_{corner_i_} {
         const auto first = (static_cast<std::uint32_t>(floor) - 1) / hog::globe::brick_side;
         for (std::uint32_t bl = first; bl < first + 3; ++bl) {
             for (std::uint32_t bj = 0; bj < 3; ++bj) {
@@ -74,9 +75,8 @@ public:
     // A block over a cube edge: the bricks of every column within a brick of the edge column `j`
     // of face 0's last row, on both faces, for the three bricks up from the floor.
     struct Edge {};
-    Block(int floor, Edge, std::uint32_t j)
-        : store_{earth().layers()}, world_{earth(), store_}, floor_{floor} {
-        const int level = store_.layers().level;
+    Block(int floor, Edge /*edge*/, std::uint32_t j) : world_{earth(), volume_}, floor_{floor} {
+        const int level = earth().layers().level;
         const std::uint32_t last = (std::uint32_t{1} << level) - 1;
         const auto first = (static_cast<std::uint32_t>(floor) - 1) / hog::globe::brick_side;
         std::set<std::tuple<int, std::uint32_t, std::uint32_t>> columns;
@@ -102,7 +102,7 @@ public:
     [[nodiscard]] Region& region() { return *region_; }
     [[nodiscard]] int floor() const { return floor_; }
     [[nodiscard]] World& world() { return world_; }
-    [[nodiscard]] const VoxelStore& store() const { return store_; }
+    [[nodiscard]] const Volume& volume() const { return volume_; }
     [[nodiscard]] const std::vector<BrickSite>& bricks() const { return bricks_; }
 
     // `layer` counted up from the floor.
@@ -187,7 +187,12 @@ private:
                     voxel.solid_amount = Voxel::full;
                 }
             }
-            store_.put(brick, hog::globe::Brick::pack(voxels));
+            // Made from the bottom, the rest of each tile column left as air.
+            const Site corner = hog::globe::site_in(brick, 0);
+            if (!volume_.floor(corner)) {
+                volume_.set_floor(corner, 0);
+            }
+            world_.write(brick, voxels);
         }
         region_ = std::make_unique<Region>(world_, hold_sea);
         for (const BrickSite brick : bricks_) {
@@ -195,7 +200,7 @@ private:
         }
     }
 
-    VoxelStore store_;
+    Volume volume_;
     World world_;
     int floor_;
     std::uint32_t corner_i_ = 0;

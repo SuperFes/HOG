@@ -1,3 +1,4 @@
+#include <hog/globe/cell.hpp>
 #include <hog/globe/volume_build.hpp>
 #include <hog/globe/voxel.hpp>
 
@@ -181,6 +182,60 @@ std::vector<Generator::Column> columns_of(const Generator& generator, std::uint8
 }
 
 } // namespace
+
+std::uint32_t tiles_across(const Generator& generator) {
+    return std::max((std::uint32_t{1} << generator.layers().level) / Volume::tile_side, 1U);
+}
+
+Area around(const Generator& generator, DVec3 direction, std::uint32_t across) {
+    const std::uint32_t side = tiles_across(generator);
+    across = std::clamp(across, 1U, side);
+    const Cell cell = cell_under(direction, generator.layers().level);
+    const auto start = [&](std::uint32_t at) {
+        const std::uint32_t tile = at / Volume::tile_side;
+        return std::min(tile - std::min(tile, across / 2), side - across);
+    };
+    return {.face = cell.face, .i = start(cell.i), .j = start(cell.j), .across = across};
+}
+
+Volume generate_area(const Generator& generator, const Area& area) {
+    Volume volume;
+    for (std::uint32_t j = area.j; j < area.j + area.across; ++j) {
+        for (std::uint32_t i = area.i; i < area.i + area.across; ++i) {
+            volume.merge(generate_tiles(generator, area.face, i, j));
+        }
+    }
+    return volume;
+}
+
+void MadeWorld::cover(const Area& area) {
+    constexpr auto side = static_cast<std::uint32_t>(Volume::tile_side);
+    for (std::uint32_t j = area.j; j < area.j + area.across; ++j) {
+        for (std::uint32_t i = area.i; i < area.i + area.across; ++i) {
+            if (!volume_.floor({.face = area.face, .i = i * side, .j = j * side})) {
+                volume_.merge(generate_tiles(world_.generator(), area.face, i, j));
+            }
+        }
+    }
+}
+
+void MadeWorld::cover(DVec3 direction, std::uint32_t across) {
+    cover(around(world_.generator(), direction, across));
+}
+
+void MadeWorld::cover_down(DVec3 direction, int layer, std::uint32_t across) {
+    cover(direction, across);
+    const Area area = around(world_.generator(), direction, across);
+    constexpr auto side = static_cast<std::uint32_t>(Volume::tile_side);
+    for (std::uint32_t j = area.j; j < area.j + area.across; ++j) {
+        for (std::uint32_t i = area.i; i < area.i + area.across; ++i) {
+            const Site corner{.face = area.face, .i = i * side, .j = j * side};
+            while (std::cmp_greater(volume_.floor(corner).value_or(0), std::max(layer, 0)) &&
+                   deepen(volume_, world_.generator(), area.face, i, j)) {
+            }
+        }
+    }
+}
 
 Volume generate_tiles(const Generator& generator, std::uint8_t face, std::uint32_t i,
                       std::uint32_t j) {

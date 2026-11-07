@@ -2,8 +2,8 @@
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
 #include <hog/globe/surface_mesh.hpp>
+#include <hog/globe/volume_build.hpp>
 #include <hog/globe/voxel.hpp>
-#include <hog/globe/voxel_store.hpp>
 #include <hog/globe/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -34,8 +34,8 @@ TEST_CASE("a chunk drawn as voxels has a box face for each solid voxel's open to
           "[globe][voxel_faces]") {
     const Generator generator{Planet{}};
     const Layers& layers = generator.layers();
-    VoxelStore store{layers};
-    const World world{generator, store};
+    MadeWorld made{generator};
+    const World& world = made.world();
     // Land: the highest ground over a coarse sweep.
     hog::DVec3 land{0.0, 0.0, 1.0};
     double top = 0.0;
@@ -49,6 +49,7 @@ TEST_CASE("a chunk drawn as voxels has a box face for each solid voxel's open to
         }
     }
     const Cell chunk = chunk_under(land, layers, 0);
+    made.cover(land);
     SurfaceMesh mesh;
     mesh.origin = center(chunk) * generator.planet().radius;
     add_chunk_voxels(mesh, world, chunk, Drawn{}, std::nullopt);
@@ -99,9 +100,10 @@ TEST_CASE("a world drawn as boxes has its chunks drawn as voxels, and not otherw
           "[globe][voxel_faces]") {
     const Generator generator{Planet{}};
     const Layers& layers = generator.layers();
-    VoxelStore store{layers};
-    World world{generator, store};
+    MadeWorld made{generator};
+    World& world = made.world();
     const hog::DVec3 up = glm::normalize(hog::DVec3{0.3, 0.4, 0.86});
+    made.cover(up);
     const Cell chunk = chunk_under(up, layers, 0);
     const auto drawn = [&] {
         SurfaceMesh mesh;

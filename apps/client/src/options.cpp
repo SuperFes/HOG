@@ -107,6 +107,8 @@ constexpr std::array kept{
          .keep = [](Options& options, std::string_view value) { options.companion = value; }},
     Kept{.name = "--capture",
          .keep = [](Options& options, std::string_view value) { options.capture = value; }},
+    Kept{.name = "--world",
+         .keep = [](Options& options, std::string_view value) { options.world = value; }},
 };
 
 const Kept* kept_named(std::string_view option) {
@@ -247,6 +249,10 @@ Result<void> check_together(const Options& options) {
         return make_error(ErrorCode::InvalidArgument,
                           "--surface boxes is for flying alone: a server draws its own ground");
     }
+    if (options.world && options.connect) {
+        return make_error(ErrorCode::InvalidArgument,
+                          "--world is for flying alone: a server sends its own ground");
+    }
     if (options.voxel && options.connect) {
         return make_error(ErrorCode::InvalidArgument,
                           "--voxel is for flying alone: a server's world has its own cell size");
@@ -317,6 +323,8 @@ options:
                          way off coarser and sends fewer chunks, the near ground as it was
   --voxel METRES         the voxel world's cell size, finer or coarser than the planet's
                          own (0.5 by default); for looking, flying alone
+  --world FILE           the world's file, its ground made ahead by hog-build-world, to
+                         fly over alone; without it there is no ground
   --surface FORM         draw the ground smoothed across the voxels' solid amounts
                          (default) or as the voxels' own boxes: smooth or boxes
   --no-bend              draw the planet curving as tightly as it truly does, not

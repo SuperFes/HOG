@@ -1,9 +1,9 @@
 #pragma once
 
-#include <hog/core/math.hpp>
 #include <hog/core/result.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/volume_archive.hpp>
+#include <hog/globe/volume_build.hpp>
 #include <hog/jobs/job_system.hpp>
 
 #include <cstddef>
@@ -13,20 +13,8 @@
 
 namespace hog::build_world {
 
-// A square of tile columns on one of the planet's six sides, counted in tiles.
-struct Area {
-    std::uint8_t face = 0;
-    std::uint32_t i = 0;
-    std::uint32_t j = 0;
-    std::uint32_t across = 1;
+using globe::Area;
 
-    friend bool operator==(const Area&, const Area&) = default;
-};
-
-// Tile columns along a side of one of the planet's six sides.
-[[nodiscard]] std::uint32_t tiles_across(const globe::Generator& generator);
-// `across` tile columns square about the one under `direction`, kept on its side.
-[[nodiscard]] Area around(const globe::Generator& generator, DVec3 direction, std::uint32_t across);
 // Each of the planet's six sides whole.
 [[nodiscard]] std::vector<Area> whole(const globe::Generator& generator);
 

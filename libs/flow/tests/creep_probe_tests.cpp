@@ -3,7 +3,7 @@
 #include <hog/globe/cell.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
-#include <hog/globe/voxel_store.hpp>
+#include <hog/globe/volume_build.hpp>
 #include <hog/globe/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -14,8 +14,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
-#include <string>
 #include <set>
+#include <string>
 #include <vector>
 
 namespace {
@@ -55,8 +55,9 @@ TEST_CASE("probe: cover on a mountain after creep", "[.creep_probe]") {
             bricks.insert(brick_of({cell.face, cell.i, cell.j, static_cast<std::uint32_t>(ground + 8)}));
         }
     }
-    VoxelStore store{layers};
-    World world{generator, store};
+    hog::globe::MadeWorld made{generator};
+    World& world = made.world();
+    made.cover(peak);
     hog::flow::Simulation simulation{world};
     const std::vector<BrickSite> list(bricks.begin(), bricks.end());
 

@@ -4,12 +4,13 @@
 #include <hog/globe/cell.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
+#include <hog/globe/volume_build.hpp>
 #include <hog/globe/voxel.hpp>
-#include <hog/globe/voxel_store.hpp>
 #include <hog/globe/world.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -23,10 +24,10 @@ using hog::DVec3;
 using hog::globe::BrickSite;
 using hog::globe::BrickVoxels;
 using hog::globe::Generator;
+using hog::globe::MadeWorld;
 using hog::globe::Material;
 using hog::globe::Site;
 using hog::globe::Voxel;
-using hog::globe::VoxelStore;
 using hog::globe::World;
 
 namespace {
@@ -138,55 +139,67 @@ TEST_CASE("slopes between neighbouring columns tell distance as truly as small s
     CHECK(shared_error / counted < 0.08);
 }
 
-TEST_CASE("an unchanged world is what the generator says, voxel by voxel", "[globe][world]") {
-    VoxelStore store{earth().layers()};
-    const World world{earth(), store};
-    const BrickSite brick = ground_at(earth(), somewhere(11)).brick;
+TEST_CASE("a world is its volume's voxels, air wherever nothing is made", "[globe][world]") {
+    MadeWorld made{earth()};
+    const World& world = made.world();
+    const DVec3 direction = somewhere(11);
+    const BrickSite brick = ground_at(earth(), direction).brick;
+    // Nothing made yet: air through and through.
+    for (const Voxel& voxel : world.brick(brick)) {
+        CHECK(voxel.solid == Material::Air);
+    }
+    made.cover(direction, 1);
     const BrickVoxels voxels = world.brick(brick);
-    std::set<Material> solids;
     int inside = 0;
     for (int index = 0; index < hog::globe::brick_voxels; index += 7) {
         const Voxel voxel = voxels[static_cast<std::size_t>(index)];
-        CHECK(world.at(hog::globe::site_in(brick, index)) == voxel);
+        const Site site = hog::globe::site_in(brick, index);
+        CHECK(world.at(site) == voxel);
+        CHECK(voxel == hog::globe::voxel_of(made.volume().at(site),
+                                            hog::globe::place_temperature(earth().planet(),
+                                                                          earth().layers(), site)));
         inside += voxel.solid_amount > Voxel::full / 2 ? 1 : 0;
-        solids.insert(voxel.solid);
     }
     // The ground passes through it.
     CHECK(inside > 0);
     CHECK(inside < 74);
-    CHECK(store.size() == 0);
 }
 
-TEST_CASE("writing what's generated holds nothing", "[globe][world]") {
-    VoxelStore store{earth().layers()};
-    World world{earth(), store};
-    const BrickSite brick = ground_at(earth(), somewhere(3)).brick;
+TEST_CASE("a brick written as it is changes nothing", "[globe][world]") {
+    MadeWorld made{earth()};
+    World& world = made.world();
+    const DVec3 direction = somewhere(3);
+    made.cover(direction, 1);
+    const BrickSite brick = ground_at(earth(), direction).brick;
+    const std::uint64_t before = world.revision();
     world.write(brick, world.brick(brick));
-    CHECK(store.size() == 0);
+    CHECK(world.revision() == before);
+    CHECK(made.volume().unsaved().empty());
     BrickVoxels voxels = world.brick(brick);
     voxels[5].condition = 100;
     world.write(brick, voxels);
-    CHECK(store.size() == 1);
-    voxels[5].condition = Voxel::sound;
-    world.write(brick, voxels);
-    CHECK(store.size() == 0);
+    CHECK(world.changed_since(before) == std::vector{brick});
+    CHECK(world.brick(brick)[5].condition == 100);
+    CHECK(made.volume().unsaved().size() == 1);
 }
 
 TEST_CASE("a ball given as a shape digs and builds as a ball does", "[globe][world]") {
     const DVec3 direction = somewhere(29);
     const DVec3 centre = direction * ground_at(earth(), direction).radius;
     const hog::globe::Shape ball = [&](DVec3 at) { return glm::length(at - centre) - 3.0; };
-    VoxelStore by_ball{earth().layers()};
-    VoxelStore by_shape{earth().layers()};
-    World ball_world{earth(), by_ball};
-    World shape_world{earth(), by_shape};
+    MadeWorld by_ball{earth()};
+    MadeWorld by_shape{earth()};
+    by_ball.cover(direction);
+    by_shape.cover(direction);
+    World& ball_world = by_ball.world();
+    World& shape_world = by_shape.world();
     hog::globe::dig(ball_world, centre, 3.0);
     hog::globe::dig_shape(shape_world, centre, 3.0, 3.0, ball);
     hog::globe::build(ball_world, centre, 2.0, Material::Granite);
     hog::globe::build_shape(shape_world, centre, 2.0, 2.0, [&](DVec3 at) {
         return glm::length(at - centre) - 2.0;
     }, Material::Granite);
-    CHECK(by_shape.size() == by_ball.size());
+    CHECK(shape_world.changed_since(0) == ball_world.changed_since(0));
     const hog::globe::Cell cell = hog::globe::cell_under(direction, earth().layers().level);
     for (int layer = -6; layer <= 6; ++layer) {
         const Site site{.face = cell.face,
@@ -194,15 +207,15 @@ TEST_CASE("a ball given as a shape digs and builds as a ball does", "[globe][wor
                         .j = cell.j,
                         .layer = static_cast<std::uint32_t>(
                             earth().layers().layer_at(glm::length(centre)) + layer)};
-        CHECK(shape_world.at(site).solid == ball_world.at(site).solid);
-        CHECK(shape_world.at(site).solid_amount == ball_world.at(site).solid_amount);
+        CHECK(shape_world.at(site) == ball_world.at(site));
     }
 }
 
 TEST_CASE("digging opens a ball in the ground and building fills one", "[globe][world]") {
-    VoxelStore store{earth().layers()};
-    World world{earth(), store};
+    MadeWorld made{earth()};
+    World& world = made.world();
     const DVec3 direction = somewhere(29);
+    made.cover(direction);
     const Ground ground = ground_at(earth(), direction);
     const hog::globe::Layers& layers = earth().layers();
     const DVec3 centre = direction * ground.radius;
@@ -220,7 +233,7 @@ TEST_CASE("digging opens a ball in the ground and building fills one", "[globe][
     CHECK(world.at(site_at(ground.radius)).solid == Material::Air);
     CHECK(world.at(site_at(ground.radius - 2.5)).solid_amount < Voxel::full / 2);
     CHECK(world.at(site_at(ground.radius - 3.5)).solid_amount > Voxel::full / 2);
-    const std::size_t dug = store.size();
+    const std::size_t dug = world.changed_since(0).size();
     // Two bricks or more each way, and some more above and below it.
     CHECK(dug >= 4);
     CHECK(dug < 60);
@@ -231,32 +244,21 @@ TEST_CASE("digging opens a ball in the ground and building fills one", "[globe][
     CHECK(world.at(site_at(ground.radius - 2.6)).solid_amount < Voxel::full / 2);
 
     // A ball dug out of the open sky changes nothing.
-    VoxelStore untouched{layers};
-    World sky{earth(), untouched};
-    hog::globe::dig(sky, direction * (ground.radius + 200.0), 3.0);
-    CHECK(untouched.size() == 0);
-}
-
-TEST_CASE("a big hole costs little more than its walls", "[globe][world]") {
-    VoxelStore store{earth().layers()};
-    World world{earth(), store};
-    const DVec3 direction = somewhere(41);
-    const Ground ground = ground_at(earth(), direction);
-    hog::globe::dig(world, direction * (ground.radius - 12.0), 10.0);
-    // Many bricks, yet under a third of what their voxels held in full would take: inside it,
-    // only the rock's warmth with depth still differs between voxels.
-    CHECK(store.size() > 50);
-    CHECK(store.bytes() < store.size() * sizeof(BrickVoxels) / 3);
+    const std::uint64_t built = world.revision();
+    hog::globe::dig(world, direction * (ground.radius + 200.0), 3.0);
+    CHECK(world.revision() == built);
 }
 
 TEST_CASE("a ball dug across a cube's edge opens on both faces", "[globe][world]") {
-    VoxelStore store{earth().layers()};
-    World world{earth(), store};
+    MadeWorld made{earth()};
+    World& world = made.world();
     const DVec3 edge = glm::normalize(DVec3{1.0, 1.0, 0.3});
+    made.cover(glm::normalize(edge + DVec3{1e-5, 0.0, 0.0}));
+    made.cover(glm::normalize(edge + DVec3{0.0, 1e-5, 0.0}));
     const Ground ground = ground_at(earth(), edge);
     hog::globe::dig(world, edge * ground.radius, 4.0);
     std::set<int> faces;
-    for (const BrickSite& site : store.sites()) {
+    for (const BrickSite& site : world.changed_since(0)) {
         faces.insert(site.face);
     }
     CHECK(faces == std::set<int>{0, 1});
@@ -289,13 +291,14 @@ TEST_CASE("columns far apart tell distance at their coarser detail as truly as s
     CHECK(shared_error / counted < 0.08);
 }
 
-TEST_CASE("voxels filled far apart are the world's where changed, and coarser ground elsewhere",
+TEST_CASE("voxels filled far apart are the world's, as thick as they're far apart",
           "[globe][world]") {
-    VoxelStore store{earth().layers()};
-    World world{earth(), store};
+    MadeWorld made{earth()};
+    World& world = made.world();
     const hog::globe::Layers& layers = earth().layers();
-    const Ground ground = ground_at(earth(), somewhere(3));
     const DVec3 direction = glm::normalize(somewhere(3));
+    made.cover(direction);
+    const Ground ground = ground_at(earth(), direction);
     hog::globe::dig(world, direction * ground.radius, 6.0);
     constexpr int apart = 4;
     const hog::globe::Cell middle = hog::globe::cell_under(direction, layers.level);
@@ -305,12 +308,10 @@ TEST_CASE("voxels filled far apart are the world's where changed, and coarser gr
             cells.push_back(hog::globe::next_to(middle, a * apart, b * apart).value_or(middle));
         }
     }
-    const double lod = hog::globe::voxel_lod(earth()) * apart;
-    const std::vector<Generator::Column> columns = earth().columns(cells, lod, apart);
     const int bottom = layers.layer_at(ground.radius) - 40;
     constexpr int count = 20;
-    const std::vector<Voxel> voxels = world.fill(cells, columns, bottom, count, apart);
-    int held = 0;
+    const std::vector<Voxel> voxels = world.fill(cells, bottom, count, apart);
+    int inside = 0;
     for (std::size_t k = 0; k < cells.size(); ++k) {
         for (int step = 0; step < count; ++step) {
             const Site site{.face = cells[k].face,
@@ -319,30 +320,27 @@ TEST_CASE("voxels filled far apart are the world's where changed, and coarser gr
                             .layer = static_cast<std::uint32_t>(bottom + (step * apart))};
             const Voxel voxel =
                 voxels[(k * static_cast<std::size_t>(count)) + static_cast<std::size_t>(step)];
-            if (store.brick(hog::globe::brick_of(site)) != nullptr) {
-                Voxel changed = world.at(site);
-                changed.solid_amount = hog::globe::amount_at(
-                    hog::globe::distance_of(changed.solid_amount, layers.thickness),
-                    layers.thickness * apart);
-                CHECK(voxel == changed);
-                ++held;
-                continue;
-            }
-            const hog::globe::Sample sample =
-                columns[k].sample(layers.middle(static_cast<int>(site.layer)));
-            CHECK(voxel == voxel_from(sample, layers.thickness * apart));
+            Voxel thick = world.at(site);
+            thick.solid_amount =
+                hog::globe::amount_at(hog::globe::distance_of(thick.solid_amount, layers.thickness),
+                                      layers.thickness * apart);
+            CHECK(voxel == thick);
+            inside += voxel.solid != Material::Air ? 1 : 0;
         }
     }
-    CHECK(held > 0);
+    CHECK(inside > 0);
 }
 
 TEST_CASE("columns filled together are the world voxel by voxel, dug or not", "[globe][world]") {
-    VoxelStore store{earth().layers()};
-    World world{earth(), store};
+    MadeWorld made{earth()};
+    World& world = made.world();
     const hog::globe::Layers& layers = earth().layers();
     const DVec3 edge = glm::normalize(DVec3{1.0, 1.0, 0.3});
+    made.cover(glm::normalize(edge + DVec3{1e-5, 0.0, 0.0}));
+    made.cover(glm::normalize(edge + DVec3{0.0, 1e-5, 0.0}));
     const Ground ground = ground_at(earth(), edge);
     hog::globe::dig(world, edge * ground.radius, 2.0);
+    const std::vector<BrickSite> changed = world.changed_since(0);
     // A row of cells across the cube's edge, through the hole.
     const hog::globe::Cell middle = hog::globe::cell_under(edge, layers.level);
     std::vector<hog::globe::Cell> cells{middle};
@@ -351,11 +349,9 @@ TEST_CASE("columns filled together are the world voxel by voxel, dug or not", "[
         REQUIRE(next);
         cells.push_back(next.value_or(middle));
     }
-    const std::vector<Generator::Column> columns =
-        earth().columns(cells, hog::globe::voxel_lod(earth()));
     const int bottom = layers.layer_at(ground.radius) - 12;
     constexpr int count = 24;
-    const std::vector<Voxel> voxels = world.fill(cells, columns, bottom, count);
+    const std::vector<Voxel> voxels = world.fill(cells, bottom, count);
     const auto across = static_cast<std::size_t>(count);
     REQUIRE(voxels.size() == cells.size() * across);
     std::set<int> faces;
@@ -369,7 +365,8 @@ TEST_CASE("columns filled together are the world voxel by voxel, dug or not", "[
                             .layer = static_cast<std::uint32_t>(bottom + layer)};
             const Voxel voxel = voxels[(k * across) + static_cast<std::size_t>(layer)];
             CHECK(voxel == world.at(site));
-            dug = dug || (store.at(site) && voxel.solid_amount < Voxel::full / 2 &&
+            dug = dug || (std::ranges::binary_search(changed, hog::globe::brick_of(site)) &&
+                          voxel.solid_amount < Voxel::full / 2 &&
                           glm::length(middle_of(site, layers)) < ground.radius);
         }
     }
@@ -415,19 +412,16 @@ TEST_CASE("bricks fill from the generator", "[.bench][globe][world]") {
 
 TEST_CASE("a voxel dug or built is matter just where it's more than half full",
           "[globe][world][amounts]") {
-    VoxelStore store{earth().layers()};
-    World world{earth(), store};
+    MadeWorld made{earth()};
+    World& world = made.world();
     const DVec3 direction = somewhere(11);
+    made.cover(direction);
     const Ground ground = ground_at(earth(), direction);
     hog::globe::dig(world, direction * ground.radius, 3.0);
     hog::globe::build(world, direction * (ground.radius - 1.0), 1.5, Material::Granite);
     std::size_t checked = 0;
-    for (const BrickSite site : store.changed_since(0)) {
-        const hog::globe::Brick* brick = store.brick(site);
-        REQUIRE(brick != nullptr);
-        BrickVoxels voxels{};
-        brick->unpack(voxels);
-        for (const Voxel& voxel : voxels) {
+    for (const BrickSite site : world.changed_since(0)) {
+        for (const Voxel& voxel : world.brick(site)) {
             // Exactly half lies on the surface, either way.
             if (voxel.solid_amount != Voxel::full / 2) {
                 CHECK((voxel.solid != Material::Air) == (voxel.solid_amount > Voxel::full / 2));
@@ -440,13 +434,14 @@ TEST_CASE("a voxel dug or built is matter just where it's more than half full",
 
 TEST_CASE("the ground's top is read from the voxels, as generated, dug or built",
           "[globe][world]") {
-    VoxelStore store{earth().layers()};
-    World world{earth(), store};
+    MadeWorld made{earth()};
+    World& world = made.world();
     const double thickness = earth().layers().thickness;
     const double lod = hog::globe::voxel_lod(earth());
     for (std::uint64_t k = 0; k < 8; ++k) {
         const DVec3 direction = hog::globe::center(
             hog::globe::cell_under(somewhere(k + 50), earth().layers().level));
+        made.cover(direction, 1);
         const double generated = hog::globe::ground_below(earth(), direction, lod).value_or(0.0);
         CHECK(std::abs(hog::globe::top_of(world, direction).value_or(0.0) - generated) <
               thickness);
@@ -454,6 +449,7 @@ TEST_CASE("the ground's top is read from the voxels, as generated, dug or built"
 
     const DVec3 direction =
         hog::globe::center(hog::globe::cell_under(somewhere(61), earth().layers().level));
+    made.cover(direction);
     const double ground = hog::globe::top_of(world, direction).value_or(0.0);
     hog::globe::dig(world, direction * ground, 3.0);
     CHECK(hog::globe::top_of(world, direction).value_or(0.0) < ground - 2.5);

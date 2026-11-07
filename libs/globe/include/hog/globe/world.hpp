@@ -4,10 +4,12 @@
 #include <hog/globe/brick.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/material.hpp>
+#include <hog/globe/volume.hpp>
 #include <hog/globe/voxel.hpp>
-#include <hog/globe/voxel_store.hpp>
 
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <optional>
@@ -24,50 +26,66 @@ using BrickVoxels = std::array<Voxel, brick_voxels>;
 [[nodiscard]] Voxel generated_at(const Generator::Column& column, const Layers& layers,
                                  std::uint32_t layer, int apart = 1);
 
-// The world as it now is: what the store holds, or else what's generated.
+// Bricks across a face, and up through the layers.
+[[nodiscard]] std::uint32_t bricks_across(const Layers& layers) noexcept;
+[[nodiscard]] std::uint32_t bricks_up(const Layers& layers) noexcept;
+// Whether a brick lies within the layers, on a face.
+[[nodiscard]] bool in_layers(const Layers& layers, BrickSite site) noexcept;
+
+// The world as it now is: the voxels the volume holds, each as warm as its place gives and its
+// heat over that. Wherever the volume holds nothing, made or not, is air.
 class World {
 public:
-    // Precondition: the store stands on the generator's layers.
-    World(const Generator& generator, VoxelStore& store);
+    // Precondition: the volume stands on the generator's layers.
+    World(const Generator& generator, Volume& volume);
 
+    // The planet and its climate; never the voxels.
     [[nodiscard]] const Generator& generator() const noexcept { return *generator_; }
-    [[nodiscard]] const VoxelStore& store() const noexcept { return *store_; }
+    [[nodiscard]] const Layers& layers() const noexcept { return generator_->layers(); }
+    [[nodiscard]] const Volume& volume() const noexcept { return *volume_; }
 
     // Whether chunks are drawn as the voxels' own boxes, nothing smoothed, in place of the shaped
     // surface. Copies of the world keep the choice.
     void draw_as_boxes(bool on) noexcept { as_boxes_ = on; }
     [[nodiscard]] bool draws_as_boxes() const noexcept { return as_boxes_; }
 
+    // Air where nothing is made; solid rock under a made column's floor.
     [[nodiscard]] Voxel at(Site site) const;
     [[nodiscard]] BrickVoxels brick(BrickSite site) const;
 
     // The voxels `count` layers up from `bottom` through each of `cells`, every `apart` layers,
-    // as they now are, a column after another; `columns` are the generator's through them, at the
-    // voxels' lod `apart` times coarser. Their solid amounts are as voxels `apart` layers thick,
-    // as coarser detail is drawn from voxels further apart.
-    [[nodiscard]] std::vector<Voxel> fill(std::span<const Cell> cells,
-                                          std::span<const Generator::Column> columns, int bottom,
-                                          int count, int apart = 1) const;
+    // as they now are, a column after another. Their solid amounts are as voxels `apart` layers
+    // thick, as coarser detail is drawn from voxels further apart.
+    [[nodiscard]] std::vector<Voxel> fill(std::span<const Cell> cells, int bottom, int count,
+                                          int apart = 1) const;
 
-    // The brick's voxels as they now are; held only if they differ from what's generated.
+    // Sets the brick's voxels as they now are, where they're made.
     void write(BrickSite site, const BrickVoxels& voxels);
 
+    // The volume's revision, and the bricks changed since one.
+    [[nodiscard]] std::uint64_t revision() const noexcept { return volume_->revision(); }
+    [[nodiscard]] std::vector<BrickSite> changed_since(std::uint64_t revision) const {
+        return volume_->changed_since(revision);
+    }
+
 private:
+    // The voxels up the column through `base`, `count` of them from `bottom` every `apart`
+    // layers, into `out` every `stride`.
+    void column(Site base, int bottom, int count, int apart, std::span<Voxel> out,
+                std::size_t stride) const;
+
     const Generator* generator_;
-    VoxelStore* store_;
+    Volume* volume_;
     bool as_boxes_ = false;
 };
 
-// The highest layer of the column through `cell` that may hold matter: unchanged voxels are as
-// generated, `column` being the generator's through it, so it's over the generated ground or at
-// the top of the highest change held there.
-[[nodiscard]] int highest_layer(const World& world, Cell cell, const Generator::Column& column);
+// The highest layer of the column through `cell` holding matter; none where it holds nothing.
+[[nodiscard]] std::optional<int> highest_layer(const World& world, Cell cell);
 
 // The first surface of matter under `from` metres from the centre in the column under
 // `direction`, told from the voxels as they now are: shaped matter, or grain filling half a voxel
 // or more. None where the column is open to the floor.
-[[nodiscard]] std::optional<double> surface_under(const World& world, DVec3 direction,
-                                                  double from);
+[[nodiscard]] std::optional<double> surface_under(const World& world, DVec3 direction, double from);
 // The highest surface in the column, from the sky's ceiling down.
 [[nodiscard]] std::optional<double> top_of(const World& world, DVec3 direction);
 

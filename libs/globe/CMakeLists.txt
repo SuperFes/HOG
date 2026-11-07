@@ -1,6 +1,5 @@
 add_library(hog_globe
     src/brick.cpp
-    src/brick_archive.cpp
     src/caves.cpp
     src/cell.cpp
     src/craters.cpp
@@ -31,7 +30,6 @@ add_library(hog_globe
     src/volume.cpp
     src/volume_build.cpp
     src/volume_archive.cpp
-    src/voxel_store.cpp
     src/world.cpp)
 add_library(hog::globe ALIAS hog_globe)
 
@@ -40,7 +38,6 @@ target_link_libraries(hog_globe PUBLIC hog::core PRIVATE tomlplusplus)
 hog_target_defaults(hog_globe)
 
 hog_add_tests(hog_globe
-    tests/brick_archive_tests.cpp
     tests/brick_tests.cpp
     tests/caves_tests.cpp
     tests/cave_bed_tests.cpp
@@ -64,7 +61,6 @@ hog_add_tests(hog_globe
     tests/surface_mesh_tests.cpp
     tests/vents_tests.cpp
     tests/volcanoes_tests.cpp
-    tests/voxel_store_tests.cpp
     tests/octree_estimate_tests.cpp
     tests/voxel_faces_tests.cpp
     tests/temperature_tests.cpp

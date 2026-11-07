@@ -2,22 +2,22 @@
 #include <hog/globe/cell.hpp>
 #include <hog/globe/generator.hpp>
 #include <hog/globe/planet.hpp>
-#include <hog/globe/voxel_store.hpp>
+#include <hog/globe/volume_build.hpp>
 #include <hog/globe/world.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/server/chunk_sharing.hpp>
 
-#include <glm/geometric.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <glm/geometric.hpp>
 
 #include <algorithm>
-#include <span>
 #include <chrono>
 #include <cstddef>
 #include <format>
 #include <map>
 #include <print>
 #include <set>
+#include <span>
 #include <thread>
 #include <vector>
 
@@ -27,10 +27,15 @@ using hog::DVec3;
 using hog::net::ConnectionId;
 using hog::server::ChunkSharing;
 
+// The ground the tests stand on.
+const DVec3 here = hog::globe::center(hog::globe::cell_at_index(7, 4'321));
+
 struct Earth {
+    Earth() { made.cover(here, 5); }
+
     hog::globe::Generator generator{hog::globe::Planet{}};
-    hog::globe::VoxelStore store{generator.layers()};
-    hog::globe::World world{generator, store};
+    hog::globe::MadeWorld made{generator};
+    hog::globe::World& world = made.world();
 };
 
 const Earth& earth() {
@@ -42,8 +47,6 @@ DVec3 eye_over(DVec3 up) {
     const auto& generator = earth().generator;
     return up * (generator.planet().radius + hog::chunks::globe_ground(earth().world, up) + 2.0);
 }
-
-const DVec3 here = hog::globe::center(hog::globe::cell_at_index(7, 4'321));
 
 // Runs `turn` once a tick's worth of time, until it says it's done or the time's up.
 template <typename Turn>
@@ -148,8 +151,9 @@ TEST_CASE("a chunk asked for before it's meshed is sent once it is", "[server][c
 TEST_CASE("changes to the world make a newer version of the chunks they touch, asked for again",
           "[server][chunks]") {
     hog::globe::Generator generator{hog::globe::Planet{}};
-    hog::globe::VoxelStore store{generator.layers()};
-    hog::globe::World world{generator, store};
+    hog::globe::MadeWorld made{generator};
+    hog::globe::World& world = made.world();
+    made.cover(here, 5);
     hog::jobs::JobSystem jobs{3};
     ChunkSharing sharing{world, jobs, {.ratio = 1.5, .least = 120.0}};
     const ConnectionId anna{1};

@@ -3,7 +3,7 @@
 #include <hog/chunks/globe_stream.hpp>
 #include <hog/core/math.hpp>
 #include <hog/globe/brick.hpp>
-#include <hog/globe/voxel_store.hpp>
+#include <hog/globe/volume.hpp>
 #include <hog/globe/world.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/net/events.hpp>
@@ -48,6 +48,9 @@ public:
 
     // The world was edited by a player, who is to see it soon: carried over at the next step.
     void edited();
+
+    // The world's volume was put back whole, as from its file: meshed afresh from now on.
+    void reload();
 
     // The player lacks these chunks of the plan, and wants them when meshed.
     void ask(net::ConnectionId player, std::span<const std::uint64_t> keys);
@@ -102,8 +105,8 @@ private:
     const globe::World* source_;
     jobs::JobSystem* jobs_;
     chunks::GlobeDetail detail_;
-    // What the chunks are meshed from: the source's bricks as of the last sync.
-    globe::VoxelStore copy_;
+    // What the chunks are meshed from: the source's volume as of the last sync.
+    globe::Volume copy_;
     globe::World seen_;
     std::uint64_t synced_ = 0;
     int ticks_ = 0;

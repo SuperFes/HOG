@@ -22,8 +22,8 @@
 #include <hog/core/log.hpp>
 #include <hog/core/profile.hpp>
 #include <hog/core/time.hpp>
-#include <hog/globe/brick_archive.hpp>
 #include <hog/globe/material.hpp>
+#include <hog/globe/volume_archive.hpp>
 #include <hog/globe/world.hpp>
 #include <hog/jobs/job_system.hpp>
 #include <hog/login/service.hpp>
@@ -42,6 +42,7 @@
 #include <hog/render/shader_watch.hpp>
 #include <hog/sim/calendar.hpp>
 #include <hog/skies/weather_keeper.hpp>
+#include <hog/store/sqlite_volume_archive.hpp>
 #include <hog/terrain/bend.hpp>
 #include <hog/window/ui.hpp>
 #include <hog/window/window.hpp>
@@ -806,14 +807,14 @@ void edit_globe(Controls& controls, client::GlobeWorld& globe, client::Scene& sc
     }
     const WorldPosition centre{camera.eye.metres() + (camera.forward * edit_ahead)};
     scene.finish_globe();
-    const std::uint64_t before = globe.store.revision();
+    const std::uint64_t before = globe.world.revision();
     if (dig) {
         globe::dig(globe.world, centre.metres(), edit_radius);
     } else {
         globe::build(globe.world, centre.metres(), edit_radius,
                      static_cast<globe::Material>(edit_material));
     }
-    scene.change_globe(globe.store.changed_since(before));
+    scene.change_globe(globe.world.changed_since(before));
 }
 
 // Puts the player back where the server says they were when they last left.
@@ -1370,6 +1371,18 @@ int show(const client::Options& options, const planet::PlanetConfig& planet, ren
     startup(std::format("making planet {:016x}", globe::world_id(*described)));
     client::GlobeWorld globe{*described, [](std::string_view stage) { startup(stage); }};
     startup("planet made");
+    if (options.world) {
+        auto archive = store::SqliteVolumeArchive::open(*options.world);
+        auto volume = archive ? globe::load_volume(*archive, globe::origin_of(globe.generator))
+                              : Result<globe::Volume>{std::unexpected(archive.error())};
+        if (!volume) {
+            std::cerr << std::format("{}: {}: {}\n", program, options.world->string(),
+                                     volume.error());
+            return EXIT_FAILURE;
+        }
+        globe.volume = std::move(*volume);
+        startup(std::format("{} tiles of ground", globe.volume.tiles()));
+    }
     globe.world.draw_as_boxes(options.surface_boxes);
     const client::Flight flight = start(options, globe);
     const sim::Calendar calendar{planet.day_length, planet.axial_tilt};

@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <optional>
 #include <utility>
+#include <vector>
 
 namespace hog::flow {
 
@@ -13,8 +14,7 @@ using globe::BrickSite;
 Simulation::Simulation(globe::World& world) : world_{&world}, region_{world} {}
 
 void Simulation::take(BrickSite site) {
-    const globe::VoxelStore& store = world_->store();
-    if (!store.holds_site(site)) {
+    if (!globe::in_layers(world_->layers(), site)) {
         return;
     }
     region_.load(site);
@@ -111,7 +111,7 @@ std::vector<BrickSite> Simulation::settle_water(std::span<const BrickSite> brick
 }
 
 std::vector<BrickSite> Simulation::lay_ice(std::span<const Laid> columns) {
-    const globe::Layers& layers = world_->store().layers();
+    const globe::Layers& layers = world_->layers();
     const globe::Generator& generator = world_->generator();
     std::vector<BrickSite> taken;
     const auto hold = [&](BrickSite site) {
@@ -151,7 +151,7 @@ void Simulation::add_vent(const Vent& vent) {
 
 void Simulation::vent(double seconds) {
     constexpr int pressure = 6; // layers over its mouth a vent can fill before it backs up
-    const double thickness = world_->store().layers().thickness;
+    const double thickness = world_->layers().thickness;
     const double units = globe::Voxel::full / (thickness * thickness * thickness);
     for (Venting& venting : vents_) {
         const double rate = rate_at(venting.vent, clock_);
@@ -214,7 +214,7 @@ void Simulation::wear(BrickSite site, double gap) {
 void Simulation::sweep(std::size_t count) {
     for (std::size_t k = 0; k < count; ++k) {
         if (sweeping_.empty()) {
-            sweeping_ = world_->store().changed_since(0);
+            sweeping_ = world_->changed_since(0);
             if (sweeping_.empty()) {
                 return;
             }
@@ -225,9 +225,9 @@ void Simulation::sweep(std::size_t count) {
 }
 
 void Simulation::attend(DVec3 centre, double reach, double gap) {
-    const globe::VoxelStore& store = world_->store();
-    for (const auto& entry : globe::sites_near(store.layers(), centre, reach)) {
-        if (store.brick(entry.first) != nullptr) {
+    const std::vector<BrickSite> changed = world_->changed_since(0);
+    for (const auto& entry : globe::sites_near(world_->layers(), centre, reach)) {
+        if (std::ranges::binary_search(changed, entry.first)) {
             wear(entry.first, gap);
         }
     }
@@ -248,7 +248,7 @@ Simulation::Moisture Simulation::moisture(std::uint8_t face, std::uint32_t i,
 }
 
 std::vector<BrickSite> Simulation::wet(std::span<const Wetted> columns, double seconds) {
-    const double thickness = world_->store().layers().thickness;
+    const double thickness = world_->layers().thickness;
     // Bricks the flow doesn't hold, as the world has them (generated, where unedited), and which
     // of them were changed.
     struct Copy {
@@ -268,7 +268,7 @@ std::vector<BrickSite> Simulation::wet(std::span<const Wetted> columns, double s
     for (const Wetted& wetted : columns) {
         const globe::Site column = wetted.column;
         const auto read = [&](std::uint32_t layer) -> std::optional<globe::Voxel> {
-            if (layer >= static_cast<std::uint32_t>(world_->store().layers().count)) {
+            if (std::cmp_greater_equal(layer, world_->layers().count)) {
                 return std::nullopt;
             }
             const globe::Site site{.face = column.face, .i = column.i, .j = column.j, .layer = layer};
@@ -323,7 +323,7 @@ Simulation::Progress Simulation::step(double seconds) {
     progress.flying = stepped.flying;
     progress.scattered = stepped.scattered;
     progress.collapsed = stepped.collapsed;
-    const double thickness = world_->store().layers().thickness;
+    const double thickness = world_->layers().thickness;
     for (const Stepped::Wet& wet : stepped.wet) {
         Moisture& moisture = moisture_[column_key(wet.face, wet.i, wet.j)];
         moisture.stood +=

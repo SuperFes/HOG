@@ -8,7 +8,7 @@
 
 using namespace hog::globe;
 
-TEST_CASE("a voxel comes back from a cube as near as the levels allow", "[globe][cube]") {
+TEST_CASE("a voxel comes back from a cube with its amounts as they were", "[globe][cube]") {
     for (int amount = 0; amount <= Voxel::full; amount += 211) {
         Voxel voxel;
         voxel.solid = Material::Granite;
@@ -18,19 +18,20 @@ TEST_CASE("a voxel comes back from a cube as near as the levels allow", "[globe]
         voxel.temperature = temperature_in_eighths(285.0);
         const Cube cube = cube_of(voxel, 285.0);
         const Voxel back = voxel_of(cube, 285.0);
-        CHECK(std::abs(static_cast<int>(back.solid_amount) - amount) <= Voxel::full / Cube::levels);
-        CHECK(std::abs(static_cast<int>(back.liquid_amount) - (Voxel::full - amount)) <=
-              Voxel::full / Cube::levels);
+        CHECK(back.solid_amount == voxel.solid_amount);
+        CHECK(back.liquid_amount == voxel.liquid_amount);
         CHECK(back.temperature == temperature_in_eighths(285.0));
     }
 }
 
-TEST_CASE("a material with too little of it to count is none, and alike voxels are alike cubes",
-          "[globe][cube]") {
-    Voxel dust;
-    dust.grain = Material::Sand;
-    dust.grain_amount = 40;
-    CHECK(cube_of(dust, 280.0) == cube_of(Voxel{}, 280.0));
+TEST_CASE("a material with none of it is none, and alike voxels are alike cubes", "[globe][cube]") {
+    Voxel emptied;
+    emptied.grain = Material::Sand;
+    CHECK(cube_of(emptied, 280.0) == cube_of(Voxel{}, 280.0));
+    // However little there is, it's kept.
+    Voxel dust = emptied;
+    dust.grain_amount = 1;
+    CHECK(voxel_of(cube_of(dust, 280.0), 280.0).grain_amount == 1);
     // Whatever the temperature within a step, the same fullness is the same cube.
     Voxel one;
     one.solid = Material::Basalt;
