@@ -13,16 +13,12 @@
 #include <vector>
 
 namespace hog::globe {
-namespace {
 
-// As a voxel `apart` layers thick.
 Voxel generated_at(const Generator::Column& column, const Layers& layers, std::uint32_t layer,
-                   int apart = 1) {
+                   int apart) {
     return voxel_from(column.sample(layers.middle(static_cast<int>(layer))),
                       layers.thickness * apart);
 }
-
-} // namespace
 
 BrickVoxels generated(const Generator& generator, BrickSite site) {
     const Layers& layers = generator.layers();

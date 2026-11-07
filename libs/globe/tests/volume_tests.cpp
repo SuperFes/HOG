@@ -1,14 +1,24 @@
+#include "bed.hpp"
+
 #include <hog/globe/volume.hpp>
+#include <hog/globe/volume_build.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstddef>
+#include <utility>
 #include <vector>
 
 using hog::globe::Cube;
 using hog::globe::Material;
 using hog::globe::Site;
 using hog::globe::Volume;
+using hog::globe::bed::earth;
+using hog::globe::bed::somewhere;
+using hog::globe::Cell;
+using hog::globe::Generator;
+using hog::globe::VoxelStore;
+using hog::globe::World;
 
 namespace {
 
@@ -68,4 +78,28 @@ TEST_CASE("a volume comes back from its bytes as it was", "[globe][volume]") {
     std::vector<std::byte> cut = bytes;
     cut.pop_back();
     CHECK_FALSE(Volume::decode(cut));
+}
+
+TEST_CASE("the generator's voxels are made into the volume once, its air left out",
+          "[globe][volume]") {
+    const Generator& generator = earth();
+    const hog::globe::Layers& layers = generator.layers();
+    const Cell cell = hog::globe::cell_under(somewhere(3), layers.level);
+    const auto i = cell.i / Volume::tile_side;
+    const auto j = cell.j / Volume::tile_side;
+    const Volume volume = hog::globe::generate_tiles(generator, cell.face, i, j);
+    REQUIRE(volume.tiles() > 0);
+    VoxelStore store{layers};
+    const World world{generator, store};
+    for (std::uint32_t a = 0; a < 64; a += 21) {
+        for (std::uint32_t layer = 0; std::cmp_less(layer, layers.count); layer += 37) {
+            const Site site{.face = cell.face,
+                            .i = (i * Volume::tile_side) + a,
+                            .j = (j * Volume::tile_side) + 63 - a,
+                            .layer = layer};
+            const hog::globe::Voxel made = world.at(site);
+            CAPTURE(a, layer);
+            CHECK(volume.at(site) == hog::globe::cube_of(made, made.temperature / 8.0));
+        }
+    }
 }

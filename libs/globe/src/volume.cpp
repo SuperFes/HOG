@@ -15,6 +15,10 @@ int within(std::uint32_t at) {
     return static_cast<int>(at % side);
 }
 
+bool all_air(const VoxelTree& tile) {
+    return tile.leaf_side(0, 0, 0) == Volume::tile_side && tile.at(0, 0, 0) == Cube{};
+}
+
 } // namespace
 
 Volume::Key Volume::key_of(Site site) noexcept {
@@ -39,7 +43,7 @@ void Volume::set(Site site, const Cube& voxel) {
     }
     VoxelTree& tile = found->second;
     tile.set(within(site.i), within(site.j), within(site.layer), voxel);
-    if (tile.leaf_side(0, 0, 0) == tile_side && tile.at(0, 0, 0) == Cube{}) {
+    if (all_air(tile)) {
         tiles_.erase(found);
     }
 }
@@ -51,6 +55,21 @@ bool Volume::put_on(Site below, const Cube& voxel) {
     }
     set(above, voxel);
     return true;
+}
+
+void Volume::put_tile(Site site, VoxelTree tile) {
+    if (all_air(tile)) {
+        tiles_.erase(key_of(site));
+        return;
+    }
+    tiles_.insert_or_assign(key_of(site), std::move(tile));
+}
+
+void Volume::merge(Volume&& other) {
+    for (auto& [key, tile] : other.tiles_) {
+        tiles_.insert_or_assign(key, std::move(tile));
+    }
+    other.tiles_.clear();
 }
 
 std::vector<std::byte> Volume::encode() const {

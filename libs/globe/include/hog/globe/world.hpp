@@ -20,6 +20,9 @@ using BrickVoxels = std::array<Voxel, brick_voxels>;
 
 // A brick's voxels as generated, its columns taken together.
 [[nodiscard]] BrickVoxels generated(const Generator& generator, BrickSite site);
+// The generator's voxel up `column` in `layer`, as one `apart` layers thick.
+[[nodiscard]] Voxel generated_at(const Generator::Column& column, const Layers& layers,
+                                 std::uint32_t layer, int apart = 1);
 
 // The world as it now is: what the store holds, or else what's generated.
 class World {
